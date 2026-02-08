@@ -150,6 +150,33 @@ func TestDetailUsesRequestedSymbolsAndDividers(t *testing.T) {
 	}
 }
 
+func TestDetailShellToolUsesDollarPrefixAndKeepsSuccessColorRole(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: toolShellCallPrefix + "pwd" + toolInlineMetaSep + "timeout: 5m"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "/tmp"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := m.View()
+	if !strings.Contains(view, "$ pwd") {
+		t.Fatalf("expected shell tool to use $ prefix, got %q", view)
+	}
+	if strings.Contains(view, "• pwd") {
+		t.Fatalf("expected no dot prefix for shell tool, got %q", view)
+	}
+}
+
+func TestDetailNonShellToolStillUsesDotPrefix(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: "ask_question"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "ok"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := m.View()
+	if !strings.Contains(view, "• ask_question") {
+		t.Fatalf("expected non-shell tool to keep dot prefix, got %q", view)
+	}
+}
+
 func TestOngoingCompactsToolCallAndHidesThinking(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "run command"})
@@ -193,14 +220,20 @@ func TestDetailToolFormattingShowsTimeoutAndInlineOutput(t *testing.T) {
 }
 
 func TestToolBlockRoleFromResult(t *testing.T) {
-	if got := toolBlockRoleFromResult("tool_result_ok"); got != "tool_success" {
+	if got := toolBlockRoleFromResult("tool_result_ok", "tool"); got != "tool_success" {
 		t.Fatalf("unexpected role for success result: %q", got)
 	}
-	if got := toolBlockRoleFromResult("tool_result_error"); got != "tool_error" {
+	if got := toolBlockRoleFromResult("tool_result_error", "tool"); got != "tool_error" {
 		t.Fatalf("unexpected role for error result: %q", got)
 	}
-	if got := toolBlockRoleFromResult("tool_result"); got != "tool_success" {
+	if got := toolBlockRoleFromResult("tool_result", "tool"); got != "tool_success" {
 		t.Fatalf("unexpected role for legacy result: %q", got)
+	}
+	if got := toolBlockRoleFromResult("tool_result_ok", "tool_shell"); got != "tool_shell_success" {
+		t.Fatalf("unexpected role for shell success result: %q", got)
+	}
+	if got := toolBlockRoleFromResult("tool_result_error", "tool_shell"); got != "tool_shell_error" {
+		t.Fatalf("unexpected role for shell error result: %q", got)
 	}
 }
 

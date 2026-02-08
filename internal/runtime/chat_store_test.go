@@ -50,6 +50,9 @@ func TestChatStoreSnapshotProjectsConversation(t *testing.T) {
 	if snap.Entries[2].Role != "tool_call" || !strings.Contains(snap.Entries[2].Text, "pwd") || !strings.Contains(snap.Entries[2].Text, "timeout: 5m") {
 		t.Fatalf("unexpected tool_call entry: %+v", snap.Entries[2])
 	}
+	if !strings.HasPrefix(snap.Entries[2].Text, toolShellCallPrefix) {
+		t.Fatalf("expected shell tool call marker prefix, got %+v", snap.Entries[2])
+	}
 	if strings.Contains(snap.Entries[2].Text, "workdir:") {
 		t.Fatalf("tool call should not include workdir line: %+v", snap.Entries[2])
 	}
@@ -106,6 +109,23 @@ func TestPatchToolCallFormattingEncodesSummaryAndDetail(t *testing.T) {
 	}
 	if !strings.Contains(detail, "+new") || !strings.Contains(detail, "-old") || !strings.Contains(detail, "+hello") {
 		t.Fatalf("unexpected detail diff: %q", detail)
+	}
+}
+
+func TestFormatToolCallShellAddsMarkerPrefix(t *testing.T) {
+	s := newChatStore()
+	call := llm.ToolCall{
+		ID:    "call_shell",
+		Name:  string(tools.ToolShell),
+		Input: json.RawMessage(`{"command":"pwd"}`),
+	}
+
+	rendered := s.formatToolCall(call)
+	if !strings.HasPrefix(rendered, toolShellCallPrefix) {
+		t.Fatalf("expected shell marker prefix, got %q", rendered)
+	}
+	if !strings.Contains(rendered, "pwd") {
+		t.Fatalf("expected command in rendered shell call, got %q", rendered)
 	}
 }
 
