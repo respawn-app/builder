@@ -43,17 +43,8 @@ func New(workspaceRoot string, workspaceOnly bool) (*Tool, error) {
 	return &Tool{workspaceRoot: abs, workspaceRootReal: real, workspaceOnly: workspaceOnly}, nil
 }
 
-func (t *Tool) Name() string {
-	return "patch"
-}
-
-func (t *Tool) Definition() tools.Definition {
-	schema := json.RawMessage(`{"type":"object","required":["patch"],"properties":{"patch":{"type":"string"}}}`)
-	return tools.Definition{
-		Name:        t.Name(),
-		Description: "Apply atomic patch with add/update/move operations only.",
-		Schema:      schema,
-	}
+func (t *Tool) Name() tools.ID {
+	return tools.ToolPatch
 }
 
 func (t *Tool) Call(_ context.Context, c tools.Call) (tools.Result, error) {

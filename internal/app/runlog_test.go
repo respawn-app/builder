@@ -47,7 +47,7 @@ func TestFormatRuntimeEventIncludesToolMetadata(t *testing.T) {
 		t.Fatalf("unexpected event line: %q", line)
 	}
 
-	res := tools.Result{CallID: "call-1", Name: "bash", IsError: true}
+	res := tools.Result{CallID: "call-1", Name: tools.ToolBash, IsError: true}
 	line = formatRuntimeEvent(runtime.Event{
 		Kind:       runtime.EventToolCallCompleted,
 		StepID:     "step-1",

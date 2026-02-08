@@ -24,7 +24,7 @@ func TestRejectDeleteBlockAtomically(t *testing.T) {
 
 	patchText := "*** Begin Patch\n*** Delete File: a.txt\n*** End Patch\n"
 	input, _ := json.Marshal(map[string]any{"patch": patchText})
-	result, err := tool.Call(context.Background(), tools.Call{ID: "1", Name: "patch", Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "1", Name: tools.ToolPatch, Input: input})
 	if err != nil {
 		t.Fatalf("patch call error: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestAddUpdateMove(t *testing.T) {
 
 	patchText := "*** Begin Patch\n*** Add File: new.txt\n+hello\n*** Update File: one.txt\n*** Move to: moved.txt\n line1\n-line2\n+line2-updated\n*** End Patch\n"
 	input, _ := json.Marshal(map[string]any{"patch": patchText})
-	result, err := tool.Call(context.Background(), tools.Call{ID: "2", Name: "patch", Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "2", Name: tools.ToolPatch, Input: input})
 	if err != nil {
 		t.Fatalf("patch call error: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestAddFileInNewDirectory(t *testing.T) {
 
 	patchText := "*** Begin Patch\n*** Add File: nested/new/file.txt\n+hello\n*** End Patch\n"
 	input, _ := json.Marshal(map[string]any{"patch": patchText})
-	result, err := tool.Call(context.Background(), tools.Call{ID: "3", Name: "patch", Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "3", Name: tools.ToolPatch, Input: input})
 	if err != nil {
 		t.Fatalf("patch call error: %v", err)
 	}

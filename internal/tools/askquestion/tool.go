@@ -147,17 +147,8 @@ func NewTool(b *Broker) *Tool {
 	return &Tool{broker: b}
 }
 
-func (t *Tool) Name() string {
-	return "ask_question"
-}
-
-func (t *Tool) Definition() tools.Definition {
-	schema := json.RawMessage(`{"type":"object","required":["question"],"properties":{"question":{"type":"string"},"suggestions":{"type":"array","items":{"type":"string"}},"action":{"type":"object","properties":{"id":{"type":"string"},"payload":{"type":"object"}}}}}`)
-	return tools.Definition{
-		Name:        t.Name(),
-		Description: "Ask user a question and block until answered.",
-		Schema:      schema,
-	}
+func (t *Tool) Name() tools.ID {
+	return tools.ToolAskQuestion
 }
 
 func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {

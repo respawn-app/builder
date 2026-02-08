@@ -2,9 +2,11 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
+	"builder/internal/llm"
 	"builder/internal/runtime"
 	"builder/internal/tools/askquestion"
 	tea "github.com/charmbracelet/bubbletea"
@@ -126,5 +128,65 @@ func TestSubmitErrorShowsFullMessageInDetailMode(t *testing.T) {
 	view := updated.View()
 	if !strings.Contains(view, "error: "+longErr) {
 		t.Fatalf("expected full error in detail mode, got: %q", view)
+	}
+}
+
+func TestSubmitErrorShowsFullAPIStatusBodyWhenWrapped(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	body := strings.Repeat("AUTH_ERR_", 64)
+	root := &llm.APIStatusError{StatusCode: 403, Body: body}
+	wrapped := fmt.Errorf("model generation failed after retries: %w", root)
+
+	next, _ := m.Update(submitDoneMsg{err: wrapped})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated = next.(*uiModel)
+
+	view := updated.View()
+	if !strings.Contains(view, "error: openai status 403") {
+		t.Fatalf("expected status line, got: %q", view)
+	}
+	if !strings.Contains(view, body) {
+		t.Fatalf("expected full API body in detail mode, got: %q", view)
+	}
+}
+
+func TestMainInputAcceptsSpaceKey(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hello")})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeySpace})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("world")})
+	updated = next.(*uiModel)
+
+	if updated.input != "hello world" {
+		t.Fatalf("expected input with space, got %q", updated.input)
+	}
+}
+
+func TestAskFreeformAcceptsSpaceKey(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	reply := make(chan askReply, 1)
+	event := askEvent{req: askquestion.Request{Question: "Type answer"}, reply: reply}
+
+	next, _ := m.Update(askEventMsg{event: event})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hello")})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeySpace})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("world")})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+
+	resp := <-reply
+	if resp.answer != "hello world" {
+		t.Fatalf("expected freeform answer with space, got %q", resp.answer)
+	}
+	if updated.activeAsk != nil {
+		t.Fatal("ask should be resolved")
 	}
 }

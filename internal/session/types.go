@@ -6,12 +6,10 @@ import (
 )
 
 type LockedContract struct {
-	Model          string          `json:"model"`
-	Temperature    float64         `json:"temperature"`
-	MaxOutputToken int             `json:"max_output_token"`
-	ToolsJSON      json.RawMessage `json:"tools_json"`
-	SystemPrompt   string          `json:"system_prompt"`
-	LockedAt       time.Time       `json:"locked_at"`
+	Model          string    `json:"model"`
+	Temperature    float64   `json:"temperature"`
+	MaxOutputToken int       `json:"max_output_token"`
+	LockedAt       time.Time `json:"locked_at"`
 }
 
 type Meta struct {

@@ -131,10 +131,11 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case submitDoneMsg:
 		m.busy = false
 		if msg.err != nil {
+			detailErr := formatSubmissionError(msg.err)
 			m.status = "error"
-			m.forwardToView(tui.SetOngoingErrorMsg{Err: msg.err})
-			m.forwardToView(tui.AppendTranscriptMsg{Role: "error", Text: msg.err.Error()})
-			m.logf("step.error err=%q", msg.err.Error())
+			m.forwardToView(tui.SetOngoingErrorMsg{Err: errors.New(detailErr)})
+			m.forwardToView(tui.AppendTranscriptMsg{Role: "error", Text: detailErr})
+			m.logf("step.error err=%q", detailErr)
 			if len(m.queued) > 0 {
 				next := m.popQueued()
 				return m, m.startSubmission(next)
@@ -205,6 +206,9 @@ func (m *uiModel) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.input) > 0 {
 			m.input = m.input[:len(m.input)-1]
 		}
+		return m, nil
+	case tea.KeySpace:
+		m.input += " "
 		return m, nil
 	case tea.KeyUp:
 		m.forwardToView(tea.KeyMsg{Type: tea.KeyUp})
@@ -308,6 +312,11 @@ func (m *uiModel) handleAskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyBackspace:
 		if m.askFreeform && len(m.askInput) > 0 {
 			m.askInput = m.askInput[:len(m.askInput)-1]
+		}
+		return m, nil
+	case tea.KeySpace:
+		if m.askFreeform {
+			m.askInput += " "
 		}
 		return m, nil
 	default:
@@ -466,4 +475,19 @@ func (m *uiModel) logf(format string, args ...any) {
 	if m.logger != nil {
 		m.logger.Logf(format, args...)
 	}
+}
+
+func formatSubmissionError(err error) string {
+	if err == nil {
+		return ""
+	}
+	var statusErr *llm.APIStatusError
+	if errors.As(err, &statusErr) {
+		body := statusErr.Body
+		if strings.TrimSpace(body) == "" {
+			body = "<empty error body>"
+		}
+		return fmt.Sprintf("openai status %d\nresponse body:\n%s", statusErr.StatusCode, body)
+	}
+	return err.Error()
 }

@@ -83,28 +83,19 @@ func (r Request) Validate() error {
 	return nil
 }
 
-func RequestFromLockedContract(locked session.LockedContract, messages []Message, tools []Tool) (Request, error) {
+func RequestFromLockedContract(locked session.LockedContract, systemPrompt string, messages []Message, tools []Tool) (Request, error) {
 	if locked.Model == "" {
 		return Request{}, fmt.Errorf("%w: locked model is required", ErrInvalidRequest)
 	}
 	if locked.MaxOutputToken < 0 {
 		return Request{}, fmt.Errorf("%w: locked max output token must be >= 0", ErrInvalidRequest)
 	}
-	if len(locked.ToolsJSON) > 0 && !json.Valid(locked.ToolsJSON) {
-		return Request{}, fmt.Errorf("%w: locked tools_json is invalid", ErrInvalidRequest)
-	}
-
-	if tools == nil && len(locked.ToolsJSON) > 0 {
-		if err := json.Unmarshal(locked.ToolsJSON, &tools); err != nil {
-			return Request{}, fmt.Errorf("%w: decode locked tools: %v", ErrInvalidRequest, err)
-		}
-	}
 
 	req := Request{
 		Model:        locked.Model,
 		Temperature:  locked.Temperature,
 		MaxTokens:    locked.MaxOutputToken,
-		SystemPrompt: locked.SystemPrompt,
+		SystemPrompt: systemPrompt,
 		SessionID:    "",
 		Messages:     append([]Message(nil), messages...),
 		Tools:        append([]Tool(nil), tools...),

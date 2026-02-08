@@ -3,59 +3,83 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 )
+
+type ID string
+
+const (
+	ToolBash        ID = "bash"
+	ToolPatch       ID = "patch"
+	ToolAskQuestion ID = "ask_question"
+)
+
+func ParseID(v string) (ID, bool) {
+	switch ID(v) {
+	case ToolBash, ToolPatch, ToolAskQuestion:
+		return ID(v), true
+	default:
+		return "", false
+	}
+}
 
 type Call struct {
 	ID     string
-	Name   string
+	Name   ID
 	Input  json.RawMessage
 	StepID string
 }
 
 type Result struct {
 	CallID  string          `json:"call_id"`
-	Name    string          `json:"name"`
+	Name    ID              `json:"name"`
 	Output  json.RawMessage `json:"output"`
 	IsError bool            `json:"is_error"`
 }
 
 type Definition struct {
-	Name        string
+	ID          ID
 	Description string
 	Schema      json.RawMessage
 }
 
 type Handler interface {
-	Name() string
-	Definition() Definition
+	Name() ID
 	Call(ctx context.Context, c Call) (Result, error)
 }
 
 type Registry struct {
-	byName map[string]Handler
-	order  []string
+	byName map[ID]Handler
+	order  []ID
 }
 
 func NewRegistry(handlers ...Handler) *Registry {
-	m := make(map[string]Handler, len(handlers))
-	order := make([]string, 0, len(handlers))
+	m := make(map[ID]Handler, len(handlers))
+	order := make([]ID, 0, len(handlers))
 	for _, h := range handlers {
-		m[h.Name()] = h
-		order = append(order, h.Name())
+		id := h.Name()
+		if _, ok := definitionFor(id); !ok {
+			panic(fmt.Sprintf("tool %q is missing centralized definition", id))
+		}
+		if _, exists := m[id]; exists {
+			panic(fmt.Sprintf("duplicate tool handler registration for %q", id))
+		}
+		m[id] = h
+		order = append(order, id)
 	}
 	return &Registry{byName: m, order: order}
 }
 
-func (r *Registry) Get(name string) (Handler, bool) {
+func (r *Registry) Get(name ID) (Handler, bool) {
 	h, ok := r.byName[name]
 	return h, ok
 }
 
 func (r *Registry) Definitions() []Definition {
 	out := make([]Definition, 0, len(r.byName))
-	for _, name := range r.order {
-		h := r.byName[name]
-		out = append(out, h.Definition())
+	for _, id := range r.order {
+		def, _ := definitionFor(id)
+		out = append(out, def)
 	}
 	return out
 }
