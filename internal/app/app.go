@@ -75,10 +75,7 @@ func Run(ctx context.Context, opts Options) error {
 		Temperature: 1,
 		MaxTokens:   0,
 		OnEvent: func(evt runtime.Event) {
-			select {
-			case runtimeEvents <- evt:
-			default:
-			}
+			runtimeEvents <- evt
 		},
 	})
 	if err != nil {

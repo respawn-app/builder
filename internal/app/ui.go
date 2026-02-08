@@ -73,6 +73,7 @@ type uiModel struct {
 	sawAssistantDelta bool
 
 	activeAsk   *askEvent
+	askQueue    []askEvent
 	askCursor   int
 	askFreeform bool
 	askInput    string
@@ -98,11 +99,12 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleRuntimeEvent(msg.event)
 		return m, waitRuntimeEvent(m.runtimeEvents)
 	case askEventMsg:
-		m.activeAsk = &msg.event
-		m.askCursor = 0
-		m.askInput = ""
-		m.askFreeform = len(msg.event.req.Suggestions) == 0
-		m.status = "question"
+		if m.activeAsk == nil {
+			m.setActiveAsk(msg.event)
+			m.status = "question"
+		} else {
+			m.askQueue = append(m.askQueue, msg.event)
+		}
 		return m, waitAskEvent(m.askEvents)
 	case tea.KeyMsg:
 		if m.activeAsk != nil {
@@ -197,12 +199,12 @@ func (m *uiModel) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.queued = append(m.queued, text)
-			m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: text})
 			m.input = ""
 			if !m.busy {
 				next := m.popQueued()
 				return m, m.startSubmission(next)
 			}
+			m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: text})
 			m.status = "queued"
 			return m, nil
 		}
@@ -221,16 +223,24 @@ func (m *uiModel) handleAskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.Type {
 	case tea.KeyCtrlC:
-		m.answerAsk("", errors.New("interrupted"))
+		hasNext := m.answerAsk("", errors.New("interrupted"))
 		if m.busy {
 			_ = m.engine.Interrupt()
 			m.busy = false
 		}
-		m.status = "interrupted"
+		if hasNext {
+			m.status = "question"
+		} else {
+			m.status = "interrupted"
+		}
 		return m, nil
 	case tea.KeyEsc:
-		m.answerAsk("", errors.New("question canceled"))
-		m.status = "idle"
+		hasNext := m.answerAsk("", errors.New("question canceled"))
+		if hasNext {
+			m.status = "question"
+		} else {
+			m.status = "idle"
+		}
 		return m, nil
 	case tea.KeyTab:
 		m.askFreeform = true
@@ -238,8 +248,12 @@ func (m *uiModel) handleAskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		if m.askFreeform {
 			answer := strings.TrimSpace(m.askInput)
-			m.answerAsk(answer, nil)
-			m.status = "running"
+			hasNext := m.answerAsk(answer, nil)
+			if hasNext {
+				m.status = "question"
+			} else {
+				m.status = "running"
+			}
 			return m, nil
 		}
 		if len(req.Suggestions) == 0 {
@@ -251,8 +265,12 @@ func (m *uiModel) handleAskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.askInput = ""
 			return m, nil
 		}
-		m.answerAsk(req.Suggestions[m.askCursor], nil)
-		m.status = "running"
+		hasNext := m.answerAsk(req.Suggestions[m.askCursor], nil)
+		if hasNext {
+			m.status = "question"
+		} else {
+			m.status = "running"
+		}
 		return m, nil
 	case tea.KeyUp:
 		if !m.askFreeform && m.askCursor > 0 {
@@ -346,6 +364,9 @@ func (m *uiModel) handleRuntimeEvent(evt runtime.Event) {
 			m.sawAssistantDelta = true
 			m.forwardToView(tui.StreamAssistantMsg{Delta: evt.AssistantDelta})
 		}
+	case runtime.EventAssistantDeltaReset:
+		m.sawAssistantDelta = false
+		m.forwardToView(tui.ClearOngoingAssistantMsg{})
 	case runtime.EventToolCallStarted:
 		if evt.ToolCall != nil {
 			m.forwardToView(tui.AppendTranscriptMsg{Role: "tool_call", Text: formatToolCall(*evt.ToolCall)})
@@ -374,15 +395,30 @@ func (m *uiModel) popQueued() string {
 	return next
 }
 
-func (m *uiModel) answerAsk(answer string, err error) {
+func (m *uiModel) answerAsk(answer string, err error) bool {
 	if m.activeAsk == nil {
-		return
+		return false
 	}
 	m.activeAsk.reply <- askReply{answer: answer, err: err}
-	m.activeAsk = nil
+	if len(m.askQueue) == 0 {
+		m.activeAsk = nil
+		m.askCursor = 0
+		m.askInput = ""
+		m.askFreeform = false
+		return false
+	}
+	next := m.askQueue[0]
+	m.askQueue = m.askQueue[1:]
+	m.setActiveAsk(next)
+	return true
+}
+
+func (m *uiModel) setActiveAsk(evt askEvent) {
+	current := evt
+	m.activeAsk = &current
 	m.askCursor = 0
 	m.askInput = ""
-	m.askFreeform = false
+	m.askFreeform = len(current.req.Suggestions) == 0
 }
 
 func waitRuntimeEvent(ch <-chan runtime.Event) tea.Cmd {

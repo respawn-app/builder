@@ -178,9 +178,16 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 			return llm.Message{}, err
 		}
 
-		resp, err := e.generateWithRetry(ctx, req, func(delta string) {
-			e.emit(Event{Kind: EventAssistantDelta, StepID: stepID, AssistantDelta: delta})
-		})
+		resp, err := e.generateWithRetry(
+			ctx,
+			req,
+			func(delta string) {
+				e.emit(Event{Kind: EventAssistantDelta, StepID: stepID, AssistantDelta: delta})
+			},
+			func() {
+				e.emit(Event{Kind: EventAssistantDeltaReset, StepID: stepID})
+			},
+		)
 		if err != nil {
 			return llm.Message{}, err
 		}
@@ -286,24 +293,38 @@ func (e *Engine) ensureLocked() (session.LockedContract, error) {
 	return lock, nil
 }
 
-func (e *Engine) generateWithRetry(ctx context.Context, req llm.Request, onDelta func(string)) (llm.Response, error) {
+func (e *Engine) generateWithRetry(ctx context.Context, req llm.Request, onDelta func(string), onAttemptReset func()) (llm.Response, error) {
 	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second}
 	var lastErr error
 	for i := 0; i <= len(delays); i++ {
 		var (
-			resp llm.Response
-			err  error
+			resp           llm.Response
+			err            error
+			attemptEmitted bool
+			attemptOnDelta func(string)
 		)
+		if onDelta != nil {
+			attemptOnDelta = func(delta string) {
+				if delta == "" {
+					return
+				}
+				attemptEmitted = true
+				onDelta(delta)
+			}
+		}
 		if streamingClient, ok := e.llm.(llm.StreamClient); ok {
-			resp, err = streamingClient.GenerateStream(ctx, req, onDelta)
+			resp, err = streamingClient.GenerateStream(ctx, req, attemptOnDelta)
 		} else {
 			resp, err = e.llm.Generate(ctx, req)
-			if err == nil && onDelta != nil && resp.Assistant.Content != "" {
-				onDelta(resp.Assistant.Content)
+			if err == nil && attemptOnDelta != nil && resp.Assistant.Content != "" {
+				attemptOnDelta(resp.Assistant.Content)
 			}
 		}
 		if err == nil {
 			return resp, nil
+		}
+		if attemptEmitted && onAttemptReset != nil {
+			onAttemptReset()
 		}
 		lastErr = err
 		if i == len(delays) {

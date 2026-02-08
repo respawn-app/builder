@@ -37,6 +37,8 @@ type StreamAssistantMsg struct {
 	Delta string
 }
 
+type ClearOngoingAssistantMsg struct{}
+
 type CommitAssistantMsg struct{}
 
 type SetOngoingErrorMsg struct {
@@ -109,6 +111,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 	case StreamAssistantMsg:
 		m.ongoing += msg.Delta
+	case ClearOngoingAssistantMsg:
+		m.ongoing = ""
+		m.ongoingScroll = 0
 	case CommitAssistantMsg:
 		if m.ongoing != "" {
 			m.transcript = append(m.transcript, TranscriptEntry{
