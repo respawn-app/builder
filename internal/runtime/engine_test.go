@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -93,6 +94,26 @@ func (c *authFailClient) Generate(_ context.Context, _ llm.Request) (llm.Respons
 }
 
 func (c *authFailClient) Calls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
+}
+
+type statusFailClient struct {
+	mu     sync.Mutex
+	calls  int
+	status int
+}
+
+func (c *statusFailClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
+	c.mu.Lock()
+	c.calls++
+	status := c.status
+	c.mu.Unlock()
+	return llm.Response{}, &llm.APIStatusError{StatusCode: status, Body: `{"error":"request_failed"}`}
+}
+
+func (c *statusFailClient) Calls() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.calls
@@ -306,6 +327,34 @@ func TestAuthErrorsAreNotRetried(t *testing.T) {
 	}
 }
 
+func TestNonRetriableStatusCodesAreNotRetried(t *testing.T) {
+	for _, status := range []int{400, 401, 403, 404} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			dir := t.TempDir()
+			store, err := session.Create(dir, "ws", dir)
+			if err != nil {
+				t.Fatalf("create store: %v", err)
+			}
+
+			client := &statusFailClient{status: status}
+			eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+				Model: "gpt-5",
+			})
+			if err != nil {
+				t.Fatalf("new engine: %v", err)
+			}
+
+			_, err = eng.SubmitUserMessage(context.Background(), "trigger status error")
+			if err == nil {
+				t.Fatalf("expected status %d failure", status)
+			}
+			if client.Calls() != 1 {
+				t.Fatalf("expected single model attempt on status %d, got %d", status, client.Calls())
+			}
+		})
+	}
+}
+
 func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserMessage(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -389,5 +438,63 @@ func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserM
 	}
 	if injectedCount != 2 {
 		t.Fatalf("expected exactly two injected AGENTS developer messages to persist, got %d", injectedCount)
+	}
+}
+
+func TestQueuedUserMessageFlushesWhenAssistantReturnsWithoutTools(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "first"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "after flush"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	var seenFlushed bool
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			if evt.Kind == EventUserMessageFlushed && evt.UserMessage == "steer now" {
+				seenFlushed = true
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	eng.QueueUserMessage("steer now")
+	msg, err := eng.SubmitUserMessage(context.Background(), "start")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "after flush" {
+		t.Fatalf("assistant content = %q, want after flush", msg.Content)
+	}
+	if !seenFlushed {
+		t.Fatal("expected user_message_flushed event")
+	}
+	if len(client.calls) < 2 {
+		t.Fatalf("expected at least 2 model calls, got %d", len(client.calls))
+	}
+	second := client.calls[1]
+	hasInjected := false
+	for _, m := range second.Messages {
+		if m.Role == llm.RoleUser && m.Content == "steer now" {
+			hasInjected = true
+			break
+		}
+	}
+	if !hasInjected {
+		t.Fatalf("expected flushed user message in second request, messages=%+v", second.Messages)
 	}
 }

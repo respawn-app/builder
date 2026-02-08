@@ -120,6 +120,10 @@ type uiModel struct {
 
 	queued []string
 
+	pendingInjected   []string
+	lockedInjectText  string
+	inputSubmitLocked bool
+
 	modelName       string
 	spinnerFrame    int
 	commandRegistry *commands.Registry
@@ -312,6 +316,16 @@ func (m *uiModel) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.busy {
+			if m.engine != nil {
+				m.engine.QueueUserMessage(text)
+			}
+			m.pendingInjected = append(m.pendingInjected, text)
+			m.lockedInjectText = text
+			m.inputSubmitLocked = true
+			m.status = "queued"
+			return m, nil
+		}
 		if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
 			m.input = ""
 			if commandResult.Text != "" {
@@ -334,13 +348,10 @@ func (m *uiModel) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if m.busy {
-			return m, nil
-		}
 		m.input = ""
 		return m, m.startSubmission(text)
 	case tea.KeyBackspace:
-		if m.busy {
+		if m.inputSubmitLocked {
 			return m, nil
 		}
 		if len(m.input) > 0 {
@@ -348,7 +359,7 @@ func (m *uiModel) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeySpace:
-		if m.busy {
+		if m.inputSubmitLocked {
 			return m, nil
 		}
 		m.input += " "
@@ -361,11 +372,20 @@ func (m *uiModel) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	default:
 		if keyString == "ctrl+enter" || keyString == "ctrl+j" {
-			if m.busy {
-				return m, nil
-			}
 			text := strings.TrimSpace(m.input)
 			if text == "" {
+				return m, nil
+			}
+			if m.busy {
+				if m.inputSubmitLocked {
+					return m, nil
+				}
+				if m.engine != nil {
+					m.engine.QueueUserMessage(text)
+				}
+				m.pendingInjected = append(m.pendingInjected, text)
+				m.input = ""
+				m.status = "queued"
 				return m, nil
 			}
 			m.queued = append(m.queued, text)
@@ -378,7 +398,7 @@ func (m *uiModel) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.Type == tea.KeyRunes {
-			if m.busy {
+			if m.inputSubmitLocked {
 				return m, nil
 			}
 			m.input += string(msg.Runes)
@@ -549,6 +569,23 @@ func (m *uiModel) handleRuntimeEvent(evt runtime.Event) {
 		m.sawAssistantDelta = evt.AssistantDelta != ""
 	case runtime.EventAssistantDeltaReset:
 		m.sawAssistantDelta = false
+	case runtime.EventUserMessageFlushed:
+		m.onUserMessageFlushed(evt.UserMessage)
+	}
+}
+
+func (m *uiModel) onUserMessageFlushed(text string) {
+	for i, pending := range m.pendingInjected {
+		if strings.TrimSpace(pending) != strings.TrimSpace(text) {
+			continue
+		}
+		m.pendingInjected = append(m.pendingInjected[:i], m.pendingInjected[i+1:]...)
+		break
+	}
+	if m.inputSubmitLocked && strings.TrimSpace(m.lockedInjectText) == strings.TrimSpace(text) {
+		m.input = ""
+		m.lockedInjectText = ""
+		m.inputSubmitLocked = false
 	}
 }
 
@@ -727,8 +764,7 @@ func (m *uiModel) renderInputLines(width int, style uiStyles) []string {
 	} else {
 		text := m.input
 		prefix := "› "
-		if m.busy {
-			text = "input locked while agent is running"
+		if m.inputSubmitLocked {
 			prefix = "⨯ "
 		}
 		raw = splitPlainLines(prefix + text)
@@ -759,7 +795,7 @@ func (m *uiModel) renderInputLines(width int, style uiStyles) []string {
 	out := make([]string, 0, len(wrapped)+2)
 	out = append(out, top)
 	lineStyle := style.input
-	if m.busy {
+	if m.inputSubmitLocked {
 		lineStyle = style.inputDisabled
 	}
 	for _, line := range wrapped {
@@ -800,9 +836,6 @@ func (m *uiModel) calcChatLines() int {
 		}
 	} else {
 		text := m.input
-		if m.busy {
-			text = "input locked while agent is running"
-		}
 		wrapped := wrapLine("› "+text, contentWidth)
 		inputContentLines = len(wrapped)
 	}
@@ -832,7 +865,7 @@ func (m *uiModel) syncViewport() {
 }
 
 func (m *uiModel) inputCursorPosition(width, height, chatLines int) (bool, int, int) {
-	if m.busy || m.activeAsk != nil || width < 1 || height < 1 {
+	if m.inputSubmitLocked || m.activeAsk != nil || width < 1 || height < 1 {
 		return false, 0, 0
 	}
 	line := "› " + m.input

@@ -59,6 +59,8 @@ func formatRuntimeEvent(evt runtime.Event) string {
 		return fmt.Sprintf("runtime.event kind=%s step_id=%s", evt.Kind, evt.StepID)
 	case runtime.EventAssistantMessage:
 		return fmt.Sprintf("runtime.event kind=%s step_id=%s message_chars=%d", evt.Kind, evt.StepID, len(evt.Message.Content))
+	case runtime.EventUserMessageFlushed:
+		return fmt.Sprintf("runtime.event kind=%s step_id=%s user_chars=%d", evt.Kind, evt.StepID, len(evt.UserMessage))
 	case runtime.EventToolCallStarted:
 		if evt.ToolCall != nil {
 			return fmt.Sprintf("runtime.event kind=%s step_id=%s call_id=%s name=%s", evt.Kind, evt.StepID, evt.ToolCall.ID, evt.ToolCall.Name)

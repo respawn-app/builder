@@ -212,6 +212,16 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 		}
 
 		if len(resp.ToolCalls) == 0 || !allowTools {
+			flushed, err := e.flushPendingUserInjections(stepID)
+			if err != nil {
+				return llm.Message{}, err
+			}
+			if flushed > 0 {
+				if e.handoffPending {
+					allowTools = false
+				}
+				continue
+			}
 			if e.handoffPending && !e.handoffDone {
 				e.handoffDone = true
 			}
@@ -236,7 +246,7 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 			}
 		}
 
-		if err := e.flushPendingUserInjections(stepID); err != nil {
+		if _, err := e.flushPendingUserInjections(stepID); err != nil {
 			return llm.Message{}, err
 		}
 
@@ -331,7 +341,7 @@ func (e *Engine) generateWithRetry(ctx context.Context, req llm.Request, onDelta
 		if err == nil {
 			return resp, nil
 		}
-		if llm.IsAuthenticationError(err) {
+		if llm.IsNonRetriableModelError(err) {
 			return llm.Response{}, err
 		}
 		if attemptEmitted && onAttemptReset != nil {
@@ -434,18 +444,21 @@ func (e *Engine) appendMessage(stepID string, msg llm.Message) error {
 	return err
 }
 
-func (e *Engine) flushPendingUserInjections(stepID string) error {
+func (e *Engine) flushPendingUserInjections(stepID string) (int, error) {
 	e.mu.Lock()
 	pending := append([]string(nil), e.pendingInjected...)
 	e.pendingInjected = nil
 	e.mu.Unlock()
+	flushed := 0
 
 	for _, m := range pending {
 		if err := e.appendUserMessage(stepID, m); err != nil {
-			return err
+			return flushed, err
 		}
+		flushed++
+		e.emit(Event{Kind: EventUserMessageFlushed, StepID: stepID, UserMessage: m})
 	}
-	return nil
+	return flushed, nil
 }
 
 func (e *Engine) injectAgentsIfNeeded(stepID string) error {
