@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -178,6 +179,17 @@ func (m *uiModel) Init() tea.Cmd {
 }
 
 func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := normalizeKeyMsg(msg); ok {
+		if m.activeAsk != nil {
+			next, cmd := m.handleAskKey(keyMsg)
+			next.(*uiModel).syncViewport()
+			return next, cmd
+		}
+		next, cmd := m.handleMainKey(keyMsg)
+		next.(*uiModel).syncViewport()
+		return next, cmd
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.termWidth = msg.Width
@@ -197,15 +209,6 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.syncViewport()
 		return m, waitAskEvent(m.askEvents)
-	case tea.KeyMsg:
-		if m.activeAsk != nil {
-			next, cmd := m.handleAskKey(msg)
-			next.(*uiModel).syncViewport()
-			return next, cmd
-		}
-		next, cmd := m.handleMainKey(msg)
-		next.(*uiModel).syncViewport()
-		return next, cmd
 	case submitDoneMsg:
 		m.busy = false
 		m.spinnerFrame = 0
@@ -291,6 +294,33 @@ func (m *uiModel) View() string {
 
 func (m *uiModel) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	keyString := strings.ToLower(msg.String())
+	if keyString == "tab" || keyString == "ctrl+enter" || keyString == "ctrl+j" {
+		text := strings.TrimSpace(m.input)
+		if text == "" {
+			return m, nil
+		}
+		if m.busy {
+			if m.inputSubmitLocked {
+				return m, nil
+			}
+			if m.engine != nil {
+				m.engine.QueueUserMessage(text)
+			}
+			m.pendingInjected = append(m.pendingInjected, text)
+			m.input = ""
+			m.status = "queued"
+			return m, nil
+		}
+		m.queued = append(m.queued, text)
+		m.input = ""
+		if !m.busy {
+			next := m.popQueued()
+			return m, m.startSubmission(next)
+		}
+		m.status = "queued"
+		return m, nil
+	}
+
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		if m.busy {
@@ -301,7 +331,7 @@ func (m *uiModel) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.exitAction = UIActionExit
 		return m, tea.Quit
-	case tea.KeyTab:
+	case tea.KeyShiftTab:
 		m.forwardToView(tui.ToggleModeMsg{})
 		return m, nil
 	case tea.KeyEnter:
@@ -368,32 +398,6 @@ func (m *uiModel) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.forwardToView(tea.KeyMsg{Type: tea.KeyDown})
 		return m, nil
 	default:
-		if keyString == "ctrl+enter" || keyString == "ctrl+j" {
-			text := strings.TrimSpace(m.input)
-			if text == "" {
-				return m, nil
-			}
-			if m.busy {
-				if m.inputSubmitLocked {
-					return m, nil
-				}
-				if m.engine != nil {
-					m.engine.QueueUserMessage(text)
-				}
-				m.pendingInjected = append(m.pendingInjected, text)
-				m.input = ""
-				m.status = "queued"
-				return m, nil
-			}
-			m.queued = append(m.queued, text)
-			m.input = ""
-			if !m.busy {
-				next := m.popQueued()
-				return m, m.startSubmission(next)
-			}
-			m.status = "queued"
-			return m, nil
-		}
 		if msg.Type == tea.KeyRunes {
 			if m.inputSubmitLocked {
 				return m, nil
@@ -873,6 +877,52 @@ func splitPlainLines(v string) []string {
 		return []string{""}
 	}
 	return strings.Split(v, "\n")
+}
+
+func normalizeKeyMsg(msg tea.Msg) (tea.KeyMsg, bool) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		return keyMsg, true
+	}
+	seq, ok := parseUnknownCSISequence(msg)
+	if !ok || !isCtrlEnterCSISequence(seq) {
+		return tea.KeyMsg{}, false
+	}
+	// Normalize terminal-specific Ctrl+Enter escape sequences to queue hotkey.
+	return tea.KeyMsg{Type: tea.KeyCtrlJ}, true
+}
+
+func parseUnknownCSISequence(msg tea.Msg) (string, bool) {
+	stringer, ok := msg.(fmt.Stringer)
+	if !ok {
+		return "", false
+	}
+	raw := stringer.String()
+	if !strings.HasPrefix(raw, "?CSI[") || !strings.HasSuffix(raw, "]?") {
+		return "", false
+	}
+	body := strings.TrimSuffix(strings.TrimPrefix(raw, "?CSI["), "]?")
+	fields := strings.Fields(body)
+	if len(fields) == 0 {
+		return "", false
+	}
+	bytes := make([]byte, 0, len(fields))
+	for _, field := range fields {
+		value, err := strconv.Atoi(field)
+		if err != nil || value < 0 || value > 255 {
+			return "", false
+		}
+		bytes = append(bytes, byte(value))
+	}
+	return string(bytes), true
+}
+
+func isCtrlEnterCSISequence(seq string) bool {
+	switch seq {
+	case "13;5u", "13;5~", "27;5;13u", "27;5;13~":
+		return true
+	default:
+		return false
+	}
 }
 
 func wrapLine(line string, width int) []string {

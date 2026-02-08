@@ -14,18 +14,56 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-func TestCtrlEnterQueuesAndStartsSubmission(t *testing.T) {
+type testUnknownCSISequence struct {
+	rendered string
+}
+
+func (m testUnknownCSISequence) String() string {
+	return m.rendered
+}
+
+func TestTabQueuesAndStartsSubmission(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "echo hi"
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated := next.(*uiModel)
 
 	if !updated.busy {
-		t.Fatal("expected busy after ctrl+enter queued submission")
+		t.Fatal("expected busy after tab queued submission")
 	}
 	if updated.input != "" {
 		t.Fatalf("expected input cleared, got %q", updated.input)
+	}
+}
+
+func TestUnknownCSICtrlEnterQueuesAndStartsSubmission(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "echo hi"
+
+	next, _ := m.Update(testUnknownCSISequence{rendered: "?CSI[49 51 59 53 117]?"}) // 13;5u
+	updated := next.(*uiModel)
+
+	if !updated.busy {
+		t.Fatal("expected busy after ctrl+enter CSI sequence")
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after ctrl+enter CSI sequence, got %q", updated.input)
+	}
+}
+
+func TestUnknownCSIXtermCtrlEnterQueuesAndStartsSubmission(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "echo hi"
+
+	next, _ := m.Update(testUnknownCSISequence{rendered: "?CSI[50 55 59 53 59 49 51 126]?"}) // 27;5;13~
+	updated := next.(*uiModel)
+
+	if !updated.busy {
+		t.Fatal("expected busy after xterm ctrl+enter sequence")
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after xterm ctrl+enter sequence, got %q", updated.input)
 	}
 }
 
@@ -103,14 +141,14 @@ func TestAskEventsQueueUntilCurrentQuestionAnswered(t *testing.T) {
 	}
 }
 
-func TestCtrlEnterIdleAppendsUserOnce(t *testing.T) {
+func TestTabIdleAppendsUserOnce(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "echo hi"
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated := next.(*uiModel)
 
-	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	updated = next.(*uiModel)
 
 	view := stripANSIAndTrimRight(updated.View())
@@ -125,7 +163,7 @@ func TestSubmitErrorShowsFullMessageInDetailMode(t *testing.T) {
 
 	next, _ := m.Update(submitDoneMsg{err: errors.New(longErr)})
 	updated := next.(*uiModel)
-	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	updated = next.(*uiModel)
 
 	view := updated.View()
@@ -145,7 +183,7 @@ func TestSubmitErrorShowsFullAPIStatusBodyWhenWrapped(t *testing.T) {
 
 	next, _ := m.Update(submitDoneMsg{err: wrapped})
 	updated := next.(*uiModel)
-	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	updated = next.(*uiModel)
 
 	view := updated.View()
@@ -281,21 +319,21 @@ func TestBusyEnterLocksInputUntilFlushed(t *testing.T) {
 	}
 }
 
-func TestBusyCtrlEnterQueuesInjectionAndKeepsInputUnlocked(t *testing.T) {
+func TestBusyTabQueuesInjectionAndKeepsInputUnlocked(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.busy = true
 	m.input = "queue this"
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated := next.(*uiModel)
 	if len(updated.pendingInjected) != 1 {
 		t.Fatalf("expected one pending injected message, got %d", len(updated.pendingInjected))
 	}
 	if updated.input != "" {
-		t.Fatalf("expected input cleared after ctrl+enter while busy, got %q", updated.input)
+		t.Fatalf("expected input cleared after tab while busy, got %q", updated.input)
 	}
 	if updated.inputSubmitLocked {
-		t.Fatal("did not expect submit lock for ctrl+enter queue")
+		t.Fatal("did not expect submit lock for tab queue")
 	}
 }
 
@@ -394,7 +432,7 @@ func TestInitialTranscriptVisibleImmediately(t *testing.T) {
 		t.Fatalf("expected resumed content in ongoing mode, got %q", ongoing)
 	}
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	detail := stripANSIAndTrimRight(next.(*uiModel).View())
 	if !containsInOrder(detail, "❯", "hello", "❮", "world") {
 		t.Fatalf("expected resumed transcript in detail mode, got %q", detail)
