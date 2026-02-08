@@ -33,6 +33,11 @@ type SetViewportLinesMsg struct {
 	Lines int
 }
 
+type SetViewportSizeMsg struct {
+	Lines int
+	Width int
+}
+
 type AppendTranscriptMsg struct {
 	Role string
 	Text string
@@ -78,6 +83,7 @@ type Model struct {
 	mode Mode
 
 	viewportLines int
+	viewportWidth int
 	ongoingScroll int
 	detailScroll  int
 
@@ -87,17 +93,20 @@ type Model struct {
 	detailSnapshot string
 	ongoingError   string
 	theme          string
+	md             *markdownRenderer
 }
 
 func NewModel(opts ...Option) Model {
 	m := Model{
 		mode:          ModeOngoing,
 		viewportLines: DefaultPreviewLines,
+		viewportWidth: 120,
 		theme:         "dark",
 	}
 	for _, opt := range opts {
 		opt(&m)
 	}
+	m.md = newMarkdownRenderer(m.theme)
 	return m
 }
 
@@ -123,6 +132,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SetViewportLinesMsg:
 		if msg.Lines > 0 {
 			m.viewportLines = msg.Lines
+		}
+	case SetViewportSizeMsg:
+		if msg.Lines > 0 {
+			m.viewportLines = msg.Lines
+		}
+		if msg.Width > 0 {
+			m.viewportWidth = msg.Width
 		}
 	case AppendTranscriptMsg:
 		role := strings.TrimSpace(msg.Role)
@@ -259,11 +275,13 @@ func (m Model) ongoingLines() []string {
 		return splitLines(m.ongoing)
 	}
 	for i := len(m.transcript) - 1; i >= 0; i-- {
-		text := strings.TrimSpace(m.transcript[i].Text)
+		entry := m.transcript[i]
+		text := strings.TrimSpace(entry.Text)
 		if text == "" {
 			continue
 		}
-		return splitLines(m.transcript[i].Text)
+		rendered := m.renderEntryText(entry.Role, entry.Text, m.viewportWidth)
+		return splitLines(rendered)
 	}
 	return []string{""}
 }
@@ -302,15 +320,15 @@ func (m Model) renderFlatDetailTranscript() string {
 				}
 				i++
 			}
-			blocks = append(blocks, flattenEntry("tool", combined))
+			blocks = append(blocks, m.flattenEntry("tool", combined))
 		case "tool_result":
-			blocks = append(blocks, flattenEntry("tool", entry.Text))
+			blocks = append(blocks, m.flattenEntry("tool", entry.Text))
 		default:
-			blocks = append(blocks, flattenEntry(role, entry.Text))
+			blocks = append(blocks, m.flattenEntry(role, entry.Text))
 		}
 	}
 	if m.ongoing != "" {
-		blocks = append(blocks, flattenEntry("assistant", m.ongoing))
+		blocks = append(blocks, m.flattenEntry("assistant", m.ongoing))
 	}
 	if len(blocks) == 0 {
 		return ""
@@ -325,8 +343,13 @@ func (m Model) renderFlatDetailTranscript() string {
 	return strings.Join(lines, "\n")
 }
 
-func flattenEntry(role, text string) []string {
-	chunks := splitLines(text)
+func (m Model) flattenEntry(role, text string) []string {
+	renderWidth := m.viewportWidth
+	if rolePrefix(role) != "" {
+		renderWidth -= 2
+	}
+	rendered := m.renderEntryText(role, text, renderWidth)
+	chunks := splitLines(rendered)
 	if len(chunks) == 0 {
 		chunks = []string{""}
 	}
@@ -348,6 +371,20 @@ func flattenEntry(role, text string) []string {
 		out = append(out, "  "+chunk)
 	}
 	return out
+}
+
+func (m Model) renderEntryText(role, text string, width int) string {
+	if strings.TrimSpace(text) == "" {
+		return text
+	}
+	if m.md == nil {
+		return text
+	}
+	rendered, err := m.md.render(role, text, width)
+	if err != nil {
+		return text
+	}
+	return rendered
 }
 
 func detailDivider() string {

@@ -136,6 +136,74 @@ func TestFormatOngoingErrorIsNotTruncated(t *testing.T) {
 	}
 }
 
+func TestDetailRendersMarkdownForUserAndAssistant(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "**bold** and `code`"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "- one\n- two"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := m.View()
+	if !strings.Contains(view, "❯") || !strings.Contains(view, "❮") {
+		t.Fatalf("expected user/assistant prefixes in view: %q", view)
+	}
+	if strings.Contains(view, "**bold**") || strings.Contains(view, "`code`") {
+		t.Fatalf("expected markdown formatting to be rendered, got raw markdown: %q", view)
+	}
+	if !strings.Contains(view, "bold") || !strings.Contains(view, "code") {
+		t.Fatalf("expected rendered markdown text to remain visible: %q", view)
+	}
+}
+
+func TestOngoingStreamingStaysPlainUntilCommit(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 60})
+	m = updateModel(t, m, StreamAssistantMsg{Delta: "**bold**"})
+
+	streaming := m.View()
+	if !strings.Contains(streaming, "**bold**") {
+		t.Fatalf("expected plain markdown while streaming, got %q", streaming)
+	}
+
+	m = updateModel(t, m, CommitAssistantMsg{})
+	committed := m.View()
+	if strings.Contains(committed, "**bold**") {
+		t.Fatalf("expected markdown rendering after commit, got %q", committed)
+	}
+	if !strings.Contains(committed, "bold") {
+		t.Fatalf("expected committed rendered text to remain visible, got %q", committed)
+	}
+}
+
+func TestViewportWidthChangeAffectsMarkdownRender(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 10, Width: 24})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "This is **markdown** content that should wrap at different widths."})
+	m = updateModel(t, m, ToggleModeMsg{})
+	narrow := m.View()
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 10, Width: 80})
+	m = updateModel(t, m, ToggleModeMsg{})
+	wide := m.View()
+
+	if narrow == wide {
+		t.Fatalf("expected markdown rendering to change with width; narrow and wide views are identical: %q", narrow)
+	}
+}
+
+func TestNonMarkdownRolesStayPlain(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: 60})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result", Text: "**raw**"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := m.View()
+	if !strings.Contains(view, "**raw**") {
+		t.Fatalf("expected tool text to remain plain, got %q", view)
+	}
+}
+
 type errString string
 
 func (e errString) Error() string {
