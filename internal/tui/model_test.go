@@ -94,6 +94,17 @@ func TestClearOngoingAssistantMsgDropsPartialStream(t *testing.T) {
 	}
 }
 
+func TestOngoingShowsCommittedAssistantAfterCommit(t *testing.T) {
+	m := NewModel(WithPreviewLines(3))
+	m = updateModel(t, m, StreamAssistantMsg{Delta: "line1\nline2"})
+	m = updateModel(t, m, CommitAssistantMsg{})
+
+	view := m.View()
+	if !strings.Contains(view, "line1") || !strings.Contains(view, "line2") {
+		t.Fatalf("ongoing view should keep committed assistant visible, got %q", view)
+	}
+}
+
 func TestFormatOngoingErrorIsNotTruncated(t *testing.T) {
 	input := strings.Repeat("e", 300)
 	formatted := FormatOngoingError(errString(input))

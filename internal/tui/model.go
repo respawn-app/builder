@@ -197,7 +197,7 @@ func (m Model) scrollActive(delta int) Model {
 }
 
 func (m Model) maxOngoingScroll() int {
-	lines := splitLines(m.ongoing)
+	lines := m.ongoingLines()
 	if len(lines) <= m.viewportLines {
 		return 0
 	}
@@ -213,7 +213,7 @@ func (m Model) maxDetailScroll() int {
 }
 
 func (m Model) renderOngoing() string {
-	lines := splitLines(m.ongoing)
+	lines := m.ongoingLines()
 	if len(lines) == 0 {
 		lines = []string{""}
 	}
@@ -239,6 +239,20 @@ func (m Model) renderOngoing() string {
 		}
 	}
 	return strings.Join(out, "\n")
+}
+
+func (m Model) ongoingLines() []string {
+	if m.ongoing != "" {
+		return splitLines(m.ongoing)
+	}
+	for i := len(m.transcript) - 1; i >= 0; i-- {
+		text := strings.TrimSpace(m.transcript[i].Text)
+		if text == "" {
+			continue
+		}
+		return splitLines(m.transcript[i].Text)
+	}
+	return []string{""}
 }
 
 func (m Model) renderDetailSnapshot() string {
