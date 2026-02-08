@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -305,9 +306,27 @@ func sanitizeMessagesForLLM(messages []llm.Message) []llm.Message {
 	cleaned := make([]llm.Message, len(messages))
 	for i, msg := range messages {
 		cleaned[i] = msg
-		cleaned[i].Content = xansi.Strip(msg.Content)
+		content := xansi.Strip(msg.Content)
+		if msg.Role == llm.RoleTool {
+			content = normalizeToolMessageForLLM(content)
+		}
+		cleaned[i].Content = content
 	}
 	return cleaned
+}
+
+func normalizeToolMessageForLLM(content string) string {
+	var payload any
+	if err := json.Unmarshal([]byte(content), &payload); err != nil {
+		return content
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(payload); err != nil {
+		return content
+	}
+	return strings.TrimSuffix(buf.String(), "\n")
 }
 
 func (e *Engine) ensureLocked() (session.LockedContract, error) {

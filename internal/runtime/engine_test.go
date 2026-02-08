@@ -238,6 +238,68 @@ func TestParallelToolsReturnDeclaredOrder(t *testing.T) {
 
 }
 
+func TestPersistedAssistantToolCallsContainNoUIDisplayMarkers(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
+			ToolCalls: []llm.ToolCall{
+				{ID: "a", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "run tool"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+
+	foundAssistantWithCall := false
+	for _, evt := range events {
+		if evt.Kind != "message" {
+			continue
+		}
+		var msg llm.Message
+		if err := json.Unmarshal(evt.Payload, &msg); err != nil {
+			t.Fatalf("decode message: %v", err)
+		}
+		if msg.Role != llm.RoleAssistant || len(msg.ToolCalls) == 0 {
+			continue
+		}
+		foundAssistantWithCall = true
+		for _, call := range msg.ToolCalls {
+			if strings.Contains(call.Name, "shell_call") {
+				t.Fatalf("assistant tool call name should not contain display marker: %+v", call)
+			}
+			if strings.Contains(string(call.Input), "shell_call") || strings.Contains(string(call.Input), "patch_payload") || strings.ContainsRune(string(call.Input), '\x1e') || strings.ContainsRune(string(call.Input), '\x1f') {
+				t.Fatalf("assistant tool call input should not contain display markers: %+v", call)
+			}
+		}
+	}
+	if !foundAssistantWithCall {
+		t.Fatal("expected persisted assistant message with tool_calls")
+	}
+}
+
 func TestExecuteToolCallsFailsOnToolCompletionPersistence(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -595,6 +657,23 @@ func TestRequestMessagesNeverContainANSIEscapes(t *testing.T) {
 				t.Fatalf("request message contains ANSI escape sequence: role=%s content=%q", msg.Role, msg.Content)
 			}
 		}
+	}
+}
+
+func TestSanitizeMessagesForLLMNormalizesToolJSONEscapes(t *testing.T) {
+	input := []llm.Message{
+		{Role: llm.RoleTool, Content: `{"exit_code":0,"output":"a =\u003e b \u003c c \u0026 d","truncated":false}`},
+	}
+
+	got := sanitizeMessagesForLLM(input)
+	if len(got) != 1 {
+		t.Fatalf("unexpected message count: %d", len(got))
+	}
+	if strings.Contains(got[0].Content, `\u003e`) || strings.Contains(got[0].Content, `\u003c`) || strings.Contains(got[0].Content, `\u0026`) {
+		t.Fatalf("expected HTML escapes to be normalized, got %q", got[0].Content)
+	}
+	if !strings.Contains(got[0].Content, "=>") || !strings.Contains(got[0].Content, "<") || !strings.Contains(got[0].Content, "&") {
+		t.Fatalf("expected decoded operators in normalized tool content, got %q", got[0].Content)
 	}
 }
 
