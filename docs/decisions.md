@@ -53,7 +53,8 @@ This file records architecture and product decisions for the minimal terminal co
    - User views a non-updating snapshot in `detail`; new events become visible after re-entering.
 
 14. **Hotkeys are fixed in v1 (not configurable).**
-   - `Tab`: toggle `ongoing`/`detail`.
+   - `Shift+Tab`: toggle `ongoing`/`detail`.
+   - `Tab`: queue/send message via queue semantics.
    - `Ctrl+C`: interrupt current work.
    - `Ctrl+R`: not used.
 
@@ -65,7 +66,8 @@ This file records architecture and product decisions for the minimal terminal co
 
 17. **In-turn user messaging supports both injection and queueing.**
    - Mid-run user message injection is supported.
-   - Queued post-turn send is supported via `Ctrl+Enter`.
+   - Queued post-turn send is supported via `Tab`, with compatibility aliases `Ctrl+Enter` and `Ctrl+J`.
+   - Normalize known terminal `Ctrl+Enter` CSI encodings (e.g. `13;5u`, `27;5;13~`) to the same queue action.
 
 18. **Mid-run injection policy is soft-insert only.**
    - Injected messages are delivered at the next safe boundary after current tool call completion.
@@ -151,7 +153,7 @@ This file records architecture and product decisions for the minimal terminal co
    - Agent is stopped.
    - Input box is visible and ready.
 
-43. **Queued `Ctrl+Enter` messages are in-memory only.**
+43. **Queued hotkey messages are in-memory only.**
    - Not persisted across app restart.
 
 44. **Injected mid-run messages persist on delivery boundary only.**
