@@ -38,7 +38,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.pendingInjected = append(m.pendingInjected, text)
 			m.input = ""
-			m.status = "queued"
+			m.activity = uiActivityQueued
 			return m, nil
 		}
 		m.queued = append(m.queued, text)
@@ -47,7 +47,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			next := m.popQueued()
 			return m, c.startSubmission(next)
 		}
-		m.status = "queued"
+		m.activity = uiActivityQueued
 		return m, nil
 	}
 
@@ -58,7 +58,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				_ = m.engine.Interrupt()
 			}
 			m.busy = false
-			m.status = "interrupted"
+			m.activity = uiActivityInterrupted
 			return m, nil
 		}
 		m.exitAction = UIActionExit
@@ -82,7 +82,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pendingInjected = append(m.pendingInjected, text)
 			m.lockedInjectText = text
 			m.inputSubmitLocked = true
-			m.status = "queued"
+			m.activity = uiActivityQueued
 			return m, nil
 		}
 		if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
@@ -143,7 +143,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (c uiInputController) startSubmission(text string) tea.Cmd {
 	m := c.model
 	m.busy = true
-	m.status = "running"
+	m.activity = uiActivityRunning
 	m.sawAssistantDelta = false
 	m.logf("step.start user_chars=%d", len(text))
 	if m.engine == nil {
@@ -177,7 +177,7 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 	if msg.err != nil {
 		c.unlockInputAfterSubmissionError()
 		detailErr := formatSubmissionError(msg.err)
-		m.status = "error"
+		m.activity = uiActivityError
 		if m.engine != nil {
 			m.engine.SetOngoingError(detailErr)
 			m.engine.AppendLocalEntry("error", detailErr)
@@ -194,7 +194,7 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 		return m, nil
 	}
 
-	m.status = "idle"
+	m.activity = uiActivityIdle
 	if m.engine != nil {
 		m.engine.ClearOngoingError()
 	} else {

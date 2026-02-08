@@ -16,7 +16,7 @@ func (c uiAskController) acceptEvent(evt askEvent) {
 	m := c.model
 	if m.activeAsk == nil {
 		c.setActiveAsk(evt)
-		m.status = "question"
+		m.activity = uiActivityQuestion
 		return
 	}
 	m.askQueue = append(m.askQueue, evt)
@@ -39,17 +39,17 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.busy = false
 		}
 		if hasNext {
-			m.status = "question"
+			m.activity = uiActivityQuestion
 		} else {
-			m.status = "interrupted"
+			m.activity = uiActivityInterrupted
 		}
 		return m, nil
 	case tea.KeyEsc:
 		hasNext := c.answer("", errors.New("question canceled"))
 		if hasNext {
-			m.status = "question"
+			m.activity = uiActivityQuestion
 		} else {
-			m.status = "idle"
+			m.activity = uiActivityIdle
 		}
 		return m, nil
 	case tea.KeyTab:
@@ -60,9 +60,9 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			answer := strings.TrimSpace(m.askInput)
 			hasNext := c.answer(answer, nil)
 			if hasNext {
-				m.status = "question"
+				m.activity = uiActivityQuestion
 			} else {
-				m.status = "running"
+				m.activity = uiActivityRunning
 			}
 			return m, nil
 		}
@@ -77,9 +77,9 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		hasNext := c.answer(req.Suggestions[m.askCursor], nil)
 		if hasNext {
-			m.status = "question"
+			m.activity = uiActivityQuestion
 		} else {
-			m.status = "running"
+			m.activity = uiActivityRunning
 		}
 		return m, nil
 	case tea.KeyUp:
