@@ -687,14 +687,7 @@ func (m *uiModel) renderChatPanel(width, height int, style uiStyles) []string {
 	}
 	contentWidth := width
 	rawLines := splitPlainLines(m.view.View())
-	contentLines := make([]string, 0, len(rawLines))
-	for _, line := range rawLines {
-		if line == tui.TranscriptDivider {
-			contentLines = append(contentLines, tui.TranscriptDivider)
-			continue
-		}
-		contentLines = append(contentLines, wrapLine(line, contentWidth)...)
-	}
+	contentLines := append([]string(nil), rawLines...)
 	if len(contentLines) < height {
 		for len(contentLines) < height {
 			contentLines = append(contentLines, "")
@@ -708,7 +701,7 @@ func (m *uiModel) renderChatPanel(width, height int, style uiStyles) []string {
 			out = append(out, style.meta.Render(strings.Repeat("─", contentWidth)))
 			continue
 		}
-		out = append(out, style.chat.Render(padRight(line, contentWidth)))
+		out = append(out, style.chat.Render(padANSIRight(line, contentWidth)))
 	}
 	return out
 }
@@ -822,7 +815,10 @@ func (m *uiModel) calcChatLines() int {
 }
 
 func (m *uiModel) syncViewport() {
-	m.forwardToView(tui.SetViewportLinesMsg{Lines: m.calcChatLines()})
+	m.forwardToView(tui.SetViewportSizeMsg{
+		Lines: m.calcChatLines(),
+		Width: m.effectiveWidth(),
+	})
 }
 
 func splitPlainLines(v string) []string {
@@ -870,6 +866,17 @@ func padRight(line string, width int) string {
 		return line
 	}
 	if current > width {
+		return line
+	}
+	return line + strings.Repeat(" ", width-current)
+}
+
+func padANSIRight(line string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	current := lipgloss.Width(line)
+	if current >= width {
 		return line
 	}
 	return line + strings.Repeat(" ", width-current)
