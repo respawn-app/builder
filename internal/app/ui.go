@@ -286,9 +286,6 @@ func (m *uiModel) View() string {
 		allLines = allLines[len(allLines)-height:]
 	}
 	rendered := strings.Join(allLines, "\n")
-	if visible, row, col := m.inputCursorPosition(width, height, chatLines); visible {
-		return rendered + ansiShowCursor + fmt.Sprintf("\x1b[%d;%dH", row, col)
-	}
 	return rendered + ansiHideCursor
 }
 
@@ -692,8 +689,8 @@ var spinnerFrames = []string{"|", "/", "-", "\\"}
 var spinnerTickInterval = 360 * time.Millisecond
 
 const (
-	ansiShowCursor = "\x1b[?25h"
-	ansiHideCursor = "\x1b[?25l"
+	ansiHideCursor  = "\x1b[?25l"
+	softCursorGlyph = "▏"
 )
 
 func tickSpinner() tea.Cmd {
@@ -766,6 +763,9 @@ func (m *uiModel) renderInputLines(width int, style uiStyles) []string {
 		prefix := "› "
 		if m.inputSubmitLocked {
 			prefix = "⨯ "
+		}
+		if m.shouldRenderSoftCursor() {
+			text += softCursorGlyph
 		}
 		raw = splitPlainLines(prefix + text)
 	}
@@ -864,38 +864,8 @@ func (m *uiModel) syncViewport() {
 	})
 }
 
-func (m *uiModel) inputCursorPosition(width, height, chatLines int) (bool, int, int) {
-	if m.inputSubmitLocked || m.activeAsk != nil || width < 1 || height < 1 {
-		return false, 0, 0
-	}
-	line := "› " + m.input
-	wrapped := wrapLine(line, width)
-	if len(wrapped) == 0 {
-		wrapped = []string{""}
-	}
-	maxContentLines := m.effectiveHeight() - 4
-	if maxContentLines < 1 {
-		maxContentLines = 1
-	}
-	if len(wrapped) > maxContentLines {
-		wrapped = wrapped[len(wrapped)-maxContentLines:]
-	}
-
-	cursorLine := len(wrapped) - 1
-	row := chatLines + 2 + cursorLine
-	if row < 1 {
-		row = 1
-	} else if row > height {
-		row = height
-	}
-
-	col := runewidth.StringWidth(wrapped[cursorLine]) + 1
-	if col < 1 {
-		col = 1
-	} else if col > width {
-		col = width
-	}
-	return true, row, col
+func (m *uiModel) shouldRenderSoftCursor() bool {
+	return !m.inputSubmitLocked && m.activeAsk == nil
 }
 
 func splitPlainLines(v string) []string {

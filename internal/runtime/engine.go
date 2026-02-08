@@ -15,6 +15,7 @@ import (
 	"builder/internal/tools"
 	"builder/prompts"
 	"github.com/google/uuid"
+	xansi "github.com/charmbracelet/x/ansi"
 )
 
 const (
@@ -280,6 +281,7 @@ func (e *Engine) buildRequest(_ string, allowTools bool) (llm.Request, error) {
 	}
 
 	msgs := e.snapshotMessages()
+	msgs = sanitizeMessagesForLLM(msgs)
 
 	req, err := llm.RequestFromLockedContract(locked, prompts.SystemPrompt, msgs, requestTools)
 	if err != nil {
@@ -287,6 +289,18 @@ func (e *Engine) buildRequest(_ string, allowTools bool) (llm.Request, error) {
 	}
 	req.SessionID = e.store.Meta().SessionID
 	return req, nil
+}
+
+func sanitizeMessagesForLLM(messages []llm.Message) []llm.Message {
+	if len(messages) == 0 {
+		return messages
+	}
+	cleaned := make([]llm.Message, len(messages))
+	for i, msg := range messages {
+		cleaned[i] = msg
+		cleaned[i].Content = xansi.Strip(msg.Content)
+	}
+	return cleaned
 }
 
 func (e *Engine) ensureLocked() (session.LockedContract, error) {
