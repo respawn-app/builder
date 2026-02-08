@@ -196,7 +196,7 @@ func TestAskFreeformAcceptsSpaceKey(t *testing.T) {
 	}
 }
 
-func TestBusyInputIsDisabled(t *testing.T) {
+func TestBusyInputRemainsEditableUntilSubmitLock(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.busy = true
 	m.input = "seed"
@@ -208,11 +208,11 @@ func TestBusyInputIsDisabled(t *testing.T) {
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 	updated = next.(*uiModel)
 
-	if updated.input != "seed" {
-		t.Fatalf("expected disabled input to remain unchanged, got %q", updated.input)
+	if updated.input != "seedx" {
+		t.Fatalf("expected input to remain editable while busy, got %q", updated.input)
 	}
-	if !strings.Contains(updated.View(), "input locked while agent is running") {
-		t.Fatalf("expected disabled input hint in view: %q", updated.View())
+	if strings.Contains(updated.View(), "input locked while agent is running") {
+		t.Fatalf("did not expect legacy locked hint in view: %q", updated.View())
 	}
 }
 
@@ -235,12 +235,60 @@ func TestViewHidesCursorWhenInputLocked(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 40
 	m.termHeight = 16
-	m.busy = true
+	m.inputSubmitLocked = true
 	m.input = "hello world"
 
 	view := m.View()
 	if !strings.Contains(view, ansiHideCursor) {
 		t.Fatalf("expected terminal cursor hide sequence in view: %q", view)
+	}
+}
+
+func TestBusyEnterLocksInputUntilFlushed(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.input = "please continue with tests"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if !updated.inputSubmitLocked {
+		t.Fatal("expected input submit lock after enter while busy")
+	}
+	if updated.input != "please continue with tests" {
+		t.Fatalf("expected input text preserved while locked, got %q", updated.input)
+	}
+	if len(updated.pendingInjected) != 1 {
+		t.Fatalf("expected one pending injected message, got %d", len(updated.pendingInjected))
+	}
+
+	next, _ = updated.Update(runtimeEventMsg{event: runtime.Event{
+		Kind:        runtime.EventUserMessageFlushed,
+		UserMessage: "please continue with tests",
+	}})
+	updated = next.(*uiModel)
+	if updated.inputSubmitLocked {
+		t.Fatal("expected input unlock after flush")
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after flush, got %q", updated.input)
+	}
+}
+
+func TestBusyCtrlEnterQueuesInjectionAndKeepsInputUnlocked(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.input = "queue this"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	updated := next.(*uiModel)
+	if len(updated.pendingInjected) != 1 {
+		t.Fatalf("expected one pending injected message, got %d", len(updated.pendingInjected))
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after ctrl+enter while busy, got %q", updated.input)
+	}
+	if updated.inputSubmitLocked {
+		t.Fatal("did not expect submit lock for ctrl+enter queue")
 	}
 }
 

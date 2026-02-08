@@ -19,3 +19,19 @@ func TestIsAuthenticationError(t *testing.T) {
 		t.Fatal("expected AuthError to be auth error")
 	}
 }
+
+func TestIsNonRetriableModelError(t *testing.T) {
+	for _, status := range []int{400, 401, 403, 404} {
+		if !IsNonRetriableModelError(&APIStatusError{StatusCode: status, Body: "x"}) {
+			t.Fatalf("expected %d to be non-retriable", status)
+		}
+	}
+	for _, status := range []int{408, 409, 429, 500} {
+		if IsNonRetriableModelError(&APIStatusError{StatusCode: status, Body: "x"}) {
+			t.Fatalf("did not expect %d to be non-retriable", status)
+		}
+	}
+	if !IsNonRetriableModelError(&AuthError{Err: errors.New("token refresh failed")}) {
+		t.Fatal("expected AuthError to be non-retriable")
+	}
+}

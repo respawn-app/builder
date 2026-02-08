@@ -52,3 +52,20 @@ func IsAuthenticationError(err error) bool {
 	}
 	return false
 }
+
+func IsNonRetriableModelError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if IsAuthenticationError(err) {
+		return true
+	}
+	var apiErr *APIStatusError
+	if errors.As(err, &apiErr) {
+		switch apiErr.StatusCode {
+		case 400, 401, 403, 404:
+			return true
+		}
+	}
+	return false
+}
