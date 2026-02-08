@@ -69,6 +69,10 @@ func formatRuntimeEvent(evt runtime.Event) string {
 		if evt.ToolResult != nil {
 			return fmt.Sprintf("runtime.event kind=%s step_id=%s call_id=%s name=%s is_error=%t", evt.Kind, evt.StepID, evt.ToolResult.CallID, evt.ToolResult.Name, evt.ToolResult.IsError)
 		}
+	case runtime.EventInFlightClearFailed:
+		if strings.TrimSpace(evt.Error) != "" {
+			return fmt.Sprintf("runtime.event kind=%s step_id=%s err=%q", evt.Kind, evt.StepID, evt.Error)
+		}
 	}
 	return fmt.Sprintf("runtime.event kind=%s step_id=%s", evt.Kind, evt.StepID)
 }

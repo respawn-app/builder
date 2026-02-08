@@ -22,7 +22,7 @@ const (
 	defaultTimeout = 5 * time.Minute
 	maxTimeout     = time.Hour
 	defaultLimit   = 10_000
-	headTailSize   = 500
+	headTailSize   = 1000
 )
 
 var shellEnvOverrides = []string{
