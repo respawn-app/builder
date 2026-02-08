@@ -99,3 +99,34 @@ func TestApplyHeaders_OAuthAddsCodexHeaders(t *testing.T) {
 		t.Fatalf("unexpected account id header: %q", got)
 	}
 }
+
+func TestBuildPayload_AppliesReasoningEffortForOpenAIModels(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	payload, err := transport.buildPayload(OpenAIRequest{
+		Model:           "gpt-5",
+		ReasoningEffort: "xhigh",
+	}, openAIAuthMode{})
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+	if payload.Reasoning == nil {
+		t.Fatal("expected reasoning payload")
+	}
+	if payload.Reasoning.Effort != "xhigh" {
+		t.Fatalf("expected effort xhigh, got %q", payload.Reasoning.Effort)
+	}
+}
+
+func TestBuildPayload_SkipsReasoningEffortForUnknownModelFamily(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	payload, err := transport.buildPayload(OpenAIRequest{
+		Model:           "custom-model",
+		ReasoningEffort: "high",
+	}, openAIAuthMode{})
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+	if payload.Reasoning != nil {
+		t.Fatalf("expected no reasoning payload for non-openai model, got %+v", payload.Reasoning)
+	}
+}

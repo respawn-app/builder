@@ -99,7 +99,7 @@ func RunOpenAIDeviceCodeFlow(ctx context.Context, opts OpenAIOAuthOptions, onCod
 		return Method{}, err
 	}
 
-	method, err := exchangeOpenAIAuthorizationCode(ctx, opts, poll.AuthorizationCode, poll.CodeVerifier)
+	method, err := exchangeOpenAIAuthorizationCode(ctx, opts, poll.AuthorizationCode, poll.CodeVerifier, issuerRedirectURI(opts))
 	if err != nil {
 		return Method{}, err
 	}
@@ -225,10 +225,12 @@ func pollOpenAIDeviceAuthToken(ctx context.Context, opts OpenAIOAuthOptions, cod
 	}
 }
 
-func exchangeOpenAIAuthorizationCode(ctx context.Context, opts OpenAIOAuthOptions, code, codeVerifier string) (Method, error) {
+func exchangeOpenAIAuthorizationCode(ctx context.Context, opts OpenAIOAuthOptions, code, codeVerifier, redirectURI string) (Method, error) {
 	issuer := strings.TrimSuffix(opts.Issuer, "/")
 	endpoint := issuer + "/oauth/token"
-	redirectURI := issuer + "/deviceauth/callback"
+	if strings.TrimSpace(redirectURI) == "" {
+		redirectURI = issuerRedirectURI(opts)
+	}
 
 	values := url.Values{}
 	values.Set("grant_type", "authorization_code")
@@ -284,6 +286,11 @@ func exchangeOpenAIAuthorizationCode(ctx context.Context, opts OpenAIOAuthOption
 			AccountID:    extractAccountID(parsed),
 		},
 	}, nil
+}
+
+func issuerRedirectURI(opts OpenAIOAuthOptions) string {
+	issuer := strings.TrimSuffix(opts.Issuer, "/")
+	return issuer + "/deviceauth/callback"
 }
 
 func RefreshOpenAIAuthToken(ctx context.Context, opts OpenAIOAuthOptions, method Method) (Method, error) {

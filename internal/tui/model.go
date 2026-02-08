@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type Mode string
@@ -25,6 +26,10 @@ type ToggleModeMsg struct{}
 
 type ScrollOngoingMsg struct {
 	Delta int
+}
+
+type SetViewportLinesMsg struct {
+	Lines int
 }
 
 type AppendTranscriptMsg struct {
@@ -51,28 +56,37 @@ type Option func(*Model)
 func WithPreviewLines(lines int) Option {
 	return func(m *Model) {
 		if lines > 0 {
-			m.previewLines = lines
+			m.viewportLines = lines
 		}
+	}
+}
+
+func WithTheme(theme string) Option {
+	return func(m *Model) {
+		m.theme = normalizeTheme(theme)
 	}
 }
 
 type Model struct {
 	mode Mode
 
-	previewLines  int
+	viewportLines int
 	ongoingScroll int
+	detailScroll  int
 
 	transcript []TranscriptEntry
 	ongoing    string
 
 	detailSnapshot string
 	ongoingError   string
+	theme          string
 }
 
 func NewModel(opts ...Option) Model {
 	m := Model{
-		mode:         ModeOngoing,
-		previewLines: DefaultPreviewLines,
+		mode:          ModeOngoing,
+		viewportLines: DefaultPreviewLines,
+		theme:         "dark",
 	}
 	for _, opt := range opts {
 		opt(&m)
@@ -91,14 +105,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyTab:
 			m = m.toggleMode()
 		case tea.KeyUp:
-			m = m.scrollOngoing(-1)
+			m = m.scrollActive(-1)
 		case tea.KeyDown:
-			m = m.scrollOngoing(1)
+			m = m.scrollActive(1)
 		}
 	case ToggleModeMsg:
 		m = m.toggleMode()
 	case ScrollOngoingMsg:
-		m = m.scrollOngoing(msg.Delta)
+		m = m.scrollActive(msg.Delta)
+	case SetViewportLinesMsg:
+		if msg.Lines > 0 {
+			m.viewportLines = msg.Lines
+		}
 	case AppendTranscriptMsg:
 		role := strings.TrimSpace(msg.Role)
 		if role == "" {
@@ -128,12 +146,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	m.ongoingScroll = clamp(m.ongoingScroll, 0, m.maxOngoingScroll())
+	m.detailScroll = clamp(m.detailScroll, 0, m.maxDetailScroll())
 	return m, nil
 }
 
 func (m Model) View() string {
 	if m.mode == ModeDetail {
-		return m.detailSnapshot
+		return m.renderDetailSnapshot()
 	}
 	return m.renderOngoing()
 }
@@ -161,23 +180,36 @@ func (m Model) toggleMode() Model {
 	if m.mode == ModeOngoing {
 		m.mode = ModeDetail
 		m.detailSnapshot = m.renderFlatDetailTranscript()
+		m.detailScroll = clamp(m.detailScroll, 0, m.maxDetailScroll())
 		return m
 	}
 	m.mode = ModeOngoing
 	return m
 }
 
-func (m Model) scrollOngoing(delta int) Model {
+func (m Model) scrollActive(delta int) Model {
+	if m.mode == ModeDetail {
+		m.detailScroll = clamp(m.detailScroll+delta, 0, m.maxDetailScroll())
+		return m
+	}
 	m.ongoingScroll = clamp(m.ongoingScroll+delta, 0, m.maxOngoingScroll())
 	return m
 }
 
 func (m Model) maxOngoingScroll() int {
 	lines := splitLines(m.ongoing)
-	if len(lines) <= m.previewLines {
+	if len(lines) <= m.viewportLines {
 		return 0
 	}
-	return len(lines) - m.previewLines
+	return len(lines) - m.viewportLines
+}
+
+func (m Model) maxDetailScroll() int {
+	lines := splitLines(m.detailSnapshot)
+	if len(lines) <= m.viewportLines {
+		return 0
+	}
+	return len(lines) - m.viewportLines
 }
 
 func (m Model) renderOngoing() string {
@@ -187,20 +219,43 @@ func (m Model) renderOngoing() string {
 	}
 
 	start := clamp(m.ongoingScroll, 0, m.maxOngoingScroll())
-	end := start + m.previewLines
+	end := start + m.viewportLines
 	if end > len(lines) {
 		end = len(lines)
 	}
 
-	out := make([]string, 0, m.previewLines+1)
+	out := make([]string, 0, m.viewportLines+1)
 	for i := start; i < end; i++ {
-		out = append(out, "> "+lines[i])
+		out = append(out, lines[i])
 	}
-	for len(out) < m.previewLines {
-		out = append(out, "> ")
+	for len(out) < m.viewportLines {
+		out = append(out, "")
 	}
 	if m.ongoingError != "" {
-		out = append(out, m.ongoingError)
+		if len(out) == 0 {
+			out = append(out, m.ongoingError)
+		} else {
+			out[len(out)-1] = m.ongoingError
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+func (m Model) renderDetailSnapshot() string {
+	lines := splitLines(m.detailSnapshot)
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	start := clamp(m.detailScroll, 0, m.maxDetailScroll())
+	end := start + m.viewportLines
+	if end > len(lines) {
+		end = len(lines)
+	}
+
+	out := make([]string, 0, m.viewportLines)
+	out = append(out, lines[start:end]...)
+	for len(out) < m.viewportLines {
+		out = append(out, "")
 	}
 	return strings.Join(out, "\n")
 }
@@ -227,9 +282,81 @@ func flattenEntry(entry TranscriptEntry) []string {
 	chunks := splitLines(entry.Text)
 	out := make([]string, 0, len(chunks))
 	for _, chunk := range chunks {
-		out = append(out, fmt.Sprintf("%s: %s", role, chunk))
+		out = append(out, fmt.Sprintf("%s %s", rolePrefix(role), chunk))
 	}
 	return out
+}
+
+func rolePrefix(role string) string {
+	switch role {
+	case "user":
+		return "▸ user:"
+	case "assistant":
+		return "◆ model:"
+	case "tool_call":
+		return "⚙ tool_call:"
+	case "tool_result":
+		return "✓ tool_result:"
+	case "system":
+		return "ℹ system:"
+	case "error":
+		return "✖ error:"
+	default:
+		return role + ":"
+	}
+}
+
+func styleForRole(role string, p palette) lipgloss.Style {
+	switch role {
+	case "user":
+		return p.user
+	case "assistant":
+		return p.model
+	case "tool_call", "tool_result":
+		return p.tool
+	case "system":
+		return p.system
+	case "error":
+		return p.error
+	default:
+		return p.preview
+	}
+}
+
+type palette struct {
+	preview lipgloss.Style
+	user    lipgloss.Style
+	model   lipgloss.Style
+	tool    lipgloss.Style
+	system  lipgloss.Style
+	error   lipgloss.Style
+}
+
+func (m Model) palette() palette {
+	base := lipgloss.AdaptiveColor{Light: "#5C6370", Dark: "#7F848E"}
+	user := lipgloss.AdaptiveColor{Light: "#005CC5", Dark: "#61AFEF"}
+	model := lipgloss.AdaptiveColor{Light: "#22863A", Dark: "#98C379"}
+	tool := lipgloss.AdaptiveColor{Light: "#8A63D2", Dark: "#C678DD"}
+	system := lipgloss.AdaptiveColor{Light: "#6A737D", Dark: "#ABB2BF"}
+	err := lipgloss.AdaptiveColor{Light: "#D73A49", Dark: "#E06C75"}
+	if m.theme == "light" {
+		base = lipgloss.AdaptiveColor{Light: "#5C6370", Dark: "#5C6370"}
+	}
+	return palette{
+		preview: lipgloss.NewStyle().Foreground(base),
+		user:    lipgloss.NewStyle().Foreground(user),
+		model:   lipgloss.NewStyle().Foreground(model),
+		tool:    lipgloss.NewStyle().Foreground(tool),
+		system:  lipgloss.NewStyle().Foreground(system).Faint(true),
+		error:   lipgloss.NewStyle().Foreground(err),
+	}
+}
+
+func normalizeTheme(theme string) string {
+	if strings.EqualFold(strings.TrimSpace(theme), "light") {
+		return "light"
+	}
+	return "dark"
 }
 
 func splitLines(v string) []string {

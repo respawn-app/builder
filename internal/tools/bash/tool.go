@@ -36,15 +36,32 @@ type output struct {
 }
 
 type Tool struct {
-	workspaceRoot string
-	outputLimit   int
+	workspaceRoot  string
+	outputLimit    int
+	defaultTimeout time.Duration
 }
 
-func New(workspaceRoot string, outputLimit int) *Tool {
+type Option func(*Tool)
+
+func WithDefaultTimeout(timeout time.Duration) Option {
+	return func(t *Tool) {
+		if timeout > 0 {
+			t.defaultTimeout = timeout
+		}
+	}
+}
+
+func New(workspaceRoot string, outputLimit int, opts ...Option) *Tool {
 	if outputLimit <= 0 {
 		outputLimit = defaultLimit
 	}
-	return &Tool{workspaceRoot: workspaceRoot, outputLimit: outputLimit}
+	t := &Tool{workspaceRoot: workspaceRoot, outputLimit: outputLimit, defaultTimeout: defaultTimeout}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(t)
+		}
+	}
+	return t
 }
 
 func (t *Tool) Name() tools.ID {
@@ -60,7 +77,7 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 		return resultErr(c, "command is required"), nil
 	}
 
-	timeout := defaultTimeout
+	timeout := t.defaultTimeout
 	if in.TimeoutSeconds != nil {
 		requested := time.Duration(*in.TimeoutSeconds) * time.Second
 		if requested <= 0 {

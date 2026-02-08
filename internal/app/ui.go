@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
+	"builder/internal/app/commands"
 	"builder/internal/llm"
 	"builder/internal/runtime"
 	"builder/internal/tools"
@@ -13,12 +15,16 @@ import (
 	"builder/internal/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 )
 
 type submitDoneMsg struct {
 	message string
 	err     error
 }
+
+type spinnerTickMsg struct{}
 
 type runtimeEventMsg struct {
 	event runtime.Event
@@ -48,9 +54,31 @@ type uiLogger interface {
 
 type UIOption func(*uiModel)
 
+type UIAction string
+
+const (
+	UIActionNone       UIAction = "none"
+	UIActionExit       UIAction = "exit"
+	UIActionNewSession UIAction = "new_session"
+	UIActionLogout     UIAction = "logout"
+)
+
 func WithUILogger(logger uiLogger) UIOption {
 	return func(m *uiModel) {
 		m.logger = logger
+	}
+}
+
+func WithUIModelName(model string) UIOption {
+	return func(m *uiModel) {
+		m.modelName = strings.TrimSpace(model)
+	}
+}
+
+func WithUITheme(theme string) UIOption {
+	return func(m *uiModel) {
+		m.theme = strings.TrimSpace(theme)
+		m.view = tui.NewModel(tui.WithTheme(theme))
 	}
 }
 
@@ -82,6 +110,12 @@ type uiModel struct {
 
 	queued []string
 
+	modelName       string
+	spinnerFrame    int
+	commandRegistry *commands.Registry
+	exitAction      UIAction
+	theme           string
+
 	sawAssistantDelta bool
 	logger            uiLogger
 
@@ -90,19 +124,26 @@ type uiModel struct {
 	askCursor   int
 	askFreeform bool
 	askInput    string
+
+	termWidth  int
+	termHeight int
 }
 
 func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
 	m := &uiModel{
-		engine:        engine,
-		view:          tui.NewModel(),
-		status:        "idle",
-		runtimeEvents: runtimeEvents,
-		askEvents:     askEvents,
+		engine:          engine,
+		view:            tui.NewModel(),
+		status:          "idle",
+		runtimeEvents:   runtimeEvents,
+		askEvents:       askEvents,
+		commandRegistry: commands.NewDefaultRegistry(),
+		exitAction:      UIActionNone,
+		theme:           "dark",
 	}
 	for _, opt := range opts {
 		opt(m)
 	}
+	m.syncViewport()
 	return m
 }
 
@@ -112,8 +153,14 @@ func (m *uiModel) Init() tea.Cmd {
 
 func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.termWidth = msg.Width
+		m.termHeight = msg.Height
+		m.syncViewport()
+		return m, nil
 	case runtimeEventMsg:
 		m.handleRuntimeEvent(msg.event)
+		m.syncViewport()
 		return m, waitRuntimeEvent(m.runtimeEvents)
 	case askEventMsg:
 		if m.activeAsk == nil {
@@ -122,14 +169,20 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.askQueue = append(m.askQueue, msg.event)
 		}
+		m.syncViewport()
 		return m, waitAskEvent(m.askEvents)
 	case tea.KeyMsg:
 		if m.activeAsk != nil {
-			return m.handleAskKey(msg)
+			next, cmd := m.handleAskKey(msg)
+			next.(*uiModel).syncViewport()
+			return next, cmd
 		}
-		return m.handleMainKey(msg)
+		next, cmd := m.handleMainKey(msg)
+		next.(*uiModel).syncViewport()
+		return next, cmd
 	case submitDoneMsg:
 		m.busy = false
+		m.spinnerFrame = 0
 		if msg.err != nil {
 			detailErr := formatSubmissionError(msg.err)
 			m.status = "error"
@@ -140,6 +193,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				next := m.popQueued()
 				return m, m.startSubmission(next)
 			}
+			m.syncViewport()
 			return m, nil
 		}
 		m.status = "idle"
@@ -154,20 +208,49 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			next := m.popQueued()
 			return m, m.startSubmission(next)
 		}
+		m.syncViewport()
 		return m, nil
+	case spinnerTickMsg:
+		if !m.busy {
+			return m, nil
+		}
+		m.spinnerFrame = (m.spinnerFrame + 1) % len(spinnerFrames)
+		m.syncViewport()
+		return m, tickSpinner()
 	}
 
 	m.forwardToView(msg)
+	m.syncViewport()
 	return m, nil
 }
 
 func (m *uiModel) View() string {
-	header := fmt.Sprintf("builder [%s] q=%d - Tab:toggle Ctrl+C:interrupt/quit Ctrl+Enter:queue\n", m.status, len(m.queued))
-	mainInput := "\n\ninput> " + m.input
-	if m.activeAsk != nil {
-		return header + m.view.View() + "\n\n" + m.renderAskPrompt()
+	style := uiThemeStyles(m.theme)
+	width := m.effectiveWidth()
+	height := m.effectiveHeight()
+	if width <= 0 || height <= 0 {
+		return ""
 	}
-	return header + m.view.View() + mainInput
+
+	inputLines := m.renderInputLines(width, style)
+	statusLine := m.renderStatusLine(width, style)
+	statusLines := 1
+	chatLines := height - len(inputLines) - statusLines
+	if chatLines < 1 {
+		chatLines = 1
+	}
+	chatPanel := m.renderChatPanel(width, chatLines, style)
+	allLines := make([]string, 0, height)
+	allLines = append(allLines, chatPanel...)
+	allLines = append(allLines, inputLines...)
+	allLines = append(allLines, statusLine)
+	for len(allLines) < height {
+		allLines = append(allLines, padRight("", width))
+	}
+	if len(allLines) > height {
+		allLines = allLines[len(allLines)-height:]
+	}
+	return strings.Join(allLines, "\n")
 }
 
 func (m *uiModel) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -180,6 +263,7 @@ func (m *uiModel) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = "interrupted"
 			return m, nil
 		}
+		m.exitAction = UIActionExit
 		return m, tea.Quit
 	case tea.KeyTab:
 		m.forwardToView(tui.ToggleModeMsg{})
@@ -193,21 +277,41 @@ func (m *uiModel) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if m.busy {
-			m.engine.QueueUserMessage(text)
-			m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: text})
+		if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
 			m.input = ""
-			m.status = "injected"
+			if commandResult.Text != "" {
+				m.forwardToView(tui.AppendTranscriptMsg{Role: "system", Text: commandResult.Text})
+			}
+			switch commandResult.Action {
+			case commands.ActionExit:
+				m.exitAction = UIActionExit
+				return m, tea.Quit
+			case commands.ActionNew:
+				m.exitAction = UIActionNewSession
+				return m, tea.Quit
+			case commands.ActionLogout:
+				m.exitAction = UIActionLogout
+				return m, tea.Quit
+			}
+			return m, nil
+		}
+		if m.busy {
 			return m, nil
 		}
 		m.input = ""
 		return m, m.startSubmission(text)
 	case tea.KeyBackspace:
+		if m.busy {
+			return m, nil
+		}
 		if len(m.input) > 0 {
 			m.input = m.input[:len(m.input)-1]
 		}
 		return m, nil
 	case tea.KeySpace:
+		if m.busy {
+			return m, nil
+		}
 		m.input += " "
 		return m, nil
 	case tea.KeyUp:
@@ -218,6 +322,9 @@ func (m *uiModel) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	default:
 		if keyString == "ctrl+enter" || keyString == "ctrl+j" {
+			if m.busy {
+				return m, nil
+			}
 			text := strings.TrimSpace(m.input)
 			if text == "" {
 				return m, nil
@@ -233,6 +340,9 @@ func (m *uiModel) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.Type == tea.KeyRunes {
+			if m.busy {
+				return m, nil
+			}
 			m.input += string(msg.Runes)
 		}
 		return m, nil
@@ -363,7 +473,8 @@ func (m *uiModel) startSubmission(text string) tea.Cmd {
 	m.sawAssistantDelta = false
 	m.logf("step.start user_chars=%d", len(text))
 	m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: text})
-	return m.submitCmd(text)
+	m.syncViewport()
+	return tea.Batch(m.submitCmd(text), tickSpinner())
 }
 
 func (m *uiModel) submitCmd(text string) tea.Cmd {
@@ -471,6 +582,10 @@ func waitAskEvent(ch <-chan askEvent) tea.Cmd {
 	}
 }
 
+func (m *uiModel) Action() UIAction {
+	return m.exitAction
+}
+
 func (m *uiModel) logf(format string, args ...any) {
 	if m.logger != nil {
 		m.logger.Logf(format, args...)
@@ -490,4 +605,313 @@ func formatSubmissionError(err error) string {
 		return fmt.Sprintf("openai status %d\nresponse body:\n%s", statusErr.StatusCode, body)
 	}
 	return err.Error()
+}
+
+var spinnerFrames = []string{"|", "/", "-", "\\"}
+
+func tickSpinner() tea.Cmd {
+	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg {
+		return spinnerTickMsg{}
+	})
+}
+
+func statusLabel(busy bool) string {
+	if busy {
+		return "busy"
+	}
+	return "idle"
+}
+
+func (m *uiModel) renderStatusLine(width int, style uiStyles) string {
+	spin := spinnerFrames[m.spinnerFrame]
+	if !m.busy {
+		spin = "•"
+	}
+	segments := []string{
+		style.meta.Render("mode " + string(m.view.Mode())),
+		style.meta.Render("state " + statusLabel(m.busy)),
+		style.meta.Render("model " + firstNonEmpty(m.modelName, "gpt-5")),
+		style.meta.Render(fmt.Sprintf("queue %d", len(m.queued))),
+		style.meta.Render(spin),
+	}
+	line := strings.Join(segments, "  |  ")
+	return padRight(line, width)
+}
+
+func (m *uiModel) renderChatPanel(width, height int, style uiStyles) []string {
+	if width < 1 {
+		return []string{padRight("", width)}
+	}
+	contentWidth := width
+	rawLines := splitPlainLines(m.view.View())
+	contentLines := make([]string, 0, len(rawLines))
+	for _, line := range rawLines {
+		contentLines = append(contentLines, wrapLine(line, contentWidth)...)
+	}
+	if len(contentLines) < height {
+		for len(contentLines) < height {
+			contentLines = append(contentLines, "")
+		}
+	} else if len(contentLines) > height {
+		contentLines = contentLines[:height]
+	}
+	out := make([]string, 0, height)
+	for _, line := range contentLines {
+		out = append(out, style.chat.Render(padRight(line, contentWidth)))
+	}
+	return out
+}
+
+func (m *uiModel) renderInputLines(width int, style uiStyles) []string {
+	if width < 1 {
+		return []string{padRight("", width)}
+	}
+	contentWidth := width
+	var raw []string
+	if m.activeAsk != nil {
+		raw = splitPlainLines(m.renderAskPrompt())
+	} else {
+		text := m.input
+		prefix := "› "
+		if m.busy {
+			text = "input locked while agent is running"
+			prefix = "⨯ "
+		}
+		raw = splitPlainLines(prefix + text)
+	}
+	wrapped := make([]string, 0, len(raw))
+	for _, line := range raw {
+		wrapped = append(wrapped, wrapLine(line, contentWidth)...)
+	}
+	if len(wrapped) == 0 {
+		wrapped = []string{""}
+	}
+	maxContentLines := m.effectiveHeight() - 4
+	if maxContentLines < 1 {
+		maxContentLines = 1
+	}
+	if len(wrapped) > maxContentLines {
+		wrapped = wrapped[len(wrapped)-maxContentLines:]
+	}
+
+	borderColor := uiPalette(m.theme).primary
+	if m.busy {
+		borderColor = uiPalette(m.theme).muted
+	}
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
+	top := borderStyle.Render(strings.Repeat("─", width))
+	bottom := borderStyle.Render(strings.Repeat("─", width))
+
+	out := make([]string, 0, len(wrapped)+2)
+	out = append(out, top)
+	lineStyle := style.input
+	if m.busy {
+		lineStyle = style.inputDisabled
+	}
+	for _, line := range wrapped {
+		out = append(out, lineStyle.Render(padRight(line, contentWidth)))
+	}
+	out = append(out, bottom)
+	return out
+}
+
+func (m *uiModel) effectiveWidth() int {
+	if m.termWidth > 0 {
+		return m.termWidth
+	}
+	return 120
+}
+
+func (m *uiModel) effectiveHeight() int {
+	if m.termHeight > 0 {
+		return m.termHeight
+	}
+	return 32
+}
+
+func (m *uiModel) calcChatLines() int {
+	width := m.effectiveWidth()
+	height := m.effectiveHeight()
+	contentWidth := width
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
+
+	inputContentLines := 1
+	if m.activeAsk != nil {
+		lines := splitPlainLines(m.renderAskPrompt())
+		inputContentLines = 0
+		for _, line := range lines {
+			inputContentLines += len(wrapLine(line, contentWidth))
+		}
+	} else {
+		text := m.input
+		if m.busy {
+			text = "input locked while agent is running"
+		}
+		wrapped := wrapLine("› "+text, contentWidth)
+		inputContentLines = len(wrapped)
+	}
+	if inputContentLines < 1 {
+		inputContentLines = 1
+	}
+	maxContentLines := height - 4
+	if maxContentLines < 1 {
+		maxContentLines = 1
+	}
+	if inputContentLines > maxContentLines {
+		inputContentLines = maxContentLines
+	}
+	inputLines := inputContentLines + 2
+	chat := height - inputLines - 1
+	if chat < 1 {
+		return 1
+	}
+	return chat
+}
+
+func (m *uiModel) syncViewport() {
+	m.forwardToView(tui.SetViewportLinesMsg{Lines: m.calcChatLines()})
+}
+
+func splitPlainLines(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return []string{""}
+	}
+	return strings.Split(v, "\n")
+}
+
+func wrapLine(line string, width int) []string {
+	if width <= 0 {
+		return []string{line}
+	}
+	if runewidth.StringWidth(line) <= width {
+		return []string{line}
+	}
+	parts := make([]string, 0, 4)
+	remaining := []rune(line)
+	for len(remaining) > 0 {
+		w := 0
+		cut := 0
+		for i, r := range remaining {
+			rw := runewidth.RuneWidth(r)
+			if w+rw > width {
+				break
+			}
+			w += rw
+			cut = i + 1
+		}
+		if cut == 0 {
+			cut = 1
+		}
+		parts = append(parts, string(remaining[:cut]))
+		remaining = remaining[cut:]
+	}
+	return parts
+}
+
+func padRight(line string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	current := runewidth.StringWidth(line)
+	if current == width {
+		return line
+	}
+	if current > width {
+		return line
+	}
+	return line + strings.Repeat(" ", width-current)
+}
+
+type uiStyles struct {
+	brand         lipgloss.Style
+	modeChip      lipgloss.Style
+	stateChip     lipgloss.Style
+	panel         lipgloss.Style
+	chat          lipgloss.Style
+	input         lipgloss.Style
+	inputDisabled lipgloss.Style
+	meta          lipgloss.Style
+	ask           lipgloss.Style
+}
+
+func uiThemeStyles(theme string) uiStyles {
+	p := uiPalette(theme)
+	return uiStyles{
+		brand: lipgloss.NewStyle().Foreground(p.primary).Bold(true),
+		modeChip: lipgloss.NewStyle().
+			Foreground(p.modeText).
+			Background(p.modeBg).
+			Padding(0, 1).
+			Bold(true),
+		stateChip: lipgloss.NewStyle().
+			Foreground(p.stateText).
+			Background(p.stateBg).
+			Padding(0, 1),
+		panel: lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(p.border).
+			Padding(0, 1),
+		chat: lipgloss.NewStyle().
+			Foreground(p.foreground),
+		input: lipgloss.NewStyle().
+			Foreground(p.foreground),
+		inputDisabled: lipgloss.NewStyle().
+			Foreground(p.muted).
+			Faint(true),
+		meta: lipgloss.NewStyle().Foreground(p.muted).Faint(true),
+		ask: lipgloss.NewStyle().
+			BorderStyle(lipgloss.ThickBorder()).
+			BorderForeground(p.secondary).
+			Foreground(p.foreground).
+			Padding(0, 1),
+	}
+}
+
+type uiColors struct {
+	primary    lipgloss.TerminalColor
+	secondary  lipgloss.TerminalColor
+	foreground lipgloss.TerminalColor
+	muted      lipgloss.TerminalColor
+	border     lipgloss.TerminalColor
+	modeBg     lipgloss.TerminalColor
+	modeText   lipgloss.TerminalColor
+	stateBg    lipgloss.TerminalColor
+	stateText  lipgloss.TerminalColor
+	chatBg     lipgloss.TerminalColor
+	inputBg    lipgloss.TerminalColor
+}
+
+func uiPalette(theme string) uiColors {
+	theme = strings.ToLower(strings.TrimSpace(theme))
+	if theme == "light" {
+		return uiColors{
+			// ANSI colors follow terminal defaults; hex values are Atom One Light fallback.
+			primary:    lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "4", ANSI256: "33", TrueColor: "#4078F2"}, Dark: lipgloss.CompleteColor{ANSI: "4", ANSI256: "33", TrueColor: "#61AFEF"}},
+			secondary:  lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "5", ANSI256: "134", TrueColor: "#A626A4"}, Dark: lipgloss.CompleteColor{ANSI: "5", ANSI256: "176", TrueColor: "#C678DD"}},
+			foreground: lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "0", ANSI256: "235", TrueColor: "#383A42"}, Dark: lipgloss.CompleteColor{ANSI: "7", ANSI256: "252", TrueColor: "#ABB2BF"}},
+			muted:      lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "8", ANSI256: "245", TrueColor: "#A0A1A7"}, Dark: lipgloss.CompleteColor{ANSI: "8", ANSI256: "243", TrueColor: "#5C6370"}},
+			border:     lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "7", ANSI256: "250", TrueColor: "#D0D0D0"}, Dark: lipgloss.CompleteColor{ANSI: "8", ANSI256: "240", TrueColor: "#3D434F"}},
+			modeBg:     lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "7", ANSI256: "252", TrueColor: "#EAEAEB"}, Dark: lipgloss.CompleteColor{ANSI: "8", ANSI256: "238", TrueColor: "#353B45"}},
+			modeText:   lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "0", ANSI256: "235", TrueColor: "#383A42"}, Dark: lipgloss.CompleteColor{ANSI: "7", ANSI256: "252", TrueColor: "#ABB2BF"}},
+			stateBg:    lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "6", ANSI256: "37", TrueColor: "#EAF2FF"}, Dark: lipgloss.CompleteColor{ANSI: "6", ANSI256: "31", TrueColor: "#28374F"}},
+			stateText:  lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "4", ANSI256: "33", TrueColor: "#4078F2"}, Dark: lipgloss.CompleteColor{ANSI: "4", ANSI256: "75", TrueColor: "#61AFEF"}},
+			chatBg:     lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "7", ANSI256: "255", TrueColor: "#F8F8F8"}, Dark: lipgloss.CompleteColor{ANSI: "0", ANSI256: "235", TrueColor: "#1E222A"}},
+			inputBg:    lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "7", ANSI256: "254", TrueColor: "#F2F3F5"}, Dark: lipgloss.CompleteColor{ANSI: "0", ANSI256: "236", TrueColor: "#2A2F37"}},
+		}
+	}
+	return uiColors{
+		primary:    lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "4", ANSI256: "33", TrueColor: "#4078F2"}, Dark: lipgloss.CompleteColor{ANSI: "4", ANSI256: "75", TrueColor: "#61AFEF"}},
+		secondary:  lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "5", ANSI256: "134", TrueColor: "#A626A4"}, Dark: lipgloss.CompleteColor{ANSI: "5", ANSI256: "176", TrueColor: "#C678DD"}},
+		foreground: lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "0", ANSI256: "235", TrueColor: "#383A42"}, Dark: lipgloss.CompleteColor{ANSI: "7", ANSI256: "252", TrueColor: "#ABB2BF"}},
+		muted:      lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "8", ANSI256: "245", TrueColor: "#A0A1A7"}, Dark: lipgloss.CompleteColor{ANSI: "8", ANSI256: "243", TrueColor: "#5C6370"}},
+		border:     lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "7", ANSI256: "250", TrueColor: "#D0D0D0"}, Dark: lipgloss.CompleteColor{ANSI: "8", ANSI256: "240", TrueColor: "#3D434F"}},
+		modeBg:     lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "7", ANSI256: "252", TrueColor: "#EAEAEB"}, Dark: lipgloss.CompleteColor{ANSI: "8", ANSI256: "238", TrueColor: "#353B45"}},
+		modeText:   lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "0", ANSI256: "235", TrueColor: "#383A42"}, Dark: lipgloss.CompleteColor{ANSI: "7", ANSI256: "252", TrueColor: "#ABB2BF"}},
+		stateBg:    lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "6", ANSI256: "37", TrueColor: "#EAF2FF"}, Dark: lipgloss.CompleteColor{ANSI: "6", ANSI256: "31", TrueColor: "#28374F"}},
+		stateText:  lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "4", ANSI256: "33", TrueColor: "#4078F2"}, Dark: lipgloss.CompleteColor{ANSI: "4", ANSI256: "75", TrueColor: "#61AFEF"}},
+		chatBg:     lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "7", ANSI256: "255", TrueColor: "#F8F8F8"}, Dark: lipgloss.CompleteColor{ANSI: "0", ANSI256: "235", TrueColor: "#1E222A"}},
+		inputBg:    lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "7", ANSI256: "254", TrueColor: "#F2F3F5"}, Dark: lipgloss.CompleteColor{ANSI: "0", ANSI256: "236", TrueColor: "#2A2F37"}},
+	}
 }

@@ -107,7 +107,12 @@ func TestLocksAtFirstDispatch(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolBash}), Config{Model: "gpt-5", Temperature: 1})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolBash}), Config{
+		Model:         "gpt-5",
+		Temperature:   1,
+		ThinkingLevel: "xhigh",
+		EnabledTools:  []tools.ID{tools.ToolBash},
+	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -121,6 +126,12 @@ func TestLocksAtFirstDispatch(t *testing.T) {
 	}
 	if meta.Locked.Model != "gpt-5" {
 		t.Fatalf("locked model = %q", meta.Locked.Model)
+	}
+	if meta.Locked.ThinkingLevel != "xhigh" {
+		t.Fatalf("locked thinking level = %q", meta.Locked.ThinkingLevel)
+	}
+	if len(meta.Locked.EnabledTools) != 1 || meta.Locked.EnabledTools[0] != string(tools.ToolBash) {
+		t.Fatalf("locked enabled tools = %+v", meta.Locked.EnabledTools)
 	}
 }
 
