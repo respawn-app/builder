@@ -72,6 +72,7 @@ func (b *Broker) Ask(ctx context.Context, req Request) (Response, error) {
 	b.queue = append(b.queue, p)
 	h := b.onAsk
 	b.mu.Unlock()
+	defer b.dequeue(req.ID)
 
 	if h != nil {
 		answer, err := h(req)
@@ -93,7 +94,6 @@ func (b *Broker) Ask(ctx context.Context, req Request) (Response, error) {
 				return Response{}, err
 			}
 		}
-		b.dequeue(req.ID)
 		return Response{RequestID: req.ID, Answer: rr.answer}, nil
 	}
 }

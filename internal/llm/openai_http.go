@@ -121,6 +121,19 @@ func (t *HTTPTransport) buildPayload(request OpenAIRequest) (chatCompletionReque
 	}
 	for _, m := range request.Messages {
 		item := chatMessage{Role: string(m.Role), Content: m.Content, Name: m.Name, ToolCallID: m.ToolCallID}
+		if len(m.ToolCalls) > 0 {
+			item.ToolCalls = make([]chatToolCall, 0, len(m.ToolCalls))
+			for _, tc := range m.ToolCalls {
+				item.ToolCalls = append(item.ToolCalls, chatToolCall{
+					ID:   tc.ID,
+					Type: "function",
+					Function: chatFunctionCall{
+						Name:      tc.Name,
+						Arguments: string(tc.Input),
+					},
+				})
+			}
+		}
 		msgs = append(msgs, item)
 	}
 
@@ -166,10 +179,22 @@ type chatCompletionRequest struct {
 }
 
 type chatMessage struct {
-	Role       string `json:"role"`
-	Content    string `json:"content,omitempty"`
-	Name       string `json:"name,omitempty"`
-	ToolCallID string `json:"tool_call_id,omitempty"`
+	Role       string         `json:"role"`
+	Content    string         `json:"content,omitempty"`
+	Name       string         `json:"name,omitempty"`
+	ToolCallID string         `json:"tool_call_id,omitempty"`
+	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
+}
+
+type chatToolCall struct {
+	ID       string           `json:"id"`
+	Type     string           `json:"type,omitempty"`
+	Function chatFunctionCall `json:"function"`
+}
+
+type chatFunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 type chatTool struct {

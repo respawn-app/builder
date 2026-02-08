@@ -56,8 +56,9 @@ func (c *OpenAIClient) Generate(ctx context.Context, request Request) (Response,
 
 	return Response{
 		Assistant: Message{
-			Role:    RoleAssistant,
-			Content: providerResp.AssistantText,
+			Role:      RoleAssistant,
+			Content:   providerResp.AssistantText,
+			ToolCalls: append([]ToolCall(nil), providerResp.ToolCalls...),
 		},
 		ToolCalls: providerResp.ToolCalls,
 		Usage:     providerResp.Usage,
