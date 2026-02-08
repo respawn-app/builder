@@ -63,23 +63,29 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	askBroker.SetAskHandler(func(req askquestion.Request) (string, error) {
-		return askFromStdin(req), nil
-	})
+	askBridge := newAskBridge()
+	askBroker.SetAskHandler(askBridge.Handle)
 
 	transport := llm.NewHTTPTransport(mgr)
 	client := llm.NewOpenAIClient(transport)
 
+	runtimeEvents := make(chan runtime.Event, 2048)
 	eng, err := runtime.New(store, client, toolRegistry, runtime.Config{
 		Model:       opts.Model,
 		Temperature: 1,
 		MaxTokens:   0,
+		OnEvent: func(evt runtime.Event) {
+			select {
+			case runtimeEvents <- evt:
+			default:
+			}
+		},
 	})
 	if err != nil {
 		return err
 	}
 
-	program := tea.NewProgram(NewUIModel(eng), tea.WithAltScreen())
+	program := tea.NewProgram(NewUIModel(eng, runtimeEvents, askBridge.Events()), tea.WithAltScreen())
 	_, err = program.Run()
 	return err
 }
@@ -188,27 +194,6 @@ func buildToolRegistry(workspaceRoot string) (*tools.Registry, *askquestion.Brok
 		askquestion.NewTool(broker),
 	)
 	return registry, broker, nil
-}
-
-func askFromStdin(req askquestion.Request) string {
-	fmt.Printf("\n? %s\n", req.Question)
-	for i, s := range req.Suggestions {
-		fmt.Printf("  %d. %s\n", i+1, s)
-	}
-	ans, _ := prompt("answer> ")
-	ans = strings.TrimSpace(ans)
-	if ans == "" {
-		return ans
-	}
-	if len(req.Suggestions) > 0 {
-		idx := -1
-		if _, err := fmt.Sscanf(ans, "%d", &idx); err == nil {
-			if idx >= 1 && idx <= len(req.Suggestions) {
-				return req.Suggestions[idx-1]
-			}
-		}
-	}
-	return ans
 }
 
 func prompt(label string) (string, error) {
