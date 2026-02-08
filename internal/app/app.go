@@ -115,7 +115,7 @@ func Run(ctx context.Context, opts Options) error {
 			ThinkingLevel: active.ThinkingLevel,
 			EnabledTools:  enabledTools,
 			OnEvent: func(evt runtime.Event) {
-				logger.Logf(formatRuntimeEvent(evt))
+				logger.Logf("%s", formatRuntimeEvent(evt))
 				runtimeEvents <- evt
 			},
 		})
