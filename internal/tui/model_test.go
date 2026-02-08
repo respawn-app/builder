@@ -51,7 +51,7 @@ func TestDetailSnapshotIsStaticUntilRetoggle(t *testing.T) {
 	m = updateModel(t, m, ToggleModeMsg{})
 
 	snapshot := m.View()
-	if !strings.Contains(snapshot, "model: alpha") {
+	if !strings.Contains(snapshot, "❮ alpha") {
 		t.Fatalf("detail snapshot missing assistant stream: %q", snapshot)
 	}
 
@@ -69,10 +69,10 @@ func TestDetailSnapshotIsStaticUntilRetoggle(t *testing.T) {
 	if refreshed == snapshot {
 		t.Fatalf("detail snapshot did not refresh after mode roundtrip")
 	}
-	if !strings.Contains(refreshed, "model: alpha beta") {
+	if !strings.Contains(refreshed, "❮ alpha beta") {
 		t.Fatalf("refreshed snapshot missing full assistant stream: %q", refreshed)
 	}
-	if !strings.Contains(refreshed, "tool: ran") && !strings.Contains(refreshed, "tool_result: ran") {
+	if !strings.Contains(refreshed, "• ran") {
 		t.Fatalf("refreshed snapshot missing new transcript entry: %q", refreshed)
 	}
 }
@@ -86,10 +86,10 @@ func TestClearOngoingAssistantMsgDropsPartialStream(t *testing.T) {
 	m = updateModel(t, m, ToggleModeMsg{})
 
 	snapshot := m.View()
-	if strings.Contains(snapshot, "model: partial") {
+	if strings.Contains(snapshot, "❮ partial") {
 		t.Fatalf("snapshot should not contain discarded attempt delta: %q", snapshot)
 	}
-	if !strings.Contains(snapshot, "model: final") {
+	if !strings.Contains(snapshot, "❮ final") {
 		t.Fatalf("snapshot missing committed final assistant output: %q", snapshot)
 	}
 }
@@ -102,6 +102,29 @@ func TestOngoingShowsCommittedAssistantAfterCommit(t *testing.T) {
 	view := m.View()
 	if !strings.Contains(view, "line1") || !strings.Contains(view, "line2") {
 		t.Fatalf("ongoing view should keep committed assistant visible, got %q", view)
+	}
+}
+
+func TestDetailUsesRequestedSymbolsAndDividers(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "hello"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "hi"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: "call"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result", Text: "result"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := m.View()
+	if !strings.Contains(view, "❯ hello") {
+		t.Fatalf("expected user symbol, got %q", view)
+	}
+	if !strings.Contains(view, "❮ hi") {
+		t.Fatalf("expected assistant symbol, got %q", view)
+	}
+	if !strings.Contains(view, "• call") || !strings.Contains(view, "result") {
+		t.Fatalf("expected tool call/result pair with tool symbol, got %q", view)
+	}
+	if got := strings.Count(view, strings.Repeat("─", 24)); got != 2 {
+		t.Fatalf("expected 2 dividers for 3 blocks, got %d in %q", got, view)
 	}
 }
 

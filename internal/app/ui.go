@@ -10,7 +10,6 @@ import (
 	"builder/internal/app/commands"
 	"builder/internal/llm"
 	"builder/internal/runtime"
-	"builder/internal/tools"
 	"builder/internal/tools/askquestion"
 	"builder/internal/tui"
 
@@ -56,6 +55,11 @@ type UIOption func(*uiModel)
 
 type UIAction string
 
+type UITranscriptEntry struct {
+	Role string
+	Text string
+}
+
 const (
 	UIActionNone       UIAction = "none"
 	UIActionExit       UIAction = "exit"
@@ -79,6 +83,12 @@ func WithUITheme(theme string) UIOption {
 	return func(m *uiModel) {
 		m.theme = strings.TrimSpace(theme)
 		m.view = tui.NewModel(tui.WithTheme(theme))
+	}
+}
+
+func WithUIInitialTranscript(entries []UITranscriptEntry) UIOption {
+	return func(m *uiModel) {
+		m.initialTranscript = append([]UITranscriptEntry(nil), entries...)
 	}
 }
 
@@ -127,6 +137,8 @@ type uiModel struct {
 
 	termWidth  int
 	termHeight int
+
+	initialTranscript []UITranscriptEntry
 }
 
 func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
@@ -142,6 +154,16 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 	}
 	for _, opt := range opts {
 		opt(m)
+	}
+	if m.engine != nil {
+		m.syncConversationFromEngine()
+	} else {
+		for _, entry := range m.initialTranscript {
+			if strings.TrimSpace(entry.Text) == "" {
+				continue
+			}
+			m.forwardToView(tui.AppendTranscriptMsg{Role: entry.Role, Text: entry.Text})
+		}
 	}
 	m.syncViewport()
 	return m
@@ -186,8 +208,13 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			detailErr := formatSubmissionError(msg.err)
 			m.status = "error"
-			m.forwardToView(tui.SetOngoingErrorMsg{Err: errors.New(detailErr)})
-			m.forwardToView(tui.AppendTranscriptMsg{Role: "error", Text: detailErr})
+			if m.engine != nil {
+				m.engine.SetOngoingError(detailErr)
+				m.engine.AppendLocalEntry("error", detailErr)
+			} else {
+				m.forwardToView(tui.SetOngoingErrorMsg{Err: errors.New(detailErr)})
+				m.forwardToView(tui.AppendTranscriptMsg{Role: "error", Text: detailErr})
+			}
 			m.logf("step.error err=%q", detailErr)
 			if len(m.queued) > 0 {
 				next := m.popQueued()
@@ -197,11 +224,15 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.status = "idle"
-		m.forwardToView(tui.ClearOngoingErrorMsg{})
-		if !m.sawAssistantDelta && msg.message != "" {
-			m.forwardToView(tui.StreamAssistantMsg{Delta: msg.message})
+		if m.engine != nil {
+			m.engine.ClearOngoingError()
+		} else {
+			m.forwardToView(tui.ClearOngoingErrorMsg{})
+			if !m.sawAssistantDelta && msg.message != "" {
+				m.forwardToView(tui.StreamAssistantMsg{Delta: msg.message})
+			}
+			m.forwardToView(tui.CommitAssistantMsg{})
 		}
-		m.forwardToView(tui.CommitAssistantMsg{})
 		m.logf("step.done assistant_chars=%d", len(msg.message))
 		m.sawAssistantDelta = false
 		if len(m.queued) > 0 {
@@ -280,7 +311,11 @@ func (m *uiModel) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
 			m.input = ""
 			if commandResult.Text != "" {
-				m.forwardToView(tui.AppendTranscriptMsg{Role: "system", Text: commandResult.Text})
+				if m.engine != nil {
+					m.engine.AppendLocalEntry("system", commandResult.Text)
+				} else {
+					m.forwardToView(tui.AppendTranscriptMsg{Role: "system", Text: commandResult.Text})
+				}
 			}
 			switch commandResult.Action {
 			case commands.ActionExit:
@@ -335,7 +370,6 @@ func (m *uiModel) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				next := m.popQueued()
 				return m, m.startSubmission(next)
 			}
-			m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: text})
 			m.status = "queued"
 			return m, nil
 		}
@@ -472,13 +506,18 @@ func (m *uiModel) startSubmission(text string) tea.Cmd {
 	m.status = "running"
 	m.sawAssistantDelta = false
 	m.logf("step.start user_chars=%d", len(text))
-	m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: text})
+	if m.engine == nil {
+		m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: text})
+	}
 	m.syncViewport()
 	return tea.Batch(m.submitCmd(text), tickSpinner())
 }
 
 func (m *uiModel) submitCmd(text string) tea.Cmd {
 	return func() tea.Msg {
+		if m.engine == nil {
+			return submitDoneMsg{err: errors.New("runtime engine is not configured")}
+		}
 		msg, err := m.engine.SubmitUserMessage(context.Background(), text)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -500,31 +539,32 @@ func (m *uiModel) forwardToView(msg tea.Msg) {
 
 func (m *uiModel) handleRuntimeEvent(evt runtime.Event) {
 	switch evt.Kind {
+	case runtime.EventConversationUpdated:
+		m.syncConversationFromEngine()
 	case runtime.EventAssistantDelta:
-		if evt.AssistantDelta != "" {
-			m.sawAssistantDelta = true
-			m.forwardToView(tui.StreamAssistantMsg{Delta: evt.AssistantDelta})
-		}
+		m.sawAssistantDelta = evt.AssistantDelta != ""
 	case runtime.EventAssistantDeltaReset:
 		m.sawAssistantDelta = false
-		m.forwardToView(tui.ClearOngoingAssistantMsg{})
-	case runtime.EventToolCallStarted:
-		if evt.ToolCall != nil {
-			m.forwardToView(tui.AppendTranscriptMsg{Role: "tool_call", Text: formatToolCall(*evt.ToolCall)})
-		}
-	case runtime.EventToolCallCompleted:
-		if evt.ToolResult != nil {
-			m.forwardToView(tui.AppendTranscriptMsg{Role: "tool_result", Text: formatToolResult(*evt.ToolResult)})
-		}
 	}
 }
 
-func formatToolCall(call llm.ToolCall) string {
-	return fmt.Sprintf("id=%s name=%s\ninput:\n%s", call.ID, call.Name, string(call.Input))
-}
-
-func formatToolResult(result tools.Result) string {
-	return fmt.Sprintf("id=%s name=%s error=%t\noutput:\n%s", result.CallID, result.Name, result.IsError, string(result.Output))
+func (m *uiModel) syncConversationFromEngine() {
+	if m.engine == nil {
+		return
+	}
+	snapshot := m.engine.ChatSnapshot()
+	entries := make([]tui.TranscriptEntry, 0, len(snapshot.Entries))
+	for _, entry := range snapshot.Entries {
+		entries = append(entries, tui.TranscriptEntry{
+			Role: entry.Role,
+			Text: entry.Text,
+		})
+	}
+	m.forwardToView(tui.SetConversationMsg{
+		Entries:      entries,
+		Ongoing:      snapshot.Ongoing,
+		OngoingError: snapshot.OngoingError,
+	})
 }
 
 func (m *uiModel) popQueued() string {
@@ -615,27 +655,30 @@ func tickSpinner() tea.Cmd {
 	})
 }
 
-func statusLabel(busy bool) string {
-	if busy {
-		return "busy"
+func (m *uiModel) renderStatusLine(width int, style uiStyles) string {
+	spin := renderStatusDot(m.theme, m.busy, m.spinnerFrame)
+	segments := []string{
+		spin,
+		style.meta.Render(string(m.view.Mode())),
+		style.meta.Render(firstNonEmpty(m.modelName, "gpt-5")),
 	}
-	return "idle"
+	line := strings.Join(segments, " | ")
+	return padRight(line, width)
 }
 
-func (m *uiModel) renderStatusLine(width int, style uiStyles) string {
-	spin := spinnerFrames[m.spinnerFrame]
-	if !m.busy {
-		spin = "•"
+func renderStatusDot(theme string, busy bool, frame int) string {
+	if !busy {
+		green := lipgloss.CompleteAdaptiveColor{
+			Light: lipgloss.CompleteColor{ANSI: "2", ANSI256: "34", TrueColor: "#22863A"},
+			Dark:  lipgloss.CompleteColor{ANSI: "2", ANSI256: "114", TrueColor: "#98C379"},
+		}
+		return lipgloss.NewStyle().Foreground(green).Render("●")
 	}
-	segments := []string{
-		style.meta.Render("mode " + string(m.view.Mode())),
-		style.meta.Render("state " + statusLabel(m.busy)),
-		style.meta.Render("model " + firstNonEmpty(m.modelName, "gpt-5")),
-		style.meta.Render(fmt.Sprintf("queue %d", len(m.queued))),
-		style.meta.Render(spin),
+	if frame%2 == 1 {
+		return " "
 	}
-	line := strings.Join(segments, "  |  ")
-	return padRight(line, width)
+	muted := uiPalette(theme).muted
+	return lipgloss.NewStyle().Foreground(muted).Render("●")
 }
 
 func (m *uiModel) renderChatPanel(width, height int, style uiStyles) []string {
@@ -646,6 +689,10 @@ func (m *uiModel) renderChatPanel(width, height int, style uiStyles) []string {
 	rawLines := splitPlainLines(m.view.View())
 	contentLines := make([]string, 0, len(rawLines))
 	for _, line := range rawLines {
+		if line == tui.TranscriptDivider {
+			contentLines = append(contentLines, tui.TranscriptDivider)
+			continue
+		}
 		contentLines = append(contentLines, wrapLine(line, contentWidth)...)
 	}
 	if len(contentLines) < height {
@@ -657,6 +704,10 @@ func (m *uiModel) renderChatPanel(width, height int, style uiStyles) []string {
 	}
 	out := make([]string, 0, height)
 	for _, line := range contentLines {
+		if line == tui.TranscriptDivider {
+			out = append(out, style.meta.Render(strings.Repeat("─", contentWidth)))
+			continue
+		}
 		out = append(out, style.chat.Render(padRight(line, contentWidth)))
 	}
 	return out
