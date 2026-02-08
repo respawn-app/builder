@@ -216,6 +216,34 @@ func TestBusyInputIsDisabled(t *testing.T) {
 	}
 }
 
+func TestViewShowsTerminalCursorForEditableInput(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 40
+	m.termHeight = 16
+	m.input = "hello world"
+
+	view := m.View()
+	if !strings.Contains(view, ansiShowCursor) {
+		t.Fatalf("expected terminal cursor show sequence in view: %q", view)
+	}
+	if !strings.Contains(view, "\x1b[14;14H") {
+		t.Fatalf("expected cursor position sequence in view: %q", view)
+	}
+}
+
+func TestViewHidesCursorWhenInputLocked(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 40
+	m.termHeight = 16
+	m.busy = true
+	m.input = "hello world"
+
+	view := m.View()
+	if !strings.Contains(view, ansiHideCursor) {
+		t.Fatalf("expected terminal cursor hide sequence in view: %q", view)
+	}
+}
+
 func TestRenderInputLinesUsesHorizontalBordersOnly(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 40

@@ -64,3 +64,16 @@ func TestRegistryRejectsUnknownToolDefinition(t *testing.T) {
 	}()
 	_ = NewRegistry(stubHandler{id: ID("unknown_tool")})
 }
+
+func TestCentralDefinitionsRequireAdditionalPropertiesFalse(t *testing.T) {
+	for id, def := range definitions {
+		var schema map[string]any
+		if err := json.Unmarshal(def.Schema, &schema); err != nil {
+			t.Fatalf("tool %s has invalid schema json: %v", id, err)
+		}
+		got, ok := schema["additionalProperties"].(bool)
+		if !ok || got {
+			t.Fatalf("tool %s must define additionalProperties=false, got %#v", id, schema["additionalProperties"])
+		}
+	}
+}
