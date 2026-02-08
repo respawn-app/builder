@@ -77,6 +77,23 @@ func TestDetailSnapshotIsStaticUntilRetoggle(t *testing.T) {
 	}
 }
 
+func TestClearOngoingAssistantMsgDropsPartialStream(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, StreamAssistantMsg{Delta: "partial"})
+	m = updateModel(t, m, ClearOngoingAssistantMsg{})
+	m = updateModel(t, m, StreamAssistantMsg{Delta: "final"})
+	m = updateModel(t, m, CommitAssistantMsg{})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	snapshot := m.View()
+	if strings.Contains(snapshot, "assistant: partial") {
+		t.Fatalf("snapshot should not contain discarded attempt delta: %q", snapshot)
+	}
+	if !strings.Contains(snapshot, "assistant: final") {
+		t.Fatalf("snapshot missing committed final assistant output: %q", snapshot)
+	}
+}
+
 func updateModel(t *testing.T, m Model, msg tea.Msg) Model {
 	t.Helper()
 

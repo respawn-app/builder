@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -43,6 +44,40 @@ func (t fakeTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	time.Sleep(t.delay)
 	out, _ := json.Marshal(map[string]any{"tool": t.name})
 	return tools.Result{CallID: c.ID, Name: c.Name, Output: out}, nil
+}
+
+type fakeStreamClient struct {
+	mu       sync.Mutex
+	attempts int
+	calls    []llm.Request
+}
+
+func (f *fakeStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
+	return llm.Response{}, errors.New("not implemented")
+}
+
+func (f *fakeStreamClient) GenerateStream(_ context.Context, req llm.Request, onDelta func(string)) (llm.Response, error) {
+	f.mu.Lock()
+	attempt := f.attempts
+	f.attempts++
+	f.calls = append(f.calls, req)
+	f.mu.Unlock()
+
+	switch attempt {
+	case 0:
+		if onDelta != nil {
+			onDelta("partial")
+		}
+		return llm.Response{}, errors.New("transient stream failure")
+	default:
+		if onDelta != nil {
+			onDelta("final")
+		}
+		return llm.Response{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "final"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		}, nil
+	}
 }
 
 func TestLocksAtFirstDispatch(t *testing.T) {
@@ -151,4 +186,69 @@ func TestParallelToolsReturnDeclaredOrder(t *testing.T) {
 		t.Fatalf("second request is missing assistant tool call metadata: %+v", secondReq.Messages)
 	}
 
+}
+
+func TestStreamingRetryResetsAttemptDeltas(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeStreamClient{}
+
+	var (
+		mu     sync.Mutex
+		events []Event
+	)
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: "noop"}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			events = append(events, evt)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "retry stream")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "final" {
+		t.Fatalf("assistant content = %q, want final", msg.Content)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	firstDelta := -1
+	reset := -1
+	secondDelta := -1
+	for i, evt := range events {
+		if evt.Kind == EventAssistantDelta && evt.AssistantDelta == "partial" && firstDelta == -1 {
+			firstDelta = i
+		}
+		if evt.Kind == EventAssistantDeltaReset && reset == -1 {
+			reset = i
+		}
+		if evt.Kind == EventAssistantDelta && evt.AssistantDelta == "final" && secondDelta == -1 {
+			secondDelta = i
+		}
+	}
+
+	if firstDelta == -1 {
+		t.Fatalf("missing first attempt delta event: %+v", events)
+	}
+	if reset == -1 {
+		t.Fatalf("missing reset event: %+v", events)
+	}
+	if secondDelta == -1 {
+		t.Fatalf("missing second attempt delta event: %+v", events)
+	}
+	if !(firstDelta < reset && reset < secondDelta) {
+		t.Fatalf("unexpected delta/reset ordering first=%d reset=%d second=%d", firstDelta, reset, secondDelta)
+	}
 }

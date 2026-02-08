@@ -8,10 +8,11 @@ import (
 type EventKind string
 
 const (
-	EventAssistantDelta    EventKind = "assistant_delta"
-	EventAssistantMessage  EventKind = "assistant_message"
-	EventToolCallStarted   EventKind = "tool_call_started"
-	EventToolCallCompleted EventKind = "tool_call_completed"
+	EventAssistantDelta      EventKind = "assistant_delta"
+	EventAssistantDeltaReset EventKind = "assistant_delta_reset"
+	EventAssistantMessage    EventKind = "assistant_message"
+	EventToolCallStarted     EventKind = "tool_call_started"
+	EventToolCallCompleted   EventKind = "tool_call_completed"
 )
 
 type Event struct {
