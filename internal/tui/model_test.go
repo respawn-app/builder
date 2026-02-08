@@ -5,12 +5,13 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestModeTogglePreservesOngoingScroll(t *testing.T) {
 	m := NewModel(WithPreviewLines(2))
 	m = updateModel(t, m, StreamAssistantMsg{Delta: "l1\nl2\nl3\nl4"})
-	m = updateModel(t, m, ScrollOngoingMsg{Delta: 1})
+	m = updateModel(t, m, ScrollOngoingMsg{Delta: -1})
 
 	if got := m.OngoingScroll(); got != 1 {
 		t.Fatalf("scroll before toggle = %d, want 1", got)
@@ -51,18 +52,9 @@ func TestOngoingShowsFullConversationContext(t *testing.T) {
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "second question"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "second answer"})
 
-	view := m.View()
-	if !strings.Contains(view, "❯ first question") {
+	view := plainTranscript(m.View())
+	if !containsInOrder(view, "❯", "first question", "❮", "first answer", "❯", "second question", "❮", "second answer") {
 		t.Fatalf("expected first user message in ongoing view, got %q", view)
-	}
-	if !strings.Contains(view, "❮ first answer") {
-		t.Fatalf("expected first assistant message in ongoing view, got %q", view)
-	}
-	if !strings.Contains(view, "❯ second question") {
-		t.Fatalf("expected second user message in ongoing view, got %q", view)
-	}
-	if !strings.Contains(view, "❮ second answer") {
-		t.Fatalf("expected second assistant message in ongoing view, got %q", view)
 	}
 }
 
@@ -72,30 +64,47 @@ func TestDetailSnapshotIsStaticUntilRetoggle(t *testing.T) {
 	m = updateModel(t, m, StreamAssistantMsg{Delta: "alpha"})
 	m = updateModel(t, m, ToggleModeMsg{})
 
-	snapshot := m.View()
-	if !strings.Contains(snapshot, "❮ alpha") {
+	snapshot := plainTranscript(m.View())
+	if !containsInOrder(snapshot, "❮", "alpha") {
 		t.Fatalf("detail snapshot missing assistant stream: %q", snapshot)
 	}
 
 	m = updateModel(t, m, StreamAssistantMsg{Delta: " beta"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool", Text: "ran"})
 
-	if got := m.View(); got != snapshot {
+	if got := plainTranscript(m.View()); got != snapshot {
 		t.Fatalf("detail snapshot changed while in detail mode:\ninitial=%q\ncurrent=%q", snapshot, got)
 	}
 
 	m = updateModel(t, m, ToggleModeMsg{})
 	m = updateModel(t, m, ToggleModeMsg{})
-	refreshed := m.View()
+	refreshed := plainTranscript(m.View())
 
 	if refreshed == snapshot {
 		t.Fatalf("detail snapshot did not refresh after mode roundtrip")
 	}
-	if !strings.Contains(refreshed, "❮ alpha beta") {
+	if !containsInOrder(refreshed, "❮", "alpha beta") {
 		t.Fatalf("refreshed snapshot missing full assistant stream: %q", refreshed)
 	}
-	if !strings.Contains(refreshed, "• ran") {
+	if !containsInOrder(refreshed, "•", "ran") {
 		t.Fatalf("refreshed snapshot missing new transcript entry: %q", refreshed)
+	}
+}
+
+func TestDetailDoesNotScrollOnIncomingMessages(t *testing.T) {
+	m := NewModel(WithPreviewLines(2))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u1"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u2"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a2"})
+	m = updateModel(t, m, ToggleModeMsg{})
+	m = updateModel(t, m, ScrollOngoingMsg{Delta: 1})
+
+	before := plainTranscript(m.View())
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a3"})
+	after := plainTranscript(m.View())
+	if after != before {
+		t.Fatalf("detail view changed while new messages arrived:\nbefore=%q\nafter=%q", before, after)
 	}
 }
 
@@ -107,11 +116,11 @@ func TestClearOngoingAssistantMsgDropsPartialStream(t *testing.T) {
 	m = updateModel(t, m, CommitAssistantMsg{})
 	m = updateModel(t, m, ToggleModeMsg{})
 
-	snapshot := m.View()
-	if strings.Contains(snapshot, "❮ partial") {
+	snapshot := plainTranscript(m.View())
+	if strings.Contains(snapshot, "partial") {
 		t.Fatalf("snapshot should not contain discarded attempt delta: %q", snapshot)
 	}
-	if !strings.Contains(snapshot, "❮ final") {
+	if !strings.Contains(snapshot, "final") {
 		t.Fatalf("snapshot missing committed final assistant output: %q", snapshot)
 	}
 }
@@ -121,9 +130,48 @@ func TestOngoingShowsCommittedAssistantAfterCommit(t *testing.T) {
 	m = updateModel(t, m, StreamAssistantMsg{Delta: "line1\nline2"})
 	m = updateModel(t, m, CommitAssistantMsg{})
 
-	view := m.View()
+	view := plainTranscript(m.View())
 	if !strings.Contains(view, "line1") || !strings.Contains(view, "line2") {
 		t.Fatalf("ongoing view should keep committed assistant visible, got %q", view)
+	}
+}
+
+func TestOngoingAutoFollowsWhenUserIsAtBottom(t *testing.T) {
+	m := NewModel(WithPreviewLines(2))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a2"})
+	if got, want := m.OngoingScroll(), m.maxOngoingScroll(); got != want {
+		t.Fatalf("expected to start at bottom, got %d want %d", got, want)
+	}
+
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a3"})
+	if got, want := m.OngoingScroll(), m.maxOngoingScroll(); got != want {
+		t.Fatalf("scroll after growth = %d, want bottom %d", got, want)
+	}
+	view := plainTranscript(m.View())
+	if !strings.Contains(view, "a3") {
+		t.Fatalf("expected latest line visible at bottom, got %q", view)
+	}
+}
+
+func TestOngoingDoesNotAutoFollowWhenUserScrolledUp(t *testing.T) {
+	m := NewModel(WithPreviewLines(2))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a2"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a3"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a4"})
+	if got, want := m.OngoingScroll(), m.maxOngoingScroll(); got != want {
+		t.Fatalf("expected to start at bottom, got %d want %d", got, want)
+	}
+
+	m = updateModel(t, m, ScrollOngoingMsg{Delta: -1})
+	pinned := m.OngoingScroll()
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a5"})
+	if got := m.OngoingScroll(); got != pinned {
+		t.Fatalf("scroll should stay pinned when user scrolled up, got %d want %d", got, pinned)
+	}
+	if m.OngoingScroll() == m.maxOngoingScroll() {
+		t.Fatalf("expected to remain above bottom after new message")
 	}
 }
 
@@ -135,11 +183,11 @@ func TestDetailUsesRequestedSymbolsAndDividers(t *testing.T) {
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result", Text: "result"})
 	m = updateModel(t, m, ToggleModeMsg{})
 
-	view := m.View()
-	if !strings.Contains(view, "❯ hello") {
+	view := plainTranscript(m.View())
+	if !containsInOrder(view, "❯", "hello") {
 		t.Fatalf("expected user symbol, got %q", view)
 	}
-	if !strings.Contains(view, "❮ hi") {
+	if !containsInOrder(view, "❮", "hi") {
 		t.Fatalf("expected assistant symbol, got %q", view)
 	}
 	if !strings.Contains(view, "•") || !strings.Contains(view, "call") || !strings.Contains(view, "result") {
@@ -156,8 +204,8 @@ func TestDetailShellToolUsesDollarPrefixAndKeepsSuccessColorRole(t *testing.T) {
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "/tmp"})
 	m = updateModel(t, m, ToggleModeMsg{})
 
-	view := m.View()
-	if !strings.Contains(view, "$ pwd") {
+	view := plainTranscript(m.View())
+	if !containsInOrder(view, "$", "pwd") {
 		t.Fatalf("expected shell tool to use $ prefix, got %q", view)
 	}
 	if strings.Contains(view, "• pwd") {
@@ -171,8 +219,8 @@ func TestDetailNonShellToolStillUsesDotPrefix(t *testing.T) {
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "ok"})
 	m = updateModel(t, m, ToggleModeMsg{})
 
-	view := m.View()
-	if !strings.Contains(view, "• ask_question") {
+	view := plainTranscript(m.View())
+	if !containsInOrder(view, "•", "ask_question") {
 		t.Fatalf("expected non-shell tool to keep dot prefix, got %q", view)
 	}
 }
@@ -196,6 +244,27 @@ func TestOngoingCompactsToolCallAndHidesThinking(t *testing.T) {
 	}
 	if strings.Contains(view, "/tmp") {
 		t.Fatalf("expected tool output to be omitted in ongoing view, got %q", view)
+	}
+}
+
+func TestOngoingDividersAreInsertedOnlyBetweenRoleGroups(t *testing.T) {
+	m := NewModel(WithPreviewLines(30))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u1"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u2"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a2"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: "pwd" + toolInlineMetaSep + "timeout: 5m"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "/tmp"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: "ls"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_error", Text: "failed"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u3"})
+
+	view := plainTranscript(m.View())
+	if got := strings.Count(view, strings.Repeat("─", 24)); got != 3 {
+		t.Fatalf("expected 3 dividers for 4 role groups, got %d in %q", got, view)
+	}
+	if !containsInOrder(view, "❯", "u1", "u2", "❮", "a1", "a2", "•", "pwd", "ls", "❯", "u3") {
+		t.Fatalf("expected grouped ongoing transcript order, got %q", view)
 	}
 }
 
@@ -374,4 +443,25 @@ func updateModel(t *testing.T, m Model, msg tea.Msg) Model {
 		t.Fatalf("unexpected model type %T", next)
 	}
 	return updated
+}
+
+func plainTranscript(view string) string {
+	stripped := ansi.Strip(view)
+	lines := strings.Split(stripped, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " ")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func containsInOrder(text string, parts ...string) bool {
+	offset := 0
+	for _, part := range parts {
+		idx := strings.Index(text[offset:], part)
+		if idx < 0 {
+			return false
+		}
+		offset += idx + len(part)
+	}
+	return true
 }
