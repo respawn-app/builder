@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+
+	"github.com/openai/openai-go/v3/responses"
 )
 
 type staticAuth struct{}
@@ -33,28 +35,42 @@ func TestBuildPayload_SerializesAssistantToolCalls(t *testing.T) {
 		t.Fatalf("build payload: %v", err)
 	}
 
-	if payload.Instructions != "sys" {
-		t.Fatalf("expected instructions to carry system prompt, got %q", payload.Instructions)
+	if !payload.Instructions.Valid() || payload.Instructions.Value != "sys" {
+		t.Fatalf("expected instructions to carry system prompt, got %+v", payload.Instructions)
 	}
-	if len(payload.Input) != 2 {
-		t.Fatalf("expected 2 input items, got %d", len(payload.Input))
+
+	jsonPayload := mustMarshalObject(t, payload)
+	inputRaw, ok := jsonPayload["input"].([]any)
+	if !ok {
+		t.Fatalf("expected input array, got %#v", jsonPayload["input"])
 	}
-	call := payload.Input[0]
-	if call.Type != "function_call" {
-		t.Fatalf("expected function_call input item, got %q", call.Type)
+	if len(inputRaw) != 2 {
+		t.Fatalf("expected 2 input items, got %d", len(inputRaw))
 	}
-	if call.CallID != "call-1" || call.Name != "bash" {
+
+	call, ok := inputRaw[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected function_call object, got %#v", inputRaw[0])
+	}
+	if call["type"] != "function_call" {
+		t.Fatalf("expected function_call input item, got %v", call["type"])
+	}
+	if call["call_id"] != "call-1" || call["name"] != "bash" {
 		t.Fatalf("unexpected function call item: %+v", call)
 	}
-	if call.Arguments != "{\"command\":\"pwd\"}" {
-		t.Fatalf("unexpected function call arguments: %s", call.Arguments)
+	if call["arguments"] != "{\"command\":\"pwd\"}" {
+		t.Fatalf("unexpected function call arguments: %v", call["arguments"])
 	}
-	result := payload.Input[1]
-	if result.Type != "function_call_output" || result.CallID != "call-1" {
+
+	result, ok := inputRaw[1].(map[string]any)
+	if !ok {
+		t.Fatalf("expected function_call_output object, got %#v", inputRaw[1])
+	}
+	if result["type"] != "function_call_output" || result["call_id"] != "call-1" {
 		t.Fatalf("unexpected function call output item: %+v", result)
 	}
-	if result.Output != "{}" {
-		t.Fatalf("unexpected function call output payload: %s", result.Output)
+	if result["output"] != "{}" {
+		t.Fatalf("unexpected function call output payload: %v", result["output"])
 	}
 }
 
@@ -66,10 +82,12 @@ func TestBuildResponsesInput_AssistantUsesOutputTextContent(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
 	}
-	if got := items[0].Content[0].Type; got != "input_text" {
+
+	jsonItems := mustMarshalItems(t, items)
+	if got := contentTypeAt(t, jsonItems[0]); got != "input_text" {
 		t.Fatalf("user content type=%q", got)
 	}
-	if got := items[1].Content[0].Type; got != "output_text" {
+	if got := contentTypeAt(t, jsonItems[1]); got != "output_text" {
 		t.Fatalf("assistant content type=%q", got)
 	}
 }
@@ -83,11 +101,10 @@ func TestBuildResponsesInput_NonAssistantRolesUseInputText(t *testing.T) {
 	if len(items) != 3 {
 		t.Fatalf("expected 3 items, got %d", len(items))
 	}
-	for i, item := range items {
-		if len(item.Content) != 1 {
-			t.Fatalf("item %d expected 1 content entry, got %d", i, len(item.Content))
-		}
-		if got := item.Content[0].Type; got != "input_text" {
+
+	jsonItems := mustMarshalItems(t, items)
+	for i, item := range jsonItems {
+		if got := contentTypeAt(t, item); got != "input_text" {
 			t.Fatalf("item %d content type=%q", i, got)
 		}
 	}
@@ -144,9 +161,6 @@ func TestBuildPayload_AppliesReasoningEffortForOpenAIModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build payload: %v", err)
 	}
-	if payload.Reasoning == nil {
-		t.Fatal("expected reasoning payload")
-	}
 	if payload.Reasoning.Effort != "xhigh" {
 		t.Fatalf("expected effort xhigh, got %q", payload.Reasoning.Effort)
 	}
@@ -161,7 +175,55 @@ func TestBuildPayload_SkipsReasoningEffortForUnknownModelFamily(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build payload: %v", err)
 	}
-	if payload.Reasoning != nil {
+	if payload.Reasoning.Effort != "" {
 		t.Fatalf("expected no reasoning payload for non-openai model, got %+v", payload.Reasoning)
 	}
+
+	jsonPayload := mustMarshalObject(t, payload)
+	if _, ok := jsonPayload["reasoning"]; ok {
+		t.Fatalf("expected reasoning to be omitted for non-openai model, got %+v", jsonPayload["reasoning"])
+	}
+}
+
+func mustMarshalObject(t *testing.T, payload responses.ResponseNewParams) map[string]any {
+	t.Helper()
+	b, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	return out
+}
+
+func mustMarshalItems(t *testing.T, items []responses.ResponseInputItemUnionParam) []map[string]any {
+	t.Helper()
+	b, err := json.Marshal(items)
+	if err != nil {
+		t.Fatalf("marshal input items: %v", err)
+	}
+	var out []map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatalf("unmarshal input items: %v", err)
+	}
+	return out
+}
+
+func contentTypeAt(t *testing.T, item map[string]any) string {
+	t.Helper()
+	parts, ok := item["content"].([]any)
+	if !ok || len(parts) == 0 {
+		t.Fatalf("expected content array, got %#v", item["content"])
+	}
+	part, ok := parts[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected first content object, got %#v", parts[0])
+	}
+	typ, ok := part["type"].(string)
+	if !ok {
+		t.Fatalf("expected content type string, got %#v", part["type"])
+	}
+	return typ
 }

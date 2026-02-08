@@ -258,6 +258,11 @@ This file records architecture and product decisions for the minimal terminal co
 74. **Event identity uses monotonic sequence IDs plus wall timestamp.**
 
 75. **Credential storage preference is OS secure store with MVP fallback.**
+
+76. **LLM provider wiring uses a provider factory seam.**
+   - Runtime/app code constructs `llm.Client` via provider selection, not provider-specific transport types.
+   - Provider inference defaults to OpenAI and can branch by model family (for example `claude*`).
+   - Anthropic/direct-provider support can be added behind this factory without refactoring runtime orchestration.
    - Preferred: OS keychain/secure credential store.
    - MVP fallback allowed: plain file if secure store integration is not feasible.
 

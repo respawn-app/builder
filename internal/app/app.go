@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -96,9 +97,16 @@ func Run(ctx context.Context, opts Options) error {
 		askBridge := newAskBridge()
 		askBroker.SetAskHandler(askBridge.Handle)
 
-		transport := llm.NewHTTPTransport(mgr)
-		transport.Client.Timeout = time.Duration(active.Timeouts.ModelRequestSeconds) * time.Second
-		client := llm.NewOpenAIClient(transport)
+		modelHTTPClient := &http.Client{Timeout: time.Duration(active.Timeouts.ModelRequestSeconds) * time.Second}
+		client, err := llm.NewProviderClient(llm.ProviderClientOptions{
+			Model:      active.Model,
+			Auth:       mgr,
+			HTTPClient: modelHTTPClient,
+		})
+		if err != nil {
+			_ = logger.Close()
+			return err
+		}
 
 		runtimeEvents := make(chan runtime.Event, 2048)
 		eng, err := runtime.New(store, client, toolRegistry, runtime.Config{
