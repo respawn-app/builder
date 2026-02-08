@@ -536,3 +536,97 @@ func TestRequestMessagesNeverContainANSIEscapes(t *testing.T) {
 		}
 	}
 }
+
+func TestReasoningSummaryVisibleAndEncryptedReasoningRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "first"},
+			Reasoning: []llm.ReasoningEntry{
+				{Role: "reasoning", Text: "Plan summary"},
+			},
+			ReasoningItems: []llm.ReasoningItem{
+				{ID: "rs_1", EncryptedContent: "enc_1"},
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "second"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "one"); err != nil {
+		t.Fatalf("first submit: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "two"); err != nil {
+		t.Fatalf("second submit: %v", err)
+	}
+
+	if len(client.calls) < 2 {
+		t.Fatalf("expected two model calls, got %d", len(client.calls))
+	}
+	secondReq := client.calls[1]
+	foundReasoningItem := false
+	for _, msg := range secondReq.Messages {
+		if msg.Role != llm.RoleAssistant || msg.Content != "first" {
+			continue
+		}
+		if len(msg.ReasoningItems) == 1 &&
+			msg.ReasoningItems[0].ID == "rs_1" &&
+			msg.ReasoningItems[0].EncryptedContent == "enc_1" {
+			foundReasoningItem = true
+		}
+	}
+	if !foundReasoningItem {
+		t.Fatalf("expected prior assistant message to carry encrypted reasoning item, got %+v", secondReq.Messages)
+	}
+	for _, msg := range secondReq.Messages {
+		if strings.Contains(msg.Content, "Plan summary") {
+			t.Fatalf("reasoning summary text should not be sent back to model input, found in %+v", secondReq.Messages)
+		}
+	}
+
+	snap := eng.ChatSnapshot()
+	sawSummary := false
+	for _, entry := range snap.Entries {
+		if entry.Role == "reasoning" && strings.Contains(entry.Text, "Plan summary") {
+			sawSummary = true
+			break
+		}
+	}
+	if !sawSummary {
+		t.Fatalf("expected reasoning summary in chat snapshot entries, got %+v", snap.Entries)
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	sawLocal := false
+	for _, evt := range events {
+		if evt.Kind != "local_entry" {
+			continue
+		}
+		var entry storedLocalEntry
+		if err := json.Unmarshal(evt.Payload, &entry); err != nil {
+			t.Fatalf("decode local_entry: %v", err)
+		}
+		if entry.Role == "reasoning" && entry.Text == "Plan summary" {
+			sawLocal = true
+		}
+	}
+	if !sawLocal {
+		t.Fatalf("expected persisted local_entry for reasoning summary, events=%+v", events)
+	}
+}

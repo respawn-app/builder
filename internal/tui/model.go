@@ -698,6 +698,8 @@ func rolePrefix(role string) string {
 		return "•"
 	case "tool_shell", "tool_shell_success", "tool_shell_error":
 		return "$"
+	case "reasoning", "thinking_trace":
+		return "…"
 	default:
 		return ""
 	}
@@ -722,6 +724,8 @@ func styleForRole(role string, p palette) lipgloss.Style {
 	case "tool_shell_error":
 		return p.toolError
 	case "system":
+		return p.system
+	case "reasoning", "thinking_trace":
 		return p.system
 	case "error":
 		return p.error

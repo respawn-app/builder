@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/openai/openai-go/v3/responses"
@@ -164,6 +165,12 @@ func TestBuildPayload_AppliesReasoningEffortForOpenAIModels(t *testing.T) {
 	if payload.Reasoning.Effort != "xhigh" {
 		t.Fatalf("expected effort xhigh, got %q", payload.Reasoning.Effort)
 	}
+	if payload.Reasoning.Summary != "concise" {
+		t.Fatalf("expected concise reasoning summary, got %q", payload.Reasoning.Summary)
+	}
+	if len(payload.Include) != 1 || payload.Include[0] != responses.ResponseIncludableReasoningEncryptedContent {
+		t.Fatalf("expected reasoning.encrypted_content include, got %+v", payload.Include)
+	}
 }
 
 func TestBuildPayload_SkipsReasoningEffortForUnknownModelFamily(t *testing.T) {
@@ -178,10 +185,43 @@ func TestBuildPayload_SkipsReasoningEffortForUnknownModelFamily(t *testing.T) {
 	if payload.Reasoning.Effort != "" {
 		t.Fatalf("expected no reasoning payload for non-openai model, got %+v", payload.Reasoning)
 	}
+	if len(payload.Include) != 0 {
+		t.Fatalf("expected no include list for non-openai model, got %+v", payload.Include)
+	}
 
 	jsonPayload := mustMarshalObject(t, payload)
 	if _, ok := jsonPayload["reasoning"]; ok {
 		t.Fatalf("expected reasoning to be omitted for non-openai model, got %+v", jsonPayload["reasoning"])
+	}
+}
+
+func TestBuildResponsesInput_AssistantReasoningItemsUseEncryptedContentOnly(t *testing.T) {
+	items := buildResponsesInput([]Message{
+		{
+			Role:    RoleAssistant,
+			Content: "a1",
+			ReasoningItems: []ReasoningItem{
+				{ID: "rs_1", EncryptedContent: "enc_1"},
+			},
+		},
+	})
+	if len(items) != 2 {
+		t.Fatalf("expected assistant message + reasoning item, got %d", len(items))
+	}
+
+	jsonItems := mustMarshalItems(t, items)
+	second := jsonItems[1]
+	if second["type"] != "reasoning" {
+		t.Fatalf("expected reasoning item type, got %#v", second["type"])
+	}
+	if second["id"] != "rs_1" {
+		t.Fatalf("expected reasoning id rs_1, got %#v", second["id"])
+	}
+	if second["encrypted_content"] != "enc_1" {
+		t.Fatalf("expected encrypted content enc_1, got %#v", second["encrypted_content"])
+	}
+	if text, ok := second["text"].(string); ok && strings.TrimSpace(text) != "" {
+		t.Fatalf("expected no reasoning text to be serialized, got %q", text)
 	}
 }
 
