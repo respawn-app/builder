@@ -31,6 +31,7 @@ type OAuthRefresher struct {
 	Factory       OAuthTokenSourceFactory
 	Now           func() time.Time
 	RefreshBefore time.Duration
+	Refresh       func(ctx context.Context, method Method) (Method, error)
 }
 
 func NewOAuthRefresher(factory OAuthTokenSourceFactory, now func() time.Time, refreshBefore time.Duration) *OAuthRefresher {
@@ -62,6 +63,13 @@ func (r *OAuthRefresher) MaybeRefresh(ctx context.Context, method Method) (Metho
 	expiry := method.OAuth.Expiry.UTC()
 	if expiry.IsZero() || expiry.After(now.Add(r.RefreshBefore)) {
 		return method, false, nil
+	}
+	if r.Refresh != nil {
+		updated, err := r.Refresh(ctx, method)
+		if err != nil {
+			return Method{}, false, err
+		}
+		return updated, true, nil
 	}
 	if r.Factory == nil {
 		return Method{}, false, ErrMissingOAuthFactory

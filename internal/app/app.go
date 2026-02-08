@@ -3,12 +3,10 @@ package app
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -42,12 +40,17 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 
+	oauthOpts := auth.OpenAIOAuthOptions{
+		Issuer:   firstNonEmpty(strings.TrimSpace(os.Getenv("BUILDER_OAUTH_ISSUER")), auth.DefaultOpenAIIssuer),
+		ClientID: firstNonEmpty(strings.TrimSpace(os.Getenv("BUILDER_OAUTH_CLIENT_ID")), auth.DefaultOpenAIClientID),
+	}
+
 	mgr := auth.NewManager(
 		auth.NewFileStore(config.GlobalAuthConfigPath(cfg)),
-		auth.NewOAuthRefresher(nil, time.Now, 5*time.Minute),
+		auth.NewOpenAIOAuthRefresher(oauthOpts, time.Now, 5*time.Minute),
 		time.Now,
 	)
-	if err := ensureAuthReady(ctx, mgr); err != nil {
+	if err := ensureAuthReady(ctx, mgr, oauthOpts); err != nil {
 		return err
 	}
 
@@ -81,7 +84,7 @@ func Run(ctx context.Context, opts Options) error {
 	return err
 }
 
-func ensureAuthReady(ctx context.Context, mgr *auth.Manager) error {
+func ensureAuthReady(ctx context.Context, mgr *auth.Manager, oauthOpts auth.OpenAIOAuthOptions) error {
 	for {
 		if err := mgr.EnsureStartupReady(ctx); err == nil {
 			return nil
@@ -103,7 +106,7 @@ func ensureAuthReady(ctx context.Context, mgr *auth.Manager) error {
 			fmt.Fprintf(os.Stderr, "Failed to configure API key from environment: %v\n", err)
 		}
 
-		choice, err := prompt("Choose auth method ([1] api_key, [2] oauth, [q] quit): ")
+		choice, err := prompt("AUTH REQUIRED. Choose method ([1] api_key, [2] oauth_device, [r] retry, [q] quit): ")
 		if err != nil {
 			return err
 		}
@@ -116,37 +119,23 @@ func ensureAuthReady(ctx context.Context, mgr *auth.Manager) error {
 			if _, err := mgr.SwitchMethod(ctx, auth.Method{Type: auth.MethodAPIKey, APIKey: &auth.APIKeyMethod{Key: strings.TrimSpace(key)}}, true); err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to save API key: %v\n", err)
 			}
-		case "2", "oauth":
-			access, err := prompt("Enter OAuth access token: ")
+		case "2", "oauth", "oauth_device":
+			method, err := auth.RunOpenAIDeviceCodeFlow(ctx, oauthOpts, func(code auth.DeviceCode) {
+				fmt.Fprintf(os.Stderr, "\nOpen %s and enter code: %s\nWaiting for authorization...\n\n", code.VerificationURL, code.UserCode)
+			})
 			if err != nil {
-				return err
-			}
-			refresh, err := prompt("Enter OAuth refresh token (optional): ")
-			if err != nil {
-				return err
-			}
-			expiresRaw, err := prompt("Enter OAuth expiry RFC3339 (optional): ")
-			if err != nil {
-				return err
-			}
-			exp := time.Now().Add(30 * time.Minute).UTC()
-			if strings.TrimSpace(expiresRaw) != "" {
-				parsed, parseErr := time.Parse(time.RFC3339, strings.TrimSpace(expiresRaw))
-				if parseErr != nil {
-					fmt.Fprintf(os.Stderr, "Invalid expiry format, using default 30m: %v\n", parseErr)
+				if errors.Is(err, auth.ErrDeviceCodeUnsupported) {
+					fmt.Fprintln(os.Stderr, "OAuth device flow is not enabled for this issuer.")
 				} else {
-					exp = parsed.UTC()
+					fmt.Fprintf(os.Stderr, "OAuth login failed: %v\n", err)
 				}
+				continue
 			}
-			_, err = mgr.SwitchMethod(ctx, auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{
-				AccessToken:  strings.TrimSpace(access),
-				RefreshToken: strings.TrimSpace(refresh),
-				TokenType:    "Bearer",
-				Expiry:       exp,
-			}}, true)
-			if err != nil {
+			if _, err := mgr.SwitchMethod(ctx, method, true); err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to save OAuth credentials: %v\n", err)
 			}
+		case "r", "retry":
+			continue
 		case "q", "quit", "":
 			return errors.New("startup blocked: auth not configured")
 		default:
@@ -169,10 +158,21 @@ func openOrCreateSession(containerDir, selectedID, workspaceRoot string) (*sessi
 		return session.Create(containerDir, containerName, workspaceRoot)
 	}
 
-	sort.Slice(summaries, func(i, j int) bool {
-		return summaries[i].UpdatedAt.After(summaries[j].UpdatedAt)
-	})
-	return session.Open(summaries[0].Path)
+	picked, err := runSessionPicker(summaries)
+	if err != nil {
+		return nil, err
+	}
+	if picked.Canceled {
+		return nil, errors.New("startup canceled by user")
+	}
+	if picked.CreateNew {
+		containerName := filepath.Base(containerDir)
+		return session.Create(containerDir, containerName, workspaceRoot)
+	}
+	if picked.Session == nil {
+		return nil, errors.New("no session selected")
+	}
+	return session.Open(picked.Session.Path)
 }
 
 func buildToolRegistry(workspaceRoot string) (*tools.Registry, *askquestion.Broker, error) {
@@ -226,10 +226,11 @@ func prompt(label string) (string, error) {
 	return strings.TrimRight(line, "\r\n"), nil
 }
 
-func dumpJSON(v any) string {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return "{}"
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
 	}
-	return string(b)
+	return ""
 }
