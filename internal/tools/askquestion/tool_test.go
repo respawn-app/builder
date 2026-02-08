@@ -2,15 +2,16 @@ package askquestion
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
-	"builder/internal/actions"
+	"builder/internal/tools"
 )
 
 func TestBrokerFIFOQueue(t *testing.T) {
-	b := NewBroker(actions.NewRegistry())
+	b := NewBroker()
 
 	ctx := context.Background()
 	type out struct {
@@ -66,7 +67,7 @@ func TestBrokerFIFOQueue(t *testing.T) {
 }
 
 func TestCanceledAskIsRemovedFromPendingQueue(t *testing.T) {
-	b := NewBroker(actions.NewRegistry())
+	b := NewBroker()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 
@@ -94,5 +95,27 @@ func TestCanceledAskIsRemovedFromPendingQueue(t *testing.T) {
 
 	if pending := b.Pending(); len(pending) != 0 {
 		t.Fatalf("pending queue should be empty after cancellation, got %+v", pending)
+	}
+}
+
+func TestToolCallRejectsActionField(t *testing.T) {
+	tl := NewTool(NewBroker())
+	result, err := tl.Call(context.Background(), tools.Call{
+		ID:    "call-1",
+		Name:  tools.ToolAskQuestion,
+		Input: json.RawMessage(`{"question":"pick one","action":{"id":"unsafe"}}`),
+	})
+	if err != nil {
+		t.Fatalf("unexpected call error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected error result, got %+v", result)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(result.Output, &payload); err != nil {
+		t.Fatalf("decode error output: %v", err)
+	}
+	if payload["error"] != `invalid input: field "action" is not allowed` {
+		t.Fatalf("expected action rejection message, got %q", payload["error"])
 	}
 }

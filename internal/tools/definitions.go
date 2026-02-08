@@ -5,7 +5,7 @@ import "encoding/json"
 var definitions = map[ID]Definition{
 	ToolBash: {
 		ID:          ToolBash,
-		Description: "Execute a shell command in non-TTY mode with merged stdout/stderr.",
+		Description: "Execute a shell command in the user's environment and device.",
 		Schema: json.RawMessage(`{
   "type": "object",
   "required": ["command"],
@@ -20,21 +20,21 @@ var definitions = map[ID]Definition{
     },
     "workdir": {
       "type": "string",
-      "description": "Optional working directory."
+      "description": "Optional working directory, otherwise - cwd."
     }
   }
 }`),
 	},
 	ToolPatch: {
 		ID:          ToolPatch,
-		Description: "Apply an atomic patch (add/update/move only). Delete blocks are forbidden.",
+		Description: "Apply a freeform patch. This tool does not support deletion, for deletion, use a shell tool, like trash (preferred if available) or rm",
 		Schema: json.RawMessage(`{
   "type": "object",
   "required": ["patch"],
   "properties": {
     "patch": {
       "type": "string",
-      "description": "Patch text in apply_patch format."
+      "description": "Patch text in freeform format."
     }
   }
 }`),
@@ -54,14 +54,6 @@ var definitions = map[ID]Definition{
       "type": "array",
       "description": "Optional predefined choices.",
       "items": {"type": "string"}
-    },
-    "action": {
-      "type": "object",
-      "description": "Optional typed action to execute after answer.",
-      "properties": {
-        "id": {"type": "string"},
-        "payload": {"type": "object"}
-      }
     }
   }
 }`),
