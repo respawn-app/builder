@@ -1,8 +1,6 @@
 package llm
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,6 +10,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	openai "github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/responses"
+	"github.com/openai/openai-go/v3/shared"
 )
 
 const (
@@ -70,48 +73,25 @@ func (t *HTTPTransport) Generate(ctx context.Context, request OpenAIRequest) (Op
 	if err != nil {
 		return OpenAIResponse{}, err
 	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return OpenAIResponse{}, fmt.Errorf("marshal openai responses request: %w", err)
-	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, t.requestURL(mode), bytes.NewReader(body))
-	if err != nil {
-		return OpenAIResponse{}, fmt.Errorf("create openai responses request: %w", err)
-	}
-	t.applyHeaders(httpReq, authHeader, mode, request.SessionID)
+	service := t.newResponseService(mode)
+	reqOpts := t.buildRequestOptions(authHeader, mode, request.SessionID)
+	var rawResp *http.Response
+	reqOpts = append(reqOpts, option.WithResponseInto(&rawResp))
 
-	resp, err := t.Client.Do(httpReq)
+	decoded, err := service.New(ctx, payload, reqOpts...)
 	if err != nil {
-		return OpenAIResponse{}, fmt.Errorf("openai responses request failed: %w", err)
+		return OpenAIResponse{}, mapOpenAIRequestError(err, rawResp, "openai responses request failed")
 	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return OpenAIResponse{}, fmt.Errorf("read openai responses response: %w", err)
-	}
-	if resp.StatusCode >= 300 {
-		return OpenAIResponse{}, &APIStatusError{
-			StatusCode: resp.StatusCode,
-			Body:       truncateError(respBody),
-		}
-	}
-
-	var decoded responsesEnvelope
-	if err := json.Unmarshal(respBody, &decoded); err != nil {
-		return OpenAIResponse{}, fmt.Errorf("decode openai responses payload: %w", err)
+	if decoded == nil {
+		return OpenAIResponse{}, fmt.Errorf("openai responses request failed: empty response")
 	}
 
 	assistantText, toolCalls := parseOutputItems(decoded.Output)
 	return OpenAIResponse{
 		AssistantText: assistantText,
 		ToolCalls:     toolCalls,
-		Usage: Usage{
-			InputTokens:  decoded.Usage.InputTokens,
-			OutputTokens: decoded.Usage.OutputTokens,
-			WindowTokens: t.ContextWindowTokens,
-		},
+		Usage:         usageFromSDK(decoded.Usage, t.ContextWindowTokens),
 	}, nil
 }
 
@@ -129,65 +109,24 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 	if err != nil {
 		return OpenAIResponse{}, err
 	}
-	payload.Stream = true
 
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return OpenAIResponse{}, fmt.Errorf("marshal openai stream request: %w", err)
-	}
+	service := t.newResponseService(mode)
+	reqOpts := t.buildRequestOptions(authHeader, mode, request.SessionID)
+	var rawResp *http.Response
+	reqOpts = append(reqOpts, option.WithResponseInto(&rawResp))
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, t.requestURL(mode), bytes.NewReader(body))
-	if err != nil {
-		return OpenAIResponse{}, fmt.Errorf("create openai stream request: %w", err)
-	}
-	t.applyHeaders(httpReq, authHeader, mode, request.SessionID)
-
-	resp, err := t.Client.Do(httpReq)
-	if err != nil {
-		return OpenAIResponse{}, fmt.Errorf("openai stream request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return OpenAIResponse{}, &APIStatusError{
-			StatusCode: resp.StatusCode,
-			Body:       truncateError(respBody),
-		}
-	}
-
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 1024), 1024*1024)
+	stream := service.NewStreaming(ctx, payload, reqOpts...)
+	defer stream.Close()
 
 	var assistantText strings.Builder
 	acc := newToolCallAccumulator()
 	usage := Usage{WindowTokens: t.ContextWindowTokens}
-	var completed *responsesEnvelope
+	var completed *responses.Response
 
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, ":") {
-			continue
-		}
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "[DONE]" {
-			break
-		}
-
-		var base responsesEventType
-		if err := json.Unmarshal([]byte(data), &base); err != nil {
-			return OpenAIResponse{}, fmt.Errorf("decode responses stream event: %w", err)
-		}
-
-		switch base.Type {
+	for stream.Next() {
+		evt := stream.Current()
+		switch evt.Type {
 		case "response.output_text.delta":
-			var evt responsesOutputTextDeltaEvent
-			if err := json.Unmarshal([]byte(data), &evt); err != nil {
-				return OpenAIResponse{}, fmt.Errorf("decode output text delta: %w", err)
-			}
 			if evt.Delta != "" {
 				assistantText.WriteString(evt.Delta)
 				if onDelta != nil {
@@ -195,33 +134,18 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 				}
 			}
 		case "response.output_item.added", "response.output_item.done":
-			var evt responsesOutputItemEvent
-			if err := json.Unmarshal([]byte(data), &evt); err != nil {
-				return OpenAIResponse{}, fmt.Errorf("decode output item event: %w", err)
-			}
 			acc.UpsertFromOutput(evt.Item)
 		case "response.function_call_arguments.delta":
-			var evt responsesFunctionCallArgsDeltaEvent
-			if err := json.Unmarshal([]byte(data), &evt); err != nil {
-				return OpenAIResponse{}, fmt.Errorf("decode function call args delta: %w", err)
-			}
 			acc.AppendArguments(evt.ItemID, evt.Delta)
 		case "response.function_call_arguments.done":
-			var evt responsesFunctionCallArgsDoneEvent
-			if err := json.Unmarshal([]byte(data), &evt); err != nil {
-				return OpenAIResponse{}, fmt.Errorf("decode function call args done: %w", err)
-			}
 			acc.SetArguments(evt.ItemID, evt.Arguments)
 		case "response.completed":
-			var evt responsesCompletedEvent
-			if err := json.Unmarshal([]byte(data), &evt); err != nil {
-				return OpenAIResponse{}, fmt.Errorf("decode completed event: %w", err)
-			}
-			completed = &evt.Response
+			e := evt.AsResponseCompleted()
+			completed = &e.Response
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return OpenAIResponse{}, fmt.Errorf("read responses stream events: %w", err)
+	if err := stream.Err(); err != nil {
+		return OpenAIResponse{}, mapOpenAIRequestError(err, rawResp, "read responses stream events")
 	}
 
 	finalText := assistantText.String()
@@ -229,8 +153,7 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 
 	if completed != nil {
 		if completed.Usage.InputTokens > 0 || completed.Usage.OutputTokens > 0 {
-			usage.InputTokens = completed.Usage.InputTokens
-			usage.OutputTokens = completed.Usage.OutputTokens
+			usage = usageFromSDK(completed.Usage, t.ContextWindowTokens)
 		}
 		parsedText, parsedCalls := parseOutputItems(completed.Output)
 		if finalText == "" {
@@ -291,67 +214,63 @@ func (t *HTTPTransport) applyHeaders(req *http.Request, authHeader string, mode 
 	}
 }
 
-func (t *HTTPTransport) buildPayload(request OpenAIRequest, mode openAIAuthMode) (responsesRequest, error) {
+func (t *HTTPTransport) buildPayload(request OpenAIRequest, mode openAIAuthMode) (responses.ResponseNewParams, error) {
 	input := buildResponsesInput(request.Messages)
 
-	tools := make([]responsesFunctionTool, 0, len(request.Tools))
+	tools := make([]responses.ToolUnionParam, 0, len(request.Tools))
 	for _, tool := range request.Tools {
 		if len(tool.Schema) > 0 && !json.Valid(tool.Schema) {
-			return responsesRequest{}, fmt.Errorf("invalid tool schema for %s", tool.Name)
+			return responses.ResponseNewParams{}, fmt.Errorf("invalid tool schema for %s", tool.Name)
 		}
-		params := json.RawMessage(`{"type":"object","properties":{}}`)
+		params := map[string]any{"type": "object", "properties": map[string]any{}}
 		if len(tool.Schema) > 0 {
-			params = append(json.RawMessage(nil), tool.Schema...)
+			if err := json.Unmarshal(tool.Schema, &params); err != nil {
+				return responses.ResponseNewParams{}, fmt.Errorf("invalid tool schema for %s", tool.Name)
+			}
 		}
-		tools = append(tools, responsesFunctionTool{
-			Type:        "function",
-			Name:        tool.Name,
-			Description: tool.Description,
-			Parameters:  params,
-		})
+		toolParam := responses.ToolParamOfFunction(tool.Name, params, true)
+		if desc := strings.TrimSpace(tool.Description); desc != "" && toolParam.OfFunction != nil {
+			toolParam.OfFunction.Description = openai.String(desc)
+		}
+		tools = append(tools, toolParam)
 	}
 
-	store := false
-	out := responsesRequest{
-		Model:        request.Model,
-		Input:        input,
-		Instructions: strings.TrimSpace(request.SystemPrompt),
-		Tools:        tools,
-		Store:        &store,
+	out := responses.ResponseNewParams{
+		Model: request.Model,
+		Store: openai.Bool(false),
 	}
-	if shouldApplyReasoningEffort(request.Model, request.ReasoningEffort) {
-		out.Reasoning = &responsesReasoning{Effort: request.ReasoningEffort}
+	if len(input) > 0 {
+		out.Input = responses.ResponseNewParamsInputUnion{OfInputItemList: input}
 	}
-	if request.MaxTokens > 0 && !mode.IsOAuth {
-		out.MaxOutputTokens = &request.MaxTokens
-	}
-	if request.Temperature != 0 && !mode.IsOAuth {
-		temp := request.Temperature
-		out.Temperature = &temp
+	if instructions := strings.TrimSpace(request.SystemPrompt); instructions != "" {
+		out.Instructions = openai.String(instructions)
 	}
 	if len(tools) > 0 {
-		parallel := true
-		out.ParallelToolCalls = &parallel
+		out.Tools = tools
+		out.ParallelToolCalls = openai.Bool(true)
 	}
+	if shouldApplyReasoningEffort(request.Model, request.ReasoningEffort) {
+		out.Reasoning = shared.ReasoningParam{Effort: shared.ReasoningEffort(strings.TrimSpace(request.ReasoningEffort))}
+	}
+	if request.MaxTokens > 0 && !mode.IsOAuth {
+		out.MaxOutputTokens = openai.Int(int64(request.MaxTokens))
+	}
+	if request.Temperature != 0 && !mode.IsOAuth {
+		out.Temperature = openai.Float(request.Temperature)
+	}
+
 	return out, nil
 }
 
-func buildResponsesInput(messages []Message) []responsesInputItem {
-	items := make([]responsesInputItem, 0, len(messages))
+func buildResponsesInput(messages []Message) []responses.ResponseInputItemUnionParam {
+	var items []responses.ResponseInputItemUnionParam
 	for _, msg := range messages {
 		switch msg.Role {
 		case RoleTool:
 			if strings.TrimSpace(msg.ToolCallID) == "" {
-				if strings.TrimSpace(msg.Content) != "" {
-					items = append(items, messageInput(string(msg.Role), msg.Content))
-				}
 				continue
 			}
-			items = append(items, responsesInputItem{
-				Type:   "function_call_output",
-				CallID: msg.ToolCallID,
-				Output: msg.Content,
-			})
+			items = append(items, responses.ResponseInputItemParamOfFunctionCallOutput(msg.ToolCallID, msg.Content))
 		case RoleAssistant:
 			if strings.TrimSpace(msg.Content) != "" {
 				items = append(items, messageInput(string(msg.Role), msg.Content))
@@ -361,12 +280,7 @@ func buildResponsesInput(messages []Message) []responsesInputItem {
 				if callID == "" {
 					continue
 				}
-				items = append(items, responsesInputItem{
-					Type:      "function_call",
-					CallID:    callID,
-					Name:      tc.Name,
-					Arguments: normalizeToolArguments(string(tc.Input)),
-				})
+				items = append(items, responses.ResponseInputItemParamOfFunctionCall(normalizeToolArguments(string(tc.Input)), callID, tc.Name))
 			}
 		default:
 			if strings.TrimSpace(msg.Content) == "" {
@@ -378,43 +292,44 @@ func buildResponsesInput(messages []Message) []responsesInputItem {
 	return items
 }
 
-func messageInput(role, text string) responsesInputItem {
-	contentType := "input_text"
-	if strings.TrimSpace(role) == string(RoleAssistant) {
-		contentType = "output_text"
-	}
-	return responsesInputItem{
-		Type: "message",
-		Role: role,
-		Content: []responsesInputContent{
+func messageInput(role, text string) responses.ResponseInputItemUnionParam {
+	role = strings.TrimSpace(role)
+	if role == string(RoleAssistant) {
+		content := []responses.ResponseOutputMessageContentUnionParam{
 			{
-				Type: contentType,
-				Text: text,
+				OfOutputText: &responses.ResponseOutputTextParam{
+					Annotations: []responses.ResponseOutputTextAnnotationUnionParam{},
+					Text:        text,
+				},
 			},
-		},
+		}
+		return responses.ResponseInputItemParamOfOutputMessage(content, "", responses.ResponseOutputMessageStatusCompleted)
 	}
+
+	inputRole := string(RoleUser)
+	switch role {
+	case string(RoleSystem), string(RoleDeveloper), string(RoleUser):
+		inputRole = role
+	}
+	content := responses.ResponseInputMessageContentListParam{
+		responses.ResponseInputContentParamOfInputText(text),
+	}
+	return responses.ResponseInputItemParamOfInputMessage(content, inputRole)
 }
 
-func parseOutputItems(items []responsesOutputItem) (string, []ToolCall) {
+func parseOutputItems(items []responses.ResponseOutputItemUnion) (string, []ToolCall) {
 	textParts := make([]string, 0, len(items))
 	toolCalls := make([]ToolCall, 0, len(items))
 	for _, item := range items {
 		switch item.Type {
 		case "message":
-			if item.Role != "" && item.Role != string(RoleAssistant) {
+			if string(item.Role) != "" && string(item.Role) != string(RoleAssistant) {
 				continue
 			}
 			for _, part := range item.Content {
 				if part.Type == "output_text" || part.Type == "text" {
 					textParts = append(textParts, part.Text)
 				}
-			}
-			if item.Text != "" {
-				textParts = append(textParts, item.Text)
-			}
-		case "output_text":
-			if item.Text != "" {
-				textParts = append(textParts, item.Text)
 			}
 		case "function_call":
 			callID := firstNonEmpty(strings.TrimSpace(item.CallID), strings.TrimSpace(item.ID))
@@ -424,102 +339,11 @@ func parseOutputItems(items []responsesOutputItem) (string, []ToolCall) {
 			toolCalls = append(toolCalls, ToolCall{
 				ID:    callID,
 				Name:  item.Name,
-				Input: normalizeToolInput(argumentsFromRaw(item.Arguments)),
+				Input: normalizeToolInput(item.Arguments),
 			})
 		}
 	}
 	return strings.Join(textParts, ""), toolCalls
-}
-
-type responsesRequest struct {
-	Model             string                  `json:"model"`
-	Input             []responsesInputItem    `json:"input,omitempty"`
-	Instructions      string                  `json:"instructions,omitempty"`
-	Tools             []responsesFunctionTool `json:"tools,omitempty"`
-	Reasoning         *responsesReasoning     `json:"reasoning,omitempty"`
-	Temperature       *float64                `json:"temperature,omitempty"`
-	MaxOutputTokens   *int                    `json:"max_output_tokens,omitempty"`
-	ParallelToolCalls *bool                   `json:"parallel_tool_calls,omitempty"`
-	Store             *bool                   `json:"store,omitempty"`
-	Stream            bool                    `json:"stream,omitempty"`
-}
-
-type responsesReasoning struct {
-	Effort string `json:"effort,omitempty"`
-}
-
-type responsesFunctionTool struct {
-	Type        string          `json:"type"`
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	Parameters  json.RawMessage `json:"parameters"`
-}
-
-type responsesInputItem struct {
-	Type      string                  `json:"type,omitempty"`
-	Role      string                  `json:"role,omitempty"`
-	Content   []responsesInputContent `json:"content,omitempty"`
-	CallID    string                  `json:"call_id,omitempty"`
-	Name      string                  `json:"name,omitempty"`
-	Arguments string                  `json:"arguments,omitempty"`
-	Output    string                  `json:"output,omitempty"`
-}
-
-type responsesInputContent struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
-}
-
-type responsesEnvelope struct {
-	Output []responsesOutputItem `json:"output"`
-	Usage  responsesUsage        `json:"usage"`
-}
-
-type responsesUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-}
-
-type responsesOutputItem struct {
-	ID        string                   `json:"id,omitempty"`
-	Type      string                   `json:"type"`
-	Role      string                   `json:"role,omitempty"`
-	Name      string                   `json:"name,omitempty"`
-	CallID    string                   `json:"call_id,omitempty"`
-	Arguments json.RawMessage          `json:"arguments,omitempty"`
-	Content   []responsesOutputContent `json:"content,omitempty"`
-	Text      string                   `json:"text,omitempty"`
-}
-
-type responsesOutputContent struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
-}
-
-type responsesEventType struct {
-	Type string `json:"type"`
-}
-
-type responsesOutputTextDeltaEvent struct {
-	Delta string `json:"delta"`
-}
-
-type responsesOutputItemEvent struct {
-	Item responsesOutputItem `json:"item"`
-}
-
-type responsesFunctionCallArgsDeltaEvent struct {
-	ItemID string `json:"item_id"`
-	Delta  string `json:"delta"`
-}
-
-type responsesFunctionCallArgsDoneEvent struct {
-	ItemID    string `json:"item_id"`
-	Arguments string `json:"arguments"`
-}
-
-type responsesCompletedEvent struct {
-	Response responsesEnvelope `json:"response"`
 }
 
 type toolCallAccumulator struct {
@@ -555,7 +379,7 @@ func (a *toolCallAccumulator) ensure(key string) *toolCallState {
 	return s
 }
 
-func (a *toolCallAccumulator) UpsertFromOutput(item responsesOutputItem) {
+func (a *toolCallAccumulator) UpsertFromOutput(item responses.ResponseOutputItemUnion) {
 	if item.Type != "function_call" {
 		return
 	}
@@ -576,7 +400,7 @@ func (a *toolCallAccumulator) UpsertFromOutput(item responsesOutputItem) {
 	if item.ID != "" {
 		a.itemToKey[item.ID] = key
 	}
-	if args := strings.TrimSpace(argumentsFromRaw(item.Arguments)); args != "" {
+	if args := strings.TrimSpace(item.Arguments); args != "" {
 		state.Args.Reset()
 		state.Args.WriteString(args)
 	}
@@ -641,19 +465,6 @@ func (a *toolCallAccumulator) ToToolCalls() []ToolCall {
 	return out
 }
 
-func argumentsFromRaw(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	if len(raw) > 0 && raw[0] == '"' {
-		var s string
-		if err := json.Unmarshal(raw, &s); err == nil {
-			return s
-		}
-	}
-	return string(raw)
-}
-
 func normalizeToolArguments(arguments string) string {
 	arguments = strings.TrimSpace(arguments)
 	if arguments == "" {
@@ -705,4 +516,72 @@ func truncateError(b []byte) string {
 		return "<empty error body>"
 	}
 	return s
+}
+
+func (t *HTTPTransport) newResponseService(mode openAIAuthMode) responses.ResponseService {
+	return responses.NewResponseService(
+		option.WithBaseURL(t.serviceBaseURL(mode)),
+		option.WithHTTPClient(t.Client),
+		option.WithMaxRetries(0),
+	)
+}
+
+func (t *HTTPTransport) serviceBaseURL(mode openAIAuthMode) string {
+	if mode.IsOAuth {
+		return strings.TrimSuffix(codexResponsesEndpoint, "/responses")
+	}
+	base := strings.TrimSuffix(t.BaseURL, "/")
+	if base == "" {
+		base = defaultOpenAIBaseURL
+	}
+	return base
+}
+
+func (t *HTTPTransport) buildRequestOptions(authHeader string, mode openAIAuthMode, sessionID string) []option.RequestOption {
+	opts := []option.RequestOption{
+		option.WithHeader("Authorization", authHeader),
+	}
+	if mode.IsOAuth {
+		opts = append(opts,
+			option.WithHeader("originator", defaultOriginator),
+			option.WithHeader("User-Agent", defaultUserAgent),
+		)
+		if strings.TrimSpace(sessionID) != "" {
+			opts = append(opts, option.WithHeader("session_id", sessionID))
+		}
+		if mode.AccountID != "" {
+			opts = append(opts, option.WithHeader("ChatGPT-Account-Id", mode.AccountID))
+		}
+	}
+	return opts
+}
+
+func mapOpenAIRequestError(err error, rawResp *http.Response, prefix string) error {
+	if rawResp != nil && rawResp.StatusCode >= 300 {
+		return apiStatusErrorFromResponse(rawResp)
+	}
+	if err == nil {
+		return fmt.Errorf("%s: unknown error", prefix)
+	}
+	return fmt.Errorf("%s: %w", prefix, err)
+}
+
+func apiStatusErrorFromResponse(rawResp *http.Response) error {
+	if rawResp == nil {
+		return &APIStatusError{StatusCode: 0, Body: "<empty error body>"}
+	}
+	defer rawResp.Body.Close()
+	body, _ := io.ReadAll(rawResp.Body)
+	return &APIStatusError{
+		StatusCode: rawResp.StatusCode,
+		Body:       truncateError(body),
+	}
+}
+
+func usageFromSDK(usage responses.ResponseUsage, window int) Usage {
+	return Usage{
+		InputTokens:  int(usage.InputTokens),
+		OutputTokens: int(usage.OutputTokens),
+		WindowTokens: window,
+	}
 }
