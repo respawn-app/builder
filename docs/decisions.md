@@ -299,3 +299,115 @@ This file records architecture and product decisions for the minimal terminal co
 87. **Large output truncation payload is standardized.**
    - Apply threshold per tool call total.
    - On overflow, send head+tail plus truncation metadata.
+
+88. **Typed action registry ships with scaffolding only in v1.**
+   - No built-in actions are committed yet (TBD after MVP).
+
+89. **Action payload schemas have no explicit versioning in v1.**
+
+90. **Unknown action IDs crash the CLI in all build modes.**
+   - No dev/prod behavior split.
+
+91. **Model seed remains unset by default.**
+
+92. **Temperature is fixed to `1`.**
+
+93. **Max output tokens are unlimited by default.**
+
+94. **Model/API errors in `ongoing` use concise single-line surfacing.**
+   - Full detail remains available in `detail` snapshot/logs.
+
+95. **Model-step retry policy is exponential with 5 retries.**
+   - Retry delays: `1s, 2s, 4s, 8s, 16s`.
+   - This supersedes Decision 39.
+
+96. **Startup session list is scrollable with no cap.**
+   - This supersedes any earlier implied display limit assumptions.
+
+97. **Workspace-bound patch path validation resolves real paths.**
+   - Use `realpath`-style resolution before enforcing workspace root boundary.
+
+98. **`bash` environment policy is inherit-plus-hints.**
+   - Inherit full parent environment.
+   - Add non-interactive environment hints.
+
+99. **`bash` command envelope is direct shell invocation only.**
+   - No runtime command parsing/AST preprocessing.
+
+100. **`AGENTS.md` injection uses structured fenced formatting with source path.**
+
+101. **Event records have no integrity hash chain in MVP.**
+
+102. **Tool call identity prefers provider-native IDs.**
+   - If missing, synthesize UUID.
+   - Provider IDs are hidden in UI but stored in history.
+   - Across retries, ID collisions overwrite prior-attempt IDs.
+
+103. **`patch` tool has no timeout and no automatic retries.**
+
+104. **Patch success persistence stores patch input plus apply-result metadata.**
+
+105. **Resuming a session does not re-inject `AGENTS.md`.**
+
+106. **Session lock-in moment is first model request dispatch.**
+
+107. **Resumed sessions keep locked setup immutable.**
+   - No editing of locked model/tools/prompt settings on resume.
+
+108. **`ongoing` preview sizing is fixed.**
+   - Command preview max: `80` chars.
+   - File preview max: `60` chars.
+   - Overflow wraps softly (multi-line allowed).
+
+109. **No timestamps are shown in UI.**
+
+110. **`ongoing` line prefix is `> `.**
+
+111. **`detail` transcript rendering is a flat continuous stream.**
+   - No grouped sections per step.
+
+112. **Streaming paint cadence is 16ms with token coalescing per flush tick.**
+
+113. **Tool output is not streamed live.**
+   - Show running status; reveal tool output on completion.
+
+114. **Assistant text streams in `ongoing` mode.**
+
+115. **Reasoning-like fields are shown only if explicitly exposed by provider/runtime.**
+
+116. **Step-end markers are shown in `detail` only.**
+   - Compact marker format.
+
+117. **`detail` mode is non-streaming snapshot view.**
+   - On mid-step entry, show latest completed snapshot only.
+   - This supersedes earlier streaming-oriented detail assumptions in Decisions 11-13.
+
+118. **`detail` snapshot behavior is strictly static while open.**
+   - No live indicator/counter.
+   - No in-place refresh action/key.
+
+119. **Switching from `detail` to `ongoing` restores prior ongoing scroll position.**
+
+120. **`detail` snapshot scope is full session transcript up to latest completed step.**
+
+121. **Mode-toggle events are UI-ephemeral and not persisted.**
+
+122. **OAuth tokens auto-refresh silently during runtime.**
+   - Surface failure only if refresh fails.
+
+123. **Global auth method can be switched only while idle.**
+
+124. **If no sessions exist on startup, go directly to new-session setup.**
+
+125. **`ask_question` source origin is not labeled in UI.**
+   - Model/runtime prompts share unified appearance.
+
+126. **`ask_question` answers are persisted as full text.**
+
+127. **Crash recovery flow is bifurcated by in-flight state.**
+   - If crash happened mid-step, resume via interrupt flow (`User interrupted you` then explicit user input).
+   - Otherwise restore normal state directly.
+
+128. **Tool results persist at tool-completion boundary.**
+
+129. **Startup auth failure uses a blocking error screen with retry.**
