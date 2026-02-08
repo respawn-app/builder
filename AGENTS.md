@@ -9,7 +9,32 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
 
 ## Repository Layout
 
-<No layout yet, edit this when defined>
+- `cmd/builder/main.go`
+  - CLI entrypoint for launching the Bubble Tea app.
+- `internal/app`
+  - Startup orchestration, auth gating, session selection, and top-level UI composition.
+- `internal/runtime`
+  - Agent step loop, retries, transcript assembly, tool orchestration, lock handling, interrupts.
+- `internal/session`
+  - Session persistence (`session.json`, `events.jsonl`) and resume/list primitives.
+- `internal/tools`
+  - Tool contracts and concrete tools (`shell`, `patch`, `ask_question`).
+- `internal/llm`
+  - Model-facing contracts and OpenAI transport/client adapters.
+- `internal/auth`
+  - Global auth state, method switching policy, startup gate, OAuth refresh plumbing.
+- `internal/tui`
+  - Mode-specific UI behavior (`ongoing`/`detail`) and rendering helpers.
+- `internal/config`
+  - Persistence root/workspace container resolution and app-level paths.
+- `internal/actions`
+  - Typed action registry scaffold for `ask_question` post-answer hooks.
+- `prompts`
+  - Embedded system prompt source file (`system_prompt.md`).
+- `internal/tools/definitions.go`
+  - Centralized compile-time tool interface declarations (name, descriptions, JSON schemas).
+- `~/.builder/config.toml`
+  - Home settings file (auto-created on first run) for model, thinking level, tool toggles, timeouts, and theme.
 
 ## Engineering Principles
 
@@ -40,9 +65,6 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
 ## Important rules:
 
 - All business logic covered by tests. Production code is written to be unit-testable. Don't ask to write or run tests
-- Before handing off to the user after code changes, rebuild the binary (an make sure it builds) and make sure tests are written and green. Don't ask for confirmation to write tests and run checks.
+- Before handing off to the user after code changes, rebuild the binary to `./bin/builder` and make sure tests are written and green. Don't ask for confirmation to write tests and run checks.
 - `docs/decisions.md` is the source of truth for locked product and architecture decisions.
 - Keep this file up-to-date and comprehensive. Avoid adding info that can become outdated, otherwise keep this as project guidelines, rules, and learnings for future team members. Persist info that should be preserved here.
-
-
-
