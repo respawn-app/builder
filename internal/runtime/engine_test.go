@@ -159,6 +159,95 @@ func TestLocksAtFirstDispatch(t *testing.T) {
 	}
 }
 
+func TestSubmitUserMessageSurfacesInFlightClearFailure(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	sessionDir := store.Dir()
+	defer func() {
+		_ = os.Chmod(sessionDir, 0o755)
+	}()
+
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	var (
+		mu         sync.Mutex
+		events     []Event
+		chmodDone  bool
+		chmodError error
+	)
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			events = append(events, evt)
+			shouldLockDir := evt.Kind == EventAssistantMessage && !chmodDone
+			if shouldLockDir {
+				chmodDone = true
+			}
+			mu.Unlock()
+			if shouldLockDir {
+				if chmodErr := os.Chmod(sessionDir, 0o555); chmodErr != nil {
+					mu.Lock()
+					if chmodError == nil {
+						chmodError = chmodErr
+					}
+					mu.Unlock()
+				}
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "hi")
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if err == nil {
+		t.Fatal("expected in-flight clear failure")
+	}
+	if !strings.Contains(err.Error(), "mark in-flight false") {
+		t.Fatalf("expected mark in-flight clear error, got %v", err)
+	}
+
+	mu.Lock()
+	gotChmodDone := chmodDone
+	gotChmodErr := chmodError
+	seenClearFailureEvent := false
+	for _, evt := range events {
+		if evt.Kind == EventInFlightClearFailed && strings.Contains(evt.Error, "mark in-flight false") {
+			seenClearFailureEvent = true
+			break
+		}
+	}
+	mu.Unlock()
+
+	if !gotChmodDone {
+		t.Fatal("expected permission flip hook to run")
+	}
+	if gotChmodErr != nil {
+		t.Fatalf("chmod hook failed: %v", gotChmodErr)
+	}
+	if !seenClearFailureEvent {
+		t.Fatalf("expected %s event, got %+v", EventInFlightClearFailed, events)
+	}
+
+	reopened, openErr := session.Open(sessionDir)
+	if openErr != nil {
+		t.Fatalf("re-open session store: %v", openErr)
+	}
+	if !reopened.Meta().InFlightStep {
+		t.Fatalf("expected persisted in-flight flag to remain true after clear failure")
+	}
+}
+
 func TestParallelToolsReturnDeclaredOrder(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

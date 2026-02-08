@@ -126,7 +126,7 @@ func (e *Engine) Interrupt() error {
 	return nil
 }
 
-func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (llm.Message, error) {
+func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (assistant llm.Message, err error) {
 	if text == "" {
 		return llm.Message{}, errors.New("empty message")
 	}
@@ -144,28 +144,33 @@ func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (llm.Messag
 	stepCtx, cancel := context.WithCancel(ctx)
 	e.cancelCurrent = cancel
 	e.mu.Unlock()
+	stepID := ""
 	defer func() {
 		e.mu.Lock()
 		e.busy = false
 		e.cancelCurrent = nil
 		e.mu.Unlock()
-		_ = e.store.MarkInFlight(false)
+		if clearErr := e.store.MarkInFlight(false); clearErr != nil {
+			wrapped := fmt.Errorf("mark in-flight false: %w", clearErr)
+			e.emit(Event{Kind: EventInFlightClearFailed, StepID: stepID, Error: wrapped.Error()})
+			err = errors.Join(err, wrapped)
+		}
 	}()
 
-	if err := e.store.MarkInFlight(true); err != nil {
+	if err = e.store.MarkInFlight(true); err != nil {
 		return llm.Message{}, err
 	}
 
-	stepID := uuid.NewString()
+	stepID = uuid.NewString()
 
-	if err := e.injectAgentsIfNeeded(stepID); err != nil {
+	if err = e.injectAgentsIfNeeded(stepID); err != nil {
 		return llm.Message{}, err
 	}
-	if err := e.appendUserMessage(stepID, text); err != nil {
+	if err = e.appendUserMessage(stepID, text); err != nil {
 		return llm.Message{}, err
 	}
 
-	assistant, err := e.runStepLoop(stepCtx, stepID)
+	assistant, err = e.runStepLoop(stepCtx, stepID)
 	if err != nil {
 		return llm.Message{}, err
 	}

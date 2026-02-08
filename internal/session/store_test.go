@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,5 +94,35 @@ func TestLockedContractPersistenceDoesNotIncludePromptOrToolSchema(t *testing.T)
 	}
 	if strings.Contains(text, "system_prompt") {
 		t.Fatalf("session metadata must not persist system_prompt: %s", text)
+	}
+}
+
+func TestReadEventsHandlesLargeJSONLines(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	const payloadSize = 128 * 1024
+	large := strings.Repeat("x", payloadSize)
+	if _, err := store.AppendEvent("step1", "message", map[string]any{"blob": large}); err != nil {
+		t.Fatalf("append large event: %v", err)
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events len = %d, want 1", len(events))
+	}
+
+	var payload map[string]string
+	if err := json.Unmarshal(events[0].Payload, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if got := len(payload["blob"]); got != payloadSize {
+		t.Fatalf("payload blob size = %d, want %d", got, payloadSize)
 	}
 }
