@@ -247,6 +247,24 @@ func TestOngoingCompactsToolCallAndHidesThinking(t *testing.T) {
 	}
 }
 
+func TestDetailShowsReasoningSummaryAsSeparateEntry(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "reasoning", Text: "Plan summary"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a"})
+
+	ongoing := plainTranscript(m.View())
+	if strings.Contains(ongoing, "Plan summary") {
+		t.Fatalf("expected reasoning hidden in ongoing view, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detail := plainTranscript(m.View())
+	if !containsInOrder(detail, "…", "Plan summary") {
+		t.Fatalf("expected reasoning summary entry in detail view, got %q", detail)
+	}
+}
+
 func TestOngoingDividersAreInsertedOnlyBetweenRoleGroups(t *testing.T) {
 	m := NewModel(WithPreviewLines(30))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u1"})

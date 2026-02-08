@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,8 +15,8 @@ import (
 	"builder/internal/session"
 	"builder/internal/tools"
 	"builder/prompts"
-	"github.com/google/uuid"
 	xansi "github.com/charmbracelet/x/ansi"
+	"github.com/google/uuid"
 )
 
 const (
@@ -23,7 +24,7 @@ const (
 	handoffInstruction       = "Context threshold reached. Provide a concise handoff summary with next steps. Do not call tools."
 	agentsFileName           = "AGENTS.md"
 	agentsGlobalDirName      = ".builder"
-	agentsInjectedHeader     = "# AGENTS.md auto-injection"
+	agentsInjectedHeader     = "# AGENTS.md content:"
 	agentsInjectedFenceLabel = "md"
 )
 
@@ -204,7 +205,13 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 		if len(resp.ToolCalls) > 0 {
 			assistantMsg.ToolCalls = append([]llm.ToolCall(nil), resp.ToolCalls...)
 		}
+		if len(resp.ReasoningItems) > 0 && len(assistantMsg.ReasoningItems) == 0 {
+			assistantMsg.ReasoningItems = append([]llm.ReasoningItem(nil), resp.ReasoningItems...)
+		}
 		if err := e.appendAssistantMessage(stepID, assistantMsg); err != nil {
+			return llm.Message{}, err
+		}
+		if err := e.appendReasoningEntries(stepID, resp.Reasoning); err != nil {
 			return llm.Message{}, err
 		}
 
@@ -226,8 +233,8 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 			if e.handoffPending && !e.handoffDone {
 				e.handoffDone = true
 			}
-			e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: resp.Assistant})
-			return resp.Assistant, nil
+			e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: assistantMsg})
+			return assistantMsg, nil
 		}
 
 		results, err := e.executeToolCalls(ctx, stepID, resp.ToolCalls)
@@ -449,6 +456,31 @@ func (e *Engine) appendAssistantMessage(stepID string, msg llm.Message) error {
 	return e.appendMessage(stepID, msg)
 }
 
+func (e *Engine) appendReasoningEntries(stepID string, entries []llm.ReasoningEntry) error {
+	for _, entry := range entries {
+		if err := e.appendPersistedLocalEntry(stepID, entry.Role, entry.Text); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (e *Engine) appendPersistedLocalEntry(stepID, role, text string) error {
+	role = strings.TrimSpace(role)
+	if role == "" || strings.TrimSpace(text) == "" {
+		return nil
+	}
+	e.chat.appendLocalEntry(role, text)
+	_, err := e.store.AppendEvent(stepID, "local_entry", storedLocalEntry{
+		Role: role,
+		Text: text,
+	})
+	if err == nil {
+		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
+	}
+	return err
+}
+
 func (e *Engine) appendMessage(stepID string, msg llm.Message) error {
 	e.chat.appendMessage(msg)
 	_, err := e.store.AppendEvent(stepID, "message", msg)
@@ -541,6 +573,12 @@ func (e *Engine) restoreMessages() error {
 			if err := e.chat.restoreToolCompletionPayload(evt.Payload); err != nil {
 				return err
 			}
+		case "local_entry":
+			var entry storedLocalEntry
+			if err := json.Unmarshal(evt.Payload, &entry); err != nil {
+				return fmt.Errorf("decode local_entry event: %w", err)
+			}
+			e.chat.appendLocalEntry(entry.Role, entry.Text)
 		}
 	}
 	return nil
@@ -572,6 +610,11 @@ func (e *Engine) ClearOngoingError() {
 func mustJSON(v any) json.RawMessage {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+type storedLocalEntry struct {
+	Role string `json:"role"`
+	Text string `json:"text"`
 }
 
 func toToolNames(ids []tools.ID) []string {

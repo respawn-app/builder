@@ -13,6 +13,7 @@ import (
 
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
 )
@@ -22,6 +23,7 @@ const (
 	codexResponsesEndpoint = "https://chatgpt.com/backend-api/codex/responses"
 	defaultOriginator      = "builder"
 	defaultUserAgent       = "builder/dev"
+	reasoningRoleSummary   = "reasoning"
 )
 
 type AuthHeaderProvider interface {
@@ -87,11 +89,13 @@ func (t *HTTPTransport) Generate(ctx context.Context, request OpenAIRequest) (Op
 		return OpenAIResponse{}, fmt.Errorf("openai responses request failed: empty response")
 	}
 
-	assistantText, toolCalls := parseOutputItems(decoded.Output)
+	assistantText, toolCalls, reasoning, reasoningItems := parseOutputItems(decoded.Output)
 	return OpenAIResponse{
-		AssistantText: assistantText,
-		ToolCalls:     toolCalls,
-		Usage:         usageFromSDK(decoded.Usage, t.ContextWindowTokens),
+		AssistantText:  assistantText,
+		ToolCalls:      toolCalls,
+		Reasoning:      reasoning,
+		ReasoningItems: reasoningItems,
+		Usage:          usageFromSDK(decoded.Usage, t.ContextWindowTokens),
 	}, nil
 }
 
@@ -120,6 +124,7 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 
 	var assistantText strings.Builder
 	acc := newToolCallAccumulator()
+	reasoningAcc := newReasoningAccumulator()
 	usage := Usage{WindowTokens: t.ContextWindowTokens}
 	var completed *responses.Response
 
@@ -135,10 +140,19 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 			}
 		case "response.output_item.added", "response.output_item.done":
 			acc.UpsertFromOutput(evt.Item)
+			reasoningAcc.UpsertReasoningItem(evt.Item)
 		case "response.function_call_arguments.delta":
 			acc.AppendArguments(evt.ItemID, evt.Delta)
 		case "response.function_call_arguments.done":
 			acc.SetArguments(evt.ItemID, evt.Arguments)
+		case "response.reasoning_summary_text.delta":
+			reasoningAcc.Append(reasoningRoleSummary, reasoningEventKey(evt.ItemID, evt.OutputIndex, evt.SummaryIndex), evt.Delta)
+		case "response.reasoning_summary_text.done":
+			reasoningAcc.Set(reasoningRoleSummary, reasoningEventKey(evt.ItemID, evt.OutputIndex, evt.SummaryIndex), evt.Text)
+		case "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
+			if evt.Part.Type == "summary_text" {
+				reasoningAcc.Set(reasoningRoleSummary, reasoningEventKey(evt.ItemID, evt.OutputIndex, evt.SummaryIndex), evt.Part.Text)
+			}
 		case "response.completed":
 			e := evt.AsResponseCompleted()
 			completed = &e.Response
@@ -150,23 +164,29 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 
 	finalText := assistantText.String()
 	finalCalls := acc.ToToolCalls()
+	finalReasoning := reasoningAcc.Entries()
+	finalReasoningItems := reasoningAcc.Items()
 
 	if completed != nil {
 		if completed.Usage.InputTokens > 0 || completed.Usage.OutputTokens > 0 {
 			usage = usageFromSDK(completed.Usage, t.ContextWindowTokens)
 		}
-		parsedText, parsedCalls := parseOutputItems(completed.Output)
+		parsedText, parsedCalls, parsedReasoning, parsedReasoningItems := parseOutputItems(completed.Output)
 		if finalText == "" {
 			finalText = parsedText
 		}
 		acc.Merge(parsedCalls)
 		finalCalls = acc.ToToolCalls()
+		finalReasoning = mergeReasoningEntries(parsedReasoning, finalReasoning)
+		finalReasoningItems = mergeReasoningItems(parsedReasoningItems, finalReasoningItems)
 	}
 
 	return OpenAIResponse{
-		AssistantText: finalText,
-		ToolCalls:     finalCalls,
-		Usage:         usage,
+		AssistantText:  finalText,
+		ToolCalls:      finalCalls,
+		Reasoning:      finalReasoning,
+		ReasoningItems: finalReasoningItems,
+		Usage:          usage,
 	}, nil
 }
 
@@ -251,7 +271,11 @@ func (t *HTTPTransport) buildPayload(request OpenAIRequest, mode openAIAuthMode)
 		out.ParallelToolCalls = openai.Bool(true)
 	}
 	if shouldApplyReasoningEffort(request.Model, request.ReasoningEffort) {
-		out.Reasoning = shared.ReasoningParam{Effort: shared.ReasoningEffort(strings.TrimSpace(request.ReasoningEffort))}
+		out.Reasoning = shared.ReasoningParam{
+			Effort:  shared.ReasoningEffort(strings.TrimSpace(request.ReasoningEffort)),
+			Summary: shared.ReasoningSummaryConcise,
+		}
+		out.Include = append(out.Include, responses.ResponseIncludableReasoningEncryptedContent)
 	}
 	if request.MaxTokens > 0 && !mode.IsOAuth {
 		out.MaxOutputTokens = openai.Int(int64(request.MaxTokens))
@@ -282,6 +306,20 @@ func buildResponsesInput(messages []Message) []responses.ResponseInputItemUnionP
 					continue
 				}
 				items = append(items, responses.ResponseInputItemParamOfFunctionCall(normalizeToolArguments(string(tc.Input)), callID, tc.Name))
+			}
+			for _, ri := range msg.ReasoningItems {
+				id := strings.TrimSpace(ri.ID)
+				encrypted := strings.TrimSpace(ri.EncryptedContent)
+				if id == "" || encrypted == "" {
+					continue
+				}
+				items = append(items, responses.ResponseInputItemUnionParam{
+					OfReasoning: &responses.ResponseReasoningItemParam{
+						ID:               id,
+						Summary:          []responses.ResponseReasoningItemSummaryParam{},
+						EncryptedContent: param.NewOpt(encrypted),
+					},
+				})
 			}
 		default:
 			if strings.TrimSpace(msg.Content) == "" {
@@ -318,9 +356,11 @@ func messageInput(role, text string) responses.ResponseInputItemUnionParam {
 	return responses.ResponseInputItemParamOfInputMessage(content, inputRole)
 }
 
-func parseOutputItems(items []responses.ResponseOutputItemUnion) (string, []ToolCall) {
+func parseOutputItems(items []responses.ResponseOutputItemUnion) (string, []ToolCall, []ReasoningEntry, []ReasoningItem) {
 	textParts := make([]string, 0, len(items))
 	toolCalls := make([]ToolCall, 0, len(items))
+	reasoning := make([]ReasoningEntry, 0, len(items))
+	reasoningItems := make([]ReasoningItem, 0, len(items))
 	for _, item := range items {
 		switch item.Type {
 		case "message":
@@ -342,9 +382,211 @@ func parseOutputItems(items []responses.ResponseOutputItemUnion) (string, []Tool
 				Name:  item.Name,
 				Input: normalizeToolInput(item.Arguments),
 			})
+		case "reasoning":
+			reasoningItem := item.AsReasoning()
+			for _, summary := range reasoningItem.Summary {
+				reasoning = appendReasoningEntry(reasoning, reasoningRoleSummary, summary.Text)
+			}
+			if id := strings.TrimSpace(reasoningItem.ID); id != "" {
+				if encrypted := strings.TrimSpace(reasoningItem.EncryptedContent); encrypted != "" {
+					reasoningItems = append(reasoningItems, ReasoningItem{
+						ID:               id,
+						EncryptedContent: encrypted,
+					})
+				}
+			}
 		}
 	}
-	return strings.Join(textParts, ""), toolCalls
+	return strings.Join(textParts, ""), toolCalls, reasoning, reasoningItems
+}
+
+func appendReasoningEntry(entries []ReasoningEntry, role, text string) []ReasoningEntry {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return entries
+	}
+	return append(entries, ReasoningEntry{
+		Role: role,
+		Text: text,
+	})
+}
+
+func mergeReasoningEntries(primary, secondary []ReasoningEntry) []ReasoningEntry {
+	out := make([]ReasoningEntry, 0, len(primary)+len(secondary))
+	seen := make(map[string]struct{}, len(primary)+len(secondary))
+	add := func(entries []ReasoningEntry) {
+		for _, entry := range entries {
+			role := strings.TrimSpace(entry.Role)
+			text := strings.TrimSpace(entry.Text)
+			if role == "" || text == "" {
+				continue
+			}
+			key := role + "\x00" + text
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, ReasoningEntry{Role: role, Text: text})
+		}
+	}
+	add(primary)
+	add(secondary)
+	return out
+}
+
+func mergeReasoningItems(primary, secondary []ReasoningItem) []ReasoningItem {
+	out := make([]ReasoningItem, 0, len(primary)+len(secondary))
+	seen := make(map[string]struct{}, len(primary)+len(secondary))
+	add := func(items []ReasoningItem) {
+		for _, item := range items {
+			id := strings.TrimSpace(item.ID)
+			encrypted := strings.TrimSpace(item.EncryptedContent)
+			if id == "" || encrypted == "" {
+				continue
+			}
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, ReasoningItem{
+				ID:               id,
+				EncryptedContent: encrypted,
+			})
+		}
+	}
+	add(primary)
+	add(secondary)
+	return out
+}
+
+func reasoningEventKey(itemID string, outputIndex, partIndex int64) string {
+	itemID = strings.TrimSpace(itemID)
+	if itemID == "" {
+		return fmt.Sprintf("output:%d:part:%d", outputIndex, partIndex)
+	}
+	return fmt.Sprintf("%s:part:%d", itemID, partIndex)
+}
+
+type reasoningAccumulator struct {
+	order         []string
+	items         map[string]*ReasoningEntry
+	reasoningIDs  []string
+	reasoningByID map[string]ReasoningItem
+}
+
+func newReasoningAccumulator() *reasoningAccumulator {
+	return &reasoningAccumulator{
+		order:         make([]string, 0, 8),
+		items:         make(map[string]*ReasoningEntry, 8),
+		reasoningIDs:  make([]string, 0, 4),
+		reasoningByID: make(map[string]ReasoningItem, 4),
+	}
+}
+
+func (a *reasoningAccumulator) ensure(role, key string) *ReasoningEntry {
+	role = strings.TrimSpace(role)
+	key = strings.TrimSpace(key)
+	if role == "" || key == "" {
+		return nil
+	}
+	composite := role + "\x00" + key
+	if item, ok := a.items[composite]; ok {
+		return item
+	}
+	entry := &ReasoningEntry{Role: role}
+	a.items[composite] = entry
+	a.order = append(a.order, composite)
+	return entry
+}
+
+func (a *reasoningAccumulator) Append(role, key, delta string) {
+	delta = strings.TrimSpace(delta)
+	if delta == "" {
+		return
+	}
+	entry := a.ensure(role, key)
+	if entry == nil {
+		return
+	}
+	entry.Text += delta
+}
+
+func (a *reasoningAccumulator) Set(role, key, text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	entry := a.ensure(role, key)
+	if entry == nil {
+		return
+	}
+	entry.Text = text
+}
+
+func (a *reasoningAccumulator) Entries() []ReasoningEntry {
+	if a == nil {
+		return nil
+	}
+	out := make([]ReasoningEntry, 0, len(a.order))
+	for _, key := range a.order {
+		entry, ok := a.items[key]
+		if !ok {
+			continue
+		}
+		text := strings.TrimSpace(entry.Text)
+		if text == "" {
+			continue
+		}
+		out = append(out, ReasoningEntry{
+			Role: entry.Role,
+			Text: text,
+		})
+	}
+	return out
+}
+
+func (a *reasoningAccumulator) UpsertReasoningItem(item responses.ResponseOutputItemUnion) {
+	if item.Type != "reasoning" {
+		return
+	}
+	reasoningItem := item.AsReasoning()
+	id := strings.TrimSpace(reasoningItem.ID)
+	if id == "" {
+		return
+	}
+	for idx, summary := range reasoningItem.Summary {
+		key := fmt.Sprintf("%s:summary:%d", id, idx)
+		a.Set(reasoningRoleSummary, key, summary.Text)
+	}
+	encrypted := strings.TrimSpace(reasoningItem.EncryptedContent)
+	if encrypted == "" {
+		return
+	}
+	if _, exists := a.reasoningByID[id]; !exists {
+		a.reasoningIDs = append(a.reasoningIDs, id)
+	}
+	a.reasoningByID[id] = ReasoningItem{
+		ID:               id,
+		EncryptedContent: encrypted,
+	}
+}
+
+func (a *reasoningAccumulator) Items() []ReasoningItem {
+	if a == nil {
+		return nil
+	}
+	out := make([]ReasoningItem, 0, len(a.reasoningIDs))
+	for _, id := range a.reasoningIDs {
+		item, ok := a.reasoningByID[id]
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(item.ID) == "" || strings.TrimSpace(item.EncryptedContent) == "" {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 type toolCallAccumulator struct {
