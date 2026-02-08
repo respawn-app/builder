@@ -671,8 +671,8 @@ func firstNonEmpty(values ...string) string {
 
 func truncateError(b []byte) string {
 	s := strings.TrimSpace(string(b))
-	if len(s) <= 240 {
-		return s
+	if s == "" {
+		return "<empty error body>"
 	}
-	return s[:240] + "..."
+	return s
 }

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -110,5 +111,20 @@ func TestCtrlEnterIdleAppendsUserOnce(t *testing.T) {
 
 	if count := strings.Count(updated.View(), "user: echo hi"); count != 1 {
 		t.Fatalf("expected one user transcript entry, got %d", count)
+	}
+}
+
+func TestSubmitErrorShowsFullMessageInDetailMode(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	longErr := "openai status 400: " + strings.Repeat("X", 320)
+
+	next, _ := m.Update(submitDoneMsg{err: errors.New(longErr)})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated = next.(*uiModel)
+
+	view := updated.View()
+	if !strings.Contains(view, "error: "+longErr) {
+		t.Fatalf("expected full error in detail mode, got: %q", view)
 	}
 }

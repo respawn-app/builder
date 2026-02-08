@@ -58,6 +58,14 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
+	logger, err := newRunLogger(store.Dir())
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = logger.Close()
+	}()
+	logger.Logf("app.start session_id=%s workspace=%s model=%s", store.Meta().SessionID, cfg.WorkspaceRoot, opts.Model)
 
 	toolRegistry, askBroker, err := buildToolRegistry(cfg.WorkspaceRoot)
 	if err != nil {
@@ -75,6 +83,7 @@ func Run(ctx context.Context, opts Options) error {
 		Temperature: 1,
 		MaxTokens:   0,
 		OnEvent: func(evt runtime.Event) {
+			logger.Logf(formatRuntimeEvent(evt))
 			runtimeEvents <- evt
 		},
 	})
@@ -82,8 +91,13 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 
-	program := tea.NewProgram(NewUIModel(eng, runtimeEvents, askBridge.Events()), tea.WithAltScreen())
+	program := tea.NewProgram(NewUIModel(eng, runtimeEvents, askBridge.Events(), WithUILogger(logger)), tea.WithAltScreen())
 	_, err = program.Run()
+	if err != nil {
+		logger.Logf("app.exit err=%q", err.Error())
+	} else {
+		logger.Logf("app.exit ok")
+	}
 	return err
 }
 

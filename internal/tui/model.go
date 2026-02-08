@@ -14,7 +14,6 @@ const (
 	ModeDetail  Mode = "detail"
 
 	DefaultPreviewLines = 8
-	maxErrorLen         = 80
 )
 
 type TranscriptEntry struct {
@@ -154,9 +153,6 @@ func FormatOngoingError(err error) string {
 	msg := strings.TrimSpace(err.Error())
 	if msg == "" {
 		return "error"
-	}
-	if len(msg) > maxErrorLen {
-		msg = strings.TrimSpace(msg[:maxErrorLen-3]) + "..."
 	}
 	return fmt.Sprintf("error: %s", msg)
 }

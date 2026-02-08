@@ -94,6 +94,20 @@ func TestClearOngoingAssistantMsgDropsPartialStream(t *testing.T) {
 	}
 }
 
+func TestFormatOngoingErrorIsNotTruncated(t *testing.T) {
+	input := strings.Repeat("e", 300)
+	formatted := FormatOngoingError(errString(input))
+	if formatted != "error: "+input {
+		t.Fatalf("unexpected formatted error: %q", formatted)
+	}
+}
+
+type errString string
+
+func (e errString) Error() string {
+	return string(e)
+}
+
 func updateModel(t *testing.T, m Model, msg tea.Msg) Model {
 	t.Helper()
 
