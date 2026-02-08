@@ -19,8 +19,8 @@ import (
 	"builder/internal/session"
 	"builder/internal/tools"
 	askquestion "builder/internal/tools/askquestion"
-	bashtool "builder/internal/tools/bash"
 	patchtool "builder/internal/tools/patch"
+	shelltool "builder/internal/tools/shell"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -32,7 +32,7 @@ type Options struct {
 	ThinkingLevel       string
 	Theme               string
 	ModelTimeoutSeconds int
-	BashTimeoutSeconds  int
+	ShellTimeoutSeconds int
 	Tools               string
 }
 
@@ -42,7 +42,7 @@ func Run(ctx context.Context, opts Options) error {
 		ThinkingLevel:       opts.ThinkingLevel,
 		Theme:               opts.Theme,
 		ModelTimeoutSeconds: opts.ModelTimeoutSeconds,
-		BashTimeoutSeconds:  opts.BashTimeoutSeconds,
+		ShellTimeoutSeconds: opts.ShellTimeoutSeconds,
 		Tools:               opts.Tools,
 	})
 	if err != nil {
@@ -89,7 +89,7 @@ func Run(ctx context.Context, opts Options) error {
 			logger.Logf("config.source %s", line)
 		}
 
-		toolRegistry, askBroker, err := buildToolRegistry(cfg.WorkspaceRoot, enabledTools, time.Duration(active.Timeouts.BashDefaultSeconds)*time.Second)
+		toolRegistry, askBroker, err := buildToolRegistry(cfg.WorkspaceRoot, enabledTools, time.Duration(active.Timeouts.ShellDefaultSeconds)*time.Second)
 		if err != nil {
 			_ = logger.Close()
 			return err
@@ -368,7 +368,7 @@ func openOrCreateSession(containerDir, selectedID, workspaceRoot string) (*sessi
 	return session.Open(picked.Session.Path)
 }
 
-func buildToolRegistry(workspaceRoot string, enabled []tools.ID, bashDefaultTimeout time.Duration) (*tools.Registry, *askquestion.Broker, error) {
+func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTimeout time.Duration) (*tools.Registry, *askquestion.Broker, error) {
 	patch, err := patchtool.New(workspaceRoot, true)
 	if err != nil {
 		return nil, nil, err
@@ -378,8 +378,8 @@ func buildToolRegistry(workspaceRoot string, enabled []tools.ID, bashDefaultTime
 	handlers := make([]tools.Handler, 0, len(enabled))
 	for _, id := range enabled {
 		switch id {
-		case tools.ToolBash:
-			handlers = append(handlers, bashtool.New(workspaceRoot, 10_000, bashtool.WithDefaultTimeout(bashDefaultTimeout)))
+		case tools.ToolShell:
+			handlers = append(handlers, shelltool.New(workspaceRoot, 10_000, shelltool.WithDefaultTimeout(shellDefaultTimeout)))
 		case tools.ToolPatch:
 			handlers = append(handlers, patch)
 		case tools.ToolAskQuestion:

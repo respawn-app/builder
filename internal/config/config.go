@@ -27,7 +27,7 @@ const (
 	defaultThinkingLevel       = "high"
 	defaultTheme               = "dark"
 	defaultModelTimeoutSeconds = 400
-	defaultBashTimeoutSeconds  = 300
+	defaultShellTimeoutSeconds = 300
 )
 
 type LoadOptions struct {
@@ -35,13 +35,13 @@ type LoadOptions struct {
 	ThinkingLevel       string
 	Theme               string
 	ModelTimeoutSeconds int
-	BashTimeoutSeconds  int
+	ShellTimeoutSeconds int
 	Tools               string
 }
 
 type Timeouts struct {
 	ModelRequestSeconds int
-	BashDefaultSeconds  int
+	ShellDefaultSeconds int
 }
 
 type Settings struct {
@@ -73,6 +73,7 @@ type fileSettings struct {
 	Tools         map[string]bool `toml:"tools"`
 	Timeouts      struct {
 		ModelRequestSeconds int `toml:"model_request_seconds"`
+		ShellDefaultSeconds int `toml:"shell_default_seconds"`
 		BashDefaultSeconds  int `toml:"bash_default_seconds"`
 	} `toml:"timeouts"`
 	PersistenceRoot string `toml:"persistence_root"`
@@ -104,7 +105,7 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		"thinking_level":         "default",
 		"theme":                  "default",
 		"timeouts.model_request": "default",
-		"timeouts.bash_default":  "default",
+		"timeouts.shell_default": "default",
 	}
 	for _, id := range sortedToolIDs() {
 		sources["tools."+string(id)] = "default"
@@ -128,9 +129,12 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		merged.Timeouts.ModelRequestSeconds = cfg.Timeouts.ModelRequestSeconds
 		sources["timeouts.model_request"] = "file"
 	}
-	if cfg.Timeouts.BashDefaultSeconds > 0 {
-		merged.Timeouts.BashDefaultSeconds = cfg.Timeouts.BashDefaultSeconds
-		sources["timeouts.bash_default"] = "file"
+	if cfg.Timeouts.ShellDefaultSeconds > 0 {
+		merged.Timeouts.ShellDefaultSeconds = cfg.Timeouts.ShellDefaultSeconds
+		sources["timeouts.shell_default"] = "file"
+	} else if cfg.Timeouts.BashDefaultSeconds > 0 {
+		merged.Timeouts.ShellDefaultSeconds = cfg.Timeouts.BashDefaultSeconds
+		sources["timeouts.shell_default"] = "file"
 	}
 	for k, v := range cfg.Tools {
 		id, ok := tools.ParseID(strings.TrimSpace(k))
@@ -165,13 +169,20 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		merged.Timeouts.ModelRequestSeconds = n
 		sources["timeouts.model_request"] = "env"
 	}
-	if v := strings.TrimSpace(os.Getenv("BUILDER_BASH_TIMEOUT_SECONDS")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("BUILDER_SHELL_TIMEOUT_SECONDS")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return App{}, fmt.Errorf("invalid BUILDER_SHELL_TIMEOUT_SECONDS: %q", v)
+		}
+		merged.Timeouts.ShellDefaultSeconds = n
+		sources["timeouts.shell_default"] = "env"
+	} else if v := strings.TrimSpace(os.Getenv("BUILDER_BASH_TIMEOUT_SECONDS")); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
 			return App{}, fmt.Errorf("invalid BUILDER_BASH_TIMEOUT_SECONDS: %q", v)
 		}
-		merged.Timeouts.BashDefaultSeconds = n
-		sources["timeouts.bash_default"] = "env"
+		merged.Timeouts.ShellDefaultSeconds = n
+		sources["timeouts.shell_default"] = "env"
 	}
 	if v := strings.TrimSpace(os.Getenv("BUILDER_TOOLS")); v != "" {
 		enabled, err := parseEnabledToolsCSV(v)
@@ -208,9 +219,9 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		merged.Timeouts.ModelRequestSeconds = opts.ModelTimeoutSeconds
 		sources["timeouts.model_request"] = "cli"
 	}
-	if opts.BashTimeoutSeconds > 0 {
-		merged.Timeouts.BashDefaultSeconds = opts.BashTimeoutSeconds
-		sources["timeouts.bash_default"] = "cli"
+	if opts.ShellTimeoutSeconds > 0 {
+		merged.Timeouts.ShellDefaultSeconds = opts.ShellTimeoutSeconds
+		sources["timeouts.shell_default"] = "cli"
 	}
 	if strings.TrimSpace(opts.Tools) != "" {
 		enabled, err := parseEnabledToolsCSV(opts.Tools)
@@ -269,7 +280,7 @@ func defaultSettings() Settings {
 		EnabledTools:  enabled,
 		Timeouts: Timeouts{
 			ModelRequestSeconds: defaultModelTimeoutSeconds,
-			BashDefaultSeconds:  defaultBashTimeoutSeconds,
+			ShellDefaultSeconds: defaultShellTimeoutSeconds,
 		},
 	}
 }
@@ -291,8 +302,8 @@ func validateSettings(v Settings) error {
 	if v.Timeouts.ModelRequestSeconds <= 0 {
 		return fmt.Errorf("timeouts.model_request_seconds must be > 0")
 	}
-	if v.Timeouts.BashDefaultSeconds <= 0 {
-		return fmt.Errorf("timeouts.bash_default_seconds must be > 0")
+	if v.Timeouts.ShellDefaultSeconds <= 0 {
+		return fmt.Errorf("timeouts.shell_default_seconds must be > 0")
 	}
 	for _, id := range sortedToolIDs() {
 		if _, ok := v.EnabledTools[id]; !ok {
@@ -356,7 +367,7 @@ func expandTildePath(path string) (string, error) {
 }
 
 func sortedToolIDs() []tools.ID {
-	ids := []tools.ID{tools.ToolAskQuestion, tools.ToolBash, tools.ToolPatch}
+	ids := []tools.ID{tools.ToolAskQuestion, tools.ToolShell, tools.ToolPatch}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	return ids
 }
@@ -406,12 +417,12 @@ func defaultSettingsTOML() string {
 		"theme":          defaults.Theme,
 		"tools": map[string]bool{
 			string(tools.ToolAskQuestion): defaults.EnabledTools[tools.ToolAskQuestion],
-			string(tools.ToolBash):        defaults.EnabledTools[tools.ToolBash],
+			string(tools.ToolShell):       defaults.EnabledTools[tools.ToolShell],
 			string(tools.ToolPatch):       defaults.EnabledTools[tools.ToolPatch],
 		},
 		"timeouts": map[string]int{
 			"model_request_seconds": defaults.Timeouts.ModelRequestSeconds,
-			"bash_default_seconds":  defaults.Timeouts.BashDefaultSeconds,
+			"shell_default_seconds": defaults.Timeouts.ShellDefaultSeconds,
 		},
 		"persistence_root": DefaultPersistence,
 	}
@@ -426,11 +437,11 @@ func defaultSettingsTOML() string {
 		"persistence_root = \"" + DefaultPersistence + "\"\n\n" +
 		"[tools]\n" +
 		string(tools.ToolAskQuestion) + " = true\n" +
-		string(tools.ToolBash) + " = true\n" +
+		string(tools.ToolShell) + " = true\n" +
 		string(tools.ToolPatch) + " = true\n\n" +
 		"[timeouts]\n" +
 		"model_request_seconds = " + strconv.Itoa(defaults.Timeouts.ModelRequestSeconds) + "\n" +
-		"bash_default_seconds = " + strconv.Itoa(defaults.Timeouts.BashDefaultSeconds) + "\n"
+		"shell_default_seconds = " + strconv.Itoa(defaults.Timeouts.ShellDefaultSeconds) + "\n"
 }
 
 func withPersistenceSource(s map[string]string, persistence string) map[string]string {

@@ -17,10 +17,16 @@ func main() {
 		thinkingLevel       = flag.String("thinking-level", "", "thinking level override (low|medium|high|xhigh)")
 		theme               = flag.String("theme", "", "theme override (light|dark)")
 		modelTimeoutSeconds = flag.Int("model-timeout-seconds", 0, "model request timeout override in seconds")
-		bashTimeoutSeconds  = flag.Int("bash-timeout-seconds", 0, "bash default timeout override in seconds")
-		tools               = flag.String("tools", "", "enabled tools override as csv (e.g. bash,patch)")
+		shellTimeoutSeconds = flag.Int("shell-timeout-seconds", 0, "shell default timeout override in seconds")
+		bashTimeoutSeconds  = flag.Int("bash-timeout-seconds", 0, "deprecated alias for --shell-timeout-seconds")
+		tools               = flag.String("tools", "", "enabled tools override as csv (e.g. shell,patch)")
 	)
 	flag.Parse()
+
+	effectiveShellTimeout := *shellTimeoutSeconds
+	if effectiveShellTimeout <= 0 {
+		effectiveShellTimeout = *bashTimeoutSeconds
+	}
 
 	if err := app.Run(context.Background(), app.Options{
 		WorkspaceRoot:       *workspace,
@@ -29,7 +35,7 @@ func main() {
 		ThinkingLevel:       *thinkingLevel,
 		Theme:               *theme,
 		ModelTimeoutSeconds: *modelTimeoutSeconds,
-		BashTimeoutSeconds:  *bashTimeoutSeconds,
+		ShellTimeoutSeconds: effectiveShellTimeout,
 		Tools:               *tools,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, err)

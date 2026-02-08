@@ -25,10 +25,10 @@ func TestBuildPayload_SerializesAssistantToolCalls(t *testing.T) {
 				Role:    RoleAssistant,
 				Content: "",
 				ToolCalls: []ToolCall{
-					{ID: "call-1", Name: "bash", Input: json.RawMessage(`{"command":"pwd"}`)},
+					{ID: "call-1", Name: "shell", Input: json.RawMessage(`{"command":"pwd"}`)},
 				},
 			},
-			{Role: RoleTool, ToolCallID: "call-1", Name: "bash", Content: "{}"},
+			{Role: RoleTool, ToolCallID: "call-1", Name: "shell", Content: "{}"},
 		},
 	}, openAIAuthMode{})
 	if err != nil {
@@ -55,7 +55,7 @@ func TestBuildPayload_SerializesAssistantToolCalls(t *testing.T) {
 	if call["type"] != "function_call" {
 		t.Fatalf("expected function_call input item, got %v", call["type"])
 	}
-	if call["call_id"] != "call-1" || call["name"] != "bash" {
+	if call["call_id"] != "call-1" || call["name"] != "shell" {
 		t.Fatalf("unexpected function call item: %+v", call)
 	}
 	if call["arguments"] != "{\"command\":\"pwd\"}" {

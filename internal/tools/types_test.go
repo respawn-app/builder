@@ -22,7 +22,8 @@ func TestParseID(t *testing.T) {
 		want ID
 		ok   bool
 	}{
-		{in: "bash", want: ToolBash, ok: true},
+		{in: "shell", want: ToolShell, ok: true},
+		{in: "bash", want: ToolShell, ok: true},
 		{in: "patch", want: ToolPatch, ok: true},
 		{in: "ask_question", want: ToolAskQuestion, ok: true},
 		{in: "unknown", ok: false},
@@ -41,13 +42,13 @@ func TestParseID(t *testing.T) {
 func TestRegistryDefinitionsFollowCentralCatalog(t *testing.T) {
 	r := NewRegistry(
 		stubHandler{id: ToolPatch},
-		stubHandler{id: ToolBash},
+		stubHandler{id: ToolShell},
 	)
 	defs := r.Definitions()
 	if len(defs) != 2 {
 		t.Fatalf("definitions count=%d want 2", len(defs))
 	}
-	if defs[0].ID != ToolPatch || defs[1].ID != ToolBash {
+	if defs[0].ID != ToolPatch || defs[1].ID != ToolShell {
 		t.Fatalf("definition order mismatch: %+v", defs)
 	}
 	if len(defs[0].Schema) == 0 || len(defs[1].Schema) == 0 {

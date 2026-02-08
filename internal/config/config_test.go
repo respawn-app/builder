@@ -31,7 +31,7 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if got := cfg.PersistenceRoot; got != filepath.Join(home, ".builder") {
 		t.Fatalf("default persistence root mismatch: %q", got)
 	}
-	if !cfg.Settings.EnabledTools[tools.ToolBash] || !cfg.Settings.EnabledTools[tools.ToolPatch] || !cfg.Settings.EnabledTools[tools.ToolAskQuestion] {
+	if !cfg.Settings.EnabledTools[tools.ToolShell] || !cfg.Settings.EnabledTools[tools.ToolPatch] || !cfg.Settings.EnabledTools[tools.ToolAskQuestion] {
 		t.Fatalf("expected all default tools enabled: %+v", cfg.Settings.EnabledTools)
 	}
 }
@@ -50,19 +50,19 @@ thinking_level = "low"
 theme = "light"
 
 [tools]
-bash = true
+shell = true
 patch = false
 ask_question = true
 
 [timeouts]
 model_request_seconds = 45
-bash_default_seconds = 50
+shell_default_seconds = 50
 `), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
 	t.Setenv("BUILDER_MODEL", "gpt-env")
-	t.Setenv("BUILDER_TOOLS", "bash,patch")
+	t.Setenv("BUILDER_TOOLS", "shell,patch")
 
 	cfg, err := Load(workspace, LoadOptions{Model: "gpt-cli"})
 	if err != nil {
@@ -76,6 +76,40 @@ bash_default_seconds = 50
 	}
 	if got := cfg.Source.Sources["model"]; got != "cli" {
 		t.Fatalf("expected model source cli, got %q", got)
+	}
+}
+
+func TestLoadSupportsLegacyBashTimeoutSettingNames(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`[timeouts]
+bash_default_seconds = 42
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.Timeouts.ShellDefaultSeconds != 42 {
+		t.Fatalf("legacy bash timeout was not mapped, got %d", cfg.Settings.Timeouts.ShellDefaultSeconds)
+	}
+
+	t.Setenv("BUILDER_SHELL_TIMEOUT_SECONDS", "")
+	t.Setenv("BUILDER_BASH_TIMEOUT_SECONDS", "51")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with legacy env: %v", err)
+	}
+	if cfg.Settings.Timeouts.ShellDefaultSeconds != 51 {
+		t.Fatalf("legacy bash env timeout was not mapped, got %d", cfg.Settings.Timeouts.ShellDefaultSeconds)
 	}
 }
 
