@@ -47,17 +47,8 @@ func New(workspaceRoot string, outputLimit int) *Tool {
 	return &Tool{workspaceRoot: workspaceRoot, outputLimit: outputLimit}
 }
 
-func (t *Tool) Name() string {
-	return "bash"
-}
-
-func (t *Tool) Definition() tools.Definition {
-	schema := json.RawMessage(`{"type":"object","required":["command"],"properties":{"command":{"type":"string"},"timeout_seconds":{"type":"integer"},"workdir":{"type":"string"}}}`)
-	return tools.Definition{
-		Name:        t.Name(),
-		Description: "Execute a shell command in non-TTY mode with merged stdout/stderr.",
-		Schema:      schema,
-	}
+func (t *Tool) Name() tools.ID {
+	return tools.ToolBash
 }
 
 func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {

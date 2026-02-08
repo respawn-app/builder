@@ -1,35 +1,42 @@
 package llm
 
 import (
-	"encoding/json"
 	"testing"
 
 	"builder/internal/session"
 )
 
-func TestRequestFromLockedContract_ToolSelectionSemantics(t *testing.T) {
-	lockedTools := json.RawMessage(`[{"name":"bash","description":"d","schema":{"type":"object"}}]`)
+func TestRequestFromLockedContract_UsesBinaryPromptAndExplicitTools(t *testing.T) {
 	locked := session.LockedContract{
 		Model:          "gpt-5",
 		Temperature:    1,
 		MaxOutputToken: 0,
-		ToolsJSON:      lockedTools,
-		SystemPrompt:   "sys",
 	}
+	tool := Tool{Name: "bash", Schema: []byte(`{"type":"object"}`)}
 
-	withDefaults, err := RequestFromLockedContract(locked, []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	req, err := RequestFromLockedContract(locked, "sys", []Message{{Role: RoleUser, Content: "hi"}}, []Tool{tool})
 	if err != nil {
-		t.Fatalf("request with defaults: %v", err)
+		t.Fatalf("request from contract: %v", err)
 	}
-	if len(withDefaults.Tools) != 1 || withDefaults.Tools[0].Name != "bash" {
-		t.Fatalf("expected locked tools to be loaded, got %+v", withDefaults.Tools)
+	if req.SystemPrompt != "sys" {
+		t.Fatalf("system prompt mismatch: %q", req.SystemPrompt)
 	}
+	if len(req.Tools) != 1 || req.Tools[0].Name != "bash" {
+		t.Fatalf("tools mismatch: %+v", req.Tools)
+	}
+}
 
-	explicitDisabled, err := RequestFromLockedContract(locked, []Message{{Role: RoleUser, Content: "hi"}}, []Tool{})
-	if err != nil {
-		t.Fatalf("request with explicit disable: %v", err)
+func TestRequestFromLockedContract_RespectsExplicitToolDisable(t *testing.T) {
+	locked := session.LockedContract{
+		Model:          "gpt-5",
+		Temperature:    1,
+		MaxOutputToken: 0,
 	}
-	if len(explicitDisabled.Tools) != 0 {
-		t.Fatalf("expected explicitly disabled tools to stay empty, got %+v", explicitDisabled.Tools)
+	req, err := RequestFromLockedContract(locked, "sys", []Message{{Role: RoleUser, Content: "hi"}}, []Tool{})
+	if err != nil {
+		t.Fatalf("request from contract: %v", err)
+	}
+	if len(req.Tools) != 0 {
+		t.Fatalf("expected tools disabled, got %+v", req.Tools)
 	}
 }

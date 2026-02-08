@@ -30,7 +30,9 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
 - `internal/actions`
   - Typed action registry scaffold for `ask_question` post-answer hooks.
 - `prompts`
-  - Embedded prompt/tool-definition source files (`system_prompt.md`, `tool_definitions.json`).
+  - Embedded system prompt source file (`system_prompt.md`).
+- `internal/tools/definitions.go`
+  - Centralized compile-time tool interface declarations (name, descriptions, JSON schemas).
 
 ## Engineering Principles
 
@@ -64,5 +66,4 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
 - Before handing off to the user after code changes, rebuild the binary (an make sure it builds) and make sure tests are written and green. Don't ask for confirmation to write tests and run checks.
 - `docs/decisions.md` is the source of truth for locked product and architecture decisions.
 - Keep this file up-to-date and comprehensive. Avoid adding info that can become outdated, otherwise keep this as project guidelines, rules, and learnings for future team members. Persist info that should be preserved here.
-
 

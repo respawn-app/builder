@@ -222,7 +222,7 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 				Role:       llm.RoleTool,
 				Content:    string(r.Output),
 				ToolCallID: r.CallID,
-				Name:       r.Name,
+				Name:       string(r.Name),
 			}
 			if err := e.appendMessage(stepID, msg); err != nil {
 				return llm.Message{}, err
@@ -256,7 +256,7 @@ func (e *Engine) buildRequest(_ string, allowTools bool) (llm.Request, error) {
 			requestTools = make([]llm.Tool, 0, len(defs))
 		}
 		for _, d := range defs {
-			requestTools = append(requestTools, llm.Tool{Name: d.Name, Description: d.Description, Schema: d.Schema})
+			requestTools = append(requestTools, llm.Tool{Name: string(d.ID), Description: d.Description, Schema: d.Schema})
 		}
 	} else {
 		requestTools = []llm.Tool{}
@@ -264,7 +264,7 @@ func (e *Engine) buildRequest(_ string, allowTools bool) (llm.Request, error) {
 
 	msgs := e.snapshotMessages()
 
-	req, err := llm.RequestFromLockedContract(locked, msgs, requestTools)
+	req, err := llm.RequestFromLockedContract(locked, prompts.SystemPrompt, msgs, requestTools)
 	if err != nil {
 		return llm.Request{}, err
 	}
@@ -280,16 +280,10 @@ func (e *Engine) ensureLocked() (session.LockedContract, error) {
 		return *e.locked, nil
 	}
 
-	toolsJSON, err := json.Marshal(e.registry.Definitions())
-	if err != nil {
-		return session.LockedContract{}, err
-	}
 	lock := session.LockedContract{
 		Model:          e.cfg.Model,
 		Temperature:    e.cfg.Temperature,
 		MaxOutputToken: e.cfg.MaxTokens,
-		ToolsJSON:      toolsJSON,
-		SystemPrompt:   prompts.SystemPrompt,
 	}
 	if err := e.store.MarkModelDispatchLocked(lock); err != nil {
 		return session.LockedContract{}, err
@@ -362,16 +356,25 @@ func (e *Engine) executeToolCalls(ctx context.Context, stepID string, calls []ll
 		wg.Add(1)
 		go func(tc llm.ToolCall) {
 			defer wg.Done()
-			h, ok := e.registry.Get(tc.Name)
+			toolID, ok := tools.ParseID(tc.Name)
 			if !ok {
-				results[idx] = tools.Result{CallID: tc.ID, Name: tc.Name, IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
+				results[idx] = tools.Result{CallID: tc.ID, Name: tools.ID(tc.Name), IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
 				_ = e.persistToolCompletion(stepID, results[idx])
 				return
 			}
-			res, err := h.Call(ctx, tools.Call{ID: tc.ID, Name: tc.Name, Input: tc.Input, StepID: stepID})
+			h, ok := e.registry.Get(toolID)
+			if !ok {
+				results[idx] = tools.Result{CallID: tc.ID, Name: toolID, IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
+				_ = e.persistToolCompletion(stepID, results[idx])
+				return
+			}
+			res, err := h.Call(ctx, tools.Call{ID: tc.ID, Name: toolID, Input: tc.Input, StepID: stepID})
 			if err != nil {
 				errCh <- err
-				res = tools.Result{CallID: tc.ID, Name: tc.Name, IsError: true, Output: mustJSON(map[string]any{"error": err.Error()})}
+				res = tools.Result{CallID: tc.ID, Name: toolID, IsError: true, Output: mustJSON(map[string]any{"error": err.Error()})}
+			}
+			if res.Name == "" {
+				res.Name = toolID
 			}
 			results[idx] = res
 			_ = e.persistToolCompletion(stepID, res)
@@ -393,7 +396,7 @@ func (e *Engine) executeToolCalls(ctx context.Context, stepID string, calls []ll
 func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
 	_, err := e.store.AppendEvent(stepID, "tool_completed", map[string]any{
 		"call_id":  r.CallID,
-		"name":     r.Name,
+		"name":     string(r.Name),
 		"is_error": r.IsError,
 		"output":   json.RawMessage(r.Output),
 	})
