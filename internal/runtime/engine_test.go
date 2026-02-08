@@ -238,6 +238,67 @@ func TestParallelToolsReturnDeclaredOrder(t *testing.T) {
 
 }
 
+func TestExecuteToolCallsFailsOnToolCompletionPersistence(t *testing.T) {
+	tests := []struct {
+		name     string
+		registry *tools.Registry
+		callName string
+	}{
+		{
+			name:     "unknown tool name",
+			registry: tools.NewRegistry(),
+			callName: "not_a_tool",
+		},
+		{
+			name:     "known tool without handler",
+			registry: tools.NewRegistry(),
+			callName: string(tools.ToolShell),
+		},
+		{
+			name:     "registered tool handler",
+			registry: tools.NewRegistry(fakeTool{name: tools.ToolShell}),
+			callName: string(tools.ToolShell),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			store, err := session.Create(dir, "ws", dir)
+			if err != nil {
+				t.Fatalf("create store: %v", err)
+			}
+
+			eng, err := New(store, &fakeClient{}, tc.registry, Config{Model: "gpt-5"})
+			if err != nil {
+				t.Fatalf("new engine: %v", err)
+			}
+
+			sessionDir := store.Dir()
+			if err := os.Chmod(sessionDir, 0o555); err != nil {
+				t.Fatalf("chmod read-only session dir: %v", err)
+			}
+			defer func() {
+				_ = os.Chmod(sessionDir, 0o755)
+			}()
+
+			_, err = eng.executeToolCalls(context.Background(), "step", []llm.ToolCall{
+				{ID: "call-1", Name: tc.callName, Input: json.RawMessage(`{}`)},
+			})
+			if err == nil {
+				t.Fatal("expected persistence failure")
+			}
+			if !strings.Contains(err.Error(), "persist tool completion") {
+				t.Fatalf("expected persistence error, got %v", err)
+			}
+
+			if len(eng.chat.toolCompletions) != 0 {
+				t.Fatalf("expected no in-memory tool completions when persistence fails, got %+v", eng.chat.toolCompletions)
+			}
+		})
+	}
+}
+
 func TestStreamingRetryResetsAttemptDeltas(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
