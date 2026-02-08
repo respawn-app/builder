@@ -329,6 +329,8 @@ func RefreshOpenAIAuthToken(ctx context.Context, opts OpenAIOAuthOptions, method
 	}
 	if parsed.ExpiresIn > 0 {
 		updated.OAuth.Expiry = time.Now().UTC().Add(time.Duration(parsed.ExpiresIn) * time.Second)
+	} else {
+		updated.OAuth.Expiry = time.Now().UTC().Add(time.Hour)
 	}
 	return updated, nil
 }
