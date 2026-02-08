@@ -1,0 +1,47 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Editors/IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Go build/test artifacts
+bin/
+dist/
+*.test
+*.out
+*.exe
+*.exe~
+coverage.out
+cover.out
+*.coverprofile
+
+# Go workspace/module local files
+go.work.sum
+
+# Vendored dependencies (enable if vendoring is used)
+# vendor/
+
+# Temp docs generated for handoff
+docs/tmp/
