@@ -5,13 +5,21 @@ import (
 	"builder/internal/tools"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
-const agentsInjectedPrefix = "# AGENTS.md auto-injection"
+const (
+	agentsInjectedPrefix      = "# AGENTS.md auto-injection"
+	toolInlineMetaSeparator   = "\x1f"
+	defaultShellTimeoutSecond = 300
+)
+
+var outputLineNumberPrefix = regexp.MustCompile(`^\s*\d+(?:\t|\s{2,})`)
 
 type ChatEntry struct {
 	Role string
@@ -183,7 +191,15 @@ func (s *chatStore) snapshot() ChatSnapshot {
 }
 
 func formatToolCall(call llm.ToolCall) string {
-	return withLabel("input", formatToolInput(call.Input))
+	command, timeoutLabel := formatToolInput(call)
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return "tool call"
+	}
+	if timeoutLabel == "" {
+		return command
+	}
+	return command + toolInlineMetaSeparator + timeoutLabel
 }
 
 func formatToolResult(result tools.Result) string {
@@ -195,24 +211,28 @@ func formatToolResult(result tools.Result) string {
 			output = "done"
 		}
 	}
-	return withLabel("output", output)
+	return output
 }
 
-func withLabel(label, text string) string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return label + ":"
+func formatToolInput(call llm.ToolCall) (string, string) {
+	var payload any
+	if err := json.Unmarshal(call.Input, &payload); err != nil {
+		return strings.TrimSpace(string(call.Input)), ""
 	}
-	parts := strings.Split(text, "\n")
-	head := label + ": " + parts[0]
-	if len(parts) == 1 {
-		return head
+	obj, ok := payload.(map[string]any)
+	if !ok {
+		return renderPlain(payload), ""
 	}
-	return head + "\n" + strings.Join(parts[1:], "\n")
-}
-
-func formatToolInput(raw json.RawMessage) string {
-	return formatJSONLikeText(raw)
+	if cmd, ok := asString(obj["command"]); ok {
+		timeout := ""
+		if secs, ok := asInt(obj["timeout_seconds"]); ok && secs > 0 {
+			timeout = "timeout: " + formatDurationShort(time.Duration(secs)*time.Second)
+		} else if strings.TrimSpace(call.Name) == string(tools.ToolShell) {
+			timeout = "timeout: " + formatDurationShort(time.Duration(defaultShellTimeoutSecond)*time.Second)
+		}
+		return cmd, timeout
+	}
+	return renderPlain(payload), ""
 }
 
 func formatToolOutput(raw json.RawMessage) string {
@@ -229,6 +249,7 @@ func formatToolOutput(raw json.RawMessage) string {
 		return msg
 	}
 	if out, ok := asString(obj["output"]); ok {
+		out = stripLineNumbersWhenLikely(out)
 		var notes []string
 		if code, ok := asInt(obj["exit_code"]); ok && code != 0 {
 			notes = append(notes, fmt.Sprintf("exit code %d", code))
@@ -254,12 +275,51 @@ func formatToolOutput(raw json.RawMessage) string {
 	return renderPlain(payload)
 }
 
-func formatJSONLikeText(raw json.RawMessage) string {
-	var payload any
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return strings.TrimSpace(string(raw))
+func stripLineNumbersWhenLikely(text string) string {
+	lines := strings.Split(text, "\n")
+	nonEmpty := 0
+	numbered := 0
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		nonEmpty++
+		if outputLineNumberPrefix.MatchString(line) {
+			numbered++
+		}
 	}
-	return renderPlain(payload)
+	if nonEmpty == 0 || numbered == 0 || numbered*2 < nonEmpty {
+		return text
+	}
+	for i, line := range lines {
+		lines[i] = outputLineNumberPrefix.ReplaceAllString(line, "")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatDurationShort(d time.Duration) string {
+	if d <= 0 {
+		return "0s"
+	}
+	total := int(d.Seconds())
+	hours := total / 3600
+	minutes := (total % 3600) / 60
+	seconds := total % 60
+
+	parts := make([]string, 0, 3)
+	if hours > 0 {
+		parts = append(parts, fmt.Sprintf("%dh", hours))
+	}
+	if minutes > 0 {
+		parts = append(parts, fmt.Sprintf("%dm", minutes))
+	}
+	if seconds > 0 {
+		parts = append(parts, fmt.Sprintf("%ds", seconds))
+	}
+	if len(parts) == 0 {
+		return "0s"
+	}
+	return strings.Join(parts, "")
 }
 
 func renderPlain(v any) string {

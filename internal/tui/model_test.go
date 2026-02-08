@@ -154,21 +154,41 @@ func TestOngoingCompactsToolCallAndHidesThinking(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "run command"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "thinking", Text: "internal trace"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: "input: command: pwd\nworkdir: /tmp"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "output: /tmp"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: "pwd" + toolInlineMetaSep + "timeout: 5m\nworkdir: /tmp"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "/tmp"})
 
 	view := m.View()
 	if strings.Contains(view, "internal trace") {
 		t.Fatalf("expected thinking trace hidden in ongoing view, got %q", view)
 	}
-	if !strings.Contains(view, "input: command: pwd") {
+	if !strings.Contains(view, "pwd") {
 		t.Fatalf("expected compact one-line tool input in ongoing view, got %q", view)
 	}
 	if strings.Contains(view, "workdir: /tmp") {
 		t.Fatalf("expected tool input to stay one line in ongoing view, got %q", view)
 	}
-	if strings.Contains(view, "output:") {
+	if strings.Contains(view, "/tmp") {
 		t.Fatalf("expected tool output to be omitted in ongoing view, got %q", view)
+	}
+}
+
+func TestDetailToolFormattingShowsTimeoutAndInlineOutput(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: "pwd" + toolInlineMetaSep + "timeout: 5m"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "alpha\nbeta"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) == 0 || !strings.Contains(lines[0], "pwd") || !strings.Contains(lines[0], "timeout: 5m") {
+		t.Fatalf("expected first detail line to contain command and timeout: %q", view)
+	}
+	if strings.Contains(view, "output:") {
+		t.Fatalf("expected no output prefix in detail view, got %q", view)
+	}
+	if len(lines) < 2 || strings.TrimSpace(lines[1]) != "alpha" {
+		t.Fatalf("expected output to start immediately after command line, got %q", view)
 	}
 }
 

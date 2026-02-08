@@ -16,6 +16,7 @@ const (
 
 	DefaultPreviewLines = 8
 	TranscriptDivider   = "────────────────────────"
+	toolInlineMetaSep   = "\x1f"
 )
 
 type TranscriptEntry struct {
@@ -306,7 +307,7 @@ func (m Model) renderFlatDetailTranscript() string {
 				nextRole := strings.TrimSpace(m.transcript[i+1].Role)
 				resultText := m.transcript[i+1].Text
 				if strings.TrimSpace(resultText) != "" {
-					combined = combined + "\n\n" + resultText
+					combined = combined + "\n" + resultText
 				}
 				blockRole = toolBlockRoleFromResult(nextRole)
 				i++
@@ -390,11 +391,15 @@ func (m Model) flattenEntry(role, text string) []string {
 	out := make([]string, 0, len(chunks))
 	for i, chunk := range chunks {
 		if i == 0 {
+			displayChunk := chunk
+			if isToolHeadlineRole(role) {
+				displayChunk = m.renderToolHeadline(chunk, renderWidth)
+			}
 			if symbol == "" {
-				out = append(out, chunk)
+				out = append(out, displayChunk)
 				continue
 			}
-			out = append(out, fmt.Sprintf("%s %s", symbol, chunk))
+			out = append(out, fmt.Sprintf("%s %s", symbol, displayChunk))
 			continue
 		}
 		if strings.TrimSpace(chunk) == "" {
@@ -468,7 +473,44 @@ func compactToolCallText(text string) string {
 	if first == "" {
 		return "tool call"
 	}
-	return first
+	command, _ := splitToolInlineMeta(first)
+	if command == "" {
+		return "tool call"
+	}
+	return command
+}
+
+func isToolHeadlineRole(role string) bool {
+	switch strings.TrimSpace(role) {
+	case "tool", "tool_success", "tool_error":
+		return true
+	default:
+		return false
+	}
+}
+
+func splitToolInlineMeta(line string) (string, string) {
+	parts := strings.SplitN(line, toolInlineMetaSep, 2)
+	if len(parts) == 1 {
+		return strings.TrimSpace(parts[0]), ""
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+}
+
+func (m Model) renderToolHeadline(line string, width int) string {
+	command, meta := splitToolInlineMeta(line)
+	if meta == "" {
+		return command
+	}
+	metaText := m.palette().preview.Faint(true).Render(meta)
+	if command == "" {
+		return metaText
+	}
+	space := width - lipgloss.Width(command) - lipgloss.Width(metaText)
+	if space < 1 {
+		space = 1
+	}
+	return command + strings.Repeat(" ", space) + metaText
 }
 
 func isToolResultRole(role string) bool {

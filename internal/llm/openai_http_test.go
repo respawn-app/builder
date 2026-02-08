@@ -185,6 +185,51 @@ func TestBuildPayload_SkipsReasoningEffortForUnknownModelFamily(t *testing.T) {
 	}
 }
 
+func TestBuildPayload_AddsAdditionalPropertiesFalseToToolSchemas(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	payload, err := transport.buildPayload(OpenAIRequest{
+		Model: "gpt-5",
+		Tools: []Tool{
+			{
+				Name:   "ask_question",
+				Schema: json.RawMessage(`{"type":"object","required":["question"],"properties":{"question":{"type":"string"},"meta":{"type":"object","properties":{"foo":{"type":"string"}}}}}`),
+			},
+		},
+	}, openAIAuthMode{})
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+
+	jsonPayload := mustMarshalObject(t, payload)
+	tools, ok := jsonPayload["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("expected one tool, got %#v", jsonPayload["tools"])
+	}
+	tool, ok := tools[0].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected tool value: %#v", tools[0])
+	}
+	params, ok := tool["parameters"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected parameters object, got %#v", tool["parameters"])
+	}
+	if got, ok := params["additionalProperties"].(bool); !ok || got {
+		t.Fatalf("expected root additionalProperties=false, got %#v", params["additionalProperties"])
+	}
+
+	props, ok := params["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected root properties object, got %#v", params["properties"])
+	}
+	meta, ok := props["meta"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested meta object schema, got %#v", props["meta"])
+	}
+	if got, ok := meta["additionalProperties"].(bool); !ok || got {
+		t.Fatalf("expected nested additionalProperties=false, got %#v", meta["additionalProperties"])
+	}
+}
+
 func mustMarshalObject(t *testing.T, payload responses.ResponseNewParams) map[string]any {
 	t.Helper()
 	b, err := json.Marshal(payload)

@@ -228,6 +228,7 @@ func (t *HTTPTransport) buildPayload(request OpenAIRequest, mode openAIAuthMode)
 				return responses.ResponseNewParams{}, fmt.Errorf("invalid tool schema for %s", tool.Name)
 			}
 		}
+		normalizeSchemaAdditionalProperties(params)
 		toolParam := responses.ToolParamOfFunction(tool.Name, params, true)
 		if desc := strings.TrimSpace(tool.Description); desc != "" && toolParam.OfFunction != nil {
 			toolParam.OfFunction.Description = openai.String(desc)
@@ -584,4 +585,76 @@ func usageFromSDK(usage responses.ResponseUsage, window int) Usage {
 		OutputTokens: int(usage.OutputTokens),
 		WindowTokens: window,
 	}
+}
+
+func normalizeSchemaAdditionalProperties(schema map[string]any) {
+	normalizeSchemaNode(schema)
+}
+
+func normalizeSchemaNode(node any) {
+	obj, ok := node.(map[string]any)
+	if ok {
+		if isJSONObjectSchema(obj) {
+			if _, exists := obj["additionalProperties"]; !exists {
+				obj["additionalProperties"] = false
+			}
+		}
+		if props, ok := obj["properties"].(map[string]any); ok {
+			for _, prop := range props {
+				normalizeSchemaNode(prop)
+			}
+		}
+		if defs, ok := obj["$defs"].(map[string]any); ok {
+			for _, def := range defs {
+				normalizeSchemaNode(def)
+			}
+		}
+		if defs, ok := obj["definitions"].(map[string]any); ok {
+			for _, def := range defs {
+				normalizeSchemaNode(def)
+			}
+		}
+		if items, exists := obj["items"]; exists {
+			normalizeSchemaNode(items)
+		}
+		for _, key := range []string{"allOf", "anyOf", "oneOf"} {
+			if list, ok := obj[key].([]any); ok {
+				for _, item := range list {
+					normalizeSchemaNode(item)
+				}
+			}
+		}
+		for _, key := range []string{"not", "if", "then", "else"} {
+			if child, exists := obj[key]; exists {
+				normalizeSchemaNode(child)
+			}
+		}
+		return
+	}
+
+	if list, ok := node.([]any); ok {
+		for _, item := range list {
+			normalizeSchemaNode(item)
+		}
+	}
+}
+
+func isJSONObjectSchema(schema map[string]any) bool {
+	if len(schema) == 0 {
+		return false
+	}
+	if typeField, ok := schema["type"]; ok {
+		switch v := typeField.(type) {
+		case string:
+			return strings.TrimSpace(v) == "object"
+		case []any:
+			for _, item := range v {
+				if sv, ok := item.(string); ok && strings.TrimSpace(sv) == "object" {
+					return true
+				}
+			}
+		}
+	}
+	_, hasProps := schema["properties"]
+	return hasProps
 }
