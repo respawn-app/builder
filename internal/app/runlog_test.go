@@ -56,4 +56,13 @@ func TestFormatRuntimeEventIncludesToolMetadata(t *testing.T) {
 	if !strings.Contains(line, "is_error=true") {
 		t.Fatalf("unexpected completion line: %q", line)
 	}
+
+	line = formatRuntimeEvent(runtime.Event{
+		Kind:   runtime.EventInFlightClearFailed,
+		StepID: "step-2",
+		Error:  "mark in-flight false: write failed",
+	})
+	if !strings.Contains(line, "kind=in_flight_clear_failed") || !strings.Contains(line, `err="mark in-flight false: write failed"`) {
+		t.Fatalf("unexpected in-flight clear failure line: %q", line)
+	}
 }

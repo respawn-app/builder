@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -107,7 +106,7 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		"timeouts.model_request": "default",
 		"timeouts.shell_default": "default",
 	}
-	for _, id := range sortedToolIDs() {
+	for _, id := range tools.CatalogIDs() {
 		sources["tools."+string(id)] = "default"
 	}
 	persistenceRoot := DefaultPersistence
@@ -189,7 +188,7 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		if err != nil {
 			return App{}, fmt.Errorf("invalid BUILDER_TOOLS: %w", err)
 		}
-		for _, id := range sortedToolIDs() {
+		for _, id := range tools.CatalogIDs() {
 			merged.EnabledTools[id] = false
 			sources["tools."+string(id)] = "env"
 		}
@@ -228,7 +227,7 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		if err != nil {
 			return App{}, fmt.Errorf("invalid tools flag: %w", err)
 		}
-		for _, id := range sortedToolIDs() {
+		for _, id := range tools.CatalogIDs() {
 			merged.EnabledTools[id] = false
 			sources["tools."+string(id)] = "cli"
 		}
@@ -270,7 +269,10 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 
 func defaultSettings() Settings {
 	enabled := map[tools.ID]bool{}
-	for _, id := range sortedToolIDs() {
+	for _, id := range tools.CatalogIDs() {
+		enabled[id] = false
+	}
+	for _, id := range tools.DefaultEnabledToolIDs() {
 		enabled[id] = true
 	}
 	return Settings{
@@ -305,7 +307,7 @@ func validateSettings(v Settings) error {
 	if v.Timeouts.ShellDefaultSeconds <= 0 {
 		return fmt.Errorf("timeouts.shell_default_seconds must be > 0")
 	}
-	for _, id := range sortedToolIDs() {
+	for _, id := range tools.CatalogIDs() {
 		if _, ok := v.EnabledTools[id]; !ok {
 			v.EnabledTools[id] = false
 		}
@@ -315,7 +317,7 @@ func validateSettings(v Settings) error {
 
 func EnabledToolIDs(v Settings) []tools.ID {
 	ids := make([]tools.ID, 0, len(v.EnabledTools))
-	for _, id := range sortedToolIDs() {
+	for _, id := range tools.CatalogIDs() {
 		if v.EnabledTools[id] {
 			ids = append(ids, id)
 		}
@@ -366,12 +368,6 @@ func expandTildePath(path string) (string, error) {
 	return trimmed, nil
 }
 
-func sortedToolIDs() []tools.ID {
-	ids := []tools.ID{tools.ToolAskQuestion, tools.ToolShell, tools.ToolPatch}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	return ids
-}
-
 func ensureDefaultSettingsFile() (path string, created bool, err error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -411,15 +407,15 @@ func readSettingsFile(path string) (fileSettings, error) {
 
 func defaultSettingsTOML() string {
 	defaults := defaultSettings()
+	toolDefaults := map[string]bool{}
+	for _, id := range tools.CatalogIDs() {
+		toolDefaults[string(id)] = defaults.EnabledTools[id]
+	}
 	payload := map[string]any{
 		"model":          defaults.Model,
 		"thinking_level": defaults.ThinkingLevel,
 		"theme":          defaults.Theme,
-		"tools": map[string]bool{
-			string(tools.ToolAskQuestion): defaults.EnabledTools[tools.ToolAskQuestion],
-			string(tools.ToolShell):       defaults.EnabledTools[tools.ToolShell],
-			string(tools.ToolPatch):       defaults.EnabledTools[tools.ToolPatch],
-		},
+		"tools":          toolDefaults,
 		"timeouts": map[string]int{
 			"model_request_seconds": defaults.Timeouts.ModelRequestSeconds,
 			"shell_default_seconds": defaults.Timeouts.ShellDefaultSeconds,
@@ -427,7 +423,7 @@ func defaultSettingsTOML() string {
 		"persistence_root": DefaultPersistence,
 	}
 	encoded, _ := json.MarshalIndent(payload, "", "  ")
-	return "# builder settings\n" +
+	out := "# builder settings\n" +
 		"# edit and restart builder to apply changes\n\n" +
 		"# This JSON block mirrors current defaults for readability:\n" +
 		"# " + strings.ReplaceAll(string(encoded), "\n", "\n# ") + "\n\n" +
@@ -435,13 +431,15 @@ func defaultSettingsTOML() string {
 		"thinking_level = \"" + defaults.ThinkingLevel + "\"\n" +
 		"theme = \"" + defaults.Theme + "\"\n" +
 		"persistence_root = \"" + DefaultPersistence + "\"\n\n" +
-		"[tools]\n" +
-		string(tools.ToolAskQuestion) + " = true\n" +
-		string(tools.ToolShell) + " = true\n" +
-		string(tools.ToolPatch) + " = true\n\n" +
+		"[tools]\n"
+	for _, id := range tools.CatalogIDs() {
+		out += string(id) + " = " + strconv.FormatBool(defaults.EnabledTools[id]) + "\n"
+	}
+	out += "\n" +
 		"[timeouts]\n" +
 		"model_request_seconds = " + strconv.Itoa(defaults.Timeouts.ModelRequestSeconds) + "\n" +
 		"shell_default_seconds = " + strconv.Itoa(defaults.Timeouts.ShellDefaultSeconds) + "\n"
+	return out
 }
 
 func withPersistenceSource(s map[string]string, persistence string) map[string]string {

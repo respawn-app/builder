@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -222,11 +223,18 @@ func (s *Store) ReadEvents() ([]Event, error) {
 	}
 	defer fp.Close()
 
-	scanner := bufio.NewScanner(fp)
+	reader := bufio.NewReader(fp)
 	out := []Event{}
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	for {
+		line, readErr := reader.ReadString('\n')
+		line = strings.TrimSpace(line)
 		if line == "" {
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			if readErr != nil {
+				return nil, fmt.Errorf("read events line: %w", readErr)
+			}
 			continue
 		}
 		var evt Event
@@ -234,9 +242,12 @@ func (s *Store) ReadEvents() ([]Event, error) {
 			return nil, fmt.Errorf("parse event line: %w", err)
 		}
 		out = append(out, evt)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan events file: %w", err)
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return nil, fmt.Errorf("read events line: %w", readErr)
+		}
 	}
 	return out, nil
 }

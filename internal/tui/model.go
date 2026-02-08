@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"builder/internal/transcript"
+	"builder/internal/transcript/toolcodec"
 	"fmt"
 	"regexp"
 	"strings"
@@ -15,19 +17,16 @@ const (
 	ModeOngoing Mode = "ongoing"
 	ModeDetail  Mode = "detail"
 
-	DefaultPreviewLines    = 8
-	TranscriptDivider      = "────────────────────────"
-	toolInlineMetaSep      = "\x1f"
-	toolShellCallPrefix    = "\x1eshell_call\x1e"
-	toolPatchPayloadPrefix = "\x1epatch_payload\x1e"
-	toolPatchPayloadSep    = "\x1epatch_sep\x1e"
+	DefaultPreviewLines = 8
+	TranscriptDivider   = "────────────────────────"
 )
 
 var patchCountTokenPattern = regexp.MustCompile(`([+-]\d+)\b`)
 
 type TranscriptEntry struct {
-	Role string
-	Text string
+	Role     string
+	Text     string
+	ToolCall *transcript.ToolCallMeta
 }
 
 type ToggleModeMsg struct{}
@@ -46,8 +45,9 @@ type SetViewportSizeMsg struct {
 }
 
 type AppendTranscriptMsg struct {
-	Role string
-	Text string
+	Role     string
+	Text     string
+	ToolCall *transcript.ToolCallMeta
 }
 
 type SetConversationMsg struct {
@@ -156,13 +156,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			role = "unknown"
 		}
 		m.transcript = append(m.transcript, TranscriptEntry{
-			Role: role,
-			Text: msg.Text,
+			Role:     role,
+			Text:     msg.Text,
+			ToolCall: cloneToolCallMeta(msg.ToolCall),
 		})
 		shouldAutoFollowOngoing = true
 	case SetConversationMsg:
 		entries := make([]TranscriptEntry, len(msg.Entries))
 		copy(entries, msg.Entries)
+		for i := range entries {
+			entries[i].ToolCall = cloneToolCallMeta(entries[i].ToolCall)
+		}
 		m.transcript = entries
 		m.ongoing = msg.Ongoing
 		m.ongoingError = strings.TrimSpace(msg.OngoingError)
@@ -322,11 +326,11 @@ func (m Model) renderFlatDetailTranscript() string {
 		switch role {
 		case "tool_call":
 			blockRole := "tool"
-			if isShellToolCall(entry.Text) {
+			if isShellToolCall(entry.ToolCall, entry.Text) {
 				blockRole = "tool_shell"
 			}
-			_, patchDetail, hasPatchPayload := extractPatchPayload(entry.Text)
-			combined := entry.Text
+			_, patchDetail, hasPatchPayload := extractPatchPayload(entry.ToolCall, entry.Text)
+			combined := toolCallDisplayText(entry.ToolCall, entry.Text)
 			if hasPatchPayload {
 				combined = patchDetail
 			}
@@ -380,11 +384,11 @@ func (m Model) renderFlatOngoingTranscript() string {
 		switch role {
 		case "tool_call":
 			blockRole := "tool"
-			if isShellToolCall(entry.Text) {
+			if isShellToolCall(entry.ToolCall, entry.Text) {
 				blockRole = "tool_shell"
 			}
-			patchSummary, _, hasPatchPayload := extractPatchPayload(entry.Text)
-			combined := compactToolCallText(entry.Text)
+			patchSummary, _, hasPatchPayload := extractPatchPayload(entry.ToolCall, entry.Text)
+			combined := compactToolCallText(entry.ToolCall, entry.Text)
 			if hasPatchPayload {
 				combined = strings.TrimSpace(patchSummary)
 			}
@@ -531,51 +535,47 @@ func skipInOngoing(role string) bool {
 	}
 }
 
-func compactToolCallText(text string) string {
-	if summary, _, ok := extractPatchPayload(text); ok {
-		return strings.TrimSpace(summary)
+func compactToolCallText(meta *transcript.ToolCallMeta, text string) string {
+	if meta != nil && strings.TrimSpace(meta.Command) != "" {
+		return strings.TrimSpace(meta.Command)
 	}
-	if shellText, ok := stripShellCallPrefix(text); ok {
-		text = shellText
+	if meta != nil && strings.TrimSpace(meta.PatchSummary) != "" {
+		return strings.TrimSpace(meta.PatchSummary)
 	}
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
-		return "tool call"
+	return toolcodec.CompactCallText(text)
+}
+
+func toolCallDisplayText(meta *transcript.ToolCallMeta, text string) string {
+	command := strings.TrimSpace(text)
+	if meta != nil && strings.TrimSpace(meta.Command) != "" {
+		command = strings.TrimSpace(meta.Command)
 	}
-	parts := strings.SplitN(trimmed, "\n", 2)
-	first := strings.TrimSpace(parts[0])
-	if first == "" {
-		return "tool call"
-	}
-	command, _ := splitToolInlineMeta(first)
 	if command == "" {
-		return "tool call"
+		command = "tool call"
 	}
-	return command
+	if meta == nil || strings.TrimSpace(meta.TimeoutLabel) == "" {
+		return command
+	}
+	return command + toolcodec.InlineMetaSeparator + strings.TrimSpace(meta.TimeoutLabel)
 }
 
 func stripShellCallPrefix(text string) (string, bool) {
-	if !strings.HasPrefix(text, toolShellCallPrefix) {
-		return text, false
-	}
-	return strings.TrimPrefix(text, toolShellCallPrefix), true
+	return toolcodec.StripShellCallPrefix(text)
 }
 
-func isShellToolCall(text string) bool {
+func isShellToolCall(meta *transcript.ToolCallMeta, text string) bool {
+	if meta != nil {
+		return meta.IsShell
+	}
 	_, ok := stripShellCallPrefix(text)
 	return ok
 }
 
-func extractPatchPayload(text string) (string, string, bool) {
-	if !strings.HasPrefix(text, toolPatchPayloadPrefix) {
-		return "", "", false
+func extractPatchPayload(meta *transcript.ToolCallMeta, text string) (string, string, bool) {
+	if meta != nil && (meta.HasPatchSummary() || meta.HasPatchDetail()) {
+		return meta.PatchSummary, meta.PatchDetail, true
 	}
-	rest := strings.TrimPrefix(text, toolPatchPayloadPrefix)
-	parts := strings.SplitN(rest, toolPatchPayloadSep, 2)
-	if len(parts) != 2 {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
+	return toolcodec.DecodePatchPayload(text)
 }
 
 func isToolHeadlineRole(role string) bool {
@@ -588,19 +588,7 @@ func isToolHeadlineRole(role string) bool {
 }
 
 func splitToolInlineMeta(line string) (string, string) {
-	parts := strings.SplitN(line, toolInlineMetaSep, 2)
-	if len(parts) == 1 {
-		command := strings.TrimSpace(parts[0])
-		if stripped, ok := stripShellCallPrefix(command); ok {
-			command = stripped
-		}
-		return command, ""
-	}
-	command := strings.TrimSpace(parts[0])
-	if stripped, ok := stripShellCallPrefix(command); ok {
-		command = stripped
-	}
-	return command, strings.TrimSpace(parts[1])
+	return toolcodec.SplitInlineMeta(line)
 }
 
 func (m Model) renderToolHeadline(line string, width int) string {
@@ -698,6 +686,8 @@ func rolePrefix(role string) string {
 		return "•"
 	case "tool_shell", "tool_shell_success", "tool_shell_error":
 		return "$"
+	case "reasoning", "thinking_trace":
+		return "…"
 	default:
 		return ""
 	}
@@ -722,6 +712,8 @@ func styleForRole(role string, p palette) lipgloss.Style {
 	case "tool_shell_error":
 		return p.toolError
 	case "system":
+		return p.system
+	case "reasoning", "thinking_trace":
 		return p.system
 	case "error":
 		return p.error
@@ -787,4 +779,12 @@ func clamp(value, minValue, maxValue int) int {
 		return maxValue
 	}
 	return value
+}
+
+func cloneToolCallMeta(in *transcript.ToolCallMeta) *transcript.ToolCallMeta {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
 }
