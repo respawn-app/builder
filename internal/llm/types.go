@@ -55,6 +55,7 @@ type Request struct {
 	Temperature  float64   `json:"temperature"`
 	MaxTokens    int       `json:"max_tokens"`
 	SystemPrompt string    `json:"system_prompt"`
+	SessionID    string    `json:"session_id,omitempty"`
 	Messages     []Message `json:"messages"`
 	Tools        []Tool    `json:"tools,omitempty"`
 }
@@ -104,6 +105,7 @@ func RequestFromLockedContract(locked session.LockedContract, messages []Message
 		Temperature:  locked.Temperature,
 		MaxTokens:    locked.MaxOutputToken,
 		SystemPrompt: locked.SystemPrompt,
+		SessionID:    "",
 		Messages:     append([]Message(nil), messages...),
 		Tools:        append([]Tool(nil), tools...),
 	}

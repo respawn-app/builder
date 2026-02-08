@@ -119,3 +119,22 @@ func (m *Manager) AuthorizationHeader(ctx context.Context) (string, error) {
 
 	return method.AuthHeaderValue()
 }
+
+// OpenAIAuthMetadata exposes auth mode details for OpenAI transport behavior.
+func (m *Manager) OpenAIAuthMetadata(ctx context.Context) (method string, accountID string, err error) {
+	state, err := m.Load(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	switch state.Method.Type {
+	case MethodOAuth:
+		if state.Method.OAuth != nil {
+			return string(MethodOAuth), state.Method.OAuth.AccountID, nil
+		}
+		return string(MethodOAuth), "", nil
+	case MethodAPIKey:
+		return string(MethodAPIKey), "", nil
+	default:
+		return "", "", nil
+	}
+}

@@ -3,6 +3,7 @@ package auth
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ const (
 	DefaultOpenAIIssuer   = "https://auth.openai.com"
 	DefaultOpenAIClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 	defaultPollTimeout    = 15 * time.Minute
+	defaultUserAgent      = "builder"
 )
 
 var ErrDeviceCodeUnsupported = errors.New("device code login is not enabled")
@@ -52,6 +54,17 @@ type oauthTokenResponse struct {
 	RefreshToken string `json:"refresh_token"`
 	TokenType    string `json:"token_type"`
 	ExpiresIn    int    `json:"expires_in"`
+	IDToken      string `json:"id_token"`
+}
+
+type idTokenClaims struct {
+	ChatGPTAccountID string `json:"chatgpt_account_id"`
+	Organizations    []struct {
+		ID string `json:"id"`
+	} `json:"organizations"`
+	OpenAIAuth struct {
+		ChatGPTAccountID string `json:"chatgpt_account_id"`
+	} `json:"https://api.openai.com/auth"`
 }
 
 func normalizeOpenAIOAuthOptions(opts OpenAIOAuthOptions) OpenAIOAuthOptions {
@@ -103,6 +116,7 @@ func requestOpenAIDeviceCode(ctx context.Context, opts OpenAIOAuthOptions) (Devi
 		return DeviceCode{}, fmt.Errorf("create device code request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", defaultUserAgent)
 
 	resp, err := opts.HTTPClient.Do(req)
 	if err != nil {
@@ -165,6 +179,7 @@ func pollOpenAIDeviceAuthToken(ctx context.Context, opts OpenAIOAuthOptions, cod
 			return deviceTokenPollResponse{}, fmt.Errorf("create token poll request: %w", err)
 		}
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", defaultUserAgent)
 
 		resp, err := opts.HTTPClient.Do(req)
 		if err != nil {
@@ -266,6 +281,7 @@ func exchangeOpenAIAuthorizationCode(ctx context.Context, opts OpenAIOAuthOption
 			RefreshToken: parsed.RefreshToken,
 			TokenType:    tokenType,
 			Expiry:       expiresAt,
+			AccountID:    extractAccountID(parsed),
 		},
 	}, nil
 }
@@ -281,18 +297,16 @@ func RefreshOpenAIAuthToken(ctx context.Context, opts OpenAIOAuthOptions, method
 
 	issuer := strings.TrimSuffix(opts.Issuer, "/")
 	endpoint := issuer + "/oauth/token"
-	payload, _ := json.Marshal(map[string]string{
-		"client_id":     opts.ClientID,
-		"grant_type":    "refresh_token",
-		"refresh_token": method.OAuth.RefreshToken,
-		"scope":         "openid profile email",
-	})
+	values := url.Values{}
+	values.Set("client_id", opts.ClientID)
+	values.Set("grant_type", "refresh_token")
+	values.Set("refresh_token", method.OAuth.RefreshToken)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(values.Encode()))
 	if err != nil {
 		return Method{}, fmt.Errorf("create refresh request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := opts.HTTPClient.Do(req)
 	if err != nil {
@@ -326,6 +340,9 @@ func RefreshOpenAIAuthToken(ctx context.Context, opts OpenAIOAuthOptions, method
 	}
 	if strings.TrimSpace(updated.OAuth.TokenType) == "" {
 		updated.OAuth.TokenType = "Bearer"
+	}
+	if accountID := extractAccountID(parsed); strings.TrimSpace(accountID) != "" {
+		updated.OAuth.AccountID = accountID
 	}
 	if parsed.ExpiresIn > 0 {
 		updated.OAuth.Expiry = time.Now().UTC().Add(time.Duration(parsed.ExpiresIn) * time.Second)
@@ -365,4 +382,49 @@ func parsePollInterval(v any) (int64, error) {
 	default:
 		return 0, fmt.Errorf("invalid interval type %T", v)
 	}
+}
+
+func extractAccountID(tokens oauthTokenResponse) string {
+	if strings.TrimSpace(tokens.IDToken) != "" {
+		if claims, err := parseJWTClaims(tokens.IDToken); err == nil {
+			if accountID := extractAccountIDFromClaims(claims); accountID != "" {
+				return accountID
+			}
+		}
+	}
+	if strings.TrimSpace(tokens.AccessToken) != "" {
+		if claims, err := parseJWTClaims(tokens.AccessToken); err == nil {
+			return extractAccountIDFromClaims(claims)
+		}
+	}
+	return ""
+}
+
+func extractAccountIDFromClaims(claims idTokenClaims) string {
+	if v := strings.TrimSpace(claims.ChatGPTAccountID); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(claims.OpenAIAuth.ChatGPTAccountID); v != "" {
+		return v
+	}
+	if len(claims.Organizations) > 0 {
+		return strings.TrimSpace(claims.Organizations[0].ID)
+	}
+	return ""
+}
+
+func parseJWTClaims(token string) (idTokenClaims, error) {
+	var out idTokenClaims
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return out, errors.New("invalid token")
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return out, err
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return out, err
+	}
+	return out, nil
 }
