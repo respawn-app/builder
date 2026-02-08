@@ -383,7 +383,7 @@ func (e *Engine) generateWithRetry(ctx context.Context, req llm.Request, onDelta
 
 func (e *Engine) executeToolCalls(ctx context.Context, stepID string, calls []llm.ToolCall) ([]tools.Result, error) {
 	results := make([]tools.Result, len(calls))
-	errCh := make(chan error, len(calls))
+	callErrs := make([]error, len(calls))
 	wg := sync.WaitGroup{}
 
 	for i := range calls {
@@ -396,45 +396,59 @@ func (e *Engine) executeToolCalls(ctx context.Context, stepID string, calls []ll
 		wg.Add(1)
 		go func(tc llm.ToolCall) {
 			defer wg.Done()
+			var callErr error
+
 			toolID, ok := tools.ParseID(tc.Name)
 			if !ok {
 				results[idx] = tools.Result{CallID: tc.ID, Name: tools.ID(tc.Name), IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
-				_ = e.persistToolCompletion(stepID, results[idx])
+				if err := e.persistToolCompletion(stepID, results[idx]); err != nil {
+					callErrs[idx] = fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", tc.ID, results[idx].Name, err)
+				} else {
+					e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: &results[idx]})
+				}
 				return
 			}
 			h, ok := e.registry.Get(toolID)
 			if !ok {
 				results[idx] = tools.Result{CallID: tc.ID, Name: toolID, IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
-				_ = e.persistToolCompletion(stepID, results[idx])
+				if err := e.persistToolCompletion(stepID, results[idx]); err != nil {
+					callErrs[idx] = fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", tc.ID, results[idx].Name, err)
+				} else {
+					e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: &results[idx]})
+				}
 				return
 			}
 			res, err := h.Call(ctx, tools.Call{ID: tc.ID, Name: toolID, Input: tc.Input, StepID: stepID})
 			if err != nil {
-				errCh <- err
+				callErr = err
 				res = tools.Result{CallID: tc.ID, Name: toolID, IsError: true, Output: mustJSON(map[string]any{"error": err.Error()})}
 			}
 			if res.Name == "" {
 				res.Name = toolID
 			}
 			results[idx] = res
-			_ = e.persistToolCompletion(stepID, res)
+			if err := e.persistToolCompletion(stepID, res); err != nil {
+				persistErr := fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", tc.ID, res.Name, err)
+				callErrs[idx] = errors.Join(callErr, persistErr)
+				return
+			}
 			e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: &res})
+			callErrs[idx] = callErr
 		}(call)
 	}
 
 	wg.Wait()
-	close(errCh)
-
-	for err := range errCh {
-		if err != nil {
-			return results, err
-		}
+	var joined error
+	for _, err := range callErrs {
+		joined = errors.Join(joined, err)
+	}
+	if joined != nil {
+		return results, joined
 	}
 	return results, nil
 }
 
 func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
-	e.chat.recordToolCompletion(r)
 	_, err := e.store.AppendEvent(stepID, "tool_completed", map[string]any{
 		"call_id":  r.CallID,
 		"name":     string(r.Name),
@@ -442,6 +456,7 @@ func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
 		"output":   json.RawMessage(r.Output),
 	})
 	if err == nil {
+		e.chat.recordToolCompletion(r)
 		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
 	}
 	return err
