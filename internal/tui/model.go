@@ -300,17 +300,20 @@ func (m Model) renderFlatDetailTranscript() string {
 		role := strings.TrimSpace(entry.Role)
 		switch role {
 		case "tool_call":
+			blockRole := "tool"
 			combined := entry.Text
-			if i+1 < len(m.transcript) && strings.TrimSpace(m.transcript[i+1].Role) == "tool_result" {
+			if i+1 < len(m.transcript) && isToolResultRole(m.transcript[i+1].Role) {
+				nextRole := strings.TrimSpace(m.transcript[i+1].Role)
 				resultText := m.transcript[i+1].Text
 				if strings.TrimSpace(resultText) != "" {
 					combined = combined + "\n\n" + resultText
 				}
+				blockRole = toolBlockRoleFromResult(nextRole)
 				i++
 			}
-			blocks = append(blocks, m.flattenEntry("tool", combined))
-		case "tool_result":
-			blocks = append(blocks, m.flattenEntry("tool", entry.Text))
+			blocks = append(blocks, m.flattenEntry(blockRole, combined))
+		case "tool_result", "tool_result_ok", "tool_result_error":
+			blocks = append(blocks, m.flattenEntry(toolBlockRoleFromResult(role), entry.Text))
 		default:
 			blocks = append(blocks, m.flattenEntry(role, entry.Text))
 		}
@@ -341,20 +344,18 @@ func (m Model) renderFlatOngoingTranscript() string {
 		}
 		switch role {
 		case "tool_call":
+			blockRole := "tool"
 			combined := compactToolCallText(entry.Text)
 			if i+1 < len(m.transcript) {
 				nextRole := strings.TrimSpace(m.transcript[i+1].Role)
-				if nextRole == "tool_result" {
-					resultText := m.transcript[i+1].Text
-					if strings.TrimSpace(resultText) != "" {
-						combined = combined + "\n\n" + resultText
-					}
+				if isToolResultRole(nextRole) {
+					blockRole = toolBlockRoleFromResult(nextRole)
 					i++
 				}
 			}
-			blocks = append(blocks, m.flattenEntry("tool", combined))
-		case "tool_result":
-			blocks = append(blocks, m.flattenEntry("tool", entry.Text))
+			blocks = append(blocks, m.flattenEntry(blockRole, combined))
+		case "tool_result", "tool_result_ok", "tool_result_error":
+			continue
 		default:
 			blocks = append(blocks, m.flattenEntry(role, entry.Text))
 		}
@@ -385,7 +386,7 @@ func (m Model) flattenEntry(role, text string) []string {
 	if len(chunks) == 0 {
 		chunks = []string{""}
 	}
-	symbol := rolePrefix(role)
+	symbol := m.roleSymbol(role)
 	out := make([]string, 0, len(chunks))
 	for i, chunk := range chunks {
 		if i == 0 {
@@ -410,7 +411,7 @@ func (m Model) flattenEntryPlain(role, text string) []string {
 	if len(chunks) == 0 {
 		chunks = []string{""}
 	}
-	symbol := rolePrefix(role)
+	symbol := m.roleSymbol(role)
 	out := make([]string, 0, len(chunks))
 	for i, chunk := range chunks {
 		if i == 0 {
@@ -470,13 +471,45 @@ func compactToolCallText(text string) string {
 	return first
 }
 
+func isToolResultRole(role string) bool {
+	switch strings.TrimSpace(role) {
+	case "tool_result", "tool_result_ok", "tool_result_error":
+		return true
+	default:
+		return false
+	}
+}
+
+func toolBlockRoleFromResult(role string) string {
+	if strings.TrimSpace(role) == "tool_result_error" {
+		return "tool_error"
+	}
+	if isToolResultRole(role) {
+		return "tool_success"
+	}
+	return "tool"
+}
+
+func (m Model) roleSymbol(role string) string {
+	prefix := rolePrefix(role)
+	if prefix == "" {
+		return ""
+	}
+	switch role {
+	case "tool", "tool_success", "tool_error":
+		return styleForRole(role, m.palette()).Render(prefix)
+	default:
+		return prefix
+	}
+}
+
 func rolePrefix(role string) string {
 	switch role {
 	case "user":
 		return "❯"
 	case "assistant":
 		return "❮"
-	case "tool":
+	case "tool", "tool_success", "tool_error":
 		return "•"
 	default:
 		return ""
@@ -491,6 +524,10 @@ func styleForRole(role string, p palette) lipgloss.Style {
 		return p.model
 	case "tool_call", "tool_result":
 		return p.tool
+	case "tool_success", "tool_result_ok":
+		return p.toolSuccess
+	case "tool_error", "tool_result_error":
+		return p.toolError
 	case "system":
 		return p.system
 	case "error":
@@ -501,12 +538,14 @@ func styleForRole(role string, p palette) lipgloss.Style {
 }
 
 type palette struct {
-	preview lipgloss.Style
-	user    lipgloss.Style
-	model   lipgloss.Style
-	tool    lipgloss.Style
-	system  lipgloss.Style
-	error   lipgloss.Style
+	preview     lipgloss.Style
+	user        lipgloss.Style
+	model       lipgloss.Style
+	tool        lipgloss.Style
+	toolSuccess lipgloss.Style
+	toolError   lipgloss.Style
+	system      lipgloss.Style
+	error       lipgloss.Style
 }
 
 func (m Model) palette() palette {
@@ -514,18 +553,22 @@ func (m Model) palette() palette {
 	user := lipgloss.AdaptiveColor{Light: "#005CC5", Dark: "#61AFEF"}
 	model := lipgloss.AdaptiveColor{Light: "#22863A", Dark: "#98C379"}
 	tool := lipgloss.AdaptiveColor{Light: "#8A63D2", Dark: "#C678DD"}
+	toolSuccess := lipgloss.AdaptiveColor{Light: "#22863A", Dark: "#98C379"}
+	toolError := lipgloss.AdaptiveColor{Light: "#D73A49", Dark: "#E06C75"}
 	system := lipgloss.AdaptiveColor{Light: "#6A737D", Dark: "#ABB2BF"}
 	err := lipgloss.AdaptiveColor{Light: "#D73A49", Dark: "#E06C75"}
 	if m.theme == "light" {
 		base = lipgloss.AdaptiveColor{Light: "#5C6370", Dark: "#5C6370"}
 	}
 	return palette{
-		preview: lipgloss.NewStyle().Foreground(base),
-		user:    lipgloss.NewStyle().Foreground(user),
-		model:   lipgloss.NewStyle().Foreground(model),
-		tool:    lipgloss.NewStyle().Foreground(tool),
-		system:  lipgloss.NewStyle().Foreground(system).Faint(true),
-		error:   lipgloss.NewStyle().Foreground(err),
+		preview:     lipgloss.NewStyle().Foreground(base),
+		user:        lipgloss.NewStyle().Foreground(user),
+		model:       lipgloss.NewStyle().Foreground(model),
+		tool:        lipgloss.NewStyle().Foreground(tool),
+		toolSuccess: lipgloss.NewStyle().Foreground(toolSuccess),
+		toolError:   lipgloss.NewStyle().Foreground(toolError),
+		system:      lipgloss.NewStyle().Foreground(system).Faint(true),
+		error:       lipgloss.NewStyle().Foreground(err),
 	}
 }
 

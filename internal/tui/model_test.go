@@ -142,7 +142,7 @@ func TestDetailUsesRequestedSymbolsAndDividers(t *testing.T) {
 	if !strings.Contains(view, "❮ hi") {
 		t.Fatalf("expected assistant symbol, got %q", view)
 	}
-	if !strings.Contains(view, "• call") || !strings.Contains(view, "result") {
+	if !strings.Contains(view, "•") || !strings.Contains(view, "call") || !strings.Contains(view, "result") {
 		t.Fatalf("expected tool call/result pair with tool symbol, got %q", view)
 	}
 	if got := strings.Count(view, strings.Repeat("─", 24)); got != 2 {
@@ -154,21 +154,33 @@ func TestOngoingCompactsToolCallAndHidesThinking(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "run command"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "thinking", Text: "internal trace"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: "id=call_1 name=bash\ninput:\n{\"command\":\"pwd\"}"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result", Text: "id=call_1 name=bash error=false\noutput:\n{\"stdout\":\"/tmp\"}"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: "input: command: pwd\nworkdir: /tmp"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "output: /tmp"})
 
 	view := m.View()
 	if strings.Contains(view, "internal trace") {
 		t.Fatalf("expected thinking trace hidden in ongoing view, got %q", view)
 	}
-	if strings.Contains(view, "input:") {
-		t.Fatalf("expected compact tool call without input payload in ongoing view, got %q", view)
+	if !strings.Contains(view, "input: command: pwd") {
+		t.Fatalf("expected compact one-line tool input in ongoing view, got %q", view)
 	}
-	if !strings.Contains(view, "• id=call_1 name=bash") {
-		t.Fatalf("expected compact tool call headline in ongoing view, got %q", view)
+	if strings.Contains(view, "workdir: /tmp") {
+		t.Fatalf("expected tool input to stay one line in ongoing view, got %q", view)
 	}
-	if !strings.Contains(view, "output:") {
-		t.Fatalf("expected tool result to remain visible in ongoing view, got %q", view)
+	if strings.Contains(view, "output:") {
+		t.Fatalf("expected tool output to be omitted in ongoing view, got %q", view)
+	}
+}
+
+func TestToolBlockRoleFromResult(t *testing.T) {
+	if got := toolBlockRoleFromResult("tool_result_ok"); got != "tool_success" {
+		t.Fatalf("unexpected role for success result: %q", got)
+	}
+	if got := toolBlockRoleFromResult("tool_result_error"); got != "tool_error" {
+		t.Fatalf("unexpected role for error result: %q", got)
+	}
+	if got := toolBlockRoleFromResult("tool_result"); got != "tool_success" {
+		t.Fatalf("unexpected role for legacy result: %q", got)
 	}
 }
 
