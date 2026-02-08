@@ -8,6 +8,9 @@ import (
 	"sync"
 
 	"github.com/charmbracelet/glamour"
+	glamouransi "github.com/charmbracelet/glamour/ansi"
+	"github.com/charmbracelet/glamour/styles"
+	xansi "github.com/charmbracelet/x/ansi"
 )
 
 const markdownCacheLimit = 1024
@@ -35,8 +38,8 @@ func (r *markdownRenderer) render(role, text string, width int) (string, error) 
 	if !isMarkdownRole(role) {
 		return text, nil
 	}
-	if width < 8 {
-		width = 8
+	if width < 1 {
+		width = 1
 	}
 
 	key := fmt.Sprintf("%s|%s|%d|%x", r.theme, role, width, hashString(text))
@@ -56,6 +59,7 @@ func (r *markdownRenderer) render(role, text string, width int) (string, error) 
 		return "", err
 	}
 	out = strings.TrimRight(out, "\n")
+	out = xansi.Wordwrap(out, width, " ,.;-+|")
 
 	if len(r.cache) >= markdownCacheLimit {
 		r.cache = make(map[string]string, 128)
@@ -69,13 +73,28 @@ func (r *markdownRenderer) getRenderer(width int) (*glamour.TermRenderer, error)
 		return existing, nil
 	}
 	termRenderer, err := glamour.NewTermRenderer(
-		glamour.WithWordWrap(width),
+		glamour.WithWordWrap(0),
+		glamour.WithStyles(r.styleConfig()),
 	)
 	if err != nil {
 		return nil, err
 	}
 	r.renderers[width] = termRenderer
 	return termRenderer, nil
+}
+
+func (r *markdownRenderer) styleConfig() glamouransi.StyleConfig {
+	var cfg glamouransi.StyleConfig
+	if strings.EqualFold(strings.TrimSpace(r.theme), "light") {
+		cfg = styles.LightStyleConfig
+	} else {
+		cfg = styles.DarkStyleConfig
+	}
+	zero := uint(0)
+	cfg.Document.Margin = &zero
+	cfg.Document.BlockPrefix = ""
+	cfg.Document.BlockSuffix = ""
+	return cfg
 }
 
 func isMarkdownRole(role string) bool {

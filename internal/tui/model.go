@@ -122,6 +122,9 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	wasAtOngoingBottom := m.isOngoingAtBottom()
+	shouldAutoFollowOngoing := false
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.Type {
@@ -156,14 +159,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Role: role,
 			Text: msg.Text,
 		})
+		shouldAutoFollowOngoing = true
 	case SetConversationMsg:
 		entries := make([]TranscriptEntry, len(msg.Entries))
 		copy(entries, msg.Entries)
 		m.transcript = entries
 		m.ongoing = msg.Ongoing
 		m.ongoingError = strings.TrimSpace(msg.OngoingError)
+		shouldAutoFollowOngoing = true
 	case StreamAssistantMsg:
 		m.ongoing += msg.Delta
+		shouldAutoFollowOngoing = true
 	case ClearOngoingAssistantMsg:
 		m.ongoing = ""
 		m.ongoingScroll = 0
@@ -174,6 +180,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Text: m.ongoing,
 			})
 			m.ongoing = ""
+			shouldAutoFollowOngoing = true
 		}
 	case SetOngoingErrorMsg:
 		m.ongoingError = FormatOngoingError(msg.Err)
@@ -183,6 +190,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	m.ongoingScroll = clamp(m.ongoingScroll, 0, m.maxOngoingScroll())
 	m.detailScroll = clamp(m.detailScroll, 0, m.maxDetailScroll())
+	if m.mode == ModeOngoing && shouldAutoFollowOngoing && wasAtOngoingBottom {
+		m.ongoingScroll = m.maxOngoingScroll()
+	}
 	return m, nil
 }
 
@@ -246,6 +256,10 @@ func (m Model) maxDetailScroll() int {
 		return 0
 	}
 	return len(lines) - m.viewportLines
+}
+
+func (m Model) isOngoingAtBottom() bool {
+	return m.ongoingScroll >= m.maxOngoingScroll()
 }
 
 func (m Model) renderOngoing() string {
@@ -351,7 +365,12 @@ func (m Model) renderFlatDetailTranscript() string {
 }
 
 func (m Model) renderFlatOngoingTranscript() string {
-	blocks := make([][]string, 0, len(m.transcript)+1)
+	type ongoingBlock struct {
+		role  string
+		lines []string
+	}
+
+	blocks := make([]ongoingBlock, 0, len(m.transcript)+1)
 	for i := 0; i < len(m.transcript); i++ {
 		entry := m.transcript[i]
 		role := strings.TrimSpace(entry.Role)
@@ -376,27 +395,52 @@ func (m Model) renderFlatOngoingTranscript() string {
 					i++
 				}
 			}
-			blocks = append(blocks, m.flattenEntry(blockRole, combined))
+			blocks = append(blocks, ongoingBlock{
+				role:  blockRole,
+				lines: m.styleOngoingToolBlock(blockRole, m.flattenEntry(blockRole, combined)),
+			})
 		case "tool_result", "tool_result_ok", "tool_result_error":
 			continue
 		default:
-			blocks = append(blocks, m.flattenEntry(role, entry.Text))
+			blocks = append(blocks, ongoingBlock{
+				role:  role,
+				lines: m.flattenEntry(role, entry.Text),
+			})
 		}
 	}
 	if m.ongoing != "" {
-		blocks = append(blocks, m.flattenEntryPlain("assistant", m.ongoing))
+		blocks = append(blocks, ongoingBlock{
+			role:  "assistant",
+			lines: m.flattenEntryPlain("assistant", m.ongoing),
+		})
 	}
 	if len(blocks) == 0 {
 		return ""
 	}
 	lines := make([]string, 0, len(blocks)*2)
 	for idx, block := range blocks {
-		if idx > 0 {
+		if idx > 0 && ongoingDividerGroup(blocks[idx-1].role) != ongoingDividerGroup(block.role) {
 			lines = append(lines, detailDivider())
 		}
-		lines = append(lines, block...)
+		lines = append(lines, block.lines...)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m Model) styleOngoingToolBlock(role string, lines []string) []string {
+	if !isToolHeadlineRole(role) {
+		return lines
+	}
+	muted := m.palette().preview.Faint(true)
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			out[i] = line
+			continue
+		}
+		out[i] = muted.Render(line)
+	}
+	return out
 }
 
 func (m Model) flattenEntry(role, text string) []string {
@@ -477,6 +521,14 @@ func (m Model) renderEntryText(role, text string, width int) string {
 
 func detailDivider() string {
 	return TranscriptDivider
+}
+
+func ongoingDividerGroup(role string) string {
+	trimmed := strings.TrimSpace(role)
+	if isToolHeadlineRole(trimmed) {
+		return "tool"
+	}
+	return strings.ToLower(trimmed)
 }
 
 func skipInOngoing(role string) bool {
