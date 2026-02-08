@@ -92,7 +92,10 @@ func (t *HTTPTransport) Generate(ctx context.Context, request OpenAIRequest) (Op
 		return OpenAIResponse{}, fmt.Errorf("read openai responses response: %w", err)
 	}
 	if resp.StatusCode >= 300 {
-		return OpenAIResponse{}, fmt.Errorf("openai status %d: %s", resp.StatusCode, truncateError(respBody))
+		return OpenAIResponse{}, &APIStatusError{
+			StatusCode: resp.StatusCode,
+			Body:       truncateError(respBody),
+		}
 	}
 
 	var decoded responsesEnvelope
@@ -147,7 +150,10 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 
 	if resp.StatusCode >= 300 {
 		respBody, _ := io.ReadAll(resp.Body)
-		return OpenAIResponse{}, fmt.Errorf("openai status %d: %s", resp.StatusCode, truncateError(respBody))
+		return OpenAIResponse{}, &APIStatusError{
+			StatusCode: resp.StatusCode,
+			Body:       truncateError(respBody),
+		}
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -244,14 +250,14 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 func (t *HTTPTransport) resolveAuth(ctx context.Context) (string, openAIAuthMode, error) {
 	authHeader, err := t.Auth.AuthorizationHeader(ctx)
 	if err != nil {
-		return "", openAIAuthMode{}, err
+		return "", openAIAuthMode{}, &AuthError{Err: err}
 	}
 
 	mode := openAIAuthMode{}
 	if provider, ok := t.Auth.(OpenAIAuthMetadataProvider); ok {
 		method, accountID, err := provider.OpenAIAuthMetadata(ctx)
 		if err != nil {
-			return "", openAIAuthMode{}, err
+			return "", openAIAuthMode{}, &AuthError{Err: err}
 		}
 		mode.IsOAuth = method == "oauth"
 		mode.AccountID = strings.TrimSpace(accountID)

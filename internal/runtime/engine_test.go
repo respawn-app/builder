@@ -80,6 +80,24 @@ func (f *fakeStreamClient) GenerateStream(_ context.Context, req llm.Request, on
 	}
 }
 
+type authFailClient struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (c *authFailClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
+	c.mu.Lock()
+	c.calls++
+	c.mu.Unlock()
+	return llm.Response{}, &llm.APIStatusError{StatusCode: 401, Body: `{"error":"invalid_api_key"}`}
+}
+
+func (c *authFailClient) Calls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
+}
+
 func TestLocksAtFirstDispatch(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -250,5 +268,29 @@ func TestStreamingRetryResetsAttemptDeltas(t *testing.T) {
 	}
 	if !(firstDelta < reset && reset < secondDelta) {
 		t.Fatalf("unexpected delta/reset ordering first=%d reset=%d second=%d", firstDelta, reset, secondDelta)
+	}
+}
+
+func TestAuthErrorsAreNotRetried(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &authFailClient{}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: "noop"}), Config{
+		Model: "gpt-5",
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	_, err = eng.SubmitUserMessage(context.Background(), "trigger auth error")
+	if err == nil {
+		t.Fatal("expected auth failure")
+	}
+	if client.Calls() != 1 {
+		t.Fatalf("expected single model attempt on auth error, got %d", client.Calls())
 	}
 }
