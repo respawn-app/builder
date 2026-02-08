@@ -229,7 +229,7 @@ func (t *HTTPTransport) buildPayload(request OpenAIRequest, mode openAIAuthMode)
 			}
 		}
 		normalizeSchemaAdditionalProperties(params)
-		toolParam := responses.ToolParamOfFunction(tool.Name, params, true)
+		toolParam := responses.ToolParamOfFunction(tool.Name, params, false)
 		if desc := strings.TrimSpace(tool.Description); desc != "" && toolParam.OfFunction != nil {
 			toolParam.OfFunction.Description = openai.String(desc)
 		}
