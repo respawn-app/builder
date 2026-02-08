@@ -24,10 +24,11 @@ const (
 )
 
 type Message struct {
-	Role       Role   `json:"role"`
-	Content    string `json:"content"`
-	Name       string `json:"name,omitempty"`
-	ToolCallID string `json:"tool_call_id,omitempty"`
+	Role       Role       `json:"role"`
+	Content    string     `json:"content,omitempty"`
+	Name       string     `json:"name,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 }
 
 type Tool struct {
@@ -92,7 +93,7 @@ func RequestFromLockedContract(locked session.LockedContract, messages []Message
 		return Request{}, fmt.Errorf("%w: locked tools_json is invalid", ErrInvalidRequest)
 	}
 
-	if len(tools) == 0 && len(locked.ToolsJSON) > 0 {
+	if tools == nil && len(locked.ToolsJSON) > 0 {
 		if err := json.Unmarshal(locked.ToolsJSON, &tools); err != nil {
 			return Request{}, fmt.Errorf("%w: decode locked tools: %v", ErrInvalidRequest, err)
 		}

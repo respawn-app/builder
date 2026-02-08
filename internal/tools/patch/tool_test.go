@@ -81,3 +81,29 @@ func TestAddUpdateMove(t *testing.T) {
 		t.Fatalf("unexpected added contents: %q", string(added))
 	}
 }
+
+func TestAddFileInNewDirectory(t *testing.T) {
+	dir := t.TempDir()
+	tool, err := New(dir, true)
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	patchText := "*** Begin Patch\n*** Add File: nested/new/file.txt\n+hello\n*** End Patch\n"
+	input, _ := json.Marshal(map[string]any{"patch": patchText})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "3", Name: "patch", Input: input})
+	if err != nil {
+		t.Fatalf("patch call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got %s", string(result.Output))
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "nested", "new", "file.txt"))
+	if err != nil {
+		t.Fatalf("read added file: %v", err)
+	}
+	if string(data) != "hello\n" {
+		t.Fatalf("unexpected file content: %q", string(data))
+	}
+}

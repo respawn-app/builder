@@ -81,8 +81,7 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 		return nil, err
 	}
 	if meta.InFlightStep {
-		eng.messages = append(eng.messages, llm.Message{Role: llm.RoleDeveloper, Content: interruptMessage})
-		if _, err := store.AppendEvent("", "message", eng.messages[len(eng.messages)-1]); err != nil {
+		if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, Content: interruptMessage}); err != nil {
 			return nil, err
 		}
 		if err := store.MarkInFlight(false); err != nil {
@@ -110,11 +109,7 @@ func (e *Engine) Interrupt() error {
 	}
 	cancel()
 
-	e.mu.Lock()
-	e.messages = append(e.messages, llm.Message{Role: llm.RoleDeveloper, Content: interruptMessage})
-	e.mu.Unlock()
-
-	if _, err := e.store.AppendEvent("", "message", llm.Message{Role: llm.RoleDeveloper, Content: interruptMessage}); err != nil {
+	if err := e.appendMessage("", llm.Message{Role: llm.RoleDeveloper, Content: interruptMessage}); err != nil {
 		return err
 	}
 	if err := e.store.MarkInFlight(false); err != nil {
@@ -187,7 +182,11 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 			return llm.Message{}, err
 		}
 
-		if err := e.appendAssistantMessage(stepID, resp.Assistant); err != nil {
+		assistantMsg := resp.Assistant
+		if len(resp.ToolCalls) > 0 {
+			assistantMsg.ToolCalls = append([]llm.ToolCall(nil), resp.ToolCalls...)
+		}
+		if err := e.appendAssistantMessage(stepID, assistantMsg); err != nil {
 			return llm.Message{}, err
 		}
 
@@ -214,8 +213,7 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 				ToolCallID: r.CallID,
 				Name:       r.Name,
 			}
-			e.messages = append(e.messages, msg)
-			if _, err := e.store.AppendEvent(stepID, "message", msg); err != nil {
+			if err := e.appendMessage(stepID, msg); err != nil {
 				return llm.Message{}, err
 			}
 		}
@@ -226,8 +224,7 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 
 		if e.handoffPending {
 			handoff := llm.Message{Role: llm.RoleDeveloper, Content: handoffInstruction}
-			e.messages = append(e.messages, handoff)
-			if _, err := e.store.AppendEvent(stepID, "message", handoff); err != nil {
+			if err := e.appendMessage(stepID, handoff); err != nil {
 				return llm.Message{}, err
 			}
 			allowTools = false
@@ -241,16 +238,20 @@ func (e *Engine) buildRequest(_ string, allowTools bool) (llm.Request, error) {
 		return llm.Request{}, err
 	}
 
-	requestTools := []llm.Tool{}
+	var requestTools []llm.Tool
 	if allowTools {
 		defs := e.registry.Definitions()
+		if len(defs) > 0 {
+			requestTools = make([]llm.Tool, 0, len(defs))
+		}
 		for _, d := range defs {
 			requestTools = append(requestTools, llm.Tool{Name: d.Name, Description: d.Description, Schema: d.Schema})
 		}
+	} else {
+		requestTools = []llm.Tool{}
 	}
 
-	msgs := make([]llm.Message, len(e.messages))
-	copy(msgs, e.messages)
+	msgs := e.snapshotMessages()
 
 	return llm.RequestFromLockedContract(locked, msgs, requestTools)
 }
@@ -355,13 +356,17 @@ func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
 
 func (e *Engine) appendUserMessage(stepID, text string) error {
 	msg := llm.Message{Role: llm.RoleUser, Content: text}
-	e.messages = append(e.messages, msg)
-	_, err := e.store.AppendEvent(stepID, "message", msg)
-	return err
+	return e.appendMessage(stepID, msg)
 }
 
 func (e *Engine) appendAssistantMessage(stepID string, msg llm.Message) error {
+	return e.appendMessage(stepID, msg)
+}
+
+func (e *Engine) appendMessage(stepID string, msg llm.Message) error {
+	e.mu.Lock()
 	e.messages = append(e.messages, msg)
+	e.mu.Unlock()
 	_, err := e.store.AppendEvent(stepID, "message", msg)
 	return err
 }
@@ -417,8 +422,18 @@ func (e *Engine) restoreMessages() error {
 		}
 		msgs = append(msgs, msg)
 	}
+	e.mu.Lock()
 	e.messages = msgs
+	e.mu.Unlock()
 	return nil
+}
+
+func (e *Engine) snapshotMessages() []llm.Message {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	msgs := make([]llm.Message, len(e.messages))
+	copy(msgs, e.messages)
+	return msgs
 }
 
 func mustJSON(v any) json.RawMessage {

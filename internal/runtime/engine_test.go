@@ -134,4 +134,21 @@ func TestParallelToolsReturnDeclaredOrder(t *testing.T) {
 		t.Fatalf("tool order mismatch: first=%s second=%s", toolMessages[0].ToolCallID, toolMessages[1].ToolCallID)
 	}
 
+	if len(client.calls) < 2 {
+		t.Fatalf("expected at least 2 model requests, got %d", len(client.calls))
+	}
+	secondReq := client.calls[1]
+	foundAssistantWithCalls := false
+	for _, msg := range secondReq.Messages {
+		if msg.Role == llm.RoleAssistant && len(msg.ToolCalls) == 2 {
+			if msg.ToolCalls[0].ID == "a" && msg.ToolCalls[1].ID == "b" {
+				foundAssistantWithCalls = true
+				break
+			}
+		}
+	}
+	if !foundAssistantWithCalls {
+		t.Fatalf("second request is missing assistant tool call metadata: %+v", secondReq.Messages)
+	}
+
 }

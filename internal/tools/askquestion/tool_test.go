@@ -2,6 +2,7 @@ package askquestion
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -61,5 +62,37 @@ func TestBrokerFIFOQueue(t *testing.T) {
 
 	if got["q1"] != "a1" || got["q2"] != "a2" {
 		t.Fatalf("unexpected answers: %+v", got)
+	}
+}
+
+func TestCanceledAskIsRemovedFromPendingQueue(t *testing.T) {
+	b := NewBroker(actions.NewRegistry())
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+
+	go func() {
+		_, err := b.Ask(ctx, Request{ID: "q-cancel", Question: "will cancel?"})
+		done <- err
+	}()
+
+	for i := 0; i < 100; i++ {
+		if len(b.Pending()) == 1 {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context canceled error, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for canceled ask")
+	}
+
+	if pending := b.Pending(); len(pending) != 0 {
+		t.Fatalf("pending queue should be empty after cancellation, got %+v", pending)
 	}
 }
