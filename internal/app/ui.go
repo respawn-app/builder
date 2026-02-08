@@ -648,9 +648,10 @@ func formatSubmissionError(err error) string {
 }
 
 var spinnerFrames = []string{"|", "/", "-", "\\"}
+var spinnerTickInterval = 360 * time.Millisecond
 
 func tickSpinner() tea.Cmd {
-	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg {
+	return tea.Tick(spinnerTickInterval, func(time.Time) tea.Msg {
 		return spinnerTickMsg{}
 	})
 }

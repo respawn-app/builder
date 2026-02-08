@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -300,5 +303,91 @@ func TestAuthErrorsAreNotRetried(t *testing.T) {
 	}
 	if client.Calls() != 1 {
 		t.Fatalf("expected single model attempt on auth error, got %d", client.Calls())
+	}
+}
+
+func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserMessage(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	globalDir := filepath.Join(home, ".builder")
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatalf("mkdir global dir: %v", err)
+	}
+	globalPath := filepath.Join(globalDir, "AGENTS.md")
+	if err := os.WriteFile(globalPath, []byte("global instructions"), 0o644); err != nil {
+		t.Fatalf("write global AGENTS.md: %v", err)
+	}
+
+	workspace := t.TempDir()
+	workspacePath := filepath.Join(workspace, "AGENTS.md")
+	if err := os.WriteFile(workspacePath, []byte("workspace instructions"), 0o644); err != nil {
+		t.Fatalf("write workspace AGENTS.md: %v", err)
+	}
+
+	storeRoot := t.TempDir()
+	store, err := session.Create(storeRoot, "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("prior-step", "message", llm.Message{
+		Role:    llm.RoleDeveloper,
+		Content: "existing context",
+	}); err != nil {
+		t.Fatalf("append existing message: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok-1"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok-2"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolBash}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "first"); err != nil {
+		t.Fatalf("first submit: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "second"); err != nil {
+		t.Fatalf("second submit: %v", err)
+	}
+
+	if len(client.calls) < 2 {
+		t.Fatalf("expected 2 model calls, got %d", len(client.calls))
+	}
+
+	firstReq := client.calls[0]
+	if len(firstReq.Messages) < 4 {
+		t.Fatalf("expected at least 4 messages in first request, got %d", len(firstReq.Messages))
+	}
+	if firstReq.Messages[0].Role != llm.RoleDeveloper || firstReq.Messages[0].Content != "existing context" {
+		t.Fatalf("expected first message to be existing context, got %+v", firstReq.Messages[0])
+	}
+	if firstReq.Messages[1].Role != llm.RoleDeveloper || !strings.Contains(firstReq.Messages[1].Content, "source: "+globalPath) {
+		t.Fatalf("expected second message to be global developer AGENTS injection, got %+v", firstReq.Messages[1])
+	}
+	if firstReq.Messages[2].Role != llm.RoleDeveloper || !strings.Contains(firstReq.Messages[2].Content, "source: "+workspacePath) {
+		t.Fatalf("expected third message to be workspace developer AGENTS injection, got %+v", firstReq.Messages[2])
+	}
+	if firstReq.Messages[3].Role != llm.RoleUser || firstReq.Messages[3].Content != "first" {
+		t.Fatalf("expected user message after AGENTS injections, got %+v", firstReq.Messages[3])
+	}
+
+	secondReq := client.calls[1]
+	injectedCount := 0
+	for _, msg := range secondReq.Messages {
+		if msg.Role == llm.RoleDeveloper && strings.Contains(msg.Content, agentsInjectedHeader) {
+			injectedCount++
+		}
+	}
+	if injectedCount != 2 {
+		t.Fatalf("expected exactly two injected AGENTS developer messages to persist, got %d", injectedCount)
 	}
 }

@@ -13,10 +13,19 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 )
 
-const defaultManualBrowserRedirectURI = "http://127.0.0.1:43110/callback"
+const (
+	defaultManualBrowserRedirectURI = "http://localhost:1455/auth/callback"
+	oauthCallbackPath               = "/auth/callback"
+	oauthCancelPath                 = "/cancel"
+	oauthBindAddress                = "127.0.0.1:1455"
+	oauthListenerRetryMax           = 10
+	oauthListenerRetryDelay         = 200 * time.Millisecond
+	defaultOAuthOriginator          = "builder"
+)
 
 type BrowserAuthSession struct {
 	AuthorizeURL string
@@ -57,7 +66,7 @@ func BeginOpenAIBrowserFlow(opts OpenAIOAuthOptions, redirectURI string) (Browse
 	challenge := base64.RawURLEncoding.EncodeToString(h[:])
 
 	issuer := strings.TrimSuffix(opts.Issuer, "/")
-	endpoint := issuer + "/authorize"
+	endpoint := issuer + "/oauth/authorize"
 	values := url.Values{}
 	values.Set("response_type", "code")
 	values.Set("client_id", opts.ClientID)
@@ -65,8 +74,10 @@ func BeginOpenAIBrowserFlow(opts OpenAIOAuthOptions, redirectURI string) (Browse
 	values.Set("scope", "openid profile email offline_access")
 	values.Set("code_challenge", challenge)
 	values.Set("code_challenge_method", "S256")
+	values.Set("id_token_add_organizations", "true")
+	values.Set("codex_cli_simplified_flow", "true")
+	values.Set("originator", defaultOAuthOriginator)
 	values.Set("state", state)
-	values.Set("prompt", "consent")
 
 	return BrowserAuthSession{
 		AuthorizeURL: endpoint + "?" + values.Encode(),
@@ -117,14 +128,58 @@ func ParseOAuthCallbackInput(input string) (BrowserCallback, error) {
 }
 
 func StartOAuthCallbackListener() (*OAuthCallbackListener, error) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return nil, fmt.Errorf("listen oauth callback: %w", err)
+	var (
+		ln              net.Listener
+		err             error
+		cancelAttempted bool
+	)
+	for attempts := 0; attempts < oauthListenerRetryMax; attempts++ {
+		ln, err = net.Listen("tcp", oauthBindAddress)
+		if err == nil {
+			break
+		}
+		if isAddrInUse(err) {
+			if !cancelAttempted {
+				_ = sendOAuthCancelRequest()
+				cancelAttempted = true
+			}
+			if attempts < oauthListenerRetryMax-1 {
+				time.Sleep(oauthListenerRetryDelay)
+				continue
+			}
+		}
+		return nil, fmt.Errorf("listen oauth callback on %s: %w", oauthBindAddress, err)
+	}
+	if ln == nil {
+		return nil, fmt.Errorf("listen oauth callback on %s: exhausted retries", oauthBindAddress)
 	}
 	resultCh := make(chan BrowserCallback, 1)
 	errCh := make(chan error, 1)
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == oauthCancelPath {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("OAuth callback listener canceled"))
+			return
+		}
+		if r.URL.Path != oauthCallbackPath {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte("Not found"))
+			return
+		}
 		q := r.URL.Query()
+		if authErr := strings.TrimSpace(q.Get("error")); authErr != "" {
+			authErrDesc := strings.TrimSpace(q.Get("error_description"))
+			if authErrDesc == "" {
+				authErrDesc = authErr
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("Authorization failed: " + authErrDesc))
+			select {
+			case errCh <- fmt.Errorf("oauth callback returned error: %s", authErrDesc):
+			default:
+			}
+			return
+		}
 		result := BrowserCallback{Code: q.Get("code"), State: q.Get("state")}
 		if strings.TrimSpace(result.Code) == "" {
 			w.WriteHeader(http.StatusBadRequest)
@@ -143,7 +198,7 @@ func StartOAuthCallbackListener() (*OAuthCallbackListener, error) {
 		}
 	}()
 	return &OAuthCallbackListener{
-		redirectURI: "http://" + ln.Addr().String() + "/callback",
+		redirectURI: defaultManualBrowserRedirectURI,
 		resultCh:    resultCh,
 		errCh:       errCh,
 		server:      srv,
@@ -221,4 +276,24 @@ func randomBase64URL(size int) (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+func sendOAuthCancelRequest() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+oauthBindAddress+oauthCancelPath, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
+
+func isAddrInUse(err error) bool {
+	return errors.Is(err, syscall.EADDRINUSE) ||
+		strings.Contains(strings.ToLower(err.Error()), "address already in use")
 }

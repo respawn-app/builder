@@ -271,19 +271,7 @@ func (m Model) renderOngoing() string {
 }
 
 func (m Model) ongoingLines() []string {
-	if m.ongoing != "" {
-		return splitLines(m.ongoing)
-	}
-	for i := len(m.transcript) - 1; i >= 0; i-- {
-		entry := m.transcript[i]
-		text := strings.TrimSpace(entry.Text)
-		if text == "" {
-			continue
-		}
-		rendered := m.renderEntryText(entry.Role, entry.Text, m.viewportWidth)
-		return splitLines(rendered)
-	}
-	return []string{""}
+	return splitLines(m.renderFlatOngoingTranscript())
 }
 
 func (m Model) renderDetailSnapshot() string {
@@ -343,6 +331,50 @@ func (m Model) renderFlatDetailTranscript() string {
 	return strings.Join(lines, "\n")
 }
 
+func (m Model) renderFlatOngoingTranscript() string {
+	blocks := make([][]string, 0, len(m.transcript)+1)
+	for i := 0; i < len(m.transcript); i++ {
+		entry := m.transcript[i]
+		role := strings.TrimSpace(entry.Role)
+		if skipInOngoing(role) {
+			continue
+		}
+		switch role {
+		case "tool_call":
+			combined := compactToolCallText(entry.Text)
+			if i+1 < len(m.transcript) {
+				nextRole := strings.TrimSpace(m.transcript[i+1].Role)
+				if nextRole == "tool_result" {
+					resultText := m.transcript[i+1].Text
+					if strings.TrimSpace(resultText) != "" {
+						combined = combined + "\n\n" + resultText
+					}
+					i++
+				}
+			}
+			blocks = append(blocks, m.flattenEntry("tool", combined))
+		case "tool_result":
+			blocks = append(blocks, m.flattenEntry("tool", entry.Text))
+		default:
+			blocks = append(blocks, m.flattenEntry(role, entry.Text))
+		}
+	}
+	if m.ongoing != "" {
+		blocks = append(blocks, m.flattenEntryPlain("assistant", m.ongoing))
+	}
+	if len(blocks) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(blocks)*2)
+	for idx, block := range blocks {
+		if idx > 0 {
+			lines = append(lines, detailDivider())
+		}
+		lines = append(lines, block...)
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (m Model) flattenEntry(role, text string) []string {
 	renderWidth := m.viewportWidth
 	if rolePrefix(role) != "" {
@@ -350,6 +382,31 @@ func (m Model) flattenEntry(role, text string) []string {
 	}
 	rendered := m.renderEntryText(role, text, renderWidth)
 	chunks := splitLines(rendered)
+	if len(chunks) == 0 {
+		chunks = []string{""}
+	}
+	symbol := rolePrefix(role)
+	out := make([]string, 0, len(chunks))
+	for i, chunk := range chunks {
+		if i == 0 {
+			if symbol == "" {
+				out = append(out, chunk)
+				continue
+			}
+			out = append(out, fmt.Sprintf("%s %s", symbol, chunk))
+			continue
+		}
+		if strings.TrimSpace(chunk) == "" {
+			out = append(out, "")
+			continue
+		}
+		out = append(out, "  "+chunk)
+	}
+	return out
+}
+
+func (m Model) flattenEntryPlain(role, text string) []string {
+	chunks := splitLines(text)
 	if len(chunks) == 0 {
 		chunks = []string{""}
 	}
@@ -389,6 +446,28 @@ func (m Model) renderEntryText(role, text string, width int) string {
 
 func detailDivider() string {
 	return TranscriptDivider
+}
+
+func skipInOngoing(role string) bool {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "thinking", "thinking_trace", "reasoning":
+		return true
+	default:
+		return false
+	}
+}
+
+func compactToolCallText(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return "tool call"
+	}
+	parts := strings.SplitN(trimmed, "\n", 2)
+	first := strings.TrimSpace(parts[0])
+	if first == "" {
+		return "tool call"
+	}
+	return first
 }
 
 func rolePrefix(role string) string {

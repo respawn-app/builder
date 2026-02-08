@@ -28,6 +28,9 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.Model != defaultModel {
 		t.Fatalf("default model mismatch: %q", cfg.Settings.Model)
 	}
+	if got := cfg.PersistenceRoot; got != filepath.Join(home, ".builder") {
+		t.Fatalf("default persistence root mismatch: %q", got)
+	}
 	if !cfg.Settings.EnabledTools[tools.ToolBash] || !cfg.Settings.EnabledTools[tools.ToolPatch] || !cfg.Settings.EnabledTools[tools.ToolAskQuestion] {
 		t.Fatalf("expected all default tools enabled: %+v", cfg.Settings.EnabledTools)
 	}
@@ -84,5 +87,20 @@ func TestLoadRejectsInvalidThinkingLevel(t *testing.T) {
 
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
 		t.Fatal("expected invalid thinking level error")
+	}
+}
+
+func TestLoadExpandsTildePersistenceRootFromEnv(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUILDER_PERSISTENCE_ROOT", "~/.builder-custom")
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := cfg.PersistenceRoot; got != filepath.Join(home, ".builder-custom") {
+		t.Fatalf("expanded persistence root mismatch: %q", got)
 	}
 }

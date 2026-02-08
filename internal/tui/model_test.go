@@ -21,7 +21,7 @@ func TestModeTogglePreservesOngoingScroll(t *testing.T) {
 	if len(linesBefore) != 2 {
 		t.Fatalf("ongoing lines = %d, want 2", len(linesBefore))
 	}
-	if linesBefore[0] != "l2" || linesBefore[1] != "l3" {
+	if strings.TrimSpace(linesBefore[0]) != "l2" || strings.TrimSpace(linesBefore[1]) != "l3" {
 		t.Fatalf("unexpected ongoing view before toggle: %q", before)
 	}
 
@@ -41,6 +41,28 @@ func TestModeTogglePreservesOngoingScroll(t *testing.T) {
 	after := m.View()
 	if after != before {
 		t.Fatalf("ongoing view changed after roundtrip toggle:\nbefore=%q\nafter=%q", before, after)
+	}
+}
+
+func TestOngoingShowsFullConversationContext(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "first question"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "first answer"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "second question"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "second answer"})
+
+	view := m.View()
+	if !strings.Contains(view, "❯ first question") {
+		t.Fatalf("expected first user message in ongoing view, got %q", view)
+	}
+	if !strings.Contains(view, "❮ first answer") {
+		t.Fatalf("expected first assistant message in ongoing view, got %q", view)
+	}
+	if !strings.Contains(view, "❯ second question") {
+		t.Fatalf("expected second user message in ongoing view, got %q", view)
+	}
+	if !strings.Contains(view, "❮ second answer") {
+		t.Fatalf("expected second assistant message in ongoing view, got %q", view)
 	}
 }
 
@@ -125,6 +147,28 @@ func TestDetailUsesRequestedSymbolsAndDividers(t *testing.T) {
 	}
 	if got := strings.Count(view, strings.Repeat("─", 24)); got != 2 {
 		t.Fatalf("expected 2 dividers for 3 blocks, got %d in %q", got, view)
+	}
+}
+
+func TestOngoingCompactsToolCallAndHidesThinking(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "run command"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "thinking", Text: "internal trace"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: "id=call_1 name=bash\ninput:\n{\"command\":\"pwd\"}"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result", Text: "id=call_1 name=bash error=false\noutput:\n{\"stdout\":\"/tmp\"}"})
+
+	view := m.View()
+	if strings.Contains(view, "internal trace") {
+		t.Fatalf("expected thinking trace hidden in ongoing view, got %q", view)
+	}
+	if strings.Contains(view, "input:") {
+		t.Fatalf("expected compact tool call without input payload in ongoing view, got %q", view)
+	}
+	if !strings.Contains(view, "• id=call_1 name=bash") {
+		t.Fatalf("expected compact tool call headline in ongoing view, got %q", view)
+	}
+	if !strings.Contains(view, "output:") {
+		t.Fatalf("expected tool result to remain visible in ongoing view, got %q", view)
 	}
 }
 

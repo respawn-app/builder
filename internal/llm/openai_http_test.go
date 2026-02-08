@@ -58,6 +58,41 @@ func TestBuildPayload_SerializesAssistantToolCalls(t *testing.T) {
 	}
 }
 
+func TestBuildResponsesInput_AssistantUsesOutputTextContent(t *testing.T) {
+	items := buildResponsesInput([]Message{
+		{Role: RoleUser, Content: "u1"},
+		{Role: RoleAssistant, Content: "a1"},
+	})
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	if got := items[0].Content[0].Type; got != "input_text" {
+		t.Fatalf("user content type=%q", got)
+	}
+	if got := items[1].Content[0].Type; got != "output_text" {
+		t.Fatalf("assistant content type=%q", got)
+	}
+}
+
+func TestBuildResponsesInput_NonAssistantRolesUseInputText(t *testing.T) {
+	items := buildResponsesInput([]Message{
+		{Role: RoleSystem, Content: "s1"},
+		{Role: RoleDeveloper, Content: "d1"},
+		{Role: RoleUser, Content: "u1"},
+	})
+	if len(items) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(items))
+	}
+	for i, item := range items {
+		if len(item.Content) != 1 {
+			t.Fatalf("item %d expected 1 content entry, got %d", i, len(item.Content))
+		}
+		if got := item.Content[0].Type; got != "input_text" {
+			t.Fatalf("item %d content type=%q", i, got)
+		}
+	}
+}
+
 func TestRequestURL_UsesCodexEndpointForOAuth(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	transport.BaseURL = "https://api.openai.com/v1"
