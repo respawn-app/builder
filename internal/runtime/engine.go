@@ -264,7 +264,12 @@ func (e *Engine) buildRequest(_ string, allowTools bool) (llm.Request, error) {
 
 	msgs := e.snapshotMessages()
 
-	return llm.RequestFromLockedContract(locked, msgs, requestTools)
+	req, err := llm.RequestFromLockedContract(locked, msgs, requestTools)
+	if err != nil {
+		return llm.Request{}, err
+	}
+	req.SessionID = e.store.Meta().SessionID
+	return req, nil
 }
 
 func (e *Engine) ensureLocked() (session.LockedContract, error) {

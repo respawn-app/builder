@@ -75,6 +75,7 @@ type OAuthMethod struct {
 	RefreshToken string    `json:"refresh_token"`
 	TokenType    string    `json:"token_type"`
 	Expiry       time.Time `json:"expiry"`
+	AccountID    string    `json:"account_id,omitempty"`
 }
 
 func (m Method) Validate() error {

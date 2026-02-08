@@ -10,6 +10,7 @@ type OpenAIRequest struct {
 	Temperature  float64
 	MaxTokens    int
 	SystemPrompt string
+	SessionID    string
 	Messages     []Message
 	Tools        []Tool
 }
@@ -49,6 +50,7 @@ func (c *OpenAIClient) Generate(ctx context.Context, request Request) (Response,
 		Temperature:  request.Temperature,
 		MaxTokens:    request.MaxTokens,
 		SystemPrompt: request.SystemPrompt,
+		SessionID:    request.SessionID,
 		Messages:     append([]Message(nil), request.Messages...),
 		Tools:        append([]Tool(nil), request.Tools...),
 	}
@@ -82,6 +84,7 @@ func (c *OpenAIClient) GenerateStream(ctx context.Context, request Request, onDe
 		Temperature:  request.Temperature,
 		MaxTokens:    request.MaxTokens,
 		SystemPrompt: request.SystemPrompt,
+		SessionID:    request.SessionID,
 		Messages:     append([]Message(nil), request.Messages...),
 		Tools:        append([]Tool(nil), request.Tools...),
 	}

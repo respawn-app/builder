@@ -72,6 +72,9 @@ func TestRunOpenAIDeviceCodeFlow(t *testing.T) {
 	if method.OAuth.AccessToken != "access-1" || method.OAuth.RefreshToken != "refresh-1" {
 		t.Fatalf("unexpected oauth tokens: %+v", method.OAuth)
 	}
+	if method.OAuth.AccountID != "" {
+		t.Fatalf("expected empty account id for opaque test tokens, got %q", method.OAuth.AccountID)
+	}
 	if !method.OAuth.Expiry.After(time.Now().UTC()) {
 		t.Fatalf("expected future expiry, got %s", method.OAuth.Expiry)
 	}
@@ -99,15 +102,14 @@ func TestRefreshOpenAIAuthToken(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		var payload map[string]string
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Fatalf("decode payload: %v", err)
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
 		}
-		if payload["grant_type"] != "refresh_token" {
-			t.Fatalf("unexpected grant_type: %s", payload["grant_type"])
+		if r.Form.Get("grant_type") != "refresh_token" {
+			t.Fatalf("unexpected grant_type: %s", r.Form.Get("grant_type"))
 		}
-		if payload["refresh_token"] != "old-refresh" {
-			t.Fatalf("unexpected refresh token: %s", payload["refresh_token"])
+		if r.Form.Get("refresh_token") != "old-refresh" {
+			t.Fatalf("unexpected refresh token: %s", r.Form.Get("refresh_token"))
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token":  "new-access",
@@ -137,4 +139,57 @@ func TestRefreshOpenAIAuthToken(t *testing.T) {
 	if updated.OAuth.AccessToken != "new-access" || updated.OAuth.RefreshToken != "new-refresh" {
 		t.Fatalf("unexpected refreshed tokens: %+v", updated.OAuth)
 	}
+}
+
+func TestExtractAccountID(t *testing.T) {
+	jwt := func(payload map[string]any) string {
+		raw, _ := json.Marshal(payload)
+		return "x." + encodeRawURL(raw) + ".y"
+	}
+
+	nested := jwt(map[string]any{
+		"https://api.openai.com/auth": map[string]any{
+			"chatgpt_account_id": "acc-nested",
+		},
+	})
+	root := jwt(map[string]any{
+		"chatgpt_account_id": "acc-root",
+	})
+	org := jwt(map[string]any{
+		"organizations": []map[string]any{{"id": "org-1"}},
+	})
+
+	if got := extractAccountID(oauthTokenResponse{IDToken: nested}); got != "acc-nested" {
+		t.Fatalf("expected nested id, got %q", got)
+	}
+	if got := extractAccountID(oauthTokenResponse{IDToken: root}); got != "acc-root" {
+		t.Fatalf("expected root id, got %q", got)
+	}
+	if got := extractAccountID(oauthTokenResponse{AccessToken: org}); got != "org-1" {
+		t.Fatalf("expected org id from access token, got %q", got)
+	}
+}
+
+func encodeRawURL(b []byte) string {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	out := make([]byte, 0, (len(b)*4+2)/3)
+	for i := 0; i < len(b); i += 3 {
+		var n uint32
+		remain := len(b) - i
+		n = uint32(b[i]) << 16
+		if remain > 1 {
+			n |= uint32(b[i+1]) << 8
+		}
+		if remain > 2 {
+			n |= uint32(b[i+2])
+		}
+		out = append(out, alphabet[(n>>18)&0x3F], alphabet[(n>>12)&0x3F])
+		if remain > 1 {
+			out = append(out, alphabet[(n>>6)&0x3F])
+		}
+		if remain > 2 {
+			out = append(out, alphabet[n&0x3F])
+		}
+	}
+	return string(out)
 }
