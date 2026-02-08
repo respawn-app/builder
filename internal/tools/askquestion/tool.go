@@ -7,21 +7,14 @@ import (
 	"fmt"
 	"sync"
 
-	"builder/internal/actions"
 	"builder/internal/tools"
 	"github.com/google/uuid"
 )
 
-type ActionBinding struct {
-	ID      string          `json:"id"`
-	Payload json.RawMessage `json:"payload,omitempty"`
-}
-
 type Request struct {
-	ID          string         `json:"id"`
-	Question    string         `json:"question"`
-	Suggestions []string       `json:"suggestions,omitempty"`
-	Action      *ActionBinding `json:"action,omitempty"`
+	ID          string   `json:"id"`
+	Question    string   `json:"question"`
+	Suggestions []string `json:"suggestions,omitempty"`
 }
 
 type Response struct {
@@ -30,10 +23,9 @@ type Response struct {
 }
 
 type Broker struct {
-	mu      sync.Mutex
-	queue   []*pending
-	onAsk   func(Request) (string, error)
-	actions *actions.Registry
+	mu    sync.Mutex
+	queue []*pending
+	onAsk func(Request) (string, error)
 }
 
 type pending struct {
@@ -46,11 +38,8 @@ type responseResult struct {
 	err    error
 }
 
-func NewBroker(reg *actions.Registry) *Broker {
-	if reg == nil {
-		reg = actions.NewRegistry()
-	}
-	return &Broker{actions: reg}
+func NewBroker() *Broker {
+	return &Broker{}
 }
 
 func (b *Broker) SetAskHandler(handler func(Request) (string, error)) {
@@ -88,11 +77,6 @@ func (b *Broker) Ask(ctx context.Context, req Request) (Response, error) {
 	case rr := <-p.ch:
 		if rr.err != nil {
 			return Response{}, rr.err
-		}
-		if req.Action != nil {
-			if err := b.actions.Execute(ctx, req.Action.ID, req.Action.Payload); err != nil {
-				return Response{}, err
-			}
 		}
 		return Response{RequestID: req.ID, Answer: rr.answer}, nil
 	}
@@ -134,9 +118,8 @@ func (b *Broker) dequeue(requestID string) {
 }
 
 type input struct {
-	Question    string         `json:"question"`
-	Suggestions []string       `json:"suggestions,omitempty"`
-	Action      *ActionBinding `json:"action,omitempty"`
+	Question    string   `json:"question"`
+	Suggestions []string `json:"suggestions,omitempty"`
 }
 
 type Tool struct {
@@ -152,6 +135,14 @@ func (t *Tool) Name() tools.ID {
 }
 
 func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(c.Input, &raw); err != nil {
+		return resultErr(c, fmt.Sprintf("invalid input: %v", err)), nil
+	}
+	if _, ok := raw["action"]; ok {
+		return resultErr(c, "invalid input: field \"action\" is not allowed"), nil
+	}
+
 	var in input
 	if err := json.Unmarshal(c.Input, &in); err != nil {
 		return resultErr(c, fmt.Sprintf("invalid input: %v", err)), nil
@@ -160,7 +151,6 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 		ID:          c.ID,
 		Question:    in.Question,
 		Suggestions: in.Suggestions,
-		Action:      in.Action,
 	})
 	if err != nil {
 		return resultErr(c, err.Error()), nil

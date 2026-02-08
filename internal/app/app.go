@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"builder/internal/actions"
 	"builder/internal/auth"
 	"builder/internal/config"
 	"builder/internal/llm"
@@ -367,8 +366,7 @@ func buildToolRegistry(workspaceRoot string, enabled []tools.ID, bashDefaultTime
 	if err != nil {
 		return nil, nil, err
 	}
-	actionsReg := actions.NewRegistry()
-	broker := askquestion.NewBroker(actionsReg)
+	broker := askquestion.NewBroker()
 
 	handlers := make([]tools.Handler, 0, len(enabled))
 	for _, id := range enabled {
