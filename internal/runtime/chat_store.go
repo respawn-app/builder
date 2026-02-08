@@ -5,6 +5,8 @@ import (
 	"builder/internal/tools"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -138,14 +140,13 @@ func (s *chatStore) snapshot() ChatSnapshot {
 			}
 			entries = append(entries, ChatEntry{Role: "user", Text: msg.Content})
 		case llm.RoleAssistant:
+			if strings.TrimSpace(msg.Content) != "" {
+				entries = append(entries, ChatEntry{Role: "assistant", Text: msg.Content})
+			}
 			if len(msg.ToolCalls) > 0 {
 				for _, call := range msg.ToolCalls {
 					entries = append(entries, ChatEntry{Role: "tool_call", Text: formatToolCall(call)})
 				}
-				continue
-			}
-			if strings.TrimSpace(msg.Content) != "" {
-				entries = append(entries, ChatEntry{Role: "assistant", Text: msg.Content})
 			}
 		case llm.RoleTool:
 			callID := strings.TrimSpace(msg.ToolCallID)
@@ -166,7 +167,11 @@ func (s *chatStore) snapshot() ChatSnapshot {
 			if result.Name == "" {
 				result.Name = tools.ID("tool")
 			}
-			entries = append(entries, ChatEntry{Role: "tool_result", Text: formatToolResult(result)})
+			role := "tool_result_ok"
+			if result.IsError {
+				role = "tool_result_error"
+			}
+			entries = append(entries, ChatEntry{Role: role, Text: formatToolResult(result)})
 		}
 	}
 	entries = append(entries, s.local...)
@@ -178,9 +183,155 @@ func (s *chatStore) snapshot() ChatSnapshot {
 }
 
 func formatToolCall(call llm.ToolCall) string {
-	return fmt.Sprintf("id=%s name=%s\ninput:\n%s", call.ID, call.Name, string(call.Input))
+	return withLabel("input", formatToolInput(call.Input))
 }
 
 func formatToolResult(result tools.Result) string {
-	return fmt.Sprintf("id=%s name=%s error=%t\noutput:\n%s", result.CallID, result.Name, result.IsError, string(result.Output))
+	output := strings.TrimSpace(formatToolOutput(result.Output))
+	if output == "" {
+		if result.IsError {
+			output = "tool failed"
+		} else {
+			output = "done"
+		}
+	}
+	return withLabel("output", output)
+}
+
+func withLabel(label, text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return label + ":"
+	}
+	parts := strings.Split(text, "\n")
+	head := label + ": " + parts[0]
+	if len(parts) == 1 {
+		return head
+	}
+	return head + "\n" + strings.Join(parts[1:], "\n")
+}
+
+func formatToolInput(raw json.RawMessage) string {
+	return formatJSONLikeText(raw)
+}
+
+func formatToolOutput(raw json.RawMessage) string {
+	var payload any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return strings.TrimSpace(string(raw))
+	}
+	obj, ok := payload.(map[string]any)
+	if !ok {
+		return renderPlain(payload)
+	}
+
+	if msg, ok := asString(obj["error"]); ok {
+		return msg
+	}
+	if out, ok := asString(obj["output"]); ok {
+		var notes []string
+		if code, ok := asInt(obj["exit_code"]); ok && code != 0 {
+			notes = append(notes, fmt.Sprintf("exit code %d", code))
+		}
+		if truncated, ok := obj["truncated"].(bool); ok && truncated {
+			if removed, ok := asInt(obj["truncation_bytes"]); ok && removed > 0 {
+				notes = append(notes, fmt.Sprintf("truncated %d bytes", removed))
+			} else {
+				notes = append(notes, "truncated")
+			}
+		}
+		if len(notes) == 0 {
+			return out
+		}
+		if strings.TrimSpace(out) == "" {
+			return strings.Join(notes, ", ")
+		}
+		return out + "\n" + strings.Join(notes, ", ")
+	}
+	if answer, ok := asString(obj["answer"]); ok {
+		return answer
+	}
+	return renderPlain(payload)
+}
+
+func formatJSONLikeText(raw json.RawMessage) string {
+	var payload any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return strings.TrimSpace(string(raw))
+	}
+	return renderPlain(payload)
+}
+
+func renderPlain(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return x
+	case bool:
+		return strconv.FormatBool(x)
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	case []any:
+		if len(x) == 0 {
+			return "[]"
+		}
+		lines := make([]string, 0, len(x))
+		for _, item := range x {
+			rendered := strings.TrimSpace(renderPlain(item))
+			if rendered == "" {
+				continue
+			}
+			itemLines := strings.Split(rendered, "\n")
+			lines = append(lines, "- "+itemLines[0])
+			for _, line := range itemLines[1:] {
+				lines = append(lines, "  "+line)
+			}
+		}
+		return strings.Join(lines, "\n")
+	case map[string]any:
+		if len(x) == 0 {
+			return "{}"
+		}
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		lines := make([]string, 0, len(keys))
+		for _, k := range keys {
+			rendered := strings.TrimSpace(renderPlain(x[k]))
+			if rendered == "" {
+				lines = append(lines, k+":")
+				continue
+			}
+			valueLines := strings.Split(rendered, "\n")
+			lines = append(lines, k+": "+valueLines[0])
+			for _, line := range valueLines[1:] {
+				lines = append(lines, "  "+line)
+			}
+		}
+		return strings.Join(lines, "\n")
+	default:
+		return fmt.Sprintf("%v", x)
+	}
+}
+
+func asString(v any) (string, bool) {
+	s, ok := v.(string)
+	if !ok {
+		return "", false
+	}
+	return strings.TrimSpace(s), true
+}
+
+func asInt(v any) (int, bool) {
+	switch x := v.(type) {
+	case float64:
+		return int(x), true
+	case int:
+		return x, true
+	default:
+		return 0, false
+	}
 }

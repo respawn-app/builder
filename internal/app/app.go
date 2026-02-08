@@ -321,7 +321,6 @@ func configSourceLines(src config.SourceReport) []string {
 }
 
 func printConfigReport(cfg config.App) {
-	fmt.Fprintf(os.Stderr, "Settings file: %s\n", cfg.Source.SettingsPath)
 	if cfg.Source.CreatedDefaultConfig {
 		fmt.Fprintln(os.Stderr, "Created default settings file on first run.")
 	}
