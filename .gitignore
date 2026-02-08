@@ -45,3 +45,6 @@ go.work.sum
 
 # Temp docs generated for handoff
 docs/tmp/
+
+# Local runtime state
+.builder/

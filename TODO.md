@@ -1,0 +1,7 @@
+- [ ] Remove "retry/exit" from auth flow. exit is ctrl+c, nothing to retry 
+- [ ] Migrate from device code auth with Codex/OpenAI to a normal browser-based flow.
+- [ ] Need to completely remake the TUI to rebuild it as beautiful, properly laid-out, with special symbols, semi-transparent (secondary text color) and colors palette, defaulting to terminal color scheme and falling back to Atom One colors. Implement a status line which shows current mode, etc under the input field. 
+- [ ] Design a working UI with disabled input field and loading spinner. Use nicer ascii symbols and colors to distinguish user/model/tool/system messages
+- [ ] Implement a settings file in a human-readable format, which allows to configure: model name, thinking level (low,medium,high,xhigh), disable/enable tools by name, timeouts, theme (light or dark options only).
+- [ ] Design parsing and usage of "slash commands", which execute an easily extendable flows. flows may include sending messages (saved prompts), invoking whole tui flows, opening files etc and must be architected to easily add new handlers. the first commands to implement will be: /logout, /exit, /new (new session).
+- [ ] Using outdated dependency versions, update all deps to latest versions.

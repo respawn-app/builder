@@ -17,8 +17,8 @@ This file records architecture and product decisions for the minimal terminal co
    - Rationale: adding tools and event handlers should require minimal setup changes.
    - Notes: target Chain of Responsibility + interceptor/composite-style extension points.
 
-5. **3 core tools in v1: `bash`, `patch`, `ask_question`**
-   - `bash`: execute commands with the user's real PATH/environment, plus non-interactive markers.
+5. **3 core tools in v1: `shell`, `patch`, `ask_question`**
+   - `shell`: execute commands with the user's real PATH/environment, plus non-interactive markers.
    - `patch`: freeform patch application equivalent in behavior to `apply_patch`.
    - `ask_question`: asks the user a question and waits for input. Will be used for prompts, permissions, decisions, planning etc.
 
@@ -79,7 +79,7 @@ This file records architecture and product decisions for the minimal terminal co
    - Interrupt current model step and active tool process.
    - Keep app/session alive.
 
-22. **`bash` tool uses user login shell.**
+22. **`shell` tool uses user login shell.**
 
 23. **Tool timeout policy is bounded with model override.**
    - Default command timeout is 5 minutes.
@@ -90,7 +90,7 @@ This file records architecture and product decisions for the minimal terminal co
    - Let model handle recovery.
 
 25. **Shell execution model is stateless per command.**
-   - No persistent shell state between `bash` tool calls.
+   - No persistent shell state between `shell` tool calls.
 
 26. **Large tool output is bounded for model consumption.**
    - Configurable threshold (example baseline: 10k chars).
@@ -114,13 +114,13 @@ This file records architecture and product decisions for the minimal terminal co
    - Lock after first turn to maximize cache hits.
 
 31. **Session-start tool defaults are enabled.**
-   - `bash=on`, `patch=on`.
+   - `shell=on`, `patch=on`.
 
 32. **Approval policy in v1 is fully autonomous.**
    - No approval prompts for tool execution.
 
 34. **Persistence root is configurable with workspace-scoped layout.**
-   - Default root dir: `./agents/builder/`.
+   - Default root dir: `~/.builder`.
    - Workspace container: `<workspace-folder-name>-<random-uuid>`.
    - Session folders inside workspace container use UUID names.
    - This supersedes earlier home-dir-only assumption from Decision 6.
@@ -141,7 +141,7 @@ This file records architecture and product decisions for the minimal terminal co
 39. **Model-step transient failure retry is limited.**
    - Automatic retry with backoff, up to 2 attempts per model step.
 
-40. **No automatic retry for `bash` process-launch failures.**
+40. **No automatic retry for `shell` process-launch failures.**
 
 41. **Interrupt injects explicit resume context.**
    - On user interrupt, append developer/system message: `User interrupted you`.
@@ -258,6 +258,11 @@ This file records architecture and product decisions for the minimal terminal co
 74. **Event identity uses monotonic sequence IDs plus wall timestamp.**
 
 75. **Credential storage preference is OS secure store with MVP fallback.**
+
+76. **LLM provider wiring uses a provider factory seam.**
+   - Runtime/app code constructs `llm.Client` via provider selection, not provider-specific transport types.
+   - Provider inference defaults to OpenAI and can branch by model family (for example `claude*`).
+   - Anthropic/direct-provider support can be added behind this factory without refactoring runtime orchestration.
    - Preferred: OS keychain/secure credential store.
    - MVP fallback allowed: plain file if secure store integration is not feasible.
 
@@ -266,7 +271,7 @@ This file records architecture and product decisions for the minimal terminal co
 77. **No session event compression in MVP.**
    - Future note: async compression (e.g., zstd) can be revisited later.
 
-78. **`bash` tool executes in non-TTY mode by default.**
+78. **`shell` tool executes in non-TTY mode by default.**
    - Use process pipes, not PTY.
 
 79. **Merged output stream policy is stdout+stderr combined.**
@@ -327,11 +332,11 @@ This file records architecture and product decisions for the minimal terminal co
 97. **Workspace-bound patch path validation resolves real paths.**
    - Use `realpath`-style resolution before enforcing workspace root boundary.
 
-98. **`bash` environment policy is inherit-plus-hints.**
+98. **`shell` environment policy is inherit-plus-hints.**
    - Inherit full parent environment.
    - Add non-interactive environment hints.
 
-99. **`bash` command envelope is direct shell invocation only.**
+99. **`shell` command envelope is direct shell invocation only.**
    - No runtime command parsing/AST preprocessing.
 
 100. **`AGENTS.md` injection uses structured fenced formatting with source path.**
@@ -411,3 +416,42 @@ This file records architecture and product decisions for the minimal terminal co
 128. **Tool results persist at tool-completion boundary.**
 
 129. **Startup auth failure uses a blocking error screen with retry.**
+
+130. **Startup auth menu exposes exactly three OAuth methods.**
+   - `[1] oauth_browser` (open browser + localhost callback listener).
+   - `[2] oauth_browser_paste` (open browser + paste callback/code).
+   - `[3] oauth_device` (device code flow fallback).
+   - This supersedes retry/quit-style auth menu prompts.
+
+131. **User settings are loaded from a home TOML file with auto-bootstrap.**
+   - Canonical path: `~/.builder/config.toml`.
+   - On first run, the file is created with default values.
+
+132. **Configuration precedence is deterministic and explicit.**
+   - `CLI overrides > environment variables > settings file > built-in defaults`.
+
+133. **Thinking level accepts OpenAI levels unchanged, including `xhigh`.**
+   - Values are not normalized or remapped.
+   - Applied only for OpenAI model families.
+
+134. **Session lock includes thinking level and enabled tool IDs.**
+   - Locked fields now include `thinking_level` and `enabled_tools`.
+   - Prompt/tool schema blobs remain excluded from lock persistence.
+
+135. **Main TUI status line is compact and fixed.**
+   - Status line under input shows only `model`, `busy/idle`, and queue size.
+
+136. **Leading slash input is always command mode.**
+   - If first non-space character is `/`, input is parsed as a slash command.
+   - Unknown slash commands are surfaced as system errors; they are not sent to the model.
+
+137. **Built-in slash commands are `/logout`, `/exit`, `/new`.**
+   - `/logout`: clear auth and run re-auth immediately in-app.
+   - `/new`: create and switch to a new session immediately.
+   - `/exit`: terminate the app.
+
+138. **AGENTS injection order is deterministic on first user turn.**
+   - Existing restored messages remain first.
+   - Then inject global `~/.builder/AGENTS.md` as `developer` message when present.
+   - Then inject workspace-root `AGENTS.md` as `developer` message when present.
+   - Then append the current user prompt.
