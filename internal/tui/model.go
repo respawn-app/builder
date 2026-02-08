@@ -397,7 +397,7 @@ func (m Model) renderFlatOngoingTranscript() string {
 			}
 			blocks = append(blocks, ongoingBlock{
 				role:  blockRole,
-				lines: m.styleOngoingToolBlock(blockRole, m.flattenEntry(blockRole, combined)),
+				lines: m.flattenEntryWithMutedText(blockRole, combined, true),
 			})
 		case "tool_result", "tool_result_ok", "tool_result_error":
 			continue
@@ -427,23 +427,11 @@ func (m Model) renderFlatOngoingTranscript() string {
 	return strings.Join(lines, "\n")
 }
 
-func (m Model) styleOngoingToolBlock(role string, lines []string) []string {
-	if !isToolHeadlineRole(role) {
-		return lines
-	}
-	muted := m.palette().preview.Faint(true)
-	out := make([]string, len(lines))
-	for i, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			out[i] = line
-			continue
-		}
-		out[i] = muted.Render(line)
-	}
-	return out
+func (m Model) flattenEntry(role, text string) []string {
+	return m.flattenEntryWithMutedText(role, text, false)
 }
 
-func (m Model) flattenEntry(role, text string) []string {
+func (m Model) flattenEntryWithMutedText(role, text string, muteText bool) []string {
 	renderWidth := m.viewportWidth
 	if rolePrefix(role) != "" {
 		renderWidth -= 2
@@ -462,6 +450,9 @@ func (m Model) flattenEntry(role, text string) []string {
 				displayChunk = m.renderToolHeadline(displayChunk, renderWidth)
 			}
 			displayChunk = m.styleToolLine(displayChunk)
+		}
+		if muteText && strings.TrimSpace(displayChunk) != "" {
+			displayChunk = m.palette().preview.Faint(true).Render(displayChunk)
 		}
 		if i == 0 {
 			if symbol == "" {

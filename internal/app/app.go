@@ -48,7 +48,6 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	printConfigReport(cfg)
 
 	_, containerDir, err := config.ResolveWorkspaceContainer(cfg)
 	if err != nil {
@@ -326,15 +325,6 @@ func configSourceLines(src config.SourceReport) []string {
 		lines = append(lines, fmt.Sprintf("%s=%s", k, src.Sources[k]))
 	}
 	return lines
-}
-
-func printConfigReport(cfg config.App) {
-	if cfg.Source.CreatedDefaultConfig {
-		fmt.Fprintln(os.Stderr, "Created default settings file on first run.")
-	}
-	for _, line := range configSourceLines(cfg.Source) {
-		fmt.Fprintf(os.Stderr, "  %s\n", line)
-	}
 }
 
 func openOrCreateSession(containerDir, selectedID, workspaceRoot string) (*session.Store, error) {

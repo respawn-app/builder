@@ -11,6 +11,7 @@ import (
 	"builder/internal/tools/askquestion"
 	"builder/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestCtrlEnterQueuesAndStartsSubmission(t *testing.T) {
@@ -112,7 +113,8 @@ func TestCtrlEnterIdleAppendsUserOnce(t *testing.T) {
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated = next.(*uiModel)
 
-	if count := strings.Count(updated.View(), "❯ echo hi"); count != 1 {
+	view := stripANSIAndTrimRight(updated.View())
+	if count := strings.Count(view, "echo hi"); count != 1 {
 		t.Fatalf("expected one user transcript entry, got %d", count)
 	}
 }
@@ -216,18 +218,19 @@ func TestBusyInputRemainsEditableUntilSubmitLock(t *testing.T) {
 	}
 }
 
-func TestViewShowsTerminalCursorForEditableInput(t *testing.T) {
+func TestViewRendersSoftCursorForEditableInput(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 40
 	m.termHeight = 16
 	m.input = "hello world"
 
 	view := m.View()
-	if !strings.Contains(view, ansiShowCursor) {
-		t.Fatalf("expected terminal cursor show sequence in view: %q", view)
+	if !strings.Contains(view, ansiHideCursor) {
+		t.Fatalf("expected terminal cursor hidden in view: %q", view)
 	}
-	if !strings.Contains(view, "\x1b[14;14H") {
-		t.Fatalf("expected cursor position sequence in view: %q", view)
+	plain := stripANSIAndTrimRight(view)
+	if !strings.Contains(plain, "› hello world"+softCursorGlyph) {
+		t.Fatalf("expected soft cursor rendered at input end, got %q", plain)
 	}
 }
 
@@ -241,6 +244,10 @@ func TestViewHidesCursorWhenInputLocked(t *testing.T) {
 	view := m.View()
 	if !strings.Contains(view, ansiHideCursor) {
 		t.Fatalf("expected terminal cursor hide sequence in view: %q", view)
+	}
+	plain := stripANSIAndTrimRight(view)
+	if strings.Contains(plain, softCursorGlyph) {
+		t.Fatalf("did not expect soft cursor while input locked, got %q", plain)
 	}
 }
 
@@ -382,14 +389,35 @@ func TestInitialTranscriptVisibleImmediately(t *testing.T) {
 	m.termWidth = 80
 	m.termHeight = 20
 
-	ongoing := m.View()
+	ongoing := stripANSIAndTrimRight(m.View())
 	if !strings.Contains(ongoing, "world") {
 		t.Fatalf("expected resumed content in ongoing mode, got %q", ongoing)
 	}
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	detail := next.(*uiModel).View()
-	if !strings.Contains(detail, "❯ hello") || !strings.Contains(detail, "❮ world") {
+	detail := stripANSIAndTrimRight(next.(*uiModel).View())
+	if !containsInOrder(detail, "❯", "hello", "❮", "world") {
 		t.Fatalf("expected resumed transcript in detail mode, got %q", detail)
 	}
+}
+
+func stripANSIAndTrimRight(view string) string {
+	stripped := ansi.Strip(view)
+	lines := strings.Split(stripped, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " ")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func containsInOrder(text string, parts ...string) bool {
+	offset := 0
+	for _, part := range parts {
+		idx := strings.Index(text[offset:], part)
+		if idx < 0 {
+			return false
+		}
+		offset += idx + len(part)
+	}
+	return true
 }

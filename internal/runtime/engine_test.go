@@ -498,3 +498,41 @@ func TestQueuedUserMessageFlushesWhenAssistantReturnsWithoutTools(t *testing.T) 
 		t.Fatalf("expected flushed user message in second request, messages=%+v", second.Messages)
 	}
 }
+
+func TestRequestMessagesNeverContainANSIEscapes(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "raw \x1b[31mansi\x1b[0m"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "plain user"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	if len(client.calls) == 0 {
+		t.Fatal("expected at least one model call")
+	}
+
+	for _, req := range client.calls {
+		for _, msg := range req.Messages {
+			if strings.Contains(msg.Content, "\x1b[") {
+				t.Fatalf("request message contains ANSI escape sequence: role=%s content=%q", msg.Role, msg.Content)
+			}
+		}
+	}
+}
