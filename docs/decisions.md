@@ -120,7 +120,7 @@ This file records architecture and product decisions for the minimal terminal co
    - No approval prompts for tool execution.
 
 34. **Persistence root is configurable with workspace-scoped layout.**
-   - Default root dir: `./agents/builder/`.
+   - Default root dir: `~/.builder`.
    - Workspace container: `<workspace-folder-name>-<random-uuid>`.
    - Session folders inside workspace container use UUID names.
    - This supersedes earlier home-dir-only assumption from Decision 6.
@@ -444,3 +444,9 @@ This file records architecture and product decisions for the minimal terminal co
    - `/logout`: clear auth and run re-auth immediately in-app.
    - `/new`: create and switch to a new session immediately.
    - `/exit`: terminate the app.
+
+138. **AGENTS injection order is deterministic on first user turn.**
+   - Existing restored messages remain first.
+   - Then inject global `~/.builder/AGENTS.md` as `developer` message when present.
+   - Then inject workspace-root `AGENTS.md` as `developer` message when present.
+   - Then append the current user prompt.

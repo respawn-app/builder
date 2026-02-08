@@ -379,12 +379,16 @@ func buildResponsesInput(messages []Message) []responsesInputItem {
 }
 
 func messageInput(role, text string) responsesInputItem {
+	contentType := "input_text"
+	if strings.TrimSpace(role) == string(RoleAssistant) {
+		contentType = "output_text"
+	}
 	return responsesInputItem{
 		Type: "message",
 		Role: role,
 		Content: []responsesInputContent{
 			{
-				Type: "input_text",
+				Type: contentType,
 				Text: text,
 			},
 		},

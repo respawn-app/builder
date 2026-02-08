@@ -5,8 +5,87 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 )
+
+func TestBeginOpenAIBrowserFlowBuildsOAuthAuthorizeURL(t *testing.T) {
+	session, err := BeginOpenAIBrowserFlow(OpenAIOAuthOptions{
+		Issuer:   "https://auth.openai.com",
+		ClientID: "client-1",
+	}, "http://localhost:5555/auth/callback")
+	if err != nil {
+		t.Fatalf("begin flow: %v", err)
+	}
+
+	u, err := url.Parse(session.AuthorizeURL)
+	if err != nil {
+		t.Fatalf("parse authorize url: %v", err)
+	}
+	if got := u.Path; got != "/oauth/authorize" {
+		t.Fatalf("unexpected authorize path %q", got)
+	}
+	q := u.Query()
+	if got := q.Get("client_id"); got != "client-1" {
+		t.Fatalf("client_id=%q", got)
+	}
+	if got := q.Get("response_type"); got != "code" {
+		t.Fatalf("response_type=%q", got)
+	}
+	if got := q.Get("redirect_uri"); got != "http://localhost:5555/auth/callback" {
+		t.Fatalf("redirect_uri=%q", got)
+	}
+	if got := q.Get("code_challenge_method"); got != "S256" {
+		t.Fatalf("code_challenge_method=%q", got)
+	}
+	if got := q.Get("scope"); got != "openid profile email offline_access" {
+		t.Fatalf("scope=%q", got)
+	}
+	if got := q.Get("id_token_add_organizations"); got != "true" {
+		t.Fatalf("id_token_add_organizations=%q", got)
+	}
+	if got := q.Get("codex_cli_simplified_flow"); got != "true" {
+		t.Fatalf("codex_cli_simplified_flow=%q", got)
+	}
+	if got := q.Get("originator"); got != "builder" {
+		t.Fatalf("originator=%q", got)
+	}
+	if got := q.Get("state"); got == "" {
+		t.Fatal("expected non-empty state")
+	}
+	if got := q.Get("code_challenge"); got == "" {
+		t.Fatal("expected non-empty code_challenge")
+	}
+}
+
+func TestStartOAuthCallbackListenerUsesLocalhostAuthCallback(t *testing.T) {
+	listener, err := StartOAuthCallbackListener()
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "address already in use") {
+			t.Skipf("oauth callback port in use: %v", err)
+		}
+		t.Fatalf("start listener: %v", err)
+	}
+	defer listener.Close()
+
+	u, err := url.Parse(listener.RedirectURI())
+	if err != nil {
+		t.Fatalf("parse redirect uri: %v", err)
+	}
+	if got := u.Scheme; got != "http" {
+		t.Fatalf("scheme=%q", got)
+	}
+	if got := u.Hostname(); got != "localhost" {
+		t.Fatalf("hostname=%q", got)
+	}
+	if got := u.Path; got != "/auth/callback" {
+		t.Fatalf("path=%q", got)
+	}
+	if got := u.Port(); got != "1455" {
+		t.Fatalf("port=%q", got)
+	}
+}
 
 func TestCompleteOpenAIBrowserFlow(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +136,57 @@ func TestCompleteOpenAIBrowserFlow(t *testing.T) {
 		t.Fatalf("unexpected method: %+v", method)
 	}
 	if method.OAuth.AccessToken != "browser-access" || method.OAuth.RefreshToken != "browser-refresh" {
+		t.Fatalf("unexpected tokens: %+v", method.OAuth)
+	}
+}
+
+func TestCompleteOpenAIBrowserFlowWithDefaultHTTPClient(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/token":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse form: %v", err)
+			}
+			if got := r.Form.Get("grant_type"); got != "authorization_code" {
+				t.Fatalf("grant_type=%q", got)
+			}
+			if got := r.Form.Get("code"); got != "auth-code-2" {
+				t.Fatalf("code=%q", got)
+			}
+			if got := r.Form.Get("redirect_uri"); got != "http://localhost:1455/auth/callback" {
+				t.Fatalf("redirect_uri=%q", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token":  "browser-access-2",
+				"refresh_token": "browser-refresh-2",
+				"token_type":    "Bearer",
+				"expires_in":    1800,
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	session, err := BeginOpenAIBrowserFlow(OpenAIOAuthOptions{
+		Issuer:   server.URL,
+		ClientID: "client-2",
+	}, "http://localhost:1455/auth/callback")
+	if err != nil {
+		t.Fatalf("begin flow: %v", err)
+	}
+
+	method, err := CompleteOpenAIBrowserFlow(context.Background(), OpenAIOAuthOptions{
+		Issuer:   server.URL,
+		ClientID: "client-2",
+	}, session, "http://localhost:1455/auth/callback?code=auth-code-2&state="+session.State)
+	if err != nil {
+		t.Fatalf("complete flow: %v", err)
+	}
+	if method.Type != MethodOAuth || method.OAuth == nil {
+		t.Fatalf("unexpected method: %+v", method)
+	}
+	if method.OAuth.AccessToken != "browser-access-2" || method.OAuth.RefreshToken != "browser-refresh-2" {
 		t.Fatalf("unexpected tokens: %+v", method.OAuth)
 	}
 }

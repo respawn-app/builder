@@ -21,6 +21,7 @@ const (
 	interruptMessage         = "User interrupted you"
 	handoffInstruction       = "Context threshold reached. Provide a concise handoff summary with next steps. Do not call tools."
 	agentsFileName           = "AGENTS.md"
+	agentsGlobalDirName      = ".builder"
 	agentsInjectedHeader     = "# AGENTS.md auto-injection"
 	agentsInjectedFenceLabel = "md"
 )
@@ -154,11 +155,10 @@ func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (llm.Messag
 
 	stepID := uuid.NewString()
 
-	if err := e.appendUserMessage(stepID, text); err != nil {
+	if err := e.injectAgentsIfNeeded(stepID); err != nil {
 		return llm.Message{}, err
 	}
-
-	if err := e.injectAgentsIfNeeded(stepID); err != nil {
+	if err := e.appendUserMessage(stepID, text); err != nil {
 		return llm.Message{}, err
 	}
 
@@ -453,20 +453,48 @@ func (e *Engine) injectAgentsIfNeeded(stepID string) error {
 	if meta.AgentsInjected {
 		return nil
 	}
-	path := filepath.Join(meta.WorkspaceRoot, agentsFileName)
-	data, err := os.ReadFile(path)
+	paths, err := agentsInjectionPaths(meta.WorkspaceRoot)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return e.store.MarkAgentsInjected()
-		}
-		return fmt.Errorf("read AGENTS.md: %w", err)
-	}
-
-	injected := fmt.Sprintf("%s\nsource: %s\n\n```%s\n%s\n```", agentsInjectedHeader, path, agentsInjectedFenceLabel, string(data))
-	if err := e.appendUserMessage(stepID, injected); err != nil {
 		return err
 	}
+
+	for _, path := range paths {
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			if errors.Is(readErr, os.ErrNotExist) {
+				continue
+			}
+			return fmt.Errorf("read AGENTS.md: %w", readErr)
+		}
+		injected := fmt.Sprintf("%s\nsource: %s\n\n```%s\n%s\n```", agentsInjectedHeader, path, agentsInjectedFenceLabel, string(data))
+		if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, Content: injected}); err != nil {
+			return err
+		}
+	}
+
 	return e.store.MarkAgentsInjected()
+}
+
+func agentsInjectionPaths(workspaceRoot string) ([]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve home dir: %w", err)
+	}
+
+	paths := make([]string, 0, 2)
+	seen := map[string]bool{}
+	addPath := func(path string) {
+		cleaned := filepath.Clean(path)
+		if cleaned == "" || seen[cleaned] {
+			return
+		}
+		seen[cleaned] = true
+		paths = append(paths, cleaned)
+	}
+
+	addPath(filepath.Join(home, agentsGlobalDirName, agentsFileName))
+	addPath(filepath.Join(workspaceRoot, agentsFileName))
+	return paths, nil
 }
 
 func (e *Engine) restoreMessages() error {

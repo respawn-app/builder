@@ -226,6 +226,7 @@ func pollOpenAIDeviceAuthToken(ctx context.Context, opts OpenAIOAuthOptions, cod
 }
 
 func exchangeOpenAIAuthorizationCode(ctx context.Context, opts OpenAIOAuthOptions, code, codeVerifier, redirectURI string) (Method, error) {
+	opts = normalizeOpenAIOAuthOptions(opts)
 	issuer := strings.TrimSuffix(opts.Issuer, "/")
 	endpoint := issuer + "/oauth/token"
 	if strings.TrimSpace(redirectURI) == "" {

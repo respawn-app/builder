@@ -19,14 +19,14 @@ import (
 
 const (
 	DefaultAppName       = "builder"
-	DefaultPersistence   = "./agents/builder"
+	DefaultPersistence   = "~/.builder"
 	workspaceIndexName   = "workspaces.json"
 	globalAuthConfigName = "auth.json"
 
-	defaultModel               = "gpt-5"
-	defaultThinkingLevel       = "medium"
+	defaultModel               = "gpt-5.3-codex"
+	defaultThinkingLevel       = "high"
 	defaultTheme               = "dark"
-	defaultModelTimeoutSeconds = 120
+	defaultModelTimeoutSeconds = 400
 	defaultBashTimeoutSeconds  = 300
 )
 
@@ -231,7 +231,12 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		return App{}, err
 	}
 
-	absRoot, err := filepath.Abs(persistenceRoot)
+	expandedPersistenceRoot, err := expandTildePath(persistenceRoot)
+	if err != nil {
+		return App{}, fmt.Errorf("expand persistence root: %w", err)
+	}
+
+	absRoot, err := filepath.Abs(expandedPersistenceRoot)
 	if err != nil {
 		return App{}, fmt.Errorf("resolve persistence root: %w", err)
 	}
@@ -327,6 +332,27 @@ func parseEnabledToolsCSV(raw string) ([]tools.ID, error) {
 		out = append(out, id)
 	}
 	return out, nil
+}
+
+func expandTildePath(path string) (string, error) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" || !strings.HasPrefix(trimmed, "~") {
+		return trimmed, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home dir: %w", err)
+	}
+	if trimmed == "~" {
+		return home, nil
+	}
+	if strings.HasPrefix(trimmed, "~/") {
+		return filepath.Join(home, strings.TrimPrefix(trimmed, "~/")), nil
+	}
+	if strings.HasPrefix(trimmed, "~\\") {
+		return filepath.Join(home, strings.TrimPrefix(trimmed, "~\\")), nil
+	}
+	return trimmed, nil
 }
 
 func sortedToolIDs() []tools.ID {
