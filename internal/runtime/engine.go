@@ -29,6 +29,7 @@ type Config struct {
 	Model       string
 	Temperature float64
 	MaxTokens   int
+	OnEvent     func(Event)
 }
 
 type Engine struct {
@@ -177,7 +178,9 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 			return llm.Message{}, err
 		}
 
-		resp, err := e.generateWithRetry(ctx, req)
+		resp, err := e.generateWithRetry(ctx, req, func(delta string) {
+			e.emit(Event{Kind: EventAssistantDelta, StepID: stepID, AssistantDelta: delta})
+		})
 		if err != nil {
 			return llm.Message{}, err
 		}
@@ -198,6 +201,7 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 			if e.handoffPending && !e.handoffDone {
 				e.handoffDone = true
 			}
+			e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: resp.Assistant})
 			return resp.Assistant, nil
 		}
 
@@ -282,11 +286,22 @@ func (e *Engine) ensureLocked() (session.LockedContract, error) {
 	return lock, nil
 }
 
-func (e *Engine) generateWithRetry(ctx context.Context, req llm.Request) (llm.Response, error) {
+func (e *Engine) generateWithRetry(ctx context.Context, req llm.Request, onDelta func(string)) (llm.Response, error) {
 	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second}
 	var lastErr error
 	for i := 0; i <= len(delays); i++ {
-		resp, err := e.llm.Generate(ctx, req)
+		var (
+			resp llm.Response
+			err  error
+		)
+		if streamingClient, ok := e.llm.(llm.StreamClient); ok {
+			resp, err = streamingClient.GenerateStream(ctx, req, onDelta)
+		} else {
+			resp, err = e.llm.Generate(ctx, req)
+			if err == nil && onDelta != nil && resp.Assistant.Content != "" {
+				onDelta(resp.Assistant.Content)
+			}
+		}
 		if err == nil {
 			return resp, nil
 		}
@@ -313,6 +328,7 @@ func (e *Engine) executeToolCalls(ctx context.Context, stepID string, calls []ll
 		if call.ID == "" {
 			call.ID = uuid.NewString()
 		}
+		e.emit(Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: &call})
 		idx := i
 		wg.Add(1)
 		go func(tc llm.ToolCall) {
@@ -330,6 +346,7 @@ func (e *Engine) executeToolCalls(ctx context.Context, stepID string, calls []ll
 			}
 			results[idx] = res
 			_ = e.persistToolCompletion(stepID, res)
+			e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: &res})
 		}(call)
 	}
 
@@ -439,4 +456,10 @@ func (e *Engine) snapshotMessages() []llm.Message {
 func mustJSON(v any) json.RawMessage {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+func (e *Engine) emit(evt Event) {
+	if e.cfg.OnEvent != nil {
+		e.cfg.OnEvent(evt)
+	}
 }

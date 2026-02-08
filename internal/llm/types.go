@@ -147,6 +147,10 @@ type Client interface {
 	Generate(ctx context.Context, request Request) (Response, error)
 }
 
+type StreamClient interface {
+	GenerateStream(ctx context.Context, request Request, onDelta func(text string)) (Response, error)
+}
+
 func AppendToolResultMessages(messages []Message, results []ToolResult) []Message {
 	out := make([]Message, 0, len(messages)+len(results))
 	out = append(out, messages...)

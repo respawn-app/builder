@@ -24,6 +24,10 @@ type OpenAITransport interface {
 	Generate(ctx context.Context, request OpenAIRequest) (OpenAIResponse, error)
 }
 
+type OpenAIStreamingTransport interface {
+	GenerateStream(ctx context.Context, request OpenAIRequest, onDelta func(text string)) (OpenAIResponse, error)
+}
+
 type OpenAIClient struct {
 	transport OpenAITransport
 }
@@ -63,4 +67,47 @@ func (c *OpenAIClient) Generate(ctx context.Context, request Request) (Response,
 		ToolCalls: providerResp.ToolCalls,
 		Usage:     providerResp.Usage,
 	}, nil
+}
+
+func (c *OpenAIClient) GenerateStream(ctx context.Context, request Request, onDelta func(text string)) (Response, error) {
+	if c == nil || c.transport == nil {
+		return Response{}, ErrMissingTransport
+	}
+	if err := request.Validate(); err != nil {
+		return Response{}, err
+	}
+
+	providerReq := OpenAIRequest{
+		Model:        request.Model,
+		Temperature:  request.Temperature,
+		MaxTokens:    request.MaxTokens,
+		SystemPrompt: request.SystemPrompt,
+		Messages:     append([]Message(nil), request.Messages...),
+		Tools:        append([]Tool(nil), request.Tools...),
+	}
+
+	if streamTransport, ok := c.transport.(OpenAIStreamingTransport); ok {
+		providerResp, err := streamTransport.GenerateStream(ctx, providerReq, onDelta)
+		if err != nil {
+			return Response{}, fmt.Errorf("openai generate stream: %w", err)
+		}
+		return Response{
+			Assistant: Message{
+				Role:      RoleAssistant,
+				Content:   providerResp.AssistantText,
+				ToolCalls: append([]ToolCall(nil), providerResp.ToolCalls...),
+			},
+			ToolCalls: providerResp.ToolCalls,
+			Usage:     providerResp.Usage,
+		}, nil
+	}
+
+	resp, err := c.Generate(ctx, request)
+	if err != nil {
+		return Response{}, err
+	}
+	if onDelta != nil && resp.Assistant.Content != "" {
+		onDelta(resp.Assistant.Content)
+	}
+	return resp, nil
 }
