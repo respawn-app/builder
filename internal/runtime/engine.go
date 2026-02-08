@@ -328,6 +328,9 @@ func (e *Engine) generateWithRetry(ctx context.Context, req llm.Request, onDelta
 		if err == nil {
 			return resp, nil
 		}
+		if llm.IsAuthenticationError(err) {
+			return llm.Response{}, err
+		}
 		if attemptEmitted && onAttemptReset != nil {
 			onAttemptReset()
 		}
