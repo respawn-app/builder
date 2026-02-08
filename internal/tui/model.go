@@ -18,6 +18,7 @@ const (
 	DefaultPreviewLines    = 8
 	TranscriptDivider      = "────────────────────────"
 	toolInlineMetaSep      = "\x1f"
+	toolShellCallPrefix    = "\x1eshell_call\x1e"
 	toolPatchPayloadPrefix = "\x1epatch_payload\x1e"
 	toolPatchPayloadSep    = "\x1epatch_sep\x1e"
 )
@@ -307,6 +308,9 @@ func (m Model) renderFlatDetailTranscript() string {
 		switch role {
 		case "tool_call":
 			blockRole := "tool"
+			if isShellToolCall(entry.Text) {
+				blockRole = "tool_shell"
+			}
 			_, patchDetail, hasPatchPayload := extractPatchPayload(entry.Text)
 			combined := entry.Text
 			if hasPatchPayload {
@@ -320,12 +324,12 @@ func (m Model) renderFlatDetailTranscript() string {
 						combined = combined + "\n" + resultText
 					}
 				}
-				blockRole = toolBlockRoleFromResult(nextRole)
+				blockRole = toolBlockRoleFromResult(nextRole, blockRole)
 				i++
 			}
 			blocks = append(blocks, m.flattenEntry(blockRole, combined))
 		case "tool_result", "tool_result_ok", "tool_result_error":
-			blocks = append(blocks, m.flattenEntry(toolBlockRoleFromResult(role), entry.Text))
+			blocks = append(blocks, m.flattenEntry(toolBlockRoleFromResult(role, "tool"), entry.Text))
 		default:
 			blocks = append(blocks, m.flattenEntry(role, entry.Text))
 		}
@@ -357,6 +361,9 @@ func (m Model) renderFlatOngoingTranscript() string {
 		switch role {
 		case "tool_call":
 			blockRole := "tool"
+			if isShellToolCall(entry.Text) {
+				blockRole = "tool_shell"
+			}
 			patchSummary, _, hasPatchPayload := extractPatchPayload(entry.Text)
 			combined := compactToolCallText(entry.Text)
 			if hasPatchPayload {
@@ -365,7 +372,7 @@ func (m Model) renderFlatOngoingTranscript() string {
 			if i+1 < len(m.transcript) {
 				nextRole := strings.TrimSpace(m.transcript[i+1].Role)
 				if isToolResultRole(nextRole) {
-					blockRole = toolBlockRoleFromResult(nextRole)
+					blockRole = toolBlockRoleFromResult(nextRole, blockRole)
 					i++
 				}
 			}
@@ -485,6 +492,9 @@ func compactToolCallText(text string) string {
 	if summary, _, ok := extractPatchPayload(text); ok {
 		return strings.TrimSpace(summary)
 	}
+	if shellText, ok := stripShellCallPrefix(text); ok {
+		text = shellText
+	}
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
 		return "tool call"
@@ -501,6 +511,18 @@ func compactToolCallText(text string) string {
 	return command
 }
 
+func stripShellCallPrefix(text string) (string, bool) {
+	if !strings.HasPrefix(text, toolShellCallPrefix) {
+		return text, false
+	}
+	return strings.TrimPrefix(text, toolShellCallPrefix), true
+}
+
+func isShellToolCall(text string) bool {
+	_, ok := stripShellCallPrefix(text)
+	return ok
+}
+
 func extractPatchPayload(text string) (string, string, bool) {
 	if !strings.HasPrefix(text, toolPatchPayloadPrefix) {
 		return "", "", false
@@ -515,7 +537,7 @@ func extractPatchPayload(text string) (string, string, bool) {
 
 func isToolHeadlineRole(role string) bool {
 	switch strings.TrimSpace(role) {
-	case "tool", "tool_success", "tool_error":
+	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error":
 		return true
 	default:
 		return false
@@ -525,9 +547,17 @@ func isToolHeadlineRole(role string) bool {
 func splitToolInlineMeta(line string) (string, string) {
 	parts := strings.SplitN(line, toolInlineMetaSep, 2)
 	if len(parts) == 1 {
-		return strings.TrimSpace(parts[0]), ""
+		command := strings.TrimSpace(parts[0])
+		if stripped, ok := stripShellCallPrefix(command); ok {
+			command = stripped
+		}
+		return command, ""
 	}
-	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+	command := strings.TrimSpace(parts[0])
+	if stripped, ok := stripShellCallPrefix(command); ok {
+		command = stripped
+	}
+	return command, strings.TrimSpace(parts[1])
 }
 
 func (m Model) renderToolHeadline(line string, width int) string {
@@ -583,12 +613,21 @@ func isToolResultRole(role string) bool {
 	}
 }
 
-func toolBlockRoleFromResult(role string) string {
+func toolBlockRoleFromResult(role, baseRole string) string {
 	if strings.TrimSpace(role) == "tool_result_error" {
+		if baseRole == "tool_shell" {
+			return "tool_shell_error"
+		}
 		return "tool_error"
 	}
 	if isToolResultRole(role) {
+		if baseRole == "tool_shell" {
+			return "tool_shell_success"
+		}
 		return "tool_success"
+	}
+	if baseRole == "tool_shell" {
+		return "tool_shell"
 	}
 	return "tool"
 }
@@ -599,7 +638,7 @@ func (m Model) roleSymbol(role string) string {
 		return ""
 	}
 	switch role {
-	case "tool", "tool_success", "tool_error":
+	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error":
 		return styleForRole(role, m.palette()).Render(prefix)
 	default:
 		return prefix
@@ -614,6 +653,8 @@ func rolePrefix(role string) string {
 		return "❮"
 	case "tool", "tool_success", "tool_error":
 		return "•"
+	case "tool_shell", "tool_shell_success", "tool_shell_error":
+		return "$"
 	default:
 		return ""
 	}
@@ -630,6 +671,12 @@ func styleForRole(role string, p palette) lipgloss.Style {
 	case "tool_success", "tool_result_ok":
 		return p.toolSuccess
 	case "tool_error", "tool_result_error":
+		return p.toolError
+	case "tool_shell":
+		return p.tool
+	case "tool_shell_success":
+		return p.toolSuccess
+	case "tool_shell_error":
 		return p.toolError
 	case "system":
 		return p.system

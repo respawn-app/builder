@@ -18,6 +18,7 @@ import (
 const (
 	agentsInjectedPrefix      = "# AGENTS.md auto-injection"
 	toolInlineMetaSeparator   = "\x1f"
+	toolShellCallPrefix       = "\x1eshell_call\x1e"
 	defaultShellTimeoutSecond = 300
 	toolPatchPayloadPrefix    = "\x1epatch_payload\x1e"
 	toolPatchPayloadSeparator = "\x1epatch_sep\x1e"
@@ -203,10 +204,14 @@ func (s *chatStore) formatToolCall(call llm.ToolCall) string {
 			return payload
 		}
 	}
+	isShellCall := strings.TrimSpace(call.Name) == string(tools.ToolShell)
 	command, timeoutLabel := formatToolInput(call)
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return "tool call"
+	}
+	if isShellCall {
+		command = toolShellCallPrefix + command
 	}
 	if timeoutLabel == "" {
 		return command
