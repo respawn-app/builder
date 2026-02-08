@@ -86,18 +86,18 @@ func (t *Tool) Name() tools.ID {
 func (t *Tool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	var in input
 	if err := json.Unmarshal(c.Input, &in); err != nil {
-		return resultErr(c, fmt.Sprintf("invalid input: %v", err)), nil
+		return tools.ErrorResult(c, fmt.Sprintf("invalid input: %v", err)), nil
 	}
 	if strings.TrimSpace(in.Patch) == "" {
-		return resultErr(c, "patch is required"), nil
+		return tools.ErrorResult(c, "patch is required"), nil
 	}
 
 	doc, err := parse(in.Patch)
 	if err != nil {
-		return resultErr(c, err.Error()), nil
+		return tools.ErrorResult(c, err.Error()), nil
 	}
 	if err := t.apply(doc); err != nil {
-		return resultErr(c, err.Error()), nil
+		return tools.ErrorResult(c, err.Error()), nil
 	}
 
 	body, _ := json.Marshal(map[string]any{
@@ -614,11 +614,6 @@ func applyHunkAt(lines []string, changes []ChangeLine, start int) ([]string, int
 
 	out = append(out, lines[cursor:]...)
 	return out, oldCount, newCount, nil
-}
-
-func resultErr(c tools.Call, msg string) tools.Result {
-	body, _ := json.Marshal(map[string]any{"error": msg})
-	return tools.Result{CallID: c.ID, Name: c.Name, Output: body, IsError: true}
 }
 
 func parse(src string) (Document, error) {

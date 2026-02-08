@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -372,19 +374,42 @@ func NewOpenAIOAuthRefresher(opts OpenAIOAuthOptions, now func() time.Time, refr
 }
 
 func parsePollInterval(v any) (int64, error) {
+	const maxPollIntervalSeconds = int64(math.MaxInt64 / int64(time.Second))
 	switch typed := v.(type) {
 	case nil:
 		return 0, nil
 	case float64:
-		return int64(typed), nil
+		if math.IsNaN(typed) || math.IsInf(typed, 0) {
+			return 0, fmt.Errorf("invalid poll interval %v", typed)
+		}
+		if typed != math.Trunc(typed) {
+			return 0, fmt.Errorf("invalid poll interval %v", typed)
+		}
+		interval := int64(typed)
+		if interval > maxPollIntervalSeconds {
+			return 0, fmt.Errorf("poll interval too large: %d", interval)
+		}
+		return interval, nil
+	case json.Number:
+		parsed, err := strconv.ParseInt(strings.TrimSpace(typed.String()), 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid poll interval %q", typed.String())
+		}
+		if parsed > maxPollIntervalSeconds {
+			return 0, fmt.Errorf("poll interval too large: %d", parsed)
+		}
+		return parsed, nil
 	case string:
 		typed = strings.TrimSpace(typed)
 		if typed == "" {
 			return 0, nil
 		}
-		var n int64
-		if _, err := fmt.Sscanf(typed, "%d", &n); err != nil {
+		n, err := strconv.ParseInt(typed, 10, 64)
+		if err != nil {
 			return 0, fmt.Errorf("invalid poll interval %q", typed)
+		}
+		if n > maxPollIntervalSeconds {
+			return 0, fmt.Errorf("poll interval too large: %d", n)
 		}
 		return n, nil
 	default:

@@ -99,17 +99,17 @@ func (t *Tool) Name() tools.ID {
 func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 	var in input
 	if err := json.Unmarshal(c.Input, &in); err != nil {
-		return resultErr(c, fmt.Sprintf("invalid input: %v", err)), nil
+		return tools.ErrorResultWith(c, fmt.Sprintf("invalid input: %v", err), marshalNoHTMLEscape), nil
 	}
 	if in.Command == "" {
-		return resultErr(c, "command is required"), nil
+		return tools.ErrorResultWith(c, "command is required", marshalNoHTMLEscape), nil
 	}
 
 	timeout := t.defaultTimeout
 	if in.TimeoutSeconds != nil {
 		requested := time.Duration(*in.TimeoutSeconds) * time.Second
 		if requested <= 0 {
-			return resultErr(c, "timeout_seconds must be positive"), nil
+			return tools.ErrorResultWith(c, "timeout_seconds must be positive", marshalNoHTMLEscape), nil
 		}
 		if requested > maxTimeout {
 			requested = maxTimeout
@@ -143,7 +143,7 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 	cmd.Stderr = &merged
 
 	if err := cmd.Start(); err != nil {
-		return resultErr(c, fmt.Sprintf("failed to launch command: %v", err)), nil
+		return tools.ErrorResultWith(c, fmt.Sprintf("failed to launch command: %v", err), marshalNoHTMLEscape), nil
 	}
 
 	waitCh := make(chan error, 1)
@@ -192,7 +192,7 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 		} else if errors.Is(callCtx.Err(), context.Canceled) {
 			exitCode = 130
 		} else {
-			return resultErr(c, fmt.Sprintf("failed to launch command: %v", err)), nil
+			return tools.ErrorResultWith(c, fmt.Sprintf("failed to launch command: %v", err), marshalNoHTMLEscape), nil
 		}
 	}
 
@@ -209,11 +209,6 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 		return tools.Result{}, marshalErr
 	}
 	return tools.Result{CallID: c.ID, Name: c.Name, Output: body}, nil
-}
-
-func resultErr(c tools.Call, msg string) tools.Result {
-	body, _ := marshalNoHTMLEscape(map[string]any{"error": msg})
-	return tools.Result{CallID: c.ID, Name: c.Name, Output: body, IsError: true}
 }
 
 func marshalNoHTMLEscape(v any) (json.RawMessage, error) {

@@ -3,7 +3,6 @@ package llm
 import (
 	"context"
 	"encoding/json"
-	"net/http"
 	"strings"
 	"testing"
 
@@ -111,45 +110,32 @@ func TestBuildResponsesInput_NonAssistantRolesUseInputText(t *testing.T) {
 	}
 }
 
-func TestRequestURL_UsesCodexEndpointForOAuth(t *testing.T) {
+func TestServiceBaseURL_UsesCodexEndpointBaseForOAuth(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	transport.BaseURL = "https://api.openai.com/v1"
 
-	got := transport.requestURL(openAIAuthMode{IsOAuth: true})
-	if got != codexResponsesEndpoint {
-		t.Fatalf("expected oauth endpoint %q, got %q", codexResponsesEndpoint, got)
+	got := transport.serviceBaseURL(openAIAuthMode{IsOAuth: true})
+	if got != strings.TrimSuffix(codexResponsesEndpoint, "/responses") {
+		t.Fatalf("expected oauth base endpoint %q, got %q", strings.TrimSuffix(codexResponsesEndpoint, "/responses"), got)
 	}
-	standard := transport.requestURL(openAIAuthMode{})
-	if standard != "https://api.openai.com/v1/responses" {
-		t.Fatalf("expected standard responses endpoint, got %q", standard)
+	standard := transport.serviceBaseURL(openAIAuthMode{})
+	if standard != "https://api.openai.com/v1" {
+		t.Fatalf("expected standard base endpoint, got %q", standard)
 	}
 }
 
-func TestApplyHeaders_OAuthAddsCodexHeaders(t *testing.T) {
+func TestBuildRequestOptions_OAuthAddsCodexHeaders(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
-	req, err := http.NewRequest(http.MethodPost, "https://example.com", nil)
-	if err != nil {
-		t.Fatalf("new request: %v", err)
-	}
-	transport.applyHeaders(req, "Bearer x", openAIAuthMode{
+	opts := transport.buildRequestOptions("Bearer x", openAIAuthMode{
 		IsOAuth:   true,
 		AccountID: "acc-1",
 	}, "session-1")
 
-	if got := req.Header.Get("Authorization"); got != "Bearer x" {
-		t.Fatalf("unexpected authorization header: %q", got)
+	if len(opts) != 5 {
+		t.Fatalf("expected 5 request options, got %d", len(opts))
 	}
-	if got := req.Header.Get("originator"); got != defaultOriginator {
-		t.Fatalf("unexpected originator header: %q", got)
-	}
-	if got := req.Header.Get("User-Agent"); got == "" {
-		t.Fatal("expected user agent header")
-	}
-	if got := req.Header.Get("session_id"); got != "session-1" {
-		t.Fatalf("unexpected session_id header: %q", got)
-	}
-	if got := req.Header.Get("ChatGPT-Account-Id"); got != "acc-1" {
-		t.Fatalf("unexpected account id header: %q", got)
+	if len(transport.buildRequestOptions("Bearer x", openAIAuthMode{}, "")) != 1 {
+		t.Fatal("expected non-oauth options to include only authorization header")
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"builder/internal/auth"
 	"builder/internal/config"
+	"builder/internal/shared/textutil"
 )
 
 type appBootstrap struct {
@@ -36,8 +37,8 @@ func bootstrapApp(ctx context.Context, opts Options) (appBootstrap, error) {
 	}
 
 	oauthOpts := auth.OpenAIOAuthOptions{
-		Issuer:   firstNonEmpty(strings.TrimSpace(os.Getenv("BUILDER_OAUTH_ISSUER")), auth.DefaultOpenAIIssuer),
-		ClientID: firstNonEmpty(strings.TrimSpace(os.Getenv("BUILDER_OAUTH_CLIENT_ID")), auth.DefaultOpenAIClientID),
+		Issuer:   textutil.FirstNonEmpty(strings.TrimSpace(os.Getenv("BUILDER_OAUTH_ISSUER")), auth.DefaultOpenAIIssuer),
+		ClientID: textutil.FirstNonEmpty(strings.TrimSpace(os.Getenv("BUILDER_OAUTH_CLIENT_ID")), auth.DefaultOpenAIClientID),
 	}
 
 	mgr := auth.NewManager(

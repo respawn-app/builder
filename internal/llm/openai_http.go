@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"builder/internal/shared/textutil"
+
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/packages/param"
@@ -208,32 +210,6 @@ func (t *HTTPTransport) resolveAuth(ctx context.Context) (string, openAIAuthMode
 	return authHeader, mode, nil
 }
 
-func (t *HTTPTransport) requestURL(mode openAIAuthMode) string {
-	if mode.IsOAuth {
-		return codexResponsesEndpoint
-	}
-	base := strings.TrimSuffix(t.BaseURL, "/")
-	if base == "" {
-		base = defaultOpenAIBaseURL
-	}
-	return base + "/responses"
-}
-
-func (t *HTTPTransport) applyHeaders(req *http.Request, authHeader string, mode openAIAuthMode, sessionID string) {
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", authHeader)
-	if mode.IsOAuth {
-		req.Header.Set("originator", defaultOriginator)
-		req.Header.Set("User-Agent", defaultUserAgent)
-		if strings.TrimSpace(sessionID) != "" {
-			req.Header.Set("session_id", sessionID)
-		}
-		if mode.AccountID != "" {
-			req.Header.Set("ChatGPT-Account-Id", mode.AccountID)
-		}
-	}
-}
-
 func (t *HTTPTransport) buildPayload(request OpenAIRequest, mode openAIAuthMode) (responses.ResponseNewParams, error) {
 	input := buildResponsesInput(request.Messages)
 
@@ -373,7 +349,7 @@ func parseOutputItems(items []responses.ResponseOutputItemUnion) (string, []Tool
 				}
 			}
 		case "function_call":
-			callID := firstNonEmpty(strings.TrimSpace(item.CallID), strings.TrimSpace(item.ID))
+			callID := textutil.FirstNonEmpty(strings.TrimSpace(item.CallID), strings.TrimSpace(item.ID))
 			if callID == "" && strings.TrimSpace(item.Name) == "" {
 				continue
 			}
@@ -626,7 +602,7 @@ func (a *toolCallAccumulator) UpsertFromOutput(item responses.ResponseOutputItem
 	if item.Type != "function_call" {
 		return
 	}
-	key := firstNonEmpty(strings.TrimSpace(item.CallID), strings.TrimSpace(item.ID))
+	key := textutil.FirstNonEmpty(strings.TrimSpace(item.CallID), strings.TrimSpace(item.ID))
 	if key == "" {
 		return
 	}
@@ -650,7 +626,7 @@ func (a *toolCallAccumulator) UpsertFromOutput(item responses.ResponseOutputItem
 }
 
 func (a *toolCallAccumulator) AppendArguments(itemID, delta string) {
-	key := firstNonEmpty(strings.TrimSpace(a.itemToKey[itemID]), strings.TrimSpace(itemID))
+	key := textutil.FirstNonEmpty(strings.TrimSpace(a.itemToKey[itemID]), strings.TrimSpace(itemID))
 	state := a.ensure(key)
 	if state == nil || strings.TrimSpace(delta) == "" {
 		return
@@ -659,7 +635,7 @@ func (a *toolCallAccumulator) AppendArguments(itemID, delta string) {
 }
 
 func (a *toolCallAccumulator) SetArguments(itemID, arguments string) {
-	key := firstNonEmpty(strings.TrimSpace(a.itemToKey[itemID]), strings.TrimSpace(itemID))
+	key := textutil.FirstNonEmpty(strings.TrimSpace(a.itemToKey[itemID]), strings.TrimSpace(itemID))
 	state := a.ensure(key)
 	if state == nil {
 		return
@@ -670,7 +646,7 @@ func (a *toolCallAccumulator) SetArguments(itemID, arguments string) {
 
 func (a *toolCallAccumulator) Merge(calls []ToolCall) {
 	for _, call := range calls {
-		key := firstNonEmpty(strings.TrimSpace(call.ID), strings.TrimSpace(call.Name))
+		key := textutil.FirstNonEmpty(strings.TrimSpace(call.ID), strings.TrimSpace(call.Name))
 		state := a.ensure(key)
 		if state == nil {
 			continue
@@ -695,7 +671,7 @@ func (a *toolCallAccumulator) ToToolCalls() []ToolCall {
 		if !ok {
 			continue
 		}
-		callID := firstNonEmpty(strings.TrimSpace(state.CallID), key)
+		callID := textutil.FirstNonEmpty(strings.TrimSpace(state.CallID), key)
 		if callID == "" && strings.TrimSpace(state.Name) == "" {
 			continue
 		}
@@ -730,15 +706,6 @@ func normalizeToolInput(arguments string) json.RawMessage {
 	}
 	quoted, _ := json.Marshal(arguments)
 	return quoted
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func shouldApplyReasoningEffort(model, effort string) bool {

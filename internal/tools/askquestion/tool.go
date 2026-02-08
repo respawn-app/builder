@@ -137,15 +137,15 @@ func (t *Tool) Name() tools.ID {
 func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(c.Input, &raw); err != nil {
-		return resultErr(c, fmt.Sprintf("invalid input: %v", err)), nil
+		return tools.ErrorResult(c, fmt.Sprintf("invalid input: %v", err)), nil
 	}
 	if _, ok := raw["action"]; ok {
-		return resultErr(c, "invalid input: field \"action\" is not allowed"), nil
+		return tools.ErrorResult(c, "invalid input: field \"action\" is not allowed"), nil
 	}
 
 	var in input
 	if err := json.Unmarshal(c.Input, &in); err != nil {
-		return resultErr(c, fmt.Sprintf("invalid input: %v", err)), nil
+		return tools.ErrorResult(c, fmt.Sprintf("invalid input: %v", err)), nil
 	}
 	resp, err := t.broker.Ask(ctx, Request{
 		ID:          c.ID,
@@ -153,16 +153,11 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 		Suggestions: in.Suggestions,
 	})
 	if err != nil {
-		return resultErr(c, err.Error()), nil
+		return tools.ErrorResult(c, err.Error()), nil
 	}
 	body, marshalErr := json.Marshal(resp)
 	if marshalErr != nil {
 		return tools.Result{}, marshalErr
 	}
 	return tools.Result{CallID: c.ID, Name: c.Name, Output: body}, nil
-}
-
-func resultErr(c tools.Call, msg string) tools.Result {
-	body, _ := json.Marshal(map[string]any{"error": msg})
-	return tools.Result{CallID: c.ID, Name: c.Name, Output: body, IsError: true}
 }

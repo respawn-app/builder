@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -84,7 +85,11 @@ func runOAuthBrowserAuto(ctx context.Context, opts auth.OpenAIOAuthOptions) (aut
 	if err != nil {
 		return auth.Method{}, err
 	}
-	return auth.CompleteOpenAIBrowserFlow(ctx, opts, session, "code="+urlEncode(callback.Code)+"&state="+urlEncode(callback.State))
+	query := url.Values{
+		"code":  []string{callback.Code},
+		"state": []string{callback.State},
+	}
+	return auth.CompleteOpenAIBrowserFlow(ctx, opts, session, query.Encode())
 }
 
 func runOAuthBrowserPaste(ctx context.Context, opts auth.OpenAIOAuthOptions) (auth.Method, error) {
@@ -116,9 +121,4 @@ func prompt(label string) (string, error) {
 		}
 	}
 	return strings.TrimRight(line, "\r\n"), nil
-}
-
-func urlEncode(v string) string {
-	repl := strings.NewReplacer("%", "%25", "&", "%26", "=", "%3D", "+", "%2B", " ", "%20")
-	return repl.Replace(v)
 }

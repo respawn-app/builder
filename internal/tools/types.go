@@ -15,14 +15,7 @@ const (
 )
 
 func ParseID(v string) (ID, bool) {
-	switch ID(v) {
-	case ToolShell, ToolPatch, ToolAskQuestion:
-		return ID(v), true
-	case ID("bash"):
-		return ToolShell, true
-	default:
-		return "", false
-	}
+	return parseCatalogID(v)
 }
 
 type Call struct {
