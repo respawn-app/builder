@@ -15,11 +15,13 @@ const (
 	EventUserMessageFlushed  EventKind = "user_message_flushed"
 	EventToolCallStarted     EventKind = "tool_call_started"
 	EventToolCallCompleted   EventKind = "tool_call_completed"
+	EventInFlightClearFailed EventKind = "in_flight_clear_failed"
 )
 
 type Event struct {
 	Kind           EventKind
 	StepID         string
+	Error          string
 	AssistantDelta string
 	UserMessage    string
 	Message        llm.Message

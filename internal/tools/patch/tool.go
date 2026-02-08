@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 
 	"builder/internal/tools"
@@ -25,10 +28,43 @@ type patchFileState struct {
 	Original string
 }
 
+type fileSnapshot struct {
+	Exists bool
+	Mode   os.FileMode
+	Data   []byte
+}
+
+type committedWrite struct {
+	Path   string
+	Before fileSnapshot
+}
+
+type removedSource struct {
+	Path   string
+	Before fileSnapshot
+}
+
 type Tool struct {
 	workspaceRoot     string
 	workspaceRootReal string
 	workspaceOnly     bool
+}
+
+const hunkMaxFuzz = 8
+
+var unifiedHunkHeaderPattern = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: .*)?$`)
+
+type editHunk struct {
+	header  hunkHeader
+	changes []ChangeLine
+}
+
+type hunkHeader struct {
+	hasPosition bool
+	oldStart    int
+	oldCount    int
+	newStart    int
+	newCount    int
 }
 
 func New(workspaceRoot string, workspaceOnly bool) (*Tool, error) {
@@ -50,18 +86,18 @@ func (t *Tool) Name() tools.ID {
 func (t *Tool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	var in input
 	if err := json.Unmarshal(c.Input, &in); err != nil {
-		return resultErr(c, fmt.Sprintf("invalid input: %v", err)), nil
+		return tools.ErrorResult(c, fmt.Sprintf("invalid input: %v", err)), nil
 	}
 	if strings.TrimSpace(in.Patch) == "" {
-		return resultErr(c, "patch is required"), nil
+		return tools.ErrorResult(c, "patch is required"), nil
 	}
 
 	doc, err := parse(in.Patch)
 	if err != nil {
-		return resultErr(c, err.Error()), nil
+		return tools.ErrorResult(c, err.Error()), nil
 	}
 	if err := t.apply(doc); err != nil {
-		return resultErr(c, err.Error()), nil
+		return tools.ErrorResult(c, err.Error()), nil
 	}
 
 	body, _ := json.Marshal(map[string]any{
@@ -154,45 +190,150 @@ func (t *Tool) apply(doc Document) error {
 		}
 	}
 
-	for _, s := range state {
-		if !s.Exists {
-			continue
-		}
+	states := sortedActiveStates(state)
+	for _, s := range states {
 		if err := os.MkdirAll(filepath.Dir(s.NewPath), 0o755); err != nil {
 			return fmt.Errorf("create parent dir: %w", err)
 		}
 	}
 
-	for _, s := range state {
-		if !s.Exists {
-			continue
-		}
+	for _, s := range states {
 		text := strings.Join(s.Content, "\n")
 		if len(s.Content) > 0 && !strings.HasSuffix(text, "\n") {
 			text += "\n"
 		}
-		tmp := s.NewPath + ".builder.tmp"
+		tmp := stagedPath(s.NewPath)
 		if err := os.WriteFile(tmp, []byte(text), 0o644); err != nil {
 			return fmt.Errorf("stage write %s: %w", s.NewPath, err)
 		}
 	}
+	defer cleanupStagedFiles(states)
 
-	for _, s := range state {
-		if !s.Exists {
-			continue
-		}
-		tmp := s.NewPath + ".builder.tmp"
-		if err := os.Rename(tmp, s.NewPath); err != nil {
-			return fmt.Errorf("commit write %s: %w", s.NewPath, err)
-		}
-		if s.NewPath != s.Original {
-			if err := os.Remove(s.Original); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("remove moved source %s: %w", s.Original, err)
-			}
-		}
+	if err := commitStagedFiles(states); err != nil {
+		return err
 	}
 
 	return nil
+}
+
+func sortedActiveStates(state map[string]*patchFileState) []*patchFileState {
+	out := make([]*patchFileState, 0, len(state))
+	for _, s := range state {
+		if s.Exists {
+			out = append(out, s)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].NewPath < out[j].NewPath
+	})
+	return out
+}
+
+func stagedPath(path string) string {
+	return path + ".builder.tmp"
+}
+
+func cleanupStagedFiles(states []*patchFileState) {
+	for _, s := range states {
+		_ = os.Remove(stagedPath(s.NewPath))
+	}
+}
+
+func commitStagedFiles(states []*patchFileState) error {
+	committed := make([]committedWrite, 0, len(states))
+	removed := make([]removedSource, 0, len(states))
+	rollback := func() error {
+		var rollbackErr error
+		for i := len(committed) - 1; i >= 0; i-- {
+			entry := committed[i]
+			if err := restoreSnapshot(entry.Path, entry.Before); err != nil {
+				rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restore target %s: %w", entry.Path, err))
+			}
+		}
+		for i := len(removed) - 1; i >= 0; i-- {
+			entry := removed[i]
+			if err := restoreSnapshot(entry.Path, entry.Before); err != nil {
+				rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restore moved source %s: %w", entry.Path, err))
+			}
+		}
+		return rollbackErr
+	}
+
+	for _, s := range states {
+		before, err := captureSnapshot(s.NewPath)
+		if err != nil {
+			return withRollback(fmt.Errorf("snapshot target %s: %w", s.NewPath, err), rollback())
+		}
+		if err := os.Rename(stagedPath(s.NewPath), s.NewPath); err != nil {
+			return withRollback(fmt.Errorf("commit write %s: %w", s.NewPath, err), rollback())
+		}
+		committed = append(committed, committedWrite{Path: s.NewPath, Before: before})
+	}
+
+	for _, s := range states {
+		if s.NewPath == s.Original {
+			continue
+		}
+		before, err := captureSnapshot(s.Original)
+		if err != nil {
+			return withRollback(fmt.Errorf("snapshot moved source %s: %w", s.Original, err), rollback())
+		}
+		if !before.Exists {
+			continue
+		}
+		if err := os.Remove(s.Original); err != nil {
+			return withRollback(fmt.Errorf("remove moved source %s: %w", s.Original, err), rollback())
+		}
+		removed = append(removed, removedSource{Path: s.Original, Before: before})
+	}
+
+	return nil
+}
+
+func captureSnapshot(path string) (fileSnapshot, error) {
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return fileSnapshot{}, nil
+	}
+	if err != nil {
+		return fileSnapshot{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return fileSnapshot{}, fmt.Errorf("not a regular file")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fileSnapshot{}, err
+	}
+	return fileSnapshot{Exists: true, Mode: info.Mode().Perm(), Data: data}, nil
+}
+
+func restoreSnapshot(path string, snapshot fileSnapshot) error {
+	if !snapshot.Exists {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp := path + ".builder.rollback.tmp"
+	if err := os.WriteFile(tmp, snapshot.Data, snapshot.Mode); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+func withRollback(primary, rollbackErr error) error {
+	if rollbackErr == nil {
+		return primary
+	}
+	return errors.Join(primary, fmt.Errorf("rollback failed: %w", rollbackErr))
 }
 
 func (t *Tool) resolvePath(path string, mustExist bool) (string, error) {
@@ -270,55 +411,209 @@ func splitLines(s string) []string {
 }
 
 func applyEdit(original []string, changes []ChangeLine) ([]string, error) {
-	out := make([]string, 0, len(original)+len(changes)/2)
-	i := 0
+	hunks, err := parseEditHunks(changes)
+	if err != nil {
+		return nil, err
+	}
+
+	current := append([]string(nil), original...)
+	cumulativeOffset := 0
+	searchFloor := 0
+
+	for idx, h := range hunks {
+		expected := -1
+		if h.header.hasPosition {
+			expected = h.header.oldStart - 1 + cumulativeOffset
+		}
+		anchor, err := findHunkAnchor(current, h.changes, expected, searchFloor, h.header.hasPosition)
+		if err != nil {
+			return nil, fmt.Errorf("hunk %d: %w", idx+1, err)
+		}
+		next, oldCount, newCount, err := applyHunkAt(current, h.changes, anchor)
+		if err != nil {
+			return nil, fmt.Errorf("hunk %d: %w", idx+1, err)
+		}
+		if h.header.hasPosition {
+			if oldCount != h.header.oldCount || newCount != h.header.newCount {
+				return nil, fmt.Errorf(
+					"hunk %d: header count mismatch: old %d->%d new %d->%d",
+					idx+1,
+					h.header.oldCount,
+					oldCount,
+					h.header.newCount,
+					newCount,
+				)
+			}
+		}
+		current = next
+		cumulativeOffset += newCount - oldCount
+		searchFloor = anchor + newCount
+	}
+	return current, nil
+}
+
+func parseEditHunks(changes []ChangeLine) ([]editHunk, error) {
+	if len(changes) == 0 {
+		return nil, nil
+	}
+
+	hunks := make([]editHunk, 0, 4)
+	current := editHunk{}
+
+	flush := func() error {
+		if len(current.changes) == 0 {
+			if current.header.hasPosition {
+				return errors.New("hunk header without changes")
+			}
+			return nil
+		}
+		hunks = append(hunks, current)
+		current = editHunk{}
+		return nil
+	}
+
 	for _, ch := range changes {
 		switch ch.Kind {
 		case '@':
-			continue
-		case ' ':
-			idx := indexOf(original, i, ch.Content)
-			if idx < 0 {
-				return nil, fmt.Errorf("context line not found: %q", ch.Content)
+			if err := flush(); err != nil {
+				return nil, err
 			}
-			out = append(out, original[i:idx+1]...)
-			i = idx + 1
-		case '-':
-			if i >= len(original) {
-				return nil, fmt.Errorf("delete past end: %q", ch.Content)
+			header, err := parseHunkHeader("@" + ch.Content)
+			if err != nil {
+				return nil, err
 			}
-			if original[i] == ch.Content {
-				i++
-				continue
-			}
-			idx := indexOf(original, i, ch.Content)
-			if idx < 0 {
-				return nil, fmt.Errorf("delete line not found: %q", ch.Content)
-			}
-			out = append(out, original[i:idx]...)
-			i = idx + 1
-		case '+':
-			out = append(out, ch.Content)
+			current.header = header
+		case ' ', '+', '-':
+			current.changes = append(current.changes, ch)
 		default:
 			return nil, fmt.Errorf("unknown change line prefix %q", string(ch.Kind))
 		}
 	}
-	out = append(out, original[i:]...)
-	return out, nil
+	if err := flush(); err != nil {
+		return nil, err
+	}
+	return hunks, nil
 }
 
-func indexOf(lines []string, start int, want string) int {
-	for i := start; i < len(lines); i++ {
-		if lines[i] == want {
-			return i
+func parseHunkHeader(line string) (hunkHeader, error) {
+	line = strings.TrimSpace(line)
+	if line == "@@" {
+		return hunkHeader{}, nil
+	}
+
+	m := unifiedHunkHeaderPattern.FindStringSubmatch(line)
+	if len(m) == 0 {
+		return hunkHeader{}, fmt.Errorf("invalid hunk header: %q", line)
+	}
+
+	oldStart, err := strconv.Atoi(m[1])
+	if err != nil {
+		return hunkHeader{}, fmt.Errorf("invalid hunk old start %q: %w", m[1], err)
+	}
+	oldCount := 1
+	if strings.TrimSpace(m[2]) != "" {
+		oldCount, err = strconv.Atoi(m[2])
+		if err != nil {
+			return hunkHeader{}, fmt.Errorf("invalid hunk old count %q: %w", m[2], err)
 		}
 	}
-	return -1
+	newStart, err := strconv.Atoi(m[3])
+	if err != nil {
+		return hunkHeader{}, fmt.Errorf("invalid hunk new start %q: %w", m[3], err)
+	}
+	newCount := 1
+	if strings.TrimSpace(m[4]) != "" {
+		newCount, err = strconv.Atoi(m[4])
+		if err != nil {
+			return hunkHeader{}, fmt.Errorf("invalid hunk new count %q: %w", m[4], err)
+		}
+	}
+
+	return hunkHeader{
+		hasPosition: true,
+		oldStart:    oldStart,
+		oldCount:    oldCount,
+		newStart:    newStart,
+		newCount:    newCount,
+	}, nil
 }
 
-func resultErr(c tools.Call, msg string) tools.Result {
-	body, _ := json.Marshal(map[string]any{"error": msg})
-	return tools.Result{CallID: c.ID, Name: c.Name, Output: body, IsError: true}
+func findHunkAnchor(lines []string, changes []ChangeLine, expected, floor int, anchored bool) (int, error) {
+	if floor < 0 {
+		floor = 0
+	}
+	maxStart := len(lines)
+	if floor > maxStart {
+		floor = maxStart
+	}
+
+	matchAt := func(start int) bool {
+		_, _, _, err := applyHunkAt(lines, changes, start)
+		return err == nil
+	}
+
+	if anchored {
+		if expected >= floor && expected <= maxStart && matchAt(expected) {
+			return expected, nil
+		}
+		for fuzz := 1; fuzz <= hunkMaxFuzz; fuzz++ {
+			up := expected - fuzz
+			if up >= floor && up <= maxStart && matchAt(up) {
+				return up, nil
+			}
+			down := expected + fuzz
+			if down >= floor && down <= maxStart && matchAt(down) {
+				return down, nil
+			}
+		}
+		return -1, fmt.Errorf("hunk did not match near expected line %d (fuzz %d)", expected+1, hunkMaxFuzz)
+	}
+
+	for start := floor; start <= maxStart; start++ {
+		if matchAt(start) {
+			return start, nil
+		}
+	}
+	return -1, errors.New("hunk did not match file content")
+}
+
+func applyHunkAt(lines []string, changes []ChangeLine, start int) ([]string, int, int, error) {
+	if start < 0 || start > len(lines) {
+		return nil, 0, 0, fmt.Errorf("invalid hunk start %d", start)
+	}
+
+	out := make([]string, 0, len(lines)+len(changes))
+	out = append(out, lines[:start]...)
+
+	cursor := start
+	oldCount := 0
+	newCount := 0
+	for _, ch := range changes {
+		switch ch.Kind {
+		case ' ':
+			if cursor >= len(lines) || lines[cursor] != ch.Content {
+				return nil, 0, 0, fmt.Errorf("context mismatch at line %d: want %q", cursor+1, ch.Content)
+			}
+			out = append(out, lines[cursor])
+			cursor++
+			oldCount++
+			newCount++
+		case '-':
+			if cursor >= len(lines) || lines[cursor] != ch.Content {
+				return nil, 0, 0, fmt.Errorf("delete mismatch at line %d: want %q", cursor+1, ch.Content)
+			}
+			cursor++
+			oldCount++
+		case '+':
+			out = append(out, ch.Content)
+			newCount++
+		default:
+			return nil, 0, 0, fmt.Errorf("unknown change line prefix %q", string(ch.Kind))
+		}
+	}
+
+	out = append(out, lines[cursor:]...)
+	return out, oldCount, newCount, nil
 }
 
 func parse(src string) (Document, error) {

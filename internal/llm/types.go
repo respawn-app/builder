@@ -24,11 +24,12 @@ const (
 )
 
 type Message struct {
-	Role       Role       `json:"role"`
-	Content    string     `json:"content,omitempty"`
-	Name       string     `json:"name,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	Role           Role            `json:"role"`
+	Content        string          `json:"content,omitempty"`
+	Name           string          `json:"name,omitempty"`
+	ToolCallID     string          `json:"tool_call_id,omitempty"`
+	ToolCalls      []ToolCall      `json:"tool_calls,omitempty"`
+	ReasoningItems []ReasoningItem `json:"reasoning_items,omitempty"`
 }
 
 type Tool struct {
@@ -114,6 +115,16 @@ type Usage struct {
 	WindowTokens int `json:"window_tokens"`
 }
 
+type ReasoningEntry struct {
+	Role string `json:"role"`
+	Text string `json:"text"`
+}
+
+type ReasoningItem struct {
+	ID               string `json:"id"`
+	EncryptedContent string `json:"encrypted_content,omitempty"`
+}
+
 func (u Usage) Percent() int {
 	if u.WindowTokens <= 0 {
 		return 0
@@ -133,9 +144,11 @@ func (u Usage) Percent() int {
 }
 
 type Response struct {
-	Assistant Message    `json:"assistant"`
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
-	Usage     Usage      `json:"usage"`
+	Assistant      Message          `json:"assistant"`
+	ToolCalls      []ToolCall       `json:"tool_calls,omitempty"`
+	Reasoning      []ReasoningEntry `json:"reasoning,omitempty"`
+	ReasoningItems []ReasoningItem  `json:"reasoning_items,omitempty"`
+	Usage          Usage            `json:"usage"`
 }
 
 type Client interface {

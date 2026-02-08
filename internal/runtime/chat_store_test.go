@@ -47,11 +47,14 @@ func TestChatStoreSnapshotProjectsConversation(t *testing.T) {
 	if snap.Entries[1].Role != "assistant" || snap.Entries[1].Text != "Let me check." {
 		t.Fatalf("unexpected assistant preamble entry: %+v", snap.Entries[1])
 	}
-	if snap.Entries[2].Role != "tool_call" || !strings.Contains(snap.Entries[2].Text, "pwd") || !strings.Contains(snap.Entries[2].Text, "timeout: 5m") {
+	if snap.Entries[2].Role != "tool_call" || !strings.Contains(snap.Entries[2].Text, "pwd") {
 		t.Fatalf("unexpected tool_call entry: %+v", snap.Entries[2])
 	}
-	if !strings.HasPrefix(snap.Entries[2].Text, toolShellCallPrefix) {
-		t.Fatalf("expected shell tool call marker prefix, got %+v", snap.Entries[2])
+	if snap.Entries[2].ToolCall == nil || !snap.Entries[2].ToolCall.IsShell {
+		t.Fatalf("expected shell tool metadata, got %+v", snap.Entries[2].ToolCall)
+	}
+	if snap.Entries[2].ToolCall.TimeoutLabel != "timeout: 5m" {
+		t.Fatalf("unexpected timeout label: %+v", snap.Entries[2].ToolCall)
 	}
 	if strings.Contains(snap.Entries[2].Text, "workdir:") {
 		t.Fatalf("tool call should not include workdir line: %+v", snap.Entries[2])
@@ -83,7 +86,7 @@ func TestFormatToolOutputStripsLineNumbers(t *testing.T) {
 	}
 }
 
-func TestPatchToolCallFormattingEncodesSummaryAndDetail(t *testing.T) {
+func TestPatchToolCallFormattingCapturesSummaryAndDetailMeta(t *testing.T) {
 	s := newChatStore()
 	s.cwd = "/workspace"
 
@@ -94,12 +97,13 @@ func TestPatchToolCallFormattingEncodesSummaryAndDetail(t *testing.T) {
 		Input: json.RawMessage(`{"patch":` + strconv.Quote(patchText) + `}`),
 	}
 	rendered := s.formatToolCall(call)
-	if !strings.HasPrefix(rendered, toolPatchPayloadPrefix) {
-		t.Fatalf("expected encoded patch payload, got %q", rendered)
+	if rendered.ToolCall == nil {
+		t.Fatalf("expected tool metadata on patch call")
 	}
-	summary, detail, ok := decodePatchPayload(rendered)
-	if !ok {
-		t.Fatalf("expected decodable patch payload, got %q", rendered)
+	summary := rendered.ToolCall.PatchSummary
+	detail := rendered.ToolCall.PatchDetail
+	if !rendered.ToolCall.HasPatchSummary() || !rendered.ToolCall.HasPatchDetail() {
+		t.Fatalf("expected patch summary/detail metadata, got %+v", rendered.ToolCall)
 	}
 	if !strings.Contains(summary, "Edited:") || !strings.Contains(summary, "./dir/a.go +1 -1") || !strings.Contains(summary, "./b.go +1") {
 		t.Fatalf("unexpected summary output: %q", summary)
@@ -112,7 +116,7 @@ func TestPatchToolCallFormattingEncodesSummaryAndDetail(t *testing.T) {
 	}
 }
 
-func TestFormatToolCallShellAddsMarkerPrefix(t *testing.T) {
+func TestFormatToolCallShellAddsShellMetadata(t *testing.T) {
 	s := newChatStore()
 	call := llm.ToolCall{
 		ID:    "call_shell",
@@ -121,24 +125,12 @@ func TestFormatToolCallShellAddsMarkerPrefix(t *testing.T) {
 	}
 
 	rendered := s.formatToolCall(call)
-	if !strings.HasPrefix(rendered, toolShellCallPrefix) {
-		t.Fatalf("expected shell marker prefix, got %q", rendered)
+	if rendered.ToolCall == nil || !rendered.ToolCall.IsShell {
+		t.Fatalf("expected shell metadata, got %+v", rendered.ToolCall)
 	}
-	if !strings.Contains(rendered, "pwd") {
-		t.Fatalf("expected command in rendered shell call, got %q", rendered)
+	if !strings.Contains(rendered.Text, "pwd") {
+		t.Fatalf("expected command in rendered shell call, got %q", rendered.Text)
 	}
-}
-
-func decodePatchPayload(v string) (string, string, bool) {
-	if !strings.HasPrefix(v, toolPatchPayloadPrefix) {
-		return "", "", false
-	}
-	rest := strings.TrimPrefix(v, toolPatchPayloadPrefix)
-	parts := strings.SplitN(rest, toolPatchPayloadSeparator, 2)
-	if len(parts) != 2 {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
 }
 
 func TestChatStoreFiltersInjectedAgentsMessage(t *testing.T) {

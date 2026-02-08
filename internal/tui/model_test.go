@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"builder/internal/transcript"
 	"strings"
 	"testing"
 
@@ -200,7 +201,15 @@ func TestDetailUsesRequestedSymbolsAndDividers(t *testing.T) {
 
 func TestDetailShellToolUsesDollarPrefixAndKeepsSuccessColorRole(t *testing.T) {
 	m := NewModel()
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: toolShellCallPrefix + "pwd" + toolInlineMetaSep + "timeout: 5m"})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: "pwd",
+		ToolCall: &transcript.ToolCallMeta{
+			IsShell:      true,
+			Command:      "pwd",
+			TimeoutLabel: "timeout: 5m",
+		},
+	})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "/tmp"})
 	m = updateModel(t, m, ToggleModeMsg{})
 
@@ -229,7 +238,15 @@ func TestOngoingCompactsToolCallAndHidesThinking(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "run command"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "thinking", Text: "internal trace"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: "pwd" + toolInlineMetaSep + "timeout: 5m\nworkdir: /tmp"})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: "pwd",
+		ToolCall: &transcript.ToolCallMeta{
+			IsShell:      true,
+			Command:      "pwd",
+			TimeoutLabel: "timeout: 5m",
+		},
+	})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "/tmp"})
 
 	view := m.View()
@@ -247,13 +264,39 @@ func TestOngoingCompactsToolCallAndHidesThinking(t *testing.T) {
 	}
 }
 
+func TestDetailShowsReasoningSummaryAsSeparateEntry(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "reasoning", Text: "Plan summary"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a"})
+
+	ongoing := plainTranscript(m.View())
+	if strings.Contains(ongoing, "Plan summary") {
+		t.Fatalf("expected reasoning hidden in ongoing view, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detail := plainTranscript(m.View())
+	if !containsInOrder(detail, "…", "Plan summary") {
+		t.Fatalf("expected reasoning summary entry in detail view, got %q", detail)
+	}
+}
+
 func TestOngoingDividersAreInsertedOnlyBetweenRoleGroups(t *testing.T) {
 	m := NewModel(WithPreviewLines(30))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u1"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u2"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a2"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: "pwd" + toolInlineMetaSep + "timeout: 5m"})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: "pwd",
+		ToolCall: &transcript.ToolCallMeta{
+			IsShell:      true,
+			Command:      "pwd",
+			TimeoutLabel: "timeout: 5m",
+		},
+	})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "/tmp"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: "ls"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_error", Text: "failed"})
@@ -263,7 +306,7 @@ func TestOngoingDividersAreInsertedOnlyBetweenRoleGroups(t *testing.T) {
 	if got := strings.Count(view, strings.Repeat("─", 24)); got != 3 {
 		t.Fatalf("expected 3 dividers for 4 role groups, got %d in %q", got, view)
 	}
-	if !containsInOrder(view, "❯", "u1", "u2", "❮", "a1", "a2", "•", "pwd", "ls", "❯", "u3") {
+	if !containsInOrder(view, "❯", "u1", "u2", "❮", "a1", "a2", "$", "pwd", "•", "ls", "❯", "u3") {
 		t.Fatalf("expected grouped ongoing transcript order, got %q", view)
 	}
 }
@@ -271,7 +314,15 @@ func TestOngoingDividersAreInsertedOnlyBetweenRoleGroups(t *testing.T) {
 func TestDetailToolFormattingShowsTimeoutAndInlineOutput(t *testing.T) {
 	m := NewModel()
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: "pwd" + toolInlineMetaSep + "timeout: 5m"})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: "pwd",
+		ToolCall: &transcript.ToolCallMeta{
+			IsShell:      true,
+			Command:      "pwd",
+			TimeoutLabel: "timeout: 5m",
+		},
+	})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "alpha\nbeta"})
 	m = updateModel(t, m, ToggleModeMsg{})
 
@@ -309,10 +360,17 @@ func TestToolBlockRoleFromResult(t *testing.T) {
 func TestPatchPayloadRendersSummaryInOngoingAndDetailDiffInDetail(t *testing.T) {
 	summary := "Edited:\n./path/to/file/1.go +13 -9\n./path/to/file/2.go +386"
 	detail := "Edited:\n/abs/path/to/file/1.go\n+new line\n-old line\n/abs/path/to/file/2.go\n+another line"
-	payload := toolPatchPayloadPrefix + summary + toolPatchPayloadSep + detail
 
 	m := NewModel(WithPreviewLines(20))
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: payload})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: summary,
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:     "patch",
+			PatchSummary: summary,
+			PatchDetail:  detail,
+		},
+	})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: ""})
 
 	ongoing := m.View()

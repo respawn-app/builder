@@ -3,7 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
-	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/openai/openai-go/v3/responses"
@@ -110,45 +110,32 @@ func TestBuildResponsesInput_NonAssistantRolesUseInputText(t *testing.T) {
 	}
 }
 
-func TestRequestURL_UsesCodexEndpointForOAuth(t *testing.T) {
+func TestServiceBaseURL_UsesCodexEndpointBaseForOAuth(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	transport.BaseURL = "https://api.openai.com/v1"
 
-	got := transport.requestURL(openAIAuthMode{IsOAuth: true})
-	if got != codexResponsesEndpoint {
-		t.Fatalf("expected oauth endpoint %q, got %q", codexResponsesEndpoint, got)
+	got := transport.serviceBaseURL(openAIAuthMode{IsOAuth: true})
+	if got != strings.TrimSuffix(codexResponsesEndpoint, "/responses") {
+		t.Fatalf("expected oauth base endpoint %q, got %q", strings.TrimSuffix(codexResponsesEndpoint, "/responses"), got)
 	}
-	standard := transport.requestURL(openAIAuthMode{})
-	if standard != "https://api.openai.com/v1/responses" {
-		t.Fatalf("expected standard responses endpoint, got %q", standard)
+	standard := transport.serviceBaseURL(openAIAuthMode{})
+	if standard != "https://api.openai.com/v1" {
+		t.Fatalf("expected standard base endpoint, got %q", standard)
 	}
 }
 
-func TestApplyHeaders_OAuthAddsCodexHeaders(t *testing.T) {
+func TestBuildRequestOptions_OAuthAddsCodexHeaders(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
-	req, err := http.NewRequest(http.MethodPost, "https://example.com", nil)
-	if err != nil {
-		t.Fatalf("new request: %v", err)
-	}
-	transport.applyHeaders(req, "Bearer x", openAIAuthMode{
+	opts := transport.buildRequestOptions("Bearer x", openAIAuthMode{
 		IsOAuth:   true,
 		AccountID: "acc-1",
 	}, "session-1")
 
-	if got := req.Header.Get("Authorization"); got != "Bearer x" {
-		t.Fatalf("unexpected authorization header: %q", got)
+	if len(opts) != 5 {
+		t.Fatalf("expected 5 request options, got %d", len(opts))
 	}
-	if got := req.Header.Get("originator"); got != defaultOriginator {
-		t.Fatalf("unexpected originator header: %q", got)
-	}
-	if got := req.Header.Get("User-Agent"); got == "" {
-		t.Fatal("expected user agent header")
-	}
-	if got := req.Header.Get("session_id"); got != "session-1" {
-		t.Fatalf("unexpected session_id header: %q", got)
-	}
-	if got := req.Header.Get("ChatGPT-Account-Id"); got != "acc-1" {
-		t.Fatalf("unexpected account id header: %q", got)
+	if len(transport.buildRequestOptions("Bearer x", openAIAuthMode{}, "")) != 1 {
+		t.Fatal("expected non-oauth options to include only authorization header")
 	}
 }
 
@@ -164,6 +151,12 @@ func TestBuildPayload_AppliesReasoningEffortForOpenAIModels(t *testing.T) {
 	if payload.Reasoning.Effort != "xhigh" {
 		t.Fatalf("expected effort xhigh, got %q", payload.Reasoning.Effort)
 	}
+	if payload.Reasoning.Summary != "concise" {
+		t.Fatalf("expected concise reasoning summary, got %q", payload.Reasoning.Summary)
+	}
+	if len(payload.Include) != 1 || payload.Include[0] != responses.ResponseIncludableReasoningEncryptedContent {
+		t.Fatalf("expected reasoning.encrypted_content include, got %+v", payload.Include)
+	}
 }
 
 func TestBuildPayload_SkipsReasoningEffortForUnknownModelFamily(t *testing.T) {
@@ -178,10 +171,43 @@ func TestBuildPayload_SkipsReasoningEffortForUnknownModelFamily(t *testing.T) {
 	if payload.Reasoning.Effort != "" {
 		t.Fatalf("expected no reasoning payload for non-openai model, got %+v", payload.Reasoning)
 	}
+	if len(payload.Include) != 0 {
+		t.Fatalf("expected no include list for non-openai model, got %+v", payload.Include)
+	}
 
 	jsonPayload := mustMarshalObject(t, payload)
 	if _, ok := jsonPayload["reasoning"]; ok {
 		t.Fatalf("expected reasoning to be omitted for non-openai model, got %+v", jsonPayload["reasoning"])
+	}
+}
+
+func TestBuildResponsesInput_AssistantReasoningItemsUseEncryptedContentOnly(t *testing.T) {
+	items := buildResponsesInput([]Message{
+		{
+			Role:    RoleAssistant,
+			Content: "a1",
+			ReasoningItems: []ReasoningItem{
+				{ID: "rs_1", EncryptedContent: "enc_1"},
+			},
+		},
+	})
+	if len(items) != 2 {
+		t.Fatalf("expected assistant message + reasoning item, got %d", len(items))
+	}
+
+	jsonItems := mustMarshalItems(t, items)
+	second := jsonItems[1]
+	if second["type"] != "reasoning" {
+		t.Fatalf("expected reasoning item type, got %#v", second["type"])
+	}
+	if second["id"] != "rs_1" {
+		t.Fatalf("expected reasoning id rs_1, got %#v", second["id"])
+	}
+	if second["encrypted_content"] != "enc_1" {
+		t.Fatalf("expected encrypted content enc_1, got %#v", second["encrypted_content"])
+	}
+	if text, ok := second["text"].(string); ok && strings.TrimSpace(text) != "" {
+		t.Fatalf("expected no reasoning text to be serialized, got %q", text)
 	}
 }
 

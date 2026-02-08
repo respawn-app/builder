@@ -9,6 +9,22 @@ import (
 	"builder/internal/tools"
 )
 
+func envSliceToMap(t *testing.T, in []string) map[string]string {
+	t.Helper()
+	out := make(map[string]string, len(in))
+	for _, entry := range in {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || key == "" {
+			t.Fatalf("invalid env entry: %q", entry)
+		}
+		if _, exists := out[key]; exists {
+			t.Fatalf("duplicate env key: %s", key)
+		}
+		out[key] = value
+	}
+	return out
+}
+
 func TestShellRunsAndMergesOutput(t *testing.T) {
 	tool := New(".", 10_000)
 	input, _ := json.Marshal(map[string]any{"command": "echo out && echo err 1>&2"})
@@ -36,6 +52,27 @@ func TestShellRunsAndMergesOutput(t *testing.T) {
 	}
 }
 
+func TestShellOutputJSONDoesNotEscapeOperators(t *testing.T) {
+	tool := New(".", 10_000)
+	input, _ := json.Marshal(map[string]any{"command": "printf 'a => b < c & d\\n'"})
+
+	result, err := tool.Call(context.Background(), tools.Call{ID: "operators", Name: tools.ToolShell, Input: input})
+	if err != nil {
+		t.Fatalf("call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error result: %s", string(result.Output))
+	}
+
+	raw := string(result.Output)
+	if strings.Contains(raw, `\u003e`) || strings.Contains(raw, `\u003c`) || strings.Contains(raw, `\u0026`) {
+		t.Fatalf("expected unescaped operators in JSON payload, got %q", raw)
+	}
+	if !strings.Contains(raw, "=>") || !strings.Contains(raw, "<") || !strings.Contains(raw, "&") {
+		t.Fatalf("expected decoded operators in JSON payload, got %q", raw)
+	}
+}
+
 func TestShellTimeout(t *testing.T) {
 	tool := New(".", 10_000)
 	input, _ := json.Marshal(map[string]any{"command": "sleep 2", "timeout_seconds": 1})
@@ -56,5 +93,49 @@ func TestShellTimeout(t *testing.T) {
 	}
 	if payload.ExitCode != 124 {
 		t.Fatalf("exit code = %d, want 124 timeout", payload.ExitCode)
+	}
+}
+
+func TestEnrichEnvOverridesNonInteractiveDefaults(t *testing.T) {
+	env := envSliceToMap(t, enrichEnv([]string{
+		"TERM=xterm-256color",
+		"GIT_EDITOR=vim",
+		"PAGER=less",
+		"NO_COLOR=0",
+		"KEEP=1",
+	}))
+
+	if env["TERM"] != "dumb" {
+		t.Fatalf("TERM = %q, want dumb", env["TERM"])
+	}
+	if env["GIT_EDITOR"] != ":" {
+		t.Fatalf("GIT_EDITOR = %q, want :", env["GIT_EDITOR"])
+	}
+	if env["PAGER"] != "cat" {
+		t.Fatalf("PAGER = %q, want cat", env["PAGER"])
+	}
+	if env["NO_COLOR"] != "1" {
+		t.Fatalf("NO_COLOR = %q, want 1", env["NO_COLOR"])
+	}
+	if env["GIT_TERMINAL_PROMPT"] != "0" {
+		t.Fatalf("GIT_TERMINAL_PROMPT = %q, want 0", env["GIT_TERMINAL_PROMPT"])
+	}
+	if env["KEEP"] != "1" {
+		t.Fatalf("KEEP = %q, want 1", env["KEEP"])
+	}
+}
+
+func TestSanitizeOutputStripsANSIAndControlSequences(t *testing.T) {
+	in := "\x1b[31mred\x1b[0m\r\nline2\a\b\tok\rline3"
+	out := sanitizeOutput(in)
+
+	if strings.Contains(out, "\x1b[") {
+		t.Fatalf("output still contains ANSI escape: %q", out)
+	}
+	if strings.ContainsAny(out, "\a\b\r") {
+		t.Fatalf("output still contains control chars: %q", out)
+	}
+	if !strings.Contains(out, "red\nline2\tok\nline3") {
+		t.Fatalf("sanitized output mismatch: %q", out)
 	}
 }

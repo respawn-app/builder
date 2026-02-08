@@ -17,9 +17,11 @@ type OpenAIRequest struct {
 }
 
 type OpenAIResponse struct {
-	AssistantText string
-	ToolCalls     []ToolCall
-	Usage         Usage
+	AssistantText  string
+	ToolCalls      []ToolCall
+	Reasoning      []ReasoningEntry
+	ReasoningItems []ReasoningItem
+	Usage          Usage
 }
 
 type OpenAITransport interface {
@@ -64,12 +66,15 @@ func (c *OpenAIClient) Generate(ctx context.Context, request Request) (Response,
 
 	return Response{
 		Assistant: Message{
-			Role:      RoleAssistant,
-			Content:   providerResp.AssistantText,
-			ToolCalls: append([]ToolCall(nil), providerResp.ToolCalls...),
+			Role:           RoleAssistant,
+			Content:        providerResp.AssistantText,
+			ToolCalls:      append([]ToolCall(nil), providerResp.ToolCalls...),
+			ReasoningItems: append([]ReasoningItem(nil), providerResp.ReasoningItems...),
 		},
-		ToolCalls: providerResp.ToolCalls,
-		Usage:     providerResp.Usage,
+		ToolCalls:      providerResp.ToolCalls,
+		Reasoning:      append([]ReasoningEntry(nil), providerResp.Reasoning...),
+		ReasoningItems: append([]ReasoningItem(nil), providerResp.ReasoningItems...),
+		Usage:          providerResp.Usage,
 	}, nil
 }
 
@@ -99,12 +104,15 @@ func (c *OpenAIClient) GenerateStream(ctx context.Context, request Request, onDe
 		}
 		return Response{
 			Assistant: Message{
-				Role:      RoleAssistant,
-				Content:   providerResp.AssistantText,
-				ToolCalls: append([]ToolCall(nil), providerResp.ToolCalls...),
+				Role:           RoleAssistant,
+				Content:        providerResp.AssistantText,
+				ToolCalls:      append([]ToolCall(nil), providerResp.ToolCalls...),
+				ReasoningItems: append([]ReasoningItem(nil), providerResp.ReasoningItems...),
 			},
-			ToolCalls: providerResp.ToolCalls,
-			Usage:     providerResp.Usage,
+			ToolCalls:      providerResp.ToolCalls,
+			Reasoning:      append([]ReasoningEntry(nil), providerResp.Reasoning...),
+			ReasoningItems: append([]ReasoningItem(nil), providerResp.ReasoningItems...),
+			Usage:          providerResp.Usage,
 		}, nil
 	}
 

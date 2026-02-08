@@ -159,6 +159,95 @@ func TestLocksAtFirstDispatch(t *testing.T) {
 	}
 }
 
+func TestSubmitUserMessageSurfacesInFlightClearFailure(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	sessionDir := store.Dir()
+	defer func() {
+		_ = os.Chmod(sessionDir, 0o755)
+	}()
+
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	var (
+		mu         sync.Mutex
+		events     []Event
+		chmodDone  bool
+		chmodError error
+	)
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			events = append(events, evt)
+			shouldLockDir := evt.Kind == EventAssistantMessage && !chmodDone
+			if shouldLockDir {
+				chmodDone = true
+			}
+			mu.Unlock()
+			if shouldLockDir {
+				if chmodErr := os.Chmod(sessionDir, 0o555); chmodErr != nil {
+					mu.Lock()
+					if chmodError == nil {
+						chmodError = chmodErr
+					}
+					mu.Unlock()
+				}
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "hi")
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if err == nil {
+		t.Fatal("expected in-flight clear failure")
+	}
+	if !strings.Contains(err.Error(), "mark in-flight false") {
+		t.Fatalf("expected mark in-flight clear error, got %v", err)
+	}
+
+	mu.Lock()
+	gotChmodDone := chmodDone
+	gotChmodErr := chmodError
+	seenClearFailureEvent := false
+	for _, evt := range events {
+		if evt.Kind == EventInFlightClearFailed && strings.Contains(evt.Error, "mark in-flight false") {
+			seenClearFailureEvent = true
+			break
+		}
+	}
+	mu.Unlock()
+
+	if !gotChmodDone {
+		t.Fatal("expected permission flip hook to run")
+	}
+	if gotChmodErr != nil {
+		t.Fatalf("chmod hook failed: %v", gotChmodErr)
+	}
+	if !seenClearFailureEvent {
+		t.Fatalf("expected %s event, got %+v", EventInFlightClearFailed, events)
+	}
+
+	reopened, openErr := session.Open(sessionDir)
+	if openErr != nil {
+		t.Fatalf("re-open session store: %v", openErr)
+	}
+	if !reopened.Meta().InFlightStep {
+		t.Fatalf("expected persisted in-flight flag to remain true after clear failure")
+	}
+}
+
 func TestParallelToolsReturnDeclaredOrder(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -236,6 +325,129 @@ func TestParallelToolsReturnDeclaredOrder(t *testing.T) {
 		t.Fatalf("second request is missing assistant tool call metadata: %+v", secondReq.Messages)
 	}
 
+}
+
+func TestPersistedAssistantToolCallsContainNoUIDisplayMarkers(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
+			ToolCalls: []llm.ToolCall{
+				{ID: "a", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "run tool"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+
+	foundAssistantWithCall := false
+	for _, evt := range events {
+		if evt.Kind != "message" {
+			continue
+		}
+		var msg llm.Message
+		if err := json.Unmarshal(evt.Payload, &msg); err != nil {
+			t.Fatalf("decode message: %v", err)
+		}
+		if msg.Role != llm.RoleAssistant || len(msg.ToolCalls) == 0 {
+			continue
+		}
+		foundAssistantWithCall = true
+		for _, call := range msg.ToolCalls {
+			if strings.Contains(call.Name, "shell_call") {
+				t.Fatalf("assistant tool call name should not contain display marker: %+v", call)
+			}
+			if strings.Contains(string(call.Input), "shell_call") || strings.Contains(string(call.Input), "patch_payload") || strings.ContainsRune(string(call.Input), '\x1e') || strings.ContainsRune(string(call.Input), '\x1f') {
+				t.Fatalf("assistant tool call input should not contain display markers: %+v", call)
+			}
+		}
+	}
+	if !foundAssistantWithCall {
+		t.Fatal("expected persisted assistant message with tool_calls")
+	}
+}
+
+func TestExecuteToolCallsFailsOnToolCompletionPersistence(t *testing.T) {
+	tests := []struct {
+		name     string
+		registry *tools.Registry
+		callName string
+	}{
+		{
+			name:     "unknown tool name",
+			registry: tools.NewRegistry(),
+			callName: "not_a_tool",
+		},
+		{
+			name:     "known tool without handler",
+			registry: tools.NewRegistry(),
+			callName: string(tools.ToolShell),
+		},
+		{
+			name:     "registered tool handler",
+			registry: tools.NewRegistry(fakeTool{name: tools.ToolShell}),
+			callName: string(tools.ToolShell),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			store, err := session.Create(dir, "ws", dir)
+			if err != nil {
+				t.Fatalf("create store: %v", err)
+			}
+
+			eng, err := New(store, &fakeClient{}, tc.registry, Config{Model: "gpt-5"})
+			if err != nil {
+				t.Fatalf("new engine: %v", err)
+			}
+
+			sessionDir := store.Dir()
+			if err := os.Chmod(sessionDir, 0o555); err != nil {
+				t.Fatalf("chmod read-only session dir: %v", err)
+			}
+			defer func() {
+				_ = os.Chmod(sessionDir, 0o755)
+			}()
+
+			_, err = eng.executeToolCalls(context.Background(), "step", []llm.ToolCall{
+				{ID: "call-1", Name: tc.callName, Input: json.RawMessage(`{}`)},
+			})
+			if err == nil {
+				t.Fatal("expected persistence failure")
+			}
+			if !strings.Contains(err.Error(), "persist tool completion") {
+				t.Fatalf("expected persistence error, got %v", err)
+			}
+
+			if len(eng.chat.toolCompletions) != 0 {
+				t.Fatalf("expected no in-memory tool completions when persistence fails, got %+v", eng.chat.toolCompletions)
+			}
+		})
+	}
 }
 
 func TestStreamingRetryResetsAttemptDeltas(t *testing.T) {
@@ -534,5 +746,116 @@ func TestRequestMessagesNeverContainANSIEscapes(t *testing.T) {
 				t.Fatalf("request message contains ANSI escape sequence: role=%s content=%q", msg.Role, msg.Content)
 			}
 		}
+	}
+}
+
+func TestSanitizeMessagesForLLMNormalizesToolJSONEscapes(t *testing.T) {
+	input := []llm.Message{
+		{Role: llm.RoleTool, Content: `{"exit_code":0,"output":"a =\u003e b \u003c c \u0026 d","truncated":false}`},
+	}
+
+	got := sanitizeMessagesForLLM(input)
+	if len(got) != 1 {
+		t.Fatalf("unexpected message count: %d", len(got))
+	}
+	if strings.Contains(got[0].Content, `\u003e`) || strings.Contains(got[0].Content, `\u003c`) || strings.Contains(got[0].Content, `\u0026`) {
+		t.Fatalf("expected HTML escapes to be normalized, got %q", got[0].Content)
+	}
+	if !strings.Contains(got[0].Content, "=>") || !strings.Contains(got[0].Content, "<") || !strings.Contains(got[0].Content, "&") {
+		t.Fatalf("expected decoded operators in normalized tool content, got %q", got[0].Content)
+	}
+}
+
+func TestReasoningSummaryVisibleAndEncryptedReasoningRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "first"},
+			Reasoning: []llm.ReasoningEntry{
+				{Role: "reasoning", Text: "Plan summary"},
+			},
+			ReasoningItems: []llm.ReasoningItem{
+				{ID: "rs_1", EncryptedContent: "enc_1"},
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "second"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "one"); err != nil {
+		t.Fatalf("first submit: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "two"); err != nil {
+		t.Fatalf("second submit: %v", err)
+	}
+
+	if len(client.calls) < 2 {
+		t.Fatalf("expected two model calls, got %d", len(client.calls))
+	}
+	secondReq := client.calls[1]
+	foundReasoningItem := false
+	for _, msg := range secondReq.Messages {
+		if msg.Role != llm.RoleAssistant || msg.Content != "first" {
+			continue
+		}
+		if len(msg.ReasoningItems) == 1 &&
+			msg.ReasoningItems[0].ID == "rs_1" &&
+			msg.ReasoningItems[0].EncryptedContent == "enc_1" {
+			foundReasoningItem = true
+		}
+	}
+	if !foundReasoningItem {
+		t.Fatalf("expected prior assistant message to carry encrypted reasoning item, got %+v", secondReq.Messages)
+	}
+	for _, msg := range secondReq.Messages {
+		if strings.Contains(msg.Content, "Plan summary") {
+			t.Fatalf("reasoning summary text should not be sent back to model input, found in %+v", secondReq.Messages)
+		}
+	}
+
+	snap := eng.ChatSnapshot()
+	sawSummary := false
+	for _, entry := range snap.Entries {
+		if entry.Role == "reasoning" && strings.Contains(entry.Text, "Plan summary") {
+			sawSummary = true
+			break
+		}
+	}
+	if !sawSummary {
+		t.Fatalf("expected reasoning summary in chat snapshot entries, got %+v", snap.Entries)
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	sawLocal := false
+	for _, evt := range events {
+		if evt.Kind != "local_entry" {
+			continue
+		}
+		var entry storedLocalEntry
+		if err := json.Unmarshal(evt.Payload, &entry); err != nil {
+			t.Fatalf("decode local_entry: %v", err)
+		}
+		if entry.Role == "reasoning" && entry.Text == "Plan summary" {
+			sawLocal = true
+		}
+	}
+	if !sawLocal {
+		t.Fatalf("expected persisted local_entry for reasoning summary, events=%+v", events)
 	}
 }

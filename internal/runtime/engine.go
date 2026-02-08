@@ -1,12 +1,14 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,8 +16,8 @@ import (
 	"builder/internal/session"
 	"builder/internal/tools"
 	"builder/prompts"
-	"github.com/google/uuid"
 	xansi "github.com/charmbracelet/x/ansi"
+	"github.com/google/uuid"
 )
 
 const (
@@ -23,7 +25,7 @@ const (
 	handoffInstruction       = "Context threshold reached. Provide a concise handoff summary with next steps. Do not call tools."
 	agentsFileName           = "AGENTS.md"
 	agentsGlobalDirName      = ".builder"
-	agentsInjectedHeader     = "# AGENTS.md auto-injection"
+	agentsInjectedHeader     = "# AGENTS.md content:"
 	agentsInjectedFenceLabel = "md"
 )
 
@@ -124,7 +126,7 @@ func (e *Engine) Interrupt() error {
 	return nil
 }
 
-func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (llm.Message, error) {
+func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (assistant llm.Message, err error) {
 	if text == "" {
 		return llm.Message{}, errors.New("empty message")
 	}
@@ -142,28 +144,33 @@ func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (llm.Messag
 	stepCtx, cancel := context.WithCancel(ctx)
 	e.cancelCurrent = cancel
 	e.mu.Unlock()
+	stepID := ""
 	defer func() {
 		e.mu.Lock()
 		e.busy = false
 		e.cancelCurrent = nil
 		e.mu.Unlock()
-		_ = e.store.MarkInFlight(false)
+		if clearErr := e.store.MarkInFlight(false); clearErr != nil {
+			wrapped := fmt.Errorf("mark in-flight false: %w", clearErr)
+			e.emit(Event{Kind: EventInFlightClearFailed, StepID: stepID, Error: wrapped.Error()})
+			err = errors.Join(err, wrapped)
+		}
 	}()
 
-	if err := e.store.MarkInFlight(true); err != nil {
+	if err = e.store.MarkInFlight(true); err != nil {
 		return llm.Message{}, err
 	}
 
-	stepID := uuid.NewString()
+	stepID = uuid.NewString()
 
-	if err := e.injectAgentsIfNeeded(stepID); err != nil {
+	if err = e.injectAgentsIfNeeded(stepID); err != nil {
 		return llm.Message{}, err
 	}
-	if err := e.appendUserMessage(stepID, text); err != nil {
+	if err = e.appendUserMessage(stepID, text); err != nil {
 		return llm.Message{}, err
 	}
 
-	assistant, err := e.runStepLoop(stepCtx, stepID)
+	assistant, err = e.runStepLoop(stepCtx, stepID)
 	if err != nil {
 		return llm.Message{}, err
 	}
@@ -204,7 +211,13 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 		if len(resp.ToolCalls) > 0 {
 			assistantMsg.ToolCalls = append([]llm.ToolCall(nil), resp.ToolCalls...)
 		}
+		if len(resp.ReasoningItems) > 0 && len(assistantMsg.ReasoningItems) == 0 {
+			assistantMsg.ReasoningItems = append([]llm.ReasoningItem(nil), resp.ReasoningItems...)
+		}
 		if err := e.appendAssistantMessage(stepID, assistantMsg); err != nil {
+			return llm.Message{}, err
+		}
+		if err := e.appendReasoningEntries(stepID, resp.Reasoning); err != nil {
 			return llm.Message{}, err
 		}
 
@@ -226,8 +239,8 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 			if e.handoffPending && !e.handoffDone {
 				e.handoffDone = true
 			}
-			e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: resp.Assistant})
-			return resp.Assistant, nil
+			e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: assistantMsg})
+			return assistantMsg, nil
 		}
 
 		results, err := e.executeToolCalls(ctx, stepID, resp.ToolCalls)
@@ -298,9 +311,27 @@ func sanitizeMessagesForLLM(messages []llm.Message) []llm.Message {
 	cleaned := make([]llm.Message, len(messages))
 	for i, msg := range messages {
 		cleaned[i] = msg
-		cleaned[i].Content = xansi.Strip(msg.Content)
+		content := xansi.Strip(msg.Content)
+		if msg.Role == llm.RoleTool {
+			content = normalizeToolMessageForLLM(content)
+		}
+		cleaned[i].Content = content
 	}
 	return cleaned
+}
+
+func normalizeToolMessageForLLM(content string) string {
+	var payload any
+	if err := json.Unmarshal([]byte(content), &payload); err != nil {
+		return content
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(payload); err != nil {
+		return content
+	}
+	return strings.TrimSuffix(buf.String(), "\n")
 }
 
 func (e *Engine) ensureLocked() (session.LockedContract, error) {
@@ -376,7 +407,7 @@ func (e *Engine) generateWithRetry(ctx context.Context, req llm.Request, onDelta
 
 func (e *Engine) executeToolCalls(ctx context.Context, stepID string, calls []llm.ToolCall) ([]tools.Result, error) {
 	results := make([]tools.Result, len(calls))
-	errCh := make(chan error, len(calls))
+	callErrs := make([]error, len(calls))
 	wg := sync.WaitGroup{}
 
 	for i := range calls {
@@ -389,45 +420,59 @@ func (e *Engine) executeToolCalls(ctx context.Context, stepID string, calls []ll
 		wg.Add(1)
 		go func(tc llm.ToolCall) {
 			defer wg.Done()
+			var callErr error
+
 			toolID, ok := tools.ParseID(tc.Name)
 			if !ok {
 				results[idx] = tools.Result{CallID: tc.ID, Name: tools.ID(tc.Name), IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
-				_ = e.persistToolCompletion(stepID, results[idx])
+				if err := e.persistToolCompletion(stepID, results[idx]); err != nil {
+					callErrs[idx] = fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", tc.ID, results[idx].Name, err)
+				} else {
+					e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: &results[idx]})
+				}
 				return
 			}
 			h, ok := e.registry.Get(toolID)
 			if !ok {
 				results[idx] = tools.Result{CallID: tc.ID, Name: toolID, IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
-				_ = e.persistToolCompletion(stepID, results[idx])
+				if err := e.persistToolCompletion(stepID, results[idx]); err != nil {
+					callErrs[idx] = fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", tc.ID, results[idx].Name, err)
+				} else {
+					e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: &results[idx]})
+				}
 				return
 			}
 			res, err := h.Call(ctx, tools.Call{ID: tc.ID, Name: toolID, Input: tc.Input, StepID: stepID})
 			if err != nil {
-				errCh <- err
+				callErr = err
 				res = tools.Result{CallID: tc.ID, Name: toolID, IsError: true, Output: mustJSON(map[string]any{"error": err.Error()})}
 			}
 			if res.Name == "" {
 				res.Name = toolID
 			}
 			results[idx] = res
-			_ = e.persistToolCompletion(stepID, res)
+			if err := e.persistToolCompletion(stepID, res); err != nil {
+				persistErr := fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", tc.ID, res.Name, err)
+				callErrs[idx] = errors.Join(callErr, persistErr)
+				return
+			}
 			e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: &res})
+			callErrs[idx] = callErr
 		}(call)
 	}
 
 	wg.Wait()
-	close(errCh)
-
-	for err := range errCh {
-		if err != nil {
-			return results, err
-		}
+	var joined error
+	for _, err := range callErrs {
+		joined = errors.Join(joined, err)
+	}
+	if joined != nil {
+		return results, joined
 	}
 	return results, nil
 }
 
 func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
-	e.chat.recordToolCompletion(r)
 	_, err := e.store.AppendEvent(stepID, "tool_completed", map[string]any{
 		"call_id":  r.CallID,
 		"name":     string(r.Name),
@@ -435,6 +480,7 @@ func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
 		"output":   json.RawMessage(r.Output),
 	})
 	if err == nil {
+		e.chat.recordToolCompletion(r)
 		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
 	}
 	return err
@@ -447,6 +493,31 @@ func (e *Engine) appendUserMessage(stepID, text string) error {
 
 func (e *Engine) appendAssistantMessage(stepID string, msg llm.Message) error {
 	return e.appendMessage(stepID, msg)
+}
+
+func (e *Engine) appendReasoningEntries(stepID string, entries []llm.ReasoningEntry) error {
+	for _, entry := range entries {
+		if err := e.appendPersistedLocalEntry(stepID, entry.Role, entry.Text); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (e *Engine) appendPersistedLocalEntry(stepID, role, text string) error {
+	role = strings.TrimSpace(role)
+	if role == "" || strings.TrimSpace(text) == "" {
+		return nil
+	}
+	e.chat.appendLocalEntry(role, text)
+	_, err := e.store.AppendEvent(stepID, "local_entry", storedLocalEntry{
+		Role: role,
+		Text: text,
+	})
+	if err == nil {
+		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
+	}
+	return err
 }
 
 func (e *Engine) appendMessage(stepID string, msg llm.Message) error {
@@ -541,6 +612,12 @@ func (e *Engine) restoreMessages() error {
 			if err := e.chat.restoreToolCompletionPayload(evt.Payload); err != nil {
 				return err
 			}
+		case "local_entry":
+			var entry storedLocalEntry
+			if err := json.Unmarshal(evt.Payload, &entry); err != nil {
+				return fmt.Errorf("decode local_entry event: %w", err)
+			}
+			e.chat.appendLocalEntry(entry.Role, entry.Text)
 		}
 	}
 	return nil
@@ -572,6 +649,11 @@ func (e *Engine) ClearOngoingError() {
 func mustJSON(v any) json.RawMessage {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+type storedLocalEntry struct {
+	Role string `json:"role"`
+	Text string `json:"text"`
 }
 
 func toToolNames(ids []tools.ID) []string {
