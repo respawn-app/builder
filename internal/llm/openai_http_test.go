@@ -209,6 +209,9 @@ func TestBuildPayload_AddsAdditionalPropertiesFalseToToolSchemas(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected tool value: %#v", tools[0])
 	}
+	if strict, ok := tool["strict"].(bool); !ok || strict {
+		t.Fatalf("expected function tool strict=false, got %#v", tool["strict"])
+	}
 	params, ok := tool["parameters"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected parameters object, got %#v", tool["parameters"])

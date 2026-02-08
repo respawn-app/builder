@@ -204,6 +204,52 @@ func TestToolBlockRoleFromResult(t *testing.T) {
 	}
 }
 
+func TestPatchPayloadRendersSummaryInOngoingAndDetailDiffInDetail(t *testing.T) {
+	summary := "Edited:\n./path/to/file/1.go +13 -9\n./path/to/file/2.go +386"
+	detail := "Edited:\n/abs/path/to/file/1.go\n+new line\n-old line\n/abs/path/to/file/2.go\n+another line"
+	payload := toolPatchPayloadPrefix + summary + toolPatchPayloadSep + detail
+
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: payload})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: ""})
+
+	ongoing := m.View()
+	if !strings.Contains(ongoing, "Edited:") || !strings.Contains(ongoing, "./path/to/file/1.go") || !strings.Contains(ongoing, "./path/to/file/2.go") {
+		t.Fatalf("expected patch summary in ongoing mode, got %q", ongoing)
+	}
+	if strings.Contains(ongoing, "/abs/path/to/file/1.go") || strings.Contains(ongoing, "+new line") {
+		t.Fatalf("did not expect detail diff in ongoing mode, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detailView := m.View()
+	if !strings.Contains(detailView, "/abs/path/to/file/1.go") || !strings.Contains(detailView, "/abs/path/to/file/2.go") {
+		t.Fatalf("expected absolute file paths in detail mode, got %q", detailView)
+	}
+	if !strings.Contains(detailView, "+new line") || !strings.Contains(detailView, "-old line") || !strings.Contains(detailView, "+another line") {
+		t.Fatalf("expected full diff lines in detail mode, got %q", detailView)
+	}
+	if strings.Contains(detailView, "output:") {
+		t.Fatalf("did not expect output prefix in detail mode, got %q", detailView)
+	}
+}
+
+func TestStyleToolLineColorsPatchCountsAndDiff(t *testing.T) {
+	m := NewModel()
+	counts := m.styleToolLine("./file.go +13 -9")
+	if !strings.Contains(counts, "+13") || !strings.Contains(counts, "-9") {
+		t.Fatalf("expected patch counts preserved, got %q", counts)
+	}
+	added := m.styleToolLine("+added")
+	if !strings.Contains(added, "+added") {
+		t.Fatalf("expected addition line preserved, got %q", added)
+	}
+	removed := m.styleToolLine("-removed")
+	if !strings.Contains(removed, "-removed") {
+		t.Fatalf("expected removal line preserved, got %q", removed)
+	}
+}
+
 func TestFormatOngoingErrorIsNotTruncated(t *testing.T) {
 	input := strings.Repeat("e", 300)
 	formatted := FormatOngoingError(errString(input))

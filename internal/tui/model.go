@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -14,10 +15,14 @@ const (
 	ModeOngoing Mode = "ongoing"
 	ModeDetail  Mode = "detail"
 
-	DefaultPreviewLines = 8
-	TranscriptDivider   = "────────────────────────"
-	toolInlineMetaSep   = "\x1f"
+	DefaultPreviewLines    = 8
+	TranscriptDivider      = "────────────────────────"
+	toolInlineMetaSep      = "\x1f"
+	toolPatchPayloadPrefix = "\x1epatch_payload\x1e"
+	toolPatchPayloadSep    = "\x1epatch_sep\x1e"
 )
+
+var patchCountTokenPattern = regexp.MustCompile(`([+-]\d+)\b`)
 
 type TranscriptEntry struct {
 	Role string
@@ -302,12 +307,18 @@ func (m Model) renderFlatDetailTranscript() string {
 		switch role {
 		case "tool_call":
 			blockRole := "tool"
+			_, patchDetail, hasPatchPayload := extractPatchPayload(entry.Text)
 			combined := entry.Text
+			if hasPatchPayload {
+				combined = patchDetail
+			}
 			if i+1 < len(m.transcript) && isToolResultRole(m.transcript[i+1].Role) {
 				nextRole := strings.TrimSpace(m.transcript[i+1].Role)
 				resultText := m.transcript[i+1].Text
 				if strings.TrimSpace(resultText) != "" {
-					combined = combined + "\n" + resultText
+					if !(hasPatchPayload && nextRole != "tool_result_error") {
+						combined = combined + "\n" + resultText
+					}
 				}
 				blockRole = toolBlockRoleFromResult(nextRole)
 				i++
@@ -346,7 +357,11 @@ func (m Model) renderFlatOngoingTranscript() string {
 		switch role {
 		case "tool_call":
 			blockRole := "tool"
+			patchSummary, _, hasPatchPayload := extractPatchPayload(entry.Text)
 			combined := compactToolCallText(entry.Text)
+			if hasPatchPayload {
+				combined = strings.TrimSpace(patchSummary)
+			}
 			if i+1 < len(m.transcript) {
 				nextRole := strings.TrimSpace(m.transcript[i+1].Role)
 				if isToolResultRole(nextRole) {
@@ -390,11 +405,14 @@ func (m Model) flattenEntry(role, text string) []string {
 	symbol := m.roleSymbol(role)
 	out := make([]string, 0, len(chunks))
 	for i, chunk := range chunks {
-		if i == 0 {
-			displayChunk := chunk
-			if isToolHeadlineRole(role) {
-				displayChunk = m.renderToolHeadline(chunk, renderWidth)
+		displayChunk := chunk
+		if isToolHeadlineRole(role) {
+			if i == 0 {
+				displayChunk = m.renderToolHeadline(displayChunk, renderWidth)
 			}
+			displayChunk = m.styleToolLine(displayChunk)
+		}
+		if i == 0 {
 			if symbol == "" {
 				out = append(out, displayChunk)
 				continue
@@ -402,11 +420,11 @@ func (m Model) flattenEntry(role, text string) []string {
 			out = append(out, fmt.Sprintf("%s %s", symbol, displayChunk))
 			continue
 		}
-		if strings.TrimSpace(chunk) == "" {
+		if strings.TrimSpace(displayChunk) == "" {
 			out = append(out, "")
 			continue
 		}
-		out = append(out, "  "+chunk)
+		out = append(out, "  "+displayChunk)
 	}
 	return out
 }
@@ -464,6 +482,9 @@ func skipInOngoing(role string) bool {
 }
 
 func compactToolCallText(text string) string {
+	if summary, _, ok := extractPatchPayload(text); ok {
+		return strings.TrimSpace(summary)
+	}
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
 		return "tool call"
@@ -478,6 +499,18 @@ func compactToolCallText(text string) string {
 		return "tool call"
 	}
 	return command
+}
+
+func extractPatchPayload(text string) (string, string, bool) {
+	if !strings.HasPrefix(text, toolPatchPayloadPrefix) {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(text, toolPatchPayloadPrefix)
+	parts := strings.SplitN(rest, toolPatchPayloadSep, 2)
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
 func isToolHeadlineRole(role string) bool {
@@ -511,6 +544,34 @@ func (m Model) renderToolHeadline(line string, width int) string {
 		space = 1
 	}
 	return command + strings.Repeat(" ", space) + metaText
+}
+
+func (m Model) styleToolLine(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return line
+	}
+	if trimmed == "Edited:" {
+		return lipgloss.NewStyle().Bold(true).Render(trimmed)
+	}
+	if strings.HasPrefix(line, "+") {
+		return m.palette().toolSuccess.Render(line)
+	}
+	if strings.HasPrefix(line, "-") {
+		return m.palette().toolError.Render(line)
+	}
+	if !strings.HasPrefix(trimmed, "./") {
+		return line
+	}
+	return patchCountTokenPattern.ReplaceAllStringFunc(line, func(token string) string {
+		if strings.HasPrefix(token, "+") {
+			return m.palette().toolSuccess.Render(token)
+		}
+		if strings.HasPrefix(token, "-") {
+			return m.palette().toolError.Render(token)
+		}
+		return token
+	})
 }
 
 func isToolResultRole(role string) bool {

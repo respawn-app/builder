@@ -4,6 +4,7 @@ import (
 	"builder/internal/llm"
 	"builder/internal/tools"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -77,6 +78,47 @@ func TestFormatToolOutputStripsLineNumbers(t *testing.T) {
 	if out != "alpha\nbeta\ngamma" {
 		t.Fatalf("unexpected normalized output: %q", out)
 	}
+}
+
+func TestPatchToolCallFormattingEncodesSummaryAndDetail(t *testing.T) {
+	s := newChatStore()
+	s.cwd = "/workspace"
+
+	patchText := "*** Begin Patch\n*** Update File: dir/a.go\n line1\n-old\n+new\n*** Add File: b.go\n+hello\n*** End Patch\n"
+	call := llm.ToolCall{
+		ID:    "call_patch",
+		Name:  string(tools.ToolPatch),
+		Input: json.RawMessage(`{"patch":` + strconv.Quote(patchText) + `}`),
+	}
+	rendered := s.formatToolCall(call)
+	if !strings.HasPrefix(rendered, toolPatchPayloadPrefix) {
+		t.Fatalf("expected encoded patch payload, got %q", rendered)
+	}
+	summary, detail, ok := decodePatchPayload(rendered)
+	if !ok {
+		t.Fatalf("expected decodable patch payload, got %q", rendered)
+	}
+	if !strings.Contains(summary, "Edited:") || !strings.Contains(summary, "./dir/a.go +1 -1") || !strings.Contains(summary, "./b.go +1") {
+		t.Fatalf("unexpected summary output: %q", summary)
+	}
+	if !strings.Contains(detail, "/workspace/dir/a.go") || !strings.Contains(detail, "/workspace/b.go") {
+		t.Fatalf("unexpected detail paths: %q", detail)
+	}
+	if !strings.Contains(detail, "+new") || !strings.Contains(detail, "-old") || !strings.Contains(detail, "+hello") {
+		t.Fatalf("unexpected detail diff: %q", detail)
+	}
+}
+
+func decodePatchPayload(v string) (string, string, bool) {
+	if !strings.HasPrefix(v, toolPatchPayloadPrefix) {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(v, toolPatchPayloadPrefix)
+	parts := strings.SplitN(rest, toolPatchPayloadSeparator, 2)
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
 func TestChatStoreFiltersInjectedAgentsMessage(t *testing.T) {
