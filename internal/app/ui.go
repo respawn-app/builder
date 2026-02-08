@@ -42,6 +42,18 @@ type askBridge struct {
 	ch chan askEvent
 }
 
+type uiLogger interface {
+	Logf(format string, args ...any)
+}
+
+type UIOption func(*uiModel)
+
+func WithUILogger(logger uiLogger) UIOption {
+	return func(m *uiModel) {
+		m.logger = logger
+	}
+}
+
 func newAskBridge() *askBridge {
 	return &askBridge{ch: make(chan askEvent, 64)}
 }
@@ -71,6 +83,7 @@ type uiModel struct {
 	queued []string
 
 	sawAssistantDelta bool
+	logger            uiLogger
 
 	activeAsk   *askEvent
 	askQueue    []askEvent
@@ -79,14 +92,18 @@ type uiModel struct {
 	askInput    string
 }
 
-func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askEvents <-chan askEvent) tea.Model {
-	return &uiModel{
+func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
+	m := &uiModel{
 		engine:        engine,
 		view:          tui.NewModel(),
 		status:        "idle",
 		runtimeEvents: runtimeEvents,
 		askEvents:     askEvents,
 	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }
 
 func (m *uiModel) Init() tea.Cmd {
@@ -116,6 +133,8 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.status = "error"
 			m.forwardToView(tui.SetOngoingErrorMsg{Err: msg.err})
+			m.forwardToView(tui.AppendTranscriptMsg{Role: "error", Text: msg.err.Error()})
+			m.logf("step.error err=%q", msg.err.Error())
 			if len(m.queued) > 0 {
 				next := m.popQueued()
 				return m, m.startSubmission(next)
@@ -128,6 +147,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.forwardToView(tui.StreamAssistantMsg{Delta: msg.message})
 		}
 		m.forwardToView(tui.CommitAssistantMsg{})
+		m.logf("step.done assistant_chars=%d", len(msg.message))
 		m.sawAssistantDelta = false
 		if len(m.queued) > 0 {
 			next := m.popQueued()
@@ -332,6 +352,7 @@ func (m *uiModel) startSubmission(text string) tea.Cmd {
 	m.busy = true
 	m.status = "running"
 	m.sawAssistantDelta = false
+	m.logf("step.start user_chars=%d", len(text))
 	m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: text})
 	return m.submitCmd(text)
 }
@@ -438,5 +459,11 @@ func waitAskEvent(ch <-chan askEvent) tea.Cmd {
 			return nil
 		}
 		return askEventMsg{event: evt}
+	}
+}
+
+func (m *uiModel) logf(format string, args ...any) {
+	if m.logger != nil {
+		m.logger.Logf(format, args...)
 	}
 }
