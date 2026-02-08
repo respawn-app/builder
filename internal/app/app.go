@@ -69,12 +69,3 @@ func dedupeSortToolIDs(ids []tools.ID) []tools.ID {
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
 }
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
-}

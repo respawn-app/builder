@@ -3,12 +3,56 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestParsePollInterval(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   any
+		want    int64
+		wantErr bool
+	}{
+		{name: "nil", input: nil, want: 0},
+		{name: "float integer", input: float64(5), want: 5},
+		{name: "float zero", input: float64(0), want: 0},
+		{name: "float negative", input: float64(-2), want: -2},
+		{name: "float fraction invalid", input: float64(1.5), wantErr: true},
+		{name: "float nan invalid", input: math.NaN(), wantErr: true},
+		{name: "float inf invalid", input: math.Inf(1), wantErr: true},
+		{name: "string int", input: "7", want: 7},
+		{name: "string empty", input: "   ", want: 0},
+		{name: "string fraction invalid", input: "1.5", wantErr: true},
+		{name: "string suffix invalid", input: "5s", wantErr: true},
+		{name: "string overflow invalid", input: "9223372036854775808", wantErr: true},
+		{name: "json number", input: json.Number("9"), want: 9},
+		{name: "json number invalid", input: json.Number("2.5"), wantErr: true},
+		{name: "type invalid", input: true, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parsePollInterval(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil (value=%d)", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("value=%d want=%d", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestRunOpenAIDeviceCodeFlow(t *testing.T) {
 	var pollCalls atomic.Int32

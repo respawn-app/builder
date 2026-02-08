@@ -88,16 +88,31 @@ func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTim
 	}
 	broker := askquestion.NewBroker()
 
-	handlers := make([]tools.Handler, 0, len(enabled))
+	factories := map[tools.ID]func() tools.Handler{
+		tools.ToolShell: func() tools.Handler {
+			return shelltool.New(workspaceRoot, 10_000, shelltool.WithDefaultTimeout(shellDefaultTimeout))
+		},
+		tools.ToolPatch: func() tools.Handler {
+			return patch
+		},
+		tools.ToolAskQuestion: func() tools.Handler {
+			return askquestion.NewTool(broker)
+		},
+	}
+	enabledSet := map[tools.ID]bool{}
 	for _, id := range enabled {
-		switch id {
-		case tools.ToolShell:
-			handlers = append(handlers, shelltool.New(workspaceRoot, 10_000, shelltool.WithDefaultTimeout(shellDefaultTimeout)))
-		case tools.ToolPatch:
-			handlers = append(handlers, patch)
-		case tools.ToolAskQuestion:
-			handlers = append(handlers, askquestion.NewTool(broker))
+		enabledSet[id] = true
+	}
+	handlers := make([]tools.Handler, 0, len(enabledSet))
+	for _, id := range tools.CatalogIDs() {
+		if !enabledSet[id] {
+			continue
 		}
+		factory, ok := factories[id]
+		if !ok {
+			return nil, nil, fmt.Errorf("missing runtime tool factory for %q", id)
+		}
+		handlers = append(handlers, factory())
 	}
 	return tools.NewRegistry(handlers...), broker, nil
 }

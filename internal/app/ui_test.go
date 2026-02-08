@@ -319,6 +319,40 @@ func TestBusyEnterLocksInputUntilFlushed(t *testing.T) {
 	}
 }
 
+func TestSubmitErrorUnlocksInputAndClearsLockedPendingState(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.input = "please continue with tests"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if !updated.inputSubmitLocked {
+		t.Fatal("expected input submit lock after enter while busy")
+	}
+	if len(updated.pendingInjected) != 1 {
+		t.Fatalf("expected one pending injected message, got %d", len(updated.pendingInjected))
+	}
+
+	updated.queued = append(updated.queued, "follow-up")
+	next, cmd := updated.Update(submitDoneMsg{err: errors.New("network failure")})
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected follow-up queued submission to start")
+	}
+	if !updated.busy {
+		t.Fatal("expected busy after starting follow-up submission")
+	}
+	if updated.inputSubmitLocked {
+		t.Fatal("expected submit lock cleared after submission error")
+	}
+	if updated.lockedInjectText != "" {
+		t.Fatalf("expected lockedInjectText cleared, got %q", updated.lockedInjectText)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected locked pending injection removed, got %d", len(updated.pendingInjected))
+	}
+}
+
 func TestBusyTabQueuesInjectionAndKeepsInputUnlocked(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.busy = true
