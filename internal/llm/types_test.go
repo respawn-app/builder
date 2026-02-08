@@ -13,7 +13,7 @@ func TestRequestFromLockedContract_UsesBinaryPromptAndExplicitTools(t *testing.T
 		MaxOutputToken: 0,
 		ThinkingLevel:  "xhigh",
 	}
-	tool := Tool{Name: "bash", Schema: []byte(`{"type":"object"}`)}
+	tool := Tool{Name: "shell", Schema: []byte(`{"type":"object"}`)}
 
 	req, err := RequestFromLockedContract(locked, "sys", []Message{{Role: RoleUser, Content: "hi"}}, []Tool{tool})
 	if err != nil {
@@ -25,7 +25,7 @@ func TestRequestFromLockedContract_UsesBinaryPromptAndExplicitTools(t *testing.T
 	if req.ReasoningEffort != "xhigh" {
 		t.Fatalf("reasoning effort mismatch: %q", req.ReasoningEffort)
 	}
-	if len(req.Tools) != 1 || req.Tools[0].Name != "bash" {
+	if len(req.Tools) != 1 || req.Tools[0].Name != "shell" {
 		t.Fatalf("tools mismatch: %+v", req.Tools)
 	}
 }

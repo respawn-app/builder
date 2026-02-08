@@ -1,4 +1,4 @@
-package bash
+package shell
 
 import (
 	"bytes"
@@ -65,7 +65,7 @@ func New(workspaceRoot string, outputLimit int, opts ...Option) *Tool {
 }
 
 func (t *Tool) Name() tools.ID {
-	return tools.ToolBash
+	return tools.ToolShell
 }
 
 func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {

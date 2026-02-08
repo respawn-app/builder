@@ -17,8 +17,8 @@ This file records architecture and product decisions for the minimal terminal co
    - Rationale: adding tools and event handlers should require minimal setup changes.
    - Notes: target Chain of Responsibility + interceptor/composite-style extension points.
 
-5. **3 core tools in v1: `bash`, `patch`, `ask_question`**
-   - `bash`: execute commands with the user's real PATH/environment, plus non-interactive markers.
+5. **3 core tools in v1: `shell`, `patch`, `ask_question`**
+   - `shell`: execute commands with the user's real PATH/environment, plus non-interactive markers.
    - `patch`: freeform patch application equivalent in behavior to `apply_patch`.
    - `ask_question`: asks the user a question and waits for input. Will be used for prompts, permissions, decisions, planning etc.
 
@@ -79,7 +79,7 @@ This file records architecture and product decisions for the minimal terminal co
    - Interrupt current model step and active tool process.
    - Keep app/session alive.
 
-22. **`bash` tool uses user login shell.**
+22. **`shell` tool uses user login shell.**
 
 23. **Tool timeout policy is bounded with model override.**
    - Default command timeout is 5 minutes.
@@ -90,7 +90,7 @@ This file records architecture and product decisions for the minimal terminal co
    - Let model handle recovery.
 
 25. **Shell execution model is stateless per command.**
-   - No persistent shell state between `bash` tool calls.
+   - No persistent shell state between `shell` tool calls.
 
 26. **Large tool output is bounded for model consumption.**
    - Configurable threshold (example baseline: 10k chars).
@@ -114,7 +114,7 @@ This file records architecture and product decisions for the minimal terminal co
    - Lock after first turn to maximize cache hits.
 
 31. **Session-start tool defaults are enabled.**
-   - `bash=on`, `patch=on`.
+   - `shell=on`, `patch=on`.
 
 32. **Approval policy in v1 is fully autonomous.**
    - No approval prompts for tool execution.
@@ -141,7 +141,7 @@ This file records architecture and product decisions for the minimal terminal co
 39. **Model-step transient failure retry is limited.**
    - Automatic retry with backoff, up to 2 attempts per model step.
 
-40. **No automatic retry for `bash` process-launch failures.**
+40. **No automatic retry for `shell` process-launch failures.**
 
 41. **Interrupt injects explicit resume context.**
    - On user interrupt, append developer/system message: `User interrupted you`.
@@ -271,7 +271,7 @@ This file records architecture and product decisions for the minimal terminal co
 77. **No session event compression in MVP.**
    - Future note: async compression (e.g., zstd) can be revisited later.
 
-78. **`bash` tool executes in non-TTY mode by default.**
+78. **`shell` tool executes in non-TTY mode by default.**
    - Use process pipes, not PTY.
 
 79. **Merged output stream policy is stdout+stderr combined.**
@@ -332,11 +332,11 @@ This file records architecture and product decisions for the minimal terminal co
 97. **Workspace-bound patch path validation resolves real paths.**
    - Use `realpath`-style resolution before enforcing workspace root boundary.
 
-98. **`bash` environment policy is inherit-plus-hints.**
+98. **`shell` environment policy is inherit-plus-hints.**
    - Inherit full parent environment.
    - Add non-interactive environment hints.
 
-99. **`bash` command envelope is direct shell invocation only.**
+99. **`shell` command envelope is direct shell invocation only.**
    - No runtime command parsing/AST preprocessing.
 
 100. **`AGENTS.md` injection uses structured fenced formatting with source path.**

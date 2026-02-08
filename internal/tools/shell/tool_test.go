@@ -1,4 +1,4 @@
-package bash
+package shell
 
 import (
 	"context"
@@ -9,11 +9,11 @@ import (
 	"builder/internal/tools"
 )
 
-func TestBashRunsAndMergesOutput(t *testing.T) {
+func TestShellRunsAndMergesOutput(t *testing.T) {
 	tool := New(".", 10_000)
 	input, _ := json.Marshal(map[string]any{"command": "echo out && echo err 1>&2"})
 
-	result, err := tool.Call(context.Background(), tools.Call{ID: "1", Name: tools.ToolBash, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "1", Name: tools.ToolShell, Input: input})
 	if err != nil {
 		t.Fatalf("call error: %v", err)
 	}
@@ -36,11 +36,11 @@ func TestBashRunsAndMergesOutput(t *testing.T) {
 	}
 }
 
-func TestBashTimeout(t *testing.T) {
+func TestShellTimeout(t *testing.T) {
 	tool := New(".", 10_000)
 	input, _ := json.Marshal(map[string]any{"command": "sleep 2", "timeout_seconds": 1})
 
-	result, err := tool.Call(context.Background(), tools.Call{ID: "2", Name: tools.ToolBash, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "2", Name: tools.ToolShell, Input: input})
 	if err != nil {
 		t.Fatalf("call error: %v", err)
 	}

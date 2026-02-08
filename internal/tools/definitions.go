@@ -3,8 +3,8 @@ package tools
 import "encoding/json"
 
 var definitions = map[ID]Definition{
-	ToolBash: {
-		ID:          ToolBash,
+	ToolShell: {
+		ID:          ToolShell,
 		Description: "Execute a shell command in the user's environment and device.",
 		Schema: json.RawMessage(`{
   "type": "object",

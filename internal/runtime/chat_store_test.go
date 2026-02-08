@@ -15,19 +15,19 @@ func TestChatStoreSnapshotProjectsConversation(t *testing.T) {
 		Role:    llm.RoleAssistant,
 		Content: "Let me check.",
 		ToolCalls: []llm.ToolCall{
-			{ID: "call_1", Name: "bash", Input: json.RawMessage(`{"command":"pwd"}`)},
+			{ID: "call_1", Name: "shell", Input: json.RawMessage(`{"command":"pwd"}`)},
 		},
 	})
 	s.recordToolCompletion(tools.Result{
 		CallID:  "call_1",
-		Name:    tools.ToolBash,
+		Name:    tools.ToolShell,
 		IsError: false,
 		Output:  json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`),
 	})
 	s.appendMessage(llm.Message{
 		Role:       llm.RoleTool,
 		ToolCallID: "call_1",
-		Name:       string(tools.ToolBash),
+		Name:       string(tools.ToolShell),
 		Content:    `{"output":"/tmp","exit_code":0,"truncated":false}`,
 	})
 	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "done"})

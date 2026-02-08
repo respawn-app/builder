@@ -110,11 +110,11 @@ func TestLocksAtFirstDispatch(t *testing.T) {
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolBash}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model:         "gpt-5",
 		Temperature:   1,
 		ThinkingLevel: "xhigh",
-		EnabledTools:  []tools.ID{tools.ToolBash},
+		EnabledTools:  []tools.ID{tools.ToolShell},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -133,7 +133,7 @@ func TestLocksAtFirstDispatch(t *testing.T) {
 	if meta.Locked.ThinkingLevel != "xhigh" {
 		t.Fatalf("locked thinking level = %q", meta.Locked.ThinkingLevel)
 	}
-	if len(meta.Locked.EnabledTools) != 1 || meta.Locked.EnabledTools[0] != string(tools.ToolBash) {
+	if len(meta.Locked.EnabledTools) != 1 || meta.Locked.EnabledTools[0] != string(tools.ToolShell) {
 		t.Fatalf("locked enabled tools = %+v", meta.Locked.EnabledTools)
 	}
 }
@@ -149,7 +149,7 @@ func TestParallelToolsReturnDeclaredOrder(t *testing.T) {
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
 			ToolCalls: []llm.ToolCall{
-				{ID: "a", Name: string(tools.ToolBash), Input: json.RawMessage(`{}`)},
+				{ID: "a", Name: string(tools.ToolShell), Input: json.RawMessage(`{}`)},
 				{ID: "b", Name: string(tools.ToolPatch), Input: json.RawMessage(`{}`)},
 			},
 			Usage: llm.Usage{WindowTokens: 200000},
@@ -161,7 +161,7 @@ func TestParallelToolsReturnDeclaredOrder(t *testing.T) {
 	}}
 
 	eng, err := New(store, client, tools.NewRegistry(
-		fakeTool{name: tools.ToolBash, delay: 40 * time.Millisecond},
+		fakeTool{name: tools.ToolShell, delay: 40 * time.Millisecond},
 		fakeTool{name: tools.ToolPatch, delay: 1 * time.Millisecond},
 	), Config{Model: "gpt-5", Temperature: 1})
 	if err != nil {
@@ -230,7 +230,7 @@ func TestStreamingRetryResetsAttemptDeltas(t *testing.T) {
 		mu     sync.Mutex
 		events []Event
 	)
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolBash}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -290,7 +290,7 @@ func TestAuthErrorsAreNotRetried(t *testing.T) {
 	}
 
 	client := &authFailClient{}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolBash}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 	})
 	if err != nil {
@@ -347,7 +347,7 @@ func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserM
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 	}}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolBash}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}

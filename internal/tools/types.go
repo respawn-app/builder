@@ -9,15 +9,17 @@ import (
 type ID string
 
 const (
-	ToolBash        ID = "bash"
+	ToolShell       ID = "shell"
 	ToolPatch       ID = "patch"
 	ToolAskQuestion ID = "ask_question"
 )
 
 func ParseID(v string) (ID, bool) {
 	switch ID(v) {
-	case ToolBash, ToolPatch, ToolAskQuestion:
+	case ToolShell, ToolPatch, ToolAskQuestion:
 		return ID(v), true
+	case ID("bash"):
+		return ToolShell, true
 	default:
 		return "", false
 	}

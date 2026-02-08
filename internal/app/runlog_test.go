@@ -37,17 +37,17 @@ func TestRunLoggerWritesStepsFile(t *testing.T) {
 }
 
 func TestFormatRuntimeEventIncludesToolMetadata(t *testing.T) {
-	call := llm.ToolCall{ID: "call-1", Name: "bash"}
+	call := llm.ToolCall{ID: "call-1", Name: "shell"}
 	line := formatRuntimeEvent(runtime.Event{
 		Kind:     runtime.EventToolCallStarted,
 		StepID:   "step-1",
 		ToolCall: &call,
 	})
-	if !strings.Contains(line, "call_id=call-1") || !strings.Contains(line, "name=bash") {
+	if !strings.Contains(line, "call_id=call-1") || !strings.Contains(line, "name=shell") {
 		t.Fatalf("unexpected event line: %q", line)
 	}
 
-	res := tools.Result{CallID: "call-1", Name: tools.ToolBash, IsError: true}
+	res := tools.Result{CallID: "call-1", Name: tools.ToolShell, IsError: true}
 	line = formatRuntimeEvent(runtime.Event{
 		Kind:       runtime.EventToolCallCompleted,
 		StepID:     "step-1",

@@ -18,7 +18,7 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
 - `internal/session`
   - Session persistence (`session.json`, `events.jsonl`) and resume/list primitives.
 - `internal/tools`
-  - Tool contracts and concrete tools (`bash`, `patch`, `ask_question`).
+  - Tool contracts and concrete tools (`shell`, `patch`, `ask_question`).
 - `internal/llm`
   - Model-facing contracts and OpenAI transport/client adapters.
 - `internal/auth`
