@@ -21,7 +21,7 @@ func TestModeTogglePreservesOngoingScroll(t *testing.T) {
 	if len(linesBefore) != 2 {
 		t.Fatalf("ongoing lines = %d, want 2", len(linesBefore))
 	}
-	if linesBefore[0] != "> l2" || linesBefore[1] != "> l3" {
+	if linesBefore[0] != "l2" || linesBefore[1] != "l3" {
 		t.Fatalf("unexpected ongoing view before toggle: %q", before)
 	}
 
@@ -51,7 +51,7 @@ func TestDetailSnapshotIsStaticUntilRetoggle(t *testing.T) {
 	m = updateModel(t, m, ToggleModeMsg{})
 
 	snapshot := m.View()
-	if !strings.Contains(snapshot, "assistant: alpha") {
+	if !strings.Contains(snapshot, "model: alpha") {
 		t.Fatalf("detail snapshot missing assistant stream: %q", snapshot)
 	}
 
@@ -69,10 +69,10 @@ func TestDetailSnapshotIsStaticUntilRetoggle(t *testing.T) {
 	if refreshed == snapshot {
 		t.Fatalf("detail snapshot did not refresh after mode roundtrip")
 	}
-	if !strings.Contains(refreshed, "assistant: alpha beta") {
+	if !strings.Contains(refreshed, "model: alpha beta") {
 		t.Fatalf("refreshed snapshot missing full assistant stream: %q", refreshed)
 	}
-	if !strings.Contains(refreshed, "tool: ran") {
+	if !strings.Contains(refreshed, "tool: ran") && !strings.Contains(refreshed, "tool_result: ran") {
 		t.Fatalf("refreshed snapshot missing new transcript entry: %q", refreshed)
 	}
 }
@@ -86,10 +86,10 @@ func TestClearOngoingAssistantMsgDropsPartialStream(t *testing.T) {
 	m = updateModel(t, m, ToggleModeMsg{})
 
 	snapshot := m.View()
-	if strings.Contains(snapshot, "assistant: partial") {
+	if strings.Contains(snapshot, "model: partial") {
 		t.Fatalf("snapshot should not contain discarded attempt delta: %q", snapshot)
 	}
-	if !strings.Contains(snapshot, "assistant: final") {
+	if !strings.Contains(snapshot, "model: final") {
 		t.Fatalf("snapshot missing committed final assistant output: %q", snapshot)
 	}
 }

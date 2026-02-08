@@ -51,13 +51,14 @@ type ToolResult struct {
 }
 
 type Request struct {
-	Model        string    `json:"model"`
-	Temperature  float64   `json:"temperature"`
-	MaxTokens    int       `json:"max_tokens"`
-	SystemPrompt string    `json:"system_prompt"`
-	SessionID    string    `json:"session_id,omitempty"`
-	Messages     []Message `json:"messages"`
-	Tools        []Tool    `json:"tools,omitempty"`
+	Model           string    `json:"model"`
+	Temperature     float64   `json:"temperature"`
+	MaxTokens       int       `json:"max_tokens"`
+	ReasoningEffort string    `json:"reasoning_effort,omitempty"`
+	SystemPrompt    string    `json:"system_prompt"`
+	SessionID       string    `json:"session_id,omitempty"`
+	Messages        []Message `json:"messages"`
+	Tools           []Tool    `json:"tools,omitempty"`
 }
 
 func (r Request) Validate() error {
@@ -92,13 +93,14 @@ func RequestFromLockedContract(locked session.LockedContract, systemPrompt strin
 	}
 
 	req := Request{
-		Model:        locked.Model,
-		Temperature:  locked.Temperature,
-		MaxTokens:    locked.MaxOutputToken,
-		SystemPrompt: systemPrompt,
-		SessionID:    "",
-		Messages:     append([]Message(nil), messages...),
-		Tools:        append([]Tool(nil), tools...),
+		Model:           locked.Model,
+		Temperature:     locked.Temperature,
+		MaxTokens:       locked.MaxOutputToken,
+		ReasoningEffort: locked.ThinkingLevel,
+		SystemPrompt:    systemPrompt,
+		SessionID:       "",
+		Messages:        append([]Message(nil), messages...),
+		Tools:           append([]Tool(nil), tools...),
 	}
 	if err := req.Validate(); err != nil {
 		return Request{}, err

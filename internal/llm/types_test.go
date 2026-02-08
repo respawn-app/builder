@@ -11,6 +11,7 @@ func TestRequestFromLockedContract_UsesBinaryPromptAndExplicitTools(t *testing.T
 		Model:          "gpt-5",
 		Temperature:    1,
 		MaxOutputToken: 0,
+		ThinkingLevel:  "xhigh",
 	}
 	tool := Tool{Name: "bash", Schema: []byte(`{"type":"object"}`)}
 
@@ -20,6 +21,9 @@ func TestRequestFromLockedContract_UsesBinaryPromptAndExplicitTools(t *testing.T
 	}
 	if req.SystemPrompt != "sys" {
 		t.Fatalf("system prompt mismatch: %q", req.SystemPrompt)
+	}
+	if req.ReasoningEffort != "xhigh" {
+		t.Fatalf("reasoning effort mismatch: %q", req.ReasoningEffort)
 	}
 	if len(req.Tools) != 1 || req.Tools[0].Name != "bash" {
 		t.Fatalf("tools mismatch: %+v", req.Tools)

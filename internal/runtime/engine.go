@@ -26,10 +26,12 @@ const (
 )
 
 type Config struct {
-	Model       string
-	Temperature float64
-	MaxTokens   int
-	OnEvent     func(Event)
+	Model         string
+	Temperature   float64
+	MaxTokens     int
+	ThinkingLevel string
+	EnabledTools  []tools.ID
+	OnEvent       func(Event)
 }
 
 type Engine struct {
@@ -284,6 +286,8 @@ func (e *Engine) ensureLocked() (session.LockedContract, error) {
 		Model:          e.cfg.Model,
 		Temperature:    e.cfg.Temperature,
 		MaxOutputToken: e.cfg.MaxTokens,
+		ThinkingLevel:  e.cfg.ThinkingLevel,
+		EnabledTools:   toToolNames(e.cfg.EnabledTools),
 	}
 	if err := e.store.MarkModelDispatchLocked(lock); err != nil {
 		return session.LockedContract{}, err
@@ -488,6 +492,17 @@ func (e *Engine) snapshotMessages() []llm.Message {
 func mustJSON(v any) json.RawMessage {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+func toToolNames(ids []tools.ID) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		out = append(out, string(id))
+	}
+	return out
 }
 
 func (e *Engine) emit(evt Event) {

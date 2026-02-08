@@ -411,3 +411,36 @@ This file records architecture and product decisions for the minimal terminal co
 128. **Tool results persist at tool-completion boundary.**
 
 129. **Startup auth failure uses a blocking error screen with retry.**
+
+130. **Startup auth menu exposes exactly three OAuth methods.**
+   - `[1] oauth_browser` (open browser + localhost callback listener).
+   - `[2] oauth_browser_paste` (open browser + paste callback/code).
+   - `[3] oauth_device` (device code flow fallback).
+   - This supersedes retry/quit-style auth menu prompts.
+
+131. **User settings are loaded from a home TOML file with auto-bootstrap.**
+   - Canonical path: `~/.builder/config.toml`.
+   - On first run, the file is created with default values.
+
+132. **Configuration precedence is deterministic and explicit.**
+   - `CLI overrides > environment variables > settings file > built-in defaults`.
+
+133. **Thinking level accepts OpenAI levels unchanged, including `xhigh`.**
+   - Values are not normalized or remapped.
+   - Applied only for OpenAI model families.
+
+134. **Session lock includes thinking level and enabled tool IDs.**
+   - Locked fields now include `thinking_level` and `enabled_tools`.
+   - Prompt/tool schema blobs remain excluded from lock persistence.
+
+135. **Main TUI status line is compact and fixed.**
+   - Status line under input shows only `model`, `busy/idle`, and queue size.
+
+136. **Leading slash input is always command mode.**
+   - If first non-space character is `/`, input is parsed as a slash command.
+   - Unknown slash commands are surfaced as system errors; they are not sent to the model.
+
+137. **Built-in slash commands are `/logout`, `/exit`, `/new`.**
+   - `/logout`: clear auth and run re-auth immediately in-app.
+   - `/new`: create and switch to a new session immediately.
+   - `/exit`: terminate the app.

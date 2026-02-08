@@ -319,6 +319,9 @@ func (t *HTTPTransport) buildPayload(request OpenAIRequest, mode openAIAuthMode)
 		Tools:        tools,
 		Store:        &store,
 	}
+	if shouldApplyReasoningEffort(request.Model, request.ReasoningEffort) {
+		out.Reasoning = &responsesReasoning{Effort: request.ReasoningEffort}
+	}
 	if request.MaxTokens > 0 && !mode.IsOAuth {
 		out.MaxOutputTokens = &request.MaxTokens
 	}
@@ -429,11 +432,16 @@ type responsesRequest struct {
 	Input             []responsesInputItem    `json:"input,omitempty"`
 	Instructions      string                  `json:"instructions,omitempty"`
 	Tools             []responsesFunctionTool `json:"tools,omitempty"`
+	Reasoning         *responsesReasoning     `json:"reasoning,omitempty"`
 	Temperature       *float64                `json:"temperature,omitempty"`
 	MaxOutputTokens   *int                    `json:"max_output_tokens,omitempty"`
 	ParallelToolCalls *bool                   `json:"parallel_tool_calls,omitempty"`
 	Store             *bool                   `json:"store,omitempty"`
 	Stream            bool                    `json:"stream,omitempty"`
+}
+
+type responsesReasoning struct {
+	Effort string `json:"effort,omitempty"`
 }
 
 type responsesFunctionTool struct {
@@ -673,6 +681,18 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func shouldApplyReasoningEffort(model, effort string) bool {
+	effort = strings.TrimSpace(effort)
+	if effort == "" {
+		return false
+	}
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return false
+	}
+	return strings.HasPrefix(model, "gpt-") || strings.HasPrefix(model, "o")
 }
 
 func truncateError(b []byte) string {

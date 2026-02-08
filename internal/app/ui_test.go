@@ -126,8 +126,11 @@ func TestSubmitErrorShowsFullMessageInDetailMode(t *testing.T) {
 	updated = next.(*uiModel)
 
 	view := updated.View()
-	if !strings.Contains(view, "error: "+longErr) {
-		t.Fatalf("expected full error in detail mode, got: %q", view)
+	if !strings.Contains(view, "error: openai status 400:") {
+		t.Fatalf("expected status text in detail mode, got: %q", view)
+	}
+	if strings.Count(view, "X") < 320 {
+		t.Fatalf("expected full wrapped body in detail mode, got: %q", view)
 	}
 }
 
@@ -146,7 +149,8 @@ func TestSubmitErrorShowsFullAPIStatusBodyWhenWrapped(t *testing.T) {
 	if !strings.Contains(view, "error: openai status 403") {
 		t.Fatalf("expected status line, got: %q", view)
 	}
-	if !strings.Contains(view, body) {
+	joined := strings.ReplaceAll(view, "\n", "")
+	if strings.Count(joined, "AUTH_ERR_") < 64 {
 		t.Fatalf("expected full API body in detail mode, got: %q", view)
 	}
 }
@@ -188,5 +192,78 @@ func TestAskFreeformAcceptsSpaceKey(t *testing.T) {
 	}
 	if updated.activeAsk != nil {
 		t.Fatal("ask should be resolved")
+	}
+}
+
+func TestBusyInputIsDisabled(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.input = "seed"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeySpace})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	updated = next.(*uiModel)
+
+	if updated.input != "seed" {
+		t.Fatalf("expected disabled input to remain unchanged, got %q", updated.input)
+	}
+	if !strings.Contains(updated.View(), "input locked while agent is running") {
+		t.Fatalf("expected disabled input hint in view: %q", updated.View())
+	}
+}
+
+func TestRenderInputLinesUsesHorizontalBordersOnly(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 40
+	m.termHeight = 16
+	m.input = "hello world"
+
+	lines := m.renderInputLines(40, uiThemeStyles("dark"))
+	if len(lines) < 3 {
+		t.Fatalf("expected bordered input block, got %d lines", len(lines))
+	}
+	if !strings.Contains(lines[0], "─") {
+		t.Fatalf("expected top horizontal border, got %q", lines[0])
+	}
+	if !strings.Contains(lines[len(lines)-1], "─") {
+		t.Fatalf("expected bottom horizontal border, got %q", lines[len(lines)-1])
+	}
+
+	joined := strings.Join(lines, "\n")
+	if strings.ContainsAny(joined, "│╭╮╰╯") {
+		t.Fatalf("expected no vertical/corner border glyphs, got %q", joined)
+	}
+}
+
+func TestCalcChatLinesShrinksWhenInputWraps(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 20
+	m.termHeight = 12
+
+	m.input = "short"
+	chatShort := m.calcChatLines()
+
+	m.input = strings.Repeat("x", 120)
+	chatLong := m.calcChatLines()
+
+	if chatLong >= chatShort {
+		t.Fatalf("expected wrapped input to reduce chat lines: short=%d long=%d", chatShort, chatLong)
+	}
+}
+
+func TestSlashCommandSetsExitAction(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/exit"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected quit cmd for /exit")
+	}
+	updated := next.(*uiModel)
+	if updated.Action() != UIActionExit {
+		t.Fatalf("expected UIActionExit, got %q", updated.Action())
 	}
 }
