@@ -9,10 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"builder/internal/tools"
+	xansi "github.com/charmbracelet/x/ansi"
 )
 
 const (
@@ -21,6 +24,31 @@ const (
 	defaultLimit   = 10_000
 	headTailSize   = 500
 )
+
+var shellEnvOverrides = []string{
+	"TERM=dumb",
+	"COLORTERM=",
+	"CI=1",
+	"NO_COLOR=1",
+	"CLICOLOR=0",
+	"CLICOLOR_FORCE=0",
+	"FORCE_COLOR=0",
+	"PAGER=cat",
+	"GIT_PAGER=cat",
+	"GH_PAGER=cat",
+	"MANPAGER=cat",
+	"SYSTEMD_PAGER=",
+	"BAT_PAGER=cat",
+	"GIT_EDITOR=:",
+	"EDITOR=:",
+	"VISUAL=:",
+	"GIT_TERMINAL_PROMPT=0",
+	"GCM_INTERACTIVE=Never",
+	"DEBIAN_FRONTEND=noninteractive",
+	"PY_COLORS=0",
+	"CARGO_TERM_COLOR=never",
+	"NPM_CONFIG_COLOR=false",
+}
 
 type input struct {
 	Command        string `json:"command"`
@@ -168,10 +196,10 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 		}
 	}
 
-	raw := merged.String()
+	raw := sanitizeOutput(merged.String())
 	display, truncated, removed := truncate(raw, t.outputLimit)
 
-	body, marshalErr := json.Marshal(output{
+	body, marshalErr := marshalNoHTMLEscape(output{
 		ExitCode:        exitCode,
 		Output:          display,
 		Truncated:       truncated,
@@ -184,17 +212,70 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 }
 
 func resultErr(c tools.Call, msg string) tools.Result {
-	body, _ := json.Marshal(map[string]any{"error": msg})
+	body, _ := marshalNoHTMLEscape(map[string]any{"error": msg})
 	return tools.Result{CallID: c.ID, Name: c.Name, Output: body, IsError: true}
 }
 
+func marshalNoHTMLEscape(v any) (json.RawMessage, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+}
+
 func enrichEnv(base []string) []string {
-	return append(base,
-		"TERM=dumb",
-		"CI=1",
-		"NO_COLOR=1",
-		"CLICOLOR=0",
-	)
+	env := make(map[string]string, len(base)+len(shellEnvOverrides))
+	order := make([]string, 0, len(base)+len(shellEnvOverrides))
+
+	for _, entry := range base {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || key == "" {
+			continue
+		}
+		if _, exists := env[key]; !exists {
+			order = append(order, key)
+		}
+		env[key] = value
+	}
+
+	for _, entry := range shellEnvOverrides {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || key == "" {
+			continue
+		}
+		if _, exists := env[key]; !exists {
+			order = append(order, key)
+		}
+		env[key] = value
+	}
+
+	out := make([]string, 0, len(order))
+	for _, key := range order {
+		out = append(out, key+"="+env[key])
+	}
+	return out
+}
+
+func sanitizeOutput(s string) string {
+	if s == "" {
+		return s
+	}
+
+	stripped := xansi.Strip(s)
+	normalized := strings.ReplaceAll(stripped, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+
+	var b strings.Builder
+	b.Grow(len(normalized))
+	for _, r := range normalized {
+		if r == '\n' || r == '\t' || !unicode.IsControl(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func truncate(s string, maxLen int) (string, bool, int) {
