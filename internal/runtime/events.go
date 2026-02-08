@@ -8,6 +8,7 @@ import (
 type EventKind string
 
 const (
+	EventConversationUpdated EventKind = "conversation_updated"
 	EventAssistantDelta      EventKind = "assistant_delta"
 	EventAssistantDeltaReset EventKind = "assistant_delta_reset"
 	EventAssistantMessage    EventKind = "assistant_message"

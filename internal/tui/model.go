@@ -15,6 +15,7 @@ const (
 	ModeDetail  Mode = "detail"
 
 	DefaultPreviewLines = 8
+	TranscriptDivider   = "────────────────────────"
 )
 
 type TranscriptEntry struct {
@@ -35,6 +36,12 @@ type SetViewportLinesMsg struct {
 type AppendTranscriptMsg struct {
 	Role string
 	Text string
+}
+
+type SetConversationMsg struct {
+	Entries      []TranscriptEntry
+	Ongoing      string
+	OngoingError string
 }
 
 type StreamAssistantMsg struct {
@@ -126,6 +133,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Role: role,
 			Text: msg.Text,
 		})
+	case SetConversationMsg:
+		entries := make([]TranscriptEntry, len(msg.Entries))
+		copy(entries, msg.Entries)
+		m.transcript = entries
+		m.ongoing = msg.Ongoing
+		m.ongoingError = strings.TrimSpace(msg.OngoingError)
 	case StreamAssistantMsg:
 		m.ongoing += msg.Delta
 	case ClearOngoingAssistantMsg:
@@ -275,48 +288,82 @@ func (m Model) renderDetailSnapshot() string {
 }
 
 func (m Model) renderFlatDetailTranscript() string {
-	lines := make([]string, 0, len(m.transcript)+1)
-	for _, entry := range m.transcript {
-		lines = append(lines, flattenEntry(entry)...)
+	blocks := make([][]string, 0, len(m.transcript)+1)
+	for i := 0; i < len(m.transcript); i++ {
+		entry := m.transcript[i]
+		role := strings.TrimSpace(entry.Role)
+		switch role {
+		case "tool_call":
+			combined := entry.Text
+			if i+1 < len(m.transcript) && strings.TrimSpace(m.transcript[i+1].Role) == "tool_result" {
+				resultText := m.transcript[i+1].Text
+				if strings.TrimSpace(resultText) != "" {
+					combined = combined + "\n\n" + resultText
+				}
+				i++
+			}
+			blocks = append(blocks, flattenEntry("tool", combined))
+		case "tool_result":
+			blocks = append(blocks, flattenEntry("tool", entry.Text))
+		default:
+			blocks = append(blocks, flattenEntry(role, entry.Text))
+		}
 	}
 	if m.ongoing != "" {
-		lines = append(lines, flattenEntry(TranscriptEntry{
-			Role: "assistant",
-			Text: m.ongoing,
-		})...)
+		blocks = append(blocks, flattenEntry("assistant", m.ongoing))
+	}
+	if len(blocks) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(blocks)*2)
+	for idx, block := range blocks {
+		if idx > 0 {
+			lines = append(lines, detailDivider())
+		}
+		lines = append(lines, block...)
 	}
 	return strings.Join(lines, "\n")
 }
 
-func flattenEntry(entry TranscriptEntry) []string {
-	role := strings.TrimSpace(entry.Role)
-	if role == "" {
-		role = "unknown"
+func flattenEntry(role, text string) []string {
+	chunks := splitLines(text)
+	if len(chunks) == 0 {
+		chunks = []string{""}
 	}
-	chunks := splitLines(entry.Text)
+	symbol := rolePrefix(role)
 	out := make([]string, 0, len(chunks))
-	for _, chunk := range chunks {
-		out = append(out, fmt.Sprintf("%s %s", rolePrefix(role), chunk))
+	for i, chunk := range chunks {
+		if i == 0 {
+			if symbol == "" {
+				out = append(out, chunk)
+				continue
+			}
+			out = append(out, fmt.Sprintf("%s %s", symbol, chunk))
+			continue
+		}
+		if strings.TrimSpace(chunk) == "" {
+			out = append(out, "")
+			continue
+		}
+		out = append(out, "  "+chunk)
 	}
 	return out
+}
+
+func detailDivider() string {
+	return TranscriptDivider
 }
 
 func rolePrefix(role string) string {
 	switch role {
 	case "user":
-		return "▸ user:"
+		return "❯"
 	case "assistant":
-		return "◆ model:"
-	case "tool_call":
-		return "⚙ tool_call:"
-	case "tool_result":
-		return "✓ tool_result:"
-	case "system":
-		return "ℹ system:"
-	case "error":
-		return "✖ error:"
+		return "❮"
+	case "tool":
+		return "•"
 	default:
-		return role + ":"
+		return ""
 	}
 }
 

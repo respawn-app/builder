@@ -42,8 +42,8 @@ type Engine struct {
 	registry *tools.Registry
 	cfg      Config
 
-	messages []llm.Message
-	locked   *session.LockedContract
+	chat   *chatStore
+	locked *session.LockedContract
 
 	pendingInjected []string
 	cancelCurrent   context.CancelFunc
@@ -72,6 +72,7 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 		llm:      client,
 		registry: registry,
 		cfg:      cfg,
+		chat:     newChatStore(),
 	}
 
 	meta := store.Meta()
@@ -184,9 +185,13 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 			ctx,
 			req,
 			func(delta string) {
+				e.chat.appendOngoingDelta(delta)
+				e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
 				e.emit(Event{Kind: EventAssistantDelta, StepID: stepID, AssistantDelta: delta})
 			},
 			func() {
+				e.chat.clearOngoing()
+				e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
 				e.emit(Event{Kind: EventAssistantDeltaReset, StepID: stepID})
 			},
 		)
@@ -398,12 +403,16 @@ func (e *Engine) executeToolCalls(ctx context.Context, stepID string, calls []ll
 }
 
 func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
+	e.chat.recordToolCompletion(r)
 	_, err := e.store.AppendEvent(stepID, "tool_completed", map[string]any{
 		"call_id":  r.CallID,
 		"name":     string(r.Name),
 		"is_error": r.IsError,
 		"output":   json.RawMessage(r.Output),
 	})
+	if err == nil {
+		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
+	}
 	return err
 }
 
@@ -417,10 +426,11 @@ func (e *Engine) appendAssistantMessage(stepID string, msg llm.Message) error {
 }
 
 func (e *Engine) appendMessage(stepID string, msg llm.Message) error {
-	e.mu.Lock()
-	e.messages = append(e.messages, msg)
-	e.mu.Unlock()
+	e.chat.appendMessage(msg)
 	_, err := e.store.AppendEvent(stepID, "message", msg)
+	if err == nil {
+		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
+	}
 	return err
 }
 
@@ -464,29 +474,44 @@ func (e *Engine) restoreMessages() error {
 	if err != nil {
 		return err
 	}
-	msgs := []llm.Message{}
 	for _, evt := range events {
-		if evt.Kind != "message" {
-			continue
+		switch evt.Kind {
+		case "message":
+			var msg llm.Message
+			if err := json.Unmarshal(evt.Payload, &msg); err != nil {
+				return fmt.Errorf("decode message event: %w", err)
+			}
+			e.chat.appendMessage(msg)
+		case "tool_completed":
+			if err := e.chat.restoreToolCompletionPayload(evt.Payload); err != nil {
+				return err
+			}
 		}
-		var msg llm.Message
-		if err := json.Unmarshal(evt.Payload, &msg); err != nil {
-			return fmt.Errorf("decode message event: %w", err)
-		}
-		msgs = append(msgs, msg)
 	}
-	e.mu.Lock()
-	e.messages = msgs
-	e.mu.Unlock()
 	return nil
 }
 
 func (e *Engine) snapshotMessages() []llm.Message {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	msgs := make([]llm.Message, len(e.messages))
-	copy(msgs, e.messages)
-	return msgs
+	return e.chat.snapshotMessages()
+}
+
+func (e *Engine) ChatSnapshot() ChatSnapshot {
+	return e.chat.snapshot()
+}
+
+func (e *Engine) AppendLocalEntry(role, text string) {
+	e.chat.appendLocalEntry(role, text)
+	e.emit(Event{Kind: EventConversationUpdated, StepID: ""})
+}
+
+func (e *Engine) SetOngoingError(text string) {
+	e.chat.setOngoingError(text)
+	e.emit(Event{Kind: EventConversationUpdated, StepID: ""})
+}
+
+func (e *Engine) ClearOngoingError() {
+	e.chat.clearOngoingError()
+	e.emit(Event{Kind: EventConversationUpdated, StepID: ""})
 }
 
 func mustJSON(v any) json.RawMessage {

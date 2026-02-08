@@ -9,6 +9,7 @@ import (
 	"builder/internal/llm"
 	"builder/internal/runtime"
 	"builder/internal/tools/askquestion"
+	"builder/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -111,7 +112,7 @@ func TestCtrlEnterIdleAppendsUserOnce(t *testing.T) {
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated = next.(*uiModel)
 
-	if count := strings.Count(updated.View(), "user: echo hi"); count != 1 {
+	if count := strings.Count(updated.View(), "❯ echo hi"); count != 1 {
 		t.Fatalf("expected one user transcript entry, got %d", count)
 	}
 }
@@ -126,7 +127,7 @@ func TestSubmitErrorShowsFullMessageInDetailMode(t *testing.T) {
 	updated = next.(*uiModel)
 
 	view := updated.View()
-	if !strings.Contains(view, "error: openai status 400:") {
+	if !strings.Contains(view, "openai status 400:") {
 		t.Fatalf("expected status text in detail mode, got: %q", view)
 	}
 	if strings.Count(view, "X") < 320 {
@@ -146,7 +147,7 @@ func TestSubmitErrorShowsFullAPIStatusBodyWhenWrapped(t *testing.T) {
 	updated = next.(*uiModel)
 
 	view := updated.View()
-	if !strings.Contains(view, "error: openai status 403") {
+	if !strings.Contains(view, "openai status 403") {
 		t.Fatalf("expected status line, got: %q", view)
 	}
 	joined := strings.ReplaceAll(view, "\n", "")
@@ -254,6 +255,30 @@ func TestCalcChatLinesShrinksWhenInputWraps(t *testing.T) {
 	}
 }
 
+func TestRenderChatPanelRendersFullWidthMetaDivider(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	style := uiThemeStyles("dark")
+
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: "hello"})
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "world"})
+	m.forwardToView(tui.ToggleModeMsg{})
+
+	width := 44
+	lines := m.renderChatPanel(width, 8, style)
+	expected := style.meta.Render(strings.Repeat("─", width))
+
+	found := false
+	for _, line := range lines {
+		if line == expected {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected full-width meta divider in chat panel, got %q", strings.Join(lines, "\n"))
+	}
+}
+
 func TestSlashCommandSetsExitAction(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "/exit"
@@ -265,5 +290,30 @@ func TestSlashCommandSetsExitAction(t *testing.T) {
 	updated := next.(*uiModel)
 	if updated.Action() != UIActionExit {
 		t.Fatalf("expected UIActionExit, got %q", updated.Action())
+	}
+}
+
+func TestInitialTranscriptVisibleImmediately(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIInitialTranscript([]UITranscriptEntry{
+			{Role: "user", Text: "hello"},
+			{Role: "assistant", Text: "world"},
+		}),
+	).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 20
+
+	ongoing := m.View()
+	if !strings.Contains(ongoing, "world") {
+		t.Fatalf("expected resumed content in ongoing mode, got %q", ongoing)
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	detail := next.(*uiModel).View()
+	if !strings.Contains(detail, "❯ hello") || !strings.Contains(detail, "❮ world") {
+		t.Fatalf("expected resumed transcript in detail mode, got %q", detail)
 	}
 }
