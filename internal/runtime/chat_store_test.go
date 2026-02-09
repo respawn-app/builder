@@ -51,6 +51,9 @@ func TestChatStoreSnapshotProjectsConversation(t *testing.T) {
 	if snap.Entries[2].Role != "tool_call" || !strings.Contains(snap.Entries[2].Text, "pwd") {
 		t.Fatalf("unexpected tool_call entry: %+v", snap.Entries[2])
 	}
+	if snap.Entries[2].ToolCallID != "call_1" {
+		t.Fatalf("unexpected tool_call id: %+v", snap.Entries[2])
+	}
 	if snap.Entries[2].ToolCall == nil || !snap.Entries[2].ToolCall.IsShell {
 		t.Fatalf("expected shell tool metadata, got %+v", snap.Entries[2].ToolCall)
 	}
@@ -62,6 +65,9 @@ func TestChatStoreSnapshotProjectsConversation(t *testing.T) {
 	}
 	if snap.Entries[3].Role != "tool_result_ok" || strings.TrimSpace(snap.Entries[3].Text) != "/tmp" {
 		t.Fatalf("unexpected tool_result entry: %+v", snap.Entries[3])
+	}
+	if snap.Entries[3].ToolCallID != "call_1" {
+		t.Fatalf("unexpected tool_result call id: %+v", snap.Entries[3])
 	}
 	if snap.Entries[4].Role != "assistant" || snap.Entries[4].Text != "done" {
 		t.Fatalf("unexpected assistant entry: %+v", snap.Entries[4])
@@ -101,6 +107,9 @@ func TestPatchToolCallFormattingCapturesSummaryAndDetailMeta(t *testing.T) {
 	if rendered.ToolCall == nil {
 		t.Fatalf("expected tool metadata on patch call")
 	}
+	if rendered.ToolCallID != "call_patch" {
+		t.Fatalf("unexpected patch call id: %+v", rendered)
+	}
 	summary := rendered.ToolCall.PatchSummary
 	detail := rendered.ToolCall.PatchDetail
 	if !rendered.ToolCall.HasPatchSummary() || !rendered.ToolCall.HasPatchDetail() {
@@ -128,6 +137,9 @@ func TestFormatToolCallShellAddsShellMetadata(t *testing.T) {
 	rendered := s.formatToolCall(call)
 	if rendered.ToolCall == nil || !rendered.ToolCall.IsShell {
 		t.Fatalf("expected shell metadata, got %+v", rendered.ToolCall)
+	}
+	if rendered.ToolCallID != "call_shell" {
+		t.Fatalf("unexpected shell call id: %+v", rendered)
 	}
 	if !strings.Contains(rendered.Text, "pwd") {
 		t.Fatalf("expected command in rendered shell call, got %q", rendered.Text)

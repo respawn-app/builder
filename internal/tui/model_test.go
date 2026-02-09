@@ -176,6 +176,48 @@ func TestOngoingDoesNotAutoFollowWhenUserScrolledUp(t *testing.T) {
 	}
 }
 
+func TestMouseWheelScrollsOngoingView(t *testing.T) {
+	m := NewModel(WithPreviewLines(2))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a2"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a3"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a4"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a5"})
+
+	start := m.OngoingScroll()
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	if got := m.OngoingScroll(); got >= start {
+		t.Fatalf("expected wheel up to scroll up ongoing view, got %d from %d", got, start)
+	}
+
+	up := m.OngoingScroll()
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+	if got := m.OngoingScroll(); got <= up {
+		t.Fatalf("expected wheel down to scroll down ongoing view, got %d from %d", got, up)
+	}
+}
+
+func TestMouseWheelScrollsDetailView(t *testing.T) {
+	m := NewModel(WithPreviewLines(2))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u1"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u2"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a2"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u3"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a3"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+	if m.detailScroll == 0 {
+		t.Fatalf("expected wheel down to scroll detail view, got detailScroll=%d", m.detailScroll)
+	}
+
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	if m.detailScroll != 0 {
+		t.Fatalf("expected wheel up to scroll detail view back toward top, got detailScroll=%d", m.detailScroll)
+	}
+}
+
 func TestDetailUsesRequestedSymbolsAndDividers(t *testing.T) {
 	m := NewModel()
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "hello"})
@@ -219,6 +261,46 @@ func TestDetailShellToolUsesDollarPrefixAndKeepsSuccessColorRole(t *testing.T) {
 	}
 	if strings.Contains(view, "• pwd") {
 		t.Fatalf("expected no dot prefix for shell tool, got %q", view)
+	}
+}
+
+func TestDetailMatchesParallelShellResultsByCallID(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "echo a",
+		ToolCallID: "call_a",
+		ToolCall: &transcript.ToolCallMeta{
+			IsShell: true,
+			Command: "echo a",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "echo b",
+		ToolCallID: "call_b",
+		ToolCall: &transcript.ToolCallMeta{
+			IsShell: true,
+			Command: "echo b",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_a", Text: "out-a"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_b", Text: "out-b"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := plainTranscript(m.View())
+	idxCallA := strings.Index(view, "echo a")
+	idxOutA := strings.Index(view, "out-a")
+	idxCallB := strings.Index(view, "echo b")
+	idxOutB := strings.Index(view, "out-b")
+	if idxCallA < 0 || idxOutA < 0 || idxCallB < 0 || idxOutB < 0 {
+		t.Fatalf("expected both calls and outputs in view, got %q", view)
+	}
+	if !(idxCallA < idxOutA && idxOutA < idxCallB && idxCallB < idxOutB) {
+		t.Fatalf("expected each output to stay with matching call, got %q", view)
+	}
+	if strings.Contains(view, "• out-a") || strings.Contains(view, "• out-b") {
+		t.Fatalf("expected no standalone tool result blocks for matched call IDs, got %q", view)
 	}
 }
 
