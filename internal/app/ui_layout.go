@@ -11,8 +11,7 @@ import (
 )
 
 const (
-	ansiHideCursor  = "\x1b[?25l"
-	softCursorGlyph = "▏"
+	ansiHideCursor = "\x1b[?25l"
 )
 
 type uiViewLayout struct {
@@ -141,9 +140,6 @@ func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
 		if m.inputSubmitLocked {
 			prefix = "⨯ "
 		}
-		if l.shouldRenderSoftCursor() {
-			text = m.inputWithSoftCursor(softCursorGlyph)
-		}
 		raw = splitPlainLines(prefix + text)
 	}
 	wrapped := make([]string, 0, len(raw))
@@ -157,8 +153,19 @@ func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
 	if maxContentLines < 1 {
 		maxContentLines = 1
 	}
+	visibleStart := 0
 	if len(wrapped) > maxContentLines {
-		wrapped = wrapped[len(wrapped)-maxContentLines:]
+		visibleStart = len(wrapped) - maxContentLines
+		wrapped = wrapped[visibleStart:]
+	}
+
+	if l.shouldRenderSoftCursor() && m.activeAsk == nil {
+		cursorStyle := lipgloss.NewStyle().Reverse(true)
+		cursorLine, cursorCol := inputCursorDisplayPosition("› ", m.input, m.inputCursor, contentWidth)
+		visibleCursorLine := cursorLine - visibleStart
+		if visibleCursorLine >= 0 && visibleCursorLine < len(wrapped) {
+			wrapped[visibleCursorLine] = overlayCursorOnLine(wrapped[visibleCursorLine], cursorCol, contentWidth, cursorStyle)
+		}
 	}
 
 	borderColor := uiPalette(m.theme).primary
@@ -176,7 +183,7 @@ func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
 		lineStyle = style.inputDisabled
 	}
 	for _, line := range wrapped {
-		out = append(out, lineStyle.Render(padRight(line, contentWidth)))
+		out = append(out, lineStyle.Render(padANSIRight(line, contentWidth)))
 	}
 	out = append(out, bottom)
 	return out
@@ -216,9 +223,6 @@ func (l uiViewLayout) calcChatLines() int {
 		}
 	} else {
 		text := m.input
-		if l.shouldRenderSoftCursor() {
-			text = m.inputWithSoftCursor(softCursorGlyph)
-		}
 		wrapped := wrapLine("› "+text, contentWidth)
 		inputContentLines = len(wrapped)
 	}
@@ -283,6 +287,66 @@ func (m *uiModel) syncViewport() {
 
 func (m *uiModel) shouldRenderSoftCursor() bool {
 	return m.layout().shouldRenderSoftCursor()
+}
+
+func inputCursorDisplayPosition(prefix, text string, cursorIndex, width int) (line, col int) {
+	textRunes := []rune(text)
+	cursor := clampCursor(cursorIndex, len(textRunes))
+	return wrappedCursorPosition(append([]rune(prefix), textRunes[:cursor]...), width)
+}
+
+func overlayCursorOnLine(line string, cursorCol, width int, cursorStyle lipgloss.Style) string {
+	if width < 1 {
+		return line
+	}
+
+	runes := []rune(line)
+	displayCol := 0
+	for i, r := range runes {
+		rw := runewidth.RuneWidth(r)
+		if rw < 1 {
+			rw = 1
+		}
+		if cursorCol < displayCol+rw {
+			return string(runes[:i]) + cursorStyle.Render(string(r)) + string(runes[i+1:])
+		}
+		displayCol += rw
+	}
+
+	if displayCol < width {
+		return line + cursorStyle.Render(" ")
+	}
+
+	if len(runes) == 0 {
+		return cursorStyle.Render(" ")
+	}
+
+	last := len(runes) - 1
+	return string(runes[:last]) + cursorStyle.Render(string(runes[last]))
+}
+
+func wrappedCursorPosition(text []rune, width int) (line int, col int) {
+	if width < 1 {
+		return 0, 0
+	}
+	line = 0
+	col = 0
+	for i, r := range text {
+		rw := runewidth.RuneWidth(r)
+		if rw < 1 {
+			rw = 1
+		}
+		if col+rw > width {
+			line++
+			col = 0
+		}
+		col += rw
+		if col == width && i < len(text)-1 {
+			line++
+			col = 0
+		}
+	}
+	return line, col
 }
 
 func splitPlainLines(v string) []string {
