@@ -284,9 +284,7 @@ func (s *chatStore) formatPatchToolCall(raw json.RawMessage) (summary, detail st
 		return "", "", false
 	}
 
-	summaryLines := []string{"Edited:"}
-	detailLines := []string{"Edited:"}
-	for _, file := range files {
+	formatSummaryLine := func(file patchFileView) string {
 		line := file.RelPath
 		if line == "" {
 			line = file.AbsPath
@@ -297,9 +295,30 @@ func (s *chatStore) formatPatchToolCall(raw json.RawMessage) (summary, detail st
 		if file.Removed > 0 {
 			line += fmt.Sprintf(" -%d", file.Removed)
 		}
-		summaryLines = append(summaryLines, line)
+		return line
+	}
+	formatDetailHeader := func(file patchFileView) string {
+		line := file.AbsPath
+		if line == "" {
+			line = file.RelPath
+		}
+		return line
+	}
 
-		detailLines = append(detailLines, file.AbsPath)
+	if len(files) == 1 {
+		single := files[0]
+		summaryLine := formatSummaryLine(single)
+		detailLines := []string{"Edited: " + formatDetailHeader(single)}
+		detailLines = append(detailLines, single.Diff...)
+		return "Edited: " + summaryLine, strings.Join(detailLines, "\n"), true
+	}
+
+	summaryLines := []string{"Edited:"}
+	detailLines := []string{"Edited:"}
+	for _, file := range files {
+		summaryLines = append(summaryLines, formatSummaryLine(file))
+
+		detailLines = append(detailLines, formatDetailHeader(file))
 		detailLines = append(detailLines, file.Diff...)
 	}
 

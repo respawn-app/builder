@@ -19,7 +19,7 @@ const (
 	compactionModeManual compactionMode = "manual"
 
 	defaultContextWindowTokens = 200_000
-	compactOverflowRetries = 2
+	compactOverflowRetries     = 2
 )
 
 type compactionResult struct {
@@ -102,8 +102,9 @@ func (e *Engine) contextWindowTokens() int {
 	if e.cfg.ContextWindowTokens > 0 {
 		return e.cfg.ContextWindowTokens
 	}
-	if e.lastUsage.WindowTokens > 0 {
-		return e.lastUsage.WindowTokens
+	usage := e.lastUsageSnapshot()
+	if usage.WindowTokens > 0 {
+		return usage.WindowTokens
 	}
 	return defaultContextWindowTokens
 }
@@ -117,8 +118,9 @@ func (e *Engine) effectiveContextTokenLimit() int {
 }
 
 func (e *Engine) currentTokenUsage() int {
-	if e.lastUsage.InputTokens > 0 || e.lastUsage.OutputTokens > 0 {
-		return e.lastUsage.InputTokens + e.lastUsage.OutputTokens
+	usage := e.lastUsageSnapshot()
+	if usage.InputTokens > 0 || usage.OutputTokens > 0 {
+		return usage.InputTokens + usage.OutputTokens
 	}
 	return estimateItemsTokens(e.snapshotItems())
 }
@@ -174,11 +176,11 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 	if windowTokens <= 0 {
 		windowTokens = e.contextWindowTokens()
 	}
-	e.lastUsage = llm.Usage{
+	e.setLastUsage(llm.Usage{
 		InputTokens:  estimateItemsTokens(result.items),
 		OutputTokens: 0,
 		WindowTokens: windowTokens,
-	}
+	})
 
 	if err := e.emitCompactionStatus(stepID, EventCompactionCompleted, mode, result.engine, providerID, result.trimmedItemsCount, compactionNumber, ""); err != nil {
 		return compactionResult{}, err

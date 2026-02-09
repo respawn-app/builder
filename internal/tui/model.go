@@ -136,6 +136,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.scrollActive(-1)
 		case tea.KeyDown:
 			m = m.scrollActive(1)
+		case tea.KeyPgUp:
+			m = m.scrollActive(-max(1, m.viewportLines-1))
+		case tea.KeyPgDown:
+			m = m.scrollActive(max(1, m.viewportLines-1))
 		}
 	case tea.MouseMsg:
 		switch {
@@ -460,6 +464,7 @@ func (m Model) flattenEntryWithMutedText(role, text string, muteText bool) []str
 		renderWidth -= 2
 	}
 	rendered := m.renderEntryText(role, text, renderWidth)
+	isEditedBlock := strings.HasPrefix(strings.TrimSpace(rendered), "Edited:")
 	chunks := splitLines(rendered)
 	if len(chunks) == 0 {
 		chunks = []string{""}
@@ -474,7 +479,7 @@ func (m Model) flattenEntryWithMutedText(role, text string, muteText bool) []str
 			}
 			displayChunk = m.styleToolLine(displayChunk)
 		}
-		if muteText && strings.TrimSpace(displayChunk) != "" {
+		if muteText && strings.TrimSpace(displayChunk) != "" && !isEditedBlock {
 			displayChunk = m.palette().preview.Faint(true).Render(displayChunk)
 		} else if role == "compaction_notice" || role == "compaction_summary" {
 			displayChunk = styleForRole(role, m.palette()).Render(displayChunk)
@@ -633,24 +638,34 @@ func (m Model) styleToolLine(line string) string {
 	if trimmed == "" {
 		return line
 	}
-	if trimmed == "Edited:" {
-		return lipgloss.NewStyle().Bold(true).Render(trimmed)
-	}
 	if strings.HasPrefix(line, "+") {
 		return m.palette().toolSuccess.Render(line)
 	}
 	if strings.HasPrefix(line, "-") {
 		return m.palette().toolError.Render(line)
 	}
+	successCountStyle := m.palette().toolSuccess
+	errorCountStyle := m.palette().toolError
+	if strings.HasPrefix(trimmed, "Edited:") {
+		return patchCountTokenPattern.ReplaceAllStringFunc(line, func(token string) string {
+			if strings.HasPrefix(token, "+") {
+				return successCountStyle.Render(token)
+			}
+			if strings.HasPrefix(token, "-") {
+				return errorCountStyle.Render(token)
+			}
+			return token
+		})
+	}
 	if !strings.HasPrefix(trimmed, "./") {
 		return line
 	}
 	return patchCountTokenPattern.ReplaceAllStringFunc(line, func(token string) string {
 		if strings.HasPrefix(token, "+") {
-			return m.palette().toolSuccess.Render(token)
+			return successCountStyle.Render(token)
 		}
 		if strings.HasPrefix(token, "-") {
-			return m.palette().toolError.Render(token)
+			return errorCountStyle.Render(token)
 		}
 		return token
 	})

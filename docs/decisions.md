@@ -492,3 +492,12 @@ This file records architecture and product decisions for the minimal terminal co
    - OpenAI model families use remote `/responses/compact`.
    - Non-OpenAI model families do not use remote compaction.
    - Non-OpenAI native providers remain stubs/unimplemented.
+
+146. **Context window size is an explicit user setting.**
+   - Config key: `model_context_window`.
+   - Default value: `400000`.
+   - Validation requires `context_compaction_threshold_tokens < model_context_window`.
+
+147. **Status line includes right-aligned context capacity meter.**
+   - Render a compact 10-character progress bar plus `% ctx window` label.
+   - Zone colors: green below 50%, yellow from 50% to below 80%, red at 80% and above.
