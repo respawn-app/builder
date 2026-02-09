@@ -24,9 +24,10 @@ const (
 var patchCountTokenPattern = regexp.MustCompile(`([+-]\d+)\b`)
 
 type TranscriptEntry struct {
-	Role     string
-	Text     string
-	ToolCall *transcript.ToolCallMeta
+	Role       string
+	Text       string
+	ToolCallID string
+	ToolCall   *transcript.ToolCallMeta
 }
 
 type ToggleModeMsg struct{}
@@ -45,9 +46,10 @@ type SetViewportSizeMsg struct {
 }
 
 type AppendTranscriptMsg struct {
-	Role     string
-	Text     string
-	ToolCall *transcript.ToolCallMeta
+	Role       string
+	Text       string
+	ToolCallID string
+	ToolCall   *transcript.ToolCallMeta
 }
 
 type SetConversationMsg struct {
@@ -135,6 +137,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyDown:
 			m = m.scrollActive(1)
 		}
+	case tea.MouseMsg:
+		switch {
+		case msg.Button == tea.MouseButtonWheelUp || msg.Type == tea.MouseWheelUp:
+			m = m.scrollActive(-3)
+		case msg.Button == tea.MouseButtonWheelDown || msg.Type == tea.MouseWheelDown:
+			m = m.scrollActive(3)
+		}
 	case ToggleModeMsg:
 		m = m.toggleMode()
 	case ScrollOngoingMsg:
@@ -156,15 +165,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			role = "unknown"
 		}
 		m.transcript = append(m.transcript, TranscriptEntry{
-			Role:     role,
-			Text:     msg.Text,
-			ToolCall: cloneToolCallMeta(msg.ToolCall),
+			Role:       role,
+			Text:       msg.Text,
+			ToolCallID: strings.TrimSpace(msg.ToolCallID),
+			ToolCall:   cloneToolCallMeta(msg.ToolCall),
 		})
 		shouldAutoFollowOngoing = true
 	case SetConversationMsg:
 		entries := make([]TranscriptEntry, len(msg.Entries))
 		copy(entries, msg.Entries)
 		for i := range entries {
+			entries[i].ToolCallID = strings.TrimSpace(entries[i].ToolCallID)
 			entries[i].ToolCall = cloneToolCallMeta(entries[i].ToolCall)
 		}
 		m.transcript = entries
@@ -320,7 +331,11 @@ func (m Model) renderDetailSnapshot() string {
 
 func (m Model) renderFlatDetailTranscript() string {
 	blocks := make([][]string, 0, len(m.transcript)+1)
+	consumedResults := make(map[int]struct{})
 	for i := 0; i < len(m.transcript); i++ {
+		if _, consumed := consumedResults[i]; consumed {
+			continue
+		}
 		entry := m.transcript[i]
 		role := strings.TrimSpace(entry.Role)
 		switch role {
@@ -334,16 +349,16 @@ func (m Model) renderFlatDetailTranscript() string {
 			if hasPatchPayload {
 				combined = patchDetail
 			}
-			if i+1 < len(m.transcript) && isToolResultRole(m.transcript[i+1].Role) {
-				nextRole := strings.TrimSpace(m.transcript[i+1].Role)
-				resultText := m.transcript[i+1].Text
+			if resultIdx := findMatchingToolResultIndex(m.transcript, i, consumedResults); resultIdx >= 0 {
+				nextRole := strings.TrimSpace(m.transcript[resultIdx].Role)
+				resultText := m.transcript[resultIdx].Text
 				if strings.TrimSpace(resultText) != "" {
 					if !(hasPatchPayload && nextRole != "tool_result_error") {
 						combined = combined + "\n" + resultText
 					}
 				}
 				blockRole = toolBlockRoleFromResult(nextRole, blockRole)
-				i++
+				consumedResults[resultIdx] = struct{}{}
 			}
 			blocks = append(blocks, m.flattenEntry(blockRole, combined))
 		case "tool_result", "tool_result_ok", "tool_result_error":
@@ -375,7 +390,11 @@ func (m Model) renderFlatOngoingTranscript() string {
 	}
 
 	blocks := make([]ongoingBlock, 0, len(m.transcript)+1)
+	consumedResults := make(map[int]struct{})
 	for i := 0; i < len(m.transcript); i++ {
+		if _, consumed := consumedResults[i]; consumed {
+			continue
+		}
 		entry := m.transcript[i]
 		role := strings.TrimSpace(entry.Role)
 		if skipInOngoing(role) {
@@ -392,11 +411,11 @@ func (m Model) renderFlatOngoingTranscript() string {
 			if hasPatchPayload {
 				combined = strings.TrimSpace(patchSummary)
 			}
-			if i+1 < len(m.transcript) {
-				nextRole := strings.TrimSpace(m.transcript[i+1].Role)
+			if resultIdx := findMatchingToolResultIndex(m.transcript, i, consumedResults); resultIdx >= 0 {
+				nextRole := strings.TrimSpace(m.transcript[resultIdx].Role)
 				if isToolResultRole(nextRole) {
 					blockRole = toolBlockRoleFromResult(nextRole, blockRole)
-					i++
+					consumedResults[resultIdx] = struct{}{}
 				}
 			}
 			blocks = append(blocks, ongoingBlock{
@@ -644,6 +663,34 @@ func isToolResultRole(role string) bool {
 	default:
 		return false
 	}
+}
+
+func findMatchingToolResultIndex(entries []TranscriptEntry, callIdx int, consumed map[int]struct{}) int {
+	if callIdx < 0 || callIdx >= len(entries) {
+		return -1
+	}
+	callID := strings.TrimSpace(entries[callIdx].ToolCallID)
+	nextIdx := callIdx + 1
+	if nextIdx < len(entries) {
+		if _, used := consumed[nextIdx]; !used && isToolResultRole(entries[nextIdx].Role) {
+			nextCallID := strings.TrimSpace(entries[nextIdx].ToolCallID)
+			if callID == "" || nextCallID == "" || callID == nextCallID {
+				return nextIdx
+			}
+		}
+	}
+	if callID == "" {
+		return -1
+	}
+	for i := callIdx + 1; i < len(entries); i++ {
+		if _, used := consumed[i]; used || !isToolResultRole(entries[i].Role) {
+			continue
+		}
+		if strings.TrimSpace(entries[i].ToolCallID) == callID {
+			return i
+		}
+	}
+	return -1
 }
 
 func toolBlockRoleFromResult(role, baseRole string) string {

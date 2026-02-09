@@ -20,9 +20,10 @@ const (
 )
 
 type ChatEntry struct {
-	Role     string
-	Text     string
-	ToolCall *transcript.ToolCallMeta
+	Role       string
+	Text       string
+	ToolCallID string
+	ToolCall   *transcript.ToolCallMeta
 }
 
 type ChatSnapshot struct {
@@ -199,7 +200,7 @@ func (s *chatStore) snapshot() ChatSnapshot {
 			if result.IsError {
 				role = "tool_result_error"
 			}
-			entries = append(entries, ChatEntry{Role: role, Text: formatToolResult(result)})
+			entries = append(entries, ChatEntry{Role: role, Text: formatToolResult(result), ToolCallID: callID})
 		}
 	}
 	entries = append(entries, s.local...)
@@ -220,9 +221,10 @@ func (s *chatStore) formatToolCall(call llm.ToolCall) ChatEntry {
 			meta.PatchSummary = summary
 			meta.PatchDetail = detail
 			return ChatEntry{
-				Role:     "tool_call",
-				Text:     summary,
-				ToolCall: meta,
+				Role:       "tool_call",
+				Text:       summary,
+				ToolCallID: strings.TrimSpace(call.ID),
+				ToolCall:   meta,
 			}
 		}
 	}
@@ -234,9 +236,10 @@ func (s *chatStore) formatToolCall(call llm.ToolCall) ChatEntry {
 	meta.Command = command
 	meta.TimeoutLabel = timeoutLabel
 	return ChatEntry{
-		Role:     "tool_call",
-		Text:     command,
-		ToolCall: meta,
+		Role:       "tool_call",
+		Text:       command,
+		ToolCallID: strings.TrimSpace(call.ID),
+		ToolCall:   meta,
 	}
 }
 
