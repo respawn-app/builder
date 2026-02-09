@@ -42,6 +42,11 @@ type Config struct {
 	OnEvent                       func(Event)
 }
 
+type ContextUsage struct {
+	UsedTokens   int
+	WindowTokens int
+}
+
 type Engine struct {
 	mu sync.Mutex
 
@@ -238,7 +243,7 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 		if err != nil {
 			return llm.Message{}, err
 		}
-		e.lastUsage = resp.Usage
+		e.setLastUsage(resp.Usage)
 
 		assistantMsg := resp.Assistant
 		if len(resp.ToolCalls) > 0 {
@@ -684,6 +689,18 @@ func (e *Engine) ChatSnapshot() ChatSnapshot {
 	return e.chat.snapshot()
 }
 
+func (e *Engine) ContextUsage() ContextUsage {
+	window := e.contextWindowTokens()
+	used := e.currentTokenUsage()
+	if used < 0 {
+		used = 0
+	}
+	if window < 0 {
+		window = 0
+	}
+	return ContextUsage{UsedTokens: used, WindowTokens: window}
+}
+
 func (e *Engine) AppendLocalEntry(role, text string) {
 	e.chat.appendLocalEntry(role, text)
 	e.emit(Event{Kind: EventConversationUpdated, StepID: ""})
@@ -724,6 +741,18 @@ func toToolNames(ids []tools.ID) []string {
 		out = append(out, string(id))
 	}
 	return out
+}
+
+func (e *Engine) lastUsageSnapshot() llm.Usage {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.lastUsage
+}
+
+func (e *Engine) setLastUsage(usage llm.Usage) {
+	e.mu.Lock()
+	e.lastUsage = usage
+	e.mu.Unlock()
 }
 
 func (e *Engine) emit(evt Event) {

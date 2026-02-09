@@ -951,6 +951,52 @@ func TestDiscardQueuedUserMessagesMatchingRemovesQueuedEntries(t *testing.T) {
 	}
 }
 
+func TestContextUsageUsesLastUsageWhenAvailable(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.setLastUsage(llm.Usage{InputTokens: 1234, OutputTokens: 66, WindowTokens: 399_000})
+
+	usage := eng.ContextUsage()
+	if usage.UsedTokens != 1300 {
+		t.Fatalf("used tokens=%d, want 1300", usage.UsedTokens)
+	}
+	if usage.WindowTokens != 400_000 {
+		t.Fatalf("window tokens=%d, want 400000", usage.WindowTokens)
+	}
+}
+
+func TestContextUsageFallsBackToEstimatedTokens(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "estimate me"}); err != nil {
+		t.Fatalf("append message: %v", err)
+	}
+
+	usage := eng.ContextUsage()
+	if usage.WindowTokens != 410_000 {
+		t.Fatalf("window tokens=%d, want 410000", usage.WindowTokens)
+	}
+	if usage.UsedTokens <= 0 {
+		t.Fatalf("expected estimated used tokens > 0, got %d", usage.UsedTokens)
+	}
+}
+
 func TestAutoCompactionRecomputesUsageFromReplacementHistory(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

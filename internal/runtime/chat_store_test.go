@@ -126,6 +126,33 @@ func TestPatchToolCallFormattingCapturesSummaryAndDetailMeta(t *testing.T) {
 	}
 }
 
+func TestPatchToolCallFormattingSingleFileUsesInlineEditedHeader(t *testing.T) {
+	s := newChatStore()
+	s.cwd = "/workspace"
+
+	patchText := "*** Begin Patch\n*** Update File: dir/a.go\n-old\n+new\n*** End Patch\n"
+	call := llm.ToolCall{
+		ID:    "call_patch_single",
+		Name:  string(tools.ToolPatch),
+		Input: json.RawMessage(`{"patch":` + strconv.Quote(patchText) + `}`),
+	}
+	rendered := s.formatToolCall(call)
+	if rendered.ToolCall == nil {
+		t.Fatalf("expected tool metadata on patch call")
+	}
+	summary := rendered.ToolCall.PatchSummary
+	detail := rendered.ToolCall.PatchDetail
+	if summary != "Edited: ./dir/a.go +1 -1" {
+		t.Fatalf("unexpected one-line summary: %q", summary)
+	}
+	if strings.Contains(summary, "\n") {
+		t.Fatalf("expected one-line summary, got %q", summary)
+	}
+	if !strings.HasPrefix(detail, "Edited: /workspace/dir/a.go") {
+		t.Fatalf("expected one-line detail header, got %q", detail)
+	}
+}
+
 func TestFormatToolCallShellAddsShellMetadata(t *testing.T) {
 	s := newChatStore()
 	call := llm.ToolCall{
