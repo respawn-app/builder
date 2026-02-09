@@ -82,6 +82,22 @@ func TestUnknownCSIShiftEnterInsertsNewline(t *testing.T) {
 	}
 }
 
+func TestUnknownCSICtrlBackspaceDeletesCurrentLine(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "one\ntwo\nthree"
+	m.inputCursor = 5 // inside "two"
+
+	next, _ := m.Update(testUnknownCSISequence{rendered: "?CSI[49 50 55 59 53 117]?"}) // 127;5u
+	updated := next.(*uiModel)
+
+	if updated.input != "one\nthree" {
+		t.Fatalf("expected ctrl+backspace CSI to remove current line, got %q", updated.input)
+	}
+	if updated.inputCursor != 4 {
+		t.Fatalf("expected cursor at start of joined line after delete, got %d", updated.inputCursor)
+	}
+}
+
 func TestAskQuestionTabFreeformFlow(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	reply := make(chan askReply, 1)
@@ -238,6 +254,38 @@ func TestMainInputCtrlJInsertsNewline(t *testing.T) {
 	}
 	if updated.input != "line 1\n" {
 		t.Fatalf("expected ctrl+j to insert newline, got %q", updated.input)
+	}
+}
+
+func TestMainInputCtrlBackspaceDeletesCurrentLine(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "111\n22\n333"
+	m.inputCursor = 5 // second line
+
+	next, _ := m.Update(tea.KeyMsg{Type: keyTypeCtrlBackspaceCSI})
+	updated := next.(*uiModel)
+
+	if updated.input != "111\n333" {
+		t.Fatalf("expected ctrl+backspace to remove current line, got %q", updated.input)
+	}
+	if updated.inputCursor != 4 {
+		t.Fatalf("expected cursor at start of remaining line, got %d", updated.inputCursor)
+	}
+}
+
+func TestMainInputCmdBackspaceDeletesCurrentLine(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "aaa\nbbb\nccc"
+	m.inputCursor = 9 // third line
+
+	next, _ := m.Update(tea.KeyMsg{Type: keyTypeSuperBackspaceCSI})
+	updated := next.(*uiModel)
+
+	if updated.input != "aaa\nbbb" {
+		t.Fatalf("expected cmd+backspace to remove current line, got %q", updated.input)
+	}
+	if updated.inputCursor != 7 {
+		t.Fatalf("expected cursor at end of remaining text, got %d", updated.inputCursor)
 	}
 }
 

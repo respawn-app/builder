@@ -9,8 +9,10 @@ import (
 )
 
 const (
-	keyTypeCtrlEnterCSI  tea.KeyType = -1024
-	keyTypeShiftEnterCSI tea.KeyType = -1025
+	keyTypeCtrlEnterCSI      tea.KeyType = -1024
+	keyTypeShiftEnterCSI     tea.KeyType = -1025
+	keyTypeCtrlBackspaceCSI  tea.KeyType = -1026
+	keyTypeSuperBackspaceCSI tea.KeyType = -1027
 )
 
 func normalizeKeyMsg(msg tea.Msg) (tea.KeyMsg, bool) {
@@ -26,6 +28,12 @@ func normalizeKeyMsg(msg tea.Msg) (tea.KeyMsg, bool) {
 	}
 	if isShiftEnterCSISequence(seq) {
 		return tea.KeyMsg{Type: keyTypeShiftEnterCSI}, true
+	}
+	if isCtrlBackspaceCSISequence(seq) {
+		return tea.KeyMsg{Type: keyTypeCtrlBackspaceCSI}, true
+	}
+	if isSuperBackspaceCSISequence(seq) {
+		return tea.KeyMsg{Type: keyTypeSuperBackspaceCSI}, true
 	}
 	return tea.KeyMsg{}, false
 }
@@ -67,6 +75,24 @@ func isCtrlEnterCSISequence(seq string) bool {
 func isShiftEnterCSISequence(seq string) bool {
 	switch seq {
 	case "13;2u", "13;2~", "27;2;13u", "27;2;13~":
+		return true
+	default:
+		return false
+	}
+}
+
+func isCtrlBackspaceCSISequence(seq string) bool {
+	switch seq {
+	case "127;5u", "127;5~", "8;5u", "8;5~", "27;5;127u", "27;5;127~", "27;5;8u", "27;5;8~":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSuperBackspaceCSISequence(seq string) bool {
+	switch seq {
+	case "127;9u", "127;9~", "8;9u", "8;9~", "27;9;127u", "27;9;127~", "27;9;8u", "27;9;8~":
 		return true
 	default:
 		return false
