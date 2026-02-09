@@ -12,6 +12,7 @@ const (
 	ActionExit      Action = "exit"
 	ActionNew       Action = "new"
 	ActionLogout    Action = "logout"
+	ActionCompact   Action = "compact"
 	ActionUnhandled Action = "unhandled"
 )
 
@@ -41,6 +42,9 @@ func NewDefaultRegistry() *Registry {
 	})
 	r.Register("logout", func(string) Result {
 		return Result{Handled: true, Action: ActionLogout}
+	})
+	r.Register("compact", func(string) Result {
+		return Result{Handled: true, Action: ActionCompact}
 	})
 	return r
 }

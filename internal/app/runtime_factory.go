@@ -33,9 +33,10 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 
 	modelHTTPClient := &http.Client{Timeout: time.Duration(active.Timeouts.ModelRequestSeconds) * time.Second}
 	client, err := llm.NewProviderClient(llm.ProviderClientOptions{
-		Model:      active.Model,
-		Auth:       mgr,
-		HTTPClient: modelHTTPClient,
+		Model:         active.Model,
+		Auth:          mgr,
+		HTTPClient:    modelHTTPClient,
+		OpenAIBaseURL: active.OpenAIBaseURL,
 	})
 	if err != nil {
 		return nil, err
@@ -46,12 +47,20 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 			logger.Logf("runtime.event.drop count=%d kind=%s step_id=%s", total, evt.Kind, evt.StepID)
 		}
 	})
+	contextWindowTokens := 0
+	if meta, ok := llm.LookupModelMetadata(active.Model); ok {
+		contextWindowTokens = meta.ContextWindowTokens
+	}
 	eng, err := runtime.New(store, client, toolRegistry, runtime.Config{
-		Model:         active.Model,
-		Temperature:   1,
-		MaxTokens:     0,
-		ThinkingLevel: active.ThinkingLevel,
-		EnabledTools:  enabledTools,
+		Model:                         active.Model,
+		Temperature:                   1,
+		MaxTokens:                     0,
+		ThinkingLevel:                 active.ThinkingLevel,
+		EnabledTools:                  enabledTools,
+		AutoCompactTokenLimit:         active.ContextCompactionThresholdTokens,
+		ContextWindowTokens:           contextWindowTokens,
+		EffectiveContextWindowPercent: 95,
+		LocalCompactionCarryoverLimit: 20_000,
 		OnEvent: func(evt runtime.Event) {
 			logger.Logf("%s", formatRuntimeEvent(evt))
 			eventBridge.Publish(evt)

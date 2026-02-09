@@ -34,6 +34,9 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if !cfg.Settings.EnabledTools[tools.ToolShell] || !cfg.Settings.EnabledTools[tools.ToolPatch] || !cfg.Settings.EnabledTools[tools.ToolAskQuestion] {
 		t.Fatalf("expected all default tools enabled: %+v", cfg.Settings.EnabledTools)
 	}
+	if cfg.Settings.ContextCompactionThresholdTokens != 360_000 {
+		t.Fatalf("default compaction threshold mismatch: %d", cfg.Settings.ContextCompactionThresholdTokens)
+	}
 }
 
 func TestLoadPrecedenceCLIOverEnvOverFile(t *testing.T) {
@@ -136,5 +139,57 @@ func TestLoadExpandsTildePersistenceRootFromEnv(t *testing.T) {
 	}
 	if got := cfg.PersistenceRoot; got != filepath.Join(home, ".builder-custom") {
 		t.Fatalf("expanded persistence root mismatch: %q", got)
+	}
+}
+
+func TestLoadOpenAIBaseURLPrecedence(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`openai_base_url = "http://file.local/v1"`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	t.Setenv("BUILDER_OPENAI_BASE_URL", "http://env.local/v1")
+	cfg, err := Load(workspace, LoadOptions{OpenAIBaseURL: "http://cli.local/v1"})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.OpenAIBaseURL != "http://cli.local/v1" {
+		t.Fatalf("expected cli openai base url, got %q", cfg.Settings.OpenAIBaseURL)
+	}
+	if got := cfg.Source.Sources["openai_base_url"]; got != "cli" {
+		t.Fatalf("expected openai_base_url source cli, got %q", got)
+	}
+}
+
+func TestLoadContextCompactionThresholdPrecedence(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`context_compaction_threshold_tokens = 123456`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	t.Setenv("BUILDER_CONTEXT_COMPACTION_THRESHOLD_TOKENS", "234567")
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.ContextCompactionThresholdTokens != 234567 {
+		t.Fatalf("expected env threshold override, got %d", cfg.Settings.ContextCompactionThresholdTokens)
+	}
+	if got := cfg.Source.Sources["context_compaction_threshold_tokens"]; got != "env" {
+		t.Fatalf("expected threshold source env, got %q", got)
 	}
 }

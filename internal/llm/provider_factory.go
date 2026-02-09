@@ -31,6 +31,11 @@ func NewProviderClient(opts ProviderClientOptions) (Client, error) {
 	if provider == "" {
 		provider = InferProviderFromModel(opts.Model)
 	}
+	if opts.ContextWindowTokens <= 0 {
+		if meta, ok := LookupModelMetadata(opts.Model); ok && meta.ContextWindowTokens > 0 {
+			opts.ContextWindowTokens = meta.ContextWindowTokens
+		}
+	}
 	switch provider {
 	case ProviderOpenAI:
 		if opts.Auth == nil {

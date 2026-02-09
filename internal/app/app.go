@@ -19,6 +19,7 @@ type Options struct {
 	ModelTimeoutSeconds int
 	ShellTimeoutSeconds int
 	Tools               string
+	OpenAIBaseURL       string
 }
 
 func Run(ctx context.Context, opts Options) error {

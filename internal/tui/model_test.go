@@ -282,6 +282,26 @@ func TestDetailShowsReasoningSummaryAsSeparateEntry(t *testing.T) {
 	}
 }
 
+func TestCompactionNoticeAndSummaryRenderingByMode(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "compaction_notice", Text: "context compacted for the 1st time"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "compaction_summary", Text: "line one\nline two"})
+
+	ongoing := plainTranscript(m.View())
+	if !containsInOrder(ongoing, "@", "context compacted for the 1st time") {
+		t.Fatalf("expected compaction notice in ongoing view, got %q", ongoing)
+	}
+	if strings.Contains(ongoing, "line one") || strings.Contains(ongoing, "line two") {
+		t.Fatalf("expected compaction summary hidden in ongoing view, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detail := plainTranscript(m.View())
+	if !containsInOrder(detail, "@", "context compacted for the 1st time", "@", "line one", "line two") {
+		t.Fatalf("expected compaction notice and full summary in detail view, got %q", detail)
+	}
+}
+
 func TestOngoingDividersAreInsertedOnlyBetweenRoleGroups(t *testing.T) {
 	m := NewModel(WithPreviewLines(30))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u1"})
