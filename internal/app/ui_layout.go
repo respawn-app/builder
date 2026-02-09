@@ -142,7 +142,7 @@ func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
 			prefix = "⨯ "
 		}
 		if l.shouldRenderSoftCursor() {
-			text += softCursorGlyph
+			text = m.inputWithSoftCursor(softCursorGlyph)
 		}
 		raw = splitPlainLines(prefix + text)
 	}
@@ -216,6 +216,9 @@ func (l uiViewLayout) calcChatLines() int {
 		}
 	} else {
 		text := m.input
+		if l.shouldRenderSoftCursor() {
+			text = m.inputWithSoftCursor(softCursorGlyph)
+		}
 		wrapped := wrapLine("› "+text, contentWidth)
 		inputContentLines = len(wrapped)
 	}

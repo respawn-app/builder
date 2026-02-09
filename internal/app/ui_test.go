@@ -211,6 +211,54 @@ func TestMainInputAcceptsSpaceKey(t *testing.T) {
 	}
 }
 
+func TestMainInputSupportsInlineCursorEditing(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "hello world"
+
+	next := tea.Model(m)
+	for range 5 {
+		next, _ = next.(*uiModel).Update(tea.KeyMsg{Type: tea.KeyLeft})
+	}
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("_")})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyHome})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(">")})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	updated = next.(*uiModel)
+
+	if updated.input != ">hello _worl" {
+		t.Fatalf("unexpected inline edit result: %q", updated.input)
+	}
+}
+
+func TestMainInputSupportsWordNavigation(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "alpha beta gamma"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlLeft})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("X")})
+	updated = next.(*uiModel)
+
+	if updated.input != "alpha beta Xgamma" {
+		t.Fatalf("expected ctrl+left insertion near word boundary, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyLeft, Alt: true})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Y")})
+	updated = next.(*uiModel)
+
+	if updated.input != "alpha beta YXgamma" {
+		t.Fatalf("expected alt+left insertion near previous word boundary, got %q", updated.input)
+	}
+}
+
 func TestAskFreeformAcceptsSpaceKey(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	reply := make(chan askReply, 1)
@@ -269,6 +317,19 @@ func TestViewRendersSoftCursorForEditableInput(t *testing.T) {
 	plain := stripANSIAndTrimRight(view)
 	if !strings.Contains(plain, "› hello world"+softCursorGlyph) {
 		t.Fatalf("expected soft cursor rendered at input end, got %q", plain)
+	}
+}
+
+func TestViewRendersSoftCursorAtCursorPosition(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 40
+	m.termHeight = 16
+	m.input = "hello"
+	m.inputCursor = 2
+
+	plain := stripANSIAndTrimRight(m.View())
+	if !strings.Contains(plain, "› he"+softCursorGlyph+"llo") {
+		t.Fatalf("expected soft cursor rendered at cursor position, got %q", plain)
 	}
 }
 

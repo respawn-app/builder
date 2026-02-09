@@ -37,12 +37,12 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.engine.QueueUserMessage(text)
 			}
 			m.pendingInjected = append(m.pendingInjected, text)
-			m.input = ""
+			m.clearInput()
 			m.activity = uiActivityQueued
 			return m, nil
 		}
 		m.queued = append(m.queued, text)
-		m.input = ""
+		m.clearInput()
 		if !m.busy {
 			next := m.popQueued()
 			return m, c.startSubmission(next)
@@ -86,7 +86,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
-			m.input = ""
+			m.clearInput()
 			if commandResult.Text != "" {
 				if m.engine != nil {
 					m.engine.AppendLocalEntry("system", commandResult.Text)
@@ -107,21 +107,63 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		m.input = ""
+		m.clearInput()
 		return m, c.startSubmission(text)
 	case tea.KeyBackspace:
 		if m.inputSubmitLocked {
 			return m, nil
 		}
-		if len(m.input) > 0 {
-			m.input = m.input[:len(m.input)-1]
-		}
+		m.backspaceInput()
 		return m, nil
 	case tea.KeySpace:
 		if m.inputSubmitLocked {
 			return m, nil
 		}
-		m.input += " "
+		m.insertInputRunes([]rune{' '})
+		return m, nil
+	case tea.KeyLeft:
+		if m.inputSubmitLocked {
+			return m, nil
+		}
+		if msg.Alt {
+			m.moveCursorWordLeft()
+			return m, nil
+		}
+		m.moveCursorLeft()
+		return m, nil
+	case tea.KeyRight:
+		if m.inputSubmitLocked {
+			return m, nil
+		}
+		if msg.Alt {
+			m.moveCursorWordRight()
+			return m, nil
+		}
+		m.moveCursorRight()
+		return m, nil
+	case tea.KeyHome, tea.KeyCtrlA:
+		if m.inputSubmitLocked {
+			return m, nil
+		}
+		m.moveCursorStart()
+		return m, nil
+	case tea.KeyEnd, tea.KeyCtrlE, tea.KeyCtrlEnd:
+		if m.inputSubmitLocked {
+			return m, nil
+		}
+		m.moveCursorEnd()
+		return m, nil
+	case tea.KeyCtrlLeft:
+		if m.inputSubmitLocked {
+			return m, nil
+		}
+		m.moveCursorWordLeft()
+		return m, nil
+	case tea.KeyCtrlRight:
+		if m.inputSubmitLocked {
+			return m, nil
+		}
+		m.moveCursorWordRight()
 		return m, nil
 	case tea.KeyUp:
 		m.forwardToView(tea.KeyMsg{Type: tea.KeyUp})
@@ -134,7 +176,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.inputSubmitLocked {
 				return m, nil
 			}
-			m.input += string(msg.Runes)
+			m.insertInputRunes(msg.Runes)
 		}
 		return m, nil
 	}
