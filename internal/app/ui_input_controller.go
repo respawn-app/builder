@@ -50,6 +50,14 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.activity = uiActivityQueued
 		return m, nil
 	}
+	if msg.Type == keyTypeCtrlBackspaceCSI || msg.Type == keyTypeSuperBackspaceCSI ||
+		keyString == "ctrl+backspace" || keyString == "cmd+backspace" || keyString == "super+backspace" {
+		if m.inputSubmitLocked {
+			return m, nil
+		}
+		m.deleteCurrentInputLine()
+		return m, nil
+	}
 
 	switch msg.Type {
 	case tea.KeyCtrlC:

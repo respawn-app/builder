@@ -108,6 +108,35 @@ func (m *uiModel) moveCursorDownLine() {
 	m.inputCursor = nextStart + min(currentCol, nextLen)
 }
 
+func (m *uiModel) deleteCurrentInputLine() bool {
+	runes := m.inputRunes()
+	if len(runes) == 0 {
+		return false
+	}
+	cursor := clampCursor(m.inputCursor, len(runes))
+	start := lineStart(runes, cursor)
+	end := lineEnd(runes, cursor)
+
+	deleteStart := start
+	deleteEnd := end
+	if end < len(runes) && runes[end] == '\n' {
+		deleteEnd = end + 1
+	} else if start > 0 && runes[start-1] == '\n' {
+		deleteStart = start - 1
+	}
+
+	if deleteStart >= deleteEnd {
+		return false
+	}
+
+	updated := make([]rune, 0, len(runes)-(deleteEnd-deleteStart))
+	updated = append(updated, runes[:deleteStart]...)
+	updated = append(updated, runes[deleteEnd:]...)
+	m.input = string(updated)
+	m.inputCursor = deleteStart
+	return true
+}
+
 func prevWordBoundary(runes []rune, cursor int) int {
 	i := clampCursor(cursor, len(runes))
 	for i > 0 && unicode.IsSpace(runes[i-1]) {
