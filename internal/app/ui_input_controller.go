@@ -24,7 +24,7 @@ var spinnerTickInterval = 360 * time.Millisecond
 func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := c.model
 	keyString := strings.ToLower(msg.String())
-	if keyString == "tab" || keyString == "ctrl+enter" || keyString == "ctrl+j" {
+	if keyString == "tab" || keyString == "ctrl+enter" || msg.Type == keyTypeCtrlEnterCSI {
 		text := strings.TrimSpace(m.input)
 		if text == "" {
 			return m, nil
@@ -109,6 +109,12 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.clearInput()
 		return m, c.startSubmission(text)
+	case tea.KeyCtrlJ, keyTypeShiftEnterCSI:
+		if m.inputSubmitLocked {
+			return m, nil
+		}
+		m.insertInputRunes([]rune{'\n'})
+		return m, nil
 	case tea.KeyBackspace:
 		if m.inputSubmitLocked {
 			return m, nil
@@ -166,12 +172,25 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.moveCursorWordRight()
 		return m, nil
 	case tea.KeyUp:
-		m.forwardToView(tea.KeyMsg{Type: tea.KeyUp})
+		if m.inputSubmitLocked {
+			return m, nil
+		}
+		m.moveCursorUpLine()
 		return m, nil
 	case tea.KeyDown:
-		m.forwardToView(tea.KeyMsg{Type: tea.KeyDown})
+		if m.inputSubmitLocked {
+			return m, nil
+		}
+		m.moveCursorDownLine()
 		return m, nil
 	default:
+		if keyString == "shift+enter" {
+			if m.inputSubmitLocked {
+				return m, nil
+			}
+			m.insertInputRunes([]rune{'\n'})
+			return m, nil
+		}
 		if msg.Type == tea.KeyRunes {
 			if m.inputSubmitLocked {
 				return m, nil

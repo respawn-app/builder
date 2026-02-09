@@ -332,6 +332,11 @@ func wrappedCursorPosition(text []rune, width int) (line int, col int) {
 	line = 0
 	col = 0
 	for i, r := range text {
+		if r == '\n' {
+			line++
+			col = 0
+			continue
+		}
 		rw := runewidth.RuneWidth(r)
 		if rw < 1 {
 			rw = 1

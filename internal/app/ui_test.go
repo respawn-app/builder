@@ -67,6 +67,21 @@ func TestUnknownCSIXtermCtrlEnterQueuesAndStartsSubmission(t *testing.T) {
 	}
 }
 
+func TestUnknownCSIShiftEnterInsertsNewline(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "hello"
+
+	next, _ := m.Update(testUnknownCSISequence{rendered: "?CSI[49 51 59 50 117]?"}) // 13;2u
+	updated := next.(*uiModel)
+
+	if updated.busy {
+		t.Fatal("did not expect busy after shift+enter CSI sequence")
+	}
+	if updated.input != "hello\n" {
+		t.Fatalf("expected newline insertion from shift+enter CSI sequence, got %q", updated.input)
+	}
+}
+
 func TestAskQuestionTabFreeformFlow(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	reply := make(chan askReply, 1)
@@ -211,6 +226,21 @@ func TestMainInputAcceptsSpaceKey(t *testing.T) {
 	}
 }
 
+func TestMainInputCtrlJInsertsNewline(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "line 1"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	updated := next.(*uiModel)
+
+	if updated.busy {
+		t.Fatal("did not expect submit on ctrl+j")
+	}
+	if updated.input != "line 1\n" {
+		t.Fatalf("expected ctrl+j to insert newline, got %q", updated.input)
+	}
+}
+
 func TestMainInputSupportsInlineCursorEditing(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "hello world"
@@ -256,6 +286,54 @@ func TestMainInputSupportsWordNavigation(t *testing.T) {
 
 	if updated.input != "alpha beta YXgamma" {
 		t.Fatalf("expected alt+left insertion near previous word boundary, got %q", updated.input)
+	}
+}
+
+func TestMainInputUpDownSingleLineMoveToStartAndEnd(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "abcd"
+	m.inputCursor = 2
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated := next.(*uiModel)
+	if updated.inputCursor != 0 {
+		t.Fatalf("expected up to move cursor to start on single line, got %d", updated.inputCursor)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	if updated.inputCursor != len([]rune(updated.input)) {
+		t.Fatalf("expected down to move cursor to end on single line, got %d", updated.inputCursor)
+	}
+}
+
+func TestMainInputUpDownMultilineMoveAcrossLines(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "1111\n22\n3333"
+	m.inputCursor = -1 // end of the input
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated := next.(*uiModel)
+	if updated.inputCursor != 7 {
+		t.Fatalf("expected first up to land on previous line end, got %d", updated.inputCursor)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated = next.(*uiModel)
+	if updated.inputCursor != 2 {
+		t.Fatalf("expected second up to keep column on first line, got %d", updated.inputCursor)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	if updated.inputCursor != 7 {
+		t.Fatalf("expected down to return to second line at same column, got %d", updated.inputCursor)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	if updated.inputCursor != 10 {
+		t.Fatalf("expected second down to land on third line at same column, got %d", updated.inputCursor)
 	}
 }
 
@@ -330,6 +408,13 @@ func TestViewCursorMovementDoesNotDropCharacters(t *testing.T) {
 	plain := stripANSIAndTrimRight(m.View())
 	if !strings.Contains(plain, "› hello") {
 		t.Fatalf("expected all characters preserved while moving cursor, got %q", plain)
+	}
+}
+
+func TestInputCursorDisplayPositionMovesToNextLineAfterNewline(t *testing.T) {
+	line, col := inputCursorDisplayPosition("› ", "abc\n", -1, 40)
+	if line != 1 || col != 0 {
+		t.Fatalf("expected cursor to move to start of next line after trailing newline, got line=%d col=%d", line, col)
 	}
 }
 

@@ -77,6 +77,37 @@ func (m *uiModel) moveCursorWordRight() {
 	m.inputCursor = nextWordBoundary(runes, clampCursor(m.inputCursor, len(runes)))
 }
 
+func (m *uiModel) moveCursorUpLine() {
+	runes := m.inputRunes()
+	cursor := clampCursor(m.inputCursor, len(runes))
+	currentStart := lineStart(runes, cursor)
+	currentCol := cursor - currentStart
+	if currentStart == 0 {
+		m.inputCursor = 0
+		return
+	}
+	prevEnd := currentStart - 1
+	prevStart := lineStart(runes, prevEnd)
+	prevLen := prevEnd - prevStart
+	m.inputCursor = prevStart + min(currentCol, prevLen)
+}
+
+func (m *uiModel) moveCursorDownLine() {
+	runes := m.inputRunes()
+	cursor := clampCursor(m.inputCursor, len(runes))
+	currentStart := lineStart(runes, cursor)
+	currentCol := cursor - currentStart
+	currentEnd := lineEnd(runes, cursor)
+	if currentEnd >= len(runes) {
+		m.inputCursor = len(runes)
+		return
+	}
+	nextStart := currentEnd + 1
+	nextEnd := lineEnd(runes, nextStart)
+	nextLen := nextEnd - nextStart
+	m.inputCursor = nextStart + min(currentCol, nextLen)
+}
+
 func prevWordBoundary(runes []rune, cursor int) int {
 	i := clampCursor(cursor, len(runes))
 	for i > 0 && unicode.IsSpace(runes[i-1]) {
@@ -115,6 +146,22 @@ func clampCursor(cursor, size int) int {
 		return size
 	}
 	return cursor
+}
+
+func lineStart(runes []rune, cursor int) int {
+	i := clampCursor(cursor, len(runes))
+	for i > 0 && runes[i-1] != '\n' {
+		i--
+	}
+	return i
+}
+
+func lineEnd(runes []rune, cursor int) int {
+	i := clampCursor(cursor, len(runes))
+	for i < len(runes) && runes[i] != '\n' {
+		i++
+	}
+	return i
 }
 
 const (
