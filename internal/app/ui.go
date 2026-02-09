@@ -107,9 +107,10 @@ type uiModel struct {
 	runtimeEvents <-chan runtime.Event
 	askEvents     <-chan askEvent
 
-	input  string
-	busy   bool
-	status string
+	input       string
+	inputCursor int // rune index; -1 means "track tail"
+	busy        bool
+	activity    uiActivity
 
 	queued []string
 
@@ -142,9 +143,10 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 	m := &uiModel{
 		engine:          engine,
 		view:            tui.NewModel(),
-		status:          "idle",
+		activity:        uiActivityIdle,
 		runtimeEvents:   runtimeEvents,
 		askEvents:       askEvents,
+		inputCursor:     -1,
 		commandRegistry: commands.NewDefaultRegistry(),
 		exitAction:      UIActionNone,
 		theme:           "dark",

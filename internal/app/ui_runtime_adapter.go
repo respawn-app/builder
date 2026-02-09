@@ -37,7 +37,7 @@ func (a uiRuntimeAdapter) onUserMessageFlushed(text string) {
 		break
 	}
 	if m.inputSubmitLocked && strings.TrimSpace(m.lockedInjectText) == strings.TrimSpace(text) {
-		m.input = ""
+		m.clearInput()
 		m.lockedInjectText = ""
 		m.inputSubmitLocked = false
 	}

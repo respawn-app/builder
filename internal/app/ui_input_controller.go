@@ -24,7 +24,7 @@ var spinnerTickInterval = 360 * time.Millisecond
 func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := c.model
 	keyString := strings.ToLower(msg.String())
-	if keyString == "tab" || keyString == "ctrl+enter" || keyString == "ctrl+j" {
+	if keyString == "tab" || keyString == "ctrl+enter" || msg.Type == keyTypeCtrlEnterCSI {
 		text := strings.TrimSpace(m.input)
 		if text == "" {
 			return m, nil
@@ -37,17 +37,25 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.engine.QueueUserMessage(text)
 			}
 			m.pendingInjected = append(m.pendingInjected, text)
-			m.input = ""
-			m.status = "queued"
+			m.clearInput()
+			m.activity = uiActivityQueued
 			return m, nil
 		}
 		m.queued = append(m.queued, text)
-		m.input = ""
+		m.clearInput()
 		if !m.busy {
 			next := m.popQueued()
 			return m, c.startSubmission(next)
 		}
-		m.status = "queued"
+		m.activity = uiActivityQueued
+		return m, nil
+	}
+	if msg.Type == keyTypeCtrlBackspaceCSI || msg.Type == keyTypeSuperBackspaceCSI ||
+		keyString == "ctrl+backspace" || keyString == "cmd+backspace" || keyString == "super+backspace" {
+		if m.inputSubmitLocked {
+			return m, nil
+		}
+		m.deleteCurrentInputLine()
 		return m, nil
 	}
 
@@ -58,7 +66,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				_ = m.engine.Interrupt()
 			}
 			m.busy = false
-			m.status = "interrupted"
+			m.activity = uiActivityInterrupted
 			return m, nil
 		}
 		m.exitAction = UIActionExit
@@ -82,11 +90,11 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pendingInjected = append(m.pendingInjected, text)
 			m.lockedInjectText = text
 			m.inputSubmitLocked = true
-			m.status = "queued"
+			m.activity = uiActivityQueued
 			return m, nil
 		}
 		if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
-			m.input = ""
+			m.clearInput()
 			if commandResult.Text != "" {
 				if m.engine != nil {
 					m.engine.AppendLocalEntry("system", commandResult.Text)
@@ -107,34 +115,95 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		m.input = ""
+		m.clearInput()
 		return m, c.startSubmission(text)
+	case tea.KeyCtrlJ, keyTypeShiftEnterCSI:
+		if m.inputSubmitLocked {
+			return m, nil
+		}
+		m.insertInputRunes([]rune{'\n'})
+		return m, nil
 	case tea.KeyBackspace:
 		if m.inputSubmitLocked {
 			return m, nil
 		}
-		if len(m.input) > 0 {
-			m.input = m.input[:len(m.input)-1]
-		}
+		m.backspaceInput()
 		return m, nil
 	case tea.KeySpace:
 		if m.inputSubmitLocked {
 			return m, nil
 		}
-		m.input += " "
+		m.insertInputRunes([]rune{' '})
+		return m, nil
+	case tea.KeyLeft:
+		if m.inputSubmitLocked {
+			return m, nil
+		}
+		if msg.Alt {
+			m.moveCursorWordLeft()
+			return m, nil
+		}
+		m.moveCursorLeft()
+		return m, nil
+	case tea.KeyRight:
+		if m.inputSubmitLocked {
+			return m, nil
+		}
+		if msg.Alt {
+			m.moveCursorWordRight()
+			return m, nil
+		}
+		m.moveCursorRight()
+		return m, nil
+	case tea.KeyHome, tea.KeyCtrlA:
+		if m.inputSubmitLocked {
+			return m, nil
+		}
+		m.moveCursorStart()
+		return m, nil
+	case tea.KeyEnd, tea.KeyCtrlE, tea.KeyCtrlEnd:
+		if m.inputSubmitLocked {
+			return m, nil
+		}
+		m.moveCursorEnd()
+		return m, nil
+	case tea.KeyCtrlLeft:
+		if m.inputSubmitLocked {
+			return m, nil
+		}
+		m.moveCursorWordLeft()
+		return m, nil
+	case tea.KeyCtrlRight:
+		if m.inputSubmitLocked {
+			return m, nil
+		}
+		m.moveCursorWordRight()
 		return m, nil
 	case tea.KeyUp:
-		m.forwardToView(tea.KeyMsg{Type: tea.KeyUp})
+		if m.inputSubmitLocked {
+			return m, nil
+		}
+		m.moveCursorUpLine()
 		return m, nil
 	case tea.KeyDown:
-		m.forwardToView(tea.KeyMsg{Type: tea.KeyDown})
+		if m.inputSubmitLocked {
+			return m, nil
+		}
+		m.moveCursorDownLine()
 		return m, nil
 	default:
+		if keyString == "shift+enter" {
+			if m.inputSubmitLocked {
+				return m, nil
+			}
+			m.insertInputRunes([]rune{'\n'})
+			return m, nil
+		}
 		if msg.Type == tea.KeyRunes {
 			if m.inputSubmitLocked {
 				return m, nil
 			}
-			m.input += string(msg.Runes)
+			m.insertInputRunes(msg.Runes)
 		}
 		return m, nil
 	}
@@ -143,7 +212,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (c uiInputController) startSubmission(text string) tea.Cmd {
 	m := c.model
 	m.busy = true
-	m.status = "running"
+	m.activity = uiActivityRunning
 	m.sawAssistantDelta = false
 	m.logf("step.start user_chars=%d", len(text))
 	if m.engine == nil {
@@ -177,7 +246,7 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 	if msg.err != nil {
 		c.unlockInputAfterSubmissionError()
 		detailErr := formatSubmissionError(msg.err)
-		m.status = "error"
+		m.activity = uiActivityError
 		if m.engine != nil {
 			m.engine.SetOngoingError(detailErr)
 			m.engine.AppendLocalEntry("error", detailErr)
@@ -194,7 +263,7 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 		return m, nil
 	}
 
-	m.status = "idle"
+	m.activity = uiActivityIdle
 	if m.engine != nil {
 		m.engine.ClearOngoingError()
 	} else {
