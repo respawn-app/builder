@@ -29,6 +29,17 @@ func TestMarkdownRendererStyleConfigRemovesDocumentPadding(t *testing.T) {
 	}
 }
 
+func TestMarkdownRendererStyleConfigInlineCodeHasNoBackground(t *testing.T) {
+	r := newMarkdownRenderer("dark")
+	cfg := r.styleConfig()
+	if cfg.Code.BackgroundColor != nil {
+		t.Fatalf("expected inline code background disabled, got %#v", cfg.Code.BackgroundColor)
+	}
+	if cfg.Code.Color == nil {
+		t.Fatal("expected inline code color to remain configured")
+	}
+}
+
 func TestMarkdownRendererRenderHasNoLeadingPadding(t *testing.T) {
 	r := newMarkdownRenderer("dark")
 	out, err := r.render("assistant", "hello", 80)
