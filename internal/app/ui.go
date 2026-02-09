@@ -16,6 +16,10 @@ type submitDoneMsg struct {
 	err     error
 }
 
+type compactDoneMsg struct {
+	err error
+}
+
 type spinnerTickMsg struct{}
 
 type runtimeEventMsg struct {
@@ -200,6 +204,10 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitAskEvent(m.askEvents)
 	case submitDoneMsg:
 		next, cmd := m.inputController().handleSubmitDone(msg)
+		next.(*uiModel).syncViewport()
+		return next, cmd
+	case compactDoneMsg:
+		next, cmd := m.inputController().handleCompactDone(msg)
 		next.(*uiModel).syncViewport()
 		return next, cmd
 	case spinnerTickMsg:

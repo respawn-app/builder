@@ -91,12 +91,13 @@ func (t *HTTPTransport) Generate(ctx context.Context, request OpenAIRequest) (Op
 		return OpenAIResponse{}, fmt.Errorf("openai responses request failed: empty response")
 	}
 
-	assistantText, toolCalls, reasoning, reasoningItems := parseOutputItems(decoded.Output)
+	outputItems, assistantText, toolCalls, reasoning, reasoningItems := parseOutputItems(decoded.Output)
 	return OpenAIResponse{
 		AssistantText:  assistantText,
 		ToolCalls:      toolCalls,
 		Reasoning:      reasoning,
 		ReasoningItems: reasoningItems,
+		OutputItems:    outputItems,
 		Usage:          usageFromSDK(decoded.Usage, t.ContextWindowTokens),
 	}, nil
 }
@@ -168,12 +169,13 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 	finalCalls := acc.ToToolCalls()
 	finalReasoning := reasoningAcc.Entries()
 	finalReasoningItems := reasoningAcc.Items()
+	finalOutputItems := buildOutputItemsFromStream(finalText, finalCalls, finalReasoning, finalReasoningItems)
 
 	if completed != nil {
 		if completed.Usage.InputTokens > 0 || completed.Usage.OutputTokens > 0 {
 			usage = usageFromSDK(completed.Usage, t.ContextWindowTokens)
 		}
-		parsedText, parsedCalls, parsedReasoning, parsedReasoningItems := parseOutputItems(completed.Output)
+		parsedItems, parsedText, parsedCalls, parsedReasoning, parsedReasoningItems := parseOutputItems(completed.Output)
 		if finalText == "" {
 			finalText = parsedText
 		}
@@ -181,6 +183,9 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 		finalCalls = acc.ToToolCalls()
 		finalReasoning = mergeReasoningEntries(parsedReasoning, finalReasoning)
 		finalReasoningItems = mergeReasoningItems(parsedReasoningItems, finalReasoningItems)
+		if len(parsedItems) > 0 {
+			finalOutputItems = parsedItems
+		}
 	}
 
 	return OpenAIResponse{
@@ -188,8 +193,53 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 		ToolCalls:      finalCalls,
 		Reasoning:      finalReasoning,
 		ReasoningItems: finalReasoningItems,
+		OutputItems:    finalOutputItems,
 		Usage:          usage,
 	}, nil
+}
+
+func (t *HTTPTransport) Compact(ctx context.Context, request OpenAICompactionRequest) (OpenAICompactionResponse, error) {
+	if t.Client == nil {
+		t.Client = &http.Client{Timeout: 120 * time.Second}
+	}
+
+	authHeader, mode, err := t.resolveAuth(ctx)
+	if err != nil {
+		return OpenAICompactionResponse{}, err
+	}
+
+	payload, err := t.buildCompactPayload(request)
+	if err != nil {
+		return OpenAICompactionResponse{}, err
+	}
+
+	service := t.newResponseService(mode)
+	reqOpts := t.buildRequestOptions(authHeader, mode, request.SessionID)
+	var rawResp *http.Response
+	reqOpts = append(reqOpts, option.WithResponseInto(&rawResp))
+
+	decoded, err := service.Compact(ctx, payload, reqOpts...)
+	if err != nil {
+		return OpenAICompactionResponse{}, mapOpenAIRequestError(err, rawResp, "openai responses compact request failed")
+	}
+	if decoded == nil {
+		return OpenAICompactionResponse{}, fmt.Errorf("openai responses compact request failed: empty response")
+	}
+
+	outputItems, _, _, _, _ := parseOutputItems(decoded.Output)
+	return OpenAICompactionResponse{
+		OutputItems:       outputItems,
+		Usage:             usageFromSDK(decoded.Usage, t.ContextWindowTokens),
+		TrimmedItemsCount: 0,
+	}, nil
+}
+
+func (t *HTTPTransport) ProviderCapabilities(ctx context.Context) (ProviderCapabilities, error) {
+	_, mode, err := t.resolveAuth(ctx)
+	if err != nil {
+		return ProviderCapabilities{}, err
+	}
+	return InferProviderCapabilities(t.serviceBaseURL(mode), mode.IsOAuth), nil
 }
 
 func (t *HTTPTransport) resolveAuth(ctx context.Context) (string, openAIAuthMode, error) {
@@ -211,7 +261,7 @@ func (t *HTTPTransport) resolveAuth(ctx context.Context) (string, openAIAuthMode
 }
 
 func (t *HTTPTransport) buildPayload(request OpenAIRequest, mode openAIAuthMode) (responses.ResponseNewParams, error) {
-	input := buildResponsesInput(request.Messages)
+	input := buildResponsesInput(request.Messages, request.Items)
 
 	tools := make([]responses.ToolUnionParam, 0, len(request.Tools))
 	for _, tool := range request.Tools {
@@ -263,7 +313,33 @@ func (t *HTTPTransport) buildPayload(request OpenAIRequest, mode openAIAuthMode)
 	return out, nil
 }
 
-func buildResponsesInput(messages []Message) []responses.ResponseInputItemUnionParam {
+func (t *HTTPTransport) buildCompactPayload(request OpenAICompactionRequest) (responses.ResponseCompactParams, error) {
+	if strings.TrimSpace(request.Model) == "" {
+		return responses.ResponseCompactParams{}, fmt.Errorf("compaction model is required")
+	}
+	input := buildResponsesInput(nil, request.InputItems)
+	out := responses.ResponseCompactParams{
+		Model: responses.ResponseCompactParamsModel(request.Model),
+	}
+	if len(input) > 0 {
+		out.Input = responses.ResponseCompactParamsInputUnion{
+			OfResponseInputItemArray: input,
+		}
+	}
+	if instructions := strings.TrimSpace(request.Instructions); instructions != "" {
+		out.Instructions = param.NewOpt(instructions)
+	}
+	return out, nil
+}
+
+func buildResponsesInput(messages []Message, canonical []ResponseItem) []responses.ResponseInputItemUnionParam {
+	if len(canonical) > 0 {
+		return buildResponsesInputFromItems(canonical)
+	}
+	return buildResponsesInputFromMessages(messages)
+}
+
+func buildResponsesInputFromMessages(messages []Message) []responses.ResponseInputItemUnionParam {
 	var items []responses.ResponseInputItemUnionParam
 	for _, msg := range messages {
 		switch msg.Role {
@@ -307,6 +383,76 @@ func buildResponsesInput(messages []Message) []responses.ResponseInputItemUnionP
 	return items
 }
 
+func buildResponsesInputFromItems(canonical []ResponseItem) []responses.ResponseInputItemUnionParam {
+	items := make([]responses.ResponseInputItemUnionParam, 0, len(canonical))
+	for _, item := range canonical {
+		switch item.Type {
+		case ResponseItemTypeMessage:
+			if strings.TrimSpace(item.Content) == "" {
+				continue
+			}
+			items = append(items, messageInput(string(item.Role), item.Content))
+		case ResponseItemTypeFunctionCall:
+			callID := textutil.FirstNonEmpty(strings.TrimSpace(item.CallID), strings.TrimSpace(item.ID))
+			if callID == "" {
+				continue
+			}
+			items = append(items, responses.ResponseInputItemParamOfFunctionCall(normalizeToolArguments(string(item.Arguments)), callID, strings.TrimSpace(item.Name)))
+		case ResponseItemTypeFunctionCallOutput:
+			callID := strings.TrimSpace(item.CallID)
+			if callID == "" {
+				continue
+			}
+			items = append(items, responses.ResponseInputItemParamOfFunctionCallOutput(callID, outputStringFromRaw(item.Output)))
+		case ResponseItemTypeReasoning:
+			id := strings.TrimSpace(item.ID)
+			if id == "" {
+				continue
+			}
+			reasoningParam := responses.ResponseReasoningItemParam{
+				ID:      id,
+				Summary: []responses.ResponseReasoningItemSummaryParam{},
+			}
+			for _, summary := range item.ReasoningSummary {
+				text := strings.TrimSpace(summary.Text)
+				if text == "" {
+					continue
+				}
+				reasoningParam.Summary = append(reasoningParam.Summary, responses.ResponseReasoningItemSummaryParam{
+					Text: text,
+					Type: "summary_text",
+				})
+			}
+			if encrypted := strings.TrimSpace(item.EncryptedContent); encrypted != "" {
+				reasoningParam.EncryptedContent = param.NewOpt(encrypted)
+			}
+			items = append(items, responses.ResponseInputItemUnionParam{
+				OfReasoning: &reasoningParam,
+			})
+		case ResponseItemTypeCompaction:
+			encrypted := strings.TrimSpace(item.EncryptedContent)
+			if encrypted == "" {
+				continue
+			}
+			compactionParam := responses.ResponseCompactionItemParam{
+				EncryptedContent: encrypted,
+			}
+			if id := strings.TrimSpace(item.ID); id != "" {
+				compactionParam.ID = param.NewOpt(id)
+			}
+			items = append(items, responses.ResponseInputItemUnionParam{
+				OfCompaction: &compactionParam,
+			})
+		default:
+			if len(item.Raw) == 0 || !json.Valid(item.Raw) {
+				continue
+			}
+			items = append(items, param.Override[responses.ResponseInputItemUnionParam](item.Raw))
+		}
+	}
+	return items
+}
+
 func messageInput(role, text string) responses.ResponseInputItemUnionParam {
 	role = strings.TrimSpace(role)
 	if role == string(RoleAssistant) {
@@ -332,37 +478,76 @@ func messageInput(role, text string) responses.ResponseInputItemUnionParam {
 	return responses.ResponseInputItemParamOfInputMessage(content, inputRole)
 }
 
-func parseOutputItems(items []responses.ResponseOutputItemUnion) (string, []ToolCall, []ReasoningEntry, []ReasoningItem) {
+func parseOutputItems(items []responses.ResponseOutputItemUnion) ([]ResponseItem, string, []ToolCall, []ReasoningEntry, []ReasoningItem) {
+	canonical := make([]ResponseItem, 0, len(items))
 	textParts := make([]string, 0, len(items))
 	toolCalls := make([]ToolCall, 0, len(items))
 	reasoning := make([]ReasoningEntry, 0, len(items))
 	reasoningItems := make([]ReasoningItem, 0, len(items))
 	for _, item := range items {
+		raw := json.RawMessage(item.RawJSON())
 		switch item.Type {
 		case "message":
-			if string(item.Role) != "" && string(item.Role) != string(RoleAssistant) {
-				continue
+			role := Role(strings.TrimSpace(string(item.Role)))
+			if role == "" {
+				role = RoleAssistant
 			}
+			textPartsForItem := make([]string, 0, len(item.Content))
 			for _, part := range item.Content {
-				if part.Type == "output_text" || part.Type == "text" {
-					textParts = append(textParts, part.Text)
+				if part.Type == "output_text" || part.Type == "text" || part.Type == "input_text" {
+					textPartsForItem = append(textPartsForItem, part.Text)
 				}
+			}
+			text := strings.Join(textPartsForItem, "")
+			canonical = append(canonical, ResponseItem{
+				Type:    ResponseItemTypeMessage,
+				Role:    role,
+				ID:      item.ID,
+				Content: text,
+				Raw:     raw,
+			})
+			if role == RoleAssistant {
+				textParts = append(textParts, text)
 			}
 		case "function_call":
 			callID := textutil.FirstNonEmpty(strings.TrimSpace(item.CallID), strings.TrimSpace(item.ID))
 			if callID == "" && strings.TrimSpace(item.Name) == "" {
 				continue
 			}
+			args := normalizeToolInput(item.Arguments)
+			canonical = append(canonical, ResponseItem{
+				Type:      ResponseItemTypeFunctionCall,
+				ID:        strings.TrimSpace(item.ID),
+				CallID:    callID,
+				Name:      item.Name,
+				Arguments: args,
+				Raw:       raw,
+			})
 			toolCalls = append(toolCalls, ToolCall{
 				ID:    callID,
 				Name:  item.Name,
-				Input: normalizeToolInput(item.Arguments),
+				Input: args,
 			})
 		case "reasoning":
 			reasoningItem := item.AsReasoning()
+			reasoningSummary := make([]ReasoningEntry, 0, len(reasoningItem.Summary))
 			for _, summary := range reasoningItem.Summary {
+				if strings.TrimSpace(summary.Text) != "" {
+					reasoningSummary = append(reasoningSummary, ReasoningEntry{
+						Role: reasoningRoleSummary,
+						Text: summary.Text,
+					})
+				}
 				reasoning = appendReasoningEntry(reasoning, reasoningRoleSummary, summary.Text)
 			}
+			canonicalReasoning := ResponseItem{
+				Type:             ResponseItemTypeReasoning,
+				ID:               strings.TrimSpace(reasoningItem.ID),
+				ReasoningSummary: reasoningSummary,
+				EncryptedContent: strings.TrimSpace(reasoningItem.EncryptedContent),
+				Raw:              raw,
+			}
+			canonical = append(canonical, canonicalReasoning)
 			if id := strings.TrimSpace(reasoningItem.ID); id != "" {
 				if encrypted := strings.TrimSpace(reasoningItem.EncryptedContent); encrypted != "" {
 					reasoningItems = append(reasoningItems, ReasoningItem{
@@ -371,9 +556,24 @@ func parseOutputItems(items []responses.ResponseOutputItemUnion) (string, []Tool
 					})
 				}
 			}
+		case "compaction":
+			compactionItem := item.AsCompaction()
+			canonical = append(canonical, ResponseItem{
+				Type:             ResponseItemTypeCompaction,
+				ID:               strings.TrimSpace(compactionItem.ID),
+				EncryptedContent: strings.TrimSpace(compactionItem.EncryptedContent),
+				Raw:              raw,
+			})
+		default:
+			if len(raw) > 0 && json.Valid(raw) {
+				canonical = append(canonical, ResponseItem{
+					Type: ResponseItemTypeOther,
+					Raw:  raw,
+				})
+			}
 		}
 	}
-	return strings.Join(textParts, ""), toolCalls, reasoning, reasoningItems
+	return canonical, strings.Join(textParts, ""), toolCalls, reasoning, reasoningItems
 }
 
 func appendReasoningEntry(entries []ReasoningEntry, role, text string) []ReasoningEntry {
@@ -718,6 +918,67 @@ func shouldApplyReasoningEffort(model, effort string) bool {
 		return false
 	}
 	return strings.HasPrefix(model, "gpt-") || strings.HasPrefix(model, "o")
+}
+
+func outputStringFromRaw(raw json.RawMessage) string {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return ""
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	return trimmed
+}
+
+func buildOutputItemsFromStream(text string, toolCalls []ToolCall, reasoning []ReasoningEntry, reasoningItems []ReasoningItem) []ResponseItem {
+	items := make([]ResponseItem, 0, 1+len(toolCalls)+len(reasoningItems))
+	if strings.TrimSpace(text) != "" {
+		items = append(items, ResponseItem{
+			Type:    ResponseItemTypeMessage,
+			Role:    RoleAssistant,
+			Content: text,
+		})
+	}
+	for _, call := range toolCalls {
+		callID := textutil.FirstNonEmpty(strings.TrimSpace(call.ID), strings.TrimSpace(call.Name))
+		if callID == "" {
+			continue
+		}
+		items = append(items, ResponseItem{
+			Type:      ResponseItemTypeFunctionCall,
+			ID:        callID,
+			CallID:    callID,
+			Name:      call.Name,
+			Arguments: normalizeToolInput(string(call.Input)),
+		})
+	}
+	summaryByID := map[string][]ReasoningEntry{}
+	for _, entry := range reasoning {
+		text := strings.TrimSpace(entry.Text)
+		if text == "" {
+			continue
+		}
+		summaryByID[""] = append(summaryByID[""], ReasoningEntry{
+			Role: entry.Role,
+			Text: text,
+		})
+	}
+	for _, item := range reasoningItems {
+		id := strings.TrimSpace(item.ID)
+		encrypted := strings.TrimSpace(item.EncryptedContent)
+		if id == "" || encrypted == "" {
+			continue
+		}
+		items = append(items, ResponseItem{
+			Type:             ResponseItemTypeReasoning,
+			ID:               id,
+			EncryptedContent: encrypted,
+			ReasoningSummary: append([]ReasoningEntry(nil), summaryByID[""]...),
+		})
+	}
+	return items
 }
 
 func truncateError(b []byte) string {

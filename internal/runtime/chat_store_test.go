@@ -3,6 +3,7 @@ package runtime
 import (
 	"builder/internal/llm"
 	"builder/internal/tools"
+	"builder/prompts"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -143,6 +144,20 @@ func TestChatStoreFiltersInjectedAgentsMessage(t *testing.T) {
 		t.Fatalf("expected 1 visible entry, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
 	if snap.Entries[0].Text != "real" {
+		t.Fatalf("unexpected visible entry: %+v", snap.Entries[0])
+	}
+}
+
+func TestChatStoreHidesSyntheticCompactionSummaryMessage(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: prompts.CompactionSummaryPrefix + "\n\nsummary"})
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "real user input"})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 1 {
+		t.Fatalf("expected 1 visible entry, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if snap.Entries[0].Role != "user" || snap.Entries[0].Text != "real user input" {
 		t.Fatalf("unexpected visible entry: %+v", snap.Entries[0])
 	}
 }

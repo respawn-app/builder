@@ -15,6 +15,7 @@ import (
 	"builder/internal/llm"
 	"builder/internal/session"
 	"builder/internal/tools"
+	"builder/prompts"
 )
 
 type fakeClient struct {
@@ -33,6 +34,68 @@ func (f *fakeClient) Generate(_ context.Context, req llm.Request) (llm.Response,
 	resp := f.responses[0]
 	f.responses = f.responses[1:]
 	return resp, nil
+}
+
+type fakeCompactionClient struct {
+	mu sync.Mutex
+
+	responses []llm.Response
+	calls     []llm.Request
+
+	compactionResponses []llm.CompactionResponse
+	compactionErr       error
+	compactionErrors    []error
+	compactionCalls     []llm.CompactionRequest
+
+	caps llm.ProviderCapabilities
+}
+
+func (f *fakeCompactionClient) Generate(_ context.Context, req llm.Request) (llm.Response, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, req)
+	if len(f.responses) == 0 {
+		return llm.Response{}, nil
+	}
+	resp := f.responses[0]
+	f.responses = f.responses[1:]
+	return resp, nil
+}
+
+func (f *fakeCompactionClient) Compact(_ context.Context, req llm.CompactionRequest) (llm.CompactionResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.compactionCalls = append(f.compactionCalls, req)
+	if len(f.compactionErrors) > 0 {
+		err := f.compactionErrors[0]
+		f.compactionErrors = f.compactionErrors[1:]
+		if err != nil {
+			return llm.CompactionResponse{}, err
+		}
+	}
+	if f.compactionErr != nil {
+		return llm.CompactionResponse{}, f.compactionErr
+	}
+	if len(f.compactionResponses) == 0 {
+		return llm.CompactionResponse{}, nil
+	}
+	resp := f.compactionResponses[0]
+	f.compactionResponses = f.compactionResponses[1:]
+	return resp, nil
+}
+
+func (f *fakeCompactionClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	if strings.TrimSpace(f.caps.ProviderID) == "" {
+		return llm.ProviderCapabilities{
+			ProviderID:                    "openai",
+			SupportsResponsesAPI:          true,
+			SupportsResponsesCompact:      true,
+			SupportsReasoningEncrypted:    true,
+			SupportsServerSideContextEdit: true,
+			IsOpenAIFirstParty:            true,
+		}, nil
+	}
+	return f.caps, nil
 }
 
 type fakeTool struct {
@@ -857,5 +920,312 @@ func TestReasoningSummaryVisibleAndEncryptedReasoningRoundTrips(t *testing.T) {
 	}
 	if !sawLocal {
 		t.Fatalf("expected persisted local_entry for reasoning summary, events=%+v", events)
+	}
+}
+
+func TestDiscardQueuedUserMessagesMatchingRemovesQueuedEntries(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	eng.QueueUserMessage("same")
+	eng.QueueUserMessage("other")
+	eng.QueueUserMessage("same")
+
+	removed := eng.DiscardQueuedUserMessagesMatching("same")
+	if removed != 2 {
+		t.Fatalf("removed=%d, want 2", removed)
+	}
+
+	eng.mu.Lock()
+	defer eng.mu.Unlock()
+	if len(eng.pendingInjected) != 1 || eng.pendingInjected[0] != "other" {
+		t.Fatalf("unexpected pending queue after discard: %+v", eng.pendingInjected)
+	}
+}
+
+func TestAutoCompactionRecomputesUsageFromReplacementHistory(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		compactionResponses: []llm.CompactionResponse{
+			{
+				OutputItems: []llm.ResponseItem{
+					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "u1"},
+					{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+				},
+				Usage: llm.Usage{InputTokens: 190000, OutputTokens: 1000, WindowTokens: 200000},
+			},
+		},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.lastUsage = llm.Usage{InputTokens: 190000, OutputTokens: 0, WindowTokens: 200000}
+
+	if err := eng.autoCompactIfNeeded(context.Background(), "step-1", compactionModeAuto); err != nil {
+		t.Fatalf("auto compact failed: %v", err)
+	}
+	if eng.shouldAutoCompact() {
+		t.Fatalf("expected auto compact threshold to be cleared after replacement, usage=%+v", eng.lastUsage)
+	}
+}
+
+func TestCompactionPersistsSingleNoticeEntry(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		compactionResponses: []llm.CompactionResponse{
+			{
+				OutputItems: []llm.ResponseItem{
+					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "u1"},
+					{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+				},
+				Usage: llm.Usage{InputTokens: 190000, OutputTokens: 1000, WindowTokens: 200000},
+			},
+		},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.lastUsage = llm.Usage{InputTokens: 190000, OutputTokens: 0, WindowTokens: 200000}
+
+	if err := eng.autoCompactIfNeeded(context.Background(), "step-1", compactionModeAuto); err != nil {
+		t.Fatalf("auto compact failed: %v", err)
+	}
+
+	snap := eng.ChatSnapshot()
+	notices := 0
+	for _, entry := range snap.Entries {
+		if entry.Role == "compaction_notice" {
+			notices++
+			if entry.Text != "context compacted for the 1st time" {
+				t.Fatalf("unexpected compaction notice text: %q", entry.Text)
+			}
+		}
+		if strings.Contains(strings.ToLower(entry.Text), "compaction started") || strings.Contains(strings.ToLower(entry.Text), "compaction completed") {
+			t.Fatalf("unexpected start/completed status entry: %+v", entry)
+		}
+	}
+	if notices != 1 {
+		t.Fatalf("expected one compaction notice, got %d entries=%+v", notices, snap.Entries)
+	}
+}
+
+func TestAutoCompactionRemoteReplacesHistoryAndCarriesCompactionItem(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		responses: []llm.Response{
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+				},
+				Usage: llm.Usage{InputTokens: 190000, OutputTokens: 2000, WindowTokens: 200000},
+			},
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+				Usage:     llm.Usage{InputTokens: 2000, OutputTokens: 1000, WindowTokens: 200000},
+			},
+		},
+		compactionResponses: []llm.CompactionResponse{
+			{
+				OutputItems: []llm.ResponseItem{
+					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "run tools"},
+					{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+				},
+				Usage: llm.Usage{InputTokens: 12000, OutputTokens: 1000, WindowTokens: 200000},
+			},
+		},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "run tools")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if len(client.compactionCalls) != 1 {
+		t.Fatalf("expected one remote compaction call, got %d", len(client.compactionCalls))
+	}
+	if len(client.calls) < 2 {
+		t.Fatalf("expected second model call after compaction, got %d calls", len(client.calls))
+	}
+
+	foundCompactionItem := false
+	for _, item := range client.calls[1].Items {
+		if item.Type == llm.ResponseItemTypeCompaction && item.EncryptedContent == "enc_1" {
+			foundCompactionItem = true
+			break
+		}
+	}
+	if !foundCompactionItem {
+		t.Fatalf("expected compaction item in post-compaction request, got %+v", client.calls[1].Items)
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	sawHistoryReplace := false
+	for _, evt := range events {
+		if evt.Kind == "history_replaced" {
+			sawHistoryReplace = true
+			break
+		}
+	}
+	if !sawHistoryReplace {
+		t.Fatalf("expected history_replaced event, got %+v", events)
+	}
+}
+
+func TestAutoCompactionRetries400ByTrimmingOldestEligibleItems(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		responses: []llm.Response{
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+				},
+				Usage: llm.Usage{InputTokens: 390000, OutputTokens: 1000, WindowTokens: 400000},
+			},
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+				Usage:     llm.Usage{InputTokens: 2000, OutputTokens: 500, WindowTokens: 400000},
+			},
+		},
+		compactionErrors: []error{
+			&llm.APIStatusError{StatusCode: 400, Body: "context window exceeded"},
+			nil,
+		},
+		compactionResponses: []llm.CompactionResponse{
+			{
+				OutputItems: []llm.ResponseItem{
+					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "run tools"},
+					{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+				},
+				Usage: llm.Usage{InputTokens: 8000, OutputTokens: 500, WindowTokens: 400000},
+			},
+		},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5.3-codex"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "run tools")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if len(client.compactionCalls) != 2 {
+		t.Fatalf("expected two compact calls (retry after 400), got %d", len(client.compactionCalls))
+	}
+	first := len(client.compactionCalls[0].InputItems)
+	second := len(client.compactionCalls[1].InputItems)
+	if second >= first {
+		t.Fatalf("expected trimmed retry input to shrink, first=%d second=%d", first, second)
+	}
+}
+
+func TestOpenAIModelCompact404DoesNotFallbackToLocalCompaction(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		responses: []llm.Response{
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+				},
+				Usage: llm.Usage{InputTokens: 190000, OutputTokens: 2000, WindowTokens: 200000},
+			},
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "summary"},
+				Usage:     llm.Usage{InputTokens: 8000, OutputTokens: 1000, WindowTokens: 200000},
+			},
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+				Usage:     llm.Usage{InputTokens: 4000, OutputTokens: 1000, WindowTokens: 200000},
+			},
+		},
+		compactionErr: &llm.APIStatusError{StatusCode: 404, Body: "not found"},
+		caps: llm.ProviderCapabilities{
+			ProviderID:                    "openai-compatible",
+			SupportsResponsesAPI:          true,
+			SupportsResponsesCompact:      false,
+			SupportsReasoningEncrypted:    false,
+			SupportsServerSideContextEdit: false,
+			IsOpenAIFirstParty:            false,
+		},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "run tools")
+	if err == nil {
+		t.Fatalf("expected compaction error, got success message %+v", msg)
+	}
+	if len(client.compactionCalls) != 1 {
+		t.Fatalf("expected one compact call, got %d", len(client.compactionCalls))
+	}
+	for _, req := range client.calls {
+		for _, item := range req.Items {
+			if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleUser && strings.Contains(item.Content, prompts.CompactionSummaryPrefix) {
+				t.Fatalf("did not expect local compaction summary fallback, request=%+v", req.Items)
+			}
+		}
 	}
 }

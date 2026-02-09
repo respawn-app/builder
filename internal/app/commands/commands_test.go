@@ -13,6 +13,9 @@ func TestExecuteBuiltins(t *testing.T) {
 	if got := r.Execute("/exit"); got.Action != ActionExit {
 		t.Fatalf("expected ActionExit, got %+v", got)
 	}
+	if got := r.Execute("/compact"); got.Action != ActionCompact {
+		t.Fatalf("expected ActionCompact, got %+v", got)
+	}
 }
 
 func TestExecuteUnknown(t *testing.T) {

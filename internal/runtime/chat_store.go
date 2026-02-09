@@ -5,6 +5,7 @@ import (
 	"builder/internal/tools"
 	"builder/internal/transcript"
 	"builder/internal/transcript/toolcodec"
+	"builder/prompts"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -41,6 +42,7 @@ type chatStore struct {
 	mu sync.RWMutex
 
 	messages []llm.Message
+	items    []llm.ResponseItem
 	local    []ChatEntry
 
 	toolCompletions map[string]tools.Result
@@ -65,6 +67,20 @@ func (s *chatStore) appendMessage(msg llm.Message) {
 		s.ongoingError = ""
 	}
 	s.messages = append(s.messages, msg)
+	s.items = append(s.items, llm.ItemsFromMessages([]llm.Message{msg})...)
+}
+
+func (s *chatStore) replaceHistory(items []llm.ResponseItem) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.items = llm.CloneResponseItems(items)
+	s.messages = llm.MessagesFromItems(items)
+}
+
+func (s *chatStore) snapshotItems() []llm.ResponseItem {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return llm.CloneResponseItems(s.items)
 }
 
 func (s *chatStore) restoreToolCompletionPayload(payload []byte) error {
@@ -145,6 +161,9 @@ func (s *chatStore) snapshot() ChatSnapshot {
 		case llm.RoleUser:
 			content := strings.TrimSpace(msg.Content)
 			if content == "" || strings.HasPrefix(content, agentsInjectedPrefix) {
+				continue
+			}
+			if strings.HasPrefix(content, prompts.CompactionSummaryPrefix+"\n") {
 				continue
 			}
 			entries = append(entries, ChatEntry{Role: "user", Text: msg.Content})

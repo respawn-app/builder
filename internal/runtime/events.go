@@ -16,6 +16,9 @@ const (
 	EventToolCallStarted     EventKind = "tool_call_started"
 	EventToolCallCompleted   EventKind = "tool_call_completed"
 	EventInFlightClearFailed EventKind = "in_flight_clear_failed"
+	EventCompactionStarted   EventKind = "context_compaction_started"
+	EventCompactionCompleted EventKind = "context_compaction_completed"
+	EventCompactionFailed    EventKind = "context_compaction_failed"
 )
 
 type Event struct {
@@ -27,4 +30,14 @@ type Event struct {
 	Message        llm.Message
 	ToolCall       *llm.ToolCall
 	ToolResult     *tools.Result
+	Compaction     *CompactionStatus
+}
+
+type CompactionStatus struct {
+	Mode              string
+	Engine            string
+	Provider          string
+	TrimmedItemsCount int
+	Count             int
+	Error             string
 }

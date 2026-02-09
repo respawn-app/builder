@@ -457,6 +457,8 @@ func (m Model) flattenEntryWithMutedText(role, text string, muteText bool) []str
 		}
 		if muteText && strings.TrimSpace(displayChunk) != "" {
 			displayChunk = m.palette().preview.Faint(true).Render(displayChunk)
+		} else if role == "compaction_notice" || role == "compaction_summary" {
+			displayChunk = styleForRole(role, m.palette()).Render(displayChunk)
 		}
 		if i == 0 {
 			if symbol == "" {
@@ -528,7 +530,7 @@ func ongoingDividerGroup(role string) string {
 
 func skipInOngoing(role string) bool {
 	switch strings.ToLower(strings.TrimSpace(role)) {
-	case "thinking", "thinking_trace", "reasoning":
+	case "thinking", "thinking_trace", "reasoning", "compaction_summary":
 		return true
 	default:
 		return false
@@ -671,6 +673,8 @@ func (m Model) roleSymbol(role string) string {
 	switch role {
 	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error":
 		return styleForRole(role, m.palette()).Render(prefix)
+	case "compaction_notice", "compaction_summary":
+		return styleForRole(role, m.palette()).Render(prefix)
 	default:
 		return prefix
 	}
@@ -688,6 +692,8 @@ func rolePrefix(role string) string {
 		return "$"
 	case "reasoning", "thinking_trace":
 		return "…"
+	case "compaction_notice", "compaction_summary":
+		return "@"
 	default:
 		return ""
 	}
@@ -717,6 +723,8 @@ func styleForRole(role string, p palette) lipgloss.Style {
 		return p.system
 	case "error":
 		return p.error
+	case "compaction_notice", "compaction_summary":
+		return p.compaction
 	default:
 		return p.preview
 	}
@@ -731,6 +739,7 @@ type palette struct {
 	toolError   lipgloss.Style
 	system      lipgloss.Style
 	error       lipgloss.Style
+	compaction  lipgloss.Style
 }
 
 func (m Model) palette() palette {
@@ -742,6 +751,7 @@ func (m Model) palette() palette {
 	toolError := lipgloss.AdaptiveColor{Light: "#D73A49", Dark: "#E06C75"}
 	system := lipgloss.AdaptiveColor{Light: "#6A737D", Dark: "#ABB2BF"}
 	err := lipgloss.AdaptiveColor{Light: "#D73A49", Dark: "#E06C75"}
+	compaction := lipgloss.AdaptiveColor{Light: "#8A5A00", Dark: "#E5C07B"}
 	if m.theme == "light" {
 		base = lipgloss.AdaptiveColor{Light: "#5C6370", Dark: "#5C6370"}
 	}
@@ -754,6 +764,7 @@ func (m Model) palette() palette {
 		toolError:   lipgloss.NewStyle().Foreground(toolError),
 		system:      lipgloss.NewStyle().Foreground(system).Faint(true),
 		error:       lipgloss.NewStyle().Foreground(err),
+		compaction:  lipgloss.NewStyle().Foreground(compaction),
 	}
 }
 

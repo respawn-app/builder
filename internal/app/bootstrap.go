@@ -26,6 +26,7 @@ func bootstrapApp(ctx context.Context, opts Options) (appBootstrap, error) {
 		ModelTimeoutSeconds: opts.ModelTimeoutSeconds,
 		ShellTimeoutSeconds: opts.ShellTimeoutSeconds,
 		Tools:               opts.Tools,
+		OpenAIBaseURL:       opts.OpenAIBaseURL,
 	})
 	if err != nil {
 		return appBootstrap{}, err
