@@ -304,7 +304,7 @@ func TestBusyInputRemainsEditableUntilSubmitLock(t *testing.T) {
 	}
 }
 
-func TestViewRendersSoftCursorForEditableInput(t *testing.T) {
+func TestViewRendersOverlayCursorWithoutShiftingText(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 40
 	m.termHeight = 16
@@ -315,12 +315,12 @@ func TestViewRendersSoftCursorForEditableInput(t *testing.T) {
 		t.Fatalf("expected terminal cursor hidden in view: %q", view)
 	}
 	plain := stripANSIAndTrimRight(view)
-	if !strings.Contains(plain, "› hello world"+softCursorGlyph) {
-		t.Fatalf("expected soft cursor rendered at input end, got %q", plain)
+	if !strings.Contains(plain, "› hello world") {
+		t.Fatalf("expected input text preserved in view, got %q", plain)
 	}
 }
 
-func TestViewRendersSoftCursorAtCursorPosition(t *testing.T) {
+func TestViewCursorMovementDoesNotDropCharacters(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 40
 	m.termHeight = 16
@@ -328,8 +328,8 @@ func TestViewRendersSoftCursorAtCursorPosition(t *testing.T) {
 	m.inputCursor = 2
 
 	plain := stripANSIAndTrimRight(m.View())
-	if !strings.Contains(plain, "› he"+softCursorGlyph+"llo") {
-		t.Fatalf("expected soft cursor rendered at cursor position, got %q", plain)
+	if !strings.Contains(plain, "› hello") {
+		t.Fatalf("expected all characters preserved while moving cursor, got %q", plain)
 	}
 }
 
@@ -345,8 +345,34 @@ func TestViewHidesCursorWhenInputLocked(t *testing.T) {
 		t.Fatalf("expected terminal cursor hide sequence in view: %q", view)
 	}
 	plain := stripANSIAndTrimRight(view)
-	if strings.Contains(plain, softCursorGlyph) {
-		t.Fatalf("did not expect soft cursor while input locked, got %q", plain)
+	if !strings.Contains(plain, "⨯ hello world") {
+		t.Fatalf("expected locked input text preserved, got %q", plain)
+	}
+}
+
+func TestArrowNavigationDoesNotMutateInput(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "abcdef"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyHome})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlLeft})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlRight})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyLeft, Alt: true})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRight, Alt: true})
+	updated = next.(*uiModel)
+
+	if updated.input != "abcdef" {
+		t.Fatalf("expected navigation keys not to mutate input, got %q", updated.input)
 	}
 }
 

@@ -77,16 +77,6 @@ func (m *uiModel) moveCursorWordRight() {
 	m.inputCursor = nextWordBoundary(runes, clampCursor(m.inputCursor, len(runes)))
 }
 
-func (m *uiModel) inputWithSoftCursor(glyph string) string {
-	cursor := m.cursorIndex()
-	runes := m.inputRunes()
-	updated := make([]rune, 0, len(runes)+len([]rune(glyph)))
-	updated = append(updated, runes[:cursor]...)
-	updated = append(updated, []rune(glyph)...)
-	updated = append(updated, runes[cursor:]...)
-	return string(updated)
-}
-
 func prevWordBoundary(runes []rune, cursor int) int {
 	i := clampCursor(cursor, len(runes))
 	for i > 0 && unicode.IsSpace(runes[i-1]) {
