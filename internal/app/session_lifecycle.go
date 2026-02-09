@@ -12,7 +12,7 @@ import (
 func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionID string) error {
 	currentSessionID := strings.TrimSpace(initialSessionID)
 	for {
-		store, err := openOrCreateSession(boot.containerDir, currentSessionID, boot.cfg.WorkspaceRoot)
+		store, err := openOrCreateSession(boot.containerDir, currentSessionID, boot.cfg.WorkspaceRoot, boot.cfg.Settings.Theme)
 		if err != nil {
 			return err
 		}
@@ -74,7 +74,7 @@ func resolveSessionAction(ctx context.Context, boot appBootstrap, store *session
 	}
 }
 
-func openOrCreateSession(containerDir, selectedID, workspaceRoot string) (*session.Store, error) {
+func openOrCreateSession(containerDir, selectedID, workspaceRoot, theme string) (*session.Store, error) {
 	if strings.TrimSpace(selectedID) != "" {
 		return session.Open(filepath.Join(containerDir, selectedID))
 	}
@@ -88,7 +88,7 @@ func openOrCreateSession(containerDir, selectedID, workspaceRoot string) (*sessi
 		return session.Create(containerDir, containerName, workspaceRoot)
 	}
 
-	picked, err := runSessionPicker(summaries)
+	picked, err := runSessionPicker(summaries, theme)
 	if err != nil {
 		return nil, err
 	}
