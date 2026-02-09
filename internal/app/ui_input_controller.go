@@ -58,6 +58,18 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.deleteCurrentInputLine()
 		return m, nil
 	}
+	if !m.inputSubmitLocked && !msg.Alt {
+		switch msg.Type {
+		case tea.KeyUp, tea.KeyLeft:
+			if m.navigateSlashCommandPicker(-1) {
+				return m, nil
+			}
+		case tea.KeyDown, tea.KeyRight:
+			if m.navigateSlashCommandPicker(1) {
+				return m, nil
+			}
+		}
+	}
 
 	switch msg.Type {
 	case tea.KeyCtrlC:

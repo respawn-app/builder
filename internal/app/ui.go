@@ -122,11 +122,14 @@ type uiModel struct {
 	lockedInjectText  string
 	inputSubmitLocked bool
 
-	modelName       string
-	spinnerFrame    int
-	commandRegistry *commands.Registry
-	exitAction      UIAction
-	theme           string
+	modelName             string
+	spinnerFrame          int
+	commandRegistry       *commands.Registry
+	slashCommandFilter    string
+	slashCommandFilterSet bool
+	slashCommandSelection int
+	exitAction            UIAction
+	theme                 string
 
 	sawAssistantDelta bool
 	logger            uiLogger

@@ -32,15 +32,17 @@ func (l uiViewLayout) render() string {
 	}
 
 	inputLines := l.renderInputLines(width, style)
+	pickerLines := l.renderSlashCommandPicker(width)
 	statusLine := l.renderStatusLine(width, style)
 	statusLines := 1
-	chatLines := height - len(inputLines) - statusLines
+	chatLines := height - len(inputLines) - len(pickerLines) - statusLines
 	if chatLines < 1 {
 		chatLines = 1
 	}
 	chatPanel := l.renderChatPanel(width, chatLines, style)
 	allLines := make([]string, 0, height)
 	allLines = append(allLines, chatPanel...)
+	allLines = append(allLines, pickerLines...)
 	allLines = append(allLines, inputLines...)
 	allLines = append(allLines, statusLine)
 	for len(allLines) < height {
@@ -189,6 +191,33 @@ func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
 	return out
 }
 
+func (l uiViewLayout) renderSlashCommandPicker(width int) []string {
+	m := l.model
+	state := m.slashCommandPicker()
+	if !state.visible || width < 1 {
+		return nil
+	}
+	palette := uiPalette(m.theme)
+	commandStyle := lipgloss.NewStyle().Foreground(palette.primary).Bold(true)
+	descriptionStyle := lipgloss.NewStyle().Foreground(palette.secondary).Faint(true)
+	out := make([]string, 0, slashCommandPickerLines)
+	for row := 0; row < slashCommandPickerLines; row++ {
+		idx := state.start + row
+		line := ""
+		if idx < len(state.matches) {
+			line = commandStyle.Render("/" + state.matches[idx].Name)
+			description := strings.TrimSpace(state.matches[idx].Description)
+			if description != "" {
+				line += " - " + descriptionStyle.Render(description)
+			}
+		} else if len(state.matches) == 0 && row == 0 {
+			line = descriptionStyle.Render("No matching commands")
+		}
+		out = append(out, padANSIRight(line, width))
+	}
+	return out
+}
+
 func (l uiViewLayout) effectiveWidth() int {
 	m := l.model
 	if m.termWidth > 0 {
@@ -237,7 +266,11 @@ func (l uiViewLayout) calcChatLines() int {
 		inputContentLines = maxContentLines
 	}
 	inputLines := inputContentLines + 2
-	chat := height - inputLines - 1
+	pickerLines := 0
+	if m.slashCommandPicker().visible {
+		pickerLines = slashCommandPickerLines
+	}
+	chat := height - inputLines - pickerLines - 1
 	if chat < 1 {
 		return 1
 	}
@@ -267,6 +300,10 @@ func (m *uiModel) renderChatPanel(width, height int, style uiStyles) []string {
 
 func (m *uiModel) renderInputLines(width int, style uiStyles) []string {
 	return m.layout().renderInputLines(width, style)
+}
+
+func (m *uiModel) renderSlashCommandPicker(width int) []string {
+	return m.layout().renderSlashCommandPicker(width)
 }
 
 func (m *uiModel) effectiveWidth() int {

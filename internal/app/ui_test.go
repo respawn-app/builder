@@ -681,6 +681,83 @@ func TestRenderChatPanelRendersFullWidthMetaDivider(t *testing.T) {
 	}
 }
 
+func TestSlashCommandPickerRendersSevenLines(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/"
+
+	lines := m.renderSlashCommandPicker(80)
+	if len(lines) != slashCommandPickerLines {
+		t.Fatalf("expected %d picker lines, got %d", slashCommandPickerLines, len(lines))
+	}
+	plain := stripANSIAndTrimRight(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "/new - Create a new session") {
+		t.Fatalf("expected /new picker entry, got %q", plain)
+	}
+}
+
+func TestSlashCommandPickerHidesInArgumentMode(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("new")})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeySpace})
+	updated = next.(*uiModel)
+
+	lines := updated.renderSlashCommandPicker(80)
+	if len(lines) != 0 {
+		t.Fatalf("expected hidden picker in argument mode, got %d lines", len(lines))
+	}
+}
+
+func TestSlashCommandArrowKeysNavigatePickerAndReplaceInput(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	updated := next.(*uiModel)
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	if updated.input != "/exit" {
+		t.Fatalf("expected first down to select /exit, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	if updated.input != "/logout" {
+		t.Fatalf("expected second down to select /logout, got %q", updated.input)
+	}
+}
+
+func TestSlashCommandArrowKeysDoNotOverrideArgumentMode(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/new arg"
+	m.inputCursor = -1
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated := next.(*uiModel)
+	if updated.input != "/new arg" {
+		t.Fatalf("expected argument input unchanged, got %q", updated.input)
+	}
+	if updated.inputCursor != 0 {
+		t.Fatalf("expected regular cursor navigation, got %d", updated.inputCursor)
+	}
+}
+
+func TestUnknownSlashCommandIsSubmittedAsPrompt(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/nope"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if !updated.busy {
+		t.Fatal("expected submission to start for unknown slash command")
+	}
+	plain := stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(plain, "/nope") {
+		t.Fatalf("expected unknown slash command in user transcript, got %q", plain)
+	}
+}
+
 func TestSlashCommandSetsExitAction(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "/exit"

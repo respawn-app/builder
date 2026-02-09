@@ -444,13 +444,16 @@ This file records architecture and product decisions for the minimal terminal co
    - Status line under input shows only `model`, `busy/idle`, and queue size.
 
 136. **Leading slash input is always command mode.**
-   - If first non-space character is `/`, input is parsed as a slash command.
-   - Unknown slash commands are surfaced as system errors; they are not sent to the model.
+   - If first non-space character is `/`, input enters slash command mode with a live picker.
+   - Picker matching uses only the first token (before first whitespace) and updates continuously.
+   - Typing whitespace after the command token enters argument mode and hides the picker.
+   - Unknown slash commands are sent to the model as normal user prompts.
 
-137. **Built-in slash commands are `/logout`, `/exit`, `/new`.**
+137. **Built-in slash commands are `/logout`, `/exit`, `/new`, `/compact`.**
    - `/logout`: clear auth and run re-auth immediately in-app.
    - `/new`: create and switch to a new session immediately.
    - `/exit`: terminate the app.
+   - `/compact`: run explicit context compaction.
 
 138. **AGENTS injection order is deterministic on first user turn.**
    - Existing restored messages remain first.

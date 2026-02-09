@@ -14,6 +14,7 @@ func (m *uiModel) cursorIndex() int {
 func (m *uiModel) clearInput() {
 	m.input = ""
 	m.inputCursor = -1
+	m.refreshSlashCommandFilterFromInput()
 }
 
 func (m *uiModel) insertInputRunes(chars []rune) {
@@ -28,6 +29,7 @@ func (m *uiModel) insertInputRunes(chars []rune) {
 	updated = append(updated, runes[cursor:]...)
 	m.input = string(updated)
 	m.inputCursor = cursor + len(chars)
+	m.refreshSlashCommandFilterFromInput()
 }
 
 func (m *uiModel) backspaceInput() bool {
@@ -41,6 +43,7 @@ func (m *uiModel) backspaceInput() bool {
 	updated = append(updated, runes[cursor:]...)
 	m.input = string(updated)
 	m.inputCursor = cursor - 1
+	m.refreshSlashCommandFilterFromInput()
 	return true
 }
 
@@ -77,22 +80,24 @@ func (m *uiModel) moveCursorWordRight() {
 	m.inputCursor = nextWordBoundary(runes, clampCursor(m.inputCursor, len(runes)))
 }
 
-func (m *uiModel) moveCursorUpLine() {
+func (m *uiModel) moveCursorUpLine() bool {
 	runes := m.inputRunes()
 	cursor := clampCursor(m.inputCursor, len(runes))
 	currentStart := lineStart(runes, cursor)
 	currentCol := cursor - currentStart
 	if currentStart == 0 {
 		m.inputCursor = 0
-		return
+		return cursor != 0
 	}
 	prevEnd := currentStart - 1
 	prevStart := lineStart(runes, prevEnd)
 	prevLen := prevEnd - prevStart
-	m.inputCursor = prevStart + min(currentCol, prevLen)
+	newCursor := prevStart + min(currentCol, prevLen)
+	m.inputCursor = newCursor
+	return newCursor != cursor
 }
 
-func (m *uiModel) moveCursorDownLine() {
+func (m *uiModel) moveCursorDownLine() bool {
 	runes := m.inputRunes()
 	cursor := clampCursor(m.inputCursor, len(runes))
 	currentStart := lineStart(runes, cursor)
@@ -100,12 +105,14 @@ func (m *uiModel) moveCursorDownLine() {
 	currentEnd := lineEnd(runes, cursor)
 	if currentEnd >= len(runes) {
 		m.inputCursor = len(runes)
-		return
+		return cursor != len(runes)
 	}
 	nextStart := currentEnd + 1
 	nextEnd := lineEnd(runes, nextStart)
 	nextLen := nextEnd - nextStart
-	m.inputCursor = nextStart + min(currentCol, nextLen)
+	newCursor := nextStart + min(currentCol, nextLen)
+	m.inputCursor = newCursor
+	return newCursor != cursor
 }
 
 func (m *uiModel) deleteCurrentInputLine() bool {
@@ -134,6 +141,7 @@ func (m *uiModel) deleteCurrentInputLine() bool {
 	updated = append(updated, runes[deleteEnd:]...)
 	m.input = string(updated)
 	m.inputCursor = deleteStart
+	m.refreshSlashCommandFilterFromInput()
 	return true
 }
 
