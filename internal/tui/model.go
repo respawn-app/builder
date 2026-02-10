@@ -689,7 +689,7 @@ func findMatchingToolResultIndex(entries []TranscriptEntry, callIdx int, consume
 	if nextIdx < len(entries) {
 		if _, used := consumed[nextIdx]; !used && isToolResultRole(entries[nextIdx].Role) {
 			nextCallID := strings.TrimSpace(entries[nextIdx].ToolCallID)
-			if callID == "" || nextCallID == "" || callID == nextCallID {
+			if callID == nextCallID {
 				return nextIdx
 			}
 		}
