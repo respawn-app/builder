@@ -368,6 +368,26 @@ func (m Model) renderFlatDetailTranscript() string {
 		case "tool_result", "tool_result_ok", "tool_result_error":
 			blocks = append(blocks, m.flattenEntry(toolBlockRoleFromResult(role, "tool"), entry.Text))
 		default:
+			if isThinkingRole(role) {
+				combined := strings.TrimSpace(entry.Text)
+				for j := i + 1; j < len(m.transcript); j++ {
+					nextRole := strings.TrimSpace(m.transcript[j].Role)
+					if !isThinkingRole(nextRole) {
+						break
+					}
+					nextText := strings.TrimSpace(m.transcript[j].Text)
+					if nextText != "" {
+						if combined == "" {
+							combined = nextText
+						} else {
+							combined += "\n" + nextText
+						}
+					}
+					consumedResults[j] = struct{}{}
+				}
+				blocks = append(blocks, m.flattenEntry(role, combined))
+				continue
+			}
 			blocks = append(blocks, m.flattenEntry(role, entry.Text))
 		}
 	}
@@ -752,12 +772,19 @@ func rolePrefix(role string) string {
 		return "•"
 	case "tool_shell", "tool_shell_success", "tool_shell_error":
 		return "$"
-	case "reasoning", "thinking_trace":
-		return "…"
 	case "compaction_notice", "compaction_summary":
 		return "@"
 	default:
 		return ""
+	}
+}
+
+func isThinkingRole(role string) bool {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "thinking", "thinking_trace", "reasoning":
+		return true
+	default:
+		return false
 	}
 }
 

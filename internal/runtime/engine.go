@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"time"
@@ -21,12 +22,12 @@ import (
 )
 
 const (
-	interruptMessage         = "User interrupted you"
-	handoffInstruction       = "Context threshold reached. Provide a concise handoff summary with next steps. Do not call tools."
-	agentsFileName           = "AGENTS.md"
-	agentsGlobalDirName      = ".builder"
-	agentsInjectedHeader     = "# AGENTS.md content:"
-	agentsInjectedFenceLabel = "md"
+	interruptMessage          = "User interrupted you"
+	agentsFileName            = "AGENTS.md"
+	agentsGlobalDirName       = ".builder"
+	agentsInjectedHeader      = "# AGENTS.md content:"
+	agentsInjectedFenceLabel  = "md"
+	environmentInjectedHeader = "# Info about environment:"
 )
 
 type Config struct {
@@ -616,6 +617,10 @@ func (e *Engine) injectAgentsIfNeeded(stepID string) error {
 			return err
 		}
 	}
+	environment := environmentContextMessage(meta.WorkspaceRoot, time.Now())
+	if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, Content: environment}); err != nil {
+		return err
+	}
 
 	return e.store.MarkAgentsInjected()
 }
@@ -640,6 +645,76 @@ func agentsInjectionPaths(workspaceRoot string) ([]string, error) {
 	addPath(filepath.Join(home, agentsGlobalDirName, agentsFileName))
 	addPath(filepath.Join(workspaceRoot, agentsFileName))
 	return paths, nil
+}
+
+func environmentContextMessage(workspaceRoot string, now time.Time) string {
+	cwd, err := os.Getwd()
+	if err != nil || strings.TrimSpace(cwd) == "" {
+		cwd = strings.TrimSpace(workspaceRoot)
+	}
+	if strings.TrimSpace(cwd) == "" {
+		cwd = "unknown"
+	}
+
+	shell := shellEnvironmentName()
+	if strings.TrimSpace(shell) == "" {
+		shell = "unknown"
+	}
+
+	osName := strings.TrimSpace(goruntime.GOOS)
+	if osName == "" {
+		osName = "unknown"
+	}
+
+	cpuArch := strings.TrimSpace(goruntime.GOARCH)
+	if strings.TrimSpace(cpuArch) == "" {
+		cpuArch = "unknown"
+	}
+
+	tzName, tzOffset := now.Zone()
+	tzName = strings.TrimSpace(tzName)
+	if tzName == "" {
+		tzName = strings.TrimSpace(now.Location().String())
+	}
+	if tzName == "" {
+		tzName = "unknown"
+	}
+
+	return strings.Join([]string{
+		environmentInjectedHeader,
+		fmt.Sprintf("OS: %s", osName),
+		fmt.Sprintf("Current TZ: %s (UTC%s)", tzName, formatUTCOffset(tzOffset)),
+		fmt.Sprintf("Date/time: %s", now.Format(time.RFC3339)),
+		fmt.Sprintf("Shell: %s", shell),
+		fmt.Sprintf("CWD: %s", cwd),
+		fmt.Sprintf("CPU arch: %s", cpuArch),
+	}, "\n")
+}
+
+func shellEnvironmentName() string {
+	for _, key := range []string{"SHELL", "COMSPEC"} {
+		value := strings.TrimSpace(os.Getenv(key))
+		if value == "" {
+			continue
+		}
+		base := filepath.Base(value)
+		if base == "" || base == "." || base == string(filepath.Separator) {
+			return value
+		}
+		return base
+	}
+	return ""
+}
+
+func formatUTCOffset(offsetSeconds int) string {
+	sign := "+"
+	if offsetSeconds < 0 {
+		sign = "-"
+		offsetSeconds = -offsetSeconds
+	}
+	hours := offsetSeconds / 3600
+	minutes := (offsetSeconds % 3600) / 60
+	return fmt.Sprintf("%s%02d:%02d", sign, hours, minutes)
 }
 
 func (e *Engine) restoreMessages() error {

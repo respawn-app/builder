@@ -402,8 +402,32 @@ func TestDetailShowsReasoningSummaryAsSeparateEntry(t *testing.T) {
 
 	m = updateModel(t, m, ToggleModeMsg{})
 	detail := plainTranscript(m.View())
-	if !containsInOrder(detail, "…", "Plan summary") {
+	if !strings.Contains(detail, "Plan summary") {
 		t.Fatalf("expected reasoning summary entry in detail view, got %q", detail)
+	}
+	if strings.Contains(detail, "…") {
+		t.Fatalf("expected reasoning entry without ellipsis prefix, got %q", detail)
+	}
+}
+
+func TestDetailGroupsReasoningEntriesAndRendersMarkdown(t *testing.T) {
+	m := NewModel(WithPreviewLines(30))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "reasoning", Text: "**First step**"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "reasoning", Text: "`second` details"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "reasoning", Text: "**third**"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "done"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := plainTranscript(m.View())
+	if strings.Contains(view, "**First step**") || strings.Contains(view, "`second` details") || strings.Contains(view, "**third**") {
+		t.Fatalf("expected reasoning markdown to be rendered, got %q", view)
+	}
+	if !containsInOrder(view, "First step", "second", "details", "third") {
+		t.Fatalf("expected grouped reasoning text in order, got %q", view)
+	}
+	if got := strings.Count(view, strings.Repeat("─", 24)); got != 2 {
+		t.Fatalf("expected 2 dividers for user/reasoning/assistant groups, got %d in %q", got, view)
 	}
 }
 
