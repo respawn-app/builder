@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -8,9 +9,12 @@ import (
 
 	"builder/internal/llm"
 	"builder/internal/runtime"
+	"builder/internal/session"
+	"builder/internal/tools"
 	"builder/internal/tools/askquestion"
 	"builder/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -591,6 +595,33 @@ func TestBusyTabQueuesInjectionAndKeepsInputUnlocked(t *testing.T) {
 	}
 }
 
+func TestCompactDoneUnlocksInputAndClearsLockedPendingState(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.input = "please continue with tests"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if !updated.inputSubmitLocked {
+		t.Fatal("expected input submit lock after enter while busy")
+	}
+	if len(updated.pendingInjected) != 1 {
+		t.Fatalf("expected one pending injected message, got %d", len(updated.pendingInjected))
+	}
+
+	next, _ = updated.Update(compactDoneMsg{})
+	updated = next.(*uiModel)
+	if updated.inputSubmitLocked {
+		t.Fatal("expected submit lock cleared after compaction completion")
+	}
+	if updated.lockedInjectText != "" {
+		t.Fatalf("expected lockedInjectText cleared, got %q", updated.lockedInjectText)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected locked pending injection removed, got %d", len(updated.pendingInjected))
+	}
+}
+
 func TestRenderInputLinesUsesHorizontalBordersOnly(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 40
@@ -654,6 +685,83 @@ func TestRenderChatPanelRendersFullWidthMetaDivider(t *testing.T) {
 	}
 }
 
+func TestSlashCommandPickerRendersSevenLines(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/"
+
+	lines := m.renderSlashCommandPicker(80)
+	if len(lines) != slashCommandPickerLines {
+		t.Fatalf("expected %d picker lines, got %d", slashCommandPickerLines, len(lines))
+	}
+	plain := stripANSIAndTrimRight(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "/new - Create a new session") {
+		t.Fatalf("expected /new picker entry, got %q", plain)
+	}
+}
+
+func TestSlashCommandPickerHidesInArgumentMode(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("new")})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeySpace})
+	updated = next.(*uiModel)
+
+	lines := updated.renderSlashCommandPicker(80)
+	if len(lines) != 0 {
+		t.Fatalf("expected hidden picker in argument mode, got %d lines", len(lines))
+	}
+}
+
+func TestSlashCommandArrowKeysNavigatePickerAndReplaceInput(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	updated := next.(*uiModel)
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	if updated.input != "/exit" {
+		t.Fatalf("expected first down to select /exit, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	if updated.input != "/logout" {
+		t.Fatalf("expected second down to select /logout, got %q", updated.input)
+	}
+}
+
+func TestSlashCommandArrowKeysDoNotOverrideArgumentMode(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/new arg"
+	m.inputCursor = -1
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated := next.(*uiModel)
+	if updated.input != "/new arg" {
+		t.Fatalf("expected argument input unchanged, got %q", updated.input)
+	}
+	if updated.inputCursor != 0 {
+		t.Fatalf("expected regular cursor navigation, got %d", updated.inputCursor)
+	}
+}
+
+func TestUnknownSlashCommandIsSubmittedAsPrompt(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/nope"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if !updated.busy {
+		t.Fatal("expected submission to start for unknown slash command")
+	}
+	plain := stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(plain, "/nope") {
+		t.Fatalf("expected unknown slash command in user transcript, got %q", plain)
+	}
+}
+
 func TestSlashCommandSetsExitAction(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "/exit"
@@ -691,6 +799,50 @@ func TestInitialTranscriptVisibleImmediately(t *testing.T) {
 	if !containsInOrder(detail, "❯", "hello", "❮", "world") {
 		t.Fatalf("expected resumed transcript in detail mode, got %q", detail)
 	}
+}
+
+func TestStatusLineShowsContextUsageWhenAvailable(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(line, "0%") {
+		t.Fatalf("expected context usage label in status line, got %q", line)
+	}
+	if !strings.Contains(line, "▯▯▯▯▯▯▯▯▯▯") {
+		t.Fatalf("expected progress bar in status line, got %q", line)
+	}
+}
+
+func TestStatusContextZoneColorBoundaries(t *testing.T) {
+	assertLightColor := func(percent int, want string) {
+		t.Helper()
+		adaptive, ok := statusContextZoneColor(percent).(lipgloss.CompleteAdaptiveColor)
+		if !ok {
+			t.Fatalf("unexpected color type for percent=%d", percent)
+		}
+		if adaptive.Light.TrueColor != want {
+			t.Fatalf("percent=%d color=%s want=%s", percent, adaptive.Light.TrueColor, want)
+		}
+	}
+	assertLightColor(49, "#22863A")
+	assertLightColor(50, "#9A6700")
+	assertLightColor(79, "#9A6700")
+	assertLightColor(80, "#CB2431")
+}
+
+type statusLineFakeClient struct{}
+
+func (statusLineFakeClient) Generate(context.Context, llm.Request) (llm.Response, error) {
+	return llm.Response{}, errors.New("not implemented")
 }
 
 func stripANSIAndTrimRight(view string) string {

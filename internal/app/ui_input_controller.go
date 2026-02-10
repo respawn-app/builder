@@ -58,6 +58,18 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.deleteCurrentInputLine()
 		return m, nil
 	}
+	if !m.inputSubmitLocked && !msg.Alt {
+		switch msg.Type {
+		case tea.KeyUp, tea.KeyLeft:
+			if m.navigateSlashCommandPicker(-1) {
+				return m, nil
+			}
+		case tea.KeyDown, tea.KeyRight:
+			if m.navigateSlashCommandPicker(1) {
+				return m, nil
+			}
+		}
+	}
 
 	switch msg.Type {
 	case tea.KeyCtrlC:
@@ -112,6 +124,8 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			case commands.ActionLogout:
 				m.exitAction = UIActionLogout
 				return m, tea.Quit
+			case commands.ActionCompact:
+				return m, c.startCompaction()
 			}
 			return m, nil
 		}
@@ -239,6 +253,26 @@ func (c uiInputController) submitCmd(text string) tea.Cmd {
 	}
 }
 
+func (c uiInputController) startCompaction() tea.Cmd {
+	m := c.model
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.sawAssistantDelta = false
+	m.logf("compaction.start")
+	m.syncViewport()
+	return tea.Batch(c.compactCmd(), tickSpinner())
+}
+
+func (c uiInputController) compactCmd() tea.Cmd {
+	m := c.model
+	return func() tea.Msg {
+		if m.engine == nil {
+			return compactDoneMsg{err: errors.New("runtime engine is not configured")}
+		}
+		return compactDoneMsg{err: m.engine.CompactContext(context.Background())}
+	}
+}
+
 func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.Cmd) {
 	m := c.model
 	m.busy = false
@@ -284,18 +318,26 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 }
 
 func (c uiInputController) unlockInputAfterSubmissionError() {
+	c.releaseLockedInjectedInput(true)
+}
+
+func (c uiInputController) releaseLockedInjectedInput(discardEngineQueue bool) {
 	m := c.model
 	if !m.inputSubmitLocked {
 		return
 	}
 	locked := strings.TrimSpace(m.lockedInjectText)
 	if locked != "" {
-		for i, pending := range m.pendingInjected {
-			if strings.TrimSpace(pending) != locked {
+		filtered := m.pendingInjected[:0]
+		for _, pending := range m.pendingInjected {
+			if strings.TrimSpace(pending) == locked {
 				continue
 			}
-			m.pendingInjected = append(m.pendingInjected[:i], m.pendingInjected[i+1:]...)
-			break
+			filtered = append(filtered, pending)
+		}
+		m.pendingInjected = filtered
+		if discardEngineQueue && m.engine != nil {
+			m.engine.DiscardQueuedUserMessagesMatching(locked)
 		}
 	}
 	m.inputSubmitLocked = false
@@ -310,6 +352,37 @@ func (c uiInputController) handleSpinnerTick() (tea.Model, tea.Cmd) {
 	m.spinnerFrame = (m.spinnerFrame + 1) % len(spinnerFrames)
 	m.syncViewport()
 	return m, tickSpinner()
+}
+
+func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
+	m := c.model
+	m.busy = false
+	m.spinnerFrame = 0
+	c.releaseLockedInjectedInput(true)
+	if msg.err != nil {
+		detailErr := formatSubmissionError(msg.err)
+		m.activity = uiActivityError
+		if m.engine != nil {
+			m.engine.SetOngoingError(detailErr)
+			m.engine.AppendLocalEntry("error", detailErr)
+		} else {
+			m.forwardToView(tui.SetOngoingErrorMsg{Err: errors.New(detailErr)})
+			m.forwardToView(tui.AppendTranscriptMsg{Role: "error", Text: detailErr})
+		}
+		m.logf("compaction.error err=%q", detailErr)
+		m.syncViewport()
+		return m, nil
+	}
+
+	m.activity = uiActivityIdle
+	if m.engine != nil {
+		m.engine.ClearOngoingError()
+	} else {
+		m.forwardToView(tui.ClearOngoingErrorMsg{})
+	}
+	m.logf("compaction.done")
+	m.syncViewport()
+	return m, nil
 }
 
 func (m *uiModel) popQueued() string {

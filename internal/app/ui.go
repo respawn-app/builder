@@ -16,6 +16,10 @@ type submitDoneMsg struct {
 	err     error
 }
 
+type compactDoneMsg struct {
+	err error
+}
+
 type spinnerTickMsg struct{}
 
 type runtimeEventMsg struct {
@@ -118,11 +122,14 @@ type uiModel struct {
 	lockedInjectText  string
 	inputSubmitLocked bool
 
-	modelName       string
-	spinnerFrame    int
-	commandRegistry *commands.Registry
-	exitAction      UIAction
-	theme           string
+	modelName             string
+	spinnerFrame          int
+	commandRegistry       *commands.Registry
+	slashCommandFilter    string
+	slashCommandFilterSet bool
+	slashCommandSelection int
+	exitAction            UIAction
+	theme                 string
 
 	sawAssistantDelta bool
 	logger            uiLogger
@@ -200,6 +207,10 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitAskEvent(m.askEvents)
 	case submitDoneMsg:
 		next, cmd := m.inputController().handleSubmitDone(msg)
+		next.(*uiModel).syncViewport()
+		return next, cmd
+	case compactDoneMsg:
+		next, cmd := m.inputController().handleCompactDone(msg)
 		next.(*uiModel).syncViewport()
 		return next, cmd
 	case spinnerTickMsg:

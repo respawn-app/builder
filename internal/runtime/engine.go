@@ -30,12 +30,21 @@ const (
 )
 
 type Config struct {
-	Model         string
-	Temperature   float64
-	MaxTokens     int
-	ThinkingLevel string
-	EnabledTools  []tools.ID
-	OnEvent       func(Event)
+	Model                         string
+	Temperature                   float64
+	MaxTokens                     int
+	ThinkingLevel                 string
+	EnabledTools                  []tools.ID
+	AutoCompactTokenLimit         int
+	ContextWindowTokens           int
+	EffectiveContextWindowPercent int
+	LocalCompactionCarryoverLimit int
+	OnEvent                       func(Event)
+}
+
+type ContextUsage struct {
+	UsedTokens   int
+	WindowTokens int
 }
 
 type Engine struct {
@@ -53,8 +62,9 @@ type Engine struct {
 	cancelCurrent   context.CancelFunc
 	busy            bool
 
-	handoffPending bool
-	handoffDone    bool
+	lastUsage llm.Usage
+
+	compactionCount int
 }
 
 func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg Config) (*Engine, error) {
@@ -69,6 +79,17 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 	}
 	if cfg.MaxTokens < 0 {
 		cfg.MaxTokens = 0
+	}
+	if cfg.EffectiveContextWindowPercent <= 0 || cfg.EffectiveContextWindowPercent > 100 {
+		cfg.EffectiveContextWindowPercent = 95
+	}
+	if cfg.LocalCompactionCarryoverLimit <= 0 {
+		cfg.LocalCompactionCarryoverLimit = 20_000
+	}
+	if cfg.ContextWindowTokens <= 0 {
+		if meta, ok := llm.LookupModelMetadata(cfg.Model); ok && meta.ContextWindowTokens > 0 {
+			cfg.ContextWindowTokens = meta.ContextWindowTokens
+		}
 	}
 
 	eng := &Engine{
@@ -106,6 +127,27 @@ func (e *Engine) QueueUserMessage(text string) {
 	e.pendingInjected = append(e.pendingInjected, text)
 }
 
+func (e *Engine) DiscardQueuedUserMessagesMatching(text string) int {
+	needle := strings.TrimSpace(text)
+	if needle == "" {
+		return 0
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	filtered := e.pendingInjected[:0]
+	removed := 0
+	for _, pending := range e.pendingInjected {
+		if strings.TrimSpace(pending) == needle {
+			removed++
+			continue
+		}
+		filtered = append(filtered, pending)
+	}
+	e.pendingInjected = filtered
+	return removed
+}
+
 func (e *Engine) Interrupt() error {
 	e.mu.Lock()
 	cancel := e.cancelCurrent
@@ -132,10 +174,6 @@ func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (assistant 
 	}
 
 	e.mu.Lock()
-	if e.handoffDone {
-		e.mu.Unlock()
-		return llm.Message{Role: llm.RoleAssistant, Content: "Context threshold reached. Start a new session to continue."}, nil
-	}
 	if e.busy {
 		e.mu.Unlock()
 		return llm.Message{}, errors.New("agent is busy")
@@ -178,13 +216,12 @@ func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (assistant 
 }
 
 func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, error) {
-	allowTools := true
-	if e.handoffPending {
-		allowTools = false
-	}
-
 	for {
-		req, err := e.buildRequest(stepID, allowTools)
+		if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
+			return llm.Message{}, err
+		}
+
+		req, err := e.buildRequest(stepID, true)
 		if err != nil {
 			return llm.Message{}, err
 		}
@@ -206,6 +243,7 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 		if err != nil {
 			return llm.Message{}, err
 		}
+		e.setLastUsage(resp.Usage)
 
 		assistantMsg := resp.Assistant
 		if len(resp.ToolCalls) > 0 {
@@ -221,23 +259,13 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 			return llm.Message{}, err
 		}
 
-		if resp.Usage.Percent() >= 80 && !e.handoffPending && !e.handoffDone {
-			e.handoffPending = true
-		}
-
-		if len(resp.ToolCalls) == 0 || !allowTools {
+		if len(resp.ToolCalls) == 0 {
 			flushed, err := e.flushPendingUserInjections(stepID)
 			if err != nil {
 				return llm.Message{}, err
 			}
 			if flushed > 0 {
-				if e.handoffPending {
-					allowTools = false
-				}
 				continue
-			}
-			if e.handoffPending && !e.handoffDone {
-				e.handoffDone = true
 			}
 			e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: assistantMsg})
 			return assistantMsg, nil
@@ -263,13 +291,8 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 		if _, err := e.flushPendingUserInjections(stepID); err != nil {
 			return llm.Message{}, err
 		}
-
-		if e.handoffPending {
-			handoff := llm.Message{Role: llm.RoleDeveloper, Content: handoffInstruction}
-			if err := e.appendMessage(stepID, handoff); err != nil {
-				return llm.Message{}, err
-			}
-			allowTools = false
+		if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
+			return llm.Message{}, err
 		}
 	}
 }
@@ -295,8 +318,10 @@ func (e *Engine) buildRequest(_ string, allowTools bool) (llm.Request, error) {
 
 	msgs := e.snapshotMessages()
 	msgs = sanitizeMessagesForLLM(msgs)
+	items := e.snapshotItems()
+	items = sanitizeItemsForLLM(items)
 
-	req, err := llm.RequestFromLockedContract(locked, prompts.SystemPrompt, msgs, requestTools)
+	req, err := llm.RequestFromLockedContractWithItems(locked, prompts.SystemPrompt, msgs, items, requestTools)
 	if err != nil {
 		return llm.Request{}, err
 	}
@@ -316,6 +341,28 @@ func sanitizeMessagesForLLM(messages []llm.Message) []llm.Message {
 			content = normalizeToolMessageForLLM(content)
 		}
 		cleaned[i].Content = content
+	}
+	return cleaned
+}
+
+func sanitizeItemsForLLM(items []llm.ResponseItem) []llm.ResponseItem {
+	if len(items) == 0 {
+		return items
+	}
+	cleaned := llm.CloneResponseItems(items)
+	for i := range cleaned {
+		if cleaned[i].Type == llm.ResponseItemTypeMessage {
+			cleaned[i].Content = xansi.Strip(cleaned[i].Content)
+		}
+		if cleaned[i].Type == llm.ResponseItemTypeFunctionCallOutput && len(cleaned[i].Output) > 0 {
+			normalized := normalizeToolMessageForLLM(string(cleaned[i].Output))
+			if json.Valid([]byte(normalized)) {
+				cleaned[i].Output = json.RawMessage(normalized)
+			} else {
+				quoted, _ := json.Marshal(normalized)
+				cleaned[i].Output = quoted
+			}
+		}
 	}
 	return cleaned
 }
@@ -618,6 +665,13 @@ func (e *Engine) restoreMessages() error {
 				return fmt.Errorf("decode local_entry event: %w", err)
 			}
 			e.chat.appendLocalEntry(entry.Role, entry.Text)
+		case "history_replaced":
+			var payload historyReplacementPayload
+			if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+				return fmt.Errorf("decode history_replaced event: %w", err)
+			}
+			e.chat.replaceHistory(payload.Items)
+			e.compactionCount++
 		}
 	}
 	return nil
@@ -627,8 +681,24 @@ func (e *Engine) snapshotMessages() []llm.Message {
 	return e.chat.snapshotMessages()
 }
 
+func (e *Engine) snapshotItems() []llm.ResponseItem {
+	return e.chat.snapshotItems()
+}
+
 func (e *Engine) ChatSnapshot() ChatSnapshot {
 	return e.chat.snapshot()
+}
+
+func (e *Engine) ContextUsage() ContextUsage {
+	window := e.contextWindowTokens()
+	used := e.currentTokenUsage()
+	if used < 0 {
+		used = 0
+	}
+	if window < 0 {
+		window = 0
+	}
+	return ContextUsage{UsedTokens: used, WindowTokens: window}
 }
 
 func (e *Engine) AppendLocalEntry(role, text string) {
@@ -656,6 +726,12 @@ type storedLocalEntry struct {
 	Text string `json:"text"`
 }
 
+type historyReplacementPayload struct {
+	Engine string             `json:"engine"`
+	Mode   string             `json:"mode"`
+	Items  []llm.ResponseItem `json:"items"`
+}
+
 func toToolNames(ids []tools.ID) []string {
 	out := make([]string, 0, len(ids))
 	for _, id := range ids {
@@ -667,8 +743,27 @@ func toToolNames(ids []tools.ID) []string {
 	return out
 }
 
+func (e *Engine) lastUsageSnapshot() llm.Usage {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.lastUsage
+}
+
+func (e *Engine) setLastUsage(usage llm.Usage) {
+	e.mu.Lock()
+	e.lastUsage = usage
+	e.mu.Unlock()
+}
+
 func (e *Engine) emit(evt Event) {
 	if e.cfg.OnEvent != nil {
 		e.cfg.OnEvent(evt)
 	}
+}
+
+func (e *Engine) nextCompactionCount() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.compactionCount++
+	return e.compactionCount
 }

@@ -94,6 +94,7 @@ func (r *markdownRenderer) styleConfig() glamouransi.StyleConfig {
 	cfg.Document.Margin = &zero
 	cfg.Document.BlockPrefix = ""
 	cfg.Document.BlockSuffix = ""
+	cfg.Code.BackgroundColor = nil
 	return cfg
 }
 

@@ -24,9 +24,10 @@ const (
 var patchCountTokenPattern = regexp.MustCompile(`([+-]\d+)\b`)
 
 type TranscriptEntry struct {
-	Role     string
-	Text     string
-	ToolCall *transcript.ToolCallMeta
+	Role       string
+	Text       string
+	ToolCallID string
+	ToolCall   *transcript.ToolCallMeta
 }
 
 type ToggleModeMsg struct{}
@@ -45,9 +46,10 @@ type SetViewportSizeMsg struct {
 }
 
 type AppendTranscriptMsg struct {
-	Role     string
-	Text     string
-	ToolCall *transcript.ToolCallMeta
+	Role       string
+	Text       string
+	ToolCallID string
+	ToolCall   *transcript.ToolCallMeta
 }
 
 type SetConversationMsg struct {
@@ -134,6 +136,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.scrollActive(-1)
 		case tea.KeyDown:
 			m = m.scrollActive(1)
+		case tea.KeyPgUp:
+			m = m.scrollActive(-max(1, m.viewportLines-1))
+		case tea.KeyPgDown:
+			m = m.scrollActive(max(1, m.viewportLines-1))
+		}
+	case tea.MouseMsg:
+		switch {
+		case msg.Button == tea.MouseButtonWheelUp || msg.Type == tea.MouseWheelUp:
+			m = m.scrollActive(-3)
+		case msg.Button == tea.MouseButtonWheelDown || msg.Type == tea.MouseWheelDown:
+			m = m.scrollActive(3)
 		}
 	case ToggleModeMsg:
 		m = m.toggleMode()
@@ -156,15 +169,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			role = "unknown"
 		}
 		m.transcript = append(m.transcript, TranscriptEntry{
-			Role:     role,
-			Text:     msg.Text,
-			ToolCall: cloneToolCallMeta(msg.ToolCall),
+			Role:       role,
+			Text:       msg.Text,
+			ToolCallID: strings.TrimSpace(msg.ToolCallID),
+			ToolCall:   cloneToolCallMeta(msg.ToolCall),
 		})
 		shouldAutoFollowOngoing = true
 	case SetConversationMsg:
 		entries := make([]TranscriptEntry, len(msg.Entries))
 		copy(entries, msg.Entries)
 		for i := range entries {
+			entries[i].ToolCallID = strings.TrimSpace(entries[i].ToolCallID)
 			entries[i].ToolCall = cloneToolCallMeta(entries[i].ToolCall)
 		}
 		m.transcript = entries
@@ -320,7 +335,11 @@ func (m Model) renderDetailSnapshot() string {
 
 func (m Model) renderFlatDetailTranscript() string {
 	blocks := make([][]string, 0, len(m.transcript)+1)
+	consumedResults := make(map[int]struct{})
 	for i := 0; i < len(m.transcript); i++ {
+		if _, consumed := consumedResults[i]; consumed {
+			continue
+		}
 		entry := m.transcript[i]
 		role := strings.TrimSpace(entry.Role)
 		switch role {
@@ -334,16 +353,16 @@ func (m Model) renderFlatDetailTranscript() string {
 			if hasPatchPayload {
 				combined = patchDetail
 			}
-			if i+1 < len(m.transcript) && isToolResultRole(m.transcript[i+1].Role) {
-				nextRole := strings.TrimSpace(m.transcript[i+1].Role)
-				resultText := m.transcript[i+1].Text
+			if resultIdx := findMatchingToolResultIndex(m.transcript, i, consumedResults); resultIdx >= 0 {
+				nextRole := strings.TrimSpace(m.transcript[resultIdx].Role)
+				resultText := m.transcript[resultIdx].Text
 				if strings.TrimSpace(resultText) != "" {
 					if !(hasPatchPayload && nextRole != "tool_result_error") {
 						combined = combined + "\n" + resultText
 					}
 				}
 				blockRole = toolBlockRoleFromResult(nextRole, blockRole)
-				i++
+				consumedResults[resultIdx] = struct{}{}
 			}
 			blocks = append(blocks, m.flattenEntry(blockRole, combined))
 		case "tool_result", "tool_result_ok", "tool_result_error":
@@ -375,7 +394,11 @@ func (m Model) renderFlatOngoingTranscript() string {
 	}
 
 	blocks := make([]ongoingBlock, 0, len(m.transcript)+1)
+	consumedResults := make(map[int]struct{})
 	for i := 0; i < len(m.transcript); i++ {
+		if _, consumed := consumedResults[i]; consumed {
+			continue
+		}
 		entry := m.transcript[i]
 		role := strings.TrimSpace(entry.Role)
 		if skipInOngoing(role) {
@@ -392,11 +415,11 @@ func (m Model) renderFlatOngoingTranscript() string {
 			if hasPatchPayload {
 				combined = strings.TrimSpace(patchSummary)
 			}
-			if i+1 < len(m.transcript) {
-				nextRole := strings.TrimSpace(m.transcript[i+1].Role)
+			if resultIdx := findMatchingToolResultIndex(m.transcript, i, consumedResults); resultIdx >= 0 {
+				nextRole := strings.TrimSpace(m.transcript[resultIdx].Role)
 				if isToolResultRole(nextRole) {
 					blockRole = toolBlockRoleFromResult(nextRole, blockRole)
-					i++
+					consumedResults[resultIdx] = struct{}{}
 				}
 			}
 			blocks = append(blocks, ongoingBlock{
@@ -441,6 +464,7 @@ func (m Model) flattenEntryWithMutedText(role, text string, muteText bool) []str
 		renderWidth -= 2
 	}
 	rendered := m.renderEntryText(role, text, renderWidth)
+	isEditedBlock := strings.HasPrefix(strings.TrimSpace(rendered), "Edited:")
 	chunks := splitLines(rendered)
 	if len(chunks) == 0 {
 		chunks = []string{""}
@@ -455,8 +479,10 @@ func (m Model) flattenEntryWithMutedText(role, text string, muteText bool) []str
 			}
 			displayChunk = m.styleToolLine(displayChunk)
 		}
-		if muteText && strings.TrimSpace(displayChunk) != "" {
+		if muteText && strings.TrimSpace(displayChunk) != "" && !isEditedBlock {
 			displayChunk = m.palette().preview.Faint(true).Render(displayChunk)
+		} else if role == "compaction_notice" || role == "compaction_summary" {
+			displayChunk = styleForRole(role, m.palette()).Render(displayChunk)
 		}
 		if i == 0 {
 			if symbol == "" {
@@ -528,7 +554,7 @@ func ongoingDividerGroup(role string) string {
 
 func skipInOngoing(role string) bool {
 	switch strings.ToLower(strings.TrimSpace(role)) {
-	case "thinking", "thinking_trace", "reasoning":
+	case "thinking", "thinking_trace", "reasoning", "compaction_summary":
 		return true
 	default:
 		return false
@@ -612,24 +638,34 @@ func (m Model) styleToolLine(line string) string {
 	if trimmed == "" {
 		return line
 	}
-	if trimmed == "Edited:" {
-		return lipgloss.NewStyle().Bold(true).Render(trimmed)
-	}
 	if strings.HasPrefix(line, "+") {
 		return m.palette().toolSuccess.Render(line)
 	}
 	if strings.HasPrefix(line, "-") {
 		return m.palette().toolError.Render(line)
 	}
+	successCountStyle := m.palette().toolSuccess
+	errorCountStyle := m.palette().toolError
+	if strings.HasPrefix(trimmed, "Edited:") {
+		return patchCountTokenPattern.ReplaceAllStringFunc(line, func(token string) string {
+			if strings.HasPrefix(token, "+") {
+				return successCountStyle.Render(token)
+			}
+			if strings.HasPrefix(token, "-") {
+				return errorCountStyle.Render(token)
+			}
+			return token
+		})
+	}
 	if !strings.HasPrefix(trimmed, "./") {
 		return line
 	}
 	return patchCountTokenPattern.ReplaceAllStringFunc(line, func(token string) string {
 		if strings.HasPrefix(token, "+") {
-			return m.palette().toolSuccess.Render(token)
+			return successCountStyle.Render(token)
 		}
 		if strings.HasPrefix(token, "-") {
-			return m.palette().toolError.Render(token)
+			return errorCountStyle.Render(token)
 		}
 		return token
 	})
@@ -642,6 +678,34 @@ func isToolResultRole(role string) bool {
 	default:
 		return false
 	}
+}
+
+func findMatchingToolResultIndex(entries []TranscriptEntry, callIdx int, consumed map[int]struct{}) int {
+	if callIdx < 0 || callIdx >= len(entries) {
+		return -1
+	}
+	callID := strings.TrimSpace(entries[callIdx].ToolCallID)
+	nextIdx := callIdx + 1
+	if nextIdx < len(entries) {
+		if _, used := consumed[nextIdx]; !used && isToolResultRole(entries[nextIdx].Role) {
+			nextCallID := strings.TrimSpace(entries[nextIdx].ToolCallID)
+			if callID == nextCallID {
+				return nextIdx
+			}
+		}
+	}
+	if callID == "" {
+		return -1
+	}
+	for i := callIdx + 1; i < len(entries); i++ {
+		if _, used := consumed[i]; used || !isToolResultRole(entries[i].Role) {
+			continue
+		}
+		if strings.TrimSpace(entries[i].ToolCallID) == callID {
+			return i
+		}
+	}
+	return -1
 }
 
 func toolBlockRoleFromResult(role, baseRole string) string {
@@ -671,6 +735,8 @@ func (m Model) roleSymbol(role string) string {
 	switch role {
 	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error":
 		return styleForRole(role, m.palette()).Render(prefix)
+	case "compaction_notice", "compaction_summary":
+		return styleForRole(role, m.palette()).Render(prefix)
 	default:
 		return prefix
 	}
@@ -688,6 +754,8 @@ func rolePrefix(role string) string {
 		return "$"
 	case "reasoning", "thinking_trace":
 		return "…"
+	case "compaction_notice", "compaction_summary":
+		return "@"
 	default:
 		return ""
 	}
@@ -717,6 +785,8 @@ func styleForRole(role string, p palette) lipgloss.Style {
 		return p.system
 	case "error":
 		return p.error
+	case "compaction_notice", "compaction_summary":
+		return p.compaction
 	default:
 		return p.preview
 	}
@@ -731,6 +801,7 @@ type palette struct {
 	toolError   lipgloss.Style
 	system      lipgloss.Style
 	error       lipgloss.Style
+	compaction  lipgloss.Style
 }
 
 func (m Model) palette() palette {
@@ -742,6 +813,7 @@ func (m Model) palette() palette {
 	toolError := lipgloss.AdaptiveColor{Light: "#D73A49", Dark: "#E06C75"}
 	system := lipgloss.AdaptiveColor{Light: "#6A737D", Dark: "#ABB2BF"}
 	err := lipgloss.AdaptiveColor{Light: "#D73A49", Dark: "#E06C75"}
+	compaction := lipgloss.AdaptiveColor{Light: "#8A5A00", Dark: "#E5C07B"}
 	if m.theme == "light" {
 		base = lipgloss.AdaptiveColor{Light: "#5C6370", Dark: "#5C6370"}
 	}
@@ -754,6 +826,7 @@ func (m Model) palette() palette {
 		toolError:   lipgloss.NewStyle().Foreground(toolError),
 		system:      lipgloss.NewStyle().Foreground(system).Faint(true),
 		error:       lipgloss.NewStyle().Foreground(err),
+		compaction:  lipgloss.NewStyle().Foreground(compaction),
 	}
 }
 

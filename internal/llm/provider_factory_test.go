@@ -26,7 +26,7 @@ func TestInferProviderFromModel(t *testing.T) {
 func TestNewProviderClient_OpenAI(t *testing.T) {
 	httpClient := &http.Client{Timeout: 7 * time.Second}
 	client, err := NewProviderClient(ProviderClientOptions{
-		Model:      "gpt-5",
+		Model:      "gpt-5.3-codex",
 		Auth:       providerTestAuth{},
 		HTTPClient: httpClient,
 	})
@@ -43,6 +43,9 @@ func TestNewProviderClient_OpenAI(t *testing.T) {
 	}
 	if transport.Client != httpClient {
 		t.Fatal("expected provider HTTP client override to be used")
+	}
+	if transport.ContextWindowTokens != 400_000 {
+		t.Fatalf("expected context window from model metadata, got %d", transport.ContextWindowTokens)
 	}
 }
 

@@ -176,6 +176,68 @@ func TestOngoingDoesNotAutoFollowWhenUserScrolledUp(t *testing.T) {
 	}
 }
 
+func TestMouseWheelScrollsOngoingView(t *testing.T) {
+	m := NewModel(WithPreviewLines(2))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a2"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a3"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a4"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a5"})
+
+	start := m.OngoingScroll()
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	if got := m.OngoingScroll(); got >= start {
+		t.Fatalf("expected wheel up to scroll up ongoing view, got %d from %d", got, start)
+	}
+
+	up := m.OngoingScroll()
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+	if got := m.OngoingScroll(); got <= up {
+		t.Fatalf("expected wheel down to scroll down ongoing view, got %d from %d", got, up)
+	}
+}
+
+func TestMouseWheelScrollsDetailView(t *testing.T) {
+	m := NewModel(WithPreviewLines(2))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u1"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u2"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a2"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u3"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a3"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+	if m.detailScroll == 0 {
+		t.Fatalf("expected wheel down to scroll detail view, got detailScroll=%d", m.detailScroll)
+	}
+
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	if m.detailScroll != 0 {
+		t.Fatalf("expected wheel up to scroll detail view back toward top, got detailScroll=%d", m.detailScroll)
+	}
+}
+
+func TestPageKeysScrollActiveView(t *testing.T) {
+	m := NewModel(WithPreviewLines(2))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a2"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a3"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a4"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a5"})
+
+	start := m.OngoingScroll()
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+	if got := m.OngoingScroll(); got >= start {
+		t.Fatalf("expected pgup to scroll up ongoing view, got %d from %d", got, start)
+	}
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyPgDown})
+	if got, want := m.OngoingScroll(), m.maxOngoingScroll(); got != want {
+		t.Fatalf("expected pgdown to return to bottom, got %d want %d", got, want)
+	}
+}
+
 func TestDetailUsesRequestedSymbolsAndDividers(t *testing.T) {
 	m := NewModel()
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "hello"})
@@ -219,6 +281,69 @@ func TestDetailShellToolUsesDollarPrefixAndKeepsSuccessColorRole(t *testing.T) {
 	}
 	if strings.Contains(view, "• pwd") {
 		t.Fatalf("expected no dot prefix for shell tool, got %q", view)
+	}
+}
+
+func TestDetailMatchesParallelShellResultsByCallID(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "echo a",
+		ToolCallID: "call_a",
+		ToolCall: &transcript.ToolCallMeta{
+			IsShell: true,
+			Command: "echo a",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "echo b",
+		ToolCallID: "call_b",
+		ToolCall: &transcript.ToolCallMeta{
+			IsShell: true,
+			Command: "echo b",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_a", Text: "out-a"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", ToolCallID: "call_b", Text: "out-b"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := plainTranscript(m.View())
+	idxCallA := strings.Index(view, "echo a")
+	idxOutA := strings.Index(view, "out-a")
+	idxCallB := strings.Index(view, "echo b")
+	idxOutB := strings.Index(view, "out-b")
+	if idxCallA < 0 || idxOutA < 0 || idxCallB < 0 || idxOutB < 0 {
+		t.Fatalf("expected both calls and outputs in view, got %q", view)
+	}
+	if !(idxCallA < idxOutA && idxOutA < idxCallB && idxCallB < idxOutB) {
+		t.Fatalf("expected each output to stay with matching call, got %q", view)
+	}
+	if strings.Contains(view, "• out-a") || strings.Contains(view, "• out-b") {
+		t.Fatalf("expected no standalone tool result blocks for matched call IDs, got %q", view)
+	}
+}
+
+func TestDetailDoesNotMatchAdjacentResultWhenCallIDMissing(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: "echo missing-id",
+		ToolCall: &transcript.ToolCallMeta{
+			IsShell: true,
+			Command: "echo missing-id",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_result_ok",
+		ToolCallID: "call_other",
+		Text:       "out-other",
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := plainTranscript(m.View())
+	if !containsInOrder(view, "$", "echo missing-id", "•", "out-other") {
+		t.Fatalf("expected unmatched result to remain standalone, got %q", view)
 	}
 }
 
@@ -279,6 +404,26 @@ func TestDetailShowsReasoningSummaryAsSeparateEntry(t *testing.T) {
 	detail := plainTranscript(m.View())
 	if !containsInOrder(detail, "…", "Plan summary") {
 		t.Fatalf("expected reasoning summary entry in detail view, got %q", detail)
+	}
+}
+
+func TestCompactionNoticeAndSummaryRenderingByMode(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "compaction_notice", Text: "context compacted for the 1st time"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "compaction_summary", Text: "line one\nline two"})
+
+	ongoing := plainTranscript(m.View())
+	if !containsInOrder(ongoing, "@", "context compacted for the 1st time") {
+		t.Fatalf("expected compaction notice in ongoing view, got %q", ongoing)
+	}
+	if strings.Contains(ongoing, "line one") || strings.Contains(ongoing, "line two") {
+		t.Fatalf("expected compaction summary hidden in ongoing view, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detail := plainTranscript(m.View())
+	if !containsInOrder(detail, "@", "context compacted for the 1st time", "@", "line one", "line two") {
+		t.Fatalf("expected compaction notice and full summary in detail view, got %q", detail)
 	}
 }
 

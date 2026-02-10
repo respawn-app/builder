@@ -3,6 +3,8 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -78,7 +80,7 @@ func TestBuildResponsesInput_AssistantUsesOutputTextContent(t *testing.T) {
 	items := buildResponsesInput([]Message{
 		{Role: RoleUser, Content: "u1"},
 		{Role: RoleAssistant, Content: "a1"},
-	})
+	}, nil)
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
 	}
@@ -97,7 +99,7 @@ func TestBuildResponsesInput_NonAssistantRolesUseInputText(t *testing.T) {
 		{Role: RoleSystem, Content: "s1"},
 		{Role: RoleDeveloper, Content: "d1"},
 		{Role: RoleUser, Content: "u1"},
-	})
+	}, nil)
 	if len(items) != 3 {
 		t.Fatalf("expected 3 items, got %d", len(items))
 	}
@@ -190,7 +192,7 @@ func TestBuildResponsesInput_AssistantReasoningItemsUseEncryptedContentOnly(t *t
 				{ID: "rs_1", EncryptedContent: "enc_1"},
 			},
 		},
-	})
+	}, nil)
 	if len(items) != 2 {
 		t.Fatalf("expected assistant message + reasoning item, got %d", len(items))
 	}
@@ -256,6 +258,107 @@ func TestBuildPayload_AddsAdditionalPropertiesFalseToToolSchemas(t *testing.T) {
 	}
 	if got, ok := meta["additionalProperties"].(bool); !ok || got {
 		t.Fatalf("expected nested additionalProperties=false, got %#v", meta["additionalProperties"])
+	}
+}
+
+func TestBuildResponsesInput_CanonicalCompactionItemRoundTrip(t *testing.T) {
+	items := buildResponsesInput(nil, []ResponseItem{
+		{Type: ResponseItemTypeMessage, Role: RoleUser, Content: "u1"},
+		{Type: ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+	})
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	jsonItems := mustMarshalItems(t, items)
+	if got := contentTypeAt(t, jsonItems[0]); got != "input_text" {
+		t.Fatalf("expected user input text content, got %q", got)
+	}
+	if got := jsonItems[0]["role"]; got != "user" {
+		t.Fatalf("expected user role, got %#v", got)
+	}
+	if got := jsonItems[1]["type"]; got != "compaction" {
+		t.Fatalf("expected compaction item, got %#v", got)
+	}
+	if got := jsonItems[1]["encrypted_content"]; got != "enc_1" {
+		t.Fatalf("unexpected compaction encrypted content: %#v", got)
+	}
+}
+
+func TestParseOutputItems_PreservesCompactionItem(t *testing.T) {
+	raw := []byte(`[
+		{
+			"type":"message",
+			"role":"user",
+			"id":"msg_1",
+			"content":[{"type":"input_text","text":"hello"}]
+		},
+		{
+			"type":"compaction",
+			"id":"cmp_1",
+			"encrypted_content":"enc_1"
+		}
+	]`)
+	var output []responses.ResponseOutputItemUnion
+	if err := json.Unmarshal(raw, &output); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	items, assistantText, toolCalls, reasoning, reasoningItems := parseOutputItems(output)
+	if assistantText != "" {
+		t.Fatalf("expected no assistant text, got %q", assistantText)
+	}
+	if len(toolCalls) != 0 || len(reasoning) != 0 || len(reasoningItems) != 0 {
+		t.Fatalf("expected no tool/reasoning outputs, got calls=%d reasoning=%d encrypted=%d", len(toolCalls), len(reasoning), len(reasoningItems))
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 canonical items, got %d", len(items))
+	}
+	if items[1].Type != ResponseItemTypeCompaction || items[1].EncryptedContent != "enc_1" {
+		t.Fatalf("unexpected compaction item: %+v", items[1])
+	}
+}
+
+func TestCompactRequestTargetsResponsesCompactPath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses/compact" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"resp_cmp_1",
+			"object":"response.compaction",
+			"created_at":1731459200,
+			"output":[
+				{"type":"message","role":"user","content":[{"type":"input_text","text":"u1"}]},
+				{"type":"compaction","id":"cmp_1","encrypted_content":"enc_1"}
+			],
+			"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}
+		}`))
+	}))
+	defer server.Close()
+
+	transport := NewHTTPTransport(staticAuth{})
+	transport.BaseURL = server.URL + "/v1"
+	transport.Client = server.Client()
+
+	resp, err := transport.Compact(context.Background(), OpenAICompactionRequest{
+		Model: "gpt-5",
+		InputItems: []ResponseItem{
+			{Type: ResponseItemTypeMessage, Role: RoleUser, Content: "u1"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("compact request failed: %v", err)
+	}
+	if len(resp.OutputItems) != 2 {
+		t.Fatalf("expected compact output items, got %d", len(resp.OutputItems))
+	}
+	if resp.OutputItems[1].Type != ResponseItemTypeCompaction {
+		t.Fatalf("expected compaction output item, got %+v", resp.OutputItems[1])
 	}
 }
 

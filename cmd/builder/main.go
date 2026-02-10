@@ -20,6 +20,7 @@ func main() {
 		shellTimeoutSeconds = flag.Int("shell-timeout-seconds", 0, "shell default timeout override in seconds")
 		bashTimeoutSeconds  = flag.Int("bash-timeout-seconds", 0, "deprecated alias for --shell-timeout-seconds")
 		tools               = flag.String("tools", "", "enabled tools override as csv (e.g. shell,patch)")
+		openAIBaseURL       = flag.String("openai-base-url", "", "OpenAI-compatible base URL override")
 	)
 	flag.Parse()
 
@@ -37,6 +38,7 @@ func main() {
 		ModelTimeoutSeconds: *modelTimeoutSeconds,
 		ShellTimeoutSeconds: effectiveShellTimeout,
 		Tools:               *tools,
+		OpenAIBaseURL:       *openAIBaseURL,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

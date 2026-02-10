@@ -5,6 +5,7 @@ import (
 	"builder/internal/tools"
 	"builder/internal/transcript"
 	"builder/internal/transcript/toolcodec"
+	"builder/prompts"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -19,9 +20,10 @@ const (
 )
 
 type ChatEntry struct {
-	Role     string
-	Text     string
-	ToolCall *transcript.ToolCallMeta
+	Role       string
+	Text       string
+	ToolCallID string
+	ToolCall   *transcript.ToolCallMeta
 }
 
 type ChatSnapshot struct {
@@ -41,6 +43,7 @@ type chatStore struct {
 	mu sync.RWMutex
 
 	messages []llm.Message
+	items    []llm.ResponseItem
 	local    []ChatEntry
 
 	toolCompletions map[string]tools.Result
@@ -65,6 +68,20 @@ func (s *chatStore) appendMessage(msg llm.Message) {
 		s.ongoingError = ""
 	}
 	s.messages = append(s.messages, msg)
+	s.items = append(s.items, llm.ItemsFromMessages([]llm.Message{msg})...)
+}
+
+func (s *chatStore) replaceHistory(items []llm.ResponseItem) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.items = llm.CloneResponseItems(items)
+	s.messages = llm.MessagesFromItems(items)
+}
+
+func (s *chatStore) snapshotItems() []llm.ResponseItem {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return llm.CloneResponseItems(s.items)
 }
 
 func (s *chatStore) restoreToolCompletionPayload(payload []byte) error {
@@ -147,6 +164,9 @@ func (s *chatStore) snapshot() ChatSnapshot {
 			if content == "" || strings.HasPrefix(content, agentsInjectedPrefix) {
 				continue
 			}
+			if strings.HasPrefix(content, prompts.CompactionSummaryPrefix+"\n") {
+				continue
+			}
 			entries = append(entries, ChatEntry{Role: "user", Text: msg.Content})
 		case llm.RoleAssistant:
 			if strings.TrimSpace(msg.Content) != "" {
@@ -180,7 +200,7 @@ func (s *chatStore) snapshot() ChatSnapshot {
 			if result.IsError {
 				role = "tool_result_error"
 			}
-			entries = append(entries, ChatEntry{Role: role, Text: formatToolResult(result)})
+			entries = append(entries, ChatEntry{Role: role, Text: formatToolResult(result), ToolCallID: callID})
 		}
 	}
 	entries = append(entries, s.local...)
@@ -201,9 +221,10 @@ func (s *chatStore) formatToolCall(call llm.ToolCall) ChatEntry {
 			meta.PatchSummary = summary
 			meta.PatchDetail = detail
 			return ChatEntry{
-				Role:     "tool_call",
-				Text:     summary,
-				ToolCall: meta,
+				Role:       "tool_call",
+				Text:       summary,
+				ToolCallID: strings.TrimSpace(call.ID),
+				ToolCall:   meta,
 			}
 		}
 	}
@@ -215,9 +236,10 @@ func (s *chatStore) formatToolCall(call llm.ToolCall) ChatEntry {
 	meta.Command = command
 	meta.TimeoutLabel = timeoutLabel
 	return ChatEntry{
-		Role:     "tool_call",
-		Text:     command,
-		ToolCall: meta,
+		Role:       "tool_call",
+		Text:       command,
+		ToolCallID: strings.TrimSpace(call.ID),
+		ToolCall:   meta,
 	}
 }
 
@@ -262,9 +284,7 @@ func (s *chatStore) formatPatchToolCall(raw json.RawMessage) (summary, detail st
 		return "", "", false
 	}
 
-	summaryLines := []string{"Edited:"}
-	detailLines := []string{"Edited:"}
-	for _, file := range files {
+	formatSummaryLine := func(file patchFileView) string {
 		line := file.RelPath
 		if line == "" {
 			line = file.AbsPath
@@ -275,9 +295,30 @@ func (s *chatStore) formatPatchToolCall(raw json.RawMessage) (summary, detail st
 		if file.Removed > 0 {
 			line += fmt.Sprintf(" -%d", file.Removed)
 		}
-		summaryLines = append(summaryLines, line)
+		return line
+	}
+	formatDetailHeader := func(file patchFileView) string {
+		line := file.AbsPath
+		if line == "" {
+			line = file.RelPath
+		}
+		return line
+	}
 
-		detailLines = append(detailLines, file.AbsPath)
+	if len(files) == 1 {
+		single := files[0]
+		summaryLine := formatSummaryLine(single)
+		detailLines := []string{"Edited: " + formatDetailHeader(single)}
+		detailLines = append(detailLines, single.Diff...)
+		return "Edited: " + summaryLine, strings.Join(detailLines, "\n"), true
+	}
+
+	summaryLines := []string{"Edited:"}
+	detailLines := []string{"Edited:"}
+	for _, file := range files {
+		summaryLines = append(summaryLines, formatSummaryLine(file))
+
+		detailLines = append(detailLines, formatDetailHeader(file))
 		detailLines = append(detailLines, file.Diff...)
 	}
 
