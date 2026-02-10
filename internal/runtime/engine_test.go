@@ -688,8 +688,8 @@ func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserM
 	}
 
 	firstReq := client.calls[0]
-	if len(firstReq.Messages) < 4 {
-		t.Fatalf("expected at least 4 messages in first request, got %d", len(firstReq.Messages))
+	if len(firstReq.Messages) < 5 {
+		t.Fatalf("expected at least 5 messages in first request, got %d", len(firstReq.Messages))
 	}
 	if firstReq.Messages[0].Role != llm.RoleDeveloper || firstReq.Messages[0].Content != "existing context" {
 		t.Fatalf("expected first message to be existing context, got %+v", firstReq.Messages[0])
@@ -700,19 +700,81 @@ func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserM
 	if firstReq.Messages[2].Role != llm.RoleDeveloper || !strings.Contains(firstReq.Messages[2].Content, "source: "+workspacePath) {
 		t.Fatalf("expected third message to be workspace developer AGENTS injection, got %+v", firstReq.Messages[2])
 	}
-	if firstReq.Messages[3].Role != llm.RoleUser || firstReq.Messages[3].Content != "first" {
-		t.Fatalf("expected user message after AGENTS injections, got %+v", firstReq.Messages[3])
+	envMsg := firstReq.Messages[3]
+	if envMsg.Role != llm.RoleDeveloper || !strings.Contains(envMsg.Content, environmentInjectedHeader) {
+		t.Fatalf("expected fourth message to be environment developer injection, got %+v", envMsg)
+	}
+	for _, required := range []string{
+		"OS: ",
+		"Current TZ: ",
+		"Date/time: ",
+		"Shell: ",
+		"CWD: ",
+		"CPU arch: ",
+	} {
+		if !strings.Contains(envMsg.Content, required) {
+			t.Fatalf("expected environment message to contain %q, got %q", required, envMsg.Content)
+		}
+	}
+	if firstReq.Messages[4].Role != llm.RoleUser || firstReq.Messages[4].Content != "first" {
+		t.Fatalf("expected user message after injections, got %+v", firstReq.Messages[4])
 	}
 
 	secondReq := client.calls[1]
 	injectedCount := 0
+	envInjectedCount := 0
 	for _, msg := range secondReq.Messages {
 		if msg.Role == llm.RoleDeveloper && strings.Contains(msg.Content, agentsInjectedHeader) {
 			injectedCount++
 		}
+		if msg.Role == llm.RoleDeveloper && strings.Contains(msg.Content, environmentInjectedHeader) {
+			envInjectedCount++
+		}
 	}
 	if injectedCount != 2 {
 		t.Fatalf("expected exactly two injected AGENTS developer messages to persist, got %d", injectedCount)
+	}
+	if envInjectedCount != 1 {
+		t.Fatalf("expected exactly one injected environment developer message to persist, got %d", envInjectedCount)
+	}
+}
+
+func TestInjectsEnvironmentInfoWithoutAnyAgentsFiles(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	storeRoot := t.TempDir()
+	store, err := session.Create(storeRoot, "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "first"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	if len(client.calls) != 1 {
+		t.Fatalf("expected one model call, got %d", len(client.calls))
+	}
+	req := client.calls[0]
+	if len(req.Messages) < 2 {
+		t.Fatalf("expected at least 2 messages, got %d", len(req.Messages))
+	}
+	if req.Messages[0].Role != llm.RoleDeveloper || !strings.Contains(req.Messages[0].Content, environmentInjectedHeader) {
+		t.Fatalf("expected first message to be environment injection, got %+v", req.Messages[0])
+	}
+	if req.Messages[1].Role != llm.RoleUser || req.Messages[1].Content != "first" {
+		t.Fatalf("expected user message after environment injection, got %+v", req.Messages[1])
 	}
 }
 
