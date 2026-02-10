@@ -14,7 +14,7 @@ func runUILoop(wiring *runtimeWiring, active config.Settings, logger *runLogger)
 		WithUILogger(logger),
 		WithUIModelName(active.Model),
 		WithUITheme(active.Theme),
-	), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	), tea.WithAltScreen())
 
 	finalModel, runErr := program.Run()
 	if dropped := wiring.eventBridge.Dropped(); dropped > 0 {

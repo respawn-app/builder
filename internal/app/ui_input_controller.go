@@ -197,13 +197,25 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.inputSubmitLocked {
 			return m, nil
 		}
-		m.moveCursorUpLine()
+		moved := m.moveCursorUpLine()
+		if !moved && !strings.ContainsRune(m.input, '\n') {
+			m.forwardToView(tea.KeyMsg{Type: tea.KeyUp})
+		}
 		return m, nil
 	case tea.KeyDown:
 		if m.inputSubmitLocked {
 			return m, nil
 		}
-		m.moveCursorDownLine()
+		moved := m.moveCursorDownLine()
+		if !moved && !strings.ContainsRune(m.input, '\n') {
+			m.forwardToView(tea.KeyMsg{Type: tea.KeyDown})
+		}
+		return m, nil
+	case tea.KeyPgUp:
+		m.forwardToView(tea.KeyMsg{Type: tea.KeyPgUp})
+		return m, nil
+	case tea.KeyPgDown:
+		m.forwardToView(tea.KeyMsg{Type: tea.KeyPgDown})
 		return m, nil
 	default:
 		if keyString == "shift+enter" {
