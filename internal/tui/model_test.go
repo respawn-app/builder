@@ -218,6 +218,26 @@ func TestMouseWheelScrollsDetailView(t *testing.T) {
 	}
 }
 
+func TestPageKeysScrollActiveView(t *testing.T) {
+	m := NewModel(WithPreviewLines(2))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a2"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a3"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a4"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a5"})
+
+	start := m.OngoingScroll()
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+	if got := m.OngoingScroll(); got >= start {
+		t.Fatalf("expected pgup to scroll up ongoing view, got %d from %d", got, start)
+	}
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyPgDown})
+	if got, want := m.OngoingScroll(), m.maxOngoingScroll(); got != want {
+		t.Fatalf("expected pgdown to return to bottom, got %d want %d", got, want)
+	}
+}
+
 func TestDetailUsesRequestedSymbolsAndDividers(t *testing.T) {
 	m := NewModel()
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "hello"})
@@ -301,6 +321,29 @@ func TestDetailMatchesParallelShellResultsByCallID(t *testing.T) {
 	}
 	if strings.Contains(view, "• out-a") || strings.Contains(view, "• out-b") {
 		t.Fatalf("expected no standalone tool result blocks for matched call IDs, got %q", view)
+	}
+}
+
+func TestDetailDoesNotMatchAdjacentResultWhenCallIDMissing(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: "echo missing-id",
+		ToolCall: &transcript.ToolCallMeta{
+			IsShell: true,
+			Command: "echo missing-id",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_result_ok",
+		ToolCallID: "call_other",
+		Text:       "out-other",
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := plainTranscript(m.View())
+	if !containsInOrder(view, "$", "echo missing-id", "•", "out-other") {
+		t.Fatalf("expected unmatched result to remain standalone, got %q", view)
 	}
 }
 
