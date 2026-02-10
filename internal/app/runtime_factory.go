@@ -33,9 +33,11 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 
 	modelHTTPClient := &http.Client{Timeout: time.Duration(active.Timeouts.ModelRequestSeconds) * time.Second}
 	client, err := llm.NewProviderClient(llm.ProviderClientOptions{
-		Model:      active.Model,
-		Auth:       mgr,
-		HTTPClient: modelHTTPClient,
+		Model:               active.Model,
+		Auth:                mgr,
+		HTTPClient:          modelHTTPClient,
+		OpenAIBaseURL:       active.OpenAIBaseURL,
+		ContextWindowTokens: active.ModelContextWindow,
 	})
 	if err != nil {
 		return nil, err
@@ -47,11 +49,15 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 		}
 	})
 	eng, err := runtime.New(store, client, toolRegistry, runtime.Config{
-		Model:         active.Model,
-		Temperature:   1,
-		MaxTokens:     0,
-		ThinkingLevel: active.ThinkingLevel,
-		EnabledTools:  enabledTools,
+		Model:                         active.Model,
+		Temperature:                   1,
+		MaxTokens:                     0,
+		ThinkingLevel:                 active.ThinkingLevel,
+		EnabledTools:                  enabledTools,
+		AutoCompactTokenLimit:         active.ContextCompactionThresholdTokens,
+		ContextWindowTokens:           active.ModelContextWindow,
+		EffectiveContextWindowPercent: 95,
+		LocalCompactionCarryoverLimit: 20_000,
 		OnEvent: func(evt runtime.Event) {
 			logger.Logf("%s", formatRuntimeEvent(evt))
 			eventBridge.Publish(evt)

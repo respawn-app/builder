@@ -73,6 +73,23 @@ func formatRuntimeEvent(evt runtime.Event) string {
 		if strings.TrimSpace(evt.Error) != "" {
 			return fmt.Sprintf("runtime.event kind=%s step_id=%s err=%q", evt.Kind, evt.StepID, evt.Error)
 		}
+	case runtime.EventCompactionStarted, runtime.EventCompactionCompleted, runtime.EventCompactionFailed:
+		if evt.Compaction != nil {
+			line := fmt.Sprintf(
+				"runtime.event kind=%s step_id=%s mode=%s engine=%s provider=%s trimmed=%d count=%d",
+				evt.Kind,
+				evt.StepID,
+				evt.Compaction.Mode,
+				evt.Compaction.Engine,
+				evt.Compaction.Provider,
+				evt.Compaction.TrimmedItemsCount,
+				evt.Compaction.Count,
+			)
+			if strings.TrimSpace(evt.Compaction.Error) != "" {
+				line += fmt.Sprintf(" err=%q", evt.Compaction.Error)
+			}
+			return line
+		}
 	}
 	return fmt.Sprintf("runtime.event kind=%s step_id=%s", evt.Kind, evt.StepID)
 }

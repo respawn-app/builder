@@ -25,8 +25,10 @@ const (
 	defaultModel               = "gpt-5.3-codex"
 	defaultThinkingLevel       = "high"
 	defaultTheme               = "dark"
+	defaultModelContextWindow  = 400_000
 	defaultModelTimeoutSeconds = 400
 	defaultShellTimeoutSeconds = 300
+	defaultCompactionThreshold = 360_000
 )
 
 type LoadOptions struct {
@@ -36,6 +38,7 @@ type LoadOptions struct {
 	ModelTimeoutSeconds int
 	ShellTimeoutSeconds int
 	Tools               string
+	OpenAIBaseURL       string
 }
 
 type Timeouts struct {
@@ -44,11 +47,14 @@ type Timeouts struct {
 }
 
 type Settings struct {
-	Model         string
-	ThinkingLevel string
-	Theme         string
-	EnabledTools  map[tools.ID]bool
-	Timeouts      Timeouts
+	Model                            string
+	ThinkingLevel                    string
+	Theme                            string
+	OpenAIBaseURL                    string
+	ModelContextWindow               int
+	ContextCompactionThresholdTokens int
+	EnabledTools                     map[tools.ID]bool
+	Timeouts                         Timeouts
 }
 
 type SourceReport struct {
@@ -75,7 +81,10 @@ type fileSettings struct {
 		ShellDefaultSeconds int `toml:"shell_default_seconds"`
 		BashDefaultSeconds  int `toml:"bash_default_seconds"`
 	} `toml:"timeouts"`
-	PersistenceRoot string `toml:"persistence_root"`
+	PersistenceRoot                  string `toml:"persistence_root"`
+	OpenAIBaseURL                    string `toml:"openai_base_url"`
+	ModelContextWindow               int    `toml:"model_context_window"`
+	ContextCompactionThresholdTokens int    `toml:"context_compaction_threshold_tokens"`
 }
 
 func Load(workspaceRoot string, opts LoadOptions) (App, error) {
@@ -100,11 +109,14 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 
 	merged := defaultSettings()
 	sources := map[string]string{
-		"model":                  "default",
-		"thinking_level":         "default",
-		"theme":                  "default",
-		"timeouts.model_request": "default",
-		"timeouts.shell_default": "default",
+		"model":                               "default",
+		"thinking_level":                      "default",
+		"theme":                               "default",
+		"openai_base_url":                     "default",
+		"model_context_window":                "default",
+		"context_compaction_threshold_tokens": "default",
+		"timeouts.model_request":              "default",
+		"timeouts.shell_default":              "default",
 	}
 	for _, id := range tools.CatalogIDs() {
 		sources["tools."+string(id)] = "default"
@@ -123,6 +135,18 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if strings.TrimSpace(cfg.Theme) != "" {
 		merged.Theme = strings.TrimSpace(cfg.Theme)
 		sources["theme"] = "file"
+	}
+	if strings.TrimSpace(cfg.OpenAIBaseURL) != "" {
+		merged.OpenAIBaseURL = strings.TrimSpace(cfg.OpenAIBaseURL)
+		sources["openai_base_url"] = "file"
+	}
+	if cfg.ModelContextWindow > 0 {
+		merged.ModelContextWindow = cfg.ModelContextWindow
+		sources["model_context_window"] = "file"
+	}
+	if cfg.ContextCompactionThresholdTokens > 0 {
+		merged.ContextCompactionThresholdTokens = cfg.ContextCompactionThresholdTokens
+		sources["context_compaction_threshold_tokens"] = "file"
 	}
 	if cfg.Timeouts.ModelRequestSeconds > 0 {
 		merged.Timeouts.ModelRequestSeconds = cfg.Timeouts.ModelRequestSeconds
@@ -159,6 +183,26 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if v := strings.TrimSpace(os.Getenv("BUILDER_THEME")); v != "" {
 		merged.Theme = v
 		sources["theme"] = "env"
+	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_OPENAI_BASE_URL")); v != "" {
+		merged.OpenAIBaseURL = v
+		sources["openai_base_url"] = "env"
+	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_MODEL_CONTEXT_WINDOW")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return App{}, fmt.Errorf("invalid BUILDER_MODEL_CONTEXT_WINDOW: %q", v)
+		}
+		merged.ModelContextWindow = n
+		sources["model_context_window"] = "env"
+	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_CONTEXT_COMPACTION_THRESHOLD_TOKENS")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return App{}, fmt.Errorf("invalid BUILDER_CONTEXT_COMPACTION_THRESHOLD_TOKENS: %q", v)
+		}
+		merged.ContextCompactionThresholdTokens = n
+		sources["context_compaction_threshold_tokens"] = "env"
 	}
 	if v := strings.TrimSpace(os.Getenv("BUILDER_MODEL_TIMEOUT_SECONDS")); v != "" {
 		n, err := strconv.Atoi(v)
@@ -213,6 +257,10 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if strings.TrimSpace(opts.Theme) != "" {
 		merged.Theme = strings.TrimSpace(opts.Theme)
 		sources["theme"] = "cli"
+	}
+	if strings.TrimSpace(opts.OpenAIBaseURL) != "" {
+		merged.OpenAIBaseURL = strings.TrimSpace(opts.OpenAIBaseURL)
+		sources["openai_base_url"] = "cli"
 	}
 	if opts.ModelTimeoutSeconds > 0 {
 		merged.Timeouts.ModelRequestSeconds = opts.ModelTimeoutSeconds
@@ -276,10 +324,12 @@ func defaultSettings() Settings {
 		enabled[id] = true
 	}
 	return Settings{
-		Model:         defaultModel,
-		ThinkingLevel: defaultThinkingLevel,
-		Theme:         defaultTheme,
-		EnabledTools:  enabled,
+		Model:                            defaultModel,
+		ThinkingLevel:                    defaultThinkingLevel,
+		Theme:                            defaultTheme,
+		ModelContextWindow:               defaultModelContextWindow,
+		ContextCompactionThresholdTokens: defaultCompactionThreshold,
+		EnabledTools:                     enabled,
 		Timeouts: Timeouts{
 			ModelRequestSeconds: defaultModelTimeoutSeconds,
 			ShellDefaultSeconds: defaultShellTimeoutSeconds,
@@ -306,6 +356,15 @@ func validateSettings(v Settings) error {
 	}
 	if v.Timeouts.ShellDefaultSeconds <= 0 {
 		return fmt.Errorf("timeouts.shell_default_seconds must be > 0")
+	}
+	if v.ContextCompactionThresholdTokens <= 0 {
+		return fmt.Errorf("context_compaction_threshold_tokens must be > 0")
+	}
+	if v.ModelContextWindow <= 0 {
+		return fmt.Errorf("model_context_window must be > 0")
+	}
+	if v.ContextCompactionThresholdTokens >= v.ModelContextWindow {
+		return fmt.Errorf("context_compaction_threshold_tokens must be < model_context_window")
 	}
 	for _, id := range tools.CatalogIDs() {
 		if _, ok := v.EnabledTools[id]; !ok {
@@ -412,10 +471,13 @@ func defaultSettingsTOML() string {
 		toolDefaults[string(id)] = defaults.EnabledTools[id]
 	}
 	payload := map[string]any{
-		"model":          defaults.Model,
-		"thinking_level": defaults.ThinkingLevel,
-		"theme":          defaults.Theme,
-		"tools":          toolDefaults,
+		"model":                               defaults.Model,
+		"thinking_level":                      defaults.ThinkingLevel,
+		"theme":                               defaults.Theme,
+		"openai_base_url":                     defaults.OpenAIBaseURL,
+		"model_context_window":                defaults.ModelContextWindow,
+		"context_compaction_threshold_tokens": defaults.ContextCompactionThresholdTokens,
+		"tools":                               toolDefaults,
 		"timeouts": map[string]int{
 			"model_request_seconds": defaults.Timeouts.ModelRequestSeconds,
 			"shell_default_seconds": defaults.Timeouts.ShellDefaultSeconds,
@@ -430,6 +492,9 @@ func defaultSettingsTOML() string {
 		"model = \"" + defaults.Model + "\"\n" +
 		"thinking_level = \"" + defaults.ThinkingLevel + "\"\n" +
 		"theme = \"" + defaults.Theme + "\"\n" +
+		"openai_base_url = \"" + defaults.OpenAIBaseURL + "\"\n" +
+		"model_context_window = " + strconv.Itoa(defaults.ModelContextWindow) + "\n" +
+		"context_compaction_threshold_tokens = " + strconv.Itoa(defaults.ContextCompactionThresholdTokens) + "\n" +
 		"persistence_root = \"" + DefaultPersistence + "\"\n\n" +
 		"[tools]\n"
 	for _, id := range tools.CatalogIDs() {

@@ -52,9 +52,10 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() {
 	entries := make([]tui.TranscriptEntry, 0, len(snapshot.Entries))
 	for _, entry := range snapshot.Entries {
 		entries = append(entries, tui.TranscriptEntry{
-			Role:     entry.Role,
-			Text:     entry.Text,
-			ToolCall: entry.ToolCall,
+			Role:       entry.Role,
+			Text:       entry.Text,
+			ToolCallID: entry.ToolCallID,
+			ToolCall:   entry.ToolCall,
 		})
 	}
 	m.forwardToView(tui.SetConversationMsg{

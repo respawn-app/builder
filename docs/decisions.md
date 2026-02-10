@@ -444,16 +444,60 @@ This file records architecture and product decisions for the minimal terminal co
    - Status line under input shows only `model`, `busy/idle`, and queue size.
 
 136. **Leading slash input is always command mode.**
-   - If first non-space character is `/`, input is parsed as a slash command.
-   - Unknown slash commands are surfaced as system errors; they are not sent to the model.
+   - If first non-space character is `/`, input enters slash command mode with a live picker.
+   - Picker matching uses only the first token (before first whitespace) and updates continuously.
+   - Typing whitespace after the command token enters argument mode and hides the picker.
+   - Unknown slash commands are sent to the model as normal user prompts.
 
-137. **Built-in slash commands are `/logout`, `/exit`, `/new`.**
+137. **Built-in slash commands are `/logout`, `/exit`, `/new`, `/compact`.**
    - `/logout`: clear auth and run re-auth immediately in-app.
    - `/new`: create and switch to a new session immediately.
    - `/exit`: terminate the app.
+   - `/compact`: run explicit context compaction.
 
 138. **AGENTS injection order is deterministic on first user turn.**
    - Existing restored messages remain first.
    - Then inject global `~/.builder/AGENTS.md` as `developer` message when present.
    - Then inject workspace-root `AGENTS.md` as `developer` message when present.
    - Then append the current user prompt.
+
+139. **Canonical model context is stored as response-item history.**
+   - Runtime now keeps canonical `responses` input items as first-class history.
+   - Message-only chat structures are treated as a projection for UI, not the source of truth.
+
+140. **Context compaction is enabled with dual engines.**
+   - Remote compaction (`POST /responses/compact`) is used when provider capabilities allow it.
+   - Local summarize-and-rebuild compaction is used as fallback when remote compaction is unavailable.
+
+141. **Remote compaction continuity keeps compaction items opaque.**
+   - `type=compaction` items are parsed, persisted, and replayed unchanged.
+   - `encrypted_content` in reasoning/compaction items is treated as opaque and never transformed.
+
+142. **Auto-compaction replaces handoff hard-stop policy.**
+   - Runtime auto-compacts near context limits instead of forcing a final handoff and session stop.
+   - Auto-compaction failures abort the current turn.
+   - This supersedes Decisions 35, 46, and 82.
+
+143. **Manual compaction is available via `/compact`.**
+   - Users can trigger compaction explicitly while idle.
+   - Manual compaction failures are surfaced to UI without terminating the session.
+
+144. **Compaction lifecycle is explicitly evented and persisted.**
+   - Runtime emits started/completed/failed compaction events.
+   - History replacement snapshots are persisted as atomic `history_replaced` events to preserve resume/fork determinism.
+   - UI transcript shows one compacted notice line per successful compaction (`context compacted for the Nth time`).
+   - Ongoing view suppresses detailed compaction summary content; detail view shows full local compaction summary when available.
+
+145. **Remote compaction routing is model-driven in the current implementation.**
+   - OpenAI model families use remote `/responses/compact`.
+   - Non-OpenAI model families do not use remote compaction.
+   - Non-OpenAI native providers remain stubs/unimplemented.
+
+146. **Context window size is an explicit user setting.**
+   - Config key: `model_context_window`.
+   - Default value: `400000`.
+   - Validation requires `context_compaction_threshold_tokens < model_context_window`.
+
+147. **Status line includes right-aligned context capacity meter.**
+   - Render a compact 10-character progress bar plus `% ctx window` label.
+   - Zone colors: green below 50%, yellow from 50% to below 80%, red at 80% and above.

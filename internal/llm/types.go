@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 var (
@@ -32,6 +33,203 @@ type Message struct {
 	ReasoningItems []ReasoningItem `json:"reasoning_items,omitempty"`
 }
 
+type ResponseItemType string
+
+const (
+	ResponseItemTypeMessage            ResponseItemType = "message"
+	ResponseItemTypeFunctionCall       ResponseItemType = "function_call"
+	ResponseItemTypeFunctionCallOutput ResponseItemType = "function_call_output"
+	ResponseItemTypeReasoning          ResponseItemType = "reasoning"
+	ResponseItemTypeCompaction         ResponseItemType = "compaction"
+	ResponseItemTypeOther              ResponseItemType = "other"
+)
+
+type ResponseItem struct {
+	Type             ResponseItemType `json:"type"`
+	Role             Role             `json:"role,omitempty"`
+	ID               string           `json:"id,omitempty"`
+	Name             string           `json:"name,omitempty"`
+	CallID           string           `json:"call_id,omitempty"`
+	Content          string           `json:"content,omitempty"`
+	Arguments        json.RawMessage  `json:"arguments,omitempty"`
+	Output           json.RawMessage  `json:"output,omitempty"`
+	ReasoningSummary []ReasoningEntry `json:"reasoning_summary,omitempty"`
+	EncryptedContent string           `json:"encrypted_content,omitempty"`
+	Raw              json.RawMessage  `json:"raw,omitempty"`
+}
+
+func CloneResponseItems(items []ResponseItem) []ResponseItem {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]ResponseItem, 0, len(items))
+	for _, item := range items {
+		copyItem := item
+		if len(item.Arguments) > 0 {
+			copyItem.Arguments = append(json.RawMessage(nil), item.Arguments...)
+		}
+		if len(item.Output) > 0 {
+			copyItem.Output = append(json.RawMessage(nil), item.Output...)
+		}
+		if len(item.Raw) > 0 {
+			copyItem.Raw = append(json.RawMessage(nil), item.Raw...)
+		}
+		if len(item.ReasoningSummary) > 0 {
+			copyItem.ReasoningSummary = append([]ReasoningEntry(nil), item.ReasoningSummary...)
+		}
+		out = append(out, copyItem)
+	}
+	return out
+}
+
+func ItemsFromMessages(messages []Message) []ResponseItem {
+	out := make([]ResponseItem, 0, len(messages))
+	for _, msg := range messages {
+		switch msg.Role {
+		case RoleAssistant:
+			if strings.TrimSpace(msg.Content) != "" {
+				out = append(out, ResponseItem{
+					Type:    ResponseItemTypeMessage,
+					Role:    RoleAssistant,
+					Content: msg.Content,
+				})
+			}
+			for _, tc := range msg.ToolCalls {
+				callID := strings.TrimSpace(tc.ID)
+				if callID == "" && strings.TrimSpace(tc.Name) == "" {
+					continue
+				}
+				out = append(out, ResponseItem{
+					Type:      ResponseItemTypeFunctionCall,
+					ID:        callID,
+					CallID:    callID,
+					Name:      tc.Name,
+					Arguments: normalizeToolInput(string(tc.Input)),
+				})
+			}
+			for _, ri := range msg.ReasoningItems {
+				id := strings.TrimSpace(ri.ID)
+				encrypted := strings.TrimSpace(ri.EncryptedContent)
+				if id == "" || encrypted == "" {
+					continue
+				}
+				out = append(out, ResponseItem{
+					Type:             ResponseItemTypeReasoning,
+					ID:               id,
+					EncryptedContent: encrypted,
+				})
+			}
+		case RoleTool:
+			callID := strings.TrimSpace(msg.ToolCallID)
+			if callID == "" {
+				continue
+			}
+			out = append(out, ResponseItem{
+				Type:   ResponseItemTypeFunctionCallOutput,
+				CallID: callID,
+				Name:   msg.Name,
+				Output: normalizeToolInput(msg.Content),
+			})
+		default:
+			if strings.TrimSpace(msg.Content) == "" {
+				continue
+			}
+			out = append(out, ResponseItem{
+				Type:    ResponseItemTypeMessage,
+				Role:    msg.Role,
+				Content: msg.Content,
+				Name:    msg.Name,
+			})
+		}
+	}
+	return out
+}
+
+func MessagesFromItems(items []ResponseItem) []Message {
+	out := make([]Message, 0, len(items))
+	appendAssistant := func() int {
+		out = append(out, Message{Role: RoleAssistant})
+		return len(out) - 1
+	}
+	lastAssistantIdx := -1
+
+	for _, item := range items {
+		switch item.Type {
+		case ResponseItemTypeMessage:
+			role := item.Role
+			if role == "" {
+				role = RoleUser
+			}
+			msg := Message{
+				Role:    role,
+				Content: item.Content,
+				Name:    item.Name,
+			}
+			out = append(out, msg)
+			if role == RoleAssistant {
+				lastAssistantIdx = len(out) - 1
+			}
+		case ResponseItemTypeFunctionCall:
+			if lastAssistantIdx < 0 || lastAssistantIdx >= len(out) || out[lastAssistantIdx].Role != RoleAssistant {
+				lastAssistantIdx = appendAssistant()
+			}
+			callID := strings.TrimSpace(item.CallID)
+			if callID == "" {
+				callID = strings.TrimSpace(item.ID)
+			}
+			out[lastAssistantIdx].ToolCalls = append(out[lastAssistantIdx].ToolCalls, ToolCall{
+				ID:    callID,
+				Name:  item.Name,
+				Input: normalizeToolInput(string(item.Arguments)),
+			})
+		case ResponseItemTypeFunctionCallOutput:
+			callID := strings.TrimSpace(item.CallID)
+			if callID == "" {
+				continue
+			}
+			out = append(out, Message{
+				Role:       RoleTool,
+				ToolCallID: callID,
+				Name:       item.Name,
+				Content:    stringFromJSONRaw(item.Output),
+			})
+			lastAssistantIdx = -1
+		case ResponseItemTypeReasoning:
+			if strings.TrimSpace(item.ID) == "" || strings.TrimSpace(item.EncryptedContent) == "" {
+				continue
+			}
+			if lastAssistantIdx < 0 || lastAssistantIdx >= len(out) || out[lastAssistantIdx].Role != RoleAssistant {
+				lastAssistantIdx = appendAssistant()
+			}
+			out[lastAssistantIdx].ReasoningItems = append(out[lastAssistantIdx].ReasoningItems, ReasoningItem{
+				ID:               item.ID,
+				EncryptedContent: item.EncryptedContent,
+			})
+		}
+	}
+
+	filtered := out[:0]
+	for _, msg := range out {
+		if strings.TrimSpace(msg.Content) == "" && len(msg.ToolCalls) == 0 && len(msg.ReasoningItems) == 0 {
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+	return append([]Message(nil), filtered...)
+}
+
+func stringFromJSONRaw(raw json.RawMessage) string {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return ""
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	return trimmed
+}
+
 type Tool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
@@ -52,14 +250,15 @@ type ToolResult struct {
 }
 
 type Request struct {
-	Model           string    `json:"model"`
-	Temperature     float64   `json:"temperature"`
-	MaxTokens       int       `json:"max_tokens"`
-	ReasoningEffort string    `json:"reasoning_effort,omitempty"`
-	SystemPrompt    string    `json:"system_prompt"`
-	SessionID       string    `json:"session_id,omitempty"`
-	Messages        []Message `json:"messages"`
-	Tools           []Tool    `json:"tools,omitempty"`
+	Model           string         `json:"model"`
+	Temperature     float64        `json:"temperature"`
+	MaxTokens       int            `json:"max_tokens"`
+	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
+	SystemPrompt    string         `json:"system_prompt"`
+	SessionID       string         `json:"session_id,omitempty"`
+	Messages        []Message      `json:"messages"`
+	Items           []ResponseItem `json:"items,omitempty"`
+	Tools           []Tool         `json:"tools,omitempty"`
 }
 
 func (r Request) Validate() error {
@@ -74,6 +273,11 @@ func (r Request) Validate() error {
 			return fmt.Errorf("%w: message role is required at index %d", ErrInvalidRequest, i)
 		}
 	}
+	for i := range r.Items {
+		if strings.TrimSpace(string(r.Items[i].Type)) == "" {
+			return fmt.Errorf("%w: item type is required at index %d", ErrInvalidRequest, i)
+		}
+	}
 	for i := range r.Tools {
 		if r.Tools[i].Name == "" {
 			return fmt.Errorf("%w: tool name is required at index %d", ErrInvalidRequest, i)
@@ -86,6 +290,10 @@ func (r Request) Validate() error {
 }
 
 func RequestFromLockedContract(locked session.LockedContract, systemPrompt string, messages []Message, tools []Tool) (Request, error) {
+	return RequestFromLockedContractWithItems(locked, systemPrompt, messages, ItemsFromMessages(messages), tools)
+}
+
+func RequestFromLockedContractWithItems(locked session.LockedContract, systemPrompt string, messages []Message, items []ResponseItem, tools []Tool) (Request, error) {
 	if locked.Model == "" {
 		return Request{}, fmt.Errorf("%w: locked model is required", ErrInvalidRequest)
 	}
@@ -101,6 +309,7 @@ func RequestFromLockedContract(locked session.LockedContract, systemPrompt strin
 		SystemPrompt:    systemPrompt,
 		SessionID:       "",
 		Messages:        append([]Message(nil), messages...),
+		Items:           CloneResponseItems(items),
 		Tools:           append([]Tool(nil), tools...),
 	}
 	if err := req.Validate(); err != nil {
@@ -148,7 +357,38 @@ type Response struct {
 	ToolCalls      []ToolCall       `json:"tool_calls,omitempty"`
 	Reasoning      []ReasoningEntry `json:"reasoning,omitempty"`
 	ReasoningItems []ReasoningItem  `json:"reasoning_items,omitempty"`
+	OutputItems    []ResponseItem   `json:"output_items,omitempty"`
 	Usage          Usage            `json:"usage"`
+}
+
+type CompactionRequest struct {
+	Model        string
+	Instructions string
+	SessionID    string
+	InputItems   []ResponseItem
+}
+
+type CompactionResponse struct {
+	OutputItems       []ResponseItem
+	Usage             Usage
+	TrimmedItemsCount int
+}
+
+type CompactionClient interface {
+	Compact(ctx context.Context, request CompactionRequest) (CompactionResponse, error)
+}
+
+type ProviderCapabilities struct {
+	ProviderID                    string
+	SupportsResponsesAPI          bool
+	SupportsResponsesCompact      bool
+	SupportsReasoningEncrypted    bool
+	SupportsServerSideContextEdit bool
+	IsOpenAIFirstParty            bool
+}
+
+type ProviderCapabilitiesClient interface {
+	ProviderCapabilities(ctx context.Context) (ProviderCapabilities, error)
 }
 
 type Client interface {

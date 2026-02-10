@@ -1,17 +1,21 @@
 package app
 
 import (
+	"fmt"
+	"math"
 	"strings"
 
 	"builder/internal/shared/textutil"
 	"builder/internal/tui"
 
+	bubbleprogress "github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 )
 
 const (
-	ansiHideCursor = "\x1b[?25l"
+	ansiHideCursor        = "\x1b[?25l"
+	statusContextBarWidth = 10
 )
 
 type uiViewLayout struct {
@@ -32,15 +36,17 @@ func (l uiViewLayout) render() string {
 	}
 
 	inputLines := l.renderInputLines(width, style)
+	pickerLines := l.renderSlashCommandPicker(width)
 	statusLine := l.renderStatusLine(width, style)
 	statusLines := 1
-	chatLines := height - len(inputLines) - statusLines
+	chatLines := height - len(inputLines) - len(pickerLines) - statusLines
 	if chatLines < 1 {
 		chatLines = 1
 	}
 	chatPanel := l.renderChatPanel(width, chatLines, style)
 	allLines := make([]string, 0, height)
 	allLines = append(allLines, chatPanel...)
+	allLines = append(allLines, pickerLines...)
 	allLines = append(allLines, inputLines...)
 	allLines = append(allLines, statusLine)
 	for len(allLines) < height {
@@ -61,8 +67,104 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 		style.meta.Render(string(m.view.Mode())),
 		style.meta.Render(textutil.FirstNonEmpty(m.modelName, "gpt-5")),
 	}
-	line := strings.Join(segments, " | ")
-	return padRight(line, width)
+	left := strings.Join(segments, style.meta.Render(" | "))
+	right := l.renderContextUsage(style)
+	if right == "" {
+		return padANSIRight(left, width)
+	}
+	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+	return padANSIRight(left+strings.Repeat(" ", gap)+right, width)
+}
+
+func (l uiViewLayout) renderContextUsage(style uiStyles) string {
+	m := l.model
+	if m.engine == nil {
+		return ""
+	}
+	usage := m.engine.ContextUsage()
+	if usage.WindowTokens <= 0 {
+		return ""
+	}
+	used := usage.UsedTokens
+	if used < 0 {
+		used = 0
+	}
+	rawPercent := int(math.Round((float64(used) * 100) / float64(usage.WindowTokens)))
+	barPercent := rawPercent
+	if barPercent < 0 {
+		barPercent = 0
+	}
+	if barPercent > 100 {
+		barPercent = 100
+	}
+	filled := int(math.Round((float64(barPercent) / 100) * statusContextBarWidth))
+	if filled < 0 {
+		filled = 0
+	}
+	if filled > statusContextBarWidth {
+		filled = statusContextBarWidth
+	}
+	barProgress := bubbleprogress.New(
+		bubbleprogress.WithWidth(statusContextBarWidth),
+		bubbleprogress.WithoutPercentage(),
+		bubbleprogress.WithSolidFill(statusContextZoneHex(m.theme, rawPercent)),
+		bubbleprogress.WithFillCharacters('▮', '▯'),
+	)
+	barProgress.EmptyColor = statusContextEmptyHex(m.theme)
+	bar := barProgress.ViewAs(float64(barPercent) / 100.0)
+	label := style.meta.Render(fmt.Sprintf("%d%%", rawPercent))
+	return label + " " + bar
+}
+
+func statusContextZoneHex(theme string, percent int) string {
+	if strings.EqualFold(strings.TrimSpace(theme), "light") {
+		if percent < 50 {
+			return "#22863A"
+		}
+		if percent < 80 {
+			return "#9A6700"
+		}
+		return "#CB2431"
+	}
+	if percent < 50 {
+		return "#98C379"
+	}
+	if percent < 80 {
+		return "#E5C07B"
+	}
+	return "#F97583"
+}
+
+func statusContextEmptyHex(theme string) string {
+	if strings.EqualFold(strings.TrimSpace(theme), "light") {
+		return "#A0A1A7"
+	}
+	return "#5C6370"
+}
+
+func statusContextZoneColor(percent int) lipgloss.TerminalColor {
+	green := lipgloss.CompleteAdaptiveColor{
+		Light: lipgloss.CompleteColor{ANSI: "2", ANSI256: "34", TrueColor: "#22863A"},
+		Dark:  lipgloss.CompleteColor{ANSI: "2", ANSI256: "114", TrueColor: "#98C379"},
+	}
+	amber := lipgloss.CompleteAdaptiveColor{
+		Light: lipgloss.CompleteColor{ANSI: "3", ANSI256: "136", TrueColor: "#9A6700"},
+		Dark:  lipgloss.CompleteColor{ANSI: "3", ANSI256: "180", TrueColor: "#E5C07B"},
+	}
+	red := lipgloss.CompleteAdaptiveColor{
+		Light: lipgloss.CompleteColor{ANSI: "1", ANSI256: "160", TrueColor: "#CB2431"},
+		Dark:  lipgloss.CompleteColor{ANSI: "1", ANSI256: "203", TrueColor: "#F97583"},
+	}
+	if percent < 50 {
+		return green
+	}
+	if percent < 80 {
+		return amber
+	}
+	return red
 }
 
 func renderStatusDot(theme string, activity uiActivity, frame int) string {
@@ -189,6 +291,33 @@ func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
 	return out
 }
 
+func (l uiViewLayout) renderSlashCommandPicker(width int) []string {
+	m := l.model
+	state := m.slashCommandPicker()
+	if !state.visible || width < 1 {
+		return nil
+	}
+	palette := uiPalette(m.theme)
+	commandStyle := lipgloss.NewStyle().Foreground(palette.primary).Bold(true)
+	descriptionStyle := lipgloss.NewStyle().Foreground(palette.secondary).Faint(true)
+	out := make([]string, 0, slashCommandPickerLines)
+	for row := 0; row < slashCommandPickerLines; row++ {
+		idx := state.start + row
+		line := ""
+		if idx < len(state.matches) {
+			line = commandStyle.Render("/" + state.matches[idx].Name)
+			description := strings.TrimSpace(state.matches[idx].Description)
+			if description != "" {
+				line += " - " + descriptionStyle.Render(description)
+			}
+		} else if len(state.matches) == 0 && row == 0 {
+			line = descriptionStyle.Render("No matching commands")
+		}
+		out = append(out, padANSIRight(line, width))
+	}
+	return out
+}
+
 func (l uiViewLayout) effectiveWidth() int {
 	m := l.model
 	if m.termWidth > 0 {
@@ -237,7 +366,11 @@ func (l uiViewLayout) calcChatLines() int {
 		inputContentLines = maxContentLines
 	}
 	inputLines := inputContentLines + 2
-	chat := height - inputLines - 1
+	pickerLines := 0
+	if m.slashCommandPicker().visible {
+		pickerLines = slashCommandPickerLines
+	}
+	chat := height - inputLines - pickerLines - 1
 	if chat < 1 {
 		return 1
 	}
@@ -267,6 +400,10 @@ func (m *uiModel) renderChatPanel(width, height int, style uiStyles) []string {
 
 func (m *uiModel) renderInputLines(width int, style uiStyles) []string {
 	return m.layout().renderInputLines(width, style)
+}
+
+func (m *uiModel) renderSlashCommandPicker(width int) []string {
+	return m.layout().renderSlashCommandPicker(width)
 }
 
 func (m *uiModel) effectiveWidth() int {
