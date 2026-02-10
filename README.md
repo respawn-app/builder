@@ -1,0 +1,47 @@
+Builder is a highly opinionated terminal coding agent for professional Agentic Engineers, focusing on output quality.
+
+The project is currently a PoC/MVP which is already usable, but not polished enough for general use, and no guarantees on output quality are made.
+
+### What's done:
+
+- [x] Agentic loop with `shell` and `patch` tools.
+- [x] Support for Codex login and OpenAI api keys.
+- [x] Compaction using native Codex/OpenAI endpoints.
+- [x] Compact UI mode for ongoing work, and detailed mode to review thinking, tool calls, prompts, summaries.
+- [x] Queueing messages, steering the model (Tab to queue, Enter to steer)
+- [x] Asking user questions via a tool
+- [x] Config file with model selection, tool config, compact threshold, timeouts.
+- [x] Local and global `AGENTS.md` support
+- [x] Session and history persistence and resumption
+- [x] Markdown rendering
+
+
+### Important things not done yet
+
+- [ ] Esc-esc-style editing of messages and history rewrites
+- [ ] Web search, especially native
+- [ ] UI for queued messages
+- [ ] Saved prompts
+- [ ] Custom, or at least well made, system prompt.
+- [ ] Info about agent environment, such as shell env, machine, os etc.
+- [ ] Any non-openai model support
+- [ ] Syntax highlighting
+- [ ] Calling shell via `$`/`!` (optional)
+- [ ] @-file mentioning
+- [ ] Premade prompts for AGENTS.md creation, code review, planning (optional).
+
+### What will likely never be implemented
+
+These features are controversial or questionable for model performance, and usually have a better replacement. 
+Here is where this project has to be highly opinionated.
+
+- Subagents - subagents can be separate headless Builder instances via tmux or background shells, native subagents distract the model.
+- Plan mode - the model has native plan capabilities and can always ask questions, rest is just eye candy.
+- MCPs - mcps are net negative on model performance, pollute context, and can be replaced with CLI scripts
+- Skills - skills are controversial in performance and can easily be replaced with already supported AGENTS.md mentions.
+- Extra UI candy tool calls - all the model needs is `shell`, `ask` and `patch`. Less tools, less burden on the model.
+- On the fly changing of toolsets or models. Changing models at runtime hurts model performance and invalidates caches.
+- Microcompaction - this invalidates caches and drives costs up with marginal benefits
+- Sandboxing - Codex's sandbox is annoying, doesn't work with many tools (gradle, java etc), junie's sandbox can be bypassed, claude code's sandbox is brittle and can also be bypassed. Frontier models are not so stupid anymore and are trained not to destroy your PC.
+- WebFetch tool or similar. Just use [jina.ai](https://r.jina.ai).
+- Fancy summaries, UI, minimal mode, features for "vibe coding", eye candy. The philosophy is to build something for professionals (existing engineers)

@@ -68,3 +68,4 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
 - Before handing off to the user after code changes, rebuild the binary to `./bin/builder` and make sure tests are written and green. Don't ask for confirmation to write tests and run checks.
 - `docs/decisions.md` is the source of truth for locked product and architecture decisions.
 - Keep this file up-to-date and comprehensive. Avoid adding info that can become outdated, otherwise keep this as project guidelines, rules, and learnings for future team members. Persist info that should be preserved here.
+- Do not enable terminal mouse capture modes (`tea.WithMouse*`, `EnableMouse*`) by default, because they break native text selection. If mouse behavior is required, preserve selection-first behavior and prefer non-capturing scroll paths.
