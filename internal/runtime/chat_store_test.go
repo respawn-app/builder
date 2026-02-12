@@ -3,6 +3,7 @@ package runtime
 import (
 	"builder/internal/llm"
 	"builder/internal/tools"
+	"builder/internal/transcript"
 	"builder/prompts"
 	"encoding/json"
 	"strconv"
@@ -107,6 +108,9 @@ func TestPatchToolCallFormattingCapturesSummaryAndDetailMeta(t *testing.T) {
 	if rendered.ToolCall == nil {
 		t.Fatalf("expected tool metadata on patch call")
 	}
+	if rendered.ToolCall.RenderHint == nil || rendered.ToolCall.RenderHint.Kind != transcript.ToolRenderKindDiff {
+		t.Fatalf("expected diff render hint for patch, got %+v", rendered.ToolCall.RenderHint)
+	}
 	if rendered.ToolCallID != "call_patch" {
 		t.Fatalf("unexpected patch call id: %+v", rendered)
 	}
@@ -158,7 +162,7 @@ func TestFormatToolCallShellAddsShellMetadata(t *testing.T) {
 	call := llm.ToolCall{
 		ID:    "call_shell",
 		Name:  string(tools.ToolShell),
-		Input: json.RawMessage(`{"command":"pwd"}`),
+		Input: json.RawMessage(`{"command":"cat internal/tui/model.go"}`),
 	}
 
 	rendered := s.formatToolCall(call)
@@ -168,8 +172,61 @@ func TestFormatToolCallShellAddsShellMetadata(t *testing.T) {
 	if rendered.ToolCallID != "call_shell" {
 		t.Fatalf("unexpected shell call id: %+v", rendered)
 	}
-	if !strings.Contains(rendered.Text, "pwd") {
+	if rendered.ToolCall.RenderHint == nil {
+		t.Fatalf("expected shell render hint, got %+v", rendered.ToolCall)
+	}
+	if rendered.ToolCall.RenderHint.Kind != transcript.ToolRenderKindSource {
+		t.Fatalf("expected source render hint kind, got %+v", rendered.ToolCall.RenderHint)
+	}
+	if rendered.ToolCall.RenderHint.Path != "internal/tui/model.go" {
+		t.Fatalf("unexpected source render hint path: %+v", rendered.ToolCall.RenderHint)
+	}
+	if !rendered.ToolCall.RenderHint.ResultOnly {
+		t.Fatalf("expected result-only shell render hint, got %+v", rendered.ToolCall.RenderHint)
+	}
+	if !strings.Contains(rendered.Text, "cat internal/tui/model.go") {
 		t.Fatalf("expected command in rendered shell call, got %q", rendered.Text)
+	}
+}
+
+func TestFormatToolCallAskQuestionUsesQuestionAndSuggestionsMeta(t *testing.T) {
+	s := newChatStore()
+	call := llm.ToolCall{
+		ID:    "call_ask",
+		Name:  string(tools.ToolAskQuestion),
+		Input: json.RawMessage(`{"question":"Choose scope?","suggestions":["Recommended: flat scan","Recursive scan"]}`),
+	}
+
+	rendered := s.formatToolCall(call)
+	if rendered.Role != "tool_call" {
+		t.Fatalf("expected tool_call role, got %+v", rendered)
+	}
+	if rendered.ToolCallID != "call_ask" {
+		t.Fatalf("unexpected ask_question call id: %+v", rendered)
+	}
+	if rendered.ToolCall == nil {
+		t.Fatalf("expected ask_question metadata, got nil")
+	}
+	if rendered.ToolCall.ToolName != string(tools.ToolAskQuestion) {
+		t.Fatalf("unexpected ask_question tool name: %+v", rendered.ToolCall)
+	}
+	if rendered.Text != "Choose scope?" {
+		t.Fatalf("expected rendered question text only, got %q", rendered.Text)
+	}
+	if strings.Contains(rendered.Text, "question:") || strings.Contains(rendered.Text, "suggestions:") {
+		t.Fatalf("expected rendered ask_question text without labels, got %q", rendered.Text)
+	}
+	if rendered.ToolCall.Question != "Choose scope?" {
+		t.Fatalf("unexpected ask_question metadata question: %+v", rendered.ToolCall)
+	}
+	if rendered.ToolCall.Command != "Choose scope?" {
+		t.Fatalf("unexpected ask_question metadata command: %+v", rendered.ToolCall)
+	}
+	if len(rendered.ToolCall.Suggestions) != 2 {
+		t.Fatalf("expected 2 suggestions, got %+v", rendered.ToolCall.Suggestions)
+	}
+	if rendered.ToolCall.Suggestions[0] != "Recommended: flat scan" || rendered.ToolCall.Suggestions[1] != "Recursive scan" {
+		t.Fatalf("unexpected ask_question suggestions: %+v", rendered.ToolCall.Suggestions)
 	}
 }
 

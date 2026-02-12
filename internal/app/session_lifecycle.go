@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"builder/internal/app/commands"
 	"builder/internal/session"
 )
 
@@ -36,7 +37,13 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 			return err
 		}
 
-		finalModel, runErr := runUILoop(wiring, active, logger)
+		commandRegistry, err := commands.NewDefaultRegistryWithFilePrompts(boot.cfg.WorkspaceRoot, boot.cfg.Source.SettingsPath)
+		if err != nil {
+			_ = logger.Close()
+			return err
+		}
+
+		finalModel, runErr := runUILoop(wiring, active, logger, commandRegistry)
 		_ = logger.Close()
 		if runErr != nil {
 			return runErr

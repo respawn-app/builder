@@ -1,12 +1,13 @@
 package app
 
 import (
+	"builder/internal/app/commands"
 	"builder/internal/config"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func runUILoop(wiring *runtimeWiring, active config.Settings, logger *runLogger) (tea.Model, error) {
+func runUILoop(wiring *runtimeWiring, active config.Settings, logger *runLogger, commandRegistry *commands.Registry) (tea.Model, error) {
 	program := tea.NewProgram(NewUIModel(
 		wiring.engine,
 		wiring.eventBridge.Channel(),
@@ -14,6 +15,7 @@ func runUILoop(wiring *runtimeWiring, active config.Settings, logger *runLogger)
 		WithUILogger(logger),
 		WithUIModelName(active.Model),
 		WithUITheme(active.Theme),
+		WithUICommandRegistry(commandRegistry),
 	), tea.WithAltScreen())
 
 	finalModel, runErr := program.Run()

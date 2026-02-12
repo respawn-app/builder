@@ -104,6 +104,9 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
 			m.clearInput()
+			if commandResult.SubmitUser {
+				return m, c.startSubmission(commandResult.User)
+			}
 			if commandResult.Text != "" {
 				if m.engine != nil {
 					m.engine.AppendLocalEntry("system", commandResult.Text)

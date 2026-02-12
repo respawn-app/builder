@@ -257,14 +257,29 @@ func (s *chatStore) snapshot() ChatSnapshot {
 }
 
 func (s *chatStore) formatToolCall(call llm.ToolCall) ChatEntry {
+	toolName := strings.TrimSpace(call.Name)
 	meta := &transcript.ToolCallMeta{
-		ToolName: strings.TrimSpace(call.Name),
-		IsShell:  strings.TrimSpace(call.Name) == string(tools.ToolShell),
+		ToolName: toolName,
+		IsShell:  toolName == string(tools.ToolShell),
 	}
-	if strings.TrimSpace(call.Name) == string(tools.ToolPatch) {
+	if toolName == string(tools.ToolAskQuestion) {
+		if question, suggestions, ok := formatAskQuestionToolCall(call.Input); ok {
+			meta.Command = question
+			meta.Question = question
+			meta.Suggestions = append([]string(nil), suggestions...)
+			return ChatEntry{
+				Role:       "tool_call",
+				Text:       question,
+				ToolCallID: strings.TrimSpace(call.ID),
+				ToolCall:   meta,
+			}
+		}
+	}
+	if toolName == string(tools.ToolPatch) {
 		if summary, detail, ok := s.formatPatchToolCall(call.Input); ok {
 			meta.PatchSummary = summary
 			meta.PatchDetail = detail
+			meta.RenderHint = &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff}
 			return ChatEntry{
 				Role:       "tool_call",
 				Text:       summary,
@@ -273,19 +288,45 @@ func (s *chatStore) formatToolCall(call llm.ToolCall) ChatEntry {
 			}
 		}
 	}
-	command, timeoutLabel := toolcodec.FormatInput(strings.TrimSpace(call.Name), call.Input, defaultShellTimeoutSecond)
+	command, timeoutLabel := toolcodec.FormatInput(toolName, call.Input, defaultShellTimeoutSecond)
 	command = strings.TrimSpace(command)
 	if command == "" {
 		command = "tool call"
 	}
 	meta.Command = command
 	meta.TimeoutLabel = timeoutLabel
+	if meta.IsShell {
+		meta.RenderHint = detectShellRenderHint(command)
+	}
 	return ChatEntry{
 		Role:       "tool_call",
 		Text:       command,
 		ToolCallID: strings.TrimSpace(call.ID),
 		ToolCall:   meta,
 	}
+}
+
+func formatAskQuestionToolCall(raw json.RawMessage) (string, []string, bool) {
+	var in struct {
+		Question    string   `json:"question"`
+		Suggestions []string `json:"suggestions,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return "", nil, false
+	}
+	question := strings.TrimSpace(in.Question)
+	if question == "" {
+		return "", nil, false
+	}
+	suggestions := make([]string, 0, len(in.Suggestions))
+	for _, suggestion := range in.Suggestions {
+		trimmed := strings.TrimSpace(suggestion)
+		if trimmed == "" {
+			continue
+		}
+		suggestions = append(suggestions, trimmed)
+	}
+	return question, suggestions, true
 }
 
 func formatToolResult(result tools.Result) string {

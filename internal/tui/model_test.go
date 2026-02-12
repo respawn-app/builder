@@ -404,15 +404,64 @@ func TestDetailDoesNotMatchAdjacentResultWhenCallIDMissing(t *testing.T) {
 	}
 }
 
-func TestDetailAskQuestionToolUsesQuestionPrefix(t *testing.T) {
-	m := NewModel()
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: "ask_question", ToolCall: &transcript.ToolCallMeta{ToolName: "ask_question"}})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "ok"})
+func TestDetailAskQuestionRendersQuestionSuggestionsAndAnswer(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: "question: Choose scope?\nsuggestions: - Recommended: flat scan\n  - Recursive scan",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:    "ask_question",
+			Question:    "Choose scope?",
+			Suggestions: []string{"Recommended: flat scan", "Recursive scan"},
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "Use flat scan."})
 	m = updateModel(t, m, ToggleModeMsg{})
 
-	view := plainTranscript(m.View())
-	if !containsInOrder(view, "?", "ask_question") {
-		t.Fatalf("expected ask_question tool to use question prefix, got %q", view)
+	plain := plainTranscript(m.View())
+	if strings.Contains(plain, "question:") || strings.Contains(plain, "suggestions:") {
+		t.Fatalf("expected ask_question labels removed from detail view, got %q", plain)
+	}
+	if !containsInOrder(plain, "?", "Choose scope?", "- Recommended: flat scan", "- Recursive scan", "Use flat scan.") {
+		t.Fatalf("expected question, suggestions and answer in detail order, got %q", plain)
+	}
+
+	colored := m.View()
+	if !strings.Contains(colored, m.palette().preview.Faint(true).Render("- Recommended: flat scan")) {
+		t.Fatalf("expected suggestions to be muted in detail view, got %q", colored)
+	}
+	if !strings.Contains(colored, m.palette().user.Render("Use flat scan.")) {
+		t.Fatalf("expected answer to use user color in detail view, got %q", colored)
+	}
+}
+
+func TestOngoingAskQuestionRendersQuestionAndAnswerOnly(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: "question: Choose scope?\nsuggestions: - Recommended: flat scan\n  - Recursive scan",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:    "ask_question",
+			Question:    "Choose scope?",
+			Suggestions: []string{"Recommended: flat scan", "Recursive scan"},
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "Use flat scan."})
+
+	plain := plainTranscript(m.View())
+	if strings.Contains(plain, "question:") || strings.Contains(plain, "suggestions:") {
+		t.Fatalf("expected ask_question labels removed from ongoing view, got %q", plain)
+	}
+	if strings.Contains(plain, "- Recommended: flat scan") || strings.Contains(plain, "- Recursive scan") {
+		t.Fatalf("expected ongoing view to omit ask_question suggestions, got %q", plain)
+	}
+	if !containsInOrder(plain, "?", "Choose scope?", "Use flat scan.") {
+		t.Fatalf("expected question and answer in ongoing view, got %q", plain)
+	}
+
+	colored := m.View()
+	if !strings.Contains(colored, m.palette().user.Render("Use flat scan.")) {
+		t.Fatalf("expected answer to use user color in ongoing view, got %q", colored)
 	}
 }
 
@@ -777,6 +826,49 @@ func TestDetailReflowsNonMarkdownRolesOnViewportResize(t *testing.T) {
 	}
 	if !strings.Contains(wide, text) {
 		t.Fatalf("expected wide detail view to reflow and contain single-line text, got %q", wide)
+	}
+}
+
+func TestRenderEntryTextHighlightsOnlyResultForShellSourceHint(t *testing.T) {
+	m := NewModel()
+	meta := &transcript.ToolCallMeta{
+		RenderHint: &transcript.ToolRenderHint{
+			Kind:       transcript.ToolRenderKindSource,
+			Path:       "main.go",
+			ResultOnly: true,
+		},
+	}
+
+	out := m.renderEntryText("tool_shell_success", "cat main.go\npackage main\nfunc main() {}", 120, meta, false)
+	lines := strings.Split(out, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected command and highlighted output lines, got %q", out)
+	}
+	if lines[0] != "cat main.go" {
+		t.Fatalf("expected command line to stay plain, got %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "\x1b[") {
+		t.Fatalf("expected highlighted result line, got %q", lines[1])
+	}
+	plain := ansi.Strip(out)
+	if !strings.Contains(plain, "package main") || !strings.Contains(plain, "func main() {}") {
+		t.Fatalf("expected result text preserved after highlighting, got %q", plain)
+	}
+}
+
+func TestRenderEntryTextSkipsHighlightWhenMuted(t *testing.T) {
+	m := NewModel()
+	meta := &transcript.ToolCallMeta{
+		RenderHint: &transcript.ToolRenderHint{
+			Kind:       transcript.ToolRenderKindSource,
+			Path:       "main.go",
+			ResultOnly: true,
+		},
+	}
+
+	out := m.renderEntryText("tool_shell_success", "cat main.go\npackage main\nfunc main() {}", 120, meta, true)
+	if strings.Contains(out, "\x1b[") {
+		t.Fatalf("expected muted tool text to skip syntax highlighting, got %q", out)
 	}
 }
 
