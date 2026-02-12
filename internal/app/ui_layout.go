@@ -16,6 +16,7 @@ import (
 const (
 	ansiHideCursor        = "\x1b[?25l"
 	statusContextBarWidth = 10
+	queuedMessagesLimit   = 5
 )
 
 type uiViewLayout struct {
@@ -36,10 +37,11 @@ func (l uiViewLayout) render() string {
 	}
 
 	inputLines := l.renderInputLines(width, style)
+	queuedLines := l.renderQueuedMessagesPane(width)
 	pickerLines := l.renderSlashCommandPicker(width)
 	statusLine := l.renderStatusLine(width, style)
 	statusLines := 1
-	chatLines := height - len(inputLines) - len(pickerLines) - statusLines
+	chatLines := height - len(inputLines) - len(queuedLines) - len(pickerLines) - statusLines
 	if chatLines < 1 {
 		chatLines = 1
 	}
@@ -47,6 +49,7 @@ func (l uiViewLayout) render() string {
 	allLines := make([]string, 0, height)
 	allLines = append(allLines, chatPanel...)
 	allLines = append(allLines, pickerLines...)
+	allLines = append(allLines, queuedLines...)
 	allLines = append(allLines, inputLines...)
 	allLines = append(allLines, statusLine)
 	for len(allLines) < height {
@@ -398,6 +401,62 @@ func (l uiViewLayout) renderSlashCommandPicker(width int) []string {
 	return out
 }
 
+func (l uiViewLayout) renderQueuedMessagesPane(width int) []string {
+	m := l.model
+	if width < 1 || len(m.queued) == 0 {
+		return nil
+	}
+	lines := l.queuedMessagePaneLines(width)
+	if len(lines) == 0 {
+		return nil
+	}
+	palette := uiPalette(m.theme)
+	queueStyle := lipgloss.NewStyle().Foreground(palette.secondary).Faint(true)
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, queueStyle.Render(padANSIRight(line, width)))
+	}
+	return out
+}
+
+func (l uiViewLayout) queuedPaneLineCount() int {
+	total := len(l.model.queued)
+	if total == 0 {
+		return 0
+	}
+	visible := total
+	if visible > queuedMessagesLimit {
+		visible = queuedMessagesLimit
+	}
+	hidden := total - visible
+	if hidden > 0 {
+		return visible + 1
+	}
+	return visible
+}
+
+func (l uiViewLayout) queuedMessagePaneLines(width int) []string {
+	m := l.model
+	total := len(m.queued)
+	if width < 1 || total == 0 {
+		return nil
+	}
+	start := 0
+	if total > queuedMessagesLimit {
+		start = total - queuedMessagesLimit
+	}
+	visible := m.queued[start:]
+	out := make([]string, 0, len(visible)+1)
+	hidden := total - len(visible)
+	if hidden > 0 {
+		out = append(out, fmt.Sprintf("%d more messages", hidden))
+	}
+	for _, message := range visible {
+		out = append(out, truncateQueuedMessageLine(message, width))
+	}
+	return out
+}
+
 func (l uiViewLayout) effectiveWidth() int {
 	m := l.model
 	if m.termWidth > 0 {
@@ -446,11 +505,12 @@ func (l uiViewLayout) calcChatLines() int {
 		inputContentLines = maxContentLines
 	}
 	inputLines := inputContentLines + 2
+	queuedLines := l.queuedPaneLineCount()
 	pickerLines := 0
 	if m.slashCommandPicker().visible {
 		pickerLines = slashCommandPickerLines
 	}
-	chat := height - inputLines - pickerLines - 1
+	chat := height - inputLines - queuedLines - pickerLines - 1
 	if chat < 1 {
 		return 1
 	}
@@ -484,6 +544,10 @@ func (m *uiModel) renderInputLines(width int, style uiStyles) []string {
 
 func (m *uiModel) renderSlashCommandPicker(width int) []string {
 	return m.layout().renderSlashCommandPicker(width)
+}
+
+func (m *uiModel) renderQueuedMessagesPane(width int) []string {
+	return m.layout().renderQueuedMessagesPane(width)
 }
 
 func (m *uiModel) effectiveWidth() int {
@@ -605,6 +669,43 @@ func wrapLine(line string, width int) []string {
 		remaining = remaining[cut:]
 	}
 	return parts
+}
+
+func truncateQueuedMessageLine(message string, width int) string {
+	if width < 1 {
+		return ""
+	}
+	firstLine := message
+	hasMoreContent := false
+	if idx := strings.IndexRune(message, '\n'); idx >= 0 {
+		firstLine = message[:idx]
+		hasMoreContent = true
+	}
+	if !hasMoreContent && runewidth.StringWidth(firstLine) <= width {
+		return firstLine
+	}
+	if width == 1 {
+		return "…"
+	}
+	maxWidth := width - 1
+	runes := []rune(firstLine)
+	cut := 0
+	w := 0
+	for i, r := range runes {
+		rw := runewidth.RuneWidth(r)
+		if rw < 1 {
+			rw = 1
+		}
+		if w+rw > maxWidth {
+			break
+		}
+		w += rw
+		cut = i + 1
+	}
+	if cut == 0 {
+		return "…"
+	}
+	return string(runes[:cut]) + "…"
 }
 
 func padRight(line string, width int) string {

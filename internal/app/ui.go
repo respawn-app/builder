@@ -89,6 +89,15 @@ func WithUIInitialTranscript(entries []UITranscriptEntry) UIOption {
 	}
 }
 
+func WithUICommandRegistry(registry *commands.Registry) UIOption {
+	return func(m *uiModel) {
+		if registry == nil {
+			return
+		}
+		m.commandRegistry = registry
+	}
+}
+
 func newAskBridge() *askBridge {
 	return &askBridge{ch: make(chan askEvent, 64)}
 }

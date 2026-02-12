@@ -18,10 +18,12 @@ const (
 )
 
 type Result struct {
-	Handled bool
-	Action  Action
-	Text    string
-	Args    string
+	Handled    bool
+	Action     Action
+	Text       string
+	Args       string
+	SubmitUser bool
+	User       string
 }
 
 type Handler func(args string) Result

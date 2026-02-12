@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"builder/internal/app/commands"
 	"builder/internal/llm"
 	"builder/internal/runtime"
 	"builder/internal/session"
@@ -809,6 +810,76 @@ func TestCalcChatLinesShrinksWhenInputWraps(t *testing.T) {
 	}
 }
 
+func TestRenderQueuedMessagesPaneShowsNewestFiveAndOverflowLine(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.queued = []string{"one", "two", "three", "four", "five", "six", "seven"}
+
+	lines := m.renderQueuedMessagesPane(40)
+	if len(lines) != 6 {
+		t.Fatalf("expected 6 queued pane lines, got %d", len(lines))
+	}
+	plain := strings.Split(stripANSIAndTrimRight(strings.Join(lines, "\n")), "\n")
+	want := []string{"2 more messages", "three", "four", "five", "six", "seven"}
+	if len(plain) != len(want) {
+		t.Fatalf("expected %d plain lines, got %d", len(want), len(plain))
+	}
+	for i := range want {
+		if plain[i] != want[i] {
+			t.Fatalf("line %d = %q want %q", i, plain[i], want[i])
+		}
+	}
+}
+
+func TestRenderQueuedMessagesPaneTruncatesToOneLineWithEllipsis(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.queued = []string{"short\nsecond line", "abcdefghijklmnopqrstuvwxyz"}
+
+	lines := m.renderQueuedMessagesPane(10)
+	plain := strings.Split(stripANSIAndTrimRight(strings.Join(lines, "\n")), "\n")
+	want := []string{"short…", "abcdefghi…"}
+	if len(plain) != len(want) {
+		t.Fatalf("expected %d plain lines, got %d", len(want), len(plain))
+	}
+	for i := range want {
+		if plain[i] != want[i] {
+			t.Fatalf("line %d = %q want %q", i, plain[i], want[i])
+		}
+	}
+}
+
+func TestViewPlacesQueuedPaneBetweenSlashPickerAndInput(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 18
+	m.input = "/"
+	m.refreshSlashCommandFilterFromInput()
+	m.queued = []string{"queued latest"}
+
+	view := stripANSIAndTrimRight(m.View())
+	if !containsInOrder(view, "/new", "queued latest", "› /") {
+		t.Fatalf("expected slash picker above queued pane above input, got %q", view)
+	}
+}
+
+func TestCalcChatLinesShrinksForQueuedPane(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 40
+	m.termHeight = 20
+	m.input = "ok"
+
+	base := m.calcChatLines()
+	m.queued = []string{"a", "b", "c"}
+	withThree := m.calcChatLines()
+	if withThree != base-3 {
+		t.Fatalf("expected chat lines to shrink by 3, base=%d withThree=%d", base, withThree)
+	}
+	m.queued = []string{"1", "2", "3", "4", "5", "6"}
+	withOverflowLine := m.calcChatLines()
+	if withOverflowLine != base-6 {
+		t.Fatalf("expected chat lines to shrink by 6 with overflow line, base=%d withOverflowLine=%d", base, withOverflowLine)
+	}
+}
+
 func TestRenderChatPanelRendersFullWidthMetaDivider(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	style := uiThemeStyles("dark")
@@ -907,6 +978,33 @@ func TestUnknownSlashCommandIsSubmittedAsPrompt(t *testing.T) {
 	plain := stripANSIAndTrimRight(updated.View())
 	if !strings.Contains(plain, "/nope") {
 		t.Fatalf("expected unknown slash command in user transcript, got %q", plain)
+	}
+}
+
+func TestFileSlashCommandSubmitsInjectedUserPrompt(t *testing.T) {
+	r := commands.NewRegistry()
+	r.Register("prompt:review", "", func(string) commands.Result {
+		return commands.Result{Handled: true, SubmitUser: true, User: "# review\nexact body\n"}
+	})
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUICommandRegistry(r),
+	).(*uiModel)
+	m.input = "/prompt:review"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if !updated.busy {
+		t.Fatal("expected submission to start for file slash command")
+	}
+	plain := stripANSIAndTrimRight(updated.View())
+	if strings.Contains(plain, "/prompt:review") {
+		t.Fatalf("expected command text to be replaced by file prompt content, got %q", plain)
+	}
+	if !strings.Contains(plain, "review") || !strings.Contains(plain, "exact body") {
+		t.Fatalf("expected file prompt content in transcript, got %q", plain)
 	}
 }
 

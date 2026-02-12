@@ -522,3 +522,9 @@ This file records architecture and product decisions for the minimal terminal co
    - Default value: `false` (workspace-only behavior stays default).
    - When disabled, outside-workspace patch attempts trigger user approval through the shared `ask_question` flow.
    - A user denial returns a tool error that explicitly instructs the model not to circumvent restrictions and to ask for manual user edits when essential.
+
+151. **Slash commands support file-backed custom prompts from local/global builder directories.**
+   - Builder scans non-recursive `.md` files from `./.builder/prompts`, `./.builder/commands`, `~/.builder/prompts`, and `~/.builder/commands`.
+   - File commands are merged into one namespace with precedence: local over global, and `prompts` over `commands`.
+   - Command id format is `prompt:<filename-without-extension>`.
+   - Triggering a file command injects the file content verbatim as a `user` message submission.

@@ -104,6 +104,7 @@ type Model struct {
 	ongoingError   string
 	theme          string
 	md             *markdownRenderer
+	code           *codeRenderer
 }
 
 func NewModel(opts ...Option) Model {
@@ -117,6 +118,7 @@ func NewModel(opts ...Option) Model {
 		opt(&m)
 	}
 	m.md = newMarkdownRenderer(m.theme)
+	m.code = newCodeRenderer(m.theme)
 	return m
 }
 
@@ -344,6 +346,18 @@ func (m Model) renderFlatDetailTranscript() string {
 			blockRole := "tool"
 			if isAskQuestionToolCall(entry.ToolCall) {
 				blockRole = "tool_question"
+				question, suggestions := askQuestionDisplay(entry.ToolCall, entry.Text)
+				answer := ""
+				if resultIdx := findMatchingToolResultIndex(m.transcript, i, consumedResults); resultIdx >= 0 {
+					nextRole := strings.TrimSpace(m.transcript[resultIdx].Role)
+					if isToolResultRole(nextRole) {
+						answer = strings.TrimSpace(m.transcript[resultIdx].Text)
+						blockRole = toolBlockRoleFromResult(nextRole, blockRole)
+						consumedResults[resultIdx] = struct{}{}
+					}
+				}
+				blocks = append(blocks, m.flattenAskQuestionEntry(blockRole, question, suggestions, answer, true))
+				continue
 			} else if isShellToolCall(entry.ToolCall, entry.Text) {
 				blockRole = "tool_shell"
 			}
@@ -363,7 +377,7 @@ func (m Model) renderFlatDetailTranscript() string {
 				blockRole = toolBlockRoleFromResult(nextRole, blockRole)
 				consumedResults[resultIdx] = struct{}{}
 			}
-			blocks = append(blocks, m.flattenEntry(blockRole, combined))
+			blocks = append(blocks, m.flattenEntryWithMeta(blockRole, combined, false, entry.ToolCall))
 		case "tool_result", "tool_result_ok", "tool_result_error":
 			blocks = append(blocks, m.flattenEntry(toolBlockRoleFromResult(role, "tool"), entry.Text))
 		default:
@@ -484,6 +498,21 @@ func (m Model) renderFlatOngoingTranscript() string {
 			blockRole := "tool"
 			if isAskQuestionToolCall(entry.ToolCall) {
 				blockRole = "tool_question"
+				question, suggestions := askQuestionDisplay(entry.ToolCall, entry.Text)
+				answer := ""
+				if resultIdx := findMatchingToolResultIndex(m.transcript, i, consumedResults); resultIdx >= 0 {
+					nextRole := strings.TrimSpace(m.transcript[resultIdx].Role)
+					if isToolResultRole(nextRole) {
+						answer = strings.TrimSpace(m.transcript[resultIdx].Text)
+						blockRole = toolBlockRoleFromResult(nextRole, blockRole)
+						consumedResults[resultIdx] = struct{}{}
+					}
+				}
+				blocks = append(blocks, ongoingBlock{
+					role:  blockRole,
+					lines: m.flattenAskQuestionEntry(blockRole, question, suggestions, answer, false),
+				})
+				continue
 			} else if isShellToolCall(entry.ToolCall, entry.Text) {
 				blockRole = "tool_shell"
 			}
@@ -501,7 +530,7 @@ func (m Model) renderFlatOngoingTranscript() string {
 			}
 			blocks = append(blocks, ongoingBlock{
 				role:  blockRole,
-				lines: m.flattenEntryWithMutedText(blockRole, combined, true),
+				lines: m.flattenEntryWithMeta(blockRole, combined, true, entry.ToolCall),
 			})
 		case "tool_result", "tool_result_ok", "tool_result_error":
 			continue
@@ -532,15 +561,19 @@ func (m Model) renderFlatOngoingTranscript() string {
 }
 
 func (m Model) flattenEntry(role, text string) []string {
-	return m.flattenEntryWithMutedText(role, text, false)
+	return m.flattenEntryWithMeta(role, text, false, nil)
 }
 
 func (m Model) flattenEntryWithMutedText(role, text string, muteText bool) []string {
+	return m.flattenEntryWithMeta(role, text, muteText, nil)
+}
+
+func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *transcript.ToolCallMeta) []string {
 	renderWidth := m.viewportWidth
 	if rolePrefix(role) != "" {
 		renderWidth -= 2
 	}
-	rendered := m.renderEntryText(role, text, renderWidth)
+	rendered := m.renderEntryText(role, text, renderWidth, toolMeta, muteText)
 	isEditedBlock := strings.HasPrefix(strings.TrimSpace(rendered), "Edited:")
 	chunks := splitLines(rendered)
 	if len(chunks) == 0 {
@@ -609,9 +642,14 @@ func (m Model) flattenEntryPlain(role, text string) []string {
 	return out
 }
 
-func (m Model) renderEntryText(role, text string, width int) string {
+func (m Model) renderEntryText(role, text string, width int, toolMeta *transcript.ToolCallMeta, muteText bool) string {
 	if strings.TrimSpace(text) == "" {
 		return text
+	}
+	if !muteText {
+		if highlighted, ok := m.renderToolTextWithHighlight(role, text, width, toolMeta); ok {
+			return highlighted
+		}
 	}
 	if !isMarkdownRole(role) {
 		return wrapTextForViewport(text, width)
@@ -624,6 +662,31 @@ func (m Model) renderEntryText(role, text string, width int) string {
 		return wrapTextForViewport(text, width)
 	}
 	return rendered
+}
+
+func (m Model) renderToolTextWithHighlight(role, text string, width int, toolMeta *transcript.ToolCallMeta) (string, bool) {
+	if !isToolHeadlineRole(role) || toolMeta == nil || !toolMeta.HasRenderHint() || m.code == nil {
+		return "", false
+	}
+	hint := toolMeta.RenderHint
+	highlightTarget := text
+	prefix := ""
+	if hint.ResultOnly {
+		parts := strings.SplitN(text, "\n", 2)
+		if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
+			return "", false
+		}
+		prefix = parts[0]
+		highlightTarget = parts[1]
+	}
+	rendered, ok := m.code.render(hint, highlightTarget)
+	if !ok {
+		return "", false
+	}
+	if prefix != "" {
+		rendered = prefix + "\n" + rendered
+	}
+	return wrapTextForViewport(rendered, width), true
 }
 
 func wrapTextForViewport(text string, width int) string {
@@ -663,6 +726,170 @@ func compactToolCallText(meta *transcript.ToolCallMeta, text string) string {
 		return strings.TrimSpace(meta.PatchSummary)
 	}
 	return toolcodec.CompactCallText(text)
+}
+
+func askQuestionDisplay(meta *transcript.ToolCallMeta, text string) (string, []string) {
+	question := ""
+	suggestions := make([]string, 0)
+	if meta != nil {
+		question = normalizeAskQuestionQuestion(meta.Question)
+		if question == "" {
+			question = normalizeAskQuestionQuestion(meta.Command)
+		}
+		for _, suggestion := range meta.Suggestions {
+			trimmed := normalizeAskQuestionSuggestion(suggestion)
+			if trimmed == "" {
+				continue
+			}
+			suggestions = append(suggestions, trimmed)
+		}
+	}
+	fallbackQuestion, fallbackSuggestions := parseAskQuestionTextFallback(text)
+	if question == "" {
+		question = fallbackQuestion
+	}
+	if len(suggestions) == 0 {
+		suggestions = append(suggestions, fallbackSuggestions...)
+	}
+	if question == "" {
+		question = "ask_question"
+	}
+	return question, suggestions
+}
+
+func normalizeAskQuestionQuestion(question string) string {
+	trimmed := strings.TrimSpace(question)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.EqualFold(trimmed, "ask_question") {
+		return ""
+	}
+	if strings.HasPrefix(strings.ToLower(trimmed), "question:") {
+		trimmed = strings.TrimSpace(trimmed[len("question:"):])
+	}
+	return trimmed
+}
+
+func normalizeAskQuestionSuggestion(suggestion string) string {
+	trimmed := strings.TrimSpace(suggestion)
+	trimmed = strings.TrimPrefix(trimmed, "-")
+	return strings.TrimSpace(trimmed)
+}
+
+func parseAskQuestionTextFallback(text string) (string, []string) {
+	trimmedText := strings.TrimSpace(text)
+	if trimmedText == "" {
+		return "", nil
+	}
+	lines := splitLines(trimmedText)
+	question := ""
+	suggestions := make([]string, 0)
+	for idx, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if idx == 0 {
+			question = normalizeAskQuestionQuestion(trimmed)
+			continue
+		}
+		lower := strings.ToLower(trimmed)
+		if strings.HasPrefix(lower, "suggestions:") {
+			rest := strings.TrimSpace(trimmed[len("suggestions:"):])
+			rest = normalizeAskQuestionSuggestion(rest)
+			if rest != "" {
+				suggestions = append(suggestions, rest)
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "-") {
+			rest := normalizeAskQuestionSuggestion(trimmed)
+			if rest != "" {
+				suggestions = append(suggestions, rest)
+			}
+		}
+	}
+	return question, suggestions
+}
+
+func (m Model) flattenAskQuestionEntry(role, question string, suggestions []string, answer string, includeSuggestions bool) []string {
+	renderWidth := m.viewportWidth
+	if rolePrefix(role) != "" {
+		renderWidth -= 2
+	}
+	if renderWidth < 1 {
+		renderWidth = 1
+	}
+
+	type askQuestionLine struct {
+		text string
+		kind string
+	}
+
+	lines := make([]askQuestionLine, 0, len(suggestions)+4)
+	question = strings.TrimSpace(question)
+	if question == "" {
+		question = "ask question"
+	}
+	for _, line := range splitLines(wrapTextForViewport(question, renderWidth)) {
+		lines = append(lines, askQuestionLine{text: line, kind: "question"})
+	}
+	if includeSuggestions {
+		for _, suggestion := range suggestions {
+			suggestion = normalizeAskQuestionSuggestion(suggestion)
+			if suggestion == "" {
+				continue
+			}
+			wrapped := splitLines(wrapTextForViewport(suggestion, max(1, renderWidth-2)))
+			for idx, line := range wrapped {
+				if idx == 0 {
+					lines = append(lines, askQuestionLine{text: "- " + line, kind: "suggestion"})
+					continue
+				}
+				lines = append(lines, askQuestionLine{text: "  " + line, kind: "suggestion"})
+			}
+		}
+	}
+	answer = strings.TrimSpace(answer)
+	if answer != "" {
+		for _, line := range splitLines(wrapTextForViewport(answer, renderWidth)) {
+			lines = append(lines, askQuestionLine{text: line, kind: "answer"})
+		}
+	}
+	if len(lines) == 0 {
+		lines = append(lines, askQuestionLine{text: "", kind: "question"})
+	}
+
+	symbol := m.roleSymbol(role)
+	out := make([]string, 0, len(lines))
+	for idx, line := range lines {
+		display := line.text
+		switch line.kind {
+		case "suggestion":
+			display = m.palette().preview.Faint(true).Render(display)
+		case "answer":
+			if role == "tool_question_error" {
+				display = styleForRole(role, m.palette()).Render(display)
+			} else {
+				display = m.palette().user.Render(display)
+			}
+		}
+		if idx == 0 {
+			if symbol == "" {
+				out = append(out, display)
+				continue
+			}
+			out = append(out, fmt.Sprintf("%s %s", symbol, display))
+			continue
+		}
+		if strings.TrimSpace(display) == "" {
+			out = append(out, "")
+			continue
+		}
+		out = append(out, "  "+display)
+	}
+	return out
 }
 
 func toolCallDisplayText(meta *transcript.ToolCallMeta, text string) string {
@@ -735,6 +962,9 @@ func (m Model) renderToolHeadline(line string, width int) string {
 }
 
 func (m Model) styleToolLine(line string) string {
+	if strings.Contains(line, "\x1b[") {
+		return line
+	}
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
 		return line
@@ -983,5 +1213,12 @@ func cloneToolCallMeta(in *transcript.ToolCallMeta) *transcript.ToolCallMeta {
 		return nil
 	}
 	out := *in
+	if in.RenderHint != nil {
+		hint := *in.RenderHint
+		out.RenderHint = &hint
+	}
+	if len(in.Suggestions) > 0 {
+		out.Suggestions = append([]string(nil), in.Suggestions...)
+	}
 	return &out
 }

@@ -14,6 +14,10 @@ The project is currently a PoC/MVP which is already usable, but not polished eno
 - [x] Local and global `AGENTS.md` support
 - [x] Session and history persistence and resumption
 - [x] Markdown rendering
+- [x] Saved prompts
+- [x] Custom, or at least well made, system prompt.
+- [x] Info about agent environment, such as shell env, machine, os etc.
+- [x] Syntax highlighting
 
 
 ### Important things not done yet
@@ -21,11 +25,7 @@ The project is currently a PoC/MVP which is already usable, but not polished eno
 - [ ] Esc-esc-style editing of messages and history rewrites
 - [ ] Web search, especially native
 - [ ] UI for queued messages
-- [ ] Saved prompts
-- [ ] Custom, or at least well made, system prompt.
-- [ ] Info about agent environment, such as shell env, machine, os etc.
 - [ ] Any non-openai model support
-- [ ] Syntax highlighting
 - [ ] Calling shell via `$`/`!` (optional)
 - [ ] @-file mentioning
 - [ ] Premade prompts for AGENTS.md creation, code review, planning (optional).
