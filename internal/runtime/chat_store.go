@@ -44,12 +44,23 @@ type chatStore struct {
 
 	messages []llm.Message
 	items    []llm.ResponseItem
-	local    []ChatEntry
+	compact  *compactionCheckpoint
+	local    []localChatEntry
 
 	toolCompletions map[string]tools.Result
 	ongoing         string
 	ongoingError    string
 	cwd             string
+}
+
+type localChatEntry struct {
+	Entry             ChatEntry
+	AfterMessageCount int
+}
+
+type compactionCheckpoint struct {
+	CutoffItemCount int
+	Items           []llm.ResponseItem
 }
 
 func newChatStore() *chatStore {
@@ -74,14 +85,16 @@ func (s *chatStore) appendMessage(msg llm.Message) {
 func (s *chatStore) replaceHistory(items []llm.ResponseItem) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.items = llm.CloneResponseItems(items)
-	s.messages = llm.MessagesFromItems(items)
+	s.compact = &compactionCheckpoint{
+		CutoffItemCount: len(s.items),
+		Items:           llm.CloneResponseItems(items),
+	}
 }
 
 func (s *chatStore) snapshotItems() []llm.ResponseItem {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return llm.CloneResponseItems(s.items)
+	return s.snapshotProviderItemsLocked()
 }
 
 func (s *chatStore) restoreToolCompletionPayload(payload []byte) error {
@@ -141,14 +154,34 @@ func (s *chatStore) appendLocalEntry(role, text string) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.local = append(s.local, ChatEntry{Role: role, Text: text})
+	s.local = append(s.local, localChatEntry{
+		Entry:             ChatEntry{Role: role, Text: text},
+		AfterMessageCount: len(s.messages),
+	})
 }
 
 func (s *chatStore) snapshotMessages() []llm.Message {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]llm.Message, len(s.messages))
-	copy(out, s.messages)
+	return llm.MessagesFromItems(s.snapshotProviderItemsLocked())
+}
+
+func (s *chatStore) snapshotProviderItemsLocked() []llm.ResponseItem {
+	if s.compact == nil {
+		return llm.CloneResponseItems(s.items)
+	}
+	base := llm.CloneResponseItems(s.compact.Items)
+	tailStart := s.compact.CutoffItemCount
+	if tailStart < 0 {
+		tailStart = 0
+	}
+	if tailStart >= len(s.items) {
+		return base
+	}
+	tail := llm.CloneResponseItems(s.items[tailStart:])
+	out := make([]llm.ResponseItem, 0, len(base)+len(tail))
+	out = append(out, base...)
+	out = append(out, tail...)
 	return out
 }
 
@@ -157,17 +190,27 @@ func (s *chatStore) snapshot() ChatSnapshot {
 	defer s.mu.RUnlock()
 
 	entries := make([]ChatEntry, 0, len(s.messages)+len(s.local))
+	localIndex := 0
+	appendLocalEntries := func(processedMessages int) {
+		for localIndex < len(s.local) {
+			if s.local[localIndex].AfterMessageCount > processedMessages {
+				break
+			}
+			entries = append(entries, s.local[localIndex].Entry)
+			localIndex++
+		}
+	}
+	appendLocalEntries(0)
+	processedMessages := 0
 	for _, msg := range s.messages {
 		switch msg.Role {
 		case llm.RoleUser:
 			content := strings.TrimSpace(msg.Content)
-			if content == "" || strings.HasPrefix(content, agentsInjectedPrefix) {
-				continue
+			if content != "" &&
+				!strings.HasPrefix(content, agentsInjectedPrefix) &&
+				!strings.HasPrefix(content, prompts.CompactionSummaryPrefix+"\n") {
+				entries = append(entries, ChatEntry{Role: "user", Text: msg.Content})
 			}
-			if strings.HasPrefix(content, prompts.CompactionSummaryPrefix+"\n") {
-				continue
-			}
-			entries = append(entries, ChatEntry{Role: "user", Text: msg.Content})
 		case llm.RoleAssistant:
 			if strings.TrimSpace(msg.Content) != "" {
 				entries = append(entries, ChatEntry{Role: "assistant", Text: msg.Content})
@@ -202,8 +245,10 @@ func (s *chatStore) snapshot() ChatSnapshot {
 			}
 			entries = append(entries, ChatEntry{Role: role, Text: formatToolResult(result), ToolCallID: callID})
 		}
+		processedMessages++
+		appendLocalEntries(processedMessages)
 	}
-	entries = append(entries, s.local...)
+	appendLocalEntries(len(s.messages))
 	return ChatSnapshot{
 		Entries:      entries,
 		Ongoing:      s.ongoing,
