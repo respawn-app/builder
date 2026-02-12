@@ -16,6 +16,9 @@ func TestExecuteBuiltins(t *testing.T) {
 	if got := r.Execute("/compact"); got.Action != ActionCompact {
 		t.Fatalf("expected ActionCompact, got %+v", got)
 	}
+	if got := r.Execute("/compact keep API details"); got.Action != ActionCompact || got.Args != "keep API details" {
+		t.Fatalf("expected ActionCompact with args, got %+v", got)
+	}
 }
 
 func TestExecuteUnknown(t *testing.T) {

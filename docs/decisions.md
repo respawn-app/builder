@@ -432,6 +432,7 @@ This file records architecture and product decisions for the minimal terminal co
 132. **Configuration precedence is deterministic and explicit.**
    - `CLI overrides > environment variables > settings file > built-in defaults`.
 
+
 133. **Thinking level accepts OpenAI levels unchanged, including `xhigh`.**
    - Values are not normalized or remapped.
    - Applied only for OpenAI model families.
@@ -465,9 +466,10 @@ This file records architecture and product decisions for the minimal terminal co
    - Runtime now keeps canonical `responses` input items as first-class history.
    - Message-only chat structures are treated as a projection for UI, not the source of truth.
 
-140. **Context compaction is enabled with dual engines.**
-   - Remote compaction (`POST /responses/compact`) is used when provider capabilities allow it.
-   - Local summarize-and-rebuild compaction is used as fallback when remote compaction is unavailable.
+140. **Context compaction is enabled with dual engines and configurable native routing.**
+   - Config key `use_native_compaction` (default `true`) controls whether runtime attempts provider-native compaction (`POST /responses/compact`) when capabilities allow it.
+   - When `use_native_compaction=false`, runtime always uses local summarize-and-rebuild compaction.
+   - Local summarize-and-rebuild remains the fallback when native compaction is unavailable or returns output without a checkpoint item.
 
 141. **Remote compaction continuity keeps compaction items opaque.**
    - `type=compaction` items are parsed, persisted, and replayed unchanged.
@@ -478,8 +480,12 @@ This file records architecture and product decisions for the minimal terminal co
    - Auto-compaction failures abort the current turn.
    - This supersedes Decisions 35, 46, and 82.
 
-143. **Manual compaction is available via `/compact`.**
+143. **Manual compaction is available via `/compact` with optional arguments.**
    - Users can trigger compaction explicitly while idle.
+   - Text after `/compact` is appended to compaction instructions as additional guidance.
+   - For local compaction summary generation, compaction instructions are injected as a final `developer` message (not `user`).
+   - Local compaction summary generation receives full provider history from the most recent compaction checkpoint onward (or from start when no checkpoint exists), with canonical context prepended.
+   - Local compaction summary requests keep tool declarations for request-shape/cache stability, but runtime rejects any returned tool calls (tool execution remains disabled for compaction summary generation).
    - Manual compaction failures are surfaced to UI without terminating the session.
 
 144. **Compaction lifecycle is explicitly evented and persisted.**
@@ -488,10 +494,10 @@ This file records architecture and product decisions for the minimal terminal co
    - UI transcript shows one compacted notice line per successful compaction (`context compacted for the Nth time`).
    - Ongoing view suppresses detailed compaction summary content; detail view shows full local compaction summary when available.
 
-145. **Remote compaction routing is model-driven in the current implementation.**
-   - OpenAI model families use remote `/responses/compact`.
-   - Non-OpenAI model families do not use remote compaction.
-   - Non-OpenAI native providers remain stubs/unimplemented.
+145. **Native compaction eligibility is capability-driven and user-configurable.**
+   - Provider capabilities gate native compaction support; this is no longer model-family-only routing.
+   - `use_native_compaction=true` allows provider-native compaction where supported.
+   - `use_native_compaction=false` forces local compaction regardless of provider capabilities.
 
 146. **Context window size is an explicit user setting.**
    - Config key: `model_context_window`.
@@ -501,3 +507,18 @@ This file records architecture and product decisions for the minimal terminal co
 147. **Status line includes right-aligned context capacity meter.**
    - Render a compact 10-character progress bar plus `% ctx window` label.
    - Zone colors: green below 50%, yellow from 50% to below 80%, red at 80% and above.
+
+148. **Responses API `store` is user-configurable and defaults to disabled.**
+   - Config key: `store`.
+   - Environment override: `BUILDER_STORE`.
+   - Default remains `false`.
+
+149. **Session/caching headers are sent for both OAuth and API key OpenAI requests.**
+   - `session_id` header is included whenever a session id is available, regardless of auth method.
+   - `originator` and `User-Agent` headers are always set on OpenAI responses requests.
+
+150. **Outside-workspace `patch` edits are approval-gated unless explicitly enabled.**
+   - Config key: `allow_non_cwd_edits`.
+   - Default value: `false` (workspace-only behavior stays default).
+   - When disabled, outside-workspace patch attempts trigger user approval through the shared `ask_question` flow.
+   - A user denial returns a tool error that explicitly instructs the model not to circumvent restrictions and to ask for manual user edits when essential.

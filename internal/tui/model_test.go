@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/mattn/go-runewidth"
 )
 
 func TestModeTogglePreservesOngoingScroll(t *testing.T) {
@@ -74,6 +75,39 @@ func TestOngoingShowsFullConversationContext(t *testing.T) {
 	view := plainTranscript(m.View())
 	if !containsInOrder(view, "❯", "first question", "❮", "first answer", "❯", "second question", "❮", "second answer") {
 		t.Fatalf("expected first user message in ongoing view, got %q", view)
+	}
+}
+
+func TestOngoingDoesNotPinOngoingErrorToBottomLine(t *testing.T) {
+	m := NewModel(WithPreviewLines(4))
+	m = updateModel(t, m, SetConversationMsg{
+		Entries:      []TranscriptEntry{{Role: "assistant", Text: "line one"}},
+		Ongoing:      "line two",
+		OngoingError: "error: should not pin",
+	})
+
+	view := plainTranscript(m.View())
+	if strings.Contains(view, "should not pin") {
+		t.Fatalf("did not expect ongoing error to consume a fixed viewport line, got %q", view)
+	}
+	if !containsInOrder(view, "line one", "line two") {
+		t.Fatalf("expected transcript content to remain visible, got %q", view)
+	}
+}
+
+func TestErrorEntryIsRenderedWithPrefixAndErrorStyle(t *testing.T) {
+	m := NewModel(WithPreviewLines(6))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "ready"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "error", Text: "boom trace"})
+
+	view := m.View()
+	plain := plainTranscript(view)
+	if !containsInOrder(plain, "❮", "ready", "!", "boom trace") {
+		t.Fatalf("expected error entry in transcript history, got %q", plain)
+	}
+	renderedError := m.palette().error.Render("boom trace")
+	if !strings.Contains(view, renderedError) {
+		t.Fatalf("expected error text to use error style, got %q", view)
 	}
 }
 
@@ -370,15 +404,15 @@ func TestDetailDoesNotMatchAdjacentResultWhenCallIDMissing(t *testing.T) {
 	}
 }
 
-func TestDetailNonShellToolStillUsesDotPrefix(t *testing.T) {
+func TestDetailAskQuestionToolUsesQuestionPrefix(t *testing.T) {
 	m := NewModel()
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: "ask_question"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: "ask_question", ToolCall: &transcript.ToolCallMeta{ToolName: "ask_question"}})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "ok"})
 	m = updateModel(t, m, ToggleModeMsg{})
 
 	view := plainTranscript(m.View())
-	if !containsInOrder(view, "•", "ask_question") {
-		t.Fatalf("expected non-shell tool to keep dot prefix, got %q", view)
+	if !containsInOrder(view, "?", "ask_question") {
+		t.Fatalf("expected ask_question tool to use question prefix, got %q", view)
 	}
 }
 
@@ -424,12 +458,41 @@ func TestDetailShowsReasoningSummaryAsSeparateEntry(t *testing.T) {
 	}
 
 	m = updateModel(t, m, ToggleModeMsg{})
+	colored := m.View()
 	detail := plainTranscript(m.View())
 	if !strings.Contains(detail, "Plan summary") {
 		t.Fatalf("expected reasoning summary entry in detail view, got %q", detail)
 	}
 	if strings.Contains(detail, "…") {
 		t.Fatalf("expected reasoning entry without ellipsis prefix, got %q", detail)
+	}
+	if !strings.Contains(colored, "\x1b[38;5;252mPlan") {
+		t.Fatalf("expected reasoning summary styled with muted/system color, got %q", colored)
+	}
+}
+
+func TestDetailReordersTrailingReasoningBeforeAssistantResponse(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "final answer"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "reasoning", Text: "hidden plan"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	detail := plainTranscript(m.View())
+	if !containsInOrder(detail, "hidden plan", "❮", "final answer") {
+		t.Fatalf("expected trailing reasoning rendered before assistant response, got %q", detail)
+	}
+}
+
+func TestDetailReordersTrailingReasoningBeforeToolCalls(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_call", Text: "run"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "reasoning", Text: "decide to call tool"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	detail := plainTranscript(m.View())
+	if !containsInOrder(detail, "decide to call tool", "•", "run") {
+		t.Fatalf("expected trailing reasoning rendered before tool call, got %q", detail)
 	}
 }
 
@@ -675,6 +738,45 @@ func TestNonMarkdownRolesStayPlain(t *testing.T) {
 	view := m.View()
 	if !strings.Contains(view, "**raw**") {
 		t.Fatalf("expected tool text to remain plain, got %q", view)
+	}
+}
+
+func TestDetailWrapsNonMarkdownRoles(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 10, Width: 28})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "compaction_summary", Text: "This compaction summary line is intentionally long and should wrap in detail mode."})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := plainTranscript(m.View())
+	for _, line := range strings.Split(view, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "─") {
+			continue
+		}
+		if got := runewidth.StringWidth(line); got > 28 {
+			t.Fatalf("expected wrapped line width <= 28, got %d for line %q", got, line)
+		}
+	}
+}
+
+func TestDetailReflowsNonMarkdownRolesOnViewportResize(t *testing.T) {
+	text := "Compaction notice should reflow when viewport width changes."
+	m := NewModel()
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 10, Width: 24})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "compaction_notice", Text: text})
+	m = updateModel(t, m, ToggleModeMsg{})
+	narrow := plainTranscript(m.View())
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 10, Width: 80})
+	m = updateModel(t, m, ToggleModeMsg{})
+	wide := plainTranscript(m.View())
+
+	if strings.Contains(narrow, text) {
+		t.Fatalf("expected narrow detail view to wrap non-markdown line, got %q", narrow)
+	}
+	if !strings.Contains(wide, text) {
+		t.Fatalf("expected wide detail view to reflow and contain single-line text, got %q", wide)
 	}
 }
 

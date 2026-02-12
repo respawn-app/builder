@@ -52,7 +52,7 @@ func TestFormatInputAndOutput(t *testing.T) {
 		t.Fatalf("timeout = %q, want timeout: 5m", timeout)
 	}
 	out := FormatOutput(json.RawMessage(`{"output":"  1\talpha\n  2\tbeta","exit_code":0}`))
-	if out != "alpha\nbeta" {
+	if out != "1\talpha\n  2\tbeta" {
 		t.Fatalf("unexpected output = %q", out)
 	}
 }

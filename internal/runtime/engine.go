@@ -40,6 +40,7 @@ type Config struct {
 	ContextWindowTokens           int
 	EffectiveContextWindowPercent int
 	LocalCompactionCarryoverLimit int
+	UseNativeCompaction           *bool
 	OnEvent                       func(Event)
 }
 
@@ -86,6 +87,10 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 	}
 	if cfg.LocalCompactionCarryoverLimit <= 0 {
 		cfg.LocalCompactionCarryoverLimit = 20_000
+	}
+	if cfg.UseNativeCompaction == nil {
+		useNative := true
+		cfg.UseNativeCompaction = &useNative
 	}
 	if cfg.ContextWindowTokens <= 0 {
 		if meta, ok := llm.LookupModelMetadata(cfg.Model); ok && meta.ContextWindowTokens > 0 {
@@ -306,13 +311,7 @@ func (e *Engine) buildRequest(_ string, allowTools bool) (llm.Request, error) {
 
 	var requestTools []llm.Tool
 	if allowTools {
-		defs := e.registry.Definitions()
-		if len(defs) > 0 {
-			requestTools = make([]llm.Tool, 0, len(defs))
-		}
-		for _, d := range defs {
-			requestTools = append(requestTools, llm.Tool{Name: string(d.ID), Description: d.Description, Schema: d.Schema})
-		}
+		requestTools = e.requestTools()
 	} else {
 		requestTools = []llm.Tool{}
 	}
@@ -328,6 +327,18 @@ func (e *Engine) buildRequest(_ string, allowTools bool) (llm.Request, error) {
 	}
 	req.SessionID = e.store.Meta().SessionID
 	return req, nil
+}
+
+func (e *Engine) requestTools() []llm.Tool {
+	defs := e.registry.Definitions()
+	if len(defs) == 0 {
+		return nil
+	}
+	out := make([]llm.Tool, 0, len(defs))
+	for _, d := range defs {
+		out = append(out, llm.Tool{Name: string(d.ID), Description: d.Description, Schema: d.Schema})
+	}
+	return out
 }
 
 func sanitizeMessagesForLLM(messages []llm.Message) []llm.Message {

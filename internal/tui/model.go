@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	xansi "github.com/charmbracelet/x/ansi"
 )
 
 type Mode string
@@ -300,13 +301,6 @@ func (m Model) renderOngoing() string {
 	for len(out) < m.viewportLines {
 		out = append(out, "")
 	}
-	if m.ongoingError != "" {
-		if len(out) == 0 {
-			out = append(out, m.ongoingError)
-		} else {
-			out[len(out)-1] = m.ongoingError
-		}
-	}
 	return strings.Join(out, "\n")
 }
 
@@ -340,12 +334,17 @@ func (m Model) renderFlatDetailTranscript() string {
 		if _, consumed := consumedResults[i]; consumed {
 			continue
 		}
+		if thinkingBlock, ok := m.trailingThinkingBlockBeforeEntry(m.transcript, i, consumedResults); ok {
+			blocks = append(blocks, thinkingBlock)
+		}
 		entry := m.transcript[i]
 		role := strings.TrimSpace(entry.Role)
 		switch role {
 		case "tool_call":
 			blockRole := "tool"
-			if isShellToolCall(entry.ToolCall, entry.Text) {
+			if isAskQuestionToolCall(entry.ToolCall) {
+				blockRole = "tool_question"
+			} else if isShellToolCall(entry.ToolCall, entry.Text) {
 				blockRole = "tool_shell"
 			}
 			_, patchDetail, hasPatchPayload := extractPatchPayload(entry.ToolCall, entry.Text)
@@ -407,6 +406,62 @@ func (m Model) renderFlatDetailTranscript() string {
 	return strings.Join(lines, "\n")
 }
 
+func (m Model) trailingThinkingBlockBeforeEntry(entries []TranscriptEntry, idx int, consumed map[int]struct{}) ([]string, bool) {
+	if idx < 0 || idx >= len(entries) {
+		return nil, false
+	}
+	role := strings.TrimSpace(entries[idx].Role)
+	if role != "assistant" && role != "tool_call" {
+		return nil, false
+	}
+	actionEnd := idx
+	for actionEnd+1 < len(entries) {
+		next := actionEnd + 1
+		if _, used := consumed[next]; used {
+			break
+		}
+		if strings.TrimSpace(entries[next].Role) != "tool_call" {
+			break
+		}
+		actionEnd = next
+	}
+	thinkingStart := actionEnd + 1
+	if thinkingStart >= len(entries) {
+		return nil, false
+	}
+	if _, used := consumed[thinkingStart]; used {
+		return nil, false
+	}
+	if !isThinkingRole(strings.TrimSpace(entries[thinkingStart].Role)) {
+		return nil, false
+	}
+
+	combined := strings.TrimSpace(entries[thinkingStart].Text)
+	consumed[thinkingStart] = struct{}{}
+	for j := thinkingStart + 1; j < len(entries); j++ {
+		if _, used := consumed[j]; used {
+			break
+		}
+		if !isThinkingRole(strings.TrimSpace(entries[j].Role)) {
+			break
+		}
+		nextText := strings.TrimSpace(entries[j].Text)
+		if nextText != "" {
+			if combined == "" {
+				combined = nextText
+			} else {
+				combined += "\n" + nextText
+			}
+		}
+		consumed[j] = struct{}{}
+	}
+
+	if combined == "" {
+		return nil, false
+	}
+	return m.flattenEntry("reasoning", combined), true
+}
+
 func (m Model) renderFlatOngoingTranscript() string {
 	type ongoingBlock struct {
 		role  string
@@ -427,7 +482,9 @@ func (m Model) renderFlatOngoingTranscript() string {
 		switch role {
 		case "tool_call":
 			blockRole := "tool"
-			if isShellToolCall(entry.ToolCall, entry.Text) {
+			if isAskQuestionToolCall(entry.ToolCall) {
+				blockRole = "tool_question"
+			} else if isShellToolCall(entry.ToolCall, entry.Text) {
 				blockRole = "tool_shell"
 			}
 			patchSummary, _, hasPatchPayload := extractPatchPayload(entry.ToolCall, entry.Text)
@@ -501,7 +558,9 @@ func (m Model) flattenEntryWithMutedText(role, text string, muteText bool) []str
 		}
 		if muteText && strings.TrimSpace(displayChunk) != "" && !isEditedBlock {
 			displayChunk = m.palette().preview.Faint(true).Render(displayChunk)
-		} else if role == "compaction_notice" || role == "compaction_summary" {
+		} else if isThinkingRole(role) {
+			displayChunk = styleForRole(role, m.palette()).Render(displayChunk)
+		} else if role == "compaction_notice" || role == "compaction_summary" || role == "error" {
 			displayChunk = styleForRole(role, m.palette()).Render(displayChunk)
 		}
 		if i == 0 {
@@ -522,7 +581,11 @@ func (m Model) flattenEntryWithMutedText(role, text string, muteText bool) []str
 }
 
 func (m Model) flattenEntryPlain(role, text string) []string {
-	chunks := splitLines(text)
+	renderWidth := m.viewportWidth
+	if rolePrefix(role) != "" {
+		renderWidth -= 2
+	}
+	chunks := splitLines(wrapTextForViewport(text, renderWidth))
 	if len(chunks) == 0 {
 		chunks = []string{""}
 	}
@@ -550,14 +613,25 @@ func (m Model) renderEntryText(role, text string, width int) string {
 	if strings.TrimSpace(text) == "" {
 		return text
 	}
+	if !isMarkdownRole(role) {
+		return wrapTextForViewport(text, width)
+	}
 	if m.md == nil {
-		return text
+		return wrapTextForViewport(text, width)
 	}
 	rendered, err := m.md.render(role, text, width)
 	if err != nil {
-		return text
+		return wrapTextForViewport(text, width)
 	}
 	return rendered
+}
+
+func wrapTextForViewport(text string, width int) string {
+	if width < 1 {
+		width = 1
+	}
+	wrapped := xansi.Wordwrap(text, width, " ,.;-+|")
+	return strings.TrimRight(wrapped, "\n")
 }
 
 func detailDivider() string {
@@ -617,6 +691,13 @@ func isShellToolCall(meta *transcript.ToolCallMeta, text string) bool {
 	return ok
 }
 
+func isAskQuestionToolCall(meta *transcript.ToolCallMeta) bool {
+	if meta == nil {
+		return false
+	}
+	return strings.TrimSpace(meta.ToolName) == "ask_question"
+}
+
 func extractPatchPayload(meta *transcript.ToolCallMeta, text string) (string, string, bool) {
 	if meta != nil && (meta.HasPatchSummary() || meta.HasPatchDetail()) {
 		return meta.PatchSummary, meta.PatchDetail, true
@@ -626,7 +707,7 @@ func extractPatchPayload(meta *transcript.ToolCallMeta, text string) (string, st
 
 func isToolHeadlineRole(role string) bool {
 	switch strings.TrimSpace(role) {
-	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error":
+	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error", "tool_question", "tool_question_error":
 		return true
 	default:
 		return false
@@ -730,12 +811,18 @@ func findMatchingToolResultIndex(entries []TranscriptEntry, callIdx int, consume
 
 func toolBlockRoleFromResult(role, baseRole string) string {
 	if strings.TrimSpace(role) == "tool_result_error" {
+		if baseRole == "tool_question" {
+			return "tool_question_error"
+		}
 		if baseRole == "tool_shell" {
 			return "tool_shell_error"
 		}
 		return "tool_error"
 	}
 	if isToolResultRole(role) {
+		if baseRole == "tool_question" {
+			return "tool_question"
+		}
 		if baseRole == "tool_shell" {
 			return "tool_shell_success"
 		}
@@ -753,7 +840,9 @@ func (m Model) roleSymbol(role string) string {
 		return ""
 	}
 	switch role {
-	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error":
+	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error", "tool_question", "tool_question_error":
+		return styleForRole(role, m.palette()).Render(prefix)
+	case "error":
 		return styleForRole(role, m.palette()).Render(prefix)
 	case "compaction_notice", "compaction_summary":
 		return styleForRole(role, m.palette()).Render(prefix)
@@ -772,8 +861,12 @@ func rolePrefix(role string) string {
 		return "•"
 	case "tool_shell", "tool_shell_success", "tool_shell_error":
 		return "$"
+	case "tool_question", "tool_question_error":
+		return "?"
 	case "compaction_notice", "compaction_summary":
 		return "@"
+	case "error":
+		return "!"
 	default:
 		return ""
 	}
@@ -805,6 +898,10 @@ func styleForRole(role string, p palette) lipgloss.Style {
 	case "tool_shell_success":
 		return p.toolSuccess
 	case "tool_shell_error":
+		return p.toolError
+	case "tool_question":
+		return p.user
+	case "tool_question_error":
 		return p.toolError
 	case "system":
 		return p.system

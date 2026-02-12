@@ -21,6 +21,7 @@ type Result struct {
 	Handled bool
 	Action  Action
 	Text    string
+	Args    string
 }
 
 type Handler func(args string) Result
@@ -54,8 +55,8 @@ func NewDefaultRegistry() *Registry {
 	r.Register("logout", "Log out and re-authenticate", func(string) Result {
 		return Result{Handled: true, Action: ActionLogout}
 	})
-	r.Register("compact", "Compact the current context", func(string) Result {
-		return Result{Handled: true, Action: ActionCompact}
+	r.Register("compact", "Compact the current context (optional: /compact <instructions>)", func(args string) Result {
+		return Result{Handled: true, Action: ActionCompact, Args: strings.TrimSpace(args)}
 	})
 	return r
 }

@@ -1,9 +1,167 @@
-You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.
+Produce a **handoff document** for the next AI agent right now as your next response. The next agent:
 
-Include:
-- Current progress and key decisions made
-- Important context, constraints, or user preferences
-- What remains to be done (clear next steps)
-- Any critical data, examples, or references needed to continue
+- Will not see this conversation.
+- Will only see: your next message with the handoff response + the environment (AGENTS.md).
+- Must be able to continue the work seamlessly without exploration or asking clarifying questions.
 
-Be concise, structured, and focused on helping the next LLM seamlessly continue the work.
+Handoff structure: 
+---
+
+## 1. Overall task and goal summary
+
+- In 3–6 sentences, describe what the user ultimately wants in business/feature terms.
+
+## 2. Current status (done / in progress / not started)
+
+Provide a bullet list of subtasks with status:
+
+- For each subtask:  
+  `- [STATUS] <short name> — <1-line description>`
+  - STATUS is one of: `DONE`, `IN_PROGRESS`, `NOT_STARTED`.
+- Explicitly state where you stopped working:
+  `Last change: <very short summary> in <file path> around <function / class / section>`.
+- repo status: uncommitted changes present (yes/no), branch name (if applicable/available).
+
+## 3. Relevant files and directory structure
+
+List everything that is needed for this task in full. Basically, tell the next agent: hey, these are relevant, read these.
+
+- List key directories and their roles, focusing on what this task touches. For example:  
+  `- app/src/main/java/.../metrics/ — runtime metrics collection`  
+  `- app/src/main/java/.../ui/featureX/ — screens affected by this change`
+- List key files (with full relative paths) that are important to understand or modify for this task, with a 1-line description each:
+  `- app/src/.../FeatureXViewModel.kt — main state machine for Feature X`
+
+## 4. Architecture and key design concepts for this task
+
+Summarize only the parts of the architecture relevant to this work:
+
+- Describe the main architectural pattern(s) involved, and how this task fits into them.
+- List important invariants, constraints, and rules that must not be violated (e.g., “use thread safety primitives”, “API must be the single source of truth”).
+- Point to core contracts (interfaces, abstract classes, protocols) that define behavior relevant to this task (with file paths).
+
+## 5. Files and components changed in this session
+
+For every file you modified, added, or deleted:
+
+- Provide a bullet point:  
+  `- <file path> — <1–2 sentence summary of what changed and why>`
+- Mention any new public APIs, classes, or functions that other parts of the system now depend on, and describe their purpose.
+
+## 6. Remaining work (ordered action plan)
+
+Describe what the next agent should do in **small, executable steps**, in the order you recommend:
+
+- Use a numbered list.
+- For each step, include:
+  - The goal of the step.
+  - The main files/classes/functions to touch.
+  - Any preconditions (e.g., “Do step 2 only after step 1 tests pass”).
+- Keep steps concrete (things that can be done in one short focus session), not vague tasks like “refactor code”.
+- Don't make up plans or instructions, base this secton on what you were **already** doing (per user) when this handoff was requested.
+
+Example format:
+
+1. Implement X in `<file>` by doing Y.
+2. Update tests in `<test file>` to cover cases A, B, C.
+3. Manually verify scenario Z using `<command>` or `<UI flow>`.
+
+If no pending work is present, replace this section with "No pending work to execute right now"
+
+## 7. Current test and runtime status (optional, if tests are involved in the task)
+
+- List all relevant tests you ran for this work, with commands and outcomes, e.g.:
+  - `- ./gradlew :module:test --tests "path.to.TestClass" — PASSED`
+  - `- ./gradlew :module:test — FAILED (reason: <short error>)`
+- Note any manual testing you did:
+  - Steps taken (inputs, UI flows, API calls).
+  - Observed outputs or behavior.
+
+## 8. Known issues, limitations, and edge cases
+
+List **everything** that you know is still problematic or incomplete:
+
+- Bugs discovered but not fixed (with brief description and affected components).
+- Edge cases that are not handled, partially handled, or intentionally ignored (with reasoning).
+- Performance, security, or compatibility concerns identified during your work.
+- Trade-offs and limitations imposed onto current code by your work or overall
+
+Be explicit if some issues are acceptable trade-offs and should remain, for example, if the user confirmed they should.
+
+## 9. Open questions and assumptions
+
+Capture anything ambiguous the next agent must be aware of:
+
+- Questions that came up but are still unanswered.
+- Assumptions you had to make about requirements, API behavior, UX, or constraints.
+- For each assumption, explicitly mark it as:  
+  `ASSUMPTION: <text> [rationale: <why you chose this>; (optional, if you made a decision)]`
+
+If you suggest defaults the next agent should keep, state them clearly.
+
+## 10. Interfaces to external systems
+
+Describe any external dependencies this work touches (if applicable):
+
+- APIs, services, databases, queues, or third-party SDKs involved.
+- Important endpoints, schemas, or contracts (just enough for the next agent to reason about correctness).
+- Mention where mocks/stubs/fakes for these interfaces live in the codebase and how they are used in tests, if applicable.
+
+## 11. Intentional shortcuts and technical debt introduced
+
+If you introduced any deliberate shortcuts, skipped work or some pieces, document them:
+
+- Location: file + code paths.
+- What shortcut was taken.
+- Why it was taken (e.g., time constraints, low risk, complexity), and recommend resolution or approach for the next agent.
+
+Treat it like asking the next agent "hey, please handle this for me / help me with this"
+
+## 12. Example usages and scenarios
+
+Give concrete examples that exercise the new/changed behavior (if applicable):
+
+- Example API requests (paths, methods, important headers, example JSON payloads and responses).
+- Example CLI commands or scripts.
+- Example UI flows:
+  - Starting state.
+  - User actions.
+  - Expected UI and data changes.
+
+If there are useful logs, feature flags, or debug views, mention how to enable and read them.
+
+## 13. User requests and past design decisions
+
+Document the history of relevant decisions so the next agent does not repeatedly ask the user same questions:
+
+- Summarize key user preferences and explicit decisions that constrain implementation, especially architectural ones:
+  - Chosen patterns or libraries.
+  - Rejected alternatives and why they were rejected.
+- Capture important past decisions that affect the final implementation:
+  - What was decided.
+  - When / in what context (high level only).
+  - The reasoning and trade-offs.
+- Clearly mark decisions that **must not be changed** without explicit user approval.
+
+Example:
+
+- `DECISION: Use MVI with FlowMVI for all screen-level state. Reason: consistency with existing modules; avoids mixing patterns.`
+
+## 14. Mistakes made and how they can be / were solved / prevented 
+
+List mistakes that were made that required correction during the session and explain why the user/you (the agent) labeled them as such, how they were corrected, or if they weren't how they can be corrected, and then how they should be prevented by the next agent. Examples: failed tool calls, user getting angry/correcting you, reverts of code, pivots in implementation
+
+---
+
+# Style and constraints for the handoff document
+
+- Write in clear, concise technical English.
+- Prefer specifics (file paths, function names, commands) over vague descriptions.
+- Avoid restating generic project documentation
+- Be thorough, do not attempt to save tokens, space, or follow verbosity instructions that apply outside of this task.
+- Do not include any overall document headers like "# HANDOFF".
+- Do NOT repeat the content or instructions from AGENTS.md files in your handoff (the next agent will see those). New instructions from the user (as User messages in this conversation) are essential to preserve, however.
+
+ ---
+
+Now, immediately output the final document and nothing else (no commentary, acknowledgement, talking to the user, tool calls, preambles or anything else). Output strictly the complete handoff content and end your turn.

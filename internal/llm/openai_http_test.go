@@ -136,8 +136,24 @@ func TestBuildRequestOptions_OAuthAddsCodexHeaders(t *testing.T) {
 	if len(opts) != 5 {
 		t.Fatalf("expected 5 request options, got %d", len(opts))
 	}
-	if len(transport.buildRequestOptions("Bearer x", openAIAuthMode{}, "")) != 1 {
-		t.Fatal("expected non-oauth options to include only authorization header")
+	if len(transport.buildRequestOptions("Bearer x", openAIAuthMode{}, "session-1")) != 4 {
+		t.Fatal("expected non-oauth options to include auth/session/caching headers")
+	}
+	if len(transport.buildRequestOptions("Bearer x", openAIAuthMode{}, "")) != 3 {
+		t.Fatal("expected non-oauth options to include auth/caching headers")
+	}
+}
+
+func TestBuildPayload_UsesTransportStoreSetting(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	transport.Store = true
+	payload, err := transport.buildPayload(OpenAIRequest{Model: "gpt-5"}, openAIAuthMode{})
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+	jsonPayload := mustMarshalObject(t, payload)
+	if got, ok := jsonPayload["store"].(bool); !ok || !got {
+		t.Fatalf("expected store=true in payload, got %#v", jsonPayload["store"])
 	}
 }
 
@@ -328,6 +344,51 @@ func TestCompactRequestTargetsResponsesCompactPath(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"resp_cmp_1",
+			"object":"response.compaction",
+			"created_at":1731459200,
+			"output":[
+				{"type":"message","role":"user","content":[{"type":"input_text","text":"u1"}]},
+				{"type":"compaction","id":"cmp_1","encrypted_content":"enc_1"}
+			],
+			"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}
+		}`))
+	}))
+	defer server.Close()
+
+	transport := NewHTTPTransport(staticAuth{})
+	transport.BaseURL = server.URL + "/v1"
+	transport.Client = server.Client()
+
+	resp, err := transport.Compact(context.Background(), OpenAICompactionRequest{
+		Model: "gpt-5",
+		InputItems: []ResponseItem{
+			{Type: ResponseItemTypeMessage, Role: RoleUser, Content: "u1"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("compact request failed: %v", err)
+	}
+	if len(resp.OutputItems) != 2 {
+		t.Fatalf("expected compact output items, got %d", len(resp.OutputItems))
+	}
+	if resp.OutputItems[1].Type != ResponseItemTypeCompaction {
+		t.Fatalf("expected compaction output item, got %+v", resp.OutputItems[1])
+	}
+}
+
+func TestCompactRequestAcceptsJSONBodyWithNonJSONContentType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses/compact" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte(`{
 			"id":"resp_cmp_1",
 			"object":"response.compaction",

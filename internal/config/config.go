@@ -51,8 +51,11 @@ type Settings struct {
 	ThinkingLevel                    string
 	Theme                            string
 	OpenAIBaseURL                    string
+	Store                            bool
+	AllowNonCwdEdits                 bool
 	ModelContextWindow               int
 	ContextCompactionThresholdTokens int
+	UseNativeCompaction              bool
 	EnabledTools                     map[tools.ID]bool
 	Timeouts                         Timeouts
 }
@@ -83,8 +86,11 @@ type fileSettings struct {
 	} `toml:"timeouts"`
 	PersistenceRoot                  string `toml:"persistence_root"`
 	OpenAIBaseURL                    string `toml:"openai_base_url"`
+	Store                            *bool  `toml:"store"`
+	AllowNonCwdEdits                 *bool  `toml:"allow_non_cwd_edits"`
 	ModelContextWindow               int    `toml:"model_context_window"`
 	ContextCompactionThresholdTokens int    `toml:"context_compaction_threshold_tokens"`
+	UseNativeCompaction              *bool  `toml:"use_native_compaction"`
 }
 
 func Load(workspaceRoot string, opts LoadOptions) (App, error) {
@@ -113,8 +119,11 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		"thinking_level":                      "default",
 		"theme":                               "default",
 		"openai_base_url":                     "default",
+		"store":                               "default",
+		"allow_non_cwd_edits":                 "default",
 		"model_context_window":                "default",
 		"context_compaction_threshold_tokens": "default",
+		"use_native_compaction":               "default",
 		"timeouts.model_request":              "default",
 		"timeouts.shell_default":              "default",
 	}
@@ -140,6 +149,14 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		merged.OpenAIBaseURL = strings.TrimSpace(cfg.OpenAIBaseURL)
 		sources["openai_base_url"] = "file"
 	}
+	if cfg.Store != nil {
+		merged.Store = *cfg.Store
+		sources["store"] = "file"
+	}
+	if cfg.AllowNonCwdEdits != nil {
+		merged.AllowNonCwdEdits = *cfg.AllowNonCwdEdits
+		sources["allow_non_cwd_edits"] = "file"
+	}
 	if cfg.ModelContextWindow > 0 {
 		merged.ModelContextWindow = cfg.ModelContextWindow
 		sources["model_context_window"] = "file"
@@ -147,6 +164,10 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if cfg.ContextCompactionThresholdTokens > 0 {
 		merged.ContextCompactionThresholdTokens = cfg.ContextCompactionThresholdTokens
 		sources["context_compaction_threshold_tokens"] = "file"
+	}
+	if cfg.UseNativeCompaction != nil {
+		merged.UseNativeCompaction = *cfg.UseNativeCompaction
+		sources["use_native_compaction"] = "file"
 	}
 	if cfg.Timeouts.ModelRequestSeconds > 0 {
 		merged.Timeouts.ModelRequestSeconds = cfg.Timeouts.ModelRequestSeconds
@@ -188,6 +209,22 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		merged.OpenAIBaseURL = v
 		sources["openai_base_url"] = "env"
 	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_STORE")); v != "" {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return App{}, fmt.Errorf("invalid BUILDER_STORE: %q", v)
+		}
+		merged.Store = enabled
+		sources["store"] = "env"
+	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_ALLOW_NON_CWD_EDITS")); v != "" {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return App{}, fmt.Errorf("invalid BUILDER_ALLOW_NON_CWD_EDITS: %q", v)
+		}
+		merged.AllowNonCwdEdits = enabled
+		sources["allow_non_cwd_edits"] = "env"
+	}
 	if v := strings.TrimSpace(os.Getenv("BUILDER_MODEL_CONTEXT_WINDOW")); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
@@ -203,6 +240,14 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		}
 		merged.ContextCompactionThresholdTokens = n
 		sources["context_compaction_threshold_tokens"] = "env"
+	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_USE_NATIVE_COMPACTION")); v != "" {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return App{}, fmt.Errorf("invalid BUILDER_USE_NATIVE_COMPACTION: %q", v)
+		}
+		merged.UseNativeCompaction = enabled
+		sources["use_native_compaction"] = "env"
 	}
 	if v := strings.TrimSpace(os.Getenv("BUILDER_MODEL_TIMEOUT_SECONDS")); v != "" {
 		n, err := strconv.Atoi(v)
@@ -327,8 +372,11 @@ func defaultSettings() Settings {
 		Model:                            defaultModel,
 		ThinkingLevel:                    defaultThinkingLevel,
 		Theme:                            defaultTheme,
+		Store:                            false,
+		AllowNonCwdEdits:                 false,
 		ModelContextWindow:               defaultModelContextWindow,
 		ContextCompactionThresholdTokens: defaultCompactionThreshold,
+		UseNativeCompaction:              true,
 		EnabledTools:                     enabled,
 		Timeouts: Timeouts{
 			ModelRequestSeconds: defaultModelTimeoutSeconds,
@@ -475,8 +523,11 @@ func defaultSettingsTOML() string {
 		"thinking_level":                      defaults.ThinkingLevel,
 		"theme":                               defaults.Theme,
 		"openai_base_url":                     defaults.OpenAIBaseURL,
+		"store":                               defaults.Store,
+		"allow_non_cwd_edits":                 defaults.AllowNonCwdEdits,
 		"model_context_window":                defaults.ModelContextWindow,
 		"context_compaction_threshold_tokens": defaults.ContextCompactionThresholdTokens,
+		"use_native_compaction":               defaults.UseNativeCompaction,
 		"tools":                               toolDefaults,
 		"timeouts": map[string]int{
 			"model_request_seconds": defaults.Timeouts.ModelRequestSeconds,
@@ -493,8 +544,11 @@ func defaultSettingsTOML() string {
 		"thinking_level = \"" + defaults.ThinkingLevel + "\"\n" +
 		"theme = \"" + defaults.Theme + "\"\n" +
 		"openai_base_url = \"" + defaults.OpenAIBaseURL + "\"\n" +
+		"store = " + strconv.FormatBool(defaults.Store) + "\n" +
+		"allow_non_cwd_edits = " + strconv.FormatBool(defaults.AllowNonCwdEdits) + "\n" +
 		"model_context_window = " + strconv.Itoa(defaults.ModelContextWindow) + "\n" +
 		"context_compaction_threshold_tokens = " + strconv.Itoa(defaults.ContextCompactionThresholdTokens) + "\n" +
+		"use_native_compaction = " + strconv.FormatBool(defaults.UseNativeCompaction) + "\n" +
 		"persistence_root = \"" + DefaultPersistence + "\"\n\n" +
 		"[tools]\n"
 	for _, id := range tools.CatalogIDs() {

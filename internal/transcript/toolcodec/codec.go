@@ -3,7 +3,6 @@ package toolcodec
 import (
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,8 +18,6 @@ const (
 	defaultToolCallFallback = "tool call"
 	shellToolNameNormalized = "shell"
 )
-
-var outputLineNumberPrefix = regexp.MustCompile(`^\s*\d+(?:\t|\s{2,})`)
 
 func EncodeInlineCall(command, timeoutLabel string, isShell bool) string {
 	command = strings.TrimSpace(command)
@@ -143,7 +140,6 @@ func FormatOutput(raw json.RawMessage) string {
 		return msg
 	}
 	if out, ok := asString(obj["output"]); ok {
-		out = stripLineNumbersWhenLikely(out)
 		var notes []string
 		if code, ok := asInt(obj["exit_code"]); ok && code != 0 {
 			notes = append(notes, fmt.Sprintf("exit code %d", code))
@@ -167,28 +163,6 @@ func FormatOutput(raw json.RawMessage) string {
 		return answer
 	}
 	return renderPlain(payload)
-}
-
-func stripLineNumbersWhenLikely(text string) string {
-	lines := strings.Split(text, "\n")
-	nonEmpty := 0
-	numbered := 0
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		nonEmpty++
-		if outputLineNumberPrefix.MatchString(line) {
-			numbered++
-		}
-	}
-	if nonEmpty == 0 || numbered == 0 || numbered*2 < nonEmpty {
-		return text
-	}
-	for i, line := range lines {
-		lines[i] = outputLineNumberPrefix.ReplaceAllString(line, "")
-	}
-	return strings.Join(lines, "\n")
 }
 
 func formatDurationShort(d time.Duration) string {

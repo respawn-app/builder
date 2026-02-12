@@ -1,6 +1,7 @@
 package app
 
 import (
+	"builder/internal/tools/askquestion"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,6 +12,31 @@ import (
 type uiAskController struct {
 	model *uiModel
 }
+
+type askPromptLineKind int
+
+const (
+	askPromptLineKindQuestion askPromptLineKind = iota
+	askPromptLineKindOption
+	askPromptLineKindHint
+	askPromptLineKindInput
+)
+
+type askPromptLine struct {
+	Text     string
+	Kind     askPromptLineKind
+	Selected bool
+}
+
+type askFreeformMode int
+
+const (
+	askFreeformModeGeneric askFreeformMode = iota
+	askFreeformModeApprovalAllowCommentary
+	askFreeformModeApprovalDenyCommentary
+)
+
+const approvalCommentaryOptionText = "Deny, and add commentary"
 
 func (c uiAskController) acceptEvent(evt askEvent) {
 	m := c.model
@@ -54,10 +80,21 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyTab:
 		m.askFreeform = true
+		if req.Approval {
+			m.askFreeformMode = askFreeformModeApprovalAllowCommentary
+			m.askInput = ""
+		}
 		return m, nil
 	case tea.KeyEnter:
 		if m.askFreeform {
 			answer := strings.TrimSpace(m.askInput)
+			if isPatchOutsideWorkspaceApproval(req) && m.askFreeformMode == askFreeformModeApprovalAllowCommentary {
+				if answer != "" && m.engine != nil {
+					m.engine.QueueUserMessage(answer)
+					m.pendingInjected = append(m.pendingInjected, answer)
+				}
+				answer = outsideWorkspaceAllowWithCommentaryAnswerPrefix + answer
+			}
 			hasNext := c.answer(answer, nil)
 			if hasNext {
 				m.activity = uiActivityQuestion
@@ -66,11 +103,18 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if len(req.Suggestions) == 0 {
+		optionCount := askOptionCount(req)
+		if optionCount == 0 {
 			m.askFreeform = true
 			return m, nil
 		}
-		if m.askCursor >= len(req.Suggestions) {
+		if askHasApprovalCommentaryOption(req) && m.askCursor == len(req.Suggestions) {
+			m.askFreeform = true
+			m.askFreeformMode = askFreeformModeApprovalDenyCommentary
+			m.askInput = ""
+			return m, nil
+		}
+		if m.askCursor < 0 || m.askCursor >= len(req.Suggestions) {
 			m.askFreeform = true
 			m.askInput = ""
 			return m, nil
@@ -89,8 +133,8 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyDown:
 		if !m.askFreeform {
-			max := len(req.Suggestions)
-			if m.askCursor < max {
+			maxIdx := askOptionCount(req) - 1
+			if maxIdx >= 0 && m.askCursor < maxIdx {
 				m.askCursor++
 			}
 		}
@@ -115,33 +159,67 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (c uiAskController) renderPrompt() string {
+	lines := c.renderPromptLines()
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, line.Text)
+	}
+	return strings.Join(out, "\n")
+}
+
+func (c uiAskController) renderPromptLines() []askPromptLine {
 	m := c.model
 	if m.activeAsk == nil {
-		return ""
+		return nil
 	}
 	req := m.activeAsk.req
-	lines := []string{fmt.Sprintf("question> %s", req.Question)}
-	if len(req.Suggestions) > 0 && !m.askFreeform {
+	if isPatchOutsideWorkspaceDenyCommentaryPrompt(req, m.askFreeform, m.askFreeformMode) {
+		return []askPromptLine{
+			{Text: "Your comment:", Kind: askPromptLineKindHint},
+			{Text: m.askInput, Kind: askPromptLineKindInput},
+		}
+	}
+	lines := []askPromptLine{{Text: strings.TrimSpace(req.Question), Kind: askPromptLineKindQuestion}}
+	if askOptionCount(req) > 0 && !m.askFreeform {
 		for i, s := range req.Suggestions {
+			selected := i == m.askCursor
 			prefix := "  "
-			if i == m.askCursor {
-				prefix = "> "
+			if selected {
+				prefix = "✓ "
 			}
-			lines = append(lines, fmt.Sprintf("%s%d. %s", prefix, i+1, s))
+			lines = append(lines, askPromptLine{Text: fmt.Sprintf("%s%d. %s", prefix, i+1, s), Kind: askPromptLineKindOption, Selected: selected})
 		}
-		prefix := "  "
-		if m.askCursor == len(req.Suggestions) {
-			prefix = "> "
+		if askHasApprovalCommentaryOption(req) {
+			selected := m.askCursor == len(req.Suggestions)
+			prefix := "  "
+			if selected {
+				prefix = "✓ "
+			}
+			lines = append(lines, askPromptLine{Text: fmt.Sprintf("%s%d. %s", prefix, len(req.Suggestions)+1, approvalCommentaryOptionText), Kind: askPromptLineKindOption, Selected: selected})
 		}
-		lines = append(lines, fmt.Sprintf("%s%d. none of the above", prefix, len(req.Suggestions)+1))
-		lines = append(lines, "Tab to switch to freeform")
-		lines = append(lines, "Enter to submit")
-		return strings.Join(lines, "\n")
+		hint := "Tab to switch to freeform • Enter to submit"
+		if req.Approval {
+			hint = "Tab to allow and add commentary • Enter to submit"
+		}
+		lines = append(lines, askPromptLine{Text: hint, Kind: askPromptLineKindHint})
+		return lines
 	}
 
-	lines = append(lines, "freeform> "+m.askInput)
-	lines = append(lines, "Enter to submit")
-	return strings.Join(lines, "\n")
+	inputLine := m.askInput
+	if req.Approval {
+		if m.askFreeformMode == askFreeformModeApprovalAllowCommentary {
+			inputLine = "Allow commentary: " + m.askInput
+		} else {
+			inputLine = "Deny commentary: " + m.askInput
+		}
+	}
+	lines = append(lines, askPromptLine{Text: inputLine, Kind: askPromptLineKindInput})
+	hint := "Tab to switch to freeform • Enter to submit"
+	if req.Approval {
+		hint = "Tab to allow and add commentary • Enter to submit"
+	}
+	lines = append(lines, askPromptLine{Text: hint, Kind: askPromptLineKindHint})
+	return lines
 }
 
 func (c uiAskController) answer(answer string, err error) bool {
@@ -155,6 +233,7 @@ func (c uiAskController) answer(answer string, err error) bool {
 		m.askCursor = 0
 		m.askInput = ""
 		m.askFreeform = false
+		m.askFreeformMode = askFreeformModeGeneric
 		return false
 	}
 	next := m.askQueue[0]
@@ -169,11 +248,39 @@ func (c uiAskController) setActiveAsk(evt askEvent) {
 	m.activeAsk = &current
 	m.askCursor = 0
 	m.askInput = ""
-	m.askFreeform = len(current.req.Suggestions) == 0
+	m.askFreeform = askOptionCount(current.req) == 0
+	m.askFreeformMode = askFreeformModeGeneric
+}
+
+func askHasApprovalCommentaryOption(req askquestion.Request) bool {
+	return req.Approval && len(req.Suggestions) > 0
+}
+
+func askOptionCount(req askquestion.Request) int {
+	count := len(req.Suggestions)
+	if askHasApprovalCommentaryOption(req) {
+		count++
+	}
+	return count
+}
+
+func isPatchOutsideWorkspaceApproval(req askquestion.Request) bool {
+	return req.Approval && strings.TrimSpace(req.ApprovalKind) == approvalKindPatchOutsideWorkspace
+}
+
+func isPatchOutsideWorkspaceDenyCommentaryPrompt(req askquestion.Request, freeform bool, mode askFreeformMode) bool {
+	if !freeform || mode != askFreeformModeApprovalDenyCommentary {
+		return false
+	}
+	return isPatchOutsideWorkspaceApproval(req)
 }
 
 func (m *uiModel) renderAskPrompt() string {
 	return m.askController().renderPrompt()
+}
+
+func (m *uiModel) renderAskPromptLines() []askPromptLine {
+	return m.askController().renderPromptLines()
 }
 
 func (m *uiModel) answerAsk(answer string, err error) bool {

@@ -10,9 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"builder/internal/tools"
 )
@@ -44,15 +46,61 @@ type removedSource struct {
 	Before fileSnapshot
 }
 
+type OutsideWorkspaceRequest struct {
+	RequestedPath string
+	ResolvedPath  string
+	WorkspaceRoot string
+}
+
+type OutsideWorkspaceDecision int
+
+const (
+	OutsideWorkspaceDecisionDeny OutsideWorkspaceDecision = iota
+	OutsideWorkspaceDecisionAllowOnce
+	OutsideWorkspaceDecisionAllowSession
+)
+
+type OutsideWorkspaceApproval struct {
+	Decision   OutsideWorkspaceDecision
+	Commentary string
+}
+
+type OutsideWorkspaceApprover func(context.Context, OutsideWorkspaceRequest) (OutsideWorkspaceApproval, error)
+
+type Option func(*Tool)
+
+func WithAllowOutsideWorkspace(allow bool) Option {
+	return func(t *Tool) {
+		t.allowOutsideWorkspace = allow
+	}
+}
+
+func WithOutsideWorkspaceApprover(approver OutsideWorkspaceApprover) Option {
+	return func(t *Tool) {
+		t.outsideWorkspaceApprover = approver
+	}
+}
+
 type Tool struct {
-	workspaceRoot     string
-	workspaceRootReal string
-	workspaceOnly     bool
+	workspaceRoot                string
+	workspaceRootReal            string
+	workspaceOnly                bool
+	allowOutsideWorkspace        bool
+	outsideWorkspaceApprover     OutsideWorkspaceApprover
+	outsideWorkspaceSessionMu    sync.RWMutex
+	outsideWorkspaceSessionAllow bool
 }
 
 const hunkMaxFuzz = 8
 
+const outsideWorkspaceRejectionInstruction = "do not attempt to circumvent this restriction in any way. if it's essential to the task, ask the user to make the edit manually at the end of the task."
+
 var unifiedHunkHeaderPattern = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: .*)?$`)
+
+var (
+	temporaryEditableRootsOnce sync.Once
+	temporaryEditableRoots     []string
+)
 
 type editHunk struct {
 	header  hunkHeader
@@ -67,7 +115,7 @@ type hunkHeader struct {
 	newCount    int
 }
 
-func New(workspaceRoot string, workspaceOnly bool) (*Tool, error) {
+func New(workspaceRoot string, workspaceOnly bool, opts ...Option) (*Tool, error) {
 	abs, err := filepath.Abs(workspaceRoot)
 	if err != nil {
 		return nil, fmt.Errorf("resolve workspace root: %w", err)
@@ -76,14 +124,20 @@ func New(workspaceRoot string, workspaceOnly bool) (*Tool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve workspace real path: %w", err)
 	}
-	return &Tool{workspaceRoot: abs, workspaceRootReal: real, workspaceOnly: workspaceOnly}, nil
+	t := &Tool{workspaceRoot: abs, workspaceRootReal: real, workspaceOnly: workspaceOnly}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(t)
+		}
+	}
+	return t, nil
 }
 
 func (t *Tool) Name() tools.ID {
 	return tools.ToolPatch
 }
 
-func (t *Tool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
+func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 	var in input
 	if err := json.Unmarshal(c.Input, &in); err != nil {
 		return tools.ErrorResult(c, fmt.Sprintf("invalid input: %v", err)), nil
@@ -96,7 +150,7 @@ func (t *Tool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	if err != nil {
 		return tools.ErrorResult(c, err.Error()), nil
 	}
-	if err := t.apply(doc); err != nil {
+	if err := t.apply(ctx, doc); err != nil {
 		return tools.ErrorResult(c, err.Error()), nil
 	}
 
@@ -107,11 +161,12 @@ func (t *Tool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	return tools.Result{CallID: c.ID, Name: c.Name, Output: body}, nil
 }
 
-func (t *Tool) apply(doc Document) error {
+func (t *Tool) apply(ctx context.Context, doc Document) error {
 	state := map[string]*patchFileState{}
+	approvedOutside := map[string]bool{}
 
 	getState := func(path string) (*patchFileState, error) {
-		resolved, err := t.resolvePath(path, false)
+		resolved, err := t.resolvePath(ctx, path, false, approvedOutside)
 		if err != nil {
 			return nil, err
 		}
@@ -133,7 +188,7 @@ func (t *Tool) apply(doc Document) error {
 	for _, h := range doc.Hunks {
 		switch op := h.(type) {
 		case AddFile:
-			target, err := t.resolvePath(op.Path, false)
+			target, err := t.resolvePath(ctx, op.Path, false, approvedOutside)
 			if err != nil {
 				return err
 			}
@@ -152,7 +207,7 @@ func (t *Tool) apply(doc Document) error {
 				Original: target,
 			}
 		case DeleteFile:
-			return errors.New("delete file operation is not allowed")
+			return errors.New("deleting files via apply_patch tool is not allowed; use shell tools")
 		case UpdateFile:
 			s, err := getState(op.Path)
 			if err != nil {
@@ -167,7 +222,7 @@ func (t *Tool) apply(doc Document) error {
 			}
 			s.Content = updated
 			if op.MoveTo != "" {
-				moveTarget, err := t.resolvePath(op.MoveTo, false)
+				moveTarget, err := t.resolvePath(ctx, op.MoveTo, false, approvedOutside)
 				if err != nil {
 					return err
 				}
@@ -336,7 +391,7 @@ func withRollback(primary, rollbackErr error) error {
 	return errors.Join(primary, fmt.Errorf("rollback failed: %w", rollbackErr))
 }
 
-func (t *Tool) resolvePath(path string, mustExist bool) (string, error) {
+func (t *Tool) resolvePath(ctx context.Context, path string, mustExist bool, approvedOutside map[string]bool) (string, error) {
 	if strings.TrimSpace(path) == "" {
 		return "", errors.New("empty path")
 	}
@@ -395,10 +450,155 @@ func (t *Tool) resolvePath(path string, mustExist bool) (string, error) {
 			return "", fmt.Errorf("rel path check for %q: %w", path, err)
 		}
 		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return "", fmt.Errorf("patch target outside workspace: %s", path)
+			if isPathInTemporaryDir(real) {
+				return real, nil
+			}
+			if t.allowOutsideWorkspace || t.outsideWorkspaceSessionAllowed() {
+				return real, nil
+			}
+			if approvedOutside != nil && approvedOutside[real] {
+				return real, nil
+			}
+			if t.outsideWorkspaceApprover == nil {
+				return "", fmt.Errorf("patch target outside workspace: %s", path)
+			}
+			approval, approveErr := t.outsideWorkspaceApprover(ctx, OutsideWorkspaceRequest{
+				RequestedPath: path,
+				ResolvedPath:  real,
+				WorkspaceRoot: t.workspaceRoot,
+			})
+			if approveErr != nil {
+				return "", fmt.Errorf("outside-workspace edit approval failed for %s: %w", path, approveErr)
+			}
+			switch approval.Decision {
+			case OutsideWorkspaceDecisionAllowOnce:
+				if approvedOutside != nil {
+					approvedOutside[real] = true
+				}
+				return real, nil
+			case OutsideWorkspaceDecisionAllowSession:
+				t.setOutsideWorkspaceSessionAllowed(true)
+				if approvedOutside != nil {
+					approvedOutside[real] = true
+				}
+				return real, nil
+			default:
+				errMessage := fmt.Sprintf("patch target outside workspace rejected by user: %s; %s", path, outsideWorkspaceRejectionInstruction)
+				commentary := strings.TrimSpace(approval.Commentary)
+				if commentary != "" {
+					errMessage += fmt.Sprintf(" User commented about this: %s", strconv.Quote(commentary))
+				}
+				return "", errors.New(errMessage)
+			}
 		}
 	}
 	return real, nil
+}
+
+func isPathInTemporaryDir(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+	abs := path
+	if !filepath.IsAbs(abs) {
+		resolvedAbs, err := filepath.Abs(abs)
+		if err != nil {
+			return false
+		}
+		abs = resolvedAbs
+	}
+	abs = filepath.Clean(abs)
+	for _, root := range tempEditableRoots() {
+		if pathWithinRoot(abs, root) {
+			return true
+		}
+	}
+	return false
+}
+
+func tempEditableRoots() []string {
+	temporaryEditableRootsOnce.Do(func() {
+		roots := make([]string, 0, 8)
+		add := func(raw string) {
+			root := normalizeExistingPath(raw)
+			if root == "" {
+				return
+			}
+			roots = append(roots, root)
+		}
+
+		add(os.TempDir())
+		add(os.Getenv("TMPDIR"))
+		add(os.Getenv("TEMP"))
+		add(os.Getenv("TMP"))
+		if runtime.GOOS != "windows" {
+			add("/tmp")
+			add("/var/tmp")
+			add("/private/tmp")
+		}
+
+		seen := make(map[string]struct{}, len(roots))
+		deduped := make([]string, 0, len(roots))
+		for _, root := range roots {
+			if _, ok := seen[root]; ok {
+				continue
+			}
+			seen[root] = struct{}{}
+			deduped = append(deduped, root)
+		}
+		sort.Strings(deduped)
+		temporaryEditableRoots = deduped
+	})
+	out := make([]string, len(temporaryEditableRoots))
+	copy(out, temporaryEditableRoots)
+	return out
+}
+
+func normalizeExistingPath(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return ""
+	}
+	abs := trimmed
+	if !filepath.IsAbs(abs) {
+		resolvedAbs, err := filepath.Abs(abs)
+		if err != nil {
+			return ""
+		}
+		abs = resolvedAbs
+	}
+	abs = filepath.Clean(abs)
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		return filepath.Clean(real)
+	}
+	return abs
+}
+
+func pathWithinRoot(path, root string) bool {
+	if path == "" || root == "" {
+		return false
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func (t *Tool) outsideWorkspaceSessionAllowed() bool {
+	t.outsideWorkspaceSessionMu.RLock()
+	defer t.outsideWorkspaceSessionMu.RUnlock()
+	return t.outsideWorkspaceSessionAllow
+}
+
+func (t *Tool) setOutsideWorkspaceSessionAllowed(allow bool) {
+	t.outsideWorkspaceSessionMu.Lock()
+	t.outsideWorkspaceSessionAllow = allow
+	t.outsideWorkspaceSessionMu.Unlock()
 }
 
 func splitLines(s string) []string {

@@ -152,6 +152,129 @@ func TestAskQuestionTabFreeformFlow(t *testing.T) {
 	}
 }
 
+func TestAskPromptUsesCheckmarkAndSingleLineHint(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	reply := make(chan askReply, 1)
+	event := askEvent{req: askquestion.Request{Question: "Pick one", Suggestions: []string{"a", "b"}}, reply: reply}
+
+	next, _ := m.Update(askEventMsg{event: event})
+	updated := next.(*uiModel)
+	lines := updated.renderInputLines(100, uiThemeStyles("dark"))
+	plain := stripANSIAndTrimRight(strings.Join(lines, "\n"))
+
+	if !strings.Contains(plain, "Pick one") {
+		t.Fatalf("expected question text, got %q", plain)
+	}
+	if strings.Contains(plain, "question>") {
+		t.Fatalf("expected no legacy question prefix, got %q", plain)
+	}
+	if strings.Contains(plain, "none of the above") {
+		t.Fatalf("expected no fallback option, got %q", plain)
+	}
+	if !strings.Contains(plain, "✓ 1. a") {
+		t.Fatalf("expected checkmark-selected first option, got %q", plain)
+	}
+	if strings.Contains(plain, "> 1. a") {
+		t.Fatalf("expected no chevron selector, got %q", plain)
+	}
+	if !strings.Contains(plain, "Tab to switch to freeform • Enter to submit") {
+		t.Fatalf("expected single-line hint, got %q", plain)
+	}
+}
+
+func TestApprovalAskSupportsDenyWithCommentary(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	reply := make(chan askReply, 1)
+	event := askEvent{req: askquestion.Request{Question: "Approve?", Suggestions: []string{"Allow once", "Allow for this session", "Deny"}, Approval: true, ApprovalKind: approvalKindPatchOutsideWorkspace}, reply: reply}
+
+	next, _ := m.Update(askEventMsg{event: event})
+	updated := next.(*uiModel)
+	lines := updated.renderInputLines(120, uiThemeStyles("dark"))
+	plain := stripANSIAndTrimRight(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "4. Deny, and add commentary") {
+		t.Fatalf("expected deny-commentary option, got %q", plain)
+	}
+	if !strings.Contains(plain, "Tab to allow and add commentary • Enter to submit") {
+		t.Fatalf("expected approval hint line, got %q", plain)
+	}
+
+	for i := 0; i < 3; i++ {
+		next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+		updated = next.(*uiModel)
+	}
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if !updated.askFreeform {
+		t.Fatal("expected commentary option to switch to freeform")
+	}
+	lines = updated.renderInputLines(120, uiThemeStyles("dark"))
+	plain = stripANSIAndTrimRight(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "Your comment:") {
+		t.Fatalf("expected minimal deny-commentary prompt, got %q", plain)
+	}
+	if strings.Contains(plain, "Approve?") || strings.Contains(plain, "Tab to allow and add commentary") {
+		t.Fatalf("expected no question/hint in deny-commentary prompt, got %q", plain)
+	}
+	select {
+	case <-reply:
+		t.Fatal("did not expect answer submission before commentary")
+	default:
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("blocked by policy")})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+
+	resp := <-reply
+	if resp.answer != "blocked by policy" {
+		t.Fatalf("unexpected commentary answer: %q", resp.answer)
+	}
+	if updated.activeAsk != nil {
+		t.Fatal("expected ask to resolve after commentary submit")
+	}
+}
+
+func TestApprovalAskTabAllowsWithCommentary(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	reply := make(chan askReply, 1)
+	event := askEvent{req: askquestion.Request{Question: "Approve?", Suggestions: []string{"Allow once", "Allow for this session", "Deny"}, Approval: true, ApprovalKind: approvalKindPatchOutsideWorkspace}, reply: reply}
+
+	next, _ := m.Update(askEventMsg{event: event})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated = next.(*uiModel)
+	if !updated.askFreeform {
+		t.Fatal("expected tab to switch approval prompt to allow-commentary freeform")
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("ok but please keep it minimal")})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+
+	resp := <-reply
+	if resp.answer != outsideWorkspaceAllowWithCommentaryAnswerPrefix+"ok but please keep it minimal" {
+		t.Fatalf("unexpected approval allow-with-commentary answer: %q", resp.answer)
+	}
+	if len(updated.pendingInjected) != 1 || updated.pendingInjected[0] != "ok but please keep it minimal" {
+		t.Fatalf("expected queued user commentary injection, got %+v", updated.pendingInjected)
+	}
+	if updated.activeAsk != nil {
+		t.Fatal("expected ask to resolve after allow-commentary submit")
+	}
+}
+
 func TestAskEventsQueueUntilCurrentQuestionAnswered(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	reply1 := make(chan askReply, 1)
@@ -844,6 +967,24 @@ func TestStatusLineShowsContextUsageWhenAvailable(t *testing.T) {
 	}
 	if !strings.Contains(line, "▯▯▯▯▯▯▯▯▯▯") {
 		t.Fatalf("expected progress bar in status line, got %q", line)
+	}
+}
+
+func TestStatusLineShowsCompactionProgressWarning(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+
+	next, _ := m.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventCompactionStarted}})
+	started := next.(*uiModel)
+	line := stripANSIAndTrimRight(started.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(strings.ToLower(line), "compacting") {
+		t.Fatalf("expected compaction warning in status line, got %q", line)
+	}
+
+	next, _ = started.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventCompactionCompleted}})
+	completed := next.(*uiModel)
+	line = stripANSIAndTrimRight(completed.renderStatusLine(120, uiThemeStyles("dark")))
+	if strings.Contains(strings.ToLower(line), "compacting") {
+		t.Fatalf("expected compaction warning cleared after completion, got %q", line)
 	}
 }
 

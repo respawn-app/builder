@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -45,6 +46,7 @@ type HTTPTransport struct {
 	BaseURL             string
 	Client              *http.Client
 	Auth                AuthHeaderProvider
+	Store               bool
 	ContextWindowTokens int
 }
 
@@ -216,11 +218,22 @@ func (t *HTTPTransport) Compact(ctx context.Context, request OpenAICompactionReq
 	service := t.newResponseService(mode)
 	reqOpts := t.buildRequestOptions(authHeader, mode, request.SessionID)
 	var rawResp *http.Response
-	reqOpts = append(reqOpts, option.WithResponseInto(&rawResp))
+	var rawBody []byte
+	reqOpts = append(reqOpts,
+		option.WithResponseInto(&rawResp),
+		option.WithResponseBodyInto(&rawBody),
+	)
 
 	decoded, err := service.Compact(ctx, payload, reqOpts...)
 	if err != nil {
 		return OpenAICompactionResponse{}, mapOpenAIRequestError(err, rawResp, "openai responses compact request failed")
+	}
+	if len(bytes.TrimSpace(rawBody)) > 0 {
+		var parsed responses.CompactedResponse
+		if err := json.Unmarshal(rawBody, &parsed); err != nil {
+			return OpenAICompactionResponse{}, fmt.Errorf("openai responses compact request failed: invalid compact response body: %w", err)
+		}
+		decoded = &parsed
 	}
 	if decoded == nil {
 		return OpenAICompactionResponse{}, fmt.Errorf("openai responses compact request failed: empty response")
@@ -284,7 +297,7 @@ func (t *HTTPTransport) buildPayload(request OpenAIRequest, mode openAIAuthMode)
 
 	out := responses.ResponseNewParams{
 		Model: request.Model,
-		Store: openai.Bool(false),
+		Store: openai.Bool(t.Store),
 	}
 	if len(input) > 0 {
 		out.Input = responses.ResponseNewParamsInputUnion{OfInputItemList: input}
@@ -1011,15 +1024,13 @@ func (t *HTTPTransport) serviceBaseURL(mode openAIAuthMode) string {
 func (t *HTTPTransport) buildRequestOptions(authHeader string, mode openAIAuthMode, sessionID string) []option.RequestOption {
 	opts := []option.RequestOption{
 		option.WithHeader("Authorization", authHeader),
+		option.WithHeader("originator", defaultOriginator),
+		option.WithHeader("User-Agent", defaultUserAgent),
+	}
+	if strings.TrimSpace(sessionID) != "" {
+		opts = append(opts, option.WithHeader("session_id", sessionID))
 	}
 	if mode.IsOAuth {
-		opts = append(opts,
-			option.WithHeader("originator", defaultOriginator),
-			option.WithHeader("User-Agent", defaultUserAgent),
-		)
-		if strings.TrimSpace(sessionID) != "" {
-			opts = append(opts, option.WithHeader("session_id", sessionID))
-		}
 		if mode.AccountID != "" {
 			opts = append(opts, option.WithHeader("ChatGPT-Account-Id", mode.AccountID))
 		}

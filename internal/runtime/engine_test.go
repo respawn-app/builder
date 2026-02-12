@@ -1059,6 +1059,212 @@ func TestContextUsageFallsBackToEstimatedTokens(t *testing.T) {
 	}
 }
 
+func TestManualCompactionRemotePassesSlashCommandArgumentsAsInstructions(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		compactionResponses: []llm.CompactionResponse{
+			{
+				OutputItems: []llm.ResponseItem{
+					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "seed"},
+					{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+				},
+				Usage: llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
+			},
+		},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append message: %v", err)
+	}
+
+	args := "preserve migration caveats"
+	if err := eng.CompactContext(context.Background(), args); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	if len(client.compactionCalls) != 1 {
+		t.Fatalf("expected one remote compact call, got %d", len(client.compactionCalls))
+	}
+	if got, want := client.compactionCalls[0].Instructions, compactionInstructions(args); got != want {
+		t.Fatalf("unexpected compact instructions\nwant:\n%s\n\ngot:\n%s", want, got)
+	}
+}
+
+func TestManualCompactionLocalAppendsSlashCommandArgumentsToPrompt(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{
+		responses: []llm.Response{
+			{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "summary"}},
+		},
+	}
+	useNative := false
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", UseNativeCompaction: &useNative})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append message: %v", err)
+	}
+
+	args := "keep TODO decisions"
+	if err := eng.CompactContext(context.Background(), args); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected one local-summary model call, got %d", len(client.calls))
+	}
+	if len(client.calls[0].Tools) == 0 {
+		t.Fatalf("expected tools to remain declared for local compaction cache stability")
+	}
+
+	additional := additionalCompactionInstructionsHeader + "\n " + args
+	found := false
+	for _, item := range client.calls[0].Items {
+		if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleDeveloper && item.Content == compactionInstructions(args) && strings.HasSuffix(item.Content, additional) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected local compact prompt to include appended slash command args, got %+v", client.calls[0].Items)
+	}
+}
+
+func TestManualCompactionLocalUsesHistorySinceLastCompactionCheckpoint(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{
+		responses: []llm.Response{
+			{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "summary"}},
+		},
+	}
+	useNative := false
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", UseNativeCompaction: &useNative})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, Content: "canonical context"}); err != nil {
+		t.Fatalf("append canonical context: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "old user request"}); err != nil {
+		t.Fatalf("append old user message: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, Content: "old assistant response"}); err != nil {
+		t.Fatalf("append old assistant message: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: prompts.CompactionSummaryPrefix + "\n\nold compacted summary"}); err != nil {
+		t.Fatalf("append compaction checkpoint: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "new user request"}); err != nil {
+		t.Fatalf("append new user message: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, Content: "new assistant response"}); err != nil {
+		t.Fatalf("append new assistant message: %v", err)
+	}
+
+	if err := eng.CompactContext(context.Background(), ""); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected one local-summary model call, got %d", len(client.calls))
+	}
+	if len(client.calls[0].Tools) == 0 {
+		t.Fatalf("expected tools to remain declared for local compaction cache stability")
+	}
+
+	foundCanonical := false
+	foundCheckpoint := false
+	foundNewUser := false
+	foundOldUser := false
+	foundPrompt := false
+	for _, item := range client.calls[0].Items {
+		if item.Type != llm.ResponseItemTypeMessage {
+			continue
+		}
+		if item.Role == llm.RoleDeveloper && item.Content == "canonical context" {
+			foundCanonical = true
+		}
+		if item.Role == llm.RoleUser && strings.HasPrefix(item.Content, prompts.CompactionSummaryPrefix) {
+			foundCheckpoint = true
+		}
+		if item.Role == llm.RoleUser && item.Content == "new user request" {
+			foundNewUser = true
+		}
+		if item.Role == llm.RoleUser && item.Content == "old user request" {
+			foundOldUser = true
+		}
+		if item.Role == llm.RoleDeveloper && item.Content == prompts.CompactionPrompt {
+			foundPrompt = true
+		}
+	}
+
+	if !foundCanonical {
+		t.Fatalf("expected canonical developer context in local compaction request, got %+v", client.calls[0].Items)
+	}
+	if !foundCheckpoint {
+		t.Fatalf("expected last compaction checkpoint item in local compaction request, got %+v", client.calls[0].Items)
+	}
+	if !foundNewUser {
+		t.Fatalf("expected post-checkpoint history in local compaction request, got %+v", client.calls[0].Items)
+	}
+	if foundOldUser {
+		t.Fatalf("did not expect pre-checkpoint history in local compaction request, got %+v", client.calls[0].Items)
+	}
+	if !foundPrompt {
+		t.Fatalf("expected compaction prompt as developer message, got %+v", client.calls[0].Items)
+	}
+}
+
+func TestManualCompactionLocalFailsWhenModelAttemptsToolCalls(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{
+		responses: []llm.Response{
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: ""},
+				ToolCalls: []llm.ToolCall{{ID: "call_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			},
+		},
+	}
+	useNative := false
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", UseNativeCompaction: &useNative})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append message: %v", err)
+	}
+
+	err = eng.CompactContext(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected local compaction to fail when model attempts tool calls")
+	}
+	if !strings.Contains(err.Error(), "tool calls") {
+		t.Fatalf("expected tool-call error, got %v", err)
+	}
+}
+
 func TestAutoCompactionRecomputesUsageFromReplacementHistory(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

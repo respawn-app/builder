@@ -22,6 +22,10 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) {
 		m.sawAssistantDelta = evt.AssistantDelta != ""
 	case runtime.EventAssistantDeltaReset:
 		m.sawAssistantDelta = false
+	case runtime.EventCompactionStarted:
+		m.compacting = true
+	case runtime.EventCompactionCompleted, runtime.EventCompactionFailed:
+		m.compacting = false
 	case runtime.EventUserMessageFlushed:
 		a.onUserMessageFlushed(evt.UserMessage)
 	}

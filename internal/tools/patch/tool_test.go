@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"builder/internal/tools"
@@ -250,4 +251,254 @@ func TestCommitStagedFilesRollsBackCommittedTargetsOnLaterFailure(t *testing.T) 
 	if !info.IsDir() {
 		t.Fatalf("blocking path changed type")
 	}
+}
+
+func TestOutsideWorkspaceEditAllowedWhenConfigured(t *testing.T) {
+	workspace := t.TempDir()
+	outsideRoot := outsideNonTempDir(t)
+	target := filepath.Join(outsideRoot, "outside.txt")
+	if err := os.WriteFile(target, []byte("start\n"), 0o644); err != nil {
+		t.Fatalf("seed outside file: %v", err)
+	}
+
+	tool, err := New(workspace, true, WithAllowOutsideWorkspace(true))
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	result := callPatch(t, tool, "allow-config", "*** Begin Patch\n*** Update File: "+target+"\n-start\n+done\n*** End Patch\n")
+	if result.IsError {
+		t.Fatalf("expected success, got %s", string(result.Output))
+	}
+
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read outside file: %v", err)
+	}
+	if string(got) != "done\n" {
+		t.Fatalf("outside file not updated: %q", string(got))
+	}
+}
+
+func TestOutsideWorkspaceTempDirAllowedWithoutApproval(t *testing.T) {
+	workspace := t.TempDir()
+	outsideRoot := t.TempDir()
+	target := filepath.Join(outsideRoot, "outside.txt")
+	if err := os.WriteFile(target, []byte("start\n"), 0o644); err != nil {
+		t.Fatalf("seed outside file: %v", err)
+	}
+
+	tool, err := New(workspace, true)
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	result := callPatch(t, tool, "allow-temp-default", "*** Begin Patch\n*** Update File: "+target+"\n-start\n+done\n*** End Patch\n")
+	if result.IsError {
+		t.Fatalf("expected success for temp outside path, got %s", string(result.Output))
+	}
+}
+
+func TestOutsideWorkspaceTempDirBypassesApprover(t *testing.T) {
+	workspace := t.TempDir()
+	outsideRoot := t.TempDir()
+	target := filepath.Join(outsideRoot, "outside.txt")
+	if err := os.WriteFile(target, []byte("start\n"), 0o644); err != nil {
+		t.Fatalf("seed outside file: %v", err)
+	}
+
+	approveCalls := 0
+	tool, err := New(workspace, true, WithOutsideWorkspaceApprover(func(context.Context, OutsideWorkspaceRequest) (OutsideWorkspaceApproval, error) {
+		approveCalls++
+		return OutsideWorkspaceApproval{Decision: OutsideWorkspaceDecisionDeny}, nil
+	}))
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	result := callPatch(t, tool, "allow-temp-bypass", "*** Begin Patch\n*** Update File: "+target+"\n-start\n+done\n*** End Patch\n")
+	if result.IsError {
+		t.Fatalf("expected success for temp outside path, got %s", string(result.Output))
+	}
+	if approveCalls != 0 {
+		t.Fatalf("expected temp exclusion to bypass approver, got %d calls", approveCalls)
+	}
+}
+
+func TestOutsideWorkspaceEditRejectionContainsSteeringMessage(t *testing.T) {
+	workspace := t.TempDir()
+	outsideRoot := outsideNonTempDir(t)
+	target := filepath.Join(outsideRoot, "outside.txt")
+	if err := os.WriteFile(target, []byte("start\n"), 0o644); err != nil {
+		t.Fatalf("seed outside file: %v", err)
+	}
+
+	approveCalls := 0
+	tool, err := New(workspace, true, WithOutsideWorkspaceApprover(func(context.Context, OutsideWorkspaceRequest) (OutsideWorkspaceApproval, error) {
+		approveCalls++
+		return OutsideWorkspaceApproval{Decision: OutsideWorkspaceDecisionDeny}, nil
+	}))
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	result := callPatch(t, tool, "deny-outside", "*** Begin Patch\n*** Update File: "+target+"\n-start\n+done\n*** End Patch\n")
+	if !result.IsError {
+		t.Fatalf("expected error result")
+	}
+	if approveCalls != 1 {
+		t.Fatalf("expected one approval call, got %d", approveCalls)
+	}
+	errMessage := toolError(t, result)
+	if !strings.Contains(errMessage, "do not attempt to circumvent this restriction in any way") {
+		t.Fatalf("expected steering guidance in error, got %q", errMessage)
+	}
+
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read outside file: %v", err)
+	}
+	if string(got) != "start\n" {
+		t.Fatalf("outside file changed despite rejection: %q", string(got))
+	}
+}
+
+func TestOutsideWorkspaceAllowSessionSkipsFuturePrompts(t *testing.T) {
+	workspace := t.TempDir()
+	outsideRoot := outsideNonTempDir(t)
+	first := filepath.Join(outsideRoot, "first.txt")
+	second := filepath.Join(outsideRoot, "second.txt")
+	if err := os.WriteFile(first, []byte("one\n"), 0o644); err != nil {
+		t.Fatalf("seed first file: %v", err)
+	}
+	if err := os.WriteFile(second, []byte("two\n"), 0o644); err != nil {
+		t.Fatalf("seed second file: %v", err)
+	}
+
+	approveCalls := 0
+	tool, err := New(workspace, true, WithOutsideWorkspaceApprover(func(context.Context, OutsideWorkspaceRequest) (OutsideWorkspaceApproval, error) {
+		approveCalls++
+		return OutsideWorkspaceApproval{Decision: OutsideWorkspaceDecisionAllowSession}, nil
+	}))
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	result := callPatch(t, tool, "allow-session-1", "*** Begin Patch\n*** Update File: "+first+"\n-one\n+one-updated\n*** End Patch\n")
+	if result.IsError {
+		t.Fatalf("expected first patch success, got %s", string(result.Output))
+	}
+	result = callPatch(t, tool, "allow-session-2", "*** Begin Patch\n*** Update File: "+second+"\n-two\n+two-updated\n*** End Patch\n")
+	if result.IsError {
+		t.Fatalf("expected second patch success, got %s", string(result.Output))
+	}
+	if approveCalls != 1 {
+		t.Fatalf("expected one approval call, got %d", approveCalls)
+	}
+}
+
+func TestOutsideWorkspaceAllowOncePromptsEachCall(t *testing.T) {
+	workspace := t.TempDir()
+	outsideRoot := outsideNonTempDir(t)
+	target := filepath.Join(outsideRoot, "outside.txt")
+	if err := os.WriteFile(target, []byte("start\n"), 0o644); err != nil {
+		t.Fatalf("seed outside file: %v", err)
+	}
+
+	approveCalls := 0
+	tool, err := New(workspace, true, WithOutsideWorkspaceApprover(func(context.Context, OutsideWorkspaceRequest) (OutsideWorkspaceApproval, error) {
+		approveCalls++
+		return OutsideWorkspaceApproval{Decision: OutsideWorkspaceDecisionAllowOnce}, nil
+	}))
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	result := callPatch(t, tool, "allow-once-1", "*** Begin Patch\n*** Update File: "+target+"\n-start\n+mid\n*** End Patch\n")
+	if result.IsError {
+		t.Fatalf("expected first patch success, got %s", string(result.Output))
+	}
+	result = callPatch(t, tool, "allow-once-2", "*** Begin Patch\n*** Update File: "+target+"\n-mid\n+done\n*** End Patch\n")
+	if result.IsError {
+		t.Fatalf("expected second patch success, got %s", string(result.Output))
+	}
+	if approveCalls != 2 {
+		t.Fatalf("expected two approval calls, got %d", approveCalls)
+	}
+}
+
+func TestOutsideWorkspaceRejectionIncludesUserCommentary(t *testing.T) {
+	workspace := t.TempDir()
+	outsideRoot := outsideNonTempDir(t)
+	target := filepath.Join(outsideRoot, "outside.txt")
+	if err := os.WriteFile(target, []byte("start\n"), 0o644); err != nil {
+		t.Fatalf("seed outside file: %v", err)
+	}
+
+	tool, err := New(workspace, true, WithOutsideWorkspaceApprover(func(context.Context, OutsideWorkspaceRequest) (OutsideWorkspaceApproval, error) {
+		return OutsideWorkspaceApproval{Decision: OutsideWorkspaceDecisionDeny, Commentary: "not allowed by policy"}, nil
+	}))
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	result := callPatch(t, tool, "deny-commentary", "*** Begin Patch\n*** Update File: "+target+"\n-start\n+done\n*** End Patch\n")
+	if !result.IsError {
+		t.Fatalf("expected error result")
+	}
+	errMessage := toolError(t, result)
+	if !strings.Contains(errMessage, `User commented about this: "not allowed by policy"`) {
+		t.Fatalf("expected user commentary in error, got %q", errMessage)
+	}
+}
+
+func outsideNonTempDir(t *testing.T) string {
+	t.Helper()
+	bases := make([]string, 0, 2)
+	if wd, err := os.Getwd(); err == nil {
+		bases = append(bases, wd)
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		bases = append(bases, home)
+	}
+	for _, base := range bases {
+		dir, err := os.MkdirTemp(base, "builder-patch-outside-*")
+		if err != nil {
+			continue
+		}
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			_ = os.RemoveAll(dir)
+			continue
+		}
+		if isPathInTemporaryDir(abs) {
+			_ = os.RemoveAll(dir)
+			continue
+		}
+		t.Cleanup(func() {
+			_ = os.RemoveAll(dir)
+		})
+		return abs
+	}
+	t.Skip("unable to create non-temporary outside directory for test")
+	return ""
+}
+
+func callPatch(t *testing.T, tool *Tool, id, patchText string) tools.Result {
+	t.Helper()
+	input, _ := json.Marshal(map[string]any{"patch": patchText})
+	result, err := tool.Call(context.Background(), tools.Call{ID: id, Name: tools.ToolPatch, Input: input})
+	if err != nil {
+		t.Fatalf("patch call error: %v", err)
+	}
+	return result
+}
+
+func toolError(t *testing.T, result tools.Result) string {
+	t.Helper()
+	payload := map[string]string{}
+	if err := json.Unmarshal(result.Output, &payload); err != nil {
+		t.Fatalf("decode tool error output: %v", err)
+	}
+	return payload["error"]
 }
