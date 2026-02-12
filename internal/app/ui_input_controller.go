@@ -33,10 +33,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.inputSubmitLocked {
 				return m, nil
 			}
-			if m.engine != nil {
-				m.engine.QueueUserMessage(text)
-			}
-			m.pendingInjected = append(m.pendingInjected, text)
+			m.queued = append(m.queued, text)
 			m.clearInput()
 			m.activity = uiActivityQueued
 			return m, nil

@@ -245,7 +245,7 @@ func (m Model) toggleMode() Model {
 	if m.mode == ModeOngoing {
 		m.mode = ModeDetail
 		m.detailSnapshot = m.renderFlatDetailTranscript()
-		m.detailScroll = clamp(m.detailScroll, 0, m.maxDetailScroll())
+		m.detailScroll = m.maxDetailScroll()
 		return m
 	}
 	m.mode = ModeOngoing
