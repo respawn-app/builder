@@ -71,6 +71,25 @@ func TestUnknownCSIXtermCtrlEnterQueuesAndStartsSubmission(t *testing.T) {
 	}
 }
 
+func TestUnknownCSICtrlEnterQueuesPostTurnWhenBusy(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.input = "echo hi"
+
+	next, _ := m.Update(testUnknownCSISequence{rendered: "?CSI[49 51 59 53 117]?"}) // 13;5u
+	updated := next.(*uiModel)
+
+	if len(updated.queued) != 1 {
+		t.Fatalf("expected one queued post-turn message, got %d", len(updated.queued))
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("did not expect injected steering messages, got %d", len(updated.pendingInjected))
+	}
+	if updated.inputSubmitLocked {
+		t.Fatal("did not expect submit lock for ctrl+enter queue")
+	}
+}
+
 func TestUnknownCSIShiftEnterInsertsNewline(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "hello"
@@ -577,15 +596,21 @@ func TestSubmitErrorUnlocksInputAndClearsLockedPendingState(t *testing.T) {
 	}
 }
 
-func TestBusyTabQueuesInjectionAndKeepsInputUnlocked(t *testing.T) {
+func TestBusyTabQueuesPostTurnSubmissionAndKeepsInputUnlocked(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.busy = true
 	m.input = "queue this"
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated := next.(*uiModel)
-	if len(updated.pendingInjected) != 1 {
-		t.Fatalf("expected one pending injected message, got %d", len(updated.pendingInjected))
+	if len(updated.queued) != 1 {
+		t.Fatalf("expected one queued post-turn message, got %d", len(updated.queued))
+	}
+	if updated.queued[0] != "queue this" {
+		t.Fatalf("unexpected queued message: %q", updated.queued[0])
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("did not expect injected steering message, got %d", len(updated.pendingInjected))
 	}
 	if updated.input != "" {
 		t.Fatalf("expected input cleared after tab while busy, got %q", updated.input)

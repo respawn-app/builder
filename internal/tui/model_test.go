@@ -46,6 +46,24 @@ func TestModeTogglePreservesOngoingScroll(t *testing.T) {
 	}
 }
 
+func TestToggleToDetailStartsAtBottom(t *testing.T) {
+	m := NewModel(WithPreviewLines(2))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a2"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a3"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a4"})
+
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	if got, want := m.detailScroll, m.maxDetailScroll(); got != want {
+		t.Fatalf("detail scroll after toggle = %d, want bottom %d", got, want)
+	}
+	view := plainTranscript(m.View())
+	if !strings.Contains(view, "a4") {
+		t.Fatalf("expected detail toggle to show newest content, got %q", view)
+	}
+}
+
 func TestOngoingShowsFullConversationContext(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "first question"})
@@ -206,15 +224,20 @@ func TestMouseWheelScrollsDetailView(t *testing.T) {
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u3"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a3"})
 	m = updateModel(t, m, ToggleModeMsg{})
-
-	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
-	if m.detailScroll == 0 {
-		t.Fatalf("expected wheel down to scroll detail view, got detailScroll=%d", m.detailScroll)
+	start := m.detailScroll
+	if start == 0 {
+		t.Fatalf("expected detail mode to start at bottom, got detailScroll=%d", start)
 	}
 
 	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
-	if m.detailScroll != 0 {
-		t.Fatalf("expected wheel up to scroll detail view back toward top, got detailScroll=%d", m.detailScroll)
+	if m.detailScroll >= start {
+		t.Fatalf("expected wheel up to scroll detail view, got detailScroll=%d from %d", m.detailScroll, start)
+	}
+
+	up := m.detailScroll
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+	if m.detailScroll <= up {
+		t.Fatalf("expected wheel down to scroll detail view, got detailScroll=%d from %d", m.detailScroll, up)
 	}
 }
 
