@@ -11,11 +11,10 @@ import (
 )
 
 const (
-	outsideWorkspaceAllowOnceSuggestion             = "Allow once (recommended): permit this outside-workspace edit for this patch call."
-	outsideWorkspaceAllowSessionSuggestion          = "Allow for this session: permit outside-workspace patch edits until builder exits."
-	outsideWorkspaceDenySuggestion                  = "Deny: keep patch edits limited to the workspace root."
-	outsideWorkspaceAllowWithCommentaryAnswerPrefix = "allow_once_with_commentary:"
-	approvalKindPatchOutsideWorkspace               = "patch_outside_workspace"
+	outsideWorkspaceAllowOnceSuggestion     = "Allow once (recommended): permit this outside-workspace edit for this patch call."
+	outsideWorkspaceAllowSessionSuggestion  = "Allow for this session: permit outside-workspace patch edits until builder exits."
+	outsideWorkspaceDenySuggestion          = "Deny: keep patch edits limited to the workspace root."
+	approvalAllowWithCommentaryAnswerPrefix = "allow_with_commentary:"
 )
 
 type patchOutsideWorkspaceApprover struct {
@@ -37,9 +36,8 @@ func (a *patchOutsideWorkspaceApprover) Approve(ctx context.Context, req patchto
 	a.mu.Unlock()
 
 	resp, err := a.broker.Ask(ctx, askquestion.Request{
-		Question:     fmt.Sprintf("Allow editing %s (outside workspace dir)?", req.ResolvedPath),
-		Approval:     true,
-		ApprovalKind: approvalKindPatchOutsideWorkspace,
+		Question: fmt.Sprintf("Allow editing %s (outside workspace dir)?", req.ResolvedPath),
+		Approval: true,
 		Suggestions: []string{
 			outsideWorkspaceAllowOnceSuggestion,
 			outsideWorkspaceAllowSessionSuggestion,
@@ -62,8 +60,8 @@ func (a *patchOutsideWorkspaceApprover) Approve(ctx context.Context, req patchto
 func parseOutsideWorkspaceApprovalAnswer(answer string) patchtool.OutsideWorkspaceApproval {
 	trimmed := strings.TrimSpace(answer)
 	normalized := strings.ToLower(trimmed)
-	if strings.HasPrefix(trimmed, outsideWorkspaceAllowWithCommentaryAnswerPrefix) {
-		commentary := strings.TrimSpace(strings.TrimPrefix(trimmed, outsideWorkspaceAllowWithCommentaryAnswerPrefix))
+	if strings.HasPrefix(trimmed, approvalAllowWithCommentaryAnswerPrefix) {
+		commentary := strings.TrimSpace(strings.TrimPrefix(trimmed, approvalAllowWithCommentaryAnswerPrefix))
 		return patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowOnce, Commentary: commentary}
 	}
 	switch normalized {

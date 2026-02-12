@@ -12,11 +12,10 @@ import (
 )
 
 type Request struct {
-	ID           string   `json:"id"`
-	Question     string   `json:"question"`
-	Suggestions  []string `json:"suggestions,omitempty"`
-	Approval     bool     `json:"approval,omitempty"`
-	ApprovalKind string   `json:"-"`
+	ID          string   `json:"id"`
+	Question    string   `json:"question"`
+	Suggestions []string `json:"suggestions,omitempty"`
+	Approval    bool     `json:"approval,omitempty"`
 }
 
 type Response struct {

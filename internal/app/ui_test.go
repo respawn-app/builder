@@ -185,7 +185,7 @@ func TestAskPromptUsesCheckmarkAndSingleLineHint(t *testing.T) {
 func TestApprovalAskSupportsDenyWithCommentary(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	reply := make(chan askReply, 1)
-	event := askEvent{req: askquestion.Request{Question: "Approve?", Suggestions: []string{"Allow once", "Allow for this session", "Deny"}, Approval: true, ApprovalKind: approvalKindPatchOutsideWorkspace}, reply: reply}
+	event := askEvent{req: askquestion.Request{Question: "Approve?", Suggestions: []string{"Allow once", "Allow for this session", "Deny"}, Approval: true}, reply: reply}
 
 	next, _ := m.Update(askEventMsg{event: event})
 	updated := next.(*uiModel)
@@ -248,7 +248,7 @@ func TestApprovalAskTabAllowsWithCommentary(t *testing.T) {
 	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.busy = true
 	reply := make(chan askReply, 1)
-	event := askEvent{req: askquestion.Request{Question: "Approve?", Suggestions: []string{"Allow once", "Allow for this session", "Deny"}, Approval: true, ApprovalKind: approvalKindPatchOutsideWorkspace}, reply: reply}
+	event := askEvent{req: askquestion.Request{Question: "Approve?", Suggestions: []string{"Allow once", "Allow for this session", "Deny"}, Approval: true}, reply: reply}
 
 	next, _ := m.Update(askEventMsg{event: event})
 	updated := next.(*uiModel)
@@ -264,7 +264,7 @@ func TestApprovalAskTabAllowsWithCommentary(t *testing.T) {
 	updated = next.(*uiModel)
 
 	resp := <-reply
-	if resp.answer != outsideWorkspaceAllowWithCommentaryAnswerPrefix+"ok but please keep it minimal" {
+	if resp.answer != approvalAllowWithCommentaryAnswerPrefix+"ok but please keep it minimal" {
 		t.Fatalf("unexpected approval allow-with-commentary answer: %q", resp.answer)
 	}
 	if len(updated.pendingInjected) != 1 || updated.pendingInjected[0] != "ok but please keep it minimal" {

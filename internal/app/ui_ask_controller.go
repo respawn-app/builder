@@ -88,12 +88,12 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		if m.askFreeform {
 			answer := strings.TrimSpace(m.askInput)
-			if isPatchOutsideWorkspaceApproval(req) && m.askFreeformMode == askFreeformModeApprovalAllowCommentary {
+			if req.Approval && m.askFreeformMode == askFreeformModeApprovalAllowCommentary {
 				if answer != "" && m.engine != nil {
 					m.engine.QueueUserMessage(answer)
 					m.pendingInjected = append(m.pendingInjected, answer)
 				}
-				answer = outsideWorkspaceAllowWithCommentaryAnswerPrefix + answer
+				answer = approvalAllowWithCommentaryAnswerPrefix + answer
 			}
 			hasNext := c.answer(answer, nil)
 			if hasNext {
@@ -173,7 +173,7 @@ func (c uiAskController) renderPromptLines() []askPromptLine {
 		return nil
 	}
 	req := m.activeAsk.req
-	if isPatchOutsideWorkspaceDenyCommentaryPrompt(req, m.askFreeform, m.askFreeformMode) {
+	if isApprovalDenyCommentaryPrompt(req, m.askFreeform, m.askFreeformMode) {
 		return []askPromptLine{
 			{Text: "Your comment:", Kind: askPromptLineKindHint},
 			{Text: m.askInput, Kind: askPromptLineKindInput},
@@ -264,15 +264,11 @@ func askOptionCount(req askquestion.Request) int {
 	return count
 }
 
-func isPatchOutsideWorkspaceApproval(req askquestion.Request) bool {
-	return req.Approval && strings.TrimSpace(req.ApprovalKind) == approvalKindPatchOutsideWorkspace
-}
-
-func isPatchOutsideWorkspaceDenyCommentaryPrompt(req askquestion.Request, freeform bool, mode askFreeformMode) bool {
+func isApprovalDenyCommentaryPrompt(req askquestion.Request, freeform bool, mode askFreeformMode) bool {
 	if !freeform || mode != askFreeformModeApprovalDenyCommentary {
 		return false
 	}
-	return isPatchOutsideWorkspaceApproval(req)
+	return req.Approval
 }
 
 func (m *uiModel) renderAskPrompt() string {

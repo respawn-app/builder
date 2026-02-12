@@ -21,7 +21,7 @@ func TestParseOutsideWorkspaceApprovalAnswer(t *testing.T) {
 		{name: "deny suggestion", answer: outsideWorkspaceDenySuggestion, want: patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionDeny}},
 		{name: "freeform allow session", answer: "allow for this session", want: patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowSession}},
 		{name: "freeform allow once", answer: "allow once", want: patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowOnce}},
-		{name: "freeform allow once with commentary prefix", answer: outsideWorkspaceAllowWithCommentaryAnswerPrefix + "approved, but keep it small", want: patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowOnce, Commentary: "approved, but keep it small"}},
+		{name: "freeform allow once with commentary prefix", answer: approvalAllowWithCommentaryAnswerPrefix + "approved, but keep it small", want: patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowOnce, Commentary: "approved, but keep it small"}},
 		{name: "freeform deny commentary", answer: "no because this is protected", want: patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionDeny, Commentary: "no because this is protected"}},
 	}
 
@@ -42,9 +42,6 @@ func TestPatchOutsideWorkspaceApproverCachesSessionDecision(t *testing.T) {
 		askCalls++
 		if !req.Approval {
 			t.Fatalf("expected approval=true for outside-workspace ask")
-		}
-		if req.ApprovalKind != approvalKindPatchOutsideWorkspace {
-			t.Fatalf("unexpected approval kind: %q", req.ApprovalKind)
 		}
 		if strings.Contains(req.Question, "workspace:") || strings.Contains(req.Question, "requested path:") || strings.Contains(req.Question, "Patch requested an edit outside the workspace.") {
 			t.Fatalf("approval prompt contains removed fields: %q", req.Question)
