@@ -122,7 +122,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.exitAction = UIActionLogout
 				return m, tea.Quit
 			case commands.ActionCompact:
-				return m, c.startCompaction()
+				return m, c.startCompaction(commandResult.Args)
 			}
 			return m, nil
 		}
@@ -262,23 +262,24 @@ func (c uiInputController) submitCmd(text string) tea.Cmd {
 	}
 }
 
-func (c uiInputController) startCompaction() tea.Cmd {
+func (c uiInputController) startCompaction(args string) tea.Cmd {
 	m := c.model
 	m.busy = true
 	m.activity = uiActivityRunning
+	m.compacting = true
 	m.sawAssistantDelta = false
-	m.logf("compaction.start")
+	m.logf("compaction.start args_chars=%d", len(strings.TrimSpace(args)))
 	m.syncViewport()
-	return tea.Batch(c.compactCmd(), tickSpinner())
+	return tea.Batch(c.compactCmd(args), tickSpinner())
 }
 
-func (c uiInputController) compactCmd() tea.Cmd {
+func (c uiInputController) compactCmd(args string) tea.Cmd {
 	m := c.model
 	return func() tea.Msg {
 		if m.engine == nil {
 			return compactDoneMsg{err: errors.New("runtime engine is not configured")}
 		}
-		return compactDoneMsg{err: m.engine.CompactContext(context.Background())}
+		return compactDoneMsg{err: m.engine.CompactContext(context.Background(), args)}
 	}
 }
 
@@ -291,10 +292,8 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 		detailErr := formatSubmissionError(msg.err)
 		m.activity = uiActivityError
 		if m.engine != nil {
-			m.engine.SetOngoingError(detailErr)
 			m.engine.AppendLocalEntry("error", detailErr)
 		} else {
-			m.forwardToView(tui.SetOngoingErrorMsg{Err: errors.New(detailErr)})
 			m.forwardToView(tui.AppendTranscriptMsg{Role: "error", Text: detailErr})
 		}
 		m.logf("step.error err=%q", detailErr)
@@ -307,10 +306,7 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 	}
 
 	m.activity = uiActivityIdle
-	if m.engine != nil {
-		m.engine.ClearOngoingError()
-	} else {
-		m.forwardToView(tui.ClearOngoingErrorMsg{})
+	if m.engine == nil {
 		if !m.sawAssistantDelta && msg.message != "" {
 			m.forwardToView(tui.StreamAssistantMsg{Delta: msg.message})
 		}
@@ -366,16 +362,15 @@ func (c uiInputController) handleSpinnerTick() (tea.Model, tea.Cmd) {
 func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
 	m := c.model
 	m.busy = false
+	m.compacting = false
 	m.spinnerFrame = 0
 	c.releaseLockedInjectedInput(true)
 	if msg.err != nil {
 		detailErr := formatSubmissionError(msg.err)
 		m.activity = uiActivityError
 		if m.engine != nil {
-			m.engine.SetOngoingError(detailErr)
 			m.engine.AppendLocalEntry("error", detailErr)
 		} else {
-			m.forwardToView(tui.SetOngoingErrorMsg{Err: errors.New(detailErr)})
 			m.forwardToView(tui.AppendTranscriptMsg{Role: "error", Text: detailErr})
 		}
 		m.logf("compaction.error err=%q", detailErr)
@@ -384,11 +379,6 @@ func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea
 	}
 
 	m.activity = uiActivityIdle
-	if m.engine != nil {
-		m.engine.ClearOngoingError()
-	} else {
-		m.forwardToView(tui.ClearOngoingErrorMsg{})
-	}
 	m.logf("compaction.done")
 	m.syncViewport()
 	return m, nil

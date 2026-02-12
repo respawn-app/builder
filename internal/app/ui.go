@@ -115,6 +115,7 @@ type uiModel struct {
 	inputCursor int // rune index; -1 means "track tail"
 	busy        bool
 	activity    uiActivity
+	compacting  bool
 
 	queued []string
 
@@ -134,11 +135,12 @@ type uiModel struct {
 	sawAssistantDelta bool
 	logger            uiLogger
 
-	activeAsk   *askEvent
-	askQueue    []askEvent
-	askCursor   int
-	askFreeform bool
-	askInput    string
+	activeAsk       *askEvent
+	askQueue        []askEvent
+	askCursor       int
+	askFreeform     bool
+	askFreeformMode askFreeformMode
+	askInput        string
 
 	termWidth  int
 	termHeight int

@@ -23,6 +23,7 @@ type ProviderClientOptions struct {
 	Auth                AuthHeaderProvider
 	HTTPClient          *http.Client
 	OpenAIBaseURL       string
+	Store               bool
 	ContextWindowTokens int
 }
 
@@ -51,6 +52,7 @@ func NewProviderClient(opts ProviderClientOptions) (Client, error) {
 		if opts.ContextWindowTokens > 0 {
 			transport.ContextWindowTokens = opts.ContextWindowTokens
 		}
+		transport.Store = opts.Store
 		return NewOpenAIClient(transport), nil
 	case ProviderAnthropic:
 		return nil, fmt.Errorf("%w: %s (not implemented)", ErrUnsupportedProvider, provider)

@@ -24,7 +24,12 @@ type runtimeWiring struct {
 }
 
 func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools []tools.ID, workspaceRoot string, mgr *auth.Manager, logger *runLogger) (*runtimeWiring, error) {
-	toolRegistry, askBroker, err := buildToolRegistry(workspaceRoot, enabledTools, time.Duration(active.Timeouts.ShellDefaultSeconds)*time.Second)
+	toolRegistry, askBroker, err := buildToolRegistry(
+		workspaceRoot,
+		enabledTools,
+		time.Duration(active.Timeouts.ShellDefaultSeconds)*time.Second,
+		active.AllowNonCwdEdits,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -37,6 +42,7 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 		Auth:                mgr,
 		HTTPClient:          modelHTTPClient,
 		OpenAIBaseURL:       active.OpenAIBaseURL,
+		Store:               active.Store,
 		ContextWindowTokens: active.ModelContextWindow,
 	})
 	if err != nil {
@@ -58,6 +64,7 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 		ContextWindowTokens:           active.ModelContextWindow,
 		EffectiveContextWindowPercent: 95,
 		LocalCompactionCarryoverLimit: 20_000,
+		UseNativeCompaction:           boolRef(active.UseNativeCompaction),
 		OnEvent: func(evt runtime.Event) {
 			logger.Logf("%s", formatRuntimeEvent(evt))
 			eventBridge.Publish(evt)
@@ -74,6 +81,10 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 	}, nil
 }
 
+func boolRef(v bool) *bool {
+	return &v
+}
+
 func configSourceLines(src config.SourceReport) []string {
 	keys := make([]string, 0, len(src.Sources))
 	for k := range src.Sources {
@@ -87,12 +98,18 @@ func configSourceLines(src config.SourceReport) []string {
 	return lines
 }
 
-func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTimeout time.Duration) (*tools.Registry, *askquestion.Broker, error) {
-	patch, err := patchtool.New(workspaceRoot, true)
+func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTimeout time.Duration, allowNonCwdEdits bool) (*tools.Registry, *askquestion.Broker, error) {
+	broker := askquestion.NewBroker()
+	outsideWorkspaceApprover := newPatchOutsideWorkspaceApprover(broker)
+	patch, err := patchtool.New(
+		workspaceRoot,
+		true,
+		patchtool.WithAllowOutsideWorkspace(allowNonCwdEdits),
+		patchtool.WithOutsideWorkspaceApprover(outsideWorkspaceApprover.Approve),
+	)
 	if err != nil {
 		return nil, nil, err
 	}
-	broker := askquestion.NewBroker()
 
 	factories := map[tools.ID]func() tools.Handler{
 		tools.ToolShell: func() tools.Handler {

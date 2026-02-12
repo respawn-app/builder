@@ -62,6 +62,9 @@ func (l uiViewLayout) render() string {
 func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 	m := l.model
 	spin := renderStatusDot(m.theme, m.activity, m.spinnerFrame)
+	if m.compacting {
+		spin = renderCompactionStatus()
+	}
 	segments := []string{
 		spin,
 		style.meta.Render(string(m.view.Mode())),
@@ -201,6 +204,14 @@ func renderStatusDot(theme string, activity uiActivity, frame int) string {
 	}
 }
 
+func renderCompactionStatus() string {
+	amber := lipgloss.CompleteAdaptiveColor{
+		Light: lipgloss.CompleteColor{ANSI: "3", ANSI256: "136", TrueColor: "#9A6700"},
+		Dark:  lipgloss.CompleteColor{ANSI: "3", ANSI256: "180", TrueColor: "#E5C07B"},
+	}
+	return lipgloss.NewStyle().Foreground(amber).Render("⚠ compacting")
+}
+
 func (l uiViewLayout) renderChatPanel(width, height int, style uiStyles) []string {
 	m := l.model
 	if width < 1 {
@@ -233,10 +244,11 @@ func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
 		return []string{padRight("", width)}
 	}
 	contentWidth := width
-	var raw []string
 	if m.activeAsk != nil {
-		raw = splitPlainLines(m.renderAskPrompt())
-	} else {
+		return l.renderAskInputLines(width, style)
+	}
+	var raw []string
+	{
 		text := m.input
 		prefix := "› "
 		if m.inputSubmitLocked {
@@ -286,6 +298,74 @@ func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
 	}
 	for _, line := range wrapped {
 		out = append(out, lineStyle.Render(padANSIRight(line, contentWidth)))
+	}
+	out = append(out, bottom)
+	return out
+}
+
+func (l uiViewLayout) renderAskInputLines(width int, style uiStyles) []string {
+	m := l.model
+	if width < 1 {
+		return []string{padRight("", width)}
+	}
+	contentWidth := width
+	promptLines := m.renderAskPromptLines()
+	if len(promptLines) == 0 {
+		promptLines = []askPromptLine{{Text: "", Kind: askPromptLineKindQuestion}}
+	}
+	wrapped := make([]struct {
+		Text string
+		Line askPromptLine
+	}, 0, len(promptLines)*2)
+	for _, line := range promptLines {
+		parts := wrapLine(line.Text, contentWidth)
+		if len(parts) == 0 {
+			parts = []string{""}
+		}
+		for _, part := range parts {
+			wrapped = append(wrapped, struct {
+				Text string
+				Line askPromptLine
+			}{Text: part, Line: line})
+		}
+	}
+	if len(wrapped) == 0 {
+		wrapped = append(wrapped, struct {
+			Text string
+			Line askPromptLine
+		}{Text: "", Line: askPromptLine{Kind: askPromptLineKindQuestion}})
+	}
+	maxContentLines := l.effectiveHeight() - 4
+	if maxContentLines < 1 {
+		maxContentLines = 1
+	}
+	if len(wrapped) > maxContentLines {
+		wrapped = wrapped[len(wrapped)-maxContentLines:]
+	}
+
+	borderColor := uiPalette(m.theme).primary
+	if m.busy {
+		borderColor = uiPalette(m.theme).muted
+	}
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
+	top := borderStyle.Render(strings.Repeat("─", width))
+	bottom := borderStyle.Render(strings.Repeat("─", width))
+
+	selectedStyle := lipgloss.NewStyle().Foreground(uiPalette(m.theme).primary).Bold(true)
+	out := make([]string, 0, len(wrapped)+2)
+	out = append(out, top)
+	for _, line := range wrapped {
+		padded := padANSIRight(line.Text, contentWidth)
+		rendered := style.input.Render(padded)
+		switch line.Line.Kind {
+		case askPromptLineKindHint:
+			rendered = style.meta.Render(padded)
+		default:
+			if line.Line.Selected {
+				rendered = selectedStyle.Render(padded)
+			}
+		}
+		out = append(out, rendered)
 	}
 	out = append(out, bottom)
 	return out

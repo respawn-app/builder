@@ -22,6 +22,8 @@ const (
 
 	defaultContextWindowTokens = 200_000
 	compactOverflowRetries     = 2
+
+	additionalCompactionInstructionsHeader = "# Additional user instructions or commentary for this task:"
 )
 
 var errRemoteCompactionMissingCheckpoint = errors.New("remote compaction output missing checkpoint item")
@@ -35,7 +37,7 @@ type compactionResult struct {
 	summary           string
 }
 
-func (e *Engine) CompactContext(ctx context.Context) (err error) {
+func (e *Engine) CompactContext(ctx context.Context, args string) (err error) {
 	e.mu.Lock()
 	if e.busy {
 		e.mu.Unlock()
@@ -66,7 +68,7 @@ func (e *Engine) CompactContext(ctx context.Context) (err error) {
 	if err = e.injectAgentsIfNeeded(stepID); err != nil {
 		return err
 	}
-	_, err = e.compactNow(stepCtx, stepID, compactionModeManual)
+	_, err = e.compactNow(stepCtx, stepID, compactionModeManual, args)
 	return err
 }
 
@@ -74,7 +76,7 @@ func (e *Engine) autoCompactIfNeeded(ctx context.Context, stepID string, mode co
 	if mode == compactionModeAuto && !e.shouldAutoCompact() {
 		return nil
 	}
-	_, err := e.compactNow(ctx, stepID, mode)
+	_, err := e.compactNow(ctx, stepID, mode, "")
 	if err != nil && mode == compactionModeAuto {
 		return fmt.Errorf("auto compaction failed: %w", err)
 	}
@@ -129,7 +131,7 @@ func (e *Engine) currentTokenUsage() int {
 	return estimateItemsTokens(e.snapshotItems())
 }
 
-func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionMode) (compactionResult, error) {
+func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionMode, args string) (compactionResult, error) {
 	input := e.snapshotItems()
 	if len(input) == 0 {
 		return compactionResult{}, nil
@@ -148,14 +150,15 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 		return compactionResult{}, err
 	}
 
+	instructions := compactionInstructions(args)
 	var result compactionResult
-	if caps.SupportsResponsesCompact {
-		result, err = e.compactRemote(ctx, input, providerID)
+	if e.useNativeCompaction() && caps.SupportsResponsesCompact {
+		result, err = e.compactRemote(ctx, input, providerID, instructions)
 		if err != nil && errors.Is(err, errRemoteCompactionMissingCheckpoint) {
-			result, err = e.compactLocal(ctx, input, providerID)
+			result, err = e.compactLocal(ctx, input, providerID, instructions)
 		}
 	} else {
-		result, err = e.compactLocal(ctx, input, providerID)
+		result, err = e.compactLocal(ctx, input, providerID, instructions)
 	}
 	if err != nil {
 		_ = e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
@@ -195,7 +198,7 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 	return result, nil
 }
 
-func (e *Engine) compactRemote(ctx context.Context, input []llm.ResponseItem, providerID string) (compactionResult, error) {
+func (e *Engine) compactRemote(ctx context.Context, input []llm.ResponseItem, providerID string, instructions string) (compactionResult, error) {
 	compactor, ok := e.llm.(llm.CompactionClient)
 	if !ok {
 		return compactionResult{}, errors.New("llm client does not support remote compaction")
@@ -209,7 +212,7 @@ func (e *Engine) compactRemote(ctx context.Context, input []llm.ResponseItem, pr
 	}
 	baseRequest := llm.CompactionRequest{
 		Model:        locked.Model,
-		Instructions: prompts.CompactionPrompt,
+		Instructions: instructions,
 		SessionID:    e.store.Meta().SessionID,
 		InputItems:   trimmedInput,
 	}
@@ -299,8 +302,8 @@ func isCompactionContextOverflow(err error) bool {
 	return statusErr.StatusCode == 400
 }
 
-func (e *Engine) compactLocal(ctx context.Context, input []llm.ResponseItem, providerID string) (compactionResult, error) {
-	summary, err := e.localCompactionSummary(ctx, input)
+func (e *Engine) compactLocal(ctx context.Context, input []llm.ResponseItem, providerID string, instructions string) (compactionResult, error) {
+	summary, err := e.localCompactionSummary(ctx, input, instructions)
 	if err != nil {
 		return compactionResult{}, err
 	}
@@ -315,21 +318,22 @@ func (e *Engine) compactLocal(ctx context.Context, input []llm.ResponseItem, pro
 	}, nil
 }
 
-func (e *Engine) localCompactionSummary(ctx context.Context, input []llm.ResponseItem) (string, error) {
+func (e *Engine) localCompactionSummary(ctx context.Context, input []llm.ResponseItem, instructions string) (string, error) {
 	locked, err := e.ensureLocked()
 	if err != nil {
 		return "", err
 	}
-	items := append(llm.CloneResponseItems(input), llm.ResponseItem{
+	window := localCompactionWindow(input)
+	items := append(window, llm.ResponseItem{
 		Type:    llm.ResponseItemTypeMessage,
-		Role:    llm.RoleUser,
-		Content: prompts.CompactionPrompt,
+		Role:    llm.RoleDeveloper,
+		Content: instructions,
 	})
 	messages := llm.MessagesFromItems(items)
 	messages = sanitizeMessagesForLLM(messages)
 	items = sanitizeItemsForLLM(items)
 
-	req, err := llm.RequestFromLockedContractWithItems(locked, prompts.SystemPrompt, messages, items, []llm.Tool{})
+	req, err := llm.RequestFromLockedContractWithItems(locked, prompts.SystemPrompt, messages, items, e.requestTools())
 	if err != nil {
 		return "", err
 	}
@@ -339,11 +343,62 @@ func (e *Engine) localCompactionSummary(ctx context.Context, input []llm.Respons
 	if err != nil {
 		return "", err
 	}
+	if len(resp.ToolCalls) > 0 {
+		return "", errors.New("local compaction summary attempted tool calls")
+	}
 	summary := strings.TrimSpace(resp.Assistant.Content)
 	if summary == "" {
 		return "", errors.New("local compaction summary was empty")
 	}
 	return summary, nil
+}
+
+func localCompactionWindow(input []llm.ResponseItem) []llm.ResponseItem {
+	if len(input) == 0 {
+		return nil
+	}
+	start := 0
+	for i := len(input) - 1; i >= 0; i-- {
+		if isCompactionBoundaryItem(input[i]) {
+			start = i
+			break
+		}
+	}
+	window := llm.CloneResponseItems(input[start:])
+	if start == 0 {
+		return window
+	}
+	canonical := extractCanonicalContext(input)
+	out := make([]llm.ResponseItem, 0, len(canonical)+len(window))
+	out = append(out, canonical...)
+	out = append(out, window...)
+	return out
+}
+
+func isCompactionBoundaryItem(item llm.ResponseItem) bool {
+	if item.Type == llm.ResponseItemTypeCompaction {
+		return true
+	}
+	if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleUser {
+		return strings.HasPrefix(strings.TrimSpace(item.Content), prompts.CompactionSummaryPrefix)
+	}
+	return false
+}
+
+func (e *Engine) useNativeCompaction() bool {
+	if e.cfg.UseNativeCompaction == nil {
+		return true
+	}
+	return *e.cfg.UseNativeCompaction
+}
+
+func compactionInstructions(args string) string {
+	instructions := prompts.CompactionPrompt
+	if strings.TrimSpace(args) == "" {
+		return instructions
+	}
+	instructions = strings.TrimRight(instructions, "\n")
+	return instructions + "\n\n" + additionalCompactionInstructionsHeader + "\n " + strings.TrimSpace(args)
 }
 
 func (e *Engine) providerCapabilities(ctx context.Context) (llm.ProviderCapabilities, error) {

@@ -40,6 +40,15 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.ModelContextWindow != 400_000 {
 		t.Fatalf("default model context window mismatch: %d", cfg.Settings.ModelContextWindow)
 	}
+	if cfg.Settings.Store {
+		t.Fatalf("expected default store=false")
+	}
+	if cfg.Settings.AllowNonCwdEdits {
+		t.Fatalf("expected default allow_non_cwd_edits=false")
+	}
+	if !cfg.Settings.UseNativeCompaction {
+		t.Fatalf("expected default use_native_compaction=true")
+	}
 }
 
 func TestLoadPrecedenceCLIOverEnvOverFile(t *testing.T) {
@@ -171,6 +180,80 @@ func TestLoadOpenAIBaseURLPrecedence(t *testing.T) {
 	}
 }
 
+func TestLoadStorePrecedence(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`store = true`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Settings.Store {
+		t.Fatalf("expected file store=true")
+	}
+	if got := cfg.Source.Sources["store"]; got != "file" {
+		t.Fatalf("expected store source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_STORE", "false")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.Store {
+		t.Fatalf("expected env store=false")
+	}
+	if got := cfg.Source.Sources["store"]; got != "env" {
+		t.Fatalf("expected store source env, got %q", got)
+	}
+}
+
+func TestLoadAllowNonCwdEditsPrecedence(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`allow_non_cwd_edits = true`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Settings.AllowNonCwdEdits {
+		t.Fatalf("expected file allow_non_cwd_edits=true")
+	}
+	if got := cfg.Source.Sources["allow_non_cwd_edits"]; got != "file" {
+		t.Fatalf("expected allow_non_cwd_edits source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_ALLOW_NON_CWD_EDITS", "false")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.AllowNonCwdEdits {
+		t.Fatalf("expected env allow_non_cwd_edits=false")
+	}
+	if got := cfg.Source.Sources["allow_non_cwd_edits"]; got != "env" {
+		t.Fatalf("expected allow_non_cwd_edits source env, got %q", got)
+	}
+}
+
 func TestLoadContextCompactionThresholdPrecedence(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -194,6 +277,43 @@ func TestLoadContextCompactionThresholdPrecedence(t *testing.T) {
 	}
 	if got := cfg.Source.Sources["context_compaction_threshold_tokens"]; got != "env" {
 		t.Fatalf("expected threshold source env, got %q", got)
+	}
+}
+
+func TestLoadUseNativeCompactionPrecedence(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("use_native_compaction = false\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.UseNativeCompaction {
+		t.Fatalf("expected file override use_native_compaction=false")
+	}
+	if got := cfg.Source.Sources["use_native_compaction"]; got != "file" {
+		t.Fatalf("expected use_native_compaction source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_USE_NATIVE_COMPACTION", "true")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if !cfg.Settings.UseNativeCompaction {
+		t.Fatalf("expected env override use_native_compaction=true")
+	}
+	if got := cfg.Source.Sources["use_native_compaction"]; got != "env" {
+		t.Fatalf("expected use_native_compaction source env, got %q", got)
 	}
 }
 
