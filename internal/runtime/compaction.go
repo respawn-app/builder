@@ -2,8 +2,10 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -21,6 +23,8 @@ const (
 	defaultContextWindowTokens = 200_000
 	compactOverflowRetries     = 2
 )
+
+var errRemoteCompactionMissingCheckpoint = errors.New("remote compaction output missing checkpoint item")
 
 type compactionResult struct {
 	engine            string
@@ -147,6 +151,9 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 	var result compactionResult
 	if caps.SupportsResponsesCompact {
 		result, err = e.compactRemote(ctx, input, providerID)
+		if err != nil && errors.Is(err, errRemoteCompactionMissingCheckpoint) {
+			result, err = e.compactLocal(ctx, input, providerID)
+		}
 	} else {
 		result, err = e.compactLocal(ctx, input, providerID)
 	}
@@ -193,6 +200,7 @@ func (e *Engine) compactRemote(ctx context.Context, input []llm.ResponseItem, pr
 	if !ok {
 		return compactionResult{}, errors.New("llm client does not support remote compaction")
 	}
+	canonicalContext := extractCanonicalContext(input)
 	trimmedInput, trimmedCount := trimCompactionInput(input, e.effectiveContextTokenLimit())
 
 	locked, err := e.ensureLocked()
@@ -206,19 +214,22 @@ func (e *Engine) compactRemote(ctx context.Context, input []llm.ResponseItem, pr
 		InputItems:   trimmedInput,
 	}
 
-	resp, adjustedInput, extraTrimmed, err := e.compactWithContextTrimRetry(ctx, compactor, baseRequest)
+	resp, _, extraTrimmed, err := e.compactWithContextTrimRetry(ctx, compactor, baseRequest)
 	if err != nil {
 		return compactionResult{}, err
 	}
 	trimmedCount += extraTrimmed
 
-	sanitized, err := sanitizeRemoteCompactionOutput(resp.OutputItems, adjustedInput)
+	sanitized, err := sanitizeRemoteCompactionOutput(resp.OutputItems)
 	if err != nil {
 		return compactionResult{}, err
 	}
+	replacement := make([]llm.ResponseItem, 0, len(canonicalContext)+len(sanitized))
+	replacement = append(replacement, canonicalContext...)
+	replacement = append(replacement, sanitized...)
 	return compactionResult{
 		engine:            "remote",
-		items:             sanitized,
+		items:             replacement,
 		usage:             resp.Usage,
 		trimmedItemsCount: trimmedCount + resp.TrimmedItemsCount,
 		provider:          providerID,
@@ -488,11 +499,12 @@ func isCompactionTrimEligible(item llm.ResponseItem) bool {
 	return item.Role != llm.RoleUser
 }
 
-func sanitizeRemoteCompactionOutput(output, existing []llm.ResponseItem) ([]llm.ResponseItem, error) {
-	contextItems := extractCanonicalContext(existing)
+func sanitizeRemoteCompactionOutput(output []llm.ResponseItem) ([]llm.ResponseItem, error) {
 	filtered := make([]llm.ResponseItem, 0, len(output))
-	hasCompaction := false
+	hasCheckpoint := false
+	typeCounts := make(map[string]int)
 	for _, item := range output {
+		typeCounts[outputItemTypeLabel(item)]++
 		switch item.Type {
 		case llm.ResponseItemTypeMessage:
 			if item.Role == llm.RoleUser && strings.TrimSpace(item.Content) != "" {
@@ -503,13 +515,74 @@ func sanitizeRemoteCompactionOutput(output, existing []llm.ResponseItem) ([]llm.
 				continue
 			}
 			filtered = append(filtered, item)
-			hasCompaction = true
+			hasCheckpoint = true
+		case llm.ResponseItemTypeReasoning:
+			if strings.TrimSpace(item.EncryptedContent) == "" {
+				continue
+			}
+			filtered = append(filtered, item)
+			hasCheckpoint = true
+		case llm.ResponseItemTypeOther:
+			if !itemHasEncryptedCheckpoint(item) {
+				continue
+			}
+			filtered = append(filtered, item)
+			hasCheckpoint = true
 		}
 	}
-	if !hasCompaction {
-		return nil, errors.New("remote compaction output missing compaction item")
+	if !hasCheckpoint {
+		return nil, fmt.Errorf("%w (types=%s)", errRemoteCompactionMissingCheckpoint, formatOutputTypeCounts(typeCounts))
 	}
-	return append(contextItems, filtered...), nil
+	return filtered, nil
+}
+
+func outputItemTypeLabel(item llm.ResponseItem) string {
+	if v := strings.TrimSpace(string(item.Type)); v != "" {
+		return v
+	}
+	if len(item.Raw) > 0 {
+		var decoded struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(item.Raw, &decoded); err == nil {
+			if v := strings.TrimSpace(decoded.Type); v != "" {
+				return v
+			}
+		}
+	}
+	return "unknown"
+}
+
+func itemHasEncryptedCheckpoint(item llm.ResponseItem) bool {
+	if strings.TrimSpace(item.EncryptedContent) != "" {
+		return true
+	}
+	if len(item.Raw) == 0 || !json.Valid(item.Raw) {
+		return false
+	}
+	var decoded struct {
+		EncryptedContent string `json:"encrypted_content"`
+	}
+	if err := json.Unmarshal(item.Raw, &decoded); err != nil {
+		return false
+	}
+	return strings.TrimSpace(decoded.EncryptedContent) != ""
+}
+
+func formatOutputTypeCounts(counts map[string]int) string {
+	if len(counts) == 0 {
+		return "none"
+	}
+	keys := make([]string, 0, len(counts))
+	for key := range counts {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s:%d", key, counts[key]))
+	}
+	return strings.Join(parts, ",")
 }
 
 func extractCanonicalContext(items []llm.ResponseItem) []llm.ResponseItem {

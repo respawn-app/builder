@@ -83,12 +83,12 @@ func TestChatStoreSnapshotProjectsConversation(t *testing.T) {
 	}
 }
 
-func TestFormatToolOutputStripsLineNumbers(t *testing.T) {
+func TestFormatToolOutputPreservesNumberedPrefixes(t *testing.T) {
 	out := formatToolOutput(json.RawMessage(`{"output":"  1\talpha\n  2\tbeta\n  3\tgamma","exit_code":0}`))
-	if strings.Contains(out, "1\talpha") || strings.Contains(out, "2\tbeta") || strings.Contains(out, "3\tgamma") {
-		t.Fatalf("expected numbered prefixes removed, got %q", out)
+	if !strings.Contains(out, "1\talpha") || !strings.Contains(out, "2\tbeta") || !strings.Contains(out, "3\tgamma") {
+		t.Fatalf("expected numbered prefixes preserved, got %q", out)
 	}
-	if out != "alpha\nbeta\ngamma" {
+	if out != "1\talpha\n  2\tbeta\n  3\tgamma" {
 		t.Fatalf("unexpected normalized output: %q", out)
 	}
 }
@@ -198,5 +198,114 @@ func TestChatStoreHidesSyntheticCompactionSummaryMessage(t *testing.T) {
 	}
 	if snap.Entries[0].Role != "user" || snap.Entries[0].Text != "real user input" {
 		t.Fatalf("unexpected visible entry: %+v", snap.Entries[0])
+	}
+}
+
+func TestChatStoreSnapshotPlacesLocalEntriesAtInsertionPoint(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "first"})
+	s.appendLocalEntry("error", "mid-error")
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "second"})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if snap.Entries[0].Role != "user" || snap.Entries[0].Text != "first" {
+		t.Fatalf("unexpected first entry: %+v", snap.Entries[0])
+	}
+	if snap.Entries[1].Role != "error" || snap.Entries[1].Text != "mid-error" {
+		t.Fatalf("expected local entry in middle, got %+v", snap.Entries[1])
+	}
+	if snap.Entries[2].Role != "assistant" || snap.Entries[2].Text != "second" {
+		t.Fatalf("unexpected third entry: %+v", snap.Entries[2])
+	}
+}
+
+func TestChatStoreSnapshotKeepsLocalEntryOrderingAfterHistoryReplace(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "a"})
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "b"})
+	s.appendLocalEntry("error", "before replace")
+
+	replacement := llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "after replace"}})
+	s.replaceHistory(replacement)
+	s.appendLocalEntry("compaction_notice", "after replace notice")
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 4 {
+		t.Fatalf("expected 4 entries, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if snap.Entries[0].Role != "user" || snap.Entries[0].Text != "a" {
+		t.Fatalf("unexpected first entry after replace: %+v", snap.Entries[0])
+	}
+	if snap.Entries[1].Role != "assistant" || snap.Entries[1].Text != "b" {
+		t.Fatalf("unexpected second entry after replace: %+v", snap.Entries[1])
+	}
+	if snap.Entries[2].Role != "error" || snap.Entries[2].Text != "before replace" {
+		t.Fatalf("expected old local entry after visible history, got %+v", snap.Entries[2])
+	}
+	if snap.Entries[3].Role != "compaction_notice" || snap.Entries[3].Text != "after replace notice" {
+		t.Fatalf("expected new local entry after old local entry, got %+v", snap.Entries[3])
+	}
+}
+
+func TestChatStoreProviderHistoryStartsAtLastCompactionCheckpoint(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "before-1"})
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "before-2"})
+
+	replacement := []llm.ResponseItem{
+		{Type: llm.ResponseItemTypeMessage, Role: llm.RoleDeveloper, Content: "ctx"},
+		{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "compact-summary"},
+	}
+	s.replaceHistory(replacement)
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "after"})
+
+	items := s.snapshotItems()
+	if len(items) != 3 {
+		t.Fatalf("expected 3 provider items, got %d (%+v)", len(items), items)
+	}
+	if items[0].Role != llm.RoleDeveloper || items[0].Content != "ctx" {
+		t.Fatalf("unexpected replacement item[0]: %+v", items[0])
+	}
+	if items[1].Role != llm.RoleUser || items[1].Content != "compact-summary" {
+		t.Fatalf("unexpected replacement item[1]: %+v", items[1])
+	}
+	if items[2].Role != llm.RoleUser || items[2].Content != "after" {
+		t.Fatalf("expected post-compaction tail in provider history, got %+v", items[2])
+	}
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 3 {
+		t.Fatalf("expected full visible transcript to remain intact, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if snap.Entries[0].Role != "user" || snap.Entries[0].Text != "before-1" {
+		t.Fatalf("unexpected visible entry[0]: %+v", snap.Entries[0])
+	}
+	if snap.Entries[1].Role != "assistant" || snap.Entries[1].Text != "before-2" {
+		t.Fatalf("unexpected visible entry[1]: %+v", snap.Entries[1])
+	}
+	if snap.Entries[2].Role != "user" || snap.Entries[2].Text != "after" {
+		t.Fatalf("unexpected visible entry[2]: %+v", snap.Entries[2])
+	}
+}
+
+func TestChatStoreProviderHistoryUsesMostRecentCompactionCheckpoint(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "before"})
+
+	s.replaceHistory([]llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "summary-1"}})
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "between"})
+
+	s.replaceHistory([]llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "summary-2"}})
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "after"})
+
+	items := s.snapshotItems()
+	if len(items) != 2 {
+		t.Fatalf("expected 2 provider items, got %d (%+v)", len(items), items)
+	}
+	if items[0].Content != "summary-2" || items[1].Content != "after" {
+		t.Fatalf("expected latest replacement + tail, got %+v", items)
 	}
 }

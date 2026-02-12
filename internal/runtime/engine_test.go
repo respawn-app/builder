@@ -1223,6 +1223,194 @@ func TestAutoCompactionRemoteReplacesHistoryAndCarriesCompactionItem(t *testing.
 	}
 }
 
+func TestAutoCompactionRemoteCarriesCanonicalContextWithoutDuplication(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, ".builder")
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatalf("create global dir: %v", err)
+	}
+	globalPath := filepath.Join(globalDir, "AGENTS.md")
+	if err := os.WriteFile(globalPath, []byte("global instructions"), 0o644); err != nil {
+		t.Fatalf("write global AGENTS.md: %v", err)
+	}
+
+	workspace := t.TempDir()
+	workspacePath := filepath.Join(workspace, "AGENTS.md")
+	if err := os.WriteFile(workspacePath, []byte("workspace instructions"), 0o644); err != nil {
+		t.Fatalf("write workspace AGENTS.md: %v", err)
+	}
+
+	storeRoot := t.TempDir()
+	store, err := session.Create(storeRoot, "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		responses: []llm.Response{
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+				},
+				Usage: llm.Usage{InputTokens: 190000, OutputTokens: 2000, WindowTokens: 200000},
+			},
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+				Usage:     llm.Usage{InputTokens: 2000, OutputTokens: 1000, WindowTokens: 200000},
+			},
+		},
+		compactionResponses: []llm.CompactionResponse{
+			{
+				OutputItems: []llm.ResponseItem{
+					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "run tools"},
+					{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+				},
+				Usage: llm.Usage{InputTokens: 12000, OutputTokens: 1000, WindowTokens: 200000},
+			},
+		},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "run tools")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if len(client.calls) < 2 {
+		t.Fatalf("expected second model call after compaction, got %d calls", len(client.calls))
+	}
+
+	post := client.calls[1]
+	globalCount := 0
+	workspaceCount := 0
+	envCount := 0
+	for _, item := range post.Items {
+		if item.Type != llm.ResponseItemTypeMessage || item.Role != llm.RoleDeveloper {
+			continue
+		}
+		if strings.Contains(item.Content, "source: "+globalPath) {
+			globalCount++
+		}
+		if strings.Contains(item.Content, "source: "+workspacePath) {
+			workspaceCount++
+		}
+		if strings.Contains(item.Content, environmentInjectedHeader) {
+			envCount++
+		}
+	}
+	if globalCount != 1 {
+		t.Fatalf("expected exactly one global AGENTS context item after compaction, got %d", globalCount)
+	}
+	if workspaceCount != 1 {
+		t.Fatalf("expected exactly one workspace AGENTS context item after compaction, got %d", workspaceCount)
+	}
+	if envCount != 1 {
+		t.Fatalf("expected exactly one environment context item after compaction, got %d", envCount)
+	}
+}
+
+func TestSanitizeRemoteCompactionOutputAcceptsEncryptedReasoningCheckpoint(t *testing.T) {
+	output := []llm.ResponseItem{
+		{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "u1"},
+		{Type: llm.ResponseItemTypeReasoning, ID: "rs_1", EncryptedContent: "enc_reason"},
+	}
+
+	replacement, err := sanitizeRemoteCompactionOutput(output)
+	if err != nil {
+		t.Fatalf("sanitize remote compaction output: %v", err)
+	}
+
+	foundReasoning := false
+	for _, item := range replacement {
+		if item.Type == llm.ResponseItemTypeReasoning && item.EncryptedContent == "enc_reason" {
+			foundReasoning = true
+			break
+		}
+	}
+	if !foundReasoning {
+		t.Fatalf("expected encrypted reasoning checkpoint in replacement history, got %+v", replacement)
+	}
+}
+
+func TestRemoteCompactionMissingCheckpointFallsBackToLocal(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		responses: []llm.Response{
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+				},
+				Usage: llm.Usage{InputTokens: 190000, OutputTokens: 2000, WindowTokens: 200000},
+			},
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "local summary"},
+				Usage:     llm.Usage{InputTokens: 8000, OutputTokens: 1000, WindowTokens: 200000},
+			},
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+				Usage:     llm.Usage{InputTokens: 2000, OutputTokens: 500, WindowTokens: 200000},
+			},
+		},
+		compactionResponses: []llm.CompactionResponse{
+			{
+				OutputItems: []llm.ResponseItem{
+					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "run tools"},
+				},
+				Usage: llm.Usage{InputTokens: 12000, OutputTokens: 1000, WindowTokens: 200000},
+			},
+		},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "run tools")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if len(client.compactionCalls) != 1 {
+		t.Fatalf("expected one remote compaction call, got %d", len(client.compactionCalls))
+	}
+	if len(client.calls) < 3 {
+		t.Fatalf("expected first turn + local summary + post-compaction turn, got %d calls", len(client.calls))
+	}
+
+	foundLocalSummaryCarryover := false
+	for _, req := range client.calls {
+		for _, item := range req.Items {
+			if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleUser && strings.Contains(item.Content, prompts.CompactionSummaryPrefix) {
+				foundLocalSummaryCarryover = true
+				break
+			}
+		}
+		if foundLocalSummaryCarryover {
+			break
+		}
+	}
+	if !foundLocalSummaryCarryover {
+		t.Fatalf("expected local summary carryover item in model requests, got %+v", client.calls)
+	}
+}
+
 func TestAutoCompactionRetries400ByTrimmingOldestEligibleItems(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
