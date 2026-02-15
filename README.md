@@ -10,6 +10,7 @@ The project is currently a PoC/MVP which is already usable, but not polished eno
 - [x] Compact UI mode for ongoing work, and detailed mode to review thinking, tool calls, prompts, summaries.
 - [x] Queueing messages, steering the model (Tab to queue, Enter to steer)
 - [x] Asking user questions via a tool
+- [x] Terminal bell notifications for asks/approvals and tool-heavy turn completion
 - [x] Config file with model selection, tool config, compact threshold, timeouts.
 - [x] Local and global `AGENTS.md` support
 - [x] Session and history persistence and resumption

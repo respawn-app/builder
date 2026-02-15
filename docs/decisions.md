@@ -528,3 +528,8 @@ This file records architecture and product decisions for the minimal terminal co
    - File commands are merged into one namespace with precedence: local over global, and `prompts` over `commands`.
    - Command id format is `prompt:<filename-without-extension>`.
    - Triggering a file command injects the file content verbatim as a `user` message submission.
+
+152. **Terminal bell notifications use runtime/app hooks with strict event policy.**
+   - Ring when a new `ask_question` request is shown to the user (including approval asks).
+   - Ring on turn end only when that turn executed at least two tool calls.
+   - Turn-end ringing is keyed by runtime step id and `tool_call_started`/`assistant_message` events.
