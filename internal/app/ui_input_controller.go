@@ -20,6 +20,7 @@ type uiInputController struct {
 
 var spinnerFrames = []string{"|", "/", "-", "\\"}
 var spinnerTickInterval = 360 * time.Millisecond
+var errSubmissionInterrupted = errors.New("interrupted")
 
 func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := c.model
@@ -74,6 +75,8 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.engine != nil {
 				_ = m.engine.Interrupt()
 			}
+			c.releaseLockedInjectedInput(true)
+			c.restoreQueuedMessagesIntoInput()
 			m.busy = false
 			m.activity = uiActivityInterrupted
 			return m, nil
@@ -257,7 +260,7 @@ func (c uiInputController) submitCmd(text string) tea.Cmd {
 		msg, err := m.engine.SubmitUserMessage(context.Background(), text)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				return submitDoneMsg{err: errors.New("interrupted")}
+				return submitDoneMsg{err: errSubmissionInterrupted}
 			}
 			return submitDoneMsg{err: err}
 		}
@@ -292,6 +295,13 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 	m.spinnerFrame = 0
 	if msg.err != nil {
 		c.unlockInputAfterSubmissionError()
+		if errors.Is(msg.err, errSubmissionInterrupted) {
+			c.restoreQueuedMessagesIntoInput()
+			m.activity = uiActivityInterrupted
+			m.logf("step.interrupted")
+			m.syncViewport()
+			return m, nil
+		}
 		detailErr := formatSubmissionError(msg.err)
 		m.activity = uiActivityError
 		if m.engine != nil {
@@ -323,6 +333,22 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 	}
 	m.syncViewport()
 	return m, nil
+}
+
+func (c uiInputController) restoreQueuedMessagesIntoInput() {
+	m := c.model
+	if len(m.queued) == 0 {
+		return
+	}
+	joined := strings.Join(m.queued, "\n\n")
+	m.queued = nil
+	if strings.TrimSpace(m.input) == "" {
+		m.input = joined
+	} else {
+		m.input = strings.TrimRight(m.input, "\n") + "\n\n" + joined
+	}
+	m.inputCursor = -1
+	m.refreshSlashCommandFilterFromInput()
 }
 
 func (c uiInputController) unlockInputAfterSubmissionError() {

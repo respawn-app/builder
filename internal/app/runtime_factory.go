@@ -24,6 +24,8 @@ type runtimeWiring struct {
 }
 
 func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools []tools.ID, workspaceRoot string, mgr *auth.Manager, logger *runLogger) (*runtimeWiring, error) {
+	bells := newBellHooks(defaultTerminalBellRinger())
+
 	toolRegistry, askBroker, err := buildToolRegistry(
 		workspaceRoot,
 		enabledTools,
@@ -34,7 +36,10 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 		return nil, err
 	}
 	askBridge := newAskBridge()
-	askBroker.SetAskHandler(askBridge.Handle)
+	askBroker.SetAskHandler(func(req askquestion.Request) (string, error) {
+		bells.OnAsk(req)
+		return askBridge.Handle(req)
+	})
 
 	modelHTTPClient := &http.Client{Timeout: time.Duration(active.Timeouts.ModelRequestSeconds) * time.Second}
 	client, err := llm.NewProviderClient(llm.ProviderClientOptions{
@@ -67,6 +72,7 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 		UseNativeCompaction:           boolRef(active.UseNativeCompaction),
 		OnEvent: func(evt runtime.Event) {
 			logger.Logf("%s", formatRuntimeEvent(evt))
+			bells.OnRuntimeEvent(evt)
 			eventBridge.Publish(evt)
 		},
 	})

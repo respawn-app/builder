@@ -744,6 +744,81 @@ func TestBusyTabQueuesPostTurnSubmissionAndKeepsInputUnlocked(t *testing.T) {
 	}
 }
 
+func TestCtrlCWhileBusyRestoresQueuedMessagesIntoInput(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.queued = []string{"first queued", "second queued", "third queued"}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated := next.(*uiModel)
+
+	if updated.busy {
+		t.Fatal("expected busy=false after ctrl+c interrupt")
+	}
+	if updated.activity != uiActivityInterrupted {
+		t.Fatalf("expected interrupted activity, got %v", updated.activity)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued list to be restored into input and cleared, got %d", len(updated.queued))
+	}
+	if updated.input != "first queued\n\nsecond queued\n\nthird queued" {
+		t.Fatalf("unexpected restored input text: %q", updated.input)
+	}
+	if updated.inputCursor != -1 {
+		t.Fatalf("expected cursor moved to tail after restore, got %d", updated.inputCursor)
+	}
+}
+
+func TestCtrlCWhileBusyUnlocksSubmitLockedInput(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.inputSubmitLocked = true
+	m.lockedInjectText = "keep this message"
+	m.pendingInjected = []string{"keep this message", "another"}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated := next.(*uiModel)
+
+	if updated.inputSubmitLocked {
+		t.Fatal("expected ctrl+c to unlock input")
+	}
+	if updated.lockedInjectText != "" {
+		t.Fatalf("expected lockedInjectText cleared, got %q", updated.lockedInjectText)
+	}
+	if len(updated.pendingInjected) != 1 || updated.pendingInjected[0] != "another" {
+		t.Fatalf("expected locked pending injection removed, got %+v", updated.pendingInjected)
+	}
+}
+
+func TestInterruptedSubmitDoneRestoresQueueIntoInputAndDoesNotAutoDrain(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.queued = []string{"first", "second"}
+
+	next, cmd := m.Update(submitDoneMsg{err: errSubmissionInterrupted})
+	updated := next.(*uiModel)
+
+	if cmd != nil {
+		t.Fatal("did not expect follow-up submission command after interruption")
+	}
+	if updated.busy {
+		t.Fatal("expected busy=false after interrupted submit completion")
+	}
+	if updated.activity != uiActivityInterrupted {
+		t.Fatalf("expected interrupted activity, got %v", updated.activity)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queue restored into input and cleared, got %d", len(updated.queued))
+	}
+	if updated.input != "first\n\nsecond" {
+		t.Fatalf("unexpected restored input text: %q", updated.input)
+	}
+	plain := stripANSIAndTrimRight(updated.View())
+	if strings.Contains(strings.ToLower(plain), "interrupted") {
+		t.Fatalf("did not expect interruption to be rendered as error transcript, got %q", plain)
+	}
+}
+
 func TestCompactDoneUnlocksInputAndClearsLockedPendingState(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.busy = true
