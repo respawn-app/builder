@@ -12,6 +12,7 @@ const (
 	ToolShell       ID = "shell"
 	ToolPatch       ID = "patch"
 	ToolAskQuestion ID = "ask_question"
+	ToolWebSearch   ID = "web_search"
 )
 
 func ParseID(v string) (ID, bool) {

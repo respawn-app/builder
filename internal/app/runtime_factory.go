@@ -64,6 +64,7 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 		Temperature:                   1,
 		MaxTokens:                     0,
 		ThinkingLevel:                 active.ThinkingLevel,
+		WebSearchMode:                 active.WebSearch,
 		EnabledTools:                  enabledTools,
 		AutoCompactTokenLimit:         active.ContextCompactionThresholdTokens,
 		ContextWindowTokens:           active.ModelContextWindow,
@@ -137,6 +138,9 @@ func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTim
 		if !enabledSet[id] {
 			continue
 		}
+		if !isLocalRuntimeTool(id) {
+			continue
+		}
 		factory, ok := factories[id]
 		if !ok {
 			return nil, nil, fmt.Errorf("missing runtime tool factory for %q", id)
@@ -144,4 +148,13 @@ func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTim
 		handlers = append(handlers, factory())
 	}
 	return tools.NewRegistry(handlers...), broker, nil
+}
+
+func isLocalRuntimeTool(id tools.ID) bool {
+	switch id {
+	case tools.ToolShell, tools.ToolPatch, tools.ToolAskQuestion:
+		return true
+	default:
+		return false
+	}
 }

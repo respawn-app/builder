@@ -28,6 +28,9 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.Model != defaultModel {
 		t.Fatalf("default model mismatch: %q", cfg.Settings.Model)
 	}
+	if cfg.Settings.WebSearch != "off" {
+		t.Fatalf("default web_search mismatch: %q", cfg.Settings.WebSearch)
+	}
 	if got := cfg.PersistenceRoot; got != filepath.Join(home, ".builder") {
 		t.Fatalf("default persistence root mismatch: %q", got)
 	}
@@ -48,6 +51,48 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	}
 	if !cfg.Settings.UseNativeCompaction {
 		t.Fatalf("expected default use_native_compaction=true")
+	}
+}
+
+func TestLoadWebSearchPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("web_search = \"native\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.WebSearch != "native" {
+		t.Fatalf("expected file web_search=native, got %q", cfg.Settings.WebSearch)
+	}
+	if got := cfg.Source.Sources["web_search"]; got != "file" {
+		t.Fatalf("expected web_search source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_WEB_SEARCH", "off")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.WebSearch != "off" {
+		t.Fatalf("expected env web_search=off, got %q", cfg.Settings.WebSearch)
+	}
+	if got := cfg.Source.Sources["web_search"]; got != "env" {
+		t.Fatalf("expected web_search source env, got %q", got)
+	}
+
+	t.Setenv("BUILDER_WEB_SEARCH", "custom")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected web_search=custom validation error")
 	}
 }
 

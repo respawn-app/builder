@@ -26,6 +26,7 @@ func TestParseID(t *testing.T) {
 		{in: "bash", want: ToolShell, ok: true},
 		{in: "patch", want: ToolPatch, ok: true},
 		{in: "ask_question", want: ToolAskQuestion, ok: true},
+		{in: "web_search", want: ToolWebSearch, ok: true},
 		{in: "unknown", ok: false},
 	}
 	for _, tt := range tests {

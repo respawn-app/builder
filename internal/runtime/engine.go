@@ -35,6 +35,7 @@ type Config struct {
 	Temperature                   float64
 	MaxTokens                     int
 	ThinkingLevel                 string
+	WebSearchMode                 string
 	EnabledTools                  []tools.ID
 	AutoCompactTokenLimit         int
 	ContextWindowTokens           int
@@ -227,7 +228,7 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 			return llm.Message{}, err
 		}
 
-		req, err := e.buildRequest(stepID, true)
+		req, err := e.buildRequest(ctx, stepID, true)
 		if err != nil {
 			return llm.Message{}, err
 		}
@@ -251,9 +252,17 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 		}
 		e.setLastUsage(resp.Usage)
 
+		localToolCalls := append([]llm.ToolCall(nil), resp.ToolCalls...)
+		hostedToolExecutions := hostedToolExecutionsFromOutputItems(resp.OutputItems)
+
 		assistantMsg := resp.Assistant
-		if len(resp.ToolCalls) > 0 {
-			assistantMsg.ToolCalls = append([]llm.ToolCall(nil), resp.ToolCalls...)
+		if len(localToolCalls) > 0 {
+			assistantMsg.ToolCalls = append([]llm.ToolCall(nil), localToolCalls...)
+		}
+		if len(hostedToolExecutions) > 0 {
+			for _, hosted := range hostedToolExecutions {
+				assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, hosted.Call)
+			}
 		}
 		if len(resp.ReasoningItems) > 0 && len(assistantMsg.ReasoningItems) == 0 {
 			assistantMsg.ReasoningItems = append([]llm.ReasoningItem(nil), resp.ReasoningItems...)
@@ -265,7 +274,22 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 			return llm.Message{}, err
 		}
 
-		if len(resp.ToolCalls) == 0 {
+		for _, hosted := range hostedToolExecutions {
+			if err := e.persistToolCompletion(stepID, hosted.Result); err != nil {
+				return llm.Message{}, err
+			}
+			msg := llm.Message{
+				Role:       llm.RoleTool,
+				Content:    string(hosted.Result.Output),
+				ToolCallID: hosted.Result.CallID,
+				Name:       string(hosted.Result.Name),
+			}
+			if err := e.appendMessage(stepID, msg); err != nil {
+				return llm.Message{}, err
+			}
+		}
+
+		if len(localToolCalls) == 0 {
 			flushed, err := e.flushPendingUserInjections(stepID)
 			if err != nil {
 				return llm.Message{}, err
@@ -273,11 +297,14 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 			if flushed > 0 {
 				continue
 			}
+			if len(hostedToolExecutions) > 0 {
+				continue
+			}
 			e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: assistantMsg})
 			return assistantMsg, nil
 		}
 
-		results, err := e.executeToolCalls(ctx, stepID, resp.ToolCalls)
+		results, err := e.executeToolCalls(ctx, stepID, localToolCalls)
 		if err != nil {
 			return llm.Message{}, err
 		}
@@ -303,7 +330,7 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 	}
 }
 
-func (e *Engine) buildRequest(_ string, allowTools bool) (llm.Request, error) {
+func (e *Engine) buildRequest(ctx context.Context, _ string, allowTools bool) (llm.Request, error) {
 	locked, err := e.ensureLocked()
 	if err != nil {
 		return llm.Request{}, err
@@ -325,8 +352,141 @@ func (e *Engine) buildRequest(_ string, allowTools bool) (llm.Request, error) {
 	if err != nil {
 		return llm.Request{}, err
 	}
+	if allowTools {
+		nativeWebSearch, nativeErr := e.enableNativeWebSearch(ctx)
+		if nativeErr != nil {
+			return llm.Request{}, nativeErr
+		}
+		req.EnableNativeWebSearch = nativeWebSearch
+	}
 	req.SessionID = e.store.Meta().SessionID
 	return req, nil
+}
+
+func (e *Engine) enableNativeWebSearch(ctx context.Context) (bool, error) {
+	if !hasEnabledTool(e.cfg.EnabledTools, tools.ToolWebSearch) {
+		return false, nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(e.cfg.WebSearchMode), "native") {
+		return false, nil
+	}
+	provider, ok := e.llm.(llm.ProviderCapabilitiesClient)
+	if !ok {
+		return false, nil
+	}
+	caps, err := provider.ProviderCapabilities(ctx)
+	if err != nil {
+		return false, fmt.Errorf("resolve provider capabilities for native web search: %w", err)
+	}
+	return caps.SupportsNativeWebSearch, nil
+}
+
+func hasEnabledTool(ids []tools.ID, toolID tools.ID) bool {
+	for _, id := range ids {
+		if id == toolID {
+			return true
+		}
+	}
+	return false
+}
+
+type hostedToolExecution struct {
+	Call   llm.ToolCall
+	Result tools.Result
+}
+
+func hostedToolExecutionsFromOutputItems(items []llm.ResponseItem) []hostedToolExecution {
+	out := make([]hostedToolExecution, 0, len(items))
+	for _, item := range items {
+		execution, ok := hostedWebSearchExecution(item)
+		if !ok {
+			continue
+		}
+		out = append(out, execution)
+	}
+	return out
+}
+
+func hostedWebSearchExecution(item llm.ResponseItem) (hostedToolExecution, bool) {
+	raw := item.Raw
+	if len(raw) == 0 || !json.Valid(raw) {
+		return hostedToolExecution{}, false
+	}
+	var payload struct {
+		Type   string `json:"type"`
+		ID     string `json:"id"`
+		Status string `json:"status"`
+		Action struct {
+			Type    string `json:"type"`
+			Query   string `json:"query"`
+			URL     string `json:"url"`
+			Pattern string `json:"pattern"`
+		} `json:"action"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return hostedToolExecution{}, false
+	}
+	if strings.TrimSpace(payload.Type) != "web_search_call" {
+		return hostedToolExecution{}, false
+	}
+	callID := strings.TrimSpace(payload.ID)
+	if callID == "" {
+		callID = strings.TrimSpace(item.ID)
+	}
+	if callID == "" {
+		callID = strings.TrimSpace(item.CallID)
+	}
+	if callID == "" {
+		return hostedToolExecution{}, false
+	}
+	input := map[string]string{}
+	actionType := strings.TrimSpace(payload.Action.Type)
+	if actionType != "" {
+		input["action"] = actionType
+	}
+	query := strings.TrimSpace(payload.Action.Query)
+	if url := strings.TrimSpace(payload.Action.URL); url != "" {
+		if query == "" {
+			query = url
+		}
+		input["url"] = url
+	}
+	if pattern := strings.TrimSpace(payload.Action.Pattern); pattern != "" {
+		if query == "" {
+			query = pattern
+		}
+		input["pattern"] = pattern
+	}
+	if query == "" {
+		if actionType != "" {
+			query = actionType
+		} else {
+			query = "web search"
+		}
+	}
+	input["query"] = query
+	inputRaw, err := json.Marshal(input)
+	if err != nil {
+		return hostedToolExecution{}, false
+	}
+	output := append(json.RawMessage(nil), raw...)
+	if !json.Valid(output) {
+		output = mustJSON(map[string]any{"raw": string(raw)})
+	}
+	isError := strings.EqualFold(strings.TrimSpace(payload.Status), "failed")
+	return hostedToolExecution{
+		Call: llm.ToolCall{
+			ID:    callID,
+			Name:  string(tools.ToolWebSearch),
+			Input: inputRaw,
+		},
+		Result: tools.Result{
+			CallID:  callID,
+			Name:    tools.ToolWebSearch,
+			Output:  output,
+			IsError: isError,
+		},
+	}, true
 }
 
 func (e *Engine) requestTools() []llm.Tool {

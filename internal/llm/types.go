@@ -254,6 +254,7 @@ type Request struct {
 	Temperature     float64        `json:"temperature"`
 	MaxTokens       int            `json:"max_tokens"`
 	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
+	EnableNativeWebSearch bool     `json:"enable_native_web_search,omitempty"`
 	SystemPrompt    string         `json:"system_prompt"`
 	SessionID       string         `json:"session_id,omitempty"`
 	Messages        []Message      `json:"messages"`
@@ -306,6 +307,7 @@ func RequestFromLockedContractWithItems(locked session.LockedContract, systemPro
 		Temperature:     locked.Temperature,
 		MaxTokens:       locked.MaxOutputToken,
 		ReasoningEffort: locked.ThinkingLevel,
+		EnableNativeWebSearch: false,
 		SystemPrompt:    systemPrompt,
 		SessionID:       "",
 		Messages:        append([]Message(nil), messages...),
@@ -382,6 +384,7 @@ type ProviderCapabilities struct {
 	ProviderID                    string
 	SupportsResponsesAPI          bool
 	SupportsResponsesCompact      bool
+	SupportsNativeWebSearch       bool
 	SupportsReasoningEncrypted    bool
 	SupportsServerSideContextEdit bool
 	IsOpenAIFirstParty            bool

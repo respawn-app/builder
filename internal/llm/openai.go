@@ -10,6 +10,7 @@ type OpenAIRequest struct {
 	Temperature     float64
 	MaxTokens       int
 	ReasoningEffort string
+	EnableNativeWebSearch bool
 	SystemPrompt    string
 	SessionID       string
 	Messages        []Message
@@ -73,6 +74,7 @@ func (c *OpenAIClient) Generate(ctx context.Context, request Request) (Response,
 		Temperature:     request.Temperature,
 		MaxTokens:       request.MaxTokens,
 		ReasoningEffort: request.ReasoningEffort,
+		EnableNativeWebSearch: request.EnableNativeWebSearch,
 		SystemPrompt:    request.SystemPrompt,
 		SessionID:       request.SessionID,
 		Messages:        append([]Message(nil), request.Messages...),
@@ -113,6 +115,7 @@ func (c *OpenAIClient) GenerateStream(ctx context.Context, request Request, onDe
 		Temperature:     request.Temperature,
 		MaxTokens:       request.MaxTokens,
 		ReasoningEffort: request.ReasoningEffort,
+		EnableNativeWebSearch: request.EnableNativeWebSearch,
 		SystemPrompt:    request.SystemPrompt,
 		SessionID:       request.SessionID,
 		Messages:        append([]Message(nil), request.Messages...),
@@ -186,6 +189,7 @@ func (c *OpenAIClient) ProviderCapabilities(ctx context.Context) (ProviderCapabi
 		ProviderID:                    "openai",
 		SupportsResponsesAPI:          true,
 		SupportsResponsesCompact:      true,
+		SupportsNativeWebSearch:       true,
 		SupportsReasoningEncrypted:    true,
 		SupportsServerSideContextEdit: true,
 		IsOpenAIFirstParty:            true,

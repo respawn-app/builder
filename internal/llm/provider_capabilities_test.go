@@ -4,12 +4,12 @@ import "testing"
 
 func TestInferProviderCapabilities_OpenAIAndOAuth(t *testing.T) {
 	openai := InferProviderCapabilities("https://api.openai.com/v1", false)
-	if !openai.SupportsResponsesCompact || !openai.IsOpenAIFirstParty {
+	if !openai.SupportsResponsesCompact || !openai.IsOpenAIFirstParty || !openai.SupportsNativeWebSearch {
 		t.Fatalf("expected first-party openai compact support, got %+v", openai)
 	}
 
 	oauth := InferProviderCapabilities("https://chatgpt.com/backend-api/codex", true)
-	if oauth.ProviderID != "chatgpt-codex" || !oauth.SupportsResponsesCompact || !oauth.IsOpenAIFirstParty {
+	if oauth.ProviderID != "chatgpt-codex" || !oauth.SupportsResponsesCompact || !oauth.IsOpenAIFirstParty || !oauth.SupportsNativeWebSearch {
 		t.Fatalf("unexpected oauth capabilities: %+v", oauth)
 	}
 }
@@ -31,6 +31,9 @@ func TestInferProviderCapabilities_ThirdPartyDefaultsToLocalCompaction(t *testin
 			}
 			if caps.IsOpenAIFirstParty {
 				t.Fatalf("expected third-party classification for %s, got %+v", tc.url, caps)
+			}
+			if caps.SupportsNativeWebSearch {
+				t.Fatalf("expected native web search unsupported for %s, got %+v", tc.url, caps)
 			}
 		})
 	}

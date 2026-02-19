@@ -59,7 +59,7 @@ var catalogEntries = []CatalogEntry{
 	{
 		ID:             ToolAskQuestion,
 		Aliases:        nil,
-		Description:    "Ask the user a question. You should ask the user when planning your work or working to make product decisions, resolve ambiguities, define missing pieces that you cannot resolve by yourself, brainstorming with the user. You should ask the user a lot of questions when you're planning/brainstorming together to learn their desires, preferences, design, product vision, or implementation approach, and sometimes ask them questions when already working if you encounter a problem you can't resolve, a caveat, an undefined area that materially affects the result or direction of your work, etc. You should avoid asking the user obvious or harmless questions like 'Should I run tests?' or 'Do you want this done well?' which you can answer yourself. Each question pings the user, so treat it like pinging a coworker on Slack: unless they're actively chatting with you, pinging them could distract them.",
+		Description:    "Ask the user a question. You should ask the user when planning your work or working to make product decisions, resolve ambiguities, define missing pieces that you cannot resolve by yourself, brainstorming with the user. You should ask the user a lot of questions when you're planning/brainstorming together to learn their desires, preferences, design, product vision, or implementation approach, and sometimes ask them questions when already working if you encounter a problem you can't resolve, a caveat, an undefined area that materially affects the result or direction of your work, etc. You should avoid asking the user obvious or harmless questions like 'Should I run tests?' or 'Where is file X?' which you can answer yourself. Each question pings the user, so treat it like pinging a coworker on Slack: unless they're actively chatting with you, pinging them could distract them. Stick to ONE question per this tool call, for multiple questions call this tool in parallel. Strive to provide multiple suggestions/options with every question if you can.",
 		DefaultEnabled: true,
 		Schema: json.RawMessage(`{
   "type": "object",
@@ -68,11 +68,38 @@ var catalogEntries = []CatalogEntry{
   "properties": {
     "question": {
       "type": "string",
-      "description": "Question text shown to the user."
+      "description": "Question text shown to the user. You must only put exactly ONE question here."
     },
     "suggestions": {
       "type": "array",
-      "description": "Optional predefined choice suggestions. The user can always answer their own way, but you should anticipate common answers, explain them in the option text briefly, pick exactly one recommended option and mark it as such. Strive to give users the best, sensible options possible, following best-practices, guidelines, and common sense.",
+      "description": "Optional choice suggestions. To fill this you should anticipate best practices or options, explain them in the item text briefly, pick exactly one recommended option and mark it as such. Strive to give users the best, sensible options possible, following best-practices, guidelines, and common sense.",
+      "items": {"type": "string"}
+    }
+  }
+}`),
+	},
+	{
+		ID:             ToolWebSearch,
+		Aliases:        nil,
+		Description:    "Search the web for up-to-date information using the provider's native web search capability when available. Provide a concise `query` and optional domain filters.",
+		DefaultEnabled: false,
+		Schema: json.RawMessage(`{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["query"],
+  "properties": {
+    "query": {
+      "type": "string",
+      "description": "Search query string. Keep it specific and concise."
+    },
+    "allowed_domains": {
+      "type": "array",
+      "description": "Optional allowlist of domains to constrain search results.",
+      "items": {"type": "string"}
+    },
+    "blocked_domains": {
+      "type": "array",
+      "description": "Optional blocklist of domains to exclude from search results.",
       "items": {"type": "string"}
     }
   }

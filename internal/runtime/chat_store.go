@@ -275,6 +275,17 @@ func (s *chatStore) formatToolCall(call llm.ToolCall) ChatEntry {
 			}
 		}
 	}
+	if toolName == string(tools.ToolWebSearch) {
+		if query, ok := formatWebSearchToolCall(call.Input); ok {
+			meta.Command = query
+			return ChatEntry{
+				Role:       "tool_call",
+				Text:       query,
+				ToolCallID: strings.TrimSpace(call.ID),
+				ToolCall:   meta,
+			}
+		}
+	}
 	if toolName == string(tools.ToolPatch) {
 		if summary, detail, ok := s.formatPatchToolCall(call.Input); ok {
 			meta.PatchSummary = summary
@@ -333,6 +344,12 @@ func formatToolResult(result tools.Result) string {
 	if result.Name == tools.ToolPatch && !result.IsError {
 		return ""
 	}
+	if result.Name == tools.ToolWebSearch {
+		formatted := strings.TrimSpace(formatRawToolJSON(result.Output))
+		if formatted != "" {
+			return formatted
+		}
+	}
 	output := strings.TrimSpace(toolcodec.FormatOutput(result.Output))
 	if output == "" {
 		if result.IsError {
@@ -342,6 +359,38 @@ func formatToolResult(result tools.Result) string {
 		}
 	}
 	return output
+}
+
+func formatWebSearchToolCall(raw json.RawMessage) (string, bool) {
+	var in struct {
+		Query string `json:"query"`
+	}
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return "", false
+	}
+	query := strings.TrimSpace(in.Query)
+	if query == "" {
+		return "", false
+	}
+	return query, true
+}
+
+func formatRawToolJSON(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	if !json.Valid(raw) {
+		return strings.TrimSpace(string(raw))
+	}
+	var payload any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return strings.TrimSpace(string(raw))
+	}
+	formatted, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return strings.TrimSpace(string(raw))
+	}
+	return string(formatted)
 }
 
 type patchFileView struct {
