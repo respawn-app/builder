@@ -294,6 +294,9 @@ func (t *HTTPTransport) buildPayload(request OpenAIRequest, mode openAIAuthMode)
 		}
 		tools = append(tools, toolParam)
 	}
+	if request.EnableNativeWebSearch {
+		tools = append(tools, responses.ToolParamOfWebSearch(responses.WebSearchToolTypeWebSearch))
+	}
 
 	out := responses.ResponseNewParams{
 		Model: request.Model,

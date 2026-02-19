@@ -50,6 +50,7 @@ type Settings struct {
 	Model                            string
 	ThinkingLevel                    string
 	Theme                            string
+	WebSearch                        string
 	OpenAIBaseURL                    string
 	Store                            bool
 	AllowNonCwdEdits                 bool
@@ -78,6 +79,7 @@ type fileSettings struct {
 	Model         string          `toml:"model"`
 	ThinkingLevel string          `toml:"thinking_level"`
 	Theme         string          `toml:"theme"`
+	WebSearch     string          `toml:"web_search"`
 	Tools         map[string]bool `toml:"tools"`
 	Timeouts      struct {
 		ModelRequestSeconds int `toml:"model_request_seconds"`
@@ -118,6 +120,7 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		"model":                               "default",
 		"thinking_level":                      "default",
 		"theme":                               "default",
+		"web_search":                          "default",
 		"openai_base_url":                     "default",
 		"store":                               "default",
 		"allow_non_cwd_edits":                 "default",
@@ -144,6 +147,10 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if strings.TrimSpace(cfg.Theme) != "" {
 		merged.Theme = strings.TrimSpace(cfg.Theme)
 		sources["theme"] = "file"
+	}
+	if strings.TrimSpace(cfg.WebSearch) != "" {
+		merged.WebSearch = strings.TrimSpace(cfg.WebSearch)
+		sources["web_search"] = "file"
 	}
 	if strings.TrimSpace(cfg.OpenAIBaseURL) != "" {
 		merged.OpenAIBaseURL = strings.TrimSpace(cfg.OpenAIBaseURL)
@@ -204,6 +211,10 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if v := strings.TrimSpace(os.Getenv("BUILDER_THEME")); v != "" {
 		merged.Theme = v
 		sources["theme"] = "env"
+	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_WEB_SEARCH")); v != "" {
+		merged.WebSearch = v
+		sources["web_search"] = "env"
 	}
 	if v := strings.TrimSpace(os.Getenv("BUILDER_OPENAI_BASE_URL")); v != "" {
 		merged.OpenAIBaseURL = v
@@ -372,6 +383,7 @@ func defaultSettings() Settings {
 		Model:                            defaultModel,
 		ThinkingLevel:                    defaultThinkingLevel,
 		Theme:                            defaultTheme,
+		WebSearch:                        "off",
 		Store:                            false,
 		AllowNonCwdEdits:                 false,
 		ModelContextWindow:               defaultModelContextWindow,
@@ -398,6 +410,14 @@ func validateSettings(v Settings) error {
 		// ok
 	} else {
 		return fmt.Errorf("invalid theme %q (expected light|dark)", v.Theme)
+	}
+	switch strings.ToLower(strings.TrimSpace(v.WebSearch)) {
+	case "off", "native":
+		// ok
+	case "custom":
+		return fmt.Errorf("web_search=custom is not implemented yet")
+	default:
+		return fmt.Errorf("invalid web_search %q (expected off|native|custom)", v.WebSearch)
 	}
 	if v.Timeouts.ModelRequestSeconds <= 0 {
 		return fmt.Errorf("timeouts.model_request_seconds must be > 0")
@@ -522,6 +542,7 @@ func defaultSettingsTOML() string {
 		"model":                               defaults.Model,
 		"thinking_level":                      defaults.ThinkingLevel,
 		"theme":                               defaults.Theme,
+		"web_search":                          defaults.WebSearch,
 		"openai_base_url":                     defaults.OpenAIBaseURL,
 		"store":                               defaults.Store,
 		"allow_non_cwd_edits":                 defaults.AllowNonCwdEdits,
@@ -543,6 +564,7 @@ func defaultSettingsTOML() string {
 		"model = \"" + defaults.Model + "\"\n" +
 		"thinking_level = \"" + defaults.ThinkingLevel + "\"\n" +
 		"theme = \"" + defaults.Theme + "\"\n" +
+		"web_search = \"" + defaults.WebSearch + "\"\n" +
 		"openai_base_url = \"" + defaults.OpenAIBaseURL + "\"\n" +
 		"store = " + strconv.FormatBool(defaults.Store) + "\n" +
 		"allow_non_cwd_edits = " + strconv.FormatBool(defaults.AllowNonCwdEdits) + "\n" +

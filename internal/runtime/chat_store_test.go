@@ -230,6 +230,42 @@ func TestFormatToolCallAskQuestionUsesQuestionAndSuggestionsMeta(t *testing.T) {
 	}
 }
 
+func TestFormatToolCallWebSearchUsesQueryOnly(t *testing.T) {
+	s := newChatStore()
+	call := llm.ToolCall{
+		ID:    "call_web",
+		Name:  string(tools.ToolWebSearch),
+		Input: json.RawMessage(`{"query":"latest golang release"}`),
+	}
+
+	rendered := s.formatToolCall(call)
+	if rendered.Role != "tool_call" {
+		t.Fatalf("expected tool_call role, got %+v", rendered)
+	}
+	if rendered.Text != "latest golang release" {
+		t.Fatalf("expected query-only text, got %q", rendered.Text)
+	}
+	if rendered.ToolCall == nil || rendered.ToolCall.Command != "latest golang release" {
+		t.Fatalf("expected command to match query, got %+v", rendered.ToolCall)
+	}
+}
+
+func TestFormatToolResultWebSearchUsesPrettyJSON(t *testing.T) {
+	result := tools.Result{
+		CallID: "call_web",
+		Name:   tools.ToolWebSearch,
+		Output: json.RawMessage(`{"type":"web_search_call","status":"completed","action":{"type":"search","query":"builder cli"}}`),
+	}
+
+	rendered := formatToolResult(result)
+	if !strings.Contains(rendered, "\"type\": \"web_search_call\"") {
+		t.Fatalf("expected pretty json type field, got %q", rendered)
+	}
+	if !strings.Contains(rendered, "\"query\": \"builder cli\"") {
+		t.Fatalf("expected pretty json query field, got %q", rendered)
+	}
+}
+
 func TestChatStoreFiltersInjectedAgentsMessage(t *testing.T) {
 	s := newChatStore()
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: agentsInjectedPrefix + "\nsource: /tmp/AGENTS.md"})

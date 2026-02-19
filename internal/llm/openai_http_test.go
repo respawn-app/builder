@@ -157,6 +157,46 @@ func TestBuildPayload_UsesTransportStoreSetting(t *testing.T) {
 	}
 }
 
+func TestBuildPayload_AddsNativeWebSearchToolWhenEnabled(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	payload, err := transport.buildPayload(OpenAIRequest{
+		Model:                 "gpt-5",
+		EnableNativeWebSearch: true,
+	}, openAIAuthMode{})
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+
+	jsonPayload := mustMarshalObject(t, payload)
+	tools, ok := jsonPayload["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("expected one native tool, got %#v", jsonPayload["tools"])
+	}
+	tool, ok := tools[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected web search tool object, got %#v", tools[0])
+	}
+	if got := tool["type"]; got != "web_search" {
+		t.Fatalf("expected web_search tool, got %#v", got)
+	}
+}
+
+func TestBuildPayload_DoesNotAddNativeWebSearchToolWhenDisabled(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	payload, err := transport.buildPayload(OpenAIRequest{
+		Model:                 "gpt-5",
+		EnableNativeWebSearch: false,
+	}, openAIAuthMode{})
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+
+	jsonPayload := mustMarshalObject(t, payload)
+	if _, ok := jsonPayload["tools"]; ok {
+		t.Fatalf("expected no tools in payload, got %#v", jsonPayload["tools"])
+	}
+}
+
 func TestBuildPayload_AppliesReasoningEffortForOpenAIModels(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	payload, err := transport.buildPayload(OpenAIRequest{

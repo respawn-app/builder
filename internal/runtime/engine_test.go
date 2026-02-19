@@ -222,6 +222,122 @@ func TestLocksAtFirstDispatch(t *testing.T) {
 	}
 }
 
+func TestHostedWebSearchExecutionFromOutputItem(t *testing.T) {
+	item := llm.ResponseItem{
+		Type: llm.ResponseItemTypeOther,
+		Raw: json.RawMessage(`{
+			"type":"web_search_call",
+			"id":"ws_1",
+			"status":"completed",
+			"action":{"type":"search","query":"builder cli"}
+		}`),
+	}
+
+	execution, ok := hostedWebSearchExecution(item)
+	if !ok {
+		t.Fatal("expected hosted web search execution")
+	}
+	if execution.Call.Name != string(tools.ToolWebSearch) {
+		t.Fatalf("unexpected hosted tool name: %+v", execution.Call)
+	}
+	if execution.Call.ID != "ws_1" {
+		t.Fatalf("unexpected hosted call id: %+v", execution.Call)
+	}
+	var input map[string]string
+	if err := json.Unmarshal(execution.Call.Input, &input); err != nil {
+		t.Fatalf("decode hosted input: %v", err)
+	}
+	if input["query"] != "builder cli" {
+		t.Fatalf("expected hosted query in input, got %+v", input)
+	}
+	if execution.Result.Name != tools.ToolWebSearch {
+		t.Fatalf("unexpected hosted result tool name: %+v", execution.Result)
+	}
+	if execution.Result.IsError {
+		t.Fatalf("expected hosted status completed to be non-error")
+	}
+}
+
+func TestHostedWebSearchExecutionUsesURLAsQueryFallback(t *testing.T) {
+	item := llm.ResponseItem{
+		Type: llm.ResponseItemTypeOther,
+		Raw: json.RawMessage(`{
+			"type":"web_search_call",
+			"id":"ws_2",
+			"status":"completed",
+			"action":{"type":"open_page","url":"https://example.com"}
+		}`),
+	}
+
+	execution, ok := hostedWebSearchExecution(item)
+	if !ok {
+		t.Fatal("expected hosted web search execution")
+	}
+	var input map[string]string
+	if err := json.Unmarshal(execution.Call.Input, &input); err != nil {
+		t.Fatalf("decode hosted input: %v", err)
+	}
+	if input["query"] != "https://example.com" {
+		t.Fatalf("expected url fallback in query, got %+v", input)
+	}
+}
+
+func TestSubmitUserMessageContinuesAfterHostedToolOnlyTurn(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: ""},
+			OutputItems: []llm.ResponseItem{
+				{
+					Type: llm.ResponseItemTypeOther,
+					Raw:  json.RawMessage(`{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"builder cli"}}`),
+				},
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "find latest")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if len(client.calls) != 2 {
+		t.Fatalf("expected 2 model calls, got %d", len(client.calls))
+	}
+
+	secondReq := client.calls[1]
+	foundHostedOutput := false
+	for _, item := range secondReq.Items {
+		if item.Type != llm.ResponseItemTypeFunctionCallOutput {
+			continue
+		}
+		if item.CallID == "ws_1" {
+			foundHostedOutput = true
+			break
+		}
+	}
+	if !foundHostedOutput {
+		t.Fatalf("expected hosted tool output item in follow-up request, got %+v", secondReq.Items)
+	}
+}
+
 func TestSubmitUserMessageSurfacesInFlightClearFailure(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
