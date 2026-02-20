@@ -8,6 +8,10 @@ import (
 )
 
 func runUILoop(wiring *runtimeWiring, active config.Settings, logger *runLogger, commandRegistry *commands.Registry) (tea.Model, error) {
+	return runUILoopWithInitialPrompt(wiring, active, logger, commandRegistry, "")
+}
+
+func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, logger *runLogger, commandRegistry *commands.Registry, initialPrompt string) (tea.Model, error) {
 	program := tea.NewProgram(NewUIModel(
 		wiring.engine,
 		wiring.eventBridge.Channel(),
@@ -16,6 +20,7 @@ func runUILoop(wiring *runtimeWiring, active config.Settings, logger *runLogger,
 		WithUIModelName(active.Model),
 		WithUITheme(active.Theme),
 		WithUICommandRegistry(commandRegistry),
+		WithUIStartupSubmit(initialPrompt),
 	), tea.WithAltScreen())
 
 	finalModel, runErr := program.Run()
@@ -30,13 +35,13 @@ func runUILoop(wiring *runtimeWiring, active config.Settings, logger *runLogger,
 	return finalModel, nil
 }
 
-func extractUIAction(model tea.Model) UIAction {
+func extractUITransition(model tea.Model) UITransition {
 	if model == nil {
-		return UIActionNone
+		return UITransition{Action: UIActionNone}
 	}
 	typed, ok := model.(*uiModel)
 	if !ok {
-		return UIActionNone
+		return UITransition{Action: UIActionNone}
 	}
-	return typed.Action()
+	return typed.Transition()
 }

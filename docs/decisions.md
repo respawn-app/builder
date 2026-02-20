@@ -450,11 +450,13 @@ This file records architecture and product decisions for the minimal terminal co
    - Typing whitespace after the command token enters argument mode and hides the picker.
    - Unknown slash commands are sent to the model as normal user prompts.
 
-137. **Built-in slash commands are `/logout`, `/exit`, `/new`, `/compact`.**
+137. **Built-in slash commands are `/logout`, `/exit`, `/new`, `/resume`, `/compact`, `/review`.**
    - `/logout`: clear auth and run re-auth immediately in-app.
    - `/new`: create and switch to a new session immediately.
+   - `/resume`: return to startup screen and choose a session from the picker.
    - `/exit`: terminate the app.
    - `/compact`: run explicit context compaction.
+   - `/review`: start a fresh session and auto-submit built-in review rubric prompt; optional arguments are appended as review scope.
 
 138. **AGENTS injection order is deterministic on first user turn.**
    - Existing restored messages remain first.
@@ -529,7 +531,13 @@ This file records architecture and product decisions for the minimal terminal co
    - Command id format is `prompt:<filename-without-extension>`.
    - Triggering a file command injects the file content verbatim as a `user` message submission.
 
-152. **Terminal bell notifications use runtime/app hooks with strict event policy.**
+152. **Built-in prompt slash commands use embedded Markdown templates.**
+   - Built-in prompt commands are registered through a shared prompt-command helper used by both built-ins and file-backed prompt commands.
+   - `/review` prompt content is sourced from embedded `prompts/review_prompt.md`.
+   - Built-in prompt commands may opt in to appending slash command arguments to the submitted user payload.
+   - Built-in prompt commands may opt in to running in a fresh session by carrying an initial prompt payload through a new-session transition.
+
+153. **Terminal bell notifications use runtime/app hooks with strict event policy.**
    - Ring when a new `ask_question` request is shown to the user (including approval asks).
    - Ring on turn end only when that turn executed at least two tool calls.
    - Turn-end ringing is keyed by runtime step id and `tool_call_started`/`assistant_message` events.

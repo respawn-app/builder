@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"builder/prompts"
 	"sort"
 	"strings"
 	"unicode"
@@ -12,18 +13,20 @@ const (
 	ActionNone      Action = "none"
 	ActionExit      Action = "exit"
 	ActionNew       Action = "new"
+	ActionResume    Action = "resume"
 	ActionLogout    Action = "logout"
 	ActionCompact   Action = "compact"
 	ActionUnhandled Action = "unhandled"
 )
 
 type Result struct {
-	Handled    bool
-	Action     Action
-	Text       string
-	Args       string
-	SubmitUser bool
-	User       string
+	Handled           bool
+	Action            Action
+	Text              string
+	Args              string
+	SubmitUser        bool
+	User              string
+	FreshConversation bool
 }
 
 type Handler func(args string) Result
@@ -54,11 +57,23 @@ func NewDefaultRegistry() *Registry {
 	r.Register("new", "Create a new session", func(string) Result {
 		return Result{Handled: true, Action: ActionNew}
 	})
+	r.Register("resume", "Go to startup screen (session picker)", func(string) Result {
+		return Result{Handled: true, Action: ActionResume}
+	})
 	r.Register("logout", "Log out and re-authenticate", func(string) Result {
 		return Result{Handled: true, Action: ActionLogout}
 	})
 	r.Register("compact", "Compact the current context (optional: /compact <instructions>)", func(args string) Result {
 		return Result{Handled: true, Action: ActionCompact, Args: strings.TrimSpace(args)}
+	})
+	registerPromptCommands(r, []promptCommandSpec{
+		{
+			Name:          "review",
+			Description:   "Run code review (optional: /review <what to review>)",
+			Prompt:        prompts.ReviewPrompt,
+			AppendRawArgs: true,
+			FreshSession:  true,
+		},
 	})
 	return r
 }

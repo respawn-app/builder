@@ -7,6 +7,9 @@ func TestExecuteBuiltins(t *testing.T) {
 	if got := r.Execute("/new"); got.Action != ActionNew {
 		t.Fatalf("expected ActionNew, got %+v", got)
 	}
+	if got := r.Execute("/resume"); got.Action != ActionResume {
+		t.Fatalf("expected ActionResume, got %+v", got)
+	}
 	if got := r.Execute("/logout"); got.Action != ActionLogout {
 		t.Fatalf("expected ActionLogout, got %+v", got)
 	}
@@ -18,6 +21,31 @@ func TestExecuteBuiltins(t *testing.T) {
 	}
 	if got := r.Execute("/compact keep API details"); got.Action != ActionCompact || got.Args != "keep API details" {
 		t.Fatalf("expected ActionCompact with args, got %+v", got)
+	}
+	got := r.Execute("/review src/internal/app")
+	if !got.Handled || !got.SubmitUser {
+		t.Fatalf("expected /review to submit a user prompt, got %+v", got)
+	}
+	if got.User == "" {
+		t.Fatal("expected /review prompt payload")
+	}
+	if got.User == "/review src/internal/app" {
+		t.Fatalf("expected injected prompt content, got %q", got.User)
+	}
+	if got.Action != ActionNone {
+		t.Fatalf("expected /review action to be none, got %q", got.Action)
+	}
+	if !got.FreshConversation {
+		t.Fatalf("expected /review to require fresh conversation, got %+v", got)
+	}
+	if got.Text != "" {
+		t.Fatalf("expected /review to avoid system text, got %q", got.Text)
+	}
+	if got.Args != "" {
+		t.Fatalf("expected /review args to be consumed by prompt payload, got %q", got.Args)
+	}
+	if got.User[len(got.User)-len("src/internal/app"):] != "src/internal/app" {
+		t.Fatalf("expected /review args appended to prompt payload, got %q", got.User)
 	}
 }
 

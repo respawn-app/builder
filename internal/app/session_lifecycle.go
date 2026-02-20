@@ -12,6 +12,7 @@ import (
 
 func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionID string) error {
 	currentSessionID := strings.TrimSpace(initialSessionID)
+	nextSessionInitialPrompt := ""
 	for {
 		store, err := openOrCreateSession(boot.containerDir, currentSessionID, boot.cfg.WorkspaceRoot, boot.cfg.Settings.Theme)
 		if err != nil {
@@ -43,13 +44,15 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 			return err
 		}
 
-		finalModel, runErr := runUILoop(wiring, active, logger, commandRegistry)
+		finalModel, runErr := runUILoopWithInitialPrompt(wiring, active, logger, commandRegistry, nextSessionInitialPrompt)
+		nextSessionInitialPrompt = ""
 		_ = logger.Close()
 		if runErr != nil {
 			return runErr
 		}
 
-		nextSessionID, shouldContinue, err := resolveSessionAction(ctx, boot, store, extractUIAction(finalModel))
+		transition := extractUITransition(finalModel)
+		nextSessionID, initialPrompt, shouldContinue, err := resolveSessionAction(ctx, boot, store, transition)
 		if err != nil {
 			return err
 		}
@@ -57,27 +60,30 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 			return nil
 		}
 		currentSessionID = nextSessionID
+		nextSessionInitialPrompt = initialPrompt
 	}
 }
 
-func resolveSessionAction(ctx context.Context, boot appBootstrap, store *session.Store, action UIAction) (string, bool, error) {
-	switch action {
+func resolveSessionAction(ctx context.Context, boot appBootstrap, store *session.Store, transition UITransition) (string, string, bool, error) {
+	switch transition.Action {
 	case UIActionNewSession:
 		newStore, err := session.Create(boot.containerDir, filepath.Base(boot.containerDir), boot.cfg.WorkspaceRoot)
 		if err != nil {
-			return "", false, err
+			return "", "", false, err
 		}
-		return newStore.Meta().SessionID, true, nil
+		return newStore.Meta().SessionID, transition.InitialPrompt, true, nil
+	case UIActionResume:
+		return "", "", true, nil
 	case UIActionLogout:
 		if _, err := boot.authManager.ClearMethod(ctx, true); err != nil {
-			return "", false, err
+			return "", "", false, err
 		}
 		if err := ensureAuthReady(ctx, boot.authManager, boot.oauthOpts); err != nil {
-			return "", false, err
+			return "", "", false, err
 		}
-		return store.Meta().SessionID, true, nil
+		return store.Meta().SessionID, "", true, nil
 	default:
-		return "", false, nil
+		return "", "", false, nil
 	}
 }
 
