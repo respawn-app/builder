@@ -24,11 +24,30 @@ const (
 	RoleTool      Role = "tool"
 )
 
+type MessagePhase string
+
+const (
+	MessagePhaseCommentary MessagePhase = "commentary"
+	MessagePhaseFinal      MessagePhase = "final_answer"
+)
+
+func normalizeMessagePhase(raw string) MessagePhase {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "commentary":
+		return MessagePhaseCommentary
+	case "final_answer", "finalanswer", "final":
+		return MessagePhaseFinal
+	default:
+		return ""
+	}
+}
+
 type Message struct {
 	Role           Role            `json:"role"`
 	Content        string          `json:"content,omitempty"`
 	Name           string          `json:"name,omitempty"`
 	ToolCallID     string          `json:"tool_call_id,omitempty"`
+	Phase          MessagePhase    `json:"phase,omitempty"`
 	ToolCalls      []ToolCall      `json:"tool_calls,omitempty"`
 	ReasoningItems []ReasoningItem `json:"reasoning_items,omitempty"`
 }
@@ -47,6 +66,7 @@ const (
 type ResponseItem struct {
 	Type             ResponseItemType `json:"type"`
 	Role             Role             `json:"role,omitempty"`
+	Phase            MessagePhase     `json:"phase,omitempty"`
 	ID               string           `json:"id,omitempty"`
 	Name             string           `json:"name,omitempty"`
 	CallID           string           `json:"call_id,omitempty"`
@@ -91,6 +111,7 @@ func ItemsFromMessages(messages []Message) []ResponseItem {
 				out = append(out, ResponseItem{
 					Type:    ResponseItemTypeMessage,
 					Role:    RoleAssistant,
+					Phase:   msg.Phase,
 					Content: msg.Content,
 				})
 			}
@@ -162,6 +183,7 @@ func MessagesFromItems(items []ResponseItem) []Message {
 			}
 			msg := Message{
 				Role:    role,
+				Phase:   item.Phase,
 				Content: item.Content,
 				Name:    item.Name,
 			}
@@ -250,16 +272,16 @@ type ToolResult struct {
 }
 
 type Request struct {
-	Model           string         `json:"model"`
-	Temperature     float64        `json:"temperature"`
-	MaxTokens       int            `json:"max_tokens"`
-	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
-	EnableNativeWebSearch bool     `json:"enable_native_web_search,omitempty"`
-	SystemPrompt    string         `json:"system_prompt"`
-	SessionID       string         `json:"session_id,omitempty"`
-	Messages        []Message      `json:"messages"`
-	Items           []ResponseItem `json:"items,omitempty"`
-	Tools           []Tool         `json:"tools,omitempty"`
+	Model                 string         `json:"model"`
+	Temperature           float64        `json:"temperature"`
+	MaxTokens             int            `json:"max_tokens"`
+	ReasoningEffort       string         `json:"reasoning_effort,omitempty"`
+	EnableNativeWebSearch bool           `json:"enable_native_web_search,omitempty"`
+	SystemPrompt          string         `json:"system_prompt"`
+	SessionID             string         `json:"session_id,omitempty"`
+	Messages              []Message      `json:"messages"`
+	Items                 []ResponseItem `json:"items,omitempty"`
+	Tools                 []Tool         `json:"tools,omitempty"`
 }
 
 func (r Request) Validate() error {
@@ -303,16 +325,16 @@ func RequestFromLockedContractWithItems(locked session.LockedContract, systemPro
 	}
 
 	req := Request{
-		Model:           locked.Model,
-		Temperature:     locked.Temperature,
-		MaxTokens:       locked.MaxOutputToken,
-		ReasoningEffort: locked.ThinkingLevel,
+		Model:                 locked.Model,
+		Temperature:           locked.Temperature,
+		MaxTokens:             locked.MaxOutputToken,
+		ReasoningEffort:       locked.ThinkingLevel,
 		EnableNativeWebSearch: false,
-		SystemPrompt:    systemPrompt,
-		SessionID:       "",
-		Messages:        append([]Message(nil), messages...),
-		Items:           CloneResponseItems(items),
-		Tools:           append([]Tool(nil), tools...),
+		SystemPrompt:          systemPrompt,
+		SessionID:             "",
+		Messages:              append([]Message(nil), messages...),
+		Items:                 CloneResponseItems(items),
+		Tools:                 append([]Tool(nil), tools...),
 	}
 	if err := req.Validate(); err != nil {
 		return Request{}, err

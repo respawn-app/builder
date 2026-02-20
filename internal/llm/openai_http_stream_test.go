@@ -27,7 +27,7 @@ func TestGenerateStream_EmitsAssistantDeltasAndToolCalls(t *testing.T) {
 		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hel\"}\n\n")
 		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"lo\"}\n\n")
 		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.reasoning_summary_text.delta\",\"item_id\":\"rs_1\",\"output_index\":1,\"summary_index\":0,\"delta\":\"Plan\"}\n\n")
-		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":7},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Hello\"}]},{\"type\":\"reasoning\",\"id\":\"rs_1\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"Plan\"}],\"content\":[{\"type\":\"reasoning_text\",\"text\":\"internal trace\"}],\"encrypted_content\":\"enc_1\"},{\"type\":\"function_call\",\"id\":\"fc_1\",\"name\":\"shell\",\"call_id\":\"call_1\",\"arguments\":\"{\\\"command\\\":\\\"pwd\\\"}\"}]}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":7},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"commentary\",\"content\":[{\"type\":\"output_text\",\"text\":\"Hello\"}]},{\"type\":\"reasoning\",\"id\":\"rs_1\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"Plan\"}],\"content\":[{\"type\":\"reasoning_text\",\"text\":\"internal trace\"}],\"encrypted_content\":\"enc_1\"},{\"type\":\"function_call\",\"id\":\"fc_1\",\"name\":\"shell\",\"call_id\":\"call_1\",\"arguments\":\"{\\\"command\\\":\\\"pwd\\\"}\"}]}}\n\n")
 		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer server.Close()
@@ -49,6 +49,9 @@ func TestGenerateStream_EmitsAssistantDeltasAndToolCalls(t *testing.T) {
 	}
 	if resp.AssistantText != "Hello" {
 		t.Fatalf("unexpected assistant text: %q", resp.AssistantText)
+	}
+	if resp.AssistantPhase != MessagePhaseCommentary {
+		t.Fatalf("unexpected assistant phase: %q", resp.AssistantPhase)
 	}
 	if len(resp.ToolCalls) != 1 {
 		t.Fatalf("expected 1 tool call, got %d", len(resp.ToolCalls))

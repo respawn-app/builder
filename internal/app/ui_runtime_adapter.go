@@ -58,6 +58,7 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() {
 		entries = append(entries, tui.TranscriptEntry{
 			Role:       entry.Role,
 			Text:       entry.Text,
+			Phase:      entry.Phase,
 			ToolCallID: entry.ToolCallID,
 			ToolCall:   entry.ToolCall,
 		})
