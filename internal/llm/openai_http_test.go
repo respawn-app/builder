@@ -358,9 +358,12 @@ func TestParseOutputItems_PreservesCompactionItem(t *testing.T) {
 	if err := json.Unmarshal(raw, &output); err != nil {
 		t.Fatalf("unmarshal output: %v", err)
 	}
-	items, assistantText, toolCalls, reasoning, reasoningItems := parseOutputItems(output)
+	items, assistantText, assistantPhase, toolCalls, reasoning, reasoningItems := parseOutputItems(output)
 	if assistantText != "" {
 		t.Fatalf("expected no assistant text, got %q", assistantText)
+	}
+	if assistantPhase != "" {
+		t.Fatalf("expected empty assistant phase, got %q", assistantPhase)
 	}
 	if len(toolCalls) != 0 || len(reasoning) != 0 || len(reasoningItems) != 0 {
 		t.Fatalf("expected no tool/reasoning outputs, got calls=%d reasoning=%d encrypted=%d", len(toolCalls), len(reasoning), len(reasoningItems))

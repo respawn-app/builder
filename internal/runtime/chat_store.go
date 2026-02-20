@@ -22,6 +22,7 @@ const (
 type ChatEntry struct {
 	Role       string
 	Text       string
+	Phase      llm.MessagePhase
 	ToolCallID string
 	ToolCall   *transcript.ToolCallMeta
 }
@@ -213,7 +214,7 @@ func (s *chatStore) snapshot() ChatSnapshot {
 			}
 		case llm.RoleAssistant:
 			if strings.TrimSpace(msg.Content) != "" {
-				entries = append(entries, ChatEntry{Role: "assistant", Text: msg.Content})
+				entries = append(entries, ChatEntry{Role: "assistant", Text: msg.Content, Phase: msg.Phase})
 			}
 			if len(msg.ToolCalls) > 0 {
 				for _, call := range msg.ToolCalls {

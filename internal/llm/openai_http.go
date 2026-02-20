@@ -93,9 +93,10 @@ func (t *HTTPTransport) Generate(ctx context.Context, request OpenAIRequest) (Op
 		return OpenAIResponse{}, fmt.Errorf("openai responses request failed: empty response")
 	}
 
-	outputItems, assistantText, toolCalls, reasoning, reasoningItems := parseOutputItems(decoded.Output)
+	outputItems, assistantText, assistantPhase, toolCalls, reasoning, reasoningItems := parseOutputItems(decoded.Output)
 	return OpenAIResponse{
 		AssistantText:  assistantText,
+		AssistantPhase: assistantPhase,
 		ToolCalls:      toolCalls,
 		Reasoning:      reasoning,
 		ReasoningItems: reasoningItems,
@@ -177,9 +178,13 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 		if completed.Usage.InputTokens > 0 || completed.Usage.OutputTokens > 0 {
 			usage = usageFromSDK(completed.Usage, t.ContextWindowTokens)
 		}
-		parsedItems, parsedText, parsedCalls, parsedReasoning, parsedReasoningItems := parseOutputItems(completed.Output)
+		parsedItems, parsedText, parsedPhase, parsedCalls, parsedReasoning, parsedReasoningItems := parseOutputItems(completed.Output)
 		if finalText == "" {
 			finalText = parsedText
+		}
+		finalPhase := MessagePhase("")
+		if parsedPhase != "" {
+			finalPhase = parsedPhase
 		}
 		acc.Merge(parsedCalls)
 		finalCalls = acc.ToToolCalls()
@@ -188,10 +193,21 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 		if len(parsedItems) > 0 {
 			finalOutputItems = parsedItems
 		}
+
+		return OpenAIResponse{
+			AssistantText:  finalText,
+			AssistantPhase: finalPhase,
+			ToolCalls:      finalCalls,
+			Reasoning:      finalReasoning,
+			ReasoningItems: finalReasoningItems,
+			OutputItems:    finalOutputItems,
+			Usage:          usage,
+		}, nil
 	}
 
 	return OpenAIResponse{
 		AssistantText:  finalText,
+		AssistantPhase: "",
 		ToolCalls:      finalCalls,
 		Reasoning:      finalReasoning,
 		ReasoningItems: finalReasoningItems,
@@ -239,7 +255,7 @@ func (t *HTTPTransport) Compact(ctx context.Context, request OpenAICompactionReq
 		return OpenAICompactionResponse{}, fmt.Errorf("openai responses compact request failed: empty response")
 	}
 
-	outputItems, _, _, _, _ := parseOutputItems(decoded.Output)
+	outputItems, _, _, _, _, _ := parseOutputItems(decoded.Output)
 	return OpenAICompactionResponse{
 		OutputItems:       outputItems,
 		Usage:             usageFromSDK(decoded.Usage, t.ContextWindowTokens),
@@ -494,9 +510,10 @@ func messageInput(role, text string) responses.ResponseInputItemUnionParam {
 	return responses.ResponseInputItemParamOfInputMessage(content, inputRole)
 }
 
-func parseOutputItems(items []responses.ResponseOutputItemUnion) ([]ResponseItem, string, []ToolCall, []ReasoningEntry, []ReasoningItem) {
+func parseOutputItems(items []responses.ResponseOutputItemUnion) ([]ResponseItem, string, MessagePhase, []ToolCall, []ReasoningEntry, []ReasoningItem) {
 	canonical := make([]ResponseItem, 0, len(items))
 	textParts := make([]string, 0, len(items))
+	assistantPhase := MessagePhase("")
 	toolCalls := make([]ToolCall, 0, len(items))
 	reasoning := make([]ReasoningEntry, 0, len(items))
 	reasoningItems := make([]ReasoningItem, 0, len(items))
@@ -515,15 +532,20 @@ func parseOutputItems(items []responses.ResponseOutputItemUnion) ([]ResponseItem
 				}
 			}
 			text := strings.Join(textPartsForItem, "")
+			phase := parseMessagePhaseFromRaw(raw)
 			canonical = append(canonical, ResponseItem{
 				Type:    ResponseItemTypeMessage,
 				Role:    role,
+				Phase:   phase,
 				ID:      item.ID,
 				Content: text,
 				Raw:     raw,
 			})
 			if role == RoleAssistant {
 				textParts = append(textParts, text)
+				if phase != "" {
+					assistantPhase = phase
+				}
 			}
 		case "function_call":
 			callID := textutil.FirstNonEmpty(strings.TrimSpace(item.CallID), strings.TrimSpace(item.ID))
@@ -589,7 +611,20 @@ func parseOutputItems(items []responses.ResponseOutputItemUnion) ([]ResponseItem
 			}
 		}
 	}
-	return canonical, strings.Join(textParts, ""), toolCalls, reasoning, reasoningItems
+	return canonical, strings.Join(textParts, ""), assistantPhase, toolCalls, reasoning, reasoningItems
+}
+
+func parseMessagePhaseFromRaw(raw json.RawMessage) MessagePhase {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return ""
+	}
+	var payload struct {
+		Phase string `json:"phase"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+	return normalizeMessagePhase(payload.Phase)
 }
 
 func appendReasoningEntry(entries []ReasoningEntry, role, text string) []ReasoningEntry {

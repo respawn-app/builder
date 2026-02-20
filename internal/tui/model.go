@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"builder/internal/llm"
 	"builder/internal/transcript"
 	"builder/internal/transcript/toolcodec"
 	"fmt"
@@ -27,6 +28,7 @@ var patchCountTokenPattern = regexp.MustCompile(`([+-]\d+)\b`)
 type TranscriptEntry struct {
 	Role       string
 	Text       string
+	Phase      llm.MessagePhase
 	ToolCallID string
 	ToolCall   *transcript.ToolCallMeta
 }
@@ -49,6 +51,7 @@ type SetViewportSizeMsg struct {
 type AppendTranscriptMsg struct {
 	Role       string
 	Text       string
+	Phase      llm.MessagePhase
 	ToolCallID string
 	ToolCall   *transcript.ToolCallMeta
 }
@@ -174,6 +177,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.transcript = append(m.transcript, TranscriptEntry{
 			Role:       role,
 			Text:       msg.Text,
+			Phase:      msg.Phase,
 			ToolCallID: strings.TrimSpace(msg.ToolCallID),
 			ToolCall:   cloneToolCallMeta(msg.ToolCall),
 		})
@@ -340,7 +344,7 @@ func (m Model) renderFlatDetailTranscript() string {
 			blocks = append(blocks, thinkingBlock)
 		}
 		entry := m.transcript[i]
-		role := strings.TrimSpace(entry.Role)
+		role := m.entryRole(entry)
 		switch role {
 		case "tool_call":
 			blockRole := "tool"
@@ -424,8 +428,8 @@ func (m Model) trailingThinkingBlockBeforeEntry(entries []TranscriptEntry, idx i
 	if idx < 0 || idx >= len(entries) {
 		return nil, false
 	}
-	role := strings.TrimSpace(entries[idx].Role)
-	if role != "assistant" && role != "tool_call" {
+	role := m.entryRole(entries[idx])
+	if role != "assistant" && role != "assistant_commentary" && role != "tool_call" {
 		return nil, false
 	}
 	actionEnd := idx
@@ -489,7 +493,7 @@ func (m Model) renderFlatOngoingTranscript() string {
 			continue
 		}
 		entry := m.transcript[i]
-		role := strings.TrimSpace(entry.Role)
+		role := m.entryRole(entry)
 		if skipInOngoing(role) {
 			continue
 		}
@@ -1085,7 +1089,7 @@ func rolePrefix(role string) string {
 	switch role {
 	case "user":
 		return "❯"
-	case "assistant":
+	case "assistant", "assistant_commentary":
 		return "❮"
 	case "tool", "tool_success", "tool_error":
 		return "•"
@@ -1117,6 +1121,8 @@ func styleForRole(role string, p palette) lipgloss.Style {
 		return p.user
 	case "assistant":
 		return p.model
+	case "assistant_commentary":
+		return p.model.Faint(true)
 	case "tool_call", "tool_result":
 		return p.tool
 	case "tool_success", "tool_result_ok":
@@ -1144,6 +1150,14 @@ func styleForRole(role string, p palette) lipgloss.Style {
 	default:
 		return p.preview
 	}
+}
+
+func (m Model) entryRole(entry TranscriptEntry) string {
+	role := strings.TrimSpace(entry.Role)
+	if role == "assistant" && entry.Phase == llm.MessagePhaseCommentary {
+		return "assistant_commentary"
+	}
+	return role
 }
 
 type palette struct {

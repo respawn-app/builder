@@ -44,3 +44,21 @@ func TestRequestFromLockedContract_RespectsExplicitToolDisable(t *testing.T) {
 		t.Fatalf("expected tools disabled, got %+v", req.Tools)
 	}
 }
+
+func TestMessagesFromItems_PreservesAssistantPhase(t *testing.T) {
+	items := []ResponseItem{
+		{
+			Type:    ResponseItemTypeMessage,
+			Role:    RoleAssistant,
+			Phase:   MessagePhaseCommentary,
+			Content: "progress",
+		},
+	}
+	msgs := MessagesFromItems(items)
+	if len(msgs) != 1 {
+		t.Fatalf("expected one message, got %d", len(msgs))
+	}
+	if msgs[0].Phase != MessagePhaseCommentary {
+		t.Fatalf("expected commentary phase, got %q", msgs[0].Phase)
+	}
+}

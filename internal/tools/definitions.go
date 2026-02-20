@@ -81,7 +81,7 @@ var catalogEntries = []CatalogEntry{
 	{
 		ID:             ToolWebSearch,
 		Aliases:        nil,
-		Description:    "Search the web for up-to-date information using the provider's native web search capability when available. Provide a concise `query` and optional domain filters.",
+		Description:    "Search the web for up-to-date external information using the provider-native web search capability when available. Use this when local workspace context is insufficient or the fact could be stale. Prefer primary and official sources, and prefer MCP resources/templates over web search when possible.",
 		DefaultEnabled: false,
 		Schema: json.RawMessage(`{
   "type": "object",
@@ -90,16 +90,16 @@ var catalogEntries = []CatalogEntry{
   "properties": {
     "query": {
       "type": "string",
-      "description": "Search query string. Keep it specific and concise."
+      "description": "Required search query string. Keep it specific and concise; include concrete keywords (entity + property + timeframe) and optionally a site hint."
     },
     "allowed_domains": {
       "type": "array",
-      "description": "Optional allowlist of domains to constrain search results.",
+      "description": "Optional allowlist of domains to constrain sources to preferred/authoritative sites.",
       "items": {"type": "string"}
     },
     "blocked_domains": {
       "type": "array",
-      "description": "Optional blocklist of domains to exclude from search results.",
+      "description": "Optional blocklist of domains to exclude low-quality or irrelevant sources.",
       "items": {"type": "string"}
     }
   }

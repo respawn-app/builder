@@ -16,6 +16,7 @@ func TestChatStoreSnapshotProjectsConversation(t *testing.T) {
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "hello"})
 	s.appendMessage(llm.Message{
 		Role:    llm.RoleAssistant,
+		Phase:   llm.MessagePhaseCommentary,
 		Content: "Let me check.",
 		ToolCalls: []llm.ToolCall{
 			{ID: "call_1", Name: "shell", Input: json.RawMessage(`{"command":"pwd","workdir":"/tmp","timeout_seconds":300}`)},
@@ -48,6 +49,9 @@ func TestChatStoreSnapshotProjectsConversation(t *testing.T) {
 	}
 	if snap.Entries[1].Role != "assistant" || snap.Entries[1].Text != "Let me check." {
 		t.Fatalf("unexpected assistant preamble entry: %+v", snap.Entries[1])
+	}
+	if snap.Entries[1].Phase != llm.MessagePhaseCommentary {
+		t.Fatalf("expected commentary assistant phase, got %+v", snap.Entries[1].Phase)
 	}
 	if snap.Entries[2].Role != "tool_call" || !strings.Contains(snap.Entries[2].Text, "pwd") {
 		t.Fatalf("unexpected tool_call entry: %+v", snap.Entries[2])
