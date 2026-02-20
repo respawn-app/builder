@@ -28,12 +28,16 @@ func NewDefaultRegistryWithFilePrompts(workspaceRoot, settingsPath string) (*Reg
 	if err != nil {
 		return nil, err
 	}
+	specs := make([]promptCommandSpec, 0, len(prompts))
 	for _, prompt := range prompts {
-		content := prompt.Content
-		r.Register(prompt.Name, prompt.Description, func(string) Result {
-			return Result{Handled: true, SubmitUser: true, User: content}
+		specs = append(specs, promptCommandSpec{
+			Name:          prompt.Name,
+			Description:   prompt.Description,
+			Prompt:        prompt.Content,
+			AppendRawArgs: false,
 		})
 	}
+	registerPromptCommands(r, specs)
 	return r, nil
 }
 

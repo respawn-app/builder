@@ -10,3 +10,6 @@ var CompactionPrompt string
 
 //go:embed compaction_summary_prefix.md
 var CompactionSummaryPrefix string
+
+//go:embed review_prompt.md
+var ReviewPrompt string

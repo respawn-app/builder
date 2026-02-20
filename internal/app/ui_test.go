@@ -1083,6 +1083,31 @@ func TestFileSlashCommandSubmitsInjectedUserPrompt(t *testing.T) {
 	}
 }
 
+func TestBuiltInReviewSlashCommandSubmitsInjectedUserPrompt(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/review internal/app"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected quit cmd for /review fresh-conversation handoff")
+	}
+	if updated.Action() != UIActionNewSession {
+		t.Fatalf("expected UIActionNewSession, got %q", updated.Action())
+	}
+	if strings.TrimSpace(updated.nextSessionInitialPrompt) == "" {
+		t.Fatal("expected next-session prompt payload for /review")
+	}
+	if !strings.Contains(updated.nextSessionInitialPrompt, "Review guidelines:") ||
+		!strings.Contains(updated.nextSessionInitialPrompt, "internal/app") {
+		t.Fatalf("expected review prompt content and args in handoff payload, got %q", updated.nextSessionInitialPrompt)
+	}
+	plain := stripANSIAndTrimRight(updated.View())
+	if strings.Contains(plain, "/review internal/app") {
+		t.Fatalf("expected command text to be consumed by fresh-session handoff, got %q", plain)
+	}
+}
+
 func TestSlashCommandSetsExitAction(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "/exit"
@@ -1094,6 +1119,20 @@ func TestSlashCommandSetsExitAction(t *testing.T) {
 	updated := next.(*uiModel)
 	if updated.Action() != UIActionExit {
 		t.Fatalf("expected UIActionExit, got %q", updated.Action())
+	}
+}
+
+func TestSlashCommandSetsResumeAction(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/resume"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected quit cmd for /resume")
+	}
+	updated := next.(*uiModel)
+	if updated.Action() != UIActionResume {
+		t.Fatalf("expected UIActionResume, got %q", updated.Action())
 	}
 }
 
@@ -1119,6 +1158,27 @@ func TestInitialTranscriptVisibleImmediately(t *testing.T) {
 	detail := stripANSIAndTrimRight(next.(*uiModel).View())
 	if !containsInOrder(detail, "❯", "hello", "❮", "world") {
 		t.Fatalf("expected resumed transcript in detail mode, got %q", detail)
+	}
+}
+
+func TestInitAutoSubmitsStartupPrompt(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIStartupSubmit("run review"),
+	).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 20
+
+	_ = m.Init()
+
+	if !m.busy {
+		t.Fatal("expected startup prompt to start submission immediately")
+	}
+	plain := stripANSIAndTrimRight(m.View())
+	if !strings.Contains(plain, "run review") {
+		t.Fatalf("expected startup prompt in transcript, got %q", plain)
 	}
 }
 

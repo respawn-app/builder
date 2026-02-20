@@ -57,10 +57,16 @@ type UITranscriptEntry struct {
 	Text string
 }
 
+type UITransition struct {
+	Action        UIAction
+	InitialPrompt string
+}
+
 const (
 	UIActionNone       UIAction = "none"
 	UIActionExit       UIAction = "exit"
 	UIActionNewSession UIAction = "new_session"
+	UIActionResume     UIAction = "resume"
 	UIActionLogout     UIAction = "logout"
 )
 
@@ -95,6 +101,12 @@ func WithUICommandRegistry(registry *commands.Registry) UIOption {
 			return
 		}
 		m.commandRegistry = registry
+	}
+}
+
+func WithUIStartupSubmit(text string) UIOption {
+	return func(m *uiModel) {
+		m.startupSubmit = text
 	}
 }
 
@@ -155,6 +167,9 @@ type uiModel struct {
 	termHeight int
 
 	initialTranscript []UITranscriptEntry
+	startupSubmit     string
+
+	nextSessionInitialPrompt string
 }
 
 func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
@@ -187,7 +202,14 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 }
 
 func (m *uiModel) Init() tea.Cmd {
-	return tea.Batch(waitRuntimeEvent(m.runtimeEvents), waitAskEvent(m.askEvents))
+	cmds := []tea.Cmd{
+		waitRuntimeEvent(m.runtimeEvents),
+		waitAskEvent(m.askEvents),
+	}
+	if strings.TrimSpace(m.startupSubmit) != "" {
+		cmds = append(cmds, m.inputController().startSubmission(m.startupSubmit))
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -245,6 +267,13 @@ func (m *uiModel) forwardToView(msg tea.Msg) {
 
 func (m *uiModel) Action() UIAction {
 	return m.exitAction
+}
+
+func (m *uiModel) Transition() UITransition {
+	return UITransition{
+		Action:        m.exitAction,
+		InitialPrompt: m.nextSessionInitialPrompt,
+	}
 }
 
 func (m *uiModel) logf(format string, args ...any) {

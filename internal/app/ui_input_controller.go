@@ -107,6 +107,11 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
 			m.clearInput()
+			if commandResult.SubmitUser && commandResult.FreshConversation {
+				m.nextSessionInitialPrompt = commandResult.User
+				m.exitAction = UIActionNewSession
+				return m, tea.Quit
+			}
 			if commandResult.SubmitUser {
 				return m, c.startSubmission(commandResult.User)
 			}
@@ -123,6 +128,9 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			case commands.ActionNew:
 				m.exitAction = UIActionNewSession
+				return m, tea.Quit
+			case commands.ActionResume:
+				m.exitAction = UIActionResume
 				return m, tea.Quit
 			case commands.ActionLogout:
 				m.exitAction = UIActionLogout
