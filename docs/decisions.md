@@ -555,3 +555,12 @@ This file records architecture and product decisions for the minimal terminal co
    - Expose a local runtime tool named `multi_tool_use_parallel` with the Codex harness-compatible schema (`tool_uses[]` with `recipient_name` + `parameters`).
    - The wrapper executes referenced local `functions.*` tools concurrently and returns results in the declared order.
    - Keep existing native multi-tool call behavior unchanged; both invocation patterns remain available.
+
+156. **Experimental post-turn reviewer agent is supported behind config and defaults to disabled.**
+   - Config key: `[reviewer].enabled` (default `false`), with dedicated reviewer model/thinking/limits settings.
+   - Reviewer runs only after a completed assistant final handoff and only when the completed turn executed at least one tool call.
+   - Reviewer receives transcript context with more aggressive tool-output truncation than the main agent request path.
+   - Reviewer response contract is minimal JSON suggestions payload (`{"suggestions":["..."]}`), with invalid payloads ignored non-fatally.
+   - When suggestions are present, runtime appends them as a `developer` message and executes one additional main-agent follow-up pass.
+   - Follow-up noop contract uses exact token `__BUILDER_REVIEW_NOOP__`; when emitted, runtime keeps original assistant final answer.
+   - Reviewer pass is single-shot (no recursive reviewer-on-reviewer follow-up in v1).

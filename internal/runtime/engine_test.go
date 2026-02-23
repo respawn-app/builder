@@ -492,6 +492,146 @@ func TestSubmitUserMessageFinalAnswerWithToolCallsIgnoresToolCalls(t *testing.T)
 	}
 }
 
+func TestReviewerSkippedWhenNoToolCalls(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["x"]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Enabled:            true,
+			Model:              "gpt-5-mini",
+			ThinkingLevel:      "low",
+			MaxSuggestions:     5,
+			MaxToolOutputChars: 800,
+			Client:             reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if len(reviewerClient.calls) != 0 {
+		t.Fatalf("expected reviewer not to be called, got %d calls", len(reviewerClient.calls))
+	}
+}
+
+func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{
+				{ID: "call_shell_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "original final", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: reviewerNoopToken, Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["Double-check test output before final handoff."]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Enabled:            true,
+			Model:              "gpt-5-mini",
+			ThinkingLevel:      "low",
+			MaxSuggestions:     5,
+			MaxToolOutputChars: 600,
+			Client:             reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "original final" {
+		t.Fatalf("assistant content = %q, want original final", msg.Content)
+	}
+	if len(reviewerClient.calls) != 1 {
+		t.Fatalf("expected one reviewer call, got %d", len(reviewerClient.calls))
+	}
+	if len(mainClient.calls) != 3 {
+		t.Fatalf("expected 3 main calls (tool loop + final + follow-up), got %d", len(mainClient.calls))
+	}
+
+	req := mainClient.calls[2]
+	foundReviewInstruction := false
+	for _, message := range req.Messages {
+		if message.Role == llm.RoleDeveloper && strings.Contains(message.Content, "Post-turn reviewer suggestions") {
+			foundReviewInstruction = true
+			break
+		}
+	}
+	if !foundReviewInstruction {
+		t.Fatalf("expected reviewer suggestions developer message in follow-up request")
+	}
+
+	reviewerReq := reviewerClient.calls[0]
+	if reviewerReq.SystemPrompt != prompts.ReviewerSystemPrompt {
+		t.Fatalf("unexpected reviewer prompt")
+	}
+	if len(reviewerReq.Tools) != 0 {
+		t.Fatalf("expected reviewer request with no tools")
+	}
+}
+
+func TestParseReviewerSuggestionsSupportsCompactPayloads(t *testing.T) {
+	suggestions := parseReviewerSuggestions(`{"suggestions":["one","two","one"," "]}`, 3)
+	if len(suggestions) != 2 || suggestions[0] != "one" || suggestions[1] != "two" {
+		t.Fatalf("unexpected suggestions from object payload: %+v", suggestions)
+	}
+
+	suggestions = parseReviewerSuggestions(`["a","b"]`, 5)
+	if len(suggestions) != 2 || suggestions[0] != "a" || suggestions[1] != "b" {
+		t.Fatalf("unexpected suggestions from array payload: %+v", suggestions)
+	}
+
+	suggestions = parseReviewerSuggestions(`not-json`, 5)
+	if len(suggestions) != 0 {
+		t.Fatalf("expected invalid payload to be ignored, got %+v", suggestions)
+	}
+}
+
 func TestSubmitUserMessageSurfacesInFlightClearFailure(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -608,12 +748,12 @@ func TestSubmitUserShellCommandPersistsDeveloperNoticeAndToolEntries(t *testing.
 	foundDeveloperNotice := false
 	foundAssistantToolCall := false
 	foundToolOutput := false
-		for _, msg := range messages {
-			switch msg.Role {
-			case llm.RoleDeveloper:
-				if strings.Contains(msg.Content, "User ran shell command directly:") && strings.Contains(msg.Content, "pwd") {
-					foundDeveloperNotice = true
-				}
+	for _, msg := range messages {
+		switch msg.Role {
+		case llm.RoleDeveloper:
+			if strings.Contains(msg.Content, "User ran shell command directly:") && strings.Contains(msg.Content, "pwd") {
+				foundDeveloperNotice = true
+			}
 		case llm.RoleAssistant:
 			if len(msg.ToolCalls) == 1 && msg.ToolCalls[0].Name == string(tools.ToolShell) {
 				foundAssistantToolCall = true

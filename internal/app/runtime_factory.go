@@ -55,6 +55,22 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 		return nil, err
 	}
 
+	var reviewerClient llm.Client
+	if active.Reviewer.Enabled {
+		reviewerHTTPClient := &http.Client{Timeout: time.Duration(active.Reviewer.TimeoutSeconds) * time.Second}
+		reviewerClient, err = llm.NewProviderClient(llm.ProviderClientOptions{
+			Model:               active.Reviewer.Model,
+			Auth:                mgr,
+			HTTPClient:          reviewerHTTPClient,
+			OpenAIBaseURL:       active.OpenAIBaseURL,
+			Store:               false,
+			ContextWindowTokens: active.ModelContextWindow,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	eventBridge := newRuntimeEventBridge(2048, func(total uint64, evt runtime.Event) {
 		if total == 1 || total%100 == 0 {
 			logger.Logf("runtime.event.drop count=%d kind=%s step_id=%s", total, evt.Kind, evt.StepID)
@@ -72,6 +88,14 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 		EffectiveContextWindowPercent: 95,
 		LocalCompactionCarryoverLimit: 20_000,
 		UseNativeCompaction:           boolRef(active.UseNativeCompaction),
+		Reviewer: runtime.ReviewerConfig{
+			Enabled:            active.Reviewer.Enabled,
+			Model:              active.Reviewer.Model,
+			ThinkingLevel:      active.Reviewer.ThinkingLevel,
+			MaxSuggestions:     active.Reviewer.MaxSuggestions,
+			MaxToolOutputChars: active.Reviewer.MaxToolOutputChars,
+			Client:             reviewerClient,
+		},
 		OnEvent: func(evt runtime.Event) {
 			logger.Logf("%s", formatRuntimeEvent(evt))
 			bells.OnRuntimeEvent(evt)

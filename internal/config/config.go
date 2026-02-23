@@ -29,6 +29,11 @@ const (
 	defaultModelTimeoutSeconds = 400
 	defaultShellTimeoutSeconds = 300
 	defaultCompactionThreshold = 360_000
+	defaultReviewerModel       = "gpt-5-mini"
+	defaultReviewerThinking    = "low"
+	defaultReviewerTimeoutSec  = 60
+	defaultReviewerSuggestions = 5
+	defaultReviewerToolOutput  = 1200
 )
 
 type LoadOptions struct {
@@ -60,6 +65,16 @@ type Settings struct {
 	UseNativeCompaction              bool
 	EnabledTools                     map[tools.ID]bool
 	Timeouts                         Timeouts
+	Reviewer                         ReviewerSettings
+}
+
+type ReviewerSettings struct {
+	Enabled            bool
+	Model              string
+	ThinkingLevel      string
+	TimeoutSeconds     int
+	MaxSuggestions     int
+	MaxToolOutputChars int
 }
 
 type SourceReport struct {
@@ -95,6 +110,14 @@ type fileSettings struct {
 	ModelContextWindow               int    `toml:"model_context_window"`
 	ContextCompactionThresholdTokens int    `toml:"context_compaction_threshold_tokens"`
 	UseNativeCompaction              *bool  `toml:"use_native_compaction"`
+	Reviewer                         struct {
+		Enabled            *bool  `toml:"enabled"`
+		Model              string `toml:"model"`
+		ThinkingLevel      string `toml:"thinking_level"`
+		TimeoutSeconds     int    `toml:"timeout_seconds"`
+		MaxSuggestions     int    `toml:"max_suggestions"`
+		MaxToolOutputChars int    `toml:"max_tool_output_chars"`
+	} `toml:"reviewer"`
 }
 
 func Load(workspaceRoot string, opts LoadOptions) (App, error) {
@@ -132,6 +155,12 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		"use_native_compaction":               "default",
 		"timeouts.model_request":              "default",
 		"timeouts.shell_default":              "default",
+		"reviewer.enabled":                    "default",
+		"reviewer.model":                      "default",
+		"reviewer.thinking_level":             "default",
+		"reviewer.timeout_seconds":            "default",
+		"reviewer.max_suggestions":            "default",
+		"reviewer.max_tool_output_chars":      "default",
 	}
 	for _, id := range tools.CatalogIDs() {
 		sources["tools."+string(id)] = "default"
@@ -182,6 +211,30 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if cfg.UseNativeCompaction != nil {
 		merged.UseNativeCompaction = *cfg.UseNativeCompaction
 		sources["use_native_compaction"] = "file"
+	}
+	if cfg.Reviewer.Enabled != nil {
+		merged.Reviewer.Enabled = *cfg.Reviewer.Enabled
+		sources["reviewer.enabled"] = "file"
+	}
+	if strings.TrimSpace(cfg.Reviewer.Model) != "" {
+		merged.Reviewer.Model = strings.TrimSpace(cfg.Reviewer.Model)
+		sources["reviewer.model"] = "file"
+	}
+	if strings.TrimSpace(cfg.Reviewer.ThinkingLevel) != "" {
+		merged.Reviewer.ThinkingLevel = strings.TrimSpace(cfg.Reviewer.ThinkingLevel)
+		sources["reviewer.thinking_level"] = "file"
+	}
+	if cfg.Reviewer.TimeoutSeconds > 0 {
+		merged.Reviewer.TimeoutSeconds = cfg.Reviewer.TimeoutSeconds
+		sources["reviewer.timeout_seconds"] = "file"
+	}
+	if cfg.Reviewer.MaxSuggestions > 0 {
+		merged.Reviewer.MaxSuggestions = cfg.Reviewer.MaxSuggestions
+		sources["reviewer.max_suggestions"] = "file"
+	}
+	if cfg.Reviewer.MaxToolOutputChars > 0 {
+		merged.Reviewer.MaxToolOutputChars = cfg.Reviewer.MaxToolOutputChars
+		sources["reviewer.max_tool_output_chars"] = "file"
 	}
 	if cfg.Timeouts.ModelRequestSeconds > 0 {
 		merged.Timeouts.ModelRequestSeconds = cfg.Timeouts.ModelRequestSeconds
@@ -270,6 +323,46 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		}
 		merged.UseNativeCompaction = enabled
 		sources["use_native_compaction"] = "env"
+	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_REVIEWER_ENABLED")); v != "" {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return App{}, fmt.Errorf("invalid BUILDER_REVIEWER_ENABLED: %q", v)
+		}
+		merged.Reviewer.Enabled = enabled
+		sources["reviewer.enabled"] = "env"
+	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_REVIEWER_MODEL")); v != "" {
+		merged.Reviewer.Model = v
+		sources["reviewer.model"] = "env"
+	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_REVIEWER_THINKING_LEVEL")); v != "" {
+		merged.Reviewer.ThinkingLevel = v
+		sources["reviewer.thinking_level"] = "env"
+	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_REVIEWER_TIMEOUT_SECONDS")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return App{}, fmt.Errorf("invalid BUILDER_REVIEWER_TIMEOUT_SECONDS: %q", v)
+		}
+		merged.Reviewer.TimeoutSeconds = n
+		sources["reviewer.timeout_seconds"] = "env"
+	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_REVIEWER_MAX_SUGGESTIONS")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return App{}, fmt.Errorf("invalid BUILDER_REVIEWER_MAX_SUGGESTIONS: %q", v)
+		}
+		merged.Reviewer.MaxSuggestions = n
+		sources["reviewer.max_suggestions"] = "env"
+	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_REVIEWER_MAX_TOOL_OUTPUT_CHARS")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return App{}, fmt.Errorf("invalid BUILDER_REVIEWER_MAX_TOOL_OUTPUT_CHARS: %q", v)
+		}
+		merged.Reviewer.MaxToolOutputChars = n
+		sources["reviewer.max_tool_output_chars"] = "env"
 	}
 	if v := strings.TrimSpace(os.Getenv("BUILDER_MODEL_TIMEOUT_SECONDS")); v != "" {
 		n, err := strconv.Atoi(v)
@@ -406,6 +499,14 @@ func defaultSettings() Settings {
 			ModelRequestSeconds: defaultModelTimeoutSeconds,
 			ShellDefaultSeconds: defaultShellTimeoutSeconds,
 		},
+		Reviewer: ReviewerSettings{
+			Enabled:            false,
+			Model:              defaultReviewerModel,
+			ThinkingLevel:      defaultReviewerThinking,
+			TimeoutSeconds:     defaultReviewerTimeoutSec,
+			MaxSuggestions:     defaultReviewerSuggestions,
+			MaxToolOutputChars: defaultReviewerToolOutput,
+		},
 	}
 }
 
@@ -455,6 +556,23 @@ func validateSettings(v Settings) error {
 		if _, ok := v.EnabledTools[id]; !ok {
 			v.EnabledTools[id] = false
 		}
+	}
+	switch strings.ToLower(strings.TrimSpace(v.Reviewer.ThinkingLevel)) {
+	case "low", "medium", "high", "xhigh":
+	default:
+		return fmt.Errorf("invalid reviewer.thinking_level %q (expected low|medium|high|xhigh)", v.Reviewer.ThinkingLevel)
+	}
+	if strings.TrimSpace(v.Reviewer.Model) == "" {
+		return fmt.Errorf("reviewer.model must not be empty")
+	}
+	if v.Reviewer.TimeoutSeconds <= 0 {
+		return fmt.Errorf("reviewer.timeout_seconds must be > 0")
+	}
+	if v.Reviewer.MaxSuggestions <= 0 {
+		return fmt.Errorf("reviewer.max_suggestions must be > 0")
+	}
+	if v.Reviewer.MaxToolOutputChars <= 0 {
+		return fmt.Errorf("reviewer.max_tool_output_chars must be > 0")
 	}
 	return nil
 }
@@ -572,6 +690,14 @@ func defaultSettingsTOML() string {
 			"model_request_seconds": defaults.Timeouts.ModelRequestSeconds,
 			"shell_default_seconds": defaults.Timeouts.ShellDefaultSeconds,
 		},
+		"reviewer": map[string]any{
+			"enabled":               defaults.Reviewer.Enabled,
+			"model":                 defaults.Reviewer.Model,
+			"thinking_level":        defaults.Reviewer.ThinkingLevel,
+			"timeout_seconds":       defaults.Reviewer.TimeoutSeconds,
+			"max_suggestions":       defaults.Reviewer.MaxSuggestions,
+			"max_tool_output_chars": defaults.Reviewer.MaxToolOutputChars,
+		},
 		"persistence_root": DefaultPersistence,
 	}
 	encoded, _ := json.MarshalIndent(payload, "", "  ")
@@ -598,7 +724,14 @@ func defaultSettingsTOML() string {
 	out += "\n" +
 		"[timeouts]\n" +
 		"model_request_seconds = " + strconv.Itoa(defaults.Timeouts.ModelRequestSeconds) + "\n" +
-		"shell_default_seconds = " + strconv.Itoa(defaults.Timeouts.ShellDefaultSeconds) + "\n"
+		"shell_default_seconds = " + strconv.Itoa(defaults.Timeouts.ShellDefaultSeconds) + "\n\n" +
+		"[reviewer]\n" +
+		"enabled = " + strconv.FormatBool(defaults.Reviewer.Enabled) + "\n" +
+		"model = \"" + defaults.Reviewer.Model + "\"\n" +
+		"thinking_level = \"" + defaults.Reviewer.ThinkingLevel + "\"\n" +
+		"timeout_seconds = " + strconv.Itoa(defaults.Reviewer.TimeoutSeconds) + "\n" +
+		"max_suggestions = " + strconv.Itoa(defaults.Reviewer.MaxSuggestions) + "\n" +
+		"max_tool_output_chars = " + strconv.Itoa(defaults.Reviewer.MaxToolOutputChars) + "\n"
 	return out
 }
 
