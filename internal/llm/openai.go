@@ -16,6 +16,7 @@ type OpenAIRequest struct {
 	Messages              []Message
 	Items                 []ResponseItem
 	Tools                 []Tool
+	StructuredOutput      *StructuredOutput
 }
 
 type OpenAIResponse struct {
@@ -81,6 +82,7 @@ func (c *OpenAIClient) Generate(ctx context.Context, request Request) (Response,
 		Messages:              append([]Message(nil), request.Messages...),
 		Items:                 CloneResponseItems(request.Items),
 		Tools:                 append([]Tool(nil), request.Tools...),
+		StructuredOutput:      request.StructuredOutput,
 	}
 
 	providerResp, err := c.transport.Generate(ctx, providerReq)
@@ -123,6 +125,7 @@ func (c *OpenAIClient) GenerateStream(ctx context.Context, request Request, onDe
 		Messages:              append([]Message(nil), request.Messages...),
 		Items:                 CloneResponseItems(request.Items),
 		Tools:                 append([]Tool(nil), request.Tools...),
+		StructuredOutput:      request.StructuredOutput,
 	}
 
 	if streamTransport, ok := c.transport.(OpenAIStreamingTransport); ok {

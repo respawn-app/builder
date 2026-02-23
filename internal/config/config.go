@@ -28,12 +28,12 @@ const (
 	defaultModelContextWindow  = 400_000
 	defaultModelTimeoutSeconds = 400
 	defaultShellTimeoutSeconds = 300
+	defaultShellOutputMaxChars = 16_000
 	defaultCompactionThreshold = 360_000
-	defaultReviewerModel       = "gpt-5-mini"
+	defaultReviewerFrequency   = "off"
 	defaultReviewerThinking    = "low"
 	defaultReviewerTimeoutSec  = 60
 	defaultReviewerSuggestions = 5
-	defaultReviewerToolOutput  = 1200
 )
 
 type LoadOptions struct {
@@ -65,16 +65,16 @@ type Settings struct {
 	UseNativeCompaction              bool
 	EnabledTools                     map[tools.ID]bool
 	Timeouts                         Timeouts
+	ShellOutputMaxChars              int
 	Reviewer                         ReviewerSettings
 }
 
 type ReviewerSettings struct {
-	Enabled            bool
-	Model              string
-	ThinkingLevel      string
-	TimeoutSeconds     int
-	MaxSuggestions     int
-	MaxToolOutputChars int
+	Frequency      string
+	Model          string
+	ThinkingLevel  string
+	TimeoutSeconds int
+	MaxSuggestions int
 }
 
 type SourceReport struct {
@@ -109,14 +109,14 @@ type fileSettings struct {
 	AllowNonCwdEdits                 *bool  `toml:"allow_non_cwd_edits"`
 	ModelContextWindow               int    `toml:"model_context_window"`
 	ContextCompactionThresholdTokens int    `toml:"context_compaction_threshold_tokens"`
+	ShellOutputMaxChars              int    `toml:"shell_output_max_chars"`
 	UseNativeCompaction              *bool  `toml:"use_native_compaction"`
 	Reviewer                         struct {
-		Enabled            *bool  `toml:"enabled"`
-		Model              string `toml:"model"`
-		ThinkingLevel      string `toml:"thinking_level"`
-		TimeoutSeconds     int    `toml:"timeout_seconds"`
-		MaxSuggestions     int    `toml:"max_suggestions"`
-		MaxToolOutputChars int    `toml:"max_tool_output_chars"`
+		Frequency      string `toml:"frequency"`
+		Model          string `toml:"model"`
+		ThinkingLevel  string `toml:"thinking_level"`
+		TimeoutSeconds int    `toml:"timeout_seconds"`
+		MaxSuggestions int    `toml:"max_suggestions"`
 	} `toml:"reviewer"`
 }
 
@@ -153,14 +153,14 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		"model_context_window":                "default",
 		"context_compaction_threshold_tokens": "default",
 		"use_native_compaction":               "default",
+		"shell_output_max_chars":              "default",
 		"timeouts.model_request":              "default",
 		"timeouts.shell_default":              "default",
-		"reviewer.enabled":                    "default",
+		"reviewer.frequency":                  "default",
 		"reviewer.model":                      "default",
 		"reviewer.thinking_level":             "default",
 		"reviewer.timeout_seconds":            "default",
 		"reviewer.max_suggestions":            "default",
-		"reviewer.max_tool_output_chars":      "default",
 	}
 	for _, id := range tools.CatalogIDs() {
 		sources["tools."+string(id)] = "default"
@@ -212,9 +212,13 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		merged.UseNativeCompaction = *cfg.UseNativeCompaction
 		sources["use_native_compaction"] = "file"
 	}
-	if cfg.Reviewer.Enabled != nil {
-		merged.Reviewer.Enabled = *cfg.Reviewer.Enabled
-		sources["reviewer.enabled"] = "file"
+	if cfg.ShellOutputMaxChars > 0 {
+		merged.ShellOutputMaxChars = cfg.ShellOutputMaxChars
+		sources["shell_output_max_chars"] = "file"
+	}
+	if strings.TrimSpace(cfg.Reviewer.Frequency) != "" {
+		merged.Reviewer.Frequency = strings.TrimSpace(cfg.Reviewer.Frequency)
+		sources["reviewer.frequency"] = "file"
 	}
 	if strings.TrimSpace(cfg.Reviewer.Model) != "" {
 		merged.Reviewer.Model = strings.TrimSpace(cfg.Reviewer.Model)
@@ -231,10 +235,6 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if cfg.Reviewer.MaxSuggestions > 0 {
 		merged.Reviewer.MaxSuggestions = cfg.Reviewer.MaxSuggestions
 		sources["reviewer.max_suggestions"] = "file"
-	}
-	if cfg.Reviewer.MaxToolOutputChars > 0 {
-		merged.Reviewer.MaxToolOutputChars = cfg.Reviewer.MaxToolOutputChars
-		sources["reviewer.max_tool_output_chars"] = "file"
 	}
 	if cfg.Timeouts.ModelRequestSeconds > 0 {
 		merged.Timeouts.ModelRequestSeconds = cfg.Timeouts.ModelRequestSeconds
@@ -324,13 +324,17 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		merged.UseNativeCompaction = enabled
 		sources["use_native_compaction"] = "env"
 	}
-	if v := strings.TrimSpace(os.Getenv("BUILDER_REVIEWER_ENABLED")); v != "" {
-		enabled, err := strconv.ParseBool(v)
-		if err != nil {
-			return App{}, fmt.Errorf("invalid BUILDER_REVIEWER_ENABLED: %q", v)
+	if v := strings.TrimSpace(os.Getenv("BUILDER_SHELL_OUTPUT_MAX_CHARS")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return App{}, fmt.Errorf("invalid BUILDER_SHELL_OUTPUT_MAX_CHARS: %q", v)
 		}
-		merged.Reviewer.Enabled = enabled
-		sources["reviewer.enabled"] = "env"
+		merged.ShellOutputMaxChars = n
+		sources["shell_output_max_chars"] = "env"
+	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_REVIEWER_FREQUENCY")); v != "" {
+		merged.Reviewer.Frequency = v
+		sources["reviewer.frequency"] = "env"
 	}
 	if v := strings.TrimSpace(os.Getenv("BUILDER_REVIEWER_MODEL")); v != "" {
 		merged.Reviewer.Model = v
@@ -355,14 +359,6 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		}
 		merged.Reviewer.MaxSuggestions = n
 		sources["reviewer.max_suggestions"] = "env"
-	}
-	if v := strings.TrimSpace(os.Getenv("BUILDER_REVIEWER_MAX_TOOL_OUTPUT_CHARS")); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n <= 0 {
-			return App{}, fmt.Errorf("invalid BUILDER_REVIEWER_MAX_TOOL_OUTPUT_CHARS: %q", v)
-		}
-		merged.Reviewer.MaxToolOutputChars = n
-		sources["reviewer.max_tool_output_chars"] = "env"
 	}
 	if v := strings.TrimSpace(os.Getenv("BUILDER_MODEL_TIMEOUT_SECONDS")); v != "" {
 		n, err := strconv.Atoi(v)
@@ -445,6 +441,10 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		}
 	}
 
+	if sources["reviewer.model"] == "default" {
+		merged.Reviewer.Model = merged.Model
+	}
+
 	if err := validateSettings(merged); err != nil {
 		return App{}, err
 	}
@@ -495,17 +495,17 @@ func defaultSettings() Settings {
 		ContextCompactionThresholdTokens: defaultCompactionThreshold,
 		UseNativeCompaction:              true,
 		EnabledTools:                     enabled,
+		ShellOutputMaxChars:              defaultShellOutputMaxChars,
 		Timeouts: Timeouts{
 			ModelRequestSeconds: defaultModelTimeoutSeconds,
 			ShellDefaultSeconds: defaultShellTimeoutSeconds,
 		},
 		Reviewer: ReviewerSettings{
-			Enabled:            false,
-			Model:              defaultReviewerModel,
-			ThinkingLevel:      defaultReviewerThinking,
-			TimeoutSeconds:     defaultReviewerTimeoutSec,
-			MaxSuggestions:     defaultReviewerSuggestions,
-			MaxToolOutputChars: defaultReviewerToolOutput,
+			Frequency:      defaultReviewerFrequency,
+			Model:          "",
+			ThinkingLevel:  defaultReviewerThinking,
+			TimeoutSeconds: defaultReviewerTimeoutSec,
+			MaxSuggestions: defaultReviewerSuggestions,
 		},
 	}
 }
@@ -543,6 +543,9 @@ func validateSettings(v Settings) error {
 	if v.Timeouts.ShellDefaultSeconds <= 0 {
 		return fmt.Errorf("timeouts.shell_default_seconds must be > 0")
 	}
+	if v.ShellOutputMaxChars <= 0 {
+		return fmt.Errorf("shell_output_max_chars must be > 0")
+	}
 	if v.ContextCompactionThresholdTokens <= 0 {
 		return fmt.Errorf("context_compaction_threshold_tokens must be > 0")
 	}
@@ -557,6 +560,11 @@ func validateSettings(v Settings) error {
 			v.EnabledTools[id] = false
 		}
 	}
+	switch strings.ToLower(strings.TrimSpace(v.Reviewer.Frequency)) {
+	case "off", "all", "edits":
+	default:
+		return fmt.Errorf("invalid reviewer.frequency %q (expected off|all|edits)", v.Reviewer.Frequency)
+	}
 	switch strings.ToLower(strings.TrimSpace(v.Reviewer.ThinkingLevel)) {
 	case "low", "medium", "high", "xhigh":
 	default:
@@ -570,9 +578,6 @@ func validateSettings(v Settings) error {
 	}
 	if v.Reviewer.MaxSuggestions <= 0 {
 		return fmt.Errorf("reviewer.max_suggestions must be > 0")
-	}
-	if v.Reviewer.MaxToolOutputChars <= 0 {
-		return fmt.Errorf("reviewer.max_tool_output_chars must be > 0")
 	}
 	return nil
 }
@@ -684,6 +689,7 @@ func defaultSettingsTOML() string {
 		"allow_non_cwd_edits":                 defaults.AllowNonCwdEdits,
 		"model_context_window":                defaults.ModelContextWindow,
 		"context_compaction_threshold_tokens": defaults.ContextCompactionThresholdTokens,
+		"shell_output_max_chars":              defaults.ShellOutputMaxChars,
 		"use_native_compaction":               defaults.UseNativeCompaction,
 		"tools":                               toolDefaults,
 		"timeouts": map[string]int{
@@ -691,12 +697,11 @@ func defaultSettingsTOML() string {
 			"shell_default_seconds": defaults.Timeouts.ShellDefaultSeconds,
 		},
 		"reviewer": map[string]any{
-			"enabled":               defaults.Reviewer.Enabled,
-			"model":                 defaults.Reviewer.Model,
-			"thinking_level":        defaults.Reviewer.ThinkingLevel,
-			"timeout_seconds":       defaults.Reviewer.TimeoutSeconds,
-			"max_suggestions":       defaults.Reviewer.MaxSuggestions,
-			"max_tool_output_chars": defaults.Reviewer.MaxToolOutputChars,
+			"frequency":       defaults.Reviewer.Frequency,
+			"model":           "<inherits model when unset>",
+			"thinking_level":  defaults.Reviewer.ThinkingLevel,
+			"timeout_seconds": defaults.Reviewer.TimeoutSeconds,
+			"max_suggestions": defaults.Reviewer.MaxSuggestions,
 		},
 		"persistence_root": DefaultPersistence,
 	}
@@ -715,6 +720,7 @@ func defaultSettingsTOML() string {
 		"allow_non_cwd_edits = " + strconv.FormatBool(defaults.AllowNonCwdEdits) + "\n" +
 		"model_context_window = " + strconv.Itoa(defaults.ModelContextWindow) + "\n" +
 		"context_compaction_threshold_tokens = " + strconv.Itoa(defaults.ContextCompactionThresholdTokens) + "\n" +
+		"shell_output_max_chars = " + strconv.Itoa(defaults.ShellOutputMaxChars) + "\n" +
 		"use_native_compaction = " + strconv.FormatBool(defaults.UseNativeCompaction) + "\n" +
 		"persistence_root = \"" + DefaultPersistence + "\"\n\n" +
 		"[tools]\n"
@@ -726,12 +732,11 @@ func defaultSettingsTOML() string {
 		"model_request_seconds = " + strconv.Itoa(defaults.Timeouts.ModelRequestSeconds) + "\n" +
 		"shell_default_seconds = " + strconv.Itoa(defaults.Timeouts.ShellDefaultSeconds) + "\n\n" +
 		"[reviewer]\n" +
-		"enabled = " + strconv.FormatBool(defaults.Reviewer.Enabled) + "\n" +
-		"model = \"" + defaults.Reviewer.Model + "\"\n" +
+		"frequency = \"" + defaults.Reviewer.Frequency + "\"\n" +
+		"# model defaults to `model` when unset\n" +
 		"thinking_level = \"" + defaults.Reviewer.ThinkingLevel + "\"\n" +
 		"timeout_seconds = " + strconv.Itoa(defaults.Reviewer.TimeoutSeconds) + "\n" +
-		"max_suggestions = " + strconv.Itoa(defaults.Reviewer.MaxSuggestions) + "\n" +
-		"max_tool_output_chars = " + strconv.Itoa(defaults.Reviewer.MaxToolOutputChars) + "\n"
+		"max_suggestions = " + strconv.Itoa(defaults.Reviewer.MaxSuggestions) + "\n"
 	return out
 }
 

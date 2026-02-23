@@ -39,7 +39,8 @@ Builder is a highly opinionated, minimal terminal coding agent for professional 
 
 These features are controversial or questionable for model performance, and usually have a better replacement.
 Here is where this project has to be highly opinionated:
-- Subagents - subagents can be separate headless Builder instances via tmux or background shells, native subagents distract the model.
+- Native subagent orchestration inside one process; use separate headless Builder instances instead.
+  - Supported path: `builder run "..."` for tmux/background subagent workflows.
 - Plan mode - the model has native plan capabilities and can always ask questions, rest is just eye candy.
 - MCPs - mcps are net negative on model performance, pollute context, and can be replaced with CLI scripts
 - Skills - skills are controversial in performance and can easily be replaced with already supported AGENTS.md mentions.

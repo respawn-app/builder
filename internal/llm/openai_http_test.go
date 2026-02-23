@@ -197,6 +197,40 @@ func TestBuildPayload_DoesNotAddNativeWebSearchToolWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestBuildPayload_AppliesStructuredOutputJSONSchema(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	payload, err := transport.buildPayload(OpenAIRequest{
+		Model: "gpt-5",
+		StructuredOutput: &StructuredOutput{
+			Name:   "reviewer_suggestions",
+			Schema: json.RawMessage(`{"type":"object","properties":{"suggestions":{"type":"array","items":{"type":"string"}}},"required":["suggestions"],"additionalProperties":false}`),
+			Strict: true,
+		},
+	}, openAIAuthMode{})
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+
+	jsonPayload := mustMarshalObject(t, payload)
+	text, ok := jsonPayload["text"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected text config in payload, got %#v", jsonPayload["text"])
+	}
+	format, ok := text["format"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected text.format config in payload, got %#v", text["format"])
+	}
+	if format["type"] != "json_schema" {
+		t.Fatalf("expected text.format.type=json_schema, got %#v", format["type"])
+	}
+	if format["name"] != "reviewer_suggestions" {
+		t.Fatalf("expected text.format.name=reviewer_suggestions, got %#v", format["name"])
+	}
+	if strict, ok := format["strict"].(bool); !ok || !strict {
+		t.Fatalf("expected text.format.strict=true, got %#v", format["strict"])
+	}
+}
+
 func TestBuildPayload_AppliesReasoningEffortForOpenAIModels(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	payload, err := transport.buildPayload(OpenAIRequest{

@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"builder/internal/config"
 	"builder/internal/session"
@@ -28,6 +30,14 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	return runSessionLifecycle(ctx, boot, strings.TrimSpace(opts.SessionID))
+}
+
+func RunPrompt(ctx context.Context, opts Options, prompt string, timeout time.Duration, progress io.Writer) (RunPromptResult, error) {
+	boot, err := bootstrapApp(ctx, opts)
+	if err != nil {
+		return RunPromptResult{}, err
+	}
+	return runPrompt(ctx, boot, strings.TrimSpace(opts.SessionID), prompt, timeout, progress)
 }
 
 func effectiveSettings(base config.Settings, locked *session.LockedContract) config.Settings {

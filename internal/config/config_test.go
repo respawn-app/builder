@@ -55,10 +55,13 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if !cfg.Settings.UseNativeCompaction {
 		t.Fatalf("expected default use_native_compaction=true")
 	}
-	if cfg.Settings.Reviewer.Enabled {
-		t.Fatalf("expected default reviewer.enabled=false")
+	if cfg.Settings.ShellOutputMaxChars != 16000 {
+		t.Fatalf("default shell_output_max_chars mismatch: %d", cfg.Settings.ShellOutputMaxChars)
 	}
-	if cfg.Settings.Reviewer.Model != "gpt-5-mini" {
+	if cfg.Settings.Reviewer.Frequency != "off" {
+		t.Fatalf("expected default reviewer.frequency=off, got %q", cfg.Settings.Reviewer.Frequency)
+	}
+	if cfg.Settings.Reviewer.Model != cfg.Settings.Model {
 		t.Fatalf("default reviewer model mismatch: %q", cfg.Settings.Reviewer.Model)
 	}
 	if cfg.Settings.Reviewer.ThinkingLevel != "low" {
@@ -70,8 +73,37 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.Reviewer.MaxSuggestions != 5 {
 		t.Fatalf("default reviewer max_suggestions mismatch: %d", cfg.Settings.Reviewer.MaxSuggestions)
 	}
-	if cfg.Settings.Reviewer.MaxToolOutputChars != 1200 {
-		t.Fatalf("default reviewer max_tool_output_chars mismatch: %d", cfg.Settings.Reviewer.MaxToolOutputChars)
+}
+
+func TestLoadReviewerModelInheritsMainModelWhenUnset(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model = \"gpt-main-file\"\n[reviewer]\nfrequency = \"all\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.Reviewer.Model != "gpt-main-file" {
+		t.Fatalf("expected reviewer.model to inherit file main model, got %q", cfg.Settings.Reviewer.Model)
+	}
+
+	t.Setenv("BUILDER_MODEL", "gpt-main-env")
+	t.Setenv("BUILDER_REVIEWER_MODEL", "")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env model: %v", err)
+	}
+	if cfg.Settings.Reviewer.Model != "gpt-main-env" {
+		t.Fatalf("expected reviewer.model to inherit env main model, got %q", cfg.Settings.Reviewer.Model)
 	}
 }
 
@@ -85,12 +117,11 @@ func TestLoadReviewerPrecedenceAndValidation(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	if err := os.WriteFile(configPath, []byte(`[reviewer]
-enabled = true
+frequency = "all"
 model = "gpt-file-reviewer"
 thinking_level = "medium"
 timeout_seconds = 45
 max_suggestions = 3
-max_tool_output_chars = 900
 `), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -99,8 +130,11 @@ max_tool_output_chars = 900
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if !cfg.Settings.Reviewer.Enabled {
-		t.Fatalf("expected file reviewer.enabled=true")
+	if cfg.Settings.Reviewer.Frequency != "all" {
+		t.Fatalf("expected file reviewer.frequency=all, got %q", cfg.Settings.Reviewer.Frequency)
+	}
+	if got := cfg.Source.Sources["reviewer.frequency"]; got != "file" {
+		t.Fatalf("expected reviewer.frequency source file, got %q", got)
 	}
 	if cfg.Settings.Reviewer.Model != "gpt-file-reviewer" {
 		t.Fatalf("expected file reviewer.model, got %q", cfg.Settings.Reviewer.Model)
@@ -109,19 +143,21 @@ max_tool_output_chars = 900
 		t.Fatalf("expected reviewer.model source file, got %q", got)
 	}
 
-	t.Setenv("BUILDER_REVIEWER_ENABLED", "false")
+	t.Setenv("BUILDER_REVIEWER_FREQUENCY", "off")
 	t.Setenv("BUILDER_REVIEWER_MODEL", "gpt-env-reviewer")
 	t.Setenv("BUILDER_REVIEWER_THINKING_LEVEL", "high")
 	t.Setenv("BUILDER_REVIEWER_TIMEOUT_SECONDS", "30")
 	t.Setenv("BUILDER_REVIEWER_MAX_SUGGESTIONS", "4")
-	t.Setenv("BUILDER_REVIEWER_MAX_TOOL_OUTPUT_CHARS", "700")
 
 	cfg, err = Load(workspace, LoadOptions{})
 	if err != nil {
 		t.Fatalf("load with env: %v", err)
 	}
-	if cfg.Settings.Reviewer.Enabled {
-		t.Fatalf("expected env reviewer.enabled=false")
+	if cfg.Settings.Reviewer.Frequency != "off" {
+		t.Fatalf("expected env reviewer.frequency=off, got %q", cfg.Settings.Reviewer.Frequency)
+	}
+	if got := cfg.Source.Sources["reviewer.frequency"]; got != "env" {
+		t.Fatalf("expected reviewer.frequency source env, got %q", got)
 	}
 	if cfg.Settings.Reviewer.Model != "gpt-env-reviewer" {
 		t.Fatalf("expected env reviewer.model, got %q", cfg.Settings.Reviewer.Model)
@@ -133,6 +169,12 @@ max_tool_output_chars = 900
 	t.Setenv("BUILDER_REVIEWER_MAX_SUGGESTIONS", "0")
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
 		t.Fatal("expected invalid reviewer max suggestions")
+	}
+
+	t.Setenv("BUILDER_REVIEWER_MAX_SUGGESTIONS", "4")
+	t.Setenv("BUILDER_REVIEWER_FREQUENCY", "sometimes")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid reviewer frequency")
 	}
 }
 
@@ -294,6 +336,48 @@ bash_default_seconds = 42
 	}
 	if cfg.Settings.Timeouts.ShellDefaultSeconds != 51 {
 		t.Fatalf("legacy bash env timeout was not mapped, got %d", cfg.Settings.Timeouts.ShellDefaultSeconds)
+	}
+}
+
+func TestLoadShellOutputMaxCharsPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("shell_output_max_chars = 12000\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.ShellOutputMaxChars != 12000 {
+		t.Fatalf("expected file shell_output_max_chars=12000, got %d", cfg.Settings.ShellOutputMaxChars)
+	}
+	if got := cfg.Source.Sources["shell_output_max_chars"]; got != "file" {
+		t.Fatalf("expected shell_output_max_chars source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_SHELL_OUTPUT_MAX_CHARS", "18000")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.ShellOutputMaxChars != 18000 {
+		t.Fatalf("expected env shell_output_max_chars=18000, got %d", cfg.Settings.ShellOutputMaxChars)
+	}
+	if got := cfg.Source.Sources["shell_output_max_chars"]; got != "env" {
+		t.Fatalf("expected shell_output_max_chars source env, got %q", got)
+	}
+
+	t.Setenv("BUILDER_SHELL_OUTPUT_MAX_CHARS", "0")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid shell_output_max_chars")
 	}
 }
 
