@@ -381,13 +381,18 @@ func (l uiViewLayout) renderSlashCommandPicker(width int) []string {
 		return nil
 	}
 	palette := uiPalette(m.theme)
-	commandStyle := lipgloss.NewStyle().Foreground(palette.primary).Bold(true)
+	selectedCommandStyle := lipgloss.NewStyle().Foreground(palette.secondary).Bold(true)
+	unselectedCommandStyle := lipgloss.NewStyle().Bold(true)
 	descriptionStyle := lipgloss.NewStyle().Foreground(palette.secondary).Faint(true)
 	out := make([]string, 0, slashCommandPickerLines)
 	for row := 0; row < slashCommandPickerLines; row++ {
 		idx := state.start + row
 		line := ""
 		if idx < len(state.matches) {
+			commandStyle := unselectedCommandStyle
+			if idx == state.selection {
+				commandStyle = selectedCommandStyle
+			}
 			line = commandStyle.Render("/" + state.matches[idx].Name)
 			description := strings.TrimSpace(state.matches[idx].Description)
 			if description != "" {
