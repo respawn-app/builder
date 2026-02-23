@@ -122,6 +122,32 @@ func TestUnknownCSICtrlBackspaceDeletesCurrentLine(t *testing.T) {
 	}
 }
 
+func TestParseUserShellCommand(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantCmd string
+		wantOK  bool
+	}{
+		{name: "basic", input: "$ pwd", wantCmd: "pwd", wantOK: true},
+		{name: "leading spaces", input: "   $   echo hi", wantCmd: "echo hi", wantOK: true},
+		{name: "empty", input: "$", wantCmd: "", wantOK: false},
+		{name: "not shell prefix", input: "echo $HOME", wantCmd: "", wantOK: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotCmd, gotOK := parseUserShellCommand(tc.input)
+			if gotOK != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", gotOK, tc.wantOK)
+			}
+			if gotCmd != tc.wantCmd {
+				t.Fatalf("command = %q, want %q", gotCmd, tc.wantCmd)
+			}
+		})
+	}
+}
+
 func TestAskQuestionTabFreeformFlow(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	reply := make(chan askReply, 1)
@@ -683,6 +709,27 @@ func TestBusyEnterLocksInputUntilFlushed(t *testing.T) {
 	}
 	if updated.input != "" {
 		t.Fatalf("expected input cleared after flush, got %q", updated.input)
+	}
+}
+
+func TestBusyEnterWithUserShellPrefixQueuesInsteadOfInjecting(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.input = "$ pwd"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if updated.inputSubmitLocked {
+		t.Fatal("did not expect submit lock for queued user shell command")
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("did not expect pending injected messages, got %d", len(updated.pendingInjected))
+	}
+	if len(updated.queued) != 1 || updated.queued[0] != "$ pwd" {
+		t.Fatalf("expected queued raw user shell input, got %+v", updated.queued)
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after queueing user shell command, got %q", updated.input)
 	}
 }
 

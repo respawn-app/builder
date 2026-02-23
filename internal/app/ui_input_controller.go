@@ -95,7 +95,14 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		_, isUserShell := parseUserShellCommand(text)
 		if m.busy {
+			if isUserShell {
+				m.queued = append(m.queued, text)
+				m.clearInput()
+				m.activity = uiActivityQueued
+				return m, nil
+			}
 			if m.engine != nil {
 				m.engine.QueueUserMessage(text)
 			}
@@ -248,14 +255,26 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (c uiInputController) startSubmission(text string) tea.Cmd {
 	m := c.model
+	command, isUserShell := parseUserShellCommand(text)
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.sawAssistantDelta = false
-	m.logf("step.start user_chars=%d", len(text))
+	if isUserShell {
+		m.logf("step.user_shell.start command_chars=%d", len(command))
+	} else {
+		m.logf("step.start user_chars=%d", len(text))
+	}
 	if m.engine == nil {
-		m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: text})
+		if isUserShell {
+			m.forwardToView(tui.AppendTranscriptMsg{Role: "tool_call", Text: command})
+		} else {
+			m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: text})
+		}
 	}
 	m.syncViewport()
+	if isUserShell {
+		return tea.Batch(c.submitUserShellCmd(command), tickSpinner())
+	}
 	return tea.Batch(c.submitCmd(text), tickSpinner())
 }
 
@@ -273,6 +292,23 @@ func (c uiInputController) submitCmd(text string) tea.Cmd {
 			return submitDoneMsg{err: err}
 		}
 		return submitDoneMsg{message: msg.Content}
+	}
+}
+
+func (c uiInputController) submitUserShellCmd(command string) tea.Cmd {
+	m := c.model
+	return func() tea.Msg {
+		if m.engine == nil {
+			return submitDoneMsg{err: errors.New("runtime engine is not configured")}
+		}
+		_, err := m.engine.SubmitUserShellCommand(context.Background(), command)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return submitDoneMsg{err: errSubmissionInterrupted}
+			}
+			return submitDoneMsg{err: err}
+		}
+		return submitDoneMsg{}
 	}
 }
 
@@ -449,4 +485,16 @@ func tickSpinner() tea.Cmd {
 	return tea.Tick(spinnerTickInterval, func(time.Time) tea.Msg {
 		return spinnerTickMsg{}
 	})
+}
+
+func parseUserShellCommand(text string) (string, bool) {
+	trimmed := strings.TrimSpace(text)
+	if !strings.HasPrefix(trimmed, "$") {
+		return "", false
+	}
+	command := strings.TrimSpace(strings.TrimPrefix(trimmed, "$"))
+	if command == "" {
+		return "", false
+	}
+	return command, true
 }
