@@ -243,6 +243,9 @@ func (l uiViewLayout) renderChatPanel(width, height int, style uiStyles) []strin
 
 func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
 	m := l.model
+	if m.rollbackMode {
+		return nil
+	}
 	if width < 1 {
 		return []string{padRight("", width)}
 	}
@@ -487,29 +490,32 @@ func (l uiViewLayout) calcChatLines() int {
 		contentWidth = 1
 	}
 
-	inputContentLines := 1
-	if m.activeAsk != nil {
-		lines := splitPlainLines(m.renderAskPrompt())
-		inputContentLines = 0
-		for _, line := range lines {
-			inputContentLines += len(wrapLine(line, contentWidth))
+	inputLines := 0
+	if !m.rollbackMode {
+		inputContentLines := 1
+		if m.activeAsk != nil {
+			lines := splitPlainLines(m.renderAskPrompt())
+			inputContentLines = 0
+			for _, line := range lines {
+				inputContentLines += len(wrapLine(line, contentWidth))
+			}
+		} else {
+			text := m.input
+			wrapped := wrapLine("› "+text, contentWidth)
+			inputContentLines = len(wrapped)
 		}
-	} else {
-		text := m.input
-		wrapped := wrapLine("› "+text, contentWidth)
-		inputContentLines = len(wrapped)
+		if inputContentLines < 1 {
+			inputContentLines = 1
+		}
+		maxContentLines := height - 4
+		if maxContentLines < 1 {
+			maxContentLines = 1
+		}
+		if inputContentLines > maxContentLines {
+			inputContentLines = maxContentLines
+		}
+		inputLines = inputContentLines + 2
 	}
-	if inputContentLines < 1 {
-		inputContentLines = 1
-	}
-	maxContentLines := height - 4
-	if maxContentLines < 1 {
-		maxContentLines = 1
-	}
-	if inputContentLines > maxContentLines {
-		inputContentLines = maxContentLines
-	}
-	inputLines := inputContentLines + 2
 	queuedLines := l.queuedPaneLineCount()
 	pickerLines := 0
 	if m.slashCommandPicker().visible {
@@ -532,7 +538,7 @@ func (l uiViewLayout) syncViewport() {
 
 func (l uiViewLayout) shouldRenderSoftCursor() bool {
 	m := l.model
-	return !m.inputSubmitLocked && m.activeAsk == nil
+	return !m.inputSubmitLocked && m.activeAsk == nil && !m.rollbackMode
 }
 
 func (m *uiModel) renderStatusLine(width int, style uiStyles) string {

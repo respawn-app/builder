@@ -22,12 +22,12 @@ import (
 )
 
 const (
-	interruptMessage          = "User interrupted you"
-	agentsFileName            = "AGENTS.md"
-	agentsGlobalDirName       = ".builder"
-	agentsInjectedHeader      = "# AGENTS.md content:"
-	agentsInjectedFenceLabel  = "md"
-	environmentInjectedHeader = "# Info about environment:"
+	interruptMessage                  = "User interrupted you"
+	agentsFileName                    = "AGENTS.md"
+	agentsGlobalDirName               = ".builder"
+	agentsInjectedHeader              = "# AGENTS.md content:"
+	agentsInjectedFenceLabel          = "md"
+	environmentInjectedHeader         = "# Info about environment:"
 	commentaryWithoutToolCallsWarning = "You sent a commentary-phase message without tool calls. This is wrong. If you intend to keep working, include tool calls with commentary updates. If you are done, send a final_answer phase message with no tool calls."
 	finalWithToolCallsIgnoredWarning  = "You included tool calls with your final answer message. This is wrong, and your tool calls were ignored. If you intended to call the tools, include updates in the \"commentary\" channel along with tool calls. Otherwise, do not include tool calls with your final message responses"
 )
@@ -1074,6 +1074,22 @@ func (e *Engine) SetOngoingError(text string) {
 func (e *Engine) ClearOngoingError() {
 	e.chat.clearOngoingError()
 	e.emit(Event{Kind: EventConversationUpdated, StepID: ""})
+}
+
+func (e *Engine) SetSessionName(name string) error {
+	return e.store.SetName(name)
+}
+
+func (e *Engine) SessionName() string {
+	return strings.TrimSpace(e.store.Meta().Name)
+}
+
+func (e *Engine) SessionID() string {
+	return strings.TrimSpace(e.store.Meta().SessionID)
+}
+
+func (e *Engine) ParentSessionID() string {
+	return strings.TrimSpace(e.store.Meta().ParentSessionID)
 }
 
 func mustJSON(v any) json.RawMessage {

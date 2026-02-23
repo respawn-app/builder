@@ -22,6 +22,15 @@ func TestExecuteBuiltins(t *testing.T) {
 	if got := r.Execute("/compact keep API details"); got.Action != ActionCompact || got.Args != "keep API details" {
 		t.Fatalf("expected ActionCompact with args, got %+v", got)
 	}
+	if got := r.Execute("/name incident triage"); got.Action != ActionSetName || got.SessionName != "incident triage" {
+		t.Fatalf("expected ActionSetName with title, got %+v", got)
+	}
+	if got := r.Execute("/name"); got.Action != ActionSetName || got.SessionName != "" {
+		t.Fatalf("expected ActionSetName reset, got %+v", got)
+	}
+	if got := r.Execute("/back"); got.Action != ActionBack {
+		t.Fatalf("expected ActionBack, got %+v", got)
+	}
 	got := r.Execute("/review src/internal/app")
 	if !got.Handled || !got.SubmitUser {
 		t.Fatalf("expected /review to submit a user prompt, got %+v", got)

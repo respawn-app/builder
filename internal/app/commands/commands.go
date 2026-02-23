@@ -16,6 +16,8 @@ const (
 	ActionResume    Action = "resume"
 	ActionLogout    Action = "logout"
 	ActionCompact   Action = "compact"
+	ActionSetName   Action = "set_name"
+	ActionBack      Action = "back"
 	ActionUnhandled Action = "unhandled"
 )
 
@@ -27,6 +29,7 @@ type Result struct {
 	SubmitUser        bool
 	User              string
 	FreshConversation bool
+	SessionName       string
 }
 
 type Handler func(args string) Result
@@ -65,6 +68,12 @@ func NewDefaultRegistry() *Registry {
 	})
 	r.Register("compact", "Compact the current context (optional: /compact <instructions>)", func(args string) Result {
 		return Result{Handled: true, Action: ActionCompact, Args: strings.TrimSpace(args)}
+	})
+	r.Register("name", "Set session title and terminal title (usage: /name <title>; empty resets)", func(args string) Result {
+		return Result{Handled: true, Action: ActionSetName, SessionName: strings.TrimSpace(args)}
+	})
+	r.Register("back", "Jump to parent session if current session was spawned from another", func(string) Result {
+		return Result{Handled: true, Action: ActionBack}
 	})
 	registerPromptCommands(r, []promptCommandSpec{
 		{

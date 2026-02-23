@@ -64,7 +64,25 @@ func (m *uiModel) currentSlashCommandMatches(token string) []commands.Command {
 	if m.commandRegistry == nil {
 		return nil
 	}
-	return m.commandRegistry.Match(m.currentSlashCommandQuery(token))
+	matches := m.commandRegistry.Match(m.currentSlashCommandQuery(token))
+	if m.hasParentSession() {
+		return matches
+	}
+	filtered := make([]commands.Command, 0, len(matches))
+	for _, command := range matches {
+		if strings.TrimSpace(command.Name) == "back" {
+			continue
+		}
+		filtered = append(filtered, command)
+	}
+	return filtered
+}
+
+func (m *uiModel) hasParentSession() bool {
+	if m.engine == nil {
+		return false
+	}
+	return strings.TrimSpace(m.engine.ParentSessionID()) != ""
 }
 
 func (m *uiModel) clampSlashCommandSelection() {
@@ -81,6 +99,9 @@ func (m *uiModel) clampSlashCommandSelection() {
 }
 
 func (m *uiModel) slashCommandPicker() slashCommandPickerState {
+	if m.rollbackMode {
+		return slashCommandPickerState{}
+	}
 	active, token, argumentMode := parseSlashCommandInput(m.input)
 	if !active || argumentMode || m.inputSubmitLocked || m.activeAsk != nil {
 		return slashCommandPickerState{}
