@@ -28,6 +28,8 @@ const (
 	agentsInjectedHeader      = "# AGENTS.md content:"
 	agentsInjectedFenceLabel  = "md"
 	environmentInjectedHeader = "# Info about environment:"
+	commentaryWithoutToolCallsWarning = "You sent a commentary-phase message without tool calls. This is wrong. If you intend to keep working, include tool calls with commentary updates. If you are done, send a final_answer phase message with no tool calls."
+	finalWithToolCallsIgnoredWarning  = "You included tool calls with your final answer message. This is wrong, and your tool calls were ignored. If you intended to call the tools, include updates in the \"commentary\" channel along with tool calls. Otherwise, do not include tool calls with your final message responses"
 )
 
 type Config struct {
@@ -222,6 +224,94 @@ func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (assistant 
 	return assistant, nil
 }
 
+func (e *Engine) SubmitUserShellCommand(ctx context.Context, command string) (result tools.Result, err error) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return tools.Result{}, errors.New("empty command")
+	}
+
+	e.mu.Lock()
+	if e.busy {
+		e.mu.Unlock()
+		return tools.Result{}, errors.New("agent is busy")
+	}
+	e.busy = true
+	stepCtx, cancel := context.WithCancel(ctx)
+	e.cancelCurrent = cancel
+	e.mu.Unlock()
+	stepID := ""
+	defer func() {
+		e.mu.Lock()
+		e.busy = false
+		e.cancelCurrent = nil
+		e.mu.Unlock()
+		if clearErr := e.store.MarkInFlight(false); clearErr != nil {
+			wrapped := fmt.Errorf("mark in-flight false: %w", clearErr)
+			e.emit(Event{Kind: EventInFlightClearFailed, StepID: stepID, Error: wrapped.Error()})
+			err = errors.Join(err, wrapped)
+		}
+	}()
+
+	if err = e.store.MarkInFlight(true); err != nil {
+		return tools.Result{}, err
+	}
+
+	stepID = uuid.NewString()
+
+	if err = e.injectAgentsIfNeeded(stepID); err != nil {
+		return tools.Result{}, err
+	}
+	if err = e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, Content: fmt.Sprintf("User ran shell command directly:\n%s", command)}); err != nil {
+		return tools.Result{}, err
+	}
+
+	call := llm.ToolCall{
+		ID:   uuid.NewString(),
+		Name: string(tools.ToolShell),
+		Input: mustJSON(map[string]any{
+			"command":        command,
+			"user_initiated": true,
+		}),
+	}
+	if err = e.appendAssistantMessage(stepID, llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call}}); err != nil {
+		return tools.Result{}, err
+	}
+
+	e.emit(Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: &call})
+	h, ok := e.registry.Get(tools.ToolShell)
+	if !ok {
+		result = tools.Result{CallID: call.ID, Name: tools.ToolShell, IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
+		if err = e.persistToolCompletion(stepID, result); err != nil {
+			return result, fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", call.ID, result.Name, err)
+		}
+		e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: &result})
+		if appendErr := e.appendMessage(stepID, llm.Message{Role: llm.RoleTool, Content: string(result.Output), ToolCallID: result.CallID, Name: string(result.Name)}); appendErr != nil {
+			return result, appendErr
+		}
+		return result, errors.New("unknown tool")
+	}
+
+	result, err = h.Call(stepCtx, tools.Call{ID: call.ID, Name: tools.ToolShell, Input: call.Input, StepID: stepID})
+	if result.Name == "" {
+		result.Name = tools.ToolShell
+	}
+	if result.CallID == "" {
+		result.CallID = call.ID
+	}
+	if err != nil {
+		result = tools.Result{CallID: call.ID, Name: tools.ToolShell, IsError: true, Output: mustJSON(map[string]any{"error": err.Error()})}
+	}
+	if persistErr := e.persistToolCompletion(stepID, result); persistErr != nil {
+		return result, errors.Join(err, fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", call.ID, result.Name, persistErr))
+	}
+	e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: &result})
+	if appendErr := e.appendMessage(stepID, llm.Message{Role: llm.RoleTool, Content: string(result.Output), ToolCallID: result.CallID, Name: string(result.Name)}); appendErr != nil {
+		return result, errors.Join(err, appendErr)
+	}
+
+	return result, err
+}
+
 func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, error) {
 	for {
 		if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
@@ -254,6 +344,7 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 
 		localToolCalls := append([]llm.ToolCall(nil), resp.ToolCalls...)
 		hostedToolExecutions := hostedToolExecutionsFromOutputItems(resp.OutputItems)
+		finalAnswerIncludedToolCalls := false
 
 		assistantMsg := resp.Assistant
 		if len(localToolCalls) > 0 {
@@ -267,11 +358,22 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 		if len(resp.ReasoningItems) > 0 && len(assistantMsg.ReasoningItems) == 0 {
 			assistantMsg.ReasoningItems = append([]llm.ReasoningItem(nil), resp.ReasoningItems...)
 		}
+		if assistantMsg.Phase == llm.MessagePhaseFinal && (len(localToolCalls) > 0 || len(hostedToolExecutions) > 0) {
+			finalAnswerIncludedToolCalls = true
+			localToolCalls = nil
+			hostedToolExecutions = nil
+			assistantMsg.ToolCalls = nil
+		}
 		if err := e.appendAssistantMessage(stepID, assistantMsg); err != nil {
 			return llm.Message{}, err
 		}
 		if err := e.appendReasoningEntries(stepID, resp.Reasoning); err != nil {
 			return llm.Message{}, err
+		}
+		if finalAnswerIncludedToolCalls {
+			if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, Content: finalWithToolCallsIgnoredWarning}); err != nil {
+				return llm.Message{}, err
+			}
 		}
 
 		for _, hosted := range hostedToolExecutions {
@@ -290,6 +392,18 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 		}
 
 		if len(localToolCalls) == 0 {
+			if assistantMsg.Phase == llm.MessagePhaseCommentary {
+				if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, Content: commentaryWithoutToolCallsWarning}); err != nil {
+					return llm.Message{}, err
+				}
+				if _, err := e.flushPendingUserInjections(stepID); err != nil {
+					return llm.Message{}, err
+				}
+				if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
+					return llm.Message{}, err
+				}
+				continue
+			}
 			flushed, err := e.flushPendingUserInjections(stepID)
 			if err != nil {
 				return llm.Message{}, err
