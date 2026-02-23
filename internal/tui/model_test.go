@@ -872,6 +872,36 @@ func TestRenderEntryTextSkipsHighlightWhenMuted(t *testing.T) {
 	}
 }
 
+func TestDetailShellUserInitiatedCallUsesUserRanLabel(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       "pwd",
+		ToolCallID: "call_1",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:      "shell",
+			IsShell:       true,
+			UserInitiated: true,
+			Command:       "pwd",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "/tmp", ToolCallID: "call_1"})
+
+	ongoing := plainTranscript(m.View())
+	if strings.Contains(ongoing, "User ran:") {
+		t.Fatalf("did not expect ongoing view label to change, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detail := plainTranscript(m.View())
+	if !strings.Contains(detail, "User ran: pwd") {
+		t.Fatalf("expected detailed shell label to include user-ran text, got %q", detail)
+	}
+	if !strings.Contains(detail, "/tmp") {
+		t.Fatalf("expected detailed shell block to include output, got %q", detail)
+	}
+}
+
 type errString string
 
 func (e errString) Error() string {

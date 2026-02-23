@@ -193,6 +193,23 @@ func TestFormatToolCallShellAddsShellMetadata(t *testing.T) {
 	}
 }
 
+func TestFormatToolCallShellCapturesUserInitiatedMarker(t *testing.T) {
+	s := newChatStore()
+	call := llm.ToolCall{
+		ID:    "call_shell_user",
+		Name:  string(tools.ToolShell),
+		Input: json.RawMessage(`{"command":"pwd","user_initiated":true}`),
+	}
+
+	rendered := s.formatToolCall(call)
+	if rendered.ToolCall == nil {
+		t.Fatalf("expected tool metadata, got nil")
+	}
+	if !rendered.ToolCall.UserInitiated {
+		t.Fatalf("expected user initiated shell metadata, got %+v", rendered.ToolCall)
+	}
+}
+
 func TestFormatToolCallAskQuestionUsesQuestionAndSuggestionsMeta(t *testing.T) {
 	s := newChatStore()
 	call := llm.ToolCall{

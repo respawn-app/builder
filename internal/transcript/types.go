@@ -16,15 +16,16 @@ type ToolRenderHint struct {
 }
 
 type ToolCallMeta struct {
-	ToolName     string
-	IsShell      bool
-	Command      string
-	TimeoutLabel string
-	PatchSummary string
-	PatchDetail  string
-	RenderHint   *ToolRenderHint
-	Question     string
-	Suggestions  []string
+	ToolName      string
+	IsShell       bool
+	UserInitiated bool
+	Command       string
+	TimeoutLabel  string
+	PatchSummary  string
+	PatchDetail   string
+	RenderHint    *ToolRenderHint
+	Question      string
+	Suggestions   []string
 }
 
 func (m *ToolCallMeta) HasPatchDetail() bool {

@@ -263,6 +263,9 @@ func (s *chatStore) formatToolCall(call llm.ToolCall) ChatEntry {
 		ToolName: toolName,
 		IsShell:  toolName == string(tools.ToolShell),
 	}
+	if meta.IsShell {
+		meta.UserInitiated = parseShellToolCallUserInitiated(call.Input)
+	}
 	if toolName == string(tools.ToolAskQuestion) {
 		if question, suggestions, ok := formatAskQuestionToolCall(call.Input); ok {
 			meta.Command = question
@@ -316,6 +319,16 @@ func (s *chatStore) formatToolCall(call llm.ToolCall) ChatEntry {
 		ToolCallID: strings.TrimSpace(call.ID),
 		ToolCall:   meta,
 	}
+}
+
+func parseShellToolCallUserInitiated(raw json.RawMessage) bool {
+	var in struct {
+		UserInitiated bool `json:"user_initiated"`
+	}
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return false
+	}
+	return in.UserInitiated
 }
 
 func formatAskQuestionToolCall(raw json.RawMessage) (string, []string, bool) {

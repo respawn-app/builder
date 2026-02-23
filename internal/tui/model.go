@@ -904,6 +904,9 @@ func toolCallDisplayText(meta *transcript.ToolCallMeta, text string) string {
 	if command == "" {
 		command = "tool call"
 	}
+	if meta != nil && meta.IsShell && meta.UserInitiated {
+		command = "User ran: " + command
+	}
 	if meta == nil || strings.TrimSpace(meta.TimeoutLabel) == "" {
 		return command
 	}
