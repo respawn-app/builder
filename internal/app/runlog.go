@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,9 @@ type runLogger struct {
 func newRunLogger(sessionDir string) (*runLogger, error) {
 	fp, err := os.OpenFile(filepath.Join(sessionDir, runLogFileName), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return &runLogger{}, nil
+		}
 		return nil, fmt.Errorf("open run log: %w", err)
 	}
 	return &runLogger{fp: fp}, nil

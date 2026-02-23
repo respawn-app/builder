@@ -8,6 +8,42 @@ import (
 	"testing"
 )
 
+func TestNewLazyDoesNotPersistUntilFirstWrite(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewLazy(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("new lazy store: %v", err)
+	}
+	if _, err := os.Stat(store.Dir()); !os.IsNotExist(err) {
+		t.Fatalf("expected no session dir before first write, stat err=%v", err)
+	}
+
+	if _, err := store.AppendEvent("step1", "message", map[string]any{"a": 1}); err != nil {
+		t.Fatalf("append event: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(store.Dir(), sessionFile)); err != nil {
+		t.Fatalf("expected session metadata after first write: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(store.Dir(), eventsFile)); err != nil {
+		t.Fatalf("expected events file after first write: %v", err)
+	}
+}
+
+func TestNewLazyReadEventsBeforePersistReturnsEmpty(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewLazy(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("new lazy store: %v", err)
+	}
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("events len = %d, want 0", len(events))
+	}
+}
+
 func TestAppendEventMonotonicSequence(t *testing.T) {
 	root := t.TempDir()
 	store, err := Create(root, "workspace-x", "/tmp/work")

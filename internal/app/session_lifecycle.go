@@ -13,11 +13,13 @@ import (
 func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionID string) error {
 	currentSessionID := strings.TrimSpace(initialSessionID)
 	nextSessionInitialPrompt := ""
+	forceNewSession := false
 	for {
-		store, err := openOrCreateSession(boot.containerDir, currentSessionID, boot.cfg.WorkspaceRoot, boot.cfg.Settings.Theme)
+		store, err := openOrCreateSession(boot.containerDir, currentSessionID, boot.cfg.WorkspaceRoot, boot.cfg.Settings.Theme, forceNewSession)
 		if err != nil {
 			return err
 		}
+		forceNewSession = false
 
 		active := effectiveSettings(boot.cfg.Settings, store.Meta().Locked)
 		enabledTools := activeToolIDs(active, store.Meta().Locked)
@@ -52,7 +54,7 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 		}
 
 		transition := extractUITransition(finalModel)
-		nextSessionID, initialPrompt, shouldContinue, err := resolveSessionAction(ctx, boot, store, transition)
+		nextSessionID, initialPrompt, nextForceNewSession, shouldContinue, err := resolveSessionAction(ctx, boot, store, transition)
 		if err != nil {
 			return err
 		}
@@ -61,35 +63,36 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 		}
 		currentSessionID = nextSessionID
 		nextSessionInitialPrompt = initialPrompt
+		forceNewSession = nextForceNewSession
 	}
 }
 
-func resolveSessionAction(ctx context.Context, boot appBootstrap, store *session.Store, transition UITransition) (string, string, bool, error) {
+func resolveSessionAction(ctx context.Context, boot appBootstrap, store *session.Store, transition UITransition) (string, string, bool, bool, error) {
 	switch transition.Action {
 	case UIActionNewSession:
-		newStore, err := session.Create(boot.containerDir, filepath.Base(boot.containerDir), boot.cfg.WorkspaceRoot)
-		if err != nil {
-			return "", "", false, err
-		}
-		return newStore.Meta().SessionID, transition.InitialPrompt, true, nil
+		return "", transition.InitialPrompt, true, true, nil
 	case UIActionResume:
-		return "", "", true, nil
+		return "", "", false, true, nil
 	case UIActionLogout:
 		if _, err := boot.authManager.ClearMethod(ctx, true); err != nil {
-			return "", "", false, err
+			return "", "", false, false, err
 		}
 		if err := ensureAuthReady(ctx, boot.authManager, boot.oauthOpts); err != nil {
-			return "", "", false, err
+			return "", "", false, false, err
 		}
-		return store.Meta().SessionID, "", true, nil
+		return store.Meta().SessionID, "", false, true, nil
 	default:
-		return "", "", false, nil
+		return "", "", false, false, nil
 	}
 }
 
-func openOrCreateSession(containerDir, selectedID, workspaceRoot, theme string) (*session.Store, error) {
+func openOrCreateSession(containerDir, selectedID, workspaceRoot, theme string, forceNew bool) (*session.Store, error) {
 	if strings.TrimSpace(selectedID) != "" {
 		return session.Open(filepath.Join(containerDir, selectedID))
+	}
+	if forceNew {
+		containerName := filepath.Base(containerDir)
+		return session.NewLazy(containerDir, containerName, workspaceRoot)
 	}
 
 	summaries, err := session.ListSessions(containerDir)
@@ -98,7 +101,7 @@ func openOrCreateSession(containerDir, selectedID, workspaceRoot, theme string) 
 	}
 	if len(summaries) == 0 {
 		containerName := filepath.Base(containerDir)
-		return session.Create(containerDir, containerName, workspaceRoot)
+		return session.NewLazy(containerDir, containerName, workspaceRoot)
 	}
 
 	picked, err := runSessionPicker(summaries, theme)
@@ -110,7 +113,7 @@ func openOrCreateSession(containerDir, selectedID, workspaceRoot, theme string) 
 	}
 	if picked.CreateNew {
 		containerName := filepath.Base(containerDir)
-		return session.Create(containerDir, containerName, workspaceRoot)
+		return session.NewLazy(containerDir, containerName, workspaceRoot)
 	}
 	if picked.Session == nil {
 		return nil, errors.New("no session selected")
