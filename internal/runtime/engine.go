@@ -327,19 +327,20 @@ func (e *Engine) SubmitUserShellCommand(ctx context.Context, command string) (re
 }
 
 func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, error) {
-	return e.runStepLoopWithOptions(ctx, stepID, true, true)
+	msg, _, err := e.runStepLoopWithOptions(ctx, stepID, true, true)
+	return msg, err
 }
 
-func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allowReviewer bool, emitAssistantEvent bool) (llm.Message, error) {
+func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allowReviewer bool, emitAssistantEvent bool) (llm.Message, bool, error) {
 	executedToolCall := false
 	for {
 		if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
-			return llm.Message{}, err
+			return llm.Message{}, executedToolCall, err
 		}
 
 		req, err := e.buildRequest(ctx, stepID, true)
 		if err != nil {
-			return llm.Message{}, err
+			return llm.Message{}, executedToolCall, err
 		}
 
 		resp, err := e.generateWithRetry(
@@ -357,7 +358,7 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 			},
 		)
 		if err != nil {
-			return llm.Message{}, err
+			return llm.Message{}, executedToolCall, err
 		}
 		e.setLastUsage(resp.Usage)
 
@@ -387,20 +388,20 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 			assistantMsg.ToolCalls = nil
 		}
 		if err := e.appendAssistantMessage(stepID, assistantMsg); err != nil {
-			return llm.Message{}, err
+			return llm.Message{}, executedToolCall, err
 		}
 		if err := e.appendReasoningEntries(stepID, resp.Reasoning); err != nil {
-			return llm.Message{}, err
+			return llm.Message{}, executedToolCall, err
 		}
 		if finalAnswerIncludedToolCalls {
 			if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, Content: finalWithToolCallsIgnoredWarning}); err != nil {
-				return llm.Message{}, err
+				return llm.Message{}, executedToolCall, err
 			}
 		}
 
 		for _, hosted := range hostedToolExecutions {
 			if err := e.persistToolCompletion(stepID, hosted.Result); err != nil {
-				return llm.Message{}, err
+				return llm.Message{}, executedToolCall, err
 			}
 			msg := llm.Message{
 				Role:       llm.RoleTool,
@@ -409,26 +410,26 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 				Name:       string(hosted.Result.Name),
 			}
 			if err := e.appendMessage(stepID, msg); err != nil {
-				return llm.Message{}, err
+				return llm.Message{}, executedToolCall, err
 			}
 		}
 
 		if len(localToolCalls) == 0 {
 			if assistantMsg.Phase == llm.MessagePhaseCommentary {
 				if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, Content: commentaryWithoutToolCallsWarning}); err != nil {
-					return llm.Message{}, err
+					return llm.Message{}, executedToolCall, err
 				}
 				if _, err := e.flushPendingUserInjections(stepID); err != nil {
-					return llm.Message{}, err
+					return llm.Message{}, executedToolCall, err
 				}
 				if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
-					return llm.Message{}, err
+					return llm.Message{}, executedToolCall, err
 				}
 				continue
 			}
 			flushed, err := e.flushPendingUserInjections(stepID)
 			if err != nil {
-				return llm.Message{}, err
+				return llm.Message{}, executedToolCall, err
 			}
 			if flushed > 0 {
 				continue
@@ -446,12 +447,12 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 			if emitAssistantEvent {
 				e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: resolved})
 			}
-			return resolved, nil
+			return resolved, executedToolCall, nil
 		}
 
 		results, err := e.executeToolCalls(ctx, stepID, localToolCalls)
 		if err != nil {
-			return llm.Message{}, err
+			return llm.Message{}, executedToolCall, err
 		}
 
 		for _, r := range results {
@@ -462,20 +463,21 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 				Name:       string(r.Name),
 			}
 			if err := e.appendMessage(stepID, msg); err != nil {
-				return llm.Message{}, err
+				return llm.Message{}, executedToolCall, err
 			}
 		}
 
 		if _, err := e.flushPendingUserInjections(stepID); err != nil {
-			return llm.Message{}, err
+			return llm.Message{}, executedToolCall, err
 		}
 		if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
-			return llm.Message{}, err
+			return llm.Message{}, executedToolCall, err
 		}
 	}
 }
 
 func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, original llm.Message) (llm.Message, error) {
+	baselineItems := e.snapshotItems()
 	suggestions, err := e.runReviewerSuggestions(ctx)
 	if err != nil || len(suggestions) == 0 {
 		return original, nil
@@ -486,11 +488,17 @@ func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, origina
 		return original, err
 	}
 
-	followUp, err := e.runStepLoopWithOptions(ctx, stepID, false, false)
+	followUp, followUpExecutedToolCall, err := e.runStepLoopWithOptions(ctx, stepID, false, false)
 	if err != nil {
+		if !followUpExecutedToolCall {
+			_ = e.replaceHistory(stepID, "reviewer_rollback", compactionModeManual, baselineItems)
+		}
 		return original, nil
 	}
 	if strings.TrimSpace(followUp.Content) == reviewerNoopToken {
+		if !followUpExecutedToolCall {
+			_ = e.replaceHistory(stepID, "reviewer_rollback", compactionModeManual, baselineItems)
+		}
 		return original, nil
 	}
 	return followUp, nil
@@ -1222,8 +1230,12 @@ func (e *Engine) restoreMessages() error {
 			if err := json.Unmarshal(evt.Payload, &payload); err != nil {
 				return fmt.Errorf("decode history_replaced event: %w", err)
 			}
-			e.chat.replaceHistory(payload.Items)
-			e.compactionCount++
+			if strings.TrimSpace(payload.Engine) == "reviewer_rollback" {
+				e.chat.restoreMessagesFromItems(payload.Items)
+			} else {
+				e.chat.replaceHistory(payload.Items)
+				e.compactionCount++
+			}
 		}
 	}
 	return nil

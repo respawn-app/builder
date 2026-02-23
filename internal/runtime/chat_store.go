@@ -92,6 +92,15 @@ func (s *chatStore) replaceHistory(items []llm.ResponseItem) {
 	}
 }
 
+func (s *chatStore) restoreMessagesFromItems(items []llm.ResponseItem) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	restored := llm.CloneResponseItems(items)
+	s.messages = llm.MessagesFromItems(restored)
+	s.items = restored
+	s.compact = nil
+}
+
 func (s *chatStore) snapshotItems() []llm.ResponseItem {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
