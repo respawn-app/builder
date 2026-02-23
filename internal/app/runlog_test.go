@@ -36,6 +36,21 @@ func TestRunLoggerWritesStepsFile(t *testing.T) {
 	}
 }
 
+func TestNewRunLoggerNoopsWhenSessionDirDoesNotExist(t *testing.T) {
+	missingDir := filepath.Join(t.TempDir(), "missing-session")
+	logger, err := newRunLogger(missingDir)
+	if err != nil {
+		t.Fatalf("new run logger: %v", err)
+	}
+	logger.Logf("hello %s", "world")
+	if err := logger.Close(); err != nil {
+		t.Fatalf("close run logger: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(missingDir, runLogFileName)); !os.IsNotExist(err) {
+		t.Fatalf("expected no run log file for non-persisted session, stat err=%v", err)
+	}
+}
+
 func TestFormatRuntimeEventIncludesToolMetadata(t *testing.T) {
 	call := llm.ToolCall{ID: "call-1", Name: "shell"}
 	line := formatRuntimeEvent(runtime.Event{

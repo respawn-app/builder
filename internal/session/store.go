@@ -28,39 +28,39 @@ type Store struct {
 	sessionFP  string
 	eventsFP   string
 	meta       Meta
+	persisted  bool
 }
 
 func Create(workspaceContainerDir, workspaceContainerName, workspaceRoot string) (*Store, error) {
+	s, err := NewLazy(workspaceContainerDir, workspaceContainerName, workspaceRoot)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.ensurePersistedLocked(); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+func NewLazy(workspaceContainerDir, workspaceContainerName, workspaceRoot string) (*Store, error) {
 	sid := uuid.NewString()
 	sessionDir := filepath.Join(workspaceContainerDir, sid)
-	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create session dir: %w", err)
-	}
-
 	now := time.Now().UTC()
-	meta := Meta{
-		SessionID:          sid,
-		WorkspaceRoot:      workspaceRoot,
-		WorkspaceContainer: workspaceContainerName,
-		CreatedAt:          now,
-		UpdatedAt:          now,
-	}
-
-	s := &Store{
+	return &Store{
 		sessionDir: sessionDir,
 		sessionFP:  filepath.Join(sessionDir, sessionFile),
 		eventsFP:   filepath.Join(sessionDir, eventsFile),
-		meta:       meta,
-	}
-
-	if err := s.persistMetaLocked(); err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(s.eventsFP, nil, 0o644); err != nil {
-		return nil, fmt.Errorf("initialize events file: %w", err)
-	}
-
-	return s, nil
+		meta: Meta{
+			SessionID:          sid,
+			WorkspaceRoot:      workspaceRoot,
+			WorkspaceContainer: workspaceContainerName,
+			CreatedAt:          now,
+			UpdatedAt:          now,
+		},
+		persisted: false,
+	}, nil
 }
 
 func Open(sessionDir string) (*Store, error) {
@@ -68,6 +68,7 @@ func Open(sessionDir string) (*Store, error) {
 		sessionDir: sessionDir,
 		sessionFP:  filepath.Join(sessionDir, sessionFile),
 		eventsFP:   filepath.Join(sessionDir, eventsFile),
+		persisted:  true,
 	}
 	if err := s.loadMetaLocked(); err != nil {
 		return nil, err
@@ -216,6 +217,9 @@ type EventInput struct {
 func (s *Store) ReadEvents() ([]Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.persisted {
+		return nil, nil
+	}
 
 	fp, err := os.Open(s.eventsFP)
 	if err != nil {
@@ -266,6 +270,9 @@ func (s *Store) loadMetaLocked() error {
 }
 
 func (s *Store) persistMetaLocked() error {
+	if err := s.ensurePersistedLocked(); err != nil {
+		return err
+	}
 	data, err := json.MarshalIndent(s.meta, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal session meta: %w", err)
@@ -281,6 +288,9 @@ func (s *Store) persistMetaLocked() error {
 }
 
 func (s *Store) appendEventsAtomicLocked(events []Event) error {
+	if err := s.ensurePersistedLocked(); err != nil {
+		return err
+	}
 	existing, err := os.ReadFile(s.eventsFP)
 	if err != nil {
 		return fmt.Errorf("read events file: %w", err)
@@ -315,5 +325,19 @@ func (s *Store) appendEventsAtomicLocked(events []Event) error {
 	if err := s.persistMetaLocked(); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (s *Store) ensurePersistedLocked() error {
+	if s.persisted {
+		return nil
+	}
+	if err := os.MkdirAll(s.sessionDir, 0o755); err != nil {
+		return fmt.Errorf("create session dir: %w", err)
+	}
+	if err := os.WriteFile(s.eventsFP, nil, 0o644); err != nil {
+		return fmt.Errorf("initialize events file: %w", err)
+	}
+	s.persisted = true
 	return nil
 }
