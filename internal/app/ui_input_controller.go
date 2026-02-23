@@ -21,14 +21,49 @@ type uiInputController struct {
 var spinnerFrames = []string{"|", "/", "-", "\\"}
 var spinnerTickInterval = 360 * time.Millisecond
 var errSubmissionInterrupted = errors.New("interrupted")
+var rollbackDoubleEscWindow = 500 * time.Millisecond
 
 func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := c.model
 	keyString := strings.ToLower(msg.String())
+	if msg.Type != tea.KeyEsc {
+		m.lastEscAt = time.Time{}
+	}
+	if m.rollbackMode {
+		switch msg.Type {
+		case tea.KeyCtrlC:
+			m.exitAction = UIActionExit
+			return m, tea.Quit
+		case tea.KeyEsc:
+			m.stopRollbackSelectionMode()
+			return m, nil
+		case tea.KeyUp:
+			m.moveRollbackSelection(-1)
+			return m, nil
+		case tea.KeyDown:
+			m.moveRollbackSelection(1)
+			return m, nil
+		case tea.KeyEnter:
+			m.beginRollbackEditing()
+			return m, nil
+		case tea.KeyPgUp, tea.KeyPgDown:
+			m.forwardToView(msg)
+			return m, nil
+		default:
+			return m, nil
+		}
+	}
 	if keyString == "tab" || keyString == "ctrl+enter" || msg.Type == keyTypeCtrlEnterCSI {
 		text := strings.TrimSpace(m.input)
 		if text == "" {
 			return m, nil
+		}
+		if m.rollbackEditing && !m.busy {
+			m.nextForkUserMessageIndex = m.rollbackSelectedUserMessageIndex
+			m.nextSessionInitialPrompt = text
+			m.exitAction = UIActionForkRollback
+			m.rollbackEditing = false
+			return m, tea.Quit
 		}
 		if m.busy {
 			if m.inputSubmitLocked {
@@ -86,6 +121,24 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyShiftTab:
 		m.forwardToView(tui.ToggleModeMsg{})
 		return m, nil
+	case tea.KeyEsc:
+		if m.rollbackEditing {
+			if strings.TrimSpace(m.input) == "" {
+				m.cancelRollbackEditingBackToSelection()
+			}
+			return m, nil
+		}
+		if m.busy || m.inputSubmitLocked || strings.TrimSpace(m.input) != "" {
+			return m, nil
+		}
+		now := time.Now()
+		if !m.lastEscAt.IsZero() && now.Sub(m.lastEscAt) <= rollbackDoubleEscWindow {
+			m.lastEscAt = time.Time{}
+			m.startRollbackSelectionMode()
+			return m, nil
+		}
+		m.lastEscAt = now
+		return m, nil
 	case tea.KeyEnter:
 		text := strings.TrimSpace(m.input)
 		if text == "" {
@@ -94,6 +147,13 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, c.startSubmission(next)
 			}
 			return m, nil
+		}
+		if m.rollbackEditing && !m.busy {
+			m.nextForkUserMessageIndex = m.rollbackSelectedUserMessageIndex
+			m.nextSessionInitialPrompt = text
+			m.exitAction = UIActionForkRollback
+			m.rollbackEditing = false
+			return m, tea.Quit
 		}
 		_, isUserShell := parseUserShellCommand(text)
 		if m.busy {
@@ -116,6 +176,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clearInput()
 			if commandResult.SubmitUser && commandResult.FreshConversation {
 				m.nextSessionInitialPrompt = commandResult.User
+				m.nextParentSessionID = m.sessionID
 				m.exitAction = UIActionNewSession
 				return m, tea.Quit
 			}
@@ -134,14 +195,36 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.exitAction = UIActionExit
 				return m, tea.Quit
 			case commands.ActionNew:
+				m.nextParentSessionID = m.sessionID
 				m.exitAction = UIActionNewSession
 				return m, tea.Quit
 			case commands.ActionResume:
 				m.exitAction = UIActionResume
 				return m, tea.Quit
+			case commands.ActionBack:
+				if m.engine == nil || strings.TrimSpace(m.engine.ParentSessionID()) == "" {
+					if m.engine != nil {
+						m.engine.AppendLocalEntry("system", "No parent session available")
+					} else {
+						m.forwardToView(tui.AppendTranscriptMsg{Role: "system", Text: "No parent session available"})
+					}
+					return m, nil
+				}
+				m.nextSessionID = strings.TrimSpace(m.engine.ParentSessionID())
+				m.exitAction = UIActionOpenSession
+				return m, tea.Quit
 			case commands.ActionLogout:
 				m.exitAction = UIActionLogout
 				return m, tea.Quit
+			case commands.ActionSetName:
+				if m.engine != nil {
+					if err := m.engine.SetSessionName(commandResult.SessionName); err != nil {
+						m.engine.AppendLocalEntry("error", formatSubmissionError(err))
+						return m, nil
+					}
+				}
+				m.sessionName = strings.TrimSpace(commandResult.SessionName)
+				return m, tea.SetWindowTitle(m.windowTitle())
 			case commands.ActionCompact:
 				return m, c.startCompaction(commandResult.Args)
 			}

@@ -194,7 +194,10 @@ func (m *sessionPickerModel) renderRow(index int) string {
 	var timestamp string
 	if index > 0 {
 		item := m.sessions[index-1]
-		title = item.SessionID
+		title = strings.TrimSpace(item.Name)
+		if title == "" {
+			title = item.SessionID
+		}
 		timestamp = humanTime(item.UpdatedAt)
 	}
 

@@ -162,3 +162,91 @@ func TestReadEventsHandlesLargeJSONLines(t *testing.T) {
 		t.Fatalf("payload blob size = %d, want %d", got, payloadSize)
 	}
 }
+
+func TestSetNamePersistsAndAppearsInList(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.SetName("Incident Triage"); err != nil {
+		t.Fatalf("set name: %v", err)
+	}
+	items, err := ListSessions(root)
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one session, got %d", len(items))
+	}
+	if items[0].Name != "Incident Triage" {
+		t.Fatalf("expected list name to match, got %q", items[0].Name)
+	}
+}
+
+func TestForkAtUserMessageCopiesPrefixBeforeSelectedMessage(t *testing.T) {
+	root := t.TempDir()
+	parent, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	if _, err := parent.AppendEvent("s1", "message", map[string]any{"role": "user", "content": "u1"}); err != nil {
+		t.Fatalf("append u1: %v", err)
+	}
+	if _, err := parent.AppendEvent("s1", "message", map[string]any{"role": "assistant", "content": "a1"}); err != nil {
+		t.Fatalf("append a1: %v", err)
+	}
+	if _, err := parent.AppendEvent("s2", "message", map[string]any{"role": "user", "content": "u2"}); err != nil {
+		t.Fatalf("append u2: %v", err)
+	}
+	if _, err := parent.AppendEvent("s2", "message", map[string]any{"role": "assistant", "content": "a2"}); err != nil {
+		t.Fatalf("append a2: %v", err)
+	}
+
+	forked, err := ForkAtUserMessage(parent, 2, "Parent → edit u2")
+	if err != nil {
+		t.Fatalf("fork at user message: %v", err)
+	}
+	forkEvents, err := forked.ReadEvents()
+	if err != nil {
+		t.Fatalf("read fork events: %v", err)
+	}
+	if len(forkEvents) != 2 {
+		t.Fatalf("expected two replayed events, got %d", len(forkEvents))
+	}
+	var first struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(forkEvents[0].Payload, &first); err != nil {
+		t.Fatalf("decode first message: %v", err)
+	}
+	if first.Role != "user" || first.Content != "u1" {
+		t.Fatalf("unexpected first message in fork: %+v", first)
+	}
+	meta := forked.Meta()
+	if meta.ParentSessionID != parent.Meta().SessionID {
+		t.Fatalf("expected fork parent session id, got %q", meta.ParentSessionID)
+	}
+	if meta.Name != "Parent → edit u2" {
+		t.Fatalf("expected fork name, got %q", meta.Name)
+	}
+}
+
+func TestSetParentSessionIDPersists(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.SetParentSessionID("parent-session-1"); err != nil {
+		t.Fatalf("set parent session id: %v", err)
+	}
+	opened, err := Open(store.Dir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if opened.Meta().ParentSessionID != "parent-session-1" {
+		t.Fatalf("expected parent session id persisted, got %q", opened.Meta().ParentSessionID)
+	}
+}

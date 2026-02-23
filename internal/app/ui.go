@@ -2,6 +2,7 @@ package app
 
 import (
 	"strings"
+	"time"
 
 	"builder/internal/app/commands"
 	"builder/internal/runtime"
@@ -58,16 +59,21 @@ type UITranscriptEntry struct {
 }
 
 type UITransition struct {
-	Action        UIAction
-	InitialPrompt string
+	Action               UIAction
+	InitialPrompt        string
+	TargetSessionID      string
+	ForkUserMessageIndex int
+	ParentSessionID      string
 }
 
 const (
-	UIActionNone       UIAction = "none"
-	UIActionExit       UIAction = "exit"
-	UIActionNewSession UIAction = "new_session"
-	UIActionResume     UIAction = "resume"
-	UIActionLogout     UIAction = "logout"
+	UIActionNone         UIAction = "none"
+	UIActionExit         UIAction = "exit"
+	UIActionNewSession   UIAction = "new_session"
+	UIActionResume       UIAction = "resume"
+	UIActionLogout       UIAction = "logout"
+	UIActionForkRollback UIAction = "fork_rollback"
+	UIActionOpenSession  UIAction = "open_session"
 )
 
 func WithUILogger(logger uiLogger) UIOption {
@@ -107,6 +113,18 @@ func WithUICommandRegistry(registry *commands.Registry) UIOption {
 func WithUIStartupSubmit(text string) UIOption {
 	return func(m *uiModel) {
 		m.startupSubmit = text
+	}
+}
+
+func WithUISessionName(name string) UIOption {
+	return func(m *uiModel) {
+		m.sessionName = strings.TrimSpace(name)
+	}
+}
+
+func WithUISessionID(sessionID string) UIOption {
+	return func(m *uiModel) {
+		m.sessionID = strings.TrimSpace(sessionID)
 	}
 }
 
@@ -170,6 +188,27 @@ type uiModel struct {
 	startupSubmit     string
 
 	nextSessionInitialPrompt string
+	nextSessionID            string
+	nextForkUserMessageIndex int
+	nextParentSessionID      string
+	sessionName              string
+	sessionID                string
+
+	transcriptEntries []tui.TranscriptEntry
+
+	lastEscAt time.Time
+
+	rollbackMode                     bool
+	rollbackEditing                  bool
+	rollbackCandidates               []rollbackCandidate
+	rollbackSelection                int
+	rollbackSelectedUserMessageIndex int
+}
+
+type rollbackCandidate struct {
+	TranscriptIndex  int
+	UserMessageIndex int
+	Text             string
 }
 
 func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
@@ -194,8 +233,10 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 			if strings.TrimSpace(entry.Text) == "" {
 				continue
 			}
+			m.transcriptEntries = append(m.transcriptEntries, tui.TranscriptEntry{Role: entry.Role, Text: entry.Text})
 			m.forwardToView(tui.AppendTranscriptMsg{Role: entry.Role, Text: entry.Text})
 		}
+		m.refreshRollbackCandidates()
 	}
 	m.syncViewport()
 	return m
@@ -205,6 +246,7 @@ func (m *uiModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		waitRuntimeEvent(m.runtimeEvents),
 		waitAskEvent(m.askEvents),
+		tea.SetWindowTitle(m.windowTitle()),
 	}
 	if strings.TrimSpace(m.startupSubmit) != "" {
 		cmds = append(cmds, m.inputController().startSubmission(m.startupSubmit))
@@ -271,9 +313,19 @@ func (m *uiModel) Action() UIAction {
 
 func (m *uiModel) Transition() UITransition {
 	return UITransition{
-		Action:        m.exitAction,
-		InitialPrompt: m.nextSessionInitialPrompt,
+		Action:               m.exitAction,
+		InitialPrompt:        m.nextSessionInitialPrompt,
+		TargetSessionID:      strings.TrimSpace(m.nextSessionID),
+		ForkUserMessageIndex: m.nextForkUserMessageIndex,
+		ParentSessionID:      strings.TrimSpace(m.nextParentSessionID),
 	}
+}
+
+func (m *uiModel) windowTitle() string {
+	if strings.TrimSpace(m.sessionName) == "" {
+		return "builder"
+	}
+	return m.sessionName
 }
 
 func (m *uiModel) logf(format string, args ...any) {

@@ -103,6 +103,7 @@ func ListSessions(workspaceContainerDir string) ([]Summary, error) {
 		}
 		out = append(out, Summary{
 			SessionID: m.SessionID,
+			Name:      strings.TrimSpace(m.Name),
 			UpdatedAt: m.UpdatedAt,
 			Path:      sessionPath,
 		})
@@ -129,6 +130,24 @@ func (s *Store) MarkInFlight(inFlight bool) error {
 	defer s.mu.Unlock()
 
 	s.meta.InFlightStep = inFlight
+	s.meta.UpdatedAt = time.Now().UTC()
+	return s.persistMetaLocked()
+}
+
+func (s *Store) SetName(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.meta.Name = strings.TrimSpace(name)
+	s.meta.UpdatedAt = time.Now().UTC()
+	return s.persistMetaLocked()
+}
+
+func (s *Store) SetParentSessionID(parentSessionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.meta.ParentSessionID = strings.TrimSpace(parentSessionID)
 	s.meta.UpdatedAt = time.Now().UTC()
 	return s.persistMetaLocked()
 }
@@ -200,6 +219,40 @@ func (s *Store) AppendTurnAtomic(stepID string, events []EventInput) ([]Event, e
 			Kind:      in.Kind,
 			StepID:    stepID,
 			Payload:   body,
+		})
+	}
+
+	if err := s.appendEventsAtomicLocked(built); err != nil {
+		return nil, err
+	}
+	return built, nil
+}
+
+type ReplayEvent struct {
+	StepID  string
+	Kind    string
+	Payload json.RawMessage
+}
+
+func (s *Store) AppendReplayEvents(events []ReplayEvent) ([]Event, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(events) == 0 {
+		return nil, nil
+	}
+	built := make([]Event, 0, len(events))
+	seq := s.meta.LastSequence
+	now := time.Now().UTC()
+	for _, in := range events {
+		seq++
+		payload := append(json.RawMessage(nil), in.Payload...)
+		built = append(built, Event{
+			Seq:       seq,
+			Timestamp: now,
+			Kind:      in.Kind,
+			StepID:    strings.TrimSpace(in.StepID),
+			Payload:   payload,
 		})
 	}
 

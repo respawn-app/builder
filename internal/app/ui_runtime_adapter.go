@@ -63,6 +63,8 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() {
 			ToolCall:   entry.ToolCall,
 		})
 	}
+	m.transcriptEntries = append(m.transcriptEntries[:0], entries...)
+	m.refreshRollbackCandidates()
 	m.forwardToView(tui.SetConversationMsg{
 		Entries:      entries,
 		Ongoing:      snapshot.Ongoing,

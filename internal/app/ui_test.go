@@ -262,6 +262,88 @@ func TestApprovalAskSupportsDenyWithCommentary(t *testing.T) {
 	}
 }
 
+func TestDoubleEscEntersRollbackSelectionAndEnterStartsEditing(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIInitialTranscript([]UITranscriptEntry{
+		{Role: "user", Text: "u1"},
+		{Role: "assistant", Text: "a1"},
+		{Role: "user", Text: "u2"},
+	})).(*uiModel)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+
+	if !updated.rollbackMode {
+		t.Fatal("expected rollback selection mode after double esc")
+	}
+	if updated.rollbackSelection != 1 {
+		t.Fatalf("expected last user message selected by default, got %d", updated.rollbackSelection)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if !updated.rollbackEditing {
+		t.Fatal("expected rollback editing mode after enter")
+	}
+	if updated.rollbackMode {
+		t.Fatal("did not expect rollback selection mode while editing")
+	}
+	if updated.input != "u2" {
+		t.Fatalf("expected selected message loaded into input, got %q", updated.input)
+	}
+}
+
+func TestRollbackEditingEscRequiresEmptyInput(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIInitialTranscript([]UITranscriptEntry{
+		{Role: "user", Text: "u1"},
+		{Role: "assistant", Text: "a1"},
+		{Role: "user", Text: "u2"},
+	})).(*uiModel)
+	m.rollbackEditing = true
+	m.rollbackSelection = 1
+	m.rollbackSelectedUserMessageIndex = 2
+	m.input = "edited"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := next.(*uiModel)
+	if !updated.rollbackEditing {
+		t.Fatal("expected rollback editing to stay active while input non-empty")
+	}
+	if updated.rollbackMode {
+		t.Fatal("did not expect rollback selection mode while input non-empty")
+	}
+
+	updated.input = ""
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if !updated.rollbackMode {
+		t.Fatal("expected rollback selection mode after esc on empty input")
+	}
+	if updated.rollbackSelection != 1 {
+		t.Fatalf("expected rollback selection preserved, got %d", updated.rollbackSelection)
+	}
+}
+
+func TestRollbackEditingSubmitQuitsIntoForkTransition(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.rollbackEditing = true
+	m.rollbackSelectedUserMessageIndex = 3
+	m.input = "edited user message"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if updated.exitAction != UIActionForkRollback {
+		t.Fatalf("expected fork rollback action, got %q", updated.exitAction)
+	}
+	if updated.nextForkUserMessageIndex != 3 {
+		t.Fatalf("expected rollback user index, got %d", updated.nextForkUserMessageIndex)
+	}
+	if updated.nextSessionInitialPrompt != "edited user message" {
+		t.Fatalf("expected startup prompt to match edited input, got %q", updated.nextSessionInitialPrompt)
+	}
+}
+
 func TestApprovalAskTabAllowsWithCommentary(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -1068,8 +1150,8 @@ func TestSlashCommandArrowKeysNavigatePickerAndReplaceInput(t *testing.T) {
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
 	updated = next.(*uiModel)
-	if updated.input != "/logout" {
-		t.Fatalf("expected second down to select /logout, got %q", updated.input)
+	if updated.input != "/name" {
+		t.Fatalf("expected second down to select /name, got %q", updated.input)
 	}
 }
 

@@ -16,6 +16,8 @@ type LockedContract struct {
 
 type Meta struct {
 	SessionID          string          `json:"session_id"`
+	Name               string          `json:"name,omitempty"`
+	ParentSessionID    string          `json:"parent_session_id,omitempty"`
 	WorkspaceRoot      string          `json:"workspace_root"`
 	WorkspaceContainer string          `json:"workspace_container"`
 	CreatedAt          time.Time       `json:"created_at"`
@@ -37,6 +39,7 @@ type Event struct {
 
 type Summary struct {
 	SessionID string    `json:"session_id"`
+	Name      string    `json:"name,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Path      string    `json:"path"`
 }

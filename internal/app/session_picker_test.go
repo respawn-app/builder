@@ -89,3 +89,19 @@ func TestHumanTimeFormatsDateAndMinutes(t *testing.T) {
 		t.Fatalf("humanTime=%q want %q", got, want)
 	}
 }
+
+func TestSessionPickerPrefersSessionName(t *testing.T) {
+	now := time.Date(2026, time.February, 8, 12, 0, 0, 0, time.UTC)
+	m := newSessionPickerModel([]session.Summary{{
+		SessionID: "abc123",
+		Name:      "Incident Triage",
+		UpdatedAt: now,
+	}}, "dark")
+	out := ansi.Strip(m.View())
+	if !strings.Contains(out, "Incident Triage") {
+		t.Fatalf("expected named session in output, got %q", out)
+	}
+	if strings.Contains(out, "abc123") {
+		t.Fatalf("expected id hidden when name is present, got %q", out)
+	}
+}

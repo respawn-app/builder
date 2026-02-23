@@ -62,6 +62,11 @@ type SetConversationMsg struct {
 	OngoingError string
 }
 
+type SetSelectedTranscriptEntryMsg struct {
+	EntryIndex int
+	Active     bool
+}
+
 type StreamAssistantMsg struct {
 	Delta string
 }
@@ -102,6 +107,9 @@ type Model struct {
 
 	transcript []TranscriptEntry
 	ongoing    string
+
+	selectedTranscriptEntry  int
+	selectedTranscriptActive bool
 
 	detailSnapshot string
 	ongoingError   string
@@ -192,7 +200,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.transcript = entries
 		m.ongoing = msg.Ongoing
 		m.ongoingError = strings.TrimSpace(msg.OngoingError)
+		if m.selectedTranscriptEntry < 0 || m.selectedTranscriptEntry >= len(m.transcript) {
+			m.selectedTranscriptActive = false
+		}
 		shouldAutoFollowOngoing = true
+	case SetSelectedTranscriptEntryMsg:
+		m.selectedTranscriptEntry = msg.EntryIndex
+		m.selectedTranscriptActive = msg.Active
 	case StreamAssistantMsg:
 		m.ongoing += msg.Delta
 		shouldAutoFollowOngoing = true
@@ -405,7 +419,8 @@ func (m Model) renderFlatDetailTranscript() string {
 				blocks = append(blocks, m.flattenEntry(role, combined))
 				continue
 			}
-			blocks = append(blocks, m.flattenEntry(role, entry.Text))
+			block := m.flattenEntry(role, entry.Text)
+			blocks = append(blocks, m.maybeSelectedUserBlock(i, role, block))
 		}
 	}
 	if m.ongoing != "" {
@@ -539,9 +554,10 @@ func (m Model) renderFlatOngoingTranscript() string {
 		case "tool_result", "tool_result_ok", "tool_result_error":
 			continue
 		default:
+			lines := m.flattenEntry(role, entry.Text)
 			blocks = append(blocks, ongoingBlock{
 				role:  role,
-				lines: m.flattenEntry(role, entry.Text),
+				lines: m.maybeSelectedUserBlock(i, role, lines),
 			})
 		}
 	}
@@ -642,6 +658,24 @@ func (m Model) flattenEntryPlain(role, text string) []string {
 			continue
 		}
 		out = append(out, "  "+chunk)
+	}
+	return out
+}
+
+func (m Model) maybeSelectedUserBlock(entryIndex int, role string, lines []string) []string {
+	if !m.selectedTranscriptActive {
+		return lines
+	}
+	if entryIndex != m.selectedTranscriptEntry {
+		return lines
+	}
+	if strings.TrimSpace(role) != "user" {
+		return lines
+	}
+	style := lipgloss.NewStyle().Background(lipgloss.Color("15")).Foreground(lipgloss.Color("0"))
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, style.Render(line))
 	}
 	return out
 }
