@@ -52,6 +52,7 @@ var shellEnvOverrides = []string{
 
 type input struct {
 	Command        string `json:"command"`
+	Cmd            string `json:"cmd,omitempty"`
 	TimeoutSeconds *int   `json:"timeout_seconds,omitempty"`
 	Workdir        string `json:"workdir,omitempty"`
 }
@@ -100,6 +101,9 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 	var in input
 	if err := json.Unmarshal(c.Input, &in); err != nil {
 		return tools.ErrorResultWith(c, fmt.Sprintf("invalid input: %v", err), marshalNoHTMLEscape), nil
+	}
+	if strings.TrimSpace(in.Command) == "" {
+		in.Command = strings.TrimSpace(in.Cmd)
 	}
 	if in.Command == "" {
 		return tools.ErrorResultWith(c, "command is required", marshalNoHTMLEscape), nil

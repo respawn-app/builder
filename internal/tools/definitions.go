@@ -16,17 +16,20 @@ type CatalogEntry struct {
 var catalogEntries = []CatalogEntry{
 	{
 		ID:             ToolShell,
-		Aliases:        []string{"bash"},
+		Aliases:        []string{"bash", "bash_command", "shell_command", "exec_command"},
 		Description:    "Execute a shell command in the user's environment and device.",
 		DefaultEnabled: true,
 		Schema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
-  "required": ["command"],
   "properties": {
     "command": {
       "type": "string",
       "description": "Command line to execute in login shell."
+    },
+    "cmd": {
+      "type": "string",
+      "description": "Alias for command."
     },
     "timeout_seconds": {
       "type": "integer",
@@ -107,7 +110,7 @@ var catalogEntries = []CatalogEntry{
 	},
 	{
 		ID:             ToolMultiToolUseParallel,
-		Aliases:        []string{"multi_tool_use_parallel", "parallel"},
+		Aliases:        []string{"parallel"},
 		Description:    "Use this function to run multiple tools simultaneously, but only if they can operate in parallel.",
 		DefaultEnabled: true,
 		Schema: json.RawMessage(`{

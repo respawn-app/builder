@@ -13,7 +13,7 @@ const (
 	ToolPatch                ID = "patch"
 	ToolAskQuestion          ID = "ask_question"
 	ToolWebSearch            ID = "web_search"
-	ToolMultiToolUseParallel ID = "multi_tool_use.parallel"
+	ToolMultiToolUseParallel ID = "multi_tool_use_parallel"
 )
 
 func ParseID(v string) (ID, bool) {

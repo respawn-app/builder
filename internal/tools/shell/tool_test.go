@@ -52,6 +52,33 @@ func TestShellRunsAndMergesOutput(t *testing.T) {
 	}
 }
 
+func TestShellAcceptsCmdAlias(t *testing.T) {
+	tool := New(".", 10_000)
+	input, _ := json.Marshal(map[string]any{"cmd": "echo from-cmd"})
+
+	result, err := tool.Call(context.Background(), tools.Call{ID: "cmd-alias", Name: tools.ToolShell, Input: input})
+	if err != nil {
+		t.Fatalf("call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error result: %s", string(result.Output))
+	}
+
+	var payload struct {
+		ExitCode int    `json:"exit_code"`
+		Output   string `json:"output"`
+	}
+	if err := json.Unmarshal(result.Output, &payload); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if payload.ExitCode != 0 {
+		t.Fatalf("exit code = %d, want 0", payload.ExitCode)
+	}
+	if !strings.Contains(payload.Output, "from-cmd") {
+		t.Fatalf("expected cmd alias output, got %q", payload.Output)
+	}
+}
+
 func TestShellOutputJSONDoesNotEscapeOperators(t *testing.T) {
 	tool := New(".", 10_000)
 	input, _ := json.Marshal(map[string]any{"command": "printf 'a => b < c & d\\n'"})
