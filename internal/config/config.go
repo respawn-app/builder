@@ -574,7 +574,7 @@ func defaultSettingsTOML() string {
 		"persistence_root = \"" + DefaultPersistence + "\"\n\n" +
 		"[tools]\n"
 	for _, id := range tools.CatalogIDs() {
-		out += string(id) + " = " + strconv.FormatBool(defaults.EnabledTools[id]) + "\n"
+		out += strconv.Quote(string(id)) + " = " + strconv.FormatBool(defaults.EnabledTools[id]) + "\n"
 	}
 	out += "\n" +
 		"[timeouts]\n" +

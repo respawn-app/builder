@@ -541,3 +541,8 @@ This file records architecture and product decisions for the minimal terminal co
    - Ring when a new `ask_question` request is shown to the user (including approval asks).
    - Ring on turn end only when that turn executed at least two tool calls.
    - Turn-end ringing is keyed by runtime step id and `tool_call_started`/`assistant_message` events.
+
+154. **Add `multi_tool_use.parallel` compatibility wrapper tool for Codex-style parallel calls.**
+   - Expose a local runtime tool named `multi_tool_use.parallel` with the Codex harness-compatible schema (`tool_uses[]` with `recipient_name` + `parameters`).
+   - The wrapper executes referenced local `functions.*` tools concurrently and returns results in the declared order.
+   - Keep existing native multi-tool call behavior unchanged; both invocation patterns remain available.

@@ -13,6 +13,7 @@ import (
 	"builder/internal/session"
 	"builder/internal/tools"
 	askquestion "builder/internal/tools/askquestion"
+	multitooluseparallel "builder/internal/tools/multitooluseparallel"
 	patchtool "builder/internal/tools/patch"
 	shelltool "builder/internal/tools/shell"
 )
@@ -117,6 +118,8 @@ func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTim
 	if err != nil {
 		return nil, nil, err
 	}
+	var registry *tools.Registry
+	parallel := multitooluseparallel.New(func() *tools.Registry { return registry })
 
 	factories := map[tools.ID]func() tools.Handler{
 		tools.ToolShell: func() tools.Handler {
@@ -127,6 +130,9 @@ func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTim
 		},
 		tools.ToolAskQuestion: func() tools.Handler {
 			return askquestion.NewTool(broker)
+		},
+		tools.ToolMultiToolUseParallel: func() tools.Handler {
+			return parallel
 		},
 	}
 	enabledSet := map[tools.ID]bool{}
@@ -147,12 +153,13 @@ func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTim
 		}
 		handlers = append(handlers, factory())
 	}
-	return tools.NewRegistry(handlers...), broker, nil
+	registry = tools.NewRegistry(handlers...)
+	return registry, broker, nil
 }
 
 func isLocalRuntimeTool(id tools.ID) bool {
 	switch id {
-	case tools.ToolShell, tools.ToolPatch, tools.ToolAskQuestion:
+	case tools.ToolShell, tools.ToolPatch, tools.ToolAskQuestion, tools.ToolMultiToolUseParallel:
 		return true
 	default:
 		return false

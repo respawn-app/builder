@@ -34,7 +34,7 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if got := cfg.PersistenceRoot; got != filepath.Join(home, ".builder") {
 		t.Fatalf("default persistence root mismatch: %q", got)
 	}
-	if !cfg.Settings.EnabledTools[tools.ToolShell] || !cfg.Settings.EnabledTools[tools.ToolPatch] || !cfg.Settings.EnabledTools[tools.ToolAskQuestion] {
+	if !cfg.Settings.EnabledTools[tools.ToolShell] || !cfg.Settings.EnabledTools[tools.ToolPatch] || !cfg.Settings.EnabledTools[tools.ToolAskQuestion] || !cfg.Settings.EnabledTools[tools.ToolMultiToolUseParallel] {
 		t.Fatalf("expected all default tools enabled: %+v", cfg.Settings.EnabledTools)
 	}
 	if cfg.Settings.ContextCompactionThresholdTokens != 360_000 {
