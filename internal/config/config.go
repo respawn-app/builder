@@ -50,6 +50,7 @@ type Settings struct {
 	Model                            string
 	ThinkingLevel                    string
 	Theme                            string
+	NotificationMethod               string
 	WebSearch                        string
 	OpenAIBaseURL                    string
 	Store                            bool
@@ -76,12 +77,13 @@ type App struct {
 }
 
 type fileSettings struct {
-	Model         string          `toml:"model"`
-	ThinkingLevel string          `toml:"thinking_level"`
-	Theme         string          `toml:"theme"`
-	WebSearch     string          `toml:"web_search"`
-	Tools         map[string]bool `toml:"tools"`
-	Timeouts      struct {
+	Model              string          `toml:"model"`
+	ThinkingLevel      string          `toml:"thinking_level"`
+	Theme              string          `toml:"theme"`
+	NotificationMethod string          `toml:"notification_method"`
+	WebSearch          string          `toml:"web_search"`
+	Tools              map[string]bool `toml:"tools"`
+	Timeouts           struct {
 		ModelRequestSeconds int `toml:"model_request_seconds"`
 		ShellDefaultSeconds int `toml:"shell_default_seconds"`
 		BashDefaultSeconds  int `toml:"bash_default_seconds"`
@@ -120,6 +122,7 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		"model":                               "default",
 		"thinking_level":                      "default",
 		"theme":                               "default",
+		"notification_method":                 "default",
 		"web_search":                          "default",
 		"openai_base_url":                     "default",
 		"store":                               "default",
@@ -147,6 +150,10 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if strings.TrimSpace(cfg.Theme) != "" {
 		merged.Theme = strings.TrimSpace(cfg.Theme)
 		sources["theme"] = "file"
+	}
+	if strings.TrimSpace(cfg.NotificationMethod) != "" {
+		merged.NotificationMethod = strings.TrimSpace(cfg.NotificationMethod)
+		sources["notification_method"] = "file"
 	}
 	if strings.TrimSpace(cfg.WebSearch) != "" {
 		merged.WebSearch = strings.TrimSpace(cfg.WebSearch)
@@ -211,6 +218,10 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if v := strings.TrimSpace(os.Getenv("BUILDER_THEME")); v != "" {
 		merged.Theme = v
 		sources["theme"] = "env"
+	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_NOTIFICATION_METHOD")); v != "" {
+		merged.NotificationMethod = v
+		sources["notification_method"] = "env"
 	}
 	if v := strings.TrimSpace(os.Getenv("BUILDER_WEB_SEARCH")); v != "" {
 		merged.WebSearch = v
@@ -383,6 +394,7 @@ func defaultSettings() Settings {
 		Model:                            defaultModel,
 		ThinkingLevel:                    defaultThinkingLevel,
 		Theme:                            defaultTheme,
+		NotificationMethod:               "auto",
 		WebSearch:                        "off",
 		Store:                            false,
 		AllowNonCwdEdits:                 false,
@@ -410,6 +422,11 @@ func validateSettings(v Settings) error {
 		// ok
 	} else {
 		return fmt.Errorf("invalid theme %q (expected light|dark)", v.Theme)
+	}
+	switch strings.ToLower(strings.TrimSpace(v.NotificationMethod)) {
+	case "auto", "osc9", "bel":
+	default:
+		return fmt.Errorf("invalid notification_method %q (expected auto|osc9|bel)", v.NotificationMethod)
 	}
 	switch strings.ToLower(strings.TrimSpace(v.WebSearch)) {
 	case "off", "native":
@@ -542,6 +559,7 @@ func defaultSettingsTOML() string {
 		"model":                               defaults.Model,
 		"thinking_level":                      defaults.ThinkingLevel,
 		"theme":                               defaults.Theme,
+		"notification_method":                 defaults.NotificationMethod,
 		"web_search":                          defaults.WebSearch,
 		"openai_base_url":                     defaults.OpenAIBaseURL,
 		"store":                               defaults.Store,
@@ -564,6 +582,7 @@ func defaultSettingsTOML() string {
 		"model = \"" + defaults.Model + "\"\n" +
 		"thinking_level = \"" + defaults.ThinkingLevel + "\"\n" +
 		"theme = \"" + defaults.Theme + "\"\n" +
+		"notification_method = \"" + defaults.NotificationMethod + "\"\n" +
 		"web_search = \"" + defaults.WebSearch + "\"\n" +
 		"openai_base_url = \"" + defaults.OpenAIBaseURL + "\"\n" +
 		"store = " + strconv.FormatBool(defaults.Store) + "\n" +

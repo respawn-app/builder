@@ -25,7 +25,7 @@ type runtimeWiring struct {
 }
 
 func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools []tools.ID, workspaceRoot string, mgr *auth.Manager, logger *runLogger) (*runtimeWiring, error) {
-	bells := newBellHooks(defaultTerminalBellRinger())
+	bells := newBellHooks(defaultTerminalNotifier(active.NotificationMethod))
 
 	toolRegistry, askBroker, err := buildToolRegistry(
 		workspaceRoot,
