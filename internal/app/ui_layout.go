@@ -381,9 +381,9 @@ func (l uiViewLayout) renderSlashCommandPicker(width int) []string {
 		return nil
 	}
 	palette := uiPalette(m.theme)
-	selectedCommandStyle := lipgloss.NewStyle().Foreground(palette.secondary).Bold(true)
+	selectedCommandStyle := lipgloss.NewStyle().Foreground(palette.muted).Bold(true)
 	unselectedCommandStyle := lipgloss.NewStyle().Bold(true)
-	descriptionStyle := lipgloss.NewStyle().Foreground(palette.secondary).Faint(true)
+	descriptionStyle := lipgloss.NewStyle().Foreground(palette.muted).Faint(true)
 	out := make([]string, 0, slashCommandPickerLines)
 	for row := 0; row < slashCommandPickerLines; row++ {
 		idx := state.start + row
@@ -795,7 +795,7 @@ func uiPalette(theme string) uiColors {
 	if theme == "light" {
 		return uiColors{
 			primary:    lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "4", ANSI256: "33", TrueColor: "#4078F2"}, Dark: lipgloss.CompleteColor{ANSI: "4", ANSI256: "33", TrueColor: "#61AFEF"}},
-			secondary:  lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "5", ANSI256: "134", TrueColor: "#A626A4"}, Dark: lipgloss.CompleteColor{ANSI: "5", ANSI256: "176", TrueColor: "#C678DD"}},
+			secondary:  lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "6", ANSI256: "36", TrueColor: "#2AA876"}, Dark: lipgloss.CompleteColor{ANSI: "6", ANSI256: "79", TrueColor: "#7FDBA6"}},
 			foreground: lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "0", ANSI256: "235", TrueColor: "#383A42"}, Dark: lipgloss.CompleteColor{ANSI: "7", ANSI256: "252", TrueColor: "#ABB2BF"}},
 			muted:      lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "8", ANSI256: "245", TrueColor: "#A0A1A7"}, Dark: lipgloss.CompleteColor{ANSI: "8", ANSI256: "243", TrueColor: "#5C6370"}},
 			border:     lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "7", ANSI256: "250", TrueColor: "#D0D0D0"}, Dark: lipgloss.CompleteColor{ANSI: "8", ANSI256: "240", TrueColor: "#3D434F"}},
@@ -807,7 +807,7 @@ func uiPalette(theme string) uiColors {
 	}
 	return uiColors{
 		primary:    lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "4", ANSI256: "33", TrueColor: "#4078F2"}, Dark: lipgloss.CompleteColor{ANSI: "4", ANSI256: "75", TrueColor: "#61AFEF"}},
-		secondary:  lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "5", ANSI256: "134", TrueColor: "#A626A4"}, Dark: lipgloss.CompleteColor{ANSI: "5", ANSI256: "176", TrueColor: "#C678DD"}},
+		secondary:  lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "6", ANSI256: "36", TrueColor: "#2AA876"}, Dark: lipgloss.CompleteColor{ANSI: "6", ANSI256: "79", TrueColor: "#7FDBA6"}},
 		foreground: lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "0", ANSI256: "235", TrueColor: "#383A42"}, Dark: lipgloss.CompleteColor{ANSI: "7", ANSI256: "252", TrueColor: "#ABB2BF"}},
 		muted:      lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "8", ANSI256: "245", TrueColor: "#A0A1A7"}, Dark: lipgloss.CompleteColor{ANSI: "8", ANSI256: "243", TrueColor: "#5C6370"}},
 		border:     lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "7", ANSI256: "250", TrueColor: "#D0D0D0"}, Dark: lipgloss.CompleteColor{ANSI: "8", ANSI256: "240", TrueColor: "#3D434F"}},
