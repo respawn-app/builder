@@ -24,10 +24,12 @@ func TestParseID(t *testing.T) {
 	}{
 		{in: "shell", want: ToolShell, ok: true},
 		{in: "bash", want: ToolShell, ok: true},
+		{in: "bash_command", want: ToolShell, ok: true},
+		{in: "shell_command", want: ToolShell, ok: true},
+		{in: "exec_command", want: ToolShell, ok: true},
 		{in: "patch", want: ToolPatch, ok: true},
 		{in: "ask_question", want: ToolAskQuestion, ok: true},
 		{in: "web_search", want: ToolWebSearch, ok: true},
-		{in: "multi_tool_use.parallel", want: ToolMultiToolUseParallel, ok: true},
 		{in: "multi_tool_use_parallel", want: ToolMultiToolUseParallel, ok: true},
 		{in: "parallel", want: ToolMultiToolUseParallel, ok: true},
 		{in: "unknown", ok: false},

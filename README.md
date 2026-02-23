@@ -1,6 +1,4 @@
-Builder is a highly opinionated terminal coding agent for professional Agentic Engineers, focusing on output quality.
-
-The project is currently a PoC/MVP which is already usable, but not polished enough for general use, and no guarantees on output quality are made.
+Builder is a highly opinionated, minimal terminal coding agent for professional Agentic Engineers, focusing on output quality. Currently only supporting OpenAI/codex models.
 
 ### What's done:
 
@@ -21,20 +19,26 @@ The project is currently a PoC/MVP which is already usable, but not polished eno
 - [x] Syntax highlighting
 - [x] Web search, especially native
 - [x] UI for queued messages
+- [x] Calling shell via `$`/`!` (optional)
+- [x] Premade prompts for review, compaction.
+- [x] Esc-esc-style editing of messages and history rewrites
+
+### Notifications
+
+- Terminal notifications are enabled through `notification_method` in `~/.builder/config.toml`.
+- Supported values: `auto` (default), `osc9`, `bel`.
+- `auto` prefers OSC 9 for compatible terminals (including Ghostty) and falls back to BEL.
+- You can override via env var: `BUILDER_NOTIFICATION_METHOD`.
 
 ### Important things not done yet
 
-- [ ] Esc-esc-style editing of messages and history rewrites
-- [ ] Any non-openai model support
 - [ ] @-file mentioning
-- [ ] Premade prompts for AGENTS.md creation, code review, planning (optional).
-- [ ] Calling shell via `$`/`!` (optional)
+- [ ] Any non-openai model support
 
 ### What will likely never be implemented
 
-These features are controversial or questionable for model performance, and usually have a better replacement. 
-Here is where this project has to be highly opinionated.
-
+These features are controversial or questionable for model performance, and usually have a better replacement.
+Here is where this project has to be highly opinionated:
 - Subagents - subagents can be separate headless Builder instances via tmux or background shells, native subagents distract the model.
 - Plan mode - the model has native plan capabilities and can always ask questions, rest is just eye candy.
 - MCPs - mcps are net negative on model performance, pollute context, and can be replaced with CLI scripts

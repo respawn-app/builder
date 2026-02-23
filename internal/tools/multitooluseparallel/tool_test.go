@@ -103,7 +103,7 @@ func TestCallRejectsRecursiveParallelInvocation(t *testing.T) {
 	reg = tools.NewRegistry(New(func() *tools.Registry { return reg }))
 	tool := New(func() *tools.Registry { return reg })
 
-	input := json.RawMessage(`{"tool_uses":[{"recipient_name":"functions.multi_tool_use.parallel","parameters":{"tool_uses":[]}}]}`)
+	input := json.RawMessage(`{"tool_uses":[{"recipient_name":"functions.multi_tool_use_parallel","parameters":{"tool_uses":[]}}]}`)
 	result, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call_parallel_3",
 		Name:  tools.ToolMultiToolUseParallel,

@@ -82,7 +82,7 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 			return tools.ErrorResult(c, fmt.Sprintf("tool_uses[%d].recipient_name references unknown tool %q", i, recipient)), nil
 		}
 		if toolID == tools.ToolMultiToolUseParallel {
-			return tools.ErrorResult(c, "recursive calls to multi_tool_use.parallel are not allowed"), nil
+			return tools.ErrorResult(c, "recursive calls to multi_tool_use_parallel are not allowed"), nil
 		}
 
 		params := use.Parameters
