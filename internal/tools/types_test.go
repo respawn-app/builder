@@ -27,6 +27,9 @@ func TestParseID(t *testing.T) {
 		{in: "patch", want: ToolPatch, ok: true},
 		{in: "ask_question", want: ToolAskQuestion, ok: true},
 		{in: "web_search", want: ToolWebSearch, ok: true},
+		{in: "multi_tool_use.parallel", want: ToolMultiToolUseParallel, ok: true},
+		{in: "multi_tool_use_parallel", want: ToolMultiToolUseParallel, ok: true},
+		{in: "parallel", want: ToolMultiToolUseParallel, ok: true},
 		{in: "unknown", ok: false},
 	}
 	for _, tt := range tests {

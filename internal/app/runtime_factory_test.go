@@ -28,3 +28,25 @@ func TestBuildToolRegistry_AllowsHostedWebSearchWithoutLocalFactory(t *testing.T
 		t.Fatalf("expected shell runtime tool definition, got %+v", defs[0])
 	}
 }
+
+func TestBuildToolRegistry_IncludesParallelWrapperWhenEnabled(t *testing.T) {
+	workspace := t.TempDir()
+
+	registry, _, err := buildToolRegistry(
+		workspace,
+		[]tools.ID{tools.ToolShell, tools.ToolMultiToolUseParallel},
+		5*time.Second,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("build tool registry: %v", err)
+	}
+
+	defs := registry.Definitions()
+	if len(defs) != 2 {
+		t.Fatalf("expected 2 local runtime tools in registry, got %d", len(defs))
+	}
+	if defs[0].ID != tools.ToolMultiToolUseParallel || defs[1].ID != tools.ToolShell {
+		t.Fatalf("unexpected runtime tool definitions: %+v", defs)
+	}
+}

@@ -105,6 +105,38 @@ var catalogEntries = []CatalogEntry{
   }
 }`),
 	},
+	{
+		ID:             ToolMultiToolUseParallel,
+		Aliases:        []string{"multi_tool_use_parallel", "parallel"},
+		Description:    "Use this function to run multiple tools simultaneously, but only if they can operate in parallel.",
+		DefaultEnabled: true,
+		Schema: json.RawMessage(`{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tool_uses"],
+  "properties": {
+    "tool_uses": {
+      "type": "array",
+      "description": "The tools to be executed in parallel. NOTE: only functions tools are permitted",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["recipient_name", "parameters"],
+        "properties": {
+          "recipient_name": {
+            "type": "string",
+            "description": "The name of the tool to use. The format must be functions.<function_name>."
+          },
+          "parameters": {
+            "type": "object",
+            "description": "The parameters to pass to the tool. Ensure these are valid according to that tool's own specifications."
+          }
+        }
+      }
+    }
+  }
+}`),
+	},
 }
 
 var (

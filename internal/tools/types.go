@@ -9,10 +9,11 @@ import (
 type ID string
 
 const (
-	ToolShell       ID = "shell"
-	ToolPatch       ID = "patch"
-	ToolAskQuestion ID = "ask_question"
-	ToolWebSearch   ID = "web_search"
+	ToolShell                ID = "shell"
+	ToolPatch                ID = "patch"
+	ToolAskQuestion          ID = "ask_question"
+	ToolWebSearch            ID = "web_search"
+	ToolMultiToolUseParallel ID = "multi_tool_use.parallel"
 )
 
 func ParseID(v string) (ID, bool) {
