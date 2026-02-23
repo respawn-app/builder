@@ -168,6 +168,31 @@ type statusFailClient struct {
 	status int
 }
 
+type streamRequiredClient struct {
+	mu          sync.Mutex
+	streamCalls int
+	requests    []llm.Request
+	response    llm.Response
+}
+
+func (c *streamRequiredClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
+	return llm.Response{}, &llm.APIStatusError{StatusCode: 400, Body: `{"detail":"Stream must be set to true"}`}
+}
+
+func (c *streamRequiredClient) GenerateStream(_ context.Context, req llm.Request, _ func(string)) (llm.Response, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.streamCalls++
+	c.requests = append(c.requests, req)
+	return c.response, nil
+}
+
+func (c *streamRequiredClient) StreamCalls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.streamCalls
+}
+
 func (c *statusFailClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
 	c.mu.Lock()
 	c.calls++
@@ -511,12 +536,11 @@ func TestReviewerSkippedWhenNoToolCalls(t *testing.T) {
 	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
-			Enabled:            true,
-			Model:              "gpt-5-mini",
-			ThinkingLevel:      "low",
-			MaxSuggestions:     5,
-			MaxToolOutputChars: 800,
-			Client:             reviewerClient,
+			Frequency:      "edits",
+			Model:          "gpt-5-mini",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			Client:         reviewerClient,
 		},
 	})
 	if err != nil {
@@ -532,6 +556,97 @@ func TestReviewerSkippedWhenNoToolCalls(t *testing.T) {
 	}
 	if len(reviewerClient.calls) != 0 {
 		t.Fatalf("expected reviewer not to be called, got %d calls", len(reviewerClient.calls))
+	}
+}
+
+func TestReviewerRunsOnAllFrequencyWithoutToolCalls(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:      "all",
+			Model:          "gpt-5-mini",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			Client:         reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if len(reviewerClient.calls) != 1 {
+		t.Fatalf("expected reviewer to be called once for frequency=all, got %d", len(reviewerClient.calls))
+	}
+}
+
+func TestReviewerRunsOnEditsFrequencyOnlyWhenPatchApplied(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(tools.ToolPatch), Input: json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}`)}},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "final", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolPatch}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:      "edits",
+			Model:          "gpt-5-mini",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			Client:         reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "edit file")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "final" {
+		t.Fatalf("assistant content = %q, want final", msg.Content)
+	}
+	if len(reviewerClient.calls) != 1 {
+		t.Fatalf("expected reviewer to be called once after patch edit, got %d", len(reviewerClient.calls))
 	}
 }
 
@@ -568,12 +683,11 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
-			Enabled:            true,
-			Model:              "gpt-5-mini",
-			ThinkingLevel:      "low",
-			MaxSuggestions:     5,
-			MaxToolOutputChars: 600,
-			Client:             reviewerClient,
+			Frequency:      "all",
+			Model:          "gpt-5-mini",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			Client:         reviewerClient,
 		},
 	})
 	if err != nil {
@@ -597,7 +711,7 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 	req := mainClient.calls[2]
 	foundReviewInstruction := false
 	for _, message := range req.Messages {
-		if message.Role == llm.RoleDeveloper && strings.Contains(message.Content, "Post-turn reviewer suggestions") {
+		if message.Role == llm.RoleDeveloper && strings.Contains(message.Content, "Supervisor agent gave you suggestions") {
 			foundReviewInstruction = true
 			break
 		}
@@ -613,30 +727,221 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 	if len(reviewerReq.Tools) != 0 {
 		t.Fatalf("expected reviewer request with no tools")
 	}
+	if reviewerReq.StructuredOutput == nil {
+		t.Fatalf("expected reviewer request structured output")
+	}
+	if reviewerReq.StructuredOutput.Name != "reviewer_suggestions" {
+		t.Fatalf("unexpected reviewer structured output name: %+v", reviewerReq.StructuredOutput)
+	}
 
 	snapshot := eng.ChatSnapshot()
+	foundReviewerStatus := false
 	for _, entry := range snapshot.Entries {
 		if strings.Contains(entry.Text, reviewerNoopToken) {
 			t.Fatalf("noop token leaked into chat snapshot: %+v", snapshot.Entries)
 		}
-		if strings.Contains(entry.Text, "Post-turn reviewer suggestions") {
+		if strings.Contains(entry.Text, "Supervisor agent gave you suggestions") {
 			t.Fatalf("reviewer control instruction leaked into chat snapshot: %+v", snapshot.Entries)
 		}
+		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "Supervisor ran") {
+			foundReviewerStatus = true
+		}
+	}
+	if !foundReviewerStatus {
+		t.Fatalf("expected reviewer status entry in snapshot, got %+v", snapshot.Entries)
 	}
 }
 
-func TestParseReviewerSuggestionsSupportsCompactPayloads(t *testing.T) {
-	suggestions := parseReviewerSuggestions(`{"suggestions":["one","two","one"," "]}`, 3)
+func TestReviewerNoSuggestionsPersistsStatusEntry(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{
+				{ID: "call_shell_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "final", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:      "all",
+			Model:          "gpt-5-mini",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			Client:         reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "final" {
+		t.Fatalf("assistant content = %q, want final", msg.Content)
+	}
+
+	snapshot := eng.ChatSnapshot()
+	foundNoSuggestionsStatus := false
+	for _, entry := range snapshot.Entries {
+		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "no suggestions") {
+			foundNoSuggestionsStatus = true
+			break
+		}
+	}
+	if !foundNoSuggestionsStatus {
+		t.Fatalf("expected no-suggestions reviewer status entry, got %+v", snapshot.Entries)
+	}
+}
+
+func TestReviewerArrayPayloadIsIgnoredAsNoSuggestions(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{
+				{ID: "call_shell_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "final", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `["should","be","ignored"]`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:      "all",
+			Model:          "gpt-5-mini",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			Client:         reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "final" {
+		t.Fatalf("assistant content = %q, want final", msg.Content)
+	}
+
+	snapshot := eng.ChatSnapshot()
+	foundNoSuggestionsStatus := false
+	for _, entry := range snapshot.Entries {
+		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "no suggestions") {
+			foundNoSuggestionsStatus = true
+			break
+		}
+	}
+	if !foundNoSuggestionsStatus {
+		t.Fatalf("expected no-suggestions reviewer status entry for array payload, got %+v", snapshot.Entries)
+	}
+}
+
+func TestReviewerUsesStreamingClientWhenAvailable(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{
+				{ID: "call_shell_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "original final", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: reviewerNoopToken, Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	reviewerClient := &streamRequiredClient{response: llm.Response{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["Check output formatting."]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:      "all",
+			Model:          "gpt-5",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			Client:         reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "original final" {
+		t.Fatalf("assistant content = %q, want original final", msg.Content)
+	}
+	if reviewerClient.StreamCalls() != 1 {
+		t.Fatalf("expected one reviewer stream call, got %d", reviewerClient.StreamCalls())
+	}
+}
+
+func TestParseReviewerSuggestionsObjectSupportsStructuredPayload(t *testing.T) {
+	suggestions := parseReviewerSuggestionsObject(`{"suggestions":["one","two","one"," "]}`, 3)
 	if len(suggestions) != 2 || suggestions[0] != "one" || suggestions[1] != "two" {
 		t.Fatalf("unexpected suggestions from object payload: %+v", suggestions)
 	}
 
-	suggestions = parseReviewerSuggestions(`["a","b"]`, 5)
-	if len(suggestions) != 2 || suggestions[0] != "a" || suggestions[1] != "b" {
-		t.Fatalf("unexpected suggestions from array payload: %+v", suggestions)
+	suggestions = parseReviewerSuggestionsObject(`["a","b"]`, 5)
+	if len(suggestions) != 0 {
+		t.Fatalf("expected invalid non-object payload to be ignored, got %+v", suggestions)
 	}
 
-	suggestions = parseReviewerSuggestions(`not-json`, 5)
+	suggestions = parseReviewerSuggestionsObject(`not-json`, 5)
 	if len(suggestions) != 0 {
 		t.Fatalf("expected invalid payload to be ignored, got %+v", suggestions)
 	}
@@ -1548,6 +1853,35 @@ func TestContextUsageFallsBackToEstimatedTokens(t *testing.T) {
 	}
 	if usage.UsedTokens <= 0 {
 		t.Fatalf("expected estimated used tokens > 0, got %d", usage.UsedTokens)
+	}
+}
+
+func TestContextUsageTracksWeightedCacheHitPercentageFromModelUsage(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if usage := eng.ContextUsage(); usage.HasCacheHitPercentage {
+		t.Fatalf("expected cache hit percentage to be unavailable before model usage, got %+v", usage)
+	}
+
+	eng.setLastUsage(llm.Usage{InputTokens: 100, CachedInputTokens: 40, HasCachedInputTokens: true})
+	eng.setLastUsage(llm.Usage{InputTokens: 300, CachedInputTokens: 60, HasCachedInputTokens: true})
+	eng.setLastUsage(llm.Usage{InputTokens: 999})
+
+	usage := eng.ContextUsage()
+	if !usage.HasCacheHitPercentage {
+		t.Fatalf("expected cache hit percentage to be available, got %+v", usage)
+	}
+	if usage.CacheHitPercent != 25 {
+		t.Fatalf("cache hit percent=%d, want 25", usage.CacheHitPercent)
 	}
 }
 

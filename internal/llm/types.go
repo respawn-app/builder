@@ -271,17 +271,25 @@ type ToolResult struct {
 	IsError bool            `json:"is_error"`
 }
 
+type StructuredOutput struct {
+	Name        string          `json:"name"`
+	Schema      json.RawMessage `json:"schema"`
+	Description string          `json:"description,omitempty"`
+	Strict      bool            `json:"strict,omitempty"`
+}
+
 type Request struct {
-	Model                 string         `json:"model"`
-	Temperature           float64        `json:"temperature"`
-	MaxTokens             int            `json:"max_tokens"`
-	ReasoningEffort       string         `json:"reasoning_effort,omitempty"`
-	EnableNativeWebSearch bool           `json:"enable_native_web_search,omitempty"`
-	SystemPrompt          string         `json:"system_prompt"`
-	SessionID             string         `json:"session_id,omitempty"`
-	Messages              []Message      `json:"messages"`
-	Items                 []ResponseItem `json:"items,omitempty"`
-	Tools                 []Tool         `json:"tools,omitempty"`
+	Model                 string            `json:"model"`
+	Temperature           float64           `json:"temperature"`
+	MaxTokens             int               `json:"max_tokens"`
+	ReasoningEffort       string            `json:"reasoning_effort,omitempty"`
+	EnableNativeWebSearch bool              `json:"enable_native_web_search,omitempty"`
+	SystemPrompt          string            `json:"system_prompt"`
+	SessionID             string            `json:"session_id,omitempty"`
+	Messages              []Message         `json:"messages"`
+	Items                 []ResponseItem    `json:"items,omitempty"`
+	Tools                 []Tool            `json:"tools,omitempty"`
+	StructuredOutput      *StructuredOutput `json:"structured_output,omitempty"`
 }
 
 func (r Request) Validate() error {
@@ -307,6 +315,14 @@ func (r Request) Validate() error {
 		}
 		if len(r.Tools[i].Schema) > 0 && !json.Valid(r.Tools[i].Schema) {
 			return fmt.Errorf("%w: tool schema is invalid json at index %d", ErrInvalidRequest, i)
+		}
+	}
+	if r.StructuredOutput != nil {
+		if strings.TrimSpace(r.StructuredOutput.Name) == "" {
+			return fmt.Errorf("%w: structured_output.name is required", ErrInvalidRequest)
+		}
+		if len(r.StructuredOutput.Schema) == 0 || !json.Valid(r.StructuredOutput.Schema) {
+			return fmt.Errorf("%w: structured_output.schema must be valid json", ErrInvalidRequest)
 		}
 	}
 	return nil
@@ -343,9 +359,11 @@ func RequestFromLockedContractWithItems(locked session.LockedContract, systemPro
 }
 
 type Usage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-	WindowTokens int `json:"window_tokens"`
+	InputTokens          int  `json:"input_tokens"`
+	OutputTokens         int  `json:"output_tokens"`
+	WindowTokens         int  `json:"window_tokens"`
+	CachedInputTokens    int  `json:"cached_input_tokens,omitempty"`
+	HasCachedInputTokens bool `json:"has_cached_input_tokens,omitempty"`
 }
 
 type ReasoningEntry struct {
@@ -374,6 +392,27 @@ func (u Usage) Percent() int {
 		return 100
 	}
 	return pct
+}
+
+func (u Usage) CacheHitPercent() (int, bool) {
+	if !u.HasCachedInputTokens || u.InputTokens <= 0 {
+		return 0, false
+	}
+	cached := u.CachedInputTokens
+	if cached < 0 {
+		cached = 0
+	}
+	if cached > u.InputTokens {
+		cached = u.InputTokens
+	}
+	pct := (cached * 100) / u.InputTokens
+	if pct < 0 {
+		return 0, false
+	}
+	if pct > 100 {
+		return 100, true
+	}
+	return pct, true
 }
 
 type Response struct {

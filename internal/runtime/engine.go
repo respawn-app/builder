@@ -31,7 +31,7 @@ const (
 	environmentInjectedHeader         = "# Info about environment:"
 	commentaryWithoutToolCallsWarning = "You sent a commentary-phase message without tool calls. This is wrong. If you intend to keep working, include tool calls with commentary updates. If you are done, send a final_answer phase message with no tool calls."
 	finalWithToolCallsIgnoredWarning  = "You included tool calls with your final answer message. This is wrong, and your tool calls were ignored. If you intended to call the tools, include updates in the \"commentary\" channel along with tool calls. Otherwise, do not include tool calls with your final message responses"
-	reviewerNoopToken                 = "__BUILDER_REVIEW_NOOP__"
+	reviewerNoopToken                 = "NO_OP"
 )
 
 type Config struct {
@@ -51,17 +51,18 @@ type Config struct {
 }
 
 type ReviewerConfig struct {
-	Enabled            bool
-	Model              string
-	ThinkingLevel      string
-	MaxSuggestions     int
-	MaxToolOutputChars int
-	Client             llm.Client
+	Frequency      string
+	Model          string
+	ThinkingLevel  string
+	MaxSuggestions int
+	Client         llm.Client
 }
 
 type ContextUsage struct {
-	UsedTokens   int
-	WindowTokens int
+	UsedTokens            int
+	WindowTokens          int
+	CacheHitPercent       int
+	HasCacheHitPercentage bool
 }
 
 type Engine struct {
@@ -81,6 +82,9 @@ type Engine struct {
 	busy            bool
 
 	lastUsage llm.Usage
+
+	totalInputTokens       int
+	totalCachedInputTokens int
 
 	compactionCount int
 }
@@ -333,6 +337,7 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 
 func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allowReviewer bool, emitAssistantEvent bool) (llm.Message, bool, error) {
 	executedToolCall := false
+	patchEditsApplied := false
 	for {
 		if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
 			return llm.Message{}, executedToolCall, err
@@ -361,6 +366,17 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 			return llm.Message{}, executedToolCall, err
 		}
 		e.setLastUsage(resp.Usage)
+		e.emit(Event{
+			Kind:   EventModelResponse,
+			StepID: stepID,
+			ModelResponse: &ModelResponseTrace{
+				AssistantPhase:   resp.Assistant.Phase,
+				AssistantChars:   len(resp.Assistant.Content),
+				ToolCallsCount:   len(resp.ToolCalls),
+				OutputItemsCount: len(resp.OutputItems),
+				OutputItemTypes:  summarizeOutputItemTypes(resp.OutputItems),
+			},
+		})
 
 		localToolCalls := append([]llm.ToolCall(nil), resp.ToolCalls...)
 		hostedToolExecutions := hostedToolExecutionsFromOutputItems(resp.OutputItems)
@@ -438,7 +454,7 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 				continue
 			}
 			resolved := assistantMsg
-			if allowReviewer && executedToolCall {
+			if allowReviewer && e.shouldRunReviewerTurn(patchEditsApplied) {
 				reviewed, err := e.runReviewerFollowUp(ctx, stepID, assistantMsg)
 				if err == nil {
 					resolved = reviewed
@@ -456,6 +472,9 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 		}
 
 		for _, r := range results {
+			if r.Name == tools.ToolPatch && !r.IsError {
+				patchEditsApplied = true
+			}
 			msg := llm.Message{
 				Role:       llm.RoleTool,
 				Content:    string(r.Output),
@@ -476,10 +495,38 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 	}
 }
 
+func (e *Engine) shouldRunReviewerTurn(patchEditsApplied bool) bool {
+	if e.reviewer == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(e.cfg.Reviewer.Frequency)) {
+	case "all":
+		return true
+	case "edits":
+		return patchEditsApplied
+	case "off", "":
+		return false
+	default:
+		return false
+	}
+}
+
 func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, original llm.Message) (llm.Message, error) {
 	baselineItems := e.snapshotItems()
 	suggestions, err := e.runReviewerSuggestions(ctx)
-	if err != nil || len(suggestions) == 0 {
+	if err != nil {
+		status := ReviewerStatus{
+			Outcome: "failed",
+			Error:   strings.TrimSpace(err.Error()),
+		}
+		e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
+		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
+		return original, nil
+	}
+	if len(suggestions) == 0 {
+		status := ReviewerStatus{Outcome: "no_suggestions"}
+		e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
+		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
 		return original, nil
 	}
 
@@ -493,24 +540,51 @@ func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, origina
 		if !followUpExecutedToolCall {
 			_ = e.replaceHistory(stepID, "reviewer_rollback", compactionModeManual, baselineItems)
 		}
+		status := ReviewerStatus{
+			Outcome:          "followup_failed",
+			SuggestionsCount: len(suggestions),
+			Error:            strings.TrimSpace(err.Error()),
+		}
+		e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
+		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, suggestions))
 		return original, nil
 	}
 	if strings.TrimSpace(followUp.Content) == reviewerNoopToken {
 		if !followUpExecutedToolCall {
 			_ = e.replaceHistory(stepID, "reviewer_rollback", compactionModeManual, baselineItems)
 		}
+		status := ReviewerStatus{Outcome: "noop", SuggestionsCount: len(suggestions)}
+		e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
+		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, suggestions))
 		return original, nil
 	}
+	status := ReviewerStatus{Outcome: "applied", SuggestionsCount: len(suggestions)}
+	e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
+	_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, suggestions))
 	return followUp, nil
 }
 
 func (e *Engine) runReviewerSuggestions(ctx context.Context) ([]string, error) {
-	if !e.cfg.Reviewer.Enabled || e.reviewer == nil {
+	if e.reviewer == nil {
 		return nil, nil
 	}
 
-	items := sanitizeItemsForReviewer(e.snapshotItems(), e.cfg.Reviewer.MaxToolOutputChars)
-	messages := sanitizeMessagesForReviewer(e.snapshotMessages(), e.cfg.Reviewer.MaxToolOutputChars)
+	schema := mustJSON(map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"suggestions": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "string",
+				},
+			},
+		},
+		"required": []string{"suggestions"},
+	})
+
+	items := sanitizeItemsForLLM(e.snapshotItems())
+	messages := sanitizeMessagesForLLM(e.snapshotMessages())
 	req := llm.Request{
 		Model:           e.cfg.Reviewer.Model,
 		Temperature:     1,
@@ -521,34 +595,35 @@ func (e *Engine) runReviewerSuggestions(ctx context.Context) ([]string, error) {
 		Messages:        messages,
 		Items:           items,
 		Tools:           []llm.Tool{},
+		StructuredOutput: &llm.StructuredOutput{
+			Name:   "reviewer_suggestions",
+			Schema: schema,
+			Strict: true,
+		},
 	}
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
-	resp, err := e.reviewer.Generate(ctx, req)
+	resp, err := e.generateWithRetryClient(ctx, e.reviewer, req, nil, nil)
 	if err != nil {
 		return nil, err
 	}
-	return parseReviewerSuggestions(resp.Assistant.Content, e.cfg.Reviewer.MaxSuggestions), nil
+	return parseReviewerSuggestionsObject(resp.Assistant.Content, e.cfg.Reviewer.MaxSuggestions), nil
 }
 
-func parseReviewerSuggestions(content string, maxSuggestions int) []string {
+func parseReviewerSuggestionsObject(content string, maxSuggestions int) []string {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" {
 		return nil
 	}
 
-	var out []string
 	var payload struct {
 		Suggestions []string `json:"suggestions"`
 	}
-	if err := json.Unmarshal([]byte(trimmed), &payload); err == nil {
-		out = payload.Suggestions
-	} else {
-		if err := json.Unmarshal([]byte(trimmed), &out); err != nil {
-			return nil
-		}
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return nil
 	}
+	out := payload.Suggestions
 
 	if maxSuggestions <= 0 {
 		maxSuggestions = 5
@@ -574,17 +649,66 @@ func parseReviewerSuggestions(content string, maxSuggestions int) []string {
 
 func formatReviewerDeveloperInstruction(suggestions []string) string {
 	b := strings.Builder{}
-	b.WriteString("Post-turn reviewer suggestions:\n")
+	b.WriteString("Supervisor agent gave you suggestions:\n")
 	for idx, suggestion := range suggestions {
 		b.WriteString(strconv.Itoa(idx + 1))
 		b.WriteString(". ")
 		b.WriteString(suggestion)
 		b.WriteString("\n")
 	}
-	b.WriteString("\nIf no action is needed, respond with exactly ")
+	b.WriteString("\nIf no suggestions are applicable and you don't want to say anything to the user (not the supervisor!), respond with exactly ")
 	b.WriteString(reviewerNoopToken)
-	b.WriteString(" and no additional text.")
+	b.WriteString(" and no additional text. Otherwise, address the suggestions now. The supervisor can't hear you, your response will be to the user.")
 	return b.String()
+}
+
+func reviewerStatusText(status ReviewerStatus, suggestions []string) string {
+	statusText := ""
+	switch strings.TrimSpace(status.Outcome) {
+	case "failed":
+		if strings.TrimSpace(status.Error) == "" {
+			statusText = "Supervisor ran: failed to generate suggestions."
+			break
+		}
+		statusText = fmt.Sprintf("Supervisor ran: failed to generate suggestions: %s", status.Error)
+	case "no_suggestions":
+		statusText = "Supervisor ran: no suggestions."
+	case "followup_failed":
+		if strings.TrimSpace(status.Error) == "" {
+			statusText = fmt.Sprintf("Supervisor ran: %s, but follow-up failed.", reviewerSuggestionCountLabel(status.SuggestionsCount))
+			break
+		}
+		statusText = fmt.Sprintf("Supervisor ran: %s, but follow-up failed: %s", reviewerSuggestionCountLabel(status.SuggestionsCount), status.Error)
+	case "noop":
+		statusText = fmt.Sprintf("Supervisor ran: %s, no changes applied.", reviewerSuggestionCountLabel(status.SuggestionsCount))
+	case "applied":
+		statusText = fmt.Sprintf("Supervisor ran: %s, applied.", reviewerSuggestionCountLabel(status.SuggestionsCount))
+	default:
+		statusText = "Supervisor ran."
+	}
+	if len(suggestions) == 0 {
+		return statusText
+	}
+	b := strings.Builder{}
+	b.WriteString(statusText)
+	b.WriteString("\n\n")
+	b.WriteString("Supervisor suggestions:\n")
+	for idx, suggestion := range suggestions {
+		b.WriteString(strconv.Itoa(idx + 1))
+		b.WriteString(". ")
+		b.WriteString(strings.TrimSpace(suggestion))
+		if idx < len(suggestions)-1 {
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
+func reviewerSuggestionCountLabel(count int) string {
+	if count <= 1 {
+		return "1 suggestion"
+	}
+	return fmt.Sprintf("%d suggestions", count)
 }
 
 func (e *Engine) buildRequest(ctx context.Context, _ string, allowTools bool) (llm.Request, error) {
@@ -645,6 +769,29 @@ func hasEnabledTool(ids []tools.ID, toolID tools.ID) bool {
 		}
 	}
 	return false
+}
+
+func summarizeOutputItemTypes(items []llm.ResponseItem) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	counts := make(map[string]int, len(items))
+	order := make([]string, 0, len(items))
+	for _, item := range items {
+		t := strings.TrimSpace(string(item.Type))
+		if t == "" {
+			t = "unknown"
+		}
+		if _, ok := counts[t]; !ok {
+			order = append(order, t)
+		}
+		counts[t]++
+	}
+	out := make([]string, 0, len(order))
+	for _, t := range order {
+		out = append(out, fmt.Sprintf("%s:%d", t, counts[t]))
+	}
+	return out
 }
 
 type hostedToolExecution struct {
@@ -796,63 +943,6 @@ func sanitizeItemsForLLM(items []llm.ResponseItem) []llm.ResponseItem {
 	return cleaned
 }
 
-func sanitizeMessagesForReviewer(messages []llm.Message, maxToolOutputChars int) []llm.Message {
-	if len(messages) == 0 {
-		return messages
-	}
-	cleaned := make([]llm.Message, len(messages))
-	for i, msg := range messages {
-		cleaned[i] = msg
-		content := xansi.Strip(msg.Content)
-		if msg.Role == llm.RoleTool {
-			content = truncateForReviewer(normalizeToolMessageForLLM(content), maxToolOutputChars)
-		}
-		cleaned[i].Content = content
-	}
-	return cleaned
-}
-
-func sanitizeItemsForReviewer(items []llm.ResponseItem, maxToolOutputChars int) []llm.ResponseItem {
-	if len(items) == 0 {
-		return items
-	}
-	cleaned := llm.CloneResponseItems(items)
-	for i := range cleaned {
-		if cleaned[i].Type == llm.ResponseItemTypeMessage {
-			cleaned[i].Content = xansi.Strip(cleaned[i].Content)
-		}
-		if cleaned[i].Type == llm.ResponseItemTypeFunctionCallOutput && len(cleaned[i].Output) > 0 {
-			normalized := normalizeToolMessageForLLM(string(cleaned[i].Output))
-			truncated := truncateForReviewer(normalized, maxToolOutputChars)
-			quoted, _ := json.Marshal(truncated)
-			cleaned[i].Output = quoted
-		}
-	}
-	return cleaned
-}
-
-func truncateForReviewer(text string, maxChars int) string {
-	if maxChars <= 0 {
-		maxChars = 1200
-	}
-	trimmed := strings.TrimSpace(text)
-	if len(trimmed) <= maxChars {
-		return trimmed
-	}
-	head := maxChars / 2
-	tail := maxChars - head
-	if tail < 0 {
-		tail = 0
-	}
-	if head > len(trimmed) {
-		head = len(trimmed)
-	}
-	if tail > len(trimmed)-head {
-		tail = len(trimmed) - head
-	}
-	return trimmed[:head] + "\n...[truncated for reviewer]...\n" + trimmed[len(trimmed)-tail:]
-}
-
 func normalizeToolMessageForLLM(content string) string {
 	var payload any
 	if err := json.Unmarshal([]byte(content), &payload); err != nil {
@@ -890,6 +980,10 @@ func (e *Engine) ensureLocked() (session.LockedContract, error) {
 }
 
 func (e *Engine) generateWithRetry(ctx context.Context, req llm.Request, onDelta func(string), onAttemptReset func()) (llm.Response, error) {
+	return e.generateWithRetryClient(ctx, e.llm, req, onDelta, onAttemptReset)
+}
+
+func (e *Engine) generateWithRetryClient(ctx context.Context, client llm.Client, req llm.Request, onDelta func(string), onAttemptReset func()) (llm.Response, error) {
 	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second}
 	var lastErr error
 	for i := 0; i <= len(delays); i++ {
@@ -908,10 +1002,10 @@ func (e *Engine) generateWithRetry(ctx context.Context, req llm.Request, onDelta
 				onDelta(delta)
 			}
 		}
-		if streamingClient, ok := e.llm.(llm.StreamClient); ok {
+		if streamingClient, ok := client.(llm.StreamClient); ok {
 			resp, err = streamingClient.GenerateStream(ctx, req, attemptOnDelta)
 		} else {
-			resp, err = e.llm.Generate(ctx, req)
+			resp, err = client.Generate(ctx, req)
 			if err == nil && attemptOnDelta != nil && resp.Assistant.Content != "" {
 				attemptOnDelta(resp.Assistant.Content)
 			}
@@ -1256,13 +1350,19 @@ func (e *Engine) ChatSnapshot() ChatSnapshot {
 func (e *Engine) ContextUsage() ContextUsage {
 	window := e.contextWindowTokens()
 	used := e.currentTokenUsage()
+	cacheHitPercent, hasCacheHitPercentage := e.cacheHitSnapshot()
 	if used < 0 {
 		used = 0
 	}
 	if window < 0 {
 		window = 0
 	}
-	return ContextUsage{UsedTokens: used, WindowTokens: window}
+	return ContextUsage{
+		UsedTokens:            used,
+		WindowTokens:          window,
+		CacheHitPercent:       cacheHitPercent,
+		HasCacheHitPercentage: hasCacheHitPercentage,
+	}
 }
 
 func (e *Engine) AppendLocalEntry(role, text string) {
@@ -1332,7 +1432,41 @@ func (e *Engine) lastUsageSnapshot() llm.Usage {
 func (e *Engine) setLastUsage(usage llm.Usage) {
 	e.mu.Lock()
 	e.lastUsage = usage
+	if usage.HasCachedInputTokens && usage.InputTokens > 0 {
+		cachedTokens := usage.CachedInputTokens
+		if cachedTokens < 0 {
+			cachedTokens = 0
+		}
+		if cachedTokens > usage.InputTokens {
+			cachedTokens = usage.InputTokens
+		}
+		e.totalInputTokens += usage.InputTokens
+		e.totalCachedInputTokens += cachedTokens
+	}
 	e.mu.Unlock()
+}
+
+func (e *Engine) cacheHitSnapshot() (int, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.totalInputTokens <= 0 {
+		return 0, false
+	}
+	cachedTokens := e.totalCachedInputTokens
+	if cachedTokens < 0 {
+		cachedTokens = 0
+	}
+	if cachedTokens > e.totalInputTokens {
+		cachedTokens = e.totalInputTokens
+	}
+	pct := (cachedTokens * 100) / e.totalInputTokens
+	if pct < 0 {
+		return 0, false
+	}
+	if pct > 100 {
+		return 100, true
+	}
+	return pct, true
 }
 
 func (e *Engine) emit(evt Event) {

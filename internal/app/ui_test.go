@@ -1377,6 +1377,37 @@ func TestInitAutoSubmitsStartupPrompt(t *testing.T) {
 	}
 }
 
+func TestReviewerStatusEndToEnd_OngoingShortDetailFull(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.AppendLocalEntry("reviewer_status", "Supervisor ran: 2 suggestions, no changes applied.\n\nSupervisor suggestions:\n1. First detailed suggestion text\n2. Second detailed suggestion text")
+
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 24
+
+	ongoing := stripANSIAndTrimRight(m.View())
+	if !strings.Contains(ongoing, "Supervisor ran: 2 suggestions, no changes applied.") {
+		t.Fatalf("expected short reviewer status in ongoing mode, got %q", ongoing)
+	}
+	if strings.Contains(ongoing, "Supervisor suggestions:") || strings.Contains(ongoing, "First detailed suggestion") {
+		t.Fatalf("expected full reviewer suggestions hidden in ongoing mode, got %q", ongoing)
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	detail := stripANSIAndTrimRight(next.(*uiModel).View())
+	if !containsInOrder(detail, "Supervisor ran: 2 suggestions, no changes applied.", "Supervisor suggestions:", "1. First detailed suggestion text", "2. Second detailed suggestion text") {
+		t.Fatalf("expected full reviewer suggestions in detail mode, got %q", detail)
+	}
+}
+
 func TestStatusLineShowsContextUsageWhenAvailable(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -1390,6 +1421,9 @@ func TestStatusLineShowsContextUsageWhenAvailable(t *testing.T) {
 	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(line, "cache --") {
+		t.Fatalf("expected cache placeholder in status line, got %q", line)
+	}
 	if !strings.Contains(line, "0%") {
 		t.Fatalf("expected context usage label in status line, got %q", line)
 	}
