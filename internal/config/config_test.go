@@ -31,6 +31,9 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.WebSearch != "off" {
 		t.Fatalf("default web_search mismatch: %q", cfg.Settings.WebSearch)
 	}
+	if cfg.Settings.NotificationMethod != "auto" {
+		t.Fatalf("default notification_method mismatch: %q", cfg.Settings.NotificationMethod)
+	}
 	if got := cfg.PersistenceRoot; got != filepath.Join(home, ".builder") {
 		t.Fatalf("default persistence root mismatch: %q", got)
 	}
@@ -93,6 +96,48 @@ func TestLoadWebSearchPrecedenceAndValidation(t *testing.T) {
 	t.Setenv("BUILDER_WEB_SEARCH", "custom")
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
 		t.Fatal("expected web_search=custom validation error")
+	}
+}
+
+func TestLoadNotificationMethodPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("notification_method = \"bel\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.NotificationMethod != "bel" {
+		t.Fatalf("expected file notification_method=bel, got %q", cfg.Settings.NotificationMethod)
+	}
+	if got := cfg.Source.Sources["notification_method"]; got != "file" {
+		t.Fatalf("expected notification_method source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_NOTIFICATION_METHOD", "osc9")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.NotificationMethod != "osc9" {
+		t.Fatalf("expected env notification_method=osc9, got %q", cfg.Settings.NotificationMethod)
+	}
+	if got := cfg.Source.Sources["notification_method"]; got != "env" {
+		t.Fatalf("expected notification_method source env, got %q", got)
+	}
+
+	t.Setenv("BUILDER_NOTIFICATION_METHOD", "bad")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid notification_method validation error")
 	}
 }
 

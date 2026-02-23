@@ -11,28 +11,96 @@ import (
 )
 
 const terminalBell = "\a"
+const osc9Prefix = "\x1b]9;"
 
-type bellRinger interface {
-	Ring()
+const (
+	notificationMethodAuto = "auto"
+	notificationMethodOSC9 = "osc9"
+	notificationMethodBEL  = "bel"
+)
+
+type terminalNotifier interface {
+	Notify(message string)
 }
 
-type terminalBellRinger struct {
+type belTerminalNotifier struct {
 	mu  sync.Mutex
 	out io.Writer
 }
 
-func newTerminalBellRinger(out io.Writer) *terminalBellRinger {
+type osc9TerminalNotifier struct {
+	mu  sync.Mutex
+	out io.Writer
+}
+
+func newBELTerminalNotifier(out io.Writer) *belTerminalNotifier {
 	if out == nil {
 		out = io.Discard
 	}
-	return &terminalBellRinger{out: out}
+	return &belTerminalNotifier{out: out}
 }
 
-func defaultTerminalBellRinger() *terminalBellRinger {
-	return newTerminalBellRinger(os.Stdout)
+func newOSC9TerminalNotifier(out io.Writer) *osc9TerminalNotifier {
+	if out == nil {
+		out = io.Discard
+	}
+	return &osc9TerminalNotifier{out: out}
 }
 
-func (r *terminalBellRinger) Ring() {
+func defaultTerminalNotifier(method string) terminalNotifier {
+	return newTerminalNotifier(method, os.Stdout, os.LookupEnv)
+}
+
+func newTerminalNotifier(method string, out io.Writer, lookup func(string) (string, bool)) terminalNotifier {
+	normalized := strings.ToLower(strings.TrimSpace(method))
+	if normalized == "" {
+		normalized = notificationMethodAuto
+	}
+	switch normalized {
+	case notificationMethodOSC9:
+		return newOSC9TerminalNotifier(out)
+	case notificationMethodBEL:
+		return newBELTerminalNotifier(out)
+	default:
+		if supportsOSC9(lookup) {
+			return newOSC9TerminalNotifier(out)
+		}
+		return newBELTerminalNotifier(out)
+	}
+}
+
+func supportsOSC9(lookup func(string) (string, bool)) bool {
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
+	if _, ok := lookup("WT_SESSION"); ok {
+		return false
+	}
+	if termProgram, ok := lookup("TERM_PROGRAM"); ok {
+		switch termProgram {
+		case "WezTerm", "ghostty":
+			return true
+		}
+	}
+	if _, ok := lookup("ITERM_SESSION_ID"); ok {
+		return true
+	}
+	if term, ok := lookup("TERM"); ok {
+		switch term {
+		case "xterm-kitty", "wezterm", "wezterm-mux":
+			return true
+		}
+	}
+	return false
+}
+
+func sanitizeOSC9Message(message string) string {
+	message = strings.ReplaceAll(message, "\x1b", "")
+	message = strings.ReplaceAll(message, terminalBell, "")
+	return message
+}
+
+func (r *belTerminalNotifier) Notify(_ string) {
 	if r == nil {
 		return
 	}
@@ -41,22 +109,35 @@ func (r *terminalBellRinger) Ring() {
 	_, _ = io.WriteString(r.out, terminalBell)
 }
 
+func (r *osc9TerminalNotifier) Notify(message string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, _ = io.WriteString(r.out, osc9Prefix+sanitizeOSC9Message(message)+terminalBell)
+}
+
 type bellHooks struct {
 	mu          sync.Mutex
-	ringer      bellRinger
+	notifier    terminalNotifier
 	currentStep string
 	toolCalls   int
 }
 
-func newBellHooks(ringer bellRinger) *bellHooks {
-	if ringer == nil {
-		ringer = newTerminalBellRinger(io.Discard)
+func newBellHooks(notifier terminalNotifier) *bellHooks {
+	if notifier == nil {
+		notifier = newBELTerminalNotifier(io.Discard)
 	}
-	return &bellHooks{ringer: ringer}
+	return &bellHooks{notifier: notifier}
 }
 
-func (h *bellHooks) OnAsk(_ askquestion.Request) {
-	h.ringer.Ring()
+func (h *bellHooks) OnAsk(req askquestion.Request) {
+	message := "Builder: action required"
+	if !req.Approval {
+		message = "Builder: question from agent"
+	}
+	h.notifier.Notify(message)
 }
 
 func (h *bellHooks) OnRuntimeEvent(evt runtime.Event) {
@@ -96,6 +177,6 @@ func (h *bellHooks) ringIfToolHeavyTurnEnd(stepID string) {
 	}
 	h.mu.Unlock()
 	if shouldRing {
-		h.ringer.Ring()
+		h.notifier.Notify("Builder: turn complete")
 	}
 }
