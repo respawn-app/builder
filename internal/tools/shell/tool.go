@@ -21,7 +21,7 @@ import (
 const (
 	defaultTimeout = 5 * time.Minute
 	maxTimeout     = time.Hour
-	defaultLimit   = 10_000
+	defaultLimit   = 16_000
 	headTailSize   = 1000
 )
 

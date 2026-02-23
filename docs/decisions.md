@@ -7,8 +7,9 @@ This file records architecture and product decisions for the minimal terminal co
 1. **No TypeScript.**
    - Rationale: avoid TS TUI stack tradeoffs and runtime/tooling complexity for this project.
 
-2. **No MCP, plugins, subagents, or skills in v1.**
+2. **No MCP, plugins, native subagent orchestration, or skills in v1.**
    - Rationale: keep the system minimal and focused on core quality.
+   - Note: headless subagents are supported as separate Builder processes via `builder run "prompt"`.
 
 3. **No sandbox in v1 (full access).**
    - Rationale: maximize capability and reduce friction; add security controls later.
@@ -564,3 +565,10 @@ This file records architecture and product decisions for the minimal terminal co
    - When suggestions are present, runtime appends them as a `developer` message and executes one additional main-agent follow-up pass.
    - Follow-up noop contract uses exact token `__BUILDER_REVIEW_NOOP__`; when emitted, runtime keeps original assistant final answer.
    - Reviewer pass is single-shot (no recursive reviewer-on-reviewer follow-up in v1).
+
+157. **`builder run "prompt"` is the supported headless subagent interface.**
+   - Runs a single non-interactive prompt using existing runtime/session persistence.
+   - Creates/resumes a normal session and auto-names unnamed sessions as `<session-id> subagent`.
+   - Default timeout is infinite; optional `--timeout` can bound execution.
+   - `stdout` is reserved for exactly one final JSON object (`status`, `result`/`error`, `session_id`, `session_name`, `duration_ms`).
+   - Progress/runtime activity is written to `stderr` to keep stdout parse-safe for shell/tmux capture.

@@ -12,9 +12,11 @@ const (
 	EventAssistantDelta      EventKind = "assistant_delta"
 	EventAssistantDeltaReset EventKind = "assistant_delta_reset"
 	EventAssistantMessage    EventKind = "assistant_message"
+	EventModelResponse       EventKind = "model_response_received"
 	EventUserMessageFlushed  EventKind = "user_message_flushed"
 	EventToolCallStarted     EventKind = "tool_call_started"
 	EventToolCallCompleted   EventKind = "tool_call_completed"
+	EventReviewerCompleted   EventKind = "reviewer_completed"
 	EventInFlightClearFailed EventKind = "in_flight_clear_failed"
 	EventCompactionStarted   EventKind = "context_compaction_started"
 	EventCompactionCompleted EventKind = "context_compaction_completed"
@@ -28,9 +30,25 @@ type Event struct {
 	AssistantDelta string
 	UserMessage    string
 	Message        llm.Message
+	ModelResponse  *ModelResponseTrace
 	ToolCall       *llm.ToolCall
 	ToolResult     *tools.Result
+	Reviewer       *ReviewerStatus
 	Compaction     *CompactionStatus
+}
+
+type ReviewerStatus struct {
+	Outcome          string `json:"outcome,omitempty"`
+	SuggestionsCount int    `json:"suggestions_count,omitempty"`
+	Error            string `json:"error,omitempty"`
+}
+
+type ModelResponseTrace struct {
+	AssistantPhase   llm.MessagePhase `json:"assistant_phase,omitempty"`
+	AssistantChars   int              `json:"assistant_chars,omitempty"`
+	ToolCallsCount   int              `json:"tool_calls_count,omitempty"`
+	OutputItemsCount int              `json:"output_items_count,omitempty"`
+	OutputItemTypes  []string         `json:"output_item_types,omitempty"`
 }
 
 type CompactionStatus struct {

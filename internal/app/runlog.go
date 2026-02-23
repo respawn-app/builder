@@ -1,8 +1,8 @@
 package app
 
 import (
-	"fmt"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,6 +63,19 @@ func formatRuntimeEvent(evt runtime.Event) string {
 		return fmt.Sprintf("runtime.event kind=%s step_id=%s", evt.Kind, evt.StepID)
 	case runtime.EventAssistantMessage:
 		return fmt.Sprintf("runtime.event kind=%s step_id=%s message_chars=%d", evt.Kind, evt.StepID, len(evt.Message.Content))
+	case runtime.EventModelResponse:
+		if evt.ModelResponse != nil {
+			return fmt.Sprintf(
+				"runtime.event kind=%s step_id=%s phase=%s assistant_chars=%d tool_calls=%d output_items=%d output_types=%q",
+				evt.Kind,
+				evt.StepID,
+				evt.ModelResponse.AssistantPhase,
+				evt.ModelResponse.AssistantChars,
+				evt.ModelResponse.ToolCallsCount,
+				evt.ModelResponse.OutputItemsCount,
+				strings.Join(evt.ModelResponse.OutputItemTypes, ","),
+			)
+		}
 	case runtime.EventUserMessageFlushed:
 		return fmt.Sprintf("runtime.event kind=%s step_id=%s user_chars=%d", evt.Kind, evt.StepID, len(evt.UserMessage))
 	case runtime.EventToolCallStarted:
@@ -72,6 +85,20 @@ func formatRuntimeEvent(evt runtime.Event) string {
 	case runtime.EventToolCallCompleted:
 		if evt.ToolResult != nil {
 			return fmt.Sprintf("runtime.event kind=%s step_id=%s call_id=%s name=%s is_error=%t", evt.Kind, evt.StepID, evt.ToolResult.CallID, evt.ToolResult.Name, evt.ToolResult.IsError)
+		}
+	case runtime.EventReviewerCompleted:
+		if evt.Reviewer != nil {
+			line := fmt.Sprintf(
+				"runtime.event kind=%s step_id=%s outcome=%s suggestions=%d",
+				evt.Kind,
+				evt.StepID,
+				evt.Reviewer.Outcome,
+				evt.Reviewer.SuggestionsCount,
+			)
+			if strings.TrimSpace(evt.Reviewer.Error) != "" {
+				line += fmt.Sprintf(" err=%q", evt.Reviewer.Error)
+			}
+			return line
 		}
 	case runtime.EventInFlightClearFailed:
 		if strings.TrimSpace(evt.Error) != "" {

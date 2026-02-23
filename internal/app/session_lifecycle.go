@@ -37,7 +37,7 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 			logger.Logf("config.source %s", line)
 		}
 
-		wiring, err := newRuntimeWiring(store, active, enabledTools, boot.cfg.WorkspaceRoot, boot.authManager, logger)
+		wiring, err := newRuntimeWiring(store, active, enabledTools, boot.cfg.WorkspaceRoot, boot.authManager, logger, runtimeWiringOptions{})
 		if err != nil {
 			_ = logger.Close()
 			return err

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"builder/internal/auth"
@@ -24,22 +25,32 @@ type runtimeWiring struct {
 	eventBridge *runtimeEventBridge
 }
 
-func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools []tools.ID, workspaceRoot string, mgr *auth.Manager, logger *runLogger) (*runtimeWiring, error) {
+type runtimeWiringOptions struct {
+	AskHandler func(req askquestion.Request) (string, error)
+	OnEvent    func(evt runtime.Event)
+}
+
+func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools []tools.ID, workspaceRoot string, mgr *auth.Manager, logger *runLogger, opts runtimeWiringOptions) (*runtimeWiring, error) {
 	bells := newBellHooks(defaultTerminalNotifier(active.NotificationMethod))
 
 	toolRegistry, askBroker, err := buildToolRegistry(
 		workspaceRoot,
 		enabledTools,
 		time.Duration(active.Timeouts.ShellDefaultSeconds)*time.Second,
+		active.ShellOutputMaxChars,
 		active.AllowNonCwdEdits,
 	)
 	if err != nil {
 		return nil, err
 	}
 	askBridge := newAskBridge()
+	askHandler := askBridge.Handle
+	if opts.AskHandler != nil {
+		askHandler = opts.AskHandler
+	}
 	askBroker.SetAskHandler(func(req askquestion.Request) (string, error) {
 		bells.OnAsk(req)
-		return askBridge.Handle(req)
+		return askHandler(req)
 	})
 
 	modelHTTPClient := &http.Client{Timeout: time.Duration(active.Timeouts.ModelRequestSeconds) * time.Second}
@@ -56,7 +67,7 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 	}
 
 	var reviewerClient llm.Client
-	if active.Reviewer.Enabled {
+	if strings.ToLower(strings.TrimSpace(active.Reviewer.Frequency)) != "off" {
 		reviewerHTTPClient := &http.Client{Timeout: time.Duration(active.Reviewer.TimeoutSeconds) * time.Second}
 		reviewerClient, err = llm.NewProviderClient(llm.ProviderClientOptions{
 			Model:               active.Reviewer.Model,
@@ -89,16 +100,18 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 		LocalCompactionCarryoverLimit: 20_000,
 		UseNativeCompaction:           boolRef(active.UseNativeCompaction),
 		Reviewer: runtime.ReviewerConfig{
-			Enabled:            active.Reviewer.Enabled,
-			Model:              active.Reviewer.Model,
-			ThinkingLevel:      active.Reviewer.ThinkingLevel,
-			MaxSuggestions:     active.Reviewer.MaxSuggestions,
-			MaxToolOutputChars: active.Reviewer.MaxToolOutputChars,
-			Client:             reviewerClient,
+			Frequency:      active.Reviewer.Frequency,
+			Model:          active.Reviewer.Model,
+			ThinkingLevel:  active.Reviewer.ThinkingLevel,
+			MaxSuggestions: active.Reviewer.MaxSuggestions,
+			Client:         reviewerClient,
 		},
 		OnEvent: func(evt runtime.Event) {
 			logger.Logf("%s", formatRuntimeEvent(evt))
 			bells.OnRuntimeEvent(evt)
+			if opts.OnEvent != nil {
+				opts.OnEvent(evt)
+			}
 			eventBridge.Publish(evt)
 		},
 	})
@@ -130,7 +143,7 @@ func configSourceLines(src config.SourceReport) []string {
 	return lines
 }
 
-func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTimeout time.Duration, allowNonCwdEdits bool) (*tools.Registry, *askquestion.Broker, error) {
+func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTimeout time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool) (*tools.Registry, *askquestion.Broker, error) {
 	broker := askquestion.NewBroker()
 	outsideWorkspaceApprover := newPatchOutsideWorkspaceApprover(broker)
 	patch, err := patchtool.New(
@@ -147,7 +160,7 @@ func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTim
 
 	factories := map[tools.ID]func() tools.Handler{
 		tools.ToolShell: func() tools.Handler {
-			return shelltool.New(workspaceRoot, 10_000, shelltool.WithDefaultTimeout(shellDefaultTimeout))
+			return shelltool.New(workspaceRoot, shellOutputMaxChars, shelltool.WithDefaultTimeout(shellDefaultTimeout))
 		},
 		tools.ToolPatch: func() tools.Handler {
 			return patch

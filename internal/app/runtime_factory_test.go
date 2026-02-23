@@ -14,6 +14,7 @@ func TestBuildToolRegistry_AllowsHostedWebSearchWithoutLocalFactory(t *testing.T
 		workspace,
 		[]tools.ID{tools.ToolShell, tools.ToolWebSearch},
 		5*time.Second,
+		16_000,
 		false,
 	)
 	if err != nil {
@@ -36,6 +37,7 @@ func TestBuildToolRegistry_IncludesParallelWrapperWhenEnabled(t *testing.T) {
 		workspace,
 		[]tools.ID{tools.ToolShell, tools.ToolMultiToolUseParallel},
 		5*time.Second,
+		16_000,
 		false,
 	)
 	if err != nil {

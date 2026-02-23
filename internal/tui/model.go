@@ -554,7 +554,11 @@ func (m Model) renderFlatOngoingTranscript() string {
 		case "tool_result", "tool_result_ok", "tool_result_error":
 			continue
 		default:
-			lines := m.flattenEntry(role, entry.Text)
+			text := entry.Text
+			if role == "reviewer_status" {
+				text = compactReviewerStatusForOngoing(text)
+			}
+			lines := m.flattenEntry(role, text)
 			blocks = append(blocks, ongoingBlock{
 				role:  role,
 				lines: m.maybeSelectedUserBlock(i, role, lines),
@@ -613,7 +617,7 @@ func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *
 			displayChunk = m.palette().preview.Faint(true).Render(displayChunk)
 		} else if isThinkingRole(role) {
 			displayChunk = styleForRole(role, m.palette()).Render(displayChunk)
-		} else if role == "compaction_notice" || role == "compaction_summary" || role == "error" {
+		} else if role == "compaction_notice" || role == "compaction_summary" || role == "reviewer_status" || role == "error" {
 			displayChunk = styleForRole(role, m.palette()).Render(displayChunk)
 		}
 		if i == 0 {
@@ -764,6 +768,20 @@ func compactToolCallText(meta *transcript.ToolCallMeta, text string) string {
 		return strings.TrimSpace(meta.PatchSummary)
 	}
 	return toolcodec.CompactCallText(text)
+}
+
+func compactReviewerStatusForOngoing(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return ""
+	}
+	for _, line := range strings.Split(trimmed, "\n") {
+		candidate := strings.TrimSpace(line)
+		if candidate != "" {
+			return candidate
+		}
+	}
+	return trimmed
 }
 
 func askQuestionDisplay(meta *transcript.ToolCallMeta, text string) (string, []string) {
@@ -1115,7 +1133,7 @@ func (m Model) roleSymbol(role string) string {
 		return styleForRole(role, m.palette()).Render(prefix)
 	case "error":
 		return styleForRole(role, m.palette()).Render(prefix)
-	case "compaction_notice", "compaction_summary":
+	case "compaction_notice", "compaction_summary", "reviewer_status":
 		return styleForRole(role, m.palette()).Render(prefix)
 	default:
 		return prefix
@@ -1135,6 +1153,8 @@ func rolePrefix(role string) string {
 	case "tool_question", "tool_question_error":
 		return "?"
 	case "compaction_notice", "compaction_summary":
+		return "@"
+	case "reviewer_status":
 		return "@"
 	case "error":
 		return "!"
@@ -1182,7 +1202,7 @@ func styleForRole(role string, p palette) lipgloss.Style {
 		return p.system
 	case "error":
 		return p.error
-	case "compaction_notice", "compaction_summary":
+	case "compaction_notice", "compaction_summary", "reviewer_status":
 		return p.compaction
 	default:
 		return p.preview
