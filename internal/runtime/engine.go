@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +31,7 @@ const (
 	environmentInjectedHeader         = "# Info about environment:"
 	commentaryWithoutToolCallsWarning = "You sent a commentary-phase message without tool calls. This is wrong. If you intend to keep working, include tool calls with commentary updates. If you are done, send a final_answer phase message with no tool calls."
 	finalWithToolCallsIgnoredWarning  = "You included tool calls with your final answer message. This is wrong, and your tool calls were ignored. If you intended to call the tools, include updates in the \"commentary\" channel along with tool calls. Otherwise, do not include tool calls with your final message responses"
+	reviewerNoopToken                 = "__BUILDER_REVIEW_NOOP__"
 )
 
 type Config struct {
@@ -44,7 +46,17 @@ type Config struct {
 	EffectiveContextWindowPercent int
 	LocalCompactionCarryoverLimit int
 	UseNativeCompaction           *bool
+	Reviewer                      ReviewerConfig
 	OnEvent                       func(Event)
+}
+
+type ReviewerConfig struct {
+	Enabled            bool
+	Model              string
+	ThinkingLevel      string
+	MaxSuggestions     int
+	MaxToolOutputChars int
+	Client             llm.Client
 }
 
 type ContextUsage struct {
@@ -57,6 +69,7 @@ type Engine struct {
 
 	store    *session.Store
 	llm      llm.Client
+	reviewer llm.Client
 	registry *tools.Registry
 	cfg      Config
 
@@ -104,6 +117,7 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 	eng := &Engine{
 		store:    store,
 		llm:      client,
+		reviewer: cfg.Reviewer.Client,
 		registry: registry,
 		cfg:      cfg,
 		chat:     newChatStore(),
@@ -313,6 +327,11 @@ func (e *Engine) SubmitUserShellCommand(ctx context.Context, command string) (re
 }
 
 func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, error) {
+	return e.runStepLoopWithOptions(ctx, stepID, true, true)
+}
+
+func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allowReviewer bool, emitAssistantEvent bool) (llm.Message, error) {
+	executedToolCall := false
 	for {
 		if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
 			return llm.Message{}, err
@@ -344,6 +363,9 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 
 		localToolCalls := append([]llm.ToolCall(nil), resp.ToolCalls...)
 		hostedToolExecutions := hostedToolExecutionsFromOutputItems(resp.OutputItems)
+		if len(localToolCalls) > 0 || len(hostedToolExecutions) > 0 {
+			executedToolCall = true
+		}
 		finalAnswerIncludedToolCalls := false
 
 		assistantMsg := resp.Assistant
@@ -414,8 +436,17 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 			if len(hostedToolExecutions) > 0 {
 				continue
 			}
-			e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: assistantMsg})
-			return assistantMsg, nil
+			resolved := assistantMsg
+			if allowReviewer && executedToolCall {
+				reviewed, err := e.runReviewerFollowUp(ctx, stepID, assistantMsg)
+				if err == nil {
+					resolved = reviewed
+				}
+			}
+			if emitAssistantEvent {
+				e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: resolved})
+			}
+			return resolved, nil
 		}
 
 		results, err := e.executeToolCalls(ctx, stepID, localToolCalls)
@@ -442,6 +473,110 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 			return llm.Message{}, err
 		}
 	}
+}
+
+func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, original llm.Message) (llm.Message, error) {
+	suggestions, err := e.runReviewerSuggestions(ctx)
+	if err != nil || len(suggestions) == 0 {
+		return original, nil
+	}
+
+	instruction := formatReviewerDeveloperInstruction(suggestions)
+	if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, Content: instruction}); err != nil {
+		return original, err
+	}
+
+	followUp, err := e.runStepLoopWithOptions(ctx, stepID, false, false)
+	if err != nil {
+		return original, nil
+	}
+	if strings.TrimSpace(followUp.Content) == reviewerNoopToken {
+		return original, nil
+	}
+	return followUp, nil
+}
+
+func (e *Engine) runReviewerSuggestions(ctx context.Context) ([]string, error) {
+	if !e.cfg.Reviewer.Enabled || e.reviewer == nil {
+		return nil, nil
+	}
+
+	items := sanitizeItemsForReviewer(e.snapshotItems(), e.cfg.Reviewer.MaxToolOutputChars)
+	messages := sanitizeMessagesForReviewer(e.snapshotMessages(), e.cfg.Reviewer.MaxToolOutputChars)
+	req := llm.Request{
+		Model:           e.cfg.Reviewer.Model,
+		Temperature:     1,
+		MaxTokens:       0,
+		ReasoningEffort: e.cfg.Reviewer.ThinkingLevel,
+		SystemPrompt:    prompts.ReviewerSystemPrompt,
+		SessionID:       e.store.Meta().SessionID,
+		Messages:        messages,
+		Items:           items,
+		Tools:           []llm.Tool{},
+	}
+	if err := req.Validate(); err != nil {
+		return nil, err
+	}
+	resp, err := e.reviewer.Generate(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return parseReviewerSuggestions(resp.Assistant.Content, e.cfg.Reviewer.MaxSuggestions), nil
+}
+
+func parseReviewerSuggestions(content string, maxSuggestions int) []string {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return nil
+	}
+
+	var out []string
+	var payload struct {
+		Suggestions []string `json:"suggestions"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &payload); err == nil {
+		out = payload.Suggestions
+	} else {
+		if err := json.Unmarshal([]byte(trimmed), &out); err != nil {
+			return nil
+		}
+	}
+
+	if maxSuggestions <= 0 {
+		maxSuggestions = 5
+	}
+	normalized := make([]string, 0, min(maxSuggestions, len(out)))
+	seen := map[string]bool{}
+	for _, suggestion := range out {
+		text := strings.TrimSpace(suggestion)
+		if text == "" {
+			continue
+		}
+		if seen[text] {
+			continue
+		}
+		seen[text] = true
+		normalized = append(normalized, text)
+		if len(normalized) >= maxSuggestions {
+			break
+		}
+	}
+	return normalized
+}
+
+func formatReviewerDeveloperInstruction(suggestions []string) string {
+	b := strings.Builder{}
+	b.WriteString("Post-turn reviewer suggestions:\n")
+	for idx, suggestion := range suggestions {
+		b.WriteString(strconv.Itoa(idx + 1))
+		b.WriteString(". ")
+		b.WriteString(suggestion)
+		b.WriteString("\n")
+	}
+	b.WriteString("\nIf no action is needed, respond with exactly ")
+	b.WriteString(reviewerNoopToken)
+	b.WriteString(" and no additional text.")
+	return b.String()
 }
 
 func (e *Engine) buildRequest(ctx context.Context, _ string, allowTools bool) (llm.Request, error) {
@@ -651,6 +786,63 @@ func sanitizeItemsForLLM(items []llm.ResponseItem) []llm.ResponseItem {
 		}
 	}
 	return cleaned
+}
+
+func sanitizeMessagesForReviewer(messages []llm.Message, maxToolOutputChars int) []llm.Message {
+	if len(messages) == 0 {
+		return messages
+	}
+	cleaned := make([]llm.Message, len(messages))
+	for i, msg := range messages {
+		cleaned[i] = msg
+		content := xansi.Strip(msg.Content)
+		if msg.Role == llm.RoleTool {
+			content = truncateForReviewer(normalizeToolMessageForLLM(content), maxToolOutputChars)
+		}
+		cleaned[i].Content = content
+	}
+	return cleaned
+}
+
+func sanitizeItemsForReviewer(items []llm.ResponseItem, maxToolOutputChars int) []llm.ResponseItem {
+	if len(items) == 0 {
+		return items
+	}
+	cleaned := llm.CloneResponseItems(items)
+	for i := range cleaned {
+		if cleaned[i].Type == llm.ResponseItemTypeMessage {
+			cleaned[i].Content = xansi.Strip(cleaned[i].Content)
+		}
+		if cleaned[i].Type == llm.ResponseItemTypeFunctionCallOutput && len(cleaned[i].Output) > 0 {
+			normalized := normalizeToolMessageForLLM(string(cleaned[i].Output))
+			truncated := truncateForReviewer(normalized, maxToolOutputChars)
+			quoted, _ := json.Marshal(truncated)
+			cleaned[i].Output = quoted
+		}
+	}
+	return cleaned
+}
+
+func truncateForReviewer(text string, maxChars int) string {
+	if maxChars <= 0 {
+		maxChars = 1200
+	}
+	trimmed := strings.TrimSpace(text)
+	if len(trimmed) <= maxChars {
+		return trimmed
+	}
+	head := maxChars / 2
+	tail := maxChars - head
+	if tail < 0 {
+		tail = 0
+	}
+	if head > len(trimmed) {
+		head = len(trimmed)
+	}
+	if tail > len(trimmed)-head {
+		tail = len(trimmed) - head
+	}
+	return trimmed[:head] + "\n...[truncated for reviewer]...\n" + trimmed[len(trimmed)-tail:]
 }
 
 func normalizeToolMessageForLLM(content string) string {
