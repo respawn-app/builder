@@ -68,10 +68,14 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 	if m.compacting {
 		spin = renderCompactionStatus()
 	}
+	transientStyle := lipgloss.NewStyle().Foreground(statusContextZoneColor(100)).Bold(true)
 	segments := []string{
 		spin,
 		style.meta.Render(string(m.view.Mode())),
 		style.meta.Render(textutil.FirstNonEmpty(m.modelName, "gpt-5")),
+	}
+	if text := strings.TrimSpace(m.transientStatus); text != "" {
+		segments = append(segments, transientStyle.Render(text))
 	}
 	left := strings.Join(segments, style.meta.Render(" | "))
 	right := l.renderContextUsage(style)

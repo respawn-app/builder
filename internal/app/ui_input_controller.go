@@ -20,6 +20,7 @@ type uiInputController struct {
 
 var spinnerFrames = []string{"|", "/", "-", "\\"}
 var spinnerTickInterval = 360 * time.Millisecond
+var transientStatusDuration = 2200 * time.Millisecond
 var errSubmissionInterrupted = errors.New("interrupted")
 var rollbackDoubleEscWindow = 500 * time.Millisecond
 
@@ -155,6 +156,18 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.rollbackEditing = false
 			return m, tea.Quit
 		}
+		if command, knownCommand := m.commandRegistry.Command(text); knownCommand {
+			if m.busy {
+				if !command.RunWhileBusy {
+					m.clearInput()
+					return m, c.showTransientStatus(fmt.Sprintf("cannot run /%s while model is working", command.Name))
+				}
+				if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
+					m.clearInput()
+					return c.applyCommandResult(commandResult)
+				}
+			}
+		}
 		_, isUserShell := parseUserShellCommand(text)
 		if m.busy {
 			if isUserShell {
@@ -174,61 +187,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
 			m.clearInput()
-			if commandResult.SubmitUser && commandResult.FreshConversation {
-				m.nextSessionInitialPrompt = commandResult.User
-				m.nextParentSessionID = m.sessionID
-				m.exitAction = UIActionNewSession
-				return m, tea.Quit
-			}
-			if commandResult.SubmitUser {
-				return m, c.startSubmission(commandResult.User)
-			}
-			if commandResult.Text != "" {
-				if m.engine != nil {
-					m.engine.AppendLocalEntry("system", commandResult.Text)
-				} else {
-					m.forwardToView(tui.AppendTranscriptMsg{Role: "system", Text: commandResult.Text})
-				}
-			}
-			switch commandResult.Action {
-			case commands.ActionExit:
-				m.exitAction = UIActionExit
-				return m, tea.Quit
-			case commands.ActionNew:
-				m.nextParentSessionID = m.sessionID
-				m.exitAction = UIActionNewSession
-				return m, tea.Quit
-			case commands.ActionResume:
-				m.exitAction = UIActionResume
-				return m, tea.Quit
-			case commands.ActionBack:
-				if m.engine == nil || strings.TrimSpace(m.engine.ParentSessionID()) == "" {
-					if m.engine != nil {
-						m.engine.AppendLocalEntry("system", "No parent session available")
-					} else {
-						m.forwardToView(tui.AppendTranscriptMsg{Role: "system", Text: "No parent session available"})
-					}
-					return m, nil
-				}
-				m.nextSessionID = strings.TrimSpace(m.engine.ParentSessionID())
-				m.exitAction = UIActionOpenSession
-				return m, tea.Quit
-			case commands.ActionLogout:
-				m.exitAction = UIActionLogout
-				return m, tea.Quit
-			case commands.ActionSetName:
-				if m.engine != nil {
-					if err := m.engine.SetSessionName(commandResult.SessionName); err != nil {
-						m.engine.AppendLocalEntry("error", formatSubmissionError(err))
-						return m, nil
-					}
-				}
-				m.sessionName = strings.TrimSpace(commandResult.SessionName)
-				return m, tea.SetWindowTitle(m.windowTitle())
-			case commands.ActionCompact:
-				return m, c.startCompaction(commandResult.Args)
-			}
-			return m, nil
+			return c.applyCommandResult(commandResult)
 		}
 		m.clearInput()
 		return m, c.startSubmission(text)
@@ -334,6 +293,75 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+}
+
+func (c uiInputController) applyCommandResult(commandResult commands.Result) (tea.Model, tea.Cmd) {
+	m := c.model
+	if commandResult.SubmitUser && commandResult.FreshConversation {
+		m.nextSessionInitialPrompt = commandResult.User
+		m.nextParentSessionID = m.sessionID
+		m.exitAction = UIActionNewSession
+		return m, tea.Quit
+	}
+	if commandResult.SubmitUser {
+		return m, c.startSubmission(commandResult.User)
+	}
+	if commandResult.Text != "" {
+		if m.engine != nil {
+			m.engine.AppendLocalEntry("system", commandResult.Text)
+		} else {
+			m.forwardToView(tui.AppendTranscriptMsg{Role: "system", Text: commandResult.Text})
+		}
+	}
+	switch commandResult.Action {
+	case commands.ActionExit:
+		m.exitAction = UIActionExit
+		return m, tea.Quit
+	case commands.ActionNew:
+		m.nextParentSessionID = m.sessionID
+		m.exitAction = UIActionNewSession
+		return m, tea.Quit
+	case commands.ActionResume:
+		m.exitAction = UIActionResume
+		return m, tea.Quit
+	case commands.ActionBack:
+		if m.engine == nil || strings.TrimSpace(m.engine.ParentSessionID()) == "" {
+			if m.engine != nil {
+				m.engine.AppendLocalEntry("system", "No parent session available")
+			} else {
+				m.forwardToView(tui.AppendTranscriptMsg{Role: "system", Text: "No parent session available"})
+			}
+			return m, nil
+		}
+		m.nextSessionID = strings.TrimSpace(m.engine.ParentSessionID())
+		m.exitAction = UIActionOpenSession
+		return m, tea.Quit
+	case commands.ActionLogout:
+		m.exitAction = UIActionLogout
+		return m, tea.Quit
+	case commands.ActionSetName:
+		if m.engine != nil {
+			if err := m.engine.SetSessionName(commandResult.SessionName); err != nil {
+				m.engine.AppendLocalEntry("error", formatSubmissionError(err))
+				return m, nil
+			}
+		}
+		m.sessionName = strings.TrimSpace(commandResult.SessionName)
+		return m, tea.SetWindowTitle(m.windowTitle())
+	case commands.ActionCompact:
+		return m, c.startCompaction(commandResult.Args)
+	}
+	return m, nil
+}
+
+func (c uiInputController) showTransientStatus(message string) tea.Cmd {
+	m := c.model
+	m.transientStatusToken++
+	token := m.transientStatusToken
+	m.transientStatus = strings.TrimSpace(message)
+	return tea.Tick(transientStatusDuration, func(time.Time) tea.Msg {
+		return clearTransientStatusMsg{token: token}
+	})
 }
 
 func (c uiInputController) startSubmission(text string) tea.Cmd {

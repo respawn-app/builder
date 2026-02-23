@@ -1237,6 +1237,72 @@ func TestBuiltInReviewSlashCommandSubmitsInjectedUserPrompt(t *testing.T) {
 	}
 }
 
+func TestBusySlashNameExecutesImmediatelyWithoutQueueing(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "/name incident triage"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected window title update cmd from /name")
+	}
+	if !updated.busy {
+		t.Fatal("expected busy state unchanged while command executes")
+	}
+	if updated.sessionName != "incident triage" {
+		t.Fatalf("expected session name update, got %q", updated.sessionName)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected no queued messages, got %d", len(updated.queued))
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected no pending injected messages, got %d", len(updated.pendingInjected))
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after /name, got %q", updated.input)
+	}
+}
+
+func TestBusyUnsupportedSlashCommandShowsTransientErrorAndDoesNotQueue(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "/compact keep details"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient status clear timer cmd")
+	}
+	if updated.transientStatus == "" {
+		t.Fatal("expected transient status message for unsupported busy command")
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected no queued messages, got %d", len(updated.queued))
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected no pending injected messages, got %d", len(updated.pendingInjected))
+	}
+	if updated.inputSubmitLocked {
+		t.Fatal("did not expect input submit lock for blocked slash command")
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared for blocked slash command, got %q", updated.input)
+	}
+	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(status, "cannot run /compact while model is working") {
+		t.Fatalf("expected transient status in status line, got %q", status)
+	}
+
+	next, _ = updated.Update(clearTransientStatusMsg{token: updated.transientStatusToken})
+	cleared := next.(*uiModel)
+	if cleared.transientStatus != "" {
+		t.Fatalf("expected transient status to clear, got %q", cleared.transientStatus)
+	}
+}
+
 func TestSlashCommandSetsExitAction(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "/exit"

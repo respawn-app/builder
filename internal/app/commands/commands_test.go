@@ -4,6 +4,12 @@ import "testing"
 
 func TestExecuteBuiltins(t *testing.T) {
 	r := NewDefaultRegistry()
+	if command, ok := r.Command("/name"); !ok || !command.RunWhileBusy {
+		t.Fatalf("expected /name command to be runnable while busy, got %+v, ok=%v", command, ok)
+	}
+	if command, ok := r.Command("/compact"); !ok || command.RunWhileBusy {
+		t.Fatalf("expected /compact command to require idle, got %+v, ok=%v", command, ok)
+	}
 	if got := r.Execute("/new"); got.Action != ActionNew {
 		t.Fatalf("expected ActionNew, got %+v", got)
 	}
@@ -60,6 +66,9 @@ func TestExecuteBuiltins(t *testing.T) {
 
 func TestExecuteUnknown(t *testing.T) {
 	r := NewDefaultRegistry()
+	if command, ok := r.Command("/nope"); ok || command.Name != "" {
+		t.Fatalf("expected unknown command lookup miss, got %+v, ok=%v", command, ok)
+	}
 	got := r.Execute("/nope")
 	if got.Handled {
 		t.Fatal("expected unknown slash command to be unhandled")
