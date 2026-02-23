@@ -450,39 +450,45 @@ This file records architecture and product decisions for the minimal terminal co
    - Typing whitespace after the command token enters argument mode and hides the picker.
    - Unknown slash commands are sent to the model as normal user prompts.
 
-137. **Built-in slash commands are `/logout`, `/exit`, `/new`, `/resume`, `/compact`, `/review`.**
+137. **Built-in slash commands are `/logout`, `/exit`, `/new`, `/resume`, `/compact`, `/name`, `/review`.**
    - `/logout`: clear auth and run re-auth immediately in-app.
    - `/new`: create and switch to a new session immediately.
    - `/resume`: return to startup screen and choose a session from the picker.
    - `/exit`: terminate the app.
    - `/compact`: run explicit context compaction.
+   - `/name`: set session title and terminal title (empty value resets to default).
    - `/review`: start a fresh session and auto-submit built-in review rubric prompt; optional arguments are appended as review scope.
 
-138. **AGENTS injection order is deterministic on first user turn.**
+138. **Known slash commands are intercepted while the model is running and never queued as user prompts.**
+   - Commands explicitly marked run-safe while busy execute immediately.
+   - Commands not marked run-safe while busy are rejected with a transient status-line error.
+   - Unknown slash commands continue to be treated as normal user prompts.
+
+139. **AGENTS injection order is deterministic on first user turn.**
    - Existing restored messages remain first.
    - Then inject global `~/.builder/AGENTS.md` as `developer` message when present.
    - Then inject workspace-root `AGENTS.md` as `developer` message when present.
    - Then append the current user prompt.
 
-139. **Canonical model context is stored as response-item history.**
+140. **Canonical model context is stored as response-item history.**
    - Runtime now keeps canonical `responses` input items as first-class history.
    - Message-only chat structures are treated as a projection for UI, not the source of truth.
 
-140. **Context compaction is enabled with dual engines and configurable native routing.**
+141. **Context compaction is enabled with dual engines and configurable native routing.**
    - Config key `use_native_compaction` (default `true`) controls whether runtime attempts provider-native compaction (`POST /responses/compact`) when capabilities allow it.
    - When `use_native_compaction=false`, runtime always uses local summarize-and-rebuild compaction.
    - Local summarize-and-rebuild remains the fallback when native compaction is unavailable or returns output without a checkpoint item.
 
-141. **Remote compaction continuity keeps compaction items opaque.**
+142. **Remote compaction continuity keeps compaction items opaque.**
    - `type=compaction` items are parsed, persisted, and replayed unchanged.
    - `encrypted_content` in reasoning/compaction items is treated as opaque and never transformed.
 
-142. **Auto-compaction replaces handoff hard-stop policy.**
+143. **Auto-compaction replaces handoff hard-stop policy.**
    - Runtime auto-compacts near context limits instead of forcing a final handoff and session stop.
    - Auto-compaction failures abort the current turn.
    - This supersedes Decisions 35, 46, and 82.
 
-143. **Manual compaction is available via `/compact` with optional arguments.**
+144. **Manual compaction is available via `/compact` with optional arguments.**
    - Users can trigger compaction explicitly while idle.
    - Text after `/compact` is appended to compaction instructions as additional guidance.
    - For local compaction summary generation, compaction instructions are injected as a final `developer` message (not `user`).
@@ -490,59 +496,62 @@ This file records architecture and product decisions for the minimal terminal co
    - Local compaction summary requests keep tool declarations for request-shape/cache stability, but runtime rejects any returned tool calls (tool execution remains disabled for compaction summary generation).
    - Manual compaction failures are surfaced to UI without terminating the session.
 
-144. **Compaction lifecycle is explicitly evented and persisted.**
+145. **Compaction lifecycle is explicitly evented and persisted.**
    - Runtime emits started/completed/failed compaction events.
    - History replacement snapshots are persisted as atomic `history_replaced` events to preserve resume/fork determinism.
    - UI transcript shows one compacted notice line per successful compaction (`context compacted for the Nth time`).
    - Ongoing view suppresses detailed compaction summary content; detail view shows full local compaction summary when available.
 
-145. **Native compaction eligibility is capability-driven and user-configurable.**
+146. **Native compaction eligibility is capability-driven and user-configurable.**
    - Provider capabilities gate native compaction support; this is no longer model-family-only routing.
    - `use_native_compaction=true` allows provider-native compaction where supported.
    - `use_native_compaction=false` forces local compaction regardless of provider capabilities.
 
-146. **Context window size is an explicit user setting.**
+147. **Context window size is an explicit user setting.**
    - Config key: `model_context_window`.
    - Default value: `400000`.
    - Validation requires `context_compaction_threshold_tokens < model_context_window`.
 
-147. **Status line includes right-aligned context capacity meter.**
+148. **Status line includes right-aligned context capacity meter.**
    - Render a compact 10-character progress bar plus `% ctx window` label.
    - Zone colors: green below 50%, yellow from 50% to below 80%, red at 80% and above.
 
-148. **Responses API `store` is user-configurable and defaults to disabled.**
+149. **Responses API `store` is user-configurable and defaults to disabled.**
    - Config key: `store`.
    - Environment override: `BUILDER_STORE`.
    - Default remains `false`.
 
-149. **Session/caching headers are sent for both OAuth and API key OpenAI requests.**
+150. **Session/caching headers are sent for both OAuth and API key OpenAI requests.**
    - `session_id` header is included whenever a session id is available, regardless of auth method.
    - `originator` and `User-Agent` headers are always set on OpenAI responses requests.
 
-150. **Outside-workspace `patch` edits are approval-gated unless explicitly enabled.**
+151. **Outside-workspace `patch` edits are approval-gated unless explicitly enabled.**
    - Config key: `allow_non_cwd_edits`.
    - Default value: `false` (workspace-only behavior stays default).
    - When disabled, outside-workspace patch attempts trigger user approval through the shared `ask_question` flow.
    - A user denial returns a tool error that explicitly instructs the model not to circumvent restrictions and to ask for manual user edits when essential.
 
-151. **Slash commands support file-backed custom prompts from local/global builder directories.**
+152. **Slash commands support file-backed custom prompts from local/global builder directories.**
    - Builder scans non-recursive `.md` files from `./.builder/prompts`, `./.builder/commands`, `~/.builder/prompts`, and `~/.builder/commands`.
    - File commands are merged into one namespace with precedence: local over global, and `prompts` over `commands`.
    - Command id format is `prompt:<filename-without-extension>`.
    - Triggering a file command injects the file content verbatim as a `user` message submission.
 
-152. **Built-in prompt slash commands use embedded Markdown templates.**
+153. **Built-in prompt slash commands use embedded Markdown templates.**
    - Built-in prompt commands are registered through a shared prompt-command helper used by both built-ins and file-backed prompt commands.
    - `/review` prompt content is sourced from embedded `prompts/review_prompt.md`.
    - Built-in prompt commands may opt in to appending slash command arguments to the submitted user payload.
    - Built-in prompt commands may opt in to running in a fresh session by carrying an initial prompt payload through a new-session transition.
 
-153. **Terminal bell notifications use runtime/app hooks with strict event policy.**
+154. **Terminal bell notifications use runtime/app hooks with strict event policy.**
    - Ring when a new `ask_question` request is shown to the user (including approval asks).
    - Ring on turn end only when that turn executed at least two tool calls.
    - Turn-end ringing is keyed by runtime step id and `tool_call_started`/`assistant_message` events.
+   - Transport uses a terminal notification backend selected by `notification_method` (`auto|osc9|bel`, default `auto`).
+   - `auto` prefers OSC 9 in terminals with known support (`TERM_PROGRAM=ghostty|WezTerm`, `ITERM_SESSION_ID`, `TERM=wezterm|wezterm-mux|xterm-kitty`) and falls back to BEL.
+   - OSC 9 is disabled when `WT_SESSION` is set to avoid broken notifications in Windows Terminal/WSL setups.
 
-154. **Add `multi_tool_use.parallel` compatibility wrapper tool for Codex-style parallel calls.**
-   - Expose a local runtime tool named `multi_tool_use.parallel` with the Codex harness-compatible schema (`tool_uses[]` with `recipient_name` + `parameters`).
+155. **Add `multi_tool_use_parallel` compatibility wrapper tool for Codex-style parallel calls.**
+   - Expose a local runtime tool named `multi_tool_use_parallel` with the Codex harness-compatible schema (`tool_uses[]` with `recipient_name` + `parameters`).
    - The wrapper executes referenced local `functions.*` tools concurrently and returns results in the declared order.
    - Keep existing native multi-tool call behavior unchanged; both invocation patterns remain available.

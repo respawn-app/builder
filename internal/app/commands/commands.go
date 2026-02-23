@@ -35,8 +35,9 @@ type Result struct {
 type Handler func(args string) Result
 
 type Command struct {
-	Name        string
-	Description string
+	Name         string
+	Description  string
+	RunWhileBusy bool
 }
 
 type registeredCommand struct {
@@ -69,7 +70,7 @@ func NewDefaultRegistry() *Registry {
 	r.Register("compact", "Compact the current context (optional: /compact <instructions>)", func(args string) Result {
 		return Result{Handled: true, Action: ActionCompact, Args: strings.TrimSpace(args)}
 	})
-	r.Register("name", "Set session title and terminal title (usage: /name <title>; empty resets)", func(args string) Result {
+	r.RegisterWithOptions("name", "Set session title and terminal title (usage: /name <title>; empty resets)", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
 		return Result{Handled: true, Action: ActionSetName, SessionName: strings.TrimSpace(args)}
 	})
 	r.Register("back", "Jump to parent session if current session was spawned from another", func(string) Result {
@@ -87,7 +88,15 @@ func NewDefaultRegistry() *Registry {
 	return r
 }
 
+type RegisterOptions struct {
+	RunWhileBusy bool
+}
+
 func (r *Registry) Register(name string, description string, h Handler) {
+	r.RegisterWithOptions(name, description, RegisterOptions{}, h)
+}
+
+func (r *Registry) RegisterWithOptions(name string, description string, options RegisterOptions, h Handler) {
 	if r == nil || h == nil {
 		return
 	}
@@ -99,7 +108,7 @@ func (r *Registry) Register(name string, description string, h Handler) {
 		panic("slash command names must not contain whitespace")
 	}
 	r.handlers[k] = registeredCommand{
-		command: Command{Name: k, Description: strings.TrimSpace(description)},
+		command: Command{Name: k, Description: strings.TrimSpace(description), RunWhileBusy: options.RunWhileBusy},
 		handler: h,
 	}
 }
@@ -189,4 +198,16 @@ func (r *Registry) Execute(raw string) Result {
 	res := registered.handler(args)
 	res.Handled = true
 	return res
+}
+
+func (r *Registry) Command(raw string) (Command, bool) {
+	name, _, ok := r.Parse(raw)
+	if !ok || name == "" {
+		return Command{}, false
+	}
+	registered, exists := r.handlers[name]
+	if !exists {
+		return Command{}, false
+	}
+	return registered.command, true
 }

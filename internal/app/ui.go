@@ -23,6 +23,10 @@ type compactDoneMsg struct {
 
 type spinnerTickMsg struct{}
 
+type clearTransientStatusMsg struct {
+	token uint64
+}
+
 type runtimeEventMsg struct {
 	event runtime.Event
 }
@@ -194,6 +198,9 @@ type uiModel struct {
 	sessionName              string
 	sessionID                string
 
+	transientStatus      string
+	transientStatusToken uint64
+
 	transcriptEntries []tui.TranscriptEntry
 
 	lastEscAt time.Time
@@ -280,6 +287,12 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.askController().acceptEvent(msg.event)
 		m.syncViewport()
 		return m, waitAskEvent(m.askEvents)
+	case clearTransientStatusMsg:
+		if msg.token == m.transientStatusToken {
+			m.transientStatus = ""
+		}
+		m.syncViewport()
+		return m, nil
 	case submitDoneMsg:
 		next, cmd := m.inputController().handleSubmitDone(msg)
 		next.(*uiModel).syncViewport()
