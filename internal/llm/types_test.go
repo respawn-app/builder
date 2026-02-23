@@ -62,3 +62,19 @@ func TestMessagesFromItems_PreservesAssistantPhase(t *testing.T) {
 		t.Fatalf("expected commentary phase, got %q", msgs[0].Phase)
 	}
 }
+
+func TestUsageCacheHitPercent(t *testing.T) {
+	usage := Usage{InputTokens: 200, CachedInputTokens: 50, HasCachedInputTokens: true}
+	pct, ok := usage.CacheHitPercent()
+	if !ok {
+		t.Fatal("expected cache hit percentage to be available")
+	}
+	if pct != 25 {
+		t.Fatalf("cache hit percent=%d, want 25", pct)
+	}
+
+	unknown := Usage{InputTokens: 200}
+	if pct, ok := unknown.CacheHitPercent(); ok || pct != 0 {
+		t.Fatalf("expected unknown cache hit percentage, got pct=%d ok=%t", pct, ok)
+	}
+}

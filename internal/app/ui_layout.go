@@ -74,6 +74,9 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 		style.meta.Render(string(m.view.Mode())),
 		style.meta.Render(textutil.FirstNonEmpty(m.modelName, "gpt-5")),
 	}
+	if cacheSection := l.renderCacheHitSection(style); cacheSection != "" {
+		segments = append(segments, cacheSection)
+	}
 	if text := strings.TrimSpace(m.transientStatus); text != "" {
 		segments = append(segments, transientStyle.Render(text))
 	}
@@ -87,6 +90,18 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 		gap = 1
 	}
 	return padANSIRight(left+strings.Repeat(" ", gap)+right, width)
+}
+
+func (l uiViewLayout) renderCacheHitSection(style uiStyles) string {
+	m := l.model
+	if m.engine == nil {
+		return ""
+	}
+	usage := m.engine.ContextUsage()
+	if !usage.HasCacheHitPercentage {
+		return style.meta.Render("cache --")
+	}
+	return style.meta.Render(fmt.Sprintf("cache %d%%", usage.CacheHitPercent))
 }
 
 func (l uiViewLayout) renderContextUsage(style uiStyles) string {

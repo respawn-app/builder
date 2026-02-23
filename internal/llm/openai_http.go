@@ -179,9 +179,9 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 			usage = usageFromSDK(completed.Usage, t.ContextWindowTokens)
 		}
 		parsedItems, parsedText, parsedPhase, parsedCalls, parsedReasoning, parsedReasoningItems := parseOutputItems(completed.Output)
-		if finalText == "" {
-			finalText = parsedText
-		}
+		// Treat response.completed as canonical output for assistant text.
+		// Streaming deltas are provisional and can diverge from final structured items.
+		finalText = parsedText
 		finalPhase := MessagePhase("")
 		if parsedPhase != "" {
 			finalPhase = parsedPhase
@@ -340,6 +340,24 @@ func (t *HTTPTransport) buildPayload(request OpenAIRequest, mode openAIAuthMode)
 	}
 	if request.Temperature != 0 && !mode.IsOAuth {
 		out.Temperature = openai.Float(request.Temperature)
+	}
+	if request.StructuredOutput != nil {
+		var schema map[string]any
+		if err := json.Unmarshal(request.StructuredOutput.Schema, &schema); err != nil {
+			return responses.ResponseNewParams{}, fmt.Errorf("invalid structured output schema")
+		}
+		text := responses.ResponseTextConfigParam{
+			Format: responses.ResponseFormatTextConfigParamOfJSONSchema(strings.TrimSpace(request.StructuredOutput.Name), schema),
+		}
+		if text.Format.OfJSONSchema != nil {
+			if request.StructuredOutput.Strict {
+				text.Format.OfJSONSchema.Strict = param.NewOpt(true)
+			}
+			if description := strings.TrimSpace(request.StructuredOutput.Description); description != "" {
+				text.Format.OfJSONSchema.Description = param.NewOpt(description)
+			}
+		}
+		out.Text = text
 	}
 
 	return out, nil
@@ -1099,11 +1117,16 @@ func apiStatusErrorFromResponse(rawResp *http.Response) error {
 }
 
 func usageFromSDK(usage responses.ResponseUsage, window int) Usage {
-	return Usage{
+	out := Usage{
 		InputTokens:  int(usage.InputTokens),
 		OutputTokens: int(usage.OutputTokens),
 		WindowTokens: window,
 	}
+	if usage.JSON.InputTokensDetails.Valid() && usage.InputTokensDetails.JSON.CachedTokens.Valid() {
+		out.CachedInputTokens = int(usage.InputTokensDetails.CachedTokens)
+		out.HasCachedInputTokens = true
+	}
+	return out
 }
 
 func normalizeSchemaAdditionalProperties(schema map[string]any) {
