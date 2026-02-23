@@ -338,6 +338,160 @@ func TestSubmitUserMessageContinuesAfterHostedToolOnlyTurn(t *testing.T) {
 	}
 }
 
+func TestSubmitUserMessageCommentaryWithoutToolCallsForcesNextLoop(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "Working on it",
+				Phase:   llm.MessagePhaseCommentary,
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "running",
+				Phase:   llm.MessagePhaseCommentary,
+			},
+			ToolCalls: []llm.ToolCall{
+				{ID: "call_shell_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "done",
+				Phase:   llm.MessagePhaseFinal,
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do the task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if len(client.calls) != 3 {
+		t.Fatalf("expected 3 model calls, got %d", len(client.calls))
+	}
+
+	secondReq := client.calls[1]
+	foundWarning := false
+	for _, reqMsg := range secondReq.Messages {
+		if reqMsg.Role == llm.RoleDeveloper && strings.Contains(reqMsg.Content, commentaryWithoutToolCallsWarning) {
+			foundWarning = true
+			break
+		}
+	}
+	if !foundWarning {
+		t.Fatalf("expected commentary warning in next request, got %+v", secondReq.Messages)
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	toolCompleted := 0
+	for _, evt := range events {
+		if evt.Kind == "tool_completed" {
+			toolCompleted++
+		}
+	}
+	if toolCompleted != 1 {
+		t.Fatalf("expected exactly one tool execution, got %d", toolCompleted)
+	}
+}
+
+func TestSubmitUserMessageFinalAnswerWithToolCallsIgnoresToolCalls(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "final response",
+				Phase:   llm.MessagePhaseFinal,
+			},
+			ToolCalls: []llm.ToolCall{
+				{ID: "call_shell_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do the task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "final response" {
+		t.Fatalf("assistant content = %q, want final response", msg.Content)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected 1 model call, got %d", len(client.calls))
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+
+	toolCompleted := 0
+	developerWarningFound := false
+	persistedFinalHasToolCalls := false
+	for _, evt := range events {
+		if evt.Kind == "tool_completed" {
+			toolCompleted++
+		}
+		if evt.Kind != "message" {
+			continue
+		}
+		var persisted llm.Message
+		if err := json.Unmarshal(evt.Payload, &persisted); err != nil {
+			t.Fatalf("decode message event: %v", err)
+		}
+		if persisted.Role == llm.RoleDeveloper && strings.Contains(persisted.Content, finalWithToolCallsIgnoredWarning) {
+			developerWarningFound = true
+		}
+		if persisted.Role == llm.RoleAssistant && strings.TrimSpace(persisted.Content) == "final response" && len(persisted.ToolCalls) > 0 {
+			persistedFinalHasToolCalls = true
+		}
+	}
+	if toolCompleted != 0 {
+		t.Fatalf("expected no tool execution, got %d", toolCompleted)
+	}
+	if !developerWarningFound {
+		t.Fatalf("expected developer warning persisted for model visibility")
+	}
+	if persistedFinalHasToolCalls {
+		t.Fatalf("expected persisted final assistant message to have no tool calls")
+	}
+}
+
 func TestSubmitUserMessageSurfacesInFlightClearFailure(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -424,6 +578,78 @@ func TestSubmitUserMessageSurfacesInFlightClearFailure(t *testing.T) {
 	}
 	if !reopened.Meta().InFlightStep {
 		t.Fatalf("expected persisted in-flight flag to remain true after clear failure")
+	}
+}
+
+func TestSubmitUserShellCommandPersistsDeveloperNoticeAndToolEntries(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	result, err := eng.SubmitUserShellCommand(context.Background(), "pwd")
+	if err != nil {
+		t.Fatalf("submit user shell command: %v", err)
+	}
+	if result.Name != tools.ToolShell {
+		t.Fatalf("unexpected tool result name: %+v", result)
+	}
+
+	messages := eng.snapshotMessages()
+	if len(messages) == 0 {
+		t.Fatal("expected persisted messages")
+	}
+	foundDeveloperNotice := false
+	foundAssistantToolCall := false
+	foundToolOutput := false
+		for _, msg := range messages {
+			switch msg.Role {
+			case llm.RoleDeveloper:
+				if strings.Contains(msg.Content, "User ran shell command directly:") && strings.Contains(msg.Content, "pwd") {
+					foundDeveloperNotice = true
+				}
+		case llm.RoleAssistant:
+			if len(msg.ToolCalls) == 1 && msg.ToolCalls[0].Name == string(tools.ToolShell) {
+				foundAssistantToolCall = true
+			}
+		case llm.RoleTool:
+			if msg.Name == string(tools.ToolShell) && strings.TrimSpace(msg.Content) != "" {
+				foundToolOutput = true
+			}
+		}
+	}
+	if !foundDeveloperNotice {
+		t.Fatalf("expected developer notice message in model context, messages=%+v", messages)
+	}
+	if !foundAssistantToolCall {
+		t.Fatalf("expected assistant shell tool call message, messages=%+v", messages)
+	}
+	if !foundToolOutput {
+		t.Fatalf("expected shell tool output message, messages=%+v", messages)
+	}
+
+	snapshot := eng.ChatSnapshot()
+	foundUserShellCall := false
+	for _, entry := range snapshot.Entries {
+		if entry.Role != "tool_call" {
+			continue
+		}
+		if entry.ToolCall == nil || !entry.ToolCall.IsShell {
+			continue
+		}
+		if entry.ToolCall.UserInitiated && strings.Contains(entry.Text, "pwd") {
+			foundUserShellCall = true
+			break
+		}
+	}
+	if !foundUserShellCall {
+		t.Fatalf("expected user-initiated shell tool call in transcript snapshot, entries=%+v", snapshot.Entries)
 	}
 }
 
