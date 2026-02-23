@@ -613,6 +613,16 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 	if len(reviewerReq.Tools) != 0 {
 		t.Fatalf("expected reviewer request with no tools")
 	}
+
+	snapshot := eng.ChatSnapshot()
+	for _, entry := range snapshot.Entries {
+		if strings.Contains(entry.Text, reviewerNoopToken) {
+			t.Fatalf("noop token leaked into chat snapshot: %+v", snapshot.Entries)
+		}
+		if strings.Contains(entry.Text, "Post-turn reviewer suggestions") {
+			t.Fatalf("reviewer control instruction leaked into chat snapshot: %+v", snapshot.Entries)
+		}
+	}
 }
 
 func TestParseReviewerSuggestionsSupportsCompactPayloads(t *testing.T) {

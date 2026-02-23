@@ -443,7 +443,11 @@ func (e *Engine) replaceHistory(stepID, engine string, mode compactionMode, item
 		Mode:   string(mode),
 		Items:  llm.CloneResponseItems(items),
 	}
-	e.chat.replaceHistory(payload.Items)
+	if payload.Engine == "reviewer_rollback" {
+		e.chat.restoreMessagesFromItems(payload.Items)
+	} else {
+		e.chat.replaceHistory(payload.Items)
+	}
 	_, err := e.store.AppendEvent(stepID, "history_replaced", payload)
 	if err == nil {
 		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
