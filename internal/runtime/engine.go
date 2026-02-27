@@ -516,6 +516,7 @@ func (e *Engine) shouldRunReviewerTurn(patchEditsApplied bool) bool {
 
 func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, original llm.Message) (llm.Message, error) {
 	baselineItems := e.snapshotItems()
+	e.emit(Event{Kind: EventReviewerStarted, StepID: stepID})
 	reviewerResult, err := e.runReviewerSuggestions(ctx)
 	if err != nil {
 		status := ReviewerStatus{
@@ -545,11 +546,11 @@ func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, origina
 			_ = e.replaceHistory(stepID, "reviewer_rollback", compactionModeManual, baselineItems)
 		}
 		status := ReviewerStatus{
-			Outcome:          "followup_failed",
-			SuggestionsCount: len(suggestions),
-			CacheHitPercent:  reviewerResult.CacheHitPercent,
+			Outcome:               "followup_failed",
+			SuggestionsCount:      len(suggestions),
+			CacheHitPercent:       reviewerResult.CacheHitPercent,
 			HasCacheHitPercentage: reviewerResult.HasCacheHitPercentage,
-			Error:            strings.TrimSpace(err.Error()),
+			Error:                 strings.TrimSpace(err.Error()),
 		}
 		e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
 		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, suggestions))

@@ -26,6 +26,11 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) {
 		m.compacting = true
 	case runtime.EventCompactionCompleted, runtime.EventCompactionFailed:
 		m.compacting = false
+	case runtime.EventReviewerStarted:
+		m.reviewerRunning = true
+		m.reviewerBlocking = true
+	case runtime.EventReviewerCompleted:
+		m.clearReviewerState()
 	case runtime.EventUserMessageFlushed:
 		a.onUserMessageFlushed(evt.UserMessage)
 	}

@@ -1474,6 +1474,62 @@ func TestStatusLineShowsCompactionProgressWarning(t *testing.T) {
 	}
 }
 
+func TestStatusLineShowsReviewerProgressWarning(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+
+	next, _ := m.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventReviewerStarted}})
+	started := next.(*uiModel)
+	line := stripANSIAndTrimRight(started.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(strings.ToLower(line), "review in progress") {
+		t.Fatalf("expected reviewer warning in status line, got %q", line)
+	}
+
+	next, _ = started.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventReviewerCompleted}})
+	completed := next.(*uiModel)
+	line = stripANSIAndTrimRight(completed.renderStatusLine(120, uiThemeStyles("dark")))
+	if strings.Contains(strings.ToLower(line), "review in progress") {
+		t.Fatalf("expected reviewer warning cleared after completion, got %q", line)
+	}
+}
+
+func TestReviewerProgressLocksInputWithPlaceholder(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "keep this draft"
+
+	next, _ := m.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventReviewerStarted}})
+	started := next.(*uiModel)
+	if !started.reviewerBlocking {
+		t.Fatal("expected reviewer to lock input while running")
+	}
+	lines := started.renderInputLines(80, uiThemeStyles("dark"))
+	plain := stripANSIAndTrimRight(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "Review in progress.") {
+		t.Fatalf("expected reviewer placeholder text, got %q", plain)
+	}
+	if strings.Contains(plain, "keep this draft") {
+		t.Fatalf("expected original draft hidden while reviewer blocks input, got %q", plain)
+	}
+
+	next, _ = started.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	locked := next.(*uiModel)
+	if locked.input != "keep this draft" {
+		t.Fatalf("expected key input ignored while reviewer blocks input, got %q", locked.input)
+	}
+
+	next, _ = locked.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventReviewerCompleted}})
+	completed := next.(*uiModel)
+	if completed.reviewerBlocking {
+		t.Fatal("expected reviewer input lock cleared after completion")
+	}
+	lines = completed.renderInputLines(80, uiThemeStyles("dark"))
+	plain = stripANSIAndTrimRight(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "keep this draft") {
+		t.Fatalf("expected original draft restored after reviewer completion, got %q", plain)
+	}
+}
+
 func TestStatusContextZoneColorBoundaries(t *testing.T) {
 	assertLightColor := func(percent int, want string) {
 		t.Helper()

@@ -16,6 +16,7 @@ const (
 	EventUserMessageFlushed  EventKind = "user_message_flushed"
 	EventToolCallStarted     EventKind = "tool_call_started"
 	EventToolCallCompleted   EventKind = "tool_call_completed"
+	EventReviewerStarted     EventKind = "reviewer_started"
 	EventReviewerCompleted   EventKind = "reviewer_completed"
 	EventInFlightClearFailed EventKind = "in_flight_clear_failed"
 	EventCompactionStarted   EventKind = "context_compaction_started"

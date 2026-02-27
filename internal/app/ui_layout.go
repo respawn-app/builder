@@ -65,7 +65,9 @@ func (l uiViewLayout) render() string {
 func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 	m := l.model
 	spin := renderStatusDot(m.theme, m.activity, m.spinnerFrame)
-	if m.compacting {
+	if m.reviewerRunning {
+		spin = renderReviewerStatus()
+	} else if m.compacting {
 		spin = renderCompactionStatus()
 	}
 	transientStyle := lipgloss.NewStyle().Foreground(statusContextZoneColor(100)).Bold(true)
@@ -234,6 +236,16 @@ func renderCompactionStatus() string {
 	return lipgloss.NewStyle().Foreground(amber).Render("⚠ compacting")
 }
 
+func renderReviewerStatus() string {
+	green := lipgloss.CompleteAdaptiveColor{
+		Light: lipgloss.CompleteColor{ANSI: "2", ANSI256: "34", TrueColor: "#22863A"},
+		Dark:  lipgloss.CompleteColor{ANSI: "2", ANSI256: "114", TrueColor: "#98C379"},
+	}
+	keyword := lipgloss.NewStyle().Foreground(green).Bold(true).Render("review")
+	suffix := lipgloss.NewStyle().Foreground(green).Render("in progress")
+	return "● " + keyword + " " + suffix
+}
+
 func (l uiViewLayout) renderChatPanel(width, height int, style uiStyles) []string {
 	m := l.model
 	if width < 1 {
@@ -276,8 +288,11 @@ func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
 	{
 		text := m.input
 		prefix := "› "
-		if m.inputSubmitLocked {
+		if m.isInputLocked() {
 			prefix = "⨯ "
+		}
+		if m.reviewerBlocking {
+			text = "Review in progress."
 		}
 		raw = splitPlainLines(prefix + text)
 	}
@@ -318,7 +333,7 @@ func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
 	out := make([]string, 0, len(wrapped)+2)
 	out = append(out, top)
 	lineStyle := style.input
-	if m.inputSubmitLocked {
+	if m.isInputLocked() {
 		lineStyle = style.inputDisabled
 	}
 	for _, line := range wrapped {
@@ -520,6 +535,9 @@ func (l uiViewLayout) calcChatLines() int {
 			}
 		} else {
 			text := m.input
+			if m.reviewerBlocking {
+				text = "Review in progress."
+			}
 			wrapped := wrapLine("› "+text, contentWidth)
 			inputContentLines = len(wrapped)
 		}
@@ -557,7 +575,7 @@ func (l uiViewLayout) syncViewport() {
 
 func (l uiViewLayout) shouldRenderSoftCursor() bool {
 	m := l.model
-	return !m.inputSubmitLocked && m.activeAsk == nil && !m.rollbackMode
+	return !m.isInputLocked() && m.activeAsk == nil && !m.rollbackMode
 }
 
 func (m *uiModel) renderStatusLine(width int, style uiStyles) string {
