@@ -34,6 +34,15 @@ const (
 	defaultReviewerThinking    = "low"
 	defaultReviewerTimeoutSec  = 60
 	defaultReviewerSuggestions = 5
+	defaultTUIAlternateScreen  = "auto"
+)
+
+type TUIAlternateScreenPolicy string
+
+const (
+	TUIAlternateScreenAuto   TUIAlternateScreenPolicy = "auto"
+	TUIAlternateScreenAlways TUIAlternateScreenPolicy = "always"
+	TUIAlternateScreenNever  TUIAlternateScreenPolicy = "never"
 )
 
 type LoadOptions struct {
@@ -55,6 +64,7 @@ type Settings struct {
 	Model                            string
 	ThinkingLevel                    string
 	Theme                            string
+	TUIAlternateScreen               TUIAlternateScreenPolicy
 	NotificationMethod               string
 	WebSearch                        string
 	OpenAIBaseURL                    string
@@ -95,6 +105,7 @@ type fileSettings struct {
 	Model              string          `toml:"model"`
 	ThinkingLevel      string          `toml:"thinking_level"`
 	Theme              string          `toml:"theme"`
+	TUIAlternateScreen string          `toml:"tui_alternate_screen"`
 	NotificationMethod string          `toml:"notification_method"`
 	WebSearch          string          `toml:"web_search"`
 	Tools              map[string]bool `toml:"tools"`
@@ -145,6 +156,7 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		"model":                               "default",
 		"thinking_level":                      "default",
 		"theme":                               "default",
+		"tui_alternate_screen":                "default",
 		"notification_method":                 "default",
 		"web_search":                          "default",
 		"openai_base_url":                     "default",
@@ -179,6 +191,10 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if strings.TrimSpace(cfg.Theme) != "" {
 		merged.Theme = strings.TrimSpace(cfg.Theme)
 		sources["theme"] = "file"
+	}
+	if strings.TrimSpace(cfg.TUIAlternateScreen) != "" {
+		merged.TUIAlternateScreen = normalizeTUIAlternateScreenPolicy(cfg.TUIAlternateScreen)
+		sources["tui_alternate_screen"] = "file"
 	}
 	if strings.TrimSpace(cfg.NotificationMethod) != "" {
 		merged.NotificationMethod = strings.TrimSpace(cfg.NotificationMethod)
@@ -271,6 +287,10 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if v := strings.TrimSpace(os.Getenv("BUILDER_THEME")); v != "" {
 		merged.Theme = v
 		sources["theme"] = "env"
+	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_TUI_ALTERNATE_SCREEN")); v != "" {
+		merged.TUIAlternateScreen = normalizeTUIAlternateScreenPolicy(v)
+		sources["tui_alternate_screen"] = "env"
 	}
 	if v := strings.TrimSpace(os.Getenv("BUILDER_NOTIFICATION_METHOD")); v != "" {
 		merged.NotificationMethod = v
@@ -487,6 +507,7 @@ func defaultSettings() Settings {
 		Model:                            defaultModel,
 		ThinkingLevel:                    defaultThinkingLevel,
 		Theme:                            defaultTheme,
+		TUIAlternateScreen:               TUIAlternateScreenPolicy(defaultTUIAlternateScreen),
 		NotificationMethod:               "auto",
 		WebSearch:                        "off",
 		Store:                            false,
@@ -523,6 +544,11 @@ func validateSettings(v Settings) error {
 		// ok
 	} else {
 		return fmt.Errorf("invalid theme %q (expected light|dark)", v.Theme)
+	}
+	switch strings.ToLower(strings.TrimSpace(string(v.TUIAlternateScreen))) {
+	case "auto", "always", "never":
+	default:
+		return fmt.Errorf("invalid tui_alternate_screen %q (expected auto|always|never)", v.TUIAlternateScreen)
 	}
 	switch strings.ToLower(strings.TrimSpace(v.NotificationMethod)) {
 	case "auto", "osc9", "bel":
@@ -580,6 +606,19 @@ func validateSettings(v Settings) error {
 		return fmt.Errorf("reviewer.max_suggestions must be > 0")
 	}
 	return nil
+}
+
+func normalizeTUIAlternateScreenPolicy(raw string) TUIAlternateScreenPolicy {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "auto":
+		return TUIAlternateScreenAuto
+	case "always":
+		return TUIAlternateScreenAlways
+	case "never":
+		return TUIAlternateScreenNever
+	default:
+		return TUIAlternateScreenPolicy(strings.TrimSpace(raw))
+	}
 }
 
 func EnabledToolIDs(v Settings) []tools.ID {
@@ -682,6 +721,7 @@ func defaultSettingsTOML() string {
 		"model":                               defaults.Model,
 		"thinking_level":                      defaults.ThinkingLevel,
 		"theme":                               defaults.Theme,
+		"tui_alternate_screen":                defaults.TUIAlternateScreen,
 		"notification_method":                 defaults.NotificationMethod,
 		"web_search":                          defaults.WebSearch,
 		"openai_base_url":                     defaults.OpenAIBaseURL,
@@ -713,6 +753,7 @@ func defaultSettingsTOML() string {
 		"model = \"" + defaults.Model + "\"\n" +
 		"thinking_level = \"" + defaults.ThinkingLevel + "\"\n" +
 		"theme = \"" + defaults.Theme + "\"\n" +
+		"tui_alternate_screen = \"" + string(defaults.TUIAlternateScreen) + "\"\n" +
 		"notification_method = \"" + defaults.NotificationMethod + "\"\n" +
 		"web_search = \"" + defaults.WebSearch + "\"\n" +
 		"openai_base_url = \"" + defaults.OpenAIBaseURL + "\"\n" +

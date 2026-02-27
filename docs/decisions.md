@@ -572,3 +572,10 @@ This file records architecture and product decisions for the minimal terminal co
    - Default timeout is infinite; optional `--timeout` can bound execution.
    - `stdout` is reserved for exactly one final JSON object (`status`, `result`/`error`, `session_id`, `session_name`, `duration_ms`).
    - Progress/runtime activity is written to `stderr` to keep stdout parse-safe for shell/tmux capture.
+
+158. **Codex-style scroll architecture with policy-driven alternate screen behavior.**
+   - New setting: `tui_alternate_screen` with values `auto|always|never` (default `auto`).
+   - Main chat in `auto` runs in the normal terminal buffer to preserve native wheel/keyboard scrollback semantics.
+   - `detail` mode remains explicit in-app paging and, in `auto`, temporarily enters alt-screen with alternate-scroll (`CSI ?1007 h/l`) on enter/exit.
+   - `always` keeps full-session alt-screen behavior; `never` disables startup/picker alt-screen but detail still temporarily enters alt-screen for fullscreen transcript review.
+   - App-level mouse wheel interception remains disabled; wheel behavior is terminal-native in main chat.

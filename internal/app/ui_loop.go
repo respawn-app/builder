@@ -12,6 +12,11 @@ func runUILoop(wiring *runtimeWiring, active config.Settings, logger *runLogger,
 }
 
 func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, logger *runLogger, commandRegistry *commands.Registry, initialPrompt string, sessionName string) (tea.Model, error) {
+	options := []tea.ProgramOption{}
+	if shouldStartMainUIInAltScreen(active.TUIAlternateScreen) {
+		options = append(options, tea.WithAltScreen())
+	}
+
 	program := tea.NewProgram(NewUIModel(
 		wiring.engine,
 		wiring.eventBridge.Channel(),
@@ -19,11 +24,12 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 		WithUILogger(logger),
 		WithUIModelName(active.Model),
 		WithUITheme(active.Theme),
+		WithUIAlternateScreenPolicy(active.TUIAlternateScreen),
 		WithUICommandRegistry(commandRegistry),
 		WithUIStartupSubmit(initialPrompt),
 		WithUISessionName(sessionName),
 		WithUISessionID(wiring.engine.SessionID()),
-	), tea.WithAltScreen())
+	), options...)
 
 	finalModel, runErr := program.Run()
 	if dropped := wiring.eventBridge.Dropped(); dropped > 0 {

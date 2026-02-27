@@ -100,10 +100,11 @@ func WithTheme(theme string) Option {
 type Model struct {
 	mode Mode
 
-	viewportLines int
-	viewportWidth int
-	ongoingScroll int
-	detailScroll  int
+	viewportLines               int
+	viewportWidth               int
+	ongoingScroll               int
+	detailScroll                int
+	detailEntryOngoingMaxScroll int
 
 	transcript []TranscriptEntry
 	ongoing    string
@@ -154,13 +155,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.scrollActive(-max(1, m.viewportLines-1))
 		case tea.KeyPgDown:
 			m = m.scrollActive(max(1, m.viewportLines-1))
-		}
-	case tea.MouseMsg:
-		switch {
-		case msg.Button == tea.MouseButtonWheelUp || msg.Type == tea.MouseWheelUp:
-			m = m.scrollActive(-3)
-		case msg.Button == tea.MouseButtonWheelDown || msg.Type == tea.MouseWheelDown:
-			m = m.scrollActive(3)
 		}
 	case ToggleModeMsg:
 		m = m.toggleMode()
@@ -265,11 +259,15 @@ func FormatOngoingError(err error) string {
 func (m Model) toggleMode() Model {
 	if m.mode == ModeOngoing {
 		m.mode = ModeDetail
+		m.detailEntryOngoingMaxScroll = m.maxOngoingScroll()
 		m.detailSnapshot = m.renderFlatDetailTranscript()
 		m.detailScroll = m.maxDetailScroll()
 		return m
 	}
 	m.mode = ModeOngoing
+	if m.maxOngoingScroll() > m.detailEntryOngoingMaxScroll {
+		m.ongoingScroll = m.maxOngoingScroll()
+	}
 	return m
 }
 

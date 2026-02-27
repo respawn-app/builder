@@ -37,7 +37,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case tea.KeyEsc:
 			m.stopRollbackSelectionMode()
-			return m, nil
+			return m, tea.ClearScreen
 		case tea.KeyUp:
 			m.moveRollbackSelection(-1)
 			return m, nil
@@ -46,7 +46,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case tea.KeyEnter:
 			m.beginRollbackEditing()
-			return m, nil
+			return m, tea.ClearScreen
 		case tea.KeyPgUp, tea.KeyPgDown:
 			m.forwardToView(msg)
 			return m, nil
@@ -121,12 +121,12 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.exitAction = UIActionExit
 		return m, tea.Quit
 	case tea.KeyShiftTab:
-		m.forwardToView(tui.ToggleModeMsg{})
-		return m, nil
+		return m, m.toggleTranscriptMode()
 	case tea.KeyEsc:
 		if m.rollbackEditing {
 			if strings.TrimSpace(m.input) == "" {
 				m.cancelRollbackEditingBackToSelection()
+				return m, tea.ClearScreen
 			}
 			return m, nil
 		}
@@ -137,7 +137,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !m.lastEscAt.IsZero() && now.Sub(m.lastEscAt) <= rollbackDoubleEscWindow {
 			m.lastEscAt = time.Time{}
 			m.startRollbackSelectionMode()
-			return m, nil
+			return m, tea.ClearScreen
 		}
 		m.lastEscAt = now
 		return m, nil
@@ -259,6 +259,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyUp:
 		if m.isInputLocked() {
+			m.forwardToView(tea.KeyMsg{Type: tea.KeyUp})
 			return m, nil
 		}
 		moved := m.moveCursorUpLine()
@@ -268,6 +269,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyDown:
 		if m.isInputLocked() {
+			m.forwardToView(tea.KeyMsg{Type: tea.KeyDown})
 			return m, nil
 		}
 		moved := m.moveCursorDownLine()

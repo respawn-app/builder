@@ -47,6 +47,31 @@ func TestModeTogglePreservesOngoingScroll(t *testing.T) {
 	}
 }
 
+func TestModeToggleReturnsToBottomWhenConversationGrewInDetail(t *testing.T) {
+	m := NewModel(WithPreviewLines(2))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a2"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a3"})
+	m = updateModel(t, m, ScrollOngoingMsg{Delta: -1})
+	before := m.OngoingScroll()
+	if before >= m.maxOngoingScroll() {
+		t.Fatalf("expected to start above bottom, got %d", before)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a4"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a5"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	if got, want := m.OngoingScroll(), m.maxOngoingScroll(); got != want {
+		t.Fatalf("expected ongoing to snap to bottom after growth in detail: got %d want %d", got, want)
+	}
+	view := plainTranscript(m.View())
+	if !strings.Contains(view, "a5") {
+		t.Fatalf("expected newest entry visible after returning from detail, got %q", view)
+	}
+}
+
 func TestToggleToDetailStartsAtBottom(t *testing.T) {
 	m := NewModel(WithPreviewLines(2))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
@@ -228,7 +253,7 @@ func TestOngoingDoesNotAutoFollowWhenUserScrolledUp(t *testing.T) {
 	}
 }
 
-func TestMouseWheelScrollsOngoingView(t *testing.T) {
+func TestMouseWheelDoesNotAffectOngoingView(t *testing.T) {
 	m := NewModel(WithPreviewLines(2))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a2"})
@@ -238,18 +263,13 @@ func TestMouseWheelScrollsOngoingView(t *testing.T) {
 
 	start := m.OngoingScroll()
 	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
-	if got := m.OngoingScroll(); got >= start {
-		t.Fatalf("expected wheel up to scroll up ongoing view, got %d from %d", got, start)
-	}
-
-	up := m.OngoingScroll()
 	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
-	if got := m.OngoingScroll(); got <= up {
-		t.Fatalf("expected wheel down to scroll down ongoing view, got %d from %d", got, up)
+	if got := m.OngoingScroll(); got != start {
+		t.Fatalf("expected mouse wheel to not change ongoing scroll, got %d want %d", got, start)
 	}
 }
 
-func TestMouseWheelScrollsDetailView(t *testing.T) {
+func TestMouseWheelDoesNotAffectDetailView(t *testing.T) {
 	m := NewModel(WithPreviewLines(2))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u1"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
@@ -264,14 +284,9 @@ func TestMouseWheelScrollsDetailView(t *testing.T) {
 	}
 
 	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
-	if m.detailScroll >= start {
-		t.Fatalf("expected wheel up to scroll detail view, got detailScroll=%d from %d", m.detailScroll, start)
-	}
-
-	up := m.detailScroll
 	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
-	if m.detailScroll <= up {
-		t.Fatalf("expected wheel down to scroll detail view, got detailScroll=%d from %d", m.detailScroll, up)
+	if m.detailScroll != start {
+		t.Fatalf("expected mouse wheel to not change detail scroll, got %d want %d", m.detailScroll, start)
 	}
 }
 

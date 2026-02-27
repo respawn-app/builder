@@ -49,10 +49,12 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
 
 ## Coding Guidelines
 
-- Prefer simple, readable implementations over clever abstractions.
+- Prefer robust, forward-compatible, reusable, well-architected implementations over hacks, one-shot, temporary fixes or features bolted onto the existing arch.
 - Keep modules cohesive; each package should have one primary responsibility.
 - Introduce interfaces where they reduce coupling, not by default.
-- Make failure paths explicit and observable.
+- Make failure paths explicit, observable.
+- Handle and surface errors cleanly
+- Maintain good user experience when adding new features (e.g. display loading states, events or ongoing processes).
 - Validate invariants at boundaries (input, filesystem, process execution, API responses).
 - Keep behavior configurable only when it serves real operator value.
 
@@ -69,5 +71,6 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
 - All business logic covered by tests. Production code is written to be unit-testable. Don't ask to write or run tests
 - Before handing off to the user after code changes, rebuild the binary to `./bin/builder` and make sure tests are written and green. Don't ask for confirmation to write tests and run checks.
 - `docs/decisions.md` is the source of truth for locked product and architecture decisions.
-- Keep this file up-to-date and comprehensive. Avoid adding info that can become outdated, otherwise keep this as project guidelines, rules, and learnings for future team members. Persist info that should be preserved here.
+- Keep this AGENTS.md file up-to-date and comprehensive. Avoid adding info that can become outdated, otherwise keep this as project guidelines, rules, and learnings for future team members. Persist info that should be preserved here.
 - Do not enable terminal mouse capture modes (`tea.WithMouse*`, `EnableMouse*`) by default, because they break native text selection. If mouse behavior is required, preserve selection-first behavior and prefer non-capturing scroll paths.
+- For terminal mode toggles (for example alternate-scroll `CSI ?1007 h/l`), do not rely on `tea.Printf`; emit raw ANSI control sequences via direct terminal writes (stdout) and use ordered command sequencing (`tea.Sequence`) for enter/exit transitions.

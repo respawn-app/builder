@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"builder/internal/config"
 	"builder/internal/session"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
@@ -254,9 +255,13 @@ func humanTime(ts time.Time) string {
 	return ts.Local().Format("2006-01-02 15:04")
 }
 
-func runSessionPicker(summaries []session.Summary, theme string) (sessionPickerResult, error) {
+func runSessionPicker(summaries []session.Summary, theme string, alternateScreen config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
 	model := newSessionPickerModel(summaries, theme)
-	program := tea.NewProgram(model, tea.WithAltScreen())
+	options := []tea.ProgramOption{}
+	if shouldUseSessionPickerAltScreen(alternateScreen) {
+		options = append(options, tea.WithAltScreen())
+	}
+	program := tea.NewProgram(model, options...)
 	finalModel, err := program.Run()
 	if err != nil {
 		return sessionPickerResult{}, err

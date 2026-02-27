@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"builder/internal/app/commands"
+	"builder/internal/config"
 	"builder/internal/runtime"
 	"builder/internal/tools/askquestion"
 	"builder/internal/tui"
@@ -99,6 +100,13 @@ func WithUITheme(theme string) UIOption {
 	}
 }
 
+func WithUIAlternateScreenPolicy(policy config.TUIAlternateScreenPolicy) UIOption {
+	return func(m *uiModel) {
+		m.tuiAlternateScreen = policy
+		m.altScreenActive = policy == config.TUIAlternateScreenAlways
+	}
+}
+
 func WithUIInitialTranscript(entries []UITranscriptEntry) UIOption {
 	return func(m *uiModel) {
 		m.initialTranscript = append([]UITranscriptEntry(nil), entries...)
@@ -176,6 +184,8 @@ type uiModel struct {
 	slashCommandSelection int
 	exitAction            UIAction
 	theme                 string
+	tuiAlternateScreen    config.TUIAlternateScreenPolicy
+	altScreenActive       bool
 
 	sawAssistantDelta bool
 	logger            uiLogger
@@ -204,6 +214,7 @@ type uiModel struct {
 	transientStatusToken uint64
 
 	transcriptEntries []tui.TranscriptEntry
+	historyPrintIndex int
 
 	lastEscAt time.Time
 
@@ -231,15 +242,16 @@ type rollbackCandidate struct {
 
 func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
 	m := &uiModel{
-		engine:          engine,
-		view:            tui.NewModel(),
-		activity:        uiActivityIdle,
-		runtimeEvents:   runtimeEvents,
-		askEvents:       askEvents,
-		inputCursor:     -1,
-		commandRegistry: commands.NewDefaultRegistry(),
-		exitAction:      UIActionNone,
-		theme:           "dark",
+		engine:             engine,
+		view:               tui.NewModel(),
+		activity:           uiActivityIdle,
+		runtimeEvents:      runtimeEvents,
+		askEvents:          askEvents,
+		inputCursor:        -1,
+		commandRegistry:    commands.NewDefaultRegistry(),
+		exitAction:         UIActionNone,
+		theme:              "dark",
+		tuiAlternateScreen: config.TUIAlternateScreenAuto,
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -262,6 +274,7 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 
 func (m *uiModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{
+		tea.ClearScreen,
 		waitRuntimeEvent(m.runtimeEvents),
 		waitAskEvent(m.askEvents),
 		tea.SetWindowTitle(m.windowTitle()),

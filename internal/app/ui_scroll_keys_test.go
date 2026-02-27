@@ -80,3 +80,43 @@ func TestMainInputUpDownAtBoundsScrollsTranscript(t *testing.T) {
 		t.Fatalf("expected second down at end to scroll transcript down, got %d from %d", got, afterUp)
 	}
 }
+
+func TestReviewerLockStillAllowsTranscriptScroll(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 8
+	m.syncViewport()
+	for i := 0; i < 20; i++ {
+		m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("line %d", i)})
+	}
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "keep this draft"
+
+	start := m.view.OngoingScroll()
+	if start == 0 {
+		t.Fatal("expected ongoing transcript to be scrollable")
+	}
+
+	next, _ := m.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventReviewerStarted}})
+	locked := next.(*uiModel)
+	if !locked.reviewerBlocking {
+		t.Fatal("expected reviewer to lock input")
+	}
+
+	next, _ = locked.Update(tea.KeyMsg{Type: tea.KeyUp})
+	locked = next.(*uiModel)
+	afterUp := locked.view.OngoingScroll()
+	if afterUp >= start {
+		t.Fatalf("expected up to scroll transcript while reviewer lock active, got %d from %d", afterUp, start)
+	}
+	if locked.input != "keep this draft" {
+		t.Fatalf("expected input text preserved while reviewer lock active, got %q", locked.input)
+	}
+
+	next, _ = locked.Update(tea.KeyMsg{Type: tea.KeyDown})
+	locked = next.(*uiModel)
+	if got := locked.view.OngoingScroll(); got <= afterUp {
+		t.Fatalf("expected down to scroll transcript while reviewer lock active, got %d from %d", got, afterUp)
+	}
+}
