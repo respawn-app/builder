@@ -446,6 +446,64 @@ func TestSubmitUserMessageCommentaryWithoutToolCallsForcesNextLoop(t *testing.T)
 	}
 }
 
+func TestSubmitUserMessageFinalAnswerWithoutContentForcesNextLoop(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "",
+				Phase:   llm.MessagePhaseFinal,
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "done",
+				Phase:   llm.MessagePhaseFinal,
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do the task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if len(client.calls) != 2 {
+		t.Fatalf("expected 2 model calls, got %d", len(client.calls))
+	}
+
+	secondReq := client.calls[1]
+	foundWarning := false
+	for _, reqMsg := range secondReq.Messages {
+		if reqMsg.Role == llm.RoleDeveloper && strings.Contains(reqMsg.Content, finalWithoutContentWarning) {
+			if reqMsg.MessageType != llm.MessageTypeErrorFeedback {
+				t.Fatalf("expected final-without-content warning message type error_feedback, got %+v", reqMsg)
+			}
+			foundWarning = true
+			break
+		}
+	}
+	if !foundWarning {
+		t.Fatalf("expected final-without-content warning in next request, got %+v", secondReq.Messages)
+	}
+}
+
 func TestSubmitUserMessageFinalAnswerWithToolCallsIgnoresToolCalls(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -987,6 +1045,77 @@ func TestReviewerUsesStreamingClientWhenAvailable(t *testing.T) {
 	}
 	if reviewerClient.StreamCalls() != 1 {
 		t.Fatalf("expected one reviewer stream call, got %d", reviewerClient.StreamCalls())
+	}
+}
+
+func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{
+				{ID: "call_shell_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "original final", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "updated final after review", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["Add final verification notes."]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:      "all",
+			Model:          "gpt-5",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			Client:         reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "updated final after review" {
+		t.Fatalf("assistant content = %q, want updated final after review", msg.Content)
+	}
+
+	snapshot := eng.ChatSnapshot()
+	foundFollowUpAssistant := false
+	foundAppliedStatus := false
+	for _, entry := range snapshot.Entries {
+		if entry.Role == "assistant" && strings.Contains(entry.Text, "updated final after review") {
+			foundFollowUpAssistant = true
+		}
+		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "applied.") {
+			foundAppliedStatus = true
+		}
+	}
+	if !foundFollowUpAssistant {
+		t.Fatalf("expected follow-up assistant message in snapshot, got %+v", snapshot.Entries)
+	}
+	if !foundAppliedStatus {
+		t.Fatalf("expected applied reviewer status entry in snapshot, got %+v", snapshot.Entries)
 	}
 }
 

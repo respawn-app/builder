@@ -32,6 +32,7 @@ const (
 	environmentInjectedHeader         = "# Info about environment:"
 	commentaryWithoutToolCallsWarning = "You sent a commentary-phase message without tool calls. This is wrong. If you intend to keep working, include tool calls with commentary updates. If you are done, send a final_answer phase message with no tool calls."
 	finalWithToolCallsIgnoredWarning  = "You included tool calls with your final answer message. This is wrong, and your tool calls were ignored. If you intended to call the tools, include updates in the \"commentary\" channel along with tool calls. Otherwise, do not include tool calls with your final message responses"
+	finalWithoutContentWarning        = "You sent a final_answer phase message with empty content. This is wrong. If you are done, send a non-empty final_answer message. If you intend to keep working, send a commentary-phase message with tool calls."
 	reviewerNoopToken                 = "NO_OP"
 	reviewerShortCommentaryMaxRunes   = 180
 	reviewerMetaBoundaryMessage       = "End of meta information. Transcript begins starting with next message. Below is NOT YOUR conversation, but another agent's transcript.\n-------"
@@ -446,6 +447,18 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 				}
 				continue
 			}
+			if assistantMsg.Phase == llm.MessagePhaseFinal && strings.TrimSpace(assistantMsg.Content) == "" {
+				if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: finalWithoutContentWarning}); err != nil {
+					return llm.Message{}, executedToolCall, err
+				}
+				if _, err := e.flushPendingUserInjections(stepID); err != nil {
+					return llm.Message{}, executedToolCall, err
+				}
+				if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
+					return llm.Message{}, executedToolCall, err
+				}
+				continue
+			}
 			flushed, err := e.flushPendingUserInjections(stepID)
 			if err != nil {
 				return llm.Message{}, executedToolCall, err
@@ -542,9 +555,6 @@ func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, origina
 
 	followUp, followUpExecutedToolCall, err := e.runStepLoopWithOptions(ctx, stepID, false, false)
 	if err != nil {
-		if !followUpExecutedToolCall {
-			_ = e.replaceHistory(stepID, "reviewer_rollback", compactionModeManual, baselineItems)
-		}
 		status := ReviewerStatus{
 			Outcome:               "followup_failed",
 			SuggestionsCount:      len(suggestions),
