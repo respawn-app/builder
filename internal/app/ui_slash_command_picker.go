@@ -103,7 +103,7 @@ func (m *uiModel) slashCommandPicker() slashCommandPickerState {
 		return slashCommandPickerState{}
 	}
 	active, token, argumentMode := parseSlashCommandInput(m.input)
-	if !active || argumentMode || m.inputSubmitLocked || m.activeAsk != nil {
+	if !active || argumentMode || m.isInputLocked() || m.activeAsk != nil {
 		return slashCommandPickerState{}
 	}
 	matches := m.currentSlashCommandMatches(token)

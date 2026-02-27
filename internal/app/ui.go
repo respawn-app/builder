@@ -154,11 +154,13 @@ type uiModel struct {
 	runtimeEvents <-chan runtime.Event
 	askEvents     <-chan askEvent
 
-	input       string
-	inputCursor int // rune index; -1 means "track tail"
-	busy        bool
-	activity    uiActivity
-	compacting  bool
+	input            string
+	inputCursor      int // rune index; -1 means "track tail"
+	busy             bool
+	activity         uiActivity
+	compacting       bool
+	reviewerRunning  bool
+	reviewerBlocking bool
 
 	queued []string
 
@@ -210,6 +212,15 @@ type uiModel struct {
 	rollbackCandidates               []rollbackCandidate
 	rollbackSelection                int
 	rollbackSelectedUserMessageIndex int
+}
+
+func (m *uiModel) isInputLocked() bool {
+	return m.inputSubmitLocked || m.reviewerBlocking
+}
+
+func (m *uiModel) clearReviewerState() {
+	m.reviewerRunning = false
+	m.reviewerBlocking = false
 }
 
 type rollbackCandidate struct {
