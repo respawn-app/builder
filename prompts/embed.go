@@ -14,5 +14,8 @@ var CompactionSummaryPrefix string
 //go:embed review_prompt.md
 var ReviewPrompt string
 
+//go:embed init_prompt.md
+var InitPrompt string
+
 //go:embed reviewer_system_prompt.md
 var ReviewerSystemPrompt string

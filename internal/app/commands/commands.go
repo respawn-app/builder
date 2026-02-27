@@ -84,6 +84,13 @@ func NewDefaultRegistry() *Registry {
 			AppendRawArgs: true,
 			FreshSession:  true,
 		},
+		{
+			Name:          "init",
+			Description:   "Run repository initialization prompt (optional: /init <instructions>)",
+			Prompt:        prompts.InitPrompt,
+			AppendRawArgs: true,
+			FreshSession:  true,
+		},
 	})
 	return r
 }
