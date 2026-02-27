@@ -615,6 +615,8 @@ func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *
 		}
 		if muteText && strings.TrimSpace(displayChunk) != "" && !isEditedBlock {
 			displayChunk = m.palette().preview.Faint(true).Render(displayChunk)
+		} else if role == "reviewer_status" && isReviewerCacheHitLine(displayChunk) {
+			displayChunk = m.palette().preview.Faint(true).Render(displayChunk)
 		} else if isThinkingRole(role) {
 			displayChunk = styleForRole(role, m.palette()).Render(displayChunk)
 		} else if role == "compaction_notice" || role == "compaction_summary" || role == "reviewer_status" || role == "error" {
@@ -782,6 +784,30 @@ func compactReviewerStatusForOngoing(text string) string {
 		}
 	}
 	return trimmed
+}
+
+func isReviewerCacheHitLine(text string) bool {
+	line := strings.ToLower(strings.TrimSpace(xansi.Strip(text)))
+	if line == "" {
+		return false
+	}
+	if !strings.HasSuffix(line, "cache hit") {
+		return false
+	}
+	prefix := strings.TrimSpace(strings.TrimSuffix(line, "cache hit"))
+	if !strings.HasSuffix(prefix, "%") {
+		return false
+	}
+	digits := strings.TrimSpace(strings.TrimSuffix(prefix, "%"))
+	if digits == "" {
+		return false
+	}
+	for _, r := range digits {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func askQuestionDisplay(meta *transcript.ToolCallMeta, text string) (string, []string) {

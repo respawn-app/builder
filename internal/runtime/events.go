@@ -38,9 +38,11 @@ type Event struct {
 }
 
 type ReviewerStatus struct {
-	Outcome          string `json:"outcome,omitempty"`
-	SuggestionsCount int    `json:"suggestions_count,omitempty"`
-	Error            string `json:"error,omitempty"`
+	Outcome               string `json:"outcome,omitempty"`
+	SuggestionsCount      int    `json:"suggestions_count,omitempty"`
+	CacheHitPercent       int    `json:"cache_hit_percent,omitempty"`
+	HasCacheHitPercentage bool   `json:"has_cache_hit_percentage,omitempty"`
+	Error                 string `json:"error,omitempty"`
 }
 
 type ModelResponseTrace struct {

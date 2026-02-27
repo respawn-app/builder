@@ -420,6 +420,9 @@ func TestSubmitUserMessageCommentaryWithoutToolCallsForcesNextLoop(t *testing.T)
 	foundWarning := false
 	for _, reqMsg := range secondReq.Messages {
 		if reqMsg.Role == llm.RoleDeveloper && strings.Contains(reqMsg.Content, commentaryWithoutToolCallsWarning) {
+			if reqMsg.MessageType != llm.MessageTypeErrorFeedback {
+				t.Fatalf("expected commentary warning message type error_feedback, got %+v", reqMsg)
+			}
 			foundWarning = true
 			break
 		}
@@ -500,6 +503,9 @@ func TestSubmitUserMessageFinalAnswerWithToolCallsIgnoresToolCalls(t *testing.T)
 			t.Fatalf("decode message event: %v", err)
 		}
 		if persisted.Role == llm.RoleDeveloper && strings.Contains(persisted.Content, finalWithToolCallsIgnoredWarning) {
+			if persisted.MessageType != llm.MessageTypeErrorFeedback {
+				t.Fatalf("expected final-with-tools warning message type error_feedback, got %+v", persisted)
+			}
 			developerWarningFound = true
 		}
 		if persisted.Role == llm.RoleAssistant && strings.TrimSpace(persisted.Content) == "final response" && len(persisted.ToolCalls) > 0 {
@@ -537,7 +543,7 @@ func TestReviewerSkippedWhenNoToolCalls(t *testing.T) {
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:      "edits",
-			Model:          "gpt-5-mini",
+			Model:          "gpt-5",
 			ThinkingLevel:  "low",
 			MaxSuggestions: 5,
 			Client:         reviewerClient,
@@ -579,7 +585,7 @@ func TestReviewerRunsOnAllFrequencyWithoutToolCalls(t *testing.T) {
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:      "all",
-			Model:          "gpt-5-mini",
+			Model:          "gpt-5",
 			ThinkingLevel:  "low",
 			MaxSuggestions: 5,
 			Client:         reviewerClient,
@@ -628,7 +634,7 @@ func TestReviewerRunsOnEditsFrequencyOnlyWhenPatchApplied(t *testing.T) {
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:      "edits",
-			Model:          "gpt-5-mini",
+			Model:          "gpt-5",
 			ThinkingLevel:  "low",
 			MaxSuggestions: 5,
 			Client:         reviewerClient,
@@ -684,7 +690,7 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:      "all",
-			Model:          "gpt-5-mini",
+			Model:          "gpt-5",
 			ThinkingLevel:  "low",
 			MaxSuggestions: 5,
 			Client:         reviewerClient,
@@ -712,6 +718,9 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 	foundReviewInstruction := false
 	for _, message := range req.Messages {
 		if message.Role == llm.RoleDeveloper && strings.Contains(message.Content, "Supervisor agent gave you suggestions") {
+			if message.MessageType != llm.MessageTypeReviewerFeedback {
+				t.Fatalf("expected reviewer feedback message type, got %+v", message)
+			}
 			foundReviewInstruction = true
 			break
 		}
@@ -723,6 +732,57 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 	reviewerReq := reviewerClient.calls[0]
 	if reviewerReq.SystemPrompt != prompts.ReviewerSystemPrompt {
 		t.Fatalf("unexpected reviewer prompt")
+	}
+	if reviewerReq.SessionID != store.Meta().SessionID+"-review" {
+		t.Fatalf("expected reviewer session id suffix, got %q", reviewerReq.SessionID)
+	}
+	if len(reviewerReq.Messages) == 0 {
+		t.Fatalf("expected reviewer request to include transcript entry messages")
+	}
+	if reviewerReq.Messages[0].Role != llm.RoleDeveloper || reviewerReq.Messages[0].MessageType != llm.MessageTypeAgentsMD {
+		t.Fatalf("expected reviewer message[0] to be AGENTS meta developer message, got %+v", reviewerReq.Messages[0])
+	}
+	if reviewerReq.Messages[1].Role != llm.RoleDeveloper || reviewerReq.Messages[1].MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected reviewer message[1] to be environment meta developer message, got %+v", reviewerReq.Messages[1])
+	}
+	if reviewerReq.Messages[2].Role != llm.RoleDeveloper || reviewerReq.Messages[2].Content != reviewerMetaBoundaryMessage {
+		t.Fatalf("expected reviewer message[2] to be transcript boundary developer message, got %+v", reviewerReq.Messages[2])
+	}
+	foundAgentLabel := false
+	foundToolCallJSON := false
+	foundToolOutputField := false
+	foundSeparateToolOutput := false
+	for _, message := range reviewerReq.Messages[3:] {
+		if message.Role != llm.RoleUser {
+			t.Fatalf("expected reviewer transcript entries after metadata to be user role messages, got %q", message.Role)
+		}
+		if strings.Contains(message.Content, "Agent:") {
+			foundAgentLabel = true
+		}
+		if strings.Contains(message.Content, "Tool calls:") && strings.Contains(message.Content, "\"command\": \"pwd\"") {
+			foundToolCallJSON = true
+		}
+		if strings.Contains(message.Content, "\"output\"") {
+			foundToolOutputField = true
+		}
+		if strings.Contains(message.Content, "Tool output:") {
+			foundSeparateToolOutput = true
+		}
+	}
+	if !foundAgentLabel {
+		t.Fatalf("expected reviewer request to include agent labels, messages=%+v", reviewerReq.Messages)
+	}
+	if !foundToolCallJSON {
+		t.Fatalf("expected reviewer request to include tool call json args, messages=%+v", reviewerReq.Messages)
+	}
+	if !foundToolOutputField {
+		t.Fatalf("expected reviewer request to include tool output in tool call payload, messages=%+v", reviewerReq.Messages)
+	}
+	if foundSeparateToolOutput {
+		t.Fatalf("did not expect separate tool output entries when output is paired, messages=%+v", reviewerReq.Messages)
+	}
+	if len(reviewerReq.Items) != 0 {
+		t.Fatalf("expected reviewer request items to be empty when using transcript entry messages, got %d", len(reviewerReq.Items))
 	}
 	if len(reviewerReq.Tools) != 0 {
 		t.Fatalf("expected reviewer request with no tools")
@@ -782,7 +842,7 @@ func TestReviewerNoSuggestionsPersistsStatusEntry(t *testing.T) {
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:      "all",
-			Model:          "gpt-5-mini",
+			Model:          "gpt-5",
 			ThinkingLevel:  "low",
 			MaxSuggestions: 5,
 			Client:         reviewerClient,
@@ -843,7 +903,7 @@ func TestReviewerArrayPayloadIsIgnoredAsNoSuggestions(t *testing.T) {
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:      "all",
-			Model:          "gpt-5-mini",
+			Model:          "gpt-5",
 			ThinkingLevel:  "low",
 			MaxSuggestions: 5,
 			Client:         reviewerClient,
@@ -944,6 +1004,149 @@ func TestParseReviewerSuggestionsObjectSupportsStructuredPayload(t *testing.T) {
 	suggestions = parseReviewerSuggestionsObject(`not-json`, 5)
 	if len(suggestions) != 0 {
 		t.Fatalf("expected invalid payload to be ignored, got %+v", suggestions)
+	}
+}
+
+func TestBuildReviewerTranscriptMessagesIncludesConversationAndToolCalls(t *testing.T) {
+	messages := []llm.Message{
+		{Role: llm.RoleAssistant, Phase: llm.MessagePhaseCommentary, Content: "I’ll inspect quickly."},
+		{Role: llm.RoleUser, Content: "user request"},
+		{Role: llm.RoleAssistant, Content: "Running command now.", Phase: llm.MessagePhaseCommentary, ToolCalls: []llm.ToolCall{{ID: "call_1", Name: "shell", Input: json.RawMessage(`{"command":"pwd"}`)}}},
+		{Role: llm.RoleAssistant, Content: "assistant response", Phase: llm.MessagePhaseFinal},
+		{Role: llm.RoleTool, Name: "shell", ToolCallID: "call_1", Content: "{\"output\":\"ok\"}"},
+		{Role: llm.RoleDeveloper, Content: environmentInjectedHeader + "\nOS: darwin"},
+	}
+
+	reviewerMessages := buildReviewerTranscriptMessages(messages)
+	if len(reviewerMessages) != 3 {
+		t.Fatalf("expected 3 reviewer transcript messages after filtering, got %d", len(reviewerMessages))
+	}
+	if reviewerMessages[0].Role != llm.RoleUser {
+		t.Fatalf("expected reviewer transcript messages to use user role, got %q", reviewerMessages[0].Role)
+	}
+	if strings.Contains(reviewerMessages[0].Content, "I’ll inspect quickly.") {
+		t.Fatalf("expected short commentary preamble to be dropped, message=%q", reviewerMessages[0].Content)
+	}
+	if strings.Contains(reviewerMessages[1].Content, "Running command now.") {
+		t.Fatalf("expected short commentary preamble text to be stripped when tool calls exist, message=%q", reviewerMessages[1].Content)
+	}
+	if !strings.Contains(reviewerMessages[1].Content, "Tool calls:") || !strings.Contains(reviewerMessages[1].Content, "\"command\": \"pwd\"") {
+		t.Fatalf("expected tool call arguments in json format, message=%q", reviewerMessages[1].Content)
+	}
+	if strings.Contains(reviewerMessages[1].Content, "(id=") {
+		t.Fatalf("did not expect tool call id in reviewer transcript, message=%q", reviewerMessages[1].Content)
+	}
+	if !strings.Contains(reviewerMessages[1].Content, "\"output\"") || !strings.Contains(reviewerMessages[1].Content, "\"ok\"") {
+		t.Fatalf("expected paired tool output field in tool call payload, message=%q", reviewerMessages[1].Content)
+	}
+	if !strings.Contains(reviewerMessages[2].Content, "Agent:") {
+		t.Fatalf("expected assistant final answer entry to use agent label, message=%q", reviewerMessages[2].Content)
+	}
+	if strings.Contains(reviewerMessages[2].Content, "Tool output:") {
+		t.Fatalf("did not expect separate tool output entry when paired output exists, message=%q", reviewerMessages[2].Content)
+	}
+}
+
+func TestBuildReviewerTranscriptMessagesKeepsOrphanToolOutputEntry(t *testing.T) {
+	messages := []llm.Message{
+		{Role: llm.RoleTool, Name: "shell", ToolCallID: "orphan_call", Content: "{\"output\":\"orphan\"}"},
+	}
+
+	reviewerMessages := buildReviewerTranscriptMessages(messages)
+	if len(reviewerMessages) != 1 {
+		t.Fatalf("expected one reviewer message for orphan tool output, got %d", len(reviewerMessages))
+	}
+	if !strings.Contains(reviewerMessages[0].Content, "Tool:") || !strings.Contains(reviewerMessages[0].Content, "Tool output:") {
+		t.Fatalf("expected orphan tool output to remain as tool entry, message=%q", reviewerMessages[0].Content)
+	}
+}
+
+func TestReviewerStatusTextIncludesReviewerCacheHitMetadata(t *testing.T) {
+	text := reviewerStatusText(ReviewerStatus{
+		Outcome:               "applied",
+		SuggestionsCount:      2,
+		CacheHitPercent:       85,
+		HasCacheHitPercentage: true,
+	}, []string{"one", "two"})
+	if !strings.Contains(text, "85% cache hit") {
+		t.Fatalf("expected reviewer cache hit metadata in reviewer status text, got %q", text)
+	}
+}
+
+func TestBuildReviewerTranscriptMessagesIncludesSupervisorControlDeveloperMessage(t *testing.T) {
+	messages := []llm.Message{
+		{Role: llm.RoleDeveloper, Content: "Supervisor agent gave you suggestions:\n1. run tests"},
+	}
+
+	reviewerMessages := buildReviewerTranscriptMessages(messages)
+	if len(reviewerMessages) != 1 {
+		t.Fatalf("expected one reviewer message, got %d", len(reviewerMessages))
+	}
+	if !strings.Contains(reviewerMessages[0].Content, "Supervisor agent gave you suggestions:") {
+		t.Fatalf("expected supervisor control message to be included, got %q", reviewerMessages[0].Content)
+	}
+	if !strings.Contains(reviewerMessages[0].Content, "Developer:") {
+		t.Fatalf("expected developer label in reviewer message, got %q", reviewerMessages[0].Content)
+	}
+}
+
+func TestAppendMissingReviewerMetaContextPrependsAgentsAndEnvironmentWhenMissing(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, agentsGlobalDirName)
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatalf("mkdir global agents dir: %v", err)
+	}
+	globalPath := filepath.Join(globalDir, agentsFileName)
+	if err := os.WriteFile(globalPath, []byte("global rule"), 0o644); err != nil {
+		t.Fatalf("write global AGENTS: %v", err)
+	}
+
+	workspace := t.TempDir()
+	workspacePath := filepath.Join(workspace, agentsFileName)
+	if err := os.WriteFile(workspacePath, []byte("workspace rule"), 0o644); err != nil {
+		t.Fatalf("write workspace AGENTS: %v", err)
+	}
+
+	in := []llm.Message{{Role: llm.RoleUser, Content: "request"}}
+	got := appendMissingReviewerMetaContext(in, workspace)
+	if len(got) != 4 {
+		t.Fatalf("expected 2 prepended agents + 1 environment message plus original, got %d", len(got))
+	}
+	if got[0].Role != llm.RoleDeveloper || got[0].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[0].Content, "source: "+globalPath) {
+		t.Fatalf("expected first prepended global AGENTS developer message, got %+v", got[0])
+	}
+	if got[1].Role != llm.RoleDeveloper || got[1].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[1].Content, "source: "+workspacePath) {
+		t.Fatalf("expected second prepended workspace AGENTS developer message, got %+v", got[1])
+	}
+	if got[2].Role != llm.RoleDeveloper || got[2].MessageType != llm.MessageTypeEnvironment || !strings.Contains(got[2].Content, environmentInjectedHeader) {
+		t.Fatalf("expected prepended environment developer message, got %+v", got[2])
+	}
+	if got[3].Role != llm.RoleUser || got[3].Content != "request" {
+		t.Fatalf("expected original message at tail, got %+v", got[3])
+	}
+}
+
+func TestAppendMissingReviewerMetaContextKeepsExistingMetaMessages(t *testing.T) {
+	workspace := t.TempDir()
+	existing := llm.Message{
+		Role:        llm.RoleDeveloper,
+		MessageType: llm.MessageTypeAgentsMD,
+		Content:     agentsInjectedHeader + "\nsource: /tmp/AGENTS.md\n\n```md\nrule\n```",
+	}
+	existingEnv := llm.Message{
+		Role:        llm.RoleDeveloper,
+		MessageType: llm.MessageTypeEnvironment,
+		Content:     environmentInjectedHeader + "\nOS: darwin",
+	}
+	in := []llm.Message{
+		existing,
+		existingEnv,
+		{Role: llm.RoleUser, Content: "request"},
+	}
+	got := appendMissingReviewerMetaContext(in, workspace)
+	if len(got) != len(in) {
+		t.Fatalf("expected no extra messages when AGENTS+environment already present, got %d", len(got))
 	}
 }
 
@@ -1494,12 +1697,21 @@ func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserM
 	if firstReq.Messages[1].Role != llm.RoleDeveloper || !strings.Contains(firstReq.Messages[1].Content, "source: "+globalPath) {
 		t.Fatalf("expected second message to be global developer AGENTS injection, got %+v", firstReq.Messages[1])
 	}
+	if firstReq.Messages[1].MessageType != llm.MessageTypeAgentsMD {
+		t.Fatalf("expected global AGENTS message type, got %+v", firstReq.Messages[1])
+	}
 	if firstReq.Messages[2].Role != llm.RoleDeveloper || !strings.Contains(firstReq.Messages[2].Content, "source: "+workspacePath) {
 		t.Fatalf("expected third message to be workspace developer AGENTS injection, got %+v", firstReq.Messages[2])
+	}
+	if firstReq.Messages[2].MessageType != llm.MessageTypeAgentsMD {
+		t.Fatalf("expected workspace AGENTS message type, got %+v", firstReq.Messages[2])
 	}
 	envMsg := firstReq.Messages[3]
 	if envMsg.Role != llm.RoleDeveloper || !strings.Contains(envMsg.Content, environmentInjectedHeader) {
 		t.Fatalf("expected fourth message to be environment developer injection, got %+v", envMsg)
+	}
+	if envMsg.MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected environment message type, got %+v", envMsg)
 	}
 	for _, required := range []string{
 		"OS: ",
@@ -1521,10 +1733,10 @@ func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserM
 	injectedCount := 0
 	envInjectedCount := 0
 	for _, msg := range secondReq.Messages {
-		if msg.Role == llm.RoleDeveloper && strings.Contains(msg.Content, agentsInjectedHeader) {
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeAgentsMD {
 			injectedCount++
 		}
-		if msg.Role == llm.RoleDeveloper && strings.Contains(msg.Content, environmentInjectedHeader) {
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeEnvironment {
 			envInjectedCount++
 		}
 	}

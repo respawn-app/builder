@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"builder/internal/llm"
 	"builder/internal/session"
@@ -32,6 +33,8 @@ const (
 	commentaryWithoutToolCallsWarning = "You sent a commentary-phase message without tool calls. This is wrong. If you intend to keep working, include tool calls with commentary updates. If you are done, send a final_answer phase message with no tool calls."
 	finalWithToolCallsIgnoredWarning  = "You included tool calls with your final answer message. This is wrong, and your tool calls were ignored. If you intended to call the tools, include updates in the \"commentary\" channel along with tool calls. Otherwise, do not include tool calls with your final message responses"
 	reviewerNoopToken                 = "NO_OP"
+	reviewerShortCommentaryMaxRunes   = 180
+	reviewerMetaBoundaryMessage       = "End of meta information. Transcript begins starting with next message. Below is NOT YOUR conversation, but another agent's transcript.\n-------"
 )
 
 type Config struct {
@@ -137,7 +140,7 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 		return nil, err
 	}
 	if meta.InFlightStep {
-		if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, Content: interruptMessage}); err != nil {
+		if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeInterruption, Content: interruptMessage}); err != nil {
 			return nil, err
 		}
 		if err := store.MarkInFlight(false); err != nil {
@@ -186,7 +189,7 @@ func (e *Engine) Interrupt() error {
 	}
 	cancel()
 
-	if err := e.appendMessage("", llm.Message{Role: llm.RoleDeveloper, Content: interruptMessage}); err != nil {
+	if err := e.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeInterruption, Content: interruptMessage}); err != nil {
 		return err
 	}
 	if err := e.store.MarkInFlight(false); err != nil {
@@ -410,7 +413,7 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 			return llm.Message{}, executedToolCall, err
 		}
 		if finalAnswerIncludedToolCalls {
-			if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, Content: finalWithToolCallsIgnoredWarning}); err != nil {
+			if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: finalWithToolCallsIgnoredWarning}); err != nil {
 				return llm.Message{}, executedToolCall, err
 			}
 		}
@@ -432,7 +435,7 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 
 		if len(localToolCalls) == 0 {
 			if assistantMsg.Phase == llm.MessagePhaseCommentary {
-				if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, Content: commentaryWithoutToolCallsWarning}); err != nil {
+				if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: commentaryWithoutToolCallsWarning}); err != nil {
 					return llm.Message{}, executedToolCall, err
 				}
 				if _, err := e.flushPendingUserInjections(stepID); err != nil {
@@ -513,7 +516,7 @@ func (e *Engine) shouldRunReviewerTurn(patchEditsApplied bool) bool {
 
 func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, original llm.Message) (llm.Message, error) {
 	baselineItems := e.snapshotItems()
-	suggestions, err := e.runReviewerSuggestions(ctx)
+	reviewerResult, err := e.runReviewerSuggestions(ctx)
 	if err != nil {
 		status := ReviewerStatus{
 			Outcome: "failed",
@@ -523,6 +526,7 @@ func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, origina
 		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
 		return original, nil
 	}
+	suggestions := reviewerResult.Suggestions
 	if len(suggestions) == 0 {
 		status := ReviewerStatus{Outcome: "no_suggestions"}
 		e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
@@ -531,7 +535,7 @@ func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, origina
 	}
 
 	instruction := formatReviewerDeveloperInstruction(suggestions)
-	if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, Content: instruction}); err != nil {
+	if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeReviewerFeedback, Content: instruction}); err != nil {
 		return original, err
 	}
 
@@ -543,6 +547,8 @@ func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, origina
 		status := ReviewerStatus{
 			Outcome:          "followup_failed",
 			SuggestionsCount: len(suggestions),
+			CacheHitPercent:  reviewerResult.CacheHitPercent,
+			HasCacheHitPercentage: reviewerResult.HasCacheHitPercentage,
 			Error:            strings.TrimSpace(err.Error()),
 		}
 		e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
@@ -553,20 +559,36 @@ func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, origina
 		if !followUpExecutedToolCall {
 			_ = e.replaceHistory(stepID, "reviewer_rollback", compactionModeManual, baselineItems)
 		}
-		status := ReviewerStatus{Outcome: "noop", SuggestionsCount: len(suggestions)}
+		status := ReviewerStatus{
+			Outcome:               "noop",
+			SuggestionsCount:      len(suggestions),
+			CacheHitPercent:       reviewerResult.CacheHitPercent,
+			HasCacheHitPercentage: reviewerResult.HasCacheHitPercentage,
+		}
 		e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
 		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, suggestions))
 		return original, nil
 	}
-	status := ReviewerStatus{Outcome: "applied", SuggestionsCount: len(suggestions)}
+	status := ReviewerStatus{
+		Outcome:               "applied",
+		SuggestionsCount:      len(suggestions),
+		CacheHitPercent:       reviewerResult.CacheHitPercent,
+		HasCacheHitPercentage: reviewerResult.HasCacheHitPercentage,
+	}
 	e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
 	_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, suggestions))
 	return followUp, nil
 }
 
-func (e *Engine) runReviewerSuggestions(ctx context.Context) ([]string, error) {
+type reviewerSuggestionsResult struct {
+	Suggestions           []string
+	CacheHitPercent       int
+	HasCacheHitPercentage bool
+}
+
+func (e *Engine) runReviewerSuggestions(ctx context.Context) (reviewerSuggestionsResult, error) {
 	if e.reviewer == nil {
-		return nil, nil
+		return reviewerSuggestionsResult{}, nil
 	}
 
 	schema := mustJSON(map[string]any{
@@ -583,17 +605,17 @@ func (e *Engine) runReviewerSuggestions(ctx context.Context) ([]string, error) {
 		"required": []string{"suggestions"},
 	})
 
-	items := sanitizeItemsForLLM(e.snapshotItems())
 	messages := sanitizeMessagesForLLM(e.snapshotMessages())
+	reviewerMessages := buildReviewerRequestMessages(messages, e.store.Meta().WorkspaceRoot)
 	req := llm.Request{
 		Model:           e.cfg.Reviewer.Model,
 		Temperature:     1,
 		MaxTokens:       0,
 		ReasoningEffort: e.cfg.Reviewer.ThinkingLevel,
 		SystemPrompt:    prompts.ReviewerSystemPrompt,
-		SessionID:       e.store.Meta().SessionID,
-		Messages:        messages,
-		Items:           items,
+		SessionID:       reviewerSessionID(e.store.Meta().SessionID),
+		Messages:        reviewerMessages,
+		Items:           []llm.ResponseItem{},
 		Tools:           []llm.Tool{},
 		StructuredOutput: &llm.StructuredOutput{
 			Name:   "reviewer_suggestions",
@@ -602,13 +624,18 @@ func (e *Engine) runReviewerSuggestions(ctx context.Context) ([]string, error) {
 		},
 	}
 	if err := req.Validate(); err != nil {
-		return nil, err
+		return reviewerSuggestionsResult{}, err
 	}
 	resp, err := e.generateWithRetryClient(ctx, e.reviewer, req, nil, nil)
 	if err != nil {
-		return nil, err
+		return reviewerSuggestionsResult{}, err
 	}
-	return parseReviewerSuggestionsObject(resp.Assistant.Content, e.cfg.Reviewer.MaxSuggestions), nil
+	cachePct, hasCachePct := resp.Usage.CacheHitPercent()
+	return reviewerSuggestionsResult{
+		Suggestions:           parseReviewerSuggestionsObject(resp.Assistant.Content, e.cfg.Reviewer.MaxSuggestions),
+		CacheHitPercent:       cachePct,
+		HasCacheHitPercentage: hasCachePct,
+	}, nil
 }
 
 func parseReviewerSuggestionsObject(content string, maxSuggestions int) []string {
@@ -645,6 +672,297 @@ func parseReviewerSuggestionsObject(content string, maxSuggestions int) []string
 		}
 	}
 	return normalized
+}
+
+func buildReviewerRequestMessages(messages []llm.Message, workspaceRoot string) []llm.Message {
+	metaMessages, transcriptSource := splitReviewerMetaMessages(messages)
+	metaMessages = appendMissingReviewerMetaContext(metaMessages, workspaceRoot)
+	out := make([]llm.Message, 0, len(metaMessages)+2+len(transcriptSource))
+	out = append(out, metaMessages...)
+	out = append(out, llm.Message{Role: llm.RoleDeveloper, Content: reviewerMetaBoundaryMessage})
+	out = append(out, buildReviewerTranscriptMessages(transcriptSource)...)
+	return out
+}
+
+func splitReviewerMetaMessages(messages []llm.Message) ([]llm.Message, []llm.Message) {
+	meta := make([]llm.Message, 0, 3)
+	transcript := make([]llm.Message, 0, len(messages))
+	seenEnvironment := false
+	seenAgentContent := map[string]bool{}
+	for _, message := range messages {
+		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeAgentsMD {
+			normalized := strings.TrimSpace(message.Content)
+			if normalized == "" || seenAgentContent[normalized] {
+				continue
+			}
+			seenAgentContent[normalized] = true
+			meta = append(meta, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeAgentsMD, Content: message.Content})
+			continue
+		}
+		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeEnvironment {
+			if seenEnvironment {
+				continue
+			}
+			seenEnvironment = true
+			meta = append(meta, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: message.Content})
+			continue
+		}
+		transcript = append(transcript, message)
+	}
+	return meta, transcript
+}
+
+func buildReviewerTranscriptMessages(messages []llm.Message) []llm.Message {
+	toolOutputsByCallID := collectReviewerToolOutputs(messages)
+	toolCallIDs := collectReviewerToolCallIDs(messages)
+	out := make([]llm.Message, 0, len(messages)+1)
+	for _, message := range messages {
+		if message.Role == llm.RoleTool {
+			callID := strings.TrimSpace(message.ToolCallID)
+			if callID != "" && toolCallIDs[callID] {
+				continue
+			}
+		}
+		if message.Role == llm.RoleTool && strings.TrimSpace(message.ToolCallID) == "" {
+			continue
+		}
+		if !shouldIncludeReviewerMessage(message) {
+			continue
+		}
+		out = append(out, llm.Message{Role: llm.RoleUser, Content: formatReviewerTranscriptEntry(message, toolOutputsByCallID)})
+	}
+	if len(out) == 0 {
+		out = append(out, llm.Message{Role: llm.RoleUser, Content: "No reviewable transcript entries were available for this turn."})
+	}
+	return out
+}
+
+func collectReviewerToolOutputs(messages []llm.Message) map[string]string {
+	out := make(map[string]string)
+	for _, message := range messages {
+		if message.Role != llm.RoleTool {
+			continue
+		}
+		callID := strings.TrimSpace(message.ToolCallID)
+		if callID == "" {
+			continue
+		}
+		if _, exists := out[callID]; exists {
+			continue
+		}
+		out[callID] = compactReviewerToolOutput(message.Content)
+	}
+	return out
+}
+
+func collectReviewerToolCallIDs(messages []llm.Message) map[string]bool {
+	out := make(map[string]bool)
+	for _, message := range messages {
+		if message.Role != llm.RoleAssistant || len(message.ToolCalls) == 0 {
+			continue
+		}
+		for _, call := range message.ToolCalls {
+			callID := strings.TrimSpace(call.ID)
+			if callID == "" {
+				continue
+			}
+			out[callID] = true
+		}
+	}
+	return out
+}
+
+func shouldIncludeReviewerMessage(message llm.Message) bool {
+	if isShortAssistantCommentaryPreamble(message) && len(message.ToolCalls) == 0 {
+		return false
+	}
+	if message.Role == llm.RoleDeveloper {
+		content := strings.TrimSpace(message.Content)
+		if content == "" {
+			return false
+		}
+		if message.MessageType == llm.MessageTypeEnvironment {
+			return false
+		}
+		if message.MessageType == llm.MessageTypeErrorFeedback || message.MessageType == llm.MessageTypeInterruption {
+			return false
+		}
+		// Backward compatibility for persisted transcripts created before message_type.
+		if strings.Contains(content, environmentInjectedHeader) {
+			return false
+		}
+		if content == commentaryWithoutToolCallsWarning || content == finalWithToolCallsIgnoredWarning || content == interruptMessage {
+			return false
+		}
+	}
+	if strings.TrimSpace(message.Content) == "" && len(message.ToolCalls) == 0 {
+		return false
+	}
+	return true
+}
+
+func formatReviewerTranscriptEntry(message llm.Message, toolOutputsByCallID map[string]string) string {
+	b := strings.Builder{}
+	b.WriteString(reviewerMessageLabel(message))
+	content := reviewerTranscriptContent(message)
+	if content != "" {
+		b.WriteString("\n")
+		if message.Role == llm.RoleTool {
+			b.WriteString("Tool output:\n")
+			b.WriteString(compactReviewerToolOutput(content))
+		} else {
+			b.WriteString(content)
+		}
+		b.WriteString("\n")
+	}
+	if len(message.ToolCalls) > 0 {
+		b.WriteString("\nTool calls:\n")
+		for i, call := range message.ToolCalls {
+			b.WriteString(strconv.Itoa(i + 1))
+			b.WriteString(". ")
+			b.WriteString(strings.TrimSpace(call.Name))
+			b.WriteString("\n")
+			output := ""
+			if callID := strings.TrimSpace(call.ID); callID != "" {
+				output = strings.TrimSpace(toolOutputsByCallID[callID])
+			}
+			b.WriteString(formatReviewerToolCallPayload(call.Input, output))
+			b.WriteString("\n")
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func formatReviewerToolCallPayload(input json.RawMessage, output string) string {
+	payload := map[string]any{
+		"input": reviewerJSONValueFromRaw(input),
+	}
+	if strings.TrimSpace(output) != "" {
+		payload["output"] = reviewerJSONValueFromString(output)
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
+}
+
+func reviewerJSONValueFromRaw(raw json.RawMessage) any {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return map[string]any{}
+	}
+	if !json.Valid([]byte(trimmed)) {
+		return trimmed
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
+		return trimmed
+	}
+	return decoded
+}
+
+func reviewerJSONValueFromString(content string) any {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return ""
+	}
+	if !json.Valid([]byte(trimmed)) {
+		return trimmed
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
+		return trimmed
+	}
+	return decoded
+}
+
+func reviewerTranscriptContent(message llm.Message) string {
+	if isShortAssistantCommentaryPreamble(message) {
+		return ""
+	}
+	return strings.TrimSpace(message.Content)
+}
+
+func isShortAssistantCommentaryPreamble(message llm.Message) bool {
+	if message.Role != llm.RoleAssistant || message.Phase != llm.MessagePhaseCommentary {
+		return false
+	}
+	content := strings.TrimSpace(message.Content)
+	if content == "" {
+		return false
+	}
+	if strings.Contains(content, "\n") {
+		return false
+	}
+	return utf8.RuneCountInString(content) <= reviewerShortCommentaryMaxRunes
+}
+
+func reviewerMessageLabel(message llm.Message) string {
+	switch message.Role {
+	case llm.RoleAssistant:
+		return "Agent:"
+	case llm.RoleUser:
+		return "User:"
+	case llm.RoleTool:
+		return "Tool:"
+	case llm.RoleDeveloper:
+		return "Developer:"
+	case llm.RoleSystem:
+		return "System:"
+	default:
+		role := strings.TrimSpace(string(message.Role))
+		if role == "" {
+			role = "unknown"
+		}
+		return fmt.Sprintf("%s:", titleCaseASCII(role))
+	}
+}
+
+func titleCaseASCII(input string) string {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return "Unknown"
+	}
+	runes := []rune(trimmed)
+	if len(runes) == 1 {
+		return strings.ToUpper(trimmed)
+	}
+	return strings.ToUpper(string(runes[0])) + string(runes[1:])
+}
+
+func compactReviewerToolOutput(content string) string {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return "{}"
+	}
+	if !json.Valid([]byte(trimmed)) {
+		return trimmed
+	}
+	var payload any
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return trimmed
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return trimmed
+	}
+	return string(encoded)
+}
+
+func prettyReviewerJSON(raw json.RawMessage) string {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return "{}"
+	}
+	if !json.Valid([]byte(trimmed)) {
+		return trimmed
+	}
+	var formatted bytes.Buffer
+	if err := json.Indent(&formatted, []byte(trimmed), "", "  "); err != nil {
+		return trimmed
+	}
+	return formatted.String()
 }
 
 func formatReviewerDeveloperInstruction(suggestions []string) string {
@@ -701,6 +1019,10 @@ func reviewerStatusText(status ReviewerStatus, suggestions []string) string {
 			b.WriteString("\n")
 		}
 	}
+	if status.HasCacheHitPercentage {
+		b.WriteString("\n\n")
+		b.WriteString(fmt.Sprintf("%d%% cache hit", status.CacheHitPercent))
+	}
 	return b.String()
 }
 
@@ -709,6 +1031,63 @@ func reviewerSuggestionCountLabel(count int) string {
 		return "1 suggestion"
 	}
 	return fmt.Sprintf("%d suggestions", count)
+}
+
+func reviewerSessionID(sessionID string) string {
+	trimmed := strings.TrimSpace(sessionID)
+	if trimmed == "" {
+		return ""
+	}
+	return trimmed + "-review"
+}
+
+func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot string) []llm.Message {
+	haveEnvironment := false
+	haveAgents := false
+	for _, msg := range messages {
+		if msg.Role != llm.RoleDeveloper {
+			continue
+		}
+		if msg.MessageType == llm.MessageTypeAgentsMD {
+			haveAgents = true
+		}
+		if msg.MessageType == llm.MessageTypeEnvironment {
+			haveEnvironment = true
+		}
+	}
+	if haveAgents && haveEnvironment {
+		return messages
+	}
+	paths, err := agentsInjectionPaths(workspaceRoot)
+	if err != nil {
+		paths = nil
+	}
+	prefixed := make([]llm.Message, 0, len(paths)+1+len(messages))
+	if !haveAgents {
+		for _, path := range paths {
+			data, readErr := os.ReadFile(path)
+			if readErr != nil {
+				if errors.Is(readErr, os.ErrNotExist) {
+					continue
+				}
+				continue
+			}
+			injected := fmt.Sprintf("%s\nsource: %s\n\n```%s\n%s\n```", agentsInjectedHeader, path, agentsInjectedFenceLabel, string(data))
+			prefixed = append(prefixed, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeAgentsMD, Content: injected})
+		}
+	}
+	if !haveEnvironment {
+		prefixed = append(prefixed, llm.Message{
+			Role:        llm.RoleDeveloper,
+			MessageType: llm.MessageTypeEnvironment,
+			Content:     environmentContextMessage(workspaceRoot, time.Now()),
+		})
+	}
+	if len(prefixed) == 0 {
+		return messages
+	}
+	prefixed = append(prefixed, messages...)
+	return prefixed
 }
 
 func (e *Engine) buildRequest(ctx context.Context, _ string, allowTools bool) (llm.Request, error) {
@@ -1192,12 +1571,12 @@ func (e *Engine) injectAgentsIfNeeded(stepID string) error {
 			return fmt.Errorf("read AGENTS.md: %w", readErr)
 		}
 		injected := fmt.Sprintf("%s\nsource: %s\n\n```%s\n%s\n```", agentsInjectedHeader, path, agentsInjectedFenceLabel, string(data))
-		if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, Content: injected}); err != nil {
+		if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeAgentsMD, Content: injected}); err != nil {
 			return err
 		}
 	}
 	environment := environmentContextMessage(meta.WorkspaceRoot, time.Now())
-	if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, Content: environment}); err != nil {
+	if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: environment}); err != nil {
 		return err
 	}
 

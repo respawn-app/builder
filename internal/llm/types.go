@@ -42,8 +42,19 @@ func normalizeMessagePhase(raw string) MessagePhase {
 	}
 }
 
+type MessageType string
+
+const (
+	MessageTypeAgentsMD         MessageType = "agents.md"
+	MessageTypeEnvironment      MessageType = "environment"
+	MessageTypeInterruption     MessageType = "interruption"
+	MessageTypeErrorFeedback    MessageType = "error_feedback"
+	MessageTypeReviewerFeedback MessageType = "reviewer_feedback"
+)
+
 type Message struct {
 	Role           Role            `json:"role"`
+	MessageType    MessageType     `json:"message_type,omitempty"`
 	Content        string          `json:"content,omitempty"`
 	Name           string          `json:"name,omitempty"`
 	ToolCallID     string          `json:"tool_call_id,omitempty"`
@@ -66,6 +77,7 @@ const (
 type ResponseItem struct {
 	Type             ResponseItemType `json:"type"`
 	Role             Role             `json:"role,omitempty"`
+	MessageType      MessageType      `json:"message_type,omitempty"`
 	Phase            MessagePhase     `json:"phase,omitempty"`
 	ID               string           `json:"id,omitempty"`
 	Name             string           `json:"name,omitempty"`
@@ -109,10 +121,11 @@ func ItemsFromMessages(messages []Message) []ResponseItem {
 		case RoleAssistant:
 			if strings.TrimSpace(msg.Content) != "" {
 				out = append(out, ResponseItem{
-					Type:    ResponseItemTypeMessage,
-					Role:    RoleAssistant,
-					Phase:   msg.Phase,
-					Content: msg.Content,
+					Type:        ResponseItemTypeMessage,
+					Role:        RoleAssistant,
+					MessageType: msg.MessageType,
+					Phase:       msg.Phase,
+					Content:     msg.Content,
 				})
 			}
 			for _, tc := range msg.ToolCalls {
@@ -156,10 +169,11 @@ func ItemsFromMessages(messages []Message) []ResponseItem {
 				continue
 			}
 			out = append(out, ResponseItem{
-				Type:    ResponseItemTypeMessage,
-				Role:    msg.Role,
-				Content: msg.Content,
-				Name:    msg.Name,
+				Type:        ResponseItemTypeMessage,
+				Role:        msg.Role,
+				MessageType: msg.MessageType,
+				Content:     msg.Content,
+				Name:        msg.Name,
 			})
 		}
 	}
@@ -182,10 +196,11 @@ func MessagesFromItems(items []ResponseItem) []Message {
 				role = RoleUser
 			}
 			msg := Message{
-				Role:    role,
-				Phase:   item.Phase,
-				Content: item.Content,
-				Name:    item.Name,
+				Role:        role,
+				MessageType: item.MessageType,
+				Phase:       item.Phase,
+				Content:     item.Content,
+				Name:        item.Name,
 			}
 			out = append(out, msg)
 			if role == RoleAssistant {
