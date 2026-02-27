@@ -1,6 +1,9 @@
 package commands
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestExecuteBuiltins(t *testing.T) {
 	r := NewDefaultRegistry()
@@ -59,8 +62,31 @@ func TestExecuteBuiltins(t *testing.T) {
 	if got.Args != "" {
 		t.Fatalf("expected /review args to be consumed by prompt payload, got %q", got.Args)
 	}
-	if got.User[len(got.User)-len("src/internal/app"):] != "src/internal/app" {
+	if !strings.HasSuffix(got.User, "src/internal/app") {
 		t.Fatalf("expected /review args appended to prompt payload, got %q", got.User)
+	}
+
+	got = r.Execute("/init starter repo")
+	if !got.Handled || !got.SubmitUser {
+		t.Fatalf("expected /init to submit a user prompt, got %+v", got)
+	}
+	if got.User == "/init starter repo" {
+		t.Fatalf("expected injected prompt content, got %q", got.User)
+	}
+	if got.Action != ActionNone {
+		t.Fatalf("expected /init action to be none, got %q", got.Action)
+	}
+	if !got.FreshConversation {
+		t.Fatalf("expected /init to require fresh conversation, got %+v", got)
+	}
+	if got.Text != "" {
+		t.Fatalf("expected /init to avoid system text, got %q", got.Text)
+	}
+	if got.Args != "" {
+		t.Fatalf("expected /init args to be consumed by prompt payload, got %q", got.Args)
+	}
+	if !strings.HasSuffix(got.User, "starter repo") {
+		t.Fatalf("expected /init args appended to prompt payload, got %q", got.User)
 	}
 }
 

@@ -1150,8 +1150,8 @@ func TestSlashCommandArrowKeysNavigatePickerAndReplaceInput(t *testing.T) {
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
 	updated = next.(*uiModel)
-	if updated.input != "/name" {
-		t.Fatalf("expected second down to select /name, got %q", updated.input)
+	if updated.input != "/init" {
+		t.Fatalf("expected second down to select /init, got %q", updated.input)
 	}
 }
 
@@ -1233,6 +1233,30 @@ func TestBuiltInReviewSlashCommandSubmitsInjectedUserPrompt(t *testing.T) {
 	}
 	plain := stripANSIAndTrimRight(updated.View())
 	if strings.Contains(plain, "/review internal/app") {
+		t.Fatalf("expected command text to be consumed by fresh-session handoff, got %q", plain)
+	}
+}
+
+func TestBuiltInInitSlashCommandSubmitsInjectedUserPrompt(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/init starter repo"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected quit cmd for /init fresh-conversation handoff")
+	}
+	if updated.Action() != UIActionNewSession {
+		t.Fatalf("expected UIActionNewSession, got %q", updated.Action())
+	}
+	if strings.TrimSpace(updated.nextSessionInitialPrompt) == "" {
+		t.Fatal("expected next-session prompt payload for /init")
+	}
+	if !strings.Contains(updated.nextSessionInitialPrompt, "starter repo") {
+		t.Fatalf("expected init args in handoff payload, got %q", updated.nextSessionInitialPrompt)
+	}
+	plain := stripANSIAndTrimRight(updated.View())
+	if strings.Contains(plain, "/init starter repo") {
 		t.Fatalf("expected command text to be consumed by fresh-session handoff, got %q", plain)
 	}
 }
