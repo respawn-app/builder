@@ -44,6 +44,8 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
   - New tools and handlers should require minimal boilerplate and minimal cross-cutting edits.
 - Maximize API cache hits, avoid mutation of past conversation history.
 - Keep TUI fast, avoid flicker, stable scroll, follow best practices.
+- Never use regex-based matching, parsing, replace hacks. Never use substring-based lookup to determine information presence. Avoid brittle and fragile text/string-based logic, and develop type-safe data structures, store structured data or metadata that can reliably be extracted instead.
+- Do not leave legacy fallbacks or preserve backward compatibility unless requested
 
 ## Coding Guidelines
 
