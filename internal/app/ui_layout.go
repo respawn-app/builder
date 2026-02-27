@@ -39,6 +39,11 @@ func (l uiViewLayout) render() string {
 	inputLines := l.renderInputLines(width, style)
 	queuedLines := l.renderQueuedMessagesPane(width)
 	pickerLines := l.renderSlashCommandPicker(width)
+	if m.view.Mode() == tui.ModeDetail {
+		inputLines = nil
+		queuedLines = nil
+		pickerLines = nil
+	}
 	statusLine := l.renderStatusLine(width, style)
 	statusLines := 1
 	chatLines := height - len(inputLines) - len(queuedLines) - len(pickerLines) - statusLines
@@ -517,8 +522,15 @@ func (l uiViewLayout) effectiveHeight() int {
 
 func (l uiViewLayout) calcChatLines() int {
 	m := l.model
-	width := l.effectiveWidth()
 	height := l.effectiveHeight()
+	if m.view.Mode() == tui.ModeDetail {
+		chat := height - 1 // keep status line
+		if chat < 1 {
+			return 1
+		}
+		return chat
+	}
+	width := l.effectiveWidth()
 	contentWidth := width
 	if contentWidth < 1 {
 		contentWidth = 1

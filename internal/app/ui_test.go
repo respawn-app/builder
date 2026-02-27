@@ -262,6 +262,28 @@ func TestApprovalAskSupportsDenyWithCommentary(t *testing.T) {
 	}
 }
 
+func TestDetailModeHidesInputBox(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 16
+	m.input = "draft input should be hidden"
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	updated := next.(*uiModel)
+	if updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("mode=%q want detail", updated.view.Mode())
+	}
+
+	view := ansi.Strip(updated.View())
+	if strings.Contains(view, "draft input should be hidden") {
+		t.Fatalf("expected detail mode to hide input text, got %q", view)
+	}
+	if strings.Contains(view, "› ") {
+		t.Fatalf("expected detail mode to hide input prompt, got %q", view)
+	}
+}
+
 func TestDoubleEscEntersRollbackSelectionAndEnterStartsEditing(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIInitialTranscript([]UITranscriptEntry{
 		{Role: "user", Text: "u1"},
@@ -1011,6 +1033,26 @@ func TestCalcChatLinesShrinksWhenInputWraps(t *testing.T) {
 
 	if chatLong >= chatShort {
 		t.Fatalf("expected wrapped input to reduce chat lines: short=%d long=%d", chatShort, chatLong)
+	}
+}
+
+func TestCalcChatLinesUsesFullHeightInDetailMode(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 20
+	m.termHeight = 12
+	m.input = strings.Repeat("x", 80)
+	m.queued = []string{"one", "two", "three", "four", "five", "six"}
+	m.refreshSlashCommandFilterFromInput()
+
+	base := m.calcChatLines()
+	if base >= m.termHeight-1 {
+		t.Fatalf("expected ongoing chat lines to reserve non-chat panes, got %d", base)
+	}
+
+	m.forwardToView(tui.ToggleModeMsg{})
+	detail := m.calcChatLines()
+	if detail != m.termHeight-1 {
+		t.Fatalf("expected detail chat lines to use full height minus status line: got %d want %d", detail, m.termHeight-1)
 	}
 }
 

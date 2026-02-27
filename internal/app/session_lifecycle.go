@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"builder/internal/app/commands"
+	"builder/internal/config"
 	"builder/internal/session"
 )
 
@@ -17,7 +18,15 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 	nextSessionParentID := ""
 	forceNewSession := false
 	for {
-		store, err := openOrCreateSession(boot.containerDir, currentSessionID, boot.cfg.WorkspaceRoot, boot.cfg.Settings.Theme, forceNewSession, nextSessionParentID)
+		store, err := openOrCreateSession(
+			boot.containerDir,
+			currentSessionID,
+			boot.cfg.WorkspaceRoot,
+			boot.cfg.Settings.Theme,
+			boot.cfg.Settings.TUIAlternateScreen,
+			forceNewSession,
+			nextSessionParentID,
+		)
 		if err != nil {
 			return err
 		}
@@ -110,7 +119,15 @@ func resolveSessionAction(ctx context.Context, boot appBootstrap, store *session
 	}
 }
 
-func openOrCreateSession(containerDir, selectedID, workspaceRoot, theme string, forceNew bool, parentSessionID string) (*session.Store, error) {
+func openOrCreateSession(
+	containerDir,
+	selectedID,
+	workspaceRoot,
+	theme string,
+	alternateScreenPolicy config.TUIAlternateScreenPolicy,
+	forceNew bool,
+	parentSessionID string,
+) (*session.Store, error) {
 	if strings.TrimSpace(selectedID) != "" {
 		return session.Open(filepath.Join(containerDir, selectedID))
 	}
@@ -137,7 +154,7 @@ func openOrCreateSession(containerDir, selectedID, workspaceRoot, theme string, 
 		return session.NewLazy(containerDir, containerName, workspaceRoot)
 	}
 
-	picked, err := runSessionPicker(summaries, theme)
+	picked, err := runSessionPicker(summaries, theme, alternateScreenPolicy)
 	if err != nil {
 		return nil, err
 	}
