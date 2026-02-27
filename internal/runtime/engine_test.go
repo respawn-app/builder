@@ -1103,16 +1103,30 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 	snapshot := eng.ChatSnapshot()
 	foundFollowUpAssistant := false
 	foundAppliedStatus := false
-	for _, entry := range snapshot.Entries {
+	suggestionsIdx := -1
+	followUpIdx := -1
+	for idx, entry := range snapshot.Entries {
+		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "Supervisor suggestions:") {
+			suggestionsIdx = idx
+		}
 		if entry.Role == "assistant" && strings.Contains(entry.Text, "updated final after review") {
 			foundFollowUpAssistant = true
+			if followUpIdx < 0 {
+				followUpIdx = idx
+			}
 		}
 		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "applied.") {
 			foundAppliedStatus = true
 		}
 	}
+	if suggestionsIdx < 0 {
+		t.Fatalf("expected reviewer suggestions status entry in snapshot, got %+v", snapshot.Entries)
+	}
 	if !foundFollowUpAssistant {
 		t.Fatalf("expected follow-up assistant message in snapshot, got %+v", snapshot.Entries)
+	}
+	if followUpIdx >= 0 && suggestionsIdx > followUpIdx {
+		t.Fatalf("expected reviewer suggestions to appear before follow-up assistant output, got %+v", snapshot.Entries)
 	}
 	if !foundAppliedStatus {
 		t.Fatalf("expected applied reviewer status entry in snapshot, got %+v", snapshot.Entries)
@@ -1199,6 +1213,16 @@ func TestReviewerStatusTextIncludesReviewerCacheHitMetadata(t *testing.T) {
 	}, []string{"one", "two"})
 	if !strings.Contains(text, "85% cache hit") {
 		t.Fatalf("expected reviewer cache hit metadata in reviewer status text, got %q", text)
+	}
+
+	text = reviewerStatusText(ReviewerStatus{
+		Outcome:               "applied",
+		SuggestionsCount:      2,
+		CacheHitPercent:       85,
+		HasCacheHitPercentage: true,
+	}, nil)
+	if !strings.Contains(text, "85% cache hit") {
+		t.Fatalf("expected reviewer cache hit metadata even without suggestions, got %q", text)
 	}
 }
 

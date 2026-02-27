@@ -547,6 +547,7 @@ func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, origina
 		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
 		return original, nil
 	}
+	_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerSuggestionsText(suggestions))
 
 	instruction := formatReviewerDeveloperInstruction(suggestions)
 	if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeReviewerFeedback, Content: instruction}); err != nil {
@@ -563,7 +564,7 @@ func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, origina
 			Error:                 strings.TrimSpace(err.Error()),
 		}
 		e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
-		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, suggestions))
+		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
 		return original, nil
 	}
 	if strings.TrimSpace(followUp.Content) == reviewerNoopToken {
@@ -577,7 +578,7 @@ func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, origina
 			HasCacheHitPercentage: reviewerResult.HasCacheHitPercentage,
 		}
 		e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
-		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, suggestions))
+		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
 		return original, nil
 	}
 	status := ReviewerStatus{
@@ -587,7 +588,7 @@ func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, origina
 		HasCacheHitPercentage: reviewerResult.HasCacheHitPercentage,
 	}
 	e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
-	_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, suggestions))
+	_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
 	return followUp, nil
 }
 
@@ -1016,6 +1017,9 @@ func reviewerStatusText(status ReviewerStatus, suggestions []string) string {
 		statusText = "Supervisor ran."
 	}
 	if len(suggestions) == 0 {
+		if status.HasCacheHitPercentage {
+			return statusText + "\n\n" + fmt.Sprintf("%d%% cache hit", status.CacheHitPercent)
+		}
 		return statusText
 	}
 	b := strings.Builder{}
@@ -1033,6 +1037,25 @@ func reviewerStatusText(status ReviewerStatus, suggestions []string) string {
 	if status.HasCacheHitPercentage {
 		b.WriteString("\n\n")
 		b.WriteString(fmt.Sprintf("%d%% cache hit", status.CacheHitPercent))
+	}
+	return b.String()
+}
+
+func reviewerSuggestionsText(suggestions []string) string {
+	if len(suggestions) == 0 {
+		return ""
+	}
+	b := strings.Builder{}
+	b.WriteString(fmt.Sprintf("Supervisor ran: %s.", reviewerSuggestionCountLabel(len(suggestions))))
+	b.WriteString("\n\n")
+	b.WriteString("Supervisor suggestions:\n")
+	for idx, suggestion := range suggestions {
+		b.WriteString(strconv.Itoa(idx + 1))
+		b.WriteString(". ")
+		b.WriteString(strings.TrimSpace(suggestion))
+		if idx < len(suggestions)-1 {
+			b.WriteString("\n")
+		}
 	}
 	return b.String()
 }
