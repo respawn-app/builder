@@ -607,6 +607,15 @@ func TestReviewerStatusRendersShortInOngoingAndFullInDetail(t *testing.T) {
 	}
 }
 
+func TestIsReviewerCacheHitLine(t *testing.T) {
+	if !isReviewerCacheHitLine("85% cache hit") {
+		t.Fatal("expected cache-hit line to be detected")
+	}
+	if isReviewerCacheHitLine("cache hit") {
+		t.Fatal("expected invalid cache-hit line to be rejected")
+	}
+}
+
 func TestOngoingDividersAreInsertedOnlyBetweenRoleGroups(t *testing.T) {
 	m := NewModel(WithPreviewLines(30))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u1"})
