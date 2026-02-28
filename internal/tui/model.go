@@ -104,7 +104,7 @@ type Model struct {
 	viewportWidth               int
 	ongoingScroll               int
 	detailScroll                int
-	detailEntryOngoingMaxScroll int
+	snapOngoingOnViewportResize bool
 
 	transcript []TranscriptEntry
 	ongoing    string
@@ -141,6 +141,7 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	wasAtOngoingBottom := m.isOngoingAtBottom()
 	shouldAutoFollowOngoing := false
+	viewportChanged := false
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -163,10 +164,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SetViewportLinesMsg:
 		if msg.Lines > 0 {
 			m.viewportLines = msg.Lines
+			viewportChanged = true
 		}
 	case SetViewportSizeMsg:
 		if msg.Lines > 0 {
 			m.viewportLines = msg.Lines
+			viewportChanged = true
 		}
 		if msg.Width > 0 {
 			m.viewportWidth = msg.Width
@@ -224,6 +227,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	m.ongoingScroll = clamp(m.ongoingScroll, 0, m.maxOngoingScroll())
 	m.detailScroll = clamp(m.detailScroll, 0, m.maxDetailScroll())
+	if m.mode == ModeOngoing && viewportChanged && m.snapOngoingOnViewportResize {
+		m.ongoingScroll = m.maxOngoingScroll()
+		m.snapOngoingOnViewportResize = false
+	}
 	if m.mode == ModeOngoing && shouldAutoFollowOngoing && wasAtOngoingBottom {
 		m.ongoingScroll = m.maxOngoingScroll()
 	}
@@ -245,6 +252,10 @@ func (m Model) OngoingScroll() int {
 	return m.ongoingScroll
 }
 
+func (m Model) OngoingSnapshot() string {
+	return m.renderFlatOngoingTranscript()
+}
+
 func FormatOngoingError(err error) string {
 	if err == nil {
 		return ""
@@ -259,15 +270,18 @@ func FormatOngoingError(err error) string {
 func (m Model) toggleMode() Model {
 	if m.mode == ModeOngoing {
 		m.mode = ModeDetail
-		m.detailEntryOngoingMaxScroll = m.maxOngoingScroll()
+		m.snapOngoingOnViewportResize = false
 		m.detailSnapshot = m.renderFlatDetailTranscript()
 		m.detailScroll = m.maxDetailScroll()
 		return m
 	}
 	m.mode = ModeOngoing
-	if m.maxOngoingScroll() > m.detailEntryOngoingMaxScroll {
-		m.ongoingScroll = m.maxOngoingScroll()
-	}
+	// Ongoing mode is the live tail view, so exiting detail always snaps to
+	// the latest visible transcript content.
+	m.ongoingScroll = m.maxOngoingScroll()
+	// App-level layout shrinks the viewport when returning to ongoing. Re-snap
+	// on the next viewport resize so we stay on the true latest tail.
+	m.snapOngoingOnViewportResize = true
 	return m
 }
 
@@ -595,16 +609,49 @@ func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *
 	if rolePrefix(role) != "" {
 		renderWidth -= 2
 	}
-	rendered := m.renderEntryText(role, text, renderWidth, toolMeta, muteText)
-	isEditedBlock := strings.HasPrefix(strings.TrimSpace(rendered), "Edited:")
-	chunks := splitLines(rendered)
-	if len(chunks) == 0 {
-		chunks = []string{""}
+	type lineWithKind struct {
+		text string
+		kind string
 	}
+	rendered := ""
+	lines := make([]lineWithKind, 0, 8)
+	if !muteText {
+		if diffLines, ok := m.renderDiffToolLines(text, renderWidth, toolMeta); ok {
+			for _, line := range diffLines {
+				item := lineWithKind{text: line.Text}
+				switch line.Kind {
+				case diffRenderAdd:
+					item.kind = "add"
+				case diffRenderRemove:
+					item.kind = "remove"
+				}
+				lines = append(lines, item)
+			}
+		} else {
+			rendered = m.renderEntryText(role, text, renderWidth, toolMeta, muteText)
+			for _, chunk := range splitLines(rendered) {
+				lines = append(lines, lineWithKind{text: chunk})
+			}
+		}
+	} else {
+		rendered = m.renderEntryText(role, text, renderWidth, toolMeta, muteText)
+		for _, chunk := range splitLines(rendered) {
+			lines = append(lines, lineWithKind{text: chunk})
+		}
+	}
+	if len(lines) == 0 {
+		lines = []lineWithKind{{text: ""}}
+	}
+	plainLines := make([]string, 0, len(lines))
+	for _, line := range lines {
+		plainLines = append(plainLines, line.text)
+	}
+	isEditedBlock := isEditedToolBlock(plainLines)
 	symbol := m.roleSymbol(role)
-	out := make([]string, 0, len(chunks))
-	for i, chunk := range chunks {
-		displayChunk := chunk
+	out := make([]string, 0, len(lines))
+	for i, line := range lines {
+		displayChunk := line.text
+		diffKind := line.kind
 		if isToolHeadlineRole(role) {
 			if i == 0 {
 				displayChunk = m.renderToolHeadline(displayChunk, renderWidth)
@@ -621,20 +668,74 @@ func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *
 			displayChunk = styleForRole(role, m.palette()).Render(displayChunk)
 		}
 		if i == 0 {
+			line := ""
 			if symbol == "" {
-				out = append(out, displayChunk)
-				continue
+				line = displayChunk
+			} else {
+				line = fmt.Sprintf("%s %s", symbol, displayChunk)
 			}
-			out = append(out, fmt.Sprintf("%s %s", symbol, displayChunk))
+			if diffKind != "" {
+				line = m.tintToolDiffLine(line, diffKind)
+			}
+			out = append(out, line)
 			continue
 		}
 		if strings.TrimSpace(displayChunk) == "" {
 			out = append(out, "")
 			continue
 		}
-		out = append(out, "  "+displayChunk)
+		line := "  " + displayChunk
+		if diffKind != "" {
+			line = m.tintToolDiffLine(line, diffKind)
+		}
+		out = append(out, line)
 	}
 	return out
+}
+
+func isEditedToolBlock(lines []string) bool {
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(xansi.Strip(line))
+		if trimmed == "" {
+			continue
+		}
+		return strings.HasPrefix(trimmed, "Edited:")
+	}
+	return false
+}
+
+func (m Model) renderDiffToolLines(text string, width int, toolMeta *transcript.ToolCallMeta) ([]diffRenderedLine, bool) {
+	if toolMeta == nil || !toolMeta.HasRenderHint() || m.code == nil {
+		return nil, false
+	}
+	hint := toolMeta.RenderHint
+	if hint == nil || hint.Kind != transcript.ToolRenderKindDiff {
+		return nil, false
+	}
+	highlightTarget := text
+	prefix := ""
+	if hint.ResultOnly {
+		parts := strings.SplitN(text, "\n", 2)
+		if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
+			return nil, false
+		}
+		prefix = parts[0]
+		highlightTarget = parts[1]
+	}
+	lines, ok := m.code.renderDiffLines(highlightTarget, width)
+	if !ok {
+		return nil, false
+	}
+	if strings.TrimSpace(prefix) == "" {
+		return lines, true
+	}
+	wrappedPrefix := splitLines(wrapTextForViewport(prefix, width))
+	combined := make([]diffRenderedLine, 0, len(wrappedPrefix)+len(lines))
+	for _, line := range wrappedPrefix {
+		combined = append(combined, diffRenderedLine{Kind: diffRenderMeta, Text: line})
+	}
+	combined = append(combined, lines...)
+	return combined, true
 }
 
 func (m Model) flattenEntryPlain(role, text string) []string {
@@ -711,6 +812,9 @@ func (m Model) renderToolTextWithHighlight(role, text string, width int, toolMet
 		return "", false
 	}
 	hint := toolMeta.RenderHint
+	if hint.Kind == transcript.ToolRenderKindDiff {
+		return "", false
+	}
 	highlightTarget := text
 	prefix := ""
 	if hint.ResultOnly {
@@ -1044,19 +1148,38 @@ func (m Model) renderToolHeadline(line string, width int) string {
 	return command + strings.Repeat(" ", space) + metaText
 }
 
-func (m Model) styleToolLine(line string) string {
-	if strings.Contains(line, "\x1b[") {
+func (m Model) tintToolDiffLine(line, kind string) string {
+	if strings.TrimSpace(line) == "" {
 		return line
 	}
+	addBg, removeBg := m.diffLineBackgroundEscapes()
+	if kind == "add" {
+		return applyBackgroundTint(line, addBg)
+	}
+	if kind == "remove" {
+		return applyBackgroundTint(line, removeBg)
+	}
+	return line
+}
+
+func (m Model) diffLineBackgroundEscapes() (string, string) {
+	p := m.palette()
+	if m.theme == "light" {
+		return bgEscape(p.diffAddBackgroundLight), bgEscape(p.diffRemoveBackgroundLight)
+	}
+	return bgEscape(p.diffAddBackgroundDark), bgEscape(p.diffRemoveBackgroundDark)
+}
+
+func (m Model) styleToolLine(line string) string {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
 		return line
 	}
-	if strings.HasPrefix(line, "+") {
-		return m.palette().toolSuccess.Render(line)
+	if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+		return m.palette().toolSuccess.Render("+") + line[1:]
 	}
-	if strings.HasPrefix(line, "-") {
-		return m.palette().toolError.Render(line)
+	if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
+		return m.palette().toolError.Render("-") + line[1:]
 	}
 	successCountStyle := m.palette().toolSuccess
 	errorCountStyle := m.palette().toolError
@@ -1251,6 +1374,11 @@ type palette struct {
 	system      lipgloss.Style
 	error       lipgloss.Style
 	compaction  lipgloss.Style
+
+	diffAddBackgroundLight    string
+	diffRemoveBackgroundLight string
+	diffAddBackgroundDark     string
+	diffRemoveBackgroundDark  string
 }
 
 func (m Model) palette() palette {
@@ -1276,6 +1404,11 @@ func (m Model) palette() palette {
 		system:      lipgloss.NewStyle().Foreground(system).Faint(true),
 		error:       lipgloss.NewStyle().Foreground(err),
 		compaction:  lipgloss.NewStyle().Foreground(compaction),
+
+		diffAddBackgroundLight:    "#E6FFED",
+		diffRemoveBackgroundLight: "#FFECEF",
+		diffAddBackgroundDark:     "#1F2A22",
+		diffRemoveBackgroundDark:  "#2B1F22",
 	}
 }
 
