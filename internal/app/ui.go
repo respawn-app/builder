@@ -216,6 +216,7 @@ type uiModel struct {
 	transcriptEntries           []tui.TranscriptEntry
 	lastInsertedOngoingSnapshot string
 	pendingOngoingSnapshot      string
+	pendingOngoingPrintable     string
 
 	lastEscAt time.Time
 

@@ -252,12 +252,10 @@ func renderReviewerStatus() string {
 }
 
 func (l uiViewLayout) renderChatPanel(width, height int, style uiStyles) []string {
-	m := l.model
 	if width < 1 {
 		return []string{padRight("", width)}
 	}
-	contentWidth := width
-	rawLines := splitPlainLines(m.view.View())
+	rawLines := splitPlainLines(l.model.view.View())
 	contentLines := append([]string(nil), rawLines...)
 	if len(contentLines) < height {
 		for len(contentLines) < height {
@@ -277,8 +275,16 @@ func (l uiViewLayout) renderChatPanel(width, height int, style uiStyles) []strin
 		}
 		contentLines = contentLines[start:end]
 	}
-	out := make([]string, 0, height)
-	for _, line := range contentLines {
+	return l.renderChatContentLines(contentLines, width, style)
+}
+
+func (l uiViewLayout) renderChatContentLines(rawLines []string, width int, style uiStyles) []string {
+	contentWidth := width
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
+	out := make([]string, 0, len(rawLines))
+	for _, line := range rawLines {
 		if line == tui.TranscriptDivider {
 			out = append(out, style.meta.Render(strings.Repeat("─", contentWidth)))
 			continue
@@ -286,6 +292,20 @@ func (l uiViewLayout) renderChatPanel(width, height int, style uiStyles) []strin
 		out = append(out, style.chat.Render(padANSIRight(line, contentWidth)))
 	}
 	return out
+}
+
+func (l uiViewLayout) ongoingScrollbackSnapshot() (canonical string, printable string) {
+	m := l.model
+	width := l.effectiveWidth()
+	if width < 1 {
+		width = 1
+	}
+	style := uiThemeStyles(m.theme)
+	rawLines := splitPlainLines(m.view.OngoingSnapshot())
+	canonical = strings.Join(rawLines, "\n")
+	rendered := l.renderChatContentLines(rawLines, width, style)
+	printable = strings.Join(rendered, "\n")
+	return canonical, printable
 }
 
 func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
