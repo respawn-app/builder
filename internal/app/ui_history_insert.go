@@ -26,12 +26,14 @@ func (m *uiModel) resetHistoryInsertionBaseline() {
 		m.lastInsertedOngoingSnapshot = ""
 		m.pendingOngoingSnapshot = ""
 		m.pendingOngoingPrintable = ""
+		m.historyBackfillPending = false
 		return
 	}
 	canonical, _ := m.currentOngoingSnapshot()
 	m.lastInsertedOngoingSnapshot = canonical
 	m.pendingOngoingSnapshot = ""
 	m.pendingOngoingPrintable = ""
+	m.historyBackfillPending = m.useInlineOngoingPanel()
 }
 
 func (m *uiModel) onConversationSyncedCmd() tea.Cmd {
@@ -39,10 +41,23 @@ func (m *uiModel) onConversationSyncedCmd() tea.Cmd {
 		m.lastInsertedOngoingSnapshot = ""
 		m.pendingOngoingSnapshot = ""
 		m.pendingOngoingPrintable = ""
+		m.historyBackfillPending = false
 		return nil
 	}
 
 	snapshotCanonical, snapshotPrintable := m.currentOngoingSnapshot()
+	if m.historyBackfillPending {
+		if !m.shouldInsertHistoryNow() {
+			m.pendingOngoingSnapshot = snapshotCanonical
+			m.pendingOngoingPrintable = snapshotPrintable
+			return nil
+		}
+		m.lastInsertedOngoingSnapshot = snapshotCanonical
+		m.pendingOngoingSnapshot = ""
+		m.pendingOngoingPrintable = ""
+		return m.flushHistoryBackfillCmd(snapshotPrintable)
+	}
+
 	if strings.TrimSpace(m.lastInsertedOngoingSnapshot) == "" {
 		m.lastInsertedOngoingSnapshot = snapshotCanonical
 		m.pendingOngoingSnapshot = ""
@@ -78,7 +93,33 @@ func (m *uiModel) flushPendingHistoryCmd() tea.Cmd {
 	}
 	m.pendingOngoingSnapshot = ""
 	m.pendingOngoingPrintable = ""
+	if m.historyBackfillPending {
+		m.lastInsertedOngoingSnapshot = targetCanonical
+		return m.flushHistoryBackfillCmd(targetPrintable)
+	}
 	return m.flushSnapshotDeltaCmd(targetCanonical, targetPrintable)
+}
+
+func (m *uiModel) maybeBackfillHistoryCmd() tea.Cmd {
+	if !m.historyBackfillPending {
+		return nil
+	}
+	if m.termWidth <= 0 || !m.shouldInsertHistoryNow() {
+		return nil
+	}
+	_, printable := m.currentOngoingSnapshot()
+	m.pendingOngoingSnapshot = ""
+	m.pendingOngoingPrintable = ""
+	return m.flushHistoryBackfillCmd(printable)
+}
+
+func (m *uiModel) flushHistoryBackfillCmd(printable string) tea.Cmd {
+	m.historyBackfillPending = false
+	printable, shouldPrint := ongoingSnapshotPrintableDelta(printable, strings.TrimSpace(printable) != "")
+	if !shouldPrint {
+		return nil
+	}
+	return tea.Printf("%s", printable)
 }
 
 func (m *uiModel) flushSnapshotDeltaCmd(targetCanonical, targetPrintable string) tea.Cmd {
@@ -86,6 +127,7 @@ func (m *uiModel) flushSnapshotDeltaCmd(targetCanonical, targetPrintable string)
 		m.lastInsertedOngoingSnapshot = ""
 		m.pendingOngoingSnapshot = ""
 		m.pendingOngoingPrintable = ""
+		m.historyBackfillPending = false
 		return nil
 	}
 	prev := m.lastInsertedOngoingSnapshot

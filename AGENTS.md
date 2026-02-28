@@ -80,5 +80,9 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
 - No app-level wheel handling in transcript models (`tea.MouseMsg` wheel branches). Ongoing keeps terminal-native scroll/selection.
 - Detail is fullscreen pager only: hide input/queued/picker; use alt-screen + alternate-scroll (`?1007h` on enter, `?1007l` on exit) with ordered sequencing and raw stdout ANSI writes (not `tea.Printf`).
 - Structural transitions must hard-refresh and keep sizing/state coherent: clear on mode/rollback/session teleports, detail viewport uses full height minus status, and returning from detail after transcript growth snaps ongoing to latest.
+- In normal-screen ongoing mode with history insertion enabled, committed transcript rendering is append-only via history insertion and must never be repainted in the ongoing panel.
+- Ongoing panel in that mode is inline/footer-only (live streaming/error surface + controls/status), not a full-height transcript viewport.
+- Session start/resume in that mode must backfill committed history once before delta insertion continues.
 - Ongoing history insertion must reuse the exact same rendered chat line pipeline as visible ongoing mode (divider expansion, ANSI styling, width padding). Do not maintain a separate formatter for scrollback insertion.
 - History insertion print payloads must be newline-terminated to avoid terminal line-merge/corruption artifacts during redraw.
+- History insertion snapshots must exclude live `ongoing` assistant streaming content; only finalized transcript entries are insertable into scrollback history.

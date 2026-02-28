@@ -130,6 +130,62 @@ func TestOngoingShowsFullConversationContext(t *testing.T) {
 	}
 }
 
+func TestOngoingHistorySnapshotExcludesStreamingAssistant(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, SetConversationMsg{
+		Entries: []TranscriptEntry{
+			{Role: "user", Text: "debug this"},
+		},
+		Ongoing: "I",
+	})
+	start := plainTranscript(m.OngoingHistorySnapshot())
+	if strings.Contains(start, "I") {
+		t.Fatalf("expected history snapshot to exclude streaming assistant text, got %q", start)
+	}
+
+	m = updateModel(t, m, SetConversationMsg{
+		Entries: []TranscriptEntry{
+			{Role: "user", Text: "debug this"},
+		},
+		Ongoing: "I've identified the issue",
+	})
+	after := plainTranscript(m.OngoingHistorySnapshot())
+	if start != after {
+		t.Fatalf("expected history snapshot to stay stable while assistant is streaming;\nstart=%q\nafter=%q", start, after)
+	}
+
+	m = updateModel(t, m, SetConversationMsg{
+		Entries: []TranscriptEntry{
+			{Role: "user", Text: "debug this"},
+			{Role: "assistant", Text: "I've identified the issue"},
+		},
+		Ongoing: "",
+	})
+	final := plainTranscript(m.OngoingHistorySnapshot())
+	if !strings.Contains(final, "I've identified the issue") {
+		t.Fatalf("expected finalized assistant text in history snapshot, got %q", final)
+	}
+}
+
+func TestOngoingLiveSnapshotContainsOnlyStreamingAssistant(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, SetConversationMsg{
+		Entries: []TranscriptEntry{
+			{Role: "user", Text: "past user"},
+			{Role: "assistant", Text: "past assistant"},
+		},
+		Ongoing: "live assistant",
+	})
+
+	live := plainTranscript(m.OngoingLiveSnapshot())
+	if strings.Contains(live, "past user") || strings.Contains(live, "past assistant") {
+		t.Fatalf("expected live snapshot to exclude committed transcript, got %q", live)
+	}
+	if !strings.Contains(live, "live assistant") {
+		t.Fatalf("expected live snapshot to include streaming assistant content, got %q", live)
+	}
+}
+
 func TestOngoingDoesNotPinOngoingErrorToBottomLine(t *testing.T) {
 	m := NewModel(WithPreviewLines(4))
 	m = updateModel(t, m, SetConversationMsg{

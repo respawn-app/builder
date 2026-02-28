@@ -1056,6 +1056,68 @@ func TestCalcChatLinesUsesFullHeightInDetailMode(t *testing.T) {
 	}
 }
 
+func TestCalcChatLinesUsesInlineModeDuringActiveOngoingInsertion(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", llm.Message{Role: llm.RoleUser, Content: "hello"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 24
+	m.busy = true
+	m.sawAssistantDelta = true
+
+	if got := m.calcChatLines(); got != 1 {
+		t.Fatalf("expected inline ongoing mode to reserve a single chat line, got %d", got)
+	}
+}
+
+func TestViewInInlineOngoingModeOmitsCommittedTranscript(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", llm.Message{Role: llm.RoleUser, Content: "prior user"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", llm.Message{Role: llm.RoleAssistant, Content: "prior assistant"}); err != nil {
+		t.Fatalf("append assistant message: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 24
+	m.busy = true
+	m.sawAssistantDelta = true
+	m.forwardToView(tui.SetConversationMsg{
+		Entries: []tui.TranscriptEntry{
+			{Role: "user", Text: "prior user"},
+			{Role: "assistant", Text: "prior assistant"},
+		},
+		Ongoing: "streaming now",
+	})
+
+	view := stripANSIAndTrimRight(m.View())
+	if strings.Contains(view, "prior assistant") || strings.Contains(view, "prior user") {
+		t.Fatalf("expected inline ongoing render to avoid repainting committed transcript, got %q", view)
+	}
+	if !strings.Contains(view, "streaming now") {
+		t.Fatalf("expected inline ongoing render to include live streaming content, got %q", view)
+	}
+}
+
 func TestRenderQueuedMessagesPaneShowsNewestFiveAndOverflowLine(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.queued = []string{"one", "two", "three", "four", "five", "six", "seven"}
@@ -1478,12 +1540,12 @@ func TestReviewerStatusEndToEnd_OngoingShortDetailFull(t *testing.T) {
 	m.termWidth = 100
 	m.termHeight = 24
 
-	ongoing := stripANSIAndTrimRight(m.View())
+	ongoing := stripANSIAndTrimRight(m.view.OngoingHistorySnapshot())
 	if !strings.Contains(ongoing, "Supervisor ran: 2 suggestions, no changes applied.") {
-		t.Fatalf("expected short reviewer status in ongoing mode, got %q", ongoing)
+		t.Fatalf("expected short reviewer status in ongoing history snapshot, got %q", ongoing)
 	}
 	if strings.Contains(ongoing, "Supervisor suggestions:") || strings.Contains(ongoing, "First detailed suggestion") {
-		t.Fatalf("expected full reviewer suggestions hidden in ongoing mode, got %q", ongoing)
+		t.Fatalf("expected full reviewer suggestions hidden in ongoing history snapshot, got %q", ongoing)
 	}
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
