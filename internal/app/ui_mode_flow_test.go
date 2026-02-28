@@ -74,16 +74,20 @@ func TestScenarioHarnessRestartAndSessionResumeKeepsTranscriptVisible(t *testing
 	m.syncViewport()
 
 	first := stripANSIAndTrimRight(m.View())
-	if !strings.Contains(first, "a2 tail") {
-		t.Fatalf("expected resumed tail in ongoing mode, got %q", first)
+	if strings.Contains(first, "a2 tail") {
+		t.Fatalf("did not expect inline ongoing panel to repaint committed transcript, got %q", first)
+	}
+	firstHistory := stripANSIAndTrimRight(m.view.OngoingHistorySnapshot())
+	if !strings.Contains(firstHistory, "a2 tail") {
+		t.Fatalf("expected resumed tail in ongoing history snapshot, got %q", firstHistory)
 	}
 
 	eng.AppendLocalEntry("assistant", "post-resume live update")
 	next, _ := m.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventConversationUpdated}})
 	updated := next.(*uiModel)
-	live := stripANSIAndTrimRight(updated.View())
-	if !strings.Contains(live, "post-resume live update") {
-		t.Fatalf("expected live update after conversation refresh, got %q", live)
+	liveHistory := stripANSIAndTrimRight(updated.view.OngoingHistorySnapshot())
+	if !strings.Contains(liveHistory, "post-resume live update") {
+		t.Fatalf("expected committed update after conversation refresh, got %q", liveHistory)
 	}
 
 	reopened, err := session.Open(store.Dir())
@@ -100,18 +104,22 @@ func TestScenarioHarnessRestartAndSessionResumeKeepsTranscriptVisible(t *testing
 	m2.syncViewport()
 
 	afterRestart := stripANSIAndTrimRight(m2.View())
-	if !strings.Contains(afterRestart, "a2 tail") {
-		t.Fatalf("expected resumed transcript after harness restart, got %q", afterRestart)
+	if strings.Contains(afterRestart, "a2 tail") {
+		t.Fatalf("did not expect inline ongoing panel to repaint resumed transcript, got %q", afterRestart)
 	}
-	if strings.Contains(afterRestart, "post-resume live update") {
-		t.Fatalf("did not expect non-persisted local update to survive restart, got %q", afterRestart)
+	afterRestartHistory := stripANSIAndTrimRight(m2.view.OngoingHistorySnapshot())
+	if !strings.Contains(afterRestartHistory, "a2 tail") {
+		t.Fatalf("expected resumed transcript in history snapshot after harness restart, got %q", afterRestartHistory)
+	}
+	if strings.Contains(afterRestartHistory, "post-resume live update") {
+		t.Fatalf("did not expect non-persisted local update to survive restart, got %q", afterRestartHistory)
 	}
 
 	m2 = updateUIModel(t, m2, tea.KeyMsg{Type: tea.KeyShiftTab})
 	m2 = updateUIModel(t, m2, tea.KeyMsg{Type: tea.KeyShiftTab})
-	backToOngoing := stripANSIAndTrimRight(m2.View())
+	backToOngoing := stripANSIAndTrimRight(m2.view.OngoingHistorySnapshot())
 	if !strings.Contains(backToOngoing, "a2 tail") {
-		t.Fatalf("expected transcript preserved across detail roundtrip after restart, got %q", backToOngoing)
+		t.Fatalf("expected transcript preserved across detail roundtrip after restart in history snapshot, got %q", backToOngoing)
 	}
 }
 
@@ -139,9 +147,9 @@ func TestScenarioTeleportBetweenSessionsResetsVisibleConversation(t *testing.T) 
 	modelA.termWidth = 80
 	modelA.termHeight = 14
 	modelA.syncViewport()
-	viewA := stripANSIAndTrimRight(modelA.View())
+	viewA := stripANSIAndTrimRight(modelA.view.OngoingHistorySnapshot())
 	if !strings.Contains(viewA, "session-a-tail") {
-		t.Fatalf("expected session A tail, got %q", viewA)
+		t.Fatalf("expected session A tail in history snapshot, got %q", viewA)
 	}
 
 	engB, err := runtime.New(storeB, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
@@ -152,9 +160,9 @@ func TestScenarioTeleportBetweenSessionsResetsVisibleConversation(t *testing.T) 
 	modelB.termWidth = 80
 	modelB.termHeight = 14
 	modelB.syncViewport()
-	viewB := stripANSIAndTrimRight(modelB.View())
+	viewB := stripANSIAndTrimRight(modelB.view.OngoingHistorySnapshot())
 	if !strings.Contains(viewB, "session-b-tail") || strings.Contains(viewB, "session-a-tail") {
-		t.Fatalf("expected teleported session B view only, got %q", viewB)
+		t.Fatalf("expected teleported session B history snapshot only, got %q", viewB)
 	}
 
 	reopenA, err := session.Open(storeA.Dir())
@@ -169,9 +177,9 @@ func TestScenarioTeleportBetweenSessionsResetsVisibleConversation(t *testing.T) 
 	modelA2.termWidth = 80
 	modelA2.termHeight = 14
 	modelA2.syncViewport()
-	viewA2 := stripANSIAndTrimRight(modelA2.View())
+	viewA2 := stripANSIAndTrimRight(modelA2.view.OngoingHistorySnapshot())
 	if !strings.Contains(viewA2, "session-a-tail") || strings.Contains(viewA2, "session-b-tail") {
-		t.Fatalf("expected teleported-back session A view only, got %q", viewA2)
+		t.Fatalf("expected teleported-back session A history snapshot only, got %q", viewA2)
 	}
 }
 
@@ -205,9 +213,9 @@ func TestScenarioScrollAttemptsAcrossModesAfterLongDetailStay(t *testing.T) {
 	detail = updateUIModel(t, detail, tea.KeyMsg{Type: tea.KeyPgDown})
 
 	ongoing := updateUIModel(t, detail, tea.KeyMsg{Type: tea.KeyShiftTab})
-	plain := stripANSIAndTrimRight(ongoing.View())
+	plain := stripANSIAndTrimRight(ongoing.view.OngoingHistorySnapshot())
 	if !containsAny(plain, "line 45", "line 44", "line 43") {
-		t.Fatalf("expected latest line visible after returning from detail, got %q", plain)
+		t.Fatalf("expected latest line visible in ongoing history snapshot after returning from detail, got %q", plain)
 	}
 
 	ongoing = updateUIModel(t, ongoing, tea.KeyMsg{Type: tea.KeyUp})
@@ -371,6 +379,36 @@ func TestCurrentOngoingSnapshotCanonicalStableAcrossResizeForShortLines(t *testi
 	}
 }
 
+func TestCurrentOngoingSnapshotExcludesStreamingAssistantFragments(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 90
+	m.termHeight = 14
+	m.syncViewport()
+
+	baseEntries := []tui.TranscriptEntry{
+		{Role: "user", Text: "investigate scrollback"},
+	}
+	m.forwardToView(tui.SetConversationMsg{Entries: baseEntries, Ongoing: "I"})
+	streamStartCanonical, _ := m.currentOngoingSnapshot()
+	if strings.Contains(ansi.Strip(streamStartCanonical), "I") {
+		t.Fatalf("expected canonical insertion snapshot to exclude streaming ongoing text, got %q", streamStartCanonical)
+	}
+
+	m.forwardToView(tui.SetConversationMsg{Entries: baseEntries, Ongoing: "I've identified regressions"})
+	streamLaterCanonical, _ := m.currentOngoingSnapshot()
+	if streamStartCanonical != streamLaterCanonical {
+		t.Fatalf("expected canonical insertion snapshot to stay stable across streaming updates;\nstart=%q\nlater=%q", streamStartCanonical, streamLaterCanonical)
+	}
+
+	finalEntries := append([]tui.TranscriptEntry{}, baseEntries...)
+	finalEntries = append(finalEntries, tui.TranscriptEntry{Role: "assistant", Text: "I've identified regressions"})
+	m.forwardToView(tui.SetConversationMsg{Entries: finalEntries, Ongoing: ""})
+	finalCanonical, _ := m.currentOngoingSnapshot()
+	if !strings.Contains(ansi.Strip(finalCanonical), "I've identified regressions") {
+		t.Fatalf("expected finalized assistant message in canonical insertion snapshot, got %q", finalCanonical)
+	}
+}
+
 func TestHistoryInsertionDisabledInAlwaysAltScreenDoesNotQueuePending(t *testing.T) {
 	workspace := t.TempDir()
 	store, err := session.Create(workspace, "ws", workspace)
@@ -403,6 +441,43 @@ func TestHistoryInsertionDisabledInAlwaysAltScreenDoesNotQueuePending(t *testing
 	}
 	if m.pendingOngoingPrintable != "" {
 		t.Fatalf("expected no pending printable snapshot accumulation in always alt-screen mode, got %q", m.pendingOngoingPrintable)
+	}
+}
+
+func TestInlineOngoingBackfillsHistoryOnFirstWindowSizeOnly(t *testing.T) {
+	workspace := t.TempDir()
+	store, err := session.Create(workspace, "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	appendTranscriptMessage(t, store, llm.RoleUser, "u1")
+	appendTranscriptMessage(t, store, llm.RoleAssistant, "a1")
+
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	if !m.historyBackfillPending {
+		t.Fatal("expected initial history backfill pending in inline ongoing mode")
+	}
+
+	nextModel, firstCmd := m.Update(tea.WindowSizeMsg{Width: 88, Height: 20})
+	updated := nextModel.(*uiModel)
+	if firstCmd == nil {
+		t.Fatal("expected first window size to emit backfill command")
+	}
+	if updated.historyBackfillPending {
+		t.Fatal("expected history backfill pending cleared after first window size")
+	}
+
+	nextModel, secondCmd := updated.Update(tea.WindowSizeMsg{Width: 88, Height: 20})
+	updated = nextModel.(*uiModel)
+	if secondCmd != nil {
+		t.Fatal("did not expect repeated full backfill on second window size")
+	}
+	if updated.historyBackfillPending {
+		t.Fatal("expected history backfill pending to remain cleared")
 	}
 }
 
