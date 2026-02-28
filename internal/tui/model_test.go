@@ -2,6 +2,7 @@ package tui
 
 import (
 	"builder/internal/transcript"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -10,7 +11,7 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-func TestModeTogglePreservesOngoingScroll(t *testing.T) {
+func TestModeToggleReturnsToLatestOngoingTail(t *testing.T) {
 	m := NewModel(WithPreviewLines(2))
 	m = updateModel(t, m, StreamAssistantMsg{Delta: "l1\nl2\nl3\nl4"})
 	m = updateModel(t, m, ScrollOngoingMsg{Delta: -1})
@@ -37,13 +38,39 @@ func TestModeTogglePreservesOngoingScroll(t *testing.T) {
 	if got := m.Mode(); got != ModeOngoing {
 		t.Fatalf("mode after second toggle = %q, want %q", got, ModeOngoing)
 	}
-	if got := m.OngoingScroll(); got != 1 {
-		t.Fatalf("scroll after roundtrip toggle = %d, want 1", got)
+	if got, want := m.OngoingScroll(), m.maxOngoingScroll(); got != want {
+		t.Fatalf("scroll after roundtrip toggle = %d, want latest %d", got, want)
 	}
 
-	after := m.View()
-	if after != before {
-		t.Fatalf("ongoing view changed after roundtrip toggle:\nbefore=%q\nafter=%q", before, after)
+	after := strings.Split(m.View(), "\n")
+	if len(after) != 2 {
+		t.Fatalf("ongoing lines after toggle = %d, want 2", len(after))
+	}
+	if strings.TrimSpace(after[0]) != "l3" || strings.TrimSpace(after[1]) != "l4" {
+		t.Fatalf("unexpected ongoing tail after toggle: %q", m.View())
+	}
+}
+
+func TestModeToggleReSnapsTailAfterViewportShrink(t *testing.T) {
+	m := NewModel(WithPreviewLines(7))
+	for i := 1; i <= 20; i++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "line"})
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{}) // detail
+	for i := 0; i < 10; i++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "new"})
+	}
+	m = updateModel(t, m, ToggleModeMsg{}) // ongoing snaps using detail viewport
+
+	beforeResize := m.OngoingScroll()
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 4, Width: 80})
+	afterResize := m.OngoingScroll()
+	if afterResize <= beforeResize {
+		t.Fatalf("expected viewport resize to re-snap ongoing tail, got %d from %d", afterResize, beforeResize)
+	}
+	if got, want := m.OngoingScroll(), m.maxOngoingScroll(); got != want {
+		t.Fatalf("expected to stay at bottom after resize snap, got %d want %d", got, want)
 	}
 }
 
@@ -756,6 +783,125 @@ func TestStyleToolLineColorsPatchCountsAndDiff(t *testing.T) {
 	removed := m.styleToolLine("-removed")
 	if !strings.Contains(removed, "-removed") {
 		t.Fatalf("expected removal line preserved, got %q", removed)
+	}
+}
+
+func TestStyleToolLineStylesOnlyDiffMarkerWhenSyntaxPresent(t *testing.T) {
+	m := NewModel()
+	inputAdded := "+\x1b[38;5;81mpackage\x1b[0m main"
+	inputRemoved := "-\x1b[38;5;81mfunc\x1b[0m main() {}"
+
+	added := m.styleToolLine(inputAdded)
+	removed := m.styleToolLine(inputRemoved)
+
+	if !strings.Contains(added, m.palette().toolSuccess.Render("+")) {
+		t.Fatalf("expected added diff marker to use tool success style, got %q", added)
+	}
+	if !strings.Contains(removed, m.palette().toolError.Render("-")) {
+		t.Fatalf("expected removed diff marker to use tool error style, got %q", removed)
+	}
+	if !strings.Contains(added, "\x1b[38;5;81mpackage\x1b[0m") {
+		t.Fatalf("expected syntax highlighting to remain intact for added line, got %q", added)
+	}
+	if !strings.Contains(removed, "\x1b[38;5;81mfunc\x1b[0m") {
+		t.Fatalf("expected syntax highlighting to remain intact for removed line, got %q", removed)
+	}
+}
+
+func TestDetailDiffBackgroundTintsFullRenderedLine(t *testing.T) {
+	detail := "Edited:\n./main.go\n+package main\n-old"
+
+	m := NewModel()
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: detail,
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:    "patch",
+			PatchDetail: detail,
+			RenderHint:  &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
+		},
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := m.View()
+	addBg, removeBg := m.diffLineBackgroundEscapes()
+	if !strings.Contains(view, addBg+"  ") {
+		t.Fatalf("expected added line background to include indentation prefix, got %q", view)
+	}
+	if !strings.Contains(view, removeBg+"  ") {
+		t.Fatalf("expected removed line background to include indentation prefix, got %q", view)
+	}
+}
+
+func TestDetailDiffRendersGoTokenAnsi(t *testing.T) {
+	detail := "Edited:\n./main.go\n+package main\n+func main() {}"
+
+	m := NewModel()
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: detail,
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:    "patch",
+			PatchDetail: detail,
+			RenderHint:  &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
+		},
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := m.View()
+	if !regexp.MustCompile(`\x1b\[[0-9;]*mpackage`).MatchString(view) {
+		t.Fatalf("expected detail view to contain ansi-colored go token for package, got %q", view)
+	}
+}
+
+func TestDetailDiffLayeringKeepsBackgroundAndTokenColorForAddAndRemove(t *testing.T) {
+	detail := "Edited:\n./main.go\n+package main\n-func removed() {}"
+
+	m := NewModel()
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: detail,
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:    "patch",
+			PatchDetail: detail,
+			RenderHint:  &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
+		},
+	})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := m.View()
+	addBg, removeBg := m.diffLineBackgroundEscapes()
+	var addLine string
+	var removeLine string
+	for _, line := range strings.Split(view, "\n") {
+		plain := ansi.Strip(line)
+		if addLine == "" && strings.Contains(plain, "+package main") {
+			addLine = line
+		}
+		if removeLine == "" && strings.Contains(plain, "-func removed() {}") {
+			removeLine = line
+		}
+	}
+	if addLine == "" || removeLine == "" {
+		t.Fatalf("expected add/remove lines in detail output, got %q", view)
+	}
+	if !strings.Contains(addLine, addBg) || !strings.Contains(addLine, "\x1b[38;") {
+		t.Fatalf("expected added line to include both background tint and token color, got %q", addLine)
+	}
+	if !strings.Contains(removeLine, removeBg) || !strings.Contains(removeLine, "\x1b[38;") {
+		t.Fatalf("expected removed line to include both background tint and token color, got %q", removeLine)
+	}
+}
+
+func TestIsEditedToolBlockDetectsAnsiHeader(t *testing.T) {
+	if !isEditedToolBlock([]string{"", "\x1b[38;5;81mEdited:\x1b[0m", "./file.go +1"}) {
+		t.Fatal("expected Edited header with ansi to be detected")
+	}
+	if isEditedToolBlock([]string{"", "regular output"}) {
+		t.Fatal("did not expect non-Edited content to be detected as Edited block")
 	}
 }
 
