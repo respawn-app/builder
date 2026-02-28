@@ -213,8 +213,9 @@ type uiModel struct {
 	transientStatus      string
 	transientStatusToken uint64
 
-	transcriptEntries []tui.TranscriptEntry
-	historyPrintIndex int
+	transcriptEntries           []tui.TranscriptEntry
+	lastInsertedOngoingSnapshot string
+	pendingOngoingSnapshot      string
 
 	lastEscAt time.Time
 
@@ -269,6 +270,7 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 		m.refreshRollbackCandidates()
 	}
 	m.syncViewport()
+	m.resetHistoryInsertionBaseline()
 	return m
 }
 
@@ -304,9 +306,9 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncViewport()
 		return m, nil
 	case runtimeEventMsg:
-		m.runtimeAdapter().handleRuntimeEvent(msg.event)
+		historyCmd := m.runtimeAdapter().handleRuntimeEvent(msg.event)
 		m.syncViewport()
-		return m, waitRuntimeEvent(m.runtimeEvents)
+		return m, tea.Batch(waitRuntimeEvent(m.runtimeEvents), historyCmd)
 	case askEventMsg:
 		m.askController().acceptEvent(msg.event)
 		m.syncViewport()
