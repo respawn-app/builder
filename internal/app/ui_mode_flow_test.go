@@ -13,6 +13,8 @@ import (
 	"builder/internal/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestScenarioDetailWhileAgentWorksReturnsToLatestOngoingTail(t *testing.T) {
@@ -252,6 +254,9 @@ func TestHistoryInsertionQueuesInDetailAndFlushesOnReturnToOngoing(t *testing.T)
 	if m.pendingOngoingSnapshot != "" {
 		t.Fatalf("expected pending ongoing snapshot flushed on return to ongoing, got %q", m.pendingOngoingSnapshot)
 	}
+	if m.pendingOngoingPrintable != "" {
+		t.Fatalf("expected pending printable snapshot flushed on return to ongoing, got %q", m.pendingOngoingPrintable)
+	}
 }
 
 func TestHistoryInsertionFlushesImmediatelyInOngoingMode(t *testing.T) {
@@ -277,6 +282,9 @@ func TestHistoryInsertionFlushesImmediatelyInOngoingMode(t *testing.T) {
 	if m.pendingOngoingSnapshot != "" {
 		t.Fatalf("expected no pending snapshot in ongoing mode, got %q", m.pendingOngoingSnapshot)
 	}
+	if m.pendingOngoingPrintable != "" {
+		t.Fatalf("expected no pending printable snapshot in ongoing mode, got %q", m.pendingOngoingPrintable)
+	}
 }
 
 func TestOngoingSnapshotDeltaAppendsOnlyNewSuffix(t *testing.T) {
@@ -297,6 +305,69 @@ func TestOngoingSnapshotDeltaRejectsReformattedSnapshots(t *testing.T) {
 	delta, ok := ongoingSnapshotDelta(prev, curr)
 	if ok || delta != "" {
 		t.Fatalf("expected non-prefix snapshots to reject append delta, got ok=%v delta=%q", ok, delta)
+	}
+}
+
+func TestOngoingSnapshotPrintableDeltaEndsWithNewline(t *testing.T) {
+	delta, ok := ongoingSnapshotPrintableDelta("❮ a2", true)
+	if !ok {
+		t.Fatal("expected printable delta for valid non-empty snapshot delta")
+	}
+	if !strings.HasSuffix(delta, "\n") {
+		t.Fatalf("expected printable delta to end with newline, got %q", delta)
+	}
+}
+
+func TestCurrentOngoingSnapshotUsesChatPanelFormatting(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 72
+	m.termHeight = 14
+	m.syncViewport()
+	m = updateUIModel(t, m, tui.AppendTranscriptMsg{Role: "user", Text: "show status"})
+	m = updateUIModel(t, m, tui.AppendTranscriptMsg{Role: "assistant", Text: "status: ok"})
+
+	canonical, printable := m.currentOngoingSnapshot()
+	if !strings.Contains(printable, "\x1b[") {
+		t.Fatalf("expected ANSI formatting in ongoing printable snapshot, got %q", printable)
+	}
+
+	plain := ansi.Strip(printable)
+	if !strings.Contains(plain, strings.Repeat("─", m.termWidth)) {
+		t.Fatalf("expected full-width divider in ongoing printable snapshot, got %q", plain)
+	}
+
+	lines := strings.Split(printable, "\n")
+	for _, line := range lines {
+		if lipgloss.Width(line) != m.termWidth {
+			t.Fatalf("expected line width %d, got %d for line %q", m.termWidth, lipgloss.Width(line), line)
+		}
+	}
+
+	canonicalLines := strings.Split(canonical, "\n")
+	for _, line := range canonicalLines {
+		if strings.HasSuffix(line, " ") {
+			t.Fatalf("canonical snapshot should not include right padding, got line %q", line)
+		}
+	}
+}
+
+func TestCurrentOngoingSnapshotCanonicalStableAcrossResizeForShortLines(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 120
+	m.termHeight = 16
+	m.syncViewport()
+	m = updateUIModel(t, m, tui.AppendTranscriptMsg{Role: "user", Text: "short user"})
+	m = updateUIModel(t, m, tui.AppendTranscriptMsg{Role: "assistant", Text: "short assistant"})
+
+	beforeCanonical, beforePrintable := m.currentOngoingSnapshot()
+	m = updateUIModel(t, m, tea.WindowSizeMsg{Width: 78, Height: 16})
+	afterCanonical, afterPrintable := m.currentOngoingSnapshot()
+
+	if beforeCanonical != afterCanonical {
+		t.Fatalf("expected canonical snapshot to remain stable across resize for short lines;\nbefore=%q\nafter=%q", beforeCanonical, afterCanonical)
+	}
+	if beforePrintable == afterPrintable {
+		t.Fatal("expected printable snapshot to remain width-aware across resize")
 	}
 }
 
@@ -329,6 +400,9 @@ func TestHistoryInsertionDisabledInAlwaysAltScreenDoesNotQueuePending(t *testing
 	}
 	if m.pendingOngoingSnapshot != "" {
 		t.Fatalf("expected no pending snapshot accumulation in always alt-screen mode, got %q", m.pendingOngoingSnapshot)
+	}
+	if m.pendingOngoingPrintable != "" {
+		t.Fatalf("expected no pending printable snapshot accumulation in always alt-screen mode, got %q", m.pendingOngoingPrintable)
 	}
 }
 
