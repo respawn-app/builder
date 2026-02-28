@@ -1150,6 +1150,25 @@ func TestRenderChatPanelRendersFullWidthMetaDivider(t *testing.T) {
 	}
 }
 
+func TestRenderChatPanelKeepsNewestLinesWhenContentOverflows(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	style := uiThemeStyles("dark")
+	m.forwardToView(tui.SetViewportSizeMsg{Lines: 6, Width: 80})
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "a1"})
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "a2"})
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "a3"})
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "a4"})
+
+	lines := m.renderChatPanel(40, 2, style)
+	plain := stripANSIAndTrimRight(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "a4") {
+		t.Fatalf("expected clipped chat panel to include latest content, got %q", plain)
+	}
+	if strings.Contains(plain, "a1") {
+		t.Fatalf("expected oldest clipped content to be dropped, got %q", plain)
+	}
+}
+
 func TestSlashCommandPickerRendersSevenLines(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "/"

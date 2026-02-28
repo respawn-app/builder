@@ -264,7 +264,18 @@ func (l uiViewLayout) renderChatPanel(width, height int, style uiStyles) []strin
 			contentLines = append(contentLines, "")
 		}
 	} else if len(contentLines) > height {
-		contentLines = contentLines[:height]
+		end := len(contentLines)
+		for end > 0 && strings.TrimSpace(contentLines[end-1]) == "" {
+			end--
+		}
+		if end < height {
+			end = height
+		}
+		start := end - height
+		if start < 0 {
+			start = 0
+		}
+		contentLines = contentLines[start:end]
 	}
 	out := make([]string, 0, height)
 	for _, line := range contentLines {

@@ -38,10 +38,11 @@ func (m *uiModel) toggleTranscriptMode() tea.Cmd {
 	m.forwardToView(tui.ToggleModeMsg{})
 	nextMode := m.view.Mode()
 	transitionCmd := m.altScreenCmdForModeTransition(prevMode, nextMode)
+	flushCmd := m.flushPendingHistoryCmd()
 	if transitionCmd == nil {
-		return tea.ClearScreen
+		return tea.Sequence(tea.ClearScreen, flushCmd)
 	}
-	return tea.Sequence(transitionCmd, tea.ClearScreen)
+	return tea.Sequence(transitionCmd, tea.ClearScreen, flushCmd)
 }
 
 func (m *uiModel) altScreenCmdForModeTransition(prev, next tui.Mode) tea.Cmd {

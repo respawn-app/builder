@@ -13,11 +13,11 @@ type uiRuntimeAdapter struct {
 	model *uiModel
 }
 
-func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) {
+func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 	m := a.model
 	switch evt.Kind {
 	case runtime.EventConversationUpdated:
-		a.syncConversationFromEngine()
+		return a.syncConversationFromEngine()
 	case runtime.EventAssistantDelta:
 		m.sawAssistantDelta = evt.AssistantDelta != ""
 	case runtime.EventAssistantDeltaReset:
@@ -34,6 +34,7 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) {
 	case runtime.EventUserMessageFlushed:
 		a.onUserMessageFlushed(evt.UserMessage)
 	}
+	return nil
 }
 
 func (a uiRuntimeAdapter) onUserMessageFlushed(text string) {
@@ -52,10 +53,10 @@ func (a uiRuntimeAdapter) onUserMessageFlushed(text string) {
 	}
 }
 
-func (a uiRuntimeAdapter) syncConversationFromEngine() {
+func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 	m := a.model
 	if m.engine == nil {
-		return
+		return nil
 	}
 	snapshot := m.engine.ChatSnapshot()
 	entries := make([]tui.TranscriptEntry, 0, len(snapshot.Entries))
@@ -75,6 +76,7 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() {
 		Ongoing:      snapshot.Ongoing,
 		OngoingError: snapshot.OngoingError,
 	})
+	return m.onConversationSyncedCmd()
 }
 
 func waitRuntimeEvent(ch <-chan runtime.Event) tea.Cmd {
@@ -98,7 +100,7 @@ func waitAskEvent(ch <-chan askEvent) tea.Cmd {
 }
 
 func (m *uiModel) handleRuntimeEvent(evt runtime.Event) {
-	m.runtimeAdapter().handleRuntimeEvent(evt)
+	_ = m.runtimeAdapter().handleRuntimeEvent(evt)
 }
 
 func (m *uiModel) onUserMessageFlushed(text string) {
@@ -106,5 +108,5 @@ func (m *uiModel) onUserMessageFlushed(text string) {
 }
 
 func (m *uiModel) syncConversationFromEngine() {
-	m.runtimeAdapter().syncConversationFromEngine()
+	_ = m.runtimeAdapter().syncConversationFromEngine()
 }
