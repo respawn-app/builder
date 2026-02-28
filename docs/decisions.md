@@ -579,3 +579,13 @@ This file records architecture and product decisions for the minimal terminal co
    - `detail` mode remains explicit in-app paging and, in `auto`, temporarily enters alt-screen with alternate-scroll (`CSI ?1007 h/l`) on enter/exit.
    - `always` keeps full-session alt-screen behavior; `never` disables startup/picker alt-screen but detail still temporarily enters alt-screen for fullscreen transcript review.
    - App-level mouse wheel interception remains disabled; wheel behavior is terminal-native in main chat.
+
+159. **Append-only ongoing history insertion is removed; ongoing returns to in-app viewport rendering.**
+   - Ongoing mode now uses the same in-app viewport rendering model as detail mode (mode-specific transcript projections with explicit scroll state).
+   - The append-only terminal history writer path and related snapshot/backfill logic are removed from app runtime flow.
+   - Alternate-screen policy and detail-mode alternate-scroll behavior from Decision 158 remain in place.
+
+160. **Detail mode now matches ongoing-mode terminal architecture (normal buffer, no detail-only alt-screen transition).**
+   - Toggling `detail` no longer enters/exits alt-screen or toggles alternate-scroll.
+   - `detail` continues to hide input/queued/picker and use in-app viewport scrolling, but rendering stays in the same normal-buffer architecture as `ongoing`.
+   - This supersedes the detail alt-screen/alternate-scroll behavior from Decision 158.

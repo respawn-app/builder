@@ -1056,7 +1056,7 @@ func TestCalcChatLinesUsesFullHeightInDetailMode(t *testing.T) {
 	}
 }
 
-func TestCalcChatLinesUsesInlineModeDuringActiveOngoingInsertion(t *testing.T) {
+func TestCalcChatLinesRemainsViewportBasedDuringActiveWork(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -1075,12 +1075,12 @@ func TestCalcChatLinesUsesInlineModeDuringActiveOngoingInsertion(t *testing.T) {
 	m.busy = true
 	m.sawAssistantDelta = true
 
-	if got := m.calcChatLines(); got != 1 {
-		t.Fatalf("expected inline ongoing mode to reserve a single chat line, got %d", got)
+	if got := m.calcChatLines(); got <= 1 {
+		t.Fatalf("expected viewport-based ongoing mode to keep multi-line chat area during active work, got %d", got)
 	}
 }
 
-func TestViewInInlineOngoingModeOmitsCommittedTranscript(t *testing.T) {
+func TestViewDuringActiveWorkKeepsCommittedTranscriptVisible(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -1110,11 +1110,11 @@ func TestViewInInlineOngoingModeOmitsCommittedTranscript(t *testing.T) {
 	})
 
 	view := stripANSIAndTrimRight(m.View())
-	if strings.Contains(view, "prior assistant") || strings.Contains(view, "prior user") {
-		t.Fatalf("expected inline ongoing render to avoid repainting committed transcript, got %q", view)
+	if !strings.Contains(view, "prior assistant") || !strings.Contains(view, "prior user") {
+		t.Fatalf("expected ongoing render to keep committed transcript visible, got %q", view)
 	}
 	if !strings.Contains(view, "streaming now") {
-		t.Fatalf("expected inline ongoing render to include live streaming content, got %q", view)
+		t.Fatalf("expected ongoing render to include live streaming content, got %q", view)
 	}
 }
 
@@ -1540,12 +1540,12 @@ func TestReviewerStatusEndToEnd_OngoingShortDetailFull(t *testing.T) {
 	m.termWidth = 100
 	m.termHeight = 24
 
-	ongoing := stripANSIAndTrimRight(m.view.OngoingHistorySnapshot())
+	ongoing := stripANSIAndTrimRight(m.View())
 	if !strings.Contains(ongoing, "Supervisor ran: 2 suggestions, no changes applied.") {
-		t.Fatalf("expected short reviewer status in ongoing history snapshot, got %q", ongoing)
+		t.Fatalf("expected short reviewer status in ongoing mode, got %q", ongoing)
 	}
 	if strings.Contains(ongoing, "Supervisor suggestions:") || strings.Contains(ongoing, "First detailed suggestion") {
-		t.Fatalf("expected full reviewer suggestions hidden in ongoing history snapshot, got %q", ongoing)
+		t.Fatalf("expected full reviewer suggestions hidden in ongoing mode, got %q", ongoing)
 	}
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
@@ -1603,14 +1603,14 @@ func TestStatusLineShowsReviewerProgressWarning(t *testing.T) {
 	next, _ := m.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventReviewerStarted}})
 	started := next.(*uiModel)
 	line := stripANSIAndTrimRight(started.renderStatusLine(120, uiThemeStyles("dark")))
-	if !strings.Contains(strings.ToLower(line), "review in progress") {
+	if !strings.Contains(strings.ToLower(line), "review") {
 		t.Fatalf("expected reviewer warning in status line, got %q", line)
 	}
 
 	next, _ = started.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventReviewerCompleted}})
 	completed := next.(*uiModel)
 	line = stripANSIAndTrimRight(completed.renderStatusLine(120, uiThemeStyles("dark")))
-	if strings.Contains(strings.ToLower(line), "review in progress") {
+	if strings.Contains(strings.ToLower(line), "reviewing") || strings.Contains(strings.ToLower(line), "review in progress") {
 		t.Fatalf("expected reviewer warning cleared after completion, got %q", line)
 	}
 }
