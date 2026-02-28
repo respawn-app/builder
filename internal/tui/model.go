@@ -253,32 +253,7 @@ func (m Model) OngoingScroll() int {
 }
 
 func (m Model) OngoingSnapshot() string {
-	return m.renderFlatOngoingTranscript(true)
-}
-
-func (m Model) OngoingHistorySnapshot() string {
-	return m.renderFlatOngoingTranscript(false)
-}
-
-func (m Model) OngoingLiveSnapshot() string {
-	blocks := make([][]string, 0, 2)
-	if strings.TrimSpace(m.ongoing) != "" {
-		blocks = append(blocks, m.flattenEntryPlain("assistant", m.ongoing))
-	}
-	if strings.TrimSpace(m.ongoingError) != "" {
-		blocks = append(blocks, m.flattenEntry("error", m.ongoingError))
-	}
-	if len(blocks) == 0 {
-		return ""
-	}
-	lines := make([]string, 0, len(blocks)*2)
-	for idx, block := range blocks {
-		if idx > 0 {
-			lines = append(lines, detailDivider())
-		}
-		lines = append(lines, block...)
-	}
-	return strings.Join(lines, "\n")
+	return m.renderFlatOngoingTranscript()
 }
 
 func FormatOngoingError(err error) string {
@@ -362,7 +337,7 @@ func (m Model) renderOngoing() string {
 }
 
 func (m Model) ongoingLines() []string {
-	return splitLines(m.renderFlatOngoingTranscript(true))
+	return splitLines(m.renderFlatOngoingTranscript())
 }
 
 func (m Model) renderDetailSnapshot() string {
@@ -532,7 +507,7 @@ func (m Model) trailingThinkingBlockBeforeEntry(entries []TranscriptEntry, idx i
 	return m.flattenEntry("reasoning", combined), true
 }
 
-func (m Model) renderFlatOngoingTranscript(includeOngoing bool) string {
+func (m Model) renderFlatOngoingTranscript() string {
 	type ongoingBlock struct {
 		role  string
 		lines []string
@@ -602,7 +577,7 @@ func (m Model) renderFlatOngoingTranscript(includeOngoing bool) string {
 			})
 		}
 	}
-	if includeOngoing && m.ongoing != "" {
+	if m.ongoing != "" {
 		blocks = append(blocks, ongoingBlock{
 			role:  "assistant",
 			lines: m.flattenEntryPlain("assistant", m.ongoing),

@@ -15,11 +15,11 @@ func TestAltScreenPolicyHelpers(t *testing.T) {
 	if shouldStartMainUIInAltScreen(config.TUIAlternateScreenAuto) {
 		t.Fatal("expected auto policy to start main UI in normal screen")
 	}
-	if !shouldUseDetailAltScreen(config.TUIAlternateScreenAuto) {
-		t.Fatal("expected auto policy to use detail alt-screen")
+	if shouldUseDetailAltScreen(config.TUIAlternateScreenAuto) {
+		t.Fatal("expected auto policy to keep detail in normal screen")
 	}
-	if !shouldUseDetailAltScreen(config.TUIAlternateScreenNever) {
-		t.Fatal("expected detail mode to use alt-screen under never policy")
+	if shouldUseDetailAltScreen(config.TUIAlternateScreenNever) {
+		t.Fatal("expected never policy to keep detail in normal screen")
 	}
 	if !shouldUseSessionPickerAltScreen(config.TUIAlternateScreenAuto) {
 		t.Fatal("expected auto policy to use picker alt-screen")
@@ -29,7 +29,7 @@ func TestAltScreenPolicyHelpers(t *testing.T) {
 	}
 }
 
-func TestToggleTranscriptModeAutoTracksAltScreenState(t *testing.T) {
+func TestToggleTranscriptModeAutoDoesNotToggleAltScreen(t *testing.T) {
 	m := NewUIModel(
 		nil,
 		make(chan runtime.Event),
@@ -46,28 +46,28 @@ func TestToggleTranscriptModeAutoTracksAltScreenState(t *testing.T) {
 
 	cmd := m.toggleTranscriptMode()
 	if cmd == nil {
-		t.Fatal("expected alt-screen enter command when toggling into detail")
+		t.Fatal("expected clear-screen command when toggling into detail")
 	}
 	if m.view.Mode() != tui.ModeDetail {
 		t.Fatalf("mode=%q want detail", m.view.Mode())
 	}
-	if !m.altScreenActive {
-		t.Fatal("expected alt-screen active in detail mode")
+	if m.altScreenActive {
+		t.Fatal("expected alt-screen unchanged when entering detail")
 	}
 
 	cmd = m.toggleTranscriptMode()
 	if cmd == nil {
-		t.Fatal("expected alt-screen exit command when toggling out of detail")
+		t.Fatal("expected clear-screen command when toggling out of detail")
 	}
 	if m.view.Mode() != tui.ModeOngoing {
 		t.Fatalf("mode=%q want ongoing", m.view.Mode())
 	}
 	if m.altScreenActive {
-		t.Fatal("expected alt-screen inactive after leaving detail")
+		t.Fatal("expected alt-screen unchanged after leaving detail")
 	}
 }
 
-func TestToggleTranscriptModeNeverEntersAltScreenForDetail(t *testing.T) {
+func TestToggleTranscriptModeNeverDoesNotEnterAltScreen(t *testing.T) {
 	m := NewUIModel(
 		nil,
 		make(chan runtime.Event),
@@ -77,17 +77,17 @@ func TestToggleTranscriptModeNeverEntersAltScreenForDetail(t *testing.T) {
 
 	cmd := m.toggleTranscriptMode()
 	if cmd == nil {
-		t.Fatal("expected alt-screen command for detail mode")
+		t.Fatal("expected clear-screen command for detail mode")
 	}
 	if m.view.Mode() != tui.ModeDetail {
 		t.Fatalf("mode=%q want detail", m.view.Mode())
 	}
-	if !m.altScreenActive {
-		t.Fatal("expected alt-screen to be active in detail mode")
+	if m.altScreenActive {
+		t.Fatal("expected alt-screen inactive in detail mode")
 	}
 }
 
-func TestToggleTranscriptModeAlwaysKeepsAltScreenButTogglesAlternateScroll(t *testing.T) {
+func TestToggleTranscriptModeAlwaysKeepsAltScreenWithoutDetailTransition(t *testing.T) {
 	m := NewUIModel(
 		nil,
 		make(chan runtime.Event),
@@ -100,7 +100,7 @@ func TestToggleTranscriptModeAlwaysKeepsAltScreenButTogglesAlternateScroll(t *te
 
 	cmd := m.toggleTranscriptMode()
 	if cmd == nil {
-		t.Fatal("expected alternate-scroll enable command when entering detail")
+		t.Fatal("expected clear-screen command when entering detail")
 	}
 	if m.view.Mode() != tui.ModeDetail {
 		t.Fatalf("mode=%q want detail", m.view.Mode())
@@ -111,7 +111,7 @@ func TestToggleTranscriptModeAlwaysKeepsAltScreenButTogglesAlternateScroll(t *te
 
 	cmd = m.toggleTranscriptMode()
 	if cmd == nil {
-		t.Fatal("expected alternate-scroll disable command when leaving detail")
+		t.Fatal("expected clear-screen command when leaving detail")
 	}
 	if m.view.Mode() != tui.ModeOngoing {
 		t.Fatalf("mode=%q want ongoing", m.view.Mode())

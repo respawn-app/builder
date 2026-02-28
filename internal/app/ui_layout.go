@@ -45,17 +45,6 @@ func (l uiViewLayout) render() string {
 		pickerLines = nil
 	}
 	statusLine := l.renderStatusLine(width, style)
-	if l.useInlineOngoingPanel() {
-		chatPanel := l.renderInlineOngoingPanel(width, style)
-		allLines := make([]string, 0, len(chatPanel)+len(pickerLines)+len(queuedLines)+len(inputLines)+1)
-		allLines = append(allLines, chatPanel...)
-		allLines = append(allLines, pickerLines...)
-		allLines = append(allLines, queuedLines...)
-		allLines = append(allLines, inputLines...)
-		allLines = append(allLines, statusLine)
-		rendered := strings.Join(allLines, "\n")
-		return rendered + ansiHideCursor
-	}
 	statusLines := 1
 	chatLines := height - len(inputLines) - len(queuedLines) - len(pickerLines) - statusLines
 	if chatLines < 1 {
@@ -257,9 +246,8 @@ func renderReviewerStatus() string {
 		Light: lipgloss.CompleteColor{ANSI: "2", ANSI256: "34", TrueColor: "#22863A"},
 		Dark:  lipgloss.CompleteColor{ANSI: "2", ANSI256: "114", TrueColor: "#98C379"},
 	}
-	keyword := lipgloss.NewStyle().Foreground(green).Bold(true).Render("review")
-	suffix := lipgloss.NewStyle().Foreground(green).Render("in progress")
-	return "● " + keyword + " " + suffix
+	keyword := lipgloss.NewStyle().Foreground(green).Bold(true).Render("reviewing")
+	return "● " + keyword
 }
 
 func (l uiViewLayout) renderChatPanel(width, height int, style uiStyles) []string {
@@ -303,20 +291,6 @@ func (l uiViewLayout) renderChatContentLines(rawLines []string, width int, style
 		out = append(out, style.chat.Render(padANSIRight(line, contentWidth)))
 	}
 	return out
-}
-
-func (l uiViewLayout) ongoingScrollbackSnapshot() (canonical string, printable string) {
-	m := l.model
-	width := l.effectiveWidth()
-	if width < 1 {
-		width = 1
-	}
-	style := uiThemeStyles(m.theme)
-	rawLines := splitPlainLines(m.view.OngoingHistorySnapshot())
-	canonical = strings.Join(rawLines, "\n")
-	rendered := l.renderChatContentLines(rawLines, width, style)
-	printable = strings.Join(rendered, "\n")
-	return canonical, printable
 }
 
 func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
@@ -564,9 +538,6 @@ func (l uiViewLayout) effectiveHeight() int {
 
 func (l uiViewLayout) calcChatLines() int {
 	m := l.model
-	if l.useInlineOngoingPanel() {
-		return 1
-	}
 	height := l.effectiveHeight()
 	if m.view.Mode() == tui.ModeDetail {
 		chat := height - 1 // keep status line
@@ -622,32 +593,6 @@ func (l uiViewLayout) calcChatLines() int {
 	return chat
 }
 
-func (l uiViewLayout) useInlineOngoingPanel() bool {
-	m := l.model
-	if m.view.Mode() != tui.ModeOngoing {
-		return false
-	}
-	if m.altScreenActive || !m.canUseHistoryInsertion() {
-		return false
-	}
-	if m.engine == nil {
-		return false
-	}
-	return true
-}
-
-func (l uiViewLayout) renderInlineOngoingPanel(width int, style uiStyles) []string {
-	if width < 1 {
-		return nil
-	}
-	raw := strings.TrimRight(l.model.view.OngoingLiveSnapshot(), "\n")
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	rawLines := splitPlainLines(raw)
-	return l.renderChatContentLines(rawLines, width, style)
-}
-
 func (l uiViewLayout) syncViewport() {
 	m := l.model
 	m.forwardToView(tui.SetViewportSizeMsg{
@@ -699,10 +644,6 @@ func (m *uiModel) syncViewport() {
 
 func (m *uiModel) shouldRenderSoftCursor() bool {
 	return m.layout().shouldRenderSoftCursor()
-}
-
-func (m *uiModel) useInlineOngoingPanel() bool {
-	return m.layout().useInlineOngoingPanel()
 }
 
 func inputCursorDisplayPosition(prefix, text string, cursorIndex, width int) (line, col int) {

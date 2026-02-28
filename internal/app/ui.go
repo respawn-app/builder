@@ -213,11 +213,7 @@ type uiModel struct {
 	transientStatus      string
 	transientStatusToken uint64
 
-	transcriptEntries           []tui.TranscriptEntry
-	lastInsertedOngoingSnapshot string
-	pendingOngoingSnapshot      string
-	pendingOngoingPrintable     string
-	historyBackfillPending      bool
+	transcriptEntries []tui.TranscriptEntry
 
 	lastEscAt time.Time
 
@@ -272,7 +268,6 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 		m.refreshRollbackCandidates()
 	}
 	m.syncViewport()
-	m.resetHistoryInsertionBaseline()
 	return m
 }
 
@@ -282,7 +277,6 @@ func (m *uiModel) Init() tea.Cmd {
 		waitRuntimeEvent(m.runtimeEvents),
 		waitAskEvent(m.askEvents),
 		tea.SetWindowTitle(m.windowTitle()),
-		m.maybeBackfillHistoryCmd(),
 	}
 	if strings.TrimSpace(m.startupSubmit) != "" {
 		cmds = append(cmds, m.inputController().startSubmission(m.startupSubmit))
@@ -307,38 +301,38 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.termWidth = msg.Width
 		m.termHeight = msg.Height
 		m.syncViewport()
-		return m, m.maybeBackfillHistoryCmd()
+		return m, nil
 	case runtimeEventMsg:
 		historyCmd := m.runtimeAdapter().handleRuntimeEvent(msg.event)
 		m.syncViewport()
-		return m, tea.Batch(waitRuntimeEvent(m.runtimeEvents), historyCmd, m.maybeBackfillHistoryCmd())
+		return m, tea.Batch(waitRuntimeEvent(m.runtimeEvents), historyCmd)
 	case askEventMsg:
 		m.askController().acceptEvent(msg.event)
 		m.syncViewport()
-		return m, tea.Batch(waitAskEvent(m.askEvents), m.maybeBackfillHistoryCmd())
+		return m, waitAskEvent(m.askEvents)
 	case clearTransientStatusMsg:
 		if msg.token == m.transientStatusToken {
 			m.transientStatus = ""
 		}
 		m.syncViewport()
-		return m, m.maybeBackfillHistoryCmd()
+		return m, nil
 	case submitDoneMsg:
 		next, cmd := m.inputController().handleSubmitDone(msg)
 		next.(*uiModel).syncViewport()
-		return next, tea.Batch(cmd, next.(*uiModel).maybeBackfillHistoryCmd())
+		return next, cmd
 	case compactDoneMsg:
 		next, cmd := m.inputController().handleCompactDone(msg)
 		next.(*uiModel).syncViewport()
-		return next, tea.Batch(cmd, next.(*uiModel).maybeBackfillHistoryCmd())
+		return next, cmd
 	case spinnerTickMsg:
 		next, cmd := m.inputController().handleSpinnerTick()
 		next.(*uiModel).syncViewport()
-		return next, tea.Batch(cmd, next.(*uiModel).maybeBackfillHistoryCmd())
+		return next, cmd
 	}
 
 	m.forwardToView(msg)
 	m.syncViewport()
-	return m, m.maybeBackfillHistoryCmd()
+	return m, nil
 }
 
 func (m *uiModel) forwardToView(msg tea.Msg) {
