@@ -190,10 +190,16 @@
 - Step-end markers appear in detail only.
 - Switching detail -> ongoing restores prior ongoing scroll position.
 - Mode-toggle events are UI-ephemeral and not persisted.
-- Ongoing mode uses in-app viewport rendering.
+- Ongoing mode in `alt` scroll mode uses in-app viewport rendering.
 - Detail remains fullscreen pager-style (input/queued/picker hidden) and uses the same normal-buffer rendering architecture as ongoing.
 - Detail does not enter/exit alt-screen.
-- App-level mouse wheel interception is enabled; wheel scroll drives the active transcript viewport in main chat.
+- Transcript scroll behavior is configurable by `tui_scroll_mode` (`alt|native`, default `alt`).
+- Terminology: `tui_scroll_mode` is a Builder config mode; terminal alt-screen is `?1049`; terminal alternate-scroll is `?1007`.
+- Detail-mode transitions do not use terminal alternate-scroll (`?1007`) or terminal alt-screen (`?1049`).
+- `tui_scroll_mode=native` forces main UI startup to normal buffer even when `tui_alternate_screen=always`, because native transcript replay is emitted via unmanaged lines that must remain visible in terminal scrollback.
+- `alt` mode keeps in-app viewport scrolling behavior.
+- `native` mode prioritizes terminal-native ongoing scrollback/selection by replaying committed transcript history into terminal scrollback and appending only new committed transcript deltas.
+- `native` mode keeps mouse capture disabled by default to preserve native text selection behavior.
 - No timestamps are shown in UI.
 - Streaming paint cadence is 16ms with token coalescing per flush tick.
 - Main status line is compact and fixed: model, busy/idle, queue size.

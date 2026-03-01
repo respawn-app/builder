@@ -29,7 +29,7 @@ func TestAltScreenPolicyHelpers(t *testing.T) {
 	}
 }
 
-func TestToggleTranscriptModeAutoDoesNotToggleAltScreen(t *testing.T) {
+func TestToggleTranscriptModeAutoDoesNotUseDetailAltScreen(t *testing.T) {
 	m := NewUIModel(
 		nil,
 		make(chan runtime.Event),
@@ -52,7 +52,7 @@ func TestToggleTranscriptModeAutoDoesNotToggleAltScreen(t *testing.T) {
 		t.Fatalf("mode=%q want detail", m.view.Mode())
 	}
 	if m.altScreenActive {
-		t.Fatal("expected alt-screen unchanged when entering detail")
+		t.Fatal("expected alt-screen inactive when entering detail")
 	}
 
 	cmd = m.toggleTranscriptMode()
@@ -63,7 +63,7 @@ func TestToggleTranscriptModeAutoDoesNotToggleAltScreen(t *testing.T) {
 		t.Fatalf("mode=%q want ongoing", m.view.Mode())
 	}
 	if m.altScreenActive {
-		t.Fatal("expected alt-screen unchanged after leaving detail")
+		t.Fatal("expected alt-screen to remain inactive after leaving detail in auto policy")
 	}
 }
 

@@ -72,12 +72,7 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
 - Before handing off to the user after code changes, rebuild the binary to `./bin/builder` and make sure tests are written and green. Don't ask for confirmation to write tests and run checks.
 - `docs/decisions.md` is the source of truth for locked product and architecture decisions.
 - Keep this AGENTS.md file up-to-date and comprehensive. Avoid adding info that can become outdated, otherwise keep this as project guidelines, rules, and learnings for future team members. Persist info that should be preserved here.
-- Do not enable terminal mouse capture modes (`tea.WithMouse*`, `EnableMouse*`) by default, because they break native text selection. If mouse behavior is required, preserve selection-first behavior and prefer non-capturing scroll paths.
-- For terminal mode toggles (for example alternate-scroll `CSI ?1007 h/l`), do not rely on `tea.Printf`; emit raw ANSI control sequences via direct terminal writes (stdout) and use ordered command sequencing (`tea.Sequence`) for enter/exit transitions.
-
-## Scroll Architecture Constraints (locked)
-
-- No app-level wheel handling in transcript models (`tea.MouseMsg` wheel branches). Ongoing keeps terminal-native scroll/selection.
-- Detail is fullscreen pager-style layout only: hide input/queued/picker and keep the same normal-buffer rendering architecture as ongoing mode.
-- Structural transitions must hard-refresh and keep sizing/state coherent: clear on mode/rollback/session teleports, detail viewport uses full height minus status, and returning from detail after transcript growth snaps ongoing to latest.
-- Ongoing mode uses in-app viewport rendering (same model style as detail paging) instead of append-only history insertion.
+- Terminology lock:
+  - `tui_scroll_mode` (`alt|native`) is a Builder config mode, not a terminal protocol toggle.
+  - Terminal alt-screen is `?1049` and is not used for detail mode transitions.
+  - Terminal alternate-scroll `?1007` must not be used for detail/ongoing scroll behavior (it is too slow in target terminals).

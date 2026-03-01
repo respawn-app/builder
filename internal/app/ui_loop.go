@@ -22,6 +22,7 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 		WithUIModelName(active.Model),
 		WithUITheme(active.Theme),
 		WithUIAlternateScreenPolicy(active.TUIAlternateScreen),
+		WithUIScrollMode(active.TUIScrollMode),
 		WithUICommandRegistry(commandRegistry),
 		WithUIStartupSubmit(initialPrompt),
 		WithUISessionName(sessionName),
@@ -42,14 +43,12 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 
 func mainUIProgramOptions(active config.Settings) []tea.ProgramOption {
 	options := []tea.ProgramOption{}
-	if shouldStartMainUIInAltScreen(active.TUIAlternateScreen) {
+	if shouldStartMainUIInAltScreen(active.TUIAlternateScreen) && active.TUIScrollMode != config.TUIScrollModeNative {
 		options = append(options, tea.WithAltScreen())
 	}
-	// Mouse cell-motion capture is intentionally enabled so wheel input is
-	// delivered as tea.MouseMsg and drives transcript scrolling.
-	// Bubble Tea v1.3.10 only offers cell-motion and all-motion modes;
-	// cell-motion is the less noisy option.
-	options = append(options, tea.WithMouseCellMotion())
+	if active.TUIScrollMode == config.TUIScrollModeAlt {
+		options = append(options, tea.WithMouseCellMotion())
+	}
 	return options
 }
 
