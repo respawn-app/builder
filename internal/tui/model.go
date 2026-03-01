@@ -223,6 +223,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.selectedTranscriptEntry = msg.EntryIndex
 		m.selectedTranscriptActive = msg.Active
 	case FocusTranscriptEntryMsg:
+		if m.mode != ModeOngoing {
+			break
+		}
 		if start, end, ok := m.ongoingLineRangeForEntry(msg.EntryIndex); ok {
 			target := start
 			if msg.Center {

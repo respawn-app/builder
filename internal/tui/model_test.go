@@ -376,6 +376,48 @@ func TestFocusTranscriptEntryCentersOngoingViewport(t *testing.T) {
 	}
 }
 
+func TestFocusTranscriptEntryClampsNearTopAndBottom(t *testing.T) {
+	m := NewModel(WithPreviewLines(6))
+	for i := 0; i < 40; i++ {
+		role := "assistant"
+		if i%2 == 0 {
+			role = "user"
+		}
+		m = updateModel(t, m, AppendTranscriptMsg{Role: role, Text: fmt.Sprintf("line %d", i)})
+	}
+
+	topEntry := 0
+	m = updateModel(t, m, FocusTranscriptEntryMsg{EntryIndex: topEntry, Center: true})
+	if got := m.OngoingScroll(); got != 0 {
+		t.Fatalf("expected top entry focus to clamp to scroll 0, got %d", got)
+	}
+	if start, end, ok := m.ongoingLineRangeForEntry(topEntry); !ok || end < m.OngoingScroll() || start >= m.OngoingScroll()+m.viewportLines {
+		t.Fatalf("expected top entry visible after focus, range=(%d,%d) scroll=%d", start, end, m.OngoingScroll())
+	}
+
+	bottomEntry := len(m.transcript) - 1
+	m = updateModel(t, m, FocusTranscriptEntryMsg{EntryIndex: bottomEntry, Center: true})
+	if got, want := m.OngoingScroll(), m.maxOngoingScroll(); got != want {
+		t.Fatalf("expected bottom entry focus to clamp to max scroll %d, got %d", want, got)
+	}
+	if start, end, ok := m.ongoingLineRangeForEntry(bottomEntry); !ok || end < m.OngoingScroll() || start >= m.OngoingScroll()+m.viewportLines {
+		t.Fatalf("expected bottom entry visible after focus, range=(%d,%d) scroll=%d", start, end, m.OngoingScroll())
+	}
+}
+
+func TestFocusTranscriptEntryIgnoredInDetailMode(t *testing.T) {
+	m := NewModel(WithPreviewLines(4))
+	for i := 0; i < 20; i++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("line %d", i)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+	start := m.detailScroll
+	m = updateModel(t, m, FocusTranscriptEntryMsg{EntryIndex: 0, Center: true})
+	if m.detailScroll != start {
+		t.Fatalf("expected detail scroll unchanged when focusing ongoing entry, got %d want %d", m.detailScroll, start)
+	}
+}
+
 func TestDetailUsesRequestedSymbolsAndDividers(t *testing.T) {
 	m := NewModel()
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "hello"})
