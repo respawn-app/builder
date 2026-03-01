@@ -151,7 +151,11 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	default:
 		if m.askFreeform && msg.Type == tea.KeyRunes {
-			m.askInput += string(msg.Runes)
+			filtered, _ := stripMouseSGRRunes(msg.Runes)
+			if len(filtered) == 0 {
+				return m, nil
+			}
+			m.askInput += string(filtered)
 			return m, nil
 		}
 		return m, nil
