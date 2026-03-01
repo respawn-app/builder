@@ -1696,6 +1696,25 @@ func TestMouseSGRReportRunesDoNotPolluteInput(t *testing.T) {
 	}
 }
 
+func TestMouseSGRSplitEscAndRunesDoNotArmRollback(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := next.(*uiModel)
+	if updated.lastEscAt.IsZero() {
+		t.Fatal("expected esc to arm rollback window before potential sgr continuation")
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[<64;63;24M")})
+	updated = next.(*uiModel)
+	if !updated.lastEscAt.IsZero() {
+		t.Fatal("expected split mouse sgr continuation to clear rollback esc arming")
+	}
+	if updated.input != "" {
+		t.Fatalf("expected split sgr payload ignored, got %q", updated.input)
+	}
+}
+
 func TestStatusContextZoneColorBoundaries(t *testing.T) {
 	assertLightColor := func(percent int, want string) {
 		t.Helper()

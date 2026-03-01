@@ -47,6 +47,8 @@ func mainUIProgramOptions(active config.Settings) []tea.ProgramOption {
 	}
 	// Mouse cell-motion capture is intentionally enabled so wheel input is
 	// delivered as tea.MouseMsg and drives transcript scrolling.
+	// Bubble Tea v1.3.10 only offers cell-motion and all-motion modes;
+	// cell-motion is the less noisy option.
 	options = append(options, tea.WithMouseCellMotion())
 	return options
 }
