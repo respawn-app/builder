@@ -598,6 +598,50 @@ func TestRollbackTransitionsDoNotClearScreenWhenNotInAltScreen(t *testing.T) {
 	}
 }
 
+func TestDetailModeShowsExpandedTranscriptSignalsComparedToOngoing(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIInitialTranscript([]UITranscriptEntry{
+			{Role: "user", Text: "task"},
+			{Role: "tool_call", Text: "pwd"},
+			{Role: "tool_result_ok", Text: "/tmp"},
+			{Role: "reviewer_status", Text: "Supervisor suggestions:\n1. tighten assertions"},
+			{Role: "compaction_summary", Text: "compaction summary body"},
+			{Role: "developer", Text: "Supervisor agent gave you suggestions:\n1. tighten assertions"},
+			{Role: "assistant", Text: "done"},
+		}),
+	).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 18
+	m.syncViewport()
+
+	ongoing := ansi.Strip(m.View())
+	if strings.Contains(ongoing, "compaction summary body") {
+		t.Fatalf("expected compaction summary hidden in ongoing, got %q", ongoing)
+	}
+	if strings.Contains(ongoing, "Supervisor agent gave you suggestions") {
+		t.Fatalf("expected developer control text hidden in ongoing, got %q", ongoing)
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	detail := next.(*uiModel)
+	detailView := ansi.Strip(detail.View())
+	if !strings.Contains(detailView, "/tmp") {
+		t.Fatalf("expected tool result visible in detail, got %q", detailView)
+	}
+	if !strings.Contains(detailView, "Supervisor suggestions:") {
+		t.Fatalf("expected reviewer status visible in detail, got %q", detailView)
+	}
+	if !strings.Contains(detailView, "compaction summary body") {
+		t.Fatalf("expected compaction summary visible in detail, got %q", detailView)
+	}
+	if !strings.Contains(detailView, "Supervisor agent gave you suggestions") {
+		t.Fatalf("expected developer text visible in detail, got %q", detailView)
+	}
+}
+
 func absInt(v int) int {
 	if v < 0 {
 		return -v
