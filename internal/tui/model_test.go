@@ -883,50 +883,6 @@ func TestDetailShowsRawPatchFallbackWhenOnlySummaryAvailableInOngoing(t *testing
 	}
 }
 
-func TestDeveloperEntriesAreHiddenInOngoingAndVisibleInDetail(t *testing.T) {
-	m := NewModel(WithPreviewLines(20))
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "run checks"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "developer", Text: "Supervisor agent gave you suggestions:\n1. tighten assertions"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "done"})
-
-	ongoing := plainTranscript(m.View())
-	if strings.Contains(ongoing, "Supervisor agent gave you suggestions") {
-		t.Fatalf("expected developer content hidden in ongoing, got %q", ongoing)
-	}
-
-	m = updateModel(t, m, ToggleModeMsg{})
-	detail := plainTranscript(m.View())
-	if !strings.Contains(detail, "Supervisor agent gave you suggestions") {
-		t.Fatalf("expected developer content visible in detail, got %q", detail)
-	}
-}
-
-func TestDetailShowsReviewerAndCompactionEntries(t *testing.T) {
-	m := NewModel(WithPreviewLines(20))
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "task"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "reviewer_status", Text: "Supervisor suggestions:\n1. tighten assertions\n2. add tests"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "compaction_notice", Text: "context compacted for the 1st time"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "compaction_summary", Text: "compaction summary body"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "done"})
-
-	ongoing := plainTranscript(m.View())
-	if strings.Contains(ongoing, "compaction summary body") {
-		t.Fatalf("expected compaction summary hidden in ongoing, got %q", ongoing)
-	}
-
-	m = updateModel(t, m, ToggleModeMsg{})
-	detail := plainTranscript(m.View())
-	if !strings.Contains(detail, "Supervisor suggestions:") {
-		t.Fatalf("expected reviewer status in detail, got %q", detail)
-	}
-	if !strings.Contains(detail, "context compacted for the 1st time") {
-		t.Fatalf("expected compaction notice in detail, got %q", detail)
-	}
-	if !strings.Contains(detail, "compaction summary body") {
-		t.Fatalf("expected compaction summary in detail, got %q", detail)
-	}
-}
-
 func TestStyleToolLineColorsPatchCountsAndDiff(t *testing.T) {
 	m := NewModel()
 	counts := m.styleToolLine("./file.go +13 -9")

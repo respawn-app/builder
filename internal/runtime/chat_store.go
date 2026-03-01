@@ -271,17 +271,13 @@ func (s *chatStore) snapshot() ChatSnapshot {
 }
 
 func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
-	content := strings.TrimSpace(msg.Content)
-	if content == "" {
+	if msg.MessageType != llm.MessageTypeErrorFeedback {
 		return ChatEntry{}, false
 	}
-	if msg.MessageType == llm.MessageTypeErrorFeedback {
-		return ChatEntry{Role: "error", Text: msg.Content}, true
+	if strings.TrimSpace(msg.Content) == "" {
+		return ChatEntry{}, false
 	}
-	if strings.HasPrefix(content, "Supervisor agent gave you suggestions:") {
-		return ChatEntry{Role: "developer", Text: msg.Content}, true
-	}
-	return ChatEntry{}, false
+	return ChatEntry{Role: "error", Text: msg.Content}, true
 }
 
 func (s *chatStore) formatToolCall(call llm.ToolCall) ChatEntry {
