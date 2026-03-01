@@ -296,6 +296,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return next, cmd
 	}
 	if _, isKey := msg.(tea.KeyMsg); isKey {
+		m.lastEscAt = time.Time{}
 		m.syncViewport()
 		return m, nil
 	}
