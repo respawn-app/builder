@@ -3,6 +3,7 @@ package app
 import (
 	"builder/internal/app/commands"
 	"builder/internal/config"
+	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -12,6 +13,8 @@ func runUILoop(wiring *runtimeWiring, active config.Settings, logger *runLogger,
 }
 
 func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, logger *runLogger, commandRegistry *commands.Registry, initialPrompt string, sessionName string) (tea.Model, error) {
+	_, _ = os.Stdout.WriteString("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l")
+
 	options := []tea.ProgramOption{}
 	if shouldStartMainUIInAltScreen(active.TUIAlternateScreen) {
 		options = append(options, tea.WithAltScreen())
