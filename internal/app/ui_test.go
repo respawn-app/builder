@@ -1682,6 +1682,18 @@ func TestMouseSGRReportRunesDoNotPolluteInput(t *testing.T) {
 	if updated.input != "draftx" {
 		t.Fatalf("expected normal runes to still insert, got %q", updated.input)
 	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[<64;63;24M")})
+	updated = next.(*uiModel)
+	if updated.input != "draftx" {
+		t.Fatalf("expected up-scroll mouse sgr ignored, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[<65;69;20M")})
+	updated = next.(*uiModel)
+	if updated.input != "draftx" {
+		t.Fatalf("expected down-scroll mouse sgr ignored, got %q", updated.input)
+	}
 }
 
 func TestStatusContextZoneColorBoundaries(t *testing.T) {

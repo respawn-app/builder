@@ -18,6 +18,37 @@ func stripMouseSGRRunes(input []rune) ([]rune, bool) {
 	return output, removedAny
 }
 
+func stripMouseSGRRunesWithCursor(input []rune, cursor int) ([]rune, int, bool) {
+	if len(input) == 0 {
+		return input, clampCursor(cursor, 0), false
+	}
+	clampedCursor := clampCursor(cursor, len(input))
+	output := make([]rune, 0, len(input))
+	removedAny := false
+	adjustedCursor := clampedCursor
+	for index := 0; index < len(input); {
+		if next, ok := consumeMouseSGRRunes(input, index); ok {
+			removedAny = true
+			if next <= clampedCursor {
+				adjustedCursor -= next - index
+			} else if index < clampedCursor {
+				adjustedCursor = index
+			}
+			index = next
+			continue
+		}
+		output = append(output, input[index])
+		index++
+	}
+	if adjustedCursor < 0 {
+		adjustedCursor = 0
+	}
+	if adjustedCursor > len(output) {
+		adjustedCursor = len(output)
+	}
+	return output, adjustedCursor, removedAny
+}
+
 func consumeMouseSGRRunes(input []rune, start int) (int, bool) {
 	if start < 0 || start >= len(input) {
 		return 0, false
