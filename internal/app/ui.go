@@ -295,6 +295,10 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		next.(*uiModel).syncViewport()
 		return next, cmd
 	}
+	if _, isKey := msg.(tea.KeyMsg); isKey {
+		m.syncViewport()
+		return m, nil
+	}
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:

@@ -3,7 +3,6 @@ package app
 import (
 	"builder/internal/app/commands"
 	"builder/internal/config"
-	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -13,13 +12,7 @@ func runUILoop(wiring *runtimeWiring, active config.Settings, logger *runLogger,
 }
 
 func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, logger *runLogger, commandRegistry *commands.Registry, initialPrompt string, sessionName string) (tea.Model, error) {
-	_, _ = os.Stdout.WriteString("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l")
-
-	options := []tea.ProgramOption{}
-	if shouldStartMainUIInAltScreen(active.TUIAlternateScreen) {
-		options = append(options, tea.WithAltScreen())
-	}
-	options = append(options, tea.WithMouseCellMotion())
+	options := mainUIProgramOptions(active)
 
 	program := tea.NewProgram(NewUIModel(
 		wiring.engine,
@@ -45,6 +38,17 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 	}
 	logger.Logf("app.exit ok")
 	return finalModel, nil
+}
+
+func mainUIProgramOptions(active config.Settings) []tea.ProgramOption {
+	options := []tea.ProgramOption{}
+	if shouldStartMainUIInAltScreen(active.TUIAlternateScreen) {
+		options = append(options, tea.WithAltScreen())
+	}
+	// Mouse cell-motion capture is intentionally enabled so wheel input is
+	// delivered as tea.MouseMsg and drives transcript scrolling.
+	options = append(options, tea.WithMouseCellMotion())
+	return options
 }
 
 func extractUITransition(model tea.Model) UITransition {
