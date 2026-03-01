@@ -19,6 +19,7 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 	if shouldStartMainUIInAltScreen(active.TUIAlternateScreen) {
 		options = append(options, tea.WithAltScreen())
 	}
+	options = append(options, tea.WithMouseCellMotion())
 
 	program := tea.NewProgram(NewUIModel(
 		wiring.engine,
