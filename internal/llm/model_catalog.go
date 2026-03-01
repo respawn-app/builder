@@ -20,4 +20,3 @@ func LookupModelMetadata(model string) (ModelMetadata, bool) {
 	meta, ok := defaultModelMetadata[key]
 	return meta, ok
 }
-

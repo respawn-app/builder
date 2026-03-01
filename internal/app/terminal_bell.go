@@ -12,6 +12,7 @@ import (
 
 const terminalBell = "\a"
 const osc9Prefix = "\x1b]9;"
+const terminalNotificationPreviewLimit = 80
 
 const (
 	notificationMethodAuto = "auto"
@@ -94,10 +95,29 @@ func supportsOSC9(lookup func(string) (string, bool)) bool {
 	return false
 }
 
-func sanitizeOSC9Message(message string) string {
+func sanitizeTerminalNotificationMessage(message string) string {
 	message = strings.ReplaceAll(message, "\x1b", "")
 	message = strings.ReplaceAll(message, terminalBell, "")
 	return message
+}
+
+func formatAssistantPreview(content string, maxChars int) string {
+	normalized := strings.Join(strings.Fields(sanitizeTerminalNotificationMessage(content)), " ")
+	trimmed := strings.TrimSpace(normalized)
+	if trimmed == "" {
+		return ""
+	}
+	if maxChars <= 0 {
+		return trimmed
+	}
+	runes := []rune(trimmed)
+	if len(runes) <= maxChars {
+		return trimmed
+	}
+	if maxChars == 1 {
+		return "…"
+	}
+	return string(runes[:maxChars-1]) + "…"
 }
 
 func (r *belTerminalNotifier) Notify(_ string) {
@@ -115,7 +135,7 @@ func (r *osc9TerminalNotifier) Notify(message string) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	_, _ = io.WriteString(r.out, osc9Prefix+sanitizeOSC9Message(message)+terminalBell)
+	_, _ = io.WriteString(r.out, osc9Prefix+sanitizeTerminalNotificationMessage(message)+terminalBell)
 }
 
 type bellHooks struct {
@@ -145,7 +165,7 @@ func (h *bellHooks) OnRuntimeEvent(evt runtime.Event) {
 	case runtime.EventToolCallStarted:
 		h.recordToolCall(evt.StepID)
 	case runtime.EventAssistantMessage:
-		h.ringIfToolHeavyTurnEnd(evt.StepID)
+		h.ringIfToolHeavyTurnEnd(evt.StepID, evt.Message.Content)
 	}
 }
 
@@ -163,7 +183,7 @@ func (h *bellHooks) recordToolCall(stepID string) {
 	h.toolCalls++
 }
 
-func (h *bellHooks) ringIfToolHeavyTurnEnd(stepID string) {
+func (h *bellHooks) ringIfToolHeavyTurnEnd(stepID, assistantContent string) {
 	stepID = strings.TrimSpace(stepID)
 	if stepID == "" {
 		return
@@ -177,6 +197,10 @@ func (h *bellHooks) ringIfToolHeavyTurnEnd(stepID string) {
 	}
 	h.mu.Unlock()
 	if shouldRing {
-		h.notifier.Notify("Builder: turn complete")
+		message := "Builder: turn complete"
+		if preview := formatAssistantPreview(assistantContent, terminalNotificationPreviewLimit); preview != "" {
+			message = "Builder: " + preview
+		}
+		h.notifier.Notify(message)
 	}
 }

@@ -10,4 +10,3 @@ const (
 	uiActivityInterrupted
 	uiActivityError
 )
-
