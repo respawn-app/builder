@@ -18,6 +18,13 @@ type uiInputController struct {
 	model *uiModel
 }
 
+func (c uiInputController) rollbackTransitionCmd() tea.Cmd {
+	if !c.model.altScreenActive {
+		return nil
+	}
+	return tea.ClearScreen
+}
+
 var spinnerFrames = []string{"|", "/", "-", "\\"}
 var spinnerTickInterval = 360 * time.Millisecond
 var transientStatusDuration = 2200 * time.Millisecond
@@ -37,7 +44,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case tea.KeyEsc:
 			m.stopRollbackSelectionMode()
-			return m, tea.ClearScreen
+			return m, c.rollbackTransitionCmd()
 		case tea.KeyUp:
 			m.moveRollbackSelection(-1)
 			return m, nil
@@ -46,7 +53,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case tea.KeyEnter:
 			m.beginRollbackEditing()
-			return m, tea.ClearScreen
+			return m, c.rollbackTransitionCmd()
 		case tea.KeyPgUp, tea.KeyPgDown:
 			m.forwardToView(msg)
 			return m, nil
@@ -126,7 +133,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.rollbackEditing {
 			if strings.TrimSpace(m.input) == "" {
 				m.cancelRollbackEditingBackToSelection()
-				return m, tea.ClearScreen
+				return m, c.rollbackTransitionCmd()
 			}
 			return m, nil
 		}
@@ -137,7 +144,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !m.lastEscAt.IsZero() && now.Sub(m.lastEscAt) <= rollbackDoubleEscWindow {
 			m.lastEscAt = time.Time{}
 			m.startRollbackSelectionMode()
-			return m, tea.ClearScreen
+			return m, c.rollbackTransitionCmd()
 		}
 		m.lastEscAt = now
 		return m, nil

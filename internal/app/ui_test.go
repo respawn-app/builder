@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"builder/internal/app/commands"
+	"builder/internal/config"
 	"builder/internal/llm"
 	"builder/internal/runtime"
 	"builder/internal/session"
@@ -413,6 +414,187 @@ func TestRollbackSelectionRecentersTranscript(t *testing.T) {
 	mid := len(lines) / 2
 	if diff := absInt(selectedLine - mid); diff > 2 {
 		t.Fatalf("expected selected rollback message near viewport middle, line=%d mid=%d", selectedLine, mid)
+	}
+}
+
+func TestRollbackSelectionCancelRestoresPriorOngoingScroll(t *testing.T) {
+	entries := make([]UITranscriptEntry, 0, 120)
+	for i := 0; i < 60; i++ {
+		entries = append(entries, UITranscriptEntry{Role: "user", Text: fmt.Sprintf("u-%d", i)})
+		entries = append(entries, UITranscriptEntry{Role: "assistant", Text: fmt.Sprintf("a-%d", i)})
+	}
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIInitialTranscript(entries)).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 10
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	updated := next.(*uiModel)
+	initialScroll := updated.view.OngoingScroll()
+	if initialScroll <= 0 {
+		t.Fatalf("expected non-zero ongoing scroll after page up, got %d", initialScroll)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if !updated.rollbackMode {
+		t.Fatal("expected rollback mode after double esc")
+	}
+
+	for i := 0; i < 6; i++ {
+		next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+		updated = next.(*uiModel)
+	}
+	if movedScroll := updated.view.OngoingScroll(); movedScroll == initialScroll {
+		t.Fatalf("expected rollback focus to move scroll from %d", initialScroll)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if updated.rollbackMode {
+		t.Fatal("expected rollback mode to be canceled")
+	}
+	if got := updated.view.OngoingScroll(); got != initialScroll {
+		t.Fatalf("expected ongoing scroll restored to %d, got %d", initialScroll, got)
+	}
+}
+
+func TestRollbackTransitionsDoNotClearScreenInNativeMode(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "u1"}, {Role: "assistant", Text: "a1"}, {Role: "user", Text: "u2"}}),
+	).(*uiModel)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := next.(*uiModel)
+	next, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if !updated.rollbackMode {
+		t.Fatal("expected rollback mode after double esc")
+	}
+	if cmd != nil {
+		t.Fatal("expected no clear-screen command when entering rollback in native mode")
+	}
+
+	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if updated.rollbackMode {
+		t.Fatal("expected rollback mode canceled")
+	}
+	if cmd != nil {
+		t.Fatal("expected no clear-screen command when canceling rollback in native mode")
+	}
+}
+
+func TestRollbackEditCancelChainRestoresPriorOngoingScroll(t *testing.T) {
+	entries := make([]UITranscriptEntry, 0, 120)
+	for i := 0; i < 60; i++ {
+		entries = append(entries, UITranscriptEntry{Role: "user", Text: fmt.Sprintf("u-%d", i)})
+		entries = append(entries, UITranscriptEntry{Role: "assistant", Text: fmt.Sprintf("a-%d", i)})
+	}
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIInitialTranscript(entries)).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 10
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	updated := next.(*uiModel)
+	initialScroll := updated.view.OngoingScroll()
+	if initialScroll <= 0 {
+		t.Fatalf("expected non-zero ongoing scroll after page up, got %d", initialScroll)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if !updated.rollbackMode {
+		t.Fatal("expected rollback mode after double esc")
+	}
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if !updated.rollbackEditing {
+		t.Fatal("expected rollback editing mode after enter")
+	}
+
+	updated.input = ""
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if !updated.rollbackMode {
+		t.Fatal("expected rollback selection mode after esc on empty edit input")
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if updated.rollbackMode {
+		t.Fatal("expected rollback mode canceled")
+	}
+	if got := updated.view.OngoingScroll(); got != initialScroll {
+		t.Fatalf("expected ongoing scroll restored to %d, got %d", initialScroll, got)
+	}
+
+	beforeAppend := updated.view.OngoingScroll()
+	updated.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "new tail"})
+	afterAppend := updated.view.OngoingScroll()
+	if afterAppend != beforeAppend {
+		t.Fatalf("expected ongoing scroll to remain stable after append when not at bottom, got %d from %d", afterAppend, beforeAppend)
+	}
+}
+
+func TestRollbackTransitionsDoNotClearScreenWhenNotInAltScreen(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeAlt),
+		WithUIAlternateScreenPolicy(config.TUIAlternateScreenAuto),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "u1"}, {Role: "assistant", Text: "a1"}, {Role: "user", Text: "u2"}}),
+	).(*uiModel)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := next.(*uiModel)
+	next, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if !updated.rollbackMode {
+		t.Fatal("expected rollback mode after double esc")
+	}
+	if cmd != nil {
+		t.Fatal("expected no clear-screen command when main UI is not in alt-screen")
+	}
+
+	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if !updated.rollbackEditing {
+		t.Fatal("expected rollback editing mode after enter")
+	}
+	if cmd != nil {
+		t.Fatal("expected no clear-screen command when entering rollback edit outside alt-screen")
+	}
+
+	updated.input = ""
+	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if !updated.rollbackMode {
+		t.Fatal("expected rollback mode after esc from empty rollback edit")
+	}
+	if cmd != nil {
+		t.Fatal("expected no clear-screen command when canceling rollback edit outside alt-screen")
+	}
+
+	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if updated.rollbackMode {
+		t.Fatal("expected rollback mode canceled")
+	}
+	if cmd != nil {
+		t.Fatal("expected no clear-screen command when canceling rollback selection outside alt-screen")
 	}
 }
 
