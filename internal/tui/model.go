@@ -169,6 +169,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.scrollActive(max(1, m.viewportLines-1))
 		}
 	case tea.MouseMsg:
+		if m.mode == ModeDetail {
+			break
+		}
 		switch msg.Type {
 		case tea.MouseWheelUp:
 			m = m.scrollActive(-1)
@@ -284,6 +287,10 @@ func (m Model) OngoingScroll() int {
 
 func (m Model) OngoingSnapshot() string {
 	return m.renderFlatOngoingTranscript()
+}
+
+func (m Model) OngoingCommittedSnapshot() string {
+	return m.renderFlatCommittedOngoingTranscript()
 }
 
 func FormatOngoingError(err error) string {
@@ -538,7 +545,15 @@ func (m Model) trailingThinkingBlockBeforeEntry(entries []TranscriptEntry, idx i
 }
 
 func (m Model) renderFlatOngoingTranscript() string {
-	blocks := m.buildOngoingBlocks()
+	return m.renderFlatOngoingTranscriptWithStreaming(true)
+}
+
+func (m Model) renderFlatCommittedOngoingTranscript() string {
+	return m.renderFlatOngoingTranscriptWithStreaming(false)
+}
+
+func (m Model) renderFlatOngoingTranscriptWithStreaming(includeStreaming bool) string {
+	blocks := m.buildOngoingBlocks(includeStreaming)
 	if len(blocks) == 0 {
 		return ""
 	}
@@ -552,7 +567,7 @@ func (m Model) renderFlatOngoingTranscript() string {
 	return strings.Join(lines, "\n")
 }
 
-func (m Model) buildOngoingBlocks() []ongoingBlock {
+func (m Model) buildOngoingBlocks(includeStreaming bool) []ongoingBlock {
 	blocks := make([]ongoingBlock, 0, len(m.transcript)+1)
 	consumedResults := make(map[int]struct{})
 	for i := 0; i < len(m.transcript); i++ {
@@ -620,7 +635,7 @@ func (m Model) buildOngoingBlocks() []ongoingBlock {
 			})
 		}
 	}
-	if m.ongoing != "" {
+	if includeStreaming && m.ongoing != "" {
 		blocks = append(blocks, ongoingBlock{
 			role:       "assistant",
 			lines:      m.flattenEntryPlain("assistant", m.ongoing),
@@ -634,7 +649,7 @@ func (m Model) ongoingLineRangeForEntry(entryIndex int) (int, int, bool) {
 	if entryIndex < 0 {
 		return 0, 0, false
 	}
-	blocks := m.buildOngoingBlocks()
+	blocks := m.buildOngoingBlocks(true)
 	lineOffset := 0
 	for idx, block := range blocks {
 		if idx > 0 && ongoingDividerGroup(blocks[idx-1].role) != ongoingDividerGroup(block.role) {
@@ -911,7 +926,7 @@ func ongoingDividerGroup(role string) string {
 
 func skipInOngoing(role string) bool {
 	switch strings.ToLower(strings.TrimSpace(role)) {
-	case "thinking", "thinking_trace", "reasoning", "compaction_summary":
+	case "thinking", "thinking_trace", "reasoning", "compaction_summary", "error":
 		return true
 	default:
 		return false

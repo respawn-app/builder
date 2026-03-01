@@ -148,19 +148,26 @@ func TestOngoingDoesNotPinOngoingErrorToBottomLine(t *testing.T) {
 	}
 }
 
-func TestErrorEntryIsRenderedWithPrefixAndErrorStyle(t *testing.T) {
+func TestErrorEntryVisibleInDetailAndHiddenInOngoing(t *testing.T) {
 	m := NewModel(WithPreviewLines(6))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "ready"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "error", Text: "boom trace"})
 
-	view := m.View()
-	plain := plainTranscript(view)
+	ongoing := m.View()
+	ongoingPlain := plainTranscript(ongoing)
+	if strings.Contains(ongoingPlain, "boom trace") {
+		t.Fatalf("expected error entry hidden in ongoing view, got %q", ongoingPlain)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detail := m.View()
+	plain := plainTranscript(detail)
 	if !containsInOrder(plain, "❮", "ready", "!", "boom trace") {
-		t.Fatalf("expected error entry in transcript history, got %q", plain)
+		t.Fatalf("expected error entry in detail transcript history, got %q", plain)
 	}
 	renderedError := m.palette().error.Render("boom trace")
-	if !strings.Contains(view, renderedError) {
-		t.Fatalf("expected error text to use error style, got %q", view)
+	if !strings.Contains(detail, renderedError) {
+		t.Fatalf("expected error text to use error style in detail, got %q", detail)
 	}
 }
 
@@ -306,7 +313,7 @@ func TestMouseWheelScrollsOngoingView(t *testing.T) {
 	}
 }
 
-func TestMouseWheelScrollsDetailView(t *testing.T) {
+func TestMouseWheelDoesNotAffectDetailView(t *testing.T) {
 	m := NewModel(WithPreviewLines(2))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u1"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
@@ -321,14 +328,9 @@ func TestMouseWheelScrollsDetailView(t *testing.T) {
 	}
 
 	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
-	afterUp := m.detailScroll
-	if afterUp >= start {
-		t.Fatalf("expected wheel up to scroll detail view up, got %d from %d", afterUp, start)
-	}
-
 	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
 	if m.detailScroll != start {
-		t.Fatalf("expected wheel down to return detail scroll to start, got %d want %d", m.detailScroll, start)
+		t.Fatalf("expected mouse wheel to not change detail scroll, got %d want %d", m.detailScroll, start)
 	}
 }
 

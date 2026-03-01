@@ -530,8 +530,7 @@ func messageInput(role, text string) responses.ResponseInputItemUnionParam {
 
 func parseOutputItems(items []responses.ResponseOutputItemUnion) ([]ResponseItem, string, MessagePhase, []ToolCall, []ReasoningEntry, []ReasoningItem) {
 	canonical := make([]ResponseItem, 0, len(items))
-	textParts := make([]string, 0, len(items))
-	assistantPhase := MessagePhase("")
+	assistantSegments := make([]assistantOutputSegment, 0, len(items))
 	toolCalls := make([]ToolCall, 0, len(items))
 	reasoning := make([]ReasoningEntry, 0, len(items))
 	reasoningItems := make([]ReasoningItem, 0, len(items))
@@ -560,10 +559,10 @@ func parseOutputItems(items []responses.ResponseOutputItemUnion) ([]ResponseItem
 				Raw:     raw,
 			})
 			if role == RoleAssistant {
-				textParts = append(textParts, text)
-				if phase != "" {
-					assistantPhase = phase
-				}
+				assistantSegments = append(assistantSegments, assistantOutputSegment{
+					Text:  text,
+					Phase: phase,
+				})
 			}
 		case "function_call":
 			callID := textutil.FirstNonEmpty(strings.TrimSpace(item.CallID), strings.TrimSpace(item.ID))
@@ -629,7 +628,36 @@ func parseOutputItems(items []responses.ResponseOutputItemUnion) ([]ResponseItem
 			}
 		}
 	}
-	return canonical, strings.Join(textParts, ""), assistantPhase, toolCalls, reasoning, reasoningItems
+	assistantText, assistantPhase := resolveAssistantOutput(assistantSegments)
+	return canonical, assistantText, assistantPhase, toolCalls, reasoning, reasoningItems
+}
+
+type assistantOutputSegment struct {
+	Text  string
+	Phase MessagePhase
+}
+
+func resolveAssistantOutput(segments []assistantOutputSegment) (string, MessagePhase) {
+	if len(segments) == 0 {
+		return "", ""
+	}
+	last := len(segments) - 1
+	if segments[last].Phase == "" {
+		return segments[last].Text, ""
+	}
+	phase := segments[last].Phase
+	start := last
+	for start > 0 {
+		if segments[start-1].Phase != phase {
+			break
+		}
+		start--
+	}
+	textParts := make([]string, 0, last-start+1)
+	for i := start; i <= last; i++ {
+		textParts = append(textParts, segments[i].Text)
+	}
+	return strings.Join(textParts, ""), phase
 }
 
 func parseMessagePhaseFromRaw(raw json.RawMessage) MessagePhase {
