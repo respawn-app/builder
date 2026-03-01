@@ -1653,6 +1653,24 @@ func TestReviewerProgressLocksInputWithPlaceholder(t *testing.T) {
 	}
 }
 
+func TestMouseSGRReportRunesDoNotPolluteInput(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "draft"
+	m.inputCursor = len([]rune(m.input))
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[<64;74;25M")})
+	updated := next.(*uiModel)
+	if updated.input != "draft" {
+		t.Fatalf("expected mouse sgr sequence ignored, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	updated = next.(*uiModel)
+	if updated.input != "draftx" {
+		t.Fatalf("expected normal runes to still insert, got %q", updated.input)
+	}
+}
+
 func TestStatusContextZoneColorBoundaries(t *testing.T) {
 	assertLightColor := func(percent int, want string) {
 		t.Helper()
