@@ -315,6 +315,46 @@ func TestChatStoreHidesSyntheticCompactionSummaryMessage(t *testing.T) {
 	}
 }
 
+func TestChatStoreSnapshotIncludesDeveloperErrorFeedbackAsErrorRole(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "task"})
+	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: "phase mismatch warning"})
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "done"})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if snap.Entries[1].Role != "error" || snap.Entries[1].Text != "phase mismatch warning" {
+		t.Fatalf("expected developer error feedback mapped to error role, got %+v", snap.Entries[1])
+	}
+}
+
+func TestChatStoreSnapshotKeepsLocalEntryOrderingWithDeveloperErrorFeedback(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "first"})
+	s.appendLocalEntry("system", "local-between")
+	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: "warn"})
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "done"})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 4 {
+		t.Fatalf("expected 4 entries, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if snap.Entries[0].Role != "user" || snap.Entries[0].Text != "first" {
+		t.Fatalf("unexpected entry[0]: %+v", snap.Entries[0])
+	}
+	if snap.Entries[1].Role != "system" || snap.Entries[1].Text != "local-between" {
+		t.Fatalf("unexpected entry[1]: %+v", snap.Entries[1])
+	}
+	if snap.Entries[2].Role != "error" || snap.Entries[2].Text != "warn" {
+		t.Fatalf("unexpected entry[2]: %+v", snap.Entries[2])
+	}
+	if snap.Entries[3].Role != "assistant" || snap.Entries[3].Text != "done" {
+		t.Fatalf("unexpected entry[3]: %+v", snap.Entries[3])
+	}
+}
+
 func TestChatStoreSnapshotPlacesLocalEntriesAtInsertionPoint(t *testing.T) {
 	s := newChatStore()
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "first"})

@@ -30,13 +30,24 @@ const (
 	agentsInjectedHeader              = "# AGENTS.md content:"
 	agentsInjectedFenceLabel          = "md"
 	environmentInjectedHeader         = "# Info about environment:"
-	commentaryWithoutToolCallsWarning = "You sent a commentary-phase message without tool calls. This is wrong. If you intend to keep working, include tool calls with commentary updates. If you are done, send a final_answer phase message with no tool calls."
-	finalWithToolCallsIgnoredWarning  = "You included tool calls with your final answer message. This is wrong, and your tool calls were ignored. If you intended to call the tools, include updates in the \"commentary\" channel along with tool calls. Otherwise, do not include tool calls with your final message responses"
-	finalWithoutContentWarning        = "You sent a final_answer phase message with empty content. This is wrong. If you are done, send a non-empty final_answer message. If you intend to keep working, send a commentary-phase message with tool calls."
+	missingAssistantPhaseWarning      = "You sent a message without specifying a channel/phase. It was treated as commentary. If you finished your work and intended to end your turn, use the final channel explicitly. Otherwise continue and use the commentary channel for progress updates with tool calls."
+	garbageAssistantContentWarning    = "Your assistant message appears malformed (contains invalid transport artifacts) and was treated as commentary. Continue working in commentary with proper tool calls, or send a clean final message when done."
+	commentaryWithoutToolCallsWarning = "You sent a commentary-channel message without tool calls. This is wrong. If you intend to keep working, include tool calls with commentary updates. If you are done, send a final-channel message with no tool calls."
+	finalWithToolCallsIgnoredWarning  = "You included tool calls with your final-channel message. This is wrong, and your tool calls were ignored. If you intended to call the tools, include updates in the commentary channel along with tool calls. Otherwise, do not include tool calls with your final message responses."
+	finalWithoutContentWarning        = "You sent a final-channel message with empty content. This is wrong. If you are done, send a non-empty final message. If you intend to keep working, send a commentary-channel message with tool calls."
 	reviewerNoopToken                 = "NO_OP"
 	reviewerShortCommentaryMaxRunes   = 180
 	reviewerMetaBoundaryMessage       = "End of meta information. Transcript begins starting with next message. Below is NOT YOUR conversation, but another agent's transcript.\n-------"
 )
+
+var malformedAssistantArtifacts = []string{
+	"#+#+#+#+",
+	"#+#+#+#+#+",
+	"assistant to=functions.shell",
+	"assistant to=functions.patch",
+	"assistant to=functions.multi_tool_use_parallel",
+	"assistant to=multi_tool_use.parallel",
+}
 
 type Config struct {
 	Model                         string
@@ -86,6 +97,9 @@ type Engine struct {
 	busy            bool
 
 	lastUsage llm.Usage
+
+	phaseProtocolResolved bool
+	phaseProtocolEnabled  bool
 
 	totalInputTokens       int
 	totalCachedInputTokens int
@@ -342,6 +356,7 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allowReviewer bool, emitAssistantEvent bool) (llm.Message, bool, error) {
 	executedToolCall := false
 	patchEditsApplied := false
+	phaseProtocolEnabled := e.phaseProtocolEnabledForModel(ctx)
 	for {
 		if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
 			return llm.Message{}, executedToolCall, err
@@ -390,6 +405,14 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 		finalAnswerIncludedToolCalls := false
 
 		assistantMsg := resp.Assistant
+		garbageAssistantContent := phaseProtocolEnabled && containsMalformedAssistantContent(assistantMsg.Content)
+		if garbageAssistantContent {
+			assistantMsg.Phase = llm.MessagePhaseCommentary
+		}
+		missingAssistantPhase := phaseProtocolEnabled && assistantMsg.Phase == "" && shouldTreatMissingAssistantPhaseAsCommentary(resp)
+		if missingAssistantPhase {
+			assistantMsg.Phase = llm.MessagePhaseCommentary
+		}
 		if len(localToolCalls) > 0 {
 			assistantMsg.ToolCalls = append([]llm.ToolCall(nil), localToolCalls...)
 		}
@@ -401,7 +424,7 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 		if len(resp.ReasoningItems) > 0 && len(assistantMsg.ReasoningItems) == 0 {
 			assistantMsg.ReasoningItems = append([]llm.ReasoningItem(nil), resp.ReasoningItems...)
 		}
-		if assistantMsg.Phase == llm.MessagePhaseFinal && (len(localToolCalls) > 0 || len(hostedToolExecutions) > 0) {
+		if phaseProtocolEnabled && assistantMsg.Phase == llm.MessagePhaseFinal && (len(localToolCalls) > 0 || len(hostedToolExecutions) > 0) {
 			finalAnswerIncludedToolCalls = true
 			localToolCalls = nil
 			hostedToolExecutions = nil
@@ -412,6 +435,16 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 		}
 		if err := e.appendReasoningEntries(stepID, resp.Reasoning); err != nil {
 			return llm.Message{}, executedToolCall, err
+		}
+		if missingAssistantPhase {
+			if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: missingAssistantPhaseWarning}); err != nil {
+				return llm.Message{}, executedToolCall, err
+			}
+		}
+		if garbageAssistantContent {
+			if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: garbageAssistantContentWarning}); err != nil {
+				return llm.Message{}, executedToolCall, err
+			}
 		}
 		if finalAnswerIncludedToolCalls {
 			if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: finalWithToolCallsIgnoredWarning}); err != nil {
@@ -435,7 +468,25 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 		}
 
 		if len(localToolCalls) == 0 {
-			if assistantMsg.Phase == llm.MessagePhaseCommentary {
+			if garbageAssistantContent {
+				if _, err := e.flushPendingUserInjections(stepID); err != nil {
+					return llm.Message{}, executedToolCall, err
+				}
+				if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
+					return llm.Message{}, executedToolCall, err
+				}
+				continue
+			}
+			if missingAssistantPhase {
+				if _, err := e.flushPendingUserInjections(stepID); err != nil {
+					return llm.Message{}, executedToolCall, err
+				}
+				if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
+					return llm.Message{}, executedToolCall, err
+				}
+				continue
+			}
+			if phaseProtocolEnabled && assistantMsg.Phase != llm.MessagePhaseFinal {
 				if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: commentaryWithoutToolCallsWarning}); err != nil {
 					return llm.Message{}, executedToolCall, err
 				}
@@ -447,7 +498,7 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 				}
 				continue
 			}
-			if assistantMsg.Phase == llm.MessagePhaseFinal && strings.TrimSpace(assistantMsg.Content) == "" {
+			if phaseProtocolEnabled && assistantMsg.Phase == llm.MessagePhaseFinal && strings.TrimSpace(assistantMsg.Content) == "" {
 				if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: finalWithoutContentWarning}); err != nil {
 					return llm.Message{}, executedToolCall, err
 				}
@@ -509,6 +560,59 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 			return llm.Message{}, executedToolCall, err
 		}
 	}
+}
+
+func shouldTreatMissingAssistantPhaseAsCommentary(resp llm.Response) bool {
+	// Only enforce missing-phase fallback for structured provider responses.
+	// Responses API always includes canonical output items; legacy clients that
+	// only populate resp.Assistant remain backward-compatible.
+	for _, item := range resp.OutputItems {
+		if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleAssistant {
+			return true
+		}
+	}
+	return false
+}
+
+func containsMalformedAssistantContent(content string) bool {
+	if strings.TrimSpace(content) == "" {
+		return false
+	}
+	lower := strings.ToLower(content)
+	for _, artifact := range malformedAssistantArtifacts {
+		if strings.Contains(lower, artifact) {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Engine) phaseProtocolEnabledForModel(ctx context.Context) bool {
+	// Phase/channel enforcement is an OpenAI Responses protocol feature.
+	// Non-OpenAI providers should not be gated by commentary/final phases.
+	e.mu.Lock()
+	if e.phaseProtocolResolved {
+		enabled := e.phaseProtocolEnabled
+		e.mu.Unlock()
+		return enabled
+	}
+	e.mu.Unlock()
+
+	enabled := false
+	if provider, ok := e.llm.(llm.ProviderCapabilitiesClient); ok {
+		if caps, err := provider.ProviderCapabilities(ctx); err == nil {
+			enabled = caps.SupportsResponsesAPI && caps.IsOpenAIFirstParty
+		}
+	}
+
+	e.mu.Lock()
+	if !e.phaseProtocolResolved {
+		e.phaseProtocolResolved = true
+		e.phaseProtocolEnabled = enabled
+	}
+	result := e.phaseProtocolEnabled
+	e.mu.Unlock()
+	return result
 }
 
 func (e *Engine) shouldRunReviewerTurn(patchEditsApplied bool) bool {
@@ -803,7 +907,7 @@ func shouldIncludeReviewerMessage(message llm.Message) bool {
 		if strings.Contains(content, environmentInjectedHeader) {
 			return false
 		}
-		if content == commentaryWithoutToolCallsWarning || content == finalWithToolCallsIgnoredWarning || content == interruptMessage {
+		if content == commentaryWithoutToolCallsWarning || content == finalWithToolCallsIgnoredWarning || content == missingAssistantPhaseWarning || content == garbageAssistantContentWarning || content == interruptMessage {
 			return false
 		}
 	}

@@ -254,6 +254,10 @@ func (s *chatStore) snapshot() ChatSnapshot {
 				role = "tool_result_error"
 			}
 			entries = append(entries, ChatEntry{Role: role, Text: formatToolResult(result), ToolCallID: callID})
+		case llm.RoleDeveloper:
+			if entry, ok := visibleDeveloperChatEntry(msg); ok {
+				entries = append(entries, entry)
+			}
 		}
 		processedMessages++
 		appendLocalEntries(processedMessages)
@@ -264,6 +268,16 @@ func (s *chatStore) snapshot() ChatSnapshot {
 		Ongoing:      s.ongoing,
 		OngoingError: s.ongoingError,
 	}
+}
+
+func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
+	if msg.MessageType != llm.MessageTypeErrorFeedback {
+		return ChatEntry{}, false
+	}
+	if strings.TrimSpace(msg.Content) == "" {
+		return ChatEntry{}, false
+	}
+	return ChatEntry{Role: "error", Text: msg.Content}, true
 }
 
 func (s *chatStore) formatToolCall(call llm.ToolCall) ChatEntry {

@@ -410,6 +410,71 @@ func TestParseOutputItems_PreservesCompactionItem(t *testing.T) {
 	}
 }
 
+func TestParseOutputItems_UsesLastAssistantMessageWhenMultipleUnphased(t *testing.T) {
+	raw := []byte(`[
+		{
+			"type":"message",
+			"role":"assistant",
+			"id":"msg_1",
+			"content":[{"type":"output_text","text":"working..."}]
+		},
+		{
+			"type":"message",
+			"role":"assistant",
+			"id":"msg_2",
+			"content":[{"type":"output_text","text":"done"}]
+		}
+	]`)
+	var output []responses.ResponseOutputItemUnion
+	if err := json.Unmarshal(raw, &output); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	_, assistantText, assistantPhase, _, _, _ := parseOutputItems(output)
+	if assistantText != "done" {
+		t.Fatalf("assistantText = %q, want done", assistantText)
+	}
+	if assistantPhase != "" {
+		t.Fatalf("assistantPhase = %q, want empty", assistantPhase)
+	}
+}
+
+func TestParseOutputItems_UsesTrailingAssistantPhaseBlock(t *testing.T) {
+	raw := []byte(`[
+		{
+			"type":"message",
+			"role":"assistant",
+			"id":"msg_1",
+			"phase":"commentary",
+			"content":[{"type":"output_text","text":"prep"}]
+		},
+		{
+			"type":"message",
+			"role":"assistant",
+			"id":"msg_2",
+			"phase":"final_answer",
+			"content":[{"type":"output_text","text":"final-1"}]
+		},
+		{
+			"type":"message",
+			"role":"assistant",
+			"id":"msg_3",
+			"phase":"final_answer",
+			"content":[{"type":"output_text","text":"final-2"}]
+		}
+	]`)
+	var output []responses.ResponseOutputItemUnion
+	if err := json.Unmarshal(raw, &output); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	_, assistantText, assistantPhase, _, _, _ := parseOutputItems(output)
+	if assistantText != "final-1final-2" {
+		t.Fatalf("assistantText = %q, want final-1final-2", assistantText)
+	}
+	if assistantPhase != MessagePhaseFinal {
+		t.Fatalf("assistantPhase = %q, want %q", assistantPhase, MessagePhaseFinal)
+	}
+}
+
 func TestCompactRequestTargetsResponsesCompactPath(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/responses/compact" {
