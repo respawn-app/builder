@@ -193,7 +193,7 @@
 - Ongoing mode uses in-app viewport rendering.
 - Detail remains fullscreen pager-style (input/queued/picker hidden) and uses the same normal-buffer rendering architecture as ongoing.
 - Detail does not enter/exit alt-screen.
-- App-level mouse wheel interception is disabled; wheel behavior is terminal-native in main chat.
+- App-level mouse wheel interception is enabled; wheel scroll drives the active transcript viewport in main chat.
 - No timestamps are shown in UI.
 - Streaming paint cadence is 16ms with token coalescing per flush tick.
 - Main status line is compact and fixed: model, busy/idle, queue size.

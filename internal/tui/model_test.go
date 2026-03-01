@@ -280,7 +280,7 @@ func TestOngoingDoesNotAutoFollowWhenUserScrolledUp(t *testing.T) {
 	}
 }
 
-func TestMouseWheelDoesNotAffectOngoingView(t *testing.T) {
+func TestMouseWheelScrollsOngoingView(t *testing.T) {
 	m := NewModel(WithPreviewLines(2))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a2"})
@@ -289,14 +289,23 @@ func TestMouseWheelDoesNotAffectOngoingView(t *testing.T) {
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a5"})
 
 	start := m.OngoingScroll()
+	if start == 0 {
+		t.Fatalf("expected ongoing mode to start at bottom, got ongoingScroll=%d", start)
+	}
+
 	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	afterUp := m.OngoingScroll()
+	if afterUp >= start {
+		t.Fatalf("expected wheel up to scroll ongoing view up, got %d from %d", afterUp, start)
+	}
+
 	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
 	if got := m.OngoingScroll(); got != start {
-		t.Fatalf("expected mouse wheel to not change ongoing scroll, got %d want %d", got, start)
+		t.Fatalf("expected wheel down to return ongoing scroll to start, got %d want %d", got, start)
 	}
 }
 
-func TestMouseWheelDoesNotAffectDetailView(t *testing.T) {
+func TestMouseWheelScrollsDetailView(t *testing.T) {
 	m := NewModel(WithPreviewLines(2))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u1"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
@@ -311,9 +320,14 @@ func TestMouseWheelDoesNotAffectDetailView(t *testing.T) {
 	}
 
 	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	afterUp := m.detailScroll
+	if afterUp >= start {
+		t.Fatalf("expected wheel up to scroll detail view up, got %d from %d", afterUp, start)
+	}
+
 	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
 	if m.detailScroll != start {
-		t.Fatalf("expected mouse wheel to not change detail scroll, got %d want %d", m.detailScroll, start)
+		t.Fatalf("expected wheel down to return detail scroll to start, got %d want %d", m.detailScroll, start)
 	}
 }
 

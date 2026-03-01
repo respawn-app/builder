@@ -157,6 +157,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyPgDown:
 			m = m.scrollActive(max(1, m.viewportLines-1))
 		}
+	case tea.MouseMsg:
+		switch msg.Type {
+		case tea.MouseWheelUp:
+			m = m.scrollActive(-1)
+		case tea.MouseWheelDown:
+			m = m.scrollActive(1)
+		}
 	case ToggleModeMsg:
 		m = m.toggleMode()
 	case ScrollOngoingMsg:
