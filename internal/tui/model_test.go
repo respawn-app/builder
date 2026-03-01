@@ -853,6 +853,36 @@ func TestPatchPayloadRendersSummaryInOngoingAndDetailDiffInDetail(t *testing.T) 
 	}
 }
 
+func TestDetailShowsRawPatchFallbackWhenOnlySummaryAvailableInOngoing(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	rawPatch := "*** Begin Patch\n*** Update File: a.go\n-old\n+new\n*** End Patch"
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: "Edited:",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:     "patch",
+			PatchSummary: "Edited:",
+			PatchDetail:  "Edited:\n" + rawPatch,
+			RenderHint:   &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: ""})
+
+	ongoing := plainTranscript(m.View())
+	if !strings.Contains(ongoing, "Edited:") {
+		t.Fatalf("expected patch summary in ongoing, got %q", ongoing)
+	}
+	if strings.Contains(ongoing, "*** Begin Patch") {
+		t.Fatalf("did not expect raw patch body in ongoing, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detail := plainTranscript(m.View())
+	if !strings.Contains(detail, "*** Begin Patch") {
+		t.Fatalf("expected raw patch body in detail, got %q", detail)
+	}
+}
+
 func TestStyleToolLineColorsPatchCountsAndDiff(t *testing.T) {
 	m := NewModel()
 	counts := m.styleToolLine("./file.go +13 -9")

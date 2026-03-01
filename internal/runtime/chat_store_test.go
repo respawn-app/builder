@@ -161,6 +161,31 @@ func TestPatchToolCallFormattingSingleFileUsesInlineEditedHeader(t *testing.T) {
 	}
 }
 
+func TestPatchToolCallFormattingFallsBackToRawPatchWhenFileViewParseFails(t *testing.T) {
+	s := newChatStore()
+	s.cwd = "/workspace"
+
+	patchText := "not a structured patch payload"
+	call := llm.ToolCall{
+		ID:    "call_patch_raw",
+		Name:  string(tools.ToolPatch),
+		Input: json.RawMessage(`{"patch":` + strconv.Quote(patchText) + `}`),
+	}
+	rendered := s.formatToolCall(call)
+	if rendered.ToolCall == nil {
+		t.Fatalf("expected tool metadata on patch call fallback")
+	}
+	if rendered.ToolCall.RenderHint == nil || rendered.ToolCall.RenderHint.Kind != transcript.ToolRenderKindDiff {
+		t.Fatalf("expected diff render hint for patch fallback, got %+v", rendered.ToolCall.RenderHint)
+	}
+	if rendered.ToolCall.PatchSummary != "Edited:" {
+		t.Fatalf("expected fallback patch summary, got %q", rendered.ToolCall.PatchSummary)
+	}
+	if !strings.Contains(rendered.ToolCall.PatchDetail, patchText) {
+		t.Fatalf("expected fallback patch detail to include raw payload, got %q", rendered.ToolCall.PatchDetail)
+	}
+}
+
 func TestFormatToolCallShellAddsShellMetadata(t *testing.T) {
 	s := newChatStore()
 	call := llm.ToolCall{

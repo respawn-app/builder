@@ -453,7 +453,11 @@ func (s *chatStore) formatPatchToolCall(raw json.RawMessage) (summary, detail st
 	}
 	files := parsePatchFileViews(patchText, s.cwd)
 	if len(files) == 0 {
-		return "", "", false
+		trimmedPatch := strings.TrimSpace(patchText)
+		if trimmedPatch == "" {
+			return "", "", false
+		}
+		return "Edited:", "Edited:\n" + trimmedPatch, true
 	}
 
 	formatSummaryLine := func(file patchFileView) string {
