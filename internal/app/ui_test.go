@@ -1664,6 +1664,13 @@ func TestMouseSGRReportRunesDoNotPolluteInput(t *testing.T) {
 		t.Fatalf("expected mouse sgr sequence ignored, got %q", updated.input)
 	}
 
+	longBurst := "[<64;81;40M[<64;81;40M[<64;80;40M[<64;80;40M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M[<65;80;39M"
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(longBurst)})
+	updated = next.(*uiModel)
+	if updated.input != "draft" {
+		t.Fatalf("expected long mouse sgr burst ignored, got %q", updated.input)
+	}
+
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
 	updated = next.(*uiModel)
 	if updated.input != "draftx" {
