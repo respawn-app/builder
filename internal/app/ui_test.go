@@ -165,6 +165,12 @@ func TestAskQuestionTabFreeformFlow(t *testing.T) {
 		t.Fatal("expected tab to switch to freeform")
 	}
 
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[<64;55;24M[<64;56;26M[<65;56;26M")})
+	updated = next.(*uiModel)
+	if updated.askInput != "" {
+		t.Fatalf("expected mouse sgr sequence ignored in ask freeform input, got %q", updated.askInput)
+	}
+
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("custom")})
 	updated = next.(*uiModel)
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
