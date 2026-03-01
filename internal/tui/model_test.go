@@ -2,6 +2,7 @@ package tui
 
 import (
 	"builder/internal/transcript"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -348,6 +349,30 @@ func TestPageKeysScrollActiveView(t *testing.T) {
 	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyPgDown})
 	if got, want := m.OngoingScroll(), m.maxOngoingScroll(); got != want {
 		t.Fatalf("expected pgdown to return to bottom, got %d want %d", got, want)
+	}
+}
+
+func TestFocusTranscriptEntryCentersOngoingViewport(t *testing.T) {
+	m := NewModel(WithPreviewLines(6))
+	for i := 0; i < 40; i++ {
+		role := "assistant"
+		if i%2 == 0 {
+			role = "user"
+		}
+		m = updateModel(t, m, AppendTranscriptMsg{Role: role, Text: fmt.Sprintf("line %d", i)})
+	}
+
+	entryIndex := 10
+	start, end, ok := m.ongoingLineRangeForEntry(entryIndex)
+	if !ok {
+		t.Fatalf("expected line range for transcript entry %d", entryIndex)
+	}
+	midpoint := (start + end) / 2
+	expected := clamp(midpoint-m.viewportLines/2, 0, m.maxOngoingScroll())
+
+	m = updateModel(t, m, FocusTranscriptEntryMsg{EntryIndex: entryIndex, Center: true})
+	if got := m.OngoingScroll(); got != expected {
+		t.Fatalf("expected centered scroll %d for entry %d, got %d", expected, entryIndex, got)
 	}
 }
 

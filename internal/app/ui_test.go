@@ -372,6 +372,33 @@ func TestRollbackEditingSubmitQuitsIntoForkTransition(t *testing.T) {
 	}
 }
 
+func TestRollbackSelectionRecentersTranscript(t *testing.T) {
+	entries := make([]UITranscriptEntry, 0, 80)
+	for i := 0; i < 40; i++ {
+		entries = append(entries, UITranscriptEntry{Role: "user", Text: fmt.Sprintf("u-%d", i)})
+		entries = append(entries, UITranscriptEntry{Role: "assistant", Text: fmt.Sprintf("a-%d", i)})
+	}
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIInitialTranscript(entries)).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 8
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+
+	before := updated.view.OngoingScroll()
+	for i := 0; i < 8; i++ {
+		next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+		updated = next.(*uiModel)
+	}
+	after := updated.view.OngoingScroll()
+	if after >= before {
+		t.Fatalf("expected rollback selection movement to recenter upwards, got %d from %d", after, before)
+	}
+}
+
 func TestApprovalAskTabAllowsWithCommentary(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

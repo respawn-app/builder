@@ -79,6 +79,7 @@ func (m *uiModel) applyRollbackSelectionHighlight() {
 	}
 	candidate := m.rollbackCandidates[m.rollbackSelection]
 	m.forwardToView(tui.SetSelectedTranscriptEntryMsg{Active: true, EntryIndex: candidate.TranscriptIndex})
+	m.forwardToView(tui.FocusTranscriptEntryMsg{EntryIndex: candidate.TranscriptIndex, Center: true})
 }
 
 func (m *uiModel) moveRollbackSelection(delta int) {

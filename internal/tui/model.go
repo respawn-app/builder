@@ -67,6 +67,11 @@ type SetSelectedTranscriptEntryMsg struct {
 	Active     bool
 }
 
+type FocusTranscriptEntryMsg struct {
+	EntryIndex int
+	Center     bool
+}
+
 type StreamAssistantMsg struct {
 	Delta string
 }
@@ -117,6 +122,12 @@ type Model struct {
 	theme          string
 	md             *markdownRenderer
 	code           *codeRenderer
+}
+
+type ongoingBlock struct {
+	role       string
+	lines      []string
+	entryIndex int
 }
 
 func NewModel(opts ...Option) Model {
@@ -211,6 +222,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SetSelectedTranscriptEntryMsg:
 		m.selectedTranscriptEntry = msg.EntryIndex
 		m.selectedTranscriptActive = msg.Active
+	case FocusTranscriptEntryMsg:
+		if start, end, ok := m.ongoingLineRangeForEntry(msg.EntryIndex); ok {
+			target := start
+			if msg.Center {
+				midpoint := (start + end) / 2
+				target = midpoint - m.viewportLines/2
+			}
+			m.ongoingScroll = clamp(target, 0, m.maxOngoingScroll())
+		}
 	case StreamAssistantMsg:
 		m.ongoing += msg.Delta
 		shouldAutoFollowOngoing = true
@@ -515,11 +535,21 @@ func (m Model) trailingThinkingBlockBeforeEntry(entries []TranscriptEntry, idx i
 }
 
 func (m Model) renderFlatOngoingTranscript() string {
-	type ongoingBlock struct {
-		role  string
-		lines []string
+	blocks := m.buildOngoingBlocks()
+	if len(blocks) == 0 {
+		return ""
 	}
+	lines := make([]string, 0, len(blocks)*2)
+	for idx, block := range blocks {
+		if idx > 0 && ongoingDividerGroup(blocks[idx-1].role) != ongoingDividerGroup(block.role) {
+			lines = append(lines, detailDivider())
+		}
+		lines = append(lines, block.lines...)
+	}
+	return strings.Join(lines, "\n")
+}
 
+func (m Model) buildOngoingBlocks() []ongoingBlock {
 	blocks := make([]ongoingBlock, 0, len(m.transcript)+1)
 	consumedResults := make(map[int]struct{})
 	for i := 0; i < len(m.transcript); i++ {
@@ -547,8 +577,9 @@ func (m Model) renderFlatOngoingTranscript() string {
 					}
 				}
 				blocks = append(blocks, ongoingBlock{
-					role:  blockRole,
-					lines: m.flattenAskQuestionEntry(blockRole, question, suggestions, answer, false),
+					role:       blockRole,
+					lines:      m.flattenAskQuestionEntry(blockRole, question, suggestions, answer, false),
+					entryIndex: i,
 				})
 				continue
 			} else if isShellToolCall(entry.ToolCall, entry.Text) {
@@ -567,8 +598,9 @@ func (m Model) renderFlatOngoingTranscript() string {
 				}
 			}
 			blocks = append(blocks, ongoingBlock{
-				role:  blockRole,
-				lines: m.flattenEntryWithMeta(blockRole, combined, true, entry.ToolCall),
+				role:       blockRole,
+				lines:      m.flattenEntryWithMeta(blockRole, combined, true, entry.ToolCall),
+				entryIndex: i,
 			})
 		case "tool_result", "tool_result_ok", "tool_result_error":
 			continue
@@ -579,28 +611,40 @@ func (m Model) renderFlatOngoingTranscript() string {
 			}
 			lines := m.flattenEntry(role, text)
 			blocks = append(blocks, ongoingBlock{
-				role:  role,
-				lines: m.maybeSelectedUserBlock(i, role, lines),
+				role:       role,
+				lines:      m.maybeSelectedUserBlock(i, role, lines),
+				entryIndex: i,
 			})
 		}
 	}
 	if m.ongoing != "" {
 		blocks = append(blocks, ongoingBlock{
-			role:  "assistant",
-			lines: m.flattenEntryPlain("assistant", m.ongoing),
+			role:       "assistant",
+			lines:      m.flattenEntryPlain("assistant", m.ongoing),
+			entryIndex: -1,
 		})
 	}
-	if len(blocks) == 0 {
-		return ""
+	return blocks
+}
+
+func (m Model) ongoingLineRangeForEntry(entryIndex int) (int, int, bool) {
+	if entryIndex < 0 {
+		return 0, 0, false
 	}
-	lines := make([]string, 0, len(blocks)*2)
+	blocks := m.buildOngoingBlocks()
+	lineOffset := 0
 	for idx, block := range blocks {
 		if idx > 0 && ongoingDividerGroup(blocks[idx-1].role) != ongoingDividerGroup(block.role) {
-			lines = append(lines, detailDivider())
+			lineOffset++
 		}
-		lines = append(lines, block.lines...)
+		start := lineOffset
+		end := lineOffset + len(block.lines) - 1
+		if block.entryIndex == entryIndex {
+			return start, end, true
+		}
+		lineOffset += len(block.lines)
 	}
-	return strings.Join(lines, "\n")
+	return 0, 0, false
 }
 
 func (m Model) flattenEntry(role, text string) []string {
