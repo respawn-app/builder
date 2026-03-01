@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -295,10 +296,45 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.isInputLocked() {
 				return m, nil
 			}
+			if isMouseSGRReportRunes(msg.Runes) {
+				return m, nil
+			}
 			m.insertInputRunes(msg.Runes)
 		}
 		return m, nil
 	}
+}
+
+func isMouseSGRReportRunes(runes []rune) bool {
+	if len(runes) == 0 {
+		return false
+	}
+	text := string(runes)
+	payload := ""
+	if strings.HasPrefix(text, "\x1b[<") {
+		payload = strings.TrimPrefix(text, "\x1b[<")
+	} else if strings.HasPrefix(text, "[<") {
+		payload = strings.TrimPrefix(text, "[<")
+	} else {
+		return false
+	}
+	if len(payload) < 3 {
+		return false
+	}
+	marker := payload[len(payload)-1]
+	if marker != 'M' && marker != 'm' {
+		return false
+	}
+	numbers := strings.Split(payload[:len(payload)-1], ";")
+	if len(numbers) != 3 {
+		return false
+	}
+	for _, part := range numbers {
+		if _, err := strconv.Atoi(part); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func (c uiInputController) applyCommandResult(commandResult commands.Result) (tea.Model, tea.Cmd) {
