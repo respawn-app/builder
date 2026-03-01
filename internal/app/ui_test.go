@@ -397,6 +397,30 @@ func TestRollbackSelectionRecentersTranscript(t *testing.T) {
 	if after >= before {
 		t.Fatalf("expected rollback selection movement to recenter upwards, got %d from %d", after, before)
 	}
+
+	selected := updated.rollbackCandidates[updated.rollbackSelection].Text
+	lines := strings.Split(stripANSIAndTrimRight(updated.view.View()), "\n")
+	selectedLine := -1
+	for idx, line := range lines {
+		if strings.Contains(line, selected) {
+			selectedLine = idx
+			break
+		}
+	}
+	if selectedLine < 0 {
+		t.Fatalf("expected selected rollback message %q visible in viewport", selected)
+	}
+	mid := len(lines) / 2
+	if diff := absInt(selectedLine - mid); diff > 2 {
+		t.Fatalf("expected selected rollback message near viewport middle, line=%d mid=%d", selectedLine, mid)
+	}
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 func TestApprovalAskTabAllowsWithCommentary(t *testing.T) {
