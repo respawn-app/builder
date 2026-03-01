@@ -83,8 +83,9 @@ func (m *sessionPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyDown:
 			m.moveCursor(1)
 		case tea.KeyRunes:
-			if len(key.Runes) == 1 {
-				switch key.Runes[0] {
+			filtered, _ := stripMouseSGRRunes(key.Runes)
+			if len(filtered) == 1 {
+				switch filtered[0] {
 				case 'k':
 					m.moveCursor(-1)
 				case 'j':
