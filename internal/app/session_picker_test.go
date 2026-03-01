@@ -72,6 +72,15 @@ func TestSessionPickerNewHotkeyAndCancel(t *testing.T) {
 	}
 }
 
+func TestSessionPickerIgnoresMouseSGRRunes(t *testing.T) {
+	m := newSessionPickerModel(nil, "dark")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[<64;81;40M[<65;80;39M")})
+	m = next.(*sessionPickerModel)
+	if m.result.CreateNew || m.result.Canceled || m.result.Session != nil {
+		t.Fatalf("expected mouse sgr runes ignored, got result=%+v", m.result)
+	}
+}
+
 func TestSessionPickerViewOmitsHotkeyLegend(t *testing.T) {
 	m := newSessionPickerModel(nil, "dark")
 	out := ansi.Strip(m.View())
