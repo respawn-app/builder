@@ -21,14 +21,18 @@ func (m *uiModel) insertInputRunes(chars []rune) {
 	if len(chars) == 0 {
 		return
 	}
+	filtered, _ := stripMouseSGRRunes(chars)
+	if len(filtered) == 0 {
+		return
+	}
 	runes := m.inputRunes()
 	cursor := clampCursor(m.inputCursor, len(runes))
-	updated := make([]rune, 0, len(runes)+len(chars))
+	updated := make([]rune, 0, len(runes)+len(filtered))
 	updated = append(updated, runes[:cursor]...)
-	updated = append(updated, chars...)
+	updated = append(updated, filtered...)
 	updated = append(updated, runes[cursor:]...)
 	m.input = string(updated)
-	m.inputCursor = cursor + len(chars)
+	m.inputCursor = cursor + len(filtered)
 	m.refreshSlashCommandFilterFromInput()
 }
 
