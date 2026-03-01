@@ -41,6 +41,10 @@ func (m *uiModel) refreshRollbackCandidates() {
 }
 
 func (m *uiModel) startRollbackSelectionMode() bool {
+	if !m.rollbackMode && !m.rollbackEditing && !m.rollbackRestoreScrollActive {
+		m.rollbackRestoreOngoingScroll = m.view.OngoingScroll()
+		m.rollbackRestoreScrollActive = true
+	}
 	m.refreshRollbackCandidates()
 	if len(m.rollbackCandidates) == 0 {
 		return false
@@ -70,6 +74,10 @@ func (m *uiModel) startRollbackSelectionMode() bool {
 func (m *uiModel) stopRollbackSelectionMode() {
 	m.rollbackMode = false
 	m.forwardToView(tui.SetSelectedTranscriptEntryMsg{Active: false, EntryIndex: -1})
+	if m.rollbackRestoreScrollActive {
+		m.forwardToView(tui.SetOngoingScrollMsg{Scroll: m.rollbackRestoreOngoingScroll})
+		m.rollbackRestoreScrollActive = false
+	}
 }
 
 func (m *uiModel) applyRollbackSelectionHighlight() {
@@ -122,5 +130,6 @@ func (m *uiModel) clearRollbackFlow() {
 	m.rollbackMode = false
 	m.rollbackEditing = false
 	m.rollbackSelectedUserMessageIndex = 0
+	m.rollbackRestoreScrollActive = false
 	m.forwardToView(tui.SetSelectedTranscriptEntryMsg{Active: false, EntryIndex: -1})
 }

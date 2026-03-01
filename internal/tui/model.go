@@ -72,6 +72,10 @@ type FocusTranscriptEntryMsg struct {
 	Center     bool
 }
 
+type SetOngoingScrollMsg struct {
+	Scroll int
+}
+
 type StreamAssistantMsg struct {
 	Delta string
 }
@@ -237,6 +241,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.ongoingScroll = clamp(target, 0, m.maxOngoingScroll())
 		}
+	case SetOngoingScrollMsg:
+		m.ongoingScroll = clamp(msg.Scroll, 0, m.maxOngoingScroll())
 	case StreamAssistantMsg:
 		m.ongoing += msg.Delta
 		shouldAutoFollowOngoing = true

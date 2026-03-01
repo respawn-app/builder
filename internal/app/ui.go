@@ -240,6 +240,8 @@ type uiModel struct {
 	rollbackCandidates               []rollbackCandidate
 	rollbackSelection                int
 	rollbackSelectedUserMessageIndex int
+	rollbackRestoreOngoingScroll     int
+	rollbackRestoreScrollActive      bool
 }
 
 func (m *uiModel) isInputLocked() bool {
