@@ -131,20 +131,19 @@ func renderNativeScrollbackSnapshot(entries []tui.TranscriptEntry, theme string,
 	if casted, ok := next.(tui.Model); ok {
 		tuiModel = casted
 	}
+	filtered := make([]tui.TranscriptEntry, 0, len(entries))
 	for _, entry := range entries {
 		if strings.TrimSpace(entry.Text) == "" {
 			continue
 		}
-		next, _ = tuiModel.Update(tui.AppendTranscriptMsg{
-			Role:       entry.Role,
-			Text:       entry.Text,
-			Phase:      entry.Phase,
-			ToolCallID: entry.ToolCallID,
-			ToolCall:   entry.ToolCall,
-		})
-		if casted, ok := next.(tui.Model); ok {
-			tuiModel = casted
-		}
+		filtered = append(filtered, entry)
+	}
+	if len(filtered) == 0 {
+		return ""
+	}
+	next, _ = tuiModel.Update(tui.SetConversationMsg{Entries: filtered})
+	if casted, ok := next.(tui.Model); ok {
+		tuiModel = casted
 	}
 	return styleNativeReplayDividers(tuiModel.OngoingCommittedSnapshot(), theme, width)
 }

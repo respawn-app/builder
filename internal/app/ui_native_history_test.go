@@ -9,6 +9,7 @@ import (
 
 	"builder/internal/config"
 	"builder/internal/runtime"
+	"builder/internal/transcript"
 	"builder/internal/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -179,6 +180,75 @@ func TestNativeScrollbackSnapshotPreservesCodeBlockIndentation(t *testing.T) {
 	plain := stripANSIPreserve(out)
 	if !strings.Contains(plain, "root:") || !strings.Contains(plain, "  key: value") {
 		t.Fatalf("expected yaml indentation preserved in formatted snapshot, got %q", out)
+	}
+}
+
+func TestRenderNativeScrollbackSnapshotPreservesToolCallFormatting(t *testing.T) {
+	out := renderNativeScrollbackSnapshot([]tui.TranscriptEntry{
+		{
+			Role: "tool_call",
+			Text: `{"command":"echo hi"}`,
+			ToolCall: &transcript.ToolCallMeta{
+				ToolName: "shell",
+				IsShell:  true,
+				Command:  "echo hi",
+			},
+		},
+		{Role: "tool_result_ok", Text: "hi"},
+	}, "dark", 100)
+	plain := stripANSIText(out)
+	if !strings.Contains(plain, "echo hi") {
+		t.Fatalf("expected tool call command preserved, got %q", out)
+	}
+	if !strings.Contains(plain, "hi") {
+		t.Fatalf("expected tool result preserved, got %q", out)
+	}
+}
+
+func renderNativeScrollbackSnapshotLegacy(entries []tui.TranscriptEntry, theme string, width int) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	if width <= 0 {
+		width = 120
+	}
+	tuiModel := tui.NewModel(tui.WithTheme(theme), tui.WithPreviewLines(200000))
+	next, _ := tuiModel.Update(tui.SetViewportSizeMsg{Lines: 200000, Width: width})
+	if casted, ok := next.(tui.Model); ok {
+		tuiModel = casted
+	}
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.Text) == "" {
+			continue
+		}
+		next, _ = tuiModel.Update(tui.AppendTranscriptMsg{
+			Role:       entry.Role,
+			Text:       entry.Text,
+			Phase:      entry.Phase,
+			ToolCallID: entry.ToolCallID,
+			ToolCall:   entry.ToolCall,
+		})
+		if casted, ok := next.(tui.Model); ok {
+			tuiModel = casted
+		}
+	}
+	return styleNativeReplayDividers(tuiModel.OngoingCommittedSnapshot(), theme, width)
+}
+
+func TestRenderNativeScrollbackSnapshotMatchesLegacyAppendPath(t *testing.T) {
+	entries := []tui.TranscriptEntry{
+		{Role: "user", Text: "show files"},
+		{Role: "tool_call", Text: "ls -la", ToolCallID: "call_1", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "ls -la"}},
+		{Role: "tool_result_ok", Text: "total 8\n-rw-r--r-- a.txt", ToolCallID: "call_1"},
+		{Role: "tool_call", Text: "Choose scope?", ToolCallID: "call_2", ToolCall: &transcript.ToolCallMeta{ToolName: "ask_question", Question: "Choose scope?", Suggestions: []string{"Recommended: full"}}},
+		{Role: "tool_result_ok", Text: "Use full scope.", ToolCallID: "call_2"},
+		{Role: "tool_call", Text: "Edited:\n./a.go +1 -1", ToolCallID: "call_3", ToolCall: &transcript.ToolCallMeta{ToolName: "patch", PatchSummary: "Edited:\n./a.go +1 -1", PatchDetail: "Edited:\n/work/a.go\n-old\n+new", RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff}}},
+		{Role: "tool_result_ok", Text: "", ToolCallID: "call_3"},
+	}
+	modern := renderNativeScrollbackSnapshot(entries, "dark", 120)
+	legacy := renderNativeScrollbackSnapshotLegacy(entries, "dark", 120)
+	if modern != legacy {
+		t.Fatalf("expected native snapshot output to match legacy append path")
 	}
 }
 
