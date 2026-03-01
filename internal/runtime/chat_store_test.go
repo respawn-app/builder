@@ -355,6 +355,62 @@ func TestChatStoreSnapshotIncludesDeveloperErrorFeedbackAsErrorRole(t *testing.T
 	}
 }
 
+func TestChatStoreSnapshotIncludesDeveloperMessagesAsDeveloperRole(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "task"})
+	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, Content: "Supervisor agent gave you suggestions:\n1. tighten assertions"})
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "done"})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if snap.Entries[1].Role != "developer" {
+		t.Fatalf("expected developer entry role, got %+v", snap.Entries[1])
+	}
+	if !strings.Contains(snap.Entries[1].Text, "Supervisor agent gave you suggestions") {
+		t.Fatalf("unexpected developer entry content: %+v", snap.Entries[1])
+	}
+}
+
+func TestChatStoreSnapshotHidesNonVisibleDeveloperMessages(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "task"})
+	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, Content: "internal control prompt"})
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "done"})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 2 {
+		t.Fatalf("expected non-visible developer message to be hidden, got %d entries (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if snap.Entries[0].Role != "user" || snap.Entries[1].Role != "assistant" {
+		t.Fatalf("unexpected visible entries when developer message should be hidden: %+v", snap.Entries)
+	}
+}
+
+func TestChatStoreSnapshotKeepsReviewerAndCompactionLocalEntriesVisible(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "task"})
+	s.appendLocalEntry("reviewer_status", "Supervisor suggestions:\n1. tighten assertions\n2. add tests")
+	s.appendLocalEntry("compaction_notice", "context compacted for the 1st time")
+	s.appendLocalEntry("compaction_summary", "compaction summary body")
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "done"})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 5 {
+		t.Fatalf("expected 5 entries with local status/compaction content, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if snap.Entries[1].Role != "reviewer_status" || !strings.Contains(snap.Entries[1].Text, "Supervisor suggestions") {
+		t.Fatalf("expected reviewer_status entry preserved, got %+v", snap.Entries[1])
+	}
+	if snap.Entries[2].Role != "compaction_notice" {
+		t.Fatalf("expected compaction_notice entry preserved, got %+v", snap.Entries[2])
+	}
+	if snap.Entries[3].Role != "compaction_summary" || !strings.Contains(snap.Entries[3].Text, "compaction summary") {
+		t.Fatalf("expected compaction_summary entry preserved, got %+v", snap.Entries[3])
+	}
+}
+
 func TestChatStoreSnapshotKeepsLocalEntryOrderingWithDeveloperErrorFeedback(t *testing.T) {
 	s := newChatStore()
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "first"})

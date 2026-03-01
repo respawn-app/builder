@@ -932,7 +932,7 @@ func ongoingDividerGroup(role string) string {
 
 func skipInOngoing(role string) bool {
 	switch strings.ToLower(strings.TrimSpace(role)) {
-	case "thinking", "thinking_trace", "reasoning", "compaction_summary", "error":
+	case "thinking", "thinking_trace", "reasoning", "compaction_summary", "error", "developer":
 		return true
 	default:
 		return false
@@ -1378,6 +1378,8 @@ func rolePrefix(role string) string {
 		return "@"
 	case "reviewer_status":
 		return "@"
+	case "developer":
+		return "#"
 	case "error":
 		return "!"
 	default:
@@ -1421,6 +1423,8 @@ func styleForRole(role string, p palette) lipgloss.Style {
 	case "system":
 		return p.system
 	case "reasoning", "thinking_trace":
+		return p.system
+	case "developer":
 		return p.system
 	case "error":
 		return p.error
