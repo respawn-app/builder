@@ -30,6 +30,12 @@ Builder is a highly opinionated, minimal terminal coding agent for professional 
 - `auto` prefers OSC 9 for compatible terminals (including Ghostty) and falls back to BEL.
 - You can override via env var: `BUILDER_NOTIFICATION_METHOD`.
 
+### Scroll Modes
+
+- `tui_scroll_mode` controls Builder transcript behavior (`alt` or `native`).
+- `tui_alternate_screen` controls terminal alt-screen policy (`auto|always|never`).
+- In `tui_scroll_mode=native`, main UI startup always uses normal buffer even if `tui_alternate_screen=always`, so transcript replay remains visible in terminal scrollback.
+
 ### Important things not done yet
 
 - [ ] @-file mentioning

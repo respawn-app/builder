@@ -28,6 +28,10 @@ type clearTransientStatusMsg struct {
 	token uint64
 }
 
+type nativeHistoryFlushMsg struct {
+	Text string
+}
+
 type runtimeEventMsg struct {
 	event runtime.Event
 }
@@ -104,6 +108,12 @@ func WithUIAlternateScreenPolicy(policy config.TUIAlternateScreenPolicy) UIOptio
 	return func(m *uiModel) {
 		m.tuiAlternateScreen = policy
 		m.altScreenActive = policy == config.TUIAlternateScreenAlways
+	}
+}
+
+func WithUIScrollMode(mode config.TUIScrollMode) UIOption {
+	return func(m *uiModel) {
+		m.tuiScrollMode = mode
 	}
 }
 
@@ -185,6 +195,7 @@ type uiModel struct {
 	exitAction            UIAction
 	theme                 string
 	tuiAlternateScreen    config.TUIAlternateScreenPolicy
+	tuiScrollMode         config.TUIScrollMode
 	altScreenActive       bool
 
 	sawAssistantDelta bool
@@ -199,6 +210,7 @@ type uiModel struct {
 
 	termWidth  int
 	termHeight int
+	windowSizeKnown bool
 
 	initialTranscript []UITranscriptEntry
 	startupSubmit     string
@@ -213,7 +225,13 @@ type uiModel struct {
 	transientStatus      string
 	transientStatusToken uint64
 
-	transcriptEntries []tui.TranscriptEntry
+	transcriptEntries       []tui.TranscriptEntry
+	nativeFlushedEntryCount int
+	nativeHistoryReplayed   bool
+	nativeReplayWidth       int
+	startupCmds             []tea.Cmd
+	nativeLiveRegionLines   int
+	nativeLiveRegionPad     int
 
 	lastEscAt time.Time
 
@@ -251,12 +269,14 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 		exitAction:         UIActionNone,
 		theme:              "dark",
 		tuiAlternateScreen: config.TUIAlternateScreenAuto,
+		tuiScrollMode:      config.TUIScrollModeAlt,
 	}
 	for _, opt := range opts {
 		opt(m)
 	}
+	var startupNativeHistoryCmd tea.Cmd
 	if m.engine != nil {
-		m.runtimeAdapter().syncConversationFromEngine()
+		startupNativeHistoryCmd = m.runtimeAdapter().syncConversationFromEngine()
 	} else {
 		for _, entry := range m.initialTranscript {
 			if strings.TrimSpace(entry.Text) == "" {
@@ -266,6 +286,10 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 			m.forwardToView(tui.AppendTranscriptMsg{Role: entry.Role, Text: entry.Text})
 		}
 		m.refreshRollbackCandidates()
+		startupNativeHistoryCmd = m.syncNativeHistoryFromTranscript()
+	}
+	if startupNativeHistoryCmd != nil {
+		m.startupCmds = append(m.startupCmds, startupNativeHistoryCmd)
 	}
 	m.syncViewport()
 	return m
@@ -273,15 +297,26 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 
 func (m *uiModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{
-		tea.ClearScreen,
 		waitRuntimeEvent(m.runtimeEvents),
 		waitAskEvent(m.askEvents),
 		tea.SetWindowTitle(m.windowTitle()),
+		tea.WindowSize(),
+	}
+	if m.shouldClearOnInit() {
+		cmds = append([]tea.Cmd{tea.ClearScreen}, cmds...)
 	}
 	if strings.TrimSpace(m.startupSubmit) != "" {
 		cmds = append(cmds, m.inputController().startSubmission(m.startupSubmit))
 	}
+	if len(m.startupCmds) > 0 {
+		cmds = append(cmds, m.startupCmds...)
+		m.startupCmds = nil
+	}
 	return tea.Batch(cmds...)
+}
+
+func (m *uiModel) shouldClearOnInit() bool {
+	return !m.usesNativeScrollback()
 }
 
 func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -305,7 +340,11 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.termWidth = msg.Width
 		m.termHeight = msg.Height
+		m.windowSizeKnown = true
 		m.syncViewport()
+		if m.usesNativeScrollback() && !m.nativeHistoryReplayed {
+			return m, m.syncNativeHistoryFromTranscript()
+		}
 		return m, nil
 	case runtimeEventMsg:
 		historyCmd := m.runtimeAdapter().handleRuntimeEvent(msg.event)
@@ -321,6 +360,11 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.syncViewport()
 		return m, nil
+	case nativeHistoryFlushMsg:
+		if strings.TrimSpace(msg.Text) == "" {
+			return m, nil
+		}
+		return m, tea.Printf("%s", msg.Text)
 	case submitDoneMsg:
 		next, cmd := m.inputController().handleSubmitDone(msg)
 		next.(*uiModel).syncViewport()

@@ -20,16 +20,30 @@ func TestExtractUITransitionIncludesInitialPrompt(t *testing.T) {
 	}
 }
 
-func TestMainUIProgramOptionsIncludeMouseCapture(t *testing.T) {
-	options := mainUIProgramOptions(config.Settings{TUIAlternateScreen: config.TUIAlternateScreenAuto})
+func TestMainUIProgramOptionsAutoAltModeEnablesMouseCapture(t *testing.T) {
+	options := mainUIProgramOptions(config.Settings{TUIAlternateScreen: config.TUIAlternateScreenAuto, TUIScrollMode: config.TUIScrollModeAlt})
 	if len(options) != 1 {
-		t.Fatalf("expected exactly one main UI option with auto alt-screen (mouse capture), got %d", len(options))
+		t.Fatalf("expected mouse option with auto alt-screen in alt mode, got %d", len(options))
 	}
 }
 
-func TestMainUIProgramOptionsIncludeAltScreenAndMouseCapture(t *testing.T) {
-	options := mainUIProgramOptions(config.Settings{TUIAlternateScreen: config.TUIAlternateScreenAlways})
+func TestMainUIProgramOptionsAlwaysAltModeUsesAltScreenAndMouse(t *testing.T) {
+	options := mainUIProgramOptions(config.Settings{TUIAlternateScreen: config.TUIAlternateScreenAlways, TUIScrollMode: config.TUIScrollModeAlt})
 	if len(options) != 2 {
-		t.Fatalf("expected alt-screen and mouse capture options, got %d", len(options))
+		t.Fatalf("expected alt-screen and mouse options, got %d", len(options))
+	}
+}
+
+func TestMainUIProgramOptionsNativeDisablesMouseCapture(t *testing.T) {
+	options := mainUIProgramOptions(config.Settings{TUIAlternateScreen: config.TUIAlternateScreenAuto, TUIScrollMode: config.TUIScrollModeNative})
+	if len(options) != 0 {
+		t.Fatalf("expected no options in native mode with auto alt-screen, got %d", len(options))
+	}
+}
+
+func TestMainUIProgramOptionsNativeDisablesAltScreenEvenWhenAlways(t *testing.T) {
+	options := mainUIProgramOptions(config.Settings{TUIAlternateScreen: config.TUIAlternateScreenAlways, TUIScrollMode: config.TUIScrollModeNative})
+	if len(options) != 0 {
+		t.Fatalf("expected no options in native mode with always alt-screen, got %d", len(options))
 	}
 }

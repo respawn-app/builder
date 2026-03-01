@@ -24,10 +24,16 @@ func (m *uiModel) toggleTranscriptMode() tea.Cmd {
 	m.forwardToView(tui.ToggleModeMsg{})
 	nextMode := m.view.Mode()
 	transitionCmd := m.altScreenCmdForModeTransition(prevMode, nextMode)
-	if transitionCmd == nil {
-		return tea.ClearScreen
+	if transitionCmd != nil {
+		if m.usesNativeScrollback() {
+			return transitionCmd
+		}
+		return tea.Sequence(transitionCmd, tea.ClearScreen)
 	}
-	return tea.Sequence(transitionCmd, tea.ClearScreen)
+	if m.usesNativeScrollback() {
+		return nil
+	}
+	return tea.ClearScreen
 }
 
 func (m *uiModel) altScreenCmdForModeTransition(prev, next tui.Mode) tea.Cmd {
@@ -36,6 +42,14 @@ func (m *uiModel) altScreenCmdForModeTransition(prev, next tui.Mode) tea.Cmd {
 	}
 	if !shouldUseDetailAltScreen(m.tuiAlternateScreen) {
 		return nil
+	}
+	if next == tui.ModeDetail && !m.altScreenActive {
+		m.altScreenActive = true
+		return tea.EnterAltScreen
+	}
+	if prev == tui.ModeDetail && m.altScreenActive && m.tuiAlternateScreen != config.TUIAlternateScreenAlways {
+		m.altScreenActive = false
+		return tea.ExitAltScreen
 	}
 	return nil
 }

@@ -35,14 +35,20 @@ const (
 	defaultReviewerTimeoutSec  = 60
 	defaultReviewerSuggestions = 5
 	defaultTUIAlternateScreen  = "auto"
+	defaultTUIScrollMode       = "alt"
 )
 
 type TUIAlternateScreenPolicy string
+
+type TUIScrollMode string
 
 const (
 	TUIAlternateScreenAuto   TUIAlternateScreenPolicy = "auto"
 	TUIAlternateScreenAlways TUIAlternateScreenPolicy = "always"
 	TUIAlternateScreenNever  TUIAlternateScreenPolicy = "never"
+
+	TUIScrollModeAlt    TUIScrollMode = "alt"
+	TUIScrollModeNative TUIScrollMode = "native"
 )
 
 type LoadOptions struct {
@@ -65,6 +71,7 @@ type Settings struct {
 	ThinkingLevel                    string
 	Theme                            string
 	TUIAlternateScreen               TUIAlternateScreenPolicy
+	TUIScrollMode                    TUIScrollMode
 	NotificationMethod               string
 	WebSearch                        string
 	OpenAIBaseURL                    string
@@ -106,6 +113,7 @@ type fileSettings struct {
 	ThinkingLevel      string          `toml:"thinking_level"`
 	Theme              string          `toml:"theme"`
 	TUIAlternateScreen string          `toml:"tui_alternate_screen"`
+	TUIScrollMode      string          `toml:"tui_scroll_mode"`
 	NotificationMethod string          `toml:"notification_method"`
 	WebSearch          string          `toml:"web_search"`
 	Tools              map[string]bool `toml:"tools"`
@@ -157,6 +165,7 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		"thinking_level":                      "default",
 		"theme":                               "default",
 		"tui_alternate_screen":                "default",
+		"tui_scroll_mode":                     "default",
 		"notification_method":                 "default",
 		"web_search":                          "default",
 		"openai_base_url":                     "default",
@@ -195,6 +204,10 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if strings.TrimSpace(cfg.TUIAlternateScreen) != "" {
 		merged.TUIAlternateScreen = normalizeTUIAlternateScreenPolicy(cfg.TUIAlternateScreen)
 		sources["tui_alternate_screen"] = "file"
+	}
+	if strings.TrimSpace(cfg.TUIScrollMode) != "" {
+		merged.TUIScrollMode = normalizeTUIScrollMode(cfg.TUIScrollMode)
+		sources["tui_scroll_mode"] = "file"
 	}
 	if strings.TrimSpace(cfg.NotificationMethod) != "" {
 		merged.NotificationMethod = strings.TrimSpace(cfg.NotificationMethod)
@@ -291,6 +304,10 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if v := strings.TrimSpace(os.Getenv("BUILDER_TUI_ALTERNATE_SCREEN")); v != "" {
 		merged.TUIAlternateScreen = normalizeTUIAlternateScreenPolicy(v)
 		sources["tui_alternate_screen"] = "env"
+	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_TUI_SCROLL_MODE")); v != "" {
+		merged.TUIScrollMode = normalizeTUIScrollMode(v)
+		sources["tui_scroll_mode"] = "env"
 	}
 	if v := strings.TrimSpace(os.Getenv("BUILDER_NOTIFICATION_METHOD")); v != "" {
 		merged.NotificationMethod = v
@@ -508,6 +525,7 @@ func defaultSettings() Settings {
 		ThinkingLevel:                    defaultThinkingLevel,
 		Theme:                            defaultTheme,
 		TUIAlternateScreen:               TUIAlternateScreenPolicy(defaultTUIAlternateScreen),
+		TUIScrollMode:                    TUIScrollMode(defaultTUIScrollMode),
 		NotificationMethod:               "auto",
 		WebSearch:                        "off",
 		Store:                            false,
@@ -549,6 +567,11 @@ func validateSettings(v Settings) error {
 	case "auto", "always", "never":
 	default:
 		return fmt.Errorf("invalid tui_alternate_screen %q (expected auto|always|never)", v.TUIAlternateScreen)
+	}
+	switch strings.ToLower(strings.TrimSpace(string(v.TUIScrollMode))) {
+	case "alt", "native":
+	default:
+		return fmt.Errorf("invalid tui_scroll_mode %q (expected alt|native)", v.TUIScrollMode)
 	}
 	switch strings.ToLower(strings.TrimSpace(v.NotificationMethod)) {
 	case "auto", "osc9", "bel":
@@ -618,6 +641,17 @@ func normalizeTUIAlternateScreenPolicy(raw string) TUIAlternateScreenPolicy {
 		return TUIAlternateScreenNever
 	default:
 		return TUIAlternateScreenPolicy(strings.TrimSpace(raw))
+	}
+}
+
+func normalizeTUIScrollMode(raw string) TUIScrollMode {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "alt":
+		return TUIScrollModeAlt
+	case "native":
+		return TUIScrollModeNative
+	default:
+		return TUIScrollMode(strings.TrimSpace(raw))
 	}
 }
 
@@ -722,6 +756,7 @@ func defaultSettingsTOML() string {
 		"thinking_level":                      defaults.ThinkingLevel,
 		"theme":                               defaults.Theme,
 		"tui_alternate_screen":                defaults.TUIAlternateScreen,
+		"tui_scroll_mode":                     defaults.TUIScrollMode,
 		"notification_method":                 defaults.NotificationMethod,
 		"web_search":                          defaults.WebSearch,
 		"openai_base_url":                     defaults.OpenAIBaseURL,
@@ -748,12 +783,15 @@ func defaultSettingsTOML() string {
 	encoded, _ := json.MarshalIndent(payload, "", "  ")
 	out := "# builder settings\n" +
 		"# edit and restart builder to apply changes\n\n" +
+		"# Note: tui_scroll_mode=native forces main UI to normal buffer even if\n" +
+		"# tui_alternate_screen=always, so transcript replay stays visible in scrollback.\n\n" +
 		"# This JSON block mirrors current defaults for readability:\n" +
 		"# " + strings.ReplaceAll(string(encoded), "\n", "\n# ") + "\n\n" +
 		"model = \"" + defaults.Model + "\"\n" +
 		"thinking_level = \"" + defaults.ThinkingLevel + "\"\n" +
 		"theme = \"" + defaults.Theme + "\"\n" +
 		"tui_alternate_screen = \"" + string(defaults.TUIAlternateScreen) + "\"\n" +
+		"tui_scroll_mode = \"" + string(defaults.TUIScrollMode) + "\"\n" +
 		"notification_method = \"" + defaults.NotificationMethod + "\"\n" +
 		"web_search = \"" + defaults.WebSearch + "\"\n" +
 		"openai_base_url = \"" + defaults.OpenAIBaseURL + "\"\n" +

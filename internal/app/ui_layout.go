@@ -15,6 +15,7 @@ import (
 
 const (
 	ansiHideCursor        = "\x1b[?25l"
+	ansiClearLine         = "\x1b[2K"
 	statusContextBarWidth = 10
 	queuedMessagesLimit   = 5
 )
@@ -29,6 +30,9 @@ func (m *uiModel) View() string {
 
 func (l uiViewLayout) render() string {
 	m := l.model
+	if m.usesNativeScrollback() && m.view.Mode() == tui.ModeOngoing {
+		return l.renderNativeOngoing()
+	}
 	style := uiThemeStyles(m.theme)
 	width := l.effectiveWidth()
 	height := l.effectiveHeight()
@@ -65,6 +69,97 @@ func (l uiViewLayout) render() string {
 	}
 	rendered := strings.Join(allLines, "\n")
 	return rendered + ansiHideCursor
+}
+
+func (l uiViewLayout) renderNativeOngoing() string {
+	m := l.model
+	if !m.windowSizeKnown {
+		return l.renderNativeOngoingPreSize()
+	}
+	return l.renderNativeOngoingSized()
+}
+
+func (l uiViewLayout) renderNativeOngoingPreSize() string {
+	m := l.model
+	style := uiThemeStyles(m.theme)
+	width := l.effectiveWidth()
+	if width <= 0 {
+		return ""
+	}
+	inputLines := l.renderInputLines(width, style)
+	queuedLines := l.renderQueuedMessagesPane(width)
+	pickerLines := l.renderSlashCommandPicker(width)
+	statusLine := l.renderStatusLine(width, style)
+	lines := make([]string, 0, len(inputLines)+len(queuedLines)+len(pickerLines)+1)
+	lines = append(lines, pickerLines...)
+	lines = append(lines, queuedLines...)
+	lines = append(lines, inputLines...)
+	lines = append(lines, statusLine)
+	return strings.Join(lines, "\n") + ansiHideCursor
+}
+
+func (l uiViewLayout) renderNativeOngoingSized() string {
+	m := l.model
+	style := uiThemeStyles(m.theme)
+	width := l.effectiveWidth()
+	height := l.effectiveHeight()
+	if width <= 0 {
+		return ""
+	}
+	if height <= 0 {
+		return l.renderNativeOngoingPreSize()
+	}
+	inputLines := l.renderInputLines(width, style)
+	queuedLines := l.renderQueuedMessagesPane(width)
+	pickerLines := l.renderSlashCommandPicker(width)
+	statusLine := l.renderStatusLine(width, style)
+	statusLines := 1
+	chatLines := height - len(inputLines) - len(queuedLines) - len(pickerLines) - statusLines
+	if chatLines < 1 {
+		chatLines = 1
+	}
+	chatPanel := l.renderChatPanel(width, chatLines, style)
+	allLines := make([]string, 0, height)
+	allLines = append(allLines, chatPanel...)
+	allLines = append(allLines, pickerLines...)
+	allLines = append(allLines, queuedLines...)
+	allLines = append(allLines, inputLines...)
+	allLines = append(allLines, statusLine)
+	for len(allLines) < height {
+		allLines = append(allLines, padRight("", width))
+	}
+	if len(allLines) > height {
+		allLines = allLines[len(allLines)-height:]
+	}
+	return strings.Join(allLines, "\n") + ansiHideCursor
+}
+
+func (l uiViewLayout) nativeOngoingLineCount() int {
+	m := l.model
+	style := uiThemeStyles(m.theme)
+	width := l.effectiveWidth()
+	if width <= 0 {
+		return 0
+	}
+	inputLines := l.renderInputLines(width, style)
+	queuedLines := l.renderQueuedMessagesPane(width)
+	pickerLines := l.renderSlashCommandPicker(width)
+	return len(inputLines) + len(queuedLines) + len(pickerLines) + 1
+}
+
+func (l uiViewLayout) syncNativeLiveRegionState() {
+	m := l.model
+	if !m.usesNativeScrollback() || m.view.Mode() != tui.ModeOngoing {
+		m.nativeLiveRegionPad = 0
+		return
+	}
+	current := l.nativeOngoingLineCount()
+	if current < m.nativeLiveRegionLines {
+		m.nativeLiveRegionPad = m.nativeLiveRegionLines - current
+	} else {
+		m.nativeLiveRegionPad = 0
+	}
+	m.nativeLiveRegionLines = current
 }
 
 func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
@@ -595,6 +690,8 @@ func (l uiViewLayout) calcChatLines() int {
 
 func (l uiViewLayout) syncViewport() {
 	m := l.model
+	l.syncNativeLiveRegionState()
+	m.nativeReplayWidth = l.effectiveWidth()
 	m.forwardToView(tui.SetViewportSizeMsg{
 		Lines: l.calcChatLines(),
 		Width: l.effectiveWidth(),

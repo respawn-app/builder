@@ -76,7 +76,7 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 		Ongoing:      snapshot.Ongoing,
 		OngoingError: snapshot.OngoingError,
 	})
-	return nil
+	return m.syncNativeHistoryFromTranscript()
 }
 
 func waitRuntimeEvent(ch <-chan runtime.Event) tea.Cmd {
