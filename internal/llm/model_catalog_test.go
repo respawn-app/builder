@@ -21,4 +21,3 @@ func TestLookupModelMetadataCaseInsensitive(t *testing.T) {
 		t.Fatalf("unexpected context window: %d", meta.ContextWindowTokens)
 	}
 }
-

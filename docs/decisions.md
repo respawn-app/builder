@@ -548,6 +548,7 @@ This file records architecture and product decisions for the minimal terminal co
    - Ring when a new `ask_question` request is shown to the user (including approval asks).
    - Ring on turn end only when that turn executed at least two tool calls.
    - Turn-end ringing is keyed by runtime step id and `tool_call_started`/`assistant_message` events.
+   - Turn-end notification text includes a preview of the assistant response start when available; falls back to `Builder: turn complete` when empty.
    - Transport uses a terminal notification backend selected by `notification_method` (`auto|osc9|bel`, default `auto`).
    - `auto` prefers OSC 9 in terminals with known support (`TERM_PROGRAM=ghostty|WezTerm`, `ITERM_SESSION_ID`, `TERM=wezterm|wezterm-mux|xterm-kitty`) and falls back to BEL.
    - OSC 9 is disabled when `WT_SESSION` is set to avoid broken notifications in Windows Terminal/WSL setups.
