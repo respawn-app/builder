@@ -41,6 +41,27 @@ func TestSupportsReasoningEffortModel(t *testing.T) {
 	}
 }
 
+func TestSupportsVisionInputsModel(t *testing.T) {
+	tests := []struct {
+		model string
+		want  bool
+	}{
+		{model: "gpt-5.3-codex", want: true},
+		{model: " GPT-4.1 ", want: true},
+		{model: "gpt-4o-mini", want: true},
+		{model: "o3", want: true},
+		{model: "o4-mini", want: true},
+		{model: "claude-3-7-sonnet", want: false},
+		{model: "", want: false},
+	}
+
+	for _, tc := range tests {
+		if got := SupportsVisionInputsModel(tc.model); got != tc.want {
+			t.Fatalf("SupportsVisionInputsModel(%q)=%v, want %v", tc.model, got, tc.want)
+		}
+	}
+}
+
 func TestModelDisplayLabel(t *testing.T) {
 	tests := []struct {
 		model         string

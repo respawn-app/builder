@@ -11,7 +11,7 @@
 
 ## Core Runtime And Tools
 
-- Core tools: `shell`, `patch`, `ask_question`.
+- Core tools: `shell`, `view_image`, `patch`, `ask_question`.
 - Compatibility wrapper tool `multi_tool_use_parallel` is supported (Codex-style schema) and executes referenced `functions.*` tools concurrently while returning results in declared order.
 - One app instance runs one active conversation.
 - Tool execution concurrency inside a model step is unbounded.
@@ -151,6 +151,7 @@
 - Terminal notification backend is configurable by `notification_method` (`auto|osc9|bel`, default `auto`).
 - TUI alternate-screen policy is configurable by `tui_alternate_screen` (`auto|always|never`, default `auto`).
 - `tools.web_search` is enabled by default; `web_search` controls whether provider-native web search is activated (`native`) or disabled (`off`).
+- `tools.view_image` is enabled by default; runtime only advertises it to models that support multimodal inputs.
 
 ## Context Management And Compaction
 

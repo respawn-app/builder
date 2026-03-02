@@ -27,6 +27,8 @@ func TestParseID(t *testing.T) {
 		{in: "bash_command", want: ToolShell, ok: true},
 		{in: "shell_command", want: ToolShell, ok: true},
 		{in: "exec_command", want: ToolShell, ok: true},
+		{in: "view_image", want: ToolViewImage, ok: true},
+		{in: "read_image", want: ToolViewImage, ok: true},
 		{in: "patch", want: ToolPatch, ok: true},
 		{in: "ask_question", want: ToolAskQuestion, ok: true},
 		{in: "web_search", want: ToolWebSearch, ok: true},
@@ -84,12 +86,15 @@ func TestCentralDefinitionsRequireAdditionalPropertiesFalse(t *testing.T) {
 	}
 }
 
-func TestDefaultEnabledToolIDsIncludesWebSearch(t *testing.T) {
+func TestDefaultEnabledToolIDsIncludesWebSearchAndViewImage(t *testing.T) {
 	enabled := map[ID]bool{}
 	for _, id := range DefaultEnabledToolIDs() {
 		enabled[id] = true
 	}
 	if !enabled[ToolWebSearch] {
 		t.Fatalf("expected %s to be default-enabled", ToolWebSearch)
+	}
+	if !enabled[ToolViewImage] {
+		t.Fatalf("expected %s to be default-enabled", ToolViewImage)
 	}
 }

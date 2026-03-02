@@ -43,6 +43,23 @@ var catalogEntries = []CatalogEntry{
 }`),
 	},
 	{
+		ID:             ToolViewImage,
+		Aliases:        []string{"read_image"},
+		Description:    "Read a local image or PDF file by path and attach it to the model as native multimodal input content.",
+		DefaultEnabled: true,
+		Schema: json.RawMessage(`{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["path"],
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Local filesystem path to an image or PDF file. Relative paths resolve from the workspace root."
+    }
+  }
+}`),
+	},
+	{
 		ID:             ToolPatch,
 		Aliases:        nil,
 		Description:    "Apply a freeform patch. This tool does not support deletion, for deletion, use a shell tool, like trash (preferred if available) or rm",

@@ -112,6 +112,73 @@ func TestBuildResponsesInput_NonAssistantRolesUseInputText(t *testing.T) {
 	}
 }
 
+func TestBuildResponsesInput_ToolOutputSupportsStructuredInputImageItems(t *testing.T) {
+	items := buildResponsesInput([]Message{
+		{
+			Role:       RoleTool,
+			ToolCallID: "call_1",
+			Content:    `[{"type":"input_image","image_url":"data:image/png;base64,abc"}]`,
+		},
+	}, nil)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+
+	jsonItems := mustMarshalItems(t, items)
+	if got := jsonItems[0]["type"]; got != "function_call_output" {
+		t.Fatalf("expected function_call_output item, got %#v", got)
+	}
+	output, ok := jsonItems[0]["output"].([]any)
+	if !ok || len(output) != 1 {
+		t.Fatalf("expected structured output array, got %#v", jsonItems[0]["output"])
+	}
+	part, ok := output[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected structured output object, got %#v", output[0])
+	}
+	if got := part["type"]; got != "input_image" {
+		t.Fatalf("expected input_image output content, got %#v", got)
+	}
+	if got := part["image_url"]; got != "data:image/png;base64,abc" {
+		t.Fatalf("unexpected image_url in structured output: %#v", got)
+	}
+}
+
+func TestBuildResponsesInput_CanonicalToolOutputSupportsStructuredInputFileItems(t *testing.T) {
+	items := buildResponsesInput(nil, []ResponseItem{
+		{
+			Type:   ResponseItemTypeFunctionCallOutput,
+			CallID: "call_1",
+			Output: json.RawMessage(`[{"type":"input_file","file_data":"Zm9v","filename":"doc.pdf"}]`),
+		},
+	})
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+
+	jsonItems := mustMarshalItems(t, items)
+	if got := jsonItems[0]["type"]; got != "function_call_output" {
+		t.Fatalf("expected function_call_output item, got %#v", got)
+	}
+	output, ok := jsonItems[0]["output"].([]any)
+	if !ok || len(output) != 1 {
+		t.Fatalf("expected structured output array, got %#v", jsonItems[0]["output"])
+	}
+	part, ok := output[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected structured output object, got %#v", output[0])
+	}
+	if got := part["type"]; got != "input_file" {
+		t.Fatalf("expected input_file output content, got %#v", got)
+	}
+	if got := part["file_data"]; got != "Zm9v" {
+		t.Fatalf("unexpected file_data in structured output: %#v", got)
+	}
+	if got := part["filename"]; got != "doc.pdf" {
+		t.Fatalf("unexpected filename in structured output: %#v", got)
+	}
+}
+
 func TestServiceBaseURL_UsesCodexEndpointBaseForOAuth(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	transport.BaseURL = "https://api.openai.com/v1"

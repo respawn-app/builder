@@ -421,7 +421,7 @@ func formatToolResult(result tools.Result) string {
 			return formatted
 		}
 	}
-	output := strings.TrimSpace(toolcodec.FormatOutput(result.Output))
+	output := strings.TrimSpace(toolcodec.FormatOutputForTool(string(result.Name), result.Output))
 	if output == "" {
 		if result.IsError {
 			output = "tool failed"
@@ -648,5 +648,5 @@ func splitRawLines(v string) []string {
 }
 
 func formatToolOutput(raw json.RawMessage) string {
-	return toolcodec.FormatOutput(raw)
+	return toolcodec.FormatOutputForTool("", raw)
 }

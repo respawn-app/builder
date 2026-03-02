@@ -127,6 +127,20 @@ func FormatInput(toolName string, raw json.RawMessage, shellTimeoutSeconds int) 
 }
 
 func FormatOutput(raw json.RawMessage) string {
+	return FormatOutputForTool("", raw)
+}
+
+func FormatOutputForTool(toolName string, raw json.RawMessage) string {
+	if strings.EqualFold(strings.TrimSpace(toolName), "view_image") {
+		if summary, ok := formatViewImageOutput(raw); ok {
+			return summary
+		}
+	}
+
+	return formatOutputDefault(raw)
+}
+
+func formatOutputDefault(raw json.RawMessage) string {
 	var payload any
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return strings.TrimSpace(string(raw))
@@ -163,6 +177,40 @@ func FormatOutput(raw json.RawMessage) string {
 		return answer
 	}
 	return renderPlain(payload)
+}
+
+func formatViewImageOutput(raw json.RawMessage) (string, bool) {
+	var items []struct {
+		Type     string `json:"type"`
+		Filename string `json:"filename"`
+	}
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return "", false
+	}
+	if len(items) == 0 {
+		return "", false
+	}
+
+	labels := make([]string, 0, len(items))
+	for _, item := range items {
+		switch strings.ToLower(strings.TrimSpace(item.Type)) {
+		case "input_image":
+			labels = append(labels, "attached image")
+		case "input_file":
+			filename := strings.TrimSpace(item.Filename)
+			if filename == "" {
+				labels = append(labels, "attached PDF")
+				continue
+			}
+			labels = append(labels, "attached PDF: "+filename)
+		default:
+			labels = append(labels, "attached multimodal content")
+		}
+	}
+	if len(labels) == 0 {
+		return "", false
+	}
+	return strings.Join(labels, "\n"), true
 }
 
 func formatDurationShort(d time.Duration) string {

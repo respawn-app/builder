@@ -16,6 +16,7 @@ import (
 	askquestion "builder/internal/tools/askquestion"
 	multitooluseparallel "builder/internal/tools/multitooluseparallel"
 	patchtool "builder/internal/tools/patch"
+	readimagetool "builder/internal/tools/readimage"
 	shelltool "builder/internal/tools/shell"
 )
 
@@ -39,6 +40,7 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 		time.Duration(active.Timeouts.ShellDefaultSeconds)*time.Second,
 		active.ShellOutputMaxChars,
 		active.AllowNonCwdEdits,
+		llm.SupportsVisionInputsModel(active.Model),
 	)
 	if err != nil {
 		return nil, err
@@ -143,7 +145,7 @@ func configSourceLines(src config.SourceReport) []string {
 	return lines
 }
 
-func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTimeout time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool) (*tools.Registry, *askquestion.Broker, error) {
+func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTimeout time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsViewImage bool) (*tools.Registry, *askquestion.Broker, error) {
 	broker := askquestion.NewBroker()
 	outsideWorkspaceApprover := newPatchOutsideWorkspaceApprover(broker)
 	patch, err := patchtool.New(
@@ -161,6 +163,9 @@ func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTim
 	factories := map[tools.ID]func() tools.Handler{
 		tools.ToolShell: func() tools.Handler {
 			return shelltool.New(workspaceRoot, shellOutputMaxChars, shelltool.WithDefaultTimeout(shellDefaultTimeout))
+		},
+		tools.ToolViewImage: func() tools.Handler {
+			return readimagetool.New(workspaceRoot, supportsViewImage)
 		},
 		tools.ToolPatch: func() tools.Handler {
 			return patch
@@ -196,7 +201,7 @@ func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTim
 
 func isLocalRuntimeTool(id tools.ID) bool {
 	switch id {
-	case tools.ToolShell, tools.ToolPatch, tools.ToolAskQuestion, tools.ToolMultiToolUseParallel:
+	case tools.ToolShell, tools.ToolViewImage, tools.ToolPatch, tools.ToolAskQuestion, tools.ToolMultiToolUseParallel:
 		return true
 	default:
 		return false

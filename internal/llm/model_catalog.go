@@ -32,6 +32,21 @@ func SupportsReasoningEffortModel(model string) bool {
 	return strings.HasPrefix(normalizedModel, "gpt-") || strings.HasPrefix(normalizedModel, "o")
 }
 
+// SupportsVisionInputsModel reports whether the model likely supports multimodal
+// image/file inputs for the Responses API.
+func SupportsVisionInputsModel(model string) bool {
+	normalizedModel := strings.ToLower(strings.TrimSpace(model))
+	if normalizedModel == "" {
+		return false
+	}
+	return strings.HasPrefix(normalizedModel, "gpt-5") ||
+		strings.HasPrefix(normalizedModel, "gpt-4.1") ||
+		strings.HasPrefix(normalizedModel, "gpt-4o") ||
+		strings.HasPrefix(normalizedModel, "o1") ||
+		strings.HasPrefix(normalizedModel, "o3") ||
+		strings.HasPrefix(normalizedModel, "o4")
+}
+
 var defaultModelMetadata = map[string]ModelMetadata{
 	"gpt-5.3-codex": {
 		ContextWindowTokens: 400_000,

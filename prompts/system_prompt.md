@@ -128,6 +128,8 @@ Your responses will be styled as Markdown. Formatting should make results easy t
 
 To interact with the outside world, you should call tools available to you, your most used tools are `shell` to interact with the user's system, and `patch`, for easier editing of text files.
 
+- Use `view_image` when you need to read a local image or PDF by filesystem path (for example screenshots, scans, or documents). Prefer absolute paths when possible; relative paths resolve from workspace root.
+
 - When searching for text or files, prefer using `rg` over grep.
 - Do not use python or other scripts to attempt to edit or create individual files. Scripting is for automation, `patch` is for editing.
 - Do not re-read files after calling `patch` on them - if there was an error, you will be notified, otherwise assume success. The same goes for other tool calls.

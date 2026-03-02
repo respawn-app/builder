@@ -602,6 +602,77 @@ func TestSubmitUserMessageCommentaryWithoutToolCallsForcesNextLoop(t *testing.T)
 	}
 }
 
+func TestSubmitUserMessage_ExposesViewImageToolForVisionModels(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolViewImage}), Config{
+		Model:        "gpt-5.3-codex",
+		EnabledTools: []tools.ID{tools.ToolViewImage},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "analyze image"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected 1 model call, got %d", len(client.calls))
+	}
+	found := false
+	for _, tool := range client.calls[0].Tools {
+		if strings.TrimSpace(tool.Name) == string(tools.ToolViewImage) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected view_image tool in request tools: %+v", client.calls[0].Tools)
+	}
+}
+
+func TestSubmitUserMessage_HidesViewImageToolForTextOnlyModels(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolViewImage}), Config{
+		Model:        "gpt-3.5-turbo",
+		EnabledTools: []tools.ID{tools.ToolViewImage},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "analyze image"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected 1 model call, got %d", len(client.calls))
+	}
+	for _, tool := range client.calls[0].Tools {
+		if strings.TrimSpace(tool.Name) == string(tools.ToolViewImage) {
+			t.Fatalf("did not expect view_image tool in request for text-only model: %+v", client.calls[0].Tools)
+		}
+	}
+}
+
 func TestSubmitUserMessageMissingPhaseDefaultsToCommentaryAndWarns(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

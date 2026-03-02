@@ -397,7 +397,7 @@ func buildResponsesInputFromMessages(messages []Message) []responses.ResponseInp
 			if strings.TrimSpace(msg.ToolCallID) == "" {
 				continue
 			}
-			items = append(items, responses.ResponseInputItemParamOfFunctionCallOutput(msg.ToolCallID, msg.Content))
+			items = append(items, functionCallOutputInputItem(msg.ToolCallID, normalizeToolInput(msg.Content)))
 		case RoleAssistant:
 			if strings.TrimSpace(msg.Content) != "" {
 				items = append(items, messageInput(string(msg.Role), msg.Content))
@@ -453,7 +453,7 @@ func buildResponsesInputFromItems(canonical []ResponseItem) []responses.Response
 			if callID == "" {
 				continue
 			}
-			items = append(items, responses.ResponseInputItemParamOfFunctionCallOutput(callID, outputStringFromRaw(item.Output)))
+			items = append(items, functionCallOutputInputItem(callID, item.Output))
 		case ResponseItemTypeReasoning:
 			id := strings.TrimSpace(item.ID)
 			if id == "" {
@@ -1023,6 +1023,101 @@ func outputStringFromRaw(raw json.RawMessage) string {
 		return text
 	}
 	return trimmed
+}
+
+func functionCallOutputInputItem(callID string, raw json.RawMessage) responses.ResponseInputItemUnionParam {
+	if contentItems, ok := functionCallOutputContentItemsFromRaw(raw); ok {
+		return responses.ResponseInputItemParamOfFunctionCallOutput(callID, contentItems)
+	}
+	return responses.ResponseInputItemParamOfFunctionCallOutput(callID, outputStringFromRaw(raw))
+}
+
+func functionCallOutputContentItemsFromRaw(raw json.RawMessage) (responses.ResponseFunctionCallOutputItemListParam, bool) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || !strings.HasPrefix(trimmed, "[") {
+		return nil, false
+	}
+
+	var arr []json.RawMessage
+	if err := json.Unmarshal(raw, &arr); err != nil {
+		return nil, false
+	}
+	if len(arr) == 0 {
+		return nil, false
+	}
+
+	out := make(responses.ResponseFunctionCallOutputItemListParam, 0, len(arr))
+	for _, rawItem := range arr {
+		item, ok := functionCallOutputContentItemFromRaw(rawItem)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, item)
+	}
+	return out, true
+}
+
+func functionCallOutputContentItemFromRaw(raw json.RawMessage) (responses.ResponseFunctionCallOutputItemUnionParam, bool) {
+	var item struct {
+		Type     string `json:"type"`
+		Text     string `json:"text"`
+		ImageURL string `json:"image_url"`
+		Detail   string `json:"detail"`
+		FileID   string `json:"file_id"`
+		FileData string `json:"file_data"`
+		FileURL  string `json:"file_url"`
+		Filename string `json:"filename"`
+	}
+	if err := json.Unmarshal(raw, &item); err != nil {
+		return responses.ResponseFunctionCallOutputItemUnionParam{}, false
+	}
+
+	switch strings.ToLower(strings.TrimSpace(item.Type)) {
+	case "input_text":
+		return responses.ResponseFunctionCallOutputItemUnionParam{
+			OfInputText: &responses.ResponseInputTextContentParam{Text: item.Text},
+		}, true
+	case "input_image":
+		image := responses.ResponseInputImageContentParam{}
+		if v := strings.TrimSpace(item.ImageURL); v != "" {
+			image.ImageURL = param.NewOpt(v)
+		}
+		if v := strings.TrimSpace(item.FileID); v != "" {
+			image.FileID = param.NewOpt(v)
+		}
+		switch strings.ToLower(strings.TrimSpace(item.Detail)) {
+		case "low":
+			image.Detail = responses.ResponseInputImageContentDetailLow
+		case "high":
+			image.Detail = responses.ResponseInputImageContentDetailHigh
+		case "auto":
+			image.Detail = responses.ResponseInputImageContentDetailAuto
+		}
+		if !image.ImageURL.Valid() && !image.FileID.Valid() {
+			return responses.ResponseFunctionCallOutputItemUnionParam{}, false
+		}
+		return responses.ResponseFunctionCallOutputItemUnionParam{OfInputImage: &image}, true
+	case "input_file":
+		file := responses.ResponseInputFileContentParam{}
+		if v := strings.TrimSpace(item.FileData); v != "" {
+			file.FileData = param.NewOpt(v)
+		}
+		if v := strings.TrimSpace(item.FileURL); v != "" {
+			file.FileURL = param.NewOpt(v)
+		}
+		if v := strings.TrimSpace(item.FileID); v != "" {
+			file.FileID = param.NewOpt(v)
+		}
+		if v := strings.TrimSpace(item.Filename); v != "" {
+			file.Filename = param.NewOpt(v)
+		}
+		if !file.FileData.Valid() && !file.FileURL.Valid() && !file.FileID.Valid() {
+			return responses.ResponseFunctionCallOutputItemUnionParam{}, false
+		}
+		return responses.ResponseFunctionCallOutputItemUnionParam{OfInputFile: &file}, true
+	default:
+		return responses.ResponseFunctionCallOutputItemUnionParam{}, false
+	}
 }
 
 func buildOutputItemsFromStream(text string, toolCalls []ToolCall, reasoning []ReasoningEntry, reasoningItems []ReasoningItem) []ResponseItem {
