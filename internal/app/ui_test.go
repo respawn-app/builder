@@ -107,6 +107,24 @@ func TestUnknownCSIShiftEnterInsertsNewline(t *testing.T) {
 	}
 }
 
+func TestUnknownCSIShiftEnterThenEnterDoesNotSubmitTrailingNewline(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "hello"
+
+	next, _ := m.Update(testUnknownCSISequence{rendered: "?CSI[49 51 59 50 117]?"}) // 13;2u
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+
+	if !updated.busy {
+		t.Fatal("expected submission started")
+	}
+	snapshot := stripANSIAndTrimRight(updated.view.OngoingCommittedSnapshot())
+	if strings.Contains(snapshot, "❯ hello\n\n") {
+		t.Fatalf("expected submitted user message without trailing blank line, got %q", snapshot)
+	}
+}
+
 func TestUnknownCSICtrlBackspaceDeletesCurrentLine(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "one\ntwo\nthree"
