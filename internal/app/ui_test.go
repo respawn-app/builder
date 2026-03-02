@@ -96,7 +96,7 @@ func TestUnknownCSIShiftEnterInsertsNewline(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "hello"
 
-	next, _ := m.Update(testUnknownCSISequence{rendered: "?CSI[49 51 59 50 117]?"}) // 13;2u
+	next, _ := m.Update(testUnknownCSISequence{rendered: "?CSI[50 55 59 50 59 49 51 117]?"}) // 27;2;13u
 	updated := next.(*uiModel)
 
 	if updated.busy {

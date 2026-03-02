@@ -83,7 +83,7 @@ func isCtrlEnterCSISequence(seq string) bool {
 
 func isShiftEnterCSISequence(seq string) bool {
 	switch seq {
-	case "13;2u", "13;2~", "27;2;13u", "27;2;13~":
+	case "27;2;13u", "27;2;13~":
 		return true
 	default:
 		return false
