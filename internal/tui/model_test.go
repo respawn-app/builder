@@ -1280,6 +1280,34 @@ func TestDetailStreamingUpdateAllocsStayBounded(t *testing.T) {
 	}
 }
 
+func TestOngoingStreamingAccessorsStableAcrossModeTogglesAndRefresh(t *testing.T) {
+	m := NewModel(WithTheme("dark"))
+	m = updateModel(t, m, SetConversationMsg{Entries: []TranscriptEntry{{Role: "assistant", Text: "committed"}}, Ongoing: "stream one", OngoingError: "error one"})
+	if got := m.OngoingStreamingText(); got != "stream one" {
+		t.Fatalf("unexpected ongoing streaming text: %q", got)
+	}
+	if got := m.OngoingErrorText(); got != "error one" {
+		t.Fatalf("unexpected ongoing error text: %q", got)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	m = updateModel(t, m, ToggleModeMsg{})
+	if got := m.OngoingStreamingText(); got != "stream one" {
+		t.Fatalf("expected streaming text stable across mode roundtrip, got %q", got)
+	}
+	if got := m.OngoingErrorText(); got != "error one" {
+		t.Fatalf("expected error text stable across mode roundtrip, got %q", got)
+	}
+
+	m = updateModel(t, m, SetConversationMsg{Entries: []TranscriptEntry{{Role: "assistant", Text: "committed"}}, Ongoing: "stream two", OngoingError: "error two"})
+	if got := m.OngoingStreamingText(); got != "stream two" {
+		t.Fatalf("expected streaming text updated after conversation refresh, got %q", got)
+	}
+	if got := m.OngoingErrorText(); got != "error two" {
+		t.Fatalf("expected error text updated after conversation refresh, got %q", got)
+	}
+}
+
 type errString string
 
 func (e errString) Error() string {
