@@ -123,6 +123,9 @@ type Model struct {
 
 	detailSnapshot string
 	detailLines    []string
+	ongoingSnapshot string
+	ongoingLineCache []string
+	ongoingDirty    bool
 	ongoingError   string
 	theme          string
 	md             *markdownRenderer
@@ -141,6 +144,7 @@ func NewModel(opts ...Option) Model {
 		viewportLines: DefaultPreviewLines,
 		viewportWidth: 120,
 		theme:         "dark",
+		ongoingDirty:  true,
 	}
 	for _, opt := range opts {
 		opt(&m)
@@ -161,6 +165,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	shouldAutoFollowOngoing := false
 	viewportChanged := false
+	ongoingChanged := false
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -187,6 +192,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.scrollActive(1)
 		}
 	case ToggleModeMsg:
+		if m.mode == ModeDetail && m.ongoingDirty {
+			m.rebuildOngoingSnapshot()
+		}
 		m = m.toggleMode()
 	case ScrollOngoingMsg:
 		m = m.scrollActive(msg.Delta)
@@ -201,7 +209,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			viewportChanged = true
 		}
 		if msg.Width > 0 {
-			m.viewportWidth = msg.Width
+			if m.viewportWidth != msg.Width {
+				m.viewportWidth = msg.Width
+				ongoingChanged = true
+			}
 		}
 	case AppendTranscriptMsg:
 		role := strings.TrimSpace(msg.Role)
@@ -216,6 +227,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ToolCall:   cloneToolCallMeta(msg.ToolCall),
 		})
 		shouldAutoFollowOngoing = true
+		ongoingChanged = true
 	case SetConversationMsg:
 		entries := make([]TranscriptEntry, len(msg.Entries))
 		copy(entries, msg.Entries)
@@ -230,9 +242,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selectedTranscriptActive = false
 		}
 		shouldAutoFollowOngoing = true
+		ongoingChanged = true
 	case SetSelectedTranscriptEntryMsg:
 		m.selectedTranscriptEntry = msg.EntryIndex
 		m.selectedTranscriptActive = msg.Active
+		ongoingChanged = true
 	case FocusTranscriptEntryMsg:
 		if m.mode != ModeOngoing {
 			break
@@ -250,9 +264,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case StreamAssistantMsg:
 		m.ongoing += msg.Delta
 		shouldAutoFollowOngoing = true
+		ongoingChanged = true
 	case ClearOngoingAssistantMsg:
 		m.ongoing = ""
 		m.ongoingScroll = 0
+		ongoingChanged = true
 	case CommitAssistantMsg:
 		if m.ongoing != "" {
 			m.transcript = append(m.transcript, TranscriptEntry{
@@ -261,6 +277,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 			m.ongoing = ""
 			shouldAutoFollowOngoing = true
+			ongoingChanged = true
 		}
 	case SetOngoingErrorMsg:
 		m.ongoingError = FormatOngoingError(msg.Err)
@@ -268,7 +285,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ongoingError = ""
 	}
 
-	clampOngoing := m.mode == ModeOngoing || shouldAutoFollowOngoing || viewportChanged || m.snapOngoingOnViewportResize
+	if ongoingChanged {
+		m.invalidateOngoingSnapshot()
+	}
+	if m.ongoingDirty && m.mode == ModeOngoing {
+		m.rebuildOngoingSnapshot()
+	}
+
+	clampOngoing := m.mode == ModeOngoing
 	if clampOngoing {
 		maxOngoing := m.maxOngoingScroll()
 		m.ongoingScroll = clamp(m.ongoingScroll, 0, maxOngoing)
@@ -303,6 +327,9 @@ func (m Model) OngoingScroll() int {
 }
 
 func (m Model) OngoingSnapshot() string {
+	if m.ongoingSnapshot != "" {
+		return m.ongoingSnapshot
+	}
 	return m.renderFlatOngoingTranscript()
 }
 
@@ -391,7 +418,21 @@ func (m Model) renderOngoing() string {
 }
 
 func (m Model) ongoingLines() []string {
+	if len(m.ongoingLineCache) > 0 {
+		return m.ongoingLineCache
+	}
 	return splitLines(m.renderFlatOngoingTranscript())
+}
+
+func (m *Model) invalidateOngoingSnapshot() {
+	m.ongoingDirty = true
+}
+
+func (m *Model) rebuildOngoingSnapshot() {
+	snapshot := m.renderFlatOngoingTranscript()
+	m.ongoingSnapshot = snapshot
+	m.ongoingLineCache = splitLines(snapshot)
+	m.ongoingDirty = false
 }
 
 func (m Model) renderDetailSnapshot() string {

@@ -229,6 +229,11 @@ type uiModel struct {
 	nativeFlushedEntryCount int
 	nativeHistoryReplayed   bool
 	nativeReplayWidth       int
+	nativeFormatter         tui.Model
+	nativeFormatterReady    bool
+	nativeFormatterWidth    int
+	nativeFormatterSnapshot string
+	nativeFormatterEntries  []tui.TranscriptEntry
 	startupCmds             []tea.Cmd
 	nativeLiveRegionLines   int
 	nativeLiveRegionPad     int
@@ -340,9 +345,13 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		previousWidth := m.termWidth
 		m.termWidth = msg.Width
 		m.termHeight = msg.Height
 		m.windowSizeKnown = true
+		if m.usesNativeScrollback() && m.nativeFormatterReady && previousWidth > 0 && previousWidth != msg.Width {
+			m.rebaseNativeFormatterSnapshot()
+		}
 		m.syncViewport()
 		if m.usesNativeScrollback() && !m.nativeHistoryReplayed {
 			return m, m.syncNativeHistoryFromTranscript()

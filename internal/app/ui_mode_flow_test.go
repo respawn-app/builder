@@ -51,6 +51,23 @@ func TestScenarioDetailWhileAgentWorksReturnsToLatestOngoingTail(t *testing.T) {
 	}
 }
 
+func TestCtrlTTogglesTranscriptModeLikeShiftTab(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 16
+	m.syncViewport()
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlT})
+	if m.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected ctrl+t to enter detail mode, got %q", m.view.Mode())
+	}
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlT})
+	if m.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected ctrl+t to return to ongoing mode, got %q", m.view.Mode())
+	}
+}
+
 func TestScenarioHarnessRestartAndSessionResumeKeepsTranscriptVisible(t *testing.T) {
 	workspace := t.TempDir()
 	store, err := session.Create(workspace, "ws", workspace)

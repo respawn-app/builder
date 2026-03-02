@@ -127,7 +127,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.exitAction = UIActionExit
 		return m, tea.Quit
-	case tea.KeyShiftTab:
+	case tea.KeyShiftTab, tea.KeyCtrlT:
 		return m, m.toggleTranscriptMode()
 	case tea.KeyEsc:
 		if m.rollbackEditing {

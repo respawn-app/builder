@@ -173,7 +173,7 @@
 
 ## UI, Modes, And Rendering
 
-- UI has two modes: `ongoing` (default) and `detail`, toggled by `Shift+Tab`.
+- UI has two modes: `ongoing` (default) and `detail`, toggled by `Shift+Tab` or `Ctrl+T`.
 - `ongoing` remains minimal:
 - Show command start and file hint previews with truncation.
 - If collapsing is not possible, show first command line and ellipsize.
@@ -197,6 +197,7 @@
 - `tui_scroll_mode=native` forces main UI startup to normal buffer even when `tui_alternate_screen=always`, because native transcript replay is emitted via unmanaged lines that must remain visible in terminal scrollback.
 - `alt` mode keeps in-app viewport scrolling behavior.
 - `native` mode prioritizes terminal-native ongoing scrollback/selection by replaying committed transcript history into terminal scrollback and appending only new committed transcript deltas.
+- In `native` mode, non-append transcript mutations (compaction/rollback-style rewrites) rebase the internal formatter state without re-emitting prior history, to avoid duplicate scrollback output.
 - `native` mode keeps mouse capture disabled by default to preserve native text selection behavior.
 - Ongoing mode never enables terminal alternate-scroll (`?1007`).
 - Detail transcript overlay uses terminal alt-screen (`?1049`) when `tui_alternate_screen != never`.
