@@ -297,11 +297,71 @@ func TestLocksAtFirstDispatch(t *testing.T) {
 	if meta.Locked.Model != "gpt-5" {
 		t.Fatalf("locked model = %q", meta.Locked.Model)
 	}
-	if meta.Locked.ThinkingLevel != "xhigh" {
-		t.Fatalf("locked thinking level = %q", meta.Locked.ThinkingLevel)
-	}
 	if len(meta.Locked.EnabledTools) != 1 || meta.Locked.EnabledTools[0] != string(tools.ToolShell) {
 		t.Fatalf("locked enabled tools = %+v", meta.Locked.EnabledTools)
+	}
+}
+
+func TestThinkingLevelCanChangeAfterLock(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "one"}, Usage: llm.Usage{WindowTokens: 200000}},
+		{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "two"}, Usage: llm.Usage{WindowTokens: 200000}},
+	}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:         "gpt-5",
+		Temperature:   1,
+		ThinkingLevel: "xhigh",
+		EnabledTools:  []tools.ID{tools.ToolShell},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "hi"); err != nil {
+		t.Fatalf("submit first: %v", err)
+	}
+	if err := eng.SetThinkingLevel("low"); err != nil {
+		t.Fatalf("set thinking level: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "again"); err != nil {
+		t.Fatalf("submit second: %v", err)
+	}
+
+	if len(client.calls) != 2 {
+		t.Fatalf("client calls = %d, want 2", len(client.calls))
+	}
+	if client.calls[0].ReasoningEffort != "xhigh" {
+		t.Fatalf("first reasoning effort = %q, want xhigh", client.calls[0].ReasoningEffort)
+	}
+	if client.calls[1].ReasoningEffort != "low" {
+		t.Fatalf("second reasoning effort = %q, want low", client.calls[1].ReasoningEffort)
+	}
+}
+
+func TestSetThinkingLevelRejectsInvalidValue(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:         "gpt-5",
+		ThinkingLevel: "high",
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.SetThinkingLevel("ultra"); err == nil {
+		t.Fatal("expected invalid thinking level error")
+	}
+	if got := eng.ThinkingLevel(); got != "high" {
+		t.Fatalf("thinking level after invalid set = %q, want high", got)
 	}
 }
 
@@ -388,8 +448,21 @@ func TestSubmitUserMessageContinuesAfterHostedToolOnlyTurn(t *testing.T) {
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 	}}
+	client.caps = llm.ProviderCapabilities{
+		ProviderID:                    "openai",
+		SupportsResponsesAPI:          true,
+		SupportsResponsesCompact:      true,
+		SupportsNativeWebSearch:       true,
+		SupportsReasoningEncrypted:    true,
+		SupportsServerSideContextEdit: true,
+		IsOpenAIFirstParty:            true,
+	}
 
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:         "gpt-5",
+		WebSearchMode: "native",
+		EnabledTools:  []tools.ID{tools.ToolWebSearch},
+	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -403,6 +476,31 @@ func TestSubmitUserMessageContinuesAfterHostedToolOnlyTurn(t *testing.T) {
 	}
 	if len(client.calls) != 2 {
 		t.Fatalf("expected 2 model calls, got %d", len(client.calls))
+	}
+	if !client.calls[0].EnableNativeWebSearch {
+		t.Fatalf("expected first request to enable native web search")
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	hostedCompletionCount := 0
+	for _, evt := range events {
+		if evt.Kind != "tool_completed" {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+			t.Fatalf("decode tool_completed payload: %v", err)
+		}
+		name, _ := payload["name"].(string)
+		if strings.TrimSpace(name) == string(tools.ToolWebSearch) {
+			hostedCompletionCount++
+		}
+	}
+	if hostedCompletionCount != 1 {
+		t.Fatalf("expected one hosted web_search tool completion, got %d", hostedCompletionCount)
 	}
 
 	secondReq := client.calls[1]
@@ -645,6 +743,60 @@ func TestSubmitUserMessageMissingPhaseLegacyClientRemainsTerminal(t *testing.T) 
 		}
 		if persisted.Role == llm.RoleDeveloper && strings.Contains(persisted.Content, missingAssistantPhaseWarning) {
 			t.Fatalf("did not expect missing-phase warning for legacy client response")
+		}
+	}
+}
+
+func TestSubmitUserMessageMissingPhaseOpenAILegacyResponseRemainsTerminal(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "done",
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do the task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected 1 model call, got %d", len(client.calls))
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	for _, evt := range events {
+		if evt.Kind != "message" {
+			continue
+		}
+		var persisted llm.Message
+		if err := json.Unmarshal(evt.Payload, &persisted); err != nil {
+			t.Fatalf("decode message event: %v", err)
+		}
+		if persisted.Role == llm.RoleDeveloper && strings.Contains(persisted.Content, commentaryWithoutToolCallsWarning) {
+			t.Fatalf("did not expect commentary-without-tools warning for legacy OpenAI response")
+		}
+		if persisted.Role == llm.RoleDeveloper && strings.Contains(persisted.Content, finalWithoutContentWarning) {
+			t.Fatalf("did not expect final-without-content warning for legacy OpenAI response")
 		}
 	}
 }
@@ -1715,7 +1867,7 @@ func TestAppendMissingReviewerMetaContextPrependsAgentsAndEnvironmentWhenMissing
 	}
 
 	in := []llm.Message{{Role: llm.RoleUser, Content: "request"}}
-	got := appendMissingReviewerMetaContext(in, workspace)
+	got := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high")
 	if len(got) != 4 {
 		t.Fatalf("expected 2 prepended agents + 1 environment message plus original, got %d", len(got))
 	}
@@ -1750,7 +1902,7 @@ func TestAppendMissingReviewerMetaContextKeepsExistingMetaMessages(t *testing.T)
 		existingEnv,
 		{Role: llm.RoleUser, Content: "request"},
 	}
-	got := appendMissingReviewerMetaContext(in, workspace)
+	got := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high")
 	if len(got) != len(in) {
 		t.Fatalf("expected no extra messages when AGENTS+environment already present, got %d", len(got))
 	}
@@ -2281,7 +2433,7 @@ func TestChatSnapshotOngoingTracksStreamingAndClearsOnCommit(t *testing.T) {
 	}
 
 	var (
-		mu            sync.Mutex
+		mu             sync.Mutex
 		deltaSnapshots []string
 	)
 	var eng *Engine
@@ -2457,6 +2609,7 @@ func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserM
 		t.Fatalf("expected environment message type, got %+v", envMsg)
 	}
 	for _, required := range []string{
+		"\ngpt-5\n",
 		"OS: ",
 		"Current TZ: ",
 		"Date/time: ",
@@ -2525,8 +2678,71 @@ func TestInjectsEnvironmentInfoWithoutAnyAgentsFiles(t *testing.T) {
 	if req.Messages[0].Role != llm.RoleDeveloper || !strings.Contains(req.Messages[0].Content, environmentInjectedHeader) {
 		t.Fatalf("expected first message to be environment injection, got %+v", req.Messages[0])
 	}
+	if !strings.Contains(req.Messages[0].Content, "\ngpt-5\n") {
+		t.Fatalf("expected environment injection to include model label, got %+v", req.Messages[0])
+	}
 	if req.Messages[1].Role != llm.RoleUser || req.Messages[1].Content != "first" {
 		t.Fatalf("expected user message after environment injection, got %+v", req.Messages[1])
+	}
+}
+
+func TestEnvironmentContextMessageIncludesStatusLineModelLabel(t *testing.T) {
+	workspace := t.TempDir()
+	msg := environmentContextMessage(workspace, "gpt-5.3.codex", "high", time.Unix(0, 0).UTC())
+	if !strings.Contains(msg, "\ngpt-5.3.codex high\n") {
+		t.Fatalf("expected environment message to include status-line model label, got %q", msg)
+	}
+}
+
+func TestSubmitInjectsEnvironmentLineWithStatusModelLabel(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	storeRoot := t.TempDir()
+	store, err := session.Create(storeRoot, "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "ok"},
+		OutputItems: []llm.ResponseItem{{
+			Type:    llm.ResponseItemTypeMessage,
+			Role:    llm.RoleAssistant,
+			Phase:   llm.MessagePhaseFinal,
+			Content: "ok",
+		}},
+		Usage: llm.Usage{WindowTokens: 200000},
+	}}}
+	useNativeCompaction := false
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5.3.codex",
+		ThinkingLevel:         "high",
+		AutoCompactTokenLimit: 1_000_000_000,
+		UseNativeCompaction:   &useNativeCompaction,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "first"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	if len(client.calls) != 1 {
+		t.Fatalf("expected one model call, got %d", len(client.calls))
+	}
+	req := client.calls[0]
+	if len(req.Messages) < 2 {
+		t.Fatalf("expected environment and user messages, got %d", len(req.Messages))
+	}
+	envMsg := req.Messages[0]
+	if envMsg.Role != llm.RoleDeveloper || envMsg.MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected first request message to be environment context, got %+v", envMsg)
+	}
+	if !strings.Contains(envMsg.Content, "\ngpt-5.3.codex high\n") {
+		t.Fatalf("expected environment context to contain status model label line, got %q", envMsg.Content)
 	}
 }
 
@@ -2837,6 +3053,58 @@ func TestContextUsageTracksWeightedCacheHitPercentageFromModelUsage(t *testing.T
 	}
 	if usage.CacheHitPercent != 25 {
 		t.Fatalf("cache hit percent=%d, want 25", usage.CacheHitPercent)
+	}
+}
+
+func TestContextUsageUsesEstimatedTokensWhenLastUsageIsStale(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.setLastUsage(llm.Usage{InputTokens: 100, OutputTokens: 0, WindowTokens: 410_000})
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: strings.Repeat("x", 1600)}); err != nil {
+		t.Fatalf("append message: %v", err)
+	}
+
+	estimated := estimateItemsTokens(eng.snapshotItems())
+	if estimated <= 100 {
+		t.Fatalf("expected estimated tokens above stale usage baseline, got %d", estimated)
+	}
+
+	usage := eng.ContextUsage()
+	if usage.UsedTokens != estimated {
+		t.Fatalf("used tokens=%d, want estimated %d", usage.UsedTokens, estimated)
+	}
+}
+
+func TestShouldAutoCompactAccountsForMessagesAppendedAfterLastUsage(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   410_000,
+		AutoCompactTokenLimit: 300,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.setLastUsage(llm.Usage{InputTokens: 120, OutputTokens: 0, WindowTokens: 410_000})
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: strings.Repeat("stale-usage-gap-", 120)}); err != nil {
+		t.Fatalf("append message: %v", err)
+	}
+
+	if !eng.shouldAutoCompact() {
+		t.Fatalf("expected auto compaction to trigger from appended message growth")
 	}
 }
 

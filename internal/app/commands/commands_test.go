@@ -10,6 +10,9 @@ func TestExecuteBuiltins(t *testing.T) {
 	if command, ok := r.Command("/name"); !ok || !command.RunWhileBusy {
 		t.Fatalf("expected /name command to be runnable while busy, got %+v, ok=%v", command, ok)
 	}
+	if command, ok := r.Command("/thinking"); !ok || !command.RunWhileBusy {
+		t.Fatalf("expected /thinking command to be runnable while busy, got %+v, ok=%v", command, ok)
+	}
 	if command, ok := r.Command("/compact"); !ok || command.RunWhileBusy {
 		t.Fatalf("expected /compact command to require idle, got %+v, ok=%v", command, ok)
 	}
@@ -36,6 +39,12 @@ func TestExecuteBuiltins(t *testing.T) {
 	}
 	if got := r.Execute("/name"); got.Action != ActionSetName || got.SessionName != "" {
 		t.Fatalf("expected ActionSetName reset, got %+v", got)
+	}
+	if got := r.Execute("/thinking high"); got.Action != ActionSetThinking || got.ThinkingLevel != "high" {
+		t.Fatalf("expected ActionSetThinking high, got %+v", got)
+	}
+	if got := r.Execute("/thinking"); got.Action != ActionSetThinking || got.ThinkingLevel != "" {
+		t.Fatalf("expected ActionSetThinking show-current, got %+v", got)
 	}
 	if got := r.Execute("/back"); got.Action != ActionBack {
 		t.Fatalf("expected ActionBack, got %+v", got)

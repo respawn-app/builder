@@ -9,7 +9,6 @@ type LockedContract struct {
 	Model          string    `json:"model"`
 	Temperature    float64   `json:"temperature"`
 	MaxOutputToken int       `json:"max_output_token"`
-	ThinkingLevel  string    `json:"thinking_level,omitempty"`
 	EnabledTools   []string  `json:"enabled_tools,omitempty"`
 	LockedAt       time.Time `json:"locked_at"`
 }

@@ -10,15 +10,16 @@ import (
 type Action string
 
 const (
-	ActionNone      Action = "none"
-	ActionExit      Action = "exit"
-	ActionNew       Action = "new"
-	ActionResume    Action = "resume"
-	ActionLogout    Action = "logout"
-	ActionCompact   Action = "compact"
-	ActionSetName   Action = "set_name"
-	ActionBack      Action = "back"
-	ActionUnhandled Action = "unhandled"
+	ActionNone        Action = "none"
+	ActionExit        Action = "exit"
+	ActionNew         Action = "new"
+	ActionResume      Action = "resume"
+	ActionLogout      Action = "logout"
+	ActionCompact     Action = "compact"
+	ActionSetName     Action = "set_name"
+	ActionSetThinking Action = "set_thinking"
+	ActionBack        Action = "back"
+	ActionUnhandled   Action = "unhandled"
 )
 
 type Result struct {
@@ -30,6 +31,7 @@ type Result struct {
 	User              string
 	FreshConversation bool
 	SessionName       string
+	ThinkingLevel     string
 }
 
 type Handler func(args string) Result
@@ -72,6 +74,9 @@ func NewDefaultRegistry() *Registry {
 	})
 	r.RegisterWithOptions("name", "Set session title and terminal title (usage: /name <title>; empty resets)", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
 		return Result{Handled: true, Action: ActionSetName, SessionName: strings.TrimSpace(args)}
+	})
+	r.RegisterWithOptions("thinking", "Set or show thinking level (usage: /thinking <low|medium|high|xhigh>; empty shows current)", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
+		return Result{Handled: true, Action: ActionSetThinking, ThinkingLevel: strings.ToLower(strings.TrimSpace(args))}
 	})
 	r.Register("back", "Jump to parent session if current session was spawned from another", func(string) Result {
 		return Result{Handled: true, Action: ActionBack}

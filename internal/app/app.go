@@ -48,9 +48,6 @@ func effectiveSettings(base config.Settings, locked *session.LockedContract) con
 	if strings.TrimSpace(locked.Model) != "" {
 		out.Model = locked.Model
 	}
-	if strings.TrimSpace(locked.ThinkingLevel) != "" {
-		out.ThinkingLevel = locked.ThinkingLevel
-	}
 	return out
 }
 

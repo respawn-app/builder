@@ -50,6 +50,22 @@ var malformedAssistantArtifacts = []string{
 	"assistant to=multi_tool_use.parallel",
 }
 
+var supportedThinkingLevels = map[string]struct{}{
+	"low":    {},
+	"medium": {},
+	"high":   {},
+	"xhigh":  {},
+}
+
+func NormalizeThinkingLevel(level string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(level))
+	if normalized == "" {
+		return "", false
+	}
+	_, ok := supportedThinkingLevels[normalized]
+	return normalized, ok
+}
+
 type Config struct {
 	Model                         string
 	Temperature                   float64
@@ -405,11 +421,14 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 		finalAnswerIncludedToolCalls := false
 
 		assistantMsg := resp.Assistant
+		structuredPhaseProtocol := shouldTreatMissingAssistantPhaseAsCommentary(resp)
+		hasExplicitAssistantPhase := strings.TrimSpace(string(assistantMsg.Phase)) != ""
+		enforcePhaseProtocol := phaseProtocolEnabled && (structuredPhaseProtocol || hasExplicitAssistantPhase)
 		garbageAssistantContent := phaseProtocolEnabled && containsMalformedAssistantContent(assistantMsg.Content)
 		if garbageAssistantContent {
 			assistantMsg.Phase = llm.MessagePhaseCommentary
 		}
-		missingAssistantPhase := phaseProtocolEnabled && assistantMsg.Phase == "" && shouldTreatMissingAssistantPhaseAsCommentary(resp)
+		missingAssistantPhase := enforcePhaseProtocol && assistantMsg.Phase == ""
 		if missingAssistantPhase {
 			assistantMsg.Phase = llm.MessagePhaseCommentary
 		}
@@ -486,7 +505,7 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 				}
 				continue
 			}
-			if phaseProtocolEnabled && assistantMsg.Phase != llm.MessagePhaseFinal {
+			if enforcePhaseProtocol && assistantMsg.Phase != llm.MessagePhaseFinal {
 				if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: commentaryWithoutToolCallsWarning}); err != nil {
 					return llm.Message{}, executedToolCall, err
 				}
@@ -498,7 +517,7 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 				}
 				continue
 			}
-			if phaseProtocolEnabled && assistantMsg.Phase == llm.MessagePhaseFinal && strings.TrimSpace(assistantMsg.Content) == "" {
+			if enforcePhaseProtocol && assistantMsg.Phase == llm.MessagePhaseFinal && strings.TrimSpace(assistantMsg.Content) == "" {
 				if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: finalWithoutContentWarning}); err != nil {
 					return llm.Message{}, executedToolCall, err
 				}
@@ -722,7 +741,7 @@ func (e *Engine) runReviewerSuggestions(ctx context.Context) (reviewerSuggestion
 	})
 
 	messages := sanitizeMessagesForLLM(e.snapshotMessages())
-	reviewerMessages := buildReviewerRequestMessages(messages, e.store.Meta().WorkspaceRoot)
+	reviewerMessages := buildReviewerRequestMessages(messages, e.store.Meta().WorkspaceRoot, e.cfg.Model, e.ThinkingLevel())
 	req := llm.Request{
 		Model:           e.cfg.Reviewer.Model,
 		Temperature:     1,
@@ -790,9 +809,9 @@ func parseReviewerSuggestionsObject(content string, maxSuggestions int) []string
 	return normalized
 }
 
-func buildReviewerRequestMessages(messages []llm.Message, workspaceRoot string) []llm.Message {
+func buildReviewerRequestMessages(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string) []llm.Message {
 	metaMessages, transcriptSource := splitReviewerMetaMessages(messages)
-	metaMessages = appendMissingReviewerMetaContext(metaMessages, workspaceRoot)
+	metaMessages = appendMissingReviewerMetaContext(metaMessages, workspaceRoot, model, thinkingLevel)
 	out := make([]llm.Message, 0, len(metaMessages)+2+len(transcriptSource))
 	out = append(out, metaMessages...)
 	out = append(out, llm.Message{Role: llm.RoleDeveloper, Content: reviewerMetaBoundaryMessage})
@@ -1179,7 +1198,7 @@ func reviewerSessionID(sessionID string) string {
 	return trimmed + "-review"
 }
 
-func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot string) []llm.Message {
+func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string) []llm.Message {
 	haveEnvironment := false
 	haveAgents := false
 	for _, msg := range messages {
@@ -1218,7 +1237,7 @@ func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot stri
 		prefixed = append(prefixed, llm.Message{
 			Role:        llm.RoleDeveloper,
 			MessageType: llm.MessageTypeEnvironment,
-			Content:     environmentContextMessage(workspaceRoot, time.Now()),
+			Content:     environmentContextMessage(workspaceRoot, model, thinkingLevel, time.Now()),
 		})
 	}
 	if len(prefixed) == 0 {
@@ -1250,6 +1269,7 @@ func (e *Engine) buildRequest(ctx context.Context, _ string, allowTools bool) (l
 	if err != nil {
 		return llm.Request{}, err
 	}
+	req.ReasoningEffort = e.ThinkingLevel()
 	if allowTools {
 		nativeWebSearch, nativeErr := e.enableNativeWebSearch(ctx)
 		if nativeErr != nil {
@@ -1486,7 +1506,6 @@ func (e *Engine) ensureLocked() (session.LockedContract, error) {
 		Model:          e.cfg.Model,
 		Temperature:    e.cfg.Temperature,
 		MaxOutputToken: e.cfg.MaxTokens,
-		ThinkingLevel:  e.cfg.ThinkingLevel,
 		EnabledTools:   toToolNames(e.cfg.EnabledTools),
 	}
 	if err := e.store.MarkModelDispatchLocked(lock); err != nil {
@@ -1718,7 +1737,7 @@ func (e *Engine) injectAgentsIfNeeded(stepID string) error {
 			return err
 		}
 	}
-	environment := environmentContextMessage(meta.WorkspaceRoot, time.Now())
+	environment := environmentContextMessage(meta.WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), time.Now())
 	if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: environment}); err != nil {
 		return err
 	}
@@ -1748,7 +1767,7 @@ func agentsInjectionPaths(workspaceRoot string) ([]string, error) {
 	return paths, nil
 }
 
-func environmentContextMessage(workspaceRoot string, now time.Time) string {
+func environmentContextMessage(workspaceRoot string, model string, thinkingLevel string, now time.Time) string {
 	cwd, err := os.Getwd()
 	if err != nil || strings.TrimSpace(cwd) == "" {
 		cwd = strings.TrimSpace(workspaceRoot)
@@ -1783,6 +1802,7 @@ func environmentContextMessage(workspaceRoot string, now time.Time) string {
 
 	return strings.Join([]string{
 		environmentInjectedHeader,
+		llm.ModelDisplayLabel(model, thinkingLevel),
 		fmt.Sprintf("OS: %s", osName),
 		fmt.Sprintf("Current TZ: %s (UTC%s)", tzName, formatUTCOffset(tzOffset)),
 		fmt.Sprintf("Date/time: %s", now.Format(time.RFC3339)),
@@ -1904,6 +1924,23 @@ func (e *Engine) ClearOngoingError() {
 
 func (e *Engine) SetSessionName(name string) error {
 	return e.store.SetName(name)
+}
+
+func (e *Engine) SetThinkingLevel(level string) error {
+	normalized, ok := NormalizeThinkingLevel(level)
+	if !ok {
+		return fmt.Errorf("invalid thinking level %q (expected low|medium|high|xhigh)", strings.TrimSpace(level))
+	}
+	e.mu.Lock()
+	e.cfg.ThinkingLevel = normalized
+	e.mu.Unlock()
+	return nil
+}
+
+func (e *Engine) ThinkingLevel() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return strings.TrimSpace(e.cfg.ThinkingLevel)
 }
 
 func (e *Engine) SessionName() string {
