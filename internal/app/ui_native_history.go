@@ -1,35 +1,13 @@
 package app
 
 import (
-	"os"
 	"strings"
-	"sync"
 
 	"builder/internal/config"
 	"builder/internal/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
-
-const (
-	nativePendingStreamMaxRunes = 20000
-	nativeStreamLineMaxRunes    = 8000
-)
-
-var nativeOutputMu sync.Mutex
-
-var writeNativeOutput = func(text string) {
-	nativeOutputMu.Lock()
-	defer nativeOutputMu.Unlock()
-	_, _ = os.Stdout.WriteString(text)
-}
-
-func emitNativeDirectWrite(text string) tea.Cmd {
-	return func() tea.Msg {
-		writeNativeOutput(text)
-		return nil
-	}
-}
 
 func (m *uiModel) usesNativeScrollback() bool {
 	return m.tuiScrollMode == config.TUIScrollModeNative
@@ -67,7 +45,6 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 		m.nativeFormatterEntries = cloneNativeEntries(filtered)
 		m.nativeFlushedEntryCount = len(m.transcriptEntries)
 		m.nativeHistoryReplayed = true
-		m.nativePendingStreamText = ""
 		return m.emitNativeRenderedText(styleNativeReplayDividers(rawSnapshot, m.theme, m.nativeFormatterWidth))
 	}
 
@@ -153,8 +130,6 @@ func (m *uiModel) resetNativeFormatterState() {
 	m.nativeFormatterWidth = 0
 	m.nativeFormatterSnapshot = ""
 	m.nativeFormatterEntries = nil
-	m.nativePendingStreamText = ""
-	m.nativeStreamLineBuffer = ""
 	m.nativeFormatter = tui.Model{}
 }
 
@@ -173,8 +148,6 @@ func (m *uiModel) rebaseNativeFormatterSnapshot() {
 	m.nativeFormatterEntries = cloneNativeEntries(filtered)
 	m.nativeFlushedEntryCount = len(m.transcriptEntries)
 	m.nativeHistoryReplayed = true
-	m.nativePendingStreamText = ""
-	m.nativeStreamLineBuffer = ""
 }
 
 func nonEmptyNativeEntries(entries []tui.TranscriptEntry) []tui.TranscriptEntry {
@@ -236,69 +209,6 @@ func nativeEntryEqual(left tui.TranscriptEntry, right tui.TranscriptEntry) bool 
 	return left.ToolCall.RenderHint.Kind == right.ToolCall.RenderHint.Kind &&
 		left.ToolCall.RenderHint.Path == right.ToolCall.RenderHint.Path &&
 		left.ToolCall.RenderHint.ResultOnly == right.ToolCall.RenderHint.ResultOnly
-}
-
-func consumeNativeStreamPrefix(pending, committed string) (string, string) {
-	if pending == "" || committed == "" {
-		return pending, committed
-	}
-	pendingRunes := []rune(pending)
-	committedRunes := []rune(committed)
-	match := 0
-	limit := len(pendingRunes)
-	if len(committedRunes) < limit {
-		limit = len(committedRunes)
-	}
-	for match < limit && pendingRunes[match] == committedRunes[match] {
-		match++
-	}
-	return string(pendingRunes[match:]), string(committedRunes[match:])
-}
-
-func appendBoundedPendingStream(existing, delta string) string {
-	if delta == "" {
-		return existing
-	}
-	combined := existing + delta
-	runes := []rune(combined)
-	if len(runes) <= nativePendingStreamMaxRunes {
-		return combined
-	}
-	return string(runes[len(runes)-nativePendingStreamMaxRunes:])
-}
-
-func appendBoundedStreamLine(existing, delta string) string {
-	if delta == "" {
-		return existing
-	}
-	combined := existing + delta
-	runes := []rune(combined)
-	if len(runes) <= nativeStreamLineMaxRunes {
-		return combined
-	}
-	return string(runes[len(runes)-nativeStreamLineMaxRunes:])
-}
-
-func tailRunes(value string, maxRunes int) string {
-	if maxRunes <= 0 {
-		return ""
-	}
-	runes := []rune(value)
-	if len(runes) <= maxRunes {
-		return value
-	}
-	return string(runes[len(runes)-maxRunes:])
-}
-
-func splitCompleteLines(value string) (string, string) {
-	if value == "" {
-		return "", ""
-	}
-	idx := strings.LastIndex(value, "\n")
-	if idx < 0 {
-		return "", value
-	}
-	return value[:idx+1], value[idx+1:]
 }
 
 func (m *uiModel) emitNativeRenderedText(rendered string) tea.Cmd {
