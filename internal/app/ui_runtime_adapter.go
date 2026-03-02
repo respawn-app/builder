@@ -19,9 +19,18 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 	case runtime.EventConversationUpdated:
 		return a.syncConversationFromEngine()
 	case runtime.EventAssistantDelta:
-		m.sawAssistantDelta = evt.AssistantDelta != ""
+		delta := evt.AssistantDelta
+		m.sawAssistantDelta = delta != ""
+		if delta != "" {
+			m.forwardToView(tui.StreamAssistantMsg{Delta: delta})
+			if m.usesNativeScrollback() && m.view.Mode() == tui.ModeOngoing {
+				m.nativePendingStreamText += delta
+				return tea.Printf("%s", delta)
+			}
+		}
 	case runtime.EventAssistantDeltaReset:
 		m.sawAssistantDelta = false
+		m.nativePendingStreamText = ""
 	case runtime.EventCompactionStarted:
 		m.compacting = true
 	case runtime.EventCompactionCompleted, runtime.EventCompactionFailed:

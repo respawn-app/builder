@@ -4,14 +4,12 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"unicode"
 
 	"builder/internal/shared/textutil"
 	"builder/internal/tui"
 
 	bubbleprogress "github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/lipgloss"
-	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -20,7 +18,6 @@ const (
 	ansiClearLine         = "\x1b[2K"
 	statusContextBarWidth = 10
 	queuedMessagesLimit   = 5
-	streamingPreviewMaxRunes = 4000
 )
 
 type uiViewLayout struct {
@@ -92,12 +89,10 @@ func (l uiViewLayout) renderNativeOngoingPreSize() string {
 	inputLines := l.renderInputLines(width, style)
 	queuedLines := l.renderQueuedMessagesPane(width)
 	pickerLines := l.renderSlashCommandPicker(width)
-	streamingLines := l.renderNativeStreamingTail(width, 4, style)
 	statusLine := l.renderStatusLine(width, style)
-	lines := make([]string, 0, len(inputLines)+len(queuedLines)+len(pickerLines)+len(streamingLines)+1)
+	lines := make([]string, 0, len(inputLines)+len(queuedLines)+len(pickerLines)+1)
 	lines = append(lines, pickerLines...)
 	lines = append(lines, queuedLines...)
-	lines = append(lines, streamingLines...)
 	lines = append(lines, inputLines...)
 	lines = append(lines, statusLine)
 	return strings.Join(lines, "\n") + ansiHideCursor
@@ -117,9 +112,8 @@ func (l uiViewLayout) renderNativeOngoingSized() string {
 	inputLines := l.renderInputLines(width, style)
 	queuedLines := l.renderQueuedMessagesPane(width)
 	pickerLines := l.renderSlashCommandPicker(width)
-	streamingLines := l.renderNativeStreamingTail(width, 4, style)
 	statusLine := l.renderStatusLine(width, style)
-	liveLines := make([]string, 0, len(pickerLines)+len(queuedLines)+len(streamingLines)+len(inputLines)+1)
+	liveLines := make([]string, 0, len(pickerLines)+len(queuedLines)+len(inputLines)+1)
 	if m.nativeLiveRegionPad > 0 {
 		for i := 0; i < m.nativeLiveRegionPad; i++ {
 			liveLines = append(liveLines, padRight("", width))
@@ -127,7 +121,6 @@ func (l uiViewLayout) renderNativeOngoingSized() string {
 	}
 	liveLines = append(liveLines, pickerLines...)
 	liveLines = append(liveLines, queuedLines...)
-	liveLines = append(liveLines, streamingLines...)
 	liveLines = append(liveLines, inputLines...)
 	liveLines = append(liveLines, statusLine)
 	if len(liveLines) > height {
@@ -146,85 +139,7 @@ func (l uiViewLayout) nativeOngoingLineCount() int {
 	inputLines := l.renderInputLines(width, style)
 	queuedLines := l.renderQueuedMessagesPane(width)
 	pickerLines := l.renderSlashCommandPicker(width)
-	streamingLines := l.renderNativeStreamingTail(width, 4, style)
-	return len(inputLines) + len(queuedLines) + len(pickerLines) + len(streamingLines) + 1
-}
-
-func (l uiViewLayout) renderNativeStreamingTail(width, maxLines int, style uiStyles) []string {
-	m := l.model
-	if width <= 0 || maxLines <= 0 {
-		return nil
-	}
-	stream := strings.TrimSpace(normalizeStreamingPreviewText(m.view.OngoingStreamingText()))
-	errText := strings.TrimSpace(normalizeStreamingPreviewText(m.view.OngoingErrorText()))
-	lines := make([]string, 0, maxLines)
-	if stream != "" {
-		lines = append(lines, style.meta.Render(padRight("(streaming)", width)))
-		for _, line := range splitPlainLines(stream) {
-			for _, wrapped := range wrapLine(line, width) {
-				lines = append(lines, style.chat.Render(padRight(wrapped, width)))
-			}
-		}
-	}
-	if errText != "" {
-		for _, line := range splitPlainLines(errText) {
-			for _, wrapped := range wrapLine(line, width) {
-				lines = append(lines, style.meta.Render(padRight(wrapped, width)))
-			}
-		}
-	}
-	if len(lines) <= maxLines {
-		return lines
-	}
-	return lines[len(lines)-maxLines:]
-}
-
-func normalizeStreamingPreviewText(value string) string {
-	if value == "" {
-		return ""
-	}
-	stripped := xansi.Strip(value)
-	trimmed := tailRunes(stripped, streamingPreviewMaxRunes)
-	var builder strings.Builder
-	builder.Grow(len(trimmed))
-	previousWasCarriageReturn := false
-	for _, r := range trimmed {
-		switch {
-		case r == '\r':
-			if !previousWasCarriageReturn {
-				builder.WriteRune('\n')
-			}
-			previousWasCarriageReturn = true
-		case r == '\n':
-			if previousWasCarriageReturn {
-				previousWasCarriageReturn = false
-				continue
-			}
-			builder.WriteRune('\n')
-			previousWasCarriageReturn = false
-		case r == '\t':
-			builder.WriteRune(r)
-			previousWasCarriageReturn = false
-		case unicode.IsControl(r):
-			previousWasCarriageReturn = false
-			continue
-		default:
-			builder.WriteRune(r)
-			previousWasCarriageReturn = false
-		}
-	}
-	return builder.String()
-}
-
-func tailRunes(value string, maxRunes int) string {
-	if maxRunes <= 0 {
-		return ""
-	}
-	runes := []rune(value)
-	if len(runes) <= maxRunes {
-		return value
-	}
-	return string(runes[len(runes)-maxRunes:])
+	return len(inputLines) + len(queuedLines) + len(pickerLines) + 1
 }
 
 func (l uiViewLayout) syncNativeLiveRegionState() {

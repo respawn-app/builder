@@ -259,6 +259,93 @@ func TestNativeScrollbackIncrementalFlushConcatenationMatchesFullSnapshot(t *tes
 	}
 }
 
+func TestConsumeNativeStreamPrefixHandlesNewlines(t *testing.T) {
+	pending, committed := consumeNativeStreamPrefix("line 1\nline 2\n", "line 1\nline 2\nline 3")
+	if pending != "" {
+		t.Fatalf("expected pending stream fully consumed, got %q", pending)
+	}
+	if committed != "line 3" {
+		t.Fatalf("expected committed remainder to keep unseen suffix, got %q", committed)
+	}
+}
+
+func TestNativeReplayDeduplicatesAlreadyStreamedAssistantPrefix(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt"}}),
+	).(*uiModel)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	m.nativePendingStreamText = "line 1\nline 2\n"
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "line 1\nline 2\nline 3"})
+	m.transcriptEntries = append(m.transcriptEntries, tui.TranscriptEntry{Role: "assistant", Text: "line 1\nline 2\nline 3"})
+	cmd := m.syncNativeHistoryFromTranscript()
+	if cmd == nil {
+		t.Fatal("expected replay delta after committed assistant append")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	plain := stripANSIText(msg.Text)
+	if strings.Contains(plain, "line 1") || strings.Contains(plain, "line 2") {
+		t.Fatalf("expected replay delta to skip already streamed prefix, got %q", msg.Text)
+	}
+	if !strings.Contains(plain, "line 3") {
+		t.Fatalf("expected replay delta to include unseen assistant suffix, got %q", msg.Text)
+	}
+}
+
+func TestNativeStreamingAppendThenCommitKeepsSinglePromptAndNoStreamDup(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
+	).(*uiModel)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	startupMsg, ok := startupCmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", startupCmd())
+	}
+	combined := startupMsg.Text + "line 1\nline 2\n"
+	m.nativePendingStreamText = "line 1\nline 2\n"
+
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "line 1\nline 2\nline 3"})
+	m.transcriptEntries = append(m.transcriptEntries, tui.TranscriptEntry{Role: "assistant", Text: "line 1\nline 2\nline 3"})
+	cmd := m.syncNativeHistoryFromTranscript()
+	if cmd == nil {
+		t.Fatal("expected committed assistant replay delta")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	combined += msg.Text
+	plain := stripANSIText(combined)
+	if count := strings.Count(plain, "prompt once"); count != 1 {
+		t.Fatalf("expected single prompt occurrence, got %d", count)
+	}
+	if count := strings.Count(plain, "line 1"); count != 1 {
+		t.Fatalf("expected streamed line 1 exactly once, got %d", count)
+	}
+	if count := strings.Count(plain, "line 2"); count != 1 {
+		t.Fatalf("expected streamed line 2 exactly once, got %d", count)
+	}
+	if count := strings.Count(plain, "line 3"); count != 1 {
+		t.Fatalf("expected committed unseen suffix line 3 exactly once, got %d", count)
+	}
+}
+
 func TestNativeScrollbackFlowIntegration(t *testing.T) {
 	entries := make([]UITranscriptEntry, 0, 120)
 	for i := 1; i <= 120; i++ {
@@ -568,16 +655,12 @@ func TestNativeOngoingKeepsInputAndStatusAtBottomOfLiveRegion(t *testing.T) {
 func TestNativeOngoingRendersBeforeWindowSizeKnownWithFallbackDimensions(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
 	m.input = "hello"
-	m.forwardToView(tui.StreamAssistantMsg{Delta: "warming up"})
 	got := stripANSIPreserve(m.View())
 	if strings.TrimSpace(got) == "" {
 		t.Fatalf("expected native ongoing render before first window size, got %q", got)
 	}
 	if !strings.Contains(got, "ongoing") {
 		t.Fatalf("expected fallback render to include status line, got %q", got)
-	}
-	if !strings.Contains(got, "(streaming)") || !strings.Contains(got, "warming up") {
-		t.Fatalf("expected fallback render to include streaming tail preview, got %q", got)
 	}
 	if lines := len(strings.Split(got, "\n")); lines > 8 {
 		t.Fatalf("expected bounded pre-size native render output, got %d lines", lines)
@@ -597,52 +680,5 @@ func TestNativeOngoingRendersWhenTrimmedToHeight(t *testing.T) {
 	}
 	if !strings.Contains(stripANSIPreserve(view), "ongoing") {
 		t.Fatalf("expected status line visible under tight height, got %q", view)
-	}
-}
-
-func TestNativeOngoingShowsStreamingTailWithoutCommittedHistory(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
-	m.termWidth = 80
-	m.termHeight = 12
-	m.windowSizeKnown = true
-	m.forwardToView(tui.SetConversationMsg{Entries: []tui.TranscriptEntry{{Role: "assistant", Text: "committed once"}}})
-	m.forwardToView(tui.StreamAssistantMsg{Delta: "streaming tail"})
-	m.syncViewport()
-	plain := stripANSIPreserve(m.View())
-	if !strings.Contains(plain, "streaming tail") {
-		t.Fatalf("expected native ongoing live region to show streaming tail, got %q", plain)
-	}
-	if strings.Contains(plain, "committed once") {
-		t.Fatalf("did not expect committed history in native ongoing live region, got %q", plain)
-	}
-}
-
-func TestNativeOngoingStreamingTailNormalizesControlCharsAndNewlines(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
-	m.termWidth = 80
-	m.termHeight = 12
-	m.windowSizeKnown = true
-	m.forwardToView(tui.StreamAssistantMsg{Delta: "line 1\r\nline 2\n\nline 3\x1b[2K\x1b[?25l"})
-	m.syncViewport()
-	plain := stripANSIPreserve(m.View())
-	if strings.ContainsRune(plain, '\r') {
-		t.Fatalf("expected streaming preview to normalize carriage returns, got %q", plain)
-	}
-	if strings.Contains(plain, "[2K") || strings.Contains(plain, "[?25l") {
-		t.Fatalf("expected streaming preview to strip ansi escape remnants, got %q", plain)
-	}
-	if strings.Contains(plain, "\n\n\n") {
-		t.Fatalf("expected CRLF normalization to avoid extra blank lines, got %q", plain)
-	}
-	if !strings.Contains(plain, "line 1") || !strings.Contains(plain, "line 2") || !strings.Contains(plain, "line 3") {
-		t.Fatalf("expected normalized streaming preview lines, got %q", plain)
-	}
-}
-
-func TestNormalizeStreamingPreviewTextBoundsLength(t *testing.T) {
-	input := strings.Repeat("a", streamingPreviewMaxRunes+500)
-	out := normalizeStreamingPreviewText(input)
-	if got := len([]rune(out)); got != streamingPreviewMaxRunes {
-		t.Fatalf("expected bounded streaming preview size %d, got %d", streamingPreviewMaxRunes, got)
 	}
 }
