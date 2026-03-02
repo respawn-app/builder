@@ -373,7 +373,6 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 			req,
 			func(delta string) {
 				e.chat.appendOngoingDelta(delta)
-				e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
 				e.emit(Event{Kind: EventAssistantDelta, StepID: stepID, AssistantDelta: delta})
 			},
 			func() {

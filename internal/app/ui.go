@@ -237,10 +237,6 @@ type uiModel struct {
 	startupCmds             []tea.Cmd
 	nativeLiveRegionLines   int
 	nativeLiveRegionPad     int
-	pendingSnapshotDeltaDedup bool
-	pendingSnapshotOngoingLen int
-	pendingSnapshotPreviousOngoingLen int
-	suppressLateDeltaStepID string
 
 	lastEscAt time.Time
 
@@ -287,7 +283,7 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 	}
 	var startupNativeHistoryCmd tea.Cmd
 	if m.engine != nil {
-		startupNativeHistoryCmd = m.runtimeAdapter().syncConversationFromEngine("")
+		startupNativeHistoryCmd = m.runtimeAdapter().syncConversationFromEngine()
 	} else {
 		for _, entry := range m.initialTranscript {
 			if strings.TrimSpace(entry.Text) == "" {
