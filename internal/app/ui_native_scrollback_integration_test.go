@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -45,6 +46,13 @@ type asyncLateDeltaStreamClient struct {
 	delay   time.Duration
 }
 
+type gatedStreamClient struct {
+	started chan struct{}
+	release chan struct{}
+	mu      sync.Mutex
+	lastReq llm.Request
+}
+
 func (c singleChunkStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
 	return llm.Response{}, errors.New("not implemented")
 }
@@ -75,6 +83,25 @@ func (c asyncLateDeltaStreamClient) GenerateStream(_ context.Context, _ llm.Requ
 	}
 	return llm.Response{
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: c.initial},
+		Usage:     llm.Usage{WindowTokens: 200_000},
+	}, nil
+}
+
+func (c *gatedStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
+	return llm.Response{}, errors.New("not implemented")
+}
+
+func (c *gatedStreamClient) GenerateStream(_ context.Context, req llm.Request, onDelta func(string)) (llm.Response, error) {
+	c.mu.Lock()
+	c.lastReq = req
+	c.mu.Unlock()
+	close(c.started)
+	<-c.release
+	if onDelta != nil {
+		onDelta("assistant")
+	}
+	return llm.Response{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "assistant"},
 		Usage:     llm.Usage{WindowTokens: 200_000},
 	}, nil
 }
@@ -580,6 +607,74 @@ func TestNativeProgramClearsResidualLivePadAfterStreamingCommit(t *testing.T) {
 	}
 	if model.nativeStreamingActive {
 		t.Fatal("expected native streaming active flag cleared after commit")
+	}
+}
+
+func TestNativeSubmitPathNoExtraBlankBetweenUserAndDivider(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	runtimeEvents := make(chan runtime.Event, 256)
+	streamClient := &gatedStreamClient{started: make(chan struct{}), release: make(chan struct{})}
+	eng, err := runtime.New(
+		store,
+		streamClient,
+		tools.NewRegistry(),
+		runtime.Config{
+			Model: "gpt-5",
+			OnEvent: func(evt runtime.Event) {
+				runtimeEvents <- evt
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	out := &bytes.Buffer{}
+	model := NewUIModel(
+		eng,
+		runtimeEvents,
+		closedAskEvents(),
+		WithUIScrollMode(config.TUIScrollModeNative),
+	).(*uiModel)
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := program.Run()
+		done <- runErr
+	}()
+
+	message := "i already see same issue for my messages, but divider was fixed. stream smth again, short"
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 160, Height: 32})
+	program.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(message)})
+	program.Send(tea.KeyMsg{Type: tea.KeyEnter})
+
+	select {
+	case <-streamClient.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream did not start")
+	}
+
+	close(streamClient.release)
+	time.Sleep(120 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("program run failed: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	plain := xansi.Strip(out.String())
+	if strings.Contains(plain, "❯ "+message+"\n\n────────────────") {
+		t.Fatalf("expected no extra blank line between committed user message and next divider, got %q", plain)
 	}
 }
 
