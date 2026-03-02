@@ -1206,6 +1206,44 @@ func TestDetailShellUserInitiatedCallUsesUserRanLabel(t *testing.T) {
 	}
 }
 
+func TestDetailSnapshotCachesLinesAcrossScrollUpdates(t *testing.T) {
+	m := NewModel(WithTheme("dark"))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 24, Width: 100})
+	m = updateModel(t, m, SetConversationMsg{Entries: []TranscriptEntry{
+		{Role: "user", Text: "hello"},
+		{Role: "assistant", Text: "world"},
+	}})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	if len(m.detailLines) == 0 {
+		t.Fatal("expected detail lines cache to be populated on detail entry")
+	}
+	startLen := len(m.detailLines)
+
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	if got := len(m.detailLines); got != startLen {
+		t.Fatalf("expected detail lines cache length to stay stable across scroll updates, got %d want %d", got, startLen)
+	}
+}
+
+func TestDetailScrollStepAllocsStayBounded(t *testing.T) {
+	entries := benchmarkDetailEntries(300)
+	m := NewModel(WithTheme("dark"))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 40, Width: 120})
+	m = updateModel(t, m, SetConversationMsg{Entries: entries})
+	m = updateModel(t, m, ToggleModeMsg{})
+	m = updateModel(t, m, ScrollOngoingMsg{Delta: -120})
+
+	allocs := testing.AllocsPerRun(20, func() {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = next.(Model)
+		_ = m.View()
+	})
+	if allocs > 50 {
+		t.Fatalf("expected detail scroll allocations to stay bounded, got %.2f allocs/op", allocs)
+	}
+}
+
 type errString string
 
 func (e errString) Error() string {

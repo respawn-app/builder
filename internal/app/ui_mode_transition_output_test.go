@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,8 +14,17 @@ import (
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
-func TestModeTogglesDoNotEnterAltScreenNative(t *testing.T) {
+func TestModeTogglesUseDetailAltScreenNative(t *testing.T) {
 	out := &bytes.Buffer{}
+	seq := &bytes.Buffer{}
+	var sequenceMu sync.Mutex
+	originalSequenceWriter := writeTerminalSequence
+	writeTerminalSequence = func(value string) {
+		sequenceMu.Lock()
+		_, _ = seq.WriteString(value)
+		sequenceMu.Unlock()
+	}
+	defer func() { writeTerminalSequence = originalSequenceWriter }()
 	model := NewUIModel(
 		nil,
 		make(chan runtime.Event),
@@ -45,8 +55,12 @@ func TestModeTogglesDoNotEnterAltScreenNative(t *testing.T) {
 		t.Fatal("program did not terminate")
 	}
 	raw := out.String()
-	if strings.Contains(raw, "\x1b[?1049h") || strings.Contains(raw, "\x1b[?1049l") {
-		t.Fatalf("did not expect alt-screen enter/leave sequences, got %q", raw)
+	if !strings.Contains(raw, "\x1b[?1049h") || !strings.Contains(raw, "\x1b[?1049l") {
+		t.Fatalf("expected detail alt-screen enter/leave sequences, got %q", raw)
+	}
+	sequenceRaw := seq.String()
+	if !strings.Contains(sequenceRaw, "\x1b[?1007h") || !strings.Contains(sequenceRaw, "\x1b[?1007l") {
+		t.Fatalf("expected alternate-scroll enable/disable sequences, got %q", sequenceRaw)
 	}
 	plain := strings.Join(strings.Fields(xansi.Strip(raw)), " ")
 	if !strings.Contains(plain, "history marker") {
@@ -54,8 +68,17 @@ func TestModeTogglesDoNotEnterAltScreenNative(t *testing.T) {
 	}
 }
 
-func TestModeTogglesDoNotEnterAltScreenAltMode(t *testing.T) {
+func TestModeTogglesUseDetailAltScreenAltMode(t *testing.T) {
 	out := &bytes.Buffer{}
+	seq := &bytes.Buffer{}
+	var sequenceMu sync.Mutex
+	originalSequenceWriter := writeTerminalSequence
+	writeTerminalSequence = func(value string) {
+		sequenceMu.Lock()
+		_, _ = seq.WriteString(value)
+		sequenceMu.Unlock()
+	}
+	defer func() { writeTerminalSequence = originalSequenceWriter }()
 	model := NewUIModel(
 		nil,
 		make(chan runtime.Event),
@@ -85,8 +108,12 @@ func TestModeTogglesDoNotEnterAltScreenAltMode(t *testing.T) {
 		t.Fatal("program did not terminate")
 	}
 	raw := out.String()
-	if strings.Contains(raw, "\x1b[?1049h") || strings.Contains(raw, "\x1b[?1049l") {
-		t.Fatalf("did not expect alt-screen enter/leave sequences in alt config mode, got %q", raw)
+	if !strings.Contains(raw, "\x1b[?1049h") || !strings.Contains(raw, "\x1b[?1049l") {
+		t.Fatalf("expected detail alt-screen enter/leave sequences in alt config mode, got %q", raw)
+	}
+	sequenceRaw := seq.String()
+	if !strings.Contains(sequenceRaw, "\x1b[?1007h") || !strings.Contains(sequenceRaw, "\x1b[?1007l") {
+		t.Fatalf("expected alternate-scroll enable/disable sequences in alt config mode, got %q", sequenceRaw)
 	}
 }
 

@@ -122,6 +122,7 @@ type Model struct {
 	selectedTranscriptActive bool
 
 	detailSnapshot string
+	detailLines    []string
 	ongoingError   string
 	theme          string
 	md             *markdownRenderer
@@ -154,7 +155,10 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	wasAtOngoingBottom := m.isOngoingAtBottom()
+	wasAtOngoingBottom := false
+	if m.mode == ModeOngoing {
+		wasAtOngoingBottom = m.isOngoingAtBottom()
+	}
 	shouldAutoFollowOngoing := false
 	viewportChanged := false
 
@@ -264,14 +268,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ongoingError = ""
 	}
 
-	m.ongoingScroll = clamp(m.ongoingScroll, 0, m.maxOngoingScroll())
-	m.detailScroll = clamp(m.detailScroll, 0, m.maxDetailScroll())
-	if m.mode == ModeOngoing && viewportChanged && m.snapOngoingOnViewportResize {
-		m.ongoingScroll = m.maxOngoingScroll()
-		m.snapOngoingOnViewportResize = false
+	clampOngoing := m.mode == ModeOngoing || shouldAutoFollowOngoing || viewportChanged || m.snapOngoingOnViewportResize
+	if clampOngoing {
+		maxOngoing := m.maxOngoingScroll()
+		m.ongoingScroll = clamp(m.ongoingScroll, 0, maxOngoing)
+		if m.mode == ModeOngoing && viewportChanged && m.snapOngoingOnViewportResize {
+			m.ongoingScroll = maxOngoing
+			m.snapOngoingOnViewportResize = false
+		}
+		if m.mode == ModeOngoing && shouldAutoFollowOngoing && wasAtOngoingBottom {
+			m.ongoingScroll = maxOngoing
+		}
 	}
-	if m.mode == ModeOngoing && shouldAutoFollowOngoing && wasAtOngoingBottom {
-		m.ongoingScroll = m.maxOngoingScroll()
+
+	if m.mode == ModeDetail || viewportChanged {
+		m.detailScroll = clamp(m.detailScroll, 0, m.maxDetailScroll())
 	}
 	return m, nil
 }
@@ -314,7 +325,7 @@ func (m Model) toggleMode() Model {
 	if m.mode == ModeOngoing {
 		m.mode = ModeDetail
 		m.snapOngoingOnViewportResize = false
-		m.detailSnapshot = m.renderFlatDetailTranscript()
+		m = m.withDetailSnapshot(m.renderFlatDetailTranscript())
 		m.detailScroll = m.maxDetailScroll()
 		return m
 	}
@@ -346,7 +357,7 @@ func (m Model) maxOngoingScroll() int {
 }
 
 func (m Model) maxDetailScroll() int {
-	lines := splitLines(m.detailSnapshot)
+	lines := m.detailSnapshotLines()
 	if len(lines) <= m.viewportLines {
 		return 0
 	}
@@ -384,7 +395,7 @@ func (m Model) ongoingLines() []string {
 }
 
 func (m Model) renderDetailSnapshot() string {
-	lines := splitLines(m.detailSnapshot)
+	lines := m.detailSnapshotLines()
 	if len(lines) == 0 {
 		lines = []string{""}
 	}
@@ -400,6 +411,19 @@ func (m Model) renderDetailSnapshot() string {
 		out = append(out, "")
 	}
 	return strings.Join(out, "\n")
+}
+
+func (m Model) detailSnapshotLines() []string {
+	if len(m.detailLines) > 0 {
+		return m.detailLines
+	}
+	return splitLines(m.detailSnapshot)
+}
+
+func (m Model) withDetailSnapshot(snapshot string) Model {
+	m.detailSnapshot = snapshot
+	m.detailLines = splitLines(snapshot)
+	return m
 }
 
 func (m Model) renderFlatDetailTranscript() string {
