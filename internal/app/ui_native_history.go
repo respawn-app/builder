@@ -1,6 +1,7 @@
 package app
 
 import (
+	"os"
 	"strings"
 
 	"builder/internal/config"
@@ -8,6 +9,19 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+const nativePendingStreamMaxRunes = 20000
+
+var writeNativeOutput = func(text string) {
+	_, _ = os.Stdout.WriteString(text)
+}
+
+func emitNativeDirectWrite(text string) tea.Cmd {
+	return func() tea.Msg {
+		writeNativeOutput(text)
+		return nil
+	}
+}
 
 func (m *uiModel) usesNativeScrollback() bool {
 	return m.tuiScrollMode == config.TUIScrollModeNative
@@ -45,6 +59,7 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 		m.nativeFormatterEntries = cloneNativeEntries(filtered)
 		m.nativeFlushedEntryCount = len(m.transcriptEntries)
 		m.nativeHistoryReplayed = true
+		m.nativePendingStreamText = ""
 		return m.emitNativeRenderedText(styleNativeReplayDividers(rawSnapshot, m.theme, m.nativeFormatterWidth))
 	}
 
@@ -64,7 +79,13 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 			continue
 		}
 		if entry.Role == "assistant" && m.nativePendingStreamText != "" {
-			m.nativePendingStreamText, entry.Text = consumeNativeStreamPrefix(m.nativePendingStreamText, entry.Text)
+			remainingPending, remainingCommitted := consumeNativeStreamPrefix(m.nativePendingStreamText, entry.Text)
+			if remainingPending == m.nativePendingStreamText && remainingCommitted == entry.Text {
+				m.nativePendingStreamText = ""
+			} else {
+				m.nativePendingStreamText = remainingPending
+				entry.Text = remainingCommitted
+			}
 			if strings.TrimSpace(entry.Text) == "" {
 				continue
 			}
@@ -136,6 +157,7 @@ func (m *uiModel) resetNativeFormatterState() {
 	m.nativeFormatterWidth = 0
 	m.nativeFormatterSnapshot = ""
 	m.nativeFormatterEntries = nil
+	m.nativePendingStreamText = ""
 	m.nativeFormatter = tui.Model{}
 }
 
@@ -154,6 +176,7 @@ func (m *uiModel) rebaseNativeFormatterSnapshot() {
 	m.nativeFormatterEntries = cloneNativeEntries(filtered)
 	m.nativeFlushedEntryCount = len(m.transcriptEntries)
 	m.nativeHistoryReplayed = true
+	m.nativePendingStreamText = ""
 }
 
 func nonEmptyNativeEntries(entries []tui.TranscriptEntry) []tui.TranscriptEntry {
@@ -232,6 +255,18 @@ func consumeNativeStreamPrefix(pending, committed string) (string, string) {
 		match++
 	}
 	return string(pendingRunes[match:]), string(committedRunes[match:])
+}
+
+func appendBoundedPendingStream(existing, delta string) string {
+	if delta == "" {
+		return existing
+	}
+	combined := existing + delta
+	runes := []rune(combined)
+	if len(runes) <= nativePendingStreamMaxRunes {
+		return combined
+	}
+	return string(runes[len(runes)-nativePendingStreamMaxRunes:])
 }
 
 func (m *uiModel) emitNativeRenderedText(rendered string) tea.Cmd {

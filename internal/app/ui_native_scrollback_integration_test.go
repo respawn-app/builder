@@ -29,8 +29,18 @@ func normalizedOutput(v string) string {
 	return strings.Join(strings.Fields(xansi.Strip(v)), " ")
 }
 
+func captureNativeOutputForTest(buffer *bytes.Buffer) func() {
+	original := writeNativeOutput
+	writeNativeOutput = func(text string) {
+		_, _ = buffer.WriteString(text)
+	}
+	return func() { writeNativeOutput = original }
+}
+
 func TestNativeScrollbackProgramOutputContract(t *testing.T) {
 	out := &bytes.Buffer{}
+	cleanup := captureNativeOutputForTest(out)
+	defer cleanup()
 	model := NewUIModel(
 		nil,
 		closedRuntimeEvents(),
@@ -98,6 +108,8 @@ func TestNativeScrollbackProgramOutputContract(t *testing.T) {
 
 func TestNativeSubmitAndFlushDoesNotDuplicateStatusLines(t *testing.T) {
 	out := &bytes.Buffer{}
+	cleanup := captureNativeOutputForTest(out)
+	defer cleanup()
 	model := NewUIModel(
 		nil,
 		closedRuntimeEvents(),
@@ -158,6 +170,8 @@ func TestNativeSubmitAndFlushDoesNotDuplicateStatusLines(t *testing.T) {
 
 func TestNativeReplayOutputContainsMarkdownStyling(t *testing.T) {
 	out := &bytes.Buffer{}
+	cleanup := captureNativeOutputForTest(out)
+	defer cleanup()
 	model := NewUIModel(
 		nil,
 		closedRuntimeEvents(),
@@ -193,5 +207,90 @@ func TestNativeReplayOutputContainsMarkdownStyling(t *testing.T) {
 	plain := normalizedOutput(raw)
 	if !strings.Contains(plain, "bold") || !strings.Contains(plain, "code") {
 		t.Fatalf("expected styled replay to include content, got %q", plain)
+	}
+}
+
+func TestNativeStreamingInterleavedWithStatusRedrawStaysCoherent(t *testing.T) {
+	out := &bytes.Buffer{}
+	cleanup := captureNativeOutputForTest(out)
+	defer cleanup()
+	model := NewUIModel(
+		nil,
+		closedRuntimeEvents(),
+		closedAskEvents(),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
+	).(*uiModel)
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	program.Send(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "line1\n"}})
+	program.Send(spinnerTickMsg{})
+	program.Send(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "line2\n"}})
+	program.Send(spinnerTickMsg{})
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+	raw := out.String()
+	plain := xansi.Strip(raw)
+	if strings.Count(normalizedOutput(raw), "prompt once") != 1 {
+		t.Fatalf("expected prompt once in output, got %d", strings.Count(normalizedOutput(raw), "prompt once"))
+	}
+	if strings.Count(normalizedOutput(raw), "line1") != 1 || strings.Count(normalizedOutput(raw), "line2") != 1 {
+		t.Fatalf("expected coherent single appended stream lines, got %q", normalizedOutput(raw))
+	}
+	for _, line := range strings.Split(plain, "\n") {
+		if strings.Count(line, "ongoing | ") > 1 {
+			t.Fatalf("expected no duplicated status segment in a single rendered line, got %q", line)
+		}
+	}
+}
+
+func TestNativeAssistantDeltaSuppressedInDetailMode(t *testing.T) {
+	out := &bytes.Buffer{}
+	cleanup := captureNativeOutputForTest(out)
+	defer cleanup()
+	model := NewUIModel(
+		nil,
+		closedRuntimeEvents(),
+		closedAskEvents(),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
+	).(*uiModel)
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	program.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
+	time.Sleep(20 * time.Millisecond)
+	program.Send(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "hidden-delta"}})
+	time.Sleep(20 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+	if strings.Contains(normalizedOutput(out.String()), "hidden-delta") {
+		t.Fatalf("expected assistant delta to stay suppressed while in detail mode, got %q", normalizedOutput(out.String()))
 	}
 }
