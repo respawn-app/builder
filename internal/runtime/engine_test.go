@@ -2273,6 +2273,54 @@ func TestStreamingDeltasDoNotEmitConversationSnapshotEvents(t *testing.T) {
 	}
 }
 
+func TestChatSnapshotOngoingTracksStreamingAndClearsOnCommit(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	var (
+		mu            sync.Mutex
+		deltaSnapshots []string
+	)
+	var eng *Engine
+	eng, err = New(store, fakeSimpleStreamClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			if evt.Kind != EventAssistantDelta || eng == nil {
+				return
+			}
+			mu.Lock()
+			deltaSnapshots = append(deltaSnapshots, eng.ChatSnapshot().Ongoing)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	_, err = eng.SubmitUserMessage(context.Background(), "stream")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	mu.Lock()
+	if len(deltaSnapshots) != 2 {
+		mu.Unlock()
+		t.Fatalf("expected two assistant delta snapshots, got %d", len(deltaSnapshots))
+	}
+	if deltaSnapshots[0] != "a" || deltaSnapshots[1] != "ab" {
+		mu.Unlock()
+		t.Fatalf("unexpected ongoing snapshots during streaming: %+v", deltaSnapshots)
+	}
+	mu.Unlock()
+
+	if ongoing := strings.TrimSpace(eng.ChatSnapshot().Ongoing); ongoing != "" {
+		t.Fatalf("expected ongoing cleared after commit, got %q", ongoing)
+	}
+}
+
 func TestAuthErrorsAreNotRetried(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
