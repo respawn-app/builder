@@ -65,6 +65,7 @@ func TestAssistantDeltaAppendsWhenSnapshotWasNotDeltaProgression(t *testing.T) {
 func TestAssistantDeltaSuppressedAfterCommittedSnapshotForSameStep(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 
+	m.forwardToView(tui.SetConversationMsg{Ongoing: "fin"})
 	m.transcriptEntries = []tui.TranscriptEntry{{Role: "user", Text: "u"}}
 	_ = m.runtimeAdapter().applyChatSnapshot("step-1", runtime.ChatSnapshot{
 		Entries: []runtime.ChatEntry{{Role: "user", Text: "u"}, {Role: "assistant", Text: "final"}},
@@ -86,5 +87,23 @@ func TestConversationUpdatedWithEmptyStepIDDoesNotClearLateDeltaSuppression(t *t
 
 	if got := m.view.OngoingStreamingText(); got != "" {
 		t.Fatalf("expected suppression to persist across empty-step snapshot, got %q", got)
+	}
+}
+
+func TestToolCallConversationUpdateDoesNotSuppressLaterSameStepDelta(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "user", Text: "u"}}
+	_ = m.runtimeAdapter().applyChatSnapshot("step-1", runtime.ChatSnapshot{
+		Entries: []runtime.ChatEntry{
+			{Role: "user", Text: "u"},
+			{Role: "tool_call", Text: "shell"},
+		},
+		Ongoing: "",
+	})
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, StepID: "step-1", AssistantDelta: "hello"})
+
+	if got := m.view.OngoingStreamingText(); got != "hello" {
+		t.Fatalf("expected later same-step assistant delta after tool update, got %q", got)
 	}
 }

@@ -89,7 +89,6 @@ func (a uiRuntimeAdapter) syncConversationFromEngine(stepID string) tea.Cmd {
 func (a uiRuntimeAdapter) applyChatSnapshot(stepID string, snapshot runtime.ChatSnapshot) tea.Cmd {
 	m := a.model
 	previousOngoingLen := len(m.view.OngoingStreamingText())
-	previousEntryCount := len(m.transcriptEntries)
 	entries := make([]tui.TranscriptEntry, 0, len(snapshot.Entries))
 	for _, entry := range snapshot.Entries {
 		entries = append(entries, tui.TranscriptEntry{
@@ -107,7 +106,7 @@ func (a uiRuntimeAdapter) applyChatSnapshot(stepID string, snapshot runtime.Chat
 		Ongoing:      snapshot.Ongoing,
 		OngoingError: snapshot.OngoingError,
 	})
-	assistantCommitted := strings.TrimSpace(snapshot.Ongoing) == "" && len(entries) > previousEntryCount
+	assistantCommitted := previousOngoingLen > 0 && strings.TrimSpace(snapshot.Ongoing) == ""
 	if assistantCommitted && strings.TrimSpace(stepID) != "" {
 		m.suppressLateDeltaStepID = stepID
 	} else if strings.TrimSpace(snapshot.Ongoing) != "" {
