@@ -81,8 +81,8 @@ func TestNativeScrollbackProgramOutputContract(t *testing.T) {
 	if strings.Contains(raw, "\x1b[?1000h") || strings.Contains(raw, "\x1b[?1002h") || strings.Contains(raw, "\x1b[?1003h") || strings.Contains(raw, "\x1b[?1006h") {
 		t.Fatalf("did not expect mouse-capture enable sequences in native mode output")
 	}
-	if strings.Count(normalized, "first replay line") < 1 {
-		t.Fatalf("expected startup replay to be present, got %d", strings.Count(normalized, "first replay line"))
+	if strings.Count(normalized, "first replay line") != 1 {
+		t.Fatalf("expected startup replay line exactly once, got %d", strings.Count(normalized, "first replay line"))
 	}
 	if strings.Count(normalized, "delta replay line") != 1 {
 		t.Fatalf("expected delta replay exactly once, got %d", strings.Count(normalized, "delta replay line"))

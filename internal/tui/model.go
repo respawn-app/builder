@@ -337,6 +337,14 @@ func (m Model) OngoingCommittedSnapshot() string {
 	return m.renderFlatCommittedOngoingTranscript()
 }
 
+func (m Model) OngoingStreamingText() string {
+	return m.ongoing
+}
+
+func (m Model) OngoingErrorText() string {
+	return m.ongoingError
+}
+
 func FormatOngoingError(err error) string {
 	if err == nil {
 		return ""

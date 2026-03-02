@@ -549,13 +549,17 @@ func TestNativeOngoingKeepsInputAndStatusAtBottomOfLiveRegion(t *testing.T) {
 	m.input = "hello"
 	m.syncViewport()
 	lines := strings.Split(stripANSIPreserve(m.View()), "\n")
-	if len(lines) != 12 {
-		t.Fatalf("expected native ongoing view to fill terminal height, got %d lines", len(lines))
+	if len(lines) >= 12 || len(lines) < 2 {
+		t.Fatalf("expected native ongoing view to render only compact live region, got %d lines", len(lines))
 	}
 	if !strings.Contains(lines[len(lines)-1], "ongoing") {
 		t.Fatalf("expected status line at terminal bottom, got %q", lines[len(lines)-1])
 	}
-	windowTail := strings.Join(lines[len(lines)-5:], "\n")
+	start := 0
+	if len(lines) > 5 {
+		start = len(lines) - 5
+	}
+	windowTail := strings.Join(lines[start:], "\n")
 	if !strings.Contains(windowTail, "› hello") {
 		t.Fatalf("expected input region in bottom window tail, got %q", windowTail)
 	}
@@ -564,12 +568,16 @@ func TestNativeOngoingKeepsInputAndStatusAtBottomOfLiveRegion(t *testing.T) {
 func TestNativeOngoingRendersBeforeWindowSizeKnownWithFallbackDimensions(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
 	m.input = "hello"
+	m.forwardToView(tui.StreamAssistantMsg{Delta: "warming up"})
 	got := stripANSIPreserve(m.View())
 	if strings.TrimSpace(got) == "" {
 		t.Fatalf("expected native ongoing render before first window size, got %q", got)
 	}
 	if !strings.Contains(got, "ongoing") {
 		t.Fatalf("expected fallback render to include status line, got %q", got)
+	}
+	if !strings.Contains(got, "(streaming)") || !strings.Contains(got, "warming up") {
+		t.Fatalf("expected fallback render to include streaming tail preview, got %q", got)
 	}
 	if lines := len(strings.Split(got, "\n")); lines > 8 {
 		t.Fatalf("expected bounded pre-size native render output, got %d lines", lines)
@@ -589,5 +597,22 @@ func TestNativeOngoingRendersWhenTrimmedToHeight(t *testing.T) {
 	}
 	if !strings.Contains(stripANSIPreserve(view), "ongoing") {
 		t.Fatalf("expected status line visible under tight height, got %q", view)
+	}
+}
+
+func TestNativeOngoingShowsStreamingTailWithoutCommittedHistory(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 12
+	m.windowSizeKnown = true
+	m.forwardToView(tui.SetConversationMsg{Entries: []tui.TranscriptEntry{{Role: "assistant", Text: "committed once"}}})
+	m.forwardToView(tui.StreamAssistantMsg{Delta: "streaming tail"})
+	m.syncViewport()
+	plain := stripANSIPreserve(m.View())
+	if !strings.Contains(plain, "streaming tail") {
+		t.Fatalf("expected native ongoing live region to show streaming tail, got %q", plain)
+	}
+	if strings.Contains(plain, "committed once") {
+		t.Fatalf("did not expect committed history in native ongoing live region, got %q", plain)
 	}
 }

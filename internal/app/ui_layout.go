@@ -89,10 +89,12 @@ func (l uiViewLayout) renderNativeOngoingPreSize() string {
 	inputLines := l.renderInputLines(width, style)
 	queuedLines := l.renderQueuedMessagesPane(width)
 	pickerLines := l.renderSlashCommandPicker(width)
+	streamingLines := l.renderNativeStreamingTail(width, 4, style)
 	statusLine := l.renderStatusLine(width, style)
-	lines := make([]string, 0, len(inputLines)+len(queuedLines)+len(pickerLines)+1)
+	lines := make([]string, 0, len(inputLines)+len(queuedLines)+len(pickerLines)+len(streamingLines)+1)
 	lines = append(lines, pickerLines...)
 	lines = append(lines, queuedLines...)
+	lines = append(lines, streamingLines...)
 	lines = append(lines, inputLines...)
 	lines = append(lines, statusLine)
 	return strings.Join(lines, "\n") + ansiHideCursor
@@ -112,26 +114,23 @@ func (l uiViewLayout) renderNativeOngoingSized() string {
 	inputLines := l.renderInputLines(width, style)
 	queuedLines := l.renderQueuedMessagesPane(width)
 	pickerLines := l.renderSlashCommandPicker(width)
+	streamingLines := l.renderNativeStreamingTail(width, 4, style)
 	statusLine := l.renderStatusLine(width, style)
-	statusLines := 1
-	chatLines := height - len(inputLines) - len(queuedLines) - len(pickerLines) - statusLines
-	if chatLines < 1 {
-		chatLines = 1
+	liveLines := make([]string, 0, len(pickerLines)+len(queuedLines)+len(streamingLines)+len(inputLines)+1)
+	if m.nativeLiveRegionPad > 0 {
+		for i := 0; i < m.nativeLiveRegionPad; i++ {
+			liveLines = append(liveLines, padRight("", width))
+		}
 	}
-	chatPanel := l.renderChatPanel(width, chatLines, style)
-	allLines := make([]string, 0, height)
-	allLines = append(allLines, chatPanel...)
-	allLines = append(allLines, pickerLines...)
-	allLines = append(allLines, queuedLines...)
-	allLines = append(allLines, inputLines...)
-	allLines = append(allLines, statusLine)
-	for len(allLines) < height {
-		allLines = append(allLines, padRight("", width))
+	liveLines = append(liveLines, pickerLines...)
+	liveLines = append(liveLines, queuedLines...)
+	liveLines = append(liveLines, streamingLines...)
+	liveLines = append(liveLines, inputLines...)
+	liveLines = append(liveLines, statusLine)
+	if len(liveLines) > height {
+		liveLines = liveLines[len(liveLines)-height:]
 	}
-	if len(allLines) > height {
-		allLines = allLines[len(allLines)-height:]
-	}
-	return strings.Join(allLines, "\n") + ansiHideCursor
+	return strings.Join(liveLines, "\n") + ansiHideCursor
 }
 
 func (l uiViewLayout) nativeOngoingLineCount() int {
@@ -144,7 +143,37 @@ func (l uiViewLayout) nativeOngoingLineCount() int {
 	inputLines := l.renderInputLines(width, style)
 	queuedLines := l.renderQueuedMessagesPane(width)
 	pickerLines := l.renderSlashCommandPicker(width)
-	return len(inputLines) + len(queuedLines) + len(pickerLines) + 1
+	streamingLines := l.renderNativeStreamingTail(width, 4, style)
+	return len(inputLines) + len(queuedLines) + len(pickerLines) + len(streamingLines) + 1
+}
+
+func (l uiViewLayout) renderNativeStreamingTail(width, maxLines int, style uiStyles) []string {
+	m := l.model
+	if width <= 0 || maxLines <= 0 {
+		return nil
+	}
+	stream := strings.TrimSpace(m.view.OngoingStreamingText())
+	errText := strings.TrimSpace(m.view.OngoingErrorText())
+	lines := make([]string, 0, maxLines)
+	if stream != "" {
+		lines = append(lines, style.meta.Render(padRight("(streaming)", width)))
+		for _, line := range splitPlainLines(stream) {
+			for _, wrapped := range wrapLine(line, width) {
+				lines = append(lines, style.chat.Render(padRight(wrapped, width)))
+			}
+		}
+	}
+	if errText != "" {
+		for _, line := range splitPlainLines(errText) {
+			for _, wrapped := range wrapLine(line, width) {
+				lines = append(lines, style.meta.Render(padRight(wrapped, width)))
+			}
+		}
+	}
+	if len(lines) <= maxLines {
+		return lines
+	}
+	return lines[len(lines)-maxLines:]
 }
 
 func (l uiViewLayout) syncNativeLiveRegionState() {
