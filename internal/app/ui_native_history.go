@@ -86,18 +86,6 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 		if strings.TrimSpace(entry.Text) == "" {
 			continue
 		}
-		if entry.Role == "assistant" && m.nativePendingStreamText != "" {
-			remainingPending, remainingCommitted := consumeNativeStreamPrefix(m.nativePendingStreamText, entry.Text)
-			if remainingPending == m.nativePendingStreamText && remainingCommitted == entry.Text {
-				m.nativePendingStreamText = ""
-			} else {
-				m.nativePendingStreamText = remainingPending
-				entry.Text = remainingCommitted
-			}
-			if strings.TrimSpace(entry.Text) == "" {
-				continue
-			}
-		}
 		next, _ := m.nativeFormatter.Update(tui.AppendTranscriptMsg{
 			Role:       entry.Role,
 			Text:       entry.Text,

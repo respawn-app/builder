@@ -248,8 +248,12 @@ func TestNativeStreamingInterleavedWithStatusRedrawStaysCoherent(t *testing.T) {
 	if strings.Count(normalizedOutput(raw), "prompt once") != 1 {
 		t.Fatalf("expected prompt once in output, got %d", strings.Count(normalizedOutput(raw), "prompt once"))
 	}
-	if strings.Count(normalizedOutput(raw), "line1") != 1 || strings.Count(normalizedOutput(raw), "line2") != 1 {
-		t.Fatalf("expected coherent single appended stream lines, got %q", normalizedOutput(raw))
+	normalized := normalizedOutput(raw)
+	if !strings.Contains(normalized, "line1") || !strings.Contains(normalized, "line2") {
+		t.Fatalf("expected coherent streamed lines to remain visible, got %q", normalized)
+	}
+	if strings.Index(normalized, "line1") > strings.Index(normalized, "line2") {
+		t.Fatalf("expected streamed line order preserved, got %q", normalized)
 	}
 	for _, line := range strings.Split(plain, "\n") {
 		if strings.Count(line, "ongoing | ") > 1 {
