@@ -232,10 +232,12 @@ func TestNativeStreamingInterleavedWithStatusRedrawStaysCoherent(t *testing.T) {
 	if strings.Count(normalizedOutput(raw), "prompt once") != 1 {
 		t.Fatalf("expected prompt once in output, got %d", strings.Count(normalizedOutput(raw), "prompt once"))
 	}
-	normalized := normalizedOutput(raw)
-	if !strings.Contains(normalized, "line1") || !strings.Contains(normalized, "line2") {
-		t.Fatalf("expected coherent streamed lines to remain visible, got %q", normalized)
+	line1Count := strings.Count(normalizedOutput(raw), "line1")
+	line2Count := strings.Count(normalizedOutput(raw), "line2")
+	if line1Count < 1 || line2Count < 1 || line1Count > 2 || line2Count > 2 {
+		t.Fatalf("expected bounded streamed line visibility under redraw pressure, got line1=%d line2=%d output=%q", line1Count, line2Count, normalizedOutput(raw))
 	}
+	normalized := normalizedOutput(raw)
 	if strings.Index(normalized, "line1") > strings.Index(normalized, "line2") {
 		t.Fatalf("expected streamed line order preserved, got %q", normalized)
 	}
@@ -350,5 +352,54 @@ func TestNativeStreamingWithoutNewlineStillVisible(t *testing.T) {
 	}
 	if !strings.Contains(xansi.Strip(out.String()), "long paragraph without newline") {
 		t.Fatalf("expected non-newline streaming text to still become visible, got %q", xansi.Strip(out.String()))
+	}
+}
+
+func TestNativeStreamingInterleavedRendersKeepsLinesLeftAligned(t *testing.T) {
+	out := &bytes.Buffer{}
+	model := NewUIModel(
+		nil,
+		closedRuntimeEvents(),
+		closedAskEvents(),
+		WithUIScrollMode(config.TUIScrollModeNative),
+	).(*uiModel)
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	expected := []string{"LADDER-01", "LADDER-02", "LADDER-03", "LADDER-04"}
+	for _, token := range expected {
+		program.Send(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: token + "\n"}})
+		program.Send(spinnerTickMsg{})
+	}
+	time.Sleep(50 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+	plain := xansi.Strip(out.String())
+	normalized := strings.ReplaceAll(strings.ReplaceAll(plain, "\r\n", "\n"), "\r", "\n")
+	lines := strings.Split(normalized, "\n")
+	for _, token := range expected {
+		matched := false
+		for _, line := range lines {
+			trimmedRight := strings.TrimRight(line, " ")
+			if trimmedRight == token {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			t.Fatalf("expected streamed line %q to be left-aligned on its own line, got %q", token, normalized)
+		}
 	}
 }
