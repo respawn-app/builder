@@ -154,6 +154,51 @@ func TestNativeScrollbackResizeRebasesFormatterWidth(t *testing.T) {
 	}
 }
 
+func TestNativeStreamingContractViewportDuringStreamCommittedReplayOnFinish(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
+	).(*uiModel)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	if len(m.transcriptEntries) != 1 {
+		t.Fatalf("expected one committed transcript entry at start, got %d", len(m.transcriptEntries))
+	}
+
+	next, _ := m.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "stream line"}})
+	updated, ok := next.(*uiModel)
+	if !ok {
+		t.Fatalf("unexpected model type %T", next)
+	}
+	m = updated
+	if len(m.transcriptEntries) != 1 {
+		t.Fatalf("expected streaming not to append committed transcript yet, got %d entries", len(m.transcriptEntries))
+	}
+	if !strings.Contains(stripANSIPreserve(m.View()), "stream line") {
+		t.Fatalf("expected ongoing viewport to show streaming text")
+	}
+
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "stream line\nfinal line"})
+	m.transcriptEntries = append(m.transcriptEntries, tui.TranscriptEntry{Role: "assistant", Text: "stream line\nfinal line"})
+	commitCmd := m.syncNativeHistoryFromTranscript()
+	if commitCmd == nil {
+		t.Fatal("expected native replay delta after committed assistant append")
+	}
+	flush, ok := commitCmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", commitCmd())
+	}
+	plain := stripANSIText(flush.Text)
+	if strings.Count(plain, "stream line") != 1 || strings.Count(plain, "final line") != 1 {
+		t.Fatalf("expected committed assistant text appended exactly once on finish, got %q", flush.Text)
+	}
+}
+
 func TestNativeScrollbackShrinkRebasesWithoutReemittingHistory(t *testing.T) {
 	m := NewUIModel(
 		nil,
