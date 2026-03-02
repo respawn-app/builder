@@ -76,3 +76,15 @@ func TestAssistantDeltaSuppressedAfterCommittedSnapshotForSameStep(t *testing.T)
 		t.Fatalf("expected late delta for committed step to be suppressed, got %q", got)
 	}
 }
+
+func TestConversationUpdatedWithEmptyStepIDDoesNotClearLateDeltaSuppression(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+
+	m.suppressLateDeltaStepID = "step-1"
+	_ = m.runtimeAdapter().applyChatSnapshot("", runtime.ChatSnapshot{Ongoing: ""})
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, StepID: "step-1", AssistantDelta: "late"})
+
+	if got := m.view.OngoingStreamingText(); got != "" {
+		t.Fatalf("expected suppression to persist across empty-step snapshot, got %q", got)
+	}
+}

@@ -22,7 +22,7 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 		delta := evt.AssistantDelta
 		m.sawAssistantDelta = delta != ""
 		if delta != "" {
-			if m.suppressLateDeltaStepID != "" && evt.StepID == m.suppressLateDeltaStepID && strings.TrimSpace(m.view.OngoingStreamingText()) == "" {
+			if m.suppressLateDeltaStepID != "" && evt.StepID == m.suppressLateDeltaStepID {
 				break
 			}
 			currentOngoing := m.view.OngoingStreamingText()
@@ -110,7 +110,11 @@ func (a uiRuntimeAdapter) applyChatSnapshot(stepID string, snapshot runtime.Chat
 	assistantCommitted := strings.TrimSpace(snapshot.Ongoing) == "" && len(entries) > previousEntryCount
 	if assistantCommitted && strings.TrimSpace(stepID) != "" {
 		m.suppressLateDeltaStepID = stepID
-	} else if strings.TrimSpace(snapshot.Ongoing) != "" || strings.TrimSpace(stepID) == "" || m.suppressLateDeltaStepID == stepID {
+	} else if strings.TrimSpace(snapshot.Ongoing) != "" {
+		if strings.TrimSpace(stepID) == "" || m.suppressLateDeltaStepID == "" || m.suppressLateDeltaStepID == stepID {
+			m.suppressLateDeltaStepID = ""
+		}
+	} else if strings.TrimSpace(stepID) != "" && m.suppressLateDeltaStepID == stepID {
 		m.suppressLateDeltaStepID = ""
 	}
 	if strings.TrimSpace(snapshot.Ongoing) == "" {
