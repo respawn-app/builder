@@ -334,3 +334,39 @@ func TestNativeStreamingTinyDeltasRemainContiguous(t *testing.T) {
 		t.Fatalf("expected no per-delta forced newlines in streamed text, got %q", plain)
 	}
 }
+
+func TestNativeStreamingWithoutNewlineStillVisible(t *testing.T) {
+	out := &bytes.Buffer{}
+	cleanup := captureNativeOutputForTest(out)
+	defer cleanup()
+	model := NewUIModel(
+		nil,
+		closedRuntimeEvents(),
+		closedAskEvents(),
+		WithUIScrollMode(config.TUIScrollModeNative),
+	).(*uiModel)
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	for _, delta := range []string{"long", " paragraph", " without", " newline"} {
+		program.Send(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: delta}})
+	}
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+	if !strings.Contains(xansi.Strip(out.String()), "long paragraph without newline") {
+		t.Fatalf("expected non-newline streaming text to still become visible, got %q", xansi.Strip(out.String()))
+	}
+}

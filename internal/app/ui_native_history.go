@@ -11,7 +11,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const nativePendingStreamMaxRunes = 20000
+const (
+	nativePendingStreamMaxRunes = 20000
+	nativeStreamLineMaxRunes    = 8000
+)
 
 var nativeOutputMu sync.Mutex
 
@@ -274,6 +277,29 @@ func appendBoundedPendingStream(existing, delta string) string {
 		return combined
 	}
 	return string(runes[len(runes)-nativePendingStreamMaxRunes:])
+}
+
+func appendBoundedStreamLine(existing, delta string) string {
+	if delta == "" {
+		return existing
+	}
+	combined := existing + delta
+	runes := []rune(combined)
+	if len(runes) <= nativeStreamLineMaxRunes {
+		return combined
+	}
+	return string(runes[len(runes)-nativeStreamLineMaxRunes:])
+}
+
+func tailRunes(value string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	return string(runes[len(runes)-maxRunes:])
 }
 
 func splitCompleteLines(value string) (string, string) {
