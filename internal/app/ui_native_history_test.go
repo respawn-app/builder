@@ -616,3 +616,22 @@ func TestNativeOngoingShowsStreamingTailWithoutCommittedHistory(t *testing.T) {
 		t.Fatalf("did not expect committed history in native ongoing live region, got %q", plain)
 	}
 }
+
+func TestNativeOngoingStreamingTailNormalizesControlCharsAndNewlines(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 12
+	m.windowSizeKnown = true
+	m.forwardToView(tui.StreamAssistantMsg{Delta: "line 1\rline 2\n\nline 3\x1b[2K"})
+	m.syncViewport()
+	plain := stripANSIPreserve(m.View())
+	if strings.ContainsRune(plain, '\r') {
+		t.Fatalf("expected streaming preview to normalize carriage returns, got %q", plain)
+	}
+	if strings.Contains(plain, "\x1b[2K") {
+		t.Fatalf("expected streaming preview to strip control escapes, got %q", plain)
+	}
+	if !strings.Contains(plain, "line 1") || !strings.Contains(plain, "line 2") || !strings.Contains(plain, "line 3") {
+		t.Fatalf("expected normalized streaming preview lines, got %q", plain)
+	}
+}
