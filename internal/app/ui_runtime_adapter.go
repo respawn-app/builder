@@ -13,7 +13,7 @@ func normalizeNativeStreamWriteChunk(text string) string {
 	if text == "" {
 		return ""
 	}
-	return "\r" + strings.ReplaceAll(text, "\n", "\n\r")
+	return "\x1b[1G" + strings.ReplaceAll(text, "\n", "\n\x1b[1G")
 }
 
 type uiRuntimeAdapter struct {
@@ -32,12 +32,19 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 			m.forwardToView(tui.StreamAssistantMsg{Delta: delta})
 			if m.usesNativeScrollback() && m.view.Mode() == tui.ModeOngoing {
 				m.nativePendingStreamText = appendBoundedPendingStream(m.nativePendingStreamText, delta)
-				m.nativeStreamLineBuffer += delta
+				m.nativeStreamLineBuffer = appendBoundedStreamLine(m.nativeStreamLineBuffer, delta)
 				chunk, remainder := splitCompleteLines(m.nativeStreamLineBuffer)
 				m.nativeStreamLineBuffer = remainder
+				emit := ""
 				if chunk != "" {
+					emit += normalizeNativeStreamWriteChunk(chunk)
+				}
+				if m.nativeStreamLineBuffer != "" {
+					emit += normalizeNativeStreamWriteChunk(m.nativeStreamLineBuffer)
+				}
+				if emit != "" {
 					return func() tea.Msg {
-						return nativeStreamAppendMsg{Text: normalizeNativeStreamWriteChunk(chunk)}
+						return nativeStreamAppendMsg{Text: emit}
 					}
 				}
 			}

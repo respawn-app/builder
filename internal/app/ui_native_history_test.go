@@ -280,6 +280,17 @@ func TestAppendBoundedPendingStreamCapsTail(t *testing.T) {
 	}
 }
 
+func TestAppendBoundedStreamLineCapsTail(t *testing.T) {
+	seed := strings.Repeat("x", nativeStreamLineMaxRunes)
+	got := appendBoundedStreamLine(seed, "yyy")
+	if gotLen := len([]rune(got)); gotLen != nativeStreamLineMaxRunes {
+		t.Fatalf("expected bounded stream line length %d, got %d", nativeStreamLineMaxRunes, gotLen)
+	}
+	if !strings.HasSuffix(got, "yyy") {
+		t.Fatalf("expected bounded stream line to keep latest suffix")
+	}
+}
+
 func TestNativeReplayClearsPendingOnNonPrefixAssistantCommit(t *testing.T) {
 	m := NewUIModel(
 		nil,
