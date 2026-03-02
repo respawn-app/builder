@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"unicode"
 
 	"builder/internal/shared/textutil"
 	"builder/internal/tui"
@@ -152,8 +153,8 @@ func (l uiViewLayout) renderNativeStreamingTail(width, maxLines int, style uiSty
 	if width <= 0 || maxLines <= 0 {
 		return nil
 	}
-	stream := strings.TrimSpace(m.view.OngoingStreamingText())
-	errText := strings.TrimSpace(m.view.OngoingErrorText())
+	stream := strings.TrimSpace(normalizeStreamingPreviewText(m.view.OngoingStreamingText()))
+	errText := strings.TrimSpace(normalizeStreamingPreviewText(m.view.OngoingErrorText()))
 	lines := make([]string, 0, maxLines)
 	if stream != "" {
 		lines = append(lines, style.meta.Render(padRight("(streaming)", width)))
@@ -174,6 +175,27 @@ func (l uiViewLayout) renderNativeStreamingTail(width, maxLines int, style uiSty
 		return lines
 	}
 	return lines[len(lines)-maxLines:]
+}
+
+func normalizeStreamingPreviewText(value string) string {
+	if value == "" {
+		return ""
+	}
+	var builder strings.Builder
+	builder.Grow(len(value))
+	for _, r := range value {
+		switch {
+		case r == '\r':
+			builder.WriteRune('\n')
+		case r == '\n' || r == '\t':
+			builder.WriteRune(r)
+		case unicode.IsControl(r):
+			continue
+		default:
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
 }
 
 func (l uiViewLayout) syncNativeLiveRegionState() {
