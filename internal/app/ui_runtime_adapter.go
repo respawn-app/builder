@@ -85,6 +85,9 @@ func (a uiRuntimeAdapter) applyChatSnapshot(snapshot runtime.ChatSnapshot) tea.C
 		Ongoing:      snapshot.Ongoing,
 		OngoingError: snapshot.OngoingError,
 	})
+	if strings.TrimSpace(snapshot.Ongoing) == "" {
+		m.sawAssistantDelta = false
+	}
 	return m.syncNativeHistoryFromTranscript()
 }
 

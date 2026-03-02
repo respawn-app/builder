@@ -208,8 +208,8 @@ type uiModel struct {
 	askFreeformMode askFreeformMode
 	askInput        string
 
-	termWidth  int
-	termHeight int
+	termWidth       int
+	termHeight      int
 	windowSizeKnown bool
 
 	initialTranscript []UITranscriptEntry
@@ -237,6 +237,7 @@ type uiModel struct {
 	startupCmds             []tea.Cmd
 	nativeLiveRegionLines   int
 	nativeLiveRegionPad     int
+	nativeStreamingActive   bool
 
 	lastEscAt time.Time
 

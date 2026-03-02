@@ -160,28 +160,61 @@ func (l uiViewLayout) renderNativeStreamingLines(width, maxLines int, style uiSt
 	if width <= 0 || maxLines <= 0 {
 		return nil
 	}
+	if !l.model.busy && !l.model.sawAssistantDelta {
+		return nil
+	}
 	streamText := l.model.view.OngoingStreamingText()
 	errText := l.model.view.OngoingErrorText()
 	if strings.TrimSpace(streamText) == "" && strings.TrimSpace(errText) == "" {
 		return nil
 	}
 	lines := make([]string, 0, maxLines)
+	includeDivider := len(l.model.transcriptEntries) > 0
+	if includeDivider {
+		lines = append(lines, style.meta.Render(strings.Repeat("─", width)))
+	}
 	if strings.TrimSpace(streamText) != "" {
-		for _, line := range splitPlainLines(streamText) {
+		streamLines := splitPlainLines(streamText)
+		if len(streamLines) > 0 && strings.TrimSpace(streamLines[len(streamLines)-1]) == "" {
+			streamLines = streamLines[:len(streamLines)-1]
+		}
+		for lineIndex, line := range streamLines {
 			for _, wrapped := range wrapLine(line, width) {
-				lines = append(lines, style.chat.Render(padRight(wrapped, width)))
+				prefix := "  "
+				if lineIndex == 0 {
+					prefix = "❮ "
+				}
+				rendered := prefix + wrapped
+				lines = append(lines, style.chat.Render(padRight(rendered, width)))
 			}
 		}
 	}
 	if strings.TrimSpace(errText) != "" {
 		for _, line := range splitPlainLines(errText) {
 			for _, wrapped := range wrapLine(line, width) {
-				lines = append(lines, style.meta.Render(padRight(wrapped, width)))
+				lines = append(lines, style.meta.Render(padRight("  "+wrapped, width)))
 			}
 		}
 	}
 	if len(lines) <= maxLines {
 		return lines
+	}
+	if includeDivider && maxLines > 1 {
+		content := lines[1:]
+		result := []string{lines[0], content[0]}
+		remaining := maxLines - len(result)
+		if remaining <= 0 {
+			return result[:maxLines]
+		}
+		if len(content) <= 1 {
+			return result
+		}
+		tail := content[1:]
+		if len(tail) > remaining {
+			tail = tail[len(tail)-remaining:]
+		}
+		result = append(result, tail...)
+		return result
 	}
 	return lines[len(lines)-maxLines:]
 }
@@ -190,15 +223,24 @@ func (l uiViewLayout) syncNativeLiveRegionState() {
 	m := l.model
 	if !m.usesNativeScrollback() || m.view.Mode() != tui.ModeOngoing {
 		m.nativeLiveRegionPad = 0
+		m.nativeStreamingActive = false
 		return
 	}
+	streamingActiveNow := strings.TrimSpace(m.view.OngoingStreamingText()) != "" || strings.TrimSpace(m.view.OngoingErrorText()) != ""
 	current := l.nativeOngoingLineCount()
+	if !streamingActiveNow {
+		m.nativeLiveRegionPad = 0
+		m.nativeLiveRegionLines = current
+		m.nativeStreamingActive = false
+		return
+	}
 	if current < m.nativeLiveRegionLines {
 		m.nativeLiveRegionPad = m.nativeLiveRegionLines - current
 	} else {
 		m.nativeLiveRegionPad = 0
 	}
 	m.nativeLiveRegionLines = current
+	m.nativeStreamingActive = streamingActiveNow
 }
 
 func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {

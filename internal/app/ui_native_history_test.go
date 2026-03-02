@@ -304,8 +304,6 @@ func TestNativeScrollbackIncrementalFlushConcatenationMatchesFullSnapshot(t *tes
 	}
 }
 
-
-
 func TestNativeScrollbackFlowIntegration(t *testing.T) {
 	entries := make([]UITranscriptEntry, 0, 120)
 	for i := 1; i <= 120; i++ {
@@ -568,7 +566,7 @@ func TestEnsureNativeFlushNewlineAppendsTerminator(t *testing.T) {
 	}
 }
 
-func TestNativeOngoingKeepsLiveRegionHeightStableAcrossInputShrink(t *testing.T) {
+func TestNativeOngoingShrinksLiveRegionAfterInputShrinkWhenNotStreaming(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
 	m.termWidth = 80
 	m.termHeight = 20
@@ -583,8 +581,8 @@ func TestNativeOngoingKeepsLiveRegionHeightStableAcrossInputShrink(t *testing.T)
 	m.input = ""
 	m.syncViewport()
 	second := strings.Split(m.View(), "\n")
-	if len(second) != firstLines {
-		t.Fatalf("expected stable native live region line count after shrink, got %d want %d", len(second), firstLines)
+	if len(second) >= firstLines {
+		t.Fatalf("expected native live region to shrink after input shrink, got %d want < %d", len(second), firstLines)
 	}
 }
 
@@ -640,5 +638,205 @@ func TestNativeOngoingRendersWhenTrimmedToHeight(t *testing.T) {
 	}
 	if !strings.Contains(stripANSIPreserve(view), "ongoing") {
 		t.Fatalf("expected status line visible under tight height, got %q", view)
+	}
+}
+
+func TestNativeOngoingClearsLiveRegionPadWhenStreamingEnds(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 12
+	m.windowSizeKnown = true
+	m.forwardToView(tui.SetConversationMsg{Ongoing: "line1\nline2"})
+	m.syncViewport()
+	if !m.nativeStreamingActive {
+		t.Fatal("expected streaming active after ongoing stream snapshot")
+	}
+	m.forwardToView(tui.SetConversationMsg{Ongoing: ""})
+	m.syncViewport()
+	if m.nativeLiveRegionPad != 0 {
+		t.Fatalf("expected no residual live region pad after streaming ends, got %d", m.nativeLiveRegionPad)
+	}
+	if m.nativeStreamingActive {
+		t.Fatal("expected streaming inactive after ongoing clears")
+	}
+}
+
+func TestNativeDeltaFlushForSingleLineUserMessageHasNoExtraBlankLine(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
+	).(*uiModel)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+
+	entry := tui.TranscriptEntry{Role: "user", Text: "belissimo.commit"}
+	m.forwardToView(tui.AppendTranscriptMsg{Role: entry.Role, Text: entry.Text})
+	m.transcriptEntries = append(m.transcriptEntries, entry)
+	cmd := m.syncNativeHistoryFromTranscript()
+	if cmd == nil {
+		t.Fatal("expected native delta flush command")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	plain := stripANSIPreserve(msg.Text)
+	if strings.Contains(plain, "belissimo.commit\n\n") {
+		t.Fatalf("expected no extra blank line after user message, got %q", plain)
+	}
+}
+
+func TestNativeStreamingLinesHiddenWhenNotBusy(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.forwardToView(tui.SetConversationMsg{Ongoing: "stale stream text"})
+	m.busy = false
+	view := stripANSIPreserve(m.View())
+	if strings.Contains(view, "stale stream text") {
+		t.Fatalf("expected stale streaming text hidden when not busy, got %q", view)
+	}
+
+	m.busy = true
+	view = stripANSIPreserve(m.View())
+	if !strings.Contains(view, "stale stream text") {
+		t.Fatalf("expected streaming text visible while busy, got %q", view)
+	}
+}
+
+func TestNativeStreamingLinesIncludeDividerAndAssistantPrefix(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "try again"}}),
+	).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.busy = true
+	m.sawAssistantDelta = true
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, Ongoing: "Second Stream Check"})
+	m.syncViewport()
+
+	plain := stripANSIPreserve(m.View())
+	if !strings.Contains(plain, strings.Repeat("─", 100)) {
+		t.Fatalf("expected streaming live region to include divider, got %q", plain)
+	}
+	if !strings.Contains(plain, "❮ Second Stream Check") {
+		t.Fatalf("expected assistant prefix in streaming live region, got %q", plain)
+	}
+}
+
+func TestNativeDeltaFlushDoesNotInsertBlankBeforeDivider(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "try again"}}),
+	).(*uiModel)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+
+	entry := tui.TranscriptEntry{Role: "assistant", Text: "Second Stream Check"}
+	m.forwardToView(tui.AppendTranscriptMsg{Role: entry.Role, Text: entry.Text})
+	m.transcriptEntries = append(m.transcriptEntries, entry)
+	cmd := m.syncNativeHistoryFromTranscript()
+	if cmd == nil {
+		t.Fatal("expected native delta flush command")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	plain := stripANSIPreserve(msg.Text)
+	if strings.HasPrefix(plain, "\n") {
+		t.Fatalf("expected no leading blank line in delta flush, got %q", plain)
+	}
+	if strings.Contains(plain, "\n\n❮") {
+		t.Fatalf("expected no blank line between divider and assistant line, got %q", plain)
+	}
+}
+
+func TestNativePostCommitRedrawStableWithoutExtraBlankBeforeDivider(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "try again"}}),
+	).(*uiModel)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "Second Stream Check"})
+	preCommitView := stripANSIPreserve(m.View())
+	if !strings.Contains(preCommitView, "❮ Second Stream Check") {
+		t.Fatalf("expected live streaming assistant line before commit, got %q", preCommitView)
+	}
+
+	cmd := m.runtimeAdapter().applyChatSnapshot(runtime.ChatSnapshot{
+		Entries: []runtime.ChatEntry{{Role: "user", Text: "try again"}, {Role: "assistant", Text: "Second Stream Check"}},
+		Ongoing: "",
+	})
+	if cmd == nil {
+		t.Fatal("expected native history flush command on commit snapshot")
+	}
+	flushMsg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	flushPlain := stripANSIPreserve(flushMsg.Text)
+	if strings.HasPrefix(flushPlain, "\n") {
+		t.Fatalf("expected no leading blank line in commit delta flush, got %q", flushPlain)
+	}
+	if strings.Contains(flushPlain, "\n\n❮") {
+		t.Fatalf("expected no blank line before assistant line in commit delta flush, got %q", flushPlain)
+	}
+
+	postCommitView := stripANSIPreserve(m.View())
+	nextView := stripANSIPreserve(m.View())
+	if postCommitView != nextView {
+		t.Fatalf("expected stable post-commit live region across redraws\nfirst=%q\nsecond=%q", postCommitView, nextView)
+	}
+	if strings.Contains(postCommitView, "Second Stream Check") {
+		t.Fatalf("expected live streaming lane to be cleared after commit, got %q", postCommitView)
+	}
+}
+
+func TestNativeStreamingDividerPersistsInTightViewport(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt"}}),
+	).(*uiModel)
+	m.termWidth = 40
+	m.termHeight = 6
+	m.windowSizeKnown = true
+	m.busy = true
+	m.sawAssistantDelta = true
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, Ongoing: "line1\nline2\nline3"})
+	m.syncViewport()
+
+	plain := stripANSIPreserve(m.View())
+	if !strings.Contains(plain, strings.Repeat("─", 40)) {
+		t.Fatalf("expected divider to remain visible in tight viewport, got %q", plain)
+	}
+	if !strings.Contains(plain, "❮ line1") {
+		t.Fatalf("expected first streamed line to remain visible in tight viewport, got %q", plain)
 	}
 }
