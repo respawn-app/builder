@@ -41,7 +41,7 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 			m.nativeFormatter = casted
 		}
 		rawSnapshot := m.nativeFormatter.OngoingCommittedSnapshot()
-		m.nativeFormatterSnapshot = ensureNativeFlushNewline(rawSnapshot)
+		m.nativeFormatterSnapshot = rawSnapshot
 		m.nativeFormatterEntries = cloneNativeEntries(filtered)
 		m.nativeFlushedEntryCount = len(m.transcriptEntries)
 		m.nativeHistoryReplayed = true
@@ -76,7 +76,7 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 	}
 
 	rawSnapshot := m.nativeFormatter.OngoingCommittedSnapshot()
-	normalizedSnapshot := ensureNativeFlushNewline(rawSnapshot)
+	normalizedSnapshot := rawSnapshot
 	previous := m.nativeFormatterSnapshot
 	m.nativeFormatterSnapshot = normalizedSnapshot
 	m.nativeFormatterEntries = cloneNativeEntries(filteredAll)
@@ -86,10 +86,6 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 		return m.emitNativeRenderedText(styleNativeReplayDividers(rawSnapshot, m.theme, m.nativeFormatterWidth))
 	}
 	if !strings.HasPrefix(normalizedSnapshot, previous) {
-		m.rebaseNativeFormatterSnapshot()
-		return nil
-	}
-	if !strings.HasSuffix(previous, "\n") {
 		m.rebaseNativeFormatterSnapshot()
 		return nil
 	}
@@ -144,7 +140,6 @@ func (m *uiModel) rebaseNativeFormatterSnapshot() {
 		m.nativeFormatter = casted
 	}
 	m.nativeFormatterSnapshot = m.nativeFormatter.OngoingCommittedSnapshot()
-	m.nativeFormatterSnapshot = ensureNativeFlushNewline(m.nativeFormatterSnapshot)
 	m.nativeFormatterEntries = cloneNativeEntries(filtered)
 	m.nativeFlushedEntryCount = len(m.transcriptEntries)
 	m.nativeHistoryReplayed = true
@@ -233,16 +228,8 @@ func emitNativeHistoryFlush(text string) tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		return nativeHistoryFlushMsg{Text: ensureNativeFlushNewline(text)}
+		return nativeHistoryFlushMsg{Text: text}
 	}
-}
-
-func ensureNativeFlushNewline(text string) string {
-	payload := text
-	if !strings.HasSuffix(payload, "\n") {
-		payload += "\n"
-	}
-	return payload
 }
 
 func splitNativeScrollbackChunks(rendered string, maxBytes int) []string {

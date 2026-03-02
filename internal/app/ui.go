@@ -239,7 +239,7 @@ type uiModel struct {
 	nativeLiveRegionPad     int
 	nativeStreamingActive   bool
 
-	lastEscAt time.Time
+	lastEscAt              time.Time
 	pendingCSIShiftEnterAt time.Time
 	pendingCSIShiftEnter   bool
 

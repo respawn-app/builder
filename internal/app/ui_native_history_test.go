@@ -236,7 +236,7 @@ func TestNativeScrollbackRepeatedConversationRefreshDoesNotDuplicateUserPrompt(t
 	if !ok {
 		t.Fatalf("expected nativeHistoryFlushMsg, got %T", startupCmd())
 	}
-	combined := startupMsg.Text
+	combined := startupMsg.Text + "\n"
 
 	for i := 0; i < 12; i++ {
 		m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
@@ -278,7 +278,7 @@ func TestNativeScrollbackIncrementalFlushConcatenationMatchesFullSnapshot(t *tes
 	if !ok {
 		t.Fatalf("expected nativeHistoryFlushMsg, got %T", startupCmd())
 	}
-	combined := startupMsg.Text
+	combined := startupMsg.Text + "\n"
 
 	appendEntry := func(text string) {
 		t.Helper()
@@ -292,13 +292,14 @@ func TestNativeScrollbackIncrementalFlushConcatenationMatchesFullSnapshot(t *tes
 		if !ok {
 			t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
 		}
-		combined += msg.Text
+		combined += msg.Text + "\n"
 	}
 
 	appendEntry("line 2\n\n```yaml\nroot:\n  key: value\n```")
 	appendEntry("line 3 with `code`")
 
-	expected := ensureNativeFlushNewline(renderNativeScrollbackSnapshot(m.transcriptEntries, m.theme, m.nativeFormatterWidth))
+	combined = strings.TrimSuffix(combined, "\n")
+	expected := renderNativeScrollbackSnapshot(m.transcriptEntries, m.theme, m.nativeFormatterWidth)
 	if combined != expected {
 		t.Fatalf("expected concatenated incremental flush output to match full snapshot\ncombined=%q\nexpected=%q", combined, expected)
 	}
@@ -554,15 +555,6 @@ func TestNativeReplayDividerStyledAndExpandedToWidth(t *testing.T) {
 	}
 	if dividerRunes != 80 {
 		t.Fatalf("expected divider width 80 runes, got %d in %q", dividerRunes, plain)
-	}
-}
-
-func TestEnsureNativeFlushNewlineAppendsTerminator(t *testing.T) {
-	if got := ensureNativeFlushNewline("line"); got != "line\n" {
-		t.Fatalf("expected newline terminator appended, got %q", got)
-	}
-	if got := ensureNativeFlushNewline("line\n"); got != "line\n" {
-		t.Fatalf("expected existing newline to be preserved, got %q", got)
 	}
 }
 

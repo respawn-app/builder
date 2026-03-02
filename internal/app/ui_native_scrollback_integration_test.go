@@ -673,8 +673,9 @@ func TestNativeSubmitPathNoExtraBlankBetweenUserAndDivider(t *testing.T) {
 	}
 
 	plain := xansi.Strip(out.String())
-	if strings.Contains(plain, "❯ "+message+"\n\n────────────────") {
-		t.Fatalf("expected no extra blank line between committed user message and next divider, got %q", plain)
+	normalized := strings.ReplaceAll(strings.ReplaceAll(plain, "\r\n", "\n"), "\r", "\n")
+	if strings.Contains(normalized, "❯ "+message+"\n\n────────────────") {
+		t.Fatalf("expected no extra blank line between committed user message and next divider, got %q", normalized)
 	}
 }
 
