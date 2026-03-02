@@ -22,10 +22,27 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 		delta := evt.AssistantDelta
 		m.sawAssistantDelta = delta != ""
 		if delta != "" {
+			currentOngoing := m.view.OngoingStreamingText()
+			expectedSnapshotLen := m.pendingSnapshotPreviousOngoingLen + len(delta)
+			if m.pendingSnapshotDeltaDedup &&
+				len(currentOngoing) == m.pendingSnapshotOngoingLen &&
+				m.pendingSnapshotOngoingLen == expectedSnapshotLen &&
+				strings.HasSuffix(currentOngoing, delta) {
+				m.pendingSnapshotDeltaDedup = false
+				m.pendingSnapshotOngoingLen = 0
+				m.pendingSnapshotPreviousOngoingLen = 0
+				break
+			}
+			m.pendingSnapshotDeltaDedup = false
+			m.pendingSnapshotOngoingLen = 0
+			m.pendingSnapshotPreviousOngoingLen = 0
 			m.forwardToView(tui.StreamAssistantMsg{Delta: delta})
 		}
 	case runtime.EventAssistantDeltaReset:
 		m.sawAssistantDelta = false
+		m.pendingSnapshotDeltaDedup = false
+		m.pendingSnapshotOngoingLen = 0
+		m.pendingSnapshotPreviousOngoingLen = 0
 	case runtime.EventCompactionStarted:
 		m.compacting = true
 	case runtime.EventCompactionCompleted, runtime.EventCompactionFailed:
@@ -62,7 +79,12 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 	if m.engine == nil {
 		return nil
 	}
-	snapshot := m.engine.ChatSnapshot()
+	return a.applyChatSnapshot(m.engine.ChatSnapshot())
+}
+
+func (a uiRuntimeAdapter) applyChatSnapshot(snapshot runtime.ChatSnapshot) tea.Cmd {
+	m := a.model
+	previousOngoingLen := len(m.view.OngoingStreamingText())
 	entries := make([]tui.TranscriptEntry, 0, len(snapshot.Entries))
 	for _, entry := range snapshot.Entries {
 		entries = append(entries, tui.TranscriptEntry{
@@ -80,6 +102,15 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 		Ongoing:      snapshot.Ongoing,
 		OngoingError: snapshot.OngoingError,
 	})
+	if strings.TrimSpace(snapshot.Ongoing) == "" {
+		m.pendingSnapshotDeltaDedup = false
+		m.pendingSnapshotOngoingLen = 0
+		m.pendingSnapshotPreviousOngoingLen = 0
+	} else {
+		m.pendingSnapshotDeltaDedup = true
+		m.pendingSnapshotOngoingLen = len(snapshot.Ongoing)
+		m.pendingSnapshotPreviousOngoingLen = previousOngoingLen
+	}
 	return m.syncNativeHistoryFromTranscript()
 }
 

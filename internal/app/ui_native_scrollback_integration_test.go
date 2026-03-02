@@ -2,12 +2,17 @@ package app
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"builder/internal/config"
+	"builder/internal/llm"
 	"builder/internal/runtime"
+	"builder/internal/session"
+	"builder/internal/tools"
 
 	tea "github.com/charmbracelet/bubbletea"
 	xansi "github.com/charmbracelet/x/ansi"
@@ -27,6 +32,24 @@ func closedAskEvents() <-chan askEvent {
 
 func normalizedOutput(v string) string {
 	return strings.Join(strings.Fields(xansi.Strip(v)), " ")
+}
+
+type singleChunkStreamClient struct {
+	delta string
+}
+
+func (c singleChunkStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
+	return llm.Response{}, errors.New("not implemented")
+}
+
+func (c singleChunkStreamClient) GenerateStream(_ context.Context, _ llm.Request, onDelta func(string)) (llm.Response, error) {
+	if onDelta != nil {
+		onDelta(c.delta)
+	}
+	return llm.Response{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: c.delta},
+		Usage:     llm.Usage{WindowTokens: 200_000},
+	}, nil
 }
 
 func TestNativeScrollbackProgramOutputContract(t *testing.T) {
@@ -93,6 +116,71 @@ func TestNativeScrollbackProgramOutputContract(t *testing.T) {
 	plain := xansi.Strip(raw)
 	if occurrences := strings.Count(plain, "ongoing | "); occurrences > 12 {
 		t.Fatalf("expected bounded status redraw output, got %d occurrences", occurrences)
+	}
+}
+
+func TestNativeFinalizeDoesNotBlinkDuplicateTailTokens(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	runtimeEvents := make(chan runtime.Event, 256)
+	eng, err := runtime.New(
+		store,
+		singleChunkStreamClient{delta: "TAIL-ONCE"},
+		tools.NewRegistry(),
+		runtime.Config{
+			Model: "gpt-5",
+			OnEvent: func(evt runtime.Event) {
+				runtimeEvents <- evt
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	out := &bytes.Buffer{}
+	model := NewUIModel(
+		eng,
+		runtimeEvents,
+		closedAskEvents(),
+		WithUIScrollMode(config.TUIScrollModeNative),
+	).(*uiModel)
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := program.Run()
+		done <- runErr
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	go func() {
+		_, _ = eng.SubmitUserMessage(context.Background(), "trigger")
+	}()
+	time.Sleep(220 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("program run failed: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	plain := xansi.Strip(out.String())
+	if strings.Contains(plain, "TAIL-ONCETAIL-ONCE") {
+		t.Fatalf("expected no duplicated tail token blink pattern, got %q", plain)
 	}
 }
 
