@@ -381,7 +381,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if strings.TrimSpace(msg.Text) == "" {
 			return m, nil
 		}
-		return m, emitNativeDirectWrite(msg.Text)
+		return m, tea.Printf("%s", msg.Text)
 	case nativeStreamAppendMsg:
 		if msg.Text == "" {
 			return m, nil
