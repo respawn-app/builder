@@ -83,3 +83,13 @@ func TestCentralDefinitionsRequireAdditionalPropertiesFalse(t *testing.T) {
 		}
 	}
 }
+
+func TestDefaultEnabledToolIDsIncludesWebSearch(t *testing.T) {
+	enabled := map[ID]bool{}
+	for _, id := range DefaultEnabledToolIDs() {
+		enabled[id] = true
+	}
+	if !enabled[ToolWebSearch] {
+		t.Fatalf("expected %s to be default-enabled", ToolWebSearch)
+	}
+}

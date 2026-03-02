@@ -121,15 +121,15 @@ type Model struct {
 	selectedTranscriptEntry  int
 	selectedTranscriptActive bool
 
-	detailSnapshot string
-	detailLines    []string
-	ongoingSnapshot string
+	detailSnapshot   string
+	detailLines      []string
+	ongoingSnapshot  string
 	ongoingLineCache []string
-	ongoingDirty    bool
-	ongoingError   string
-	theme          string
-	md             *markdownRenderer
-	code           *codeRenderer
+	ongoingDirty     bool
+	ongoingError     string
+	theme            string
+	md               *markdownRenderer
+	code             *codeRenderer
 }
 
 type ongoingBlock struct {
@@ -182,9 +182,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.scrollActive(max(1, m.viewportLines-1))
 		}
 	case tea.MouseMsg:
-		if m.mode == ModeDetail {
-			break
-		}
 		switch msg.Type {
 		case tea.MouseWheelUp:
 			m = m.scrollActive(-1)
@@ -684,6 +681,9 @@ func (m Model) buildOngoingBlocks(includeStreaming bool) []ongoingBlock {
 			}
 			patchSummary, _, hasPatchPayload := extractPatchPayload(entry.ToolCall, entry.Text)
 			combined := compactToolCallText(entry.ToolCall, entry.Text)
+			if blockRole == "tool_shell" {
+				combined = compactOngoingShellPreviewText(combined)
+			}
 			if hasPatchPayload {
 				combined = strings.TrimSpace(patchSummary)
 			}
@@ -837,6 +837,13 @@ func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *
 			line = m.tintToolDiffLine(line, diffKind)
 		}
 		out = append(out, line)
+	}
+	if muteText && isShellPreviewRole(role) && shellPreviewShouldCollapse(text) {
+		ellipsis := "  " + m.palette().preview.Faint(true).Render("…")
+		if len(out) == 0 {
+			return []string{"", ellipsis}
+		}
+		return []string{out[0], ellipsis}
 	}
 	return out
 }
@@ -1020,6 +1027,25 @@ func compactToolCallText(meta *transcript.ToolCallMeta, text string) string {
 		return strings.TrimSpace(meta.PatchSummary)
 	}
 	return toolcodec.CompactCallText(text)
+}
+
+func compactOngoingShellPreviewText(command string) string {
+	normalized := strings.ReplaceAll(command, "\r\n", "\n")
+	if !strings.Contains(normalized, "\n") {
+		return command
+	}
+	for _, line := range strings.Split(normalized, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		return trimmed + "\n…"
+	}
+	return "…"
+}
+
+func shellPreviewShouldCollapse(command string) bool {
+	return strings.Contains(strings.ReplaceAll(command, "\r\n", "\n"), "\n")
 }
 
 func compactReviewerStatusForOngoing(text string) string {
@@ -1276,6 +1302,15 @@ func isToolHeadlineRole(role string) bool {
 	}
 }
 
+func isShellPreviewRole(role string) bool {
+	switch strings.TrimSpace(role) {
+	case "tool_shell", "tool_shell_success", "tool_shell_error":
+		return true
+	default:
+		return false
+	}
+}
+
 func splitToolInlineMeta(line string) (string, string) {
 	return toolcodec.SplitInlineMeta(line)
 }
@@ -1299,6 +1334,12 @@ func (m Model) renderToolHeadline(line string, width int) string {
 func (m Model) tintToolDiffLine(line, kind string) string {
 	if strings.TrimSpace(line) == "" {
 		return line
+	}
+	if width := m.viewportWidth; width > 0 {
+		lineWidth := lipgloss.Width(line)
+		if lineWidth < width {
+			line += strings.Repeat(" ", width-lineWidth)
+		}
 	}
 	addBg, removeBg := m.diffLineBackgroundEscapes()
 	if kind == "add" {

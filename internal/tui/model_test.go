@@ -313,7 +313,7 @@ func TestMouseWheelScrollsOngoingView(t *testing.T) {
 	}
 }
 
-func TestMouseWheelDoesNotAffectDetailView(t *testing.T) {
+func TestMouseWheelScrollsDetailView(t *testing.T) {
 	m := NewModel(WithPreviewLines(2))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u1"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
@@ -322,15 +322,52 @@ func TestMouseWheelDoesNotAffectDetailView(t *testing.T) {
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u3"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a3"})
 	m = updateModel(t, m, ToggleModeMsg{})
+	ongoingStart := m.ongoingScroll
+	maxDetail := m.maxDetailScroll()
 	start := m.detailScroll
 	if start == 0 {
 		t.Fatalf("expected detail mode to start at bottom, got detailScroll=%d", start)
 	}
+	if start != maxDetail {
+		t.Fatalf("expected detail mode to start at max scroll, got %d want %d", start, maxDetail)
+	}
 
 	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	afterUp := m.detailScroll
+	if afterUp >= start {
+		t.Fatalf("expected wheel up to scroll detail view up, got %d from %d", afterUp, start)
+	}
+	if got := m.ongoingScroll; got != ongoingStart {
+		t.Fatalf("expected detail wheel scroll to leave ongoing scroll untouched, got %d want %d", got, ongoingStart)
+	}
+
+	for m.detailScroll > 0 {
+		m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	}
+	if got := m.detailScroll; got != 0 {
+		t.Fatalf("expected repeated wheel up to clamp detail scroll at top, got %d", got)
+	}
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	if got := m.detailScroll; got != 0 {
+		t.Fatalf("expected wheel up at top to remain clamped at 0, got %d", got)
+	}
+
 	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
-	if m.detailScroll != start {
-		t.Fatalf("expected mouse wheel to not change detail scroll, got %d want %d", m.detailScroll, start)
+	if got := m.detailScroll; got != 1 {
+		t.Fatalf("expected wheel down from top to advance detail scroll, got %d want %d", got, 1)
+	}
+	for m.detailScroll < maxDetail {
+		m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+	}
+	if got := m.detailScroll; got != maxDetail {
+		t.Fatalf("expected repeated wheel down to clamp detail scroll at bottom, got %d want %d", got, maxDetail)
+	}
+	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+	if got := m.detailScroll; got != maxDetail {
+		t.Fatalf("expected wheel down at bottom to remain clamped, got %d want %d", got, maxDetail)
+	}
+	if got := m.ongoingScroll; got != ongoingStart {
+		t.Fatalf("expected detail wheel scroll to keep ongoing scroll unchanged, got %d want %d", got, ongoingStart)
 	}
 }
 
@@ -923,9 +960,10 @@ func TestStyleToolLineStylesOnlyDiffMarkerWhenSyntaxPresent(t *testing.T) {
 
 func TestDetailDiffBackgroundTintsFullRenderedLine(t *testing.T) {
 	detail := "Edited:\n./main.go\n+package main\n-old"
+	const viewportWidth = 40
 
 	m := NewModel()
-	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: viewportWidth})
 	m = updateModel(t, m, AppendTranscriptMsg{
 		Role: "tool_call",
 		Text: detail,
@@ -939,11 +977,61 @@ func TestDetailDiffBackgroundTintsFullRenderedLine(t *testing.T) {
 
 	view := m.View()
 	addBg, removeBg := m.diffLineBackgroundEscapes()
+	var addLine string
+	var removeLine string
+	for _, line := range strings.Split(view, "\n") {
+		plain := ansi.Strip(line)
+		if addLine == "" && strings.Contains(plain, "+package main") {
+			addLine = line
+		}
+		if removeLine == "" && strings.Contains(plain, "-old") {
+			removeLine = line
+		}
+	}
+	if addLine == "" || removeLine == "" {
+		t.Fatalf("expected add/remove lines in detail output, got %q", view)
+	}
+	if got := runewidth.StringWidth(ansi.Strip(addLine)); got != viewportWidth {
+		t.Fatalf("expected added line tint to span viewport width %d, got %d", viewportWidth, got)
+	}
+	if got := runewidth.StringWidth(ansi.Strip(removeLine)); got != viewportWidth {
+		t.Fatalf("expected removed line tint to span viewport width %d, got %d", viewportWidth, got)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if got := runewidth.StringWidth(ansi.Strip(line)); got > viewportWidth {
+			t.Fatalf("expected rendered detail line width <= viewport width %d, got %d for %q", viewportWidth, got, line)
+		}
+	}
 	if !strings.Contains(view, addBg+"  ") {
 		t.Fatalf("expected added line background to include indentation prefix, got %q", view)
 	}
 	if !strings.Contains(view, removeBg+"  ") {
 		t.Fatalf("expected removed line background to include indentation prefix, got %q", view)
+	}
+}
+
+func TestTintToolDiffLineKeepsBackgroundOnPaddedSpacesAfterAnsiReset(t *testing.T) {
+	const viewportWidth = 32
+	m := NewModel()
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: viewportWidth})
+	addBg, _ := m.diffLineBackgroundEscapes()
+	input := "  +\x1b[38;5;81mpackage\x1b[0m main"
+	if got := runewidth.StringWidth(ansi.Strip(input)); got >= viewportWidth {
+		t.Fatalf("expected test input width to be smaller than viewport to exercise padding, got %d", got)
+	}
+
+	tinted := m.tintToolDiffLine(input, "add")
+	if got := runewidth.StringWidth(ansi.Strip(tinted)); got != viewportWidth {
+		t.Fatalf("expected tinted line width %d, got %d", viewportWidth, got)
+	}
+	if !strings.Contains(tinted, "\x1b[38;5;81mpackage\x1b[0m") {
+		t.Fatalf("expected syntax token color to remain intact, got %q", tinted)
+	}
+	if !strings.Contains(tinted, "\x1b[0m"+addBg+" ") {
+		t.Fatalf("expected background tint to be re-applied after ansi reset before trailing padding, got %q", tinted)
+	}
+	if !strings.HasSuffix(tinted, "\x1b[0m") {
+		t.Fatalf("expected tinted line to end with reset, got %q", tinted)
 	}
 }
 
@@ -1203,6 +1291,122 @@ func TestDetailShellUserInitiatedCallUsesUserRanLabel(t *testing.T) {
 	}
 	if !strings.Contains(detail, "/tmp") {
 		t.Fatalf("expected detailed shell block to include output, got %q", detail)
+	}
+}
+
+func TestOngoingShellMultilineCommandPreviewIsCollapsedToTwoLines(t *testing.T) {
+	command := strings.Join([]string{
+		"cat > /tmp/demo.txt <<'EOF'",
+		"first line",
+		"second line",
+		"third line",
+		"EOF",
+	}, "\n")
+
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: command,
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "shell",
+			IsShell:  true,
+			Command:  command,
+		},
+	})
+
+	blocks := m.buildOngoingBlocks(true)
+	shellBlockLines := []string{}
+	for _, block := range blocks {
+		if block.role == "tool_shell" {
+			shellBlockLines = block.lines
+			break
+		}
+	}
+	if len(shellBlockLines) != 2 {
+		t.Fatalf("expected ongoing shell preview to be capped at 2 lines, got %d (%q)", len(shellBlockLines), shellBlockLines)
+	}
+	if got := strings.TrimSpace(ansi.Strip(shellBlockLines[1])); got != "…" {
+		t.Fatalf("expected ongoing shell preview second line to be ellipsis, got %q", shellBlockLines[1])
+	}
+
+	ongoing := plainTranscript(m.OngoingSnapshot())
+	if !strings.Contains(ongoing, "\n  …") {
+		t.Fatalf("expected ongoing shell preview to include ellipsis line, got %q", ongoing)
+	}
+	if strings.Contains(ongoing, "second line") || strings.Contains(ongoing, "third line") || strings.Contains(ongoing, "\n  EOF") {
+		t.Fatalf("expected ongoing shell preview to omit heredoc tail, got %q", ongoing)
+	}
+
+	detail := plainTranscript(m.renderFlatDetailTranscript())
+	if !strings.Contains(detail, "third line") || !strings.Contains(detail, "EOF") {
+		t.Fatalf("expected detail transcript to keep full shell command, got %q", detail)
+	}
+}
+
+func TestOngoingShellSingleLineCommandIsNotCollapsed(t *testing.T) {
+	command := "printf '%s' " + strings.Repeat("very-long-token-", 10)
+
+	m := NewModel(WithPreviewLines(30))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 30, Width: 28})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: command,
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "shell",
+			IsShell:  true,
+			Command:  command,
+		},
+	})
+
+	blocks := m.buildOngoingBlocks(true)
+	shellBlockLines := []string{}
+	for _, block := range blocks {
+		if block.role == "tool_shell" {
+			shellBlockLines = block.lines
+			break
+		}
+	}
+	if len(shellBlockLines) <= 2 {
+		t.Fatalf("expected long single-line shell command to wrap naturally without collapse, got %d lines (%q)", len(shellBlockLines), shellBlockLines)
+	}
+	if strings.TrimSpace(ansi.Strip(shellBlockLines[len(shellBlockLines)-1])) == "…" {
+		t.Fatalf("did not expect ellipsis collapse marker for single-line shell command, got %q", shellBlockLines)
+	}
+}
+
+func TestOngoingShellMultilinePreviewStaysTwoLinesWhenHeaderWraps(t *testing.T) {
+	command := strings.Join([]string{
+		"cat > /tmp/" + strings.Repeat("very-long-name-", 8) + "demo.txt <<'EOF'",
+		"body line",
+		"EOF",
+	}, "\n")
+
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 28})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: command,
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "shell",
+			IsShell:  true,
+			Command:  command,
+		},
+	})
+
+	blocks := m.buildOngoingBlocks(true)
+	shellBlockLines := []string{}
+	for _, block := range blocks {
+		if block.role == "tool_shell" {
+			shellBlockLines = block.lines
+			break
+		}
+	}
+	if len(shellBlockLines) != 2 {
+		t.Fatalf("expected wrapped multiline shell preview to remain capped at 2 lines, got %d (%q)", len(shellBlockLines), shellBlockLines)
+	}
+	if got := strings.TrimSpace(ansi.Strip(shellBlockLines[1])); got != "…" {
+		t.Fatalf("expected wrapped multiline shell preview second line to be ellipsis, got %q", shellBlockLines[1])
 	}
 }
 

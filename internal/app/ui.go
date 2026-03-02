@@ -97,6 +97,18 @@ func WithUIModelName(model string) UIOption {
 	}
 }
 
+func WithUIThinkingLevel(thinkingLevel string) UIOption {
+	return func(m *uiModel) {
+		m.thinkingLevel = strings.TrimSpace(thinkingLevel)
+	}
+}
+
+func WithUIModelContractLocked(locked bool) UIOption {
+	return func(m *uiModel) {
+		m.modelContractLocked = locked
+	}
+}
+
 func WithUITheme(theme string) UIOption {
 	return func(m *uiModel) {
 		m.theme = strings.TrimSpace(theme)
@@ -187,6 +199,8 @@ type uiModel struct {
 	inputSubmitLocked bool
 
 	modelName             string
+	thinkingLevel         string
+	modelContractLocked   bool
 	spinnerFrame          int
 	commandRegistry       *commands.Registry
 	slashCommandFilter    string

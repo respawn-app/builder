@@ -61,7 +61,15 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 			return err
 		}
 
-		finalModel, runErr := runUILoopWithInitialPrompt(wiring, active, logger, commandRegistry, nextSessionInitialPrompt, store.Meta().Name)
+		finalModel, runErr := runUILoopWithInitialPrompt(
+			wiring,
+			active,
+			logger,
+			commandRegistry,
+			nextSessionInitialPrompt,
+			store.Meta().Name,
+			store.Meta().Locked != nil,
+		)
 		nextSessionInitialPrompt = ""
 		_ = logger.Close()
 		if runErr != nil {
