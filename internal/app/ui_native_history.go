@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"strings"
+	"sync"
 
 	"builder/internal/config"
 	"builder/internal/tui"
@@ -12,7 +13,11 @@ import (
 
 const nativePendingStreamMaxRunes = 20000
 
+var nativeOutputMu sync.Mutex
+
 var writeNativeOutput = func(text string) {
+	nativeOutputMu.Lock()
+	defer nativeOutputMu.Unlock()
 	_, _ = os.Stdout.WriteString(text)
 }
 
@@ -158,6 +163,7 @@ func (m *uiModel) resetNativeFormatterState() {
 	m.nativeFormatterSnapshot = ""
 	m.nativeFormatterEntries = nil
 	m.nativePendingStreamText = ""
+	m.nativeStreamLineBuffer = ""
 	m.nativeFormatter = tui.Model{}
 }
 
@@ -177,6 +183,7 @@ func (m *uiModel) rebaseNativeFormatterSnapshot() {
 	m.nativeFlushedEntryCount = len(m.transcriptEntries)
 	m.nativeHistoryReplayed = true
 	m.nativePendingStreamText = ""
+	m.nativeStreamLineBuffer = ""
 }
 
 func nonEmptyNativeEntries(entries []tui.TranscriptEntry) []tui.TranscriptEntry {
@@ -267,6 +274,17 @@ func appendBoundedPendingStream(existing, delta string) string {
 		return combined
 	}
 	return string(runes[len(runes)-nativePendingStreamMaxRunes:])
+}
+
+func splitCompleteLines(value string) (string, string) {
+	if value == "" {
+		return "", ""
+	}
+	idx := strings.LastIndex(value, "\n")
+	if idx < 0 {
+		return "", value
+	}
+	return value[:idx+1], value[idx+1:]
 }
 
 func (m *uiModel) emitNativeRenderedText(rendered string) tea.Cmd {

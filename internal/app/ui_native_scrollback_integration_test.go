@@ -294,3 +294,43 @@ func TestNativeAssistantDeltaSuppressedInDetailMode(t *testing.T) {
 		t.Fatalf("expected assistant delta to stay suppressed while in detail mode, got %q", normalizedOutput(out.String()))
 	}
 }
+
+func TestNativeStreamingTinyDeltasRemainContiguous(t *testing.T) {
+	out := &bytes.Buffer{}
+	cleanup := captureNativeOutputForTest(out)
+	defer cleanup()
+	model := NewUIModel(
+		nil,
+		closedRuntimeEvents(),
+		closedAskEvents(),
+		WithUIScrollMode(config.TUIScrollModeNative),
+	).(*uiModel)
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	for _, delta := range []string{"he", "llo", " ", "wor", "ld", "\n"} {
+		program.Send(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: delta}})
+	}
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+	plain := xansi.Strip(out.String())
+	if !strings.Contains(plain, "hello world") {
+		t.Fatalf("expected contiguous streamed text from tiny deltas, got %q", plain)
+	}
+	if strings.Contains(plain, "he\nllo") || strings.Contains(plain, "wor\nld") {
+		t.Fatalf("expected no per-delta forced newlines in streamed text, got %q", plain)
+	}
+}
