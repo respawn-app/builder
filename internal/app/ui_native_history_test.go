@@ -307,6 +307,9 @@ func TestNativeReplayClearsPendingOnNonPrefixAssistantCommit(t *testing.T) {
 		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
 	}
 	plain := stripANSIText(msg.Text)
+	if count := strings.Count(plain, "different committed text"); count != 1 {
+		t.Fatalf("expected full committed assistant text emitted exactly once, got %d in %q", count, msg.Text)
+	}
 	if !strings.Contains(plain, "different committed text") {
 		t.Fatalf("expected full committed assistant text emitted once, got %q", msg.Text)
 	}

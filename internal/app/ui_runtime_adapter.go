@@ -9,6 +9,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+func normalizeNativeStreamWriteChunk(text string) string {
+	if text == "" {
+		return ""
+	}
+	return "\r" + strings.ReplaceAll(text, "\n", "\n\r")
+}
+
 type uiRuntimeAdapter struct {
 	model *uiModel
 }
@@ -25,14 +32,20 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 			m.forwardToView(tui.StreamAssistantMsg{Delta: delta})
 			if m.usesNativeScrollback() && m.view.Mode() == tui.ModeOngoing {
 				m.nativePendingStreamText = appendBoundedPendingStream(m.nativePendingStreamText, delta)
-				return func() tea.Msg {
-					return nativeStreamAppendMsg{Text: delta}
+				m.nativeStreamLineBuffer += delta
+				chunk, remainder := splitCompleteLines(m.nativeStreamLineBuffer)
+				m.nativeStreamLineBuffer = remainder
+				if chunk != "" {
+					return func() tea.Msg {
+						return nativeStreamAppendMsg{Text: normalizeNativeStreamWriteChunk(chunk)}
+					}
 				}
 			}
 		}
 	case runtime.EventAssistantDeltaReset:
 		m.sawAssistantDelta = false
 		m.nativePendingStreamText = ""
+		m.nativeStreamLineBuffer = ""
 	case runtime.EventCompactionStarted:
 		m.compacting = true
 	case runtime.EventCompactionCompleted, runtime.EventCompactionFailed:
