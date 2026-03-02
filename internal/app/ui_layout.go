@@ -11,6 +11,7 @@ import (
 
 	bubbleprogress "github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/lipgloss"
+	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -19,6 +20,7 @@ const (
 	ansiClearLine         = "\x1b[2K"
 	statusContextBarWidth = 10
 	queuedMessagesLimit   = 5
+	streamingPreviewMaxRunes = 4000
 )
 
 type uiViewLayout struct {
@@ -181,21 +183,48 @@ func normalizeStreamingPreviewText(value string) string {
 	if value == "" {
 		return ""
 	}
+	stripped := xansi.Strip(value)
+	trimmed := tailRunes(stripped, streamingPreviewMaxRunes)
 	var builder strings.Builder
-	builder.Grow(len(value))
-	for _, r := range value {
+	builder.Grow(len(trimmed))
+	previousWasCarriageReturn := false
+	for _, r := range trimmed {
 		switch {
 		case r == '\r':
+			if !previousWasCarriageReturn {
+				builder.WriteRune('\n')
+			}
+			previousWasCarriageReturn = true
+		case r == '\n':
+			if previousWasCarriageReturn {
+				previousWasCarriageReturn = false
+				continue
+			}
 			builder.WriteRune('\n')
-		case r == '\n' || r == '\t':
+			previousWasCarriageReturn = false
+		case r == '\t':
 			builder.WriteRune(r)
+			previousWasCarriageReturn = false
 		case unicode.IsControl(r):
+			previousWasCarriageReturn = false
 			continue
 		default:
 			builder.WriteRune(r)
+			previousWasCarriageReturn = false
 		}
 	}
 	return builder.String()
+}
+
+func tailRunes(value string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	return string(runes[len(runes)-maxRunes:])
 }
 
 func (l uiViewLayout) syncNativeLiveRegionState() {
