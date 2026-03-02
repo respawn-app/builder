@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -1509,9 +1510,13 @@ func (e *Engine) generateWithRetryClient(ctx context.Context, client llm.Client,
 			err            error
 			attemptEmitted bool
 			attemptOnDelta func(string)
+			attemptDone    atomic.Bool
 		)
 		if onDelta != nil {
 			attemptOnDelta = func(delta string) {
+				if attemptDone.Load() {
+					return
+				}
 				if delta == "" {
 					return
 				}
@@ -1527,6 +1532,7 @@ func (e *Engine) generateWithRetryClient(ctx context.Context, client llm.Client,
 				attemptOnDelta(resp.Assistant.Content)
 			}
 		}
+		attemptDone.Store(true)
 		if err == nil {
 			return resp, nil
 		}

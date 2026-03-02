@@ -38,6 +38,12 @@ type singleChunkStreamClient struct {
 	delta string
 }
 
+type asyncLateDeltaStreamClient struct {
+	initial string
+	late    string
+	delay   time.Duration
+}
+
 func (c singleChunkStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
 	return llm.Response{}, errors.New("not implemented")
 }
@@ -48,6 +54,26 @@ func (c singleChunkStreamClient) GenerateStream(_ context.Context, _ llm.Request
 	}
 	return llm.Response{
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: c.delta},
+		Usage:     llm.Usage{WindowTokens: 200_000},
+	}, nil
+}
+
+func (c asyncLateDeltaStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
+	return llm.Response{}, errors.New("not implemented")
+}
+
+func (c asyncLateDeltaStreamClient) GenerateStream(_ context.Context, _ llm.Request, onDelta func(string)) (llm.Response, error) {
+	if onDelta != nil {
+		onDelta(c.initial)
+	}
+	if onDelta != nil && strings.TrimSpace(c.late) != "" {
+		go func() {
+			time.Sleep(c.delay)
+			onDelta(c.late)
+		}()
+	}
+	return llm.Response{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: c.initial},
 		Usage:     llm.Usage{WindowTokens: 200_000},
 	}, nil
 }
@@ -181,6 +207,74 @@ func TestNativeFinalizeDoesNotBlinkDuplicateTailTokens(t *testing.T) {
 	plain := xansi.Strip(out.String())
 	if strings.Contains(plain, "TAIL-ONCETAIL-ONCE") {
 		t.Fatalf("expected no duplicated tail token blink pattern, got %q", plain)
+	}
+}
+
+func TestNativeFinalizeSuppressesLateAsyncDeltaArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	runtimeEvents := make(chan runtime.Event, 256)
+	eng, err := runtime.New(
+		store,
+		asyncLateDeltaStreamClient{initial: "FINAL-CONTENT", late: "LATE-BLINK", delay: 25 * time.Millisecond},
+		tools.NewRegistry(),
+		runtime.Config{
+			Model: "gpt-5",
+			OnEvent: func(evt runtime.Event) {
+				runtimeEvents <- evt
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	out := &bytes.Buffer{}
+	model := NewUIModel(
+		eng,
+		runtimeEvents,
+		closedAskEvents(),
+		WithUIScrollMode(config.TUIScrollModeNative),
+	).(*uiModel)
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := program.Run()
+		done <- runErr
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	go func() {
+		_, _ = eng.SubmitUserMessage(context.Background(), "trigger")
+	}()
+	time.Sleep(260 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("program run failed: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	normalized := normalizedOutput(out.String())
+	if strings.Count(normalized, "FINAL-CONTENT") != 1 {
+		t.Fatalf("expected committed final content once, got %d in %q", strings.Count(normalized, "FINAL-CONTENT"), normalized)
+	}
+	if strings.Contains(normalized, "LATE-BLINK") {
+		t.Fatalf("expected late async delta to be suppressed after finalize, got %q", normalized)
 	}
 }
 

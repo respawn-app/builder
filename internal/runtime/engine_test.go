@@ -137,6 +137,8 @@ type fakeStreamClient struct {
 	calls    []llm.Request
 }
 
+type fakeAsyncLateDeltaClient struct{}
+
 func (f *fakeStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
 	return llm.Response{}, errors.New("not implemented")
 }
@@ -163,6 +165,24 @@ func (f *fakeStreamClient) GenerateStream(_ context.Context, req llm.Request, on
 			Usage:     llm.Usage{WindowTokens: 200000},
 		}, nil
 	}
+}
+
+func (fakeAsyncLateDeltaClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
+	return llm.Response{}, errors.New("not implemented")
+}
+
+func (fakeAsyncLateDeltaClient) GenerateStream(_ context.Context, _ llm.Request, onDelta func(string)) (llm.Response, error) {
+	if onDelta != nil {
+		onDelta("final")
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			onDelta("late")
+		}()
+	}
+	return llm.Response{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "final"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}, nil
 }
 
 type authFailClient struct {
@@ -2144,6 +2164,50 @@ func TestStreamingRetryResetsAttemptDeltas(t *testing.T) {
 	}
 	if !(firstDelta < reset && reset < secondDelta) {
 		t.Fatalf("unexpected delta/reset ordering first=%d reset=%d second=%d", firstDelta, reset, secondDelta)
+	}
+}
+
+func TestStreamingIgnoresAsyncLateDeltasAfterGenerateReturns(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	var (
+		mu     sync.Mutex
+		events []Event
+	)
+	eng, err := New(store, fakeAsyncLateDeltaClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			events = append(events, evt)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "test")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "final" {
+		t.Fatalf("assistant content = %q, want final", msg.Content)
+	}
+	time.Sleep(40 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) == 0 {
+		t.Fatal("expected runtime events")
+	}
+	for _, evt := range events {
+		if evt.Kind == EventAssistantDelta && evt.AssistantDelta == "late" {
+			t.Fatalf("expected late delta to be ignored, got events: %+v", events)
+		}
 	}
 }
 
