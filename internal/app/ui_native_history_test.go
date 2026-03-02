@@ -269,6 +269,49 @@ func TestConsumeNativeStreamPrefixHandlesNewlines(t *testing.T) {
 	}
 }
 
+func TestAppendBoundedPendingStreamCapsTail(t *testing.T) {
+	seed := strings.Repeat("a", nativePendingStreamMaxRunes)
+	got := appendBoundedPendingStream(seed, "bbb")
+	if gotLen := len([]rune(got)); gotLen != nativePendingStreamMaxRunes {
+		t.Fatalf("expected bounded pending stream length %d, got %d", nativePendingStreamMaxRunes, gotLen)
+	}
+	if !strings.HasSuffix(got, "bbb") {
+		t.Fatalf("expected bounded stream to keep latest suffix, got %q", got[len(got)-10:])
+	}
+}
+
+func TestNativeReplayClearsPendingOnNonPrefixAssistantCommit(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt"}}),
+	).(*uiModel)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	m.nativePendingStreamText = "streamed prefix"
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "different committed text"})
+	m.transcriptEntries = append(m.transcriptEntries, tui.TranscriptEntry{Role: "assistant", Text: "different committed text"})
+	cmd := m.syncNativeHistoryFromTranscript()
+	if cmd == nil {
+		t.Fatal("expected replay delta for committed assistant")
+	}
+	if m.nativePendingStreamText != "" {
+		t.Fatalf("expected pending stream to clear on non-prefix assistant commit, got %q", m.nativePendingStreamText)
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	plain := stripANSIText(msg.Text)
+	if !strings.Contains(plain, "different committed text") {
+		t.Fatalf("expected full committed assistant text emitted once, got %q", msg.Text)
+	}
+}
+
 func TestNativeReplayDeduplicatesAlreadyStreamedAssistantPrefix(t *testing.T) {
 	m := NewUIModel(
 		nil,

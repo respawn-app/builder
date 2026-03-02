@@ -16,6 +16,8 @@ import (
 
 func TestModeTogglesUseDetailAltScreenNative(t *testing.T) {
 	out := &bytes.Buffer{}
+	cleanupNativeOutput := captureNativeOutputForTest(out)
+	defer cleanupNativeOutput()
 	seq := &bytes.Buffer{}
 	var sequenceMu sync.Mutex
 	originalSequenceWriter := writeTerminalSequence
@@ -70,6 +72,8 @@ func TestModeTogglesUseDetailAltScreenNative(t *testing.T) {
 
 func TestCtrlTModeTogglesUseDetailAltScreenNative(t *testing.T) {
 	out := &bytes.Buffer{}
+	cleanupNativeOutput := captureNativeOutputForTest(out)
+	defer cleanupNativeOutput()
 	seq := &bytes.Buffer{}
 	var sequenceMu sync.Mutex
 	originalSequenceWriter := writeTerminalSequence
@@ -169,6 +173,8 @@ func TestModeTogglesUseDetailAltScreenAltMode(t *testing.T) {
 
 func TestNativeAlwaysPolicyDisablesAltScreenAndShowsReplayAfterWindowSize(t *testing.T) {
 	out := &bytes.Buffer{}
+	cleanupNativeOutput := captureNativeOutputForTest(out)
+	defer cleanupNativeOutput()
 	settings := config.Settings{TUIAlternateScreen: config.TUIAlternateScreenAlways, TUIScrollMode: config.TUIScrollModeNative}
 	model := NewUIModel(
 		nil,

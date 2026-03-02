@@ -32,6 +32,10 @@ type nativeHistoryFlushMsg struct {
 	Text string
 }
 
+type nativeStreamAppendMsg struct {
+	Text string
+}
+
 type runtimeEventMsg struct {
 	event runtime.Event
 }
@@ -376,7 +380,12 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if strings.TrimSpace(msg.Text) == "" {
 			return m, nil
 		}
-		return m, tea.Printf("%s", msg.Text)
+		return m, emitNativeDirectWrite(msg.Text)
+	case nativeStreamAppendMsg:
+		if msg.Text == "" {
+			return m, nil
+		}
+		return m, emitNativeDirectWrite(msg.Text)
 	case submitDoneMsg:
 		next, cmd := m.inputController().handleSubmitDone(msg)
 		next.(*uiModel).syncViewport()

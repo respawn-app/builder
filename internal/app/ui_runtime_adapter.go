@@ -24,8 +24,10 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 		if delta != "" {
 			m.forwardToView(tui.StreamAssistantMsg{Delta: delta})
 			if m.usesNativeScrollback() && m.view.Mode() == tui.ModeOngoing {
-				m.nativePendingStreamText += delta
-				return tea.Printf("%s", delta)
+				m.nativePendingStreamText = appendBoundedPendingStream(m.nativePendingStreamText, delta)
+				return func() tea.Msg {
+					return nativeStreamAppendMsg{Text: delta}
+				}
 			}
 		}
 	case runtime.EventAssistantDeltaReset:
@@ -79,6 +81,7 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 		})
 	}
 	m.transcriptEntries = append(m.transcriptEntries[:0], entries...)
+	m.nativePendingStreamText = ""
 	m.refreshRollbackCandidates()
 	m.forwardToView(tui.SetConversationMsg{
 		Entries:      entries,
