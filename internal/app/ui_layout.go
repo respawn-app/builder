@@ -234,13 +234,10 @@ func (l uiViewLayout) syncNativeLiveRegionState() {
 		m.nativeStreamingActive = false
 		return
 	}
-	if current < m.nativeLiveRegionLines {
-		m.nativeLiveRegionPad = m.nativeLiveRegionLines - current
-	} else {
-		m.nativeLiveRegionPad = 0
-	}
+	m.nativeLiveRegionPad = 0
 	m.nativeLiveRegionLines = current
-	m.nativeStreamingActive = streamingActiveNow
+	m.nativeStreamingActive = true
+	return
 }
 
 func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
