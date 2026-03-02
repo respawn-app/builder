@@ -52,6 +52,9 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if !cfg.Settings.EnabledTools[tools.ToolShell] || !cfg.Settings.EnabledTools[tools.ToolPatch] || !cfg.Settings.EnabledTools[tools.ToolAskQuestion] || !cfg.Settings.EnabledTools[tools.ToolMultiToolUseParallel] {
 		t.Fatalf("expected all default tools enabled: %+v", cfg.Settings.EnabledTools)
 	}
+	if !cfg.Settings.EnabledTools[tools.ToolWebSearch] {
+		t.Fatalf("expected web_search tool enabled by default: %+v", cfg.Settings.EnabledTools)
+	}
 	if cfg.Settings.ContextCompactionThresholdTokens != 360_000 {
 		t.Fatalf("default compaction threshold mismatch: %d", cfg.Settings.ContextCompactionThresholdTokens)
 	}
@@ -213,6 +216,9 @@ func TestLoadWebSearchPrecedenceAndValidation(t *testing.T) {
 	if got := cfg.Source.Sources["web_search"]; got != "file" {
 		t.Fatalf("expected web_search source file, got %q", got)
 	}
+	if !cfg.Settings.EnabledTools[tools.ToolWebSearch] {
+		t.Fatalf("expected web_search tool to remain enabled by default")
+	}
 
 	t.Setenv("BUILDER_WEB_SEARCH", "off")
 	cfg, err = Load(workspace, LoadOptions{})
@@ -225,10 +231,38 @@ func TestLoadWebSearchPrecedenceAndValidation(t *testing.T) {
 	if got := cfg.Source.Sources["web_search"]; got != "env" {
 		t.Fatalf("expected web_search source env, got %q", got)
 	}
+	if !cfg.Settings.EnabledTools[tools.ToolWebSearch] {
+		t.Fatalf("expected web_search tool to stay enabled when only web_search mode is off")
+	}
 
 	t.Setenv("BUILDER_WEB_SEARCH", "custom")
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
 		t.Fatal("expected web_search=custom validation error")
+	}
+}
+
+func TestLoadWebSearchNativeRespectsExplicitToolToggle(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("web_search = \"native\"\n[tools]\nweb_search = false\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.EnabledTools[tools.ToolWebSearch] {
+		t.Fatalf("expected explicit tools.web_search=false to stay disabled")
+	}
+	if got := cfg.Source.Sources["tools.web_search"]; got != "file" {
+		t.Fatalf("expected tools.web_search source file, got %q", got)
 	}
 }
 

@@ -21,3 +21,40 @@ func TestLookupModelMetadataCaseInsensitive(t *testing.T) {
 		t.Fatalf("unexpected context window: %d", meta.ContextWindowTokens)
 	}
 }
+
+func TestSupportsReasoningEffortModel(t *testing.T) {
+	tests := []struct {
+		model string
+		want  bool
+	}{
+		{model: "gpt-5.3-codex", want: true},
+		{model: " GPT-4o ", want: true},
+		{model: "o3-mini", want: true},
+		{model: "claude-3-7-sonnet", want: false},
+		{model: "", want: false},
+	}
+
+	for _, tc := range tests {
+		if got := SupportsReasoningEffortModel(tc.model); got != tc.want {
+			t.Fatalf("SupportsReasoningEffortModel(%q)=%v, want %v", tc.model, got, tc.want)
+		}
+	}
+}
+
+func TestModelDisplayLabel(t *testing.T) {
+	tests := []struct {
+		model         string
+		thinkingLevel string
+		want          string
+	}{
+		{model: "gpt-5.3.codex", thinkingLevel: "high", want: "gpt-5.3.codex high"},
+		{model: "claude-3-7-sonnet", thinkingLevel: "high", want: "claude-3-7-sonnet"},
+		{model: "", thinkingLevel: "", want: "gpt-5"},
+	}
+
+	for _, tc := range tests {
+		if got := ModelDisplayLabel(tc.model, tc.thinkingLevel); got != tc.want {
+			t.Fatalf("ModelDisplayLabel(%q, %q)=%q, want %q", tc.model, tc.thinkingLevel, got, tc.want)
+		}
+	}
+}

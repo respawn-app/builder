@@ -85,7 +85,7 @@ var catalogEntries = []CatalogEntry{
 		ID:             ToolWebSearch,
 		Aliases:        nil,
 		Description:    "Search the web for up-to-date external information using the provider-native web search capability when available. Use this when local workspace context is insufficient or the fact could be stale. Prefer primary and official sources, and prefer MCP resources/templates over web search when possible.",
-		DefaultEnabled: false,
+		DefaultEnabled: true,
 		Schema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,

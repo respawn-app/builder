@@ -52,6 +52,9 @@ type chatStore struct {
 	ongoing         string
 	ongoingError    string
 	cwd             string
+
+	providerTokenEstimate      int
+	providerTokenEstimateDirty bool
 }
 
 type localChatEntry struct {
@@ -67,8 +70,9 @@ type compactionCheckpoint struct {
 func newChatStore() *chatStore {
 	cwd, _ := os.Getwd()
 	return &chatStore{
-		toolCompletions: make(map[string]tools.Result, 16),
-		cwd:             cwd,
+		toolCompletions:            make(map[string]tools.Result, 16),
+		cwd:                        cwd,
+		providerTokenEstimateDirty: true,
 	}
 }
 
@@ -81,6 +85,7 @@ func (s *chatStore) appendMessage(msg llm.Message) {
 	}
 	s.messages = append(s.messages, msg)
 	s.items = append(s.items, llm.ItemsFromMessages([]llm.Message{msg})...)
+	s.providerTokenEstimateDirty = true
 }
 
 func (s *chatStore) replaceHistory(items []llm.ResponseItem) {
@@ -90,6 +95,7 @@ func (s *chatStore) replaceHistory(items []llm.ResponseItem) {
 		CutoffItemCount: len(s.items),
 		Items:           llm.CloneResponseItems(items),
 	}
+	s.providerTokenEstimateDirty = true
 }
 
 func (s *chatStore) restoreMessagesFromItems(items []llm.ResponseItem) {
@@ -99,6 +105,34 @@ func (s *chatStore) restoreMessagesFromItems(items []llm.ResponseItem) {
 	s.messages = llm.MessagesFromItems(restored)
 	s.items = restored
 	s.compact = nil
+	s.providerTokenEstimateDirty = true
+}
+
+func (s *chatStore) estimatedProviderTokens() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.providerTokenEstimateDirty {
+		return s.providerTokenEstimate
+	}
+	total := 0
+	if s.compact == nil {
+		total = estimateItemsTokens(s.items)
+	} else {
+		total = estimateItemsTokens(s.compact.Items)
+		tailStart := s.compact.CutoffItemCount
+		if tailStart < 0 {
+			tailStart = 0
+		}
+		if tailStart < len(s.items) {
+			total += estimateItemsTokens(s.items[tailStart:])
+		}
+	}
+	if total < 0 {
+		total = 0
+	}
+	s.providerTokenEstimate = total
+	s.providerTokenEstimateDirty = false
+	return total
 }
 
 func (s *chatStore) snapshotItems() []llm.ResponseItem {

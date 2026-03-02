@@ -1010,11 +1010,7 @@ func shouldApplyReasoningEffort(model, effort string) bool {
 	if effort == "" {
 		return false
 	}
-	model = strings.ToLower(strings.TrimSpace(model))
-	if model == "" {
-		return false
-	}
-	return strings.HasPrefix(model, "gpt-") || strings.HasPrefix(model, "o")
+	return SupportsReasoningEffortModel(model)
 }
 
 func outputStringFromRaw(raw json.RawMessage) string {
