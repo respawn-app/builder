@@ -93,6 +93,172 @@ func TestNativeScrollbackEmitsOnlyNewTranscriptLines(t *testing.T) {
 	}
 }
 
+func TestNativeScrollbackRebasesFormatterSilentlyOnNonAppendMutation(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "old line"}, {Role: "assistant", Text: "tail line"}}),
+	).(*uiModel)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+
+	m.transcriptEntries[0].Text = "mutated line"
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+	cmd := m.syncNativeHistoryFromTranscript()
+	if cmd != nil {
+		t.Fatalf("expected no native replay emission for non-append mutation, got %T", cmd())
+	}
+}
+
+func TestNativeScrollbackResizeRebasesFormatterWidth(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "old line"}}),
+	).(*uiModel)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 40, Height: 20})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	if m.nativeFormatterWidth != 40 {
+		t.Fatalf("expected initial formatter width 40, got %d", m.nativeFormatterWidth)
+	}
+
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	if m.nativeFormatterWidth != 100 {
+		t.Fatalf("expected formatter width rebased to 100 after resize, got %d", m.nativeFormatterWidth)
+	}
+
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "new line"})
+	m.transcriptEntries = append(m.transcriptEntries, tui.TranscriptEntry{Role: "assistant", Text: "new line"})
+	cmd := m.syncNativeHistoryFromTranscript()
+	if cmd == nil {
+		t.Fatal("expected delta command after append post-resize")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	plain := stripANSIText(msg.Text)
+	if !strings.Contains(plain, "new line") {
+		t.Fatalf("expected delta replay to include new entry, got %q", msg.Text)
+	}
+	if strings.Contains(plain, "old line") {
+		t.Fatalf("expected delta replay to exclude previously flushed history, got %q", msg.Text)
+	}
+}
+
+func TestNativeScrollbackShrinkRebasesWithoutReemittingHistory(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "line one"}, {Role: "assistant", Text: "line two"}}),
+	).(*uiModel)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+
+	m.transcriptEntries = m.transcriptEntries[:1]
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+	cmd := m.syncNativeHistoryFromTranscript()
+	if cmd != nil {
+		t.Fatalf("expected no replay emission after transcript shrink, got %T", cmd())
+	}
+}
+
+func TestNativeScrollbackRepeatedConversationRefreshDoesNotDuplicateUserPrompt(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
+	).(*uiModel)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	startupMsg, ok := startupCmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", startupCmd())
+	}
+	combined := startupMsg.Text
+
+	for i := 0; i < 12; i++ {
+		m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+		if cmd := m.syncNativeHistoryFromTranscript(); cmd != nil {
+			t.Fatalf("expected no replay emission on repeated conversation refresh #%d, got %T", i, cmd())
+		}
+	}
+
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "tail"})
+	m.transcriptEntries = append(m.transcriptEntries, tui.TranscriptEntry{Role: "assistant", Text: "tail"})
+	cmd := m.syncNativeHistoryFromTranscript()
+	if cmd == nil {
+		t.Fatal("expected tail delta command")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	combined += msg.Text
+	plain := stripANSIText(combined)
+	if count := strings.Count(plain, "prompt once"); count != 1 {
+		t.Fatalf("expected prompt emitted once across repeated refreshes, got %d occurrences", count)
+	}
+}
+
+func TestNativeScrollbackIncrementalFlushConcatenationMatchesFullSnapshot(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "line 1"}}),
+	).(*uiModel)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	startupMsg, ok := startupCmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", startupCmd())
+	}
+	combined := startupMsg.Text
+
+	appendEntry := func(text string) {
+		t.Helper()
+		m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: text})
+		m.transcriptEntries = append(m.transcriptEntries, tui.TranscriptEntry{Role: "assistant", Text: text})
+		cmd := m.syncNativeHistoryFromTranscript()
+		if cmd == nil {
+			t.Fatalf("expected replay command after append %q", text)
+		}
+		msg, ok := cmd().(nativeHistoryFlushMsg)
+		if !ok {
+			t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+		}
+		combined += msg.Text
+	}
+
+	appendEntry("line 2\n\n```yaml\nroot:\n  key: value\n```")
+	appendEntry("line 3 with `code`")
+
+	expected := ensureNativeFlushNewline(renderNativeScrollbackSnapshot(m.transcriptEntries, m.theme, m.nativeFormatterWidth))
+	if combined != expected {
+		t.Fatalf("expected concatenated incremental flush output to match full snapshot\ncombined=%q\nexpected=%q", combined, expected)
+	}
+}
+
 func TestNativeScrollbackFlowIntegration(t *testing.T) {
 	entries := make([]UITranscriptEntry, 0, 120)
 	for i := 1; i <= 120; i++ {

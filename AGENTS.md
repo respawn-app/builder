@@ -76,6 +76,7 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
   - `tui_scroll_mode` (`alt|native`) is a Builder config mode, not a terminal protocol toggle.
   - Terminal alt-screen is `?1049`.
   - Terminal alternate-scroll is `?1007`.
+  - Transcript mode toggle bindings are `Shift+Tab` and `Ctrl+T`; keep behavior/protocol side effects identical between both.
   - Ongoing mode must not use `?1007`.
   - Detail transcript overlay may use `?1049` + `?1007` when `tui_alternate_screen != never`.
   - Rationale: ongoing prioritizes native long scrollback + selection in normal buffer; detail overlay prioritizes transcript navigation with wheel while still keeping mouse capture disabled for text selection.

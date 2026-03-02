@@ -1244,6 +1244,42 @@ func TestDetailScrollStepAllocsStayBounded(t *testing.T) {
 	}
 }
 
+func TestOngoingScrollStepAllocsStayBounded(t *testing.T) {
+	entries := benchmarkDetailEntries(300)
+	m := NewModel(WithTheme("dark"))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 40, Width: 120})
+	m = updateModel(t, m, SetConversationMsg{Entries: entries})
+	m = updateModel(t, m, ScrollOngoingMsg{Delta: -120})
+
+	allocs := testing.AllocsPerRun(20, func() {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = next.(Model)
+		_ = m.View()
+	})
+	if allocs > 100 {
+		t.Fatalf("expected ongoing scroll allocations to stay bounded, got %.2f allocs/op", allocs)
+	}
+}
+
+func TestDetailStreamingUpdateAllocsStayBounded(t *testing.T) {
+	entries := benchmarkDetailEntries(300)
+	m := NewModel(WithTheme("dark"))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 40, Width: 120})
+	m = updateModel(t, m, SetConversationMsg{Entries: entries})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	base := m
+	allocs := testing.AllocsPerRun(20, func() {
+		local := base
+		next, _ := local.Update(StreamAssistantMsg{Delta: "x"})
+		local = next.(Model)
+		_ = local.View()
+	})
+	if allocs > 80 {
+		t.Fatalf("expected detail streaming update allocations to stay bounded, got %.2f allocs/op", allocs)
+	}
+}
+
 type errString string
 
 func (e errString) Error() string {
