@@ -5,7 +5,7 @@ import (
 	"math"
 	"strings"
 
-	"builder/internal/shared/textutil"
+	"builder/internal/llm"
 	"builder/internal/tui"
 
 	bubbleprogress "github.com/charmbracelet/bubbles/progress"
@@ -252,7 +252,7 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 	segments := []string{
 		spin,
 		style.meta.Render(string(m.view.Mode())),
-		style.meta.Render(textutil.FirstNonEmpty(m.modelName, "gpt-5")),
+		style.meta.Render(l.statusModelLabel()),
 	}
 	if cacheSection := l.renderCacheHitSection(style); cacheSection != "" {
 		segments = append(segments, cacheSection)
@@ -270,6 +270,15 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 		gap = 1
 	}
 	return padANSIRight(left+strings.Repeat(" ", gap)+right, width)
+}
+
+func (l uiViewLayout) statusModelLabel() string {
+	m := l.model
+	label := llm.ModelDisplayLabel(m.modelName, m.thinkingLevel)
+	if !m.modelContractLocked {
+		return label
+	}
+	return label + " (model locked)"
 }
 
 func (l uiViewLayout) renderCacheHitSection(style uiStyles) string {

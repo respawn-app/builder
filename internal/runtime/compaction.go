@@ -125,10 +125,15 @@ func (e *Engine) effectiveContextTokenLimit() int {
 
 func (e *Engine) currentTokenUsage() int {
 	usage := e.lastUsageSnapshot()
+	usageTotal := 0
 	if usage.InputTokens > 0 || usage.OutputTokens > 0 {
-		return usage.InputTokens + usage.OutputTokens
+		usageTotal = usage.InputTokens + usage.OutputTokens
 	}
-	return estimateItemsTokens(e.snapshotItems())
+	estimated := e.chat.estimatedProviderTokens()
+	if estimated > usageTotal {
+		return estimated
+	}
+	return usageTotal
 }
 
 func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionMode, args string) (compactionResult, error) {
@@ -337,6 +342,7 @@ func (e *Engine) localCompactionSummary(ctx context.Context, input []llm.Respons
 	if err != nil {
 		return "", err
 	}
+	req.ReasoningEffort = e.ThinkingLevel()
 	req.SessionID = e.store.Meta().SessionID
 
 	resp, err := e.generateWithRetry(ctx, req, nil, nil)

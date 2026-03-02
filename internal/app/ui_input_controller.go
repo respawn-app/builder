@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"builder/internal/app/commands"
 	"builder/internal/llm"
+	"builder/internal/runtime"
 	"builder/internal/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -416,6 +418,45 @@ func (c uiInputController) applyCommandResult(commandResult commands.Result) (te
 		}
 		m.sessionName = strings.TrimSpace(commandResult.SessionName)
 		return m, tea.SetWindowTitle(m.windowTitle())
+	case commands.ActionSetThinking:
+		requested := strings.TrimSpace(commandResult.ThinkingLevel)
+		if requested == "" {
+			current := strings.TrimSpace(m.thinkingLevel)
+			if m.engine != nil {
+				current = m.engine.ThinkingLevel()
+			}
+			if current == "" {
+				current = "unknown"
+			}
+			if m.engine != nil {
+				m.engine.AppendLocalEntry("system", "Thinking level is "+current)
+			} else {
+				m.forwardToView(tui.AppendTranscriptMsg{Role: "system", Text: "Thinking level is " + current})
+			}
+			return m, nil
+		}
+		normalized, ok := runtime.NormalizeThinkingLevel(requested)
+		if !ok {
+			errText := "invalid thinking level " + strconv.Quote(requested) + " (expected low|medium|high|xhigh)"
+			if m.engine != nil {
+				m.engine.AppendLocalEntry("error", errText)
+			} else {
+				m.forwardToView(tui.AppendTranscriptMsg{Role: "error", Text: errText})
+			}
+			return m, nil
+		}
+		if m.engine != nil {
+			if err := m.engine.SetThinkingLevel(normalized); err != nil {
+				m.engine.AppendLocalEntry("error", formatSubmissionError(err))
+				return m, nil
+			}
+			m.thinkingLevel = m.engine.ThinkingLevel()
+			m.engine.AppendLocalEntry("system", "Thinking level set to "+m.thinkingLevel)
+			return m, nil
+		}
+		m.thinkingLevel = normalized
+		m.forwardToView(tui.AppendTranscriptMsg{Role: "system", Text: "Thinking level set to " + m.thinkingLevel})
+		return m, nil
 	case commands.ActionCompact:
 		return m, c.startCompaction(commandResult.Args)
 	}

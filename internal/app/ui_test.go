@@ -1669,6 +1669,35 @@ func TestBusySlashNameExecutesImmediatelyWithoutQueueing(t *testing.T) {
 	}
 }
 
+func TestBusySlashThinkingExecutesImmediatelyWithoutQueueing(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.thinkingLevel = "high"
+	m.input = "/thinking low"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd != nil {
+		t.Fatal("did not expect extra command from /thinking")
+	}
+	if !updated.busy {
+		t.Fatal("expected busy state unchanged while command executes")
+	}
+	if updated.thinkingLevel != "low" {
+		t.Fatalf("expected thinking level update, got %q", updated.thinkingLevel)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected no queued messages, got %d", len(updated.queued))
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected no pending injected messages, got %d", len(updated.pendingInjected))
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after /thinking, got %q", updated.input)
+	}
+}
+
 func TestBusyUnsupportedSlashCommandShowsTransientErrorAndDoesNotQueue(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.busy = true
@@ -1833,6 +1862,55 @@ func TestStatusLineShowsContextUsageWhenAvailable(t *testing.T) {
 	}
 	if !strings.Contains(line, "▯▯▯▯▯▯▯▯▯▯") {
 		t.Fatalf("expected progress bar in status line, got %q", line)
+	}
+}
+
+func TestStatusLineShowsThinkingLevelForReasoningModels(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIModelName("gpt-5.3.codex"),
+		WithUIThinkingLevel("high"),
+	).(*uiModel)
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(line, "gpt-5.3.codex high") {
+		t.Fatalf("expected status line to include model and thinking level, got %q", line)
+	}
+}
+
+func TestStatusLineOmitsThinkingLevelForNonReasoningModels(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIModelName("claude-3-7-sonnet"),
+		WithUIThinkingLevel("high"),
+	).(*uiModel)
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if strings.Contains(line, "claude-3-7-sonnet high") {
+		t.Fatalf("did not expect status line to include thinking level for non-reasoning model, got %q", line)
+	}
+	if !strings.Contains(line, "claude-3-7-sonnet") {
+		t.Fatalf("expected status line to include model name, got %q", line)
+	}
+}
+
+func TestStatusLineShowsLockedModelContractMarker(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIModelName("gpt-5.3.codex"),
+		WithUIThinkingLevel("high"),
+		WithUIModelContractLocked(true),
+	).(*uiModel)
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(line, "gpt-5.3.codex high (model locked)") {
+		t.Fatalf("expected status line to include locked model contract marker, got %q", line)
 	}
 }
 

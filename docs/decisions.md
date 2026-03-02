@@ -76,8 +76,8 @@
 - Session persistence format: split `session.json` + `events.jsonl`.
 - Session directory names are UUID-only.
 - Session start/setup becomes immutable at first model request dispatch.
-- Resumed sessions keep locked setup immutable.
-- Lock covers model + core generation params, thinking level, enabled tools, tool schema/description snapshot, and system prompt snapshot.
+- Resumed sessions keep locked setup immutable, except thinking level.
+- Lock covers model + core generation params, enabled tools, tool schema/description snapshot, and system prompt snapshot; thinking level is mutable mid-session.
 - Transcript message order is immutable for cache stability.
 - Canonical model context/history is stored as Responses API input items; message-only chat is UI projection.
 - Tool-call identity prefers provider-native ids; UUID fallback when missing.
@@ -150,6 +150,7 @@
 - Native compaction routing is configurable by `use_native_compaction` (default `true`).
 - Terminal notification backend is configurable by `notification_method` (`auto|osc9|bel`, default `auto`).
 - TUI alternate-screen policy is configurable by `tui_alternate_screen` (`auto|always|never`, default `auto`).
+- `tools.web_search` is enabled by default; `web_search` controls whether provider-native web search is activated (`native`) or disabled (`off`).
 
 ## Context Management And Compaction
 
@@ -208,7 +209,8 @@
 - Rationale: ongoing must preserve long-lived normal-buffer scrollback and smooth native selection/copy; detail is an inspection surface where wheel navigation is prioritized without taking over mouse capture.
 - No timestamps are shown in UI.
 - Streaming paint cadence is 16ms with token coalescing per flush tick.
-- Main status line is compact and fixed: model, busy/idle, queue size.
+- Main status line is compact and fixed: activity indicator, mode, model label, cache section, transient warning; context meter is right-aligned.
+- Model label appends thinking level when model matches reasoning-effort heuristic (`gpt-*` or `o*`).
 - Status line includes right-aligned context meter (10-char bar + `% ctx window`, green/yellow/red at `<50%`, `50-<80%`, `>=80%`).
 
 ## Startup And Session Selection UX
