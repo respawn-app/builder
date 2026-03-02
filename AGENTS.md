@@ -74,5 +74,8 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
 - Keep this AGENTS.md file up-to-date and comprehensive. Avoid adding info that can become outdated, otherwise keep this as project guidelines, rules, and learnings for future team members. Persist info that should be preserved here.
 - Terminology lock:
   - `tui_scroll_mode` (`alt|native`) is a Builder config mode, not a terminal protocol toggle.
-  - Terminal alt-screen is `?1049` and is not used for detail mode transitions.
-  - Terminal alternate-scroll `?1007` must not be used for detail/ongoing scroll behavior (it is too slow in target terminals).
+  - Terminal alt-screen is `?1049`.
+  - Terminal alternate-scroll is `?1007`.
+  - Ongoing mode must not use `?1007`.
+  - Detail transcript overlay may use `?1049` + `?1007` when `tui_alternate_screen != never`.
+  - Rationale: ongoing prioritizes native long scrollback + selection in normal buffer; detail overlay prioritizes transcript navigation with wheel while still keeping mouse capture disabled for text selection.

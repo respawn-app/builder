@@ -191,15 +191,18 @@
 - Switching detail -> ongoing restores prior ongoing scroll position.
 - Mode-toggle events are UI-ephemeral and not persisted.
 - Ongoing mode in `alt` scroll mode uses in-app viewport rendering.
-- Detail remains fullscreen pager-style (input/queued/picker hidden) and uses the same normal-buffer rendering architecture as ongoing.
-- Detail does not enter/exit alt-screen.
+- Detail is a fullscreen pager-style transcript overlay (input/queued/picker hidden).
 - Transcript scroll behavior is configurable by `tui_scroll_mode` (`alt|native`, default `alt`).
 - Terminology: `tui_scroll_mode` is a Builder config mode; terminal alt-screen is `?1049`; terminal alternate-scroll is `?1007`.
-- Detail-mode transitions do not use terminal alternate-scroll (`?1007`) or terminal alt-screen (`?1049`).
 - `tui_scroll_mode=native` forces main UI startup to normal buffer even when `tui_alternate_screen=always`, because native transcript replay is emitted via unmanaged lines that must remain visible in terminal scrollback.
 - `alt` mode keeps in-app viewport scrolling behavior.
 - `native` mode prioritizes terminal-native ongoing scrollback/selection by replaying committed transcript history into terminal scrollback and appending only new committed transcript deltas.
 - `native` mode keeps mouse capture disabled by default to preserve native text selection behavior.
+- Ongoing mode never enables terminal alternate-scroll (`?1007`).
+- Detail transcript overlay uses terminal alt-screen (`?1049`) when `tui_alternate_screen != never`.
+- While detail overlay is active, terminal alternate-scroll (`?1007`) is enabled to support wheel-driven transcript navigation; it is disabled again on leaving detail.
+- Mouse capture remains disabled, so text selection/copy in detail overlay stays terminal-native.
+- Rationale: ongoing must preserve long-lived normal-buffer scrollback and smooth native selection/copy; detail is an inspection surface where wheel navigation is prioritized without taking over mouse capture.
 - No timestamps are shown in UI.
 - Streaming paint cadence is 16ms with token coalescing per flush tick.
 - Main status line is compact and fixed: model, busy/idle, queue size.

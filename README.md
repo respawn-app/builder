@@ -34,7 +34,11 @@ Builder is a highly opinionated, minimal terminal coding agent for professional 
 
 - `tui_scroll_mode` controls Builder transcript behavior (`alt` or `native`).
 - `tui_alternate_screen` controls terminal alt-screen policy (`auto|always|never`).
+- `Shift+Tab` toggles ongoing/detail transcript surfaces.
 - In `tui_scroll_mode=native`, main UI startup always uses normal buffer even if `tui_alternate_screen=always`, so transcript replay remains visible in terminal scrollback.
+- Ongoing mode keeps mouse capture disabled and does not use terminal alternate-scroll (`?1007`), preserving native scrollback, selection, and copy behavior.
+- Detail transcript mode is an overlay: when `tui_alternate_screen != never`, entering detail uses terminal alt-screen (`?1049`) and enables alternate-scroll (`?1007`) for wheel navigation, then disables it on exit.
+- Rationale: ongoing optimizes for long-lived terminal-native history UX; detail optimizes for transcript inspection/navigation UX without enabling mouse capture.
 
 ### Important things not done yet
 
