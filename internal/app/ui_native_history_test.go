@@ -622,16 +622,27 @@ func TestNativeOngoingStreamingTailNormalizesControlCharsAndNewlines(t *testing.
 	m.termWidth = 80
 	m.termHeight = 12
 	m.windowSizeKnown = true
-	m.forwardToView(tui.StreamAssistantMsg{Delta: "line 1\rline 2\n\nline 3\x1b[2K"})
+	m.forwardToView(tui.StreamAssistantMsg{Delta: "line 1\r\nline 2\n\nline 3\x1b[2K\x1b[?25l"})
 	m.syncViewport()
 	plain := stripANSIPreserve(m.View())
 	if strings.ContainsRune(plain, '\r') {
 		t.Fatalf("expected streaming preview to normalize carriage returns, got %q", plain)
 	}
-	if strings.Contains(plain, "\x1b[2K") {
-		t.Fatalf("expected streaming preview to strip control escapes, got %q", plain)
+	if strings.Contains(plain, "[2K") || strings.Contains(plain, "[?25l") {
+		t.Fatalf("expected streaming preview to strip ansi escape remnants, got %q", plain)
+	}
+	if strings.Contains(plain, "\n\n\n") {
+		t.Fatalf("expected CRLF normalization to avoid extra blank lines, got %q", plain)
 	}
 	if !strings.Contains(plain, "line 1") || !strings.Contains(plain, "line 2") || !strings.Contains(plain, "line 3") {
 		t.Fatalf("expected normalized streaming preview lines, got %q", plain)
+	}
+}
+
+func TestNormalizeStreamingPreviewTextBoundsLength(t *testing.T) {
+	input := strings.Repeat("a", streamingPreviewMaxRunes+500)
+	out := normalizeStreamingPreviewText(input)
+	if got := len([]rune(out)); got != streamingPreviewMaxRunes {
+		t.Fatalf("expected bounded streaming preview size %d, got %d", streamingPreviewMaxRunes, got)
 	}
 }

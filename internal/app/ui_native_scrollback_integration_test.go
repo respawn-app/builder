@@ -8,6 +8,7 @@ import (
 
 	"builder/internal/config"
 	"builder/internal/runtime"
+	"builder/internal/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
 	xansi "github.com/charmbracelet/x/ansi"
@@ -193,5 +194,46 @@ func TestNativeReplayOutputContainsMarkdownStyling(t *testing.T) {
 	plain := normalizedOutput(raw)
 	if !strings.Contains(plain, "bold") || !strings.Contains(plain, "code") {
 		t.Fatalf("expected styled replay to include content, got %q", plain)
+	}
+}
+
+func TestNativeStreamingPreviewOutputCoherentUnderControlChars(t *testing.T) {
+	out := &bytes.Buffer{}
+	model := NewUIModel(
+		nil,
+		closedRuntimeEvents(),
+		closedAskEvents(),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
+	).(*uiModel)
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	program.Send(tui.StreamAssistantMsg{Delta: "line1\r\nline2\x1b[2K\nline3\x1b[?25l"})
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+	raw := out.String()
+	plain := xansi.Strip(raw)
+	if strings.Count(normalizedOutput(raw), "prompt once") != 1 {
+		t.Fatalf("expected committed prompt once in output, got %d", strings.Count(normalizedOutput(raw), "prompt once"))
+	}
+	if strings.Contains(plain, "[2K") || strings.Contains(plain, "[?25l") {
+		t.Fatalf("expected no ansi escape remnants in streaming preview, got %q", plain)
+	}
+	if !strings.Contains(plain, "line1") || !strings.Contains(plain, "line2") || !strings.Contains(plain, "line3") {
+		t.Fatalf("expected coherent streaming preview content, got %q", plain)
 	}
 }
