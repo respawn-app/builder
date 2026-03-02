@@ -237,6 +237,9 @@ type uiModel struct {
 	startupCmds             []tea.Cmd
 	nativeLiveRegionLines   int
 	nativeLiveRegionPad     int
+	pendingSnapshotDeltaDedup bool
+	pendingSnapshotOngoingLen int
+	pendingSnapshotPreviousOngoingLen int
 
 	lastEscAt time.Time
 
