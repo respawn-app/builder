@@ -139,6 +139,8 @@ type fakeStreamClient struct {
 
 type fakeAsyncLateDeltaClient struct{}
 
+type fakeSimpleStreamClient struct{}
+
 func (f *fakeStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
 	return llm.Response{}, errors.New("not implemented")
 }
@@ -181,6 +183,21 @@ func (fakeAsyncLateDeltaClient) GenerateStream(_ context.Context, _ llm.Request,
 	}
 	return llm.Response{
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "final"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}, nil
+}
+
+func (fakeSimpleStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
+	return llm.Response{}, errors.New("not implemented")
+}
+
+func (fakeSimpleStreamClient) GenerateStream(_ context.Context, _ llm.Request, onDelta func(string)) (llm.Response, error) {
+	if onDelta != nil {
+		onDelta("a")
+		onDelta("b")
+	}
+	return llm.Response{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ab"},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}, nil
 }
@@ -2208,6 +2225,51 @@ func TestStreamingIgnoresAsyncLateDeltasAfterGenerateReturns(t *testing.T) {
 		if evt.Kind == EventAssistantDelta && evt.AssistantDelta == "late" {
 			t.Fatalf("expected late delta to be ignored, got events: %+v", events)
 		}
+	}
+}
+
+func TestStreamingDeltasDoNotEmitConversationSnapshotEvents(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	var (
+		mu                   sync.Mutex
+		events               []Event
+		conversationWithLive int
+	)
+	var eng *Engine
+	eng, err = New(store, fakeSimpleStreamClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			defer mu.Unlock()
+			events = append(events, evt)
+			if evt.Kind == EventConversationUpdated && eng != nil {
+				if strings.TrimSpace(eng.ChatSnapshot().Ongoing) != "" {
+					conversationWithLive++
+				}
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "stream")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "ab" {
+		t.Fatalf("assistant content = %q, want ab", msg.Content)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if conversationWithLive != 0 {
+		t.Fatalf("expected no conversation_updated events carrying live ongoing snapshot, got %d events: %+v", conversationWithLive, events)
 	}
 }
 

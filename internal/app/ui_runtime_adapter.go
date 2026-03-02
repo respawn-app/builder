@@ -17,36 +17,16 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 	m := a.model
 	switch evt.Kind {
 	case runtime.EventConversationUpdated:
-		return a.syncConversationFromEngine(evt.StepID)
+		return a.syncConversationFromEngine()
 	case runtime.EventAssistantDelta:
 		delta := evt.AssistantDelta
 		m.sawAssistantDelta = delta != ""
 		if delta != "" {
-			if m.suppressLateDeltaStepID != "" && evt.StepID == m.suppressLateDeltaStepID {
-				break
-			}
-			currentOngoing := m.view.OngoingStreamingText()
-			expectedSnapshotLen := m.pendingSnapshotPreviousOngoingLen + len(delta)
-			if m.pendingSnapshotDeltaDedup &&
-				len(currentOngoing) == m.pendingSnapshotOngoingLen &&
-				m.pendingSnapshotOngoingLen == expectedSnapshotLen &&
-				strings.HasSuffix(currentOngoing, delta) {
-				m.pendingSnapshotDeltaDedup = false
-				m.pendingSnapshotOngoingLen = 0
-				m.pendingSnapshotPreviousOngoingLen = 0
-				break
-			}
-			m.pendingSnapshotDeltaDedup = false
-			m.pendingSnapshotOngoingLen = 0
-			m.pendingSnapshotPreviousOngoingLen = 0
 			m.forwardToView(tui.StreamAssistantMsg{Delta: delta})
 		}
 	case runtime.EventAssistantDeltaReset:
 		m.sawAssistantDelta = false
-		m.pendingSnapshotDeltaDedup = false
-		m.pendingSnapshotOngoingLen = 0
-		m.pendingSnapshotPreviousOngoingLen = 0
-		m.suppressLateDeltaStepID = ""
+		m.forwardToView(tui.ClearOngoingAssistantMsg{})
 	case runtime.EventCompactionStarted:
 		m.compacting = true
 	case runtime.EventCompactionCompleted, runtime.EventCompactionFailed:
@@ -78,17 +58,16 @@ func (a uiRuntimeAdapter) onUserMessageFlushed(text string) {
 	}
 }
 
-func (a uiRuntimeAdapter) syncConversationFromEngine(stepID string) tea.Cmd {
+func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 	m := a.model
 	if m.engine == nil {
 		return nil
 	}
-	return a.applyChatSnapshot(stepID, m.engine.ChatSnapshot())
+	return a.applyChatSnapshot(m.engine.ChatSnapshot())
 }
 
-func (a uiRuntimeAdapter) applyChatSnapshot(stepID string, snapshot runtime.ChatSnapshot) tea.Cmd {
+func (a uiRuntimeAdapter) applyChatSnapshot(snapshot runtime.ChatSnapshot) tea.Cmd {
 	m := a.model
-	previousOngoingLen := len(m.view.OngoingStreamingText())
 	entries := make([]tui.TranscriptEntry, 0, len(snapshot.Entries))
 	for _, entry := range snapshot.Entries {
 		entries = append(entries, tui.TranscriptEntry{
@@ -106,25 +85,6 @@ func (a uiRuntimeAdapter) applyChatSnapshot(stepID string, snapshot runtime.Chat
 		Ongoing:      snapshot.Ongoing,
 		OngoingError: snapshot.OngoingError,
 	})
-	assistantCommitted := previousOngoingLen > 0 && strings.TrimSpace(snapshot.Ongoing) == ""
-	if assistantCommitted && strings.TrimSpace(stepID) != "" {
-		m.suppressLateDeltaStepID = stepID
-	} else if strings.TrimSpace(snapshot.Ongoing) != "" {
-		if strings.TrimSpace(stepID) == "" || m.suppressLateDeltaStepID == "" || m.suppressLateDeltaStepID == stepID {
-			m.suppressLateDeltaStepID = ""
-		}
-	} else if strings.TrimSpace(stepID) != "" && m.suppressLateDeltaStepID == stepID {
-		m.suppressLateDeltaStepID = ""
-	}
-	if strings.TrimSpace(snapshot.Ongoing) == "" {
-		m.pendingSnapshotDeltaDedup = false
-		m.pendingSnapshotOngoingLen = 0
-		m.pendingSnapshotPreviousOngoingLen = 0
-	} else {
-		m.pendingSnapshotDeltaDedup = true
-		m.pendingSnapshotOngoingLen = len(snapshot.Ongoing)
-		m.pendingSnapshotPreviousOngoingLen = previousOngoingLen
-	}
 	return m.syncNativeHistoryFromTranscript()
 }
 
@@ -157,5 +117,5 @@ func (m *uiModel) onUserMessageFlushed(text string) {
 }
 
 func (m *uiModel) syncConversationFromEngine() {
-	_ = m.runtimeAdapter().syncConversationFromEngine("")
+	_ = m.runtimeAdapter().syncConversationFromEngine()
 }
