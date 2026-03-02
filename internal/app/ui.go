@@ -240,6 +240,8 @@ type uiModel struct {
 	nativeStreamingActive   bool
 
 	lastEscAt time.Time
+	pendingCSIShiftEnterAt time.Time
+	pendingCSIShiftEnter   bool
 
 	rollbackMode                     bool
 	rollbackEditing                  bool

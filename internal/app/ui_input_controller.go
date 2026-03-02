@@ -30,10 +30,43 @@ var spinnerTickInterval = 360 * time.Millisecond
 var transientStatusDuration = 2200 * time.Millisecond
 var errSubmissionInterrupted = errors.New("interrupted")
 var rollbackDoubleEscWindow = 500 * time.Millisecond
+var csiShiftEnterDedupWindow = 120 * time.Millisecond
+
+func (c uiInputController) markPendingCSIShiftEnter() {
+	m := c.model
+	m.pendingCSIShiftEnter = true
+	m.pendingCSIShiftEnterAt = time.Now()
+}
+
+func (c uiInputController) clearPendingCSIShiftEnter() {
+	m := c.model
+	m.pendingCSIShiftEnter = false
+	m.pendingCSIShiftEnterAt = time.Time{}
+}
+
+func (c uiInputController) normalizePendingCSIShiftEnterOnEnter() {
+	m := c.model
+	if !m.pendingCSIShiftEnter {
+		return
+	}
+	if m.pendingCSIShiftEnterAt.IsZero() || time.Since(m.pendingCSIShiftEnterAt) > csiShiftEnterDedupWindow {
+		c.clearPendingCSIShiftEnter()
+		return
+	}
+	if strings.HasSuffix(m.input, "\n") {
+		m.input = strings.TrimSuffix(m.input, "\n")
+		m.inputCursor = -1
+		m.refreshSlashCommandFilterFromInput()
+	}
+	c.clearPendingCSIShiftEnter()
+}
 
 func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := c.model
 	keyString := strings.ToLower(msg.String())
+	if msg.Type != tea.KeyEnter && msg.Type != keyTypeShiftEnterCSI {
+		c.clearPendingCSIShiftEnter()
+	}
 	if msg.Type != tea.KeyEsc {
 		m.lastEscAt = time.Time{}
 	}
@@ -149,6 +182,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.lastEscAt = now
 		return m, nil
 	case tea.KeyEnter:
+		c.normalizePendingCSIShiftEnterOnEnter()
 		text := strings.TrimSpace(m.input)
 		if text == "" {
 			if !m.busy && len(m.queued) > 0 {
@@ -207,6 +241,9 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.insertInputRunes([]rune{'\n'})
+		if msg.Type == keyTypeShiftEnterCSI {
+			c.markPendingCSIShiftEnter()
+		}
 		return m, nil
 	case tea.KeyBackspace:
 		if m.isInputLocked() {
