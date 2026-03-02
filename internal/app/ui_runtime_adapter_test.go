@@ -10,7 +10,7 @@ import (
 func TestApplyChatSnapshotMarksPendingDeltaDedup(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 
-	_ = m.runtimeAdapter().applyChatSnapshot(runtime.ChatSnapshot{Ongoing: "hello"})
+	_ = m.runtimeAdapter().applyChatSnapshot("", runtime.ChatSnapshot{Ongoing: "hello"})
 
 	if !m.pendingSnapshotDeltaDedup {
 		t.Fatal("expected pending snapshot delta dedupe marker")
@@ -27,7 +27,7 @@ func TestAssistantDeltaSkippedWhenSnapshotAlreadyApplied(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 
 	m.forwardToView(tui.SetConversationMsg{Ongoing: "hel"})
-	_ = m.runtimeAdapter().applyChatSnapshot(runtime.ChatSnapshot{Ongoing: "hello"})
+	_ = m.runtimeAdapter().applyChatSnapshot("", runtime.ChatSnapshot{Ongoing: "hello"})
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "lo"})
 
 	if got := m.view.OngoingStreamingText(); got != "hello" {
@@ -41,7 +41,7 @@ func TestAssistantDeltaSkippedWhenSnapshotAlreadyApplied(t *testing.T) {
 func TestAssistantDeltaAppendsWhenSnapshotMarkerCannotMatch(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 
-	_ = m.runtimeAdapter().applyChatSnapshot(runtime.ChatSnapshot{Ongoing: "hello"})
+	_ = m.runtimeAdapter().applyChatSnapshot("", runtime.ChatSnapshot{Ongoing: "hello"})
 	m.pendingSnapshotOngoingLen = 4
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "!"})
 
@@ -54,10 +54,25 @@ func TestAssistantDeltaAppendsWhenSnapshotWasNotDeltaProgression(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 
 	m.forwardToView(tui.SetConversationMsg{Ongoing: "hello"})
-	_ = m.runtimeAdapter().applyChatSnapshot(runtime.ChatSnapshot{Ongoing: "hello"})
+	_ = m.runtimeAdapter().applyChatSnapshot("", runtime.ChatSnapshot{Ongoing: "hello"})
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "lo"})
 
 	if got := m.view.OngoingStreamingText(); got != "hellolo" {
 		t.Fatalf("expected legitimate delta append after non-progression snapshot, got %q", got)
+	}
+}
+
+func TestAssistantDeltaSuppressedAfterCommittedSnapshotForSameStep(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "user", Text: "u"}}
+	_ = m.runtimeAdapter().applyChatSnapshot("step-1", runtime.ChatSnapshot{
+		Entries: []runtime.ChatEntry{{Role: "user", Text: "u"}, {Role: "assistant", Text: "final"}},
+		Ongoing: "",
+	})
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, StepID: "step-1", AssistantDelta: "late"})
+
+	if got := m.view.OngoingStreamingText(); got != "" {
+		t.Fatalf("expected late delta for committed step to be suppressed, got %q", got)
 	}
 }
