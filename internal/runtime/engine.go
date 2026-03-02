@@ -1437,6 +1437,9 @@ func (e *Engine) requestTools() []llm.Tool {
 	}
 	out := make([]llm.Tool, 0, len(defs))
 	for _, d := range defs {
+		if d.ID == tools.ToolViewImage && !llm.SupportsVisionInputsModel(e.cfg.Model) {
+			continue
+		}
 		out = append(out, llm.Tool{Name: string(d.ID), Description: d.Description, Schema: d.Schema})
 	}
 	return out

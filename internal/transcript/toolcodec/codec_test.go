@@ -56,3 +56,13 @@ func TestFormatInputAndOutput(t *testing.T) {
 		t.Fatalf("unexpected output = %q", out)
 	}
 }
+
+func TestFormatOutputForTool_ViewImageSummarizesBinaryPayload(t *testing.T) {
+	out := FormatOutputForTool("view_image", json.RawMessage(`[
+		{"type":"input_image","image_url":"data:image/png;base64,AAAA"},
+		{"type":"input_file","file_data":"Zm9v","filename":"doc.pdf"}
+	]`))
+	if out != "attached image\nattached PDF: doc.pdf" {
+		t.Fatalf("unexpected output = %q", out)
+	}
+}

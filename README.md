@@ -3,6 +3,7 @@ Builder is a highly opinionated, minimal terminal coding agent for professional 
 ### What's done:
 
 - [x] Agentic loop with `shell` and `patch` tools.
+- [x] Native local image/PDF attachment tool (`view_image`) for path-based multimodal reading.
 - [x] Support for Codex login and OpenAI api keys.
 - [x] Compaction using native Codex/OpenAI endpoints.
 - [x] Compact UI mode for ongoing work, and detailed mode to review thinking, tool calls, prompts, summaries.
@@ -54,7 +55,7 @@ Here is where this project has to be highly opinionated:
 - Plan mode - the model has native plan capabilities and can always ask questions, rest is just eye candy.
 - MCPs - mcps are net negative on model performance, pollute context, and can be replaced with CLI scripts
 - Skills - skills are controversial in performance and can easily be replaced with already supported AGENTS.md mentions.
-- Extra UI candy tool calls - all the model needs is `shell`, `ask` and `patch`. Less tools, less burden on the model.
+- Extra UI candy tool calls - keep the toolset minimal (`shell`, `view_image`, `ask`, `patch`). Less tools, less burden on the model.
 - On the fly changing of toolsets or models. Changing models at runtime hurts model performance and invalidates caches.
 - Microcompaction - this invalidates caches and drives costs up with marginal benefits
 - Sandboxing - Codex's sandbox is annoying, doesn't work with many tools (gradle, java etc), junie's sandbox can be bypassed, claude code's sandbox is brittle and can also be bypassed. Frontier models are not so stupid anymore and are trained not to destroy your PC.
