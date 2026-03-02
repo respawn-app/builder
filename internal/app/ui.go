@@ -32,10 +32,6 @@ type nativeHistoryFlushMsg struct {
 	Text string
 }
 
-type nativeStreamAppendMsg struct {
-	Text string
-}
-
 type runtimeEventMsg struct {
 	event runtime.Event
 }
@@ -238,8 +234,6 @@ type uiModel struct {
 	nativeFormatterWidth    int
 	nativeFormatterSnapshot string
 	nativeFormatterEntries  []tui.TranscriptEntry
-	nativePendingStreamText string
-	nativeStreamLineBuffer  string
 	startupCmds             []tea.Cmd
 	nativeLiveRegionLines   int
 	nativeLiveRegionPad     int
@@ -382,11 +376,6 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, tea.Printf("%s", msg.Text)
-	case nativeStreamAppendMsg:
-		if msg.Text == "" {
-			return m, nil
-		}
-		return m, emitNativeDirectWrite(msg.Text)
 	case submitDoneMsg:
 		next, cmd := m.inputController().handleSubmitDone(msg)
 		next.(*uiModel).syncViewport()

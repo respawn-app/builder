@@ -29,18 +29,8 @@ func normalizedOutput(v string) string {
 	return strings.Join(strings.Fields(xansi.Strip(v)), " ")
 }
 
-func captureNativeOutputForTest(buffer *bytes.Buffer) func() {
-	original := writeNativeOutput
-	writeNativeOutput = func(text string) {
-		_, _ = buffer.WriteString(text)
-	}
-	return func() { writeNativeOutput = original }
-}
-
 func TestNativeScrollbackProgramOutputContract(t *testing.T) {
 	out := &bytes.Buffer{}
-	cleanup := captureNativeOutputForTest(out)
-	defer cleanup()
 	model := NewUIModel(
 		nil,
 		closedRuntimeEvents(),
@@ -108,8 +98,6 @@ func TestNativeScrollbackProgramOutputContract(t *testing.T) {
 
 func TestNativeSubmitAndFlushDoesNotDuplicateStatusLines(t *testing.T) {
 	out := &bytes.Buffer{}
-	cleanup := captureNativeOutputForTest(out)
-	defer cleanup()
 	model := NewUIModel(
 		nil,
 		closedRuntimeEvents(),
@@ -170,8 +158,6 @@ func TestNativeSubmitAndFlushDoesNotDuplicateStatusLines(t *testing.T) {
 
 func TestNativeReplayOutputContainsMarkdownStyling(t *testing.T) {
 	out := &bytes.Buffer{}
-	cleanup := captureNativeOutputForTest(out)
-	defer cleanup()
 	model := NewUIModel(
 		nil,
 		closedRuntimeEvents(),
@@ -212,8 +198,6 @@ func TestNativeReplayOutputContainsMarkdownStyling(t *testing.T) {
 
 func TestNativeStreamingInterleavedWithStatusRedrawStaysCoherent(t *testing.T) {
 	out := &bytes.Buffer{}
-	cleanup := captureNativeOutputForTest(out)
-	defer cleanup()
 	model := NewUIModel(
 		nil,
 		closedRuntimeEvents(),
@@ -264,8 +248,6 @@ func TestNativeStreamingInterleavedWithStatusRedrawStaysCoherent(t *testing.T) {
 
 func TestNativeAssistantDeltaSuppressedInDetailMode(t *testing.T) {
 	out := &bytes.Buffer{}
-	cleanup := captureNativeOutputForTest(out)
-	defer cleanup()
 	model := NewUIModel(
 		nil,
 		closedRuntimeEvents(),
@@ -301,8 +283,6 @@ func TestNativeAssistantDeltaSuppressedInDetailMode(t *testing.T) {
 
 func TestNativeStreamingTinyDeltasRemainContiguous(t *testing.T) {
 	out := &bytes.Buffer{}
-	cleanup := captureNativeOutputForTest(out)
-	defer cleanup()
 	model := NewUIModel(
 		nil,
 		closedRuntimeEvents(),
@@ -341,8 +321,6 @@ func TestNativeStreamingTinyDeltasRemainContiguous(t *testing.T) {
 
 func TestNativeStreamingWithoutNewlineStillVisible(t *testing.T) {
 	out := &bytes.Buffer{}
-	cleanup := captureNativeOutputForTest(out)
-	defer cleanup()
 	model := NewUIModel(
 		nil,
 		closedRuntimeEvents(),

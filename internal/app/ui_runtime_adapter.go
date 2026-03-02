@@ -26,8 +26,6 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 		}
 	case runtime.EventAssistantDeltaReset:
 		m.sawAssistantDelta = false
-		m.nativePendingStreamText = ""
-		m.nativeStreamLineBuffer = ""
 	case runtime.EventCompactionStarted:
 		m.compacting = true
 	case runtime.EventCompactionCompleted, runtime.EventCompactionFailed:
@@ -76,7 +74,6 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 		})
 	}
 	m.transcriptEntries = append(m.transcriptEntries[:0], entries...)
-	m.nativePendingStreamText = ""
 	m.refreshRollbackCandidates()
 	m.forwardToView(tui.SetConversationMsg{
 		Entries:      entries,

@@ -259,37 +259,6 @@ func TestNativeScrollbackIncrementalFlushConcatenationMatchesFullSnapshot(t *tes
 	}
 }
 
-func TestConsumeNativeStreamPrefixHandlesNewlines(t *testing.T) {
-	pending, committed := consumeNativeStreamPrefix("line 1\nline 2\n", "line 1\nline 2\nline 3")
-	if pending != "" {
-		t.Fatalf("expected pending stream fully consumed, got %q", pending)
-	}
-	if committed != "line 3" {
-		t.Fatalf("expected committed remainder to keep unseen suffix, got %q", committed)
-	}
-}
-
-func TestAppendBoundedPendingStreamCapsTail(t *testing.T) {
-	seed := strings.Repeat("a", nativePendingStreamMaxRunes)
-	got := appendBoundedPendingStream(seed, "bbb")
-	if gotLen := len([]rune(got)); gotLen != nativePendingStreamMaxRunes {
-		t.Fatalf("expected bounded pending stream length %d, got %d", nativePendingStreamMaxRunes, gotLen)
-	}
-	if !strings.HasSuffix(got, "bbb") {
-		t.Fatalf("expected bounded stream to keep latest suffix, got %q", got[len(got)-10:])
-	}
-}
-
-func TestAppendBoundedStreamLineCapsTail(t *testing.T) {
-	seed := strings.Repeat("x", nativeStreamLineMaxRunes)
-	got := appendBoundedStreamLine(seed, "yyy")
-	if gotLen := len([]rune(got)); gotLen != nativeStreamLineMaxRunes {
-		t.Fatalf("expected bounded stream line length %d, got %d", nativeStreamLineMaxRunes, gotLen)
-	}
-	if !strings.HasSuffix(got, "yyy") {
-		t.Fatalf("expected bounded stream line to keep latest suffix")
-	}
-}
 
 
 func TestNativeScrollbackFlowIntegration(t *testing.T) {

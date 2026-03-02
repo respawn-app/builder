@@ -198,6 +198,8 @@
 - `alt` mode keeps in-app viewport scrolling behavior.
 - `native` mode prioritizes terminal-native ongoing scrollback/selection by replaying committed transcript history into terminal scrollback and appending only new committed transcript deltas.
 - In `native` mode, non-append transcript mutations (compaction/rollback-style rewrites) rebase the internal formatter state without re-emitting prior history, to avoid duplicate scrollback output.
+- In `native` mode, assistant streaming is rendered in the ongoing live viewport and is not appended to normal-buffer scrollback until commit.
+- Rationale: terminal normal-buffer scrollback cannot be safely rewritten portably; committed replay is the single source of truth for persistent formatted history.
 - `native` mode keeps mouse capture disabled by default to preserve native text selection behavior.
 - Ongoing mode never enables terminal alternate-scroll (`?1007`).
 - Detail transcript overlay uses terminal alt-screen (`?1049`) when `tui_alternate_screen != never`.
