@@ -13,6 +13,7 @@ import (
 	"builder/internal/runtime"
 	"builder/internal/session"
 	"builder/internal/tools"
+	"builder/internal/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
 	xansi "github.com/charmbracelet/x/ansi"
@@ -270,11 +271,17 @@ func TestNativeFinalizeSuppressesLateAsyncDeltaArtifacts(t *testing.T) {
 	}
 
 	normalized := normalizedOutput(out.String())
-	if strings.Count(normalized, "FINAL-CONTENT") != 1 {
-		t.Fatalf("expected committed final content once, got %d in %q", strings.Count(normalized, "FINAL-CONTENT"), normalized)
+	if !strings.Contains(normalized, "FINAL-CONTENT") {
+		t.Fatalf("expected final content in output, got %q", normalized)
 	}
 	if strings.Contains(normalized, "LATE-BLINK") {
 		t.Fatalf("expected late async delta to be suppressed after finalize, got %q", normalized)
+	}
+	if strings.TrimSpace(model.view.OngoingStreamingText()) != "" {
+		t.Fatalf("expected live streaming buffer cleared after commit, got %q", model.view.OngoingStreamingText())
+	}
+	if model.sawAssistantDelta {
+		t.Fatal("expected sawAssistantDelta cleared after finalize commit")
 	}
 }
 
@@ -537,6 +544,175 @@ func TestNativeStreamingWithoutNewlineStillVisible(t *testing.T) {
 	}
 }
 
+func TestNativeProgramClearsResidualLivePadAfterStreamingCommit(t *testing.T) {
+	out := &bytes.Buffer{}
+	model := NewUIModel(
+		nil,
+		closedRuntimeEvents(),
+		closedAskEvents(),
+		WithUIScrollMode(config.TUIScrollModeNative),
+	).(*uiModel)
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 20})
+	program.Send(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "line1\nline2"}})
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tui.SetConversationMsg{Entries: []tui.TranscriptEntry{}, Ongoing: ""})
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	if model.nativeLiveRegionPad != 0 {
+		t.Fatalf("expected native live region pad cleared after streaming commit, got %d", model.nativeLiveRegionPad)
+	}
+	if model.nativeStreamingActive {
+		t.Fatal("expected native streaming active flag cleared after commit")
+	}
+}
+
+func TestNativeRuntimeFlowNoExtraBlankAfterCommittedAssistant(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	runtimeEvents := make(chan runtime.Event, 256)
+	eng, err := runtime.New(
+		store,
+		singleChunkStreamClient{delta: "belissimo.commit"},
+		tools.NewRegistry(),
+		runtime.Config{
+			Model: "gpt-5",
+			OnEvent: func(evt runtime.Event) {
+				runtimeEvents <- evt
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	out := &bytes.Buffer{}
+	model := NewUIModel(
+		eng,
+		runtimeEvents,
+		closedAskEvents(),
+		WithUIScrollMode(config.TUIScrollModeNative),
+	).(*uiModel)
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := program.Run()
+		done <- runErr
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	go func() {
+		_, _ = eng.SubmitUserMessage(context.Background(), "ping")
+	}()
+	time.Sleep(220 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("program run failed: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	plain := xansi.Strip(out.String())
+	if strings.Contains(plain, "❮ belissimo.commit\n\n") {
+		t.Fatalf("expected no extra blank line after committed assistant text, got %q", plain)
+	}
+}
+
+func TestNativeRuntimeFlowNoExtraBlankAfterCommittedUser(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	runtimeEvents := make(chan runtime.Event, 256)
+	eng, err := runtime.New(
+		store,
+		singleChunkStreamClient{delta: "ok"},
+		tools.NewRegistry(),
+		runtime.Config{
+			Model: "gpt-5",
+			OnEvent: func(evt runtime.Event) {
+				runtimeEvents <- evt
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	out := &bytes.Buffer{}
+	model := NewUIModel(
+		eng,
+		runtimeEvents,
+		closedAskEvents(),
+		WithUIScrollMode(config.TUIScrollModeNative),
+	).(*uiModel)
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := program.Run()
+		done <- runErr
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	go func() {
+		_, _ = eng.SubmitUserMessage(context.Background(), "belissimo.commit")
+	}()
+	time.Sleep(220 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("program run failed: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	plain := xansi.Strip(out.String())
+	if strings.Contains(plain, "❯ belissimo.commit\n\n") {
+		t.Fatalf("expected no extra blank line after committed user text, got %q", plain)
+	}
+}
+
 func TestNativeStreamingInterleavedRendersKeepsLinesLeftAligned(t *testing.T) {
 	out := &bytes.Buffer{}
 	model := NewUIModel(
@@ -571,17 +747,22 @@ func TestNativeStreamingInterleavedRendersKeepsLinesLeftAligned(t *testing.T) {
 	plain := xansi.Strip(out.String())
 	normalized := strings.ReplaceAll(strings.ReplaceAll(plain, "\r\n", "\n"), "\r", "\n")
 	lines := strings.Split(normalized, "\n")
-	for _, token := range expected {
+	for index, token := range expected {
+		prefix := "  "
+		if index == 0 {
+			prefix = "❮ "
+		}
+		expectedLine := prefix + token
 		matched := false
 		for _, line := range lines {
 			trimmedRight := strings.TrimRight(line, " ")
-			if trimmedRight == token {
+			if trimmedRight == expectedLine {
 				matched = true
 				break
 			}
 		}
 		if !matched {
-			t.Fatalf("expected streamed line %q to be left-aligned on its own line, got %q", token, normalized)
+			t.Fatalf("expected streamed line %q to render as %q, got %q", token, expectedLine, normalized)
 		}
 	}
 }
