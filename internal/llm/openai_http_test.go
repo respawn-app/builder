@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"builder/internal/tools"
+
 	"github.com/openai/openai-go/v3/responses"
 )
 
@@ -144,11 +146,65 @@ func TestBuildResponsesInput_ToolOutputSupportsStructuredInputImageItems(t *test
 	}
 }
 
-func TestBuildResponsesInput_CanonicalToolOutputSupportsStructuredInputFileItems(t *testing.T) {
+func TestBuildResponsesInput_CanonicalToolOutputPromotesStructuredInputFileItems(t *testing.T) {
 	items := buildResponsesInput(nil, []ResponseItem{
 		{
 			Type:   ResponseItemTypeFunctionCallOutput,
 			CallID: "call_1",
+			Name:   string(tools.ToolViewImage),
+			Output: json.RawMessage(`[{"type":"input_file","file_data":"Zm9v","filename":"doc.pdf"}]`),
+		},
+	})
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+
+	jsonItems := mustMarshalItems(t, items)
+	if got := jsonItems[0]["type"]; got != "function_call_output" {
+		t.Fatalf("expected function_call_output item, got %#v", got)
+	}
+	if output, ok := jsonItems[0]["output"].([]any); ok {
+		for _, partRaw := range output {
+			part, partOK := partRaw.(map[string]any)
+			if !partOK {
+				continue
+			}
+			if got := part["type"]; got == "input_file" {
+				t.Fatalf("did not expect input_file inside function_call_output.output after promotion")
+			}
+		}
+	}
+	if output, ok := jsonItems[0]["output"].(string); !ok || strings.TrimSpace(output) == "" {
+		t.Fatalf("expected non-empty string output for promoted file item, got %#v", jsonItems[0]["output"])
+	}
+	if got := jsonItems[1]["role"]; got != "user" {
+		t.Fatalf("expected promoted user role, got %#v", got)
+	}
+	content, ok := jsonItems[1]["content"].([]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("expected one promoted content item, got %#v", jsonItems[1]["content"])
+	}
+	part, ok := content[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected promoted content object, got %#v", content[0])
+	}
+	if got := part["type"]; got != "input_file" {
+		t.Fatalf("expected promoted input_file content, got %#v", got)
+	}
+	if got := part["file_data"]; got != "Zm9v" {
+		t.Fatalf("unexpected file_data in promoted content: %#v", got)
+	}
+	if got := part["filename"]; got != "doc.pdf" {
+		t.Fatalf("unexpected filename in promoted content: %#v", got)
+	}
+}
+
+func TestBuildResponsesInput_CanonicalNonViewImageToolOutputKeepsStructuredInputFileItems(t *testing.T) {
+	items := buildResponsesInput(nil, []ResponseItem{
+		{
+			Type:   ResponseItemTypeFunctionCallOutput,
+			CallID: "call_1",
+			Name:   string(tools.ToolShell),
 			Output: json.RawMessage(`[{"type":"input_file","file_data":"Zm9v","filename":"doc.pdf"}]`),
 		},
 	})
@@ -170,12 +226,6 @@ func TestBuildResponsesInput_CanonicalToolOutputSupportsStructuredInputFileItems
 	}
 	if got := part["type"]; got != "input_file" {
 		t.Fatalf("expected input_file output content, got %#v", got)
-	}
-	if got := part["file_data"]; got != "Zm9v" {
-		t.Fatalf("unexpected file_data in structured output: %#v", got)
-	}
-	if got := part["filename"]; got != "doc.pdf" {
-		t.Fatalf("unexpected filename in structured output: %#v", got)
 	}
 }
 

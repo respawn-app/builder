@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"builder/internal/shared/textutil"
+	"builder/internal/tools"
 
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -397,7 +398,7 @@ func buildResponsesInputFromMessages(messages []Message) []responses.ResponseInp
 			if strings.TrimSpace(msg.ToolCallID) == "" {
 				continue
 			}
-			items = append(items, functionCallOutputInputItem(msg.ToolCallID, normalizeToolInput(msg.Content)))
+			items = append(items, functionCallOutputInputItems(msg.ToolCallID, msg.Name, normalizeToolInput(msg.Content))...)
 		case RoleAssistant:
 			if strings.TrimSpace(msg.Content) != "" {
 				items = append(items, messageInput(string(msg.Role), msg.Content))
@@ -453,7 +454,7 @@ func buildResponsesInputFromItems(canonical []ResponseItem) []responses.Response
 			if callID == "" {
 				continue
 			}
-			items = append(items, functionCallOutputInputItem(callID, item.Output))
+			items = append(items, functionCallOutputInputItems(callID, item.Name, item.Output)...)
 		case ResponseItemTypeReasoning:
 			id := strings.TrimSpace(item.ID)
 			if id == "" {
@@ -1025,11 +1026,71 @@ func outputStringFromRaw(raw json.RawMessage) string {
 	return trimmed
 }
 
-func functionCallOutputInputItem(callID string, raw json.RawMessage) responses.ResponseInputItemUnionParam {
+func functionCallOutputInputItems(callID string, toolName string, raw json.RawMessage) []responses.ResponseInputItemUnionParam {
 	if contentItems, ok := functionCallOutputContentItemsFromRaw(raw); ok {
-		return responses.ResponseInputItemParamOfFunctionCallOutput(callID, contentItems)
+		if strings.TrimSpace(toolName) == string(tools.ToolViewImage) {
+			if promotedInputMessage, promoted := promoteFunctionOutputFilesToInputMessage(contentItems); promoted {
+				return []responses.ResponseInputItemUnionParam{
+					responses.ResponseInputItemParamOfFunctionCallOutput(callID, "attached file content"),
+					responses.ResponseInputItemParamOfInputMessage(promotedInputMessage, string(RoleUser)),
+				}
+			}
+		}
+		return []responses.ResponseInputItemUnionParam{responses.ResponseInputItemParamOfFunctionCallOutput(callID, contentItems)}
 	}
-	return responses.ResponseInputItemParamOfFunctionCallOutput(callID, outputStringFromRaw(raw))
+	return []responses.ResponseInputItemUnionParam{responses.ResponseInputItemParamOfFunctionCallOutput(callID, outputStringFromRaw(raw))}
+}
+
+func promoteFunctionOutputFilesToInputMessage(contentItems responses.ResponseFunctionCallOutputItemListParam) (responses.ResponseInputMessageContentListParam, bool) {
+	out := make(responses.ResponseInputMessageContentListParam, 0, len(contentItems))
+	hasInputFile := false
+
+	for _, item := range contentItems {
+		switch {
+		case item.OfInputText != nil:
+			out = append(out, responses.ResponseInputContentParamOfInputText(item.OfInputText.Text))
+		case item.OfInputImage != nil:
+			image := responses.ResponseInputImageParam{}
+			detail := responses.ResponseInputImageDetailAuto
+			switch item.OfInputImage.Detail {
+			case responses.ResponseInputImageContentDetailLow:
+				detail = responses.ResponseInputImageDetailLow
+			case responses.ResponseInputImageContentDetailHigh:
+				detail = responses.ResponseInputImageDetailHigh
+			case responses.ResponseInputImageContentDetailAuto:
+				detail = responses.ResponseInputImageDetailAuto
+			}
+			image.Detail = detail
+			if item.OfInputImage.ImageURL.Valid() {
+				image.ImageURL = item.OfInputImage.ImageURL
+			}
+			if item.OfInputImage.FileID.Valid() {
+				image.FileID = item.OfInputImage.FileID
+			}
+			out = append(out, responses.ResponseInputContentUnionParam{OfInputImage: &image})
+		case item.OfInputFile != nil:
+			hasInputFile = true
+			file := responses.ResponseInputFileParam{}
+			if item.OfInputFile.FileData.Valid() {
+				file.FileData = item.OfInputFile.FileData
+			}
+			if item.OfInputFile.FileID.Valid() {
+				file.FileID = item.OfInputFile.FileID
+			}
+			if item.OfInputFile.FileURL.Valid() {
+				file.FileURL = item.OfInputFile.FileURL
+			}
+			if item.OfInputFile.Filename.Valid() {
+				file.Filename = item.OfInputFile.Filename
+			}
+			out = append(out, responses.ResponseInputContentUnionParam{OfInputFile: &file})
+		}
+	}
+
+	if !hasInputFile || len(out) == 0 {
+		return nil, false
+	}
+	return out, true
 }
 
 func functionCallOutputContentItemsFromRaw(raw json.RawMessage) (responses.ResponseFunctionCallOutputItemListParam, bool) {
