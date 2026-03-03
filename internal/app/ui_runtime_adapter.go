@@ -38,6 +38,9 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 		m.clearReviewerState()
 	case runtime.EventUserMessageFlushed:
 		a.onUserMessageFlushed(evt.UserMessage)
+		if m.usesNativeScrollback() {
+			return a.syncConversationFromEngine()
+		}
 	}
 	return nil
 }
