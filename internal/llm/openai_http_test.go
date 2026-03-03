@@ -147,12 +147,13 @@ func TestBuildResponsesInput_ToolOutputSupportsStructuredInputImageItems(t *test
 }
 
 func TestBuildResponsesInput_CanonicalToolOutputPromotesStructuredInputFileItems(t *testing.T) {
+	const pdfDataURL = "data:application/pdf;base64,Zm9v"
 	items := buildResponsesInput(nil, []ResponseItem{
 		{
 			Type:   ResponseItemTypeFunctionCallOutput,
 			CallID: "call_1",
 			Name:   string(tools.ToolViewImage),
-			Output: json.RawMessage(`[{"type":"input_file","file_data":"Zm9v","filename":"doc.pdf"}]`),
+			Output: json.RawMessage(`[{"type":"input_file","file_data":"data:application/pdf;base64,Zm9v","filename":"doc.pdf"}]`),
 		},
 	})
 	if len(items) != 2 {
@@ -191,11 +192,54 @@ func TestBuildResponsesInput_CanonicalToolOutputPromotesStructuredInputFileItems
 	if got := part["type"]; got != "input_file" {
 		t.Fatalf("expected promoted input_file content, got %#v", got)
 	}
-	if got := part["file_data"]; got != "Zm9v" {
+	if got := part["file_data"]; got != pdfDataURL {
 		t.Fatalf("unexpected file_data in promoted content: %#v", got)
 	}
 	if got := part["filename"]; got != "doc.pdf" {
 		t.Fatalf("unexpected filename in promoted content: %#v", got)
+	}
+}
+
+func TestBuildResponsesInput_MessageToolOutputPromotesPDFToInputMessage(t *testing.T) {
+	const pdfDataURL = "data:application/pdf;base64,Zm9v"
+	items := buildResponsesInput([]Message{
+		{
+			Role:       RoleTool,
+			ToolCallID: "call_1",
+			Name:       string(tools.ToolViewImage),
+			Content:    `[{"type":"input_file","file_data":"data:application/pdf;base64,Zm9v","filename":"doc.pdf"}]`,
+		},
+	}, nil)
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+
+	jsonItems := mustMarshalItems(t, items)
+	if got := jsonItems[0]["type"]; got != "function_call_output" {
+		t.Fatalf("expected function_call_output item, got %#v", got)
+	}
+	if _, ok := jsonItems[0]["output"].([]any); ok {
+		t.Fatalf("expected string output for promoted view_image PDF, got array")
+	}
+	if got := jsonItems[1]["role"]; got != "user" {
+		t.Fatalf("expected promoted user role, got %#v", got)
+	}
+	content, ok := jsonItems[1]["content"].([]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("expected one promoted content item, got %#v", jsonItems[1]["content"])
+	}
+	part, ok := content[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected promoted content object, got %#v", content[0])
+	}
+	if got := part["type"]; got != "input_file" {
+		t.Fatalf("expected promoted input_file content, got %#v", got)
+	}
+	if got := part["file_data"]; got != pdfDataURL {
+		t.Fatalf("unexpected promoted file_data: %#v", got)
+	}
+	if got := part["filename"]; got != "doc.pdf" {
+		t.Fatalf("unexpected promoted filename: %#v", got)
 	}
 }
 

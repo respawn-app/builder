@@ -128,9 +128,10 @@ func buildContentItemsForFile(path, mimeType string, data []byte) ([]contentItem
 		if strings.TrimSpace(filename) == "" {
 			filename = "document.pdf"
 		}
+		encoded := base64.StdEncoding.EncodeToString(data)
 		return []contentItem{{
 			Type:     "input_file",
-			FileData: base64.StdEncoding.EncodeToString(data),
+			FileData: "data:application/pdf;base64," + encoded,
 			Filename: filename,
 		}}, nil
 	}
