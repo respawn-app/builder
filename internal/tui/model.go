@@ -63,8 +63,9 @@ type SetConversationMsg struct {
 }
 
 type SetSelectedTranscriptEntryMsg struct {
-	EntryIndex int
-	Active     bool
+	EntryIndex            int
+	Active                bool
+	RefreshDetailSnapshot bool
 }
 
 type FocusTranscriptEntryMsg struct {
@@ -121,21 +122,29 @@ type Model struct {
 	selectedTranscriptEntry  int
 	selectedTranscriptActive bool
 
-	detailSnapshot   string
-	detailLines      []string
-	ongoingSnapshot  string
-	ongoingLineCache []string
-	ongoingDirty     bool
-	ongoingError     string
-	theme            string
-	md               *markdownRenderer
-	code             *codeRenderer
+	detailSnapshot         string
+	detailLines            []string
+	detailLineEntryIndices []int
+	detailEntryLineRanges  []lineRange
+	detailDirty            bool
+	ongoingSnapshot        string
+	ongoingLineCache       []string
+	ongoingDirty           bool
+	ongoingError           string
+	theme                  string
+	md                     *markdownRenderer
+	code                   *codeRenderer
 }
 
 type ongoingBlock struct {
 	role       string
 	lines      []string
 	entryIndex int
+}
+
+type lineRange struct {
+	Start int
+	End   int
 }
 
 func NewModel(opts ...Option) Model {
@@ -145,6 +154,7 @@ func NewModel(opts ...Option) Model {
 		viewportWidth: 120,
 		theme:         "dark",
 		ongoingDirty:  true,
+		detailDirty:   true,
 	}
 	for _, opt := range opts {
 		opt(&m)
@@ -166,6 +176,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	shouldAutoFollowOngoing := false
 	viewportChanged := false
 	ongoingChanged := false
+	detailChanged := false
+	forceDetailRefresh := false
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -209,6 +221,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.viewportWidth != msg.Width {
 				m.viewportWidth = msg.Width
 				ongoingChanged = true
+				detailChanged = true
+				if m.mode == ModeDetail {
+					forceDetailRefresh = true
+				}
 			}
 		}
 	case AppendTranscriptMsg:
@@ -225,6 +241,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 		shouldAutoFollowOngoing = true
 		ongoingChanged = true
+		detailChanged = true
 	case SetConversationMsg:
 		entries := make([]TranscriptEntry, len(msg.Entries))
 		copy(entries, msg.Entries)
@@ -240,21 +257,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		shouldAutoFollowOngoing = true
 		ongoingChanged = true
+		detailChanged = true
 	case SetSelectedTranscriptEntryMsg:
 		m.selectedTranscriptEntry = msg.EntryIndex
 		m.selectedTranscriptActive = msg.Active
 		ongoingChanged = true
-	case FocusTranscriptEntryMsg:
-		if m.mode != ModeOngoing {
-			break
+		if m.mode == ModeDetail && msg.RefreshDetailSnapshot {
+			detailChanged = true
+			forceDetailRefresh = true
 		}
-		if start, end, ok := m.ongoingLineRangeForEntry(msg.EntryIndex); ok {
-			target := start
-			if msg.Center {
-				midpoint := (start + end) / 2
-				target = midpoint - m.viewportLines/2
+	case FocusTranscriptEntryMsg:
+		switch m.mode {
+		case ModeOngoing:
+			if start, end, ok := m.ongoingLineRangeForEntry(msg.EntryIndex); ok {
+				target := start
+				if msg.Center {
+					midpoint := (start + end) / 2
+					target = midpoint - m.viewportLines/2
+				}
+				m.ongoingScroll = clamp(target, 0, m.maxOngoingScroll())
 			}
-			m.ongoingScroll = clamp(target, 0, m.maxOngoingScroll())
+		case ModeDetail:
+			if m.detailDirty {
+				m.rebuildDetailSnapshot()
+			}
+			if start, end, ok := m.detailLineRangeForEntry(msg.EntryIndex); ok {
+				target := start
+				if msg.Center {
+					midpoint := (start + end) / 2
+					target = midpoint - m.viewportLines/2
+				}
+				m.detailScroll = clamp(target, 0, m.maxDetailScroll())
+			}
 		}
 	case SetOngoingScrollMsg:
 		m.ongoingScroll = clamp(msg.Scroll, 0, m.maxOngoingScroll())
@@ -262,10 +296,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ongoing += msg.Delta
 		shouldAutoFollowOngoing = true
 		ongoingChanged = true
+		detailChanged = true
 	case ClearOngoingAssistantMsg:
 		m.ongoing = ""
 		m.ongoingScroll = 0
 		ongoingChanged = true
+		detailChanged = true
 	case CommitAssistantMsg:
 		if m.ongoing != "" {
 			m.transcript = append(m.transcript, TranscriptEntry{
@@ -275,6 +311,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ongoing = ""
 			shouldAutoFollowOngoing = true
 			ongoingChanged = true
+			detailChanged = true
 		}
 	case SetOngoingErrorMsg:
 		m.ongoingError = FormatOngoingError(msg.Err)
@@ -284,6 +321,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if ongoingChanged {
 		m.invalidateOngoingSnapshot()
+	}
+	if detailChanged {
+		m.invalidateDetailSnapshot()
+	}
+	if forceDetailRefresh {
+		m.rebuildDetailSnapshot()
 	}
 	if m.ongoingDirty && m.mode == ModeOngoing {
 		m.rebuildOngoingSnapshot()
@@ -357,7 +400,9 @@ func (m Model) toggleMode() Model {
 	if m.mode == ModeOngoing {
 		m.mode = ModeDetail
 		m.snapOngoingOnViewportResize = false
-		m = m.withDetailSnapshot(m.renderFlatDetailTranscript())
+		if m.detailDirty || len(m.detailLines) == 0 {
+			m.rebuildDetailSnapshot()
+		}
 		m.detailScroll = m.maxDetailScroll()
 		return m
 	}
@@ -441,6 +486,9 @@ func (m *Model) rebuildOngoingSnapshot() {
 }
 
 func (m Model) renderDetailSnapshot() string {
+	if m.detailDirty && len(m.detailLines) == 0 {
+		m.rebuildDetailSnapshot()
+	}
 	lines := m.detailSnapshotLines()
 	if len(lines) == 0 {
 		lines = []string{""}
@@ -451,8 +499,21 @@ func (m Model) renderDetailSnapshot() string {
 		end = len(lines)
 	}
 
+	selectedEntry := -1
+	if m.selectedTranscriptActive && m.selectedTranscriptEntry >= 0 && m.selectedTranscriptEntry < len(m.transcript) {
+		if strings.TrimSpace(m.transcript[m.selectedTranscriptEntry].Role) == "user" {
+			selectedEntry = m.selectedTranscriptEntry
+		}
+	}
+	selectedStyle := lipgloss.NewStyle().Background(lipgloss.Color("15")).Foreground(lipgloss.Color("0"))
 	out := make([]string, 0, m.viewportLines)
-	out = append(out, lines[start:end]...)
+	for i := start; i < end; i++ {
+		line := lines[i]
+		if selectedEntry >= 0 && i < len(m.detailLineEntryIndices) && m.detailLineEntryIndices[i] == selectedEntry {
+			line = selectedStyle.Render(line)
+		}
+		out = append(out, line)
+	}
 	for len(out) < m.viewportLines {
 		out = append(out, "")
 	}
@@ -466,21 +527,76 @@ func (m Model) detailSnapshotLines() []string {
 	return splitLines(m.detailSnapshot)
 }
 
-func (m Model) withDetailSnapshot(snapshot string) Model {
-	m.detailSnapshot = snapshot
-	m.detailLines = splitLines(snapshot)
-	return m
+func (m *Model) invalidateDetailSnapshot() {
+	m.detailDirty = true
+}
+
+func (m *Model) rebuildDetailSnapshot() {
+	blocks := m.buildDetailBlocks(true, false)
+	if len(blocks) == 0 {
+		m.detailSnapshot = ""
+		m.detailLines = []string{""}
+		m.detailLineEntryIndices = []int{-1}
+		m.detailEntryLineRanges = nil
+		m.detailDirty = false
+		return
+	}
+	lines := make([]string, 0, len(blocks)*2)
+	lineOwners := make([]int, 0, len(blocks)*2)
+	ranges := make([]lineRange, len(m.transcript))
+	for i := range ranges {
+		ranges[i] = lineRange{Start: -1, End: -1}
+	}
+	for idx, block := range blocks {
+		if idx > 0 {
+			lines = append(lines, detailDivider())
+			lineOwners = append(lineOwners, -1)
+		}
+		start := len(lines)
+		lines = append(lines, block.lines...)
+		for range block.lines {
+			lineOwners = append(lineOwners, block.entryIndex)
+		}
+		if block.entryIndex < 0 || block.entryIndex >= len(ranges) {
+			continue
+		}
+		if ranges[block.entryIndex].Start < 0 {
+			ranges[block.entryIndex] = lineRange{Start: start, End: len(lines) - 1}
+			continue
+		}
+		ranges[block.entryIndex] = lineRange{Start: ranges[block.entryIndex].Start, End: len(lines) - 1}
+	}
+	m.detailSnapshot = strings.Join(lines, "\n")
+	m.detailLines = lines
+	m.detailLineEntryIndices = lineOwners
+	m.detailEntryLineRanges = ranges
+	m.detailDirty = false
 }
 
 func (m Model) renderFlatDetailTranscript() string {
-	blocks := make([][]string, 0, len(m.transcript)+1)
+	blocks := m.buildDetailBlocks(true, true)
+	if len(blocks) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(blocks)*2)
+	for idx, block := range blocks {
+		if idx > 0 {
+			lines = append(lines, detailDivider())
+		}
+		lines = append(lines, block.lines...)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) buildDetailBlocks(includeStreaming bool, applySelection bool) []ongoingBlock {
+	blocks := make([]ongoingBlock, 0, len(m.transcript)+1)
 	consumedResults := make(map[int]struct{})
 	for i := 0; i < len(m.transcript); i++ {
 		if _, consumed := consumedResults[i]; consumed {
 			continue
 		}
 		if thinkingBlock, ok := m.trailingThinkingBlockBeforeEntry(m.transcript, i, consumedResults); ok {
-			blocks = append(blocks, thinkingBlock)
+			blocks = append(blocks, ongoingBlock{role: "reasoning", lines: thinkingBlock, entryIndex: -1})
 		}
 		entry := m.transcript[i]
 		role := m.entryRole(entry)
@@ -499,7 +615,11 @@ func (m Model) renderFlatDetailTranscript() string {
 						consumedResults[resultIdx] = struct{}{}
 					}
 				}
-				blocks = append(blocks, m.flattenAskQuestionEntry(blockRole, question, suggestions, answer, true))
+				blocks = append(blocks, ongoingBlock{
+					role:       blockRole,
+					lines:      m.flattenAskQuestionEntry(blockRole, question, suggestions, answer, true),
+					entryIndex: i,
+				})
 				continue
 			} else if isShellToolCall(entry.ToolCall, entry.Text) {
 				blockRole = "tool_shell"
@@ -520,9 +640,17 @@ func (m Model) renderFlatDetailTranscript() string {
 				blockRole = toolBlockRoleFromResult(nextRole, blockRole)
 				consumedResults[resultIdx] = struct{}{}
 			}
-			blocks = append(blocks, m.flattenEntryWithMeta(blockRole, combined, false, entry.ToolCall))
+			blocks = append(blocks, ongoingBlock{
+				role:       blockRole,
+				lines:      m.flattenEntryWithMeta(blockRole, combined, false, entry.ToolCall),
+				entryIndex: i,
+			})
 		case "tool_result", "tool_result_ok", "tool_result_error":
-			blocks = append(blocks, m.flattenEntry(toolBlockRoleFromResult(role, "tool"), entry.Text))
+			blocks = append(blocks, ongoingBlock{
+				role:       toolBlockRoleFromResult(role, "tool"),
+				lines:      m.flattenEntry(toolBlockRoleFromResult(role, "tool"), entry.Text),
+				entryIndex: i,
+			})
 		default:
 			if isThinkingRole(role) {
 				combined := strings.TrimSpace(entry.Text)
@@ -541,27 +669,32 @@ func (m Model) renderFlatDetailTranscript() string {
 					}
 					consumedResults[j] = struct{}{}
 				}
-				blocks = append(blocks, m.flattenEntry(role, combined))
+				blocks = append(blocks, ongoingBlock{
+					role:       role,
+					lines:      m.flattenEntry(role, combined),
+					entryIndex: i,
+				})
 				continue
 			}
 			block := m.flattenEntry(role, entry.Text)
-			blocks = append(blocks, m.maybeSelectedUserBlock(i, role, block))
+			if applySelection {
+				block = m.maybeSelectedUserBlock(i, role, block)
+			}
+			blocks = append(blocks, ongoingBlock{
+				role:       role,
+				lines:      block,
+				entryIndex: i,
+			})
 		}
 	}
-	if m.ongoing != "" {
-		blocks = append(blocks, m.flattenEntry("assistant", m.ongoing))
+	if includeStreaming && m.ongoing != "" {
+		blocks = append(blocks, ongoingBlock{
+			role:       "assistant",
+			lines:      m.flattenEntry("assistant", m.ongoing),
+			entryIndex: -1,
+		})
 	}
-	if len(blocks) == 0 {
-		return ""
-	}
-	lines := make([]string, 0, len(blocks)*2)
-	for idx, block := range blocks {
-		if idx > 0 {
-			lines = append(lines, detailDivider())
-		}
-		lines = append(lines, block...)
-	}
-	return strings.Join(lines, "\n")
+	return blocks
 }
 
 func (m Model) trailingThinkingBlockBeforeEntry(entries []TranscriptEntry, idx int, consumed map[int]struct{}) ([]string, bool) {
@@ -732,6 +865,33 @@ func (m Model) ongoingLineRangeForEntry(entryIndex int) (int, int, bool) {
 	lineOffset := 0
 	for idx, block := range blocks {
 		if idx > 0 && ongoingDividerGroup(blocks[idx-1].role) != ongoingDividerGroup(block.role) {
+			lineOffset++
+		}
+		start := lineOffset
+		end := lineOffset + len(block.lines) - 1
+		if block.entryIndex == entryIndex {
+			return start, end, true
+		}
+		lineOffset += len(block.lines)
+	}
+	return 0, 0, false
+}
+
+func (m Model) detailLineRangeForEntry(entryIndex int) (int, int, bool) {
+	if entryIndex < 0 {
+		return 0, 0, false
+	}
+	if entryIndex < len(m.detailEntryLineRanges) {
+		rangeForEntry := m.detailEntryLineRanges[entryIndex]
+		if rangeForEntry.Start >= 0 && rangeForEntry.End >= rangeForEntry.Start {
+			return rangeForEntry.Start, rangeForEntry.End, true
+		}
+		return 0, 0, false
+	}
+	blocks := m.buildDetailBlocks(true, false)
+	lineOffset := 0
+	for idx, block := range blocks {
+		if idx > 0 {
 			lineOffset++
 		}
 		start := lineOffset

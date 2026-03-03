@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	goruntime "runtime"
 	"strings"
 	"testing"
 
@@ -135,6 +136,22 @@ func TestUnknownCSICtrlBackspaceDeletesCurrentLine(t *testing.T) {
 
 	if updated.input != "one\nthree" {
 		t.Fatalf("expected ctrl+backspace CSI to remove current line, got %q", updated.input)
+	}
+	if updated.inputCursor != 4 {
+		t.Fatalf("expected cursor at start of joined line after delete, got %d", updated.inputCursor)
+	}
+}
+
+func TestUnknownCSICtrlBackspaceWithSubtypeDeletesCurrentLine(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "one\ntwo\nthree"
+	m.inputCursor = 5 // inside "two"
+
+	next, _ := m.Update(testUnknownCSISequence{rendered: "?CSI[49 50 55 59 53 58 51 117]?"}) // 127;5:3u
+	updated := next.(*uiModel)
+
+	if updated.input != "one\nthree" {
+		t.Fatalf("expected ctrl+backspace CSI with subtype to remove current line, got %q", updated.input)
 	}
 	if updated.inputCursor != 4 {
 		t.Fatalf("expected cursor at start of joined line after delete, got %d", updated.inputCursor)
@@ -479,12 +496,75 @@ func TestRollbackSelectionCancelRestoresPriorOngoingScroll(t *testing.T) {
 	}
 }
 
-func TestRollbackTransitionsDoNotClearScreenInNativeMode(t *testing.T) {
+func TestRollbackTransitionsUseDetailOverlayInNativeMode(t *testing.T) {
 	m := NewUIModel(
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
 		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "u1"}, {Role: "assistant", Text: "a1"}, {Role: "user", Text: "u2"}}),
+	).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 10
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := next.(*uiModel)
+	next, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if !updated.rollbackMode {
+		t.Fatal("expected rollback mode after double esc")
+	}
+	if updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected rollback selection in detail overlay, got mode %q", updated.view.Mode())
+	}
+	if !updated.rollbackOverlayPushed {
+		t.Fatal("expected rollback overlay to be pushed in native mode")
+	}
+	if cmd == nil {
+		t.Fatal("expected native rollback entry to emit detail overlay transition command")
+	}
+
+	selected := updated.rollbackCandidates[updated.rollbackSelection].Text
+	lines := strings.Split(stripANSIAndTrimRight(updated.View()), "\n")
+	selectedLine := -1
+	for idx, line := range lines {
+		if strings.Contains(line, selected) {
+			selectedLine = idx
+			break
+		}
+	}
+	if selectedLine < 0 {
+		t.Fatalf("expected selected rollback message %q visible in detail overlay", selected)
+	}
+	mid := len(lines) / 2
+	if diff := absInt(selectedLine - mid); diff > 2 {
+		t.Fatalf("expected selected rollback message near overlay center, line=%d mid=%d", selectedLine, mid)
+	}
+
+	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if updated.rollbackMode {
+		t.Fatal("expected rollback mode canceled")
+	}
+	if updated.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected cancel to return to ongoing mode, got %q", updated.view.Mode())
+	}
+	if updated.rollbackOverlayPushed {
+		t.Fatal("expected rollback overlay state cleared after cancel")
+	}
+	if cmd == nil {
+		t.Fatal("expected native rollback cancel to emit detail overlay exit command")
+	}
+}
+
+func TestNativeRollbackOverlayUsesClearScreenWhenAltScreenNever(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "u1"}, {Role: "assistant", Text: "a1"}, {Role: "user", Text: "u2"}}),
 	).(*uiModel)
 
@@ -495,8 +575,11 @@ func TestRollbackTransitionsDoNotClearScreenInNativeMode(t *testing.T) {
 	if !updated.rollbackMode {
 		t.Fatal("expected rollback mode after double esc")
 	}
-	if cmd != nil {
-		t.Fatal("expected no clear-screen command when entering rollback in native mode")
+	if updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected detail overlay mode, got %q", updated.view.Mode())
+	}
+	if cmd == nil {
+		t.Fatal("expected explicit clear-screen command when native rollback overlay enters with alt-screen disabled")
 	}
 
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -504,8 +587,161 @@ func TestRollbackTransitionsDoNotClearScreenInNativeMode(t *testing.T) {
 	if updated.rollbackMode {
 		t.Fatal("expected rollback mode canceled")
 	}
-	if cmd != nil {
-		t.Fatal("expected no clear-screen command when canceling rollback in native mode")
+	if updated.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected return to ongoing mode, got %q", updated.view.Mode())
+	}
+	if cmd == nil {
+		t.Fatal("expected explicit clear-screen command when native rollback overlay exits with alt-screen disabled")
+	}
+}
+
+func TestNativeRollbackOverlayFullSelectionFlowPreservesHistory(t *testing.T) {
+	entries := make([]UITranscriptEntry, 0, 200)
+	for i := 0; i < 100; i++ {
+		entries = append(entries, UITranscriptEntry{Role: "user", Text: fmt.Sprintf("u-%03d", i)})
+		entries = append(entries, UITranscriptEntry{Role: "assistant", Text: fmt.Sprintf("a-%03d", i)})
+	}
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript(entries),
+	).(*uiModel)
+
+	next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 14})
+	updated := next.(*uiModel)
+	if startupCmd == nil {
+		t.Fatal("expected native startup replay command")
+	}
+	committedBefore := stripANSIAndTrimRight(updated.view.OngoingCommittedSnapshot())
+
+	assertSelectionCentered := func(model *uiModel) {
+		t.Helper()
+		selected := model.rollbackCandidates[model.rollbackSelection].Text
+		lines := strings.Split(stripANSIAndTrimRight(model.View()), "\n")
+		selectedLine := -1
+		for idx, line := range lines {
+			if strings.Contains(line, selected) {
+				selectedLine = idx
+				break
+			}
+		}
+		if selectedLine < 0 {
+			t.Fatalf("expected selected rollback message %q visible in overlay", selected)
+		}
+		mid := len(lines) / 2
+		if diff := absInt(selectedLine - mid); diff > 3 {
+			t.Fatalf("expected selected rollback message near overlay center, line=%d mid=%d", selectedLine, mid)
+		}
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if !updated.rollbackMode || updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected rollback selection detail overlay, mode=%q rollback=%t", updated.view.Mode(), updated.rollbackMode)
+	}
+	assertSelectionCentered(updated)
+
+	for i := 0; i < 8; i++ {
+		next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+		updated = next.(*uiModel)
+		assertSelectionCentered(updated)
+	}
+	for i := 0; i < 3; i++ {
+		next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+		updated = next.(*uiModel)
+		assertSelectionCentered(updated)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if !updated.rollbackEditing || updated.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected rollback editing in ongoing mode, mode=%q editing=%t", updated.view.Mode(), updated.rollbackEditing)
+	}
+
+	updated.input = ""
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if !updated.rollbackMode || updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected esc from empty edit input to return to rollback overlay, mode=%q rollback=%t", updated.view.Mode(), updated.rollbackMode)
+	}
+	assertSelectionCentered(updated)
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if updated.rollbackMode || updated.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected final esc to cancel rollback overlay back to ongoing, mode=%q rollback=%t", updated.view.Mode(), updated.rollbackMode)
+	}
+
+	committedAfter := stripANSIAndTrimRight(updated.view.OngoingCommittedSnapshot())
+	if committedAfter != committedBefore {
+		t.Fatal("expected committed history unchanged after rollback overlay cancel chain")
+	}
+	if cmd := updated.syncNativeHistoryFromTranscript(); cmd != nil {
+		t.Fatalf("expected no native replay delta after rollback overlay cancel chain, got %T", cmd())
+	}
+}
+
+func TestNativeRollbackEditCancelPreservesCommittedHistory(t *testing.T) {
+	entries := make([]UITranscriptEntry, 0, 80)
+	for i := 0; i < 40; i++ {
+		entries = append(entries, UITranscriptEntry{Role: "user", Text: fmt.Sprintf("u-%d", i)})
+		entries = append(entries, UITranscriptEntry{Role: "assistant", Text: fmt.Sprintf("a-%d", i)})
+	}
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript(entries),
+	).(*uiModel)
+
+	next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 14})
+	updated := next.(*uiModel)
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	originalCommitted := stripANSIAndTrimRight(updated.view.OngoingCommittedSnapshot())
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if !updated.rollbackMode || updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected native rollback selection in detail overlay, mode=%q rollback=%t", updated.view.Mode(), updated.rollbackMode)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if !updated.rollbackEditing || updated.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected rollback editing in ongoing mode, mode=%q editing=%t", updated.view.Mode(), updated.rollbackEditing)
+	}
+
+	updated.input = ""
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if !updated.rollbackMode || updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected esc from empty edit input to restore rollback selection overlay, mode=%q rollback=%t", updated.view.Mode(), updated.rollbackMode)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if updated.rollbackMode {
+		t.Fatal("expected rollback mode canceled")
+	}
+	if updated.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected ongoing mode after cancel chain, got %q", updated.view.Mode())
+	}
+
+	afterCommitted := stripANSIAndTrimRight(updated.view.OngoingCommittedSnapshot())
+	if afterCommitted != originalCommitted {
+		t.Fatalf("expected committed history preserved after rollback cancel chain")
+	}
+	if cmd := updated.syncNativeHistoryFromTranscript(); cmd != nil {
+		t.Fatalf("expected no native replay delta after rollback cancel chain, got %T", cmd())
 	}
 }
 
@@ -820,6 +1056,44 @@ func TestMainInputCmdBackspaceDeletesCurrentLine(t *testing.T) {
 	}
 	if updated.inputCursor != 7 {
 		t.Fatalf("expected cursor at end of remaining text, got %d", updated.inputCursor)
+	}
+}
+
+func TestMainInputCtrlUDeletesCurrentLine(t *testing.T) {
+	if goruntime.GOOS != "darwin" {
+		t.Skip("ctrl+u alias for cmd+backspace is darwin-only")
+	}
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "top\ncurrent\nbottom"
+	m.inputCursor = 8 // inside "current"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	updated := next.(*uiModel)
+
+	if updated.input != "top\nbottom" {
+		t.Fatalf("expected ctrl+u alias to remove current line, got %q", updated.input)
+	}
+	if updated.inputCursor != 4 {
+		t.Fatalf("expected cursor at start of joined line after delete, got %d", updated.inputCursor)
+	}
+}
+
+func TestDebugKeysTransientStatusShowsNormalizationSource(t *testing.T) {
+	t.Setenv("BUILDER_DEBUG_KEYS", "1")
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+
+	next, _ := m.Update(testUnknownCSISequence{rendered: "?CSI[49 50 55 59 53 58 51 117]?"}) // 127;5:3u
+	updated := next.(*uiModel)
+
+	status := strings.TrimSpace(updated.transientStatus)
+	if status == "" {
+		t.Fatal("expected debug key status to be set")
+	}
+	if !strings.Contains(status, "src=unknown_csi") {
+		t.Fatalf("expected unknown CSI source in debug status, got %q", status)
+	}
+	if !strings.Contains(status, "type=-1026") {
+		t.Fatalf("expected normalized ctrl+backspace key type in debug status, got %q", status)
 	}
 }
 
@@ -1695,6 +1969,125 @@ func TestBusySlashThinkingExecutesImmediatelyWithoutQueueing(t *testing.T) {
 	}
 	if updated.input != "" {
 		t.Fatalf("expected input cleared after /thinking, got %q", updated.input)
+	}
+}
+
+func TestSlashSupervisorTogglesReviewerInvocationAndShowsStatus(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/supervisor"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient status clear timer cmd")
+	}
+	if !updated.reviewerEnabled {
+		t.Fatal("expected reviewer invocation enabled after toggle")
+	}
+	if updated.reviewerMode != "edits" {
+		t.Fatalf("expected reviewer mode edits after toggle, got %q", updated.reviewerMode)
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after /supervisor, got %q", updated.input)
+	}
+	if !strings.Contains(updated.transientStatus, "Supervisor invocation enabled") {
+		t.Fatalf("expected transient status for /supervisor toggle, got %q", updated.transientStatus)
+	}
+	plain := stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(plain, "Supervisor invocation enabled") {
+		t.Fatalf("expected transcript notice for /supervisor toggle, got %q", plain)
+	}
+
+	updated.input = "/supervisor off"
+	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient status clear timer cmd")
+	}
+	if updated.reviewerEnabled {
+		t.Fatal("expected reviewer invocation disabled")
+	}
+	if updated.reviewerMode != "off" {
+		t.Fatalf("expected reviewer mode off after disable, got %q", updated.reviewerMode)
+	}
+	if !strings.Contains(updated.transientStatus, "Supervisor invocation disabled") {
+		t.Fatalf("expected disable transient status, got %q", updated.transientStatus)
+	}
+}
+
+func TestBusySlashSupervisorExecutesImmediatelyWithoutQueueing(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "/supervisor on"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient status clear timer cmd")
+	}
+	if !updated.busy {
+		t.Fatal("expected busy state unchanged while command executes")
+	}
+	if !updated.reviewerEnabled || updated.reviewerMode != "edits" {
+		t.Fatalf("expected reviewer enabled in edits mode, got enabled=%v mode=%q", updated.reviewerEnabled, updated.reviewerMode)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected no queued messages, got %d", len(updated.queued))
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected no pending injected messages, got %d", len(updated.pendingInjected))
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after /supervisor, got %q", updated.input)
+	}
+}
+
+func TestSlashSupervisorWithEngineTogglesRuntimeReviewer(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{
+		Model: "gpt-5",
+		Reviewer: runtime.ReviewerConfig{
+			Frequency:      "off",
+			Model:          "gpt-5",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			Client:         statusLineFakeClient{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/supervisor on"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient status clear timer cmd")
+	}
+	if got := eng.ReviewerFrequency(); got != "edits" {
+		t.Fatalf("expected runtime reviewer mode edits, got %q", got)
+	}
+	if !updated.reviewerEnabled || updated.reviewerMode != "edits" {
+		t.Fatalf("expected ui reviewer enabled in edits mode, got enabled=%v mode=%q", updated.reviewerEnabled, updated.reviewerMode)
+	}
+	if !strings.Contains(updated.transientStatus, "Supervisor invocation enabled") {
+		t.Fatalf("expected enable status message, got %q", updated.transientStatus)
+	}
+
+	updated.input = "/supervisor off"
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if got := eng.ReviewerFrequency(); got != "off" {
+		t.Fatalf("expected runtime reviewer mode off, got %q", got)
+	}
+	if updated.reviewerEnabled || updated.reviewerMode != "off" {
+		t.Fatalf("expected ui reviewer disabled in off mode, got enabled=%v mode=%q", updated.reviewerEnabled, updated.reviewerMode)
 	}
 }
 

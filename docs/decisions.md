@@ -227,11 +227,14 @@
 - Picker matches only first token and updates continuously.
 - After whitespace, command enters argument mode and picker hides.
 - Unknown slash commands are sent to model as normal user prompts.
-- Built-in commands: `/logout`, `/exit`, `/new`, `/resume`, `/compact`, `/name`, `/review`.
+- Built-in commands: `/logout`, `/exit`, `/new`, `/resume`, `/compact`, `/name`, `/thinking`, `/review`, `/supervisor`.
 - Known slash commands are intercepted while model is running and never queued as user prompts.
 - Run-safe commands execute immediately while busy.
 - Non-run-safe known commands while busy are rejected with transient status-line error.
 - `/review` starts fresh session and auto-submits embedded review rubric prompt; optional args are appended as review scope.
+- `/supervisor` controls runtime reviewer invocation for the current session only.
+- `/supervisor` toggles when called without args; `/supervisor on|off` sets explicitly.
+- `/supervisor` emits user-visible confirmation in transcript + status line and does not persist to config.
 - Built-in prompt commands use embedded markdown templates.
 - Slash commands support file-backed prompts from:
 - `./.builder/prompts`, `./.builder/commands`, `~/.builder/prompts`, `~/.builder/commands`.

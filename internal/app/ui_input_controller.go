@@ -27,6 +27,54 @@ func (c uiInputController) rollbackTransitionCmd() tea.Cmd {
 	return tea.ClearScreen
 }
 
+func (c uiInputController) startRollbackSelectionFlowCmd() tea.Cmd {
+	m := c.model
+	if !m.startRollbackSelectionMode() {
+		return nil
+	}
+	overlayCmd := m.pushRollbackOverlayIfNeeded()
+	if overlayCmd != nil {
+		m.focusRollbackSelection()
+		return overlayCmd
+	}
+	return c.rollbackTransitionCmd()
+}
+
+func (c uiInputController) stopRollbackSelectionFlowCmd() tea.Cmd {
+	m := c.model
+	overlayCmd := m.popRollbackOverlayIfNeeded()
+	m.stopRollbackSelectionMode()
+	if overlayCmd != nil {
+		return overlayCmd
+	}
+	return c.rollbackTransitionCmd()
+}
+
+func (c uiInputController) beginRollbackEditingFlowCmd() tea.Cmd {
+	m := c.model
+	if !m.beginRollbackEditing() {
+		return nil
+	}
+	overlayCmd := m.popRollbackOverlayIfNeeded()
+	if overlayCmd != nil {
+		return overlayCmd
+	}
+	return c.rollbackTransitionCmd()
+}
+
+func (c uiInputController) cancelRollbackEditingToSelectionFlowCmd() tea.Cmd {
+	m := c.model
+	if !m.cancelRollbackEditingBackToSelection() {
+		return nil
+	}
+	overlayCmd := m.pushRollbackOverlayIfNeeded()
+	if overlayCmd != nil {
+		m.focusRollbackSelection()
+		return overlayCmd
+	}
+	return c.rollbackTransitionCmd()
+}
+
 var spinnerFrames = []string{"|", "/", "-", "\\"}
 var spinnerTickInterval = 360 * time.Millisecond
 var transientStatusDuration = 2200 * time.Millisecond
@@ -76,10 +124,13 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyCtrlC:
 			m.exitAction = UIActionExit
+			if overlayCmd := m.popRollbackOverlayIfNeeded(); overlayCmd != nil {
+				m.stopRollbackSelectionMode()
+				return m, tea.Sequence(overlayCmd, tea.Quit)
+			}
 			return m, tea.Quit
 		case tea.KeyEsc:
-			m.stopRollbackSelectionMode()
-			return m, c.rollbackTransitionCmd()
+			return m, c.stopRollbackSelectionFlowCmd()
 		case tea.KeyUp:
 			m.moveRollbackSelection(-1)
 			return m, nil
@@ -87,8 +138,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.moveRollbackSelection(1)
 			return m, nil
 		case tea.KeyEnter:
-			m.beginRollbackEditing()
-			return m, c.rollbackTransitionCmd()
+			return m, c.beginRollbackEditingFlowCmd()
 		case tea.KeyPgUp, tea.KeyPgDown:
 			m.forwardToView(msg)
 			return m, nil
@@ -126,8 +176,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.activity = uiActivityQueued
 		return m, nil
 	}
-	if msg.Type == keyTypeCtrlBackspaceCSI || msg.Type == keyTypeSuperBackspaceCSI ||
-		keyString == "ctrl+backspace" || keyString == "cmd+backspace" || keyString == "super+backspace" {
+	if isDeleteCurrentLineKey(msg) {
 		if m.isInputLocked() {
 			return m, nil
 		}
@@ -167,9 +216,11 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEsc:
 		if m.rollbackEditing {
 			if strings.TrimSpace(m.input) == "" {
-				m.cancelRollbackEditingBackToSelection()
-				return m, c.rollbackTransitionCmd()
+				return m, c.cancelRollbackEditingToSelectionFlowCmd()
 			}
+			return m, nil
+		}
+		if m.view.Mode() != tui.ModeOngoing {
 			return m, nil
 		}
 		if m.busy || m.isInputLocked() || strings.TrimSpace(m.input) != "" {
@@ -178,8 +229,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		now := time.Now()
 		if !m.lastEscAt.IsZero() && now.Sub(m.lastEscAt) <= rollbackDoubleEscWindow {
 			m.lastEscAt = time.Time{}
-			m.startRollbackSelectionMode()
-			return m, c.rollbackTransitionCmd()
+			return m, c.startRollbackSelectionFlowCmd()
 		}
 		m.lastEscAt = now
 		return m, nil
@@ -454,10 +504,90 @@ func (c uiInputController) applyCommandResult(commandResult commands.Result) (te
 		m.thinkingLevel = normalized
 		m.forwardToView(tui.AppendTranscriptMsg{Role: "system", Text: "Thinking level set to " + m.thinkingLevel})
 		return m, nil
+	case commands.ActionSetSupervisor:
+		requested := strings.ToLower(strings.TrimSpace(commandResult.SupervisorMode))
+		currentEnabled, currentMode := m.reviewerInvocationState()
+		targetEnabled := currentEnabled
+		switch requested {
+		case "":
+			targetEnabled = !currentEnabled
+		case "on":
+			targetEnabled = true
+		case "off":
+			targetEnabled = false
+		default:
+			errText := "invalid supervisor mode " + strconv.Quote(requested) + " (expected on|off)"
+			if m.engine != nil {
+				m.engine.AppendLocalEntry("error", errText)
+			} else {
+				m.forwardToView(tui.AppendTranscriptMsg{Role: "error", Text: errText})
+			}
+			return m, nil
+		}
+
+		changed := false
+		nextMode := currentMode
+		if m.engine != nil {
+			var err error
+			changed, nextMode, err = m.engine.SetReviewerEnabled(targetEnabled)
+			if err != nil {
+				m.engine.AppendLocalEntry("error", formatSubmissionError(err))
+				return m, nil
+			}
+		} else {
+			nextMode = "off"
+			if targetEnabled {
+				nextMode = "edits"
+			}
+			changed = currentEnabled != targetEnabled
+		}
+		m.reviewerMode = nextMode
+		m.reviewerEnabled = nextMode != "off"
+		status := reviewerToggleStatusMessage(m.reviewerEnabled, nextMode, changed)
+		if m.engine != nil {
+			m.engine.AppendLocalEntry("system", status)
+		} else {
+			m.forwardToView(tui.AppendTranscriptMsg{Role: "system", Text: status})
+		}
+		return m, c.showTransientStatus(status)
 	case commands.ActionCompact:
 		return m, c.startCompaction(commandResult.Args)
 	}
 	return m, nil
+}
+
+func (m *uiModel) reviewerInvocationState() (bool, string) {
+	if m.engine != nil {
+		mode := m.engine.ReviewerFrequency()
+		return mode != "off", mode
+	}
+	mode := strings.ToLower(strings.TrimSpace(m.reviewerMode))
+	if mode == "" {
+		mode = "off"
+	}
+	return mode != "off", mode
+}
+
+func reviewerToggleStatusMessage(enabled bool, mode string, changed bool) string {
+	modeText := strings.ToLower(strings.TrimSpace(mode))
+	if modeText == "" {
+		modeText = "off"
+	}
+	if enabled {
+		detail := ""
+		switch modeText {
+		case "all", "edits":
+			detail = " (frequency: " + modeText + ")"
+		}
+		if changed {
+			return "Supervisor invocation enabled" + detail
+		}
+		return "Supervisor invocation already enabled" + detail
+	}
+	if changed {
+		return "Supervisor invocation disabled"
+	}
+	return "Supervisor invocation already disabled"
 }
 
 func (c uiInputController) showTransientStatus(message string) tea.Cmd {

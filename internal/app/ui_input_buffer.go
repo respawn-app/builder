@@ -122,13 +122,24 @@ func (m *uiModel) moveCursorDownLine() bool {
 }
 
 func (m *uiModel) deleteCurrentInputLine() bool {
-	runes := m.inputRunes()
-	if len(runes) == 0 {
+	updated, nextCursor, ok := deleteCurrentLineAtCursor(m.input, m.inputCursor)
+	if !ok {
 		return false
 	}
-	cursor := clampCursor(m.inputCursor, len(runes))
-	start := lineStart(runes, cursor)
-	end := lineEnd(runes, cursor)
+	m.input = updated
+	m.inputCursor = nextCursor
+	m.refreshSlashCommandFilterFromInput()
+	return true
+}
+
+func deleteCurrentLineAtCursor(text string, cursor int) (string, int, bool) {
+	runes := []rune(text)
+	if len(runes) == 0 {
+		return "", 0, false
+	}
+	cursorIndex := clampCursor(cursor, len(runes))
+	start := lineStart(runes, cursorIndex)
+	end := lineEnd(runes, cursorIndex)
 
 	deleteStart := start
 	deleteEnd := end
@@ -139,16 +150,13 @@ func (m *uiModel) deleteCurrentInputLine() bool {
 	}
 
 	if deleteStart >= deleteEnd {
-		return false
+		return text, cursorIndex, false
 	}
 
 	updated := make([]rune, 0, len(runes)-(deleteEnd-deleteStart))
 	updated = append(updated, runes[:deleteStart]...)
 	updated = append(updated, runes[deleteEnd:]...)
-	m.input = string(updated)
-	m.inputCursor = deleteStart
-	m.refreshSlashCommandFilterFromInput()
-	return true
+	return string(updated), deleteStart, true
 }
 
 func prevWordBoundary(runes []rune, cursor int) int {

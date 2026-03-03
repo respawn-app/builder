@@ -1,10 +1,17 @@
 package app
 
 import (
+	"builder/internal/config"
 	"builder/internal/llm"
+	"builder/internal/runtime"
 	"builder/internal/session"
+	"builder/internal/tools"
 	"context"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestResolveSessionActionResumeReopensPicker(t *testing.T) {
@@ -127,5 +134,73 @@ func TestResolveSessionActionOpenSessionUsesTargetID(t *testing.T) {
 	}
 	if forceNewSession {
 		t.Fatal("did not expect force-new session")
+	}
+}
+
+func TestForkRollbackNativeStartupReplayUsesForkedHistory(t *testing.T) {
+	root := t.TempDir()
+	store, err := session.Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", llm.Message{Role: llm.RoleUser, Content: "u1"}); err != nil {
+		t.Fatalf("append u1: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", llm.Message{Role: llm.RoleAssistant, Content: "a1"}); err != nil {
+		t.Fatalf("append a1: %v", err)
+	}
+	if _, err := store.AppendEvent("s2", "message", llm.Message{Role: llm.RoleUser, Content: "u2"}); err != nil {
+		t.Fatalf("append u2: %v", err)
+	}
+	if _, err := store.AppendEvent("s2", "message", llm.Message{Role: llm.RoleAssistant, Content: "a2"}); err != nil {
+		t.Fatalf("append a2: %v", err)
+	}
+
+	nextSessionID, _, _, _, shouldContinue, err := resolveSessionAction(
+		context.Background(),
+		appBootstrap{},
+		store,
+		UITransition{Action: UIActionForkRollback, InitialPrompt: "edited user message", ForkUserMessageIndex: 2},
+	)
+	if err != nil {
+		t.Fatalf("resolve session action: %v", err)
+	}
+	if !shouldContinue {
+		t.Fatal("expected lifecycle to continue for fork rollback action")
+	}
+
+	forkedStore, err := session.Open(filepath.Join(root, nextSessionID))
+	if err != nil {
+		t.Fatalf("open fork session store: %v", err)
+	}
+	eng, err := runtime.New(forkedStore, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new runtime for fork: %v", err)
+	}
+
+	m := NewUIModel(
+		eng,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+	).(*uiModel)
+	next, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected native startup replay command for fork session")
+	}
+	flushMsg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	plain := stripANSIAndTrimRight(flushMsg.Text)
+	if !strings.Contains(plain, "u1") || !strings.Contains(plain, "a1") {
+		t.Fatalf("expected startup replay to include fork base history, got %q", plain)
+	}
+	if strings.Contains(plain, "u2") || strings.Contains(plain, "a2") {
+		t.Fatalf("expected startup replay to exclude trimmed history after fork point, got %q", plain)
+	}
+	if len(updated.transcriptEntries) != 2 {
+		t.Fatalf("expected forked transcript to include only two committed entries, got %d", len(updated.transcriptEntries))
 	}
 }

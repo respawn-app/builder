@@ -66,6 +66,19 @@ func NormalizeThinkingLevel(level string) (string, bool) {
 	return normalized, ok
 }
 
+func NormalizeReviewerFrequency(frequency string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(frequency)) {
+	case "off":
+		return "off", true
+	case "all":
+		return "all", true
+	case "edits":
+		return "edits", true
+	default:
+		return "", false
+	}
+}
+
 type Config struct {
 	Model                         string
 	Temperature                   float64
@@ -88,6 +101,7 @@ type ReviewerConfig struct {
 	ThinkingLevel  string
 	MaxSuggestions int
 	Client         llm.Client
+	ClientFactory  func() (llm.Client, error)
 }
 
 type ContextUsage struct {
@@ -117,6 +131,8 @@ type Engine struct {
 
 	phaseProtocolResolved bool
 	phaseProtocolEnabled  bool
+
+	reviewerResumeFrequency string
 
 	totalInputTokens       int
 	totalCachedInputTokens int
@@ -160,6 +176,21 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 		registry: registry,
 		cfg:      cfg,
 		chat:     newChatStore(),
+	}
+
+	reviewerFrequency, ok := NormalizeReviewerFrequency(eng.cfg.Reviewer.Frequency)
+	if !ok {
+		reviewerFrequency = "off"
+	}
+	eng.cfg.Reviewer.Frequency = reviewerFrequency
+	eng.reviewerResumeFrequency = reviewerFrequency
+	if eng.reviewerResumeFrequency == "off" {
+		eng.reviewerResumeFrequency = "edits"
+	}
+	if reviewerFrequency != "off" {
+		if err := eng.initReviewerClient(); err != nil {
+			return nil, err
+		}
 	}
 
 	meta := store.Meta()
@@ -366,11 +397,13 @@ func (e *Engine) SubmitUserShellCommand(ctx context.Context, command string) (re
 }
 
 func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, error) {
-	msg, _, err := e.runStepLoopWithOptions(ctx, stepID, true, true)
+	reviewerFrequency := e.ReviewerFrequency()
+	reviewerClient := e.reviewerClientSnapshot()
+	msg, _, err := e.runStepLoopWithOptions(ctx, stepID, reviewerFrequency, reviewerClient, true)
 	return msg, err
 }
 
-func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allowReviewer bool, emitAssistantEvent bool) (llm.Message, bool, error) {
+func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, reviewerFrequency string, reviewerClient llm.Client, emitAssistantEvent bool) (llm.Message, bool, error) {
 	executedToolCall := false
 	patchEditsApplied := false
 	phaseProtocolEnabled := e.phaseProtocolEnabledForModel(ctx)
@@ -540,8 +573,8 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, allo
 				continue
 			}
 			resolved := assistantMsg
-			if allowReviewer && e.shouldRunReviewerTurn(patchEditsApplied) {
-				reviewed, err := e.runReviewerFollowUp(ctx, stepID, assistantMsg)
+			if e.shouldRunReviewerTurnForFrequency(reviewerFrequency, reviewerClient, patchEditsApplied) {
+				reviewed, err := e.runReviewerFollowUp(ctx, stepID, assistantMsg, reviewerClient)
 				if err == nil {
 					resolved = reviewed
 				}
@@ -634,11 +667,11 @@ func (e *Engine) phaseProtocolEnabledForModel(ctx context.Context) bool {
 	return result
 }
 
-func (e *Engine) shouldRunReviewerTurn(patchEditsApplied bool) bool {
-	if e.reviewer == nil {
+func (e *Engine) shouldRunReviewerTurnForFrequency(frequency string, reviewerClient llm.Client, patchEditsApplied bool) bool {
+	if reviewerClient == nil {
 		return false
 	}
-	switch strings.ToLower(strings.TrimSpace(e.cfg.Reviewer.Frequency)) {
+	switch strings.ToLower(strings.TrimSpace(frequency)) {
 	case "all":
 		return true
 	case "edits":
@@ -650,10 +683,10 @@ func (e *Engine) shouldRunReviewerTurn(patchEditsApplied bool) bool {
 	}
 }
 
-func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, original llm.Message) (llm.Message, error) {
+func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, original llm.Message, reviewerClient llm.Client) (llm.Message, error) {
 	baselineItems := e.snapshotItems()
 	e.emit(Event{Kind: EventReviewerStarted, StepID: stepID})
-	reviewerResult, err := e.runReviewerSuggestions(ctx)
+	reviewerResult, err := e.runReviewerSuggestions(ctx, reviewerClient)
 	if err != nil {
 		status := ReviewerStatus{
 			Outcome: "failed",
@@ -677,7 +710,7 @@ func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, origina
 		return original, err
 	}
 
-	followUp, followUpExecutedToolCall, err := e.runStepLoopWithOptions(ctx, stepID, false, false)
+	followUp, followUpExecutedToolCall, err := e.runStepLoopWithOptions(ctx, stepID, "off", nil, false)
 	if err != nil {
 		status := ReviewerStatus{
 			Outcome:               "followup_failed",
@@ -721,10 +754,17 @@ type reviewerSuggestionsResult struct {
 	HasCacheHitPercentage bool
 }
 
-func (e *Engine) runReviewerSuggestions(ctx context.Context) (reviewerSuggestionsResult, error) {
-	if e.reviewer == nil {
+type reviewerRequestConfig struct {
+	Model          string
+	ThinkingLevel  string
+	MaxSuggestions int
+}
+
+func (e *Engine) runReviewerSuggestions(ctx context.Context, reviewerClient llm.Client) (reviewerSuggestionsResult, error) {
+	if reviewerClient == nil {
 		return reviewerSuggestionsResult{}, nil
 	}
+	reviewerCfg := e.reviewerRequestConfigSnapshot()
 
 	schema := mustJSON(map[string]any{
 		"type":                 "object",
@@ -743,10 +783,10 @@ func (e *Engine) runReviewerSuggestions(ctx context.Context) (reviewerSuggestion
 	messages := sanitizeMessagesForLLM(e.snapshotMessages())
 	reviewerMessages := buildReviewerRequestMessages(messages, e.store.Meta().WorkspaceRoot, e.cfg.Model, e.ThinkingLevel())
 	req := llm.Request{
-		Model:           e.cfg.Reviewer.Model,
+		Model:           reviewerCfg.Model,
 		Temperature:     1,
 		MaxTokens:       0,
-		ReasoningEffort: e.cfg.Reviewer.ThinkingLevel,
+		ReasoningEffort: reviewerCfg.ThinkingLevel,
 		SystemPrompt:    prompts.ReviewerSystemPrompt,
 		SessionID:       reviewerSessionID(e.store.Meta().SessionID),
 		Messages:        reviewerMessages,
@@ -761,13 +801,13 @@ func (e *Engine) runReviewerSuggestions(ctx context.Context) (reviewerSuggestion
 	if err := req.Validate(); err != nil {
 		return reviewerSuggestionsResult{}, err
 	}
-	resp, err := e.generateWithRetryClient(ctx, e.reviewer, req, nil, nil)
+	resp, err := e.generateWithRetryClient(ctx, reviewerClient, req, nil, nil)
 	if err != nil {
 		return reviewerSuggestionsResult{}, err
 	}
 	cachePct, hasCachePct := resp.Usage.CacheHitPercent()
 	return reviewerSuggestionsResult{
-		Suggestions:           parseReviewerSuggestionsObject(resp.Assistant.Content, e.cfg.Reviewer.MaxSuggestions),
+		Suggestions:           parseReviewerSuggestionsObject(resp.Assistant.Content, reviewerCfg.MaxSuggestions),
 		CacheHitPercent:       cachePct,
 		HasCacheHitPercentage: hasCachePct,
 	}, nil
@@ -2026,10 +2066,95 @@ func (e *Engine) SetThinkingLevel(level string) error {
 	return nil
 }
 
+func (e *Engine) SetReviewerEnabled(enabled bool) (bool, string, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	current, ok := NormalizeReviewerFrequency(e.cfg.Reviewer.Frequency)
+	if !ok {
+		current = "off"
+	}
+	if current != "off" {
+		e.reviewerResumeFrequency = current
+	}
+
+	if enabled {
+		if current != "off" {
+			return false, current, nil
+		}
+		if err := e.initReviewerClientLocked(); err != nil {
+			return false, current, err
+		}
+		target := e.reviewerResumeFrequency
+		if target == "" || target == "off" {
+			target = "edits"
+		}
+		e.cfg.Reviewer.Frequency = target
+		return true, target, nil
+	}
+
+	if current == "off" {
+		return false, current, nil
+	}
+	e.cfg.Reviewer.Frequency = "off"
+	return true, "off", nil
+}
+
 func (e *Engine) ThinkingLevel() string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return strings.TrimSpace(e.cfg.ThinkingLevel)
+}
+
+func (e *Engine) ReviewerFrequency() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	normalized, ok := NormalizeReviewerFrequency(e.cfg.Reviewer.Frequency)
+	if !ok {
+		return "off"
+	}
+	return normalized
+}
+
+func (e *Engine) ReviewerEnabled() bool {
+	return e.ReviewerFrequency() != "off"
+}
+
+func (e *Engine) initReviewerClient() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.initReviewerClientLocked()
+}
+
+func (e *Engine) initReviewerClientLocked() error {
+	if e.reviewer != nil {
+		return nil
+	}
+	if e.cfg.Reviewer.ClientFactory == nil {
+		return errors.New("reviewer client is not configured")
+	}
+	client, err := e.cfg.Reviewer.ClientFactory()
+	if err != nil {
+		return fmt.Errorf("configure reviewer client: %w", err)
+	}
+	e.reviewer = client
+	return nil
+}
+
+func (e *Engine) reviewerClientSnapshot() llm.Client {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.reviewer
+}
+
+func (e *Engine) reviewerRequestConfigSnapshot() reviewerRequestConfig {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return reviewerRequestConfig{
+		Model:          strings.TrimSpace(e.cfg.Reviewer.Model),
+		ThinkingLevel:  strings.TrimSpace(e.cfg.Reviewer.ThinkingLevel),
+		MaxSuggestions: e.cfg.Reviewer.MaxSuggestions,
+	}
 }
 
 func (e *Engine) SessionName() string {
