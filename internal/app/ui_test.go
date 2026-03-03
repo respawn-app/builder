@@ -1985,7 +1985,7 @@ func TestReviewerProgressKeepsInputEditable(t *testing.T) {
 	}
 }
 
-func TestBusyEnterDuringReviewerQueuesForNextTurn(t *testing.T) {
+func TestBusyEnterDuringReviewerUsesSteeringInjection(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.busy = true
 	m.activity = uiActivityRunning
@@ -2002,17 +2002,17 @@ func TestBusyEnterDuringReviewerQueuesForNextTurn(t *testing.T) {
 
 	next, _ = started.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	if len(updated.queued) != 1 || updated.queued[0] != "steer after review" {
-		t.Fatalf("expected steer message queued for next turn, got %+v", updated.queued)
+	if len(updated.queued) != 0 {
+		t.Fatalf("did not expect post-turn queue for reviewer steering, got %+v", updated.queued)
 	}
-	if len(updated.pendingInjected) != 0 {
-		t.Fatalf("did not expect pending injected reviewer steering, got %+v", updated.pendingInjected)
+	if len(updated.pendingInjected) != 1 || updated.pendingInjected[0] != "steer after review" {
+		t.Fatalf("expected reviewer steering injected for earliest flush, got %+v", updated.pendingInjected)
 	}
-	if updated.inputSubmitLocked {
-		t.Fatal("did not expect submit lock while reviewer is running")
+	if !updated.inputSubmitLocked {
+		t.Fatal("expected submit lock while waiting for reviewer steering flush")
 	}
-	if updated.input != "" {
-		t.Fatalf("expected input cleared after queueing reviewer steering, got %q", updated.input)
+	if updated.input != "steer after review" {
+		t.Fatalf("expected input preserved while waiting for reviewer steering flush, got %q", updated.input)
 	}
 }
 
