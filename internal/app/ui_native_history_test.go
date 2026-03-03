@@ -464,10 +464,10 @@ func TestRenderNativeScrollbackSnapshotMatchesLegacyAppendPath(t *testing.T) {
 	}
 }
 
-func TestNativeScrollbackInitDoesNotClearScreen(t *testing.T) {
+func TestUIInitClearsScreenInAllScrollModes(t *testing.T) {
 	native := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
-	if native.shouldClearOnInit() {
-		t.Fatal("expected native mode init to avoid clear screen")
+	if !native.shouldClearOnInit() {
+		t.Fatal("expected native mode init to clear screen")
 	}
 	alt := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeAlt)).(*uiModel)
 	if !alt.shouldClearOnInit() {

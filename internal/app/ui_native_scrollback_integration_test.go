@@ -149,8 +149,8 @@ func TestNativeScrollbackProgramOutputContract(t *testing.T) {
 
 	raw := out.String()
 	normalized := normalizedOutput(raw)
-	if strings.Contains(raw, "\x1b[2J") {
-		t.Fatalf("did not expect clear-screen sequence in native mode output")
+	if !strings.Contains(raw, "\x1b[2J") {
+		t.Fatalf("expected startup clear-screen sequence in native mode output")
 	}
 	if strings.Contains(raw, "\x1b[?1049h") || strings.Contains(raw, "\x1b[?1049l") {
 		t.Fatalf("did not expect alt-screen enter/leave sequences in native mode output")
@@ -170,6 +170,57 @@ func TestNativeScrollbackProgramOutputContract(t *testing.T) {
 	plain := xansi.Strip(raw)
 	if occurrences := strings.Count(plain, "ongoing | "); occurrences > 12 {
 		t.Fatalf("expected bounded status redraw output, got %d occurrences", occurrences)
+	}
+}
+
+func TestNativeScrollbackInitClearsOnEachProgramRun(t *testing.T) {
+	run := func() string {
+		t.Helper()
+		out := &bytes.Buffer{}
+		model := NewUIModel(
+			nil,
+			closedRuntimeEvents(),
+			closedAskEvents(),
+			WithUIScrollMode(config.TUIScrollModeNative),
+		).(*uiModel)
+
+		program := tea.NewProgram(
+			model,
+			tea.WithInput(strings.NewReader("")),
+			tea.WithOutput(out),
+			tea.WithoutSignals(),
+		)
+
+		done := make(chan error, 1)
+		go func() {
+			_, err := program.Run()
+			done <- err
+		}()
+
+		time.Sleep(40 * time.Millisecond)
+		program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+		time.Sleep(20 * time.Millisecond)
+		program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("program run failed: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("program did not terminate")
+		}
+
+		return out.String()
+	}
+
+	first := run()
+	second := run()
+	if !strings.Contains(first, "\x1b[2J") {
+		t.Fatalf("expected first startup to clear screen, output=%q", first)
+	}
+	if !strings.Contains(second, "\x1b[2J") {
+		t.Fatalf("expected second startup to clear screen, output=%q", second)
 	}
 }
 

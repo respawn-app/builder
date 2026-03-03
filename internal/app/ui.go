@@ -340,7 +340,10 @@ func (m *uiModel) Init() tea.Cmd {
 }
 
 func (m *uiModel) shouldClearOnInit() bool {
-	return !m.usesNativeScrollback()
+	if m.usesNativeScrollback() {
+		return m.view.Mode() == tui.ModeOngoing
+	}
+	return true
 }
 
 func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
