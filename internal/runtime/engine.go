@@ -824,6 +824,7 @@ func splitReviewerMetaMessages(messages []llm.Message) ([]llm.Message, []llm.Mes
 	transcript := make([]llm.Message, 0, len(messages))
 	seenEnvironment := false
 	seenAgentContent := map[string]bool{}
+	seenSkillsContent := map[string]bool{}
 	for _, message := range messages {
 		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeAgentsMD {
 			normalized := strings.TrimSpace(message.Content)
@@ -832,6 +833,15 @@ func splitReviewerMetaMessages(messages []llm.Message) ([]llm.Message, []llm.Mes
 			}
 			seenAgentContent[normalized] = true
 			meta = append(meta, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeAgentsMD, Content: message.Content})
+			continue
+		}
+		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeSkills {
+			normalized := strings.TrimSpace(message.Content)
+			if normalized == "" || seenSkillsContent[normalized] {
+				continue
+			}
+			seenSkillsContent[normalized] = true
+			meta = append(meta, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeSkills, Content: message.Content})
 			continue
 		}
 		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeEnvironment {
@@ -916,7 +926,7 @@ func shouldIncludeReviewerMessage(message llm.Message) bool {
 		if content == "" {
 			return false
 		}
-		if message.MessageType == llm.MessageTypeEnvironment {
+		if message.MessageType == llm.MessageTypeEnvironment || message.MessageType == llm.MessageTypeSkills {
 			return false
 		}
 		if message.MessageType == llm.MessageTypeErrorFeedback || message.MessageType == llm.MessageTypeInterruption {
@@ -924,6 +934,9 @@ func shouldIncludeReviewerMessage(message llm.Message) bool {
 		}
 		// Backward compatibility for persisted transcripts created before message_type.
 		if strings.Contains(content, environmentInjectedHeader) {
+			return false
+		}
+		if strings.Contains(content, skillsInjectedHeader+"\n") {
 			return false
 		}
 		if content == commentaryWithoutToolCallsWarning || content == finalWithToolCallsIgnoredWarning || content == missingAssistantPhaseWarning || content == garbageAssistantContentWarning || content == interruptMessage {
@@ -1201,6 +1214,7 @@ func reviewerSessionID(sessionID string) string {
 func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string) []llm.Message {
 	haveEnvironment := false
 	haveAgents := false
+	haveSkills := false
 	for _, msg := range messages {
 		if msg.Role != llm.RoleDeveloper {
 			continue
@@ -1208,18 +1222,22 @@ func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot stri
 		if msg.MessageType == llm.MessageTypeAgentsMD {
 			haveAgents = true
 		}
+		if msg.MessageType == llm.MessageTypeSkills {
+			haveSkills = true
+		}
 		if msg.MessageType == llm.MessageTypeEnvironment {
 			haveEnvironment = true
 		}
 	}
-	if haveAgents && haveEnvironment {
+	if haveAgents && haveSkills && haveEnvironment {
 		return messages
 	}
+	out := append([]llm.Message(nil), messages...)
 	paths, err := agentsInjectionPaths(workspaceRoot)
 	if err != nil {
 		paths = nil
 	}
-	prefixed := make([]llm.Message, 0, len(paths)+1+len(messages))
+	agentsToInsert := make([]llm.Message, 0, len(paths))
 	if !haveAgents {
 		for _, path := range paths {
 			data, readErr := os.ReadFile(path)
@@ -1230,21 +1248,80 @@ func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot stri
 				continue
 			}
 			injected := fmt.Sprintf("%s\nsource: %s\n\n```%s\n%s\n```", agentsInjectedHeader, path, agentsInjectedFenceLabel, string(data))
-			prefixed = append(prefixed, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeAgentsMD, Content: injected})
+			agentsToInsert = append(agentsToInsert, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeAgentsMD, Content: injected})
+		}
+		if len(agentsToInsert) > 0 {
+			out = append(agentsToInsert, out...)
 		}
 	}
+
+	if !haveSkills {
+		skills, found, skillsErr := skillsContextMessage(workspaceRoot)
+		if skillsErr == nil && found {
+			skillsMessage := llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeSkills, Content: skills}
+			insertAt := firstMetaBoundaryIndex(out)
+			lastAgentsIndex := -1
+			firstEnvironmentIndex := -1
+			for idx, msg := range out {
+				if msg.Role != llm.RoleDeveloper {
+					continue
+				}
+				if msg.MessageType == llm.MessageTypeAgentsMD {
+					lastAgentsIndex = idx
+					continue
+				}
+				if msg.MessageType == llm.MessageTypeEnvironment && firstEnvironmentIndex < 0 {
+					firstEnvironmentIndex = idx
+				}
+			}
+			if lastAgentsIndex >= 0 {
+				insertAt = lastAgentsIndex + 1
+			} else if firstEnvironmentIndex >= 0 {
+				insertAt = firstEnvironmentIndex
+			}
+			out = insertMessageAt(out, insertAt, skillsMessage)
+		}
+	}
+
 	if !haveEnvironment {
-		prefixed = append(prefixed, llm.Message{
+		environmentMessage := llm.Message{
 			Role:        llm.RoleDeveloper,
 			MessageType: llm.MessageTypeEnvironment,
 			Content:     environmentContextMessage(workspaceRoot, model, thinkingLevel, time.Now()),
-		})
+		}
+		insertAt := firstMetaBoundaryIndex(out)
+		out = insertMessageAt(out, insertAt, environmentMessage)
 	}
-	if len(prefixed) == 0 {
+
+	if len(out) == len(messages) {
 		return messages
 	}
-	prefixed = append(prefixed, messages...)
-	return prefixed
+	return out
+}
+
+func firstMetaBoundaryIndex(messages []llm.Message) int {
+	for idx, msg := range messages {
+		if msg.Role != llm.RoleDeveloper {
+			return idx
+		}
+		if msg.MessageType != llm.MessageTypeAgentsMD && msg.MessageType != llm.MessageTypeSkills && msg.MessageType != llm.MessageTypeEnvironment {
+			return idx
+		}
+	}
+	return len(messages)
+}
+
+func insertMessageAt(messages []llm.Message, index int, message llm.Message) []llm.Message {
+	if index < 0 {
+		index = 0
+	}
+	if index > len(messages) {
+		index = len(messages)
+	}
+	messages = append(messages, llm.Message{})
+	copy(messages[index+1:], messages[index:])
+	messages[index] = message
+	return messages
 }
 
 func (e *Engine) buildRequest(ctx context.Context, _ string, allowTools bool) (llm.Request, error) {
@@ -1737,6 +1814,15 @@ func (e *Engine) injectAgentsIfNeeded(stepID string) error {
 		}
 		injected := fmt.Sprintf("%s\nsource: %s\n\n```%s\n%s\n```", agentsInjectedHeader, path, agentsInjectedFenceLabel, string(data))
 		if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeAgentsMD, Content: injected}); err != nil {
+			return err
+		}
+	}
+	skills, found, err := skillsContextMessage(meta.WorkspaceRoot)
+	if err != nil {
+		return err
+	}
+	if found {
+		if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeSkills, Content: skills}); err != nil {
 			return err
 		}
 	}

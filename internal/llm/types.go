@@ -46,6 +46,7 @@ type MessageType string
 
 const (
 	MessageTypeAgentsMD         MessageType = "agents.md"
+	MessageTypeSkills           MessageType = "skills"
 	MessageTypeEnvironment      MessageType = "environment"
 	MessageTypeInterruption     MessageType = "interruption"
 	MessageTypeErrorFeedback    MessageType = "error_feedback"
