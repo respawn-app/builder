@@ -68,10 +68,9 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 		return nil, err
 	}
 
-	var reviewerClient llm.Client
-	if strings.ToLower(strings.TrimSpace(active.Reviewer.Frequency)) != "off" {
+	newReviewerClient := func() (llm.Client, error) {
 		reviewerHTTPClient := &http.Client{Timeout: time.Duration(active.Reviewer.TimeoutSeconds) * time.Second}
-		reviewerClient, err = llm.NewProviderClient(llm.ProviderClientOptions{
+		return llm.NewProviderClient(llm.ProviderClientOptions{
 			Model:               active.Reviewer.Model,
 			Auth:                mgr,
 			HTTPClient:          reviewerHTTPClient,
@@ -79,6 +78,11 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 			Store:               false,
 			ContextWindowTokens: active.ModelContextWindow,
 		})
+	}
+
+	var reviewerClient llm.Client
+	if strings.ToLower(strings.TrimSpace(active.Reviewer.Frequency)) != "off" {
+		reviewerClient, err = newReviewerClient()
 		if err != nil {
 			return nil, err
 		}
@@ -107,6 +111,7 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 			ThinkingLevel:  active.Reviewer.ThinkingLevel,
 			MaxSuggestions: active.Reviewer.MaxSuggestions,
 			Client:         reviewerClient,
+			ClientFactory:  newReviewerClient,
 		},
 		OnEvent: func(evt runtime.Event) {
 			logger.Logf("%s", formatRuntimeEvent(evt))

@@ -224,6 +224,80 @@ func TestNativeScrollbackInitClearsOnEachProgramRun(t *testing.T) {
 	}
 }
 
+func TestNativeRollbackOverlayCtrlCBalancesAltScreenAndAlternateScroll(t *testing.T) {
+	var terminalSequences []string
+	originalWriteTerminalSequence := writeTerminalSequence
+	writeTerminalSequence = func(sequence string) {
+		terminalSequences = append(terminalSequences, sequence)
+	}
+	defer func() {
+		writeTerminalSequence = originalWriteTerminalSequence
+	}()
+
+	out := &bytes.Buffer{}
+	model := NewUIModel(
+		nil,
+		closedRuntimeEvents(),
+		closedAskEvents(),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIAlternateScreenPolicy(config.TUIAlternateScreenAuto),
+		WithUIInitialTranscript([]UITranscriptEntry{
+			{Role: "user", Text: "u1"},
+			{Role: "assistant", Text: "a1"},
+			{Role: "user", Text: "u2"},
+		}),
+	).(*uiModel)
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	time.Sleep(20 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyEsc})
+	program.Send(tea.KeyMsg{Type: tea.KeyEsc})
+	time.Sleep(20 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	raw := out.String()
+	enterAlt := strings.Count(raw, "\x1b[?1049h")
+	exitAlt := strings.Count(raw, "\x1b[?1049l")
+	if enterAlt != exitAlt {
+		t.Fatalf("expected balanced alt-screen enter/exit sequences, enter=%d exit=%d", enterAlt, exitAlt)
+	}
+	if enterAlt == 0 {
+		t.Fatal("expected rollback overlay in native mode to enter alt-screen under auto policy")
+	}
+	sequenceLog := strings.Join(terminalSequences, "")
+	enableAltScroll := strings.Count(sequenceLog, "\x1b[?1007h")
+	disableAltScroll := strings.Count(sequenceLog, "\x1b[?1007l")
+	if enableAltScroll != disableAltScroll {
+		t.Fatalf("expected balanced alternate-scroll enable/disable sequences, enable=%d disable=%d", enableAltScroll, disableAltScroll)
+	}
+	if enableAltScroll == 0 {
+		t.Fatal("expected rollback overlay in native mode to enable alternate scroll under auto policy")
+	}
+}
+
 func TestNativeFinalizeDoesNotBlinkDuplicateTailTokens(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

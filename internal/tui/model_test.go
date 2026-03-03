@@ -444,17 +444,37 @@ func TestFocusTranscriptEntryClampsNearTopAndBottom(t *testing.T) {
 	}
 }
 
-func TestFocusTranscriptEntryIgnoredInDetailMode(t *testing.T) {
+func TestFocusTranscriptEntryCentersInDetailMode(t *testing.T) {
 	m := NewModel(WithPreviewLines(4))
 	for i := 0; i < 20; i++ {
 		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("line %d", i)})
 	}
 	m = updateModel(t, m, ToggleModeMsg{})
-	start := m.detailScroll
 	m = updateModel(t, m, FocusTranscriptEntryMsg{EntryIndex: 0, Center: true})
-	if m.detailScroll != start {
-		t.Fatalf("expected detail scroll unchanged when focusing ongoing entry, got %d want %d", m.detailScroll, start)
+	if m.detailScroll != 0 {
+		t.Fatalf("expected detail focus of first entry to clamp to top, got %d", m.detailScroll)
 	}
+
+	m = updateModel(t, m, FocusTranscriptEntryMsg{EntryIndex: 10, Center: true})
+	if m.detailScroll <= 0 {
+		t.Fatalf("expected detail focus of middle entry to scroll into transcript, got %d", m.detailScroll)
+	}
+	start, end, ok := m.detailLineRangeForEntry(10)
+	if !ok {
+		t.Fatal("expected detail line range for focused entry")
+	}
+	midpoint := (start + end) / 2
+	visibleMid := m.detailScroll + m.viewportLines/2
+	if diff := absInt(midpoint - visibleMid); diff > 2 {
+		t.Fatalf("expected focused entry near viewport center, midpoint=%d visibleMid=%d", midpoint, visibleMid)
+	}
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 func TestDetailUsesRequestedSymbolsAndDividers(t *testing.T) {

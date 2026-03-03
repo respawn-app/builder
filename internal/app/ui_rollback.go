@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"builder/internal/tui"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func (m *uiModel) refreshRollbackCandidates() {
@@ -25,8 +27,9 @@ func (m *uiModel) refreshRollbackCandidates() {
 		m.rollbackSelection = 0
 		m.rollbackMode = false
 		m.rollbackEditing = false
+		m.rollbackOverlayPushed = false
 		m.rollbackSelectedUserMessageIndex = 0
-		m.forwardToView(tui.SetSelectedTranscriptEntryMsg{Active: false, EntryIndex: -1})
+		m.clearRollbackSelectionHighlight()
 		return
 	}
 	if m.rollbackSelection < 0 {
@@ -73,7 +76,7 @@ func (m *uiModel) startRollbackSelectionMode() bool {
 
 func (m *uiModel) stopRollbackSelectionMode() {
 	m.rollbackMode = false
-	m.forwardToView(tui.SetSelectedTranscriptEntryMsg{Active: false, EntryIndex: -1})
+	m.clearRollbackSelectionHighlight()
 	if m.rollbackRestoreScrollActive {
 		m.forwardToView(tui.SetOngoingScrollMsg{Scroll: m.rollbackRestoreOngoingScroll})
 		m.rollbackRestoreScrollActive = false
@@ -82,12 +85,24 @@ func (m *uiModel) stopRollbackSelectionMode() {
 
 func (m *uiModel) applyRollbackSelectionHighlight() {
 	if !m.rollbackMode || len(m.rollbackCandidates) == 0 {
-		m.forwardToView(tui.SetSelectedTranscriptEntryMsg{Active: false, EntryIndex: -1})
+		m.clearRollbackSelectionHighlight()
 		return
 	}
 	candidate := m.rollbackCandidates[m.rollbackSelection]
-	m.forwardToView(tui.SetSelectedTranscriptEntryMsg{Active: true, EntryIndex: candidate.TranscriptIndex})
+	m.forwardToView(tui.SetSelectedTranscriptEntryMsg{Active: true, EntryIndex: candidate.TranscriptIndex, RefreshDetailSnapshot: false})
+	m.focusRollbackSelection()
+}
+
+func (m *uiModel) focusRollbackSelection() {
+	if !m.rollbackMode || len(m.rollbackCandidates) == 0 {
+		return
+	}
+	candidate := m.rollbackCandidates[m.rollbackSelection]
 	m.forwardToView(tui.FocusTranscriptEntryMsg{EntryIndex: candidate.TranscriptIndex, Center: true})
+}
+
+func (m *uiModel) clearRollbackSelectionHighlight() {
+	m.forwardToView(tui.SetSelectedTranscriptEntryMsg{Active: false, EntryIndex: -1, RefreshDetailSnapshot: false})
 }
 
 func (m *uiModel) moveRollbackSelection(delta int) {
@@ -114,7 +129,7 @@ func (m *uiModel) beginRollbackEditing() bool {
 	m.rollbackEditing = true
 	m.input = selected.Text
 	m.inputCursor = -1
-	m.forwardToView(tui.SetSelectedTranscriptEntryMsg{Active: false, EntryIndex: -1})
+	m.clearRollbackSelectionHighlight()
 	return true
 }
 
@@ -129,7 +144,39 @@ func (m *uiModel) cancelRollbackEditingBackToSelection() bool {
 func (m *uiModel) clearRollbackFlow() {
 	m.rollbackMode = false
 	m.rollbackEditing = false
+	m.rollbackOverlayPushed = false
 	m.rollbackSelectedUserMessageIndex = 0
 	m.rollbackRestoreScrollActive = false
-	m.forwardToView(tui.SetSelectedTranscriptEntryMsg{Active: false, EntryIndex: -1})
+	m.clearRollbackSelectionHighlight()
+}
+
+func (m *uiModel) pushRollbackOverlayIfNeeded() tea.Cmd {
+	if !m.usesNativeScrollback() {
+		return nil
+	}
+	if m.rollbackOverlayPushed {
+		return nil
+	}
+	if m.view.Mode() != tui.ModeOngoing {
+		return nil
+	}
+	m.rollbackOverlayPushed = true
+	if transitionCmd := m.toggleTranscriptMode(); transitionCmd != nil {
+		return transitionCmd
+	}
+	return tea.ClearScreen
+}
+
+func (m *uiModel) popRollbackOverlayIfNeeded() tea.Cmd {
+	if !m.rollbackOverlayPushed {
+		return nil
+	}
+	m.rollbackOverlayPushed = false
+	if m.view.Mode() != tui.ModeDetail {
+		return nil
+	}
+	if transitionCmd := m.toggleTranscriptMode(); transitionCmd != nil {
+		return transitionCmd
+	}
+	return tea.ClearScreen
 }

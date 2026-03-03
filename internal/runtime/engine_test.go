@@ -365,6 +365,166 @@ func TestSetThinkingLevelRejectsInvalidValue(t *testing.T) {
 	}
 }
 
+func TestSetReviewerEnabledTogglesRuntimeOnly(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	cfg := Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:      "off",
+			Model:          "gpt-5",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			Client:         &fakeClient{},
+		},
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), cfg)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	changed, mode, err := eng.SetReviewerEnabled(true)
+	if err != nil {
+		t.Fatalf("enable reviewer: %v", err)
+	}
+	if !changed || mode != "edits" {
+		t.Fatalf("expected changed=true mode=edits, got changed=%v mode=%q", changed, mode)
+	}
+	if got := eng.ReviewerFrequency(); got != "edits" {
+		t.Fatalf("reviewer frequency = %q, want edits", got)
+	}
+
+	restarted, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), cfg)
+	if err != nil {
+		t.Fatalf("new restarted engine: %v", err)
+	}
+	if got := restarted.ReviewerFrequency(); got != "off" {
+		t.Fatalf("reviewer frequency after restart = %q, want off", got)
+	}
+}
+
+func TestSetReviewerEnabledFailsWhenReviewerClientMissing(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:      "off",
+			Model:          "gpt-5",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			Client:         nil,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	changed, mode, err := eng.SetReviewerEnabled(true)
+	if err == nil {
+		t.Fatal("expected enable reviewer error when reviewer client is missing")
+	}
+	if changed {
+		t.Fatal("did not expect changed=true when reviewer client is missing")
+	}
+	if mode != "off" {
+		t.Fatalf("expected mode off on failure, got %q", mode)
+	}
+}
+
+func TestSetReviewerEnabledLazyInitializesReviewerClient(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:      "off",
+			Model:          "gpt-5",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			Client:         nil,
+			ClientFactory: func() (llm.Client, error) {
+				return &fakeClient{}, nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	changed, mode, err := eng.SetReviewerEnabled(true)
+	if err != nil {
+		t.Fatalf("enable reviewer with lazy client init: %v", err)
+	}
+	if !changed || mode != "edits" {
+		t.Fatalf("expected changed=true mode=edits, got changed=%v mode=%q", changed, mode)
+	}
+}
+
+func TestSetReviewerEnabledConcurrentWithBusyStep(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(tools.ToolPatch), Input: json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}`)}},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolPatch, delay: 50 * time.Millisecond}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:      "off",
+			Model:          "gpt-5",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			ClientFactory: func() (llm.Client, error) {
+				return reviewerClient, nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	submitDone := make(chan error, 1)
+	go func() {
+		_, submitErr := eng.SubmitUserMessage(context.Background(), "edit file")
+		submitDone <- submitErr
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+	if _, _, err := eng.SetReviewerEnabled(true); err != nil {
+		t.Fatalf("enable reviewer while busy: %v", err)
+	}
+
+	if err := <-submitDone; err != nil {
+		t.Fatalf("submit while enabling reviewer: %v", err)
+	}
+	if got := eng.ReviewerFrequency(); got != "edits" {
+		t.Fatalf("reviewer frequency after concurrent enable = %q, want edits", got)
+	}
+}
+
 func TestHostedWebSearchExecutionFromOutputItem(t *testing.T) {
 	item := llm.ResponseItem{
 		Type: llm.ResponseItemTypeOther,

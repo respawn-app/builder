@@ -10,16 +10,17 @@ import (
 type Action string
 
 const (
-	ActionNone        Action = "none"
-	ActionExit        Action = "exit"
-	ActionNew         Action = "new"
-	ActionResume      Action = "resume"
-	ActionLogout      Action = "logout"
-	ActionCompact     Action = "compact"
-	ActionSetName     Action = "set_name"
-	ActionSetThinking Action = "set_thinking"
-	ActionBack        Action = "back"
-	ActionUnhandled   Action = "unhandled"
+	ActionNone          Action = "none"
+	ActionExit          Action = "exit"
+	ActionNew           Action = "new"
+	ActionResume        Action = "resume"
+	ActionLogout        Action = "logout"
+	ActionCompact       Action = "compact"
+	ActionSetName       Action = "set_name"
+	ActionSetThinking   Action = "set_thinking"
+	ActionSetSupervisor Action = "set_supervisor"
+	ActionBack          Action = "back"
+	ActionUnhandled     Action = "unhandled"
 )
 
 type Result struct {
@@ -32,6 +33,7 @@ type Result struct {
 	FreshConversation bool
 	SessionName       string
 	ThinkingLevel     string
+	SupervisorMode    string
 }
 
 type Handler func(args string) Result
@@ -77,6 +79,9 @@ func NewDefaultRegistry() *Registry {
 	})
 	r.RegisterWithOptions("thinking", "Set or show thinking level (usage: /thinking <low|medium|high|xhigh>; empty shows current)", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
 		return Result{Handled: true, Action: ActionSetThinking, ThinkingLevel: strings.ToLower(strings.TrimSpace(args))}
+	})
+	r.RegisterWithOptions("supervisor", "Toggle reviewer invocation (usage: /supervisor [on|off]; empty toggles)", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
+		return Result{Handled: true, Action: ActionSetSupervisor, SupervisorMode: strings.ToLower(strings.TrimSpace(args))}
 	})
 	r.Register("back", "Jump to parent session if current session was spawned from another", func(string) Result {
 		return Result{Handled: true, Action: ActionBack}

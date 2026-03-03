@@ -1,6 +1,8 @@
 package app
 
 import (
+	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -191,6 +193,8 @@ type uiModel struct {
 	compacting       bool
 	reviewerRunning  bool
 	reviewerBlocking bool
+	reviewerEnabled  bool
+	reviewerMode     string
 
 	queued []string
 
@@ -238,6 +242,7 @@ type uiModel struct {
 
 	transientStatus      string
 	transientStatusToken uint64
+	debugKeys            bool
 
 	transcriptEntries       []tui.TranscriptEntry
 	nativeFlushedEntryCount int
@@ -259,6 +264,7 @@ type uiModel struct {
 
 	rollbackMode                     bool
 	rollbackEditing                  bool
+	rollbackOverlayPushed            bool
 	rollbackCandidates               []rollbackCandidate
 	rollbackSelection                int
 	rollbackSelectedUserMessageIndex int
@@ -294,9 +300,17 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 		theme:              "dark",
 		tuiAlternateScreen: config.TUIAlternateScreenAuto,
 		tuiScrollMode:      config.TUIScrollModeAlt,
+		debugKeys:          envFlagEnabled("BUILDER_DEBUG_KEYS"),
+		reviewerMode:       "off",
 	}
 	for _, opt := range opts {
 		opt(m)
+	}
+	if m.engine != nil {
+		m.reviewerMode = m.engine.ReviewerFrequency()
+		m.reviewerEnabled = m.engine.ReviewerEnabled()
+	} else {
+		m.reviewerEnabled = strings.TrimSpace(m.reviewerMode) != "" && strings.TrimSpace(m.reviewerMode) != "off"
 	}
 	var startupNativeHistoryCmd tea.Cmd
 	if m.engine != nil {
@@ -347,7 +361,10 @@ func (m *uiModel) shouldClearOnInit() bool {
 }
 
 func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if keyMsg, ok := normalizeKeyMsg(msg); ok {
+	if keyMsg, ok, source := normalizeKeyMsgWithSource(msg); ok {
+		if m.debugKeys {
+			m.setDebugKeyTransientStatus(msg, keyMsg, source)
+		}
 		if m.activeAsk != nil {
 			next, cmd := m.askController().handleKey(keyMsg)
 			next.(*uiModel).syncViewport()
@@ -413,6 +430,28 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.forwardToView(msg)
 	m.syncViewport()
 	return m, nil
+}
+
+func (m *uiModel) setDebugKeyTransientStatus(raw tea.Msg, normalized tea.KeyMsg, source string) {
+	rawString := ""
+	if stringer, ok := raw.(fmt.Stringer); ok {
+		rawString = stringer.String()
+	}
+	m.transientStatusToken++
+	m.transientStatus = fmt.Sprintf("key src=%s raw=%q norm=%q type=%d", source, rawString, normalized.String(), normalized.Type)
+}
+
+func envFlagEnabled(name string) bool {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return false
+	}
+	switch strings.ToLower(value) {
+	case "0", "false", "off", "no":
+		return false
+	default:
+		return true
+	}
 }
 
 func (m *uiModel) forwardToView(msg tea.Msg) {
