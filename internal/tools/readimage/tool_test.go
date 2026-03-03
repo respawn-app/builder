@@ -103,7 +103,11 @@ func TestCall_PDFPathReturnsInputFileContentItem(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected file_data string, got %#v", items[0]["file_data"])
 	}
-	decoded, decodeErr := base64.StdEncoding.DecodeString(encoded)
+	const prefix = "data:application/pdf;base64,"
+	if !strings.HasPrefix(encoded, prefix) {
+		t.Fatalf("expected data URL prefix %q, got %q", prefix, encoded)
+	}
+	decoded, decodeErr := base64.StdEncoding.DecodeString(strings.TrimPrefix(encoded, prefix))
 	if decodeErr != nil {
 		t.Fatalf("decode base64 file_data: %v", decodeErr)
 	}
