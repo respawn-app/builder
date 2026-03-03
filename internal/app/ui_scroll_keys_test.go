@@ -81,7 +81,7 @@ func TestMainInputUpDownAtBoundsScrollsTranscript(t *testing.T) {
 	}
 }
 
-func TestReviewerLockStillAllowsTranscriptScroll(t *testing.T) {
+func TestReviewerRunStillAllowsTranscriptScrollAndEditing(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 80
 	m.termHeight = 8
@@ -101,22 +101,37 @@ func TestReviewerLockStillAllowsTranscriptScroll(t *testing.T) {
 	next, _ := m.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventReviewerStarted}})
 	locked := next.(*uiModel)
 	if !locked.reviewerBlocking {
-		t.Fatal("expected reviewer to lock input")
+		t.Fatal("expected reviewer running state")
 	}
+	if locked.isInputLocked() {
+		t.Fatal("did not expect reviewer to lock input")
+	}
+
+	next, _ = locked.Update(tea.KeyMsg{Type: tea.KeyUp})
+	locked = next.(*uiModel)
 
 	next, _ = locked.Update(tea.KeyMsg{Type: tea.KeyUp})
 	locked = next.(*uiModel)
 	afterUp := locked.view.OngoingScroll()
 	if afterUp >= start {
-		t.Fatalf("expected up to scroll transcript while reviewer lock active, got %d from %d", afterUp, start)
+		t.Fatalf("expected up to scroll transcript while reviewer runs, got %d from %d", afterUp, start)
 	}
 	if locked.input != "keep this draft" {
-		t.Fatalf("expected input text preserved while reviewer lock active, got %q", locked.input)
+		t.Fatalf("expected input text preserved while reviewer runs, got %q", locked.input)
 	}
 
 	next, _ = locked.Update(tea.KeyMsg{Type: tea.KeyDown})
 	locked = next.(*uiModel)
+
+	next, _ = locked.Update(tea.KeyMsg{Type: tea.KeyDown})
+	locked = next.(*uiModel)
 	if got := locked.view.OngoingScroll(); got <= afterUp {
-		t.Fatalf("expected down to scroll transcript while reviewer lock active, got %d from %d", got, afterUp)
+		t.Fatalf("expected down to scroll transcript while reviewer runs, got %d from %d", got, afterUp)
+	}
+
+	next, _ = locked.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	locked = next.(*uiModel)
+	if locked.input != "keep this draftx" {
+		t.Fatalf("expected input editable while reviewer runs, got %q", locked.input)
 	}
 }

@@ -158,13 +158,6 @@ func formatOutputDefault(raw json.RawMessage) string {
 		if code, ok := asInt(obj["exit_code"]); ok && code != 0 {
 			notes = append(notes, fmt.Sprintf("exit code %d", code))
 		}
-		if truncated, ok := obj["truncated"].(bool); ok && truncated {
-			if removed, ok := asInt(obj["truncation_bytes"]); ok && removed > 0 {
-				notes = append(notes, fmt.Sprintf("truncated %d bytes", removed))
-			} else {
-				notes = append(notes, "truncated")
-			}
-		}
 		if len(notes) == 0 {
 			return out
 		}

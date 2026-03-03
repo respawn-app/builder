@@ -66,3 +66,17 @@ func TestFormatOutputForTool_ViewImageSummarizesBinaryPayload(t *testing.T) {
 		t.Fatalf("unexpected output = %q", out)
 	}
 }
+
+func TestFormatOutputDoesNotAppendDuplicateTruncationNote(t *testing.T) {
+	out := FormatOutput(json.RawMessage(`{"output":"head\n\n...[Output is very large, omitted 21525 bytes. Consider using more targeted commands to reduce output size]...\n\ntail","exit_code":0,"truncated":true,"truncation_bytes":21525}`))
+	if strings.Contains(out, "truncated 21525 bytes") {
+		t.Fatalf("did not expect duplicate truncation note, output = %q", out)
+	}
+}
+
+func TestFormatOutputDoesNotAppendTruncationNoteWithoutInlineBanner(t *testing.T) {
+	out := FormatOutput(json.RawMessage(`{"output":"trimmed output","exit_code":0,"truncated":true,"truncation_bytes":42}`))
+	if strings.Contains(out, "truncated 42 bytes") {
+		t.Fatalf("did not expect truncation note, output = %q", out)
+	}
+}
