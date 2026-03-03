@@ -494,9 +494,6 @@ func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
 		if m.isInputLocked() {
 			prefix = "⨯ "
 		}
-		if m.reviewerBlocking {
-			text = "Review in progress."
-		}
 		raw = splitPlainLines(prefix + text)
 	}
 	wrapped := make([]string, 0, len(raw))
@@ -744,11 +741,7 @@ func (l uiViewLayout) calcChatLines() int {
 				inputContentLines += len(wrapLine(line, contentWidth))
 			}
 		} else {
-			text := m.input
-			if m.reviewerBlocking {
-				text = "Review in progress."
-			}
-			wrapped := wrapLine("› "+text, contentWidth)
+			wrapped := wrapLine("› "+m.input, contentWidth)
 			inputContentLines = len(wrapped)
 		}
 		if inputContentLines < 1 {

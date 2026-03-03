@@ -290,5 +290,5 @@ func truncate(s string, maxLen int) (string, bool, int) {
 		tail = tail[len(tail)-headTailSize:]
 	}
 	removed := len(s) - len(head) - len(tail)
-	return fmt.Sprintf("%s\n\n...[Output is very large, omitted %d chars. Consider using more targeted commands to reduce output size]...\n\n%s", head, removed, tail), true, removed
+	return fmt.Sprintf("%s\n\n...[Output is very large, omitted %d bytes. Consider using more targeted commands to reduce output size]...\n\n%s", head, removed, tail), true, removed
 }

@@ -1950,7 +1950,7 @@ func TestStatusLineShowsReviewerProgressWarning(t *testing.T) {
 	}
 }
 
-func TestReviewerProgressLocksInputWithPlaceholder(t *testing.T) {
+func TestReviewerProgressKeepsInputEditable(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.busy = true
 	m.activity = uiActivityRunning
@@ -1959,32 +1959,60 @@ func TestReviewerProgressLocksInputWithPlaceholder(t *testing.T) {
 	next, _ := m.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventReviewerStarted}})
 	started := next.(*uiModel)
 	if !started.reviewerBlocking {
-		t.Fatal("expected reviewer to lock input while running")
+		t.Fatal("expected reviewer state to be marked running")
 	}
 	lines := started.renderInputLines(80, uiThemeStyles("dark"))
 	plain := stripANSIAndTrimRight(strings.Join(lines, "\n"))
-	if !strings.Contains(plain, "Review in progress.") {
-		t.Fatalf("expected reviewer placeholder text, got %q", plain)
-	}
-	if strings.Contains(plain, "keep this draft") {
-		t.Fatalf("expected original draft hidden while reviewer blocks input, got %q", plain)
+	if !strings.Contains(plain, "keep this draft") {
+		t.Fatalf("expected original draft visible while reviewer runs, got %q", plain)
 	}
 
 	next, _ = started.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
 	locked := next.(*uiModel)
-	if locked.input != "keep this draft" {
-		t.Fatalf("expected key input ignored while reviewer blocks input, got %q", locked.input)
+	if locked.input != "keep this draftx" {
+		t.Fatalf("expected key input accepted while reviewer runs, got %q", locked.input)
 	}
 
 	next, _ = locked.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventReviewerCompleted}})
 	completed := next.(*uiModel)
 	if completed.reviewerBlocking {
-		t.Fatal("expected reviewer input lock cleared after completion")
+		t.Fatal("expected reviewer state cleared after completion")
 	}
 	lines = completed.renderInputLines(80, uiThemeStyles("dark"))
 	plain = stripANSIAndTrimRight(strings.Join(lines, "\n"))
-	if !strings.Contains(plain, "keep this draft") {
-		t.Fatalf("expected original draft restored after reviewer completion, got %q", plain)
+	if !strings.Contains(plain, "keep this draftx") {
+		t.Fatalf("expected edited draft retained after reviewer completion, got %q", plain)
+	}
+}
+
+func TestBusyEnterDuringReviewerQueuesForNextTurn(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "steer after review"
+
+	next, _ := m.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventReviewerStarted}})
+	started := next.(*uiModel)
+	if !started.reviewerRunning {
+		t.Fatal("expected reviewer to be running")
+	}
+	if started.isInputLocked() {
+		t.Fatal("did not expect input lock while reviewer is running")
+	}
+
+	next, _ = started.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if len(updated.queued) != 1 || updated.queued[0] != "steer after review" {
+		t.Fatalf("expected steer message queued for next turn, got %+v", updated.queued)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("did not expect pending injected reviewer steering, got %+v", updated.pendingInjected)
+	}
+	if updated.inputSubmitLocked {
+		t.Fatal("did not expect submit lock while reviewer is running")
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after queueing reviewer steering, got %q", updated.input)
 	}
 }
 

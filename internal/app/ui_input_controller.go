@@ -200,9 +200,6 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.rollbackEditing = false
 			return m, tea.Quit
 		}
-		if m.reviewerBlocking {
-			return m, nil
-		}
 		if command, knownCommand := m.commandRegistry.Command(text); knownCommand {
 			if m.busy {
 				if !command.RunWhileBusy {
@@ -218,6 +215,12 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		_, isUserShell := parseUserShellCommand(text)
 		if m.busy {
 			if isUserShell {
+				m.queued = append(m.queued, text)
+				m.clearInput()
+				m.activity = uiActivityQueued
+				return m, nil
+			}
+			if m.reviewerRunning {
 				m.queued = append(m.queued, text)
 				m.clearInput()
 				m.activity = uiActivityQueued

@@ -166,3 +166,17 @@ func TestSanitizeOutputStripsANSIAndControlSequences(t *testing.T) {
 		t.Fatalf("sanitized output mismatch: %q", out)
 	}
 }
+
+func TestTruncateBannerUsesByteWording(t *testing.T) {
+	in := strings.Repeat("a", headTailSize+headTailSize+10)
+	out, truncated, removed := truncate(in, 100)
+	if !truncated {
+		t.Fatal("expected truncation")
+	}
+	if removed <= 0 {
+		t.Fatalf("expected positive removed bytes, got %d", removed)
+	}
+	if !strings.Contains(out, "omitted ") || !strings.Contains(out, " bytes.") {
+		t.Fatalf("expected byte-based truncation banner, output = %q", out)
+	}
+}

@@ -267,7 +267,7 @@ type uiModel struct {
 }
 
 func (m *uiModel) isInputLocked() bool {
-	return m.inputSubmitLocked || m.reviewerBlocking
+	return m.inputSubmitLocked
 }
 
 func (m *uiModel) clearReviewerState() {
