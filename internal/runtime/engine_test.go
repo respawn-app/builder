@@ -1391,6 +1391,17 @@ func TestReviewerRunsOnEditsFrequencyOnlyWhenPatchApplied(t *testing.T) {
 }
 
 func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, agentsGlobalDirName)
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatalf("mkdir global agents dir: %v", err)
+	}
+	globalPath := filepath.Join(globalDir, agentsFileName)
+	if err := os.WriteFile(globalPath, []byte("global rule"), 0o644); err != nil {
+		t.Fatalf("write global AGENTS: %v", err)
+	}
+
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -1473,20 +1484,41 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 	if len(reviewerReq.Messages) == 0 {
 		t.Fatalf("expected reviewer request to include transcript entry messages")
 	}
-	if reviewerReq.Messages[0].Role != llm.RoleDeveloper || reviewerReq.Messages[0].MessageType != llm.MessageTypeAgentsMD {
+	if reviewerReq.Messages[0].Role != llm.RoleDeveloper || reviewerReq.Messages[0].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(reviewerReq.Messages[0].Content, "source: "+globalPath) {
 		t.Fatalf("expected reviewer message[0] to be AGENTS meta developer message, got %+v", reviewerReq.Messages[0])
 	}
-	if reviewerReq.Messages[1].Role != llm.RoleDeveloper || reviewerReq.Messages[1].MessageType != llm.MessageTypeEnvironment {
-		t.Fatalf("expected reviewer message[1] to be environment meta developer message, got %+v", reviewerReq.Messages[1])
+	environmentIdx := -1
+	boundaryIdx := -1
+	skillsMetaIdx := -1
+	for idx, message := range reviewerReq.Messages {
+		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeEnvironment {
+			environmentIdx = idx
+		}
+		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeSkills {
+			skillsMetaIdx = idx
+		}
+		if message.Role == llm.RoleDeveloper && message.Content == reviewerMetaBoundaryMessage {
+			boundaryIdx = idx
+			break
+		}
 	}
-	if reviewerReq.Messages[2].Role != llm.RoleDeveloper || reviewerReq.Messages[2].Content != reviewerMetaBoundaryMessage {
-		t.Fatalf("expected reviewer message[2] to be transcript boundary developer message, got %+v", reviewerReq.Messages[2])
+	if environmentIdx < 0 {
+		t.Fatalf("expected reviewer metadata to include environment context, got %+v", reviewerReq.Messages)
+	}
+	if boundaryIdx < 0 {
+		t.Fatalf("expected reviewer metadata to include transcript boundary message, got %+v", reviewerReq.Messages)
+	}
+	if environmentIdx >= boundaryIdx {
+		t.Fatalf("expected environment metadata before boundary, env=%d boundary=%d", environmentIdx, boundaryIdx)
+	}
+	if skillsMetaIdx >= 0 && (skillsMetaIdx <= 0 || skillsMetaIdx >= environmentIdx) {
+		t.Fatalf("expected skills metadata between AGENTS and environment when present, skills=%d env=%d", skillsMetaIdx, environmentIdx)
 	}
 	foundAgentLabel := false
 	foundToolCallJSON := false
 	foundToolOutputField := false
 	foundSeparateToolOutput := false
-	for _, message := range reviewerReq.Messages[3:] {
+	for _, message := range reviewerReq.Messages[boundaryIdx+1:] {
 		if message.Role != llm.RoleUser {
 			t.Fatalf("expected reviewer transcript entries after metadata to be user role messages, got %q", message.Role)
 		}
@@ -1957,6 +1989,9 @@ func TestAppendMissingReviewerMetaContextPrependsAgentsAndEnvironmentWhenMissing
 }
 
 func TestAppendMissingReviewerMetaContextKeepsExistingMetaMessages(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
 	workspace := t.TempDir()
 	existing := llm.Message{
 		Role:        llm.RoleDeveloper,
@@ -1976,6 +2011,85 @@ func TestAppendMissingReviewerMetaContextKeepsExistingMetaMessages(t *testing.T)
 	got := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high")
 	if len(got) != len(in) {
 		t.Fatalf("expected no extra messages when AGENTS+environment already present, got %d", len(got))
+	}
+}
+
+func TestAppendMissingReviewerMetaContextBackfillsSkillsBetweenAgentsAndEnvironment(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "workspace-skill", "from workspace")
+
+	existingGlobalAgents := llm.Message{
+		Role:        llm.RoleDeveloper,
+		MessageType: llm.MessageTypeAgentsMD,
+		Content:     agentsInjectedHeader + "\nsource: /tmp/global/AGENTS.md\n\n```md\nglobal\n```",
+	}
+	existingWorkspaceAgents := llm.Message{
+		Role:        llm.RoleDeveloper,
+		MessageType: llm.MessageTypeAgentsMD,
+		Content:     agentsInjectedHeader + "\nsource: /tmp/workspace/AGENTS.md\n\n```md\nworkspace\n```",
+	}
+	existingEnv := llm.Message{
+		Role:        llm.RoleDeveloper,
+		MessageType: llm.MessageTypeEnvironment,
+		Content:     environmentInjectedHeader + "\nOS: darwin",
+	}
+	in := []llm.Message{
+		existingGlobalAgents,
+		existingWorkspaceAgents,
+		existingEnv,
+		{Role: llm.RoleUser, Content: "request"},
+	}
+
+	got := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high")
+	if len(got) != len(in)+1 {
+		t.Fatalf("expected one skills message to be inserted, got len=%d", len(got))
+	}
+	if got[0].MessageType != llm.MessageTypeAgentsMD || got[1].MessageType != llm.MessageTypeAgentsMD {
+		t.Fatalf("expected AGENTS metadata to remain first, got %+v %+v", got[0], got[1])
+	}
+	if got[2].MessageType != llm.MessageTypeSkills {
+		t.Fatalf("expected skills metadata to be inserted after AGENTS, got %+v", got[2])
+	}
+	if got[3].MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected environment metadata after skills, got %+v", got[3])
+	}
+	if got[4].Role != llm.RoleUser || got[4].Content != "request" {
+		t.Fatalf("expected transcript content to stay at tail, got %+v", got[4])
+	}
+}
+
+func TestAppendMissingReviewerMetaContextBackfillsSkillsBeforeEnvironmentWhenNoAgents(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "workspace-skill", "from workspace")
+
+	existingEnv := llm.Message{
+		Role:        llm.RoleDeveloper,
+		MessageType: llm.MessageTypeEnvironment,
+		Content:     environmentInjectedHeader + "\nOS: darwin",
+	}
+	in := []llm.Message{
+		existingEnv,
+		{Role: llm.RoleUser, Content: "request"},
+	}
+
+	got := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high")
+	if len(got) != len(in)+1 {
+		t.Fatalf("expected one skills message to be inserted, got len=%d", len(got))
+	}
+	if got[0].MessageType != llm.MessageTypeSkills {
+		t.Fatalf("expected skills metadata first when agents are absent, got %+v", got[0])
+	}
+	if got[1].MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected environment metadata after skills, got %+v", got[1])
+	}
+	if got[2].Role != llm.RoleUser || got[2].Content != "request" {
+		t.Fatalf("expected transcript content to stay at tail, got %+v", got[2])
 	}
 }
 
@@ -2754,6 +2868,86 @@ func TestInjectsEnvironmentInfoWithoutAnyAgentsFiles(t *testing.T) {
 	}
 	if req.Messages[1].Role != llm.RoleUser || req.Messages[1].Content != "first" {
 		t.Fatalf("expected user message after environment injection, got %+v", req.Messages[1])
+	}
+}
+
+func TestInjectsSkillsContextBeforeEnvironmentAndPersists(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	homeSkillPath := writeTestSkill(t, filepath.Join(home, ".builder", "skills", "home-skill"), "home-skill", "from home")
+	workspaceSkillPath := writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "workspace-skill", "from workspace")
+
+	storeRoot := t.TempDir()
+	store, err := session.Create(storeRoot, "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok-1"}, Usage: llm.Usage{WindowTokens: 200000}},
+		{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok-2"}, Usage: llm.Usage{WindowTokens: 200000}},
+	}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "first"); err != nil {
+		t.Fatalf("first submit: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "second"); err != nil {
+		t.Fatalf("second submit: %v", err)
+	}
+
+	if len(client.calls) != 2 {
+		t.Fatalf("expected two model calls, got %d", len(client.calls))
+	}
+
+	firstReq := client.calls[0]
+	skillsIdx := -1
+	envIdx := -1
+	userIdx := -1
+	for i, msg := range firstReq.Messages {
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeSkills {
+			skillsIdx = i
+			if !strings.Contains(msg.Content, "- home-skill: from home (file: "+filepath.ToSlash(homeSkillPath)+")") {
+				t.Fatalf("expected injected skills context to include home skill entry, got %q", msg.Content)
+			}
+			if !strings.Contains(msg.Content, "- workspace-skill: from workspace (file: "+filepath.ToSlash(workspaceSkillPath)+")") {
+				t.Fatalf("expected injected skills context to include workspace skill entry, got %q", msg.Content)
+			}
+		}
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeEnvironment {
+			envIdx = i
+		}
+		if msg.Role == llm.RoleUser && msg.Content == "first" {
+			userIdx = i
+		}
+	}
+	if skillsIdx < 0 {
+		t.Fatalf("expected injected skills developer message in first request, messages=%+v", firstReq.Messages)
+	}
+	if envIdx < 0 {
+		t.Fatalf("expected injected environment developer message in first request, messages=%+v", firstReq.Messages)
+	}
+	if userIdx < 0 {
+		t.Fatalf("expected first user message in first request, messages=%+v", firstReq.Messages)
+	}
+	if !(skillsIdx < envIdx && envIdx < userIdx) {
+		t.Fatalf("expected skills -> environment -> user ordering, got skills=%d env=%d user=%d", skillsIdx, envIdx, userIdx)
+	}
+
+	secondReq := client.calls[1]
+	skillsInjectedCount := 0
+	for _, msg := range secondReq.Messages {
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeSkills {
+			skillsInjectedCount++
+		}
+	}
+	if skillsInjectedCount != 1 {
+		t.Fatalf("expected exactly one injected skills message to persist, got %d", skillsInjectedCount)
 	}
 }
 
