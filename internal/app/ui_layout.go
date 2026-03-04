@@ -618,7 +618,7 @@ func (l uiViewLayout) renderSlashCommandPicker(width int) []string {
 		return nil
 	}
 	palette := uiPalette(m.theme)
-	selectedCommandStyle := lipgloss.NewStyle().Foreground(palette.muted).Bold(true)
+	selectedCommandStyle := lipgloss.NewStyle().Foreground(palette.primary).Bold(true)
 	unselectedCommandStyle := lipgloss.NewStyle().Bold(true)
 	descriptionStyle := lipgloss.NewStyle().Foreground(palette.muted).Faint(true)
 	out := make([]string, 0, slashCommandPickerLines)
