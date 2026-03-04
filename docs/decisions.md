@@ -142,12 +142,13 @@
 ## Configuration
 
 - User settings are loaded from `~/.builder/config.toml` with first-run auto-bootstrap.
+- Unknown `config.toml` keys are rejected as configuration errors.
 - Configuration precedence: `CLI overrides > environment > settings file > built-in defaults`.
 - Thinking level passes OpenAI values through unchanged (including `xhigh`) and applies only to OpenAI model families.
 - Context window is explicit setting: `model_context_window` (default `400000`).
 - Validation requires `context_compaction_threshold_tokens < model_context_window`.
 - Responses API `store` is configurable via `store` / `BUILDER_STORE`, default `false`.
-- Native compaction routing is configurable by `use_native_compaction` (default `true`).
+- Compaction routing is configurable by `compaction_mode` (`native|local|none`, default `native`).
 - Terminal notification backend is configurable by `notification_method` (`auto|osc9|bel`, default `auto`).
 - TUI alternate-screen policy is configurable by `tui_alternate_screen` (`auto|always|never`, default `auto`).
 - `tools.web_search` is enabled by default; `web_search` controls whether provider-native web search is activated (`native`) or disabled (`off`).
@@ -157,6 +158,7 @@
 
 - Auto-compaction is enabled near context limits.
 - Auto-compaction failure aborts the current turn.
+- `compaction_mode=none` disables manual and automatic compaction.
 - Manual compaction is available via `/compact` while idle; optional arguments are appended as compaction guidance.
 - Local compaction instructions are injected as final `developer` message.
 - Local compaction summary generation reads full provider history from latest compaction checkpoint onward (or from start if none).
@@ -227,7 +229,7 @@
 - Picker matches only first token and updates continuously.
 - After whitespace, command enters argument mode and picker hides.
 - Unknown slash commands are sent to model as normal user prompts.
-- Built-in commands: `/logout`, `/exit`, `/new`, `/resume`, `/compact`, `/name`, `/thinking`, `/review`, `/supervisor`.
+- Built-in commands: `/logout`, `/exit`, `/new`, `/resume`, `/compact`, `/name`, `/thinking`, `/review`, `/supervisor`, `/autocompaction`.
 - Known slash commands are intercepted while model is running and never queued as user prompts.
 - Run-safe commands execute immediately while busy.
 - Non-run-safe known commands while busy are rejected with transient status-line error.
@@ -235,6 +237,9 @@
 - `/supervisor` controls runtime reviewer invocation for the current session only.
 - `/supervisor` toggles when called without args; `/supervisor on|off` sets explicitly.
 - `/supervisor` emits user-visible confirmation in transcript + status line and does not persist to config.
+- `/autocompaction` controls runtime auto-compaction invocation for the current session only.
+- `/autocompaction` toggles when called without args; `/autocompaction on|off` sets explicitly.
+- `/autocompaction` emits user-visible confirmation in transcript + status line and does not persist to config.
 - Built-in prompt commands use embedded markdown templates.
 - Slash commands support file-backed prompts from:
 - `./.builder/prompts`, `./.builder/commands`, `~/.builder/prompts`, `~/.builder/commands`.

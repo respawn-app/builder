@@ -10,30 +10,32 @@ import (
 type Action string
 
 const (
-	ActionNone          Action = "none"
-	ActionExit          Action = "exit"
-	ActionNew           Action = "new"
-	ActionResume        Action = "resume"
-	ActionLogout        Action = "logout"
-	ActionCompact       Action = "compact"
-	ActionSetName       Action = "set_name"
-	ActionSetThinking   Action = "set_thinking"
-	ActionSetSupervisor Action = "set_supervisor"
-	ActionBack          Action = "back"
-	ActionUnhandled     Action = "unhandled"
+	ActionNone              Action = "none"
+	ActionExit              Action = "exit"
+	ActionNew               Action = "new"
+	ActionResume            Action = "resume"
+	ActionLogout            Action = "logout"
+	ActionCompact           Action = "compact"
+	ActionSetName           Action = "set_name"
+	ActionSetThinking       Action = "set_thinking"
+	ActionSetSupervisor     Action = "set_supervisor"
+	ActionSetAutoCompaction Action = "set_auto_compaction"
+	ActionBack              Action = "back"
+	ActionUnhandled         Action = "unhandled"
 )
 
 type Result struct {
-	Handled           bool
-	Action            Action
-	Text              string
-	Args              string
-	SubmitUser        bool
-	User              string
-	FreshConversation bool
-	SessionName       string
-	ThinkingLevel     string
-	SupervisorMode    string
+	Handled            bool
+	Action             Action
+	Text               string
+	Args               string
+	SubmitUser         bool
+	User               string
+	FreshConversation  bool
+	SessionName        string
+	ThinkingLevel      string
+	SupervisorMode     string
+	AutoCompactionMode string
 }
 
 type Handler func(args string) Result
@@ -82,6 +84,9 @@ func NewDefaultRegistry() *Registry {
 	})
 	r.RegisterWithOptions("supervisor", "Toggle reviewer invocation (usage: /supervisor [on|off]; empty toggles)", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
 		return Result{Handled: true, Action: ActionSetSupervisor, SupervisorMode: strings.ToLower(strings.TrimSpace(args))}
+	})
+	r.RegisterWithOptions("autocompaction", "Toggle auto-compaction (usage: /autocompaction [on|off]; empty toggles)", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
+		return Result{Handled: true, Action: ActionSetAutoCompaction, AutoCompactionMode: strings.ToLower(strings.TrimSpace(args))}
 	})
 	r.Register("back", "Jump to parent session if current session was spawned from another", func(string) Result {
 		return Result{Handled: true, Action: ActionBack}

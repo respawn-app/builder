@@ -131,6 +131,25 @@ func (t fakeTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	return tools.Result{CallID: c.ID, Name: c.Name, Output: out}, nil
 }
 
+type blockingTool struct {
+	name    tools.ID
+	started chan struct{}
+	release chan struct{}
+}
+
+func (t blockingTool) Name() tools.ID { return t.name }
+
+func (t blockingTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
+	select {
+	case <-t.started:
+	default:
+		close(t.started)
+	}
+	<-t.release
+	out, _ := json.Marshal(map[string]any{"tool": string(t.name)})
+	return tools.Result{CallID: c.ID, Name: c.Name, Output: out}, nil
+}
+
 type fakeStreamClient struct {
 	mu       sync.Mutex
 	attempts int
@@ -362,6 +381,100 @@ func TestSetThinkingLevelRejectsInvalidValue(t *testing.T) {
 	}
 	if got := eng.ThinkingLevel(); got != "high" {
 		t.Fatalf("thinking level after invalid set = %q, want high", got)
+	}
+}
+
+func TestSetAutoCompactionEnabledTogglesRuntimeOnly(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	cfg := Config{Model: "gpt-5"}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), cfg)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	changed, enabled := eng.SetAutoCompactionEnabled(false)
+	if !changed || enabled {
+		t.Fatalf("expected changed=true enabled=false, got changed=%v enabled=%v", changed, enabled)
+	}
+	if got := eng.AutoCompactionEnabled(); got {
+		t.Fatalf("expected runtime auto-compaction disabled, got %v", got)
+	}
+
+	restarted, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), cfg)
+	if err != nil {
+		t.Fatalf("new restarted engine: %v", err)
+	}
+	if got := restarted.AutoCompactionEnabled(); !got {
+		t.Fatalf("expected auto-compaction enabled after restart, got %v", got)
+	}
+}
+
+func TestSetAutoCompactionDisabledConcurrentWithBusyStepSkipsCompactionForCurrentRun(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		responses: []llm.Response{
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+				ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+				Usage:     llm.Usage{InputTokens: 390000, OutputTokens: 1000, WindowTokens: 400000},
+			},
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+				Usage:     llm.Usage{WindowTokens: 400000},
+			},
+		},
+		compactionResponses: []llm.CompactionResponse{
+			{
+				OutputItems: []llm.ResponseItem{
+					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "run tools"},
+					{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+				},
+				Usage: llm.Usage{InputTokens: 8000, OutputTokens: 500, WindowTokens: 400000},
+			},
+		},
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	eng, err := New(store, client, tools.NewRegistry(blockingTool{name: tools.ToolShell, started: started, release: release}), Config{
+		Model:                 "gpt-5",
+		AutoCompactTokenLimit: 350000,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	submitDone := make(chan error, 1)
+	go func() {
+		_, submitErr := eng.SubmitUserMessage(context.Background(), "run tools")
+		submitDone <- submitErr
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for tool call to start")
+	}
+	changed, enabled := eng.SetAutoCompactionEnabled(false)
+	if !changed || enabled {
+		t.Fatalf("expected changed=true enabled=false, got changed=%v enabled=%v", changed, enabled)
+	}
+	close(release)
+
+	if err := <-submitDone; err != nil {
+		t.Fatalf("submit while disabling auto-compaction: %v", err)
+	}
+	if got := len(client.compactionCalls); got != 0 {
+		t.Fatalf("expected no compaction call for in-flight run after disabling auto-compaction, got %d", got)
 	}
 }
 
@@ -3202,12 +3315,11 @@ func TestSubmitInjectsEnvironmentLineWithStatusModelLabel(t *testing.T) {
 		}},
 		Usage: llm.Usage{WindowTokens: 200000},
 	}}}
-	useNativeCompaction := false
 	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model:                 "gpt-5.3.codex",
 		ThinkingLevel:         "high",
 		AutoCompactTokenLimit: 1_000_000_000,
-		UseNativeCompaction:   &useNativeCompaction,
+		CompactionMode:        "local",
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -3646,8 +3758,7 @@ func TestManualCompactionLocalAppendsSlashCommandArgumentsToPrompt(t *testing.T)
 			{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "summary"}},
 		},
 	}
-	useNative := false
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", UseNativeCompaction: &useNative})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -3691,8 +3802,7 @@ func TestManualCompactionLocalUsesHistorySinceLastCompactionCheckpoint(t *testin
 			{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "summary"}},
 		},
 	}
-	useNative := false
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", UseNativeCompaction: &useNative})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -3783,8 +3893,7 @@ func TestManualCompactionLocalFailsWhenModelAttemptsToolCalls(t *testing.T) {
 			},
 		},
 	}
-	useNative := false
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", UseNativeCompaction: &useNative})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -3798,6 +3907,37 @@ func TestManualCompactionLocalFailsWhenModelAttemptsToolCalls(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "tool calls") {
 		t.Fatalf("expected tool-call error, got %v", err)
+	}
+}
+
+func TestManualCompactionDisabledWhenModeNone(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", CompactionMode: "none"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append message: %v", err)
+	}
+
+	err = eng.CompactContext(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected manual compaction to fail when compaction_mode=none")
+	}
+	if !strings.Contains(err.Error(), "compaction_mode=none") {
+		t.Fatalf("expected disabled-compaction error, got %v", err)
+	}
+	if len(client.compactionCalls) != 0 {
+		t.Fatalf("expected no remote compaction call when disabled, got %d", len(client.compactionCalls))
+	}
+	if len(client.calls) != 0 {
+		t.Fatalf("expected no local-summary model call when disabled, got %d", len(client.calls))
 	}
 }
 

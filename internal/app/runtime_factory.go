@@ -104,7 +104,8 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 		ContextWindowTokens:           active.ModelContextWindow,
 		EffectiveContextWindowPercent: 95,
 		LocalCompactionCarryoverLimit: 20_000,
-		UseNativeCompaction:           boolRef(active.UseNativeCompaction),
+		CompactionMode:                string(active.CompactionMode),
+		AutoCompactionEnabled:         boolRef(true),
 		Reviewer: runtime.ReviewerConfig{
 			Frequency:      active.Reviewer.Frequency,
 			Model:          active.Reviewer.Model,

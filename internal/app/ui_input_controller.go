@@ -550,6 +550,47 @@ func (c uiInputController) applyCommandResult(commandResult commands.Result) (te
 			m.forwardToView(tui.AppendTranscriptMsg{Role: "system", Text: status})
 		}
 		return m, c.showTransientStatus(status)
+	case commands.ActionSetAutoCompaction:
+		requested := strings.ToLower(strings.TrimSpace(commandResult.AutoCompactionMode))
+		currentEnabled := m.autoCompactionState()
+		currentCompactionMode := "native"
+		if m.engine != nil {
+			currentCompactionMode = m.engine.CompactionMode()
+		}
+		targetEnabled := currentEnabled
+		switch requested {
+		case "":
+			targetEnabled = !currentEnabled
+		case "on":
+			targetEnabled = true
+		case "off":
+			targetEnabled = false
+		default:
+			errText := "invalid autocompaction mode " + strconv.Quote(requested) + " (expected on|off)"
+			if m.engine != nil {
+				m.engine.AppendLocalEntry("error", errText)
+			} else {
+				m.forwardToView(tui.AppendTranscriptMsg{Role: "error", Text: errText})
+			}
+			return m, nil
+		}
+
+		changed := false
+		nextEnabled := currentEnabled
+		if m.engine != nil {
+			changed, nextEnabled = m.engine.SetAutoCompactionEnabled(targetEnabled)
+		} else {
+			nextEnabled = targetEnabled
+			changed = currentEnabled != targetEnabled
+		}
+		m.autoCompactionEnabled = nextEnabled
+		status := autoCompactionToggleStatusMessage(nextEnabled, changed, currentCompactionMode)
+		if m.engine != nil {
+			m.engine.AppendLocalEntry("system", status)
+		} else {
+			m.forwardToView(tui.AppendTranscriptMsg{Role: "system", Text: status})
+		}
+		return m, c.showTransientStatus(status)
 	case commands.ActionCompact:
 		return m, c.startCompaction(commandResult.Args)
 	}
@@ -566,6 +607,13 @@ func (m *uiModel) reviewerInvocationState() (bool, string) {
 		mode = "off"
 	}
 	return mode != "off", mode
+}
+
+func (m *uiModel) autoCompactionState() bool {
+	if m.engine != nil {
+		return m.engine.AutoCompactionEnabled()
+	}
+	return m.autoCompactionEnabled
 }
 
 func reviewerToggleStatusMessage(enabled bool, mode string, changed bool) string {
@@ -588,6 +636,23 @@ func reviewerToggleStatusMessage(enabled bool, mode string, changed bool) string
 		return "Supervisor invocation disabled"
 	}
 	return "Supervisor invocation already disabled"
+}
+
+func autoCompactionToggleStatusMessage(enabled bool, changed bool, compactionMode string) string {
+	modeNote := ""
+	if strings.EqualFold(strings.TrimSpace(compactionMode), "none") {
+		modeNote = " (compaction_mode=none; manual/auto compaction disabled)"
+	}
+	if enabled {
+		if changed {
+			return "Auto-compaction enabled" + modeNote
+		}
+		return "Auto-compaction already enabled" + modeNote
+	}
+	if changed {
+		return "Auto-compaction disabled" + modeNote
+	}
+	return "Auto-compaction already disabled" + modeNote
 }
 
 func (c uiInputController) showTransientStatus(message string) tea.Cmd {

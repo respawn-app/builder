@@ -79,6 +79,19 @@ func NormalizeReviewerFrequency(frequency string) (string, bool) {
 	}
 }
 
+func NormalizeCompactionMode(mode string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "native":
+		return "native", true
+	case "local":
+		return "local", true
+	case "none":
+		return "none", true
+	default:
+		return "", false
+	}
+}
+
 type Config struct {
 	Model                         string
 	Temperature                   float64
@@ -90,7 +103,8 @@ type Config struct {
 	ContextWindowTokens           int
 	EffectiveContextWindowPercent int
 	LocalCompactionCarryoverLimit int
-	UseNativeCompaction           *bool
+	CompactionMode                string
+	AutoCompactionEnabled         *bool
 	Reviewer                      ReviewerConfig
 	OnEvent                       func(Event)
 }
@@ -159,9 +173,14 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 	if cfg.LocalCompactionCarryoverLimit <= 0 {
 		cfg.LocalCompactionCarryoverLimit = 20_000
 	}
-	if cfg.UseNativeCompaction == nil {
-		useNative := true
-		cfg.UseNativeCompaction = &useNative
+	if normalized, ok := NormalizeCompactionMode(cfg.CompactionMode); ok {
+		cfg.CompactionMode = normalized
+	} else {
+		cfg.CompactionMode = "native"
+	}
+	if cfg.AutoCompactionEnabled == nil {
+		enabled := true
+		cfg.AutoCompactionEnabled = &enabled
 	}
 	if cfg.ContextWindowTokens <= 0 {
 		if meta, ok := llm.LookupModelMetadata(cfg.Model); ok && meta.ContextWindowTokens > 0 {
@@ -2076,6 +2095,23 @@ func (e *Engine) SetThinkingLevel(level string) error {
 	return nil
 }
 
+func (e *Engine) SetAutoCompactionEnabled(enabled bool) (bool, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	current := true
+	if e.cfg.AutoCompactionEnabled != nil {
+		current = *e.cfg.AutoCompactionEnabled
+	}
+	if current == enabled {
+		return false, current
+	}
+	if e.cfg.AutoCompactionEnabled == nil {
+		e.cfg.AutoCompactionEnabled = new(bool)
+	}
+	*e.cfg.AutoCompactionEnabled = enabled
+	return true, enabled
+}
+
 func (e *Engine) SetReviewerEnabled(enabled bool) (bool, string, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -2128,6 +2164,25 @@ func (e *Engine) ReviewerFrequency() string {
 
 func (e *Engine) ReviewerEnabled() bool {
 	return e.ReviewerFrequency() != "off"
+}
+
+func (e *Engine) AutoCompactionEnabled() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.cfg.AutoCompactionEnabled == nil {
+		return true
+	}
+	return *e.cfg.AutoCompactionEnabled
+}
+
+func (e *Engine) CompactionMode() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	normalized, ok := NormalizeCompactionMode(e.cfg.CompactionMode)
+	if !ok {
+		return "native"
+	}
+	return normalized
 }
 
 func (e *Engine) initReviewerClient() error {

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"builder/internal/tools"
@@ -67,8 +68,8 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.AllowNonCwdEdits {
 		t.Fatalf("expected default allow_non_cwd_edits=false")
 	}
-	if !cfg.Settings.UseNativeCompaction {
-		t.Fatalf("expected default use_native_compaction=true")
+	if cfg.Settings.CompactionMode != CompactionModeNative {
+		t.Fatalf("expected default compaction_mode=native, got %q", cfg.Settings.CompactionMode)
 	}
 	if cfg.Settings.ShellOutputMaxChars != 16000 {
 		t.Fatalf("default shell_output_max_chars mismatch: %d", cfg.Settings.ShellOutputMaxChars)
@@ -684,7 +685,7 @@ func TestLoadContextCompactionThresholdPrecedence(t *testing.T) {
 	}
 }
 
-func TestLoadUseNativeCompactionPrecedence(t *testing.T) {
+func TestLoadCompactionModePrecedence(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -693,7 +694,7 @@ func TestLoadUseNativeCompactionPrecedence(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(configPath, []byte("use_native_compaction = false\n"), 0o644); err != nil {
+	if err := os.WriteFile(configPath, []byte("compaction_mode = \"local\"\n"), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -701,23 +702,90 @@ func TestLoadUseNativeCompactionPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if cfg.Settings.UseNativeCompaction {
-		t.Fatalf("expected file override use_native_compaction=false")
+	if cfg.Settings.CompactionMode != CompactionModeLocal {
+		t.Fatalf("expected file override compaction_mode=local, got %q", cfg.Settings.CompactionMode)
 	}
-	if got := cfg.Source.Sources["use_native_compaction"]; got != "file" {
-		t.Fatalf("expected use_native_compaction source file, got %q", got)
+	if got := cfg.Source.Sources["compaction_mode"]; got != "file" {
+		t.Fatalf("expected compaction_mode source file, got %q", got)
 	}
 
-	t.Setenv("BUILDER_USE_NATIVE_COMPACTION", "true")
+	t.Setenv("BUILDER_COMPACTION_MODE", "none")
 	cfg, err = Load(workspace, LoadOptions{})
 	if err != nil {
 		t.Fatalf("load with env: %v", err)
 	}
-	if !cfg.Settings.UseNativeCompaction {
-		t.Fatalf("expected env override use_native_compaction=true")
+	if cfg.Settings.CompactionMode != CompactionModeNone {
+		t.Fatalf("expected env override compaction_mode=none, got %q", cfg.Settings.CompactionMode)
 	}
-	if got := cfg.Source.Sources["use_native_compaction"]; got != "env" {
-		t.Fatalf("expected use_native_compaction source env, got %q", got)
+	if got := cfg.Source.Sources["compaction_mode"]; got != "env" {
+		t.Fatalf("expected compaction_mode source env, got %q", got)
+	}
+}
+
+func TestLoadRejectsRemovedUseNativeCompactionSetting(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("use_native_compaction = true\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected unsupported use_native_compaction settings key error")
+	}
+}
+
+func TestLoadRejectsRemovedUseNativeCompactionEnv(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUILDER_USE_NATIVE_COMPACTION", "true")
+
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected unsupported BUILDER_USE_NATIVE_COMPACTION error")
+	}
+}
+
+func TestLoadRejectsUnrelatedUnknownSettingKeys(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model = \"gpt-5\"\nfoo = 1\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected unknown settings key error")
+	} else if !strings.Contains(err.Error(), "foo") {
+		t.Fatalf("expected unknown key name in error, got %v", err)
+	}
+}
+
+func TestLoadRejectsInvalidCompactionMode(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("compaction_mode = \"remote\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid compaction_mode validation error")
 	}
 }
 
