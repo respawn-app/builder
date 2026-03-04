@@ -399,11 +399,16 @@ func (e *Engine) SubmitUserShellCommand(ctx context.Context, command string) (re
 func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, error) {
 	reviewerFrequency := e.ReviewerFrequency()
 	reviewerClient := e.reviewerClientSnapshot()
-	msg, _, err := e.runStepLoopWithOptions(ctx, stepID, reviewerFrequency, reviewerClient, true)
+	msg, _, err := e.runStepLoopWithOptions(ctx, stepID, reviewerFrequency, reviewerClient, true, true)
 	return msg, err
 }
 
-func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, reviewerFrequency string, reviewerClient llm.Client, emitAssistantEvent bool) (llm.Message, bool, error) {
+// runStepLoopWithOptions executes a single assistant/tool loop.
+// reviewerFrequency/reviewerClient are used as the baseline reviewer policy for
+// this run. When refreshReviewerConfigOnResolve is true, the final assistant
+// resolution re-reads current runtime reviewer config so busy-time toggles (for
+// example from /supervisor) affect the currently running step at completion.
+func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, reviewerFrequency string, reviewerClient llm.Client, emitAssistantEvent bool, refreshReviewerConfigOnResolve bool) (llm.Message, bool, error) {
 	executedToolCall := false
 	patchEditsApplied := false
 	phaseProtocolEnabled := e.phaseProtocolEnabledForModel(ctx)
@@ -573,8 +578,13 @@ func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, revi
 				continue
 			}
 			resolved := assistantMsg
-			if e.shouldRunReviewerTurnForFrequency(reviewerFrequency, reviewerClient, patchEditsApplied) {
-				reviewed, err := e.runReviewerFollowUp(ctx, stepID, assistantMsg, reviewerClient)
+			effectiveReviewerFrequency := reviewerFrequency
+			effectiveReviewerClient := reviewerClient
+			if refreshReviewerConfigOnResolve {
+				effectiveReviewerFrequency, effectiveReviewerClient = e.reviewerTurnConfigSnapshot()
+			}
+			if e.shouldRunReviewerTurnForFrequency(effectiveReviewerFrequency, effectiveReviewerClient, patchEditsApplied) {
+				reviewed, err := e.runReviewerFollowUp(ctx, stepID, assistantMsg, effectiveReviewerClient)
 				if err == nil {
 					resolved = reviewed
 				}
@@ -710,7 +720,7 @@ func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, origina
 		return original, err
 	}
 
-	followUp, followUpExecutedToolCall, err := e.runStepLoopWithOptions(ctx, stepID, "off", nil, false)
+	followUp, followUpExecutedToolCall, err := e.runStepLoopWithOptions(ctx, stepID, "off", nil, false, false)
 	if err != nil {
 		status := ReviewerStatus{
 			Outcome:               "followup_failed",
@@ -2145,6 +2155,16 @@ func (e *Engine) reviewerClientSnapshot() llm.Client {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.reviewer
+}
+
+func (e *Engine) reviewerTurnConfigSnapshot() (string, llm.Client) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	normalized, ok := NormalizeReviewerFrequency(e.cfg.Reviewer.Frequency)
+	if !ok {
+		normalized = "off"
+	}
+	return normalized, e.reviewer
 }
 
 func (e *Engine) reviewerRequestConfigSnapshot() reviewerRequestConfig {

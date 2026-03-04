@@ -523,6 +523,68 @@ func TestSetReviewerEnabledConcurrentWithBusyStep(t *testing.T) {
 	if got := eng.ReviewerFrequency(); got != "edits" {
 		t.Fatalf("reviewer frequency after concurrent enable = %q, want edits", got)
 	}
+	if got := len(reviewerClient.calls); got != 1 {
+		t.Fatalf("expected reviewer to run for in-flight step after concurrent enable, got %d calls", got)
+	}
+}
+
+func TestSetReviewerDisabledConcurrentWithBusyStepSkipsReviewerForCurrentRun(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(tools.ToolPatch), Input: json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}`)}},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolPatch, delay: 50 * time.Millisecond}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:      "all",
+			Model:          "gpt-5",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			Client:         reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	submitDone := make(chan error, 1)
+	go func() {
+		_, submitErr := eng.SubmitUserMessage(context.Background(), "edit file")
+		submitDone <- submitErr
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+	if _, _, err := eng.SetReviewerEnabled(false); err != nil {
+		t.Fatalf("disable reviewer while busy: %v", err)
+	}
+
+	if err := <-submitDone; err != nil {
+		t.Fatalf("submit while disabling reviewer: %v", err)
+	}
+	if got := eng.ReviewerFrequency(); got != "off" {
+		t.Fatalf("reviewer frequency after concurrent disable = %q, want off", got)
+	}
+	if got := len(reviewerClient.calls); got != 0 {
+		t.Fatalf("expected reviewer to be skipped for in-flight step after concurrent disable, got %d calls", got)
+	}
 }
 
 func TestHostedWebSearchExecutionFromOutputItem(t *testing.T) {

@@ -2,11 +2,14 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	goruntime "runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"builder/internal/app/commands"
 	"builder/internal/config"
@@ -2043,6 +2046,130 @@ func TestBusySlashSupervisorExecutesImmediatelyWithoutQueueing(t *testing.T) {
 	}
 }
 
+func TestBusySlashSupervisorOffAppliesToInFlightRunCompletion(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	mainClient := &busyToggleFakeClient{
+		delay: 80 * time.Millisecond,
+		responses: []llm.Response{{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		}},
+	}
+	reviewerClient := &busyToggleFakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := runtime.New(store, mainClient, tools.NewRegistry(), runtime.Config{
+		Model: "gpt-5",
+		Reviewer: runtime.ReviewerConfig{
+			Frequency:      "all",
+			Model:          "gpt-5",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			Client:         reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.activity = uiActivityRunning
+
+	submitDone := make(chan error, 1)
+	go func() {
+		_, submitErr := eng.SubmitUserMessage(context.Background(), "hello")
+		submitDone <- submitErr
+	}()
+	time.Sleep(10 * time.Millisecond)
+
+	m.input = "/supervisor off"
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if updated.reviewerEnabled || updated.reviewerMode != "off" {
+		t.Fatalf("expected ui reviewer disabled after /supervisor off, got enabled=%v mode=%q", updated.reviewerEnabled, updated.reviewerMode)
+	}
+	if got := eng.ReviewerFrequency(); got != "off" {
+		t.Fatalf("expected runtime reviewer mode off, got %q", got)
+	}
+
+	if err := <-submitDone; err != nil {
+		t.Fatalf("submit user message: %v", err)
+	}
+	if got := reviewerClient.CallCount(); got != 0 {
+		t.Fatalf("expected no reviewer call for in-flight run after /supervisor off, got %d", got)
+	}
+}
+
+func TestBusySlashSupervisorOnAppliesToInFlightRunCompletion(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	mainClient := &busyToggleFakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(tools.ToolPatch), Input: json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}`)}},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	reviewerClient := &busyToggleFakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := runtime.New(store, mainClient, tools.NewRegistry(busyTogglePatchTool{delay: 80 * time.Millisecond}), runtime.Config{
+		Model: "gpt-5",
+		Reviewer: runtime.ReviewerConfig{
+			Frequency:      "off",
+			Model:          "gpt-5",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			Client:         reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.activity = uiActivityRunning
+
+	submitDone := make(chan error, 1)
+	go func() {
+		_, submitErr := eng.SubmitUserMessage(context.Background(), "edit file")
+		submitDone <- submitErr
+	}()
+	time.Sleep(10 * time.Millisecond)
+
+	m.input = "/supervisor on"
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if !updated.reviewerEnabled || updated.reviewerMode != "edits" {
+		t.Fatalf("expected ui reviewer enabled in edits mode after /supervisor on, got enabled=%v mode=%q", updated.reviewerEnabled, updated.reviewerMode)
+	}
+	if got := eng.ReviewerFrequency(); got != "edits" {
+		t.Fatalf("expected runtime reviewer mode edits, got %q", got)
+	}
+
+	if err := <-submitDone; err != nil {
+		t.Fatalf("submit user message: %v", err)
+	}
+	if got := reviewerClient.CallCount(); got != 1 {
+		t.Fatalf("expected reviewer call for in-flight run after /supervisor on, got %d", got)
+	}
+}
+
 func TestSlashSupervisorWithEngineTogglesRuntimeReviewer(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -2483,6 +2610,57 @@ func TestStatusContextZoneColorBoundaries(t *testing.T) {
 }
 
 type statusLineFakeClient struct{}
+
+type busyToggleFakeClient struct {
+	mu        sync.Mutex
+	responses []llm.Response
+	calls     int
+	delay     time.Duration
+}
+
+func (f *busyToggleFakeClient) Generate(ctx context.Context, _ llm.Request) (llm.Response, error) {
+	if f.delay > 0 {
+		select {
+		case <-ctx.Done():
+			return llm.Response{}, ctx.Err()
+		case <-time.After(f.delay):
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	if len(f.responses) == 0 {
+		return llm.Response{}, errors.New("no fake response configured")
+	}
+	resp := f.responses[0]
+	f.responses = f.responses[1:]
+	return resp, nil
+}
+
+func (f *busyToggleFakeClient) CallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+type busyTogglePatchTool struct {
+	delay time.Duration
+}
+
+func (t busyTogglePatchTool) Name() tools.ID {
+	return tools.ToolPatch
+}
+
+func (t busyTogglePatchTool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
+	if t.delay > 0 {
+		select {
+		case <-ctx.Done():
+			return tools.Result{}, ctx.Err()
+		case <-time.After(t.delay):
+		}
+	}
+	return tools.Result{CallID: c.ID, Name: c.Name, Output: json.RawMessage(`{"ok":true}`)}, nil
+}
 
 func (statusLineFakeClient) Generate(context.Context, llm.Request) (llm.Response, error) {
 	return llm.Response{}, errors.New("not implemented")
