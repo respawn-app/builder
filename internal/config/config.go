@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -36,11 +37,14 @@ const (
 	defaultReviewerSuggestions = 5
 	defaultTUIAlternateScreen  = "auto"
 	defaultTUIScrollMode       = "alt"
+	defaultCompactionMode      = "native"
 )
 
 type TUIAlternateScreenPolicy string
 
 type TUIScrollMode string
+
+type CompactionMode string
 
 const (
 	TUIAlternateScreenAuto   TUIAlternateScreenPolicy = "auto"
@@ -49,6 +53,10 @@ const (
 
 	TUIScrollModeAlt    TUIScrollMode = "alt"
 	TUIScrollModeNative TUIScrollMode = "native"
+
+	CompactionModeNative CompactionMode = "native"
+	CompactionModeLocal  CompactionMode = "local"
+	CompactionModeNone   CompactionMode = "none"
 )
 
 type LoadOptions struct {
@@ -79,7 +87,7 @@ type Settings struct {
 	AllowNonCwdEdits                 bool
 	ModelContextWindow               int
 	ContextCompactionThresholdTokens int
-	UseNativeCompaction              bool
+	CompactionMode                   CompactionMode
 	EnabledTools                     map[tools.ID]bool
 	Timeouts                         Timeouts
 	ShellOutputMaxChars              int
@@ -129,7 +137,7 @@ type fileSettings struct {
 	ModelContextWindow               int    `toml:"model_context_window"`
 	ContextCompactionThresholdTokens int    `toml:"context_compaction_threshold_tokens"`
 	ShellOutputMaxChars              int    `toml:"shell_output_max_chars"`
-	UseNativeCompaction              *bool  `toml:"use_native_compaction"`
+	CompactionMode                   string `toml:"compaction_mode"`
 	Reviewer                         struct {
 		Frequency      string `toml:"frequency"`
 		Model          string `toml:"model"`
@@ -173,7 +181,7 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		"allow_non_cwd_edits":                 "default",
 		"model_context_window":                "default",
 		"context_compaction_threshold_tokens": "default",
-		"use_native_compaction":               "default",
+		"compaction_mode":                     "default",
 		"shell_output_max_chars":              "default",
 		"timeouts.model_request":              "default",
 		"timeouts.shell_default":              "default",
@@ -237,9 +245,9 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		merged.ContextCompactionThresholdTokens = cfg.ContextCompactionThresholdTokens
 		sources["context_compaction_threshold_tokens"] = "file"
 	}
-	if cfg.UseNativeCompaction != nil {
-		merged.UseNativeCompaction = *cfg.UseNativeCompaction
-		sources["use_native_compaction"] = "file"
+	if strings.TrimSpace(cfg.CompactionMode) != "" {
+		merged.CompactionMode = normalizeCompactionMode(cfg.CompactionMode)
+		sources["compaction_mode"] = "file"
 	}
 	if cfg.ShellOutputMaxChars > 0 {
 		merged.ShellOutputMaxChars = cfg.ShellOutputMaxChars
@@ -353,13 +361,12 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		merged.ContextCompactionThresholdTokens = n
 		sources["context_compaction_threshold_tokens"] = "env"
 	}
-	if v := strings.TrimSpace(os.Getenv("BUILDER_USE_NATIVE_COMPACTION")); v != "" {
-		enabled, err := strconv.ParseBool(v)
-		if err != nil {
-			return App{}, fmt.Errorf("invalid BUILDER_USE_NATIVE_COMPACTION: %q", v)
-		}
-		merged.UseNativeCompaction = enabled
-		sources["use_native_compaction"] = "env"
+	if raw, exists := os.LookupEnv("BUILDER_USE_NATIVE_COMPACTION"); exists && strings.TrimSpace(raw) != "" {
+		return App{}, errors.New("unsupported env var: BUILDER_USE_NATIVE_COMPACTION")
+	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_COMPACTION_MODE")); v != "" {
+		merged.CompactionMode = normalizeCompactionMode(v)
+		sources["compaction_mode"] = "env"
 	}
 	if v := strings.TrimSpace(os.Getenv("BUILDER_SHELL_OUTPUT_MAX_CHARS")); v != "" {
 		n, err := strconv.Atoi(v)
@@ -532,7 +539,7 @@ func defaultSettings() Settings {
 		AllowNonCwdEdits:                 false,
 		ModelContextWindow:               defaultModelContextWindow,
 		ContextCompactionThresholdTokens: defaultCompactionThreshold,
-		UseNativeCompaction:              true,
+		CompactionMode:                   CompactionMode(defaultCompactionMode),
 		EnabledTools:                     enabled,
 		ShellOutputMaxChars:              defaultShellOutputMaxChars,
 		Timeouts: Timeouts{
@@ -604,6 +611,11 @@ func validateSettings(v Settings) error {
 	if v.ContextCompactionThresholdTokens >= v.ModelContextWindow {
 		return fmt.Errorf("context_compaction_threshold_tokens must be < model_context_window")
 	}
+	switch strings.ToLower(strings.TrimSpace(string(v.CompactionMode))) {
+	case "native", "local", "none":
+	default:
+		return fmt.Errorf("invalid compaction_mode %q (expected native|local|none)", v.CompactionMode)
+	}
 	for _, id := range tools.CatalogIDs() {
 		if _, ok := v.EnabledTools[id]; !ok {
 			v.EnabledTools[id] = false
@@ -652,6 +664,19 @@ func normalizeTUIScrollMode(raw string) TUIScrollMode {
 		return TUIScrollModeNative
 	default:
 		return TUIScrollMode(strings.TrimSpace(raw))
+	}
+}
+
+func normalizeCompactionMode(raw string) CompactionMode {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "native":
+		return CompactionModeNative
+	case "local":
+		return CompactionModeLocal
+	case "none":
+		return CompactionModeNone
+	default:
+		return CompactionMode(strings.TrimSpace(raw))
 	}
 }
 
@@ -739,10 +764,27 @@ func readSettingsFile(path string) (fileSettings, error) {
 	if strings.TrimSpace(string(data)) == "" {
 		return cfg, nil
 	}
-	if _, err := toml.NewDecoder(bytes.NewReader(data)).Decode(&cfg); err != nil {
+	metadata, err := toml.NewDecoder(bytes.NewReader(data)).Decode(&cfg)
+	if err != nil {
+		return cfg, fmt.Errorf("parse settings file %s: %w", path, err)
+	}
+	if err := validateNoUnknownSettingsKeys(metadata.Undecoded()); err != nil {
 		return cfg, fmt.Errorf("parse settings file %s: %w", path, err)
 	}
 	return cfg, nil
+}
+
+func validateNoUnknownSettingsKeys(keys []toml.Key) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(keys))
+	for _, key := range keys {
+		keyName := strings.TrimSpace(key.String())
+		names = append(names, keyName)
+	}
+	sort.Strings(names)
+	return fmt.Errorf("unknown settings key(s): %s", strings.Join(names, ", "))
 }
 
 func defaultSettingsTOML() string {
@@ -765,7 +807,7 @@ func defaultSettingsTOML() string {
 		"model_context_window":                defaults.ModelContextWindow,
 		"context_compaction_threshold_tokens": defaults.ContextCompactionThresholdTokens,
 		"shell_output_max_chars":              defaults.ShellOutputMaxChars,
-		"use_native_compaction":               defaults.UseNativeCompaction,
+		"compaction_mode":                     defaults.CompactionMode,
 		"tools":                               toolDefaults,
 		"timeouts": map[string]int{
 			"model_request_seconds": defaults.Timeouts.ModelRequestSeconds,
@@ -783,6 +825,11 @@ func defaultSettingsTOML() string {
 	encoded, _ := json.MarshalIndent(payload, "", "  ")
 	out := "# builder settings\n" +
 		"# edit and restart builder to apply changes\n\n" +
+		"# Unknown keys are rejected to keep config changes explicit and safe.\n\n" +
+		"# compaction_mode options:\n" +
+		"# - native: provider-native compaction when available, fallback to local\n" +
+		"# - local: force local summary compaction\n" +
+		"# - none: disable both automatic and manual compaction\n\n" +
 		"# Note: tui_scroll_mode=native forces main UI to normal buffer even if\n" +
 		"# tui_alternate_screen=always, so transcript replay stays visible in scrollback.\n\n" +
 		"# This JSON block mirrors current defaults for readability:\n" +
@@ -800,7 +847,7 @@ func defaultSettingsTOML() string {
 		"model_context_window = " + strconv.Itoa(defaults.ModelContextWindow) + "\n" +
 		"context_compaction_threshold_tokens = " + strconv.Itoa(defaults.ContextCompactionThresholdTokens) + "\n" +
 		"shell_output_max_chars = " + strconv.Itoa(defaults.ShellOutputMaxChars) + "\n" +
-		"use_native_compaction = " + strconv.FormatBool(defaults.UseNativeCompaction) + "\n" +
+		"compaction_mode = \"" + string(defaults.CompactionMode) + "\"\n" +
 		"persistence_root = \"" + DefaultPersistence + "\"\n\n" +
 		"[tools]\n"
 	for _, id := range tools.CatalogIDs() {

@@ -87,6 +87,12 @@ func (e *Engine) autoCompactIfNeeded(ctx context.Context, stepID string, mode co
 }
 
 func (e *Engine) shouldAutoCompact() bool {
+	if !e.AutoCompactionEnabled() {
+		return false
+	}
+	if e.compactionMode() == "none" {
+		return false
+	}
 	current := e.currentTokenUsage()
 	limit := e.autoCompactTokenLimit()
 	return limit > 0 && current >= limit
@@ -137,6 +143,13 @@ func (e *Engine) currentTokenUsage() int {
 }
 
 func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionMode, args string) (compactionResult, error) {
+	if e.compactionMode() == "none" {
+		if mode == compactionModeAuto {
+			return compactionResult{}, nil
+		}
+		return compactionResult{}, errors.New("context compaction is disabled (compaction_mode=none)")
+	}
+
 	input := e.snapshotItems()
 	if len(input) == 0 {
 		return compactionResult{}, nil
@@ -157,7 +170,7 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 
 	instructions := compactionInstructions(args)
 	var result compactionResult
-	if e.useNativeCompaction() && caps.SupportsResponsesCompact {
+	if e.compactionMode() == "native" && caps.SupportsResponsesCompact {
 		result, err = e.compactRemote(ctx, input, providerID, instructions)
 		if err != nil && errors.Is(err, errRemoteCompactionMissingCheckpoint) {
 			result, err = e.compactLocal(ctx, input, providerID, instructions)
@@ -391,11 +404,12 @@ func isCompactionBoundaryItem(item llm.ResponseItem) bool {
 	return false
 }
 
-func (e *Engine) useNativeCompaction() bool {
-	if e.cfg.UseNativeCompaction == nil {
-		return true
+func (e *Engine) compactionMode() string {
+	normalized, ok := NormalizeCompactionMode(e.cfg.CompactionMode)
+	if !ok {
+		return "native"
 	}
-	return *e.cfg.UseNativeCompaction
+	return normalized
 }
 
 func compactionInstructions(args string) string {

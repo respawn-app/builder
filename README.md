@@ -23,6 +23,7 @@ Builder is a highly opinionated, minimal terminal coding agent for professional 
 - [x] Calling shell via `$`/`!` (optional)
 - [x] Premade prompts for review, compaction.
 - [x] Esc-esc-style editing of messages and history rewrites
+- [x] Configurable compaction routing (`compaction_mode=native|local|none`) and runtime auto-compaction toggle (`/autocompaction`)
 
 ### Notifications
 
@@ -40,6 +41,17 @@ Builder is a highly opinionated, minimal terminal coding agent for professional 
 - Ongoing mode keeps mouse capture disabled and does not use terminal alternate-scroll (`?1007`), preserving native scrollback, selection, and copy behavior.
 - Detail transcript mode is an overlay: when `tui_alternate_screen != never`, entering detail uses terminal alt-screen (`?1049`) and enables alternate-scroll (`?1007`) for wheel navigation, then disables it on exit.
 - Rationale: ongoing optimizes for long-lived terminal-native history UX; detail optimizes for transcript inspection/navigation UX without enabling mouse capture.
+
+### Compaction Modes
+
+- `compaction_mode` controls compaction routing in `~/.builder/config.toml`.
+- Supported values: `native` (default), `local`, `none`.
+- `native` uses provider-native compaction when available and falls back to local summary compaction.
+- `local` always uses local summary compaction.
+- `none` disables both automatic and manual compaction (`/compact` will fail with a clear disabled message).
+- Env override: `BUILDER_COMPACTION_MODE`.
+- Runtime toggle: `/autocompaction [on|off]` controls only auto-compaction for the current session (not persisted to config).
+- `~/.builder/config.toml` is strict: unknown keys are rejected with an error.
 
 ### Important things not done yet
 

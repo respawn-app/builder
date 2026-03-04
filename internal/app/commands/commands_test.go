@@ -16,6 +16,9 @@ func TestExecuteBuiltins(t *testing.T) {
 	if command, ok := r.Command("/supervisor"); !ok || !command.RunWhileBusy {
 		t.Fatalf("expected /supervisor command to be runnable while busy, got %+v, ok=%v", command, ok)
 	}
+	if command, ok := r.Command("/autocompaction"); !ok || !command.RunWhileBusy {
+		t.Fatalf("expected /autocompaction command to be runnable while busy, got %+v, ok=%v", command, ok)
+	}
 	if command, ok := r.Command("/compact"); !ok || command.RunWhileBusy {
 		t.Fatalf("expected /compact command to require idle, got %+v, ok=%v", command, ok)
 	}
@@ -57,6 +60,15 @@ func TestExecuteBuiltins(t *testing.T) {
 	}
 	if got := r.Execute("/supervisor off"); got.Action != ActionSetSupervisor || got.SupervisorMode != "off" {
 		t.Fatalf("expected ActionSetSupervisor off, got %+v", got)
+	}
+	if got := r.Execute("/autocompaction"); got.Action != ActionSetAutoCompaction || got.AutoCompactionMode != "" {
+		t.Fatalf("expected ActionSetAutoCompaction toggle, got %+v", got)
+	}
+	if got := r.Execute("/autocompaction on"); got.Action != ActionSetAutoCompaction || got.AutoCompactionMode != "on" {
+		t.Fatalf("expected ActionSetAutoCompaction on, got %+v", got)
+	}
+	if got := r.Execute("/autocompaction off"); got.Action != ActionSetAutoCompaction || got.AutoCompactionMode != "off" {
+		t.Fatalf("expected ActionSetAutoCompaction off, got %+v", got)
 	}
 	if got := r.Execute("/back"); got.Action != ActionBack {
 		t.Fatalf("expected ActionBack, got %+v", got)

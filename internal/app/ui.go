@@ -186,15 +186,16 @@ type uiModel struct {
 	runtimeEvents <-chan runtime.Event
 	askEvents     <-chan askEvent
 
-	input            string
-	inputCursor      int // rune index; -1 means "track tail"
-	busy             bool
-	activity         uiActivity
-	compacting       bool
-	reviewerRunning  bool
-	reviewerBlocking bool
-	reviewerEnabled  bool
-	reviewerMode     string
+	input                 string
+	inputCursor           int // rune index; -1 means "track tail"
+	busy                  bool
+	activity              uiActivity
+	compacting            bool
+	reviewerRunning       bool
+	reviewerBlocking      bool
+	reviewerEnabled       bool
+	reviewerMode          string
+	autoCompactionEnabled bool
 
 	queued []string
 
@@ -289,19 +290,20 @@ type rollbackCandidate struct {
 
 func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
 	m := &uiModel{
-		engine:             engine,
-		view:               tui.NewModel(),
-		activity:           uiActivityIdle,
-		runtimeEvents:      runtimeEvents,
-		askEvents:          askEvents,
-		inputCursor:        -1,
-		commandRegistry:    commands.NewDefaultRegistry(),
-		exitAction:         UIActionNone,
-		theme:              "dark",
-		tuiAlternateScreen: config.TUIAlternateScreenAuto,
-		tuiScrollMode:      config.TUIScrollModeAlt,
-		debugKeys:          envFlagEnabled("BUILDER_DEBUG_KEYS"),
-		reviewerMode:       "off",
+		engine:                engine,
+		view:                  tui.NewModel(),
+		activity:              uiActivityIdle,
+		runtimeEvents:         runtimeEvents,
+		askEvents:             askEvents,
+		inputCursor:           -1,
+		commandRegistry:       commands.NewDefaultRegistry(),
+		exitAction:            UIActionNone,
+		theme:                 "dark",
+		tuiAlternateScreen:    config.TUIAlternateScreenAuto,
+		tuiScrollMode:         config.TUIScrollModeAlt,
+		debugKeys:             envFlagEnabled("BUILDER_DEBUG_KEYS"),
+		reviewerMode:          "off",
+		autoCompactionEnabled: true,
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -309,6 +311,7 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 	if m.engine != nil {
 		m.reviewerMode = m.engine.ReviewerFrequency()
 		m.reviewerEnabled = m.engine.ReviewerEnabled()
+		m.autoCompactionEnabled = m.engine.AutoCompactionEnabled()
 	} else {
 		m.reviewerEnabled = strings.TrimSpace(m.reviewerMode) != "" && strings.TrimSpace(m.reviewerMode) != "off"
 	}

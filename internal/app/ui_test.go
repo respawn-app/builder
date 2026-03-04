@@ -2218,6 +2218,127 @@ func TestSlashSupervisorWithEngineTogglesRuntimeReviewer(t *testing.T) {
 	}
 }
 
+func TestSlashAutoCompactionTogglesAndShowsStatus(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/autocompaction"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient status clear timer cmd")
+	}
+	if updated.autoCompactionEnabled {
+		t.Fatal("expected auto-compaction disabled after toggle")
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after /autocompaction, got %q", updated.input)
+	}
+	if !strings.Contains(updated.transientStatus, "Auto-compaction disabled") {
+		t.Fatalf("expected transient status for /autocompaction toggle, got %q", updated.transientStatus)
+	}
+	plain := stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(plain, "Auto-compaction disabled") {
+		t.Fatalf("expected transcript notice for /autocompaction toggle, got %q", plain)
+	}
+
+	updated.input = "/autocompaction on"
+	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient status clear timer cmd")
+	}
+	if !updated.autoCompactionEnabled {
+		t.Fatal("expected auto-compaction enabled")
+	}
+	if !strings.Contains(updated.transientStatus, "Auto-compaction enabled") {
+		t.Fatalf("expected enable transient status, got %q", updated.transientStatus)
+	}
+}
+
+func TestBusySlashAutoCompactionExecutesImmediatelyWithoutQueueing(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "/autocompaction off"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient status clear timer cmd")
+	}
+	if !updated.busy {
+		t.Fatal("expected busy state unchanged while command executes")
+	}
+	if updated.autoCompactionEnabled {
+		t.Fatal("expected auto-compaction disabled")
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected no queued messages, got %d", len(updated.queued))
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected no pending injected messages, got %d", len(updated.pendingInjected))
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after /autocompaction, got %q", updated.input)
+	}
+}
+
+func TestSlashAutoCompactionWithEngineTogglesRuntime(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/autocompaction off"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient status clear timer cmd")
+	}
+	if got := eng.AutoCompactionEnabled(); got {
+		t.Fatalf("expected runtime auto-compaction disabled, got %v", got)
+	}
+	if updated.autoCompactionEnabled {
+		t.Fatal("expected ui auto-compaction disabled")
+	}
+
+	updated.input = "/autocompaction on"
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if got := eng.AutoCompactionEnabled(); !got {
+		t.Fatalf("expected runtime auto-compaction enabled, got %v", got)
+	}
+	if !updated.autoCompactionEnabled {
+		t.Fatal("expected ui auto-compaction enabled")
+	}
+}
+
+func TestSlashAutoCompactionShowsCompactionModeNoneNote(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", CompactionMode: "none"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/autocompaction on"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if !strings.Contains(updated.transientStatus, "compaction_mode=none") {
+		t.Fatalf("expected compaction_mode=none note in status, got %q", updated.transientStatus)
+	}
+}
+
 func TestBusyUnsupportedSlashCommandShowsTransientErrorAndDoesNotQueue(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.busy = true
