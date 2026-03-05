@@ -58,3 +58,10 @@ func TestNewProviderClient_AnthropicNotImplemented(t *testing.T) {
 		t.Fatalf("expected unsupported provider error, got %v", err)
 	}
 }
+
+func TestProviderErrorReducerForUnknownIDFailsFast(t *testing.T) {
+	_, err := providerErrorReducerForID("custom-provider-id")
+	if err == nil {
+		t.Fatal("expected missing provider reducer error")
+	}
+}

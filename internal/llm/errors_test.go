@@ -2,10 +2,14 @@ package llm
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 )
 
 func TestIsAuthenticationError(t *testing.T) {
+	if !IsAuthenticationError(&ProviderAPIError{ProviderID: "openai", StatusCode: 401, Code: UnifiedErrorCodeAuthentication}) {
+		t.Fatal("expected provider authentication code to be auth error")
+	}
 	if !IsAuthenticationError(&APIStatusError{StatusCode: 401, Body: "unauthorized"}) {
 		t.Fatal("expected 401 to be auth error")
 	}
@@ -33,5 +37,50 @@ func TestIsNonRetriableModelError(t *testing.T) {
 	}
 	if !IsNonRetriableModelError(&AuthError{Err: errors.New("token refresh failed")}) {
 		t.Fatal("expected AuthError to be non-retriable")
+	}
+}
+
+func TestIsContextLengthOverflowError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "provider unified overflow code",
+			err:  &ProviderAPIError{ProviderID: "openai", StatusCode: 400, Code: UnifiedErrorCodeContextLengthOverflow, ProviderCode: "context_length_exceeded"},
+			want: true,
+		},
+		{
+			name: "413 overflow code",
+			err:  &ProviderAPIError{ProviderID: "openai", StatusCode: 413, Code: UnifiedErrorCodeContextLengthOverflow, ProviderCode: "context_length_exceeded"},
+			want: true,
+		},
+		{
+			name: "wrapped overflow error",
+			err:  fmt.Errorf("compact failed: %w", &ProviderAPIError{ProviderID: "openai", StatusCode: 422, Code: UnifiedErrorCodeContextLengthOverflow, ProviderCode: "input_too_long"}),
+			want: true,
+		},
+		{
+			name: "provider unknown code",
+			err:  &ProviderAPIError{ProviderID: "openai", StatusCode: 400, Code: UnifiedErrorCodeUnknown, ProviderCode: "invalid_tool_arguments"},
+			want: false,
+		},
+		{
+			name: "legacy api status error is not overflow typed",
+			err: &APIStatusError{
+				StatusCode: 400,
+				Body:       `{"error":{"code":"context_length_exceeded"}}`,
+			},
+			want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsContextLengthOverflowError(tc.err); got != tc.want {
+				t.Fatalf("IsContextLengthOverflowError() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

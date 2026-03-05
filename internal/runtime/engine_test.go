@@ -2209,7 +2209,7 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 	suggestionsIdx := -1
 	followUpIdx := -1
 	for idx, entry := range snapshot.Entries {
-		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "Supervisor suggestions:") {
+		if entry.Role == "reviewer_suggestions" && strings.Contains(entry.Text, "Supervisor suggested:") {
 			suggestionsIdx = idx
 		}
 		if entry.Role == "assistant" && strings.Contains(entry.Text, "updated final after review") {
@@ -4623,7 +4623,7 @@ func TestAutoCompactionRetries400ByTrimmingOldestEligibleItems(t *testing.T) {
 			},
 		},
 		compactionErrors: []error{
-			&llm.APIStatusError{StatusCode: 400, Body: "context window exceeded"},
+			&llm.ProviderAPIError{ProviderID: "openai", StatusCode: 400, Code: llm.UnifiedErrorCodeContextLengthOverflow, ProviderCode: "context_length_exceeded", Message: "prompt exceeded"},
 			nil,
 		},
 		compactionResponses: []llm.CompactionResponse{
@@ -4651,6 +4651,109 @@ func TestAutoCompactionRetries400ByTrimmingOldestEligibleItems(t *testing.T) {
 	}
 	if len(client.compactionCalls) != 2 {
 		t.Fatalf("expected two compact calls (retry after 400), got %d", len(client.compactionCalls))
+	}
+	first := len(client.compactionCalls[0].InputItems)
+	second := len(client.compactionCalls[1].InputItems)
+	if second >= first {
+		t.Fatalf("expected trimmed retry input to shrink, first=%d second=%d", first, second)
+	}
+}
+
+func TestAutoCompactionDoesNotRetryNonOverflow400(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		responses: []llm.Response{
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+				},
+				Usage: llm.Usage{InputTokens: 390000, OutputTokens: 1000, WindowTokens: 400000},
+			},
+		},
+		compactionErrors: []error{
+			&llm.APIStatusError{StatusCode: 400, Body: `{"error":{"type":"invalid_request_error","code":"invalid_tool_arguments","message":"tool arguments must be an object"}}`},
+			nil,
+		},
+		compactionResponses: []llm.CompactionResponse{
+			{
+				OutputItems: []llm.ResponseItem{
+					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "run tools"},
+					{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+				},
+				Usage: llm.Usage{InputTokens: 8000, OutputTokens: 500, WindowTokens: 400000},
+			},
+		},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5.3-codex"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "run tools"); err == nil {
+		t.Fatal("expected compaction to fail on non-overflow 400")
+	}
+	if len(client.compactionCalls) != 1 {
+		t.Fatalf("expected one compact call for non-overflow 400, got %d", len(client.compactionCalls))
+	}
+}
+
+func TestAutoCompactionRetries413ByTrimmingOldestEligibleItems(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		responses: []llm.Response{
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+				},
+				Usage: llm.Usage{InputTokens: 390000, OutputTokens: 1000, WindowTokens: 400000},
+			},
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+				Usage:     llm.Usage{InputTokens: 2000, OutputTokens: 500, WindowTokens: 400000},
+			},
+		},
+		compactionErrors: []error{
+			&llm.ProviderAPIError{ProviderID: "openai", StatusCode: 413, Code: llm.UnifiedErrorCodeContextLengthOverflow, ProviderCode: "context_length_exceeded", Message: "payload too large"},
+			nil,
+		},
+		compactionResponses: []llm.CompactionResponse{
+			{
+				OutputItems: []llm.ResponseItem{
+					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "run tools"},
+					{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+				},
+				Usage: llm.Usage{InputTokens: 8000, OutputTokens: 500, WindowTokens: 400000},
+			},
+		},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5.3-codex"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "run tools")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if len(client.compactionCalls) != 2 {
+		t.Fatalf("expected two compact calls (retry after 413), got %d", len(client.compactionCalls))
 	}
 	first := len(client.compactionCalls[0].InputItems)
 	second := len(client.compactionCalls[1].InputItems)

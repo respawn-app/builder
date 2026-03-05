@@ -17,6 +17,40 @@ func (e *APIStatusError) Error() string {
 	return fmt.Sprintf("openai status %d: %s", e.StatusCode, e.Body)
 }
 
+type UnifiedErrorCode string
+
+const (
+	UnifiedErrorCodeUnknown               UnifiedErrorCode = "unknown"
+	UnifiedErrorCodeAuthentication        UnifiedErrorCode = "authentication"
+	UnifiedErrorCodeContextLengthOverflow UnifiedErrorCode = "context_length_overflow"
+)
+
+type ProviderAPIError struct {
+	ProviderID    string
+	StatusCode    int
+	Code          UnifiedErrorCode
+	ProviderCode  string
+	ProviderType  string
+	ProviderParam string
+	Message       string
+	Raw           string
+	Err           error
+}
+
+func (e *ProviderAPIError) Error() string {
+	if e == nil {
+		return "provider api error"
+	}
+	return fmt.Sprintf("%s status %d [%s/%s]: %s", e.ProviderID, e.StatusCode, e.Code, e.ProviderCode, e.Message)
+}
+
+func (e *ProviderAPIError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
 type AuthError struct {
 	Err error
 }
@@ -43,6 +77,16 @@ func IsAuthenticationError(err error) bool {
 	if errors.As(err, &authErr) {
 		return true
 	}
+	var providerErr *ProviderAPIError
+	if errors.As(err, &providerErr) {
+		if providerErr.Code == UnifiedErrorCodeAuthentication {
+			return true
+		}
+		switch providerErr.StatusCode {
+		case 401, 403:
+			return true
+		}
+	}
 	var apiErr *APIStatusError
 	if errors.As(err, &apiErr) {
 		switch apiErr.StatusCode {
@@ -60,6 +104,13 @@ func IsNonRetriableModelError(err error) bool {
 	if IsAuthenticationError(err) {
 		return true
 	}
+	var providerErr *ProviderAPIError
+	if errors.As(err, &providerErr) {
+		switch providerErr.StatusCode {
+		case 400, 401, 403, 404:
+			return true
+		}
+	}
 	var apiErr *APIStatusError
 	if errors.As(err, &apiErr) {
 		switch apiErr.StatusCode {
@@ -68,4 +119,15 @@ func IsNonRetriableModelError(err error) bool {
 		}
 	}
 	return false
+}
+
+func IsContextLengthOverflowError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var providerErr *ProviderAPIError
+	if !errors.As(err, &providerErr) {
+		return false
+	}
+	return providerErr.Code == UnifiedErrorCodeContextLengthOverflow
 }
