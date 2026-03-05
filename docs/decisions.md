@@ -74,6 +74,7 @@
 - Persistence root is configurable; default `~/.builder`.
 - Storage layout is workspace-scoped containers (`<workspace-folder-name>-<random-uuid>`) with UUID session directories.
 - Session persistence format: split `session.json` + `events.jsonl`.
+- `events.jsonl` is append-only on normal writes; periodic compaction rewrites canonical JSONL to control long-session growth.
 - Session directory names are UUID-only.
 - Session start/setup becomes immutable at first model request dispatch.
 - Resumed sessions keep locked setup immutable, except thinking level.
@@ -84,7 +85,7 @@
 - Retry collisions on tool-call ids overwrite prior-attempt ids.
 - Event identity uses monotonic sequence id + wall timestamp.
 - No event integrity hash chain.
-- Durability strategy: async capture with atomic turn writes.
+- Durability strategy: async capture with append-only turn writes and configurable fsync policy.
 - Tool results persist at tool-completion boundary.
 - History replacement during compaction persists as atomic `history_replaced` events.
 - Crash-loss tolerance allows losing up to one in-flight tool call.

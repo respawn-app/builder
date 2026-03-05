@@ -1,0 +1,92 @@
+package session
+
+import "strings"
+
+type EventLogFSyncPolicy string
+
+const (
+	EventLogFSyncNever    EventLogFSyncPolicy = "never"
+	EventLogFSyncAlways   EventLogFSyncPolicy = "always"
+	EventLogFSyncPeriodic EventLogFSyncPolicy = "periodic"
+)
+
+const (
+	defaultEventLogFSyncPolicy           = EventLogFSyncPeriodic
+	defaultEventLogFSyncIntervalWrites   = 16
+	defaultEventLogCompactionEveryWrites = 256
+	defaultEventLogCompactionMinBytes    = int64(4 * 1024 * 1024)
+)
+
+type StoreOption func(*storeOptions)
+
+type storeOptions struct {
+	eventLog eventLogOptions
+}
+
+type eventLogOptions struct {
+	fsyncPolicy           EventLogFSyncPolicy
+	fsyncIntervalWrites   int
+	compactionEveryWrites int
+	compactionMinBytes    int64
+}
+
+func WithEventLogFSyncPolicy(policy EventLogFSyncPolicy) StoreOption {
+	return func(options *storeOptions) {
+		options.eventLog.fsyncPolicy = policy
+	}
+}
+
+func WithEventLogFSyncIntervalWrites(interval int) StoreOption {
+	return func(options *storeOptions) {
+		options.eventLog.fsyncIntervalWrites = interval
+	}
+}
+
+func WithEventLogCompaction(everyWrites int, minBytes int64) StoreOption {
+	return func(options *storeOptions) {
+		options.eventLog.compactionEveryWrites = everyWrites
+		options.eventLog.compactionMinBytes = minBytes
+	}
+}
+
+func normalizeStoreOptions(options ...StoreOption) storeOptions {
+	result := storeOptions{
+		eventLog: eventLogOptions{
+			fsyncPolicy:           defaultEventLogFSyncPolicy,
+			fsyncIntervalWrites:   defaultEventLogFSyncIntervalWrites,
+			compactionEveryWrites: defaultEventLogCompactionEveryWrites,
+			compactionMinBytes:    defaultEventLogCompactionMinBytes,
+		},
+	}
+	for _, option := range options {
+		if option == nil {
+			continue
+		}
+		option(&result)
+	}
+	result.eventLog = normalizeEventLogOptions(result.eventLog)
+	return result
+}
+
+func normalizeEventLogOptions(options eventLogOptions) eventLogOptions {
+	switch EventLogFSyncPolicy(strings.ToLower(strings.TrimSpace(string(options.fsyncPolicy)))) {
+	case EventLogFSyncNever:
+		options.fsyncPolicy = EventLogFSyncNever
+	case EventLogFSyncAlways:
+		options.fsyncPolicy = EventLogFSyncAlways
+	case EventLogFSyncPeriodic:
+		options.fsyncPolicy = EventLogFSyncPeriodic
+	default:
+		options.fsyncPolicy = defaultEventLogFSyncPolicy
+	}
+	if options.fsyncIntervalWrites <= 0 {
+		options.fsyncIntervalWrites = defaultEventLogFSyncIntervalWrites
+	}
+	if options.compactionEveryWrites < 0 {
+		options.compactionEveryWrites = 0
+	}
+	if options.compactionMinBytes < 0 {
+		options.compactionMinBytes = 0
+	}
+	return options
+}

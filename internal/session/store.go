@@ -2,11 +2,9 @@ package session
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,16 +21,20 @@ const (
 )
 
 type Store struct {
-	mu         sync.Mutex
-	sessionDir string
-	sessionFP  string
-	eventsFP   string
-	meta       Meta
-	persisted  bool
+	mu                    sync.Mutex
+	sessionDir            string
+	sessionFP             string
+	eventsFP              string
+	meta                  Meta
+	persisted             bool
+	options               storeOptions
+	eventsFileSizeBytes   int64
+	pendingFsyncWrites    int
+	writesSinceCompaction int
 }
 
-func Create(workspaceContainerDir, workspaceContainerName, workspaceRoot string) (*Store, error) {
-	s, err := NewLazy(workspaceContainerDir, workspaceContainerName, workspaceRoot)
+func Create(workspaceContainerDir, workspaceContainerName, workspaceRoot string, options ...StoreOption) (*Store, error) {
+	s, err := NewLazy(workspaceContainerDir, workspaceContainerName, workspaceRoot, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -44,14 +46,16 @@ func Create(workspaceContainerDir, workspaceContainerName, workspaceRoot string)
 	return s, nil
 }
 
-func NewLazy(workspaceContainerDir, workspaceContainerName, workspaceRoot string) (*Store, error) {
+func NewLazy(workspaceContainerDir, workspaceContainerName, workspaceRoot string, options ...StoreOption) (*Store, error) {
 	sid := uuid.NewString()
 	sessionDir := filepath.Join(workspaceContainerDir, sid)
 	now := time.Now().UTC()
+	storeOpts := normalizeStoreOptions(options...)
 	return &Store{
 		sessionDir: sessionDir,
 		sessionFP:  filepath.Join(sessionDir, sessionFile),
 		eventsFP:   filepath.Join(sessionDir, eventsFile),
+		options:    storeOpts,
 		meta: Meta{
 			SessionID:          sid,
 			WorkspaceRoot:      workspaceRoot,
@@ -63,14 +67,19 @@ func NewLazy(workspaceContainerDir, workspaceContainerName, workspaceRoot string
 	}, nil
 }
 
-func Open(sessionDir string) (*Store, error) {
+func Open(sessionDir string, options ...StoreOption) (*Store, error) {
+	storeOpts := normalizeStoreOptions(options...)
 	s := &Store{
 		sessionDir: sessionDir,
 		sessionFP:  filepath.Join(sessionDir, sessionFile),
 		eventsFP:   filepath.Join(sessionDir, eventsFile),
 		persisted:  true,
+		options:    storeOpts,
 	}
 	if err := s.loadMetaLocked(); err != nil {
+		return nil, err
+	}
+	if err := s.bootstrapEventLogStateLocked(); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -273,40 +282,18 @@ func (s *Store) ReadEvents() ([]Event, error) {
 	if !s.persisted {
 		return nil, nil
 	}
-
 	fp, err := os.Open(s.eventsFP)
 	if err != nil {
 		return nil, fmt.Errorf("open events file: %w", err)
 	}
 	defer fp.Close()
 
-	reader := bufio.NewReader(fp)
-	out := []Event{}
-	for {
-		line, readErr := reader.ReadString('\n')
-		line = strings.TrimSpace(line)
-		if line == "" {
-			if errors.Is(readErr, io.EOF) {
-				break
-			}
-			if readErr != nil {
-				return nil, fmt.Errorf("read events line: %w", readErr)
-			}
-			continue
-		}
-		var evt Event
-		if err := json.Unmarshal([]byte(line), &evt); err != nil {
-			return nil, fmt.Errorf("parse event line: %w", err)
-		}
-		out = append(out, evt)
-		if errors.Is(readErr, io.EOF) {
-			break
-		}
-		if readErr != nil {
-			return nil, fmt.Errorf("read events line: %w", readErr)
-		}
+	parsed, err := parseEventsFromReader(bufio.NewReader(fp))
+	if err != nil {
+		return nil, err
 	}
-	return out, nil
+	s.eventsFileSizeBytes = parsed.totalBytes
+	return parsed.events, nil
 }
 
 func (s *Store) loadMetaLocked() error {
@@ -344,37 +331,18 @@ func (s *Store) appendEventsAtomicLocked(events []Event) error {
 	if err := s.ensurePersistedLocked(); err != nil {
 		return err
 	}
-	existing, err := os.ReadFile(s.eventsFP)
-	if err != nil {
-		return fmt.Errorf("read events file: %w", err)
+	if err := s.compactEventsIfNeededLocked(); err != nil {
+		return err
 	}
 
-	buf := bytes.NewBuffer(nil)
-	if len(existing) > 0 {
-		buf.Write(existing)
-		if existing[len(existing)-1] != '\n' {
-			buf.WriteByte('\n')
-		}
+	if _, err := s.appendEventsLogLocked(events); err != nil {
+		return err
 	}
-
 	for _, e := range events {
-		line, err := json.Marshal(e)
-		if err != nil {
-			return fmt.Errorf("marshal event line: %w", err)
-		}
-		buf.Write(line)
-		buf.WriteByte('\n')
 		s.meta.LastSequence = e.Seq
 	}
 	s.meta.UpdatedAt = time.Now().UTC()
-
-	tmp := s.eventsFP + ".tmp"
-	if err := os.WriteFile(tmp, buf.Bytes(), 0o644); err != nil {
-		return fmt.Errorf("write events tmp: %w", err)
-	}
-	if err := os.Rename(tmp, s.eventsFP); err != nil {
-		return fmt.Errorf("replace events: %w", err)
-	}
+	s.writesSinceCompaction++
 	if err := s.persistMetaLocked(); err != nil {
 		return err
 	}
@@ -391,6 +359,9 @@ func (s *Store) ensurePersistedLocked() error {
 	if err := os.WriteFile(s.eventsFP, nil, 0o644); err != nil {
 		return fmt.Errorf("initialize events file: %w", err)
 	}
+	s.eventsFileSizeBytes = 0
+	s.pendingFsyncWrites = 0
+	s.writesSinceCompaction = 0
 	s.persisted = true
 	return nil
 }
