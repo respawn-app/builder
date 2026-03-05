@@ -1,0 +1,442 @@
+package patch
+
+import (
+	"bufio"
+	"bytes"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strconv"
+	"strings"
+
+	"builder/internal/shared/textutil"
+)
+
+func isPathInTemporaryDir(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+	abs := path
+	if !filepath.IsAbs(abs) {
+		resolvedAbs, err := filepath.Abs(abs)
+		if err != nil {
+			return false
+		}
+		abs = resolvedAbs
+	}
+	abs = filepath.Clean(abs)
+	for _, root := range tempEditableRoots() {
+		if pathWithinRoot(abs, root) {
+			return true
+		}
+	}
+	return false
+}
+
+func tempEditableRoots() []string {
+	temporaryEditableRootsOnce.Do(func() {
+		roots := make([]string, 0, 8)
+		add := func(raw string) {
+			root := normalizeExistingPath(raw)
+			if root == "" {
+				return
+			}
+			roots = append(roots, root)
+		}
+
+		add(os.TempDir())
+		add(os.Getenv("TMPDIR"))
+		add(os.Getenv("TEMP"))
+		add(os.Getenv("TMP"))
+		if runtime.GOOS != "windows" {
+			add("/tmp")
+			add("/var/tmp")
+			add("/private/tmp")
+		}
+
+		seen := make(map[string]struct{}, len(roots))
+		deduped := make([]string, 0, len(roots))
+		for _, root := range roots {
+			if _, ok := seen[root]; ok {
+				continue
+			}
+			seen[root] = struct{}{}
+			deduped = append(deduped, root)
+		}
+		sort.Strings(deduped)
+		temporaryEditableRoots = deduped
+	})
+	out := make([]string, len(temporaryEditableRoots))
+	copy(out, temporaryEditableRoots)
+	return out
+}
+
+func normalizeExistingPath(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return ""
+	}
+	abs := trimmed
+	if !filepath.IsAbs(abs) {
+		resolvedAbs, err := filepath.Abs(abs)
+		if err != nil {
+			return ""
+		}
+		abs = resolvedAbs
+	}
+	abs = filepath.Clean(abs)
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		return filepath.Clean(real)
+	}
+	return abs
+}
+
+func pathWithinRoot(path, root string) bool {
+	if path == "" || root == "" {
+		return false
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func (t *Tool) outsideWorkspaceSessionAllowed() bool {
+	t.outsideWorkspaceSessionMu.RLock()
+	defer t.outsideWorkspaceSessionMu.RUnlock()
+	return t.outsideWorkspaceSessionAllow
+}
+
+func (t *Tool) setOutsideWorkspaceSessionAllowed(allow bool) {
+	t.outsideWorkspaceSessionMu.Lock()
+	t.outsideWorkspaceSessionAllow = allow
+	t.outsideWorkspaceSessionMu.Unlock()
+}
+
+func splitLines(s string) []string {
+	s = textutil.NormalizeCRLF(s)
+	s = strings.TrimSuffix(s, "\n")
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
+}
+
+func applyEdit(original []string, changes []ChangeLine) ([]string, error) {
+	hunks, err := parseEditHunks(changes)
+	if err != nil {
+		return nil, err
+	}
+
+	current := append([]string(nil), original...)
+	cumulativeOffset := 0
+	searchFloor := 0
+
+	for idx, h := range hunks {
+		expected := -1
+		if h.header.hasPosition {
+			expected = h.header.oldStart - 1 + cumulativeOffset
+		}
+		anchor, err := findHunkAnchor(current, h.changes, expected, searchFloor, h.header.hasPosition)
+		if err != nil {
+			return nil, fmt.Errorf("hunk %d: %w", idx+1, err)
+		}
+		next, oldCount, newCount, err := applyHunkAt(current, h.changes, anchor)
+		if err != nil {
+			return nil, fmt.Errorf("hunk %d: %w", idx+1, err)
+		}
+		if h.header.hasPosition {
+			if oldCount != h.header.oldCount || newCount != h.header.newCount {
+				return nil, fmt.Errorf(
+					"hunk %d: header count mismatch: old %d->%d new %d->%d",
+					idx+1,
+					h.header.oldCount,
+					oldCount,
+					h.header.newCount,
+					newCount,
+				)
+			}
+		}
+		current = next
+		cumulativeOffset += newCount - oldCount
+		searchFloor = anchor + newCount
+	}
+	return current, nil
+}
+
+func parseEditHunks(changes []ChangeLine) ([]editHunk, error) {
+	if len(changes) == 0 {
+		return nil, nil
+	}
+
+	hunks := make([]editHunk, 0, 4)
+	current := editHunk{}
+
+	flush := func() error {
+		if len(current.changes) == 0 {
+			if current.header.hasPosition {
+				return errors.New("hunk header without changes")
+			}
+			return nil
+		}
+		hunks = append(hunks, current)
+		current = editHunk{}
+		return nil
+	}
+
+	for _, ch := range changes {
+		switch ch.Kind {
+		case '@':
+			if err := flush(); err != nil {
+				return nil, err
+			}
+			header, err := parseHunkHeader("@" + ch.Content)
+			if err != nil {
+				return nil, err
+			}
+			current.header = header
+		case ' ', '+', '-':
+			current.changes = append(current.changes, ch)
+		default:
+			return nil, fmt.Errorf("unknown change line prefix %q", string(ch.Kind))
+		}
+	}
+	if err := flush(); err != nil {
+		return nil, err
+	}
+	return hunks, nil
+}
+
+func parseHunkHeader(line string) (hunkHeader, error) {
+	line = strings.TrimSpace(line)
+	if line == "@@" {
+		return hunkHeader{}, nil
+	}
+
+	m := unifiedHunkHeaderPattern.FindStringSubmatch(line)
+	if len(m) == 0 {
+		return hunkHeader{}, fmt.Errorf("invalid hunk header: %q", line)
+	}
+
+	oldStart, err := strconv.Atoi(m[1])
+	if err != nil {
+		return hunkHeader{}, fmt.Errorf("invalid hunk old start %q: %w", m[1], err)
+	}
+	oldCount := 1
+	if strings.TrimSpace(m[2]) != "" {
+		oldCount, err = strconv.Atoi(m[2])
+		if err != nil {
+			return hunkHeader{}, fmt.Errorf("invalid hunk old count %q: %w", m[2], err)
+		}
+	}
+	newStart, err := strconv.Atoi(m[3])
+	if err != nil {
+		return hunkHeader{}, fmt.Errorf("invalid hunk new start %q: %w", m[3], err)
+	}
+	newCount := 1
+	if strings.TrimSpace(m[4]) != "" {
+		newCount, err = strconv.Atoi(m[4])
+		if err != nil {
+			return hunkHeader{}, fmt.Errorf("invalid hunk new count %q: %w", m[4], err)
+		}
+	}
+
+	return hunkHeader{
+		hasPosition: true,
+		oldStart:    oldStart,
+		oldCount:    oldCount,
+		newStart:    newStart,
+		newCount:    newCount,
+	}, nil
+}
+
+func findHunkAnchor(lines []string, changes []ChangeLine, expected, floor int, anchored bool) (int, error) {
+	if floor < 0 {
+		floor = 0
+	}
+	maxStart := len(lines)
+	if floor > maxStart {
+		floor = maxStart
+	}
+
+	matchAt := func(start int) bool {
+		_, _, _, err := applyHunkAt(lines, changes, start)
+		return err == nil
+	}
+
+	if anchored {
+		if expected >= floor && expected <= maxStart && matchAt(expected) {
+			return expected, nil
+		}
+		for fuzz := 1; fuzz <= hunkMaxFuzz; fuzz++ {
+			up := expected - fuzz
+			if up >= floor && up <= maxStart && matchAt(up) {
+				return up, nil
+			}
+			down := expected + fuzz
+			if down >= floor && down <= maxStart && matchAt(down) {
+				return down, nil
+			}
+		}
+		return -1, fmt.Errorf("hunk did not match near expected line %d (fuzz %d)", expected+1, hunkMaxFuzz)
+	}
+
+	for start := floor; start <= maxStart; start++ {
+		if matchAt(start) {
+			return start, nil
+		}
+	}
+	return -1, errors.New("hunk did not match file content")
+}
+
+func applyHunkAt(lines []string, changes []ChangeLine, start int) ([]string, int, int, error) {
+	if start < 0 || start > len(lines) {
+		return nil, 0, 0, fmt.Errorf("invalid hunk start %d", start)
+	}
+
+	out := make([]string, 0, len(lines)+len(changes))
+	out = append(out, lines[:start]...)
+
+	cursor := start
+	oldCount := 0
+	newCount := 0
+	for _, ch := range changes {
+		switch ch.Kind {
+		case ' ':
+			if cursor >= len(lines) || lines[cursor] != ch.Content {
+				return nil, 0, 0, fmt.Errorf("context mismatch at line %d: want %q", cursor+1, ch.Content)
+			}
+			out = append(out, lines[cursor])
+			cursor++
+			oldCount++
+			newCount++
+		case '-':
+			if cursor >= len(lines) || lines[cursor] != ch.Content {
+				return nil, 0, 0, fmt.Errorf("delete mismatch at line %d: want %q", cursor+1, ch.Content)
+			}
+			cursor++
+			oldCount++
+		case '+':
+			out = append(out, ch.Content)
+			newCount++
+		default:
+			return nil, 0, 0, fmt.Errorf("unknown change line prefix %q", string(ch.Kind))
+		}
+	}
+
+	out = append(out, lines[cursor:]...)
+	return out, oldCount, newCount, nil
+}
+
+func parse(src string) (Document, error) {
+	s := scanner{lines: splitRawLines(src)}
+	if !s.consumeExact("*** Begin Patch") {
+		return Document{}, errors.New("patch must start with *** Begin Patch")
+	}
+
+	doc := Document{}
+	for !s.done() {
+		line := s.peek()
+		switch {
+		case line == "*** End Patch":
+			s.next()
+			if !s.done() {
+				return Document{}, errors.New("unexpected content after *** End Patch")
+			}
+			return doc, nil
+		case strings.HasPrefix(line, "*** Add File: "):
+			head := strings.TrimPrefix(s.next(), "*** Add File: ")
+			content := []string{}
+			for !s.done() {
+				n := s.peek()
+				if strings.HasPrefix(n, "*** ") {
+					break
+				}
+				if !strings.HasPrefix(n, "+") {
+					return Document{}, fmt.Errorf("add file line must start with +: %q", n)
+				}
+				content = append(content, strings.TrimPrefix(s.next(), "+"))
+			}
+			doc.Hunks = append(doc.Hunks, AddFile{Path: head, Content: content})
+		case strings.HasPrefix(line, "*** Delete File: "):
+			path := strings.TrimPrefix(s.next(), "*** Delete File: ")
+			doc.Hunks = append(doc.Hunks, DeleteFile{Path: path})
+		case strings.HasPrefix(line, "*** Update File: "):
+			path := strings.TrimPrefix(s.next(), "*** Update File: ")
+			up := UpdateFile{Path: path}
+			if !s.done() && strings.HasPrefix(s.peek(), "*** Move to: ") {
+				up.MoveTo = strings.TrimPrefix(s.next(), "*** Move to: ")
+			}
+			for !s.done() {
+				n := s.peek()
+				if strings.HasPrefix(n, "*** ") {
+					break
+				}
+				if n == "" {
+					up.Changes = append(up.Changes, ChangeLine{Kind: ' ', Content: ""})
+					s.next()
+					continue
+				}
+				p := n[0]
+				if p != ' ' && p != '+' && p != '-' && p != '@' {
+					return Document{}, fmt.Errorf("invalid update line prefix in %q", n)
+				}
+				up.Changes = append(up.Changes, ChangeLine{Kind: rune(p), Content: n[1:]})
+				s.next()
+			}
+			doc.Hunks = append(doc.Hunks, up)
+		default:
+			return Document{}, fmt.Errorf("unknown patch block: %q", line)
+		}
+	}
+
+	return Document{}, errors.New("missing *** End Patch")
+}
+
+type scanner struct {
+	lines []string
+	idx   int
+}
+
+func (s *scanner) done() bool {
+	return s.idx >= len(s.lines)
+}
+
+func (s *scanner) peek() string {
+	if s.done() {
+		return ""
+	}
+	return s.lines[s.idx]
+}
+
+func (s *scanner) next() string {
+	v := s.peek()
+	s.idx++
+	return v
+}
+
+func (s *scanner) consumeExact(v string) bool {
+	if s.peek() == v {
+		s.next()
+		return true
+	}
+	return false
+}
+
+func splitRawLines(in string) []string {
+	in = textutil.NormalizeCRLF(in)
+	reader := bufio.NewScanner(bytes.NewBufferString(in))
+	out := []string{}
+	for reader.Scan() {
+		out = append(out, reader.Text())
+	}
+	return out
+}
