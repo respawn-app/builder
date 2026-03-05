@@ -152,6 +152,9 @@ type Engine struct {
 	totalCachedInputTokens int
 
 	compactionCount int
+
+	compactionTokenCountCacheKey   string
+	compactionTokenCountCacheValue int
 }
 
 func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg Config) (*Engine, error) {

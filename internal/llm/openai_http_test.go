@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -726,6 +727,148 @@ func TestCompactRequestAcceptsJSONBodyWithNonJSONContentType(t *testing.T) {
 	}
 }
 
+func TestInputTokenCountPayloadMatchesCompactPayloadInputShape(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	canonicalItems := []ResponseItem{
+		{Type: ResponseItemTypeMessage, Role: RoleUser, Content: "hello"},
+		{Type: ResponseItemTypeFunctionCall, ID: "call_1", CallID: "call_1", Name: "shell", Arguments: json.RawMessage(`{"command":"pwd"}`)},
+		{
+			Type:   ResponseItemTypeFunctionCallOutput,
+			CallID: "call_1",
+			Name:   string(tools.ToolViewImage),
+			Output: json.RawMessage(`[{"type":"input_file","file_data":"data:application/pdf;base64,Zm9v","filename":"doc.pdf"}]`),
+		},
+		{Type: ResponseItemTypeReasoning, ID: "rs_1", EncryptedContent: "enc_reasoning"},
+		{Type: ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_compaction"},
+	}
+
+	compactPayload, err := transport.buildCompactPayload(OpenAICompactionRequest{
+		Model:        "gpt-5",
+		Instructions: "compaction instructions",
+		InputItems:   canonicalItems,
+	})
+	if err != nil {
+		t.Fatalf("build compact payload: %v", err)
+	}
+	countPayload, err := transport.buildInputTokenCountParams(OpenAIRequest{
+		Model:        "gpt-5",
+		SystemPrompt: "compaction instructions",
+		Items:        canonicalItems,
+	})
+	if err != nil {
+		t.Fatalf("build input-token-count payload: %v", err)
+	}
+
+	compactJSON := mustMarshalJSONMap(t, compactPayload)
+	countJSON := mustMarshalJSONMap(t, countPayload)
+	if !reflect.DeepEqual(compactJSON["input"], countJSON["input"]) {
+		t.Fatalf("expected input shape parity between compact and input-token-count payloads\ncompact=%#v\ncount=%#v", compactJSON["input"], countJSON["input"])
+	}
+	if compactJSON["instructions"] != countJSON["instructions"] {
+		t.Fatalf("expected instructions parity between compact and input-token-count payloads, compact=%#v count=%#v", compactJSON["instructions"], countJSON["instructions"])
+	}
+}
+
+func TestCountRequestInputTokensTargetsResponsesInputTokensPath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses/input_tokens" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"response.input_tokens","input_tokens":12345}`))
+	}))
+	defer server.Close()
+
+	transport := NewHTTPTransport(staticAuth{})
+	transport.BaseURL = server.URL + "/v1"
+	transport.Client = server.Client()
+
+	count, err := transport.CountRequestInputTokens(context.Background(), OpenAIRequest{
+		Model:        "gpt-5",
+		SystemPrompt: "sys",
+		Items: []ResponseItem{
+			{Type: ResponseItemTypeMessage, Role: RoleUser, Content: "hello"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("count request input tokens failed: %v", err)
+	}
+	if count != 12345 {
+		t.Fatalf("expected input token count 12345, got %d", count)
+	}
+}
+
+func TestResolveModelContextWindowUsesModelMetadataFromAPI(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models/gpt-5" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"gpt-5",
+			"object":"model",
+			"created":1731459200,
+			"owned_by":"openai",
+			"context_window":272000
+		}`))
+	}))
+	defer server.Close()
+
+	transport := NewHTTPTransport(staticAuth{})
+	transport.BaseURL = server.URL + "/v1"
+	transport.Client = server.Client()
+	transport.ContextWindowTokens = 0
+
+	window, err := transport.ResolveModelContextWindow(context.Background(), "gpt-5")
+	if err != nil {
+		t.Fatalf("resolve model context window failed: %v", err)
+	}
+	if window != 272000 {
+		t.Fatalf("expected context window 272000 from model metadata, got %d", window)
+	}
+}
+
+func TestResolveModelContextWindowFallsBackToInputTokenLimitField(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models/gpt-5" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"gpt-5",
+			"object":"model",
+			"created":1731459200,
+			"owned_by":"openai",
+			"limits":{"input_token_limit":190000}
+		}`))
+	}))
+	defer server.Close()
+
+	transport := NewHTTPTransport(staticAuth{})
+	transport.BaseURL = server.URL + "/v1"
+	transport.Client = server.Client()
+	transport.ContextWindowTokens = 0
+
+	window, err := transport.ResolveModelContextWindow(context.Background(), "gpt-5")
+	if err != nil {
+		t.Fatalf("resolve model context window failed: %v", err)
+	}
+	if window != 190000 {
+		t.Fatalf("expected context window 190000 from nested input_token_limit field, got %d", window)
+	}
+}
+
 func mustMarshalObject(t *testing.T, payload responses.ResponseNewParams) map[string]any {
 	t.Helper()
 	b, err := json.Marshal(payload)
@@ -748,6 +891,19 @@ func mustMarshalItems(t *testing.T, items []responses.ResponseInputItemUnionPara
 	var out []map[string]any
 	if err := json.Unmarshal(b, &out); err != nil {
 		t.Fatalf("unmarshal input items: %v", err)
+	}
+	return out
+}
+
+func mustMarshalJSONMap(t *testing.T, payload any) map[string]any {
+	t.Helper()
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
 	}
 	return out
 }

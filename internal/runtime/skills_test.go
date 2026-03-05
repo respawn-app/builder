@@ -32,7 +32,7 @@ func TestSkillsContextMessageIncludesCodexPromptAndSkillEntries(t *testing.T) {
 		skillsHowToUseHeader,
 		"- home-skill: from home (file: " + filepath.ToSlash(homeSkillPath) + ")",
 		"- workspace-skill: from workspace (file: " + filepath.ToSlash(workspaceSkillPath) + ")",
-		"- Trigger rules: If the user names a skill",
+		"- Trigger rules: If the task matches a skill's description shown above",
 	} {
 		if !strings.Contains(content, required) {
 			t.Fatalf("expected skills context to include %q, got %q", required, content)

@@ -22,6 +22,7 @@ const (
 
 	defaultContextWindowTokens = 200_000
 	compactOverflowRetries     = 2
+	autoCompactNearLimitMargin = 8_000
 
 	additionalCompactionInstructionsHeader = "# Additional user instructions or commentary for this task:"
 )
@@ -73,41 +74,192 @@ func (e *Engine) CompactContext(ctx context.Context, args string) (err error) {
 }
 
 func (e *Engine) autoCompactIfNeeded(ctx context.Context, stepID string, mode compactionMode) error {
-	if mode == compactionModeAuto && !e.shouldAutoCompact() {
+	if mode == compactionModeAuto && !e.shouldAutoCompactWithContext(ctx) {
 		return nil
 	}
 	_, err := e.compactNow(ctx, stepID, mode, "")
 	if err != nil && mode == compactionModeAuto {
 		return fmt.Errorf("auto compaction failed: %w", err)
 	}
-	if err == nil && mode == compactionModeAuto && e.shouldAutoCompact() {
+	if err == nil && mode == compactionModeAuto && e.shouldAutoCompactWithContext(ctx) {
 		return errors.New("auto compaction did not reduce context below threshold")
 	}
 	return err
 }
 
 func (e *Engine) shouldAutoCompact() bool {
+	return e.shouldAutoCompactWithContext(context.Background())
+}
+
+func (e *Engine) shouldAutoCompactWithContext(ctx context.Context) bool {
 	if !e.AutoCompactionEnabled() {
 		return false
 	}
 	if e.compactionMode() == "none" {
 		return false
 	}
-	current := e.currentTokenUsage()
-	limit := e.autoCompactTokenLimit()
-	return limit > 0 && current >= limit
+	limit := e.autoCompactTokenLimit(ctx)
+	if limit <= 0 {
+		return false
+	}
+
+	reservedOutput := e.reservedOutputTokens()
+	estimatedInput := e.currentTokenUsage()
+	estimatedTotal := estimatedInput + reservedOutput
+	if estimatedTotal >= limit {
+		return true
+	}
+	margin := autoCompactPrecisionMarginForLimit(limit)
+	if estimatedTotal+margin < limit {
+		return false
+	}
+	preciseInput, ok := e.currentInputTokensPrecisely(ctx)
+	if !ok {
+		return estimatedTotal >= limit
+	}
+	return preciseInput+reservedOutput >= limit
 }
 
-func (e *Engine) autoCompactTokenLimit() int {
+func (e *Engine) autoCompactTokenLimit(ctx context.Context) int {
 	if e.cfg.AutoCompactTokenLimit > 0 {
 		return e.cfg.AutoCompactTokenLimit
 	}
-	window := e.contextWindowTokens()
+	window := e.resolveContextWindowTokens(ctx)
 	limit := int(float64(window) * 0.90)
 	if limit < 1 {
 		return 1
 	}
 	return limit
+}
+
+func (e *Engine) resolveContextWindowTokens(ctx context.Context) int {
+	if configured := e.configuredContextWindowTokens(); configured > 0 {
+		return configured
+	}
+
+	model := e.currentModel()
+	if resolver, ok := e.llm.(llm.ModelContextWindowClient); ok {
+		resolved, err := resolver.ResolveModelContextWindow(ctx, model)
+		if err == nil && resolved > 0 {
+			e.setContextWindowTokens(resolved)
+			return resolved
+		}
+	}
+	return e.contextWindowTokens()
+}
+
+func (e *Engine) configuredContextWindowTokens() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.cfg.ContextWindowTokens > 0 {
+		return e.cfg.ContextWindowTokens
+	}
+	return 0
+}
+
+func (e *Engine) setContextWindowTokens(tokens int) {
+	if tokens <= 0 {
+		return
+	}
+	e.mu.Lock()
+	e.cfg.ContextWindowTokens = tokens
+	e.mu.Unlock()
+}
+
+func (e *Engine) currentModel() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.locked != nil {
+		if model := strings.TrimSpace(e.locked.Model); model != "" {
+			return model
+		}
+	}
+	return strings.TrimSpace(e.cfg.Model)
+}
+
+func (e *Engine) reservedOutputTokens() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.locked != nil && e.locked.MaxOutputToken > 0 {
+		return e.locked.MaxOutputToken
+	}
+	if e.cfg.MaxTokens > 0 {
+		return e.cfg.MaxTokens
+	}
+	return 0
+}
+
+func autoCompactPrecisionMarginForLimit(limit int) int {
+	if limit <= 0 {
+		return autoCompactNearLimitMargin
+	}
+	percentMargin := limit / 50
+	if percentMargin > autoCompactNearLimitMargin {
+		return percentMargin
+	}
+	return autoCompactNearLimitMargin
+}
+
+func (e *Engine) currentInputTokensPrecisely(ctx context.Context) (int, bool) {
+	req, err := e.buildRequest(ctx, "", true)
+	if err != nil {
+		return 0, false
+	}
+	return e.requestInputTokensPrecisely(ctx, req)
+}
+
+func (e *Engine) requestInputTokensPrecisely(ctx context.Context, req llm.Request) (int, bool) {
+	counter, ok := e.llm.(llm.RequestInputTokenCountClient)
+	if !ok {
+		return 0, false
+	}
+	cacheKey := requestTokenCountCacheKey(req)
+	if cacheKey != "" {
+		if cached, ok := e.lookupCompactionTokenCountCache(cacheKey); ok {
+			return cached, true
+		}
+	}
+	count, err := counter.CountRequestInputTokens(ctx, req)
+	if err != nil || count <= 0 {
+		return 0, false
+	}
+	if cacheKey != "" {
+		e.storeCompactionTokenCountCache(cacheKey, count)
+	}
+	return count, true
+}
+
+func requestTokenCountCacheKey(req llm.Request) string {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return ""
+	}
+	return string(payload)
+}
+
+func (e *Engine) lookupCompactionTokenCountCache(cacheKey string) (int, bool) {
+	if strings.TrimSpace(cacheKey) == "" {
+		return 0, false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.compactionTokenCountCacheKey != cacheKey {
+		return 0, false
+	}
+	if e.compactionTokenCountCacheValue <= 0 {
+		return 0, false
+	}
+	return e.compactionTokenCountCacheValue, true
+}
+
+func (e *Engine) storeCompactionTokenCountCache(cacheKey string, count int) {
+	if strings.TrimSpace(cacheKey) == "" || count <= 0 {
+		return
+	}
+	e.mu.Lock()
+	e.compactionTokenCountCacheKey = cacheKey
+	e.compactionTokenCountCacheValue = count
+	e.mu.Unlock()
 }
 
 func (e *Engine) contextWindowTokens() int {
@@ -154,6 +306,8 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 	if len(input) == 0 {
 		return compactionResult{}, nil
 	}
+
+	_ = e.resolveContextWindowTokens(ctx)
 
 	caps, err := e.providerCapabilities(ctx)
 	if err != nil {
@@ -204,8 +358,12 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 	if windowTokens <= 0 {
 		windowTokens = e.contextWindowTokens()
 	}
+	inputTokens := estimateItemsTokens(result.items)
+	if preciseInput, ok := e.currentInputTokensPrecisely(ctx); ok {
+		inputTokens = preciseInput
+	}
 	e.setLastUsage(llm.Usage{
-		InputTokens:  estimateItemsTokens(result.items),
+		InputTokens:  inputTokens,
 		OutputTokens: 0,
 		WindowTokens: windowTokens,
 	})
@@ -221,13 +379,13 @@ func (e *Engine) compactRemote(ctx context.Context, input []llm.ResponseItem, pr
 	if !ok {
 		return compactionResult{}, errors.New("llm client does not support remote compaction")
 	}
-	canonicalContext := extractCanonicalContext(input)
-	trimmedInput, trimmedCount := trimCompactionInput(input, e.effectiveContextTokenLimit())
-
 	locked, err := e.ensureLocked()
 	if err != nil {
 		return compactionResult{}, err
 	}
+	contextLimit := e.effectiveContextTokenLimit()
+	canonicalContext := extractCanonicalContext(input)
+	trimmedInput, trimmedCount := e.trimCompactionInputToLimit(ctx, locked.Model, instructions, input, contextLimit)
 	baseRequest := llm.CompactionRequest{
 		Model:        locked.Model,
 		Instructions: instructions,
@@ -235,7 +393,7 @@ func (e *Engine) compactRemote(ctx context.Context, input []llm.ResponseItem, pr
 		InputItems:   trimmedInput,
 	}
 
-	resp, _, extraTrimmed, err := e.compactWithContextTrimRetry(ctx, compactor, baseRequest)
+	resp, _, extraTrimmed, err := e.compactWithContextTrimRetry(ctx, compactor, baseRequest, contextLimit)
 	if err != nil {
 		return compactionResult{}, err
 	}
@@ -261,6 +419,7 @@ func (e *Engine) compactWithContextTrimRetry(
 	ctx context.Context,
 	client llm.CompactionClient,
 	request llm.CompactionRequest,
+	limit int,
 ) (llm.CompactionResponse, []llm.ResponseItem, int, error) {
 	currentInput := llm.CloneResponseItems(request.InputItems)
 	additionalTrimmed := 0
@@ -277,7 +436,10 @@ func (e *Engine) compactWithContextTrimRetry(
 			return llm.CompactionResponse{}, nil, additionalTrimmed, err
 		}
 
-		nextInput, trimmed := trimOldestEligibleItems(currentInput, 1+attempt)
+		nextInput, trimmed := e.trimCompactionInputToLimit(ctx, request.Model, request.Instructions, currentInput, limit)
+		if trimmed == 0 {
+			nextInput, trimmed = trimOldestEligibleItems(currentInput, 1+attempt)
+		}
 		if trimmed == 0 {
 			return llm.CompactionResponse{}, nil, additionalTrimmed, err
 		}
@@ -321,15 +483,23 @@ func isCompactionContextOverflow(err error) bool {
 }
 
 func (e *Engine) compactLocal(ctx context.Context, input []llm.ResponseItem, providerID string, instructions string) (compactionResult, error) {
+	locked, err := e.ensureLocked()
+	if err != nil {
+		return compactionResult{}, err
+	}
 	summary, err := e.localCompactionSummary(ctx, input, instructions)
 	if err != nil {
 		return compactionResult{}, err
 	}
-	replacement := rebuildLocalCompactionHistory(input, summary, e.cfg.LocalCompactionCarryoverLimit)
+	replacement := e.rebuildLocalCompactionHistory(ctx, locked.Model, input, summary, e.cfg.LocalCompactionCarryoverLimit)
+	usageInputTokens := estimateItemsTokens(replacement)
+	if preciseInput, ok := e.inputTokensForItems(ctx, locked.Model, "", replacement); ok {
+		usageInputTokens = preciseInput
+	}
 	return compactionResult{
 		engine:            "local",
 		items:             replacement,
-		usage:             llm.Usage{InputTokens: estimateItemsTokens(replacement), WindowTokens: e.contextWindowTokens()},
+		usage:             llm.Usage{InputTokens: usageInputTokens, WindowTokens: e.contextWindowTokens()},
 		trimmedItemsCount: 0,
 		provider:          providerID,
 		summary:           strings.TrimSpace(summary),
@@ -525,27 +695,190 @@ func ordinal(v int) string {
 	}
 }
 
-func trimCompactionInput(items []llm.ResponseItem, limit int) ([]llm.ResponseItem, int) {
+func (e *Engine) trimCompactionInputToLimit(
+	ctx context.Context,
+	model string,
+	instructions string,
+	items []llm.ResponseItem,
+	limit int,
+) ([]llm.ResponseItem, int) {
+	out := llm.CloneResponseItems(items)
+	if limit <= 0 {
+		return out, 0
+	}
+	eligibleCount := countCompactionEligibleItems(out)
+	if eligibleCount <= 0 {
+		return out, 0
+	}
+	type removedTokenEvaluation struct {
+		items  []llm.ResponseItem
+		tokens int
+		ok     bool
+		ready  bool
+	}
+	evaluations := make(map[int]removedTokenEvaluation, 8)
+	evaluations[0] = removedTokenEvaluation{items: out, tokens: 0, ok: false, ready: false}
+	evaluateRemoved := func(removed int) ([]llm.ResponseItem, int, bool) {
+		if removed < 0 || removed > eligibleCount {
+			return nil, 0, false
+		}
+		if cached, ok := evaluations[removed]; ok && cached.ready {
+			return cached.items, cached.tokens, cached.ok
+		}
+		if removed == 0 {
+			tokens, ok := e.inputTokensForItems(ctx, model, instructions, out)
+			evaluations[removed] = removedTokenEvaluation{items: out, tokens: tokens, ok: ok, ready: true}
+			return out, tokens, ok
+		}
+		candidateItems, candidateRemoved := trimOldestEligibleItems(out, removed)
+		if candidateRemoved <= 0 {
+			evaluations[removed] = removedTokenEvaluation{items: candidateItems, tokens: 0, ok: false, ready: true}
+			return candidateItems, 0, false
+		}
+		tokens, ok := e.inputTokensForItems(ctx, model, instructions, candidateItems)
+		evaluations[removed] = removedTokenEvaluation{items: candidateItems, tokens: tokens, ok: ok, ready: true}
+		return candidateItems, tokens, ok
+	}
+	_, fullTokens, ok := evaluateRemoved(0)
+	if !ok {
+		return trimCompactionInputEstimated(out, limit)
+	}
+	if fullTokens <= limit {
+		return out, 0
+	}
+
+	estimatedOverflow := fullTokens - limit
+	step := compactionTrimStep(out, estimatedOverflow)
+	if step < 1 {
+		step = 1
+	}
+	if step > eligibleCount {
+		step = eligibleCount
+	}
+
+	high := step
+	highItems, highTokens, ok := evaluateRemoved(high)
+	if !ok {
+		return out, 0
+	}
+	highRemoved := high
+	for highTokens > limit && high < eligibleCount {
+		nextHigh := high * 2
+		if nextHigh > eligibleCount {
+			nextHigh = eligibleCount
+		}
+		high = nextHigh
+		highItems, highTokens, ok = evaluateRemoved(high)
+		if !ok {
+			return trimCompactionInputEstimated(out, limit)
+		}
+		highRemoved = high
+	}
+	if highTokens > limit {
+		return highItems, highRemoved
+	}
+
+	low := 0
+	bestRemoved := high
+	bestItems := highItems
+	for low+1 < high {
+		mid := (low + high) / 2
+		midItems, midTokens, ok := evaluateRemoved(mid)
+		if !ok {
+			return trimCompactionInputEstimated(out, limit)
+		}
+		if midTokens <= limit {
+			high = mid
+			bestRemoved = mid
+			bestItems = midItems
+			continue
+		}
+		low = mid
+	}
+	return bestItems, bestRemoved
+}
+
+func (e *Engine) inputTokensForItems(ctx context.Context, model string, instructions string, items []llm.ResponseItem) (int, bool) {
+	req, ok := buildTokenCountRequestForItems(model, instructions, items)
+	if !ok {
+		return 0, false
+	}
+	return e.requestInputTokensPrecisely(ctx, req)
+}
+
+func trimCompactionInputEstimated(items []llm.ResponseItem, limit int) ([]llm.ResponseItem, int) {
 	out := llm.CloneResponseItems(items)
 	if limit <= 0 {
 		return out, 0
 	}
 	trimmed := 0
 	for estimateItemsTokens(out) > limit {
-		trimmedIdx := -1
-		for i, item := range out {
-			if isCompactionTrimEligible(item) {
-				trimmedIdx = i
-				break
-			}
-		}
-		if trimmedIdx < 0 {
+		next, removed := trimOldestEligibleItems(out, 1)
+		if removed <= 0 {
 			break
 		}
-		out = append(out[:trimmedIdx], out[trimmedIdx+1:]...)
-		trimmed++
+		out = next
+		trimmed += removed
 	}
 	return out, trimmed
+}
+
+func countCompactionEligibleItems(items []llm.ResponseItem) int {
+	total := 0
+	for _, item := range items {
+		if isCompactionTrimEligible(item) {
+			total++
+		}
+	}
+	return total
+}
+
+func compactionTrimStep(items []llm.ResponseItem, overflowTokens int) int {
+	if overflowTokens <= 0 {
+		return 1
+	}
+	eligibleCount := 0
+	eligibleEstimatedTokens := 0
+	for _, item := range items {
+		if !isCompactionTrimEligible(item) {
+			continue
+		}
+		eligibleCount++
+		eligibleEstimatedTokens += estimateItemsTokens([]llm.ResponseItem{item})
+	}
+	if eligibleCount <= 0 {
+		return 1
+	}
+	avgTokensPerItem := eligibleEstimatedTokens / eligibleCount
+	if avgTokensPerItem < 1 {
+		avgTokensPerItem = 1
+	}
+	step := (overflowTokens + avgTokensPerItem - 1) / avgTokensPerItem
+	if step < 1 {
+		step = 1
+	}
+	if step > eligibleCount {
+		step = eligibleCount
+	}
+	return step
+}
+
+func buildTokenCountRequestForItems(model string, instructions string, items []llm.ResponseItem) (llm.Request, bool) {
+	trimmedModel := strings.TrimSpace(model)
+	if trimmedModel == "" {
+		return llm.Request{}, false
+	}
+	req := llm.Request{
+		Model:        trimmedModel,
+		SystemPrompt: strings.TrimSpace(instructions),
+		Items:        sanitizeItemsForLLM(items),
+		Tools:        []llm.Tool{},
+		Messages:     []llm.Message{},
+	}
+	if err := req.Validate(); err != nil {
+		return llm.Request{}, false
+	}
+	return req, true
 }
 
 func trimOldestEligibleItems(items []llm.ResponseItem, count int) ([]llm.ResponseItem, int) {
@@ -680,7 +1013,7 @@ func extractCanonicalContext(items []llm.ResponseItem) []llm.ResponseItem {
 	return llm.CloneResponseItems(contextItems)
 }
 
-func rebuildLocalCompactionHistory(items []llm.ResponseItem, summary string, carryoverLimit int) []llm.ResponseItem {
+func (e *Engine) rebuildLocalCompactionHistory(ctx context.Context, model string, items []llm.ResponseItem, summary string, carryoverLimit int) []llm.ResponseItem {
 	contextItems := extractCanonicalContext(items)
 	userMessages := make([]llm.ResponseItem, 0, len(items))
 	for _, item := range items {
@@ -692,6 +1025,66 @@ func rebuildLocalCompactionHistory(items []llm.ResponseItem, summary string, car
 	if carryoverLimit <= 0 {
 		carryoverLimit = 20_000
 	}
+	selected := e.selectLocalCarryoverMessages(ctx, model, userMessages, carryoverLimit)
+
+	summaryMessage := llm.ResponseItem{
+		Type:    llm.ResponseItemTypeMessage,
+		Role:    llm.RoleUser,
+		Content: prompts.CompactionSummaryPrefix + "\n\n" + strings.TrimSpace(summary),
+	}
+
+	out := make([]llm.ResponseItem, 0, len(contextItems)+len(selected)+1)
+	out = append(out, contextItems...)
+	out = append(out, selected...)
+	out = append(out, summaryMessage)
+	return out
+}
+
+func (e *Engine) selectLocalCarryoverMessages(
+	ctx context.Context,
+	model string,
+	userMessages []llm.ResponseItem,
+	carryoverLimit int,
+) []llm.ResponseItem {
+	if len(userMessages) == 0 {
+		return nil
+	}
+	fallback := selectLocalCarryoverMessagesEstimated(userMessages, carryoverLimit)
+	if _, ok := e.llm.(llm.RequestInputTokenCountClient); !ok {
+		return fallback
+	}
+
+	usedPrecise := false
+	low := 1
+	high := len(userMessages)
+	best := 1
+	for low <= high {
+		mid := (low + high) / 2
+		candidate := llm.CloneResponseItems(userMessages[len(userMessages)-mid:])
+		tokens := estimateItemsTokens(candidate)
+		if precise, ok := e.inputTokensForItems(ctx, model, "", candidate); ok {
+			usedPrecise = true
+			tokens = precise
+		} else {
+			break
+		}
+		if tokens <= carryoverLimit {
+			best = mid
+			low = mid + 1
+		} else {
+			high = mid - 1
+		}
+	}
+	if !usedPrecise {
+		return fallback
+	}
+	if best < 1 {
+		best = 1
+	}
+	return llm.CloneResponseItems(userMessages[len(userMessages)-best:])
+}
+
+func selectLocalCarryoverMessagesEstimated(userMessages []llm.ResponseItem, carryoverLimit int) []llm.ResponseItem {
 	selected := make([]llm.ResponseItem, 0, len(userMessages))
 	budget := 0
 	for i := len(userMessages) - 1; i >= 0; i-- {
@@ -706,18 +1099,7 @@ func rebuildLocalCompactionHistory(items []llm.ResponseItem, summary string, car
 	for i, j := 0, len(selected)-1; i < j; i, j = i+1, j-1 {
 		selected[i], selected[j] = selected[j], selected[i]
 	}
-
-	summaryMessage := llm.ResponseItem{
-		Type:    llm.ResponseItemTypeMessage,
-		Role:    llm.RoleUser,
-		Content: prompts.CompactionSummaryPrefix + "\n\n" + strings.TrimSpace(summary),
-	}
-
-	out := make([]llm.ResponseItem, 0, len(contextItems)+len(selected)+1)
-	out = append(out, contextItems...)
-	out = append(out, selected...)
-	out = append(out, summaryMessage)
-	return out
+	return selected
 }
 
 func estimateItemsTokens(items []llm.ResponseItem) int {
