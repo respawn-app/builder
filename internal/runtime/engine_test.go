@@ -2671,6 +2671,55 @@ func TestSubmitUserShellCommandPersistsDeveloperNoticeAndToolEntries(t *testing.
 	}
 }
 
+func TestSubmitUserShellCommandReturnsUnknownToolErrorWhenShellNotRegistered(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	result, err := eng.SubmitUserShellCommand(context.Background(), "pwd")
+	if err == nil {
+		t.Fatal("expected unknown tool error")
+	}
+	if !strings.Contains(err.Error(), "unknown tool") {
+		t.Fatalf("expected unknown tool error, got %v", err)
+	}
+	if result.Name != tools.ToolShell || !result.IsError {
+		t.Fatalf("expected shell error result, got %+v", result)
+	}
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if unmarshalErr := json.Unmarshal(result.Output, &payload); unmarshalErr != nil {
+		t.Fatalf("decode result output: %v", unmarshalErr)
+	}
+	if strings.TrimSpace(payload.Error) != "unknown tool" {
+		t.Fatalf("expected unknown tool output payload, got %v", payload)
+	}
+
+	messages := eng.snapshotMessages()
+	foundToolOutput := false
+	for _, msg := range messages {
+		if msg.Role != llm.RoleTool {
+			continue
+		}
+		if msg.Name != string(tools.ToolShell) {
+			continue
+		}
+		foundToolOutput = true
+		break
+	}
+	if !foundToolOutput {
+		t.Fatalf("expected persisted shell tool output message, messages=%+v", messages)
+	}
+}
+
 func TestParallelToolsReturnDeclaredOrder(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
