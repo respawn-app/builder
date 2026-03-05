@@ -250,3 +250,167 @@ func TestSetParentSessionIDPersists(t *testing.T) {
 		t.Fatalf("expected parent session id persisted, got %q", opened.Meta().ParentSessionID)
 	}
 }
+
+func TestReadEventsIgnoresTrailingTruncatedEOFLine(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "user", "content": "u1"}); err != nil {
+		t.Fatalf("append event: %v", err)
+	}
+
+	fp, err := os.OpenFile(filepath.Join(store.Dir(), eventsFile), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("open events for append: %v", err)
+	}
+	if _, err := fp.WriteString("{\"seq\":2"); err != nil {
+		_ = fp.Close()
+		t.Fatalf("append truncated line: %v", err)
+	}
+	if err := fp.Close(); err != nil {
+		t.Fatalf("close events file: %v", err)
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events len = %d, want 1", len(events))
+	}
+	if events[0].Seq != 1 {
+		t.Fatalf("expected seq=1, got %d", events[0].Seq)
+	}
+}
+
+func TestAppendEventRepairsTruncatedTailBeforeAppend(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "user", "content": "u1"}); err != nil {
+		t.Fatalf("append event 1: %v", err)
+	}
+
+	fp, err := os.OpenFile(filepath.Join(store.Dir(), eventsFile), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("open events for append: %v", err)
+	}
+	if _, err := fp.WriteString("{\"seq\":2"); err != nil {
+		_ = fp.Close()
+		t.Fatalf("append truncated tail: %v", err)
+	}
+	if err := fp.Close(); err != nil {
+		t.Fatalf("close events file: %v", err)
+	}
+
+	e2, err := store.AppendEvent("s2", "message", map[string]any{"role": "assistant", "content": "a2"})
+	if err != nil {
+		t.Fatalf("append event 2: %v", err)
+	}
+	if e2.Seq != 2 {
+		t.Fatalf("expected seq=2, got %d", e2.Seq)
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("events len = %d, want 2", len(events))
+	}
+	if events[0].Seq != 1 || events[1].Seq != 2 {
+		t.Fatalf("unexpected event sequence: %+v", events)
+	}
+}
+
+func TestOpenReconcilesMetaLastSequenceFromEventLog(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "user", "content": "u1"}); err != nil {
+		t.Fatalf("append event 1: %v", err)
+	}
+	if _, err := store.AppendEvent("s2", "message", map[string]any{"role": "assistant", "content": "a1"}); err != nil {
+		t.Fatalf("append event 2: %v", err)
+	}
+
+	sessionPath := filepath.Join(store.Dir(), sessionFile)
+	data, err := os.ReadFile(sessionPath)
+	if err != nil {
+		t.Fatalf("read session file: %v", err)
+	}
+	var meta Meta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		t.Fatalf("decode session meta: %v", err)
+	}
+	meta.LastSequence = 0
+	rewritten, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		t.Fatalf("encode session meta: %v", err)
+	}
+	if err := os.WriteFile(sessionPath, rewritten, 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	reopened, err := Open(store.Dir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if reopened.Meta().LastSequence != 2 {
+		t.Fatalf("expected reconciled last sequence 2, got %d", reopened.Meta().LastSequence)
+	}
+	next, err := reopened.AppendEvent("s3", "message", map[string]any{"role": "user", "content": "u2"})
+	if err != nil {
+		t.Fatalf("append event after reconcile: %v", err)
+	}
+	if next.Seq != 3 {
+		t.Fatalf("expected seq=3 after reopen reconciliation, got %d", next.Seq)
+	}
+}
+
+func TestPeriodicCompactionRewritesCanonicalEventsLog(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(
+		root,
+		"workspace-x",
+		"/tmp/work",
+		WithEventLogCompaction(1, 1),
+		WithEventLogFSyncPolicy(EventLogFSyncNever),
+	)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "user", "content": "u1"}); err != nil {
+		t.Fatalf("append event 1: %v", err)
+	}
+
+	fp, err := os.OpenFile(filepath.Join(store.Dir(), eventsFile), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("open events file: %v", err)
+	}
+	if _, err := fp.WriteString("\n\n"); err != nil {
+		_ = fp.Close()
+		t.Fatalf("append padding lines: %v", err)
+	}
+	if err := fp.Close(); err != nil {
+		t.Fatalf("close events file: %v", err)
+	}
+
+	if _, err := store.AppendEvent("s2", "message", map[string]any{"role": "assistant", "content": "a1"}); err != nil {
+		t.Fatalf("append event 2: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(store.Dir(), eventsFile))
+	if err != nil {
+		t.Fatalf("read events file: %v", err)
+	}
+	if strings.Contains(string(raw), "\n\n") {
+		t.Fatalf("expected compaction to remove blank lines from events log")
+	}
+}
