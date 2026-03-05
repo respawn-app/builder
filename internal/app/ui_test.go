@@ -1870,8 +1870,18 @@ func TestFileSlashCommandSubmitsInjectedUserPrompt(t *testing.T) {
 }
 
 func TestBuiltInReviewSlashCommandSubmitsInjectedUserPrompt(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	r := commands.NewDefaultRegistry()
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUICommandRegistry(r),
+	).(*uiModel)
 	m.input = "/review internal/app"
+	expected := r.Execute("/review internal/app")
+	if !expected.Handled || !expected.SubmitUser {
+		t.Fatalf("expected /review command to submit injected user prompt, got %+v", expected)
+	}
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
@@ -1884,9 +1894,8 @@ func TestBuiltInReviewSlashCommandSubmitsInjectedUserPrompt(t *testing.T) {
 	if strings.TrimSpace(updated.nextSessionInitialPrompt) == "" {
 		t.Fatal("expected next-session prompt payload for /review")
 	}
-	if !strings.Contains(updated.nextSessionInitialPrompt, "Review guidelines:") ||
-		!strings.Contains(updated.nextSessionInitialPrompt, "internal/app") {
-		t.Fatalf("expected review prompt content and args in handoff payload, got %q", updated.nextSessionInitialPrompt)
+	if updated.nextSessionInitialPrompt != expected.User {
+		t.Fatalf("expected handoff payload to match /review command output\nwant: %q\n got: %q", expected.User, updated.nextSessionInitialPrompt)
 	}
 	plain := stripANSIAndTrimRight(updated.View())
 	if strings.Contains(plain, "/review internal/app") {

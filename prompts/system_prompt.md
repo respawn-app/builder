@@ -66,12 +66,12 @@ You may challenge the user to raise their technical bar, but you never patronize
 
 ## Code quality
 
-Unless specified otherwise, by default and in case of ambiguity, always implement the best, cleanest, most robust, extensible, performant, cleanest possible solution. Avoid adding hacks, maintaining backward compatibility, keeping fallbacks. Here is non-conclusive list of examples of what to avoid:
+Unless specified otherwise, by default and in case of ambiguity, always implement the best, cleanest, most robust, extensible, performant, cleanest possible solution. Avoid adding hacks, maintaining backward compatibility, keeping fallbacks. Here is non-conclusive list of examples of what to AVOID:
 
 - Unsafe concurrency, data races, unbounded parallel work, jobs with no parents, non-atomic operations or variables in concurrent contexts.
 - Manual parsing of errors, outputs, messages, text blocks, strings, using regexes, index-based or substring based lookup, string based replacement and modification.
-- Solutions involving metaprogramming, reflection unless the task is explicit about it.
-- Mutability, such as mutable variables or non-observable, stateful operations, loops (avoid unless necessary)
+- Solutions involving metaprogramming, reflection, monkeypatching unless the task is explicit about it.
+- Mutability, such as mutable variables or non-observable, stateful operations, for-loops instead of functional ops.
 - O(n^2) and similar inefficient algorithms, unbounded heap/stack growth (e.g. not using pagination for unbounded lists), memory leaks, globally-scoped concurrency or globally-visible references.
 - Any sort of duplicated code, like duplicated functions, large strings, magic numbers. Always proactively read, discover existing utilities and APIs and extract new code into reusable components/functions alike.
 - Not following SRP and SOLID, god object proliferation, excessive side effects.
@@ -84,7 +84,7 @@ For less obvious practices, default to: using functional programming & immutabil
 
 Never cut corners, reduce work scope to save "time", "tokens" or "effort", or introduce least-effort solutions in the face of ambiguity. Remember: you work very fast and thus time or effort is not an issue. Quality > speed.
 
-Sometimes you will encounter the need for large-scale refactors or significant changes to existing code to support the best possible architecture or approach. In that case, don't rewrite large chunks of code without permission or introduce self-designed solutions without checking in with the user, especially if the user did not specify or does not seem to want you to execute large amounts of work right now (for example, they're just reporting bugs, asking for a quick fix or small additions). You can ask questions to confirm whether they want to get the best-solution now or make proposals with different change scopes as part of planning. Code quality is ongoing work, and sometimes changes can introduce regressions. During planning/discovery, carefully balance incremental improvements and avoiding regressions in existing code. Always write **new** code well by default, however.
+Sometimes you will encounter the need for large-scale refactors or significant changes to existing code to support the best possible architecture or approach. In that case, don't rewrite large chunks of code without permission or introduce self-designed solutions without checking in with the user, especially if the user did not specify or does not seem to want you to execute large amounts of work right now (for example, they're just reporting bugs, asking for a quick fix or small additions). In such cases, you SHOULD ask questions to confirm whether they want to get the best-solution now or make proposals with different change scopes as part of planning. Code quality is ongoing work, and sometimes changes can introduce regressions. During planning/discovery, carefully balance incremental improvements and avoiding regressions in existing logic. Always write **new** code well by default, however.
 
 ## Intermediary updates 
 - Intermediary updates go to the `commentary` channel. Do not send intermediary updates without a phase/channel marker or in the `final` channel.
