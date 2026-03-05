@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -94,7 +93,7 @@ func (t *HTTPTransport) Generate(ctx context.Context, request OpenAIRequest) (Op
 
 	decoded, err := service.New(ctx, payload, reqOpts...)
 	if err != nil {
-		return OpenAIResponse{}, mapOpenAIRequestError(err, rawResp, "openai responses request failed")
+		return OpenAIResponse{}, mapOpenAIRequestError(t.errorProviderID(mode), err, rawResp, "openai responses request failed")
 	}
 	if decoded == nil {
 		return OpenAIResponse{}, fmt.Errorf("openai responses request failed: empty response")
@@ -173,7 +172,7 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 		}
 	}
 	if err := stream.Err(); err != nil {
-		return OpenAIResponse{}, mapOpenAIRequestError(err, rawResp, "read responses stream events")
+		return OpenAIResponse{}, mapOpenAIRequestError(t.errorProviderID(mode), err, rawResp, "read responses stream events")
 	}
 
 	finalText := assistantText.String()
@@ -251,7 +250,7 @@ func (t *HTTPTransport) Compact(ctx context.Context, request OpenAICompactionReq
 
 	decoded, err := service.Compact(ctx, payload, reqOpts...)
 	if err != nil {
-		return OpenAICompactionResponse{}, mapOpenAIRequestError(err, rawResp, "openai responses compact request failed")
+		return OpenAICompactionResponse{}, mapOpenAIRequestError(t.errorProviderID(mode), err, rawResp, "openai responses compact request failed")
 	}
 	if len(bytes.TrimSpace(rawBody)) > 0 {
 		var parsed responses.CompactedResponse
@@ -298,7 +297,7 @@ func (t *HTTPTransport) CountRequestInputTokens(ctx context.Context, request Ope
 
 	decoded, err := service.Count(ctx, payload, reqOpts...)
 	if err != nil {
-		return 0, mapOpenAIRequestError(err, rawResp, "openai responses input_tokens request failed")
+		return 0, mapOpenAIRequestError(t.errorProviderID(mode), err, rawResp, "openai responses input_tokens request failed")
 	}
 	if decoded == nil {
 		return 0, fmt.Errorf("openai responses input_tokens request failed: empty response")
@@ -1446,14 +1445,23 @@ func (t *HTTPTransport) buildRequestOptions(authHeader string, mode openAIAuthMo
 	return opts
 }
 
-func mapOpenAIRequestError(err error, rawResp *http.Response, prefix string) error {
-	if rawResp != nil && rawResp.StatusCode >= 300 {
-		return apiStatusErrorFromResponse(rawResp)
+func mapOpenAIRequestError(providerID string, err error, rawResp *http.Response, prefix string) error {
+	reducer, reducerErr := providerErrorReducerForID(providerID)
+	if reducerErr != nil {
+		return fmt.Errorf("%s: %w", prefix, reducerErr)
+	}
+	reducedErr, ok := reducer.Reduce(err, rawResp)
+	if ok && reducedErr != nil {
+		return fmt.Errorf("%s: %w", prefix, reducedErr)
 	}
 	if err == nil {
 		return fmt.Errorf("%s: unknown error", prefix)
 	}
 	return fmt.Errorf("%s: %w", prefix, err)
+}
+
+func (t *HTTPTransport) errorProviderID(mode openAIAuthMode) string {
+	return InferProviderCapabilities(t.serviceBaseURL(mode), mode.IsOAuth).ProviderID
 }
 
 func (t *HTTPTransport) resolveContextWindowFallback(ctx context.Context, model string) int {
@@ -1569,18 +1577,6 @@ func parsePositiveInt(value any) int {
 		}
 	}
 	return 0
-}
-
-func apiStatusErrorFromResponse(rawResp *http.Response) error {
-	if rawResp == nil {
-		return &APIStatusError{StatusCode: 0, Body: "<empty error body>"}
-	}
-	defer rawResp.Body.Close()
-	body, _ := io.ReadAll(rawResp.Body)
-	return &APIStatusError{
-		StatusCode: rawResp.StatusCode,
-		Body:       truncateError(body),
-	}
 }
 
 func usageFromSDK(usage responses.ResponseUsage, window int) Usage {

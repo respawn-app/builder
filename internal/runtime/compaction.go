@@ -458,7 +458,7 @@ func (e *Engine) compactWithRetry(ctx context.Context, client llm.CompactionClie
 		if err == nil {
 			return resp, nil
 		}
-		if llm.IsNonRetriableModelError(err) {
+		if llm.IsNonRetriableModelError(err) || llm.IsContextLengthOverflowError(err) {
 			return llm.CompactionResponse{}, err
 		}
 		lastErr = err
@@ -475,11 +475,7 @@ func (e *Engine) compactWithRetry(ctx context.Context, client llm.CompactionClie
 }
 
 func isCompactionContextOverflow(err error) bool {
-	var statusErr *llm.APIStatusError
-	if !errors.As(err, &statusErr) {
-		return false
-	}
-	return statusErr.StatusCode == 400
+	return llm.IsContextLengthOverflowError(err)
 }
 
 func (e *Engine) compactLocal(ctx context.Context, input []llm.ResponseItem, providerID string, instructions string) (compactionResult, error) {
