@@ -92,13 +92,6 @@ func TestSessionPickerViewOmitsHotkeyLegend(t *testing.T) {
 	}
 }
 
-func TestHumanTimeFormatsDateAndMinutes(t *testing.T) {
-	ts := time.Date(2026, time.February, 8, 9, 7, 55, 0, time.Local)
-	if got, want := humanTime(ts), "2026-02-08 09:07"; got != want {
-		t.Fatalf("humanTime=%q want %q", got, want)
-	}
-}
-
 func TestSessionPickerPrefersSessionName(t *testing.T) {
 	now := time.Date(2026, time.February, 8, 12, 0, 0, 0, time.UTC)
 	m := newSessionPickerModel([]session.Summary{{

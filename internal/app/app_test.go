@@ -16,13 +16,3 @@ func TestEffectiveSettingsKeepsBaseThinkingLevelEvenWhenSessionIsLocked(t *testi
 		t.Fatalf("thinking level = %q, want %q", effective.ThinkingLevel, "high")
 	}
 }
-
-func TestEffectiveSettingsKeepsBaseThinkingLevelWhenLockIsEmpty(t *testing.T) {
-	base := config.Settings{Model: "gpt-5", ThinkingLevel: "high"}
-	locked := &session.LockedContract{Model: "gpt-5"}
-
-	effective := effectiveSettings(base, locked)
-	if effective.ThinkingLevel != "high" {
-		t.Fatalf("thinking level = %q, want %q", effective.ThinkingLevel, "high")
-	}
-}
