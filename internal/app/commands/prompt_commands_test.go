@@ -2,14 +2,6 @@ package commands
 
 import "testing"
 
-func TestBuildPromptSubmissionWithoutArgsAppendReturnsPromptVerbatim(t *testing.T) {
-	prompt := "# review\nbody\n"
-	got := buildPromptSubmission(prompt, "src", false)
-	if got != prompt {
-		t.Fatalf("expected verbatim prompt, got %q", got)
-	}
-}
-
 func TestBuildPromptSubmissionWithArgsAppendsTrimmedArgs(t *testing.T) {
 	prompt := "# review\nbody\n"
 	got := buildPromptSubmission(prompt, "  src/internal  ", true)

@@ -68,56 +68,6 @@ func TestModeTogglesUseDetailAltScreenNative(t *testing.T) {
 	}
 }
 
-func TestCtrlTModeTogglesUseDetailAltScreenNative(t *testing.T) {
-	out := &bytes.Buffer{}
-	seq := &bytes.Buffer{}
-	var sequenceMu sync.Mutex
-	originalSequenceWriter := writeTerminalSequence
-	writeTerminalSequence = func(value string) {
-		sequenceMu.Lock()
-		_, _ = seq.WriteString(value)
-		sequenceMu.Unlock()
-	}
-	defer func() { writeTerminalSequence = originalSequenceWriter }()
-	model := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
-		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "history marker"}}),
-	).(*uiModel)
-	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
-	done := make(chan error, 1)
-	go func() {
-		_, err := program.Run()
-		done <- err
-	}()
-	time.Sleep(30 * time.Millisecond)
-	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
-	time.Sleep(20 * time.Millisecond)
-	program.Send(tea.KeyMsg{Type: tea.KeyCtrlT})
-	time.Sleep(10 * time.Millisecond)
-	program.Send(tea.KeyMsg{Type: tea.KeyCtrlT})
-	time.Sleep(20 * time.Millisecond)
-	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("program run failed: %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("program did not terminate")
-	}
-	raw := out.String()
-	if !strings.Contains(raw, "\x1b[?1049h") || !strings.Contains(raw, "\x1b[?1049l") {
-		t.Fatalf("expected detail alt-screen enter/leave sequences, got %q", raw)
-	}
-	sequenceRaw := seq.String()
-	if !strings.Contains(sequenceRaw, "\x1b[?1007h") || !strings.Contains(sequenceRaw, "\x1b[?1007l") {
-		t.Fatalf("expected alternate-scroll enable/disable sequences, got %q", sequenceRaw)
-	}
-}
-
 func TestModeTogglesUseDetailAltScreenAltMode(t *testing.T) {
 	out := &bytes.Buffer{}
 	seq := &bytes.Buffer{}

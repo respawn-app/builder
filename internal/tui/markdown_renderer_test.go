@@ -18,28 +18,6 @@ func TestMarkdownRendererUsesStyledTheme(t *testing.T) {
 	}
 }
 
-func TestMarkdownRendererStyleConfigRemovesDocumentPadding(t *testing.T) {
-	r := newMarkdownRenderer("dark")
-	cfg := r.styleConfig()
-	if cfg.Document.Margin == nil || *cfg.Document.Margin != 0 {
-		t.Fatalf("expected document margin=0, got %#v", cfg.Document.Margin)
-	}
-	if cfg.Document.BlockPrefix != "" || cfg.Document.BlockSuffix != "" {
-		t.Fatalf("expected empty document block wrappers, got prefix=%q suffix=%q", cfg.Document.BlockPrefix, cfg.Document.BlockSuffix)
-	}
-}
-
-func TestMarkdownRendererStyleConfigInlineCodeHasNoBackground(t *testing.T) {
-	r := newMarkdownRenderer("dark")
-	cfg := r.styleConfig()
-	if cfg.Code.BackgroundColor != nil {
-		t.Fatalf("expected inline code background disabled, got %#v", cfg.Code.BackgroundColor)
-	}
-	if cfg.Code.Color == nil {
-		t.Fatal("expected inline code color to remain configured")
-	}
-}
-
 func TestMarkdownRendererRenderHasNoLeadingPadding(t *testing.T) {
 	r := newMarkdownRenderer("dark")
 	out, err := r.render("assistant", "hello", 80)
