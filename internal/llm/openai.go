@@ -47,6 +47,14 @@ type OpenAITransport interface {
 	Compact(ctx context.Context, request OpenAICompactionRequest) (OpenAICompactionResponse, error)
 }
 
+type OpenAIInputTokenCountTransport interface {
+	CountRequestInputTokens(ctx context.Context, request OpenAIRequest) (int, error)
+}
+
+type OpenAIModelContextWindowTransport interface {
+	ResolveModelContextWindow(ctx context.Context, model string) (int, error)
+}
+
 type OpenAIStreamingTransport interface {
 	GenerateStream(ctx context.Context, request OpenAIRequest, onDelta func(text string)) (OpenAIResponse, error)
 }
@@ -200,4 +208,51 @@ func (c *OpenAIClient) ProviderCapabilities(ctx context.Context) (ProviderCapabi
 		SupportsServerSideContextEdit: true,
 		IsOpenAIFirstParty:            true,
 	}, nil
+}
+
+func (c *OpenAIClient) CountRequestInputTokens(ctx context.Context, request Request) (int, error) {
+	if c == nil || c.transport == nil {
+		return 0, ErrMissingTransport
+	}
+	if err := request.Validate(); err != nil {
+		return 0, err
+	}
+	counter, ok := c.transport.(OpenAIInputTokenCountTransport)
+	if !ok {
+		return 0, fmt.Errorf("openai request token counting is not supported by transport")
+	}
+
+	providerReq := OpenAIRequest{
+		Model:                 request.Model,
+		Temperature:           request.Temperature,
+		MaxTokens:             request.MaxTokens,
+		ReasoningEffort:       request.ReasoningEffort,
+		EnableNativeWebSearch: request.EnableNativeWebSearch,
+		SystemPrompt:          request.SystemPrompt,
+		SessionID:             request.SessionID,
+		Messages:              append([]Message(nil), request.Messages...),
+		Items:                 CloneResponseItems(request.Items),
+		Tools:                 append([]Tool(nil), request.Tools...),
+		StructuredOutput:      request.StructuredOutput,
+	}
+
+	count, err := counter.CountRequestInputTokens(ctx, providerReq)
+	if err != nil {
+		return 0, fmt.Errorf("openai request token counting failed: %w", err)
+	}
+	if count < 0 {
+		return 0, nil
+	}
+	return count, nil
+}
+
+func (c *OpenAIClient) ResolveModelContextWindow(ctx context.Context, model string) (int, error) {
+	if c == nil || c.transport == nil {
+		return 0, ErrMissingTransport
+	}
+	resolver, ok := c.transport.(OpenAIModelContextWindowTransport)
+	if !ok {
+		return 0, fmt.Errorf("openai model context window resolution is not supported by transport")
+	}
+	return resolver.ResolveModelContextWindow(ctx, model)
 }

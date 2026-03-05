@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"builder/internal/shared/textutil"
@@ -49,6 +50,9 @@ type HTTPTransport struct {
 	Auth                AuthHeaderProvider
 	Store               bool
 	ContextWindowTokens int
+
+	mu                  sync.RWMutex
+	modelContextWindows map[string]int
 }
 
 func NewHTTPTransport(auth AuthHeaderProvider) *HTTPTransport {
@@ -63,6 +67,7 @@ func NewHTTPTransport(auth AuthHeaderProvider) *HTTPTransport {
 		Client:              &http.Client{Timeout: 120 * time.Second},
 		Auth:                auth,
 		ContextWindowTokens: window,
+		modelContextWindows: make(map[string]int),
 	}
 }
 
@@ -70,6 +75,7 @@ func (t *HTTPTransport) Generate(ctx context.Context, request OpenAIRequest) (Op
 	if t.Client == nil {
 		t.Client = &http.Client{Timeout: 120 * time.Second}
 	}
+	windowTokens := t.resolveContextWindowFallback(ctx, request.Model)
 
 	authHeader, mode, err := t.resolveAuth(ctx)
 	if err != nil {
@@ -102,7 +108,7 @@ func (t *HTTPTransport) Generate(ctx context.Context, request OpenAIRequest) (Op
 		Reasoning:      reasoning,
 		ReasoningItems: reasoningItems,
 		OutputItems:    outputItems,
-		Usage:          usageFromSDK(decoded.Usage, t.ContextWindowTokens),
+		Usage:          usageFromSDK(decoded.Usage, windowTokens),
 	}, nil
 }
 
@@ -110,6 +116,7 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 	if t.Client == nil {
 		t.Client = &http.Client{Timeout: 120 * time.Second}
 	}
+	windowTokens := t.resolveContextWindowFallback(ctx, request.Model)
 
 	authHeader, mode, err := t.resolveAuth(ctx)
 	if err != nil {
@@ -132,7 +139,7 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 	var assistantText strings.Builder
 	acc := newToolCallAccumulator()
 	reasoningAcc := newReasoningAccumulator()
-	usage := Usage{WindowTokens: t.ContextWindowTokens}
+	usage := Usage{WindowTokens: windowTokens}
 	var completed *responses.Response
 
 	for stream.Next() {
@@ -177,7 +184,7 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 
 	if completed != nil {
 		if completed.Usage.InputTokens > 0 || completed.Usage.OutputTokens > 0 {
-			usage = usageFromSDK(completed.Usage, t.ContextWindowTokens)
+			usage = usageFromSDK(completed.Usage, windowTokens)
 		}
 		parsedItems, parsedText, parsedPhase, parsedCalls, parsedReasoning, parsedReasoningItems := parseOutputItems(completed.Output)
 		// Treat response.completed as canonical output for assistant text.
@@ -221,6 +228,7 @@ func (t *HTTPTransport) Compact(ctx context.Context, request OpenAICompactionReq
 	if t.Client == nil {
 		t.Client = &http.Client{Timeout: 120 * time.Second}
 	}
+	windowTokens := t.resolveContextWindowFallback(ctx, request.Model)
 
 	authHeader, mode, err := t.resolveAuth(ctx)
 	if err != nil {
@@ -259,9 +267,107 @@ func (t *HTTPTransport) Compact(ctx context.Context, request OpenAICompactionReq
 	outputItems, _, _, _, _, _ := parseOutputItems(decoded.Output)
 	return OpenAICompactionResponse{
 		OutputItems:       outputItems,
-		Usage:             usageFromSDK(decoded.Usage, t.ContextWindowTokens),
+		Usage:             usageFromSDK(decoded.Usage, windowTokens),
 		TrimmedItemsCount: 0,
 	}, nil
+}
+
+func (t *HTTPTransport) CountRequestInputTokens(ctx context.Context, request OpenAIRequest) (int, error) {
+	if t.Client == nil {
+		t.Client = &http.Client{Timeout: 120 * time.Second}
+	}
+
+	authHeader, mode, err := t.resolveAuth(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	payload, err := t.buildInputTokenCountParams(request)
+	if err != nil {
+		return 0, err
+	}
+
+	service := responses.NewInputTokenService(
+		option.WithBaseURL(t.serviceBaseURL(mode)),
+		option.WithHTTPClient(t.Client),
+		option.WithMaxRetries(0),
+	)
+	reqOpts := t.buildRequestOptions(authHeader, mode, request.SessionID)
+	var rawResp *http.Response
+	reqOpts = append(reqOpts, option.WithResponseInto(&rawResp))
+
+	decoded, err := service.Count(ctx, payload, reqOpts...)
+	if err != nil {
+		return 0, mapOpenAIRequestError(err, rawResp, "openai responses input_tokens request failed")
+	}
+	if decoded == nil {
+		return 0, fmt.Errorf("openai responses input_tokens request failed: empty response")
+	}
+	resolvedWindow := parseContextWindowTokens(decoded.RawJSON())
+	if resolvedWindow <= 0 {
+		resolvedWindow = parseContextWindowTokensFromHeaders(rawResp)
+	}
+	t.cacheModelContextWindow(request.Model, resolvedWindow)
+	if decoded.InputTokens < 0 {
+		return 0, nil
+	}
+	return int(decoded.InputTokens), nil
+}
+
+func (t *HTTPTransport) ResolveModelContextWindow(ctx context.Context, model string) (int, error) {
+	if t.Client == nil {
+		t.Client = &http.Client{Timeout: 120 * time.Second}
+	}
+	if t.ContextWindowTokens > 0 {
+		return t.ContextWindowTokens, nil
+	}
+
+	normalizedModel := strings.ToLower(strings.TrimSpace(model))
+	if normalizedModel == "" {
+		if t.ContextWindowTokens > 0 {
+			return t.ContextWindowTokens, nil
+		}
+		return 0, nil
+	}
+
+	t.mu.RLock()
+	if cached := t.modelContextWindows[normalizedModel]; cached > 0 {
+		t.mu.RUnlock()
+		return cached, nil
+	}
+	t.mu.RUnlock()
+
+	resolved := 0
+	authHeader, mode, err := t.resolveAuth(ctx)
+	if err == nil {
+		service := openai.NewModelService(
+			option.WithBaseURL(t.serviceBaseURL(mode)),
+			option.WithHTTPClient(t.Client),
+			option.WithMaxRetries(0),
+		)
+		reqOpts := t.buildRequestOptions(authHeader, mode, "")
+		var rawResp *http.Response
+		reqOpts = append(reqOpts, option.WithResponseInto(&rawResp))
+		modelResponse, modelErr := service.Get(ctx, strings.TrimSpace(model), reqOpts...)
+		if modelErr == nil && modelResponse != nil {
+			resolved = parseContextWindowTokens(modelResponse.RawJSON())
+		}
+		if resolved <= 0 {
+			resolved = parseContextWindowTokensFromHeaders(rawResp)
+		}
+	}
+
+	if resolved <= 0 {
+		if fallbackMeta, ok := LookupModelMetadata(model); ok && fallbackMeta.ContextWindowTokens > 0 {
+			resolved = fallbackMeta.ContextWindowTokens
+		}
+	}
+	if resolved <= 0 {
+		resolved = t.ContextWindowTokens
+	}
+
+	t.cacheModelContextWindow(model, resolved)
+	return resolved, nil
 }
 
 func (t *HTTPTransport) ProviderCapabilities(ctx context.Context) (ProviderCapabilities, error) {
@@ -348,6 +454,72 @@ func (t *HTTPTransport) buildPayload(request OpenAIRequest, mode openAIAuthMode)
 			return responses.ResponseNewParams{}, fmt.Errorf("invalid structured output schema")
 		}
 		text := responses.ResponseTextConfigParam{
+			Format: responses.ResponseFormatTextConfigParamOfJSONSchema(strings.TrimSpace(request.StructuredOutput.Name), schema),
+		}
+		if text.Format.OfJSONSchema != nil {
+			if request.StructuredOutput.Strict {
+				text.Format.OfJSONSchema.Strict = param.NewOpt(true)
+			}
+			if description := strings.TrimSpace(request.StructuredOutput.Description); description != "" {
+				text.Format.OfJSONSchema.Description = param.NewOpt(description)
+			}
+		}
+		out.Text = text
+	}
+
+	return out, nil
+}
+
+func (t *HTTPTransport) buildInputTokenCountParams(request OpenAIRequest) (responses.InputTokenCountParams, error) {
+	input := buildResponsesInput(request.Messages, request.Items)
+
+	tools := make([]responses.ToolUnionParam, 0, len(request.Tools))
+	for _, tool := range request.Tools {
+		if len(tool.Schema) > 0 && !json.Valid(tool.Schema) {
+			return responses.InputTokenCountParams{}, fmt.Errorf("invalid tool schema for %s", tool.Name)
+		}
+		params := map[string]any{"type": "object", "properties": map[string]any{}}
+		if len(tool.Schema) > 0 {
+			if err := json.Unmarshal(tool.Schema, &params); err != nil {
+				return responses.InputTokenCountParams{}, fmt.Errorf("invalid tool schema for %s", tool.Name)
+			}
+		}
+		normalizeSchemaAdditionalProperties(params)
+		toolParam := responses.ToolParamOfFunction(tool.Name, params, false)
+		if description := strings.TrimSpace(tool.Description); description != "" && toolParam.OfFunction != nil {
+			toolParam.OfFunction.Description = openai.String(description)
+		}
+		tools = append(tools, toolParam)
+	}
+	if request.EnableNativeWebSearch {
+		tools = append(tools, responses.ToolParamOfWebSearch(responses.WebSearchToolTypeWebSearch))
+	}
+
+	out := responses.InputTokenCountParams{
+		Model: param.NewOpt(strings.TrimSpace(request.Model)),
+	}
+	if len(input) > 0 {
+		out.Input = responses.InputTokenCountParamsInputUnion{OfResponseInputItemArray: input}
+	}
+	if instructions := strings.TrimSpace(request.SystemPrompt); instructions != "" {
+		out.Instructions = param.NewOpt(instructions)
+	}
+	if len(tools) > 0 {
+		out.Tools = tools
+		out.ParallelToolCalls = param.NewOpt(true)
+	}
+	if shouldApplyReasoningEffort(request.Model, request.ReasoningEffort) {
+		out.Reasoning = shared.ReasoningParam{
+			Effort:  shared.ReasoningEffort(strings.TrimSpace(request.ReasoningEffort)),
+			Summary: shared.ReasoningSummaryConcise,
+		}
+	}
+	if request.StructuredOutput != nil {
+		var schema map[string]any
+		if err := json.Unmarshal(request.StructuredOutput.Schema, &schema); err != nil {
+			return responses.InputTokenCountParams{}, fmt.Errorf("invalid structured output schema")
+		}
+		text := responses.InputTokenCountParamsText{
 			Format: responses.ResponseFormatTextConfigParamOfJSONSchema(strings.TrimSpace(request.StructuredOutput.Name), schema),
 		}
 		if text.Format.OfJSONSchema != nil {
@@ -1282,6 +1454,121 @@ func mapOpenAIRequestError(err error, rawResp *http.Response, prefix string) err
 		return fmt.Errorf("%s: unknown error", prefix)
 	}
 	return fmt.Errorf("%s: %w", prefix, err)
+}
+
+func (t *HTTPTransport) resolveContextWindowFallback(ctx context.Context, model string) int {
+	if t.ContextWindowTokens > 0 {
+		return t.ContextWindowTokens
+	}
+	resolved, err := t.ResolveModelContextWindow(ctx, model)
+	if err == nil && resolved > 0 {
+		return resolved
+	}
+	if fallbackMeta, ok := LookupModelMetadata(model); ok && fallbackMeta.ContextWindowTokens > 0 {
+		return fallbackMeta.ContextWindowTokens
+	}
+	return 0
+}
+
+func (t *HTTPTransport) cacheModelContextWindow(model string, tokens int) {
+	if tokens <= 0 {
+		return
+	}
+	normalizedModel := strings.ToLower(strings.TrimSpace(model))
+	if normalizedModel == "" {
+		return
+	}
+	t.mu.Lock()
+	t.modelContextWindows[normalizedModel] = tokens
+	t.mu.Unlock()
+}
+
+func parseContextWindowTokens(rawJSON string) int {
+	trimmed := strings.TrimSpace(rawJSON)
+	if trimmed == "" {
+		return 0
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
+		return 0
+	}
+	return findPositiveIntByPreferredKeys(
+		decoded,
+		[]string{"context_window", "model_context_window", "input_token_limit", "max_input_tokens", "context_length"},
+	)
+}
+
+func parseContextWindowTokensFromHeaders(rawResp *http.Response) int {
+	if rawResp == nil {
+		return 0
+	}
+	for _, headerName := range []string{
+		"x-openai-model-context-window",
+		"openai-model-context-window",
+		"x-model-context-window",
+		"model-context-window",
+		"x-context-window",
+		"context-window",
+	} {
+		if parsed := parsePositiveInt(rawResp.Header.Get(headerName)); parsed > 0 {
+			return parsed
+		}
+	}
+	return 0
+}
+
+func findPositiveIntByPreferredKeys(node any, keys []string) int {
+	switch typed := node.(type) {
+	case map[string]any:
+		for _, key := range keys {
+			if value, ok := typed[key]; ok {
+				if parsed := parsePositiveInt(value); parsed > 0 {
+					return parsed
+				}
+			}
+		}
+		for _, value := range typed {
+			if parsed := findPositiveIntByPreferredKeys(value, keys); parsed > 0 {
+				return parsed
+			}
+		}
+	case []any:
+		for _, value := range typed {
+			if parsed := findPositiveIntByPreferredKeys(value, keys); parsed > 0 {
+				return parsed
+			}
+		}
+	}
+	return 0
+}
+
+func parsePositiveInt(value any) int {
+	switch typed := value.(type) {
+	case float64:
+		parsed := int(typed)
+		if parsed > 0 {
+			return parsed
+		}
+	case json.Number:
+		parsed, err := typed.Int64()
+		if err == nil && parsed > 0 {
+			return int(parsed)
+		}
+	case int:
+		if typed > 0 {
+			return typed
+		}
+	case int64:
+		if typed > 0 {
+			return int(typed)
+		}
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(typed))
+		if err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return 0
 }
 
 func apiStatusErrorFromResponse(rawResp *http.Response) error {

@@ -478,6 +478,14 @@ type StreamClient interface {
 	GenerateStream(ctx context.Context, request Request, onDelta func(text string)) (Response, error)
 }
 
+type RequestInputTokenCountClient interface {
+	CountRequestInputTokens(ctx context.Context, request Request) (int, error)
+}
+
+type ModelContextWindowClient interface {
+	ResolveModelContextWindow(ctx context.Context, model string) (int, error)
+}
+
 func AppendToolResultMessages(messages []Message, results []ToolResult) []Message {
 	out := make([]Message, 0, len(messages)+len(results))
 	out = append(out, messages...)

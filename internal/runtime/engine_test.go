@@ -63,12 +63,55 @@ type fakeCompactionClient struct {
 	responses []llm.Response
 	calls     []llm.Request
 
+	inputTokenCount      int
+	inputTokenCountFn    func(req llm.Request) int
+	countInputTokenCalls int
+
 	compactionResponses []llm.CompactionResponse
 	compactionErr       error
 	compactionErrors    []error
 	compactionCalls     []llm.CompactionRequest
 
 	caps llm.ProviderCapabilities
+}
+
+type preciseCompactionClient struct {
+	inputTokenCount int
+	contextWindow   int
+
+	countCalls   int
+	resolveCalls int
+}
+
+func (c *preciseCompactionClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
+	return llm.Response{}, nil
+}
+
+func (c *preciseCompactionClient) CountRequestInputTokens(_ context.Context, _ llm.Request) (int, error) {
+	c.countCalls++
+	if c.inputTokenCount < 0 {
+		return 0, nil
+	}
+	return c.inputTokenCount, nil
+}
+
+func (c *preciseCompactionClient) ResolveModelContextWindow(_ context.Context, _ string) (int, error) {
+	c.resolveCalls++
+	if c.contextWindow <= 0 {
+		return 0, nil
+	}
+	return c.contextWindow, nil
+}
+
+func (c *preciseCompactionClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	return llm.ProviderCapabilities{
+		ProviderID:                    "openai",
+		SupportsResponsesAPI:          true,
+		SupportsResponsesCompact:      true,
+		SupportsReasoningEncrypted:    true,
+		SupportsServerSideContextEdit: true,
+		IsOpenAIFirstParty:            true,
+	}, nil
 }
 
 func (f *fakeCompactionClient) Generate(_ context.Context, req llm.Request) (llm.Response, error) {
@@ -81,6 +124,23 @@ func (f *fakeCompactionClient) Generate(_ context.Context, req llm.Request) (llm
 	resp := f.responses[0]
 	f.responses = f.responses[1:]
 	return resp, nil
+}
+
+func (f *fakeCompactionClient) CountRequestInputTokens(_ context.Context, req llm.Request) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.countInputTokenCalls++
+	if f.inputTokenCountFn != nil {
+		count := f.inputTokenCountFn(req)
+		if count < 0 {
+			return 0, nil
+		}
+		return count, nil
+	}
+	if f.inputTokenCount < 0 {
+		return 0, nil
+	}
+	return f.inputTokenCount, nil
 }
 
 func (f *fakeCompactionClient) Compact(_ context.Context, req llm.CompactionRequest) (llm.CompactionResponse, error) {
@@ -3707,6 +3767,147 @@ func TestShouldAutoCompactAccountsForMessagesAppendedAfterLastUsage(t *testing.T
 	}
 }
 
+func TestShouldAutoCompactUsesPreciseRequestInputTokenCountWhenAvailable(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &preciseCompactionClient{inputTokenCount: 960, contextWindow: 1000}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   400_000,
+		AutoCompactTokenLimit: 900,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "short"}); err != nil {
+		t.Fatalf("append message: %v", err)
+	}
+
+	if !eng.shouldAutoCompact() {
+		t.Fatalf("expected auto compaction to trigger from precise input token count")
+	}
+}
+
+func TestShouldAutoCompactPrefersConfiguredThresholdOverResolvedContextWindow(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &preciseCompactionClient{inputTokenCount: 950, contextWindow: 1000}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   400_000,
+		AutoCompactTokenLimit: 360_000,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "short"}); err != nil {
+		t.Fatalf("append message: %v", err)
+	}
+
+	if eng.shouldAutoCompact() {
+		t.Fatalf("expected auto compaction to honor configured threshold and remain below limit")
+	}
+	if client.resolveCalls != 0 {
+		t.Fatalf("expected configured context window to bypass remote resolver, got resolveCalls=%d", client.resolveCalls)
+	}
+	eng.mu.Lock()
+	defer eng.mu.Unlock()
+	if eng.cfg.ContextWindowTokens != 400_000 {
+		t.Fatalf("expected configured context window to remain unchanged, got %d", eng.cfg.ContextWindowTokens)
+	}
+}
+
+func TestShouldAutoCompactAccountsForReservedOutputBudget(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &preciseCompactionClient{inputTokenCount: 850, contextWindow: 400000}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   400_000,
+		AutoCompactTokenLimit: 900,
+		MaxTokens:             100,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "short"}); err != nil {
+		t.Fatalf("append message: %v", err)
+	}
+
+	if !eng.shouldAutoCompact() {
+		t.Fatalf("expected auto compaction when input + reserved output exceeds threshold")
+	}
+}
+
+func TestShouldAutoCompactSkipsPreciseCountWhenFarBelowThreshold(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &preciseCompactionClient{inputTokenCount: 999999, contextWindow: 400000}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   400_000,
+		AutoCompactTokenLimit: 100_000,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "short"}); err != nil {
+		t.Fatalf("append message: %v", err)
+	}
+
+	if eng.shouldAutoCompact() {
+		t.Fatalf("expected no compaction when far below configured threshold")
+	}
+	if client.countCalls != 0 {
+		t.Fatalf("expected precise token counting to be skipped when far below threshold, got countCalls=%d", client.countCalls)
+	}
+}
+
+func TestShouldAutoCompactMemoizesPreciseCountForUnchangedRequest(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &preciseCompactionClient{inputTokenCount: 96000, contextWindow: 400000}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   400_000,
+		AutoCompactTokenLimit: 100_000,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.setLastUsage(llm.Usage{InputTokens: 95_000, WindowTokens: 400_000})
+
+	if eng.shouldAutoCompact() {
+		t.Fatalf("expected no compaction for precise count below threshold")
+	}
+	if eng.shouldAutoCompact() {
+		t.Fatalf("expected no compaction for repeated unchanged request")
+	}
+	if client.countCalls != 1 {
+		t.Fatalf("expected memoized precise token count across unchanged checks, got countCalls=%d", client.countCalls)
+	}
+}
+
 func TestManualCompactionRemotePassesSlashCommandArgumentsAsInstructions(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -3788,6 +3989,113 @@ func TestManualCompactionLocalAppendsSlashCommandArgumentsToPrompt(t *testing.T)
 	if !found {
 		t.Fatalf("expected local compact prompt to include appended slash command args, got %+v", client.calls[0].Items)
 	}
+}
+
+func TestRemoteCompactionTrimUsesSublinearPreciseTokenCountCalls(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	maxItemsSeen := 0
+	client := &fakeCompactionClient{
+		inputTokenCountFn: func(req llm.Request) int {
+			if len(req.Items) > maxItemsSeen {
+				maxItemsSeen = len(req.Items)
+			}
+			return len(req.Items) * 1000
+		},
+		compactionResponses: []llm.CompactionResponse{
+			{
+				OutputItems: []llm.ResponseItem{
+					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "seed"},
+					{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+				},
+				Usage: llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 400000},
+			},
+		},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	for i := 0; i < 600; i++ {
+		if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, Content: "a"}); err != nil {
+			t.Fatalf("append assistant message %d: %v", i, err)
+		}
+	}
+
+	if err := eng.CompactContext(context.Background(), ""); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	if maxItemsSeen <= 0 {
+		t.Fatalf("expected at least one precise token-count request")
+	}
+	bound := 2*ceilLog2Int(maxItemsSeen+1) + 14
+	if client.countInputTokenCalls > bound {
+		t.Fatalf("expected sublinear precise token count calls, got=%d bound=%d n=%d", client.countInputTokenCalls, bound, maxItemsSeen)
+	}
+}
+
+func TestLocalCompactionCarryoverUsesSublinearPreciseTokenCountCalls(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	maxItemsSeen := 0
+	client := &fakeCompactionClient{
+		inputTokenCountFn: func(req llm.Request) int {
+			if len(req.Items) > maxItemsSeen {
+				maxItemsSeen = len(req.Items)
+			}
+			return len(req.Items) * 1000
+		},
+		responses: []llm.Response{
+			{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "summary"}, Usage: llm.Usage{WindowTokens: 400000}},
+		},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:               "gpt-5",
+		ContextWindowTokens: 400_000,
+		CompactionMode:      "local",
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	for i := 0; i < 512; i++ {
+		if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "u"}); err != nil {
+			t.Fatalf("append user message %d: %v", i, err)
+		}
+	}
+
+	if err := eng.CompactContext(context.Background(), ""); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	if maxItemsSeen <= 0 {
+		t.Fatalf("expected at least one precise token-count request")
+	}
+	bound := 2*ceilLog2Int(maxItemsSeen+1) + 16
+	if client.countInputTokenCalls > bound {
+		t.Fatalf("expected sublinear precise token count calls for local carryover, got=%d bound=%d n=%d", client.countInputTokenCalls, bound, maxItemsSeen)
+	}
+}
+
+func ceilLog2Int(value int) int {
+	if value <= 1 {
+		return 0
+	}
+	pow := 0
+	current := 1
+	for current < value {
+		current <<= 1
+		pow++
+	}
+	return pow
 }
 
 func TestManualCompactionLocalUsesHistorySinceLastCompactionCheckpoint(t *testing.T) {
