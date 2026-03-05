@@ -771,20 +771,21 @@ func TestCompactionNoticeAndSummaryRenderingByMode(t *testing.T) {
 func TestReviewerStatusRendersShortInOngoingAndFullInDetail(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "run task"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "reviewer_status", Text: "Supervisor ran: 2 suggestions, no changes applied.\n\nSupervisor suggestions:\n1. First\n2. Second"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "reviewer_suggestions", Text: "Supervisor suggested:\n1. First\n2. Second"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "reviewer_status", Text: "Supervisor ran: 2 suggestions, no changes applied."})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "done"})
 
 	ongoing := plainTranscript(m.View())
 	if !strings.Contains(ongoing, "Supervisor ran: 2 suggestions, no changes applied.") {
 		t.Fatalf("expected short reviewer status in ongoing view, got %q", ongoing)
 	}
-	if strings.Contains(ongoing, "Supervisor suggestions:") || strings.Contains(ongoing, "1. First") {
+	if strings.Contains(ongoing, "Supervisor suggested:") || strings.Contains(ongoing, "1. First") {
 		t.Fatalf("expected full reviewer suggestions hidden in ongoing view, got %q", ongoing)
 	}
 
 	m = updateModel(t, m, ToggleModeMsg{})
 	detail := plainTranscript(m.View())
-	if !containsInOrder(detail, "❯", "run task", "@", "Supervisor ran: 2 suggestions, no changes applied.", "Supervisor suggestions:", "1. First", "2. Second", "❮", "done") {
+	if !containsInOrder(detail, "❯", "run task", "@", "Supervisor suggested:", "1. First", "2. Second", "@", "Supervisor ran: 2 suggestions, no changes applied.", "❮", "done") {
 		t.Fatalf("expected reviewer status visible in detail view, got %q", detail)
 	}
 }

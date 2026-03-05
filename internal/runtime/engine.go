@@ -735,7 +735,7 @@ func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, origina
 		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
 		return original, nil
 	}
-	_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerSuggestionsText(suggestions))
+	_ = e.appendPersistedLocalEntry(stepID, "reviewer_suggestions", reviewerSuggestionsText(suggestions))
 
 	instruction := formatReviewerDeveloperInstruction(suggestions)
 	if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeReviewerFeedback, Content: instruction}); err != nil {
@@ -1233,7 +1233,7 @@ func reviewerStatusText(status ReviewerStatus, suggestions []string) string {
 	b := strings.Builder{}
 	b.WriteString(statusText)
 	b.WriteString("\n\n")
-	b.WriteString("Supervisor suggestions:\n")
+	b.WriteString("Supervisor suggested:\n")
 	for idx, suggestion := range suggestions {
 		b.WriteString(strconv.Itoa(idx + 1))
 		b.WriteString(". ")
@@ -1254,9 +1254,7 @@ func reviewerSuggestionsText(suggestions []string) string {
 		return ""
 	}
 	b := strings.Builder{}
-	b.WriteString(fmt.Sprintf("Supervisor ran: %s.", reviewerSuggestionCountLabel(len(suggestions))))
-	b.WriteString("\n\n")
-	b.WriteString("Supervisor suggestions:\n")
+	b.WriteString("Supervisor suggested:\n")
 	for idx, suggestion := range suggestions {
 		b.WriteString(strconv.Itoa(idx + 1))
 		b.WriteString(". ")

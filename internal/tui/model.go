@@ -972,7 +972,7 @@ func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *
 			displayChunk = m.palette().preview.Faint(true).Render(displayChunk)
 		} else if isThinkingRole(role) {
 			displayChunk = styleForRole(role, m.palette()).Render(displayChunk)
-		} else if role == "compaction_notice" || role == "compaction_summary" || role == "reviewer_status" || role == "error" {
+		} else if role == "compaction_notice" || role == "compaction_summary" || role == "reviewer_status" || role == "reviewer_suggestions" || role == "error" {
 			displayChunk = styleForRole(role, m.palette()).Render(displayChunk)
 		}
 		if i == 0 {
@@ -1172,7 +1172,7 @@ func ongoingDividerGroup(role string) string {
 
 func skipInOngoing(role string) bool {
 	switch strings.ToLower(strings.TrimSpace(role)) {
-	case "thinking", "thinking_trace", "reasoning", "compaction_summary", "error":
+	case "thinking", "thinking_trace", "reasoning", "compaction_summary", "reviewer_suggestions", "error":
 		return true
 	default:
 		return false
@@ -1629,7 +1629,7 @@ func (m Model) roleSymbol(role string) string {
 		return styleForRole(role, m.palette()).Render(prefix)
 	case "error":
 		return styleForRole(role, m.palette()).Render(prefix)
-	case "compaction_notice", "compaction_summary", "reviewer_status":
+	case "compaction_notice", "compaction_summary", "reviewer_status", "reviewer_suggestions":
 		return styleForRole(role, m.palette()).Render(prefix)
 	default:
 		return prefix
@@ -1650,7 +1650,7 @@ func rolePrefix(role string) string {
 		return "?"
 	case "compaction_notice", "compaction_summary":
 		return "@"
-	case "reviewer_status":
+	case "reviewer_status", "reviewer_suggestions":
 		return "@"
 	case "error":
 		return "!"
@@ -1698,7 +1698,7 @@ func styleForRole(role string, p palette) lipgloss.Style {
 		return p.system
 	case "error":
 		return p.error
-	case "compaction_notice", "compaction_summary", "reviewer_status":
+	case "compaction_notice", "compaction_summary", "reviewer_status", "reviewer_suggestions":
 		return p.compaction
 	default:
 		return p.preview
