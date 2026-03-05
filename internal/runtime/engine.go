@@ -41,15 +41,6 @@ const (
 	reviewerMetaBoundaryMessage       = "End of meta information. Transcript begins starting with next message. Below is NOT YOUR conversation, but another agent's transcript.\n-------"
 )
 
-var malformedAssistantArtifacts = []string{
-	"#+#+#+#+",
-	"#+#+#+#+#+",
-	"assistant to=functions.shell",
-	"assistant to=functions.patch",
-	"assistant to=functions.multi_tool_use_parallel",
-	"assistant to=multi_tool_use.parallel",
-}
-
 var supportedThinkingLevels = map[string]struct{}{
 	"low":    {},
 	"medium": {},
@@ -155,6 +146,13 @@ type Engine struct {
 
 	compactionTokenCountCacheKey   string
 	compactionTokenCountCacheValue int
+	collaboratorsOnce              sync.Once
+
+	phaseProtocol phaseProtocolEnforcer
+	reviewerFlow  reviewerPipeline
+	messageFlow   messageLifecycle
+	stepFlow      stepExecutor
+	toolFlow      toolExecutor
 }
 
 func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg Config) (*Engine, error) {
@@ -199,6 +197,7 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 		cfg:      cfg,
 		chat:     newChatStore(),
 	}
+	eng.ensureOrchestrationCollaborators()
 
 	reviewerFrequency, ok := NormalizeReviewerFrequency(eng.cfg.Reviewer.Frequency)
 	if !ok {
@@ -382,35 +381,25 @@ func (e *Engine) SubmitUserShellCommand(ctx context.Context, command string) (re
 	if err = e.appendAssistantMessage(stepID, llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call}}); err != nil {
 		return tools.Result{}, err
 	}
-
-	e.emit(Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: &call})
-	h, ok := e.registry.Get(tools.ToolShell)
-	if !ok {
+	if _, ok := e.registry.Get(tools.ToolShell); !ok {
+		e.emit(Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: copiedToolCall(call)})
 		result = tools.Result{CallID: call.ID, Name: tools.ToolShell, IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
 		if err = e.persistToolCompletion(stepID, result); err != nil {
 			return result, fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", call.ID, result.Name, err)
 		}
-		e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: &result})
+		e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: copiedToolResult(result)})
 		if appendErr := e.appendMessage(stepID, llm.Message{Role: llm.RoleTool, Content: string(result.Output), ToolCallID: result.CallID, Name: string(result.Name)}); appendErr != nil {
 			return result, appendErr
 		}
 		return result, errors.New("unknown tool")
 	}
 
-	result, err = h.Call(stepCtx, tools.Call{ID: call.ID, Name: tools.ToolShell, Input: call.Input, StepID: stepID})
-	if result.Name == "" {
-		result.Name = tools.ToolShell
+	results, execErr := e.executeToolCalls(stepCtx, stepID, []llm.ToolCall{call})
+	if len(results) == 0 {
+		return tools.Result{}, errors.New("shell tool execution returned no result")
 	}
-	if result.CallID == "" {
-		result.CallID = call.ID
-	}
-	if err != nil {
-		result = tools.Result{CallID: call.ID, Name: tools.ToolShell, IsError: true, Output: mustJSON(map[string]any{"error": err.Error()})}
-	}
-	if persistErr := e.persistToolCompletion(stepID, result); persistErr != nil {
-		return result, errors.Join(err, fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", call.ID, result.Name, persistErr))
-	}
-	e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: &result})
+	result = results[0]
+	err = execErr
 	if appendErr := e.appendMessage(stepID, llm.Message{Role: llm.RoleTool, Content: string(result.Output), ToolCallID: result.CallID, Name: string(result.Name)}); appendErr != nil {
 		return result, errors.Join(err, appendErr)
 	}
@@ -431,353 +420,28 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 // resolution re-reads current runtime reviewer config so busy-time toggles (for
 // example from /supervisor) affect the currently running step at completion.
 func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, reviewerFrequency string, reviewerClient llm.Client, emitAssistantEvent bool, refreshReviewerConfigOnResolve bool) (llm.Message, bool, error) {
-	executedToolCall := false
-	patchEditsApplied := false
-	phaseProtocolEnabled := e.phaseProtocolEnabledForModel(ctx)
-	for {
-		if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
-			return llm.Message{}, executedToolCall, err
-		}
-
-		req, err := e.buildRequest(ctx, stepID, true)
-		if err != nil {
-			return llm.Message{}, executedToolCall, err
-		}
-
-		resp, err := e.generateWithRetry(
-			ctx,
-			req,
-			func(delta string) {
-				e.chat.appendOngoingDelta(delta)
-				e.emit(Event{Kind: EventAssistantDelta, StepID: stepID, AssistantDelta: delta})
-			},
-			func() {
-				e.chat.clearOngoing()
-				e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
-				e.emit(Event{Kind: EventAssistantDeltaReset, StepID: stepID})
-			},
-		)
-		if err != nil {
-			return llm.Message{}, executedToolCall, err
-		}
-		e.setLastUsage(resp.Usage)
-		e.emit(Event{
-			Kind:   EventModelResponse,
-			StepID: stepID,
-			ModelResponse: &ModelResponseTrace{
-				AssistantPhase:   resp.Assistant.Phase,
-				AssistantChars:   len(resp.Assistant.Content),
-				ToolCallsCount:   len(resp.ToolCalls),
-				OutputItemsCount: len(resp.OutputItems),
-				OutputItemTypes:  summarizeOutputItemTypes(resp.OutputItems),
-			},
-		})
-
-		localToolCalls := append([]llm.ToolCall(nil), resp.ToolCalls...)
-		hostedToolExecutions := hostedToolExecutionsFromOutputItems(resp.OutputItems)
-		if len(localToolCalls) > 0 || len(hostedToolExecutions) > 0 {
-			executedToolCall = true
-		}
-		finalAnswerIncludedToolCalls := false
-
-		assistantMsg := resp.Assistant
-		structuredPhaseProtocol := shouldTreatMissingAssistantPhaseAsCommentary(resp)
-		hasExplicitAssistantPhase := strings.TrimSpace(string(assistantMsg.Phase)) != ""
-		enforcePhaseProtocol := phaseProtocolEnabled && (structuredPhaseProtocol || hasExplicitAssistantPhase)
-		garbageAssistantContent := phaseProtocolEnabled && containsMalformedAssistantContent(assistantMsg.Content)
-		if garbageAssistantContent {
-			assistantMsg.Phase = llm.MessagePhaseCommentary
-		}
-		missingAssistantPhase := enforcePhaseProtocol && assistantMsg.Phase == ""
-		if missingAssistantPhase {
-			assistantMsg.Phase = llm.MessagePhaseCommentary
-		}
-		if len(localToolCalls) > 0 {
-			assistantMsg.ToolCalls = append([]llm.ToolCall(nil), localToolCalls...)
-		}
-		if len(hostedToolExecutions) > 0 {
-			for _, hosted := range hostedToolExecutions {
-				assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, hosted.Call)
-			}
-		}
-		if len(resp.ReasoningItems) > 0 && len(assistantMsg.ReasoningItems) == 0 {
-			assistantMsg.ReasoningItems = append([]llm.ReasoningItem(nil), resp.ReasoningItems...)
-		}
-		if phaseProtocolEnabled && assistantMsg.Phase == llm.MessagePhaseFinal && (len(localToolCalls) > 0 || len(hostedToolExecutions) > 0) {
-			finalAnswerIncludedToolCalls = true
-			localToolCalls = nil
-			hostedToolExecutions = nil
-			assistantMsg.ToolCalls = nil
-		}
-		if err := e.appendAssistantMessage(stepID, assistantMsg); err != nil {
-			return llm.Message{}, executedToolCall, err
-		}
-		if err := e.appendReasoningEntries(stepID, resp.Reasoning); err != nil {
-			return llm.Message{}, executedToolCall, err
-		}
-		if missingAssistantPhase {
-			if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: missingAssistantPhaseWarning}); err != nil {
-				return llm.Message{}, executedToolCall, err
-			}
-		}
-		if garbageAssistantContent {
-			if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: garbageAssistantContentWarning}); err != nil {
-				return llm.Message{}, executedToolCall, err
-			}
-		}
-		if finalAnswerIncludedToolCalls {
-			if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: finalWithToolCallsIgnoredWarning}); err != nil {
-				return llm.Message{}, executedToolCall, err
-			}
-		}
-
-		for _, hosted := range hostedToolExecutions {
-			if err := e.persistToolCompletion(stepID, hosted.Result); err != nil {
-				return llm.Message{}, executedToolCall, err
-			}
-			msg := llm.Message{
-				Role:       llm.RoleTool,
-				Content:    string(hosted.Result.Output),
-				ToolCallID: hosted.Result.CallID,
-				Name:       string(hosted.Result.Name),
-			}
-			if err := e.appendMessage(stepID, msg); err != nil {
-				return llm.Message{}, executedToolCall, err
-			}
-		}
-
-		if len(localToolCalls) == 0 {
-			if garbageAssistantContent {
-				if _, err := e.flushPendingUserInjections(stepID); err != nil {
-					return llm.Message{}, executedToolCall, err
-				}
-				if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
-					return llm.Message{}, executedToolCall, err
-				}
-				continue
-			}
-			if missingAssistantPhase {
-				if _, err := e.flushPendingUserInjections(stepID); err != nil {
-					return llm.Message{}, executedToolCall, err
-				}
-				if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
-					return llm.Message{}, executedToolCall, err
-				}
-				continue
-			}
-			if enforcePhaseProtocol && assistantMsg.Phase != llm.MessagePhaseFinal {
-				if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: commentaryWithoutToolCallsWarning}); err != nil {
-					return llm.Message{}, executedToolCall, err
-				}
-				if _, err := e.flushPendingUserInjections(stepID); err != nil {
-					return llm.Message{}, executedToolCall, err
-				}
-				if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
-					return llm.Message{}, executedToolCall, err
-				}
-				continue
-			}
-			if enforcePhaseProtocol && assistantMsg.Phase == llm.MessagePhaseFinal && strings.TrimSpace(assistantMsg.Content) == "" {
-				if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: finalWithoutContentWarning}); err != nil {
-					return llm.Message{}, executedToolCall, err
-				}
-				if _, err := e.flushPendingUserInjections(stepID); err != nil {
-					return llm.Message{}, executedToolCall, err
-				}
-				if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
-					return llm.Message{}, executedToolCall, err
-				}
-				continue
-			}
-			flushed, err := e.flushPendingUserInjections(stepID)
-			if err != nil {
-				return llm.Message{}, executedToolCall, err
-			}
-			if flushed > 0 {
-				continue
-			}
-			if len(hostedToolExecutions) > 0 {
-				continue
-			}
-			resolved := assistantMsg
-			effectiveReviewerFrequency := reviewerFrequency
-			effectiveReviewerClient := reviewerClient
-			if refreshReviewerConfigOnResolve {
-				effectiveReviewerFrequency, effectiveReviewerClient = e.reviewerTurnConfigSnapshot()
-			}
-			if e.shouldRunReviewerTurnForFrequency(effectiveReviewerFrequency, effectiveReviewerClient, patchEditsApplied) {
-				reviewed, err := e.runReviewerFollowUp(ctx, stepID, assistantMsg, effectiveReviewerClient)
-				if err == nil {
-					resolved = reviewed
-				}
-			}
-			if emitAssistantEvent {
-				e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: resolved})
-			}
-			return resolved, executedToolCall, nil
-		}
-
-		results, err := e.executeToolCalls(ctx, stepID, localToolCalls)
-		if err != nil {
-			return llm.Message{}, executedToolCall, err
-		}
-
-		for _, r := range results {
-			if r.Name == tools.ToolPatch && !r.IsError {
-				patchEditsApplied = true
-			}
-			msg := llm.Message{
-				Role:       llm.RoleTool,
-				Content:    string(r.Output),
-				ToolCallID: r.CallID,
-				Name:       string(r.Name),
-			}
-			if err := e.appendMessage(stepID, msg); err != nil {
-				return llm.Message{}, executedToolCall, err
-			}
-		}
-
-		if _, err := e.flushPendingUserInjections(stepID); err != nil {
-			return llm.Message{}, executedToolCall, err
-		}
-		if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
-			return llm.Message{}, executedToolCall, err
-		}
-	}
-}
-
-func shouldTreatMissingAssistantPhaseAsCommentary(resp llm.Response) bool {
-	// Only enforce missing-phase fallback for structured provider responses.
-	// Responses API always includes canonical output items; legacy clients that
-	// only populate resp.Assistant remain backward-compatible.
-	for _, item := range resp.OutputItems {
-		if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleAssistant {
-			return true
-		}
-	}
-	return false
-}
-
-func containsMalformedAssistantContent(content string) bool {
-	if strings.TrimSpace(content) == "" {
-		return false
-	}
-	lower := strings.ToLower(content)
-	for _, artifact := range malformedAssistantArtifacts {
-		if strings.Contains(lower, artifact) {
-			return true
-		}
-	}
-	return false
+	e.ensureOrchestrationCollaborators()
+	return e.stepFlow.RunStepLoopWithOptions(ctx, stepID, stepLoopOptions{
+		ReviewerFrequency:              reviewerFrequency,
+		ReviewerClient:                 reviewerClient,
+		EmitAssistantEvent:             emitAssistantEvent,
+		RefreshReviewerConfigOnResolve: refreshReviewerConfigOnResolve,
+	})
 }
 
 func (e *Engine) phaseProtocolEnabledForModel(ctx context.Context) bool {
-	// Phase/channel enforcement is an OpenAI Responses protocol feature.
-	// Non-OpenAI providers should not be gated by commentary/final phases.
-	e.mu.Lock()
-	if e.phaseProtocolResolved {
-		enabled := e.phaseProtocolEnabled
-		e.mu.Unlock()
-		return enabled
-	}
-	e.mu.Unlock()
-
-	enabled := false
-	if provider, ok := e.llm.(llm.ProviderCapabilitiesClient); ok {
-		if caps, err := provider.ProviderCapabilities(ctx); err == nil {
-			enabled = caps.SupportsResponsesAPI && caps.IsOpenAIFirstParty
-		}
-	}
-
-	e.mu.Lock()
-	if !e.phaseProtocolResolved {
-		e.phaseProtocolResolved = true
-		e.phaseProtocolEnabled = enabled
-	}
-	result := e.phaseProtocolEnabled
-	e.mu.Unlock()
-	return result
+	e.ensureOrchestrationCollaborators()
+	return e.phaseProtocol.EnabledForModel(ctx)
 }
 
 func (e *Engine) shouldRunReviewerTurnForFrequency(frequency string, reviewerClient llm.Client, patchEditsApplied bool) bool {
-	if reviewerClient == nil {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(frequency)) {
-	case "all":
-		return true
-	case "edits":
-		return patchEditsApplied
-	case "off", "":
-		return false
-	default:
-		return false
-	}
+	e.ensureOrchestrationCollaborators()
+	return e.reviewerFlow.ShouldRunTurn(frequency, reviewerClient, patchEditsApplied)
 }
 
 func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, original llm.Message, reviewerClient llm.Client) (llm.Message, error) {
-	baselineItems := e.snapshotItems()
-	e.emit(Event{Kind: EventReviewerStarted, StepID: stepID})
-	reviewerResult, err := e.runReviewerSuggestions(ctx, reviewerClient)
-	if err != nil {
-		status := ReviewerStatus{
-			Outcome: "failed",
-			Error:   strings.TrimSpace(err.Error()),
-		}
-		e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
-		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
-		return original, nil
-	}
-	suggestions := reviewerResult.Suggestions
-	if len(suggestions) == 0 {
-		status := ReviewerStatus{Outcome: "no_suggestions"}
-		e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
-		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
-		return original, nil
-	}
-	_ = e.appendPersistedLocalEntry(stepID, "reviewer_suggestions", reviewerSuggestionsText(suggestions))
-
-	instruction := formatReviewerDeveloperInstruction(suggestions)
-	if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeReviewerFeedback, Content: instruction}); err != nil {
-		return original, err
-	}
-
-	followUp, followUpExecutedToolCall, err := e.runStepLoopWithOptions(ctx, stepID, "off", nil, false, false)
-	if err != nil {
-		status := ReviewerStatus{
-			Outcome:               "followup_failed",
-			SuggestionsCount:      len(suggestions),
-			CacheHitPercent:       reviewerResult.CacheHitPercent,
-			HasCacheHitPercentage: reviewerResult.HasCacheHitPercentage,
-			Error:                 strings.TrimSpace(err.Error()),
-		}
-		e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
-		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
-		return original, nil
-	}
-	if strings.TrimSpace(followUp.Content) == reviewerNoopToken {
-		if !followUpExecutedToolCall {
-			_ = e.replaceHistory(stepID, "reviewer_rollback", compactionModeManual, baselineItems)
-		}
-		status := ReviewerStatus{
-			Outcome:               "noop",
-			SuggestionsCount:      len(suggestions),
-			CacheHitPercent:       reviewerResult.CacheHitPercent,
-			HasCacheHitPercentage: reviewerResult.HasCacheHitPercentage,
-		}
-		e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
-		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
-		return original, nil
-	}
-	status := ReviewerStatus{
-		Outcome:               "applied",
-		SuggestionsCount:      len(suggestions),
-		CacheHitPercent:       reviewerResult.CacheHitPercent,
-		HasCacheHitPercentage: reviewerResult.HasCacheHitPercentage,
-	}
-	e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
-	_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
-	return followUp, nil
+	e.ensureOrchestrationCollaborators()
+	return e.reviewerFlow.RunFollowUp(ctx, stepID, original, reviewerClient)
 }
 
 type reviewerSuggestionsResult struct {
@@ -793,56 +457,8 @@ type reviewerRequestConfig struct {
 }
 
 func (e *Engine) runReviewerSuggestions(ctx context.Context, reviewerClient llm.Client) (reviewerSuggestionsResult, error) {
-	if reviewerClient == nil {
-		return reviewerSuggestionsResult{}, nil
-	}
-	reviewerCfg := e.reviewerRequestConfigSnapshot()
-
-	schema := mustJSON(map[string]any{
-		"type":                 "object",
-		"additionalProperties": false,
-		"properties": map[string]any{
-			"suggestions": map[string]any{
-				"type": "array",
-				"items": map[string]any{
-					"type": "string",
-				},
-			},
-		},
-		"required": []string{"suggestions"},
-	})
-
-	messages := sanitizeMessagesForLLM(e.snapshotMessages())
-	reviewerMessages := buildReviewerRequestMessages(messages, e.store.Meta().WorkspaceRoot, e.cfg.Model, e.ThinkingLevel())
-	req := llm.Request{
-		Model:           reviewerCfg.Model,
-		Temperature:     1,
-		MaxTokens:       0,
-		ReasoningEffort: reviewerCfg.ThinkingLevel,
-		SystemPrompt:    prompts.ReviewerSystemPrompt,
-		SessionID:       reviewerSessionID(e.store.Meta().SessionID),
-		Messages:        reviewerMessages,
-		Items:           []llm.ResponseItem{},
-		Tools:           []llm.Tool{},
-		StructuredOutput: &llm.StructuredOutput{
-			Name:   "reviewer_suggestions",
-			Schema: schema,
-			Strict: true,
-		},
-	}
-	if err := req.Validate(); err != nil {
-		return reviewerSuggestionsResult{}, err
-	}
-	resp, err := e.generateWithRetryClient(ctx, reviewerClient, req, nil, nil)
-	if err != nil {
-		return reviewerSuggestionsResult{}, err
-	}
-	cachePct, hasCachePct := resp.Usage.CacheHitPercent()
-	return reviewerSuggestionsResult{
-		Suggestions:           parseReviewerSuggestionsObject(resp.Assistant.Content, reviewerCfg.MaxSuggestions),
-		CacheHitPercent:       cachePct,
-		HasCacheHitPercentage: hasCachePct,
-	}, nil
+	e.ensureOrchestrationCollaborators()
+	return e.reviewerFlow.RunSuggestions(ctx, reviewerClient)
 }
 
 func parseReviewerSuggestionsObject(content string, maxSuggestions int) []string {
@@ -1724,70 +1340,8 @@ func (e *Engine) generateWithRetryClient(ctx context.Context, client llm.Client,
 }
 
 func (e *Engine) executeToolCalls(ctx context.Context, stepID string, calls []llm.ToolCall) ([]tools.Result, error) {
-	results := make([]tools.Result, len(calls))
-	callErrs := make([]error, len(calls))
-	wg := sync.WaitGroup{}
-
-	for i := range calls {
-		call := calls[i]
-		if call.ID == "" {
-			call.ID = uuid.NewString()
-		}
-		e.emit(Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: &call})
-		idx := i
-		wg.Add(1)
-		go func(tc llm.ToolCall) {
-			defer wg.Done()
-			var callErr error
-
-			toolID, ok := tools.ParseID(tc.Name)
-			if !ok {
-				results[idx] = tools.Result{CallID: tc.ID, Name: tools.ID(tc.Name), IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
-				if err := e.persistToolCompletion(stepID, results[idx]); err != nil {
-					callErrs[idx] = fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", tc.ID, results[idx].Name, err)
-				} else {
-					e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: &results[idx]})
-				}
-				return
-			}
-			h, ok := e.registry.Get(toolID)
-			if !ok {
-				results[idx] = tools.Result{CallID: tc.ID, Name: toolID, IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
-				if err := e.persistToolCompletion(stepID, results[idx]); err != nil {
-					callErrs[idx] = fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", tc.ID, results[idx].Name, err)
-				} else {
-					e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: &results[idx]})
-				}
-				return
-			}
-			res, err := h.Call(ctx, tools.Call{ID: tc.ID, Name: toolID, Input: tc.Input, StepID: stepID})
-			if err != nil {
-				callErr = err
-				res = tools.Result{CallID: tc.ID, Name: toolID, IsError: true, Output: mustJSON(map[string]any{"error": err.Error()})}
-			}
-			if res.Name == "" {
-				res.Name = toolID
-			}
-			results[idx] = res
-			if err := e.persistToolCompletion(stepID, res); err != nil {
-				persistErr := fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", tc.ID, res.Name, err)
-				callErrs[idx] = errors.Join(callErr, persistErr)
-				return
-			}
-			e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: &res})
-			callErrs[idx] = callErr
-		}(call)
-	}
-
-	wg.Wait()
-	var joined error
-	for _, err := range callErrs {
-		joined = errors.Join(joined, err)
-	}
-	if joined != nil {
-		return results, joined
-	}
-	return results, nil
+	e.ensureOrchestrationCollaborators()
+	return e.toolFlow.ExecuteToolCalls(ctx, stepID, calls)
 }
 
 func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
@@ -1848,60 +1402,13 @@ func (e *Engine) appendMessage(stepID string, msg llm.Message) error {
 }
 
 func (e *Engine) flushPendingUserInjections(stepID string) (int, error) {
-	e.mu.Lock()
-	pending := append([]string(nil), e.pendingInjected...)
-	e.pendingInjected = nil
-	e.mu.Unlock()
-	flushed := 0
-
-	for _, m := range pending {
-		if err := e.appendUserMessage(stepID, m); err != nil {
-			return flushed, err
-		}
-		flushed++
-		e.emit(Event{Kind: EventUserMessageFlushed, StepID: stepID, UserMessage: m})
-	}
-	return flushed, nil
+	e.ensureOrchestrationCollaborators()
+	return e.messageFlow.FlushPendingUserInjections(stepID)
 }
 
 func (e *Engine) injectAgentsIfNeeded(stepID string) error {
-	meta := e.store.Meta()
-	if meta.AgentsInjected {
-		return nil
-	}
-	paths, err := agentsInjectionPaths(meta.WorkspaceRoot)
-	if err != nil {
-		return err
-	}
-
-	for _, path := range paths {
-		data, readErr := os.ReadFile(path)
-		if readErr != nil {
-			if errors.Is(readErr, os.ErrNotExist) {
-				continue
-			}
-			return fmt.Errorf("read AGENTS.md: %w", readErr)
-		}
-		injected := fmt.Sprintf("%s\nsource: %s\n\n```%s\n%s\n```", agentsInjectedHeader, path, agentsInjectedFenceLabel, string(data))
-		if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeAgentsMD, Content: injected}); err != nil {
-			return err
-		}
-	}
-	skills, found, err := skillsContextMessage(meta.WorkspaceRoot)
-	if err != nil {
-		return err
-	}
-	if found {
-		if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeSkills, Content: skills}); err != nil {
-			return err
-		}
-	}
-	environment := environmentContextMessage(meta.WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), time.Now())
-	if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: environment}); err != nil {
-		return err
-	}
-
-	return e.store.MarkAgentsInjected()
+	e.ensureOrchestrationCollaborators()
+	return e.messageFlow.InjectAgentsIfNeeded(stepID)
 }
 
 func agentsInjectionPaths(workspaceRoot string) ([]string, error) {
@@ -1998,42 +1505,8 @@ func formatUTCOffset(offsetSeconds int) string {
 }
 
 func (e *Engine) restoreMessages() error {
-	events, err := e.store.ReadEvents()
-	if err != nil {
-		return err
-	}
-	for _, evt := range events {
-		switch evt.Kind {
-		case "message":
-			var msg llm.Message
-			if err := json.Unmarshal(evt.Payload, &msg); err != nil {
-				return fmt.Errorf("decode message event: %w", err)
-			}
-			e.chat.appendMessage(msg)
-		case "tool_completed":
-			if err := e.chat.restoreToolCompletionPayload(evt.Payload); err != nil {
-				return err
-			}
-		case "local_entry":
-			var entry storedLocalEntry
-			if err := json.Unmarshal(evt.Payload, &entry); err != nil {
-				return fmt.Errorf("decode local_entry event: %w", err)
-			}
-			e.chat.appendLocalEntry(entry.Role, entry.Text)
-		case "history_replaced":
-			var payload historyReplacementPayload
-			if err := json.Unmarshal(evt.Payload, &payload); err != nil {
-				return fmt.Errorf("decode history_replaced event: %w", err)
-			}
-			if strings.TrimSpace(payload.Engine) == "reviewer_rollback" {
-				e.chat.restoreMessagesFromItems(payload.Items)
-			} else {
-				e.chat.replaceHistory(payload.Items)
-				e.compactionCount++
-			}
-		}
-	}
-	return nil
+	e.ensureOrchestrationCollaborators()
+	return e.messageFlow.RestoreMessages()
 }
 
 func (e *Engine) snapshotMessages() []llm.Message {
