@@ -10,6 +10,8 @@ import (
 	"sync"
 )
 
+const authStateFileMode os.FileMode = 0o600
+
 type Store interface {
 	Load(ctx context.Context) (State, error)
 	Save(ctx context.Context, state State) error
@@ -25,6 +27,10 @@ func NewFileStore(path string) *FileStore {
 
 func (s *FileStore) Load(ctx context.Context) (State, error) {
 	if err := ctx.Err(); err != nil {
+		return State{}, err
+	}
+
+	if err := ensureSecureAuthStatePermissions(s.path); err != nil {
 		return State{}, err
 	}
 
@@ -60,6 +66,9 @@ func (s *FileStore) Save(ctx context.Context, state State) error {
 	if err := state.Validate(); err != nil {
 		return err
 	}
+	if err := ensureSecureAuthStatePermissions(s.path); err != nil {
+		return err
+	}
 
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
@@ -71,12 +80,73 @@ func (s *FileStore) Save(ctx context.Context, state State) error {
 		return fmt.Errorf("create auth directory: %w", err)
 	}
 
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	tmpFile, err := os.CreateTemp(dir, filepath.Base(s.path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create auth tmp: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	cleanupTmp := true
+	defer func() {
+		if cleanupTmp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if err := tmpFile.Chmod(authStateFileMode); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("set auth tmp permissions: %w", err)
+	}
+
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
 		return fmt.Errorf("write auth tmp: %w", err)
 	}
-	if err := os.Rename(tmp, s.path); err != nil {
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("close auth tmp: %w", err)
+	}
+	if err := ensureRegularFile(tmpPath); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, s.path); err != nil {
 		return fmt.Errorf("replace auth state: %w", err)
+	}
+	cleanupTmp = false
+
+	if err := ensureSecureAuthStatePermissions(s.path); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureSecureAuthStatePermissions(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("stat auth state: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("auth state must be a regular file: %s", path)
+	}
+	if info.Mode().Perm()&0o077 == 0 {
+		return nil
+	}
+	if err := os.Chmod(path, authStateFileMode); err != nil {
+		return fmt.Errorf("set auth state permissions: %w", err)
+	}
+	return nil
+}
+
+func ensureRegularFile(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("auth state file disappeared before replace")
+		}
+		return fmt.Errorf("stat auth state: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("auth state must be a regular file: %s", path)
 	}
 	return nil
 }
