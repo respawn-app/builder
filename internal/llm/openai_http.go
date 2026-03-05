@@ -1448,7 +1448,15 @@ func (t *HTTPTransport) buildRequestOptions(authHeader string, mode openAIAuthMo
 func mapOpenAIRequestError(providerID string, err error, rawResp *http.Response, prefix string) error {
 	reducer, reducerErr := providerErrorReducerForID(providerID)
 	if reducerErr != nil {
-		return fmt.Errorf("%s: %w", prefix, reducerErr)
+		statusCode := 0
+		if rawResp != nil {
+			statusCode = rawResp.StatusCode
+			if rawResp.Body != nil {
+				rawResp.Body.Close()
+				rawResp.Body = nil
+			}
+		}
+		return fmt.Errorf("%s: %w", prefix, NewProviderContractError(providerID, statusCode, reducerErr))
 	}
 	reducedErr, ok := reducer.Reduce(err, rawResp)
 	if ok && reducedErr != nil {

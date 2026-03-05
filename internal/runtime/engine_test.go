@@ -305,6 +305,11 @@ type statusFailClient struct {
 	status int
 }
 
+type providerContractFailClient struct {
+	mu    sync.Mutex
+	calls int
+}
+
 type streamRequiredClient struct {
 	mu          sync.Mutex
 	streamCalls int
@@ -339,6 +344,23 @@ func (c *statusFailClient) Generate(_ context.Context, _ llm.Request) (llm.Respo
 }
 
 func (c *statusFailClient) Calls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
+}
+
+func (c *providerContractFailClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
+	c.mu.Lock()
+	c.calls++
+	c.mu.Unlock()
+	return llm.Response{}, &llm.ProviderAPIError{
+		ProviderID: "openai-compatible",
+		Code:       llm.UnifiedErrorCodeProviderContract,
+		Message:    "no error reducer registered for provider_id \"openai-compatible\"",
+	}
+}
+
+func (c *providerContractFailClient) Calls() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.calls
@@ -3102,6 +3124,31 @@ func TestNonRetriableStatusCodesAreNotRetried(t *testing.T) {
 				t.Fatalf("expected single model attempt on status %d, got %d", status, client.Calls())
 			}
 		})
+	}
+}
+
+func TestProviderContractErrorsAreNotRetried(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &providerContractFailClient{}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	_, err = eng.SubmitUserMessage(context.Background(), "trigger provider contract error")
+	if err == nil {
+		t.Fatal("expected provider contract failure")
+	}
+	if !llm.IsNonRetriableModelError(err) {
+		t.Fatalf("expected non-retriable provider contract error, got %v", err)
+	}
+	if client.Calls() != 1 {
+		t.Fatalf("expected single model attempt on provider contract error, got %d", client.Calls())
 	}
 }
 
