@@ -2470,7 +2470,8 @@ func TestReviewerStatusEndToEnd_OngoingShortDetailFull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	eng.AppendLocalEntry("reviewer_status", "Supervisor ran: 2 suggestions, no changes applied.\n\nSupervisor suggestions:\n1. First detailed suggestion text\n2. Second detailed suggestion text")
+	eng.AppendLocalEntry("reviewer_suggestions", "Supervisor suggested:\n1. First detailed suggestion text\n2. Second detailed suggestion text")
+	eng.AppendLocalEntry("reviewer_status", "Supervisor ran: 2 suggestions, no changes applied.")
 
 	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 100
@@ -2480,13 +2481,13 @@ func TestReviewerStatusEndToEnd_OngoingShortDetailFull(t *testing.T) {
 	if !strings.Contains(ongoing, "Supervisor ran: 2 suggestions, no changes applied.") {
 		t.Fatalf("expected short reviewer status in ongoing mode, got %q", ongoing)
 	}
-	if strings.Contains(ongoing, "Supervisor suggestions:") || strings.Contains(ongoing, "First detailed suggestion") {
+	if strings.Contains(ongoing, "Supervisor suggested:") || strings.Contains(ongoing, "First detailed suggestion") {
 		t.Fatalf("expected full reviewer suggestions hidden in ongoing mode, got %q", ongoing)
 	}
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	detail := stripANSIAndTrimRight(next.(*uiModel).View())
-	if !containsInOrder(detail, "Supervisor ran: 2 suggestions, no changes applied.", "Supervisor suggestions:", "1. First detailed suggestion text", "2. Second detailed suggestion text") {
+	if !containsInOrder(detail, "Supervisor suggested:", "1. First detailed suggestion text", "2. Second detailed suggestion text", "Supervisor ran: 2 suggestions, no changes applied.") {
 		t.Fatalf("expected full reviewer suggestions in detail mode, got %q", detail)
 	}
 }
