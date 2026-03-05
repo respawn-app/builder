@@ -4,17 +4,23 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 
 	"builder/internal/tools"
+	patchtool "builder/internal/tools/patch"
 )
 
 const maxFileSizeBytes int64 = 20 << 20
+
+const outsideWorkspaceRejectionInstruction = "do not attempt to circumvent this restriction in any way. if it's essential to the task, ask the user to place the file inside the workspace root."
 
 var supportedImageMIMEs = map[string]struct{}{
 	"image/png":  {},
@@ -24,8 +30,44 @@ var supportedImageMIMEs = map[string]struct{}{
 }
 
 type Tool struct {
-	workspaceRoot string
-	supported     bool
+	workspaceRoot             string
+	workspaceRootReal         string
+	workspaceRootInfo         os.FileInfo
+	workspaceOnly             bool
+	allowOutsideWorkspace     bool
+	outsideWorkspaceApprover  patchtool.OutsideWorkspaceApprover
+	outsideWorkspaceAudit     OutsideWorkspaceAuditLogger
+	outsideWorkspaceSessionMu sync.RWMutex
+	outsideWorkspaceAllowed   bool
+	supported                 bool
+}
+
+type OutsideWorkspaceAudit struct {
+	RequestedPath string
+	ResolvedPath  string
+	Reason        string
+}
+
+type OutsideWorkspaceAuditLogger func(OutsideWorkspaceAudit)
+
+type Option func(*Tool)
+
+func WithAllowOutsideWorkspace(allow bool) Option {
+	return func(t *Tool) {
+		t.allowOutsideWorkspace = allow
+	}
+}
+
+func WithOutsideWorkspaceApprover(approver patchtool.OutsideWorkspaceApprover) Option {
+	return func(t *Tool) {
+		t.outsideWorkspaceApprover = approver
+	}
+}
+
+func WithOutsideWorkspaceAuditLogger(logger OutsideWorkspaceAuditLogger) Option {
+	return func(t *Tool) {
+		t.outsideWorkspaceAudit = logger
+	}
 }
 
 type input struct {
@@ -39,15 +81,33 @@ type contentItem struct {
 	Filename string `json:"filename,omitempty"`
 }
 
-func New(workspaceRoot string, supported bool) *Tool {
-	return &Tool{workspaceRoot: workspaceRoot, supported: supported}
+func New(workspaceRoot string, supported bool, opts ...Option) (*Tool, error) {
+	rootAbs, err := filepath.Abs(workspaceRoot)
+	if err != nil {
+		return nil, fmt.Errorf("resolve workspace root: %w", err)
+	}
+	rootReal, err := filepath.EvalSymlinks(rootAbs)
+	if err != nil {
+		return nil, fmt.Errorf("resolve workspace real path: %w", err)
+	}
+	rootInfo, err := os.Stat(rootReal)
+	if err != nil {
+		return nil, fmt.Errorf("stat workspace root: %w", err)
+	}
+	t := &Tool{workspaceRoot: rootAbs, workspaceRootReal: rootReal, workspaceRootInfo: rootInfo, workspaceOnly: true, supported: supported}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(t)
+		}
+	}
+	return t, nil
 }
 
 func (t *Tool) Name() tools.ID {
 	return tools.ToolViewImage
 }
 
-func (t *Tool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
+func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 	if !t.supported {
 		return tools.ErrorResult(c, "view_image is not allowed because this model does not support image/file inputs"), nil
 	}
@@ -61,7 +121,12 @@ func (t *Tool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 		return tools.ErrorResult(c, "path is required"), nil
 	}
 
-	resolvedPath := resolvePath(t.workspaceRoot, requestedPath)
+	approvedOutside := map[string]bool{}
+	resolvedPath, err := t.resolvePath(ctx, requestedPath, approvedOutside)
+	if err != nil {
+		return tools.ErrorResult(c, err.Error()), nil
+	}
+
 	info, err := os.Stat(resolvedPath)
 	if err != nil {
 		return tools.ErrorResult(c, fmt.Sprintf("unable to locate file at %q: %v", resolvedPath, err)), nil
@@ -91,15 +156,136 @@ func (t *Tool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	return tools.Result{CallID: c.ID, Name: c.Name, Output: body}, nil
 }
 
-func resolvePath(workspaceRoot, requested string) string {
-	if filepath.IsAbs(requested) {
-		return filepath.Clean(requested)
+func (t *Tool) resolvePath(ctx context.Context, path string, approvedOutside map[string]bool) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", errors.New("path is required")
 	}
-	base := strings.TrimSpace(workspaceRoot)
-	if base == "" {
-		base = "."
+
+	candidate := path
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(t.workspaceRoot, candidate)
 	}
-	return filepath.Clean(filepath.Join(base, requested))
+	candidate = filepath.Clean(candidate)
+	abs, err := filepath.Abs(candidate)
+	if err != nil {
+		return "", fmt.Errorf("resolve absolute path %q: %w", path, err)
+	}
+	real, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("resolve path %q: %w", path, err)
+	}
+	real = filepath.Clean(real)
+
+	if t.workspaceOnly {
+		insideWorkspace, containmentErr := t.isWithinWorkspace(real)
+		if containmentErr != nil {
+			return "", fmt.Errorf("workspace boundary check for %q: %w", path, containmentErr)
+		}
+		if !insideWorkspace {
+			req := patchtool.OutsideWorkspaceRequest{
+				RequestedPath: path,
+				ResolvedPath:  real,
+				WorkspaceRoot: t.workspaceRoot,
+			}
+			if t.allowOutsideWorkspace {
+				t.logOutsideWorkspaceApproval(req, "configured_allow")
+				return real, nil
+			}
+			if t.outsideWorkspaceSessionAllowed() {
+				t.logOutsideWorkspaceApproval(req, "session_allow")
+				return real, nil
+			}
+			if approvedOutside != nil && approvedOutside[real] {
+				t.logOutsideWorkspaceApproval(req, "call_allow")
+				return real, nil
+			}
+			if t.outsideWorkspaceApprover == nil {
+				return "", fmt.Errorf("view_image path outside workspace: %s", path)
+			}
+			approval, approveErr := t.outsideWorkspaceApprover(ctx, req)
+			if approveErr != nil {
+				return "", fmt.Errorf("outside-workspace read approval failed for %s: %w", path, approveErr)
+			}
+			switch approval.Decision {
+			case patchtool.OutsideWorkspaceDecisionAllowOnce:
+				if approvedOutside != nil {
+					approvedOutside[real] = true
+				}
+				t.logOutsideWorkspaceApproval(req, "allow_once")
+				return real, nil
+			case patchtool.OutsideWorkspaceDecisionAllowSession:
+				t.setOutsideWorkspaceSessionAllowed(true)
+				if approvedOutside != nil {
+					approvedOutside[real] = true
+				}
+				t.logOutsideWorkspaceApproval(req, "allow_session")
+				return real, nil
+			default:
+				errMessage := fmt.Sprintf("view_image path outside workspace rejected by user: %s; %s", path, outsideWorkspaceRejectionInstruction)
+				commentary := strings.TrimSpace(approval.Commentary)
+				if commentary != "" {
+					errMessage += fmt.Sprintf(" User commented about this: %s", strconv.Quote(commentary))
+				}
+				return "", errors.New(errMessage)
+			}
+		}
+	}
+
+	return real, nil
+}
+
+func (t *Tool) isWithinWorkspace(real string) (bool, error) {
+	rel, relErr := filepath.Rel(t.workspaceRootReal, real)
+	if relErr == nil {
+		if rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
+			return true, nil
+		}
+	}
+
+	if t.workspaceRootInfo == nil {
+		return false, errors.New("workspace root info unavailable")
+	}
+
+	current := real
+	for {
+		info, statErr := os.Stat(current)
+		if statErr != nil {
+			return false, fmt.Errorf("stat candidate path %q: %w", current, statErr)
+		}
+		if os.SameFile(info, t.workspaceRootInfo) {
+			return true, nil
+		}
+		next := filepath.Dir(current)
+		if next == current {
+			break
+		}
+		current = next
+	}
+
+	return false, nil
+}
+
+func (t *Tool) outsideWorkspaceSessionAllowed() bool {
+	t.outsideWorkspaceSessionMu.RLock()
+	defer t.outsideWorkspaceSessionMu.RUnlock()
+	return t.outsideWorkspaceAllowed
+}
+
+func (t *Tool) setOutsideWorkspaceSessionAllowed(allow bool) {
+	t.outsideWorkspaceSessionMu.Lock()
+	t.outsideWorkspaceAllowed = allow
+	t.outsideWorkspaceSessionMu.Unlock()
+}
+
+func (t *Tool) logOutsideWorkspaceApproval(req patchtool.OutsideWorkspaceRequest, reason string) {
+	if t.outsideWorkspaceAudit == nil {
+		return
+	}
+	t.outsideWorkspaceAudit(OutsideWorkspaceAudit{
+		RequestedPath: req.RequestedPath,
+		ResolvedPath:  req.ResolvedPath,
+		Reason:        reason,
+	})
 }
 
 func detectFileMIME(path string, data []byte) string {

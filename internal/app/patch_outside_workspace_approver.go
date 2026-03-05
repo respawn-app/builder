@@ -11,23 +11,28 @@ import (
 )
 
 const (
-	outsideWorkspaceAllowOnceSuggestion     = "Allow once (recommended): permit this outside-workspace edit for this patch call."
-	outsideWorkspaceAllowSessionSuggestion  = "Allow for this session: permit outside-workspace patch edits until builder exits."
-	outsideWorkspaceDenySuggestion          = "Deny: keep patch edits limited to the workspace root."
+	outsideWorkspaceAllowOnceSuggestion     = "Allow once (recommended): permit this outside-workspace access for this tool call."
+	outsideWorkspaceAllowSessionSuggestion  = "Allow for this session: permit outside-workspace access until builder exits."
+	outsideWorkspaceDenySuggestion          = "Deny: keep access limited to the workspace root."
 	approvalAllowWithCommentaryAnswerPrefix = "allow_with_commentary:"
 )
 
-type patchOutsideWorkspaceApprover struct {
+type outsideWorkspaceApprover struct {
 	broker         *askquestion.Broker
+	actionVerb     string
 	mu             sync.Mutex
 	sessionAllowed bool
 }
 
-func newPatchOutsideWorkspaceApprover(broker *askquestion.Broker) *patchOutsideWorkspaceApprover {
-	return &patchOutsideWorkspaceApprover{broker: broker}
+func newOutsideWorkspaceApprover(broker *askquestion.Broker, actionVerb string) *outsideWorkspaceApprover {
+	verb := strings.TrimSpace(actionVerb)
+	if verb == "" {
+		verb = "accessing"
+	}
+	return &outsideWorkspaceApprover{broker: broker, actionVerb: verb}
 }
 
-func (a *patchOutsideWorkspaceApprover) Approve(ctx context.Context, req patchtool.OutsideWorkspaceRequest) (patchtool.OutsideWorkspaceApproval, error) {
+func (a *outsideWorkspaceApprover) Approve(ctx context.Context, req patchtool.OutsideWorkspaceRequest) (patchtool.OutsideWorkspaceApproval, error) {
 	a.mu.Lock()
 	if a.sessionAllowed {
 		a.mu.Unlock()
@@ -36,7 +41,7 @@ func (a *patchOutsideWorkspaceApprover) Approve(ctx context.Context, req patchto
 	a.mu.Unlock()
 
 	resp, err := a.broker.Ask(ctx, askquestion.Request{
-		Question: fmt.Sprintf("Allow editing %s (outside workspace dir)?", req.ResolvedPath),
+		Question: fmt.Sprintf("Allow %s %s (outside workspace dir)?", a.actionVerb, req.ResolvedPath),
 		Approval: true,
 		Suggestions: []string{
 			outsideWorkspaceAllowOnceSuggestion,

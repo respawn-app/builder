@@ -45,6 +45,14 @@
 - `allow_non_cwd_edits=false` by default.
 - If outside-workspace approval is denied, return an explicit non-circumvention tool error instructing manual user edits when essential.
 
+## View Image Tool
+
+- `view_image` path resolution uses absolute + canonical real paths before access checks.
+- Workspace boundary checks apply after symlink resolution; symlink escapes outside workspace are blocked by default.
+- Paths containing `..` are evaluated via canonical resolution; they are only allowed when the canonical target remains within the workspace boundary.
+- Outside-workspace file reads are approval-gated via the same approver contract as `patch`, with per-call/per-session allow semantics.
+- Approved outside-workspace reads are written to run logs with requested/resolved path metadata for auditability.
+
 ## Tool Output, Retries, And Failure Handling
 
 - Large tool output is truncated for model consumption using standardized payloads (head+tail + truncation metadata, threshold configurable).

@@ -52,7 +52,7 @@ func TestPatchOutsideWorkspaceApproverCachesSessionDecision(t *testing.T) {
 		return outsideWorkspaceAllowSessionSuggestion, nil
 	})
 
-	approver := newPatchOutsideWorkspaceApprover(broker)
+	approver := newOutsideWorkspaceApprover(broker, "editing")
 	req := patchtool.OutsideWorkspaceRequest{RequestedPath: "../x.txt", ResolvedPath: "/tmp/x.txt", WorkspaceRoot: "/tmp/w"}
 
 	first, err := approver.Approve(context.Background(), req)
@@ -80,9 +80,33 @@ func TestPatchOutsideWorkspaceApproverPropagatesAskError(t *testing.T) {
 		return "", errors.New("ask failed")
 	})
 
-	approver := newPatchOutsideWorkspaceApprover(broker)
+	approver := newOutsideWorkspaceApprover(broker, "editing")
 	_, err := approver.Approve(context.Background(), patchtool.OutsideWorkspaceRequest{RequestedPath: "../x.txt", ResolvedPath: "/tmp/x.txt", WorkspaceRoot: "/tmp/w"})
 	if err == nil {
 		t.Fatal("expected ask error")
+	}
+}
+
+func TestOutsideWorkspaceApproverUsesReadPromptText(t *testing.T) {
+	broker := askquestion.NewBroker()
+	askCalls := 0
+	broker.SetAskHandler(func(req askquestion.Request) (string, error) {
+		askCalls++
+		if !strings.Contains(req.Question, "Allow reading /tmp/x.pdf (outside workspace dir)?") {
+			t.Fatalf("unexpected read approval question text: %q", req.Question)
+		}
+		return outsideWorkspaceAllowOnceSuggestion, nil
+	})
+
+	approver := newOutsideWorkspaceApprover(broker, "reading")
+	approval, err := approver.Approve(context.Background(), patchtool.OutsideWorkspaceRequest{RequestedPath: "../x.pdf", ResolvedPath: "/tmp/x.pdf", WorkspaceRoot: "/tmp/w"})
+	if err != nil {
+		t.Fatalf("approve read call: %v", err)
+	}
+	if approval.Decision != patchtool.OutsideWorkspaceDecisionAllowOnce {
+		t.Fatalf("unexpected approval decision: %v", approval)
+	}
+	if askCalls != 1 {
+		t.Fatalf("expected one ask call, got %d", askCalls)
 	}
 }

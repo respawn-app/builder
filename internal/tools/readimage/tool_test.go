@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode"
 
 	"builder/internal/tools"
+	patchtool "builder/internal/tools/patch"
 )
 
 var tinyPNG = []byte{
@@ -25,7 +27,11 @@ func TestCall_ImagePathReturnsInputImageContentItem(t *testing.T) {
 		t.Fatalf("write image: %v", err)
 	}
 
-	tool := New(workspace, true)
+	tool, err := New(workspace, true)
+	if err != nil {
+		t.Fatalf("new tool: %v", err)
+	}
+
 	result, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call-1",
 		Name:  tools.ToolViewImage,
@@ -73,7 +79,11 @@ func TestCall_PDFPathReturnsInputFileContentItem(t *testing.T) {
 		t.Fatalf("write pdf: %v", err)
 	}
 
-	tool := New(workspace, true)
+	tool, err := New(workspace, true)
+	if err != nil {
+		t.Fatalf("new tool: %v", err)
+	}
+
 	result, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call-1",
 		Name:  tools.ToolViewImage,
@@ -123,7 +133,11 @@ func TestCall_UnsupportedFileReturnsToolError(t *testing.T) {
 		t.Fatalf("write text file: %v", err)
 	}
 
-	tool := New(workspace, true)
+	tool, err := New(workspace, true)
+	if err != nil {
+		t.Fatalf("new tool: %v", err)
+	}
+
 	result, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call-1",
 		Name:  tools.ToolViewImage,
@@ -140,7 +154,11 @@ func TestCall_UnsupportedFileReturnsToolError(t *testing.T) {
 func TestCall_DirectoryPathReturnsToolError(t *testing.T) {
 	workspace := t.TempDir()
 
-	tool := New(workspace, true)
+	tool, err := New(workspace, true)
+	if err != nil {
+		t.Fatalf("new tool: %v", err)
+	}
+
 	result, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call-1",
 		Name:  tools.ToolViewImage,
@@ -156,7 +174,11 @@ func TestCall_DirectoryPathReturnsToolError(t *testing.T) {
 
 func TestCall_UnsupportedModelReturnsToolError(t *testing.T) {
 	workspace := t.TempDir()
-	tool := New(workspace, false)
+	tool, err := New(workspace, false)
+	if err != nil {
+		t.Fatalf("new tool: %v", err)
+	}
+
 	result, err := tool.Call(context.Background(), tools.Call{
 		ID:    "call-1",
 		Name:  tools.ToolViewImage,
@@ -168,4 +190,342 @@ func TestCall_UnsupportedModelReturnsToolError(t *testing.T) {
 	if !result.IsError {
 		t.Fatalf("expected tool error result for unsupported model")
 	}
+}
+
+func TestCall_PathTraversalOutsideWorkspaceRejectedByDefault(t *testing.T) {
+	parent := t.TempDir()
+	workspace := filepath.Join(parent, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	outsidePath := filepath.Join(parent, "outside.png")
+	if err := os.WriteFile(outsidePath, tinyPNG, 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+
+	tool, err := New(workspace, true)
+	if err != nil {
+		t.Fatalf("new tool: %v", err)
+	}
+
+	result, err := tool.Call(context.Background(), tools.Call{
+		ID:    "call-traversal",
+		Name:  tools.ToolViewImage,
+		Input: json.RawMessage(`{"path":"../outside.png"}`),
+	})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected error for outside-workspace traversal path")
+	}
+	if !strings.Contains(toolError(t, result), "outside workspace") {
+		t.Fatalf("expected outside workspace error, got %q", toolError(t, result))
+	}
+}
+
+func TestCall_SymlinkEscapeOutsideWorkspaceRejectedByDefault(t *testing.T) {
+	workspace := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.png")
+	if err := os.WriteFile(outside, tinyPNG, 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	linkPath := filepath.Join(workspace, "symlink.png")
+	if err := os.Symlink(outside, linkPath); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	tool, err := New(workspace, true)
+	if err != nil {
+		t.Fatalf("new tool: %v", err)
+	}
+
+	result, err := tool.Call(context.Background(), tools.Call{
+		ID:    "call-symlink",
+		Name:  tools.ToolViewImage,
+		Input: json.RawMessage(`{"path":"symlink.png"}`),
+	})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected error for symlink escape outside workspace")
+	}
+	if !strings.Contains(toolError(t, result), "outside workspace") {
+		t.Fatalf("expected outside workspace error, got %q", toolError(t, result))
+	}
+}
+
+func TestCall_OutsideWorkspaceAllowSessionSkipsFuturePrompts(t *testing.T) {
+	workspace := t.TempDir()
+	outside1 := filepath.Join(t.TempDir(), "outside1.png")
+	outside2 := filepath.Join(t.TempDir(), "outside2.png")
+	if err := os.WriteFile(outside1, tinyPNG, 0o644); err != nil {
+		t.Fatalf("write outside1: %v", err)
+	}
+	if err := os.WriteFile(outside2, tinyPNG, 0o644); err != nil {
+		t.Fatalf("write outside2: %v", err)
+	}
+
+	approveCalls := 0
+	tool, err := New(
+		workspace,
+		true,
+		WithOutsideWorkspaceApprover(func(context.Context, patchtool.OutsideWorkspaceRequest) (patchtool.OutsideWorkspaceApproval, error) {
+			approveCalls++
+			return patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowSession}, nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("new tool: %v", err)
+	}
+
+	result, err := tool.Call(context.Background(), tools.Call{
+		ID:    "call-1",
+		Name:  tools.ToolViewImage,
+		Input: json.RawMessage(`{"path":"` + strings.ReplaceAll(outside1, `\`, `\\`) + `"}`),
+	})
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected first call success, got %s", string(result.Output))
+	}
+
+	result, err = tool.Call(context.Background(), tools.Call{
+		ID:    "call-2",
+		Name:  tools.ToolViewImage,
+		Input: json.RawMessage(`{"path":"` + strings.ReplaceAll(outside2, `\`, `\\`) + `"}`),
+	})
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected second call success, got %s", string(result.Output))
+	}
+
+	if approveCalls != 1 {
+		t.Fatalf("expected one approval call, got %d", approveCalls)
+	}
+}
+
+func TestCall_OutsideWorkspaceAllowOncePromptsEachCall(t *testing.T) {
+	workspace := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.png")
+	if err := os.WriteFile(outside, tinyPNG, 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+
+	approveCalls := 0
+	tool, err := New(
+		workspace,
+		true,
+		WithOutsideWorkspaceApprover(func(context.Context, patchtool.OutsideWorkspaceRequest) (patchtool.OutsideWorkspaceApproval, error) {
+			approveCalls++
+			return patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowOnce}, nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("new tool: %v", err)
+	}
+
+	input := json.RawMessage(`{"path":"` + strings.ReplaceAll(outside, `\`, `\\`) + `"}`)
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-1", Name: tools.ToolViewImage, Input: input})
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected first call success, got %s", string(result.Output))
+	}
+
+	result, err = tool.Call(context.Background(), tools.Call{ID: "call-2", Name: tools.ToolViewImage, Input: input})
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected second call success, got %s", string(result.Output))
+	}
+
+	if approveCalls != 2 {
+		t.Fatalf("expected two approval calls, got %d", approveCalls)
+	}
+}
+
+func TestCall_OutsideWorkspaceApprovalAuditsResolvedPath(t *testing.T) {
+	workspace := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.png")
+	if err := os.WriteFile(outside, tinyPNG, 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+
+	audits := make([]OutsideWorkspaceAudit, 0, 2)
+	tool, err := New(
+		workspace,
+		true,
+		WithOutsideWorkspaceApprover(func(context.Context, patchtool.OutsideWorkspaceRequest) (patchtool.OutsideWorkspaceApproval, error) {
+			return patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowSession}, nil
+		}),
+		WithOutsideWorkspaceAuditLogger(func(entry OutsideWorkspaceAudit) {
+			audits = append(audits, entry)
+		}),
+	)
+	if err != nil {
+		t.Fatalf("new tool: %v", err)
+	}
+
+	input := json.RawMessage(`{"path":"` + strings.ReplaceAll(outside, `\`, `\\`) + `"}`)
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-1", Name: tools.ToolViewImage, Input: input})
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected first call success, got %s", string(result.Output))
+	}
+
+	result, err = tool.Call(context.Background(), tools.Call{ID: "call-2", Name: tools.ToolViewImage, Input: input})
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected second call success, got %s", string(result.Output))
+	}
+
+	if len(audits) != 2 {
+		t.Fatalf("expected 2 audit entries, got %d", len(audits))
+	}
+	realOutside, err := filepath.EvalSymlinks(outside)
+	if err != nil {
+		t.Fatalf("resolve outside real path: %v", err)
+	}
+	if audits[0].ResolvedPath != realOutside {
+		t.Fatalf("unexpected first audit resolved path: %q", audits[0].ResolvedPath)
+	}
+	if audits[0].Reason != "allow_session" {
+		t.Fatalf("unexpected first audit reason: %q", audits[0].Reason)
+	}
+	if audits[1].Reason != "session_allow" {
+		t.Fatalf("unexpected second audit reason: %q", audits[1].Reason)
+	}
+}
+
+func TestCall_CaseVariantAbsolutePathInsideWorkspaceDoesNotTriggerOutsideApproval(t *testing.T) {
+	workspace := t.TempDir()
+	imagePath := filepath.Join(workspace, "img.png")
+	if err := os.WriteFile(imagePath, tinyPNG, 0o644); err != nil {
+		t.Fatalf("write image: %v", err)
+	}
+
+	variantWorkspace, ok := findCaseVariantExistingAlias(workspace)
+	if !ok {
+		t.Skip("filesystem does not provide a case-variant alias for workspace path")
+	}
+	variantImagePath := filepath.Join(variantWorkspace, "img.png")
+
+	approveCalls := 0
+	tool, err := New(
+		workspace,
+		true,
+		WithOutsideWorkspaceApprover(func(context.Context, patchtool.OutsideWorkspaceRequest) (patchtool.OutsideWorkspaceApproval, error) {
+			approveCalls++
+			return patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionDeny}, nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("new tool: %v", err)
+	}
+
+	input := json.RawMessage(`{"path":"` + strings.ReplaceAll(variantImagePath, `\`, `\\`) + `"}`)
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-case-variant", Name: tools.ToolViewImage, Input: input})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success for case-variant absolute in-workspace path, got %s", string(result.Output))
+	}
+	if approveCalls != 0 {
+		t.Fatalf("expected no outside-workspace approval prompts, got %d", approveCalls)
+	}
+}
+
+func findCaseVariantExistingAlias(path string) (string, bool) {
+	canonical := filepath.Clean(path)
+	canonicalInfo, err := os.Stat(canonical)
+	if err != nil {
+		return "", false
+	}
+	if candidate, ok := caseAliasUsersSubstitution(canonical, canonicalInfo); ok {
+		return candidate, true
+	}
+
+	parts := strings.Split(canonical, string(filepath.Separator))
+	start := 0
+	if filepath.IsAbs(canonical) && len(parts) > 0 && parts[0] == "" {
+		start = 1
+	}
+
+	for idx := start; idx < len(parts); idx++ {
+		variantPart := toggleFirstLetterCase(parts[idx])
+		if variantPart == parts[idx] {
+			continue
+		}
+		candidateParts := append([]string(nil), parts...)
+		candidateParts[idx] = variantPart
+		candidate := strings.Join(candidateParts, string(filepath.Separator))
+		if candidate == canonical {
+			continue
+		}
+		candidateInfo, statErr := os.Stat(candidate)
+		if statErr != nil {
+			continue
+		}
+		if os.SameFile(candidateInfo, canonicalInfo) {
+			return candidate, true
+		}
+	}
+
+	return "", false
+}
+
+func caseAliasUsersSubstitution(canonical string, canonicalInfo os.FileInfo) (string, bool) {
+	if strings.HasPrefix(canonical, "/Users/") {
+		candidate := "/users/" + strings.TrimPrefix(canonical, "/Users/")
+		if info, err := os.Stat(candidate); err == nil && os.SameFile(info, canonicalInfo) {
+			return candidate, true
+		}
+	}
+	if strings.HasPrefix(canonical, "/users/") {
+		candidate := "/Users/" + strings.TrimPrefix(canonical, "/users/")
+		if info, err := os.Stat(candidate); err == nil && os.SameFile(info, canonicalInfo) {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
+func toggleFirstLetterCase(value string) string {
+	runes := []rune(value)
+	if len(runes) == 0 {
+		return value
+	}
+	first := runes[0]
+	upper := unicode.ToUpper(first)
+	lower := unicode.ToLower(first)
+	if first == upper && first == lower {
+		return value
+	}
+	if first == upper {
+		runes[0] = lower
+		return string(runes)
+	}
+	runes[0] = upper
+	return string(runes)
+}
+
+func toolError(t *testing.T, result tools.Result) string {
+	t.Helper()
+	payload := map[string]string{}
+	if err := json.Unmarshal(result.Output, &payload); err != nil {
+		t.Fatalf("decode tool error output: %v", err)
+	}
+	return payload["error"]
 }
