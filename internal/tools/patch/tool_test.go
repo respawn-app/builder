@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode"
 
 	"builder/internal/tools"
 )
@@ -325,6 +326,45 @@ func TestOutsideWorkspaceTempDirBypassesApprover(t *testing.T) {
 	}
 }
 
+func TestCaseVariantAbsoluteInWorkspaceDoesNotTriggerOutsideApproval(t *testing.T) {
+	workspace := t.TempDir()
+	target := filepath.Join(workspace, "inside.txt")
+	if err := os.WriteFile(target, []byte("start\n"), 0o644); err != nil {
+		t.Fatalf("seed inside file: %v", err)
+	}
+
+	variantWorkspace, ok := findCaseVariantExistingAlias(workspace)
+	if !ok {
+		t.Skip("filesystem does not provide a case-variant alias for workspace path")
+	}
+	variantTarget := filepath.Join(variantWorkspace, "inside.txt")
+
+	approveCalls := 0
+	tool, err := New(workspace, true, WithOutsideWorkspaceApprover(func(context.Context, OutsideWorkspaceRequest) (OutsideWorkspaceApproval, error) {
+		approveCalls++
+		return OutsideWorkspaceApproval{Decision: OutsideWorkspaceDecisionDeny}, nil
+	}))
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	result := callPatch(t, tool, "case-variant-inside", "*** Begin Patch\n*** Update File: "+variantTarget+"\n-start\n+done\n*** End Patch\n")
+	if result.IsError {
+		t.Fatalf("expected success for case-variant absolute in-workspace target, got %s", string(result.Output))
+	}
+	if approveCalls != 0 {
+		t.Fatalf("expected no outside-workspace approval prompts, got %d", approveCalls)
+	}
+
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read inside file: %v", err)
+	}
+	if string(got) != "done\n" {
+		t.Fatalf("inside file not updated: %q", string(got))
+	}
+}
+
 func TestOutsideWorkspaceEditRejectionContainsSteeringMessage(t *testing.T) {
 	workspace := t.TempDir()
 	outsideRoot := outsideNonTempDir(t)
@@ -482,6 +522,80 @@ func outsideNonTempDir(t *testing.T) string {
 	}
 	t.Skip("unable to create non-temporary outside directory for test")
 	return ""
+}
+
+func findCaseVariantExistingAlias(path string) (string, bool) {
+	canonical := filepath.Clean(path)
+	canonicalInfo, err := os.Stat(canonical)
+	if err != nil {
+		return "", false
+	}
+	if candidate, ok := caseAliasUsersSubstitution(canonical, canonicalInfo); ok {
+		return candidate, true
+	}
+
+	parts := strings.Split(canonical, string(filepath.Separator))
+	start := 0
+	if filepath.IsAbs(canonical) && len(parts) > 0 && parts[0] == "" {
+		start = 1
+	}
+
+	for idx := start; idx < len(parts); idx++ {
+		variantPart := toggleFirstLetterCase(parts[idx])
+		if variantPart == parts[idx] {
+			continue
+		}
+		candidateParts := append([]string(nil), parts...)
+		candidateParts[idx] = variantPart
+		candidate := strings.Join(candidateParts, string(filepath.Separator))
+		if candidate == canonical {
+			continue
+		}
+		candidateInfo, statErr := os.Stat(candidate)
+		if statErr != nil {
+			continue
+		}
+		if os.SameFile(candidateInfo, canonicalInfo) {
+			return candidate, true
+		}
+	}
+
+	return "", false
+}
+
+func caseAliasUsersSubstitution(canonical string, canonicalInfo os.FileInfo) (string, bool) {
+	if strings.HasPrefix(canonical, "/Users/") {
+		candidate := "/users/" + strings.TrimPrefix(canonical, "/Users/")
+		if info, err := os.Stat(candidate); err == nil && os.SameFile(info, canonicalInfo) {
+			return candidate, true
+		}
+	}
+	if strings.HasPrefix(canonical, "/users/") {
+		candidate := "/Users/" + strings.TrimPrefix(canonical, "/users/")
+		if info, err := os.Stat(candidate); err == nil && os.SameFile(info, canonicalInfo) {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
+func toggleFirstLetterCase(value string) string {
+	runes := []rune(value)
+	if len(runes) == 0 {
+		return value
+	}
+	first := runes[0]
+	upper := unicode.ToUpper(first)
+	lower := unicode.ToLower(first)
+	if first == upper && first == lower {
+		return value
+	}
+	if first == upper {
+		runes[0] = lower
+		return string(runes)
+	}
+	runes[0] = upper
+	return string(runes)
 }
 
 func callPatch(t *testing.T, tool *Tool, id, patchText string) tools.Result {

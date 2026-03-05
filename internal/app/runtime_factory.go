@@ -41,6 +41,7 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 		active.ShellOutputMaxChars,
 		active.AllowNonCwdEdits,
 		llm.SupportsVisionInputsModel(active.Model),
+		logger,
 	)
 	if err != nil {
 		return nil, err
@@ -151,14 +152,35 @@ func configSourceLines(src config.SourceReport) []string {
 	return lines
 }
 
-func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTimeout time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsViewImage bool) (*tools.Registry, *askquestion.Broker, error) {
+func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTimeout time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsViewImage bool, logger *runLogger) (*tools.Registry, *askquestion.Broker, error) {
 	broker := askquestion.NewBroker()
-	outsideWorkspaceApprover := newPatchOutsideWorkspaceApprover(broker)
+	patchOutsideWorkspaceApprover := newOutsideWorkspaceApprover(broker, "editing")
+	readOutsideWorkspaceApprover := newOutsideWorkspaceApprover(broker, "reading")
 	patch, err := patchtool.New(
 		workspaceRoot,
 		true,
 		patchtool.WithAllowOutsideWorkspace(allowNonCwdEdits),
-		patchtool.WithOutsideWorkspaceApprover(outsideWorkspaceApprover.Approve),
+		patchtool.WithOutsideWorkspaceApprover(patchOutsideWorkspaceApprover.Approve),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	viewImage, err := readimagetool.New(
+		workspaceRoot,
+		supportsViewImage,
+		readimagetool.WithAllowOutsideWorkspace(allowNonCwdEdits),
+		readimagetool.WithOutsideWorkspaceApprover(readOutsideWorkspaceApprover.Approve),
+		readimagetool.WithOutsideWorkspaceAuditLogger(func(entry readimagetool.OutsideWorkspaceAudit) {
+			if logger == nil {
+				return
+			}
+			logger.Logf(
+				"tool.view_image.outside_workspace.approved requested=%q resolved=%q reason=%s",
+				entry.RequestedPath,
+				entry.ResolvedPath,
+				entry.Reason,
+			)
+		}),
 	)
 	if err != nil {
 		return nil, nil, err
@@ -171,7 +193,7 @@ func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTim
 			return shelltool.New(workspaceRoot, shellOutputMaxChars, shelltool.WithDefaultTimeout(shellDefaultTimeout))
 		},
 		tools.ToolViewImage: func() tools.Handler {
-			return readimagetool.New(workspaceRoot, supportsViewImage)
+			return viewImage
 		},
 		tools.ToolPatch: func() tools.Handler {
 			return patch

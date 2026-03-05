@@ -84,6 +84,7 @@ func WithOutsideWorkspaceApprover(approver OutsideWorkspaceApprover) Option {
 type Tool struct {
 	workspaceRoot                string
 	workspaceRootReal            string
+	workspaceRootInfo            os.FileInfo
 	workspaceOnly                bool
 	allowOutsideWorkspace        bool
 	outsideWorkspaceApprover     OutsideWorkspaceApprover
@@ -124,7 +125,11 @@ func New(workspaceRoot string, workspaceOnly bool, opts ...Option) (*Tool, error
 	if err != nil {
 		return nil, fmt.Errorf("resolve workspace real path: %w", err)
 	}
-	t := &Tool{workspaceRoot: abs, workspaceRootReal: real, workspaceOnly: workspaceOnly}
+	rootInfo, err := os.Stat(real)
+	if err != nil {
+		return nil, fmt.Errorf("stat workspace root: %w", err)
+	}
+	t := &Tool{workspaceRoot: abs, workspaceRootReal: real, workspaceRootInfo: rootInfo, workspaceOnly: workspaceOnly}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(t)
@@ -445,11 +450,11 @@ func (t *Tool) resolvePath(ctx context.Context, path string, mustExist bool, app
 	}
 
 	if t.workspaceOnly {
-		rel, err := filepath.Rel(t.workspaceRootReal, real)
-		if err != nil {
-			return "", fmt.Errorf("rel path check for %q: %w", path, err)
+		insideWorkspace, containmentErr := t.isWithinWorkspace(real)
+		if containmentErr != nil {
+			return "", fmt.Errorf("workspace boundary check for %q: %w", path, containmentErr)
 		}
-		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		if !insideWorkspace {
 			if isPathInTemporaryDir(real) {
 				return real, nil
 			}
@@ -493,6 +498,37 @@ func (t *Tool) resolvePath(ctx context.Context, path string, mustExist bool, app
 		}
 	}
 	return real, nil
+}
+
+func (t *Tool) isWithinWorkspace(real string) (bool, error) {
+	rel, relErr := filepath.Rel(t.workspaceRootReal, real)
+	if relErr == nil {
+		if rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
+			return true, nil
+		}
+	}
+
+	if t.workspaceRootInfo == nil {
+		return false, errors.New("workspace root info unavailable")
+	}
+
+	current := real
+	for {
+		info, statErr := os.Stat(current)
+		if statErr != nil {
+			return false, fmt.Errorf("stat candidate path %q: %w", current, statErr)
+		}
+		if os.SameFile(info, t.workspaceRootInfo) {
+			return true, nil
+		}
+		next := filepath.Dir(current)
+		if next == current {
+			break
+		}
+		current = next
+	}
+
+	return false, nil
 }
 
 func isPathInTemporaryDir(path string) bool {
