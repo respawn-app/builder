@@ -23,6 +23,7 @@ const (
 	UnifiedErrorCodeUnknown               UnifiedErrorCode = "unknown"
 	UnifiedErrorCodeAuthentication        UnifiedErrorCode = "authentication"
 	UnifiedErrorCodeContextLengthOverflow UnifiedErrorCode = "context_length_overflow"
+	UnifiedErrorCodeProviderContract      UnifiedErrorCode = "provider_contract_error"
 )
 
 type ProviderAPIError struct {
@@ -35,6 +36,21 @@ type ProviderAPIError struct {
 	Message       string
 	Raw           string
 	Err           error
+}
+
+func NewProviderContractError(providerID string, statusCode int, cause error) *ProviderAPIError {
+	message := "provider contract error"
+	if cause != nil {
+		message = cause.Error()
+	}
+	return &ProviderAPIError{
+		ProviderID: providerID,
+		StatusCode: statusCode,
+		Code:       UnifiedErrorCodeProviderContract,
+		Message:    message,
+		Raw:        message,
+		Err:        cause,
+	}
 }
 
 func (e *ProviderAPIError) Error() string {
@@ -106,6 +122,9 @@ func IsNonRetriableModelError(err error) bool {
 	}
 	var providerErr *ProviderAPIError
 	if errors.As(err, &providerErr) {
+		if providerErr.Code == UnifiedErrorCodeProviderContract {
+			return true
+		}
 		switch providerErr.StatusCode {
 		case 400, 401, 403, 404:
 			return true

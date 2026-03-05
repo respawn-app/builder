@@ -203,8 +203,18 @@ func TestMapOpenAIRequestError_UnknownProviderIDFailsFast(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected missing provider reducer error")
 	}
-	if !strings.Contains(err.Error(), "no error reducer registered for provider_id \"ollama\"") {
-		t.Fatalf("expected fail-fast reducer error, got %v", err)
+	var providerErr *ProviderAPIError
+	if !errors.As(err, &providerErr) {
+		t.Fatalf("expected ProviderAPIError, got %T err=%v", err, err)
+	}
+	if providerErr.Code != UnifiedErrorCodeProviderContract || providerErr.ProviderID != "ollama" {
+		t.Fatalf("expected provider contract error for ollama, got %+v", providerErr)
+	}
+	if rawResp.Body != nil {
+		t.Fatal("expected response body to be closed and cleared on reducer registration failure")
+	}
+	if !IsNonRetriableModelError(err) {
+		t.Fatalf("expected provider contract error to be non-retriable, got err=%v", err)
 	}
 }
 
@@ -275,9 +285,15 @@ func TestCompactErrorPath_ReturnsProviderAPIErrorWithDetectedProviderID(t *testi
 	if err == nil {
 		t.Fatal("expected compact error")
 	}
-
-	if !strings.Contains(err.Error(), "no error reducer registered for provider_id \"ollama\"") {
-		t.Fatalf("expected fail-fast unknown provider reducer error, got err=%v", err)
+	var providerErr *ProviderAPIError
+	if !errors.As(err, &providerErr) {
+		t.Fatalf("expected ProviderAPIError from transport path, got %T err=%v", err, err)
+	}
+	if providerErr.ProviderID != "ollama" || providerErr.Code != UnifiedErrorCodeProviderContract {
+		t.Fatalf("expected provider contract error for ollama, got %+v", providerErr)
+	}
+	if !IsNonRetriableModelError(err) {
+		t.Fatalf("expected non-retriable provider contract error, got %v", err)
 	}
 }
 
