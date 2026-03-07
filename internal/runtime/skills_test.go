@@ -70,7 +70,7 @@ func TestAppendMissingReviewerMetaContextPrependsSkillsWhenMissing(t *testing.T)
 	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "workspace-skill", "from workspace")
 
 	in := []llm.Message{{Role: llm.RoleUser, Content: "request"}}
-	got := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high")
+	got := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false)
 	if len(got) != 3 {
 		t.Fatalf("expected skills+environment prepended plus original, got %d", len(got))
 	}
@@ -103,6 +103,26 @@ func TestSplitReviewerMetaMessagesDeduplicatesSkillsContext(t *testing.T) {
 	}
 	if meta[1].MessageType != llm.MessageTypeEnvironment {
 		t.Fatalf("expected second meta message to be environment context, got %+v", meta[1])
+	}
+	if len(transcript) != 1 || transcript[0].Role != llm.RoleUser || transcript[0].Content != "request" {
+		t.Fatalf("expected transcript to contain only user request, got %+v", transcript)
+	}
+}
+
+func TestSplitReviewerMetaMessagesTreatsHeadlessContextAsMeta(t *testing.T) {
+	headless := llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessMode, Content: "headless mode instructions"}
+	messages := []llm.Message{
+		headless,
+		headless,
+		{Role: llm.RoleUser, Content: "request"},
+	}
+
+	meta, transcript := splitReviewerMetaMessages(messages)
+	if len(meta) != 1 {
+		t.Fatalf("expected one headless meta message, got %d", len(meta))
+	}
+	if meta[0].MessageType != llm.MessageTypeHeadlessMode {
+		t.Fatalf("expected headless meta message, got %+v", meta[0])
 	}
 	if len(transcript) != 1 || transcript[0].Role != llm.RoleUser || transcript[0].Content != "request" {
 		t.Fatalf("expected transcript to contain only user request, got %+v", transcript)

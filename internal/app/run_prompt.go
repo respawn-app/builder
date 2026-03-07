@@ -56,6 +56,7 @@ func runPrompt(ctx context.Context, boot appBootstrap, initialSessionID, prompt 
 
 	wiring, err := newRuntimeWiring(store, active, enabledTools, boot.cfg.WorkspaceRoot, boot.authManager, logger, runtimeWiringOptions{
 		AskHandler: runPromptAskHandler,
+		Headless:   true,
 		OnEvent: func(evt runtime.Event) {
 			writeRunProgressEvent(progress, evt)
 		},
@@ -63,6 +64,9 @@ func runPrompt(ctx context.Context, boot appBootstrap, initialSessionID, prompt 
 	if err != nil {
 		return RunPromptResult{}, err
 	}
+	defer func() {
+		_ = wiring.Close()
+	}()
 
 	runCtx := ctx
 	if timeout > 0 {

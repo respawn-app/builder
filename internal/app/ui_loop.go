@@ -26,6 +26,7 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 		WithUIAlternateScreenPolicy(active.TUIAlternateScreen),
 		WithUIScrollMode(active.TUIScrollMode),
 		WithUICommandRegistry(commandRegistry),
+		WithUIBackgroundManager(wiring.background),
 		WithUIStartupSubmit(initialPrompt),
 		WithUISessionName(sessionName),
 		WithUISessionID(wiring.engine.SessionID()),

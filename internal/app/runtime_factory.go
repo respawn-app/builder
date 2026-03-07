@@ -24,17 +24,19 @@ type runtimeWiring struct {
 	engine      *runtime.Engine
 	askBridge   *askBridge
 	eventBridge *runtimeEventBridge
+	background  *shelltool.Manager
 }
 
 type runtimeWiringOptions struct {
 	AskHandler func(req askquestion.Request) (string, error)
 	OnEvent    func(evt runtime.Event)
+	Headless   bool
 }
 
 func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools []tools.ID, workspaceRoot string, mgr *auth.Manager, logger *runLogger, opts runtimeWiringOptions) (*runtimeWiring, error) {
 	bells := newBellHooks(defaultTerminalNotifier(active.NotificationMethod))
 
-	toolRegistry, askBroker, err := buildToolRegistry(
+	toolRegistry, askBroker, background, err := buildToolRegistry(
 		workspaceRoot,
 		enabledTools,
 		time.Duration(active.Timeouts.ShellDefaultSeconds)*time.Second,
@@ -107,6 +109,7 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 		LocalCompactionCarryoverLimit: 20_000,
 		CompactionMode:                string(active.CompactionMode),
 		AutoCompactionEnabled:         boolRef(true),
+		HeadlessMode:                  opts.Headless,
 		Reviewer: runtime.ReviewerConfig{
 			Frequency:      active.Reviewer.Frequency,
 			Model:          active.Reviewer.Model,
@@ -127,16 +130,48 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 	if err != nil {
 		return nil, err
 	}
+	if background != nil {
+		background.SetEventHandler(func(evt shelltool.Event) {
+			eng.HandleBackgroundShellEvent(runtime.BackgroundShellEvent{
+				Type:              string(evt.Type),
+				ID:                evt.Snapshot.ID,
+				State:             evt.Snapshot.State,
+				Command:           evt.Snapshot.Command,
+				Workdir:           evt.Snapshot.Workdir,
+				LogPath:           evt.Snapshot.LogPath,
+				Preview:           evt.Preview,
+				Removed:           evt.Removed,
+				ExitCode:          cloneIntPtr(evt.Snapshot.ExitCode),
+				UserRequestedKill: evt.Snapshot.KillRequested,
+			})
+		})
+	}
 
 	return &runtimeWiring{
 		engine:      eng,
 		askBridge:   askBridge,
 		eventBridge: eventBridge,
+		background:  background,
 	}, nil
+}
+
+func (w *runtimeWiring) Close() error {
+	if w == nil || w.background == nil {
+		return nil
+	}
+	return w.background.Close()
 }
 
 func boolRef(v bool) *bool {
 	return &v
+}
+
+func cloneIntPtr(v *int) *int {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	return &out
 }
 
 func configSourceLines(src config.SourceReport) []string {
@@ -152,8 +187,12 @@ func configSourceLines(src config.SourceReport) []string {
 	return lines
 }
 
-func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTimeout time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsViewImage bool, logger *runLogger) (*tools.Registry, *askquestion.Broker, error) {
+func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTimeout time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsViewImage bool, logger *runLogger) (*tools.Registry, *askquestion.Broker, *shelltool.Manager, error) {
 	broker := askquestion.NewBroker()
+	background, err := shelltool.NewManager()
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	patchOutsideWorkspaceApprover := newOutsideWorkspaceApprover(broker, "editing")
 	readOutsideWorkspaceApprover := newOutsideWorkspaceApprover(broker, "reading")
 	patch, err := patchtool.New(
@@ -163,7 +202,7 @@ func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTim
 		patchtool.WithOutsideWorkspaceApprover(patchOutsideWorkspaceApprover.Approve),
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	viewImage, err := readimagetool.New(
 		workspaceRoot,
@@ -183,7 +222,7 @@ func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTim
 		}),
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	var registry *tools.Registry
 	parallel := multitooluseparallel.New(func() *tools.Registry { return registry })
@@ -191,6 +230,12 @@ func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTim
 	factories := map[tools.ID]func() tools.Handler{
 		tools.ToolShell: func() tools.Handler {
 			return shelltool.New(workspaceRoot, shellOutputMaxChars, shelltool.WithDefaultTimeout(shellDefaultTimeout))
+		},
+		tools.ToolExecCommand: func() tools.Handler {
+			return shelltool.NewExecCommandTool(workspaceRoot, shellOutputMaxChars, background)
+		},
+		tools.ToolWriteStdin: func() tools.Handler {
+			return shelltool.NewWriteStdinTool(shellOutputMaxChars, background)
 		},
 		tools.ToolViewImage: func() tools.Handler {
 			return viewImage
@@ -219,17 +264,17 @@ func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTim
 		}
 		factory, ok := factories[id]
 		if !ok {
-			return nil, nil, fmt.Errorf("missing runtime tool factory for %q", id)
+			return nil, nil, nil, fmt.Errorf("missing runtime tool factory for %q", id)
 		}
 		handlers = append(handlers, factory())
 	}
 	registry = tools.NewRegistry(handlers...)
-	return registry, broker, nil
+	return registry, broker, background, nil
 }
 
 func isLocalRuntimeTool(id tools.ID) bool {
 	switch id {
-	case tools.ToolShell, tools.ToolViewImage, tools.ToolPatch, tools.ToolAskQuestion, tools.ToolMultiToolUseParallel:
+	case tools.ToolShell, tools.ToolExecCommand, tools.ToolWriteStdin, tools.ToolViewImage, tools.ToolPatch, tools.ToolAskQuestion, tools.ToolMultiToolUseParallel:
 		return true
 	default:
 		return false

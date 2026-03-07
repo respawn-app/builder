@@ -51,6 +51,8 @@ const (
 	MessageTypeInterruption     MessageType = "interruption"
 	MessageTypeErrorFeedback    MessageType = "error_feedback"
 	MessageTypeReviewerFeedback MessageType = "reviewer_feedback"
+	MessageTypeBackgroundNotice MessageType = "background_notice"
+	MessageTypeHeadlessMode     MessageType = "headless_mode"
 )
 
 type Message struct {

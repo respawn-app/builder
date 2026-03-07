@@ -22,6 +22,8 @@ const (
 	EventCompactionStarted   EventKind = "context_compaction_started"
 	EventCompactionCompleted EventKind = "context_compaction_completed"
 	EventCompactionFailed    EventKind = "context_compaction_failed"
+	EventRunStateChanged     EventKind = "run_state_changed"
+	EventBackgroundUpdated   EventKind = "background_updated"
 )
 
 type Event struct {
@@ -36,6 +38,25 @@ type Event struct {
 	ToolResult     *tools.Result
 	Reviewer       *ReviewerStatus
 	Compaction     *CompactionStatus
+	RunState       *RunState
+	Background     *BackgroundShellEvent
+}
+
+type RunState struct {
+	Busy bool
+}
+
+type BackgroundShellEvent struct {
+	Type              string
+	ID                string
+	State             string
+	Command           string
+	Workdir           string
+	LogPath           string
+	Preview           string
+	Removed           int
+	ExitCode          *int
+	UserRequestedKill bool
 }
 
 type ReviewerStatus struct {

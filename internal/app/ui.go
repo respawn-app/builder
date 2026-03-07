@@ -10,6 +10,7 @@ import (
 	"builder/internal/config"
 	"builder/internal/runtime"
 	"builder/internal/tools/askquestion"
+	shelltool "builder/internal/tools/shell"
 	"builder/internal/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -55,6 +56,14 @@ type askEventMsg struct {
 type askBridge struct {
 	ch chan askEvent
 }
+
+type uiStatusNoticeKind uint8
+
+const (
+	uiStatusNoticeNeutral uiStatusNoticeKind = iota
+	uiStatusNoticeSuccess
+	uiStatusNoticeError
+)
 
 type uiLogger interface {
 	Logf(format string, args ...any)
@@ -164,6 +173,12 @@ func WithUISessionID(sessionID string) UIOption {
 	}
 }
 
+func WithUIBackgroundManager(manager *shelltool.Manager) UIOption {
+	return func(m *uiModel) {
+		m.backgroundManager = manager
+	}
+}
+
 func newAskBridge() *askBridge {
 	return &askBridge{ch: make(chan askEvent, 64)}
 }
@@ -182,6 +197,8 @@ func (b *askBridge) Handle(req askquestion.Request) (string, error) {
 type uiModel struct {
 	engine *runtime.Engine
 	view   tui.Model
+
+	backgroundManager *shelltool.Manager
 
 	runtimeEvents <-chan runtime.Event
 	askEvents     <-chan askEvent
@@ -240,8 +257,12 @@ type uiModel struct {
 	nextParentSessionID      string
 	sessionName              string
 	sessionID                string
+	psVisible                bool
+	psSelection              int
+	psEntries                []shelltool.Snapshot
 
 	transientStatus      string
+	transientStatusKind  uiStatusNoticeKind
 	transientStatusToken uint64
 	debugKeys            bool
 
@@ -315,6 +336,7 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 	} else {
 		m.reviewerEnabled = strings.TrimSpace(m.reviewerMode) != "" && strings.TrimSpace(m.reviewerMode) != "off"
 	}
+	m.refreshProcessEntries()
 	var startupNativeHistoryCmd tea.Cmd
 	if m.engine != nil {
 		startupNativeHistoryCmd = m.runtimeAdapter().syncConversationFromEngine()
@@ -408,6 +430,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clearTransientStatusMsg:
 		if msg.token == m.transientStatusToken {
 			m.transientStatus = ""
+			m.transientStatusKind = uiStatusNoticeNeutral
 		}
 		m.syncViewport()
 		return m, nil
@@ -442,6 +465,7 @@ func (m *uiModel) setDebugKeyTransientStatus(raw tea.Msg, normalized tea.KeyMsg,
 	}
 	m.transientStatusToken++
 	m.transientStatus = fmt.Sprintf("key src=%s raw=%q norm=%q type=%d", source, rawString, normalized.String(), normalized.Type)
+	m.transientStatusKind = uiStatusNoticeNeutral
 }
 
 func envFlagEnabled(name string) bool {
@@ -502,6 +526,20 @@ func (m *uiModel) askController() uiAskController {
 
 func (m *uiModel) runtimeAdapter() uiRuntimeAdapter {
 	return uiRuntimeAdapter{model: m}
+}
+
+func (m *uiModel) setTransientStatus(message string) tea.Cmd {
+	return m.setTransientStatusWithKind(message, uiStatusNoticeNeutral)
+}
+
+func (m *uiModel) setTransientStatusWithKind(message string, kind uiStatusNoticeKind) tea.Cmd {
+	m.transientStatusToken++
+	token := m.transientStatusToken
+	m.transientStatus = strings.TrimSpace(message)
+	m.transientStatusKind = kind
+	return tea.Tick(transientStatusDuration, func(time.Time) tea.Msg {
+		return clearTransientStatusMsg{token: token}
+	})
 }
 
 func (m *uiModel) layout() uiViewLayout {

@@ -22,3 +22,6 @@ var ReviewerSystemPrompt string
 
 //go:embed skills_how_to_use_rules.md
 var SkillsHowToUseRulesPrompt string
+
+//go:embed headless_mode_prompt.md
+var HeadlessModePrompt string

@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"builder/internal/llm"
+	"builder/prompts"
 )
 
 type reviewerSuggestionsResult struct {
@@ -68,9 +69,9 @@ func parseReviewerSuggestionsObject(content string, maxSuggestions int) []string
 	return normalized
 }
 
-func buildReviewerRequestMessages(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string) []llm.Message {
+func buildReviewerRequestMessages(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool) []llm.Message {
 	metaMessages, transcriptSource := splitReviewerMetaMessages(messages)
-	metaMessages = appendMissingReviewerMetaContext(metaMessages, workspaceRoot, model, thinkingLevel)
+	metaMessages = appendMissingReviewerMetaContext(metaMessages, workspaceRoot, model, thinkingLevel, headless)
 	out := make([]llm.Message, 0, len(metaMessages)+2+len(transcriptSource))
 	out = append(out, metaMessages...)
 	out = append(out, llm.Message{Role: llm.RoleDeveloper, Content: reviewerMetaBoundaryMessage})
@@ -82,6 +83,7 @@ func splitReviewerMetaMessages(messages []llm.Message) ([]llm.Message, []llm.Mes
 	meta := make([]llm.Message, 0, 3)
 	transcript := make([]llm.Message, 0, len(messages))
 	seenEnvironment := false
+	seenHeadless := false
 	seenAgentContent := map[string]bool{}
 	seenSkillsContent := map[string]bool{}
 	for _, message := range messages {
@@ -109,6 +111,14 @@ func splitReviewerMetaMessages(messages []llm.Message) ([]llm.Message, []llm.Mes
 			}
 			seenEnvironment = true
 			meta = append(meta, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: message.Content})
+			continue
+		}
+		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeHeadlessMode {
+			if seenHeadless {
+				continue
+			}
+			seenHeadless = true
+			meta = append(meta, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessMode, Content: message.Content})
 			continue
 		}
 		transcript = append(transcript, message)
@@ -185,7 +195,7 @@ func shouldIncludeReviewerMessage(message llm.Message) bool {
 		if content == "" {
 			return false
 		}
-		if message.MessageType == llm.MessageTypeEnvironment || message.MessageType == llm.MessageTypeSkills {
+		if message.MessageType == llm.MessageTypeEnvironment || message.MessageType == llm.MessageTypeSkills || message.MessageType == llm.MessageTypeHeadlessMode {
 			return false
 		}
 		if message.MessageType == llm.MessageTypeErrorFeedback || message.MessageType == llm.MessageTypeInterruption {
@@ -468,10 +478,11 @@ func reviewerSessionID(sessionID string) string {
 	return trimmed + "-review"
 }
 
-func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string) []llm.Message {
+func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool) []llm.Message {
 	haveEnvironment := false
 	haveAgents := false
 	haveSkills := false
+	haveHeadless := false
 	for _, msg := range messages {
 		if msg.Role != llm.RoleDeveloper {
 			continue
@@ -485,8 +496,12 @@ func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot stri
 		if msg.MessageType == llm.MessageTypeEnvironment {
 			haveEnvironment = true
 		}
+		if msg.MessageType == llm.MessageTypeHeadlessMode {
+			haveHeadless = true
+		}
 	}
-	if haveAgents && haveSkills && haveEnvironment {
+	needHeadless := headless && strings.TrimSpace(prompts.HeadlessModePrompt) != ""
+	if haveAgents && haveSkills && haveEnvironment && (!needHeadless || haveHeadless) {
 		return messages
 	}
 	out := append([]llm.Message(nil), messages...)
@@ -549,6 +564,15 @@ func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot stri
 		insertAt := firstMetaBoundaryIndex(out)
 		out = insertMessageAt(out, insertAt, environmentMessage)
 	}
+	if needHeadless && !haveHeadless {
+		headlessMessage := llm.Message{
+			Role:        llm.RoleDeveloper,
+			MessageType: llm.MessageTypeHeadlessMode,
+			Content:     strings.TrimSpace(prompts.HeadlessModePrompt),
+		}
+		insertAt := firstMetaBoundaryIndex(out)
+		out = insertMessageAt(out, insertAt, headlessMessage)
+	}
 
 	if len(out) == len(messages) {
 		return messages
@@ -561,7 +585,7 @@ func firstMetaBoundaryIndex(messages []llm.Message) int {
 		if msg.Role != llm.RoleDeveloper {
 			return idx
 		}
-		if msg.MessageType != llm.MessageTypeAgentsMD && msg.MessageType != llm.MessageTypeSkills && msg.MessageType != llm.MessageTypeEnvironment {
+		if msg.MessageType != llm.MessageTypeAgentsMD && msg.MessageType != llm.MessageTypeSkills && msg.MessageType != llm.MessageTypeEnvironment && msg.MessageType != llm.MessageTypeHeadlessMode {
 			return idx
 		}
 	}

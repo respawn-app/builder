@@ -10,6 +10,8 @@ type ID string
 
 const (
 	ToolShell                ID = "shell"
+	ToolExecCommand          ID = "exec_command"
+	ToolWriteStdin           ID = "write_stdin"
 	ToolViewImage            ID = "view_image"
 	ToolPatch                ID = "patch"
 	ToolAskQuestion          ID = "ask_question"
