@@ -304,20 +304,25 @@ func (s *chatStore) snapshot() ChatSnapshot {
 }
 
 func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
-	if msg.MessageType != llm.MessageTypeErrorFeedback {
-		return ChatEntry{}, false
-	}
 	if strings.TrimSpace(msg.Content) == "" {
 		return ChatEntry{}, false
 	}
-	return ChatEntry{Role: "error", Text: msg.Content}, true
+	switch msg.MessageType {
+	case llm.MessageTypeErrorFeedback:
+		return ChatEntry{Role: "error", Text: msg.Content}, true
+	case llm.MessageTypeBackgroundNotice:
+		return ChatEntry{Role: "system", Text: msg.Content}, true
+	default:
+		return ChatEntry{}, false
+	}
 }
 
 func (s *chatStore) formatToolCall(call llm.ToolCall) ChatEntry {
 	toolName := strings.TrimSpace(call.Name)
+	isShellTool := toolName == string(tools.ToolShell) || toolName == string(tools.ToolExecCommand) || toolName == string(tools.ToolWriteStdin)
 	meta := &transcript.ToolCallMeta{
 		ToolName: toolName,
-		IsShell:  toolName == string(tools.ToolShell),
+		IsShell:  isShellTool,
 	}
 	if meta.IsShell {
 		meta.UserInitiated = parseShellToolCallUserInitiated(call.Input)

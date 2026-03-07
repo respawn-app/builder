@@ -163,3 +163,54 @@ func TestUserMessageFlushedAfterConversationUpdatedDoesNotDuplicateNativeReplay(
 		t.Fatalf("expected no duplicate replay after already-synced conversation, got %T", flushCmd())
 	}
 }
+
+func TestBackgroundUpdatedUsesTransientStatusLifecycle(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+
+	cmd := m.runtimeAdapter().handleRuntimeEvent(runtime.Event{
+		Kind: runtime.EventBackgroundUpdated,
+		Background: &runtime.BackgroundShellEvent{
+			Type:  "completed",
+			ID:    "1000",
+			State: "completed",
+		},
+	})
+	if cmd == nil {
+		t.Fatal("expected transient status clear command")
+	}
+	if got := strings.TrimSpace(m.transientStatus); got != "background shell 1000 completed" {
+		t.Fatalf("unexpected transient status %q", got)
+	}
+	if m.transientStatusKind != uiStatusNoticeSuccess {
+		t.Fatalf("expected success notice kind, got %d", m.transientStatusKind)
+	}
+	clearMsg, ok := cmd().(clearTransientStatusMsg)
+	if !ok {
+		t.Fatalf("expected clearTransientStatusMsg, got %T", cmd())
+	}
+	next, _ := m.Update(clearMsg)
+	updated := next.(*uiModel)
+	if updated.transientStatus != "" {
+		t.Fatalf("expected transient status to clear, got %q", updated.transientStatus)
+	}
+	if updated.transientStatusKind != uiStatusNoticeNeutral {
+		t.Fatalf("expected transient status kind reset, got %d", updated.transientStatusKind)
+	}
+}
+
+func TestUserRequestedKilledBackgroundUsesSuccessNotice(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{
+		Kind: runtime.EventBackgroundUpdated,
+		Background: &runtime.BackgroundShellEvent{
+			Type:              "killed",
+			ID:                "1001",
+			State:             "killed",
+			UserRequestedKill: true,
+		},
+	})
+	if m.transientStatusKind != uiStatusNoticeSuccess {
+		t.Fatalf("expected success notice kind, got %d", m.transientStatusKind)
+	}
+}

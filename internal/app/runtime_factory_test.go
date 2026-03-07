@@ -16,7 +16,7 @@ import (
 func TestBuildToolRegistry_AllowsHostedWebSearchWithoutLocalFactory(t *testing.T) {
 	workspace := t.TempDir()
 
-	registry, _, err := buildToolRegistry(
+	registry, _, _, err := buildToolRegistry(
 		workspace,
 		[]tools.ID{tools.ToolShell, tools.ToolWebSearch},
 		5*time.Second,
@@ -41,7 +41,7 @@ func TestBuildToolRegistry_AllowsHostedWebSearchWithoutLocalFactory(t *testing.T
 func TestBuildToolRegistry_IncludesParallelWrapperWhenEnabled(t *testing.T) {
 	workspace := t.TempDir()
 
-	registry, _, err := buildToolRegistry(
+	registry, _, _, err := buildToolRegistry(
 		workspace,
 		[]tools.ID{tools.ToolShell, tools.ToolMultiToolUseParallel},
 		5*time.Second,
@@ -66,7 +66,7 @@ func TestBuildToolRegistry_IncludesParallelWrapperWhenEnabled(t *testing.T) {
 func TestBuildToolRegistry_IncludesViewImageWhenEnabled(t *testing.T) {
 	workspace := t.TempDir()
 
-	registry, _, err := buildToolRegistry(
+	registry, _, _, err := buildToolRegistry(
 		workspace,
 		[]tools.ID{tools.ToolViewImage},
 		5*time.Second,
@@ -102,7 +102,7 @@ func TestBuildToolRegistry_ViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 		t.Fatalf("new run logger: %v", err)
 	}
 
-	registry, broker, err := buildToolRegistry(
+	registry, broker, _, err := buildToolRegistry(
 		workspace,
 		[]tools.ID{tools.ToolViewImage},
 		5*time.Second,

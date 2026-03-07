@@ -88,6 +88,7 @@ type Config struct {
 	CompactionMode                string
 	AutoCompactionEnabled         *bool
 	Reviewer                      ReviewerConfig
+	HeadlessMode                  bool
 	OnEvent                       func(Event)
 }
 
@@ -120,8 +121,10 @@ type Engine struct {
 	locked *session.LockedContract
 
 	pendingInjected []string
+	pendingNotices  []llm.Message
 	cancelCurrent   context.CancelFunc
 	busy            bool
+	noticeScheduled bool
 
 	lastUsage llm.Usage
 
@@ -287,12 +290,21 @@ func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (assistant 
 	stepCtx, cancel := context.WithCancel(ctx)
 	e.cancelCurrent = cancel
 	e.mu.Unlock()
+	e.emit(Event{Kind: EventRunStateChanged, RunState: &RunState{Busy: true}})
 	stepID := ""
 	defer func() {
 		e.mu.Lock()
 		e.busy = false
 		e.cancelCurrent = nil
+		hasQueuedNotices := len(e.pendingNotices) > 0 && !e.noticeScheduled
+		if hasQueuedNotices {
+			e.noticeScheduled = true
+		}
 		e.mu.Unlock()
+		e.emit(Event{Kind: EventRunStateChanged, StepID: stepID, RunState: &RunState{Busy: false}})
+		if hasQueuedNotices {
+			go e.processQueuedNotices(context.Background())
+		}
 		if clearErr := e.store.MarkInFlight(false); clearErr != nil {
 			wrapped := fmt.Errorf("mark in-flight false: %w", clearErr)
 			e.emit(Event{Kind: EventInFlightClearFailed, StepID: stepID, Error: wrapped.Error()})
@@ -335,12 +347,21 @@ func (e *Engine) SubmitUserShellCommand(ctx context.Context, command string) (re
 	stepCtx, cancel := context.WithCancel(ctx)
 	e.cancelCurrent = cancel
 	e.mu.Unlock()
+	e.emit(Event{Kind: EventRunStateChanged, RunState: &RunState{Busy: true}})
 	stepID := ""
 	defer func() {
 		e.mu.Lock()
 		e.busy = false
 		e.cancelCurrent = nil
+		hasQueuedNotices := len(e.pendingNotices) > 0 && !e.noticeScheduled
+		if hasQueuedNotices {
+			e.noticeScheduled = true
+		}
 		e.mu.Unlock()
+		e.emit(Event{Kind: EventRunStateChanged, StepID: stepID, RunState: &RunState{Busy: false}})
+		if hasQueuedNotices {
+			go e.processQueuedNotices(context.Background())
+		}
 		if clearErr := e.store.MarkInFlight(false); clearErr != nil {
 			wrapped := fmt.Errorf("mark in-flight false: %w", clearErr)
 			e.emit(Event{Kind: EventInFlightClearFailed, StepID: stepID, Error: wrapped.Error()})

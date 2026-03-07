@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 
 	"builder/internal/runtime"
@@ -36,6 +37,24 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 		m.reviewerBlocking = true
 	case runtime.EventReviewerCompleted:
 		m.clearReviewerState()
+	case runtime.EventRunStateChanged:
+		if evt.RunState != nil {
+			m.busy = evt.RunState.Busy
+			if evt.RunState.Busy {
+				m.activity = uiActivityRunning
+			} else if m.activity == uiActivityRunning {
+				m.activity = uiActivityIdle
+			}
+		}
+	case runtime.EventBackgroundUpdated:
+		m.refreshProcessEntries()
+		if evt.Background != nil && (evt.Background.Type == "completed" || evt.Background.Type == "killed") {
+			kind := uiStatusNoticeSuccess
+			if evt.Background.Type == "killed" && !evt.Background.UserRequestedKill {
+				kind = uiStatusNoticeError
+			}
+			return m.setTransientStatusWithKind(fmt.Sprintf("background shell %s %s", evt.Background.ID, evt.Background.State), kind)
+		}
 	case runtime.EventUserMessageFlushed:
 		a.onUserMessageFlushed(evt.UserMessage)
 		if m.usesNativeScrollback() {

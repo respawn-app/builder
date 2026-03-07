@@ -121,6 +121,18 @@ func formatRuntimeEvent(evt runtime.Event) string {
 			}
 			return line
 		}
+	case runtime.EventRunStateChanged:
+		if evt.RunState != nil {
+			return fmt.Sprintf("runtime.event kind=%s step_id=%s busy=%t", evt.Kind, evt.StepID, evt.RunState.Busy)
+		}
+	case runtime.EventBackgroundUpdated:
+		if evt.Background != nil {
+			line := fmt.Sprintf("runtime.event kind=%s id=%s type=%s state=%s", evt.Kind, evt.Background.ID, evt.Background.Type, evt.Background.State)
+			if evt.Background.ExitCode != nil {
+				line += fmt.Sprintf(" exit_code=%d", *evt.Background.ExitCode)
+			}
+			return line
+		}
 	}
 	return fmt.Sprintf("runtime.event kind=%s step_id=%s", evt.Kind, evt.StepID)
 }

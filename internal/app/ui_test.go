@@ -1100,6 +1100,20 @@ func TestDebugKeysTransientStatusShowsNormalizationSource(t *testing.T) {
 	}
 }
 
+func TestShowErrorStatusSetsErrorNoticeKind(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	cmd := m.inputController().showErrorStatus("boom")
+	if cmd == nil {
+		t.Fatal("expected clear command")
+	}
+	if m.transientStatus != "boom" {
+		t.Fatalf("unexpected transient status %q", m.transientStatus)
+	}
+	if m.transientStatusKind != uiStatusNoticeError {
+		t.Fatalf("expected error notice kind, got %d", m.transientStatusKind)
+	}
+}
+
 func TestMainInputSupportsInlineCursorEditing(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "hello world"
@@ -1801,14 +1815,14 @@ func TestSlashCommandArrowKeysNavigatePickerAndReplaceInput(t *testing.T) {
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
 	updated = next.(*uiModel)
-	if updated.input != "/exit" {
-		t.Fatalf("expected first down to select /exit, got %q", updated.input)
+	if updated.input != "/new" {
+		t.Fatalf("expected first down to select /new, got %q", updated.input)
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
 	updated = next.(*uiModel)
-	if updated.input != "/init" {
-		t.Fatalf("expected second down to select /init, got %q", updated.input)
+	if updated.input != "/exit" {
+		t.Fatalf("expected second down to select /exit, got %q", updated.input)
 	}
 }
 
@@ -2528,6 +2542,56 @@ func TestStatusLineShowsThinkingLevelForReasoningModels(t *testing.T) {
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(line, "gpt-5.3.codex high") {
 		t.Fatalf("expected status line to include model and thinking level, got %q", line)
+	}
+}
+
+func TestStatusLineRightAlignsTransientNotice(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIModelName("gpt-5"),
+	).(*uiModel)
+	m.setTransientStatusWithKind("done", uiStatusNoticeSuccess)
+
+	line := stripANSIPreserve(m.renderStatusLine(80, uiThemeStyles("dark")))
+	if !strings.HasSuffix(strings.TrimRight(line, " "), "done") {
+		t.Fatalf("expected notice at right edge, got %q", line)
+	}
+	if !containsInOrder(line, "ongoing", "gpt-5", "done") {
+		t.Fatalf("expected notice after left metadata, got %q", line)
+	}
+	parts := strings.SplitN(line, "done", 2)
+	if len(parts) < 2 || !strings.Contains(parts[0], "   ") {
+		t.Fatalf("expected visible padding before right-aligned notice, got %q", line)
+	}
+}
+
+func TestStatusLineTruncatesRightNoticeWithoutPushingOutContextUsage(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.setTransientStatusWithKind("this is a very long background completion notice that should truncate before it reaches the context progress bar", uiStatusNoticeSuccess)
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(70, uiThemeStyles("dark")))
+	if !strings.Contains(line, "0%") {
+		t.Fatalf("expected context usage label to remain visible, got %q", line)
+	}
+	if !strings.Contains(line, "▯") {
+		t.Fatalf("expected context progress bar to remain visible, got %q", line)
+	}
+	if !strings.Contains(line, "…") {
+		t.Fatalf("expected truncated notice ellipsis, got %q", line)
+	}
+	if strings.Contains(line, "this is a very long background completion notice that should truncate before it reaches the context progress bar") {
+		t.Fatalf("expected long notice to be truncated, got %q", line)
 	}
 }
 

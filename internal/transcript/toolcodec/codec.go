@@ -17,6 +17,8 @@ const (
 	DefaultShellTimeoutSecs = 300
 	defaultToolCallFallback = "tool call"
 	shellToolNameNormalized = "shell"
+	execToolNameNormalized  = "exec_command"
+	stdinToolNameNormalized = "write_stdin"
 )
 
 func EncodeInlineCall(command, timeoutLabel string, isShell bool) string {
@@ -110,6 +112,17 @@ func FormatInput(toolName string, raw json.RawMessage, shellTimeoutSeconds int) 
 	obj, ok := payload.(map[string]any)
 	if !ok {
 		return renderPlain(payload), ""
+	}
+	if strings.TrimSpace(toolName) == stdinToolNameNormalized {
+		sessionID, _ := asInt(obj["session_id"])
+		chars, _ := asString(obj["chars"])
+		if strings.TrimSpace(chars) == "" {
+			return fmt.Sprintf("poll session %d", sessionID), ""
+		}
+		return fmt.Sprintf("write stdin session %d", sessionID), ""
+	}
+	if cmd, ok := asString(obj["cmd"]); ok && strings.TrimSpace(toolName) == execToolNameNormalized {
+		return cmd, ""
 	}
 	if cmd, ok := asString(obj["command"]); ok {
 		timeout := ""

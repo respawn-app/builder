@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -41,6 +42,20 @@ type runJSONError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
+
+type runOutputMode string
+
+const (
+	runOutputModeFinalText runOutputMode = "final-text"
+	runOutputModeJSON      runOutputMode = "json"
+)
+
+type runProgressMode string
+
+const (
+	runProgressModeQuiet  runProgressMode = "quiet"
+	runProgressModeStderr runProgressMode = "stderr"
+)
 
 func main() {
 	args := os.Args[1:]
@@ -82,49 +97,41 @@ func runSubcommand(args []string) int {
 	runFS.SetOutput(os.Stderr)
 	flags := registerCommonFlags(runFS)
 	timeoutRaw := runFS.String("timeout", "", "optional timeout duration (e.g. 30s, 2m); default is no timeout")
+	outputModeRaw := runFS.String("output-mode", string(runOutputModeFinalText), "output mode: final-text|json")
+	progressModeRaw := runFS.String("progress-mode", string(runProgressModeQuiet), "progress mode: quiet|stderr")
+	usageOutputMode := inferRunOutputMode(args)
 	if err := runFS.Parse(args); err != nil {
-		emitRunJSON(runJSONResult{
-			Status: "error",
-			Error: &runJSONError{
-				Code:    "usage",
-				Message: err.Error(),
-			},
-		})
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		emitRunUsageError(usageOutputMode, err.Error())
+		return 2
+	}
+	outputMode, err := parseRunOutputMode(*outputModeRaw)
+	if err != nil {
+		emitRunUsageError(usageOutputMode, err.Error())
 		return 2
 	}
 
 	remaining := runFS.Args()
 	if len(remaining) == 0 {
-		emitRunJSON(runJSONResult{
-			Status: "error",
-			Error: &runJSONError{
-				Code:    "usage",
-				Message: "prompt argument is required",
-			},
-		})
+		emitRunUsageError(outputMode, "prompt argument is required")
 		return 2
 	}
 	prompt := strings.TrimSpace(strings.Join(remaining, " "))
 	if prompt == "" {
-		emitRunJSON(runJSONResult{
-			Status: "error",
-			Error: &runJSONError{
-				Code:    "usage",
-				Message: "prompt argument is required",
-			},
-		})
+		emitRunUsageError(outputMode, "prompt argument is required")
 		return 2
 	}
 
 	timeout, err := parseRunTimeout(*timeoutRaw)
 	if err != nil {
-		emitRunJSON(runJSONResult{
-			Status: "error",
-			Error: &runJSONError{
-				Code:    "usage",
-				Message: err.Error(),
-			},
-		})
+		emitRunUsageError(outputMode, err.Error())
+		return 2
+	}
+	progressMode, err := parseRunProgressMode(*progressModeRaw)
+	if err != nil {
+		emitRunUsageError(outputMode, err.Error())
 		return 2
 	}
 
@@ -143,32 +150,43 @@ func runSubcommand(args []string) int {
 		OpenAIBaseURL:       flags.OpenAIBaseURL,
 	}
 
-	result, runErr := app.RunPrompt(ctx, opts, prompt, timeout, os.Stderr)
+	var progress io.Writer
+	if progressMode == runProgressModeStderr {
+		progress = os.Stderr
+	}
+	result, runErr := app.RunPrompt(ctx, opts, prompt, timeout, progress)
 	if runErr != nil {
 		code := runErrorCode(runErr)
-		emitRunJSON(runJSONResult{
-			Status:      "error",
-			SessionID:   result.SessionID,
-			SessionName: result.SessionName,
-			DurationMS:  result.Duration.Milliseconds(),
-			Error: &runJSONError{
-				Code:    code,
-				Message: runErr.Error(),
-			},
-		})
+		if outputMode == runOutputModeJSON {
+			emitRunJSON(runJSONResult{
+				Status:      "error",
+				SessionID:   result.SessionID,
+				SessionName: result.SessionName,
+				DurationMS:  result.Duration.Milliseconds(),
+				Error: &runJSONError{
+					Code:    code,
+					Message: runErr.Error(),
+				},
+			})
+		} else {
+			fmt.Fprintln(os.Stderr, runErr)
+		}
 		if code == "interrupted" {
 			return 130
 		}
 		return 1
 	}
-
-	emitRunJSON(runJSONResult{
-		Status:      "ok",
-		Result:      result.Result,
-		SessionID:   result.SessionID,
-		SessionName: result.SessionName,
-		DurationMS:  result.Duration.Milliseconds(),
-	})
+	if outputMode == runOutputModeJSON {
+		emitRunJSON(runJSONResult{
+			Status:      "ok",
+			Result:      result.Result,
+			SessionID:   result.SessionID,
+			SessionName: result.SessionName,
+			DurationMS:  result.Duration.Milliseconds(),
+		})
+	} else {
+		_, _ = fmt.Fprintln(os.Stdout, result.Result)
+	}
 	return 0
 }
 
@@ -209,6 +227,28 @@ func parseRunTimeout(raw string) (time.Duration, error) {
 	return parsed, nil
 }
 
+func parseRunOutputMode(raw string) (runOutputMode, error) {
+	switch runOutputMode(strings.TrimSpace(raw)) {
+	case runOutputModeFinalText:
+		return runOutputModeFinalText, nil
+	case runOutputModeJSON:
+		return runOutputModeJSON, nil
+	default:
+		return "", fmt.Errorf("invalid --output-mode value %q", raw)
+	}
+}
+
+func parseRunProgressMode(raw string) (runProgressMode, error) {
+	switch runProgressMode(strings.TrimSpace(raw)) {
+	case runProgressModeQuiet:
+		return runProgressModeQuiet, nil
+	case runProgressModeStderr:
+		return runProgressModeStderr, nil
+	default:
+		return "", fmt.Errorf("invalid --progress-mode value %q", raw)
+	}
+}
+
 func runErrorCode(err error) string {
 	if err == nil {
 		return ""
@@ -228,4 +268,42 @@ func emitRunJSON(v runJSONResult) {
 	if err := enc.Encode(v); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to encode JSON output: %v\n", err)
 	}
+}
+
+func emitRunUsageError(mode runOutputMode, message string) {
+	if mode == runOutputModeJSON {
+		emitRunJSON(runJSONResult{
+			Status: "error",
+			Error:  &runJSONError{Code: "usage", Message: message},
+		})
+		return
+	}
+	_, _ = fmt.Fprintln(os.Stderr, message)
+}
+
+func inferRunOutputMode(args []string) runOutputMode {
+	for i := 0; i < len(args); i++ {
+		arg := strings.TrimSpace(args[i])
+		switch {
+		case arg == "--output-mode" || arg == "-output-mode":
+			if i+1 >= len(args) {
+				return runOutputModeFinalText
+			}
+			if mode, err := parseRunOutputMode(args[i+1]); err == nil {
+				return mode
+			}
+			return runOutputModeFinalText
+		case strings.HasPrefix(arg, "--output-mode="):
+			if mode, err := parseRunOutputMode(strings.TrimPrefix(arg, "--output-mode=")); err == nil {
+				return mode
+			}
+			return runOutputModeFinalText
+		case strings.HasPrefix(arg, "-output-mode="):
+			if mode, err := parseRunOutputMode(strings.TrimPrefix(arg, "-output-mode=")); err == nil {
+				return mode
+			}
+			return runOutputModeFinalText
+		}
+	}
+	return runOutputModeFinalText
 }

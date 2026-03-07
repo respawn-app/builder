@@ -45,6 +45,11 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
+	if m.psVisible {
+		next, cmd := c.handleProcessListKey(msg)
+		next.(*uiModel).syncViewport()
+		return next, cmd
+	}
 	if keyString == "tab" || keyString == "ctrl+enter" || msg.Type == keyTypeCtrlEnterCSI {
 		text := strings.TrimSpace(m.input)
 		if text == "" {
@@ -153,7 +158,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.busy {
 				if !command.RunWhileBusy {
 					m.clearInput()
-					return m, c.showTransientStatus(fmt.Sprintf("cannot run /%s while model is working", command.Name))
+					return m, c.showErrorStatus(fmt.Sprintf("cannot run /%s while model is working", command.Name))
 				}
 				if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
 					m.clearInput()

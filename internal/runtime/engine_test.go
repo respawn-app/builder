@@ -15,6 +15,7 @@ import (
 	"builder/internal/llm"
 	"builder/internal/session"
 	"builder/internal/tools"
+	shelltool "builder/internal/tools/shell"
 	"builder/prompts"
 )
 
@@ -2387,7 +2388,7 @@ func TestAppendMissingReviewerMetaContextPrependsAgentsAndEnvironmentWhenMissing
 	}
 
 	in := []llm.Message{{Role: llm.RoleUser, Content: "request"}}
-	got := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high")
+	got := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false)
 	if len(got) != 4 {
 		t.Fatalf("expected 2 prepended agents + 1 environment message plus original, got %d", len(got))
 	}
@@ -2425,7 +2426,7 @@ func TestAppendMissingReviewerMetaContextKeepsExistingMetaMessages(t *testing.T)
 		existingEnv,
 		{Role: llm.RoleUser, Content: "request"},
 	}
-	got := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high")
+	got := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false)
 	if len(got) != len(in) {
 		t.Fatalf("expected no extra messages when AGENTS+environment already present, got %d", len(got))
 	}
@@ -2460,7 +2461,7 @@ func TestAppendMissingReviewerMetaContextBackfillsSkillsBetweenAgentsAndEnvironm
 		{Role: llm.RoleUser, Content: "request"},
 	}
 
-	got := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high")
+	got := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false)
 	if len(got) != len(in)+1 {
 		t.Fatalf("expected one skills message to be inserted, got len=%d", len(got))
 	}
@@ -2495,7 +2496,7 @@ func TestAppendMissingReviewerMetaContextBackfillsSkillsBeforeEnvironmentWhenNoA
 		{Role: llm.RoleUser, Content: "request"},
 	}
 
-	got := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high")
+	got := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false)
 	if len(got) != len(in)+1 {
 		t.Fatalf("expected one skills message to be inserted, got len=%d", len(got))
 	}
@@ -2507,6 +2508,87 @@ func TestAppendMissingReviewerMetaContextBackfillsSkillsBeforeEnvironmentWhenNoA
 	}
 	if got[2].Role != llm.RoleUser || got[2].Content != "request" {
 		t.Fatalf("expected transcript content to stay at tail, got %+v", got[2])
+	}
+}
+
+func TestFastExecCommandCompletionDoesNotQueueBackgroundNotice(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	manager, err := shelltool.NewManager()
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer func() {
+		_ = manager.Close()
+	}()
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "running fast command",
+			},
+			ToolCalls: []llm.ToolCall{{
+				ID:    "call_exec_1",
+				Name:  string(tools.ToolExecCommand),
+				Input: json.RawMessage(`{"cmd":"echo hi","shell":"/bin/sh","login":false,"yield_time_ms":1000}`),
+			}},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "unexpected extra turn"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	registry := tools.NewRegistry(shelltool.NewExecCommandTool(dir, 16_000, manager))
+	eng, err := New(store, client, registry, Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	manager.SetEventHandler(func(evt shelltool.Event) {
+		eng.HandleBackgroundShellEvent(BackgroundShellEvent{
+			Type:    string(evt.Type),
+			ID:      evt.Snapshot.ID,
+			State:   evt.Snapshot.State,
+			Command: evt.Snapshot.Command,
+			Workdir: evt.Snapshot.Workdir,
+			LogPath: evt.Snapshot.LogPath,
+			Preview: evt.Preview,
+			Removed: evt.Removed,
+			ExitCode: func() *int {
+				if evt.Snapshot.ExitCode == nil {
+					return nil
+				}
+				out := *evt.Snapshot.ExitCode
+				return &out
+			}(),
+		})
+	})
+
+	assistant, err := eng.SubmitUserMessage(context.Background(), "run fast command")
+	if err != nil {
+		t.Fatalf("submit user message: %v", err)
+	}
+	if assistant.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", assistant.Content)
+	}
+	time.Sleep(300 * time.Millisecond)
+	client.mu.Lock()
+	callCount := len(client.calls)
+	client.mu.Unlock()
+	if callCount != 2 {
+		t.Fatalf("model call count = %d, want 2", callCount)
+	}
+	for _, msg := range eng.snapshotMessages() {
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeBackgroundNotice {
+			t.Fatalf("did not expect background notice for foreground exec_command completion: %+v", msg)
+		}
 	}
 }
 

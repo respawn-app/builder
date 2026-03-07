@@ -16,7 +16,7 @@ type CatalogEntry struct {
 var catalogEntries = []CatalogEntry{
 	{
 		ID:             ToolShell,
-		Aliases:        []string{"bash", "bash_command", "shell_command", "exec_command"},
+		Aliases:        []string{"bash", "bash_command", "shell_command"},
 		Description:    "Execute a shell command in the user's environment and device.",
 		DefaultEnabled: true,
 		Schema: json.RawMessage(`{
@@ -38,6 +38,76 @@ var catalogEntries = []CatalogEntry{
     "workdir": {
       "type": "string",
       "description": "Optional working directory, otherwise - cwd."
+    }
+  }
+}`),
+	},
+	{
+		ID:             ToolExecCommand,
+		Aliases:        nil,
+		Description:    "Runs a command in the user's default shell, returning output or a session ID for ongoing interaction.",
+		DefaultEnabled: true,
+		Schema: json.RawMessage(`{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["cmd"],
+  "properties": {
+    "cmd": {
+      "type": "string",
+      "description": "Shell command to execute."
+    },
+    "workdir": {
+      "type": "string",
+      "description": "Optional working directory to run the command in; defaults to the workspace root."
+    },
+    "shell": {
+      "type": "string",
+      "description": "Shell binary to launch. Defaults to the user's default shell."
+    },
+    "login": {
+      "type": "boolean",
+      "description": "Whether to run the shell with login semantics. Defaults to true."
+    },
+    "tty": {
+      "type": "boolean",
+      "description": "Whether to keep stdin open for follow-up write_stdin calls. Defaults to false."
+    },
+    "yield_time_ms": {
+      "type": "integer",
+      "description": "How long to wait in milliseconds for output before yielding control and backgrounding the process."
+    },
+    "max_output_tokens": {
+      "type": "integer",
+      "description": "Maximum amount of output to return to the model. Excess output will be truncated, and the full clean log remains available on disk."
+    }
+  }
+}`),
+	},
+	{
+		ID:             ToolWriteStdin,
+		Aliases:        nil,
+		Description:    "Writes characters to an existing exec_command session and returns recent output. Use empty chars to poll.",
+		DefaultEnabled: true,
+		Schema: json.RawMessage(`{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["session_id"],
+  "properties": {
+    "session_id": {
+      "type": "integer",
+      "description": "Identifier of the running exec_command session."
+    },
+    "chars": {
+      "type": "string",
+      "description": "Bytes to write to stdin. May be empty to poll for output."
+    },
+    "yield_time_ms": {
+      "type": "integer",
+      "description": "How long to wait in milliseconds for output before yielding."
+    },
+    "max_output_tokens": {
+      "type": "integer",
+      "description": "Maximum amount of output to return to the model. Excess output will be truncated."
     }
   }
 }`),

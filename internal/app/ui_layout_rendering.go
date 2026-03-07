@@ -20,20 +20,19 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 	} else if m.compacting {
 		spin = renderCompactionStatus()
 	}
-	transientStyle := lipgloss.NewStyle().Foreground(statusContextZoneColor(100)).Bold(true)
 	segments := []string{
 		spin,
 		style.meta.Render(string(m.view.Mode())),
 		style.meta.Render(l.statusModelLabel()),
 	}
+	if label := processCountLabel(m.backgroundManager); label != "" {
+		segments = append(segments, style.meta.Render(label))
+	}
 	if cacheSection := l.renderCacheHitSection(style); cacheSection != "" {
 		segments = append(segments, cacheSection)
 	}
-	if text := strings.TrimSpace(m.transientStatus); text != "" {
-		segments = append(segments, transientStyle.Render(text))
-	}
 	left := strings.Join(segments, style.meta.Render(" | "))
-	right := l.renderContextUsage(style)
+	right := l.renderStatusLineRight(width, left, style)
 	if right == "" {
 		return padANSIRight(left, width)
 	}
@@ -42,6 +41,49 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 		gap = 1
 	}
 	return padANSIRight(left+strings.Repeat(" ", gap)+right, width)
+}
+
+func (l uiViewLayout) renderStatusLineRight(width int, left string, style uiStyles) string {
+	context := l.renderContextUsage(style)
+	notice := l.renderStatusNotice(width, left, context, style)
+	segments := make([]string, 0, 2)
+	if notice != "" {
+		segments = append(segments, notice)
+	}
+	if context != "" {
+		segments = append(segments, context)
+	}
+	return strings.Join(segments, style.meta.Render(" | "))
+}
+
+func (l uiViewLayout) renderStatusNotice(width int, left string, context string, style uiStyles) string {
+	m := l.model
+	text := strings.TrimSpace(m.transientStatus)
+	if text == "" {
+		return ""
+	}
+	separatorWidth := 0
+	if context != "" {
+		separatorWidth = lipgloss.Width(style.meta.Render(" | "))
+	}
+	available := width - lipgloss.Width(left) - lipgloss.Width(context) - separatorWidth - 1
+	if available <= 0 {
+		return ""
+	}
+	text = truncateQueuedMessageLine(text, available)
+	return statusNoticeStyle(m.theme, m.transientStatusKind).Render(text)
+}
+
+func statusNoticeStyle(theme string, kind uiStatusNoticeKind) lipgloss.Style {
+	palette := uiPalette(theme)
+	color := palette.primary
+	switch kind {
+	case uiStatusNoticeSuccess:
+		color = palette.secondary
+	case uiStatusNoticeError:
+		color = statusContextZoneColor(100)
+	}
+	return lipgloss.NewStyle().Foreground(color).Bold(true)
 }
 
 func (l uiViewLayout) statusModelLabel() string {
@@ -205,6 +247,9 @@ func renderReviewerStatus() string {
 }
 
 func (l uiViewLayout) renderChatPanel(width, height int, style uiStyles) []string {
+	if l.model.psVisible {
+		return l.renderProcessList(width, height, style)
+	}
 	if width < 1 {
 		return []string{padRight("", width)}
 	}
@@ -249,6 +294,9 @@ func (l uiViewLayout) renderChatContentLines(rawLines []string, width int, style
 
 func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
 	m := l.model
+	if m.psVisible {
+		return []string{padRight("", width)}
+	}
 	if m.rollbackMode {
 		return nil
 	}

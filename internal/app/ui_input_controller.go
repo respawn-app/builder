@@ -292,6 +292,18 @@ func (c uiInputController) applyCommandResult(commandResult commands.Result) (te
 		return m, c.showTransientStatus(status)
 	case commands.ActionCompact:
 		return m, c.startCompaction(commandResult.Args)
+	case commands.ActionProcesses:
+		args := strings.Fields(strings.TrimSpace(commandResult.Args))
+		if len(args) == 0 {
+			m.openProcessList()
+			return m, nil
+		}
+		action := strings.ToLower(strings.TrimSpace(args[0]))
+		id := ""
+		if len(args) > 1 {
+			id = strings.TrimSpace(args[1])
+		}
+		return c.runProcessAction(action, id)
 	}
 	return m, nil
 }

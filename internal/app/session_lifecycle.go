@@ -54,9 +54,9 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 			_ = logger.Close()
 			return err
 		}
-
 		commandRegistry, err := commands.NewDefaultRegistryWithFilePrompts(boot.cfg.WorkspaceRoot, boot.cfg.Source.SettingsPath)
 		if err != nil {
+			_ = wiring.Close()
 			_ = logger.Close()
 			return err
 		}
@@ -70,6 +70,7 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 			store.Meta().Name,
 			store.Meta().Locked != nil,
 		)
+		_ = wiring.Close()
 		nextSessionInitialPrompt = ""
 		_ = logger.Close()
 		if runErr != nil {

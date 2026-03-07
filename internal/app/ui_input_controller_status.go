@@ -2,7 +2,6 @@ package app
 
 import (
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -66,11 +65,13 @@ func autoCompactionToggleStatusMessage(enabled bool, changed bool, compactionMod
 }
 
 func (c uiInputController) showTransientStatus(message string) tea.Cmd {
-	m := c.model
-	m.transientStatusToken++
-	token := m.transientStatusToken
-	m.transientStatus = strings.TrimSpace(message)
-	return tea.Tick(transientStatusDuration, func(time.Time) tea.Msg {
-		return clearTransientStatusMsg{token: token}
-	})
+	return c.model.setTransientStatus(message)
+}
+
+func (c uiInputController) showSuccessStatus(message string) tea.Cmd {
+	return c.model.setTransientStatusWithKind(message, uiStatusNoticeSuccess)
+}
+
+func (c uiInputController) showErrorStatus(message string) tea.Cmd {
+	return c.model.setTransientStatusWithKind(message, uiStatusNoticeError)
 }

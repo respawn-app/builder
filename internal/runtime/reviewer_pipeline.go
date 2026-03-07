@@ -132,7 +132,7 @@ func (r *defaultReviewerPipeline) RunSuggestions(ctx context.Context, reviewerCl
 	})
 
 	messages := sanitizeMessagesForLLM(e.snapshotMessages())
-	reviewerMessages := buildReviewerRequestMessages(messages, e.store.Meta().WorkspaceRoot, e.cfg.Model, e.ThinkingLevel())
+	reviewerMessages := buildReviewerRequestMessages(messages, e.store.Meta().WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), e.cfg.HeadlessMode)
 	req := llm.Request{
 		Model:           reviewerCfg.Model,
 		Temperature:     1,
