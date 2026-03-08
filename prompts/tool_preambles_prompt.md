@@ -1,4 +1,4 @@
-## Intermediary updates
+# Intermediary updates
 
 - Intermediary updates go to the `commentary` channel. Do not send intermediary updates without a phase/channel marker or in the `final` channel.
 - User updates are short notes while you are working, they are NOT final answers.
