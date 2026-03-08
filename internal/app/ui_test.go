@@ -2530,6 +2530,28 @@ func TestStatusLineShowsContextUsageWhenAvailable(t *testing.T) {
 	}
 }
 
+func TestStatusLineShowsActivityAfterCacheSection(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.activityStatus = "Checking out repository"
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !containsInOrder(line, "cache --", "Checking out repository") {
+		t.Fatalf("expected activity status after cache section, got %q", line)
+	}
+	if !strings.Contains(line, "0%") {
+		t.Fatalf("expected context usage to remain visible with activity status, got %q", line)
+	}
+}
+
 func TestStatusLineShowsThinkingLevelForReasoningModels(t *testing.T) {
 	m := NewUIModel(
 		nil,

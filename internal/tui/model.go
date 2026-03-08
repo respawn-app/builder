@@ -31,6 +31,12 @@ type TranscriptEntry struct {
 	ToolCall   *transcript.ToolCallMeta
 }
 
+type StreamingReasoningEntry struct {
+	Key  string
+	Role string
+	Text string
+}
+
 type ToggleModeMsg struct{}
 
 type ScrollOngoingMsg struct {
@@ -81,6 +87,14 @@ type StreamAssistantMsg struct {
 
 type ClearOngoingAssistantMsg struct{}
 
+type UpsertStreamingReasoningMsg struct {
+	Key  string
+	Role string
+	Text string
+}
+
+type ClearStreamingReasoningMsg struct{}
+
 type CommitAssistantMsg struct{}
 
 type SetOngoingErrorMsg struct {
@@ -114,8 +128,9 @@ type Model struct {
 	detailScroll                int
 	snapOngoingOnViewportResize bool
 
-	transcript []TranscriptEntry
-	ongoing    string
+	transcript         []TranscriptEntry
+	ongoing            string
+	streamingReasoning []StreamingReasoningEntry
 
 	selectedTranscriptEntry  int
 	selectedTranscriptActive bool
@@ -300,6 +315,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ongoingScroll = 0
 		ongoingChanged = true
 		detailChanged = true
+	case UpsertStreamingReasoningMsg:
+		key := strings.TrimSpace(msg.Key)
+		role := strings.TrimSpace(msg.Role)
+		text := strings.TrimSpace(msg.Text)
+		if role == "" {
+			role = "reasoning"
+		}
+		if key != "" && text != "" {
+			updated := false
+			for i := range m.streamingReasoning {
+				if m.streamingReasoning[i].Key != key {
+					continue
+				}
+				m.streamingReasoning[i].Role = role
+				m.streamingReasoning[i].Text = text
+				updated = true
+				break
+			}
+			if !updated {
+				m.streamingReasoning = append(m.streamingReasoning, StreamingReasoningEntry{Key: key, Role: role, Text: text})
+			}
+			detailChanged = true
+			if m.mode == ModeDetail {
+				forceDetailRefresh = true
+			}
+		}
+	case ClearStreamingReasoningMsg:
+		if len(m.streamingReasoning) > 0 {
+			m.streamingReasoning = nil
+			detailChanged = true
+			if m.mode == ModeDetail {
+				forceDetailRefresh = true
+			}
+		}
 	case CommitAssistantMsg:
 		if m.ongoing != "" {
 			m.transcript = append(m.transcript, TranscriptEntry{

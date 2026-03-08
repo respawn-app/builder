@@ -37,8 +37,14 @@ func TestGenerateStream_EmitsAssistantDeltasAndToolCalls(t *testing.T) {
 	transport.Client = server.Client()
 
 	var deltas []string
-	resp, err := transport.GenerateStream(context.Background(), OpenAIRequest{Model: "gpt-5"}, func(text string) {
-		deltas = append(deltas, text)
+	var reasoning []ReasoningSummaryDelta
+	resp, err := transport.GenerateStreamWithEvents(context.Background(), OpenAIRequest{Model: "gpt-5"}, StreamCallbacks{
+		OnAssistantDelta: func(text string) {
+			deltas = append(deltas, text)
+		},
+		OnReasoningSummaryDelta: func(delta ReasoningSummaryDelta) {
+			reasoning = append(reasoning, delta)
+		},
 	})
 	if err != nil {
 		t.Fatalf("GenerateStream failed: %v", err)
@@ -73,5 +79,8 @@ func TestGenerateStream_EmitsAssistantDeltasAndToolCalls(t *testing.T) {
 	}
 	if len(resp.ReasoningItems) != 1 || resp.ReasoningItems[0].ID != "rs_1" || resp.ReasoningItems[0].EncryptedContent != "enc_1" {
 		t.Fatalf("unexpected reasoning items: %+v", resp.ReasoningItems)
+	}
+	if len(reasoning) != 1 || reasoning[0].Key == "" || reasoning[0].Role != "reasoning" || reasoning[0].Text != "Plan" {
+		t.Fatalf("unexpected reasoning delta callbacks: %+v", reasoning)
 	}
 }

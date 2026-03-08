@@ -89,6 +89,7 @@ type Config struct {
 	AutoCompactionEnabled         *bool
 	Reviewer                      ReviewerConfig
 	HeadlessMode                  bool
+	ToolPreambles                 bool
 	OnEvent                       func(Event)
 }
 
@@ -293,6 +294,7 @@ func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (assistant 
 	e.emit(Event{Kind: EventRunStateChanged, RunState: &RunState{Busy: true}})
 	stepID := ""
 	defer func() {
+		e.chat.clearActivity()
 		e.mu.Lock()
 		e.busy = false
 		e.cancelCurrent = nil
@@ -319,6 +321,9 @@ func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (assistant 
 	stepID = uuid.NewString()
 
 	if err = e.injectAgentsIfNeeded(stepID); err != nil {
+		return llm.Message{}, err
+	}
+	if err = e.injectHeadlessModeTransitionPromptIfNeeded(stepID); err != nil {
 		return llm.Message{}, err
 	}
 	if err = e.appendUserMessage(stepID, text); err != nil {
@@ -350,6 +355,7 @@ func (e *Engine) SubmitUserShellCommand(ctx context.Context, command string) (re
 	e.emit(Event{Kind: EventRunStateChanged, RunState: &RunState{Busy: true}})
 	stepID := ""
 	defer func() {
+		e.chat.clearActivity()
 		e.mu.Lock()
 		e.busy = false
 		e.cancelCurrent = nil
@@ -469,6 +475,10 @@ func (e *Engine) ensureLocked() (session.LockedContract, error) {
 		Temperature:    e.cfg.Temperature,
 		MaxOutputToken: e.cfg.MaxTokens,
 		EnabledTools:   toToolNames(e.cfg.EnabledTools),
+		ToolPreambles: func() *bool {
+			enabled := !e.cfg.HeadlessMode && e.cfg.ToolPreambles
+			return &enabled
+		}(),
 	}
 	if err := e.store.MarkModelDispatchLocked(lock); err != nil {
 		return session.LockedContract{}, err
@@ -477,20 +487,22 @@ func (e *Engine) ensureLocked() (session.LockedContract, error) {
 	return lock, nil
 }
 
-func (e *Engine) generateWithRetry(ctx context.Context, req llm.Request, onDelta func(string), onAttemptReset func()) (llm.Response, error) {
-	return e.generateWithRetryClient(ctx, e.llm, req, onDelta, onAttemptReset)
+func (e *Engine) generateWithRetry(ctx context.Context, req llm.Request, onDelta func(string), onReasoningDelta func(llm.ReasoningSummaryDelta), onAttemptReset func()) (llm.Response, error) {
+	return e.generateWithRetryClient(ctx, e.llm, req, onDelta, onReasoningDelta, onAttemptReset)
 }
 
-func (e *Engine) generateWithRetryClient(ctx context.Context, client llm.Client, req llm.Request, onDelta func(string), onAttemptReset func()) (llm.Response, error) {
+func (e *Engine) generateWithRetryClient(ctx context.Context, client llm.Client, req llm.Request, onDelta func(string), onReasoningDelta func(llm.ReasoningSummaryDelta), onAttemptReset func()) (llm.Response, error) {
 	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second}
 	var lastErr error
 	for i := 0; i <= len(delays); i++ {
 		var (
-			resp           llm.Response
-			err            error
-			attemptEmitted bool
-			attemptOnDelta func(string)
-			attemptDone    atomic.Bool
+			resp                    llm.Response
+			err                     error
+			attemptEmitted          bool
+			reasoningEmitted        bool
+			attemptOnDelta          func(string)
+			attemptOnReasoningDelta func(llm.ReasoningSummaryDelta)
+			attemptDone             atomic.Bool
 		)
 		if onDelta != nil {
 			attemptOnDelta = func(delta string) {
@@ -504,7 +516,24 @@ func (e *Engine) generateWithRetryClient(ctx context.Context, client llm.Client,
 				onDelta(delta)
 			}
 		}
-		if streamingClient, ok := client.(llm.StreamClient); ok {
+		if onReasoningDelta != nil {
+			attemptOnReasoningDelta = func(delta llm.ReasoningSummaryDelta) {
+				if attemptDone.Load() {
+					return
+				}
+				if strings.TrimSpace(delta.Text) == "" {
+					return
+				}
+				reasoningEmitted = true
+				onReasoningDelta(delta)
+			}
+		}
+		if streamingClient, ok := client.(llm.StreamEventsClient); ok {
+			resp, err = streamingClient.GenerateStreamWithEvents(ctx, req, llm.StreamCallbacks{
+				OnAssistantDelta:        attemptOnDelta,
+				OnReasoningSummaryDelta: attemptOnReasoningDelta,
+			})
+		} else if streamingClient, ok := client.(llm.StreamClient); ok {
 			resp, err = streamingClient.GenerateStream(ctx, req, attemptOnDelta)
 		} else {
 			resp, err = client.Generate(ctx, req)
@@ -519,7 +548,7 @@ func (e *Engine) generateWithRetryClient(ctx context.Context, client llm.Client,
 		if llm.IsNonRetriableModelError(err) {
 			return llm.Response{}, err
 		}
-		if attemptEmitted && onAttemptReset != nil {
+		if (attemptEmitted || reasoningEmitted) && onAttemptReset != nil {
 			onAttemptReset()
 		}
 		lastErr = err

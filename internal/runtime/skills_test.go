@@ -129,6 +129,26 @@ func TestSplitReviewerMetaMessagesTreatsHeadlessContextAsMeta(t *testing.T) {
 	}
 }
 
+func TestSplitReviewerMetaMessagesTreatsHeadlessExitContextAsMeta(t *testing.T) {
+	headlessExit := llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessModeExit, Content: "interactive mode instructions"}
+	messages := []llm.Message{
+		headlessExit,
+		headlessExit,
+		{Role: llm.RoleUser, Content: "request"},
+	}
+
+	meta, transcript := splitReviewerMetaMessages(messages)
+	if len(meta) != 1 {
+		t.Fatalf("expected one headless exit meta message, got %d", len(meta))
+	}
+	if meta[0].MessageType != llm.MessageTypeHeadlessModeExit {
+		t.Fatalf("expected headless exit meta message, got %+v", meta[0])
+	}
+	if len(transcript) != 1 || transcript[0].Role != llm.RoleUser || transcript[0].Content != "request" {
+		t.Fatalf("expected transcript to contain only user request, got %+v", transcript)
+	}
+}
+
 func TestBuildReviewerTranscriptMessagesSkipsSkillsContextEntries(t *testing.T) {
 	messages := []llm.Message{
 		{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeSkills, Content: "## Skills\n### Available skills\n- demo: desc"},

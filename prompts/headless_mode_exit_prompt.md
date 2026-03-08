@@ -1,0 +1,1 @@
+The user returned from the headless (background) mode and is now working with you interactively. The previous headless mode instructions no longer apply, and your tool functionality has been restored.

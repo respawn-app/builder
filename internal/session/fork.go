@@ -60,6 +60,7 @@ func ForkAtUserMessage(parent *Store, userMessageIndex int, forkName string) (*S
 	child.meta.AgentsInjected = parentMeta.AgentsInjected
 	child.meta.ParentSessionID = parentMeta.SessionID
 	child.meta.Name = strings.TrimSpace(forkName)
+	child.meta.Continuation = cloneContinuationContext(parentMeta.Continuation)
 	child.mu.Unlock()
 
 	if _, err := child.AppendReplayEvents(replay); err != nil {
@@ -91,4 +92,12 @@ func cloneLockedContract(in *LockedContract) *LockedContract {
 		copyLocked.EnabledTools = append([]string(nil), in.EnabledTools...)
 	}
 	return &copyLocked
+}
+
+func cloneContinuationContext(in *ContinuationContext) *ContinuationContext {
+	if in == nil {
+		return nil
+	}
+	copyContext := *in
+	return &copyContext
 }

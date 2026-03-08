@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"builder/internal/llm"
+	"builder/internal/session"
 	"builder/internal/tools"
 	"builder/prompts"
 	xansi "github.com/charmbracelet/x/ansi"
@@ -31,7 +32,7 @@ func (e *Engine) buildRequest(ctx context.Context, _ string, allowTools bool) (l
 	items := e.snapshotItems()
 	items = sanitizeItemsForLLM(items)
 
-	req, err := llm.RequestFromLockedContractWithItems(locked, prompts.SystemPrompt, msgs, items, requestTools)
+	req, err := llm.RequestFromLockedContractWithItems(locked, e.systemPrompt(locked), msgs, items, requestTools)
 	if err != nil {
 		return llm.Request{}, err
 	}
@@ -72,6 +73,14 @@ func hasEnabledTool(ids []tools.ID, toolID tools.ID) bool {
 		}
 	}
 	return false
+}
+
+func (e *Engine) systemPrompt(locked session.LockedContract) string {
+	includeToolPreambles := true
+	if locked.ToolPreambles != nil {
+		includeToolPreambles = *locked.ToolPreambles
+	}
+	return prompts.MainSystemPrompt(includeToolPreambles)
 }
 
 func summarizeOutputItemTypes(items []llm.ResponseItem) []string {

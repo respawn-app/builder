@@ -29,7 +29,7 @@ func runPrompt(ctx context.Context, boot appBootstrap, initialSessionID, prompt 
 		return RunPromptResult{}, errors.New("prompt is required")
 	}
 
-	store, err := openOrCreateSessionNonInteractive(boot.containerDir, initialSessionID, boot.cfg.WorkspaceRoot)
+	store, err := openOrCreateSessionNonInteractive(boot.cfg.PersistenceRoot, boot.containerDir, initialSessionID, boot.cfg.WorkspaceRoot)
 	if err != nil {
 		return RunPromptResult{}, err
 	}
@@ -38,6 +38,9 @@ func runPrompt(ctx context.Context, boot appBootstrap, initialSessionID, prompt 
 	}
 
 	active := effectiveSettings(boot.cfg.Settings, store.Meta().Locked)
+	if err := store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: active.OpenAIBaseURL}); err != nil {
+		return RunPromptResult{}, err
+	}
 	enabledTools := activeToolIDs(active, store.Meta().Locked)
 
 	logger, err := newRunLogger(store.Dir())
@@ -95,9 +98,9 @@ func runPrompt(ctx context.Context, boot appBootstrap, initialSessionID, prompt 
 	return result, nil
 }
 
-func openOrCreateSessionNonInteractive(containerDir, selectedID, workspaceRoot string) (*session.Store, error) {
+func openOrCreateSessionNonInteractive(persistenceRoot, containerDir, selectedID, workspaceRoot string) (*session.Store, error) {
 	if strings.TrimSpace(selectedID) != "" {
-		return session.Open(filepath.Join(containerDir, selectedID))
+		return session.OpenByID(persistenceRoot, selectedID)
 	}
 	containerName := filepath.Base(containerDir)
 	return session.NewLazy(containerDir, containerName, workspaceRoot)
@@ -119,7 +122,7 @@ func ensureSubagentSessionName(store *session.Store) error {
 }
 
 func runPromptAskHandler(req askquestion.Request) (string, error) {
-	return "", fmt.Errorf("ask_question is not supported in run mode: %s", strings.TrimSpace(req.Question))
+	return "", errors.New("You can't ask questions in headless/background mode. If the question is critical and materially affects the task, ask it by ending your turn after trying to do as much work as possible beforehand. Otherwise, follow best practice and mention the ambiguity in your final answer.")
 }
 
 func writeRunProgressEvent(w io.Writer, evt runtime.Event) {

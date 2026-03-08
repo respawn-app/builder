@@ -53,6 +53,7 @@ const (
 	MessageTypeReviewerFeedback MessageType = "reviewer_feedback"
 	MessageTypeBackgroundNotice MessageType = "background_notice"
 	MessageTypeHeadlessMode     MessageType = "headless_mode"
+	MessageTypeHeadlessModeExit MessageType = "headless_mode_exit"
 )
 
 type Message struct {
@@ -478,6 +479,21 @@ type Client interface {
 
 type StreamClient interface {
 	GenerateStream(ctx context.Context, request Request, onDelta func(text string)) (Response, error)
+}
+
+type ReasoningSummaryDelta struct {
+	Key  string
+	Role string
+	Text string
+}
+
+type StreamCallbacks struct {
+	OnAssistantDelta        func(text string)
+	OnReasoningSummaryDelta func(delta ReasoningSummaryDelta)
+}
+
+type StreamEventsClient interface {
+	GenerateStreamWithEvents(ctx context.Context, request Request, callbacks StreamCallbacks) (Response, error)
 }
 
 type RequestInputTokenCountClient interface {

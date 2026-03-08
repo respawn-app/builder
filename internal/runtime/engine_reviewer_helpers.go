@@ -84,6 +84,7 @@ func splitReviewerMetaMessages(messages []llm.Message) ([]llm.Message, []llm.Mes
 	transcript := make([]llm.Message, 0, len(messages))
 	seenEnvironment := false
 	seenHeadless := false
+	seenHeadlessExit := false
 	seenAgentContent := map[string]bool{}
 	seenSkillsContent := map[string]bool{}
 	for _, message := range messages {
@@ -119,6 +120,14 @@ func splitReviewerMetaMessages(messages []llm.Message) ([]llm.Message, []llm.Mes
 			}
 			seenHeadless = true
 			meta = append(meta, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessMode, Content: message.Content})
+			continue
+		}
+		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeHeadlessModeExit {
+			if seenHeadlessExit {
+				continue
+			}
+			seenHeadlessExit = true
+			meta = append(meta, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessModeExit, Content: message.Content})
 			continue
 		}
 		transcript = append(transcript, message)
@@ -195,7 +204,7 @@ func shouldIncludeReviewerMessage(message llm.Message) bool {
 		if content == "" {
 			return false
 		}
-		if message.MessageType == llm.MessageTypeEnvironment || message.MessageType == llm.MessageTypeSkills || message.MessageType == llm.MessageTypeHeadlessMode {
+		if message.MessageType == llm.MessageTypeEnvironment || message.MessageType == llm.MessageTypeSkills || message.MessageType == llm.MessageTypeHeadlessMode || message.MessageType == llm.MessageTypeHeadlessModeExit {
 			return false
 		}
 		if message.MessageType == llm.MessageTypeErrorFeedback || message.MessageType == llm.MessageTypeInterruption {
@@ -585,7 +594,7 @@ func firstMetaBoundaryIndex(messages []llm.Message) int {
 		if msg.Role != llm.RoleDeveloper {
 			return idx
 		}
-		if msg.MessageType != llm.MessageTypeAgentsMD && msg.MessageType != llm.MessageTypeSkills && msg.MessageType != llm.MessageTypeEnvironment && msg.MessageType != llm.MessageTypeHeadlessMode {
+		if msg.MessageType != llm.MessageTypeAgentsMD && msg.MessageType != llm.MessageTypeSkills && msg.MessageType != llm.MessageTypeEnvironment && msg.MessageType != llm.MessageTypeHeadlessMode && msg.MessageType != llm.MessageTypeHeadlessModeExit {
 			return idx
 		}
 	}

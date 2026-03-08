@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"builder/internal/llm"
-	"builder/prompts"
 )
 
 type defaultMessageLifecycle struct {
@@ -53,6 +52,7 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 			}
 		}
 	}
+	e.chat.clearActivity()
 	return nil
 }
 
@@ -110,14 +110,6 @@ func (m *defaultMessageLifecycle) InjectAgentsIfNeeded(stepID string) error {
 	environment := environmentContextMessage(meta.WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), time.Now())
 	if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: environment}); err != nil {
 		return err
-	}
-	if e.cfg.HeadlessMode {
-		headlessPrompt := strings.TrimSpace(prompts.HeadlessModePrompt)
-		if headlessPrompt != "" {
-			if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessMode, Content: headlessPrompt}); err != nil {
-				return err
-			}
-		}
 	}
 
 	return e.store.MarkAgentsInjected()

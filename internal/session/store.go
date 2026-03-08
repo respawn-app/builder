@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	sessionFile = "session.json"
-	eventsFile  = "events.jsonl"
+	sessionFile     = "session.json"
+	eventsFile      = "events.jsonl"
+	sessionsDirName = "sessions"
 )
 
 type Store struct {
@@ -83,6 +84,56 @@ func Open(sessionDir string, options ...StoreOption) (*Store, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+func OpenByID(persistenceRoot, sessionID string, options ...StoreOption) (*Store, error) {
+	sessionDir, err := FindSessionDir(persistenceRoot, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return Open(sessionDir, options...)
+}
+
+func FindSessionDir(persistenceRoot, sessionID string) (string, error) {
+	root := strings.TrimSpace(persistenceRoot)
+	id := strings.TrimSpace(sessionID)
+	if root == "" {
+		return "", errors.New("persistence root is required")
+	}
+	if id == "" {
+		return "", errors.New("session id is required")
+	}
+
+	for _, searchRoot := range []string{filepath.Join(root, sessionsDirName), root} {
+		if direct := filepath.Join(searchRoot, id); hasSessionMeta(direct) {
+			return direct, nil
+		}
+		entries, err := os.ReadDir(searchRoot)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return "", fmt.Errorf("read session root: %w", err)
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			candidate := filepath.Join(searchRoot, entry.Name(), id)
+			if hasSessionMeta(candidate) {
+				return candidate, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("session %q not found", id)
+}
+
+func hasSessionMeta(sessionDir string) bool {
+	if strings.TrimSpace(sessionDir) == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(sessionDir, sessionFile))
+	return err == nil
 }
 
 func ListSessions(workspaceContainerDir string) ([]Summary, error) {
@@ -158,6 +209,18 @@ func (s *Store) SetParentSessionID(parentSessionID string) error {
 
 	s.meta.ParentSessionID = strings.TrimSpace(parentSessionID)
 	s.meta.UpdatedAt = time.Now().UTC()
+	return s.persistMetaLocked()
+}
+
+func (s *Store) SetContinuationContext(ctx ContinuationContext) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.meta.Continuation = normalizeContinuationContext(ctx)
+	s.meta.UpdatedAt = time.Now().UTC()
+	if !s.persisted {
+		return nil
+	}
 	return s.persistMetaLocked()
 }
 
@@ -364,4 +427,12 @@ func (s *Store) ensurePersistedLocked() error {
 	s.writesSinceCompaction = 0
 	s.persisted = true
 	return nil
+}
+
+func normalizeContinuationContext(ctx ContinuationContext) *ContinuationContext {
+	openAIBaseURL := strings.TrimSpace(ctx.OpenAIBaseURL)
+	if openAIBaseURL == "" {
+		return nil
+	}
+	return &ContinuationContext{OpenAIBaseURL: openAIBaseURL}
 }

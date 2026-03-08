@@ -152,7 +152,7 @@ func (r *defaultReviewerPipeline) RunSuggestions(ctx context.Context, reviewerCl
 	if err := req.Validate(); err != nil {
 		return reviewerSuggestionsResult{}, err
 	}
-	resp, err := e.generateWithRetryClient(ctx, reviewerClient, req, nil, nil)
+	resp, err := e.generateWithRetryClient(ctx, reviewerClient, req, nil, nil, nil)
 	if err != nil {
 		return reviewerSuggestionsResult{}, err
 	}

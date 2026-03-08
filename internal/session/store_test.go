@@ -251,6 +251,94 @@ func TestSetParentSessionIDPersists(t *testing.T) {
 	}
 }
 
+func TestSetContinuationContextStaysLazyUntilFirstWrite(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewLazy(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("new lazy store: %v", err)
+	}
+	if err := store.SetContinuationContext(ContinuationContext{OpenAIBaseURL: "http://example.local/v1"}); err != nil {
+		t.Fatalf("set continuation context: %v", err)
+	}
+	if store.Meta().Continuation == nil || store.Meta().Continuation.OpenAIBaseURL != "http://example.local/v1" {
+		t.Fatalf("expected in-memory continuation context, got %+v", store.Meta().Continuation)
+	}
+	if _, err := os.Stat(store.Dir()); !os.IsNotExist(err) {
+		t.Fatalf("expected lazy session to remain unpersisted, stat err=%v", err)
+	}
+	if _, err := store.AppendEvent("step1", "message", map[string]any{"a": 1}); err != nil {
+		t.Fatalf("append event: %v", err)
+	}
+	opened, err := Open(store.Dir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if opened.Meta().Continuation == nil || opened.Meta().Continuation.OpenAIBaseURL != "http://example.local/v1" {
+		t.Fatalf("expected persisted continuation context, got %+v", opened.Meta().Continuation)
+	}
+}
+
+func TestOpenByIDFindsSessionAcrossContainers(t *testing.T) {
+	root := t.TempDir()
+	containerA := filepath.Join(root, sessionsDirName, "workspace-a")
+	containerB := filepath.Join(root, sessionsDirName, "workspace-b")
+	if err := os.MkdirAll(containerA, 0o755); err != nil {
+		t.Fatalf("mkdir container a: %v", err)
+	}
+	if err := os.MkdirAll(containerB, 0o755); err != nil {
+		t.Fatalf("mkdir container b: %v", err)
+	}
+	_, err := Create(containerA, "workspace-a", "/tmp/work-a")
+	if err != nil {
+		t.Fatalf("create session a: %v", err)
+	}
+	target, err := Create(containerB, "workspace-b", "/tmp/work-b")
+	if err != nil {
+		t.Fatalf("create session b: %v", err)
+	}
+	if err := target.SetContinuationContext(ContinuationContext{OpenAIBaseURL: "http://target.local/v1"}); err != nil {
+		t.Fatalf("set continuation context: %v", err)
+	}
+
+	opened, err := OpenByID(root, target.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("open by id: %v", err)
+	}
+	meta := opened.Meta()
+	if meta.SessionID != target.Meta().SessionID {
+		t.Fatalf("expected session id %q, got %q", target.Meta().SessionID, meta.SessionID)
+	}
+	if meta.WorkspaceRoot != "/tmp/work-b" {
+		t.Fatalf("expected workspace root from target session, got %q", meta.WorkspaceRoot)
+	}
+	if meta.Continuation == nil || meta.Continuation.OpenAIBaseURL != "http://target.local/v1" {
+		t.Fatalf("expected continuation context from target session, got %+v", meta.Continuation)
+	}
+}
+
+func TestOpenByIDFallsBackToLegacyPersistenceRootLayout(t *testing.T) {
+	root := t.TempDir()
+	legacyContainer := filepath.Join(root, "workspace-legacy")
+	if err := os.MkdirAll(legacyContainer, 0o755); err != nil {
+		t.Fatalf("mkdir legacy container: %v", err)
+	}
+	store, err := Create(legacyContainer, "workspace-legacy", "/tmp/work-legacy")
+	if err != nil {
+		t.Fatalf("create legacy session: %v", err)
+	}
+	if _, err := store.AppendEvent("step1", "message", map[string]any{"role": "user", "content": "hello"}); err != nil {
+		t.Fatalf("append event: %v", err)
+	}
+
+	opened, err := OpenByID(root, store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("open by id: %v", err)
+	}
+	if opened.Meta().SessionID != store.Meta().SessionID {
+		t.Fatalf("expected session id %q, got %q", store.Meta().SessionID, opened.Meta().SessionID)
+	}
+}
+
 func TestReadEventsIgnoresTrailingTruncatedEOFLine(t *testing.T) {
 	root := t.TempDir()
 	store, err := Create(root, "workspace-x", "/tmp/work")

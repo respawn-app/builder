@@ -39,6 +39,7 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		"tui_alternate_screen":                "default",
 		"tui_scroll_mode":                     "default",
 		"notification_method":                 "default",
+		"tool_preambles":                      "default",
 		"web_search":                          "default",
 		"openai_base_url":                     "default",
 		"store":                               "default",
@@ -84,6 +85,10 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if strings.TrimSpace(cfg.NotificationMethod) != "" {
 		merged.NotificationMethod = strings.TrimSpace(cfg.NotificationMethod)
 		sources["notification_method"] = "file"
+	}
+	if cfg.ToolPreambles != nil {
+		merged.ToolPreambles = *cfg.ToolPreambles
+		sources["tool_preambles"] = "file"
 	}
 	if strings.TrimSpace(cfg.WebSearch) != "" {
 		merged.WebSearch = strings.TrimSpace(cfg.WebSearch)
@@ -184,6 +189,14 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if v := strings.TrimSpace(os.Getenv("BUILDER_NOTIFICATION_METHOD")); v != "" {
 		merged.NotificationMethod = v
 		sources["notification_method"] = "env"
+	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_TOOL_PREAMBLES")); v != "" {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return App{}, fmt.Errorf("invalid BUILDER_TOOL_PREAMBLES: %q", v)
+		}
+		merged.ToolPreambles = enabled
+		sources["tool_preambles"] = "env"
 	}
 	if v := strings.TrimSpace(os.Getenv("BUILDER_WEB_SEARCH")); v != "" {
 		merged.WebSearch = v
@@ -368,6 +381,9 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	}
 	if err := os.MkdirAll(absRoot, 0o755); err != nil {
 		return App{}, fmt.Errorf("create persistence root: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(absRoot, sessionsDirName), 0o755); err != nil {
+		return App{}, fmt.Errorf("create sessions root: %w", err)
 	}
 
 	return App{

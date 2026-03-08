@@ -424,6 +424,14 @@ func (a *reasoningAccumulator) Set(role, key, text string) {
 	entry.Text = text
 }
 
+func (a *reasoningAccumulator) Current(role, key string) string {
+	entry := a.ensure(role, key)
+	if entry == nil {
+		return ""
+	}
+	return strings.TrimSpace(entry.Text)
+}
+
 func (a *reasoningAccumulator) Entries() []ReasoningEntry {
 	if a == nil {
 		return nil

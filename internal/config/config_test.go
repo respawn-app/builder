@@ -41,6 +41,9 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.NotificationMethod != "auto" {
 		t.Fatalf("default notification_method mismatch: %q", cfg.Settings.NotificationMethod)
 	}
+	if !cfg.Settings.ToolPreambles {
+		t.Fatalf("expected default tool_preambles=true")
+	}
 	if cfg.Settings.TUIAlternateScreen != TUIAlternateScreenAuto {
 		t.Fatalf("default tui_alternate_screen mismatch: %q", cfg.Settings.TUIAlternateScreen)
 	}
@@ -49,6 +52,9 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	}
 	if got := cfg.PersistenceRoot; got != filepath.Join(home, ".builder") {
 		t.Fatalf("default persistence root mismatch: %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.PersistenceRoot, sessionsDirName)); err != nil {
+		t.Fatalf("expected sessions root to exist: %v", err)
 	}
 	if !cfg.Settings.EnabledTools[tools.ToolShell] || !cfg.Settings.EnabledTools[tools.ToolViewImage] || !cfg.Settings.EnabledTools[tools.ToolPatch] || !cfg.Settings.EnabledTools[tools.ToolAskQuestion] || !cfg.Settings.EnabledTools[tools.ToolMultiToolUseParallel] {
 		t.Fatalf("expected all default tools enabled: %+v", cfg.Settings.EnabledTools)
@@ -120,6 +126,39 @@ func TestLoadReviewerModelInheritsMainModelWhenUnset(t *testing.T) {
 	}
 	if cfg.Settings.Reviewer.Model != "gpt-main-env" {
 		t.Fatalf("expected reviewer.model to inherit env main model, got %q", cfg.Settings.Reviewer.Model)
+	}
+}
+
+func TestResolveWorkspaceContainerUsesSessionsSubdirectory(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	containerName, containerDir, err := ResolveWorkspaceContainer(cfg)
+	if err != nil {
+		t.Fatalf("resolve workspace container: %v", err)
+	}
+	if containerName == "" {
+		t.Fatal("expected non-empty container name")
+	}
+	wantParent := filepath.Join(cfg.PersistenceRoot, sessionsDirName)
+	if filepath.Dir(containerDir) != wantParent {
+		t.Fatalf("expected container under %q, got %q", wantParent, containerDir)
+	}
+	if _, err := os.Stat(containerDir); err != nil {
+		t.Fatalf("expected container dir to exist: %v", err)
+	}
+
+	againName, againDir, err := ResolveWorkspaceContainer(cfg)
+	if err != nil {
+		t.Fatalf("resolve workspace container second time: %v", err)
+	}
+	if againName != containerName || againDir != containerDir {
+		t.Fatalf("expected stable workspace container, got %q %q after %q %q", againName, againDir, containerName, containerDir)
 	}
 }
 
@@ -306,6 +345,48 @@ func TestLoadNotificationMethodPrecedenceAndValidation(t *testing.T) {
 	t.Setenv("BUILDER_NOTIFICATION_METHOD", "bad")
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
 		t.Fatal("expected invalid notification_method validation error")
+	}
+}
+
+func TestLoadToolPreamblesPrecedence(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("tool_preambles = false\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.ToolPreambles {
+		t.Fatalf("expected file tool_preambles=false")
+	}
+	if got := cfg.Source.Sources["tool_preambles"]; got != "file" {
+		t.Fatalf("expected tool_preambles source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_TOOL_PREAMBLES", "true")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if !cfg.Settings.ToolPreambles {
+		t.Fatalf("expected env tool_preambles=true")
+	}
+	if got := cfg.Source.Sources["tool_preambles"]; got != "env" {
+		t.Fatalf("expected tool_preambles source env, got %q", got)
+	}
+
+	t.Setenv("BUILDER_TOOL_PREAMBLES", "broken")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid BUILDER_TOOL_PREAMBLES error")
 	}
 }
 

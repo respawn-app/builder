@@ -59,6 +59,10 @@ type OpenAIStreamingTransport interface {
 	GenerateStream(ctx context.Context, request OpenAIRequest, onDelta func(text string)) (OpenAIResponse, error)
 }
 
+type OpenAIStreamingEventsTransport interface {
+	GenerateStreamWithEvents(ctx context.Context, request OpenAIRequest, callbacks StreamCallbacks) (OpenAIResponse, error)
+}
+
 type OpenAIProviderCapabilitiesTransport interface {
 	ProviderCapabilities(ctx context.Context) (ProviderCapabilities, error)
 }
@@ -115,6 +119,10 @@ func (c *OpenAIClient) Generate(ctx context.Context, request Request) (Response,
 }
 
 func (c *OpenAIClient) GenerateStream(ctx context.Context, request Request, onDelta func(text string)) (Response, error) {
+	return c.GenerateStreamWithEvents(ctx, request, StreamCallbacks{OnAssistantDelta: onDelta})
+}
+
+func (c *OpenAIClient) GenerateStreamWithEvents(ctx context.Context, request Request, callbacks StreamCallbacks) (Response, error) {
 	if c == nil || c.transport == nil {
 		return Response{}, ErrMissingTransport
 	}
@@ -136,8 +144,29 @@ func (c *OpenAIClient) GenerateStream(ctx context.Context, request Request, onDe
 		StructuredOutput:      request.StructuredOutput,
 	}
 
+	if streamTransport, ok := c.transport.(OpenAIStreamingEventsTransport); ok {
+		providerResp, err := streamTransport.GenerateStreamWithEvents(ctx, providerReq, callbacks)
+		if err != nil {
+			return Response{}, fmt.Errorf("openai generate stream: %w", err)
+		}
+		return Response{
+			Assistant: Message{
+				Role:           RoleAssistant,
+				Content:        providerResp.AssistantText,
+				Phase:          providerResp.AssistantPhase,
+				ToolCalls:      append([]ToolCall(nil), providerResp.ToolCalls...),
+				ReasoningItems: append([]ReasoningItem(nil), providerResp.ReasoningItems...),
+			},
+			ToolCalls:      providerResp.ToolCalls,
+			Reasoning:      append([]ReasoningEntry(nil), providerResp.Reasoning...),
+			ReasoningItems: append([]ReasoningItem(nil), providerResp.ReasoningItems...),
+			OutputItems:    CloneResponseItems(providerResp.OutputItems),
+			Usage:          providerResp.Usage,
+		}, nil
+	}
+
 	if streamTransport, ok := c.transport.(OpenAIStreamingTransport); ok {
-		providerResp, err := streamTransport.GenerateStream(ctx, providerReq, onDelta)
+		providerResp, err := streamTransport.GenerateStream(ctx, providerReq, callbacks.OnAssistantDelta)
 		if err != nil {
 			return Response{}, fmt.Errorf("openai generate stream: %w", err)
 		}
@@ -161,8 +190,8 @@ func (c *OpenAIClient) GenerateStream(ctx context.Context, request Request, onDe
 	if err != nil {
 		return Response{}, err
 	}
-	if onDelta != nil && resp.Assistant.Content != "" {
-		onDelta(resp.Assistant.Content)
+	if callbacks.OnAssistantDelta != nil && resp.Assistant.Content != "" {
+		callbacks.OnAssistantDelta(resp.Assistant.Content)
 	}
 	return resp, nil
 }
