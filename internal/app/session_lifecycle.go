@@ -19,6 +19,7 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 	forceNewSession := false
 	for {
 		store, err := openOrCreateSession(
+			boot.cfg.PersistenceRoot,
 			boot.containerDir,
 			currentSessionID,
 			boot.cfg.WorkspaceRoot,
@@ -34,6 +35,9 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 		nextSessionParentID = ""
 
 		active := effectiveSettings(boot.cfg.Settings, store.Meta().Locked)
+		if err := store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: active.OpenAIBaseURL}); err != nil {
+			return err
+		}
 		enabledTools := activeToolIDs(active, store.Meta().Locked)
 
 		logger, err := newRunLogger(store.Dir())
@@ -132,6 +136,7 @@ func resolveSessionAction(ctx context.Context, boot appBootstrap, store *session
 }
 
 func openOrCreateSession(
+	persistenceRoot,
 	containerDir,
 	selectedID,
 	workspaceRoot,
@@ -141,7 +146,7 @@ func openOrCreateSession(
 	parentSessionID string,
 ) (*session.Store, error) {
 	if strings.TrimSpace(selectedID) != "" {
-		return session.Open(filepath.Join(containerDir, selectedID))
+		return session.OpenByID(persistenceRoot, selectedID)
 	}
 	if forceNew {
 		containerName := filepath.Base(containerDir)

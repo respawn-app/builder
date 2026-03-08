@@ -697,8 +697,8 @@ func TestDetailShowsReasoningSummaryAsSeparateEntry(t *testing.T) {
 	if strings.Contains(detail, "…") {
 		t.Fatalf("expected reasoning entry without ellipsis prefix, got %q", detail)
 	}
-	if !strings.Contains(colored, "\x1b[38;5;252mPlan") {
-		t.Fatalf("expected reasoning summary styled with muted/system color, got %q", colored)
+	if !strings.Contains(colored, "Plan summary") {
+		t.Fatalf("expected reasoning summary visible in colored detail view, got %q", colored)
 	}
 }
 
@@ -727,7 +727,7 @@ func TestDetailReordersTrailingReasoningBeforeToolCalls(t *testing.T) {
 	}
 }
 
-func TestDetailGroupsReasoningEntriesAndRendersMarkdown(t *testing.T) {
+func TestDetailGroupsReasoningEntriesWithoutMarkdownFormatting(t *testing.T) {
 	m := NewModel(WithPreviewLines(30))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u"})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "reasoning", Text: "**First step**"})
@@ -737,14 +737,32 @@ func TestDetailGroupsReasoningEntriesAndRendersMarkdown(t *testing.T) {
 	m = updateModel(t, m, ToggleModeMsg{})
 
 	view := plainTranscript(m.View())
-	if strings.Contains(view, "**First step**") || strings.Contains(view, "`second` details") || strings.Contains(view, "**third**") {
-		t.Fatalf("expected reasoning markdown to be rendered, got %q", view)
+	if !containsInOrder(view, "**First step**", "`second` details", "**third**") {
+		t.Fatalf("expected grouped reasoning text to remain unformatted, got %q", view)
 	}
-	if !containsInOrder(view, "First step", "second", "details", "third") {
-		t.Fatalf("expected grouped reasoning text in order, got %q", view)
+	if !strings.Contains(view, "`second` details") {
+		t.Fatalf("expected reasoning text to preserve inline formatting markers, got %q", view)
 	}
 	if got := strings.Count(view, strings.Repeat("─", 24)); got != 2 {
 		t.Fatalf("expected 2 dividers for user/reasoning/assistant groups, got %d in %q", got, view)
+	}
+}
+
+func TestDetailRefreshesForLiveStreamingReasoning(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "u"})
+	m = updateModel(t, m, ToggleModeMsg{})
+	m = updateModel(t, m, UpsertStreamingReasoningMsg{Key: "rs_1:summary:0", Role: "reasoning", Text: "Plan summary"})
+
+	view := plainTranscript(m.View())
+	if !strings.Contains(view, "Plan summary") {
+		t.Fatalf("expected live reasoning to refresh detail snapshot, got %q", view)
+	}
+
+	m = updateModel(t, m, ClearStreamingReasoningMsg{})
+	view = plainTranscript(m.View())
+	if strings.Contains(view, "Plan summary") {
+		t.Fatalf("expected live reasoning cleared from detail snapshot, got %q", view)
 	}
 }
 

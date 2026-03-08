@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -17,16 +18,19 @@ import (
 )
 
 type commonFlags struct {
-	WorkspaceRoot       string
-	SessionID           string
-	Model               string
-	ThinkingLevel       string
-	Theme               string
-	ModelTimeoutSeconds int
-	ShellTimeoutSeconds int
-	BashTimeoutSeconds  int
-	Tools               string
-	OpenAIBaseURL       string
+	WorkspaceRoot         string
+	WorkspaceExplicit     bool
+	SessionID             string
+	ContinueID            string
+	Model                 string
+	ThinkingLevel         string
+	Theme                 string
+	ModelTimeoutSeconds   int
+	ShellTimeoutSeconds   int
+	BashTimeoutSeconds    int
+	Tools                 string
+	OpenAIBaseURL         string
+	OpenAIBaseURLExplicit bool
 }
 
 type runJSONResult struct {
@@ -34,6 +38,8 @@ type runJSONResult struct {
 	Result      string        `json:"result,omitempty"`
 	SessionID   string        `json:"session_id,omitempty"`
 	SessionName string        `json:"session_name,omitempty"`
+	ContinueID  string        `json:"continue_id,omitempty"`
+	ContinueCmd string        `json:"continue_command,omitempty"`
 	DurationMS  int64         `json:"duration_ms"`
 	Error       *runJSONError `json:"error,omitempty"`
 }
@@ -73,17 +79,25 @@ func main() {
 	if err := rootFS.Parse(args); err != nil {
 		os.Exit(2)
 	}
+	markExplicitCommonFlags(rootFS, &flags)
+	sessionID, err := effectiveSessionID(flags)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 
 	opts := app.Options{
-		WorkspaceRoot:       flags.WorkspaceRoot,
-		SessionID:           flags.SessionID,
-		Model:               flags.Model,
-		ThinkingLevel:       flags.ThinkingLevel,
-		Theme:               flags.Theme,
-		ModelTimeoutSeconds: flags.ModelTimeoutSeconds,
-		ShellTimeoutSeconds: effectiveShellTimeout(flags),
-		Tools:               flags.Tools,
-		OpenAIBaseURL:       flags.OpenAIBaseURL,
+		WorkspaceRoot:         flags.WorkspaceRoot,
+		WorkspaceRootExplicit: flags.WorkspaceExplicit,
+		SessionID:             sessionID,
+		Model:                 flags.Model,
+		ThinkingLevel:         flags.ThinkingLevel,
+		Theme:                 flags.Theme,
+		ModelTimeoutSeconds:   flags.ModelTimeoutSeconds,
+		ShellTimeoutSeconds:   effectiveShellTimeout(flags),
+		Tools:                 flags.Tools,
+		OpenAIBaseURL:         flags.OpenAIBaseURL,
+		OpenAIBaseURLExplicit: flags.OpenAIBaseURLExplicit,
 	}
 
 	if err := app.Run(context.Background(), opts); err != nil {
@@ -104,6 +118,12 @@ func runSubcommand(args []string) int {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
+		emitRunUsageError(usageOutputMode, err.Error())
+		return 2
+	}
+	markExplicitCommonFlags(runFS, &flags)
+	sessionID, err := effectiveSessionID(flags)
+	if err != nil {
 		emitRunUsageError(usageOutputMode, err.Error())
 		return 2
 	}
@@ -139,15 +159,17 @@ func runSubcommand(args []string) int {
 	defer stop()
 
 	opts := app.Options{
-		WorkspaceRoot:       flags.WorkspaceRoot,
-		SessionID:           flags.SessionID,
-		Model:               flags.Model,
-		ThinkingLevel:       flags.ThinkingLevel,
-		Theme:               flags.Theme,
-		ModelTimeoutSeconds: flags.ModelTimeoutSeconds,
-		ShellTimeoutSeconds: effectiveShellTimeout(flags),
-		Tools:               flags.Tools,
-		OpenAIBaseURL:       flags.OpenAIBaseURL,
+		WorkspaceRoot:         flags.WorkspaceRoot,
+		WorkspaceRootExplicit: flags.WorkspaceExplicit,
+		SessionID:             sessionID,
+		Model:                 flags.Model,
+		ThinkingLevel:         flags.ThinkingLevel,
+		Theme:                 flags.Theme,
+		ModelTimeoutSeconds:   flags.ModelTimeoutSeconds,
+		ShellTimeoutSeconds:   effectiveShellTimeout(flags),
+		Tools:                 flags.Tools,
+		OpenAIBaseURL:         flags.OpenAIBaseURL,
+		OpenAIBaseURLExplicit: flags.OpenAIBaseURLExplicit,
 	}
 
 	var progress io.Writer
@@ -155,6 +177,9 @@ func runSubcommand(args []string) int {
 		progress = os.Stderr
 	}
 	result, runErr := app.RunPrompt(ctx, opts, prompt, timeout, progress)
+	continueID := strings.TrimSpace(result.SessionID)
+	continueCmd := buildRunContinueCommand(continueID)
+	continueHint := buildRunContinueHint(continueID)
 	if runErr != nil {
 		code := runErrorCode(runErr)
 		if outputMode == runOutputModeJSON {
@@ -162,6 +187,8 @@ func runSubcommand(args []string) int {
 				Status:      "error",
 				SessionID:   result.SessionID,
 				SessionName: result.SessionName,
+				ContinueID:  continueID,
+				ContinueCmd: continueCmd,
 				DurationMS:  result.Duration.Milliseconds(),
 				Error: &runJSONError{
 					Code:    code,
@@ -170,6 +197,10 @@ func runSubcommand(args []string) int {
 			})
 		} else {
 			fmt.Fprintln(os.Stderr, runErr)
+			if continueHint != "" {
+				fmt.Fprintln(os.Stderr)
+				fmt.Fprintln(os.Stderr, continueHint)
+			}
 		}
 		if code == "interrupted" {
 			return 130
@@ -182,10 +213,12 @@ func runSubcommand(args []string) int {
 			Result:      result.Result,
 			SessionID:   result.SessionID,
 			SessionName: result.SessionName,
+			ContinueID:  continueID,
+			ContinueCmd: continueCmd,
 			DurationMS:  result.Duration.Milliseconds(),
 		})
 	} else {
-		_, _ = fmt.Fprintln(os.Stdout, result.Result)
+		emitRunFinalText(os.Stdout, result.Result, continueHint)
 	}
 	return 0
 }
@@ -194,6 +227,7 @@ func registerCommonFlags(fs *flag.FlagSet) commonFlags {
 	flags := commonFlags{}
 	fs.StringVar(&flags.WorkspaceRoot, "workspace", ".", "workspace root")
 	fs.StringVar(&flags.SessionID, "session", "", "session id to resume")
+	fs.StringVar(&flags.ContinueID, "continue", "", "session id to continue")
 	fs.StringVar(&flags.Model, "model", "", "model name override")
 	fs.StringVar(&flags.ThinkingLevel, "thinking-level", "", "thinking level override (low|medium|high|xhigh)")
 	fs.StringVar(&flags.Theme, "theme", "", "theme override (light|dark)")
@@ -205,11 +239,37 @@ func registerCommonFlags(fs *flag.FlagSet) commonFlags {
 	return flags
 }
 
+func effectiveSessionID(flags commonFlags) (string, error) {
+	sessionID := strings.TrimSpace(flags.SessionID)
+	continueID := strings.TrimSpace(flags.ContinueID)
+	if sessionID != "" && continueID != "" && sessionID != continueID {
+		return "", fmt.Errorf("--session and --continue must match when both are provided")
+	}
+	if continueID != "" {
+		return continueID, nil
+	}
+	return sessionID, nil
+}
+
 func effectiveShellTimeout(flags commonFlags) int {
 	if flags.ShellTimeoutSeconds > 0 {
 		return flags.ShellTimeoutSeconds
 	}
 	return flags.BashTimeoutSeconds
+}
+
+func markExplicitCommonFlags(fs *flag.FlagSet, flags *commonFlags) {
+	if fs == nil || flags == nil {
+		return
+	}
+	fs.Visit(func(f *flag.Flag) {
+		switch strings.TrimSpace(f.Name) {
+		case "workspace":
+			flags.WorkspaceExplicit = true
+		case "openai-base-url":
+			flags.OpenAIBaseURLExplicit = true
+		}
+	})
 }
 
 func parseRunTimeout(raw string) (time.Duration, error) {
@@ -279,6 +339,38 @@ func emitRunUsageError(mode runOutputMode, message string) {
 		return
 	}
 	_, _ = fmt.Fprintln(os.Stderr, message)
+}
+
+func emitRunFinalText(w io.Writer, result string, continueHint string) {
+	if w == nil {
+		return
+	}
+	trimmedResult := strings.TrimRight(result, "\n")
+	trimmedHint := strings.TrimSpace(continueHint)
+	switch {
+	case trimmedResult != "" && trimmedHint != "":
+		_, _ = fmt.Fprintf(w, "%s\n\n%s\n", trimmedResult, trimmedHint)
+	case trimmedResult != "":
+		_, _ = fmt.Fprintln(w, trimmedResult)
+	case trimmedHint != "":
+		_, _ = fmt.Fprintln(w, trimmedHint)
+	}
+}
+
+func buildRunContinueCommand(sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ""
+	}
+	return fmt.Sprintf("builder run --continue %s %s", sessionID, strconv.Quote("follow-up"))
+}
+
+func buildRunContinueHint(sessionID string) string {
+	command := buildRunContinueCommand(sessionID)
+	if command == "" {
+		return ""
+	}
+	return fmt.Sprintf("To continue this run, execute `%s`.", command)
 }
 
 func inferRunOutputMode(args []string) runOutputMode {

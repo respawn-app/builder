@@ -11,6 +11,7 @@ import (
 
 	"builder/internal/llm"
 	"builder/internal/tools"
+	"builder/prompts"
 )
 
 func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
@@ -30,6 +31,53 @@ func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
 func (e *Engine) appendUserMessage(stepID, text string) error {
 	msg := llm.Message{Role: llm.RoleUser, Content: text}
 	return e.appendMessage(stepID, msg)
+}
+
+func (e *Engine) injectHeadlessModeTransitionPromptIfNeeded(stepID string) error {
+	messages := e.snapshotMessages()
+	if e.cfg.HeadlessMode {
+		if !shouldInjectHeadlessModePrompt(messages) {
+			return nil
+		}
+		return e.appendMessage(stepID, llm.Message{
+			Role:        llm.RoleDeveloper,
+			MessageType: llm.MessageTypeHeadlessMode,
+			Content:     strings.TrimSpace(prompts.HeadlessModePrompt),
+		})
+	}
+	if !shouldInjectHeadlessModeExitPrompt(messages) {
+		return nil
+	}
+	return e.appendMessage(stepID, llm.Message{
+		Role:        llm.RoleDeveloper,
+		MessageType: llm.MessageTypeHeadlessModeExit,
+		Content:     strings.TrimSpace(prompts.HeadlessModeExitPrompt),
+	})
+}
+
+func shouldInjectHeadlessModePrompt(messages []llm.Message) bool {
+	return !headlessModeActive(messages)
+}
+
+func shouldInjectHeadlessModeExitPrompt(messages []llm.Message) bool {
+	return headlessModeActive(messages)
+}
+
+func headlessModeActive(messages []llm.Message) bool {
+	active := false
+	for _, msg := range messages {
+		if msg.Role != llm.RoleDeveloper {
+			continue
+		}
+		if msg.MessageType == llm.MessageTypeHeadlessMode {
+			active = true
+			continue
+		}
+		if msg.MessageType == llm.MessageTypeHeadlessModeExit {
+			active = false
+		}
+	}
+	return active
 }
 
 func (e *Engine) appendAssistantMessage(stepID string, msg llm.Message) error {

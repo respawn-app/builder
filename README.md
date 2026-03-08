@@ -1,11 +1,11 @@
 Builder is a highly opinionated, minimal terminal coding agent for professional Agentic Engineers, focusing on output quality. Currently only supporting OpenAI/codex models.
 
-### What's done:
+### Features:
 
-- [x] Agentic loop with `shell` and `patch` tools.
+- [x] Agentic loop with `shell`, `ask_question`, `patch` tools.
 - [x] Native local image/PDF attachment tool (`view_image`) for path-based multimodal reading.
 - [x] Support for Codex login and OpenAI api keys.
-- [x] Compaction using native Codex/OpenAI endpoints.
+- [x] Compaction, including auto, using native Codex/OpenAI endpoints.
 - [x] Compact UI mode for ongoing work, and detailed mode to review thinking, tool calls, prompts, summaries.
 - [x] Queueing messages, steering the model (Tab to queue, Enter to steer)
 - [x] Asking user questions via a tool
@@ -15,61 +15,32 @@ Builder is a highly opinionated, minimal terminal coding agent for professional 
 - [x] Session and history persistence and resumption
 - [x] Markdown rendering
 - [x] Saved prompts
-- [x] Custom, or at least well made, system prompt.
 - [x] Info about agent environment, such as shell env, machine, os etc.
 - [x] Syntax highlighting
-- [x] Web search, especially native
-- [x] UI for queued messages
-- [x] Calling shell via `$`/`!` (optional)
-- [x] Premade prompts for review, compaction.
+- [x] Native Web search (for now only OpenAI)
+- [x] Calling shell directly via `$`
+- [x] Premade prompts for review, compaction, init.
 - [x] Esc-esc-style editing of messages and history rewrites
-- [x] Configurable compaction routing (`compaction_mode=native|local|none`) and runtime auto-compaction toggle (`/autocompaction`)
-
-### Notifications
-
-- Terminal notifications are enabled through `notification_method` in `~/.builder/config.toml`.
-- Supported values: `auto` (default), `osc9`, `bel`.
-- `auto` prefers OSC 9 for compatible terminals (including Ghostty) and falls back to BEL.
-- You can override via env var: `BUILDER_NOTIFICATION_METHOD`.
-
-### Scroll Modes
-
-- `tui_scroll_mode` controls Builder transcript behavior (`alt` or `native`).
-- `tui_alternate_screen` controls terminal alt-screen policy (`auto|always|never`).
-- `Shift+Tab` or `Ctrl+T` toggles ongoing/detail transcript surfaces.
-- In `tui_scroll_mode=native`, main UI startup always uses normal buffer even if `tui_alternate_screen=always`, so transcript replay remains visible in terminal scrollback.
-- Ongoing mode keeps mouse capture disabled and does not use terminal alternate-scroll (`?1007`), preserving native scrollback, selection, and copy behavior.
-- Detail transcript mode is an overlay: when `tui_alternate_screen != never`, entering detail uses terminal alt-screen (`?1049`) and enables alternate-scroll (`?1007`) for wheel navigation, then disables it on exit.
-- Rationale: ongoing optimizes for long-lived terminal-native history UX; detail optimizes for transcript inspection/navigation UX without enabling mouse capture.
-
-### Compaction Modes
-
-- `compaction_mode` controls compaction routing in `~/.builder/config.toml`.
-- Supported values: `native` (default), `local`, `none`.
-- `native` uses provider-native compaction when available and falls back to local summary compaction.
-- `local` always uses local summary compaction.
-- `none` disables both automatic and manual compaction (`/compact` will fail with a clear disabled message).
-- Env override: `BUILDER_COMPACTION_MODE`.
-- Runtime toggle: `/autocompaction [on|off]` controls only auto-compaction for the current session (not persisted to config).
-- `~/.builder/config.toml` is strict: unknown keys are rejected with an error.
+- [x] Agent skills.
+- [x] Background shells, which enable subagents via headless mode: `builder run`
 
 ### Important things not done yet
 
 - [ ] @-file mentioning
-- [ ] Any non-openai model support
+- [ ] Any other providers except Codex (since no other exist that I know that allow to use their subscription in a 3rd party harness)
 
 ### What will likely never be implemented
 
 These features are controversial or questionable for model performance, and usually have a better replacement.
 Here is where this project has to be highly opinionated:
+
 - Native subagent orchestration inside one process; use separate headless Builder instances instead.
   - Supported path: `builder run "..."` for tmux/background subagent workflows.
 - Plan mode - the model has native plan capabilities and can always ask questions, rest is just eye candy.
 - MCPs - mcps are net negative on model performance, pollute context, and can be replaced with CLI scripts
-- Skills - skills are controversial in performance and can easily be replaced with already supported AGENTS.md mentions.
-- Extra UI candy tool calls - keep the toolset minimal (`shell`, `view_image`, `ask`, `patch`). Less tools, less burden on the model.
+- Extra UI candy tool calls. Less tools, less burden on the model.
 - On the fly changing of toolsets or models. Changing models at runtime hurts model performance and invalidates caches.
 - Microcompaction - this invalidates caches and drives costs up with marginal benefits
 - Sandboxing - Codex's sandbox is annoying, doesn't work with many tools (gradle, java etc), junie's sandbox can be bypassed, claude code's sandbox is brittle and can also be bypassed. Frontier models are not so stupid anymore and are trained not to destroy your PC.
 - WebFetch tool or similar. Just use [jina.ai](https://r.jina.ai).
-- Fancy summaries, UI, minimal mode, features for "vibe coding", eye candy. The philosophy is to build something for professionals (existing engineers)
+- Fancy summaries, UI, minimal mode, features for "vibe coding", eye candy. The philosophy is to build something for professionals (agentic engineers)

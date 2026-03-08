@@ -112,6 +112,31 @@ func TestMessagesFromItems_PreservesSkillsMessageType(t *testing.T) {
 	}
 }
 
+func TestMessagesFromItems_PreservesHeadlessExitMessageType(t *testing.T) {
+	items := []ResponseItem{
+		{
+			Type:        ResponseItemTypeMessage,
+			Role:        RoleDeveloper,
+			MessageType: MessageTypeHeadlessModeExit,
+			Content:     "interactive mode instructions",
+		},
+	}
+	msgs := MessagesFromItems(items)
+	if len(msgs) != 1 {
+		t.Fatalf("expected one message, got %d", len(msgs))
+	}
+	if msgs[0].MessageType != MessageTypeHeadlessModeExit {
+		t.Fatalf("expected message type to round-trip, got %q", msgs[0].MessageType)
+	}
+	roundTrip := ItemsFromMessages(msgs)
+	if len(roundTrip) != 1 {
+		t.Fatalf("expected one round-trip item, got %d", len(roundTrip))
+	}
+	if roundTrip[0].MessageType != MessageTypeHeadlessModeExit {
+		t.Fatalf("expected round-trip item message type, got %q", roundTrip[0].MessageType)
+	}
+}
+
 func TestUsageCacheHitPercent(t *testing.T) {
 	usage := Usage{InputTokens: 200, CachedInputTokens: 50, HasCachedInputTokens: true}
 	pct, ok := usage.CacheHitPercent()

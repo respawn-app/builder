@@ -13,15 +13,17 @@ import (
 )
 
 type Options struct {
-	WorkspaceRoot       string
-	SessionID           string
-	Model               string
-	ThinkingLevel       string
-	Theme               string
-	ModelTimeoutSeconds int
-	ShellTimeoutSeconds int
-	Tools               string
-	OpenAIBaseURL       string
+	WorkspaceRoot         string
+	WorkspaceRootExplicit bool
+	SessionID             string
+	Model                 string
+	ThinkingLevel         string
+	Theme                 string
+	ModelTimeoutSeconds   int
+	ShellTimeoutSeconds   int
+	Tools                 string
+	OpenAIBaseURL         string
+	OpenAIBaseURLExplicit bool
 }
 
 func Run(ctx context.Context, opts Options) error {

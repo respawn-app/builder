@@ -71,7 +71,7 @@ func TestRunPromptAskHandlerReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "ask_question is not supported") {
+	if !strings.Contains(err.Error(), "You can't ask questions") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

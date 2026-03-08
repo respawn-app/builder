@@ -37,10 +37,14 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 				e.chat.appendOngoingDelta(delta)
 				e.emit(Event{Kind: EventAssistantDelta, StepID: stepID, AssistantDelta: delta})
 			},
+			func(delta llm.ReasoningSummaryDelta) {
+				e.emit(Event{Kind: EventReasoningDelta, StepID: stepID, ReasoningDelta: &delta})
+			},
 			func() {
 				e.chat.clearOngoing()
 				e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
 				e.emit(Event{Kind: EventAssistantDeltaReset, StepID: stepID})
+				e.emit(Event{Kind: EventReasoningDeltaReset, StepID: stepID})
 			},
 		)
 		if err != nil {

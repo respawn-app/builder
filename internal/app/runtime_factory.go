@@ -110,6 +110,7 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 		CompactionMode:                string(active.CompactionMode),
 		AutoCompactionEnabled:         boolRef(true),
 		HeadlessMode:                  opts.Headless,
+		ToolPreambles:                 active.ToolPreambles,
 		Reviewer: runtime.ReviewerConfig{
 			Frequency:      active.Reviewer.Frequency,
 			Model:          active.Reviewer.Model,

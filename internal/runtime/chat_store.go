@@ -30,6 +30,7 @@ type ChatSnapshot struct {
 	Entries      []ChatEntry
 	Ongoing      string
 	OngoingError string
+	Activity     string
 }
 
 type storedToolCompletion struct {
@@ -50,6 +51,7 @@ type chatStore struct {
 	toolCompletions map[string]tools.Result
 	ongoing         string
 	ongoingError    string
+	activity        string
 	cwd             string
 
 	providerTokenEstimate      int
@@ -78,6 +80,7 @@ func newChatStore() *chatStore {
 func (s *chatStore) appendMessage(msg llm.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.updateActivityLocked(msg)
 	if msg.Role == llm.RoleAssistant && strings.TrimSpace(msg.Content) != "" {
 		s.ongoing = ""
 		s.ongoingError = ""
@@ -85,6 +88,22 @@ func (s *chatStore) appendMessage(msg llm.Message) {
 	s.messages = append(s.messages, msg)
 	s.items = append(s.items, llm.ItemsFromMessages([]llm.Message{msg})...)
 	s.providerTokenEstimateDirty = true
+}
+
+func (s *chatStore) updateActivityLocked(msg llm.Message) {
+	switch msg.Role {
+	case llm.RoleAssistant:
+		content := strings.TrimSpace(msg.Content)
+		if isShortAssistantCommentaryPreamble(msg) {
+			if content != "" {
+				s.activity = content
+			}
+			return
+		}
+		s.activity = ""
+	case llm.RoleUser:
+		s.activity = ""
+	}
 }
 
 func (s *chatStore) replaceHistory(items []llm.ResponseItem) {
@@ -191,6 +210,12 @@ func (s *chatStore) clearOngoingError() {
 	s.ongoingError = ""
 }
 
+func (s *chatStore) clearActivity() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.activity = ""
+}
+
 func (s *chatStore) appendLocalEntry(role, text string) {
 	if strings.TrimSpace(text) == "" {
 		return
@@ -255,7 +280,7 @@ func (s *chatStore) snapshot() ChatSnapshot {
 				entries = append(entries, ChatEntry{Role: "user", Text: msg.Content})
 			}
 		case llm.RoleAssistant:
-			if strings.TrimSpace(msg.Content) != "" {
+			if strings.TrimSpace(msg.Content) != "" && !isShortAssistantCommentaryPreamble(msg) {
 				entries = append(entries, ChatEntry{Role: "assistant", Text: msg.Content, Phase: msg.Phase})
 			}
 			if len(msg.ToolCalls) > 0 {
@@ -300,6 +325,7 @@ func (s *chatStore) snapshot() ChatSnapshot {
 		Entries:      entries,
 		Ongoing:      s.ongoing,
 		OngoingError: s.ongoingError,
+		Activity:     s.activity,
 	}
 }
 

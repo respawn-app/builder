@@ -28,6 +28,12 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 	case runtime.EventAssistantDeltaReset:
 		m.sawAssistantDelta = false
 		m.forwardToView(tui.ClearOngoingAssistantMsg{})
+	case runtime.EventReasoningDelta:
+		if evt.ReasoningDelta != nil {
+			m.forwardToView(tui.UpsertStreamingReasoningMsg{Key: evt.ReasoningDelta.Key, Role: evt.ReasoningDelta.Role, Text: evt.ReasoningDelta.Text})
+		}
+	case runtime.EventReasoningDeltaReset:
+		m.forwardToView(tui.ClearStreamingReasoningMsg{})
 	case runtime.EventCompactionStarted:
 		m.compacting = true
 	case runtime.EventCompactionCompleted, runtime.EventCompactionFailed:
@@ -42,8 +48,13 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 			m.busy = evt.RunState.Busy
 			if evt.RunState.Busy {
 				m.activity = uiActivityRunning
-			} else if m.activity == uiActivityRunning {
-				m.activity = uiActivityIdle
+				m.activityStatus = ""
+			} else {
+				if m.activity == uiActivityRunning {
+					m.activity = uiActivityIdle
+				}
+				m.activityStatus = ""
+				m.forwardToView(tui.ClearStreamingReasoningMsg{})
 			}
 		}
 	case runtime.EventBackgroundUpdated:
@@ -102,11 +113,13 @@ func (a uiRuntimeAdapter) applyChatSnapshot(snapshot runtime.ChatSnapshot) tea.C
 	}
 	m.transcriptEntries = append(m.transcriptEntries[:0], entries...)
 	m.refreshRollbackCandidates()
+	m.forwardToView(tui.ClearStreamingReasoningMsg{})
 	m.forwardToView(tui.SetConversationMsg{
 		Entries:      entries,
 		Ongoing:      snapshot.Ongoing,
 		OngoingError: snapshot.OngoingError,
 	})
+	m.activityStatus = strings.TrimSpace(snapshot.Activity)
 	if strings.TrimSpace(snapshot.Ongoing) == "" {
 		m.sawAssistantDelta = false
 	}

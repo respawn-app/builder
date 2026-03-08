@@ -20,6 +20,7 @@ import (
 const (
 	DefaultAppName       = "builder"
 	DefaultPersistence   = "~/.builder"
+	sessionsDirName      = "sessions"
 	workspaceIndexName   = "workspaces.json"
 	globalAuthConfigName = "auth.json"
 
@@ -81,6 +82,7 @@ type Settings struct {
 	TUIAlternateScreen               TUIAlternateScreenPolicy
 	TUIScrollMode                    TUIScrollMode
 	NotificationMethod               string
+	ToolPreambles                    bool
 	WebSearch                        string
 	OpenAIBaseURL                    string
 	Store                            bool
@@ -123,6 +125,7 @@ type fileSettings struct {
 	TUIAlternateScreen string          `toml:"tui_alternate_screen"`
 	TUIScrollMode      string          `toml:"tui_scroll_mode"`
 	NotificationMethod string          `toml:"notification_method"`
+	ToolPreambles      *bool           `toml:"tool_preambles"`
 	WebSearch          string          `toml:"web_search"`
 	Tools              map[string]bool `toml:"tools"`
 	Timeouts           struct {
@@ -162,6 +165,7 @@ func defaultSettings() Settings {
 		TUIAlternateScreen:               TUIAlternateScreenPolicy(defaultTUIAlternateScreen),
 		TUIScrollMode:                    TUIScrollMode(defaultTUIScrollMode),
 		NotificationMethod:               "auto",
+		ToolPreambles:                    true,
 		WebSearch:                        "off",
 		Store:                            false,
 		AllowNonCwdEdits:                 false,
@@ -428,6 +432,7 @@ func defaultSettingsTOML() string {
 		"tui_alternate_screen":                defaults.TUIAlternateScreen,
 		"tui_scroll_mode":                     defaults.TUIScrollMode,
 		"notification_method":                 defaults.NotificationMethod,
+		"tool_preambles":                      defaults.ToolPreambles,
 		"web_search":                          defaults.WebSearch,
 		"openai_base_url":                     defaults.OpenAIBaseURL,
 		"store":                               defaults.Store,
@@ -468,6 +473,9 @@ func defaultSettingsTOML() string {
 		"tui_alternate_screen = \"" + string(defaults.TUIAlternateScreen) + "\"\n" +
 		"tui_scroll_mode = \"" + string(defaults.TUIScrollMode) + "\"\n" +
 		"notification_method = \"" + defaults.NotificationMethod + "\"\n" +
+		"# Known tradeoff: sessions started in headless mode never include intermediary-update\n" +
+		"# instructions for their lifetime because the dispatch contract is locked on first use.\n" +
+		"tool_preambles = " + strconv.FormatBool(defaults.ToolPreambles) + "\n" +
 		"web_search = \"" + defaults.WebSearch + "\"\n" +
 		"openai_base_url = \"" + defaults.OpenAIBaseURL + "\"\n" +
 		"store = " + strconv.FormatBool(defaults.Store) + "\n" +
@@ -515,7 +523,7 @@ func ResolveWorkspaceContainer(cfg App) (string, string, error) {
 	}
 
 	if name, ok := idx.Entries[cfg.WorkspaceRoot]; ok {
-		return name, filepath.Join(cfg.PersistenceRoot, name), nil
+		return name, filepath.Join(SessionsRoot(cfg), name), nil
 	}
 
 	base := filepath.Base(cfg.WorkspaceRoot)
@@ -525,12 +533,16 @@ func ResolveWorkspaceContainer(cfg App) (string, string, error) {
 		return "", "", err
 	}
 
-	containerDir := filepath.Join(cfg.PersistenceRoot, container)
+	containerDir := filepath.Join(SessionsRoot(cfg), container)
 	if err := os.MkdirAll(containerDir, 0o755); err != nil {
 		return "", "", fmt.Errorf("create workspace container: %w", err)
 	}
 
 	return container, containerDir, nil
+}
+
+func SessionsRoot(cfg App) string {
+	return filepath.Join(cfg.PersistenceRoot, sessionsDirName)
 }
 
 func GlobalAuthConfigPath(cfg App) string {

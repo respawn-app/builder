@@ -264,6 +264,7 @@ type uiModel struct {
 	transientStatus      string
 	transientStatusKind  uiStatusNoticeKind
 	transientStatusToken uint64
+	activityStatus       string
 	debugKeys            bool
 
 	transcriptEntries       []tui.TranscriptEntry

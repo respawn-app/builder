@@ -109,6 +109,10 @@ func (t *HTTPTransport) Generate(ctx context.Context, request OpenAIRequest) (Op
 }
 
 func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIRequest, onDelta func(text string)) (OpenAIResponse, error) {
+	return t.GenerateStreamWithEvents(ctx, request, StreamCallbacks{OnAssistantDelta: onDelta})
+}
+
+func (t *HTTPTransport) GenerateStreamWithEvents(ctx context.Context, request OpenAIRequest, callbacks StreamCallbacks) (OpenAIResponse, error) {
 	if t.Client == nil {
 		t.Client = &http.Client{Timeout: 120 * time.Second}
 	}
@@ -144,8 +148,8 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 		case "response.output_text.delta":
 			if evt.Delta != "" {
 				assistantText.WriteString(evt.Delta)
-				if onDelta != nil {
-					onDelta(evt.Delta)
+				if callbacks.OnAssistantDelta != nil {
+					callbacks.OnAssistantDelta(evt.Delta)
 				}
 			}
 		case "response.output_item.added", "response.output_item.done":
@@ -156,12 +160,24 @@ func (t *HTTPTransport) GenerateStream(ctx context.Context, request OpenAIReques
 		case "response.function_call_arguments.done":
 			acc.SetArguments(evt.ItemID, evt.Arguments)
 		case "response.reasoning_summary_text.delta":
-			reasoningAcc.Append(reasoningRoleSummary, reasoningEventKey(evt.ItemID, evt.OutputIndex, evt.SummaryIndex), evt.Delta)
+			key := reasoningEventKey(evt.ItemID, evt.OutputIndex, evt.SummaryIndex)
+			reasoningAcc.Append(reasoningRoleSummary, key, evt.Delta)
+			if callbacks.OnReasoningSummaryDelta != nil {
+				callbacks.OnReasoningSummaryDelta(ReasoningSummaryDelta{Key: key, Role: reasoningRoleSummary, Text: reasoningAcc.Current(reasoningRoleSummary, key)})
+			}
 		case "response.reasoning_summary_text.done":
-			reasoningAcc.Set(reasoningRoleSummary, reasoningEventKey(evt.ItemID, evt.OutputIndex, evt.SummaryIndex), evt.Text)
+			key := reasoningEventKey(evt.ItemID, evt.OutputIndex, evt.SummaryIndex)
+			reasoningAcc.Set(reasoningRoleSummary, key, evt.Text)
+			if callbacks.OnReasoningSummaryDelta != nil {
+				callbacks.OnReasoningSummaryDelta(ReasoningSummaryDelta{Key: key, Role: reasoningRoleSummary, Text: reasoningAcc.Current(reasoningRoleSummary, key)})
+			}
 		case "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
 			if evt.Part.Type == "summary_text" {
-				reasoningAcc.Set(reasoningRoleSummary, reasoningEventKey(evt.ItemID, evt.OutputIndex, evt.SummaryIndex), evt.Part.Text)
+				key := reasoningEventKey(evt.ItemID, evt.OutputIndex, evt.SummaryIndex)
+				reasoningAcc.Set(reasoningRoleSummary, key, evt.Part.Text)
+				if callbacks.OnReasoningSummaryDelta != nil {
+					callbacks.OnReasoningSummaryDelta(ReasoningSummaryDelta{Key: key, Role: reasoningRoleSummary, Text: reasoningAcc.Current(reasoningRoleSummary, key)})
+				}
 			}
 		case "response.completed":
 			e := evt.AsResponseCompleted()

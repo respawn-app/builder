@@ -123,6 +123,11 @@ func (m Model) buildDetailBlocks(includeStreaming bool, applySelection bool) []o
 			})
 		}
 	}
+	if includeStreaming {
+		if lines := m.streamingReasoningLines(); len(lines) > 0 {
+			blocks = append(blocks, ongoingBlock{role: "reasoning", lines: lines, entryIndex: -1})
+		}
+	}
 	if includeStreaming && m.ongoing != "" {
 		blocks = append(blocks, ongoingBlock{
 			role:       "assistant",
@@ -131,6 +136,24 @@ func (m Model) buildDetailBlocks(includeStreaming bool, applySelection bool) []o
 		})
 	}
 	return blocks
+}
+
+func (m Model) streamingReasoningLines() []string {
+	if len(m.streamingReasoning) == 0 {
+		return nil
+	}
+	parts := make([]string, 0, len(m.streamingReasoning))
+	for _, entry := range m.streamingReasoning {
+		text := strings.TrimSpace(entry.Text)
+		if text == "" {
+			continue
+		}
+		parts = append(parts, text)
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	return m.flattenEntry("reasoning", strings.Join(parts, "\n"))
 }
 
 func (m Model) trailingThinkingBlockBeforeEntry(entries []TranscriptEntry, idx int, consumed map[int]struct{}) ([]string, bool) {
@@ -353,6 +376,9 @@ func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *
 	if rolePrefix(role) != "" {
 		renderWidth -= 2
 	}
+	if isThinkingRole(role) {
+		return m.flattenThinkingEntry(role, text, renderWidth)
+	}
 	type lineWithKind struct {
 		text string
 		kind string
@@ -440,6 +466,31 @@ func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *
 			return []string{"", ellipsis}
 		}
 		return []string{out[0], ellipsis}
+	}
+	return out
+}
+
+func (m Model) flattenThinkingEntry(role, text string, renderWidth int) []string {
+	if renderWidth < 1 {
+		renderWidth = 1
+	}
+	chunks := splitLines(wrapTextForViewport(text, renderWidth))
+	if len(chunks) == 0 {
+		chunks = []string{""}
+	}
+	style := styleForRole(role, m.palette())
+	out := make([]string, 0, len(chunks))
+	for i, chunk := range chunks {
+		display := style.Render(chunk)
+		if i == 0 {
+			out = append(out, display)
+			continue
+		}
+		if strings.TrimSpace(chunk) == "" {
+			out = append(out, "")
+			continue
+		}
+		out = append(out, "  "+display)
 	}
 	return out
 }
@@ -539,6 +590,9 @@ func (m Model) maybeSelectedUserBlock(entryIndex int, role string, lines []strin
 func (m Model) renderEntryText(role, text string, width int, toolMeta *transcript.ToolCallMeta, muteText bool) string {
 	if strings.TrimSpace(text) == "" {
 		return text
+	}
+	if isThinkingRole(role) {
+		return wrapTextForViewport(text, width)
 	}
 	if !muteText {
 		if highlighted, ok := m.renderToolTextWithHighlight(role, text, width, toolMeta); ok {

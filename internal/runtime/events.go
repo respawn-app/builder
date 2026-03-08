@@ -11,6 +11,8 @@ const (
 	EventConversationUpdated EventKind = "conversation_updated"
 	EventAssistantDelta      EventKind = "assistant_delta"
 	EventAssistantDeltaReset EventKind = "assistant_delta_reset"
+	EventReasoningDelta      EventKind = "reasoning_delta"
+	EventReasoningDeltaReset EventKind = "reasoning_delta_reset"
 	EventAssistantMessage    EventKind = "assistant_message"
 	EventModelResponse       EventKind = "model_response_received"
 	EventUserMessageFlushed  EventKind = "user_message_flushed"
@@ -31,6 +33,7 @@ type Event struct {
 	StepID         string
 	Error          string
 	AssistantDelta string
+	ReasoningDelta *llm.ReasoningSummaryDelta
 	UserMessage    string
 	Message        llm.Message
 	ModelResponse  *ModelResponseTrace

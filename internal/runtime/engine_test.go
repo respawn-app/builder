@@ -221,6 +221,8 @@ type fakeAsyncLateDeltaClient struct{}
 
 type fakeSimpleStreamClient struct{}
 
+type fakeReasoningStreamClient struct{}
+
 func (f *fakeStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
 	return llm.Response{}, errors.New("not implemented")
 }
@@ -278,6 +280,25 @@ func (fakeSimpleStreamClient) GenerateStream(_ context.Context, _ llm.Request, o
 	}
 	return llm.Response{
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ab"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}, nil
+}
+
+func (fakeReasoningStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
+	return llm.Response{}, errors.New("not implemented")
+}
+
+func (fakeReasoningStreamClient) GenerateStreamWithEvents(_ context.Context, _ llm.Request, callbacks llm.StreamCallbacks) (llm.Response, error) {
+	if callbacks.OnReasoningSummaryDelta != nil {
+		callbacks.OnReasoningSummaryDelta(llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Text: "Plan"})
+		callbacks.OnReasoningSummaryDelta(llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Text: "Plan summary"})
+	}
+	if callbacks.OnAssistantDelta != nil {
+		callbacks.OnAssistantDelta("done")
+	}
+	return llm.Response{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+		Reasoning: []llm.ReasoningEntry{{Role: "reasoning", Text: "Plan summary"}},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}, nil
 }
@@ -384,6 +405,7 @@ func TestLocksAtFirstDispatch(t *testing.T) {
 		Temperature:   1,
 		ThinkingLevel: "xhigh",
 		EnabledTools:  []tools.ID{tools.ToolShell},
+		ToolPreambles: true,
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -401,6 +423,94 @@ func TestLocksAtFirstDispatch(t *testing.T) {
 	}
 	if len(meta.Locked.EnabledTools) != 1 || meta.Locked.EnabledTools[0] != string(tools.ToolShell) {
 		t.Fatalf("locked enabled tools = %+v", meta.Locked.EnabledTools)
+	}
+	if meta.Locked.ToolPreambles == nil || !*meta.Locked.ToolPreambles {
+		t.Fatalf("expected locked tool_preambles=true for normal session")
+	}
+}
+
+func TestHeadlessSessionLocksToolPreamblesOff(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:         "gpt-5",
+		Temperature:   1,
+		ThinkingLevel: "high",
+		EnabledTools:  []tools.ID{tools.ToolShell},
+		HeadlessMode:  true,
+		ToolPreambles: true,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "hi"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	meta := store.Meta()
+	if meta.Locked == nil {
+		t.Fatalf("expected locked contract after first dispatch")
+	}
+	if meta.Locked.ToolPreambles == nil || *meta.Locked.ToolPreambles {
+		t.Fatalf("expected locked tool_preambles=false for headless session")
+	}
+	if strings.Contains(client.calls[0].SystemPrompt, "## Intermediary updates") {
+		t.Fatalf("did not expect intermediary updates in headless system prompt")
+	}
+}
+
+func TestLockedToolPreamblesPersistAcrossResume(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	firstClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "first"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	firstEngine, err := New(store, firstClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:         "gpt-5",
+		EnabledTools:  []tools.ID{tools.ToolShell},
+		ToolPreambles: false,
+	})
+	if err != nil {
+		t.Fatalf("new first engine: %v", err)
+	}
+	if _, err := firstEngine.SubmitUserMessage(context.Background(), "first"); err != nil {
+		t.Fatalf("submit first: %v", err)
+	}
+	if strings.Contains(firstClient.calls[0].SystemPrompt, "## Intermediary updates") {
+		t.Fatalf("did not expect intermediary updates in first locked prompt")
+	}
+
+	resumedClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "second"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	resumedEngine, err := New(store, resumedClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:         "gpt-5",
+		EnabledTools:  []tools.ID{tools.ToolShell},
+		ToolPreambles: true,
+	})
+	if err != nil {
+		t.Fatalf("new resumed engine: %v", err)
+	}
+	if _, err := resumedEngine.SubmitUserMessage(context.Background(), "second"); err != nil {
+		t.Fatalf("submit second: %v", err)
+	}
+	if strings.Contains(resumedClient.calls[0].SystemPrompt, "## Intermediary updates") {
+		t.Fatalf("did not expect resumed session to change locked tool_preambles policy")
 	}
 }
 
@@ -3069,6 +3179,47 @@ func TestStreamingRetryResetsAttemptDeltas(t *testing.T) {
 	}
 }
 
+func TestStreamingEmitsReasoningSummaryDeltaEvents(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	var (
+		mu     sync.Mutex
+		events []Event
+	)
+	eng, err := New(store, fakeReasoningStreamClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			events = append(events, evt)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "stream reasoning"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	var reasoningTexts []string
+	for _, evt := range events {
+		if evt.Kind != EventReasoningDelta || evt.ReasoningDelta == nil {
+			continue
+		}
+		reasoningTexts = append(reasoningTexts, evt.ReasoningDelta.Text)
+	}
+	if len(reasoningTexts) != 2 || reasoningTexts[0] != "Plan" || reasoningTexts[1] != "Plan summary" {
+		t.Fatalf("unexpected reasoning delta events: %+v", reasoningTexts)
+	}
+}
+
 func TestStreamingIgnoresAsyncLateDeltasAfterGenerateReturns(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -3580,6 +3731,293 @@ func TestSubmitInjectsEnvironmentLineWithStatusModelLabel(t *testing.T) {
 	}
 	if !strings.Contains(envMsg.Content, "\ngpt-5.3.codex high\n") {
 		t.Fatalf("expected environment context to contain status model label line, got %q", envMsg.Content)
+	}
+}
+
+func TestHeadlessModeTransitionDecisionsFollowLatestMarker(t *testing.T) {
+	if headlessModeActive(nil) {
+		t.Fatal("did not expect headless mode without history")
+	}
+	if !shouldInjectHeadlessModePrompt(nil) {
+		t.Fatal("expected enter prompt when no headless marker exists")
+	}
+	if shouldInjectHeadlessModeExitPrompt(nil) {
+		t.Fatal("did not expect exit prompt without an active headless phase")
+	}
+
+	headless := []llm.Message{{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessMode, Content: "headless"}}
+	if !headlessModeActive(headless) {
+		t.Fatal("expected headless mode to be active after headless marker")
+	}
+	if shouldInjectHeadlessModePrompt(headless) {
+		t.Fatal("did not expect enter prompt during active headless phase")
+	}
+	if !shouldInjectHeadlessModeExitPrompt(headless) {
+		t.Fatal("expected exit prompt during active headless phase")
+	}
+
+	exited := []llm.Message{
+		{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessMode, Content: "headless"},
+		{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessModeExit, Content: "exit"},
+	}
+	if headlessModeActive(exited) {
+		t.Fatal("did not expect headless mode after exit marker")
+	}
+	if !shouldInjectHeadlessModePrompt(exited) {
+		t.Fatal("expected enter prompt after exit marker")
+	}
+	if shouldInjectHeadlessModeExitPrompt(exited) {
+		t.Fatal("did not expect exit prompt after exit marker")
+	}
+}
+
+func TestSubmitUserMessageInjectsHeadlessEnterPromptWhenContinuingRegularSessionInHeadlessMode(t *testing.T) {
+	prevHeadlessPrompt := prompts.HeadlessModePrompt
+	prompts.HeadlessModePrompt = "headless mode instructions"
+	defer func() {
+		prompts.HeadlessModePrompt = prevHeadlessPrompt
+	}()
+
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	interactiveClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "interactive-ok"},
+		OutputItems: []llm.ResponseItem{{
+			Type:    llm.ResponseItemTypeMessage,
+			Role:    llm.RoleAssistant,
+			Phase:   llm.MessagePhaseFinal,
+			Content: "interactive-ok",
+		}},
+		Usage: llm.Usage{WindowTokens: 200000},
+	}}}
+	interactiveEngine, err := New(store, interactiveClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new interactive engine: %v", err)
+	}
+	if _, err := interactiveEngine.SubmitUserMessage(context.Background(), "regular start"); err != nil {
+		t.Fatalf("interactive submit: %v", err)
+	}
+
+	headlessClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "headless-ok-1"},
+			OutputItems: []llm.ResponseItem{{
+				Type:    llm.ResponseItemTypeMessage,
+				Role:    llm.RoleAssistant,
+				Phase:   llm.MessagePhaseFinal,
+				Content: "headless-ok-1",
+			}},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "headless-ok-2"},
+			OutputItems: []llm.ResponseItem{{
+				Type:    llm.ResponseItemTypeMessage,
+				Role:    llm.RoleAssistant,
+				Phase:   llm.MessagePhaseFinal,
+				Content: "headless-ok-2",
+			}},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	headlessEngine, err := New(store, headlessClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", HeadlessMode: true})
+	if err != nil {
+		t.Fatalf("new headless engine: %v", err)
+	}
+
+	if _, err := headlessEngine.SubmitUserMessage(context.Background(), "continue headlessly"); err != nil {
+		t.Fatalf("headless submit 1: %v", err)
+	}
+	if _, err := headlessEngine.SubmitUserMessage(context.Background(), "continue headlessly again"); err != nil {
+		t.Fatalf("headless submit 2: %v", err)
+	}
+
+	if len(headlessClient.calls) != 2 {
+		t.Fatalf("expected two headless calls, got %d", len(headlessClient.calls))
+	}
+	firstReq := headlessClient.calls[0]
+	headlessIdx := -1
+	userIdx := -1
+	for i, msg := range firstReq.Messages {
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeHeadlessMode {
+			headlessIdx = i
+		}
+		if msg.Role == llm.RoleUser && msg.Content == "continue headlessly" {
+			userIdx = i
+		}
+	}
+	if headlessIdx < 0 {
+		t.Fatalf("expected enter prompt when switching regular session into headless mode, messages=%+v", firstReq.Messages)
+	}
+	if userIdx < 0 || headlessIdx >= userIdx {
+		t.Fatalf("expected headless enter prompt before user message, headless=%d user=%d messages=%+v", headlessIdx, userIdx, firstReq.Messages)
+	}
+	secondReq := headlessClient.calls[1]
+	headlessCount := 0
+	for _, msg := range secondReq.Messages {
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeHeadlessMode {
+			headlessCount++
+		}
+	}
+	if headlessCount != 1 {
+		t.Fatalf("expected exactly one persisted headless enter marker, got %d messages=%+v", headlessCount, secondReq.Messages)
+	}
+}
+
+func TestSubmitUserMessageInjectsHeadlessExitPromptOnFirstInteractiveTurn(t *testing.T) {
+	prevHeadlessPrompt := prompts.HeadlessModePrompt
+	prevExitPrompt := prompts.HeadlessModeExitPrompt
+	prompts.HeadlessModePrompt = "headless mode instructions"
+	prompts.HeadlessModeExitPrompt = "interactive mode instructions"
+	defer func() {
+		prompts.HeadlessModePrompt = prevHeadlessPrompt
+		prompts.HeadlessModeExitPrompt = prevExitPrompt
+	}()
+
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	headlessClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "headless-ok"},
+		OutputItems: []llm.ResponseItem{{
+			Type:    llm.ResponseItemTypeMessage,
+			Role:    llm.RoleAssistant,
+			Phase:   llm.MessagePhaseFinal,
+			Content: "headless-ok",
+		}},
+		Usage: llm.Usage{WindowTokens: 200000},
+	}}}
+	headlessEngine, err := New(store, headlessClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", HeadlessMode: true})
+	if err != nil {
+		t.Fatalf("new headless engine: %v", err)
+	}
+	if _, err := headlessEngine.SubmitUserMessage(context.Background(), "run headless"); err != nil {
+		t.Fatalf("headless submit: %v", err)
+	}
+
+	interactiveClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "interactive-ok-1"},
+			OutputItems: []llm.ResponseItem{{
+				Type:    llm.ResponseItemTypeMessage,
+				Role:    llm.RoleAssistant,
+				Phase:   llm.MessagePhaseFinal,
+				Content: "interactive-ok-1",
+			}},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "interactive-ok-2"},
+			OutputItems: []llm.ResponseItem{{
+				Type:    llm.ResponseItemTypeMessage,
+				Role:    llm.RoleAssistant,
+				Phase:   llm.MessagePhaseFinal,
+				Content: "interactive-ok-2",
+			}},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	interactiveEngine, err := New(store, interactiveClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new interactive engine: %v", err)
+	}
+
+	if _, err := interactiveEngine.SubmitUserMessage(context.Background(), "continue interactively"); err != nil {
+		t.Fatalf("interactive submit 1: %v", err)
+	}
+	if _, err := interactiveEngine.SubmitUserMessage(context.Background(), "continue again"); err != nil {
+		t.Fatalf("interactive submit 2: %v", err)
+	}
+
+	if len(interactiveClient.calls) != 2 {
+		t.Fatalf("expected two interactive model calls, got %d", len(interactiveClient.calls))
+	}
+
+	firstReq := interactiveClient.calls[0]
+	headlessIdx := -1
+	exitIdx := -1
+	userIdx := -1
+	for i, msg := range firstReq.Messages {
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeHeadlessMode {
+			headlessIdx = i
+		}
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeHeadlessModeExit {
+			exitIdx = i
+		}
+		if msg.Role == llm.RoleUser && msg.Content == "continue interactively" {
+			userIdx = i
+		}
+	}
+	if headlessIdx < 0 {
+		t.Fatalf("expected prior headless prompt in first interactive request, messages=%+v", firstReq.Messages)
+	}
+	if exitIdx < 0 {
+		t.Fatalf("expected exit prompt in first interactive request, messages=%+v", firstReq.Messages)
+	}
+	if userIdx < 0 {
+		t.Fatalf("expected interactive user message in first request, messages=%+v", firstReq.Messages)
+	}
+	if !(headlessIdx < exitIdx && exitIdx < userIdx) {
+		t.Fatalf("expected headless -> exit -> user ordering, got headless=%d exit=%d user=%d", headlessIdx, exitIdx, userIdx)
+	}
+
+	secondReq := interactiveClient.calls[1]
+	exitCount := 0
+	for _, msg := range secondReq.Messages {
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeHeadlessModeExit {
+			exitCount++
+		}
+	}
+	if exitCount != 1 {
+		t.Fatalf("expected exactly one persisted exit prompt in later requests, got %d messages=%+v", exitCount, secondReq.Messages)
+	}
+}
+
+func TestSubmitUserMessageDoesNotInjectHeadlessExitPromptForNormalSession(t *testing.T) {
+	prevExitPrompt := prompts.HeadlessModeExitPrompt
+	prompts.HeadlessModeExitPrompt = "interactive mode instructions"
+	defer func() {
+		prompts.HeadlessModeExitPrompt = prevExitPrompt
+	}()
+
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "ok"},
+		OutputItems: []llm.ResponseItem{{
+			Type:    llm.ResponseItemTypeMessage,
+			Role:    llm.RoleAssistant,
+			Phase:   llm.MessagePhaseFinal,
+			Content: "ok",
+		}},
+		Usage: llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "plain user"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected one model call, got %d", len(client.calls))
+	}
+	for _, msg := range client.calls[0].Messages {
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeHeadlessModeExit {
+			t.Fatalf("did not expect headless exit prompt in normal session, messages=%+v", client.calls[0].Messages)
+		}
 	}
 }
 

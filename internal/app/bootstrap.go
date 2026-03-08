@@ -8,6 +8,7 @@ import (
 
 	"builder/internal/auth"
 	"builder/internal/config"
+	"builder/internal/session"
 	"builder/internal/shared/textutil"
 )
 
@@ -19,17 +20,19 @@ type appBootstrap struct {
 }
 
 func bootstrapApp(ctx context.Context, opts Options) (appBootstrap, error) {
-	cfg, err := config.Load(opts.WorkspaceRoot, config.LoadOptions{
-		Model:               opts.Model,
-		ThinkingLevel:       opts.ThinkingLevel,
-		Theme:               opts.Theme,
-		ModelTimeoutSeconds: opts.ModelTimeoutSeconds,
-		ShellTimeoutSeconds: opts.ShellTimeoutSeconds,
-		Tools:               opts.Tools,
-		OpenAIBaseURL:       opts.OpenAIBaseURL,
-	})
+	cfg, err := loadBootstrapConfig(opts, requestedWorkspaceRoot(opts), opts.OpenAIBaseURL, opts.OpenAIBaseURLExplicit)
 	if err != nil {
 		return appBootstrap{}, err
+	}
+	if strings.TrimSpace(opts.SessionID) != "" {
+		workspaceRoot, openAIBaseURL, useOpenAIBaseURL, err := resolveContinuationLoadParams(cfg.PersistenceRoot, opts)
+		if err != nil {
+			return appBootstrap{}, err
+		}
+		cfg, err = loadBootstrapConfig(opts, workspaceRoot, openAIBaseURL, useOpenAIBaseURL)
+		if err != nil {
+			return appBootstrap{}, err
+		}
 	}
 
 	_, containerDir, err := config.ResolveWorkspaceContainer(cfg)
@@ -57,4 +60,48 @@ func bootstrapApp(ctx context.Context, opts Options) (appBootstrap, error) {
 		oauthOpts:    oauthOpts,
 		authManager:  mgr,
 	}, nil
+}
+
+func loadBootstrapConfig(opts Options, workspaceRoot, openAIBaseURL string, useOpenAIBaseURL bool) (config.App, error) {
+	loadOpts := config.LoadOptions{
+		Model:               opts.Model,
+		ThinkingLevel:       opts.ThinkingLevel,
+		Theme:               opts.Theme,
+		ModelTimeoutSeconds: opts.ModelTimeoutSeconds,
+		ShellTimeoutSeconds: opts.ShellTimeoutSeconds,
+		Tools:               opts.Tools,
+	}
+	if useOpenAIBaseURL {
+		loadOpts.OpenAIBaseURL = openAIBaseURL
+	}
+	return config.Load(workspaceRoot, loadOpts)
+}
+
+func requestedWorkspaceRoot(opts Options) string {
+	workspaceRoot := strings.TrimSpace(opts.WorkspaceRoot)
+	if workspaceRoot == "" {
+		return "."
+	}
+	return workspaceRoot
+}
+
+func resolveContinuationLoadParams(persistenceRoot string, opts Options) (string, string, bool, error) {
+	store, err := session.OpenByID(persistenceRoot, opts.SessionID)
+	if err != nil {
+		return "", "", false, err
+	}
+	meta := store.Meta()
+
+	workspaceRoot := requestedWorkspaceRoot(opts)
+	if !opts.WorkspaceRootExplicit && strings.TrimSpace(meta.WorkspaceRoot) != "" {
+		workspaceRoot = strings.TrimSpace(meta.WorkspaceRoot)
+	}
+
+	if opts.OpenAIBaseURLExplicit {
+		return workspaceRoot, strings.TrimSpace(opts.OpenAIBaseURL), true, nil
+	}
+	if meta.Continuation != nil && strings.TrimSpace(meta.Continuation.OpenAIBaseURL) != "" {
+		return workspaceRoot, strings.TrimSpace(meta.Continuation.OpenAIBaseURL), true, nil
+	}
+	return workspaceRoot, "", false, nil
 }
