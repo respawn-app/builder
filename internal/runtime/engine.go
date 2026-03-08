@@ -521,7 +521,7 @@ func (e *Engine) generateWithRetryClient(ctx context.Context, client llm.Client,
 				if attemptDone.Load() {
 					return
 				}
-				if strings.TrimSpace(delta.Text) == "" {
+				if strings.TrimSpace(delta.Text) == "" && strings.TrimSpace(delta.Status) == "" {
 					return
 				}
 				reasoningEmitted = true

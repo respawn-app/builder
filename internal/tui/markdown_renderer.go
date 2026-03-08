@@ -100,7 +100,7 @@ func (r *markdownRenderer) styleConfig() glamouransi.StyleConfig {
 
 func isMarkdownRole(role string) bool {
 	switch strings.TrimSpace(role) {
-	case "user", "assistant", "assistant_commentary", "reasoning":
+	case "user", "assistant", "assistant_commentary":
 		return true
 	default:
 		return false

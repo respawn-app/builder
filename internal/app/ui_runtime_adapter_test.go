@@ -69,10 +69,33 @@ func TestReasoningDeltaUpdatesDetailTranscriptLive(t *testing.T) {
 	m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: "u"})
 	m.forwardToView(tui.ToggleModeMsg{})
 
-	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventReasoningDelta, ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Text: "Plan summary"}})
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventReasoningDelta, ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Text: "Plan summary", Status: "Preparing patch"}})
 
 	if detail := stripANSIAndTrimRight(m.view.View()); !strings.Contains(detail, "Plan summary") {
 		t.Fatalf("expected live reasoning summary in detail view, got %q", detail)
+	}
+	if detail := stripANSIAndTrimRight(m.view.View()); strings.Contains(detail, "Preparing patch") {
+		t.Fatalf("expected reasoning status omitted from detail view, got %q", detail)
+	}
+	if got := m.activityStatus; got != "Preparing patch" {
+		t.Fatalf("expected reasoning status in status line activity, got %q", got)
+	}
+}
+
+func TestReasoningDeltaPreservesStatusAcrossPlainSummaryUpdates(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: "u"})
+	m.forwardToView(tui.ToggleModeMsg{})
+
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventReasoningDelta, ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Text: "Initial summary", Status: "Preparing patch"}})
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventReasoningDelta, ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Text: "Expanded plain summary"}})
+
+	if got := m.activityStatus; got != "Preparing patch" {
+		t.Fatalf("expected reasoning status preserved across plain summary update, got %q", got)
+	}
+	if detail := stripANSIAndTrimRight(m.view.View()); !strings.Contains(detail, "Expanded plain summary") {
+		t.Fatalf("expected updated plain reasoning summary in detail view, got %q", detail)
 	}
 }
 
@@ -81,12 +104,58 @@ func TestReasoningDeltaResetClearsLiveReasoningTranscript(t *testing.T) {
 	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
 	m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: "u"})
 	m.forwardToView(tui.ToggleModeMsg{})
+	m.activityStatus = "Preparing patch"
 	m.forwardToView(tui.UpsertStreamingReasoningMsg{Key: "rs_1:summary:0", Role: "reasoning", Text: "Plan summary"})
 
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventReasoningDeltaReset})
 
 	if detail := stripANSIAndTrimRight(m.view.View()); strings.Contains(detail, "Plan summary") {
 		t.Fatalf("expected live reasoning summary cleared after reset, got %q", detail)
+	}
+	if m.activityStatus != "" {
+		t.Fatalf("expected reasoning status cleared after reset, got %q", m.activityStatus)
+	}
+}
+
+func TestReasoningDeltaStatusOnlyClearsLiveReasoningForKey(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: "u"})
+	m.forwardToView(tui.ToggleModeMsg{})
+
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventReasoningDelta, ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Text: "Plan summary", Status: "Preparing patch"}})
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventReasoningDelta, ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Text: "", Status: "Running checks"}})
+
+	if detail := stripANSIAndTrimRight(m.view.View()); strings.Contains(detail, "Plan summary") {
+		t.Fatalf("expected stale live reasoning cleared when key becomes status-only, got %q", detail)
+	}
+	if got := m.activityStatus; got != "Running checks" {
+		t.Fatalf("expected latest status after status-only delta, got %q", got)
+	}
+}
+
+func TestReasoningDeltaMixedPayloadShowsStatusOnlyInStatusLine(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: "u"})
+	m.forwardToView(tui.ToggleModeMsg{})
+
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventReasoningDelta, ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Status: "Refactoring resultReceiver usage"}})
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventReasoningDelta, ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Text: "I am exploring ways to define atomic, low-level collection methods in NavResultStore that support reified filtering without reflection."}})
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventReasoningDelta, ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Text: "I am exploring ways to define atomic, low-level collection methods in NavResultStore that support reified filtering without reflection.", Status: "Preparing patch for navigation files"}})
+
+	if detail := stripANSIAndTrimRight(m.view.View()); strings.Contains(detail, "Refactoring resultReceiver usage") || strings.Contains(detail, "Preparing patch for navigation files") {
+		t.Fatalf("expected status-only reasoning lines omitted from detail view, got %q", detail)
+	}
+	if detail := stripANSIAndTrimRight(m.view.View()); !strings.Contains(detail, "I am exploring ways to define atomic, low-level collection methods") {
+		t.Fatalf("expected plain reasoning summary in detail view, got %q", detail)
+	}
+	status := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(status, "Preparing patch for navigation files") {
+		t.Fatalf("expected latest bold reasoning status in status line, got %q", status)
+	}
+	if strings.Contains(status, "I am exploring ways to define atomic") {
+		t.Fatalf("expected plain reasoning summary omitted from status line, got %q", status)
 	}
 }
 

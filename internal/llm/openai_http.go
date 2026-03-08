@@ -97,6 +97,7 @@ func (t *HTTPTransport) Generate(ctx context.Context, request OpenAIRequest) (Op
 	}
 
 	outputItems, assistantText, assistantPhase, toolCalls, reasoning, reasoningItems := parseOutputItems(decoded.Output)
+	reasoning = normalizeReasoningEntries(reasoning)
 	return OpenAIResponse{
 		AssistantText:  assistantText,
 		AssistantPhase: assistantPhase,
@@ -163,20 +164,20 @@ func (t *HTTPTransport) GenerateStreamWithEvents(ctx context.Context, request Op
 			key := reasoningEventKey(evt.ItemID, evt.OutputIndex, evt.SummaryIndex)
 			reasoningAcc.Append(reasoningRoleSummary, key, evt.Delta)
 			if callbacks.OnReasoningSummaryDelta != nil {
-				callbacks.OnReasoningSummaryDelta(ReasoningSummaryDelta{Key: key, Role: reasoningRoleSummary, Text: reasoningAcc.Current(reasoningRoleSummary, key)})
+				callbacks.OnReasoningSummaryDelta(reasoningSummaryDeltaFromText(key, reasoningRoleSummary, reasoningAcc.Current(reasoningRoleSummary, key)))
 			}
 		case "response.reasoning_summary_text.done":
 			key := reasoningEventKey(evt.ItemID, evt.OutputIndex, evt.SummaryIndex)
 			reasoningAcc.Set(reasoningRoleSummary, key, evt.Text)
 			if callbacks.OnReasoningSummaryDelta != nil {
-				callbacks.OnReasoningSummaryDelta(ReasoningSummaryDelta{Key: key, Role: reasoningRoleSummary, Text: reasoningAcc.Current(reasoningRoleSummary, key)})
+				callbacks.OnReasoningSummaryDelta(reasoningSummaryDeltaFromText(key, reasoningRoleSummary, reasoningAcc.Current(reasoningRoleSummary, key)))
 			}
 		case "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
 			if evt.Part.Type == "summary_text" {
 				key := reasoningEventKey(evt.ItemID, evt.OutputIndex, evt.SummaryIndex)
 				reasoningAcc.Set(reasoningRoleSummary, key, evt.Part.Text)
 				if callbacks.OnReasoningSummaryDelta != nil {
-					callbacks.OnReasoningSummaryDelta(ReasoningSummaryDelta{Key: key, Role: reasoningRoleSummary, Text: reasoningAcc.Current(reasoningRoleSummary, key)})
+					callbacks.OnReasoningSummaryDelta(reasoningSummaryDeltaFromText(key, reasoningRoleSummary, reasoningAcc.Current(reasoningRoleSummary, key)))
 				}
 			}
 		case "response.completed":
@@ -209,6 +210,7 @@ func (t *HTTPTransport) GenerateStreamWithEvents(ctx context.Context, request Op
 		acc.Merge(parsedCalls)
 		finalCalls = acc.ToToolCalls()
 		finalReasoning = mergeReasoningEntries(parsedReasoning, finalReasoning)
+		finalReasoning = normalizeReasoningEntries(finalReasoning)
 		finalReasoningItems = mergeReasoningItems(parsedReasoningItems, finalReasoningItems)
 		if len(parsedItems) > 0 {
 			finalOutputItems = parsedItems
@@ -229,7 +231,7 @@ func (t *HTTPTransport) GenerateStreamWithEvents(ctx context.Context, request Op
 		AssistantText:  finalText,
 		AssistantPhase: "",
 		ToolCalls:      finalCalls,
-		Reasoning:      finalReasoning,
+		Reasoning:      normalizeReasoningEntries(finalReasoning),
 		ReasoningItems: finalReasoningItems,
 		OutputItems:    finalOutputItems,
 		Usage:          usage,

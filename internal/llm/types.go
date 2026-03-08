@@ -482,9 +482,10 @@ type StreamClient interface {
 }
 
 type ReasoningSummaryDelta struct {
-	Key  string
-	Role string
-	Text string
+	Key    string
+	Role   string
+	Text   string
+	Status string
 }
 
 type StreamCallbacks struct {
