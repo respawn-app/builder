@@ -322,18 +322,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if role == "" {
 			role = "reasoning"
 		}
-		if key != "" && text != "" {
+		if key != "" {
 			updated := false
 			for i := range m.streamingReasoning {
 				if m.streamingReasoning[i].Key != key {
 					continue
 				}
-				m.streamingReasoning[i].Role = role
-				m.streamingReasoning[i].Text = text
 				updated = true
+				if text == "" {
+					m.streamingReasoning = append(m.streamingReasoning[:i], m.streamingReasoning[i+1:]...)
+				} else {
+					m.streamingReasoning[i].Role = role
+					m.streamingReasoning[i].Text = text
+				}
 				break
 			}
-			if !updated {
+			if !updated && text != "" {
 				m.streamingReasoning = append(m.streamingReasoning, StreamingReasoningEntry{Key: key, Role: role, Text: text})
 			}
 			detailChanged = true

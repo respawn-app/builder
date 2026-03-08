@@ -30,9 +30,13 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 		m.forwardToView(tui.ClearOngoingAssistantMsg{})
 	case runtime.EventReasoningDelta:
 		if evt.ReasoningDelta != nil {
+			if status := strings.TrimSpace(evt.ReasoningDelta.Status); status != "" {
+				m.activityStatus = status
+			}
 			m.forwardToView(tui.UpsertStreamingReasoningMsg{Key: evt.ReasoningDelta.Key, Role: evt.ReasoningDelta.Role, Text: evt.ReasoningDelta.Text})
 		}
 	case runtime.EventReasoningDeltaReset:
+		m.activityStatus = ""
 		m.forwardToView(tui.ClearStreamingReasoningMsg{})
 	case runtime.EventCompactionStarted:
 		m.compacting = true
