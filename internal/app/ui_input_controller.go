@@ -75,12 +75,39 @@ func (c uiInputController) cancelRollbackEditingToSelectionFlowCmd() tea.Cmd {
 	return c.rollbackTransitionCmd()
 }
 
+func (c uiInputController) startProcessListFlowCmd() tea.Cmd {
+	m := c.model
+	m.openProcessList()
+	refreshCmd := waitProcessListRefresh()
+	if overlayCmd := m.pushProcessOverlayIfNeeded(); overlayCmd != nil {
+		return tea.Batch(overlayCmd, refreshCmd)
+	}
+	return refreshCmd
+}
+
+func (c uiInputController) stopProcessListFlowCmd() tea.Cmd {
+	m := c.model
+	overlayCmd := m.popProcessOverlayIfNeeded()
+	m.closeProcessList()
+	if overlayCmd != nil {
+		return overlayCmd
+	}
+	return nil
+}
+
 var spinnerFrames = []string{"|", "/", "-", "\\"}
 var spinnerTickInterval = 360 * time.Millisecond
 var transientStatusDuration = 2200 * time.Millisecond
+var processListRefreshInterval = 1500 * time.Millisecond
 var errSubmissionInterrupted = errors.New("interrupted")
 var rollbackDoubleEscWindow = 500 * time.Millisecond
 var csiShiftEnterDedupWindow = 120 * time.Millisecond
+
+func waitProcessListRefresh() tea.Cmd {
+	return tea.Tick(processListRefreshInterval, func(time.Time) tea.Msg {
+		return processListRefreshTickMsg{}
+	})
+}
 
 func (c uiInputController) markPendingCSIShiftEnter() {
 	m := c.model
@@ -295,8 +322,7 @@ func (c uiInputController) applyCommandResult(commandResult commands.Result) (te
 	case commands.ActionProcesses:
 		args := strings.Fields(strings.TrimSpace(commandResult.Args))
 		if len(args) == 0 {
-			m.openProcessList()
-			return m, nil
+			return m, c.startProcessListFlowCmd()
 		}
 		action := strings.ToLower(strings.TrimSpace(args[0]))
 		id := ""

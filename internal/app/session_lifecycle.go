@@ -53,13 +53,19 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 			logger.Logf("config.source %s", line)
 		}
 
-		wiring, err := newRuntimeWiring(store, active, enabledTools, boot.cfg.WorkspaceRoot, boot.authManager, logger, runtimeWiringOptions{})
+		wiring, err := newRuntimeWiringWithBackground(store, active, enabledTools, boot.cfg.WorkspaceRoot, boot.authManager, logger, boot.background, runtimeWiringOptions{})
 		if err != nil {
 			_ = logger.Close()
 			return err
 		}
+		if boot.backgroundRouter != nil {
+			boot.backgroundRouter.SetActiveSession(store.Meta().SessionID, wiring.engine)
+		}
 		commandRegistry, err := commands.NewDefaultRegistryWithFilePrompts(boot.cfg.WorkspaceRoot, boot.cfg.Source.SettingsPath)
 		if err != nil {
+			if boot.backgroundRouter != nil {
+				boot.backgroundRouter.ClearActiveSession(store.Meta().SessionID)
+			}
 			_ = wiring.Close()
 			_ = logger.Close()
 			return err
@@ -74,6 +80,9 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 			store.Meta().Name,
 			store.Meta().Locked != nil,
 		)
+		if boot.backgroundRouter != nil {
+			boot.backgroundRouter.ClearActiveSession(store.Meta().SessionID)
+		}
 		_ = wiring.Close()
 		nextSessionInitialPrompt = ""
 		_ = logger.Close()

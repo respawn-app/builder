@@ -1,10 +1,13 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	goruntime "runtime"
 	"strings"
 	"sync"
@@ -18,6 +21,7 @@ import (
 	"builder/internal/session"
 	"builder/internal/tools"
 	"builder/internal/tools/askquestion"
+	shelltool "builder/internal/tools/shell"
 	"builder/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -1779,6 +1783,384 @@ func TestRenderChatPanelKeepsNewestLinesWhenContentOverflows(t *testing.T) {
 	}
 }
 
+func TestPSCommandOpensDetailOverlayInNativeMode(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+	).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 14
+	m.windowSizeKnown = true
+	m.input = "/ps"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if !updated.psVisible {
+		t.Fatal("expected /ps to open the process list")
+	}
+	if !updated.psOverlayPushed {
+		t.Fatal("expected /ps to push a dedicated overlay")
+	}
+	if updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected /ps to switch into detail mode, got %q", updated.view.Mode())
+	}
+	if cmd == nil {
+		t.Fatal("expected /ps open to emit a screen transition command")
+	}
+	plain := stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(plain, "Background Processes") {
+		t.Fatalf("expected process list title in overlay, got %q", plain)
+	}
+	if !strings.Contains(plain, "Esc/q close") {
+		t.Fatalf("expected process list help text in overlay, got %q", plain)
+	}
+	lines := strings.Split(plain, "\n")
+	if len(lines) < 3 {
+		t.Fatalf("expected multi-line /ps overlay, got %q", plain)
+	}
+	if strings.Contains(lines[0], "Background Processes") || strings.Contains(lines[0], "Esc/q close") {
+		t.Fatalf("expected /ps controls moved out of the header, top line=%q", lines[0])
+	}
+	footer := strings.Join(lines[max(0, len(lines)-3):], "\n")
+	if !strings.Contains(footer, "Background Processes") || !strings.Contains(footer, "Esc/q close") {
+		t.Fatalf("expected /ps controls near the bottom of the overlay, footer=%q", footer)
+	}
+
+	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if updated.psVisible {
+		t.Fatal("expected esc to close the process list")
+	}
+	if updated.psOverlayPushed {
+		t.Fatal("expected process overlay state cleared after close")
+	}
+	if updated.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected process list close to restore ongoing mode, got %q", updated.view.Mode())
+	}
+	if cmd == nil {
+		t.Fatal("expected /ps close to emit a screen transition command")
+	}
+}
+
+func TestPSOverlayInlineAppendsOutputToInputAndReturnsToOngoing(t *testing.T) {
+	manager, err := shelltool.NewManager()
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	workdir := t.TempDir()
+	start := func(label string) string {
+		res, startErr := manager.Start(context.Background(), shelltool.ExecRequest{
+			Command:        []string{"sh", "-c", fmt.Sprintf("printf '%s\\n'; sleep 30", label)},
+			DisplayCommand: label,
+			Workdir:        workdir,
+			YieldTime:      250 * time.Millisecond,
+		})
+		if startErr != nil {
+			t.Fatalf("start %s: %v", label, startErr)
+		}
+		if !res.Backgrounded {
+			t.Fatalf("expected %s to move to background", label)
+		}
+		return res.SessionID
+	}
+
+	firstID := start("first-job")
+	secondID := start("second-job")
+
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIBackgroundManager(manager),
+	).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 14
+	m.windowSizeKnown = true
+	m.input = "/ps"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	selected, ok := updated.selectedProcess()
+	if !ok {
+		t.Fatal("expected a selected background process")
+	}
+	if selected.ID != secondID {
+		t.Fatalf("expected newest process %s selected first, got %s", secondID, selected.ID)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	selected, ok = updated.selectedProcess()
+	if !ok {
+		t.Fatal("expected selection after moving down")
+	}
+	if selected.ID != firstID {
+		t.Fatalf("expected moved selection to reach %s, got %s", firstID, selected.ID)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if updated.psVisible {
+		t.Fatal("expected inline paste to close the process overlay")
+	}
+	if updated.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected inline paste to return to ongoing mode, got %q", updated.view.Mode())
+	}
+	if !strings.Contains(updated.input, "Output of bg shell "+firstID+":") {
+		t.Fatalf("expected inline paste prefix in input buffer, got %q", updated.input)
+	}
+	if !strings.Contains(updated.input, "first-job") {
+		t.Fatalf("expected pasted shell content in input buffer, got %q", updated.input)
+	}
+	if !strings.Contains(stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark"))), "Pasted shell transcript") {
+		t.Fatal("expected ongoing status line to show pasted shell transcript notice")
+	}
+}
+
+func TestPSOverlayInlineUnlocksLockedInputBeforeAppending(t *testing.T) {
+	manager, err := shelltool.NewManager()
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	workdir := t.TempDir()
+	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "printf 'locked-job\n'; sleep 30"},
+		DisplayCommand: "locked-job",
+		Workdir:        workdir,
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start locked-job: %v", err)
+	}
+	if !res.Backgrounded {
+		t.Fatal("expected background process")
+	}
+
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 14
+	m.windowSizeKnown = true
+	m.busy = true
+	m.input = "queued draft"
+	m.inputSubmitLocked = true
+	m.lockedInjectText = "queued draft"
+	m.pendingInjected = []string{"queued draft"}
+	controller := uiInputController{model: m}
+	_ = controller.startProcessListFlowCmd()
+	updated := m
+	var next tea.Model
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+
+	if updated.inputSubmitLocked {
+		t.Fatal("expected inline paste to unlock the input box")
+	}
+	if updated.lockedInjectText != "" {
+		t.Fatalf("expected lockedInjectText cleared, got %q", updated.lockedInjectText)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected pending injected messages cleared, got %d", len(updated.pendingInjected))
+	}
+	if !strings.Contains(updated.input, "Output of bg shell "+res.SessionID+":") {
+		t.Fatalf("expected pasted shell output in unlocked draft, got %q", updated.input)
+	}
+	if !strings.Contains(updated.input, "locked-job") {
+		t.Fatalf("expected shell preview content in unlocked draft, got %q", updated.input)
+	}
+	if updated.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected inline paste to end in ongoing mode, got %q", updated.view.Mode())
+	}
+}
+
+func TestPSOverlayRefreshTickUpdatesEntriesWhileOpen(t *testing.T) {
+	manager, err := shelltool.NewManager()
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 14
+	m.windowSizeKnown = true
+	m.input = "/ps"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if got := len(updated.psEntries); got != 0 {
+		t.Fatalf("expected empty /ps list before refresh tick, got %d", got)
+	}
+
+	workdir := t.TempDir()
+	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "printf 'tick-job\n'; sleep 30"},
+		DisplayCommand: "tick-job",
+		Workdir:        workdir,
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start tick-job: %v", err)
+	}
+	if !res.Backgrounded {
+		t.Fatal("expected tick-job to move to background")
+	}
+
+	next, cmd := updated.Update(processListRefreshTickMsg{})
+	updated = next.(*uiModel)
+	if got := len(updated.psEntries); got != 1 {
+		t.Fatalf("expected refresh tick to pull new process entry, got %d", got)
+	}
+	if updated.psEntries[0].ID != res.SessionID {
+		t.Fatalf("expected refresh tick to load session %s, got %s", res.SessionID, updated.psEntries[0].ID)
+	}
+	if cmd == nil {
+		t.Fatal("expected refresh tick to schedule the next refresh")
+	}
+}
+
+func TestOpenLogsFallsBackToEditorCommandWhenDefaultOpenFails(t *testing.T) {
+	manager, err := shelltool.NewManager()
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	workdir := t.TempDir()
+	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "printf 'log-job\n'; sleep 30"},
+		DisplayCommand: "log-job",
+		Workdir:        workdir,
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start log-job: %v", err)
+	}
+	if !res.Backgrounded {
+		t.Fatal("expected log-job to move to background")
+	}
+
+	originalOpenDefault := openDefault
+	openDefault = func(string) error { return errors.New("forced open failure") }
+	defer func() { openDefault = originalOpenDefault }()
+
+	marker := filepath.Join(t.TempDir(), "editor-opened")
+	oldVisual, hadVisual := os.LookupEnv("VISUAL")
+	oldEditor, hadEditor := os.LookupEnv("EDITOR")
+	oldShell, hadShell := os.LookupEnv("SHELL")
+	if err := os.Setenv("VISUAL", "touch "+marker); err != nil {
+		t.Fatalf("set VISUAL: %v", err)
+	}
+	if err := os.Unsetenv("EDITOR"); err != nil {
+		t.Fatalf("unset EDITOR: %v", err)
+	}
+	if err := os.Setenv("SHELL", "/bin/sh"); err != nil {
+		t.Fatalf("set SHELL: %v", err)
+	}
+	defer func() {
+		if hadVisual {
+			_ = os.Setenv("VISUAL", oldVisual)
+		} else {
+			_ = os.Unsetenv("VISUAL")
+		}
+		if hadEditor {
+			_ = os.Setenv("EDITOR", oldEditor)
+		} else {
+			_ = os.Unsetenv("EDITOR")
+		}
+		if hadShell {
+			_ = os.Setenv("SHELL", oldShell)
+		} else {
+			_ = os.Unsetenv("SHELL")
+		}
+	}()
+
+	out := &bytes.Buffer{}
+	model := NewUIModel(nil, closedRuntimeEvents(), closedAskEvents(), WithUIBackgroundManager(manager)).(*uiModel)
+	model.input = "/ps"
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := program.Run()
+		done <- runErr
+	}()
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	time.Sleep(20 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	time.Sleep(20 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, statErr := os.Stat(marker); statErr == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expected editor fallback to execute via tea.ExecProcess")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("program run failed: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+}
+
+func TestPSOverlayIgnoresTranscriptModeTogglesWhileOpen(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+	).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 14
+	m.windowSizeKnown = true
+	m.input = "/ps"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if !updated.psVisible || updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected /ps overlay open in detail mode, visible=%t mode=%q", updated.psVisible, updated.view.Mode())
+	}
+
+	next, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	updated = next.(*uiModel)
+	if !updated.psVisible || !updated.psOverlayPushed {
+		t.Fatalf("expected shift+tab ignored while /ps overlay open, visible=%t overlay=%t", updated.psVisible, updated.psOverlayPushed)
+	}
+	if updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected shift+tab to keep detail mode while /ps overlay open, got %q", updated.view.Mode())
+	}
+	if cmd != nil {
+		t.Fatal("expected no transcript toggle command while /ps overlay is open")
+	}
+
+	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	updated = next.(*uiModel)
+	if !updated.psVisible || !updated.psOverlayPushed {
+		t.Fatalf("expected ctrl+t ignored while /ps overlay open, visible=%t overlay=%t", updated.psVisible, updated.psOverlayPushed)
+	}
+	if updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected ctrl+t to keep detail mode while /ps overlay open, got %q", updated.view.Mode())
+	}
+	if cmd != nil {
+		t.Fatal("expected no transcript toggle command for ctrl+t while /ps overlay is open")
+	}
+}
+
 func TestSlashCommandPickerRendersSevenLines(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "/"
@@ -2527,28 +2909,6 @@ func TestStatusLineShowsContextUsageWhenAvailable(t *testing.T) {
 	}
 	if !strings.Contains(line, "▯▯▯▯▯▯▯▯▯▯") {
 		t.Fatalf("expected progress bar in status line, got %q", line)
-	}
-}
-
-func TestStatusLineShowsActivityAfterCacheSection(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
-	m.activityStatus = "Checking out repository"
-
-	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
-	if !containsInOrder(line, "cache --", "Checking out repository") {
-		t.Fatalf("expected activity status after cache section, got %q", line)
-	}
-	if !strings.Contains(line, "0%") {
-		t.Fatalf("expected context usage to remain visible with activity status, got %q", line)
 	}
 }
 

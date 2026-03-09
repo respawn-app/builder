@@ -19,10 +19,11 @@ import (
 )
 
 const (
-	defaultTimeout = 5 * time.Minute
-	maxTimeout     = time.Hour
-	defaultLimit   = 16_000
-	headTailSize   = 1000
+	defaultTimeout           = 5 * time.Minute
+	maxTimeout               = time.Hour
+	defaultLimit             = 16_000
+	headTailSize             = 1000
+	truncationBannerTemplate = "\n\n...[Output is very large, omitted %d bytes. Consider using more targeted commands to reduce output size]...\n\n"
 )
 
 var shellEnvOverrides = []string{
@@ -281,14 +282,46 @@ func truncate(s string, maxLen int) (string, bool, int) {
 	if len(s) <= maxLen {
 		return s, false, 0
 	}
-	head := s
-	if len(head) > headTailSize {
-		head = head[:headTailSize]
+	headLen, tailLen := truncationSegmentLengths(len(s), maxLen)
+	removed := len(s) - headLen - tailLen
+	return formatTruncatedPreview(s[:headLen], removed, s[len(s)-tailLen:]), true, removed
+}
+
+func truncationSegmentLengths(total int, maxLen int) (int, int) {
+	if total <= 1 {
+		return total, 0
 	}
-	tail := s
-	if len(tail) > headTailSize {
-		tail = tail[len(tail)-headTailSize:]
+	maxPreserve := min(total-1, headTailSize*2)
+	preserve := maxPreserve
+	if maxLen > 0 {
+		preserve = min(maxPreserve, maxLen)
 	}
-	removed := len(s) - len(head) - len(tail)
-	return fmt.Sprintf("%s\n\n...[Output is very large, omitted %d bytes. Consider using more targeted commands to reduce output size]...\n\n%s", head, removed, tail), true, removed
+	if preserve < 2 {
+		preserve = min(total-1, 2)
+	}
+	head := preserve / 2
+	tail := preserve - head
+	if head <= 0 {
+		head = 1
+		tail = preserve - head
+	}
+	if tail <= 0 {
+		tail = 1
+		head = preserve - tail
+	}
+	if head > headTailSize {
+		head = headTailSize
+	}
+	if tail > headTailSize {
+		tail = headTailSize
+	}
+	return head, tail
+}
+
+func truncationBannerLen(removed int) int {
+	return len(fmt.Sprintf(truncationBannerTemplate, removed))
+}
+
+func formatTruncatedPreview(head string, removed int, tail string) string {
+	return fmt.Sprintf("%s%s%s", head, fmt.Sprintf(truncationBannerTemplate, removed), tail)
 }

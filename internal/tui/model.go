@@ -24,11 +24,12 @@ const (
 var patchCountTokenPattern = regexp.MustCompile(`([+-]\d+)\b`)
 
 type TranscriptEntry struct {
-	Role       string
-	Text       string
-	Phase      llm.MessagePhase
-	ToolCallID string
-	ToolCall   *transcript.ToolCallMeta
+	Role        string
+	Text        string
+	OngoingText string
+	Phase       llm.MessagePhase
+	ToolCallID  string
+	ToolCall    *transcript.ToolCallMeta
 }
 
 type StreamingReasoningEntry struct {
@@ -53,11 +54,12 @@ type SetViewportSizeMsg struct {
 }
 
 type AppendTranscriptMsg struct {
-	Role       string
-	Text       string
-	Phase      llm.MessagePhase
-	ToolCallID string
-	ToolCall   *transcript.ToolCallMeta
+	Role        string
+	Text        string
+	OngoingText string
+	Phase       llm.MessagePhase
+	ToolCallID  string
+	ToolCall    *transcript.ToolCallMeta
 }
 
 type SetConversationMsg struct {
@@ -246,11 +248,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			role = "unknown"
 		}
 		m.transcript = append(m.transcript, TranscriptEntry{
-			Role:       role,
-			Text:       msg.Text,
-			Phase:      msg.Phase,
-			ToolCallID: strings.TrimSpace(msg.ToolCallID),
-			ToolCall:   cloneToolCallMeta(msg.ToolCall),
+			Role:        role,
+			Text:        msg.Text,
+			OngoingText: msg.OngoingText,
+			Phase:       msg.Phase,
+			ToolCallID:  strings.TrimSpace(msg.ToolCallID),
+			ToolCall:    cloneToolCallMeta(msg.ToolCall),
 		})
 		shouldAutoFollowOngoing = true
 		ongoingChanged = true

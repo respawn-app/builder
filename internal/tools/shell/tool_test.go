@@ -203,6 +203,31 @@ func TestTruncateBannerUsesByteWording(t *testing.T) {
 	}
 }
 
+func TestTruncateDoesNotDuplicateWholeOutputWhenShorterThanHeadTailWindow(t *testing.T) {
+	in := strings.Repeat("x", 543)
+	out, truncated, removed := truncate(in, 80)
+	if !truncated {
+		t.Fatal("expected truncation")
+	}
+	if removed <= 0 {
+		t.Fatalf("expected positive removed bytes, got %d", removed)
+	}
+	if strings.Contains(out, "omitted -") {
+		t.Fatalf("did not expect negative omitted bytes, got %q", out)
+	}
+	if strings.Count(out, in) > 0 {
+		t.Fatalf("did not expect full input duplicated in output, got %q", out)
+	}
+	headLen, tailLen := truncationSegmentLengths(len(in), 80)
+	wantMax := headLen + tailLen + truncationBannerLen(removed)
+	if got := len(out); got > wantMax {
+		t.Fatalf("expected bounded truncated output <= %d bytes, got %d", wantMax, got)
+	}
+	if len(out) >= len(in) {
+		t.Fatalf("expected truncated output smaller than input, got out=%d in=%d", len(out), len(in))
+	}
+}
+
 func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 	workspace := t.TempDir()
 	manager, err := NewManager()
@@ -210,7 +235,7 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 		t.Fatalf("new manager: %v", err)
 	}
 	t.Cleanup(func() { _ = manager.Close() })
-	execTool := NewExecCommandTool(workspace, 16_000, manager)
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
 	pollTool := NewWriteStdinTool(16_000, manager)
 
 	execInput, _ := json.Marshal(map[string]any{
@@ -233,6 +258,12 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 	if !strings.Contains(text, "session ID 1000") {
 		t.Fatalf("expected numeric session id, got %q", text)
 	}
+	if strings.Contains(text, "Wall time:") {
+		t.Fatalf("did not expect wall time for still-running background shell, got %q", text)
+	}
+	if strings.Contains(text, "Log file:") {
+		t.Fatalf("did not expect log file for still-running background shell, got %q", text)
+	}
 	if manager.Count() != 1 {
 		t.Fatalf("manager count = %d, want 1", manager.Count())
 	}
@@ -252,6 +283,12 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 	if !strings.Contains(pollText, "Process exited with code 0") {
 		t.Fatalf("expected exit code in poll output, got %q", pollText)
 	}
+	if !strings.Contains(pollText, "Wall time:") {
+		t.Fatalf("expected wall time once backgrounded shell completed, got %q", pollText)
+	}
+	if !strings.Contains(pollText, "Log file:") {
+		t.Fatalf("expected log file once backgrounded shell completed, got %q", pollText)
+	}
 	if !strings.Contains(pollText, "done") {
 		t.Fatalf("expected command output in poll output, got %q", pollText)
 	}
@@ -265,7 +302,7 @@ func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
 		t.Fatalf("new manager: %v", err)
 	}
 	t.Cleanup(func() { _ = manager.Close() })
-	execTool := NewExecCommandTool(workspace, 16_000, manager)
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
 	stdinTool := NewWriteStdinTool(16_000, manager)
 
 	execInput, _ := json.Marshal(map[string]any{
@@ -286,6 +323,12 @@ func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
 	if !strings.Contains(text, "Process moved to background.") {
 		t.Fatalf("expected background message, got %q", text)
 	}
+	if strings.Contains(text, "Wall time:") {
+		t.Fatalf("did not expect wall time for still-running interactive shell, got %q", text)
+	}
+	if strings.Contains(text, "Log file:") {
+		t.Fatalf("did not expect log file for still-running interactive shell, got %q", text)
+	}
 
 	stdinInput, _ := json.Marshal(map[string]any{
 		"session_id":    1000,
@@ -302,6 +345,12 @@ func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
 	stdinText := decodeStringToolOutput(t, stdinResult)
 	if !strings.Contains(stdinText, "Process exited with code 0") {
 		t.Fatalf("expected exit code in stdin output, got %q", stdinText)
+	}
+	if !strings.Contains(stdinText, "Wall time:") {
+		t.Fatalf("expected wall time once interactive background shell completed, got %q", stdinText)
+	}
+	if !strings.Contains(stdinText, "Log file:") {
+		t.Fatalf("expected log file once interactive background shell completed, got %q", stdinText)
 	}
 	if !strings.Contains(stdinText, "hello builder") {
 		t.Fatalf("expected echoed stdin in output, got %q", stdinText)
@@ -323,7 +372,7 @@ func TestExecCommandClosesStdinForNonInteractiveProcess(t *testing.T) {
 		default:
 		}
 	})
-	execTool := NewExecCommandTool(workspace, 16_000, manager)
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
 
 	execInput, _ := json.Marshal(map[string]any{
 		"cmd":           "if read line; then echo line:$line; else echo eof; fi",
@@ -341,6 +390,12 @@ func TestExecCommandClosesStdinForNonInteractiveProcess(t *testing.T) {
 	text := decodeStringToolOutput(t, result)
 	if strings.Contains(text, "Process moved to background.") {
 		t.Fatalf("expected immediate completion with closed stdin, got %q", text)
+	}
+	if strings.Contains(text, "Wall time:") {
+		t.Fatalf("did not expect wall time for foreground shell, got %q", text)
+	}
+	if strings.Contains(text, "Log file:") {
+		t.Fatalf("did not expect log file for foreground shell, got %q", text)
 	}
 	if !strings.Contains(text, "Process exited with code 0") {
 		t.Fatalf("expected exit code in output, got %q", text)

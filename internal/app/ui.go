@@ -27,6 +27,12 @@ type compactDoneMsg struct {
 
 type spinnerTickMsg struct{}
 
+type processListRefreshTickMsg struct{}
+
+type openProcessLogsDoneMsg struct {
+	err error
+}
+
 type clearTransientStatusMsg struct {
 	token uint64
 }
@@ -258,13 +264,13 @@ type uiModel struct {
 	sessionName              string
 	sessionID                string
 	psVisible                bool
+	psOverlayPushed          bool
 	psSelection              int
 	psEntries                []shelltool.Snapshot
 
 	transientStatus      string
 	transientStatusKind  uiStatusNoticeKind
 	transientStatusToken uint64
-	activityStatus       string
 	debugKeys            bool
 
 	transcriptEntries       []tui.TranscriptEntry
@@ -452,6 +458,20 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		next, cmd := m.inputController().handleSpinnerTick()
 		next.(*uiModel).syncViewport()
 		return next, cmd
+	case processListRefreshTickMsg:
+		if !m.psVisible {
+			m.syncViewport()
+			return m, nil
+		}
+		m.refreshProcessEntries()
+		m.syncViewport()
+		return m, waitProcessListRefresh()
+	case openProcessLogsDoneMsg:
+		m.syncViewport()
+		if msg.err != nil {
+			return m, m.setTransientStatusWithKind(msg.err.Error(), uiStatusNoticeError)
+		}
+		return m, nil
 	}
 
 	m.forwardToView(msg)

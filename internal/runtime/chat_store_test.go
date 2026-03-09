@@ -41,41 +41,41 @@ func TestChatStoreSnapshotProjectsConversation(t *testing.T) {
 	s.appendLocalEntry("system", "note")
 
 	snap := s.snapshot()
-	if len(snap.Entries) != 5 {
-		t.Fatalf("expected 5 entries, got %d (%+v)", len(snap.Entries), snap.Entries)
+	if len(snap.Entries) != 6 {
+		t.Fatalf("expected 6 entries, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
 	if snap.Entries[0].Role != "user" || snap.Entries[0].Text != "hello" {
 		t.Fatalf("unexpected first entry: %+v", snap.Entries[0])
 	}
-	if snap.Activity != "" {
-		t.Fatalf("expected commentary activity cleared after final assistant message, got %q", snap.Activity)
+	if snap.Entries[1].Role != "assistant" || snap.Entries[1].Text != "Let me check." {
+		t.Fatalf("unexpected commentary entry: %+v", snap.Entries[1])
 	}
-	if snap.Entries[1].Role != "tool_call" || !strings.Contains(snap.Entries[1].Text, "pwd") {
-		t.Fatalf("unexpected tool_call entry: %+v", snap.Entries[1])
-	}
-	if snap.Entries[1].ToolCallID != "call_1" {
-		t.Fatalf("unexpected tool_call id: %+v", snap.Entries[1])
-	}
-	if snap.Entries[1].ToolCall == nil || !snap.Entries[1].ToolCall.IsShell {
-		t.Fatalf("expected shell tool metadata, got %+v", snap.Entries[1].ToolCall)
-	}
-	if snap.Entries[1].ToolCall.TimeoutLabel != "timeout: 5m" {
-		t.Fatalf("unexpected timeout label: %+v", snap.Entries[1].ToolCall)
-	}
-	if strings.Contains(snap.Entries[1].Text, "workdir:") {
-		t.Fatalf("tool call should not include workdir line: %+v", snap.Entries[1])
-	}
-	if snap.Entries[2].Role != "tool_result_ok" || strings.TrimSpace(snap.Entries[2].Text) != "/tmp" {
-		t.Fatalf("unexpected tool_result entry: %+v", snap.Entries[2])
+	if snap.Entries[2].Role != "tool_call" || !strings.Contains(snap.Entries[2].Text, "pwd") {
+		t.Fatalf("unexpected tool_call entry: %+v", snap.Entries[2])
 	}
 	if snap.Entries[2].ToolCallID != "call_1" {
-		t.Fatalf("unexpected tool_result call id: %+v", snap.Entries[2])
+		t.Fatalf("unexpected tool_call id: %+v", snap.Entries[2])
 	}
-	if snap.Entries[3].Role != "assistant" || snap.Entries[3].Text != "done" {
-		t.Fatalf("unexpected assistant entry: %+v", snap.Entries[3])
+	if snap.Entries[2].ToolCall == nil || !snap.Entries[2].ToolCall.IsShell {
+		t.Fatalf("expected shell tool metadata, got %+v", snap.Entries[2].ToolCall)
 	}
-	if snap.Entries[4].Role != "system" || snap.Entries[4].Text != "note" {
-		t.Fatalf("unexpected local entry: %+v", snap.Entries[4])
+	if snap.Entries[2].ToolCall.TimeoutLabel != "timeout: 5m" {
+		t.Fatalf("unexpected timeout label: %+v", snap.Entries[2].ToolCall)
+	}
+	if strings.Contains(snap.Entries[2].Text, "workdir:") {
+		t.Fatalf("tool call should not include workdir line: %+v", snap.Entries[2])
+	}
+	if snap.Entries[3].Role != "tool_result_ok" || strings.TrimSpace(snap.Entries[3].Text) != "/tmp" {
+		t.Fatalf("unexpected tool_result entry: %+v", snap.Entries[3])
+	}
+	if snap.Entries[3].ToolCallID != "call_1" {
+		t.Fatalf("unexpected tool_result call id: %+v", snap.Entries[3])
+	}
+	if snap.Entries[4].Role != "assistant" || snap.Entries[4].Text != "done" {
+		t.Fatalf("unexpected assistant entry: %+v", snap.Entries[4])
+	}
+	if snap.Entries[5].Role != "system" || snap.Entries[5].Text != "note" {
+		t.Fatalf("unexpected local entry: %+v", snap.Entries[5])
 	}
 	if snap.Ongoing != "stream" {
 		t.Fatalf("unexpected ongoing text: %q", snap.Ongoing)
@@ -85,7 +85,7 @@ func TestChatStoreSnapshotProjectsConversation(t *testing.T) {
 	}
 }
 
-func TestChatStoreSnapshotProjectsCommentaryAsEphemeralActivity(t *testing.T) {
+func TestChatStoreSnapshotKeepsShortCommentaryInTranscript(t *testing.T) {
 	s := newChatStore()
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "hello"})
 	s.appendMessage(llm.Message{
@@ -98,14 +98,12 @@ func TestChatStoreSnapshotProjectsCommentaryAsEphemeralActivity(t *testing.T) {
 	})
 
 	snap := s.snapshot()
-	if snap.Activity != "Checking out repository" {
-		t.Fatalf("expected commentary activity status, got %q", snap.Activity)
-	}
 	for _, entry := range snap.Entries {
 		if entry.Role == "assistant" && entry.Text == "Checking out repository" {
-			t.Fatalf("expected commentary hidden from transcript entries, got %+v", snap.Entries)
+			return
 		}
 	}
+	t.Fatalf("expected short commentary preserved in transcript entries, got %+v", snap.Entries)
 }
 
 func TestChatStoreSnapshotKeepsSubstantiveCommentaryInTranscript(t *testing.T) {
@@ -114,9 +112,6 @@ func TestChatStoreSnapshotKeepsSubstantiveCommentaryInTranscript(t *testing.T) {
 	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseCommentary, Content: content})
 
 	snap := s.snapshot()
-	if snap.Activity != "" {
-		t.Fatalf("expected no activity status for substantive commentary, got %q", snap.Activity)
-	}
 	if len(snap.Entries) != 1 || snap.Entries[0].Role != "assistant" || snap.Entries[0].Phase != llm.MessagePhaseCommentary || snap.Entries[0].Text != content {
 		t.Fatalf("expected substantive commentary preserved in transcript, got %+v", snap.Entries)
 	}
@@ -346,20 +341,6 @@ func TestFormatToolResultWebSearchUsesPrettyJSON(t *testing.T) {
 	}
 }
 
-func TestChatStoreFiltersInjectedAgentsMessage(t *testing.T) {
-	s := newChatStore()
-	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: agentsInjectedPrefix + "\nsource: /tmp/AGENTS.md"})
-	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "real"})
-
-	snap := s.snapshot()
-	if len(snap.Entries) != 1 {
-		t.Fatalf("expected 1 visible entry, got %d (%+v)", len(snap.Entries), snap.Entries)
-	}
-	if snap.Entries[0].Text != "real" {
-		t.Fatalf("unexpected visible entry: %+v", snap.Entries[0])
-	}
-}
-
 func TestChatStoreHidesSyntheticCompactionSummaryMessage(t *testing.T) {
 	s := newChatStore()
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: prompts.CompactionSummaryPrefix + "\n\nsummary"})
@@ -386,6 +367,30 @@ func TestChatStoreSnapshotIncludesDeveloperErrorFeedbackAsErrorRole(t *testing.T
 	}
 	if snap.Entries[1].Role != "error" || snap.Entries[1].Text != "phase mismatch warning" {
 		t.Fatalf("expected developer error feedback mapped to error role, got %+v", snap.Entries[1])
+	}
+}
+
+func TestChatStoreSnapshotIncludesCompactTextForBackgroundNotice(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{
+		Role:           llm.RoleDeveloper,
+		MessageType:    llm.MessageTypeBackgroundNotice,
+		Content:        "Background shell 1000 completed.\nExit code: 0\nOutput:\nlong output",
+		CompactContent: "Background shell 1000 completed (exit 0)",
+	})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if snap.Entries[0].Role != "system" {
+		t.Fatalf("expected system role, got %+v", snap.Entries[0])
+	}
+	if snap.Entries[0].Text != "Background shell 1000 completed.\nExit code: 0\nOutput:\nlong output" {
+		t.Fatalf("unexpected detail text: %+v", snap.Entries[0])
+	}
+	if snap.Entries[0].OngoingText != "Background shell 1000 completed (exit 0)" {
+		t.Fatalf("unexpected ongoing text: %+v", snap.Entries[0])
 	}
 }
 

@@ -31,6 +31,7 @@ const (
 	defaultModelTimeoutSeconds = 400
 	defaultShellTimeoutSeconds = 300
 	defaultShellOutputMaxChars = 16_000
+	defaultBGShellsOutput      = "default"
 	defaultCompactionThreshold = 360_000
 	defaultReviewerFrequency   = "off"
 	defaultReviewerThinking    = "low"
@@ -46,6 +47,7 @@ type TUIAlternateScreenPolicy string
 type TUIScrollMode string
 
 type CompactionMode string
+type BGShellsOutputMode string
 
 const (
 	TUIAlternateScreenAuto   TUIAlternateScreenPolicy = "auto"
@@ -58,6 +60,10 @@ const (
 	CompactionModeNative CompactionMode = "native"
 	CompactionModeLocal  CompactionMode = "local"
 	CompactionModeNone   CompactionMode = "none"
+
+	BGShellsOutputDefault BGShellsOutputMode = "default"
+	BGShellsOutputVerbose BGShellsOutputMode = "verbose"
+	BGShellsOutputConcise BGShellsOutputMode = "concise"
 )
 
 type LoadOptions struct {
@@ -93,6 +99,7 @@ type Settings struct {
 	EnabledTools                     map[tools.ID]bool
 	Timeouts                         Timeouts
 	ShellOutputMaxChars              int
+	BGShellsOutput                   BGShellsOutputMode
 	Reviewer                         ReviewerSettings
 }
 
@@ -140,6 +147,7 @@ type fileSettings struct {
 	ModelContextWindow               int    `toml:"model_context_window"`
 	ContextCompactionThresholdTokens int    `toml:"context_compaction_threshold_tokens"`
 	ShellOutputMaxChars              int    `toml:"shell_output_max_chars"`
+	BGShellsOutput                   string `toml:"bg_shells_output"`
 	CompactionMode                   string `toml:"compaction_mode"`
 	Reviewer                         struct {
 		Frequency      string `toml:"frequency"`
@@ -174,6 +182,7 @@ func defaultSettings() Settings {
 		CompactionMode:                   CompactionMode(defaultCompactionMode),
 		EnabledTools:                     enabled,
 		ShellOutputMaxChars:              defaultShellOutputMaxChars,
+		BGShellsOutput:                   BGShellsOutputMode(defaultBGShellsOutput),
 		Timeouts: Timeouts{
 			ModelRequestSeconds: defaultModelTimeoutSeconds,
 			ShellDefaultSeconds: defaultShellTimeoutSeconds,
@@ -233,6 +242,11 @@ func validateSettings(v Settings) error {
 	}
 	if v.ShellOutputMaxChars <= 0 {
 		return fmt.Errorf("shell_output_max_chars must be > 0")
+	}
+	switch strings.ToLower(strings.TrimSpace(string(v.BGShellsOutput))) {
+	case "default", "verbose", "concise":
+	default:
+		return fmt.Errorf("invalid bg_shells_output %q (expected default|verbose|concise)", v.BGShellsOutput)
 	}
 	if v.ContextCompactionThresholdTokens <= 0 {
 		return fmt.Errorf("context_compaction_threshold_tokens must be > 0")
@@ -440,6 +454,7 @@ func defaultSettingsTOML() string {
 		"model_context_window":                defaults.ModelContextWindow,
 		"context_compaction_threshold_tokens": defaults.ContextCompactionThresholdTokens,
 		"shell_output_max_chars":              defaults.ShellOutputMaxChars,
+		"bg_shells_output":                    defaults.BGShellsOutput,
 		"compaction_mode":                     defaults.CompactionMode,
 		"tools":                               toolDefaults,
 		"timeouts": map[string]int{
@@ -463,6 +478,9 @@ func defaultSettingsTOML() string {
 		"# - native: provider-native compaction when available, fallback to local\n" +
 		"# - local: force local summary compaction\n" +
 		"# - none: disable both automatic and manual compaction\n\n" +
+		"# bg_shells_output applies directly to exit code 0 background shells.\n" +
+		"# Non-zero exits use verbose only when bg_shells_output=verbose; otherwise\n" +
+		"# they fall back to default truncation.\n\n" +
 		"# Note: tui_scroll_mode=native forces main UI to normal buffer even if\n" +
 		"# tui_alternate_screen=always, so transcript replay stays visible in scrollback.\n\n" +
 		"# This JSON block mirrors current defaults for readability:\n" +
@@ -483,6 +501,7 @@ func defaultSettingsTOML() string {
 		"model_context_window = " + strconv.Itoa(defaults.ModelContextWindow) + "\n" +
 		"context_compaction_threshold_tokens = " + strconv.Itoa(defaults.ContextCompactionThresholdTokens) + "\n" +
 		"shell_output_max_chars = " + strconv.Itoa(defaults.ShellOutputMaxChars) + "\n" +
+		"bg_shells_output = \"" + string(defaults.BGShellsOutput) + "\"\n" +
 		"compaction_mode = \"" + string(defaults.CompactionMode) + "\"\n" +
 		"persistence_root = \"" + DefaultPersistence + "\"\n\n" +
 		"[tools]\n"

@@ -23,14 +23,15 @@ type execCommandInput struct {
 }
 
 type ExecCommandTool struct {
-	workspaceRoot   string
-	defaultShell    string
-	defaultLogin    bool
-	outputLimit     int
-	background      *Manager
+	workspaceRoot  string
+	defaultShell   string
+	defaultLogin   bool
+	outputLimit    int
+	background     *Manager
+	ownerSessionID string
 }
 
-func NewExecCommandTool(workspaceRoot string, outputLimit int, background *Manager) *ExecCommandTool {
+func NewExecCommandTool(workspaceRoot string, outputLimit int, background *Manager, ownerSessionID string) *ExecCommandTool {
 	defaultShell := strings.TrimSpace(os.Getenv("SHELL"))
 	if defaultShell == "" {
 		defaultShell = "/bin/sh"
@@ -39,11 +40,12 @@ func NewExecCommandTool(workspaceRoot string, outputLimit int, background *Manag
 		outputLimit = defaultLimit
 	}
 	return &ExecCommandTool{
-		workspaceRoot: workspaceRoot,
-		defaultShell:  defaultShell,
-		defaultLogin:  true,
-		outputLimit:   outputLimit,
-		background:    background,
+		workspaceRoot:  workspaceRoot,
+		defaultShell:   defaultShell,
+		defaultLogin:   true,
+		outputLimit:    outputLimit,
+		background:     background,
+		ownerSessionID: strings.TrimSpace(ownerSessionID),
 	}
 }
 
@@ -96,6 +98,7 @@ func (t *ExecCommandTool) Call(ctx context.Context, c tools.Call) (tools.Result,
 	result, err := t.background.Start(ctx, ExecRequest{
 		Command:        argv,
 		DisplayCommand: cmdText,
+		OwnerSessionID: t.ownerSessionID,
 		Workdir:        workdir,
 		YieldTime:      yieldTime,
 		MaxOutputChars: maxChars,

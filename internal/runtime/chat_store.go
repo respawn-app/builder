@@ -14,23 +14,22 @@ import (
 )
 
 const (
-	agentsInjectedPrefix      = "# AGENTS.md auto-injection"
 	defaultShellTimeoutSecond = toolcodec.DefaultShellTimeoutSecs
 )
 
 type ChatEntry struct {
-	Role       string
-	Text       string
-	Phase      llm.MessagePhase
-	ToolCallID string
-	ToolCall   *transcript.ToolCallMeta
+	Role        string
+	Text        string
+	OngoingText string
+	Phase       llm.MessagePhase
+	ToolCallID  string
+	ToolCall    *transcript.ToolCallMeta
 }
 
 type ChatSnapshot struct {
 	Entries      []ChatEntry
 	Ongoing      string
 	OngoingError string
-	Activity     string
 }
 
 type storedToolCompletion struct {
@@ -51,7 +50,6 @@ type chatStore struct {
 	toolCompletions map[string]tools.Result
 	ongoing         string
 	ongoingError    string
-	activity        string
 	cwd             string
 
 	providerTokenEstimate      int
@@ -80,7 +78,6 @@ func newChatStore() *chatStore {
 func (s *chatStore) appendMessage(msg llm.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.updateActivityLocked(msg)
 	if msg.Role == llm.RoleAssistant && strings.TrimSpace(msg.Content) != "" {
 		s.ongoing = ""
 		s.ongoingError = ""
@@ -89,23 +86,6 @@ func (s *chatStore) appendMessage(msg llm.Message) {
 	s.items = append(s.items, llm.ItemsFromMessages([]llm.Message{msg})...)
 	s.providerTokenEstimateDirty = true
 }
-
-func (s *chatStore) updateActivityLocked(msg llm.Message) {
-	switch msg.Role {
-	case llm.RoleAssistant:
-		content := strings.TrimSpace(msg.Content)
-		if isShortAssistantCommentaryPreamble(msg) {
-			if content != "" {
-				s.activity = content
-			}
-			return
-		}
-		s.activity = ""
-	case llm.RoleUser:
-		s.activity = ""
-	}
-}
-
 func (s *chatStore) replaceHistory(items []llm.ResponseItem) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -210,12 +190,6 @@ func (s *chatStore) clearOngoingError() {
 	s.ongoingError = ""
 }
 
-func (s *chatStore) clearActivity() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.activity = ""
-}
-
 func (s *chatStore) appendLocalEntry(role, text string) {
 	if strings.TrimSpace(text) == "" {
 		return
@@ -275,12 +249,11 @@ func (s *chatStore) snapshot() ChatSnapshot {
 		case llm.RoleUser:
 			content := strings.TrimSpace(msg.Content)
 			if content != "" &&
-				!strings.HasPrefix(content, agentsInjectedPrefix) &&
 				!strings.HasPrefix(content, prompts.CompactionSummaryPrefix+"\n") {
 				entries = append(entries, ChatEntry{Role: "user", Text: msg.Content})
 			}
 		case llm.RoleAssistant:
-			if strings.TrimSpace(msg.Content) != "" && !isShortAssistantCommentaryPreamble(msg) {
+			if strings.TrimSpace(msg.Content) != "" {
 				entries = append(entries, ChatEntry{Role: "assistant", Text: msg.Content, Phase: msg.Phase})
 			}
 			if len(msg.ToolCalls) > 0 {
@@ -325,7 +298,6 @@ func (s *chatStore) snapshot() ChatSnapshot {
 		Entries:      entries,
 		Ongoing:      s.ongoing,
 		OngoingError: s.ongoingError,
-		Activity:     s.activity,
 	}
 }
 
@@ -337,7 +309,7 @@ func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
 	case llm.MessageTypeErrorFeedback:
 		return ChatEntry{Role: "error", Text: msg.Content}, true
 	case llm.MessageTypeBackgroundNotice:
-		return ChatEntry{Role: "system", Text: msg.Content}, true
+		return ChatEntry{Role: "system", Text: msg.Content, OngoingText: msg.CompactContent}, true
 	default:
 		return ChatEntry{}, false
 	}

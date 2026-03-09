@@ -10,13 +10,16 @@ import (
 	"builder/internal/config"
 	"builder/internal/session"
 	"builder/internal/shared/textutil"
+	shelltool "builder/internal/tools/shell"
 )
 
 type appBootstrap struct {
-	cfg          config.App
-	containerDir string
-	oauthOpts    auth.OpenAIOAuthOptions
-	authManager  *auth.Manager
+	cfg              config.App
+	containerDir     string
+	oauthOpts        auth.OpenAIOAuthOptions
+	authManager      *auth.Manager
+	background       *shelltool.Manager
+	backgroundRouter *backgroundEventRouter
 }
 
 func bootstrapApp(ctx context.Context, opts Options) (appBootstrap, error) {
@@ -54,11 +57,22 @@ func bootstrapApp(ctx context.Context, opts Options) (appBootstrap, error) {
 		return appBootstrap{}, err
 	}
 
+	background, err := shelltool.NewManager()
+	if err != nil {
+		return appBootstrap{}, err
+	}
+
 	return appBootstrap{
 		cfg:          cfg,
 		containerDir: containerDir,
 		oauthOpts:    oauthOpts,
 		authManager:  mgr,
+		background:   background,
+		backgroundRouter: newBackgroundEventRouter(
+			background,
+			cfg.Settings.ShellOutputMaxChars,
+			shelltool.NormalizeBackgroundOutputMode(string(cfg.Settings.BGShellsOutput)),
+		),
 	}, nil
 }
 

@@ -171,6 +171,32 @@ func TestErrorEntryVisibleInDetailAndHiddenInOngoing(t *testing.T) {
 	}
 }
 
+func TestBackgroundNoticeUsesCompactTextInOngoingAndFullTextInDetail(t *testing.T) {
+	m := NewModel(WithPreviewLines(8))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:        "system",
+		Text:        "Background shell 1000 completed.\nExit code: 0\nLog lines: 5\nOutput:\nvery long output",
+		OngoingText: "Background shell 1000 completed (exit 0)",
+	})
+
+	ongoing := plainTranscript(m.View())
+	if !strings.Contains(ongoing, "Background shell 1000 completed (exit 0)") {
+		t.Fatalf("expected compact background notice in ongoing, got %q", ongoing)
+	}
+	if strings.Contains(ongoing, "Log lines: 5") || strings.Contains(ongoing, "very long output") {
+		t.Fatalf("did not expect detail background notice in ongoing, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detail := plainTranscript(m.View())
+	if !strings.Contains(detail, "Background shell 1000 completed.") || !strings.Contains(detail, "Log lines: 5") || !strings.Contains(detail, "very long output") {
+		t.Fatalf("expected full background notice in detail, got %q", detail)
+	}
+	if strings.Contains(detail, "Background shell 1000 completed (exit 0)") {
+		t.Fatalf("did not expect compact background line in detail, got %q", detail)
+	}
+}
+
 func TestDetailSnapshotIsStaticUntilRetoggle(t *testing.T) {
 	m := NewModel()
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "question"})

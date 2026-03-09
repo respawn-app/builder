@@ -89,7 +89,7 @@ func NewDefaultRegistry() *Registry {
 	r.RegisterWithOptions("autocompaction", "Toggle auto-compaction (usage: /autocompaction [on|off]; empty toggles)", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
 		return Result{Handled: true, Action: ActionSetAutoCompaction, AutoCompactionMode: strings.ToLower(strings.TrimSpace(args))}
 	})
-	r.RegisterWithOptions("ps", "List background processes or manage one (usage: /ps [kill|inline|editor|open] <id>)", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
+	r.RegisterWithOptions("ps", "List background processes or manage one (usage: /ps [kill|inline|logs] <id>)", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
 		return Result{Handled: true, Action: ActionProcesses, Args: strings.TrimSpace(args)}
 	})
 	r.Register("back", "Jump to parent session if current session was spawned from another", func(string) Result {
