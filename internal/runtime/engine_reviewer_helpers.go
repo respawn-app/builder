@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"builder/internal/llm"
 	"builder/prompts"
@@ -196,9 +195,6 @@ func collectReviewerToolCallIDs(messages []llm.Message) map[string]bool {
 }
 
 func shouldIncludeReviewerMessage(message llm.Message) bool {
-	if isShortAssistantCommentaryPreamble(message) && len(message.ToolCalls) == 0 {
-		return false
-	}
 	if message.Role == llm.RoleDeveloper {
 		content := strings.TrimSpace(message.Content)
 		if content == "" {
@@ -304,24 +300,7 @@ func reviewerJSONValueFromString(content string) any {
 }
 
 func reviewerTranscriptContent(message llm.Message) string {
-	if isShortAssistantCommentaryPreamble(message) {
-		return ""
-	}
 	return strings.TrimSpace(message.Content)
-}
-
-func isShortAssistantCommentaryPreamble(message llm.Message) bool {
-	if message.Role != llm.RoleAssistant || message.Phase != llm.MessagePhaseCommentary {
-		return false
-	}
-	content := strings.TrimSpace(message.Content)
-	if content == "" {
-		return false
-	}
-	if strings.Contains(content, "\n") {
-		return false
-	}
-	return utf8.RuneCountInString(content) <= reviewerShortCommentaryMaxRunes
 }
 
 func reviewerMessageLabel(message llm.Message) string {

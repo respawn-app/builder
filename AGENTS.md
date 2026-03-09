@@ -45,7 +45,7 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
 - Maximize API cache hits, avoid mutation of past conversation history.
 - Keep TUI fast, avoid flicker, stable scroll, follow best practices.
 - Never use regex-based matching, parsing, replace hacks. Never use substring-based lookup to determine information presence. Avoid brittle and fragile text/string-based logic, and develop type-safe data structures, store structured data or metadata that can reliably be extracted instead.
-- Do not leave legacy fallbacks or preserve backward compatibility unless requested
+- Do not leave legacy fallbacks, migrations, or preserve backward compatibility unless requested
 
 ## Coding Guidelines
 
@@ -61,10 +61,10 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
 ## When designing model prompts (tool descriptions, etc.):
 
 - Clearly explain **how** and **when** the model should use the tool in descriptions.
-- Write tool schemas for parameters that specify whether it's optional, what's the default value, what the parameter does, what is its format (iso date etc)
+- Write tool schemas for parameters that specify whether it's optional, what's the default value, what the parameter does, what is its format (iso date/number etc)
 - Minimize parameters, minimize required parameters even more.
 - Handle common errors and hand the error message back to the model with a clear message and an instruction, e.g. avoid "status 124", instead: "tool timed out, try specifying a larger `timeout` param or adjusting the tool call to be faster".
-- Keep frequently edited files easily accessible, like a global "system_prompt.md" or "tool_definitions.go" files.
+- Keep frequently edited files easily accessible, like the global "system_prompt.md" or "tool_definitions.go" files.
 
 ## Important rules:
 

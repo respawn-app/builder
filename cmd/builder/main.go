@@ -9,12 +9,12 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"builder/internal/app"
+	"builder/internal/selfcmd"
 )
 
 type commonFlags struct {
@@ -358,11 +358,7 @@ func emitRunFinalText(w io.Writer, result string, continueHint string) {
 }
 
 func buildRunContinueCommand(sessionID string) string {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return ""
-	}
-	return fmt.Sprintf("builder run --continue %s %s", sessionID, strconv.Quote("follow-up"))
+	return selfcmd.ContinueRunCommand(sessionID)
 }
 
 func buildRunContinueHint(sessionID string) string {

@@ -6,39 +6,11 @@ import (
 	"builder/internal/shared/textutil"
 )
 
-type ReasoningSummaryParts struct {
-	Status  string
-	Summary string
-}
-
-func splitReasoningSummary(text string) ReasoningSummaryParts {
-	lines := textutil.SplitLinesCRLF(text)
-	if len(lines) == 0 {
-		return ReasoningSummaryParts{}
-	}
-
-	summaryLines := make([]string, 0, len(lines))
-	lastStatus := ""
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if status, ok := reasoningStatusLine(trimmed); ok {
-			lastStatus = status
-			continue
-		}
-		summaryLines = append(summaryLines, strings.TrimRight(line, " \t"))
-	}
-
-	return ReasoningSummaryParts{
-		Status:  lastStatus,
-		Summary: normalizeReasoningSummaryLines(summaryLines),
-	}
-}
-
 func normalizeReasoningEntries(entries []ReasoningEntry) []ReasoningEntry {
 	out := make([]ReasoningEntry, 0, len(entries))
 	for _, entry := range entries {
 		role := strings.TrimSpace(entry.Role)
-		summary := strings.TrimSpace(splitReasoningSummary(entry.Text).Summary)
+		summary := normalizeReasoningSummaryText(entry.Text)
 		if role == "" || summary == "" {
 			continue
 		}
@@ -48,24 +20,15 @@ func normalizeReasoningEntries(entries []ReasoningEntry) []ReasoningEntry {
 }
 
 func reasoningSummaryDeltaFromText(key, role, text string) ReasoningSummaryDelta {
-	parts := splitReasoningSummary(text)
 	return ReasoningSummaryDelta{
-		Key:    key,
-		Role:   role,
-		Text:   parts.Summary,
-		Status: parts.Status,
+		Key:  key,
+		Role: role,
+		Text: normalizeReasoningSummaryText(text),
 	}
 }
 
-func reasoningStatusLine(line string) (string, bool) {
-	if len(line) < 4 || !strings.HasPrefix(line, "**") || !strings.HasSuffix(line, "**") {
-		return "", false
-	}
-	inner := strings.TrimSpace(line[2 : len(line)-2])
-	if inner == "" {
-		return "", false
-	}
-	return inner, true
+func normalizeReasoningSummaryText(text string) string {
+	return normalizeReasoningSummaryLines(textutil.SplitLinesCRLF(text))
 }
 
 func normalizeReasoningSummaryLines(lines []string) string {

@@ -516,7 +516,7 @@ func (e *Engine) localCompactionSummary(ctx context.Context, input []llm.Respons
 	messages = sanitizeMessagesForLLM(messages)
 	items = sanitizeItemsForLLM(items)
 
-	req, err := llm.RequestFromLockedContractWithItems(locked, prompts.SystemPrompt, messages, items, e.requestTools())
+	req, err := llm.RequestFromLockedContractWithItems(locked, prompts.BaseSystemPrompt(), messages, items, e.requestTools())
 	if err != nil {
 		return "", err
 	}

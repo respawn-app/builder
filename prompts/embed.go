@@ -3,7 +3,11 @@ package prompts
 import (
 	_ "embed"
 	"strings"
+
+	"builder/internal/selfcmd"
 )
+
+const runCommandPlaceholder = "{{builder_run_command}}"
 
 //go:embed system_prompt.md
 var SystemPrompt string
@@ -36,7 +40,7 @@ var HeadlessModePrompt string
 var HeadlessModeExitPrompt string
 
 func MainSystemPrompt(includeToolPreambles bool) string {
-	base := strings.TrimSpace(SystemPrompt)
+	base := renderRunCommand(strings.TrimSpace(SystemPrompt))
 	if !includeToolPreambles {
 		return base
 	}
@@ -48,4 +52,19 @@ func MainSystemPrompt(includeToolPreambles bool) string {
 		return preambles
 	}
 	return base + "\n\n" + preambles
+}
+
+func BaseSystemPrompt() string {
+	return renderRunCommand(strings.TrimSpace(SystemPrompt))
+}
+
+func renderRunCommand(text string) string {
+	return renderRunCommandWithPrefix(text, selfcmd.RunCommandPrefix())
+}
+
+func renderRunCommandWithPrefix(text, prefix string) string {
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	return strings.ReplaceAll(text, runCommandPlaceholder, prefix)
 }
