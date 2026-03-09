@@ -34,14 +34,6 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 	separator := style.meta.Render(" | ")
 	left := strings.Join(segments, separator)
 	right := l.renderStatusLineRight(width, left, style)
-	if activity := l.renderActivityStatus(width, left, right, separator, style); activity != "" {
-		if left == "" {
-			left = activity
-		} else {
-			left += separator + activity
-		}
-	}
-	right = l.renderStatusLineRight(width, left, style)
 	if right == "" {
 		return padANSIRight(left, width)
 	}
@@ -51,23 +43,6 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 	}
 	return padANSIRight(left+strings.Repeat(" ", gap)+right, width)
 }
-
-func (l uiViewLayout) renderActivityStatus(width int, left string, right string, separator string, style uiStyles) string {
-	text := strings.TrimSpace(l.model.activityStatus)
-	if text == "" {
-		return ""
-	}
-	separatorWidth := 0
-	if left != "" {
-		separatorWidth = lipgloss.Width(separator)
-	}
-	available := width - lipgloss.Width(left) - lipgloss.Width(right) - separatorWidth - 1
-	if available <= 0 {
-		return ""
-	}
-	return style.meta.Render(truncateQueuedMessageLine(text, available))
-}
-
 func (l uiViewLayout) renderStatusLineRight(width int, left string, style uiStyles) string {
 	context := l.renderContextUsage(style)
 	notice := l.renderStatusNotice(width, left, context, style)

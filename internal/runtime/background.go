@@ -10,37 +10,49 @@ import (
 )
 
 func (e *Engine) HandleBackgroundShellEvent(evt BackgroundShellEvent) {
+	e.HandleBackgroundShellUpdate(evt, true)
+}
+
+func (e *Engine) HandleBackgroundShellUpdate(evt BackgroundShellEvent, queueNotice bool) {
 	e.emit(Event{Kind: EventBackgroundUpdated, Background: &evt})
+	if !queueNotice {
+		return
+	}
 	if evt.Type != "completed" && evt.Type != "killed" {
 		return
 	}
 	e.queueDeveloperNotice(llm.Message{
-		Role:        llm.RoleDeveloper,
-		MessageType: llm.MessageTypeBackgroundNotice,
-		Content:     formatBackgroundShellNotice(evt),
+		Role:           llm.RoleDeveloper,
+		MessageType:    llm.MessageTypeBackgroundNotice,
+		Content:        formatBackgroundShellNotice(evt),
+		CompactContent: formatBackgroundShellCompact(evt),
 	})
 }
 
 func formatBackgroundShellNotice(evt BackgroundShellEvent) string {
+	if strings.TrimSpace(evt.NoticeText) != "" {
+		return strings.TrimSpace(evt.NoticeText)
+	}
 	parts := []string{fmt.Sprintf("Background shell %s %s.", evt.ID, evt.State)}
 	if code := evt.ExitCode; code != nil {
 		parts = append(parts, fmt.Sprintf("Exit code: %d", *code))
-	}
-	if strings.TrimSpace(evt.Command) != "" {
-		parts = append(parts, "Command:")
-		parts = append(parts, evt.Command)
-	}
-	if strings.TrimSpace(evt.Workdir) != "" {
-		parts = append(parts, fmt.Sprintf("Workdir: %s", evt.Workdir))
-	}
-	if strings.TrimSpace(evt.LogPath) != "" {
-		parts = append(parts, fmt.Sprintf("Log file: %s", evt.LogPath))
 	}
 	if strings.TrimSpace(evt.Preview) != "" {
 		parts = append(parts, "Output:")
 		parts = append(parts, evt.Preview)
 	}
 	return strings.Join(parts, "\n")
+}
+
+func formatBackgroundShellCompact(evt BackgroundShellEvent) string {
+	if strings.TrimSpace(evt.CompactText) != "" {
+		return strings.TrimSpace(evt.CompactText)
+	}
+	text := fmt.Sprintf("Background shell %s %s", evt.ID, evt.State)
+	if code := evt.ExitCode; code != nil {
+		text = fmt.Sprintf("%s (exit %d)", text, *code)
+	}
+	return text
 }
 
 func (e *Engine) queueDeveloperNotice(msg llm.Message) {

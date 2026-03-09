@@ -31,6 +31,11 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if boot.background != nil {
+			_ = boot.background.Close()
+		}
+	}()
 	return runSessionLifecycle(ctx, boot, strings.TrimSpace(opts.SessionID))
 }
 
@@ -39,6 +44,11 @@ func RunPrompt(ctx context.Context, opts Options, prompt string, timeout time.Du
 	if err != nil {
 		return RunPromptResult{}, err
 	}
+	defer func() {
+		if boot.background != nil {
+			_ = boot.background.Close()
+		}
+	}()
 	return runPrompt(ctx, boot, strings.TrimSpace(opts.SessionID), prompt, timeout, progress)
 }
 

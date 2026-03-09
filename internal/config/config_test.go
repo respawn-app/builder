@@ -80,6 +80,9 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.ShellOutputMaxChars != 16000 {
 		t.Fatalf("default shell_output_max_chars mismatch: %d", cfg.Settings.ShellOutputMaxChars)
 	}
+	if cfg.Settings.BGShellsOutput != BGShellsOutputDefault {
+		t.Fatalf("default bg_shells_output mismatch: %q", cfg.Settings.BGShellsOutput)
+	}
 	if cfg.Settings.Reviewer.Frequency != "off" {
 		t.Fatalf("expected default reviewer.frequency=off, got %q", cfg.Settings.Reviewer.Frequency)
 	}
@@ -611,6 +614,48 @@ func TestLoadShellOutputMaxCharsPrecedenceAndValidation(t *testing.T) {
 	t.Setenv("BUILDER_SHELL_OUTPUT_MAX_CHARS", "0")
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
 		t.Fatal("expected invalid shell_output_max_chars")
+	}
+}
+
+func TestLoadBGShellsOutputPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("bg_shells_output = \"concise\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.BGShellsOutput != BGShellsOutputConcise {
+		t.Fatalf("expected file bg_shells_output=concise, got %q", cfg.Settings.BGShellsOutput)
+	}
+	if got := cfg.Source.Sources["bg_shells_output"]; got != "file" {
+		t.Fatalf("expected bg_shells_output source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_BG_SHELLS_OUTPUT", "verbose")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.BGShellsOutput != BGShellsOutputVerbose {
+		t.Fatalf("expected env bg_shells_output=verbose, got %q", cfg.Settings.BGShellsOutput)
+	}
+	if got := cfg.Source.Sources["bg_shells_output"]; got != "env" {
+		t.Fatalf("expected bg_shells_output source env, got %q", got)
+	}
+
+	t.Setenv("BUILDER_BG_SHELLS_OUTPUT", "loud")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid bg_shells_output")
 	}
 }
 

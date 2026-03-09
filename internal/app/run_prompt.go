@@ -57,7 +57,7 @@ func runPrompt(ctx context.Context, boot appBootstrap, initialSessionID, prompt 
 		logger.Logf("config.source %s", line)
 	}
 
-	wiring, err := newRuntimeWiring(store, active, enabledTools, boot.cfg.WorkspaceRoot, boot.authManager, logger, runtimeWiringOptions{
+	wiring, err := newRuntimeWiringWithBackground(store, active, enabledTools, boot.cfg.WorkspaceRoot, boot.authManager, logger, boot.background, runtimeWiringOptions{
 		AskHandler: runPromptAskHandler,
 		Headless:   true,
 		OnEvent: func(evt runtime.Event) {
@@ -67,7 +67,13 @@ func runPrompt(ctx context.Context, boot appBootstrap, initialSessionID, prompt 
 	if err != nil {
 		return RunPromptResult{}, err
 	}
+	if boot.backgroundRouter != nil {
+		boot.backgroundRouter.SetActiveSession(store.Meta().SessionID, wiring.engine)
+	}
 	defer func() {
+		if boot.backgroundRouter != nil {
+			boot.backgroundRouter.ClearActiveSession(store.Meta().SessionID)
+		}
 		_ = wiring.Close()
 	}()
 

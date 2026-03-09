@@ -60,6 +60,7 @@ type Message struct {
 	Role           Role            `json:"role"`
 	MessageType    MessageType     `json:"message_type,omitempty"`
 	Content        string          `json:"content,omitempty"`
+	CompactContent string          `json:"compact_content,omitempty"`
 	Name           string          `json:"name,omitempty"`
 	ToolCallID     string          `json:"tool_call_id,omitempty"`
 	Phase          MessagePhase    `json:"phase,omitempty"`
@@ -87,6 +88,7 @@ type ResponseItem struct {
 	Name             string           `json:"name,omitempty"`
 	CallID           string           `json:"call_id,omitempty"`
 	Content          string           `json:"content,omitempty"`
+	CompactContent   string           `json:"compact_content,omitempty"`
 	Arguments        json.RawMessage  `json:"arguments,omitempty"`
 	Output           json.RawMessage  `json:"output,omitempty"`
 	ReasoningSummary []ReasoningEntry `json:"reasoning_summary,omitempty"`
@@ -125,11 +127,12 @@ func ItemsFromMessages(messages []Message) []ResponseItem {
 		case RoleAssistant:
 			if strings.TrimSpace(msg.Content) != "" {
 				out = append(out, ResponseItem{
-					Type:        ResponseItemTypeMessage,
-					Role:        RoleAssistant,
-					MessageType: msg.MessageType,
-					Phase:       msg.Phase,
-					Content:     msg.Content,
+					Type:           ResponseItemTypeMessage,
+					Role:           RoleAssistant,
+					MessageType:    msg.MessageType,
+					Phase:          msg.Phase,
+					Content:        msg.Content,
+					CompactContent: msg.CompactContent,
 				})
 			}
 			for _, tc := range msg.ToolCalls {
@@ -173,11 +176,12 @@ func ItemsFromMessages(messages []Message) []ResponseItem {
 				continue
 			}
 			out = append(out, ResponseItem{
-				Type:        ResponseItemTypeMessage,
-				Role:        msg.Role,
-				MessageType: msg.MessageType,
-				Content:     msg.Content,
-				Name:        msg.Name,
+				Type:           ResponseItemTypeMessage,
+				Role:           msg.Role,
+				MessageType:    msg.MessageType,
+				Content:        msg.Content,
+				CompactContent: msg.CompactContent,
+				Name:           msg.Name,
 			})
 		}
 	}
@@ -200,11 +204,12 @@ func MessagesFromItems(items []ResponseItem) []Message {
 				role = RoleUser
 			}
 			msg := Message{
-				Role:        role,
-				MessageType: item.MessageType,
-				Phase:       item.Phase,
-				Content:     item.Content,
-				Name:        item.Name,
+				Role:           role,
+				MessageType:    item.MessageType,
+				Phase:          item.Phase,
+				Content:        item.Content,
+				CompactContent: item.CompactContent,
+				Name:           item.Name,
 			}
 			out = append(out, msg)
 			if role == RoleAssistant {
@@ -482,10 +487,9 @@ type StreamClient interface {
 }
 
 type ReasoningSummaryDelta struct {
-	Key    string
-	Role   string
-	Text   string
-	Status string
+	Key  string
+	Role string
+	Text string
 }
 
 type StreamCallbacks struct {

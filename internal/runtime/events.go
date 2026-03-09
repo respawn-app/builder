@@ -56,6 +56,8 @@ type BackgroundShellEvent struct {
 	Command           string
 	Workdir           string
 	LogPath           string
+	NoticeText        string
+	CompactText       string
 	Preview           string
 	Removed           int
 	ExitCode          *int

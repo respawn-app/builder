@@ -6,10 +6,12 @@ import (
 	"builder/internal/runtime"
 	"builder/internal/session"
 	"builder/internal/tools"
+	shelltool "builder/internal/tools/shell"
 	"context"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -65,6 +67,65 @@ func TestResolveSessionActionNewSessionUsesForceNewFlow(t *testing.T) {
 	}
 	if initialPrompt != "hello" {
 		t.Fatalf("expected initial prompt passthrough, got %q", initialPrompt)
+	}
+}
+
+func TestNewSessionTransitionKeepsBackgroundProcessesAlive(t *testing.T) {
+	manager, err := shelltool.NewManager()
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	workdir := t.TempDir()
+	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "printf 'transition-job\n'; sleep 30"},
+		DisplayCommand: "transition-job",
+		Workdir:        workdir,
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start background process: %v", err)
+	}
+	if !res.Backgrounded {
+		t.Fatal("expected process to move to background")
+	}
+
+	root := t.TempDir()
+	nextSessionID, initialPrompt, parentSessionID, forceNewSession, shouldContinue, err := resolveSessionAction(
+		context.Background(),
+		appBootstrap{background: manager},
+		nil,
+		UITransition{Action: UIActionNewSession, InitialPrompt: "hello", ParentSessionID: "parent-1"},
+	)
+	if err != nil {
+		t.Fatalf("resolve session action: %v", err)
+	}
+	if !shouldContinue || !forceNewSession {
+		t.Fatalf("expected new-session transition, shouldContinue=%t forceNew=%t", shouldContinue, forceNewSession)
+	}
+	if nextSessionID != "" || initialPrompt != "hello" {
+		t.Fatalf("unexpected transition payload nextSessionID=%q initialPrompt=%q", nextSessionID, initialPrompt)
+	}
+
+	wiring := &runtimeWiring{background: manager}
+	if err := wiring.Close(); err != nil {
+		t.Fatalf("close wiring: %v", err)
+	}
+
+	store, err := openOrCreateSession(root, root, nextSessionID, workdir, "dark", config.TUIAlternateScreenAuto, forceNewSession, parentSessionID)
+	if err != nil {
+		t.Fatalf("open or create next session: %v", err)
+	}
+	if store.Meta().ParentSessionID != "parent-1" {
+		t.Fatalf("expected parent session id preserved across new session transition, got %q", store.Meta().ParentSessionID)
+	}
+	entries := manager.List()
+	if len(entries) != 1 {
+		t.Fatalf("expected background process to survive session transition, got %d entries", len(entries))
+	}
+	if entries[0].ID != res.SessionID {
+		t.Fatalf("expected surviving background process %s, got %s", res.SessionID, entries[0].ID)
 	}
 }
 

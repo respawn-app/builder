@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"builder/internal/auth"
@@ -27,6 +28,72 @@ type runtimeWiring struct {
 	background  *shelltool.Manager
 }
 
+type backgroundEventRouter struct {
+	mu              sync.RWMutex
+	activeSessionID string
+	activeEngine    *runtime.Engine
+	outputLimit     int
+	outputMode      shelltool.BackgroundOutputMode
+}
+
+func newBackgroundEventRouter(background *shelltool.Manager, outputLimit int, outputMode shelltool.BackgroundOutputMode) *backgroundEventRouter {
+	router := &backgroundEventRouter{outputLimit: outputLimit, outputMode: outputMode}
+	if background != nil {
+		background.SetEventHandler(router.handle)
+	}
+	return router
+}
+
+func (r *backgroundEventRouter) SetActiveSession(sessionID string, engine *runtime.Engine) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.activeSessionID = strings.TrimSpace(sessionID)
+	r.activeEngine = engine
+}
+
+func (r *backgroundEventRouter) ClearActiveSession(sessionID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if strings.TrimSpace(sessionID) != "" && r.activeSessionID != strings.TrimSpace(sessionID) {
+		return
+	}
+	r.activeSessionID = ""
+	r.activeEngine = nil
+}
+
+func (r *backgroundEventRouter) handle(evt shelltool.Event) {
+	r.mu.RLock()
+	activeSessionID := r.activeSessionID
+	activeEngine := r.activeEngine
+	outputLimit := r.outputLimit
+	outputMode := r.outputMode
+	r.mu.RUnlock()
+	if activeEngine == nil {
+		return
+	}
+	summary := shelltool.BackgroundNoticeSummary{}
+	if evt.Type == shelltool.EventCompleted || evt.Type == shelltool.EventKilled {
+		summary = shelltool.SummarizeBackgroundEvent(evt, shelltool.BackgroundNoticeOptions{
+			MaxChars:          outputLimit,
+			SuccessOutputMode: outputMode,
+		})
+	}
+	activeEngine.HandleBackgroundShellUpdate(runtime.BackgroundShellEvent{
+		Type:              string(evt.Type),
+		ID:                evt.Snapshot.ID,
+		State:             evt.Snapshot.State,
+		Command:           evt.Snapshot.Command,
+		Workdir:           evt.Snapshot.Workdir,
+		LogPath:           evt.Snapshot.LogPath,
+		NoticeText:        summary.DetailText,
+		CompactText:       summary.OngoingText,
+		Preview:           evt.Preview,
+		Removed:           evt.Removed,
+		ExitCode:          cloneIntPtr(evt.Snapshot.ExitCode),
+		UserRequestedKill: evt.Snapshot.KillRequested,
+	}, strings.TrimSpace(evt.Snapshot.OwnerSessionID) != "" && strings.TrimSpace(evt.Snapshot.OwnerSessionID) == activeSessionID)
+}
+
 type runtimeWiringOptions struct {
 	AskHandler func(req askquestion.Request) (string, error)
 	OnEvent    func(evt runtime.Event)
@@ -34,16 +101,22 @@ type runtimeWiringOptions struct {
 }
 
 func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools []tools.ID, workspaceRoot string, mgr *auth.Manager, logger *runLogger, opts runtimeWiringOptions) (*runtimeWiring, error) {
+	return newRuntimeWiringWithBackground(store, active, enabledTools, workspaceRoot, mgr, logger, nil, opts)
+}
+
+func newRuntimeWiringWithBackground(store *session.Store, active config.Settings, enabledTools []tools.ID, workspaceRoot string, mgr *auth.Manager, logger *runLogger, background *shelltool.Manager, opts runtimeWiringOptions) (*runtimeWiring, error) {
 	bells := newBellHooks(defaultTerminalNotifier(active.NotificationMethod))
 
 	toolRegistry, askBroker, background, err := buildToolRegistry(
 		workspaceRoot,
+		store.Meta().SessionID,
 		enabledTools,
 		time.Duration(active.Timeouts.ShellDefaultSeconds)*time.Second,
 		active.ShellOutputMaxChars,
 		active.AllowNonCwdEdits,
 		llm.SupportsVisionInputsModel(active.Model),
 		logger,
+		background,
 	)
 	if err != nil {
 		return nil, err
@@ -131,23 +204,6 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 	if err != nil {
 		return nil, err
 	}
-	if background != nil {
-		background.SetEventHandler(func(evt shelltool.Event) {
-			eng.HandleBackgroundShellEvent(runtime.BackgroundShellEvent{
-				Type:              string(evt.Type),
-				ID:                evt.Snapshot.ID,
-				State:             evt.Snapshot.State,
-				Command:           evt.Snapshot.Command,
-				Workdir:           evt.Snapshot.Workdir,
-				LogPath:           evt.Snapshot.LogPath,
-				Preview:           evt.Preview,
-				Removed:           evt.Removed,
-				ExitCode:          cloneIntPtr(evt.Snapshot.ExitCode),
-				UserRequestedKill: evt.Snapshot.KillRequested,
-			})
-		})
-	}
-
 	return &runtimeWiring{
 		engine:      eng,
 		askBridge:   askBridge,
@@ -157,10 +213,7 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 }
 
 func (w *runtimeWiring) Close() error {
-	if w == nil || w.background == nil {
-		return nil
-	}
-	return w.background.Close()
+	return nil
 }
 
 func boolRef(v bool) *bool {
@@ -188,11 +241,14 @@ func configSourceLines(src config.SourceReport) []string {
 	return lines
 }
 
-func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTimeout time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsViewImage bool, logger *runLogger) (*tools.Registry, *askquestion.Broker, *shelltool.Manager, error) {
+func buildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []tools.ID, shellDefaultTimeout time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsViewImage bool, logger *runLogger, background *shelltool.Manager) (*tools.Registry, *askquestion.Broker, *shelltool.Manager, error) {
 	broker := askquestion.NewBroker()
-	background, err := shelltool.NewManager()
-	if err != nil {
-		return nil, nil, nil, err
+	if background == nil {
+		var err error
+		background, err = shelltool.NewManager()
+		if err != nil {
+			return nil, nil, nil, err
+		}
 	}
 	patchOutsideWorkspaceApprover := newOutsideWorkspaceApprover(broker, "editing")
 	readOutsideWorkspaceApprover := newOutsideWorkspaceApprover(broker, "reading")
@@ -233,7 +289,7 @@ func buildToolRegistry(workspaceRoot string, enabled []tools.ID, shellDefaultTim
 			return shelltool.New(workspaceRoot, shellOutputMaxChars, shelltool.WithDefaultTimeout(shellDefaultTimeout))
 		},
 		tools.ToolExecCommand: func() tools.Handler {
-			return shelltool.NewExecCommandTool(workspaceRoot, shellOutputMaxChars, background)
+			return shelltool.NewExecCommandTool(workspaceRoot, shellOutputMaxChars, background, ownerSessionID)
 		},
 		tools.ToolWriteStdin: func() tools.Handler {
 			return shelltool.NewWriteStdinTool(shellOutputMaxChars, background)

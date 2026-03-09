@@ -294,7 +294,7 @@ func (m Model) buildOngoingBlocks(includeStreaming bool) []ongoingBlock {
 		case "tool_result", "tool_result_ok", "tool_result_error":
 			continue
 		default:
-			text := entry.Text
+			text := m.ongoingEntryText(entry)
 			if role == "reviewer_status" {
 				text = compactReviewerStatusForOngoing(text)
 			}
@@ -314,6 +314,13 @@ func (m Model) buildOngoingBlocks(includeStreaming bool) []ongoingBlock {
 		})
 	}
 	return blocks
+}
+
+func (m Model) ongoingEntryText(entry TranscriptEntry) string {
+	if strings.TrimSpace(entry.OngoingText) != "" {
+		return entry.OngoingText
+	}
+	return entry.Text
 }
 
 func (m Model) ongoingLineRangeForEntry(entryIndex int) (int, int, bool) {

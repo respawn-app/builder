@@ -60,15 +60,16 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 	}
 
 	for _, entry := range m.transcriptEntries[start:] {
-		if strings.TrimSpace(entry.Text) == "" {
+		if strings.TrimSpace(ongoingTranscriptText(entry)) == "" {
 			continue
 		}
 		next, _ := m.nativeFormatter.Update(tui.AppendTranscriptMsg{
-			Role:       entry.Role,
-			Text:       entry.Text,
-			Phase:      entry.Phase,
-			ToolCallID: entry.ToolCallID,
-			ToolCall:   entry.ToolCall,
+			Role:        entry.Role,
+			Text:        entry.Text,
+			OngoingText: entry.OngoingText,
+			Phase:       entry.Phase,
+			ToolCallID:  entry.ToolCallID,
+			ToolCall:    entry.ToolCall,
 		})
 		if casted, ok := next.(tui.Model); ok {
 			m.nativeFormatter = casted
@@ -149,11 +150,20 @@ func nonEmptyNativeEntries(entries []tui.TranscriptEntry) []tui.TranscriptEntry 
 	filtered := make([]tui.TranscriptEntry, 0, len(entries))
 	for _, entry := range entries {
 		if strings.TrimSpace(entry.Text) == "" {
-			continue
+			if strings.TrimSpace(entry.OngoingText) == "" {
+				continue
+			}
 		}
 		filtered = append(filtered, entry)
 	}
 	return filtered
+}
+
+func ongoingTranscriptText(entry tui.TranscriptEntry) string {
+	if strings.TrimSpace(entry.OngoingText) != "" {
+		return entry.OngoingText
+	}
+	return entry.Text
 }
 
 func cloneNativeEntries(entries []tui.TranscriptEntry) []tui.TranscriptEntry {
@@ -175,7 +185,7 @@ func nativeEntriesPrefixEqual(entries []tui.TranscriptEntry, prefix []tui.Transc
 }
 
 func nativeEntryEqual(left tui.TranscriptEntry, right tui.TranscriptEntry) bool {
-	if left.Role != right.Role || left.Text != right.Text || left.Phase != right.Phase || left.ToolCallID != right.ToolCallID {
+	if left.Role != right.Role || left.Text != right.Text || left.OngoingText != right.OngoingText || left.Phase != right.Phase || left.ToolCallID != right.ToolCallID {
 		return false
 	}
 	if left.ToolCall == nil || right.ToolCall == nil {

@@ -30,13 +30,9 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 		m.forwardToView(tui.ClearOngoingAssistantMsg{})
 	case runtime.EventReasoningDelta:
 		if evt.ReasoningDelta != nil {
-			if status := strings.TrimSpace(evt.ReasoningDelta.Status); status != "" {
-				m.activityStatus = status
-			}
 			m.forwardToView(tui.UpsertStreamingReasoningMsg{Key: evt.ReasoningDelta.Key, Role: evt.ReasoningDelta.Role, Text: evt.ReasoningDelta.Text})
 		}
 	case runtime.EventReasoningDeltaReset:
-		m.activityStatus = ""
 		m.forwardToView(tui.ClearStreamingReasoningMsg{})
 	case runtime.EventCompactionStarted:
 		m.compacting = true
@@ -52,12 +48,10 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 			m.busy = evt.RunState.Busy
 			if evt.RunState.Busy {
 				m.activity = uiActivityRunning
-				m.activityStatus = ""
 			} else {
 				if m.activity == uiActivityRunning {
 					m.activity = uiActivityIdle
 				}
-				m.activityStatus = ""
 				m.forwardToView(tui.ClearStreamingReasoningMsg{})
 			}
 		}
@@ -108,11 +102,12 @@ func (a uiRuntimeAdapter) applyChatSnapshot(snapshot runtime.ChatSnapshot) tea.C
 	entries := make([]tui.TranscriptEntry, 0, len(snapshot.Entries))
 	for _, entry := range snapshot.Entries {
 		entries = append(entries, tui.TranscriptEntry{
-			Role:       entry.Role,
-			Text:       entry.Text,
-			Phase:      entry.Phase,
-			ToolCallID: entry.ToolCallID,
-			ToolCall:   entry.ToolCall,
+			Role:        entry.Role,
+			Text:        entry.Text,
+			OngoingText: entry.OngoingText,
+			Phase:       entry.Phase,
+			ToolCallID:  entry.ToolCallID,
+			ToolCall:    entry.ToolCall,
 		})
 	}
 	m.transcriptEntries = append(m.transcriptEntries[:0], entries...)
@@ -123,7 +118,6 @@ func (a uiRuntimeAdapter) applyChatSnapshot(snapshot runtime.ChatSnapshot) tea.C
 		Ongoing:      snapshot.Ongoing,
 		OngoingError: snapshot.OngoingError,
 	})
-	m.activityStatus = strings.TrimSpace(snapshot.Activity)
 	if strings.TrimSpace(snapshot.Ongoing) == "" {
 		m.sawAssistantDelta = false
 	}

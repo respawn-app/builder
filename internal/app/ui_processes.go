@@ -41,7 +41,36 @@ func (m *uiModel) openProcessList() {
 
 func (m *uiModel) closeProcessList() {
 	m.psVisible = false
+	m.psOverlayPushed = false
 	m.refreshProcessEntries()
+}
+
+func (m *uiModel) pushProcessOverlayIfNeeded() tea.Cmd {
+	if m.psOverlayPushed {
+		return nil
+	}
+	if m.view.Mode() != tui.ModeOngoing {
+		return nil
+	}
+	m.psOverlayPushed = true
+	if transitionCmd := m.toggleTranscriptMode(); transitionCmd != nil {
+		return transitionCmd
+	}
+	return tea.ClearScreen
+}
+
+func (m *uiModel) popProcessOverlayIfNeeded() tea.Cmd {
+	if !m.psOverlayPushed {
+		return nil
+	}
+	m.psOverlayPushed = false
+	if m.view.Mode() != tui.ModeDetail {
+		return nil
+	}
+	if transitionCmd := m.toggleTranscriptMode(); transitionCmd != nil {
+		return transitionCmd
+	}
+	return tea.ClearScreen
 }
 
 func (m *uiModel) moveProcessSelection(delta int) {
@@ -58,6 +87,43 @@ func (m *uiModel) moveProcessSelection(delta int) {
 	}
 }
 
+func (m *uiModel) moveProcessSelectionPage(deltaPages int) {
+	rowsPerPage := m.processListRowsPerPage()
+	m.moveProcessSelection(deltaPages * rowsPerPage)
+}
+
+func (m *uiModel) processListRowsPerPage() int {
+	panelHeight := m.termHeight - 1 // status line
+	if panelHeight < 4 {
+		panelHeight = 4
+	}
+	available := panelHeight - 3 // title, help, spacer
+	if available < 5 {
+		return 1
+	}
+	rows := available / 5
+	if rows < 1 {
+		return 1
+	}
+	return rows
+}
+
+func (m *uiModel) selectFirstProcess() {
+	if len(m.psEntries) == 0 {
+		m.psSelection = 0
+		return
+	}
+	m.psSelection = 0
+}
+
+func (m *uiModel) selectLastProcess() {
+	if len(m.psEntries) == 0 {
+		m.psSelection = 0
+		return
+	}
+	m.psSelection = len(m.psEntries) - 1
+}
+
 func (m *uiModel) selectedProcess() (shelltool.Snapshot, bool) {
 	if len(m.psEntries) == 0 || m.psSelection < 0 || m.psSelection >= len(m.psEntries) {
 		return shelltool.Snapshot{}, false
@@ -68,26 +134,44 @@ func (m *uiModel) selectedProcess() (shelltool.Snapshot, bool) {
 func (c uiInputController) handleProcessListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := c.model
 	switch strings.ToLower(msg.String()) {
+	case "ctrl+c":
+		m.exitAction = UIActionExit
+		if overlayCmd := m.popProcessOverlayIfNeeded(); overlayCmd != nil {
+			m.closeProcessList()
+			return m, tea.Sequence(overlayCmd, tea.Quit)
+		}
+		return m, tea.Quit
 	case "esc", "q":
-		m.closeProcessList()
-		return m, nil
+		return m, c.stopProcessListFlowCmd()
 	case "up":
 		m.moveProcessSelection(-1)
 		return m, nil
 	case "down":
 		m.moveProcessSelection(1)
 		return m, nil
+	case "pgup":
+		m.moveProcessSelectionPage(-1)
+		return m, nil
+	case "pgdown":
+		m.moveProcessSelectionPage(1)
+		return m, nil
+	case "home":
+		m.selectFirstProcess()
+		return m, nil
+	case "end":
+		m.selectLastProcess()
+		return m, nil
 	case "r":
 		m.refreshProcessEntries()
 		return m, c.showTransientStatus(fmt.Sprintf("refreshed %d processes", len(m.psEntries)))
+	case "enter":
+		return c.runProcessListAction("inline")
 	case "k":
 		return c.runProcessListAction("kill")
 	case "i":
 		return c.runProcessListAction("inline")
-	case "e":
-		return c.runProcessListAction("editor")
 	case "o":
-		return c.runProcessListAction("open")
+		return c.runProcessListAction("logs")
 	default:
 		return m, nil
 	}
@@ -110,8 +194,7 @@ func (c uiInputController) runProcessAction(action, id string) (tea.Model, tea.C
 	action = strings.ToLower(strings.TrimSpace(action))
 	id = strings.TrimSpace(id)
 	if id == "" {
-		m.openProcessList()
-		return m, nil
+		return m, c.startProcessListFlowCmd()
 	}
 	switch action {
 	case "kill":
@@ -121,41 +204,55 @@ func (c uiInputController) runProcessAction(action, id string) (tea.Model, tea.C
 		m.refreshProcessEntries()
 		return m, c.showTransientStatus(fmt.Sprintf("sent terminate signal to %s", id))
 	case "inline":
-		preview, path, err := m.backgroundManager.InlineOutput(id, 12_000)
+		preview, _, err := m.backgroundManager.InlineOutput(id, 12_000)
 		if err != nil {
 			return m, c.showErrorStatus(err.Error())
 		}
-		text := fmt.Sprintf("Background shell %s output\nLog file: %s", id, path)
-		if strings.TrimSpace(preview) != "" {
-			text += "\n\n" + preview
+		preview = strings.TrimSpace(preview)
+		if preview == "" {
+			preview = "<no output yet>"
 		}
-		if m.engine != nil {
-			m.engine.AppendLocalEntry("system", text)
-		} else {
-			m.forwardToView(tui.AppendTranscriptMsg{Role: "system", Text: text})
-		}
-		return m, c.showTransientStatus(fmt.Sprintf("inlined output for %s", id))
-	case "editor":
+		c.releaseLockedInjectedInput(true)
+		m.appendProcessOutputToInput(id, preview)
+		return m, tea.Batch(c.stopProcessListFlowCmd(), c.showTransientStatus("Pasted shell transcript"))
+	case "logs":
 		path, err := processLogPath(m.backgroundManager, id)
 		if err != nil {
 			return m, c.showErrorStatus(err.Error())
 		}
-		if err := openInEditor(path); err != nil {
-			return m, c.showErrorStatus(err.Error())
+		if err := openDefault(path); err == nil {
+			return m, tea.Batch(c.stopProcessListFlowCmd(), c.showTransientStatus("Opened logs"))
 		}
-		return m, c.showTransientStatus(fmt.Sprintf("opened %s in editor", id))
-	case "open":
-		path, err := processLogPath(m.backgroundManager, id)
+		editorCmd, err := editorCommand(path)
 		if err != nil {
 			return m, c.showErrorStatus(err.Error())
 		}
-		if err := openDefault(path); err != nil {
-			return m, c.showErrorStatus(err.Error())
-		}
-		return m, c.showTransientStatus(fmt.Sprintf("opened %s", id))
+		return m, tea.Batch(
+			c.stopProcessListFlowCmd(),
+			c.showTransientStatus("Opened logs"),
+			tea.ExecProcess(editorCmd, func(runErr error) tea.Msg {
+				return openProcessLogsDoneMsg{err: runErr}
+			}),
+		)
 	default:
 		return m, c.showErrorStatus(fmt.Sprintf("unknown /ps action %q", action))
 	}
+}
+
+func (m *uiModel) appendProcessOutputToInput(id, output string) {
+	payload := fmt.Sprintf("Output of bg shell %s:\n%s\n", id, output)
+	if strings.TrimSpace(m.input) == "" {
+		m.input = payload
+		m.inputCursor = -1
+		m.refreshSlashCommandFilterFromInput()
+		return
+	}
+	m.moveCursorEnd()
+	prefix := "\n"
+	if strings.HasSuffix(m.input, "\n") {
+		prefix = ""
+	}
+	m.insertInputRunes([]rune(prefix + payload))
 }
 
 func processLogPath(manager *shelltool.Manager, id string) (string, error) {
@@ -170,19 +267,24 @@ func processLogPath(manager *shelltool.Manager, id string) (string, error) {
 	return "", fmt.Errorf("unknown session_id %s", id)
 }
 
-func openInEditor(path string) error {
+func editorCommand(path string) (*exec.Cmd, error) {
 	editor := strings.TrimSpace(os.Getenv("VISUAL"))
 	if editor == "" {
 		editor = strings.TrimSpace(os.Getenv("EDITOR"))
 	}
 	if editor == "" {
-		return fmt.Errorf("EDITOR/VISUAL is not set")
+		return nil, fmt.Errorf("open logs failed and EDITOR/VISUAL is not set")
 	}
-	cmd := exec.Command(editor, path)
-	return cmd.Start()
+	shellPath := strings.TrimSpace(os.Getenv("SHELL"))
+	if shellPath == "" {
+		shellPath = "/bin/sh"
+	}
+	cmd := exec.Command(shellPath, "-lc", `eval "$BUILDER_EDITOR \"$1\""`, "builder-editor", path)
+	cmd.Env = append(os.Environ(), "BUILDER_EDITOR="+editor)
+	return cmd, nil
 }
 
-func openDefault(path string) error {
+var openDefault = func(path string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
@@ -201,15 +303,21 @@ func (l uiViewLayout) renderProcessList(width, height int, style uiStyles) []str
 		return []string{padRight("", width)}
 	}
 	m.refreshProcessEntries()
-	lines := []string{style.meta.Bold(true).Render("Background Processes")}
-	help := style.meta.Render("Esc/q close | k kill | i inline | e editor | o open | r refresh")
-	lines = append(lines, help, "")
+	footerLines := []string{
+		style.meta.Bold(true).Render(fmt.Sprintf("Background Processes (%d)", len(m.psEntries))),
+		style.meta.Render("Esc/q close | Enter/i paste transcript | k kill | o open logs | PgUp/PgDn/Home/End move | auto-refresh + r refresh"),
+	}
+	contentHeight := height - len(footerLines)
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+	content := make([]string, 0, contentHeight)
 	if len(m.psEntries) == 0 {
-		lines = append(lines, style.meta.Render("No background processes."))
-		for len(lines) < height {
-			lines = append(lines, "")
+		content = append(content, style.meta.Render("No background processes."))
+		for len(content) < contentHeight {
+			content = append(content, "")
 		}
-		return l.renderChatContentLines(lines[:height], width, style)
+		return l.renderChatContentLines(append(content[:contentHeight], footerLines...), width, style)
 	}
 	visibleRows := make([]string, 0, len(m.psEntries)*5)
 	for idx, entry := range m.psEntries {
@@ -232,7 +340,7 @@ func (l uiViewLayout) renderProcessList(width, height int, style uiStyles) []str
 		line4 := fmt.Sprintf("   out: %s", preview)
 		visibleRows = append(visibleRows, line1, line2, line3, line4, "")
 	}
-	available := height - len(lines)
+	available := contentHeight
 	if available < 1 {
 		available = 1
 	}
@@ -248,11 +356,11 @@ func (l uiViewLayout) renderProcessList(width, height int, style uiStyles) []str
 	if end > len(visibleRows) {
 		end = len(visibleRows)
 	}
-	lines = append(lines, visibleRows[start:end]...)
-	for len(lines) < height {
-		lines = append(lines, "")
+	content = append(content, visibleRows[start:end]...)
+	for len(content) < contentHeight {
+		content = append(content, "")
 	}
-	return l.renderChatContentLines(lines[:height], width, style)
+	return l.renderChatContentLines(append(content[:contentHeight], footerLines...), width, style)
 }
 
 func humanAge(t time.Time) string {

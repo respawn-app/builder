@@ -298,6 +298,147 @@ func TestNativeRollbackOverlayCtrlCBalancesAltScreenAndAlternateScroll(t *testin
 	}
 }
 
+func TestNativePSOverlayEscBalancesAltScreenAndAlternateScroll(t *testing.T) {
+	var terminalSequences []string
+	originalWriteTerminalSequence := writeTerminalSequence
+	writeTerminalSequence = func(sequence string) {
+		terminalSequences = append(terminalSequences, sequence)
+	}
+	defer func() {
+		writeTerminalSequence = originalWriteTerminalSequence
+	}()
+
+	out := &bytes.Buffer{}
+	model := NewUIModel(
+		nil,
+		closedRuntimeEvents(),
+		closedAskEvents(),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIAlternateScreenPolicy(config.TUIAlternateScreenAuto),
+	).(*uiModel)
+	model.input = "/ps"
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	time.Sleep(20 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	time.Sleep(20 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyEsc})
+	time.Sleep(20 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	raw := out.String()
+	enterAlt := strings.Count(raw, "\x1b[?1049h")
+	exitAlt := strings.Count(raw, "\x1b[?1049l")
+	if enterAlt != exitAlt {
+		t.Fatalf("expected balanced /ps alt-screen enter/exit sequences, enter=%d exit=%d", enterAlt, exitAlt)
+	}
+	if enterAlt == 0 {
+		t.Fatal("expected /ps overlay in native mode to enter alt-screen under auto policy")
+	}
+	sequenceLog := strings.Join(terminalSequences, "")
+	enableAltScroll := strings.Count(sequenceLog, "\x1b[?1007h")
+	disableAltScroll := strings.Count(sequenceLog, "\x1b[?1007l")
+	if enableAltScroll != disableAltScroll {
+		t.Fatalf("expected balanced /ps alternate-scroll enable/disable sequences, enable=%d disable=%d", enableAltScroll, disableAltScroll)
+	}
+	if enableAltScroll == 0 {
+		t.Fatal("expected /ps overlay in native mode to enable alternate scroll under auto policy")
+	}
+	if !strings.Contains(normalizedOutput(raw), "Background Processes") {
+		t.Fatalf("expected /ps overlay content in output, got %q", normalizedOutput(raw))
+	}
+}
+
+func TestNativePSOverlayUsesClearScreenWhenAltScreenNever(t *testing.T) {
+	var terminalSequences []string
+	originalWriteTerminalSequence := writeTerminalSequence
+	writeTerminalSequence = func(sequence string) {
+		terminalSequences = append(terminalSequences, sequence)
+	}
+	defer func() {
+		writeTerminalSequence = originalWriteTerminalSequence
+	}()
+
+	out := &bytes.Buffer{}
+	model := NewUIModel(
+		nil,
+		closedRuntimeEvents(),
+		closedAskEvents(),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
+	).(*uiModel)
+	model.input = "/ps"
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	time.Sleep(20 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	time.Sleep(20 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyEsc})
+	time.Sleep(20 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	raw := out.String()
+	if strings.Contains(raw, "\x1b[?1049h") || strings.Contains(raw, "\x1b[?1049l") {
+		t.Fatalf("did not expect /ps overlay to use alt-screen when detail alt-screen is disabled, got %q", raw)
+	}
+	sequenceLog := strings.Join(terminalSequences, "")
+	if strings.Contains(sequenceLog, "\x1b[?1007h") || strings.Contains(sequenceLog, "\x1b[?1007l") {
+		t.Fatalf("did not expect /ps overlay to toggle alternate scroll when detail alt-screen is disabled, got %q", sequenceLog)
+	}
+	if clearCount := strings.Count(raw, "\x1b[2J"); clearCount < 3 {
+		t.Fatalf("expected startup + /ps open + /ps close clear-screen sequences, got %d in %q", clearCount, raw)
+	}
+	if !strings.Contains(normalizedOutput(raw), "Background Processes") {
+		t.Fatalf("expected /ps overlay content in output, got %q", normalizedOutput(raw))
+	}
+}
+
 func TestNativeFinalizeDoesNotBlinkDuplicateTailTokens(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

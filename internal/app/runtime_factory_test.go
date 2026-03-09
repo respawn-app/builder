@@ -6,11 +6,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"builder/internal/llm"
+	"builder/internal/runtime"
+	"builder/internal/session"
 	"builder/internal/tools"
 	"builder/internal/tools/askquestion"
+	shelltool "builder/internal/tools/shell"
 )
 
 func TestBuildToolRegistry_AllowsHostedWebSearchWithoutLocalFactory(t *testing.T) {
@@ -18,11 +23,13 @@ func TestBuildToolRegistry_AllowsHostedWebSearchWithoutLocalFactory(t *testing.T
 
 	registry, _, _, err := buildToolRegistry(
 		workspace,
+		"",
 		[]tools.ID{tools.ToolShell, tools.ToolWebSearch},
 		5*time.Second,
 		16_000,
 		false,
 		true,
+		nil,
 		nil,
 	)
 	if err != nil {
@@ -43,11 +50,13 @@ func TestBuildToolRegistry_IncludesParallelWrapperWhenEnabled(t *testing.T) {
 
 	registry, _, _, err := buildToolRegistry(
 		workspace,
+		"",
 		[]tools.ID{tools.ToolShell, tools.ToolMultiToolUseParallel},
 		5*time.Second,
 		16_000,
 		false,
 		true,
+		nil,
 		nil,
 	)
 	if err != nil {
@@ -68,11 +77,13 @@ func TestBuildToolRegistry_IncludesViewImageWhenEnabled(t *testing.T) {
 
 	registry, _, _, err := buildToolRegistry(
 		workspace,
+		"",
 		[]tools.ID{tools.ToolViewImage},
 		5*time.Second,
 		16_000,
 		false,
 		true,
+		nil,
 		nil,
 	)
 	if err != nil {
@@ -104,12 +115,14 @@ func TestBuildToolRegistry_ViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 
 	registry, broker, _, err := buildToolRegistry(
 		workspace,
+		"",
 		[]tools.ID{tools.ToolViewImage},
 		5*time.Second,
 		16_000,
 		false,
 		true,
 		logger,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("build tool registry: %v", err)
@@ -157,5 +170,366 @@ func TestBuildToolRegistry_ViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 	}
 	if !strings.Contains(text, realOutside) {
 		t.Fatalf("expected canonical resolved outside path in audit line, got %q", text)
+	}
+}
+
+func TestRuntimeWiringCloseDoesNotCloseSharedBackgroundManager(t *testing.T) {
+	manager, err := shelltool.NewManager()
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	wiring := &runtimeWiring{background: manager}
+	if err := wiring.Close(); err != nil {
+		t.Fatalf("close wiring: %v", err)
+	}
+
+	if _, _, _, err := buildToolRegistry(t.TempDir(), "", []tools.ID{tools.ToolExecCommand}, 5*time.Second, 16_000, false, true, nil, manager); err != nil {
+		t.Fatalf("expected shared background manager to remain usable after wiring close: %v", err)
+	}
+}
+
+func TestBackgroundEventRouterSkipsDeveloperNoticeForOrphanedShells(t *testing.T) {
+	root := t.TempDir()
+	storeA, err := session.Create(root, "ws-a", root)
+	if err != nil {
+		t.Fatalf("create store A: %v", err)
+	}
+	storeB, err := session.Create(root, "ws-b", root)
+	if err != nil {
+		t.Fatalf("create store B: %v", err)
+	}
+
+	clientA := &busyToggleFakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "a", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200_000}}}}
+	clientB := &busyToggleFakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "b", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200_000}}}}
+	var mu sync.Mutex
+	backgroundUpdates := 0
+	_, err = runtime.New(storeA, clientA, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine A: %v", err)
+	}
+	engB, err := runtime.New(storeB, clientB, tools.NewRegistry(), runtime.Config{Model: "gpt-5", OnEvent: func(evt runtime.Event) {
+		if evt.Kind == runtime.EventBackgroundUpdated {
+			mu.Lock()
+			backgroundUpdates++
+			mu.Unlock()
+		}
+	}})
+	if err != nil {
+		t.Fatalf("new engine B: %v", err)
+	}
+
+	router := &backgroundEventRouter{}
+	router.SetActiveSession(storeB.Meta().SessionID, engB)
+	router.handle(shelltool.Event{Snapshot: shelltool.Snapshot{ID: "1000", OwnerSessionID: storeA.Meta().SessionID, State: "completed", Command: "builder run", Workdir: root, LogPath: filepath.Join(root, "1000.log")}, Type: shelltool.EventCompleted, Preview: "done"})
+
+	time.Sleep(150 * time.Millisecond)
+	if got := clientB.CallCount(); got != 0 {
+		t.Fatalf("expected orphaned completion to skip model notice for active session, got %d client calls", got)
+	}
+	mu.Lock()
+	updates := backgroundUpdates
+	mu.Unlock()
+	if updates != 1 {
+		t.Fatalf("expected orphaned completion to still emit one background update event, got %d", updates)
+	}
+	if got := clientA.CallCount(); got != 0 {
+		t.Fatalf("did not expect inactive owner engine to be called, got %d", got)
+	}
+}
+
+func TestBackgroundEventRouterQueuesNoticeForActiveOwnerSession(t *testing.T) {
+	root := t.TempDir()
+	store, err := session.Create(root, "ws", root)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &busyToggleFakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "notice handled", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200_000}}}}
+	eng, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	router := &backgroundEventRouter{}
+	router.SetActiveSession(store.Meta().SessionID, eng)
+	router.handle(shelltool.Event{Snapshot: shelltool.Snapshot{ID: "1001", OwnerSessionID: store.Meta().SessionID, State: "completed", Command: "builder run", Workdir: root, LogPath: filepath.Join(root, "1001.log")}, Type: shelltool.EventCompleted, Preview: "done"})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for client.CallCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := client.CallCount(); got == 0 {
+		t.Fatal("expected active owner completion to queue a model notice")
+	}
+}
+
+func TestBackgroundEventRouterShapesBackgroundNoticeByOutputMode(t *testing.T) {
+	tests := []struct {
+		name            string
+		mode            shelltool.BackgroundOutputMode
+		exitCode        int
+		maxChars        int
+		content         string
+		wantContains    []string
+		wantNotContains []string
+	}{
+		{
+			name:     "concise success omits output section",
+			mode:     shelltool.BackgroundOutputConcise,
+			exitCode: 0,
+			maxChars: 16,
+			content:  "alpha\nbeta\ngamma\n",
+			wantContains: []string{
+				"Output file (3 lines):",
+			},
+			wantNotContains: []string{
+				"Output:",
+				"alpha",
+			},
+		},
+		{
+			name:     "verbose success keeps full output",
+			mode:     shelltool.BackgroundOutputVerbose,
+			exitCode: 0,
+			maxChars: 5,
+			content:  "alpha\nbeta\ngamma\n",
+			wantContains: []string{
+				"Output:",
+				"alpha\nbeta\ngamma",
+			},
+			wantNotContains: []string{
+				"omitted",
+			},
+		},
+		{
+			name:     "concise non-zero falls back to default truncation",
+			mode:     shelltool.BackgroundOutputConcise,
+			exitCode: 17,
+			maxChars: 32,
+			content:  "alpha line\n" + strings.Repeat("middle-noise-", 40) + "\nomega line\n",
+			wantContains: []string{
+				"Output:",
+				"alpha line",
+				"omega line",
+				"omitted",
+			},
+		},
+		{
+			name:     "verbose non-zero keeps full output",
+			mode:     shelltool.BackgroundOutputVerbose,
+			exitCode: 17,
+			maxChars: 5,
+			content:  "alpha\nbeta\ngamma\n",
+			wantContains: []string{
+				"Output:",
+				"alpha\nbeta\ngamma",
+			},
+			wantNotContains: []string{
+				"omitted",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			store, err := session.Create(root, "ws", root)
+			if err != nil {
+				t.Fatalf("create store: %v", err)
+			}
+			client := &busyToggleFakeClient{}
+			events := make(chan runtime.Event, 4)
+			eng, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{
+				Model: "gpt-5",
+				OnEvent: func(evt runtime.Event) {
+					if evt.Kind == runtime.EventBackgroundUpdated {
+						events <- evt
+					}
+				},
+			})
+			if err != nil {
+				t.Fatalf("new engine: %v", err)
+			}
+
+			logPath := filepath.Join(root, "1000.log")
+			if err := os.WriteFile(logPath, []byte(tt.content), 0o644); err != nil {
+				t.Fatalf("write log: %v", err)
+			}
+
+			router := newBackgroundEventRouter(nil, tt.maxChars, tt.mode)
+			router.SetActiveSession(store.Meta().SessionID, eng)
+			router.handle(shelltool.Event{
+				Type: shelltool.EventCompleted,
+				Snapshot: shelltool.Snapshot{
+					ID:             "1000",
+					OwnerSessionID: "other-session",
+					State:          "completed",
+					LogPath:        logPath,
+					ExitCode:       &tt.exitCode,
+				},
+			})
+
+			select {
+			case evt := <-events:
+				if evt.Background == nil {
+					t.Fatal("expected background payload")
+				}
+				for _, needle := range tt.wantContains {
+					if !strings.Contains(evt.Background.NoticeText, needle) {
+						t.Fatalf("expected notice to contain %q, got %q", needle, evt.Background.NoticeText)
+					}
+				}
+				for _, needle := range tt.wantNotContains {
+					if strings.Contains(evt.Background.NoticeText, needle) {
+						t.Fatalf("expected notice to omit %q, got %q", needle, evt.Background.NoticeText)
+					}
+				}
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for background update event")
+			}
+		})
+	}
+}
+
+func TestBuildToolRegistryExecCommandPropagatesOwnerSessionID(t *testing.T) {
+	workspace := t.TempDir()
+	registry, _, manager, err := buildToolRegistry(
+		workspace,
+		"session-owner-1",
+		[]tools.ID{tools.ToolExecCommand},
+		5*time.Second,
+		16_000,
+		false,
+		true,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("build tool registry: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	handler, ok := registry.Get(tools.ToolExecCommand)
+	if !ok {
+		t.Fatal("expected exec_command handler")
+	}
+	input, err := json.Marshal(map[string]any{
+		"cmd":           "printf owner-check\\n; sleep 30",
+		"yield_time_ms": 250,
+	})
+	if err != nil {
+		t.Fatalf("marshal exec_command input: %v", err)
+	}
+	if _, err := handler.Call(context.Background(), tools.Call{ID: "call-1", Name: tools.ToolExecCommand, Input: input}); err != nil {
+		t.Fatalf("exec_command call: %v", err)
+	}
+	entries := manager.List()
+	if len(entries) != 1 {
+		t.Fatalf("expected one background process, got %d", len(entries))
+	}
+	if entries[0].OwnerSessionID != "session-owner-1" {
+		t.Fatalf("expected owner session id propagation, got %q", entries[0].OwnerSessionID)
+	}
+}
+
+func TestBackgroundEventRouterDoesNotRetroactivelyQueueNoticeAfterOwnerSessionResume(t *testing.T) {
+	root := t.TempDir()
+	manager, err := shelltool.NewManager()
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+	router := newBackgroundEventRouter(manager, 16_000, shelltool.BackgroundOutputDefault)
+
+	storeA, err := session.Create(root, "ws-a", root)
+	if err != nil {
+		t.Fatalf("create store A: %v", err)
+	}
+	storeB, err := session.Create(root, "ws-b", root)
+	if err != nil {
+		t.Fatalf("create store B: %v", err)
+	}
+	clientA := &busyToggleFakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "a", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200_000}}}}
+	clientB := &busyToggleFakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "b", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200_000}}}}
+	engA, err := runtime.New(storeA, clientA, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine A: %v", err)
+	}
+	engB, err := runtime.New(storeB, clientB, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine B: %v", err)
+	}
+
+	router.SetActiveSession(storeA.Meta().SessionID, engA)
+	workdir := t.TempDir()
+	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "printf resume-check\\n; sleep 1"},
+		DisplayCommand: "resume-check",
+		OwnerSessionID: storeA.Meta().SessionID,
+		Workdir:        workdir,
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start process: %v", err)
+	}
+	if !res.Backgrounded {
+		t.Fatal("expected process to background")
+	}
+	router.SetActiveSession(storeB.Meta().SessionID, engB)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		entries := manager.List()
+		if len(entries) == 1 && !entries[0].Running {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for background process completion")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := clientA.CallCount(); got != 0 {
+		t.Fatalf("expected owner session to receive no notice while orphaned, got %d", got)
+	}
+	if got := clientB.CallCount(); got != 0 {
+		t.Fatalf("expected active foreign session to receive no notice, got %d", got)
+	}
+
+	router.SetActiveSession(storeA.Meta().SessionID, engA)
+	time.Sleep(150 * time.Millisecond)
+	if got := clientA.CallCount(); got != 0 {
+		t.Fatalf("expected no retroactive notice on owner session resume, got %d", got)
+	}
+	entries := manager.List()
+	if len(entries) != 1 || entries[0].ID != res.SessionID || entries[0].Running {
+		t.Fatalf("expected finished process to remain visible in manager state after resume, got %+v", entries)
+	}
+}
+
+func TestBackgroundEventRouterDropsNoticeWhenNoSessionIsActive(t *testing.T) {
+	root := t.TempDir()
+	manager, err := shelltool.NewManager()
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+	router := newBackgroundEventRouter(manager, 16_000, shelltool.BackgroundOutputDefault)
+
+	store, err := session.Create(root, "ws", root)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &busyToggleFakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200_000}}}}
+	eng, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	router.SetActiveSession(store.Meta().SessionID, eng)
+	router.ClearActiveSession(store.Meta().SessionID)
+	router.handle(shelltool.Event{Snapshot: shelltool.Snapshot{ID: "1002", OwnerSessionID: store.Meta().SessionID, State: "completed"}, Type: shelltool.EventCompleted, Preview: "done"})
+	time.Sleep(150 * time.Millisecond)
+	if got := client.CallCount(); got != 0 {
+		t.Fatalf("expected no notice delivery while no session is active, got %d", got)
 	}
 }

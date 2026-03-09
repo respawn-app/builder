@@ -48,6 +48,7 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		"context_compaction_threshold_tokens": "default",
 		"compaction_mode":                     "default",
 		"shell_output_max_chars":              "default",
+		"bg_shells_output":                    "default",
 		"timeouts.model_request":              "default",
 		"timeouts.shell_default":              "default",
 		"reviewer.frequency":                  "default",
@@ -121,6 +122,10 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if cfg.ShellOutputMaxChars > 0 {
 		merged.ShellOutputMaxChars = cfg.ShellOutputMaxChars
 		sources["shell_output_max_chars"] = "file"
+	}
+	if strings.TrimSpace(cfg.BGShellsOutput) != "" {
+		merged.BGShellsOutput = BGShellsOutputMode(strings.TrimSpace(cfg.BGShellsOutput))
+		sources["bg_shells_output"] = "file"
 	}
 	if strings.TrimSpace(cfg.Reviewer.Frequency) != "" {
 		merged.Reviewer.Frequency = strings.TrimSpace(cfg.Reviewer.Frequency)
@@ -252,6 +257,10 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		}
 		merged.ShellOutputMaxChars = n
 		sources["shell_output_max_chars"] = "env"
+	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_BG_SHELLS_OUTPUT")); v != "" {
+		merged.BGShellsOutput = BGShellsOutputMode(v)
+		sources["bg_shells_output"] = "env"
 	}
 	if v := strings.TrimSpace(os.Getenv("BUILDER_REVIEWER_FREQUENCY")); v != "" {
 		merged.Reviewer.Frequency = v
