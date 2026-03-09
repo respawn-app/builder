@@ -401,7 +401,6 @@ func (a *reasoningAccumulator) ensure(role, key string) *ReasoningEntry {
 }
 
 func (a *reasoningAccumulator) Append(role, key, delta string) {
-	delta = strings.TrimSpace(delta)
 	if delta == "" {
 		return
 	}
@@ -413,7 +412,6 @@ func (a *reasoningAccumulator) Append(role, key, delta string) {
 }
 
 func (a *reasoningAccumulator) Set(role, key, text string) {
-	text = strings.TrimSpace(text)
 	if text == "" {
 		return
 	}
@@ -429,7 +427,7 @@ func (a *reasoningAccumulator) Current(role, key string) string {
 	if entry == nil {
 		return ""
 	}
-	return strings.TrimSpace(entry.Text)
+	return entry.Text
 }
 
 func (a *reasoningAccumulator) Entries() []ReasoningEntry {

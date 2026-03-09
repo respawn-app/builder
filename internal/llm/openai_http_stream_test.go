@@ -83,12 +83,9 @@ func TestGenerateStream_EmitsAssistantDeltasAndToolCalls(t *testing.T) {
 	if len(reasoning) != 1 || reasoning[0].Key == "" || reasoning[0].Role != "reasoning" || reasoning[0].Text != "Plan" {
 		t.Fatalf("unexpected reasoning delta callbacks: %+v", reasoning)
 	}
-	if reasoning[0].Status != "" {
-		t.Fatalf("unexpected reasoning status in plain summary callback: %+v", reasoning)
-	}
 }
 
-func TestGenerateStream_SeparatesReasoningStatusFromSummary(t *testing.T) {
+func TestGenerateStream_PreservesBoldReasoningTextWithoutInferringStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/responses" {
 			w.WriteHeader(http.StatusNotFound)
@@ -118,13 +115,10 @@ func TestGenerateStream_SeparatesReasoningStatusFromSummary(t *testing.T) {
 	if len(reasoning) != 1 {
 		t.Fatalf("expected 1 reasoning delta callback, got %+v", reasoning)
 	}
-	if reasoning[0].Status != "Preparing patch" {
-		t.Fatalf("status = %q, want %q", reasoning[0].Status, "Preparing patch")
+	if reasoning[0].Text != "**Preparing patch**\n\nPlain summary text" {
+		t.Fatalf("summary = %q", reasoning[0].Text)
 	}
-	if reasoning[0].Text != "Plain summary text" {
-		t.Fatalf("summary = %q, want %q", reasoning[0].Text, "Plain summary text")
-	}
-	if len(resp.Reasoning) != 1 || resp.Reasoning[0].Text != "Plain summary text" {
+	if len(resp.Reasoning) != 1 || resp.Reasoning[0].Text != "**Preparing patch**\n\nPlain summary text" {
 		t.Fatalf("unexpected final reasoning summary entries: %+v", resp.Reasoning)
 	}
 }

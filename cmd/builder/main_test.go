@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"builder/internal/selfcmd"
 )
 
 func TestParseRunTimeoutDefaultsToInfinite(t *testing.T) {
@@ -115,7 +117,7 @@ func TestBuildRunContinueCommandAndHint(t *testing.T) {
 		t.Fatalf("expected empty command for empty session id, got %q", got)
 	}
 	command := buildRunContinueCommand("session-123")
-	if command != "builder run --continue session-123 \"follow-up\"" {
+	if command != selfcmd.ContinueRunCommand("session-123") {
 		t.Fatalf("unexpected continue command: %q", command)
 	}
 	hint := buildRunContinueHint("session-123")
@@ -126,7 +128,7 @@ func TestBuildRunContinueCommandAndHint(t *testing.T) {
 
 func TestEmitRunFinalTextIncludesContinuationHint(t *testing.T) {
 	var out bytes.Buffer
-	emitRunFinalText(&out, "done", "To continue this run, execute `builder run --continue session-123 \"follow-up\"`.")
+	emitRunFinalText(&out, "done", "To continue this run, execute `"+selfcmd.ContinueRunCommand("session-123")+"`.")
 	got := out.String()
 	if !strings.Contains(got, "done\n\nTo continue this run") {
 		t.Fatalf("unexpected final-text output: %q", got)

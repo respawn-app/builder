@@ -2397,32 +2397,32 @@ func TestBuildReviewerTranscriptMessagesIncludesConversationAndToolCalls(t *test
 	}
 
 	reviewerMessages := buildReviewerTranscriptMessages(messages)
-	if len(reviewerMessages) != 3 {
-		t.Fatalf("expected 3 reviewer transcript messages after filtering, got %d", len(reviewerMessages))
+	if len(reviewerMessages) != 4 {
+		t.Fatalf("expected 4 reviewer transcript messages after filtering, got %d", len(reviewerMessages))
 	}
 	if reviewerMessages[0].Role != llm.RoleUser {
 		t.Fatalf("expected reviewer transcript messages to use user role, got %q", reviewerMessages[0].Role)
 	}
-	if strings.Contains(reviewerMessages[0].Content, "I’ll inspect quickly.") {
-		t.Fatalf("expected short commentary preamble to be dropped, message=%q", reviewerMessages[0].Content)
+	if !strings.Contains(reviewerMessages[0].Content, "I’ll inspect quickly.") {
+		t.Fatalf("expected short commentary preamble to be preserved, message=%q", reviewerMessages[0].Content)
 	}
-	if strings.Contains(reviewerMessages[1].Content, "Running command now.") {
-		t.Fatalf("expected short commentary preamble text to be stripped when tool calls exist, message=%q", reviewerMessages[1].Content)
+	if !strings.Contains(reviewerMessages[2].Content, "Running command now.") {
+		t.Fatalf("expected short commentary preamble text to be preserved when tool calls exist, message=%q", reviewerMessages[2].Content)
 	}
-	if !strings.Contains(reviewerMessages[1].Content, "Tool calls:") || !strings.Contains(reviewerMessages[1].Content, "\"command\": \"pwd\"") {
-		t.Fatalf("expected tool call arguments in json format, message=%q", reviewerMessages[1].Content)
+	if !strings.Contains(reviewerMessages[2].Content, "Tool calls:") || !strings.Contains(reviewerMessages[2].Content, "\"command\": \"pwd\"") {
+		t.Fatalf("expected tool call arguments in json format, message=%q", reviewerMessages[2].Content)
 	}
-	if strings.Contains(reviewerMessages[1].Content, "(id=") {
-		t.Fatalf("did not expect tool call id in reviewer transcript, message=%q", reviewerMessages[1].Content)
+	if strings.Contains(reviewerMessages[2].Content, "(id=") {
+		t.Fatalf("did not expect tool call id in reviewer transcript, message=%q", reviewerMessages[2].Content)
 	}
-	if !strings.Contains(reviewerMessages[1].Content, "\"output\"") || !strings.Contains(reviewerMessages[1].Content, "\"ok\"") {
-		t.Fatalf("expected paired tool output field in tool call payload, message=%q", reviewerMessages[1].Content)
+	if !strings.Contains(reviewerMessages[2].Content, "\"output\"") || !strings.Contains(reviewerMessages[2].Content, "\"ok\"") {
+		t.Fatalf("expected paired tool output field in tool call payload, message=%q", reviewerMessages[2].Content)
 	}
-	if !strings.Contains(reviewerMessages[2].Content, "Agent:") {
-		t.Fatalf("expected assistant final answer entry to use agent label, message=%q", reviewerMessages[2].Content)
+	if !strings.Contains(reviewerMessages[3].Content, "Agent:") {
+		t.Fatalf("expected assistant final answer entry to use agent label, message=%q", reviewerMessages[3].Content)
 	}
-	if strings.Contains(reviewerMessages[2].Content, "Tool output:") {
-		t.Fatalf("did not expect separate tool output entry when paired output exists, message=%q", reviewerMessages[2].Content)
+	if strings.Contains(reviewerMessages[3].Content, "Tool output:") {
+		t.Fatalf("did not expect separate tool output entry when paired output exists, message=%q", reviewerMessages[3].Content)
 	}
 }
 
@@ -2656,7 +2656,7 @@ func TestFastExecCommandCompletionDoesNotQueueBackgroundNotice(t *testing.T) {
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 	}}
-	registry := tools.NewRegistry(shelltool.NewExecCommandTool(dir, 16_000, manager))
+	registry := tools.NewRegistry(shelltool.NewExecCommandTool(dir, 16_000, manager, ""))
 	eng, err := New(store, client, registry, Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)

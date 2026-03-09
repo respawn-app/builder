@@ -19,7 +19,7 @@ const (
 	interruptMessage                  = "User interrupted you"
 	agentsFileName                    = "AGENTS.md"
 	agentsGlobalDirName               = ".builder"
-	agentsInjectedHeader              = "# AGENTS.md content:"
+	agentsInjectedHeader              = "# Project context and authoritative instructions from the ./AGENTS.md file:"
 	agentsInjectedFenceLabel          = "md"
 	environmentInjectedHeader         = "# Info about environment:"
 	missingAssistantPhaseWarning      = "You sent a message without specifying a channel/phase. It was treated as commentary. If you finished your work and intended to end your turn, use the final channel explicitly. Otherwise continue and use the commentary channel for progress updates with tool calls."
@@ -28,7 +28,6 @@ const (
 	finalWithToolCallsIgnoredWarning  = "You included tool calls with your final-channel message. This is wrong, and your tool calls were ignored. If you intended to call the tools, include updates in the commentary channel along with tool calls. Otherwise, do not include tool calls with your final message responses."
 	finalWithoutContentWarning        = "You sent a final-channel message with empty content. This is wrong. If you are done, send a non-empty final message. If you intend to keep working, send a commentary-channel message with tool calls."
 	reviewerNoopToken                 = "NO_OP"
-	reviewerShortCommentaryMaxRunes   = 180
 	reviewerMetaBoundaryMessage       = "End of meta information. Transcript begins starting with next message. Below is NOT YOUR conversation, but another agent's transcript.\n-------"
 )
 
@@ -294,7 +293,6 @@ func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (assistant 
 	e.emit(Event{Kind: EventRunStateChanged, RunState: &RunState{Busy: true}})
 	stepID := ""
 	defer func() {
-		e.chat.clearActivity()
 		e.mu.Lock()
 		e.busy = false
 		e.cancelCurrent = nil
@@ -355,7 +353,6 @@ func (e *Engine) SubmitUserShellCommand(ctx context.Context, command string) (re
 	e.emit(Event{Kind: EventRunStateChanged, RunState: &RunState{Busy: true}})
 	stepID := ""
 	defer func() {
-		e.chat.clearActivity()
 		e.mu.Lock()
 		e.busy = false
 		e.cancelCurrent = nil
@@ -521,7 +518,7 @@ func (e *Engine) generateWithRetryClient(ctx context.Context, client llm.Client,
 				if attemptDone.Load() {
 					return
 				}
-				if strings.TrimSpace(delta.Text) == "" && strings.TrimSpace(delta.Status) == "" {
+				if strings.TrimSpace(delta.Text) == "" {
 					return
 				}
 				reasoningEmitted = true

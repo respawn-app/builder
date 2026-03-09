@@ -52,7 +52,6 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 			}
 		}
 	}
-	e.chat.clearActivity()
 	return nil
 }
 
