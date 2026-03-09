@@ -12,7 +12,7 @@ import (
 	"builder/internal/tools"
 )
 
-func TestRejectDeleteBlockAtomically(t *testing.T) {
+func TestDeleteFile(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "a.txt")
 	if err := os.WriteFile(target, []byte("keep\n"), 0o644); err != nil {
@@ -30,16 +30,178 @@ func TestRejectDeleteBlockAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatalf("patch call error: %v", err)
 	}
+	if result.IsError {
+		t.Fatalf("expected success, got %s", string(result.Output))
+	}
+
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("expected file deleted, stat err=%v", err)
+	}
+}
+
+func TestDeleteParticipatesInAtomicPatchCommit(t *testing.T) {
+	dir := t.TempDir()
+	deleteTarget := filepath.Join(dir, "delete.txt")
+	keepTarget := filepath.Join(dir, "keep.txt")
+	if err := os.WriteFile(deleteTarget, []byte("delete me\n"), 0o644); err != nil {
+		t.Fatalf("write delete target: %v", err)
+	}
+	if err := os.WriteFile(keepTarget, []byte("one\n"), 0o644); err != nil {
+		t.Fatalf("write keep target: %v", err)
+	}
+
+	tool, err := New(dir, true)
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	patchText := "*** Begin Patch\n*** Delete File: delete.txt\n*** Add File: added.txt\n+hello\n*** Update File: keep.txt\n-two\n+two\n*** End Patch\n"
+	input, _ := json.Marshal(map[string]any{"patch": patchText})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "atomic-delete", Name: tools.ToolPatch, Input: input})
+	if err != nil {
+		t.Fatalf("patch call error: %v", err)
+	}
 	if !result.IsError {
 		t.Fatalf("expected tool error result")
 	}
 
-	data, readErr := os.ReadFile(target)
-	if readErr != nil {
-		t.Fatalf("read target: %v", readErr)
+	deleted, err := os.ReadFile(deleteTarget)
+	if err != nil {
+		t.Fatalf("read delete target after failure: %v", err)
 	}
-	if string(data) != "keep\n" {
-		t.Fatalf("file mutated on delete rejection: %q", string(data))
+	if string(deleted) != "delete me\n" {
+		t.Fatalf("unexpected delete target contents after rollback: %q", string(deleted))
+	}
+	if _, err := os.Stat(filepath.Join(dir, "added.txt")); !os.IsNotExist(err) {
+		t.Fatalf("expected added file absent after rollback, stat err=%v", err)
+	}
+	kept, err := os.ReadFile(keepTarget)
+	if err != nil {
+		t.Fatalf("read keep target after failure: %v", err)
+	}
+	if string(kept) != "one\n" {
+		t.Fatalf("unexpected keep target contents after rollback: %q", string(kept))
+	}
+}
+
+func TestDeleteAddUpdateCommitTogether(t *testing.T) {
+	dir := t.TempDir()
+	deleteTarget := filepath.Join(dir, "delete.txt")
+	updateTarget := filepath.Join(dir, "update.txt")
+	if err := os.WriteFile(deleteTarget, []byte("remove me\n"), 0o644); err != nil {
+		t.Fatalf("write delete target: %v", err)
+	}
+	if err := os.WriteFile(updateTarget, []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatalf("write update target: %v", err)
+	}
+
+	tool, err := New(dir, true)
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	patchText := "*** Begin Patch\n*** Delete File: delete.txt\n*** Add File: added.txt\n+hello\n*** Update File: update.txt\n one\n-two\n+two updated\n*** End Patch\n"
+	input, _ := json.Marshal(map[string]any{"patch": patchText})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "mixed-success", Name: tools.ToolPatch, Input: input})
+	if err != nil {
+		t.Fatalf("patch call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got %s", string(result.Output))
+	}
+
+	if _, err := os.Stat(deleteTarget); !os.IsNotExist(err) {
+		t.Fatalf("expected delete target removed, stat err=%v", err)
+	}
+	added, err := os.ReadFile(filepath.Join(dir, "added.txt"))
+	if err != nil {
+		t.Fatalf("read added file: %v", err)
+	}
+	if string(added) != "hello\n" {
+		t.Fatalf("unexpected added file contents: %q", string(added))
+	}
+	updated, err := os.ReadFile(updateTarget)
+	if err != nil {
+		t.Fatalf("read updated file: %v", err)
+	}
+	if string(updated) != "one\ntwo updated\n" {
+		t.Fatalf("unexpected updated file contents: %q", string(updated))
+	}
+}
+
+func TestDeleteThenMoveToSamePathCommitsReplacement(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.txt")
+	dest := filepath.Join(dir, "dest.txt")
+	if err := os.WriteFile(src, []byte("line1\nline2\n"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	if err := os.WriteFile(dest, []byte("old\n"), 0o644); err != nil {
+		t.Fatalf("write destination: %v", err)
+	}
+
+	tool, err := New(dir, true)
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	patchText := "*** Begin Patch\n*** Delete File: dest.txt\n*** Update File: src.txt\n*** Move to: dest.txt\n line1\n-line2\n+line2 moved\n*** End Patch\n"
+	input, _ := json.Marshal(map[string]any{"patch": patchText})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "replace-move", Name: tools.ToolPatch, Input: input})
+	if err != nil {
+		t.Fatalf("patch call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got %s", string(result.Output))
+	}
+
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("expected source removed after move, stat err=%v", err)
+	}
+	data, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read replacement destination: %v", err)
+	}
+	if string(data) != "line1\nline2 moved\n" {
+		t.Fatalf("unexpected replacement destination contents: %q", string(data))
+	}
+}
+
+func TestDeleteThenAddNestedFileReplacesFileWithDirectory(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "tools")
+	if err := os.WriteFile(blocker, []byte("old blocker\n"), 0o644); err != nil {
+		t.Fatalf("write blocker file: %v", err)
+	}
+
+	tool, err := New(dir, true)
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	patchText := "*** Begin Patch\n*** Delete File: tools\n*** Add File: tools/main.go\n+package main\n+\n+func main() {}\n*** End Patch\n"
+	input, _ := json.Marshal(map[string]any{"patch": patchText})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "replace-file-dir", Name: tools.ToolPatch, Input: input})
+	if err != nil {
+		t.Fatalf("patch call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got %s", string(result.Output))
+	}
+
+	info, err := os.Stat(filepath.Join(dir, "tools"))
+	if err != nil {
+		t.Fatalf("stat tools directory: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected tools to become a directory, mode=%v", info.Mode())
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "tools", "main.go"))
+	if err != nil {
+		t.Fatalf("read nested replacement file: %v", err)
+	}
+	if string(data) != "package main\n\nfunc main() {}\n" {
+		t.Fatalf("unexpected nested replacement contents: %q", string(data))
 	}
 }
 
@@ -220,19 +382,23 @@ func TestCommitStagedFilesRollsBackCommittedTargetsOnLaterFailure(t *testing.T) 
 		t.Fatalf("seed blocking dir: %v", err)
 	}
 
-	if err := os.WriteFile(stagedPath(first), []byte("patched-first\n"), 0o644); err != nil {
+	firstStage, err := createStagedFile(first, []byte("patched-first\n"))
+	if err != nil {
 		t.Fatalf("stage first file: %v", err)
 	}
-	if err := os.WriteFile(stagedPath(blockingDir), []byte("patched-second\n"), 0o644); err != nil {
+	defer func() { _ = os.Remove(firstStage) }()
+	secondStage, err := createStagedFile(blockingDir, []byte("patched-second\n"))
+	if err != nil {
 		t.Fatalf("stage second file: %v", err)
 	}
+	defer func() { _ = os.Remove(secondStage) }()
 
 	states := []*patchFileState{
-		{Exists: true, NewPath: first, Original: first},
-		{Exists: true, NewPath: blockingDir, Original: blockingDir},
+		{Exists: true, NewPath: first, Original: first, StagedPath: firstStage},
+		{Exists: true, NewPath: blockingDir, Original: blockingDir, StagedPath: secondStage},
 	}
 
-	err := commitStagedFiles(states)
+	err = commitStagedFiles(states, nil)
 	if err == nil {
 		t.Fatal("expected transactional commit failure")
 	}

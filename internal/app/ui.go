@@ -281,6 +281,7 @@ type uiModel struct {
 	nativeFormatterReady    bool
 	nativeFormatterWidth    int
 	nativeFormatterSnapshot string
+	nativeRenderedSnapshot  string
 	nativeFormatterEntries  []tui.TranscriptEntry
 	startupCmds             []tea.Cmd
 	nativeLiveRegionLines   int

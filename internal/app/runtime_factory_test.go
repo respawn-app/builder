@@ -392,6 +392,56 @@ func TestBackgroundEventRouterShapesBackgroundNoticeByOutputMode(t *testing.T) {
 	}
 }
 
+func TestBackgroundEventRouterWhitespacePreviewUsesNoOutputLine(t *testing.T) {
+	root := t.TempDir()
+	store, err := session.Create(root, "ws", root)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &busyToggleFakeClient{}
+	events := make(chan runtime.Event, 4)
+	eng, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{
+		Model: "gpt-5",
+		OnEvent: func(evt runtime.Event) {
+			if evt.Kind == runtime.EventBackgroundUpdated {
+				events <- evt
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	router := newBackgroundEventRouter(nil, 80, shelltool.BackgroundOutputDefault)
+	router.SetActiveSession(store.Meta().SessionID, eng)
+	exitCode := 0
+	router.handle(shelltool.Event{
+		Type: shelltool.EventCompleted,
+		Snapshot: shelltool.Snapshot{
+			ID:             "1000",
+			OwnerSessionID: "other-session",
+			State:          "completed",
+			ExitCode:       &exitCode,
+		},
+		Preview: "  \n\t  ",
+	})
+
+	select {
+	case evt := <-events:
+		if evt.Background == nil {
+			t.Fatal("expected background payload")
+		}
+		if !strings.Contains(evt.Background.NoticeText, "\nno output") {
+			t.Fatalf("expected no output line, got %q", evt.Background.NoticeText)
+		}
+		if strings.Contains(evt.Background.NoticeText, "Output:") {
+			t.Fatalf("did not expect output header for blank preview, got %q", evt.Background.NoticeText)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for background update event")
+	}
+}
+
 func TestBuildToolRegistryExecCommandPropagatesOwnerSessionID(t *testing.T) {
 	workspace := t.TempDir()
 	registry, _, manager, err := buildToolRegistry(

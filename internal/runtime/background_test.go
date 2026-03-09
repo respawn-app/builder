@@ -1,6 +1,9 @@
 package runtime
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFormatBackgroundShellNoticeUsesStructuredTexts(t *testing.T) {
 	evt := BackgroundShellEvent{
@@ -15,5 +18,23 @@ func TestFormatBackgroundShellNoticeUsesStructuredTexts(t *testing.T) {
 	}
 	if got := formatBackgroundShellCompact(evt); got != evt.CompactText {
 		t.Fatalf("unexpected compact notice: %q", got)
+	}
+}
+
+func TestFormatBackgroundShellNoticeWhitespacePreviewUsesNoOutputLine(t *testing.T) {
+	exitCode := 0
+	evt := BackgroundShellEvent{
+		ID:       "1000",
+		State:    "completed",
+		ExitCode: &exitCode,
+		Preview:  "  \n\t  ",
+	}
+
+	got := formatBackgroundShellNotice(evt)
+	if !strings.Contains(got, "\nno output") {
+		t.Fatalf("expected no output line, got %q", got)
+	}
+	if strings.Contains(got, "Output:") {
+		t.Fatalf("did not expect output header for blank preview, got %q", got)
 	}
 }

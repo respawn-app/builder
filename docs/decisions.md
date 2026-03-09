@@ -36,8 +36,8 @@
 ## Patch Tool
 
 - Apply is atomic: malformed/conflicting patch means no file changes.
-- Allowed operations in v1: add/update/move.
-- Any `Delete File` block rejects the entire patch atomically.
+- Allowed operations in v1: add/update/move/delete.
+- `Delete File` participates in the same atomic patch transaction as add/update/move.
 - Patch targets are validated with real-path resolution.
 - No timeout and no automatic retries.
 - Patch success persistence includes patch input + apply-result metadata.

@@ -77,6 +77,7 @@ type SetSelectedTranscriptEntryMsg struct {
 type FocusTranscriptEntryMsg struct {
 	EntryIndex int
 	Center     bool
+	Bottom     bool
 }
 
 type SetOngoingScrollMsg struct {
@@ -287,7 +288,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case ModeOngoing:
 			if start, end, ok := m.ongoingLineRangeForEntry(msg.EntryIndex); ok {
 				target := start
-				if msg.Center {
+				if msg.Bottom {
+					target = end - m.viewportLines + 1
+				} else if msg.Center {
 					midpoint := (start + end) / 2
 					target = midpoint - m.viewportLines/2
 				}
@@ -299,7 +302,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if start, end, ok := m.detailLineRangeForEntry(msg.EntryIndex); ok {
 				target := start
-				if msg.Center {
+				if msg.Bottom {
+					target = end - m.viewportLines + 1
+				} else if msg.Center {
 					midpoint := (start + end) / 2
 					target = midpoint - m.viewportLines/2
 				}

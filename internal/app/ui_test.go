@@ -809,6 +809,134 @@ func TestRollbackEditCancelChainRestoresPriorOngoingScroll(t *testing.T) {
 	}
 }
 
+func TestNativeRollbackEditAnchorsToSelectedConversationPoint(t *testing.T) {
+	entries := make([]UITranscriptEntry, 0, 40)
+	for i := 0; i < 20; i++ {
+		entries = append(entries,
+			UITranscriptEntry{Role: "user", Text: fmt.Sprintf("u-%02d", i)},
+			UITranscriptEntry{Role: "assistant", Text: fmt.Sprintf("a-%02d", i)},
+		)
+	}
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript(entries),
+	).(*uiModel)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 14})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	if !m.startRollbackSelectionMode() {
+		t.Fatal("expected rollback selection mode")
+	}
+	if overlayCmd := m.pushRollbackOverlayIfNeeded(); overlayCmd == nil {
+		t.Fatal("expected rollback overlay transition command")
+	}
+	m.rollbackSelection = 3
+	m.applyRollbackSelectionHighlight()
+	target := m.rollbackCandidates[m.rollbackSelection].TranscriptIndex
+	laterTail := m.transcriptEntries[len(m.transcriptEntries)-1].Text
+
+	cmd := m.inputController().beginRollbackEditingFlowCmd()
+	if cmd == nil {
+		t.Fatal("expected rollback edit transition command")
+	}
+	if !m.rollbackEditing || m.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected rollback editing in ongoing mode, mode=%q editing=%t", m.view.Mode(), m.rollbackEditing)
+	}
+	expected := renderNativeCommittedSnapshot(m.transcriptEntries[:target+1], m.theme, m.nativeReplayRenderWidth())
+	if m.nativeRenderedSnapshot != expected {
+		t.Fatalf("expected native rendered snapshot anchored through selected entry")
+	}
+	if !strings.Contains(m.nativeRenderedSnapshot, m.transcriptEntries[target].Text) {
+		t.Fatalf("expected anchored snapshot to include selected message %q, got %q", m.transcriptEntries[target].Text, m.nativeRenderedSnapshot)
+	}
+	if strings.Contains(m.nativeRenderedSnapshot, laterTail) {
+		t.Fatalf("expected anchored snapshot to exclude later tail %q, got %q", laterTail, m.nativeRenderedSnapshot)
+	}
+}
+
+func TestNativeRollbackEditCommandSequenceClearsBeforeAnchoredReplay(t *testing.T) {
+	entries := make([]UITranscriptEntry, 0, 20)
+	for i := 0; i < 10; i++ {
+		entries = append(entries,
+			UITranscriptEntry{Role: "user", Text: fmt.Sprintf("u-%02d", i)},
+			UITranscriptEntry{Role: "assistant", Text: fmt.Sprintf("a-%02d", i)},
+		)
+	}
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
+		WithUIInitialTranscript(entries),
+	).(*uiModel)
+	next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 14})
+	m = next.(*uiModel)
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	_ = collectCmdMessages(t, startupCmd)
+
+	next, firstEscCmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(*uiModel)
+	if firstEscCmd != nil {
+		_ = collectCmdMessages(t, firstEscCmd)
+	}
+	next, secondEscCmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(*uiModel)
+	if !m.rollbackMode || m.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected rollback selection in detail mode, mode=%q rollback=%t", m.view.Mode(), m.rollbackMode)
+	}
+	_ = collectCmdMessages(t, secondEscCmd)
+
+	m.rollbackSelection = 2
+	m.applyRollbackSelectionHighlight()
+	target := m.rollbackCandidates[m.rollbackSelection].TranscriptIndex
+	targetText := m.transcriptEntries[target].Text
+	laterTail := m.transcriptEntries[len(m.transcriptEntries)-1].Text
+
+	cmd := m.inputController().beginRollbackEditingFlowCmd()
+	if cmd == nil {
+		t.Fatal("expected rollback edit command")
+	}
+	msgs := collectCmdMessages(t, cmd)
+	clearIndex := -1
+	flushIndex := -1
+	flushText := ""
+	for idx, msg := range msgs {
+		if clearIndex < 0 && strings.Contains(fmt.Sprintf("%T", msg), "clearScreenMsg") {
+			clearIndex = idx
+		}
+		if flush, ok := msg.(nativeHistoryFlushMsg); ok {
+			flushIndex = idx
+			flushText = stripANSIPreserve(flush.Text)
+			break
+		}
+	}
+	if clearIndex < 0 {
+		t.Fatalf("expected rollback edit command to clear screen before replay, got messages=%v", msgs)
+	}
+	if flushIndex < 0 {
+		t.Fatalf("expected rollback edit command to emit anchored native replay, got messages=%v", msgs)
+	}
+	if clearIndex > flushIndex {
+		t.Fatalf("expected clear screen before native replay, got messages=%v", msgs)
+	}
+	if !strings.Contains(flushText, targetText) {
+		t.Fatalf("expected anchored replay to include selected message %q, got %q", targetText, flushText)
+	}
+	if strings.Contains(flushText, laterTail) {
+		t.Fatalf("expected anchored replay to exclude later tail %q, got %q", laterTail, flushText)
+	}
+	if !m.rollbackEditing || m.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected rollback editing in ongoing mode after command, mode=%q editing=%t", m.view.Mode(), m.rollbackEditing)
+	}
+}
+
 func TestRollbackTransitionsDoNotClearScreenWhenNotInAltScreen(t *testing.T) {
 	m := NewUIModel(
 		nil,

@@ -833,10 +833,10 @@ func SummarizeBackgroundEvent(evt Event, opts BackgroundNoticeOptions) Backgroun
 		detail = append(detail, fmt.Sprintf("Output file (%s): %s", formatOutputLineCount(lineCount), evt.Snapshot.LogPath))
 	}
 	if mode != BackgroundOutputConcise {
-		detail = append(detail, "Output:")
 		if strings.TrimSpace(preview) == "" {
-			detail = append(detail, "<no output>")
+			detail = append(detail, "no output")
 		} else {
+			detail = append(detail, "Output:")
 			detail = append(detail, preview)
 		}
 	}

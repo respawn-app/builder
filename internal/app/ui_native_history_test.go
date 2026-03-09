@@ -832,3 +832,59 @@ func TestNativeStreamingDividerPersistsInTightViewport(t *testing.T) {
 		t.Fatalf("expected first streamed line to remain visible in tight viewport, got %q", plain)
 	}
 }
+
+func TestNativeHistoryReplayDefersWhileDetailAndFlushesOnReturn(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
+	).(*uiModel)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	startupMsg, ok := startupCmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", startupCmd())
+	}
+	if !strings.Contains(stripANSIPreserve(startupMsg.Text), "seed") {
+		t.Fatalf("expected startup replay to include seed, got %q", startupMsg.Text)
+	}
+
+	m.forwardToView(tui.ToggleModeMsg{})
+	if m.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected detail mode, got %q", m.view.Mode())
+	}
+
+	steered := tui.TranscriptEntry{Role: "user", Text: "steered message"}
+	m.transcriptEntries = append(m.transcriptEntries, steered)
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+	if cmd := m.syncNativeHistoryFromTranscript(); cmd != nil {
+		t.Fatalf("expected native replay to stay deferred while detail is active, got %T", cmd())
+	}
+	if strings.Contains(m.nativeRenderedSnapshot, "steered message") {
+		t.Fatalf("expected rendered normal-buffer snapshot to remain stale while detail is active, got %q", m.nativeRenderedSnapshot)
+	}
+
+	m.forwardToView(tui.ToggleModeMsg{})
+	if m.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected ongoing mode, got %q", m.view.Mode())
+	}
+	cmd := m.emitCurrentNativeHistorySnapshot(false)
+	if cmd == nil {
+		t.Fatal("expected deferred native replay when returning to ongoing")
+	}
+	flushMsg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	plain := stripANSIPreserve(flushMsg.Text)
+	if !strings.Contains(plain, "steered message") {
+		t.Fatalf("expected deferred replay to include steered message, got %q", plain)
+	}
+	if strings.Contains(plain, "seed") {
+		t.Fatalf("expected deferred replay to emit only the missing delta, got %q", plain)
+	}
+}

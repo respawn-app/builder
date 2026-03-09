@@ -193,3 +193,23 @@ func TestSummarizeBackgroundEventDefaultDoesNotDuplicateShortLogAroundTruncation
 		t.Fatalf("expected truncated preview smaller than content, got preview=%d content=%d", len(preview), len(content))
 	}
 }
+
+func TestSummarizeBackgroundEventWhitespacePreviewUsesNoOutputLine(t *testing.T) {
+	exitCode := 0
+	summary := SummarizeBackgroundEvent(Event{
+		Type: EventCompleted,
+		Snapshot: Snapshot{
+			ID:       "1000",
+			State:    "completed",
+			ExitCode: &exitCode,
+		},
+		Preview: " \n\t ",
+	}, BackgroundNoticeOptions{MaxChars: 80, SuccessOutputMode: BackgroundOutputDefault})
+
+	if !strings.Contains(summary.DetailText, "\nno output") {
+		t.Fatalf("expected no output line, got %q", summary.DetailText)
+	}
+	if strings.Contains(summary.DetailText, "Output:") {
+		t.Fatalf("did not expect output header for blank preview, got %q", summary.DetailText)
+	}
+}
