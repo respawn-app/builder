@@ -45,7 +45,10 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 		m.nativeFormatterEntries = cloneNativeEntries(filtered)
 		m.nativeFlushedEntryCount = len(m.transcriptEntries)
 		m.nativeHistoryReplayed = true
-		return m.emitNativeRenderedText(styleNativeReplayDividers(rawSnapshot, m.theme, m.nativeFormatterWidth))
+		if !m.shouldEmitNativeHistory() {
+			return nil
+		}
+		return m.emitCurrentNativeHistorySnapshot(false)
 	}
 
 	filteredAll := nonEmptyNativeEntries(m.transcriptEntries)
@@ -77,24 +80,18 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 	}
 
 	rawSnapshot := m.nativeFormatter.OngoingCommittedSnapshot()
-	normalizedSnapshot := rawSnapshot
-	previous := m.nativeFormatterSnapshot
-	m.nativeFormatterSnapshot = normalizedSnapshot
+	m.nativeFormatterSnapshot = rawSnapshot
 	m.nativeFormatterEntries = cloneNativeEntries(filteredAll)
 	m.nativeFlushedEntryCount = len(m.transcriptEntries)
 	m.nativeHistoryReplayed = true
-	if previous == "" {
-		return m.emitNativeRenderedText(styleNativeReplayDividers(rawSnapshot, m.theme, m.nativeFormatterWidth))
-	}
-	if !strings.HasPrefix(normalizedSnapshot, previous) {
-		m.rebaseNativeFormatterSnapshot()
+	if !m.shouldEmitNativeHistory() {
 		return nil
 	}
-	delta := normalizedSnapshot[len(previous):]
-	if len(delta) == 0 {
-		return nil
-	}
-	return m.emitNativeRenderedText(styleNativeReplayDividers(delta, m.theme, m.nativeFormatterWidth))
+	return m.emitCurrentNativeHistorySnapshot(false)
+}
+
+func (m *uiModel) shouldEmitNativeHistory() bool {
+	return m.usesNativeScrollback() && m.windowSizeKnown && m.view.Mode() == tui.ModeOngoing
 }
 
 func (m *uiModel) nativeReplayRenderWidth() int {
@@ -126,6 +123,7 @@ func (m *uiModel) resetNativeFormatterState() {
 	m.nativeFormatterReady = false
 	m.nativeFormatterWidth = 0
 	m.nativeFormatterSnapshot = ""
+	m.nativeRenderedSnapshot = ""
 	m.nativeFormatterEntries = nil
 	m.nativeFormatter = tui.Model{}
 }
@@ -144,6 +142,52 @@ func (m *uiModel) rebaseNativeFormatterSnapshot() {
 	m.nativeFormatterEntries = cloneNativeEntries(filtered)
 	m.nativeFlushedEntryCount = len(m.transcriptEntries)
 	m.nativeHistoryReplayed = true
+}
+
+func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool) tea.Cmd {
+	rawSnapshot := m.nativeFormatterSnapshot
+	if strings.TrimSpace(rawSnapshot) == "" {
+		m.nativeRenderedSnapshot = ""
+		return nil
+	}
+	if !forceFull && m.nativeRenderedSnapshot != "" {
+		if strings.HasPrefix(rawSnapshot, m.nativeRenderedSnapshot) {
+			delta := rawSnapshot[len(m.nativeRenderedSnapshot):]
+			m.nativeRenderedSnapshot = rawSnapshot
+			if len(delta) == 0 {
+				return nil
+			}
+			return m.emitNativeRenderedText(styleNativeReplayDividers(delta, m.theme, m.nativeFormatterWidth))
+		}
+		forceFull = true
+	}
+	m.nativeRenderedSnapshot = rawSnapshot
+	styled := styleNativeReplayDividers(rawSnapshot, m.theme, m.nativeFormatterWidth)
+	if strings.TrimSpace(styled) == "" {
+		return nil
+	}
+	if forceFull && strings.TrimSpace(m.nativeRenderedSnapshot) != "" {
+		return tea.Sequence(tea.ClearScreen, m.emitNativeRenderedText(styled))
+	}
+	return m.emitNativeRenderedText(styled)
+}
+
+func (m *uiModel) replayNativeTranscriptThroughEntry(entryIndex int) tea.Cmd {
+	if !m.usesNativeScrollback() || !m.windowSizeKnown {
+		return nil
+	}
+	if entryIndex < 0 || entryIndex >= len(m.transcriptEntries) {
+		return nil
+	}
+	rawSnapshot := renderNativeCommittedSnapshot(m.transcriptEntries[:entryIndex+1], m.theme, m.nativeReplayRenderWidth())
+	m.nativeRenderedSnapshot = rawSnapshot
+	if strings.TrimSpace(rawSnapshot) == "" {
+		return tea.ClearScreen
+	}
+	return tea.Sequence(
+		tea.ClearScreen,
+		m.emitNativeRenderedText(styleNativeReplayDividers(rawSnapshot, m.theme, m.nativeReplayRenderWidth())),
+	)
 }
 
 func nonEmptyNativeEntries(entries []tui.TranscriptEntry) []tui.TranscriptEntry {
@@ -277,6 +321,11 @@ func splitNativeScrollbackChunks(rendered string, maxBytes int) []string {
 }
 
 func renderNativeScrollbackSnapshot(entries []tui.TranscriptEntry, theme string, width int) string {
+	rawSnapshot := renderNativeCommittedSnapshot(entries, theme, width)
+	return styleNativeReplayDividers(rawSnapshot, theme, width)
+}
+
+func renderNativeCommittedSnapshot(entries []tui.TranscriptEntry, theme string, width int) string {
 	if len(entries) == 0 {
 		return ""
 	}
@@ -296,7 +345,7 @@ func renderNativeScrollbackSnapshot(entries []tui.TranscriptEntry, theme string,
 	if casted, ok := next.(tui.Model); ok {
 		tuiModel = casted
 	}
-	return styleNativeReplayDividers(tuiModel.OngoingCommittedSnapshot(), theme, width)
+	return tuiModel.OngoingCommittedSnapshot()
 }
 
 func styleNativeReplayDividers(snapshot, theme string, width int) string {

@@ -119,9 +119,9 @@ func (m *uiModel) moveRollbackSelection(delta int) {
 	m.applyRollbackSelectionHighlight()
 }
 
-func (m *uiModel) beginRollbackEditing() bool {
+func (m *uiModel) beginRollbackEditing() (int, bool) {
 	if !m.rollbackMode || len(m.rollbackCandidates) == 0 {
-		return false
+		return -1, false
 	}
 	selected := m.rollbackCandidates[m.rollbackSelection]
 	m.rollbackSelectedUserMessageIndex = selected.UserMessageIndex
@@ -130,7 +130,7 @@ func (m *uiModel) beginRollbackEditing() bool {
 	m.input = selected.Text
 	m.inputCursor = -1
 	m.clearRollbackSelectionHighlight()
-	return true
+	return selected.TranscriptIndex, true
 }
 
 func (m *uiModel) cancelRollbackEditingBackToSelection() bool {
@@ -168,6 +168,10 @@ func (m *uiModel) pushRollbackOverlayIfNeeded() tea.Cmd {
 }
 
 func (m *uiModel) popRollbackOverlayIfNeeded() tea.Cmd {
+	return m.popRollbackOverlayWithNativeReplay(true)
+}
+
+func (m *uiModel) popRollbackOverlayWithNativeReplay(emitNativeReplay bool) tea.Cmd {
 	if !m.rollbackOverlayPushed {
 		return nil
 	}
@@ -175,7 +179,7 @@ func (m *uiModel) popRollbackOverlayIfNeeded() tea.Cmd {
 	if m.view.Mode() != tui.ModeDetail {
 		return nil
 	}
-	if transitionCmd := m.toggleTranscriptMode(); transitionCmd != nil {
+	if transitionCmd := m.toggleTranscriptModeWithNativeReplay(emitNativeReplay); transitionCmd != nil {
 		return transitionCmd
 	}
 	return tea.ClearScreen

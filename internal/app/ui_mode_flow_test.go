@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -260,6 +261,46 @@ func updateUIModel(t *testing.T, m *uiModel, msg tea.Msg) *uiModel {
 		t.Fatalf("unexpected model type %T", next)
 	}
 	return updated
+}
+
+func collectCmdMessages(t *testing.T, cmd tea.Cmd) []tea.Msg {
+	t.Helper()
+	msgs := make([]tea.Msg, 0)
+	var runMsg func(tea.Msg)
+	var runCmd func(tea.Cmd)
+	runCmd = func(cmd tea.Cmd) {
+		if cmd == nil {
+			return
+		}
+		runMsg(cmd())
+	}
+	runMsg = func(msg tea.Msg) {
+		if msg == nil {
+			return
+		}
+		switch typed := msg.(type) {
+		case tea.BatchMsg:
+			for _, child := range typed {
+				runCmd(child)
+			}
+			return
+		}
+		value := reflect.ValueOf(msg)
+		if value.IsValid() && value.Kind() == reflect.Slice {
+			for i := 0; i < value.Len(); i++ {
+				child, ok := value.Index(i).Interface().(tea.Cmd)
+				if !ok {
+					msgs = append(msgs, msg)
+					return
+				}
+				runCmd(child)
+			}
+			return
+		}
+		msgs = append(msgs, msg)
+	}
+	runCmd(cmd)
+	return msgs
 }
 
 func containsAny(text string, parts ...string) bool {

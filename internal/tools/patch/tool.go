@@ -21,10 +21,11 @@ type input struct {
 }
 
 type patchFileState struct {
-	Exists   bool
-	Content  []string
-	NewPath  string
-	Original string
+	Exists     bool
+	Content    []string
+	NewPath    string
+	Original   string
+	StagedPath string
 }
 
 type fileSnapshot struct {
@@ -165,7 +166,26 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 
 func (t *Tool) apply(ctx context.Context, doc Document) error {
 	state := map[string]*patchFileState{}
+	deleteTargets := map[string]struct{}{}
 	approvedOutside := map[string]bool{}
+
+	hasDeleteTarget := func(path string) bool {
+		_, ok := deleteTargets[path]
+		return ok
+	}
+
+	hasDeletedAncestor := func(path string) bool {
+		for current := filepath.Dir(path); current != "" && current != path; current = filepath.Dir(current) {
+			if hasDeleteTarget(current) {
+				return true
+			}
+			next := filepath.Dir(current)
+			if next == current {
+				break
+			}
+		}
+		return false
+	}
 
 	getState := func(path string) (*patchFileState, error) {
 		resolved, err := t.resolvePath(ctx, path, false, approvedOutside)
@@ -197,10 +217,16 @@ func (t *Tool) apply(ctx context.Context, doc Document) error {
 			if _, exists := state[target]; exists {
 				return fmt.Errorf("add file target already referenced: %s", op.Path)
 			}
+			allowReplacement := hasDeleteTarget(target)
+			allowBlockedAncestor := hasDeletedAncestor(target)
 			if _, err := os.Stat(target); err == nil {
-				return fmt.Errorf("add file target already exists: %s", op.Path)
+				if !allowReplacement {
+					return fmt.Errorf("add file target already exists: %s", op.Path)
+				}
 			} else if !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("stat add target: %w", err)
+				if !allowReplacement && !allowBlockedAncestor {
+					return fmt.Errorf("stat add target: %w", err)
+				}
 			}
 			state[target] = &patchFileState{
 				Exists:   true,
@@ -209,8 +235,29 @@ func (t *Tool) apply(ctx context.Context, doc Document) error {
 				Original: target,
 			}
 		case DeleteFile:
-			return errors.New("deleting files via apply_patch tool is not allowed; use shell tools")
+			target, err := t.resolvePath(ctx, op.Path, true, approvedOutside)
+			if err != nil {
+				return err
+			}
+			if _, exists := state[target]; exists {
+				return fmt.Errorf("delete target already referenced: %s", op.Path)
+			}
+			snapshot, err := captureSnapshot(target)
+			if err != nil {
+				return fmt.Errorf("stat delete target %q: %w", op.Path, err)
+			}
+			if !snapshot.Exists {
+				return fmt.Errorf("delete target does not exist: %s", op.Path)
+			}
+			deleteTargets[target] = struct{}{}
 		case UpdateFile:
+			resolved, err := t.resolvePath(ctx, op.Path, false, approvedOutside)
+			if err != nil {
+				return err
+			}
+			if hasDeleteTarget(resolved) {
+				return fmt.Errorf("update target already marked for deletion: %s", op.Path)
+			}
 			s, err := getState(op.Path)
 			if err != nil {
 				return err
@@ -232,10 +279,16 @@ func (t *Tool) apply(ctx context.Context, doc Document) error {
 					if _, ok := state[moveTarget]; ok {
 						return fmt.Errorf("move target already referenced: %s", op.MoveTo)
 					}
+					allowReplacement := hasDeleteTarget(moveTarget)
+					allowBlockedAncestor := hasDeletedAncestor(moveTarget)
 					if _, err := os.Stat(moveTarget); err == nil {
-						return fmt.Errorf("move target already exists: %s", op.MoveTo)
+						if !allowReplacement {
+							return fmt.Errorf("move target already exists: %s", op.MoveTo)
+						}
 					} else if !errors.Is(err, os.ErrNotExist) {
-						return fmt.Errorf("stat move target: %w", err)
+						if !allowReplacement && !allowBlockedAncestor {
+							return fmt.Errorf("stat move target: %w", err)
+						}
 					}
 					delete(state, s.NewPath)
 					s.NewPath = moveTarget
@@ -247,38 +300,31 @@ func (t *Tool) apply(ctx context.Context, doc Document) error {
 		}
 	}
 
-	states := sortedActiveStates(state)
-	for _, s := range states {
-		if err := os.MkdirAll(filepath.Dir(s.NewPath), 0o755); err != nil {
-			return fmt.Errorf("create parent dir: %w", err)
-		}
-	}
-
+	states := sortedCommitStates(state)
 	for _, s := range states {
 		text := strings.Join(s.Content, "\n")
 		if len(s.Content) > 0 && !strings.HasSuffix(text, "\n") {
 			text += "\n"
 		}
-		tmp := stagedPath(s.NewPath)
-		if err := os.WriteFile(tmp, []byte(text), 0o644); err != nil {
+		staged, err := createStagedFile(s.NewPath, []byte(text))
+		if err != nil {
 			return fmt.Errorf("stage write %s: %w", s.NewPath, err)
 		}
+		s.StagedPath = staged
 	}
 	defer cleanupStagedFiles(states)
 
-	if err := commitStagedFiles(states); err != nil {
+	if err := commitStagedFiles(states, deleteTargets); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func sortedActiveStates(state map[string]*patchFileState) []*patchFileState {
+func sortedCommitStates(state map[string]*patchFileState) []*patchFileState {
 	out := make([]*patchFileState, 0, len(state))
 	for _, s := range state {
-		if s.Exists {
-			out = append(out, s)
-		}
+		out = append(out, s)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].NewPath < out[j].NewPath
@@ -286,19 +332,19 @@ func sortedActiveStates(state map[string]*patchFileState) []*patchFileState {
 	return out
 }
 
-func stagedPath(path string) string {
-	return path + ".builder.tmp"
-}
-
 func cleanupStagedFiles(states []*patchFileState) {
 	for _, s := range states {
-		_ = os.Remove(stagedPath(s.NewPath))
+		if strings.TrimSpace(s.StagedPath) == "" {
+			continue
+		}
+		_ = os.Remove(s.StagedPath)
 	}
 }
 
-func commitStagedFiles(states []*patchFileState) error {
+func commitStagedFiles(states []*patchFileState, deleteTargets map[string]struct{}) error {
 	committed := make([]committedWrite, 0, len(states))
-	removed := make([]removedSource, 0, len(states))
+	removed := make([]removedSource, 0, len(states)*2)
+	removedPaths := make(map[string]struct{}, len(deleteTargets)+len(states))
 	rollback := func() error {
 		var rollbackErr error
 		for i := len(committed) - 1; i >= 0; i-- {
@@ -316,35 +362,109 @@ func commitStagedFiles(states []*patchFileState) error {
 		return rollbackErr
 	}
 
+	removePath := func(path string, label string) error {
+		if _, seen := removedPaths[path]; seen {
+			return nil
+		}
+		before, err := captureSnapshot(path)
+		if err != nil {
+			return withRollback(fmt.Errorf("snapshot %s %s: %w", label, path, err), rollback())
+		}
+		removedPaths[path] = struct{}{}
+		if !before.Exists {
+			return nil
+		}
+		if err := os.Remove(path); err != nil {
+			return withRollback(fmt.Errorf("remove %s %s: %w", label, path, err), rollback())
+		}
+		removed = append(removed, removedSource{Path: path, Before: before})
+		return nil
+	}
+
+	deletePaths := make([]string, 0, len(deleteTargets))
+	for path := range deleteTargets {
+		deletePaths = append(deletePaths, path)
+	}
+	sort.Strings(deletePaths)
+	for _, path := range deletePaths {
+		if err := removePath(path, "delete target"); err != nil {
+			return err
+		}
+	}
+
 	for _, s := range states {
+		if s.NewPath != s.Original {
+			if err := removePath(s.Original, "moved source"); err != nil {
+				return err
+			}
+		}
+	}
+
+	for _, s := range states {
+		if err := os.MkdirAll(filepath.Dir(s.NewPath), 0o755); err != nil {
+			return withRollback(fmt.Errorf("create parent dir for %s: %w", s.NewPath, err), rollback())
+		}
 		before, err := captureSnapshot(s.NewPath)
 		if err != nil {
 			return withRollback(fmt.Errorf("snapshot target %s: %w", s.NewPath, err), rollback())
 		}
-		if err := os.Rename(stagedPath(s.NewPath), s.NewPath); err != nil {
+		if err := os.Rename(s.StagedPath, s.NewPath); err != nil {
 			return withRollback(fmt.Errorf("commit write %s: %w", s.NewPath, err), rollback())
 		}
 		committed = append(committed, committedWrite{Path: s.NewPath, Before: before})
 	}
 
-	for _, s := range states {
-		if s.NewPath == s.Original {
-			continue
-		}
-		before, err := captureSnapshot(s.Original)
-		if err != nil {
-			return withRollback(fmt.Errorf("snapshot moved source %s: %w", s.Original, err), rollback())
-		}
-		if !before.Exists {
-			continue
-		}
-		if err := os.Remove(s.Original); err != nil {
-			return withRollback(fmt.Errorf("remove moved source %s: %w", s.Original, err), rollback())
-		}
-		removed = append(removed, removedSource{Path: s.Original, Before: before})
-	}
-
 	return nil
+}
+
+func createStagedFile(targetPath string, data []byte) (string, error) {
+	stageDir, err := nearestExistingDirectory(filepath.Dir(targetPath))
+	if err != nil {
+		return "", err
+	}
+	pattern := ".builder-patch-*"
+	if base := strings.TrimSpace(filepath.Base(targetPath)); base != "" && base != "." && base != string(filepath.Separator) {
+		pattern = ".builder-patch-" + base + "-*"
+	}
+	file, err := os.CreateTemp(stageDir, pattern)
+	if err != nil {
+		return "", err
+	}
+	path := file.Name()
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return "", err
+	}
+	if err := file.Chmod(0o644); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	return path, nil
+}
+
+func nearestExistingDirectory(path string) (string, error) {
+	current := filepath.Clean(path)
+	for {
+		info, err := os.Stat(current)
+		if err == nil {
+			if info.IsDir() {
+				return current, nil
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		next := filepath.Dir(current)
+		if next == current {
+			return "", fmt.Errorf("no existing directory ancestor for %s", path)
+		}
+		current = next
+	}
 }
 
 func captureSnapshot(path string) (fileSnapshot, error) {

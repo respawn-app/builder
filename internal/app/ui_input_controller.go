@@ -52,14 +52,20 @@ func (c uiInputController) stopRollbackSelectionFlowCmd() tea.Cmd {
 
 func (c uiInputController) beginRollbackEditingFlowCmd() tea.Cmd {
 	m := c.model
-	if !m.beginRollbackEditing() {
+	targetEntry, ok := m.beginRollbackEditing()
+	if !ok {
 		return nil
 	}
-	overlayCmd := m.popRollbackOverlayIfNeeded()
-	if overlayCmd != nil {
-		return overlayCmd
+	overlayCmd := m.popRollbackOverlayWithNativeReplay(false)
+	m.forwardToView(tui.FocusTranscriptEntryMsg{EntryIndex: targetEntry, Bottom: true})
+	if !m.usesNativeScrollback() {
+		if overlayCmd != nil {
+			return overlayCmd
+		}
+		return c.rollbackTransitionCmd()
 	}
-	return c.rollbackTransitionCmd()
+	anchorCmd := m.replayNativeTranscriptThroughEntry(targetEntry)
+	return sequenceCmds(overlayCmd, anchorCmd)
 }
 
 func (c uiInputController) cancelRollbackEditingToSelectionFlowCmd() tea.Cmd {

@@ -12,6 +12,7 @@ import (
 	"builder/internal/session"
 	"builder/internal/tools"
 	"builder/internal/tui"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 type runtimeAdapterFakeClient struct {
@@ -222,6 +223,71 @@ func TestUserMessageFlushedAfterConversationUpdatedDoesNotDuplicateNativeReplay(
 	flushCmd := m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, UserMessage: "steered message"})
 	if flushCmd != nil {
 		t.Fatalf("expected no duplicate replay after already-synced conversation, got %T", flushCmd())
+	}
+}
+
+func TestDeferredNativeReplayFlushesAutomaticallyOnDetailExit(t *testing.T) {
+	policies := []config.TUIAlternateScreenPolicy{
+		config.TUIAlternateScreenNever,
+		config.TUIAlternateScreenAuto,
+	}
+	for _, policy := range policies {
+		t.Run(string(policy), func(t *testing.T) {
+			m := NewUIModel(
+				nil,
+				make(chan runtime.Event),
+				make(chan askEvent),
+				WithUIScrollMode(config.TUIScrollModeNative),
+				WithUIAlternateScreenPolicy(policy),
+				WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
+			).(*uiModel)
+
+			next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+			m = next.(*uiModel)
+			if startupCmd == nil {
+				t.Fatal("expected startup replay command")
+			}
+			_ = collectCmdMessages(t, startupCmd)
+
+			next, enterCmd := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+			m = next.(*uiModel)
+			if m.view.Mode() != tui.ModeDetail {
+				t.Fatalf("expected detail mode, got %q", m.view.Mode())
+			}
+			_ = collectCmdMessages(t, enterCmd)
+
+			cmd := m.runtimeAdapter().applyChatSnapshot(runtime.ChatSnapshot{
+				Entries: []runtime.ChatEntry{{Role: "assistant", Text: "seed"}, {Role: "user", Text: "steered later"}},
+			})
+			if cmd != nil {
+				t.Fatalf("expected replay to stay deferred while detail is active, got %T", cmd())
+			}
+
+			next, leaveCmd := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+			m = next.(*uiModel)
+			if m.view.Mode() != tui.ModeOngoing {
+				t.Fatalf("expected ongoing mode, got %q", m.view.Mode())
+			}
+			msgs := collectCmdMessages(t, leaveCmd)
+			flushCount := 0
+			foundLater := false
+			for _, msg := range msgs {
+				flush, ok := msg.(nativeHistoryFlushMsg)
+				if !ok {
+					continue
+				}
+				flushCount++
+				if strings.Contains(stripANSIPreserve(flush.Text), "steered later") {
+					foundLater = true
+				}
+			}
+			if flushCount == 0 {
+				t.Fatalf("expected native replay flush on detail exit, got messages=%v", msgs)
+			}
+			if !foundLater {
+				t.Fatalf("expected exit replay to include deferred transcript update, got messages=%v", msgs)
+			}
+		})
 	}
 }
 

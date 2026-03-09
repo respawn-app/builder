@@ -132,7 +132,7 @@ var catalogEntries = []CatalogEntry{
 	{
 		ID:             ToolPatch,
 		Aliases:        nil,
-		Description:    "Apply a freeform patch. This tool does not support deletion, for deletion, use a shell tool, like trash (preferred if available) or rm",
+		Description:    "Apply a freeform patch.",
 		DefaultEnabled: true,
 		Schema: json.RawMessage(`{
   "type": "object",

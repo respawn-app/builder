@@ -25,20 +25,51 @@ var writeTerminalSequence = func(sequence string) {
 }
 
 func (m *uiModel) toggleTranscriptMode() tea.Cmd {
+	return m.toggleTranscriptModeWithNativeReplay(true)
+}
+
+func (m *uiModel) toggleTranscriptModeWithNativeReplay(emitNativeReplay bool) tea.Cmd {
 	prevMode := m.view.Mode()
 	m.forwardToView(tui.ToggleModeMsg{})
 	nextMode := m.view.Mode()
 	transitionCmd := m.altScreenCmdForModeTransition(prevMode, nextMode)
+	nativeReplayCmd := m.nativeReplayCmdForModeTransition(prevMode, nextMode, emitNativeReplay && transitionCmd == nil, emitNativeReplay)
+	if m.usesNativeScrollback() {
+		return sequenceCmds(transitionCmd, nativeReplayCmd)
+	}
 	if transitionCmd != nil {
-		if m.usesNativeScrollback() {
-			return transitionCmd
-		}
 		return tea.Sequence(transitionCmd, tea.ClearScreen)
 	}
-	if m.usesNativeScrollback() {
+	return tea.ClearScreen
+}
+
+func (m *uiModel) nativeReplayCmdForModeTransition(prev, next tui.Mode, forceFull bool, enabled bool) tea.Cmd {
+	if !m.usesNativeScrollback() {
 		return nil
 	}
-	return tea.ClearScreen
+	if !enabled {
+		return nil
+	}
+	if prev != tui.ModeDetail || next != tui.ModeOngoing {
+		return nil
+	}
+	return m.emitCurrentNativeHistorySnapshot(forceFull)
+}
+
+func sequenceCmds(cmds ...tea.Cmd) tea.Cmd {
+	filtered := make([]tea.Cmd, 0, len(cmds))
+	for _, cmd := range cmds {
+		if cmd != nil {
+			filtered = append(filtered, cmd)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	if len(filtered) == 1 {
+		return filtered[0]
+	}
+	return tea.Sequence(filtered...)
 }
 
 func (m *uiModel) altScreenCmdForModeTransition(prev, next tui.Mode) tea.Cmd {

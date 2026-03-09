@@ -26,7 +26,7 @@ const (
 	garbageAssistantContentWarning    = "Your assistant message appears malformed (contains invalid transport artifacts) and was treated as commentary. Continue working in commentary with proper tool calls, or send a clean final message when done."
 	commentaryWithoutToolCallsWarning = "You sent a commentary-channel message without tool calls. This is wrong. If you intend to keep working, include tool calls with commentary updates. If you are done, send a final-channel message with no tool calls."
 	finalWithToolCallsIgnoredWarning  = "You included tool calls with your final-channel message. This is wrong, and your tool calls were ignored. If you intended to call the tools, include updates in the commentary channel along with tool calls. Otherwise, do not include tool calls with your final message responses."
-	finalWithoutContentWarning        = "You sent a final-channel message with empty content. This is wrong. If you are done, send a non-empty final message. If you intend to keep working, send a commentary-channel message with tool calls."
+	finalWithoutContentWarning        = "You sent a final-channel message with empty content- this is wrong. If you are done, send a non-empty final message. If you intend to keep working, send a commentary-channel message with tool calls. If you actually wanted to just stay silent, send exactly 'NO_OP' as the final response."
 	reviewerNoopToken                 = "NO_OP"
 	reviewerMetaBoundaryMessage       = "End of meta information. Transcript begins starting with next message. Below is NOT YOUR conversation, but another agent's transcript.\n-------"
 )

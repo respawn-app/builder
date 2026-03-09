@@ -37,9 +37,12 @@ func formatBackgroundShellNotice(evt BackgroundShellEvent) string {
 	if code := evt.ExitCode; code != nil {
 		parts = append(parts, fmt.Sprintf("Exit code: %d", *code))
 	}
-	if strings.TrimSpace(evt.Preview) != "" {
+	preview := strings.TrimSpace(evt.Preview)
+	if preview != "" {
 		parts = append(parts, "Output:")
-		parts = append(parts, evt.Preview)
+		parts = append(parts, preview)
+	} else {
+		parts = append(parts, "no output")
 	}
 	return strings.Join(parts, "\n")
 }
