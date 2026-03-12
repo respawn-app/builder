@@ -267,6 +267,7 @@ type uiModel struct {
 	psOverlayPushed          bool
 	psSelection              int
 	psEntries                []shelltool.Snapshot
+	reasoningStatusHeader    string
 
 	transientStatus      string
 	transientStatusKind  uiStatusNoticeKind
