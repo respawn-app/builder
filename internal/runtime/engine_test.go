@@ -2702,6 +2702,343 @@ func TestFastExecCommandCompletionDoesNotQueueBackgroundNotice(t *testing.T) {
 	}
 }
 
+func TestBackgroundShellNoticeFlushesOnFirstAvailableSlot(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "foreground done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "background done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var (
+		mu     sync.Mutex
+		events []Event
+	)
+	eng, err := New(store, client, tools.NewRegistry(blockingTool{name: tools.ToolShell, started: started, release: release}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			events = append(events, evt)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	submitDone := make(chan error, 1)
+	go func() {
+		_, submitErr := eng.SubmitUserMessage(context.Background(), "run tools")
+		submitDone <- submitErr
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for tool call to start")
+	}
+
+	eng.HandleBackgroundShellEvent(BackgroundShellEvent{
+		Type:       "completed",
+		ID:         "1000",
+		State:      "completed",
+		NoticeText: "Background shell 1000 completed.\nExit code: 0\nOutput:\ndone",
+	})
+
+	client.mu.Lock()
+	callCountWhileBusy := len(client.calls)
+	client.mu.Unlock()
+	if callCountWhileBusy != 1 {
+		t.Fatalf("expected queued notice to avoid immediate model call while busy, got %d calls", callCountWhileBusy)
+	}
+
+	close(release)
+	if err := <-submitDone; err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		client.mu.Lock()
+		callCount := len(client.calls)
+		client.mu.Unlock()
+		if callCount >= 3 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	client.mu.Lock()
+	requests := append([]llm.Request(nil), client.calls...)
+	client.mu.Unlock()
+	if len(requests) != 3 {
+		t.Fatalf("expected 3 model calls including queued background notice, got %d", len(requests))
+	}
+
+	containsNotice := func(req llm.Request) bool {
+		for _, msg := range req.Messages {
+			if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeBackgroundNotice && strings.Contains(msg.Content, "Background shell 1000 completed.") {
+				return true
+			}
+		}
+		return false
+	}
+	if containsNotice(requests[1]) {
+		t.Fatal("did not expect background notice in the still-busy follow-up tool turn")
+	}
+	if !containsNotice(requests[2]) {
+		t.Fatalf("expected background notice in first available follow-up turn, messages=%+v", requests[2].Messages)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	hasImmediateBackgroundUpdate := false
+	for _, evt := range events {
+		if evt.Kind == EventBackgroundUpdated && evt.Background != nil && evt.Background.ID == "1000" {
+			hasImmediateBackgroundUpdate = true
+			break
+		}
+	}
+	if !hasImmediateBackgroundUpdate {
+		t.Fatalf("expected immediate background_updated event, got %+v", events)
+	}
+}
+
+func TestWriteStdinCompletionDoesNotQueueDuplicateBackgroundNotice(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	manager, err := shelltool.NewManager()
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer func() {
+		_ = manager.Close()
+	}()
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "start background", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{
+				ID:    "call_exec_1",
+				Name:  string(tools.ToolExecCommand),
+				Input: json.RawMessage(`{"cmd":"sleep 1; echo done","shell":"/bin/sh","login":false,"yield_time_ms":250}`),
+			}},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "wait for it", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{
+				ID:    "call_poll_1",
+				Name:  string(tools.ToolWriteStdin),
+				Input: json.RawMessage(`{"session_id":1000,"yield_time_ms":2000}`),
+			}},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "unexpected extra turn", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	registry := tools.NewRegistry(
+		shelltool.NewExecCommandTool(dir, 16_000, manager, store.Meta().SessionID),
+		shelltool.NewWriteStdinTool(16_000, manager),
+	)
+	eng, err := New(store, client, registry, Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	manager.SetEventHandler(func(evt shelltool.Event) {
+		eng.HandleBackgroundShellUpdate(BackgroundShellEvent{
+			Type:    string(evt.Type),
+			ID:      evt.Snapshot.ID,
+			State:   evt.Snapshot.State,
+			Command: evt.Snapshot.Command,
+			Workdir: evt.Snapshot.Workdir,
+			LogPath: evt.Snapshot.LogPath,
+			Preview: evt.Preview,
+			Removed: evt.Removed,
+			ExitCode: func() *int {
+				if evt.Snapshot.ExitCode == nil {
+					return nil
+				}
+				out := *evt.Snapshot.ExitCode
+				return &out
+			}(),
+			NoticeSuppressed: evt.NoticeSuppressed,
+		}, strings.TrimSpace(evt.Snapshot.OwnerSessionID) == store.Meta().SessionID && !evt.NoticeSuppressed)
+	})
+
+	assistant, err := eng.SubmitUserMessage(context.Background(), "run and wait")
+	if err != nil {
+		t.Fatalf("submit user message: %v", err)
+	}
+	if assistant.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", assistant.Content)
+	}
+	time.Sleep(300 * time.Millisecond)
+
+	client.mu.Lock()
+	callCount := len(client.calls)
+	client.mu.Unlock()
+	if callCount != 3 {
+		t.Fatalf("model call count = %d, want 3", callCount)
+	}
+	for _, msg := range eng.snapshotMessages() {
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeBackgroundNotice {
+			t.Fatalf("did not expect background notice after write_stdin harvested completion: %+v", msg)
+		}
+	}
+}
+
+func TestLateWriteStdinPollConsumesAlreadyQueuedBackgroundNotice(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	manager, err := shelltool.NewManager()
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer func() {
+		_ = manager.Close()
+	}()
+
+	blockStarted := make(chan struct{})
+	blockRelease := make(chan struct{})
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "start background", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{
+				ID:    "call_exec_1",
+				Name:  string(tools.ToolExecCommand),
+				Input: json.RawMessage(`{"cmd":"sleep 1; echo done","shell":"/bin/sh","login":false,"yield_time_ms":250}`),
+			}},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "hold", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{
+				ID:    "call_block_1",
+				Name:  string(tools.ToolPatch),
+				Input: json.RawMessage(`{"patch":"ignored"}`),
+			}},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "now poll", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{
+				ID:    "call_poll_1",
+				Name:  string(tools.ToolWriteStdin),
+				Input: json.RawMessage(`{"session_id":1000,"yield_time_ms":250}`),
+			}},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "unexpected extra turn", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	registry := tools.NewRegistry(
+		shelltool.NewExecCommandTool(dir, 16_000, manager, store.Meta().SessionID),
+		shelltool.NewWriteStdinTool(16_000, manager),
+		blockingTool{name: tools.ToolPatch, started: blockStarted, release: blockRelease},
+	)
+	eng, err := New(store, client, registry, Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	manager.SetEventHandler(func(evt shelltool.Event) {
+		eng.HandleBackgroundShellUpdate(BackgroundShellEvent{
+			Type:    string(evt.Type),
+			ID:      evt.Snapshot.ID,
+			State:   evt.Snapshot.State,
+			Command: evt.Snapshot.Command,
+			Workdir: evt.Snapshot.Workdir,
+			LogPath: evt.Snapshot.LogPath,
+			Preview: evt.Preview,
+			Removed: evt.Removed,
+			ExitCode: func() *int {
+				if evt.Snapshot.ExitCode == nil {
+					return nil
+				}
+				out := *evt.Snapshot.ExitCode
+				return &out
+			}(),
+			NoticeSuppressed: evt.NoticeSuppressed,
+		}, strings.TrimSpace(evt.Snapshot.OwnerSessionID) == store.Meta().SessionID && !evt.NoticeSuppressed)
+	})
+
+	submitDone := make(chan struct {
+		assistant llm.Message
+		err       error
+	}, 1)
+	go func() {
+		assistant, submitErr := eng.SubmitUserMessage(context.Background(), "run and wait late")
+		submitDone <- struct {
+			assistant llm.Message
+			err       error
+		}{assistant: assistant, err: submitErr}
+	}()
+
+	select {
+	case <-blockStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for blocking tool to start")
+	}
+	time.Sleep(1200 * time.Millisecond)
+	close(blockRelease)
+
+	result := <-submitDone
+	if result.err != nil {
+		t.Fatalf("submit user message: %v", result.err)
+	}
+	if result.assistant.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", result.assistant.Content)
+	}
+	time.Sleep(300 * time.Millisecond)
+
+	client.mu.Lock()
+	callCount := len(client.calls)
+	client.mu.Unlock()
+	if callCount != 4 {
+		t.Fatalf("model call count = %d, want 4", callCount)
+	}
+	for _, msg := range eng.snapshotMessages() {
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeBackgroundNotice {
+			t.Fatalf("did not expect queued background notice to survive late write_stdin poll: %+v", msg)
+		}
+	}
+}
+
 func TestSubmitUserMessageSurfacesInFlightClearFailure(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

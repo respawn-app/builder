@@ -325,6 +325,115 @@ func TestBackgroundUpdatedUsesTransientStatusLifecycle(t *testing.T) {
 	}
 }
 
+func TestBackgroundUpdatedWhileBusyMentionsQueuedDelivery(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{
+		Kind: runtime.EventBackgroundUpdated,
+		Background: &runtime.BackgroundShellEvent{
+			Type:  "completed",
+			ID:    "1000",
+			State: "completed",
+		},
+	})
+
+	if got := strings.TrimSpace(m.transientStatus); got != "background shell 1000 completed; transcript notice queued for next turn slot" {
+		t.Fatalf("unexpected transient status %q", got)
+	}
+}
+
+func TestBackgroundUpdatedWithSuppressedNoticeSkipsTransientStatus(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.transientStatus = "existing"
+
+	cmd := m.runtimeAdapter().handleRuntimeEvent(runtime.Event{
+		Kind: runtime.EventBackgroundUpdated,
+		Background: &runtime.BackgroundShellEvent{
+			Type:             "completed",
+			ID:               "1000",
+			State:            "completed",
+			NoticeSuppressed: true,
+		},
+	})
+
+	if cmd != nil {
+		t.Fatalf("did not expect transient status command when notice is suppressed, got %T", cmd())
+	}
+	if m.transientStatus != "existing" {
+		t.Fatalf("expected transient status unchanged, got %q", m.transientStatus)
+	}
+}
+
+func TestDeferredNativeReplayFlushesBackgroundNoticeOnDetailExit(t *testing.T) {
+	policies := []config.TUIAlternateScreenPolicy{
+		config.TUIAlternateScreenNever,
+		config.TUIAlternateScreenAuto,
+	}
+	for _, policy := range policies {
+		t.Run(string(policy), func(t *testing.T) {
+			m := NewUIModel(
+				nil,
+				make(chan runtime.Event),
+				make(chan askEvent),
+				WithUIScrollMode(config.TUIScrollModeNative),
+				WithUIAlternateScreenPolicy(policy),
+				WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
+			).(*uiModel)
+
+			next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+			m = next.(*uiModel)
+			if startupCmd == nil {
+				t.Fatal("expected startup replay command")
+			}
+			_ = collectCmdMessages(t, startupCmd)
+
+			next, enterCmd := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+			m = next.(*uiModel)
+			if m.view.Mode() != tui.ModeDetail {
+				t.Fatalf("expected detail mode, got %q", m.view.Mode())
+			}
+			_ = collectCmdMessages(t, enterCmd)
+
+			cmd := m.runtimeAdapter().applyChatSnapshot(runtime.ChatSnapshot{
+				Entries: []runtime.ChatEntry{
+					{Role: "assistant", Text: "seed"},
+					{Role: "system", Text: "Background shell 1000 completed.\nExit code: 0\nOutput:\ndone", OngoingText: "Background shell 1000 completed (exit 0)"},
+				},
+			})
+			if cmd != nil {
+				t.Fatalf("expected replay to stay deferred while detail is active, got %T", cmd())
+			}
+
+			next, leaveCmd := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+			m = next.(*uiModel)
+			if m.view.Mode() != tui.ModeOngoing {
+				t.Fatalf("expected ongoing mode, got %q", m.view.Mode())
+			}
+			msgs := collectCmdMessages(t, leaveCmd)
+			flushCount := 0
+			foundNotice := false
+			for _, msg := range msgs {
+				flush, ok := msg.(nativeHistoryFlushMsg)
+				if !ok {
+					continue
+				}
+				flushCount++
+				plain := stripANSIPreserve(flush.Text)
+				if strings.Contains(plain, "Background shell 1000 completed (exit 0)") {
+					foundNotice = true
+				}
+			}
+			if flushCount == 0 {
+				t.Fatalf("expected native replay flush on detail exit, got messages=%v", msgs)
+			}
+			if !foundNotice {
+				t.Fatalf("expected exit replay to include deferred background notice, got messages=%v", msgs)
+			}
+		})
+	}
+}
+
 func TestRunStateChangedTransitionsRunningStateToIdleWhenTurnEnds(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.activity = uiActivityRunning

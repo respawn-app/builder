@@ -43,10 +43,11 @@ const (
 )
 
 type Event struct {
-	Type     EventType
-	Snapshot Snapshot
-	Preview  string
-	Removed  int
+	Type             EventType
+	Snapshot         Snapshot
+	Preview          string
+	Removed          int
+	NoticeSuppressed bool
 }
 
 type Snapshot struct {
@@ -141,6 +142,7 @@ type processEntry struct {
 	notify         chan struct{}
 	done           chan struct{}
 	killRequested  bool
+	noticeConsumed bool
 	mu             sync.Mutex
 	interactMu     sync.Mutex
 }
@@ -219,6 +221,8 @@ func (p *processEntry) closeOnExit(exitCode int, state string) Snapshot {
 	p.lastUpdatedAt = finishedAt
 	p.exitCode = &exitCode
 	p.state = state
+	p.running = false
+	p.signal()
 	return Snapshot{
 		ID:             p.id,
 		OwnerSessionID: p.ownerSessionID,
@@ -243,6 +247,21 @@ func (p *processEntry) finalizeClosedExit() {
 	defer p.mu.Unlock()
 	p.running = false
 	p.signal()
+}
+
+func (p *processEntry) markCompletionNoticeConsumed() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.backgrounded || p.exitCode == nil {
+		return
+	}
+	p.noticeConsumed = true
+}
+
+func (p *processEntry) completionNoticeConsumed() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.noticeConsumed
 }
 
 func (p *processEntry) snapshot() Snapshot {
@@ -514,6 +533,9 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteRequest) (ExecResult,
 	snapshot := entry.snapshot()
 	sanitized := sanitizeOutput(string(output))
 	display, truncated, removed := truncate(sanitized, maxOutputChars)
+	if snapshot.Backgrounded && snapshot.ExitCode != nil {
+		entry.markCompletionNoticeConsumed()
+	}
 	result := ExecResult{
 		SessionID:       id,
 		WallTime:        time.Since(start),
@@ -694,7 +716,10 @@ func (m *Manager) waitForExit(entry *processEntry) {
 	if state == "killed" {
 		eventType = EventKilled
 	}
-	m.emitEvent(Event{Type: eventType, Snapshot: snapshot, Preview: preview, Removed: removed})
+	entry.interactMu.Lock()
+	noticeSuppressed := entry.completionNoticeConsumed()
+	entry.interactMu.Unlock()
+	m.emitEvent(Event{Type: eventType, Snapshot: snapshot, Preview: preview, Removed: removed, NoticeSuppressed: noticeSuppressed})
 	entry.finalizeClosedExit()
 }
 

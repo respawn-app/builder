@@ -13,10 +13,16 @@ import (
 func decodeStringToolOutput(t *testing.T, result tools.Result) string {
 	t.Helper()
 	var out string
-	if err := json.Unmarshal(result.Output, &out); err != nil {
+	if err := json.Unmarshal(result.Output, &out); err == nil {
+		return out
+	}
+	var wrapped struct {
+		Output string `json:"output"`
+	}
+	if err := json.Unmarshal(result.Output, &wrapped); err != nil {
 		t.Fatalf("decode string output: %v", err)
 	}
-	return out
+	return wrapped.Output
 }
 
 func waitForManagerCount(t *testing.T, manager *Manager, want int, timeout time.Duration) {
@@ -354,6 +360,62 @@ func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
 	}
 	if !strings.Contains(stdinText, "hello builder") {
 		t.Fatalf("expected echoed stdin in output, got %q", stdinText)
+	}
+	waitForManagerCount(t, manager, 0, 3*time.Second)
+}
+
+func TestWriteStdinCompletionSuppressesBackgroundNoticeEvent(t *testing.T) {
+	workspace := t.TempDir()
+	manager, err := NewManager()
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
+	pollTool := NewWriteStdinTool(16_000, manager)
+	events := make(chan Event, 2)
+	manager.SetEventHandler(func(evt Event) {
+		if evt.Type == EventCompleted || evt.Type == EventKilled {
+			select {
+			case events <- evt:
+			default:
+			}
+		}
+	})
+
+	execInput, _ := json.Marshal(map[string]any{
+		"cmd":           "sleep 1; echo done",
+		"shell":         "/bin/sh",
+		"login":         false,
+		"yield_time_ms": 250,
+	})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "bg-1", Name: tools.ToolExecCommand, Input: execInput})
+	if err != nil {
+		t.Fatalf("exec_command call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
+	}
+
+	pollInput, _ := json.Marshal(map[string]any{
+		"session_id":    1000,
+		"yield_time_ms": 2_000,
+	})
+	pollResult, err := pollTool.Call(context.Background(), tools.Call{ID: "bg-2", Name: tools.ToolWriteStdin, Input: pollInput})
+	if err != nil {
+		t.Fatalf("write_stdin call error: %v", err)
+	}
+	if pollResult.IsError {
+		t.Fatalf("unexpected write_stdin error: %s", string(pollResult.Output))
+	}
+
+	select {
+	case evt := <-events:
+		if !evt.NoticeSuppressed {
+			t.Fatalf("expected completion event notice to be suppressed after write_stdin harvest, got %+v", evt)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for completion event")
 	}
 	waitForManagerCount(t, manager, 0, 3*time.Second)
 }
