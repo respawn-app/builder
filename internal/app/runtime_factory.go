@@ -31,6 +31,7 @@ type runtimeWiring struct {
 type backgroundEventRouter struct {
 	mu              sync.RWMutex
 	activeSessionID string
+	activeSince     time.Time
 	activeEngine    *runtime.Engine
 	outputLimit     int
 	outputMode      shelltool.BackgroundOutputMode
@@ -48,6 +49,7 @@ func (r *backgroundEventRouter) SetActiveSession(sessionID string, engine *runti
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.activeSessionID = strings.TrimSpace(sessionID)
+	r.activeSince = time.Now().UTC()
 	r.activeEngine = engine
 }
 
@@ -58,12 +60,14 @@ func (r *backgroundEventRouter) ClearActiveSession(sessionID string) {
 		return
 	}
 	r.activeSessionID = ""
+	r.activeSince = time.Time{}
 	r.activeEngine = nil
 }
 
 func (r *backgroundEventRouter) handle(evt shelltool.Event) {
 	r.mu.RLock()
 	activeSessionID := r.activeSessionID
+	activeSince := r.activeSince
 	activeEngine := r.activeEngine
 	outputLimit := r.outputLimit
 	outputMode := r.outputMode
@@ -77,6 +81,11 @@ func (r *backgroundEventRouter) handle(evt shelltool.Event) {
 			MaxChars:          outputLimit,
 			SuccessOutputMode: outputMode,
 		})
+	}
+	ownerSessionID := strings.TrimSpace(evt.Snapshot.OwnerSessionID)
+	shouldNotify := ownerSessionID != "" && ownerSessionID == activeSessionID && !evt.NoticeSuppressed
+	if shouldNotify && !evt.Snapshot.FinishedAt.IsZero() && evt.Snapshot.FinishedAt.Before(activeSince) {
+		shouldNotify = false
 	}
 	activeEngine.HandleBackgroundShellUpdate(runtime.BackgroundShellEvent{
 		Type:              string(evt.Type),
@@ -92,7 +101,7 @@ func (r *backgroundEventRouter) handle(evt shelltool.Event) {
 		ExitCode:          cloneIntPtr(evt.Snapshot.ExitCode),
 		UserRequestedKill: evt.Snapshot.KillRequested,
 		NoticeSuppressed:  evt.NoticeSuppressed,
-	}, strings.TrimSpace(evt.Snapshot.OwnerSessionID) != "" && strings.TrimSpace(evt.Snapshot.OwnerSessionID) == activeSessionID && !evt.NoticeSuppressed)
+	}, shouldNotify)
 }
 
 type runtimeWiringOptions struct {

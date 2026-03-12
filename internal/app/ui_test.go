@@ -1972,6 +1972,122 @@ func TestPSCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 	}
 }
 
+func TestPSOverlayScrollKeepsEntryHeadersVisibleAtTop(t *testing.T) {
+	manager, err := shelltool.NewManager()
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	workdir := t.TempDir()
+	for i := 1; i <= 4; i++ {
+		res, startErr := manager.Start(context.Background(), shelltool.ExecRequest{
+			Command:        []string{"sh", "-c", fmt.Sprintf("printf 'job-%d\\n'; sleep 30", i)},
+			DisplayCommand: fmt.Sprintf("job-%d", i),
+			Workdir:        workdir,
+			YieldTime:      250 * time.Millisecond,
+		})
+		if startErr != nil {
+			t.Fatalf("start job-%d: %v", i, startErr)
+		}
+		if !res.Backgrounded {
+			t.Fatalf("expected job-%d to move to background", i)
+		}
+	}
+
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIBackgroundManager(manager),
+	).(*uiModel)
+	m.termWidth = 120
+	m.termHeight = 17
+	m.windowSizeKnown = true
+	m.input = "/ps"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	for i := 0; i < 3; i++ {
+		next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+		updated = next.(*uiModel)
+	}
+
+	lines := strings.Split(stripANSIAndTrimRight(updated.View()), "\n")
+	if len(lines) == 0 {
+		t.Fatal("expected rendered /ps overlay")
+	}
+	top := strings.TrimSpace(lines[0])
+	if top == "" {
+		t.Fatalf("expected top line to begin with a process header, got blank line in %q", lines[0])
+	}
+	if strings.Contains(top, "cwd:") || strings.Contains(top, "log:") || strings.Contains(top, "out:") {
+		t.Fatalf("expected /ps overlay to start on a process header, got %q", top)
+	}
+	if !strings.Contains(top, "[") {
+		t.Fatalf("expected /ps header line with process state at top, got %q", top)
+	}
+}
+
+func TestPSOverlayScrollShowsSelectedEntryFullyNearBottom(t *testing.T) {
+	manager, err := shelltool.NewManager()
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	for i := 1; i <= 4; i++ {
+		workdir := filepath.Join(t.TempDir(), fmt.Sprintf("job-%d", i))
+		if mkErr := os.MkdirAll(workdir, 0o755); mkErr != nil {
+			t.Fatalf("mkdir workdir %d: %v", i, mkErr)
+		}
+		res, startErr := manager.Start(context.Background(), shelltool.ExecRequest{
+			Command:        []string{"sh", "-c", fmt.Sprintf("printf 'job-%d-output\\n'; sleep 30", i)},
+			DisplayCommand: fmt.Sprintf("job-%d-command", i),
+			Workdir:        workdir,
+			YieldTime:      250 * time.Millisecond,
+		})
+		if startErr != nil {
+			t.Fatalf("start job-%d: %v", i, startErr)
+		}
+		if !res.Backgrounded {
+			t.Fatalf("expected job-%d to move to background", i)
+		}
+	}
+
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIBackgroundManager(manager),
+	).(*uiModel)
+	m.termWidth = 120
+	m.termHeight = 17
+	m.windowSizeKnown = true
+	m.input = "/ps"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	for i := 0; i < 3; i++ {
+		next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+		updated = next.(*uiModel)
+	}
+
+	plain := stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(plain, "> [running]") {
+		t.Fatalf("expected selected entry header to remain visible near bottom, got %q", plain)
+	}
+	if !strings.Contains(plain, "job-1-command") {
+		t.Fatalf("expected selected entry command visible near bottom, got %q", plain)
+	}
+	if !strings.Contains(plain, "cwd: ") || !strings.Contains(plain, "/job-1") {
+		t.Fatalf("expected selected entry cwd visible near bottom, got %q", plain)
+	}
+	if !strings.Contains(plain, "out: job-1-output") {
+		t.Fatalf("expected selected entry output visible near bottom, got %q", plain)
+	}
+}
+
 func TestPSOverlayInlineAppendsOutputToInputAndReturnsToOngoing(t *testing.T) {
 	manager, err := shelltool.NewManager()
 	if err != nil {
@@ -3102,6 +3218,25 @@ func TestStatusLineTruncatesRightNoticeWithoutPushingOutContextUsage(t *testing.
 	}
 	if strings.Contains(line, "this is a very long background completion notice that should truncate before it reaches the context progress bar") {
 		t.Fatalf("expected long notice to be truncated, got %q", line)
+	}
+}
+
+func TestStatusLineRendersReasoningHeaderBeforeContextUsage(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.reasoningStatusHeader = "Summarizing fix and investigation"
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !containsInOrder(line, "Summarizing fix and investigation", "0%") {
+		t.Fatalf("expected reasoning header immediately left of context usage, got %q", line)
 	}
 }
 

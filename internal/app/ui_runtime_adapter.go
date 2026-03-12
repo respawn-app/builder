@@ -30,6 +30,9 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 		m.forwardToView(tui.ClearOngoingAssistantMsg{})
 	case runtime.EventReasoningDelta:
 		if evt.ReasoningDelta != nil {
+			if header := extractReasoningStatusHeader(evt.ReasoningDelta.Text); header != "" {
+				m.reasoningStatusHeader = header
+			}
 			m.forwardToView(tui.UpsertStreamingReasoningMsg{Key: evt.ReasoningDelta.Key, Role: evt.ReasoningDelta.Role, Text: evt.ReasoningDelta.Text})
 		}
 	case runtime.EventReasoningDeltaReset:
@@ -52,6 +55,7 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 				if m.activity == uiActivityRunning {
 					m.activity = uiActivityIdle
 				}
+				m.reasoningStatusHeader = ""
 				m.forwardToView(tui.ClearStreamingReasoningMsg{})
 			}
 		}

@@ -15,6 +15,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+const (
+	processListEntryLines  = 5
+	processListFooterLines = 2
+)
+
 func (m *uiModel) refreshProcessEntries() {
 	if m.backgroundManager == nil {
 		m.psEntries = nil
@@ -93,15 +98,11 @@ func (m *uiModel) moveProcessSelectionPage(deltaPages int) {
 }
 
 func (m *uiModel) processListRowsPerPage() int {
-	panelHeight := m.termHeight - 1 // status line
-	if panelHeight < 4 {
-		panelHeight = 4
-	}
-	available := panelHeight - 3 // title, help, spacer
-	if available < 5 {
+	available := m.termHeight - 1 - processListFooterLines // status line + footer
+	if available < processListEntryLines {
 		return 1
 	}
-	rows := available / 5
+	rows := available / processListEntryLines
 	if rows < 1 {
 		return 1
 	}
@@ -319,7 +320,7 @@ func (l uiViewLayout) renderProcessList(width, height int, style uiStyles) []str
 		}
 		return l.renderChatContentLines(append(content[:contentHeight], footerLines...), width, style)
 	}
-	visibleRows := make([]string, 0, len(m.psEntries)*5)
+	visibleRows := make([]string, 0, len(m.psEntries)*processListEntryLines)
 	for idx, entry := range m.psEntries {
 		prefix := "  "
 		if idx == m.psSelection {
@@ -341,17 +342,7 @@ func (l uiViewLayout) renderProcessList(width, height int, style uiStyles) []str
 		visibleRows = append(visibleRows, line1, line2, line3, line4, "")
 	}
 	available := contentHeight
-	if available < 1 {
-		available = 1
-	}
-	start := 0
-	selectedRow := m.psSelection * 5
-	if selectedRow >= available {
-		start = selectedRow - available + 5
-		if start < 0 {
-			start = 0
-		}
-	}
+	start := processListStartRow(m.psSelection, len(m.psEntries), contentHeight)
 	end := start + available
 	if end > len(visibleRows) {
 		end = len(visibleRows)
@@ -361,6 +352,27 @@ func (l uiViewLayout) renderProcessList(width, height int, style uiStyles) []str
 		content = append(content, "")
 	}
 	return l.renderChatContentLines(append(content[:contentHeight], footerLines...), width, style)
+}
+
+func processListStartRow(selection, entryCount, contentHeight int) int {
+	if selection < 0 || entryCount <= 0 || contentHeight <= 0 {
+		return 0
+	}
+	visibleEntries := contentHeight / processListEntryLines
+	if visibleEntries < 1 {
+		visibleEntries = 1
+	}
+	startEntry := 0
+	if selection >= visibleEntries {
+		startEntry = selection - visibleEntries + 1
+	}
+	if startEntry >= entryCount {
+		startEntry = entryCount - 1
+	}
+	if startEntry < 0 {
+		startEntry = 0
+	}
+	return startEntry * processListEntryLines
 }
 
 func humanAge(t time.Time) string {

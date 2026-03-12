@@ -104,12 +104,51 @@ func TestReasoningDeltaPreservesStreamingWhitespaceAcrossUpdates(t *testing.T) {
 	}
 }
 
-func TestReasoningDeltaNeverWritesSummaryTextToStatusLine(t *testing.T) {
+func TestReasoningDeltaBoldOnlyUpdatesStatusLineHeader(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
 	m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: "u"})
 	m.forwardToView(tui.ToggleModeMsg{})
 
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventRunStateChanged, RunState: &runtime.RunState{Busy: true}})
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventReasoningDelta, ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Text: "**Summarizing fix and investigation**"}})
+
+	status := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(status, "Summarizing fix and investigation") {
+		t.Fatalf("expected bold-only reasoning summary in status line, got %q", status)
+	}
+	if strings.Contains(status, "**Summarizing fix and investigation**") {
+		t.Fatalf("expected status line header without markdown markers, got %q", status)
+	}
+}
+
+func TestReasoningDeltaMixedContentUsesFirstBoldSpanForStatusLineHeader(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: "u"})
+	m.forwardToView(tui.ToggleModeMsg{})
+
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventRunStateChanged, RunState: &runtime.RunState{Busy: true}})
+	text := "**Summarizing fix and investigation**\n\nregular reasoning details"
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventReasoningDelta, ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Text: text}})
+
+	status := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(status, "Summarizing fix and investigation") {
+		t.Fatalf("expected first bold span in status line, got %q", status)
+	}
+	if detail := stripANSIAndTrimRight(m.view.View()); !strings.Contains(detail, "regular reasoning details") {
+		t.Fatalf("expected mixed reasoning content to remain in detail view, got %q", detail)
+	}
+}
+
+func TestReasoningDeltaRegularSummaryDoesNotReplaceStatusLineHeader(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: "u"})
+	m.forwardToView(tui.ToggleModeMsg{})
+
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventRunStateChanged, RunState: &runtime.RunState{Busy: true}})
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventReasoningDelta, ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Text: "**Preparing patch**"}})
 	text := "I am exploring ways to define atomic, low-level collection methods in NavResultStore that support reified filtering without reflection."
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventReasoningDelta, ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Text: text}})
 
@@ -117,8 +156,21 @@ func TestReasoningDeltaNeverWritesSummaryTextToStatusLine(t *testing.T) {
 		t.Fatalf("expected plain reasoning summary in detail view, got %q", detail)
 	}
 	status := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(status, "Preparing patch") {
+		t.Fatalf("expected prior bold-only header to persist, got %q", status)
+	}
 	if strings.Contains(status, "I am exploring ways to define atomic") {
-		t.Fatalf("expected reasoning summary omitted from status line, got %q", status)
+		t.Fatalf("did not expect regular reasoning summary in status line, got %q", status)
+	}
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventReasoningDelta, ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "rs_1:summary:0", Role: "reasoning", Text: "**Running checks**"}})
+	status = stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(status, "Running checks") || strings.Contains(status, "Preparing patch") {
+		t.Fatalf("expected latest bold-only header to replace prior value, got %q", status)
+	}
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventRunStateChanged, RunState: &runtime.RunState{Busy: false}})
+	status = stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if strings.Contains(status, "Running checks") {
+		t.Fatalf("expected status line header cleared when run stops, got %q", status)
 	}
 }
 

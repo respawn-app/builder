@@ -44,34 +44,71 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 	return padANSIRight(left+strings.Repeat(" ", gap)+right, width)
 }
 func (l uiViewLayout) renderStatusLineRight(width int, left string, style uiStyles) string {
+	separator := style.meta.Render(" | ")
+	separatorWidth := lipgloss.Width(separator)
+	available := width - lipgloss.Width(left) - 1
+	if available <= 0 {
+		return ""
+	}
+	segments := make([]string, 0, 3)
+	used := 0
+	prepend := func(segment string) {
+		if segment == "" {
+			return
+		}
+		segmentWidth := lipgloss.Width(segment)
+		if segmentWidth == 0 {
+			return
+		}
+		additional := segmentWidth
+		if len(segments) > 0 {
+			additional += separatorWidth
+		}
+		if used+additional > available {
+			return
+		}
+		used += additional
+		segments = append([]string{segment}, segments...)
+	}
+
 	context := l.renderContextUsage(style)
-	notice := l.renderStatusNotice(width, left, context, style)
-	segments := make([]string, 0, 2)
-	if notice != "" {
-		segments = append(segments, notice)
+	prepend(context)
+
+	headerAvailable := available - used
+	if len(segments) > 0 {
+		headerAvailable -= separatorWidth
 	}
-	if context != "" {
-		segments = append(segments, context)
+	prepend(l.renderReasoningStatusHeader(headerAvailable))
+
+	noticeAvailable := available - used
+	if len(segments) > 0 {
+		noticeAvailable -= separatorWidth
 	}
-	return strings.Join(segments, style.meta.Render(" | "))
+	prepend(l.renderStatusNotice(noticeAvailable))
+
+	return strings.Join(segments, separator)
 }
 
-func (l uiViewLayout) renderStatusNotice(width int, left string, context string, style uiStyles) string {
+func (l uiViewLayout) renderStatusNotice(available int) string {
 	m := l.model
 	text := strings.TrimSpace(m.transientStatus)
 	if text == "" {
 		return ""
 	}
-	separatorWidth := 0
-	if context != "" {
-		separatorWidth = lipgloss.Width(style.meta.Render(" | "))
-	}
-	available := width - lipgloss.Width(left) - lipgloss.Width(context) - separatorWidth - 1
 	if available <= 0 {
 		return ""
 	}
 	text = truncateQueuedMessageLine(text, available)
 	return statusNoticeStyle(m.theme, m.transientStatusKind).Render(text)
+}
+
+func (l uiViewLayout) renderReasoningStatusHeader(available int) string {
+	text := strings.TrimSpace(l.model.reasoningStatusHeader)
+	if text == "" || available <= 0 {
+		return ""
+	}
+	text = truncateQueuedMessageLine(text, available)
+	return statusNoticeStyle(l.model.theme, uiStatusNoticeNeutral).Render(text)
 }
 
 func statusNoticeStyle(theme string, kind uiStatusNoticeKind) lipgloss.Style {
