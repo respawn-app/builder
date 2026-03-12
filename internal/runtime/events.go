@@ -62,6 +62,7 @@ type BackgroundShellEvent struct {
 	Removed           int
 	ExitCode          *int
 	UserRequestedKill bool
+	NoticeSuppressed  bool
 }
 
 type ReviewerStatus struct {

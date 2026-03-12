@@ -91,7 +91,8 @@ func (r *backgroundEventRouter) handle(evt shelltool.Event) {
 		Removed:           evt.Removed,
 		ExitCode:          cloneIntPtr(evt.Snapshot.ExitCode),
 		UserRequestedKill: evt.Snapshot.KillRequested,
-	}, strings.TrimSpace(evt.Snapshot.OwnerSessionID) != "" && strings.TrimSpace(evt.Snapshot.OwnerSessionID) == activeSessionID)
+		NoticeSuppressed:  evt.NoticeSuppressed,
+	}, strings.TrimSpace(evt.Snapshot.OwnerSessionID) != "" && strings.TrimSpace(evt.Snapshot.OwnerSessionID) == activeSessionID && !evt.NoticeSuppressed)
 }
 
 type runtimeWiringOptions struct {

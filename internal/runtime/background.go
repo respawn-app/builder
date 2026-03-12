@@ -2,10 +2,12 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"builder/internal/llm"
+	"builder/internal/tools"
 	"github.com/google/uuid"
 )
 
@@ -24,6 +26,7 @@ func (e *Engine) HandleBackgroundShellUpdate(evt BackgroundShellEvent, queueNoti
 	e.queueDeveloperNotice(llm.Message{
 		Role:           llm.RoleDeveloper,
 		MessageType:    llm.MessageTypeBackgroundNotice,
+		Name:           strings.TrimSpace(evt.ID),
 		Content:        formatBackgroundShellNotice(evt),
 		CompactContent: formatBackgroundShellCompact(evt),
 	})
@@ -73,6 +76,49 @@ func (e *Engine) queueDeveloperNotice(msg llm.Message) {
 	if shouldSchedule {
 		go e.processQueuedNotices(context.Background())
 	}
+}
+
+func (e *Engine) consumePendingBackgroundNotice(sessionID string) bool {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return false
+	}
+	removed := false
+	e.mu.Lock()
+	filtered := e.pendingNotices[:0]
+	for _, msg := range e.pendingNotices {
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeBackgroundNotice && strings.TrimSpace(msg.Name) == sessionID {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+	e.pendingNotices = filtered
+	if len(e.pendingNotices) == 0 {
+		e.noticeScheduled = false
+	}
+	e.mu.Unlock()
+	return removed
+}
+
+type harvestedBackgroundCompletion struct {
+	SessionID  int  `json:"background_session_id"`
+	Running    bool `json:"background_running"`
+	Background bool `json:"backgrounded"`
+}
+
+func harvestedBackgroundCompletionSessionID(res tools.Result) (string, bool) {
+	if res.IsError || res.Name != tools.ToolWriteStdin {
+		return "", false
+	}
+	var out harvestedBackgroundCompletion
+	if err := json.Unmarshal(res.Output, &out); err != nil {
+		return "", false
+	}
+	if out.SessionID <= 0 || out.Running || !out.Background {
+		return "", false
+	}
+	return fmt.Sprintf("%d", out.SessionID), true
 }
 
 func (e *Engine) processQueuedNotices(ctx context.Context) {

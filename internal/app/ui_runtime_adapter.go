@@ -58,11 +58,14 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 	case runtime.EventBackgroundUpdated:
 		m.refreshProcessEntries()
 		if evt.Background != nil && (evt.Background.Type == "completed" || evt.Background.Type == "killed") {
+			if evt.Background.NoticeSuppressed {
+				return nil
+			}
 			kind := uiStatusNoticeSuccess
 			if evt.Background.Type == "killed" && !evt.Background.UserRequestedKill {
 				kind = uiStatusNoticeError
 			}
-			return m.setTransientStatusWithKind(fmt.Sprintf("background shell %s %s", evt.Background.ID, evt.Background.State), kind)
+			return m.setTransientStatusWithKind(formatBackgroundTransientStatus(evt.Background, m.busy), kind)
 		}
 	case runtime.EventUserMessageFlushed:
 		a.onUserMessageFlushed(evt.UserMessage)
@@ -71,6 +74,14 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+func formatBackgroundTransientStatus(evt *runtime.BackgroundShellEvent, busy bool) string {
+	text := fmt.Sprintf("background shell %s %s", evt.ID, evt.State)
+	if !busy {
+		return text
+	}
+	return text + "; transcript notice queued for next turn slot"
 }
 
 func (a uiRuntimeAdapter) onUserMessageFlushed(text string) {

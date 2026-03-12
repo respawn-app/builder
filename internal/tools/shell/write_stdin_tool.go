@@ -22,6 +22,14 @@ type WriteStdinTool struct {
 	background  *Manager
 }
 
+type writeStdinOutput struct {
+	Output              string `json:"output"`
+	BackgroundSessionID int    `json:"background_session_id,omitempty"`
+	BackgroundRunning   bool   `json:"background_running,omitempty"`
+	Backgrounded        bool   `json:"backgrounded,omitempty"`
+	BackgroundExitCode  *int   `json:"background_exit_code,omitempty"`
+}
+
 func NewWriteStdinTool(outputLimit int, background *Manager) *WriteStdinTool {
 	if outputLimit <= 0 {
 		outputLimit = defaultLimit
@@ -61,7 +69,13 @@ func (t *WriteStdinTool) Call(ctx context.Context, c tools.Call) (tools.Result, 
 	if err != nil {
 		return tools.ErrorResultWith(c, fmt.Sprintf("write_stdin failed: %v", err), marshalNoHTMLEscape), nil
 	}
-	body, marshalErr := marshalNoHTMLEscape(formatExecResponse(result))
+	body, marshalErr := marshalNoHTMLEscape(writeStdinOutput{
+		Output:              formatExecResponse(result),
+		BackgroundSessionID: in.SessionID,
+		BackgroundRunning:   result.Running,
+		Backgrounded:        result.Backgrounded,
+		BackgroundExitCode:  cloneIntPtr(result.ExitCode),
+	})
 	if marshalErr != nil {
 		return tools.Result{}, marshalErr
 	}

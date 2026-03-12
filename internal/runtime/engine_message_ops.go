@@ -15,6 +15,9 @@ import (
 )
 
 func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
+	if sessionID, ok := harvestedBackgroundCompletionSessionID(r); ok {
+		e.consumePendingBackgroundNotice(sessionID)
+	}
 	_, err := e.store.AppendEvent(stepID, "tool_completed", map[string]any{
 		"call_id":  r.CallID,
 		"name":     string(r.Name),
