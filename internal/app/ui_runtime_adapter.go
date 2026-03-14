@@ -69,7 +69,7 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 			if evt.Background.Type == "killed" && !evt.Background.UserRequestedKill {
 				kind = uiStatusNoticeError
 			}
-			return m.setTransientStatusWithKind(formatBackgroundTransientStatus(evt.Background, m.busy), kind)
+			return m.setTransientStatusWithKind(fmt.Sprintf("background shell %s %s", evt.Background.ID, evt.Background.State), kind)
 		}
 	case runtime.EventUserMessageFlushed:
 		a.onUserMessageFlushed(evt.UserMessage)
@@ -79,15 +79,6 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 	}
 	return nil
 }
-
-func formatBackgroundTransientStatus(evt *runtime.BackgroundShellEvent, busy bool) string {
-	text := fmt.Sprintf("background shell %s %s", evt.ID, evt.State)
-	if !busy {
-		return text
-	}
-	return text + "; transcript notice queued for next turn slot"
-}
-
 func (a uiRuntimeAdapter) onUserMessageFlushed(text string) {
 	m := a.model
 	for i, pending := range m.pendingInjected {

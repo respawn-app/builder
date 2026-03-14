@@ -60,6 +60,9 @@ func (m *defaultMessageLifecycle) FlushPendingUserInjections(stepID string) (int
 	e.mu.Lock()
 	pending := append([]string(nil), e.pendingInjected...)
 	e.pendingInjected = nil
+	pendingNotices := append([]llm.Message(nil), e.pendingNotices...)
+	e.pendingNotices = nil
+	e.noticeScheduled = false
 	e.mu.Unlock()
 	flushed := 0
 
@@ -69,6 +72,12 @@ func (m *defaultMessageLifecycle) FlushPendingUserInjections(stepID string) (int
 		}
 		flushed++
 		e.emit(Event{Kind: EventUserMessageFlushed, StepID: stepID, UserMessage: pendingMessage})
+	}
+	for _, notice := range pendingNotices {
+		if err := e.appendMessage(stepID, notice); err != nil {
+			return flushed, err
+		}
+		flushed++
 	}
 	return flushed, nil
 }

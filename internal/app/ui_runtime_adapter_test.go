@@ -377,7 +377,7 @@ func TestBackgroundUpdatedUsesTransientStatusLifecycle(t *testing.T) {
 	}
 }
 
-func TestBackgroundUpdatedWhileBusyMentionsQueuedDelivery(t *testing.T) {
+func TestBackgroundUpdatedWhileBusyUsesCompletionStatus(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.busy = true
 
@@ -390,7 +390,7 @@ func TestBackgroundUpdatedWhileBusyMentionsQueuedDelivery(t *testing.T) {
 		},
 	})
 
-	if got := strings.TrimSpace(m.transientStatus); got != "background shell 1000 completed; transcript notice queued for next turn slot" {
+	if got := strings.TrimSpace(m.transientStatus); got != "background shell 1000 completed" {
 		t.Fatalf("unexpected transient status %q", got)
 	}
 }
