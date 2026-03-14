@@ -221,6 +221,8 @@ type fakeAsyncLateDeltaClient struct{}
 
 type fakeSimpleStreamClient struct{}
 
+type fakeNoopStreamClient struct{}
+
 type fakeReasoningStreamClient struct{}
 
 func (f *fakeStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
@@ -280,6 +282,20 @@ func (fakeSimpleStreamClient) GenerateStream(_ context.Context, _ llm.Request, o
 	}
 	return llm.Response{
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ab"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}, nil
+}
+
+func (fakeNoopStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
+	return llm.Response{}, errors.New("not implemented")
+}
+
+func (fakeNoopStreamClient) GenerateStream(_ context.Context, _ llm.Request, onDelta func(string)) (llm.Response, error) {
+	if onDelta != nil {
+		onDelta(reviewerNoopToken)
+	}
+	return llm.Response{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: reviewerNoopToken, Phase: llm.MessagePhaseFinal},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}, nil
 }
@@ -1869,6 +1885,99 @@ func TestReviewerRunsOnAllFrequencyWithoutToolCalls(t *testing.T) {
 	}
 }
 
+func TestFinalNoopAnswerIsInvisibleAndSkipsReviewer(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: reviewerNoopToken, Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["x"]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	var (
+		mu     sync.Mutex
+		events []Event
+	)
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:      "all",
+			Model:          "gpt-5",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			Client:         reviewerClient,
+		},
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			events = append(events, evt)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "" {
+		t.Fatalf("assistant content = %q, want empty", msg.Content)
+	}
+	if len(mainClient.calls) != 1 {
+		t.Fatalf("expected one main model call, got %d", len(mainClient.calls))
+	}
+	if len(reviewerClient.calls) != 0 {
+		t.Fatalf("expected reviewer not to run for NO_OP final, got %d calls", len(reviewerClient.calls))
+	}
+
+	finalAssistantContents := make([]string, 0)
+	for _, persisted := range eng.snapshotMessages() {
+		if persisted.Role == llm.RoleAssistant && persisted.Phase == llm.MessagePhaseFinal {
+			finalAssistantContents = append(finalAssistantContents, persisted.Content)
+		}
+		if strings.Contains(persisted.Content, reviewerNoopToken) {
+			t.Fatalf("noop token leaked into persisted messages: %+v", eng.snapshotMessages())
+		}
+	}
+	if len(finalAssistantContents) != 0 {
+		t.Fatalf("expected no persisted final assistant messages, got %q", finalAssistantContents)
+	}
+
+	snapshot := eng.ChatSnapshot()
+	for _, entry := range snapshot.Entries {
+		if strings.Contains(entry.Text, reviewerNoopToken) {
+			t.Fatalf("noop token leaked into chat snapshot: %+v", snapshot.Entries)
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	assistantEvents := 0
+	modelResponseEvents := 0
+	for _, evt := range events {
+		if evt.Kind == EventAssistantMessage {
+			assistantEvents++
+		}
+		if evt.Kind == EventModelResponse {
+			modelResponseEvents++
+		}
+	}
+	if assistantEvents != 0 {
+		t.Fatalf("expected no assistant_message events for NO_OP final, got %d", assistantEvents)
+	}
+	if modelResponseEvents != 0 {
+		t.Fatalf("expected no model_response_received events for NO_OP final, got %d", modelResponseEvents)
+	}
+}
+
 func TestReviewerRunsOnEditsFrequencyOnlyWhenPatchApplied(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -2719,10 +2828,6 @@ func TestBackgroundShellNoticeFlushesOnFirstAvailableSlot(t *testing.T) {
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "foreground done", Phase: llm.MessagePhaseFinal},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
-		{
-			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "background done", Phase: llm.MessagePhaseFinal},
-			Usage:     llm.Usage{WindowTokens: 200000},
-		},
 	}}
 
 	started := make(chan struct{})
@@ -2743,10 +2848,16 @@ func TestBackgroundShellNoticeFlushesOnFirstAvailableSlot(t *testing.T) {
 		t.Fatalf("new engine: %v", err)
 	}
 
-	submitDone := make(chan error, 1)
+	submitDone := make(chan struct {
+		assistant llm.Message
+		err       error
+	}, 1)
 	go func() {
-		_, submitErr := eng.SubmitUserMessage(context.Background(), "run tools")
-		submitDone <- submitErr
+		assistant, submitErr := eng.SubmitUserMessage(context.Background(), "run tools")
+		submitDone <- struct {
+			assistant llm.Message
+			err       error
+		}{assistant: assistant, err: submitErr}
 	}()
 
 	select {
@@ -2770,26 +2881,19 @@ func TestBackgroundShellNoticeFlushesOnFirstAvailableSlot(t *testing.T) {
 	}
 
 	close(release)
-	if err := <-submitDone; err != nil {
-		t.Fatalf("submit: %v", err)
+	result := <-submitDone
+	if result.err != nil {
+		t.Fatalf("submit: %v", result.err)
 	}
-
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		client.mu.Lock()
-		callCount := len(client.calls)
-		client.mu.Unlock()
-		if callCount >= 3 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	if result.assistant.Content != "foreground done" {
+		t.Fatalf("assistant content = %q, want foreground done", result.assistant.Content)
 	}
 
 	client.mu.Lock()
 	requests := append([]llm.Request(nil), client.calls...)
 	client.mu.Unlock()
-	if len(requests) != 3 {
-		t.Fatalf("expected 3 model calls including queued background notice, got %d", len(requests))
+	if len(requests) != 2 {
+		t.Fatalf("expected 2 model calls with background notice injected into the next request, got %d", len(requests))
 	}
 
 	containsNotice := func(req llm.Request) bool {
@@ -2800,11 +2904,15 @@ func TestBackgroundShellNoticeFlushesOnFirstAvailableSlot(t *testing.T) {
 		}
 		return false
 	}
-	if containsNotice(requests[1]) {
-		t.Fatal("did not expect background notice in the still-busy follow-up tool turn")
+	if !containsNotice(requests[1]) {
+		t.Fatalf("expected background notice in first available in-turn follow-up, messages=%+v", requests[1].Messages)
 	}
-	if !containsNotice(requests[2]) {
-		t.Fatalf("expected background notice in first available follow-up turn, messages=%+v", requests[2].Messages)
+	time.Sleep(300 * time.Millisecond)
+	client.mu.Lock()
+	callCountAfterReturn := len(client.calls)
+	client.mu.Unlock()
+	if callCountAfterReturn != 2 {
+		t.Fatalf("did not expect a later batched continuation after turn completion, got %d calls", callCountAfterReturn)
 	}
 
 	mu.Lock()
@@ -2818,6 +2926,420 @@ func TestBackgroundShellNoticeFlushesOnFirstAvailableSlot(t *testing.T) {
 	}
 	if !hasImmediateBackgroundUpdate {
 		t.Fatalf("expected immediate background_updated event, got %+v", events)
+	}
+}
+
+func TestDeferredFinalWithBackgroundNoticeStillRunsReviewerAndEmitsAssistantEvent(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "foreground done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: reviewerNoopToken, Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var (
+		mu     sync.Mutex
+		events []Event
+	)
+	eng, err := New(store, mainClient, tools.NewRegistry(blockingTool{name: tools.ToolShell, started: started, release: release}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:      "all",
+			Model:          "gpt-5",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			Client:         reviewerClient,
+		},
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			events = append(events, evt)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	submitDone := make(chan struct {
+		assistant llm.Message
+		err       error
+	}, 1)
+	go func() {
+		assistant, submitErr := eng.SubmitUserMessage(context.Background(), "run tools")
+		submitDone <- struct {
+			assistant llm.Message
+			err       error
+		}{assistant: assistant, err: submitErr}
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for tool call to start")
+	}
+
+	eng.HandleBackgroundShellEvent(BackgroundShellEvent{
+		Type:       "completed",
+		ID:         "1000",
+		State:      "completed",
+		NoticeText: "Background shell 1000 completed.\nExit code: 0\nOutput:\ndone",
+	})
+
+	close(release)
+	result := <-submitDone
+	if result.err != nil {
+		t.Fatalf("submit: %v", result.err)
+	}
+	if result.assistant.Content != "foreground done" {
+		t.Fatalf("assistant content = %q, want foreground done", result.assistant.Content)
+	}
+	if len(reviewerClient.calls) != 1 {
+		t.Fatalf("expected reviewer to run once for deferred final, got %d", len(reviewerClient.calls))
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	assistantMessages := 0
+	for _, evt := range events {
+		if evt.Kind != EventAssistantMessage {
+			continue
+		}
+		assistantMessages++
+		if evt.Message.Content != "foreground done" {
+			t.Fatalf("assistant message content = %q, want foreground done", evt.Message.Content)
+		}
+	}
+	if assistantMessages != 1 {
+		t.Fatalf("expected one assistant_message event for deferred final, got %d events=%+v", assistantMessages, events)
+	}
+}
+
+func TestDeferredFinalWithQueuedUserInjectionStillRunsReviewerAndEmitsAssistantEvent(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "foreground done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: reviewerNoopToken, Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	var (
+		mu     sync.Mutex
+		events []Event
+	)
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:      "all",
+			Model:          "gpt-5",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			Client:         reviewerClient,
+		},
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			events = append(events, evt)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	eng.QueueUserMessage("steer now")
+	result, err := eng.SubmitUserMessage(context.Background(), "run task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if result.Content != "foreground done" {
+		t.Fatalf("assistant content = %q, want foreground done", result.Content)
+	}
+	if len(reviewerClient.calls) != 1 {
+		t.Fatalf("expected reviewer to run once for deferred final, got %d", len(reviewerClient.calls))
+	}
+	if len(mainClient.calls) != 2 {
+		t.Fatalf("expected two main model calls for deferred final path, got %d", len(mainClient.calls))
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	assistantMessages := 0
+	flushedQueuedUser := false
+	for _, evt := range events {
+		if evt.Kind == EventAssistantMessage {
+			assistantMessages++
+			if evt.Message.Content != "foreground done" {
+				t.Fatalf("assistant message content = %q, want foreground done", evt.Message.Content)
+			}
+		}
+		if evt.Kind == EventUserMessageFlushed && evt.UserMessage == "steer now" {
+			flushedQueuedUser = true
+		}
+	}
+	if assistantMessages != 1 {
+		t.Fatalf("expected one assistant_message event for deferred final, got %d events=%+v", assistantMessages, events)
+	}
+	if !flushedQueuedUser {
+		t.Fatalf("expected queued user injection flush event, got %+v", events)
+	}
+}
+
+func TestBackgroundShellNoticeSameTurnNoopAddsNoAssistantMessage(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: reviewerNoopToken, Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var (
+		mu     sync.Mutex
+		events []Event
+	)
+	eng, err := New(store, client, tools.NewRegistry(blockingTool{name: tools.ToolShell, started: started, release: release}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			events = append(events, evt)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	submitDone := make(chan struct {
+		assistant llm.Message
+		err       error
+	}, 1)
+	go func() {
+		assistant, submitErr := eng.SubmitUserMessage(context.Background(), "run tools")
+		submitDone <- struct {
+			assistant llm.Message
+			err       error
+		}{assistant: assistant, err: submitErr}
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for tool call to start")
+	}
+
+	eng.HandleBackgroundShellEvent(BackgroundShellEvent{
+		Type:       "completed",
+		ID:         "1000",
+		State:      "completed",
+		NoticeText: "Background shell 1000 completed.\nExit code: 0\nOutput:\ndone",
+	})
+
+	close(release)
+	result := <-submitDone
+	if result.err != nil {
+		t.Fatalf("submit: %v", result.err)
+	}
+	if strings.TrimSpace(result.assistant.Content) != "" {
+		t.Fatalf("assistant content = %q, want empty", result.assistant.Content)
+	}
+
+	client.mu.Lock()
+	callCount := len(client.calls)
+	requests := append([]llm.Request(nil), client.calls...)
+	client.mu.Unlock()
+	if callCount != 2 {
+		t.Fatalf("expected 2 model calls within the same turn, got %d", callCount)
+	}
+
+	containsNotice := func(req llm.Request) bool {
+		for _, msg := range req.Messages {
+			if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeBackgroundNotice && strings.Contains(msg.Content, "Background shell 1000 completed.") {
+				return true
+			}
+		}
+		return false
+	}
+	if !containsNotice(requests[1]) {
+		t.Fatalf("expected background notice in same-turn follow-up, messages=%+v", requests[1].Messages)
+	}
+	time.Sleep(300 * time.Millisecond)
+	client.mu.Lock()
+	callCountAfterReturn := len(client.calls)
+	client.mu.Unlock()
+	if callCountAfterReturn != 2 {
+		t.Fatalf("did not expect a later batched continuation after turn completion, got %d calls", callCountAfterReturn)
+	}
+
+	finalAssistantContents := make([]string, 0)
+	foundBackgroundNotice := false
+	for _, persisted := range eng.snapshotMessages() {
+		if persisted.Role == llm.RoleAssistant && persisted.Phase == llm.MessagePhaseFinal {
+			finalAssistantContents = append(finalAssistantContents, persisted.Content)
+		}
+		if persisted.Role == llm.RoleDeveloper && persisted.MessageType == llm.MessageTypeBackgroundNotice && strings.Contains(persisted.Content, "Background shell 1000 completed.") {
+			foundBackgroundNotice = true
+		}
+		if strings.Contains(persisted.Content, reviewerNoopToken) {
+			t.Fatalf("noop token leaked into persisted messages: %+v", eng.snapshotMessages())
+		}
+	}
+	if !foundBackgroundNotice {
+		t.Fatalf("expected persisted background notice, got %+v", eng.snapshotMessages())
+	}
+	if len(finalAssistantContents) != 0 {
+		t.Fatalf("expected no persisted final assistant message, got %q", finalAssistantContents)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	assistantEvents := 0
+	for _, evt := range events {
+		if evt.Kind == EventAssistantMessage {
+			assistantEvents++
+		}
+	}
+	if assistantEvents != 0 {
+		t.Fatalf("expected no assistant_message events for same-turn noop background notice, got %d events=%+v", assistantEvents, events)
+	}
+}
+
+func TestMultipleBackgroundShellNoticesFlushTogetherOnFirstAvailableSlot(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	eng, err := New(store, client, tools.NewRegistry(blockingTool{name: tools.ToolShell, started: started, release: release}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	submitDone := make(chan struct {
+		assistant llm.Message
+		err       error
+	}, 1)
+	go func() {
+		assistant, submitErr := eng.SubmitUserMessage(context.Background(), "run tools")
+		submitDone <- struct {
+			assistant llm.Message
+			err       error
+		}{assistant: assistant, err: submitErr}
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for tool call to start")
+	}
+
+	eng.HandleBackgroundShellEvent(BackgroundShellEvent{
+		Type:       "completed",
+		ID:         "1000",
+		State:      "completed",
+		NoticeText: "Background shell 1000 completed.\nExit code: 0\nOutput:\ndone-a",
+	})
+	eng.HandleBackgroundShellEvent(BackgroundShellEvent{
+		Type:       "completed",
+		ID:         "1001",
+		State:      "completed",
+		NoticeText: "Background shell 1001 completed.\nExit code: 0\nOutput:\ndone-b",
+	})
+
+	close(release)
+	result := <-submitDone
+	if result.err != nil {
+		t.Fatalf("submit: %v", result.err)
+	}
+	if result.assistant.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", result.assistant.Content)
+	}
+
+	client.mu.Lock()
+	requests := append([]llm.Request(nil), client.calls...)
+	client.mu.Unlock()
+	if len(requests) != 2 {
+		t.Fatalf("expected 2 model calls with both background notices injected into the next request, got %d", len(requests))
+	}
+
+	containsNotice := func(req llm.Request, shellID string) bool {
+		for _, msg := range req.Messages {
+			if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeBackgroundNotice && strings.Contains(msg.Content, "Background shell "+shellID+" completed.") {
+				return true
+			}
+		}
+		return false
+	}
+	if !containsNotice(requests[1], "1000") || !containsNotice(requests[1], "1001") {
+		t.Fatalf("expected both background notices in the same in-turn follow-up, messages=%+v", requests[1].Messages)
+	}
+
+	time.Sleep(300 * time.Millisecond)
+	client.mu.Lock()
+	callCountAfterReturn := len(client.calls)
+	client.mu.Unlock()
+	if callCountAfterReturn != 2 {
+		t.Fatalf("did not expect a later batched continuation after turn completion, got %d calls", callCountAfterReturn)
 	}
 }
 
@@ -2910,131 +3432,6 @@ func TestWriteStdinCompletionDoesNotQueueDuplicateBackgroundNotice(t *testing.T)
 	for _, msg := range eng.snapshotMessages() {
 		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeBackgroundNotice {
 			t.Fatalf("did not expect background notice after write_stdin harvested completion: %+v", msg)
-		}
-	}
-}
-
-func TestLateWriteStdinPollConsumesAlreadyQueuedBackgroundNotice(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	manager, err := shelltool.NewManager()
-	if err != nil {
-		t.Fatalf("new manager: %v", err)
-	}
-	defer func() {
-		_ = manager.Close()
-	}()
-
-	blockStarted := make(chan struct{})
-	blockRelease := make(chan struct{})
-	client := &fakeClient{responses: []llm.Response{
-		{
-			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "start background", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{
-				ID:    "call_exec_1",
-				Name:  string(tools.ToolExecCommand),
-				Input: json.RawMessage(`{"cmd":"sleep 1; echo done","shell":"/bin/sh","login":false,"yield_time_ms":250}`),
-			}},
-			Usage: llm.Usage{WindowTokens: 200000},
-		},
-		{
-			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "hold", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{
-				ID:    "call_block_1",
-				Name:  string(tools.ToolPatch),
-				Input: json.RawMessage(`{"patch":"ignored"}`),
-			}},
-			Usage: llm.Usage{WindowTokens: 200000},
-		},
-		{
-			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "now poll", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{
-				ID:    "call_poll_1",
-				Name:  string(tools.ToolWriteStdin),
-				Input: json.RawMessage(`{"session_id":1000,"yield_time_ms":250}`),
-			}},
-			Usage: llm.Usage{WindowTokens: 200000},
-		},
-		{
-			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
-			Usage:     llm.Usage{WindowTokens: 200000},
-		},
-		{
-			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "unexpected extra turn", Phase: llm.MessagePhaseFinal},
-			Usage:     llm.Usage{WindowTokens: 200000},
-		},
-	}}
-	registry := tools.NewRegistry(
-		shelltool.NewExecCommandTool(dir, 16_000, manager, store.Meta().SessionID),
-		shelltool.NewWriteStdinTool(16_000, manager),
-		blockingTool{name: tools.ToolPatch, started: blockStarted, release: blockRelease},
-	)
-	eng, err := New(store, client, registry, Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
-	manager.SetEventHandler(func(evt shelltool.Event) {
-		eng.HandleBackgroundShellUpdate(BackgroundShellEvent{
-			Type:    string(evt.Type),
-			ID:      evt.Snapshot.ID,
-			State:   evt.Snapshot.State,
-			Command: evt.Snapshot.Command,
-			Workdir: evt.Snapshot.Workdir,
-			LogPath: evt.Snapshot.LogPath,
-			Preview: evt.Preview,
-			Removed: evt.Removed,
-			ExitCode: func() *int {
-				if evt.Snapshot.ExitCode == nil {
-					return nil
-				}
-				out := *evt.Snapshot.ExitCode
-				return &out
-			}(),
-			NoticeSuppressed: evt.NoticeSuppressed,
-		}, strings.TrimSpace(evt.Snapshot.OwnerSessionID) == store.Meta().SessionID && !evt.NoticeSuppressed)
-	})
-
-	submitDone := make(chan struct {
-		assistant llm.Message
-		err       error
-	}, 1)
-	go func() {
-		assistant, submitErr := eng.SubmitUserMessage(context.Background(), "run and wait late")
-		submitDone <- struct {
-			assistant llm.Message
-			err       error
-		}{assistant: assistant, err: submitErr}
-	}()
-
-	select {
-	case <-blockStarted:
-	case <-time.After(3 * time.Second):
-		t.Fatal("timed out waiting for blocking tool to start")
-	}
-	time.Sleep(1200 * time.Millisecond)
-	close(blockRelease)
-
-	result := <-submitDone
-	if result.err != nil {
-		t.Fatalf("submit user message: %v", result.err)
-	}
-	if result.assistant.Content != "done" {
-		t.Fatalf("assistant content = %q, want done", result.assistant.Content)
-	}
-	time.Sleep(300 * time.Millisecond)
-
-	client.mu.Lock()
-	callCount := len(client.calls)
-	client.mu.Unlock()
-	if callCount != 4 {
-		t.Fatalf("model call count = %d, want 4", callCount)
-	}
-	for _, msg := range eng.snapshotMessages() {
-		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeBackgroundNotice {
-			t.Fatalf("did not expect queued background notice to survive late write_stdin poll: %+v", msg)
 		}
 	}
 }
@@ -3598,6 +3995,74 @@ func TestStreamingIgnoresAsyncLateDeltasAfterGenerateReturns(t *testing.T) {
 		if evt.Kind == EventAssistantDelta && evt.AssistantDelta == "late" {
 			t.Fatalf("expected late delta to be ignored, got events: %+v", events)
 		}
+	}
+}
+
+func TestStreamingNoopFinalClearsLiveAssistantDelta(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	var (
+		mu     sync.Mutex
+		events []Event
+	)
+	eng, err := New(store, fakeNoopStreamClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			events = append(events, evt)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "stream noop")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "" {
+		t.Fatalf("assistant content = %q, want empty", msg.Content)
+	}
+	if ongoing := strings.TrimSpace(eng.ChatSnapshot().Ongoing); ongoing != "" {
+		t.Fatalf("expected ongoing cleared after noop final, got %q", ongoing)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	hasDelta := false
+	hasReset := false
+	hasAssistantMessage := false
+	hasModelResponse := false
+	for _, evt := range events {
+		switch evt.Kind {
+		case EventAssistantDelta:
+			if evt.AssistantDelta == reviewerNoopToken {
+				hasDelta = true
+			}
+		case EventAssistantDeltaReset:
+			hasReset = true
+		case EventAssistantMessage:
+			hasAssistantMessage = true
+		case EventModelResponse:
+			hasModelResponse = true
+		}
+	}
+	if !hasDelta {
+		t.Fatalf("expected streamed noop delta event, got %+v", events)
+	}
+	if !hasReset {
+		t.Fatalf("expected assistant delta reset for noop final, got %+v", events)
+	}
+	if hasAssistantMessage {
+		t.Fatalf("did not expect assistant_message event for noop final, got %+v", events)
+	}
+	if hasModelResponse {
+		t.Fatalf("did not expect model_response_received event for noop final, got %+v", events)
 	}
 }
 
