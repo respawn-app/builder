@@ -3118,6 +3118,80 @@ func TestDeferredFinalWithQueuedUserInjectionStillRunsReviewerAndEmitsAssistantE
 	}
 }
 
+func TestDeferredFinalWithQueuedUserInjectionAndTrailingNoopStillUsesDeferredFinal(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "foreground done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: reviewerNoopToken, Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	var (
+		mu     sync.Mutex
+		events []Event
+	)
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:      "all",
+			Model:          "gpt-5",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			Client:         reviewerClient,
+		},
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			events = append(events, evt)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	eng.QueueUserMessage("steer now")
+	result, err := eng.SubmitUserMessage(context.Background(), "run task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if result.Content != "foreground done" {
+		t.Fatalf("assistant content = %q, want foreground done", result.Content)
+	}
+	if len(reviewerClient.calls) != 1 {
+		t.Fatalf("expected reviewer to run once for deferred final, got %d", len(reviewerClient.calls))
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	assistantMessages := 0
+	for _, evt := range events {
+		if evt.Kind != EventAssistantMessage {
+			continue
+		}
+		assistantMessages++
+		if evt.Message.Content != "foreground done" {
+			t.Fatalf("assistant message content = %q, want foreground done", evt.Message.Content)
+		}
+	}
+	if assistantMessages != 1 {
+		t.Fatalf("expected one assistant_message event for deferred final, got %d events=%+v", assistantMessages, events)
+	}
+}
+
 func TestBackgroundShellNoticeSameTurnNoopAddsNoAssistantMessage(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
