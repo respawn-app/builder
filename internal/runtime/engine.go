@@ -425,7 +425,10 @@ func (e *Engine) SubmitUserShellCommand(ctx context.Context, command string) (re
 func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, error) {
 	reviewerFrequency := e.ReviewerFrequency()
 	reviewerClient := e.reviewerClientSnapshot()
-	msg, _, err := e.runStepLoopWithOptions(ctx, stepID, reviewerFrequency, reviewerClient, true, true)
+	msg, _, noopFinalAnswer, err := e.runStepLoopWithOptions(ctx, stepID, reviewerFrequency, reviewerClient, true, true)
+	if noopFinalAnswer {
+		return llm.Message{}, err
+	}
 	return msg, err
 }
 
@@ -434,7 +437,7 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 // this run. When refreshReviewerConfigOnResolve is true, the final assistant
 // resolution re-reads current runtime reviewer config so busy-time toggles (for
 // example from /supervisor) affect the currently running step at completion.
-func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, reviewerFrequency string, reviewerClient llm.Client, emitAssistantEvent bool, refreshReviewerConfigOnResolve bool) (llm.Message, bool, error) {
+func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, reviewerFrequency string, reviewerClient llm.Client, emitAssistantEvent bool, refreshReviewerConfigOnResolve bool) (llm.Message, bool, bool, error) {
 	e.ensureOrchestrationCollaborators()
 	return e.stepFlow.RunStepLoopWithOptions(ctx, stepID, stepLoopOptions{
 		ReviewerFrequency:              reviewerFrequency,

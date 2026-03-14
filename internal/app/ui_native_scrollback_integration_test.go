@@ -40,6 +40,8 @@ type singleChunkStreamClient struct {
 	delta string
 }
 
+type noopFinalStreamClient struct{}
+
 type asyncLateDeltaStreamClient struct {
 	initial string
 	late    string
@@ -63,6 +65,20 @@ func (c singleChunkStreamClient) GenerateStream(_ context.Context, _ llm.Request
 	}
 	return llm.Response{
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: c.delta},
+		Usage:     llm.Usage{WindowTokens: 200_000},
+	}, nil
+}
+
+func (noopFinalStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
+	return llm.Response{}, errors.New("not implemented")
+}
+
+func (noopFinalStreamClient) GenerateStream(_ context.Context, _ llm.Request, onDelta func(string)) (llm.Response, error) {
+	if onDelta != nil {
+		onDelta("NO_OP")
+	}
+	return llm.Response{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "NO_OP", Phase: llm.MessagePhaseFinal},
 		Usage:     llm.Usage{WindowTokens: 200_000},
 	}, nil
 }
@@ -575,6 +591,82 @@ func TestNativeFinalizeSuppressesLateAsyncDeltaArtifacts(t *testing.T) {
 	}
 	if model.sawAssistantDelta {
 		t.Fatal("expected sawAssistantDelta cleared after finalize commit")
+	}
+}
+
+func TestNativeNoopFinalNeverAppearsOnScreen(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	runtimeEvents := make(chan runtime.Event, 256)
+	eng, err := runtime.New(
+		store,
+		noopFinalStreamClient{},
+		tools.NewRegistry(),
+		runtime.Config{
+			Model: "gpt-5",
+			OnEvent: func(evt runtime.Event) {
+				runtimeEvents <- evt
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	out := &bytes.Buffer{}
+	model := NewUIModel(
+		eng,
+		runtimeEvents,
+		closedAskEvents(),
+		WithUIScrollMode(config.TUIScrollModeNative),
+	).(*uiModel)
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := program.Run()
+		done <- runErr
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	go func() {
+		_, _ = eng.SubmitUserMessage(context.Background(), "trigger")
+	}()
+	time.Sleep(220 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("program run failed: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	plain := xansi.Strip(out.String())
+	if strings.Contains(plain, "NO_OP") {
+		t.Fatalf("expected NO_OP to stay invisible in native ongoing output, got %q", plain)
+	}
+	if strings.TrimSpace(model.view.OngoingStreamingText()) != "" {
+		t.Fatalf("expected live streaming buffer cleared after noop final, got %q", model.view.OngoingStreamingText())
+	}
+	if model.sawAssistantDelta {
+		t.Fatal("expected sawAssistantDelta cleared after noop final")
+	}
+	for _, entry := range eng.ChatSnapshot().Entries {
+		if strings.Contains(entry.Text, "NO_OP") {
+			t.Fatalf("expected NO_OP to stay out of transcript entries, got %+v", eng.ChatSnapshot().Entries)
+		}
 	}
 }
 

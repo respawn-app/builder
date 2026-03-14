@@ -15,11 +15,11 @@ type stepLoopOptions struct {
 }
 
 type stepExecutor interface {
-	RunStepLoopWithOptions(ctx context.Context, stepID string, options stepLoopOptions) (llm.Message, bool, error)
+	RunStepLoopWithOptions(ctx context.Context, stepID string, options stepLoopOptions) (llm.Message, bool, bool, error)
 }
 
 type stepLoopRunner interface {
-	RunStepLoopWithOptions(ctx context.Context, stepID string, options stepLoopOptions) (llm.Message, bool, error)
+	RunStepLoopWithOptions(ctx context.Context, stepID string, options stepLoopOptions) (llm.Message, bool, bool, error)
 }
 
 type toolExecutor interface {

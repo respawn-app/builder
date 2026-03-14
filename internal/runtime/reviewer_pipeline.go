@@ -67,7 +67,7 @@ func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string
 		return original, nil
 	}
 
-	followUp, followUpExecutedToolCall, err := r.stepRunner.RunStepLoopWithOptions(ctx, stepID, stepLoopOptions{
+	followUp, followUpExecutedToolCall, noopFinalAnswer, err := r.stepRunner.RunStepLoopWithOptions(ctx, stepID, stepLoopOptions{
 		ReviewerFrequency:              "off",
 		ReviewerClient:                 nil,
 		EmitAssistantEvent:             false,
@@ -85,7 +85,7 @@ func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string
 		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
 		return original, nil
 	}
-	if strings.TrimSpace(followUp.Content) == reviewerNoopToken {
+	if noopFinalAnswer || isNoopFinalAnswer(followUp) {
 		if !followUpExecutedToolCall {
 			_ = e.replaceHistory(stepID, "reviewer_rollback", compactionModeManual, baselineItems)
 		}
