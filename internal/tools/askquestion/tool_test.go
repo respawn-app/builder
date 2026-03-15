@@ -15,15 +15,15 @@ func TestBrokerFIFOQueue(t *testing.T) {
 
 	ctx := context.Background()
 	type out struct {
-		id  string
-		ans string
-		err error
+		id   string
+		resp Response
+		err  error
 	}
 	ch := make(chan out, 2)
 
 	go func() {
 		resp, err := b.Ask(ctx, Request{ID: "q1", Question: "one?"})
-		ch <- out{id: "q1", ans: resp.Answer, err: err}
+		ch <- out{id: "q1", resp: resp, err: err}
 	}()
 	for i := 0; i < 100; i++ {
 		if len(b.Pending()) == 1 {
@@ -33,7 +33,7 @@ func TestBrokerFIFOQueue(t *testing.T) {
 	}
 	go func() {
 		resp, err := b.Ask(ctx, Request{ID: "q2", Question: "two?"})
-		ch <- out{id: "q2", ans: resp.Answer, err: err}
+		ch <- out{id: "q2", resp: resp, err: err}
 	}()
 
 	time.Sleep(10 * time.Millisecond)
@@ -45,10 +45,10 @@ func TestBrokerFIFOQueue(t *testing.T) {
 		t.Fatalf("pending not fifo: %+v", pending)
 	}
 
-	if err := b.Submit("q1", "a1"); err != nil {
+	if err := b.Submit("q1", Response{Answer: "a1"}); err != nil {
 		t.Fatalf("submit q1: %v", err)
 	}
-	if err := b.Submit("q2", "a2"); err != nil {
+	if err := b.Submit("q2", Response{Answer: "a2"}); err != nil {
 		t.Fatalf("submit q2: %v", err)
 	}
 
@@ -58,11 +58,144 @@ func TestBrokerFIFOQueue(t *testing.T) {
 		if item.err != nil {
 			t.Fatalf("ask result err: %v", item.err)
 		}
-		got[item.id] = item.ans
+		got[item.id] = item.resp.Answer
 	}
 
 	if got["q1"] != "a1" || got["q2"] != "a2" {
 		t.Fatalf("unexpected answers: %+v", got)
+	}
+}
+
+func TestSubmitApprovalResponse(t *testing.T) {
+	b := NewBroker()
+	ctx := context.Background()
+	type out struct {
+		resp Response
+		err  error
+	}
+	done := make(chan out, 1)
+
+	go func() {
+		resp, err := b.Ask(ctx, Request{ID: "approval", Question: "approve?", Approval: true, ApprovalOptions: []ApprovalOption{{Decision: ApprovalDecisionAllowOnce, Label: "Allow once"}, {Decision: ApprovalDecisionAllowSession, Label: "Allow for this session"}, {Decision: ApprovalDecisionDeny, Label: "Deny"}}})
+		done <- out{resp: resp, err: err}
+	}()
+
+	for i := 0; i < 100; i++ {
+		if len(b.Pending()) == 1 {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	approval := &ApprovalPayload{Decision: ApprovalDecisionAllowSession, Commentary: "trusted path"}
+	if err := b.Submit("approval", Response{Approval: approval}); err != nil {
+		t.Fatalf("submit approval: %v", err)
+	}
+
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatalf("ask approval: %v", result.err)
+		}
+		if result.resp.RequestID != "approval" {
+			t.Fatalf("request id = %q, want approval", result.resp.RequestID)
+		}
+		if result.resp.Approval == nil || *result.resp.Approval != *approval {
+			t.Fatalf("approval payload = %+v, want %+v", result.resp.Approval, approval)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for approval response")
+	}
+}
+
+func TestApprovalAskRequiresApprovalOptions(t *testing.T) {
+	b := NewBroker()
+	_, err := b.Ask(context.Background(), Request{ID: "approval", Question: "approve?", Approval: true})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if err.Error() != "approval questions require approval_options" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSubmitRejectsPlainStringResponseForApprovalAsk(t *testing.T) {
+	b := NewBroker()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	type out struct {
+		resp Response
+		err  error
+	}
+	done := make(chan out, 1)
+	approvalReq := Request{
+		ID:       "approval",
+		Question: "approve?",
+		Approval: true,
+		ApprovalOptions: []ApprovalOption{
+			{Decision: ApprovalDecisionAllowOnce, Label: "Allow once"},
+			{Decision: ApprovalDecisionAllowSession, Label: "Allow for this session"},
+			{Decision: ApprovalDecisionDeny, Label: "Deny"},
+		},
+	}
+
+	go func() {
+		resp, err := b.Ask(ctx, approvalReq)
+		done <- out{resp: resp, err: err}
+	}()
+
+	for i := 0; i < 100; i++ {
+		if len(b.Pending()) == 1 {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	if err := b.Submit("approval", Response{Answer: "allow once"}); err == nil {
+		t.Fatal("expected submit error for plain-string approval response")
+	} else if err.Error() != "approval questions require approval responses" {
+		t.Fatalf("unexpected submit error: %v", err)
+	}
+
+	valid := &ApprovalPayload{Decision: ApprovalDecisionAllowOnce}
+	if err := b.Submit("approval", Response{Approval: valid}); err != nil {
+		t.Fatalf("submit valid approval: %v", err)
+	}
+
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatalf("ask approval: %v", result.err)
+		}
+		if result.resp.Approval == nil || *result.resp.Approval != *valid {
+			t.Fatalf("approval payload = %+v, want %+v", result.resp.Approval, valid)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for approval response")
+	}
+}
+
+func TestAskHandlerRejectsPlainStringResponseForApprovalAsk(t *testing.T) {
+	b := NewBroker()
+	b.SetAskHandler(func(Request) (Response, error) {
+		return Response{Answer: "allow once"}, nil
+	})
+
+	_, err := b.Ask(context.Background(), Request{
+		ID:       "approval",
+		Question: "approve?",
+		Approval: true,
+		ApprovalOptions: []ApprovalOption{
+			{Decision: ApprovalDecisionAllowOnce, Label: "Allow once"},
+			{Decision: ApprovalDecisionAllowSession, Label: "Allow for this session"},
+			{Decision: ApprovalDecisionDeny, Label: "Deny"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if err.Error() != "approval questions require approval responses" {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

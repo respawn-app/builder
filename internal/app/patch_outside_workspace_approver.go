@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -11,10 +12,9 @@ import (
 )
 
 const (
-	outsideWorkspaceAllowOnceSuggestion     = "Allow once (recommended): permit this outside-workspace access for this tool call."
-	outsideWorkspaceAllowSessionSuggestion  = "Allow for this session: permit outside-workspace access until builder exits."
-	outsideWorkspaceDenySuggestion          = "Deny: keep access limited to the workspace root."
-	approvalAllowWithCommentaryAnswerPrefix = "allow_with_commentary:"
+	outsideWorkspaceAllowOnceSuggestion    = "Allow once (recommended): permit this outside-workspace access for this tool call."
+	outsideWorkspaceAllowSessionSuggestion = "Allow for this session: permit outside-workspace access until builder exits."
+	outsideWorkspaceDenySuggestion         = "Deny: keep access limited to the workspace root."
 )
 
 type outsideWorkspaceApprover struct {
@@ -43,17 +43,20 @@ func (a *outsideWorkspaceApprover) Approve(ctx context.Context, req patchtool.Ou
 	resp, err := a.broker.Ask(ctx, askquestion.Request{
 		Question: fmt.Sprintf("Allow %s %s (outside workspace dir)?", a.actionVerb, req.ResolvedPath),
 		Approval: true,
-		Suggestions: []string{
-			outsideWorkspaceAllowOnceSuggestion,
-			outsideWorkspaceAllowSessionSuggestion,
-			outsideWorkspaceDenySuggestion,
+		ApprovalOptions: []askquestion.ApprovalOption{
+			{Decision: askquestion.ApprovalDecisionAllowOnce, Label: outsideWorkspaceAllowOnceSuggestion},
+			{Decision: askquestion.ApprovalDecisionAllowSession, Label: outsideWorkspaceAllowSessionSuggestion},
+			{Decision: askquestion.ApprovalDecisionDeny, Label: outsideWorkspaceDenySuggestion},
 		},
 	})
 	if err != nil {
 		return patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionDeny}, err
 	}
 
-	approval := parseOutsideWorkspaceApprovalAnswer(resp.Answer)
+	approval, err := outsideWorkspaceApprovalFromResponse(resp)
+	if err != nil {
+		return patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionDeny}, err
+	}
 	if approval.Decision == patchtool.OutsideWorkspaceDecisionAllowSession {
 		a.mu.Lock()
 		a.sessionAllowed = true
@@ -62,30 +65,21 @@ func (a *outsideWorkspaceApprover) Approve(ctx context.Context, req patchtool.Ou
 	return approval, nil
 }
 
-func parseOutsideWorkspaceApprovalAnswer(answer string) patchtool.OutsideWorkspaceApproval {
-	trimmed := strings.TrimSpace(answer)
-	normalized := strings.ToLower(trimmed)
-	if strings.HasPrefix(trimmed, approvalAllowWithCommentaryAnswerPrefix) {
-		commentary := strings.TrimSpace(strings.TrimPrefix(trimmed, approvalAllowWithCommentaryAnswerPrefix))
-		return patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowOnce, Commentary: commentary}
+func outsideWorkspaceApprovalFromResponse(resp askquestion.Response) (patchtool.OutsideWorkspaceApproval, error) {
+	payload := resp.Approval
+	if payload == nil {
+		return patchtool.OutsideWorkspaceApproval{}, errors.New("missing approval payload")
 	}
-	switch normalized {
-	case strings.ToLower(outsideWorkspaceAllowOnceSuggestion), "allow once", "once", "allow", "yes", "y":
-		return patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowOnce}
-	case strings.ToLower(outsideWorkspaceAllowSessionSuggestion), "allow for this session", "allow session", "session", "always allow":
-		return patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowSession}
-	case strings.ToLower(outsideWorkspaceDenySuggestion), "deny", "no", "n":
-		return patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionDeny}
+	approval := patchtool.OutsideWorkspaceApproval{Commentary: strings.TrimSpace(payload.Commentary)}
+	switch payload.Decision {
+	case askquestion.ApprovalDecisionAllowOnce:
+		approval.Decision = patchtool.OutsideWorkspaceDecisionAllowOnce
+	case askquestion.ApprovalDecisionAllowSession:
+		approval.Decision = patchtool.OutsideWorkspaceDecisionAllowSession
+	case askquestion.ApprovalDecisionDeny:
+		approval.Decision = patchtool.OutsideWorkspaceDecisionDeny
 	default:
-		if strings.HasPrefix(normalized, "allow for this session") || strings.HasPrefix(normalized, "allow session") || strings.HasPrefix(normalized, "session allow") {
-			return patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowSession}
-		}
-		if strings.HasPrefix(normalized, "allow once") || normalized == "allow" {
-			return patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowOnce}
-		}
-		if trimmed == "" {
-			return patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionDeny}
-		}
-		return patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionDeny, Commentary: trimmed}
+		return patchtool.OutsideWorkspaceApproval{}, fmt.Errorf("unsupported approval decision %q", payload.Decision)
 	}
+	return approval, nil
 }
