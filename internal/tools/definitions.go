@@ -74,7 +74,7 @@ var catalogEntries = []CatalogEntry{
     },
     "yield_time_ms": {
       "type": "integer",
-      "description": "How long to wait in milliseconds for output before yielding control and backgrounding the process."
+      "description": "How long to wait in milliseconds for output before yielding control and backgrounding the process. Omit this for most commands. 15000 is a reasonable minimum"
     },
     "max_output_tokens": {
       "type": "integer",

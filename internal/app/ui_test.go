@@ -1849,6 +1849,52 @@ func TestViewPlacesQueuedPaneBetweenSlashPickerAndInput(t *testing.T) {
 	}
 }
 
+func TestSlashPickerShowsFastForOpenAIFirstPartyResponsesProvider(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFastClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/"
+	m.refreshSlashCommandFilterFromInput()
+
+	state := m.slashCommandPicker()
+	if !state.visible {
+		t.Fatal("expected slash picker visible")
+	}
+	if !slashPickerContainsCommand(state, "fast") {
+		t.Fatalf("expected /fast in slash picker, got %+v", slashPickerCommandNames(state))
+	}
+}
+
+func TestSlashPickerHidesFastForNonFirstPartyResponsesProvider(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineAzureClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/"
+	m.refreshSlashCommandFilterFromInput()
+
+	state := m.slashCommandPicker()
+	if !state.visible {
+		t.Fatal("expected slash picker visible")
+	}
+	if slashPickerContainsCommand(state, "fast") {
+		t.Fatalf("did not expect /fast in slash picker, got %+v", slashPickerCommandNames(state))
+	}
+}
+
 func TestCalcChatLinesShrinksForQueuedPane(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 40
@@ -1973,7 +2019,7 @@ func TestPSCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 }
 
 func TestPSOverlayScrollKeepsEntryHeadersVisibleAtTop(t *testing.T) {
-	manager, err := shelltool.NewManager()
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new background manager: %v", err)
 	}
@@ -2030,7 +2076,7 @@ func TestPSOverlayScrollKeepsEntryHeadersVisibleAtTop(t *testing.T) {
 }
 
 func TestPSOverlayScrollShowsSelectedEntryFullyNearBottom(t *testing.T) {
-	manager, err := shelltool.NewManager()
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new background manager: %v", err)
 	}
@@ -2089,7 +2135,7 @@ func TestPSOverlayScrollShowsSelectedEntryFullyNearBottom(t *testing.T) {
 }
 
 func TestPSOverlayInlineAppendsOutputToInputAndReturnsToOngoing(t *testing.T) {
-	manager, err := shelltool.NewManager()
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new background manager: %v", err)
 	}
@@ -2166,7 +2212,7 @@ func TestPSOverlayInlineAppendsOutputToInputAndReturnsToOngoing(t *testing.T) {
 }
 
 func TestPSOverlayInlineUnlocksLockedInputBeforeAppending(t *testing.T) {
-	manager, err := shelltool.NewManager()
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new background manager: %v", err)
 	}
@@ -2223,7 +2269,7 @@ func TestPSOverlayInlineUnlocksLockedInputBeforeAppending(t *testing.T) {
 }
 
 func TestPSOverlayRefreshTickUpdatesEntriesWhileOpen(t *testing.T) {
-	manager, err := shelltool.NewManager()
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new background manager: %v", err)
 	}
@@ -2269,7 +2315,7 @@ func TestPSOverlayRefreshTickUpdatesEntriesWhileOpen(t *testing.T) {
 }
 
 func TestOpenLogsFallsBackToEditorCommandWhenDefaultOpenFails(t *testing.T) {
-	manager, err := shelltool.NewManager()
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new background manager: %v", err)
 	}
@@ -2621,6 +2667,116 @@ func TestBusySlashThinkingExecutesImmediatelyWithoutQueueing(t *testing.T) {
 	}
 	if updated.input != "" {
 		t.Fatalf("expected input cleared after /thinking, got %q", updated.input)
+	}
+}
+
+func TestSlashFastTogglesAndShowsStatus(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIFastModeAvailable(true),
+	).(*uiModel)
+	m.input = "/fast"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient status clear timer cmd")
+	}
+	if !updated.fastModeEnabled {
+		t.Fatal("expected fast mode enabled after toggle")
+	}
+	if !strings.Contains(updated.transientStatus, "Fast mode enabled") {
+		t.Fatalf("expected transient status for /fast toggle, got %q", updated.transientStatus)
+	}
+	plain := stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(plain, "Fast mode enabled") {
+		t.Fatalf("expected transcript notice for /fast toggle, got %q", plain)
+	}
+
+	updated.input = "/fast off"
+	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient status clear timer cmd")
+	}
+	if updated.fastModeEnabled {
+		t.Fatal("expected fast mode disabled")
+	}
+	if !strings.Contains(updated.transientStatus, "Fast mode disabled") {
+		t.Fatalf("expected disable transient status, got %q", updated.transientStatus)
+	}
+
+	updated.input = "/fast status"
+	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if cmd != nil {
+		t.Fatal("did not expect transient status cmd for /fast status")
+	}
+	plain = stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(plain, "Fast mode is off") {
+		t.Fatalf("expected status transcript entry, got %q", plain)
+	}
+	if updated.transientStatus != "Fast mode disabled" {
+		t.Fatalf("did not expect /fast status to overwrite transient status, got %q", updated.transientStatus)
+	}
+}
+
+func TestSlashFastUnavailableShowsError(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/fast on"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient status clear timer cmd")
+	}
+	if updated.fastModeEnabled {
+		t.Fatal("did not expect fast mode enabled")
+	}
+	if !strings.Contains(updated.transientStatus, "OpenAI-based Responses providers") {
+		t.Fatalf("expected availability error status, got %q", updated.transientStatus)
+	}
+	plain := stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(plain, "Fast mode is only available for OpenAI-based Responses providers") {
+		t.Fatalf("expected transcript error for unavailable fast mode, got %q", plain)
+	}
+}
+
+func TestSlashFastWithEngineTogglesRuntime(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFastClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5.3-codex"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/fast on"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient status clear timer cmd")
+	}
+	if !eng.FastModeEnabled() {
+		t.Fatal("expected runtime fast mode enabled")
+	}
+	if !updated.fastModeEnabled {
+		t.Fatal("expected ui fast mode enabled")
+	}
+
+	updated.input = "/fast off"
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if eng.FastModeEnabled() {
+		t.Fatal("expected runtime fast mode disabled")
+	}
+	if updated.fastModeEnabled {
+		t.Fatal("expected ui fast mode disabled")
 	}
 }
 
@@ -3171,6 +3327,39 @@ func TestStatusLineShowsThinkingLevelForReasoningModels(t *testing.T) {
 	}
 }
 
+func TestStatusLineShowsFastAfterThinkingLevelWhenAvailableAndEnabled(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIModelName("gpt-5.3.codex"),
+		WithUIThinkingLevel("high"),
+		WithUIFastModeAvailable(true),
+		WithUIFastModeEnabled(true),
+	).(*uiModel)
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(line, "gpt-5.3.codex high fast") {
+		t.Fatalf("expected status line to include fast marker, got %q", line)
+	}
+}
+
+func TestStatusLineOmitsFastWhenUnavailable(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIModelName("gpt-5.3.codex"),
+		WithUIThinkingLevel("high"),
+		WithUIFastModeEnabled(true),
+	).(*uiModel)
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if strings.Contains(line, " high fast") {
+		t.Fatalf("did not expect fast marker when unavailable, got %q", line)
+	}
+}
+
 func TestStatusLineRightAlignsTransientNotice(t *testing.T) {
 	m := NewUIModel(
 		nil,
@@ -3451,6 +3640,10 @@ func TestStatusContextZoneColorBoundaries(t *testing.T) {
 
 type statusLineFakeClient struct{}
 
+type statusLineFastClient struct{}
+
+type statusLineAzureClient struct{}
+
 type busyToggleFakeClient struct {
 	mu        sync.Mutex
 	responses []llm.Response
@@ -3504,6 +3697,39 @@ func (t busyTogglePatchTool) Call(ctx context.Context, c tools.Call) (tools.Resu
 
 func (statusLineFakeClient) Generate(context.Context, llm.Request) (llm.Response, error) {
 	return llm.Response{}, errors.New("not implemented")
+}
+
+func (statusLineFastClient) Generate(context.Context, llm.Request) (llm.Response, error) {
+	return llm.Response{}, errors.New("not implemented")
+}
+
+func (statusLineFastClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	return llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}, nil
+}
+
+func (statusLineAzureClient) Generate(context.Context, llm.Request) (llm.Response, error) {
+	return llm.Response{}, errors.New("not implemented")
+}
+
+func (statusLineAzureClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	return llm.ProviderCapabilities{ProviderID: "azure-openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: false}, nil
+}
+
+func slashPickerContainsCommand(state slashCommandPickerState, name string) bool {
+	for _, command := range state.matches {
+		if command.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func slashPickerCommandNames(state slashCommandPickerState) []string {
+	names := make([]string, 0, len(state.matches))
+	for _, command := range state.matches {
+		names = append(names, command.Name)
+	}
+	return names
 }
 
 func stripANSIAndTrimRight(view string) string {

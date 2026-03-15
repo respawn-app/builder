@@ -10,6 +10,7 @@ type OpenAIRequest struct {
 	Temperature           float64
 	MaxTokens             int
 	ReasoningEffort       string
+	FastMode              bool
 	EnableNativeWebSearch bool
 	SystemPrompt          string
 	SessionID             string
@@ -88,6 +89,7 @@ func (c *OpenAIClient) Generate(ctx context.Context, request Request) (Response,
 		Temperature:           request.Temperature,
 		MaxTokens:             request.MaxTokens,
 		ReasoningEffort:       request.ReasoningEffort,
+		FastMode:              request.FastMode,
 		EnableNativeWebSearch: request.EnableNativeWebSearch,
 		SystemPrompt:          request.SystemPrompt,
 		SessionID:             request.SessionID,
@@ -135,6 +137,7 @@ func (c *OpenAIClient) GenerateStreamWithEvents(ctx context.Context, request Req
 		Temperature:           request.Temperature,
 		MaxTokens:             request.MaxTokens,
 		ReasoningEffort:       request.ReasoningEffort,
+		FastMode:              request.FastMode,
 		EnableNativeWebSearch: request.EnableNativeWebSearch,
 		SystemPrompt:          request.SystemPrompt,
 		SessionID:             request.SessionID,

@@ -40,6 +40,9 @@ func TestSummarizeBackgroundEventDefaultIncludesMetadataAndTruncatedOutput(t *te
 	if !strings.Contains(summary.DetailText, "alpha line") || !strings.Contains(summary.DetailText, "omega line") {
 		t.Fatalf("expected head/tail output preview, got %q", summary.DetailText)
 	}
+	if !strings.Contains(summary.DetailText, "Omitted ") || !strings.Contains(summary.DetailText, "read log file for details") {
+		t.Fatalf("expected background truncation banner to point to the log file, got %q", summary.DetailText)
+	}
 	if summary.OngoingText != "Background shell 1000 completed (exit 17)" {
 		t.Fatalf("unexpected ongoing summary: %q", summary.OngoingText)
 	}
@@ -181,7 +184,7 @@ func TestSummarizeBackgroundEventDefaultDoesNotDuplicateShortLogAroundTruncation
 		t.Fatalf("did not expect full content duplicated in summary, got %q", summary.DetailText)
 	}
 	headLen, tailLen := truncationSegmentLengths(len(content), 80)
-	wantMax := headLen + tailLen + truncationBannerLen(len(content)-headLen-tailLen)
+	wantMax := headLen + tailLen + backgroundTruncationBannerLen(len(content)-headLen-tailLen)
 	_, preview, ok := strings.Cut(summary.DetailText, "Output:\n")
 	if !ok {
 		t.Fatalf("expected output section in summary, got %q", summary.DetailText)

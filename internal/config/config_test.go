@@ -44,6 +44,9 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if !cfg.Settings.ToolPreambles {
 		t.Fatalf("expected default tool_preambles=true")
 	}
+	if cfg.Settings.PriorityRequestMode {
+		t.Fatalf("expected default priority_request_mode=false")
+	}
 	if cfg.Settings.TUIAlternateScreen != TUIAlternateScreenAuto {
 		t.Fatalf("default tui_alternate_screen mismatch: %q", cfg.Settings.TUIAlternateScreen)
 	}
@@ -64,6 +67,9 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	}
 	if cfg.Settings.ContextCompactionThresholdTokens != 360_000 {
 		t.Fatalf("default compaction threshold mismatch: %d", cfg.Settings.ContextCompactionThresholdTokens)
+	}
+	if cfg.Settings.MinimumExecToBgSeconds != defaultMinimumExecToBgSec {
+		t.Fatalf("default minimum_exec_to_bg_seconds mismatch: %d", cfg.Settings.MinimumExecToBgSeconds)
 	}
 	if cfg.Settings.ModelContextWindow != 400_000 {
 		t.Fatalf("default model context window mismatch: %d", cfg.Settings.ModelContextWindow)
@@ -129,6 +135,31 @@ func TestLoadReviewerModelInheritsMainModelWhenUnset(t *testing.T) {
 	}
 	if cfg.Settings.Reviewer.Model != "gpt-main-env" {
 		t.Fatalf("expected reviewer.model to inherit env main model, got %q", cfg.Settings.Reviewer.Model)
+	}
+}
+
+func TestLoadPriorityRequestModeFromFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("priority_request_mode = true\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Settings.PriorityRequestMode {
+		t.Fatal("expected priority_request_mode=true from file")
+	}
+	if got := cfg.Source.Sources["priority_request_mode"]; got != "file" {
+		t.Fatalf("expected priority_request_mode source file, got %q", got)
 	}
 }
 
@@ -614,6 +645,48 @@ func TestLoadShellOutputMaxCharsPrecedenceAndValidation(t *testing.T) {
 	t.Setenv("BUILDER_SHELL_OUTPUT_MAX_CHARS", "0")
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
 		t.Fatal("expected invalid shell_output_max_chars")
+	}
+}
+
+func TestLoadMinimumExecToBgSecondsPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("minimum_exec_to_bg_seconds = 21\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.MinimumExecToBgSeconds != 21 {
+		t.Fatalf("expected file minimum_exec_to_bg_seconds=21, got %d", cfg.Settings.MinimumExecToBgSeconds)
+	}
+	if got := cfg.Source.Sources["minimum_exec_to_bg_seconds"]; got != "file" {
+		t.Fatalf("expected minimum_exec_to_bg_seconds source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_MINIMUM_EXEC_TO_BG_SECONDS", "18")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.MinimumExecToBgSeconds != 18 {
+		t.Fatalf("expected env minimum_exec_to_bg_seconds=18, got %d", cfg.Settings.MinimumExecToBgSeconds)
+	}
+	if got := cfg.Source.Sources["minimum_exec_to_bg_seconds"]; got != "env" {
+		t.Fatalf("expected minimum_exec_to_bg_seconds source env, got %q", got)
+	}
+
+	t.Setenv("BUILDER_MINIMUM_EXEC_TO_BG_SECONDS", "0")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid minimum_exec_to_bg_seconds")
 	}
 }
 

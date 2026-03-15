@@ -30,6 +30,7 @@ const (
 	defaultModelContextWindow  = 400_000
 	defaultModelTimeoutSeconds = 400
 	defaultShellTimeoutSeconds = 300
+	defaultMinimumExecToBgSec  = 15
 	defaultShellOutputMaxChars = 16_000
 	defaultBGShellsOutput      = "default"
 	defaultCompactionThreshold = 360_000
@@ -89,12 +90,14 @@ type Settings struct {
 	TUIScrollMode                    TUIScrollMode
 	NotificationMethod               string
 	ToolPreambles                    bool
+	PriorityRequestMode              bool
 	WebSearch                        string
 	OpenAIBaseURL                    string
 	Store                            bool
 	AllowNonCwdEdits                 bool
 	ModelContextWindow               int
 	ContextCompactionThresholdTokens int
+	MinimumExecToBgSeconds           int
 	CompactionMode                   CompactionMode
 	EnabledTools                     map[tools.ID]bool
 	Timeouts                         Timeouts
@@ -126,16 +129,17 @@ type App struct {
 }
 
 type fileSettings struct {
-	Model              string          `toml:"model"`
-	ThinkingLevel      string          `toml:"thinking_level"`
-	Theme              string          `toml:"theme"`
-	TUIAlternateScreen string          `toml:"tui_alternate_screen"`
-	TUIScrollMode      string          `toml:"tui_scroll_mode"`
-	NotificationMethod string          `toml:"notification_method"`
-	ToolPreambles      *bool           `toml:"tool_preambles"`
-	WebSearch          string          `toml:"web_search"`
-	Tools              map[string]bool `toml:"tools"`
-	Timeouts           struct {
+	Model               string          `toml:"model"`
+	ThinkingLevel       string          `toml:"thinking_level"`
+	Theme               string          `toml:"theme"`
+	TUIAlternateScreen  string          `toml:"tui_alternate_screen"`
+	TUIScrollMode       string          `toml:"tui_scroll_mode"`
+	NotificationMethod  string          `toml:"notification_method"`
+	ToolPreambles       *bool           `toml:"tool_preambles"`
+	PriorityRequestMode *bool           `toml:"priority_request_mode"`
+	WebSearch           string          `toml:"web_search"`
+	Tools               map[string]bool `toml:"tools"`
+	Timeouts            struct {
 		ModelRequestSeconds int `toml:"model_request_seconds"`
 		ShellDefaultSeconds int `toml:"shell_default_seconds"`
 		BashDefaultSeconds  int `toml:"bash_default_seconds"`
@@ -146,6 +150,7 @@ type fileSettings struct {
 	AllowNonCwdEdits                 *bool  `toml:"allow_non_cwd_edits"`
 	ModelContextWindow               int    `toml:"model_context_window"`
 	ContextCompactionThresholdTokens int    `toml:"context_compaction_threshold_tokens"`
+	MinimumExecToBgSeconds           int    `toml:"minimum_exec_to_bg_seconds"`
 	ShellOutputMaxChars              int    `toml:"shell_output_max_chars"`
 	BGShellsOutput                   string `toml:"bg_shells_output"`
 	CompactionMode                   string `toml:"compaction_mode"`
@@ -174,11 +179,13 @@ func defaultSettings() Settings {
 		TUIScrollMode:                    TUIScrollMode(defaultTUIScrollMode),
 		NotificationMethod:               "auto",
 		ToolPreambles:                    true,
+		PriorityRequestMode:              false,
 		WebSearch:                        "off",
 		Store:                            false,
 		AllowNonCwdEdits:                 false,
 		ModelContextWindow:               defaultModelContextWindow,
 		ContextCompactionThresholdTokens: defaultCompactionThreshold,
+		MinimumExecToBgSeconds:           defaultMinimumExecToBgSec,
 		CompactionMode:                   CompactionMode(defaultCompactionMode),
 		EnabledTools:                     enabled,
 		ShellOutputMaxChars:              defaultShellOutputMaxChars,
@@ -242,6 +249,9 @@ func validateSettings(v Settings) error {
 	}
 	if v.ShellOutputMaxChars <= 0 {
 		return fmt.Errorf("shell_output_max_chars must be > 0")
+	}
+	if v.MinimumExecToBgSeconds <= 0 {
+		return fmt.Errorf("minimum_exec_to_bg_seconds must be > 0")
 	}
 	switch strings.ToLower(strings.TrimSpace(string(v.BGShellsOutput))) {
 	case "default", "verbose", "concise":
@@ -447,12 +457,14 @@ func defaultSettingsTOML() string {
 		"tui_scroll_mode":                     defaults.TUIScrollMode,
 		"notification_method":                 defaults.NotificationMethod,
 		"tool_preambles":                      defaults.ToolPreambles,
+		"priority_request_mode":               defaults.PriorityRequestMode,
 		"web_search":                          defaults.WebSearch,
 		"openai_base_url":                     defaults.OpenAIBaseURL,
 		"store":                               defaults.Store,
 		"allow_non_cwd_edits":                 defaults.AllowNonCwdEdits,
 		"model_context_window":                defaults.ModelContextWindow,
 		"context_compaction_threshold_tokens": defaults.ContextCompactionThresholdTokens,
+		"minimum_exec_to_bg_seconds":          defaults.MinimumExecToBgSeconds,
 		"shell_output_max_chars":              defaults.ShellOutputMaxChars,
 		"bg_shells_output":                    defaults.BGShellsOutput,
 		"compaction_mode":                     defaults.CompactionMode,
@@ -481,6 +493,8 @@ func defaultSettingsTOML() string {
 		"# bg_shells_output applies directly to exit code 0 background shells.\n" +
 		"# Non-zero exits use verbose only when bg_shells_output=verbose; otherwise\n" +
 		"# they fall back to default truncation.\n\n" +
+		"# exec_command yield_time_ms values below minimum_exec_to_bg_seconds are\n" +
+		"# clamped up and surfaced to the model as a warning before command output.\n\n" +
 		"# Note: tui_scroll_mode=native forces main UI to normal buffer even if\n" +
 		"# tui_alternate_screen=always, so transcript replay stays visible in scrollback.\n\n" +
 		"# This JSON block mirrors current defaults for readability:\n" +
@@ -494,12 +508,14 @@ func defaultSettingsTOML() string {
 		"# Known tradeoff: sessions started in headless mode never include intermediary-update\n" +
 		"# instructions for their lifetime because the dispatch contract is locked on first use.\n" +
 		"tool_preambles = " + strconv.FormatBool(defaults.ToolPreambles) + "\n" +
+		"priority_request_mode = " + strconv.FormatBool(defaults.PriorityRequestMode) + "\n" +
 		"web_search = \"" + defaults.WebSearch + "\"\n" +
 		"openai_base_url = \"" + defaults.OpenAIBaseURL + "\"\n" +
 		"store = " + strconv.FormatBool(defaults.Store) + "\n" +
 		"allow_non_cwd_edits = " + strconv.FormatBool(defaults.AllowNonCwdEdits) + "\n" +
 		"model_context_window = " + strconv.Itoa(defaults.ModelContextWindow) + "\n" +
 		"context_compaction_threshold_tokens = " + strconv.Itoa(defaults.ContextCompactionThresholdTokens) + "\n" +
+		"minimum_exec_to_bg_seconds = " + strconv.Itoa(defaults.MinimumExecToBgSeconds) + "\n" +
 		"shell_output_max_chars = " + strconv.Itoa(defaults.ShellOutputMaxChars) + "\n" +
 		"bg_shells_output = \"" + string(defaults.BGShellsOutput) + "\"\n" +
 		"compaction_mode = \"" + string(defaults.CompactionMode) + "\"\n" +

@@ -456,6 +456,9 @@ func (t *HTTPTransport) buildPayload(request OpenAIRequest, mode openAIAuthMode)
 		}
 		out.Include = append(out.Include, responses.ResponseIncludableReasoningEncryptedContent)
 	}
+	if request.FastMode && SupportsFastModeProvider(InferProviderCapabilities(t.serviceBaseURL(mode), mode.IsOAuth)) {
+		out.ServiceTier = responses.ResponseNewParamsServiceTierPriority
+	}
 	if request.MaxTokens > 0 && !mode.IsOAuth {
 		out.MaxOutputTokens = openai.Int(int64(request.MaxTokens))
 	}

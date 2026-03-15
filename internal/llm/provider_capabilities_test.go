@@ -38,3 +38,15 @@ func TestInferProviderCapabilities_ThirdPartyDefaultsToLocalCompaction(t *testin
 		})
 	}
 }
+
+func TestSupportsFastModeProvider(t *testing.T) {
+	if !SupportsFastModeProvider(ProviderCapabilities{ProviderID: "chatgpt-codex", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}) {
+		t.Fatal("expected chatgpt-codex to support fast mode")
+	}
+	if !SupportsFastModeProvider(ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}) {
+		t.Fatal("expected openai provider to support fast mode")
+	}
+	if SupportsFastModeProvider(ProviderCapabilities{ProviderID: "azure-openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: false}) {
+		t.Fatal("did not expect non-first-party provider to support fast mode")
+	}
+}

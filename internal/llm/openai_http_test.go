@@ -563,6 +563,64 @@ func TestBuildPayload_AppliesReasoningEffortForOpenAIModels(t *testing.T) {
 	}
 }
 
+func TestBuildPayload_AppliesFastModeForCodexProvider(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	payload, err := transport.buildPayload(OpenAIRequest{
+		Model:    "gpt-5.3-codex",
+		FastMode: true,
+	}, openAIAuthMode{IsOAuth: true})
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+	if payload.ServiceTier != responses.ResponseNewParamsServiceTierPriority {
+		t.Fatalf("expected priority service tier, got %q", payload.ServiceTier)
+	}
+
+	jsonPayload := mustMarshalObject(t, payload)
+	if got := jsonPayload["service_tier"]; got != "priority" {
+		t.Fatalf("expected service_tier=priority, got %#v", got)
+	}
+}
+
+func TestBuildPayload_AppliesFastModeForOpenAIProvider(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	payload, err := transport.buildPayload(OpenAIRequest{
+		Model:    "gpt-5.3-codex",
+		FastMode: true,
+	}, openAIAuthMode{})
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+	if payload.ServiceTier != responses.ResponseNewParamsServiceTierPriority {
+		t.Fatalf("expected priority service tier for openai provider, got %q", payload.ServiceTier)
+	}
+
+	jsonPayload := mustMarshalObject(t, payload)
+	if got := jsonPayload["service_tier"]; got != "priority" {
+		t.Fatalf("expected service_tier=priority, got %#v", got)
+	}
+}
+
+func TestBuildPayload_SkipsFastModeForNonFirstPartyResponsesProvider(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	transport.BaseURL = "https://example.openai.azure.com/openai/v1"
+	payload, err := transport.buildPayload(OpenAIRequest{
+		Model:    "gpt-5.3-codex",
+		FastMode: true,
+	}, openAIAuthMode{})
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+	if payload.ServiceTier != "" {
+		t.Fatalf("expected no service tier for non-first-party provider, got %q", payload.ServiceTier)
+	}
+
+	jsonPayload := mustMarshalObject(t, payload)
+	if _, ok := jsonPayload["service_tier"]; ok {
+		t.Fatalf("expected service_tier omitted, got %+v", jsonPayload["service_tier"])
+	}
+}
+
 func TestBuildPayload_SkipsReasoningEffortForUnknownModelFamily(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	payload, err := transport.buildPayload(OpenAIRequest{

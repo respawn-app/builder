@@ -137,6 +137,7 @@ func (r *defaultReviewerPipeline) RunSuggestions(ctx context.Context, reviewerCl
 		Model:           reviewerCfg.Model,
 		Temperature:     1,
 		MaxTokens:       0,
+		FastMode:        e.FastModeEnabled(),
 		ReasoningEffort: reviewerCfg.ThinkingLevel,
 		SystemPrompt:    prompts.ReviewerSystemPrompt,
 		SessionID:       reviewerSessionID(e.store.Meta().SessionID),

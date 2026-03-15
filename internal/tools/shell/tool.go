@@ -19,11 +19,12 @@ import (
 )
 
 const (
-	defaultTimeout           = 5 * time.Minute
-	maxTimeout               = time.Hour
-	defaultLimit             = 16_000
-	headTailSize             = 1000
-	truncationBannerTemplate = "\n\n...[Output is very large, omitted %d bytes. Consider using more targeted commands to reduce output size]...\n\n"
+	defaultTimeout                     = 5 * time.Minute
+	maxTimeout                         = time.Hour
+	defaultLimit                       = 16_000
+	headTailSize                       = 1000
+	truncationBannerTemplate           = "\n\n...[Output is very large, omitted %d bytes. Consider using more targeted commands to reduce output size]...\n\n"
+	backgroundTruncationBannerTemplate = "\n\n...[Omitted %d bytes, read log file for details]...\n\n"
 )
 
 var shellEnvOverrides = []string{
@@ -279,12 +280,20 @@ func sanitizeOutput(s string) string {
 }
 
 func truncate(s string, maxLen int) (string, bool, int) {
+	return truncateWithTemplate(s, maxLen, truncationBannerTemplate)
+}
+
+func truncateBackgroundOutput(s string, maxLen int) (string, bool, int) {
+	return truncateWithTemplate(s, maxLen, backgroundTruncationBannerTemplate)
+}
+
+func truncateWithTemplate(s string, maxLen int, bannerTemplate string) (string, bool, int) {
 	if len(s) <= maxLen {
 		return s, false, 0
 	}
 	headLen, tailLen := truncationSegmentLengths(len(s), maxLen)
 	removed := len(s) - headLen - tailLen
-	return formatTruncatedPreview(s[:headLen], removed, s[len(s)-tailLen:]), true, removed
+	return formatTruncatedPreviewWithTemplate(s[:headLen], removed, s[len(s)-tailLen:], bannerTemplate), true, removed
 }
 
 func truncationSegmentLengths(total int, maxLen int) (int, int) {
@@ -319,9 +328,25 @@ func truncationSegmentLengths(total int, maxLen int) (int, int) {
 }
 
 func truncationBannerLen(removed int) int {
-	return len(fmt.Sprintf(truncationBannerTemplate, removed))
+	return truncationBannerLenWithTemplate(truncationBannerTemplate, removed)
+}
+
+func backgroundTruncationBannerLen(removed int) int {
+	return truncationBannerLenWithTemplate(backgroundTruncationBannerTemplate, removed)
+}
+
+func truncationBannerLenWithTemplate(bannerTemplate string, removed int) int {
+	return len(fmt.Sprintf(bannerTemplate, removed))
 }
 
 func formatTruncatedPreview(head string, removed int, tail string) string {
-	return fmt.Sprintf("%s%s%s", head, fmt.Sprintf(truncationBannerTemplate, removed), tail)
+	return formatTruncatedPreviewWithTemplate(head, removed, tail, truncationBannerTemplate)
+}
+
+func formatBackgroundTruncatedPreview(head string, removed int, tail string) string {
+	return formatTruncatedPreviewWithTemplate(head, removed, tail, backgroundTruncationBannerTemplate)
+}
+
+func formatTruncatedPreviewWithTemplate(head string, removed int, tail string, bannerTemplate string) string {
+	return fmt.Sprintf("%s%s%s", head, fmt.Sprintf(bannerTemplate, removed), tail)
 }

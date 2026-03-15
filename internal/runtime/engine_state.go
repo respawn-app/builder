@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -70,6 +71,22 @@ func (e *Engine) SetThinkingLevel(level string) error {
 	return nil
 }
 
+func (e *Engine) SetFastModeEnabled(enabled bool) (bool, error) {
+	if enabled && !e.FastModeAvailable() {
+		return false, errors.New("fast mode is only available for OpenAI-based Responses providers")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.cfg.FastModeState != nil {
+		return e.cfg.FastModeState.SetEnabled(enabled), nil
+	}
+	if e.cfg.FastModeEnabled == enabled {
+		return false, nil
+	}
+	e.cfg.FastModeEnabled = enabled
+	return true, nil
+}
+
 func (e *Engine) SetAutoCompactionEnabled(enabled bool) (bool, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -125,6 +142,27 @@ func (e *Engine) ThinkingLevel() string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return strings.TrimSpace(e.cfg.ThinkingLevel)
+}
+
+func (e *Engine) FastModeEnabled() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.cfg.FastModeState != nil {
+		return e.cfg.FastModeState.Enabled()
+	}
+	return e.cfg.FastModeEnabled
+}
+
+func (e *Engine) FastModeAvailable() bool {
+	provider, ok := e.llm.(llm.ProviderCapabilitiesClient)
+	if !ok {
+		return false
+	}
+	caps, err := provider.ProviderCapabilities(context.Background())
+	if err != nil {
+		return false
+	}
+	return llm.SupportsFastModeProvider(caps)
 }
 
 func (e *Engine) ReviewerFrequency() string {

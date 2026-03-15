@@ -593,6 +593,147 @@ func TestSetThinkingLevelRejectsInvalidValue(t *testing.T) {
 	}
 }
 
+func TestFastModeCanChangeAfterLock(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{
+		responses: []llm.Response{
+			{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "one"}, Usage: llm.Usage{WindowTokens: 200000}},
+			{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "two"}, Usage: llm.Usage{WindowTokens: 200000}},
+		},
+		caps: llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:         "gpt-5.3-codex",
+		Temperature:   1,
+		ThinkingLevel: "high",
+		EnabledTools:  []tools.ID{tools.ToolShell},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "hi"); err != nil {
+		t.Fatalf("submit first: %v", err)
+	}
+	changed, err := eng.SetFastModeEnabled(true)
+	if err != nil {
+		t.Fatalf("set fast mode: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected fast mode change")
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "again"); err != nil {
+		t.Fatalf("submit second: %v", err)
+	}
+
+	if len(client.calls) != 2 {
+		t.Fatalf("client calls = %d, want 2", len(client.calls))
+	}
+	if client.calls[0].FastMode {
+		t.Fatal("did not expect first request to enable fast mode")
+	}
+	if !client.calls[1].FastMode {
+		t.Fatal("expected second request to enable fast mode")
+	}
+}
+
+func TestSetFastModeRejectsUnsupportedProvider(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "azure-openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: false}}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5.3-codex",
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	changed, err := eng.SetFastModeEnabled(true)
+	if err == nil {
+		t.Fatal("expected fast mode unsupported error")
+	}
+	if changed {
+		t.Fatal("did not expect changed=true for unsupported fast mode")
+	}
+	if eng.FastModeEnabled() {
+		t.Fatal("did not expect fast mode enabled after failure")
+	}
+}
+
+func TestSetFastModeTogglesRuntimeOnly(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	cfg := Config{Model: "gpt-5.3-codex"}
+	eng, err := New(store, &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), cfg)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	changed, err := eng.SetFastModeEnabled(true)
+	if err != nil {
+		t.Fatalf("enable fast mode: %v", err)
+	}
+	if !changed || !eng.FastModeEnabled() {
+		t.Fatalf("expected fast mode enabled, changed=%v enabled=%v", changed, eng.FastModeEnabled())
+	}
+
+	restarted, err := New(store, &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), cfg)
+	if err != nil {
+		t.Fatalf("new restarted engine: %v", err)
+	}
+	if restarted.FastModeEnabled() {
+		t.Fatal("expected fast mode disabled after restart")
+	}
+}
+
+func TestFastModeSharedStateAppliesAcrossEngines(t *testing.T) {
+	dir := t.TempDir()
+	state := NewFastModeState(false)
+	storeA, err := session.Create(dir, "ws-a", dir)
+	if err != nil {
+		t.Fatalf("create store A: %v", err)
+	}
+	engA, err := New(storeA, &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:         "gpt-5.3-codex",
+		FastModeState: state,
+	})
+	if err != nil {
+		t.Fatalf("new engine A: %v", err)
+	}
+
+	changed, err := engA.SetFastModeEnabled(true)
+	if err != nil {
+		t.Fatalf("enable fast mode: %v", err)
+	}
+	if !changed || !state.Enabled() {
+		t.Fatalf("expected shared fast mode enabled, changed=%v enabled=%v", changed, state.Enabled())
+	}
+
+	storeB, err := session.Create(dir, "ws-b", dir)
+	if err != nil {
+		t.Fatalf("create store B: %v", err)
+	}
+	engB, err := New(storeB, &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:         "gpt-5.3-codex",
+		FastModeState: state,
+	})
+	if err != nil {
+		t.Fatalf("new engine B: %v", err)
+	}
+	if !engB.FastModeEnabled() {
+		t.Fatal("expected shared fast mode to carry into next engine")
+	}
+}
+
 func TestSetAutoCompactionEnabledTogglesRuntimeOnly(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -1885,6 +2026,48 @@ func TestReviewerRunsOnAllFrequencyWithoutToolCalls(t *testing.T) {
 	}
 }
 
+func TestReviewerSuggestionsRequestInheritsFastMode(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:           "gpt-5",
+		FastModeEnabled: true,
+		Reviewer: ReviewerConfig{
+			Frequency:      "all",
+			Model:          "gpt-5",
+			ThinkingLevel:  "low",
+			MaxSuggestions: 5,
+			Client:         reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "hello"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if len(reviewerClient.calls) != 1 {
+		t.Fatalf("expected reviewer to be called once, got %d", len(reviewerClient.calls))
+	}
+	if !reviewerClient.calls[0].FastMode {
+		t.Fatal("expected reviewer request to inherit fast mode")
+	}
+}
+
 func TestFinalNoopAnswerIsInvisibleAndSkipsReviewer(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -2736,7 +2919,7 @@ func TestFastExecCommandCompletionDoesNotQueueBackgroundNotice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	manager, err := shelltool.NewManager()
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
@@ -3423,7 +3606,7 @@ func TestWriteStdinCompletionDoesNotQueueDuplicateBackgroundNotice(t *testing.T)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	manager, err := shelltool.NewManager()
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}

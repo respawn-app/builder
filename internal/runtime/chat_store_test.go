@@ -264,6 +264,35 @@ func TestFormatToolCallShellCapturesUserInitiatedMarker(t *testing.T) {
 	}
 }
 
+func TestFormatToolCallWriteStdinPollUsesDurationInTranscript(t *testing.T) {
+	s := newChatStore()
+	call := llm.ToolCall{
+		ID:    "call_poll",
+		Name:  string(tools.ToolWriteStdin),
+		Input: json.RawMessage(`{"session_id":1149,"yield_time_ms":2000}`),
+	}
+
+	rendered := s.formatToolCall(call)
+	if rendered.Role != "tool_call" {
+		t.Fatalf("expected tool_call role, got %+v", rendered)
+	}
+	if rendered.Text != "Polled session 1149 for 2s" {
+		t.Fatalf("expected transcript poll summary, got %q", rendered.Text)
+	}
+	if rendered.ToolCall == nil {
+		t.Fatalf("expected tool metadata, got nil")
+	}
+	if rendered.ToolCall.Command != "Polled session 1149 for 2s" {
+		t.Fatalf("expected tool command to match transcript summary, got %+v", rendered.ToolCall)
+	}
+	if rendered.ToolCall.TimeoutLabel != "" {
+		t.Fatalf("did not expect timeout label for write_stdin poll, got %+v", rendered.ToolCall)
+	}
+	if !rendered.ToolCall.IsShell {
+		t.Fatalf("expected write_stdin to remain marked as shell-like, got %+v", rendered.ToolCall)
+	}
+}
+
 func TestFormatToolCallAskQuestionUsesQuestionAndSuggestionsMeta(t *testing.T) {
 	s := newChatStore()
 	call := llm.ToolCall{

@@ -71,7 +71,7 @@ func TestResolveSessionActionNewSessionUsesForceNewFlow(t *testing.T) {
 }
 
 func TestNewSessionTransitionKeepsBackgroundProcessesAlive(t *testing.T) {
-	manager, err := shelltool.NewManager()
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}

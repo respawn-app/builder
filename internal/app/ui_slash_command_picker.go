@@ -64,13 +64,30 @@ func (m *uiModel) currentSlashCommandMatches(token string) []commands.Command {
 	if m.commandRegistry == nil {
 		return nil
 	}
-	matches := m.commandRegistry.Match(m.currentSlashCommandQuery(token))
+	matches := m.filterSlashCommandMatches(m.commandRegistry.Match(m.currentSlashCommandQuery(token)))
+	if len(matches) == 0 {
+		return nil
+	}
 	if m.hasParentSession() {
 		return matches
 	}
 	filtered := make([]commands.Command, 0, len(matches))
 	for _, command := range matches {
 		if strings.TrimSpace(command.Name) == "back" {
+			continue
+		}
+		filtered = append(filtered, command)
+	}
+	return filtered
+}
+
+func (m *uiModel) filterSlashCommandMatches(matches []commands.Command) []commands.Command {
+	if len(matches) == 0 {
+		return nil
+	}
+	filtered := make([]commands.Command, 0, len(matches))
+	for _, command := range matches {
+		if command.Name == "fast" && !m.fastModeAvailable {
 			continue
 		}
 		filtered = append(filtered, command)
@@ -90,7 +107,7 @@ func (m *uiModel) clampSlashCommandSelection() {
 		m.slashCommandSelection = 0
 		return
 	}
-	matches := m.commandRegistry.Match(m.slashCommandFilter)
+	matches := m.filterSlashCommandMatches(m.commandRegistry.Match(m.slashCommandFilter))
 	if len(matches) == 0 {
 		m.slashCommandSelection = 0
 		return
