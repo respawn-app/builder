@@ -34,6 +34,7 @@ func TestGenerateStream_EmitsAssistantDeltasAndToolCalls(t *testing.T) {
 
 	transport := NewHTTPTransport(staticAuthHeader{})
 	transport.BaseURL = server.URL
+	transport.ProviderMetadata = ResolveOpenAIProviderMetadata(transport.BaseURL)
 	transport.Client = server.Client()
 
 	var deltas []string
@@ -100,6 +101,7 @@ func TestGenerateStream_PreservesBoldReasoningTextWithoutInferringStatus(t *test
 
 	transport := NewHTTPTransport(staticAuthHeader{})
 	transport.BaseURL = server.URL
+	transport.ProviderMetadata = ResolveOpenAIProviderMetadata(transport.BaseURL)
 	transport.Client = server.Client()
 
 	var reasoning []ReasoningSummaryDelta

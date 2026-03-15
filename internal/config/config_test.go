@@ -138,6 +138,98 @@ func TestLoadReviewerModelInheritsMainModelWhenUnset(t *testing.T) {
 	}
 }
 
+func TestLoadCapabilityOverridesFromFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`model = "gpt-5.4"
+
+[model_capabilities]
+supports_reasoning_effort = true
+supports_vision_inputs = true
+
+[provider_capabilities]
+provider_id = "custom-provider"
+supports_responses_api = true
+supports_responses_compact = false
+supports_native_web_search = true
+supports_reasoning_encrypted = false
+supports_server_side_context_edit = false
+is_openai_first_party = false
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Settings.ModelCapabilities.SupportsReasoningEffort || !cfg.Settings.ModelCapabilities.SupportsVisionInputs {
+		t.Fatalf("expected model capability overrides from file, got %+v", cfg.Settings.ModelCapabilities)
+	}
+	if cfg.Settings.ProviderCapabilities.ProviderID != "custom-provider" || !cfg.Settings.ProviderCapabilities.SupportsResponsesAPI || !cfg.Settings.ProviderCapabilities.SupportsNativeWebSearch {
+		t.Fatalf("expected provider capability overrides from file, got %+v", cfg.Settings.ProviderCapabilities)
+	}
+	if got := cfg.Source.Sources["model_capabilities"]; got != "file" {
+		t.Fatalf("expected model_capabilities source file, got %q", got)
+	}
+	if got := cfg.Source.Sources["provider_capabilities"]; got != "file" {
+		t.Fatalf("expected provider_capabilities source file, got %q", got)
+	}
+}
+
+func TestLoadCapabilityOverridesFromEnv(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUILDER_MODEL_SUPPORTS_REASONING_EFFORT", "true")
+	t.Setenv("BUILDER_MODEL_SUPPORTS_VISION_INPUTS", "true")
+	t.Setenv("BUILDER_PROVIDER_CAPABILITY_ID", "custom-provider")
+	t.Setenv("BUILDER_PROVIDER_SUPPORTS_RESPONSES_API", "true")
+	t.Setenv("BUILDER_PROVIDER_SUPPORTS_RESPONSES_COMPACT", "false")
+	t.Setenv("BUILDER_PROVIDER_SUPPORTS_NATIVE_WEB_SEARCH", "true")
+	t.Setenv("BUILDER_PROVIDER_SUPPORTS_REASONING_ENCRYPTED", "false")
+	t.Setenv("BUILDER_PROVIDER_SUPPORTS_SERVER_SIDE_CONTEXT_EDIT", "false")
+	t.Setenv("BUILDER_PROVIDER_IS_OPENAI_FIRST_PARTY", "false")
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Settings.ModelCapabilities.SupportsReasoningEffort || !cfg.Settings.ModelCapabilities.SupportsVisionInputs {
+		t.Fatalf("expected model capability overrides from env, got %+v", cfg.Settings.ModelCapabilities)
+	}
+	if cfg.Settings.ProviderCapabilities.ProviderID != "custom-provider" || !cfg.Settings.ProviderCapabilities.SupportsResponsesAPI || !cfg.Settings.ProviderCapabilities.SupportsNativeWebSearch {
+		t.Fatalf("expected provider capability overrides from env, got %+v", cfg.Settings.ProviderCapabilities)
+	}
+	if got := cfg.Source.Sources["model_capabilities"]; got != "env" {
+		t.Fatalf("expected model_capabilities source env, got %q", got)
+	}
+	if got := cfg.Source.Sources["provider_capabilities"]; got != "env" {
+		t.Fatalf("expected provider_capabilities source env, got %q", got)
+	}
+}
+
+func TestLoadCapabilityOverridesRequireProviderID(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUILDER_PROVIDER_SUPPORTS_NATIVE_WEB_SEARCH", "true")
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected validation error when provider capability override is set without provider_id")
+	}
+	if !strings.Contains(err.Error(), "provider_capabilities.provider_id") {
+		t.Fatalf("expected provider_id validation error, got %v", err)
+	}
+}
+
 func TestLoadPriorityRequestModeFromFile(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

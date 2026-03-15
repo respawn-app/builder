@@ -121,6 +121,7 @@ func newOpenAIProviderClient(opts ProviderClientOptions) (Client, error) {
 	if v := strings.TrimSpace(opts.OpenAIBaseURL); v != "" {
 		transport.BaseURL = v
 	}
+	transport.ProviderMetadata = ResolveOpenAIProviderMetadata(opts.OpenAIBaseURL)
 	if opts.ContextWindowTokens > 0 {
 		transport.ContextWindowTokens = opts.ContextWindowTokens
 	}

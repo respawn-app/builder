@@ -154,11 +154,7 @@ func (e *Engine) FastModeEnabled() bool {
 }
 
 func (e *Engine) FastModeAvailable() bool {
-	provider, ok := e.llm.(llm.ProviderCapabilitiesClient)
-	if !ok {
-		return false
-	}
-	caps, err := provider.ProviderCapabilities(context.Background())
+	caps, err := e.providerCapabilities(context.Background())
 	if err != nil {
 		return false
 	}

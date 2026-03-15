@@ -39,6 +39,7 @@ func defaultSettings() Settings {
 	return Settings{
 		Model:                            defaultModel,
 		ThinkingLevel:                    defaultThinkingLevel,
+		ModelCapabilities:                ModelCapabilitiesOverride{},
 		Theme:                            defaultTheme,
 		TUIAlternateScreen:               TUIAlternateScreenPolicy(defaultTUIAlternateScreen),
 		TUIScrollMode:                    TUIScrollMode(defaultTUIScrollMode),
@@ -46,6 +47,7 @@ func defaultSettings() Settings {
 		ToolPreambles:                    true,
 		PriorityRequestMode:              false,
 		WebSearch:                        "off",
+		ProviderCapabilities:             ProviderCapabilitiesOverride{},
 		Store:                            false,
 		AllowNonCwdEdits:                 false,
 		ModelContextWindow:               defaultModelContextWindow,
@@ -76,16 +78,29 @@ func defaultSettingsTOML() string {
 		toolDefaults[string(id)] = defaults.EnabledTools[id]
 	}
 	payload := map[string]any{
-		"model":                               defaults.Model,
-		"thinking_level":                      defaults.ThinkingLevel,
-		"theme":                               defaults.Theme,
-		"tui_alternate_screen":                defaults.TUIAlternateScreen,
-		"tui_scroll_mode":                     defaults.TUIScrollMode,
-		"notification_method":                 defaults.NotificationMethod,
-		"tool_preambles":                      defaults.ToolPreambles,
-		"priority_request_mode":               defaults.PriorityRequestMode,
-		"web_search":                          defaults.WebSearch,
-		"openai_base_url":                     defaults.OpenAIBaseURL,
+		"model":          defaults.Model,
+		"thinking_level": defaults.ThinkingLevel,
+		"model_capabilities": map[string]bool{
+			"supports_reasoning_effort": defaults.ModelCapabilities.SupportsReasoningEffort,
+			"supports_vision_inputs":    defaults.ModelCapabilities.SupportsVisionInputs,
+		},
+		"theme":                 defaults.Theme,
+		"tui_alternate_screen":  defaults.TUIAlternateScreen,
+		"tui_scroll_mode":       defaults.TUIScrollMode,
+		"notification_method":   defaults.NotificationMethod,
+		"tool_preambles":        defaults.ToolPreambles,
+		"priority_request_mode": defaults.PriorityRequestMode,
+		"web_search":            defaults.WebSearch,
+		"openai_base_url":       defaults.OpenAIBaseURL,
+		"provider_capabilities": map[string]any{
+			"provider_id":                       defaults.ProviderCapabilities.ProviderID,
+			"supports_responses_api":            defaults.ProviderCapabilities.SupportsResponsesAPI,
+			"supports_responses_compact":        defaults.ProviderCapabilities.SupportsResponsesCompact,
+			"supports_native_web_search":        defaults.ProviderCapabilities.SupportsNativeWebSearch,
+			"supports_reasoning_encrypted":      defaults.ProviderCapabilities.SupportsReasoningEncrypted,
+			"supports_server_side_context_edit": defaults.ProviderCapabilities.SupportsServerSideContextEdit,
+			"is_openai_first_party":             defaults.ProviderCapabilities.IsOpenAIFirstParty,
+		},
 		"store":                               defaults.Store,
 		"allow_non_cwd_edits":                 defaults.AllowNonCwdEdits,
 		"model_context_window":                defaults.ModelContextWindow,
@@ -146,7 +161,23 @@ func defaultSettingsTOML() string {
 		"bg_shells_output = \"" + string(defaults.BGShellsOutput) + "\"\n" +
 		"compaction_mode = \"" + string(defaults.CompactionMode) + "\"\n" +
 		"persistence_root = \"" + DefaultPersistence + "\"\n\n" +
-		"[tools]\n"
+		"# Optional explicit capability overrides for custom/alias models. Uncomment only\n" +
+		"# when the reviewed registry does not cover your configured model.\n" +
+		"# [model_capabilities]\n" +
+		"# supports_reasoning_effort = true\n" +
+		"# supports_vision_inputs = true\n\n" +
+		"# Optional explicit provider capability overrides. These are only needed for\n" +
+		"# custom providers or stale built-in contracts. Keep them conservative to\n" +
+		"# avoid unsupported provider-native features.\n" +
+		"# [provider_capabilities]\n" +
+		"# provider_id = \"custom-provider\"\n" +
+		"# supports_responses_api = true\n" +
+		"# supports_responses_compact = false\n" +
+		"# supports_native_web_search = false\n" +
+		"# supports_reasoning_encrypted = false\n" +
+		"# supports_server_side_context_edit = false\n" +
+		"# is_openai_first_party = false\n"
+	out += "\n[tools]\n"
 	for _, id := range tools.CatalogIDs() {
 		out += strconv.Quote(string(id)) + " = " + strconv.FormatBool(defaults.EnabledTools[id]) + "\n"
 	}

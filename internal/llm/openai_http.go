@@ -44,6 +44,7 @@ type HTTPTransport struct {
 	Auth                AuthHeaderProvider
 	Store               bool
 	ContextWindowTokens int
+	ProviderMetadata    OpenAIProviderMetadata
 
 	mu                  sync.RWMutex
 	modelContextWindows map[string]int
@@ -61,6 +62,7 @@ func NewHTTPTransport(auth AuthHeaderProvider) *HTTPTransport {
 		Client:              &http.Client{Timeout: 120 * time.Second},
 		Auth:                auth,
 		ContextWindowTokens: window,
+		ProviderMetadata:    ResolveOpenAIProviderMetadata(defaultOpenAIBaseURL),
 		modelContextWindows: make(map[string]int),
 	}
 }
@@ -295,7 +297,7 @@ func (t *HTTPTransport) ProviderCapabilities(ctx context.Context) (ProviderCapab
 	if err != nil {
 		return ProviderCapabilities{}, err
 	}
-	return InferProviderCapabilities(t.serviceBaseURL(mode), mode.IsOAuth), nil
+	return t.providerCapabilitiesForMode(mode), nil
 }
 
 func (t *HTTPTransport) resolveAuth(ctx context.Context) (string, openAIAuthMode, error) {

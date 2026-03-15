@@ -78,9 +78,11 @@ type Config struct {
 	Temperature                   float64
 	MaxTokens                     int
 	ThinkingLevel                 string
+	ModelCapabilities             session.LockedModelCapabilities
 	FastModeEnabled               bool
 	FastModeState                 *FastModeState
 	WebSearchMode                 string
+	ProviderCapabilitiesOverride  *llm.ProviderCapabilities
 	EnabledTools                  []tools.ID
 	AutoCompactTokenLimit         int
 	ContextWindowTokens           int
@@ -183,6 +185,9 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 		if meta, ok := llm.LookupModelMetadata(cfg.Model); ok && meta.ContextWindowTokens > 0 {
 			cfg.ContextWindowTokens = meta.ContextWindowTokens
 		}
+	}
+	if !cfg.ModelCapabilities.SupportsReasoningEffort && !cfg.ModelCapabilities.SupportsVisionInputs {
+		cfg.ModelCapabilities = llm.LockedModelCapabilitiesForModel(cfg.Model)
 	}
 
 	eng := &Engine{
@@ -471,16 +476,31 @@ func (e *Engine) ensureLocked() (session.LockedContract, error) {
 	if e.locked != nil {
 		return *e.locked, nil
 	}
+	var providerContract llm.ProviderCapabilities
+	hasProviderContract := false
+	if e.cfg.ProviderCapabilitiesOverride != nil {
+		providerContract = *e.cfg.ProviderCapabilitiesOverride
+		hasProviderContract = true
+	} else if provider, ok := e.llm.(llm.ProviderCapabilitiesClient); ok {
+		if caps, err := provider.ProviderCapabilities(context.Background()); err == nil {
+			providerContract = caps
+			hasProviderContract = true
+		}
+	}
 
 	lock := session.LockedContract{
-		Model:          e.cfg.Model,
-		Temperature:    e.cfg.Temperature,
-		MaxOutputToken: e.cfg.MaxTokens,
-		EnabledTools:   toToolNames(e.cfg.EnabledTools),
+		Model:             e.cfg.Model,
+		Temperature:       e.cfg.Temperature,
+		MaxOutputToken:    e.cfg.MaxTokens,
+		EnabledTools:      toToolNames(e.cfg.EnabledTools),
+		ModelCapabilities: e.cfg.ModelCapabilities,
 		ToolPreambles: func() *bool {
 			enabled := !e.cfg.HeadlessMode && e.cfg.ToolPreambles
 			return &enabled
 		}(),
+	}
+	if hasProviderContract {
+		lock.ProviderContract = llm.LockedProviderCapabilitiesFromContract(providerContract)
 	}
 	if err := e.store.MarkModelDispatchLocked(lock); err != nil {
 		return session.LockedContract{}, err

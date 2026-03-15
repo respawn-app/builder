@@ -46,7 +46,7 @@ func (t *HTTPTransport) buildRequestOptions(authHeader string, mode openAIAuthMo
 }
 
 func (t *HTTPTransport) errorProviderID(mode openAIAuthMode) string {
-	return InferProviderCapabilities(t.serviceBaseURL(mode), mode.IsOAuth).ProviderID
+	return t.providerCapabilitiesForMode(mode).ProviderID
 }
 
 func (t *HTTPTransport) resolveContextWindowFallback(ctx context.Context, model string) int {
@@ -61,6 +61,17 @@ func (t *HTTPTransport) resolveContextWindowFallback(ctx context.Context, model 
 		return fallbackMeta.ContextWindowTokens
 	}
 	return 0
+}
+
+func (t *HTTPTransport) providerCapabilitiesForMode(mode openAIAuthMode) ProviderCapabilities {
+	providerID := strings.TrimSpace(t.ProviderMetadata.CapabilityProviderID)
+	if mode.IsOAuth {
+		providerID = "chatgpt-codex"
+	}
+	if providerID == "" {
+		providerID = "openai-compatible"
+	}
+	return InferProviderCapabilities(providerID)
 }
 
 func (t *HTTPTransport) cacheModelContextWindow(model string, tokens int) {

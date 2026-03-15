@@ -11,6 +11,7 @@ import (
 type settingsOverlay struct {
 	Model                            *string
 	ThinkingLevel                    *string
+	ModelCapabilities                *ModelCapabilitiesOverride
 	Theme                            *string
 	TUIAlternateScreen               *TUIAlternateScreenPolicy
 	TUIScrollMode                    *TUIScrollMode
@@ -19,6 +20,7 @@ type settingsOverlay struct {
 	PriorityRequestMode              *bool
 	WebSearch                        *string
 	OpenAIBaseURL                    *string
+	ProviderCapabilities             *ProviderCapabilitiesOverride
 	Store                            *bool
 	AllowNonCwdEdits                 *bool
 	ModelContextWindow               *int
@@ -50,6 +52,7 @@ func defaultSourceMap() map[string]string {
 	sources := map[string]string{
 		"model":                               "default",
 		"thinking_level":                      "default",
+		"model_capabilities":                  "default",
 		"theme":                               "default",
 		"tui_alternate_screen":                "default",
 		"tui_scroll_mode":                     "default",
@@ -58,6 +61,7 @@ func defaultSourceMap() map[string]string {
 		"priority_request_mode":               "default",
 		"web_search":                          "default",
 		"openai_base_url":                     "default",
+		"provider_capabilities":               "default",
 		"store":                               "default",
 		"allow_non_cwd_edits":                 "default",
 		"model_context_window":                "default",
@@ -88,6 +92,12 @@ func settingsOverlayFromFile(cfg fileSettings, settingsPath string) (settingsOve
 	if v := strings.TrimSpace(cfg.ThinkingLevel); v != "" {
 		overlay.ThinkingLevel = &v
 	}
+	if cfg.ModelCapabilities.SupportsReasoningEffort != nil || cfg.ModelCapabilities.SupportsVisionInputs != nil {
+		overlay.ModelCapabilities = &ModelCapabilitiesOverride{
+			SupportsReasoningEffort: cfg.ModelCapabilities.SupportsReasoningEffort != nil && *cfg.ModelCapabilities.SupportsReasoningEffort,
+			SupportsVisionInputs:    cfg.ModelCapabilities.SupportsVisionInputs != nil && *cfg.ModelCapabilities.SupportsVisionInputs,
+		}
+	}
 	if v := strings.TrimSpace(cfg.Theme); v != "" {
 		overlay.Theme = &v
 	}
@@ -113,6 +123,23 @@ func settingsOverlayFromFile(cfg fileSettings, settingsPath string) (settingsOve
 	}
 	if v := strings.TrimSpace(cfg.OpenAIBaseURL); v != "" {
 		overlay.OpenAIBaseURL = &v
+	}
+	if strings.TrimSpace(cfg.ProviderCapabilities.ProviderID) != "" ||
+		cfg.ProviderCapabilities.SupportsResponsesAPI != nil ||
+		cfg.ProviderCapabilities.SupportsResponsesCompact != nil ||
+		cfg.ProviderCapabilities.SupportsNativeWebSearch != nil ||
+		cfg.ProviderCapabilities.SupportsReasoningEncrypted != nil ||
+		cfg.ProviderCapabilities.SupportsServerSideContextEdit != nil ||
+		cfg.ProviderCapabilities.IsOpenAIFirstParty != nil {
+		overlay.ProviderCapabilities = &ProviderCapabilitiesOverride{
+			ProviderID:                    strings.TrimSpace(cfg.ProviderCapabilities.ProviderID),
+			SupportsResponsesAPI:          cfg.ProviderCapabilities.SupportsResponsesAPI != nil && *cfg.ProviderCapabilities.SupportsResponsesAPI,
+			SupportsResponsesCompact:      cfg.ProviderCapabilities.SupportsResponsesCompact != nil && *cfg.ProviderCapabilities.SupportsResponsesCompact,
+			SupportsNativeWebSearch:       cfg.ProviderCapabilities.SupportsNativeWebSearch != nil && *cfg.ProviderCapabilities.SupportsNativeWebSearch,
+			SupportsReasoningEncrypted:    cfg.ProviderCapabilities.SupportsReasoningEncrypted != nil && *cfg.ProviderCapabilities.SupportsReasoningEncrypted,
+			SupportsServerSideContextEdit: cfg.ProviderCapabilities.SupportsServerSideContextEdit != nil && *cfg.ProviderCapabilities.SupportsServerSideContextEdit,
+			IsOpenAIFirstParty:            cfg.ProviderCapabilities.IsOpenAIFirstParty != nil && *cfg.ProviderCapabilities.IsOpenAIFirstParty,
+		}
 	}
 	if cfg.Store != nil {
 		overlay.Store = cfg.Store
@@ -218,6 +245,10 @@ func applySettingsOverlay(settings *Settings, persistenceRoot *string, persisten
 		settings.ThinkingLevel = *overlay.ThinkingLevel
 		sources["thinking_level"] = source
 	}
+	if overlay.ModelCapabilities != nil {
+		settings.ModelCapabilities = *overlay.ModelCapabilities
+		sources["model_capabilities"] = source
+	}
 	if overlay.Theme != nil {
 		settings.Theme = *overlay.Theme
 		sources["theme"] = source
@@ -249,6 +280,10 @@ func applySettingsOverlay(settings *Settings, persistenceRoot *string, persisten
 	if overlay.OpenAIBaseURL != nil {
 		settings.OpenAIBaseURL = *overlay.OpenAIBaseURL
 		sources["openai_base_url"] = source
+	}
+	if overlay.ProviderCapabilities != nil {
+		settings.ProviderCapabilities = *overlay.ProviderCapabilities
+		sources["provider_capabilities"] = source
 	}
 	if overlay.Store != nil {
 		settings.Store = *overlay.Store

@@ -21,12 +21,12 @@ func newOpenAIRequestPayloadBuilder(store bool, capabilities ProviderCapabilitie
 }
 
 func (t *HTTPTransport) buildPayload(request OpenAIRequest, mode openAIAuthMode) (responses.ResponseNewParams, error) {
-	builder := newOpenAIRequestPayloadBuilder(t.Store, InferProviderCapabilities(t.serviceBaseURL(mode), mode.IsOAuth))
+	builder := newOpenAIRequestPayloadBuilder(t.Store, t.providerCapabilitiesForMode(mode))
 	return builder.BuildResponse(request, mode)
 }
 
 func (t *HTTPTransport) buildInputTokenCountParams(request OpenAIRequest) (responses.InputTokenCountParams, error) {
-	builder := newOpenAIRequestPayloadBuilder(t.Store, InferProviderCapabilities(t.serviceBaseURL(openAIAuthMode{}), false))
+	builder := newOpenAIRequestPayloadBuilder(t.Store, t.providerCapabilitiesForMode(openAIAuthMode{}))
 	return builder.BuildInputTokenCount(request)
 }
 
@@ -52,7 +52,7 @@ func (b openAIRequestPayloadBuilder) BuildResponse(request OpenAIRequest, mode o
 		out.Tools = tools
 		out.ParallelToolCalls = openai.Bool(true)
 	}
-	if shouldApplyReasoningEffort(request.Model, request.ReasoningEffort) {
+	if shouldApplyReasoningEffort(request.SupportsReasoningEffort, request.Model, request.ReasoningEffort) {
 		out.Reasoning = shared.ReasoningParam{Effort: shared.ReasoningEffort(strings.TrimSpace(request.ReasoningEffort)), Summary: shared.ReasoningSummaryConcise}
 		out.Include = append(out.Include, responses.ResponseIncludableReasoningEncryptedContent)
 	}
@@ -93,7 +93,7 @@ func (b openAIRequestPayloadBuilder) BuildInputTokenCount(request OpenAIRequest)
 		out.Tools = tools
 		out.ParallelToolCalls = param.NewOpt(true)
 	}
-	if shouldApplyReasoningEffort(request.Model, request.ReasoningEffort) {
+	if shouldApplyReasoningEffort(request.SupportsReasoningEffort, request.Model, request.ReasoningEffort) {
 		out.Reasoning = shared.ReasoningParam{Effort: shared.ReasoningEffort(strings.TrimSpace(request.ReasoningEffort)), Summary: shared.ReasoningSummaryConcise}
 	}
 	if request.StructuredOutput != nil {
@@ -196,10 +196,13 @@ func parseStructuredOutputSchema(raw json.RawMessage) (map[string]any, error) {
 	return schema, nil
 }
 
-func shouldApplyReasoningEffort(model, effort string) bool {
+func shouldApplyReasoningEffort(contractSupport bool, model, effort string) bool {
 	effort = strings.TrimSpace(effort)
 	if effort == "" {
 		return false
+	}
+	if contractSupport {
+		return true
 	}
 	return SupportsReasoningEffortModel(model)
 }

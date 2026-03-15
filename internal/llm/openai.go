@@ -6,18 +6,19 @@ import (
 )
 
 type OpenAIRequest struct {
-	Model                 string
-	Temperature           float64
-	MaxTokens             int
-	ReasoningEffort       string
-	FastMode              bool
-	EnableNativeWebSearch bool
-	SystemPrompt          string
-	SessionID             string
-	Messages              []Message
-	Items                 []ResponseItem
-	Tools                 []Tool
-	StructuredOutput      *StructuredOutput
+	Model                   string
+	Temperature             float64
+	MaxTokens               int
+	ReasoningEffort         string
+	SupportsReasoningEffort bool
+	FastMode                bool
+	EnableNativeWebSearch   bool
+	SystemPrompt            string
+	SessionID               string
+	Messages                []Message
+	Items                   []ResponseItem
+	Tools                   []Tool
+	StructuredOutput        *StructuredOutput
 }
 
 type OpenAIResponse struct {
@@ -85,18 +86,19 @@ func (c *OpenAIClient) Generate(ctx context.Context, request Request) (Response,
 	}
 
 	providerReq := OpenAIRequest{
-		Model:                 request.Model,
-		Temperature:           request.Temperature,
-		MaxTokens:             request.MaxTokens,
-		ReasoningEffort:       request.ReasoningEffort,
-		FastMode:              request.FastMode,
-		EnableNativeWebSearch: request.EnableNativeWebSearch,
-		SystemPrompt:          request.SystemPrompt,
-		SessionID:             request.SessionID,
-		Messages:              append([]Message(nil), request.Messages...),
-		Items:                 CloneResponseItems(request.Items),
-		Tools:                 append([]Tool(nil), request.Tools...),
-		StructuredOutput:      request.StructuredOutput,
+		Model:                   request.Model,
+		Temperature:             request.Temperature,
+		MaxTokens:               request.MaxTokens,
+		ReasoningEffort:         request.ReasoningEffort,
+		SupportsReasoningEffort: request.SupportsReasoningEffort,
+		FastMode:                request.FastMode,
+		EnableNativeWebSearch:   request.EnableNativeWebSearch,
+		SystemPrompt:            request.SystemPrompt,
+		SessionID:               request.SessionID,
+		Messages:                append([]Message(nil), request.Messages...),
+		Items:                   CloneResponseItems(request.Items),
+		Tools:                   append([]Tool(nil), request.Tools...),
+		StructuredOutput:        request.StructuredOutput,
 	}
 
 	providerResp, err := c.transport.Generate(ctx, providerReq)
@@ -133,18 +135,19 @@ func (c *OpenAIClient) GenerateStreamWithEvents(ctx context.Context, request Req
 	}
 
 	providerReq := OpenAIRequest{
-		Model:                 request.Model,
-		Temperature:           request.Temperature,
-		MaxTokens:             request.MaxTokens,
-		ReasoningEffort:       request.ReasoningEffort,
-		FastMode:              request.FastMode,
-		EnableNativeWebSearch: request.EnableNativeWebSearch,
-		SystemPrompt:          request.SystemPrompt,
-		SessionID:             request.SessionID,
-		Messages:              append([]Message(nil), request.Messages...),
-		Items:                 CloneResponseItems(request.Items),
-		Tools:                 append([]Tool(nil), request.Tools...),
-		StructuredOutput:      request.StructuredOutput,
+		Model:                   request.Model,
+		Temperature:             request.Temperature,
+		MaxTokens:               request.MaxTokens,
+		ReasoningEffort:         request.ReasoningEffort,
+		SupportsReasoningEffort: request.SupportsReasoningEffort,
+		FastMode:                request.FastMode,
+		EnableNativeWebSearch:   request.EnableNativeWebSearch,
+		SystemPrompt:            request.SystemPrompt,
+		SessionID:               request.SessionID,
+		Messages:                append([]Message(nil), request.Messages...),
+		Items:                   CloneResponseItems(request.Items),
+		Tools:                   append([]Tool(nil), request.Tools...),
+		StructuredOutput:        request.StructuredOutput,
 	}
 
 	if streamTransport, ok := c.transport.(OpenAIStreamingEventsTransport); ok {
@@ -231,15 +234,7 @@ func (c *OpenAIClient) ProviderCapabilities(ctx context.Context) (ProviderCapabi
 	if transport, ok := c.transport.(OpenAIProviderCapabilitiesTransport); ok {
 		return transport.ProviderCapabilities(ctx)
 	}
-	return ProviderCapabilities{
-		ProviderID:                    "openai",
-		SupportsResponsesAPI:          true,
-		SupportsResponsesCompact:      true,
-		SupportsNativeWebSearch:       true,
-		SupportsReasoningEncrypted:    true,
-		SupportsServerSideContextEdit: true,
-		IsOpenAIFirstParty:            true,
-	}, nil
+	return InferProviderCapabilities("openai"), nil
 }
 
 func (c *OpenAIClient) CountRequestInputTokens(ctx context.Context, request Request) (int, error) {
@@ -255,17 +250,18 @@ func (c *OpenAIClient) CountRequestInputTokens(ctx context.Context, request Requ
 	}
 
 	providerReq := OpenAIRequest{
-		Model:                 request.Model,
-		Temperature:           request.Temperature,
-		MaxTokens:             request.MaxTokens,
-		ReasoningEffort:       request.ReasoningEffort,
-		EnableNativeWebSearch: request.EnableNativeWebSearch,
-		SystemPrompt:          request.SystemPrompt,
-		SessionID:             request.SessionID,
-		Messages:              append([]Message(nil), request.Messages...),
-		Items:                 CloneResponseItems(request.Items),
-		Tools:                 append([]Tool(nil), request.Tools...),
-		StructuredOutput:      request.StructuredOutput,
+		Model:                   request.Model,
+		Temperature:             request.Temperature,
+		MaxTokens:               request.MaxTokens,
+		ReasoningEffort:         request.ReasoningEffort,
+		SupportsReasoningEffort: request.SupportsReasoningEffort,
+		EnableNativeWebSearch:   request.EnableNativeWebSearch,
+		SystemPrompt:            request.SystemPrompt,
+		SessionID:               request.SessionID,
+		Messages:                append([]Message(nil), request.Messages...),
+		Items:                   CloneResponseItems(request.Items),
+		Tools:                   append([]Tool(nil), request.Tools...),
+		StructuredOutput:        request.StructuredOutput,
 	}
 
 	count, err := counter.CountRequestInputTokens(ctx, providerReq)

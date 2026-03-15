@@ -443,6 +443,18 @@ func TestLocksAtFirstDispatch(t *testing.T) {
 	if meta.Locked.ToolPreambles == nil || !*meta.Locked.ToolPreambles {
 		t.Fatalf("expected locked tool_preambles=true for normal session")
 	}
+	if !meta.Locked.ModelCapabilities.SupportsReasoningEffort {
+		t.Fatalf("expected locked reasoning support for %q", meta.Locked.Model)
+	}
+	if !meta.Locked.ModelCapabilities.SupportsVisionInputs {
+		t.Fatalf("expected locked vision support for %q", meta.Locked.Model)
+	}
+	if meta.Locked.ProviderContract.ProviderID != "openai" {
+		t.Fatalf("expected locked openai provider contract, got %+v", meta.Locked.ProviderContract)
+	}
+	if !meta.Locked.ProviderContract.SupportsResponsesCompact || !meta.Locked.ProviderContract.IsOpenAIFirstParty {
+		t.Fatalf("unexpected locked provider capabilities: %+v", meta.Locked.ProviderContract)
+	}
 }
 
 func TestHeadlessSessionLocksToolPreamblesOff(t *testing.T) {
@@ -1355,6 +1367,166 @@ func TestSubmitUserMessage_HidesViewImageToolForTextOnlyModels(t *testing.T) {
 		if strings.TrimSpace(tool.Name) == string(tools.ToolViewImage) {
 			t.Fatalf("did not expect view_image tool in request for text-only model: %+v", client.calls[0].Tools)
 		}
+	}
+}
+
+func TestSubmitUserMessage_ExposesViewImageToolForUnlistedVisionModelWithOverride(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolViewImage}), Config{
+		Model:             "gpt-4o-2026-01-15",
+		ModelCapabilities: session.LockedModelCapabilities{SupportsVisionInputs: true},
+		EnabledTools:      []tools.ID{tools.ToolViewImage},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "analyze image"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected 1 model call, got %d", len(client.calls))
+	}
+	found := false
+	for _, tool := range client.calls[0].Tools {
+		if strings.TrimSpace(tool.Name) == string(tools.ToolViewImage) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected view_image tool in request tools for override-enabled alias: %+v", client.calls[0].Tools)
+	}
+	locked := store.Meta().Locked
+	if locked == nil || !locked.ModelCapabilities.SupportsVisionInputs {
+		t.Fatalf("expected locked model capability override to persist, got %+v", locked)
+	}
+}
+
+func TestEnsureLocked_DoesNotPersistFallbackProviderContractOnTransientFailure(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{
+		capsErr: errors.New("transient auth metadata failure"),
+		responses: []llm.Response{{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		}},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5.3-codex"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "hello"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	locked := store.Meta().Locked
+	if locked == nil {
+		t.Fatal("expected session to lock")
+	}
+	if strings.TrimSpace(locked.ProviderContract.ProviderID) != "" {
+		t.Fatalf("expected transient provider capability failure to avoid persisting fallback provider contract, got %+v", locked.ProviderContract)
+	}
+
+	client.mu.Lock()
+	client.capsErr = nil
+	client.caps = llm.ProviderCapabilities{
+		ProviderID:                    "openai",
+		SupportsResponsesAPI:          true,
+		SupportsResponsesCompact:      true,
+		SupportsNativeWebSearch:       true,
+		SupportsReasoningEncrypted:    true,
+		SupportsServerSideContextEdit: true,
+		IsOpenAIFirstParty:            true,
+	}
+	client.mu.Unlock()
+
+	caps, err := eng.providerCapabilities(context.Background())
+	if err != nil {
+		t.Fatalf("providerCapabilities after recovery: %v", err)
+	}
+	if caps.ProviderID != "openai" || !caps.SupportsNativeWebSearch || !caps.SupportsResponsesCompact {
+		t.Fatalf("expected live provider capabilities after recovery, got %+v", caps)
+	}
+}
+
+func TestEnsureLocked_PersistsProviderCapabilityOverrideOverTransportMetadata(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{
+		caps: llm.ProviderCapabilities{
+			ProviderID:                 "openai-compatible",
+			SupportsResponsesAPI:       true,
+			SupportsResponsesCompact:   false,
+			SupportsNativeWebSearch:    false,
+			SupportsReasoningEncrypted: false,
+			IsOpenAIFirstParty:         false,
+		},
+		responses: []llm.Response{{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		}},
+	}
+
+	override := &llm.ProviderCapabilities{
+		ProviderID:                    "custom-provider",
+		SupportsResponsesAPI:          true,
+		SupportsResponsesCompact:      true,
+		SupportsNativeWebSearch:       true,
+		SupportsReasoningEncrypted:    true,
+		SupportsServerSideContextEdit: true,
+		IsOpenAIFirstParty:            true,
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                        "gpt-5.4",
+		ProviderCapabilitiesOverride: override,
+		EnabledTools:                 []tools.ID{tools.ToolShell},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "hello"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	locked := store.Meta().Locked
+	if locked == nil {
+		t.Fatal("expected session to lock")
+	}
+	if locked.ProviderContract.ProviderID != override.ProviderID {
+		t.Fatalf("expected override provider id to persist, got %+v", locked.ProviderContract)
+	}
+	if !locked.ProviderContract.SupportsResponsesCompact || !locked.ProviderContract.SupportsNativeWebSearch || !locked.ProviderContract.IsOpenAIFirstParty {
+		t.Fatalf("expected override provider capabilities to persist, got %+v", locked.ProviderContract)
+	}
+
+	resumedCaps, err := eng.providerCapabilities(context.Background())
+	if err != nil {
+		t.Fatalf("providerCapabilities: %v", err)
+	}
+	if resumedCaps.ProviderID != override.ProviderID || !resumedCaps.SupportsResponsesCompact || !resumedCaps.SupportsNativeWebSearch || !resumedCaps.IsOpenAIFirstParty {
+		t.Fatalf("expected locked override provider capabilities on subsequent reads, got %+v", resumedCaps)
 	}
 }
 
@@ -4736,8 +4908,8 @@ func TestInjectsSkillsContextBeforeEnvironmentAndPersists(t *testing.T) {
 
 func TestEnvironmentContextMessageIncludesStatusLineModelLabel(t *testing.T) {
 	workspace := t.TempDir()
-	msg := environmentContextMessage(workspace, "gpt-5.3.codex", "high", time.Unix(0, 0).UTC())
-	if !strings.Contains(msg, "\ngpt-5.3.codex high\n") {
+	msg := environmentContextMessage(workspace, "gpt-5.3-codex", "high", time.Unix(0, 0).UTC())
+	if !strings.Contains(msg, "\ngpt-5.3-codex high\n") {
 		t.Fatalf("expected environment message to include status-line model label, got %q", msg)
 	}
 }
@@ -4764,7 +4936,7 @@ func TestSubmitInjectsEnvironmentLineWithStatusModelLabel(t *testing.T) {
 		Usage: llm.Usage{WindowTokens: 200000},
 	}}}
 	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
-		Model:                 "gpt-5.3.codex",
+		Model:                 "gpt-5.3-codex",
 		ThinkingLevel:         "high",
 		AutoCompactTokenLimit: 1_000_000_000,
 		CompactionMode:        "local",
@@ -4788,7 +4960,7 @@ func TestSubmitInjectsEnvironmentLineWithStatusModelLabel(t *testing.T) {
 	if envMsg.Role != llm.RoleDeveloper || envMsg.MessageType != llm.MessageTypeEnvironment {
 		t.Fatalf("expected first request message to be environment context, got %+v", envMsg)
 	}
-	if !strings.Contains(envMsg.Content, "\ngpt-5.3.codex high\n") {
+	if !strings.Contains(envMsg.Content, "\ngpt-5.3-codex high\n") {
 		t.Fatalf("expected environment context to contain status model label line, got %q", envMsg.Content)
 	}
 }
@@ -6464,12 +6636,12 @@ func TestOpenAIModelCompact404DoesNotFallbackToLocalCompaction(t *testing.T) {
 		},
 		compactionErr: &llm.APIStatusError{StatusCode: 404, Body: "not found"},
 		caps: llm.ProviderCapabilities{
-			ProviderID:                    "openai-compatible",
+			ProviderID:                    "openai",
 			SupportsResponsesAPI:          true,
-			SupportsResponsesCompact:      false,
-			SupportsReasoningEncrypted:    false,
-			SupportsServerSideContextEdit: false,
-			IsOpenAIFirstParty:            false,
+			SupportsResponsesCompact:      true,
+			SupportsReasoningEncrypted:    true,
+			SupportsServerSideContextEdit: true,
+			IsOpenAIFirstParty:            true,
 		},
 	}
 

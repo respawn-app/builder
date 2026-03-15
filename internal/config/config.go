@@ -56,6 +56,7 @@ type Timeouts struct {
 type Settings struct {
 	Model                            string
 	ThinkingLevel                    string
+	ModelCapabilities                ModelCapabilitiesOverride
 	Theme                            string
 	TUIAlternateScreen               TUIAlternateScreenPolicy
 	TUIScrollMode                    TUIScrollMode
@@ -64,6 +65,7 @@ type Settings struct {
 	PriorityRequestMode              bool
 	WebSearch                        string
 	OpenAIBaseURL                    string
+	ProviderCapabilities             ProviderCapabilitiesOverride
 	Store                            bool
 	AllowNonCwdEdits                 bool
 	ModelContextWindow               int
@@ -75,6 +77,21 @@ type Settings struct {
 	ShellOutputMaxChars              int
 	BGShellsOutput                   BGShellsOutputMode
 	Reviewer                         ReviewerSettings
+}
+
+type ModelCapabilitiesOverride struct {
+	SupportsReasoningEffort bool
+	SupportsVisionInputs    bool
+}
+
+type ProviderCapabilitiesOverride struct {
+	ProviderID                    string
+	SupportsResponsesAPI          bool
+	SupportsResponsesCompact      bool
+	SupportsNativeWebSearch       bool
+	SupportsReasoningEncrypted    bool
+	SupportsServerSideContextEdit bool
+	IsOpenAIFirstParty            bool
 }
 
 type ReviewerSettings struct {
@@ -100,8 +117,12 @@ type App struct {
 }
 
 type fileSettings struct {
-	Model               string          `toml:"model"`
-	ThinkingLevel       string          `toml:"thinking_level"`
+	Model             string `toml:"model"`
+	ThinkingLevel     string `toml:"thinking_level"`
+	ModelCapabilities struct {
+		SupportsReasoningEffort *bool `toml:"supports_reasoning_effort"`
+		SupportsVisionInputs    *bool `toml:"supports_vision_inputs"`
+	} `toml:"model_capabilities"`
 	Theme               string          `toml:"theme"`
 	TUIAlternateScreen  string          `toml:"tui_alternate_screen"`
 	TUIScrollMode       string          `toml:"tui_scroll_mode"`
@@ -115,8 +136,17 @@ type fileSettings struct {
 		ShellDefaultSeconds int `toml:"shell_default_seconds"`
 		BashDefaultSeconds  int `toml:"bash_default_seconds"`
 	} `toml:"timeouts"`
-	PersistenceRoot                  string `toml:"persistence_root"`
-	OpenAIBaseURL                    string `toml:"openai_base_url"`
+	PersistenceRoot      string `toml:"persistence_root"`
+	OpenAIBaseURL        string `toml:"openai_base_url"`
+	ProviderCapabilities struct {
+		ProviderID                    string `toml:"provider_id"`
+		SupportsResponsesAPI          *bool  `toml:"supports_responses_api"`
+		SupportsResponsesCompact      *bool  `toml:"supports_responses_compact"`
+		SupportsNativeWebSearch       *bool  `toml:"supports_native_web_search"`
+		SupportsReasoningEncrypted    *bool  `toml:"supports_reasoning_encrypted"`
+		SupportsServerSideContextEdit *bool  `toml:"supports_server_side_context_edit"`
+		IsOpenAIFirstParty            *bool  `toml:"is_openai_first_party"`
+	} `toml:"provider_capabilities"`
 	Store                            *bool  `toml:"store"`
 	AllowNonCwdEdits                 *bool  `toml:"allow_non_cwd_edits"`
 	ModelContextWindow               int    `toml:"model_context_window"`
