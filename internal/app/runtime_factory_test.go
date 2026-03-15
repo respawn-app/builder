@@ -131,11 +131,11 @@ func TestBuildToolRegistry_ViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build tool registry: %v", err)
 	}
-	broker.SetAskHandler(func(req askquestion.Request) (string, error) {
+	broker.SetAskHandler(func(req askquestion.Request) (askquestion.Response, error) {
 		if !strings.Contains(req.Question, "Allow reading") {
 			t.Fatalf("expected read-focused approval question, got %q", req.Question)
 		}
-		return outsideWorkspaceAllowOnceSuggestion, nil
+		return askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowOnce}}, nil
 	})
 
 	viewImageHandler, ok := registry.Get(tools.ToolViewImage)

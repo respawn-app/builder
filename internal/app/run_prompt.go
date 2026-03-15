@@ -128,8 +128,8 @@ func ensureSubagentSessionName(store *session.Store) error {
 	return store.SetName(name)
 }
 
-func runPromptAskHandler(req askquestion.Request) (string, error) {
-	return "", errors.New("You can't ask questions in headless/background mode. If the question is critical and materially affects the task, ask it by ending your turn after trying to do as much work as possible beforehand. Otherwise, follow best practice and mention the ambiguity in your final answer.")
+func runPromptAskHandler(req askquestion.Request) (askquestion.Response, error) {
+	return askquestion.Response{}, errors.New("You can't ask questions in headless/background mode. If the question is critical and materially affects the task, ask it by ending your turn after trying to do as much work as possible beforehand. Otherwise, follow best practice and mention the ambiguity in your final answer.")
 }
 
 func writeRunProgressEvent(w io.Writer, evt runtime.Event) {

@@ -12,21 +12,41 @@ import (
 )
 
 type Request struct {
-	ID          string   `json:"id"`
-	Question    string   `json:"question"`
-	Suggestions []string `json:"suggestions,omitempty"`
-	Approval    bool     `json:"approval,omitempty"`
+	ID              string           `json:"id"`
+	Question        string           `json:"question"`
+	Suggestions     []string         `json:"suggestions,omitempty"`
+	Approval        bool             `json:"approval,omitempty"`
+	ApprovalOptions []ApprovalOption `json:"approval_options,omitempty"`
+}
+
+type ApprovalDecision string
+
+const (
+	ApprovalDecisionAllowOnce    ApprovalDecision = "allow_once"
+	ApprovalDecisionAllowSession ApprovalDecision = "allow_session"
+	ApprovalDecisionDeny         ApprovalDecision = "deny"
+)
+
+type ApprovalOption struct {
+	Decision ApprovalDecision `json:"decision"`
+	Label    string           `json:"label"`
+}
+
+type ApprovalPayload struct {
+	Decision   ApprovalDecision `json:"decision"`
+	Commentary string           `json:"commentary,omitempty"`
 }
 
 type Response struct {
-	RequestID string `json:"request_id"`
-	Answer    string `json:"answer"`
+	RequestID string           `json:"request_id"`
+	Answer    string           `json:"answer"`
+	Approval  *ApprovalPayload `json:"approval,omitempty"`
 }
 
 type Broker struct {
 	mu    sync.Mutex
 	queue []*pending
-	onAsk func(Request) (string, error)
+	onAsk func(Request) (Response, error)
 }
 
 type pending struct {
@@ -35,15 +55,15 @@ type pending struct {
 }
 
 type responseResult struct {
-	answer string
-	err    error
+	response Response
+	err      error
 }
 
 func NewBroker() *Broker {
 	return &Broker{}
 }
 
-func (b *Broker) SetAskHandler(handler func(Request) (string, error)) {
+func (b *Broker) SetAskHandler(handler func(Request) (Response, error)) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.onAsk = handler
@@ -56,6 +76,9 @@ func (b *Broker) Ask(ctx context.Context, req Request) (Response, error) {
 	if req.Question == "" {
 		return Response{}, errors.New("question is required")
 	}
+	if err := validateRequest(req); err != nil {
+		return Response{}, err
+	}
 
 	p := &pending{req: req, ch: make(chan responseResult, 1)}
 	b.mu.Lock()
@@ -65,11 +88,17 @@ func (b *Broker) Ask(ctx context.Context, req Request) (Response, error) {
 	defer b.dequeue(req.ID)
 
 	if h != nil {
-		answer, err := h(req)
+		resp, err := h(req)
 		if err != nil {
 			return Response{}, err
 		}
-		p.ch <- responseResult{answer: answer}
+		if resp.RequestID == "" {
+			resp.RequestID = req.ID
+		}
+		if err := validateResponse(req, resp); err != nil {
+			return Response{}, err
+		}
+		p.ch <- responseResult{response: resp}
 	}
 
 	select {
@@ -79,20 +108,77 @@ func (b *Broker) Ask(ctx context.Context, req Request) (Response, error) {
 		if rr.err != nil {
 			return Response{}, rr.err
 		}
-		return Response{RequestID: req.ID, Answer: rr.answer}, nil
+		if rr.response.RequestID == "" {
+			rr.response.RequestID = req.ID
+		}
+		if err := validateResponse(req, rr.response); err != nil {
+			return Response{}, err
+		}
+		return rr.response, nil
 	}
 }
 
-func (b *Broker) Submit(requestID, answer string) error {
+func (b *Broker) Submit(requestID string, resp Response) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, p := range b.queue {
 		if p.req.ID == requestID {
-			p.ch <- responseResult{answer: answer}
+			if resp.RequestID == "" {
+				resp.RequestID = requestID
+			}
+			if err := validateResponse(p.req, resp); err != nil {
+				return err
+			}
+			p.ch <- responseResult{response: resp}
 			return nil
 		}
 	}
 	return fmt.Errorf("request %s not found", requestID)
+}
+
+func validateRequest(req Request) error {
+	if !req.Approval {
+		return nil
+	}
+	if len(req.ApprovalOptions) == 0 {
+		return errors.New("approval questions require approval_options")
+	}
+	seen := make(map[ApprovalDecision]struct{}, len(req.ApprovalOptions))
+	for _, option := range req.ApprovalOptions {
+		if err := validateApprovalDecision(option.Decision); err != nil {
+			return fmt.Errorf("invalid approval option: %w", err)
+		}
+		if option.Label == "" {
+			return fmt.Errorf("approval option %q requires a label", option.Decision)
+		}
+		if _, ok := seen[option.Decision]; ok {
+			return fmt.Errorf("duplicate approval option %q", option.Decision)
+		}
+		seen[option.Decision] = struct{}{}
+	}
+	return nil
+}
+
+func validateResponse(req Request, resp Response) error {
+	if !req.Approval {
+		if resp.Approval != nil {
+			return errors.New("non-approval questions must not return approval payloads")
+		}
+		return nil
+	}
+	if resp.Approval == nil {
+		return errors.New("approval questions require approval responses")
+	}
+	return validateApprovalDecision(resp.Approval.Decision)
+}
+
+func validateApprovalDecision(decision ApprovalDecision) error {
+	switch decision {
+	case ApprovalDecisionAllowOnce, ApprovalDecisionAllowSession, ApprovalDecisionDeny:
+		return nil
+	default:
+		return fmt.Errorf("unsupported approval decision %q", decision)
+	}
 }
 
 func (b *Broker) Pending() []Request {

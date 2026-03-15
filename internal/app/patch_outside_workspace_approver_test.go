@@ -10,26 +10,45 @@ import (
 	patchtool "builder/internal/tools/patch"
 )
 
-func TestParseOutsideWorkspaceApprovalAnswer(t *testing.T) {
+func TestOutsideWorkspaceApprovalFromResponse(t *testing.T) {
 	tests := []struct {
-		name   string
-		answer string
-		want   patchtool.OutsideWorkspaceApproval
+		name string
+		resp askquestion.Response
+		want patchtool.OutsideWorkspaceApproval
 	}{
-		{name: "allow once suggestion", answer: outsideWorkspaceAllowOnceSuggestion, want: patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowOnce}},
-		{name: "allow session suggestion", answer: outsideWorkspaceAllowSessionSuggestion, want: patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowSession}},
-		{name: "deny suggestion", answer: outsideWorkspaceDenySuggestion, want: patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionDeny}},
-		{name: "freeform allow session", answer: "allow for this session", want: patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowSession}},
-		{name: "freeform allow once", answer: "allow once", want: patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowOnce}},
-		{name: "freeform allow once with commentary prefix", answer: approvalAllowWithCommentaryAnswerPrefix + "approved, but keep it small", want: patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowOnce, Commentary: "approved, but keep it small"}},
-		{name: "freeform deny commentary", answer: "no because this is protected", want: patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionDeny, Commentary: "no because this is protected"}},
+		{name: "allow once", resp: askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowOnce}}, want: patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowOnce}},
+		{name: "allow session", resp: askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowSession}}, want: patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowSession}},
+		{name: "deny", resp: askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionDeny}}, want: patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionDeny}},
+		{name: "allow once with commentary", resp: askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowOnce, Commentary: "approved, but keep it small"}}, want: patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionAllowOnce, Commentary: "approved, but keep it small"}},
+		{name: "deny with commentary", resp: askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionDeny, Commentary: "no because this is protected"}}, want: patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionDeny, Commentary: "no because this is protected"}},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := parseOutsideWorkspaceApprovalAnswer(tc.answer)
+			got, err := outsideWorkspaceApprovalFromResponse(tc.resp)
+			if err != nil {
+				t.Fatalf("parse approval response: %v", err)
+			}
 			if got != tc.want {
 				t.Fatalf("decision mismatch: got %v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestOutsideWorkspaceApprovalFromResponseRejectsMissingOrInvalidPayload(t *testing.T) {
+	tests := []struct {
+		name string
+		resp askquestion.Response
+	}{
+		{name: "missing payload", resp: askquestion.Response{}},
+		{name: "invalid decision", resp: askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: "maybe"}}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := outsideWorkspaceApprovalFromResponse(tc.resp); err == nil {
+				t.Fatal("expected error")
 			}
 		})
 	}
@@ -38,10 +57,16 @@ func TestParseOutsideWorkspaceApprovalAnswer(t *testing.T) {
 func TestPatchOutsideWorkspaceApproverCachesSessionDecision(t *testing.T) {
 	broker := askquestion.NewBroker()
 	askCalls := 0
-	broker.SetAskHandler(func(req askquestion.Request) (string, error) {
+	broker.SetAskHandler(func(req askquestion.Request) (askquestion.Response, error) {
 		askCalls++
 		if !req.Approval {
 			t.Fatalf("expected approval=true for outside-workspace ask")
+		}
+		if len(req.Suggestions) != 0 {
+			t.Fatalf("expected structured approval options instead of suggestions, got %+v", req.Suggestions)
+		}
+		if len(req.ApprovalOptions) != 3 {
+			t.Fatalf("expected 3 approval options, got %+v", req.ApprovalOptions)
 		}
 		if strings.Contains(req.Question, "workspace:") || strings.Contains(req.Question, "requested path:") || strings.Contains(req.Question, "Patch requested an edit outside the workspace.") {
 			t.Fatalf("approval prompt contains removed fields: %q", req.Question)
@@ -49,7 +74,7 @@ func TestPatchOutsideWorkspaceApproverCachesSessionDecision(t *testing.T) {
 		if !strings.Contains(req.Question, "Allow editing /tmp/x.txt (outside workspace dir)?") {
 			t.Fatalf("unexpected approval question text: %q", req.Question)
 		}
-		return outsideWorkspaceAllowSessionSuggestion, nil
+		return askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowSession}}, nil
 	})
 
 	approver := newOutsideWorkspaceApprover(broker, "editing")
@@ -76,8 +101,8 @@ func TestPatchOutsideWorkspaceApproverCachesSessionDecision(t *testing.T) {
 
 func TestPatchOutsideWorkspaceApproverPropagatesAskError(t *testing.T) {
 	broker := askquestion.NewBroker()
-	broker.SetAskHandler(func(askquestion.Request) (string, error) {
-		return "", errors.New("ask failed")
+	broker.SetAskHandler(func(askquestion.Request) (askquestion.Response, error) {
+		return askquestion.Response{}, errors.New("ask failed")
 	})
 
 	approver := newOutsideWorkspaceApprover(broker, "editing")
@@ -90,12 +115,12 @@ func TestPatchOutsideWorkspaceApproverPropagatesAskError(t *testing.T) {
 func TestOutsideWorkspaceApproverUsesReadPromptText(t *testing.T) {
 	broker := askquestion.NewBroker()
 	askCalls := 0
-	broker.SetAskHandler(func(req askquestion.Request) (string, error) {
+	broker.SetAskHandler(func(req askquestion.Request) (askquestion.Response, error) {
 		askCalls++
 		if !strings.Contains(req.Question, "Allow reading /tmp/x.pdf (outside workspace dir)?") {
 			t.Fatalf("unexpected read approval question text: %q", req.Question)
 		}
-		return outsideWorkspaceAllowOnceSuggestion, nil
+		return askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowOnce}}, nil
 	})
 
 	approver := newOutsideWorkspaceApprover(broker, "reading")

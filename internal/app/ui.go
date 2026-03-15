@@ -51,8 +51,8 @@ type askEvent struct {
 }
 
 type askReply struct {
-	answer string
-	err    error
+	response askquestion.Response
+	err      error
 }
 
 type askEventMsg struct {
@@ -205,11 +205,11 @@ func (b *askBridge) Events() <-chan askEvent {
 	return b.ch
 }
 
-func (b *askBridge) Handle(req askquestion.Request) (string, error) {
+func (b *askBridge) Handle(req askquestion.Request) (askquestion.Response, error) {
 	e := askEvent{req: req, reply: make(chan askReply, 1)}
 	b.ch <- e
 	resp := <-e.reply
-	return resp.answer, resp.err
+	return resp.response, resp.err
 }
 
 type uiModel struct {
