@@ -38,6 +38,25 @@ func TestDetectShellRenderHintRecognizesSimpleFileViewCommands(t *testing.T) {
 	}
 }
 
+func TestDetectShellRenderHintDefaultsToShellForGeneralCommands(t *testing.T) {
+	commands := []string{
+		"./gradlew -p apps/respawn detektFormat > docs/tmp/build-triage-2026-03-15/detektFormat.log 2>&1",
+		"git status --short",
+	}
+
+	for _, command := range commands {
+		t.Run(command, func(t *testing.T) {
+			hint := detectShellRenderHint(command)
+			if hint == nil {
+				t.Fatalf("expected shell render hint for command %q", command)
+			}
+			if hint.Kind != transcript.ToolRenderKindShell {
+				t.Fatalf("expected shell hint, got %+v", hint)
+			}
+		})
+	}
+}
+
 func TestDetectShellRenderHintRejectsComplexOrAmbiguousCommands(t *testing.T) {
 	tests := []string{
 		"cat",
@@ -51,8 +70,12 @@ func TestDetectShellRenderHintRejectsComplexOrAmbiguousCommands(t *testing.T) {
 
 	for _, command := range tests {
 		t.Run(command, func(t *testing.T) {
-			if hint := detectShellRenderHint(command); hint != nil {
-				t.Fatalf("expected no render hint for command %q, got %+v", command, hint)
+			hint := detectShellRenderHint(command)
+			if hint == nil {
+				t.Fatalf("expected fallback shell hint for command %q", command)
+			}
+			if hint.Kind != transcript.ToolRenderKindShell {
+				t.Fatalf("expected shell fallback hint, got %+v", hint)
 			}
 		})
 	}

@@ -203,6 +203,8 @@ func (r *codeRenderer) renderDiffLines(text string, width int) ([]diffRenderedLi
 
 func (r *codeRenderer) resolveLexer(hint *transcript.ToolRenderHint, text string) chroma.Lexer {
 	switch hint.Kind {
+	case transcript.ToolRenderKindShell:
+		return lexers.Get("bash")
 	case transcript.ToolRenderKindDiff:
 		return lexers.Get("diff")
 	case transcript.ToolRenderKindSource:

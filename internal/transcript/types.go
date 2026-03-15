@@ -5,6 +5,7 @@ import "strings"
 type ToolRenderKind string
 
 const (
+	ToolRenderKindShell  ToolRenderKind = "shell"
 	ToolRenderKindDiff   ToolRenderKind = "diff"
 	ToolRenderKindSource ToolRenderKind = "source"
 )
@@ -45,6 +46,8 @@ func (h *ToolRenderHint) Valid() bool {
 		return false
 	}
 	switch h.Kind {
+	case ToolRenderKindShell:
+		return true
 	case ToolRenderKindDiff:
 		return true
 	case ToolRenderKindSource:

@@ -171,6 +171,34 @@ func TestErrorEntryVisibleInDetailAndHiddenInOngoing(t *testing.T) {
 	}
 }
 
+func TestShellToolPreviewUsesShellHighlightingForWrappedHyphenatedPath(t *testing.T) {
+	m := NewModel()
+	out := m.renderEntryText("tool_shell", "./gradlew -p apps/respawn detektFormat > docs/tmp/build-triage-2026-03-15/detektFormat.log 2>&1", 56, &transcript.ToolCallMeta{
+		RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindShell},
+	}, false)
+	plain := ansi.Strip(out)
+	if !strings.Contains(plain, "2026-03-15") || !strings.Contains(plain, "detektFormat.log") {
+		t.Fatalf("expected wrapped shell path to remain visible, got %q", plain)
+	}
+	if !strings.Contains(out, "\x1b[") {
+		t.Fatalf("expected shell command preview to be syntax-highlighted, got %q", out)
+	}
+}
+
+func TestRenderEntryTextHighlightsShellCommandForShellHint(t *testing.T) {
+	m := NewModel()
+	meta := &transcript.ToolCallMeta{RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindShell}}
+
+	out := m.renderEntryText("tool_shell_success", "./gradlew -p apps/respawn detektFormat > docs/tmp/build-triage-2026-03-15/detektFormat.log 2>&1", 120, meta, false)
+	if !strings.Contains(out, "\x1b[") {
+		t.Fatalf("expected shell-highlighted output, got %q", out)
+	}
+	plain := ansi.Strip(out)
+	if !strings.Contains(plain, "build-triage-2026-03-15") {
+		t.Fatalf("expected highlighted shell command text preserved, got %q", plain)
+	}
+}
+
 func TestBackgroundNoticeUsesCompactTextInOngoingAndFullTextInDetail(t *testing.T) {
 	m := NewModel(WithPreviewLines(8))
 	m = updateModel(t, m, AppendTranscriptMsg{
