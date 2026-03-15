@@ -223,7 +223,7 @@
 - No timestamps are shown in UI.
 - Streaming paint cadence is 16ms with token coalescing per flush tick.
 - Main status line is compact and fixed: activity indicator, mode, model label, cache section, transient warning; context meter is right-aligned.
-- Model label appends thinking level when model matches reasoning-effort heuristic (`gpt-*` or `o*`).
+- Model label appends thinking level when the explicit model capability contract enables reasoning effort.
 - Status line includes right-aligned context meter (10-char bar + `% ctx window`, green/yellow/red at `<50%`, `50-<80%`, `>=80%`).
 
 ## Startup And Session Selection UX

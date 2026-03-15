@@ -6,12 +6,29 @@ import (
 )
 
 type LockedContract struct {
-	Model          string    `json:"model"`
-	Temperature    float64   `json:"temperature"`
-	MaxOutputToken int       `json:"max_output_token"`
-	EnabledTools   []string  `json:"enabled_tools,omitempty"`
-	ToolPreambles  *bool     `json:"tool_preambles,omitempty"`
-	LockedAt       time.Time `json:"locked_at"`
+	Model             string                     `json:"model"`
+	Temperature       float64                    `json:"temperature"`
+	MaxOutputToken    int                        `json:"max_output_token"`
+	EnabledTools      []string                   `json:"enabled_tools,omitempty"`
+	ToolPreambles     *bool                      `json:"tool_preambles,omitempty"`
+	ModelCapabilities LockedModelCapabilities    `json:"model_capabilities,omitempty"`
+	ProviderContract  LockedProviderCapabilities `json:"provider_contract,omitempty"`
+	LockedAt          time.Time                  `json:"locked_at"`
+}
+
+type LockedModelCapabilities struct {
+	SupportsReasoningEffort bool `json:"supports_reasoning_effort,omitempty"`
+	SupportsVisionInputs    bool `json:"supports_vision_inputs,omitempty"`
+}
+
+type LockedProviderCapabilities struct {
+	ProviderID                    string `json:"provider_id,omitempty"`
+	SupportsResponsesAPI          bool   `json:"supports_responses_api,omitempty"`
+	SupportsResponsesCompact      bool   `json:"supports_responses_compact,omitempty"`
+	SupportsNativeWebSearch       bool   `json:"supports_native_web_search,omitempty"`
+	SupportsReasoningEncrypted    bool   `json:"supports_reasoning_encrypted,omitempty"`
+	SupportsServerSideContextEdit bool   `json:"supports_server_side_context_edit,omitempty"`
+	IsOpenAIFirstParty            bool   `json:"is_openai_first_party,omitempty"`
 }
 
 type ContinuationContext struct {

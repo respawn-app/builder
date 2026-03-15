@@ -31,10 +31,8 @@ func (p *defaultPhaseProtocol) EnabledForModel(ctx context.Context) bool {
 	e.mu.Unlock()
 
 	enabled := false
-	if provider, ok := e.llm.(llm.ProviderCapabilitiesClient); ok {
-		if caps, err := provider.ProviderCapabilities(ctx); err == nil {
-			enabled = caps.SupportsResponsesAPI && caps.IsOpenAIFirstParty
-		}
+	if caps, err := e.providerCapabilities(ctx); err == nil {
+		enabled = caps.SupportsResponsesAPI && caps.IsOpenAIFirstParty
 	}
 
 	e.mu.Lock()

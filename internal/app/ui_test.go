@@ -220,8 +220,8 @@ func TestAskQuestionTabFreeformFlow(t *testing.T) {
 	updated = next.(*uiModel)
 
 	resp := <-reply
-	if resp.answer != "custom" {
-		t.Fatalf("unexpected answer: %q", resp.answer)
+	if resp.response.Answer != "custom" {
+		t.Fatalf("unexpected answer: %q", resp.response.Answer)
 	}
 	if updated.activeAsk != nil {
 		t.Fatal("ask should be resolved")
@@ -261,7 +261,7 @@ func TestAskPromptUsesCheckmarkAndSingleLineHint(t *testing.T) {
 func TestApprovalAskSupportsDenyWithCommentary(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	reply := make(chan askReply, 1)
-	event := askEvent{req: askquestion.Request{Question: "Approve?", Suggestions: []string{"Allow once", "Allow for this session", "Deny"}, Approval: true}, reply: reply}
+	event := askEvent{req: askquestion.Request{Question: "Approve?", Approval: true, ApprovalOptions: []askquestion.ApprovalOption{{Decision: askquestion.ApprovalDecisionAllowOnce, Label: "Allow once"}, {Decision: askquestion.ApprovalDecisionAllowSession, Label: "Allow for this session"}, {Decision: askquestion.ApprovalDecisionDeny, Label: "Deny"}}}, reply: reply}
 
 	next, _ := m.Update(askEventMsg{event: event})
 	updated := next.(*uiModel)
@@ -303,8 +303,11 @@ func TestApprovalAskSupportsDenyWithCommentary(t *testing.T) {
 	updated = next.(*uiModel)
 
 	resp := <-reply
-	if resp.answer != "blocked by policy" {
-		t.Fatalf("unexpected commentary answer: %q", resp.answer)
+	if resp.response.Approval == nil {
+		t.Fatal("expected typed approval response")
+	}
+	if resp.response.Approval.Decision != askquestion.ApprovalDecisionDeny || resp.response.Approval.Commentary != "blocked by policy" {
+		t.Fatalf("unexpected approval response: %+v", resp.response.Approval)
 	}
 	if updated.activeAsk != nil {
 		t.Fatal("expected ask to resolve after commentary submit")
@@ -1007,7 +1010,7 @@ func TestApprovalAskTabAllowsWithCommentary(t *testing.T) {
 	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.busy = true
 	reply := make(chan askReply, 1)
-	event := askEvent{req: askquestion.Request{Question: "Approve?", Suggestions: []string{"Allow once", "Allow for this session", "Deny"}, Approval: true}, reply: reply}
+	event := askEvent{req: askquestion.Request{Question: "Approve?", Approval: true, ApprovalOptions: []askquestion.ApprovalOption{{Decision: askquestion.ApprovalDecisionAllowOnce, Label: "Allow once"}, {Decision: askquestion.ApprovalDecisionAllowSession, Label: "Allow for this session"}, {Decision: askquestion.ApprovalDecisionDeny, Label: "Deny"}}}, reply: reply}
 
 	next, _ := m.Update(askEventMsg{event: event})
 	updated := next.(*uiModel)
@@ -1023,8 +1026,11 @@ func TestApprovalAskTabAllowsWithCommentary(t *testing.T) {
 	updated = next.(*uiModel)
 
 	resp := <-reply
-	if resp.answer != approvalAllowWithCommentaryAnswerPrefix+"ok but please keep it minimal" {
-		t.Fatalf("unexpected approval allow-with-commentary answer: %q", resp.answer)
+	if resp.response.Approval == nil {
+		t.Fatal("expected typed approval response")
+	}
+	if resp.response.Approval.Decision != askquestion.ApprovalDecisionAllowOnce || resp.response.Approval.Commentary != "ok but please keep it minimal" {
+		t.Fatalf("unexpected approval allow-with-commentary answer: %+v", resp.response.Approval)
 	}
 	if len(updated.pendingInjected) != 1 || updated.pendingInjected[0] != "ok but please keep it minimal" {
 		t.Fatalf("expected queued user commentary injection, got %+v", updated.pendingInjected)
@@ -1058,8 +1064,8 @@ func TestAskEventsQueueUntilCurrentQuestionAnswered(t *testing.T) {
 	updated = next.(*uiModel)
 
 	first := <-reply1
-	if first.answer != "one" {
-		t.Fatalf("unexpected first answer: %q", first.answer)
+	if first.response.Answer != "one" {
+		t.Fatalf("unexpected first answer: %q", first.response.Answer)
 	}
 	if updated.activeAsk == nil || updated.activeAsk.req.Question != "Second" {
 		t.Fatalf("expected second ask to become active, got %#v", updated.activeAsk)
@@ -1069,8 +1075,8 @@ func TestAskEventsQueueUntilCurrentQuestionAnswered(t *testing.T) {
 	updated = next.(*uiModel)
 
 	second := <-reply2
-	if second.answer != "two" {
-		t.Fatalf("unexpected second answer: %q", second.answer)
+	if second.response.Answer != "two" {
+		t.Fatalf("unexpected second answer: %q", second.response.Answer)
 	}
 	if updated.activeAsk != nil {
 		t.Fatal("expected no active ask after queue is drained")
@@ -1359,8 +1365,8 @@ func TestAskFreeformAcceptsSpaceKey(t *testing.T) {
 	updated = next.(*uiModel)
 
 	resp := <-reply
-	if resp.answer != "hello world" {
-		t.Fatalf("expected freeform answer with space, got %q", resp.answer)
+	if resp.response.Answer != "hello world" {
+		t.Fatalf("expected freeform answer with space, got %q", resp.response.Answer)
 	}
 	if updated.activeAsk != nil {
 		t.Fatal("ask should be resolved")
@@ -3317,12 +3323,12 @@ func TestStatusLineShowsThinkingLevelForReasoningModels(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIModelName("gpt-5.3.codex"),
+		WithUIModelName("gpt-5.3-codex"),
 		WithUIThinkingLevel("high"),
 	).(*uiModel)
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
-	if !strings.Contains(line, "gpt-5.3.codex high") {
+	if !strings.Contains(line, "gpt-5.3-codex high") {
 		t.Fatalf("expected status line to include model and thinking level, got %q", line)
 	}
 }
@@ -3332,14 +3338,14 @@ func TestStatusLineShowsFastAfterThinkingLevelWhenAvailableAndEnabled(t *testing
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIModelName("gpt-5.3.codex"),
+		WithUIModelName("gpt-5.3-codex"),
 		WithUIThinkingLevel("high"),
 		WithUIFastModeAvailable(true),
 		WithUIFastModeEnabled(true),
 	).(*uiModel)
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
-	if !strings.Contains(line, "gpt-5.3.codex high fast") {
+	if !strings.Contains(line, "gpt-5.3-codex high fast") {
 		t.Fatalf("expected status line to include fast marker, got %q", line)
 	}
 }
@@ -3349,7 +3355,7 @@ func TestStatusLineOmitsFastWhenUnavailable(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIModelName("gpt-5.3.codex"),
+		WithUIModelName("gpt-5.3-codex"),
 		WithUIThinkingLevel("high"),
 		WithUIFastModeEnabled(true),
 	).(*uiModel)
@@ -3452,13 +3458,13 @@ func TestStatusLineShowsLockedModelContractMarker(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIModelName("gpt-5.3.codex"),
+		WithUIModelName("gpt-5.3-codex"),
 		WithUIThinkingLevel("high"),
 		WithUIModelContractLocked(true),
 	).(*uiModel)
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
-	if !strings.Contains(line, "gpt-5.3.codex high (model locked)") {
+	if !strings.Contains(line, "gpt-5.3-codex high (model locked)") {
 		t.Fatalf("expected status line to include locked model contract marker, got %q", line)
 	}
 }

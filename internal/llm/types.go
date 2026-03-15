@@ -303,18 +303,19 @@ type StructuredOutput struct {
 }
 
 type Request struct {
-	Model                 string            `json:"model"`
-	Temperature           float64           `json:"temperature"`
-	MaxTokens             int               `json:"max_tokens"`
-	ReasoningEffort       string            `json:"reasoning_effort,omitempty"`
-	FastMode              bool              `json:"fast_mode,omitempty"`
-	EnableNativeWebSearch bool              `json:"enable_native_web_search,omitempty"`
-	SystemPrompt          string            `json:"system_prompt"`
-	SessionID             string            `json:"session_id,omitempty"`
-	Messages              []Message         `json:"messages"`
-	Items                 []ResponseItem    `json:"items,omitempty"`
-	Tools                 []Tool            `json:"tools,omitempty"`
-	StructuredOutput      *StructuredOutput `json:"structured_output,omitempty"`
+	Model                   string            `json:"model"`
+	Temperature             float64           `json:"temperature"`
+	MaxTokens               int               `json:"max_tokens"`
+	ReasoningEffort         string            `json:"reasoning_effort,omitempty"`
+	SupportsReasoningEffort bool              `json:"supports_reasoning_effort,omitempty"`
+	FastMode                bool              `json:"fast_mode,omitempty"`
+	EnableNativeWebSearch   bool              `json:"enable_native_web_search,omitempty"`
+	SystemPrompt            string            `json:"system_prompt"`
+	SessionID               string            `json:"session_id,omitempty"`
+	Messages                []Message         `json:"messages"`
+	Items                   []ResponseItem    `json:"items,omitempty"`
+	Tools                   []Tool            `json:"tools,omitempty"`
+	StructuredOutput        *StructuredOutput `json:"structured_output,omitempty"`
 }
 
 func (r Request) Validate() error {
@@ -366,15 +367,16 @@ func RequestFromLockedContractWithItems(locked session.LockedContract, systemPro
 	}
 
 	req := Request{
-		Model:                 locked.Model,
-		Temperature:           locked.Temperature,
-		MaxTokens:             locked.MaxOutputToken,
-		EnableNativeWebSearch: false,
-		SystemPrompt:          systemPrompt,
-		SessionID:             "",
-		Messages:              append([]Message(nil), messages...),
-		Items:                 CloneResponseItems(items),
-		Tools:                 append([]Tool(nil), tools...),
+		Model:                   locked.Model,
+		Temperature:             locked.Temperature,
+		MaxTokens:               locked.MaxOutputToken,
+		SupportsReasoningEffort: locked.ModelCapabilities.SupportsReasoningEffort,
+		EnableNativeWebSearch:   false,
+		SystemPrompt:            systemPrompt,
+		SessionID:               "",
+		Messages:                append([]Message(nil), messages...),
+		Items:                   CloneResponseItems(items),
+		Tools:                   append([]Tool(nil), tools...),
 	}
 	if err := req.Validate(); err != nil {
 		return Request{}, err

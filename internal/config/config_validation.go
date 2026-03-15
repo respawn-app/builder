@@ -12,6 +12,11 @@ func validateSettings(v Settings) error {
 	if strings.TrimSpace(v.Model) == "" {
 		return errors.New("settings model must not be empty")
 	}
+	if strings.TrimSpace(v.ProviderCapabilities.ProviderID) == "" {
+		if v.ProviderCapabilities.SupportsResponsesAPI || v.ProviderCapabilities.SupportsResponsesCompact || v.ProviderCapabilities.SupportsNativeWebSearch || v.ProviderCapabilities.SupportsReasoningEncrypted || v.ProviderCapabilities.SupportsServerSideContextEdit || v.ProviderCapabilities.IsOpenAIFirstParty {
+			return fmt.Errorf("provider_capabilities.provider_id must not be empty when provider capability overrides are set")
+		}
+	}
 	switch strings.ToLower(strings.TrimSpace(v.ThinkingLevel)) {
 	case "low", "medium", "high", "xhigh":
 	default:

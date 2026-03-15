@@ -1,6 +1,10 @@
 package llm
 
-import "testing"
+import (
+	"testing"
+
+	"builder/internal/session"
+)
 
 func TestLookupModelMetadata(t *testing.T) {
 	meta, ok := LookupModelMetadata("gpt-5.3-codex")
@@ -68,7 +72,7 @@ func TestModelDisplayLabel(t *testing.T) {
 		thinkingLevel string
 		want          string
 	}{
-		{model: "gpt-5.3.codex", thinkingLevel: "high", want: "gpt-5.3.codex high"},
+		{model: "gpt-5.3-codex", thinkingLevel: "high", want: "gpt-5.3-codex high"},
 		{model: "claude-3-7-sonnet", thinkingLevel: "high", want: "claude-3-7-sonnet"},
 		{model: "", thinkingLevel: "", want: "gpt-5"},
 	}
@@ -77,5 +81,15 @@ func TestModelDisplayLabel(t *testing.T) {
 		if got := ModelDisplayLabel(tc.model, tc.thinkingLevel); got != tc.want {
 			t.Fatalf("ModelDisplayLabel(%q, %q)=%q, want %q", tc.model, tc.thinkingLevel, got, tc.want)
 		}
+	}
+}
+
+func TestLockedContractCapabilityFallbackForLegacySessions(t *testing.T) {
+	legacy := &session.LockedContract{Model: "gpt-5.3-codex"}
+	if !LockedContractSupportsReasoningEffort(legacy, legacy.Model) {
+		t.Fatal("expected legacy locked session to fall back to registry reasoning support")
+	}
+	if !LockedContractSupportsVisionInputs(legacy, legacy.Model) {
+		t.Fatal("expected legacy locked session to fall back to registry vision support")
 	}
 }

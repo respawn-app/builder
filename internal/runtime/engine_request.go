@@ -56,11 +56,7 @@ func (e *Engine) enableNativeWebSearch(ctx context.Context) (bool, error) {
 	if !strings.EqualFold(strings.TrimSpace(e.cfg.WebSearchMode), "native") {
 		return false, nil
 	}
-	provider, ok := e.llm.(llm.ProviderCapabilitiesClient)
-	if !ok {
-		return false, nil
-	}
-	caps, err := provider.ProviderCapabilities(ctx)
+	caps, err := e.providerCapabilities(ctx)
 	if err != nil {
 		return false, fmt.Errorf("resolve provider capabilities for native web search: %w", err)
 	}
@@ -212,8 +208,9 @@ func (e *Engine) requestTools() []llm.Tool {
 		return nil
 	}
 	out := make([]llm.Tool, 0, len(defs))
+	locked := e.store.Meta().Locked
 	for _, d := range defs {
-		if d.ID == tools.ToolViewImage && !llm.SupportsVisionInputsModel(e.cfg.Model) {
+		if d.ID == tools.ToolViewImage && !llm.LockedContractSupportsVisionInputs(locked, e.cfg.Model) {
 			continue
 		}
 		out = append(out, llm.Tool{Name: string(d.ID), Description: d.Description, Schema: d.Schema})

@@ -12,39 +12,21 @@ import (
 )
 
 func (e *Engine) providerCapabilities(ctx context.Context) (llm.ProviderCapabilities, error) {
-	caps := llm.ProviderCapabilities{
-		ProviderID:                    "openai",
-		SupportsResponsesAPI:          true,
-		SupportsResponsesCompact:      false,
-		SupportsReasoningEncrypted:    true,
-		SupportsServerSideContextEdit: true,
-		IsOpenAIFirstParty:            false,
+	if caps, ok := llm.ProviderCapabilitiesFromLocked(e.store.Meta().Locked); ok {
+		return caps, nil
 	}
-	if provider, ok := e.llm.(llm.ProviderCapabilitiesClient); ok {
-		providerCaps, err := provider.ProviderCapabilities(ctx)
-		if err != nil {
-			return llm.ProviderCapabilities{}, err
-		}
-		caps = providerCaps
+	if e.cfg.ProviderCapabilitiesOverride != nil {
+		return *e.cfg.ProviderCapabilitiesOverride, nil
 	}
-
-	model := strings.TrimSpace(e.cfg.Model)
-	if locked, err := e.ensureLocked(); err == nil {
-		if v := strings.TrimSpace(locked.Model); v != "" {
-			model = v
-		}
+	provider, ok := e.llm.(llm.ProviderCapabilitiesClient)
+	if !ok {
+		return llm.InferProviderCapabilities("openai-compatible"), nil
 	}
-	if llm.InferProviderFromModel(model) == llm.ProviderOpenAI {
-		caps.SupportsResponsesCompact = true
-		caps.IsOpenAIFirstParty = true
-		if strings.TrimSpace(caps.ProviderID) == "" {
-			caps.ProviderID = "openai"
-		}
-	} else {
-		caps.SupportsResponsesCompact = false
-		caps.IsOpenAIFirstParty = false
+	providerCaps, err := provider.ProviderCapabilities(ctx)
+	if err != nil {
+		return llm.ProviderCapabilities{}, err
 	}
-	return caps, nil
+	return providerCaps, nil
 }
 
 func (e *Engine) replaceHistory(stepID, engine string, mode compactionMode, items []llm.ResponseItem) error {

@@ -16,6 +16,26 @@ func settingsOverlayFromEnv(lookup envLookup) (settingsOverlay, error) {
 	if v, ok := lookupTrimmedEnv(lookup, "BUILDER_THINKING_LEVEL"); ok {
 		overlay.ThinkingLevel = stringPtr(v)
 	}
+	if reasoning, ok := lookupTrimmedEnv(lookup, "BUILDER_MODEL_SUPPORTS_REASONING_EFFORT"); ok {
+		parsed, err := parseBoolString(reasoning, "BUILDER_MODEL_SUPPORTS_REASONING_EFFORT")
+		if err != nil {
+			return settingsOverlay{}, err
+		}
+		if overlay.ModelCapabilities == nil {
+			overlay.ModelCapabilities = &ModelCapabilitiesOverride{}
+		}
+		overlay.ModelCapabilities.SupportsReasoningEffort = *parsed
+	}
+	if vision, ok := lookupTrimmedEnv(lookup, "BUILDER_MODEL_SUPPORTS_VISION_INPUTS"); ok {
+		parsed, err := parseBoolString(vision, "BUILDER_MODEL_SUPPORTS_VISION_INPUTS")
+		if err != nil {
+			return settingsOverlay{}, err
+		}
+		if overlay.ModelCapabilities == nil {
+			overlay.ModelCapabilities = &ModelCapabilitiesOverride{}
+		}
+		overlay.ModelCapabilities.SupportsVisionInputs = *parsed
+	}
 	if v, ok := lookupTrimmedEnv(lookup, "BUILDER_THEME"); ok {
 		overlay.Theme = stringPtr(v)
 	}
@@ -42,6 +62,72 @@ func settingsOverlayFromEnv(lookup envLookup) (settingsOverlay, error) {
 	}
 	if v, ok := lookupTrimmedEnv(lookup, "BUILDER_OPENAI_BASE_URL"); ok {
 		overlay.OpenAIBaseURL = stringPtr(v)
+	}
+	if providerID, ok := lookupTrimmedEnv(lookup, "BUILDER_PROVIDER_CAPABILITY_ID"); ok {
+		if overlay.ProviderCapabilities == nil {
+			overlay.ProviderCapabilities = &ProviderCapabilitiesOverride{}
+		}
+		overlay.ProviderCapabilities.ProviderID = providerID
+	}
+	if v, ok := lookupTrimmedEnv(lookup, "BUILDER_PROVIDER_SUPPORTS_RESPONSES_API"); ok {
+		parsed, err := parseBoolString(v, "BUILDER_PROVIDER_SUPPORTS_RESPONSES_API")
+		if err != nil {
+			return settingsOverlay{}, err
+		}
+		if overlay.ProviderCapabilities == nil {
+			overlay.ProviderCapabilities = &ProviderCapabilitiesOverride{}
+		}
+		overlay.ProviderCapabilities.SupportsResponsesAPI = *parsed
+	}
+	if v, ok := lookupTrimmedEnv(lookup, "BUILDER_PROVIDER_SUPPORTS_RESPONSES_COMPACT"); ok {
+		parsed, err := parseBoolString(v, "BUILDER_PROVIDER_SUPPORTS_RESPONSES_COMPACT")
+		if err != nil {
+			return settingsOverlay{}, err
+		}
+		if overlay.ProviderCapabilities == nil {
+			overlay.ProviderCapabilities = &ProviderCapabilitiesOverride{}
+		}
+		overlay.ProviderCapabilities.SupportsResponsesCompact = *parsed
+	}
+	if v, ok := lookupTrimmedEnv(lookup, "BUILDER_PROVIDER_SUPPORTS_NATIVE_WEB_SEARCH"); ok {
+		parsed, err := parseBoolString(v, "BUILDER_PROVIDER_SUPPORTS_NATIVE_WEB_SEARCH")
+		if err != nil {
+			return settingsOverlay{}, err
+		}
+		if overlay.ProviderCapabilities == nil {
+			overlay.ProviderCapabilities = &ProviderCapabilitiesOverride{}
+		}
+		overlay.ProviderCapabilities.SupportsNativeWebSearch = *parsed
+	}
+	if v, ok := lookupTrimmedEnv(lookup, "BUILDER_PROVIDER_SUPPORTS_REASONING_ENCRYPTED"); ok {
+		parsed, err := parseBoolString(v, "BUILDER_PROVIDER_SUPPORTS_REASONING_ENCRYPTED")
+		if err != nil {
+			return settingsOverlay{}, err
+		}
+		if overlay.ProviderCapabilities == nil {
+			overlay.ProviderCapabilities = &ProviderCapabilitiesOverride{}
+		}
+		overlay.ProviderCapabilities.SupportsReasoningEncrypted = *parsed
+	}
+	if v, ok := lookupTrimmedEnv(lookup, "BUILDER_PROVIDER_SUPPORTS_SERVER_SIDE_CONTEXT_EDIT"); ok {
+		parsed, err := parseBoolString(v, "BUILDER_PROVIDER_SUPPORTS_SERVER_SIDE_CONTEXT_EDIT")
+		if err != nil {
+			return settingsOverlay{}, err
+		}
+		if overlay.ProviderCapabilities == nil {
+			overlay.ProviderCapabilities = &ProviderCapabilitiesOverride{}
+		}
+		overlay.ProviderCapabilities.SupportsServerSideContextEdit = *parsed
+	}
+	if v, ok := lookupTrimmedEnv(lookup, "BUILDER_PROVIDER_IS_OPENAI_FIRST_PARTY"); ok {
+		parsed, err := parseBoolString(v, "BUILDER_PROVIDER_IS_OPENAI_FIRST_PARTY")
+		if err != nil {
+			return settingsOverlay{}, err
+		}
+		if overlay.ProviderCapabilities == nil {
+			overlay.ProviderCapabilities = &ProviderCapabilitiesOverride{}
+		}
+		overlay.ProviderCapabilities.IsOpenAIFirstParty = *parsed
 	}
 	if v, ok := lookupTrimmedEnv(lookup, "BUILDER_STORE"); ok {
 		parsed, err := parseBoolString(v, "BUILDER_STORE")

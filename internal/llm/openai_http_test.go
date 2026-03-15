@@ -276,6 +276,7 @@ func TestCompactErrorPath_ReturnsProviderAPIErrorWithDetectedProviderID(t *testi
 
 	transport := NewHTTPTransport(staticAuth{})
 	transport.BaseURL = server.URL + "/v1"
+	transport.ProviderMetadata = ResolveOpenAIProviderMetadata(transport.BaseURL)
 
 	_, err := transport.Compact(context.Background(), OpenAICompactionRequest{
 		Model:      "gpt-5",
@@ -289,8 +290,8 @@ func TestCompactErrorPath_ReturnsProviderAPIErrorWithDetectedProviderID(t *testi
 	if !errors.As(err, &providerErr) {
 		t.Fatalf("expected ProviderAPIError from transport path, got %T err=%v", err, err)
 	}
-	if providerErr.ProviderID != "ollama" || providerErr.Code != UnifiedErrorCodeProviderContract {
-		t.Fatalf("expected provider contract error for ollama, got %+v", providerErr)
+	if providerErr.ProviderID != "openai-compatible" || providerErr.Code != UnifiedErrorCodeProviderContract {
+		t.Fatalf("expected provider contract error for openai-compatible, got %+v", providerErr)
 	}
 	if !IsNonRetriableModelError(err) {
 		t.Fatalf("expected non-retriable provider contract error, got %v", err)
@@ -427,6 +428,7 @@ func TestBuildResponsesInput_CanonicalNonViewImageToolOutputKeepsStructuredInput
 func TestServiceBaseURL_UsesCodexEndpointBaseForOAuth(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	transport.BaseURL = "https://api.openai.com/v1"
+	transport.ProviderMetadata = ResolveOpenAIProviderMetadata(transport.BaseURL)
 
 	got := transport.serviceBaseURL(openAIAuthMode{IsOAuth: true})
 	if got != strings.TrimSuffix(codexResponsesEndpoint, "/responses") {
@@ -604,6 +606,7 @@ func TestBuildPayload_AppliesFastModeForOpenAIProvider(t *testing.T) {
 func TestBuildPayload_SkipsFastModeForNonFirstPartyResponsesProvider(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	transport.BaseURL = "https://example.openai.azure.com/openai/v1"
+	transport.ProviderMetadata = ResolveOpenAIProviderMetadata(transport.BaseURL)
 	payload, err := transport.buildPayload(OpenAIRequest{
 		Model:    "gpt-5.3-codex",
 		FastMode: true,
@@ -871,6 +874,7 @@ func TestCompactRequestTargetsResponsesCompactPath(t *testing.T) {
 
 	transport := NewHTTPTransport(staticAuth{})
 	transport.BaseURL = server.URL + "/v1"
+	transport.ProviderMetadata = ResolveOpenAIProviderMetadata(transport.BaseURL)
 	transport.Client = server.Client()
 
 	resp, err := transport.Compact(context.Background(), OpenAICompactionRequest{
@@ -916,6 +920,7 @@ func TestCompactRequestAcceptsJSONBodyWithNonJSONContentType(t *testing.T) {
 
 	transport := NewHTTPTransport(staticAuth{})
 	transport.BaseURL = server.URL + "/v1"
+	transport.ProviderMetadata = ResolveOpenAIProviderMetadata(transport.BaseURL)
 	transport.Client = server.Client()
 
 	resp, err := transport.Compact(context.Background(), OpenAICompactionRequest{
@@ -994,6 +999,7 @@ func TestCountRequestInputTokensTargetsResponsesInputTokensPath(t *testing.T) {
 
 	transport := NewHTTPTransport(staticAuth{})
 	transport.BaseURL = server.URL + "/v1"
+	transport.ProviderMetadata = ResolveOpenAIProviderMetadata(transport.BaseURL)
 	transport.Client = server.Client()
 
 	count, err := transport.CountRequestInputTokens(context.Background(), OpenAIRequest{
@@ -1034,6 +1040,7 @@ func TestResolveModelContextWindowUsesModelMetadataFromAPI(t *testing.T) {
 
 	transport := NewHTTPTransport(staticAuth{})
 	transport.BaseURL = server.URL + "/v1"
+	transport.ProviderMetadata = ResolveOpenAIProviderMetadata(transport.BaseURL)
 	transport.Client = server.Client()
 	transport.ContextWindowTokens = 0
 
@@ -1065,6 +1072,7 @@ func TestResolveModelContextWindowFallsBackToInputTokenLimitField(t *testing.T) 
 
 	transport := NewHTTPTransport(staticAuth{})
 	transport.BaseURL = server.URL + "/v1"
+	transport.ProviderMetadata = ResolveOpenAIProviderMetadata(transport.BaseURL)
 	transport.Client = server.Client()
 	transport.ContextWindowTokens = 0
 

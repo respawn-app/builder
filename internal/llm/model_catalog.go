@@ -21,43 +21,24 @@ func ModelDisplayLabel(model string, thinkingLevel string) string {
 	return modelLabel + " " + level
 }
 
-// SupportsReasoningEffortModel reports whether reasoning effort is applicable
-// for the given model identifier. The heuristic is shared between request
-// payload construction and UI labeling to keep behavior consistent.
+// SupportsReasoningEffortModel reports whether reasoning effort is enabled by
+// the explicit model capability contract for the given model identifier.
 func SupportsReasoningEffortModel(model string) bool {
-	normalizedModel := strings.ToLower(strings.TrimSpace(model))
-	if normalizedModel == "" {
-		return false
-	}
-	return strings.HasPrefix(normalizedModel, "gpt-") || strings.HasPrefix(normalizedModel, "o")
+	contract, ok := LookupModelCapabilityContract(model)
+	return ok && contract.SupportsReasoningEffort
 }
 
-// SupportsVisionInputsModel reports whether the model likely supports multimodal
-// image/file inputs for the Responses API.
+// SupportsVisionInputsModel reports whether the explicit model capability
+// contract allows multimodal image/file inputs for the Responses API.
 func SupportsVisionInputsModel(model string) bool {
-	normalizedModel := strings.ToLower(strings.TrimSpace(model))
-	if normalizedModel == "" {
-		return false
-	}
-	return strings.HasPrefix(normalizedModel, "gpt-5") ||
-		strings.HasPrefix(normalizedModel, "gpt-4.1") ||
-		strings.HasPrefix(normalizedModel, "gpt-4o") ||
-		strings.HasPrefix(normalizedModel, "o1") ||
-		strings.HasPrefix(normalizedModel, "o3") ||
-		strings.HasPrefix(normalizedModel, "o4")
-}
-
-var defaultModelMetadata = map[string]ModelMetadata{
-	"gpt-5.3-codex": {
-		ContextWindowTokens: 400_000,
-	},
+	contract, ok := LookupModelCapabilityContract(model)
+	return ok && contract.SupportsVisionInputs
 }
 
 func LookupModelMetadata(model string) (ModelMetadata, bool) {
-	key := strings.ToLower(strings.TrimSpace(model))
-	if key == "" {
+	contract, ok := LookupModelCapabilityContract(model)
+	if !ok {
 		return ModelMetadata{}, false
 	}
-	meta, ok := defaultModelMetadata[key]
-	return meta, ok
+	return ModelMetadata{ContextWindowTokens: contract.ContextWindowTokens}, contract.ContextWindowTokens > 0
 }

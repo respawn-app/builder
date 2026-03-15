@@ -105,7 +105,7 @@ func (r *backgroundEventRouter) handle(evt shelltool.Event) {
 }
 
 type runtimeWiringOptions struct {
-	AskHandler func(req askquestion.Request) (string, error)
+	AskHandler func(req askquestion.Request) (askquestion.Response, error)
 	OnEvent    func(evt runtime.Event)
 	Headless   bool
 	FastMode   *runtime.FastModeState
@@ -126,7 +126,7 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		time.Duration(active.MinimumExecToBgSeconds)*time.Second,
 		active.ShellOutputMaxChars,
 		active.AllowNonCwdEdits,
-		llm.SupportsVisionInputsModel(active.Model),
+		llm.LockedContractSupportsVisionInputs(store.Meta().Locked, active.Model),
 		logger,
 		background,
 	)
@@ -138,7 +138,7 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 	if opts.AskHandler != nil {
 		askHandler = opts.AskHandler
 	}
-	askBroker.SetAskHandler(func(req askquestion.Request) (string, error) {
+	askBroker.SetAskHandler(func(req askquestion.Request) (askquestion.Response, error) {
 		bells.OnAsk(req)
 		return askHandler(req)
 	})
@@ -181,14 +181,22 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 			logger.Logf("runtime.event.drop count=%d kind=%s step_id=%s", total, evt.Kind, evt.StepID)
 		}
 	})
+	providerCapsOverride, hasProviderCapsOverride := llm.ProviderCapabilitiesFromOverride(active.ProviderCapabilities)
 	eng, err := runtime.New(store, client, toolRegistry, runtime.Config{
-		Model:                         active.Model,
-		Temperature:                   1,
-		MaxTokens:                     0,
-		ThinkingLevel:                 active.ThinkingLevel,
-		FastModeEnabled:               active.PriorityRequestMode,
-		FastModeState:                 opts.FastMode,
-		WebSearchMode:                 active.WebSearch,
+		Model:             active.Model,
+		Temperature:       1,
+		MaxTokens:         0,
+		ThinkingLevel:     active.ThinkingLevel,
+		ModelCapabilities: llm.LockedModelCapabilitiesForConfig(active.Model, active.ModelCapabilities),
+		FastModeEnabled:   active.PriorityRequestMode,
+		FastModeState:     opts.FastMode,
+		WebSearchMode:     active.WebSearch,
+		ProviderCapabilitiesOverride: func() *llm.ProviderCapabilities {
+			if !hasProviderCapsOverride {
+				return nil
+			}
+			return &providerCapsOverride
+		}(),
 		EnabledTools:                  enabledTools,
 		AutoCompactTokenLimit:         active.ContextCompactionThresholdTokens,
 		ContextWindowTokens:           active.ModelContextWindow,
