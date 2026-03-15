@@ -74,7 +74,7 @@ var catalogEntries = []CatalogEntry{
     },
     "yield_time_ms": {
       "type": "integer",
-      "description": "How long to wait in milliseconds for output before yielding control and backgrounding the process. Omit this for most commands. 15-30s is a reasonable minimum"
+      "description": "How long to wait in milliseconds for output before yielding control and backgrounding the process. Omit this for most commands. 15000 is a reasonable minimum"
     },
     "max_output_tokens": {
       "type": "integer",
@@ -103,7 +103,7 @@ var catalogEntries = []CatalogEntry{
     },
     "yield_time_ms": {
       "type": "integer",
-      "description": "How long to wait in milliseconds for output before yielding. Polling for up to 10 minutes is acceptable. Avoid short polls."
+      "description": "How long to wait in milliseconds for output before yielding."
     },
     "max_output_tokens": {
       "type": "integer",
@@ -171,7 +171,7 @@ var catalogEntries = []CatalogEntry{
 	{
 		ID:             ToolWebSearch,
 		Aliases:        nil,
-		Description:    "Search the web for up-to-date external information. Use this when local workspace context is insufficient or you need information beyond your knowledge cutoff. Prefer primary and official sources.",
+		Description:    "Search the web for up-to-date external information using the provider-native web search capability when available. Use this when local workspace context is insufficient or the fact could be stale. Prefer primary and official sources, and prefer MCP resources/templates over web search when possible.",
 		DefaultEnabled: true,
 		Schema: json.RawMessage(`{
   "type": "object",
