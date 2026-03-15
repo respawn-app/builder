@@ -12,9 +12,10 @@ import (
 var sedPrintRangePattern = regexp.MustCompile(`^\d+(?:,\d+)?p$`)
 
 func detectShellRenderHint(command string) *transcript.ToolRenderHint {
+	defaultHint := &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindShell}
 	args, ok := parseSimpleShellCommand(command)
 	if !ok || len(args) == 0 {
-		return nil
+		return defaultHint
 	}
 
 	name := normalizeCommandName(args[0])
@@ -22,23 +23,23 @@ func detectShellRenderHint(command string) *transcript.ToolRenderHint {
 	case "cat":
 		filePath, ok := parseCatFileArg(args)
 		if !ok {
-			return nil
+			return defaultHint
 		}
 		return &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindSource, Path: filePath, ResultOnly: true}
 	case "nl":
 		filePath, ok := parseNlFileArg(args)
 		if !ok {
-			return nil
+			return defaultHint
 		}
 		return &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindSource, Path: filePath, ResultOnly: true}
 	case "sed":
 		filePath, ok := parseSedFileArg(args)
 		if !ok {
-			return nil
+			return defaultHint
 		}
 		return &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindSource, Path: filePath, ResultOnly: true}
 	default:
-		return nil
+		return defaultHint
 	}
 }
 
