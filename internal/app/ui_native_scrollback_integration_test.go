@@ -14,6 +14,7 @@ import (
 	"builder/internal/runtime"
 	"builder/internal/session"
 	"builder/internal/tools"
+	"builder/internal/transcript"
 	"builder/internal/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -767,6 +768,87 @@ func TestNativeReplayOutputContainsMarkdownStyling(t *testing.T) {
 	plain := normalizedOutput(raw)
 	if !strings.Contains(plain, "bold") || !strings.Contains(plain, "code") {
 		t.Fatalf("expected styled replay to include content, got %q", plain)
+	}
+}
+
+func TestNativeProgramKeepsPendingToolTailLiveOnlyUntilCompletion(t *testing.T) {
+	out := &bytes.Buffer{}
+	model := NewUIModel(
+		nil,
+		closedRuntimeEvents(),
+		closedAskEvents(),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
+	).(*uiModel)
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	time.Sleep(40 * time.Millisecond)
+	baselineRaw := out.String()
+	baselineNormalized := normalizedOutput(baselineRaw)
+	if strings.Count(baselineNormalized, "prompt once") != 1 {
+		t.Fatalf("expected prompt once in baseline startup output, got %q", baselineNormalized)
+	}
+
+	call := tui.TranscriptEntry{
+		Role:       "tool_call",
+		Text:       "pwd",
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"},
+	}
+	model.transcriptEntries = append(model.transcriptEntries, call)
+	model.forwardToView(tui.SetConversationMsg{Entries: model.transcriptEntries})
+	model.syncViewport()
+	if cmd := model.syncNativeHistoryFromTranscript(); cmd != nil {
+		t.Fatalf("expected pending tool call not to flush committed history, got %T", cmd())
+	}
+	program.Send(spinnerTickMsg{})
+	time.Sleep(40 * time.Millisecond)
+	pendingDelta := out.String()[len(baselineRaw):]
+	pendingNormalized := normalizedOutput(pendingDelta)
+	if strings.Contains(pendingNormalized, "prompt once") {
+		t.Fatalf("expected no prompt replay while tool call is pending, got %q", pendingNormalized)
+	}
+	if !strings.Contains(xansi.Strip(pendingDelta), "$ pwd") {
+		t.Fatalf("expected pending tool call visible in live region output, got %q", xansi.Strip(pendingDelta))
+	}
+
+	result := tui.TranscriptEntry{Role: "tool_result_ok", Text: "/tmp", ToolCallID: "call_1"}
+	model.transcriptEntries = append(model.transcriptEntries, result)
+	model.forwardToView(tui.SetConversationMsg{Entries: model.transcriptEntries})
+	model.syncViewport()
+	cmd := model.syncNativeHistoryFromTranscript()
+	if cmd == nil {
+		t.Fatal("expected finalized tool block flush")
+	}
+	program.Send(cmd())
+	time.Sleep(40 * time.Millisecond)
+	finalDelta := out.String()[len(baselineRaw)+len(pendingDelta):]
+	finalNormalized := normalizedOutput(finalDelta)
+	if strings.Contains(finalNormalized, "prompt once") {
+		t.Fatalf("expected finalized flush without prompt replay, got %q", finalNormalized)
+	}
+	if strings.Count(finalNormalized, "pwd") != 1 {
+		t.Fatalf("expected finalized tool call exactly once in append output, got %q", finalNormalized)
+	}
+	if strings.Contains(finalNormalized, "/tmp") {
+		t.Fatalf("did not expect native ongoing scrollback to append shell output inline, got %q", finalNormalized)
+	}
+
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
 	}
 }
 

@@ -464,6 +464,90 @@ func TestRenderNativeScrollbackSnapshotMatchesLegacyAppendPath(t *testing.T) {
 	}
 }
 
+func TestNativeCommittedEntriesStopsAtFirstUnresolvedToolCall(t *testing.T) {
+	entries := []tui.TranscriptEntry{
+		{Role: "user", Text: "prompt"},
+		{Role: "tool_call", Text: "echo a", ToolCallID: "call_a", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo a"}},
+		{Role: "tool_call", Text: "echo b", ToolCallID: "call_b", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo b"}},
+		{Role: "tool_result_ok", Text: "out-b", ToolCallID: "call_b"},
+	}
+
+	committed := nativeCommittedEntries(entries)
+	if len(committed) != 1 || committed[0].Text != "prompt" {
+		t.Fatalf("expected only stable prefix committed, got %#v", committed)
+	}
+	pending := nativePendingEntries(entries)
+	if len(pending) != 3 {
+		t.Fatalf("expected unresolved tool tail to stay pending, got %d entries", len(pending))
+	}
+
+	entries = append(entries, tui.TranscriptEntry{Role: "tool_result_ok", Text: "out-a", ToolCallID: "call_a"})
+	committed = nativeCommittedEntries(entries)
+	if len(committed) != len(entries) {
+		t.Fatalf("expected full transcript committed once first unresolved call completes, got %d of %d entries", len(committed), len(entries))
+	}
+}
+
+func TestNativePendingToolCallStaysLiveUntilResultThenAppendsFinalBlock(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIScrollMode(config.TUIScrollModeNative),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
+	).(*uiModel)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+
+	call := tui.TranscriptEntry{
+		Role:       "tool_call",
+		Text:       "pwd",
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"},
+	}
+	m.transcriptEntries = append(m.transcriptEntries, call)
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+	m.syncViewport()
+	if cmd := m.syncNativeHistoryFromTranscript(); cmd != nil {
+		t.Fatalf("expected pending tool call to stay out of committed scrollback, got %T", cmd())
+	}
+	view := stripANSIPreserve(m.View())
+	if !strings.Contains(view, "$ pwd") {
+		t.Fatalf("expected pending tool call visible in native live region, got %q", view)
+	}
+	if strings.Contains(m.nativeRenderedSnapshot, "pwd") {
+		t.Fatalf("expected pending tool call absent from committed snapshot, got %q", m.nativeRenderedSnapshot)
+	}
+
+	result := tui.TranscriptEntry{Role: "tool_result_ok", Text: "/tmp", ToolCallID: "call_1"}
+	m.transcriptEntries = append(m.transcriptEntries, result)
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+	m.syncViewport()
+	cmd := m.syncNativeHistoryFromTranscript()
+	if cmd == nil {
+		t.Fatal("expected finalized tool block to append to native scrollback")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	plain := stripANSIText(msg.Text)
+	if strings.Contains(plain, "prompt once") {
+		t.Fatalf("expected tool completion delta without full replay, got %q", msg.Text)
+	}
+	if strings.Count(plain, "pwd") != 1 {
+		t.Fatalf("expected finalized tool call emitted once, got %q", msg.Text)
+	}
+	if strings.Contains(plain, "/tmp") {
+		t.Fatalf("did not expect native ongoing scrollback to start emitting shell output inline, got %q", msg.Text)
+	}
+	if cmd := m.syncNativeHistoryFromTranscript(); cmd != nil {
+		t.Fatalf("expected no duplicate emission after finalized tool call flush, got %T", cmd())
+	}
+}
+
 func TestUIInitClearsScreenInAllScrollModes(t *testing.T) {
 	native := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
 	if !native.shouldClearOnInit() {

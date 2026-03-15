@@ -25,7 +25,9 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 		return nil
 	}
 
-	if m.nativeFlushedEntryCount < 0 || m.nativeFlushedEntryCount > len(m.transcriptEntries) {
+	committedEntries := nativeCommittedEntries(m.transcriptEntries)
+
+	if m.nativeFlushedEntryCount < 0 || m.nativeFlushedEntryCount > len(committedEntries) {
 		if m.nativeFormatterReady {
 			m.rebaseNativeFormatterSnapshot()
 			return nil
@@ -34,16 +36,22 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 	}
 
 	if !m.nativeFormatterReady {
+		if len(committedEntries) == 0 {
+			m.nativeFormatterEntries = nil
+			m.nativeFormatterSnapshot = ""
+			m.nativeFlushedEntryCount = 0
+			m.nativeHistoryReplayed = true
+			return nil
+		}
 		m.initNativeFormatterModel()
-		filtered := nonEmptyNativeEntries(m.transcriptEntries)
-		next, _ := m.nativeFormatter.Update(tui.SetConversationMsg{Entries: filtered})
+		next, _ := m.nativeFormatter.Update(tui.SetConversationMsg{Entries: committedEntries})
 		if casted, ok := next.(tui.Model); ok {
 			m.nativeFormatter = casted
 		}
 		rawSnapshot := m.nativeFormatter.OngoingCommittedSnapshot()
 		m.nativeFormatterSnapshot = rawSnapshot
-		m.nativeFormatterEntries = cloneNativeEntries(filtered)
-		m.nativeFlushedEntryCount = len(m.transcriptEntries)
+		m.nativeFormatterEntries = cloneNativeEntries(committedEntries)
+		m.nativeFlushedEntryCount = len(committedEntries)
 		m.nativeHistoryReplayed = true
 		if !m.shouldEmitNativeHistory() {
 			return nil
@@ -51,18 +59,17 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 		return m.emitCurrentNativeHistorySnapshot(false)
 	}
 
-	filteredAll := nonEmptyNativeEntries(m.transcriptEntries)
-	if !nativeEntriesPrefixEqual(filteredAll, m.nativeFormatterEntries) {
+	if !nativeEntriesPrefixEqual(committedEntries, m.nativeFormatterEntries) {
 		m.rebaseNativeFormatterSnapshot()
 		return nil
 	}
 
 	start := m.nativeFlushedEntryCount
-	if start >= len(m.transcriptEntries) {
+	if start >= len(committedEntries) {
 		return nil
 	}
 
-	for _, entry := range m.transcriptEntries[start:] {
+	for _, entry := range committedEntries[start:] {
 		if strings.TrimSpace(ongoingTranscriptText(entry)) == "" {
 			continue
 		}
@@ -81,8 +88,8 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 
 	rawSnapshot := m.nativeFormatter.OngoingCommittedSnapshot()
 	m.nativeFormatterSnapshot = rawSnapshot
-	m.nativeFormatterEntries = cloneNativeEntries(filteredAll)
-	m.nativeFlushedEntryCount = len(m.transcriptEntries)
+	m.nativeFormatterEntries = cloneNativeEntries(committedEntries)
+	m.nativeFlushedEntryCount = len(committedEntries)
 	m.nativeHistoryReplayed = true
 	if !m.shouldEmitNativeHistory() {
 		return nil
@@ -133,14 +140,21 @@ func (m *uiModel) rebaseNativeFormatterSnapshot() {
 		return
 	}
 	m.initNativeFormatterModel()
-	filtered := nonEmptyNativeEntries(m.transcriptEntries)
-	next, _ := m.nativeFormatter.Update(tui.SetConversationMsg{Entries: filtered})
+	committedEntries := nativeCommittedEntries(m.transcriptEntries)
+	if len(committedEntries) == 0 {
+		m.nativeFormatterSnapshot = ""
+		m.nativeFormatterEntries = nil
+		m.nativeFlushedEntryCount = 0
+		m.nativeHistoryReplayed = true
+		return
+	}
+	next, _ := m.nativeFormatter.Update(tui.SetConversationMsg{Entries: committedEntries})
 	if casted, ok := next.(tui.Model); ok {
 		m.nativeFormatter = casted
 	}
 	m.nativeFormatterSnapshot = m.nativeFormatter.OngoingCommittedSnapshot()
-	m.nativeFormatterEntries = cloneNativeEntries(filtered)
-	m.nativeFlushedEntryCount = len(m.transcriptEntries)
+	m.nativeFormatterEntries = cloneNativeEntries(committedEntries)
+	m.nativeFlushedEntryCount = len(committedEntries)
 	m.nativeHistoryReplayed = true
 }
 
@@ -201,6 +215,83 @@ func nonEmptyNativeEntries(entries []tui.TranscriptEntry) []tui.TranscriptEntry 
 		filtered = append(filtered, entry)
 	}
 	return filtered
+}
+
+func nativeCommittedEntries(entries []tui.TranscriptEntry) []tui.TranscriptEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	prefixEnd := nativeCommittedPrefixEnd(entries)
+	if prefixEnd <= 0 {
+		return nil
+	}
+	return nonEmptyNativeEntries(entries[:prefixEnd])
+}
+
+func nativePendingEntries(entries []tui.TranscriptEntry) []tui.TranscriptEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	prefixEnd := nativeCommittedPrefixEnd(entries)
+	if prefixEnd >= len(entries) {
+		return nil
+	}
+	return nonEmptyNativeEntries(entries[prefixEnd:])
+}
+
+func nativeCommittedPrefixEnd(entries []tui.TranscriptEntry) int {
+	consumedResults := make(map[int]struct{})
+	for idx, entry := range entries {
+		if strings.TrimSpace(entry.Role) != "tool_call" {
+			continue
+		}
+		if strings.TrimSpace(ongoingTranscriptText(entry)) == "" {
+			continue
+		}
+		resultIdx := nativeFindMatchingToolResultIndex(entries, idx, consumedResults)
+		if resultIdx < 0 {
+			return idx
+		}
+		consumedResults[resultIdx] = struct{}{}
+	}
+	return len(entries)
+}
+
+func nativeFindMatchingToolResultIndex(entries []tui.TranscriptEntry, callIdx int, consumed map[int]struct{}) int {
+	if callIdx < 0 || callIdx >= len(entries) {
+		return -1
+	}
+	callID := strings.TrimSpace(entries[callIdx].ToolCallID)
+	nextIdx := callIdx + 1
+	if nextIdx < len(entries) {
+		if _, used := consumed[nextIdx]; !used && nativeIsToolResultRole(entries[nextIdx].Role) {
+			nextCallID := strings.TrimSpace(entries[nextIdx].ToolCallID)
+			if callID == nextCallID {
+				return nextIdx
+			}
+		}
+	}
+	if callID == "" {
+		return -1
+	}
+	for idx := callIdx + 1; idx < len(entries); idx++ {
+		if _, used := consumed[idx]; used || !nativeIsToolResultRole(entries[idx].Role) {
+			continue
+		}
+		if strings.TrimSpace(entries[idx].ToolCallID) == callID {
+			return idx
+		}
+	}
+	return -1
+}
+
+func nativeIsToolResultRole(role string) bool {
+	switch strings.TrimSpace(role) {
+	case "tool_result", "tool_result_ok", "tool_result_error":
+		return true
+	default:
+		return false
+	}
 }
 
 func ongoingTranscriptText(entry tui.TranscriptEntry) string {

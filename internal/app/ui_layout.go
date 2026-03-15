@@ -153,19 +153,22 @@ func (l uiViewLayout) renderNativeStreamingLines(width, maxLines int, style uiSt
 	if width <= 0 || maxLines <= 0 {
 		return nil
 	}
-	if !l.model.busy && !l.model.sawAssistantDelta {
+	pendingLines := l.renderNativePendingLines(width)
+	hasStreaming := l.model.busy || l.model.sawAssistantDelta
+	if !hasStreaming && len(pendingLines) == 0 {
 		return nil
 	}
 	streamText := l.model.view.OngoingStreamingText()
 	errText := l.model.view.OngoingErrorText()
-	if strings.TrimSpace(streamText) == "" && strings.TrimSpace(errText) == "" {
+	if len(pendingLines) == 0 && strings.TrimSpace(streamText) == "" && strings.TrimSpace(errText) == "" {
 		return nil
 	}
 	lines := make([]string, 0, maxLines)
-	includeDivider := len(l.model.transcriptEntries) > 0
+	includeDivider := len(nativeCommittedEntries(l.model.transcriptEntries)) > 0
 	if includeDivider {
 		lines = append(lines, style.meta.Render(strings.Repeat("─", width)))
 	}
+	lines = append(lines, pendingLines...)
 	if strings.TrimSpace(streamText) != "" {
 		streamLines := splitPlainLines(streamText)
 		if len(streamLines) > 0 && strings.TrimSpace(streamLines[len(streamLines)-1]) == "" {
@@ -210,6 +213,19 @@ func (l uiViewLayout) renderNativeStreamingLines(width, maxLines int, style uiSt
 		return result
 	}
 	return lines[len(lines)-maxLines:]
+}
+
+func (l uiViewLayout) renderNativePendingLines(width int) []string {
+	pending := nativePendingEntries(l.model.transcriptEntries)
+	if len(pending) == 0 {
+		return nil
+	}
+	rendered := renderNativeCommittedSnapshot(pending, l.model.theme, width)
+	rendered = styleNativeReplayDividers(rendered, l.model.theme, width)
+	if strings.TrimSpace(rendered) == "" {
+		return nil
+	}
+	return strings.Split(rendered, "\n")
 }
 
 func (l uiViewLayout) syncNativeLiveRegionState() {
