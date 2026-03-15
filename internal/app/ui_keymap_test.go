@@ -1,10 +1,13 @@
 package app
 
 import (
+	"reflect"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+type testBubbleTeaUnknownCSISequence []byte
 
 func TestNormalizeKeyMsgStripsConcatenatedMouseSGRRunes(t *testing.T) {
 	message := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[<64;74;25M[<64;74;25M[<65;74;25M")}
@@ -35,15 +38,16 @@ func TestNormalizeKeyMsgPreservesNonMouseRunes(t *testing.T) {
 
 func TestNormalizeKeyMsgRecognizesShiftEnterCSIUVariants(t *testing.T) {
 	tests := []struct {
-		name     string
-		rendered string
+		name string
+		seq  string
 	}{
-		{name: "bare csi-u", rendered: "?CSI[49 51 59 50 117]?"},
-		{name: "esc prefixed csi-u", rendered: "?CSI[50 55 59 50 59 49 51 117]?"},
+		{name: "bare csi-u", seq: "\x1b[13;2u"},
+		{name: "esc prefixed csi-u", seq: "\x1b[27;2;13u"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			normalized, ok := normalizeKeyMsg(testUnknownCSISequence{rendered: tc.rendered})
+			msg := adaptCustomKeyMsg(testBubbleTeaUnknownCSISequence(tc.seq))
+			normalized, ok := normalizeKeyMsg(msg)
 			if !ok {
 				t.Fatal("expected shift+enter csi sequence to normalize")
 			}
@@ -51,5 +55,13 @@ func TestNormalizeKeyMsgRecognizesShiftEnterCSIUVariants(t *testing.T) {
 				t.Fatalf("expected keyTypeShiftEnterCSI, got %v", normalized.Type)
 			}
 		})
+	}
+}
+
+func TestAdaptCustomKeyMsgLeavesNonCustomUnknownCSIUntouched(t *testing.T) {
+	msg := testBubbleTeaUnknownCSISequence("\x1b[1;9A")
+	adapted := adaptCustomKeyMsg(msg)
+	if reflect.TypeOf(adapted) != reflect.TypeOf(msg) {
+		t.Fatalf("expected non-custom unknown csi to remain untouched, got %T", adapted)
 	}
 }

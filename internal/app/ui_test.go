@@ -28,14 +28,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-type testUnknownCSISequence struct {
-	rendered string
-}
-
-func (m testUnknownCSISequence) String() string {
-	return m.rendered
-}
-
 func TestTabQueuesAndStartsSubmission(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "echo hi"
@@ -51,26 +43,26 @@ func TestTabQueuesAndStartsSubmission(t *testing.T) {
 	}
 }
 
-func TestUnknownCSICtrlEnterQueuesAndStartsSubmission(t *testing.T) {
+func TestCustomKeyCtrlEnterQueuesAndStartsSubmission(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "echo hi"
 
-	next, _ := m.Update(testUnknownCSISequence{rendered: "?CSI[49 51 59 53 117]?"}) // 13;5u
+	next, _ := m.Update(customKeyMsg{Kind: customKeyCtrlEnter})
 	updated := next.(*uiModel)
 
 	if !updated.busy {
-		t.Fatal("expected busy after ctrl+enter CSI sequence")
+		t.Fatal("expected busy after ctrl+enter custom key")
 	}
 	if updated.input != "" {
-		t.Fatalf("expected input cleared after ctrl+enter CSI sequence, got %q", updated.input)
+		t.Fatalf("expected input cleared after ctrl+enter custom key, got %q", updated.input)
 	}
 }
 
-func TestUnknownCSIXtermCtrlEnterQueuesAndStartsSubmission(t *testing.T) {
+func TestCustomKeyCtrlEnterXtermVariantQueuesAndStartsSubmission(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "echo hi"
 
-	next, _ := m.Update(testUnknownCSISequence{rendered: "?CSI[50 55 59 53 59 49 51 126]?"}) // 27;5;13~
+	next, _ := m.Update(customKeyMsg{Kind: customKeyCtrlEnter})
 	updated := next.(*uiModel)
 
 	if !updated.busy {
@@ -81,12 +73,12 @@ func TestUnknownCSIXtermCtrlEnterQueuesAndStartsSubmission(t *testing.T) {
 	}
 }
 
-func TestUnknownCSICtrlEnterQueuesPostTurnWhenBusy(t *testing.T) {
+func TestCustomKeyCtrlEnterQueuesPostTurnWhenBusy(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.busy = true
 	m.input = "echo hi"
 
-	next, _ := m.Update(testUnknownCSISequence{rendered: "?CSI[49 51 59 53 117]?"}) // 13;5u
+	next, _ := m.Update(customKeyMsg{Kind: customKeyCtrlEnter})
 	updated := next.(*uiModel)
 
 	if len(updated.queued) != 1 {
@@ -100,11 +92,11 @@ func TestUnknownCSICtrlEnterQueuesPostTurnWhenBusy(t *testing.T) {
 	}
 }
 
-func TestUnknownCSIShiftEnterInsertsNewline(t *testing.T) {
+func TestCustomKeyShiftEnterInsertsNewline(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "hello"
 
-	next, _ := m.Update(testUnknownCSISequence{rendered: "?CSI[50 55 59 50 59 49 51 117]?"}) // 27;2;13u
+	next, _ := m.Update(customKeyMsg{Kind: customKeyShiftEnter})
 	updated := next.(*uiModel)
 
 	if updated.busy {
@@ -115,11 +107,11 @@ func TestUnknownCSIShiftEnterInsertsNewline(t *testing.T) {
 	}
 }
 
-func TestUnknownCSIShiftEnterThenEnterDoesNotSubmitTrailingNewline(t *testing.T) {
+func TestCustomKeyShiftEnterThenEnterDoesNotSubmitTrailingNewline(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "hello"
 
-	next, _ := m.Update(testUnknownCSISequence{rendered: "?CSI[49 51 59 50 117]?"}) // 13;2u
+	next, _ := m.Update(customKeyMsg{Kind: customKeyShiftEnter})
 	updated := next.(*uiModel)
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated = next.(*uiModel)
@@ -133,12 +125,12 @@ func TestUnknownCSIShiftEnterThenEnterDoesNotSubmitTrailingNewline(t *testing.T)
 	}
 }
 
-func TestUnknownCSICtrlBackspaceDeletesCurrentLine(t *testing.T) {
+func TestCustomKeyCtrlBackspaceDeletesCurrentLine(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "one\ntwo\nthree"
 	m.inputCursor = 5 // inside "two"
 
-	next, _ := m.Update(testUnknownCSISequence{rendered: "?CSI[49 50 55 59 53 117]?"}) // 127;5u
+	next, _ := m.Update(customKeyMsg{Kind: customKeyCtrlBackspace})
 	updated := next.(*uiModel)
 
 	if updated.input != "one\nthree" {
@@ -149,12 +141,12 @@ func TestUnknownCSICtrlBackspaceDeletesCurrentLine(t *testing.T) {
 	}
 }
 
-func TestUnknownCSICtrlBackspaceWithSubtypeDeletesCurrentLine(t *testing.T) {
+func TestCustomKeyCtrlBackspaceWithSubtypeDeletesCurrentLine(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "one\ntwo\nthree"
 	m.inputCursor = 5 // inside "two"
 
-	next, _ := m.Update(testUnknownCSISequence{rendered: "?CSI[49 50 55 59 53 58 51 117]?"}) // 127;5:3u
+	next, _ := m.Update(customKeyMsg{Kind: customKeyCtrlBackspace})
 	updated := next.(*uiModel)
 
 	if updated.input != "one\nthree" {
@@ -1223,15 +1215,15 @@ func TestDebugKeysTransientStatusShowsNormalizationSource(t *testing.T) {
 	t.Setenv("BUILDER_DEBUG_KEYS", "1")
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 
-	next, _ := m.Update(testUnknownCSISequence{rendered: "?CSI[49 50 55 59 53 58 51 117]?"}) // 127;5:3u
+	next, _ := m.Update(customKeyMsg{Kind: customKeyCtrlBackspace})
 	updated := next.(*uiModel)
 
 	status := strings.TrimSpace(updated.transientStatus)
 	if status == "" {
 		t.Fatal("expected debug key status to be set")
 	}
-	if !strings.Contains(status, "src=unknown_csi") {
-		t.Fatalf("expected unknown CSI source in debug status, got %q", status)
+	if !strings.Contains(status, "src=custom_key") {
+		t.Fatalf("expected custom key source in debug status, got %q", status)
 	}
 	if !strings.Contains(status, "type=-1026") {
 		t.Fatalf("expected normalized ctrl+backspace key type in debug status, got %q", status)
