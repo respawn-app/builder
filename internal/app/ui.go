@@ -120,6 +120,18 @@ func WithUIThinkingLevel(thinkingLevel string) UIOption {
 	}
 }
 
+func WithUIFastModeAvailable(available bool) UIOption {
+	return func(m *uiModel) {
+		m.fastModeAvailable = available
+	}
+}
+
+func WithUIFastModeEnabled(enabled bool) UIOption {
+	return func(m *uiModel) {
+		m.fastModeEnabled = enabled
+	}
+}
+
 func WithUIModelContractLocked(locked bool) UIOption {
 	return func(m *uiModel) {
 		m.modelContractLocked = locked
@@ -228,6 +240,8 @@ type uiModel struct {
 
 	modelName             string
 	thinkingLevel         string
+	fastModeAvailable     bool
+	fastModeEnabled       bool
 	modelContractLocked   bool
 	spinnerFrame          int
 	commandRegistry       *commands.Registry
@@ -342,6 +356,8 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 		m.reviewerMode = m.engine.ReviewerFrequency()
 		m.reviewerEnabled = m.engine.ReviewerEnabled()
 		m.autoCompactionEnabled = m.engine.AutoCompactionEnabled()
+		m.fastModeAvailable = m.engine.FastModeAvailable()
+		m.fastModeEnabled = m.engine.FastModeEnabled()
 	} else {
 		m.reviewerEnabled = strings.TrimSpace(m.reviewerMode) != "" && strings.TrimSpace(m.reviewerMode) != "off"
 	}

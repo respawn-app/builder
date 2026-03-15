@@ -8,6 +8,7 @@ import (
 
 	"builder/internal/auth"
 	"builder/internal/config"
+	"builder/internal/runtime"
 	"builder/internal/session"
 	"builder/internal/shared/textutil"
 	shelltool "builder/internal/tools/shell"
@@ -18,6 +19,7 @@ type appBootstrap struct {
 	containerDir     string
 	oauthOpts        auth.OpenAIOAuthOptions
 	authManager      *auth.Manager
+	fastModeState    *runtime.FastModeState
 	background       *shelltool.Manager
 	backgroundRouter *backgroundEventRouter
 }
@@ -57,17 +59,20 @@ func bootstrapApp(ctx context.Context, opts Options) (appBootstrap, error) {
 		return appBootstrap{}, err
 	}
 
-	background, err := shelltool.NewManager()
+	background, err := shelltool.NewManager(
+		shelltool.WithMinimumExecToBgTime(time.Duration(cfg.Settings.MinimumExecToBgSeconds) * time.Second),
+	)
 	if err != nil {
 		return appBootstrap{}, err
 	}
 
 	return appBootstrap{
-		cfg:          cfg,
-		containerDir: containerDir,
-		oauthOpts:    oauthOpts,
-		authManager:  mgr,
-		background:   background,
+		cfg:           cfg,
+		containerDir:  containerDir,
+		oauthOpts:     oauthOpts,
+		authManager:   mgr,
+		fastModeState: runtime.NewFastModeState(cfg.Settings.PriorityRequestMode),
+		background:    background,
 		backgroundRouter: newBackgroundEventRouter(
 			background,
 			cfg.Settings.ShellOutputMaxChars,

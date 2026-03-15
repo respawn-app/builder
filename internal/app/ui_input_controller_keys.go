@@ -56,29 +56,9 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.rollbackEditing && !m.busy {
-			m.nextForkUserMessageIndex = m.rollbackSelectedUserMessageIndex
-			m.nextSessionInitialPrompt = text
-			m.exitAction = UIActionForkRollback
-			m.rollbackEditing = false
-			return m, tea.Quit
+			return c.startRollbackFork(text)
 		}
-		if m.busy {
-			if m.isInputLocked() {
-				return m, nil
-			}
-			m.queued = append(m.queued, text)
-			m.clearInput()
-			m.activity = uiActivityQueued
-			return m, nil
-		}
-		m.queued = append(m.queued, text)
-		m.clearInput()
-		if !m.busy {
-			next := m.popQueued()
-			return m, c.startSubmission(next)
-		}
-		m.activity = uiActivityQueued
-		return m, nil
+		return c.queueOrStartSubmission(text)
 	}
 	if isDeleteCurrentLineKey(msg) {
 		if m.isInputLocked() {
@@ -148,11 +128,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.rollbackEditing && !m.busy {
-			m.nextForkUserMessageIndex = m.rollbackSelectedUserMessageIndex
-			m.nextSessionInitialPrompt = text
-			m.exitAction = UIActionForkRollback
-			m.rollbackEditing = false
-			return m, tea.Quit
+			return c.startRollbackFork(text)
 		}
 		if command, knownCommand := m.commandRegistry.Command(text); knownCommand {
 			if m.busy {
@@ -169,18 +145,10 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		_, isUserShell := parseUserShellCommand(text)
 		if m.busy {
 			if isUserShell {
-				m.queued = append(m.queued, text)
-				m.clearInput()
-				m.activity = uiActivityQueued
+				m.queueInput(text)
 				return m, nil
 			}
-			if m.engine != nil {
-				m.engine.QueueUserMessage(text)
-			}
-			m.pendingInjected = append(m.pendingInjected, text)
-			m.lockedInjectText = text
-			m.inputSubmitLocked = true
-			m.activity = uiActivityQueued
+			m.lockInjectedInput(text)
 			return m, nil
 		}
 		if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {

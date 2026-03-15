@@ -26,6 +26,7 @@ func TestBuildToolRegistry_AllowsHostedWebSearchWithoutLocalFactory(t *testing.T
 		"",
 		[]tools.ID{tools.ToolShell, tools.ToolWebSearch},
 		5*time.Second,
+		15*time.Second,
 		16_000,
 		false,
 		true,
@@ -53,6 +54,7 @@ func TestBuildToolRegistry_IncludesParallelWrapperWhenEnabled(t *testing.T) {
 		"",
 		[]tools.ID{tools.ToolShell, tools.ToolMultiToolUseParallel},
 		5*time.Second,
+		15*time.Second,
 		16_000,
 		false,
 		true,
@@ -80,6 +82,7 @@ func TestBuildToolRegistry_IncludesViewImageWhenEnabled(t *testing.T) {
 		"",
 		[]tools.ID{tools.ToolViewImage},
 		5*time.Second,
+		15*time.Second,
 		16_000,
 		false,
 		true,
@@ -118,6 +121,7 @@ func TestBuildToolRegistry_ViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 		"",
 		[]tools.ID{tools.ToolViewImage},
 		5*time.Second,
+		15*time.Second,
 		16_000,
 		false,
 		true,
@@ -174,7 +178,7 @@ func TestBuildToolRegistry_ViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 }
 
 func TestRuntimeWiringCloseDoesNotCloseSharedBackgroundManager(t *testing.T) {
-	manager, err := shelltool.NewManager()
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
@@ -185,7 +189,7 @@ func TestRuntimeWiringCloseDoesNotCloseSharedBackgroundManager(t *testing.T) {
 		t.Fatalf("close wiring: %v", err)
 	}
 
-	if _, _, _, err := buildToolRegistry(t.TempDir(), "", []tools.ID{tools.ToolExecCommand}, 5*time.Second, 16_000, false, true, nil, manager); err != nil {
+	if _, _, _, err := buildToolRegistry(t.TempDir(), "", []tools.ID{tools.ToolExecCommand}, 5*time.Second, 15*time.Second, 16_000, false, true, nil, manager); err != nil {
 		t.Fatalf("expected shared background manager to remain usable after wiring close: %v", err)
 	}
 }
@@ -312,7 +316,8 @@ func TestBackgroundEventRouterShapesBackgroundNoticeByOutputMode(t *testing.T) {
 				"Output:",
 				"alpha line",
 				"omega line",
-				"omitted",
+				"Omitted ",
+				"read log file for details",
 			},
 		},
 		{
@@ -449,6 +454,7 @@ func TestBuildToolRegistryExecCommandPropagatesOwnerSessionID(t *testing.T) {
 		"session-owner-1",
 		[]tools.ID{tools.ToolExecCommand},
 		5*time.Second,
+		250*time.Millisecond,
 		16_000,
 		false,
 		true,
@@ -485,7 +491,7 @@ func TestBuildToolRegistryExecCommandPropagatesOwnerSessionID(t *testing.T) {
 
 func TestBackgroundEventRouterDoesNotRetroactivelyQueueNoticeAfterOwnerSessionResume(t *testing.T) {
 	root := t.TempDir()
-	manager, err := shelltool.NewManager()
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
@@ -559,7 +565,7 @@ func TestBackgroundEventRouterDoesNotRetroactivelyQueueNoticeAfterOwnerSessionRe
 
 func TestBackgroundEventRouterDropsNoticeWhenNoSessionIsActive(t *testing.T) {
 	root := t.TempDir()
-	manager, err := shelltool.NewManager()
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}

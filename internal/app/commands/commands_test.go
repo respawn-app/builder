@@ -13,6 +13,9 @@ func TestExecuteBuiltins(t *testing.T) {
 	if command, ok := r.Command("/thinking"); !ok || !command.RunWhileBusy {
 		t.Fatalf("expected /thinking command to be runnable while busy, got %+v, ok=%v", command, ok)
 	}
+	if command, ok := r.Command("/fast"); !ok || command.RunWhileBusy {
+		t.Fatalf("expected /fast command to require idle, got %+v, ok=%v", command, ok)
+	}
 	if command, ok := r.Command("/supervisor"); !ok || !command.RunWhileBusy {
 		t.Fatalf("expected /supervisor command to be runnable while busy, got %+v, ok=%v", command, ok)
 	}
@@ -51,6 +54,18 @@ func TestExecuteBuiltins(t *testing.T) {
 	}
 	if got := r.Execute("/thinking"); got.Action != ActionSetThinking || got.ThinkingLevel != "" {
 		t.Fatalf("expected ActionSetThinking show-current, got %+v", got)
+	}
+	if got := r.Execute("/fast"); got.Action != ActionSetFast || got.FastMode != "" {
+		t.Fatalf("expected ActionSetFast toggle, got %+v", got)
+	}
+	if got := r.Execute("/fast on"); got.Action != ActionSetFast || got.FastMode != "on" {
+		t.Fatalf("expected ActionSetFast on, got %+v", got)
+	}
+	if got := r.Execute("/fast off"); got.Action != ActionSetFast || got.FastMode != "off" {
+		t.Fatalf("expected ActionSetFast off, got %+v", got)
+	}
+	if got := r.Execute("/fast status"); got.Action != ActionSetFast || got.FastMode != "status" {
+		t.Fatalf("expected ActionSetFast status, got %+v", got)
 	}
 	if got := r.Execute("/supervisor"); got.Action != ActionSetSupervisor || got.SupervisorMode != "" {
 		t.Fatalf("expected ActionSetSupervisor toggle, got %+v", got)

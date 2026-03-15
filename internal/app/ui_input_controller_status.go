@@ -25,6 +25,26 @@ func (m *uiModel) autoCompactionState() bool {
 	return m.autoCompactionEnabled
 }
 
+func (m *uiModel) fastModeState() (bool, bool) {
+	if m.engine != nil {
+		return m.engine.FastModeAvailable(), m.engine.FastModeEnabled()
+	}
+	return m.fastModeAvailable, m.fastModeEnabled
+}
+
+func fastModeToggleStatusMessage(enabled bool, changed bool) string {
+	if enabled {
+		if changed {
+			return "Fast mode enabled"
+		}
+		return "Fast mode already enabled"
+	}
+	if changed {
+		return "Fast mode disabled"
+	}
+	return "Fast mode already disabled"
+}
+
 func reviewerToggleStatusMessage(enabled bool, mode string, changed bool) string {
 	modeText := strings.ToLower(strings.TrimSpace(mode))
 	if modeText == "" {

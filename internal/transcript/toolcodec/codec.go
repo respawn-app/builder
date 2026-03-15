@@ -117,6 +117,9 @@ func FormatInput(toolName string, raw json.RawMessage, shellTimeoutSeconds int) 
 		sessionID, _ := asInt(obj["session_id"])
 		chars, _ := asString(obj["chars"])
 		if strings.TrimSpace(chars) == "" {
+			if yieldTimeMS, ok := asInt(obj["yield_time_ms"]); ok && yieldTimeMS > 0 {
+				return fmt.Sprintf("Polled session %d for %s", sessionID, formatWriteStdinPollDuration(time.Duration(yieldTimeMS)*time.Millisecond)), ""
+			}
 			return fmt.Sprintf("poll session %d", sessionID), ""
 		}
 		return fmt.Sprintf("write stdin session %d", sessionID), ""
@@ -242,6 +245,13 @@ func formatDurationShort(d time.Duration) string {
 		return "0s"
 	}
 	return strings.Join(parts, "")
+}
+
+func formatWriteStdinPollDuration(d time.Duration) string {
+	if d <= 0 {
+		return "0s"
+	}
+	return d.String()
 }
 
 func renderPlain(v any) string {

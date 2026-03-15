@@ -60,6 +60,7 @@ func runPrompt(ctx context.Context, boot appBootstrap, initialSessionID, prompt 
 	wiring, err := newRuntimeWiringWithBackground(store, active, enabledTools, boot.cfg.WorkspaceRoot, boot.authManager, logger, boot.background, runtimeWiringOptions{
 		AskHandler: runPromptAskHandler,
 		Headless:   true,
+		FastMode:   boot.fastModeState,
 		OnEvent: func(evt runtime.Event) {
 			writeRunProgressEvent(progress, evt)
 		},

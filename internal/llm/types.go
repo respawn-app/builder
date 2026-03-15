@@ -307,6 +307,7 @@ type Request struct {
 	Temperature           float64           `json:"temperature"`
 	MaxTokens             int               `json:"max_tokens"`
 	ReasoningEffort       string            `json:"reasoning_effort,omitempty"`
+	FastMode              bool              `json:"fast_mode,omitempty"`
 	EnableNativeWebSearch bool              `json:"enable_native_web_search,omitempty"`
 	SystemPrompt          string            `json:"system_prompt"`
 	SessionID             string            `json:"session_id,omitempty"`

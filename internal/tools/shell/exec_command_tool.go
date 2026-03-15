@@ -87,7 +87,7 @@ func (t *ExecCommandTool) Call(ctx context.Context, c tools.Call) (tools.Result,
 	} else {
 		argv = append(argv, "-c", cmdText)
 	}
-	yieldTime := defaultExecYieldTime
+	var yieldTime time.Duration
 	if in.YieldTimeMS != nil {
 		yieldTime = time.Duration(*in.YieldTimeMS) * time.Millisecond
 	}

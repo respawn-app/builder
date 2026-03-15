@@ -40,12 +40,14 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		"tui_scroll_mode":                     "default",
 		"notification_method":                 "default",
 		"tool_preambles":                      "default",
+		"priority_request_mode":               "default",
 		"web_search":                          "default",
 		"openai_base_url":                     "default",
 		"store":                               "default",
 		"allow_non_cwd_edits":                 "default",
 		"model_context_window":                "default",
 		"context_compaction_threshold_tokens": "default",
+		"minimum_exec_to_bg_seconds":          "default",
 		"compaction_mode":                     "default",
 		"shell_output_max_chars":              "default",
 		"bg_shells_output":                    "default",
@@ -91,6 +93,10 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		merged.ToolPreambles = *cfg.ToolPreambles
 		sources["tool_preambles"] = "file"
 	}
+	if cfg.PriorityRequestMode != nil {
+		merged.PriorityRequestMode = *cfg.PriorityRequestMode
+		sources["priority_request_mode"] = "file"
+	}
 	if strings.TrimSpace(cfg.WebSearch) != "" {
 		merged.WebSearch = strings.TrimSpace(cfg.WebSearch)
 		sources["web_search"] = "file"
@@ -114,6 +120,10 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if cfg.ContextCompactionThresholdTokens > 0 {
 		merged.ContextCompactionThresholdTokens = cfg.ContextCompactionThresholdTokens
 		sources["context_compaction_threshold_tokens"] = "file"
+	}
+	if cfg.MinimumExecToBgSeconds > 0 {
+		merged.MinimumExecToBgSeconds = cfg.MinimumExecToBgSeconds
+		sources["minimum_exec_to_bg_seconds"] = "file"
 	}
 	if strings.TrimSpace(cfg.CompactionMode) != "" {
 		merged.CompactionMode = normalizeCompactionMode(cfg.CompactionMode)
@@ -242,6 +252,14 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		}
 		merged.ContextCompactionThresholdTokens = n
 		sources["context_compaction_threshold_tokens"] = "env"
+	}
+	if v := strings.TrimSpace(os.Getenv("BUILDER_MINIMUM_EXEC_TO_BG_SECONDS")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return App{}, fmt.Errorf("invalid BUILDER_MINIMUM_EXEC_TO_BG_SECONDS: %q", v)
+		}
+		merged.MinimumExecToBgSeconds = n
+		sources["minimum_exec_to_bg_seconds"] = "env"
 	}
 	if raw, exists := os.LookupEnv("BUILDER_USE_NATIVE_COMPACTION"); exists && strings.TrimSpace(raw) != "" {
 		return App{}, errors.New("unsupported env var: BUILDER_USE_NATIVE_COMPACTION")

@@ -521,6 +521,7 @@ func (e *Engine) localCompactionSummary(ctx context.Context, input []llm.Respons
 		return "", err
 	}
 	req.ReasoningEffort = e.ThinkingLevel()
+	req.FastMode = e.FastModeEnabled()
 	req.SessionID = e.store.Meta().SessionID
 
 	resp, err := e.generateWithRetry(ctx, req, nil, nil, nil)

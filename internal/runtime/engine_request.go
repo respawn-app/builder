@@ -37,6 +37,7 @@ func (e *Engine) buildRequest(ctx context.Context, _ string, allowTools bool) (l
 		return llm.Request{}, err
 	}
 	req.ReasoningEffort = e.ThinkingLevel()
+	req.FastMode = e.FastModeEnabled()
 	if allowTools {
 		nativeWebSearch, nativeErr := e.enableNativeWebSearch(ctx)
 		if nativeErr != nil {

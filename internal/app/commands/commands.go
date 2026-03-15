@@ -18,6 +18,7 @@ const (
 	ActionCompact           Action = "compact"
 	ActionSetName           Action = "set_name"
 	ActionSetThinking       Action = "set_thinking"
+	ActionSetFast           Action = "set_fast"
 	ActionSetSupervisor     Action = "set_supervisor"
 	ActionSetAutoCompaction Action = "set_auto_compaction"
 	ActionProcesses         Action = "processes"
@@ -35,6 +36,7 @@ type Result struct {
 	FreshConversation  bool
 	SessionName        string
 	ThinkingLevel      string
+	FastMode           string
 	SupervisorMode     string
 	AutoCompactionMode string
 }
@@ -82,6 +84,9 @@ func NewDefaultRegistry() *Registry {
 	})
 	r.RegisterWithOptions("thinking", "Set or show thinking level (usage: /thinking <low|medium|high|xhigh>; empty shows current)", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
 		return Result{Handled: true, Action: ActionSetThinking, ThinkingLevel: strings.ToLower(strings.TrimSpace(args))}
+	})
+	r.RegisterWithOptions("fast", "Toggle Fast mode to request priority inference (usage: /fast [on|off|status]; empty toggles)", RegisterOptions{}, func(args string) Result {
+		return Result{Handled: true, Action: ActionSetFast, FastMode: strings.ToLower(strings.TrimSpace(args))}
 	})
 	r.RegisterWithOptions("supervisor", "Toggle reviewer invocation (usage: /supervisor [on|off]; empty toggles)", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
 		return Result{Handled: true, Action: ActionSetSupervisor, SupervisorMode: strings.ToLower(strings.TrimSpace(args))}

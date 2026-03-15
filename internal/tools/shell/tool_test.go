@@ -37,6 +37,16 @@ func waitForManagerCount(t *testing.T, manager *Manager, want int, timeout time.
 	t.Fatalf("manager count = %d, want %d", manager.Count(), want)
 }
 
+func newBackgroundTestManager(t *testing.T) *Manager {
+	t.Helper()
+	manager, err := NewManager(WithMinimumExecToBgTime(250 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+	return manager
+}
+
 func envSliceToMap(t *testing.T, in []string) map[string]string {
 	t.Helper()
 	out := make(map[string]string, len(in))
@@ -209,6 +219,23 @@ func TestTruncateBannerUsesByteWording(t *testing.T) {
 	}
 }
 
+func TestTruncateBackgroundOutputBannerReferencesLogFile(t *testing.T) {
+	in := strings.Repeat("a", headTailSize+headTailSize+10)
+	out, truncated, removed := truncateBackgroundOutput(in, 100)
+	if !truncated {
+		t.Fatal("expected truncation")
+	}
+	if removed <= 0 {
+		t.Fatalf("expected positive removed bytes, got %d", removed)
+	}
+	if !strings.Contains(out, "Omitted ") || !strings.Contains(out, "read log file for details") {
+		t.Fatalf("expected background truncation banner to point to the log file, output = %q", out)
+	}
+	if strings.Contains(out, "Consider using more targeted commands") {
+		t.Fatalf("did not expect foreground truncation guidance in background output, got %q", out)
+	}
+}
+
 func TestTruncateDoesNotDuplicateWholeOutputWhenShorterThanHeadTailWindow(t *testing.T) {
 	in := strings.Repeat("x", 543)
 	out, truncated, removed := truncate(in, 80)
@@ -236,11 +263,7 @@ func TestTruncateDoesNotDuplicateWholeOutputWhenShorterThanHeadTailWindow(t *tes
 
 func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 	workspace := t.TempDir()
-	manager, err := NewManager()
-	if err != nil {
-		t.Fatalf("new manager: %v", err)
-	}
-	t.Cleanup(func() { _ = manager.Close() })
+	manager := newBackgroundTestManager(t)
 	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
 	pollTool := NewWriteStdinTool(16_000, manager)
 
@@ -301,13 +324,164 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 	waitForManagerCount(t, manager, 0, 3*time.Second)
 }
 
-func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
+func TestExecCommandClampsShortYieldTimeAndWarns(t *testing.T) {
 	workspace := t.TempDir()
-	manager, err := NewManager()
+	manager, err := NewManager(WithMinimumExecToBgTime(1500 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
 	t.Cleanup(func() { _ = manager.Close() })
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
+
+	execInput, _ := json.Marshal(map[string]any{
+		"cmd":           "sleep 1; echo done",
+		"shell":         "/bin/sh",
+		"login":         false,
+		"yield_time_ms": 250,
+	})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "clamp-1", Name: tools.ToolExecCommand, Input: execInput})
+	if err != nil {
+		t.Fatalf("exec_command call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
+	}
+	text := decodeStringToolOutput(t, result)
+	if !strings.Contains(text, "Warning: yield_time_ms below the minimum exec-to-background time of 250ms; clamped to 1500ms.") {
+		t.Fatalf("expected clamp warning, got %q", text)
+	}
+	if strings.Contains(text, "Process moved to background.") {
+		t.Fatalf("expected command to stay foreground after clamp, got %q", text)
+	}
+	if !strings.Contains(text, "Process exited with code 0") {
+		t.Fatalf("expected exit code in output, got %q", text)
+	}
+	if !strings.Contains(text, "done") {
+		t.Fatalf("expected command output, got %q", text)
+	}
+	if manager.Count() != 0 {
+		t.Fatalf("manager count = %d, want 0", manager.Count())
+	}
+}
+
+func TestNormalizeExecYieldTimeDoesNotCapConfiguredMinimum(t *testing.T) {
+	manager, err := NewManager(WithMinimumExecToBgTime(45 * time.Second))
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	yieldTime, warning := manager.normalizeExecYieldTime(250 * time.Millisecond)
+	if yieldTime != 45*time.Second {
+		t.Fatalf("yield time = %s, want %s", yieldTime, 45*time.Second)
+	}
+	if !strings.Contains(warning, "clamped to 45000ms") {
+		t.Fatalf("expected warning to mention configured minimum, got %q", warning)
+	}
+
+	yieldTime, warning = manager.normalizeExecYieldTime(50 * time.Second)
+	if yieldTime != 50*time.Second {
+		t.Fatalf("yield time = %s, want %s", yieldTime, 50*time.Second)
+	}
+	if warning != "" {
+		t.Fatalf("did not expect warning for value above minimum, got %q", warning)
+	}
+}
+
+func TestExecCommandForegroundTruncationUsesForegroundBanner(t *testing.T) {
+	workspace := t.TempDir()
+	manager := newBackgroundTestManager(t)
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
+
+	execInput, _ := json.Marshal(map[string]any{
+		"cmd":               "i=0; while [ $i -lt 400 ]; do printf x; i=$((i+1)); done",
+		"shell":             "/bin/sh",
+		"login":             false,
+		"yield_time_ms":     2_000,
+		"max_output_tokens": 10,
+	})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "fg-trunc-1", Name: tools.ToolExecCommand, Input: execInput})
+	if err != nil {
+		t.Fatalf("exec_command call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
+	}
+	text := decodeStringToolOutput(t, result)
+	if !strings.Contains(text, "Output is very large, omitted ") {
+		t.Fatalf("expected foreground truncation banner, got %q", text)
+	}
+	if strings.Contains(text, "read log file for details") {
+		t.Fatalf("did not expect background truncation guidance in foreground output, got %q", text)
+	}
+	if strings.Contains(text, "Log file:") {
+		t.Fatalf("did not expect log file in foreground output, got %q", text)
+	}
+	if strings.Contains(text, "Process moved to background.") {
+		t.Fatalf("expected immediate completion, got %q", text)
+	}
+	if manager.Count() != 0 {
+		t.Fatalf("manager count = %d, want 0", manager.Count())
+	}
+}
+
+func TestExecCommandUsesBackgroundTruncationBannerWhenPreviewIsCut(t *testing.T) {
+	workspace := t.TempDir()
+	manager := newBackgroundTestManager(t)
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
+	pollTool := NewWriteStdinTool(16_000, manager)
+
+	execInput, _ := json.Marshal(map[string]any{
+		"cmd":               "i=0; while [ $i -lt 400 ]; do printf x; i=$((i+1)); done; sleep 1",
+		"shell":             "/bin/sh",
+		"login":             false,
+		"yield_time_ms":     250,
+		"max_output_tokens": 10,
+	})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "bg-trunc-1", Name: tools.ToolExecCommand, Input: execInput})
+	if err != nil {
+		t.Fatalf("exec_command call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
+	}
+	text := decodeStringToolOutput(t, result)
+	if !strings.Contains(text, "Process moved to background.") {
+		t.Fatalf("expected background message, got %q", text)
+	}
+	if !strings.Contains(text, "session ID 1000") {
+		t.Fatalf("expected numeric session id, got %q", text)
+	}
+	if !strings.Contains(text, "Omitted ") {
+		t.Fatalf("expected background truncation banner, got %q", text)
+	}
+	if !strings.Contains(text, "read log file for details") {
+		t.Fatalf("expected background truncation banner to reference the log file, got %q", text)
+	}
+	if strings.Contains(text, "Consider using more targeted commands") {
+		t.Fatalf("did not expect foreground truncation guidance in background output, got %q", text)
+	}
+	if strings.Contains(text, "Log file:") {
+		t.Fatalf("did not expect log file for still-running background shell, got %q", text)
+	}
+
+	pollInput, _ := json.Marshal(map[string]any{
+		"session_id":    1000,
+		"yield_time_ms": 2_000,
+	})
+	pollResult, err := pollTool.Call(context.Background(), tools.Call{ID: "bg-trunc-2", Name: tools.ToolWriteStdin, Input: pollInput})
+	if err != nil {
+		t.Fatalf("write_stdin call error: %v", err)
+	}
+	if pollResult.IsError {
+		t.Fatalf("unexpected write_stdin error: %s", string(pollResult.Output))
+	}
+	waitForManagerCount(t, manager, 0, 3*time.Second)
+}
+
+func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
+	workspace := t.TempDir()
+	manager := newBackgroundTestManager(t)
 	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
 	stdinTool := NewWriteStdinTool(16_000, manager)
 
@@ -364,13 +538,59 @@ func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
 	waitForManagerCount(t, manager, 0, 3*time.Second)
 }
 
+func TestWriteStdinUsesBackgroundTruncationBannerOnCompletion(t *testing.T) {
+	workspace := t.TempDir()
+	manager := newBackgroundTestManager(t)
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
+	stdinTool := NewWriteStdinTool(16_000, manager)
+
+	execInput, _ := json.Marshal(map[string]any{
+		"cmd":           "read line; printf '%s' \"$line\"",
+		"shell":         "/bin/sh",
+		"login":         false,
+		"tty":           true,
+		"yield_time_ms": 250,
+	})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "tty-trunc-1", Name: tools.ToolExecCommand, Input: execInput})
+	if err != nil {
+		t.Fatalf("exec_command call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
+	}
+
+	stdinInput, _ := json.Marshal(map[string]any{
+		"session_id":        1000,
+		"chars":             strings.Repeat("x", 400) + "\n",
+		"yield_time_ms":     2_000,
+		"max_output_tokens": 10,
+	})
+	stdinResult, err := stdinTool.Call(context.Background(), tools.Call{ID: "tty-trunc-2", Name: tools.ToolWriteStdin, Input: stdinInput})
+	if err != nil {
+		t.Fatalf("write_stdin call error: %v", err)
+	}
+	if stdinResult.IsError {
+		t.Fatalf("unexpected write_stdin error: %s", string(stdinResult.Output))
+	}
+	stdinText := decodeStringToolOutput(t, stdinResult)
+	if !strings.Contains(stdinText, "Omitted ") {
+		t.Fatalf("expected background truncation banner, got %q", stdinText)
+	}
+	if !strings.Contains(stdinText, "read log file for details") {
+		t.Fatalf("expected background truncation banner to reference the log file, got %q", stdinText)
+	}
+	if strings.Contains(stdinText, "Consider using more targeted commands") {
+		t.Fatalf("did not expect foreground truncation guidance in background output, got %q", stdinText)
+	}
+	if !strings.Contains(stdinText, "Log file:") {
+		t.Fatalf("expected completed background shell response to include log file, got %q", stdinText)
+	}
+	waitForManagerCount(t, manager, 0, 3*time.Second)
+}
+
 func TestWriteStdinCompletionSuppressesBackgroundNoticeEvent(t *testing.T) {
 	workspace := t.TempDir()
-	manager, err := NewManager()
-	if err != nil {
-		t.Fatalf("new manager: %v", err)
-	}
-	t.Cleanup(func() { _ = manager.Close() })
+	manager := newBackgroundTestManager(t)
 	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
 	pollTool := NewWriteStdinTool(16_000, manager)
 	events := make(chan Event, 2)
@@ -422,11 +642,7 @@ func TestWriteStdinCompletionSuppressesBackgroundNoticeEvent(t *testing.T) {
 
 func TestExecCommandClosesStdinForNonInteractiveProcess(t *testing.T) {
 	workspace := t.TempDir()
-	manager, err := NewManager()
-	if err != nil {
-		t.Fatalf("new manager: %v", err)
-	}
-	t.Cleanup(func() { _ = manager.Close() })
+	manager := newBackgroundTestManager(t)
 	events := make(chan Event, 1)
 	manager.SetEventHandler(func(evt Event) {
 		select {
@@ -474,7 +690,7 @@ func TestExecCommandClosesStdinForNonInteractiveProcess(t *testing.T) {
 }
 
 func TestManagerCloseKillsRunningProcesses(t *testing.T) {
-	manager, err := NewManager()
+	manager, err := NewManager(WithMinimumExecToBgTime(250 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}

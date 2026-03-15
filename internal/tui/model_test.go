@@ -900,6 +900,56 @@ func TestDetailToolFormattingShowsTimeoutAndInlineOutput(t *testing.T) {
 	}
 }
 
+func TestWriteStdinPollFormattingShowsDurationInOngoingAndDetail(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: "Polled session 1149 for 2s",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "write_stdin",
+			IsShell:  true,
+			Command:  "Polled session 1149 for 2s",
+		},
+	})
+
+	ongoing := plainTranscript(m.View())
+	if !strings.Contains(ongoing, "Polled session 1149 for 2s") {
+		t.Fatalf("expected poll duration visible in ongoing view, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detail := plainTranscript(m.View())
+	if !strings.Contains(detail, "Polled session 1149 for 2s") {
+		t.Fatalf("expected poll duration visible in detail view, got %q", detail)
+	}
+}
+
+func TestWriteStdinPollFormattingShowsSubSecondDurationInOngoingAndDetail(t *testing.T) {
+	m := NewModel()
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: "Polled session 1149 for 250ms",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "write_stdin",
+			IsShell:  true,
+			Command:  "Polled session 1149 for 250ms",
+		},
+	})
+
+	ongoing := plainTranscript(m.View())
+	if !strings.Contains(ongoing, "Polled session 1149 for 250ms") {
+		t.Fatalf("expected sub-second poll duration visible in ongoing view, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detail := plainTranscript(m.View())
+	if !strings.Contains(detail, "Polled session 1149 for 250ms") {
+		t.Fatalf("expected sub-second poll duration visible in detail view, got %q", detail)
+	}
+}
+
 func TestToolBlockRoleFromResult(t *testing.T) {
 	if got := toolBlockRoleFromResult("tool_result_ok", "tool"); got != "tool_success" {
 		t.Fatalf("unexpected role for success result: %q", got)

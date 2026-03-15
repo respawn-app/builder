@@ -53,7 +53,7 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 			logger.Logf("config.source %s", line)
 		}
 
-		wiring, err := newRuntimeWiringWithBackground(store, active, enabledTools, boot.cfg.WorkspaceRoot, boot.authManager, logger, boot.background, runtimeWiringOptions{})
+		wiring, err := newRuntimeWiringWithBackground(store, active, enabledTools, boot.cfg.WorkspaceRoot, boot.authManager, logger, boot.background, runtimeWiringOptions{FastMode: boot.fastModeState})
 		if err != nil {
 			_ = logger.Close()
 			return err

@@ -83,6 +83,10 @@ func InferProviderCapabilities(baseURL string, oauth bool) ProviderCapabilities 
 	}
 }
 
+func SupportsFastModeProvider(caps ProviderCapabilities) bool {
+	return caps.SupportsResponsesAPI && caps.IsOpenAIFirstParty
+}
+
 func hostForBaseURL(baseURL string) string {
 	trimmed := strings.TrimSpace(baseURL)
 	if trimmed == "" {

@@ -57,6 +57,36 @@ func TestFormatInputAndOutput(t *testing.T) {
 	}
 }
 
+func TestFormatInputWriteStdinPollIncludesYieldTime(t *testing.T) {
+	cmd, timeout := FormatInput("write_stdin", json.RawMessage(`{"session_id":1149,"yield_time_ms":2000}`), DefaultShellTimeoutSecs)
+	if cmd != "Polled session 1149 for 2s" {
+		t.Fatalf("cmd = %q, want poll transcript summary", cmd)
+	}
+	if timeout != "" {
+		t.Fatalf("timeout = %q, want empty timeout label", timeout)
+	}
+}
+
+func TestFormatInputWriteStdinPollSubSecondUsesStandardDurationString(t *testing.T) {
+	cmd, timeout := FormatInput("write_stdin", json.RawMessage(`{"session_id":1149,"yield_time_ms":250}`), DefaultShellTimeoutSecs)
+	if cmd != "Polled session 1149 for 250ms" {
+		t.Fatalf("cmd = %q, want poll transcript summary with standard duration", cmd)
+	}
+	if timeout != "" {
+		t.Fatalf("timeout = %q, want empty timeout label", timeout)
+	}
+}
+
+func TestFormatInputWriteStdinPollWithoutYieldTimeUsesLegacySummary(t *testing.T) {
+	cmd, timeout := FormatInput("write_stdin", json.RawMessage(`{"session_id":1149}`), DefaultShellTimeoutSecs)
+	if cmd != "poll session 1149" {
+		t.Fatalf("cmd = %q, want legacy poll summary without explicit duration", cmd)
+	}
+	if timeout != "" {
+		t.Fatalf("timeout = %q, want empty timeout label", timeout)
+	}
+}
+
 func TestFormatOutputForTool_ViewImageSummarizesBinaryPayload(t *testing.T) {
 	out := FormatOutputForTool("view_image", json.RawMessage(`[
 		{"type":"input_image","image_url":"data:image/png;base64,AAAA"},

@@ -108,6 +108,7 @@ type runtimeWiringOptions struct {
 	AskHandler func(req askquestion.Request) (string, error)
 	OnEvent    func(evt runtime.Event)
 	Headless   bool
+	FastMode   *runtime.FastModeState
 }
 
 func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools []tools.ID, workspaceRoot string, mgr *auth.Manager, logger *runLogger, opts runtimeWiringOptions) (*runtimeWiring, error) {
@@ -122,6 +123,7 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		store.Meta().SessionID,
 		enabledTools,
 		time.Duration(active.Timeouts.ShellDefaultSeconds)*time.Second,
+		time.Duration(active.MinimumExecToBgSeconds)*time.Second,
 		active.ShellOutputMaxChars,
 		active.AllowNonCwdEdits,
 		llm.SupportsVisionInputsModel(active.Model),
@@ -184,6 +186,8 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		Temperature:                   1,
 		MaxTokens:                     0,
 		ThinkingLevel:                 active.ThinkingLevel,
+		FastModeEnabled:               active.PriorityRequestMode,
+		FastModeState:                 opts.FastMode,
 		WebSearchMode:                 active.WebSearch,
 		EnabledTools:                  enabledTools,
 		AutoCompactTokenLimit:         active.ContextCompactionThresholdTokens,
@@ -251,15 +255,16 @@ func configSourceLines(src config.SourceReport) []string {
 	return lines
 }
 
-func buildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []tools.ID, shellDefaultTimeout time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsViewImage bool, logger *runLogger, background *shelltool.Manager) (*tools.Registry, *askquestion.Broker, *shelltool.Manager, error) {
+func buildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []tools.ID, shellDefaultTimeout time.Duration, minimumExecToBgTime time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsViewImage bool, logger *runLogger, background *shelltool.Manager) (*tools.Registry, *askquestion.Broker, *shelltool.Manager, error) {
 	broker := askquestion.NewBroker()
 	if background == nil {
 		var err error
-		background, err = shelltool.NewManager()
+		background, err = shelltool.NewManager(shelltool.WithMinimumExecToBgTime(minimumExecToBgTime))
 		if err != nil {
 			return nil, nil, nil, err
 		}
 	}
+	background.SetMinimumExecToBgTime(minimumExecToBgTime)
 	patchOutsideWorkspaceApprover := newOutsideWorkspaceApprover(broker, "editing")
 	readOutsideWorkspaceApprover := newOutsideWorkspaceApprover(broker, "reading")
 	patch, err := patchtool.New(

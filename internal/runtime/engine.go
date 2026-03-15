@@ -78,6 +78,8 @@ type Config struct {
 	Temperature                   float64
 	MaxTokens                     int
 	ThinkingLevel                 string
+	FastModeEnabled               bool
+	FastModeState                 *FastModeState
 	WebSearchMode                 string
 	EnabledTools                  []tools.ID
 	AutoCompactTokenLimit         int
