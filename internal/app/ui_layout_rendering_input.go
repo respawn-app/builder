@@ -13,16 +13,17 @@ type wrappedAskPromptLine struct {
 
 func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
 	m := l.model
-	if m.psVisible {
+	inputState := m.inputModeState()
+	if inputState.Mode == uiInputModeProcessList {
 		return []string{padRight("", width)}
 	}
-	if m.rollbackMode {
+	if inputState.Mode == uiInputModeRollbackSelection {
 		return nil
 	}
 	if width < 1 {
 		return []string{padRight("", width)}
 	}
-	if m.activeAsk != nil {
+	if inputState.ShowsAskInput {
 		return l.renderAskInputLines(width, style)
 	}
 
@@ -140,11 +141,12 @@ func inputContentLineLimit(height int) int {
 }
 
 func (l uiViewLayout) inputPanelLineCount(width, height int) int {
-	if l.model.rollbackMode {
+	inputState := l.model.inputModeState()
+	if inputState.Mode == uiInputModeRollbackSelection {
 		return 0
 	}
 	contentLines := len(l.wrappedMainInputLines(width))
-	if l.model.activeAsk != nil {
+	if inputState.ShowsAskInput {
 		contentLines = len(l.wrappedAskPromptLines(width))
 	}
 	if contentLines < 1 {

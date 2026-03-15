@@ -12,6 +12,7 @@ import (
 
 func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := c.model
+	inputState := m.inputModeState()
 	keyString := strings.ToLower(msg.String())
 	if msg.Type != tea.KeyEnter && msg.Type != keyTypeShiftEnterCSI {
 		c.clearPendingCSIShiftEnter()
@@ -19,33 +20,10 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.Type != tea.KeyEsc {
 		m.lastEscAt = time.Time{}
 	}
-	if m.rollbackMode {
-		switch msg.Type {
-		case tea.KeyCtrlC:
-			m.exitAction = UIActionExit
-			if overlayCmd := m.popRollbackOverlayIfNeeded(); overlayCmd != nil {
-				m.stopRollbackSelectionMode()
-				return m, tea.Sequence(overlayCmd, tea.Quit)
-			}
-			return m, tea.Quit
-		case tea.KeyEsc:
-			return m, c.stopRollbackSelectionFlowCmd()
-		case tea.KeyUp:
-			m.moveRollbackSelection(-1)
-			return m, nil
-		case tea.KeyDown:
-			m.moveRollbackSelection(1)
-			return m, nil
-		case tea.KeyEnter:
-			return m, c.beginRollbackEditingFlowCmd()
-		case tea.KeyPgUp, tea.KeyPgDown:
-			m.forwardToView(msg)
-			return m, nil
-		default:
-			return m, nil
-		}
+	if inputState.Mode == uiInputModeRollbackSelection {
+		return c.handleRollbackSelectionKey(msg)
 	}
-	if m.psVisible {
+	if inputState.Mode == uiInputModeProcessList {
 		next, cmd := c.handleProcessListKey(msg)
 		next.(*uiModel).syncViewport()
 		return next, cmd
@@ -55,7 +33,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if text == "" {
 			return m, nil
 		}
-		if m.rollbackEditing && !m.busy {
+		if inputState.Mode == uiInputModeRollbackEdit && !inputState.Busy {
 			return c.startRollbackFork(text)
 		}
 		return c.queueOrStartSubmission(text)
@@ -98,7 +76,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyShiftTab, tea.KeyCtrlT:
 		return m, m.toggleTranscriptMode()
 	case tea.KeyEsc:
-		if m.rollbackEditing {
+		if inputState.Mode == uiInputModeRollbackEdit {
 			if strings.TrimSpace(m.input) == "" {
 				return m, c.cancelRollbackEditingToSelectionFlowCmd()
 			}
@@ -127,7 +105,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if m.rollbackEditing && !m.busy {
+		if inputState.Mode == uiInputModeRollbackEdit && !inputState.Busy {
 			return c.startRollbackFork(text)
 		}
 		if command, knownCommand := m.commandRegistry.Command(text); knownCommand {
@@ -280,6 +258,34 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.insertInputRunes(msg.Runes)
 		}
+		return m, nil
+	}
+}
+
+func (c uiInputController) handleRollbackSelectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := c.model
+	switch msg.Type {
+	case tea.KeyCtrlC:
+		m.exitAction = UIActionExit
+		if overlayCmd := m.popRollbackOverlayIfNeeded(); overlayCmd != nil {
+			m.stopRollbackSelectionMode()
+			return m, tea.Sequence(overlayCmd, tea.Quit)
+		}
+		return m, tea.Quit
+	case tea.KeyEsc:
+		return m, c.stopRollbackSelectionFlowCmd()
+	case tea.KeyUp:
+		m.moveRollbackSelection(-1)
+		return m, nil
+	case tea.KeyDown:
+		m.moveRollbackSelection(1)
+		return m, nil
+	case tea.KeyEnter:
+		return m, c.beginRollbackEditingFlowCmd()
+	case tea.KeyPgUp, tea.KeyPgDown:
+		m.forwardToView(msg)
+		return m, nil
+	default:
 		return m, nil
 	}
 }
