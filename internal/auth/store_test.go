@@ -161,3 +161,62 @@ func TestFileStoreSaveCorrectsExistingInsecurePermissions(t *testing.T) {
 		t.Fatalf("expected corrected auth state mode %04o, got %04o", authStateFileMode, got)
 	}
 }
+
+func TestEnvAPIKeyOverrideStoreLoadPrefersEnvironmentWithoutPersistedState(t *testing.T) {
+	store := NewEnvAPIKeyOverrideStore(NewMemoryStore(State{
+		Scope: ScopeGlobal,
+		Method: Method{
+			Type: MethodOAuth,
+			OAuth: &OAuthMethod{
+				AccessToken:  "oauth-access",
+				RefreshToken: "oauth-refresh",
+				TokenType:    "Bearer",
+				Expiry:       time.Date(2026, time.January, 1, 11, 0, 0, 0, time.UTC),
+			},
+		},
+	}), func(key string) (string, bool) {
+		if key == "OPENAI_API_KEY" {
+			return "  sk-env  ", true
+		}
+		return "", false
+	})
+
+	state, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatalf("load auth state: %v", err)
+	}
+	if state.Method.Type != MethodAPIKey {
+		t.Fatalf("expected api key override, got %q", state.Method.Type)
+	}
+	if state.Method.APIKey == nil || state.Method.APIKey.Key != "sk-env" {
+		t.Fatalf("expected trimmed env api key, got %+v", state.Method.APIKey)
+	}
+}
+
+func TestEnvAPIKeyOverrideStoreSaveDelegatesToBaseStore(t *testing.T) {
+	base := NewMemoryStore(EmptyState())
+	store := NewEnvAPIKeyOverrideStore(base, func(string) (string, bool) { return "", false })
+
+	want := State{
+		Scope: ScopeGlobal,
+		Method: Method{
+			Type:   MethodAPIKey,
+			APIKey: &APIKeyMethod{Key: "sk-saved"},
+		},
+		UpdatedAt: time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC),
+	}
+	if err := store.Save(context.Background(), want); err != nil {
+		t.Fatalf("save auth state: %v", err)
+	}
+
+	loaded, err := base.Load(context.Background())
+	if err != nil {
+		t.Fatalf("load delegated state: %v", err)
+	}
+	if loaded.Method.Type != MethodAPIKey {
+		t.Fatalf("expected delegated api key save, got %q", loaded.Method.Type)
+	}
+	if loaded.Method.APIKey == nil || loaded.Method.APIKey.Key != "sk-saved" {
+		t.Fatalf("expected delegated saved key, got %+v", loaded.Method.APIKey)
+	}
+}

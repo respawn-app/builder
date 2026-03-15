@@ -2,9 +2,13 @@ package app
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"os"
 	"strings"
 	"testing"
 
+	"builder/internal/auth"
 	"builder/internal/runtime"
 	"builder/internal/session"
 	"builder/internal/tools/askquestion"
@@ -73,5 +77,29 @@ func TestRunPromptAskHandlerReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "You can't ask questions") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunPromptWithoutAuthReturnsErrAuthNotConfiguredWithoutReadingStdin(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "")
+
+	originalStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stdin: %v", err)
+	}
+	_ = w.Close()
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = originalStdin
+		_ = r.Close()
+	})
+
+	_, err = RunPrompt(context.Background(), Options{WorkspaceRoot: workspace}, "hello", 0, nil)
+	if !errors.Is(err, auth.ErrAuthNotConfigured) {
+		t.Fatalf("expected auth not configured without stdin prompt, got %v", err)
 	}
 }

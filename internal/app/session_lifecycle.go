@@ -135,7 +135,7 @@ func resolveSessionAction(ctx context.Context, boot appBootstrap, store *session
 		if _, err := boot.authManager.ClearMethod(ctx, true); err != nil {
 			return "", "", "", false, false, err
 		}
-		if err := ensureAuthReady(ctx, boot.authManager, boot.oauthOpts); err != nil {
+		if err := ensureAuthReady(ctx, boot.authManager, boot.oauthOpts, boot.authInteractor); err != nil {
 			return "", "", "", false, false, err
 		}
 		return store.Meta().SessionID, "", "", false, true, nil
