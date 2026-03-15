@@ -14,9 +14,7 @@ import (
 
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
-	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
-	"github.com/openai/openai-go/v3/shared"
 )
 
 const (
@@ -54,8 +52,8 @@ type HTTPTransport struct {
 func NewHTTPTransport(auth AuthHeaderProvider) *HTTPTransport {
 	window := 200000
 	if raw := strings.TrimSpace(os.Getenv("BUILDER_CONTEXT_WINDOW")); raw != "" {
-		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
-			window = v
+		if value, err := strconv.Atoi(raw); err == nil && value > 0 {
+			window = value
 		}
 	}
 	return &HTTPTransport{
@@ -97,12 +95,11 @@ func (t *HTTPTransport) Generate(ctx context.Context, request OpenAIRequest) (Op
 	}
 
 	outputItems, assistantText, assistantPhase, toolCalls, reasoning, reasoningItems := parseOutputItems(decoded.Output)
-	reasoning = normalizeReasoningEntries(reasoning)
 	return OpenAIResponse{
 		AssistantText:  assistantText,
 		AssistantPhase: assistantPhase,
 		ToolCalls:      toolCalls,
-		Reasoning:      reasoning,
+		Reasoning:      normalizeReasoningEntries(reasoning),
 		ReasoningItems: reasoningItems,
 		OutputItems:    outputItems,
 		Usage:          usageFromSDK(decoded.Usage, windowTokens),
@@ -137,105 +134,14 @@ func (t *HTTPTransport) GenerateStreamWithEvents(ctx context.Context, request Op
 	stream := service.NewStreaming(ctx, payload, reqOpts...)
 	defer stream.Close()
 
-	var assistantText strings.Builder
-	acc := newToolCallAccumulator()
-	reasoningAcc := newReasoningAccumulator()
-	usage := Usage{WindowTokens: windowTokens}
-	var completed *responses.Response
-
+	accumulator := newResponseStreamAccumulator(callbacks, windowTokens)
 	for stream.Next() {
-		evt := stream.Current()
-		switch evt.Type {
-		case "response.output_text.delta":
-			if evt.Delta != "" {
-				assistantText.WriteString(evt.Delta)
-				if callbacks.OnAssistantDelta != nil {
-					callbacks.OnAssistantDelta(evt.Delta)
-				}
-			}
-		case "response.output_item.added", "response.output_item.done":
-			acc.UpsertFromOutput(evt.Item)
-			reasoningAcc.UpsertReasoningItem(evt.Item)
-		case "response.function_call_arguments.delta":
-			acc.AppendArguments(evt.ItemID, evt.Delta)
-		case "response.function_call_arguments.done":
-			acc.SetArguments(evt.ItemID, evt.Arguments)
-		case "response.reasoning_summary_text.delta":
-			key := reasoningEventKey(evt.ItemID, evt.OutputIndex, evt.SummaryIndex)
-			reasoningAcc.Append(reasoningRoleSummary, key, evt.Delta)
-			if callbacks.OnReasoningSummaryDelta != nil {
-				callbacks.OnReasoningSummaryDelta(reasoningSummaryDeltaFromText(key, reasoningRoleSummary, reasoningAcc.Current(reasoningRoleSummary, key)))
-			}
-		case "response.reasoning_summary_text.done":
-			key := reasoningEventKey(evt.ItemID, evt.OutputIndex, evt.SummaryIndex)
-			reasoningAcc.Set(reasoningRoleSummary, key, evt.Text)
-			if callbacks.OnReasoningSummaryDelta != nil {
-				callbacks.OnReasoningSummaryDelta(reasoningSummaryDeltaFromText(key, reasoningRoleSummary, reasoningAcc.Current(reasoningRoleSummary, key)))
-			}
-		case "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
-			if evt.Part.Type == "summary_text" {
-				key := reasoningEventKey(evt.ItemID, evt.OutputIndex, evt.SummaryIndex)
-				reasoningAcc.Set(reasoningRoleSummary, key, evt.Part.Text)
-				if callbacks.OnReasoningSummaryDelta != nil {
-					callbacks.OnReasoningSummaryDelta(reasoningSummaryDeltaFromText(key, reasoningRoleSummary, reasoningAcc.Current(reasoningRoleSummary, key)))
-				}
-			}
-		case "response.completed":
-			e := evt.AsResponseCompleted()
-			completed = &e.Response
-		}
+		accumulator.Consume(stream.Current())
 	}
 	if err := stream.Err(); err != nil {
 		return OpenAIResponse{}, mapOpenAIRequestError(t.errorProviderID(mode), err, rawResp, "read responses stream events")
 	}
-
-	finalText := assistantText.String()
-	finalCalls := acc.ToToolCalls()
-	finalReasoning := reasoningAcc.Entries()
-	finalReasoningItems := reasoningAcc.Items()
-	finalOutputItems := buildOutputItemsFromStream(finalText, finalCalls, finalReasoning, finalReasoningItems)
-
-	if completed != nil {
-		if completed.Usage.InputTokens > 0 || completed.Usage.OutputTokens > 0 {
-			usage = usageFromSDK(completed.Usage, windowTokens)
-		}
-		parsedItems, parsedText, parsedPhase, parsedCalls, parsedReasoning, parsedReasoningItems := parseOutputItems(completed.Output)
-		// Treat response.completed as canonical output for assistant text.
-		// Streaming deltas are provisional and can diverge from final structured items.
-		finalText = parsedText
-		finalPhase := MessagePhase("")
-		if parsedPhase != "" {
-			finalPhase = parsedPhase
-		}
-		acc.Merge(parsedCalls)
-		finalCalls = acc.ToToolCalls()
-		finalReasoning = mergeReasoningEntries(parsedReasoning, finalReasoning)
-		finalReasoning = normalizeReasoningEntries(finalReasoning)
-		finalReasoningItems = mergeReasoningItems(parsedReasoningItems, finalReasoningItems)
-		if len(parsedItems) > 0 {
-			finalOutputItems = parsedItems
-		}
-
-		return OpenAIResponse{
-			AssistantText:  finalText,
-			AssistantPhase: finalPhase,
-			ToolCalls:      finalCalls,
-			Reasoning:      finalReasoning,
-			ReasoningItems: finalReasoningItems,
-			OutputItems:    finalOutputItems,
-			Usage:          usage,
-		}, nil
-	}
-
-	return OpenAIResponse{
-		AssistantText:  finalText,
-		AssistantPhase: "",
-		ToolCalls:      finalCalls,
-		Reasoning:      normalizeReasoningEntries(finalReasoning),
-		ReasoningItems: finalReasoningItems,
-		OutputItems:    finalOutputItems,
-		Usage:          usage,
-	}, nil
+	return accumulator.Response(), nil
 }
 
 func (t *HTTPTransport) Compact(ctx context.Context, request OpenAICompactionRequest) (OpenAICompactionResponse, error) {
@@ -408,166 +314,4 @@ func (t *HTTPTransport) resolveAuth(ctx context.Context) (string, openAIAuthMode
 		mode.AccountID = strings.TrimSpace(accountID)
 	}
 	return authHeader, mode, nil
-}
-
-func (t *HTTPTransport) buildPayload(request OpenAIRequest, mode openAIAuthMode) (responses.ResponseNewParams, error) {
-	input := buildResponsesInput(request.Messages, request.Items)
-
-	tools := make([]responses.ToolUnionParam, 0, len(request.Tools))
-	for _, tool := range request.Tools {
-		if len(tool.Schema) > 0 && !json.Valid(tool.Schema) {
-			return responses.ResponseNewParams{}, fmt.Errorf("invalid tool schema for %s", tool.Name)
-		}
-		params := map[string]any{"type": "object", "properties": map[string]any{}}
-		if len(tool.Schema) > 0 {
-			if err := json.Unmarshal(tool.Schema, &params); err != nil {
-				return responses.ResponseNewParams{}, fmt.Errorf("invalid tool schema for %s", tool.Name)
-			}
-		}
-		normalizeSchemaAdditionalProperties(params)
-		toolParam := responses.ToolParamOfFunction(tool.Name, params, false)
-		if desc := strings.TrimSpace(tool.Description); desc != "" && toolParam.OfFunction != nil {
-			toolParam.OfFunction.Description = openai.String(desc)
-		}
-		tools = append(tools, toolParam)
-	}
-	if request.EnableNativeWebSearch {
-		tools = append(tools, responses.ToolParamOfWebSearch(responses.WebSearchToolTypeWebSearch))
-	}
-
-	out := responses.ResponseNewParams{
-		Model: request.Model,
-		Store: openai.Bool(t.Store),
-	}
-	if len(input) > 0 {
-		out.Input = responses.ResponseNewParamsInputUnion{OfInputItemList: input}
-	}
-	if instructions := strings.TrimSpace(request.SystemPrompt); instructions != "" {
-		out.Instructions = openai.String(instructions)
-	}
-	if len(tools) > 0 {
-		out.Tools = tools
-		out.ParallelToolCalls = openai.Bool(true)
-	}
-	if shouldApplyReasoningEffort(request.Model, request.ReasoningEffort) {
-		out.Reasoning = shared.ReasoningParam{
-			Effort:  shared.ReasoningEffort(strings.TrimSpace(request.ReasoningEffort)),
-			Summary: shared.ReasoningSummaryConcise,
-		}
-		out.Include = append(out.Include, responses.ResponseIncludableReasoningEncryptedContent)
-	}
-	if request.FastMode && SupportsFastModeProvider(InferProviderCapabilities(t.serviceBaseURL(mode), mode.IsOAuth)) {
-		out.ServiceTier = responses.ResponseNewParamsServiceTierPriority
-	}
-	if request.MaxTokens > 0 && !mode.IsOAuth {
-		out.MaxOutputTokens = openai.Int(int64(request.MaxTokens))
-	}
-	if request.Temperature != 0 && !mode.IsOAuth {
-		out.Temperature = openai.Float(request.Temperature)
-	}
-	if request.StructuredOutput != nil {
-		var schema map[string]any
-		if err := json.Unmarshal(request.StructuredOutput.Schema, &schema); err != nil {
-			return responses.ResponseNewParams{}, fmt.Errorf("invalid structured output schema")
-		}
-		text := responses.ResponseTextConfigParam{
-			Format: responses.ResponseFormatTextConfigParamOfJSONSchema(strings.TrimSpace(request.StructuredOutput.Name), schema),
-		}
-		if text.Format.OfJSONSchema != nil {
-			if request.StructuredOutput.Strict {
-				text.Format.OfJSONSchema.Strict = param.NewOpt(true)
-			}
-			if description := strings.TrimSpace(request.StructuredOutput.Description); description != "" {
-				text.Format.OfJSONSchema.Description = param.NewOpt(description)
-			}
-		}
-		out.Text = text
-	}
-
-	return out, nil
-}
-
-func (t *HTTPTransport) buildInputTokenCountParams(request OpenAIRequest) (responses.InputTokenCountParams, error) {
-	input := buildResponsesInput(request.Messages, request.Items)
-
-	tools := make([]responses.ToolUnionParam, 0, len(request.Tools))
-	for _, tool := range request.Tools {
-		if len(tool.Schema) > 0 && !json.Valid(tool.Schema) {
-			return responses.InputTokenCountParams{}, fmt.Errorf("invalid tool schema for %s", tool.Name)
-		}
-		params := map[string]any{"type": "object", "properties": map[string]any{}}
-		if len(tool.Schema) > 0 {
-			if err := json.Unmarshal(tool.Schema, &params); err != nil {
-				return responses.InputTokenCountParams{}, fmt.Errorf("invalid tool schema for %s", tool.Name)
-			}
-		}
-		normalizeSchemaAdditionalProperties(params)
-		toolParam := responses.ToolParamOfFunction(tool.Name, params, false)
-		if description := strings.TrimSpace(tool.Description); description != "" && toolParam.OfFunction != nil {
-			toolParam.OfFunction.Description = openai.String(description)
-		}
-		tools = append(tools, toolParam)
-	}
-	if request.EnableNativeWebSearch {
-		tools = append(tools, responses.ToolParamOfWebSearch(responses.WebSearchToolTypeWebSearch))
-	}
-
-	out := responses.InputTokenCountParams{
-		Model: param.NewOpt(strings.TrimSpace(request.Model)),
-	}
-	if len(input) > 0 {
-		out.Input = responses.InputTokenCountParamsInputUnion{OfResponseInputItemArray: input}
-	}
-	if instructions := strings.TrimSpace(request.SystemPrompt); instructions != "" {
-		out.Instructions = param.NewOpt(instructions)
-	}
-	if len(tools) > 0 {
-		out.Tools = tools
-		out.ParallelToolCalls = param.NewOpt(true)
-	}
-	if shouldApplyReasoningEffort(request.Model, request.ReasoningEffort) {
-		out.Reasoning = shared.ReasoningParam{
-			Effort:  shared.ReasoningEffort(strings.TrimSpace(request.ReasoningEffort)),
-			Summary: shared.ReasoningSummaryConcise,
-		}
-	}
-	if request.StructuredOutput != nil {
-		var schema map[string]any
-		if err := json.Unmarshal(request.StructuredOutput.Schema, &schema); err != nil {
-			return responses.InputTokenCountParams{}, fmt.Errorf("invalid structured output schema")
-		}
-		text := responses.InputTokenCountParamsText{
-			Format: responses.ResponseFormatTextConfigParamOfJSONSchema(strings.TrimSpace(request.StructuredOutput.Name), schema),
-		}
-		if text.Format.OfJSONSchema != nil {
-			if request.StructuredOutput.Strict {
-				text.Format.OfJSONSchema.Strict = param.NewOpt(true)
-			}
-			if description := strings.TrimSpace(request.StructuredOutput.Description); description != "" {
-				text.Format.OfJSONSchema.Description = param.NewOpt(description)
-			}
-		}
-		out.Text = text
-	}
-
-	return out, nil
-}
-
-func (t *HTTPTransport) buildCompactPayload(request OpenAICompactionRequest) (responses.ResponseCompactParams, error) {
-	if strings.TrimSpace(request.Model) == "" {
-		return responses.ResponseCompactParams{}, fmt.Errorf("compaction model is required")
-	}
-	input := buildResponsesInput(nil, request.InputItems)
-	out := responses.ResponseCompactParams{
-		Model: responses.ResponseCompactParamsModel(request.Model),
-	}
-	if len(input) > 0 {
-		out.Input = responses.ResponseCompactParamsInputUnion{
-			OfResponseInputItemArray: input,
-		}
-	}
-	if instructions := strings.TrimSpace(request.Instructions); instructions != "" {
-		out.Instructions = param.NewOpt(instructions)
-	}
-	return out, nil
 }

@@ -1,0 +1,164 @@
+package config
+
+import (
+	"encoding/json"
+	"strconv"
+	"strings"
+
+	"builder/internal/tools"
+)
+
+const (
+	defaultModel               = "gpt-5.3-codex"
+	defaultThinkingLevel       = "high"
+	defaultTheme               = "dark"
+	defaultModelContextWindow  = 400_000
+	defaultModelTimeoutSeconds = 400
+	defaultShellTimeoutSeconds = 300
+	defaultMinimumExecToBgSec  = 15
+	defaultShellOutputMaxChars = 16_000
+	defaultBGShellsOutput      = "default"
+	defaultCompactionThreshold = 360_000
+	defaultReviewerFrequency   = "off"
+	defaultReviewerThinking    = "low"
+	defaultReviewerTimeoutSec  = 60
+	defaultReviewerSuggestions = 5
+	defaultTUIAlternateScreen  = "auto"
+	defaultTUIScrollMode       = "alt"
+	defaultCompactionMode      = "native"
+)
+
+func defaultSettings() Settings {
+	enabled := map[tools.ID]bool{}
+	for _, id := range tools.CatalogIDs() {
+		enabled[id] = false
+	}
+	for _, id := range tools.DefaultEnabledToolIDs() {
+		enabled[id] = true
+	}
+	return Settings{
+		Model:                            defaultModel,
+		ThinkingLevel:                    defaultThinkingLevel,
+		Theme:                            defaultTheme,
+		TUIAlternateScreen:               TUIAlternateScreenPolicy(defaultTUIAlternateScreen),
+		TUIScrollMode:                    TUIScrollMode(defaultTUIScrollMode),
+		NotificationMethod:               "auto",
+		ToolPreambles:                    true,
+		PriorityRequestMode:              false,
+		WebSearch:                        "off",
+		Store:                            false,
+		AllowNonCwdEdits:                 false,
+		ModelContextWindow:               defaultModelContextWindow,
+		ContextCompactionThresholdTokens: defaultCompactionThreshold,
+		MinimumExecToBgSeconds:           defaultMinimumExecToBgSec,
+		CompactionMode:                   CompactionMode(defaultCompactionMode),
+		EnabledTools:                     enabled,
+		ShellOutputMaxChars:              defaultShellOutputMaxChars,
+		BGShellsOutput:                   BGShellsOutputMode(defaultBGShellsOutput),
+		Timeouts: Timeouts{
+			ModelRequestSeconds: defaultModelTimeoutSeconds,
+			ShellDefaultSeconds: defaultShellTimeoutSeconds,
+		},
+		Reviewer: ReviewerSettings{
+			Frequency:      defaultReviewerFrequency,
+			Model:          "",
+			ThinkingLevel:  defaultReviewerThinking,
+			TimeoutSeconds: defaultReviewerTimeoutSec,
+			MaxSuggestions: defaultReviewerSuggestions,
+		},
+	}
+}
+
+func defaultSettingsTOML() string {
+	defaults := defaultSettings()
+	toolDefaults := map[string]bool{}
+	for _, id := range tools.CatalogIDs() {
+		toolDefaults[string(id)] = defaults.EnabledTools[id]
+	}
+	payload := map[string]any{
+		"model":                               defaults.Model,
+		"thinking_level":                      defaults.ThinkingLevel,
+		"theme":                               defaults.Theme,
+		"tui_alternate_screen":                defaults.TUIAlternateScreen,
+		"tui_scroll_mode":                     defaults.TUIScrollMode,
+		"notification_method":                 defaults.NotificationMethod,
+		"tool_preambles":                      defaults.ToolPreambles,
+		"priority_request_mode":               defaults.PriorityRequestMode,
+		"web_search":                          defaults.WebSearch,
+		"openai_base_url":                     defaults.OpenAIBaseURL,
+		"store":                               defaults.Store,
+		"allow_non_cwd_edits":                 defaults.AllowNonCwdEdits,
+		"model_context_window":                defaults.ModelContextWindow,
+		"context_compaction_threshold_tokens": defaults.ContextCompactionThresholdTokens,
+		"minimum_exec_to_bg_seconds":          defaults.MinimumExecToBgSeconds,
+		"shell_output_max_chars":              defaults.ShellOutputMaxChars,
+		"bg_shells_output":                    defaults.BGShellsOutput,
+		"compaction_mode":                     defaults.CompactionMode,
+		"tools":                               toolDefaults,
+		"timeouts": map[string]int{
+			"model_request_seconds": defaults.Timeouts.ModelRequestSeconds,
+			"shell_default_seconds": defaults.Timeouts.ShellDefaultSeconds,
+		},
+		"reviewer": map[string]any{
+			"frequency":       defaults.Reviewer.Frequency,
+			"model":           "<inherits model when unset>",
+			"thinking_level":  defaults.Reviewer.ThinkingLevel,
+			"timeout_seconds": defaults.Reviewer.TimeoutSeconds,
+			"max_suggestions": defaults.Reviewer.MaxSuggestions,
+		},
+		"persistence_root": DefaultPersistence,
+	}
+	encoded, _ := json.MarshalIndent(payload, "", "  ")
+	out := "# builder settings\n" +
+		"# edit and restart builder to apply changes\n\n" +
+		"# Unknown keys are rejected to keep config changes explicit and safe.\n\n" +
+		"# compaction_mode options:\n" +
+		"# - native: provider-native compaction when available, fallback to local\n" +
+		"# - local: force local summary compaction\n" +
+		"# - none: disable both automatic and manual compaction\n\n" +
+		"# bg_shells_output applies directly to exit code 0 background shells.\n" +
+		"# Non-zero exits use verbose only when bg_shells_output=verbose; otherwise\n" +
+		"# they fall back to default truncation.\n\n" +
+		"# exec_command yield_time_ms values below minimum_exec_to_bg_seconds are\n" +
+		"# clamped up and surfaced to the model as a warning before command output.\n\n" +
+		"# Note: tui_scroll_mode=native forces main UI to normal buffer even if\n" +
+		"# tui_alternate_screen=always, so transcript replay stays visible in scrollback.\n\n" +
+		"# This JSON block mirrors current defaults for readability:\n" +
+		"# " + strings.ReplaceAll(string(encoded), "\n", "\n# ") + "\n\n" +
+		"model = \"" + defaults.Model + "\"\n" +
+		"thinking_level = \"" + defaults.ThinkingLevel + "\"\n" +
+		"theme = \"" + defaults.Theme + "\"\n" +
+		"tui_alternate_screen = \"" + string(defaults.TUIAlternateScreen) + "\"\n" +
+		"tui_scroll_mode = \"" + string(defaults.TUIScrollMode) + "\"\n" +
+		"notification_method = \"" + defaults.NotificationMethod + "\"\n" +
+		"# Known tradeoff: sessions started in headless mode never include intermediary-update\n" +
+		"# instructions for their lifetime because the dispatch contract is locked on first use.\n" +
+		"tool_preambles = " + strconv.FormatBool(defaults.ToolPreambles) + "\n" +
+		"priority_request_mode = " + strconv.FormatBool(defaults.PriorityRequestMode) + "\n" +
+		"web_search = \"" + defaults.WebSearch + "\"\n" +
+		"openai_base_url = \"" + defaults.OpenAIBaseURL + "\"\n" +
+		"store = " + strconv.FormatBool(defaults.Store) + "\n" +
+		"allow_non_cwd_edits = " + strconv.FormatBool(defaults.AllowNonCwdEdits) + "\n" +
+		"model_context_window = " + strconv.Itoa(defaults.ModelContextWindow) + "\n" +
+		"context_compaction_threshold_tokens = " + strconv.Itoa(defaults.ContextCompactionThresholdTokens) + "\n" +
+		"minimum_exec_to_bg_seconds = " + strconv.Itoa(defaults.MinimumExecToBgSeconds) + "\n" +
+		"shell_output_max_chars = " + strconv.Itoa(defaults.ShellOutputMaxChars) + "\n" +
+		"bg_shells_output = \"" + string(defaults.BGShellsOutput) + "\"\n" +
+		"compaction_mode = \"" + string(defaults.CompactionMode) + "\"\n" +
+		"persistence_root = \"" + DefaultPersistence + "\"\n\n" +
+		"[tools]\n"
+	for _, id := range tools.CatalogIDs() {
+		out += strconv.Quote(string(id)) + " = " + strconv.FormatBool(defaults.EnabledTools[id]) + "\n"
+	}
+	out += "\n" +
+		"[timeouts]\n" +
+		"model_request_seconds = " + strconv.Itoa(defaults.Timeouts.ModelRequestSeconds) + "\n" +
+		"shell_default_seconds = " + strconv.Itoa(defaults.Timeouts.ShellDefaultSeconds) + "\n\n" +
+		"[reviewer]\n" +
+		"frequency = \"" + defaults.Reviewer.Frequency + "\"\n" +
+		"# model defaults to `model` when unset\n" +
+		"thinking_level = \"" + defaults.Reviewer.ThinkingLevel + "\"\n" +
+		"timeout_seconds = " + strconv.Itoa(defaults.Reviewer.TimeoutSeconds) + "\n" +
+		"max_suggestions = " + strconv.Itoa(defaults.Reviewer.MaxSuggestions) + "\n"
+	return out
+}
