@@ -17,6 +17,24 @@ type uiViewLayout struct {
 	model *uiModel
 }
 
+type uiRenderFrame struct {
+	width       int
+	height      int
+	chatPanel   []string
+	pickerPane  []string
+	queuePane   []string
+	inputPane   []string
+	statusLine  string
+	padToHeight bool
+	tailOnly    bool
+}
+
+type nativeLiveRegionState struct {
+	pad             int
+	lines           int
+	streamingActive bool
+}
+
 func (m *uiModel) View() string {
 	return m.layout().render()
 }
@@ -27,41 +45,32 @@ func (l uiViewLayout) render() string {
 		return l.renderNativeOngoing()
 	}
 	style := uiThemeStyles(m.theme)
+	frame, ok := l.composeStandardFrame(style)
+	if !ok {
+		return ""
+	}
+	return frame.render()
+}
+
+func (l uiViewLayout) composeStandardFrame(style uiStyles) (uiRenderFrame, bool) {
+	m := l.model
 	width := l.effectiveWidth()
 	height := l.effectiveHeight()
 	if width <= 0 || height <= 0 {
-		return ""
+		return uiRenderFrame{}, false
 	}
-
-	inputLines := l.renderInputLines(width, style)
-	queuedLines := l.renderQueuedMessagesPane(width)
-	pickerLines := l.renderSlashCommandPicker(width)
-	if m.view.Mode() == tui.ModeDetail {
-		inputLines = nil
-		queuedLines = nil
-		pickerLines = nil
+	frame := uiRenderFrame{width: width, height: height, statusLine: l.renderStatusLine(width, style), padToHeight: true, tailOnly: true}
+	if m.view.Mode() != tui.ModeDetail {
+		frame.inputPane = l.renderInputLines(width, style)
+		frame.queuePane = l.renderQueuedMessagesPane(width)
+		frame.pickerPane = l.renderSlashCommandPicker(width)
 	}
-	statusLine := l.renderStatusLine(width, style)
-	statusLines := 1
-	chatLines := height - len(inputLines) - len(queuedLines) - len(pickerLines) - statusLines
+	chatLines := height - len(frame.inputPane) - len(frame.queuePane) - len(frame.pickerPane) - 1
 	if chatLines < 1 {
 		chatLines = 1
 	}
-	chatPanel := l.renderChatPanel(width, chatLines, style)
-	allLines := make([]string, 0, height)
-	allLines = append(allLines, chatPanel...)
-	allLines = append(allLines, pickerLines...)
-	allLines = append(allLines, queuedLines...)
-	allLines = append(allLines, inputLines...)
-	allLines = append(allLines, statusLine)
-	for len(allLines) < height {
-		allLines = append(allLines, padRight("", width))
-	}
-	if len(allLines) > height {
-		allLines = allLines[len(allLines)-height:]
-	}
-	rendered := strings.Join(allLines, "\n")
-	return rendered + ansiHideCursor
+	frame.chatPanel = l.renderChatPanel(width, chatLines, style)
+	return frame, true
 }
 
 func (l uiViewLayout) renderNativeOngoing() string {
@@ -75,59 +84,107 @@ func (l uiViewLayout) renderNativeOngoing() string {
 func (l uiViewLayout) renderNativeOngoingPreSize() string {
 	m := l.model
 	style := uiThemeStyles(m.theme)
-	width := l.effectiveWidth()
-	if width <= 0 {
+	frame, ok := l.composeNativePreSizeFrame(style)
+	if !ok {
 		return ""
 	}
-	inputLines := l.renderInputLines(width, style)
-	queuedLines := l.renderQueuedMessagesPane(width)
-	pickerLines := l.renderSlashCommandPicker(width)
-	streamingLines := l.renderNativeStreamingLines(width, 12, style)
-	statusLine := l.renderStatusLine(width, style)
-	lines := make([]string, 0, len(inputLines)+len(queuedLines)+len(pickerLines)+len(streamingLines)+1)
-	lines = append(lines, pickerLines...)
-	lines = append(lines, queuedLines...)
-	lines = append(lines, streamingLines...)
-	lines = append(lines, inputLines...)
-	lines = append(lines, statusLine)
-	return strings.Join(lines, "\n") + ansiHideCursor
+	return frame.render()
 }
 
 func (l uiViewLayout) renderNativeOngoingSized() string {
 	m := l.model
 	style := uiThemeStyles(m.theme)
+	frame, status := l.composeNativeSizedFrame(style)
+	if status == nativeFrameInvalid {
+		return ""
+	}
+	if status == nativeFrameFallbackPreSize {
+		return l.renderNativeOngoingPreSize()
+	}
+	return frame.render()
+}
+
+func (f uiRenderFrame) render() string {
+	allLines := make([]string, 0, f.height)
+	allLines = append(allLines, f.chatPanel...)
+	allLines = append(allLines, f.pickerPane...)
+	allLines = append(allLines, f.queuePane...)
+	allLines = append(allLines, f.inputPane...)
+	if strings.TrimSpace(f.statusLine) != "" || f.height > 0 {
+		allLines = append(allLines, f.statusLine)
+	}
+	if f.padToHeight {
+		for len(allLines) < f.height {
+			allLines = append(allLines, padRight("", f.width))
+		}
+	}
+	if len(allLines) > f.height {
+		if f.tailOnly {
+			allLines = allLines[len(allLines)-f.height:]
+		} else {
+			allLines = allLines[:f.height]
+		}
+	}
+	return strings.Join(allLines, "\n") + ansiHideCursor
+}
+
+type nativeFrameStatus uint8
+
+const (
+	nativeFrameInvalid nativeFrameStatus = iota
+	nativeFrameFallbackPreSize
+	nativeFrameReady
+)
+
+func (l uiViewLayout) composeNativePreSizeFrame(style uiStyles) (uiRenderFrame, bool) {
+	width := l.effectiveWidth()
+	if width <= 0 {
+		return uiRenderFrame{}, false
+	}
+	frame := uiRenderFrame{
+		width:      width,
+		height:     len(l.renderSlashCommandPicker(width)) + len(l.renderQueuedMessagesPane(width)) + len(l.renderNativeStreamingLines(width, 12, style)) + len(l.renderInputLines(width, style)) + 1,
+		pickerPane: l.renderSlashCommandPicker(width),
+		queuePane:  l.renderQueuedMessagesPane(width),
+		chatPanel:  l.renderNativeStreamingLines(width, 12, style),
+		inputPane:  l.renderInputLines(width, style),
+		statusLine: l.renderStatusLine(width, style),
+	}
+	return frame, true
+}
+
+func (l uiViewLayout) composeNativeSizedFrame(style uiStyles) (uiRenderFrame, nativeFrameStatus) {
+	m := l.model
 	width := l.effectiveWidth()
 	height := l.effectiveHeight()
 	if width <= 0 {
-		return ""
+		return uiRenderFrame{}, nativeFrameInvalid
 	}
 	if height <= 0 {
-		return l.renderNativeOngoingPreSize()
+		return uiRenderFrame{}, nativeFrameFallbackPreSize
 	}
-	inputLines := l.renderInputLines(width, style)
-	queuedLines := l.renderQueuedMessagesPane(width)
-	pickerLines := l.renderSlashCommandPicker(width)
-	availableStreamingLines := height - len(pickerLines) - len(queuedLines) - len(inputLines) - 1
+	frame := uiRenderFrame{
+		width:      width,
+		height:     height,
+		pickerPane: l.renderSlashCommandPicker(width),
+		queuePane:  l.renderQueuedMessagesPane(width),
+		inputPane:  l.renderInputLines(width, style),
+		statusLine: l.renderStatusLine(width, style),
+		tailOnly:   true,
+	}
+	availableStreamingLines := height - len(frame.pickerPane) - len(frame.queuePane) - len(frame.inputPane) - 1
 	if availableStreamingLines < 0 {
 		availableStreamingLines = 0
 	}
-	streamingLines := l.renderNativeStreamingLines(width, availableStreamingLines, style)
-	statusLine := l.renderStatusLine(width, style)
-	liveLines := make([]string, 0, len(pickerLines)+len(queuedLines)+len(streamingLines)+len(inputLines)+1)
+	frame.chatPanel = l.renderNativeStreamingLines(width, availableStreamingLines, style)
 	if m.nativeLiveRegionPad > 0 {
+		pad := make([]string, 0, m.nativeLiveRegionPad+len(frame.chatPanel))
 		for i := 0; i < m.nativeLiveRegionPad; i++ {
-			liveLines = append(liveLines, padRight("", width))
+			pad = append(pad, padRight("", width))
 		}
+		frame.chatPanel = append(pad, frame.chatPanel...)
 	}
-	liveLines = append(liveLines, pickerLines...)
-	liveLines = append(liveLines, queuedLines...)
-	liveLines = append(liveLines, streamingLines...)
-	liveLines = append(liveLines, inputLines...)
-	liveLines = append(liveLines, statusLine)
-	if len(liveLines) > height {
-		liveLines = liveLines[len(liveLines)-height:]
-	}
-	return strings.Join(liveLines, "\n") + ansiHideCursor
+	return frame, nativeFrameReady
 }
 
 func (l uiViewLayout) nativeOngoingLineCount() int {
@@ -229,22 +286,22 @@ func (l uiViewLayout) renderNativePendingLines(width int) []string {
 }
 
 func (l uiViewLayout) syncNativeLiveRegionState() {
+	state := l.computeNativeLiveRegionState()
+	m := l.model
+	m.nativeLiveRegionPad = state.pad
+	m.nativeLiveRegionLines = state.lines
+	m.nativeStreamingActive = state.streamingActive
+}
+
+func (l uiViewLayout) computeNativeLiveRegionState() nativeLiveRegionState {
 	m := l.model
 	if !m.usesNativeScrollback() || m.view.Mode() != tui.ModeOngoing {
-		m.nativeLiveRegionPad = 0
-		m.nativeStreamingActive = false
-		return
+		return nativeLiveRegionState{}
 	}
 	streamingActiveNow := strings.TrimSpace(m.view.OngoingStreamingText()) != "" || strings.TrimSpace(m.view.OngoingErrorText()) != ""
 	current := l.nativeOngoingLineCount()
 	if !streamingActiveNow {
-		m.nativeLiveRegionPad = 0
-		m.nativeLiveRegionLines = current
-		m.nativeStreamingActive = false
-		return
+		return nativeLiveRegionState{lines: current}
 	}
-	m.nativeLiveRegionPad = 0
-	m.nativeLiveRegionLines = current
-	m.nativeStreamingActive = true
-	return
+	return nativeLiveRegionState{lines: current, streamingActive: true}
 }

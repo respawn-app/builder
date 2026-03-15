@@ -415,14 +415,16 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.debugKeys {
 			m.setDebugKeyTransientStatus(msg, keyMsg, source)
 		}
-		if m.activeAsk != nil {
+		switch m.inputModeState().Mode {
+		case uiInputModeAsk:
 			next, cmd := m.askController().handleKey(keyMsg)
 			next.(*uiModel).syncViewport()
 			return next, cmd
+		default:
+			next, cmd := m.inputController().handleKey(keyMsg)
+			next.(*uiModel).syncViewport()
+			return next, cmd
 		}
-		next, cmd := m.inputController().handleKey(keyMsg)
-		next.(*uiModel).syncViewport()
-		return next, cmd
 	}
 	if _, isKey := msg.(tea.KeyMsg); isKey {
 		m.lastEscAt = time.Time{}

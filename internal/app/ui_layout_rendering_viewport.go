@@ -52,6 +52,6 @@ func (l uiViewLayout) syncViewport() {
 }
 
 func (l uiViewLayout) shouldRenderSoftCursor() bool {
-	m := l.model
-	return !m.isInputLocked() && m.activeAsk == nil && !m.rollbackMode
+	inputState := l.model.inputModeState()
+	return !inputState.InputLocked && inputState.ShowsMainInput
 }
