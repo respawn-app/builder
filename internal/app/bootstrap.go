@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"time"
@@ -19,12 +20,13 @@ type appBootstrap struct {
 	containerDir     string
 	oauthOpts        auth.OpenAIOAuthOptions
 	authManager      *auth.Manager
+	authInteractor   authInteractor
 	fastModeState    *runtime.FastModeState
 	background       *shelltool.Manager
 	backgroundRouter *backgroundEventRouter
 }
 
-func bootstrapApp(ctx context.Context, opts Options) (appBootstrap, error) {
+func bootstrapApp(ctx context.Context, opts Options, interactor authInteractor) (appBootstrap, error) {
 	cfg, err := loadBootstrapConfig(opts, requestedWorkspaceRoot(opts), opts.OpenAIBaseURL, opts.OpenAIBaseURLExplicit)
 	if err != nil {
 		return appBootstrap{}, err
@@ -49,13 +51,17 @@ func bootstrapApp(ctx context.Context, opts Options) (appBootstrap, error) {
 		Issuer:   textutil.FirstNonEmpty(strings.TrimSpace(os.Getenv("BUILDER_OAUTH_ISSUER")), auth.DefaultOpenAIIssuer),
 		ClientID: textutil.FirstNonEmpty(strings.TrimSpace(os.Getenv("BUILDER_OAUTH_CLIENT_ID")), auth.DefaultOpenAIClientID),
 	}
+	if interactor == nil {
+		return appBootstrap{}, errors.New("auth interactor is required")
+	}
+	store := interactor.WrapStore(auth.NewFileStore(config.GlobalAuthConfigPath(cfg)))
 
 	mgr := auth.NewManager(
-		auth.NewFileStore(config.GlobalAuthConfigPath(cfg)),
+		store,
 		auth.NewOpenAIOAuthRefresher(oauthOpts, time.Now, 5*time.Minute),
 		time.Now,
 	)
-	if err := ensureAuthReady(ctx, mgr, oauthOpts); err != nil {
+	if err := ensureAuthReady(ctx, mgr, oauthOpts, interactor); err != nil {
 		return appBootstrap{}, err
 	}
 
@@ -67,12 +73,13 @@ func bootstrapApp(ctx context.Context, opts Options) (appBootstrap, error) {
 	}
 
 	return appBootstrap{
-		cfg:           cfg,
-		containerDir:  containerDir,
-		oauthOpts:     oauthOpts,
-		authManager:   mgr,
-		fastModeState: runtime.NewFastModeState(cfg.Settings.PriorityRequestMode),
-		background:    background,
+		cfg:            cfg,
+		containerDir:   containerDir,
+		oauthOpts:      oauthOpts,
+		authManager:    mgr,
+		authInteractor: interactor,
+		fastModeState:  runtime.NewFastModeState(cfg.Settings.PriorityRequestMode),
+		background:     background,
 		backgroundRouter: newBackgroundEventRouter(
 			background,
 			cfg.Settings.ShellOutputMaxChars,

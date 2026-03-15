@@ -27,7 +27,7 @@ type Options struct {
 }
 
 func Run(ctx context.Context, opts Options) error {
-	boot, err := bootstrapApp(ctx, opts)
+	boot, err := bootstrapApp(ctx, opts, newInteractiveAuthInteractor())
 	if err != nil {
 		return err
 	}
@@ -40,7 +40,7 @@ func Run(ctx context.Context, opts Options) error {
 }
 
 func RunPrompt(ctx context.Context, opts Options, prompt string, timeout time.Duration, progress io.Writer) (RunPromptResult, error) {
-	boot, err := bootstrapApp(ctx, opts)
+	boot, err := bootstrapApp(ctx, opts, newHeadlessAuthInteractor())
 	if err != nil {
 		return RunPromptResult{}, err
 	}
