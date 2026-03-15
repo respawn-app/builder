@@ -45,7 +45,7 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 }
 
 func mainUIProgramOptions(active config.Settings) []tea.ProgramOption {
-	options := []tea.ProgramOption{}
+	options := []tea.ProgramOption{tea.WithFilter(customKeyProgramFilter)}
 	if shouldStartMainUIInAltScreen(active.TUIAlternateScreen) && active.TUIScrollMode != config.TUIScrollModeNative {
 		options = append(options, tea.WithAltScreen())
 	}

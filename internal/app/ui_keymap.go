@@ -1,7 +1,6 @@
 package app
 
 import (
-	"fmt"
 	"runtime"
 	"strconv"
 	"strings"
@@ -15,6 +14,20 @@ const (
 	keyTypeCtrlBackspaceCSI  tea.KeyType = -1026
 	keyTypeSuperBackspaceCSI tea.KeyType = -1027
 )
+
+type customKeyKind uint8
+
+const (
+	customKeyUnknown customKeyKind = iota
+	customKeyCtrlEnter
+	customKeyShiftEnter
+	customKeyCtrlBackspace
+	customKeySuperBackspace
+)
+
+type customKeyMsg struct {
+	Kind customKeyKind
+}
 
 func normalizeKeyMsg(msg tea.Msg) (tea.KeyMsg, bool) {
 	normalized, ok, _ := normalizeKeyMsgWithSource(msg)
@@ -34,23 +47,22 @@ func normalizeKeyMsgWithSource(msg tea.Msg) (tea.KeyMsg, bool, string) {
 		}
 		return keyMsg, true, "keymsg"
 	}
-	seq, ok := parseUnknownCSISequence(msg)
+	customKey, ok := msg.(customKeyMsg)
 	if !ok {
 		return tea.KeyMsg{}, false, ""
 	}
-	if isCtrlEnterCSISequence(seq) {
-		return tea.KeyMsg{Type: keyTypeCtrlEnterCSI}, true, "unknown_csi"
+	switch customKey.Kind {
+	case customKeyCtrlEnter:
+		return tea.KeyMsg{Type: keyTypeCtrlEnterCSI}, true, "custom_key"
+	case customKeyShiftEnter:
+		return tea.KeyMsg{Type: keyTypeShiftEnterCSI}, true, "custom_key"
+	case customKeyCtrlBackspace:
+		return tea.KeyMsg{Type: keyTypeCtrlBackspaceCSI}, true, "custom_key"
+	case customKeySuperBackspace:
+		return tea.KeyMsg{Type: keyTypeSuperBackspaceCSI}, true, "custom_key"
+	default:
+		return tea.KeyMsg{}, false, ""
 	}
-	if isShiftEnterCSISequence(seq) {
-		return tea.KeyMsg{Type: keyTypeShiftEnterCSI}, true, "unknown_csi"
-	}
-	if isCtrlBackspaceCSISequence(seq) {
-		return tea.KeyMsg{Type: keyTypeCtrlBackspaceCSI}, true, "unknown_csi"
-	}
-	if isSuperBackspaceCSISequence(seq) {
-		return tea.KeyMsg{Type: keyTypeSuperBackspaceCSI}, true, "unknown_csi"
-	}
-	return tea.KeyMsg{}, false, ""
 }
 
 func isDeleteCurrentLineKey(msg tea.KeyMsg) bool {
@@ -62,31 +74,6 @@ func isDeleteCurrentLineKey(msg tea.KeyMsg) bool {
 		return true
 	}
 	return keyString == "ctrl+backspace" || keyString == "cmd+backspace" || keyString == "super+backspace"
-}
-
-func parseUnknownCSISequence(msg tea.Msg) (string, bool) {
-	stringer, ok := msg.(fmt.Stringer)
-	if !ok {
-		return "", false
-	}
-	raw := stringer.String()
-	if !strings.HasPrefix(raw, "?CSI[") || !strings.HasSuffix(raw, "]?") {
-		return "", false
-	}
-	body := strings.TrimSuffix(strings.TrimPrefix(raw, "?CSI["), "]?")
-	fields := strings.Fields(body)
-	if len(fields) == 0 {
-		return "", false
-	}
-	bytes := make([]byte, 0, len(fields))
-	for _, field := range fields {
-		value, err := strconv.Atoi(field)
-		if err != nil || value < 0 || value > 255 {
-			return "", false
-		}
-		bytes = append(bytes, byte(value))
-	}
-	return string(bytes), true
 }
 
 func isCtrlEnterCSISequence(seq string) bool {
