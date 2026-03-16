@@ -2962,7 +2962,10 @@ func TestAppendMissingReviewerMetaContextPrependsAgentsAndEnvironmentWhenMissing
 	}
 
 	in := []llm.Message{{Role: llm.RoleUser, Content: "request"}}
-	got := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false)
+	got, err := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false)
+	if err != nil {
+		t.Fatalf("appendMissingReviewerMetaContext: %v", err)
+	}
 	if len(got) != 4 {
 		t.Fatalf("expected 2 prepended agents + 1 environment message plus original, got %d", len(got))
 	}
@@ -3000,7 +3003,10 @@ func TestAppendMissingReviewerMetaContextKeepsExistingMetaMessages(t *testing.T)
 		existingEnv,
 		{Role: llm.RoleUser, Content: "request"},
 	}
-	got := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false)
+	got, err := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false)
+	if err != nil {
+		t.Fatalf("appendMissingReviewerMetaContext: %v", err)
+	}
 	if len(got) != len(in) {
 		t.Fatalf("expected no extra messages when AGENTS+environment already present, got %d", len(got))
 	}
@@ -3035,7 +3041,10 @@ func TestAppendMissingReviewerMetaContextBackfillsSkillsBetweenAgentsAndEnvironm
 		{Role: llm.RoleUser, Content: "request"},
 	}
 
-	got := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false)
+	got, err := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false)
+	if err != nil {
+		t.Fatalf("appendMissingReviewerMetaContext: %v", err)
+	}
 	if len(got) != len(in)+1 {
 		t.Fatalf("expected one skills message to be inserted, got len=%d", len(got))
 	}
@@ -3070,7 +3079,10 @@ func TestAppendMissingReviewerMetaContextBackfillsSkillsBeforeEnvironmentWhenNoA
 		{Role: llm.RoleUser, Content: "request"},
 	}
 
-	got := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false)
+	got, err := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false)
+	if err != nil {
+		t.Fatalf("appendMissingReviewerMetaContext: %v", err)
+	}
 	if len(got) != len(in)+1 {
 		t.Fatalf("expected one skills message to be inserted, got len=%d", len(got))
 	}

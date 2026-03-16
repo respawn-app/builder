@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -405,6 +406,41 @@ func TestCall_OutsideWorkspaceApprovalAuditsResolvedPath(t *testing.T) {
 	}
 	if audits[1].Reason != "session_allow" {
 		t.Fatalf("unexpected second audit reason: %q", audits[1].Reason)
+	}
+}
+
+func TestCall_OutsideWorkspaceApprovalFailureUsesReadSpecificWording(t *testing.T) {
+	workspace := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.png")
+	if err := os.WriteFile(outside, tinyPNG, 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+
+	tool, err := New(
+		workspace,
+		true,
+		WithOutsideWorkspaceApprover(func(context.Context, patchtool.OutsideWorkspaceRequest) (patchtool.OutsideWorkspaceApproval, error) {
+			return patchtool.OutsideWorkspaceApproval{}, errors.New("ask failed")
+		}),
+	)
+	if err != nil {
+		t.Fatalf("new tool: %v", err)
+	}
+
+	input := json.RawMessage(`{"path":"` + strings.ReplaceAll(outside, `\`, `\\`) + `"}`)
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-approval-error", Name: tools.ToolViewImage, Input: input})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected error result")
+	}
+	errMessage := toolError(t, result)
+	if !strings.Contains(errMessage, "outside-workspace read approval failed") {
+		t.Fatalf("expected read approval failure wording, got %q", errMessage)
+	}
+	if strings.Contains(errMessage, "edit approval failed") || strings.Contains(errMessage, "patch target outside workspace") {
+		t.Fatalf("unexpected patch wording, got %q", errMessage)
 	}
 }
 

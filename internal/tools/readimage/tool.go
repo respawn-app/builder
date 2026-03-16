@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -176,105 +175,35 @@ func (t *Tool) resolvePath(ctx context.Context, path string, approvedOutside map
 	}
 	real = filepath.Clean(real)
 
-	if t.workspaceOnly {
-		insideWorkspace, containmentErr := t.isWithinWorkspace(real)
-		if containmentErr != nil {
-			return "", fmt.Errorf("workspace boundary check for %q: %w", path, containmentErr)
-		}
-		if !insideWorkspace {
-			req := patchtool.OutsideWorkspaceRequest{
-				RequestedPath: path,
-				ResolvedPath:  real,
-				WorkspaceRoot: t.workspaceRoot,
-			}
-			if t.allowOutsideWorkspace {
-				t.logOutsideWorkspaceApproval(req, "configured_allow")
-				return real, nil
-			}
-			if t.outsideWorkspaceSessionAllowed() {
-				t.logOutsideWorkspaceApproval(req, "session_allow")
-				return real, nil
-			}
-			if approvedOutside != nil && approvedOutside[real] {
-				t.logOutsideWorkspaceApproval(req, "call_allow")
-				return real, nil
-			}
-			if t.outsideWorkspaceApprover == nil {
-				return "", fmt.Errorf("view_image path outside workspace: %s", path)
-			}
-			approval, approveErr := t.outsideWorkspaceApprover(ctx, req)
-			if approveErr != nil {
-				return "", fmt.Errorf("outside-workspace read approval failed for %s: %w", path, approveErr)
-			}
-			switch approval.Decision {
-			case patchtool.OutsideWorkspaceDecisionAllowOnce:
-				if approvedOutside != nil {
-					approvedOutside[real] = true
-				}
-				t.logOutsideWorkspaceApproval(req, "allow_once")
-				return real, nil
-			case patchtool.OutsideWorkspaceDecisionAllowSession:
-				t.setOutsideWorkspaceSessionAllowed(true)
-				if approvedOutside != nil {
-					approvedOutside[real] = true
-				}
-				t.logOutsideWorkspaceApproval(req, "allow_session")
-				return real, nil
-			default:
-				errMessage := fmt.Sprintf("view_image path outside workspace rejected by user: %s; %s", path, outsideWorkspaceRejectionInstruction)
-				commentary := strings.TrimSpace(approval.Commentary)
-				if commentary != "" {
-					errMessage += fmt.Sprintf(" User commented about this: %s", strconv.Quote(commentary))
-				}
-				return "", errors.New(errMessage)
-			}
-		}
-	}
-
-	return real, nil
-}
-
-func (t *Tool) isWithinWorkspace(real string) (bool, error) {
-	rel, relErr := filepath.Rel(t.workspaceRootReal, real)
-	if relErr == nil {
-		if rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
-			return true, nil
-		}
-	}
-
-	if t.workspaceRootInfo == nil {
-		return false, errors.New("workspace root info unavailable")
-	}
-
-	current := real
-	for {
-		info, statErr := os.Stat(current)
-		if statErr != nil {
-			return false, fmt.Errorf("stat candidate path %q: %w", current, statErr)
-		}
-		if os.SameFile(info, t.workspaceRootInfo) {
-			return true, nil
-		}
-		next := filepath.Dir(current)
-		if next == current {
-			break
-		}
-		current = next
-	}
-
-	return false, nil
-}
-
-func (t *Tool) outsideWorkspaceSessionAllowed() bool {
-	t.outsideWorkspaceSessionMu.RLock()
-	defer t.outsideWorkspaceSessionMu.RUnlock()
-	return t.outsideWorkspaceAllowed
-}
-
-func (t *Tool) setOutsideWorkspaceSessionAllowed(allow bool) {
-	t.outsideWorkspaceSessionMu.Lock()
-	t.outsideWorkspaceAllowed = allow
-	t.outsideWorkspaceSessionMu.Unlock()
+	guard := patchtool.NewOutsideWorkspaceGuard(
+		t.workspaceRoot,
+		t.workspaceRootReal,
+		t.workspaceRootInfo,
+		t.workspaceOnly,
+		t.allowOutsideWorkspace,
+		t.outsideWorkspaceApprover,
+		func() bool {
+			t.outsideWorkspaceSessionMu.RLock()
+			defer t.outsideWorkspaceSessionMu.RUnlock()
+			return t.outsideWorkspaceAllowed
+		},
+		func(allow bool) {
+			t.outsideWorkspaceSessionMu.Lock()
+			t.outsideWorkspaceAllowed = allow
+			t.outsideWorkspaceSessionMu.Unlock()
+		},
+		outsideWorkspaceRejectionInstruction,
+		patchtool.OutsideWorkspaceErrorLabels{
+			OutsidePath:          "view_image path outside workspace",
+			ApprovalFailed:       "outside-workspace read approval failed",
+			RejectedByUserPrefix: "view_image path outside workspace rejected by user",
+		},
+		nil,
+		func(req patchtool.OutsideWorkspaceRequest, reason string) {
+			t.logOutsideWorkspaceApproval(req, reason)
+		},
+	)
+	return guard.Allow(ctx, path, real, approvedOutside)
 }
 
 func (t *Tool) logOutsideWorkspaceApproval(req patchtool.OutsideWorkspaceRequest, reason string) {

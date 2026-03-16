@@ -71,6 +71,7 @@ type transcriptBlockOptions struct {
 func (m Model) buildTranscriptBlocks(opts transcriptBlockOptions) []ongoingBlock {
 	blocks := make([]ongoingBlock, 0, len(m.transcript)+1)
 	consumedResults := make(map[int]struct{})
+	resultIndex := buildToolResultIndex(m.transcript)
 	for idx := 0; idx < len(m.transcript); idx++ {
 		if _, consumed := consumedResults[idx]; consumed {
 			continue
@@ -83,7 +84,7 @@ func (m Model) buildTranscriptBlocks(opts transcriptBlockOptions) []ongoingBlock
 		if opts.mode == transcriptBlockModeOngoing && skipInOngoing(role) {
 			continue
 		}
-		block, ok := m.entryBlock(idx, entry, role, consumedResults, opts)
+		block, ok := m.entryBlock(idx, entry, role, consumedResults, resultIndex, opts)
 		if !ok {
 			continue
 		}
@@ -103,10 +104,10 @@ func (m Model) prefixedReasoningBlock(entryIndex int, consumed map[int]struct{},
 	return ongoingBlock{role: "reasoning", lines: thinkingBlock, entryIndex: -1}, true
 }
 
-func (m Model) entryBlock(entryIndex int, entry TranscriptEntry, role string, consumed map[int]struct{}, opts transcriptBlockOptions) (ongoingBlock, bool) {
+func (m Model) entryBlock(entryIndex int, entry TranscriptEntry, role string, consumed map[int]struct{}, resultIndex toolResultIndex, opts transcriptBlockOptions) (ongoingBlock, bool) {
 	switch role {
 	case "tool_call":
-		return m.toolCallBlock(entryIndex, entry, consumed, opts), true
+		return m.toolCallBlock(entryIndex, entry, consumed, resultIndex, opts), true
 	case "tool_result", "tool_result_ok", "tool_result_error":
 		if opts.mode == transcriptBlockModeOngoing {
 			return ongoingBlock{}, false
@@ -122,17 +123,17 @@ func (m Model) entryBlock(entryIndex int, entry TranscriptEntry, role string, co
 	}
 }
 
-func (m Model) toolCallBlock(entryIndex int, entry TranscriptEntry, consumed map[int]struct{}, opts transcriptBlockOptions) ongoingBlock {
+func (m Model) toolCallBlock(entryIndex int, entry TranscriptEntry, consumed map[int]struct{}, resultIndex toolResultIndex, opts transcriptBlockOptions) ongoingBlock {
 	blockRole := "tool"
 	if isAskQuestionToolCall(entry.ToolCall) {
-		return m.askQuestionBlock(entryIndex, entry, consumed, opts, blockRole)
+		return m.askQuestionBlock(entryIndex, entry, consumed, resultIndex, opts, blockRole)
 	}
 	if isShellToolCall(entry.ToolCall, entry.Text) {
 		blockRole = "tool_shell"
 	}
 	patchSummary, patchDetail, hasPatchPayload := extractPatchPayload(entry.ToolCall, entry.Text)
 	combined := m.toolCallDisplayText(entry, blockRole, patchSummary, patchDetail, hasPatchPayload, opts)
-	blockRole, combined = m.applyToolResult(entryIndex, blockRole, combined, hasPatchPayload, consumed, opts)
+	blockRole, combined = m.applyToolResult(entryIndex, blockRole, combined, hasPatchPayload, consumed, resultIndex, opts)
 	return ongoingBlock{
 		role:       blockRole,
 		lines:      m.flattenEntryWithMeta(blockRole, combined, opts.mode == transcriptBlockModeOngoing, entry.ToolCall),
@@ -140,11 +141,11 @@ func (m Model) toolCallBlock(entryIndex int, entry TranscriptEntry, consumed map
 	}
 }
 
-func (m Model) askQuestionBlock(entryIndex int, entry TranscriptEntry, consumed map[int]struct{}, opts transcriptBlockOptions, defaultRole string) ongoingBlock {
+func (m Model) askQuestionBlock(entryIndex int, entry TranscriptEntry, consumed map[int]struct{}, resultIndex toolResultIndex, opts transcriptBlockOptions, defaultRole string) ongoingBlock {
 	blockRole := "tool_question"
 	question, suggestions := askQuestionDisplay(entry.ToolCall, entry.Text)
 	answer := ""
-	if resultIdx := findMatchingToolResultIndex(m.transcript, entryIndex, consumed); resultIdx >= 0 {
+	if resultIdx := resultIndex.findMatchingToolResultIndex(m.transcript, entryIndex, consumed); resultIdx >= 0 {
 		nextRole := strings.TrimSpace(m.transcript[resultIdx].Role)
 		if isToolResultRole(nextRole) {
 			answer = strings.TrimSpace(m.transcript[resultIdx].Text)
@@ -177,8 +178,8 @@ func (m Model) toolCallDisplayText(entry TranscriptEntry, blockRole string, patc
 	return combined
 }
 
-func (m Model) applyToolResult(entryIndex int, blockRole string, combined string, hasPatchPayload bool, consumed map[int]struct{}, opts transcriptBlockOptions) (string, string) {
-	resultIdx := findMatchingToolResultIndex(m.transcript, entryIndex, consumed)
+func (m Model) applyToolResult(entryIndex int, blockRole string, combined string, hasPatchPayload bool, consumed map[int]struct{}, resultIndex toolResultIndex, opts transcriptBlockOptions) (string, string) {
+	resultIdx := resultIndex.findMatchingToolResultIndex(m.transcript, entryIndex, consumed)
 	if resultIdx < 0 {
 		return blockRole, combined
 	}

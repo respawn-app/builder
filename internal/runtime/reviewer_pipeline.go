@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"builder/internal/llm"
@@ -132,7 +133,10 @@ func (r *defaultReviewerPipeline) RunSuggestions(ctx context.Context, reviewerCl
 	})
 
 	messages := sanitizeMessagesForLLM(e.snapshotMessages())
-	reviewerMessages := buildReviewerRequestMessages(messages, e.store.Meta().WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), e.cfg.HeadlessMode)
+	reviewerMessages, err := buildReviewerRequestMessages(messages, e.store.Meta().WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), e.cfg.HeadlessMode)
+	if err != nil {
+		return reviewerSuggestionsResult{}, fmt.Errorf("build reviewer request messages: %w", err)
+	}
 	req := llm.Request{
 		Model:           reviewerCfg.Model,
 		Temperature:     1,

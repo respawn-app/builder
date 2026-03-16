@@ -43,7 +43,9 @@ func runPrompt(ctx context.Context, boot appBootstrap, initialSessionID, prompt 
 	}
 	enabledTools := activeToolIDs(active, store.Meta().Locked)
 
-	logger, err := newRunLogger(store.Dir())
+	logger, err := newRunLogger(store.Dir(), func(diag runLoggerDiagnostic) {
+		reportRunLoggerDiagnostic(progress, diag)
+	})
 	if err != nil {
 		return RunPromptResult{}, err
 	}

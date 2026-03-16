@@ -108,6 +108,24 @@ type ClearOngoingErrorMsg struct{}
 
 type Option func(*Model)
 
+type RenderDiagnosticSeverity string
+
+const (
+	RenderDiagnosticSeverityInfo  RenderDiagnosticSeverity = "info"
+	RenderDiagnosticSeverityWarn  RenderDiagnosticSeverity = "warn"
+	RenderDiagnosticSeverityError RenderDiagnosticSeverity = "error"
+	RenderDiagnosticSeverityFatal RenderDiagnosticSeverity = "fatal"
+)
+
+type RenderDiagnostic struct {
+	Component string
+	Message   string
+	Err       error
+	Severity  RenderDiagnosticSeverity
+}
+
+type RenderDiagnosticHandler func(RenderDiagnostic)
+
 func WithPreviewLines(lines int) Option {
 	return func(m *Model) {
 		if lines > 0 {
@@ -119,6 +137,12 @@ func WithPreviewLines(lines int) Option {
 func WithTheme(theme string) Option {
 	return func(m *Model) {
 		m.theme = normalizeTheme(theme)
+	}
+}
+
+func WithRenderDiagnosticHandler(handler RenderDiagnosticHandler) Option {
+	return func(m *Model) {
+		m.renderDiagnosticHandler = handler
 	}
 }
 
@@ -150,6 +174,7 @@ type Model struct {
 	theme                  string
 	md                     *markdownRenderer
 	code                   *codeRenderer
+	renderDiagnosticHandler RenderDiagnosticHandler
 }
 
 type ongoingBlock struct {
@@ -175,9 +200,24 @@ func NewModel(opts ...Option) Model {
 	for _, opt := range opts {
 		opt(&m)
 	}
-	m.md = newMarkdownRenderer(m.theme)
+	m.md = newMarkdownRenderer(m.theme, m.reportRenderDiagnostic)
 	m.code = newCodeRenderer(m.theme)
 	return m
+}
+
+func (m Model) reportRenderDiagnostic(diag RenderDiagnostic) {
+	if strings.TrimSpace(diag.Message) == "" && diag.Err != nil {
+		diag.Message = diag.Err.Error()
+	}
+	if strings.TrimSpace(diag.Component) == "" {
+		diag.Component = "render"
+	}
+	if strings.TrimSpace(string(diag.Severity)) == "" {
+		diag.Severity = RenderDiagnosticSeverityWarn
+	}
+	if m.renderDiagnosticHandler != nil {
+		m.renderDiagnosticHandler(diag)
+	}
 }
 
 func (m Model) Init() tea.Cmd {

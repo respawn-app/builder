@@ -70,7 +70,10 @@ func TestAppendMissingReviewerMetaContextPrependsSkillsWhenMissing(t *testing.T)
 	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "workspace-skill", "from workspace")
 
 	in := []llm.Message{{Role: llm.RoleUser, Content: "request"}}
-	got := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false)
+	got, err := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false)
+	if err != nil {
+		t.Fatalf("appendMissingReviewerMetaContext: %v", err)
+	}
 	if len(got) != 3 {
 		t.Fatalf("expected skills+environment prepended plus original, got %d", len(got))
 	}
@@ -82,6 +85,31 @@ func TestAppendMissingReviewerMetaContextPrependsSkillsWhenMissing(t *testing.T)
 	}
 	if got[2].Role != llm.RoleUser || got[2].Content != "request" {
 		t.Fatalf("expected original message at tail, got %+v", got[2])
+	}
+}
+
+func TestSkillsContextMessageFailsOnUnreadableSkillsDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	prev := readSkillsDir
+	readSkillsDir = func(path string) ([]os.DirEntry, error) {
+		if path == filepath.Join(workspace, ".builder", "skills") {
+			return nil, os.ErrPermission
+		}
+		return prev(path)
+	}
+	t.Cleanup(func() {
+		readSkillsDir = prev
+	})
+
+	_, _, err := skillsContextMessage(workspace)
+	if err == nil {
+		t.Fatal("expected unreadable skills directory to fail discovery")
+	}
+	if !strings.Contains(err.Error(), "read skills directory") {
+		t.Fatalf("expected read skills directory error, got %v", err)
 	}
 }
 

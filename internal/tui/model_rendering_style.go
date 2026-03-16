@@ -17,7 +17,30 @@ func isToolResultRole(role string) bool {
 	}
 }
 
-func findMatchingToolResultIndex(entries []TranscriptEntry, callIdx int, consumed map[int]struct{}) int {
+type toolResultIndex struct {
+	results map[string][]int
+	cursors map[string]int
+}
+
+func buildToolResultIndex(entries []TranscriptEntry) toolResultIndex {
+	index := toolResultIndex{
+		results: make(map[string][]int),
+		cursors: make(map[string]int),
+	}
+	for idx, entry := range entries {
+		if !isToolResultRole(entry.Role) {
+			continue
+		}
+		callID := strings.TrimSpace(entry.ToolCallID)
+		if callID == "" {
+			continue
+		}
+		index.results[callID] = append(index.results[callID], idx)
+	}
+	return index
+}
+
+func (index toolResultIndex) findMatchingToolResultIndex(entries []TranscriptEntry, callIdx int, consumed map[int]struct{}) int {
 	if callIdx < 0 || callIdx >= len(entries) {
 		return -1
 	}
@@ -34,14 +57,21 @@ func findMatchingToolResultIndex(entries []TranscriptEntry, callIdx int, consume
 	if callID == "" {
 		return -1
 	}
-	for i := callIdx + 1; i < len(entries); i++ {
-		if _, used := consumed[i]; used || !isToolResultRole(entries[i].Role) {
+	results := index.results[callID]
+	for cursor := index.cursors[callID]; cursor < len(results); cursor++ {
+		resultIdx := results[cursor]
+		if resultIdx <= callIdx {
+			index.cursors[callID] = cursor + 1
 			continue
 		}
-		if strings.TrimSpace(entries[i].ToolCallID) == callID {
-			return i
+		if _, used := consumed[resultIdx]; used {
+			index.cursors[callID] = cursor + 1
+			continue
 		}
+		index.cursors[callID] = cursor
+		return resultIdx
 	}
+	index.cursors[callID] = len(results)
 	return -1
 }
 
