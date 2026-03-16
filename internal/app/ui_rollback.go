@@ -79,6 +79,7 @@ func (m *uiModel) stopRollbackSelectionMode() {
 	m.clearRollbackSelectionHighlight()
 	if m.rollbackRestoreScrollActive {
 		m.forwardToView(tui.SetOngoingScrollMsg{Scroll: m.rollbackRestoreOngoingScroll})
+		m.forwardToView(tui.SetSelectedTranscriptEntryMsg{Active: false, EntryIndex: -1, RefreshDetailSnapshot: true})
 		m.rollbackRestoreScrollActive = false
 	}
 }
@@ -151,9 +152,6 @@ func (m *uiModel) clearRollbackFlow() {
 }
 
 func (m *uiModel) pushRollbackOverlayIfNeeded() tea.Cmd {
-	if !m.usesNativeScrollback() {
-		return nil
-	}
 	if m.rollbackOverlayPushed {
 		return nil
 	}

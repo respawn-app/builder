@@ -202,46 +202,28 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyUp:
 		if m.isInputLocked() {
-			if m.usesNativeScrollback() && m.view.Mode() == tui.ModeOngoing {
-				return m, nil
-			}
 			m.forwardToView(tea.KeyMsg{Type: tea.KeyUp})
 			return m, nil
 		}
 		moved := m.moveCursorUpLine()
 		if !moved && !strings.ContainsRune(m.input, '\n') {
-			if m.usesNativeScrollback() && m.view.Mode() == tui.ModeOngoing {
-				return m, nil
-			}
 			m.forwardToView(tea.KeyMsg{Type: tea.KeyUp})
 		}
 		return m, nil
 	case tea.KeyDown:
 		if m.isInputLocked() {
-			if m.usesNativeScrollback() && m.view.Mode() == tui.ModeOngoing {
-				return m, nil
-			}
 			m.forwardToView(tea.KeyMsg{Type: tea.KeyDown})
 			return m, nil
 		}
 		moved := m.moveCursorDownLine()
 		if !moved && !strings.ContainsRune(m.input, '\n') {
-			if m.usesNativeScrollback() && m.view.Mode() == tui.ModeOngoing {
-				return m, nil
-			}
 			m.forwardToView(tea.KeyMsg{Type: tea.KeyDown})
 		}
 		return m, nil
 	case tea.KeyPgUp:
-		if m.usesNativeScrollback() && m.view.Mode() == tui.ModeOngoing {
-			return m, nil
-		}
 		m.forwardToView(tea.KeyMsg{Type: tea.KeyPgUp})
 		return m, nil
 	case tea.KeyPgDown:
-		if m.usesNativeScrollback() && m.view.Mode() == tui.ModeOngoing {
-			return m, nil
-		}
 		m.forwardToView(tea.KeyMsg{Type: tea.KeyPgDown})
 		return m, nil
 	default:

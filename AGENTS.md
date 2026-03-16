@@ -73,7 +73,6 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
 - `docs/decisions.md` is the source of truth for locked product and architecture decisions.
 - Keep this AGENTS.md file up-to-date and comprehensive. Avoid adding info that can become outdated, otherwise keep this as project guidelines, rules, and learnings for future team members. Persist info that should be preserved here.
 - Terminology lock:
-  - `tui_scroll_mode` (`alt|native`) is a Builder config mode, not a terminal protocol toggle.
   - Terminal alt-screen is `?1049`.
   - Terminal alternate-scroll is `?1007`.
   - Transcript mode toggle bindings are `Shift+Tab` and `Ctrl+T`; keep behavior/protocol side effects identical between both.

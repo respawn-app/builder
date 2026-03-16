@@ -129,7 +129,6 @@ func TestNativeScrollbackProgramOutputContract(t *testing.T) {
 		nil,
 		closedRuntimeEvents(),
 		closedAskEvents(),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{
 			{Role: "user", Text: "first replay line"},
 			{Role: "assistant", Text: "second replay line"},
@@ -198,7 +197,6 @@ func TestNativeScrollbackInitClearsOnEachProgramRun(t *testing.T) {
 			nil,
 			closedRuntimeEvents(),
 			closedAskEvents(),
-			WithUIScrollMode(config.TUIScrollModeNative),
 		).(*uiModel)
 
 		program := tea.NewProgram(
@@ -256,7 +254,6 @@ func TestNativeRollbackOverlayCtrlCBalancesAltScreenAndAlternateScroll(t *testin
 		nil,
 		closedRuntimeEvents(),
 		closedAskEvents(),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIAlternateScreenPolicy(config.TUIAlternateScreenAuto),
 		WithUIInitialTranscript([]UITranscriptEntry{
 			{Role: "user", Text: "u1"},
@@ -330,7 +327,6 @@ func TestNativePSOverlayEscBalancesAltScreenAndAlternateScroll(t *testing.T) {
 		nil,
 		closedRuntimeEvents(),
 		closedAskEvents(),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIAlternateScreenPolicy(config.TUIAlternateScreenAuto),
 	).(*uiModel)
 	model.input = "/ps"
@@ -404,7 +400,6 @@ func TestNativePSOverlayUsesClearScreenWhenAltScreenNever(t *testing.T) {
 		nil,
 		closedRuntimeEvents(),
 		closedAskEvents(),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
 	).(*uiModel)
 	model.input = "/ps"
@@ -483,7 +478,6 @@ func TestNativeFinalizeDoesNotBlinkDuplicateTailTokens(t *testing.T) {
 		eng,
 		runtimeEvents,
 		closedAskEvents(),
-		WithUIScrollMode(config.TUIScrollModeNative),
 	).(*uiModel)
 
 	program := tea.NewProgram(
@@ -548,7 +542,6 @@ func TestNativeFinalizeSuppressesLateAsyncDeltaArtifacts(t *testing.T) {
 		eng,
 		runtimeEvents,
 		closedAskEvents(),
-		WithUIScrollMode(config.TUIScrollModeNative),
 	).(*uiModel)
 
 	program := tea.NewProgram(
@@ -622,7 +615,6 @@ func TestNativeNoopFinalNeverAppearsOnScreen(t *testing.T) {
 		eng,
 		runtimeEvents,
 		closedAskEvents(),
-		WithUIScrollMode(config.TUIScrollModeNative),
 	).(*uiModel)
 
 	program := tea.NewProgram(
@@ -677,7 +669,6 @@ func TestNativeSubmitAndFlushDoesNotDuplicateStatusLines(t *testing.T) {
 		nil,
 		closedRuntimeEvents(),
 		closedAskEvents(),
-		WithUIScrollMode(config.TUIScrollModeNative),
 	).(*uiModel)
 
 	program := tea.NewProgram(
@@ -737,7 +728,6 @@ func TestNativeReplayOutputContainsMarkdownStyling(t *testing.T) {
 		nil,
 		closedRuntimeEvents(),
 		closedAskEvents(),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "**bold** and `code`"}}),
 	).(*uiModel)
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
@@ -777,7 +767,6 @@ func TestNativeProgramKeepsPendingToolTailLiveOnlyUntilCompletion(t *testing.T) 
 		nil,
 		closedRuntimeEvents(),
 		closedAskEvents(),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
 	).(*uiModel)
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
@@ -858,7 +847,6 @@ func TestNativeStreamingInterleavedWithStatusRedrawStaysCoherent(t *testing.T) {
 		nil,
 		closedRuntimeEvents(),
 		closedAskEvents(),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
 	).(*uiModel)
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
@@ -910,7 +898,6 @@ func TestNativeAssistantDeltaSuppressedInDetailMode(t *testing.T) {
 		nil,
 		closedRuntimeEvents(),
 		closedAskEvents(),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
 	).(*uiModel)
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
@@ -945,7 +932,6 @@ func TestNativeStreamingTinyDeltasRemainContiguous(t *testing.T) {
 		nil,
 		closedRuntimeEvents(),
 		closedAskEvents(),
-		WithUIScrollMode(config.TUIScrollModeNative),
 	).(*uiModel)
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
 	done := make(chan error, 1)
@@ -983,7 +969,6 @@ func TestNativeStreamingWithoutNewlineStillVisible(t *testing.T) {
 		nil,
 		closedRuntimeEvents(),
 		closedAskEvents(),
-		WithUIScrollMode(config.TUIScrollModeNative),
 	).(*uiModel)
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
 	done := make(chan error, 1)
@@ -1017,7 +1002,6 @@ func TestNativeProgramClearsResidualLivePadAfterStreamingCommit(t *testing.T) {
 		nil,
 		closedRuntimeEvents(),
 		closedAskEvents(),
-		WithUIScrollMode(config.TUIScrollModeNative),
 	).(*uiModel)
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
 	done := make(chan error, 1)
@@ -1056,7 +1040,6 @@ func TestNativeStreamingInterleavedRendersKeepsLinesLeftAligned(t *testing.T) {
 		nil,
 		closedRuntimeEvents(),
 		closedAskEvents(),
-		WithUIScrollMode(config.TUIScrollModeNative),
 	).(*uiModel)
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
 	done := make(chan error, 1)

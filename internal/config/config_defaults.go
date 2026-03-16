@@ -24,7 +24,6 @@ const (
 	defaultReviewerTimeoutSec  = 60
 	defaultReviewerSuggestions = 5
 	defaultTUIAlternateScreen  = "auto"
-	defaultTUIScrollMode       = "alt"
 	defaultCompactionMode      = "native"
 )
 
@@ -42,7 +41,6 @@ func defaultSettings() Settings {
 		ModelCapabilities:                ModelCapabilitiesOverride{},
 		Theme:                            defaultTheme,
 		TUIAlternateScreen:               TUIAlternateScreenPolicy(defaultTUIAlternateScreen),
-		TUIScrollMode:                    TUIScrollMode(defaultTUIScrollMode),
 		NotificationMethod:               "auto",
 		ToolPreambles:                    true,
 		PriorityRequestMode:              false,
@@ -86,7 +84,6 @@ func defaultSettingsTOML() string {
 		},
 		"theme":                 defaults.Theme,
 		"tui_alternate_screen":  defaults.TUIAlternateScreen,
-		"tui_scroll_mode":       defaults.TUIScrollMode,
 		"notification_method":   defaults.NotificationMethod,
 		"tool_preambles":        defaults.ToolPreambles,
 		"priority_request_mode": defaults.PriorityRequestMode,
@@ -136,15 +133,12 @@ func defaultSettingsTOML() string {
 		"# they fall back to default truncation.\n\n" +
 		"# exec_command yield_time_ms values below minimum_exec_to_bg_seconds are\n" +
 		"# clamped up and surfaced to the model as a warning before command output.\n\n" +
-		"# Note: tui_scroll_mode=native forces main UI to normal buffer even if\n" +
-		"# tui_alternate_screen=always, so transcript replay stays visible in scrollback.\n\n" +
 		"# This JSON block mirrors current defaults for readability:\n" +
 		"# " + strings.ReplaceAll(string(encoded), "\n", "\n# ") + "\n\n" +
 		"model = \"" + defaults.Model + "\"\n" +
 		"thinking_level = \"" + defaults.ThinkingLevel + "\"\n" +
 		"theme = \"" + defaults.Theme + "\"\n" +
 		"tui_alternate_screen = \"" + string(defaults.TUIAlternateScreen) + "\"\n" +
-		"tui_scroll_mode = \"" + string(defaults.TUIScrollMode) + "\"\n" +
 		"notification_method = \"" + defaults.NotificationMethod + "\"\n" +
 		"# Known tradeoff: sessions started in headless mode never include intermediary-update\n" +
 		"# instructions for their lifetime because the dispatch contract is locked on first use.\n" +

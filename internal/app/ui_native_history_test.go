@@ -7,7 +7,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"builder/internal/config"
 	"builder/internal/runtime"
 	"builder/internal/transcript"
 	"builder/internal/tui"
@@ -29,7 +28,6 @@ func TestNativeScrollbackStartupReplayIncludesFullTranscript(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{
 			{Role: "user", Text: "first message"},
 			{Role: "assistant", Text: "last message"},
@@ -63,7 +61,6 @@ func TestNativeScrollbackEmitsOnlyNewTranscriptLines(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "old line"}}),
 	).(*uiModel)
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -98,7 +95,6 @@ func TestNativeScrollbackRebasesFormatterSilentlyOnNonAppendMutation(t *testing.
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "old line"}, {Role: "assistant", Text: "tail line"}}),
 	).(*uiModel)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -119,7 +115,6 @@ func TestNativeScrollbackResizeRebasesFormatterWidth(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "old line"}}),
 	).(*uiModel)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 40, Height: 20})
@@ -159,7 +154,6 @@ func TestNativeStreamingContractViewportDuringStreamCommittedReplayOnFinish(t *t
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
 	).(*uiModel)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -204,7 +198,6 @@ func TestNativeScrollbackShrinkRebasesWithoutReemittingHistory(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "line one"}, {Role: "assistant", Text: "line two"}}),
 	).(*uiModel)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -225,7 +218,6 @@ func TestNativeScrollbackRepeatedConversationRefreshDoesNotDuplicateUserPrompt(t
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
 	).(*uiModel)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -267,7 +259,6 @@ func TestNativeScrollbackIncrementalFlushConcatenationMatchesFullSnapshot(t *tes
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "line 1"}}),
 	).(*uiModel)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -314,7 +305,6 @@ func TestNativeScrollbackFlowIntegration(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript(entries),
 	).(*uiModel)
 	nextModel, startupCmd := m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
@@ -351,8 +341,8 @@ func TestNativeScrollbackFlowIntegration(t *testing.T) {
 
 	start := m.view.OngoingScroll()
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
-	if got := m.view.OngoingScroll(); got != start {
-		t.Fatalf("expected pgup to avoid in-app ongoing scroll in native mode, got %d from %d", got, start)
+	if got := m.view.OngoingScroll(); got >= start {
+		t.Fatalf("expected pgup to scroll ongoing transcript state, got %d from %d", got, start)
 	}
 
 	m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "message 121"})
@@ -493,7 +483,6 @@ func TestNativePendingToolCallStaysLiveUntilResultThenAppendsFinalBlock(t *testi
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
 	).(*uiModel)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
@@ -548,14 +537,11 @@ func TestNativePendingToolCallStaysLiveUntilResultThenAppendsFinalBlock(t *testi
 	}
 }
 
-func TestUIInitClearsScreenInAllScrollModes(t *testing.T) {
-	native := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
-	if !native.shouldClearOnInit() {
-		t.Fatal("expected native mode init to clear screen")
-	}
-	alt := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeAlt)).(*uiModel)
-	if !alt.shouldClearOnInit() {
-		t.Fatal("expected alt mode init to clear screen")
+func TestUIInitClearsScreen(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	cmd := m.Init()
+	if cmd == nil {
+		t.Fatal("expected init command")
 	}
 }
 
@@ -643,7 +629,7 @@ func TestNativeReplayDividerStyledAndExpandedToWidth(t *testing.T) {
 }
 
 func TestNativeOngoingShrinksLiveRegionAfterInputShrinkWhenNotStreaming(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 80
 	m.termHeight = 20
 	m.windowSizeKnown = true
@@ -663,7 +649,7 @@ func TestNativeOngoingShrinksLiveRegionAfterInputShrinkWhenNotStreaming(t *testi
 }
 
 func TestNativeOngoingKeepsInputAndStatusAtBottomOfLiveRegion(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 80
 	m.termHeight = 12
 	m.windowSizeKnown = true
@@ -686,23 +672,17 @@ func TestNativeOngoingKeepsInputAndStatusAtBottomOfLiveRegion(t *testing.T) {
 	}
 }
 
-func TestNativeOngoingRendersBeforeWindowSizeKnownWithFallbackDimensions(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
+func TestNativeOngoingDoesNotRenderBeforeWindowSizeKnown(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "hello"
 	got := stripANSIPreserve(m.View())
-	if strings.TrimSpace(got) == "" {
-		t.Fatalf("expected native ongoing render before first window size, got %q", got)
-	}
-	if !strings.Contains(got, "ongoing") {
-		t.Fatalf("expected fallback render to include status line, got %q", got)
-	}
-	if lines := len(strings.Split(got, "\n")); lines > 8 {
-		t.Fatalf("expected bounded pre-size native render output, got %d lines", lines)
+	if got != "" {
+		t.Fatalf("expected no native ongoing render before first window size, got %q", got)
 	}
 }
 
 func TestNativeOngoingRendersWhenTrimmedToHeight(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 80
 	m.termHeight = 4
 	m.windowSizeKnown = true
@@ -718,7 +698,7 @@ func TestNativeOngoingRendersWhenTrimmedToHeight(t *testing.T) {
 }
 
 func TestNativeOngoingClearsLiveRegionPadWhenStreamingEnds(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 80
 	m.termHeight = 12
 	m.windowSizeKnown = true
@@ -742,7 +722,6 @@ func TestNativeDeltaFlushForSingleLineUserMessageHasNoExtraBlankLine(t *testing.
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
 	).(*uiModel)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
@@ -768,7 +747,7 @@ func TestNativeDeltaFlushForSingleLineUserMessageHasNoExtraBlankLine(t *testing.
 }
 
 func TestNativeStreamingLinesHiddenWhenNotBusy(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 80
 	m.termHeight = 20
 	m.windowSizeKnown = true
@@ -791,7 +770,6 @@ func TestNativeStreamingLinesIncludeDividerAndAssistantPrefix(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "try again"}}),
 	).(*uiModel)
 	m.termWidth = 100
@@ -816,7 +794,6 @@ func TestNativeDeltaFlushDoesNotInsertBlankBeforeDivider(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "try again"}}),
 	).(*uiModel)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
@@ -849,7 +826,6 @@ func TestNativePostCommitRedrawStableWithoutExtraBlankBeforeDivider(t *testing.T
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "try again"}}),
 	).(*uiModel)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
@@ -897,7 +873,6 @@ func TestNativeStreamingDividerPersistsInTightViewport(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt"}}),
 	).(*uiModel)
 	m.termWidth = 40
@@ -922,7 +897,6 @@ func TestNativeHistoryReplayDefersWhileDetailAndFlushesOnReturn(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
 	).(*uiModel)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})

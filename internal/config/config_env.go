@@ -43,10 +43,6 @@ func settingsOverlayFromEnv(lookup envLookup) (settingsOverlay, error) {
 		normalized := normalizeTUIAlternateScreenPolicy(v)
 		overlay.TUIAlternateScreen = &normalized
 	}
-	if v, ok := lookupTrimmedEnv(lookup, "BUILDER_TUI_SCROLL_MODE"); ok {
-		normalized := normalizeTUIScrollMode(v)
-		overlay.TUIScrollMode = &normalized
-	}
 	if v, ok := lookupTrimmedEnv(lookup, "BUILDER_NOTIFICATION_METHOD"); ok {
 		overlay.NotificationMethod = stringPtr(v)
 	}

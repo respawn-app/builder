@@ -47,10 +47,7 @@ func (c uiInputController) beginRollbackEditingFlowCmd() tea.Cmd {
 	}
 	overlayCmd := m.popRollbackOverlayWithNativeReplay(false)
 	m.forwardToView(tui.FocusTranscriptEntryMsg{EntryIndex: targetEntry, Bottom: true})
-	if !m.usesNativeScrollback() {
-		if overlayCmd != nil {
-			return overlayCmd
-		}
+	if overlayCmd == nil {
 		return c.rollbackTransitionCmd()
 	}
 	anchorCmd := m.replayNativeTranscriptThroughEntry(targetEntry)

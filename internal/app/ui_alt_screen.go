@@ -34,19 +34,13 @@ func (m *uiModel) toggleTranscriptModeWithNativeReplay(emitNativeReplay bool) te
 	nextMode := m.view.Mode()
 	transitionCmd := m.altScreenCmdForModeTransition(prevMode, nextMode)
 	nativeReplayCmd := m.nativeReplayCmdForModeTransition(prevMode, nextMode, emitNativeReplay && transitionCmd == nil, emitNativeReplay)
-	if m.usesNativeScrollback() {
-		return sequenceCmds(transitionCmd, nativeReplayCmd)
+	if transitionCmd == nil && nativeReplayCmd == nil {
+		return tea.ClearScreen
 	}
-	if transitionCmd != nil {
-		return tea.Sequence(transitionCmd, tea.ClearScreen)
-	}
-	return tea.ClearScreen
+	return sequenceCmds(transitionCmd, nativeReplayCmd)
 }
 
 func (m *uiModel) nativeReplayCmdForModeTransition(prev, next tui.Mode, forceFull bool, enabled bool) tea.Cmd {
-	if !m.usesNativeScrollback() {
-		return nil
-	}
 	if !enabled {
 		return nil
 	}

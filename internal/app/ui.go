@@ -152,12 +152,6 @@ func WithUIAlternateScreenPolicy(policy config.TUIAlternateScreenPolicy) UIOptio
 	}
 }
 
-func WithUIScrollMode(mode config.TUIScrollMode) UIOption {
-	return func(m *uiModel) {
-		m.tuiScrollMode = mode
-	}
-}
-
 func WithUIInitialTranscript(entries []UITranscriptEntry) UIOption {
 	return func(m *uiModel) {
 		m.initialTranscript = append([]UITranscriptEntry(nil), entries...)
@@ -249,10 +243,9 @@ type uiModel struct {
 	slashCommandFilterSet bool
 	slashCommandSelection int
 	exitAction            UIAction
-	theme                 string
-	tuiAlternateScreen    config.TUIAlternateScreenPolicy
-	tuiScrollMode         config.TUIScrollMode
-	altScreenActive       bool
+	theme              string
+	tuiAlternateScreen config.TUIAlternateScreenPolicy
+	altScreenActive    bool
 
 	sawAssistantDelta bool
 	logger            uiLogger
@@ -344,7 +337,6 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 		exitAction:            UIActionNone,
 		theme:                 "dark",
 		tuiAlternateScreen:    config.TUIAlternateScreenAuto,
-		tuiScrollMode:         config.TUIScrollModeAlt,
 		debugKeys:             envFlagEnabled("BUILDER_DEBUG_KEYS"),
 		reviewerMode:          "off",
 		autoCompactionEnabled: true,
@@ -390,9 +382,7 @@ func (m *uiModel) Init() tea.Cmd {
 		tea.SetWindowTitle(m.windowTitle()),
 		tea.WindowSize(),
 	}
-	if m.shouldClearOnInit() {
-		cmds = append([]tea.Cmd{tea.ClearScreen}, cmds...)
-	}
+	cmds = append([]tea.Cmd{tea.ClearScreen}, cmds...)
 	if strings.TrimSpace(m.startupSubmit) != "" {
 		cmds = append(cmds, m.inputController().startSubmission(m.startupSubmit))
 	}
@@ -401,13 +391,6 @@ func (m *uiModel) Init() tea.Cmd {
 		m.startupCmds = nil
 	}
 	return tea.Batch(cmds...)
-}
-
-func (m *uiModel) shouldClearOnInit() bool {
-	if m.usesNativeScrollback() {
-		return m.view.Mode() == tui.ModeOngoing
-	}
-	return true
 }
 
 func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -438,11 +421,11 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.termWidth = msg.Width
 		m.termHeight = msg.Height
 		m.windowSizeKnown = true
-		if m.usesNativeScrollback() && m.nativeFormatterReady && previousWidth > 0 && previousWidth != msg.Width {
+		if m.nativeFormatterReady && previousWidth > 0 && previousWidth != msg.Width {
 			m.rebaseNativeFormatterSnapshot()
 		}
 		m.syncViewport()
-		if m.usesNativeScrollback() && !m.nativeHistoryReplayed {
+		if !m.nativeHistoryReplayed {
 			return m, m.syncNativeHistoryFromTranscript()
 		}
 		return m, nil

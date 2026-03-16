@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"builder/internal/config"
 	"builder/internal/runtime"
 	"builder/internal/tui"
 )
@@ -30,7 +29,7 @@ func TestUIRenderFrameRenderRespectsPaddingPolicy(t *testing.T) {
 }
 
 func TestComputeNativeLiveRegionStateTracksStreamingBoundary(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 40
 	m.termHeight = 10
 	m.windowSizeKnown = true

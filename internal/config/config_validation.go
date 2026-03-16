@@ -32,11 +32,6 @@ func validateSettings(v Settings) error {
 	default:
 		return fmt.Errorf("invalid tui_alternate_screen %q (expected auto|always|never)", v.TUIAlternateScreen)
 	}
-	switch strings.ToLower(strings.TrimSpace(string(v.TUIScrollMode))) {
-	case "alt", "native":
-	default:
-		return fmt.Errorf("invalid tui_scroll_mode %q (expected alt|native)", v.TUIScrollMode)
-	}
 	switch strings.ToLower(strings.TrimSpace(v.NotificationMethod)) {
 	case "auto", "osc9", "bel":
 	default:
@@ -117,17 +112,6 @@ func normalizeTUIAlternateScreenPolicy(raw string) TUIAlternateScreenPolicy {
 		return TUIAlternateScreenNever
 	default:
 		return TUIAlternateScreenPolicy(strings.TrimSpace(raw))
-	}
-}
-
-func normalizeTUIScrollMode(raw string) TUIScrollMode {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "alt":
-		return TUIScrollModeAlt
-	case "native":
-		return TUIScrollModeNative
-	default:
-		return TUIScrollMode(strings.TrimSpace(raw))
 	}
 }
 

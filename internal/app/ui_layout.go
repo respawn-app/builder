@@ -40,11 +40,10 @@ func (m *uiModel) View() string {
 }
 
 func (l uiViewLayout) render() string {
-	m := l.model
-	if m.usesNativeScrollback() && m.view.Mode() == tui.ModeOngoing {
+	if l.model.view.Mode() == tui.ModeOngoing {
 		return l.renderNativeOngoing()
 	}
-	style := uiThemeStyles(m.theme)
+	style := uiThemeStyles(l.model.theme)
 	frame, ok := l.composeStandardFrame(style)
 	if !ok {
 		return ""
@@ -74,21 +73,10 @@ func (l uiViewLayout) composeStandardFrame(style uiStyles) (uiRenderFrame, bool)
 }
 
 func (l uiViewLayout) renderNativeOngoing() string {
-	m := l.model
-	if !m.windowSizeKnown {
-		return l.renderNativeOngoingPreSize()
-	}
-	return l.renderNativeOngoingSized()
-}
-
-func (l uiViewLayout) renderNativeOngoingPreSize() string {
-	m := l.model
-	style := uiThemeStyles(m.theme)
-	frame, ok := l.composeNativePreSizeFrame(style)
-	if !ok {
+	if !l.model.windowSizeKnown {
 		return ""
 	}
-	return frame.render()
+	return l.renderNativeOngoingSized()
 }
 
 func (l uiViewLayout) renderNativeOngoingSized() string {
@@ -97,9 +85,6 @@ func (l uiViewLayout) renderNativeOngoingSized() string {
 	frame, status := l.composeNativeSizedFrame(style)
 	if status == nativeFrameInvalid {
 		return ""
-	}
-	if status == nativeFrameFallbackPreSize {
-		return l.renderNativeOngoingPreSize()
 	}
 	return frame.render()
 }
@@ -132,26 +117,8 @@ type nativeFrameStatus uint8
 
 const (
 	nativeFrameInvalid nativeFrameStatus = iota
-	nativeFrameFallbackPreSize
 	nativeFrameReady
 )
-
-func (l uiViewLayout) composeNativePreSizeFrame(style uiStyles) (uiRenderFrame, bool) {
-	width := l.effectiveWidth()
-	if width <= 0 {
-		return uiRenderFrame{}, false
-	}
-	frame := uiRenderFrame{
-		width:      width,
-		height:     len(l.renderSlashCommandPicker(width)) + len(l.renderQueuedMessagesPane(width)) + len(l.renderNativeStreamingLines(width, 12, style)) + len(l.renderInputLines(width, style)) + 1,
-		pickerPane: l.renderSlashCommandPicker(width),
-		queuePane:  l.renderQueuedMessagesPane(width),
-		chatPanel:  l.renderNativeStreamingLines(width, 12, style),
-		inputPane:  l.renderInputLines(width, style),
-		statusLine: l.renderStatusLine(width, style),
-	}
-	return frame, true
-}
 
 func (l uiViewLayout) composeNativeSizedFrame(style uiStyles) (uiRenderFrame, nativeFrameStatus) {
 	m := l.model
@@ -161,7 +128,7 @@ func (l uiViewLayout) composeNativeSizedFrame(style uiStyles) (uiRenderFrame, na
 		return uiRenderFrame{}, nativeFrameInvalid
 	}
 	if height <= 0 {
-		return uiRenderFrame{}, nativeFrameFallbackPreSize
+		return uiRenderFrame{}, nativeFrameInvalid
 	}
 	frame := uiRenderFrame{
 		width:      width,
@@ -171,6 +138,7 @@ func (l uiViewLayout) composeNativeSizedFrame(style uiStyles) (uiRenderFrame, na
 		inputPane:  l.renderInputLines(width, style),
 		statusLine: l.renderStatusLine(width, style),
 		tailOnly:   true,
+		padToHeight: false,
 	}
 	availableStreamingLines := height - len(frame.pickerPane) - len(frame.queuePane) - len(frame.inputPane) - 1
 	if availableStreamingLines < 0 {
@@ -215,7 +183,10 @@ func (l uiViewLayout) renderNativeStreamingLines(width, maxLines int, style uiSt
 	if !hasStreaming && len(pendingLines) == 0 {
 		return nil
 	}
-	streamText := l.model.view.OngoingStreamingText()
+	streamText := ""
+	if hasStreaming {
+		streamText = l.model.view.OngoingStreamingText()
+	}
 	errText := l.model.view.OngoingErrorText()
 	if len(pendingLines) == 0 && strings.TrimSpace(streamText) == "" && strings.TrimSpace(errText) == "" {
 		return nil
@@ -295,7 +266,7 @@ func (l uiViewLayout) syncNativeLiveRegionState() {
 
 func (l uiViewLayout) computeNativeLiveRegionState() nativeLiveRegionState {
 	m := l.model
-	if !m.usesNativeScrollback() || m.view.Mode() != tui.ModeOngoing {
+	if m.view.Mode() != tui.ModeOngoing {
 		return nativeLiveRegionState{}
 	}
 	streamingActiveNow := strings.TrimSpace(m.view.OngoingStreamingText()) != "" || strings.TrimSpace(m.view.OngoingErrorText()) != ""

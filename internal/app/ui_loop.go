@@ -24,7 +24,6 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 		WithUIModelContractLocked(modelContractLocked),
 		WithUITheme(active.Theme),
 		WithUIAlternateScreenPolicy(active.TUIAlternateScreen),
-		WithUIScrollMode(active.TUIScrollMode),
 		WithUICommandRegistry(commandRegistry),
 		WithUIBackgroundManager(wiring.background),
 		WithUIStartupSubmit(initialPrompt),
@@ -46,12 +45,6 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 
 func mainUIProgramOptions(active config.Settings) []tea.ProgramOption {
 	options := []tea.ProgramOption{tea.WithFilter(customKeyProgramFilter)}
-	if shouldStartMainUIInAltScreen(active.TUIAlternateScreen) && active.TUIScrollMode != config.TUIScrollModeNative {
-		options = append(options, tea.WithAltScreen())
-	}
-	if active.TUIScrollMode == config.TUIScrollModeAlt {
-		options = append(options, tea.WithMouseCellMotion())
-	}
 	return options
 }
 

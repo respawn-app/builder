@@ -14,7 +14,6 @@ type settingsOverlay struct {
 	ModelCapabilities                *ModelCapabilitiesOverride
 	Theme                            *string
 	TUIAlternateScreen               *TUIAlternateScreenPolicy
-	TUIScrollMode                    *TUIScrollMode
 	NotificationMethod               *string
 	ToolPreambles                    *bool
 	PriorityRequestMode              *bool
@@ -55,7 +54,6 @@ func defaultSourceMap() map[string]string {
 		"model_capabilities":                  "default",
 		"theme":                               "default",
 		"tui_alternate_screen":                "default",
-		"tui_scroll_mode":                     "default",
 		"notification_method":                 "default",
 		"tool_preambles":                      "default",
 		"priority_request_mode":               "default",
@@ -104,10 +102,6 @@ func settingsOverlayFromFile(cfg fileSettings, settingsPath string) (settingsOve
 	if v := strings.TrimSpace(cfg.TUIAlternateScreen); v != "" {
 		normalized := normalizeTUIAlternateScreenPolicy(v)
 		overlay.TUIAlternateScreen = &normalized
-	}
-	if v := strings.TrimSpace(cfg.TUIScrollMode); v != "" {
-		normalized := normalizeTUIScrollMode(v)
-		overlay.TUIScrollMode = &normalized
 	}
 	if v := strings.TrimSpace(cfg.NotificationMethod); v != "" {
 		overlay.NotificationMethod = &v
@@ -256,10 +250,6 @@ func applySettingsOverlay(settings *Settings, persistenceRoot *string, persisten
 	if overlay.TUIAlternateScreen != nil {
 		settings.TUIAlternateScreen = *overlay.TUIAlternateScreen
 		sources["tui_alternate_screen"] = source
-	}
-	if overlay.TUIScrollMode != nil {
-		settings.TUIScrollMode = *overlay.TUIScrollMode
-		sources["tui_scroll_mode"] = source
 	}
 	if overlay.NotificationMethod != nil {
 		settings.NotificationMethod = *overlay.NotificationMethod
