@@ -11,9 +11,6 @@ import (
 
 const (
 	InlineMetaSeparator     = "\x1f"
-	ShellCallPrefix         = "\x1eshell_call\x1e"
-	PatchPayloadPrefix      = "\x1epatch_payload\x1e"
-	PatchPayloadSeparator   = "\x1epatch_sep\x1e"
 	DefaultShellTimeoutSecs = 300
 	defaultToolCallFallback = "tool call"
 	shellToolNameNormalized = "shell"
@@ -21,60 +18,9 @@ const (
 	stdinToolNameNormalized = "write_stdin"
 )
 
-func EncodeInlineCall(command, timeoutLabel string, isShell bool) string {
-	command = strings.TrimSpace(command)
-	if command == "" {
-		return ""
-	}
-	if isShell {
-		command = ShellCallPrefix + command
-	}
-	timeoutLabel = strings.TrimSpace(timeoutLabel)
-	if timeoutLabel == "" {
-		return command
-	}
-	return command + InlineMetaSeparator + timeoutLabel
-}
-
-func EncodePatchPayload(summary, detail string) string {
-	summary = strings.TrimSpace(summary)
-	detail = strings.TrimSpace(detail)
-	if summary == "" || detail == "" {
-		return ""
-	}
-	return PatchPayloadPrefix + summary + PatchPayloadSeparator + detail
-}
-
-func DecodePatchPayload(text string) (string, string, bool) {
-	if !strings.HasPrefix(text, PatchPayloadPrefix) {
-		return "", "", false
-	}
-	rest := strings.TrimPrefix(text, PatchPayloadPrefix)
-	parts := strings.SplitN(rest, PatchPayloadSeparator, 2)
-	if len(parts) != 2 {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
-}
-
-func StripShellCallPrefix(text string) (string, bool) {
-	if !strings.HasPrefix(text, ShellCallPrefix) {
-		return text, false
-	}
-	return strings.TrimPrefix(text, ShellCallPrefix), true
-}
-
-func IsShellToolCall(text string) bool {
-	_, ok := StripShellCallPrefix(text)
-	return ok
-}
-
 func SplitInlineMeta(line string) (string, string) {
 	parts := strings.SplitN(line, InlineMetaSeparator, 2)
 	command := strings.TrimSpace(parts[0])
-	if stripped, ok := StripShellCallPrefix(command); ok {
-		command = stripped
-	}
 	if len(parts) == 1 {
 		return command, ""
 	}
@@ -82,12 +28,6 @@ func SplitInlineMeta(line string) (string, string) {
 }
 
 func CompactCallText(text string) string {
-	if summary, _, ok := DecodePatchPayload(text); ok {
-		return strings.TrimSpace(summary)
-	}
-	if shellText, ok := StripShellCallPrefix(text); ok {
-		text = shellText
-	}
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
 		return defaultToolCallFallback

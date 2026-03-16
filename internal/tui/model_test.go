@@ -1063,6 +1063,65 @@ func TestDetailShowsRawPatchFallbackWhenOnlySummaryAvailableInOngoing(t *testing
 	}
 }
 
+func TestSetConversationTypedToolMetadataRendersWithoutLegacyInlineParsing(t *testing.T) {
+	summary := "Edited:\n./main.go +1 -1"
+	detail := "Edited:\n/abs/main.go\n-old\n+new"
+
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, SetConversationMsg{Entries: []TranscriptEntry{
+		{
+			Role: "tool_call",
+			Text: summary,
+			ToolCall: &transcript.ToolCallMeta{
+				ToolName:     "patch",
+				PatchSummary: summary,
+				PatchDetail:  detail,
+			},
+		},
+		{
+			Role: "tool_result_ok",
+			Text: "",
+		},
+		{
+			Role: "tool_call",
+			Text: "pwd",
+			ToolCall: &transcript.ToolCallMeta{
+				ToolName:     "shell",
+				IsShell:      true,
+				Command:      "pwd",
+				TimeoutLabel: "timeout: 5m",
+			},
+		},
+		{
+			Role: "tool_result_ok",
+			Text: "/tmp",
+		},
+	}})
+
+	ongoing := plainTranscript(m.View())
+	if !strings.Contains(ongoing, "./main.go +1 -1") {
+		t.Fatalf("expected patch summary from typed metadata in ongoing view, got %q", ongoing)
+	}
+	if strings.Contains(ongoing, "/abs/main.go") || strings.Contains(ongoing, "+new") {
+		t.Fatalf("did not expect patch detail in ongoing view, got %q", ongoing)
+	}
+	if !strings.Contains(ongoing, "pwd") {
+		t.Fatalf("expected shell command from typed metadata in ongoing view, got %q", ongoing)
+	}
+	if strings.Contains(ongoing, "/tmp") {
+		t.Fatalf("did not expect shell output in ongoing view, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detailView := plainTranscript(m.View())
+	if !strings.Contains(detailView, "/abs/main.go") || !strings.Contains(detailView, "+new") || !strings.Contains(detailView, "-old") {
+		t.Fatalf("expected patch detail from typed metadata in detail view, got %q", detailView)
+	}
+	if !containsInOrder(detailView, "$", "pwd", "timeout: 5m", "/tmp") {
+		t.Fatalf("expected shell command, timeout and output from typed metadata in detail view, got %q", detailView)
+	}
+}
+
 func TestStyleToolLineColorsPatchCountsAndDiff(t *testing.T) {
 	m := NewModel()
 	counts := m.styleToolLine("./file.go +13 -9")
