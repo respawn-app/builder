@@ -45,8 +45,8 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 			return err
 		}
 		logger.Logf("app.start session_id=%s workspace=%s model=%s", store.Meta().SessionID, boot.cfg.WorkspaceRoot, active.Model)
-		if active.TUIScrollMode == config.TUIScrollModeNative && active.TUIAlternateScreen == config.TUIAlternateScreenAlways {
-			logger.Logf("ui.scroll_mode.native overrides tui_alternate_screen=always for main UI startup (normal buffer required for replay)")
+		if active.TUIAlternateScreen == config.TUIAlternateScreenAlways {
+			logger.Logf("ui.scrollback.native keeps main UI startup in normal buffer even with tui_alternate_screen=always")
 		}
 		logger.Logf("config.settings path=%s created=%t", boot.cfg.Source.SettingsPath, boot.cfg.Source.CreatedDefaultConfig)
 		for _, line := range configSourceLines(boot.cfg.Source) {

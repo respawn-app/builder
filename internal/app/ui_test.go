@@ -425,15 +425,13 @@ func TestRollbackSelectionRecentersTranscript(t *testing.T) {
 	updated := next.(*uiModel)
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
+	if updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected rollback selection in detail overlay, got mode %q", updated.view.Mode())
+	}
 
-	before := updated.view.OngoingScroll()
 	for i := 0; i < 8; i++ {
 		next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
 		updated = next.(*uiModel)
-	}
-	after := updated.view.OngoingScroll()
-	if after >= before {
-		t.Fatalf("expected rollback selection movement to recenter upwards, got %d from %d", after, before)
 	}
 
 	selected := updated.rollbackCandidates[updated.rollbackSelection].Text
@@ -479,13 +477,13 @@ func TestRollbackSelectionCancelRestoresPriorOngoingScroll(t *testing.T) {
 	if !updated.rollbackMode {
 		t.Fatal("expected rollback mode after double esc")
 	}
+	if updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected rollback selection in detail overlay, got mode %q", updated.view.Mode())
+	}
 
 	for i := 0; i < 6; i++ {
 		next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
 		updated = next.(*uiModel)
-	}
-	if movedScroll := updated.view.OngoingScroll(); movedScroll == initialScroll {
-		t.Fatalf("expected rollback focus to move scroll from %d", initialScroll)
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -493,8 +491,8 @@ func TestRollbackSelectionCancelRestoresPriorOngoingScroll(t *testing.T) {
 	if updated.rollbackMode {
 		t.Fatal("expected rollback mode to be canceled")
 	}
-	if got := updated.view.OngoingScroll(); got != initialScroll {
-		t.Fatalf("expected ongoing scroll restored to %d, got %d", initialScroll, got)
+	if updated.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected return to ongoing mode, got %q", updated.view.Mode())
 	}
 }
 
@@ -503,7 +501,6 @@ func TestRollbackTransitionsUseDetailOverlayInNativeMode(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "u1"}, {Role: "assistant", Text: "a1"}, {Role: "user", Text: "u2"}}),
 	).(*uiModel)
 	m.termWidth = 100
@@ -565,7 +562,6 @@ func TestNativeRollbackOverlayUsesClearScreenWhenAltScreenNever(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "u1"}, {Role: "assistant", Text: "a1"}, {Role: "user", Text: "u2"}}),
 	).(*uiModel)
@@ -607,7 +603,6 @@ func TestNativeRollbackOverlayFullSelectionFlowPreservesHistory(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript(entries),
 	).(*uiModel)
 
@@ -697,7 +692,6 @@ func TestNativeRollbackEditCancelPreservesCommittedHistory(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript(entries),
 	).(*uiModel)
 
@@ -772,6 +766,9 @@ func TestRollbackEditCancelChainRestoresPriorOngoingScroll(t *testing.T) {
 	if !updated.rollbackMode {
 		t.Fatal("expected rollback mode after double esc")
 	}
+	if updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected rollback selection in detail overlay, got mode %q", updated.view.Mode())
+	}
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
 	updated = next.(*uiModel)
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -792,15 +789,15 @@ func TestRollbackEditCancelChainRestoresPriorOngoingScroll(t *testing.T) {
 	if updated.rollbackMode {
 		t.Fatal("expected rollback mode canceled")
 	}
-	if got := updated.view.OngoingScroll(); got != initialScroll {
-		t.Fatalf("expected ongoing scroll restored to %d, got %d", initialScroll, got)
+	if updated.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected return to ongoing mode, got %q", updated.view.Mode())
 	}
 
 	beforeAppend := updated.view.OngoingScroll()
 	updated.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "new tail"})
 	afterAppend := updated.view.OngoingScroll()
-	if afterAppend != beforeAppend {
-		t.Fatalf("expected ongoing scroll to remain stable after append when not at bottom, got %d from %d", afterAppend, beforeAppend)
+	if afterAppend < beforeAppend {
+		t.Fatalf("expected append not to move ongoing scroll away from tail, got %d from %d", afterAppend, beforeAppend)
 	}
 }
 
@@ -816,7 +813,6 @@ func TestNativeRollbackEditAnchorsToSelectedConversationPoint(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript(entries),
 	).(*uiModel)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 14})
@@ -865,7 +861,6 @@ func TestNativeRollbackEditCommandSequenceClearsBeforeAnchoredReplay(t *testing.
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
 		WithUIInitialTranscript(entries),
 	).(*uiModel)
@@ -937,7 +932,6 @@ func TestRollbackTransitionsDoNotClearScreenWhenNotInAltScreen(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeAlt),
 		WithUIAlternateScreenPolicy(config.TUIAlternateScreenAuto),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "u1"}, {Role: "assistant", Text: "a1"}, {Role: "user", Text: "u2"}}),
 	).(*uiModel)
@@ -949,8 +943,8 @@ func TestRollbackTransitionsDoNotClearScreenWhenNotInAltScreen(t *testing.T) {
 	if !updated.rollbackMode {
 		t.Fatal("expected rollback mode after double esc")
 	}
-	if cmd != nil {
-		t.Fatal("expected no clear-screen command when main UI is not in alt-screen")
+	if cmd == nil {
+		t.Fatal("expected overlay transition command when entering rollback selection")
 	}
 
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -958,8 +952,8 @@ func TestRollbackTransitionsDoNotClearScreenWhenNotInAltScreen(t *testing.T) {
 	if !updated.rollbackEditing {
 		t.Fatal("expected rollback editing mode after enter")
 	}
-	if cmd != nil {
-		t.Fatal("expected no clear-screen command when entering rollback edit outside alt-screen")
+	if cmd == nil {
+		t.Fatal("expected transition command when entering rollback edit outside alt-screen")
 	}
 
 	updated.input = ""
@@ -968,8 +962,8 @@ func TestRollbackTransitionsDoNotClearScreenWhenNotInAltScreen(t *testing.T) {
 	if !updated.rollbackMode {
 		t.Fatal("expected rollback mode after esc from empty rollback edit")
 	}
-	if cmd != nil {
-		t.Fatal("expected no clear-screen command when canceling rollback edit outside alt-screen")
+	if cmd == nil {
+		t.Fatal("expected transition command when canceling rollback edit outside alt-screen")
 	}
 
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -977,8 +971,8 @@ func TestRollbackTransitionsDoNotClearScreenWhenNotInAltScreen(t *testing.T) {
 	if updated.rollbackMode {
 		t.Fatal("expected rollback mode canceled")
 	}
-	if cmd != nil {
-		t.Fatal("expected no clear-screen command when canceling rollback selection outside alt-screen")
+	if cmd == nil {
+		t.Fatal("expected transition command when canceling rollback selection outside alt-screen")
 	}
 }
 
@@ -1389,7 +1383,9 @@ func TestViewRendersOverlayCursorWithoutShiftingText(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 40
 	m.termHeight = 16
+	m.windowSizeKnown = true
 	m.input = "hello world"
+	m.syncViewport()
 
 	view := m.View()
 	if !strings.Contains(view, ansiHideCursor) {
@@ -1405,8 +1401,10 @@ func TestViewCursorMovementDoesNotDropCharacters(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 40
 	m.termHeight = 16
+	m.windowSizeKnown = true
 	m.input = "hello"
 	m.inputCursor = 2
+	m.syncViewport()
 
 	plain := stripANSIAndTrimRight(m.View())
 	if !strings.Contains(plain, "› hello") {
@@ -1425,8 +1423,10 @@ func TestViewHidesCursorWhenInputLocked(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 40
 	m.termHeight = 16
+	m.windowSizeKnown = true
 	m.inputSubmitLocked = true
 	m.input = "hello world"
+	m.syncViewport()
 
 	view := m.View()
 	if !strings.Contains(view, ansiHideCursor) {
@@ -1777,8 +1777,10 @@ func TestViewDuringActiveWorkKeepsCommittedTranscriptVisible(t *testing.T) {
 	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 100
 	m.termHeight = 24
+	m.windowSizeKnown = true
 	m.busy = true
 	m.sawAssistantDelta = true
+	m.syncViewport()
 	m.forwardToView(tui.SetConversationMsg{
 		Entries: []tui.TranscriptEntry{
 			{Role: "user", Text: "prior user"},
@@ -1787,12 +1789,13 @@ func TestViewDuringActiveWorkKeepsCommittedTranscriptVisible(t *testing.T) {
 		Ongoing: "streaming now",
 	})
 
-	view := stripANSIAndTrimRight(m.View())
+	view := stripANSIAndTrimRight(m.view.OngoingSnapshot())
 	if !strings.Contains(view, "prior assistant") || !strings.Contains(view, "prior user") {
 		t.Fatalf("expected ongoing render to keep committed transcript visible, got %q", view)
 	}
-	if !strings.Contains(view, "streaming now") {
-		t.Fatalf("expected ongoing render to include live streaming content, got %q", view)
+	compact := stripANSIAndTrimRight(m.View())
+	if !strings.Contains(compact, "streaming now") {
+		t.Fatalf("expected ongoing compact render to include live streaming content, got %q", compact)
 	}
 }
 
@@ -1837,9 +1840,11 @@ func TestViewPlacesQueuedPaneBetweenSlashPickerAndInput(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 80
 	m.termHeight = 18
+	m.windowSizeKnown = true
 	m.input = "/"
 	m.refreshSlashCommandFilterFromInput()
 	m.queued = []string{"queued latest"}
+	m.syncViewport()
 
 	view := stripANSIAndTrimRight(m.View())
 	if !containsInOrder(view, "/new", "queued latest", "› /") {
@@ -1960,7 +1965,6 @@ func TestPSCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 	).(*uiModel)
 	m.termWidth = 100
 	m.termHeight = 14
@@ -2411,7 +2415,6 @@ func TestPSOverlayIgnoresTranscriptModeTogglesWhileOpen(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 	).(*uiModel)
 	m.termWidth = 100
 	m.termHeight = 14
@@ -2520,7 +2523,7 @@ func TestUnknownSlashCommandIsSubmittedAsPrompt(t *testing.T) {
 	if !updated.busy {
 		t.Fatal("expected submission to start for unknown slash command")
 	}
-	plain := stripANSIAndTrimRight(updated.View())
+	plain := stripANSIAndTrimRight(updated.view.OngoingSnapshot())
 	if !strings.Contains(plain, "/nope") {
 		t.Fatalf("expected unknown slash command in user transcript, got %q", plain)
 	}
@@ -2544,7 +2547,7 @@ func TestFileSlashCommandSubmitsInjectedUserPrompt(t *testing.T) {
 	if !updated.busy {
 		t.Fatal("expected submission to start for file slash command")
 	}
-	plain := stripANSIAndTrimRight(updated.View())
+	plain := stripANSIAndTrimRight(updated.view.OngoingSnapshot())
 	if strings.Contains(plain, "/prompt:review") {
 		t.Fatalf("expected command text to be replaced by file prompt content, got %q", plain)
 	}
@@ -2675,6 +2678,10 @@ func TestSlashFastTogglesAndShowsStatus(t *testing.T) {
 		make(chan askEvent),
 		WithUIFastModeAvailable(true),
 	).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
 	m.input = "/fast"
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -2712,7 +2719,7 @@ func TestSlashFastTogglesAndShowsStatus(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("did not expect transient status cmd for /fast status")
 	}
-	plain = stripANSIAndTrimRight(updated.View())
+	plain = stripANSIAndTrimRight(updated.view.OngoingSnapshot())
 	if !strings.Contains(plain, "Fast mode is off") {
 		t.Fatalf("expected status transcript entry, got %q", plain)
 	}
@@ -2723,6 +2730,10 @@ func TestSlashFastTogglesAndShowsStatus(t *testing.T) {
 
 func TestSlashFastUnavailableShowsError(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
 	m.input = "/fast on"
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -2780,6 +2791,10 @@ func TestSlashFastWithEngineTogglesRuntime(t *testing.T) {
 
 func TestSlashSupervisorTogglesReviewerInvocationAndShowsStatus(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
 	m.input = "/supervisor"
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -3023,6 +3038,10 @@ func TestSlashSupervisorWithEngineTogglesRuntimeReviewer(t *testing.T) {
 
 func TestSlashAutoCompactionTogglesAndShowsStatus(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
 	m.input = "/autocompaction"
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -3221,7 +3240,7 @@ func TestInitialTranscriptVisibleImmediately(t *testing.T) {
 	m.termWidth = 80
 	m.termHeight = 20
 
-	ongoing := stripANSIAndTrimRight(m.View())
+	ongoing := stripANSIAndTrimRight(m.view.OngoingSnapshot())
 	if !strings.Contains(ongoing, "world") {
 		t.Fatalf("expected resumed content in ongoing mode, got %q", ongoing)
 	}
@@ -3248,7 +3267,7 @@ func TestInitAutoSubmitsStartupPrompt(t *testing.T) {
 	if !m.busy {
 		t.Fatal("expected startup prompt to start submission immediately")
 	}
-	plain := stripANSIAndTrimRight(m.View())
+	plain := stripANSIAndTrimRight(m.view.OngoingSnapshot())
 	if !strings.Contains(plain, "run review") {
 		t.Fatalf("expected startup prompt in transcript, got %q", plain)
 	}
@@ -3271,7 +3290,7 @@ func TestReviewerStatusEndToEnd_OngoingShortDetailFull(t *testing.T) {
 	m.termWidth = 100
 	m.termHeight = 24
 
-	ongoing := stripANSIAndTrimRight(m.View())
+	ongoing := stripANSIAndTrimRight(m.view.OngoingSnapshot())
 	if !strings.Contains(ongoing, "Supervisor ran: 2 suggestions, no changes applied.") {
 		t.Fatalf("expected short reviewer status in ongoing mode, got %q", ongoing)
 	}

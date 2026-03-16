@@ -243,7 +243,6 @@ func TestForkRollbackNativeStartupReplayUsesForkedHistory(t *testing.T) {
 		eng,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 	).(*uiModel)
 	next, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	updated := next.(*uiModel)

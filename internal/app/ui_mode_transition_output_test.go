@@ -29,7 +29,6 @@ func TestModeTogglesUseDetailAltScreenNative(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "history marker"}}),
 	).(*uiModel)
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
@@ -83,7 +82,6 @@ func TestModeTogglesUseDetailAltScreenAltMode(t *testing.T) {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeAlt),
 	).(*uiModel)
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
 	done := make(chan error, 1)
@@ -119,12 +117,11 @@ func TestModeTogglesUseDetailAltScreenAltMode(t *testing.T) {
 
 func TestNativeAlwaysPolicyDisablesAltScreenAndShowsReplayAfterWindowSize(t *testing.T) {
 	out := &bytes.Buffer{}
-	settings := config.Settings{TUIAlternateScreen: config.TUIAlternateScreenAlways, TUIScrollMode: config.TUIScrollModeNative}
+	settings := config.Settings{TUIAlternateScreen: config.TUIAlternateScreenAlways}
 	model := NewUIModel(
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "startup replay marker"}}),
 	).(*uiModel)
 	program := tea.NewProgram(model, append(mainUIProgramOptions(settings), tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())...)

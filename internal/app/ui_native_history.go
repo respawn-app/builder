@@ -3,20 +3,12 @@ package app
 import (
 	"strings"
 
-	"builder/internal/config"
 	"builder/internal/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func (m *uiModel) usesNativeScrollback() bool {
-	return m.tuiScrollMode == config.TUIScrollModeNative
-}
-
 func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
-	if !m.usesNativeScrollback() {
-		return nil
-	}
 	if !m.windowSizeKnown {
 		return nil
 	}
@@ -98,7 +90,7 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 }
 
 func (m *uiModel) shouldEmitNativeHistory() bool {
-	return m.usesNativeScrollback() && m.windowSizeKnown && m.view.Mode() == tui.ModeOngoing
+	return m.windowSizeKnown && m.view.Mode() == tui.ModeOngoing
 }
 
 func (m *uiModel) nativeReplayRenderWidth() int {
@@ -187,7 +179,7 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool) tea.Cmd {
 }
 
 func (m *uiModel) replayNativeTranscriptThroughEntry(entryIndex int) tea.Cmd {
-	if !m.usesNativeScrollback() || !m.windowSizeKnown {
+	if !m.windowSizeKnown {
 		return nil
 	}
 	if entryIndex < 0 || entryIndex >= len(m.transcriptEntries) {

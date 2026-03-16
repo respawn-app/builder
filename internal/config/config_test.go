@@ -10,7 +10,6 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	_ = os.Unsetenv("BUILDER_TUI_SCROLL_MODE")
 	os.Exit(m.Run())
 }
 
@@ -18,8 +17,6 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("BUILDER_TUI_SCROLL_MODE", "")
-
 	cfg, err := Load(workspace, LoadOptions{})
 	if err != nil {
 		t.Fatalf("load: %v", err)
@@ -49,9 +46,6 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	}
 	if cfg.Settings.TUIAlternateScreen != TUIAlternateScreenAuto {
 		t.Fatalf("default tui_alternate_screen mismatch: %q", cfg.Settings.TUIAlternateScreen)
-	}
-	if cfg.Settings.TUIScrollMode != TUIScrollModeAlt {
-		t.Fatalf("default tui_scroll_mode mismatch: %q", cfg.Settings.TUIScrollMode)
 	}
 	if got := cfg.PersistenceRoot; got != filepath.Join(home, ".builder") {
 		t.Fatalf("default persistence root mismatch: %q", got)
@@ -575,49 +569,6 @@ func TestLoadTUIAlternateScreenPrecedenceAndValidation(t *testing.T) {
 	t.Setenv("BUILDER_TUI_ALTERNATE_SCREEN", "broken")
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
 		t.Fatal("expected invalid tui_alternate_screen validation error")
-	}
-}
-
-func TestLoadTUIScrollModePrecedenceAndValidation(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("BUILDER_TUI_SCROLL_MODE", "")
-
-	configPath := filepath.Join(home, ".builder", "config.toml")
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(configPath, []byte("tui_scroll_mode = \"native\"\n"), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	cfg, err := Load(workspace, LoadOptions{})
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if cfg.Settings.TUIScrollMode != TUIScrollModeNative {
-		t.Fatalf("expected file tui_scroll_mode=native, got %q", cfg.Settings.TUIScrollMode)
-	}
-	if got := cfg.Source.Sources["tui_scroll_mode"]; got != "file" {
-		t.Fatalf("expected tui_scroll_mode source file, got %q", got)
-	}
-
-	t.Setenv("BUILDER_TUI_SCROLL_MODE", "alt")
-	cfg, err = Load(workspace, LoadOptions{})
-	if err != nil {
-		t.Fatalf("load with env: %v", err)
-	}
-	if cfg.Settings.TUIScrollMode != TUIScrollModeAlt {
-		t.Fatalf("expected env tui_scroll_mode=alt, got %q", cfg.Settings.TUIScrollMode)
-	}
-	if got := cfg.Source.Sources["tui_scroll_mode"]; got != "env" {
-		t.Fatalf("expected tui_scroll_mode source env, got %q", got)
-	}
-
-	t.Setenv("BUILDER_TUI_SCROLL_MODE", "broken")
-	if _, err := Load(workspace, LoadOptions{}); err == nil {
-		t.Fatal("expected invalid tui_scroll_mode validation error")
 	}
 }
 

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	"builder/internal/config"
 	"builder/internal/runtime"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -26,7 +25,6 @@ func benchmarkRollbackOverlayModel(entries []UITranscriptEntry) *uiModel {
 		nil,
 		make(chan runtime.Event),
 		make(chan askEvent),
-		WithUIScrollMode(config.TUIScrollModeNative),
 		WithUIInitialTranscript(entries),
 	).(*uiModel)
 	next, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 30})

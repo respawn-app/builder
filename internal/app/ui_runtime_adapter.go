@@ -73,9 +73,7 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 		}
 	case runtime.EventUserMessageFlushed:
 		a.onUserMessageFlushed(evt.UserMessage)
-		if m.usesNativeScrollback() {
-			return a.syncConversationFromEngine()
-		}
+		return a.syncConversationFromEngine()
 	}
 	return nil
 }
@@ -124,6 +122,9 @@ func (a uiRuntimeAdapter) applyChatSnapshot(snapshot runtime.ChatSnapshot) tea.C
 		Ongoing:      snapshot.Ongoing,
 		OngoingError: snapshot.OngoingError,
 	})
+	if m.view.Mode() == tui.ModeOngoing {
+		m.forwardToView(tui.SetOngoingScrollMsg{Scroll: m.view.OngoingScroll()})
+	}
 	if strings.TrimSpace(snapshot.Ongoing) == "" {
 		m.sawAssistantDelta = false
 	}

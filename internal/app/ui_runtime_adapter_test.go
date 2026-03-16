@@ -175,7 +175,7 @@ func TestReasoningDeltaRegularSummaryDoesNotReplaceStatusLineHeader(t *testing.T
 }
 
 func TestConversationSnapshotCommitClearsSawAssistantDelta(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 100
 	m.termHeight = 20
 	m.windowSizeKnown = true
@@ -212,7 +212,7 @@ func TestUserMessageFlushedSyncsConversationForNativeReplay(t *testing.T) {
 		t.Fatalf("new engine: %v", err)
 	}
 
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 100
 	m.termHeight = 20
 	m.windowSizeKnown = true
@@ -250,7 +250,7 @@ func TestUserMessageFlushedAfterConversationUpdatedDoesNotDuplicateNativeReplay(
 		t.Fatalf("new engine: %v", err)
 	}
 
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent), WithUIScrollMode(config.TUIScrollModeNative)).(*uiModel)
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 100
 	m.termHeight = 20
 	m.windowSizeKnown = true
@@ -289,7 +289,6 @@ func TestDeferredNativeReplayFlushesAutomaticallyOnDetailExit(t *testing.T) {
 				nil,
 				make(chan runtime.Event),
 				make(chan askEvent),
-				WithUIScrollMode(config.TUIScrollModeNative),
 				WithUIAlternateScreenPolicy(policy),
 				WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
 			).(*uiModel)
@@ -428,7 +427,6 @@ func TestDeferredNativeReplayFlushesBackgroundNoticeOnDetailExit(t *testing.T) {
 				nil,
 				make(chan runtime.Event),
 				make(chan askEvent),
-				WithUIScrollMode(config.TUIScrollModeNative),
 				WithUIAlternateScreenPolicy(policy),
 				WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
 			).(*uiModel)

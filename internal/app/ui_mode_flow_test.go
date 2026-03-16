@@ -42,13 +42,18 @@ func TestScenarioDetailWhileAgentWorksReturnsToLatestOngoingTail(t *testing.T) {
 	if ongoing.view.Mode() != tui.ModeOngoing {
 		t.Fatalf("expected ongoing mode, got %q", ongoing.view.Mode())
 	}
+	ongoing.termWidth = 100
+	ongoing.termHeight = 18
+	ongoing.windowSizeKnown = true
+	ongoing.syncViewport()
 
-	view := stripANSIAndTrimRight(ongoing.View())
+	view := stripANSIAndTrimRight(ongoing.view.OngoingSnapshot())
 	if !containsAny(view, "line 30", "line 29", "line 28") {
 		t.Fatalf("expected latest content visible after returning from detail, got %q", view)
 	}
-	if !strings.Contains(view, "/new") {
-		t.Fatalf("expected slash picker to remain visible, got %q", view)
+	compact := stripANSIAndTrimRight(ongoing.View())
+	if !strings.Contains(compact, "/new") {
+		t.Fatalf("expected slash picker to remain visible, got %q", compact)
 	}
 }
 
@@ -89,7 +94,7 @@ func TestScenarioHarnessRestartAndSessionResumeKeepsTranscriptVisible(t *testing
 	m.termHeight = 16
 	m.syncViewport()
 
-	first := stripANSIAndTrimRight(m.View())
+	first := stripANSIAndTrimRight(m.view.OngoingSnapshot())
 	if !strings.Contains(first, "a2 tail") {
 		t.Fatalf("expected resumed tail in ongoing mode, got %q", first)
 	}
@@ -97,7 +102,7 @@ func TestScenarioHarnessRestartAndSessionResumeKeepsTranscriptVisible(t *testing
 	eng.AppendLocalEntry("assistant", "post-resume live update")
 	next, _ := m.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventConversationUpdated}})
 	updated := next.(*uiModel)
-	live := stripANSIAndTrimRight(updated.View())
+	live := stripANSIAndTrimRight(updated.view.OngoingSnapshot())
 	if !strings.Contains(live, "post-resume live update") {
 		t.Fatalf("expected live update after conversation refresh, got %q", live)
 	}
@@ -115,7 +120,7 @@ func TestScenarioHarnessRestartAndSessionResumeKeepsTranscriptVisible(t *testing
 	m2.termHeight = 16
 	m2.syncViewport()
 
-	afterRestart := stripANSIAndTrimRight(m2.View())
+	afterRestart := stripANSIAndTrimRight(m2.view.OngoingSnapshot())
 	if !strings.Contains(afterRestart, "a2 tail") {
 		t.Fatalf("expected resumed transcript after harness restart, got %q", afterRestart)
 	}
@@ -125,7 +130,7 @@ func TestScenarioHarnessRestartAndSessionResumeKeepsTranscriptVisible(t *testing
 
 	m2 = updateUIModel(t, m2, tea.KeyMsg{Type: tea.KeyShiftTab})
 	m2 = updateUIModel(t, m2, tea.KeyMsg{Type: tea.KeyShiftTab})
-	backToOngoing := stripANSIAndTrimRight(m2.View())
+	backToOngoing := stripANSIAndTrimRight(m2.view.OngoingSnapshot())
 	if !strings.Contains(backToOngoing, "a2 tail") {
 		t.Fatalf("expected transcript preserved across detail roundtrip after restart, got %q", backToOngoing)
 	}
@@ -155,7 +160,7 @@ func TestScenarioTeleportBetweenSessionsResetsVisibleConversation(t *testing.T) 
 	modelA.termWidth = 80
 	modelA.termHeight = 14
 	modelA.syncViewport()
-	viewA := stripANSIAndTrimRight(modelA.View())
+	viewA := stripANSIAndTrimRight(modelA.view.OngoingSnapshot())
 	if !strings.Contains(viewA, "session-a-tail") {
 		t.Fatalf("expected session A tail, got %q", viewA)
 	}
@@ -168,7 +173,7 @@ func TestScenarioTeleportBetweenSessionsResetsVisibleConversation(t *testing.T) 
 	modelB.termWidth = 80
 	modelB.termHeight = 14
 	modelB.syncViewport()
-	viewB := stripANSIAndTrimRight(modelB.View())
+	viewB := stripANSIAndTrimRight(modelB.view.OngoingSnapshot())
 	if !strings.Contains(viewB, "session-b-tail") || strings.Contains(viewB, "session-a-tail") {
 		t.Fatalf("expected teleported session B view only, got %q", viewB)
 	}
@@ -185,7 +190,7 @@ func TestScenarioTeleportBetweenSessionsResetsVisibleConversation(t *testing.T) 
 	modelA2.termWidth = 80
 	modelA2.termHeight = 14
 	modelA2.syncViewport()
-	viewA2 := stripANSIAndTrimRight(modelA2.View())
+	viewA2 := stripANSIAndTrimRight(modelA2.view.OngoingSnapshot())
 	if !strings.Contains(viewA2, "session-a-tail") || strings.Contains(viewA2, "session-b-tail") {
 		t.Fatalf("expected teleported-back session A view only, got %q", viewA2)
 	}
@@ -221,7 +226,7 @@ func TestScenarioScrollAttemptsAcrossModesAfterLongDetailStay(t *testing.T) {
 	detail = updateUIModel(t, detail, tea.KeyMsg{Type: tea.KeyPgDown})
 
 	ongoing := updateUIModel(t, detail, tea.KeyMsg{Type: tea.KeyShiftTab})
-	plain := stripANSIAndTrimRight(ongoing.View())
+	plain := stripANSIAndTrimRight(ongoing.view.OngoingSnapshot())
 	if !containsAny(plain, "line 45", "line 44", "line 43") {
 		t.Fatalf("expected latest line visible after returning from detail, got %q", plain)
 	}

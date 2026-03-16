@@ -16,8 +16,6 @@ const (
 
 type TUIAlternateScreenPolicy string
 
-type TUIScrollMode string
-
 type CompactionMode string
 type BGShellsOutputMode string
 
@@ -25,9 +23,6 @@ const (
 	TUIAlternateScreenAuto   TUIAlternateScreenPolicy = "auto"
 	TUIAlternateScreenAlways TUIAlternateScreenPolicy = "always"
 	TUIAlternateScreenNever  TUIAlternateScreenPolicy = "never"
-
-	TUIScrollModeAlt    TUIScrollMode = "alt"
-	TUIScrollModeNative TUIScrollMode = "native"
 
 	CompactionModeNative CompactionMode = "native"
 	CompactionModeLocal  CompactionMode = "local"
@@ -59,7 +54,6 @@ type Settings struct {
 	ModelCapabilities                ModelCapabilitiesOverride
 	Theme                            string
 	TUIAlternateScreen               TUIAlternateScreenPolicy
-	TUIScrollMode                    TUIScrollMode
 	NotificationMethod               string
 	ToolPreambles                    bool
 	PriorityRequestMode              bool
@@ -125,7 +119,6 @@ type fileSettings struct {
 	} `toml:"model_capabilities"`
 	Theme               string          `toml:"theme"`
 	TUIAlternateScreen  string          `toml:"tui_alternate_screen"`
-	TUIScrollMode       string          `toml:"tui_scroll_mode"`
 	NotificationMethod  string          `toml:"notification_method"`
 	ToolPreambles       *bool           `toml:"tool_preambles"`
 	PriorityRequestMode *bool           `toml:"priority_request_mode"`
