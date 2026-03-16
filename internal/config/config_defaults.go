@@ -38,6 +38,7 @@ func defaultSettings() Settings {
 	return Settings{
 		Model:                            defaultModel,
 		ThinkingLevel:                    defaultThinkingLevel,
+		ModelVerbosity:                   "",
 		ModelCapabilities:                ModelCapabilitiesOverride{},
 		Theme:                            defaultTheme,
 		TUIAlternateScreen:               TUIAlternateScreenPolicy(defaultTUIAlternateScreen),
@@ -76,8 +77,9 @@ func defaultSettingsTOML() string {
 		toolDefaults[string(id)] = defaults.EnabledTools[id]
 	}
 	payload := map[string]any{
-		"model":          defaults.Model,
-		"thinking_level": defaults.ThinkingLevel,
+		"model":           defaults.Model,
+		"thinking_level":  defaults.ThinkingLevel,
+		"model_verbosity": defaults.ModelVerbosity,
 		"model_capabilities": map[string]bool{
 			"supports_reasoning_effort": defaults.ModelCapabilities.SupportsReasoningEffort,
 			"supports_vision_inputs":    defaults.ModelCapabilities.SupportsVisionInputs,
@@ -137,6 +139,9 @@ func defaultSettingsTOML() string {
 		"# " + strings.ReplaceAll(string(encoded), "\n", "\n# ") + "\n\n" +
 		"model = \"" + defaults.Model + "\"\n" +
 		"thinking_level = \"" + defaults.ThinkingLevel + "\"\n" +
+		"# Optional Responses API text verbosity for GPT-5-family OpenAI providers.\n" +
+		"# Valid values: low, medium, high. Leave empty to let the provider default.\n" +
+		"model_verbosity = \"" + string(defaults.ModelVerbosity) + "\"\n" +
 		"theme = \"" + defaults.Theme + "\"\n" +
 		"tui_alternate_screen = \"" + string(defaults.TUIAlternateScreen) + "\"\n" +
 		"notification_method = \"" + defaults.NotificationMethod + "\"\n" +

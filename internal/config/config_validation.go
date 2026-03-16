@@ -22,6 +22,11 @@ func validateSettings(v Settings) error {
 	default:
 		return fmt.Errorf("invalid thinking_level %q (expected low|medium|high|xhigh)", v.ThinkingLevel)
 	}
+	switch strings.ToLower(strings.TrimSpace(string(v.ModelVerbosity))) {
+	case "", "low", "medium", "high":
+	default:
+		return fmt.Errorf("invalid model_verbosity %q (expected low|medium|high)", v.ModelVerbosity)
+	}
 	if strings.EqualFold(strings.TrimSpace(v.Theme), "light") || strings.EqualFold(strings.TrimSpace(v.Theme), "dark") {
 		// ok
 	} else {
@@ -125,5 +130,18 @@ func normalizeCompactionMode(raw string) CompactionMode {
 		return CompactionModeNone
 	default:
 		return CompactionMode(strings.TrimSpace(raw))
+	}
+}
+
+func normalizeModelVerbosity(raw string) ModelVerbosity {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "low":
+		return ModelVerbosityLow
+	case "medium":
+		return ModelVerbosityMedium
+	case "high":
+		return ModelVerbosityHigh
+	default:
+		return ModelVerbosity(strings.TrimSpace(raw))
 	}
 }

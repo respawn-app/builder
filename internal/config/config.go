@@ -18,6 +18,7 @@ type TUIAlternateScreenPolicy string
 
 type CompactionMode string
 type BGShellsOutputMode string
+type ModelVerbosity string
 
 const (
 	TUIAlternateScreenAuto   TUIAlternateScreenPolicy = "auto"
@@ -31,6 +32,10 @@ const (
 	BGShellsOutputDefault BGShellsOutputMode = "default"
 	BGShellsOutputVerbose BGShellsOutputMode = "verbose"
 	BGShellsOutputConcise BGShellsOutputMode = "concise"
+
+	ModelVerbosityLow    ModelVerbosity = "low"
+	ModelVerbosityMedium ModelVerbosity = "medium"
+	ModelVerbosityHigh   ModelVerbosity = "high"
 )
 
 type LoadOptions struct {
@@ -51,6 +56,7 @@ type Timeouts struct {
 type Settings struct {
 	Model                            string
 	ThinkingLevel                    string
+	ModelVerbosity                   ModelVerbosity
 	ModelCapabilities                ModelCapabilitiesOverride
 	Theme                            string
 	TUIAlternateScreen               TUIAlternateScreenPolicy
@@ -113,6 +119,7 @@ type App struct {
 type fileSettings struct {
 	Model             string `toml:"model"`
 	ThinkingLevel     string `toml:"thinking_level"`
+	ModelVerbosity    string `toml:"model_verbosity"`
 	ModelCapabilities struct {
 		SupportsReasoningEffort *bool `toml:"supports_reasoning_effort"`
 		SupportsVisionInputs    *bool `toml:"supports_vision_inputs"`

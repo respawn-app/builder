@@ -23,6 +23,7 @@ type ProviderClientOptions struct {
 	Auth                AuthHeaderProvider
 	HTTPClient          *http.Client
 	OpenAIBaseURL       string
+	ModelVerbosity      string
 	Store               bool
 	ContextWindowTokens int
 }
@@ -122,6 +123,7 @@ func newOpenAIProviderClient(opts ProviderClientOptions) (Client, error) {
 		transport.BaseURL = v
 	}
 	transport.ProviderMetadata = ResolveOpenAIProviderMetadata(opts.OpenAIBaseURL)
+	transport.ModelVerbosity = strings.ToLower(strings.TrimSpace(opts.ModelVerbosity))
 	if opts.ContextWindowTokens > 0 {
 		transport.ContextWindowTokens = opts.ContextWindowTokens
 	}

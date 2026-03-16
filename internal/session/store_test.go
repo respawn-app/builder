@@ -278,6 +278,51 @@ func TestSetContinuationContextStaysLazyUntilFirstWrite(t *testing.T) {
 	}
 }
 
+func TestSessionMetadataDoesNotPersistModelVerbosityState(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.MarkModelDispatchLocked(LockedContract{
+		Model:          "gpt-5",
+		Temperature:    1,
+		MaxOutputToken: 0,
+	}); err != nil {
+		t.Fatalf("mark model dispatch locked: %v", err)
+	}
+	if err := store.SetContinuationContext(ContinuationContext{OpenAIBaseURL: "http://example.local/v1"}); err != nil {
+		t.Fatalf("set continuation context: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(store.Dir(), sessionFile))
+	if err != nil {
+		t.Fatalf("read session file: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "openai_base_url") {
+		t.Fatalf("expected continuation openai_base_url to persist, got %q", text)
+	}
+	if strings.Contains(text, "model_verbosity") {
+		t.Fatalf("session metadata must not persist model_verbosity: %s", text)
+	}
+
+	opened, err := Open(store.Dir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if opened.Meta().Continuation == nil || opened.Meta().Continuation.OpenAIBaseURL != "http://example.local/v1" {
+		t.Fatalf("expected persisted continuation context, got %+v", opened.Meta().Continuation)
+	}
+	reopenedMetaJSON, err := json.Marshal(opened.Meta())
+	if err != nil {
+		t.Fatalf("marshal reopened meta: %v", err)
+	}
+	if strings.Contains(string(reopenedMetaJSON), "model_verbosity") {
+		t.Fatal("expected reopened session metadata to remain free of model_verbosity")
+	}
+}
+
 func TestOpenByIDFindsSessionAcrossContainers(t *testing.T) {
 	root := t.TempDir()
 	containerA := filepath.Join(root, sessionsDirName, "workspace-a")

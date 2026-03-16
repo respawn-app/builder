@@ -15,6 +15,7 @@ type ModelCapabilityContract struct {
 	Model                   string
 	ContextWindowTokens     int
 	SupportsReasoningEffort bool
+	SupportsVerbosity       bool
 	SupportsVisionInputs    bool
 }
 
@@ -26,17 +27,20 @@ var knownModelCapabilityContracts = map[string]ModelCapabilityContract{
 	"gpt-5": {
 		Model:                   "gpt-5",
 		SupportsReasoningEffort: true,
+		SupportsVerbosity:       true,
 		SupportsVisionInputs:    true,
 	},
 	"gpt-5.4": {
 		Model:                   "gpt-5.4",
 		SupportsReasoningEffort: true,
+		SupportsVerbosity:       true,
 		SupportsVisionInputs:    true,
 	},
 	"gpt-5.3-codex": {
 		Model:                   "gpt-5.3-codex",
 		ContextWindowTokens:     400_000,
 		SupportsReasoningEffort: true,
+		SupportsVerbosity:       true,
 		SupportsVisionInputs:    true,
 	},
 	"gpt-4.1": {

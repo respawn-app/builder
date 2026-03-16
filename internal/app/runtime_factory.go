@@ -149,6 +149,7 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		Auth:                mgr,
 		HTTPClient:          modelHTTPClient,
 		OpenAIBaseURL:       active.OpenAIBaseURL,
+		ModelVerbosity:      string(active.ModelVerbosity),
 		Store:               active.Store,
 		ContextWindowTokens: active.ModelContextWindow,
 	})
@@ -163,6 +164,7 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 			Auth:                mgr,
 			HTTPClient:          reviewerHTTPClient,
 			OpenAIBaseURL:       active.OpenAIBaseURL,
+			ModelVerbosity:      string(active.ModelVerbosity),
 			Store:               false,
 			ContextWindowTokens: active.ModelContextWindow,
 		})
