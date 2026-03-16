@@ -199,6 +199,96 @@ func TestAskHandlerRejectsPlainStringResponseForApprovalAsk(t *testing.T) {
 	}
 }
 
+func TestAskHandlerModeDoesNotQueuePendingRequest(t *testing.T) {
+	b := NewBroker()
+	b.SetAskHandler(func(req Request) (Response, error) {
+		return Response{RequestID: req.ID, Answer: "handled"}, nil
+	})
+
+	resp, err := b.Ask(context.Background(), Request{ID: "sync", Question: "one?"})
+	if err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+	if resp.Answer != "handled" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if pending := b.Pending(); len(pending) != 0 {
+		t.Fatalf("expected no pending requests in handler mode, got %+v", pending)
+	}
+	if err := b.Submit("sync", Response{Answer: "late"}); err == nil {
+		t.Fatal("expected submit to reject non-queued sync request")
+	}
+}
+
+func TestSubmitRejectsSecondCompletionForQueuedRequest(t *testing.T) {
+	b := NewBroker()
+	ctx := context.Background()
+	done := make(chan error, 1)
+
+	go func() {
+		_, err := b.Ask(ctx, Request{ID: "q1", Question: "one?"})
+		done <- err
+	}()
+
+	for i := 0; i < 100; i++ {
+		if len(b.Pending()) == 1 {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	if err := b.Submit("q1", Response{Answer: "a1"}); err != nil {
+		t.Fatalf("first submit: %v", err)
+	}
+	if err := b.Submit("q1", Response{Answer: "a2"}); err == nil {
+		t.Fatal("expected second submit to fail")
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("ask result err: %v", err)
+	}
+}
+
+func TestAskHandlerModeHonorsCanceledContextBeforeInvocation(t *testing.T) {
+	b := NewBroker()
+	called := false
+	b.SetAskHandler(func(req Request) (Response, error) {
+		called = true
+		return Response{RequestID: req.ID, Answer: "handled"}, nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := b.Ask(ctx, Request{ID: "sync", Question: "one?"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if called {
+		t.Fatal("expected handler not to be called after context cancellation")
+	}
+}
+
+func TestAskHandlerModePrefersContextCancellationAfterHandlerReturns(t *testing.T) {
+	b := NewBroker()
+	release := make(chan struct{})
+	b.SetAskHandler(func(req Request) (Response, error) {
+		<-release
+		return Response{RequestID: req.ID, Answer: "handled"}, nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+
+	go func() {
+		_, err := b.Ask(ctx, Request{ID: "sync", Question: "one?"})
+		done <- err
+	}()
+	cancel()
+	close(release)
+
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+}
+
 func TestCanceledAskIsRemovedFromPendingQueue(t *testing.T) {
 	b := NewBroker()
 	ctx, cancel := context.WithCancel(context.Background())
