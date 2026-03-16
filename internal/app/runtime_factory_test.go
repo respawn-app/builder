@@ -111,7 +111,7 @@ func TestBuildToolRegistry_ViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 	}
 
 	sessionDir := t.TempDir()
-	logger, err := newRunLogger(sessionDir)
+	logger, err := newRunLogger(sessionDir, nil)
 	if err != nil {
 		t.Fatalf("new run logger: %v", err)
 	}
@@ -174,6 +174,60 @@ func TestBuildToolRegistry_ViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 	}
 	if !strings.Contains(text, realOutside) {
 		t.Fatalf("expected canonical resolved outside path in audit line, got %q", text)
+	}
+}
+
+func TestBuildToolRegistry_ViewImageConfiguredAllowBypassesApprovalForOutsidePath(t *testing.T) {
+	workspace := t.TempDir()
+	outsideDir := filepath.Join(t.TempDir(), "missing")
+	outsideFile := filepath.Join(outsideDir, "doc.pdf")
+	pdfBytes := []byte("%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n")
+	if err := os.MkdirAll(outsideDir, 0o755); err != nil {
+		t.Fatalf("mkdir outside dir: %v", err)
+	}
+	if err := os.WriteFile(outsideFile, pdfBytes, 0o644); err != nil {
+		t.Fatalf("write outside pdf: %v", err)
+	}
+
+	registry, broker, _, err := buildToolRegistry(
+		workspace,
+		"",
+		[]tools.ID{tools.ToolViewImage},
+		5*time.Second,
+		15*time.Second,
+		16_000,
+		true,
+		true,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("build tool registry: %v", err)
+	}
+
+	askCalls := 0
+	broker.SetAskHandler(func(req askquestion.Request) (askquestion.Response, error) {
+		askCalls++
+		return askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowOnce}}, nil
+	})
+
+	viewImageHandler, ok := registry.Get(tools.ToolViewImage)
+	if !ok {
+		t.Fatal("expected view_image handler")
+	}
+	input, err := json.Marshal(map[string]any{"path": outsideFile})
+	if err != nil {
+		t.Fatalf("marshal view_image input: %v", err)
+	}
+	result, err := viewImageHandler.Call(context.Background(), tools.Call{ID: "call-config-allow", Name: tools.ToolViewImage, Input: input})
+	if err != nil {
+		t.Fatalf("view_image call: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success result, got %s", string(result.Output))
+	}
+	if askCalls != 0 {
+		t.Fatalf("expected configured allow to bypass approval, got %d asks", askCalls)
 	}
 }
 

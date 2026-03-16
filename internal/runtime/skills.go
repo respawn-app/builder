@@ -20,6 +20,7 @@ const (
 )
 
 var skillsHowToUseRules = strings.TrimSpace(prompts.SkillsHowToUseRulesPrompt)
+var readSkillsDir = os.ReadDir
 
 type injectedSkill struct {
 	Name        string
@@ -51,12 +52,12 @@ func discoverInjectedSkills(workspaceRoot string) ([]injectedSkill, error) {
 	out := make([]injectedSkill, 0)
 	seenPaths := map[string]bool{}
 	for _, root := range roots {
-		entries, readErr := os.ReadDir(root)
+		entries, readErr := readSkillsDir(root)
 		if readErr != nil {
 			if os.IsNotExist(readErr) {
 				continue
 			}
-			continue
+			return nil, fmt.Errorf("read skills directory %q: %w", root, readErr)
 		}
 		for _, entry := range entries {
 			if !entry.IsDir() {

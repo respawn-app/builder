@@ -68,14 +68,18 @@ func parseReviewerSuggestionsObject(content string, maxSuggestions int) []string
 	return normalized
 }
 
-func buildReviewerRequestMessages(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool) []llm.Message {
+func buildReviewerRequestMessages(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool) ([]llm.Message, error) {
 	metaMessages, transcriptSource := splitReviewerMetaMessages(messages)
-	metaMessages = appendMissingReviewerMetaContext(metaMessages, workspaceRoot, model, thinkingLevel, headless)
+	var err error
+	metaMessages, err = appendMissingReviewerMetaContext(metaMessages, workspaceRoot, model, thinkingLevel, headless)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]llm.Message, 0, len(metaMessages)+2+len(transcriptSource))
 	out = append(out, metaMessages...)
 	out = append(out, llm.Message{Role: llm.RoleDeveloper, Content: reviewerMetaBoundaryMessage})
 	out = append(out, buildReviewerTranscriptMessages(transcriptSource)...)
-	return out
+	return out, nil
 }
 
 func splitReviewerMetaMessages(messages []llm.Message) ([]llm.Message, []llm.Message) {
@@ -466,7 +470,7 @@ func reviewerSessionID(sessionID string) string {
 	return trimmed + "-review"
 }
 
-func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool) []llm.Message {
+func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool) ([]llm.Message, error) {
 	haveEnvironment := false
 	haveAgents := false
 	haveSkills := false
@@ -490,7 +494,7 @@ func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot stri
 	}
 	needHeadless := headless && strings.TrimSpace(prompts.HeadlessModePrompt) != ""
 	if haveAgents && haveSkills && haveEnvironment && (!needHeadless || haveHeadless) {
-		return messages
+		return messages, nil
 	}
 	out := append([]llm.Message(nil), messages...)
 	paths, err := agentsInjectionPaths(workspaceRoot)
@@ -517,7 +521,10 @@ func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot stri
 
 	if !haveSkills {
 		skills, found, skillsErr := skillsContextMessage(workspaceRoot)
-		if skillsErr == nil && found {
+		if skillsErr != nil {
+			return nil, skillsErr
+		}
+		if found {
 			skillsMessage := llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeSkills, Content: skills}
 			insertAt := firstMetaBoundaryIndex(out)
 			lastAgentsIndex := -1
@@ -563,9 +570,9 @@ func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot stri
 	}
 
 	if len(out) == len(messages) {
-		return messages
+		return messages, nil
 	}
-	return out
+	return out, nil
 }
 
 func firstMetaBoundaryIndex(messages []llm.Message) int {

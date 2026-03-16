@@ -3,9 +3,7 @@ package tui
 import (
 	"fmt"
 	"hash/fnv"
-	"os"
 	"strings"
-	"sync"
 
 	"github.com/charmbracelet/glamour"
 	glamouransi "github.com/charmbracelet/glamour/ansi"
@@ -15,19 +13,24 @@ import (
 
 const markdownCacheLimit = 1024
 
-var markdownInitErrOnce sync.Once
+type markdownRendererErrorReporter func(RenderDiagnostic)
 
 type markdownRenderer struct {
 	theme     string
 	renderers map[int]*glamour.TermRenderer
 	cache     map[string]string
+	reportErr markdownRendererErrorReporter
+	newTermRenderer func(...glamour.TermRendererOption) (*glamour.TermRenderer, error)
+	reportedInitFailure bool
 }
 
-func newMarkdownRenderer(theme string) *markdownRenderer {
+func newMarkdownRenderer(theme string, reportErr markdownRendererErrorReporter) *markdownRenderer {
 	return &markdownRenderer{
 		theme:     theme,
 		renderers: make(map[int]*glamour.TermRenderer, 8),
 		cache:     make(map[string]string, 128),
+		reportErr: reportErr,
+		newTermRenderer: glamour.NewTermRenderer,
 	}
 }
 
@@ -49,9 +52,15 @@ func (r *markdownRenderer) render(role, text string, width int) (string, error) 
 
 	renderer, err := r.getRenderer(width)
 	if err != nil {
-		markdownInitErrOnce.Do(func() {
-			_, _ = fmt.Fprintf(os.Stderr, "markdown renderer disabled, falling back to plain text: %v\n", err)
-		})
+		if !r.reportedInitFailure && r.reportErr != nil {
+			r.reportedInitFailure = true
+			r.reportErr(RenderDiagnostic{
+				Component: "markdown_renderer",
+				Message:   fmt.Sprintf("markdown renderer disabled, falling back to plain text: %v", err),
+				Err:       err,
+				Severity:  RenderDiagnosticSeverityWarn,
+			})
+		}
 		return "", err
 	}
 	out, err := renderer.Render(text)
@@ -72,7 +81,7 @@ func (r *markdownRenderer) getRenderer(width int) (*glamour.TermRenderer, error)
 	if existing, ok := r.renderers[width]; ok {
 		return existing, nil
 	}
-	termRenderer, err := glamour.NewTermRenderer(
+	termRenderer, err := r.newTermRenderer(
 		glamour.WithWordWrap(0),
 		glamour.WithStyles(r.styleConfig()),
 	)

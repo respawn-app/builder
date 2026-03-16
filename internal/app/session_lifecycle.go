@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -40,7 +41,9 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 		}
 		enabledTools := activeToolIDs(active, store.Meta().Locked)
 
-		logger, err := newRunLogger(store.Dir())
+		logger, err := newRunLogger(store.Dir(), func(diag runLoggerDiagnostic) {
+			reportRunLoggerDiagnostic(os.Stderr, diag)
+		})
 		if err != nil {
 			return err
 		}

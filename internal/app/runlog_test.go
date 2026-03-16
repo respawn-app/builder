@@ -1,6 +1,8 @@
 package app
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +15,7 @@ import (
 
 func TestRunLoggerWritesStepsFile(t *testing.T) {
 	dir := t.TempDir()
-	logger, err := newRunLogger(dir)
+	logger, err := newRunLogger(dir, nil)
 	if err != nil {
 		t.Fatalf("newRunLogger failed: %v", err)
 	}
@@ -38,7 +40,7 @@ func TestRunLoggerWritesStepsFile(t *testing.T) {
 
 func TestNewRunLoggerNoopsWhenSessionDirDoesNotExist(t *testing.T) {
 	missingDir := filepath.Join(t.TempDir(), "missing-session")
-	logger, err := newRunLogger(missingDir)
+	logger, err := newRunLogger(missingDir, nil)
 	if err != nil {
 		t.Fatalf("new run logger: %v", err)
 	}
@@ -48,6 +50,46 @@ func TestNewRunLoggerNoopsWhenSessionDirDoesNotExist(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(missingDir, runLogFileName)); !os.IsNotExist(err) {
 		t.Fatalf("expected no run log file for non-persisted session, stat err=%v", err)
+	}
+}
+
+type failingWriteCloser struct{}
+
+func (failingWriteCloser) WriteString(string) (int, error) {
+	return 0, errors.New("disk full")
+}
+
+func (failingWriteCloser) Close() error {
+	return nil
+}
+
+func TestRunLoggerReportsWriteFailureDiagnosticOnce(t *testing.T) {
+	var diagnostics []runLoggerDiagnostic
+	logger := &runLogger{
+		fp: failingWriteCloser{},
+		onDiagnostic: func(diag runLoggerDiagnostic) {
+			diagnostics = append(diagnostics, diag)
+		},
+	}
+	logger.Logf("first")
+	logger.Logf("second")
+
+	if len(diagnostics) != 1 {
+		t.Fatalf("expected one diagnostic, got %d", len(diagnostics))
+	}
+	if diagnostics[0].Kind != "write_failed" {
+		t.Fatalf("expected write_failed diagnostic kind, got %+v", diagnostics[0])
+	}
+	if diagnostics[0].Err == nil || !strings.Contains(diagnostics[0].Err.Error(), "disk full") {
+		t.Fatalf("expected underlying write error, got %+v", diagnostics[0])
+	}
+}
+
+func TestReportRunLoggerDiagnosticWritesMessage(t *testing.T) {
+	var buf bytes.Buffer
+	reportRunLoggerDiagnostic(&buf, runLoggerDiagnostic{Kind: "write_failed", Message: "run log write failed; observability degraded: disk full", Err: errors.New("disk full")})
+	if got := strings.TrimSpace(buf.String()); got != `run_logger.diagnostic kind=write_failed message="run log write failed; observability degraded: disk full" err="disk full"` {
+		t.Fatalf("unexpected diagnostic output: %q", got)
 	}
 }
 

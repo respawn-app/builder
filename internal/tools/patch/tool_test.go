@@ -3,6 +3,7 @@ package patch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -655,6 +656,119 @@ func TestOutsideWorkspaceRejectionIncludesUserCommentary(t *testing.T) {
 	errMessage := toolError(t, result)
 	if !strings.Contains(errMessage, `User commented about this: "not allowed by policy"`) {
 		t.Fatalf("expected user commentary in error, got %q", errMessage)
+	}
+}
+
+func TestOutsideWorkspaceApprovalFailureUsesPatchSpecificWording(t *testing.T) {
+	workspace := t.TempDir()
+	outsideRoot := outsideNonTempDir(t)
+	target := filepath.Join(outsideRoot, "outside.txt")
+	if err := os.WriteFile(target, []byte("start\n"), 0o644); err != nil {
+		t.Fatalf("seed outside file: %v", err)
+	}
+
+	tool, err := New(workspace, true, WithOutsideWorkspaceApprover(func(context.Context, OutsideWorkspaceRequest) (OutsideWorkspaceApproval, error) {
+		return OutsideWorkspaceApproval{}, errors.New("ask failed")
+	}))
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	result := callPatch(t, tool, "deny-approval-error", "*** Begin Patch\n*** Update File: "+target+"\n-start\n+done\n*** End Patch\n")
+	if !result.IsError {
+		t.Fatalf("expected error result")
+	}
+	errMessage := toolError(t, result)
+	if !strings.Contains(errMessage, "outside-workspace edit approval failed") {
+		t.Fatalf("expected patch approval failure wording, got %q", errMessage)
+	}
+	if strings.Contains(errMessage, "read approval failed") || strings.Contains(errMessage, "view_image path outside workspace") {
+		t.Fatalf("unexpected non-patch wording, got %q", errMessage)
+	}
+}
+
+func TestOutsideWorkspaceAddFileRequestsApprovalBeforeMissingPathChecks(t *testing.T) {
+	workspace := t.TempDir()
+	outsideRoot := outsideNonTempDir(t)
+	target := filepath.Join(outsideRoot, "missing", "created.txt")
+
+	approvalCalls := 0
+	tool, err := New(workspace, true, WithOutsideWorkspaceApprover(func(context.Context, OutsideWorkspaceRequest) (OutsideWorkspaceApproval, error) {
+		approvalCalls++
+		return OutsideWorkspaceApproval{Decision: OutsideWorkspaceDecisionAllowOnce}, nil
+	}))
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	result := callPatch(t, tool, "outside-add-missing", "*** Begin Patch\n*** Add File: "+target+"\n+hello\n*** End Patch\n")
+	if result.IsError {
+		t.Fatalf("expected success, got %s", toolError(t, result))
+	}
+	if approvalCalls != 1 {
+		t.Fatalf("expected one approval call, got %d", approvalCalls)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read created outside file: %v", err)
+	}
+	if string(got) != "hello\n" {
+		t.Fatalf("unexpected outside file content: %q", string(got))
+	}
+	if err := os.RemoveAll(filepath.Dir(target)); err != nil {
+		t.Fatalf("cleanup created outside tree: %v", err)
+	}
+}
+
+func TestOutsideWorkspaceQueuesApprovalPerFileInSinglePatch(t *testing.T) {
+	workspace := t.TempDir()
+	outsideRoot := outsideNonTempDir(t)
+	first := filepath.Join(outsideRoot, "first", "one.txt")
+	second := filepath.Join(outsideRoot, "second", "two.txt")
+
+	requests := make([]OutsideWorkspaceRequest, 0, 2)
+	tool, err := New(workspace, true, WithOutsideWorkspaceApprover(func(_ context.Context, req OutsideWorkspaceRequest) (OutsideWorkspaceApproval, error) {
+		requests = append(requests, req)
+		return OutsideWorkspaceApproval{Decision: OutsideWorkspaceDecisionAllowOnce}, nil
+	}))
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	patchText := "*** Begin Patch\n*** Add File: " + first + "\n+one\n*** Add File: " + second + "\n+two\n*** End Patch\n"
+	result := callPatch(t, tool, "outside-multi-add", patchText)
+	if result.IsError {
+		t.Fatalf("expected success, got %s", toolError(t, result))
+	}
+	if len(requests) != 2 {
+		t.Fatalf("expected two approval requests, got %d", len(requests))
+	}
+	if requests[0].ResolvedPath != first {
+		t.Fatalf("unexpected first approval path: %+v", requests[0])
+	}
+	if requests[1].ResolvedPath != second {
+		t.Fatalf("unexpected second approval path: %+v", requests[1])
+	}
+	for _, tc := range []struct {
+		path string
+		want string
+	}{
+		{path: first, want: "one\n"},
+		{path: second, want: "two\n"},
+	} {
+		got, err := os.ReadFile(tc.path)
+		if err != nil {
+			t.Fatalf("read outside file %s: %v", tc.path, err)
+		}
+		if string(got) != tc.want {
+			t.Fatalf("unexpected content for %s: %q", tc.path, string(got))
+		}
+	}
+	if err := os.RemoveAll(filepath.Dir(first)); err != nil {
+		t.Fatalf("cleanup first outside tree: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Dir(second)); err != nil {
+		t.Fatalf("cleanup second outside tree: %v", err)
 	}
 }
 

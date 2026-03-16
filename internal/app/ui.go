@@ -45,6 +45,14 @@ type runtimeEventMsg struct {
 	event runtime.Event
 }
 
+type renderDiagnosticMsg struct {
+	diagnostic tui.RenderDiagnostic
+}
+
+type runLoggerDiagnosticMsg struct {
+	diagnostic runLoggerDiagnostic
+}
+
 type askEvent struct {
 	req   askquestion.Request
 	reply chan askReply
@@ -141,7 +149,10 @@ func WithUIModelContractLocked(locked bool) UIOption {
 func WithUITheme(theme string) UIOption {
 	return func(m *uiModel) {
 		m.theme = strings.TrimSpace(theme)
-		m.view = tui.NewModel(tui.WithTheme(theme))
+		m.view = tui.NewModel(
+			tui.WithTheme(theme),
+			tui.WithRenderDiagnosticHandler(m.handleRenderDiagnostic),
+		)
 	}
 }
 
@@ -375,6 +386,53 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 	return m
 }
 
+func (m *uiModel) handleRenderDiagnostic(diag tui.RenderDiagnostic) {
+	m.startupCmds = append(m.startupCmds, func() tea.Msg {
+		return renderDiagnosticMsg{diagnostic: diag}
+	})
+}
+
+func (m *uiModel) handleRunLoggerDiagnostic(diag runLoggerDiagnostic) {
+	m.startupCmds = append(m.startupCmds, func() tea.Msg {
+		return runLoggerDiagnosticMsg{diagnostic: diag}
+	})
+}
+
+func (m *uiModel) applyRenderDiagnostic(diag tui.RenderDiagnostic) tea.Cmd {
+	message := strings.TrimSpace(diag.Message)
+	if message == "" {
+		return nil
+	}
+	severity := strings.TrimSpace(string(diag.Severity))
+	if severity == "" {
+		severity = string(tui.RenderDiagnosticSeverityWarn)
+	}
+	m.logf("render.diagnostic severity=%s component=%s message=%q", severity, strings.TrimSpace(diag.Component), message)
+	if diag.Err != nil {
+		m.logf("render.diagnostic.err component=%s err=%q", strings.TrimSpace(diag.Component), diag.Err.Error())
+	}
+	kind := uiStatusNoticeNeutral
+	switch diag.Severity {
+	case tui.RenderDiagnosticSeverityError, tui.RenderDiagnosticSeverityFatal:
+		kind = uiStatusNoticeError
+	default:
+		kind = uiStatusNoticeNeutral
+	}
+	return m.setTransientStatusWithKind(message, kind)
+}
+
+func (m *uiModel) applyRunLoggerDiagnostic(diag runLoggerDiagnostic) tea.Cmd {
+	message := strings.TrimSpace(diag.Message)
+	if message == "" {
+		message = "run logger diagnostic"
+	}
+	m.logf("run_logger.diagnostic kind=%s message=%q", strings.TrimSpace(diag.Kind), message)
+	if diag.Err != nil {
+		m.logf("run_logger.diagnostic.err kind=%s err=%q", strings.TrimSpace(diag.Kind), diag.Err.Error())
+	}
+	return m.setTransientStatusWithKind(message, uiStatusNoticeError)
+}
+
 func (m *uiModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		waitRuntimeEvent(m.runtimeEvents),
@@ -433,6 +491,14 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		historyCmd := m.runtimeAdapter().handleRuntimeEvent(msg.event)
 		m.syncViewport()
 		return m, tea.Batch(waitRuntimeEvent(m.runtimeEvents), historyCmd)
+	case renderDiagnosticMsg:
+		cmd := m.applyRenderDiagnostic(msg.diagnostic)
+		m.syncViewport()
+		return m, cmd
+	case runLoggerDiagnosticMsg:
+		cmd := m.applyRunLoggerDiagnostic(msg.diagnostic)
+		m.syncViewport()
+		return m, cmd
 	case askEventMsg:
 		m.askController().acceptEvent(msg.event)
 		m.syncViewport()
