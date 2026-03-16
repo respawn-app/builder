@@ -31,6 +31,7 @@ func TestSupportsReasoningEffortModel(t *testing.T) {
 		model string
 		want  bool
 	}{
+		{model: "gpt-5.4", want: true},
 		{model: "gpt-5.3-codex", want: true},
 		{model: " GPT-4o ", want: true},
 		{model: "o3-mini", want: true},
@@ -91,5 +92,20 @@ func TestLockedContractCapabilityFallbackForLegacySessions(t *testing.T) {
 	}
 	if !LockedContractSupportsVisionInputs(legacy, legacy.Model) {
 		t.Fatal("expected legacy locked session to fall back to registry vision support")
+	}
+}
+
+func TestLockedContractCapabilityFallbackIgnoresProviderOnlySnapshot(t *testing.T) {
+	locked := &session.LockedContract{
+		Model: "gpt-5.4",
+		ProviderContract: session.LockedProviderCapabilities{
+			ProviderID: "chatgpt-codex",
+		},
+	}
+	if !LockedContractSupportsReasoningEffort(locked, locked.Model) {
+		t.Fatal("expected provider-only locked session to fall back to registry reasoning support")
+	}
+	if !LockedContractSupportsVisionInputs(locked, locked.Model) {
+		t.Fatal("expected provider-only locked session to fall back to registry vision support")
 	}
 }

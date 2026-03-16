@@ -370,7 +370,7 @@ func RequestFromLockedContractWithItems(locked session.LockedContract, systemPro
 		Model:                   locked.Model,
 		Temperature:             locked.Temperature,
 		MaxTokens:               locked.MaxOutputToken,
-		SupportsReasoningEffort: locked.ModelCapabilities.SupportsReasoningEffort,
+		SupportsReasoningEffort: LockedContractSupportsReasoningEffort(&locked, locked.Model),
 		EnableNativeWebSearch:   false,
 		SystemPrompt:            systemPrompt,
 		SessionID:               "",
