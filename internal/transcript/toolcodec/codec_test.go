@@ -6,12 +6,8 @@ import (
 	"testing"
 )
 
-func TestEncodeInlineCallAndSplitInlineMeta(t *testing.T) {
-	encoded := EncodeInlineCall("pwd", "timeout: 5m", true)
-	if !strings.HasPrefix(encoded, ShellCallPrefix) {
-		t.Fatalf("expected shell prefix, got %q", encoded)
-	}
-	cmd, meta := SplitInlineMeta(encoded)
+func TestSplitInlineMeta(t *testing.T) {
+	cmd, meta := SplitInlineMeta("pwd" + InlineMetaSeparator + "timeout: 5m")
 	if cmd != "pwd" {
 		t.Fatalf("command = %q, want pwd", cmd)
 	}
@@ -20,24 +16,7 @@ func TestEncodeInlineCallAndSplitInlineMeta(t *testing.T) {
 	}
 }
 
-func TestPatchPayloadRoundTrip(t *testing.T) {
-	summary := "Edited:\n./a.go +1 -1"
-	detail := "Edited:\n/work/a.go\n+new\n-old"
-	encoded := EncodePatchPayload(summary, detail)
-	gotSummary, gotDetail, ok := DecodePatchPayload(encoded)
-	if !ok {
-		t.Fatalf("expected patch payload decode")
-	}
-	if gotSummary != summary || gotDetail != detail {
-		t.Fatalf("unexpected decoded payload: summary=%q detail=%q", gotSummary, gotDetail)
-	}
-}
-
-func TestCompactCallTextPrefersPatchSummaryAndInlineCommand(t *testing.T) {
-	payload := EncodePatchPayload("Edited:\n./a.go +1", "Edited:\n/work/a.go\n+new")
-	if got := CompactCallText(payload); !strings.Contains(got, "./a.go +1") {
-		t.Fatalf("expected patch summary compact text, got %q", got)
-	}
+func TestCompactCallTextUsesInlineCommand(t *testing.T) {
 	if got := CompactCallText("ls" + InlineMetaSeparator + "timeout: 5m\nworkdir: /tmp"); got != "ls" {
 		t.Fatalf("expected compact command ls, got %q", got)
 	}

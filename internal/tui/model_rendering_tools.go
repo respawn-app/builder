@@ -280,16 +280,12 @@ func toolCallDisplayText(meta *transcript.ToolCallMeta, text string) string {
 	return command + toolcodec.InlineMetaSeparator + strings.TrimSpace(meta.TimeoutLabel)
 }
 
-func stripShellCallPrefix(text string) (string, bool) {
-	return toolcodec.StripShellCallPrefix(text)
-}
-
 func isShellToolCall(meta *transcript.ToolCallMeta, text string) bool {
 	if meta != nil {
 		return meta.IsShell
 	}
-	_, ok := stripShellCallPrefix(text)
-	return ok
+	_ = text
+	return false
 }
 
 func isAskQuestionToolCall(meta *transcript.ToolCallMeta) bool {
@@ -303,7 +299,8 @@ func extractPatchPayload(meta *transcript.ToolCallMeta, text string) (string, st
 	if meta != nil && (meta.HasPatchSummary() || meta.HasPatchDetail()) {
 		return meta.PatchSummary, meta.PatchDetail, true
 	}
-	return toolcodec.DecodePatchPayload(text)
+	_ = text
+	return "", "", false
 }
 
 func isToolHeadlineRole(role string) bool {
