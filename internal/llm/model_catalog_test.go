@@ -35,7 +35,8 @@ func TestSupportsReasoningEffortModel(t *testing.T) {
 		{model: "gpt-5.3-codex", want: true},
 		{model: " GPT-4o ", want: true},
 		{model: "o3-mini", want: true},
-		{model: "claude-3-7-sonnet", want: false},
+		{model: "claude-3-7-sonnet", want: true},
+		{model: "custom-alias", want: true},
 		{model: "", want: false},
 	}
 
@@ -74,7 +75,8 @@ func TestModelDisplayLabel(t *testing.T) {
 		want          string
 	}{
 		{model: "gpt-5.3-codex", thinkingLevel: "high", want: "gpt-5.3-codex high"},
-		{model: "claude-3-7-sonnet", thinkingLevel: "high", want: "claude-3-7-sonnet"},
+		{model: "claude-3-7-sonnet", thinkingLevel: "high", want: "claude-3-7-sonnet high"},
+		{model: "custom-alias", thinkingLevel: "high", want: "custom-alias high"},
 		{model: "", thinkingLevel: "", want: "gpt-5"},
 	}
 

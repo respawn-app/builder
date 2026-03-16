@@ -21,11 +21,19 @@ func ModelDisplayLabel(model string, thinkingLevel string) string {
 	return modelLabel + " " + level
 }
 
-// SupportsReasoningEffortModel reports whether reasoning effort is enabled by
-// the explicit model capability contract for the given model identifier.
+// SupportsReasoningEffortModel reports whether reasoning effort is enabled for
+// the given model identifier. Unknown non-empty models default to reasoning
+// support so new model rollouts do not silently disable thinking.
 func SupportsReasoningEffortModel(model string) bool {
-	contract, ok := LookupModelCapabilityContract(model)
-	return ok && contract.SupportsReasoningEffort
+	normalized := strings.TrimSpace(model)
+	if normalized == "" {
+		return false
+	}
+	contract, ok := LookupModelCapabilityContract(normalized)
+	if !ok {
+		return true
+	}
+	return contract.SupportsReasoningEffort
 }
 
 // SupportsVisionInputsModel reports whether the explicit model capability

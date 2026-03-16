@@ -3446,7 +3446,7 @@ func TestStatusLineRendersReasoningHeaderBeforeContextUsage(t *testing.T) {
 	}
 }
 
-func TestStatusLineOmitsThinkingLevelForNonReasoningModels(t *testing.T) {
+func TestStatusLineShowsThinkingLevelForUnknownModels(t *testing.T) {
 	m := NewUIModel(
 		nil,
 		make(chan runtime.Event),
@@ -3456,8 +3456,8 @@ func TestStatusLineOmitsThinkingLevelForNonReasoningModels(t *testing.T) {
 	).(*uiModel)
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
-	if strings.Contains(line, "claude-3-7-sonnet high") {
-		t.Fatalf("did not expect status line to include thinking level for non-reasoning model, got %q", line)
+	if !strings.Contains(line, "claude-3-7-sonnet high") {
+		t.Fatalf("expected status line to include thinking level for unknown model, got %q", line)
 	}
 	if !strings.Contains(line, "claude-3-7-sonnet") {
 		t.Fatalf("expected status line to include model name, got %q", line)
