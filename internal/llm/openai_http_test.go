@@ -624,7 +624,7 @@ func TestBuildPayload_SkipsFastModeForNonFirstPartyResponsesProvider(t *testing.
 	}
 }
 
-func TestBuildPayload_SkipsReasoningEffortForUnknownModelFamily(t *testing.T) {
+func TestBuildPayload_DefaultsReasoningEffortForUnknownModelFamily(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	payload, err := transport.buildPayload(OpenAIRequest{
 		Model:           "custom-model",
@@ -633,16 +633,16 @@ func TestBuildPayload_SkipsReasoningEffortForUnknownModelFamily(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build payload: %v", err)
 	}
-	if payload.Reasoning.Effort != "" {
-		t.Fatalf("expected no reasoning payload for non-openai model, got %+v", payload.Reasoning)
+	if payload.Reasoning.Effort != "high" {
+		t.Fatalf("expected reasoning payload for unknown model, got %+v", payload.Reasoning)
 	}
-	if len(payload.Include) != 0 {
-		t.Fatalf("expected no include list for non-openai model, got %+v", payload.Include)
+	if len(payload.Include) == 0 {
+		t.Fatalf("expected encrypted reasoning include for unknown model, got %+v", payload.Include)
 	}
 
 	jsonPayload := mustMarshalObject(t, payload)
-	if _, ok := jsonPayload["reasoning"]; ok {
-		t.Fatalf("expected reasoning to be omitted for non-openai model, got %+v", jsonPayload["reasoning"])
+	if _, ok := jsonPayload["reasoning"]; !ok {
+		t.Fatalf("expected reasoning to be present for unknown model, got %+v", jsonPayload)
 	}
 }
 
