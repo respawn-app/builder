@@ -46,12 +46,15 @@ type Response struct {
 type Broker struct {
 	mu    sync.Mutex
 	queue []*pending
+	// onAsk switches the broker into synchronous handler mode. When unset, Ask
+	// uses queued submit mode and requests complete only via Submit.
 	onAsk func(Request) (Response, error)
 }
 
 type pending struct {
-	req Request
-	ch  chan responseResult
+	req       Request
+	ch        chan responseResult
+	completed bool
 }
 
 type responseResult struct {
@@ -80,42 +83,70 @@ func (b *Broker) Ask(ctx context.Context, req Request) (Response, error) {
 		return Response{}, err
 	}
 
+	h := b.askHandler()
+	if h != nil {
+		// Synchronous handler mode has exactly one completion path: the handler
+		// return value. Requests are never queued in this mode.
+		return b.askSync(ctx, req, h)
+	}
+	// Queued submit mode has exactly one completion path: Submit delivering a
+	// validated response to the pending request.
+	return b.askQueued(ctx, req)
+}
+
+func (b *Broker) askHandler() func(Request) (Response, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.onAsk
+}
+
+func (b *Broker) askSync(ctx context.Context, req Request, handler func(Request) (Response, error)) (Response, error) {
+	if err := ctx.Err(); err != nil {
+		return Response{}, err
+	}
+	resp, err := handler(req)
+	if err != nil {
+		return Response{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return Response{}, err
+	}
+	if resp.RequestID == "" {
+		resp.RequestID = req.ID
+	}
+	if err := validateResponse(req, resp); err != nil {
+		return Response{}, err
+	}
+	return resp, nil
+}
+
+func (b *Broker) askQueued(ctx context.Context, req Request) (Response, error) {
+
 	p := &pending{req: req, ch: make(chan responseResult, 1)}
 	b.mu.Lock()
 	b.queue = append(b.queue, p)
-	h := b.onAsk
 	b.mu.Unlock()
 	defer b.dequeue(req.ID)
-
-	if h != nil {
-		resp, err := h(req)
-		if err != nil {
-			return Response{}, err
-		}
-		if resp.RequestID == "" {
-			resp.RequestID = req.ID
-		}
-		if err := validateResponse(req, resp); err != nil {
-			return Response{}, err
-		}
-		p.ch <- responseResult{response: resp}
-	}
 
 	select {
 	case <-ctx.Done():
 		return Response{}, ctx.Err()
 	case rr := <-p.ch:
-		if rr.err != nil {
-			return Response{}, rr.err
-		}
-		if rr.response.RequestID == "" {
-			rr.response.RequestID = req.ID
-		}
-		if err := validateResponse(req, rr.response); err != nil {
-			return Response{}, err
-		}
-		return rr.response, nil
+		return b.finishQueuedResponse(req, rr)
 	}
+}
+
+func (b *Broker) finishQueuedResponse(req Request, rr responseResult) (Response, error) {
+	if rr.err != nil {
+		return Response{}, rr.err
+	}
+	if rr.response.RequestID == "" {
+		rr.response.RequestID = req.ID
+	}
+	if err := validateResponse(req, rr.response); err != nil {
+		return Response{}, err
+	}
+	return rr.response, nil
 }
 
 func (b *Broker) Submit(requestID string, resp Response) error {
@@ -123,17 +154,27 @@ func (b *Broker) Submit(requestID string, resp Response) error {
 	defer b.mu.Unlock()
 	for _, p := range b.queue {
 		if p.req.ID == requestID {
-			if resp.RequestID == "" {
-				resp.RequestID = requestID
-			}
-			if err := validateResponse(p.req, resp); err != nil {
-				return err
-			}
-			p.ch <- responseResult{response: resp}
-			return nil
+			return b.deliverPendingResponseLocked(p, responseResult{response: resp})
 		}
 	}
 	return fmt.Errorf("request %s not found", requestID)
+}
+
+func (b *Broker) deliverPendingResponseLocked(p *pending, rr responseResult) error {
+	if p.completed {
+		return fmt.Errorf("request %s already completed", p.req.ID)
+	}
+	if rr.err == nil {
+		if rr.response.RequestID == "" {
+			rr.response.RequestID = p.req.ID
+		}
+		if err := validateResponse(p.req, rr.response); err != nil {
+			return err
+		}
+	}
+	p.completed = true
+	p.ch <- rr
+	return nil
 }
 
 func validateRequest(req Request) error {
