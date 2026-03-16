@@ -23,9 +23,12 @@ Builder is a highly opinionated, minimal terminal coding agent for professional 
 - [x] Esc-esc-style editing of messages and history rewrites
 - [x] Agent skills.
 - [x] Background shells, which enable subagents via headless mode: `builder run`
+- [x] Model verbosity for openai models
+- [x] Native terminal scrollback, selection, copy-paste
 
 ### Important things not done yet
 
+- [ ] Arrow-up in input box to scroll through previous prompts and repeat them.
 - [ ] @-file mentioning
 - [ ] Any other providers except Codex (since no other exist that I know that allow to use their subscription in a 3rd party harness)
 
@@ -35,12 +38,12 @@ These features are controversial or questionable for model performance, and usua
 Here is where this project has to be highly opinionated:
 
 - Native subagent orchestration inside one process; use separate headless Builder instances instead.
-  - Supported path: `builder run "..."` for tmux/background subagent workflows.
+  - Supported path: `builder run "..."` for tmux/background subagent workflows. Agent already does this on its own.
 - Plan mode - the model has native plan capabilities and can always ask questions, rest is just eye candy.
 - MCPs - mcps are net negative on model performance, pollute context, and can be replaced with CLI scripts
 - Extra UI candy tool calls. Less tools, less burden on the model.
 - On the fly changing of toolsets or models. Changing models at runtime hurts model performance and invalidates caches.
 - Microcompaction - this invalidates caches and drives costs up with marginal benefits
 - Sandboxing - Codex's sandbox is annoying, doesn't work with many tools (gradle, java etc), junie's sandbox can be bypassed, claude code's sandbox is brittle and can also be bypassed. Frontier models are not so stupid anymore and are trained not to destroy your PC.
-- WebFetch tool or similar. Just use [jina.ai](https://r.jina.ai).
+- WebFetch tool or similar. Just use [jina.ai](https://r.jina.ai) to fetch urls.
 - Fancy summaries, UI, minimal mode, features for "vibe coding", eye candy. The philosophy is to build something for professionals (agentic engineers)
