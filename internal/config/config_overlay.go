@@ -11,6 +11,7 @@ import (
 type settingsOverlay struct {
 	Model                            *string
 	ThinkingLevel                    *string
+	ModelVerbosity                   *ModelVerbosity
 	ModelCapabilities                *ModelCapabilitiesOverride
 	Theme                            *string
 	TUIAlternateScreen               *TUIAlternateScreenPolicy
@@ -51,6 +52,7 @@ func defaultSourceMap() map[string]string {
 	sources := map[string]string{
 		"model":                               "default",
 		"thinking_level":                      "default",
+		"model_verbosity":                     "default",
 		"model_capabilities":                  "default",
 		"theme":                               "default",
 		"tui_alternate_screen":                "default",
@@ -89,6 +91,10 @@ func settingsOverlayFromFile(cfg fileSettings, settingsPath string) (settingsOve
 	}
 	if v := strings.TrimSpace(cfg.ThinkingLevel); v != "" {
 		overlay.ThinkingLevel = &v
+	}
+	if v := strings.TrimSpace(cfg.ModelVerbosity); v != "" {
+		normalized := normalizeModelVerbosity(v)
+		overlay.ModelVerbosity = &normalized
 	}
 	if cfg.ModelCapabilities.SupportsReasoningEffort != nil || cfg.ModelCapabilities.SupportsVisionInputs != nil {
 		overlay.ModelCapabilities = &ModelCapabilitiesOverride{
@@ -238,6 +244,10 @@ func applySettingsOverlay(settings *Settings, persistenceRoot *string, persisten
 	if overlay.ThinkingLevel != nil {
 		settings.ThinkingLevel = *overlay.ThinkingLevel
 		sources["thinking_level"] = source
+	}
+	if overlay.ModelVerbosity != nil {
+		settings.ModelVerbosity = *overlay.ModelVerbosity
+		sources["model_verbosity"] = source
 	}
 	if overlay.ModelCapabilities != nil {
 		settings.ModelCapabilities = *overlay.ModelCapabilities

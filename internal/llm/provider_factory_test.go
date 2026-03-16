@@ -26,9 +26,10 @@ func TestInferProviderFromModel(t *testing.T) {
 func TestNewProviderClient_OpenAI(t *testing.T) {
 	httpClient := &http.Client{Timeout: 7 * time.Second}
 	client, err := NewProviderClient(ProviderClientOptions{
-		Model:      "gpt-5.3-codex",
-		Auth:       providerTestAuth{},
-		HTTPClient: httpClient,
+		Model:          "gpt-5.3-codex",
+		Auth:           providerTestAuth{},
+		HTTPClient:     httpClient,
+		ModelVerbosity: "HIGH",
 	})
 	if err != nil {
 		t.Fatalf("new provider client: %v", err)
@@ -46,6 +47,9 @@ func TestNewProviderClient_OpenAI(t *testing.T) {
 	}
 	if transport.ContextWindowTokens != 400_000 {
 		t.Fatalf("expected context window from model metadata, got %d", transport.ContextWindowTokens)
+	}
+	if transport.ModelVerbosity != "high" {
+		t.Fatalf("expected normalized model verbosity, got %q", transport.ModelVerbosity)
 	}
 }
 

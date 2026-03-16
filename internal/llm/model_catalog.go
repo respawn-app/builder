@@ -43,6 +43,21 @@ func SupportsVisionInputsModel(model string) bool {
 	return ok && contract.SupportsVisionInputs
 }
 
+// SupportsVerbosityModel reports whether Responses API text verbosity should be
+// sent for the given model identifier. Unknown models default to false because
+// unsupported verbosity fields can hard-fail requests.
+func SupportsVerbosityModel(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	if normalized == "" {
+		return false
+	}
+	contract, ok := LookupModelCapabilityContract(normalized)
+	if ok {
+		return contract.SupportsVerbosity
+	}
+	return strings.HasPrefix(normalized, "gpt-5")
+}
+
 func LookupModelMetadata(model string) (ModelMetadata, bool) {
 	contract, ok := LookupModelCapabilityContract(model)
 	if !ok {

@@ -68,6 +68,26 @@ func TestSupportsVisionInputsModel(t *testing.T) {
 	}
 }
 
+func TestSupportsVerbosityModel(t *testing.T) {
+	tests := []struct {
+		model string
+		want  bool
+	}{
+		{model: "gpt-5.4", want: true},
+		{model: "gpt-5.3-codex", want: true},
+		{model: " GPT-5-preview ", want: true},
+		{model: "gpt-4o", want: false},
+		{model: "custom-alias", want: false},
+		{model: "", want: false},
+	}
+
+	for _, tc := range tests {
+		if got := SupportsVerbosityModel(tc.model); got != tc.want {
+			t.Fatalf("SupportsVerbosityModel(%q)=%v, want %v", tc.model, got, tc.want)
+		}
+	}
+}
+
 func TestModelDisplayLabel(t *testing.T) {
 	tests := []struct {
 		model         string

@@ -12,26 +12,27 @@ import (
 )
 
 type openAIRequestPayloadBuilder struct {
-	store        bool
-	capabilities ProviderCapabilities
+	store          bool
+	modelVerbosity string
+	capabilities   ProviderCapabilities
 }
 
-func newOpenAIRequestPayloadBuilder(store bool, capabilities ProviderCapabilities) openAIRequestPayloadBuilder {
-	return openAIRequestPayloadBuilder{store: store, capabilities: capabilities}
+func newOpenAIRequestPayloadBuilder(store bool, modelVerbosity string, capabilities ProviderCapabilities) openAIRequestPayloadBuilder {
+	return openAIRequestPayloadBuilder{store: store, modelVerbosity: strings.ToLower(strings.TrimSpace(modelVerbosity)), capabilities: capabilities}
 }
 
 func (t *HTTPTransport) buildPayload(request OpenAIRequest, mode openAIAuthMode) (responses.ResponseNewParams, error) {
-	builder := newOpenAIRequestPayloadBuilder(t.Store, t.providerCapabilitiesForMode(mode))
+	builder := newOpenAIRequestPayloadBuilder(t.Store, t.ModelVerbosity, t.providerCapabilitiesForMode(mode))
 	return builder.BuildResponse(request, mode)
 }
 
 func (t *HTTPTransport) buildInputTokenCountParams(request OpenAIRequest) (responses.InputTokenCountParams, error) {
-	builder := newOpenAIRequestPayloadBuilder(t.Store, t.providerCapabilitiesForMode(openAIAuthMode{}))
+	builder := newOpenAIRequestPayloadBuilder(t.Store, t.ModelVerbosity, t.providerCapabilitiesForMode(openAIAuthMode{}))
 	return builder.BuildInputTokenCount(request)
 }
 
 func (t *HTTPTransport) buildCompactPayload(request OpenAICompactionRequest) (responses.ResponseCompactParams, error) {
-	return newOpenAIRequestPayloadBuilder(t.Store, ProviderCapabilities{}).BuildCompact(request)
+	return newOpenAIRequestPayloadBuilder(t.Store, t.ModelVerbosity, ProviderCapabilities{}).BuildCompact(request)
 }
 
 func (b openAIRequestPayloadBuilder) BuildResponse(request OpenAIRequest, mode openAIAuthMode) (responses.ResponseNewParams, error) {
@@ -65,11 +66,11 @@ func (b openAIRequestPayloadBuilder) BuildResponse(request OpenAIRequest, mode o
 	if request.Temperature != 0 && !mode.IsOAuth {
 		out.Temperature = openai.Float(request.Temperature)
 	}
-	if request.StructuredOutput != nil {
-		textConfig, err := buildResponseTextConfig(*request.StructuredOutput)
-		if err != nil {
-			return responses.ResponseNewParams{}, err
-		}
+	textConfig, ok, err := buildResponseTextConfig(request.StructuredOutput, configuredTextVerbosity(request.Model, b.modelVerbosity))
+	if err != nil {
+		return responses.ResponseNewParams{}, err
+	}
+	if ok {
 		out.Text = textConfig
 	}
 	return out, nil
@@ -96,11 +97,11 @@ func (b openAIRequestPayloadBuilder) BuildInputTokenCount(request OpenAIRequest)
 	if shouldApplyReasoningEffort(request.SupportsReasoningEffort, request.Model, request.ReasoningEffort) {
 		out.Reasoning = shared.ReasoningParam{Effort: shared.ReasoningEffort(strings.TrimSpace(request.ReasoningEffort)), Summary: shared.ReasoningSummaryConcise}
 	}
-	if request.StructuredOutput != nil {
-		textConfig, err := buildInputTokenCountTextConfig(*request.StructuredOutput)
-		if err != nil {
-			return responses.InputTokenCountParams{}, err
-		}
+	textConfig, ok, err := buildInputTokenCountTextConfig(request.StructuredOutput, configuredTextVerbosity(request.Model, b.modelVerbosity))
+	if err != nil {
+		return responses.InputTokenCountParams{}, err
+	}
+	if ok {
 		out.Text = textConfig
 	}
 	return out, nil
@@ -154,12 +155,19 @@ func buildFunctionToolParam(tool Tool) (responses.ToolUnionParam, error) {
 	return toolParam, nil
 }
 
-func buildResponseTextConfig(output StructuredOutput) (responses.ResponseTextConfigParam, error) {
+func buildResponseTextConfig(output *StructuredOutput, verbosity string) (responses.ResponseTextConfigParam, bool, error) {
+	text := responses.ResponseTextConfigParam{}
+	if verbosity != "" {
+		text.Verbosity = responses.ResponseTextConfigVerbosity(verbosity)
+	}
+	if output == nil {
+		return text, text.Verbosity != "", nil
+	}
 	schema, err := parseStructuredOutputSchema(output.Schema)
 	if err != nil {
-		return responses.ResponseTextConfigParam{}, err
+		return responses.ResponseTextConfigParam{}, false, err
 	}
-	text := responses.ResponseTextConfigParam{Format: responses.ResponseFormatTextConfigParamOfJSONSchema(strings.TrimSpace(output.Name), schema)}
+	text.Format = responses.ResponseFormatTextConfigParamOfJSONSchema(strings.TrimSpace(output.Name), schema)
 	if text.Format.OfJSONSchema != nil {
 		if output.Strict {
 			text.Format.OfJSONSchema.Strict = param.NewOpt(true)
@@ -168,15 +176,22 @@ func buildResponseTextConfig(output StructuredOutput) (responses.ResponseTextCon
 			text.Format.OfJSONSchema.Description = param.NewOpt(description)
 		}
 	}
-	return text, nil
+	return text, true, nil
 }
 
-func buildInputTokenCountTextConfig(output StructuredOutput) (responses.InputTokenCountParamsText, error) {
+func buildInputTokenCountTextConfig(output *StructuredOutput, verbosity string) (responses.InputTokenCountParamsText, bool, error) {
+	text := responses.InputTokenCountParamsText{}
+	if verbosity != "" {
+		text.Verbosity = verbosity
+	}
+	if output == nil {
+		return text, text.Verbosity != "", nil
+	}
 	schema, err := parseStructuredOutputSchema(output.Schema)
 	if err != nil {
-		return responses.InputTokenCountParamsText{}, err
+		return responses.InputTokenCountParamsText{}, false, err
 	}
-	text := responses.InputTokenCountParamsText{Format: responses.ResponseFormatTextConfigParamOfJSONSchema(strings.TrimSpace(output.Name), schema)}
+	text.Format = responses.ResponseFormatTextConfigParamOfJSONSchema(strings.TrimSpace(output.Name), schema)
 	if text.Format.OfJSONSchema != nil {
 		if output.Strict {
 			text.Format.OfJSONSchema.Strict = param.NewOpt(true)
@@ -185,7 +200,7 @@ func buildInputTokenCountTextConfig(output StructuredOutput) (responses.InputTok
 			text.Format.OfJSONSchema.Description = param.NewOpt(description)
 		}
 	}
-	return text, nil
+	return text, true, nil
 }
 
 func parseStructuredOutputSchema(raw json.RawMessage) (map[string]any, error) {
@@ -205,6 +220,19 @@ func shouldApplyReasoningEffort(contractSupport bool, model, effort string) bool
 		return true
 	}
 	return SupportsReasoningEffortModel(model)
+}
+
+func configuredTextVerbosity(model, configured string) string {
+	normalized := strings.ToLower(strings.TrimSpace(configured))
+	switch normalized {
+	case "low", "medium", "high":
+	default:
+		return ""
+	}
+	if !SupportsVerbosityModel(model) {
+		return ""
+	}
+	return normalized
 }
 
 func normalizeSchemaAdditionalProperties(schema map[string]any) {

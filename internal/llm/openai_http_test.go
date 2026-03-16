@@ -545,6 +545,66 @@ func TestBuildPayload_AppliesStructuredOutputJSONSchema(t *testing.T) {
 	}
 }
 
+func TestBuildPayload_AppliesConfiguredModelVerbosityForSupportedModels(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	transport.ModelVerbosity = "high"
+	payload, err := transport.buildPayload(OpenAIRequest{Model: "gpt-5"}, openAIAuthMode{})
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+
+	jsonPayload := mustMarshalObject(t, payload)
+	text, ok := jsonPayload["text"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected text config in payload, got %#v", jsonPayload["text"])
+	}
+	if got := text["verbosity"]; got != "high" {
+		t.Fatalf("expected text.verbosity=high, got %#v", got)
+	}
+}
+
+func TestBuildPayload_IgnoresConfiguredModelVerbosityForUnsupportedModels(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	transport.ModelVerbosity = "high"
+	payload, err := transport.buildPayload(OpenAIRequest{Model: "gpt-4o"}, openAIAuthMode{})
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+
+	jsonPayload := mustMarshalObject(t, payload)
+	if _, ok := jsonPayload["text"]; ok {
+		t.Fatalf("expected text config to be omitted for unsupported model, got %#v", jsonPayload["text"])
+	}
+}
+
+func TestBuildPayload_MergesConfiguredModelVerbosityWithStructuredOutput(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	transport.ModelVerbosity = "low"
+	payload, err := transport.buildPayload(OpenAIRequest{
+		Model: "gpt-5",
+		StructuredOutput: &StructuredOutput{
+			Name:   "reviewer_suggestions",
+			Schema: json.RawMessage(`{"type":"object","properties":{"suggestions":{"type":"array","items":{"type":"string"}}},"required":["suggestions"],"additionalProperties":false}`),
+			Strict: true,
+		},
+	}, openAIAuthMode{})
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+
+	jsonPayload := mustMarshalObject(t, payload)
+	text, ok := jsonPayload["text"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected text config in payload, got %#v", jsonPayload["text"])
+	}
+	if got := text["verbosity"]; got != "low" {
+		t.Fatalf("expected text.verbosity=low, got %#v", got)
+	}
+	if _, ok := text["format"].(map[string]any); !ok {
+		t.Fatalf("expected text.format to remain present, got %#v", text["format"])
+	}
+}
+
 func TestBuildPayload_AppliesReasoningEffortForOpenAIModels(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	payload, err := transport.buildPayload(OpenAIRequest{
@@ -979,6 +1039,24 @@ func TestInputTokenCountPayloadMatchesCompactPayloadInputShape(t *testing.T) {
 	}
 	if compactJSON["instructions"] != countJSON["instructions"] {
 		t.Fatalf("expected instructions parity between compact and input-token-count payloads, compact=%#v count=%#v", compactJSON["instructions"], countJSON["instructions"])
+	}
+}
+
+func TestBuildInputTokenCountParams_AppliesConfiguredModelVerbosity(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	transport.ModelVerbosity = "medium"
+	payload, err := transport.buildInputTokenCountParams(OpenAIRequest{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("build input-token-count payload: %v", err)
+	}
+
+	jsonPayload := mustMarshalJSONMap(t, payload)
+	text, ok := jsonPayload["text"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected text config in payload, got %#v", jsonPayload["text"])
+	}
+	if got := text["verbosity"]; got != "medium" {
+		t.Fatalf("expected text.verbosity=medium, got %#v", got)
 	}
 }
 

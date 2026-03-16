@@ -43,6 +43,7 @@ type HTTPTransport struct {
 	Client              *http.Client
 	Auth                AuthHeaderProvider
 	Store               bool
+	ModelVerbosity      string
 	ContextWindowTokens int
 	ProviderMetadata    OpenAIProviderMetadata
 

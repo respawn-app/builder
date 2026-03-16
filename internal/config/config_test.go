@@ -35,6 +35,9 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.WebSearch != "off" {
 		t.Fatalf("default web_search mismatch: %q", cfg.Settings.WebSearch)
 	}
+	if cfg.Settings.ModelVerbosity != "" {
+		t.Fatalf("default model_verbosity mismatch: %q", cfg.Settings.ModelVerbosity)
+	}
 	if cfg.Settings.NotificationMethod != "auto" {
 		t.Fatalf("default notification_method mismatch: %q", cfg.Settings.NotificationMethod)
 	}
@@ -97,6 +100,13 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	}
 	if cfg.Settings.Reviewer.MaxSuggestions != 5 {
 		t.Fatalf("default reviewer max_suggestions mismatch: %d", cfg.Settings.Reviewer.MaxSuggestions)
+	}
+	settingsBytes, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings file: %v", err)
+	}
+	if !strings.Contains(string(settingsBytes), "model_verbosity = \"\"") {
+		t.Fatalf("expected default config to expose model_verbosity option, got %q", string(settingsBytes))
 	}
 }
 
@@ -246,6 +256,53 @@ func TestLoadPriorityRequestModeFromFile(t *testing.T) {
 	}
 	if got := cfg.Source.Sources["priority_request_mode"]; got != "file" {
 		t.Fatalf("expected priority_request_mode source file, got %q", got)
+	}
+}
+
+func TestLoadModelVerbosityFromFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model_verbosity = \"high\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.ModelVerbosity != ModelVerbosityHigh {
+		t.Fatalf("expected model_verbosity=high from file, got %q", cfg.Settings.ModelVerbosity)
+	}
+	if got := cfg.Source.Sources["model_verbosity"]; got != "file" {
+		t.Fatalf("expected model_verbosity source file, got %q", got)
+	}
+}
+
+func TestLoadRejectsInvalidModelVerbosityFromFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model_verbosity = \"verbose\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected validation error for invalid model_verbosity")
+	}
+	if !strings.Contains(err.Error(), "model_verbosity") {
+		t.Fatalf("expected model_verbosity validation error, got %v", err)
 	}
 }
 
