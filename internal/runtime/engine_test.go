@@ -1118,10 +1118,11 @@ func TestHostedWebSearchExecutionFromOutputItem(t *testing.T) {
 		}`),
 	}
 
-	execution, ok := hostedWebSearchExecution(item)
-	if !ok {
+	executions := hostedToolExecutionsFromOutputItems([]llm.ResponseItem{item}, tools.DefinitionsFor([]tools.ID{tools.ToolWebSearch}))
+	if len(executions) != 1 {
 		t.Fatal("expected hosted web search execution")
 	}
+	execution := executions[0]
 	if execution.Call.Name != string(tools.ToolWebSearch) {
 		t.Fatalf("unexpected hosted tool name: %+v", execution.Call)
 	}
@@ -1154,10 +1155,11 @@ func TestHostedWebSearchExecutionUsesURLAsQueryFallback(t *testing.T) {
 		}`),
 	}
 
-	execution, ok := hostedWebSearchExecution(item)
-	if !ok {
+	executions := hostedToolExecutionsFromOutputItems([]llm.ResponseItem{item}, tools.DefinitionsFor([]tools.ID{tools.ToolWebSearch}))
+	if len(executions) != 1 {
 		t.Fatal("expected hosted web search execution")
 	}
+	execution := executions[0]
 	var input map[string]string
 	if err := json.Unmarshal(execution.Call.Input, &input); err != nil {
 		t.Fatalf("decode hosted input: %v", err)

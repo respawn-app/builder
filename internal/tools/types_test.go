@@ -99,3 +99,82 @@ func TestDefaultEnabledToolIDsIncludesWebSearchAndViewImage(t *testing.T) {
 		t.Fatalf("expected %s to be default-enabled", ToolViewImage)
 	}
 }
+
+func TestDefinitionContractsDriveRuntimeAndRequestExposure(t *testing.T) {
+	shell, ok := DefinitionFor(ToolShell)
+	if !ok {
+		t.Fatalf("expected %s definition", ToolShell)
+	}
+	if !shell.AvailableInLocalRuntime() {
+		t.Fatalf("expected %s to be available in local runtime", ToolShell)
+	}
+	if !shell.ExposedToModelRequest(false) {
+		t.Fatalf("expected %s to be request-exposed without vision", ToolShell)
+	}
+
+	viewImage, ok := DefinitionFor(ToolViewImage)
+	if !ok {
+		t.Fatalf("expected %s definition", ToolViewImage)
+	}
+	if !viewImage.AvailableInLocalRuntime() {
+		t.Fatalf("expected %s to be available in local runtime", ToolViewImage)
+	}
+	if viewImage.ExposedToModelRequest(false) {
+		t.Fatalf("expected %s to remain hidden without vision support", ToolViewImage)
+	}
+	if !viewImage.ExposedToModelRequest(true) {
+		t.Fatalf("expected %s to be request-exposed with vision support", ToolViewImage)
+	}
+
+	webSearch, ok := DefinitionFor(ToolWebSearch)
+	if !ok {
+		t.Fatalf("expected %s definition", ToolWebSearch)
+	}
+	if webSearch.AvailableInLocalRuntime() {
+		t.Fatalf("expected %s to remain hosted-only", ToolWebSearch)
+	}
+	if webSearch.ExposedToModelRequest(true) {
+		t.Fatalf("expected %s to stay hidden from request tool declarations", ToolWebSearch)
+	}
+	if !webSearch.EnablesNativeWebSearch("native") {
+		t.Fatalf("expected %s to opt into native provider web search", ToolWebSearch)
+	}
+	if webSearch.EnablesNativeWebSearch("off") {
+		t.Fatalf("expected %s native web search to honor disabled mode", ToolWebSearch)
+	}
+}
+
+func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
+	shell, _ := DefinitionFor(ToolShell)
+	shellMeta := shell.BuildToolCallMeta(ToolCallContext{DefaultShellTimeoutSeconds: DefaultShellTimeoutSeconds}, json.RawMessage(`{"command":"pwd"}`))
+	if !shellMeta.IsShell || shellMeta.Presentation != "shell" {
+		t.Fatalf("expected shell contract to mark shell presentation, got %+v", shellMeta)
+	}
+	if shellMeta.Command != "pwd" || shellMeta.CompactText != "pwd" {
+		t.Fatalf("unexpected shell transcript metadata: %+v", shellMeta)
+	}
+	if shellMeta.InlineMeta != "timeout: 5m" || shellMeta.TimeoutLabel != "timeout: 5m" {
+		t.Fatalf("expected shell timeout metadata, got %+v", shellMeta)
+	}
+
+	patch, _ := DefinitionFor(ToolPatch)
+	patchMeta := patch.BuildToolCallMeta(ToolCallContext{WorkingDir: "/workspace"}, json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: a.go\n-old\n+new\n*** End Patch\n"}`))
+	if !patchMeta.OmitSuccessfulResult {
+		t.Fatalf("expected patch transcript to suppress success result append, got %+v", patchMeta)
+	}
+	if patchMeta.PatchSummary == "" || patchMeta.PatchDetail == "" {
+		t.Fatalf("expected patch transcript metadata, got %+v", patchMeta)
+	}
+	if patchMeta.CompactText != patchMeta.PatchSummary || patchMeta.Command != patchMeta.PatchDetail {
+		t.Fatalf("expected patch aliases normalized, got %+v", patchMeta)
+	}
+
+	askQuestion, _ := DefinitionFor(ToolAskQuestion)
+	askMeta := askQuestion.BuildToolCallMeta(ToolCallContext{}, json.RawMessage(`{"question":"Choose scope?","suggestions":["Recommended: full"]}`))
+	if askMeta.Presentation != "ask_question" {
+		t.Fatalf("expected ask_question presentation, got %+v", askMeta)
+	}
+	if askMeta.Question != "Choose scope?" || len(askMeta.Suggestions) != 1 {
+		t.Fatalf("unexpected ask_question transcript metadata: %+v", askMeta)
+	}
+}

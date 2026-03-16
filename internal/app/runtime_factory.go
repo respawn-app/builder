@@ -308,30 +308,15 @@ func buildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []to
 	}
 	var registry *tools.Registry
 	parallel := multitooluseparallel.New(func() *tools.Registry { return registry })
-
-	factories := map[tools.ID]func() tools.Handler{
-		tools.ToolShell: func() tools.Handler {
-			return shelltool.New(workspaceRoot, shellOutputMaxChars, shelltool.WithDefaultTimeout(shellDefaultTimeout))
-		},
-		tools.ToolExecCommand: func() tools.Handler {
-			return shelltool.NewExecCommandTool(workspaceRoot, shellOutputMaxChars, background, ownerSessionID)
-		},
-		tools.ToolWriteStdin: func() tools.Handler {
-			return shelltool.NewWriteStdinTool(shellOutputMaxChars, background)
-		},
-		tools.ToolViewImage: func() tools.Handler {
-			return viewImage
-		},
-		tools.ToolPatch: func() tools.Handler {
-			return patch
-		},
-		tools.ToolAskQuestion: func() tools.Handler {
-			return askquestion.NewTool(broker)
-		},
-		tools.ToolMultiToolUseParallel: func() tools.Handler {
-			return parallel
-		},
-	}
+	availableHandlers := tools.NewRegistry(
+		shelltool.New(workspaceRoot, shellOutputMaxChars, shelltool.WithDefaultTimeout(shellDefaultTimeout)),
+		shelltool.NewExecCommandTool(workspaceRoot, shellOutputMaxChars, background, ownerSessionID),
+		shelltool.NewWriteStdinTool(shellOutputMaxChars, background),
+		viewImage,
+		patch,
+		askquestion.NewTool(broker),
+		parallel,
+	)
 	enabledSet := map[tools.ID]bool{}
 	for _, id := range enabled {
 		enabledSet[id] = true
@@ -341,24 +326,19 @@ func buildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []to
 		if !enabledSet[id] {
 			continue
 		}
-		if !isLocalRuntimeTool(id) {
+		def, ok := tools.DefinitionFor(id)
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("missing tool definition for %q", id)
+		}
+		if !def.AvailableInLocalRuntime() {
 			continue
 		}
-		factory, ok := factories[id]
+		handler, ok := availableHandlers.Get(id)
 		if !ok {
 			return nil, nil, nil, fmt.Errorf("missing runtime tool factory for %q", id)
 		}
-		handlers = append(handlers, factory())
+		handlers = append(handlers, handler)
 	}
 	registry = tools.NewRegistry(handlers...)
 	return registry, broker, background, nil
-}
-
-func isLocalRuntimeTool(id tools.ID) bool {
-	switch id {
-	case tools.ToolShell, tools.ToolExecCommand, tools.ToolWriteStdin, tools.ToolViewImage, tools.ToolPatch, tools.ToolAskQuestion, tools.ToolMultiToolUseParallel:
-		return true
-	default:
-		return false
-	}
 }

@@ -33,11 +33,14 @@ func skipInOngoing(role string) bool {
 }
 
 func compactToolCallText(meta *transcript.ToolCallMeta, text string) string {
+	if meta != nil && meta.HasCompactText() {
+		return strings.TrimSpace(meta.CompactText)
+	}
+	if meta != nil && meta.HasPatchSummary() {
+		return strings.TrimSpace(meta.PatchSummary)
+	}
 	if meta != nil && strings.TrimSpace(meta.Command) != "" {
 		return strings.TrimSpace(meta.Command)
-	}
-	if meta != nil && strings.TrimSpace(meta.PatchSummary) != "" {
-		return strings.TrimSpace(meta.PatchSummary)
 	}
 	return toolcodec.CompactCallText(text)
 }
@@ -115,12 +118,8 @@ func askQuestionDisplay(meta *transcript.ToolCallMeta, text string) (string, []s
 			suggestions = append(suggestions, trimmed)
 		}
 	}
-	fallbackQuestion, fallbackSuggestions := parseAskQuestionTextFallback(text)
 	if question == "" {
-		question = fallbackQuestion
-	}
-	if len(suggestions) == 0 {
-		suggestions = append(suggestions, fallbackSuggestions...)
+		question = normalizeAskQuestionQuestion(text)
 	}
 	if question == "" {
 		question = "ask_question"
@@ -146,42 +145,6 @@ func normalizeAskQuestionSuggestion(suggestion string) string {
 	trimmed := strings.TrimSpace(suggestion)
 	trimmed = strings.TrimPrefix(trimmed, "-")
 	return strings.TrimSpace(trimmed)
-}
-
-func parseAskQuestionTextFallback(text string) (string, []string) {
-	trimmedText := strings.TrimSpace(text)
-	if trimmedText == "" {
-		return "", nil
-	}
-	lines := splitLines(trimmedText)
-	question := ""
-	suggestions := make([]string, 0)
-	for idx, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		if idx == 0 {
-			question = normalizeAskQuestionQuestion(trimmed)
-			continue
-		}
-		lower := strings.ToLower(trimmed)
-		if strings.HasPrefix(lower, "suggestions:") {
-			rest := strings.TrimSpace(trimmed[len("suggestions:"):])
-			rest = normalizeAskQuestionSuggestion(rest)
-			if rest != "" {
-				suggestions = append(suggestions, rest)
-			}
-			continue
-		}
-		if strings.HasPrefix(trimmed, "-") {
-			rest := normalizeAskQuestionSuggestion(trimmed)
-			if rest != "" {
-				suggestions = append(suggestions, rest)
-			}
-		}
-	}
-	return question, suggestions
 }
 
 func (m Model) flattenAskQuestionEntry(role, question string, suggestions []string, answer string, includeSuggestions bool) []string {
@@ -265,24 +228,34 @@ func (m Model) flattenAskQuestionEntry(role, question string, suggestions []stri
 
 func toolCallDisplayText(meta *transcript.ToolCallMeta, text string) string {
 	command := strings.TrimSpace(text)
+	inlineMeta := ""
 	if meta != nil && strings.TrimSpace(meta.Command) != "" {
 		command = strings.TrimSpace(meta.Command)
+	}
+	if meta != nil && strings.TrimSpace(meta.PatchDetail) != "" && strings.TrimSpace(command) == "" {
+		command = strings.TrimSpace(meta.PatchDetail)
 	}
 	if command == "" {
 		command = "tool call"
 	}
-	if meta != nil && meta.IsShell && meta.UserInitiated {
+	if meta != nil && (meta.Presentation == transcript.ToolPresentationShell || meta.IsShell) && meta.UserInitiated {
 		command = "User ran: " + command
 	}
-	if meta == nil || strings.TrimSpace(meta.TimeoutLabel) == "" {
+	if meta != nil {
+		inlineMeta = strings.TrimSpace(meta.InlineMeta)
+		if inlineMeta == "" {
+			inlineMeta = strings.TrimSpace(meta.TimeoutLabel)
+		}
+	}
+	if inlineMeta == "" {
 		return command
 	}
-	return command + toolcodec.InlineMetaSeparator + strings.TrimSpace(meta.TimeoutLabel)
+	return command + toolcodec.InlineMetaSeparator + inlineMeta
 }
 
 func isShellToolCall(meta *transcript.ToolCallMeta, text string) bool {
 	if meta != nil {
-		return meta.IsShell
+		return meta.Presentation == transcript.ToolPresentationShell || meta.IsShell
 	}
 	_ = text
 	return false
@@ -292,15 +265,7 @@ func isAskQuestionToolCall(meta *transcript.ToolCallMeta) bool {
 	if meta == nil {
 		return false
 	}
-	return strings.TrimSpace(meta.ToolName) == "ask_question"
-}
-
-func extractPatchPayload(meta *transcript.ToolCallMeta, text string) (string, string, bool) {
-	if meta != nil && (meta.HasPatchSummary() || meta.HasPatchDetail()) {
-		return meta.PatchSummary, meta.PatchDetail, true
-	}
-	_ = text
-	return "", "", false
+	return meta.Presentation == transcript.ToolPresentationAskQuestion || strings.TrimSpace(meta.ToolName) == "ask_question"
 }
 
 func isToolHeadlineRole(role string) bool {

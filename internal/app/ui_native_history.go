@@ -319,12 +319,17 @@ func nativeEntryEqual(left tui.TranscriptEntry, right tui.TranscriptEntry) bool 
 		return left.ToolCall == nil && right.ToolCall == nil
 	}
 	if left.ToolCall.ToolName != right.ToolCall.ToolName ||
+		left.ToolCall.Presentation != right.ToolCall.Presentation ||
 		left.ToolCall.Command != right.ToolCall.Command ||
+		left.ToolCall.CompactText != right.ToolCall.CompactText ||
+		left.ToolCall.InlineMeta != right.ToolCall.InlineMeta ||
+		left.ToolCall.TimeoutLabel != right.ToolCall.TimeoutLabel ||
 		left.ToolCall.Question != right.ToolCall.Question ||
 		left.ToolCall.PatchSummary != right.ToolCall.PatchSummary ||
 		left.ToolCall.PatchDetail != right.ToolCall.PatchDetail ||
 		left.ToolCall.IsShell != right.ToolCall.IsShell ||
-		left.ToolCall.UserInitiated != right.ToolCall.UserInitiated {
+		left.ToolCall.UserInitiated != right.ToolCall.UserInitiated ||
+		left.ToolCall.OmitSuccessfulResult != right.ToolCall.OmitSuccessfulResult {
 		return false
 	}
 	if len(left.ToolCall.Suggestions) != len(right.ToolCall.Suggestions) {

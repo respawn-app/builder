@@ -55,7 +55,7 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 		e.setLastUsage(resp.Usage)
 
 		localToolCalls := append([]llm.ToolCall(nil), resp.ToolCalls...)
-		hostedToolExecutions := hostedToolExecutionsFromOutputItems(resp.OutputItems)
+		hostedToolExecutions := hostedToolExecutionsFromOutputItems(resp.OutputItems, tools.DefinitionsFor(e.cfg.EnabledTools))
 		if len(localToolCalls) > 0 || len(hostedToolExecutions) > 0 {
 			executedToolCall = true
 		}

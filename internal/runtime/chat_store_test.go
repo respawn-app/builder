@@ -118,7 +118,7 @@ func TestChatStoreSnapshotKeepsSubstantiveCommentaryInTranscript(t *testing.T) {
 }
 
 func TestFormatToolOutputPreservesNumberedPrefixes(t *testing.T) {
-	out := formatToolOutput(json.RawMessage(`{"output":"  1\talpha\n  2\tbeta\n  3\tgamma","exit_code":0}`))
+	out := tools.FormatGenericOutput(json.RawMessage(`{"output":"  1\talpha\n  2\tbeta\n  3\tgamma","exit_code":0}`))
 	if !strings.Contains(out, "1\talpha") || !strings.Contains(out, "2\tbeta") || !strings.Contains(out, "3\tgamma") {
 		t.Fatalf("expected numbered prefixes preserved, got %q", out)
 	}

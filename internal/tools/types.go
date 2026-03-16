@@ -41,6 +41,7 @@ type Definition struct {
 	ID          ID
 	Description string
 	Schema      json.RawMessage
+	contract    Contract
 }
 
 type Handler interface {
