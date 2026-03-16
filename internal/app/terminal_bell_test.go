@@ -51,7 +51,7 @@ func TestOSC9TerminalNotifierWritesEscapeSequence(t *testing.T) {
 	notifier := newTerminalNotifier(notificationMethodOSC9, &out, nil)
 	notifier.Notify("done")
 
-	want := osc9Prefix + "done" + terminalBell
+	want := osc9Prefix + "done" + terminalBell + terminalBell
 	if got := out.String(); got != want {
 		t.Fatalf("osc9 output = %q, want %q", got, want)
 	}
@@ -69,7 +69,7 @@ func TestAutoNotifierUsesOSC9ForGhostty(t *testing.T) {
 	})
 	notifier.Notify("ping")
 
-	want := osc9Prefix + "ping" + terminalBell
+	want := osc9Prefix + "ping" + terminalBell + terminalBell
 	if got := out.String(); got != want {
 		t.Fatalf("auto output = %q, want %q", got, want)
 	}

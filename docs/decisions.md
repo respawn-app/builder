@@ -259,6 +259,7 @@
 - Turn-end ringing is keyed by runtime step id and `tool_call_started`/`assistant_message` events.
 - Turn-end notification text includes assistant response preview when available, else `Builder: turn complete`.
 - `auto` notification method prefers OSC 9 on supported terminals and falls back to BEL.
+- OSC 9 notifications still emit a separate BEL so supported terminals get both notification and audible bell.
 - OSC 9 is disabled when `WT_SESSION` is set.
 
 ## API Headers And Provider Wiring
