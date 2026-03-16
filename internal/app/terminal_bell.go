@@ -135,7 +135,9 @@ func (r *osc9TerminalNotifier) Notify(message string) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	_, _ = io.WriteString(r.out, osc9Prefix+sanitizeTerminalNotificationMessage(message)+terminalBell)
+	// The first BEL terminates the OSC 9 sequence. Emit a second BEL so asks and
+	// turn-complete notifications still produce an audible bell on OSC-capable terminals.
+	_, _ = io.WriteString(r.out, osc9Prefix+sanitizeTerminalNotificationMessage(message)+terminalBell+terminalBell)
 }
 
 type bellHooks struct {
