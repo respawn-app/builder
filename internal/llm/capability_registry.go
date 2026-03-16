@@ -28,6 +28,11 @@ var knownModelCapabilityContracts = map[string]ModelCapabilityContract{
 		SupportsReasoningEffort: true,
 		SupportsVisionInputs:    true,
 	},
+	"gpt-5.4": {
+		Model:                   "gpt-5.4",
+		SupportsReasoningEffort: true,
+		SupportsVisionInputs:    true,
+	},
 	"gpt-5.3-codex": {
 		Model:                   "gpt-5.3-codex",
 		ContextWindowTokens:     400_000,
@@ -238,9 +243,6 @@ func LockedContractSupportsVisionInputs(locked *session.LockedContract, model st
 func hasLockedCapabilitySnapshot(locked *session.LockedContract) bool {
 	if locked == nil {
 		return false
-	}
-	if strings.TrimSpace(locked.ProviderContract.ProviderID) != "" {
-		return true
 	}
 	return locked.ModelCapabilities.SupportsReasoningEffort || locked.ModelCapabilities.SupportsVisionInputs
 }

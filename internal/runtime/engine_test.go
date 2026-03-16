@@ -605,6 +605,51 @@ func TestSetThinkingLevelRejectsInvalidValue(t *testing.T) {
 	}
 }
 
+func TestPoisonedLockedSessionFallsBackToModelReasoningSupport(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.MarkModelDispatchLocked(session.LockedContract{
+		Model:          "gpt-5.4",
+		Temperature:    1,
+		MaxOutputToken: 0,
+		ProviderContract: session.LockedProviderCapabilities{
+			ProviderID:                 "chatgpt-codex",
+			SupportsResponsesAPI:       true,
+			SupportsResponsesCompact:   true,
+			SupportsNativeWebSearch:    true,
+			SupportsReasoningEncrypted: true,
+			IsOpenAIFirstParty:         true,
+		},
+	}); err != nil {
+		t.Fatalf("mark locked: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"}}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:         "gpt-5.4",
+		ThinkingLevel: "high",
+		EnabledTools:  []tools.ID{tools.ToolShell},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "hi"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("client calls = %d, want 1", len(client.calls))
+	}
+	if client.calls[0].ReasoningEffort != "high" {
+		t.Fatalf("reasoning effort = %q, want high", client.calls[0].ReasoningEffort)
+	}
+	if !client.calls[0].SupportsReasoningEffort {
+		t.Fatal("expected request to preserve reasoning support fallback for poisoned locked session")
+	}
+}
+
 func TestFastModeCanChangeAfterLock(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
