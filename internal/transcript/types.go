@@ -2,6 +2,14 @@ package transcript
 
 import "strings"
 
+type ToolPresentationKind string
+
+const (
+	ToolPresentationDefault     ToolPresentationKind = "default"
+	ToolPresentationShell       ToolPresentationKind = "shell"
+	ToolPresentationAskQuestion ToolPresentationKind = "ask_question"
+)
+
 type ToolRenderKind string
 
 const (
@@ -17,16 +25,28 @@ type ToolRenderHint struct {
 }
 
 type ToolCallMeta struct {
-	ToolName      string
-	IsShell       bool
-	UserInitiated bool
-	Command       string
-	TimeoutLabel  string
-	PatchSummary  string
-	PatchDetail   string
-	RenderHint    *ToolRenderHint
-	Question      string
-	Suggestions   []string
+	ToolName             string
+	Presentation         ToolPresentationKind
+	IsShell              bool
+	UserInitiated        bool
+	Command              string
+	CompactText          string
+	InlineMeta           string
+	TimeoutLabel         string
+	PatchSummary         string
+	PatchDetail          string
+	RenderHint           *ToolRenderHint
+	Question             string
+	Suggestions          []string
+	OmitSuccessfulResult bool
+}
+
+func (m *ToolCallMeta) HasRenderHint() bool {
+	return m != nil && m.RenderHint != nil && m.RenderHint.Valid()
+}
+
+func (m *ToolCallMeta) HasCompactText() bool {
+	return m != nil && strings.TrimSpace(m.CompactText) != ""
 }
 
 func (m *ToolCallMeta) HasPatchDetail() bool {
@@ -35,10 +55,6 @@ func (m *ToolCallMeta) HasPatchDetail() bool {
 
 func (m *ToolCallMeta) HasPatchSummary() bool {
 	return m != nil && strings.TrimSpace(m.PatchSummary) != ""
-}
-
-func (m *ToolCallMeta) HasRenderHint() bool {
-	return m != nil && m.RenderHint != nil && m.RenderHint.Valid()
 }
 
 func (h *ToolRenderHint) Valid() bool {

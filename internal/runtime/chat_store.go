@@ -4,7 +4,6 @@ import (
 	"builder/internal/llm"
 	"builder/internal/tools"
 	"builder/internal/transcript"
-	"builder/internal/transcript/toolcodec"
 	"builder/prompts"
 	"encoding/json"
 	"fmt"
@@ -14,7 +13,7 @@ import (
 )
 
 const (
-	defaultShellTimeoutSecond = toolcodec.DefaultShellTimeoutSecs
+	defaultShellTimeoutSecond = tools.DefaultShellTimeoutSeconds
 )
 
 type ChatEntry struct {
@@ -316,114 +315,33 @@ func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
 }
 
 func (s *chatStore) formatToolCall(call llm.ToolCall) ChatEntry {
-	toolName := strings.TrimSpace(call.Name)
-	isShellTool := toolName == string(tools.ToolShell) || toolName == string(tools.ToolExecCommand) || toolName == string(tools.ToolWriteStdin)
-	meta := &transcript.ToolCallMeta{
-		ToolName: toolName,
-		IsShell:  isShellTool,
+	toolID := tools.ID(strings.TrimSpace(call.Name))
+	def, ok := tools.DefinitionFor(toolID)
+	meta := &transcript.ToolCallMeta{ToolName: strings.TrimSpace(call.Name)}
+	if ok {
+		built := def.BuildToolCallMeta(tools.ToolCallContext{
+			WorkingDir:                 s.cwd,
+			DefaultShellTimeoutSeconds: defaultShellTimeoutSecond,
+		}, call.Input)
+		meta = &built
 	}
-	if meta.IsShell {
-		meta.UserInitiated = parseShellToolCallUserInitiated(call.Input)
-	}
-	if toolName == string(tools.ToolAskQuestion) {
-		if question, suggestions, ok := formatAskQuestionToolCall(call.Input); ok {
-			meta.Command = question
-			meta.Question = question
-			meta.Suggestions = append([]string(nil), suggestions...)
-			return ChatEntry{
-				Role:       "tool_call",
-				Text:       question,
-				ToolCallID: strings.TrimSpace(call.ID),
-				ToolCall:   meta,
-			}
-		}
-	}
-	if toolName == string(tools.ToolWebSearch) {
-		if query, ok := formatWebSearchToolCall(call.Input); ok {
-			meta.Command = query
-			return ChatEntry{
-				Role:       "tool_call",
-				Text:       query,
-				ToolCallID: strings.TrimSpace(call.ID),
-				ToolCall:   meta,
-			}
-		}
-	}
-	if toolName == string(tools.ToolPatch) {
-		if summary, detail, ok := s.formatPatchToolCall(call.Input); ok {
-			meta.PatchSummary = summary
-			meta.PatchDetail = detail
-			meta.RenderHint = &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff}
-			return ChatEntry{
-				Role:       "tool_call",
-				Text:       summary,
-				ToolCallID: strings.TrimSpace(call.ID),
-				ToolCall:   meta,
-			}
-		}
-	}
-	command, timeoutLabel := toolcodec.FormatInput(toolName, call.Input, defaultShellTimeoutSecond)
-	command = strings.TrimSpace(command)
-	if command == "" {
-		command = "tool call"
-	}
-	meta.Command = command
-	meta.TimeoutLabel = timeoutLabel
-	if meta.IsShell {
-		meta.RenderHint = detectShellRenderHint(command)
+	text := strings.TrimSpace(meta.Command)
+	if text == "" {
+		text = "tool call"
 	}
 	return ChatEntry{
 		Role:       "tool_call",
-		Text:       command,
+		Text:       text,
 		ToolCallID: strings.TrimSpace(call.ID),
 		ToolCall:   meta,
 	}
 }
 
-func parseShellToolCallUserInitiated(raw json.RawMessage) bool {
-	var in struct {
-		UserInitiated bool `json:"user_initiated"`
-	}
-	if err := json.Unmarshal(raw, &in); err != nil {
-		return false
-	}
-	return in.UserInitiated
-}
-
-func formatAskQuestionToolCall(raw json.RawMessage) (string, []string, bool) {
-	var in struct {
-		Question    string   `json:"question"`
-		Suggestions []string `json:"suggestions,omitempty"`
-	}
-	if err := json.Unmarshal(raw, &in); err != nil {
-		return "", nil, false
-	}
-	question := strings.TrimSpace(in.Question)
-	if question == "" {
-		return "", nil, false
-	}
-	suggestions := make([]string, 0, len(in.Suggestions))
-	for _, suggestion := range in.Suggestions {
-		trimmed := strings.TrimSpace(suggestion)
-		if trimmed == "" {
-			continue
-		}
-		suggestions = append(suggestions, trimmed)
-	}
-	return question, suggestions, true
-}
-
 func formatToolResult(result tools.Result) string {
-	if result.Name == tools.ToolPatch && !result.IsError {
-		return ""
+	if def, ok := tools.DefinitionFor(result.Name); ok {
+		return def.FormatToolResult(result)
 	}
-	if result.Name == tools.ToolWebSearch {
-		formatted := strings.TrimSpace(formatRawToolJSON(result.Output))
-		if formatted != "" {
-			return formatted
-		}
-	}
-	output := strings.TrimSpace(toolcodec.FormatOutputForTool(string(result.Name), result.Output))
+	output := strings.TrimSpace(tools.FormatGenericOutput(result.Output))
 	if output == "" {
 		if result.IsError {
 			output = "tool failed"
@@ -432,18 +350,4 @@ func formatToolResult(result tools.Result) string {
 		}
 	}
 	return output
-}
-
-func formatWebSearchToolCall(raw json.RawMessage) (string, bool) {
-	var in struct {
-		Query string `json:"query"`
-	}
-	if err := json.Unmarshal(raw, &in); err != nil {
-		return "", false
-	}
-	query := strings.TrimSpace(in.Query)
-	if query == "" {
-		return "", false
-	}
-	return query, true
 }

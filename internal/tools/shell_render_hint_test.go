@@ -1,4 +1,4 @@
-package runtime
+package tools
 
 import (
 	"builder/internal/transcript"

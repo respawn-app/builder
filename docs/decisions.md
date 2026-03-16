@@ -4,7 +4,8 @@
 
 - Build a minimal terminal coding agent focused on output quality, speed, and professional workflows.
 - Tech stack: Go + Bubble Tea; no TypeScript.
-- v1 excludes MCP, plugins, native subagent orchestration, and skills.
+- v1 excludes MCP, plugins, and native subagent orchestration.
+- Skills are supported via AGENTS-driven `SKILL.md` discovery/injection from `~/.builder/skills` and `<workspace>/.builder/skills`.
 - Full-access execution in v1 (no sandbox).
 - Architecture must remain pluggable/composable with low-friction extension points.
 - Working name is `builder` and must stay easy to rename.
@@ -32,6 +33,9 @@
 - Non-zero exit is recoverable (does not auto-abort the turn).
 - No automatic retry for shell process-launch failures.
 - Interrupt escalation is `SIGINT` then `SIGKILL` after 10s grace.
+- Background shell processes (`exec_command` / `write_stdin`) are app-global, not session-scoped.
+- Background process ids are app-global within one app instance; owner session metadata is advisory for routing notices/history, not an access-control boundary.
+- `/ps` may surface and operate on background processes started from other sessions in the same app instance; this is intentional in v1 to preserve operator visibility/control of long-running jobs.
 
 ## Patch Tool
 
@@ -122,6 +126,7 @@
 - Prompt sources live in repository files.
 - System prompt is a markdown file in-repo.
 - Tool definitions (names, descriptions, schemas) are centralized in one file.
+- Tool definitions are also the single source of truth for tool runtime availability, request exposure/gating (including multimodal and native-web-search opt-in), hosted-output decoding, transcript metadata, and render hints.
 - Prompts/tool definitions are build-embedded (runtime-hardcoded from source files; no runtime file loading dependency).
 - Instruction precedence follows provider/API role semantics (no custom override layer).
 
@@ -234,7 +239,7 @@
 - Picker matches only first token and updates continuously.
 - After whitespace, command enters argument mode and picker hides.
 - Unknown slash commands are sent to model as normal user prompts.
-- Built-in commands: `/logout`, `/exit`, `/new`, `/resume`, `/compact`, `/name`, `/thinking`, `/review`, `/supervisor`, `/autocompaction`.
+- Built-in commands: `/logout`, `/exit`, `/new`, `/resume`, `/compact`, `/name`, `/thinking`, `/fast`, `/review`, `/init`, `/supervisor`, `/autocompaction`, `/ps`, `/back`.
 - Known slash commands are intercepted while model is running and never queued as user prompts.
 - Run-safe commands execute immediately while busy.
 - Non-run-safe known commands while busy are rejected with transient status-line error.
@@ -274,15 +279,17 @@
 - Executes a single non-interactive prompt with existing runtime/session persistence.
 - Creates/resumes normal sessions and auto-names unnamed sessions `<session-id> subagent`.
 - Default timeout is infinite; `--timeout` can bound execution.
-- `stdout` is reserved for exactly one final JSON object: `status`, `result`/`error`, `session_id`, `session_name`, `duration_ms`.
-- Progress/runtime activity goes to `stderr`.
+- Output modes are explicit: default `--output-mode=final-text`, optional `--output-mode=json`.
+- JSON mode emits exactly one final object on `stdout`: `status`, `result`/`error`, `session_id`, `session_name`, `duration_ms`, plus continuation metadata when available.
+- Final-text mode emits the final assistant text to `stdout`, optionally followed by a continue hint.
+- Progress is quiet by default and is emitted to `stderr` only when `--progress-mode=stderr`.
 
 ## Experimental Reviewer
 
-- Post-turn reviewer agent exists behind config and is disabled by default (`[reviewer].enabled=false`).
+- Post-turn reviewer agent exists behind config and is disabled by default via `reviewer.frequency = "off"`.
 - Reviewer runs only after completed assistant final handoff and only if the completed turn executed at least one tool call.
 - Reviewer uses more aggressive tool-output truncation than main-agent path.
 - Reviewer contract is minimal JSON: `{"suggestions":["..."]}`; invalid payloads are ignored non-fatally.
 - If suggestions exist, runtime appends them as `developer` message and runs one extra main-agent follow-up pass.
-- Follow-up noop token is exact `__BUILDER_REVIEW_NOOP__`; if emitted, runtime keeps original assistant final answer.
+- Follow-up noop token is exact `NO_OP`; if emitted, runtime keeps original assistant final answer.
 - Reviewer pass is single-shot (no recursive review of review).

@@ -11,6 +11,7 @@ type CatalogEntry struct {
 	Description    string
 	Schema         json.RawMessage
 	DefaultEnabled bool
+	Contract       Contract
 }
 
 var catalogEntries = []CatalogEntry{
@@ -19,6 +20,11 @@ var catalogEntries = []CatalogEntry{
 		Aliases:        []string{"bash", "bash_command", "shell_command"},
 		Description:    "Execute a shell command in the user's environment and device.",
 		DefaultEnabled: true,
+		Contract: localContract(
+			RequestExposure{Enabled: true},
+			shellToolCallMeta(ToolShell),
+			formatGenericToolResult,
+		),
 		Schema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -47,6 +53,11 @@ var catalogEntries = []CatalogEntry{
 		Aliases:        nil,
 		Description:    "Runs a command in the user's default shell, returning output or a session ID for ongoing interaction.",
 		DefaultEnabled: true,
+		Contract: localContract(
+			RequestExposure{Enabled: true},
+			shellToolCallMeta(ToolExecCommand),
+			formatGenericToolResult,
+		),
 		Schema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -88,6 +99,11 @@ var catalogEntries = []CatalogEntry{
 		Aliases:        nil,
 		Description:    "Writes characters to an existing exec_command session and returns recent output. Use empty chars to poll.",
 		DefaultEnabled: true,
+		Contract: localContract(
+			RequestExposure{Enabled: true},
+			shellToolCallMeta(ToolWriteStdin),
+			formatGenericToolResult,
+		),
 		Schema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -117,6 +133,11 @@ var catalogEntries = []CatalogEntry{
 		Aliases:        []string{"read_image"},
 		Description:    "Read a local image or PDF file by path and attach it to the model as native multimodal input content.",
 		DefaultEnabled: true,
+		Contract: localContract(
+			RequestExposure{Enabled: true, RequiresVision: true},
+			defaultToolCallMeta(ToolViewImage),
+			formatViewImageToolResult,
+		),
 		Schema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -134,6 +155,11 @@ var catalogEntries = []CatalogEntry{
 		Aliases:        nil,
 		Description:    "Apply a freeform patch.",
 		DefaultEnabled: true,
+		Contract: localContract(
+			RequestExposure{Enabled: true},
+			patchToolCallMeta(ToolPatch),
+			formatPatchToolResult,
+		),
 		Schema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -151,6 +177,11 @@ var catalogEntries = []CatalogEntry{
 		Aliases:        nil,
 		Description:    "Ask the user a question. You should ask the user when planning your work or working to make product decisions, resolve ambiguities, define missing pieces that you cannot resolve by yourself, brainstorming with the user. You should ask the user a lot of questions when you're planning/brainstorming together to learn their desires, preferences, design, product vision, or implementation approach, and sometimes ask them questions when already working if you encounter a problem you can't resolve, a caveat, an undefined area that materially affects the result or direction of your work, etc. You should avoid asking the user obvious or harmless questions like 'Should I run tests?' or 'Where is file X?' which you can answer yourself. Each question pings the user, so treat it like pinging a coworker on Slack: unless they're actively chatting with you, pinging them could distract them. Stick to ONE question per this tool call, for multiple questions call this tool in parallel. Strive to provide multiple suggestions/options with every question if you can.",
 		DefaultEnabled: true,
+		Contract: localContract(
+			RequestExposure{Enabled: true},
+			askQuestionToolCallMeta(ToolAskQuestion),
+			formatGenericToolResult,
+		),
 		Schema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -173,6 +204,18 @@ var catalogEntries = []CatalogEntry{
 		Aliases:        nil,
 		Description:    "Search the web for up-to-date external information using the provider-native web search capability when available. Use this when local workspace context is insufficient or the fact could be stale. Prefer primary and official sources, and prefer MCP resources/templates over web search when possible.",
 		DefaultEnabled: true,
+		Contract: Contract{
+			Runtime: RuntimeContract{
+				Availability:       RuntimeAvailabilityHosted,
+				NativeWebSearch:    true,
+				DecodeHostedOutput: decodeHostedWebSearchOutput,
+			},
+			Request: RequestExposure{Enabled: false},
+			Transcript: TranscriptContract{
+				BuildCallMeta: defaultToolCallMeta(ToolWebSearch),
+				FormatResult:  formatWebSearchToolResult,
+			},
+		},
 		Schema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -200,6 +243,11 @@ var catalogEntries = []CatalogEntry{
 		Aliases:        []string{"parallel"},
 		Description:    "Use this function to run multiple tools simultaneously, but only if they can operate in parallel.",
 		DefaultEnabled: true,
+		Contract: localContract(
+			RequestExposure{Enabled: true},
+			defaultToolCallMeta(ToolMultiToolUseParallel),
+			formatGenericToolResult,
+		),
 		Schema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -243,10 +291,12 @@ func init() {
 	defaultEnabledIDs = make([]ID, 0, len(catalogEntries))
 
 	for _, entry := range catalogEntries {
+		validateCatalogEntry(entry)
 		definitions[entry.ID] = Definition{
 			ID:          entry.ID,
 			Description: entry.Description,
 			Schema:      entry.Schema,
+			contract:    entry.Contract,
 		}
 		parseAliases[string(entry.ID)] = entry.ID
 		for _, alias := range entry.Aliases {
@@ -289,4 +339,19 @@ func parseCatalogID(v string) (ID, bool) {
 func definitionFor(id ID) (Definition, bool) {
 	def, ok := definitions[id]
 	return def, ok
+}
+
+func validateCatalogEntry(entry CatalogEntry) {
+	if entry.Contract.Runtime.Availability == "" {
+		panic("tool contract is missing runtime availability for " + string(entry.ID))
+	}
+	if entry.Contract.Runtime.Availability == RuntimeAvailabilityHosted && entry.Contract.Runtime.DecodeHostedOutput == nil {
+		panic("hosted tool contract is missing hosted output decoder for " + string(entry.ID))
+	}
+	if entry.Contract.Transcript.BuildCallMeta == nil {
+		panic("tool contract is missing transcript call metadata builder for " + string(entry.ID))
+	}
+	if entry.Contract.Transcript.FormatResult == nil {
+		panic("tool contract is missing transcript result formatter for " + string(entry.ID))
+	}
 }

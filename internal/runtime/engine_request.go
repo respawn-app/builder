@@ -50,10 +50,14 @@ func (e *Engine) buildRequest(ctx context.Context, _ string, allowTools bool) (l
 }
 
 func (e *Engine) enableNativeWebSearch(ctx context.Context) (bool, error) {
-	if !hasEnabledTool(e.cfg.EnabledTools, tools.ToolWebSearch) {
-		return false, nil
+	needsNativeWebSearch := false
+	for _, def := range tools.DefinitionsFor(e.cfg.EnabledTools) {
+		if def.EnablesNativeWebSearch(e.cfg.WebSearchMode) {
+			needsNativeWebSearch = true
+			break
+		}
 	}
-	if !strings.EqualFold(strings.TrimSpace(e.cfg.WebSearchMode), "native") {
+	if !needsNativeWebSearch {
 		return false, nil
 	}
 	caps, err := e.providerCapabilities(ctx)
@@ -61,15 +65,6 @@ func (e *Engine) enableNativeWebSearch(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("resolve provider capabilities for native web search: %w", err)
 	}
 	return caps.SupportsNativeWebSearch, nil
-}
-
-func hasEnabledTool(ids []tools.ID, toolID tools.ID) bool {
-	for _, id := range ids {
-		if id == toolID {
-			return true
-		}
-	}
-	return false
 }
 
 func (e *Engine) systemPrompt(locked session.LockedContract) string {
@@ -108,98 +103,30 @@ type hostedToolExecution struct {
 	Result tools.Result
 }
 
-func hostedToolExecutionsFromOutputItems(items []llm.ResponseItem) []hostedToolExecution {
+func hostedToolExecutionsFromOutputItems(items []llm.ResponseItem, defs []tools.Definition) []hostedToolExecution {
 	out := make([]hostedToolExecution, 0, len(items))
 	for _, item := range items {
-		execution, ok := hostedWebSearchExecution(item)
-		if !ok {
-			continue
+		for _, def := range defs {
+			execution, ok := def.DecodeHostedOutput(tools.HostedToolOutput{
+				ID:     strings.TrimSpace(item.ID),
+				CallID: strings.TrimSpace(item.CallID),
+				Raw:    append(json.RawMessage(nil), item.Raw...),
+			})
+			if !ok {
+				continue
+			}
+			out = append(out, hostedToolExecution{
+				Call: llm.ToolCall{
+					ID:    execution.Call.ID,
+					Name:  string(execution.Call.Name),
+					Input: execution.Call.Input,
+				},
+				Result: execution.Result,
+			})
+			break
 		}
-		out = append(out, execution)
 	}
 	return out
-}
-
-func hostedWebSearchExecution(item llm.ResponseItem) (hostedToolExecution, bool) {
-	raw := item.Raw
-	if len(raw) == 0 || !json.Valid(raw) {
-		return hostedToolExecution{}, false
-	}
-	var payload struct {
-		Type   string `json:"type"`
-		ID     string `json:"id"`
-		Status string `json:"status"`
-		Action struct {
-			Type    string `json:"type"`
-			Query   string `json:"query"`
-			URL     string `json:"url"`
-			Pattern string `json:"pattern"`
-		} `json:"action"`
-	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return hostedToolExecution{}, false
-	}
-	if strings.TrimSpace(payload.Type) != "web_search_call" {
-		return hostedToolExecution{}, false
-	}
-	callID := strings.TrimSpace(payload.ID)
-	if callID == "" {
-		callID = strings.TrimSpace(item.ID)
-	}
-	if callID == "" {
-		callID = strings.TrimSpace(item.CallID)
-	}
-	if callID == "" {
-		return hostedToolExecution{}, false
-	}
-	input := map[string]string{}
-	actionType := strings.TrimSpace(payload.Action.Type)
-	if actionType != "" {
-		input["action"] = actionType
-	}
-	query := strings.TrimSpace(payload.Action.Query)
-	if url := strings.TrimSpace(payload.Action.URL); url != "" {
-		if query == "" {
-			query = url
-		}
-		input["url"] = url
-	}
-	if pattern := strings.TrimSpace(payload.Action.Pattern); pattern != "" {
-		if query == "" {
-			query = pattern
-		}
-		input["pattern"] = pattern
-	}
-	if query == "" {
-		if actionType != "" {
-			query = actionType
-		} else {
-			query = "web search"
-		}
-	}
-	input["query"] = query
-	inputRaw, err := json.Marshal(input)
-	if err != nil {
-		return hostedToolExecution{}, false
-	}
-	output := append(json.RawMessage(nil), raw...)
-	if !json.Valid(output) {
-		output = mustJSON(map[string]any{"raw": string(raw)})
-	}
-	isError := strings.EqualFold(strings.TrimSpace(payload.Status), "failed")
-	return hostedToolExecution{
-		Call: llm.ToolCall{
-			ID:    callID,
-			Name:  string(tools.ToolWebSearch),
-			Input: inputRaw,
-		},
-		Result: tools.Result{
-			CallID:  callID,
-			Name:    tools.ToolWebSearch,
-			Output:  output,
-			IsError: isError,
-		},
-	}, true
 }
 
 func (e *Engine) requestTools() []llm.Tool {
@@ -208,9 +135,9 @@ func (e *Engine) requestTools() []llm.Tool {
 		return nil
 	}
 	out := make([]llm.Tool, 0, len(defs))
-	locked := e.store.Meta().Locked
+	supportsVision := llm.LockedContractSupportsVisionInputs(e.store.Meta().Locked, e.cfg.Model)
 	for _, d := range defs {
-		if d.ID == tools.ToolViewImage && !llm.LockedContractSupportsVisionInputs(locked, e.cfg.Model) {
+		if !d.ExposedToModelRequest(supportsVision) {
 			continue
 		}
 		out = append(out, llm.Tool{Name: string(d.ID), Description: d.Description, Schema: d.Schema})

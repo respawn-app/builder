@@ -1,6 +1,9 @@
 package tui
 
-import "strings"
+import (
+	"builder/internal/transcript"
+	"strings"
+)
 
 func (m Model) renderFlatDetailTranscript() string {
 	blocks := m.buildDetailBlocks(true, true)
@@ -131,9 +134,8 @@ func (m Model) toolCallBlock(entryIndex int, entry TranscriptEntry, consumed map
 	if isShellToolCall(entry.ToolCall, entry.Text) {
 		blockRole = "tool_shell"
 	}
-	patchSummary, patchDetail, hasPatchPayload := extractPatchPayload(entry.ToolCall, entry.Text)
-	combined := m.toolCallDisplayText(entry, blockRole, patchSummary, patchDetail, hasPatchPayload, opts)
-	blockRole, combined = m.applyToolResult(entryIndex, blockRole, combined, hasPatchPayload, consumed, resultIndex, opts)
+	combined := m.toolCallDisplayText(entry, blockRole, opts)
+	blockRole, combined = m.applyToolResult(entryIndex, entry.ToolCall, blockRole, combined, consumed, resultIndex, opts)
 	return ongoingBlock{
 		role:       blockRole,
 		lines:      m.flattenEntryWithMeta(blockRole, combined, opts.mode == transcriptBlockModeOngoing, entry.ToolCall),
@@ -160,25 +162,18 @@ func (m Model) askQuestionBlock(entryIndex int, entry TranscriptEntry, consumed 
 	}
 }
 
-func (m Model) toolCallDisplayText(entry TranscriptEntry, blockRole string, patchSummary string, patchDetail string, hasPatchPayload bool, opts transcriptBlockOptions) string {
+func (m Model) toolCallDisplayText(entry TranscriptEntry, blockRole string, opts transcriptBlockOptions) string {
 	if opts.mode == transcriptBlockModeDetail {
-		combined := toolCallDisplayText(entry.ToolCall, entry.Text)
-		if hasPatchPayload {
-			return patchDetail
-		}
-		return combined
+		return toolCallDisplayText(entry.ToolCall, entry.Text)
 	}
 	combined := compactToolCallText(entry.ToolCall, entry.Text)
 	if blockRole == "tool_shell" {
 		combined = compactOngoingShellPreviewText(combined)
 	}
-	if hasPatchPayload {
-		return strings.TrimSpace(patchSummary)
-	}
 	return combined
 }
 
-func (m Model) applyToolResult(entryIndex int, blockRole string, combined string, hasPatchPayload bool, consumed map[int]struct{}, resultIndex toolResultIndex, opts transcriptBlockOptions) (string, string) {
+func (m Model) applyToolResult(entryIndex int, meta *transcript.ToolCallMeta, blockRole string, combined string, consumed map[int]struct{}, resultIndex toolResultIndex, opts transcriptBlockOptions) (string, string) {
 	resultIdx := resultIndex.findMatchingToolResultIndex(m.transcript, entryIndex, consumed)
 	if resultIdx < 0 {
 		return blockRole, combined
@@ -186,7 +181,8 @@ func (m Model) applyToolResult(entryIndex int, blockRole string, combined string
 	nextRole := strings.TrimSpace(m.transcript[resultIdx].Role)
 	if opts.mode == transcriptBlockModeDetail {
 		resultText := m.transcript[resultIdx].Text
-		if strings.TrimSpace(resultText) != "" && !(hasPatchPayload && nextRole != "tool_result_error") {
+		omitSuccessfulResult := meta != nil && meta.OmitSuccessfulResult && nextRole != "tool_result_error"
+		if strings.TrimSpace(resultText) != "" && !omitSuccessfulResult {
 			combined += "\n" + resultText
 		}
 	}
