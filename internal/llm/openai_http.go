@@ -42,10 +42,10 @@ type HTTPTransport struct {
 	BaseURL             string
 	Client              *http.Client
 	Auth                AuthHeaderProvider
+	Provider            Provider
 	Store               bool
 	ModelVerbosity      string
 	ContextWindowTokens int
-	ProviderMetadata    OpenAIProviderMetadata
 
 	mu                  sync.RWMutex
 	modelContextWindows map[string]int
@@ -62,8 +62,8 @@ func NewHTTPTransport(auth AuthHeaderProvider) *HTTPTransport {
 		BaseURL:             defaultOpenAIBaseURL,
 		Client:              &http.Client{Timeout: 120 * time.Second},
 		Auth:                auth,
+		Provider:            ProviderOpenAI,
 		ContextWindowTokens: window,
-		ProviderMetadata:    ResolveOpenAIProviderMetadata(defaultOpenAIBaseURL),
 		modelContextWindows: make(map[string]int),
 	}
 }
@@ -78,8 +78,12 @@ func (t *HTTPTransport) Generate(ctx context.Context, request OpenAIRequest) (Op
 	if err != nil {
 		return OpenAIResponse{}, err
 	}
+	providerCaps, err := t.providerCapabilitiesForMode(mode)
+	if err != nil {
+		return OpenAIResponse{}, err
+	}
 
-	payload, err := t.buildPayload(request, mode)
+	payload, err := t.buildPayload(request, mode, providerCaps)
 	if err != nil {
 		return OpenAIResponse{}, err
 	}
@@ -91,7 +95,7 @@ func (t *HTTPTransport) Generate(ctx context.Context, request OpenAIRequest) (Op
 
 	decoded, err := service.New(ctx, payload, reqOpts...)
 	if err != nil {
-		return OpenAIResponse{}, mapOpenAIRequestError(t.errorProviderID(mode), err, rawResp, "openai responses request failed")
+		return OpenAIResponse{}, mapOpenAIRequestError(providerCaps.ProviderID, err, rawResp, "openai responses request failed")
 	}
 	if decoded == nil {
 		return OpenAIResponse{}, fmt.Errorf("openai responses request failed: empty response")
@@ -123,8 +127,12 @@ func (t *HTTPTransport) GenerateStreamWithEvents(ctx context.Context, request Op
 	if err != nil {
 		return OpenAIResponse{}, err
 	}
+	providerCaps, err := t.providerCapabilitiesForMode(mode)
+	if err != nil {
+		return OpenAIResponse{}, err
+	}
 
-	payload, err := t.buildPayload(request, mode)
+	payload, err := t.buildPayload(request, mode, providerCaps)
 	if err != nil {
 		return OpenAIResponse{}, err
 	}
@@ -142,7 +150,7 @@ func (t *HTTPTransport) GenerateStreamWithEvents(ctx context.Context, request Op
 		accumulator.Consume(stream.Current())
 	}
 	if err := stream.Err(); err != nil {
-		return OpenAIResponse{}, mapOpenAIRequestError(t.errorProviderID(mode), err, rawResp, "read responses stream events")
+		return OpenAIResponse{}, mapOpenAIRequestError(providerCaps.ProviderID, err, rawResp, "read responses stream events")
 	}
 	return accumulator.Response(), nil
 }
@@ -154,6 +162,10 @@ func (t *HTTPTransport) Compact(ctx context.Context, request OpenAICompactionReq
 	windowTokens := t.resolveContextWindowFallback(ctx, request.Model)
 
 	authHeader, mode, err := t.resolveAuth(ctx)
+	if err != nil {
+		return OpenAICompactionResponse{}, err
+	}
+	providerCaps, err := t.providerCapabilitiesForMode(mode)
 	if err != nil {
 		return OpenAICompactionResponse{}, err
 	}
@@ -174,7 +186,7 @@ func (t *HTTPTransport) Compact(ctx context.Context, request OpenAICompactionReq
 
 	decoded, err := service.Compact(ctx, payload, reqOpts...)
 	if err != nil {
-		return OpenAICompactionResponse{}, mapOpenAIRequestError(t.errorProviderID(mode), err, rawResp, "openai responses compact request failed")
+		return OpenAICompactionResponse{}, mapOpenAIRequestError(providerCaps.ProviderID, err, rawResp, "openai responses compact request failed")
 	}
 	if len(bytes.TrimSpace(rawBody)) > 0 {
 		var parsed responses.CompactedResponse
@@ -204,8 +216,12 @@ func (t *HTTPTransport) CountRequestInputTokens(ctx context.Context, request Ope
 	if err != nil {
 		return 0, err
 	}
+	providerCaps, err := t.providerCapabilitiesForMode(mode)
+	if err != nil {
+		return 0, err
+	}
 
-	payload, err := t.buildInputTokenCountParams(request)
+	payload, err := t.buildInputTokenCountParams(request, providerCaps)
 	if err != nil {
 		return 0, err
 	}
@@ -221,7 +237,7 @@ func (t *HTTPTransport) CountRequestInputTokens(ctx context.Context, request Ope
 
 	decoded, err := service.Count(ctx, payload, reqOpts...)
 	if err != nil {
-		return 0, mapOpenAIRequestError(t.errorProviderID(mode), err, rawResp, "openai responses input_tokens request failed")
+		return 0, mapOpenAIRequestError(providerCaps.ProviderID, err, rawResp, "openai responses input_tokens request failed")
 	}
 	if decoded == nil {
 		return 0, fmt.Errorf("openai responses input_tokens request failed: empty response")
@@ -298,7 +314,7 @@ func (t *HTTPTransport) ProviderCapabilities(ctx context.Context) (ProviderCapab
 	if err != nil {
 		return ProviderCapabilities{}, err
 	}
-	return t.providerCapabilitiesForMode(mode), nil
+	return t.providerCapabilitiesForMode(mode)
 }
 
 func (t *HTTPTransport) resolveAuth(ctx context.Context) (string, openAIAuthMode, error) {

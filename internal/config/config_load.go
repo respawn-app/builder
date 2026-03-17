@@ -50,7 +50,7 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	applySettingsOverlay(&settings, &persistenceRoot, &persistenceSource, sources, cliOverlay, "cli")
 	inheritReviewerModel(&settings)
 
-	if err := validateSettings(settings); err != nil {
+	if err := validateSettings(settings, sources); err != nil {
 		return App{}, err
 	}
 

@@ -40,6 +40,7 @@ const (
 
 type LoadOptions struct {
 	Model               string
+	ProviderOverride    string
 	ThinkingLevel       string
 	Theme               string
 	ModelTimeoutSeconds int
@@ -64,6 +65,7 @@ type Settings struct {
 	ToolPreambles                    bool
 	PriorityRequestMode              bool
 	WebSearch                        string
+	ProviderOverride                 string
 	OpenAIBaseURL                    string
 	ProviderCapabilities             ProviderCapabilitiesOverride
 	Store                            bool
@@ -130,6 +132,7 @@ type fileSettings struct {
 	ToolPreambles       *bool           `toml:"tool_preambles"`
 	PriorityRequestMode *bool           `toml:"priority_request_mode"`
 	WebSearch           string          `toml:"web_search"`
+	ProviderOverride    string          `toml:"provider_override"`
 	Tools               map[string]bool `toml:"tools"`
 	Timeouts            struct {
 		ModelRequestSeconds int `toml:"model_request_seconds"`

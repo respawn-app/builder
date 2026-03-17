@@ -91,6 +91,7 @@ func bootstrapApp(ctx context.Context, opts Options, interactor authInteractor) 
 func loadBootstrapConfig(opts Options, workspaceRoot, openAIBaseURL string, useOpenAIBaseURL bool) (config.App, error) {
 	loadOpts := config.LoadOptions{
 		Model:               opts.Model,
+		ProviderOverride:    opts.ProviderOverride,
 		ThinkingLevel:       opts.ThinkingLevel,
 		Theme:               opts.Theme,
 		ModelTimeoutSeconds: opts.ModelTimeoutSeconds,

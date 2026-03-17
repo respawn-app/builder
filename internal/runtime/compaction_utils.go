@@ -20,7 +20,7 @@ func (e *Engine) providerCapabilities(ctx context.Context) (llm.ProviderCapabili
 	}
 	provider, ok := e.llm.(llm.ProviderCapabilitiesClient)
 	if !ok {
-		return llm.InferProviderCapabilities("openai-compatible"), nil
+		return llm.ProviderCapabilities{}, fmt.Errorf("provider capabilities are unavailable for client %T", e.llm)
 	}
 	providerCaps, err := provider.ProviderCapabilities(ctx)
 	if err != nil {

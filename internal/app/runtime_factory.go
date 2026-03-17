@@ -145,6 +145,7 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 
 	modelHTTPClient := &http.Client{Timeout: time.Duration(active.Timeouts.ModelRequestSeconds) * time.Second}
 	client, err := llm.NewProviderClient(llm.ProviderClientOptions{
+		Provider:            llm.Provider(strings.TrimSpace(active.ProviderOverride)),
 		Model:               active.Model,
 		Auth:                mgr,
 		HTTPClient:          modelHTTPClient,
@@ -160,6 +161,7 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 	newReviewerClient := func() (llm.Client, error) {
 		reviewerHTTPClient := &http.Client{Timeout: time.Duration(active.Reviewer.TimeoutSeconds) * time.Second}
 		return llm.NewProviderClient(llm.ProviderClientOptions{
+			Provider:            llm.Provider(strings.TrimSpace(active.ProviderOverride)),
 			Model:               active.Reviewer.Model,
 			Auth:                mgr,
 			HTTPClient:          reviewerHTTPClient,

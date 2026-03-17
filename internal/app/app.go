@@ -17,6 +17,7 @@ type Options struct {
 	WorkspaceRootExplicit bool
 	SessionID             string
 	Model                 string
+	ProviderOverride      string
 	ThinkingLevel         string
 	Theme                 string
 	ModelTimeoutSeconds   int
