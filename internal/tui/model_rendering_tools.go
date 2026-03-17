@@ -2,8 +2,8 @@ package tui
 
 import (
 	"builder/internal/shared/textutil"
+	"builder/internal/tools"
 	"builder/internal/transcript"
-	"builder/internal/transcript/toolcodec"
 	"fmt"
 	"strings"
 
@@ -33,16 +33,7 @@ func skipInOngoing(role string) bool {
 }
 
 func compactToolCallText(meta *transcript.ToolCallMeta, text string) string {
-	if meta != nil && meta.HasCompactText() {
-		return strings.TrimSpace(meta.CompactText)
-	}
-	if meta != nil && meta.HasPatchSummary() {
-		return strings.TrimSpace(meta.PatchSummary)
-	}
-	if meta != nil && strings.TrimSpace(meta.Command) != "" {
-		return strings.TrimSpace(meta.Command)
-	}
-	return toolcodec.CompactCallText(text)
+	return tools.CompactToolCallText(meta, text)
 }
 
 func compactOngoingShellPreviewText(command string) string {
@@ -236,9 +227,9 @@ func toolCallDisplayText(meta *transcript.ToolCallMeta, text string) string {
 		command = strings.TrimSpace(meta.PatchDetail)
 	}
 	if command == "" {
-		command = "tool call"
+		command = tools.CompactToolCallText(meta, text)
 	}
-	if meta != nil && (meta.Presentation == transcript.ToolPresentationShell || meta.IsShell) && meta.UserInitiated {
+	if meta != nil && meta.Presentation == transcript.ToolPresentationShell && meta.UserInitiated {
 		command = "User ran: " + command
 	}
 	if meta != nil {
@@ -250,12 +241,12 @@ func toolCallDisplayText(meta *transcript.ToolCallMeta, text string) string {
 	if inlineMeta == "" {
 		return command
 	}
-	return command + toolcodec.InlineMetaSeparator + inlineMeta
+	return command + tools.InlineMetaSeparator + inlineMeta
 }
 
 func isShellToolCall(meta *transcript.ToolCallMeta, text string) bool {
 	if meta != nil {
-		return meta.Presentation == transcript.ToolPresentationShell || meta.IsShell
+		return meta.Presentation == transcript.ToolPresentationShell
 	}
 	_ = text
 	return false
@@ -265,7 +256,7 @@ func isAskQuestionToolCall(meta *transcript.ToolCallMeta) bool {
 	if meta == nil {
 		return false
 	}
-	return meta.Presentation == transcript.ToolPresentationAskQuestion || strings.TrimSpace(meta.ToolName) == "ask_question"
+	return meta.Presentation == transcript.ToolPresentationAskQuestion
 }
 
 func isToolHeadlineRole(role string) bool {
@@ -287,7 +278,7 @@ func isShellPreviewRole(role string) bool {
 }
 
 func splitToolInlineMeta(line string) (string, string) {
-	return toolcodec.SplitInlineMeta(line)
+	return tools.SplitInlineMeta(line)
 }
 
 func (m Model) renderToolHeadline(line string, width int) string {

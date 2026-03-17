@@ -16,6 +16,16 @@ type Tool struct {
 	getRegistry func() *tools.Registry
 }
 
+func init() {
+	tools.RegisterLocalRuntimeFactory(tools.ToolMultiToolUseParallel, func(ctx tools.LocalRuntimeContext) (tools.Handler, error) {
+		registryProvider, err := tools.ResolveLocalRuntimeDependency[func() *tools.Registry](ctx.RegistryProvider, "multi_tool_use_parallel registry provider")
+		if err != nil {
+			return nil, err
+		}
+		return New(registryProvider), nil
+	})
+}
+
 func New(getRegistry func() *tools.Registry) *Tool {
 	return &Tool{getRegistry: getRegistry}
 }

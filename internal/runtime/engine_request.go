@@ -50,14 +50,7 @@ func (e *Engine) buildRequest(ctx context.Context, _ string, allowTools bool) (l
 }
 
 func (e *Engine) enableNativeWebSearch(ctx context.Context) (bool, error) {
-	needsNativeWebSearch := false
-	for _, def := range tools.DefinitionsFor(e.cfg.EnabledTools) {
-		if def.EnablesNativeWebSearch(e.cfg.WebSearchMode) {
-			needsNativeWebSearch = true
-			break
-		}
-	}
-	if !needsNativeWebSearch {
+	if !tools.NeedsNativeWebSearch(e.cfg.EnabledTools, e.cfg.WebSearchMode) {
 		return false, nil
 	}
 	caps, err := e.providerCapabilities(ctx)
@@ -130,16 +123,15 @@ func hostedToolExecutionsFromOutputItems(items []llm.ResponseItem, defs []tools.
 }
 
 func (e *Engine) requestTools() []llm.Tool {
-	defs := e.registry.Definitions()
+	defs := tools.FilterRequestExposedDefinitions(
+		e.registry.Definitions(),
+		llm.LockedContractSupportsVisionInputs(e.store.Meta().Locked, e.cfg.Model),
+	)
 	if len(defs) == 0 {
 		return nil
 	}
 	out := make([]llm.Tool, 0, len(defs))
-	supportsVision := llm.LockedContractSupportsVisionInputs(e.store.Meta().Locked, e.cfg.Model)
 	for _, d := range defs {
-		if !d.ExposedToModelRequest(supportsVision) {
-			continue
-		}
 		out = append(out, llm.Tool{Name: string(d.ID), Description: d.Description, Schema: d.Schema})
 	}
 	return out

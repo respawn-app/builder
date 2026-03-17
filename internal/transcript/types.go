@@ -41,6 +41,43 @@ type ToolCallMeta struct {
 	OmitSuccessfulResult bool
 }
 
+func NormalizeToolCallMeta(in ToolCallMeta) ToolCallMeta {
+	out := in
+	if out.Presentation == "" {
+		switch {
+		case out.IsShell:
+			out.Presentation = ToolPresentationShell
+		case strings.TrimSpace(out.Question) != "" || len(out.Suggestions) > 0:
+			out.Presentation = ToolPresentationAskQuestion
+		default:
+			out.Presentation = ToolPresentationDefault
+		}
+	}
+	if out.Presentation == ToolPresentationShell {
+		out.IsShell = true
+	}
+	if strings.TrimSpace(out.InlineMeta) == "" {
+		out.InlineMeta = strings.TrimSpace(out.TimeoutLabel)
+	}
+	if strings.TrimSpace(out.TimeoutLabel) == "" {
+		out.TimeoutLabel = strings.TrimSpace(out.InlineMeta)
+	}
+	if strings.TrimSpace(out.Command) == "" {
+		out.Command = strings.TrimSpace(out.PatchDetail)
+	}
+	if strings.TrimSpace(out.CompactText) == "" {
+		if strings.TrimSpace(out.PatchSummary) != "" {
+			out.CompactText = strings.TrimSpace(out.PatchSummary)
+		} else {
+			out.CompactText = strings.TrimSpace(out.Command)
+		}
+	}
+	if out.HasPatchDetail() {
+		out.OmitSuccessfulResult = true
+	}
+	return out
+}
+
 func (m *ToolCallMeta) HasRenderHint() bool {
 	return m != nil && m.RenderHint != nil && m.RenderHint.Valid()
 }

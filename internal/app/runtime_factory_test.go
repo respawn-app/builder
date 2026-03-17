@@ -46,6 +46,13 @@ func TestBuildToolRegistry_AllowsHostedWebSearchWithoutLocalFactory(t *testing.T
 	}
 }
 
+func TestBuildToolRegistry_ValidatesAllLocalToolFactoriesAreRegistered(t *testing.T) {
+	if err := tools.ValidateLocalRuntimeFactoryCoverage(); err != nil {
+		f := err.Error()
+		t.Fatalf("expected all local tool definitions to register factories, got %q", f)
+	}
+}
+
 func TestBuildToolRegistry_IncludesParallelWrapperWhenEnabled(t *testing.T) {
 	workspace := t.TempDir()
 

@@ -315,16 +315,11 @@ func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
 }
 
 func (s *chatStore) formatToolCall(call llm.ToolCall) ChatEntry {
-	toolID := tools.ID(strings.TrimSpace(call.Name))
-	def, ok := tools.DefinitionFor(toolID)
-	meta := &transcript.ToolCallMeta{ToolName: strings.TrimSpace(call.Name)}
-	if ok {
-		built := def.BuildToolCallMeta(tools.ToolCallContext{
-			WorkingDir:                 s.cwd,
-			DefaultShellTimeoutSeconds: defaultShellTimeoutSecond,
-		}, call.Input)
-		meta = &built
-	}
+	built := tools.BuildCallTranscriptMeta(call.Name, tools.ToolCallContext{
+		WorkingDir:                 s.cwd,
+		DefaultShellTimeoutSeconds: defaultShellTimeoutSecond,
+	}, call.Input)
+	meta := &built
 	text := strings.TrimSpace(meta.Command)
 	if text == "" {
 		text = "tool call"
@@ -338,16 +333,5 @@ func (s *chatStore) formatToolCall(call llm.ToolCall) ChatEntry {
 }
 
 func formatToolResult(result tools.Result) string {
-	if def, ok := tools.DefinitionFor(result.Name); ok {
-		return def.FormatToolResult(result)
-	}
-	output := strings.TrimSpace(tools.FormatGenericOutput(result.Output))
-	if output == "" {
-		if result.IsError {
-			output = "tool failed"
-		} else {
-			output = "done"
-		}
-	}
-	return output
+	return tools.FormatToolResultForTranscript(result)
 }

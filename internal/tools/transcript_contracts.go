@@ -18,27 +18,32 @@ import (
 
 var sedPrintRangePattern = regexp.MustCompile(`^\d+(?:,\d+)?p$`)
 
-func localContract(request RequestExposure, buildCallMeta func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta, formatResult func(Result) string) Contract {
+func localContract(request RequestExposure, presentation transcript.ToolPresentationKind, omitSuccessfulResult bool, buildCallMeta func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta, formatResult func(Result) string) Contract {
 	return Contract{
 		Runtime: RuntimeContract{Availability: RuntimeAvailabilityLocal},
 		Request: request,
 		Transcript: TranscriptContract{
-			BuildCallMeta: buildCallMeta,
-			FormatResult:  formatResult,
+			Presentation:         presentation,
+			OmitSuccessfulResult: omitSuccessfulResult,
+			BuildCallMeta:        buildCallMeta,
+			FormatResult:         formatResult,
 		},
 	}
 }
 
-func hostedContract(request RequestExposure, buildCallMeta func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta, formatResult func(Result) string, decodeHostedOutput func(HostedToolOutput) (HostedExecution, bool)) Contract {
+func hostedContract(request RequestExposure, presentation transcript.ToolPresentationKind, omitSuccessfulResult bool, nativeWebSearch bool, buildCallMeta func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta, formatResult func(Result) string, decodeHostedOutput func(HostedToolOutput) (HostedExecution, bool)) Contract {
 	return Contract{
 		Runtime: RuntimeContract{
 			Availability:       RuntimeAvailabilityHosted,
+			NativeWebSearch:    nativeWebSearch,
 			DecodeHostedOutput: decodeHostedOutput,
 		},
 		Request: request,
 		Transcript: TranscriptContract{
-			BuildCallMeta: buildCallMeta,
-			FormatResult:  formatResult,
+			Presentation:         presentation,
+			OmitSuccessfulResult: omitSuccessfulResult,
+			BuildCallMeta:        buildCallMeta,
+			FormatResult:         formatResult,
 		},
 	}
 }
@@ -48,14 +53,13 @@ func defaultToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) trans
 		command, inlineMeta := formatToolInput(toolID, raw, ctx.DefaultShellTimeoutSeconds)
 		command = strings.TrimSpace(command)
 		if command == "" {
-			command = "tool call"
+			command = defaultToolCallFallback
 		}
 		return transcript.ToolCallMeta{
-			ToolName:     string(toolID),
-			Presentation: transcript.ToolPresentationDefault,
-			Command:      command,
-			CompactText:  command,
-			InlineMeta:   inlineMeta,
+			ToolName:    string(toolID),
+			Command:     command,
+			CompactText: command,
+			InlineMeta:  inlineMeta,
 		}
 	}
 }
@@ -65,11 +69,10 @@ func shellToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) transcr
 		command, inlineMeta := formatToolInput(toolID, raw, ctx.DefaultShellTimeoutSeconds)
 		command = strings.TrimSpace(command)
 		if command == "" {
-			command = "tool call"
+			command = defaultToolCallFallback
 		}
 		return transcript.ToolCallMeta{
 			ToolName:      string(toolID),
-			Presentation:  transcript.ToolPresentationShell,
 			IsShell:       true,
 			UserInitiated: parseShellToolCallUserInitiated(raw),
 			Command:       command,
@@ -88,12 +91,11 @@ func askQuestionToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) t
 			return defaultToolCallMeta(toolID)(ctx, raw)
 		}
 		return transcript.ToolCallMeta{
-			ToolName:     string(toolID),
-			Presentation: transcript.ToolPresentationAskQuestion,
-			Command:      question,
-			CompactText:  question,
-			Question:     question,
-			Suggestions:  suggestions,
+			ToolName:    string(toolID),
+			Command:     question,
+			CompactText: question,
+			Question:    question,
+			Suggestions: suggestions,
 		}
 	}
 }
@@ -106,18 +108,15 @@ func patchToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) transcr
 			meta.PatchSummary = meta.CompactText
 			meta.PatchDetail = meta.Command
 			meta.RenderHint = &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff}
-			meta.OmitSuccessfulResult = true
 			return meta
 		}
 		return transcript.ToolCallMeta{
-			ToolName:             string(toolID),
-			Presentation:         transcript.ToolPresentationDefault,
-			Command:              detail,
-			CompactText:          compact,
-			PatchSummary:         compact,
-			PatchDetail:          detail,
-			RenderHint:           &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
-			OmitSuccessfulResult: true,
+			ToolName:     string(toolID),
+			Command:      detail,
+			CompactText:  compact,
+			PatchSummary: compact,
+			PatchDetail:  detail,
+			RenderHint:   &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
 		}
 	}
 }
