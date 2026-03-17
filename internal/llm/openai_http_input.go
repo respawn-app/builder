@@ -29,7 +29,7 @@ func buildResponsesInputFromMessages(messages []Message) []responses.ResponseInp
 			items = append(items, functionCallOutputInputItems(msg.ToolCallID, msg.Name, normalizeToolInput(msg.Content))...)
 		case RoleAssistant:
 			if strings.TrimSpace(msg.Content) != "" {
-				items = append(items, messageInput(string(msg.Role), msg.Content))
+				items = append(items, messageInput(string(msg.Role), msg.Content, msg.Phase))
 			}
 			for _, tc := range msg.ToolCalls {
 				callID := strings.TrimSpace(tc.ID)
@@ -56,7 +56,7 @@ func buildResponsesInputFromMessages(messages []Message) []responses.ResponseInp
 			if strings.TrimSpace(msg.Content) == "" {
 				continue
 			}
-			items = append(items, messageInput(string(msg.Role), msg.Content))
+			items = append(items, messageInput(string(msg.Role), msg.Content, ""))
 		}
 	}
 	return items
@@ -70,7 +70,7 @@ func buildResponsesInputFromItems(canonical []ResponseItem) []responses.Response
 			if strings.TrimSpace(item.Content) == "" {
 				continue
 			}
-			items = append(items, messageInput(string(item.Role), item.Content))
+			items = append(items, messageInput(string(item.Role), item.Content, item.Phase))
 		case ResponseItemTypeFunctionCall:
 			callID := textutil.FirstNonEmpty(strings.TrimSpace(item.CallID), strings.TrimSpace(item.ID))
 			if callID == "" {
@@ -126,7 +126,7 @@ func buildResponsesInputFromItems(canonical []ResponseItem) []responses.Response
 	return items
 }
 
-func messageInput(role, text string) responses.ResponseInputItemUnionParam {
+func messageInput(role, text string, phase MessagePhase) responses.ResponseInputItemUnionParam {
 	role = strings.TrimSpace(role)
 	if role == string(RoleAssistant) {
 		content := []responses.ResponseOutputMessageContentUnionParam{{
@@ -135,7 +135,11 @@ func messageInput(role, text string) responses.ResponseInputItemUnionParam {
 				Text:        text,
 			},
 		}}
-		return responses.ResponseInputItemParamOfOutputMessage(content, "", responses.ResponseOutputMessageStatusCompleted)
+		item := responses.ResponseInputItemParamOfOutputMessage(content, "", responses.ResponseOutputMessageStatusCompleted)
+		if item.OfOutputMessage != nil && phase != "" {
+			item.OfOutputMessage.Phase = responses.ResponseOutputMessagePhase(phase)
+		}
+		return item
 	}
 
 	inputRole := string(RoleUser)

@@ -111,10 +111,10 @@ func TestBuildResponsesInput_AssistantUsesTypedMessageInput(t *testing.T) {
 	if got := jsonItems[1]["role"]; got != string(RoleAssistant) {
 		t.Fatalf("assistant role=%#v", got)
 	}
-	if _, exists := jsonItems[1]["status"]; exists {
-		t.Fatalf("assistant message should not include status, got %#v", jsonItems[1]["status"])
+	if got := jsonItems[1]["status"]; got != "completed" {
+		t.Fatalf("assistant status=%#v", got)
 	}
-	if got := contentTypeAt(t, jsonItems[1]); got != "input_text" {
+	if got := contentTypeAt(t, jsonItems[1]); got != "output_text" {
 		t.Fatalf("assistant content type=%q", got)
 	}
 }
@@ -132,8 +132,11 @@ func TestBuildResponsesInput_AssistantPreservesPhase(t *testing.T) {
 	if got := jsonItems[0]["phase"]; got != string(MessagePhaseCommentary) {
 		t.Fatalf("assistant phase=%#v", got)
 	}
-	if _, exists := jsonItems[0]["status"]; exists {
-		t.Fatalf("assistant message should not include status, got %#v", jsonItems[0]["status"])
+	if got := jsonItems[0]["status"]; got != "completed" {
+		t.Fatalf("assistant status=%#v", got)
+	}
+	if got := contentTypeAt(t, jsonItems[0]); got != "output_text" {
+		t.Fatalf("assistant content type=%q", got)
 	}
 }
 
@@ -155,8 +158,11 @@ func TestBuildResponsesInput_CanonicalAssistantPreservesPhase(t *testing.T) {
 	if got := jsonItems[0]["phase"]; got != string(MessagePhaseFinal) {
 		t.Fatalf("assistant phase=%#v", got)
 	}
-	if _, exists := jsonItems[0]["status"]; exists {
-		t.Fatalf("assistant message should not include status, got %#v", jsonItems[0]["status"])
+	if got := jsonItems[0]["status"]; got != "completed" {
+		t.Fatalf("assistant status=%#v", got)
+	}
+	if got := contentTypeAt(t, jsonItems[0]); got != "output_text" {
+		t.Fatalf("assistant content type=%q", got)
 	}
 }
 
