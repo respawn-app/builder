@@ -46,6 +46,7 @@ func defaultSettings() Settings {
 		ToolPreambles:                    true,
 		PriorityRequestMode:              false,
 		WebSearch:                        "off",
+		ProviderOverride:                 "",
 		ProviderCapabilities:             ProviderCapabilitiesOverride{},
 		Store:                            false,
 		AllowNonCwdEdits:                 false,
@@ -90,6 +91,7 @@ func defaultSettingsTOML() string {
 		"tool_preambles":        defaults.ToolPreambles,
 		"priority_request_mode": defaults.PriorityRequestMode,
 		"web_search":            defaults.WebSearch,
+		"provider_override":     defaults.ProviderOverride,
 		"openai_base_url":       defaults.OpenAIBaseURL,
 		"provider_capabilities": map[string]any{
 			"provider_id":                       defaults.ProviderCapabilities.ProviderID,
@@ -150,6 +152,7 @@ func defaultSettingsTOML() string {
 		"tool_preambles = " + strconv.FormatBool(defaults.ToolPreambles) + "\n" +
 		"priority_request_mode = " + strconv.FormatBool(defaults.PriorityRequestMode) + "\n" +
 		"web_search = \"" + defaults.WebSearch + "\"\n" +
+		"provider_override = \"" + defaults.ProviderOverride + "\"\n" +
 		"openai_base_url = \"" + defaults.OpenAIBaseURL + "\"\n" +
 		"store = " + strconv.FormatBool(defaults.Store) + "\n" +
 		"allow_non_cwd_edits = " + strconv.FormatBool(defaults.AllowNonCwdEdits) + "\n" +
@@ -165,6 +168,9 @@ func defaultSettingsTOML() string {
 		"# [model_capabilities]\n" +
 		"# supports_reasoning_effort = true\n" +
 		"# supports_vision_inputs = true\n\n" +
+		"# Optional explicit provider selection for custom/alias model names when\n" +
+		"# provider inference from model family is insufficient. Set together with\n" +
+		"# an explicit `model` override. Example: provider_override = \"openai\"\n" +
 		"# Optional explicit provider capability overrides. These are only needed for\n" +
 		"# custom providers or stale built-in contracts. Keep them conservative to\n" +
 		"# avoid unsupported provider-native features.\n" +

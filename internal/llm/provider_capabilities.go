@@ -1,17 +1,17 @@
 package llm
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
-func InferProviderCapabilities(providerID string) ProviderCapabilities {
-	contract, ok := LookupProviderCapabilityContract(providerID)
+func InferProviderCapabilities(providerID string) (ProviderCapabilities, error) {
+	normalizedID := strings.TrimSpace(providerID)
+	contract, ok := LookupProviderCapabilityContract(normalizedID)
 	if !ok {
-		fallback, fallbackOK := LookupProviderCapabilityContract("openai-compatible")
-		if fallbackOK {
-			return fallback
-		}
-		return ProviderCapabilities{ProviderID: strings.TrimSpace(providerID)}
+		return ProviderCapabilities{}, fmt.Errorf("%w: unknown provider_id %q", ErrUnsupportedProvider, normalizedID)
 	}
-	return contract
+	return contract, nil
 }
 
 func SupportsFastModeProvider(caps ProviderCapabilities) bool {

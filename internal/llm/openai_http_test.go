@@ -24,6 +24,15 @@ func (staticAuth) AuthorizationHeader(context.Context) (string, error) {
 	return "Bearer token", nil
 }
 
+func requireProviderCapabilities(t *testing.T, transport *HTTPTransport, mode openAIAuthMode) ProviderCapabilities {
+	t.Helper()
+	caps, err := transport.providerCapabilitiesForMode(mode)
+	if err != nil {
+		t.Fatalf("resolve provider capabilities: %v", err)
+	}
+	return caps
+}
+
 func TestBuildPayload_SerializesAssistantToolCalls(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	payload, err := transport.buildPayload(OpenAIRequest{
@@ -39,7 +48,7 @@ func TestBuildPayload_SerializesAssistantToolCalls(t *testing.T) {
 			},
 			{Role: RoleTool, ToolCallID: "call-1", Name: "shell", Content: "{}"},
 		},
-	}, openAIAuthMode{})
+	}, openAIAuthMode{}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
 	if err != nil {
 		t.Fatalf("build payload: %v", err)
 	}
@@ -83,7 +92,7 @@ func TestBuildPayload_SerializesAssistantToolCalls(t *testing.T) {
 	}
 }
 
-func TestBuildResponsesInput_AssistantUsesOutputTextContent(t *testing.T) {
+func TestBuildResponsesInput_AssistantUsesTypedMessageInput(t *testing.T) {
 	items := buildResponsesInput([]Message{
 		{Role: RoleUser, Content: "u1"},
 		{Role: RoleAssistant, Content: "a1"},
@@ -96,8 +105,58 @@ func TestBuildResponsesInput_AssistantUsesOutputTextContent(t *testing.T) {
 	if got := contentTypeAt(t, jsonItems[0]); got != "input_text" {
 		t.Fatalf("user content type=%q", got)
 	}
-	if got := contentTypeAt(t, jsonItems[1]); got != "output_text" {
+	if got := jsonItems[1]["type"]; got != "message" {
+		t.Fatalf("assistant item type=%#v", got)
+	}
+	if got := jsonItems[1]["role"]; got != string(RoleAssistant) {
+		t.Fatalf("assistant role=%#v", got)
+	}
+	if _, exists := jsonItems[1]["status"]; exists {
+		t.Fatalf("assistant message should not include status, got %#v", jsonItems[1]["status"])
+	}
+	if got := contentTypeAt(t, jsonItems[1]); got != "input_text" {
 		t.Fatalf("assistant content type=%q", got)
+	}
+}
+
+func TestBuildResponsesInput_AssistantPreservesPhase(t *testing.T) {
+	items := buildResponsesInput([]Message{{Role: RoleAssistant, Content: "a1", Phase: MessagePhaseCommentary}}, nil)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+
+	jsonItems := mustMarshalItems(t, items)
+	if got := jsonItems[0]["type"]; got != "message" {
+		t.Fatalf("assistant item type=%#v", got)
+	}
+	if got := jsonItems[0]["phase"]; got != string(MessagePhaseCommentary) {
+		t.Fatalf("assistant phase=%#v", got)
+	}
+	if _, exists := jsonItems[0]["status"]; exists {
+		t.Fatalf("assistant message should not include status, got %#v", jsonItems[0]["status"])
+	}
+}
+
+func TestBuildResponsesInput_CanonicalAssistantPreservesPhase(t *testing.T) {
+	items := buildResponsesInput(nil, []ResponseItem{{
+		Type:    ResponseItemTypeMessage,
+		Role:    RoleAssistant,
+		Content: "done",
+		Phase:   MessagePhaseFinal,
+	}})
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+
+	jsonItems := mustMarshalItems(t, items)
+	if got := jsonItems[0]["type"]; got != "message" {
+		t.Fatalf("assistant item type=%#v", got)
+	}
+	if got := jsonItems[0]["phase"]; got != string(MessagePhaseFinal) {
+		t.Fatalf("assistant phase=%#v", got)
+	}
+	if _, exists := jsonItems[0]["status"]; exists {
+		t.Fatalf("assistant message should not include status, got %#v", jsonItems[0]["status"])
 	}
 }
 
@@ -276,7 +335,6 @@ func TestCompactErrorPath_ReturnsProviderAPIErrorWithDetectedProviderID(t *testi
 
 	transport := NewHTTPTransport(staticAuth{})
 	transport.BaseURL = server.URL + "/v1"
-	transport.ProviderMetadata = ResolveOpenAIProviderMetadata(transport.BaseURL)
 
 	_, err := transport.Compact(context.Background(), OpenAICompactionRequest{
 		Model:      "gpt-5",
@@ -290,11 +348,11 @@ func TestCompactErrorPath_ReturnsProviderAPIErrorWithDetectedProviderID(t *testi
 	if !errors.As(err, &providerErr) {
 		t.Fatalf("expected ProviderAPIError from transport path, got %T err=%v", err, err)
 	}
-	if providerErr.ProviderID != "openai-compatible" || providerErr.Code != UnifiedErrorCodeProviderContract {
-		t.Fatalf("expected provider contract error for openai-compatible, got %+v", providerErr)
+	if providerErr.ProviderID != "openai" || providerErr.Code != UnifiedErrorCodeContextLengthOverflow {
+		t.Fatalf("expected openai overflow classification on loopback transport, got %+v", providerErr)
 	}
 	if !IsNonRetriableModelError(err) {
-		t.Fatalf("expected non-retriable provider contract error, got %v", err)
+		t.Fatalf("expected 400 overflow response to remain non-retriable, got %v", err)
 	}
 }
 
@@ -428,7 +486,6 @@ func TestBuildResponsesInput_CanonicalNonViewImageToolOutputKeepsStructuredInput
 func TestServiceBaseURL_UsesCodexEndpointBaseForOAuth(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	transport.BaseURL = "https://api.openai.com/v1"
-	transport.ProviderMetadata = ResolveOpenAIProviderMetadata(transport.BaseURL)
 
 	got := transport.serviceBaseURL(openAIAuthMode{IsOAuth: true})
 	if got != strings.TrimSuffix(codexResponsesEndpoint, "/responses") {
@@ -461,7 +518,7 @@ func TestBuildRequestOptions_OAuthAddsCodexHeaders(t *testing.T) {
 func TestBuildPayload_UsesTransportStoreSetting(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	transport.Store = true
-	payload, err := transport.buildPayload(OpenAIRequest{Model: "gpt-5"}, openAIAuthMode{})
+	payload, err := transport.buildPayload(OpenAIRequest{Model: "gpt-5"}, openAIAuthMode{}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
 	if err != nil {
 		t.Fatalf("build payload: %v", err)
 	}
@@ -476,7 +533,7 @@ func TestBuildPayload_AddsNativeWebSearchToolWhenEnabled(t *testing.T) {
 	payload, err := transport.buildPayload(OpenAIRequest{
 		Model:                 "gpt-5",
 		EnableNativeWebSearch: true,
-	}, openAIAuthMode{})
+	}, openAIAuthMode{}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
 	if err != nil {
 		t.Fatalf("build payload: %v", err)
 	}
@@ -500,7 +557,7 @@ func TestBuildPayload_DoesNotAddNativeWebSearchToolWhenDisabled(t *testing.T) {
 	payload, err := transport.buildPayload(OpenAIRequest{
 		Model:                 "gpt-5",
 		EnableNativeWebSearch: false,
-	}, openAIAuthMode{})
+	}, openAIAuthMode{}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
 	if err != nil {
 		t.Fatalf("build payload: %v", err)
 	}
@@ -520,7 +577,7 @@ func TestBuildPayload_AppliesStructuredOutputJSONSchema(t *testing.T) {
 			Schema: json.RawMessage(`{"type":"object","properties":{"suggestions":{"type":"array","items":{"type":"string"}}},"required":["suggestions"],"additionalProperties":false}`),
 			Strict: true,
 		},
-	}, openAIAuthMode{})
+	}, openAIAuthMode{}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
 	if err != nil {
 		t.Fatalf("build payload: %v", err)
 	}
@@ -548,7 +605,7 @@ func TestBuildPayload_AppliesStructuredOutputJSONSchema(t *testing.T) {
 func TestBuildPayload_AppliesConfiguredModelVerbosityForSupportedModels(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	transport.ModelVerbosity = "high"
-	payload, err := transport.buildPayload(OpenAIRequest{Model: "gpt-5"}, openAIAuthMode{})
+	payload, err := transport.buildPayload(OpenAIRequest{Model: "gpt-5"}, openAIAuthMode{}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
 	if err != nil {
 		t.Fatalf("build payload: %v", err)
 	}
@@ -566,7 +623,7 @@ func TestBuildPayload_AppliesConfiguredModelVerbosityForSupportedModels(t *testi
 func TestBuildPayload_IgnoresConfiguredModelVerbosityForUnsupportedModels(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	transport.ModelVerbosity = "high"
-	payload, err := transport.buildPayload(OpenAIRequest{Model: "gpt-4o"}, openAIAuthMode{})
+	payload, err := transport.buildPayload(OpenAIRequest{Model: "gpt-4o"}, openAIAuthMode{}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
 	if err != nil {
 		t.Fatalf("build payload: %v", err)
 	}
@@ -587,7 +644,7 @@ func TestBuildPayload_MergesConfiguredModelVerbosityWithStructuredOutput(t *test
 			Schema: json.RawMessage(`{"type":"object","properties":{"suggestions":{"type":"array","items":{"type":"string"}}},"required":["suggestions"],"additionalProperties":false}`),
 			Strict: true,
 		},
-	}, openAIAuthMode{})
+	}, openAIAuthMode{}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
 	if err != nil {
 		t.Fatalf("build payload: %v", err)
 	}
@@ -610,7 +667,7 @@ func TestBuildPayload_AppliesReasoningEffortForOpenAIModels(t *testing.T) {
 	payload, err := transport.buildPayload(OpenAIRequest{
 		Model:           "gpt-5",
 		ReasoningEffort: "xhigh",
-	}, openAIAuthMode{})
+	}, openAIAuthMode{}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
 	if err != nil {
 		t.Fatalf("build payload: %v", err)
 	}
@@ -630,7 +687,7 @@ func TestBuildPayload_AppliesFastModeForCodexProvider(t *testing.T) {
 	payload, err := transport.buildPayload(OpenAIRequest{
 		Model:    "gpt-5.3-codex",
 		FastMode: true,
-	}, openAIAuthMode{IsOAuth: true})
+	}, openAIAuthMode{IsOAuth: true}, requireProviderCapabilities(t, transport, openAIAuthMode{IsOAuth: true}))
 	if err != nil {
 		t.Fatalf("build payload: %v", err)
 	}
@@ -649,7 +706,7 @@ func TestBuildPayload_AppliesFastModeForOpenAIProvider(t *testing.T) {
 	payload, err := transport.buildPayload(OpenAIRequest{
 		Model:    "gpt-5.3-codex",
 		FastMode: true,
-	}, openAIAuthMode{})
+	}, openAIAuthMode{}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
 	if err != nil {
 		t.Fatalf("build payload: %v", err)
 	}
@@ -663,24 +720,31 @@ func TestBuildPayload_AppliesFastModeForOpenAIProvider(t *testing.T) {
 	}
 }
 
-func TestBuildPayload_SkipsFastModeForNonFirstPartyResponsesProvider(t *testing.T) {
+func TestBuildPayload_SkipsFastModeForRemoteOpenAICompatibleProvider(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	transport.BaseURL = "https://example.openai.azure.com/openai/v1"
-	transport.ProviderMetadata = ResolveOpenAIProviderMetadata(transport.BaseURL)
 	payload, err := transport.buildPayload(OpenAIRequest{
 		Model:    "gpt-5.3-codex",
 		FastMode: true,
-	}, openAIAuthMode{})
+	}, openAIAuthMode{}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
 	if err != nil {
 		t.Fatalf("build payload: %v", err)
 	}
 	if payload.ServiceTier != "" {
-		t.Fatalf("expected no service tier for non-first-party provider, got %q", payload.ServiceTier)
+		t.Fatalf("expected no service tier for remote openai-compatible provider, got %q", payload.ServiceTier)
 	}
 
 	jsonPayload := mustMarshalObject(t, payload)
 	if _, ok := jsonPayload["service_tier"]; ok {
 		t.Fatalf("expected service_tier omitted, got %+v", jsonPayload["service_tier"])
+	}
+
+	providerCaps, err := transport.providerCapabilitiesForMode(openAIAuthMode{})
+	if err != nil {
+		t.Fatalf("resolve provider capabilities: %v", err)
+	}
+	if providerCaps.ProviderID != "openai-compatible" || providerCaps.IsOpenAIFirstParty || providerCaps.SupportsResponsesCompact || providerCaps.SupportsNativeWebSearch {
+		t.Fatalf("expected conservative remote openai-compatible capabilities, got %+v", providerCaps)
 	}
 }
 
@@ -689,7 +753,7 @@ func TestBuildPayload_DefaultsReasoningEffortForUnknownModelFamily(t *testing.T)
 	payload, err := transport.buildPayload(OpenAIRequest{
 		Model:           "custom-model",
 		ReasoningEffort: "high",
-	}, openAIAuthMode{})
+	}, openAIAuthMode{}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
 	if err != nil {
 		t.Fatalf("build payload: %v", err)
 	}
@@ -746,7 +810,7 @@ func TestBuildPayload_AddsAdditionalPropertiesFalseToToolSchemas(t *testing.T) {
 				Schema: json.RawMessage(`{"type":"object","required":["question"],"properties":{"question":{"type":"string"},"meta":{"type":"object","properties":{"foo":{"type":"string"}}}}}`),
 			},
 		},
-	}, openAIAuthMode{})
+	}, openAIAuthMode{}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
 	if err != nil {
 		t.Fatalf("build payload: %v", err)
 	}
@@ -934,7 +998,6 @@ func TestCompactRequestTargetsResponsesCompactPath(t *testing.T) {
 
 	transport := NewHTTPTransport(staticAuth{})
 	transport.BaseURL = server.URL + "/v1"
-	transport.ProviderMetadata = ResolveOpenAIProviderMetadata(transport.BaseURL)
 	transport.Client = server.Client()
 
 	resp, err := transport.Compact(context.Background(), OpenAICompactionRequest{
@@ -980,7 +1043,6 @@ func TestCompactRequestAcceptsJSONBodyWithNonJSONContentType(t *testing.T) {
 
 	transport := NewHTTPTransport(staticAuth{})
 	transport.BaseURL = server.URL + "/v1"
-	transport.ProviderMetadata = ResolveOpenAIProviderMetadata(transport.BaseURL)
 	transport.Client = server.Client()
 
 	resp, err := transport.Compact(context.Background(), OpenAICompactionRequest{
@@ -1027,7 +1089,7 @@ func TestInputTokenCountPayloadMatchesCompactPayloadInputShape(t *testing.T) {
 		Model:        "gpt-5",
 		SystemPrompt: "compaction instructions",
 		Items:        canonicalItems,
-	})
+	}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
 	if err != nil {
 		t.Fatalf("build input-token-count payload: %v", err)
 	}
@@ -1045,7 +1107,7 @@ func TestInputTokenCountPayloadMatchesCompactPayloadInputShape(t *testing.T) {
 func TestBuildInputTokenCountParams_AppliesConfiguredModelVerbosity(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	transport.ModelVerbosity = "medium"
-	payload, err := transport.buildInputTokenCountParams(OpenAIRequest{Model: "gpt-5"})
+	payload, err := transport.buildInputTokenCountParams(OpenAIRequest{Model: "gpt-5"}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
 	if err != nil {
 		t.Fatalf("build input-token-count payload: %v", err)
 	}
@@ -1077,7 +1139,6 @@ func TestCountRequestInputTokensTargetsResponsesInputTokensPath(t *testing.T) {
 
 	transport := NewHTTPTransport(staticAuth{})
 	transport.BaseURL = server.URL + "/v1"
-	transport.ProviderMetadata = ResolveOpenAIProviderMetadata(transport.BaseURL)
 	transport.Client = server.Client()
 
 	count, err := transport.CountRequestInputTokens(context.Background(), OpenAIRequest{
@@ -1118,7 +1179,6 @@ func TestResolveModelContextWindowUsesModelMetadataFromAPI(t *testing.T) {
 
 	transport := NewHTTPTransport(staticAuth{})
 	transport.BaseURL = server.URL + "/v1"
-	transport.ProviderMetadata = ResolveOpenAIProviderMetadata(transport.BaseURL)
 	transport.Client = server.Client()
 	transport.ContextWindowTokens = 0
 
@@ -1150,7 +1210,6 @@ func TestResolveModelContextWindowFallsBackToInputTokenLimitField(t *testing.T) 
 
 	transport := NewHTTPTransport(staticAuth{})
 	transport.BaseURL = server.URL + "/v1"
-	transport.ProviderMetadata = ResolveOpenAIProviderMetadata(transport.BaseURL)
 	transport.Client = server.Client()
 	transport.ContextWindowTokens = 0
 

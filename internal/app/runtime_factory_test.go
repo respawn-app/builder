@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"builder/internal/auth"
+	"builder/internal/config"
 	"builder/internal/llm"
 	"builder/internal/runtime"
 	"builder/internal/session"
@@ -268,6 +270,50 @@ func TestBuildToolRegistry_ViewImageConfiguredAllowBypassesApprovalForOutsidePat
 	}
 	if askCalls != 0 {
 		t.Fatalf("expected configured allow to bypass approval, got %d asks", askCalls)
+	}
+}
+
+func TestNewRuntimeWiring_ProviderOverrideSupportsAliasModelsForMainAndReviewer(t *testing.T) {
+	workspace := t.TempDir()
+	store, err := session.Create(t.TempDir(), "ws", workspace)
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	activeCfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	active := activeCfg.Settings
+	active.Model = "main-alias"
+	active.ProviderOverride = "openai"
+	active.Reviewer.Frequency = "all"
+	active.Reviewer.Model = "reviewer-alias"
+
+	authMgr := auth.NewManager(auth.NewMemoryStore(auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type: auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{
+				Key: "test-key",
+			},
+		},
+	}), nil, time.Now)
+
+	logger, err := newRunLogger(t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("new run logger: %v", err)
+	}
+	defer logger.Close()
+
+	wiring, err := newRuntimeWiring(store, active, config.EnabledToolIDs(active), workspace, authMgr, logger, runtimeWiringOptions{})
+	if err != nil {
+		t.Fatalf("new runtime wiring: %v", err)
+	}
+	if wiring == nil || wiring.engine == nil {
+		t.Fatal("expected runtime wiring with engine")
 	}
 }
 

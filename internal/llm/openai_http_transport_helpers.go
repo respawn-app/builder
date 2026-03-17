@@ -45,8 +45,12 @@ func (t *HTTPTransport) buildRequestOptions(authHeader string, mode openAIAuthMo
 	return opts
 }
 
-func (t *HTTPTransport) errorProviderID(mode openAIAuthMode) string {
-	return t.providerCapabilitiesForMode(mode).ProviderID
+func (t *HTTPTransport) errorProviderID(mode openAIAuthMode) (string, error) {
+	variant, err := t.providerVariantForMode(mode)
+	if err != nil {
+		return "", err
+	}
+	return variant.ProviderID, nil
 }
 
 func (t *HTTPTransport) resolveContextWindowFallback(ctx context.Context, model string) int {
@@ -63,15 +67,28 @@ func (t *HTTPTransport) resolveContextWindowFallback(ctx context.Context, model 
 	return 0
 }
 
-func (t *HTTPTransport) providerCapabilitiesForMode(mode openAIAuthMode) ProviderCapabilities {
-	providerID := strings.TrimSpace(t.ProviderMetadata.CapabilityProviderID)
-	if mode.IsOAuth {
-		providerID = "chatgpt-codex"
+func (t *HTTPTransport) providerVariantForMode(mode openAIAuthMode) (ProviderVariantContract, error) {
+	provider := t.Provider
+	if provider == "" {
+		provider = ProviderOpenAI
 	}
-	if providerID == "" {
-		providerID = "openai-compatible"
+	variant, err := resolveProviderTransportVariant(provider, t.BaseURL, mode)
+	if err != nil {
+		providerID := strings.TrimSpace(string(provider))
+		if providerID == "" {
+			providerID = "unknown-provider"
+		}
+		return ProviderVariantContract{}, NewProviderContractError(providerID, 0, err)
 	}
-	return InferProviderCapabilities(providerID)
+	return variant, nil
+}
+
+func (t *HTTPTransport) providerCapabilitiesForMode(mode openAIAuthMode) (ProviderCapabilities, error) {
+	variant, err := t.providerVariantForMode(mode)
+	if err != nil {
+		return ProviderCapabilities{}, err
+	}
+	return variant.Capabilities, nil
 }
 
 func (t *HTTPTransport) cacheModelContextWindow(model string, tokens int) {

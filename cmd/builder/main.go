@@ -23,6 +23,7 @@ type commonFlags struct {
 	SessionID             string
 	ContinueID            string
 	Model                 string
+	ProviderOverride      string
 	ThinkingLevel         string
 	Theme                 string
 	ModelTimeoutSeconds   int
@@ -91,6 +92,7 @@ func main() {
 		WorkspaceRootExplicit: flags.WorkspaceExplicit,
 		SessionID:             sessionID,
 		Model:                 flags.Model,
+		ProviderOverride:      flags.ProviderOverride,
 		ThinkingLevel:         flags.ThinkingLevel,
 		Theme:                 flags.Theme,
 		ModelTimeoutSeconds:   flags.ModelTimeoutSeconds,
@@ -163,6 +165,7 @@ func runSubcommand(args []string) int {
 		WorkspaceRootExplicit: flags.WorkspaceExplicit,
 		SessionID:             sessionID,
 		Model:                 flags.Model,
+		ProviderOverride:      flags.ProviderOverride,
 		ThinkingLevel:         flags.ThinkingLevel,
 		Theme:                 flags.Theme,
 		ModelTimeoutSeconds:   flags.ModelTimeoutSeconds,
@@ -229,6 +232,7 @@ func registerCommonFlags(fs *flag.FlagSet) commonFlags {
 	fs.StringVar(&flags.SessionID, "session", "", "session id to resume")
 	fs.StringVar(&flags.ContinueID, "continue", "", "session id to continue")
 	fs.StringVar(&flags.Model, "model", "", "model name override")
+	fs.StringVar(&flags.ProviderOverride, "provider-override", "", "provider override for custom/alias model names")
 	fs.StringVar(&flags.ThinkingLevel, "thinking-level", "", "thinking level override (low|medium|high|xhigh)")
 	fs.StringVar(&flags.Theme, "theme", "", "theme override (light|dark)")
 	fs.IntVar(&flags.ModelTimeoutSeconds, "model-timeout-seconds", 0, "model request timeout override in seconds")

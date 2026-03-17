@@ -12,12 +12,13 @@ type ProviderErrorReducer interface {
 
 func providerErrorReducerForID(providerID string) (ProviderErrorReducer, error) {
 	normalizedID := strings.TrimSpace(providerID)
-	if factory, ok := globalProviderRegistry.reducerFactories[normalizedID]; ok {
-		reducer := factory(normalizedID)
-		if reducer == nil {
-			return nil, fmt.Errorf("error reducer factory returned nil for provider_id %q", normalizedID)
-		}
-		return reducer, nil
+	registration, ok := lookupProviderVariantContract(normalizedID)
+	if !ok {
+		return nil, fmt.Errorf("no error reducer registered for provider_id %q; register a provider contract variant for this provider_id", normalizedID)
 	}
-	return nil, fmt.Errorf("no error reducer registered for provider_id %q; register a reducer for this provider_id or use a base URL/provider that is registered", normalizedID)
+	reducer := registration.Variant.NewErrorReducer(normalizedID)
+	if reducer == nil {
+		return nil, fmt.Errorf("error reducer factory returned nil for provider_id %q", normalizedID)
+	}
+	return reducer, nil
 }

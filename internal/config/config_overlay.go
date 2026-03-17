@@ -19,6 +19,7 @@ type settingsOverlay struct {
 	ToolPreambles                    *bool
 	PriorityRequestMode              *bool
 	WebSearch                        *string
+	ProviderOverride                 *string
 	OpenAIBaseURL                    *string
 	ProviderCapabilities             *ProviderCapabilitiesOverride
 	Store                            *bool
@@ -60,6 +61,7 @@ func defaultSourceMap() map[string]string {
 		"tool_preambles":                      "default",
 		"priority_request_mode":               "default",
 		"web_search":                          "default",
+		"provider_override":                   "default",
 		"openai_base_url":                     "default",
 		"provider_capabilities":               "default",
 		"store":                               "default",
@@ -120,6 +122,10 @@ func settingsOverlayFromFile(cfg fileSettings, settingsPath string) (settingsOve
 	}
 	if v := strings.TrimSpace(cfg.WebSearch); v != "" {
 		overlay.WebSearch = &v
+	}
+	if v := strings.TrimSpace(cfg.ProviderOverride); v != "" {
+		normalized := normalizeProviderOverride(v)
+		overlay.ProviderOverride = &normalized
 	}
 	if v := strings.TrimSpace(cfg.OpenAIBaseURL); v != "" {
 		overlay.OpenAIBaseURL = &v
@@ -217,6 +223,10 @@ func settingsOverlayFromCLI(opts LoadOptions) (settingsOverlay, error) {
 	if v := strings.TrimSpace(opts.Theme); v != "" {
 		overlay.Theme = &v
 	}
+	if v := strings.TrimSpace(opts.ProviderOverride); v != "" {
+		normalized := normalizeProviderOverride(v)
+		overlay.ProviderOverride = &normalized
+	}
 	if v := strings.TrimSpace(opts.OpenAIBaseURL); v != "" {
 		overlay.OpenAIBaseURL = &v
 	}
@@ -276,6 +286,10 @@ func applySettingsOverlay(settings *Settings, persistenceRoot *string, persisten
 	if overlay.WebSearch != nil {
 		settings.WebSearch = *overlay.WebSearch
 		sources["web_search"] = source
+	}
+	if overlay.ProviderOverride != nil {
+		settings.ProviderOverride = *overlay.ProviderOverride
+		sources["provider_override"] = source
 	}
 	if overlay.OpenAIBaseURL != nil {
 		settings.OpenAIBaseURL = *overlay.OpenAIBaseURL

@@ -234,7 +234,7 @@ func (c *OpenAIClient) ProviderCapabilities(ctx context.Context) (ProviderCapabi
 	if transport, ok := c.transport.(OpenAIProviderCapabilitiesTransport); ok {
 		return transport.ProviderCapabilities(ctx)
 	}
-	return InferProviderCapabilities("openai"), nil
+	return ProviderCapabilities{}, fmt.Errorf("openai provider capabilities are not supported by transport %T", c.transport)
 }
 
 func (c *OpenAIClient) CountRequestInputTokens(ctx context.Context, request Request) (int, error) {

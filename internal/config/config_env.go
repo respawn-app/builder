@@ -56,6 +56,10 @@ func settingsOverlayFromEnv(lookup envLookup) (settingsOverlay, error) {
 	if v, ok := lookupTrimmedEnv(lookup, "BUILDER_WEB_SEARCH"); ok {
 		overlay.WebSearch = stringPtr(v)
 	}
+	if v, ok := lookupTrimmedEnv(lookup, "BUILDER_PROVIDER_OVERRIDE"); ok {
+		normalized := normalizeProviderOverride(v)
+		overlay.ProviderOverride = &normalized
+	}
 	if v, ok := lookupTrimmedEnv(lookup, "BUILDER_OPENAI_BASE_URL"); ok {
 		overlay.OpenAIBaseURL = stringPtr(v)
 	}

@@ -8,9 +8,20 @@ import (
 	"builder/internal/tools"
 )
 
-func validateSettings(v Settings) error {
+func validateSettings(v Settings, sources map[string]string) error {
 	if strings.TrimSpace(v.Model) == "" {
 		return errors.New("settings model must not be empty")
+	}
+	if strings.TrimSpace(v.ProviderOverride) != "" && strings.TrimSpace(sources["model"]) == "default" {
+		return fmt.Errorf("provider_override requires an explicit model override; set model alongside provider_override")
+	}
+	switch normalizeProviderOverride(v.ProviderOverride) {
+	case "", "openai", "anthropic":
+	default:
+		return fmt.Errorf("invalid provider_override %q (expected openai|anthropic)", v.ProviderOverride)
+	}
+	if strings.TrimSpace(v.OpenAIBaseURL) != "" && normalizeProviderOverride(v.ProviderOverride) != "" && normalizeProviderOverride(v.ProviderOverride) != "openai" {
+		return fmt.Errorf("provider_override %q conflicts with openai_base_url; openai_base_url requires provider_override=openai or unset", v.ProviderOverride)
 	}
 	if strings.TrimSpace(v.ProviderCapabilities.ProviderID) == "" {
 		if v.ProviderCapabilities.SupportsResponsesAPI || v.ProviderCapabilities.SupportsResponsesCompact || v.ProviderCapabilities.SupportsNativeWebSearch || v.ProviderCapabilities.SupportsReasoningEncrypted || v.ProviderCapabilities.SupportsServerSideContextEdit || v.ProviderCapabilities.IsOpenAIFirstParty {
@@ -144,4 +155,8 @@ func normalizeModelVerbosity(raw string) ModelVerbosity {
 	default:
 		return ModelVerbosity(strings.TrimSpace(raw))
 	}
+}
+
+func normalizeProviderOverride(raw string) string {
+	return strings.ToLower(strings.TrimSpace(raw))
 }

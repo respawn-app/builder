@@ -392,9 +392,9 @@ func (c *providerContractFailClient) Generate(_ context.Context, _ llm.Request) 
 	c.calls++
 	c.mu.Unlock()
 	return llm.Response{}, &llm.ProviderAPIError{
-		ProviderID: "openai-compatible",
+		ProviderID: "openai",
 		Code:       llm.UnifiedErrorCodeProviderContract,
-		Message:    "no error reducer registered for provider_id \"openai-compatible\"",
+		Message:    "provider contract is unavailable",
 	}
 }
 
@@ -1522,8 +1522,8 @@ func TestEnsureLocked_PersistsProviderCapabilityOverrideOverTransportMetadata(t 
 
 	client := &fakeClient{
 		caps: llm.ProviderCapabilities{
-			ProviderID:                 "openai-compatible",
-			SupportsResponsesAPI:       true,
+			ProviderID:                 "anthropic",
+			SupportsResponsesAPI:       false,
 			SupportsResponsesCompact:   false,
 			SupportsNativeWebSearch:    false,
 			SupportsReasoningEncrypted: false,
@@ -1829,7 +1829,7 @@ func TestSubmitUserMessageCommentaryWithoutToolsNonOpenAIRemainsTerminal(t *test
 	}
 }
 
-func TestSubmitUserMessageGarbageAssistantTokenDowngradesToCommentaryAndContinues(t *testing.T) {
+func TestSubmitUserMessageLegacyGarbageTokenRemainsTerminal(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -1845,14 +1845,6 @@ func TestSubmitUserMessageGarbageAssistantTokenDowngradesToCommentaryAndContinue
 			},
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
-		{
-			Assistant: llm.Message{
-				Role:    llm.RoleAssistant,
-				Content: "done",
-				Phase:   llm.MessagePhaseFinal,
-			},
-			Usage: llm.Usage{WindowTokens: 200000},
-		},
 	}}
 
 	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
@@ -1864,34 +1856,18 @@ func TestSubmitUserMessageGarbageAssistantTokenDowngradesToCommentaryAndContinue
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	if msg.Content != "done" {
-		t.Fatalf("assistant content = %q, want done", msg.Content)
+	if msg.Content != "working #+#+#+#+#+ malformed" {
+		t.Fatalf("assistant content = %q", msg.Content)
 	}
-	if len(client.calls) != 2 {
-		t.Fatalf("expected 2 model calls, got %d", len(client.calls))
-	}
-
-	secondReq := client.calls[1]
-	foundWarning := false
-	for _, reqMsg := range secondReq.Messages {
-		if reqMsg.Role == llm.RoleDeveloper && strings.Contains(reqMsg.Content, garbageAssistantContentWarning) {
-			if reqMsg.MessageType != llm.MessageTypeErrorFeedback {
-				t.Fatalf("expected garbage-token warning message type error_feedback, got %+v", reqMsg)
-			}
-			foundWarning = true
-			break
-		}
-	}
-	if !foundWarning {
-		t.Fatalf("expected garbage-token warning in next request, got %+v", secondReq.Messages)
+	if len(client.calls) != 1 {
+		t.Fatalf("expected 1 model call, got %d", len(client.calls))
 	}
 
 	events, err := store.ReadEvents()
 	if err != nil {
 		t.Fatalf("read events: %v", err)
 	}
-	persistedAsCommentary := false
-	persistedToken := false
+	persistedAsFinal := false
 	for _, evt := range events {
 		if evt.Kind != "message" {
 			continue
@@ -1900,22 +1876,16 @@ func TestSubmitUserMessageGarbageAssistantTokenDowngradesToCommentaryAndContinue
 		if err := json.Unmarshal(evt.Payload, &persisted); err != nil {
 			t.Fatalf("decode message event: %v", err)
 		}
-		if persisted.Role == llm.RoleAssistant && strings.Contains(persisted.Content, "working") {
-			persistedAsCommentary = persisted.Phase == llm.MessagePhaseCommentary
-		}
-		if persisted.Role == llm.RoleAssistant && strings.Contains(persisted.Content, "#+#+#+#+") {
-			persistedToken = true
+		if persisted.Role == llm.RoleAssistant && persisted.Content == "working #+#+#+#+#+ malformed" {
+			persistedAsFinal = persisted.Phase == llm.MessagePhaseFinal
 		}
 	}
-	if !persistedAsCommentary {
-		t.Fatalf("expected garbage-token assistant message to be persisted as commentary")
-	}
-	if !persistedToken {
-		t.Fatalf("expected garbage token sequence to remain in persisted assistant content")
+	if !persistedAsFinal {
+		t.Fatalf("expected garbage-token assistant message to remain final")
 	}
 }
 
-func TestSubmitUserMessageEnvelopeLeakDowngradesToCommentaryAndContinues(t *testing.T) {
+func TestSubmitUserMessageLegacyEnvelopeLeakRemainsTerminal(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -1931,14 +1901,6 @@ func TestSubmitUserMessageEnvelopeLeakDowngradesToCommentaryAndContinues(t *test
 			},
 			Usage: llm.Usage{WindowTokens: 200000},
 		},
-		{
-			Assistant: llm.Message{
-				Role:    llm.RoleAssistant,
-				Content: "done",
-				Phase:   llm.MessagePhaseFinal,
-			},
-			Usage: llm.Usage{WindowTokens: 200000},
-		},
 	}}
 
 	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
@@ -1950,33 +1912,18 @@ func TestSubmitUserMessageEnvelopeLeakDowngradesToCommentaryAndContinues(t *test
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	if msg.Content != "done" {
-		t.Fatalf("assistant content = %q, want done", msg.Content)
+	if msg.Content != "assistant to=functions.shell commentary  {\"command\":\"pwd\"}" {
+		t.Fatalf("assistant content = %q", msg.Content)
 	}
-	if len(client.calls) != 2 {
-		t.Fatalf("expected 2 model calls, got %d", len(client.calls))
-	}
-
-	secondReq := client.calls[1]
-	foundWarning := false
-	for _, reqMsg := range secondReq.Messages {
-		if reqMsg.Role == llm.RoleDeveloper && strings.Contains(reqMsg.Content, garbageAssistantContentWarning) {
-			if reqMsg.MessageType != llm.MessageTypeErrorFeedback {
-				t.Fatalf("expected envelope warning message type error_feedback, got %+v", reqMsg)
-			}
-			foundWarning = true
-			break
-		}
-	}
-	if !foundWarning {
-		t.Fatalf("expected envelope warning in next request, got %+v", secondReq.Messages)
+	if len(client.calls) != 1 {
+		t.Fatalf("expected 1 model call, got %d", len(client.calls))
 	}
 
 	events, err := store.ReadEvents()
 	if err != nil {
 		t.Fatalf("read events: %v", err)
 	}
-	persistedEnvelopeAsCommentary := false
+	persistedEnvelopeAsFinal := false
 	for _, evt := range events {
 		if evt.Kind != "message" {
 			continue
@@ -1986,43 +1933,11 @@ func TestSubmitUserMessageEnvelopeLeakDowngradesToCommentaryAndContinues(t *test
 			t.Fatalf("decode message event: %v", err)
 		}
 		if persisted.Role == llm.RoleAssistant && strings.Contains(strings.ToLower(persisted.Content), "assistant to=functions.") {
-			persistedEnvelopeAsCommentary = persisted.Phase == llm.MessagePhaseCommentary
+			persistedEnvelopeAsFinal = persisted.Phase == llm.MessagePhaseFinal
 		}
 	}
-	if !persistedEnvelopeAsCommentary {
-		t.Fatalf("expected envelope leak assistant message to be persisted as commentary")
-	}
-}
-
-func TestContainsMalformedAssistantContent_DetectsGarbageToken(t *testing.T) {
-	garbageSamples := []string{
-		"abc #+#+#+#+#+ xyz",
-		"abc #+#+#+#+#+#+ xyz",
-	}
-	for _, sample := range garbageSamples {
-		if !containsMalformedAssistantContent(sample) {
-			t.Fatalf("expected malformed content to be detected for %q", sample)
-		}
-	}
-	if containsMalformedAssistantContent("clean content") {
-		t.Fatal("did not expect clean content to be flagged malformed")
-	}
-}
-
-func TestContainsMalformedAssistantContent_DetectsEnvelopeLeak(t *testing.T) {
-	leakSamples := []string{
-		"assistant to=functions.shell commentary {\"command\":\"pwd\"}",
-		"assistant to=functions.patch commentary {\"patch\":\"*** Begin Patch\"}",
-		"assistant to=functions.multi_tool_use_parallel commentary {}",
-		"assistant to=multi_tool_use.parallel commentary {}",
-	}
-	for _, sample := range leakSamples {
-		if !containsMalformedAssistantContent(sample) {
-			t.Fatalf("expected envelope leak to be detected for %q", sample)
-		}
-	}
-	if containsMalformedAssistantContent("normal final answer") {
-		t.Fatal("did not expect normal content to be flagged malformed")
+	if !persistedEnvelopeAsFinal {
+		t.Fatalf("expected envelope leak assistant message to remain final")
 	}
 }
 

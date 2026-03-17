@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -15,11 +16,22 @@ func (providerTestAuth) AuthorizationHeader(context.Context) (string, error) {
 }
 
 func TestInferProviderFromModel(t *testing.T) {
-	if got := InferProviderFromModel("gpt-5"); got != ProviderOpenAI {
+	got, err := InferProviderFromModel("gpt-5")
+	if err != nil {
+		t.Fatalf("infer openai provider: %v", err)
+	}
+	if got != ProviderOpenAI {
 		t.Fatalf("expected openai provider, got %q", got)
 	}
-	if got := InferProviderFromModel("claude-3-7-sonnet"); got != ProviderAnthropic {
+	got, err = InferProviderFromModel("claude-3-7-sonnet")
+	if err != nil {
+		t.Fatalf("infer anthropic provider: %v", err)
+	}
+	if got != ProviderAnthropic {
 		t.Fatalf("expected anthropic provider, got %q", got)
+	}
+	if _, err := InferProviderFromModel("custom-model"); !errors.Is(err, ErrUnsupportedProvider) {
+		t.Fatalf("expected unsupported provider inference for unknown model family, got %v", err)
 	}
 }
 
@@ -60,6 +72,84 @@ func TestNewProviderClient_AnthropicNotImplemented(t *testing.T) {
 	})
 	if !errors.Is(err, ErrUnsupportedProvider) {
 		t.Fatalf("expected unsupported provider error, got %v", err)
+	}
+}
+
+func TestNewProviderClient_ExplicitProviderOverrideAllowsCustomModelAlias(t *testing.T) {
+	client, err := NewProviderClient(ProviderClientOptions{
+		Provider: ProviderOpenAI,
+		Model:    "my-team-alias",
+		Auth:     providerTestAuth{},
+	})
+	if err != nil {
+		t.Fatalf("new provider client: %v", err)
+	}
+
+	openAIClient, ok := client.(*OpenAIClient)
+	if !ok {
+		t.Fatalf("expected *OpenAIClient, got %T", client)
+	}
+	providerCaps, err := openAIClient.ProviderCapabilities(context.Background())
+	if err != nil {
+		t.Fatalf("provider capabilities: %v", err)
+	}
+	if providerCaps.ProviderID != "openai" || !providerCaps.IsOpenAIFirstParty {
+		t.Fatalf("expected explicit provider override to bypass model inference, got %+v", providerCaps)
+	}
+}
+
+func TestNewProviderClient_CustomModelInferenceErrorMentionsProviderOverride(t *testing.T) {
+	_, err := NewProviderClient(ProviderClientOptions{
+		Model: "my-team-alias",
+		Auth:  providerTestAuth{},
+	})
+	if !errors.Is(err, ErrUnsupportedProvider) {
+		t.Fatalf("expected unsupported provider error, got %v", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "provider_override") {
+		t.Fatalf("expected inference failure to mention provider_override, got %v", err)
+	}
+}
+
+func TestNewProviderClient_RemoteOpenAICompatibleBaseURLAllowsCustomModelFamily(t *testing.T) {
+	client, err := NewProviderClient(ProviderClientOptions{
+		Model:          "vendor-custom-model",
+		Auth:           providerTestAuth{},
+		OpenAIBaseURL:  "https://example.openrouter.ai/api/v1",
+		ModelVerbosity: "MEDIUM",
+	})
+	if err != nil {
+		t.Fatalf("new provider client: %v", err)
+	}
+
+	openAIClient, ok := client.(*OpenAIClient)
+	if !ok {
+		t.Fatalf("expected *OpenAIClient, got %T", client)
+	}
+
+	transport, ok := openAIClient.transport.(*HTTPTransport)
+	if !ok {
+		t.Fatalf("expected *HTTPTransport, got %T", openAIClient.transport)
+	}
+	if transport.Provider != ProviderOpenAI {
+		t.Fatalf("expected explicit openai-compatible base URL to select openai transport family, got %q", transport.Provider)
+	}
+	if transport.BaseURL != "https://example.openrouter.ai/api/v1" {
+		t.Fatalf("expected custom base url to be preserved, got %q", transport.BaseURL)
+	}
+
+	providerCaps, err := openAIClient.ProviderCapabilities(context.Background())
+	if err != nil {
+		t.Fatalf("provider capabilities: %v", err)
+	}
+	if providerCaps.ProviderID != "openai-compatible" {
+		t.Fatalf("expected remote base url to resolve openai-compatible provider id, got %+v", providerCaps)
+	}
+	if !providerCaps.SupportsResponsesAPI {
+		t.Fatalf("expected responses api support, got %+v", providerCaps)
+	}
+	if providerCaps.SupportsResponsesCompact || providerCaps.SupportsNativeWebSearch || providerCaps.IsOpenAIFirstParty {
+		t.Fatalf("expected conservative remote provider capabilities, got %+v", providerCaps)
 	}
 }
 

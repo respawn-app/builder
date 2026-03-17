@@ -219,6 +219,122 @@ func TestLoadCapabilityOverridesFromEnv(t *testing.T) {
 	}
 }
 
+func TestLoadProviderOverrideFromFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model = \"my-team-alias\"\nprovider_override = \"OpenAI\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.ProviderOverride != "openai" {
+		t.Fatalf("expected normalized provider_override from file, got %q", cfg.Settings.ProviderOverride)
+	}
+	if got := cfg.Source.Sources["provider_override"]; got != "file" {
+		t.Fatalf("expected provider_override source file, got %q", got)
+	}
+}
+
+func TestLoadProviderOverrideRequiresExplicitModelOverride(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("provider_override = \"openai\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected provider_override without model override to fail")
+	}
+	if !strings.Contains(err.Error(), "provider_override requires an explicit model override") {
+		t.Fatalf("expected provider_override/model override validation error, got %v", err)
+	}
+}
+
+func TestLoadProviderOverrideRejectsUnsupportedProviderFamily(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model = \"my-team-alias\"\nprovider_override = \"openrouter\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected invalid provider_override to fail")
+	}
+	if !strings.Contains(err.Error(), "invalid provider_override") {
+		t.Fatalf("expected invalid provider_override validation error, got %v", err)
+	}
+}
+
+func TestLoadProviderOverrideRejectsOpenAIBaseURLConflict(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model = \"my-team-alias\"\nprovider_override = \"anthropic\"\nopenai_base_url = \"https://example.openrouter.ai/api/v1\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected provider_override/openai_base_url conflict to fail")
+	}
+	if !strings.Contains(err.Error(), "conflicts with openai_base_url") {
+		t.Fatalf("expected provider_override/openai_base_url conflict error, got %v", err)
+	}
+}
+
+func TestLoadProviderOverrideFromCLIWithExplicitFileModel(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model = \"my-team-alias\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{ProviderOverride: "openai"})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.ProviderOverride != "openai" {
+		t.Fatalf("expected cli provider_override, got %q", cfg.Settings.ProviderOverride)
+	}
+	if got := cfg.Source.Sources["provider_override"]; got != "cli" {
+		t.Fatalf("expected provider_override source cli, got %q", got)
+	}
+}
+
 func TestLoadCapabilityOverridesRequireProviderID(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

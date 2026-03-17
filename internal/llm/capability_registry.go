@@ -1,6 +1,9 @@
 package llm
 
 import (
+	"fmt"
+	"net"
+	"net/url"
 	"strings"
 
 	"builder/internal/config"
@@ -8,8 +11,8 @@ import (
 )
 
 // capability_registry.go is the single source of truth for built-in provider
-// and model capability contracts. Additions here should be deliberate and
-// reviewable because request shaping depends on these contracts.
+// contracts. Each provider contract owns its client wiring, transport variants,
+// provider capability flags, and model metadata.
 
 type ModelCapabilityContract struct {
 	Model                   string
@@ -19,109 +22,18 @@ type ModelCapabilityContract struct {
 	SupportsVisionInputs    bool
 }
 
-type OpenAIProviderMetadata struct {
-	CapabilityProviderID string
+func lookupProviderContract(provider Provider) (ProviderContract, bool) {
+	contract, ok := globalProviderRegistry.contractsByProvider[provider]
+	return contract, ok
 }
 
-var knownModelCapabilityContracts = map[string]ModelCapabilityContract{
-	"gpt-5": {
-		Model:                   "gpt-5",
-		SupportsReasoningEffort: true,
-		SupportsVerbosity:       true,
-		SupportsVisionInputs:    true,
-	},
-	"gpt-5.4": {
-		Model:                   "gpt-5.4",
-		SupportsReasoningEffort: true,
-		SupportsVerbosity:       true,
-		SupportsVisionInputs:    true,
-	},
-	"gpt-5.3-codex": {
-		Model:                   "gpt-5.3-codex",
-		ContextWindowTokens:     400_000,
-		SupportsReasoningEffort: true,
-		SupportsVerbosity:       true,
-		SupportsVisionInputs:    true,
-	},
-	"gpt-4.1": {
-		Model:                   "gpt-4.1",
-		SupportsReasoningEffort: true,
-		SupportsVisionInputs:    true,
-	},
-	"gpt-4o": {
-		Model:                   "gpt-4o",
-		SupportsReasoningEffort: true,
-		SupportsVisionInputs:    true,
-	},
-	"gpt-4o-mini": {
-		Model:                   "gpt-4o-mini",
-		SupportsReasoningEffort: true,
-		SupportsVisionInputs:    true,
-	},
-	"o1": {
-		Model:                   "o1",
-		SupportsReasoningEffort: true,
-		SupportsVisionInputs:    true,
-	},
-	"o3": {
-		Model:                   "o3",
-		SupportsReasoningEffort: true,
-		SupportsVisionInputs:    true,
-	},
-	"o3-mini": {
-		Model:                   "o3-mini",
-		SupportsReasoningEffort: true,
-		SupportsVisionInputs:    true,
-	},
-	"o4": {
-		Model:                   "o4",
-		SupportsReasoningEffort: true,
-		SupportsVisionInputs:    true,
-	},
-	"o4-mini": {
-		Model:                   "o4-mini",
-		SupportsReasoningEffort: true,
-		SupportsVisionInputs:    true,
-	},
-}
-
-var knownProviderCapabilityContracts = map[string]ProviderCapabilities{
-	"openai": {
-		ProviderID:                    "openai",
-		SupportsResponsesAPI:          true,
-		SupportsResponsesCompact:      true,
-		SupportsNativeWebSearch:       true,
-		SupportsReasoningEncrypted:    true,
-		SupportsServerSideContextEdit: true,
-		IsOpenAIFirstParty:            true,
-	},
-	"chatgpt-codex": {
-		ProviderID:                    "chatgpt-codex",
-		SupportsResponsesAPI:          true,
-		SupportsResponsesCompact:      true,
-		SupportsNativeWebSearch:       true,
-		SupportsReasoningEncrypted:    true,
-		SupportsServerSideContextEdit: true,
-		IsOpenAIFirstParty:            true,
-	},
-	"openai-compatible": {
-		ProviderID:                    "openai-compatible",
-		SupportsResponsesAPI:          true,
-		SupportsResponsesCompact:      false,
-		SupportsNativeWebSearch:       false,
-		SupportsReasoningEncrypted:    false,
-		SupportsServerSideContextEdit: false,
-		IsOpenAIFirstParty:            false,
-	},
-	"anthropic": {
-		ProviderID:                    "anthropic",
-		SupportsResponsesAPI:          false,
-		SupportsResponsesCompact:      false,
-		SupportsNativeWebSearch:       false,
-		SupportsReasoningEncrypted:    false,
-		SupportsServerSideContextEdit: false,
-		IsOpenAIFirstParty:            false,
-	},
+func lookupProviderVariantContract(providerID string) (providerVariantRegistration, bool) {
+	key := normalizeCapabilityRegistryKey(providerID)
+	if key == "" {
+		return providerVariantRegistration{}, false
+	}
+	registration, ok := globalProviderRegistry.providerVariantsByID[key]
+	return registration, ok
 }
 
 func LookupModelCapabilityContract(model string) (ModelCapabilityContract, bool) {
@@ -129,24 +41,55 @@ func LookupModelCapabilityContract(model string) (ModelCapabilityContract, bool)
 	if key == "" {
 		return ModelCapabilityContract{}, false
 	}
-	contract, ok := knownModelCapabilityContracts[key]
-	return contract, ok
+	registration, ok := globalProviderRegistry.modelContractsByName[key]
+	if !ok {
+		return ModelCapabilityContract{}, false
+	}
+	return registration.Contract, true
 }
 
 func LookupProviderCapabilityContract(providerID string) (ProviderCapabilities, bool) {
-	key := normalizeCapabilityRegistryKey(providerID)
-	if key == "" {
+	registration, ok := lookupProviderVariantContract(providerID)
+	if !ok {
 		return ProviderCapabilities{}, false
 	}
-	contract, ok := knownProviderCapabilityContracts[key]
-	return contract, ok
+	return registration.Variant.Capabilities, true
 }
 
-func ResolveOpenAIProviderMetadata(baseURL string) OpenAIProviderMetadata {
-	if normalizeOpenAIBaseURL(baseURL) == normalizeOpenAIBaseURL(defaultOpenAIBaseURL) {
-		return OpenAIProviderMetadata{CapabilityProviderID: "openai"}
+func resolveProviderTransportVariant(provider Provider, baseURL string, mode openAIAuthMode) (ProviderVariantContract, error) {
+	contract, ok := lookupProviderContract(provider)
+	if !ok {
+		return ProviderVariantContract{}, fmt.Errorf("%w: %s", ErrUnsupportedProvider, provider)
 	}
-	return OpenAIProviderMetadata{CapabilityProviderID: "openai-compatible"}
+	if contract.ResolveTransportVariant == nil {
+		return ProviderVariantContract{}, fmt.Errorf("%w: transport provider resolution is not implemented for %s", ErrUnsupportedProvider, provider)
+	}
+	providerID, err := contract.ResolveTransportVariant(baseURL, mode)
+	if err != nil {
+		return ProviderVariantContract{}, err
+	}
+	registration, ok := lookupProviderVariantContract(providerID)
+	if !ok {
+		return ProviderVariantContract{}, fmt.Errorf("provider %q resolved unknown provider_id %q", provider, strings.TrimSpace(providerID))
+	}
+	if registration.Provider != provider {
+		return ProviderVariantContract{}, fmt.Errorf("provider %q resolved provider_id %q owned by %q", provider, strings.TrimSpace(providerID), registration.Provider)
+	}
+	return registration.Variant, nil
+}
+
+func resolveOpenAITransportProviderVariant(baseURL string, mode openAIAuthMode) (string, error) {
+	if mode.IsOAuth {
+		return "chatgpt-codex", nil
+	}
+	normalizedBaseURL := normalizeOpenAIBaseURL(baseURL)
+	if normalizedBaseURL == normalizeOpenAIBaseURL(defaultOpenAIBaseURL) || isLoopbackOpenAIBaseURL(normalizedBaseURL) {
+		return "openai", nil
+	}
+	if strings.TrimSpace(baseURL) != "" {
+		return "openai-compatible", nil
+	}
+	return "", fmt.Errorf("%w: openai base URL %q does not map to a registered provider contract", ErrUnsupportedProvider, strings.TrimSpace(baseURL))
 }
 
 func normalizeOpenAIBaseURL(baseURL string) string {
@@ -156,6 +99,22 @@ func normalizeOpenAIBaseURL(baseURL string) string {
 		return strings.TrimSuffix(defaultOpenAIBaseURL, "/")
 	}
 	return trimmed
+}
+
+func isLoopbackOpenAIBaseURL(baseURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return false
+	}
+	hostname := strings.TrimSpace(parsed.Hostname())
+	if hostname == "" {
+		return false
+	}
+	if strings.EqualFold(hostname, "localhost") {
+		return true
+	}
+	parsedIP := net.ParseIP(hostname)
+	return parsedIP != nil && parsedIP.IsLoopback()
 }
 
 func normalizeCapabilityRegistryKey(value string) string {

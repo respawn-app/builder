@@ -1,61 +1,68 @@
 package llm
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestInferProviderCapabilities_UsesRegistryContracts(t *testing.T) {
-	openai := InferProviderCapabilities("openai")
+	openai, err := InferProviderCapabilities("openai")
+	if err != nil {
+		t.Fatalf("infer openai capabilities: %v", err)
+	}
 	if !openai.SupportsResponsesCompact || !openai.IsOpenAIFirstParty || !openai.SupportsNativeWebSearch {
 		t.Fatalf("expected first-party openai compact support, got %+v", openai)
 	}
 
-	oauth := InferProviderCapabilities("chatgpt-codex")
+	oauth, err := InferProviderCapabilities("chatgpt-codex")
+	if err != nil {
+		t.Fatalf("infer codex capabilities: %v", err)
+	}
 	if oauth.ProviderID != "chatgpt-codex" || !oauth.SupportsResponsesCompact || !oauth.IsOpenAIFirstParty || !oauth.SupportsNativeWebSearch {
 		t.Fatalf("unexpected oauth capabilities: %+v", oauth)
 	}
 }
 
-func TestInferProviderCapabilities_UnknownProviderFallsBackToOpenAICompatible(t *testing.T) {
-	caps := InferProviderCapabilities("custom-provider")
-	if caps.ProviderID != "openai-compatible" {
-		t.Fatalf("expected openai-compatible fallback, got %+v", caps)
-	}
-	if caps.SupportsResponsesCompact || caps.IsOpenAIFirstParty || caps.SupportsNativeWebSearch {
-		t.Fatalf("expected conservative fallback capabilities, got %+v", caps)
+func TestInferProviderCapabilities_UnknownProviderFailsExplicitly(t *testing.T) {
+	_, err := InferProviderCapabilities("custom-provider")
+	if !errors.Is(err, ErrUnsupportedProvider) {
+		t.Fatalf("expected unsupported provider error, got %v", err)
 	}
 }
 
-func TestResolveOpenAIProviderMetadata_DefaultAndCustomBaseURL(t *testing.T) {
-	if got := ResolveOpenAIProviderMetadata(""); got.CapabilityProviderID != "openai" {
-		t.Fatalf("expected default base url to resolve openai metadata, got %+v", got)
+func TestResolveOpenAITransportProviderVariant_DefaultLoopbackAndRemoteCompatibleBaseURL(t *testing.T) {
+	if got, err := resolveOpenAITransportProviderVariant("", openAIAuthMode{}); err != nil || got != "openai" {
+		t.Fatalf("expected default base url to resolve openai variant, got variant=%q err=%v", got, err)
 	}
-	if got := ResolveOpenAIProviderMetadata("https://api.openai.com/v1/"); got.CapabilityProviderID != "openai" {
-		t.Fatalf("expected normalized default base url to resolve openai metadata, got %+v", got)
+	if got, err := resolveOpenAITransportProviderVariant("https://api.openai.com/v1/", openAIAuthMode{}); err != nil || got != "openai" {
+		t.Fatalf("expected normalized default base url to resolve openai variant, got variant=%q err=%v", got, err)
 	}
-	if got := ResolveOpenAIProviderMetadata("https://example.openai.azure.com/openai/v1"); got.CapabilityProviderID != "openai-compatible" {
-		t.Fatalf("expected custom base url to stay conservative, got %+v", got)
+	if got, err := resolveOpenAITransportProviderVariant("http://127.0.0.1:8080/v1", openAIAuthMode{}); err != nil || got != "openai" {
+		t.Fatalf("expected loopback base url to resolve openai variant, got variant=%q err=%v", got, err)
+	}
+	if got, err := resolveOpenAITransportProviderVariant("https://example.openai.azure.com/openai/v1", openAIAuthMode{}); err != nil || got != "openai-compatible" {
+		t.Fatalf("expected remote compatible base url to resolve openai-compatible variant, got variant=%q err=%v", got, err)
+	}
+	if got, err := resolveOpenAITransportProviderVariant("https://ignored.example/v1", openAIAuthMode{IsOAuth: true}); err != nil || got != "chatgpt-codex" {
+		t.Fatalf("expected oauth mode to resolve chatgpt-codex variant, got variant=%q err=%v", got, err)
 	}
 }
 
 func TestKnownNonFirstPartyProviderContractsRemainLocalCompactionOnly(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		providerID string
-	}{
-		{name: "generic", providerID: "openai-compatible"},
-		{name: "anthropic", providerID: "anthropic"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			caps := InferProviderCapabilities(tc.providerID)
-			if caps.SupportsResponsesCompact {
-				t.Fatalf("expected compact unsupported for %s, got %+v", tc.providerID, caps)
-			}
-			if caps.IsOpenAIFirstParty {
-				t.Fatalf("expected third-party classification for %s, got %+v", tc.providerID, caps)
-			}
-			if caps.SupportsNativeWebSearch {
-				t.Fatalf("expected native web search unsupported for %s, got %+v", tc.providerID, caps)
-			}
-		})
+	for _, providerID := range []string{"anthropic", "openai-compatible"} {
+		caps, err := InferProviderCapabilities(providerID)
+		if err != nil {
+			t.Fatalf("infer %s capabilities: %v", providerID, err)
+		}
+		if caps.SupportsResponsesCompact {
+			t.Fatalf("expected compact unsupported for %s, got %+v", providerID, caps)
+		}
+		if caps.IsOpenAIFirstParty {
+			t.Fatalf("expected third-party classification for %s, got %+v", providerID, caps)
+		}
+		if caps.SupportsNativeWebSearch {
+			t.Fatalf("expected native web search unsupported for %s, got %+v", providerID, caps)
+		}
 	}
 }
 

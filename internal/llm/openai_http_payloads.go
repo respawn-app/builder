@@ -21,13 +21,13 @@ func newOpenAIRequestPayloadBuilder(store bool, modelVerbosity string, capabilit
 	return openAIRequestPayloadBuilder{store: store, modelVerbosity: strings.ToLower(strings.TrimSpace(modelVerbosity)), capabilities: capabilities}
 }
 
-func (t *HTTPTransport) buildPayload(request OpenAIRequest, mode openAIAuthMode) (responses.ResponseNewParams, error) {
-	builder := newOpenAIRequestPayloadBuilder(t.Store, t.ModelVerbosity, t.providerCapabilitiesForMode(mode))
+func (t *HTTPTransport) buildPayload(request OpenAIRequest, mode openAIAuthMode, capabilities ProviderCapabilities) (responses.ResponseNewParams, error) {
+	builder := newOpenAIRequestPayloadBuilder(t.Store, t.ModelVerbosity, capabilities)
 	return builder.BuildResponse(request, mode)
 }
 
-func (t *HTTPTransport) buildInputTokenCountParams(request OpenAIRequest) (responses.InputTokenCountParams, error) {
-	builder := newOpenAIRequestPayloadBuilder(t.Store, t.ModelVerbosity, t.providerCapabilitiesForMode(openAIAuthMode{}))
+func (t *HTTPTransport) buildInputTokenCountParams(request OpenAIRequest, capabilities ProviderCapabilities) (responses.InputTokenCountParams, error) {
+	builder := newOpenAIRequestPayloadBuilder(t.Store, t.ModelVerbosity, capabilities)
 	return builder.BuildInputTokenCount(request)
 }
 
