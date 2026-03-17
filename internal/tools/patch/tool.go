@@ -27,6 +27,21 @@ type Tool struct {
 	outsideWorkspaceSessionAllow bool
 }
 
+func init() {
+	tools.RegisterLocalRuntimeFactory(tools.ToolPatch, func(ctx tools.LocalRuntimeContext) (tools.Handler, error) {
+		approver, err := tools.ResolveLocalRuntimeDependency[OutsideWorkspaceApprover](ctx.OutsideWorkspaceEditApprover, "patch outside-workspace approver")
+		if err != nil {
+			return nil, err
+		}
+		return New(
+			ctx.WorkspaceRoot,
+			true,
+			WithAllowOutsideWorkspace(ctx.AllowNonCwdEdits),
+			WithOutsideWorkspaceApprover(approver),
+		)
+	})
+}
+
 func New(workspaceRoot string, workspaceOnly bool, opts ...Option) (*Tool, error) {
 	abs, err := filepath.Abs(workspaceRoot)
 	if err != nil {

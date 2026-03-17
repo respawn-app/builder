@@ -11,6 +11,16 @@ import (
 	"github.com/google/uuid"
 )
 
+func init() {
+	tools.RegisterLocalRuntimeFactory(tools.ToolAskQuestion, func(ctx tools.LocalRuntimeContext) (tools.Handler, error) {
+		broker, err := tools.ResolveLocalRuntimeDependency[*Broker](ctx.AskQuestionBroker, "ask_question broker")
+		if err != nil {
+			return nil, err
+		}
+		return NewTool(broker), nil
+	})
+}
+
 type Request struct {
 	ID              string           `json:"id"`
 	Question        string           `json:"question"`

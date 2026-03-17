@@ -80,6 +80,27 @@ type contentItem struct {
 	Filename string `json:"filename,omitempty"`
 }
 
+func init() {
+	tools.RegisterLocalRuntimeFactory(tools.ToolViewImage, func(ctx tools.LocalRuntimeContext) (tools.Handler, error) {
+		approver, err := tools.ResolveLocalRuntimeDependency[patchtool.OutsideWorkspaceApprover](ctx.OutsideWorkspaceReadApprover, "view_image outside-workspace approver")
+		if err != nil {
+			return nil, err
+		}
+		opts := []Option{
+			WithAllowOutsideWorkspace(ctx.AllowNonCwdEdits),
+			WithOutsideWorkspaceApprover(approver),
+		}
+		if ctx.ViewImageOutsideWorkspaceLogger != nil {
+			logger, err := tools.ResolveLocalRuntimeDependency[OutsideWorkspaceAuditLogger](ctx.ViewImageOutsideWorkspaceLogger, "view_image outside-workspace audit logger")
+			if err != nil {
+				return nil, err
+			}
+			opts = append(opts, WithOutsideWorkspaceAuditLogger(logger))
+		}
+		return New(ctx.WorkspaceRoot, ctx.SupportsVision, opts...)
+	})
+}
+
 func New(workspaceRoot string, supported bool, opts ...Option) (*Tool, error) {
 	rootAbs, err := filepath.Abs(workspaceRoot)
 	if err != nil {

@@ -15,7 +15,7 @@ import (
 	"builder/internal/session"
 	"builder/internal/tools"
 	askquestion "builder/internal/tools/askquestion"
-	multitooluseparallel "builder/internal/tools/multitooluseparallel"
+	_ "builder/internal/tools/multitooluseparallel"
 	patchtool "builder/internal/tools/patch"
 	readimagetool "builder/internal/tools/readimage"
 	shelltool "builder/internal/tools/shell"
@@ -277,21 +277,18 @@ func buildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []to
 	background.SetMinimumExecToBgTime(minimumExecToBgTime)
 	patchOutsideWorkspaceApprover := newOutsideWorkspaceApprover(broker, "editing")
 	readOutsideWorkspaceApprover := newOutsideWorkspaceApprover(broker, "reading")
-	patch, err := patchtool.New(
-		workspaceRoot,
-		true,
-		patchtool.WithAllowOutsideWorkspace(allowNonCwdEdits),
-		patchtool.WithOutsideWorkspaceApprover(patchOutsideWorkspaceApprover.Approve),
-	)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	viewImage, err := readimagetool.New(
-		workspaceRoot,
-		supportsViewImage,
-		readimagetool.WithAllowOutsideWorkspace(allowNonCwdEdits),
-		readimagetool.WithOutsideWorkspaceApprover(readOutsideWorkspaceApprover.Approve),
-		readimagetool.WithOutsideWorkspaceAuditLogger(func(entry readimagetool.OutsideWorkspaceAudit) {
+	registry, err := tools.BuildLocalRuntimeRegistry(enabled, tools.LocalRuntimeContext{
+		WorkspaceRoot:                workspaceRoot,
+		OwnerSessionID:               ownerSessionID,
+		ShellDefaultTimeout:          shellDefaultTimeout,
+		ShellOutputMaxChars:          shellOutputMaxChars,
+		AllowNonCwdEdits:             allowNonCwdEdits,
+		SupportsVision:               supportsViewImage,
+		AskQuestionBroker:            broker,
+		BackgroundShellManager:       background,
+		OutsideWorkspaceEditApprover: patchtool.OutsideWorkspaceApprover(patchOutsideWorkspaceApprover.Approve),
+		OutsideWorkspaceReadApprover: patchtool.OutsideWorkspaceApprover(readOutsideWorkspaceApprover.Approve),
+		ViewImageOutsideWorkspaceLogger: readimagetool.OutsideWorkspaceAuditLogger(func(entry readimagetool.OutsideWorkspaceAudit) {
 			if logger == nil {
 				return
 			}
@@ -302,43 +299,9 @@ func buildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []to
 				entry.Reason,
 			)
 		}),
-	)
+	})
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	var registry *tools.Registry
-	parallel := multitooluseparallel.New(func() *tools.Registry { return registry })
-	availableHandlers := tools.NewRegistry(
-		shelltool.New(workspaceRoot, shellOutputMaxChars, shelltool.WithDefaultTimeout(shellDefaultTimeout)),
-		shelltool.NewExecCommandTool(workspaceRoot, shellOutputMaxChars, background, ownerSessionID),
-		shelltool.NewWriteStdinTool(shellOutputMaxChars, background),
-		viewImage,
-		patch,
-		askquestion.NewTool(broker),
-		parallel,
-	)
-	enabledSet := map[tools.ID]bool{}
-	for _, id := range enabled {
-		enabledSet[id] = true
-	}
-	handlers := make([]tools.Handler, 0, len(enabledSet))
-	for _, id := range tools.CatalogIDs() {
-		if !enabledSet[id] {
-			continue
-		}
-		def, ok := tools.DefinitionFor(id)
-		if !ok {
-			return nil, nil, nil, fmt.Errorf("missing tool definition for %q", id)
-		}
-		if !def.AvailableInLocalRuntime() {
-			continue
-		}
-		handler, ok := availableHandlers.Get(id)
-		if !ok {
-			return nil, nil, nil, fmt.Errorf("missing runtime tool factory for %q", id)
-		}
-		handlers = append(handlers, handler)
-	}
-	registry = tools.NewRegistry(handlers...)
 	return registry, broker, background, nil
 }

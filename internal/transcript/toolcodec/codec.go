@@ -7,35 +7,16 @@ import (
 )
 
 const (
-	InlineMetaSeparator     = "\x1f"
+	InlineMetaSeparator     = tools.InlineMetaSeparator
 	DefaultShellTimeoutSecs = tools.DefaultShellTimeoutSeconds
-	defaultToolCallFallback = "tool call"
 )
 
 func SplitInlineMeta(line string) (string, string) {
-	parts := strings.SplitN(line, InlineMetaSeparator, 2)
-	command := strings.TrimSpace(parts[0])
-	if len(parts) == 1 {
-		return command, ""
-	}
-	return command, strings.TrimSpace(parts[1])
+	return tools.SplitInlineMeta(line)
 }
 
 func CompactCallText(text string) string {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
-		return defaultToolCallFallback
-	}
-	parts := strings.SplitN(trimmed, "\n", 2)
-	first := strings.TrimSpace(parts[0])
-	if first == "" {
-		return defaultToolCallFallback
-	}
-	command, _ := SplitInlineMeta(first)
-	if command == "" {
-		return defaultToolCallFallback
-	}
-	return command
+	return tools.CompactToolCallText(nil, text)
 }
 
 func FormatInput(toolName string, raw json.RawMessage, shellTimeoutSeconds int) (string, string) {
@@ -47,8 +28,7 @@ func FormatInput(toolName string, raw json.RawMessage, shellTimeoutSeconds int) 
 	if !ok {
 		return strings.TrimSpace(string(raw)), ""
 	}
-	meta := def.BuildToolCallMeta(tools.ToolCallContext{DefaultShellTimeoutSeconds: shellTimeoutSeconds}, raw)
-	return strings.TrimSpace(meta.Command), strings.TrimSpace(meta.InlineMeta)
+	return def.FormatToolInput(tools.ToolCallContext{DefaultShellTimeoutSeconds: shellTimeoutSeconds}, raw)
 }
 
 func FormatOutput(raw json.RawMessage) string {

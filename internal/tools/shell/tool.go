@@ -74,6 +74,16 @@ type Tool struct {
 
 type Option func(*Tool)
 
+func init() {
+	tools.RegisterLocalRuntimeFactory(tools.ToolShell, func(ctx tools.LocalRuntimeContext) (tools.Handler, error) {
+		return New(
+			ctx.WorkspaceRoot,
+			ctx.ShellOutputMaxChars,
+			WithDefaultTimeout(ctx.ShellDefaultTimeout),
+		), nil
+	})
+}
+
 func WithDefaultTimeout(timeout time.Duration) Option {
 	return func(t *Tool) {
 		if timeout > 0 {

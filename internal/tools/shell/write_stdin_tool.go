@@ -10,6 +10,16 @@ import (
 	"builder/internal/tools"
 )
 
+func init() {
+	tools.RegisterLocalRuntimeFactory(tools.ToolWriteStdin, func(ctx tools.LocalRuntimeContext) (tools.Handler, error) {
+		manager, err := tools.ResolveLocalRuntimeDependency[*Manager](ctx.BackgroundShellManager, "write_stdin background manager")
+		if err != nil {
+			return nil, err
+		}
+		return NewWriteStdinTool(ctx.ShellOutputMaxChars, manager), nil
+	})
+}
+
 type writeStdinInput struct {
 	SessionID       int    `json:"session_id"`
 	Chars           string `json:"chars,omitempty"`

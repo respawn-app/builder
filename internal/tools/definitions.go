@@ -3,6 +3,8 @@ package tools
 import (
 	"encoding/json"
 	"sort"
+
+	"builder/internal/transcript"
 )
 
 type CatalogEntry struct {
@@ -22,6 +24,8 @@ var catalogEntries = []CatalogEntry{
 		DefaultEnabled: true,
 		Contract: localContract(
 			RequestExposure{Enabled: true},
+			transcript.ToolPresentationShell,
+			false,
 			shellToolCallMeta(ToolShell),
 			formatGenericToolResult,
 		),
@@ -55,6 +59,8 @@ var catalogEntries = []CatalogEntry{
 		DefaultEnabled: true,
 		Contract: localContract(
 			RequestExposure{Enabled: true},
+			transcript.ToolPresentationShell,
+			false,
 			shellToolCallMeta(ToolExecCommand),
 			formatGenericToolResult,
 		),
@@ -101,6 +107,8 @@ var catalogEntries = []CatalogEntry{
 		DefaultEnabled: true,
 		Contract: localContract(
 			RequestExposure{Enabled: true},
+			transcript.ToolPresentationShell,
+			false,
 			shellToolCallMeta(ToolWriteStdin),
 			formatGenericToolResult,
 		),
@@ -135,6 +143,8 @@ var catalogEntries = []CatalogEntry{
 		DefaultEnabled: true,
 		Contract: localContract(
 			RequestExposure{Enabled: true, RequiresVision: true},
+			transcript.ToolPresentationDefault,
+			false,
 			defaultToolCallMeta(ToolViewImage),
 			formatViewImageToolResult,
 		),
@@ -157,6 +167,8 @@ var catalogEntries = []CatalogEntry{
 		DefaultEnabled: true,
 		Contract: localContract(
 			RequestExposure{Enabled: true},
+			transcript.ToolPresentationDefault,
+			true,
 			patchToolCallMeta(ToolPatch),
 			formatPatchToolResult,
 		),
@@ -179,6 +191,8 @@ var catalogEntries = []CatalogEntry{
 		DefaultEnabled: true,
 		Contract: localContract(
 			RequestExposure{Enabled: true},
+			transcript.ToolPresentationAskQuestion,
+			false,
 			askQuestionToolCallMeta(ToolAskQuestion),
 			formatGenericToolResult,
 		),
@@ -204,18 +218,15 @@ var catalogEntries = []CatalogEntry{
 		Aliases:        nil,
 		Description:    "Search the web for up-to-date external information using the provider-native web search capability when available. Use this when local workspace context is insufficient or the fact could be stale. Prefer primary and official sources, and prefer MCP resources/templates over web search when possible.",
 		DefaultEnabled: true,
-		Contract: Contract{
-			Runtime: RuntimeContract{
-				Availability:       RuntimeAvailabilityHosted,
-				NativeWebSearch:    true,
-				DecodeHostedOutput: decodeHostedWebSearchOutput,
-			},
-			Request: RequestExposure{Enabled: false},
-			Transcript: TranscriptContract{
-				BuildCallMeta: defaultToolCallMeta(ToolWebSearch),
-				FormatResult:  formatWebSearchToolResult,
-			},
-		},
+		Contract: hostedContract(
+			RequestExposure{Enabled: false},
+			transcript.ToolPresentationDefault,
+			false,
+			true,
+			defaultToolCallMeta(ToolWebSearch),
+			formatWebSearchToolResult,
+			decodeHostedWebSearchOutput,
+		),
 		Schema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -245,6 +256,8 @@ var catalogEntries = []CatalogEntry{
 		DefaultEnabled: true,
 		Contract: localContract(
 			RequestExposure{Enabled: true},
+			transcript.ToolPresentationDefault,
+			false,
 			defaultToolCallMeta(ToolMultiToolUseParallel),
 			formatGenericToolResult,
 		),
@@ -353,5 +366,8 @@ func validateCatalogEntry(entry CatalogEntry) {
 	}
 	if entry.Contract.Transcript.FormatResult == nil {
 		panic("tool contract is missing transcript result formatter for " + string(entry.ID))
+	}
+	if entry.Contract.Transcript.Presentation == "" {
+		panic("tool contract is missing transcript presentation for " + string(entry.ID))
 	}
 }

@@ -12,6 +12,16 @@ import (
 	"builder/internal/tools"
 )
 
+func init() {
+	tools.RegisterLocalRuntimeFactory(tools.ToolExecCommand, func(ctx tools.LocalRuntimeContext) (tools.Handler, error) {
+		manager, err := tools.ResolveLocalRuntimeDependency[*Manager](ctx.BackgroundShellManager, "exec_command background manager")
+		if err != nil {
+			return nil, err
+		}
+		return NewExecCommandTool(ctx.WorkspaceRoot, ctx.ShellOutputMaxChars, manager, ctx.OwnerSessionID), nil
+	})
+}
+
 type execCommandInput struct {
 	Cmd             string `json:"cmd"`
 	Workdir         string `json:"workdir,omitempty"`
