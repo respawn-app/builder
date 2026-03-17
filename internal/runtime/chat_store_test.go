@@ -152,6 +152,9 @@ func TestPatchToolCallFormattingCapturesSummaryAndDetailMeta(t *testing.T) {
 	if !rendered.ToolCall.HasPatchSummary() || !rendered.ToolCall.HasPatchDetail() {
 		t.Fatalf("expected patch summary/detail metadata, got %+v", rendered.ToolCall)
 	}
+	if rendered.ToolCall.PatchRender == nil {
+		t.Fatalf("expected typed patch render metadata, got %+v", rendered.ToolCall)
+	}
 	if !strings.Contains(summary, "Edited:") || !strings.Contains(summary, "./dir/a.go +1 -1") || !strings.Contains(summary, "./b.go +1") {
 		t.Fatalf("unexpected summary output: %q", summary)
 	}
@@ -182,6 +185,9 @@ func TestPatchToolCallFormattingSingleFileUsesInlineEditedHeader(t *testing.T) {
 	if summary != "Edited: ./dir/a.go +1 -1" {
 		t.Fatalf("unexpected one-line summary: %q", summary)
 	}
+	if rendered.ToolCall.PatchRender == nil {
+		t.Fatalf("expected typed patch render metadata, got %+v", rendered.ToolCall)
+	}
 	if strings.Contains(summary, "\n") {
 		t.Fatalf("expected one-line summary, got %q", summary)
 	}
@@ -209,6 +215,9 @@ func TestPatchToolCallFormattingFallsBackToRawPatchWhenFileViewParseFails(t *tes
 	}
 	if rendered.ToolCall.PatchSummary != "Edited:" {
 		t.Fatalf("expected fallback patch summary, got %q", rendered.ToolCall.PatchSummary)
+	}
+	if rendered.ToolCall.PatchRender == nil {
+		t.Fatalf("expected fallback typed patch render metadata, got %+v", rendered.ToolCall)
 	}
 	if !strings.Contains(rendered.ToolCall.PatchDetail, patchText) {
 		t.Fatalf("expected fallback patch detail to include raw payload, got %q", rendered.ToolCall.PatchDetail)

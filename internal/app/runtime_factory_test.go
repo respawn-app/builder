@@ -15,10 +15,11 @@ import (
 	"builder/internal/session"
 	"builder/internal/tools"
 	"builder/internal/tools/askquestion"
+	patchtool "builder/internal/tools/patch"
 	shelltool "builder/internal/tools/shell"
 )
 
-func TestBuildToolRegistry_AllowsHostedWebSearchWithoutLocalFactory(t *testing.T) {
+func TestBuildToolRegistry_AllowsHostedWebSearchWithoutLocalRuntimeBuilder(t *testing.T) {
 	workspace := t.TempDir()
 
 	registry, _, _, err := buildToolRegistry(
@@ -46,10 +47,42 @@ func TestBuildToolRegistry_AllowsHostedWebSearchWithoutLocalFactory(t *testing.T
 	}
 }
 
-func TestBuildToolRegistry_ValidatesAllLocalToolFactoriesAreRegistered(t *testing.T) {
-	if err := tools.ValidateLocalRuntimeFactoryCoverage(); err != nil {
-		f := err.Error()
-		t.Fatalf("expected all local tool definitions to register factories, got %q", f)
+func TestBuildLocalRuntimeHandler_CoversAllLocalToolContracts(t *testing.T) {
+	workspace := t.TempDir()
+	background, err := shelltool.NewManager()
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	ctx := localToolRuntimeContext{
+		workspaceRoot:          workspace,
+		ownerSessionID:         "session-1",
+		shellDefaultTimeout:    5 * time.Second,
+		shellOutputMaxChars:    16_000,
+		allowNonCwdEdits:       false,
+		supportsVision:         true,
+		registryProvider:       func() *tools.Registry { return tools.NewRegistry() },
+		askQuestionBroker:      askquestion.NewBroker(),
+		backgroundShellManager: background,
+		outsideWorkspaceEditApprover: func(context.Context, patchtool.OutsideWorkspaceRequest) (patchtool.OutsideWorkspaceApproval, error) {
+			return patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionDeny}, nil
+		},
+		outsideWorkspaceReadApprover: func(context.Context, patchtool.OutsideWorkspaceRequest) (patchtool.OutsideWorkspaceApproval, error) {
+			return patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionDeny}, nil
+		},
+	}
+
+	for _, id := range tools.CatalogIDs() {
+		def, ok := tools.DefinitionFor(id)
+		if !ok || !def.AvailableInLocalRuntime() {
+			continue
+		}
+		handler, err := buildLocalRuntimeHandler(def, ctx)
+		if err != nil {
+			t.Fatalf("build local runtime handler for %s: %v", id, err)
+		}
+		if handler.Name() != id {
+			t.Fatalf("handler/name mismatch: got %s want %s", handler.Name(), id)
+		}
 	}
 }
 

@@ -4,26 +4,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"builder/internal/shared/textutil"
+	patchformat "builder/internal/tools/patch/format"
 	"builder/internal/transcript"
 	"mvdan.cc/sh/v3/syntax"
 )
 
 var sedPrintRangePattern = regexp.MustCompile(`^\d+(?:,\d+)?p$`)
 
-func localContract(request RequestExposure, presentation transcript.ToolPresentationKind, omitSuccessfulResult bool, buildCallMeta func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta, formatResult func(Result) string) Contract {
+func localContract(localBuilder LocalRuntimeBuilder, request RequestExposure, presentation transcript.ToolPresentationKind, renderBehavior transcript.ToolCallRenderBehavior, omitSuccessfulResult bool, buildCallMeta func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta, formatResult func(Result) string) Contract {
 	return Contract{
-		Runtime: RuntimeContract{Availability: RuntimeAvailabilityLocal},
+		Runtime: RuntimeContract{Availability: RuntimeAvailabilityLocal, LocalBuilder: localBuilder},
 		Request: request,
 		Transcript: TranscriptContract{
 			Presentation:         presentation,
+			RenderBehavior:       renderBehavior,
 			OmitSuccessfulResult: omitSuccessfulResult,
 			BuildCallMeta:        buildCallMeta,
 			FormatResult:         formatResult,
@@ -31,7 +31,7 @@ func localContract(request RequestExposure, presentation transcript.ToolPresenta
 	}
 }
 
-func hostedContract(request RequestExposure, presentation transcript.ToolPresentationKind, omitSuccessfulResult bool, nativeWebSearch bool, buildCallMeta func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta, formatResult func(Result) string, decodeHostedOutput func(HostedToolOutput) (HostedExecution, bool)) Contract {
+func hostedContract(request RequestExposure, presentation transcript.ToolPresentationKind, renderBehavior transcript.ToolCallRenderBehavior, omitSuccessfulResult bool, nativeWebSearch bool, buildCallMeta func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta, formatResult func(Result) string, decodeHostedOutput func(HostedToolOutput) (HostedExecution, bool)) Contract {
 	return Contract{
 		Runtime: RuntimeContract{
 			Availability:       RuntimeAvailabilityHosted,
@@ -41,6 +41,7 @@ func hostedContract(request RequestExposure, presentation transcript.ToolPresent
 		Request: request,
 		Transcript: TranscriptContract{
 			Presentation:         presentation,
+			RenderBehavior:       renderBehavior,
 			OmitSuccessfulResult: omitSuccessfulResult,
 			BuildCallMeta:        buildCallMeta,
 			FormatResult:         formatResult,
@@ -102,7 +103,7 @@ func askQuestionToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) t
 
 func patchToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
 	return func(ctx ToolCallContext, raw json.RawMessage) transcript.ToolCallMeta {
-		detail, compact, ok := parsePatchToolCall(raw, ctx.WorkingDir)
+		detail, compact, rendered, ok := parsePatchToolCall(raw, ctx.WorkingDir)
 		if !ok {
 			meta := defaultToolCallMeta(toolID)(ctx, raw)
 			meta.PatchSummary = meta.CompactText
@@ -116,6 +117,7 @@ func patchToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) transcr
 			CompactText:  compact,
 			PatchSummary: compact,
 			PatchDetail:  detail,
+			PatchRender:  rendered,
 			RenderHint:   &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
 		}
 	}
@@ -187,180 +189,25 @@ func parseAskQuestionToolCall(raw json.RawMessage) (string, []string, bool) {
 	return question, suggestions, true
 }
 
-func parsePatchToolCall(raw json.RawMessage, cwd string) (detail string, compact string, ok bool) {
+func parsePatchToolCall(raw json.RawMessage, cwd string) (detail string, compact string, rendered *patchformat.RenderedPatch, ok bool) {
 	var input map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &input); err != nil {
-		return "", "", false
+		return "", "", nil, false
 	}
 	patchRaw, ok := input["patch"]
 	if !ok {
-		return "", "", false
+		return "", "", nil, false
 	}
 	var patchText string
 	if err := json.Unmarshal(patchRaw, &patchText); err != nil {
-		return "", "", false
+		return "", "", nil, false
 	}
-	files := parsePatchFileViews(patchText, cwd)
-	if len(files) == 0 {
-		trimmedPatch := strings.TrimSpace(patchText)
-		if trimmedPatch == "" {
-			return "", "", false
-		}
-		return "Edited:\n" + trimmedPatch, "Edited:", true
+	trimmedPatch := strings.TrimSpace(patchText)
+	if trimmedPatch == "" {
+		return "", "", nil, false
 	}
-
-	formatSummaryLine := func(file patchFileView) string {
-		line := file.RelPath
-		if line == "" {
-			line = file.AbsPath
-		}
-		if file.Added > 0 {
-			line += fmt.Sprintf(" +%d", file.Added)
-		}
-		if file.Removed > 0 {
-			line += fmt.Sprintf(" -%d", file.Removed)
-		}
-		return line
-	}
-	formatDetailHeader := func(file patchFileView) string {
-		line := file.AbsPath
-		if line == "" {
-			line = file.RelPath
-		}
-		return line
-	}
-
-	if len(files) == 1 {
-		single := files[0]
-		detailLines := []string{"Edited: " + formatDetailHeader(single)}
-		detailLines = append(detailLines, single.Diff...)
-		compactLine := "Edited: " + formatSummaryLine(single)
-		return strings.Join(detailLines, "\n"), compactLine, true
-	}
-
-	compactLines := []string{"Edited:"}
-	detailLines := []string{"Edited:"}
-	for _, file := range files {
-		compactLines = append(compactLines, formatSummaryLine(file))
-		detailLines = append(detailLines, formatDetailHeader(file))
-		detailLines = append(detailLines, file.Diff...)
-	}
-	return strings.Join(detailLines, "\n"), strings.Join(compactLines, "\n"), true
-}
-
-type patchFileView struct {
-	AbsPath string
-	RelPath string
-	Added   int
-	Removed int
-	Diff    []string
-}
-
-func parsePatchFileViews(patchText, cwd string) []patchFileView {
-	lines := textutil.SplitLinesCRLF(patchText)
-	files := make([]patchFileView, 0, 8)
-	byAbs := make(map[string]int, 8)
-
-	resolve := func(path string) (string, string) {
-		p := strings.TrimSpace(path)
-		if p == "" {
-			return "", ""
-		}
-		var abs string
-		if filepath.IsAbs(p) {
-			abs = filepath.Clean(p)
-		} else if cwd != "" {
-			abs = filepath.Clean(filepath.Join(cwd, p))
-		} else {
-			abs = filepath.Clean(p)
-		}
-		abs = filepath.ToSlash(abs)
-		if cwd == "" {
-			return abs, "./" + filepath.ToSlash(strings.TrimPrefix(p, "./"))
-		}
-		rel, err := filepath.Rel(cwd, filepath.FromSlash(abs))
-		if err != nil {
-			return abs, filepath.ToSlash(p)
-		}
-		rel = filepath.ToSlash(rel)
-		if rel == "." {
-			return abs, "./"
-		}
-		if strings.HasPrefix(rel, "../") || rel == ".." {
-			return abs, filepath.ToSlash(p)
-		}
-		return abs, "./" + rel
-	}
-
-	getFile := func(path string) *patchFileView {
-		abs, rel := resolve(path)
-		if abs == "" {
-			return nil
-		}
-		if idx, ok := byAbs[abs]; ok {
-			return &files[idx]
-		}
-		files = append(files, patchFileView{AbsPath: abs, RelPath: rel, Diff: make([]string, 0, 32)})
-		idx := len(files) - 1
-		byAbs[abs] = idx
-		return &files[idx]
-	}
-
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-		switch {
-		case strings.HasPrefix(line, "*** Add File: "):
-			file := getFile(strings.TrimPrefix(line, "*** Add File: "))
-			for i+1 < len(lines) && !strings.HasPrefix(lines[i+1], "*** ") {
-				i++
-				row := lines[i]
-				if file == nil {
-					continue
-				}
-				if row == "" {
-					file.Diff = append(file.Diff, "")
-					continue
-				}
-				if strings.HasPrefix(row, "+") {
-					file.Added++
-				}
-				file.Diff = append(file.Diff, row)
-			}
-		case strings.HasPrefix(line, "*** Update File: "):
-			path := strings.TrimPrefix(line, "*** Update File: ")
-			if i+1 < len(lines) && strings.HasPrefix(lines[i+1], "*** Move to: ") {
-				i++
-				path = strings.TrimPrefix(lines[i], "*** Move to: ")
-			}
-			file := getFile(path)
-			for i+1 < len(lines) && !strings.HasPrefix(lines[i+1], "*** ") {
-				i++
-				row := lines[i]
-				if file == nil {
-					continue
-				}
-				if row == "" {
-					file.Diff = append(file.Diff, "")
-					continue
-				}
-				switch row[0] {
-				case '+':
-					file.Added++
-				case '-':
-					file.Removed++
-				}
-				file.Diff = append(file.Diff, row)
-			}
-		case strings.HasPrefix(line, "*** Delete File: "):
-			file := getFile(strings.TrimPrefix(line, "*** Delete File: "))
-			if file != nil {
-				file.Removed++
-				file.Diff = append(file.Diff, "-<deleted file>")
-			}
-		}
-	}
-
-	return files
+	r := patchformat.Render(patchText, cwd)
+	return r.DetailText(), r.SummaryText(), &r, true
 }
 
 func detectShellRenderHint(command string) *transcript.ToolRenderHint {

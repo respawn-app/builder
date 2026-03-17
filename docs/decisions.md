@@ -151,7 +151,7 @@
 - OAuth failure does not auto-fallback to API key.
 - OAuth tokens auto-refresh silently; only refresh failures are surfaced.
 - Global auth method can be switched only while idle.
-- Credential storage preference is OS secure store; plain-file fallback is allowed when secure-store integration is unavailable.
+- Auth credentials are stored in plain JSON under the persistence root (`auth.json`) with restrictive file permissions; no OS secure-store backend exists in v1.
 
 ## Configuration
 

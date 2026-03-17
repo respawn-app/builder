@@ -2,9 +2,7 @@ package tools
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
-	"time"
 
 	"builder/internal/transcript"
 )
@@ -61,32 +59,28 @@ type ToolCallContext struct {
 
 type TranscriptContract struct {
 	Presentation         transcript.ToolPresentationKind
+	RenderBehavior       transcript.ToolCallRenderBehavior
 	OmitSuccessfulResult bool
 	BuildCallMeta        func(ctx ToolCallContext, raw json.RawMessage) transcript.ToolCallMeta
 	FormatResult         func(Result) string
 }
 
-type LocalRuntimeContext struct {
-	WorkspaceRoot                   string
-	OwnerSessionID                  string
-	ShellDefaultTimeout             time.Duration
-	ShellOutputMaxChars             int
-	AllowNonCwdEdits                bool
-	SupportsVision                  bool
-	RegistryProvider                func() *Registry
-	AskQuestionBroker               any
-	BackgroundShellManager          any
-	OutsideWorkspaceEditApprover    any
-	OutsideWorkspaceReadApprover    any
-	ViewImageOutsideWorkspaceLogger any
-}
+type LocalRuntimeBuilder string
 
-type LocalRuntimeFactory func(LocalRuntimeContext) (Handler, error)
+const (
+	LocalRuntimeBuilderShell                LocalRuntimeBuilder = "shell"
+	LocalRuntimeBuilderExecCommand          LocalRuntimeBuilder = "exec_command"
+	LocalRuntimeBuilderWriteStdin           LocalRuntimeBuilder = "write_stdin"
+	LocalRuntimeBuilderViewImage            LocalRuntimeBuilder = "view_image"
+	LocalRuntimeBuilderPatch                LocalRuntimeBuilder = "patch"
+	LocalRuntimeBuilderAskQuestion          LocalRuntimeBuilder = "ask_question"
+	LocalRuntimeBuilderMultiToolUseParallel LocalRuntimeBuilder = "multi_tool_use_parallel"
+)
 
 type RuntimeContract struct {
 	Availability       RuntimeAvailability
 	NativeWebSearch    bool
-	LocalFactory       LocalRuntimeFactory
+	LocalBuilder       LocalRuntimeBuilder
 	DecodeHostedOutput func(HostedToolOutput) (HostedExecution, bool)
 }
 
@@ -100,18 +94,8 @@ func (d Definition) AvailableInLocalRuntime() bool {
 	return d.contract.Runtime.Availability == RuntimeAvailabilityLocal
 }
 
-func (d Definition) BuildLocalHandler(ctx LocalRuntimeContext) (Handler, error) {
-	if !d.AvailableInLocalRuntime() {
-		return nil, fmt.Errorf("tool %q is not available in local runtime", d.ID)
-	}
-	if d.contract.Runtime.LocalFactory == nil {
-		return nil, fmt.Errorf("missing runtime tool factory for %q", d.ID)
-	}
-	return d.contract.Runtime.LocalFactory(ctx)
-}
-
-func (d Definition) HasLocalRuntimeFactory() bool {
-	return d.contract.Runtime.LocalFactory != nil
+func (d Definition) LocalRuntimeBuilder() LocalRuntimeBuilder {
+	return d.contract.Runtime.LocalBuilder
 }
 
 func (d Definition) ExposedToModelRequest(supportsVision bool) bool {
@@ -127,8 +111,8 @@ func (d Definition) BuildToolCallMeta(ctx ToolCallContext, raw json.RawMessage) 
 	if meta.Presentation == "" {
 		meta.Presentation = d.contract.Transcript.Presentation
 	}
-	if meta.Presentation == transcript.ToolPresentationShell {
-		meta.IsShell = true
+	if meta.RenderBehavior == "" {
+		meta.RenderBehavior = d.contract.Transcript.RenderBehavior
 	}
 	if strings.TrimSpace(meta.CompactText) == "" {
 		meta.CompactText = strings.TrimSpace(meta.Command)
@@ -139,7 +123,7 @@ func (d Definition) BuildToolCallMeta(ctx ToolCallContext, raw json.RawMessage) 
 	if d.contract.Transcript.OmitSuccessfulResult {
 		meta.OmitSuccessfulResult = true
 	}
-	return meta
+	return transcript.NormalizeToolCallMeta(meta)
 }
 
 func (d Definition) FormatToolInput(ctx ToolCallContext, raw json.RawMessage) (string, string) {
@@ -169,50 +153,58 @@ func DefinitionFor(id ID) (Definition, bool) {
 	return definitionFor(id)
 }
 
-func ValidateLocalRuntimeFactoryCoverage() error {
-	for _, id := range CatalogIDs() {
-		def, ok := definitionFor(id)
-		if !ok {
-			return fmt.Errorf("missing tool definition for %q", id)
-		}
-		if !def.AvailableInLocalRuntime() {
-			continue
-		}
-		if !def.HasLocalRuntimeFactory() {
-			return fmt.Errorf("local runtime tool %q is missing a registered factory", id)
-		}
+func definitionForToolName(toolName string) (Definition, bool) {
+	id, ok := ParseID(strings.TrimSpace(toolName))
+	if !ok {
+		return Definition{}, false
 	}
-	return nil
+	return definitionFor(id)
+}
+
+func fallbackToolCallMeta(toolName string, raw json.RawMessage) transcript.ToolCallMeta {
+	command := strings.TrimSpace(string(raw))
+	if command == "" {
+		command = defaultToolCallFallback
+	}
+	return transcript.NormalizeToolCallMeta(transcript.ToolCallMeta{
+		ToolName:       strings.TrimSpace(toolName),
+		Presentation:   transcript.ToolPresentationDefault,
+		RenderBehavior: transcript.ToolCallRenderBehaviorDefault,
+		Command:        command,
+		CompactText:    command,
+	})
 }
 
 func BuildCallTranscriptMeta(toolName string, ctx ToolCallContext, raw json.RawMessage) transcript.ToolCallMeta {
-	id, ok := ParseID(strings.TrimSpace(toolName))
+	def, ok := definitionForToolName(toolName)
 	if !ok {
-		command := strings.TrimSpace(string(raw))
-		if command == "" {
-			command = defaultToolCallFallback
-		}
-		return transcript.ToolCallMeta{
-			ToolName:     strings.TrimSpace(toolName),
-			Presentation: transcript.ToolPresentationDefault,
-			Command:      command,
-			CompactText:  command,
-		}
-	}
-	def, ok := definitionFor(id)
-	if !ok {
-		command := strings.TrimSpace(string(raw))
-		if command == "" {
-			command = defaultToolCallFallback
-		}
-		return transcript.ToolCallMeta{
-			ToolName:     string(id),
-			Presentation: transcript.ToolPresentationDefault,
-			Command:      command,
-			CompactText:  command,
-		}
+		return fallbackToolCallMeta(toolName, raw)
 	}
 	return def.BuildToolCallMeta(ctx, raw)
+}
+
+func FormatToolInputByName(toolName string, ctx ToolCallContext, raw json.RawMessage) (string, string) {
+	def, ok := definitionForToolName(toolName)
+	if !ok {
+		meta := fallbackToolCallMeta(toolName, raw)
+		return strings.TrimSpace(meta.Command), strings.TrimSpace(meta.InlineMeta)
+	}
+	return def.FormatToolInput(ctx, raw)
+}
+
+func FormatToolResultByName(toolName string, raw json.RawMessage, isError bool) string {
+	def, ok := definitionForToolName(toolName)
+	if ok {
+		return def.FormatToolResult(Result{Name: def.ID, Output: raw, IsError: isError})
+	}
+	output := strings.TrimSpace(FormatGenericOutput(raw))
+	if output == "" {
+		if isError {
+			return "tool failed"
+		}
+		return "done"
+	}
+	return output
 }
 
 func DefinitionsFor(ids []ID) []Definition {
@@ -246,6 +238,13 @@ func RequestExposedDefinitions(ids []ID, supportsVision bool) []Definition {
 	return FilterRequestExposedDefinitions(DefinitionsFor(ids), supportsVision)
 }
 
+func RequestExposedDefinitionsForSession(enabled []ID, registered []Definition, supportsVision bool) []Definition {
+	if len(enabled) > 0 {
+		return RequestExposedDefinitions(enabled, supportsVision)
+	}
+	return FilterRequestExposedDefinitions(registered, supportsVision)
+}
+
 func NeedsNativeWebSearch(ids []ID, mode string) bool {
 	for _, def := range DefinitionsFor(ids) {
 		if def.EnablesNativeWebSearch(mode) {
@@ -256,52 +255,25 @@ func NeedsNativeWebSearch(ids []ID, mode string) bool {
 }
 
 func FormatToolResultForTranscript(result Result) string {
-	if def, ok := definitionFor(result.Name); ok {
-		return def.FormatToolResult(result)
-	}
-	output := strings.TrimSpace(FormatGenericOutput(result.Output))
-	if output == "" {
-		if result.IsError {
-			return "tool failed"
-		}
-		return "done"
-	}
-	return output
+	return FormatToolResultByName(string(result.Name), result.Output, result.IsError)
 }
 
-func BuildLocalRuntimeRegistry(enabled []ID, ctx LocalRuntimeContext) (*Registry, error) {
-	if err := ValidateLocalRuntimeFactoryCoverage(); err != nil {
-		return nil, err
+func HostedExecutionsFromOutputs(items []HostedToolOutput, defs []Definition) []HostedExecution {
+	if len(items) == 0 || len(defs) == 0 {
+		return nil
 	}
-	enabledSet := make(map[ID]struct{}, len(enabled))
-	for _, id := range enabled {
-		enabledSet[id] = struct{}{}
+	out := make([]HostedExecution, 0, len(items))
+	for _, item := range items {
+		for _, def := range defs {
+			execution, ok := def.DecodeHostedOutput(item)
+			if !ok {
+				continue
+			}
+			out = append(out, execution)
+			break
+		}
 	}
-	handlers := make([]Handler, 0, len(enabledSet))
-	var registry *Registry
-	ctx.RegistryProvider = func() *Registry { return registry }
-	for _, id := range CatalogIDs() {
-		if _, ok := enabledSet[id]; !ok {
-			continue
-		}
-		def, ok := definitionFor(id)
-		if !ok {
-			return nil, fmt.Errorf("missing tool definition for %q", id)
-		}
-		if !def.AvailableInLocalRuntime() {
-			continue
-		}
-		handler, err := def.BuildLocalHandler(ctx)
-		if err != nil {
-			return nil, err
-		}
-		handlers = append(handlers, handler)
-		registry = NewRegistry(handlers...)
-	}
-	if registry == nil {
-		return NewRegistry(), nil
-	}
-	return registry, nil
+	return out
 }
 
 func FormatGenericOutput(raw json.RawMessage) string {
@@ -345,31 +317,4 @@ func CompactToolCallText(meta *transcript.ToolCallMeta, text string) string {
 		return defaultToolCallFallback
 	}
 	return command
-}
-
-func RegisterLocalRuntimeFactory(id ID, factory LocalRuntimeFactory) {
-	if factory == nil {
-		panic("runtime tool factory is nil for " + string(id))
-	}
-	def, ok := definitions[id]
-	if !ok {
-		panic("runtime tool factory references unknown tool " + string(id))
-	}
-	if def.contract.Runtime.Availability != RuntimeAvailabilityLocal {
-		panic("runtime tool factory registered for non-local tool " + string(id))
-	}
-	if def.contract.Runtime.LocalFactory != nil {
-		panic("runtime tool factory already registered for " + string(id))
-	}
-	def.contract.Runtime.LocalFactory = factory
-	definitions[id] = def
-}
-
-func ResolveLocalRuntimeDependency[T any](value any, name string) (T, error) {
-	resolved, ok := value.(T)
-	if ok {
-		return resolved, nil
-	}
-	var zero T
-	return zero, fmt.Errorf("%s is unavailable", name)
 }

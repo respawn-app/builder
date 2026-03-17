@@ -23,8 +23,10 @@ var catalogEntries = []CatalogEntry{
 		Description:    "Execute a shell command in the user's environment and device.",
 		DefaultEnabled: true,
 		Contract: localContract(
+			LocalRuntimeBuilderShell,
 			RequestExposure{Enabled: true},
 			transcript.ToolPresentationShell,
+			transcript.ToolCallRenderBehaviorShell,
 			false,
 			shellToolCallMeta(ToolShell),
 			formatGenericToolResult,
@@ -58,8 +60,10 @@ var catalogEntries = []CatalogEntry{
 		Description:    "Runs a command in the user's default shell, returning output or a session ID for ongoing interaction.",
 		DefaultEnabled: true,
 		Contract: localContract(
+			LocalRuntimeBuilderExecCommand,
 			RequestExposure{Enabled: true},
 			transcript.ToolPresentationShell,
+			transcript.ToolCallRenderBehaviorShell,
 			false,
 			shellToolCallMeta(ToolExecCommand),
 			formatGenericToolResult,
@@ -106,8 +110,10 @@ var catalogEntries = []CatalogEntry{
 		Description:    "Writes characters to an existing exec_command session and returns recent output. Use empty chars to poll.",
 		DefaultEnabled: true,
 		Contract: localContract(
+			LocalRuntimeBuilderWriteStdin,
 			RequestExposure{Enabled: true},
 			transcript.ToolPresentationShell,
+			transcript.ToolCallRenderBehaviorShell,
 			false,
 			shellToolCallMeta(ToolWriteStdin),
 			formatGenericToolResult,
@@ -142,8 +148,10 @@ var catalogEntries = []CatalogEntry{
 		Description:    "Read a local image or PDF file by path and attach it to the model as native multimodal input content.",
 		DefaultEnabled: true,
 		Contract: localContract(
+			LocalRuntimeBuilderViewImage,
 			RequestExposure{Enabled: true, RequiresVision: true},
 			transcript.ToolPresentationDefault,
+			transcript.ToolCallRenderBehaviorDefault,
 			false,
 			defaultToolCallMeta(ToolViewImage),
 			formatViewImageToolResult,
@@ -166,8 +174,10 @@ var catalogEntries = []CatalogEntry{
 		Description:    "Apply a freeform patch.",
 		DefaultEnabled: true,
 		Contract: localContract(
+			LocalRuntimeBuilderPatch,
 			RequestExposure{Enabled: true},
 			transcript.ToolPresentationDefault,
+			transcript.ToolCallRenderBehaviorDefault,
 			true,
 			patchToolCallMeta(ToolPatch),
 			formatPatchToolResult,
@@ -190,8 +200,10 @@ var catalogEntries = []CatalogEntry{
 		Description:    "Ask the user a question. You should ask the user when planning your work or working to make product decisions, resolve ambiguities, define missing pieces that you cannot resolve by yourself, brainstorming with the user. You should ask the user a lot of questions when you're planning/brainstorming together to learn their desires, preferences, design, product vision, or implementation approach, and sometimes ask them questions when already working if you encounter a problem you can't resolve, a caveat, an undefined area that materially affects the result or direction of your work, etc. You should avoid asking the user obvious or harmless questions like 'Should I run tests?' or 'Where is file X?' which you can answer yourself. Each question pings the user, so treat it like pinging a coworker on Slack: unless they're actively chatting with you, pinging them could distract them. Stick to ONE question per this tool call, for multiple questions call this tool in parallel. Strive to provide multiple suggestions/options with every question if you can.",
 		DefaultEnabled: true,
 		Contract: localContract(
+			LocalRuntimeBuilderAskQuestion,
 			RequestExposure{Enabled: true},
 			transcript.ToolPresentationAskQuestion,
+			transcript.ToolCallRenderBehaviorAskQuestion,
 			false,
 			askQuestionToolCallMeta(ToolAskQuestion),
 			formatGenericToolResult,
@@ -221,6 +233,7 @@ var catalogEntries = []CatalogEntry{
 		Contract: hostedContract(
 			RequestExposure{Enabled: false},
 			transcript.ToolPresentationDefault,
+			transcript.ToolCallRenderBehaviorDefault,
 			false,
 			true,
 			defaultToolCallMeta(ToolWebSearch),
@@ -255,8 +268,10 @@ var catalogEntries = []CatalogEntry{
 		Description:    "Use this function to run multiple tools simultaneously, but only if they can operate in parallel.",
 		DefaultEnabled: true,
 		Contract: localContract(
+			LocalRuntimeBuilderMultiToolUseParallel,
 			RequestExposure{Enabled: true},
 			transcript.ToolPresentationDefault,
+			transcript.ToolCallRenderBehaviorDefault,
 			false,
 			defaultToolCallMeta(ToolMultiToolUseParallel),
 			formatGenericToolResult,
@@ -361,6 +376,12 @@ func validateCatalogEntry(entry CatalogEntry) {
 	if entry.Contract.Runtime.Availability == RuntimeAvailabilityHosted && entry.Contract.Runtime.DecodeHostedOutput == nil {
 		panic("hosted tool contract is missing hosted output decoder for " + string(entry.ID))
 	}
+	if entry.Contract.Runtime.Availability == RuntimeAvailabilityLocal && entry.Contract.Runtime.LocalBuilder == "" {
+		panic("local tool contract is missing local runtime builder for " + string(entry.ID))
+	}
+	if entry.Contract.Runtime.Availability == RuntimeAvailabilityHosted && entry.Contract.Runtime.LocalBuilder != "" {
+		panic("hosted tool contract must not declare a local runtime builder for " + string(entry.ID))
+	}
 	if entry.Contract.Transcript.BuildCallMeta == nil {
 		panic("tool contract is missing transcript call metadata builder for " + string(entry.ID))
 	}
@@ -369,5 +390,8 @@ func validateCatalogEntry(entry CatalogEntry) {
 	}
 	if entry.Contract.Transcript.Presentation == "" {
 		panic("tool contract is missing transcript presentation for " + string(entry.ID))
+	}
+	if entry.Contract.Transcript.RenderBehavior == "" {
+		panic("tool contract is missing transcript render behavior for " + string(entry.ID))
 	}
 }

@@ -108,6 +108,9 @@ func TestDefinitionContractsDriveRuntimeAndRequestExposure(t *testing.T) {
 	if !shell.AvailableInLocalRuntime() {
 		t.Fatalf("expected %s to be available in local runtime", ToolShell)
 	}
+	if shell.LocalRuntimeBuilder() != LocalRuntimeBuilderShell {
+		t.Fatalf("expected %s local runtime builder, got %q", ToolShell, shell.LocalRuntimeBuilder())
+	}
 	if !shell.ExposedToModelRequest(false) {
 		t.Fatalf("expected %s to be request-exposed without vision", ToolShell)
 	}
@@ -118,6 +121,9 @@ func TestDefinitionContractsDriveRuntimeAndRequestExposure(t *testing.T) {
 	}
 	if !viewImage.AvailableInLocalRuntime() {
 		t.Fatalf("expected %s to be available in local runtime", ToolViewImage)
+	}
+	if viewImage.LocalRuntimeBuilder() != LocalRuntimeBuilderViewImage {
+		t.Fatalf("expected %s local runtime builder, got %q", ToolViewImage, viewImage.LocalRuntimeBuilder())
 	}
 	if viewImage.ExposedToModelRequest(false) {
 		t.Fatalf("expected %s to remain hidden without vision support", ToolViewImage)
@@ -132,6 +138,9 @@ func TestDefinitionContractsDriveRuntimeAndRequestExposure(t *testing.T) {
 	}
 	if webSearch.AvailableInLocalRuntime() {
 		t.Fatalf("expected %s to remain hosted-only", ToolWebSearch)
+	}
+	if webSearch.LocalRuntimeBuilder() != "" {
+		t.Fatalf("expected %s to have no local runtime builder, got %q", ToolWebSearch, webSearch.LocalRuntimeBuilder())
 	}
 	if webSearch.ExposedToModelRequest(true) {
 		t.Fatalf("expected %s to stay hidden from request tool declarations", ToolWebSearch)
@@ -150,6 +159,9 @@ func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 	if !shellMeta.IsShell || shellMeta.Presentation != "shell" {
 		t.Fatalf("expected shell contract to mark shell presentation, got %+v", shellMeta)
 	}
+	if shellMeta.RenderBehavior != "shell" {
+		t.Fatalf("expected shell render behavior, got %+v", shellMeta)
+	}
 	if shellMeta.Command != "pwd" || shellMeta.CompactText != "pwd" {
 		t.Fatalf("unexpected shell transcript metadata: %+v", shellMeta)
 	}
@@ -165,6 +177,9 @@ func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 	if patchMeta.PatchSummary == "" || patchMeta.PatchDetail == "" {
 		t.Fatalf("expected patch transcript metadata, got %+v", patchMeta)
 	}
+	if patchMeta.PatchRender == nil {
+		t.Fatalf("expected typed patch render metadata, got %+v", patchMeta)
+	}
 	if patchMeta.CompactText != patchMeta.PatchSummary || patchMeta.Command != patchMeta.PatchDetail {
 		t.Fatalf("expected patch aliases normalized, got %+v", patchMeta)
 	}
@@ -173,6 +188,9 @@ func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 	askMeta := askQuestion.BuildToolCallMeta(ToolCallContext{}, json.RawMessage(`{"question":"Choose scope?","suggestions":["Recommended: full"]}`))
 	if askMeta.Presentation != "ask_question" {
 		t.Fatalf("expected ask_question presentation, got %+v", askMeta)
+	}
+	if askMeta.RenderBehavior != "ask_question" {
+		t.Fatalf("expected ask_question render behavior, got %+v", askMeta)
 	}
 	if askMeta.Question != "Choose scope?" || len(askMeta.Suggestions) != 1 {
 		t.Fatalf("unexpected ask_question transcript metadata: %+v", askMeta)

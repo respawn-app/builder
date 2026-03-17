@@ -1,12 +1,23 @@
 package tui
 
 import (
+	patchformat "builder/internal/tools/patch/format"
 	"builder/internal/transcript"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
 )
+
+func renderedPatch(t *testing.T, cwd string, patchLines ...string) *patchformat.RenderedPatch {
+	t.Helper()
+	rendered := patchformat.Render(strings.Join(patchLines, "\n")+"\n", cwd)
+	return &rendered
+}
+
+func renderedDiff(lines ...patchformat.RenderedLine) *patchformat.RenderedPatch {
+	return &patchformat.RenderedPatch{DetailLines: lines}
+}
 
 func TestCodeRendererRendersSourceWhenPathHintIsProvided(t *testing.T) {
 	r := newCodeRenderer("dark")
@@ -30,7 +41,13 @@ func TestCodeRendererRendersDiffWhenDiffHintIsProvided(t *testing.T) {
 	if out, ok := r.render(hint, "Edited:\n./main.go\n-func main() {}\n+package main"); ok || out != "" {
 		t.Fatalf("expected width-aware diff rendering path only, got ok=%v out=%q", ok, out)
 	}
-	lines, ok := r.renderDiffLines("Edited:\n./main.go\n-func main() {}\n+package main", 120)
+	lines, ok := r.renderDiffLines(renderedPatch(t, "/workspace",
+		"*** Begin Patch",
+		"*** Update File: main.go",
+		"-func main() {}",
+		"+package main",
+		"*** End Patch",
+	), 120)
 	if !ok {
 		t.Fatal("expected diff highlight to render")
 	}
@@ -53,7 +70,12 @@ func TestCodeRendererRendersDiffWhenDiffHintIsProvided(t *testing.T) {
 
 func TestCodeRendererRendersDiffWithCodeSyntaxForDetectedPath(t *testing.T) {
 	r := newCodeRenderer("dark")
-	lines, ok := r.renderDiffLines("Edited:\n./main.go\n+package main", 120)
+	lines, ok := r.renderDiffLines(renderedPatch(t, "/workspace",
+		"*** Begin Patch",
+		"*** Update File: main.go",
+		"+package main",
+		"*** End Patch",
+	), 120)
 	if !ok {
 		t.Fatal("expected diff highlight to render")
 	}
@@ -73,14 +95,19 @@ func TestCodeRendererRendersDiffWithCodeSyntaxForDetectedPath(t *testing.T) {
 	}
 }
 
-func TestRenderDiffLinesUsesSummaryPathForLexerSelection(t *testing.T) {
+func TestRenderDiffLinesUsesTypedPathForLexerSelection(t *testing.T) {
 	r := newCodeRenderer("dark")
-	lines, ok := r.renderDiffLines("Edited:\n./main.go +12 -3\n+package main", 120)
+	lines, ok := r.renderDiffLines(renderedPatch(t, "/workspace",
+		"*** Begin Patch",
+		"*** Update File: main.go",
+		"+package main",
+		"*** End Patch",
+	), 120)
 	if !ok {
 		t.Fatal("expected diff lines to render")
 	}
-	if len(lines) < 3 {
-		t.Fatalf("expected at least 3 rendered lines, got %d", len(lines))
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 rendered lines, got %d", len(lines))
 	}
 	added := lines[len(lines)-1].Text
 	if !strings.HasPrefix(ansi.Strip(added), "+package main") {
@@ -93,7 +120,14 @@ func TestRenderDiffLinesUsesSummaryPathForLexerSelection(t *testing.T) {
 
 func TestRenderDiffLinesKeepsPreviousLexerWhenNextPathHasNoMatch(t *testing.T) {
 	r := newCodeRenderer("dark")
-	lines, ok := r.renderDiffLines("Edited:\n./main.go\n+package main\n./path/without_extension\n+func main() {}", 120)
+	lines, ok := r.renderDiffLines(renderedPatch(t, "/workspace",
+		"*** Begin Patch",
+		"*** Update File: main.go",
+		"+package main",
+		"*** Update File: path/without_extension",
+		"+func main() {}",
+		"*** End Patch",
+	), 120)
 	if !ok {
 		t.Fatal("expected diff lines to render")
 	}
@@ -111,15 +145,21 @@ func TestRenderDiffLinesKeepsPreviousLexerWhenNextPathHasNoMatch(t *testing.T) {
 
 func TestRenderDiffLinesHighlightsGoForAbsoluteDetailPath(t *testing.T) {
 	r := newCodeRenderer("dark")
-	lines, ok := r.renderDiffLines("Edited:\n/Users/nek/project/main.go\n+package main\n+func main() {}", 120)
+	lines, ok := r.renderDiffLines(renderedPatch(t, "/Users/nek/project",
+		"*** Begin Patch",
+		"*** Update File: main.go",
+		"+package main",
+		"+func main() {}",
+		"*** End Patch",
+	), 120)
 	if !ok {
 		t.Fatal("expected diff lines to render")
 	}
-	if len(lines) < 4 {
-		t.Fatalf("expected at least 4 rendered lines, got %d", len(lines))
+	if len(lines) < 3 {
+		t.Fatalf("expected at least 3 rendered lines, got %d", len(lines))
 	}
-	addedKeyword := lines[2].Text
-	addedFunc := lines[3].Text
+	addedKeyword := lines[1].Text
+	addedFunc := lines[2].Text
 	if !strings.Contains(addedKeyword, "\x1b[") || !strings.Contains(addedFunc, "\x1b[") {
 		t.Fatalf("expected go syntax highlighting for absolute detail path lines, got %q / %q", addedKeyword, addedFunc)
 	}
@@ -127,7 +167,11 @@ func TestRenderDiffLinesHighlightsGoForAbsoluteDetailPath(t *testing.T) {
 
 func TestRenderDiffLinesFallsBackToAnalyseWhenNoPathLexer(t *testing.T) {
 	r := newCodeRenderer("dark")
-	lines, ok := r.renderDiffLines("Edited:\n+package main\n+func main() {}", 120)
+	lines, ok := r.renderDiffLines(renderedDiff(
+		patchformat.RenderedLine{Kind: patchformat.RenderedLineKindHeader, Text: "Edited:", FileIndex: -1},
+		patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+package main", FileIndex: -1},
+		patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+func main() {}", FileIndex: -1},
+	), 120)
 	if !ok {
 		t.Fatal("expected diff lines to render")
 	}
@@ -141,14 +185,20 @@ func TestRenderDiffLinesFallsBackToAnalyseWhenNoPathLexer(t *testing.T) {
 
 func TestRenderDiffLinesPreservesMultilineLexerContext(t *testing.T) {
 	r := newCodeRenderer("dark")
-	lines, ok := r.renderDiffLines("Edited:\n./main.go\n+var s = `hello\n+world`", 120)
+	lines, ok := r.renderDiffLines(renderedPatch(t, "/workspace",
+		"*** Begin Patch",
+		"*** Update File: main.go",
+		"+var s = `hello",
+		"+world`",
+		"*** End Patch",
+	), 120)
 	if !ok {
 		t.Fatal("expected diff lines to render")
 	}
-	if len(lines) < 4 {
-		t.Fatalf("expected at least 4 lines, got %d", len(lines))
+	if len(lines) < 3 {
+		t.Fatalf("expected at least 3 lines, got %d", len(lines))
 	}
-	secondStringLine := lines[3].Text
+	secondStringLine := lines[2].Text
 	if !strings.HasPrefix(ansi.Strip(secondStringLine), "+world`") {
 		t.Fatalf("expected second string line preserved, got %q", ansi.Strip(secondStringLine))
 	}
@@ -159,7 +209,12 @@ func TestRenderDiffLinesPreservesMultilineLexerContext(t *testing.T) {
 
 func TestRenderDiffLinesWrapContinuationUsesSpacePrefix(t *testing.T) {
 	r := newCodeRenderer("dark")
-	lines, ok := r.renderDiffLines("Edited:\n./main.go\n+package main longidentifier longidentifier longidentifier", 24)
+	lines, ok := r.renderDiffLines(renderedPatch(t, "/workspace",
+		"*** Begin Patch",
+		"*** Update File: main.go",
+		"+package main longidentifier longidentifier longidentifier",
+		"*** End Patch",
+	), 24)
 	if !ok {
 		t.Fatal("expected diff lines to render")
 	}
@@ -187,25 +242,38 @@ func TestRenderDiffLinesWrapContinuationUsesSpacePrefix(t *testing.T) {
 
 func TestRenderDiffLinesMixedBlockKeepsHighlighting(t *testing.T) {
 	r := newCodeRenderer("dark")
-	lines, ok := r.renderDiffLines("Edited:\n./main.go\n+var s = `hello\n world`", 120)
+	lines, ok := r.renderDiffLines(renderedPatch(t, "/workspace",
+		"*** Begin Patch",
+		"*** Update File: main.go",
+		"+var s = `hello",
+		" world`",
+		"*** End Patch",
+	), 120)
 	if !ok {
 		t.Fatal("expected diff lines to render")
 	}
-	if len(lines) < 4 {
-		t.Fatalf("expected at least 4 lines, got %d", len(lines))
+	if len(lines) < 3 {
+		t.Fatalf("expected at least 3 lines, got %d", len(lines))
+	}
+	if !strings.Contains(lines[1].Text, "\x1b[38;") {
+		t.Fatalf("expected added line to stay syntax-highlighted, got %q", lines[1].Text)
 	}
 	if !strings.Contains(lines[2].Text, "\x1b[38;") {
-		t.Fatalf("expected added line to stay syntax-highlighted, got %q", lines[2].Text)
-	}
-	if !strings.Contains(lines[3].Text, "\x1b[38;") {
-		t.Fatalf("expected context line to stay syntax-highlighted, got %q", lines[3].Text)
+		t.Fatalf("expected context line to stay syntax-highlighted, got %q", lines[2].Text)
 	}
 }
 
 func TestRenderDiffLinesMultipleHunksKeepHighlightingForRemovals(t *testing.T) {
 	r := newCodeRenderer("dark")
-	input := "Edited: /Users/nek/Developer/builder-cli/internal/tui/code_renderer_test.go\n@@\n+package main\n@@\n-func removed() {}"
-	lines, ok := r.renderDiffLines(input, 120)
+	lines, ok := r.renderDiffLines(renderedPatch(t, "/Users/nek/Developer/builder-cli",
+		"*** Begin Patch",
+		"*** Update File: internal/tui/code_renderer_test.go",
+		"@@",
+		"+package main",
+		"@@",
+		"-func removed() {}",
+		"*** End Patch",
+	), 120)
 	if !ok {
 		t.Fatal("expected diff lines to render")
 	}
@@ -236,7 +304,12 @@ func TestRenderDiffLinesMultipleHunksKeepHighlightingForRemovals(t *testing.T) {
 
 func TestRenderDiffLinesWrapsBeforeHighlighting(t *testing.T) {
 	r := newCodeRenderer("dark")
-	lines, ok := r.renderDiffLines("Edited:\n./main.go\n+package main", 8)
+	lines, ok := r.renderDiffLines(renderedPatch(t, "/workspace",
+		"*** Begin Patch",
+		"*** Update File: main.go",
+		"+package main",
+		"*** End Patch",
+	), 8)
 	if !ok {
 		t.Fatal("expected wrapped diff lines")
 	}
@@ -250,33 +323,6 @@ func TestRenderDiffLinesWrapsBeforeHighlighting(t *testing.T) {
 	joined := strings.Join(plainJoined, "\n")
 	if !strings.Contains(joined, "+package") || !strings.Contains(joined, " main") {
 		t.Fatalf("expected wrapped added code line with spaced continuation marker, got %q", joined)
-	}
-}
-
-func TestDetectDiffPathIgnoresNonPathLines(t *testing.T) {
-	if _, ok := detectDiffPath("foo.bar is not a path line"); ok {
-		t.Fatal("expected non-path prose line to be ignored")
-	}
-	if path, ok := detectDiffPath("Edited: /Users/nek/Developer/builder-cli/internal/tui/code_renderer_test.go"); !ok || path != "/Users/nek/Developer/builder-cli/internal/tui/code_renderer_test.go" {
-		t.Fatalf("expected Edited absolute path header to be detected, got ok=%v path=%q", ok, path)
-	}
-	if path, ok := detectDiffPath("./cmd/builder/main.go +12 -3"); !ok || path != "./cmd/builder/main.go" {
-		t.Fatalf("expected patch summary path line to strip counters, got ok=%v path=%q", ok, path)
-	}
-	if path, ok := detectDiffPath("./cmd/builder/main.go"); !ok || path != "./cmd/builder/main.go" {
-		t.Fatalf("expected explicit patch path line to be detected, got ok=%v path=%q", ok, path)
-	}
-	if path, ok := detectDiffPath("diff --git a/internal/tui/model.go b/internal/tui/model.go"); !ok || path != "internal/tui/model.go" {
-		t.Fatalf("expected git diff path line to be detected, got ok=%v path=%q", ok, path)
-	}
-}
-
-func TestNormalizeDiffPathLineStripsPatchCountSuffixTokens(t *testing.T) {
-	if got := normalizeDiffPathLine("./f.go +1 -2 +3"); got != "./f.go" {
-		t.Fatalf("expected all trailing patch counters stripped, got %q", got)
-	}
-	if got := normalizeDiffPathLine("   ./f.go   +1   -2   "); got != "./f.go" {
-		t.Fatalf("expected spacing-tolerant patch counter stripping, got %q", got)
 	}
 }
 

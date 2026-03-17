@@ -1,25 +1,13 @@
 package patch
 
-type Document struct {
-	Hunks []any
-}
+import patchformat "builder/internal/tools/patch/format"
 
-type AddFile struct {
-	Path    string
-	Content []string
-}
+type Document = patchformat.Document
 
-type DeleteFile struct {
-	Path string
-}
+type AddFile = patchformat.AddFile
 
-type UpdateFile struct {
-	Path    string
-	MoveTo  string
-	Changes []ChangeLine
-}
+type DeleteFile = patchformat.DeleteFile
 
-type ChangeLine struct {
-	Kind    rune
-	Content string
-}
+type UpdateFile = patchformat.UpdateFile
+
+type ChangeLine = patchformat.ChangeLine
