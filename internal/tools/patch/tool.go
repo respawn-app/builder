@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"builder/internal/tools"
+	patchformat "builder/internal/tools/patch/format"
 )
 
 type input struct {
@@ -25,21 +26,6 @@ type Tool struct {
 	outsideWorkspaceApprover     OutsideWorkspaceApprover
 	outsideWorkspaceSessionMu    sync.RWMutex
 	outsideWorkspaceSessionAllow bool
-}
-
-func init() {
-	tools.RegisterLocalRuntimeFactory(tools.ToolPatch, func(ctx tools.LocalRuntimeContext) (tools.Handler, error) {
-		approver, err := tools.ResolveLocalRuntimeDependency[OutsideWorkspaceApprover](ctx.OutsideWorkspaceEditApprover, "patch outside-workspace approver")
-		if err != nil {
-			return nil, err
-		}
-		return New(
-			ctx.WorkspaceRoot,
-			true,
-			WithAllowOutsideWorkspace(ctx.AllowNonCwdEdits),
-			WithOutsideWorkspaceApprover(approver),
-		)
-	})
 }
 
 func New(workspaceRoot string, workspaceOnly bool, opts ...Option) (*Tool, error) {
@@ -77,7 +63,7 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 		return tools.ErrorResult(c, "patch is required"), nil
 	}
 
-	doc, err := parse(in.Patch)
+	doc, err := patchformat.Parse(in.Patch)
 	if err != nil {
 		return tools.ErrorResult(c, err.Error()), nil
 	}

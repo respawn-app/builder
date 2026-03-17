@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	patchformat "builder/internal/tools/patch/format"
 	"builder/internal/transcript"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/formatters"
@@ -87,18 +88,19 @@ func (r *codeRenderer) render(hint *transcript.ToolRenderHint, text string) (str
 	return rendered, true
 }
 
-func (r *codeRenderer) renderDiffLines(text string, width int) ([]diffRenderedLine, bool) {
-	if strings.TrimSpace(text) == "" {
+func (r *codeRenderer) renderDiffLines(renderedPatch *patchformat.RenderedPatch, width int) ([]diffRenderedLine, bool) {
+	if renderedPatch == nil || len(renderedPatch.DetailLines) == 0 {
 		return nil, false
 	}
 	if width < 1 {
 		width = 1
 	}
+	text := renderedPatch.DetailText()
 	key := fmt.Sprintf("%s|diff|w=%d|%x", r.theme, width, hashString(text))
 	if cached, ok := r.diffCache[key]; ok {
 		return append([]diffRenderedLine(nil), cached...), true
 	}
-	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	lines := renderedPatch.DetailLines
 	out := make([]diffRenderedLine, 0, len(lines))
 	var currentLexer chroma.Lexer
 	var inferredLexer chroma.Lexer
@@ -157,31 +159,31 @@ func (r *codeRenderer) renderDiffLines(text string, width int) ([]diffRenderedLi
 		}
 	}
 	for _, line := range lines {
-		if path, ok := detectDiffPath(line); ok {
+		if line.Kind == patchformat.RenderedLineKindFile {
 			flushPending()
-			if lexer := lexers.Match(path); lexer != nil {
+			if lexer := lexers.Match(strings.TrimSpace(line.Path)); lexer != nil {
 				currentLexer = lexer
 				inferredLexer = nil
 			}
-			for _, chunk := range splitLines(wrapTextForViewport(line, width)) {
+			for _, chunk := range splitLines(wrapTextForViewport(line.Text, width)) {
 				out = append(out, diffRenderedLine{Kind: diffRenderMeta, Text: chunk})
 			}
 			continue
 		}
-		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-			appendPending(diffRenderAdd, line[1:])
+		if line.Kind == patchformat.RenderedLineKindDiff && strings.HasPrefix(line.Text, "+") && !strings.HasPrefix(line.Text, "+++") {
+			appendPending(diffRenderAdd, line.Text[1:])
 			continue
 		}
-		if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
-			appendPending(diffRenderRemove, line[1:])
+		if line.Kind == patchformat.RenderedLineKindDiff && strings.HasPrefix(line.Text, "-") && !strings.HasPrefix(line.Text, "---") {
+			appendPending(diffRenderRemove, line.Text[1:])
 			continue
 		}
-		if strings.HasPrefix(line, " ") {
-			appendPending(diffRenderContext, line[1:])
+		if line.Kind == patchformat.RenderedLineKindDiff && strings.HasPrefix(line.Text, " ") {
+			appendPending(diffRenderContext, line.Text[1:])
 			continue
 		}
 		flushPending()
-		for _, chunk := range splitLines(wrapTextForViewport(line, width)) {
+		for _, chunk := range splitLines(wrapTextForViewport(line.Text, width)) {
 			out = append(out, diffRenderedLine{Kind: diffRenderMeta, Text: chunk})
 		}
 	}
@@ -249,97 +251,6 @@ func (r *codeRenderer) highlightCodeBlock(lexer chroma.Lexer, source string) []s
 		highlighted = highlighted[:len(sourceLines)]
 	}
 	return highlighted
-}
-
-func detectDiffPath(line string) (string, bool) {
-	trimmed := strings.TrimSpace(line)
-	if trimmed == "" {
-		return "", false
-	}
-	if strings.HasPrefix(trimmed, "diff --git ") {
-		parts := strings.Fields(trimmed)
-		if len(parts) >= 4 {
-			path := strings.TrimPrefix(parts[3], "b/")
-			if path != "" && path != "/dev/null" {
-				return path, true
-			}
-		}
-		return "", false
-	}
-	if strings.HasPrefix(trimmed, "+++") || strings.HasPrefix(trimmed, "---") {
-		path := strings.TrimSpace(trimmed[3:])
-		path = strings.TrimPrefix(path, "a/")
-		path = strings.TrimPrefix(path, "b/")
-		if path == "" || path == "/dev/null" {
-			return "", false
-		}
-		return path, true
-	}
-	if strings.HasPrefix(trimmed, "Edited:") {
-		rest := strings.TrimSpace(trimmed[len("Edited:"):])
-		if rest == "" {
-			return "", false
-		}
-		if strings.HasPrefix(rest, "./") || strings.HasPrefix(rest, "../") || strings.HasPrefix(rest, "/") {
-			normalized := normalizeDiffPathLine(rest)
-			if normalized == "" {
-				return "", false
-			}
-			return normalized, true
-		}
-		return "", false
-	}
-	if strings.HasPrefix(trimmed, "@@") {
-		return "", false
-	}
-	if strings.HasPrefix(trimmed, "+") || strings.HasPrefix(trimmed, "-") {
-		return "", false
-	}
-	if strings.HasPrefix(trimmed, "./") || strings.HasPrefix(trimmed, "../") || strings.HasPrefix(trimmed, "/") {
-		normalized := normalizeDiffPathLine(trimmed)
-		if normalized == "" {
-			return "", false
-		}
-		return normalized, true
-	}
-	return "", false
-}
-
-func normalizeDiffPathLine(line string) string {
-	trimmed := strings.TrimSpace(line)
-	if trimmed == "" {
-		return ""
-	}
-	parts := strings.Fields(trimmed)
-	if len(parts) < 2 {
-		return trimmed
-	}
-	end := len(parts)
-	for end > 1 && isPatchCountToken(parts[end-1]) {
-		end--
-	}
-	if end < len(parts) {
-		candidate := strings.Join(parts[:end], " ")
-		if candidate != "" {
-			return candidate
-		}
-	}
-	return trimmed
-}
-
-func isPatchCountToken(token string) bool {
-	if len(token) < 2 {
-		return false
-	}
-	if token[0] != '+' && token[0] != '-' {
-		return false
-	}
-	for i := 1; i < len(token); i++ {
-		if token[i] < '0' || token[i] > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 func applyBackgroundTint(line string, bg string) string {

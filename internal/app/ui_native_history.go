@@ -3,6 +3,7 @@ package app
 import (
 	"strings"
 
+	patchformat "builder/internal/tools/patch/format"
 	"builder/internal/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -320,6 +321,7 @@ func nativeEntryEqual(left tui.TranscriptEntry, right tui.TranscriptEntry) bool 
 	}
 	if left.ToolCall.ToolName != right.ToolCall.ToolName ||
 		left.ToolCall.Presentation != right.ToolCall.Presentation ||
+		left.ToolCall.RenderBehavior != right.ToolCall.RenderBehavior ||
 		left.ToolCall.Command != right.ToolCall.Command ||
 		left.ToolCall.CompactText != right.ToolCall.CompactText ||
 		left.ToolCall.InlineMeta != right.ToolCall.InlineMeta ||
@@ -340,12 +342,49 @@ func nativeEntryEqual(left tui.TranscriptEntry, right tui.TranscriptEntry) bool 
 			return false
 		}
 	}
+	if !nativePatchRenderEqual(left.ToolCall.PatchRender, right.ToolCall.PatchRender) {
+		return false
+	}
 	if left.ToolCall.RenderHint == nil || right.ToolCall.RenderHint == nil {
 		return left.ToolCall.RenderHint == nil && right.ToolCall.RenderHint == nil
 	}
 	return left.ToolCall.RenderHint.Kind == right.ToolCall.RenderHint.Kind &&
 		left.ToolCall.RenderHint.Path == right.ToolCall.RenderHint.Path &&
 		left.ToolCall.RenderHint.ResultOnly == right.ToolCall.RenderHint.ResultOnly
+}
+
+func nativePatchRenderEqual(left *patchformat.RenderedPatch, right *patchformat.RenderedPatch) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	if len(left.Files) != len(right.Files) || len(left.SummaryLines) != len(right.SummaryLines) || len(left.DetailLines) != len(right.DetailLines) {
+		return false
+	}
+	for index := range left.Files {
+		if left.Files[index].AbsPath != right.Files[index].AbsPath ||
+			left.Files[index].RelPath != right.Files[index].RelPath ||
+			left.Files[index].Added != right.Files[index].Added ||
+			left.Files[index].Removed != right.Files[index].Removed ||
+			len(left.Files[index].Diff) != len(right.Files[index].Diff) {
+			return false
+		}
+		for diffIndex := range left.Files[index].Diff {
+			if left.Files[index].Diff[diffIndex] != right.Files[index].Diff[diffIndex] {
+				return false
+			}
+		}
+	}
+	for index := range left.SummaryLines {
+		if left.SummaryLines[index] != right.SummaryLines[index] {
+			return false
+		}
+	}
+	for index := range left.DetailLines {
+		if left.DetailLines[index] != right.DetailLines[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *uiModel) emitNativeRenderedText(rendered string) tea.Cmd {

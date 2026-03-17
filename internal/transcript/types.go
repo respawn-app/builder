@@ -1,6 +1,10 @@
 package transcript
 
-import "strings"
+import (
+	"strings"
+
+	patchformat "builder/internal/tools/patch/format"
+)
 
 type ToolPresentationKind string
 
@@ -8,6 +12,14 @@ const (
 	ToolPresentationDefault     ToolPresentationKind = "default"
 	ToolPresentationShell       ToolPresentationKind = "shell"
 	ToolPresentationAskQuestion ToolPresentationKind = "ask_question"
+)
+
+type ToolCallRenderBehavior string
+
+const (
+	ToolCallRenderBehaviorDefault     ToolCallRenderBehavior = "default"
+	ToolCallRenderBehaviorShell       ToolCallRenderBehavior = "shell"
+	ToolCallRenderBehaviorAskQuestion ToolCallRenderBehavior = "ask_question"
 )
 
 type ToolRenderKind string
@@ -27,6 +39,7 @@ type ToolRenderHint struct {
 type ToolCallMeta struct {
 	ToolName             string
 	Presentation         ToolPresentationKind
+	RenderBehavior       ToolCallRenderBehavior
 	IsShell              bool
 	UserInitiated        bool
 	Command              string
@@ -35,6 +48,7 @@ type ToolCallMeta struct {
 	TimeoutLabel         string
 	PatchSummary         string
 	PatchDetail          string
+	PatchRender          *patchformat.RenderedPatch
 	RenderHint           *ToolRenderHint
 	Question             string
 	Suggestions          []string
@@ -45,15 +59,28 @@ func NormalizeToolCallMeta(in ToolCallMeta) ToolCallMeta {
 	out := in
 	if out.Presentation == "" {
 		switch {
-		case out.IsShell:
+		case out.RenderBehavior == ToolCallRenderBehaviorShell || out.IsShell:
 			out.Presentation = ToolPresentationShell
-		case strings.TrimSpace(out.Question) != "" || len(out.Suggestions) > 0:
+		case out.RenderBehavior == ToolCallRenderBehaviorAskQuestion || strings.TrimSpace(out.Question) != "" || len(out.Suggestions) > 0:
 			out.Presentation = ToolPresentationAskQuestion
 		default:
 			out.Presentation = ToolPresentationDefault
 		}
 	}
+	if out.RenderBehavior == "" {
+		switch {
+		case out.Presentation == ToolPresentationShell || out.IsShell:
+			out.RenderBehavior = ToolCallRenderBehaviorShell
+		case out.Presentation == ToolPresentationAskQuestion || strings.TrimSpace(out.Question) != "" || len(out.Suggestions) > 0:
+			out.RenderBehavior = ToolCallRenderBehaviorAskQuestion
+		default:
+			out.RenderBehavior = ToolCallRenderBehaviorDefault
+		}
+	}
 	if out.Presentation == ToolPresentationShell {
+		out.IsShell = true
+	}
+	if out.RenderBehavior == ToolCallRenderBehaviorShell {
 		out.IsShell = true
 	}
 	if strings.TrimSpace(out.InlineMeta) == "" {
@@ -61,6 +88,14 @@ func NormalizeToolCallMeta(in ToolCallMeta) ToolCallMeta {
 	}
 	if strings.TrimSpace(out.TimeoutLabel) == "" {
 		out.TimeoutLabel = strings.TrimSpace(out.InlineMeta)
+	}
+	if out.PatchRender != nil {
+		if strings.TrimSpace(out.PatchSummary) == "" {
+			out.PatchSummary = strings.TrimSpace(out.PatchRender.SummaryText())
+		}
+		if strings.TrimSpace(out.PatchDetail) == "" {
+			out.PatchDetail = strings.TrimSpace(out.PatchRender.DetailText())
+		}
 	}
 	if strings.TrimSpace(out.Command) == "" {
 		out.Command = strings.TrimSpace(out.PatchDetail)
@@ -76,6 +111,28 @@ func NormalizeToolCallMeta(in ToolCallMeta) ToolCallMeta {
 		out.OmitSuccessfulResult = true
 	}
 	return out
+}
+
+func (m *ToolCallMeta) UsesShellRendering() bool {
+	if m == nil {
+		return false
+	}
+	behavior := m.RenderBehavior
+	if behavior == "" {
+		behavior = NormalizeToolCallMeta(*m).RenderBehavior
+	}
+	return behavior == ToolCallRenderBehaviorShell
+}
+
+func (m *ToolCallMeta) UsesAskQuestionRendering() bool {
+	if m == nil {
+		return false
+	}
+	behavior := m.RenderBehavior
+	if behavior == "" {
+		behavior = NormalizeToolCallMeta(*m).RenderBehavior
+	}
+	return behavior == ToolCallRenderBehaviorAskQuestion
 }
 
 func (m *ToolCallMeta) HasRenderHint() bool {

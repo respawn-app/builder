@@ -229,7 +229,7 @@ func toolCallDisplayText(meta *transcript.ToolCallMeta, text string) string {
 	if command == "" {
 		command = tools.CompactToolCallText(meta, text)
 	}
-	if meta != nil && meta.Presentation == transcript.ToolPresentationShell && meta.UserInitiated {
+	if meta != nil && meta.UsesShellRendering() && meta.UserInitiated {
 		command = "User ran: " + command
 	}
 	if meta != nil {
@@ -245,18 +245,12 @@ func toolCallDisplayText(meta *transcript.ToolCallMeta, text string) string {
 }
 
 func isShellToolCall(meta *transcript.ToolCallMeta, text string) bool {
-	if meta != nil {
-		return meta.Presentation == transcript.ToolPresentationShell
-	}
 	_ = text
-	return false
+	return meta != nil && meta.UsesShellRendering()
 }
 
 func isAskQuestionToolCall(meta *transcript.ToolCallMeta) bool {
-	if meta == nil {
-		return false
-	}
-	return meta.Presentation == transcript.ToolPresentationAskQuestion
+	return meta != nil && meta.UsesAskQuestionRendering()
 }
 
 func isToolHeadlineRole(role string) bool {

@@ -153,6 +153,7 @@ func isEditedToolBlock(lines []string) bool {
 }
 
 func (m Model) renderDiffToolLines(text string, width int, toolMeta *transcript.ToolCallMeta) ([]diffRenderedLine, bool) {
+	_ = text
 	if toolMeta == nil || !toolMeta.HasRenderHint() || m.code == nil {
 		return nil, false
 	}
@@ -160,30 +161,14 @@ func (m Model) renderDiffToolLines(text string, width int, toolMeta *transcript.
 	if hint == nil || hint.Kind != transcript.ToolRenderKindDiff {
 		return nil, false
 	}
-	highlightTarget := text
-	prefix := ""
-	if hint.ResultOnly {
-		parts := strings.SplitN(text, "\n", 2)
-		if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
-			return nil, false
-		}
-		prefix = parts[0]
-		highlightTarget = parts[1]
+	if toolMeta.PatchRender == nil {
+		return nil, false
 	}
-	lines, ok := m.code.renderDiffLines(highlightTarget, width)
+	lines, ok := m.code.renderDiffLines(toolMeta.PatchRender, width)
 	if !ok {
 		return nil, false
 	}
-	if strings.TrimSpace(prefix) == "" {
-		return lines, true
-	}
-	wrappedPrefix := splitLines(wrapTextForViewport(prefix, width))
-	combined := make([]diffRenderedLine, 0, len(wrappedPrefix)+len(lines))
-	for _, line := range wrappedPrefix {
-		combined = append(combined, diffRenderedLine{Kind: diffRenderMeta, Text: line})
-	}
-	combined = append(combined, lines...)
-	return combined, true
+	return lines, true
 }
 
 func (m Model) flattenEntryPlain(role, text string) []string {

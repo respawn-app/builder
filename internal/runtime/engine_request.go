@@ -97,36 +97,32 @@ type hostedToolExecution struct {
 }
 
 func hostedToolExecutionsFromOutputItems(items []llm.ResponseItem, defs []tools.Definition) []hostedToolExecution {
-	out := make([]hostedToolExecution, 0, len(items))
+	hostedOutputs := make([]tools.HostedToolOutput, 0, len(items))
 	for _, item := range items {
-		for _, def := range defs {
-			execution, ok := def.DecodeHostedOutput(tools.HostedToolOutput{
-				ID:     strings.TrimSpace(item.ID),
-				CallID: strings.TrimSpace(item.CallID),
-				Raw:    append(json.RawMessage(nil), item.Raw...),
-			})
-			if !ok {
-				continue
-			}
-			out = append(out, hostedToolExecution{
-				Call: llm.ToolCall{
-					ID:    execution.Call.ID,
-					Name:  string(execution.Call.Name),
-					Input: execution.Call.Input,
-				},
-				Result: execution.Result,
-			})
-			break
-		}
+		hostedOutputs = append(hostedOutputs, tools.HostedToolOutput{
+			ID:     strings.TrimSpace(item.ID),
+			CallID: strings.TrimSpace(item.CallID),
+			Raw:    append(json.RawMessage(nil), item.Raw...),
+		})
+	}
+	decoded := tools.HostedExecutionsFromOutputs(hostedOutputs, defs)
+	out := make([]hostedToolExecution, 0, len(decoded))
+	for _, execution := range decoded {
+		out = append(out, hostedToolExecution{
+			Call: llm.ToolCall{
+				ID:    execution.Call.ID,
+				Name:  string(execution.Call.Name),
+				Input: execution.Call.Input,
+			},
+			Result: execution.Result,
+		})
 	}
 	return out
 }
 
 func (e *Engine) requestTools() []llm.Tool {
-	defs := tools.FilterRequestExposedDefinitions(
-		e.registry.Definitions(),
-		llm.LockedContractSupportsVisionInputs(e.store.Meta().Locked, e.cfg.Model),
-	)
+	supportsVision := llm.LockedContractSupportsVisionInputs(e.store.Meta().Locked, e.cfg.Model)
+	defs := tools.RequestExposedDefinitionsForSession(e.cfg.EnabledTools, e.registry.Definitions(), supportsVision)
 	if len(defs) == 0 {
 		return nil
 	}

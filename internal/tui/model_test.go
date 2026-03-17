@@ -1,6 +1,7 @@
 package tui
 
 import (
+	patchformat "builder/internal/tools/patch/format"
 	"builder/internal/transcript"
 	"fmt"
 	"regexp"
@@ -11,6 +12,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 )
+
+func testPatchRender(lines ...patchformat.RenderedLine) *patchformat.RenderedPatch {
+	return &patchformat.RenderedPatch{DetailLines: lines}
+}
 
 func TestModeToggleReturnsToLatestOngoingTail(t *testing.T) {
 	m := NewModel(WithPreviewLines(2))
@@ -1008,6 +1013,14 @@ func TestPatchPayloadRendersSummaryInOngoingAndDetailDiffInDetail(t *testing.T) 
 			ToolName:     "patch",
 			PatchSummary: summary,
 			PatchDetail:  detail,
+			PatchRender: testPatchRender(
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindHeader, Text: "Edited:", FileIndex: -1},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindFile, Text: "/abs/path/to/file/1.go", FileIndex: 0, Path: "/abs/path/to/file/1.go"},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+new line", FileIndex: 0},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "-old line", FileIndex: 0},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindFile, Text: "/abs/path/to/file/2.go", FileIndex: 1, Path: "/abs/path/to/file/2.go"},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+another line", FileIndex: 1},
+			),
 		},
 	})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: ""})
@@ -1043,7 +1056,11 @@ func TestDetailShowsRawPatchFallbackWhenOnlySummaryAvailableInOngoing(t *testing
 			ToolName:     "patch",
 			PatchSummary: "Edited:",
 			PatchDetail:  "Edited:\n" + rawPatch,
-			RenderHint:   &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
+			PatchRender: func() *patchformat.RenderedPatch {
+				rendered := patchformat.Raw(rawPatch)
+				return &rendered
+			}(),
+			RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
 		},
 	})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: ""})
@@ -1076,6 +1093,12 @@ func TestSetConversationTypedToolMetadataRendersWithoutLegacyInlineParsing(t *te
 				ToolName:     "patch",
 				PatchSummary: summary,
 				PatchDetail:  detail,
+				PatchRender: testPatchRender(
+					patchformat.RenderedLine{Kind: patchformat.RenderedLineKindHeader, Text: "Edited:", FileIndex: -1},
+					patchformat.RenderedLine{Kind: patchformat.RenderedLineKindFile, Text: "/abs/main.go", FileIndex: 0, Path: "/abs/main.go"},
+					patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "-old", FileIndex: 0},
+					patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+new", FileIndex: 0},
+				),
 			},
 		},
 		{
@@ -1172,7 +1195,13 @@ func TestDetailDiffBackgroundTintsFullRenderedLine(t *testing.T) {
 		ToolCall: &transcript.ToolCallMeta{
 			ToolName:    "patch",
 			PatchDetail: detail,
-			RenderHint:  &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
+			PatchRender: testPatchRender(
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindHeader, Text: "Edited:", FileIndex: -1},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindFile, Text: "./main.go", FileIndex: 0, Path: "main.go"},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+package main", FileIndex: 0},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "-old", FileIndex: 0},
+			),
+			RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
 		},
 	})
 	m = updateModel(t, m, ToggleModeMsg{})
@@ -1248,7 +1277,13 @@ func TestDetailDiffRendersGoTokenAnsi(t *testing.T) {
 		ToolCall: &transcript.ToolCallMeta{
 			ToolName:    "patch",
 			PatchDetail: detail,
-			RenderHint:  &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
+			PatchRender: testPatchRender(
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindHeader, Text: "Edited:", FileIndex: -1},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindFile, Text: "./main.go", FileIndex: 0, Path: "main.go"},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+package main", FileIndex: 0},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+func main() {}", FileIndex: 0},
+			),
+			RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
 		},
 	})
 	m = updateModel(t, m, ToggleModeMsg{})
@@ -1270,7 +1305,13 @@ func TestDetailDiffLayeringKeepsBackgroundAndTokenColorForAddAndRemove(t *testin
 		ToolCall: &transcript.ToolCallMeta{
 			ToolName:    "patch",
 			PatchDetail: detail,
-			RenderHint:  &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
+			PatchRender: testPatchRender(
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindHeader, Text: "Edited:", FileIndex: -1},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindFile, Text: "./main.go", FileIndex: 0, Path: "main.go"},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "+package main", FileIndex: 0},
+				patchformat.RenderedLine{Kind: patchformat.RenderedLineKindDiff, Text: "-func removed() {}", FileIndex: 0},
+			),
+			RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff},
 		},
 	})
 	m = updateModel(t, m, ToggleModeMsg{})

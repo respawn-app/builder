@@ -1,0 +1,232 @@
+package format
+
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+
+	"builder/internal/shared/textutil"
+)
+
+func Render(src, cwd string) RenderedPatch {
+	doc, err := Parse(src)
+	if err != nil {
+		return Raw(src)
+	}
+	rendered := Format(doc, cwd)
+	if len(rendered.Files) == 0 {
+		return Raw(src)
+	}
+	return rendered
+}
+
+func Raw(src string) RenderedPatch {
+	summary := []RenderedLine{{Kind: RenderedLineKindHeader, Text: "Edited:", FileIndex: -1}}
+	detail := []RenderedLine{{Kind: RenderedLineKindHeader, Text: "Edited:", FileIndex: -1}}
+	trimmed := strings.TrimSpace(src)
+	if trimmed == "" {
+		return RenderedPatch{SummaryLines: summary, DetailLines: detail}
+	}
+	for _, line := range textutil.SplitLinesCRLF(trimmed) {
+		detail = append(detail, RenderedLine{Kind: RenderedLineKindRaw, Text: line, FileIndex: -1})
+	}
+	return RenderedPatch{SummaryLines: summary, DetailLines: detail}
+}
+
+func Format(doc Document, cwd string) RenderedPatch {
+	files := buildRenderedFiles(doc, cwd)
+	if len(files) == 0 {
+		return RenderedPatch{}
+	}
+
+	rendered := RenderedPatch{Files: files}
+	if len(files) == 1 {
+		file := files[0]
+		rendered.SummaryLines = []RenderedLine{{
+			Kind:      RenderedLineKindFile,
+			Text:      "Edited: " + summaryLine(file),
+			FileIndex: 0,
+			Path:      file.RelPath,
+		}}
+		rendered.DetailLines = append(rendered.DetailLines, RenderedLine{
+			Kind:      RenderedLineKindFile,
+			Text:      "Edited: " + detailHeader(file),
+			FileIndex: 0,
+			Path:      detailPath(file),
+		})
+		for _, diff := range file.Diff {
+			rendered.DetailLines = append(rendered.DetailLines, RenderedLine{Kind: RenderedLineKindDiff, Text: diff, FileIndex: 0})
+		}
+		return rendered
+	}
+
+	rendered.SummaryLines = append(rendered.SummaryLines, RenderedLine{Kind: RenderedLineKindHeader, Text: "Edited:", FileIndex: -1})
+	rendered.DetailLines = append(rendered.DetailLines, RenderedLine{Kind: RenderedLineKindHeader, Text: "Edited:", FileIndex: -1})
+	for idx, file := range files {
+		rendered.SummaryLines = append(rendered.SummaryLines, RenderedLine{
+			Kind:      RenderedLineKindFile,
+			Text:      summaryLine(file),
+			FileIndex: idx,
+			Path:      file.RelPath,
+		})
+		rendered.DetailLines = append(rendered.DetailLines, RenderedLine{
+			Kind:      RenderedLineKindFile,
+			Text:      detailHeader(file),
+			FileIndex: idx,
+			Path:      detailPath(file),
+		})
+		for _, diff := range file.Diff {
+			rendered.DetailLines = append(rendered.DetailLines, RenderedLine{Kind: RenderedLineKindDiff, Text: diff, FileIndex: idx})
+		}
+	}
+	return rendered
+}
+
+func (r RenderedPatch) SummaryText() string {
+	return joinRenderedLines(r.SummaryLines)
+}
+
+func (r RenderedPatch) DetailText() string {
+	return joinRenderedLines(r.DetailLines)
+}
+
+func joinRenderedLines(lines []RenderedLine) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, line.Text)
+	}
+	return strings.Join(out, "\n")
+}
+
+func buildRenderedFiles(doc Document, cwd string) []RenderedFile {
+	files := make([]RenderedFile, 0, 8)
+	byAbs := make(map[string]int, 8)
+
+	getFile := func(path string) *RenderedFile {
+		abs, rel := resolvePath(path, cwd)
+		if abs == "" {
+			return nil
+		}
+		if idx, ok := byAbs[abs]; ok {
+			return &files[idx]
+		}
+		files = append(files, RenderedFile{AbsPath: abs, RelPath: rel, Diff: make([]string, 0, 32)})
+		idx := len(files) - 1
+		byAbs[abs] = idx
+		return &files[idx]
+	}
+
+	for _, hunk := range doc.Hunks {
+		switch op := hunk.(type) {
+		case AddFile:
+			file := getFile(op.Path)
+			if file == nil {
+				continue
+			}
+			for _, line := range op.Content {
+				file.Added++
+				file.Diff = append(file.Diff, "+"+line)
+			}
+		case UpdateFile:
+			target := op.Path
+			if strings.TrimSpace(op.MoveTo) != "" {
+				target = op.MoveTo
+			}
+			file := getFile(target)
+			if file == nil {
+				continue
+			}
+			for _, change := range op.Changes {
+				switch change.Kind {
+				case '+':
+					file.Added++
+				case '-':
+					file.Removed++
+				}
+				file.Diff = append(file.Diff, renderChangeLine(change))
+			}
+		case DeleteFile:
+			file := getFile(op.Path)
+			if file == nil {
+				continue
+			}
+			file.Removed++
+			file.Diff = append(file.Diff, "-<deleted file>")
+		}
+	}
+
+	return files
+}
+
+func renderChangeLine(change ChangeLine) string {
+	if change.Kind == ' ' && change.Content == "" {
+		return ""
+	}
+	return string(change.Kind) + change.Content
+}
+
+func summaryLine(file RenderedFile) string {
+	line := file.RelPath
+	if line == "" {
+		line = file.AbsPath
+	}
+	if file.Added > 0 {
+		line += fmt.Sprintf(" +%d", file.Added)
+	}
+	if file.Removed > 0 {
+		line += fmt.Sprintf(" -%d", file.Removed)
+	}
+	return line
+}
+
+func detailHeader(file RenderedFile) string {
+	line := file.AbsPath
+	if line == "" {
+		line = file.RelPath
+	}
+	return line
+}
+
+func detailPath(file RenderedFile) string {
+	if strings.TrimSpace(file.AbsPath) != "" {
+		return file.AbsPath
+	}
+	return file.RelPath
+}
+
+func resolvePath(path, cwd string) (string, string) {
+	p := strings.TrimSpace(path)
+	if p == "" {
+		return "", ""
+	}
+	var abs string
+	if filepath.IsAbs(p) {
+		abs = filepath.Clean(p)
+	} else if cwd != "" {
+		abs = filepath.Clean(filepath.Join(cwd, p))
+	} else {
+		abs = filepath.Clean(p)
+	}
+	abs = filepath.ToSlash(abs)
+	if cwd == "" {
+		if filepath.IsAbs(p) {
+			return abs, abs
+		}
+		return abs, "./" + filepath.ToSlash(strings.TrimPrefix(p, "./"))
+	}
+	rel, err := filepath.Rel(cwd, filepath.FromSlash(abs))
+	if err != nil {
+		return abs, filepath.ToSlash(p)
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == "." {
+		return abs, "./"
+	}
+	if strings.HasPrefix(rel, "../") || rel == ".." {
+		return abs, filepath.ToSlash(p)
+	}
+	return abs, "./" + rel
+}
