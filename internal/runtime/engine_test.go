@@ -5563,6 +5563,55 @@ func TestContextUsageUsesEstimatedTokensWhenLastUsageIsStale(t *testing.T) {
 	}
 }
 
+func TestEstimateItemsTokensDoesNotTreatInlineImagePayloadAsPlainText(t *testing.T) {
+	base64Payload := strings.Repeat("A", 24_000)
+	item := llm.ResponseItem{
+		Type:   llm.ResponseItemTypeFunctionCallOutput,
+		Name:   string(tools.ToolViewImage),
+		CallID: "call-1",
+		Output: json.RawMessage(`[{"type":"input_image","image_url":"data:image/png;base64,` + base64Payload + `"}]`),
+	}
+
+	estimated := estimateItemsTokens([]llm.ResponseItem{item})
+	naive := (len(item.Name) + len(item.CallID) + len(item.Output) + 3) / 4
+	if estimated <= 0 {
+		t.Fatalf("expected multimodal estimate > 0, got %d", estimated)
+	}
+	if estimated >= naive/4 {
+		t.Fatalf("expected multimodal estimate to stay well below plain-text estimate, got estimated=%d naive=%d", estimated, naive)
+	}
+}
+
+func TestContextUsageDoesNotInflateInlineImagePayloadByBase64Length(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.setLastUsage(llm.Usage{InputTokens: 100, OutputTokens: 0, WindowTokens: 410_000})
+	if err := eng.appendMessage("", llm.Message{
+		Role:       llm.RoleTool,
+		ToolCallID: "call-1",
+		Name:       string(tools.ToolViewImage),
+		Content:    `[{"type":"input_image","image_url":"data:image/png;base64,` + strings.Repeat("A", 24_000) + `"}]`,
+	}); err != nil {
+		t.Fatalf("append tool message: %v", err)
+	}
+
+	usage := eng.ContextUsage()
+	if usage.UsedTokens <= 100 {
+		t.Fatalf("expected local estimate to exceed stale usage baseline, got %d", usage.UsedTokens)
+	}
+	if usage.UsedTokens >= 2_000 {
+		t.Fatalf("expected inline image estimate to avoid base64 inflation, got %d", usage.UsedTokens)
+	}
+}
+
 func TestShouldAutoCompactAccountsForMessagesAppendedAfterLastUsage(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -5610,6 +5659,39 @@ func TestShouldAutoCompactUsesPreciseRequestInputTokenCountWhenAvailable(t *test
 
 	if !eng.shouldAutoCompact() {
 		t.Fatalf("expected auto compaction to trigger from precise input token count")
+	}
+}
+
+func TestShouldAutoCompactRechecksProviderBeforeCompactingOnLargeEstimate(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &preciseCompactionClient{inputTokenCount: 1, contextWindow: 1000}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   400_000,
+		AutoCompactTokenLimit: 2,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{
+		Role:       llm.RoleTool,
+		ToolCallID: "call-1",
+		Name:       string(tools.ToolViewImage),
+		Content:    `[{"type":"input_image","image_url":"data:image/png;base64,` + strings.Repeat("A", 24_000) + `"}]`,
+	}); err != nil {
+		t.Fatalf("append tool message: %v", err)
+	}
+
+	if eng.shouldAutoCompact() {
+		t.Fatalf("expected provider token count to prevent over-eager compaction")
+	}
+	if client.countCalls != 1 {
+		t.Fatalf("expected one precise token count before compact decision, got %d", client.countCalls)
 	}
 }
 
