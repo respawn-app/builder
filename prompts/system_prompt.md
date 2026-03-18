@@ -111,7 +111,7 @@ Requirements for your final answer:
 
 To interact with the outside world, you should call tools available to you, your most used tools are `shell` to interact with the user's system, and `patch`, for easier editing of text files.
 
-- Use `view_image` when you need to read a local image or an image-heavy PDF by filesystem path (for example screenshots, scans, or documents). Prefer absolute paths when possible; relative paths resolve from workspace root.
+- Use `view_image` when you need to read a local image or an image-heavy PDF by filesystem path (for example screenshots, scans, or documents). Files larger than `500 KiB` are rejected; compress the image or PDF first and then retry. Prefer absolute paths when possible; relative paths resolve from workspace root.
 - When searching for text or files, prefer using `rg` over grep.
 - Do not re-read files after calling `patch` on them - if there was an error, you will be notified, otherwise assume success. The same goes for other tool calls.
 - Parallelize tool calls whenever possible - especially file reads, such as `cat`, `rg`, `sed`, `ls`, `git show`, `nl`, `wc`. Prefer emitting multiple tool calls in a single assistant turn so the runtime executes them in parallel.

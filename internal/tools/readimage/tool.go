@@ -17,7 +17,7 @@ import (
 	patchtool "builder/internal/tools/patch"
 )
 
-const maxFileSizeBytes int64 = 20 << 20
+const maxFileSizeBytes int64 = 500 << 10
 
 const outsideWorkspaceRejectionInstruction = "do not attempt to circumvent this restriction in any way. if it's essential to the task, ask the user to place the file inside the workspace root."
 
@@ -134,7 +134,7 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 		return tools.ErrorResult(c, fmt.Sprintf("path %q is not a regular file", resolvedPath)), nil
 	}
 	if info.Size() > maxFileSizeBytes {
-		return tools.ErrorResult(c, fmt.Sprintf("file %q is too large (%d bytes). max supported size is %d bytes", resolvedPath, info.Size(), maxFileSizeBytes)), nil
+		return tools.ErrorResult(c, fmt.Sprintf("file %q is too large (%d bytes). max supported size is %d bytes (500 KiB). compress the image or PDF and try again", resolvedPath, info.Size(), maxFileSizeBytes)), nil
 	}
 
 	data, err := os.ReadFile(resolvedPath)

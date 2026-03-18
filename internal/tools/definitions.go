@@ -145,7 +145,7 @@ var catalogEntries = []CatalogEntry{
 	{
 		ID:             ToolViewImage,
 		Aliases:        []string{"read_image"},
-		Description:    "Read a local image or PDF file by path and attach it to the model as native multimodal input content.",
+		Description:    "Read a local image or PDF file by path and attach it to the model as native multimodal input content. Files larger than 500 KiB are rejected; compress the image or PDF first and try again.",
 		DefaultEnabled: true,
 		Contract: localContract(
 			LocalRuntimeBuilderViewImage,
@@ -163,7 +163,7 @@ var catalogEntries = []CatalogEntry{
   "properties": {
     "path": {
       "type": "string",
-      "description": "Local filesystem path to an image or PDF file. Relative paths resolve from the workspace root."
+      "description": "Local filesystem path to an image or PDF file. Relative paths resolve from the workspace root. Files larger than 500 KiB are rejected; compress them before retrying."
     }
   }
 }`),
