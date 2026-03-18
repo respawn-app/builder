@@ -105,11 +105,8 @@ func (e *Engine) shouldAutoCompactWithContext(ctx context.Context) bool {
 	reservedOutput := e.reservedOutputTokens()
 	estimatedInput := e.currentTokenUsage()
 	estimatedTotal := estimatedInput + reservedOutput
-	if estimatedTotal >= limit {
-		return true
-	}
 	margin := autoCompactPrecisionMarginForLimit(limit)
-	if estimatedTotal+margin < limit {
+	if estimatedTotal < limit && estimatedTotal+margin < limit {
 		return false
 	}
 	preciseInput, ok := e.currentInputTokensPrecisely(ctx)

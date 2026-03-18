@@ -11,6 +11,11 @@ import (
 	"builder/prompts"
 )
 
+const (
+	estimatedInlineImagePayloadTokens = 256
+	estimatedInlineFilePayloadTokens  = 512
+)
+
 func (e *Engine) providerCapabilities(ctx context.Context) (llm.ProviderCapabilities, error) {
 	if caps, ok := llm.ProviderCapabilitiesFromLocked(e.store.Meta().Locked); ok {
 		return caps, nil
@@ -505,22 +510,91 @@ func selectLocalCarryoverMessagesEstimated(userMessages []llm.ResponseItem, carr
 }
 
 func estimateItemsTokens(items []llm.ResponseItem) int {
-	totalChars := 0
+	totalTokens := 0
 	for _, item := range items {
-		totalChars += len(item.Content)
-		totalChars += len(item.ID)
-		totalChars += len(item.Name)
-		totalChars += len(item.CallID)
-		totalChars += len(item.EncryptedContent)
-		totalChars += len(item.Arguments)
-		totalChars += len(item.Output)
-		totalChars += len(item.Raw)
+		totalTokens += estimateTextTokens(item.Content)
+		totalTokens += estimateTextTokens(item.ID)
+		totalTokens += estimateTextTokens(item.Name)
+		totalTokens += estimateTextTokens(item.CallID)
+		totalTokens += estimateTextTokens(item.EncryptedContent)
+		totalTokens += estimateTextTokens(string(item.Arguments))
+		if outputTokens, ok := estimateStructuredOutputTokens(item.Output); ok {
+			totalTokens += outputTokens
+		} else {
+			totalTokens += estimateTextTokens(string(item.Output))
+		}
+		totalTokens += estimateTextTokens(string(item.Raw))
 		for _, summary := range item.ReasoningSummary {
-			totalChars += len(summary.Role) + len(summary.Text)
+			totalTokens += estimateTextTokens(summary.Role)
+			totalTokens += estimateTextTokens(summary.Text)
 		}
 	}
-	if totalChars <= 0 {
+	if totalTokens <= 0 {
 		return 0
 	}
-	return totalChars / 4
+	return totalTokens
+}
+
+func estimateStructuredOutputTokens(raw json.RawMessage) (int, bool) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || !strings.HasPrefix(trimmed, "[") {
+		return 0, false
+	}
+
+	var items []struct {
+		Type     string `json:"type"`
+		Text     string `json:"text"`
+		ImageURL string `json:"image_url"`
+		Detail   string `json:"detail"`
+		FileID   string `json:"file_id"`
+		FileData string `json:"file_data"`
+		FileURL  string `json:"file_url"`
+		Filename string `json:"filename"`
+	}
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return 0, false
+	}
+	if len(items) == 0 {
+		return 0, false
+	}
+
+	total := 0
+	for _, item := range items {
+		switch strings.ToLower(strings.TrimSpace(item.Type)) {
+		case "input_text":
+			total += estimateTextTokens(item.Text)
+		case "input_image":
+			total += estimatedInlineImagePayloadTokens
+			total += estimateReferenceTokens(item.ImageURL)
+			total += estimateReferenceTokens(item.FileID)
+			total += estimateTextTokens(item.Detail)
+		case "input_file":
+			total += estimatedInlineFilePayloadTokens
+			total += estimateReferenceTokens(item.FileData)
+			total += estimateReferenceTokens(item.FileID)
+			total += estimateReferenceTokens(item.FileURL)
+			total += estimateTextTokens(item.Filename)
+		default:
+			return 0, false
+		}
+	}
+	return total, true
+}
+
+func estimateReferenceTokens(value string) int {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0
+	}
+	if strings.HasPrefix(strings.ToLower(trimmed), "data:") {
+		return 0
+	}
+	return estimateTextTokens(trimmed)
+}
+
+func estimateTextTokens(value string) int {
+	if value == "" {
+		return 0
+	}
+	return (len(value) + 3) / 4
 }
