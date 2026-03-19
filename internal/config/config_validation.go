@@ -4,115 +4,182 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"builder/internal/tools"
 )
 
 func validateSettings(v Settings, sources map[string]string) error {
-	if strings.TrimSpace(v.Model) == "" {
+	return configRegistry.validate(settingsState{Settings: v}, sources)
+}
+
+func validateModelNotEmpty(state settingsState, _ map[string]string) error {
+	if strings.TrimSpace(state.Settings.Model) == "" {
 		return errors.New("settings model must not be empty")
 	}
-	if strings.TrimSpace(v.ProviderOverride) != "" && strings.TrimSpace(sources["model"]) == "default" {
+	return nil
+}
+
+func validateProviderOverrideRequiresModel(state settingsState, sources map[string]string) error {
+	if strings.TrimSpace(state.Settings.ProviderOverride) != "" && strings.TrimSpace(sources["model"]) == "default" {
 		return fmt.Errorf("provider_override requires an explicit model override; set model alongside provider_override")
 	}
-	switch normalizeProviderOverride(v.ProviderOverride) {
+	return nil
+}
+
+func validateProviderOverrideValue(state settingsState, _ map[string]string) error {
+	switch normalizeProviderOverride(state.Settings.ProviderOverride) {
 	case "", "openai", "anthropic":
+		return nil
 	default:
-		return fmt.Errorf("invalid provider_override %q (expected openai|anthropic)", v.ProviderOverride)
+		return fmt.Errorf("invalid provider_override %q (expected openai|anthropic)", state.Settings.ProviderOverride)
 	}
-	if strings.TrimSpace(v.OpenAIBaseURL) != "" && normalizeProviderOverride(v.ProviderOverride) != "" && normalizeProviderOverride(v.ProviderOverride) != "openai" {
-		return fmt.Errorf("provider_override %q conflicts with openai_base_url; openai_base_url requires provider_override=openai or unset", v.ProviderOverride)
+}
+
+func validateOpenAIBaseURL(state settingsState, _ map[string]string) error {
+	provider := normalizeProviderOverride(state.Settings.ProviderOverride)
+	if strings.TrimSpace(state.Settings.OpenAIBaseURL) != "" && provider != "" && provider != "openai" {
+		return fmt.Errorf("provider_override %q conflicts with openai_base_url; openai_base_url requires provider_override=openai or unset", state.Settings.ProviderOverride)
 	}
-	if strings.TrimSpace(v.ProviderCapabilities.ProviderID) == "" {
-		if v.ProviderCapabilities.SupportsResponsesAPI || v.ProviderCapabilities.SupportsResponsesCompact || v.ProviderCapabilities.SupportsNativeWebSearch || v.ProviderCapabilities.SupportsReasoningEncrypted || v.ProviderCapabilities.SupportsServerSideContextEdit || v.ProviderCapabilities.IsOpenAIFirstParty {
-			return fmt.Errorf("provider_capabilities.provider_id must not be empty when provider capability overrides are set")
-		}
+	return nil
+}
+
+func validateProviderCapabilitiesProviderID(state settingsState, _ map[string]string) error {
+	capabilities := state.Settings.ProviderCapabilities
+	if strings.TrimSpace(capabilities.ProviderID) != "" {
+		return nil
 	}
-	switch strings.ToLower(strings.TrimSpace(v.ThinkingLevel)) {
+	if capabilities.SupportsResponsesAPI || capabilities.SupportsResponsesCompact || capabilities.SupportsNativeWebSearch || capabilities.SupportsReasoningEncrypted || capabilities.SupportsServerSideContextEdit || capabilities.IsOpenAIFirstParty {
+		return fmt.Errorf("provider_capabilities.provider_id must not be empty when provider capability overrides are set")
+	}
+	return nil
+}
+
+func validateThinkingLevel(state settingsState, _ map[string]string) error {
+	switch strings.ToLower(strings.TrimSpace(state.Settings.ThinkingLevel)) {
 	case "low", "medium", "high", "xhigh":
+		return nil
 	default:
-		return fmt.Errorf("invalid thinking_level %q (expected low|medium|high|xhigh)", v.ThinkingLevel)
+		return fmt.Errorf("invalid thinking_level %q (expected low|medium|high|xhigh)", state.Settings.ThinkingLevel)
 	}
-	switch strings.ToLower(strings.TrimSpace(string(v.ModelVerbosity))) {
+}
+
+func validateModelVerbosity(state settingsState, _ map[string]string) error {
+	switch strings.ToLower(strings.TrimSpace(string(state.Settings.ModelVerbosity))) {
 	case "", "low", "medium", "high":
+		return nil
 	default:
-		return fmt.Errorf("invalid model_verbosity %q (expected low|medium|high)", v.ModelVerbosity)
+		return fmt.Errorf("invalid model_verbosity %q (expected low|medium|high)", state.Settings.ModelVerbosity)
 	}
-	if strings.EqualFold(strings.TrimSpace(v.Theme), "light") || strings.EqualFold(strings.TrimSpace(v.Theme), "dark") {
-		// ok
-	} else {
-		return fmt.Errorf("invalid theme %q (expected light|dark)", v.Theme)
+}
+
+func validateTheme(state settingsState, _ map[string]string) error {
+	if strings.EqualFold(strings.TrimSpace(state.Settings.Theme), "light") || strings.EqualFold(strings.TrimSpace(state.Settings.Theme), "dark") {
+		return nil
 	}
-	switch strings.ToLower(strings.TrimSpace(string(v.TUIAlternateScreen))) {
+	return fmt.Errorf("invalid theme %q (expected light|dark)", state.Settings.Theme)
+}
+
+func validateTUIAlternateScreen(state settingsState, _ map[string]string) error {
+	switch strings.ToLower(strings.TrimSpace(string(state.Settings.TUIAlternateScreen))) {
 	case "auto", "always", "never":
+		return nil
 	default:
-		return fmt.Errorf("invalid tui_alternate_screen %q (expected auto|always|never)", v.TUIAlternateScreen)
+		return fmt.Errorf("invalid tui_alternate_screen %q (expected auto|always|never)", state.Settings.TUIAlternateScreen)
 	}
-	switch strings.ToLower(strings.TrimSpace(v.NotificationMethod)) {
+}
+
+func validateNotificationMethod(state settingsState, _ map[string]string) error {
+	switch strings.ToLower(strings.TrimSpace(state.Settings.NotificationMethod)) {
 	case "auto", "osc9", "bel":
+		return nil
 	default:
-		return fmt.Errorf("invalid notification_method %q (expected auto|osc9|bel)", v.NotificationMethod)
+		return fmt.Errorf("invalid notification_method %q (expected auto|osc9|bel)", state.Settings.NotificationMethod)
 	}
-	switch strings.ToLower(strings.TrimSpace(v.WebSearch)) {
+}
+
+func validateWebSearch(state settingsState, _ map[string]string) error {
+	switch strings.ToLower(strings.TrimSpace(state.Settings.WebSearch)) {
 	case "off", "native":
+		return nil
 	case "custom":
 		return fmt.Errorf("web_search=custom is not implemented yet")
 	default:
-		return fmt.Errorf("invalid web_search %q (expected off|native|custom)", v.WebSearch)
+		return fmt.Errorf("invalid web_search %q (expected off|native|custom)", state.Settings.WebSearch)
 	}
-	if v.Timeouts.ModelRequestSeconds <= 0 {
+}
+
+func validateTimeouts(state settingsState, _ map[string]string) error {
+	if state.Settings.Timeouts.ModelRequestSeconds <= 0 {
 		return fmt.Errorf("timeouts.model_request_seconds must be > 0")
 	}
-	if v.Timeouts.ShellDefaultSeconds <= 0 {
+	if state.Settings.Timeouts.ShellDefaultSeconds <= 0 {
 		return fmt.Errorf("timeouts.shell_default_seconds must be > 0")
 	}
-	if v.ShellOutputMaxChars <= 0 {
+	return nil
+}
+
+func validateShellOutputMaxChars(state settingsState, _ map[string]string) error {
+	if state.Settings.ShellOutputMaxChars <= 0 {
 		return fmt.Errorf("shell_output_max_chars must be > 0")
 	}
-	if v.MinimumExecToBgSeconds <= 0 {
+	return nil
+}
+
+func validateMinimumExecToBgSeconds(state settingsState, _ map[string]string) error {
+	if state.Settings.MinimumExecToBgSeconds <= 0 {
 		return fmt.Errorf("minimum_exec_to_bg_seconds must be > 0")
 	}
-	switch strings.ToLower(strings.TrimSpace(string(v.BGShellsOutput))) {
+	return nil
+}
+
+func validateBGShellsOutput(state settingsState, _ map[string]string) error {
+	switch strings.ToLower(strings.TrimSpace(string(state.Settings.BGShellsOutput))) {
 	case "default", "verbose", "concise":
+		return nil
 	default:
-		return fmt.Errorf("invalid bg_shells_output %q (expected default|verbose|concise)", v.BGShellsOutput)
+		return fmt.Errorf("invalid bg_shells_output %q (expected default|verbose|concise)", state.Settings.BGShellsOutput)
 	}
-	if v.ContextCompactionThresholdTokens <= 0 {
+}
+
+func validateContextWindow(state settingsState, _ map[string]string) error {
+	if state.Settings.ContextCompactionThresholdTokens <= 0 {
 		return fmt.Errorf("context_compaction_threshold_tokens must be > 0")
 	}
-	if v.ModelContextWindow <= 0 {
+	if state.Settings.ModelContextWindow <= 0 {
 		return fmt.Errorf("model_context_window must be > 0")
 	}
-	if v.ContextCompactionThresholdTokens >= v.ModelContextWindow {
+	if state.Settings.ContextCompactionThresholdTokens >= state.Settings.ModelContextWindow {
 		return fmt.Errorf("context_compaction_threshold_tokens must be < model_context_window")
 	}
-	switch strings.ToLower(strings.TrimSpace(string(v.CompactionMode))) {
+	return nil
+}
+
+func validateCompactionMode(state settingsState, _ map[string]string) error {
+	switch strings.ToLower(strings.TrimSpace(string(state.Settings.CompactionMode))) {
 	case "native", "local", "none":
+		return nil
 	default:
-		return fmt.Errorf("invalid compaction_mode %q (expected native|local|none)", v.CompactionMode)
+		return fmt.Errorf("invalid compaction_mode %q (expected native|local|none)", state.Settings.CompactionMode)
 	}
-	for _, id := range tools.CatalogIDs() {
-		if _, ok := v.EnabledTools[id]; !ok {
-			v.EnabledTools[id] = false
-		}
-	}
-	switch strings.ToLower(strings.TrimSpace(v.Reviewer.Frequency)) {
+}
+
+func validateReviewer(state settingsState, _ map[string]string) error {
+	reviewer := state.Settings.Reviewer
+	switch strings.ToLower(strings.TrimSpace(reviewer.Frequency)) {
 	case "off", "all", "edits":
 	default:
-		return fmt.Errorf("invalid reviewer.frequency %q (expected off|all|edits)", v.Reviewer.Frequency)
+		return fmt.Errorf("invalid reviewer.frequency %q (expected off|all|edits)", reviewer.Frequency)
 	}
-	switch strings.ToLower(strings.TrimSpace(v.Reviewer.ThinkingLevel)) {
+	switch strings.ToLower(strings.TrimSpace(reviewer.ThinkingLevel)) {
 	case "low", "medium", "high", "xhigh":
 	default:
-		return fmt.Errorf("invalid reviewer.thinking_level %q (expected low|medium|high|xhigh)", v.Reviewer.ThinkingLevel)
+		return fmt.Errorf("invalid reviewer.thinking_level %q (expected low|medium|high|xhigh)", reviewer.ThinkingLevel)
 	}
-	if strings.TrimSpace(v.Reviewer.Model) == "" {
+	if strings.TrimSpace(reviewer.Model) == "" {
 		return fmt.Errorf("reviewer.model must not be empty")
 	}
-	if v.Reviewer.TimeoutSeconds <= 0 {
+	if reviewer.TimeoutSeconds <= 0 {
 		return fmt.Errorf("reviewer.timeout_seconds must be > 0")
 	}
-	if v.Reviewer.MaxSuggestions <= 0 {
+	if reviewer.MaxSuggestions <= 0 {
 		return fmt.Errorf("reviewer.max_suggestions must be > 0")
 	}
 	return nil

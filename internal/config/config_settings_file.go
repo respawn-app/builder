@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -33,33 +32,17 @@ func ensureDefaultSettingsFile() (path string, created bool, err error) {
 	return path, true, nil
 }
 
-func readSettingsFile(path string) (fileSettings, error) {
-	var cfg fileSettings
+func readSettingsFile(path string) (settingsFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return cfg, fmt.Errorf("read settings file %s: %w", path, err)
+		return nil, fmt.Errorf("read settings file %s: %w", path, err)
 	}
 	if strings.TrimSpace(string(data)) == "" {
-		return cfg, nil
+		return settingsFile{}, nil
 	}
-	metadata, err := toml.NewDecoder(bytes.NewReader(data)).Decode(&cfg)
-	if err != nil {
-		return cfg, fmt.Errorf("parse settings file %s: %w", path, err)
+	var raw settingsFile
+	if _, err := toml.NewDecoder(bytes.NewReader(data)).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("parse settings file %s: %w", path, err)
 	}
-	if err := validateNoUnknownSettingsKeys(metadata.Undecoded()); err != nil {
-		return cfg, fmt.Errorf("parse settings file %s: %w", path, err)
-	}
-	return cfg, nil
-}
-
-func validateNoUnknownSettingsKeys(keys []toml.Key) error {
-	if len(keys) == 0 {
-		return nil
-	}
-	names := make([]string, 0, len(keys))
-	for _, key := range keys {
-		names = append(names, strings.TrimSpace(key.String()))
-	}
-	sort.Strings(names)
-	return fmt.Errorf("unknown settings key(s): %s", strings.Join(names, ", "))
+	return raw, nil
 }

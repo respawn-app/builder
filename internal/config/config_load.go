@@ -27,34 +27,25 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		return App{}, err
 	}
 
-	fileOverlay, err := settingsOverlayFromFile(fileConfig, settingsPath)
-	if err != nil {
+	state := configRegistry.defaultState()
+	sources := configRegistry.defaultSourceMap()
+
+	if err := configRegistry.applyFile(fileConfig, settingsPath, &state, sources); err != nil {
 		return App{}, err
 	}
-	envOverlay, err := settingsOverlayFromEnv(os.LookupEnv)
-	if err != nil {
+	if err := configRegistry.applyEnv(os.LookupEnv, &state, sources); err != nil {
 		return App{}, err
 	}
-	cliOverlay, err := settingsOverlayFromCLI(opts)
-	if err != nil {
+	if err := configRegistry.applyCLI(opts, &state, sources); err != nil {
 		return App{}, err
 	}
+	inheritReviewerModel(&state.Settings)
 
-	settings := defaultSettings()
-	sources := defaultSourceMap()
-	persistenceRoot := DefaultPersistence
-	persistenceSource := "default"
-
-	applySettingsOverlay(&settings, &persistenceRoot, &persistenceSource, sources, fileOverlay, "file")
-	applySettingsOverlay(&settings, &persistenceRoot, &persistenceSource, sources, envOverlay, "env")
-	applySettingsOverlay(&settings, &persistenceRoot, &persistenceSource, sources, cliOverlay, "cli")
-	inheritReviewerModel(&settings)
-
-	if err := validateSettings(settings, sources); err != nil {
+	if err := validateSettings(state.Settings, sources); err != nil {
 		return App{}, err
 	}
 
-	absPersistenceRoot, err := preparePersistenceRoot(persistenceRoot)
+	absPersistenceRoot, err := preparePersistenceRoot(state.PersistenceRoot)
 	if err != nil {
 		return App{}, err
 	}
@@ -63,11 +54,11 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		AppName:         DefaultAppName,
 		WorkspaceRoot:   absWorkspace,
 		PersistenceRoot: absPersistenceRoot,
-		Settings:        settings,
+		Settings:        state.Settings,
 		Source: SourceReport{
 			SettingsPath:         settingsPath,
 			CreatedDefaultConfig: created,
-			Sources:              withPersistenceSource(sources, persistenceSource),
+			Sources:              sources,
 		},
 	}, nil
 }

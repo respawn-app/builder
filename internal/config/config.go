@@ -118,54 +118,7 @@ type App struct {
 	Source          SourceReport
 }
 
-type fileSettings struct {
-	Model             string `toml:"model"`
-	ThinkingLevel     string `toml:"thinking_level"`
-	ModelVerbosity    string `toml:"model_verbosity"`
-	ModelCapabilities struct {
-		SupportsReasoningEffort *bool `toml:"supports_reasoning_effort"`
-		SupportsVisionInputs    *bool `toml:"supports_vision_inputs"`
-	} `toml:"model_capabilities"`
-	Theme               string          `toml:"theme"`
-	TUIAlternateScreen  string          `toml:"tui_alternate_screen"`
-	NotificationMethod  string          `toml:"notification_method"`
-	ToolPreambles       *bool           `toml:"tool_preambles"`
-	PriorityRequestMode *bool           `toml:"priority_request_mode"`
-	WebSearch           string          `toml:"web_search"`
-	ProviderOverride    string          `toml:"provider_override"`
-	Tools               map[string]bool `toml:"tools"`
-	Timeouts            struct {
-		ModelRequestSeconds int `toml:"model_request_seconds"`
-		ShellDefaultSeconds int `toml:"shell_default_seconds"`
-		BashDefaultSeconds  int `toml:"bash_default_seconds"`
-	} `toml:"timeouts"`
-	PersistenceRoot      string `toml:"persistence_root"`
-	OpenAIBaseURL        string `toml:"openai_base_url"`
-	ProviderCapabilities struct {
-		ProviderID                    string `toml:"provider_id"`
-		SupportsResponsesAPI          *bool  `toml:"supports_responses_api"`
-		SupportsResponsesCompact      *bool  `toml:"supports_responses_compact"`
-		SupportsNativeWebSearch       *bool  `toml:"supports_native_web_search"`
-		SupportsReasoningEncrypted    *bool  `toml:"supports_reasoning_encrypted"`
-		SupportsServerSideContextEdit *bool  `toml:"supports_server_side_context_edit"`
-		IsOpenAIFirstParty            *bool  `toml:"is_openai_first_party"`
-	} `toml:"provider_capabilities"`
-	Store                            *bool  `toml:"store"`
-	AllowNonCwdEdits                 *bool  `toml:"allow_non_cwd_edits"`
-	ModelContextWindow               int    `toml:"model_context_window"`
-	ContextCompactionThresholdTokens int    `toml:"context_compaction_threshold_tokens"`
-	MinimumExecToBgSeconds           int    `toml:"minimum_exec_to_bg_seconds"`
-	ShellOutputMaxChars              int    `toml:"shell_output_max_chars"`
-	BGShellsOutput                   string `toml:"bg_shells_output"`
-	CompactionMode                   string `toml:"compaction_mode"`
-	Reviewer                         struct {
-		Frequency      string `toml:"frequency"`
-		Model          string `toml:"model"`
-		ThinkingLevel  string `toml:"thinking_level"`
-		TimeoutSeconds int    `toml:"timeout_seconds"`
-		MaxSuggestions int    `toml:"max_suggestions"`
-	} `toml:"reviewer"`
-}
+type settingsFile map[string]any
 
 func EnabledToolIDs(v Settings) []tools.ID {
 	ids := make([]tools.ID, 0, len(v.EnabledTools))
