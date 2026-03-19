@@ -791,7 +791,7 @@ func outsideNonTempDir(t *testing.T) string {
 			_ = os.RemoveAll(dir)
 			continue
 		}
-		if isPathInTemporaryDir(abs) {
+		if IsPathInTemporaryDir(abs) {
 			_ = os.RemoveAll(dir)
 			continue
 		}
@@ -802,6 +802,42 @@ func outsideNonTempDir(t *testing.T) string {
 	}
 	t.Skip("unable to create non-temporary outside directory for test")
 	return ""
+}
+
+func TestTemporaryEditableRootsIncludeBasicTmpAliases(t *testing.T) {
+	assertAlias := func(primary, alias string) {
+		t.Helper()
+		primaryInfo, err := os.Stat(primary)
+		if err != nil {
+			return
+		}
+		aliasInfo, err := os.Stat(alias)
+		if err != nil {
+			return
+		}
+		if !os.SameFile(primaryInfo, aliasInfo) {
+			return
+		}
+		roots := tempEditableRoots()
+		if !containsString(roots, filepath.Clean(primary)) {
+			t.Fatalf("expected temp roots to include %q, got %v", primary, roots)
+		}
+		if !containsString(roots, filepath.Clean(alias)) {
+			t.Fatalf("expected temp roots to include %q, got %v", alias, roots)
+		}
+	}
+
+	assertAlias("/tmp", "/private/tmp")
+	assertAlias("/var/tmp", "/private/var/tmp")
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func findCaseVariantExistingAlias(path string) (string, bool) {

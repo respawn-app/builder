@@ -3,109 +3,11 @@ package patch
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 
 	"builder/internal/shared/textutil"
 )
-
-func isPathInTemporaryDir(path string) bool {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return false
-	}
-	abs := path
-	if !filepath.IsAbs(abs) {
-		resolvedAbs, err := filepath.Abs(abs)
-		if err != nil {
-			return false
-		}
-		abs = resolvedAbs
-	}
-	abs = filepath.Clean(abs)
-	for _, root := range tempEditableRoots() {
-		if pathWithinRoot(abs, root) {
-			return true
-		}
-	}
-	return false
-}
-
-func tempEditableRoots() []string {
-	temporaryEditableRootsOnce.Do(func() {
-		roots := make([]string, 0, 8)
-		add := func(raw string) {
-			root := normalizeExistingPath(raw)
-			if root == "" {
-				return
-			}
-			roots = append(roots, root)
-		}
-
-		add(os.TempDir())
-		add(os.Getenv("TMPDIR"))
-		add(os.Getenv("TEMP"))
-		add(os.Getenv("TMP"))
-		if runtime.GOOS != "windows" {
-			add("/tmp")
-			add("/var/tmp")
-			add("/private/tmp")
-		}
-
-		seen := make(map[string]struct{}, len(roots))
-		deduped := make([]string, 0, len(roots))
-		for _, root := range roots {
-			if _, ok := seen[root]; ok {
-				continue
-			}
-			seen[root] = struct{}{}
-			deduped = append(deduped, root)
-		}
-		sort.Strings(deduped)
-		temporaryEditableRoots = deduped
-	})
-	out := make([]string, len(temporaryEditableRoots))
-	copy(out, temporaryEditableRoots)
-	return out
-}
-
-func normalizeExistingPath(path string) string {
-	trimmed := strings.TrimSpace(path)
-	if trimmed == "" {
-		return ""
-	}
-	abs := trimmed
-	if !filepath.IsAbs(abs) {
-		resolvedAbs, err := filepath.Abs(abs)
-		if err != nil {
-			return ""
-		}
-		abs = resolvedAbs
-	}
-	abs = filepath.Clean(abs)
-	if real, err := filepath.EvalSymlinks(abs); err == nil {
-		return filepath.Clean(real)
-	}
-	return abs
-}
-
-func pathWithinRoot(path, root string) bool {
-	if path == "" || root == "" {
-		return false
-	}
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return false
-	}
-	if rel == "." {
-		return true
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
 
 func (t *Tool) outsideWorkspaceSessionAllowed() bool {
 	t.outsideWorkspaceSessionMu.RLock()
