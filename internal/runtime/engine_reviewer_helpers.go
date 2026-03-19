@@ -217,9 +217,6 @@ func shouldIncludeReviewerMessage(message llm.Message) bool {
 		if strings.Contains(content, skillsInjectedHeader+"\n") {
 			return false
 		}
-		if content == commentaryWithoutToolCallsWarning || content == finalWithToolCallsIgnoredWarning || content == missingAssistantPhaseWarning || content == garbageAssistantContentWarning || content == interruptMessage {
-			return false
-		}
 	}
 	if strings.TrimSpace(message.Content) == "" && len(message.ToolCalls) == 0 {
 		return false

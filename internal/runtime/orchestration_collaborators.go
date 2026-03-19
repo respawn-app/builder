@@ -44,7 +44,6 @@ type phaseProtocolTurn struct {
 	HostedToolExecutions         []hostedToolExecution
 	EnforcePhaseProtocol         bool
 	MissingAssistantPhase        bool
-	GarbageAssistantContent      bool
 	FinalAnswerIncludedToolCalls bool
 }
 
