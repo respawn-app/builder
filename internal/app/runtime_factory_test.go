@@ -146,7 +146,7 @@ func TestBuildToolRegistry_IncludesViewImageWhenEnabled(t *testing.T) {
 
 func TestBuildToolRegistry_ViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 	workspace := t.TempDir()
-	outsideFile := filepath.Join(t.TempDir(), "doc.pdf")
+	outsideFile := filepath.Join(outsideNonTempDir(t), "doc.pdf")
 	pdfBytes := []byte("%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n")
 	if err := os.WriteFile(outsideFile, pdfBytes, 0o644); err != nil {
 		t.Fatalf("write outside pdf: %v", err)
@@ -221,7 +221,7 @@ func TestBuildToolRegistry_ViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 
 func TestBuildToolRegistry_ViewImageConfiguredAllowBypassesApprovalForOutsidePath(t *testing.T) {
 	workspace := t.TempDir()
-	outsideDir := filepath.Join(t.TempDir(), "missing")
+	outsideDir := filepath.Join(outsideNonTempDir(t), "missing")
 	outsideFile := filepath.Join(outsideDir, "doc.pdf")
 	pdfBytes := []byte("%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n")
 	if err := os.MkdirAll(outsideDir, 0o755); err != nil {
@@ -728,4 +728,36 @@ func TestBackgroundEventRouterDropsNoticeWhenNoSessionIsActive(t *testing.T) {
 	if got := client.CallCount(); got != 0 {
 		t.Fatalf("expected no notice delivery while no session is active, got %d", got)
 	}
+}
+
+func outsideNonTempDir(t *testing.T) string {
+	t.Helper()
+	bases := make([]string, 0, 2)
+	if wd, err := os.Getwd(); err == nil {
+		bases = append(bases, wd)
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		bases = append(bases, home)
+	}
+	for _, base := range bases {
+		dir, err := os.MkdirTemp(base, "builder-app-outside-*")
+		if err != nil {
+			continue
+		}
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			_ = os.RemoveAll(dir)
+			continue
+		}
+		if patchtool.IsPathInTemporaryDir(abs) {
+			_ = os.RemoveAll(dir)
+			continue
+		}
+		t.Cleanup(func() {
+			_ = os.RemoveAll(dir)
+		})
+		return abs
+	}
+	t.Skip("unable to create non-temporary outside directory for test")
+	return ""
 }

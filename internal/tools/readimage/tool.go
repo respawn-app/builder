@@ -198,7 +198,7 @@ func (t *Tool) resolvePath(ctx context.Context, path string, approvedOutside map
 			ApprovalFailed:       "outside-workspace read approval failed",
 			RejectedByUserPrefix: "view_image path outside workspace rejected by user",
 		},
-		nil,
+		patchtool.IsPathInTemporaryDir,
 		func(req patchtool.OutsideWorkspaceRequest, reason string) {
 			t.logOutsideWorkspaceApproval(req, reason)
 		},

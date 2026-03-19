@@ -277,7 +277,7 @@ func TestCall_UnsupportedModelReturnsToolError(t *testing.T) {
 }
 
 func TestCall_PathTraversalOutsideWorkspaceRejectedByDefault(t *testing.T) {
-	parent := t.TempDir()
+	parent := outsideNonTempDir(t)
 	workspace := filepath.Join(parent, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -310,7 +310,7 @@ func TestCall_PathTraversalOutsideWorkspaceRejectedByDefault(t *testing.T) {
 
 func TestCall_SymlinkEscapeOutsideWorkspaceRejectedByDefault(t *testing.T) {
 	workspace := t.TempDir()
-	outside := filepath.Join(t.TempDir(), "outside.png")
+	outside := filepath.Join(outsideNonTempDir(t), "outside.png")
 	if err := os.WriteFile(outside, tinyPNG, 0o644); err != nil {
 		t.Fatalf("write outside file: %v", err)
 	}
@@ -340,10 +340,44 @@ func TestCall_SymlinkEscapeOutsideWorkspaceRejectedByDefault(t *testing.T) {
 	}
 }
 
+func TestCall_OutsideWorkspaceTempDirAllowedWithoutApproval(t *testing.T) {
+	workspace := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.png")
+	if err := os.WriteFile(outside, tinyPNG, 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+
+	approveCalls := 0
+	tool, err := New(
+		workspace,
+		true,
+		WithOutsideWorkspaceApprover(func(context.Context, patchtool.OutsideWorkspaceRequest) (patchtool.OutsideWorkspaceApproval, error) {
+			approveCalls++
+			return patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionDeny}, nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("new tool: %v", err)
+	}
+
+	input := json.RawMessage(`{"path":"` + strings.ReplaceAll(outside, `\`, `\\`) + `"}`)
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-temp-allow", Name: tools.ToolViewImage, Input: input})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success for temp outside path, got %s", string(result.Output))
+	}
+	if approveCalls != 0 {
+		t.Fatalf("expected temp outside path to bypass approver, got %d calls", approveCalls)
+	}
+}
+
 func TestCall_OutsideWorkspaceAllowSessionSkipsFuturePrompts(t *testing.T) {
 	workspace := t.TempDir()
-	outside1 := filepath.Join(t.TempDir(), "outside1.png")
-	outside2 := filepath.Join(t.TempDir(), "outside2.png")
+	outsideRoot := outsideNonTempDir(t)
+	outside1 := filepath.Join(outsideRoot, "outside1.png")
+	outside2 := filepath.Join(outsideRoot, "outside2.png")
 	if err := os.WriteFile(outside1, tinyPNG, 0o644); err != nil {
 		t.Fatalf("write outside1: %v", err)
 	}
@@ -395,7 +429,7 @@ func TestCall_OutsideWorkspaceAllowSessionSkipsFuturePrompts(t *testing.T) {
 
 func TestCall_OutsideWorkspaceAllowOncePromptsEachCall(t *testing.T) {
 	workspace := t.TempDir()
-	outside := filepath.Join(t.TempDir(), "outside.png")
+	outside := filepath.Join(outsideNonTempDir(t), "outside.png")
 	if err := os.WriteFile(outside, tinyPNG, 0o644); err != nil {
 		t.Fatalf("write outside file: %v", err)
 	}
@@ -437,7 +471,7 @@ func TestCall_OutsideWorkspaceAllowOncePromptsEachCall(t *testing.T) {
 
 func TestCall_OutsideWorkspaceApprovalAuditsResolvedPath(t *testing.T) {
 	workspace := t.TempDir()
-	outside := filepath.Join(t.TempDir(), "outside.png")
+	outside := filepath.Join(outsideNonTempDir(t), "outside.png")
 	if err := os.WriteFile(outside, tinyPNG, 0o644); err != nil {
 		t.Fatalf("write outside file: %v", err)
 	}
@@ -494,7 +528,7 @@ func TestCall_OutsideWorkspaceApprovalAuditsResolvedPath(t *testing.T) {
 
 func TestCall_OutsideWorkspaceApprovalFailureUsesReadSpecificWording(t *testing.T) {
 	workspace := t.TempDir()
-	outside := filepath.Join(t.TempDir(), "outside.png")
+	outside := filepath.Join(outsideNonTempDir(t), "outside.png")
 	if err := os.WriteFile(outside, tinyPNG, 0o644); err != nil {
 		t.Fatalf("write outside file: %v", err)
 	}
@@ -603,6 +637,38 @@ func findCaseVariantExistingAlias(path string) (string, bool) {
 	}
 
 	return "", false
+}
+
+func outsideNonTempDir(t *testing.T) string {
+	t.Helper()
+	bases := make([]string, 0, 2)
+	if wd, err := os.Getwd(); err == nil {
+		bases = append(bases, wd)
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		bases = append(bases, home)
+	}
+	for _, base := range bases {
+		dir, err := os.MkdirTemp(base, "builder-readimage-outside-*")
+		if err != nil {
+			continue
+		}
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			_ = os.RemoveAll(dir)
+			continue
+		}
+		if patchtool.IsPathInTemporaryDir(abs) {
+			_ = os.RemoveAll(dir)
+			continue
+		}
+		t.Cleanup(func() {
+			_ = os.RemoveAll(dir)
+		})
+		return abs
+	}
+	t.Skip("unable to create non-temporary outside directory for test")
+	return ""
 }
 
 func caseAliasUsersSubstitution(canonical string, canonicalInfo os.FileInfo) (string, bool) {

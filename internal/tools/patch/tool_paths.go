@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 )
 
 type OutsideWorkspaceRequest struct {
@@ -46,11 +45,6 @@ func WithOutsideWorkspaceApprover(approver OutsideWorkspaceApprover) Option {
 }
 
 const outsideWorkspaceRejectionInstruction = "do not attempt to circumvent this restriction in any way. if it's essential to the task, ask the user to make the edit manually at the end of the task."
-
-var (
-	temporaryEditableRootsOnce sync.Once
-	temporaryEditableRoots     []string
-)
 
 func (t *Tool) resolvePath(ctx context.Context, path string, mustExist bool, approvedOutside map[string]bool) (string, error) {
 	if strings.TrimSpace(path) == "" {
@@ -128,7 +122,7 @@ func (t *Tool) resolvePath(ctx context.Context, path string, mustExist bool, app
 			ApprovalFailed:       "outside-workspace edit approval failed",
 			RejectedByUserPrefix: "patch target outside workspace rejected by user",
 		},
-		isPathInTemporaryDir,
+		IsPathInTemporaryDir,
 		nil,
 	)
 	return guard.Allow(ctx, path, real, approvedOutside)
