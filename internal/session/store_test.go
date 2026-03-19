@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"builder/prompts"
 )
 
 func TestNewLazyDoesNotPersistUntilFirstWrite(t *testing.T) {
@@ -184,6 +186,127 @@ func TestSetNamePersistsAndAppearsInList(t *testing.T) {
 	}
 }
 
+func TestAppendEventPersistsFirstPromptPreview(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "assistant", "content": "hello"}); err != nil {
+		t.Fatalf("append assistant event: %v", err)
+	}
+	if got := store.Meta().FirstPromptPreview; got != "" {
+		t.Fatalf("expected assistant event to leave preview empty, got %q", got)
+	}
+	if _, err := store.AppendEvent("s2", "message", map[string]any{"role": "user", "content": "Investigate config load failures\nsecond line"}); err != nil {
+		t.Fatalf("append user event: %v", err)
+	}
+	if got := store.Meta().FirstPromptPreview; got != "Investigate config load failures" {
+		t.Fatalf("preview = %q, want %q", got, "Investigate config load failures")
+	}
+
+	opened, err := Open(store.Dir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if got := opened.Meta().FirstPromptPreview; got != "Investigate config load failures" {
+		t.Fatalf("reopened preview = %q, want %q", got, "Investigate config load failures")
+	}
+
+	items, err := ListSessions(root)
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one session, got %d", len(items))
+	}
+	if items[0].FirstPromptPreview != "Investigate config load failures" {
+		t.Fatalf("list preview = %q, want %q", items[0].FirstPromptPreview, "Investigate config load failures")
+	}
+}
+
+func TestFirstPromptPreviewSkipsCompactionSummaryMessages(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "user", "content": prompts.CompactionSummaryPrefix + "\nsummary"}); err != nil {
+		t.Fatalf("append compaction summary event: %v", err)
+	}
+	if got := store.Meta().FirstPromptPreview; got != "" {
+		t.Fatalf("expected compaction summary to be ignored, got %q", got)
+	}
+	if _, err := store.AppendEvent("s2", "message", map[string]any{"role": "user", "content": "\n  Fix config registry boot path\nmore details"}); err != nil {
+		t.Fatalf("append visible user event: %v", err)
+	}
+	if got := store.Meta().FirstPromptPreview; got != "Fix config registry boot path" {
+		t.Fatalf("preview = %q, want %q", got, "Fix config registry boot path")
+	}
+}
+
+func TestAppendTurnAtomicPersistsFirstPromptPreview(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendTurnAtomic("s1", []EventInput{{Kind: "message", Payload: map[string]any{"role": "assistant", "content": "hello"}}, {Kind: "message", Payload: map[string]any{"role": "user", "content": "Atomic preview source\nmore"}}}); err != nil {
+		t.Fatalf("append turn: %v", err)
+	}
+	if got := store.Meta().FirstPromptPreview; got != "Atomic preview source" {
+		t.Fatalf("preview = %q, want %q", got, "Atomic preview source")
+	}
+}
+
+func TestListSessionsDoesNotDeriveFirstPromptPreviewFromLegacySessionMeta(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "user", "content": "Legacy preview source\nsecond line"}); err != nil {
+		t.Fatalf("append user event: %v", err)
+	}
+
+	metaPath := filepath.Join(store.Dir(), sessionFile)
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatalf("read session file: %v", err)
+	}
+	var meta Meta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		t.Fatalf("decode session meta: %v", err)
+	}
+	meta.FirstPromptPreview = ""
+	rewritten, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		t.Fatalf("encode session meta: %v", err)
+	}
+	if err := os.WriteFile(metaPath, rewritten, 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	items, err := ListSessions(root)
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one session, got %d", len(items))
+	}
+	if items[0].FirstPromptPreview != "" {
+		t.Fatalf("expected legacy session preview to remain empty after hard cutover, got %q", items[0].FirstPromptPreview)
+	}
+
+	reloaded, err := Open(store.Dir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if reloaded.Meta().FirstPromptPreview != "" {
+		t.Fatalf("expected legacy metadata preview to remain empty after list, got %q", reloaded.Meta().FirstPromptPreview)
+	}
+}
+
 func TestForkAtUserMessageCopiesPrefixBeforeSelectedMessage(t *testing.T) {
 	root := t.TempDir()
 	parent, err := Create(root, "workspace-x", "/tmp/work")
@@ -230,6 +353,9 @@ func TestForkAtUserMessageCopiesPrefixBeforeSelectedMessage(t *testing.T) {
 	}
 	if meta.Name != "Parent → edit u2" {
 		t.Fatalf("expected fork name, got %q", meta.Name)
+	}
+	if meta.FirstPromptPreview != "u1" {
+		t.Fatalf("expected fork preview to persist first user message, got %q", meta.FirstPromptPreview)
 	}
 }
 

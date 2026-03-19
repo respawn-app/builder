@@ -162,10 +162,11 @@ func ListSessions(workspaceContainerDir string) ([]Summary, error) {
 			continue
 		}
 		out = append(out, Summary{
-			SessionID: m.SessionID,
-			Name:      strings.TrimSpace(m.Name),
-			UpdatedAt: m.UpdatedAt,
-			Path:      sessionPath,
+			SessionID:          m.SessionID,
+			Name:               strings.TrimSpace(m.Name),
+			FirstPromptPreview: strings.TrimSpace(m.FirstPromptPreview),
+			UpdatedAt:          m.UpdatedAt,
+			Path:               sessionPath,
 		})
 	}
 
@@ -262,6 +263,7 @@ func (s *Store) AppendEvent(stepID, kind string, payload any) (Event, error) {
 		StepID:    stepID,
 		Payload:   body,
 	}
+	s.captureFirstPromptPreviewLocked([]Event{evt})
 
 	if err := s.appendEventsAtomicLocked([]Event{evt}); err != nil {
 		return Event{}, err
@@ -293,6 +295,7 @@ func (s *Store) AppendTurnAtomic(stepID string, events []EventInput) ([]Event, e
 			Payload:   body,
 		})
 	}
+	s.captureFirstPromptPreviewLocked(built)
 
 	if err := s.appendEventsAtomicLocked(built); err != nil {
 		return nil, err
@@ -327,6 +330,7 @@ func (s *Store) AppendReplayEvents(events []ReplayEvent) ([]Event, error) {
 			Payload:   payload,
 		})
 	}
+	s.captureFirstPromptPreviewLocked(built)
 
 	if err := s.appendEventsAtomicLocked(built); err != nil {
 		return nil, err
@@ -435,4 +439,16 @@ func normalizeContinuationContext(ctx ContinuationContext) *ContinuationContext 
 		return nil
 	}
 	return &ContinuationContext{OpenAIBaseURL: openAIBaseURL}
+}
+
+func (s *Store) captureFirstPromptPreviewLocked(events []Event) {
+	if strings.TrimSpace(s.meta.FirstPromptPreview) != "" {
+		return
+	}
+	for _, evt := range events {
+		if preview, ok := firstPromptPreviewFromEvent(evt.Kind, evt.Payload); ok {
+			s.meta.FirstPromptPreview = preview
+			return
+		}
+	}
 }

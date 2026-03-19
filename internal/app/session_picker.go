@@ -32,6 +32,7 @@ type sessionPickerStyles struct {
 	rowSelected    lipgloss.Style
 	marker         lipgloss.Style
 	markerSelected lipgloss.Style
+	preview        lipgloss.Style
 	timestamp      lipgloss.Style
 }
 
@@ -118,15 +119,13 @@ func (m *sessionPickerModel) View() string {
 	var out strings.Builder
 	out.WriteString(m.renderHeader())
 	out.WriteString("\n\n")
-	start := m.offset
-	end := start + m.visibleRows()
-	totalItems := m.itemCount()
-	if end > totalItems {
-		end = totalItems
-	}
-	for i := start; i < end; i++ {
-		out.WriteString(m.renderRow(i))
-		if i+1 < end {
+	visible := m.visibleRowsFromOffset(m.offset)
+	for i, row := range visible {
+		if i > 0 && m.needsSeparatorAfterRow(visible[i-1]) {
+			out.WriteByte('\n')
+		}
+		out.WriteString(m.renderRow(row.index, row.showPreview))
+		if i+1 < len(visible) {
 			out.WriteByte('\n')
 		}
 	}
@@ -149,17 +148,19 @@ func (m *sessionPickerModel) moveCursor(delta int) {
 }
 
 func (m *sessionPickerModel) ensureCursorVisible() {
-	visibleRows := m.visibleRows()
 	if m.cursor < m.offset {
 		m.offset = m.cursor
 	}
-	if m.cursor >= m.offset+visibleRows {
-		m.offset = m.cursor - visibleRows + 1
+	for m.offset < m.cursor && !m.rowVisibleFromOffset(m.offset, m.cursor) {
+		m.offset++
 	}
 	if m.offset < 0 {
 		m.offset = 0
 	}
-	maxOffset := m.itemCount() - visibleRows
+	for m.offset > 0 && m.rowVisibleFromOffset(m.offset-1, m.cursor) {
+		m.offset--
+	}
+	maxOffset := m.itemCount() - 1
 	if maxOffset < 0 {
 		maxOffset = 0
 	}
@@ -168,12 +169,65 @@ func (m *sessionPickerModel) ensureCursorVisible() {
 	}
 }
 
-func (m *sessionPickerModel) visibleRows() int {
+func (m *sessionPickerModel) visibleLineBudget() int {
 	rows := m.height - 2
 	if rows < 1 {
 		return 1
 	}
 	return rows
+}
+
+type sessionPickerVisibleRow struct {
+	index       int
+	showPreview bool
+}
+
+func (m *sessionPickerModel) visibleRowsFromOffset(offset int) []sessionPickerVisibleRow {
+	budget := m.visibleLineBudget()
+	if budget <= 0 {
+		return nil
+	}
+	visible := make([]sessionPickerVisibleRow, 0, m.itemCount())
+	for i := offset; i < m.itemCount(); i++ {
+		separator := 0
+		if len(visible) > 0 && m.needsSeparatorAfterRow(visible[len(visible)-1]) {
+			separator = 1
+		}
+		available := budget - separator
+		if available < 1 {
+			break
+		}
+		showPreview := m.hasPreview(i) && available >= 2
+		rowLines := 1
+		if showPreview {
+			rowLines = 2
+		}
+		if rowLines > available {
+			if len(visible) == 0 {
+				return []sessionPickerVisibleRow{{index: i, showPreview: false}}
+			}
+			break
+		}
+		visible = append(visible, sessionPickerVisibleRow{index: i, showPreview: showPreview})
+		budget -= separator + rowLines
+		if budget == 0 {
+			break
+		}
+	}
+	return visible
+}
+
+func (m *sessionPickerModel) rowVisibleFromOffset(offset, index int) bool {
+	for _, row := range m.visibleRowsFromOffset(offset) {
+		if row.index == index {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *sessionPickerModel) needsSeparatorAfterRow(row sessionPickerVisibleRow) bool {
+	return row.index == 0 || row.showPreview
 }
 
 func (m *sessionPickerModel) itemCount() int {
@@ -190,16 +244,15 @@ func (m *sessionPickerModel) renderHeader() string {
 	return m.styles.headerFallback.Render("Select session")
 }
 
-func (m *sessionPickerModel) renderRow(index int) string {
+func (m *sessionPickerModel) renderRow(index int, showPreview bool) string {
 	selected := index == m.cursor
 	title := sessionPickerCreateLabel
+	preview := ""
 	var timestamp string
 	if index > 0 {
 		item := m.sessions[index-1]
-		title = strings.TrimSpace(item.Name)
-		if title == "" {
-			title = item.SessionID
-		}
+		title = sessionPickerTitle(item)
+		preview = strings.TrimSpace(item.FirstPromptPreview)
 		timestamp = humanTime(item.UpdatedAt)
 	}
 
@@ -219,7 +272,37 @@ func (m *sessionPickerModel) renderRow(index int) string {
 	if gap < 1 {
 		gap = 1
 	}
-	return left + strings.Repeat(" ", gap) + right
+	titleLine := left + strings.Repeat(" ", gap) + right
+	if preview == "" || !showPreview {
+		return titleLine
+	}
+	previewWidth := m.width - 2
+	if previewWidth < 1 {
+		previewWidth = 1
+	}
+	previewLine := "  " + m.styles.preview.Render(truncateQueuedMessageLine(preview, previewWidth))
+	return titleLine + "\n" + previewLine
+}
+
+func sessionPickerTitle(item session.Summary) string {
+	if title := strings.TrimSpace(item.Name); title != "" {
+		return title
+	}
+	return item.SessionID
+}
+
+func (m *sessionPickerModel) rowLineCount(index int) int {
+	if m.hasPreview(index) {
+		return 2
+	}
+	return 1
+}
+
+func (m *sessionPickerModel) hasPreview(index int) bool {
+	if index <= 0 {
+		return false
+	}
+	return strings.TrimSpace(m.sessions[index-1].FirstPromptPreview) != ""
 }
 
 func newSessionPickerStyles(theme string) sessionPickerStyles {
@@ -230,6 +313,7 @@ func newSessionPickerStyles(theme string) sessionPickerStyles {
 		rowSelected:    lipgloss.NewStyle().Foreground(palette.primary).Bold(true),
 		marker:         lipgloss.NewStyle().Foreground(palette.muted),
 		markerSelected: lipgloss.NewStyle().Foreground(palette.primary).Bold(true),
+		preview:        lipgloss.NewStyle().Foreground(palette.muted).Faint(true),
 		timestamp:      lipgloss.NewStyle().Foreground(palette.muted).Faint(true),
 	}
 }
