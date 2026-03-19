@@ -87,7 +87,7 @@ func (messageOutputItemParser) Parse(item responses.ResponseOutputItemUnion) par
 		}
 	}
 	text := strings.Join(textParts, "")
-	phase := parseMessagePhaseFromRaw(json.RawMessage(item.RawJSON()))
+	phase := normalizeMessagePhase(string(item.Phase))
 	raw := json.RawMessage(item.RawJSON())
 	parsed := parsedResponseOutputItem{
 		CanonicalItems: []ResponseItem{{
@@ -213,17 +213,4 @@ func resolveAssistantOutput(segments []assistantOutputSegment) (string, MessageP
 		textParts = append(textParts, segments[i].Text)
 	}
 	return strings.Join(textParts, ""), phase
-}
-
-func parseMessagePhaseFromRaw(raw json.RawMessage) MessagePhase {
-	if len(raw) == 0 || !json.Valid(raw) {
-		return ""
-	}
-	var payload struct {
-		Phase string `json:"phase"`
-	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return ""
-	}
-	return normalizeMessagePhase(payload.Phase)
 }

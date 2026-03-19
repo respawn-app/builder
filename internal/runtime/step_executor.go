@@ -94,11 +94,6 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 					return llm.Message{}, executedToolCall, false, err
 				}
 			}
-			if phaseTurn.GarbageAssistantContent {
-				if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: garbageAssistantContentWarning}); err != nil {
-					return llm.Message{}, executedToolCall, false, err
-				}
-			}
 			if phaseTurn.FinalAnswerIncludedToolCalls {
 				if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: finalWithToolCallsIgnoredWarning}); err != nil {
 					return llm.Message{}, executedToolCall, false, err
@@ -122,15 +117,6 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 		}
 
 		if len(localToolCalls) == 0 {
-			if phaseTurn.GarbageAssistantContent {
-				if _, err := s.messages.FlushPendingUserInjections(stepID); err != nil {
-					return llm.Message{}, executedToolCall, false, err
-				}
-				if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
-					return llm.Message{}, executedToolCall, false, err
-				}
-				continue
-			}
 			if phaseTurn.MissingAssistantPhase {
 				if _, err := s.messages.FlushPendingUserInjections(stepID); err != nil {
 					return llm.Message{}, executedToolCall, false, err

@@ -7,15 +7,6 @@ import (
 	"builder/internal/llm"
 )
 
-var malformedAssistantArtifacts = []string{
-	"#+#+#+#+",
-	"#+#+#+#+#+",
-	"assistant to=functions.shell",
-	"assistant to=functions.patch",
-	"assistant to=functions.multi_tool_use_parallel",
-	"assistant to=multi_tool_use.parallel",
-}
-
 type defaultPhaseProtocol struct {
 	engine *Engine
 }
@@ -50,10 +41,6 @@ func (p *defaultPhaseProtocol) Apply(ctx context.Context, resp llm.Response, ass
 	structuredPhaseProtocol := shouldTreatMissingAssistantPhaseAsCommentary(resp)
 	hasExplicitAssistantPhase := strings.TrimSpace(string(assistant.Phase)) != ""
 	enforcePhaseProtocol := phaseProtocolEnabled && (structuredPhaseProtocol || hasExplicitAssistantPhase)
-	garbageAssistantContent := phaseProtocolEnabled && containsMalformedAssistantContent(assistant.Content)
-	if garbageAssistantContent {
-		assistant.Phase = llm.MessagePhaseCommentary
-	}
 	missingAssistantPhase := enforcePhaseProtocol && assistant.Phase == ""
 	if missingAssistantPhase {
 		assistant.Phase = llm.MessagePhaseCommentary
@@ -83,7 +70,6 @@ func (p *defaultPhaseProtocol) Apply(ctx context.Context, resp llm.Response, ass
 		HostedToolExecutions:         hostedToolExecutions,
 		EnforcePhaseProtocol:         enforcePhaseProtocol,
 		MissingAssistantPhase:        missingAssistantPhase,
-		GarbageAssistantContent:      garbageAssistantContent,
 		FinalAnswerIncludedToolCalls: finalAnswerIncludedToolCalls,
 	}
 }
@@ -91,19 +77,6 @@ func (p *defaultPhaseProtocol) Apply(ctx context.Context, resp llm.Response, ass
 func shouldTreatMissingAssistantPhaseAsCommentary(resp llm.Response) bool {
 	for _, item := range resp.OutputItems {
 		if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleAssistant {
-			return true
-		}
-	}
-	return false
-}
-
-func containsMalformedAssistantContent(content string) bool {
-	if strings.TrimSpace(content) == "" {
-		return false
-	}
-	lower := strings.ToLower(content)
-	for _, artifact := range malformedAssistantArtifacts {
-		if strings.Contains(lower, artifact) {
 			return true
 		}
 	}
