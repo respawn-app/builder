@@ -179,11 +179,11 @@ is_openai_first_party = false
 	if cfg.Settings.ProviderCapabilities.ProviderID != "custom-provider" || !cfg.Settings.ProviderCapabilities.SupportsResponsesAPI || !cfg.Settings.ProviderCapabilities.SupportsNativeWebSearch {
 		t.Fatalf("expected provider capability overrides from file, got %+v", cfg.Settings.ProviderCapabilities)
 	}
-	if got := cfg.Source.Sources["model_capabilities"]; got != "file" {
-		t.Fatalf("expected model_capabilities source file, got %q", got)
+	if got := cfg.Source.Sources["model_capabilities.supports_reasoning_effort"]; got != "file" {
+		t.Fatalf("expected model_capabilities.supports_reasoning_effort source file, got %q", got)
 	}
-	if got := cfg.Source.Sources["provider_capabilities"]; got != "file" {
-		t.Fatalf("expected provider_capabilities source file, got %q", got)
+	if got := cfg.Source.Sources["provider_capabilities.provider_id"]; got != "file" {
+		t.Fatalf("expected provider_capabilities.provider_id source file, got %q", got)
 	}
 }
 
@@ -191,15 +191,15 @@ func TestLoadCapabilityOverridesFromEnv(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("BUILDER_MODEL_SUPPORTS_REASONING_EFFORT", "true")
-	t.Setenv("BUILDER_MODEL_SUPPORTS_VISION_INPUTS", "true")
-	t.Setenv("BUILDER_PROVIDER_CAPABILITY_ID", "custom-provider")
-	t.Setenv("BUILDER_PROVIDER_SUPPORTS_RESPONSES_API", "true")
-	t.Setenv("BUILDER_PROVIDER_SUPPORTS_RESPONSES_COMPACT", "false")
-	t.Setenv("BUILDER_PROVIDER_SUPPORTS_NATIVE_WEB_SEARCH", "true")
-	t.Setenv("BUILDER_PROVIDER_SUPPORTS_REASONING_ENCRYPTED", "false")
-	t.Setenv("BUILDER_PROVIDER_SUPPORTS_SERVER_SIDE_CONTEXT_EDIT", "false")
-	t.Setenv("BUILDER_PROVIDER_IS_OPENAI_FIRST_PARTY", "false")
+	t.Setenv("BUILDER_MODEL_CAPABILITIES_SUPPORTS_REASONING_EFFORT", "true")
+	t.Setenv("BUILDER_MODEL_CAPABILITIES_SUPPORTS_VISION_INPUTS", "true")
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_PROVIDER_ID", "custom-provider")
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_RESPONSES_API", "true")
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_RESPONSES_COMPACT", "false")
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_NATIVE_WEB_SEARCH", "true")
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_REASONING_ENCRYPTED", "false")
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_SERVER_SIDE_CONTEXT_EDIT", "false")
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_IS_OPENAI_FIRST_PARTY", "false")
 
 	cfg, err := Load(workspace, LoadOptions{})
 	if err != nil {
@@ -211,11 +211,11 @@ func TestLoadCapabilityOverridesFromEnv(t *testing.T) {
 	if cfg.Settings.ProviderCapabilities.ProviderID != "custom-provider" || !cfg.Settings.ProviderCapabilities.SupportsResponsesAPI || !cfg.Settings.ProviderCapabilities.SupportsNativeWebSearch {
 		t.Fatalf("expected provider capability overrides from env, got %+v", cfg.Settings.ProviderCapabilities)
 	}
-	if got := cfg.Source.Sources["model_capabilities"]; got != "env" {
-		t.Fatalf("expected model_capabilities source env, got %q", got)
+	if got := cfg.Source.Sources["model_capabilities.supports_reasoning_effort"]; got != "env" {
+		t.Fatalf("expected model_capabilities.supports_reasoning_effort source env, got %q", got)
 	}
-	if got := cfg.Source.Sources["provider_capabilities"]; got != "env" {
-		t.Fatalf("expected provider_capabilities source env, got %q", got)
+	if got := cfg.Source.Sources["provider_capabilities.provider_id"]; got != "env" {
+		t.Fatalf("expected provider_capabilities.provider_id source env, got %q", got)
 	}
 }
 
@@ -339,7 +339,7 @@ func TestLoadCapabilityOverridesRequireProviderID(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("BUILDER_PROVIDER_SUPPORTS_NATIVE_WEB_SEARCH", "true")
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_NATIVE_WEB_SEARCH", "true")
 
 	_, err := Load(workspace, LoadOptions{})
 	if err == nil {
@@ -771,14 +771,18 @@ shell_default_seconds = 50
 	}
 
 	t.Setenv("BUILDER_MODEL", "gpt-env")
+	t.Setenv("BUILDER_THINKING_LEVEL", "medium")
 	t.Setenv("BUILDER_TOOLS", "shell,patch")
 
-	cfg, err := Load(workspace, LoadOptions{Model: "gpt-cli"})
+	cfg, err := Load(workspace, LoadOptions{Model: "gpt-cli", ThinkingLevel: "xhigh"})
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	if cfg.Settings.Model != "gpt-cli" {
 		t.Fatalf("expected cli model, got %q", cfg.Settings.Model)
+	}
+	if cfg.Settings.ThinkingLevel != "xhigh" {
+		t.Fatalf("expected cli thinking_level, got %q", cfg.Settings.ThinkingLevel)
 	}
 	if !cfg.Settings.EnabledTools[tools.ToolPatch] {
 		t.Fatalf("expected env tool override to enable patch")
@@ -786,9 +790,12 @@ shell_default_seconds = 50
 	if got := cfg.Source.Sources["model"]; got != "cli" {
 		t.Fatalf("expected model source cli, got %q", got)
 	}
+	if got := cfg.Source.Sources["thinking_level"]; got != "cli" {
+		t.Fatalf("expected thinking_level source cli, got %q", got)
+	}
 }
 
-func TestLoadSupportsLegacyBashTimeoutSettingNames(t *testing.T) {
+func TestLoadRejectsLegacyTimeoutSettingNames(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -803,22 +810,16 @@ bash_default_seconds = 42
 		t.Fatalf("write config: %v", err)
 	}
 
-	cfg, err := Load(workspace, LoadOptions{})
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if cfg.Settings.Timeouts.ShellDefaultSeconds != 42 {
-		t.Fatalf("legacy bash timeout was not mapped, got %d", cfg.Settings.Timeouts.ShellDefaultSeconds)
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected legacy bash timeout file key to be rejected")
 	}
 
-	t.Setenv("BUILDER_SHELL_TIMEOUT_SECONDS", "")
-	t.Setenv("BUILDER_BASH_TIMEOUT_SECONDS", "51")
-	cfg, err = Load(workspace, LoadOptions{})
-	if err != nil {
-		t.Fatalf("load with legacy env: %v", err)
+	if err := os.WriteFile(configPath, []byte(""), 0o644); err != nil {
+		t.Fatalf("clear config: %v", err)
 	}
-	if cfg.Settings.Timeouts.ShellDefaultSeconds != 51 {
-		t.Fatalf("legacy bash env timeout was not mapped, got %d", cfg.Settings.Timeouts.ShellDefaultSeconds)
+	t.Setenv("BUILDER_BASH_TIMEOUT_SECONDS", "51")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected legacy bash timeout env var to be rejected")
 	}
 }
 
@@ -1000,6 +1001,31 @@ func TestLoadOpenAIBaseURLPrecedence(t *testing.T) {
 	}
 }
 
+func TestLoadCanonicalTimeoutEnvAndSourceKeys(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUILDER_TIMEOUTS_MODEL_REQUEST_SECONDS", "123")
+	t.Setenv("BUILDER_TIMEOUTS_SHELL_DEFAULT_SECONDS", "234")
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.Timeouts.ModelRequestSeconds != 123 {
+		t.Fatalf("expected canonical env model timeout, got %d", cfg.Settings.Timeouts.ModelRequestSeconds)
+	}
+	if cfg.Settings.Timeouts.ShellDefaultSeconds != 234 {
+		t.Fatalf("expected canonical env shell timeout, got %d", cfg.Settings.Timeouts.ShellDefaultSeconds)
+	}
+	if got := cfg.Source.Sources["timeouts.model_request_seconds"]; got != "env" {
+		t.Fatalf("expected timeouts.model_request_seconds source env, got %q", got)
+	}
+	if got := cfg.Source.Sources["timeouts.shell_default_seconds"]; got != "env" {
+		t.Fatalf("expected timeouts.shell_default_seconds source env, got %q", got)
+	}
+}
+
 func TestLoadStorePrecedence(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -1034,6 +1060,46 @@ func TestLoadStorePrecedence(t *testing.T) {
 	}
 	if got := cfg.Source.Sources["store"]; got != "env" {
 		t.Fatalf("expected store source env, got %q", got)
+	}
+}
+
+func TestLoadRejectsLegacyCapabilityEnvNamesWithMigrationHints(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUILDER_PROVIDER_CAPABILITY_ID", "custom-provider")
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected legacy provider capability env var to be rejected")
+	}
+	if !strings.Contains(err.Error(), "BUILDER_PROVIDER_CAPABILITIES_PROVIDER_ID") {
+		t.Fatalf("expected migration hint for canonical provider capability env var, got %v", err)
+	}
+
+	t.Setenv("BUILDER_PROVIDER_CAPABILITY_ID", "")
+	t.Setenv("BUILDER_MODEL_SUPPORTS_REASONING_EFFORT", "true")
+	_, err = Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected legacy model capability env var to be rejected")
+	}
+	if !strings.Contains(err.Error(), "BUILDER_MODEL_CAPABILITIES_SUPPORTS_REASONING_EFFORT") {
+		t.Fatalf("expected migration hint for canonical model capability env var, got %v", err)
+	}
+}
+
+func TestLoadRejectsLegacyTimeoutEnvNamesWithMigrationHints(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUILDER_MODEL_TIMEOUT_SECONDS", "123")
+
+	_, err := Load(workspace, LoadOptions{})
+	if err == nil {
+		t.Fatal("expected legacy model timeout env var to be rejected")
+	}
+	if !strings.Contains(err.Error(), "BUILDER_TIMEOUTS_MODEL_REQUEST_SECONDS") {
+		t.Fatalf("expected migration hint for canonical model timeout env var, got %v", err)
 	}
 }
 
