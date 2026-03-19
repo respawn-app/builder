@@ -38,6 +38,7 @@ type ContinuationContext struct {
 type Meta struct {
 	SessionID          string               `json:"session_id"`
 	Name               string               `json:"name,omitempty"`
+	FirstPromptPreview string               `json:"first_prompt_preview,omitempty"`
 	ParentSessionID    string               `json:"parent_session_id,omitempty"`
 	WorkspaceRoot      string               `json:"workspace_root"`
 	WorkspaceContainer string               `json:"workspace_container"`
@@ -60,8 +61,9 @@ type Event struct {
 }
 
 type Summary struct {
-	SessionID string    `json:"session_id"`
-	Name      string    `json:"name,omitempty"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Path      string    `json:"path"`
+	SessionID          string    `json:"session_id"`
+	Name               string    `json:"name,omitempty"`
+	FirstPromptPreview string    `json:"first_prompt_preview,omitempty"`
+	UpdatedAt          time.Time `json:"updated_at"`
+	Path               string    `json:"path"`
 }

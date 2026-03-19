@@ -1,17 +1,11 @@
 package session
 
 import (
-	"builder/prompts"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
 )
-
-type persistedMessageEnvelope struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
 
 func ForkAtUserMessage(parent *Store, userMessageIndex int, forkName string) (*Store, error) {
 	if parent == nil {
@@ -67,20 +61,6 @@ func ForkAtUserMessage(parent *Store, userMessageIndex int, forkName string) (*S
 		return nil, fmt.Errorf("append fork replay events: %w", err)
 	}
 	return child, nil
-}
-
-func isVisibleUserMessage(msg persistedMessageEnvelope) bool {
-	if strings.TrimSpace(msg.Role) != "user" {
-		return false
-	}
-	content := strings.TrimSpace(msg.Content)
-	if content == "" {
-		return false
-	}
-	if strings.HasPrefix(content, prompts.CompactionSummaryPrefix+"\n") {
-		return false
-	}
-	return true
 }
 
 func cloneLockedContract(in *LockedContract) *LockedContract {
