@@ -239,6 +239,164 @@ func TestNativeScrollbackInitClearsOnEachProgramRun(t *testing.T) {
 	}
 }
 
+func TestNativeResizeReplaysOngoingScreenAfterRealResize(t *testing.T) {
+	previousDebounce := nativeResizeReplayDebounce
+	nativeResizeReplayDebounce = 20 * time.Millisecond
+	t.Cleanup(func() {
+		nativeResizeReplayDebounce = previousDebounce
+	})
+
+	out := &bytes.Buffer{}
+	model := NewUIModel(
+		nil,
+		closedRuntimeEvents(),
+		closedAskEvents(),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed replay line"}}),
+	).(*uiModel)
+	model.input = "line one\nline two"
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	for _, size := range []tea.WindowSizeMsg{
+		{Width: 120, Height: 30},
+		{Width: 96, Height: 24},
+		{Width: 110, Height: 28},
+		{Width: 84, Height: 22},
+	} {
+		program.Send(size)
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	raw := out.String()
+	if count := strings.Count(raw, "\x1b[2J"); count < 2 {
+		t.Fatalf("expected startup clear plus one debounced resize clear, got %d occurrences in %q", count, raw)
+	}
+	plain := xansi.Strip(raw)
+	if strings.Count(normalizedOutput(raw), "seed replay line") < 2 {
+		t.Fatalf("expected committed history replayed after debounced resize, got %q", normalizedOutput(raw))
+	}
+	for _, line := range strings.Split(plain, "\n") {
+		if strings.Count(line, "ongoing | ") > 1 {
+			t.Fatalf("expected no duplicated status segment in a single rendered line, got %q", line)
+		}
+	}
+	borderLines := 0
+	for _, line := range strings.Split(plain, "\n") {
+		if strings.Contains(line, strings.Repeat("─", 12)) {
+			borderLines++
+		}
+	}
+	if borderLines > 16 {
+		t.Fatalf("expected bounded border redraw count during resize, got %d", borderLines)
+	}
+	if strings.Count(plain, "ongoing | ") > 12 {
+		t.Fatalf("expected bounded status redraw count during resize, got %d", strings.Count(plain, "ongoing | "))
+	}
+}
+
+func TestNativeResizeClearWithoutHistoryRedrawsSingleLiveRegion(t *testing.T) {
+	previousDebounce := nativeResizeReplayDebounce
+	nativeResizeReplayDebounce = 20 * time.Millisecond
+	t.Cleanup(func() {
+		nativeResizeReplayDebounce = previousDebounce
+	})
+
+	out := &bytes.Buffer{}
+	model := NewUIModel(
+		nil,
+		closedRuntimeEvents(),
+		closedAskEvents(),
+	).(*uiModel)
+	model.input = "top\ncurrent\nbottom"
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	for _, size := range []tea.WindowSizeMsg{
+		{Width: 120, Height: 30},
+		{Width: 96, Height: 24},
+		{Width: 110, Height: 28},
+		{Width: 84, Height: 22},
+	} {
+		program.Send(size)
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	raw := out.String()
+	if count := strings.Count(raw, "\x1b[2J"); count < 1 {
+		t.Fatalf("expected startup clear-screen sequence in no-history path, got %d occurrences in %q", count, raw)
+	}
+	plain := xansi.Strip(raw)
+	if !strings.Contains(plain, "top") || !strings.Contains(plain, "current") || !strings.Contains(plain, "bottom") {
+		t.Fatalf("expected multiline input to remain visible after repeated resizes, got %q", plain)
+	}
+	for _, line := range strings.Split(plain, "\n") {
+		if strings.Count(line, "ongoing | ") > 1 {
+			t.Fatalf("expected no duplicated status segment in a single rendered line, got %q", line)
+		}
+		if strings.Count(line, "› ") > 1 {
+			t.Fatalf("expected no duplicated input prompt in a single rendered line, got %q", line)
+		}
+	}
+	borderLines := 0
+	for _, line := range strings.Split(plain, "\n") {
+		if strings.Contains(line, strings.Repeat("─", 12)) {
+			borderLines++
+		}
+	}
+	if borderLines > 16 {
+		t.Fatalf("expected bounded border redraw count in no-history resize path, got %d", borderLines)
+	}
+	if strings.Count(plain, "ongoing | ") > 12 {
+		t.Fatalf("expected bounded status redraw count in no-history resize path, got %d", strings.Count(plain, "ongoing | "))
+	}
+}
+
 func TestNativeRollbackOverlayCtrlCBalancesAltScreenAndAlternateScroll(t *testing.T) {
 	var terminalSequences []string
 	originalWriteTerminalSequence := writeTerminalSequence

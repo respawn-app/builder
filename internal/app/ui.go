@@ -37,6 +37,10 @@ type clearTransientStatusMsg struct {
 	token uint64
 }
 
+type nativeResizeReplayMsg struct {
+	token uint64
+}
+
 type nativeHistoryFlushMsg struct {
 	Text string
 }
@@ -109,6 +113,8 @@ const (
 	UIActionForkRollback UIAction = "fork_rollback"
 	UIActionOpenSession  UIAction = "open_session"
 )
+
+var nativeResizeReplayDebounce = time.Second
 
 func WithUILogger(logger uiLogger) UIOption {
 	return func(m *uiModel) {
@@ -254,9 +260,9 @@ type uiModel struct {
 	slashCommandFilterSet bool
 	slashCommandSelection int
 	exitAction            UIAction
-	theme              string
-	tuiAlternateScreen config.TUIAlternateScreenPolicy
-	altScreenActive    bool
+	theme                 string
+	tuiAlternateScreen    config.TUIAlternateScreenPolicy
+	altScreenActive       bool
 
 	sawAssistantDelta bool
 	logger            uiLogger
@@ -306,6 +312,7 @@ type uiModel struct {
 	nativeLiveRegionLines   int
 	nativeLiveRegionPad     int
 	nativeStreamingActive   bool
+	nativeResizeReplayToken uint64
 
 	lastEscAt              time.Time
 	pendingCSIShiftEnterAt time.Time
@@ -328,6 +335,10 @@ func (m *uiModel) isInputLocked() bool {
 func (m *uiModel) clearReviewerState() {
 	m.reviewerRunning = false
 	m.reviewerBlocking = false
+}
+
+func (m *uiModel) invalidateNativeResizeReplay() {
+	m.nativeResizeReplayToken++
 }
 
 type rollbackCandidate struct {
@@ -476,6 +487,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		previousWidth := m.termWidth
+		previousHeight := m.termHeight
 		m.termWidth = msg.Width
 		m.termHeight = msg.Height
 		m.windowSizeKnown = true
@@ -486,7 +498,22 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.nativeHistoryReplayed {
 			return m, m.syncNativeHistoryFromTranscript()
 		}
+		if previousWidth > 0 && previousHeight > 0 && (previousWidth != msg.Width || previousHeight != msg.Height) && m.view.Mode() == tui.ModeOngoing {
+			m.nativeResizeReplayToken++
+			token := m.nativeResizeReplayToken
+			return m, tea.Tick(nativeResizeReplayDebounce, func(time.Time) tea.Msg {
+				return nativeResizeReplayMsg{token: token}
+			})
+		}
 		return m, nil
+	case nativeResizeReplayMsg:
+		if msg.token != m.nativeResizeReplayToken || m.view.Mode() != tui.ModeOngoing {
+			return m, nil
+		}
+		if replay := m.emitCurrentNativeHistorySnapshot(true); replay != nil {
+			return m, replay
+		}
+		return m, tea.ClearScreen
 	case runtimeEventMsg:
 		historyCmd := m.runtimeAdapter().handleRuntimeEvent(msg.event)
 		m.syncViewport()

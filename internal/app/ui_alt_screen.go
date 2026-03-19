@@ -32,6 +32,9 @@ func (m *uiModel) toggleTranscriptModeWithNativeReplay(emitNativeReplay bool) te
 	prevMode := m.view.Mode()
 	m.forwardToView(tui.ToggleModeMsg{})
 	nextMode := m.view.Mode()
+	if prevMode != nextMode {
+		m.invalidateNativeResizeReplay()
+	}
 	transitionCmd := m.altScreenCmdForModeTransition(prevMode, nextMode)
 	nativeReplayCmd := m.nativeReplayCmdForModeTransition(prevMode, nextMode, emitNativeReplay && transitionCmd == nil, emitNativeReplay)
 	if transitionCmd == nil && nativeReplayCmd == nil {

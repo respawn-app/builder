@@ -131,13 +131,13 @@ func (l uiViewLayout) composeNativeSizedFrame(style uiStyles) (uiRenderFrame, na
 		return uiRenderFrame{}, nativeFrameInvalid
 	}
 	frame := uiRenderFrame{
-		width:      width,
-		height:     height,
-		pickerPane: l.renderSlashCommandPicker(width),
-		queuePane:  l.renderQueuedMessagesPane(width),
-		inputPane:  l.renderInputLines(width, style),
-		statusLine: l.renderStatusLine(width, style),
-		tailOnly:   true,
+		width:       width,
+		height:      height,
+		pickerPane:  l.renderSlashCommandPicker(width),
+		queuePane:   l.renderQueuedMessagesPane(width),
+		inputPane:   l.renderInputLines(width, style),
+		statusLine:  l.renderStatusLine(width, style),
+		tailOnly:    true,
 		padToHeight: false,
 	}
 	availableStreamingLines := height - len(frame.pickerPane) - len(frame.queuePane) - len(frame.inputPane) - 1
