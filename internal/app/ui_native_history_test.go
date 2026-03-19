@@ -149,6 +149,98 @@ func TestNativeScrollbackResizeRebasesFormatterWidth(t *testing.T) {
 	}
 }
 
+func TestNativeResizeReplayDebouncedToLatestResize(t *testing.T) {
+	previousDebounce := nativeResizeReplayDebounce
+	nativeResizeReplayDebounce = time.Millisecond
+	t.Cleanup(func() {
+		nativeResizeReplayDebounce = previousDebounce
+	})
+
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "old line"}}),
+	).(*uiModel)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 40, Height: 20})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+
+	next, cmd := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	m = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected debounced resize replay command")
+	}
+	firstToken := m.nativeResizeReplayToken
+
+	next, cmd = m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	m = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected debounced resize replay command for later resize")
+	}
+	secondToken := m.nativeResizeReplayToken
+	if secondToken <= firstToken {
+		t.Fatalf("expected resize replay token to advance, first=%d second=%d", firstToken, secondToken)
+	}
+
+	next, staleCmd := m.Update(nativeResizeReplayMsg{token: firstToken})
+	m = next.(*uiModel)
+	if staleCmd != nil {
+		t.Fatalf("expected stale resize replay token ignored, got %T", staleCmd)
+	}
+
+	next, replayCmd := m.Update(nativeResizeReplayMsg{token: secondToken})
+	m = next.(*uiModel)
+	if replayCmd == nil {
+		t.Fatal("expected latest resize replay token to emit replay command")
+	}
+	if msg := replayCmd(); msg == nil {
+		t.Fatal("expected replay command to return a message")
+	}
+	if m.nativeFormatterWidth != 100 {
+		t.Fatalf("expected formatter width rebased to latest resize width 100, got %d", m.nativeFormatterWidth)
+	}
+}
+
+func TestNativeResizeReplayInvalidatedAcrossModeSwitch(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
+	).(*uiModel)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 40, Height: 20})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+
+	next, resizeCmd := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	m = next.(*uiModel)
+	if resizeCmd == nil {
+		t.Fatal("expected debounced resize replay command")
+	}
+	staleToken := m.nativeResizeReplayToken
+
+	_ = m.toggleTranscriptModeWithNativeReplay(false)
+	if m.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected detail mode, got %q", m.view.Mode())
+	}
+	_ = m.toggleTranscriptModeWithNativeReplay(false)
+	if m.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected ongoing mode, got %q", m.view.Mode())
+	}
+	if m.nativeResizeReplayToken == staleToken {
+		t.Fatalf("expected mode switch to invalidate stale resize replay token %d", staleToken)
+	}
+
+	next, staleCmd := m.Update(nativeResizeReplayMsg{token: staleToken})
+	m = next.(*uiModel)
+	if staleCmd != nil {
+		t.Fatalf("expected stale resize replay ignored after mode switch, got %T", staleCmd)
+	}
+}
+
 func TestNativeStreamingContractViewportDuringStreamCommittedReplayOnFinish(t *testing.T) {
 	m := NewUIModel(
 		nil,
@@ -781,7 +873,7 @@ func TestNativeStreamingLinesIncludeDividerAndAssistantPrefix(t *testing.T) {
 	m.syncViewport()
 
 	plain := stripANSIPreserve(m.View())
-	if !strings.Contains(plain, strings.Repeat("─", 100)) {
+	if !strings.Contains(plain, strings.Repeat("─", m.termWidth)) {
 		t.Fatalf("expected streaming live region to include divider, got %q", plain)
 	}
 	if !strings.Contains(plain, "❮ Second Stream Check") {
@@ -884,7 +976,7 @@ func TestNativeStreamingDividerPersistsInTightViewport(t *testing.T) {
 	m.syncViewport()
 
 	plain := stripANSIPreserve(m.View())
-	if !strings.Contains(plain, strings.Repeat("─", 40)) {
+	if !strings.Contains(plain, strings.Repeat("─", m.termWidth)) {
 		t.Fatalf("expected divider to remain visible in tight viewport, got %q", plain)
 	}
 	if !strings.Contains(plain, "❮ line1") {
