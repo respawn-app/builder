@@ -7,6 +7,23 @@ Builder is licensed under `AGPL-3.0-only`. See `LICENSE`.
 If you deploy a modified network-accessible version, AGPL section 13 requires
 you to offer the corresponding source of that modified version to its users.
 
+## Install
+
+### Homebrew (macOS/Linux)
+
+```bash
+brew tap respawn-app/tap
+brew install builder
+```
+
+### Standalone binaries via GitHub Releases
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/respawn-app/agent/main/scripts/install.sh | sh
+```
+
+Check the installed version with `builder --version`.
+
 ### Features:
 
 - [x] Agentic loop with `shell`, `ask_question`, `patch` tools.

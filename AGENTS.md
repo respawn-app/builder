@@ -11,6 +11,8 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
 
 - `cmd/builder/main.go`
   - CLI entrypoint for launching the Bubble Tea app.
+- `VERSION`
+  - Source of truth for release version/tag used by the release workflow and versioned builds.
 - `internal/app`
   - Startup orchestration, auth gating, session selection, and top-level UI composition.
 - `internal/runtime`
@@ -35,6 +37,8 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
   - Centralized compile-time tool interface declarations (name, descriptions, JSON schemas).
 - `~/.builder/config.toml`
   - Home settings file (auto-created on first run) for model, thinking level, tool toggles, timeouts, and theme.
+- `scripts/update-brew-tap.sh`
+  - Updates the Homebrew tap formula after a tagged release.
 
 ## Engineering Principles
 
@@ -70,6 +74,7 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
 
 - All business logic covered by tests. Production code is written to be unit-testable. Don't ask to write or run tests
 - Before handing off to the user after code changes, rebuild the binary to `./bin/builder` and make sure tests are written and green. Don't ask for confirmation to write tests and run checks.
+- Releases are driven by `VERSION` and `.github/workflows/release.yml`; keep Homebrew release plumbing in sync with `scripts/update-brew-tap.sh` and the tap formula.
 - `docs/decisions.md` is the source of truth for locked product and architecture decisions.
 - Keep this AGENTS.md file up-to-date and comprehensive. Avoid adding info that can become outdated, otherwise keep this as project guidelines, rules, and learnings for future team members. Persist info that should be preserved here.
 - Terminology lock:
