@@ -5,7 +5,7 @@ The product philosophy is:
 - extensible architecture with low-friction composition that enables easy future feature additions.
 - transparency of agent activity for power users, no fluff, no fancy UI tweaks, productivity and long-running work focus.
 
-This is not a general plugin platform. The scope is intentionally narrow and quality-oriented.
+The scope is intentionally narrow and quality-oriented.
 
 ## Repository Layout
 
@@ -32,9 +32,9 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
 - `internal/actions`
   - Typed action registry scaffold for `ask_question` post-answer hooks.
 - `docs`
-  - Public Astro/Starlight documentation site. Internal product/engineering docs stay under `docs/dev`, and scratch/internal working notes stay under `docs/tmp`.
+  - Public Astro/Starlight documentation site. Internal product/engineering docs stay under `docs/dev`, and scratch/internal working notes stay under `docs/tmp`. Keep docs up-to-date on your own and proactively.
 - `prompts`
-  - Embedded system prompt source file (`system_prompt.md`).
+  - Embedded prompt source files.
 - `internal/tools/definitions.go`
   - Centralized compile-time tool interface declarations (name, descriptions, JSON schemas).
 - `~/.builder/config.toml`
@@ -49,9 +49,9 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
 - Design for composability.
   - New tools and handlers should require minimal boilerplate and minimal cross-cutting edits.
 - Maximize API cache hits, avoid mutation of past conversation history.
-- Keep TUI fast, avoid flicker, stable scroll, follow best practices.
+- Keep TUI fast, avoid flicker, stable scroll, follow best practices, avoid affecting scrollback buffer in ongoing mode or re-emitting full history.
 - Never use regex-based matching, parsing, replace hacks. Never use substring-based lookup to determine information presence. Avoid brittle and fragile text/string-based logic, and develop type-safe data structures, store structured data or metadata that can reliably be extracted instead.
-- Do not leave legacy fallbacks, migrations, or preserve backward compatibility unless requested
+-  Breaking changes are allowed, but the UX of migration should be straightforward, e.g. a migration note for config entries or a clear error message. Ask user what migration strat they want.
 
 ## Coding Guidelines
 
@@ -64,7 +64,7 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
 - Validate invariants at boundaries (input, filesystem, process execution, API responses).
 - Keep behavior configurable only when it serves real operator value.
 
-## When designing model prompts (tool descriptions, etc.):
+## When designing model prompts:
 
 - Clearly explain **how** and **when** the model should use the tool in descriptions.
 - Write tool schemas for parameters that specify whether it's optional, what's the default value, what the parameter does, what is its format (iso date/number etc)
@@ -74,18 +74,11 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
 
 ## Important rules:
 
-- All business logic covered by tests. Production code is written to be unit-testable. Don't ask to write or run tests
+- All business logic covered by tests. Production code is written to be unit-testable.
 - Before handing off to the user after code changes, rebuild the binary to `./bin/builder` and make sure tests are written and green. Don't ask for confirmation to write tests and run checks.
-- Releases are driven by `VERSION` and `.github/workflows/release.yml`; keep Homebrew release plumbing in sync with `scripts/update-brew-tap.sh` and the tap formula.
-- `docs/decisions.md` is the source of truth for locked product and architecture decisions.
+- Releases are driven by `VERSION` and `.github/workflows/release.yml`; keep Homebrew release plumbing in sync with `scripts/update-brew-tap.sh` and the tap formula. Tap formula lives in a separate repo.
+- `docs/decisions.md` is the source of truth for locked product and architecture decisions, keep it up to date if user makes a new decision.
 - Keep this AGENTS.md file up-to-date and comprehensive. Avoid adding info that can become outdated, otherwise keep this as project guidelines, rules, and learnings for future team members. Persist info that should be preserved here.
-- Terminology lock:
-  - Terminal alt-screen is `?1049`.
-  - Terminal alternate-scroll is `?1007`.
-  - Transcript mode toggle bindings are `Shift+Tab` and `Ctrl+T`; keep behavior/protocol side effects identical between both.
-  - Ongoing mode must not use `?1007`.
-  - Ongoing normal-buffer transcript history is append-only after startup. Once a line is emitted into scrollback, it is immutable: never retroactively restyle it, rewrite it, clear-and-replay it, or re-emit the full buffer to reflect later tool state.
-  - Pending tool activity in ongoing mode belongs to the volatile live region only; pending tool previews must use the same rendering/layout as ordinary committed `tool_call` previews, with no pending-only labels, keywords, or extra markers.
-  - Parallel tool calls in ongoing mode commit through a stable frontier: later completed calls stay in the live region looking exactly like ordinary pending tool-call previews until all earlier pending calls are ready, then newly committable final lines append once in transcript order.
-  - Detail transcript overlay may use `?1049` + `?1007` when `tui_alternate_screen != never`.
-  - Rationale: ongoing prioritizes native long scrollback + selection in normal buffer; detail overlay prioritizes transcript navigation with wheel while still keeping mouse capture disabled for text selection.
+- Ongoing mode must not use `?1007`.
+- Ongoing normal-buffer transcript history is append-only after startup. Once a line is emitted into scrollback, it is immutable: never retroactively restyle it, rewrite it, clear-and-replay it, or re-emit the full buffer to reflect later tool state.
+- Proactively keep documentation up-to-date on your own when you make UX or other user-facing changes. Example areas that warrant a docs check include setup, startup, config, env variables, slash commands, model providers, etc.

@@ -31,6 +31,10 @@ export default defineConfig({
           link: docsConfig.docsHomePath,
         },
         {
+          label: 'Subagents / Headless',
+          link: '/subagents-headless/',
+        },
+        {
           label: 'Configuration',
           link: '/config/',
         },
