@@ -75,6 +75,7 @@ Here is where this project has to be highly opinionated:
 
 - Contribution guide: `CONTRIBUTING.md`
 - Security policy: `SECURITY.md`
+- Code of conduct: `CODE_OF_CONDUCT.md`
 
 
 ## License
