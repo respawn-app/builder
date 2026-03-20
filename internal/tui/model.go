@@ -162,18 +162,18 @@ type Model struct {
 	selectedTranscriptEntry  int
 	selectedTranscriptActive bool
 
-	detailSnapshot         string
-	detailLines            []string
-	detailLineEntryIndices []int
-	detailEntryLineRanges  []lineRange
-	detailDirty            bool
-	ongoingSnapshot        string
-	ongoingLineCache       []string
-	ongoingDirty           bool
-	ongoingError           string
-	theme                  string
-	md                     *markdownRenderer
-	code                   *codeRenderer
+	detailSnapshot          string
+	detailLines             []string
+	detailLineEntryIndices  []int
+	detailEntryLineRanges   []lineRange
+	detailDirty             bool
+	ongoingSnapshot         string
+	ongoingLineCache        []string
+	ongoingDirty            bool
+	ongoingError            string
+	theme                   string
+	md                      *markdownRenderer
+	code                    *codeRenderer
 	renderDiagnosticHandler RenderDiagnosticHandler
 }
 

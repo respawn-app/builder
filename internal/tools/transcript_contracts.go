@@ -17,6 +17,8 @@ import (
 
 var sedPrintRangePattern = regexp.MustCompile(`^\d+(?:,\d+)?p$`)
 
+const noOutputText = "No output"
+
 func localContract(localBuilder LocalRuntimeBuilder, request RequestExposure, presentation transcript.ToolPresentationKind, renderBehavior transcript.ToolCallRenderBehavior, omitSuccessfulResult bool, buildCallMeta func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta, formatResult func(Result) string) Contract {
 	return Contract{
 		Runtime: RuntimeContract{Availability: RuntimeAvailabilityLocal, LocalBuilder: localBuilder},
@@ -499,15 +501,16 @@ func formatOutputDefault(raw json.RawMessage) string {
 		return msg
 	}
 	if out, ok := asString(obj["output"]); ok {
+		out = strings.TrimSpace(out)
+		if out == "" {
+			out = noOutputText
+		}
 		var notes []string
 		if code, ok := asInt(obj["exit_code"]); ok && code != 0 {
 			notes = append(notes, fmt.Sprintf("exit code %d", code))
 		}
 		if len(notes) == 0 {
 			return out
-		}
-		if strings.TrimSpace(out) == "" {
-			return strings.Join(notes, ", ")
 		}
 		return out + "\n" + strings.Join(notes, ", ")
 	}

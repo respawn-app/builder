@@ -27,11 +27,19 @@ func nativePendingToolEntries(entries []tui.TranscriptEntry) []tui.TranscriptEnt
 	return pending
 }
 
-func renderNativePendingToolSnapshot(entries []tui.TranscriptEntry, theme string, width int) string {
+func renderNativePendingToolSnapshot(entries []tui.TranscriptEntry, theme string, width int, spinnerFrame int) string {
 	pending := nativePendingToolEntries(entries)
 	if len(pending) == 0 {
 		return ""
 	}
-	rendered := renderNativeCommittedSnapshot(pending, theme, width)
+	frame := ""
+	if len(pendingToolSpinner.Frames) > 0 {
+		index := spinnerFrame % len(pendingToolSpinner.Frames)
+		if index < 0 {
+			index = 0
+		}
+		frame = pendingToolSpinner.Frames[index]
+	}
+	rendered := tui.RenderPendingToolSnapshot(pending, theme, width, frame)
 	return styleNativeReplayDividers(rendered, theme, width)
 }

@@ -244,7 +244,7 @@ func (l uiViewLayout) renderNativeStreamingLines(width, maxLines int, style uiSt
 }
 
 func (l uiViewLayout) renderNativePendingLines(width int) []string {
-	rendered := renderNativePendingToolSnapshot(l.model.transcriptEntries, l.model.theme, width)
+	rendered := renderNativePendingToolSnapshot(l.model.transcriptEntries, l.model.theme, width, l.model.spinnerFrame)
 	if strings.TrimSpace(rendered) == "" {
 		return nil
 	}

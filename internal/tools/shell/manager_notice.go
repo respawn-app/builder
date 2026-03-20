@@ -12,6 +12,8 @@ import (
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
+const noOutputText = "No output"
+
 func readPreviewFromFile(path string, maxChars int) (string, int, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -56,7 +58,7 @@ func SummarizeBackgroundEvent(evt Event, opts BackgroundNoticeOptions) Backgroun
 	}
 	if mode != BackgroundOutputConcise {
 		if strings.TrimSpace(preview) == "" {
-			detail = append(detail, "no output")
+			detail = append(detail, noOutputText)
 		} else {
 			detail = append(detail, "Output:")
 			detail = append(detail, preview)
@@ -342,7 +344,11 @@ func formatExecResponse(result ExecResult) string {
 	if result.Truncated {
 		sections = append(sections, fmt.Sprintf("Original token count: %d", approxTokenCount(result.OriginalChars)))
 	}
-	sections = append(sections, "Output:")
-	sections = append(sections, result.Output)
+	output := strings.TrimSpace(result.Output)
+	if output == "" {
+		sections = append(sections, noOutputText)
+	} else {
+		sections = append(sections, output)
+	}
 	return strings.Join(sections, "\n")
 }

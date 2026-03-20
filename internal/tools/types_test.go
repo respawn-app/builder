@@ -196,3 +196,15 @@ func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 		t.Fatalf("unexpected ask_question transcript metadata: %+v", askMeta)
 	}
 }
+
+func TestDefinitionContractsFormatEmptyShellOutputAsNoOutput(t *testing.T) {
+	shell, _ := DefinitionFor(ToolShell)
+	got := shell.FormatToolResult(Result{
+		Name:   ToolShell,
+		Output: json.RawMessage(`{"output":" \n\t ","exit_code":0,"truncated":false}`),
+	})
+
+	if got != "No output" {
+		t.Fatalf("expected No output, got %q", got)
+	}
+}

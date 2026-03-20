@@ -152,7 +152,11 @@ func (c uiInputController) handleSpinnerTick() (tea.Model, tea.Cmd) {
 	if !m.busy {
 		return m, nil
 	}
-	m.spinnerFrame = (m.spinnerFrame + 1) % len(spinnerFrames)
+	frameCount := len(pendingToolSpinner.Frames)
+	if frameCount <= 0 {
+		frameCount = 1
+	}
+	m.spinnerFrame = (m.spinnerFrame + 1) % frameCount
 	m.syncViewport()
 	return m, tickSpinner()
 }

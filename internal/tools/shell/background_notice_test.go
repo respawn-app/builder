@@ -209,10 +209,25 @@ func TestSummarizeBackgroundEventWhitespacePreviewUsesNoOutputLine(t *testing.T)
 		Preview: " \n\t ",
 	}, BackgroundNoticeOptions{MaxChars: 80, SuccessOutputMode: BackgroundOutputDefault})
 
-	if !strings.Contains(summary.DetailText, "\nno output") {
+	if !strings.Contains(summary.DetailText, "\nNo output") {
 		t.Fatalf("expected no output line, got %q", summary.DetailText)
 	}
 	if strings.Contains(summary.DetailText, "Output:") {
 		t.Fatalf("did not expect output header for blank preview, got %q", summary.DetailText)
+	}
+}
+
+func TestFormatExecResponseBlankOutputUsesNoOutput(t *testing.T) {
+	exitCode := 1
+	text := formatExecResponse(ExecResult{ExitCode: &exitCode, Output: " \n\t "})
+
+	if !strings.Contains(text, "Process exited with code 1") {
+		t.Fatalf("expected exit code line, got %q", text)
+	}
+	if !strings.Contains(text, "\nNo output") {
+		t.Fatalf("expected No output line, got %q", text)
+	}
+	if strings.Contains(text, "Output:") {
+		t.Fatalf("did not expect output header for blank output, got %q", text)
 	}
 }
