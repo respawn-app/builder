@@ -88,7 +88,7 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.tag }}
-          draft: true
+          draft: false
           body: ${{ steps.changelog.outputs.changelog }}
           files: dist/*
 
