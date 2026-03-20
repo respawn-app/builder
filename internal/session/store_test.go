@@ -487,7 +487,7 @@ func TestOpenByIDFindsSessionAcrossContainers(t *testing.T) {
 	}
 }
 
-func TestOpenByIDFallsBackToLegacyPersistenceRootLayout(t *testing.T) {
+func TestOpenByIDRejectsLegacyPersistenceRootLayout(t *testing.T) {
 	root := t.TempDir()
 	legacyContainer := filepath.Join(root, "workspace-legacy")
 	if err := os.MkdirAll(legacyContainer, 0o755); err != nil {
@@ -501,12 +501,8 @@ func TestOpenByIDFallsBackToLegacyPersistenceRootLayout(t *testing.T) {
 		t.Fatalf("append event: %v", err)
 	}
 
-	opened, err := OpenByID(root, store.Meta().SessionID)
-	if err != nil {
-		t.Fatalf("open by id: %v", err)
-	}
-	if opened.Meta().SessionID != store.Meta().SessionID {
-		t.Fatalf("expected session id %q, got %q", store.Meta().SessionID, opened.Meta().SessionID)
+	if _, err := OpenByID(root, store.Meta().SessionID); err == nil {
+		t.Fatal("expected legacy persistence root layout to be ignored")
 	}
 }
 

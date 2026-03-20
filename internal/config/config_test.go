@@ -798,7 +798,7 @@ shell_default_seconds = 50
 	}
 }
 
-func TestLoadRejectsLegacyTimeoutSettingNames(t *testing.T) {
+func TestLoadRejectsUnknownLegacyTimeoutSettingNames(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -814,15 +814,7 @@ bash_default_seconds = 42
 	}
 
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
-		t.Fatal("expected legacy bash timeout file key to be rejected")
-	}
-
-	if err := os.WriteFile(configPath, []byte(""), 0o644); err != nil {
-		t.Fatalf("clear config: %v", err)
-	}
-	t.Setenv("BUILDER_BASH_TIMEOUT_SECONDS", "51")
-	if _, err := Load(workspace, LoadOptions{}); err == nil {
-		t.Fatal("expected legacy bash timeout env var to be rejected")
+		t.Fatal("expected unknown bash_default_seconds settings key error")
 	}
 }
 
@@ -1066,54 +1058,28 @@ func TestLoadStorePrecedence(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsLegacyCapabilityEnvNamesWithMigrationHints(t *testing.T) {
+func TestLoadIgnoresUnknownBuilderEnvVars(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("BUILDER_PROVIDER_CAPABILITY_ID", "custom-provider")
-
-	_, err := Load(workspace, LoadOptions{})
-	if err == nil {
-		t.Fatal("expected legacy provider capability env var to be rejected")
-	}
-	if !strings.Contains(err.Error(), "BUILDER_PROVIDER_CAPABILITIES_PROVIDER_ID") {
-		t.Fatalf("expected migration hint for canonical provider capability env var, got %v", err)
-	}
-
-	t.Setenv("BUILDER_PROVIDER_CAPABILITY_ID", "")
 	t.Setenv("BUILDER_MODEL_SUPPORTS_REASONING_EFFORT", "true")
-	_, err = Load(workspace, LoadOptions{})
-	if err == nil {
-		t.Fatal("expected legacy model capability env var to be rejected")
-	}
-	if !strings.Contains(err.Error(), "BUILDER_MODEL_CAPABILITIES_SUPPORTS_REASONING_EFFORT") {
-		t.Fatalf("expected migration hint for canonical model capability env var, got %v", err)
-	}
-}
-
-func TestLoadRejectsLegacyTimeoutEnvNamesWithMigrationHints(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
 	t.Setenv("BUILDER_MODEL_TIMEOUT_SECONDS", "123")
-
-	_, err := Load(workspace, LoadOptions{})
-	if err == nil {
-		t.Fatal("expected legacy model timeout env var to be rejected")
-	}
-	if !strings.Contains(err.Error(), "BUILDER_TIMEOUTS_MODEL_REQUEST_SECONDS") {
-		t.Fatalf("expected migration hint for canonical model timeout env var, got %v", err)
-	}
-}
-
-func TestLoadRejectsRemovedReviewerMaxSuggestionsEnv(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Setenv("BUILDER_USE_NATIVE_COMPACTION", "true")
 	t.Setenv("BUILDER_REVIEWER_MAX_SUGGESTIONS", "15")
 
-	if _, err := Load(workspace, LoadOptions{}); err == nil {
-		t.Fatal("expected removed BUILDER_REVIEWER_MAX_SUGGESTIONS env var to be rejected")
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.ModelCapabilities.SupportsReasoningEffort {
+		t.Fatal("expected unknown legacy env vars to be ignored")
+	}
+	if cfg.Settings.Timeouts.ModelRequestSeconds != defaultModelTimeoutSeconds {
+		t.Fatalf("expected unknown legacy env vars not to affect model timeout, got %d", cfg.Settings.Timeouts.ModelRequestSeconds)
+	}
+	if cfg.Settings.CompactionMode != CompactionModeLocal {
+		t.Fatalf("expected unknown legacy env vars not to affect compaction mode, got %q", cfg.Settings.CompactionMode)
 	}
 }
 
@@ -1250,17 +1216,6 @@ func TestLoadRejectsRemovedUseNativeCompactionSetting(t *testing.T) {
 
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
 		t.Fatal("expected unsupported use_native_compaction settings key error")
-	}
-}
-
-func TestLoadRejectsRemovedUseNativeCompactionEnv(t *testing.T) {
-	home := t.TempDir()
-	workspace := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("BUILDER_USE_NATIVE_COMPACTION", "true")
-
-	if _, err := Load(workspace, LoadOptions{}); err == nil {
-		t.Fatal("expected unsupported BUILDER_USE_NATIVE_COMPACTION error")
 	}
 }
 

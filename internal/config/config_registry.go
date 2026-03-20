@@ -16,11 +16,6 @@ type settingsState struct {
 
 type settingsValidator func(settingsState, map[string]string) error
 
-type rejectedFileKey struct {
-	Path        []string
-	Replacement string
-}
-
 type defaultConfigLine struct {
 	Path      []string
 	Value     any
@@ -44,11 +39,9 @@ type fileKeyTree struct {
 }
 
 type settingsRegistry struct {
-	settings         []registrySetting
-	validators       []settingsValidator
-	rejectedEnv      map[string]string
-	rejectedFileKeys []rejectedFileKey
-	fileKeys         *fileKeyTree
+	settings   []registrySetting
+	validators []settingsValidator
+	fileKeys   *fileKeyTree
 }
 
 type settingDocOptions struct {
@@ -338,26 +331,6 @@ func newSettingsRegistry() settingsRegistry {
 			validateCompactionMode,
 			validateReviewer,
 		},
-		rejectedEnv: map[string]string{
-			"BUILDER_MODEL_SUPPORTS_REASONING_EFFORT":            "BUILDER_MODEL_CAPABILITIES_SUPPORTS_REASONING_EFFORT",
-			"BUILDER_MODEL_SUPPORTS_VISION_INPUTS":               "BUILDER_MODEL_CAPABILITIES_SUPPORTS_VISION_INPUTS",
-			"BUILDER_PROVIDER_CAPABILITY_ID":                     "BUILDER_PROVIDER_CAPABILITIES_PROVIDER_ID",
-			"BUILDER_PROVIDER_SUPPORTS_RESPONSES_API":            "BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_RESPONSES_API",
-			"BUILDER_PROVIDER_SUPPORTS_RESPONSES_COMPACT":        "BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_RESPONSES_COMPACT",
-			"BUILDER_PROVIDER_SUPPORTS_NATIVE_WEB_SEARCH":        "BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_NATIVE_WEB_SEARCH",
-			"BUILDER_PROVIDER_SUPPORTS_REASONING_ENCRYPTED":      "BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_REASONING_ENCRYPTED",
-			"BUILDER_PROVIDER_SUPPORTS_SERVER_SIDE_CONTEXT_EDIT": "BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_SERVER_SIDE_CONTEXT_EDIT",
-			"BUILDER_PROVIDER_IS_OPENAI_FIRST_PARTY":             "BUILDER_PROVIDER_CAPABILITIES_IS_OPENAI_FIRST_PARTY",
-			"BUILDER_MODEL_TIMEOUT_SECONDS":                      "BUILDER_TIMEOUTS_MODEL_REQUEST_SECONDS",
-			"BUILDER_SHELL_TIMEOUT_SECONDS":                      "BUILDER_TIMEOUTS_SHELL_DEFAULT_SECONDS",
-			"BUILDER_BASH_TIMEOUT_SECONDS":                       "BUILDER_TIMEOUTS_SHELL_DEFAULT_SECONDS",
-			"BUILDER_USE_NATIVE_COMPACTION":                      "BUILDER_COMPACTION_MODE",
-			"BUILDER_REVIEWER_MAX_SUGGESTIONS":                   "",
-		},
-		rejectedFileKeys: []rejectedFileKey{
-			{Path: []string{"timeouts", "bash_default_seconds"}, Replacement: "timeouts.shell_default_seconds"},
-			{Path: []string{"use_native_compaction"}, Replacement: "compaction_mode"},
-		},
 	}
 
 	registry.fileKeys = newFileKeyTree()
@@ -384,15 +357,6 @@ func (r settingsRegistry) defaultSourceMap() map[string]string {
 }
 
 func (r settingsRegistry) applyFile(raw settingsFile, settingsPath string, state *settingsState, sources map[string]string) error {
-	for _, rejected := range r.rejectedFileKeys {
-		value, ok, err := lookupFileValue(raw, rejected.Path)
-		if err != nil {
-			return err
-		}
-		if ok && value != nil {
-			return unsupportedSettingsKeyError(strings.Join(rejected.Path, "."), rejected.Replacement)
-		}
-	}
 	if err := validateSettingsFileKeys(raw, r.fileKeys); err != nil {
 		return err
 	}
@@ -405,9 +369,6 @@ func (r settingsRegistry) applyFile(raw settingsFile, settingsPath string, state
 }
 
 func (r settingsRegistry) applyEnv(lookup envLookup, state *settingsState, sources map[string]string) error {
-	if err := validateRejectedEnv(lookup, r.rejectedEnv); err != nil {
-		return err
-	}
 	for _, setting := range r.settings {
 		if err := setting.applyEnv(lookup, state, sources); err != nil {
 			return err
@@ -782,26 +743,6 @@ func validateSettingsFileKeys(raw settingsFile, tree *fileKeyTree) error {
 	return fmt.Errorf("unknown settings key(s): %s", strings.Join(unknown, ", "))
 }
 
-func validateRejectedEnv(lookup envLookup, rejected map[string]string) error {
-	keys := make([]string, 0, len(rejected))
-	for key := range rejected {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		raw, exists := lookup(key)
-		if !exists || strings.TrimSpace(raw) == "" {
-			continue
-		}
-		replacement := rejected[key]
-		if strings.TrimSpace(replacement) == "" {
-			return fmt.Errorf("unsupported env var: %s", key)
-		}
-		return fmt.Errorf("unsupported env var: %s (use %s)", key, replacement)
-	}
-	return nil
-}
-
 func lookupFileValue(raw settingsFile, path []string) (any, bool, error) {
 	current := raw
 	for index, part := range path {
@@ -954,13 +895,6 @@ func positiveCLIInt(raw int) (int, bool, error) {
 
 func invalidSettingsTypeError(path []string, want string) error {
 	return fmt.Errorf("invalid settings key %s: expected %s", strings.Join(path, "."), want)
-}
-
-func unsupportedSettingsKeyError(path string, replacement string) error {
-	if strings.TrimSpace(replacement) == "" {
-		return fmt.Errorf("unsupported settings key: %s", path)
-	}
-	return fmt.Errorf("unsupported settings key: %s (use %s)", path, replacement)
 }
 
 func renderTOMLValue(value any) string {
