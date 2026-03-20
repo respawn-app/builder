@@ -291,6 +291,7 @@ type uiModel struct {
 	psOverlayPushed          bool
 	psSelection              int
 	psEntries                []shelltool.Snapshot
+	helpVisible              bool
 	reasoningStatusHeader    string
 
 	transientStatus      string
@@ -467,6 +468,20 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.debugKeys {
 			m.setDebugKeyTransientStatus(msg, keyMsg, source)
 		}
+		if m.helpVisible {
+			m.helpVisible = false
+			if isHelpKey(keyMsg) && m.canShowHelp() {
+				m.lastEscAt = time.Time{}
+				m.syncViewport()
+				return m, nil
+			}
+		}
+		if isHelpKey(keyMsg) && m.canShowHelp() {
+			m.lastEscAt = time.Time{}
+			m.toggleHelp()
+			m.syncViewport()
+			return m, nil
+		}
 		switch m.inputModeState().Mode {
 		case uiInputModeAsk:
 			next, cmd := m.askController().handleKey(keyMsg)
@@ -479,6 +494,9 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	if _, isKey := msg.(tea.KeyMsg); isKey {
+		if m.helpVisible {
+			m.helpVisible = false
+		}
 		m.lastEscAt = time.Time{}
 		m.syncViewport()
 		return m, nil

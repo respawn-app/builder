@@ -32,6 +32,9 @@ func (m *uiModel) toggleTranscriptModeWithNativeReplay(emitNativeReplay bool) te
 	prevMode := m.view.Mode()
 	m.forwardToView(tui.ToggleModeMsg{})
 	nextMode := m.view.Mode()
+	if nextMode != tui.ModeOngoing {
+		m.helpVisible = false
+	}
 	if prevMode != nextMode {
 		m.invalidateNativeResizeReplay()
 	}

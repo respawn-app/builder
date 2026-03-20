@@ -13,6 +13,7 @@ const (
 	keyTypeShiftEnterCSI     tea.KeyType = -1025
 	keyTypeCtrlBackspaceCSI  tea.KeyType = -1026
 	keyTypeSuperBackspaceCSI tea.KeyType = -1027
+	keyTypeHelpCSI           tea.KeyType = -1028
 )
 
 type customKeyKind uint8
@@ -23,6 +24,7 @@ const (
 	customKeyShiftEnter
 	customKeyCtrlBackspace
 	customKeySuperBackspace
+	customKeyHelp
 )
 
 type customKeyMsg struct {
@@ -60,9 +62,39 @@ func normalizeKeyMsgWithSource(msg tea.Msg) (tea.KeyMsg, bool, string) {
 		return tea.KeyMsg{Type: keyTypeCtrlBackspaceCSI}, true, "custom_key"
 	case customKeySuperBackspace:
 		return tea.KeyMsg{Type: keyTypeSuperBackspaceCSI}, true, "custom_key"
+	case customKeyHelp:
+		return tea.KeyMsg{Type: keyTypeHelpCSI}, true, "custom_key"
 	default:
 		return tea.KeyMsg{}, false, ""
 	}
+}
+
+func isHelpKey(msg tea.KeyMsg) bool {
+	if msg.Type == keyTypeHelpCSI {
+		return true
+	}
+	if msg.Type != tea.KeyRunes || !msg.Alt || len(msg.Runes) != 1 {
+		return false
+	}
+	switch msg.Runes[0] {
+	case '?', '/':
+		return true
+	default:
+		return false
+	}
+}
+
+func isTranscriptToggleKey(msg tea.KeyMsg) bool {
+	return msg.Type == tea.KeyShiftTab || msg.Type == tea.KeyCtrlT
+}
+
+func isQueueSubmissionKey(msg tea.KeyMsg) bool {
+	keyString := strings.ToLower(msg.String())
+	return keyString == "tab" || keyString == "ctrl+enter" || msg.Type == keyTypeCtrlEnterCSI
+}
+
+func isShiftEnterKey(msg tea.KeyMsg) bool {
+	return msg.Type == keyTypeShiftEnterCSI || strings.ToLower(msg.String()) == "shift+enter"
 }
 
 func isDeleteCurrentLineKey(msg tea.KeyMsg) bool {
@@ -108,6 +140,53 @@ func isSuperBackspaceCSISequence(seq string) bool {
 		return false
 	}
 	return csiModifierHasSuper(modifier)
+}
+
+func isHelpCSISequence(seq string) bool {
+	codepoint, modifier, ok := parseCSIUCodepointAndModifier(seq)
+	if !ok {
+		return false
+	}
+	if !csiModifierHasSuper(modifier) {
+		return false
+	}
+	switch rune(codepoint) {
+	case '?', '/':
+		return true
+	default:
+		return false
+	}
+}
+
+func parseCSIUCodepointAndModifier(seq string) (int, int, bool) {
+	if len(seq) < 4 || seq[len(seq)-1] != 'u' {
+		return 0, 0, false
+	}
+	body := seq[:len(seq)-1]
+	parts := strings.Split(body, ";")
+	if len(parts) < 2 {
+		return 0, 0, false
+	}
+
+	modifierIdx := 1
+	codepointIdx := 0
+	if parts[0] == "27" {
+		if len(parts) < 3 {
+			return 0, 0, false
+		}
+		modifierIdx = 1
+		codepointIdx = 2
+	}
+
+	modifier, ok := parseCSIParamInt(parts[modifierIdx])
+	if !ok {
+		return 0, 0, false
+	}
+	codepoint, ok := parseCSIParamInt(parts[codepointIdx])
+	if !ok {
+		return 0, 0, false
+	}
+	return codepoint, modifier, true
 }
 
 func parseBackspaceCSIModifier(seq string) (int, bool) {
