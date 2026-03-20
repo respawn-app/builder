@@ -962,7 +962,15 @@ func TestNativeProgramKeepsPendingToolTailLiveOnlyUntilCompletion(t *testing.T) 
 	if strings.Contains(pendingNormalized, "prompt once") {
 		t.Fatalf("expected no prompt replay while tool call is pending, got %q", pendingNormalized)
 	}
-	if !strings.Contains(xansi.Strip(pendingDelta), "$ pwd") {
+	pendingPlain := xansi.Strip(pendingDelta)
+	hasDotFrame := false
+	for _, frame := range pendingToolSpinner.Frames {
+		if strings.Contains(pendingPlain, strings.TrimSpace(frame)+" pwd") {
+			hasDotFrame = true
+			break
+		}
+	}
+	if !hasDotFrame {
 		t.Fatalf("expected pending tool call visible in live region output, got %q", xansi.Strip(pendingDelta))
 	}
 

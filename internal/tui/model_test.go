@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"builder/internal/tools"
 	patchformat "builder/internal/tools/patch/format"
 	"builder/internal/transcript"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -930,6 +932,43 @@ func TestDetailToolFormattingShowsTimeoutAndInlineOutput(t *testing.T) {
 	}
 	if len(lines) < 2 || strings.TrimSpace(lines[1]) != "alpha" {
 		t.Fatalf("expected output to start immediately after command line, got %q", view)
+	}
+}
+
+func TestDetailExecCommandEmptyOutputRendersNoOutput(t *testing.T) {
+	def, ok := tools.DefinitionFor(tools.ToolExecCommand)
+	if !ok {
+		t.Fatal("expected exec_command definition")
+	}
+	raw, err := json.Marshal("Process exited with code 0\nNo output")
+	if err != nil {
+		t.Fatalf("marshal exec result: %v", err)
+	}
+	formatted := def.FormatToolResult(tools.Result{Name: tools.ToolExecCommand, Output: raw})
+
+	m := NewModel()
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: "true",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "exec_command",
+			IsShell:  true,
+			Command:  "true",
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: formatted})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := plainTranscript(m.View())
+	if !strings.Contains(view, "Process exited with code 0") {
+		t.Fatalf("expected exit code line in detail view, got %q", view)
+	}
+	if !strings.Contains(view, "No output") {
+		t.Fatalf("expected No output in detail view, got %q", view)
+	}
+	if strings.Contains(view, "Output:") {
+		t.Fatalf("did not expect dangling Output header in detail view, got %q", view)
 	}
 }
 

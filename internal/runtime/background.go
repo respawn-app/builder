@@ -45,7 +45,7 @@ func formatBackgroundShellNotice(evt BackgroundShellEvent) string {
 		parts = append(parts, "Output:")
 		parts = append(parts, preview)
 	} else {
-		parts = append(parts, "no output")
+		parts = append(parts, "No output")
 	}
 	return strings.Join(parts, "\n")
 }

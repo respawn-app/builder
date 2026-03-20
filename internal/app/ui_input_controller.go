@@ -9,6 +9,7 @@ import (
 	"builder/internal/llm"
 	"builder/internal/tui"
 
+	bubblespinner "github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -16,8 +17,8 @@ type uiInputController struct {
 	model *uiModel
 }
 
-var spinnerFrames = []string{"|", "/", "-", "\\"}
-var spinnerTickInterval = 360 * time.Millisecond
+var pendingToolSpinner = bubblespinner.Dot
+var spinnerTickInterval = pendingToolSpinner.FPS
 var transientStatusDuration = 2200 * time.Millisecond
 var processListRefreshInterval = 1500 * time.Millisecond
 var errSubmissionInterrupted = errors.New("interrupted")

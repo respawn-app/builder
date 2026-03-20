@@ -16,20 +16,20 @@ const markdownCacheLimit = 1024
 type markdownRendererErrorReporter func(RenderDiagnostic)
 
 type markdownRenderer struct {
-	theme     string
-	renderers map[int]*glamour.TermRenderer
-	cache     map[string]string
-	reportErr markdownRendererErrorReporter
-	newTermRenderer func(...glamour.TermRendererOption) (*glamour.TermRenderer, error)
+	theme               string
+	renderers           map[int]*glamour.TermRenderer
+	cache               map[string]string
+	reportErr           markdownRendererErrorReporter
+	newTermRenderer     func(...glamour.TermRendererOption) (*glamour.TermRenderer, error)
 	reportedInitFailure bool
 }
 
 func newMarkdownRenderer(theme string, reportErr markdownRendererErrorReporter) *markdownRenderer {
 	return &markdownRenderer{
-		theme:     theme,
-		renderers: make(map[int]*glamour.TermRenderer, 8),
-		cache:     make(map[string]string, 128),
-		reportErr: reportErr,
+		theme:           theme,
+		renderers:       make(map[int]*glamour.TermRenderer, 8),
+		cache:           make(map[string]string, 128),
+		reportErr:       reportErr,
 		newTermRenderer: glamour.NewTermRenderer,
 	}
 }

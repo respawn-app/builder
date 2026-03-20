@@ -31,7 +31,7 @@ func TestFormatBackgroundShellNoticeWhitespacePreviewUsesNoOutputLine(t *testing
 	}
 
 	got := formatBackgroundShellNotice(evt)
-	if !strings.Contains(got, "\nno output") {
+	if !strings.Contains(got, "\nNo output") {
 		t.Fatalf("expected no output line, got %q", got)
 	}
 	if strings.Contains(got, "Output:") {

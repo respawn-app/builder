@@ -20,16 +20,10 @@ jobs:
           cache: true
 
       - name: Verify formatting
-        run: |
-          unformatted="$(gofmt -l .)"
-          if [ -n "$unformatted" ]; then
-            echo "The following files are not gofmt-formatted:"
-            echo "$unformatted"
-            exit 1
-          fi
+        run: ./scripts/ci-check.sh format
 
       - name: Run vet
-        run: go vet ./...
+        run: ./scripts/ci-check.sh vet
 
   build:
     runs-on: ubuntu-latest
@@ -44,7 +38,7 @@ jobs:
           cache: true
 
       - name: Build
-        run: go build -o ./bin/builder ./cmd/builder
+        run: ./scripts/ci-check.sh build
 
   test:
     runs-on: ubuntu-latest
@@ -59,4 +53,4 @@ jobs:
           cache: true
 
       - name: Test
-        run: go test ./...
+        run: ./scripts/ci-check.sh test

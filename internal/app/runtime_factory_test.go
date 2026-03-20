@@ -576,7 +576,7 @@ func TestBackgroundEventRouterWhitespacePreviewUsesNoOutputLine(t *testing.T) {
 		if evt.Background == nil {
 			t.Fatal("expected background payload")
 		}
-		if !strings.Contains(evt.Background.NoticeText, "\nno output") {
+		if !strings.Contains(evt.Background.NoticeText, "\nNo output") {
 			t.Fatalf("expected no output line, got %q", evt.Background.NoticeText)
 		}
 		if strings.Contains(evt.Background.NoticeText, "Output:") {

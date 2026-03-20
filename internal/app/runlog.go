@@ -16,9 +16,9 @@ import (
 const runLogFileName = "steps.log"
 
 type runLogger struct {
-	mu sync.Mutex
-	fp writeStringCloser
-	onDiagnostic func(runLoggerDiagnostic)
+	mu                   sync.Mutex
+	fp                   writeStringCloser
+	onDiagnostic         func(runLoggerDiagnostic)
 	reportedWriteFailure bool
 }
 

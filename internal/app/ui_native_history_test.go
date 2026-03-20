@@ -23,6 +23,17 @@ func stripANSIPreserve(v string) string {
 	return xansi.Strip(v)
 }
 
+func pendingSpinnerFrame(frame int) string {
+	if len(pendingToolSpinner.Frames) == 0 {
+		return ""
+	}
+	index := frame % len(pendingToolSpinner.Frames)
+	if index < 0 {
+		index = 0
+	}
+	return strings.TrimSpace(pendingToolSpinner.Frames[index])
+}
+
 func TestNativeScrollbackStartupReplayIncludesFullTranscript(t *testing.T) {
 	m := NewUIModel(
 		nil,
@@ -589,16 +600,16 @@ func TestNativePendingToolEntriesTrackParallelCommitFrontier(t *testing.T) {
 		t.Fatalf("unexpected second pending tool entry: %#v", pending[1])
 	}
 
-	rendered := renderNativePendingToolSnapshot(entries, "dark", 40)
+	rendered := renderNativePendingToolSnapshot(entries, "dark", 40, 0)
 	plain := stripANSIPreserve(rendered)
-	if !strings.Contains(plain, "$ echo a") {
+	if !strings.Contains(plain, pendingSpinnerFrame(0)+" echo a") {
 		t.Fatalf("expected first pending tool preview in live region, got %q", plain)
 	}
-	expectedLater := stripANSIPreserve(renderNativePendingToolSnapshot([]tui.TranscriptEntry{entries[2]}, "dark", 40))
+	expectedLater := stripANSIPreserve(renderNativePendingToolSnapshot([]tui.TranscriptEntry{entries[2]}, "dark", 40, 0))
 	if expectedLater == "" {
 		t.Fatal("expected standalone later pending tool preview")
 	}
-	if !strings.Contains(plain, "$ echo b") {
+	if !strings.Contains(plain, pendingSpinnerFrame(0)+" echo b") {
 		t.Fatalf("expected later completed call to remain visually identical pending preview, got %q", plain)
 	}
 	if !strings.Contains(plain, expectedLater) {
@@ -628,7 +639,7 @@ func TestNativePendingMultilineShellPreviewStaysTwoLines(t *testing.T) {
 		t.Fatalf("expected one pending tool entry, got %#v", pending)
 	}
 
-	rendered := strings.Split(renderNativePendingToolSnapshot(entries, "dark", 80), "\n")
+	rendered := strings.Split(renderNativePendingToolSnapshot(entries, "dark", 80, 0), "\n")
 	if len(rendered) != 2 {
 		t.Fatalf("expected multiline pending shell preview capped to 2 lines, got %d (%q)", len(rendered), rendered)
 	}
@@ -636,7 +647,7 @@ func TestNativePendingMultilineShellPreviewStaysTwoLines(t *testing.T) {
 	for _, line := range rendered {
 		plain = append(plain, strings.TrimSpace(stripANSIPreserve(line)))
 	}
-	if plain[0] != "$ cat > /tmp/demo.txt <<'EOF'" {
+	if plain[0] != pendingSpinnerFrame(0)+" cat > /tmp/demo.txt <<'EOF'" {
 		t.Fatalf("unexpected first collapsed line: %q", plain[0])
 	}
 	if plain[1] != "…" {
@@ -657,9 +668,12 @@ func TestNativePendingMultilineShellPreviewStaysTwoLinesWhenHeaderWraps(t *testi
 		ToolCall:   &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: command},
 	}}
 
-	rendered := strings.Split(renderNativePendingToolSnapshot(entries, "dark", 28), "\n")
+	rendered := strings.Split(renderNativePendingToolSnapshot(entries, "dark", 28, 0), "\n")
 	if len(rendered) != 2 {
 		t.Fatalf("expected wrapped multiline pending shell preview capped to 2 lines, got %d (%q)", len(rendered), rendered)
+	}
+	if got := strings.TrimSpace(stripANSIPreserve(rendered[0])); !strings.HasPrefix(got, pendingSpinnerFrame(0)+" ") {
+		t.Fatalf("expected wrapped multiline pending shell preview to use spinner icon, got %q", rendered[0])
 	}
 	if got := strings.TrimSpace(stripANSIPreserve(rendered[1])); got != "…" {
 		t.Fatalf("expected wrapped multiline pending shell preview second line to be ellipsis, got %q", rendered[1])
@@ -684,13 +698,13 @@ func TestNativePendingCompletedMultilineShellPreviewStaysTwoLinesWithoutWaitingA
 		t.Fatalf("expected two pending tool entries, got %#v", pending)
 	}
 
-	rendered := strings.Split(renderNativePendingToolSnapshot(entries, "dark", 80), "\n")
+	rendered := strings.Split(renderNativePendingToolSnapshot(entries, "dark", 80, 0), "\n")
 	plain := make([]string, 0, len(rendered))
 	for _, line := range rendered {
 		plain = append(plain, strings.TrimSpace(stripANSIPreserve(line)))
 	}
 	joined := strings.Join(plain, "\n")
-	if !strings.Contains(joined, "$ cat > /tmp/demo.txt <<'EOF'") {
+	if !strings.Contains(joined, pendingSpinnerFrame(0)+" cat > /tmp/demo.txt <<'EOF'") {
 		t.Fatalf("expected completed multiline pending shell preview header, got %q", plain)
 	}
 	if !strings.Contains(joined, "…") {
@@ -726,7 +740,7 @@ func TestNativePendingToolCallStaysLiveUntilResultThenAppendsFinalBlock(t *testi
 		t.Fatalf("expected pending tool call to stay out of committed scrollback, got %T", cmd())
 	}
 	view := stripANSIPreserve(m.View())
-	if !strings.Contains(view, "$ pwd") {
+	if !strings.Contains(view, pendingSpinnerFrame(0)+" pwd") {
 		t.Fatalf("expected pending tool call visible in native live region, got %q", view)
 	}
 	if strings.Contains(m.nativeRenderedSnapshot, "pwd") {
@@ -760,6 +774,50 @@ func TestNativePendingToolCallStaysLiveUntilResultThenAppendsFinalBlock(t *testi
 	}
 }
 
+func TestNativePendingToolPreviewUsesBubbleTeaDotSpinnerWithoutCommittingScrollback(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
+	).(*uiModel)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+
+	call := tui.TranscriptEntry{
+		Role:       "tool_call",
+		Text:       "pwd",
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"},
+	}
+	m.transcriptEntries = append(m.transcriptEntries, call)
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+	m.syncViewport()
+	if cmd := m.syncNativeHistoryFromTranscript(); cmd != nil {
+		t.Fatalf("expected pending tool call to stay out of committed scrollback, got %T", cmd())
+	}
+
+	m.spinnerFrame = 0
+	view0 := stripANSIPreserve(m.View())
+	m.spinnerFrame = 1
+	view1 := stripANSIPreserve(m.View())
+
+	if !strings.Contains(view0, pendingSpinnerFrame(0)) {
+		t.Fatalf("expected pending tool preview to use Bubble Tea Dot frame 0, got %q", view0)
+	}
+	if !strings.Contains(view1, pendingSpinnerFrame(1)) {
+		t.Fatalf("expected pending tool preview to use Bubble Tea Dot frame 1, got %q", view1)
+	}
+	if view0 == view1 {
+		t.Fatalf("expected pending tool preview to animate across frames, got %q", view0)
+	}
+	if strings.Contains(m.nativeRenderedSnapshot, "pwd") {
+		t.Fatalf("expected pending tool spinner animation to leave committed scrollback untouched, got %q", m.nativeRenderedSnapshot)
+	}
+}
+
 func TestNativeParallelToolCompletionWaitsForStablePrefixBeforeAppend(t *testing.T) {
 	m := NewUIModel(
 		nil,
@@ -785,7 +843,7 @@ func TestNativeParallelToolCompletionWaitsForStablePrefixBeforeAppend(t *testing
 		t.Fatalf("expected no committed flush before first pending call resolves, got %T", cmd())
 	}
 	view := stripANSIPreserve(m.View())
-	if !strings.Contains(view, "$ echo a") || !strings.Contains(view, "$ echo b") {
+	if !strings.Contains(view, pendingSpinnerFrame(0)+" echo a") || !strings.Contains(view, pendingSpinnerFrame(0)+" echo b") {
 		t.Fatalf("expected pending rows to match committed shell preview formatting, got %q", view)
 	}
 	if strings.Contains(view, "waiting") {
