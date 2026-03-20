@@ -78,6 +78,7 @@ This is not a general plugin platform. The scope is intentionally narrow and qua
   - Transcript mode toggle bindings are `Shift+Tab` and `Ctrl+T`; keep behavior/protocol side effects identical between both.
   - Ongoing mode must not use `?1007`.
   - Ongoing normal-buffer transcript history is append-only after startup. Once a line is emitted into scrollback, it is immutable: never retroactively restyle it, rewrite it, clear-and-replay it, or re-emit the full buffer to reflect later tool state.
-  - Pending tool activity in ongoing mode belongs to the volatile live region only; final success/error styling is applied only when the committed line is first appended in its terminal state.
+  - Pending tool activity in ongoing mode belongs to the volatile live region only; pending tool previews must use the same rendering/layout as ordinary committed `tool_call` previews, with no pending-only labels, keywords, or extra markers.
+  - Parallel tool calls in ongoing mode commit through a stable frontier: later completed calls stay in the live region looking exactly like ordinary pending tool-call previews until all earlier pending calls are ready, then newly committable final lines append once in transcript order.
   - Detail transcript overlay may use `?1049` + `?1007` when `tui_alternate_screen != never`.
   - Rationale: ongoing prioritizes native long scrollback + selection in normal buffer; detail overlay prioritizes transcript navigation with wheel while still keeping mouse capture disabled for text selection.

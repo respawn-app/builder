@@ -244,12 +244,7 @@ func (l uiViewLayout) renderNativeStreamingLines(width, maxLines int, style uiSt
 }
 
 func (l uiViewLayout) renderNativePendingLines(width int) []string {
-	pending := nativePendingEntries(l.model.transcriptEntries)
-	if len(pending) == 0 {
-		return nil
-	}
-	rendered := renderNativeCommittedSnapshot(pending, l.model.theme, width)
-	rendered = styleNativeReplayDividers(rendered, l.model.theme, width)
+	rendered := renderNativePendingToolSnapshot(l.model.transcriptEntries, l.model.theme, width)
 	if strings.TrimSpace(rendered) == "" {
 		return nil
 	}

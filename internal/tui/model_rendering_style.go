@@ -215,7 +215,7 @@ func (m Model) palette() palette {
 	base := lipgloss.AdaptiveColor{Light: "#5C6370", Dark: "#7F848E"}
 	user := lipgloss.AdaptiveColor{Light: "#005CC5", Dark: "#61AFEF"}
 	model := lipgloss.AdaptiveColor{Light: "#22863A", Dark: "#98C379"}
-	tool := lipgloss.AdaptiveColor{Light: "#8A63D2", Dark: "#C678DD"}
+	tool := lipgloss.AdaptiveColor{Light: "#4078F2", Dark: "#61AFEF"}
 	toolSuccess := lipgloss.AdaptiveColor{Light: "#22863A", Dark: "#98C379"}
 	toolError := lipgloss.AdaptiveColor{Light: "#D73A49", Dark: "#E06C75"}
 	system := lipgloss.AdaptiveColor{Light: "#6A737D", Dark: "#ABB2BF"}
