@@ -1,0 +1,137 @@
+---
+import { Icon } from '@astrojs/starlight/components';
+---
+
+<builder-theme-toggle>
+  <button type="button" class="theme-toggle" aria-label="Switch theme">
+    <span class="icon icon-light" aria-hidden="true">
+      <Icon name="moon" />
+    </span>
+    <span class="icon icon-dark" aria-hidden="true">
+      <Icon name="sun" />
+    </span>
+  </button>
+</builder-theme-toggle>
+
+<script>
+  const storageKey = 'starlight-theme';
+  const lightTheme = 'light';
+  const darkTheme = 'dark';
+
+  const getStoredTheme = () => {
+    const value = typeof localStorage !== 'undefined' ? localStorage.getItem(storageKey) : null;
+    return value === lightTheme || value === darkTheme ? value : null;
+  };
+
+  const getSystemTheme = () =>
+    window.matchMedia('(prefers-color-scheme: light)').matches ? lightTheme : darkTheme;
+
+  const getEffectiveTheme = () => getStoredTheme() ?? getSystemTheme();
+
+  const setTheme = (theme, persist) => {
+    document.documentElement.dataset.theme = theme;
+    if (persist) {
+      localStorage.setItem(storageKey, theme);
+    }
+  };
+
+  const updateToggleUi = (root) => {
+    const button = root.querySelector('button');
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    const currentTheme = getEffectiveTheme();
+    const nextTheme = currentTheme === darkTheme ? lightTheme : darkTheme;
+    button.dataset.currentTheme = currentTheme;
+    button.setAttribute('aria-label', `Switch to ${nextTheme} theme`);
+  };
+
+  class BuilderThemeToggle extends HTMLElement {
+    constructor() {
+      super();
+      this.mediaQuery = window.matchMedia('(prefers-color-scheme: light)');
+      this.onSystemThemeChange = () => {
+        if (getStoredTheme() === null) {
+          setTheme(getSystemTheme(), false);
+          updateToggleUi(this);
+        }
+      };
+      this.onToggleClick = () => {
+        const nextTheme = getEffectiveTheme() === darkTheme ? lightTheme : darkTheme;
+        setTheme(nextTheme, true);
+        updateToggleUi(this);
+      };
+    }
+
+    connectedCallback() {
+      const button = this.querySelector('button');
+      if (!(button instanceof HTMLButtonElement)) {
+        return;
+      }
+
+      setTheme(getEffectiveTheme(), false);
+      updateToggleUi(this);
+      button.addEventListener('click', this.onToggleClick);
+
+      this.mediaQuery.addEventListener('change', this.onSystemThemeChange);
+    }
+
+    disconnectedCallback() {
+      const button = this.querySelector('button');
+      if (button instanceof HTMLButtonElement) {
+        button.removeEventListener('click', this.onToggleClick);
+      }
+      this.mediaQuery.removeEventListener('change', this.onSystemThemeChange);
+    }
+  }
+
+  if (!customElements.get('builder-theme-toggle')) {
+    customElements.define('builder-theme-toggle', BuilderThemeToggle);
+  }
+</script>
+
+<style>
+  @layer starlight.core {
+    builder-theme-toggle {
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .theme-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2.5rem;
+      height: 2.5rem;
+      padding: 0;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--sl-color-text-accent);
+      cursor: pointer;
+      transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+    }
+
+    .theme-toggle:hover {
+      background-color: color-mix(in srgb, var(--sl-color-accent) 12%, transparent);
+      border-color: color-mix(in srgb, var(--sl-color-accent) 35%, transparent);
+    }
+
+    .theme-toggle:focus-visible {
+      outline: 2px solid var(--sl-color-accent);
+      outline-offset: 2px;
+    }
+
+    .icon {
+      display: none;
+      font-size: 1rem;
+      line-height: 1;
+    }
+
+    :global(html[data-theme='light']) .theme-toggle .icon-light,
+    :global(html[data-theme='dark']) .theme-toggle .icon-dark {
+      display: inline-flex;
+    }
+  }
+</style>
