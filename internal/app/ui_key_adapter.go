@@ -21,6 +21,8 @@ func adaptCustomKeyMsg(msg tea.Msg) tea.Msg {
 		return customKeyMsg{Kind: customKeyCtrlBackspace}
 	case isSuperBackspaceCSISequence(seq):
 		return customKeyMsg{Kind: customKeySuperBackspace}
+	case isHelpCSISequence(seq):
+		return customKeyMsg{Kind: customKeyHelp}
 	default:
 		return msg
 	}

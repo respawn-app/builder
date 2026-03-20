@@ -13,7 +13,6 @@ import (
 func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := c.model
 	inputState := m.inputModeState()
-	keyString := strings.ToLower(msg.String())
 	if msg.Type != tea.KeyEnter && msg.Type != keyTypeShiftEnterCSI {
 		c.clearPendingCSIShiftEnter()
 	}
@@ -28,7 +27,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		next.(*uiModel).syncViewport()
 		return next, cmd
 	}
-	if keyString == "tab" || keyString == "ctrl+enter" || msg.Type == keyTypeCtrlEnterCSI {
+	if isQueueSubmissionKey(msg) {
 		text := strings.TrimSpace(m.input)
 		if text == "" {
 			return m, nil
@@ -227,7 +226,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.forwardToView(tea.KeyMsg{Type: tea.KeyPgDown})
 		return m, nil
 	default:
-		if keyString == "shift+enter" {
+		if isShiftEnterKey(msg) {
 			if m.isInputLocked() {
 				return m, nil
 			}

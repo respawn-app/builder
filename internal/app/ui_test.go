@@ -3732,6 +3732,324 @@ func (statusLineAzureClient) ProviderCapabilities(context.Context) (llm.Provider
 	return llm.ProviderCapabilities{ProviderID: "azure-openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: false}, nil
 }
 
+func TestHelpToggleRendersBelowQueuedMessagesAndInput(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 40
+	m.windowSizeKnown = true
+	m.queued = []string{"queued latest"}
+	m.input = "draft"
+	m.syncViewport()
+
+	next, _ := m.Update(customKeyMsg{Kind: customKeyHelp})
+	updated := next.(*uiModel)
+
+	if !updated.helpVisible {
+		t.Fatal("expected help pane visible")
+	}
+	plain := stripANSIAndTrimRight(updated.View())
+	if !containsInOrder(plain, "queued latest", "Global", "› draft") {
+		t.Fatalf("expected help above input and below queue, got %q", plain)
+	}
+	if !containsInOrder(plain, "Global\nAlt + /, ? | Cmd + /, ?", "\n\nTranscript\nPgUp", "\n\nMain Input\nEnter", "\n\nRollback Mode\nEsc | Esc") {
+		t.Fatalf("expected blank line between visible help sections, got %q", plain)
+	}
+	if !containsInOrder(plain, "Alt + ←, → | Ctrl + ←, →", "move the cursor by word") {
+		t.Fatalf("expected exact main-input arrow binding label, got %q", plain)
+	}
+	if !containsInOrder(plain, "↑, ↓", "move the rollback selection") {
+		t.Fatalf("expected exact rollback arrow binding label, got %q", plain)
+	}
+	if !strings.Contains(plain, "cancel or go back") {
+		t.Fatalf("expected rollback escape copy in help pane, got %q", plain)
+	}
+	if !strings.Contains(plain, "Alt + /, ?") || !strings.Contains(plain, "Cmd + /, ?") || !strings.Contains(plain, "Shift + Tab") {
+		t.Fatalf("expected indexed shortcuts in help pane, got %q", plain)
+	}
+	for _, unwanted := range []string{"Keyboard Help", "Press any registered key to dismiss", "Slash Commands", "Ask Prompt", "Process List", "Printable keys", "start editing from the selected rollback point", "fork from the selected rollback point", "close rollback selection", "return to rollback selection when the edit prompt is empty"} {
+		if strings.Contains(plain, unwanted) {
+			t.Fatalf("did not expect %q in help pane, got %q", unwanted, plain)
+		}
+	}
+}
+
+func TestHelpRollbackModeRowsUseActiveStyles(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.helpVisible = true
+	m.windowSizeKnown = true
+	width := 180
+	style := uiThemeStyles(m.theme)
+	lines := m.layout().renderHelpPane(width, 80, style)
+	sections := m.helpSections()
+	keyColumnWidth := helpKeyColumnWidth(sections, width)
+	activeKeyStyle := lipgloss.NewStyle().Foreground(uiPalette(m.theme).primary).Bold(true)
+	activeDescStyle := style.input
+
+	expectedLines := []string{
+		padANSIRight(activeKeyStyle.Render(padRight("Esc | Esc", keyColumnWidth))+" "+activeDescStyle.Render("open rollback selection from an idle empty prompt"), width),
+		padANSIRight(activeKeyStyle.Render(padRight("↑, ↓", keyColumnWidth))+" "+activeDescStyle.Render("move the rollback selection"), width),
+		padANSIRight(activeKeyStyle.Render(padRight("PgUp | PgDn", keyColumnWidth))+" "+activeDescStyle.Render("scroll the transcript while selecting a rollback point"), width),
+		padANSIRight(activeKeyStyle.Render(padRight("Esc", keyColumnWidth))+" "+activeDescStyle.Render("cancel or go back"), width),
+	}
+
+	joined := strings.Join(lines, "\n")
+	for _, expected := range expectedLines {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("expected active-styled rollback help row %q in %q", stripANSIAndTrimRight(expected), joined)
+		}
+	}
+}
+
+func TestHelpDismissesOnRegisteredKeyAndAppliesAction(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(customKeyMsg{Kind: customKeyHelp})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	updated = next.(*uiModel)
+
+	if updated.helpVisible {
+		t.Fatal("expected help dismissed by registered key")
+	}
+	if updated.input != "x" {
+		t.Fatalf("expected keypress to keep its normal behavior, got %q", updated.input)
+	}
+}
+
+func TestHelpDismissesOnAnyKeypress(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.activeAsk = &askEvent{req: askquestion.Request{Question: "Proceed?", Suggestions: []string{"Yes", "No"}}}
+	m.syncViewport()
+
+	next, _ := m.Update(customKeyMsg{Kind: customKeyHelp})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	updated = next.(*uiModel)
+
+	if updated.helpVisible {
+		t.Fatal("expected any keypress to dismiss help")
+	}
+	if updated.askFreeform {
+		t.Fatal("did not expect plain rune key to alter ask prompt state")
+	}
+}
+
+func TestAltQuestionMarkTogglesHelp(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}, Alt: true})
+	updated := next.(*uiModel)
+
+	if !updated.helpVisible {
+		t.Fatal("expected alt+? to open help")
+	}
+}
+
+func TestAltSlashTogglesHelp(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}, Alt: true})
+	updated := next.(*uiModel)
+
+	if !updated.helpVisible {
+		t.Fatal("expected alt+/ to open help")
+	}
+}
+
+func TestHelpToggleClearsRollbackEscArming(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := next.(*uiModel)
+	if updated.lastEscAt.IsZero() {
+		t.Fatal("expected first esc to arm rollback window")
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}, Alt: true})
+	updated = next.(*uiModel)
+	if !updated.helpVisible {
+		t.Fatal("expected alt+/ to open help")
+	}
+	if !updated.lastEscAt.IsZero() {
+		t.Fatal("expected help toggle to clear rollback esc arming")
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if updated.helpVisible {
+		t.Fatal("expected esc to dismiss help")
+	}
+	if updated.rollbackMode {
+		t.Fatal("did not expect esc after help toggle to open rollback selection")
+	}
+	if updated.lastEscAt.IsZero() {
+		t.Fatal("expected esc after help toggle to start a fresh rollback arming window")
+	}
+}
+
+func TestCmdSlashCSIUTogglesHelp(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(adaptCustomKeyMsg(testBubbleTeaUnknownCSISequence("\x1b[47;10u")))
+	updated := next.(*uiModel)
+
+	if !updated.helpVisible {
+		t.Fatal("expected cmd+/ CSI-u sequence to open help")
+	}
+}
+
+func TestHelpToggleKeyHidesVisibleHelp(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(customKeyMsg{Kind: customKeyHelp})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(customKeyMsg{Kind: customKeyHelp})
+	updated = next.(*uiModel)
+
+	if updated.helpVisible {
+		t.Fatal("expected help toggle key to hide visible help")
+	}
+}
+
+func TestHelpToggleIgnoredInDetailMode(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.forwardToView(tui.ToggleModeMsg{})
+	m.syncViewport()
+
+	next, _ := m.Update(customKeyMsg{Kind: customKeyHelp})
+	updated := next.(*uiModel)
+
+	if updated.helpVisible {
+		t.Fatal("did not expect help to open in detail mode")
+	}
+}
+
+func TestTranscriptToggleClosesVisibleHelp(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(customKeyMsg{Kind: customKeyHelp})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	updated = next.(*uiModel)
+
+	if updated.helpVisible {
+		t.Fatal("expected transcript toggle to hide help")
+	}
+	if updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected detail mode after transcript toggle, got %q", updated.view.Mode())
+	}
+}
+
+func TestHelpRollbackSelectionDismissesAndMovesSelection(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "user", Text: "one"}, {Role: "assistant", Text: "a"}, {Role: "user", Text: "two"}}
+	if !m.startRollbackSelectionMode() {
+		t.Fatal("expected rollback selection mode to start")
+	}
+	m.syncViewport()
+
+	next, _ := m.Update(customKeyMsg{Kind: customKeyHelp})
+	updated := next.(*uiModel)
+	updated.rollbackSelection = 0
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+
+	if updated.helpVisible {
+		t.Fatal("expected rollback selection key to dismiss help")
+	}
+	if updated.rollbackSelection != 1 {
+		t.Fatalf("expected rollback selection to move, got %d", updated.rollbackSelection)
+	}
+}
+
+func TestHelpRollbackEditDismissesAndReturnsToSelection(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "user", Text: "one"}, {Role: "assistant", Text: "a"}, {Role: "user", Text: "two"}}
+	if !m.startRollbackSelectionMode() {
+		t.Fatal("expected rollback selection mode to start")
+	}
+	if _, ok := m.beginRollbackEditing(); !ok {
+		t.Fatal("expected rollback editing mode to start")
+	}
+	m.input = ""
+	m.syncViewport()
+
+	next, _ := m.Update(customKeyMsg{Kind: customKeyHelp})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+
+	if updated.helpVisible {
+		t.Fatal("expected rollback edit key to dismiss help")
+	}
+	if !updated.rollbackMode || updated.rollbackEditing {
+		t.Fatalf("expected esc to return to rollback selection, rollbackMode=%t rollbackEditing=%t", updated.rollbackMode, updated.rollbackEditing)
+	}
+}
+
+func TestLockedInputEditKeysDismissHelpAndStillNoOp(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.inputSubmitLocked = true
+	m.busy = true
+	m.input = "locked"
+	m.syncViewport()
+
+	next, _ := m.Update(customKeyMsg{Kind: customKeyHelp})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	updated = next.(*uiModel)
+
+	if updated.helpVisible {
+		t.Fatal("expected any keypress to dismiss help")
+	}
+	if updated.input != "locked" {
+		t.Fatalf("expected locked input unchanged, got %q", updated.input)
+	}
+}
+
 func slashPickerContainsCommand(state slashCommandPickerState, name string) bool {
 	for _, command := range state.matches {
 		if command.Name == name {

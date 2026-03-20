@@ -58,6 +58,45 @@ func TestNormalizeKeyMsgRecognizesShiftEnterCSIUVariants(t *testing.T) {
 	}
 }
 
+func TestNormalizeKeyMsgRecognizesHelpCSIUVariants(t *testing.T) {
+	tests := []struct {
+		name string
+		seq  string
+	}{
+		{name: "cmd question mark", seq: "\x1b[63;10u"},
+		{name: "cmd slash", seq: "\x1b[47;10u"},
+		{name: "esc prefixed cmd question mark", seq: "\x1b[27;10;63u"},
+		{name: "esc prefixed cmd slash", seq: "\x1b[27;10;47u"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := adaptCustomKeyMsg(testBubbleTeaUnknownCSISequence(tc.seq))
+			normalized, ok := normalizeKeyMsg(msg)
+			if !ok {
+				t.Fatal("expected help csi sequence to normalize")
+			}
+			if normalized.Type != keyTypeHelpCSI {
+				t.Fatalf("expected keyTypeHelpCSI, got %v", normalized.Type)
+			}
+		})
+	}
+}
+
+func TestIsHelpKeyRecognizesAltSlashAndQuestionMarkRunes(t *testing.T) {
+	if !isHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}, Alt: true}) {
+		t.Fatal("expected alt+? rune key to toggle help")
+	}
+	if !isHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}, Alt: true}) {
+		t.Fatal("expected alt+/ rune key to toggle help")
+	}
+	if isHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}}) {
+		t.Fatal("did not expect plain ? rune key to toggle help")
+	}
+	if isHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}) {
+		t.Fatal("did not expect plain / rune key to toggle help")
+	}
+}
+
 func TestAdaptCustomKeyMsgLeavesNonCustomUnknownCSIUntouched(t *testing.T) {
 	msg := testBubbleTeaUnknownCSISequence("\x1b[1;9A")
 	adapted := adaptCustomKeyMsg(msg)

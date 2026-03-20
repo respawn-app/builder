@@ -34,7 +34,8 @@ func (l uiViewLayout) calcChatLines() int {
 	if l.model.slashCommandPicker().visible {
 		pickerLines = slashCommandPickerLines
 	}
-	chat := height - inputLines - queuedLines - pickerLines - 1
+	helpLines := l.helpPaneLineCount(l.effectiveWidth(), helpPaneMaxLines(height, inputLines, queuedLines, pickerLines))
+	chat := height - inputLines - queuedLines - pickerLines - helpLines - 1
 	if chat < 1 {
 		return 1
 	}
