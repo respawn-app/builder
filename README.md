@@ -24,6 +24,12 @@ curl -fsSL https://raw.githubusercontent.com/respawn-app/agent/main/scripts/inst
 
 Check the installed version with `builder --version`.
 
+## Compatibility
+
+- Published release binaries: macOS, Linux, Windows on `x64` (`amd64`) and `arm64`.
+- Homebrew install path: macOS and Linux.
+- Building from source currently requires Go `1.25`.
+
 ### Features:
 
 - [x] Agentic loop with `shell`, `ask_question`, `patch` tools.
