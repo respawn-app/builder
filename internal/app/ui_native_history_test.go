@@ -570,6 +570,137 @@ func TestNativeCommittedEntriesStopsAtFirstUnresolvedToolCall(t *testing.T) {
 	}
 }
 
+func TestNativePendingToolEntriesTrackParallelCommitFrontier(t *testing.T) {
+	entries := []tui.TranscriptEntry{
+		{Role: "user", Text: "prompt"},
+		{Role: "tool_call", Text: "echo a", ToolCallID: "call_a", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo a"}},
+		{Role: "tool_call", Text: "echo b", ToolCallID: "call_b", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo b"}},
+		{Role: "tool_result_ok", Text: "out-b", ToolCallID: "call_b"},
+	}
+
+	pending := nativePendingToolEntries(entries)
+	if len(pending) != 2 {
+		t.Fatalf("expected two pending tool entries, got %#v", pending)
+	}
+	if pending[0].ToolCallID != "call_a" || pending[0].Role != "tool_call" || pending[0].Text != "echo a" {
+		t.Fatalf("unexpected first pending tool entry: %#v", pending[0])
+	}
+	if pending[1].ToolCallID != "call_b" || pending[1].Role != "tool_call" || pending[1].Text != "echo b" {
+		t.Fatalf("unexpected second pending tool entry: %#v", pending[1])
+	}
+
+	rendered := renderNativePendingToolSnapshot(entries, "dark", 40)
+	plain := stripANSIPreserve(rendered)
+	if !strings.Contains(plain, "$ echo a") {
+		t.Fatalf("expected first pending tool preview in live region, got %q", plain)
+	}
+	expectedLater := stripANSIPreserve(renderNativePendingToolSnapshot([]tui.TranscriptEntry{entries[2]}, "dark", 40))
+	if expectedLater == "" {
+		t.Fatal("expected standalone later pending tool preview")
+	}
+	if !strings.Contains(plain, "$ echo b") {
+		t.Fatalf("expected later completed call to remain visually identical pending preview, got %q", plain)
+	}
+	if !strings.Contains(plain, expectedLater) {
+		t.Fatalf("expected later completed call to reuse the plain pending tool-call preview, got %q want substring %q", plain, expectedLater)
+	}
+	if strings.Contains(plain, "waiting") {
+		t.Fatalf("did not expect waiting annotation in pending tool preview, got %q", plain)
+	}
+}
+
+func TestNativePendingMultilineShellPreviewStaysTwoLines(t *testing.T) {
+	command := strings.Join([]string{
+		"cat > /tmp/demo.txt <<'EOF'",
+		"first line",
+		"second line",
+		"EOF",
+	}, "\n")
+	entries := []tui.TranscriptEntry{{
+		Role:       "tool_call",
+		Text:       command,
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: command},
+	}}
+
+	pending := nativePendingToolEntries(entries)
+	if len(pending) != 1 {
+		t.Fatalf("expected one pending tool entry, got %#v", pending)
+	}
+
+	rendered := strings.Split(renderNativePendingToolSnapshot(entries, "dark", 80), "\n")
+	if len(rendered) != 2 {
+		t.Fatalf("expected multiline pending shell preview capped to 2 lines, got %d (%q)", len(rendered), rendered)
+	}
+	plain := make([]string, 0, len(rendered))
+	for _, line := range rendered {
+		plain = append(plain, strings.TrimSpace(stripANSIPreserve(line)))
+	}
+	if plain[0] != "$ cat > /tmp/demo.txt <<'EOF'" {
+		t.Fatalf("unexpected first collapsed line: %q", plain[0])
+	}
+	if plain[1] != "…" {
+		t.Fatalf("expected ellipsis second line, got %q", plain[1])
+	}
+}
+
+func TestNativePendingMultilineShellPreviewStaysTwoLinesWhenHeaderWraps(t *testing.T) {
+	command := strings.Join([]string{
+		"cat > /tmp/" + strings.Repeat("very-long-name-", 8) + "demo.txt <<'EOF'",
+		"body line",
+		"EOF",
+	}, "\n")
+	entries := []tui.TranscriptEntry{{
+		Role:       "tool_call",
+		Text:       command,
+		ToolCallID: "call_1",
+		ToolCall:   &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: command},
+	}}
+
+	rendered := strings.Split(renderNativePendingToolSnapshot(entries, "dark", 28), "\n")
+	if len(rendered) != 2 {
+		t.Fatalf("expected wrapped multiline pending shell preview capped to 2 lines, got %d (%q)", len(rendered), rendered)
+	}
+	if got := strings.TrimSpace(stripANSIPreserve(rendered[1])); got != "…" {
+		t.Fatalf("expected wrapped multiline pending shell preview second line to be ellipsis, got %q", rendered[1])
+	}
+}
+
+func TestNativePendingCompletedMultilineShellPreviewStaysTwoLinesWithoutWaitingAnnotation(t *testing.T) {
+	commandA := "echo a"
+	commandB := strings.Join([]string{
+		"cat > /tmp/demo.txt <<'EOF'",
+		"body line",
+		"EOF",
+	}, "\n")
+	entries := []tui.TranscriptEntry{
+		{Role: "tool_call", Text: commandA, ToolCallID: "call_a", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: commandA}},
+		{Role: "tool_call", Text: commandB, ToolCallID: "call_b", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: commandB}},
+		{Role: "tool_result_ok", Text: "done", ToolCallID: "call_b"},
+	}
+
+	pending := nativePendingToolEntries(entries)
+	if len(pending) != 2 {
+		t.Fatalf("expected two pending tool entries, got %#v", pending)
+	}
+
+	rendered := strings.Split(renderNativePendingToolSnapshot(entries, "dark", 80), "\n")
+	plain := make([]string, 0, len(rendered))
+	for _, line := range rendered {
+		plain = append(plain, strings.TrimSpace(stripANSIPreserve(line)))
+	}
+	joined := strings.Join(plain, "\n")
+	if !strings.Contains(joined, "$ cat > /tmp/demo.txt <<'EOF'") {
+		t.Fatalf("expected completed multiline pending shell preview header, got %q", plain)
+	}
+	if !strings.Contains(joined, "…") {
+		t.Fatalf("expected ellipsis line in completed pending multiline preview, got %q", plain)
+	}
+	if strings.Contains(joined, "waiting") {
+		t.Fatalf("did not expect waiting annotation in completed pending multiline preview, got %q", plain)
+	}
+}
+
 func TestNativePendingToolCallStaysLiveUntilResultThenAppendsFinalBlock(t *testing.T) {
 	m := NewUIModel(
 		nil,
@@ -626,6 +757,71 @@ func TestNativePendingToolCallStaysLiveUntilResultThenAppendsFinalBlock(t *testi
 	}
 	if cmd := m.syncNativeHistoryFromTranscript(); cmd != nil {
 		t.Fatalf("expected no duplicate emission after finalized tool call flush, got %T", cmd())
+	}
+}
+
+func TestNativeParallelToolCompletionWaitsForStablePrefixBeforeAppend(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
+	).(*uiModel)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+
+	entries := []tui.TranscriptEntry{
+		{Role: "user", Text: "prompt once"},
+		{Role: "tool_call", Text: "echo a", ToolCallID: "call_a", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo a"}},
+		{Role: "tool_call", Text: "echo b", ToolCallID: "call_b", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo b"}},
+		{Role: "tool_result_ok", Text: "out-b", ToolCallID: "call_b"},
+	}
+	m.transcriptEntries = entries
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+	m.syncViewport()
+	if cmd := m.syncNativeHistoryFromTranscript(); cmd != nil {
+		t.Fatalf("expected no committed flush before first pending call resolves, got %T", cmd())
+	}
+	view := stripANSIPreserve(m.View())
+	if !strings.Contains(view, "$ echo a") || !strings.Contains(view, "$ echo b") {
+		t.Fatalf("expected pending rows to match committed shell preview formatting, got %q", view)
+	}
+	if strings.Contains(view, "waiting") {
+		t.Fatalf("did not expect waiting annotation in live region, got %q", view)
+	}
+
+	m.transcriptEntries = append(m.transcriptEntries, tui.TranscriptEntry{Role: "tool_result_ok", Text: "out-a", ToolCallID: "call_a"})
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+	m.syncViewport()
+	cmd := m.syncNativeHistoryFromTranscript()
+	if cmd == nil {
+		t.Fatal("expected append once the stable prefix advances")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	plain := stripANSIText(msg.Text)
+	if strings.Contains(plain, "prompt once") {
+		t.Fatalf("expected delta append without prompt replay, got %q", msg.Text)
+	}
+	if strings.Count(plain, "echo a") != 1 || strings.Count(plain, "echo b") != 1 {
+		t.Fatalf("expected both tool calls appended exactly once in order, got %q", msg.Text)
+	}
+	if strings.Index(plain, "echo a") > strings.Index(plain, "echo b") {
+		t.Fatalf("expected parallel tool append to preserve declaration order, got %q", plain)
+	}
+	if strings.Contains(plain, "out-a") || strings.Contains(plain, "out-b") {
+		t.Fatalf("did not expect shell outputs inline in ongoing scrollback delta, got %q", msg.Text)
+	}
+	postCommitView := stripANSIPreserve(m.View())
+	if strings.Contains(postCommitView, "echo a") || strings.Contains(postCommitView, "echo b") {
+		t.Fatalf("expected committed tool rows removed from volatile live region, got %q", postCommitView)
+	}
+	if cmd := m.syncNativeHistoryFromTranscript(); cmd != nil {
+		t.Fatalf("expected no duplicate append after committing stable prefix, got %T", cmd())
 	}
 }
 
