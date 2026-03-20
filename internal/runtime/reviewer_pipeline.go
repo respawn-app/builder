@@ -163,7 +163,7 @@ func (r *defaultReviewerPipeline) RunSuggestions(ctx context.Context, reviewerCl
 	}
 	cachePct, hasCachePct := resp.Usage.CacheHitPercent()
 	return reviewerSuggestionsResult{
-		Suggestions:           parseReviewerSuggestionsObject(resp.Assistant.Content, reviewerCfg.MaxSuggestions),
+		Suggestions:           parseReviewerSuggestionsObject(resp.Assistant.Content),
 		CacheHitPercent:       cachePct,
 		HasCacheHitPercentage: hasCachePct,
 	}, nil

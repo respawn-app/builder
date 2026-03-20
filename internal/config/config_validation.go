@@ -179,9 +179,6 @@ func validateReviewer(state settingsState, _ map[string]string) error {
 	if reviewer.TimeoutSeconds <= 0 {
 		return fmt.Errorf("reviewer.timeout_seconds must be > 0")
 	}
-	if reviewer.MaxSuggestions <= 0 {
-		return fmt.Errorf("reviewer.max_suggestions must be > 0")
-	}
 	return nil
 }
 

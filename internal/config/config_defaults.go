@@ -6,22 +6,21 @@ import (
 )
 
 const (
-	defaultModel               = "gpt-5.3-codex"
-	defaultThinkingLevel       = "high"
+	defaultModel               = "gpt-5.4"
+	defaultThinkingLevel       = "medium"
+	defaultModelVerbosity      = ModelVerbosityMedium
 	defaultTheme               = "dark"
-	defaultModelContextWindow  = 400_000
+	defaultModelContextWindow  = 272_000
 	defaultModelTimeoutSeconds = 400
 	defaultShellTimeoutSeconds = 300
 	defaultMinimumExecToBgSec  = 15
 	defaultShellOutputMaxChars = 16_000
 	defaultBGShellsOutput      = "default"
-	defaultCompactionThreshold = 360_000
-	defaultReviewerFrequency   = "off"
-	defaultReviewerThinking    = "low"
+	defaultCompactionThreshold = defaultModelContextWindow * 95 / 100
+	defaultReviewerFrequency   = "edits"
 	defaultReviewerTimeoutSec  = 60
-	defaultReviewerSuggestions = 5
 	defaultTUIAlternateScreen  = "auto"
-	defaultCompactionMode      = "native"
+	defaultCompactionMode      = "local"
 )
 
 func defaultSettings() Settings {
@@ -71,10 +70,9 @@ func defaultSettingsTOML() string {
 	out.WriteString("\n[timeouts]\n")
 	writeDefaultLines(&out, filterDefaultLines(lines, "timeouts"))
 	out.WriteString("\n[reviewer]\n")
+	out.WriteString("# model defaults to `model` when unset\n")
+	out.WriteString("# thinking_level defaults to `thinking_level` when unset\n")
 	for _, line := range filterDefaultLines(lines, "reviewer") {
-		if line.Path[len(line.Path)-1] == "thinking_level" {
-			out.WriteString("# model defaults to `model` when unset\n")
-		}
 		writeDefaultLines(&out, []defaultConfigLine{line})
 	}
 	return out.String()

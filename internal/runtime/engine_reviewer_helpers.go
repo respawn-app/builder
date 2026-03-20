@@ -22,9 +22,8 @@ type reviewerSuggestionsResult struct {
 }
 
 type reviewerRequestConfig struct {
-	Model          string
-	ThinkingLevel  string
-	MaxSuggestions int
+	Model         string
+	ThinkingLevel string
 }
 
 func (e *Engine) runReviewerSuggestions(ctx context.Context, reviewerClient llm.Client) (reviewerSuggestionsResult, error) {
@@ -32,7 +31,7 @@ func (e *Engine) runReviewerSuggestions(ctx context.Context, reviewerClient llm.
 	return e.reviewerFlow.RunSuggestions(ctx, reviewerClient)
 }
 
-func parseReviewerSuggestionsObject(content string, maxSuggestions int) []string {
+func parseReviewerSuggestionsObject(content string) []string {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" {
 		return nil
@@ -44,28 +43,7 @@ func parseReviewerSuggestionsObject(content string, maxSuggestions int) []string
 	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
 		return nil
 	}
-	out := payload.Suggestions
-
-	if maxSuggestions <= 0 {
-		maxSuggestions = 5
-	}
-	normalized := make([]string, 0, min(maxSuggestions, len(out)))
-	seen := map[string]bool{}
-	for _, suggestion := range out {
-		text := strings.TrimSpace(suggestion)
-		if text == "" {
-			continue
-		}
-		if seen[text] {
-			continue
-		}
-		seen[text] = true
-		normalized = append(normalized, text)
-		if len(normalized) >= maxSuggestions {
-			break
-		}
-	}
-	return normalized
+	return payload.Suggestions
 }
 
 func buildReviewerRequestMessages(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool) ([]llm.Message, error) {

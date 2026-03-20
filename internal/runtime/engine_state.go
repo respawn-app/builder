@@ -235,9 +235,8 @@ func (e *Engine) reviewerRequestConfigSnapshot() reviewerRequestConfig {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return reviewerRequestConfig{
-		Model:          strings.TrimSpace(e.cfg.Reviewer.Model),
-		ThinkingLevel:  strings.TrimSpace(e.cfg.Reviewer.ThinkingLevel),
-		MaxSuggestions: e.cfg.Reviewer.MaxSuggestions,
+		Model:         strings.TrimSpace(e.cfg.Reviewer.Model),
+		ThinkingLevel: strings.TrimSpace(e.cfg.Reviewer.ThinkingLevel),
 	}
 }
 

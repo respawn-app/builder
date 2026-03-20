@@ -292,7 +292,7 @@
 
 ## Experimental Reviewer
 
-- Post-turn reviewer agent exists behind config and is disabled by default via `reviewer.frequency = "off"`.
+- Post-turn reviewer agent exists behind config and defaults to `reviewer.frequency = "edits"`.
 - Reviewer runs only after completed assistant final handoff and only if the completed turn executed at least one tool call.
 - Reviewer uses more aggressive tool-output truncation than main-agent path.
 - Reviewer contract is minimal JSON: `{"suggestions":["..."]}`; invalid payloads are ignored non-fatally.

@@ -39,7 +39,7 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 	if err := configRegistry.applyCLI(opts, &state, sources); err != nil {
 		return App{}, err
 	}
-	inheritReviewerModel(&state.Settings)
+	inheritReviewerDefaults(&state.Settings)
 
 	if err := validateSettings(state.Settings, sources); err != nil {
 		return App{}, err

@@ -30,6 +30,10 @@ export default defineConfig({
           label: docsConfig.docsHomeLabel,
           link: docsConfig.docsHomePath,
         },
+        {
+          label: 'Configuration',
+          link: '/config/',
+        },
       ],
       editLink: {
         baseUrl: docsConfig.repoEditRootUrl,

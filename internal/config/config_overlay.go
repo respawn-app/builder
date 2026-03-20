@@ -8,9 +8,12 @@ import (
 	"builder/internal/tools"
 )
 
-func inheritReviewerModel(settings *Settings) {
+func inheritReviewerDefaults(settings *Settings) {
 	if strings.TrimSpace(settings.Reviewer.Model) == "" {
 		settings.Reviewer.Model = settings.Model
+	}
+	if strings.TrimSpace(settings.Reviewer.ThinkingLevel) == "" {
+		settings.Reviewer.ThinkingLevel = settings.ThinkingLevel
 	}
 }
 

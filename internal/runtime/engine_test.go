@@ -894,11 +894,10 @@ func TestSetReviewerEnabledTogglesRuntimeOnly(t *testing.T) {
 	cfg := Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
-			Frequency:      "off",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
-			Client:         &fakeClient{},
+			Frequency:     "off",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        &fakeClient{},
 		},
 	}
 	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), cfg)
@@ -934,11 +933,10 @@ func TestSetReviewerEnabledFailsWhenReviewerClientMissing(t *testing.T) {
 	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
-			Frequency:      "off",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
-			Client:         nil,
+			Frequency:     "off",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        nil,
 		},
 	})
 	if err != nil {
@@ -965,11 +963,10 @@ func TestSetReviewerEnabledLazyInitializesReviewerClient(t *testing.T) {
 	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
-			Frequency:      "off",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
-			Client:         nil,
+			Frequency:     "off",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        nil,
 			ClientFactory: func() (llm.Client, error) {
 				return &fakeClient{}, nil
 			},
@@ -1013,10 +1010,9 @@ func TestSetReviewerEnabledConcurrentWithBusyStep(t *testing.T) {
 	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolPatch, delay: 50 * time.Millisecond}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
-			Frequency:      "off",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
+			Frequency:     "off",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
 			ClientFactory: func() (llm.Client, error) {
 				return reviewerClient, nil
 			},
@@ -1074,11 +1070,10 @@ func TestSetReviewerDisabledConcurrentWithBusyStepSkipsReviewerForCurrentRun(t *
 	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolPatch, delay: 50 * time.Millisecond}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
-			Frequency:      "all",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
-			Client:         reviewerClient,
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
 		},
 	})
 	if err != nil {
@@ -2095,11 +2090,10 @@ func TestReviewerSkippedWhenNoToolCalls(t *testing.T) {
 	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
-			Frequency:      "edits",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
-			Client:         reviewerClient,
+			Frequency:     "edits",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
 		},
 	})
 	if err != nil {
@@ -2137,11 +2131,10 @@ func TestReviewerRunsOnAllFrequencyWithoutToolCalls(t *testing.T) {
 	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
-			Frequency:      "all",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
-			Client:         reviewerClient,
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
 		},
 	})
 	if err != nil {
@@ -2180,11 +2173,10 @@ func TestReviewerSuggestionsRequestInheritsFastMode(t *testing.T) {
 		Model:           "gpt-5",
 		FastModeEnabled: true,
 		Reviewer: ReviewerConfig{
-			Frequency:      "all",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
-			Client:         reviewerClient,
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
 		},
 	})
 	if err != nil {
@@ -2225,11 +2217,10 @@ func TestFinalNoopAnswerIsInvisibleAndSkipsReviewer(t *testing.T) {
 	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
-			Frequency:      "all",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
-			Client:         reviewerClient,
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
 		},
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -2321,11 +2312,10 @@ func TestReviewerRunsOnEditsFrequencyOnlyWhenPatchApplied(t *testing.T) {
 	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolPatch}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
-			Frequency:      "edits",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
-			Client:         reviewerClient,
+			Frequency:     "edits",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
 		},
 	})
 	if err != nil {
@@ -2388,11 +2378,10 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
-			Frequency:      "all",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
-			Client:         reviewerClient,
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
 		},
 	})
 	if err != nil {
@@ -2561,11 +2550,10 @@ func TestReviewerNoSuggestionsPersistsStatusEntry(t *testing.T) {
 	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
-			Frequency:      "all",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
-			Client:         reviewerClient,
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
 		},
 	})
 	if err != nil {
@@ -2622,11 +2610,10 @@ func TestReviewerArrayPayloadIsIgnoredAsNoSuggestions(t *testing.T) {
 	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
-			Frequency:      "all",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
-			Client:         reviewerClient,
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
 		},
 	})
 	if err != nil {
@@ -2687,11 +2674,10 @@ func TestReviewerUsesStreamingClientWhenAvailable(t *testing.T) {
 	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
-			Frequency:      "all",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
-			Client:         reviewerClient,
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
 		},
 	})
 	if err != nil {
@@ -2743,11 +2729,10 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
-			Frequency:      "all",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
-			Client:         reviewerClient,
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
 		},
 	})
 	if err != nil {
@@ -2796,17 +2781,17 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 }
 
 func TestParseReviewerSuggestionsObjectSupportsStructuredPayload(t *testing.T) {
-	suggestions := parseReviewerSuggestionsObject(`{"suggestions":["one","two","one"," "]}`, 3)
-	if len(suggestions) != 2 || suggestions[0] != "one" || suggestions[1] != "two" {
+	suggestions := parseReviewerSuggestionsObject(`{"suggestions":["one","two","one"," "]}`)
+	if len(suggestions) != 4 || suggestions[0] != "one" || suggestions[1] != "two" || suggestions[2] != "one" || suggestions[3] != " " {
 		t.Fatalf("unexpected suggestions from object payload: %+v", suggestions)
 	}
 
-	suggestions = parseReviewerSuggestionsObject(`["a","b"]`, 5)
+	suggestions = parseReviewerSuggestionsObject(`["a","b"]`)
 	if len(suggestions) != 0 {
 		t.Fatalf("expected invalid non-object payload to be ignored, got %+v", suggestions)
 	}
 
-	suggestions = parseReviewerSuggestionsObject(`not-json`, 5)
+	suggestions = parseReviewerSuggestionsObject(`not-json`)
 	if len(suggestions) != 0 {
 		t.Fatalf("expected invalid payload to be ignored, got %+v", suggestions)
 	}
@@ -3294,11 +3279,10 @@ func TestDeferredFinalWithBackgroundNoticeStillRunsReviewerAndEmitsAssistantEven
 	eng, err := New(store, mainClient, tools.NewRegistry(blockingTool{name: tools.ToolShell, started: started, release: release}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
-			Frequency:      "all",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
-			Client:         reviewerClient,
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
 		},
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -3393,11 +3377,10 @@ func TestDeferredFinalWithQueuedUserInjectionStillRunsReviewerAndEmitsAssistantE
 	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
-			Frequency:      "all",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
-			Client:         reviewerClient,
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
 		},
 		OnEvent: func(evt Event) {
 			mu.Lock()
@@ -3476,11 +3459,10 @@ func TestDeferredFinalWithQueuedUserInjectionAndTrailingNoopStillUsesDeferredFin
 	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
-			Frequency:      "all",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
-			Client:         reviewerClient,
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
 		},
 		OnEvent: func(evt Event) {
 			mu.Lock()
