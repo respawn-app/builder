@@ -1,0 +1,38 @@
+---
+import SocialIcons from 'virtual:starlight/components/SocialIcons';
+import ThemeSelect from 'virtual:starlight/components/ThemeSelect';
+---
+
+<div class="mobile-preferences sl-flex">
+  <span class="copyright">2026 Respawn OSS</span>
+  <div class="social-icons">
+    <SocialIcons />
+  </div>
+  <ThemeSelect />
+</div>
+
+<style>
+  @layer starlight.core {
+    .mobile-preferences {
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 1rem;
+      padding: 0.75rem 0 1.5rem;
+      border-top: 1px solid var(--sl-color-gray-6);
+    }
+
+    .copyright {
+      width: 100%;
+      font-size: var(--sl-text-xs);
+      color: var(--sl-color-gray-3);
+    }
+
+    .social-icons {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      margin-inline-end: auto;
+    }
+  }
+</style>

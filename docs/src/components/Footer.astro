@@ -1,0 +1,28 @@
+---
+import EditLink from 'virtual:starlight/components/EditLink';
+import Pagination from 'virtual:starlight/components/Pagination';
+---
+
+<div class="footer-shell">
+  <div class="meta sl-flex">
+    <EditLink />
+  </div>
+  <Pagination />
+</div>
+
+<style>
+  @layer starlight.core {
+    .footer-shell {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+      padding-bottom: 2rem;
+    }
+
+    .meta {
+      margin-top: 3rem;
+      color: var(--sl-color-gray-3);
+      font-size: var(--sl-text-sm);
+    }
+  }
+</style>

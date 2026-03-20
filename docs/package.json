@@ -1,0 +1,23 @@
+{
+  "name": "builder-docs",
+  "private": true,
+  "type": "module",
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "node ./scripts/sync-readme.mjs && astro dev",
+    "build": "node ./scripts/sync-readme.mjs && astro build && node ./scripts/emit-deployment-files.mjs",
+    "preview": "astro preview",
+    "test": "node --test ./scripts/readme-mirror.test.mjs",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/sitemap": "^3.6.0",
+    "@astrojs/starlight": "^0.38.1",
+    "astro": "^6.0.7",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-stringify": "^11.0.0",
+    "unified": "^11.0.5",
+    "unist-util-visit": "^5.0.0"
+  }
+}

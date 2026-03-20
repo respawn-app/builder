@@ -1,0 +1,137 @@
+---
+import config from 'virtual:starlight/user-config';
+
+import Search from 'virtual:starlight/components/Search';
+import SiteTitle from 'virtual:starlight/components/SiteTitle';
+import SocialIcons from 'virtual:starlight/components/SocialIcons';
+import ThemeSelect from 'virtual:starlight/components/ThemeSelect';
+
+const shouldRenderSearch =
+  config.pagefind ||
+  config.components.Search !== '@astrojs/starlight/components/Search.astro';
+---
+
+<div class="header-shell">
+  <div class="title-wrapper sl-flex">
+    <SiteTitle />
+  </div>
+
+  {shouldRenderSearch && (
+    <div class="sl-flex print:hidden search-wrapper">
+      <Search />
+    </div>
+  )}
+
+  <div class="sl-hidden md:sl-flex print:hidden right-group">
+    <span class="copyright" aria-label="Copyright">2026 Respawn OSS</span>
+    <div class="sl-flex social-icons">
+      <SocialIcons />
+    </div>
+    <ThemeSelect />
+  </div>
+</div>
+
+<script>
+  const root = document.documentElement;
+  const hiddenState = 'hidden';
+  const shownState = 'shown';
+  let lastScrollY = window.scrollY;
+
+  const applyHeaderState = (nextState) => {
+    root.dataset.headerState = nextState;
+  };
+
+  applyHeaderState(shownState);
+
+  const onScroll = () => {
+    const currentScrollY = window.scrollY;
+    const delta = currentScrollY - lastScrollY;
+    const shouldHide = currentScrollY > 96 && delta > 8;
+    const shouldShow = delta < -8 || currentScrollY <= 32;
+
+    if (shouldHide) {
+      applyHeaderState(hiddenState);
+    } else if (shouldShow) {
+      applyHeaderState(shownState);
+    }
+
+    lastScrollY = currentScrollY;
+  };
+
+  window.addEventListener('scroll', onScroll, { passive: true });
+</script>
+
+<style>
+  @layer starlight.core {
+    .header-shell {
+      display: grid;
+      gap: 1rem;
+      align-items: center;
+      height: 100%;
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .title-wrapper {
+      overflow: clip;
+      justify-self: start;
+      padding: 0.25rem;
+      margin: -0.25rem;
+      min-width: 0;
+    }
+
+    .search-wrapper {
+      display: none;
+      min-width: 0;
+      justify-content: center;
+    }
+
+    .right-group,
+    .social-icons {
+      gap: 1rem;
+      align-items: center;
+    }
+
+    .right-group {
+      justify-self: end;
+    }
+
+    .copyright {
+      white-space: nowrap;
+      font-size: var(--sl-text-xs);
+      color: var(--sl-color-gray-3);
+    }
+
+    :global(header.header) {
+      transition: transform 160ms ease, box-shadow 160ms ease;
+      will-change: transform;
+    }
+
+    :global(:root[data-header-state='hidden'] header.header) {
+      transform: translateY(calc(-1 * var(--sl-nav-height) - 1px));
+      box-shadow: none;
+    }
+
+    @media (min-width: 50rem) {
+      .header-shell {
+        grid-template-columns: minmax(max-content, 1fr) minmax(0, 25rem) minmax(max-content, 1fr);
+      }
+
+      .title-wrapper {
+        grid-column: 1;
+        justify-self: start;
+      }
+
+      .search-wrapper {
+        display: flex;
+        grid-column: 2;
+        width: min(100%, 25rem);
+        justify-self: center;
+      }
+
+      .right-group {
+        grid-column: 3;
+        justify-self: end;
+      }
+    }
+  }
+</style>
