@@ -211,12 +211,11 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		HeadlessMode:                  opts.Headless,
 		ToolPreambles:                 active.ToolPreambles,
 		Reviewer: runtime.ReviewerConfig{
-			Frequency:      active.Reviewer.Frequency,
-			Model:          active.Reviewer.Model,
-			ThinkingLevel:  active.Reviewer.ThinkingLevel,
-			MaxSuggestions: active.Reviewer.MaxSuggestions,
-			Client:         reviewerClient,
-			ClientFactory:  newReviewerClient,
+			Frequency:     active.Reviewer.Frequency,
+			Model:         active.Reviewer.Model,
+			ThinkingLevel: active.Reviewer.ThinkingLevel,
+			Client:        reviewerClient,
+			ClientFactory: newReviewerClient,
 		},
 		OnEvent: func(evt runtime.Event) {
 			logger.Logf("%s", formatRuntimeEvent(evt))

@@ -96,12 +96,11 @@ type Config struct {
 }
 
 type ReviewerConfig struct {
-	Frequency      string
-	Model          string
-	ThinkingLevel  string
-	MaxSuggestions int
-	Client         llm.Client
-	ClientFactory  func() (llm.Client, error)
+	Frequency     string
+	Model         string
+	ThinkingLevel string
+	Client        llm.Client
+	ClientFactory func() (llm.Client, error)
 }
 
 type ContextUsage struct {

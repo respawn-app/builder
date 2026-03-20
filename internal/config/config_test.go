@@ -32,10 +32,10 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.Model != defaultModel {
 		t.Fatalf("default model mismatch: %q", cfg.Settings.Model)
 	}
-	if cfg.Settings.WebSearch != "off" {
+	if cfg.Settings.WebSearch != "native" {
 		t.Fatalf("default web_search mismatch: %q", cfg.Settings.WebSearch)
 	}
-	if cfg.Settings.ModelVerbosity != "" {
+	if cfg.Settings.ModelVerbosity != defaultModelVerbosity {
 		t.Fatalf("default model_verbosity mismatch: %q", cfg.Settings.ModelVerbosity)
 	}
 	if cfg.Settings.NotificationMethod != "auto" {
@@ -62,13 +62,13 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if !cfg.Settings.EnabledTools[tools.ToolWebSearch] {
 		t.Fatalf("expected web_search tool enabled by default: %+v", cfg.Settings.EnabledTools)
 	}
-	if cfg.Settings.ContextCompactionThresholdTokens != 360_000 {
+	if cfg.Settings.ContextCompactionThresholdTokens != defaultCompactionThreshold {
 		t.Fatalf("default compaction threshold mismatch: %d", cfg.Settings.ContextCompactionThresholdTokens)
 	}
 	if cfg.Settings.MinimumExecToBgSeconds != defaultMinimumExecToBgSec {
 		t.Fatalf("default minimum_exec_to_bg_seconds mismatch: %d", cfg.Settings.MinimumExecToBgSeconds)
 	}
-	if cfg.Settings.ModelContextWindow != 400_000 {
+	if cfg.Settings.ModelContextWindow != defaultModelContextWindow {
 		t.Fatalf("default model context window mismatch: %d", cfg.Settings.ModelContextWindow)
 	}
 	if cfg.Settings.Store {
@@ -77,8 +77,8 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.AllowNonCwdEdits {
 		t.Fatalf("expected default allow_non_cwd_edits=false")
 	}
-	if cfg.Settings.CompactionMode != CompactionModeNative {
-		t.Fatalf("expected default compaction_mode=native, got %q", cfg.Settings.CompactionMode)
+	if cfg.Settings.CompactionMode != CompactionModeLocal {
+		t.Fatalf("expected default compaction_mode=local, got %q", cfg.Settings.CompactionMode)
 	}
 	if cfg.Settings.ShellOutputMaxChars != 16000 {
 		t.Fatalf("default shell_output_max_chars mismatch: %d", cfg.Settings.ShellOutputMaxChars)
@@ -86,31 +86,34 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.BGShellsOutput != BGShellsOutputDefault {
 		t.Fatalf("default bg_shells_output mismatch: %q", cfg.Settings.BGShellsOutput)
 	}
-	if cfg.Settings.Reviewer.Frequency != "off" {
-		t.Fatalf("expected default reviewer.frequency=off, got %q", cfg.Settings.Reviewer.Frequency)
+	if cfg.Settings.Reviewer.Frequency != defaultReviewerFrequency {
+		t.Fatalf("expected default reviewer.frequency=%s, got %q", defaultReviewerFrequency, cfg.Settings.Reviewer.Frequency)
 	}
 	if cfg.Settings.Reviewer.Model != cfg.Settings.Model {
 		t.Fatalf("default reviewer model mismatch: %q", cfg.Settings.Reviewer.Model)
 	}
-	if cfg.Settings.Reviewer.ThinkingLevel != "low" {
+	if cfg.Settings.Reviewer.ThinkingLevel != cfg.Settings.ThinkingLevel {
 		t.Fatalf("default reviewer thinking_level mismatch: %q", cfg.Settings.Reviewer.ThinkingLevel)
 	}
 	if cfg.Settings.Reviewer.TimeoutSeconds != 60 {
 		t.Fatalf("default reviewer timeout mismatch: %d", cfg.Settings.Reviewer.TimeoutSeconds)
 	}
-	if cfg.Settings.Reviewer.MaxSuggestions != 5 {
-		t.Fatalf("default reviewer max_suggestions mismatch: %d", cfg.Settings.Reviewer.MaxSuggestions)
-	}
 	settingsBytes, err := os.ReadFile(settingsPath)
 	if err != nil {
 		t.Fatalf("read settings file: %v", err)
 	}
-	if !strings.Contains(string(settingsBytes), "model_verbosity = \"\"") {
+	if !strings.Contains(string(settingsBytes), "model_verbosity = \"medium\"") {
 		t.Fatalf("expected default config to expose model_verbosity option, got %q", string(settingsBytes))
+	}
+	if strings.Contains(string(settingsBytes), "thinking_level = \"low\"") {
+		t.Fatalf("expected default config not to hardcode reviewer thinking inheritance, got %q", string(settingsBytes))
+	}
+	if strings.Contains(string(settingsBytes), "max_suggestions") {
+		t.Fatalf("expected default config not to expose reviewer.max_suggestions, got %q", string(settingsBytes))
 	}
 }
 
-func TestLoadReviewerModelInheritsMainModelWhenUnset(t *testing.T) {
+func TestLoadReviewerDefaultsInheritMainSettingsWhenUnset(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -119,7 +122,7 @@ func TestLoadReviewerModelInheritsMainModelWhenUnset(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(configPath, []byte("model = \"gpt-main-file\"\n[reviewer]\nfrequency = \"all\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(configPath, []byte("model = \"gpt-main-file\"\nthinking_level = \"xhigh\"\n[reviewer]\nfrequency = \"all\"\n"), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -130,15 +133,23 @@ func TestLoadReviewerModelInheritsMainModelWhenUnset(t *testing.T) {
 	if cfg.Settings.Reviewer.Model != "gpt-main-file" {
 		t.Fatalf("expected reviewer.model to inherit file main model, got %q", cfg.Settings.Reviewer.Model)
 	}
+	if cfg.Settings.Reviewer.ThinkingLevel != "xhigh" {
+		t.Fatalf("expected reviewer.thinking_level to inherit file main thinking level, got %q", cfg.Settings.Reviewer.ThinkingLevel)
+	}
 
 	t.Setenv("BUILDER_MODEL", "gpt-main-env")
+	t.Setenv("BUILDER_THINKING_LEVEL", "medium")
 	t.Setenv("BUILDER_REVIEWER_MODEL", "")
+	t.Setenv("BUILDER_REVIEWER_THINKING_LEVEL", "")
 	cfg, err = Load(workspace, LoadOptions{})
 	if err != nil {
 		t.Fatalf("load with env model: %v", err)
 	}
 	if cfg.Settings.Reviewer.Model != "gpt-main-env" {
 		t.Fatalf("expected reviewer.model to inherit env main model, got %q", cfg.Settings.Reviewer.Model)
+	}
+	if cfg.Settings.Reviewer.ThinkingLevel != "medium" {
+		t.Fatalf("expected reviewer.thinking_level to inherit env main thinking level, got %q", cfg.Settings.Reviewer.ThinkingLevel)
 	}
 }
 
@@ -469,7 +480,6 @@ frequency = "all"
 model = "gpt-file-reviewer"
 thinking_level = "medium"
 timeout_seconds = 45
-max_suggestions = 3
 `), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -495,7 +505,6 @@ max_suggestions = 3
 	t.Setenv("BUILDER_REVIEWER_MODEL", "gpt-env-reviewer")
 	t.Setenv("BUILDER_REVIEWER_THINKING_LEVEL", "high")
 	t.Setenv("BUILDER_REVIEWER_TIMEOUT_SECONDS", "30")
-	t.Setenv("BUILDER_REVIEWER_MAX_SUGGESTIONS", "4")
 
 	cfg, err = Load(workspace, LoadOptions{})
 	if err != nil {
@@ -514,12 +523,6 @@ max_suggestions = 3
 		t.Fatalf("expected reviewer.model source env, got %q", got)
 	}
 
-	t.Setenv("BUILDER_REVIEWER_MAX_SUGGESTIONS", "0")
-	if _, err := Load(workspace, LoadOptions{}); err == nil {
-		t.Fatal("expected invalid reviewer max suggestions")
-	}
-
-	t.Setenv("BUILDER_REVIEWER_MAX_SUGGESTIONS", "4")
 	t.Setenv("BUILDER_REVIEWER_FREQUENCY", "sometimes")
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
 		t.Fatal("expected invalid reviewer frequency")
@@ -1100,6 +1103,35 @@ func TestLoadRejectsLegacyTimeoutEnvNamesWithMigrationHints(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "BUILDER_TIMEOUTS_MODEL_REQUEST_SECONDS") {
 		t.Fatalf("expected migration hint for canonical model timeout env var, got %v", err)
+	}
+}
+
+func TestLoadRejectsRemovedReviewerMaxSuggestionsEnv(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BUILDER_REVIEWER_MAX_SUGGESTIONS", "15")
+
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected removed BUILDER_REVIEWER_MAX_SUGGESTIONS env var to be rejected")
+	}
+}
+
+func TestLoadRejectsRemovedReviewerMaxSuggestionsFileKey(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("[reviewer]\nmax_suggestions = 15\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected removed reviewer.max_suggestions file key to be rejected")
 	}
 }
 

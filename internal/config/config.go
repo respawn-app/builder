@@ -101,7 +101,6 @@ type ReviewerSettings struct {
 	Model          string
 	ThinkingLevel  string
 	TimeoutSeconds int
-	MaxSuggestions int
 }
 
 type SourceReport struct {

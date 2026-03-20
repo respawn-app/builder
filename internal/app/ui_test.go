@@ -2884,11 +2884,10 @@ func TestBusySlashSupervisorOffAppliesToInFlightRunCompletion(t *testing.T) {
 	eng, err := runtime.New(store, mainClient, tools.NewRegistry(), runtime.Config{
 		Model: "gpt-5",
 		Reviewer: runtime.ReviewerConfig{
-			Frequency:      "all",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
-			Client:         reviewerClient,
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
 		},
 	})
 	if err != nil {
@@ -2948,11 +2947,10 @@ func TestBusySlashSupervisorOnAppliesToInFlightRunCompletion(t *testing.T) {
 	eng, err := runtime.New(store, mainClient, tools.NewRegistry(busyTogglePatchTool{delay: 80 * time.Millisecond}), runtime.Config{
 		Model: "gpt-5",
 		Reviewer: runtime.ReviewerConfig{
-			Frequency:      "off",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
-			Client:         reviewerClient,
+			Frequency:     "off",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
 		},
 	})
 	if err != nil {
@@ -2997,11 +2995,10 @@ func TestSlashSupervisorWithEngineTogglesRuntimeReviewer(t *testing.T) {
 	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{
 		Model: "gpt-5",
 		Reviewer: runtime.ReviewerConfig{
-			Frequency:      "off",
-			Model:          "gpt-5",
-			ThinkingLevel:  "low",
-			MaxSuggestions: 5,
-			Client:         statusLineFakeClient{},
+			Frequency:     "off",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        statusLineFakeClient{},
 		},
 	})
 	if err != nil {
