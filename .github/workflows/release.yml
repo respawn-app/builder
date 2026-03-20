@@ -1,0 +1,150 @@
+name: release
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types:
+      - closed
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'autorelease')) }}
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.base.ref || github.ref_name }}
+
+      - uses: actions/setup-go@v6.3.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Read version
+        id: version
+        run: |
+          version="$(tr -d ' \n' < VERSION)"
+          if [ -z "$version" ]; then
+            echo "VERSION file is empty" >&2
+            exit 1
+          fi
+          version="${version#v}"
+          tag="v${version}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists"
+          else
+            git tag -a "$TAG" -m "$TAG"
+            git push origin "$TAG"
+          fi
+
+      - name: Build changelog
+        id: changelog
+        uses: mikepenz/release-changelog-builder-action@v6.1.1
+        with:
+          commitMode: true
+          configuration: ".github/changelog_config.json"
+
+      - name: Build binaries
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          VERSION_VAR: builder/internal/buildinfo.Version
+        run: |
+          mkdir -p dist
+          for GOOS in darwin linux windows; do
+            for GOARCH in amd64 arm64; do
+              if [ "$GOOS" = "windows" ]; then
+                ext=".exe"
+              else
+                ext=""
+              fi
+              out="builder_${VERSION}_${GOOS}_${GOARCH}"
+              env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
+                go build -ldflags "-X ${VERSION_VAR}=${VERSION}" -o "dist/${out}${ext}" ./cmd/builder
+              if [ "$GOOS" = "windows" ]; then
+                (cd dist && zip "${out}.zip" "${out}${ext}")
+              else
+                (cd dist && tar -czf "${out}.tar.gz" "${out}${ext}")
+              fi
+              rm -f "dist/${out}${ext}"
+            done
+          done
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2.5.0
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          draft: true
+          body: ${{ steps.changelog.outputs.changelog }}
+          files: dist/*
+
+  update_brew_tap:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+
+      - uses: actions/checkout@v6.0.2
+        with:
+          repository: respawn-app/homebrew-tap
+          path: homebrew-tap
+          token: ${{ secrets.RESPAWN_BREW_TAP_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git -C homebrew-tap config user.name "github-actions[bot]"
+          git -C homebrew-tap config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update tap formula
+        env:
+          BUILDER_VERSION: ${{ needs.release.outputs.tag }}
+        run: scripts/update-brew-tap.sh --tap "$GITHUB_WORKSPACE/homebrew-tap"
+
+      - name: Ensure pr-pull label exists
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.RESPAWN_BREW_TAP_TOKEN }}
+          script: |
+            const owner = "respawn-app";
+            const repo = "homebrew-tap";
+            const name = "pr-pull";
+            try {
+              await github.rest.issues.getLabel({ owner, repo, name });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.issues.createLabel({
+                owner,
+                repo,
+                name,
+                color: "0e8a16",
+                description: "Ready for brew pr-pull",
+              });
+            }
+
+      - name: Create tap PR
+        uses: peter-evans/create-pull-request@v8.1.0
+        with:
+          token: ${{ secrets.RESPAWN_BREW_TAP_TOKEN }}
+          path: homebrew-tap
+          base: master
+          branch: chore/builder-${{ needs.release.outputs.tag }}
+          commit-message: "builder ${{ needs.release.outputs.tag }}"
+          title: "builder ${{ needs.release.outputs.tag }}"
+          body: "Automated formula bump for ${{ needs.release.outputs.tag }}."
+          labels: pr-pull

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"builder/internal/app"
+	"builder/internal/buildinfo"
 	"builder/internal/selfcmd"
 )
 
@@ -65,26 +66,41 @@ const (
 )
 
 func main() {
-	args := os.Args[1:]
+	if exitCode := rootCommand(os.Args[1:], os.Stdout, os.Stderr); exitCode != 0 {
+		os.Exit(exitCode)
+	}
+}
+
+func rootCommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "run" {
-		exitCode := runSubcommand(args[1:])
-		if exitCode != 0 {
-			os.Exit(exitCode)
-		}
-		return
+		return runSubcommand(args[1:])
+	}
+	if stdout == nil {
+		stdout = io.Discard
+	}
+	if stderr == nil {
+		stderr = io.Discard
 	}
 
 	rootFS := flag.NewFlagSet("builder", flag.ContinueOnError)
-	rootFS.SetOutput(os.Stderr)
+	rootFS.SetOutput(stderr)
+	showVersion := rootFS.Bool("version", false, "print version and exit")
 	flags := registerCommonFlags(rootFS)
 	if err := rootFS.Parse(args); err != nil {
-		os.Exit(2)
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if *showVersion {
+		_, _ = fmt.Fprintln(stdout, buildinfo.Version)
+		return 0
 	}
 	markExplicitCommonFlags(rootFS, &flags)
 	sessionID, err := effectiveSessionID(flags)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		fmt.Fprintln(stderr, err)
+		return 2
 	}
 
 	opts := app.Options{
@@ -103,9 +119,10 @@ func main() {
 	}
 
 	if err := app.Run(context.Background(), opts); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		fmt.Fprintln(stderr, err)
+		return 1
 	}
+	return 0
 }
 
 func runSubcommand(args []string) int {

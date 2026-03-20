@@ -9,8 +9,40 @@ import (
 	"testing"
 	"time"
 
+	"builder/internal/buildinfo"
 	"builder/internal/selfcmd"
 )
+
+func TestRootCommandPrintsVersion(t *testing.T) {
+	original := buildinfo.Version
+	buildinfo.Version = "1.2.3"
+	t.Cleanup(func() {
+		buildinfo.Version = original
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := rootCommand([]string{"--version"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if got := stdout.String(); got != "1.2.3\n" {
+		t.Fatalf("stdout = %q, want version output", got)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRootCommandHelpReturnsZero(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := rootCommand([]string{"--help"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if !strings.Contains(stderr.String(), "Usage of builder:") {
+		t.Fatalf("stderr = %q, want usage", stderr.String())
+	}
+}
 
 func TestParseRunTimeoutDefaultsToInfinite(t *testing.T) {
 	got, err := parseRunTimeout("")

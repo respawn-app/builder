@@ -6,6 +6,14 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cd "$repo_root"
 
+read_version() {
+  local version="${BUILDER_VERSION:-}"
+  if [ -z "$version" ] && [ -f VERSION ]; then
+    version="$(tr -d ' \n' < VERSION)"
+  fi
+  printf '%s' "${version#v}"
+}
+
 run_format() {
   echo "==> verify formatting"
   local unformatted
@@ -24,6 +32,12 @@ run_vet() {
 
 run_build() {
   echo "==> go build"
+  local version
+  version="$(read_version)"
+  if [ -n "$version" ]; then
+    go build -ldflags "-X builder/internal/buildinfo.Version=${version}" -o ./bin/builder ./cmd/builder
+    return
+  fi
   go build -o ./bin/builder ./cmd/builder
 }
 
