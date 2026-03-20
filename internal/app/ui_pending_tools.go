@@ -14,12 +14,27 @@ func nativePendingToolEntries(entries []tui.TranscriptEntry) []tui.TranscriptEnt
 	if start >= len(entries) {
 		return nil
 	}
-	pending := make([]tui.TranscriptEntry, 0, len(entries)-start)
-	for _, entry := range entries[start:] {
+	tail := entries[start:]
+	include := make(map[int]struct{})
+	consumedResults := make(map[int]struct{})
+	for idx, entry := range tail {
 		if strings.TrimSpace(entry.Role) != "tool_call" {
 			continue
 		}
 		if strings.TrimSpace(ongoingTranscriptText(entry)) == "" {
+			continue
+		}
+		include[idx] = struct{}{}
+		resultIdx := nativeFindMatchingToolResultIndex(tail, idx, consumedResults)
+		if resultIdx < 0 {
+			continue
+		}
+		include[resultIdx] = struct{}{}
+		consumedResults[resultIdx] = struct{}{}
+	}
+	pending := make([]tui.TranscriptEntry, 0, len(include))
+	for idx, entry := range tail {
+		if _, ok := include[idx]; !ok {
 			continue
 		}
 		pending = append(pending, entry)

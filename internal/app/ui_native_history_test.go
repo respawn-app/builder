@@ -590,8 +590,8 @@ func TestNativePendingToolEntriesTrackParallelCommitFrontier(t *testing.T) {
 	}
 
 	pending := nativePendingToolEntries(entries)
-	if len(pending) != 2 {
-		t.Fatalf("expected two pending tool entries, got %#v", pending)
+	if len(pending) != 3 {
+		t.Fatalf("expected pending tool calls plus matching completed result, got %#v", pending)
 	}
 	if pending[0].ToolCallID != "call_a" || pending[0].Role != "tool_call" || pending[0].Text != "echo a" {
 		t.Fatalf("unexpected first pending tool entry: %#v", pending[0])
@@ -599,21 +599,20 @@ func TestNativePendingToolEntriesTrackParallelCommitFrontier(t *testing.T) {
 	if pending[1].ToolCallID != "call_b" || pending[1].Role != "tool_call" || pending[1].Text != "echo b" {
 		t.Fatalf("unexpected second pending tool entry: %#v", pending[1])
 	}
+	if pending[2].ToolCallID != "call_b" || pending[2].Role != "tool_result_ok" || pending[2].Text != "out-b" {
+		t.Fatalf("unexpected pending tool result entry: %#v", pending[2])
+	}
 
 	rendered := renderNativePendingToolSnapshot(entries, "dark", 40, 0)
 	plain := stripANSIPreserve(rendered)
 	if !strings.Contains(plain, pendingSpinnerFrame(0)+" echo a") {
 		t.Fatalf("expected first pending tool preview in live region, got %q", plain)
 	}
-	expectedLater := stripANSIPreserve(renderNativePendingToolSnapshot([]tui.TranscriptEntry{entries[2]}, "dark", 40, 0))
-	if expectedLater == "" {
-		t.Fatal("expected standalone later pending tool preview")
+	if !strings.Contains(plain, "$ echo b") {
+		t.Fatalf("expected completed pending call to use its final symbol, got %q", plain)
 	}
-	if !strings.Contains(plain, pendingSpinnerFrame(0)+" echo b") {
-		t.Fatalf("expected later completed call to remain visually identical pending preview, got %q", plain)
-	}
-	if !strings.Contains(plain, expectedLater) {
-		t.Fatalf("expected later completed call to reuse the plain pending tool-call preview, got %q want substring %q", plain, expectedLater)
+	if strings.Contains(plain, pendingSpinnerFrame(0)+" echo b") {
+		t.Fatalf("did not expect completed pending call to keep spinner state, got %q", plain)
 	}
 	if strings.Contains(plain, "waiting") {
 		t.Fatalf("did not expect waiting annotation in pending tool preview, got %q", plain)
@@ -694,8 +693,8 @@ func TestNativePendingCompletedMultilineShellPreviewStaysTwoLinesWithoutWaitingA
 	}
 
 	pending := nativePendingToolEntries(entries)
-	if len(pending) != 2 {
-		t.Fatalf("expected two pending tool entries, got %#v", pending)
+	if len(pending) != 3 {
+		t.Fatalf("expected pending tool calls plus matching completed result, got %#v", pending)
 	}
 
 	rendered := strings.Split(renderNativePendingToolSnapshot(entries, "dark", 80, 0), "\n")
@@ -704,7 +703,7 @@ func TestNativePendingCompletedMultilineShellPreviewStaysTwoLinesWithoutWaitingA
 		plain = append(plain, strings.TrimSpace(stripANSIPreserve(line)))
 	}
 	joined := strings.Join(plain, "\n")
-	if !strings.Contains(joined, pendingSpinnerFrame(0)+" cat > /tmp/demo.txt <<'EOF'") {
+	if !strings.Contains(joined, "$ cat > /tmp/demo.txt <<'EOF'") {
 		t.Fatalf("expected completed multiline pending shell preview header, got %q", plain)
 	}
 	if !strings.Contains(joined, "…") {
@@ -712,6 +711,29 @@ func TestNativePendingCompletedMultilineShellPreviewStaysTwoLinesWithoutWaitingA
 	}
 	if strings.Contains(joined, "waiting") {
 		t.Fatalf("did not expect waiting annotation in completed pending multiline preview, got %q", plain)
+	}
+}
+
+func TestNativePendingCompletedErrorToolKeepsFinalStateWithoutSpinner(t *testing.T) {
+	entries := []tui.TranscriptEntry{
+		{Role: "tool_call", Text: "echo a", ToolCallID: "call_a", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo a"}},
+		{Role: "tool_call", Text: "exit 1", ToolCallID: "call_b", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "exit 1"}},
+		{Role: "tool_result_error", Text: "failed", ToolCallID: "call_b"},
+	}
+
+	rendered := renderNativePendingToolSnapshot(entries, "dark", 80, 0)
+	plain := stripANSIPreserve(rendered)
+	if !strings.Contains(plain, pendingSpinnerFrame(0)+" echo a") {
+		t.Fatalf("expected unresolved pending call to keep spinner, got %q", plain)
+	}
+	if !strings.Contains(plain, "$ exit 1") {
+		t.Fatalf("expected completed error call to use final shell symbol, got %q", plain)
+	}
+	if strings.Contains(plain, pendingSpinnerFrame(0)+" exit 1") {
+		t.Fatalf("did not expect completed error call to keep spinner state, got %q", plain)
+	}
+	if strings.Contains(plain, "waiting") {
+		t.Fatalf("did not expect waiting annotation in mixed pending/error preview, got %q", plain)
 	}
 }
 
@@ -843,7 +865,7 @@ func TestNativeParallelToolCompletionWaitsForStablePrefixBeforeAppend(t *testing
 		t.Fatalf("expected no committed flush before first pending call resolves, got %T", cmd())
 	}
 	view := stripANSIPreserve(m.View())
-	if !strings.Contains(view, pendingSpinnerFrame(0)+" echo a") || !strings.Contains(view, pendingSpinnerFrame(0)+" echo b") {
+	if !strings.Contains(view, pendingSpinnerFrame(0)+" echo a") || !strings.Contains(view, "$ echo b") {
 		t.Fatalf("expected pending rows to match committed shell preview formatting, got %q", view)
 	}
 	if strings.Contains(view, "waiting") {

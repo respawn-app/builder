@@ -19,7 +19,7 @@ func RenderPendingToolSnapshot(entries []TranscriptEntry, theme string, width in
 		model = casted
 	}
 	blocks := model.buildOngoingBlocks(false)
-	blocks = model.applyPendingSpinner(blocks, spinner)
+	blocks = model.applyPendingSpinner(blocks, entries, spinner)
 	if len(blocks) == 0 {
 		return ""
 	}
@@ -33,14 +33,16 @@ func RenderPendingToolSnapshot(entries []TranscriptEntry, theme string, width in
 	return strings.Join(lines, "\n")
 }
 
-func (m Model) applyPendingSpinner(blocks []ongoingBlock, spinner string) []ongoingBlock {
+func (m Model) applyPendingSpinner(blocks []ongoingBlock, entries []TranscriptEntry, spinner string) []ongoingBlock {
 	trimmedSpinner := strings.TrimSpace(spinner)
 	if trimmedSpinner == "" {
 		return blocks
 	}
+	consumedResults := make(map[int]struct{})
+	resultIndex := buildToolResultIndex(entries)
 	out := make([]ongoingBlock, 0, len(blocks))
 	for _, block := range blocks {
-		if !isToolHeadlineRole(block.role) || len(block.lines) == 0 {
+		if !m.shouldRenderPendingSpinner(block, entries, consumedResults, resultIndex) {
 			out = append(out, block)
 			continue
 		}
@@ -60,4 +62,23 @@ func (m Model) applyPendingSpinner(blocks []ongoingBlock, spinner string) []ongo
 		out = append(out, ongoingBlock{role: block.role, lines: lines, entryIndex: block.entryIndex})
 	}
 	return out
+}
+
+func (m Model) shouldRenderPendingSpinner(block ongoingBlock, entries []TranscriptEntry, consumedResults map[int]struct{}, resultIndex toolResultIndex) bool {
+	if !isToolHeadlineRole(block.role) || len(block.lines) == 0 {
+		return false
+	}
+	if block.entryIndex < 0 || block.entryIndex >= len(entries) {
+		return false
+	}
+	entry := entries[block.entryIndex]
+	if strings.TrimSpace(entry.Role) != "tool_call" {
+		return false
+	}
+	resultIdx := resultIndex.findMatchingToolResultIndex(entries, block.entryIndex, consumedResults)
+	if resultIdx < 0 {
+		return true
+	}
+	consumedResults[resultIdx] = struct{}{}
+	return false
 }
