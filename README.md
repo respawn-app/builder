@@ -1,5 +1,12 @@
 Builder is a highly opinionated, minimal terminal coding agent for professional Agentic Engineers, focusing on output quality. Currently only supporting OpenAI/codex models.
 
+## License
+
+Builder is licensed under `AGPL-3.0-only`. See `LICENSE`.
+
+If you deploy a modified network-accessible version, AGPL section 13 requires
+you to offer the corresponding source of that modified version to its users.
+
 ### Features:
 
 - [x] Agentic loop with `shell`, `ask_question`, `patch` tools.
