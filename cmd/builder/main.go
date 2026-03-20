@@ -16,6 +16,7 @@ import (
 	"builder/internal/app"
 	"builder/internal/buildinfo"
 	"builder/internal/selfcmd"
+	"golang.org/x/term"
 )
 
 type commonFlags struct {
@@ -65,15 +66,20 @@ const (
 	runProgressModeStderr runProgressMode = "stderr"
 )
 
+var runInteractiveApp = app.Run
+
 func main() {
-	if exitCode := rootCommand(os.Args[1:], os.Stdout, os.Stderr); exitCode != 0 {
+	if exitCode := rootCommand(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); exitCode != 0 {
 		os.Exit(exitCode)
 	}
 }
 
-func rootCommand(args []string, stdout io.Writer, stderr io.Writer) int {
+func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "run" {
 		return runSubcommand(args[1:])
+	}
+	if stdin == nil {
+		stdin = strings.NewReader("")
 	}
 	if stdout == nil {
 		stdout = io.Discard
@@ -85,6 +91,7 @@ func rootCommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	rootFS := flag.NewFlagSet("builder", flag.ContinueOnError)
 	rootFS.SetOutput(stderr)
 	showVersion := rootFS.Bool("version", false, "print version and exit")
+	forceInteractive := rootFS.Bool("force-interactive", false, "run interactive UI even when stdin/stdout are not terminals")
 	flags := registerCommonFlags(rootFS)
 	if err := rootFS.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -95,6 +102,15 @@ func rootCommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	if *showVersion {
 		_, _ = fmt.Fprintln(stdout, buildinfo.Version)
 		return 0
+	}
+	if remaining := rootFS.Args(); len(remaining) > 0 {
+		fmt.Fprintf(stderr, "unknown command or arguments: %s\n\n", strings.Join(remaining, " "))
+		rootFS.Usage()
+		return 2
+	}
+	if err := requireInteractiveTerminal(stdin, stdout, *forceInteractive); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
 	}
 	markExplicitCommonFlags(rootFS, &flags)
 	sessionID, err := effectiveSessionID(flags)
@@ -118,11 +134,37 @@ func rootCommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		OpenAIBaseURLExplicit: flags.OpenAIBaseURLExplicit,
 	}
 
-	if err := app.Run(context.Background(), opts); err != nil {
+	if err := runInteractiveApp(context.Background(), opts); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	return 0
+}
+
+func requireInteractiveTerminal(stdin io.Reader, stdout io.Writer, force bool) error {
+	if force {
+		return nil
+	}
+	if !isTerminalReader(stdin) || !isTerminalWriter(stdout) {
+		return errors.New("interactive mode requires a terminal on stdin and stdout; use `builder run ...` for headless usage or pass --force-interactive to bypass this check")
+	}
+	return nil
+}
+
+func isTerminalReader(r io.Reader) bool {
+	file, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	return term.IsTerminal(int(file.Fd()))
+}
+
+func isTerminalWriter(w io.Writer) bool {
+	file, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	return term.IsTerminal(int(file.Fd()))
 }
 
 func runSubcommand(args []string) int {

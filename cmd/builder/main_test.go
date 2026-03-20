@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"builder/internal/app"
 	"builder/internal/buildinfo"
 	"builder/internal/selfcmd"
 )
@@ -22,7 +23,7 @@ func TestRootCommandPrintsVersion(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	if code := rootCommand([]string{"--version"}, &stdout, &stderr); code != 0 {
+	if code := rootCommand([]string{"--version"}, strings.NewReader(""), &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
 	if got := stdout.String(); got != "1.2.3\n" {
@@ -36,11 +37,69 @@ func TestRootCommandPrintsVersion(t *testing.T) {
 func TestRootCommandHelpReturnsZero(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	if code := rootCommand([]string{"--help"}, &stdout, &stderr); code != 0 {
+	if code := rootCommand([]string{"--help"}, strings.NewReader(""), &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
 	if !strings.Contains(stderr.String(), "Usage of builder:") {
 		t.Fatalf("stderr = %q, want usage", stderr.String())
+	}
+}
+
+func TestRootCommandRejectsUnknownCommand(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := rootCommand([]string{"prompt", "--help"}, strings.NewReader(""), &stdout, &stderr); code != 2 {
+		t.Fatalf("exit code = %d, want 2", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, "unknown command or arguments: prompt --help") || !strings.Contains(got, "Usage of builder:") {
+		t.Fatalf("stderr = %q, want unknown-command usage error", got)
+	}
+}
+
+func TestRootCommandRejectsNonInteractiveMode(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := rootCommand(nil, strings.NewReader(""), &stdout, &stderr); code != 2 {
+		t.Fatalf("exit code = %d, want 2", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, "interactive mode requires a terminal on stdin and stdout") {
+		t.Fatalf("stderr = %q, want non-interactive error", got)
+	}
+}
+
+func TestRootCommandForceInteractiveBypassesTerminalCheck(t *testing.T) {
+	original := runInteractiveApp
+	t.Cleanup(func() {
+		runInteractiveApp = original
+	})
+	called := false
+	runInteractiveApp = func(ctx context.Context, opts app.Options) error {
+		called = true
+		return nil
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := rootCommand([]string{"--force-interactive"}, strings.NewReader(""), &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if !called {
+		t.Fatal("expected interactive app to run when --force-interactive is set")
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRequireInteractiveTerminalAllowsForce(t *testing.T) {
+	if err := requireInteractiveTerminal(strings.NewReader(""), &bytes.Buffer{}, true); err != nil {
+		t.Fatalf("require interactive terminal with force: %v", err)
 	}
 }
 
