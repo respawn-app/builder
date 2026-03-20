@@ -107,7 +107,7 @@
 ## Interrupts, Queueing, And In-Turn Messaging
 
 - In-turn user messaging supports both mid-run injection and queued post-turn send.
-- Queue/send hotkey is `Tab`; compatibility aliases: `Ctrl+Enter`, `Ctrl+J`.
+- Queue/send hotkey is `Tab`; compatibility alias: `Ctrl+Enter`.
 - Known `Ctrl+Enter` CSI encodings normalize to the same queue action.
 - Mid-run injection is soft-insert only (delivered at safe boundary after current tool completion; no forced interruption).
 - Pending user message order is strict FIFO.

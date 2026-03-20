@@ -203,6 +203,14 @@ func TestEffectiveSessionIDPrefersContinueAlias(t *testing.T) {
 	}
 }
 
+func TestRegisterCommonFlagsDoesNotExposeRemovedBashTimeoutAlias(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	registerCommonFlags(fs)
+	if fs.Lookup("bash-timeout-seconds") != nil {
+		t.Fatal("expected removed --bash-timeout-seconds flag to be absent")
+	}
+}
+
 func TestBuildRunContinueCommandAndHint(t *testing.T) {
 	if got := buildRunContinueCommand(""); got != "" {
 		t.Fatalf("expected empty command for empty session id, got %q", got)

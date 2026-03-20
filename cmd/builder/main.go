@@ -30,7 +30,6 @@ type commonFlags struct {
 	Theme                 string
 	ModelTimeoutSeconds   int
 	ShellTimeoutSeconds   int
-	BashTimeoutSeconds    int
 	Tools                 string
 	OpenAIBaseURL         string
 	OpenAIBaseURLExplicit bool
@@ -296,7 +295,6 @@ func registerCommonFlags(fs *flag.FlagSet) commonFlags {
 	fs.StringVar(&flags.Theme, "theme", "", "theme override (light|dark)")
 	fs.IntVar(&flags.ModelTimeoutSeconds, "model-timeout-seconds", 0, "model request timeout override in seconds")
 	fs.IntVar(&flags.ShellTimeoutSeconds, "shell-timeout-seconds", 0, "shell default timeout override in seconds")
-	fs.IntVar(&flags.BashTimeoutSeconds, "bash-timeout-seconds", 0, "deprecated alias for --shell-timeout-seconds")
 	fs.StringVar(&flags.Tools, "tools", "", "enabled tools override as csv (e.g. shell,patch)")
 	fs.StringVar(&flags.OpenAIBaseURL, "openai-base-url", "", "OpenAI-compatible base URL override")
 	return flags
@@ -315,10 +313,7 @@ func effectiveSessionID(flags commonFlags) (string, error) {
 }
 
 func effectiveShellTimeout(flags commonFlags) int {
-	if flags.ShellTimeoutSeconds > 0 {
-		return flags.ShellTimeoutSeconds
-	}
-	return flags.BashTimeoutSeconds
+	return flags.ShellTimeoutSeconds
 }
 
 func markExplicitCommonFlags(fs *flag.FlagSet, flags *commonFlags) {

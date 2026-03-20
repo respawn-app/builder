@@ -9,7 +9,7 @@ import (
 
 func TestResolveContinuationLoadParamsUsesSessionWorkspaceAndPersistedBaseURL(t *testing.T) {
 	persistenceRoot := t.TempDir()
-	containerDir := filepath.Join(persistenceRoot, "workspace-a")
+	containerDir := filepath.Join(persistenceRoot, "sessions", "workspace-a")
 	store, err := session.Create(containerDir, "workspace-a", "/tmp/original-workspace")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
@@ -38,7 +38,7 @@ func TestResolveContinuationLoadParamsUsesSessionWorkspaceAndPersistedBaseURL(t 
 
 func TestResolveContinuationLoadParamsRespectsExplicitOverrides(t *testing.T) {
 	persistenceRoot := t.TempDir()
-	containerDir := filepath.Join(persistenceRoot, "workspace-a")
+	containerDir := filepath.Join(persistenceRoot, "sessions", "workspace-a")
 	store, err := session.Create(containerDir, "workspace-a", "/tmp/original-workspace")
 	if err != nil {
 		t.Fatalf("create session: %v", err)

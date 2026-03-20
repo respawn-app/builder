@@ -69,7 +69,6 @@ These flags overlay settings at startup.
 | `--theme` | `theme` | |
 | `--model-timeout-seconds` | `timeouts.model_request_seconds` | |
 | `--shell-timeout-seconds` | `timeouts.shell_default_seconds` | |
-| `--bash-timeout-seconds` | `timeouts.shell_default_seconds` | Deprecated alias |
 | `--tools` | entire tool set | CSV replacement, not a merge |
 | `--openai-base-url` | `openai_base_url` | Also affects continuation behavior |
 
@@ -111,7 +110,7 @@ Related, but not part of the settings model:
 | Key | Type | Default | Env | CLI | Description |
 | --- | --- | --- | --- | --- | --- |
 | `timeouts.model_request_seconds` | int | `400` | `BUILDER_TIMEOUTS_MODEL_REQUEST_SECONDS` | `--model-timeout-seconds` | HTTP timeout for model requests. Must be `> 0`. |
-| `timeouts.shell_default_seconds` | int | `300` | `BUILDER_TIMEOUTS_SHELL_DEFAULT_SECONDS` | `--shell-timeout-seconds` | Default timeout for shell tool calls. Must be `> 0`. Deprecated CLI alias: `--bash-timeout-seconds`. |
+| `timeouts.shell_default_seconds` | int | `300` | `BUILDER_TIMEOUTS_SHELL_DEFAULT_SECONDS` | `--shell-timeout-seconds` | Default timeout for shell tool calls. Must be `> 0`. |
 
 ### Reviewer
 
@@ -181,32 +180,3 @@ These are real runtime knobs, but they are not part of the typed settings regist
 | `BUILDER_OAUTH_CLIENT_ID` | OAuth client ID override for login flows. |
 | `BUILDER_DEBUG_KEYS` | Debug-only UI key rendering toggle. |
 | `BUILDER_CONTEXT_WINDOW` | Low-level transport fallback for context-window size. In normal Builder startup it is usually superseded by `model_context_window`. |
-
-## Rejected Legacy Names
-
-Builder rejects legacy names instead of silently accepting them.
-
-### Rejected file keys
-
-| Legacy key | Use instead |
-| --- | --- |
-| `timeouts.bash_default_seconds` | `timeouts.shell_default_seconds` |
-| `use_native_compaction` | `compaction_mode` |
-
-### Rejected environment variables
-
-| Legacy env var | Use instead |
-| --- | --- |
-| `BUILDER_MODEL_SUPPORTS_REASONING_EFFORT` | `BUILDER_MODEL_CAPABILITIES_SUPPORTS_REASONING_EFFORT` |
-| `BUILDER_MODEL_SUPPORTS_VISION_INPUTS` | `BUILDER_MODEL_CAPABILITIES_SUPPORTS_VISION_INPUTS` |
-| `BUILDER_PROVIDER_CAPABILITY_ID` | `BUILDER_PROVIDER_CAPABILITIES_PROVIDER_ID` |
-| `BUILDER_PROVIDER_SUPPORTS_RESPONSES_API` | `BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_RESPONSES_API` |
-| `BUILDER_PROVIDER_SUPPORTS_RESPONSES_COMPACT` | `BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_RESPONSES_COMPACT` |
-| `BUILDER_PROVIDER_SUPPORTS_NATIVE_WEB_SEARCH` | `BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_NATIVE_WEB_SEARCH` |
-| `BUILDER_PROVIDER_SUPPORTS_REASONING_ENCRYPTED` | `BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_REASONING_ENCRYPTED` |
-| `BUILDER_PROVIDER_SUPPORTS_SERVER_SIDE_CONTEXT_EDIT` | `BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_SERVER_SIDE_CONTEXT_EDIT` |
-| `BUILDER_PROVIDER_IS_OPENAI_FIRST_PARTY` | `BUILDER_PROVIDER_CAPABILITIES_IS_OPENAI_FIRST_PARTY` |
-| `BUILDER_MODEL_TIMEOUT_SECONDS` | `BUILDER_TIMEOUTS_MODEL_REQUEST_SECONDS` |
-| `BUILDER_SHELL_TIMEOUT_SECONDS` | `BUILDER_TIMEOUTS_SHELL_DEFAULT_SECONDS` |
-| `BUILDER_BASH_TIMEOUT_SECONDS` | `BUILDER_TIMEOUTS_SHELL_DEFAULT_SECONDS` |
-| `BUILDER_USE_NATIVE_COMPACTION` | `BUILDER_COMPACTION_MODE` |

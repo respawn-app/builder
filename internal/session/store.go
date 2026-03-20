@@ -104,25 +104,24 @@ func FindSessionDir(persistenceRoot, sessionID string) (string, error) {
 		return "", errors.New("session id is required")
 	}
 
-	for _, searchRoot := range []string{filepath.Join(root, sessionsDirName), root} {
-		if direct := filepath.Join(searchRoot, id); hasSessionMeta(direct) {
-			return direct, nil
+	searchRoot := filepath.Join(root, sessionsDirName)
+	if direct := filepath.Join(searchRoot, id); hasSessionMeta(direct) {
+		return direct, nil
+	}
+	entries, err := os.ReadDir(searchRoot)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("session %q not found", id)
 		}
-		entries, err := os.ReadDir(searchRoot)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return "", fmt.Errorf("read session root: %w", err)
+		return "", fmt.Errorf("read session root: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
 		}
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			candidate := filepath.Join(searchRoot, entry.Name(), id)
-			if hasSessionMeta(candidate) {
-				return candidate, nil
-			}
+		candidate := filepath.Join(searchRoot, entry.Name(), id)
+		if hasSessionMeta(candidate) {
+			return candidate, nil
 		}
 	}
 	return "", fmt.Errorf("session %q not found", id)
