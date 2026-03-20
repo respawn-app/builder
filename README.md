@@ -1,12 +1,5 @@
 Builder is a highly opinionated, minimal terminal coding agent for professional Agentic Engineers, focusing on output quality. Currently only supporting OpenAI/codex models.
 
-## License
-
-Builder is licensed under `AGPL-3.0-only`. See `LICENSE`.
-
-If you deploy a modified network-accessible version, AGPL section 13 requires
-you to offer the corresponding source of that modified version to its users.
-
 ## Install
 
 ### Homebrew (macOS/Linux)
@@ -76,4 +69,17 @@ Here is where this project has to be highly opinionated:
 - Microcompaction - this invalidates caches and drives costs up with marginal benefits
 - Sandboxing - Codex's sandbox is annoying, doesn't work with many tools (gradle, java etc), junie's sandbox can be bypassed, claude code's sandbox is brittle and can also be bypassed. Frontier models are not so stupid anymore and are trained not to destroy your PC.
 - WebFetch tool or similar. Just use [jina.ai](https://r.jina.ai) to fetch urls.
-- Fancy summaries, UI, minimal mode, features for "vibe coding", eye candy. The philosophy is to build something for professionals (agentic engineers)
+- Fancy summaries, UI, minimal mode, features for "vibe coding". The philosophy is to build something for professionals (agentic engineers)
+
+## Project Docs
+
+- Contribution guide: `CONTRIBUTING.md`
+- Security policy: `SECURITY.md`
+
+
+## License
+
+Builder is licensed under `AGPL-3.0-only`. See `LICENSE`.
+
+If you deploy a modified network-accessible version, AGPL section 13 requires
+you to offer the corresponding source of that modified version to its users.
