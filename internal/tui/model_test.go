@@ -1550,7 +1550,16 @@ func TestRenderEntryTextSkipsHighlightWhenMuted(t *testing.T) {
 }
 
 func TestFlattenEntryWithMetaKeepsMutedShellHighlightWhenMuted(t *testing.T) {
-	m := NewModel(WithTheme("dark"))
+	testFlattenEntryWithMetaKeepsMutedShellHighlightWhenMuted(t, "dark")
+}
+
+func TestFlattenEntryWithMetaKeepsMutedShellHighlightWhenMutedLight(t *testing.T) {
+	testFlattenEntryWithMetaKeepsMutedShellHighlightWhenMuted(t, "light")
+}
+
+func testFlattenEntryWithMetaKeepsMutedShellHighlightWhenMuted(t *testing.T, theme string) {
+	t.Helper()
+	m := NewModel(WithTheme(theme))
 	meta := &transcript.ToolCallMeta{
 		RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindShell},
 	}
@@ -1566,7 +1575,7 @@ func TestFlattenEntryWithMetaKeepsMutedShellHighlightWhenMuted(t *testing.T) {
 		t.Fatalf("expected ongoing shell command to keep muted highlighting, got %q", ongoing)
 	}
 	if !strings.Contains(ongoing, "\x1b[38;2;") {
-		t.Fatalf("expected ongoing shell command colors to be remapped to blended truecolor, got %q", ongoing)
+		t.Fatalf("expected ongoing shell command colors to be remapped to truecolor, got %q", ongoing)
 	}
 	if !strings.Contains(ansi.Strip(ongoing), command) {
 		t.Fatalf("expected ongoing shell command text preserved after muting, got %q", ansi.Strip(ongoing))
@@ -1574,19 +1583,218 @@ func TestFlattenEntryWithMetaKeepsMutedShellHighlightWhenMuted(t *testing.T) {
 	if strings.Contains(ongoing, "\x1b[38;5;255m./gradlew") {
 		t.Fatalf("expected ongoing shell command to replace original chroma foregrounds with muted ones, got %q", ongoing)
 	}
+	if strings.Contains(ongoing, foregroundEscape(m.palette().previewColor)+command) {
+		t.Fatalf("expected muted shell command to preserve relative token colors instead of flattening to preview color, got %q", ongoing)
+	}
 }
 
-func TestMuteANSIForegroundReappliesMutedBaseAfterReset(t *testing.T) {
-	muted := muteANSIForeground("echo \x1b[38;5;81mfoo\x1b[0m bar", "dark")
+func TestMuteANSIOutputReappliesDefaultForegroundAfterReset(t *testing.T) {
+	m := NewModel(WithTheme("dark"))
+	base := m.palette().previewColor
+	muted := muteANSIOutput("echo \x1b[38;5;81mfoo\x1b[0m bar", base)
 	if !strings.Contains(muted, "\x1b[38;2;") {
-		t.Fatalf("expected muted output to contain blended truecolor escape, got %q", muted)
+		t.Fatalf("expected muted output to contain rewritten truecolor escape, got %q", muted)
 	}
-	if !strings.Contains(muted, "\x1b[0;38;2;127;132;142m bar") {
-		t.Fatalf("expected reset to restore muted base foreground, got %q", muted)
+	if !strings.Contains(muted, "\x1b[0;"+strings.Join(foregroundParams(base), ";")+"m bar") {
+		t.Fatalf("expected reset to restore default foreground, got %q", muted)
 	}
 	if got := ansi.Strip(muted); got != "echo foo bar" {
 		t.Fatalf("expected text preserved after muting, got %q", got)
 	}
+}
+
+func TestMuteANSIOutputSupportsColonTrueColorSGR(t *testing.T) {
+	m := NewModel(WithTheme("light"))
+	muted := muteANSIOutput("\x1b[38:2:255:0:255mhello\x1b[39m world", m.palette().previewColor)
+	if !strings.Contains(muted, "\x1b[38;2;") {
+		t.Fatalf("expected colon-form truecolor sequence to be rewritten, got %q", muted)
+	}
+	if !strings.Contains(muted, "\x1b[38;2;255;0;255m") {
+		if strings.Contains(muted, "\x1b[38:2:255:0:255m") {
+			t.Fatalf("expected colon-form sequence to be normalized during rewrite, got %q", muted)
+		}
+	}
+	if got := ansi.Strip(muted); got != "hello world" {
+		t.Fatalf("expected colon-form truecolor text preserved, got %q", got)
+	}
+}
+
+func TestOngoingWrappedShellPreviewKeepsMutedHighlightAcrossVisualLines(t *testing.T) {
+	m := NewModel(WithTheme("dark"))
+	m.viewportWidth = 28
+	meta := &transcript.ToolCallMeta{
+		RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindShell},
+	}
+	command := "./gradlew -p apps/respawn detektFormat > docs/tmp/build-triage-2026-03-15/detektFormat.log 2>&1"
+
+	lines := m.flattenEntryWithMeta("tool_shell_success", command, true, meta)
+	if len(lines) < 3 {
+		t.Fatalf("expected wrapped ongoing shell preview to span multiple visual lines, got %d (%q)", len(lines), lines)
+	}
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "\x1b[38;2;") {
+		t.Fatalf("expected wrapped shell preview to contain muted truecolor highlight, got %q", joined)
+	}
+	if strings.Contains(joined, "\x1b[38;5;255m") {
+		t.Fatalf("expected wrapped shell preview to avoid original full-color chroma output, got %q", joined)
+	}
+	plain := strings.Join(strings.Fields(ansi.Strip(joined)), "")
+	expected := strings.Join(strings.Fields("$ "+command), "")
+	if plain != expected {
+		t.Fatalf("expected wrapped shell preview text preserved, got %q want %q", plain, expected)
+	}
+}
+
+func TestOngoingSourceHintShellPreviewFallsBackToMutedShellHighlight(t *testing.T) {
+	m := NewModel(WithTheme("dark"))
+	meta := &transcript.ToolCallMeta{
+		ToolName: "shell",
+		IsShell:  true,
+		RenderHint: &transcript.ToolRenderHint{
+			Kind:       transcript.ToolRenderKindSource,
+			Path:       "internal/app/app.go",
+			ResultOnly: true,
+		},
+	}
+	command := "sed -n '1,220p' internal/app/app.go"
+
+	joined := strings.Join(m.flattenEntryWithMeta("tool_shell_success", command, true, meta), "\n")
+	if !strings.Contains(joined, "\x1b[38;2;") {
+		t.Fatalf("expected source-hinted shell preview to fall back to muted shell highlight, got %q", joined)
+	}
+	if plain := strings.Join(strings.Fields(ansi.Strip(joined)), " "); plain != "$ "+command {
+		t.Fatalf("expected source-hinted shell preview text preserved, got %q", plain)
+	}
+}
+
+func TestViewWrappedShellPreviewUsesMutedOngoingAndFullColorDetail(t *testing.T) {
+	command := "./gradlew -p apps/respawn detektFormat > docs/tmp/build-triage-2026-03-15/detektFormat.log 2>&1"
+	m := NewModel(WithTheme("dark"), WithPreviewLines(20))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 28})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: command,
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:   "shell",
+			IsShell:    true,
+			Command:    command,
+			RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindShell},
+		},
+	})
+
+	ongoing := m.View()
+	if !strings.Contains(ongoing, "\x1b[38;2;") {
+		t.Fatalf("expected ongoing view to contain muted truecolor shell highlight, got %q", ongoing)
+	}
+	if strings.Contains(ongoing, "\x1b[38;5;255m./gradlew") {
+		t.Fatalf("expected ongoing view to avoid original full-color shell highlight, got %q", ongoing)
+	}
+	if strings.Count(plainTranscript(ongoing), "detektFormat") == 0 {
+		t.Fatalf("expected ongoing view to show wrapped shell command text, got %q", plainTranscript(ongoing))
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detail := m.View()
+	if !strings.Contains(detail, "\x1b[38;5;") {
+		t.Fatalf("expected detail view to keep full shell color output, got %q", detail)
+	}
+	if strings.Contains(detail, "\x1b[38;2;") && !strings.Contains(detail, "\x1b[38;5;") {
+		t.Fatalf("expected detail view to avoid muted-only shell output, got %q", detail)
+	}
+}
+
+func TestViewSourceHintShellPreviewUsesMutedOngoing(t *testing.T) {
+	command := "sed -n '1,220p' internal/app/app.go"
+	m := NewModel(WithTheme("dark"), WithPreviewLines(20))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: command,
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "shell",
+			IsShell:  true,
+			Command:  command,
+			RenderHint: &transcript.ToolRenderHint{
+				Kind:       transcript.ToolRenderKindSource,
+				Path:       "internal/app/app.go",
+				ResultOnly: true,
+			},
+		},
+	})
+
+	ongoing := m.View()
+	if !strings.Contains(ongoing, "\x1b[38;2;") {
+		t.Fatalf("expected ongoing source-hinted shell preview to be muted-highlighted, got %q", ongoing)
+	}
+	if plain := plainTranscript(ongoing); !strings.Contains(plain, command) {
+		t.Fatalf("expected ongoing source-hinted shell preview to show command text, got %q", plain)
+	}
+}
+
+func TestViewMixedShellPreviewsUseMutedOngoingAndFullColorDetail(t *testing.T) {
+	sedCommand := "sed -n '1,220p' internal/app/app.go"
+	rgCommand := "rg -n \"func effectiveSettings|effectiveSettings\\(\" internal/app internal/runtime internal/session"
+	m := NewModel(WithTheme("dark"), WithPreviewLines(20))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 120})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: sedCommand,
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName: "shell",
+			IsShell:  true,
+			Command:  sedCommand,
+			RenderHint: &transcript.ToolRenderHint{
+				Kind:       transcript.ToolRenderKindSource,
+				Path:       "internal/app/app.go",
+				ResultOnly: true,
+			},
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: rgCommand,
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:   "shell",
+			IsShell:    true,
+			Command:    rgCommand,
+			RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindShell},
+		},
+	})
+
+	ongoing := m.View()
+	for _, command := range []string{sedCommand, rgCommand} {
+		line := lineContaining(ongoing, command)
+		if line == "" {
+			t.Fatalf("expected ongoing view to contain command %q, got %q", command, plainTranscript(ongoing))
+		}
+		if !strings.Contains(line, "\x1b[38;2;") {
+			t.Fatalf("expected ongoing command line to be muted-highlighted, got %q", line)
+		}
+		if strings.Contains(line, "\x1b[38;5;255m") {
+			t.Fatalf("expected ongoing command line to avoid original full-color shell highlight, got %q", line)
+		}
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detail := m.View()
+	for _, command := range []string{sedCommand, rgCommand} {
+		line := lineContaining(detail, command)
+		if line == "" {
+			t.Fatalf("expected detail view to contain command %q, got %q", command, plainTranscript(detail))
+		}
+		if !strings.Contains(line, "\x1b[38;5;") {
+			t.Fatalf("expected detail command line to retain full shell highlight, got %q", line)
+		}
+	}
+}
+
+func lineContaining(text, substring string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(ansi.Strip(line), substring) {
+			return line
+		}
+	}
+	return ""
 }
 
 func TestDetailShellUserInitiatedCallUsesUserRanLabel(t *testing.T) {
