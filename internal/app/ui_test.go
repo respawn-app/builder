@@ -3480,6 +3480,45 @@ func TestStatusLineShowsLockedModelContractMarker(t *testing.T) {
 	}
 }
 
+func TestStatusLineHidesLockedModelMarkerWhenConfiguredModelMatches(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIModelName("gpt-5.3-codex"),
+		WithUIConfiguredModelName("gpt-5.3-codex"),
+		WithUIThinkingLevel("high"),
+		WithUIFastModeAvailable(true),
+		WithUIFastModeEnabled(true),
+		WithUIModelContractLocked(true),
+	).(*uiModel)
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(line, "gpt-5.3-codex high fast") {
+		t.Fatalf("expected status line to keep model label, got %q", line)
+	}
+	if strings.Contains(line, "(model locked)") {
+		t.Fatalf("did not expect locked model contract marker when configured model matches, got %q", line)
+	}
+}
+
+func TestStatusLineShowsLockedModelMarkerWhenConfiguredModelDiffers(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIModelName("gpt-5.3-codex"),
+		WithUIConfiguredModelName("gpt-5.4"),
+		WithUIThinkingLevel("low"),
+		WithUIModelContractLocked(true),
+	).(*uiModel)
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(line, "gpt-5.3-codex low (model locked)") {
+		t.Fatalf("expected status line to include locked model contract marker when configured model differs, got %q", line)
+	}
+}
+
 func TestStatusLineShowsCompactionProgressWarning(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 

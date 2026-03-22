@@ -125,10 +125,17 @@ func (l uiViewLayout) statusModelLabel() string {
 	if m.fastModeAvailable && m.fastModeEnabled {
 		label += " fast"
 	}
-	if !m.modelContractLocked {
+	if !m.shouldShowModelLockedLabel() {
 		return label
 	}
 	return label + " (model locked)"
+}
+
+func (m *uiModel) shouldShowModelLockedLabel() bool {
+	if !m.modelContractLocked {
+		return false
+	}
+	return strings.TrimSpace(m.modelName) != strings.TrimSpace(m.configuredModelName)
 }
 
 func (l uiViewLayout) renderCacheHitSection(style uiStyles) string {

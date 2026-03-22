@@ -8,10 +8,10 @@ import (
 )
 
 func runUILoop(wiring *runtimeWiring, active config.Settings, logger *runLogger, commandRegistry *commands.Registry) (tea.Model, error) {
-	return runUILoopWithInitialPrompt(wiring, active, logger, commandRegistry, "", "", false)
+	return runUILoopWithInitialPrompt(wiring, active, logger, commandRegistry, "", "", false, active.Model)
 }
 
-func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, logger *runLogger, commandRegistry *commands.Registry, initialPrompt string, sessionName string, modelContractLocked bool) (tea.Model, error) {
+func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, logger *runLogger, commandRegistry *commands.Registry, initialPrompt string, sessionName string, modelContractLocked bool, configuredModelName string) (tea.Model, error) {
 	options := mainUIProgramOptions(active)
 
 	program := tea.NewProgram(NewUIModel(
@@ -20,6 +20,7 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 		wiring.askBridge.Events(),
 		WithUILogger(logger),
 		WithUIModelName(active.Model),
+		WithUIConfiguredModelName(configuredModelName),
 		WithUIThinkingLevel(active.ThinkingLevel),
 		WithUIModelContractLocked(modelContractLocked),
 		WithUITheme(active.Theme),

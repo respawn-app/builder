@@ -128,6 +128,12 @@ func WithUIModelName(model string) UIOption {
 	}
 }
 
+func WithUIConfiguredModelName(model string) UIOption {
+	return func(m *uiModel) {
+		m.configuredModelName = strings.TrimSpace(model)
+	}
+}
+
 func WithUIThinkingLevel(thinkingLevel string) UIOption {
 	return func(m *uiModel) {
 		m.thinkingLevel = strings.TrimSpace(thinkingLevel)
@@ -250,6 +256,7 @@ type uiModel struct {
 	inputSubmitLocked bool
 
 	modelName             string
+	configuredModelName   string
 	thinkingLevel         string
 	fastModeAvailable     bool
 	fastModeEnabled       bool
