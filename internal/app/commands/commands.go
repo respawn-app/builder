@@ -102,18 +102,16 @@ func NewDefaultRegistry() *Registry {
 	})
 	registerPromptCommands(r, []promptCommandSpec{
 		{
-			Name:          "review",
-			Description:   "Run code review (optional: /review <what to review>)",
-			Prompt:        prompts.ReviewPrompt,
-			AppendRawArgs: true,
-			FreshSession:  true,
+			Name:         "review",
+			Description:  "Run code review (optional: /review <what to review>)",
+			Prompt:       prompts.ReviewPrompt,
+			FreshSession: true,
 		},
 		{
-			Name:          "init",
-			Description:   "Run repository initialization prompt (optional: /init <instructions>)",
-			Prompt:        prompts.InitPrompt,
-			AppendRawArgs: true,
-			FreshSession:  true,
+			Name:         "init",
+			Description:  "Run repository initialization prompt (optional: /init <instructions>)",
+			Prompt:       prompts.InitPrompt,
+			FreshSession: true,
 		},
 	})
 	return r

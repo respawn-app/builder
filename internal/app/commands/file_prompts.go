@@ -31,10 +31,9 @@ func NewDefaultRegistryWithFilePrompts(workspaceRoot, settingsPath string) (*Reg
 	specs := make([]promptCommandSpec, 0, len(prompts))
 	for _, prompt := range prompts {
 		specs = append(specs, promptCommandSpec{
-			Name:          prompt.Name,
-			Description:   prompt.Description,
-			Prompt:        prompt.Content,
-			AppendRawArgs: false,
+			Name:        prompt.Name,
+			Description: prompt.Description,
+			Prompt:      prompt.Content,
 		})
 	}
 	registerPromptCommands(r, specs)
@@ -69,13 +68,11 @@ func loadFilePromptCommands(workspaceRoot, settingsPath string) ([]filePromptCom
 				continue
 			}
 			base := strings.TrimSuffix(name, ".md")
-			if strings.TrimSpace(base) == "" {
+			commandID := normalizeFilePromptCommandID(base)
+			if commandID == "" {
 				continue
 			}
-			commandName := "prompt:" + strings.ToLower(base)
-			if strings.IndexFunc(commandName, unicode.IsSpace) >= 0 {
-				return nil, fmt.Errorf("invalid prompt file name %q in %s: whitespace in command id", name, dir)
-			}
+			commandName := "prompt:" + commandID
 			if seen[commandName] {
 				continue
 			}
@@ -83,6 +80,9 @@ func loadFilePromptCommands(workspaceRoot, settingsPath string) ([]filePromptCom
 			content, err := os.ReadFile(fullPath)
 			if err != nil {
 				return nil, fmt.Errorf("read prompt file %s: %w", fullPath, err)
+			}
+			if strings.TrimSpace(string(content)) == "" {
+				continue
 			}
 			seen[commandName] = true
 			commands = append(commands, filePromptCommand{
@@ -93,6 +93,31 @@ func loadFilePromptCommands(workspaceRoot, settingsPath string) ([]filePromptCom
 		}
 	}
 	return commands, nil
+}
+
+func normalizeFilePromptCommandID(name string) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return ""
+	}
+
+	var builder strings.Builder
+	builder.Grow(len(trimmed))
+	lastUnderscore := false
+	for _, r := range trimmed {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			builder.WriteRune(unicode.ToLower(r))
+			lastUnderscore = false
+		case unicode.IsSpace(r) || r == '_':
+			if builder.Len() == 0 || lastUnderscore {
+				continue
+			}
+			builder.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	return strings.Trim(builder.String(), "_")
 }
 
 func filePromptSearchDirs(workspaceRoot, settingsPath string) ([]string, error) {
