@@ -3444,6 +3444,90 @@ func TestStatusLineRendersReasoningHeaderBeforeContextUsage(t *testing.T) {
 	if !containsInOrder(line, "Summarizing fix and investigation", "0%") {
 		t.Fatalf("expected reasoning header immediately left of context usage, got %q", line)
 	}
+	if strings.Contains(line, statusHelpHint) {
+		t.Fatalf("did not expect help hint while reasoning header is present, got %q", line)
+	}
+}
+
+func TestStatusLineShowsHelpHintWhenIdleInOngoingMode(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !containsInOrder(line, statusHelpHint, "0%") {
+		t.Fatalf("expected help hint immediately left of context usage while idle, got %q", line)
+	}
+}
+
+func TestStatusLineHidesHelpHintWhenOngoingModeIsNotIdle(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	cases := []struct {
+		name  string
+		apply func(*uiModel)
+	}{
+		{name: "busy running", apply: func(m *uiModel) {
+			m.busy = true
+			m.activity = uiActivityRunning
+		}},
+		{name: "queued", apply: func(m *uiModel) {
+			m.activity = uiActivityQueued
+		}},
+		{name: "question", apply: func(m *uiModel) {
+			m.activity = uiActivityQuestion
+		}},
+		{name: "reviewer", apply: func(m *uiModel) {
+			m.reviewerRunning = true
+		}},
+		{name: "compacting", apply: func(m *uiModel) {
+			m.compacting = true
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+			tc.apply(m)
+
+			line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+			if strings.Contains(line, statusHelpHint) {
+				t.Fatalf("did not expect help hint while ongoing mode is active but not idle, got %q", line)
+			}
+		})
+	}
+}
+
+func TestStatusLineHidesHelpHintOutsideOngoingMode(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.forwardToView(tui.ToggleModeMsg{})
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if strings.Contains(line, statusHelpHint) {
+		t.Fatalf("did not expect help hint outside ongoing mode, got %q", line)
+	}
 }
 
 func TestStatusLineShowsThinkingLevelForUnknownModels(t *testing.T) {
