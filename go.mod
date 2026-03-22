@@ -12,8 +12,9 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-runewidth v0.0.21
-	github.com/openai/openai-go/v3 v3.28.0
+	github.com/openai/openai-go/v3 v3.29.0
 	golang.org/x/oauth2 v0.36.0
+	golang.org/x/term v0.41.0
 	gopkg.in/yaml.v3 v3.0.1
 	mvdan.cc/sh/v3 v3.13.0
 )
@@ -51,6 +52,5 @@ require (
 	golang.org/x/exp v0.0.0-20260312153236-7ab1446f8b90 // indirect
 	golang.org/x/net v0.52.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/term v0.41.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 )
