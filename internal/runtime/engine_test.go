@@ -2755,6 +2755,9 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 	for idx, entry := range snapshot.Entries {
 		if entry.Role == "reviewer_suggestions" && strings.Contains(entry.Text, "Supervisor suggested:") {
 			suggestionsIdx = idx
+			if entry.OngoingText != "Supervisor made 1 suggestion." {
+				t.Fatalf("expected compact reviewer suggestions ongoing text, got %+v", entry)
+			}
 		}
 		if entry.Role == "assistant" && strings.Contains(entry.Text, "updated final after review") {
 			foundFollowUpAssistant = true
@@ -2777,6 +2780,34 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 	}
 	if !foundAppliedStatus {
 		t.Fatalf("expected applied reviewer status entry in snapshot, got %+v", snapshot.Entries)
+	}
+
+	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	restoredSnapshot := restored.ChatSnapshot()
+	foundRestoredSuggestions := false
+	for _, entry := range restoredSnapshot.Entries {
+		if entry.Role != "reviewer_suggestions" || !strings.Contains(entry.Text, "Supervisor suggested:") {
+			continue
+		}
+		foundRestoredSuggestions = true
+		if entry.OngoingText != "Supervisor made 1 suggestion." {
+			t.Fatalf("expected restored compact reviewer suggestions ongoing text, got %+v", entry)
+		}
+	}
+	if !foundRestoredSuggestions {
+		t.Fatalf("expected restored reviewer suggestions entry, got %+v", restoredSnapshot.Entries)
+	}
+}
+
+func TestReviewerSuggestionsOngoingTextUsesLockedWording(t *testing.T) {
+	if got := reviewerSuggestionsOngoingText([]string{"one"}); got != "Supervisor made 1 suggestion." {
+		t.Fatalf("unexpected single-suggestion ongoing text: %q", got)
+	}
+	if got := reviewerSuggestionsOngoingText([]string{"one", "two"}); got != "Supervisor made 2 suggestions." {
+		t.Fatalf("unexpected multi-suggestion ongoing text: %q", got)
 	}
 }
 

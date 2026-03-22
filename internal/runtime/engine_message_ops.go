@@ -97,14 +97,19 @@ func (e *Engine) appendReasoningEntries(stepID string, entries []llm.ReasoningEn
 }
 
 func (e *Engine) appendPersistedLocalEntry(stepID, role, text string) error {
+	return e.appendPersistedLocalEntryWithOngoingText(stepID, role, text, "")
+}
+
+func (e *Engine) appendPersistedLocalEntryWithOngoingText(stepID, role, text, ongoingText string) error {
 	role = strings.TrimSpace(role)
 	if role == "" || strings.TrimSpace(text) == "" {
 		return nil
 	}
-	e.chat.appendLocalEntry(role, text)
+	e.chat.appendLocalEntryWithOngoingText(role, text, ongoingText)
 	_, err := e.store.AppendEvent(stepID, "local_entry", storedLocalEntry{
-		Role: role,
-		Text: text,
+		Role:        role,
+		Text:        text,
+		OngoingText: strings.TrimSpace(ongoingText),
 	})
 	if err == nil {
 		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})

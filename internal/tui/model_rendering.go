@@ -206,6 +206,8 @@ func (m Model) standardEntryBlock(entryIndex int, entry TranscriptEntry, role st
 		text = m.ongoingEntryText(entry)
 		if role == "reviewer_status" {
 			text = compactReviewerStatusForOngoing(text)
+		} else if role == "reviewer_suggestions" {
+			text = compactReviewerSuggestionsForOngoing(text)
 		}
 	}
 	lines := m.flattenEntry(role, text)

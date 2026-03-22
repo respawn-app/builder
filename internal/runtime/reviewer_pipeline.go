@@ -51,7 +51,12 @@ func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string
 		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
 		return original, nil
 	}
-	_ = e.appendPersistedLocalEntry(stepID, "reviewer_suggestions", reviewerSuggestionsText(suggestions))
+	_ = e.appendPersistedLocalEntryWithOngoingText(
+		stepID,
+		"reviewer_suggestions",
+		reviewerSuggestionsText(suggestions),
+		reviewerSuggestionsOngoingText(suggestions),
+	)
 
 	instruction := formatReviewerDeveloperInstruction(suggestions)
 	if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeReviewerFeedback, Content: instruction}); err != nil {
