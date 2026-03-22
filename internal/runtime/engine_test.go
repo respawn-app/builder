@@ -4141,6 +4141,98 @@ func TestParallelToolsReturnDeclaredOrder(t *testing.T) {
 
 }
 
+func TestParallelToolCompletionAppearsInChatSnapshotBeforeAllToolsFinish(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working"},
+			ToolCalls: []llm.ToolCall{
+				{ID: "a", Name: string(tools.ToolShell), Input: json.RawMessage(`{}`)},
+				{ID: "b", Name: string(tools.ToolPatch), Input: json.RawMessage(`{}`)},
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	slow := blockingTool{name: tools.ToolShell, started: make(chan struct{}), release: make(chan struct{})}
+	toolCompleted := make(chan tools.Result, 4)
+	eng, err := New(store, client, tools.NewRegistry(
+		slow,
+		fakeTool{name: tools.ToolPatch, delay: 1 * time.Millisecond},
+	), Config{
+		Model:       "gpt-5",
+		Temperature: 1,
+		OnEvent: func(evt Event) {
+			if evt.Kind != EventToolCallCompleted || evt.ToolResult == nil {
+				return
+			}
+			select {
+			case toolCompleted <- *evt.ToolResult:
+			default:
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	submitDone := make(chan error, 1)
+	go func() {
+		_, submitErr := eng.SubmitUserMessage(context.Background(), "run tools")
+		submitDone <- submitErr
+	}()
+
+	select {
+	case <-slow.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for slow tool to start")
+	}
+
+	var completed tools.Result
+	select {
+	case completed = <-toolCompleted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for fast tool completion")
+	}
+	if completed.CallID != "b" {
+		t.Fatalf("expected fast patch tool to complete first, got %+v", completed)
+	}
+
+	snapshot := eng.ChatSnapshot()
+	foundPendingA := false
+	foundCompletedB := false
+	for _, entry := range snapshot.Entries {
+		switch {
+		case entry.Role == "tool_call" && entry.ToolCallID == "a":
+			foundPendingA = true
+		case entry.Role == "tool_result_ok" && entry.ToolCallID == "b":
+			foundCompletedB = true
+		}
+	}
+	if !foundPendingA || !foundCompletedB {
+		t.Fatalf("expected snapshot to expose pending a and completed b before slow tool finishes, got %+v", snapshot.Entries)
+	}
+
+	close(slow.release)
+	select {
+	case submitErr := <-submitDone:
+		if submitErr != nil {
+			t.Fatalf("submit: %v", submitErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for submit completion")
+	}
+}
+
 func TestPersistedAssistantToolCallsContainNoUIDisplayMarkers(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

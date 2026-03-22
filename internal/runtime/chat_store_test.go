@@ -106,6 +106,37 @@ func TestChatStoreSnapshotKeepsShortCommentaryInTranscript(t *testing.T) {
 	t.Fatalf("expected short commentary preserved in transcript entries, got %+v", snap.Entries)
 }
 
+func TestChatStoreSnapshotSynthesizesCompletedToolResultBeforeToolMessage(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{
+		Role:    llm.RoleAssistant,
+		Content: "working",
+		ToolCalls: []llm.ToolCall{
+			{ID: "call_a", Name: "shell", Input: json.RawMessage(`{"command":"sleep 1"}`)},
+			{ID: "call_b", Name: "shell", Input: json.RawMessage(`{"command":"pwd"}`)},
+		},
+	})
+	s.recordToolCompletion(tools.Result{
+		CallID: "call_b",
+		Name:   tools.ToolShell,
+		Output: json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`),
+	})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 4 {
+		t.Fatalf("expected assistant, two tool calls, and synthesized tool result, got %+v", snap.Entries)
+	}
+	if snap.Entries[1].Role != "tool_call" || snap.Entries[1].ToolCallID != "call_a" {
+		t.Fatalf("unexpected first tool call entry: %+v", snap.Entries[1])
+	}
+	if snap.Entries[2].Role != "tool_call" || snap.Entries[2].ToolCallID != "call_b" {
+		t.Fatalf("unexpected second tool call entry: %+v", snap.Entries[2])
+	}
+	if snap.Entries[3].Role != "tool_result_ok" || snap.Entries[3].ToolCallID != "call_b" || strings.TrimSpace(snap.Entries[3].Text) != "/tmp" {
+		t.Fatalf("expected synthesized completed tool result for call_b, got %+v", snap.Entries[3])
+	}
+}
+
 func TestChatStoreSnapshotKeepsSubstantiveCommentaryInTranscript(t *testing.T) {
 	s := newChatStore()
 	content := strings.Repeat("reasoning detail ", 20)

@@ -11,6 +11,7 @@ import (
 	"builder/internal/runtime"
 	"builder/internal/session"
 	"builder/internal/tools"
+	"builder/internal/transcript"
 	"builder/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -194,6 +195,39 @@ func TestConversationSnapshotCommitClearsSawAssistantDelta(t *testing.T) {
 	}
 	if strings.Contains(stripANSIPreserve(m.View()), "partial") {
 		t.Fatalf("expected no stale streaming text in live region after commit, got %q", stripANSIPreserve(m.View()))
+	}
+}
+
+func TestApplyChatSnapshotShowsMixedParallelPendingStatesInLiveView(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.spinnerFrame = 0
+
+	cmd := m.runtimeAdapter().applyChatSnapshot(runtime.ChatSnapshot{Entries: []runtime.ChatEntry{
+		{Role: "assistant", Text: "working"},
+		{Role: "tool_call", Text: "echo a", ToolCallID: "call_a", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo a"}},
+		{Role: "tool_call", Text: "echo b", ToolCallID: "call_b", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "echo b"}},
+		{Role: "tool_result_ok", Text: "out-b", ToolCallID: "call_b"},
+	}})
+	if cmd != nil {
+		_ = cmd()
+	}
+	m.syncViewport()
+
+	view := stripANSIPreserve(m.View())
+	if !strings.Contains(view, pendingSpinnerFrame(0)+" echo a") {
+		t.Fatalf("expected unresolved tool to keep spinner in live view, got %q", view)
+	}
+	if !strings.Contains(view, "$ echo b") {
+		t.Fatalf("expected completed sibling to use final shell symbol in live view, got %q", view)
+	}
+	if strings.Contains(view, pendingSpinnerFrame(0)+" echo b") {
+		t.Fatalf("did not expect completed sibling to keep spinner in live view, got %q", view)
+	}
+	if strings.Contains(view, "waiting") {
+		t.Fatalf("did not expect waiting annotation in live view, got %q", view)
 	}
 }
 

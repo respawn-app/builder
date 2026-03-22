@@ -235,6 +235,17 @@ func (s *chatStore) snapshot() ChatSnapshot {
 	defer s.mu.RUnlock()
 
 	entries := make([]ChatEntry, 0, len(s.messages)+len(s.local))
+	materializedToolResults := make(map[string]struct{})
+	for _, msg := range s.messages {
+		if msg.Role != llm.RoleTool {
+			continue
+		}
+		callID := strings.TrimSpace(msg.ToolCallID)
+		if callID == "" {
+			continue
+		}
+		materializedToolResults[callID] = struct{}{}
+	}
 	localIndex := 0
 	appendLocalEntries := func(processedMessages int) {
 		for localIndex < len(s.local) {
@@ -262,6 +273,9 @@ func (s *chatStore) snapshot() ChatSnapshot {
 			if len(msg.ToolCalls) > 0 {
 				for _, call := range msg.ToolCalls {
 					entries = append(entries, s.formatToolCall(call))
+					if synthesized, ok := s.synthesizedToolResult(call, materializedToolResults); ok {
+						entries = append(entries, synthesized)
+					}
 				}
 			}
 		case llm.RoleTool:
@@ -302,6 +316,25 @@ func (s *chatStore) snapshot() ChatSnapshot {
 		Ongoing:      s.ongoing,
 		OngoingError: s.ongoingError,
 	}
+}
+
+func (s *chatStore) synthesizedToolResult(call llm.ToolCall, materialized map[string]struct{}) (ChatEntry, bool) {
+	callID := strings.TrimSpace(call.ID)
+	if callID == "" {
+		return ChatEntry{}, false
+	}
+	if _, ok := materialized[callID]; ok {
+		return ChatEntry{}, false
+	}
+	completion, ok := s.toolCompletions[callID]
+	if !ok {
+		return ChatEntry{}, false
+	}
+	role := "tool_result_ok"
+	if completion.IsError {
+		role = "tool_result_error"
+	}
+	return ChatEntry{Role: role, Text: formatToolResult(completion), ToolCallID: callID}, true
 }
 
 func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
