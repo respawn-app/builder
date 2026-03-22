@@ -82,6 +82,7 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 			nextSessionInitialPrompt,
 			store.Meta().Name,
 			store.Meta().Locked != nil,
+			boot.cfg.Settings.Model,
 		)
 		if boot.backgroundRouter != nil {
 			boot.backgroundRouter.ClearActiveSession(store.Meta().SessionID)
