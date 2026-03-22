@@ -25,7 +25,7 @@ func ongoingDividerGroup(role string) string {
 
 func skipInOngoing(role string) bool {
 	switch strings.ToLower(strings.TrimSpace(role)) {
-	case "thinking", "thinking_trace", "reasoning", "compaction_summary", "reviewer_suggestions", "error":
+	case "thinking", "thinking_trace", "reasoning", "compaction_summary", "error":
 		return true
 	default:
 		return false
@@ -67,6 +67,10 @@ func compactReviewerStatusForOngoing(text string) string {
 		}
 	}
 	return trimmed
+}
+
+func compactReviewerSuggestionsForOngoing(text string) string {
+	return compactReviewerStatusForOngoing(text)
 }
 
 func isReviewerCacheHitLine(text string) bool {

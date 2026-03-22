@@ -42,7 +42,11 @@ func (e *Engine) ContextUsage() ContextUsage {
 }
 
 func (e *Engine) AppendLocalEntry(role, text string) {
-	e.chat.appendLocalEntry(role, text)
+	e.AppendLocalEntryWithOngoingText(role, text, "")
+}
+
+func (e *Engine) AppendLocalEntryWithOngoingText(role, text, ongoingText string) {
+	e.chat.appendLocalEntryWithOngoingText(role, text, ongoingText)
 	e.emit(Event{Kind: EventConversationUpdated, StepID: ""})
 }
 
@@ -258,8 +262,9 @@ func mustJSON(v any) json.RawMessage {
 }
 
 type storedLocalEntry struct {
-	Role string `json:"role"`
-	Text string `json:"text"`
+	Role        string `json:"role"`
+	Text        string `json:"text"`
+	OngoingText string `json:"ongoing_text,omitempty"`
 }
 
 type historyReplacementPayload struct {

@@ -117,6 +117,19 @@ func TestChatStoreSnapshotKeepsSubstantiveCommentaryInTranscript(t *testing.T) {
 	}
 }
 
+func TestChatStoreSnapshotPreservesLocalEntryOngoingText(t *testing.T) {
+	s := newChatStore()
+	s.appendLocalEntryWithOngoingText("reviewer_suggestions", "Supervisor suggested:\n1. First", "Supervisor made 1 suggestion.")
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 1 {
+		t.Fatalf("expected one entry, got %+v", snap.Entries)
+	}
+	if snap.Entries[0].Role != "reviewer_suggestions" || snap.Entries[0].Text != "Supervisor suggested:\n1. First" || snap.Entries[0].OngoingText != "Supervisor made 1 suggestion." {
+		t.Fatalf("unexpected local entry snapshot: %+v", snap.Entries[0])
+	}
+}
+
 func TestFormatToolOutputPreservesNumberedPrefixes(t *testing.T) {
 	out := tools.FormatGenericOutput(json.RawMessage(`{"output":"  1\talpha\n  2\tbeta\n  3\tgamma","exit_code":0}`))
 	if !strings.Contains(out, "1\talpha") || !strings.Contains(out, "2\tbeta") || !strings.Contains(out, "3\tgamma") {

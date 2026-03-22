@@ -430,6 +430,13 @@ func reviewerSuggestionsText(suggestions []string) string {
 	return b.String()
 }
 
+func reviewerSuggestionsOngoingText(suggestions []string) string {
+	if len(suggestions) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Supervisor made %s.", reviewerSuggestionCountLabel(len(suggestions)))
+}
+
 func reviewerSuggestionCountLabel(count int) string {
 	if count <= 1 {
 		return "1 suggestion"

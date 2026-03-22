@@ -38,7 +38,7 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 			if err := json.Unmarshal(evt.Payload, &entry); err != nil {
 				return fmt.Errorf("decode local_entry event: %w", err)
 			}
-			e.chat.appendLocalEntry(entry.Role, entry.Text)
+			e.chat.appendLocalEntryWithOngoingText(entry.Role, entry.Text, entry.OngoingText)
 		case "history_replaced":
 			var payload historyReplacementPayload
 			if err := json.Unmarshal(evt.Payload, &payload); err != nil {

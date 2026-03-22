@@ -850,11 +850,14 @@ func TestCompactionNoticeAndSummaryRenderingByMode(t *testing.T) {
 func TestReviewerStatusRendersShortInOngoingAndFullInDetail(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "run task"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "reviewer_suggestions", Text: "Supervisor suggested:\n1. First\n2. Second"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "reviewer_suggestions", Text: "Supervisor suggested:\n1. First\n2. Second", OngoingText: "Supervisor made 2 suggestions."})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "reviewer_status", Text: "Supervisor ran: 2 suggestions, no changes applied."})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "done"})
 
 	ongoing := plainTranscript(m.View())
+	if !strings.Contains(ongoing, "Supervisor made 2 suggestions.") {
+		t.Fatalf("expected compact reviewer suggestions in ongoing view, got %q", ongoing)
+	}
 	if !strings.Contains(ongoing, "Supervisor ran: 2 suggestions, no changes applied.") {
 		t.Fatalf("expected short reviewer status in ongoing view, got %q", ongoing)
 	}
@@ -1543,6 +1546,46 @@ func TestRenderEntryTextSkipsHighlightWhenMuted(t *testing.T) {
 	out := m.renderEntryText("tool_shell_success", "cat main.go\npackage main\nfunc main() {}", 120, meta, true)
 	if strings.Contains(out, "\x1b[") {
 		t.Fatalf("expected muted tool text to skip syntax highlighting, got %q", out)
+	}
+}
+
+func TestFlattenEntryWithMetaKeepsMutedShellHighlightWhenMuted(t *testing.T) {
+	m := NewModel(WithTheme("dark"))
+	meta := &transcript.ToolCallMeta{
+		RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindShell},
+	}
+	command := "./gradlew -p apps/respawn detektFormat > docs/tmp/build-triage-2026-03-15/detektFormat.log 2>&1"
+
+	detail := m.renderEntryText("tool_shell_success", command, 120, meta, false)
+	ongoing := strings.Join(m.flattenEntryWithMeta("tool_shell_success", command, true, meta), "\n")
+
+	if !strings.Contains(detail, "\x1b[") {
+		t.Fatalf("expected detail shell command to remain highlighted, got %q", detail)
+	}
+	if !strings.Contains(ongoing, "\x1b[") {
+		t.Fatalf("expected ongoing shell command to keep muted highlighting, got %q", ongoing)
+	}
+	if !strings.Contains(ongoing, "\x1b[38;2;") {
+		t.Fatalf("expected ongoing shell command colors to be remapped to blended truecolor, got %q", ongoing)
+	}
+	if !strings.Contains(ansi.Strip(ongoing), command) {
+		t.Fatalf("expected ongoing shell command text preserved after muting, got %q", ansi.Strip(ongoing))
+	}
+	if strings.Contains(ongoing, "\x1b[38;5;255m./gradlew") {
+		t.Fatalf("expected ongoing shell command to replace original chroma foregrounds with muted ones, got %q", ongoing)
+	}
+}
+
+func TestMuteANSIForegroundReappliesMutedBaseAfterReset(t *testing.T) {
+	muted := muteANSIForeground("echo \x1b[38;5;81mfoo\x1b[0m bar", "dark")
+	if !strings.Contains(muted, "\x1b[38;2;") {
+		t.Fatalf("expected muted output to contain blended truecolor escape, got %q", muted)
+	}
+	if !strings.Contains(muted, "\x1b[0;38;2;127;132;142m bar") {
+		t.Fatalf("expected reset to restore muted base foreground, got %q", muted)
+	}
+	if got := ansi.Strip(muted); got != "echo foo bar" {
+		t.Fatalf("expected text preserved after muting, got %q", got)
 	}
 }
 

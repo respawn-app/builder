@@ -190,13 +190,17 @@ func (s *chatStore) clearOngoingError() {
 }
 
 func (s *chatStore) appendLocalEntry(role, text string) {
+	s.appendLocalEntryWithOngoingText(role, text, "")
+}
+
+func (s *chatStore) appendLocalEntryWithOngoingText(role, text, ongoingText string) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.local = append(s.local, localChatEntry{
-		Entry:             ChatEntry{Role: role, Text: text},
+		Entry:             ChatEntry{Role: role, Text: text, OngoingText: strings.TrimSpace(ongoingText)},
 		AfterMessageCount: len(s.messages),
 	})
 }
