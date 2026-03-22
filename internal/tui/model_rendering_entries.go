@@ -75,7 +75,13 @@ func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *
 			displayChunk = m.styleToolLine(displayChunk)
 		}
 		if muteText && strings.TrimSpace(displayChunk) != "" && !isEditedBlock {
-			displayChunk = m.palette().preview.Faint(true).Render(displayChunk)
+			if shouldUseLowLevelMutedShellStyle(role, text, toolMeta) {
+				if !strings.Contains(displayChunk, "\x1b[") {
+					displayChunk = m.palette().preview.Faint(true).Render(displayChunk)
+				}
+			} else {
+				displayChunk = m.palette().preview.Faint(true).Render(displayChunk)
+			}
 		} else if role == "reviewer_status" && isReviewerCacheHitLine(displayChunk) {
 			displayChunk = m.palette().preview.Faint(true).Render(displayChunk)
 		} else if isThinkingRole(role) {
@@ -223,31 +229,65 @@ func (m Model) renderEntryText(role, text string, width int, toolMeta *transcrip
 		return text
 	}
 	if isThinkingRole(role) {
-		return wrapTextForViewport(text, width)
+		return m.wrapRenderedEntryContent(text, width)
 	}
-	if !muteText {
-		if highlighted, ok := m.renderToolTextWithHighlight(role, text, width, toolMeta); ok {
-			return highlighted
-		}
+	if rendered, ok := m.renderEntryContent(role, text, toolMeta, muteText); ok {
+		return m.wrapRenderedEntryContent(rendered, width)
 	}
 	if !isMarkdownRole(role) {
-		return wrapTextForViewport(text, width)
+		return m.wrapRenderedEntryContent(text, width)
 	}
 	if m.md == nil {
-		return wrapTextForViewport(text, width)
+		return m.wrapRenderedEntryContent(text, width)
 	}
 	rendered, err := m.md.render(role, text, width)
 	if err != nil {
-		return wrapTextForViewport(text, width)
+		return m.wrapRenderedEntryContent(text, width)
 	}
 	return rendered
 }
 
-func (m Model) renderToolTextWithHighlight(role, text string, width int, toolMeta *transcript.ToolCallMeta) (string, bool) {
-	if !isToolHeadlineRole(role) || toolMeta == nil || !toolMeta.HasRenderHint() || m.code == nil {
+func (m Model) renderEntryContent(role, text string, toolMeta *transcript.ToolCallMeta, muteText bool) (string, bool) {
+	rendered, ok := m.renderToolTextWithHighlight(role, text, toolMeta)
+	if !ok {
 		return "", false
 	}
+	if muteText && shouldUseLowLevelMutedShellStyle(role, text, toolMeta) {
+		return m.applyLowLevelMutedShellStyle(rendered), true
+	}
+	if muteText {
+		return "", false
+	}
+	return rendered, true
+}
+
+func (m Model) applyLowLevelMutedShellStyle(text string) string {
+	return muteANSIOutput(text, m.palette().previewColor)
+}
+
+func (m Model) wrapRenderedEntryContent(text string, width int) string {
+	return wrapTextForViewport(text, width)
+}
+
+func shouldUseLowLevelMutedShellStyle(role, text string, toolMeta *transcript.ToolCallMeta) bool {
+	if !isShellPreviewRole(role) || toolMeta == nil || !toolMeta.HasRenderHint() {
+		return false
+	}
 	hint := toolMeta.RenderHint
+	if hint == nil {
+		return false
+	}
+	if hint.Kind == transcript.ToolRenderKindShell {
+		return true
+	}
+	return shouldFallbackToShellPreviewHint(role, text, toolMeta, hint)
+}
+
+func (m Model) renderToolTextWithHighlight(role, text string, toolMeta *transcript.ToolCallMeta) (string, bool) {
+	hint, ok := resolveToolRenderHint(role, text, toolMeta)
+	if !ok || m.code == nil {
+		return "", false
+	}
 	if hint.Kind == transcript.ToolRenderKindDiff {
 		return "", false
 	}
@@ -268,7 +308,29 @@ func (m Model) renderToolTextWithHighlight(role, text string, width int, toolMet
 	if prefix != "" {
 		rendered = prefix + "\n" + rendered
 	}
-	return wrapTextForViewport(rendered, width), true
+	return rendered, true
+}
+
+func resolveToolRenderHint(role, text string, toolMeta *transcript.ToolCallMeta) (*transcript.ToolRenderHint, bool) {
+	if !isToolHeadlineRole(role) || toolMeta == nil || !toolMeta.HasRenderHint() {
+		return nil, false
+	}
+	hint := toolMeta.RenderHint
+	if hint == nil {
+		return nil, false
+	}
+	if shouldFallbackToShellPreviewHint(role, text, toolMeta, hint) {
+		return &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindShell}, true
+	}
+	return hint, true
+}
+
+func shouldFallbackToShellPreviewHint(role, text string, toolMeta *transcript.ToolCallMeta, hint *transcript.ToolRenderHint) bool {
+	if hint == nil || !hint.ResultOnly || !isShellPreviewRole(role) || toolMeta == nil || !toolMeta.UsesShellRendering() {
+		return false
+	}
+	parts := strings.SplitN(text, "\n", 2)
+	return len(parts) < 2 || strings.TrimSpace(parts[1]) == ""
 }
 
 func wrapTextForViewport(text string, width int) string {

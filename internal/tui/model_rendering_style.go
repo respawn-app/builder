@@ -195,15 +195,16 @@ func (m Model) entryRole(entry TranscriptEntry) string {
 }
 
 type palette struct {
-	preview     lipgloss.Style
-	user        lipgloss.Style
-	model       lipgloss.Style
-	tool        lipgloss.Style
-	toolSuccess lipgloss.Style
-	toolError   lipgloss.Style
-	system      lipgloss.Style
-	error       lipgloss.Style
-	compaction  lipgloss.Style
+	preview      lipgloss.Style
+	previewColor rgbColor
+	user         lipgloss.Style
+	model        lipgloss.Style
+	tool         lipgloss.Style
+	toolSuccess  lipgloss.Style
+	toolError    lipgloss.Style
+	system       lipgloss.Style
+	error        lipgloss.Style
+	compaction   lipgloss.Style
 
 	diffAddBackgroundLight    string
 	diffRemoveBackgroundLight string
@@ -212,7 +213,10 @@ type palette struct {
 }
 
 func (m Model) palette() palette {
-	base := lipgloss.AdaptiveColor{Light: "#5C6370", Dark: "#7F848E"}
+	const previewLight = "#5C6370"
+	const previewDark = "#7F848E"
+	base := lipgloss.AdaptiveColor{Light: previewLight, Dark: previewDark}
+	previewColor := rgbColorFromHex(previewDark)
 	user := lipgloss.AdaptiveColor{Light: "#005CC5", Dark: "#61AFEF"}
 	model := lipgloss.AdaptiveColor{Light: "#22863A", Dark: "#98C379"}
 	tool := lipgloss.AdaptiveColor{Light: "#4078F2", Dark: "#61AFEF"}
@@ -222,24 +226,34 @@ func (m Model) palette() palette {
 	err := lipgloss.AdaptiveColor{Light: "#D73A49", Dark: "#E06C75"}
 	compaction := lipgloss.AdaptiveColor{Light: "#8A5A00", Dark: "#E5C07B"}
 	if m.theme == "light" {
-		base = lipgloss.AdaptiveColor{Light: "#5C6370", Dark: "#5C6370"}
+		base = lipgloss.AdaptiveColor{Light: previewLight, Dark: previewLight}
+		previewColor = rgbColorFromHex(previewLight)
 	}
 	return palette{
-		preview:     lipgloss.NewStyle().Foreground(base),
-		user:        lipgloss.NewStyle().Foreground(user),
-		model:       lipgloss.NewStyle().Foreground(model),
-		tool:        lipgloss.NewStyle().Foreground(tool),
-		toolSuccess: lipgloss.NewStyle().Foreground(toolSuccess),
-		toolError:   lipgloss.NewStyle().Foreground(toolError),
-		system:      lipgloss.NewStyle().Foreground(system).Faint(true),
-		error:       lipgloss.NewStyle().Foreground(err),
-		compaction:  lipgloss.NewStyle().Foreground(compaction),
+		preview:      lipgloss.NewStyle().Foreground(base),
+		previewColor: previewColor,
+		user:         lipgloss.NewStyle().Foreground(user),
+		model:        lipgloss.NewStyle().Foreground(model),
+		tool:         lipgloss.NewStyle().Foreground(tool),
+		toolSuccess:  lipgloss.NewStyle().Foreground(toolSuccess),
+		toolError:    lipgloss.NewStyle().Foreground(toolError),
+		system:       lipgloss.NewStyle().Foreground(system).Faint(true),
+		error:        lipgloss.NewStyle().Foreground(err),
+		compaction:   lipgloss.NewStyle().Foreground(compaction),
 
 		diffAddBackgroundLight:    "#E6FFED",
 		diffRemoveBackgroundLight: "#FFECEF",
 		diffAddBackgroundDark:     "#1F2A22",
 		diffRemoveBackgroundDark:  "#2B1F22",
 	}
+}
+
+func rgbColorFromHex(hex string) rgbColor {
+	r, g, b, ok := parseHexColor(hex)
+	if !ok {
+		return rgbColor{}
+	}
+	return rgbColor{r: r, g: g, b: b}
 }
 
 func normalizeTheme(theme string) string {
