@@ -11,6 +11,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+const statusHelpHint = "Alt + / for help"
+
 func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 	m := l.model
 	spin := renderStatusDot(m.theme, m.activity, m.spinnerFrame)
@@ -77,7 +79,7 @@ func (l uiViewLayout) renderStatusLineRight(width int, left string, style uiStyl
 	if len(segments) > 0 {
 		headerAvailable -= separatorWidth
 	}
-	prepend(l.renderReasoningStatusHeader(headerAvailable))
+	prepend(l.renderActivityStatus(headerAvailable, style))
 
 	noticeAvailable := available - used
 	if len(segments) > 0 {
@@ -98,13 +100,32 @@ func (l uiViewLayout) renderStatusNotice(available int) string {
 	return statusNoticeStyle(m.theme, m.transientStatusKind).Render(text)
 }
 
-func (l uiViewLayout) renderReasoningStatusHeader(available int) string {
-	text := strings.TrimSpace(l.model.reasoningStatusHeader)
-	if text == "" || available <= 0 {
+func (l uiViewLayout) renderActivityStatus(available int, style uiStyles) string {
+	if available <= 0 {
 		return ""
 	}
-	text = truncateQueuedMessageLine(text, available)
-	return statusNoticeStyle(l.model.theme, uiStatusNoticeNeutral).Render(text)
+	if text := strings.TrimSpace(l.model.reasoningStatusHeader); text != "" {
+		text = truncateQueuedMessageLine(text, available)
+		return statusNoticeStyle(l.model.theme, uiStatusNoticeNeutral).Render(text)
+	}
+	if strings.TrimSpace(l.model.transientStatus) != "" {
+		return ""
+	}
+	if !l.shouldRenderHelpHint() {
+		return ""
+	}
+	return style.meta.Render(truncateQueuedMessageLine(statusHelpHint, available))
+}
+
+func (l uiViewLayout) shouldRenderHelpHint() bool {
+	m := l.model
+	if !m.canShowHelp() || m.helpVisible {
+		return false
+	}
+	if m.busy || m.compacting || m.reviewerRunning {
+		return false
+	}
+	return m.activity == uiActivityIdle
 }
 
 func statusNoticeStyle(theme string, kind uiStatusNoticeKind) lipgloss.Style {
