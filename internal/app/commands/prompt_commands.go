@@ -2,12 +2,13 @@ package commands
 
 import "strings"
 
+const promptArgumentsPlaceholder = "$ARGUMENTS"
+
 type promptCommandSpec struct {
-	Name          string
-	Description   string
-	Prompt        string
-	AppendRawArgs bool
-	FreshSession  bool
+	Name         string
+	Description  string
+	Prompt       string
+	FreshSession bool
 }
 
 func registerPromptCommands(r *Registry, specs []promptCommandSpec) {
@@ -18,28 +19,30 @@ func registerPromptCommands(r *Registry, specs []promptCommandSpec) {
 		commandName := spec.Name
 		commandDescription := spec.Description
 		commandPrompt := spec.Prompt
-		appendRawArgs := spec.AppendRawArgs
 		freshSession := spec.FreshSession
 		r.Register(commandName, commandDescription, func(args string) Result {
 			return Result{
 				Handled:           true,
 				Action:            ActionNone,
 				SubmitUser:        true,
-				User:              buildPromptSubmission(commandPrompt, args, appendRawArgs),
+				User:              buildPromptSubmission(commandPrompt, args),
 				FreshConversation: freshSession,
 			}
 		})
 	}
 }
 
-func buildPromptSubmission(prompt, args string, appendRawArgs bool) string {
-	if !appendRawArgs {
-		return prompt
-	}
+func buildPromptSubmission(prompt, args string) string {
 	trimmedArgs := strings.TrimSpace(args)
+	if strings.Contains(prompt, promptArgumentsPlaceholder) {
+		return strings.ReplaceAll(prompt, promptArgumentsPlaceholder, trimmedArgs)
+	}
 	if trimmedArgs == "" {
 		return prompt
 	}
 	base := strings.TrimRight(prompt, "\n")
+	if base == "" {
+		return trimmedArgs
+	}
 	return base + "\n\n" + trimmedArgs
 }
