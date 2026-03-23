@@ -123,8 +123,7 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 		m.appendLocalEntry("error", detailErr)
 		m.logf("step.error err=%q", detailErr)
 		if len(m.queued) > 0 {
-			next := m.popQueued()
-			return m, c.startSubmission(next)
+			return c.flushQueuedInputs(queueDrainAuto)
 		}
 		m.syncViewport()
 		return m, nil
@@ -140,8 +139,7 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 	m.logf("step.done assistant_chars=%d", len(msg.message))
 	m.sawAssistantDelta = false
 	if len(m.queued) > 0 {
-		next := m.popQueued()
-		return m, c.startSubmission(next)
+		return c.flushQueuedInputs(queueDrainAuto)
 	}
 	m.syncViewport()
 	return m, nil
@@ -176,6 +174,9 @@ func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea
 
 	m.activity = uiActivityIdle
 	m.logf("compaction.done")
+	if len(m.queued) > 0 {
+		return c.flushQueuedInputs(queueDrainAuto)
+	}
 	m.syncViewport()
 	return m, nil
 }

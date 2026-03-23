@@ -53,7 +53,7 @@ func (m *uiModel) nativeReplayCmdForModeTransition(prev, next tui.Mode, forceFul
 	if prev != tui.ModeDetail || next != tui.ModeOngoing {
 		return nil
 	}
-	return m.emitCurrentNativeHistorySnapshot(forceFull)
+	return m.emitCurrentNativeScrollbackState(forceFull)
 }
 
 func sequenceCmds(cmds ...tea.Cmd) tea.Cmd {

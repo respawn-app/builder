@@ -69,19 +69,22 @@ func normalizeKeyMsgWithSource(msg tea.Msg) (tea.KeyMsg, bool, string) {
 	}
 }
 
-func isHelpKey(msg tea.KeyMsg) bool {
-	if msg.Type == keyTypeHelpCSI {
+func isHelpKey(msg tea.KeyMsg, model *uiModel) bool {
+	if msg.Type == tea.KeyF1 || msg.Type == keyTypeHelpCSI {
 		return true
 	}
-	if msg.Type != tea.KeyRunes || !msg.Alt || len(msg.Runes) != 1 {
+	if msg.Type != tea.KeyRunes || len(msg.Runes) != 1 {
 		return false
 	}
-	switch msg.Runes[0] {
-	case '?', '/':
-		return true
-	default:
-		return false
+	if msg.Alt {
+		switch msg.Runes[0] {
+		case '?', '/':
+			return true
+		default:
+			return false
+		}
 	}
+	return msg.Runes[0] == '?' && model != nil && model.canToggleHelpWithQuestionMark()
 }
 
 func isTranscriptToggleKey(msg tea.KeyMsg) bool {

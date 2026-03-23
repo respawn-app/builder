@@ -13,12 +13,16 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 	if !m.windowSizeKnown {
 		return nil
 	}
-	if len(m.transcriptEntries) == 0 {
-		m.resetNativeFormatterState()
-		return nil
-	}
-
 	committedEntries := nativeCommittedEntries(m.transcriptEntries)
+	if len(committedEntries) == 0 {
+		alreadyReplayed := m.nativeHistoryReplayed
+		m.resetNativeFormatterState()
+		m.nativeHistoryReplayed = true
+		if alreadyReplayed || !m.shouldEmitNativeHistory() {
+			return nil
+		}
+		return m.emitCurrentNativeScrollbackState(false)
+	}
 
 	if m.nativeFlushedEntryCount < 0 || m.nativeFlushedEntryCount > len(committedEntries) {
 		if m.nativeFormatterReady {
@@ -149,6 +153,35 @@ func (m *uiModel) rebaseNativeFormatterSnapshot() {
 	m.nativeFormatterEntries = cloneNativeEntries(committedEntries)
 	m.nativeFlushedEntryCount = len(committedEntries)
 	m.nativeHistoryReplayed = true
+}
+
+func (m *uiModel) emitCurrentNativeScrollbackState(forceFull bool) tea.Cmd {
+	if strings.TrimSpace(m.nativeFormatterSnapshot) != "" {
+		return m.emitCurrentNativeHistorySnapshot(forceFull)
+	}
+	return m.emitEmptyNativeScrollbackSpacer(forceFull)
+}
+
+func (m *uiModel) emitEmptyNativeScrollbackSpacer(forceFull bool) tea.Cmd {
+	spacer := m.nativeEmptyScrollbackSpacerText()
+	if spacer == "" {
+		if forceFull {
+			return tea.ClearScreen
+		}
+		return nil
+	}
+	flush := emitNativeHistoryFlush(spacer, true)
+	if !forceFull {
+		return flush
+	}
+	return tea.Sequence(tea.ClearScreen, flush)
+}
+
+func (m *uiModel) nativeEmptyScrollbackSpacerText() string {
+	if !m.windowSizeKnown || m.termHeight <= 0 {
+		return ""
+	}
+	return strings.Repeat("\n", m.termHeight)
 }
 
 func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool) tea.Cmd {
@@ -394,7 +427,7 @@ func (m *uiModel) emitNativeRenderedText(rendered string) tea.Cmd {
 	}
 	cmds := make([]tea.Cmd, 0, len(chunks))
 	for _, chunk := range chunks {
-		if cmd := emitNativeHistoryFlush(chunk); cmd != nil {
+		if cmd := emitNativeHistoryFlush(chunk, false); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	}
@@ -404,12 +437,15 @@ func (m *uiModel) emitNativeRenderedText(rendered string) tea.Cmd {
 	return tea.Sequence(cmds...)
 }
 
-func emitNativeHistoryFlush(text string) tea.Cmd {
-	if strings.TrimSpace(text) == "" {
+func emitNativeHistoryFlush(text string, allowBlank bool) tea.Cmd {
+	if text == "" {
+		return nil
+	}
+	if !allowBlank && strings.TrimSpace(text) == "" {
 		return nil
 	}
 	return func() tea.Msg {
-		return nativeHistoryFlushMsg{Text: text}
+		return nativeHistoryFlushMsg{Text: text, AllowBlank: allowBlank}
 	}
 }
 

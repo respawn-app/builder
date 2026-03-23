@@ -11,8 +11,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const statusHelpHint = "Alt + / for help"
-
 func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 	m := l.model
 	spin := renderStatusDot(m.theme, m.activity, m.spinnerFrame)
@@ -114,7 +112,7 @@ func (l uiViewLayout) renderActivityStatus(available int, style uiStyles) string
 	if !l.shouldRenderHelpHint() {
 		return ""
 	}
-	return style.meta.Render(truncateQueuedMessageLine(statusHelpHint, available))
+	return style.meta.Render(truncateQueuedMessageLine(l.model.statusHelpHint(), available))
 }
 
 func (l uiViewLayout) shouldRenderHelpHint() bool {
