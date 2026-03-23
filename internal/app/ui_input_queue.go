@@ -157,7 +157,7 @@ func (m *uiModel) discardQueuedText(text string) bool {
 	if needle == "" {
 		return false
 	}
-	for i := len(m.queued) - 1; i >= 0; i-- {
+	for i := 0; i < len(m.queued); i++ {
 		if strings.TrimSpace(m.queued[i]) != needle {
 			continue
 		}
