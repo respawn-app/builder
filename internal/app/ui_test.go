@@ -1633,8 +1633,8 @@ func TestPreSubmitCompactionQueuesPromptUntilCompactionCompletes(t *testing.T) {
 	if !updated.compacting {
 		t.Fatal("expected compaction state after pre-submit compaction decision")
 	}
-	if updated.pendingPreSubmitText != "" {
-		t.Fatalf("expected pending pre-submit text cleared once compaction starts, got %q", updated.pendingPreSubmitText)
+	if updated.pendingPreSubmitText != "continue" {
+		t.Fatalf("expected pending pre-submit text kept while compaction runs, got %q", updated.pendingPreSubmitText)
 	}
 
 	next, _ = updated.Update(compactDoneMsg{})
@@ -1797,11 +1797,70 @@ func TestPreSubmitCompactionFailureKeepsPromptOutOfHistory(t *testing.T) {
 	if updated.activity != uiActivityError {
 		t.Fatalf("expected error activity after compaction failure, got %v", updated.activity)
 	}
-	if len(updated.queued) != 1 || updated.queued[0] != "continue" {
-		t.Fatalf("expected prompt to remain queued after compaction failure, got %+v", updated.queued)
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected failed pre-submit prompt removed from queue, got %+v", updated.queued)
+	}
+	if updated.pendingPreSubmitText != "" {
+		t.Fatalf("expected pending pre-submit text cleared after compaction failure, got %q", updated.pendingPreSubmitText)
+	}
+	if updated.input != "continue" {
+		t.Fatalf("expected failed pre-submit prompt restored into input, got %q", updated.input)
 	}
 	if len(updated.promptHistory) != 0 {
 		t.Fatalf("expected compaction failure before submit start not to record prompt history, got %+v", updated.promptHistory)
+	}
+}
+
+func TestPreSubmitCheckErrorUnlocksInjectedInput(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, &runtimeAdapterFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "continue"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	updated.input = "later"
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if !updated.inputSubmitLocked {
+		t.Fatal("expected follow-up enter during pre-submit check to lock input")
+	}
+	if updated.lockedInjectText != "later" {
+		t.Fatalf("expected locked injected text recorded, got %q", updated.lockedInjectText)
+	}
+	if len(updated.pendingInjected) != 1 || updated.pendingInjected[0] != "later" {
+		t.Fatalf("expected pending injected follow-up recorded, got %+v", updated.pendingInjected)
+	}
+
+	next, _ = updated.Update(preSubmitCompactionCheckDoneMsg{
+		token: updated.preSubmitCheckToken,
+		text:  "continue",
+		err:   errors.New("pre-submit failed"),
+	})
+	updated = next.(*uiModel)
+	if updated.inputSubmitLocked {
+		t.Fatal("expected pre-submit check error to unlock input")
+	}
+	if updated.lockedInjectText != "" {
+		t.Fatalf("expected locked injected text cleared, got %q", updated.lockedInjectText)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected pending injected follow-up cleared, got %+v", updated.pendingInjected)
+	}
+	if updated.pendingPreSubmitText != "" {
+		t.Fatalf("expected pending pre-submit text cleared after error, got %q", updated.pendingPreSubmitText)
+	}
+	if updated.input != "later\n\ncontinue" {
+		t.Fatalf("expected restored prompt and unlocked follow-up draft, got %q", updated.input)
 	}
 }
 
