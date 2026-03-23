@@ -45,7 +45,7 @@ func defaultSettingsTOML() string {
 	out.WriteString("# Non-zero exits use verbose only when bg_shells_output=verbose; otherwise\n")
 	out.WriteString("# they fall back to default truncation.\n\n")
 	out.WriteString("# exec_command yield_time_ms values below minimum_exec_to_bg_seconds are\n")
-	out.WriteString("# clamped up and surfaced to the model as a warning before command output.\n\n")
+	out.WriteString("# clamped up silently before command execution continues.\n\n")
 	out.WriteString("# This JSON block mirrors current defaults for readability:\n")
 	out.WriteString("# ")
 	out.WriteString(strings.ReplaceAll(string(encoded), "\n", "\n# "))
