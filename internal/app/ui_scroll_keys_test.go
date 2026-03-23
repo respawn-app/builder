@@ -33,6 +33,102 @@ func TestPageKeysScrollTranscriptWhileInputFocused(t *testing.T) {
 	}
 }
 
+func TestDetailModeUpDownScrollTranscript(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 8
+	m.syncViewport()
+
+	for i := 0; i < 16; i++ {
+		m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("line %d", i)})
+	}
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+
+	initial := stripANSIAndTrimRight(m.view.View())
+	if initial == "" {
+		t.Fatal("expected detail transcript visible before scrolling")
+	}
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	afterUp := stripANSIAndTrimRight(m.view.View())
+	if afterUp == initial {
+		t.Fatal("expected detail transcript to change after up")
+	}
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	afterDown := stripANSIAndTrimRight(m.view.View())
+	if afterDown != initial {
+		t.Fatalf("expected detail transcript to return after down, got %q want %q", afterDown, initial)
+	}
+}
+
+func TestDetailModeMouseWheelScrollTranscript(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 8
+	m.syncViewport()
+
+	for i := 0; i < 16; i++ {
+		m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("line %d", i)})
+	}
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+
+	initial := stripANSIAndTrimRight(m.view.View())
+	if initial == "" {
+		t.Fatal("expected detail transcript visible before mouse scrolling")
+	}
+
+	m = updateUIModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	afterWheelUp := stripANSIAndTrimRight(m.view.View())
+	if afterWheelUp == initial {
+		t.Fatal("expected detail transcript to change after mouse wheel up")
+	}
+
+	m = updateUIModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+	afterWheelDown := stripANSIAndTrimRight(m.view.View())
+	if afterWheelDown != initial {
+		t.Fatalf("expected detail transcript to return after mouse wheel down, got %q want %q", afterWheelDown, initial)
+	}
+}
+
+func TestUpDownRouteByTranscriptMode(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIPromptHistory([]string{"hello"})).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 8
+	m.syncViewport()
+	for i := 0; i < 20; i++ {
+		m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("line %d", i)})
+	}
+
+	ongoingStart := m.view.OngoingScroll()
+	if ongoingStart == 0 {
+		t.Fatal("expected ongoing transcript to be scrollable")
+	}
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	if m.input != "hello" {
+		t.Fatalf("expected ongoing mode up to recall prompt history, got %q", m.input)
+	}
+	if got := m.view.OngoingScroll(); got != ongoingStart {
+		t.Fatalf("expected ongoing mode up not to scroll transcript, got %d from %d", got, ongoingStart)
+	}
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if m.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected detail mode, got %q", m.view.Mode())
+	}
+	initialDetail := stripANSIAndTrimRight(m.view.View())
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	afterDetailUp := stripANSIAndTrimRight(m.view.View())
+	if afterDetailUp == initialDetail {
+		t.Fatal("expected detail mode up to scroll transcript")
+	}
+	if m.input != "hello" {
+		t.Fatalf("expected detail mode scrolling not to mutate recalled input, got %q", m.input)
+	}
+}
+
 func TestMainInputUpDownAtBoundsStayInInput(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 80

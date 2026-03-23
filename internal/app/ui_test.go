@@ -1428,8 +1428,17 @@ func TestPromptHistoryUpCanEnterFromNewDraftAndRestoreItAfterReuse(t *testing.T)
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	updated := next.(*uiModel)
+	if updated.input != "world" {
+		t.Fatalf("expected first up from draft tail to stay on draft, got %q", updated.input)
+	}
+	if updated.inputCursor != 0 {
+		t.Fatalf("expected first up from draft tail to move cursor to start, got %d", updated.inputCursor)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated = next.(*uiModel)
 	if updated.input != "hello" {
-		t.Fatalf("expected up from new draft to recall history, got %q", updated.input)
+		t.Fatalf("expected second up from draft start to recall history, got %q", updated.input)
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyHome})
@@ -1447,6 +1456,41 @@ func TestPromptHistoryUpCanEnterFromNewDraftAndRestoreItAfterReuse(t *testing.T)
 	}
 	if cmd == nil {
 		t.Fatal("expected submission command")
+	}
+}
+
+func TestPromptHistoryUpFromMultilineDraftTailMovesWithinDraftBeforeRecall(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIPromptHistory([]string{"hello"}),
+	).(*uiModel)
+	m.input = "one\ntwo"
+	m.inputCursor = -1
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated := next.(*uiModel)
+	if updated.input != "one\ntwo" {
+		t.Fatalf("expected first up from multiline draft tail to stay on draft, got %q", updated.input)
+	}
+	if updated.inputCursor != 3 {
+		t.Fatalf("expected first up from multiline draft tail to move to previous line, got %d", updated.inputCursor)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated = next.(*uiModel)
+	if updated.input != "one\ntwo" {
+		t.Fatalf("expected second up within multiline draft to stay on draft, got %q", updated.input)
+	}
+	if updated.inputCursor != 0 {
+		t.Fatalf("expected second up within multiline draft to reach buffer start, got %d", updated.inputCursor)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated = next.(*uiModel)
+	if updated.input != "hello" {
+		t.Fatalf("expected third up from multiline draft start to recall history, got %q", updated.input)
 	}
 }
 

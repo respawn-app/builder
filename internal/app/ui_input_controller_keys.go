@@ -26,6 +26,13 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		next.(*uiModel).syncViewport()
 		return next, cmd
 	}
+	if m.view.Mode() == tui.ModeDetail {
+		switch msg.Type {
+		case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown:
+			m.forwardToView(tea.KeyMsg{Type: msg.Type})
+			return m, nil
+		}
+	}
 	if isQueueSubmissionKey(msg) {
 		text := strings.TrimSpace(m.input)
 		if text == "" {
