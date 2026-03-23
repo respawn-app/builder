@@ -35,7 +35,7 @@ func parseSlashCommandInput(input string) slashCommandInput {
 	if trimmed == "" || trimmed[0] != '/' {
 		return slashCommandInput{}
 	}
-	payload := trimmed[1:]
+	payload := strings.TrimLeftFunc(trimmed[1:], unicode.IsSpace)
 	if payload == "" {
 		return slashCommandInput{active: true}
 	}
