@@ -60,9 +60,6 @@ func compactReviewerStatusForOngoing(text string) string {
 	if trimmed == "" {
 		return ""
 	}
-	if strings.Contains(trimmed, " suggestions:\n1. ") || strings.Contains(trimmed, " suggestion:\n1. ") {
-		return trimmed
-	}
 	for _, line := range strings.Split(trimmed, "\n") {
 		candidate := strings.TrimSpace(line)
 		if candidate != "" {
@@ -73,7 +70,7 @@ func compactReviewerStatusForOngoing(text string) string {
 }
 
 func compactReviewerSuggestionsForOngoing(text string) string {
-	return compactReviewerStatusForOngoing(text)
+	return strings.TrimSpace(text)
 }
 
 func isReviewerCacheHitLine(text string) bool {

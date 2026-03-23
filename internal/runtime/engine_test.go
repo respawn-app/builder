@@ -2798,8 +2798,8 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 	for idx, entry := range snapshot.Entries {
 		if entry.Role == "reviewer_suggestions" && strings.Contains(entry.Text, "Supervisor suggested:") {
 			suggestionsIdx = idx
-			if entry.OngoingText != "Supervisor made 1 suggestion." {
-				t.Fatalf("expected compact reviewer suggestions ongoing text, got %+v", entry)
+			if entry.OngoingText != "Supervisor suggested:\n1. Add final verification notes." {
+				t.Fatalf("expected full reviewer suggestions ongoing text, got %+v", entry)
 			}
 		}
 		if entry.Role == "assistant" && strings.Contains(entry.Text, "updated final after review") {
@@ -2808,7 +2808,7 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 				followUpIdx = idx
 			}
 		}
-		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "Supervisor ran, applied 1 suggestion:") {
+		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "Supervisor ran: 1 suggestion, applied.") {
 			foundAppliedStatus = true
 		}
 	}
@@ -2836,8 +2836,8 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 			continue
 		}
 		foundRestoredSuggestions = true
-		if entry.OngoingText != "Supervisor made 1 suggestion." {
-			t.Fatalf("expected restored compact reviewer suggestions ongoing text, got %+v", entry)
+		if entry.OngoingText != "Supervisor suggested:\n1. Add final verification notes." {
+			t.Fatalf("expected restored full reviewer suggestions ongoing text, got %+v", entry)
 		}
 	}
 	if !foundRestoredSuggestions {
@@ -2897,16 +2897,7 @@ func TestReviewerDefaultOutputOmitsReviewerSuggestionsEntry(t *testing.T) {
 	}
 }
 
-func TestReviewerSuggestionsOngoingTextUsesLockedWording(t *testing.T) {
-	if got := reviewerSuggestionsOngoingText([]string{"one"}); got != "Supervisor made 1 suggestion." {
-		t.Fatalf("unexpected single-suggestion ongoing text: %q", got)
-	}
-	if got := reviewerSuggestionsOngoingText([]string{"one", "two"}); got != "Supervisor made 2 suggestions." {
-		t.Fatalf("unexpected multi-suggestion ongoing text: %q", got)
-	}
-}
-
-func TestReviewerVerboseOutputIncludesSuggestionsInFinalStatus(t *testing.T) {
+func TestReviewerVerboseOutputShowsSuggestionsWhenIssuedAndKeepsFinalStatusConcise(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -2949,18 +2940,21 @@ func TestReviewerVerboseOutputIncludesSuggestionsInFinalStatus(t *testing.T) {
 	}
 
 	snapshot := eng.ChatSnapshot()
-	foundVerboseStatus := false
+	foundVerboseSuggestions := false
+	foundConciseStatus := false
 	for _, entry := range snapshot.Entries {
-		if entry.Role != "reviewer_status" {
-			continue
+		if entry.Role == "reviewer_suggestions" && entry.OngoingText == "Supervisor suggested:\n1. Add final verification notes." {
+			foundVerboseSuggestions = true
 		}
-		if strings.Contains(entry.Text, "Supervisor ran, applied 1 suggestion:\n1. Add final verification notes.") {
-			foundVerboseStatus = true
-			break
+		if entry.Role == "reviewer_status" && entry.Text == "Supervisor ran: 1 suggestion, applied." {
+			foundConciseStatus = true
 		}
 	}
-	if !foundVerboseStatus {
-		t.Fatalf("expected verbose reviewer status entry in snapshot, got %+v", snapshot.Entries)
+	if !foundVerboseSuggestions {
+		t.Fatalf("expected verbose reviewer suggestions entry in snapshot, got %+v", snapshot.Entries)
+	}
+	if !foundConciseStatus {
+		t.Fatalf("expected concise reviewer status entry in snapshot, got %+v", snapshot.Entries)
 	}
 
 	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
@@ -2968,18 +2962,21 @@ func TestReviewerVerboseOutputIncludesSuggestionsInFinalStatus(t *testing.T) {
 		t.Fatalf("restore engine: %v", err)
 	}
 	restoredSnapshot := restored.ChatSnapshot()
-	foundRestoredVerboseStatus := false
+	foundRestoredVerboseSuggestions := false
+	foundRestoredConciseStatus := false
 	for _, entry := range restoredSnapshot.Entries {
-		if entry.Role != "reviewer_status" {
-			continue
+		if entry.Role == "reviewer_suggestions" && entry.OngoingText == "Supervisor suggested:\n1. Add final verification notes." {
+			foundRestoredVerboseSuggestions = true
 		}
-		if strings.Contains(entry.Text, "Supervisor ran, applied 1 suggestion:\n1. Add final verification notes.") {
-			foundRestoredVerboseStatus = true
-			break
+		if entry.Role == "reviewer_status" && entry.Text == "Supervisor ran: 1 suggestion, applied." {
+			foundRestoredConciseStatus = true
 		}
 	}
-	if !foundRestoredVerboseStatus {
-		t.Fatalf("expected restored verbose reviewer status entry, got %+v", restoredSnapshot.Entries)
+	if !foundRestoredVerboseSuggestions {
+		t.Fatalf("expected restored verbose reviewer suggestions entry, got %+v", restoredSnapshot.Entries)
+	}
+	if !foundRestoredConciseStatus {
+		t.Fatalf("expected restored concise reviewer status entry, got %+v", restoredSnapshot.Entries)
 	}
 }
 
@@ -3061,8 +3058,8 @@ func TestReviewerStatusTextIncludesReviewerCacheHitMetadata(t *testing.T) {
 		CacheHitPercent:       85,
 		HasCacheHitPercentage: true,
 	}, []string{"one", "two"})
-	if !strings.Contains(text, "Supervisor ran, applied 2 suggestions:\n1. one\n2. two") {
-		t.Fatalf("expected verbose reviewer status header and suggestions, got %q", text)
+	if strings.Contains(text, "Supervisor suggested:") || strings.Contains(text, "1. one") {
+		t.Fatalf("expected reviewer status text to stay concise even when suggestions are provided, got %q", text)
 	}
 	if !strings.Contains(text, "85% cache hit") {
 		t.Fatalf("expected reviewer cache hit metadata in reviewer status text, got %q", text)
@@ -3083,8 +3080,8 @@ func TestReviewerStatusTextIncludesReviewerCacheHitMetadata(t *testing.T) {
 		SuggestionsCount: 2,
 		Error:            "tool crashed",
 	}, []string{"one", "two"})
-	if !strings.Contains(text, "Supervisor ran, follow-up failed after 2 suggestions: tool crashed\n1. one\n2. two") {
-		t.Fatalf("expected verbose follow-up failure to include error and suggestions, got %q", text)
+	if text != "Supervisor ran: 2 suggestions, but follow-up failed: tool crashed" {
+		t.Fatalf("expected concise follow-up failure status, got %q", text)
 	}
 }
 

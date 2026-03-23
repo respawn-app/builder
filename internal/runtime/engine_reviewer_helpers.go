@@ -364,7 +364,7 @@ func formatReviewerDeveloperInstruction(suggestions []string) string {
 	return b.String()
 }
 
-func reviewerStatusText(status ReviewerStatus, suggestions []string) string {
+func reviewerStatusText(status ReviewerStatus, _ []string) string {
 	statusText := ""
 	switch strings.TrimSpace(status.Outcome) {
 	case "failed":
@@ -388,48 +388,10 @@ func reviewerStatusText(status ReviewerStatus, suggestions []string) string {
 	default:
 		statusText = "Supervisor ran."
 	}
-	if len(suggestions) == 0 {
-		if status.HasCacheHitPercentage {
-			return statusText + "\n\n" + fmt.Sprintf("%d%% cache hit", status.CacheHitPercent)
-		}
-		return statusText
-	}
-	header := reviewerVerboseStatusHeader(status)
-	if strings.TrimSpace(header) == "" {
-		header = statusText
-	}
-	b := strings.Builder{}
-	b.WriteString(header)
-	b.WriteString("\n")
-	for idx, suggestion := range suggestions {
-		b.WriteString(strconv.Itoa(idx + 1))
-		b.WriteString(". ")
-		b.WriteString(strings.TrimSpace(suggestion))
-		if idx < len(suggestions)-1 {
-			b.WriteString("\n")
-		}
-	}
 	if status.HasCacheHitPercentage {
-		b.WriteString("\n\n")
-		b.WriteString(fmt.Sprintf("%d%% cache hit", status.CacheHitPercent))
+		return statusText + "\n\n" + fmt.Sprintf("%d%% cache hit", status.CacheHitPercent)
 	}
-	return b.String()
-}
-
-func reviewerVerboseStatusHeader(status ReviewerStatus) string {
-	switch strings.TrimSpace(status.Outcome) {
-	case "noop":
-		return fmt.Sprintf("Supervisor ran, ignored %s:", reviewerSuggestionCountLabel(status.SuggestionsCount))
-	case "applied":
-		return fmt.Sprintf("Supervisor ran, applied %s:", reviewerSuggestionCountLabel(status.SuggestionsCount))
-	case "followup_failed":
-		if strings.TrimSpace(status.Error) != "" {
-			return fmt.Sprintf("Supervisor ran, follow-up failed after %s: %s", reviewerSuggestionCountLabel(status.SuggestionsCount), status.Error)
-		}
-		return fmt.Sprintf("Supervisor ran, follow-up failed after %s:", reviewerSuggestionCountLabel(status.SuggestionsCount))
-	default:
-		return ""
-	}
+	return statusText
 }
 
 func reviewerSuggestionsText(suggestions []string) string {
@@ -447,13 +409,6 @@ func reviewerSuggestionsText(suggestions []string) string {
 		}
 	}
 	return b.String()
-}
-
-func reviewerSuggestionsOngoingText(suggestions []string) string {
-	if len(suggestions) == 0 {
-		return ""
-	}
-	return fmt.Sprintf("Supervisor made %s.", reviewerSuggestionCountLabel(len(suggestions)))
 }
 
 func reviewerSuggestionCountLabel(count int) string {
