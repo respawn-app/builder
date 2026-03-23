@@ -127,6 +127,11 @@ class ${formula_class} < Formula
   url "$url"
   sha256 "$sha256"
   license "AGPL-3.0-only"
+
+  bottle do
+    root_url "https://ghcr.io/v2/respawn-app/tap"
+  end
+
   depends_on "go" => :build
 
   def install
@@ -144,7 +149,11 @@ perl -0pi -e "s|^class\s+\S+\s+< Formula$|class ${formula_class} < Formula|m" "$
 perl -0pi -e "s|^  url \".*\"|  url \"$url\"|m" "$formula_path"
 perl -0pi -e "s|^  sha256 \".*\"|  sha256 \"$sha256\"|m" "$formula_path"
 perl -0pi -e 's|^  version ".*"\n||m' "$formula_path"
-perl -0pi -e 's/^\s*bottle do\n(?:.*\n)*?\s*end\n\n//m' "$formula_path"
+perl -0pi -e 's/^\s*bottle do\n(?:.*\n)*?\s*end\n\n/  bottle do\n    root_url "https:\/\/ghcr.io\/v2\/respawn-app\/tap"\n  end\n\n/m' "$formula_path"
+
+if ! grep -q '^  bottle do$' "$formula_path"; then
+  perl -0pi -e 's|^  license ".*"$|$&\n\n  bottle do\n    root_url "https://ghcr.io/v2/respawn-app/tap"\n  end|m' "$formula_path"
+fi
 
 if [[ "$do_commit" == "true" ]]; then
   git -C "$tap_dir" add "$formula_path"
