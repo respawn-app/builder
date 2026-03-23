@@ -31,6 +31,14 @@ For code changes, run:
 ./scripts/ci-check.sh all
 ```
 
+For manual Go test runs outside the full check, use:
+
+```bash
+./scripts/test.sh ./...
+```
+
+This keeps successful runs silent while still printing the captured test log on failure.
+
 If you changed docs under `docs/`, also run:
 
 ```bash

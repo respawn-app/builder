@@ -43,7 +43,7 @@ run_build() {
 
 run_test() {
   echo "==> go test"
-  go test ./...
+  ./scripts/test.sh ./...
 }
 
 mode="${1:-all}"
