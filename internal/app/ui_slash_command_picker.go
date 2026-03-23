@@ -182,6 +182,13 @@ func (m *uiModel) resolveSlashCommandSelection(input string) slashCommandSelecti
 		selection.exact = true
 		return selection
 	}
+	exactCommandText := "/" + normalizeSlashCommandToken(parsed.token)
+	if command, ok := m.commandRegistry.Command(exactCommandText); ok {
+		selection.command = command
+		selection.hasCommand = true
+		selection.exact = true
+		return selection
+	}
 	matches := m.currentSlashCommandMatches(parsed.token)
 	if len(matches) == 0 {
 		return selection

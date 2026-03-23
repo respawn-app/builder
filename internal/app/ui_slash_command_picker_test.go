@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	"builder/internal/app/commands"
@@ -51,5 +52,63 @@ func TestBuiltInReviewSlashCommandWithWhitespaceAfterSlashDoesNotDuplicateArgs(t
 	}
 	if updated.nextSessionInitialPrompt != expected.User {
 		t.Fatalf("expected handoff payload to match normalized /review command output\nwant: %q\n got: %q", expected.User, updated.nextSessionInitialPrompt)
+	}
+}
+
+func TestBusyEnterRecognizesExactFastCommandEvenWhenPickerHidesIt(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "/fast on"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient status command for blocked busy /fast")
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected no queued messages, got %+v", updated.queued)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected no pending injected messages, got %+v", updated.pendingInjected)
+	}
+	if updated.inputSubmitLocked {
+		t.Fatal("did not expect locked input for blocked busy /fast")
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared for blocked busy /fast, got %q", updated.input)
+	}
+	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(status, "cannot run /fast while model is working") {
+		t.Fatalf("expected busy /fast error in status line, got %q", status)
+	}
+}
+
+func TestBusyTabBackWithoutParentShowsLocalErrorAndDoesNotQueue(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "/back"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient status command for rejected queued /back")
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected no queued messages, got %+v", updated.queued)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected no pending injected messages, got %+v", updated.pendingInjected)
+	}
+	if updated.input != "/back" {
+		t.Fatalf("expected input preserved for editing after rejected queued /back, got %q", updated.input)
+	}
+	if !strings.Contains(updated.transientStatus, "No parent session available") {
+		t.Fatalf("expected transient error for rejected queued /back, got %q", updated.transientStatus)
+	}
+	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(status, "No parent session available") {
+		t.Fatalf("expected queued /back error in status line, got %q", status)
 	}
 }
