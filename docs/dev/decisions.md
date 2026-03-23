@@ -245,9 +245,11 @@
 - Leading slash input enters command mode when first non-space char is `/`.
 - Picker matches only first token and updates continuously.
 - After whitespace, command enters argument mode and picker hides.
+- `Enter` runs the currently selected slash command, including the default first match for partial input.
+- `Tab` on a partial selected slash command autocompletes it and inserts a trailing space for arguments.
 - Unknown slash commands are sent to model as normal user prompts.
 - Built-in commands: `/logout`, `/exit`, `/new`, `/resume`, `/compact`, `/name`, `/thinking`, `/fast`, `/review`, `/init`, `/supervisor`, `/autocompaction`, `/ps`, `/back`.
-- Known slash commands are intercepted while model is running and never queued as user prompts.
+- Exact known slash commands use the normal queued-input drain path when queued, including fresh-session commands like `/review` and `/init`; they are never sent to the model as plain user prompts.
 - Run-safe commands execute immediately while busy.
 - Non-run-safe known commands while busy are rejected with transient status-line error.
 - `/review` starts fresh session and auto-submits embedded review rubric prompt; optional args are appended as review scope.

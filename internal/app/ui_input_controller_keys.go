@@ -1,7 +1,6 @@
 package app
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -34,6 +33,9 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if inputState.Mode == uiInputModeRollbackEdit && !inputState.Busy {
 			return c.startRollbackFork(text)
+		}
+		if handled, next, cmd := c.handleQueuedSlashCommandInput(text); handled {
+			return next, cmd
 		}
 		return c.queueOrStartSubmission(text)
 	}
@@ -99,25 +101,15 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		text := strings.TrimSpace(m.input)
 		if text == "" {
 			if !m.busy && len(m.queued) > 0 {
-				next := m.popQueued()
-				return m, c.startSubmission(next)
+				return c.flushQueuedInputs(queueDrainOne)
 			}
 			return m, nil
 		}
 		if inputState.Mode == uiInputModeRollbackEdit && !inputState.Busy {
 			return c.startRollbackFork(text)
 		}
-		if command, knownCommand := m.commandRegistry.Command(text); knownCommand {
-			if m.busy {
-				if !command.RunWhileBusy {
-					m.clearInput()
-					return m, c.showErrorStatus(fmt.Sprintf("cannot run /%s while model is working", command.Name))
-				}
-				if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
-					m.clearInput()
-					return c.applyCommandResult(commandResult)
-				}
-			}
+		if handled, next, cmd := c.handleEnteredSlashCommandInput(text); handled {
+			return next, cmd
 		}
 		_, isUserShell := parseUserShellCommand(text)
 		if m.busy {

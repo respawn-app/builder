@@ -48,8 +48,8 @@ func (m *uiModel) helpSections() []uiHelpSection {
 		{
 			Title: "Main Input",
 			Entries: []uiHelpEntry{
-				{Bindings: []string{"Enter"}, Description: "submit, run a slash command, or flush the next queued message", Active: uiHelpInMainInput},
-				{Bindings: []string{"Tab", "Ctrl + Enter"}, Description: "submit plain text immediately or queue it for post-turn send", Active: uiHelpInMainInput},
+				{Bindings: []string{"Enter"}, Description: "submit, run the selected slash command, or flush the next queued item", Active: uiHelpInMainInput},
+				{Bindings: []string{"Tab", "Ctrl + Enter"}, Description: "autocomplete a selected slash command, or queue/send the current input", Active: uiHelpInMainInput},
 				{Bindings: []string{"Shift + Enter", "Ctrl + J"}, Description: "insert a newline", Active: uiHelpInTextEditing},
 				{Bindings: deleteCurrentLineBindings(), Description: "delete the current input line", Active: uiHelpInTextEditing},
 				{Bindings: []string{"Alt + ←, →", "Ctrl + ←, →"}, Description: "move the cursor by word", Active: uiHelpInTextEditing},
