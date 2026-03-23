@@ -96,7 +96,7 @@ func TestAutoNotifierFallsBackToBELForWindowsTerminal(t *testing.T) {
 
 func TestBellHooksRingOnAskRequests(t *testing.T) {
 	ringer := &countRinger{}
-	hooks := newBellHooks(ringer)
+	hooks := newBellHooks(ringer, nil)
 
 	hooks.OnAsk(askquestion.Request{Question: "question"})
 	hooks.OnAsk(askquestion.Request{Question: "approval", Approval: true})
@@ -104,11 +104,25 @@ func TestBellHooksRingOnAskRequests(t *testing.T) {
 	if got := ringer.Count(); got != 2 {
 		t.Fatalf("ring count = %d, want 2", got)
 	}
+	if got := ringer.Last(); got != "builder: Action required: approval" {
+		t.Fatalf("last message = %q, want %q", got, "builder: Action required: approval")
+	}
+}
+
+func TestBellHooksUseSessionNameAndQuestionTextForAskNotifications(t *testing.T) {
+	ringer := &countRinger{}
+	hooks := newBellHooks(ringer, func() string { return "incident triage" })
+
+	hooks.OnAsk(askquestion.Request{Question: "Which rollback strategy should I use?"})
+
+	if got := ringer.Last(); got != "incident triage: Question: Which rollback strategy should I use?" {
+		t.Fatalf("last message = %q, want %q", got, "incident triage: Question: Which rollback strategy should I use?")
+	}
 }
 
 func TestBellHooksRingOnToolHeavyTurnEnd(t *testing.T) {
 	ringer := &countRinger{}
-	hooks := newBellHooks(ringer)
+	hooks := newBellHooks(ringer, nil)
 
 	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1"})
 	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, StepID: "step-1"})
@@ -122,8 +136,8 @@ func TestBellHooksRingOnToolHeavyTurnEnd(t *testing.T) {
 	if got := ringer.Count(); got != 1 {
 		t.Fatalf("ring count = %d after two tool call turn, want 1", got)
 	}
-	if got := ringer.Last(); got != "Builder: turn complete" {
-		t.Fatalf("last message = %q, want %q", got, "Builder: turn complete")
+	if got := ringer.Last(); got != "builder: turn complete" {
+		t.Fatalf("last message = %q, want %q", got, "builder: turn complete")
 	}
 
 	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, StepID: "step-2"})
@@ -134,27 +148,27 @@ func TestBellHooksRingOnToolHeavyTurnEnd(t *testing.T) {
 
 func TestBellHooksIncludeAssistantPreviewInTurnCompleteNotification(t *testing.T) {
 	ringer := &countRinger{}
-	hooks := newBellHooks(ringer)
+	hooks := newBellHooks(ringer, nil)
 
 	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1"})
 	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1"})
 	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, StepID: "step-1", Message: llm.Message{Content: "  First line\n\nSecond line with details  "}})
 
-	if got := ringer.Last(); got != "Builder: First line Second line with details" {
-		t.Fatalf("last message = %q, want %q", got, "Builder: First line Second line with details")
+	if got := ringer.Last(); got != "builder: First line Second line with details" {
+		t.Fatalf("last message = %q, want %q", got, "builder: First line Second line with details")
 	}
 }
 
 func TestBellHooksFallbackToTurnCompleteForWhitespacePreview(t *testing.T) {
 	ringer := &countRinger{}
-	hooks := newBellHooks(ringer)
+	hooks := newBellHooks(ringer, nil)
 
 	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1"})
 	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1"})
 	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, StepID: "step-1", Message: llm.Message{Content: "\n\t  "}})
 
-	if got := ringer.Last(); got != "Builder: turn complete" {
-		t.Fatalf("last message = %q, want %q", got, "Builder: turn complete")
+	if got := ringer.Last(); got != "builder: turn complete" {
+		t.Fatalf("last message = %q, want %q", got, "builder: turn complete")
 	}
 }
 
@@ -184,7 +198,7 @@ func TestFormatAssistantPreview(t *testing.T) {
 
 func TestBellHooksIgnoresMismatchedTurnEndStep(t *testing.T) {
 	ringer := &countRinger{}
-	hooks := newBellHooks(ringer)
+	hooks := newBellHooks(ringer, nil)
 
 	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1"})
 	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1"})

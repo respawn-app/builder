@@ -271,7 +271,8 @@
 - Ring terminal bell when a new `ask_question` is shown.
 - Ring on turn end only if the turn executed at least two tool calls.
 - Turn-end ringing is keyed by runtime step id and `tool_call_started`/`assistant_message` events.
-- Turn-end notification text includes assistant response preview when available, else `Builder: turn complete`.
+- Turn-end notification text includes assistant response preview when available, else `<session title>: turn complete` with `builder` as the fallback title.
+- Ask notifications include the ask text as `<session title>: Question: <question>` or `<session title>: Action required: <question>`.
 - `auto` notification method prefers OSC 9 on supported terminals and falls back to BEL.
 - OSC 9 notifications still emit a separate BEL so supported terminals get both notification and audible bell.
 - OSC 9 is disabled when `WT_SESSION` is set.
