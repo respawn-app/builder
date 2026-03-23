@@ -271,6 +271,13 @@ func (l uiViewLayout) computeNativeLiveRegionState() nativeLiveRegionState {
 	}
 	streamingActiveNow := strings.TrimSpace(m.view.OngoingStreamingText()) != "" || strings.TrimSpace(m.view.OngoingErrorText()) != ""
 	current := l.nativeOngoingLineCount()
+	if len(nativeCommittedEntries(m.transcriptEntries)) == 0 {
+		pad := l.effectiveHeight() - current
+		if pad < 0 {
+			pad = 0
+		}
+		return nativeLiveRegionState{pad: pad, lines: current + pad, streamingActive: streamingActiveNow}
+	}
 	if !streamingActiveNow {
 		return nativeLiveRegionState{lines: current}
 	}
