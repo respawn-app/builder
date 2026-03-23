@@ -172,9 +172,12 @@
 ## Context Management And Compaction
 
 - Auto-compaction is enabled near context limits.
+- Builder may compact before sending the next user prompt when current context usage is already within a configurable lead band of the normal compaction threshold; in that case the prompt is queued, compaction runs first, and the queued prompt is submitted immediately after compaction completes.
+- Pre-submit compaction lead uses `threshold - min(model_context_window - threshold, pre_submit_compaction_lead_tokens)`, with `pre_submit_compaction_lead_tokens` defaulting to `15000`.
 - Auto-compaction failure aborts the current turn.
 - `compaction_mode=none` disables manual and automatic compaction.
 - Manual compaction is available via `/compact` while idle; optional arguments are appended as compaction guidance.
+- Successful manual `/compact` appends a hidden developer carryover message containing the last visible user prompt so the post-compaction model context still knows what the user most recently asked for.
 - Local compaction instructions are injected as final `developer` message.
 - Local compaction summary generation reads full provider history from latest compaction checkpoint onward (or from start if none).
 - Local compaction summary generation keeps tool declarations for request shape/cache stability but runtime rejects any returned tool calls.

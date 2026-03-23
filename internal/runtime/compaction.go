@@ -19,11 +19,14 @@ const (
 	compactionModeAuto   compactionMode = "auto"
 	compactionModeManual compactionMode = "manual"
 
-	defaultContextWindowTokens = 200_000
-	compactOverflowRetries     = 2
-	autoCompactNearLimitMargin = 8_000
+	defaultContextWindowTokens           = 200_000
+	compactOverflowRetries               = 2
+	autoCompactNearLimitMargin           = 8_000
+	defaultPreSubmitCompactionLeadTokens = 15_000
+	manualCompactionCarryoverMaxChars    = 4_000
 
 	additionalCompactionInstructionsHeader = "# Additional user instructions or commentary for this task:"
+	manualCompactionCarryoverHeader        = "# Last user message before manual compaction"
 )
 
 var errRemoteCompactionMissingCheckpoint = errors.New("remote compaction output missing checkpoint item")
@@ -38,6 +41,14 @@ type compactionResult struct {
 }
 
 func (e *Engine) CompactContext(ctx context.Context, args string) (err error) {
+	return e.compactContext(ctx, compactionModeManual, args, true)
+}
+
+func (e *Engine) CompactContextForPreSubmit(ctx context.Context) (err error) {
+	return e.compactContext(ctx, compactionModeManual, "", false)
+}
+
+func (e *Engine) compactContext(ctx context.Context, mode compactionMode, args string, includeManualCarryover bool) (err error) {
 	e.mu.Lock()
 	if e.busy {
 		e.mu.Unlock()
@@ -68,7 +79,7 @@ func (e *Engine) CompactContext(ctx context.Context, args string) (err error) {
 	if err = e.injectAgentsIfNeeded(stepID); err != nil {
 		return err
 	}
-	_, err = e.compactNow(stepCtx, stepID, compactionModeManual, args)
+	_, err = e.compactNow(stepCtx, stepID, mode, args, includeManualCarryover)
 	return err
 }
 
@@ -76,7 +87,7 @@ func (e *Engine) autoCompactIfNeeded(ctx context.Context, stepID string, mode co
 	if mode == compactionModeAuto && !e.shouldAutoCompactWithContext(ctx) {
 		return nil
 	}
-	_, err := e.compactNow(ctx, stepID, mode, "")
+	_, err := e.compactNow(ctx, stepID, mode, "", false)
 	if err != nil && mode == compactionModeAuto {
 		return fmt.Errorf("auto compaction failed: %w", err)
 	}
@@ -120,12 +131,78 @@ func (e *Engine) autoCompactTokenLimit(ctx context.Context) int {
 	if e.cfg.AutoCompactTokenLimit > 0 {
 		return e.cfg.AutoCompactTokenLimit
 	}
-	window := e.resolveContextWindowTokens(ctx)
-	limit := int(float64(window) * 0.90)
+	limit := e.effectiveContextTokenLimit()
 	if limit < 1 {
 		return 1
 	}
 	return limit
+}
+
+func (e *Engine) preSubmitCompactionLeadTokens() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.cfg.PreSubmitCompactionLeadTokens > 0 {
+		return e.cfg.PreSubmitCompactionLeadTokens
+	}
+	return defaultPreSubmitCompactionLeadTokens
+}
+
+func (e *Engine) preSubmitCompactionTokenLimit(ctx context.Context) int {
+	limit := e.autoCompactTokenLimit(ctx)
+	if limit <= 0 {
+		return 0
+	}
+	window := e.resolveContextWindowTokens(ctx)
+	if window <= 0 {
+		return limit
+	}
+	lead := window - limit
+	if lead < 0 {
+		lead = 0
+	}
+	leadCap := e.preSubmitCompactionLeadTokens()
+	if lead > leadCap {
+		lead = leadCap
+	}
+	threshold := limit - lead
+	if threshold < 1 {
+		return 1
+	}
+	return threshold
+}
+
+func (e *Engine) ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error) {
+	if strings.TrimSpace(text) == "" {
+		return false, nil
+	}
+	if !e.AutoCompactionEnabled() || e.compactionMode() == "none" {
+		return false, nil
+	}
+	limit := e.autoCompactTokenLimit(ctx)
+	if limit <= 0 {
+		return false, nil
+	}
+	reservedOutput := e.reservedOutputTokens()
+	preSubmitLimit := e.preSubmitCompactionTokenLimit(ctx)
+	estimatedCurrentTotal := e.currentTokenUsage() + reservedOutput
+	if preSubmitLimit > 0 && estimatedCurrentTotal >= preSubmitLimit {
+		if preciseInput, ok := e.currentInputTokensPrecisely(ctx); ok {
+			return preciseInput+reservedOutput >= preSubmitLimit, nil
+		}
+		return true, nil
+	}
+	promptEstimate := estimateItemsTokens(llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: text}}))
+	if estimatedCurrentTotal+promptEstimate < limit {
+		return false, nil
+	}
+	req, err := e.buildRequestWithExtraMessages(ctx, []llm.Message{{Role: llm.RoleUser, Content: text}}, true)
+	if err != nil {
+		return false, err
+	}
+	if preciseInput, ok := e.requestInputTokensPrecisely(ctx, req); ok {
+		return preciseInput+reservedOutput >= limit, nil
+	}
+	return estimatedCurrentTotal+promptEstimate >= limit, nil
 }
 
 func (e *Engine) resolveContextWindowTokens(ctx context.Context) int {
@@ -290,7 +367,7 @@ func (e *Engine) currentTokenUsage() int {
 	return usageTotal
 }
 
-func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionMode, args string) (compactionResult, error) {
+func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionMode, args string, includeManualCarryover bool) (compactionResult, error) {
 	if e.compactionMode() == "none" {
 		if mode == compactionModeAuto {
 			return compactionResult{}, nil
@@ -319,6 +396,10 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 	}
 
 	instructions := compactionInstructions(args)
+	manualCarryover := ""
+	if mode == compactionModeManual && includeManualCarryover {
+		manualCarryover = e.lastVisibleUserMessage()
+	}
 	var result compactionResult
 	if e.compactionMode() == "native" && caps.SupportsResponsesCompact {
 		result, err = e.compactRemote(ctx, input, providerID, instructions)
@@ -342,6 +423,14 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 	if err := e.replaceHistory(stepID, result.engine, mode, result.items); err != nil {
 		_ = e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
 		return compactionResult{}, err
+	}
+	if mode == compactionModeManual {
+		if carryover := manualCompactionCarryoverMessage(manualCarryover); strings.TrimSpace(carryover.Content) != "" {
+			if err := e.appendMessage(stepID, carryover); err != nil {
+				_ = e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
+				return compactionResult{}, err
+			}
+		}
 	}
 	compactionNumber := e.nextCompactionCount()
 	if strings.TrimSpace(result.summary) != "" {
@@ -565,6 +654,50 @@ func isCompactionBoundaryItem(item llm.ResponseItem) bool {
 		return strings.HasPrefix(strings.TrimSpace(item.Content), prompts.CompactionSummaryPrefix)
 	}
 	return false
+}
+
+func (e *Engine) lastVisibleUserMessage() string {
+	messages := e.snapshotMessages()
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role != llm.RoleUser {
+			continue
+		}
+		content := strings.TrimSpace(msg.Content)
+		if content == "" || strings.HasPrefix(content, prompts.CompactionSummaryPrefix+"\n") {
+			continue
+		}
+		return msg.Content
+	}
+	return ""
+}
+
+func manualCompactionCarryoverMessage(text string) llm.Message {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return llm.Message{}
+	}
+	content := trimCompactionCarryoverText(trimmed, manualCompactionCarryoverMaxChars)
+	return llm.Message{
+		Role:        llm.RoleDeveloper,
+		MessageType: llm.MessageTypeManualCompactionCarryover,
+		Content:     manualCompactionCarryoverHeader + "\n\n" + content,
+	}
+}
+
+func trimCompactionCarryoverText(text string, maxChars int) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" || maxChars <= 0 {
+		return trimmed
+	}
+	runes := []rune(trimmed)
+	if len(runes) <= maxChars {
+		return trimmed
+	}
+	if maxChars < 4 {
+		return string(runes[:maxChars])
+	}
+	return string(runes[:maxChars-4]) + "\n..."
 }
 
 func (e *Engine) compactionMode() string {

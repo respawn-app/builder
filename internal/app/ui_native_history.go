@@ -190,23 +190,32 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool) tea.Cmd {
 		m.nativeRenderedSnapshot = ""
 		return nil
 	}
-	if !forceFull && m.nativeRenderedSnapshot != "" {
-		if strings.HasPrefix(rawSnapshot, m.nativeRenderedSnapshot) {
-			delta := rawSnapshot[len(m.nativeRenderedSnapshot):]
-			m.nativeRenderedSnapshot = rawSnapshot
-			if len(delta) == 0 {
-				return nil
-			}
-			return m.emitNativeRenderedText(styleNativeReplayDividers(delta, m.theme, m.nativeFormatterWidth))
-		}
-		forceFull = true
-	}
-	m.nativeRenderedSnapshot = rawSnapshot
+	previousRawSnapshot := m.nativeRenderedSnapshot
 	styled := styleNativeReplayDividers(rawSnapshot, m.theme, m.nativeFormatterWidth)
 	if strings.TrimSpace(styled) == "" {
+		m.nativeRenderedSnapshot = rawSnapshot
 		return nil
 	}
-	if forceFull && strings.TrimSpace(m.nativeRenderedSnapshot) != "" {
+	if !forceFull && m.nativeRenderedSnapshot != "" {
+		if strings.HasPrefix(rawSnapshot, m.nativeRenderedSnapshot) {
+			previousStyled := styleNativeReplayDividers(previousRawSnapshot, m.theme, m.nativeFormatterWidth)
+			m.nativeRenderedSnapshot = rawSnapshot
+			if !strings.HasPrefix(styled, previousStyled) {
+				forceFull = true
+			} else {
+				delta := styled[len(previousStyled):]
+				delta = strings.TrimPrefix(delta, "\n")
+				if len(delta) == 0 {
+					return nil
+				}
+				return m.emitNativeRenderedText(delta)
+			}
+		} else {
+			forceFull = true
+		}
+	}
+	m.nativeRenderedSnapshot = rawSnapshot
+	if forceFull && strings.TrimSpace(previousRawSnapshot) != "" {
 		return tea.Sequence(tea.ClearScreen, m.emitNativeRenderedText(styled))
 	}
 	return m.emitNativeRenderedText(styled)
@@ -421,6 +430,9 @@ func nativePatchRenderEqual(left *patchformat.RenderedPatch, right *patchformat.
 }
 
 func (m *uiModel) emitNativeRenderedText(rendered string) tea.Cmd {
+	if len(rendered) <= 64*1024 {
+		return emitNativeHistoryFlush(rendered, false)
+	}
 	chunks := splitNativeScrollbackChunks(rendered, 64*1024)
 	if len(chunks) == 0 {
 		return nil
@@ -433,6 +445,9 @@ func (m *uiModel) emitNativeRenderedText(rendered string) tea.Cmd {
 	}
 	if len(cmds) == 0 {
 		return nil
+	}
+	if len(cmds) == 1 {
+		return cmds[0]
 	}
 	return tea.Sequence(cmds...)
 }
