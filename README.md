@@ -6,7 +6,7 @@ Builder is a highly opinionated, minimal terminal coding agent for professional 
 
 ```bash
 brew tap respawn-app/tap
-brew install builder
+brew install builder-cli
 ```
 
 ### Standalone binaries via GitHub Releases
