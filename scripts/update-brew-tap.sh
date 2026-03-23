@@ -5,12 +5,12 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/update-brew-tap.sh [--version vX.Y.Z] [--tap /path/to/homebrew-tap] [--repo owner/name] [--formula name] [--commit] [--push]
 
-Updates the Homebrew tap formula for builder with a new tag tarball + sha256.
+Updates the Homebrew tap formula for builder-cli with a new tag tarball + sha256.
 
 Defaults:
   --version : $BUILDER_VERSION, $GITHUB_REF_NAME, or latest git tag in this repo
   --repo    : respawn-app/agent
-  --formula : builder
+  --formula : builder-cli
   --tap     : $BUILDER_TAP_PATH, $HOMEBREW_TAP_PATH, else ../homebrew-tap (relative to repo root)
 
 Flags:
@@ -21,7 +21,7 @@ USAGE
 
 version=""
 repo="respawn-app/agent"
-formula="builder"
+formula="builder-cli"
 tap_dir=""
 do_commit="false"
 do_push="false"
@@ -97,6 +97,7 @@ if [[ -z "$tap_dir" ]]; then
 fi
 
 formula_path="$tap_dir/Formula/${formula}.rb"
+formula_class="$(printf '%s\n' "$formula" | awk -F'[-_]' '{for (i = 1; i <= NF; i++) if ($i != "") printf toupper(substr($i, 1, 1)) substr($i, 2)}')"
 url="https://github.com/${repo}/archive/refs/tags/${version}.tar.gz"
 
 tmp_file="$(mktemp)"
@@ -120,7 +121,7 @@ fi
 if [[ ! -f "$formula_path" ]]; then
   mkdir -p "$(dirname "$formula_path")"
   cat > "$formula_path" <<EOF
-class Builder < Formula
+class ${formula_class} < Formula
   desc "Minimal terminal coding agent for professional engineering workflows"
   homepage "https://github.com/respawn-app/agent"
   url "$url"
@@ -140,6 +141,7 @@ end
 EOF
 fi
 
+perl -0pi -e "s|^class\s+\S+\s+< Formula$|class ${formula_class} < Formula|m" "$formula_path"
 perl -0pi -e "s|^  url \".*\"|  url \"$url\"|m" "$formula_path"
 perl -0pi -e "s|^  version \".*\"|  version \"${version#v}\"|m" "$formula_path"
 perl -0pi -e "s|^  sha256 \".*\"|  sha256 \"$sha256\"|m" "$formula_path"
