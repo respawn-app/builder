@@ -18,8 +18,8 @@ description: Available slash commands, how their input is parsed, and how file-b
 | <code>/autocompaction [on&#124;off]</code> | optional single value | Toggle auto-compaction. |
 | <code>/ps [kill&#124;inline&#124;logs] &lt;id&gt;</code> | optional action + id | Open the background-process picker, or manage a specific background shell. |
 | `/back` | none | Open the parent session when the current session was spawned from one. |
-| `/review <what to review>` | optional free-form text | Start a fresh review session using the built-in review prompt. Trailing text is appended to the prompt body. |
-| `/init <instructions>` | optional free-form text | Start a fresh initialization session using the built-in init prompt. Trailing text is appended to the prompt body. |
+| `/review <what to review>` | optional free-form text | Use the built-in review prompt. In an empty session it submits in place; otherwise it starts a fresh child review session. Trailing text is appended to the prompt body. |
+| `/init <instructions>` | optional free-form text | Use the built-in init prompt. In an empty session it submits in place; otherwise it starts a fresh child initialization session. Trailing text is appended to the prompt body. |
 | `/prompt:<name>` | optional free-form text | Run a custom Markdown prompt discovered from disk. |
 
 ## Input Behavior

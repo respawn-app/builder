@@ -9,6 +9,7 @@ import (
 	"builder/internal/app/commands"
 	"builder/internal/config"
 	"builder/internal/runtime"
+	"builder/internal/session"
 	"builder/internal/tools/askquestion"
 	shelltool "builder/internal/tools/shell"
 	"builder/internal/tui"
@@ -164,6 +165,12 @@ func WithUIFastModeEnabled(enabled bool) UIOption {
 	}
 }
 
+func WithUIConversationFreshness(freshness session.ConversationFreshness) UIOption {
+	return func(m *uiModel) {
+		m.conversationFreshness = freshness
+	}
+}
+
 func WithUIModelContractLocked(locked bool) UIOption {
 	return func(m *uiModel) {
 		m.modelContractLocked = locked
@@ -270,6 +277,7 @@ type uiModel struct {
 	reviewerEnabled          bool
 	reviewerMode             string
 	autoCompactionEnabled    bool
+	conversationFreshness    session.ConversationFreshness
 
 	queued               []string
 	preSubmitCheckToken  uint64
@@ -396,6 +404,7 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 		debugKeys:                envFlagEnabled("BUILDER_DEBUG_KEYS"),
 		reviewerMode:             "off",
 		autoCompactionEnabled:    true,
+		conversationFreshness:    session.ConversationFreshnessFresh,
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -406,6 +415,7 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 		m.autoCompactionEnabled = m.engine.AutoCompactionEnabled()
 		m.fastModeAvailable = m.engine.FastModeAvailable()
 		m.fastModeEnabled = m.engine.FastModeEnabled()
+		m.conversationFreshness = m.engine.ConversationFreshness()
 	} else {
 		m.reviewerEnabled = strings.TrimSpace(m.reviewerMode) != "" && strings.TrimSpace(m.reviewerMode) != "off"
 	}

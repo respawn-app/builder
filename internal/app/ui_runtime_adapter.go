@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"builder/internal/runtime"
+	"builder/internal/session"
 	"builder/internal/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -84,6 +85,7 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 
 func (a uiRuntimeAdapter) onUserMessageFlushed(text string) bool {
 	m := a.model
+	m.conversationFreshness = session.ConversationFreshnessEstablished
 	shouldRecordHistory := false
 	for i, pending := range m.pendingInjected {
 		if strings.TrimSpace(pending) != strings.TrimSpace(text) {
@@ -108,6 +110,7 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 	if m.engine == nil {
 		return nil
 	}
+	m.conversationFreshness = m.engine.ConversationFreshness()
 	return a.applyChatSnapshot(m.engine.ChatSnapshot())
 }
 

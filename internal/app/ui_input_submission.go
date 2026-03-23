@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"builder/internal/session"
 	"builder/internal/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -23,6 +24,7 @@ func (c uiInputController) startSubmission(text string) tea.Cmd {
 		if isUserShell {
 			m.forwardToView(tui.AppendTranscriptMsg{Role: "tool_call", Text: command})
 		} else {
+			m.conversationFreshness = session.ConversationFreshnessEstablished
 			m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: text})
 		}
 	}
