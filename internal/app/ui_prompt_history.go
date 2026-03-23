@@ -43,6 +43,10 @@ func (m *uiModel) resetPromptHistoryNavigation() {
 	m.promptHistoryDraftCursor = -1
 }
 
+func (m *uiModel) clearPromptHistorySelection() {
+	m.promptHistorySelection = -1
+}
+
 func (m *uiModel) promptHistorySelectionActive() bool {
 	return m.promptHistorySelection >= 0 && m.promptHistorySelection < len(m.promptHistory)
 }
@@ -62,12 +66,16 @@ func (m *uiModel) promptHistorySelectionMatchesInput() bool {
 	return m.input == selected
 }
 
+func (m *uiModel) inputCursorAtBoundary() bool {
+	cursor := m.cursorIndex()
+	return cursor == 0 || cursor == len([]rune(m.input))
+}
+
 func (m *uiModel) promptHistoryCursorAtBoundary() bool {
 	if !m.promptHistorySelectionMatchesInput() {
 		return false
 	}
-	cursor := m.cursorIndex()
-	return cursor == 0 || cursor == len([]rune(m.input))
+	return m.inputCursorAtBoundary()
 }
 
 func (m *uiModel) shouldSuppressSlashCommandPicker() bool {
@@ -81,17 +89,29 @@ func (m *uiModel) syncPromptHistorySelectionToInput() {
 	if m.promptHistorySelectionMatchesInput() {
 		return
 	}
-	m.resetPromptHistoryNavigation()
+	m.clearPromptHistorySelection()
 }
 
 func (m *uiModel) shouldAttemptPromptHistoryNavigation(delta int) bool {
 	if delta == 0 {
 		return false
 	}
+	if len(m.promptHistory) == 0 {
+		return false
+	}
 	if m.input == "" {
 		return true
 	}
-	return m.promptHistoryCursorAtBoundary()
+	if m.promptHistorySelectionActive() {
+		return m.promptHistoryCursorAtBoundary()
+	}
+	if m.hasPromptHistoryDraft() {
+		return false
+	}
+	if delta < 0 {
+		return m.inputCursorAtBoundary()
+	}
+	return false
 }
 
 func (m *uiModel) navigatePromptHistory(delta int) bool {
@@ -105,7 +125,10 @@ func (m *uiModel) navigatePromptHistory(delta int) bool {
 }
 
 func (m *uiModel) navigatePromptHistoryUp() bool {
-	if m.input == "" {
+	if !m.promptHistorySelectionActive() {
+		if m.input != "" && !m.inputCursorAtBoundary() {
+			return false
+		}
 		m.promptHistoryDraft = m.input
 		m.promptHistoryDraftCursor = m.inputCursor
 		m.promptHistorySelection = len(m.promptHistory) - 1
@@ -124,18 +147,51 @@ func (m *uiModel) navigatePromptHistoryUp() bool {
 }
 
 func (m *uiModel) navigatePromptHistoryDown() bool {
-	if m.input == "" || !m.promptHistoryCursorAtBoundary() {
+	if !m.promptHistorySelectionActive() || m.input == "" || !m.promptHistoryCursorAtBoundary() {
 		return false
 	}
 	if m.promptHistorySelection == len(m.promptHistory)-1 {
-		m.input = m.promptHistoryDraft
-		m.inputCursor = m.promptHistoryDraftCursor
-		m.refreshSlashCommandFilterFromInput()
-		m.resetPromptHistoryNavigation()
+		m.restorePromptHistoryDraft()
 		return true
 	}
 	m.promptHistorySelection++
 	m.applyPromptHistorySelection()
+	return true
+}
+
+func (m *uiModel) hasPromptHistoryDraft() bool {
+	return m.promptHistoryDraft != "" || m.promptHistoryDraftCursor >= 0
+}
+
+func (m *uiModel) restorePromptHistoryDraft() {
+	m.input = m.promptHistoryDraft
+	m.inputCursor = m.promptHistoryDraftCursor
+	m.refreshSlashCommandFilterFromInput()
+	m.resetPromptHistoryNavigation()
+}
+
+func (m *uiModel) restorePromptHistoryDraftAfterReuse() bool {
+	if !m.hasPromptHistoryDraft() {
+		return false
+	}
+	m.restorePromptHistoryDraft()
+	return true
+}
+
+func (m *uiModel) capturePromptHistoryDraftForReuse() (string, int, bool) {
+	if !m.hasPromptHistoryDraft() {
+		return "", -1, false
+	}
+	return m.promptHistoryDraft, m.promptHistoryDraftCursor, true
+}
+
+func (m *uiModel) restoreCapturedPromptHistoryDraft(text string, cursor int, ok bool) bool {
+	if !ok {
+		return false
+	}
+	m.promptHistoryDraft = text
+	m.promptHistoryDraftCursor = cursor
+	m.restorePromptHistoryDraft()
 	return true
 }
 

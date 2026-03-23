@@ -863,7 +863,7 @@ func TestReviewerStatusRendersConciseWithoutSuggestionsEntry(t *testing.T) {
 
 	m = updateModel(t, m, ToggleModeMsg{})
 	detail := plainTranscript(m.View())
-	if !containsInOrder(detail, "❯", "run task", "@", "Supervisor ran: 2 suggestions, no changes applied.", "❮", "done") {
+	if !containsInOrder(detail, "❯", "run task", "§", "Supervisor ran: 2 suggestions, no changes applied.", "❮", "done") {
 		t.Fatalf("expected concise reviewer status visible in detail view, got %q", detail)
 	}
 	if strings.Contains(detail, "Supervisor suggested:") || strings.Contains(detail, "1. First") {
@@ -894,8 +894,26 @@ func TestReviewerVerboseStatusRendersFullOnlyInFinalOngoingBlockAndTwiceInDetail
 	if strings.Count(detail, "Supervisor suggested:") != 2 {
 		t.Fatalf("expected detailed suggestion text in both detail reviewer entries, got %q", detail)
 	}
-	if !containsInOrder(detail, "❯", "run task", "@", "Supervisor suggested:", "1. First", "2. Second", "@", "Supervisor ran: 2 suggestions, applied.", "Supervisor suggested:", "1. First", "2. Second", "❮", "done") {
+	if !containsInOrder(detail, "❯", "run task", "§", "Supervisor suggested:", "1. First", "2. Second", "§", "Supervisor ran: 2 suggestions, applied.", "Supervisor suggested:", "1. First", "2. Second", "❮", "done") {
 		t.Fatalf("expected verbose reviewer detail ordering, got %q", detail)
+	}
+}
+
+func TestOngoingWebSearchUsesAtPrefixAndVerboseQuery(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: "tool_call",
+		Text: `web search: "latest golang release"`,
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:    "web_search",
+			Command:     `web search: "latest golang release"`,
+			CompactText: `web search: "latest golang release"`,
+		},
+	})
+
+	ongoing := plainTranscript(m.View())
+	if !strings.Contains(ongoing, `@ web search: "latest golang release"`) {
+		t.Fatalf("expected web search ongoing block to use @ prefix and verbose query, got %q", ongoing)
 	}
 }
 

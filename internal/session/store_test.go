@@ -134,6 +134,37 @@ func TestReadPromptHistoryUsesExplicitPromptHistoryEvents(t *testing.T) {
 	}
 }
 
+func TestReadPromptHistoryKeepsLegacyEntriesBeforeFirstExplicitEvent(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "user", "content": "legacy one"}); err != nil {
+		t.Fatalf("append legacy one: %v", err)
+	}
+	if _, err := store.AppendEvent("s2", "message", map[string]any{"role": "user", "content": "legacy two"}); err != nil {
+		t.Fatalf("append legacy two: %v", err)
+	}
+	if _, err := store.AppendEvent("", "prompt_history", map[string]any{"text": "/resume"}); err != nil {
+		t.Fatalf("append explicit history: %v", err)
+	}
+	if _, err := store.AppendEvent("s3", "message", map[string]any{"role": "user", "content": "expanded later user message"}); err != nil {
+		t.Fatalf("append post-upgrade user message: %v", err)
+	}
+
+	history, err := store.ReadPromptHistory()
+	if err != nil {
+		t.Fatalf("read prompt history: %v", err)
+	}
+	if len(history) != 3 {
+		t.Fatalf("expected 3 history entries, got %d", len(history))
+	}
+	if history[0] != "legacy one" || history[1] != "legacy two" || history[2] != "/resume" {
+		t.Fatalf("unexpected prompt history: %+v", history)
+	}
+}
+
 func TestReadPromptHistoryPreservesExactStoredText(t *testing.T) {
 	root := t.TempDir()
 	store, err := Create(root, "workspace-x", "/tmp/work")
