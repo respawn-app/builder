@@ -99,11 +99,19 @@ func (r *markdownRenderer) styleConfig() glamouransi.StyleConfig {
 	} else {
 		cfg = styles.DarkStyleConfig
 	}
+	foreground := themeForegroundColor(r.theme).hexString()
 	zero := uint(0)
 	cfg.Document.Margin = &zero
 	cfg.Document.BlockPrefix = ""
 	cfg.Document.BlockSuffix = ""
-	cfg.Code.BackgroundColor = nil
+	cfg.Document.Color = &foreground
+	cfg.Text.Color = &foreground
+	cfg.CodeBlock.StylePrimitive.Color = &foreground
+	if cfg.CodeBlock.Chroma != nil {
+		cfg.CodeBlock.Chroma.Text.Color = &foreground
+		cfg.CodeBlock.Chroma.Name.Color = &foreground
+	}
+	clearMarkdownBackgrounds(&cfg)
 	return cfg
 }
 

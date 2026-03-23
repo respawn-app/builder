@@ -1000,6 +1000,19 @@ func TestWriteStdinPollFormattingShowsDurationInOngoingAndDetail(t *testing.T) {
 	}
 }
 
+func TestRenderEntryTextDoesNotShellHighlightWriteStdinPollSummary(t *testing.T) {
+	m := NewModel(WithTheme("dark"))
+	out := m.renderEntryText("tool_shell_success", "Polled session 1149 for 2s", 80, &transcript.ToolCallMeta{
+		ToolName: "write_stdin",
+		IsShell:  true,
+		Command:  "Polled session 1149 for 2s",
+	}, false)
+	expected := applyDefaultForeground("Polled session 1149 for 2s", m.palette().foregroundColor)
+	if out != expected {
+		t.Fatalf("expected write_stdin poll summary to stay plain app-foreground text, got %q want %q", out, expected)
+	}
+}
+
 func TestWriteStdinPollFormattingShowsSubSecondDurationInOngoingAndDetail(t *testing.T) {
 	m := NewModel()
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
@@ -1418,6 +1431,45 @@ func TestDetailRendersMarkdownForUserAndAssistant(t *testing.T) {
 	}
 }
 
+func TestDetailFormattedAssistantTextUsesAppForegroundDark(t *testing.T) {
+	testDetailFormattedAssistantTextUsesAppForeground(t, "dark")
+}
+
+func TestDetailFormattedAssistantTextUsesAppForegroundLight(t *testing.T) {
+	testDetailFormattedAssistantTextUsesAppForeground(t, "light")
+}
+
+func testDetailFormattedAssistantTextUsesAppForeground(t *testing.T, theme string) {
+	t.Helper()
+	m := NewModel(WithTheme(theme))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "plain transcript text"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "formatted **assistant** text"})
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	view := m.View()
+	appForeground := foregroundEscape(m.palette().foregroundColor)
+	plainLine := lineContaining(view, "plain transcript text")
+	formattedLine := lineContaining(view, "formatted assistant text")
+	if plainLine == "" || formattedLine == "" {
+		t.Fatalf("expected detail view to contain both plain and formatted assistant lines, got %q", plainTranscript(view))
+	}
+	if !strings.Contains(plainLine, appForeground) {
+		t.Fatalf("expected plain assistant detail line to use app foreground for %s theme, got %q", theme, plainLine)
+	}
+	if !strings.Contains(formattedLine, appForeground) {
+		t.Fatalf("expected formatted assistant detail line to use app foreground for %s theme, got %q", theme, formattedLine)
+	}
+	if containsBackgroundSGR(formattedLine) {
+		t.Fatalf("expected formatted assistant detail line to avoid background color escapes for %s theme, got %q", theme, formattedLine)
+	}
+	for _, unwanted := range oldFormatterBaseForegroundEscapes(theme) {
+		if strings.Contains(formattedLine, unwanted) {
+			t.Fatalf("expected formatted assistant detail line to avoid old formatter base foreground %q for %s theme, got %q", unwanted, theme, formattedLine)
+		}
+	}
+}
+
 func TestOngoingStreamingStaysPlainUntilCommit(t *testing.T) {
 	m := NewModel()
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 6, Width: 60})
@@ -1464,6 +1516,70 @@ func TestNonMarkdownRolesStayPlain(t *testing.T) {
 	view := m.View()
 	if !strings.Contains(view, "**raw**") {
 		t.Fatalf("expected tool text to remain plain, got %q", view)
+	}
+}
+
+func TestRenderEntryTextUsesAppForegroundForPlainAssistantTextDark(t *testing.T) {
+	testRenderEntryTextUsesAppForegroundForPlainAssistantText(t, "dark")
+}
+
+func TestRenderEntryTextUsesAppForegroundForPlainAssistantTextLight(t *testing.T) {
+	testRenderEntryTextUsesAppForegroundForPlainAssistantText(t, "light")
+}
+
+func testRenderEntryTextUsesAppForegroundForPlainAssistantText(t *testing.T, theme string) {
+	t.Helper()
+	m := NewModel(WithTheme(theme))
+	out := m.renderEntryText("assistant", "plain response text", 80, nil, false)
+	if !strings.HasPrefix(out, foregroundEscape(m.palette().foregroundColor)) {
+		t.Fatalf("expected plain assistant text to start with app foreground for %s theme, got %q", theme, out)
+	}
+	if got := ansi.Strip(out); got != "plain response text" {
+		t.Fatalf("expected plain assistant text preserved, got %q", got)
+	}
+}
+
+func TestRenderEntryTextUsesAppForegroundForMarkdownAssistantTextDark(t *testing.T) {
+	testRenderEntryTextUsesAppForegroundForMarkdownAssistantText(t, "dark")
+}
+
+func TestRenderEntryTextUsesAppForegroundForMarkdownAssistantTextLight(t *testing.T) {
+	testRenderEntryTextUsesAppForegroundForMarkdownAssistantText(t, "light")
+}
+
+func testRenderEntryTextUsesAppForegroundForMarkdownAssistantText(t *testing.T, theme string) {
+	t.Helper()
+	m := NewModel(WithTheme(theme))
+	out := m.renderEntryText("assistant", "plain and **bold**", 80, nil, false)
+	if !strings.HasPrefix(out, foregroundEscape(m.palette().foregroundColor)) {
+		t.Fatalf("expected markdown assistant text to start with app foreground for %s theme, got %q", theme, out)
+	}
+	if got := ansi.Strip(out); !strings.Contains(got, "plain and bold") {
+		t.Fatalf("expected markdown assistant text preserved, got %q", got)
+	}
+}
+
+func TestRenderEntryTextUsesAppForegroundForHighlightedToolTextDark(t *testing.T) {
+	testRenderEntryTextUsesAppForegroundForHighlightedToolText(t, "dark")
+}
+
+func TestRenderEntryTextUsesAppForegroundForHighlightedToolTextLight(t *testing.T) {
+	testRenderEntryTextUsesAppForegroundForHighlightedToolText(t, "light")
+}
+
+func testRenderEntryTextUsesAppForegroundForHighlightedToolText(t *testing.T, theme string) {
+	t.Helper()
+	m := NewModel(WithTheme(theme))
+	meta := &transcript.ToolCallMeta{RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindSource, Path: "main.go", ResultOnly: true}}
+	out := m.renderEntryText("tool_success", "package main\nfunc main() {}", 80, meta, false)
+	if !strings.HasPrefix(out, foregroundEscape(m.palette().foregroundColor)) {
+		t.Fatalf("expected highlighted tool text to start with app foreground for %s theme, got %q", theme, out)
+	}
+	if got := ansi.Strip(out); !strings.Contains(got, "package main") {
+		t.Fatalf("expected highlighted tool text preserved, got %q", got)
+	}
+	if containsBackgroundSGR(out) {
+		t.Fatalf("expected highlighted tool text to avoid background color escapes for %s theme, got %q", theme, out)
 	}
 }
 
@@ -1521,8 +1637,11 @@ func TestRenderEntryTextHighlightsOnlyResultForShellSourceHint(t *testing.T) {
 	if len(lines) < 2 {
 		t.Fatalf("expected command and highlighted output lines, got %q", out)
 	}
-	if lines[0] != "cat main.go" {
+	if ansi.Strip(lines[0]) != "cat main.go" {
 		t.Fatalf("expected command line to stay plain, got %q", lines[0])
+	}
+	if colors := extractForegroundTrueColors(lines[0]); len(colors) > 1 {
+		t.Fatalf("expected command line to avoid syntax highlighting, got %q", lines[0])
 	}
 	if !strings.Contains(lines[1], "\x1b[") {
 		t.Fatalf("expected highlighted result line, got %q", lines[1])
@@ -1574,17 +1693,18 @@ func testFlattenEntryWithMetaKeepsMutedShellHighlightWhenMuted(t *testing.T, the
 	if !strings.Contains(ongoing, "\x1b[") {
 		t.Fatalf("expected ongoing shell command to keep muted highlighting, got %q", ongoing)
 	}
-	if !strings.Contains(ongoing, "\x1b[38;2;") {
-		t.Fatalf("expected ongoing shell command colors to be remapped to truecolor, got %q", ongoing)
+	if !strings.Contains(ongoing, ";2m") {
+		t.Fatalf("expected ongoing shell command to enforce faint styling, got %q", ongoing)
 	}
 	if !strings.Contains(ansi.Strip(ongoing), command) {
 		t.Fatalf("expected ongoing shell command text preserved after muting, got %q", ansi.Strip(ongoing))
 	}
-	if strings.Contains(ongoing, "\x1b[38;5;255m./gradlew") {
-		t.Fatalf("expected ongoing shell command to replace original chroma foregrounds with muted ones, got %q", ongoing)
+	ongoingColors := extractForegroundTrueColors(ongoing)
+	if !containsColor(ongoingColors, m.palette().previewColor) {
+		t.Fatalf("expected ongoing shell command to restore preview foreground for uncolored spans, got %q", ongoing)
 	}
-	if strings.Contains(ongoing, foregroundEscape(m.palette().previewColor)+command) {
-		t.Fatalf("expected muted shell command to preserve relative token colors instead of flattening to preview color, got %q", ongoing)
+	if !containsNonPreviewColor(ongoingColors, m.palette().previewColor) {
+		t.Fatalf("expected ongoing shell command to preserve some syntax foreground colors under faint styling, got %q", ongoing)
 	}
 }
 
@@ -1593,26 +1713,30 @@ func TestMuteANSIOutputReappliesDefaultForegroundAfterReset(t *testing.T) {
 	base := m.palette().previewColor
 	muted := muteANSIOutput("echo \x1b[38;5;81mfoo\x1b[0m bar", base)
 	if !strings.Contains(muted, "\x1b[38;2;") {
-		t.Fatalf("expected muted output to contain rewritten truecolor escape, got %q", muted)
+		t.Fatalf("expected muted output to contain truecolor foreground escapes, got %q", muted)
 	}
-	if !strings.Contains(muted, "\x1b[0;"+strings.Join(foregroundParams(base), ";")+"m bar") {
-		t.Fatalf("expected reset to restore default foreground, got %q", muted)
+	if !strings.Contains(muted, "\x1b[0;"+strings.Join(foregroundParams(base), ";")+";2m bar") {
+		t.Fatalf("expected reset to restore preview foreground and faint, got %q", muted)
 	}
 	if got := ansi.Strip(muted); got != "echo foo bar" {
 		t.Fatalf("expected text preserved after muting, got %q", got)
 	}
 }
 
-func TestMuteANSIOutputSupportsColonTrueColorSGR(t *testing.T) {
+func TestMuteANSIOutputSupportsColonTrueColorSGRInRenderingPipeline(t *testing.T) {
 	m := NewModel(WithTheme("light"))
-	muted := muteANSIOutput("\x1b[38:2:255:0:255mhello\x1b[39m world", m.palette().previewColor)
+	base := m.palette().previewColor
+	muted := muteANSIOutput("\x1b[38:2:255:0:255mhello\x1b[39m world", base)
 	if !strings.Contains(muted, "\x1b[38;2;") {
 		t.Fatalf("expected colon-form truecolor sequence to be rewritten, got %q", muted)
 	}
-	if !strings.Contains(muted, "\x1b[38;2;255;0;255m") {
+	if !strings.Contains(muted, "\x1b[38;2;255;0;255;2m") {
 		if strings.Contains(muted, "\x1b[38:2:255:0:255m") {
 			t.Fatalf("expected colon-form sequence to be normalized during rewrite, got %q", muted)
 		}
+	}
+	if !strings.Contains(muted, "\x1b["+strings.Join(styleParams(ansiStyleTransform{DefaultForeground: &base, ForceFaint: true}, false), ";")+"m world") {
+		t.Fatalf("expected default-foreground reset to restore preview+faint style, got %q", muted)
 	}
 	if got := ansi.Strip(muted); got != "hello world" {
 		t.Fatalf("expected colon-form truecolor text preserved, got %q", got)
@@ -1632,17 +1756,127 @@ func TestOngoingWrappedShellPreviewKeepsMutedHighlightAcrossVisualLines(t *testi
 		t.Fatalf("expected wrapped ongoing shell preview to span multiple visual lines, got %d (%q)", len(lines), lines)
 	}
 	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "\x1b[38;2;") {
-		t.Fatalf("expected wrapped shell preview to contain muted truecolor highlight, got %q", joined)
+	if !strings.Contains(joined, ";2m") {
+		t.Fatalf("expected wrapped shell preview to remain faint across visual lines, got %q", joined)
 	}
-	if strings.Contains(joined, "\x1b[38;5;255m") {
-		t.Fatalf("expected wrapped shell preview to avoid original full-color chroma output, got %q", joined)
+	colors := extractForegroundTrueColors(joined)
+	if !containsColor(colors, m.palette().previewColor) || !containsNonPreviewColor(colors, m.palette().previewColor) {
+		t.Fatalf("expected wrapped shell preview to keep preview base plus syntax colors, got %q", joined)
 	}
 	plain := strings.Join(strings.Fields(ansi.Strip(joined)), "")
 	expected := strings.Join(strings.Fields("$ "+command), "")
 	if plain != expected {
 		t.Fatalf("expected wrapped shell preview text preserved, got %q want %q", plain, expected)
 	}
+}
+
+func TestWrappedMutedShellPreviewDoesNotApplySecondPerLineMutePass(t *testing.T) {
+	m := NewModel(WithTheme("dark"))
+	m.viewportWidth = 92
+	meta := &transcript.ToolCallMeta{
+		RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindShell},
+	}
+	command := "go test ./internal/tui -run 'Test(MuteANSIOutput|FlattenEntryWithMetaKeepsMutedShellHighlightWhenMuted|OngoingWrappedShellPreviewKeepsMutedHighlightAcrossVisualLines|ViewWrappedShellPreviewUsesMutedOngoingAndFullColorDetail|ViewSourceHintShellPreviewUsesMutedOngoing|OngoingSourceHintShellPreviewFallsBackToMutedShellHighlight)'"
+
+	lines := m.flattenEntryWithMeta("tool_shell_success", command, true, meta)
+	if len(lines) < 2 {
+		t.Fatalf("expected wrapped muted shell preview to span multiple visual lines, got %d (%q)", len(lines), lines)
+	}
+
+	base := m.palette().previewColor
+	previewPrefix := "  " + styleEscape(ansiStyleTransform{
+		DefaultForeground: &base,
+		ForceFaint:        true,
+	}, false)
+	lineStartStates := mutedShellStyleStateAtLineStarts(strings.Join(lines, "\n"))
+	if len(lineStartStates) != len(lines) {
+		t.Fatalf("expected line-start style state for every wrapped line, got %d want %d", len(lineStartStates), len(lines))
+	}
+	for idx, line := range lines[1:] {
+		if strings.HasPrefix(line, previewPrefix) {
+			t.Fatalf("expected wrapped muted shell continuation line %d to avoid second per-line mute pass, got %q", idx+1, line)
+		}
+		if !lineStartStates[idx+1].faint || !lineStartStates[idx+1].hasForeground {
+			t.Fatalf("expected wrapped muted shell continuation line %d to start under active muted shell styling, got state=%+v line=%q", idx+1, lineStartStates[idx+1], line)
+		}
+	}
+}
+
+type sgrStyleState struct {
+	hasForeground bool
+	faint         bool
+}
+
+func mutedShellStyleStateAtLineStarts(text string) []sgrStyleState {
+	parser := ansi.GetParser()
+	defer ansi.PutParser(parser)
+
+	states := []sgrStyleState{{}}
+	state := byte(0)
+	input := text
+	current := sgrStyleState{}
+	for len(input) > 0 {
+		seq, width, n, newState := ansi.GraphemeWidth.DecodeSequenceInString(input, state, parser)
+		if n <= 0 {
+			break
+		}
+		state = newState
+		input = input[n:]
+		if width > 0 {
+			continue
+		}
+		if strings.Contains(seq, "\n") {
+			for range strings.Count(seq, "\n") {
+				states = append(states, current)
+			}
+			continue
+		}
+		if ansi.Cmd(parser.Command()).Final() != 'm' {
+			continue
+		}
+		current = applySGRStyleState(current, parser.Params())
+	}
+	return states
+}
+
+func applySGRStyleState(current sgrStyleState, params ansi.Params) sgrStyleState {
+	if len(params) == 0 {
+		return sgrStyleState{}
+	}
+	for idx := 0; idx < len(params); {
+		param, _, ok := params.Param(idx, 0)
+		if !ok {
+			break
+		}
+		switch {
+		case param == 0:
+			current = sgrStyleState{}
+			idx++
+		case param == 2:
+			current.faint = true
+			idx++
+		case param == 22:
+			current.faint = false
+			idx++
+		case param == 39:
+			current.hasForeground = false
+			idx++
+		case (30 <= param && param <= 37) || (90 <= param && param <= 97):
+			current.hasForeground = true
+			idx++
+		case param == 38:
+			_, consumed, ok := parseANSIForegroundColor(params, idx)
+			if !ok {
+				idx++
+				continue
+			}
+			current.hasForeground = true
+			idx += consumed
+		default:
+			idx++
+		}
+	}
+	return current
 }
 
 func TestOngoingSourceHintShellPreviewFallsBackToMutedShellHighlight(t *testing.T) {
@@ -1659,8 +1893,11 @@ func TestOngoingSourceHintShellPreviewFallsBackToMutedShellHighlight(t *testing.
 	command := "sed -n '1,220p' internal/app/app.go"
 
 	joined := strings.Join(m.flattenEntryWithMeta("tool_shell_success", command, true, meta), "\n")
-	if !strings.Contains(joined, "\x1b[38;2;") {
+	if !strings.Contains(joined, ";2m") {
 		t.Fatalf("expected source-hinted shell preview to fall back to muted shell highlight, got %q", joined)
+	}
+	if colors := extractForegroundTrueColors(joined); !containsNonPreviewColor(colors, m.palette().previewColor) {
+		t.Fatalf("expected source-hinted shell preview to preserve syntax colors under faint styling, got %q", joined)
 	}
 	if plain := strings.Join(strings.Fields(ansi.Strip(joined)), " "); plain != "$ "+command {
 		t.Fatalf("expected source-hinted shell preview text preserved, got %q", plain)
@@ -1683,11 +1920,18 @@ func TestViewWrappedShellPreviewUsesMutedOngoingAndFullColorDetail(t *testing.T)
 	})
 
 	ongoing := m.View()
-	if !strings.Contains(ongoing, "\x1b[38;2;") {
-		t.Fatalf("expected ongoing view to contain muted truecolor shell highlight, got %q", ongoing)
+	if !strings.Contains(ongoing, ";2m") {
+		t.Fatalf("expected ongoing view to contain faint shell highlight, got %q", ongoing)
 	}
-	if strings.Contains(ongoing, "\x1b[38;5;255m./gradlew") {
-		t.Fatalf("expected ongoing view to avoid original full-color shell highlight, got %q", ongoing)
+	ongoingColors := extractForegroundTrueColors(ongoing)
+	if len(ongoingColors) == 0 {
+		t.Fatalf("expected ongoing view to contain parseable foreground colors, got %q", ongoing)
+	}
+	if !containsColor(ongoingColors, m.palette().previewColor) {
+		t.Fatalf("expected ongoing view to restore preview foreground for resets/default spans, got %q", ongoing)
+	}
+	if !containsNonPreviewColor(ongoingColors, m.palette().previewColor) {
+		t.Fatalf("expected ongoing view to preserve some syntax colors while fainting them, got %q", ongoing)
 	}
 	if strings.Count(plainTranscript(ongoing), "detektFormat") == 0 {
 		t.Fatalf("expected ongoing view to show wrapped shell command text, got %q", plainTranscript(ongoing))
@@ -1795,6 +2039,13 @@ func lineContaining(text, substring string) string {
 		}
 	}
 	return ""
+}
+
+func oldFormatterBaseForegroundEscapes(theme string) []string {
+	if strings.EqualFold(strings.TrimSpace(theme), "light") {
+		return []string{"\x1b[38;5;234m"}
+	}
+	return []string{"\x1b[38;5;252m", "\x1b[97m", "\x1b[38;2;255;255;255m"}
 }
 
 func TestDetailShellUserInitiatedCallUsesUserRanLabel(t *testing.T) {

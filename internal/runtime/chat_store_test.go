@@ -344,6 +344,9 @@ func TestFormatToolCallWriteStdinPollUsesDurationInTranscript(t *testing.T) {
 	if !rendered.ToolCall.IsShell {
 		t.Fatalf("expected write_stdin to remain marked as shell-like, got %+v", rendered.ToolCall)
 	}
+	if rendered.ToolCall.RenderHint != nil {
+		t.Fatalf("did not expect render hint for write_stdin poll summary, got %+v", rendered.ToolCall.RenderHint)
+	}
 }
 
 func TestFormatToolCallAskQuestionUsesQuestionAndSuggestionsMeta(t *testing.T) {

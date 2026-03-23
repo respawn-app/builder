@@ -64,6 +64,7 @@ func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *
 	}
 	isEditedBlock := isEditedToolBlock(plainLines)
 	symbol := m.roleSymbol(role)
+	usesLowLevelMutedShellStyle := muteText && shouldUseLowLevelMutedShellStyle(role, text, toolMeta)
 	out := make([]string, 0, len(lines))
 	for i, line := range lines {
 		displayChunk := line.text
@@ -75,11 +76,7 @@ func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *
 			displayChunk = m.styleToolLine(displayChunk)
 		}
 		if muteText && strings.TrimSpace(displayChunk) != "" && !isEditedBlock {
-			if shouldUseLowLevelMutedShellStyle(role, text, toolMeta) {
-				if !strings.Contains(displayChunk, "\x1b[") {
-					displayChunk = m.palette().preview.Faint(true).Render(displayChunk)
-				}
-			} else {
+			if !usesLowLevelMutedShellStyle {
 				displayChunk = m.palette().preview.Faint(true).Render(displayChunk)
 			}
 		} else if role == "reviewer_status" && isReviewerCacheHitLine(displayChunk) {
@@ -232,18 +229,23 @@ func (m Model) renderEntryText(role, text string, width int, toolMeta *transcrip
 		return m.wrapRenderedEntryContent(text, width)
 	}
 	if rendered, ok := m.renderEntryContent(role, text, toolMeta, muteText); ok {
+		rendered = m.applyEntryDefaultForeground(role, rendered, muteText)
 		return m.wrapRenderedEntryContent(rendered, width)
 	}
 	if !isMarkdownRole(role) {
+		text = m.applyEntryDefaultForeground(role, text, muteText)
 		return m.wrapRenderedEntryContent(text, width)
 	}
 	if m.md == nil {
+		text = m.applyEntryDefaultForeground(role, text, muteText)
 		return m.wrapRenderedEntryContent(text, width)
 	}
 	rendered, err := m.md.render(role, text, width)
 	if err != nil {
+		text = m.applyEntryDefaultForeground(role, text, muteText)
 		return m.wrapRenderedEntryContent(text, width)
 	}
+	rendered = m.applyEntryDefaultForeground(role, rendered, muteText)
 	return rendered
 }
 
@@ -263,6 +265,21 @@ func (m Model) renderEntryContent(role, text string, toolMeta *transcript.ToolCa
 
 func (m Model) applyLowLevelMutedShellStyle(text string) string {
 	return muteANSIOutput(text, m.palette().previewColor)
+}
+
+func (m Model) applyEntryDefaultForeground(role, text string, muteText bool) string {
+	if strings.TrimSpace(text) == "" {
+		return text
+	}
+	if muteText || isThinkingRole(role) {
+		return text
+	}
+	switch role {
+	case "compaction_notice", "compaction_summary", "reviewer_status", "reviewer_suggestions", "error":
+		return text
+	default:
+		return applyDefaultForeground(text, m.palette().foregroundColor)
+	}
 }
 
 func (m Model) wrapRenderedEntryContent(text string, width int) string {
