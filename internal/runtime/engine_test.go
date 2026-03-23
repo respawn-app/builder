@@ -3077,6 +3077,15 @@ func TestReviewerStatusTextIncludesReviewerCacheHitMetadata(t *testing.T) {
 	if !strings.Contains(text, "85% cache hit") {
 		t.Fatalf("expected reviewer cache hit metadata even without suggestions, got %q", text)
 	}
+
+	text = reviewerStatusText(ReviewerStatus{
+		Outcome:          "followup_failed",
+		SuggestionsCount: 2,
+		Error:            "tool crashed",
+	}, []string{"one", "two"})
+	if !strings.Contains(text, "Supervisor ran, follow-up failed after 2 suggestions: tool crashed\n1. one\n2. two") {
+		t.Fatalf("expected verbose follow-up failure to include error and suggestions, got %q", text)
+	}
 }
 
 func TestBuildReviewerTranscriptMessagesIncludesSupervisorControlDeveloperMessage(t *testing.T) {
