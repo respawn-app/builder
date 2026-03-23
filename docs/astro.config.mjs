@@ -36,7 +36,7 @@ export default defineConfig({
         },
         {
           label: 'Subagents / Headless',
-          link: '/subagents-headless/',
+          link: '/headless/',
         },
         {
           label: 'Configuration',
