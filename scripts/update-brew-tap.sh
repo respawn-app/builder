@@ -132,6 +132,8 @@ class ${formula_class} < Formula
     root_url "https://ghcr.io/v2/respawn-app/tap"
   end
 
+  depends_on "git"
+  depends_on "ripgrep"
   depends_on "go" => :build
 
   def install
@@ -154,6 +156,10 @@ perl -0pi -e 's/^\s*bottle do\n(?:.*\n)*?\s*end\n\n/  bottle do\n    root_url "h
 if ! grep -q '^  bottle do$' "$formula_path"; then
   perl -0pi -e 's|^  license ".*"$|$&\n\n  bottle do\n    root_url "https://ghcr.io/v2/respawn-app/tap"\n  end|m' "$formula_path"
 fi
+
+perl -0pi -e 's/^  depends_on "git"\n//m' "$formula_path"
+perl -0pi -e 's/^  depends_on "ripgrep"\n//m' "$formula_path"
+perl -0pi -e 's|^  depends_on "go" => :build$|  depends_on "git"\n  depends_on "ripgrep"\n  depends_on "go" => :build|m' "$formula_path"
 
 if [[ "$do_commit" == "true" ]]; then
   git -C "$tap_dir" add "$formula_path"
