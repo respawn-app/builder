@@ -3,6 +3,7 @@ package tui
 import (
 	"builder/internal/llm"
 	"builder/internal/transcript"
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -195,16 +196,17 @@ func (m Model) entryRole(entry TranscriptEntry) string {
 }
 
 type palette struct {
-	preview      lipgloss.Style
-	previewColor rgbColor
-	user         lipgloss.Style
-	model        lipgloss.Style
-	tool         lipgloss.Style
-	toolSuccess  lipgloss.Style
-	toolError    lipgloss.Style
-	system       lipgloss.Style
-	error        lipgloss.Style
-	compaction   lipgloss.Style
+	foregroundColor rgbColor
+	preview         lipgloss.Style
+	previewColor    rgbColor
+	user            lipgloss.Style
+	model           lipgloss.Style
+	tool            lipgloss.Style
+	toolSuccess     lipgloss.Style
+	toolError       lipgloss.Style
+	system          lipgloss.Style
+	error           lipgloss.Style
+	compaction      lipgloss.Style
 
 	diffAddBackgroundLight    string
 	diffRemoveBackgroundLight string
@@ -213,9 +215,12 @@ type palette struct {
 }
 
 func (m Model) palette() palette {
+	const foregroundLight = "#383A42"
+	const foregroundDark = "#ABB2BF"
 	const previewLight = "#5C6370"
 	const previewDark = "#7F848E"
 	base := lipgloss.AdaptiveColor{Light: previewLight, Dark: previewDark}
+	foregroundColor := rgbColorFromHex(foregroundDark)
 	previewColor := rgbColorFromHex(previewDark)
 	user := lipgloss.AdaptiveColor{Light: "#005CC5", Dark: "#61AFEF"}
 	model := lipgloss.AdaptiveColor{Light: "#22863A", Dark: "#98C379"}
@@ -227,19 +232,21 @@ func (m Model) palette() palette {
 	compaction := lipgloss.AdaptiveColor{Light: "#8A5A00", Dark: "#E5C07B"}
 	if m.theme == "light" {
 		base = lipgloss.AdaptiveColor{Light: previewLight, Dark: previewLight}
+		foregroundColor = rgbColorFromHex(foregroundLight)
 		previewColor = rgbColorFromHex(previewLight)
 	}
 	return palette{
-		preview:      lipgloss.NewStyle().Foreground(base),
-		previewColor: previewColor,
-		user:         lipgloss.NewStyle().Foreground(user),
-		model:        lipgloss.NewStyle().Foreground(model),
-		tool:         lipgloss.NewStyle().Foreground(tool),
-		toolSuccess:  lipgloss.NewStyle().Foreground(toolSuccess),
-		toolError:    lipgloss.NewStyle().Foreground(toolError),
-		system:       lipgloss.NewStyle().Foreground(system).Faint(true),
-		error:        lipgloss.NewStyle().Foreground(err),
-		compaction:   lipgloss.NewStyle().Foreground(compaction),
+		foregroundColor: foregroundColor,
+		preview:         lipgloss.NewStyle().Foreground(base),
+		previewColor:    previewColor,
+		user:            lipgloss.NewStyle().Foreground(user),
+		model:           lipgloss.NewStyle().Foreground(model),
+		tool:            lipgloss.NewStyle().Foreground(tool),
+		toolSuccess:     lipgloss.NewStyle().Foreground(toolSuccess),
+		toolError:       lipgloss.NewStyle().Foreground(toolError),
+		system:          lipgloss.NewStyle().Foreground(system).Faint(true),
+		error:           lipgloss.NewStyle().Foreground(err),
+		compaction:      lipgloss.NewStyle().Foreground(compaction),
 
 		diffAddBackgroundLight:    "#E6FFED",
 		diffRemoveBackgroundLight: "#FFECEF",
@@ -254,6 +261,17 @@ func rgbColorFromHex(hex string) rgbColor {
 		return rgbColor{}
 	}
 	return rgbColor{r: r, g: g, b: b}
+}
+
+func themeForegroundColor(theme string) rgbColor {
+	if strings.EqualFold(strings.TrimSpace(theme), "light") {
+		return rgbColorFromHex("#383A42")
+	}
+	return rgbColorFromHex("#ABB2BF")
+}
+
+func (c rgbColor) hexString() string {
+	return fmt.Sprintf("#%02X%02X%02X", c.r, c.g, c.b)
 }
 
 func normalizeTheme(theme string) string {

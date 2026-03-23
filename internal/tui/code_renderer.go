@@ -22,10 +22,11 @@ const (
 )
 
 type codeRenderer struct {
-	theme     string
-	cache     map[string]string
-	diffCache map[string][]diffRenderedLine
-	formatter chroma.Formatter
+	theme          string
+	baseForeground rgbColor
+	cache          map[string]string
+	diffCache      map[string][]diffRenderedLine
+	formatter      chroma.Formatter
 }
 
 type diffRenderKind string
@@ -44,10 +45,11 @@ type diffRenderedLine struct {
 
 func newCodeRenderer(theme string) *codeRenderer {
 	return &codeRenderer{
-		theme:     theme,
-		cache:     make(map[string]string, 128),
-		diffCache: make(map[string][]diffRenderedLine, 64),
-		formatter: formatters.TTY256,
+		theme:          theme,
+		baseForeground: themeForegroundColor(theme),
+		cache:          make(map[string]string, 128),
+		diffCache:      make(map[string][]diffRenderedLine, 64),
+		formatter:      formatters.TTY256,
 	}
 }
 
@@ -166,7 +168,7 @@ func (r *codeRenderer) renderDiffLines(renderedPatch *patchformat.RenderedPatch,
 				inferredLexer = nil
 			}
 			for _, chunk := range splitLines(wrapTextForViewport(line.Text, width)) {
-				out = append(out, diffRenderedLine{Kind: diffRenderMeta, Text: chunk})
+				out = append(out, diffRenderedLine{Kind: diffRenderMeta, Text: applyDefaultForeground(chunk, r.baseForeground)})
 			}
 			continue
 		}
@@ -184,7 +186,7 @@ func (r *codeRenderer) renderDiffLines(renderedPatch *patchformat.RenderedPatch,
 		}
 		flushPending()
 		for _, chunk := range splitLines(wrapTextForViewport(line.Text, width)) {
-			out = append(out, diffRenderedLine{Kind: diffRenderMeta, Text: chunk})
+			out = append(out, diffRenderedLine{Kind: diffRenderMeta, Text: applyDefaultForeground(chunk, r.baseForeground)})
 		}
 	}
 	flushPending()
@@ -224,26 +226,24 @@ func (r *codeRenderer) resolveLexer(hint *transcript.ToolRenderHint, text string
 func (r *codeRenderer) highlightCodeBlock(lexer chroma.Lexer, source string) []string {
 	sourceLines := splitLines(source)
 	if lexer == nil || source == "" {
-		return sourceLines
+		return r.applyDefaultForegroundToLines(sourceLines)
 	}
 	iterator, err := chroma.Coalesce(lexer).Tokenise(nil, source)
 	if err != nil {
-		return sourceLines
+		return r.applyDefaultForegroundToLines(sourceLines)
 	}
 	var out bytes.Buffer
 	if err := r.formatter.Format(&out, r.style(), iterator); err != nil {
-		return sourceLines
+		return r.applyDefaultForegroundToLines(sourceLines)
 	}
-	raw := strings.ReplaceAll(out.String(), "\r\n", "\n")
+	raw := strings.TrimRight(strings.ReplaceAll(out.String(), "\r\n", "\n"), "\n")
+	raw = applyDefaultForeground(raw, r.baseForeground)
 	highlighted := strings.Split(raw, "\n")
-	if len(highlighted) == len(sourceLines)+1 && highlighted[len(highlighted)-1] == "" {
-		highlighted = highlighted[:len(highlighted)-1]
-	}
 	if len(highlighted) < len(sourceLines) {
 		padded := make([]string, len(sourceLines))
 		copy(padded, highlighted)
 		for idx := len(highlighted); idx < len(sourceLines); idx++ {
-			padded[idx] = sourceLines[idx]
+			padded[idx] = applyDefaultForeground(sourceLines[idx], r.baseForeground)
 		}
 		return padded
 	}
@@ -251,6 +251,14 @@ func (r *codeRenderer) highlightCodeBlock(lexer chroma.Lexer, source string) []s
 		highlighted = highlighted[:len(sourceLines)]
 	}
 	return highlighted
+}
+
+func (r *codeRenderer) applyDefaultForegroundToLines(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, applyDefaultForeground(line, r.baseForeground))
+	}
+	return out
 }
 
 func applyBackgroundTint(line string, bg string) string {
@@ -285,6 +293,11 @@ func parseHexColor(hex string) (int, int, int, bool) {
 }
 
 func (r *codeRenderer) style() *chroma.Style {
+	base := r.baseStyle()
+	return withTransparentChromaBackgrounds(base, chroma.MustParseColour(r.baseForeground.hexString()))
+}
+
+func (r *codeRenderer) baseStyle() *chroma.Style {
 	if strings.EqualFold(strings.TrimSpace(r.theme), "light") {
 		if style := chromastyles.Get("github"); style != nil {
 			return style

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alecthomas/chroma/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -32,6 +33,42 @@ func TestCodeRendererRendersSourceWhenPathHintIsProvided(t *testing.T) {
 	plain := ansi.Strip(out)
 	if !strings.Contains(plain, "package main") || !strings.Contains(plain, "func main() {}") {
 		t.Fatalf("expected highlighted source text preserved, got %q", plain)
+	}
+}
+
+func TestCodeRendererOverridesBaseTextColorWithAppForegroundDark(t *testing.T) {
+	testCodeRendererOverridesBaseTextColorWithAppForeground(t, "dark")
+}
+
+func TestCodeRendererOverridesBaseTextColorWithAppForegroundLight(t *testing.T) {
+	testCodeRendererOverridesBaseTextColorWithAppForeground(t, "light")
+}
+
+func testCodeRendererOverridesBaseTextColorWithAppForeground(t *testing.T, theme string) {
+	t.Helper()
+	r := newCodeRenderer(theme)
+	baseText := r.baseStyle().Get(chroma.Text).Colour
+	appForeground := chroma.MustParseColour(r.baseForeground.hexString())
+	style := r.style()
+	if got := style.Get(chroma.Text).Colour; got != appForeground {
+		t.Fatalf("expected code renderer text color to use app foreground for %s theme, got %s want %s", theme, got, appForeground)
+	}
+	for _, token := range []chroma.TokenType{chroma.Text, chroma.Keyword, chroma.LiteralString, chroma.NameFunction, chroma.Punctuation} {
+		if bg := style.Get(token).Background; bg.IsSet() {
+			t.Fatalf("expected code renderer token %s background to stay transparent for %s theme, got %s", token, theme, bg)
+		}
+	}
+	hint := &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindShell}
+	out, ok := r.render(hint, "./gradlew -p apps/respawn detektFormat")
+	if !ok {
+		t.Fatal("expected shell highlight to render")
+	}
+	oldBaseSeq := foregroundEscape(rgbColor{r: int(baseText.Red()), g: int(baseText.Green()), b: int(baseText.Blue())})
+	if baseText != appForeground && strings.Contains(out, oldBaseSeq) {
+		t.Fatalf("expected shell highlight to avoid original base text color %q, got %q", oldBaseSeq, out)
+	}
+	if containsBackgroundSGR(out) {
+		t.Fatalf("expected shell highlight to avoid background color escapes for %s theme, got %q", theme, out)
 	}
 }
 
@@ -65,6 +102,9 @@ func TestCodeRendererRendersDiffWhenDiffHintIsProvided(t *testing.T) {
 	plain := ansi.Strip(out)
 	if !strings.Contains(plain, "-func main() {}") || !strings.Contains(plain, "+package main") {
 		t.Fatalf("expected highlighted diff text preserved, got %q", plain)
+	}
+	if len(lines) == 0 || !strings.HasPrefix(lines[0].Text, foregroundEscape(themeForegroundColor("dark"))) {
+		t.Fatalf("expected diff meta lines to start with app foreground, got %#v", lines)
 	}
 }
 

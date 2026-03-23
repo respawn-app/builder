@@ -74,6 +74,10 @@ func shellToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) transcr
 		if command == "" {
 			command = defaultToolCallFallback
 		}
+		renderHint := detectShellRenderHint(command)
+		if toolID == ToolWriteStdin {
+			renderHint = nil
+		}
 		return transcript.ToolCallMeta{
 			ToolName:      string(toolID),
 			IsShell:       true,
@@ -82,7 +86,7 @@ func shellToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) transcr
 			CompactText:   command,
 			InlineMeta:    inlineMeta,
 			TimeoutLabel:  inlineMeta,
-			RenderHint:    detectShellRenderHint(command),
+			RenderHint:    renderHint,
 		}
 	}
 }

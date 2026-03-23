@@ -8,6 +8,7 @@ import (
 
 	"builder/internal/config"
 	"builder/internal/session"
+	"builder/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
@@ -42,6 +43,7 @@ type sessionPickerModel struct {
 	offset   int
 	width    int
 	height   int
+	theme    string
 	styles   sessionPickerStyles
 	headerMD *glamour.TermRenderer
 	result   sessionPickerResult
@@ -56,6 +58,7 @@ func newSessionPickerModel(summaries []session.Summary, theme string) *sessionPi
 		sessions: items,
 		width:    defaultPickerWidth,
 		height:   defaultPickerHeight,
+		theme:    theme,
 		styles:   newSessionPickerStyles(theme),
 	}
 	m.headerMD = newSessionPickerMarkdownRenderer(theme)
@@ -238,7 +241,7 @@ func (m *sessionPickerModel) renderHeader() string {
 	if m.headerMD != nil {
 		rendered, err := m.headerMD.Render(sessionPickerHeaderMarkdown)
 		if err == nil {
-			return strings.TrimRight(rendered, "\n")
+			return tui.ApplyThemeDefaultForeground(strings.TrimRight(rendered, "\n"), m.theme)
 		}
 	}
 	return m.styles.headerFallback.Render("Select session")

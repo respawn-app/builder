@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"builder/internal/session"
+	"builder/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -89,6 +90,18 @@ func TestSessionPickerViewOmitsHotkeyLegend(t *testing.T) {
 	}
 	if strings.Contains(out, "Enter=resume") {
 		t.Fatalf("expected hotkey legend removed, got %q", out)
+	}
+}
+
+func TestSessionPickerHeaderUsesAppForeground(t *testing.T) {
+	m := newSessionPickerModel(nil, "dark")
+	header := m.renderHeader()
+	expectedPrefix := strings.TrimSuffix(tui.ApplyThemeDefaultForeground("x", "dark"), "x\x1b[0m")
+	if !strings.HasPrefix(header, expectedPrefix) {
+		t.Fatalf("expected session picker header to start with app foreground, got %q", header)
+	}
+	if stripped := ansi.Strip(header); !strings.Contains(stripped, "Select session") {
+		t.Fatalf("expected session picker header text preserved, got %q", stripped)
 	}
 }
 

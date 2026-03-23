@@ -199,6 +199,7 @@
 - Hide thinking traces, preambles, outputs, and diffs.
 - Ongoing preview sizing is fixed: command max `80`, file max `60`, soft-wrap allowed.
 - Ongoing line prefix is `> `.
+- Shell command previews remain syntax-highlighted in both modes; ongoing renders them with lower-contrast `preview` styling plus terminal `faint`, while detail keeps full syntax colors.
 - Assistant text streams in ongoing mode.
 - Tool output is not streamed live; show running status and reveal on completion.
 - `detail` is a non-streaming snapshot view.

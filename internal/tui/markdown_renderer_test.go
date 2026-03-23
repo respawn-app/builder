@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -47,6 +48,58 @@ func TestMarkdownRendererPlainTextNoInjectedNewlines(t *testing.T) {
 	plain := ansi.Strip(out)
 	if plain != "just plain text" {
 		t.Fatalf("expected plain text passthrough shape, got %q", plain)
+	}
+}
+
+func TestMarkdownRendererOverridesBaseTextColorWithAppForegroundDark(t *testing.T) {
+	testMarkdownRendererOverridesBaseTextColorWithAppForeground(t, "dark", *styles.DarkStyleConfig.Document.Color)
+}
+
+func TestMarkdownRendererOverridesBaseTextColorWithAppForegroundLight(t *testing.T) {
+	testMarkdownRendererOverridesBaseTextColorWithAppForeground(t, "light", *styles.LightStyleConfig.Document.Color)
+}
+
+func testMarkdownRendererOverridesBaseTextColorWithAppForeground(t *testing.T, theme, oldDefault string) {
+	t.Helper()
+	r := newMarkdownRenderer(theme, nil)
+	fg := themeForegroundColor(theme).hexString()
+	oldDefaultEscape := ""
+	if strings.HasPrefix(oldDefault, "#") {
+		oldDefaultEscape = foregroundEscape(rgbColorFromHex(oldDefault))
+	} else {
+		oldDefaultEscape = "\x1b[38;5;" + oldDefault + "m"
+	}
+	cfg := r.styleConfig()
+	if cfg.Document.Color == nil || *cfg.Document.Color != fg {
+		t.Fatalf("expected markdown document color to use app foreground for %s theme, got %+v", theme, cfg.Document.Color)
+	}
+	if cfg.Text.Color == nil || *cfg.Text.Color != fg {
+		t.Fatalf("expected markdown text color to use app foreground for %s theme, got %+v", theme, cfg.Text.Color)
+	}
+	if cfg.H1.BackgroundColor != nil || cfg.Code.BackgroundColor != nil || cfg.CodeBlock.StylePrimitive.BackgroundColor != nil {
+		t.Fatalf("expected key markdown style surfaces to avoid backgrounds for %s theme, got %+v", theme, cfg)
+	}
+	if cfg.CodeBlock.Chroma != nil && (cfg.CodeBlock.Chroma.Error.BackgroundColor != nil || cfg.CodeBlock.Chroma.Background.BackgroundColor != nil) {
+		t.Fatalf("expected key markdown chroma surfaces to avoid backgrounds for %s theme, got %+v", theme, cfg.CodeBlock.Chroma)
+	}
+	for _, primitive := range markdownStylePrimitives(&cfg) {
+		if primitive.BackgroundColor != nil {
+			t.Fatalf("expected markdown style config to avoid background colors for %s theme, got %+v", theme, cfg)
+		}
+	}
+	out, err := r.render("assistant", "plain and **bold**", 80)
+	if err != nil {
+		t.Fatalf("render markdown: %v", err)
+	}
+	if oldDefault != fg && strings.Contains(out, oldDefaultEscape) {
+		t.Fatalf("expected markdown output to avoid old default foreground %q, got %q", oldDefaultEscape, out)
+	}
+	richOut, err := r.render("assistant", "# Heading\n\nUse `code` here.\n\n```go\nfmt.Println(\"hi\")\n```", 80)
+	if err != nil {
+		t.Fatalf("render rich markdown: %v", err)
+	}
+	if containsBackgroundSGR(richOut) {
+		t.Fatalf("expected markdown output to avoid background color escapes for %s theme, got %q", theme, richOut)
 	}
 }
 
