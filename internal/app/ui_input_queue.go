@@ -6,6 +6,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+type queueDrainMode uint8
+
+const (
+	queueDrainOne queueDrainMode = iota
+	queueDrainAuto
+)
+
 func (m *uiModel) queueInput(text string) {
 	m.queued = append(m.queued, text)
 	m.clearInput()
@@ -31,7 +38,7 @@ func (c uiInputController) queueOrStartSubmission(text string) (tea.Model, tea.C
 	if m.busy {
 		return m, nil
 	}
-	return m, c.startSubmission(m.popQueued())
+	return c.flushQueuedInputs(queueDrainOne)
 }
 
 func (c uiInputController) restoreQueuedMessagesIntoInput() {
@@ -75,6 +82,47 @@ func (c uiInputController) releaseLockedInjectedInput(discardEngineQueue bool) {
 	}
 	m.inputSubmitLocked = false
 	m.lockedInjectText = ""
+}
+
+func (c uiInputController) flushQueuedInputs(mode queueDrainMode) (tea.Model, tea.Cmd) {
+	m := c.model
+	if len(m.queued) == 0 {
+		return m, nil
+	}
+	cmds := make([]tea.Cmd, 0, 2)
+	for len(m.queued) > 0 {
+		next := m.popQueued()
+		if cmd := c.dispatchQueuedInput(next); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if mode == queueDrainOne || !m.shouldContinueQueuedInputAutoDrain() {
+			break
+		}
+	}
+	return m, tea.Batch(cmds...)
+}
+
+func (c uiInputController) dispatchQueuedInput(text string) tea.Cmd {
+	m := c.model
+	if m.commandRegistry != nil {
+		if _, knownCommand := m.commandRegistry.Command(text); knownCommand {
+			if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
+				_, cmd := c.applyCommandResult(commandResult)
+				return cmd
+			}
+		}
+	}
+	return c.startSubmission(text)
+}
+
+func (m *uiModel) shouldContinueQueuedInputAutoDrain() bool {
+	if len(m.queued) == 0 || m.busy || m.isInputLocked() || m.exitAction != UIActionNone || m.activeAsk != nil {
+		return false
+	}
+	if m.inputMode() != uiInputModeMain {
+		return false
+	}
+	return strings.TrimSpace(m.input) == ""
 }
 
 func (m *uiModel) popQueued() string {

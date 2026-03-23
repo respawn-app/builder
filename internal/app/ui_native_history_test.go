@@ -67,6 +67,43 @@ func TestNativeScrollbackStartupReplayIncludesFullTranscript(t *testing.T) {
 	}
 }
 
+func TestNativeScrollbackStartupEmptyConversationEmitsBlankScreenSpacer(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+	).(*uiModel)
+
+	next, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	updated, ok := next.(*uiModel)
+	if !ok {
+		t.Fatalf("unexpected model type %T", next)
+	}
+	m = updated
+	if cmd == nil {
+		t.Fatal("expected blank spacer command after first window size without transcript")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg after first empty window size, got %T", cmd())
+	}
+	if !msg.AllowBlank {
+		t.Fatal("expected blank spacer replay to allow whitespace-only flushes")
+	}
+	if got := strings.Count(msg.Text, "\n"); got != 30 {
+		t.Fatalf("expected blank spacer to emit one empty screen worth of lines, got %d newlines", got)
+	}
+	if !m.nativeHistoryReplayed {
+		t.Fatal("expected empty-history startup to mark native scrollback as replayed")
+	}
+	if m.nativeRenderedSnapshot != "" {
+		t.Fatalf("expected empty-history startup to keep rendered history snapshot empty, got %q", m.nativeRenderedSnapshot)
+	}
+	if cmd := m.syncNativeHistoryFromTranscript(); cmd != nil {
+		t.Fatalf("expected empty-history replay to emit spacer only once without resize, got %T", cmd())
+	}
+}
+
 func TestNativeScrollbackEmitsOnlyNewTranscriptLines(t *testing.T) {
 	m := NewUIModel(
 		nil,
@@ -1003,16 +1040,20 @@ func TestNativeOngoingShrinksLiveRegionAfterInputShrinkWhenNotStreaming(t *testi
 	m.windowSizeKnown = true
 	m.input = "line 1\nline 2\nline 3"
 	m.syncViewport()
+	firstPad := m.nativeLiveRegionPad
 	first := strings.Split(m.View(), "\n")
-	firstLines := len(first)
-	if firstLines < 4 {
-		t.Fatalf("expected multi-line native region, got %d", firstLines)
+	if len(first) != 20 {
+		t.Fatalf("expected fresh conversation to fill terminal height before shrink, got %d lines", len(first))
 	}
 	m.input = ""
 	m.syncViewport()
+	secondPad := m.nativeLiveRegionPad
 	second := strings.Split(m.View(), "\n")
-	if len(second) >= firstLines {
-		t.Fatalf("expected native live region to shrink after input shrink, got %d want < %d", len(second), firstLines)
+	if len(second) != 20 {
+		t.Fatalf("expected fresh conversation to keep filling terminal height after shrink, got %d lines", len(second))
+	}
+	if secondPad <= firstPad {
+		t.Fatalf("expected top padding to grow after input shrink, first=%d second=%d", firstPad, secondPad)
 	}
 }
 
@@ -1024,11 +1065,14 @@ func TestNativeOngoingKeepsInputAndStatusAtBottomOfLiveRegion(t *testing.T) {
 	m.input = "hello"
 	m.syncViewport()
 	lines := strings.Split(stripANSIPreserve(m.View()), "\n")
-	if len(lines) >= 12 || len(lines) < 2 {
-		t.Fatalf("expected native ongoing view to render only compact live region, got %d lines", len(lines))
+	if len(lines) != 12 {
+		t.Fatalf("expected fresh conversation to fill full terminal height, got %d lines", len(lines))
 	}
 	if !strings.Contains(lines[len(lines)-1], "ongoing") {
 		t.Fatalf("expected status line at terminal bottom, got %q", lines[len(lines)-1])
+	}
+	if strings.TrimSpace(lines[0]) != "" {
+		t.Fatalf("expected top of fresh conversation live region to stay blank, got %q", lines[0])
 	}
 	start := 0
 	if len(lines) > 5 {
@@ -1077,8 +1121,8 @@ func TestNativeOngoingClearsLiveRegionPadWhenStreamingEnds(t *testing.T) {
 	}
 	m.forwardToView(tui.SetConversationMsg{Ongoing: ""})
 	m.syncViewport()
-	if m.nativeLiveRegionPad != 0 {
-		t.Fatalf("expected no residual live region pad after streaming ends, got %d", m.nativeLiveRegionPad)
+	if m.nativeLiveRegionPad <= 0 {
+		t.Fatalf("expected fresh conversation to restore top padding after streaming ends, got %d", m.nativeLiveRegionPad)
 	}
 	if m.nativeStreamingActive {
 		t.Fatal("expected streaming inactive after ongoing clears")

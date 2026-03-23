@@ -43,6 +43,49 @@ func TestTabQueuesAndStartsSubmission(t *testing.T) {
 	}
 }
 
+func TestEmptyEnterFlushesOnlyNextQueuedItem(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.queued = []string{"/name queued title", "follow up"}
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+
+	if cmd == nil {
+		t.Fatal("expected command from queued /name flush")
+	}
+	if updated.sessionName != "queued title" {
+		t.Fatalf("expected only first queued item to execute, got session name %q", updated.sessionName)
+	}
+	if updated.busy {
+		t.Fatal("did not expect follow-up prompt submission from empty-enter flush")
+	}
+	if len(updated.queued) != 1 || updated.queued[0] != "follow up" {
+		t.Fatalf("expected follow-up prompt to remain queued, got %+v", updated.queued)
+	}
+}
+
+func TestIdleTabWithExistingQueueFlushesOnlyNextQueuedItem(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.queued = []string{"/name queued title"}
+	m.input = "follow up"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated := next.(*uiModel)
+
+	if cmd == nil {
+		t.Fatal("expected command from queued /name flush")
+	}
+	if updated.sessionName != "queued title" {
+		t.Fatalf("expected queued /name to execute first, got %q", updated.sessionName)
+	}
+	if updated.busy {
+		t.Fatal("did not expect appended prompt to auto-submit while idle tab is flushing one queued item")
+	}
+	if len(updated.queued) != 1 || updated.queued[0] != "follow up" {
+		t.Fatalf("expected appended prompt to remain queued, got %+v", updated.queued)
+	}
+}
+
 func TestCustomKeyCtrlEnterQueuesAndStartsSubmission(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "echo hi"
@@ -1598,6 +1641,44 @@ func TestCtrlCWhileBusyRestoresQueuedMessagesIntoInput(t *testing.T) {
 	}
 }
 
+func TestCtrlCWhileBusyRestoresQueuedSlashCommandsIntoInput(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.queued = []string{"/name queued title"}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated := next.(*uiModel)
+
+	if updated.busy {
+		t.Fatal("expected busy=false after ctrl+c interrupt")
+	}
+	if updated.activity != uiActivityInterrupted {
+		t.Fatalf("expected interrupted activity, got %v", updated.activity)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued slash command restored into input and cleared, got %+v", updated.queued)
+	}
+	if updated.input != "/name queued title" {
+		t.Fatalf("expected queued slash command restored into input, got %q", updated.input)
+	}
+}
+
+func TestCtrlCWhileBusyRestoresMixedQueuedInputsIntoInput(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.queued = []string{"draft one", "draft two", "/name queued title", "later draft"}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated := next.(*uiModel)
+
+	if updated.input != "draft one\n\ndraft two\n\n/name queued title\n\nlater draft" {
+		t.Fatalf("expected all queued inputs restored into input, got %q", updated.input)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queue cleared after restore, got %+v", updated.queued)
+	}
+}
+
 func TestCtrlCWhileBusyUnlocksSubmitLockedInput(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.busy = true
@@ -2511,6 +2592,184 @@ func TestSlashCommandArrowKeysDoNotOverrideArgumentMode(t *testing.T) {
 	}
 	if updated.inputCursor != 0 {
 		t.Fatalf("expected regular cursor navigation, got %d", updated.inputCursor)
+	}
+}
+
+func TestSlashCommandTabAutocompletesSelectedCommandAndAddsSpace(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/ne"
+	m.refreshSlashCommandFilterFromInput()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated := next.(*uiModel)
+	if updated.input != "/new " {
+		t.Fatalf("expected tab to autocomplete /new with trailing space, got %q", updated.input)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected no queued messages after autocomplete, got %d", len(updated.queued))
+	}
+	if updated.busy {
+		t.Fatal("did not expect autocomplete to start submission")
+	}
+}
+
+func TestSlashCommandEnterExecutesSelectedPartialMatch(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "/ex"
+	m.refreshSlashCommandFilterFromInput()
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected quit cmd for selected /exit partial match")
+	}
+	if updated.Action() != UIActionExit {
+		t.Fatalf("expected UIActionExit, got %q", updated.Action())
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after slash command execution, got %q", updated.input)
+	}
+}
+
+func TestBusyTabQueuesSlashCommandAndFlushesAfterTurn(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "/name queued title"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated := next.(*uiModel)
+	if len(updated.queued) != 1 || updated.queued[0] != "/name queued title" {
+		t.Fatalf("expected queued slash command, got %+v", updated.queued)
+	}
+	if updated.sessionName != "" {
+		t.Fatalf("did not expect queued slash command to execute immediately, got %q", updated.sessionName)
+	}
+
+	next, cmd := updated.Update(submitDoneMsg{})
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected follow-up command from queued /name execution")
+	}
+	if updated.sessionName != "queued title" {
+		t.Fatalf("expected queued /name to execute after turn, got %q", updated.sessionName)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued slash command drained, got %+v", updated.queued)
+	}
+}
+
+func TestBusyQueuedSlashCommandDrainContinuesIntoQueuedPrompt(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "/name queued title"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated := next.(*uiModel)
+	updated.input = "follow up"
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated = next.(*uiModel)
+	if len(updated.queued) != 2 {
+		t.Fatalf("expected two queued items, got %+v", updated.queued)
+	}
+
+	next, _ = updated.Update(submitDoneMsg{})
+	updated = next.(*uiModel)
+	if updated.sessionName != "queued title" {
+		t.Fatalf("expected queued /name to execute before queued prompt, got %q", updated.sessionName)
+	}
+	if !updated.busy {
+		t.Fatal("expected queued prompt to auto-submit after queued slash command")
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued items fully drained, got %+v", updated.queued)
+	}
+	plain := stripANSIAndTrimRight(updated.view.OngoingSnapshot())
+	if !strings.Contains(plain, "follow up") {
+		t.Fatalf("expected queued prompt in transcript, got %q", plain)
+	}
+}
+
+func TestAutoDrainStopsAfterQueuedPSInlineAppendsToInput(t *testing.T) {
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	workdir := t.TempDir()
+	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "printf 'queued-inline\n'; sleep 30"},
+		DisplayCommand: "queued-inline",
+		Workdir:        workdir,
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start queued-inline: %v", err)
+	}
+	if !res.Backgrounded {
+		t.Fatal("expected background process")
+	}
+
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.queued = []string{"/ps inline " + res.SessionID, "summarize this"}
+
+	next, cmd := m.Update(submitDoneMsg{})
+	updated := next.(*uiModel)
+
+	if cmd == nil {
+		t.Fatal("expected command batch from queued /ps inline execution")
+	}
+	if updated.busy {
+		t.Fatal("did not expect queued /ps inline to auto-submit the follow-up prompt")
+	}
+	if !strings.Contains(updated.input, "Output of bg shell "+res.SessionID+":") {
+		t.Fatalf("expected inline shell transcript pasted into input, got %q", updated.input)
+	}
+	if !strings.Contains(updated.input, "queued-inline") {
+		t.Fatalf("expected pasted shell transcript content in input, got %q", updated.input)
+	}
+	if len(updated.queued) != 1 || updated.queued[0] != "summarize this" {
+		t.Fatalf("expected follow-up prompt to remain queued after inline paste, got %+v", updated.queued)
+	}
+	plain := stripANSIAndTrimRight(updated.view.OngoingSnapshot())
+	if strings.Contains(plain, "summarize this") {
+		t.Fatalf("did not expect follow-up prompt submitted without pasted transcript, got %q", plain)
+	}
+}
+
+func TestBusyQueuedReviewSlashCommandStartsFreshSessionAfterTurn(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "/review internal/app"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated := next.(*uiModel)
+	if len(updated.queued) != 1 || updated.queued[0] != "/review internal/app" {
+		t.Fatalf("expected queued /review command, got %+v", updated.queued)
+	}
+
+	next, cmd := updated.Update(submitDoneMsg{message: "done"})
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected quit cmd for queued /review handoff")
+	}
+	if updated.Action() != UIActionNewSession {
+		t.Fatalf("expected UIActionNewSession, got %q", updated.Action())
+	}
+	if strings.TrimSpace(updated.nextSessionInitialPrompt) == "" {
+		t.Fatal("expected queued /review to populate the next-session prompt")
+	}
+	if !strings.Contains(updated.nextSessionInitialPrompt, "internal/app") {
+		t.Fatalf("expected queued /review args in handoff payload, got %q", updated.nextSessionInitialPrompt)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued /review drained, got %+v", updated.queued)
 	}
 }
 
@@ -3444,7 +3703,7 @@ func TestStatusLineRendersReasoningHeaderBeforeContextUsage(t *testing.T) {
 	if !containsInOrder(line, "Summarizing fix and investigation", "0%") {
 		t.Fatalf("expected reasoning header immediately left of context usage, got %q", line)
 	}
-	if strings.Contains(line, statusHelpHint) {
+	if strings.Contains(line, m.statusHelpHint()) {
 		t.Fatalf("did not expect help hint while reasoning header is present, got %q", line)
 	}
 }
@@ -3462,8 +3721,30 @@ func TestStatusLineShowsHelpHintWhenIdleInOngoingMode(t *testing.T) {
 	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
-	if !containsInOrder(line, statusHelpHint, "0%") {
+	if !containsInOrder(line, m.statusHelpHint(), "0%") {
 		t.Fatalf("expected help hint immediately left of context usage while idle, got %q", line)
+	}
+}
+
+func TestStatusLineFallsBackToF1HelpHintWhenQuestionMarkWouldType(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "draft"
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !containsInOrder(line, m.statusHelpHint(), "0%") {
+		t.Fatalf("expected f1-only help hint immediately left of context usage while typing, got %q", line)
+	}
+	if strings.Contains(line, "F1 or ? for help") {
+		t.Fatalf("did not expect question mark help hint while typing, got %q", line)
 	}
 }
 
@@ -3504,7 +3785,7 @@ func TestStatusLineHidesHelpHintWhenOngoingModeIsNotIdle(t *testing.T) {
 			tc.apply(m)
 
 			line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
-			if strings.Contains(line, statusHelpHint) {
+			if strings.Contains(line, m.statusHelpHint()) || strings.Contains(line, "F1 or ? for help") || strings.Contains(line, "F1 for help") {
 				t.Fatalf("did not expect help hint while ongoing mode is active but not idle, got %q", line)
 			}
 		})
@@ -3525,7 +3806,7 @@ func TestStatusLineHidesHelpHintOutsideOngoingMode(t *testing.T) {
 	m.forwardToView(tui.ToggleModeMsg{})
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
-	if strings.Contains(line, statusHelpHint) {
+	if strings.Contains(line, m.statusHelpHint()) || strings.Contains(line, "F1 or ? for help") || strings.Contains(line, "F1 for help") {
 		t.Fatalf("did not expect help hint outside ongoing mode, got %q", line)
 	}
 }
@@ -3857,7 +4138,7 @@ func (statusLineAzureClient) ProviderCapabilities(context.Context) (llm.Provider
 
 func TestHelpToggleRendersBelowQueuedMessagesAndInput(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
-	m.termWidth = 80
+	m.termWidth = 120
 	m.termHeight = 40
 	m.windowSizeKnown = true
 	m.queued = []string{"queued latest"}
@@ -3874,7 +4155,7 @@ func TestHelpToggleRendersBelowQueuedMessagesAndInput(t *testing.T) {
 	if !containsInOrder(plain, "queued latest", "Global", "› draft") {
 		t.Fatalf("expected help above input and below queue, got %q", plain)
 	}
-	if !containsInOrder(plain, "Global\nAlt + /, ? | Cmd + /, ?", "\n\nTranscript\nPgUp", "\n\nMain Input\nEnter", "\n\nRollback Mode\nEsc | Esc") {
+	if !containsInOrder(plain, "Global\nF1 | ? (empty prompt) | Alt + / | Cmd + /", "\n\nTranscript\nPgUp", "\n\nMain Input\nEnter", "\n\nRollback Mode\nEsc | Esc") {
 		t.Fatalf("expected blank line between visible help sections, got %q", plain)
 	}
 	if !containsInOrder(plain, "Alt + ←, → | Ctrl + ←, →", "move the cursor by word") {
@@ -3886,7 +4167,7 @@ func TestHelpToggleRendersBelowQueuedMessagesAndInput(t *testing.T) {
 	if !strings.Contains(plain, "cancel or go back") {
 		t.Fatalf("expected rollback escape copy in help pane, got %q", plain)
 	}
-	if !strings.Contains(plain, "Alt + /, ?") || !strings.Contains(plain, "Cmd + /, ?") || !strings.Contains(plain, "Shift + Tab") {
+	if !strings.Contains(plain, "F1") || !strings.Contains(plain, "? (empty prompt)") || !strings.Contains(plain, "Alt + /") || !strings.Contains(plain, "Cmd + /") || !strings.Contains(plain, "Shift + Tab") {
 		t.Fatalf("expected indexed shortcuts in help pane, got %q", plain)
 	}
 	for _, unwanted := range []string{"Keyboard Help", "Press any registered key to dismiss", "Slash Commands", "Ask Prompt", "Process List", "Printable keys", "start editing from the selected rollback point", "fork from the selected rollback point", "close rollback selection", "return to rollback selection when the edit prompt is empty"} {
@@ -3964,6 +4245,41 @@ func TestHelpDismissesOnAnyKeypress(t *testing.T) {
 	}
 }
 
+func TestQuestionMarkTogglesHelpWhenInputIsEmpty(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	updated := next.(*uiModel)
+
+	if !updated.helpVisible {
+		t.Fatal("expected ? to open help from an empty prompt")
+	}
+}
+
+func TestQuestionMarkInsertsLiteralWhenInputIsNotEmpty(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.input = "draft"
+	m.inputCursor = len([]rune(m.input))
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	updated := next.(*uiModel)
+
+	if updated.helpVisible {
+		t.Fatal("did not expect ? to open help while a draft is present")
+	}
+	if updated.input != "draft?" {
+		t.Fatalf("expected ? to be inserted into the draft, got %q", updated.input)
+	}
+}
+
 func TestAltQuestionMarkTogglesHelp(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 80
@@ -3976,6 +4292,21 @@ func TestAltQuestionMarkTogglesHelp(t *testing.T) {
 
 	if !updated.helpVisible {
 		t.Fatal("expected alt+? to open help")
+	}
+}
+
+func TestF1TogglesHelp(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyF1})
+	updated := next.(*uiModel)
+
+	if !updated.helpVisible {
+		t.Fatal("expected f1 to open help")
 	}
 }
 
