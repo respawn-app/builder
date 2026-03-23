@@ -16,20 +16,39 @@ type slashCommandPickerState struct {
 	start     int
 }
 
-func parseSlashCommandInput(input string) (active bool, token string, argumentMode bool) {
+type slashCommandInput struct {
+	active       bool
+	token        string
+	args         string
+	argumentMode bool
+}
+
+type slashCommandSelection struct {
+	input      slashCommandInput
+	command    commands.Command
+	hasCommand bool
+	exact      bool
+}
+
+func parseSlashCommandInput(input string) slashCommandInput {
 	trimmed := strings.TrimLeftFunc(input, unicode.IsSpace)
 	if trimmed == "" || trimmed[0] != '/' {
-		return false, "", false
+		return slashCommandInput{}
 	}
 	payload := trimmed[1:]
 	if payload == "" {
-		return true, "", false
+		return slashCommandInput{active: true}
 	}
 	spaceIdx := strings.IndexFunc(payload, unicode.IsSpace)
 	if spaceIdx < 0 {
-		return true, payload, false
+		return slashCommandInput{active: true, token: payload}
 	}
-	return true, payload[:spaceIdx], true
+	return slashCommandInput{
+		active:       true,
+		token:        payload[:spaceIdx],
+		args:         strings.TrimSpace(payload[spaceIdx:]),
+		argumentMode: true,
+	}
 }
 
 func normalizeSlashCommandToken(token string) string {
@@ -37,14 +56,14 @@ func normalizeSlashCommandToken(token string) string {
 }
 
 func (m *uiModel) refreshSlashCommandFilterFromInput() {
-	active, token, argumentMode := parseSlashCommandInput(m.input)
-	if !active || argumentMode {
+	parsed := parseSlashCommandInput(m.input)
+	if !parsed.active || parsed.argumentMode {
 		m.slashCommandFilter = ""
 		m.slashCommandFilterSet = false
 		m.slashCommandSelection = 0
 		return
 	}
-	normalized := normalizeSlashCommandToken(token)
+	normalized := normalizeSlashCommandToken(parsed.token)
 	if !m.slashCommandFilterSet || m.slashCommandFilter != normalized {
 		m.slashCommandSelection = 0
 	}
@@ -119,11 +138,11 @@ func (m *uiModel) slashCommandPicker() slashCommandPickerState {
 	if m.rollbackMode {
 		return slashCommandPickerState{}
 	}
-	active, token, argumentMode := parseSlashCommandInput(m.input)
-	if !active || argumentMode || m.isInputLocked() || m.activeAsk != nil {
+	parsed := parseSlashCommandInput(m.input)
+	if !parsed.active || parsed.argumentMode || m.isInputLocked() || m.activeAsk != nil {
 		return slashCommandPickerState{}
 	}
-	matches := m.currentSlashCommandMatches(token)
+	matches := m.currentSlashCommandMatches(parsed.token)
 	selection := 0
 	if len(matches) > 0 {
 		selection = clampSlashPickerIndex(m.slashCommandSelection, 0, len(matches)-1)
@@ -145,6 +164,55 @@ func (m *uiModel) slashCommandPicker() slashCommandPickerState {
 		selection: selection,
 		start:     start,
 	}
+}
+
+func (m *uiModel) resolveSlashCommandSelection(input string) slashCommandSelection {
+	parsed := parseSlashCommandInput(input)
+	selection := slashCommandSelection{input: parsed}
+	if !parsed.active || m.commandRegistry == nil {
+		return selection
+	}
+	if parsed.argumentMode {
+		command, ok := m.commandRegistry.Command(input)
+		if !ok {
+			return selection
+		}
+		selection.command = command
+		selection.hasCommand = true
+		selection.exact = true
+		return selection
+	}
+	matches := m.currentSlashCommandMatches(parsed.token)
+	if len(matches) == 0 {
+		return selection
+	}
+	selected := matches[clampSlashPickerIndex(m.slashCommandSelection, 0, len(matches)-1)]
+	selection.command = selected
+	selection.hasCommand = true
+	selection.exact = selected.Name == normalizeSlashCommandToken(parsed.token)
+	return selection
+}
+
+func (s slashCommandSelection) commandText() string {
+	if !s.hasCommand {
+		return ""
+	}
+	commandText := "/" + s.command.Name
+	if !s.input.argumentMode || strings.TrimSpace(s.input.args) == "" {
+		return commandText
+	}
+	return commandText + " " + strings.TrimSpace(s.input.args)
+}
+
+func (s slashCommandSelection) autocompleteText() string {
+	if !s.hasCommand {
+		return ""
+	}
+	return "/" + s.command.Name + " "
+}
+
+func (s slashCommandSelection) shouldAutocomplete() bool {
+	return s.hasCommand && !s.input.argumentMode && !s.exact
 }
 
 func (m *uiModel) navigateSlashCommandPicker(delta int) bool {

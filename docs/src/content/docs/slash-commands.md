@@ -22,6 +22,13 @@ description: Available slash commands, how their input is parsed, and how file-b
 | `/init <instructions>` | optional free-form text | Start a fresh initialization session using the built-in init prompt. Trailing text is appended to the prompt body. |
 | `/prompt:<name>` | optional free-form text | Run a custom Markdown prompt discovered from disk. |
 
+## Input Behavior
+
+- While you are still typing the slash-command name, the picker keeps a selected best match.
+- `Enter` runs the selected command immediately, even when the name is only partially typed.
+- `Tab` on a partial command autocompletes the selected command and inserts a trailing space so you can continue with arguments.
+- `Tab` on an exact known command uses the normal queued-input flow, so built-in, custom, and fresh-session commands all flush after the current turn finishes.
+- Unknown slash commands are still sent to the model as normal user prompts.
 
 ### 2. Built-In and Custom Prompts
 
