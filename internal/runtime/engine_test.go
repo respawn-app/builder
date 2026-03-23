@@ -2134,6 +2134,7 @@ func TestReviewerRunsOnAllFrequencyWithoutToolCalls(t *testing.T) {
 			Frequency:     "all",
 			Model:         "gpt-5",
 			ThinkingLevel: "low",
+			VerboseOutput: true,
 			Client:        reviewerClient,
 		},
 	})
@@ -2381,6 +2382,7 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 			Frequency:     "all",
 			Model:         "gpt-5",
 			ThinkingLevel: "low",
+			VerboseOutput: true,
 			Client:        reviewerClient,
 		},
 	})
@@ -2553,6 +2555,7 @@ func TestReviewerNoSuggestionsPersistsStatusEntry(t *testing.T) {
 			Frequency:     "all",
 			Model:         "gpt-5",
 			ThinkingLevel: "low",
+			VerboseOutput: true,
 			Client:        reviewerClient,
 		},
 	})
@@ -2613,6 +2616,7 @@ func TestReviewerArrayPayloadIsIgnoredAsNoSuggestions(t *testing.T) {
 			Frequency:     "all",
 			Model:         "gpt-5",
 			ThinkingLevel: "low",
+			VerboseOutput: true,
 			Client:        reviewerClient,
 		},
 	})
@@ -2732,6 +2736,7 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 			Frequency:     "all",
 			Model:         "gpt-5",
 			ThinkingLevel: "low",
+			VerboseOutput: true,
 			Client:        reviewerClient,
 		},
 	})
@@ -2802,12 +2807,141 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 	}
 }
 
+func TestReviewerDefaultOutputOmitsReviewerSuggestionsEntry(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "original final"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}, {
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "updated final after review"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["Add final verification notes."]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "updated final after review" {
+		t.Fatalf("assistant content = %q, want updated final after review", msg.Content)
+	}
+
+	snapshot := eng.ChatSnapshot()
+	for _, entry := range snapshot.Entries {
+		if entry.Role == "reviewer_suggestions" {
+			t.Fatalf("expected reviewer_suggestions entry to be omitted by default, got %+v", snapshot.Entries)
+		}
+		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "Supervisor suggested:") {
+			t.Fatalf("expected concise reviewer status by default, got %+v", entry)
+		}
+	}
+}
+
 func TestReviewerSuggestionsOngoingTextUsesLockedWording(t *testing.T) {
 	if got := reviewerSuggestionsOngoingText([]string{"one"}); got != "Supervisor made 1 suggestion." {
 		t.Fatalf("unexpected single-suggestion ongoing text: %q", got)
 	}
 	if got := reviewerSuggestionsOngoingText([]string{"one", "two"}); got != "Supervisor made 2 suggestions." {
 		t.Fatalf("unexpected multi-suggestion ongoing text: %q", got)
+	}
+}
+
+func TestReviewerVerboseOutputIncludesSuggestionsInFinalStatus(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "original final"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}, {
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "updated final after review"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["Add final verification notes."]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			VerboseOutput: true,
+			Client:        reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "updated final after review" {
+		t.Fatalf("assistant content = %q, want updated final after review", msg.Content)
+	}
+
+	snapshot := eng.ChatSnapshot()
+	foundVerboseStatus := false
+	for _, entry := range snapshot.Entries {
+		if entry.Role != "reviewer_status" {
+			continue
+		}
+		if strings.Contains(entry.Text, "Supervisor suggested:\n1. Add final verification notes.") {
+			foundVerboseStatus = true
+			break
+		}
+	}
+	if !foundVerboseStatus {
+		t.Fatalf("expected verbose reviewer status entry in snapshot, got %+v", snapshot.Entries)
+	}
+
+	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	restoredSnapshot := restored.ChatSnapshot()
+	foundRestoredVerboseStatus := false
+	for _, entry := range restoredSnapshot.Entries {
+		if entry.Role != "reviewer_status" {
+			continue
+		}
+		if strings.Contains(entry.Text, "Supervisor suggested:\n1. Add final verification notes.") {
+			foundRestoredVerboseStatus = true
+			break
+		}
+	}
+	if !foundRestoredVerboseStatus {
+		t.Fatalf("expected restored verbose reviewer status entry, got %+v", restoredSnapshot.Entries)
 	}
 }
 

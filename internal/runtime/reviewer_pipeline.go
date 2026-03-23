@@ -51,12 +51,16 @@ func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string
 		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
 		return original, nil
 	}
-	_ = e.appendPersistedLocalEntryWithOngoingText(
-		stepID,
-		"reviewer_suggestions",
-		reviewerSuggestionsText(suggestions),
-		reviewerSuggestionsOngoingText(suggestions),
-	)
+	statusSuggestions := []string(nil)
+	if e.cfg.Reviewer.VerboseOutput {
+		_ = e.appendPersistedLocalEntryWithOngoingText(
+			stepID,
+			"reviewer_suggestions",
+			reviewerSuggestionsText(suggestions),
+			reviewerSuggestionsOngoingText(suggestions),
+		)
+		statusSuggestions = suggestions
+	}
 
 	instruction := formatReviewerDeveloperInstruction(suggestions)
 	if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeReviewerFeedback, Content: instruction}); err != nil {
@@ -69,7 +73,7 @@ func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string
 			Error:            "reviewer step runner is not configured",
 		}
 		e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
-		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
+		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, statusSuggestions))
 		return original, nil
 	}
 
@@ -88,7 +92,7 @@ func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string
 			Error:                 strings.TrimSpace(err.Error()),
 		}
 		e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
-		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
+		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, statusSuggestions))
 		return original, nil
 	}
 	if noopFinalAnswer || isNoopFinalAnswer(followUp) {
@@ -102,7 +106,7 @@ func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string
 			HasCacheHitPercentage: reviewerResult.HasCacheHitPercentage,
 		}
 		e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
-		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
+		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, statusSuggestions))
 		return original, nil
 	}
 	status := ReviewerStatus{
@@ -112,7 +116,7 @@ func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string
 		HasCacheHitPercentage: reviewerResult.HasCacheHitPercentage,
 	}
 	e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: &status})
-	_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
+	_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, statusSuggestions))
 	return followUp, nil
 }
 

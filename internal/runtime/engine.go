@@ -99,6 +99,7 @@ type ReviewerConfig struct {
 	Frequency     string
 	Model         string
 	ThinkingLevel string
+	VerboseOutput bool
 	Client        llm.Client
 	ClientFactory func() (llm.Client, error)
 }
