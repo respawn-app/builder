@@ -31,6 +31,10 @@ export default defineConfig({
           link: docsConfig.docsHomePath,
         },
         {
+          label: 'Slash Commands',
+          link: '/slash-commands/',
+        },
+        {
           label: 'Subagents / Headless',
           link: '/subagents-headless/',
         },

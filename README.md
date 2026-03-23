@@ -12,7 +12,7 @@ brew install builder-cli
 ### Standalone binaries via GitHub Releases
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/respawn-app/agent/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/respawn-app/builder/main/scripts/install.sh | sh
 ```
 
 Check the installed version with `builder --version`.

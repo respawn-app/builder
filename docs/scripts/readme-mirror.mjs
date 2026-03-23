@@ -53,7 +53,9 @@ function rewriteRelativeUrl(url, docsConfig) {
     return new URL(normalizedPath, docsConfig.repoRawRootUrl).toString() + hash;
   }
 
-  const targetRoot = isDirectory ? docsConfig.repoUrl.replace('/agent', '/agent/tree/main') : docsConfig.repoBlobRootUrl;
+  const targetRoot = isDirectory
+    ? `${docsConfig.repoUrl}/tree/${docsConfig.repoDefaultBranch}/`
+    : docsConfig.repoBlobRootUrl;
   return new URL(normalizedPath, `${targetRoot}`).toString() + hash;
 }
 

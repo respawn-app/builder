@@ -9,7 +9,7 @@ Updates the Homebrew tap formula for builder-cli with a new tag tarball + sha256
 
 Defaults:
   --version : $BUILDER_VERSION, $GITHUB_REF_NAME, or latest git tag in this repo
-  --repo    : respawn-app/agent
+  --repo    : respawn-app/builder
   --formula : builder-cli
   --tap     : $BUILDER_TAP_PATH, $HOMEBREW_TAP_PATH, else ../homebrew-tap (relative to repo root)
 
@@ -20,7 +20,7 @@ USAGE
 }
 
 version=""
-repo="respawn-app/agent"
+repo="respawn-app/builder"
 formula="builder-cli"
 tap_dir=""
 do_commit="false"
@@ -123,7 +123,7 @@ if [[ ! -f "$formula_path" ]]; then
   cat > "$formula_path" <<EOF
 class ${formula_class} < Formula
   desc "Minimal terminal coding agent for professional engineering workflows"
-  homepage "https://github.com/respawn-app/agent"
+  homepage "https://github.com/respawn-app/builder"
   url "$url"
   version "${version#v}"
   sha256 "$sha256"
