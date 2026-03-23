@@ -423,6 +423,9 @@ func reviewerVerboseStatusHeader(status ReviewerStatus) string {
 	case "applied":
 		return fmt.Sprintf("Supervisor ran, applied %s:", reviewerSuggestionCountLabel(status.SuggestionsCount))
 	case "followup_failed":
+		if strings.TrimSpace(status.Error) != "" {
+			return fmt.Sprintf("Supervisor ran, follow-up failed after %s: %s", reviewerSuggestionCountLabel(status.SuggestionsCount), status.Error)
+		}
 		return fmt.Sprintf("Supervisor ran, follow-up failed after %s:", reviewerSuggestionCountLabel(status.SuggestionsCount))
 	default:
 		return ""
