@@ -125,7 +125,6 @@ class ${formula_class} < Formula
   desc "Minimal terminal coding agent for professional engineering workflows"
   homepage "https://github.com/respawn-app/builder"
   url "$url"
-  version "${version#v}"
   sha256 "$sha256"
   license "AGPL-3.0-only"
   depends_on "go" => :build
@@ -143,8 +142,8 @@ fi
 
 perl -0pi -e "s|^class\s+\S+\s+< Formula$|class ${formula_class} < Formula|m" "$formula_path"
 perl -0pi -e "s|^  url \".*\"|  url \"$url\"|m" "$formula_path"
-perl -0pi -e "s|^  version \".*\"|  version \"${version#v}\"|m" "$formula_path"
 perl -0pi -e "s|^  sha256 \".*\"|  sha256 \"$sha256\"|m" "$formula_path"
+perl -0pi -e 's|^  version ".*"\n||m' "$formula_path"
 perl -0pi -e 's/^\s*bottle do\n(?:.*\n)*?\s*end\n\n//m' "$formula_path"
 
 if [[ "$do_commit" == "true" ]]; then
