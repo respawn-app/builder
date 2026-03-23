@@ -354,7 +354,7 @@ func TestFormatToolCallAskQuestionUsesQuestionAndSuggestionsMeta(t *testing.T) {
 	call := llm.ToolCall{
 		ID:    "call_ask",
 		Name:  string(tools.ToolAskQuestion),
-		Input: json.RawMessage(`{"question":"Choose scope?","suggestions":["Recommended: flat scan","Recursive scan"]}`),
+		Input: json.RawMessage(`{"question":"Choose scope?","suggestions":["flat scan","Recursive scan"],"recommended_option_index":1}`),
 	}
 
 	rendered := s.formatToolCall(call)
@@ -385,8 +385,78 @@ func TestFormatToolCallAskQuestionUsesQuestionAndSuggestionsMeta(t *testing.T) {
 	if len(rendered.ToolCall.Suggestions) != 2 {
 		t.Fatalf("expected 2 suggestions, got %+v", rendered.ToolCall.Suggestions)
 	}
-	if rendered.ToolCall.Suggestions[0] != "Recommended: flat scan" || rendered.ToolCall.Suggestions[1] != "Recursive scan" {
+	if rendered.ToolCall.Suggestions[0] != "flat scan" || rendered.ToolCall.Suggestions[1] != "Recursive scan" {
 		t.Fatalf("unexpected ask_question suggestions: %+v", rendered.ToolCall.Suggestions)
+	}
+	if rendered.ToolCall.RecommendedOptionIndex != 1 {
+		t.Fatalf("unexpected ask_question recommended option index: %+v", rendered.ToolCall)
+	}
+}
+
+func TestChatStoreSnapshotFormatsAskQuestionStructuredAnswer(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{
+		Role: llm.RoleAssistant,
+		ToolCalls: []llm.ToolCall{{
+			ID:    "call_ask",
+			Name:  string(tools.ToolAskQuestion),
+			Input: json.RawMessage(`{"question":"Choose scope?","suggestions":["full","fast"]}`),
+		}},
+	})
+	s.appendMessage(llm.Message{
+		Role:       llm.RoleTool,
+		ToolCallID: "call_ask",
+		Name:       string(tools.ToolAskQuestion),
+		Content:    `"User answered and picked option 2.\nUser also said:\nneed extra context"`,
+	})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 2 {
+		t.Fatalf("expected 2 entries, got %+v", snap.Entries)
+	}
+	if snap.Entries[1].Role != "tool_result_ok" {
+		t.Fatalf("expected ask result entry, got %+v", snap.Entries[1])
+	}
+	want := "User answered and picked option 2.\nUser also said:\nneed extra context"
+	if snap.Entries[1].Text != want {
+		t.Fatalf("unexpected ask result text: %q", snap.Entries[1].Text)
+	}
+}
+
+func TestFormatToolCallAskQuestionRejectsApprovalShapeAtToolLayer(t *testing.T) {
+	s := newChatStore()
+	call := llm.ToolCall{
+		ID:    "call_ask",
+		Name:  string(tools.ToolAskQuestion),
+		Input: json.RawMessage(`{"question":"Approve?","approval":true}`),
+	}
+
+	rendered := s.formatToolCall(call)
+	if rendered.Text != "Approve?" {
+		t.Fatalf("expected ask question text preserved for invalid approval-shaped tool call, got %q", rendered.Text)
+	}
+	if rendered.ToolCall == nil || rendered.ToolCall.Question != "Approve?" {
+		t.Fatalf("expected ask metadata question preserved, got %+v", rendered.ToolCall)
+	}
+}
+
+func TestFormatToolCallAskQuestionDropsImpossibleRecommendedMetadataAfterNormalization(t *testing.T) {
+	s := newChatStore()
+	call := llm.ToolCall{
+		ID:    "call_ask",
+		Name:  string(tools.ToolAskQuestion),
+		Input: json.RawMessage(`{"question":"Choose scope?","suggestions":["", "beta"],"recommended_option_index":2}`),
+	}
+
+	rendered := s.formatToolCall(call)
+	if rendered.ToolCall == nil {
+		t.Fatalf("expected ask metadata, got nil")
+	}
+	if len(rendered.ToolCall.Suggestions) != 1 || rendered.ToolCall.Suggestions[0] != "beta" {
+		t.Fatalf("unexpected normalized suggestions: %+v", rendered.ToolCall)
+	}
+	if rendered.ToolCall.RecommendedOptionIndex != 0 {
+		t.Fatalf("expected impossible recommended index to be dropped, got %+v", rendered.ToolCall)
 	}
 }
 

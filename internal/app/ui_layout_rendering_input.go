@@ -27,16 +27,7 @@ func (l uiViewLayout) renderInputLines(width int, style uiStyles) []string {
 		return l.renderAskInputLines(width, style)
 	}
 
-	wrapped, visibleStart := l.visibleMainInputLines(width)
-	if l.shouldRenderSoftCursor() {
-		cursorStyle := lipgloss.NewStyle().Reverse(true)
-		cursorLine, cursorCol := inputCursorDisplayPosition(l.mainInputPrefix(), m.input, m.inputCursor, width)
-		visibleCursorLine := cursorLine - visibleStart
-		if visibleCursorLine >= 0 && visibleCursorLine < len(wrapped) {
-			wrapped[visibleCursorLine] = overlayCursorOnLine(wrapped[visibleCursorLine], cursorCol, width, cursorStyle)
-		}
-	}
-
+	wrapped := l.visibleMainInputLines(width)
 	lineStyle := style.input
 	if m.isInputLocked() {
 		lineStyle = style.inputDisabled
@@ -54,14 +45,19 @@ func (l uiViewLayout) renderAskInputLines(width int, style uiStyles) []string {
 	}
 	wrapped := l.visibleAskPromptLines(width)
 	selectedStyle := lipgloss.NewStyle().Foreground(uiPalette(l.model.theme).primary).Bold(true)
+	recommendedStyle := lipgloss.NewStyle().Foreground(uiPalette(l.model.theme).secondary)
 	rendered := make([]string, 0, len(wrapped))
 	for _, line := range wrapped {
 		padded := padANSIRight(line.Text, width)
 		switch {
 		case line.Line.Kind == askPromptLineKindHint:
 			rendered = append(rendered, style.meta.Render(padded))
+		case line.Line.Disabled:
+			rendered = append(rendered, style.inputDisabled.Render(padded))
 		case line.Line.Selected:
 			rendered = append(rendered, selectedStyle.Render(padded))
+		case line.Line.Recommended:
+			rendered = append(rendered, recommendedStyle.Render(padded))
 		default:
 			rendered = append(rendered, style.input.Render(padded))
 		}
@@ -76,29 +72,43 @@ func (l uiViewLayout) mainInputPrefix() string {
 	return "› "
 }
 
-func (l uiViewLayout) wrappedMainInputLines(width int) []string {
-	return wrapPlainLines(splitPlainLines(l.mainInputPrefix()+l.model.input), width)
-}
-
-func (l uiViewLayout) visibleMainInputLines(width int) ([]string, int) {
-	wrapped := l.wrappedMainInputLines(width)
-	visibleStart := 0
-	maxContentLines := inputContentLineLimit(l.effectiveHeight())
-	if len(wrapped) > maxContentLines {
-		visibleStart = len(wrapped) - maxContentLines
-		wrapped = wrapped[visibleStart:]
+func (l uiViewLayout) mainInputRenderSpec() uiEditableInputRenderSpec {
+	return uiEditableInputRenderSpec{
+		Prefix:       l.mainInputPrefix(),
+		Text:         l.model.input,
+		CursorIndex:  l.model.inputCursor,
+		RenderCursor: l.shouldRenderSoftCursor(),
 	}
-	return wrapped, visibleStart
 }
 
-func (l uiViewLayout) wrappedAskPromptLines(width int) []wrappedAskPromptLine {
+func (l uiViewLayout) wrappedMainInputLines(width int) []string {
+	return wrappedEditableInputLines(width, l.mainInputRenderSpec())
+}
+
+func (l uiViewLayout) visibleMainInputLines(width int) []string {
+	return visibleEditableInputLines(width, inputContentLineLimit(l.effectiveHeight()), l.mainInputRenderSpec())
+}
+
+func (l uiViewLayout) wrappedAskPromptLines(width int) ([]wrappedAskPromptLine, int) {
 	promptLines := l.model.renderAskPromptLines()
 	if len(promptLines) == 0 {
 		promptLines = []askPromptLine{{Text: "", Kind: askPromptLineKindQuestion}}
 	}
 	out := make([]wrappedAskPromptLine, 0, len(promptLines)*2)
+	cursorLineIndex := -1
 	for _, line := range promptLines {
 		parts := wrapLine(line.Text, width)
+		if line.Kind == askPromptLineKindInput {
+			spec := uiEditableInputRenderSpec{Prefix: line.InputPrefix, Text: line.InputText, CursorIndex: line.InputCursor, RenderCursor: line.ShowsCursor}
+			parts = wrappedEditableInputLines(width, spec)
+			if line.ShowsCursor {
+				cursorLine, cursorCol := inputCursorDisplayPosition(spec.Prefix, spec.Text, spec.CursorIndex, width)
+				if cursorLine >= 0 && cursorLine < len(parts) {
+					parts[cursorLine] = overlayCursorOnLine(parts[cursorLine], cursorCol, width, lipgloss.NewStyle().Reverse(true))
+					cursorLineIndex = len(out) + cursorLine
+				}
+			}
+		}
 		if len(parts) == 0 {
 			parts = []string{""}
 		}
@@ -107,16 +117,17 @@ func (l uiViewLayout) wrappedAskPromptLines(width int) []wrappedAskPromptLine {
 		}
 	}
 	if len(out) == 0 {
-		return []wrappedAskPromptLine{{Text: "", Line: askPromptLine{Kind: askPromptLineKindQuestion}}}
+		return []wrappedAskPromptLine{{Text: "", Line: askPromptLine{Kind: askPromptLineKindQuestion}}}, -1
 	}
-	return out
+	return out, cursorLineIndex
 }
 
 func (l uiViewLayout) visibleAskPromptLines(width int) []wrappedAskPromptLine {
-	wrapped := l.wrappedAskPromptLines(width)
+	wrapped, cursorLine := l.wrappedAskPromptLines(width)
 	maxContentLines := inputContentLineLimit(l.effectiveHeight())
 	if len(wrapped) > maxContentLines {
-		wrapped = wrapped[len(wrapped)-maxContentLines:]
+		visibleStart := visibleWrappedLineStart(len(wrapped), maxContentLines, cursorLine, cursorLine >= 0)
+		wrapped = wrapped[visibleStart : visibleStart+maxContentLines]
 	}
 	return wrapped
 }
@@ -147,7 +158,8 @@ func (l uiViewLayout) inputPanelLineCount(width, height int) int {
 	}
 	contentLines := len(l.wrappedMainInputLines(width))
 	if inputState.ShowsAskInput {
-		contentLines = len(l.wrappedAskPromptLines(width))
+		wrappedAskLines, _ := l.wrappedAskPromptLines(width)
+		contentLines = len(wrappedAskLines)
 	}
 	if contentLines < 1 {
 		contentLines = 1

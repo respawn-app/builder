@@ -195,6 +195,9 @@ func TestBuildToolRegistry_ViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("expected success result, got %s", string(result.Output))
 	}
+	if strings.Contains(string(result.Output), "User answered approval") {
+		t.Fatalf("did not expect approval ask output to leak into guarded tool result, got %s", string(result.Output))
+	}
 
 	if err := logger.Close(); err != nil {
 		t.Fatalf("close run logger: %v", err)

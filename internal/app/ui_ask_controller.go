@@ -23,20 +23,25 @@ const (
 )
 
 type askPromptLine struct {
-	Text     string
-	Kind     askPromptLineKind
-	Selected bool
+	Text        string
+	Kind        askPromptLineKind
+	Selected    bool
+	Recommended bool
+	Disabled    bool
+	InputPrefix string
+	InputText   string
+	InputCursor int
+	ShowsCursor bool
 }
 
 type askFreeformMode int
 
 const (
 	askFreeformModeGeneric askFreeformMode = iota
-	askFreeformModeApprovalAllowCommentary
-	askFreeformModeApprovalDenyCommentary
+	askFreeformModeApprovalCommentary
 )
 
-const approvalCommentaryOptionText = "Deny, and add commentary"
+const askFreeformSelectionOptionText = "Something else"
 
 func (c uiAskController) acceptEvent(evt askEvent) {
 	m := c.model
@@ -52,6 +57,9 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := c.model
 	if m.activeAsk == nil {
 		return m, nil
+	}
+	if msg.Type != tea.KeyEnter && msg.Type != keyTypeShiftEnterCSI {
+		m.inputController().clearPendingCSIShiftEnter()
 	}
 	req := m.activeAsk.req
 
@@ -79,26 +87,41 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyTab:
+		if m.askFreeform {
+			if !askSupportsDraftRoundTrip(req) {
+				return m, nil
+			}
+			m.askFreeform = false
+			return m, nil
+		}
 		m.askFreeform = true
-		if approvalSupportsAllowCommentary(req) {
-			m.askFreeformMode = askFreeformModeApprovalAllowCommentary
-			m.askInput = ""
+		if approvalSupportsCommentary(req) {
+			m.askFreeformMode = askFreeformModeApprovalCommentary
+			m.clearAskInput()
 		}
 		return m, nil
 	case tea.KeyEnter:
+		m.inputController().normalizePendingCSIShiftEnterOnEnter()
 		if m.askFreeform {
 			commentary := strings.TrimSpace(m.askInput)
-			resp := askquestion.Response{Answer: commentary}
+			if askRequiresFreeformSelectionCommentary(req, m.askCursor) && commentary == "" {
+				return m, c.showFreeformSelectionCommentaryRequiredError()
+			}
+			resp := askquestion.Response{Answer: commentary, FreeformAnswer: commentary}
+			if optionNumber, ok := selectedAskOptionNumber(req, m.askCursor); ok {
+				resp.SelectedOptionNumber = optionNumber
+			}
 			if req.Approval {
-				switch m.askFreeformMode {
-				case askFreeformModeApprovalAllowCommentary:
+				if m.askFreeformMode == askFreeformModeApprovalCommentary {
+					decision, ok := selectedApprovalDecision(req, m.askCursor)
+					if !ok {
+						return m, nil
+					}
 					if commentary != "" && m.engine != nil {
 						m.engine.QueueUserMessage(commentary)
 						m.pendingInjected = append(m.pendingInjected, commentary)
 					}
-					resp = askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowOnce, Commentary: commentary}}
-				case askFreeformModeApprovalDenyCommentary:
-					resp = askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionDeny, Commentary: commentary}}
+					resp = askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: decision, Commentary: commentary}}
 				}
 			}
 			hasNext := c.answer(resp, nil)
@@ -114,19 +137,30 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.askFreeform = true
 			return m, nil
 		}
-		if askHasApprovalDenyCommentaryOption(req) && m.askCursor == len(askVisibleOptions(req)) {
-			m.askFreeform = true
-			m.askFreeformMode = askFreeformModeApprovalDenyCommentary
-			m.askInput = ""
+		if askHasFreeformSelectionOption(req) && m.askCursor == len(askVisibleOptions(req)) {
+			commentary := strings.TrimSpace(m.askInput)
+			if commentary == "" {
+				m.askFreeform = true
+				return m, nil
+			}
+			hasNext := c.answer(askquestion.Response{Answer: commentary, FreeformAnswer: commentary}, nil)
+			if hasNext {
+				m.activity = uiActivityQuestion
+			} else {
+				m.activity = uiActivityRunning
+			}
 			return m, nil
 		}
 		visibleOptions := askVisibleOptions(req)
 		if m.askCursor < 0 || m.askCursor >= len(visibleOptions) {
 			m.askFreeform = true
-			m.askInput = ""
+			m.clearAskInput()
 			return m, nil
 		}
-		resp := askquestion.Response{Answer: visibleOptions[m.askCursor]}
+		resp := askquestion.Response{SelectedOptionNumber: m.askCursor + 1}
+		if commentary := strings.TrimSpace(m.askInput); askSupportsDraftRoundTrip(req) && commentary != "" {
+			resp.FreeformAnswer = commentary
+		}
 		if req.Approval && m.askCursor < len(req.ApprovalOptions) {
 			resp = askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: req.ApprovalOptions[m.askCursor].Decision}}
 		}
@@ -138,35 +172,99 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyUp:
-		if !m.askFreeform && m.askCursor > 0 {
+		if m.askFreeform {
+			m.moveAskCursorUpLine()
+			return m, nil
+		}
+		if m.askCursor > 0 {
 			m.askCursor--
 		}
 		return m, nil
 	case tea.KeyDown:
+		if m.askFreeform {
+			m.moveAskCursorDownLine()
+			return m, nil
+		}
+		maxIdx := askOptionCount(req) - 1
+		if maxIdx >= 0 && m.askCursor < maxIdx {
+			m.askCursor++
+		}
+		return m, nil
+	case tea.KeyCtrlJ, keyTypeShiftEnterCSI:
 		if !m.askFreeform {
-			maxIdx := askOptionCount(req) - 1
-			if maxIdx >= 0 && m.askCursor < maxIdx {
-				m.askCursor++
-			}
+			return m, nil
+		}
+		m.insertAskInputRunes([]rune{'\n'})
+		if msg.Type == keyTypeShiftEnterCSI {
+			m.inputController().markPendingCSIShiftEnter()
 		}
 		return m, nil
 	case tea.KeyBackspace:
-		if m.askFreeform && len(m.askInput) > 0 {
-			m.askInput = m.askInput[:len(m.askInput)-1]
+		if m.askFreeform {
+			m.backspaceAskInput()
 		}
 		return m, nil
 	case tea.KeySpace:
 		if m.askFreeform {
-			m.askInput += " "
+			m.insertAskInputRunes([]rune{' '})
+		}
+		return m, nil
+	case tea.KeyLeft:
+		if !m.askFreeform {
+			return m, nil
+		}
+		if msg.Alt {
+			m.moveAskCursorWordLeft()
+			return m, nil
+		}
+		m.moveAskCursorLeft()
+		return m, nil
+	case tea.KeyRight:
+		if !m.askFreeform {
+			return m, nil
+		}
+		if msg.Alt {
+			m.moveAskCursorWordRight()
+			return m, nil
+		}
+		m.moveAskCursorRight()
+		return m, nil
+	case tea.KeyHome, tea.KeyCtrlA:
+		if m.askFreeform {
+			m.moveAskCursorStart()
+		}
+		return m, nil
+	case tea.KeyEnd, tea.KeyCtrlE, tea.KeyCtrlEnd:
+		if m.askFreeform {
+			m.moveAskCursorEnd()
+		}
+		return m, nil
+	case tea.KeyCtrlLeft:
+		if m.askFreeform {
+			m.moveAskCursorWordLeft()
+		}
+		return m, nil
+	case tea.KeyCtrlRight:
+		if m.askFreeform {
+			m.moveAskCursorWordRight()
 		}
 		return m, nil
 	default:
-		if m.askFreeform && msg.Type == tea.KeyRunes {
-			filtered, _ := stripMouseSGRRunes(msg.Runes)
-			if len(filtered) == 0 {
+		if isDeleteCurrentLineKey(msg) {
+			if m.askFreeform {
+				m.deleteCurrentAskInputLine()
+			}
+			return m, nil
+		}
+		if isShiftEnterKey(msg) {
+			if !m.askFreeform {
 				return m, nil
 			}
-			m.askInput += string(filtered)
+			m.insertAskInputRunes([]rune{'\n'})
+			return m, nil
+		}
+		if m.askFreeform && msg.Type == tea.KeyRunes {
+			m.insertAskInputRunes(msg.Runes)
 			return m, nil
 		}
 		return m, nil
@@ -188,10 +286,10 @@ func (c uiAskController) renderPromptLines() []askPromptLine {
 		return nil
 	}
 	req := m.activeAsk.req
-	if isApprovalDenyCommentaryPrompt(req, m.askFreeform, m.askFreeformMode) {
+	if isApprovalCommentaryPrompt(req, m.askFreeform, m.askFreeformMode) {
 		return []askPromptLine{
-			{Text: "Your comment:", Kind: askPromptLineKindHint},
-			{Text: m.askInput, Kind: askPromptLineKindInput},
+			{Text: approvalCommentaryLabel(req, m.askCursor), Kind: askPromptLineKindHint},
+			{Kind: askPromptLineKindInput, InputPrefix: m.askInputPrefix(), InputText: m.askInput, InputCursor: m.askInputCursor, ShowsCursor: true},
 		}
 	}
 	lines := []askPromptLine{{Text: strings.TrimSpace(req.Question), Kind: askPromptLineKindQuestion}}
@@ -199,40 +297,45 @@ func (c uiAskController) renderPromptLines() []askPromptLine {
 		visibleOptions := askVisibleOptions(req)
 		for i, s := range visibleOptions {
 			selected := i == m.askCursor
+			recommended := askOptionIsRecommended(req, i)
 			prefix := "  "
 			if selected {
 				prefix = "✓ "
 			}
-			lines = append(lines, askPromptLine{Text: fmt.Sprintf("%s%d. %s", prefix, i+1, s), Kind: askPromptLineKindOption, Selected: selected})
+			lines = append(lines, askPromptLine{Text: fmt.Sprintf("%s%d. %s", prefix, i+1, s), Kind: askPromptLineKindOption, Selected: selected, Recommended: recommended})
 		}
-		if askHasApprovalDenyCommentaryOption(req) {
+		if askHasFreeformSelectionOption(req) {
+			idx := len(visibleOptions) + 1
 			selected := m.askCursor == len(visibleOptions)
 			prefix := "  "
 			if selected {
 				prefix = "✓ "
 			}
-			lines = append(lines, askPromptLine{Text: fmt.Sprintf("%s%d. %s", prefix, len(visibleOptions)+1, approvalCommentaryOptionText), Kind: askPromptLineKindOption, Selected: selected})
+			lines = append(lines, askPromptLine{Text: fmt.Sprintf("%s%d. %s", prefix, idx, askFreeformSelectionOptionText), Kind: askPromptLineKindOption, Selected: selected})
 		}
-		hint := "Tab to switch to freeform • Enter to submit"
-		if approvalSupportsAllowCommentary(req) {
-			hint = "Tab to allow and add commentary • Enter to submit"
+		if askSupportsDraftRoundTrip(req) && askHasPendingFreeformDraft(m.askInput) {
+			lines = append(lines, askPromptLine{Kind: askPromptLineKindInput, Disabled: true, InputPrefix: m.askInputPrefix(), InputText: m.askInput, InputCursor: m.askInputCursor, ShowsCursor: false})
+			return lines
+		}
+		hint := "Tab to switch to freeform • Enter to submit • Something else opens freeform"
+		if approvalSupportsCommentary(req) {
+			hint = "Tab to add commentary • Enter to submit"
 		}
 		lines = append(lines, askPromptLine{Text: hint, Kind: askPromptLineKindHint})
 		return lines
 	}
 
-	inputLine := m.askInput
-	if req.Approval {
-		if m.askFreeformMode == askFreeformModeApprovalAllowCommentary {
-			inputLine = "Allow commentary: " + m.askInput
-		} else {
-			inputLine = "Deny commentary: " + m.askInput
-		}
+	inputLabel := ""
+	if isApprovalCommentaryPrompt(req, m.askFreeform, m.askFreeformMode) {
+		inputLabel = approvalCommentaryLabel(req, m.askCursor)
 	}
-	lines = append(lines, askPromptLine{Text: inputLine, Kind: askPromptLineKindInput})
-	hint := "Tab to switch to freeform • Enter to submit"
-	if approvalSupportsAllowCommentary(req) {
-		hint = "Tab to allow and add commentary • Enter to submit"
+	if inputLabel != "" {
+		lines = append(lines, askPromptLine{Text: inputLabel, Kind: askPromptLineKindHint})
+	}
+	lines = append(lines, askPromptLine{Kind: askPromptLineKindInput, InputPrefix: m.askInputPrefix(), InputText: m.askInput, InputCursor: m.askInputCursor, ShowsCursor: true})
+	hint := "Enter to submit"
+	if askSupportsDraftRoundTrip(req) {
+		hint = "Tab to return to picker • Enter to submit"
 	}
 	lines = append(lines, askPromptLine{Text: hint, Kind: askPromptLineKindHint})
 	return lines
@@ -250,7 +353,7 @@ func (c uiAskController) answer(resp askquestion.Response, err error) bool {
 	if len(m.askQueue) == 0 {
 		m.activeAsk = nil
 		m.askCursor = 0
-		m.askInput = ""
+		m.clearAskInput()
 		m.askFreeform = false
 		m.askFreeformMode = askFreeformModeGeneric
 		return false
@@ -266,9 +369,13 @@ func (c uiAskController) setActiveAsk(evt askEvent) {
 	current := evt
 	m.activeAsk = &current
 	m.askCursor = 0
-	m.askInput = ""
+	m.clearAskInput()
 	m.askFreeform = askOptionCount(current.req) == 0
 	m.askFreeformMode = askFreeformModeGeneric
+}
+
+func (m *uiModel) askInputPrefix() string {
+	return "› "
 }
 
 func askVisibleOptions(req askquestion.Request) []string {
@@ -291,33 +398,87 @@ func approvalOptionIndex(req askquestion.Request, decision askquestion.ApprovalD
 	return -1
 }
 
-func approvalSupportsAllowCommentary(req askquestion.Request) bool {
+func approvalSupportsCommentary(req askquestion.Request) bool {
 	if !req.Approval {
 		return false
 	}
-	return approvalOptionIndex(req, askquestion.ApprovalDecisionAllowOnce) >= 0
+	return len(askVisibleOptions(req)) > 0
 }
 
-func askHasApprovalDenyCommentaryOption(req askquestion.Request) bool {
-	if !req.Approval {
+func askHasFreeformSelectionOption(req askquestion.Request) bool {
+	if req.Approval {
 		return false
 	}
-	return approvalOptionIndex(req, askquestion.ApprovalDecisionDeny) >= 0 && len(askVisibleOptions(req)) > 0
+	return len(askVisibleOptions(req)) > 0
 }
 
 func askOptionCount(req askquestion.Request) int {
 	count := len(askVisibleOptions(req))
-	if askHasApprovalDenyCommentaryOption(req) {
+	if askHasFreeformSelectionOption(req) {
 		count++
 	}
 	return count
 }
 
-func isApprovalDenyCommentaryPrompt(req askquestion.Request, freeform bool, mode askFreeformMode) bool {
-	if !freeform || mode != askFreeformModeApprovalDenyCommentary {
+func isApprovalCommentaryPrompt(req askquestion.Request, freeform bool, mode askFreeformMode) bool {
+	if !freeform || mode != askFreeformModeApprovalCommentary {
 		return false
 	}
 	return req.Approval
+}
+
+func selectedApprovalDecision(req askquestion.Request, cursor int) (askquestion.ApprovalDecision, bool) {
+	if !req.Approval || cursor < 0 || cursor >= len(req.ApprovalOptions) {
+		return "", false
+	}
+	return req.ApprovalOptions[cursor].Decision, true
+}
+
+func approvalCommentaryLabel(req askquestion.Request, cursor int) string {
+	if !req.Approval || cursor < 0 || cursor >= len(req.ApprovalOptions) {
+		return "Commentary:"
+	}
+	return fmt.Sprintf("Commentary for %s:", req.ApprovalOptions[cursor].Label)
+}
+
+func selectedAskOptionNumber(req askquestion.Request, cursor int) (int, bool) {
+	if req.Approval {
+		return 0, false
+	}
+	visibleOptions := askVisibleOptions(req)
+	if cursor < 0 || cursor >= len(visibleOptions) {
+		return 0, false
+	}
+	return cursor + 1, true
+}
+
+func askOptionIsRecommended(req askquestion.Request, index int) bool {
+	if req.Approval {
+		return false
+	}
+	return req.RecommendedOptionIndex == index+1
+}
+
+func askRequiresFreeformSelectionCommentary(req askquestion.Request, cursor int) bool {
+	if !askHasFreeformSelectionOption(req) {
+		return false
+	}
+	return cursor == len(askVisibleOptions(req))
+}
+
+func askHasPendingFreeformDraft(input string) bool {
+	return strings.TrimSpace(input) != ""
+}
+
+func askSupportsDraftRoundTrip(req askquestion.Request) bool {
+	return !req.Approval && len(askVisibleOptions(req)) > 0
+}
+
+func (c uiAskController) showFreeformSelectionCommentaryRequiredError() tea.Cmd {
+	return sequenceCmds(
+		c.model.setTransientStatusWithKind("Write your response before submitting the freeform option", uiStatusNoticeError),
+		ringBellCmd(),
+	)
 }
 
 func (m *uiModel) renderAskPrompt() string {

@@ -105,13 +105,25 @@ func (g OutsideWorkspaceGuard) Allow(ctx context.Context, requestedPath string, 
 		g.logApproved(req, "allow_session")
 		return resolvedPath, nil
 	default:
-		errMessage := fmt.Sprintf("%s: %s; %s", g.errorLabels.RejectedByUserPrefix, requestedPath, g.rejectionInstruction)
-		commentary := strings.TrimSpace(approval.Commentary)
-		if commentary != "" {
-			errMessage += fmt.Sprintf(" User commented about this: %s", strconv.Quote(commentary))
-		}
-		return "", errors.New(errMessage)
+		return "", errors.New(g.rejectedByUserError(requestedPath, approval.Commentary))
 	}
+}
+
+func (g OutsideWorkspaceGuard) rejectedByUserError(requestedPath string, commentary string) string {
+	var parts []string
+	if prefix := strings.TrimSpace(g.errorLabels.RejectedByUserPrefix); prefix != "" {
+		parts = append(parts, fmt.Sprintf("%s: %s", prefix, requestedPath))
+	}
+	errMessage := "User rejected the approval request for this tool call"
+	if trimmedCommentary := strings.TrimSpace(commentary); trimmedCommentary != "" {
+		errMessage += fmt.Sprintf(", and said: %s", strconv.Quote(trimmedCommentary))
+	}
+	errMessage += ". Do not attempt to circumvent, hack around, or re-execute the same path. Treat this rejection as authoritative."
+	if instruction := strings.TrimSpace(g.rejectionInstruction); instruction != "" {
+		errMessage += " " + instruction
+	}
+	parts = append(parts, errMessage)
+	return strings.Join(parts, ". ")
 }
 
 func (g OutsideWorkspaceGuard) isWithinWorkspace(real string) (bool, error) {

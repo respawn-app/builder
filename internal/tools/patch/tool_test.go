@@ -557,8 +557,9 @@ func TestOutsideWorkspaceEditRejectionContainsSteeringMessage(t *testing.T) {
 		t.Fatalf("expected one approval call, got %d", approveCalls)
 	}
 	errMessage := toolError(t, result)
-	if !strings.Contains(errMessage, "do not attempt to circumvent this restriction in any way") {
-		t.Fatalf("expected steering guidance in error, got %q", errMessage)
+	want := "patch target outside workspace rejected by user: " + target + ". User rejected the approval request for this tool call. Do not attempt to circumvent, hack around, or re-execute the same path. Treat this rejection as authoritative. If it's essential to the task, ask the user to make the edit manually at the end of the task."
+	if errMessage != want {
+		t.Fatalf("unexpected steering guidance in error, got %q want %q", errMessage, want)
 	}
 
 	got, err := os.ReadFile(target)
@@ -654,8 +655,9 @@ func TestOutsideWorkspaceRejectionIncludesUserCommentary(t *testing.T) {
 		t.Fatalf("expected error result")
 	}
 	errMessage := toolError(t, result)
-	if !strings.Contains(errMessage, `User commented about this: "not allowed by policy"`) {
-		t.Fatalf("expected user commentary in error, got %q", errMessage)
+	want := `patch target outside workspace rejected by user: ` + target + `. User rejected the approval request for this tool call, and said: "not allowed by policy". Do not attempt to circumvent, hack around, or re-execute the same path. Treat this rejection as authoritative. If it's essential to the task, ask the user to make the edit manually at the end of the task.`
+	if errMessage != want {
+		t.Fatalf("unexpected rejection error, got %q want %q", errMessage, want)
 	}
 }
 

@@ -119,6 +119,127 @@ func TestApprovalAskRequiresApprovalOptions(t *testing.T) {
 	}
 }
 
+func TestApprovalAskRejectsRecommendedOptionIndex(t *testing.T) {
+	b := NewBroker()
+	_, err := b.Ask(context.Background(), Request{
+		ID:                     "approval",
+		Question:               "approve?",
+		Approval:               true,
+		RecommendedOptionIndex: 1,
+		ApprovalOptions: []ApprovalOption{
+			{Decision: ApprovalDecisionAllowOnce, Label: "Allow once"},
+			{Decision: ApprovalDecisionAllowSession, Label: "Allow for this session"},
+			{Decision: ApprovalDecisionDeny, Label: "Deny"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if err.Error() != "approval questions must not set recommended_option_index" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestApprovalAskRejectsSuggestions(t *testing.T) {
+	b := NewBroker()
+	_, err := b.Ask(context.Background(), Request{
+		ID:       "approval",
+		Question: "approve?",
+		Approval: true,
+		Suggestions: []string{
+			"do not use suggestions here",
+		},
+		ApprovalOptions: []ApprovalOption{
+			{Decision: ApprovalDecisionAllowOnce, Label: "Allow once"},
+			{Decision: ApprovalDecisionAllowSession, Label: "Allow for this session"},
+			{Decision: ApprovalDecisionDeny, Label: "Deny"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if err.Error() != "approval questions must not set suggestions" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSuggestionAskRequiresRecommendedOptionIndexAtRequestLayer(t *testing.T) {
+	b := NewBroker()
+	_, err := b.Ask(context.Background(), Request{
+		ID:          "pick-one",
+		Question:    "pick one",
+		Suggestions: []string{"alpha", "beta"},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if err.Error() != "questions with suggestions require recommended_option_index" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSuggestionAskRejectsOutOfRangeRecommendedOptionIndexAtRequestLayer(t *testing.T) {
+	b := NewBroker()
+	_, err := b.Ask(context.Background(), Request{
+		ID:                     "pick-one",
+		Question:               "pick one",
+		Suggestions:            []string{"alpha", "beta"},
+		RecommendedOptionIndex: 3,
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if err.Error() != "recommended_option_index 3 is out of range" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSuggestionAskRejectsRecommendedIndexAfterBlankSuggestionsAreDropped(t *testing.T) {
+	b := NewBroker()
+	_, err := b.Ask(context.Background(), Request{
+		ID:                     "pick-one",
+		Question:               "pick one",
+		Suggestions:            []string{"", "beta"},
+		RecommendedOptionIndex: 2,
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if err.Error() != "recommended_option_index 2 is out of range" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestFreeformOnlyAskAllowsOmittedRecommendedOptionIndexAtRequestLayer(t *testing.T) {
+	b := NewBroker()
+	b.SetAskHandler(func(req Request) (Response, error) {
+		return Response{RequestID: req.ID, FreeformAnswer: "typed answer"}, nil
+	})
+
+	resp, err := b.Ask(context.Background(), Request{ID: "freeform", Question: "what else?"})
+	if err != nil {
+		t.Fatalf("unexpected ask error: %v", err)
+	}
+	if resp.FreeformAnswer != "typed answer" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestFreeformAskRejectsEmptyResponse(t *testing.T) {
+	b := NewBroker()
+	b.SetAskHandler(func(req Request) (Response, error) {
+		return Response{RequestID: req.ID}, nil
+	})
+
+	_, err := b.Ask(context.Background(), Request{ID: "freeform", Question: "what else?"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if err.Error() != "non-approval questions require an answer" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestSubmitRejectsPlainStringResponseForApprovalAsk(t *testing.T) {
 	b := NewBroker()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -340,5 +461,303 @@ func TestToolCallRejectsActionField(t *testing.T) {
 	}
 	if payload["error"] != `invalid input: field "action" is not allowed` {
 		t.Fatalf("expected action rejection message, got %q", payload["error"])
+	}
+}
+
+func TestToolCallSerializesSelectedOptionWithFreeformForModel(t *testing.T) {
+	b := NewBroker()
+	b.SetAskHandler(func(req Request) (Response, error) {
+		return Response{RequestID: req.ID, SelectedOptionNumber: 2, FreeformAnswer: "need extra context"}, nil
+	})
+	tl := NewTool(b)
+
+	result, err := tl.Call(context.Background(), tools.Call{
+		ID:   "call-structured",
+		Name: tools.ToolAskQuestion,
+		Input: json.RawMessage(`{
+			"question":"Pick one",
+			"suggestions":["alpha","beta"],
+			"recommended_option_index":1
+		}`),
+	})
+	if err != nil {
+		t.Fatalf("unexpected call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success result, got %+v", result)
+	}
+	var payload string
+	if err := json.Unmarshal(result.Output, &payload); err != nil {
+		t.Fatalf("decode tool output: %v", err)
+	}
+	wantSummary := "User answered and picked option 2.\nUser also said:\nneed extra context"
+	if payload != wantSummary {
+		t.Fatalf("unexpected summary: %q", payload)
+	}
+}
+
+func TestToolCallSerializesPureFreeformOnSingleLine(t *testing.T) {
+	b := NewBroker()
+	b.SetAskHandler(func(req Request) (Response, error) {
+		return Response{RequestID: req.ID, FreeformAnswer: "need extra context"}, nil
+	})
+	tl := NewTool(b)
+
+	result, err := tl.Call(context.Background(), tools.Call{
+		ID:   "call-freeform",
+		Name: tools.ToolAskQuestion,
+		Input: json.RawMessage(`{
+			"question":"What else?",
+			"suggestions":["alpha","beta"],
+			"recommended_option_index":1
+		}`),
+	})
+	if err != nil {
+		t.Fatalf("unexpected call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success result, got %+v", result)
+	}
+	var payload string
+	if err := json.Unmarshal(result.Output, &payload); err != nil {
+		t.Fatalf("decode tool output: %v", err)
+	}
+	wantSummary := "User answered: need extra context"
+	if payload != wantSummary {
+		t.Fatalf("unexpected summary: %q", payload)
+	}
+}
+
+func TestToolCallAllowsFreeformOnlyWithoutRecommendedOptionIndex(t *testing.T) {
+	b := NewBroker()
+	b.SetAskHandler(func(req Request) (Response, error) {
+		if req.RecommendedOptionIndex != 0 {
+			t.Fatalf("did not expect recommended option index for freeform ask, got %+v", req)
+		}
+		return Response{RequestID: req.ID, FreeformAnswer: "typed answer"}, nil
+	})
+	tl := NewTool(b)
+
+	result, err := tl.Call(context.Background(), tools.Call{
+		ID:    "call-freeform-only",
+		Name:  tools.ToolAskQuestion,
+		Input: json.RawMessage(`{"question":"What else?"}`),
+	})
+	if err != nil {
+		t.Fatalf("unexpected call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success result, got %+v", result)
+	}
+}
+
+func TestToolCallRejectsSuggestionAskWithoutRecommendedOptionIndex(t *testing.T) {
+	b := NewBroker()
+	tl := NewTool(b)
+
+	result, err := tl.Call(context.Background(), tools.Call{
+		ID:   "call-missing-recommended",
+		Name: tools.ToolAskQuestion,
+		Input: json.RawMessage(`{
+			"question":"Pick one",
+			"suggestions":["alpha","beta"]
+		}`),
+	})
+	if err != nil {
+		t.Fatalf("unexpected call error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected error result, got %+v", result)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(result.Output, &payload); err != nil {
+		t.Fatalf("decode error output: %v", err)
+	}
+	if payload["error"] != "questions with suggestions require recommended_option_index" {
+		t.Fatalf("unexpected error output: %q", payload["error"])
+	}
+}
+
+func TestToolCallRejectsOutOfRangeRecommendedOptionIndex(t *testing.T) {
+	b := NewBroker()
+	tl := NewTool(b)
+
+	result, err := tl.Call(context.Background(), tools.Call{
+		ID:   "call-bad-recommended",
+		Name: tools.ToolAskQuestion,
+		Input: json.RawMessage(`{
+			"question":"Pick one",
+			"suggestions":["alpha","beta"],
+			"recommended_option_index":3
+		}`),
+	})
+	if err != nil {
+		t.Fatalf("unexpected call error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected error result, got %+v", result)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(result.Output, &payload); err != nil {
+		t.Fatalf("decode error output: %v", err)
+	}
+	if payload["error"] != "recommended_option_index 3 is out of range" {
+		t.Fatalf("unexpected error output: %q", payload["error"])
+	}
+}
+
+func TestToolCallRejectsRecommendedIndexAfterBlankSuggestionsAreDropped(t *testing.T) {
+	b := NewBroker()
+	tl := NewTool(b)
+
+	result, err := tl.Call(context.Background(), tools.Call{
+		ID:   "call-bad-normalized-recommended",
+		Name: tools.ToolAskQuestion,
+		Input: json.RawMessage(`{
+			"question":"Pick one",
+			"suggestions":["", "beta"],
+			"recommended_option_index":2
+		}`),
+	})
+	if err != nil {
+		t.Fatalf("unexpected call error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected error result, got %+v", result)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(result.Output, &payload); err != nil {
+		t.Fatalf("decode error output: %v", err)
+	}
+	if payload["error"] != "recommended_option_index 2 is out of range" {
+		t.Fatalf("unexpected error output: %q", payload["error"])
+	}
+}
+
+func TestToolCallRejectsApprovalField(t *testing.T) {
+	b := NewBroker()
+	tl := NewTool(b)
+
+	result, err := tl.Call(context.Background(), tools.Call{
+		ID:    "call-approval",
+		Name:  tools.ToolAskQuestion,
+		Input: json.RawMessage(`{"question":"Approve?","approval":true}`),
+	})
+	if err != nil {
+		t.Fatalf("unexpected call error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected error result, got %+v", result)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(result.Output, &payload); err != nil {
+		t.Fatalf("decode error output: %v", err)
+	}
+	if payload["error"] != `invalid input: field "approval" is not allowed` {
+		t.Fatalf("unexpected error output: %q", payload["error"])
+	}
+}
+
+func TestToolCallRejectsApprovalOptionsField(t *testing.T) {
+	b := NewBroker()
+	tl := NewTool(b)
+
+	result, err := tl.Call(context.Background(), tools.Call{
+		ID:   "call-approval-options",
+		Name: tools.ToolAskQuestion,
+		Input: json.RawMessage(`{
+			"question":"Approve?",
+			"approval_options":[{"decision":"allow_once","label":"Allow once"}]
+		}`),
+	})
+	if err != nil {
+		t.Fatalf("unexpected call error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected error result, got %+v", result)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(result.Output, &payload); err != nil {
+		t.Fatalf("decode error output: %v", err)
+	}
+	if payload["error"] != `invalid input: field "approval_options" is not allowed` {
+		t.Fatalf("unexpected error output: %q", payload["error"])
+	}
+}
+
+func TestToolCallRejectsApprovalPayloadReturnedByHandler(t *testing.T) {
+	b := NewBroker()
+	b.SetAskHandler(func(req Request) (Response, error) {
+		return Response{RequestID: req.ID, Approval: &ApprovalPayload{Decision: ApprovalDecisionDeny}}, nil
+	})
+	tl := NewTool(b)
+
+	result, err := tl.Call(context.Background(), tools.Call{
+		ID:    "call-approval-payload",
+		Name:  tools.ToolAskQuestion,
+		Input: json.RawMessage(`{"question":"What should I do?"}`),
+	})
+	if err != nil {
+		t.Fatalf("unexpected call error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected error result, got %+v", result)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(result.Output, &payload); err != nil {
+		t.Fatalf("decode error output: %v", err)
+	}
+	if payload["error"] != "non-approval questions must not return approval payloads" {
+		t.Fatalf("unexpected error output: %q", payload["error"])
+	}
+}
+
+func TestInternalRequestIsNotModelFacingJSONShape(t *testing.T) {
+	encoded, err := json.Marshal(Request{
+		ID:       "approval",
+		Question: "approve?",
+		Approval: true,
+		ApprovalOptions: []ApprovalOption{{
+			Decision: ApprovalDecisionAllowOnce,
+			Label:    "Allow once",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal internal request: %v", err)
+	}
+	if string(encoded) != "{}" {
+		t.Fatalf("internal request unexpectedly serialized as %s", encoded)
+	}
+
+	encoded, err = json.Marshal(ToolRequest{
+		Question:               "pick one",
+		Suggestions:            []string{"alpha", "beta"},
+		RecommendedOptionIndex: 2,
+	})
+	if err != nil {
+		t.Fatalf("marshal tool request: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatalf("decode tool request json: %v", err)
+	}
+	if _, ok := payload["approval"]; ok {
+		t.Fatalf("tool request json must not contain approval field: %s", encoded)
+	}
+	if _, ok := payload["approval_options"]; ok {
+		t.Fatalf("tool request json must not contain approval_options field: %s", encoded)
+	}
+	if payload["question"] != "pick one" {
+		t.Fatalf("unexpected tool request question payload: %+v", payload)
+	}
+}
+
+func TestBuildToolOutputSummaryRejectsEmptyNonApprovalResponse(t *testing.T) {
+	_, err := buildToolOutputSummary(Response{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if err.Error() != "non-approval questions require an answer" {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

@@ -7,8 +7,7 @@ func (m *uiModel) inputRunes() []rune {
 }
 
 func (m *uiModel) cursorIndex() int {
-	runes := m.inputRunes()
-	return clampCursor(m.inputCursor, len(runes))
+	return bufferCursorIndex(m.input, m.inputCursor)
 }
 
 func (m *uiModel) clearInput() {
@@ -19,113 +18,18 @@ func (m *uiModel) clearInput() {
 }
 
 func (m *uiModel) insertInputRunes(chars []rune) {
-	if len(chars) == 0 {
+	updated, nextCursor, ok := insertBufferRunes(m.input, m.inputCursor, chars)
+	if !ok {
 		return
 	}
-	filtered, _ := stripMouseSGRRunes(chars)
-	if len(filtered) == 0 {
-		return
-	}
-	runes := m.inputRunes()
-	cursor := clampCursor(m.inputCursor, len(runes))
-	updated := make([]rune, 0, len(runes)+len(filtered))
-	updated = append(updated, runes[:cursor]...)
-	updated = append(updated, filtered...)
-	updated = append(updated, runes[cursor:]...)
-	nextCursor := cursor + len(filtered)
-	cleaned, cleanedCursor, _ := stripMouseSGRRunesWithCursor(updated, nextCursor)
-	m.input = string(cleaned)
-	m.inputCursor = cleanedCursor
+	m.input = updated
+	m.inputCursor = nextCursor
 	m.syncPromptHistorySelectionToInput()
 	m.refreshSlashCommandFilterFromInput()
 }
 
 func (m *uiModel) backspaceInput() bool {
-	runes := m.inputRunes()
-	cursor := clampCursor(m.inputCursor, len(runes))
-	if cursor == 0 {
-		return false
-	}
-	updated := make([]rune, 0, len(runes)-1)
-	updated = append(updated, runes[:cursor-1]...)
-	updated = append(updated, runes[cursor:]...)
-	m.input = string(updated)
-	m.inputCursor = cursor - 1
-	m.syncPromptHistorySelectionToInput()
-	m.refreshSlashCommandFilterFromInput()
-	return true
-}
-
-func (m *uiModel) moveCursorLeft() {
-	cursor := m.cursorIndex()
-	if cursor > 0 {
-		m.inputCursor = cursor - 1
-	}
-}
-
-func (m *uiModel) moveCursorRight() {
-	runes := m.inputRunes()
-	cursor := clampCursor(m.inputCursor, len(runes))
-	if cursor < len(runes) {
-		m.inputCursor = cursor + 1
-	}
-}
-
-func (m *uiModel) moveCursorStart() {
-	m.inputCursor = 0
-}
-
-func (m *uiModel) moveCursorEnd() {
-	m.inputCursor = -1
-}
-
-func (m *uiModel) moveCursorWordLeft() {
-	runes := m.inputRunes()
-	m.inputCursor = prevWordBoundary(runes, clampCursor(m.inputCursor, len(runes)))
-}
-
-func (m *uiModel) moveCursorWordRight() {
-	runes := m.inputRunes()
-	m.inputCursor = nextWordBoundary(runes, clampCursor(m.inputCursor, len(runes)))
-}
-
-func (m *uiModel) moveCursorUpLine() bool {
-	runes := m.inputRunes()
-	cursor := clampCursor(m.inputCursor, len(runes))
-	currentStart := lineStart(runes, cursor)
-	currentCol := cursor - currentStart
-	if currentStart == 0 {
-		m.inputCursor = 0
-		return cursor != 0
-	}
-	prevEnd := currentStart - 1
-	prevStart := lineStart(runes, prevEnd)
-	prevLen := prevEnd - prevStart
-	newCursor := prevStart + min(currentCol, prevLen)
-	m.inputCursor = newCursor
-	return newCursor != cursor
-}
-
-func (m *uiModel) moveCursorDownLine() bool {
-	runes := m.inputRunes()
-	cursor := clampCursor(m.inputCursor, len(runes))
-	currentStart := lineStart(runes, cursor)
-	currentCol := cursor - currentStart
-	currentEnd := lineEnd(runes, cursor)
-	if currentEnd >= len(runes) {
-		m.inputCursor = len(runes)
-		return cursor != len(runes)
-	}
-	nextStart := currentEnd + 1
-	nextEnd := lineEnd(runes, nextStart)
-	nextLen := nextEnd - nextStart
-	newCursor := nextStart + min(currentCol, nextLen)
-	m.inputCursor = newCursor
-	return newCursor != cursor
-}
-
-func (m *uiModel) deleteCurrentInputLine() bool {
-	updated, nextCursor, ok := deleteCurrentLineAtCursor(m.input, m.inputCursor)
+	updated, nextCursor, ok := backspaceBuffer(m.input, m.inputCursor)
 	if !ok {
 		return false
 	}
@@ -136,7 +40,230 @@ func (m *uiModel) deleteCurrentInputLine() bool {
 	return true
 }
 
-func deleteCurrentLineAtCursor(text string, cursor int) (string, int, bool) {
+func (m *uiModel) moveCursorLeft() {
+	m.inputCursor = moveBufferCursorLeft(m.input, m.inputCursor)
+}
+
+func (m *uiModel) moveCursorRight() {
+	m.inputCursor = moveBufferCursorRight(m.input, m.inputCursor)
+}
+
+func (m *uiModel) moveCursorStart() {
+	m.inputCursor = moveBufferCursorStart()
+}
+
+func (m *uiModel) moveCursorEnd() {
+	m.inputCursor = moveBufferCursorEnd()
+}
+
+func (m *uiModel) moveCursorWordLeft() {
+	m.inputCursor = moveBufferCursorWordLeft(m.input, m.inputCursor)
+}
+
+func (m *uiModel) moveCursorWordRight() {
+	m.inputCursor = moveBufferCursorWordRight(m.input, m.inputCursor)
+}
+
+func (m *uiModel) moveCursorUpLine() bool {
+	nextCursor, moved := moveBufferCursorUpLine(m.input, m.inputCursor)
+	m.inputCursor = nextCursor
+	return moved
+}
+
+func (m *uiModel) moveCursorDownLine() bool {
+	nextCursor, moved := moveBufferCursorDownLine(m.input, m.inputCursor)
+	m.inputCursor = nextCursor
+	return moved
+}
+
+func (m *uiModel) deleteCurrentInputLine() bool {
+	updated, nextCursor, ok := deleteCurrentBufferLine(m.input, m.inputCursor)
+	if !ok {
+		return false
+	}
+	m.input = updated
+	m.inputCursor = nextCursor
+	m.syncPromptHistorySelectionToInput()
+	m.refreshSlashCommandFilterFromInput()
+	return true
+}
+
+func (m *uiModel) askCursorIndex() int {
+	return bufferCursorIndex(m.askInput, m.askInputCursor)
+}
+
+func (m *uiModel) clearAskInput() {
+	m.askInput = ""
+	m.askInputCursor = -1
+}
+
+func (m *uiModel) insertAskInputRunes(chars []rune) {
+	updated, nextCursor, ok := insertBufferRunes(m.askInput, m.askInputCursor, chars)
+	if !ok {
+		return
+	}
+	m.askInput = updated
+	m.askInputCursor = nextCursor
+}
+
+func (m *uiModel) backspaceAskInput() bool {
+	updated, nextCursor, ok := backspaceBuffer(m.askInput, m.askInputCursor)
+	if !ok {
+		return false
+	}
+	m.askInput = updated
+	m.askInputCursor = nextCursor
+	return true
+}
+
+func (m *uiModel) moveAskCursorLeft() {
+	m.askInputCursor = moveBufferCursorLeft(m.askInput, m.askInputCursor)
+}
+
+func (m *uiModel) moveAskCursorRight() {
+	m.askInputCursor = moveBufferCursorRight(m.askInput, m.askInputCursor)
+}
+
+func (m *uiModel) moveAskCursorStart() {
+	m.askInputCursor = moveBufferCursorStart()
+}
+
+func (m *uiModel) moveAskCursorEnd() {
+	m.askInputCursor = moveBufferCursorEnd()
+}
+
+func (m *uiModel) moveAskCursorWordLeft() {
+	m.askInputCursor = moveBufferCursorWordLeft(m.askInput, m.askInputCursor)
+}
+
+func (m *uiModel) moveAskCursorWordRight() {
+	m.askInputCursor = moveBufferCursorWordRight(m.askInput, m.askInputCursor)
+}
+
+func (m *uiModel) moveAskCursorUpLine() bool {
+	nextCursor, moved := moveBufferCursorUpLine(m.askInput, m.askInputCursor)
+	m.askInputCursor = nextCursor
+	return moved
+}
+
+func (m *uiModel) moveAskCursorDownLine() bool {
+	nextCursor, moved := moveBufferCursorDownLine(m.askInput, m.askInputCursor)
+	m.askInputCursor = nextCursor
+	return moved
+}
+
+func (m *uiModel) deleteCurrentAskInputLine() bool {
+	updated, nextCursor, ok := deleteCurrentBufferLine(m.askInput, m.askInputCursor)
+	if !ok {
+		return false
+	}
+	m.askInput = updated
+	m.askInputCursor = nextCursor
+	return true
+}
+
+func bufferCursorIndex(text string, cursor int) int {
+	return clampCursor(cursor, len([]rune(text)))
+}
+
+func insertBufferRunes(text string, cursor int, chars []rune) (string, int, bool) {
+	if len(chars) == 0 {
+		return text, cursor, false
+	}
+	filtered, _ := stripMouseSGRRunes(chars)
+	if len(filtered) == 0 {
+		return text, cursor, false
+	}
+	runes := []rune(text)
+	cursor = clampCursor(cursor, len(runes))
+	updated := make([]rune, 0, len(runes)+len(filtered))
+	updated = append(updated, runes[:cursor]...)
+	updated = append(updated, filtered...)
+	updated = append(updated, runes[cursor:]...)
+	nextCursor := cursor + len(filtered)
+	cleaned, cleanedCursor, _ := stripMouseSGRRunesWithCursor(updated, nextCursor)
+	return string(cleaned), cleanedCursor, true
+}
+
+func backspaceBuffer(text string, cursor int) (string, int, bool) {
+	runes := []rune(text)
+	cursor = clampCursor(cursor, len(runes))
+	if cursor == 0 {
+		return text, cursor, false
+	}
+	updated := make([]rune, 0, len(runes)-1)
+	updated = append(updated, runes[:cursor-1]...)
+	updated = append(updated, runes[cursor:]...)
+	return string(updated), cursor - 1, true
+}
+
+func moveBufferCursorLeft(text string, cursor int) int {
+	cursor = bufferCursorIndex(text, cursor)
+	if cursor > 0 {
+		return cursor - 1
+	}
+	return cursor
+}
+
+func moveBufferCursorRight(text string, cursor int) int {
+	runes := []rune(text)
+	cursor = clampCursor(cursor, len(runes))
+	if cursor < len(runes) {
+		return cursor + 1
+	}
+	return cursor
+}
+
+func moveBufferCursorStart() int {
+	return 0
+}
+
+func moveBufferCursorEnd() int {
+	return -1
+}
+
+func moveBufferCursorWordLeft(text string, cursor int) int {
+	runes := []rune(text)
+	return prevWordBoundary(runes, clampCursor(cursor, len(runes)))
+}
+
+func moveBufferCursorWordRight(text string, cursor int) int {
+	runes := []rune(text)
+	return nextWordBoundary(runes, clampCursor(cursor, len(runes)))
+}
+
+func moveBufferCursorUpLine(text string, cursor int) (int, bool) {
+	runes := []rune(text)
+	cursor = clampCursor(cursor, len(runes))
+	currentStart := lineStart(runes, cursor)
+	currentCol := cursor - currentStart
+	if currentStart == 0 {
+		return 0, cursor != 0
+	}
+	prevEnd := currentStart - 1
+	prevStart := lineStart(runes, prevEnd)
+	prevLen := prevEnd - prevStart
+	newCursor := prevStart + min(currentCol, prevLen)
+	return newCursor, newCursor != cursor
+}
+
+func moveBufferCursorDownLine(text string, cursor int) (int, bool) {
+	runes := []rune(text)
+	cursor = clampCursor(cursor, len(runes))
+	currentStart := lineStart(runes, cursor)
+	currentCol := cursor - currentStart
+	currentEnd := lineEnd(runes, cursor)
+	if currentEnd >= len(runes) {
+		return len(runes), cursor != len(runes)
+	}
+	nextStart := currentEnd + 1
+	nextEnd := lineEnd(runes, nextStart)
+	nextLen := nextEnd - nextStart
+	newCursor := nextStart + min(currentCol, nextLen)
+	return newCursor, newCursor != cursor
+}
+
+func deleteCurrentBufferLine(text string, cursor int) (string, int, bool) {
 	runes := []rune(text)
 	if len(runes) == 0 {
 		return "", 0, false

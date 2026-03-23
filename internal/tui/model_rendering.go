@@ -147,7 +147,7 @@ func (m Model) toolCallBlock(entryIndex int, entry TranscriptEntry, consumed map
 
 func (m Model) askQuestionBlock(entryIndex int, entry TranscriptEntry, consumed map[int]struct{}, resultIndex toolResultIndex, opts transcriptBlockOptions, defaultRole string) ongoingBlock {
 	blockRole := "tool_question"
-	question, suggestions := askQuestionDisplay(entry.ToolCall, entry.Text)
+	question, suggestions, recommendedOptionIndex := askQuestionDisplay(entry.ToolCall, entry.Text)
 	answer := ""
 	if resultIdx := resultIndex.findMatchingToolResultIndex(m.transcript, entryIndex, consumed); resultIdx >= 0 {
 		nextRole := strings.TrimSpace(m.transcript[resultIdx].Role)
@@ -159,7 +159,7 @@ func (m Model) askQuestionBlock(entryIndex int, entry TranscriptEntry, consumed 
 	}
 	return ongoingBlock{
 		role:       blockRole,
-		lines:      m.flattenAskQuestionEntry(blockRole, question, suggestions, answer, opts.mode == transcriptBlockModeDetail),
+		lines:      m.flattenAskQuestionEntry(blockRole, question, suggestions, recommendedOptionIndex, answer, opts.mode == transcriptBlockModeDetail),
 		entryIndex: entryIndex,
 	}
 }
