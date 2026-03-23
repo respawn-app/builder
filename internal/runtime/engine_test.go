@@ -2845,6 +2845,42 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 	}
 }
 
+func TestRestoreMessagesNormalizesLegacyReviewerEntries(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("legacy-step", "local_entry", storedLocalEntry{
+		Role:        "reviewer_suggestions",
+		Text:        "Supervisor suggested:\n1. Add final verification notes.",
+		OngoingText: "Supervisor made 1 suggestion.",
+	}); err != nil {
+		t.Fatalf("append legacy reviewer_suggestions: %v", err)
+	}
+	if _, err := store.AppendEvent("legacy-step", "local_entry", storedLocalEntry{
+		Role: "reviewer_status",
+		Text: "Supervisor ran, applied 1 suggestion:\n1. Add final verification notes.",
+	}); err != nil {
+		t.Fatalf("append legacy reviewer_status: %v", err)
+	}
+
+	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	snapshot := restored.ChatSnapshot()
+	if len(snapshot.Entries) != 2 {
+		t.Fatalf("expected 2 restored entries, got %+v", snapshot.Entries)
+	}
+	if snapshot.Entries[0].Role != "reviewer_suggestions" || snapshot.Entries[0].OngoingText != "Supervisor suggested:\n1. Add final verification notes." {
+		t.Fatalf("expected normalized restored reviewer_suggestions entry, got %+v", snapshot.Entries[0])
+	}
+	if snapshot.Entries[1].Role != "reviewer_status" || snapshot.Entries[1].Text != "Supervisor ran: 1 suggestion, applied." {
+		t.Fatalf("expected normalized restored reviewer_status entry, got %+v", snapshot.Entries[1])
+	}
+}
+
 func TestReviewerDefaultOutputOmitsReviewerSuggestionsEntry(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

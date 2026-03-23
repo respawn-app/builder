@@ -136,6 +136,54 @@ func TestScenarioHarnessRestartAndSessionResumeKeepsTranscriptVisible(t *testing
 	}
 }
 
+func TestScenarioSessionResumeNormalizesLegacyReviewerEntriesInOngoingMode(t *testing.T) {
+	workspace := t.TempDir()
+	store, err := session.Create(workspace, "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("legacy-step", "local_entry", map[string]any{
+		"role":         "reviewer_suggestions",
+		"text":         "Supervisor suggested:\n1. Add final verification notes.",
+		"ongoing_text": "Supervisor made 1 suggestion.",
+	}); err != nil {
+		t.Fatalf("append legacy reviewer_suggestions: %v", err)
+	}
+	if _, err := store.AppendEvent("legacy-step", "local_entry", map[string]any{
+		"role": "reviewer_status",
+		"text": "Supervisor ran, applied 1 suggestion:\n1. Add final verification notes.",
+	}); err != nil {
+		t.Fatalf("append legacy reviewer_status: %v", err)
+	}
+
+	reopened, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	eng, err := runtime.New(reopened, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine after restart: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 90
+	m.termHeight = 16
+	m.syncViewport()
+
+	ongoing := stripANSIAndTrimRight(m.view.OngoingSnapshot())
+	if !containsInOrder(ongoing, "Supervisor suggested:", "1. Add final verification notes.", "Supervisor ran: 1 suggestion, applied.") {
+		t.Fatalf("expected normalized reviewer entries after session resume, got %q", ongoing)
+	}
+	if strings.Contains(ongoing, "Supervisor made 1 suggestion.") {
+		t.Fatalf("did not expect legacy compact reviewer suggestions text after session resume, got %q", ongoing)
+	}
+	if strings.Contains(ongoing, "Supervisor ran, applied 1 suggestion:") {
+		t.Fatalf("did not expect legacy verbose reviewer status header after session resume, got %q", ongoing)
+	}
+	if strings.Contains(ongoing, "1. Add final verification notes.\n\n  1. Add final verification notes.") {
+		t.Fatalf("did not expect suggestion details duplicated into final reviewer status after session resume, got %q", ongoing)
+	}
+}
+
 func TestScenarioTeleportBetweenSessionsResetsVisibleConversation(t *testing.T) {
 	workspace := t.TempDir()
 	storeA, err := session.Create(workspace, "ws", workspace)
