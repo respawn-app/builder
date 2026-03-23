@@ -108,6 +108,24 @@ func TestCodeRendererRendersDiffWhenDiffHintIsProvided(t *testing.T) {
 	}
 }
 
+func TestApplyBackgroundTintReappliesAfterTransformedResetSGR(t *testing.T) {
+	bg := bgEscape("#1F2A22")
+	resetToDefault := "\x1b[0;38;2;230;237;243m"
+	input := "  +" + resetToDefault + "\x1b[38;5;81mpackage" + resetToDefault + " main"
+
+	tinted := applyBackgroundTint(input, bg)
+
+	if !strings.Contains(tinted, resetToDefault+bg+"\x1b[38;5;81mpackage") {
+		t.Fatalf("expected background tint to be re-applied before first syntax-colored token after transformed reset, got %q", tinted)
+	}
+	if !strings.Contains(tinted, resetToDefault+bg+" main") {
+		t.Fatalf("expected background tint to be re-applied after transformed reset before trailing plain text, got %q", tinted)
+	}
+	if got := ansi.Strip(tinted); got != "  +package main" {
+		t.Fatalf("expected text preserved after tinting transformed resets, got %q", got)
+	}
+}
+
 func TestCodeRendererRendersDiffWithCodeSyntaxForDetectedPath(t *testing.T) {
 	r := newCodeRenderer("dark")
 	lines, ok := r.renderDiffLines(renderedPatch(t, "/workspace",
