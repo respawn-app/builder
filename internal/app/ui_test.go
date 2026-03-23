@@ -1675,6 +1675,39 @@ func TestPreSubmitCompactionQueuesPromptUntilCompactionCompletes(t *testing.T) {
 	}
 }
 
+func TestPreSubmitCompactionKeepsDuplicateQueuedPromptsInOrder(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &runtimeAdapterFakeClient{}
+	eng, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "continue"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	updated.queued = append(updated.queued, "fix", "continue")
+
+	next, _ = updated.Update(preSubmitCompactionCheckDoneMsg{
+		token:         updated.preSubmitCheckToken,
+		text:          "continue",
+		shouldCompact: false,
+	})
+	updated = next.(*uiModel)
+	if len(updated.queued) != 2 {
+		t.Fatalf("expected two queued prompts to remain, got %+v", updated.queued)
+	}
+	if updated.queued[0] != "fix" || updated.queued[1] != "continue" {
+		t.Fatalf("expected duplicate queued prompts to preserve order, got %+v", updated.queued)
+	}
+}
+
 func TestCtrlCWhilePreSubmitCheckRestoresDraftAndIgnoresStaleDecision(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
