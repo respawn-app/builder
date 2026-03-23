@@ -22,10 +22,11 @@ import (
 )
 
 type runtimeWiring struct {
-	engine      *runtime.Engine
-	askBridge   *askBridge
-	eventBridge *runtimeEventBridge
-	background  *shelltool.Manager
+	engine        *runtime.Engine
+	askBridge     *askBridge
+	eventBridge   *runtimeEventBridge
+	background    *shelltool.Manager
+	promptHistory []string
 }
 
 type backgroundEventRouter struct {
@@ -116,7 +117,14 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 }
 
 func newRuntimeWiringWithBackground(store *session.Store, active config.Settings, enabledTools []tools.ID, workspaceRoot string, mgr *auth.Manager, logger *runLogger, background *shelltool.Manager, opts runtimeWiringOptions) (*runtimeWiring, error) {
-	bells := newBellHooks(defaultTerminalNotifier(active.NotificationMethod))
+	promptHistory, err := store.ReadPromptHistory()
+	if err != nil {
+		return nil, err
+	}
+
+	bells := newBellHooks(defaultTerminalNotifier(active.NotificationMethod), func() string {
+		return store.Meta().Name
+	})
 
 	toolRegistry, askBroker, background, err := buildToolRegistry(
 		workspaceRoot,
@@ -203,6 +211,7 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		}(),
 		EnabledTools:                  enabledTools,
 		AutoCompactTokenLimit:         active.ContextCompactionThresholdTokens,
+		PreSubmitCompactionLeadTokens: active.PreSubmitCompactionLeadTokens,
 		ContextWindowTokens:           active.ModelContextWindow,
 		EffectiveContextWindowPercent: 95,
 		LocalCompactionCarryoverLimit: 20_000,
@@ -214,6 +223,7 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 			Frequency:     active.Reviewer.Frequency,
 			Model:         active.Reviewer.Model,
 			ThinkingLevel: active.Reviewer.ThinkingLevel,
+			VerboseOutput: active.Reviewer.VerboseOutput,
 			Client:        reviewerClient,
 			ClientFactory: newReviewerClient,
 		},
@@ -230,10 +240,11 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		return nil, err
 	}
 	return &runtimeWiring{
-		engine:      eng,
-		askBridge:   askBridge,
-		eventBridge: eventBridge,
-		background:  background,
+		engine:        eng,
+		askBridge:     askBridge,
+		eventBridge:   eventBridge,
+		background:    background,
+		promptHistory: append([]string(nil), promptHistory...),
 	}, nil
 }
 

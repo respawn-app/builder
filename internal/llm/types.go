@@ -45,15 +45,16 @@ func normalizeMessagePhase(raw string) MessagePhase {
 type MessageType string
 
 const (
-	MessageTypeAgentsMD         MessageType = "agents.md"
-	MessageTypeSkills           MessageType = "skills"
-	MessageTypeEnvironment      MessageType = "environment"
-	MessageTypeInterruption     MessageType = "interruption"
-	MessageTypeErrorFeedback    MessageType = "error_feedback"
-	MessageTypeReviewerFeedback MessageType = "reviewer_feedback"
-	MessageTypeBackgroundNotice MessageType = "background_notice"
-	MessageTypeHeadlessMode     MessageType = "headless_mode"
-	MessageTypeHeadlessModeExit MessageType = "headless_mode_exit"
+	MessageTypeAgentsMD                  MessageType = "agents.md"
+	MessageTypeSkills                    MessageType = "skills"
+	MessageTypeEnvironment               MessageType = "environment"
+	MessageTypeInterruption              MessageType = "interruption"
+	MessageTypeErrorFeedback             MessageType = "error_feedback"
+	MessageTypeReviewerFeedback          MessageType = "reviewer_feedback"
+	MessageTypeBackgroundNotice          MessageType = "background_notice"
+	MessageTypeManualCompactionCarryover MessageType = "manual_compaction_carryover"
+	MessageTypeHeadlessMode              MessageType = "headless_mode"
+	MessageTypeHeadlessModeExit          MessageType = "headless_mode_exit"
 )
 
 type Message struct {

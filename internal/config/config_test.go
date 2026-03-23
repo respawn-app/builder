@@ -98,6 +98,9 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.Reviewer.TimeoutSeconds != 60 {
 		t.Fatalf("default reviewer timeout mismatch: %d", cfg.Settings.Reviewer.TimeoutSeconds)
 	}
+	if cfg.Settings.Reviewer.VerboseOutput {
+		t.Fatalf("expected default reviewer verbose_output=false")
+	}
 	settingsBytes, err := os.ReadFile(settingsPath)
 	if err != nil {
 		t.Fatalf("read settings file: %v", err)
@@ -110,6 +113,9 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	}
 	if strings.Contains(string(settingsBytes), "max_suggestions") {
 		t.Fatalf("expected default config not to expose reviewer.max_suggestions, got %q", string(settingsBytes))
+	}
+	if !strings.Contains(string(settingsBytes), "verbose_output = false") {
+		t.Fatalf("expected default config to expose reviewer.verbose_output, got %q", string(settingsBytes))
 	}
 }
 
@@ -480,6 +486,7 @@ frequency = "all"
 model = "gpt-file-reviewer"
 thinking_level = "medium"
 timeout_seconds = 45
+verbose_output = true
 `), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -500,11 +507,18 @@ timeout_seconds = 45
 	if got := cfg.Source.Sources["reviewer.model"]; got != "file" {
 		t.Fatalf("expected reviewer.model source file, got %q", got)
 	}
+	if !cfg.Settings.Reviewer.VerboseOutput {
+		t.Fatalf("expected file reviewer.verbose_output=true")
+	}
+	if got := cfg.Source.Sources["reviewer.verbose_output"]; got != "file" {
+		t.Fatalf("expected reviewer.verbose_output source file, got %q", got)
+	}
 
 	t.Setenv("BUILDER_REVIEWER_FREQUENCY", "off")
 	t.Setenv("BUILDER_REVIEWER_MODEL", "gpt-env-reviewer")
 	t.Setenv("BUILDER_REVIEWER_THINKING_LEVEL", "high")
 	t.Setenv("BUILDER_REVIEWER_TIMEOUT_SECONDS", "30")
+	t.Setenv("BUILDER_REVIEWER_VERBOSE_OUTPUT", "false")
 
 	cfg, err = Load(workspace, LoadOptions{})
 	if err != nil {
@@ -521,6 +535,12 @@ timeout_seconds = 45
 	}
 	if got := cfg.Source.Sources["reviewer.model"]; got != "env" {
 		t.Fatalf("expected reviewer.model source env, got %q", got)
+	}
+	if cfg.Settings.Reviewer.VerboseOutput {
+		t.Fatalf("expected env reviewer.verbose_output=false")
+	}
+	if got := cfg.Source.Sources["reviewer.verbose_output"]; got != "env" {
+		t.Fatalf("expected reviewer.verbose_output source env, got %q", got)
 	}
 
 	t.Setenv("BUILDER_REVIEWER_FREQUENCY", "sometimes")

@@ -84,7 +84,7 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 	if workdir == "" {
 		return ExecResult{}, errors.New("workdir is required")
 	}
-	yieldTime, warning := m.normalizeExecYieldTime(req.YieldTime)
+	yieldTime := m.normalizeExecYieldTime(req.YieldTime)
 	maxOutputChars := normalizeOutputChars(req.MaxOutputChars)
 
 	id, logPath, err := m.allocateProcessSlot()
@@ -164,7 +164,6 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 	result := ExecResult{
 		SessionID:  id,
 		WallTime:   time.Since(start),
-		Warning:    warning,
 		OutputPath: logPath,
 	}
 	snapshot, backgrounded := entry.transitionToBackground()

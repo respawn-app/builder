@@ -84,6 +84,7 @@ type Config struct {
 	ProviderCapabilitiesOverride  *llm.ProviderCapabilities
 	EnabledTools                  []tools.ID
 	AutoCompactTokenLimit         int
+	PreSubmitCompactionLeadTokens int
 	ContextWindowTokens           int
 	EffectiveContextWindowPercent int
 	LocalCompactionCarryoverLimit int
@@ -99,6 +100,7 @@ type ReviewerConfig struct {
 	Frequency     string
 	Model         string
 	ThinkingLevel string
+	VerboseOutput bool
 	Client        llm.Client
 	ClientFactory func() (llm.Client, error)
 }
@@ -166,6 +168,9 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 	}
 	if cfg.EffectiveContextWindowPercent <= 0 || cfg.EffectiveContextWindowPercent > 100 {
 		cfg.EffectiveContextWindowPercent = 95
+	}
+	if cfg.PreSubmitCompactionLeadTokens <= 0 {
+		cfg.PreSubmitCompactionLeadTokens = 15_000
 	}
 	if cfg.LocalCompactionCarryoverLimit <= 0 {
 		cfg.LocalCompactionCarryoverLimit = 20_000

@@ -33,7 +33,103 @@ func TestPageKeysScrollTranscriptWhileInputFocused(t *testing.T) {
 	}
 }
 
-func TestMainInputUpDownAtBoundsScrollsTranscript(t *testing.T) {
+func TestDetailModeUpDownScrollTranscript(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 8
+	m.syncViewport()
+
+	for i := 0; i < 16; i++ {
+		m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("line %d", i)})
+	}
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+
+	initial := stripANSIAndTrimRight(m.view.View())
+	if initial == "" {
+		t.Fatal("expected detail transcript visible before scrolling")
+	}
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	afterUp := stripANSIAndTrimRight(m.view.View())
+	if afterUp == initial {
+		t.Fatal("expected detail transcript to change after up")
+	}
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	afterDown := stripANSIAndTrimRight(m.view.View())
+	if afterDown != initial {
+		t.Fatalf("expected detail transcript to return after down, got %q want %q", afterDown, initial)
+	}
+}
+
+func TestDetailModeMouseWheelScrollTranscript(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 8
+	m.syncViewport()
+
+	for i := 0; i < 16; i++ {
+		m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("line %d", i)})
+	}
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+
+	initial := stripANSIAndTrimRight(m.view.View())
+	if initial == "" {
+		t.Fatal("expected detail transcript visible before mouse scrolling")
+	}
+
+	m = updateUIModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
+	afterWheelUp := stripANSIAndTrimRight(m.view.View())
+	if afterWheelUp == initial {
+		t.Fatal("expected detail transcript to change after mouse wheel up")
+	}
+
+	m = updateUIModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
+	afterWheelDown := stripANSIAndTrimRight(m.view.View())
+	if afterWheelDown != initial {
+		t.Fatalf("expected detail transcript to return after mouse wheel down, got %q want %q", afterWheelDown, initial)
+	}
+}
+
+func TestUpDownRouteByTranscriptMode(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIPromptHistory([]string{"hello"})).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 8
+	m.syncViewport()
+	for i := 0; i < 20; i++ {
+		m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("line %d", i)})
+	}
+
+	ongoingStart := m.view.OngoingScroll()
+	if ongoingStart == 0 {
+		t.Fatal("expected ongoing transcript to be scrollable")
+	}
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	if m.input != "hello" {
+		t.Fatalf("expected ongoing mode up to recall prompt history, got %q", m.input)
+	}
+	if got := m.view.OngoingScroll(); got != ongoingStart {
+		t.Fatalf("expected ongoing mode up not to scroll transcript, got %d from %d", got, ongoingStart)
+	}
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if m.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected detail mode, got %q", m.view.Mode())
+	}
+	initialDetail := stripANSIAndTrimRight(m.view.View())
+
+	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	afterDetailUp := stripANSIAndTrimRight(m.view.View())
+	if afterDetailUp == initialDetail {
+		t.Fatal("expected detail mode up to scroll transcript")
+	}
+	if m.input != "hello" {
+		t.Fatalf("expected detail mode scrolling not to mutate recalled input, got %q", m.input)
+	}
+}
+
+func TestMainInputUpDownAtBoundsStayInInput(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 80
 	m.termHeight = 8
@@ -60,9 +156,11 @@ func TestMainInputUpDownAtBoundsScrollsTranscript(t *testing.T) {
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
 	updated = next.(*uiModel)
-	afterUp := updated.view.OngoingScroll()
-	if afterUp >= start {
-		t.Fatalf("expected second up at top to scroll transcript up, got %d from %d", afterUp, start)
+	if updated.inputCursor != 0 {
+		t.Fatalf("expected second up at top to stay at start, got %d", updated.inputCursor)
+	}
+	if got := updated.view.OngoingScroll(); got != start {
+		t.Fatalf("expected second up at top not to scroll transcript, got %d from %d", got, start)
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -70,18 +168,21 @@ func TestMainInputUpDownAtBoundsScrollsTranscript(t *testing.T) {
 	if updated.inputCursor != len([]rune(updated.input)) {
 		t.Fatalf("expected first down to move cursor to end, got %d", updated.inputCursor)
 	}
-	if got := updated.view.OngoingScroll(); got != afterUp {
-		t.Fatalf("expected first down not to scroll transcript, got %d from %d", got, afterUp)
+	if got := updated.view.OngoingScroll(); got != start {
+		t.Fatalf("expected first down not to scroll transcript, got %d from %d", got, start)
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
 	updated = next.(*uiModel)
-	if got := updated.view.OngoingScroll(); got <= afterUp {
-		t.Fatalf("expected second down at end to scroll transcript down, got %d from %d", got, afterUp)
+	if updated.inputCursor != len([]rune(updated.input)) {
+		t.Fatalf("expected second down at end to stay at end, got %d", updated.inputCursor)
+	}
+	if got := updated.view.OngoingScroll(); got != start {
+		t.Fatalf("expected second down at end not to scroll transcript, got %d from %d", got, start)
 	}
 }
 
-func TestReviewerRunStillAllowsTranscriptScrollAndEditing(t *testing.T) {
+func TestReviewerRunStillAllowsEditingWithoutTranscriptScroll(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 80
 	m.termHeight = 8
@@ -112,9 +213,11 @@ func TestReviewerRunStillAllowsTranscriptScrollAndEditing(t *testing.T) {
 
 	next, _ = locked.Update(tea.KeyMsg{Type: tea.KeyUp})
 	locked = next.(*uiModel)
-	afterUp := locked.view.OngoingScroll()
-	if afterUp >= start {
-		t.Fatalf("expected up to scroll transcript while reviewer runs, got %d from %d", afterUp, start)
+	if locked.inputCursor != 0 {
+		t.Fatalf("expected up to move cursor to start while reviewer runs, got %d", locked.inputCursor)
+	}
+	if got := locked.view.OngoingScroll(); got != start {
+		t.Fatalf("expected up not to scroll transcript while reviewer runs, got %d from %d", got, start)
 	}
 	if locked.input != "keep this draft" {
 		t.Fatalf("expected input text preserved while reviewer runs, got %q", locked.input)
@@ -125,8 +228,11 @@ func TestReviewerRunStillAllowsTranscriptScrollAndEditing(t *testing.T) {
 
 	next, _ = locked.Update(tea.KeyMsg{Type: tea.KeyDown})
 	locked = next.(*uiModel)
-	if got := locked.view.OngoingScroll(); got <= afterUp {
-		t.Fatalf("expected down to scroll transcript while reviewer runs, got %d from %d", got, afterUp)
+	if locked.inputCursor != len([]rune(locked.input)) {
+		t.Fatalf("expected down to move cursor to end while reviewer runs, got %d", locked.inputCursor)
+	}
+	if got := locked.view.OngoingScroll(); got != start {
+		t.Fatalf("expected down not to scroll transcript while reviewer runs, got %d from %d", got, start)
 	}
 
 	next, _ = locked.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})

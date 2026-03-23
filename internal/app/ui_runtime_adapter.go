@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"builder/internal/runtime"
+	"builder/internal/session"
 	"builder/internal/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -50,6 +51,7 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 		if evt.RunState != nil {
 			m.busy = evt.RunState.Busy
 			if evt.RunState.Busy {
+				m.pendingPreSubmitText = ""
 				m.activity = uiActivityRunning
 			} else {
 				if m.activity == uiActivityRunning {
@@ -72,25 +74,35 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 			return m.setTransientStatusWithKind(fmt.Sprintf("background shell %s %s", evt.Background.ID, evt.Background.State), kind)
 		}
 	case runtime.EventUserMessageFlushed:
-		a.onUserMessageFlushed(evt.UserMessage)
+		shouldRecordHistory := a.onUserMessageFlushed(evt.UserMessage)
+		if shouldRecordHistory {
+			return sequenceCmds(a.syncConversationFromEngine(), m.recordPromptHistory(evt.UserMessage))
+		}
 		return a.syncConversationFromEngine()
 	}
 	return nil
 }
-func (a uiRuntimeAdapter) onUserMessageFlushed(text string) {
+
+func (a uiRuntimeAdapter) onUserMessageFlushed(text string) bool {
 	m := a.model
+	m.conversationFreshness = session.ConversationFreshnessEstablished
+	shouldRecordHistory := false
 	for i, pending := range m.pendingInjected {
 		if strings.TrimSpace(pending) != strings.TrimSpace(text) {
 			continue
 		}
 		m.pendingInjected = append(m.pendingInjected[:i], m.pendingInjected[i+1:]...)
+		shouldRecordHistory = true
 		break
 	}
 	if m.inputSubmitLocked && strings.TrimSpace(m.lockedInjectText) == strings.TrimSpace(text) {
-		m.clearInput()
+		if strings.TrimSpace(m.input) == strings.TrimSpace(m.lockedInjectText) {
+			m.clearInput()
+		}
 		m.lockedInjectText = ""
 		m.inputSubmitLocked = false
 	}
+	return shouldRecordHistory
 }
 
 func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
@@ -98,11 +110,16 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 	if m.engine == nil {
 		return nil
 	}
+	m.conversationFreshness = m.engine.ConversationFreshness()
 	return a.applyChatSnapshot(m.engine.ChatSnapshot())
 }
 
 func (a uiRuntimeAdapter) applyChatSnapshot(snapshot runtime.ChatSnapshot) tea.Cmd {
 	m := a.model
+	if len(m.startupCmds) > 0 {
+		m.startupCmds = nil
+		m.nativeRenderedSnapshot = ""
+	}
 	entries := make([]tui.TranscriptEntry, 0, len(snapshot.Entries))
 	for _, entry := range snapshot.Entries {
 		entries = append(entries, tui.TranscriptEntry{
@@ -115,6 +132,7 @@ func (a uiRuntimeAdapter) applyChatSnapshot(snapshot runtime.ChatSnapshot) tea.C
 		})
 	}
 	m.transcriptEntries = append(m.transcriptEntries[:0], entries...)
+	m.seedPromptHistoryFromTranscriptEntries(m.transcriptEntries)
 	m.refreshRollbackCandidates()
 	m.forwardToView(tui.ClearStreamingReasoningMsg{})
 	m.forwardToView(tui.SetConversationMsg{
@@ -156,7 +174,7 @@ func (m *uiModel) handleRuntimeEvent(evt runtime.Event) {
 }
 
 func (m *uiModel) onUserMessageFlushed(text string) {
-	m.runtimeAdapter().onUserMessageFlushed(text)
+	_ = m.runtimeAdapter().onUserMessageFlushed(text)
 }
 
 func (m *uiModel) syncConversationFromEngine() {

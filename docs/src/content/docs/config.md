@@ -55,6 +55,7 @@ web_search = true
 [reviewer]
 frequency = "edits"
 timeout_seconds = 60
+verbose_output = false
 ```
 
 ## CLI Overrides
@@ -89,7 +90,7 @@ Related, but not part of the settings model:
 | `model_verbosity` | string | `medium` |  |  | Text verbosity hint for supported models. Allowed: `""`, `low`, `medium`, `high`. Unsupported models ignore it. |
 | `theme` | string | `dark` | `BUILDER_THEME` | `--theme` | TUI theme. Allowed: `light`, `dark`. |
 | `tui_alternate_screen` | string | `auto` | `BUILDER_TUI_ALTERNATE_SCREEN` |  | Alternate-screen policy. Allowed: `auto`, `always`, `never`. |
-| `notification_method` | string | `auto` | `BUILDER_NOTIFICATION_METHOD` |  | Terminal notification style for asks and tool-heavy turn completion. Allowed: `auto`, `osc9`, `bel`. `auto` chooses `osc9` on supported terminals and falls back to `bel`. |
+| `notification_method` | string | `auto` | `BUILDER_NOTIFICATION_METHOD` |  | Terminal notification style for asks and tool-heavy turn completion. Ask notifications include the question text and use the session title when set. Allowed: `auto`, `osc9`, `bel`. `auto` chooses `osc9` on supported terminals and falls back to `bel`. |
 | `tool_preambles` | bool | `true` | `BUILDER_TOOL_PREAMBLES` |  | Includes tool-usage preambles in the main system prompt for interactive runs. Headless `builder run` still suppresses them. |
 | `priority_request_mode` | bool | `false` |  |  | Enables fast-mode requests where the provider supports them. File-only. |
 | `web_search` | string | `native` | `BUILDER_WEB_SEARCH` |  | Native web search mode. Allowed: `off`, `native`. `custom` is recognized but rejected as not implemented. This is separate from the `tools.web_search` toggle. |
@@ -99,6 +100,7 @@ Related, but not part of the settings model:
 | `allow_non_cwd_edits` | bool | `false` | `BUILDER_ALLOW_NON_CWD_EDITS` |  | Lets the `patch` tool edit files outside the workspace root, still gated by approval. |
 | `model_context_window` | int | `272000` | `BUILDER_MODEL_CONTEXT_WINDOW` |  | Explicit context-window size used for compaction and token accounting. Must be `> 0`. |
 | `context_compaction_threshold_tokens` | int | `258400` | `BUILDER_CONTEXT_COMPACTION_THRESHOLD_TOKENS` |  | Auto-compaction threshold. Must be `> 0` and `< model_context_window`. The default is derived from the default context window. |
+| `pre_submit_compaction_lead_tokens` | int | `15000` | `BUILDER_PRE_SUBMIT_COMPACTION_LEAD_TOKENS` |  | Lead-band cap for compact-before-submit. Builder compacts before sending the next user prompt when current usage is within `min(model_context_window - context_compaction_threshold_tokens, pre_submit_compaction_lead_tokens)` tokens of the normal threshold. Must be `> 0`. Very large prompts can still trigger pre-submit compaction even below this band. |
 | `minimum_exec_to_bg_seconds` | int | `15` | `BUILDER_MINIMUM_EXEC_TO_BG_SECONDS` |  | Minimum `exec_command` yield time before Builder backgrounds the command. Lower values are clamped up. |
 | `compaction_mode` | string | `local` | `BUILDER_COMPACTION_MODE` |  | Allowed: `native`, `local`, `none`. `native` prefers provider-native compaction and falls back to local compaction. `local` always uses local summary compaction. `none` disables auto-compaction and makes manual compaction fail. |
 | `shell_output_max_chars` | int | `16000` | `BUILDER_SHELL_OUTPUT_MAX_CHARS` |  | Output budget for shell tools and background-shell notices. Must be `> 0`. |
@@ -120,6 +122,7 @@ Related, but not part of the settings model:
 | `reviewer.model` | string | inherits `model` | `BUILDER_REVIEWER_MODEL` | Separate model for the reviewer pass. If unset, Builder copies the effective `model`. |
 | `reviewer.thinking_level` | string | inherits `thinking_level` | `BUILDER_REVIEWER_THINKING_LEVEL` | Allowed: `low`, `medium`, `high`, `xhigh`. |
 | `reviewer.timeout_seconds` | int | `60` | `BUILDER_REVIEWER_TIMEOUT_SECONDS` | Reviewer HTTP timeout. Must be `> 0`. |
+| `reviewer.verbose_output` | bool | `false` | `BUILDER_REVIEWER_VERBOSE_OUTPUT` | Controls whether reviewer suggestion text is shown at all. When `false`, Builder only shows the concise reviewer result/status line. When `true`, ongoing mode keeps the initial reviewer entry compact and shows the full suggestion list only in the final reviewer status, while detail mode shows the suggestions both when issued and in the final reviewer status. |
 
 ### Model Capability Overrides
 

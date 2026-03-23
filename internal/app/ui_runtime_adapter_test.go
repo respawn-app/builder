@@ -30,6 +30,17 @@ func (f *runtimeAdapterFakeClient) Generate(context.Context, llm.Request) (llm.R
 	return resp, nil
 }
 
+func (f *runtimeAdapterFakeClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	return llm.ProviderCapabilities{
+		ProviderID:                    "openai",
+		SupportsResponsesAPI:          true,
+		SupportsResponsesCompact:      true,
+		SupportsReasoningEncrypted:    true,
+		SupportsServerSideContextEdit: true,
+		IsOpenAIFirstParty:            true,
+	}, nil
+}
+
 func TestApplyChatSnapshotSetsOngoingFromSnapshot(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 

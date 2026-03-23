@@ -195,19 +195,15 @@ func (m *Manager) releaseEntry(id string) {
 	delete(m.entries, id)
 }
 
-func (m *Manager) normalizeExecYieldTime(value time.Duration) (time.Duration, string) {
+func (m *Manager) normalizeExecYieldTime(value time.Duration) time.Duration {
 	minimum := m.minimumExecToBgTimeOrDefault()
 	if value <= 0 {
 		value = minimum
 	}
 	if value < minimum {
-		return minimum, fmt.Sprintf(
-			"Warning: yield_time_ms below the minimum exec-to-background time of %dms; clamped to %dms.",
-			value/time.Millisecond,
-			minimum/time.Millisecond,
-		)
+		return minimum
 	}
-	return value, ""
+	return value
 }
 
 func (m *Manager) minimumExecToBgTimeOrDefault() time.Duration {

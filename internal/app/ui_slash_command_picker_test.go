@@ -37,21 +37,30 @@ func TestBuiltInReviewSlashCommandWithWhitespaceAfterSlashDoesNotDuplicateArgs(t
 		WithUICommandRegistry(r),
 	).(*uiModel)
 	m.input = "/ review internal/app"
-	expected := r.Execute("/review internal/app")
-	if !expected.Handled || !expected.SubmitUser {
-		t.Fatalf("expected /review command to submit injected user prompt, got %+v", expected)
+	if got := r.Execute("/review internal/app"); !got.Handled || !got.SubmitUser {
+		t.Fatalf("expected /review command to submit injected user prompt, got %+v", got)
 	}
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
 	if cmd == nil {
-		t.Fatal("expected quit cmd for whitespace-prefixed /review fresh-conversation handoff")
+		t.Fatal("expected submission cmd for whitespace-prefixed /review")
 	}
-	if updated.Action() != UIActionNewSession {
-		t.Fatalf("expected UIActionNewSession, got %q", updated.Action())
+	if updated.Action() != UIActionNone {
+		t.Fatalf("expected no session transition for empty-session /review, got %q", updated.Action())
 	}
-	if updated.nextSessionInitialPrompt != expected.User {
-		t.Fatalf("expected handoff payload to match normalized /review command output\nwant: %q\n got: %q", expected.User, updated.nextSessionInitialPrompt)
+	if !updated.busy {
+		t.Fatal("expected /review to submit in place for an empty session")
+	}
+	if updated.nextSessionInitialPrompt != "" {
+		t.Fatalf("expected no handoff payload for empty-session /review, got %q", updated.nextSessionInitialPrompt)
+	}
+	plain := stripANSIAndTrimRight(updated.view.OngoingSnapshot())
+	if strings.Contains(plain, "/ review internal/app") {
+		t.Fatalf("expected normalized /review prompt content instead of raw command text, got %q", plain)
+	}
+	if !strings.Contains(plain, "internal/app") {
+		t.Fatalf("expected /review args preserved in in-place prompt, got %q", plain)
 	}
 }
 

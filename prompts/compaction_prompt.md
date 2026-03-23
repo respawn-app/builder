@@ -9,7 +9,7 @@ Handoff structure:
 
 ## 1. Overall task and goal summary
 
-- In 3–6 sentences, describe what the user ultimately wants in business/feature terms.
+- In plain text and product language, describe what the user ultimately wants in business/feature terms. This section should preserve information from previous handoffs, if any, and expand on them.
 
 ## 2. Current status (done / in progress / not started)
 
@@ -69,12 +69,8 @@ If no pending work is present, replace this section with "No pending work to exe
 
 ## 7. Current test and runtime status (optional, if tests are involved in the task)
 
-- List all relevant tests you ran for this work, with commands and outcomes, e.g.:
-  - `- ./gradlew :module:test --tests "path.to.TestClass" — PASSED`
-  - `- ./gradlew :module:test — FAILED (reason: <short error>)`
-- Note any manual testing you did:
-  - Steps taken (inputs, UI flows, API calls).
-  - Observed outputs or behavior.
+- Concisely list/summarize relevant tests you ran for this work and any existing failures before this handoff.
+- Note any manual testing flows you did or that will be relevant, and any failures detected during them that are not yet addressed.
 
 ## 8. Known issues, limitations, and edge cases
 
@@ -93,32 +89,35 @@ Capture anything ambiguous the next agent must be aware of:
 
 - Questions that came up but are still unanswered.
 - Assumptions you had to make about requirements, API behavior, UX, or constraints.
-- For each assumption, explicitly mark it as:  
-  `ASSUMPTION: <text> [rationale: <why you chose this>; (optional, if you made a decision)]`
+- Format with this structure:  
+  `<explanation> [rationale: <why you chose this>; (optional, if you made a decision)]`
 
-If you suggest defaults the next agent should keep, state them clearly.
+If you suggest defaults the next agent should keep, state them clearly. For each open question or assumption, issue a recommendation to either ask the user for clarification if the assumption cannot be resolved on your own, or how to resolve it.
 
 ## 10. Interfaces to external systems
 
-Describe any external dependencies this work touches (if applicable):
+Briefly describe any external dependencies this work touches (if applicable):
 
 - APIs, services, databases, queues, or third-party SDKs involved.
 - Important endpoints, schemas, or contracts (just enough for the next agent to reason about correctness).
 - Mention where mocks/stubs/fakes for these interfaces live in the codebase and how they are used in tests, if applicable.
 
+Avoid restating already-known or standard interfaces like "app database" or "git". Mention **new** interfaces relevant for the task.
+
 ## 11. Intentional shortcuts and technical debt introduced
 
-If you introduced any deliberate shortcuts, skipped work or some pieces, document them:
+If you introduced any deliberate shortcuts, skipped work, added hacks, cut work short or omitted some pieces of the final implementation, document them:
 
 - Location: file + code paths.
 - What shortcut was taken.
-- Why it was taken (e.g., time constraints, low risk, complexity), and recommend resolution or approach for the next agent.
+- Why it was taken (e.g., time constraints, low risk, complexity)
+- recommended resolution or approach for the next agent (ask user/resolve/mark as todo etc).
 
-Treat it like asking the next agent "hey, please handle this for me / help me with this"
+Treat it like asking the next agent "hey, since you pick up after me, please handle this for me / help me with this"
 
 ## 12. Example usages and scenarios
 
-Give concrete examples that exercise the new/changed behavior (if applicable):
+Give concrete examples that exercise the new/changed behavior (if applicable and relevant to the task):
 
 - Example API requests (paths, methods, important headers, example JSON payloads and responses).
 - Example CLI commands or scripts.
@@ -131,10 +130,10 @@ If there are useful logs, feature flags, or debug views, mention how to enable a
 
 ## 13. User requests and past design decisions
 
-Document the history of relevant decisions so the next agent does not repeatedly ask the user same questions:
+Thoroughly document the history of relevant decisions so the next agent does not repeatedly ask the user same questions:
 
-- Summarize key user preferences and explicit decisions that constrain implementation, especially architectural ones:
-  - Chosen patterns or libraries.
+- Summarize key user preferences and explicit decisions that constrain implementation, especially architectural, product, UX ones:
+  - Chosen patterns, interactions, or libraries.
   - Rejected alternatives and why they were rejected.
 - Capture important past decisions that affect the final implementation:
   - What was decided.
@@ -148,7 +147,7 @@ Example:
 
 ## 14. Mistakes made and how they can be/were solved/prevented 
 
-List mistakes that were made that required correction during the session and explain why the user/you (the agent) labeled them as such, how they were corrected, or if they weren't how they can be corrected, and then how they should be prevented by the next agent. Examples: failed tool calls, user getting angry/correcting you, reverts of code, pivots in implementation. Maintain imperative tone, e.g. "User strongly asserted that no backward compatibility is preserved: do not add fallbacks and deprecation notices."
+Fully list mistakes that were made that required correction during the session and explain why the user or you (the agent) labeled them as such, how they were corrected, or if they weren't how they can be corrected, and then how they should be prevented by the next agent. Examples: failed tool calls, user getting angry/correcting you, reverts of code, pivots in implementation. Maintain imperative tone, e.g. "User strongly asserted that no backward compatibility is preserved: do not add fallbacks and deprecation notices."
 
 ---
 
@@ -159,11 +158,11 @@ List mistakes that were made that required correction during the session and exp
 - Avoid restating generic project documentation or common knowledge
 - Be thorough, do not attempt to save tokens, space, or follow verbosity instructions that apply outside of this task.
 - Do not include any overall document headers like "# HANDOFF".
-- Do NOT repeat the content or instructions from AGENTS.md files in your handoff (the next agent will see those). However, treat instructions from the user (as User messages in this conversation) are essential.
+- Do NOT repeat the content or instructions from AGENTS.md files in your handoff (the next agent will see those). However, treat instructions from the user (as User messages in this conversation) as essential.
 
 # Coherent continuation of work 
 
-If this conversation started with another handoff (meaning that you're not the first agent to work on the task), then **preserve** and carry over **all** relevant and important information from the original handoff. To maintain coherence and drive the **overall** task to completion, the handoff you produce must be a continuation of the **overarching** task **in addition** to the chunk you completed in this session. For example, preserve original user goals in section 1 and add additional information learned from the current session instead of removing that from the scope; preserve previous mistake/leaning notice and add new ones instead of only including the latest info. This applies to all other sections as well. Assume that the information you received in the handoff at the beginning is trustworthy, with additions and corrections from the user (if any) from this session taking priority.
+If this conversation started with another handoff (meaning that you're not the first agent to work on the task), then **preserve** and carry over **all** relevant and important information from the original handoff. To maintain coherence and drive the **overall** task to completion, the handoff you produce must be a continuation of the **overarching** task **in addition** to the chunk you completed in this session. For example, preserve original user goals in section 1 and add additional information learned from the current session instead of removing that from the scope; preserve previous mistakes/learnings and add new ones instead of only including the latest info. This applies to all other sections as well. Assume that the information you received in the handoff at the beginning is trustworthy, with additions and corrections from the user (if any) from this session taking priority.
 
  ---
 

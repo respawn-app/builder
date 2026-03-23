@@ -138,6 +138,9 @@ func (m *uiModel) slashCommandPicker() slashCommandPickerState {
 	if m.rollbackMode {
 		return slashCommandPickerState{}
 	}
+	if m.shouldSuppressSlashCommandPicker() {
+		return slashCommandPickerState{}
+	}
 	parsed := parseSlashCommandInput(m.input)
 	if !parsed.active || parsed.argumentMode || m.isInputLocked() || m.activeAsk != nil {
 		return slashCommandPickerState{}
@@ -223,6 +226,9 @@ func (s slashCommandSelection) shouldAutocomplete() bool {
 }
 
 func (m *uiModel) navigateSlashCommandPicker(delta int) bool {
+	if m.shouldSuppressSlashCommandPicker() {
+		return false
+	}
 	state := m.slashCommandPicker()
 	if !state.visible || len(state.matches) == 0 {
 		return false

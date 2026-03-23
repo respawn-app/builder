@@ -12,14 +12,14 @@ description: Available slash commands, how their input is parsed, and how file-b
 | `/logout` | none | Clear auth and run login again. |
 | `/compact <instructions>` | optional free-form text | Compact the current context. Trailing text is passed through as compaction instructions. |
 | `/name <title>` | optional free-form text | Set the session title. Empty input resets it. |
-| `/thinking <low|medium|high|xhigh>` | optional single value | Set the thinking level. Empty input shows the current level. |
-| `/fast [on|off|status]` | optional single value | Toggle or inspect Fast mode. |
-| `/supervisor [on|off]` | optional single value | Toggle reviewer invocation. |
-| `/autocompaction [on|off]` | optional single value | Toggle auto-compaction. |
-| `/ps [kill|inline|logs] <id>` | optional action + id | Open the background-process picker, or manage a specific background shell. |
+| <code>/thinking &lt;low&#124;medium&#124;high&#124;xhigh&gt;</code> | optional single value | Set the thinking level. Empty input shows the current level. |
+| <code>/fast [on&#124;off&#124;status]</code> | optional single value | Toggle or inspect Fast mode. |
+| <code>/supervisor [on&#124;off]</code> | optional single value | Toggle reviewer invocation. |
+| <code>/autocompaction [on&#124;off]</code> | optional single value | Toggle auto-compaction. |
+| <code>/ps [kill&#124;inline&#124;logs] &lt;id&gt;</code> | optional action + id | Open the background-process picker, or manage a specific background shell. |
 | `/back` | none | Open the parent session when the current session was spawned from one. |
-| `/review <what to review>` | optional free-form text | Start a fresh review session using the built-in review prompt. Trailing text is appended to the prompt body. |
-| `/init <instructions>` | optional free-form text | Start a fresh initialization session using the built-in init prompt. Trailing text is appended to the prompt body. |
+| `/review <what to review>` | optional free-form text | Use the built-in review prompt. In an empty session it submits in place; otherwise it starts a fresh child review session. Trailing text is appended to the prompt body. |
+| `/init <instructions>` | optional free-form text | Use the built-in init prompt. In an empty session it submits in place; otherwise it starts a fresh child initialization session. Trailing text is appended to the prompt body. |
 | `/prompt:<name>` | optional free-form text | Run a custom Markdown prompt discovered from disk. |
 
 ## Input Behavior

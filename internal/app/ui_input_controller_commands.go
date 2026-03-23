@@ -6,13 +6,14 @@ import (
 
 	"builder/internal/app/commands"
 	"builder/internal/runtime"
+	"builder/internal/session"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 func (c uiInputController) applyCommandResult(commandResult commands.Result) (tea.Model, tea.Cmd) {
 	m := c.model
-	if commandResult.SubmitUser && commandResult.FreshConversation {
+	if commandResult.SubmitUser && commandResult.FreshConversation && m.currentConversationFreshness() != session.ConversationFreshnessFresh {
 		m.nextSessionInitialPrompt = commandResult.User
 		m.nextParentSessionID = m.sessionID
 		m.exitAction = UIActionNewSession

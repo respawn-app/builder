@@ -149,6 +149,9 @@ func validateContextWindow(state settingsState, _ map[string]string) error {
 	if state.Settings.ContextCompactionThresholdTokens >= state.Settings.ModelContextWindow {
 		return fmt.Errorf("context_compaction_threshold_tokens must be < model_context_window")
 	}
+	if state.Settings.PreSubmitCompactionLeadTokens <= 0 {
+		return fmt.Errorf("pre_submit_compaction_lead_tokens must be > 0")
+	}
 	return nil
 }
 

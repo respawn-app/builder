@@ -172,9 +172,12 @@
 ## Context Management And Compaction
 
 - Auto-compaction is enabled near context limits.
+- Builder may compact before sending the next user prompt when current context usage is already within a configurable lead band of the normal compaction threshold; in that case the prompt is queued, compaction runs first, and the queued prompt is submitted immediately after compaction completes.
+- Pre-submit compaction lead uses `threshold - min(model_context_window - threshold, pre_submit_compaction_lead_tokens)`, with `pre_submit_compaction_lead_tokens` defaulting to `15000`.
 - Auto-compaction failure aborts the current turn.
 - `compaction_mode=none` disables manual and automatic compaction.
 - Manual compaction is available via `/compact` while idle; optional arguments are appended as compaction guidance.
+- Successful manual `/compact` appends a hidden developer carryover message containing the last visible user prompt so the post-compaction model context still knows what the user most recently asked for.
 - Local compaction instructions are injected as final `developer` message.
 - Local compaction summary generation reads full provider history from latest compaction checkpoint onward (or from start if none).
 - Local compaction summary generation keeps tool declarations for request shape/cache stability but runtime rejects any returned tool calls.
@@ -218,9 +221,12 @@
 - Non-append transcript mutations (compaction/rollback-style rewrites) rebase the internal formatter state without re-emitting prior history, to avoid duplicate scrollback output.
 - Assistant streaming is rendered in the ongoing live viewport and is not appended to normal-buffer scrollback until commit.
 - Pending tool-call activity in ongoing mode lives only in the volatile live region, not in committed normal-buffer scrollback.
+- Ongoing-mode glyphs reserve `@` for web search tool calls; reviewer status/suggestion entries use `§`.
 - Pending tool-call previews in the live region use the same rendering/layout as normal committed `tool_call` previews, with no pending-only labels, keywords, or extra markers.
 - Tool completion in ongoing mode appends exactly one final committed line for that tool, already rendered in its terminal state. Ongoing mode must never recolor or otherwise mutate an earlier emitted tool line.
 - Parallel tool calls in ongoing mode commit through a stable frontier: later completed calls remain in the live region until all earlier pending calls are ready, but they render in their final tool state immediately; only still-running calls show the spinner. Newly committable final lines append once in transcript order.
+- In ongoing main-input mode, `Up`/`Down` are reserved for prompt-history recall at whole-buffer boundaries and for normal multiline cursor movement otherwise; they do not scroll the ongoing transcript.
+- Ongoing transcript scrolling remains on `PgUp`/`PgDn`; failed prompt-history navigation attempts emit a plain terminal BEL with no transient UI notification.
 - Rationale: terminal normal-buffer scrollback cannot be safely rewritten portably; committed replay is the single source of truth for persistent formatted history.
 - Ongoing mode keeps mouse capture disabled by default to preserve native text selection behavior.
 - Ongoing mode never enables terminal alternate-scroll (`?1007`).
@@ -249,10 +255,10 @@
 - `Tab` on a partial selected slash command autocompletes it and inserts a trailing space for arguments.
 - Unknown slash commands are sent to model as normal user prompts.
 - Built-in commands: `/logout`, `/exit`, `/new`, `/resume`, `/compact`, `/name`, `/thinking`, `/fast`, `/review`, `/init`, `/supervisor`, `/autocompaction`, `/ps`, `/back`.
-- Exact known slash commands use the normal queued-input drain path when queued, including fresh-session commands like `/review` and `/init`; they are never sent to the model as plain user prompts.
+- Exact known slash commands use the normal queued-input drain path when queued, including conditionally fresh-session commands like `/review` and `/init`; they are never sent to the model as plain user prompts.
 - Run-safe commands execute immediately while busy.
 - Non-run-safe known commands while busy are rejected with transient status-line error.
-- `/review` starts fresh session and auto-submits embedded review rubric prompt; optional args are appended as review scope.
+- `/review` auto-submits the embedded review rubric prompt; it stays in-place for empty sessions and forks a fresh child session once the current session already has a visible user prompt. Optional args are appended as review scope.
 - `/supervisor` controls runtime reviewer invocation for the current session only.
 - `/supervisor` toggles when called without args; `/supervisor on|off` sets explicitly.
 - `/supervisor` emits user-visible confirmation in transcript + status line and does not persist to config.
@@ -271,7 +277,8 @@
 - Ring terminal bell when a new `ask_question` is shown.
 - Ring on turn end only if the turn executed at least two tool calls.
 - Turn-end ringing is keyed by runtime step id and `tool_call_started`/`assistant_message` events.
-- Turn-end notification text includes assistant response preview when available, else `Builder: turn complete`.
+- Turn-end notification text includes assistant response preview when available, else `<session title>: turn complete` with `builder` as the fallback title.
+- Ask notifications include the ask text as `<session title>: Question: <question>` or `<session title>: Action required: <question>`.
 - `auto` notification method prefers OSC 9 on supported terminals and falls back to BEL.
 - OSC 9 notifications still emit a separate BEL so supported terminals get both notification and audible bell.
 - OSC 9 is disabled when `WT_SESSION` is set.

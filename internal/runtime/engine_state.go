@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"builder/internal/llm"
+	"builder/internal/session"
 	"builder/internal/tools"
 )
 
@@ -48,6 +49,15 @@ func (e *Engine) AppendLocalEntry(role, text string) {
 func (e *Engine) AppendLocalEntryWithOngoingText(role, text, ongoingText string) {
 	e.chat.appendLocalEntryWithOngoingText(role, text, ongoingText)
 	e.emit(Event{Kind: EventConversationUpdated, StepID: ""})
+}
+
+func (e *Engine) RecordPromptHistory(text string) error {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	_, err := e.store.AppendEvent("", "prompt_history", map[string]any{"text": text})
+	return err
 }
 
 func (e *Engine) SetOngoingError(text string) {
@@ -254,6 +264,10 @@ func (e *Engine) SessionID() string {
 
 func (e *Engine) ParentSessionID() string {
 	return strings.TrimSpace(e.store.Meta().ParentSessionID)
+}
+
+func (e *Engine) ConversationFreshness() session.ConversationFreshness {
+	return e.store.ConversationFreshness()
 }
 
 func mustJSON(v any) json.RawMessage {

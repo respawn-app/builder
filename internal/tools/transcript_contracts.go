@@ -107,6 +107,21 @@ func askQuestionToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) t
 	}
 }
 
+func webSearchToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
+	return func(ctx ToolCallContext, raw json.RawMessage) transcript.ToolCallMeta {
+		query, ok := parseWebSearchToolCall(raw)
+		if !ok {
+			return defaultToolCallMeta(toolID)(ctx, raw)
+		}
+		display := FormatWebSearchDisplayText(query)
+		return transcript.ToolCallMeta{
+			ToolName:    string(toolID),
+			Command:     display,
+			CompactText: display,
+		}
+	}
+}
+
 func patchToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
 	return func(ctx ToolCallContext, raw json.RawMessage) transcript.ToolCallMeta {
 		detail, compact, rendered, ok := parsePatchToolCall(raw, ctx.WorkingDir)
@@ -193,6 +208,14 @@ func parseAskQuestionToolCall(raw json.RawMessage) (string, []string, bool) {
 		suggestions = append(suggestions, trimmed)
 	}
 	return question, suggestions, true
+}
+
+func parseWebSearchToolCall(raw json.RawMessage) (string, bool) {
+	in, err := ParseWebSearchInput(raw)
+	if err != nil {
+		return "", false
+	}
+	return in.Query, true
 }
 
 func parsePatchToolCall(raw json.RawMessage, cwd string) (detail string, compact string, rendered *patchformat.RenderedPatch, ok bool) {
@@ -399,6 +422,7 @@ func decodeHostedWebSearchOutput(item HostedToolOutput) (HostedExecution, bool) 
 		input["action"] = actionType
 	}
 	query := strings.TrimSpace(payload.Action.Query)
+	searchQuery := query
 	if url := strings.TrimSpace(payload.Action.URL); url != "" {
 		if query == "" {
 			query = url
@@ -411,14 +435,18 @@ func decodeHostedWebSearchOutput(item HostedToolOutput) (HostedExecution, bool) 
 		}
 		input["pattern"] = pattern
 	}
-	if query == "" {
+	if strings.EqualFold(actionType, "search") {
+		input["query"] = searchQuery
+	} else if query != "" || searchQuery != "" {
+		input["query"] = query
+	} else if query == "" {
 		if actionType != "" {
 			query = actionType
 		} else {
 			query = "web search"
 		}
+		input["query"] = query
 	}
-	input["query"] = query
 	inputRaw, err := json.Marshal(input)
 	if err != nil {
 		return HostedExecution{}, false
@@ -428,6 +456,12 @@ func decodeHostedWebSearchOutput(item HostedToolOutput) (HostedExecution, bool) 
 		output = mustJSON(map[string]any{"raw": string(raw)})
 	}
 	isError := strings.EqualFold(strings.TrimSpace(payload.Status), "failed")
+	if strings.EqualFold(actionType, "search") {
+		if err := ValidateWebSearchQuery(searchQuery); err != nil {
+			output = mustJSON(map[string]any{"error": InvalidWebSearchQueryMessage})
+			isError = true
+		}
+	}
 	return HostedExecution{
 		Call: HostedCall{
 			ID:    callID,
@@ -480,8 +514,9 @@ func formatToolInput(toolID ID, raw json.RawMessage, shellTimeoutSeconds int) (s
 	}
 	if toolID == ToolWebSearch {
 		if query, ok := asString(obj["query"]); ok {
-			return query, ""
+			return FormatWebSearchDisplayText(query), ""
 		}
+		return FormatWebSearchDisplayText(""), ""
 	}
 	if toolID == ToolAskQuestion {
 		if question, ok := asString(obj["question"]); ok {
