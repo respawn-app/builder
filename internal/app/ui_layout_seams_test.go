@@ -63,3 +63,21 @@ func TestComputeNativeLiveRegionStateTracksStreamingBoundary(t *testing.T) {
 		t.Fatalf("expected detail mode to disable native live region state, got %+v", detail)
 	}
 }
+
+func TestComputeNativeLiveRegionStatePadsFreshConversationToTerminalHeight(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 40
+	m.termHeight = 10
+	m.windowSizeKnown = true
+
+	state := m.layout().computeNativeLiveRegionState()
+	if state.pad <= 0 {
+		t.Fatalf("expected fresh conversation to reserve top padding, got %+v", state)
+	}
+	if state.lines != m.termHeight {
+		t.Fatalf("expected fresh conversation live region to fill terminal height %d, got %+v", m.termHeight, state)
+	}
+	if state.streamingActive {
+		t.Fatalf("did not expect fresh conversation to report active streaming, got %+v", state)
+	}
+}

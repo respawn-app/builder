@@ -42,7 +42,8 @@ type nativeResizeReplayMsg struct {
 }
 
 type nativeHistoryFlushMsg struct {
-	Text string
+	Text       string
+	AllowBlank bool
 }
 
 type runtimeEventMsg struct {
@@ -535,7 +536,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.token != m.nativeResizeReplayToken || m.view.Mode() != tui.ModeOngoing {
 			return m, nil
 		}
-		if replay := m.emitCurrentNativeHistorySnapshot(true); replay != nil {
+		if replay := m.emitCurrentNativeScrollbackState(true); replay != nil {
 			return m, replay
 		}
 		return m, tea.ClearScreen
@@ -563,7 +564,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncViewport()
 		return m, nil
 	case nativeHistoryFlushMsg:
-		if strings.TrimSpace(msg.Text) == "" {
+		if !msg.AllowBlank && strings.TrimSpace(msg.Text) == "" {
 			return m, nil
 		}
 		return m, tea.Printf("%s", msg.Text)
