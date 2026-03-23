@@ -78,6 +78,85 @@ func TestAppendEventMonotonicSequence(t *testing.T) {
 	}
 }
 
+func TestReadPromptHistoryFallsBackToVisibleUserMessages(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "user", "content": "first\nline"}); err != nil {
+		t.Fatalf("append first user message: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "assistant", "content": "ignored"}); err != nil {
+		t.Fatalf("append assistant message: %v", err)
+	}
+	if _, err := store.AppendEvent("s2", "message", map[string]any{"role": "user", "content": "second"}); err != nil {
+		t.Fatalf("append second user message: %v", err)
+	}
+
+	history, err := store.ReadPromptHistory()
+	if err != nil {
+		t.Fatalf("read prompt history: %v", err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("expected 2 prompt history entries, got %d", len(history))
+	}
+	if history[0] != "first\nline" || history[1] != "second" {
+		t.Fatalf("unexpected prompt history: %+v", history)
+	}
+}
+
+func TestReadPromptHistoryUsesExplicitPromptHistoryEvents(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("", "prompt_history", map[string]any{"text": "/resume"}); err != nil {
+		t.Fatalf("append slash command history: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "user", "content": "plain user message"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if _, err := store.AppendEvent("", "prompt_history", map[string]any{"text": "plain user message"}); err != nil {
+		t.Fatalf("append explicit user history: %v", err)
+	}
+
+	history, err := store.ReadPromptHistory()
+	if err != nil {
+		t.Fatalf("read prompt history: %v", err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("expected 2 explicit prompt history entries, got %d", len(history))
+	}
+	if history[0] != "/resume" || history[1] != "plain user message" {
+		t.Fatalf("unexpected prompt history: %+v", history)
+	}
+}
+
+func TestReadPromptHistoryPreservesExactStoredText(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	want := "  line one\nline two  "
+	if _, err := store.AppendEvent("", "prompt_history", map[string]any{"text": want}); err != nil {
+		t.Fatalf("append prompt history: %v", err)
+	}
+
+	history, err := store.ReadPromptHistory()
+	if err != nil {
+		t.Fatalf("read prompt history: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("expected 1 history entry, got %d", len(history))
+	}
+	if history[0] != want {
+		t.Fatalf("expected exact stored prompt text, got %q want %q", history[0], want)
+	}
+}
+
 func TestListSessionsSortedByUpdatedAt(t *testing.T) {
 	root := t.TempDir()
 	s1, err := Create(root, "workspace-x", "/tmp/work")

@@ -22,10 +22,11 @@ import (
 )
 
 type runtimeWiring struct {
-	engine      *runtime.Engine
-	askBridge   *askBridge
-	eventBridge *runtimeEventBridge
-	background  *shelltool.Manager
+	engine        *runtime.Engine
+	askBridge     *askBridge
+	eventBridge   *runtimeEventBridge
+	background    *shelltool.Manager
+	promptHistory []string
 }
 
 type backgroundEventRouter struct {
@@ -116,6 +117,11 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 }
 
 func newRuntimeWiringWithBackground(store *session.Store, active config.Settings, enabledTools []tools.ID, workspaceRoot string, mgr *auth.Manager, logger *runLogger, background *shelltool.Manager, opts runtimeWiringOptions) (*runtimeWiring, error) {
+	promptHistory, err := store.ReadPromptHistory()
+	if err != nil {
+		return nil, err
+	}
+
 	bells := newBellHooks(defaultTerminalNotifier(active.NotificationMethod), func() string {
 		return store.Meta().Name
 	})
@@ -233,10 +239,11 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		return nil, err
 	}
 	return &runtimeWiring{
-		engine:      eng,
-		askBridge:   askBridge,
-		eventBridge: eventBridge,
-		background:  background,
+		engine:        eng,
+		askBridge:     askBridge,
+		eventBridge:   eventBridge,
+		background:    background,
+		promptHistory: append([]string(nil), promptHistory...),
 	}, nil
 }
 

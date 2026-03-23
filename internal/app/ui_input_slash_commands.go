@@ -45,9 +45,10 @@ func (c uiInputController) handleEnteredSlashCommandInput(text string) (bool, te
 		return true, m, c.showErrorStatus(fmt.Sprintf("cannot run /%s while model is working", command.Name))
 	}
 	if commandResult := m.commandRegistry.Execute(commandText); commandResult.Handled {
+		recordCmd := m.recordPromptHistory(commandText)
 		m.clearInput()
 		next, cmd := c.applyCommandResult(commandResult)
-		return true, next, cmd
+		return true, next, sequenceCmds(recordCmd, cmd)
 	}
 	return false, m, nil
 }

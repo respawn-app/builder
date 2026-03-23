@@ -21,6 +21,10 @@ type submitDoneMsg struct {
 	err     error
 }
 
+type promptHistoryPersistErrMsg struct {
+	err error
+}
+
 type compactDoneMsg struct {
 	err error
 }
@@ -215,6 +219,12 @@ func WithUIBackgroundManager(manager *shelltool.Manager) UIOption {
 	}
 }
 
+func WithUIPromptHistory(history []string) UIOption {
+	return func(m *uiModel) {
+		m.loadPromptHistory(history)
+	}
+}
+
 func newAskBridge() *askBridge {
 	return &askBridge{ch: make(chan askEvent, 64)}
 }
@@ -239,16 +249,20 @@ type uiModel struct {
 	runtimeEvents <-chan runtime.Event
 	askEvents     <-chan askEvent
 
-	input                 string
-	inputCursor           int // rune index; -1 means "track tail"
-	busy                  bool
-	activity              uiActivity
-	compacting            bool
-	reviewerRunning       bool
-	reviewerBlocking      bool
-	reviewerEnabled       bool
-	reviewerMode          string
-	autoCompactionEnabled bool
+	input                    string
+	inputCursor              int // rune index; -1 means "track tail"
+	promptHistory            []string
+	promptHistorySelection   int
+	promptHistoryDraft       string
+	promptHistoryDraftCursor int
+	busy                     bool
+	activity                 uiActivity
+	compacting               bool
+	reviewerRunning          bool
+	reviewerBlocking         bool
+	reviewerEnabled          bool
+	reviewerMode             string
+	autoCompactionEnabled    bool
 
 	queued []string
 
@@ -358,19 +372,21 @@ type rollbackCandidate struct {
 
 func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
 	m := &uiModel{
-		engine:                engine,
-		view:                  tui.NewModel(),
-		activity:              uiActivityIdle,
-		runtimeEvents:         runtimeEvents,
-		askEvents:             askEvents,
-		inputCursor:           -1,
-		commandRegistry:       commands.NewDefaultRegistry(),
-		exitAction:            UIActionNone,
-		theme:                 "dark",
-		tuiAlternateScreen:    config.TUIAlternateScreenAuto,
-		debugKeys:             envFlagEnabled("BUILDER_DEBUG_KEYS"),
-		reviewerMode:          "off",
-		autoCompactionEnabled: true,
+		engine:                   engine,
+		view:                     tui.NewModel(),
+		activity:                 uiActivityIdle,
+		runtimeEvents:            runtimeEvents,
+		askEvents:                askEvents,
+		inputCursor:              -1,
+		promptHistorySelection:   -1,
+		promptHistoryDraftCursor: -1,
+		commandRegistry:          commands.NewDefaultRegistry(),
+		exitAction:               UIActionNone,
+		theme:                    "dark",
+		tuiAlternateScreen:       config.TUIAlternateScreenAuto,
+		debugKeys:                envFlagEnabled("BUILDER_DEBUG_KEYS"),
+		reviewerMode:             "off",
+		autoCompactionEnabled:    true,
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -396,6 +412,7 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 			m.transcriptEntries = append(m.transcriptEntries, tui.TranscriptEntry{Role: entry.Role, Text: entry.Text})
 			m.forwardToView(tui.AppendTranscriptMsg{Role: entry.Role, Text: entry.Text})
 		}
+		m.seedPromptHistoryFromTranscriptEntries(m.transcriptEntries)
 		m.refreshRollbackCandidates()
 		startupNativeHistoryCmd = m.syncNativeHistoryFromTranscript()
 	}
@@ -461,8 +478,8 @@ func (m *uiModel) Init() tea.Cmd {
 		tea.WindowSize(),
 	}
 	cmds = append([]tea.Cmd{tea.ClearScreen}, cmds...)
-	if strings.TrimSpace(m.startupSubmit) != "" {
-		cmds = append(cmds, m.inputController().startSubmission(m.startupSubmit))
+	if startupText := strings.TrimSpace(m.startupSubmit); startupText != "" {
+		cmds = append(cmds, sequenceCmds(m.recordPromptHistory(startupText), m.inputController().startSubmission(startupText)))
 	}
 	if len(m.startupCmds) > 0 {
 		cmds = append(cmds, m.startupCmds...)
@@ -568,6 +585,11 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, tea.Printf("%s", msg.Text)
+	case promptHistoryPersistErrMsg:
+		if msg.err == nil {
+			return m, nil
+		}
+		return m, m.setTransientStatusWithKind("prompt history persistence failed: "+msg.err.Error(), uiStatusNoticeError)
 	case submitDoneMsg:
 		next, cmd := m.inputController().handleSubmitDone(msg)
 		next.(*uiModel).syncViewport()

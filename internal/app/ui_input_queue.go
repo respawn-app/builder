@@ -34,11 +34,13 @@ func (c uiInputController) queueOrStartSubmission(text string) (tea.Model, tea.C
 	if m.isInputLocked() {
 		return m, nil
 	}
+	recordCmd := m.recordPromptHistory(text)
 	m.queueInput(text)
 	if m.busy {
-		return m, nil
+		return m, recordCmd
 	}
-	return c.flushQueuedInputs(queueDrainOne)
+	next, cmd := c.flushQueuedInputs(queueDrainOne)
+	return next, sequenceCmds(recordCmd, cmd)
 }
 
 func (c uiInputController) restoreQueuedMessagesIntoInput() {

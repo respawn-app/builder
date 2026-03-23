@@ -115,6 +115,7 @@ func (a uiRuntimeAdapter) applyChatSnapshot(snapshot runtime.ChatSnapshot) tea.C
 		})
 	}
 	m.transcriptEntries = append(m.transcriptEntries[:0], entries...)
+	m.seedPromptHistoryFromTranscriptEntries(m.transcriptEntries)
 	m.refreshRollbackCandidates()
 	m.forwardToView(tui.ClearStreamingReasoningMsg{})
 	m.forwardToView(tui.SetConversationMsg{
