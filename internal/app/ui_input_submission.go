@@ -198,6 +198,7 @@ func (c uiInputController) handlePreSubmitCompactionCheckDone(msg preSubmitCompa
 	}
 	if msg.err != nil {
 		c.finishBusyActivity(false)
+		c.releaseLockedInjectedInput(true)
 		m.discardQueuedText(msg.text)
 		c.restorePendingPreSubmitTextIntoInput()
 		detailErr := formatSubmissionError(msg.err)
@@ -212,7 +213,6 @@ func (c uiInputController) handlePreSubmitCompactionCheckDone(msg preSubmitCompa
 		m.logf("step.pre_submit_check.submit user_chars=%d", len(msg.text))
 		return m, sequenceCmds(m.recordPromptHistory(msg.text), c.submitCmd(msg.text))
 	}
-	m.pendingPreSubmitText = ""
 	m.logf("step.pre_submit_check.compact_then_submit user_chars=%d", len(msg.text))
 	return m, c.startPreSubmitCompaction()
 }
@@ -236,6 +236,8 @@ func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea
 	c.finishBusyActivity(true)
 	c.releaseLockedInjectedInput(true)
 	if msg.err != nil {
+		m.discardQueuedText(m.pendingPreSubmitText)
+		c.restorePendingPreSubmitTextIntoInput()
 		detailErr := formatSubmissionError(msg.err)
 		m.activity = uiActivityError
 		m.appendLocalEntry("error", detailErr)
