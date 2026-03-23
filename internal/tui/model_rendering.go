@@ -131,7 +131,9 @@ func (m Model) toolCallBlock(entryIndex int, entry TranscriptEntry, consumed map
 	if isAskQuestionToolCall(entry.ToolCall) {
 		return m.askQuestionBlock(entryIndex, entry, consumed, resultIndex, opts, blockRole)
 	}
-	if isShellToolCall(entry.ToolCall, entry.Text) {
+	if isWebSearchToolCall(entry.ToolCall) {
+		blockRole = "tool_web_search"
+	} else if isShellToolCall(entry.ToolCall, entry.Text) {
 		blockRole = "tool_shell"
 	}
 	combined := m.toolCallDisplayText(entry, blockRole, opts)

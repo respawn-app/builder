@@ -124,23 +124,27 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return next, cmd
 		}
 		_, isUserShell := parseUserShellCommand(text)
+		draftText, draftCursor, restoreDraft := m.capturePromptHistoryDraftForReuse()
 		if m.busy {
-			recordCmd := m.recordPromptHistory(text)
 			if isUserShell {
 				m.queueInput(text)
-				return m, recordCmd
+				m.restoreCapturedPromptHistoryDraft(draftText, draftCursor, restoreDraft)
+				return m, nil
 			}
 			m.lockInjectedInput(text)
-			return m, recordCmd
+			m.restoreCapturedPromptHistoryDraft(draftText, draftCursor, restoreDraft)
+			return m, nil
 		}
 		if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
 			recordCmd := m.recordPromptHistory(text)
 			m.clearInput()
+			m.restoreCapturedPromptHistoryDraft(draftText, draftCursor, restoreDraft)
 			next, cmd := c.applyCommandResult(commandResult)
 			return next, sequenceCmds(recordCmd, cmd)
 		}
 		recordCmd := m.recordPromptHistory(text)
 		m.clearInput()
+		m.restoreCapturedPromptHistoryDraft(draftText, draftCursor, restoreDraft)
 		return m, sequenceCmds(recordCmd, c.startSubmission(text))
 	case tea.KeyCtrlJ, keyTypeShiftEnterCSI:
 		if m.isInputLocked() {

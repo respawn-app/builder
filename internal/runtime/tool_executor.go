@@ -44,6 +44,17 @@ func (t *defaultToolExecutor) ExecuteToolCalls(ctx context.Context, stepID strin
 				return
 			}
 			h, ok := e.registry.Get(toolID)
+			if toolID == tools.ToolWebSearch {
+				if err := tools.ValidateWebSearchInput(tc.Input); err != nil {
+					results[idx] = tools.ErrorResult(tools.Call{ID: tc.ID, Name: toolID, Input: tc.Input, StepID: stepID}, tools.InvalidWebSearchQueryMessage)
+					if err := e.persistToolCompletion(stepID, results[idx]); err != nil {
+						callErrs[idx] = fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", tc.ID, results[idx].Name, err)
+					} else {
+						e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: copiedToolResult(results[idx])})
+					}
+					return
+				}
+			}
 			if !ok {
 				results[idx] = tools.Result{CallID: tc.ID, Name: toolID, IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
 				if err := e.persistToolCompletion(stepID, results[idx]); err != nil {

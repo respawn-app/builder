@@ -716,6 +716,28 @@ func TestNativePendingMultilineShellPreviewStaysTwoLinesWhenHeaderWraps(t *testi
 	}
 }
 
+func TestNativePendingWebSearchPreviewUsesAtPrefixAndVerboseQuery(t *testing.T) {
+	entries := []tui.TranscriptEntry{{
+		Role:       "tool_call",
+		Text:       `web search: "latest golang release"`,
+		ToolCallID: "call_web",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:    "web_search",
+			Command:     `web search: "latest golang release"`,
+			CompactText: `web search: "latest golang release"`,
+		},
+	}}
+
+	rendered := renderNativePendingToolSnapshot(entries, "dark", 80, 0)
+	plain := stripANSIPreserve(rendered)
+	if !strings.Contains(plain, pendingSpinnerFrame(0)+` web search: "latest golang release"`) {
+		t.Fatalf("expected pending web search preview to use spinner and verbose query, got %q", plain)
+	}
+	if strings.Contains(plain, `web search: invalid query`) {
+		t.Fatalf("did not expect invalid query fallback for valid web search preview, got %q", plain)
+	}
+}
+
 func TestNativePendingCompletedMultilineShellPreviewStaysTwoLinesWithoutWaitingAnnotation(t *testing.T) {
 	commandA := "echo a"
 	commandB := strings.Join([]string{
@@ -748,6 +770,66 @@ func TestNativePendingCompletedMultilineShellPreviewStaysTwoLinesWithoutWaitingA
 	}
 	if strings.Contains(joined, "waiting") {
 		t.Fatalf("did not expect waiting annotation in completed pending multiline preview, got %q", plain)
+	}
+}
+
+func TestNativeScrollbackReviewerUsesSectionSignPrefix(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "reviewer_status", Text: "Supervisor ran: 2 suggestions, no changes applied."}}),
+	).(*uiModel)
+
+	_, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	if cmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	plain := stripANSIPreserve(msg.Text)
+	if !strings.Contains(plain, "§ Supervisor ran: 2 suggestions, no changes applied.") {
+		t.Fatalf("expected reviewer replay to use section-sign prefix, got %q", plain)
+	}
+	if strings.Contains(plain, "@ Supervisor ran: 2 suggestions, no changes applied.") {
+		t.Fatalf("did not expect reviewer replay to keep @ prefix, got %q", plain)
+	}
+}
+
+func TestNativeScrollbackCommittedWebSearchUsesAtPrefixAndVerboseQuery(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.transcriptEntries = []tui.TranscriptEntry{{
+		Role:       "tool_call",
+		Text:       `web search: "latest golang release"`,
+		ToolCallID: "call_web",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:    "web_search",
+			Command:     `web search: "latest golang release"`,
+			CompactText: `web search: "latest golang release"`,
+		},
+	}, {
+		Role:       "tool_result_ok",
+		Text:       "done",
+		ToolCallID: "call_web",
+	}}
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+	m.nativeHistoryReplayed = true
+	m.windowSizeKnown = true
+	m.termWidth = 100
+	m.termHeight = 20
+	cmd := m.syncNativeHistoryFromTranscript()
+	if cmd == nil {
+		t.Fatal("expected committed replay command")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	plain := stripANSIPreserve(msg.Text)
+	if !strings.Contains(plain, `@ web search: "latest golang release"`) {
+		t.Fatalf("expected committed web search replay to use @ prefix and verbose query, got %q", plain)
 	}
 }
 

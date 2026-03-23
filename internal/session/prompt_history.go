@@ -19,26 +19,20 @@ func normalizePromptHistoryText(text string) string {
 }
 
 func promptHistoryFromEvents(events []Event) []string {
-	out := make([]string, 0)
-	sawPromptHistory := false
+	firstPromptHistorySeq := int64(0)
 	for _, evt := range events {
 		if strings.TrimSpace(evt.Kind) != promptHistoryEventKind || len(evt.Payload) == 0 {
 			continue
 		}
-		sawPromptHistory = true
-		var entry promptHistoryEnvelope
-		if err := json.Unmarshal(evt.Payload, &entry); err != nil {
-			continue
-		}
-		if text := normalizePromptHistoryText(entry.Text); text != "" {
-			out = append(out, text)
-		}
-	}
-	if sawPromptHistory {
-		return out
+		firstPromptHistorySeq = evt.Seq
+		break
 	}
 
+	legacy := make([]string, 0)
 	for _, evt := range events {
+		if firstPromptHistorySeq > 0 && evt.Seq >= firstPromptHistorySeq {
+			break
+		}
 		if strings.TrimSpace(evt.Kind) != "message" || len(evt.Payload) == 0 {
 			continue
 		}
@@ -50,6 +44,20 @@ func promptHistoryFromEvents(events []Event) []string {
 			continue
 		}
 		if text := normalizePromptHistoryText(msg.Content); text != "" {
+			legacy = append(legacy, text)
+		}
+	}
+
+	out := append([]string(nil), legacy...)
+	for _, evt := range events {
+		if strings.TrimSpace(evt.Kind) != promptHistoryEventKind || len(evt.Payload) == 0 {
+			continue
+		}
+		var entry promptHistoryEnvelope
+		if err := json.Unmarshal(evt.Payload, &entry); err != nil {
+			continue
+		}
+		if text := normalizePromptHistoryText(entry.Text); text != "" {
 			out = append(out, text)
 		}
 	}

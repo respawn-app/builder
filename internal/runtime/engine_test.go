@@ -1164,6 +1164,44 @@ func TestHostedWebSearchExecutionUsesURLAsQueryFallback(t *testing.T) {
 	}
 }
 
+func TestHostedWebSearchExecutionRejectsWhitespaceSearchQuery(t *testing.T) {
+	item := llm.ResponseItem{
+		Type: llm.ResponseItemTypeOther,
+		Raw: json.RawMessage(`{
+			"type":"web_search_call",
+			"id":"ws_3",
+			"status":"completed",
+			"action":{"type":"search","query":"   "}
+		}`),
+	}
+
+	executions := hostedToolExecutionsFromOutputItems([]llm.ResponseItem{item}, tools.DefinitionsFor([]tools.ID{tools.ToolWebSearch}))
+	if len(executions) != 1 {
+		t.Fatal("expected hosted web search execution")
+	}
+	execution := executions[0]
+	if !execution.Result.IsError {
+		t.Fatalf("expected hosted whitespace query to fail, got %+v", execution.Result)
+	}
+	var output map[string]string
+	if err := json.Unmarshal(execution.Result.Output, &output); err != nil {
+		t.Fatalf("decode hosted output: %v", err)
+	}
+	if output["error"] != tools.InvalidWebSearchQueryMessage {
+		t.Fatalf("expected invalid query error, got %+v", output)
+	}
+	var input map[string]string
+	if err := json.Unmarshal(execution.Call.Input, &input); err != nil {
+		t.Fatalf("decode hosted input: %v", err)
+	}
+	if _, ok := input["query"]; !ok {
+		t.Fatalf("expected hosted input to preserve query field, got %+v", input)
+	}
+	if input["query"] != "" {
+		t.Fatalf("expected hosted input query to stay empty, got %+v", input)
+	}
+}
+
 func TestSubmitUserMessageContinuesAfterHostedToolOnlyTurn(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -4487,6 +4525,46 @@ func TestExecuteToolCallsFailsOnToolCompletionPersistence(t *testing.T) {
 				t.Fatalf("expected no in-memory tool completions when persistence fails, got %+v", eng.chat.toolCompletions)
 			}
 		})
+	}
+}
+
+func TestExecuteToolCallsRejectsWhitespaceWebSearchQuery(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	results, err := eng.executeToolCalls(context.Background(), "step", []llm.ToolCall{{
+		ID:    "call-web",
+		Name:  string(tools.ToolWebSearch),
+		Input: json.RawMessage(`{"query":"   "}`),
+	}})
+	if err != nil {
+		t.Fatalf("execute tool calls: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected one result, got %d", len(results))
+	}
+	if !results[0].IsError {
+		t.Fatalf("expected invalid web search query to fail, got %+v", results[0])
+	}
+	var output map[string]string
+	if err := json.Unmarshal(results[0].Output, &output); err != nil {
+		t.Fatalf("decode result output: %v", err)
+	}
+	if output["error"] != tools.InvalidWebSearchQueryMessage {
+		t.Fatalf("expected invalid query error, got %+v", output)
+	}
+	if completion, ok := eng.chat.toolCompletions["call-web"]; !ok {
+		t.Fatal("expected tool completion to be recorded")
+	} else if !completion.IsError {
+		t.Fatalf("expected persisted completion to be error, got %+v", completion)
 	}
 }
 

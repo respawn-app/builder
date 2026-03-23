@@ -73,7 +73,7 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 		}
 	case runtime.EventUserMessageFlushed:
 		a.onUserMessageFlushed(evt.UserMessage)
-		return a.syncConversationFromEngine()
+		return sequenceCmds(m.recordPromptHistory(evt.UserMessage), a.syncConversationFromEngine())
 	}
 	return nil
 }
@@ -87,7 +87,9 @@ func (a uiRuntimeAdapter) onUserMessageFlushed(text string) {
 		break
 	}
 	if m.inputSubmitLocked && strings.TrimSpace(m.lockedInjectText) == strings.TrimSpace(text) {
-		m.clearInput()
+		if strings.TrimSpace(m.input) == strings.TrimSpace(m.lockedInjectText) {
+			m.clearInput()
+		}
 		m.lockedInjectText = ""
 		m.inputSubmitLocked = false
 	}

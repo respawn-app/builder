@@ -260,9 +260,13 @@ func isAskQuestionToolCall(meta *transcript.ToolCallMeta) bool {
 	return meta != nil && meta.UsesAskQuestionRendering()
 }
 
+func isWebSearchToolCall(meta *transcript.ToolCallMeta) bool {
+	return meta != nil && strings.TrimSpace(meta.ToolName) == string(tools.ToolWebSearch)
+}
+
 func isToolHeadlineRole(role string) bool {
 	switch strings.TrimSpace(role) {
-	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error", "tool_question", "tool_question_error":
+	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error", "tool_question", "tool_question_error", "tool_web_search", "tool_web_search_success", "tool_web_search_error":
 		return true
 	default:
 		return false

@@ -34,13 +34,13 @@ func (c uiInputController) queueOrStartSubmission(text string) (tea.Model, tea.C
 	if m.isInputLocked() {
 		return m, nil
 	}
-	recordCmd := m.recordPromptHistory(text)
+	draftText, draftCursor, restoreDraft := m.capturePromptHistoryDraftForReuse()
 	m.queueInput(text)
+	m.restoreCapturedPromptHistoryDraft(draftText, draftCursor, restoreDraft)
 	if m.busy {
-		return m, recordCmd
+		return m, nil
 	}
-	next, cmd := c.flushQueuedInputs(queueDrainOne)
-	return next, sequenceCmds(recordCmd, cmd)
+	return c.flushQueuedInputs(queueDrainOne)
 }
 
 func (c uiInputController) restoreQueuedMessagesIntoInput() {
@@ -110,11 +110,11 @@ func (c uiInputController) dispatchQueuedInput(text string) tea.Cmd {
 		if _, knownCommand := m.commandRegistry.Command(text); knownCommand {
 			if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
 				_, cmd := c.applyCommandResult(commandResult)
-				return cmd
+				return sequenceCmds(m.recordPromptHistory(text), cmd)
 			}
 		}
 	}
-	return c.startSubmission(text)
+	return sequenceCmds(m.recordPromptHistory(text), c.startSubmission(text))
 }
 
 func (m *uiModel) shouldContinueQueuedInputAutoDrain() bool {

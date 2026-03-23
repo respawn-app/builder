@@ -236,7 +236,7 @@ var catalogEntries = []CatalogEntry{
 			transcript.ToolCallRenderBehaviorDefault,
 			false,
 			true,
-			defaultToolCallMeta(ToolWebSearch),
+			webSearchToolCallMeta(ToolWebSearch),
 			formatWebSearchToolResult,
 			decodeHostedWebSearchOutput,
 		),

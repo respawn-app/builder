@@ -1416,6 +1416,40 @@ func TestPromptHistoryUpDownBrowseSubmittedPrompts(t *testing.T) {
 	}
 }
 
+func TestPromptHistoryUpCanEnterFromNewDraftAndRestoreItAfterReuse(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIPromptHistory([]string{"hello"}),
+	).(*uiModel)
+	m.input = "world"
+	m.inputCursor = -1
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated := next.(*uiModel)
+	if updated.input != "hello" {
+		t.Fatalf("expected up from new draft to recall history, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyHome})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Hi!!")})
+	updated = next.(*uiModel)
+	if updated.input != "Hi!!hello" {
+		t.Fatalf("expected edited recalled prompt, got %q", updated.input)
+	}
+
+	next, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if updated.input != "world" {
+		t.Fatalf("expected parked draft restored after submitting recalled prompt, got %q", updated.input)
+	}
+	if cmd == nil {
+		t.Fatal("expected submission command")
+	}
+}
+
 func TestPromptHistoryUsesBoundaryNavigationForMultilineSelection(t *testing.T) {
 	m := NewUIModel(
 		nil,
@@ -1491,6 +1525,28 @@ func TestPromptHistoryBellWritesRawTerminalBell(t *testing.T) {
 	}
 	if updated.input != "only prompt" {
 		t.Fatalf("expected prompt selection unchanged after bell miss, got %q", updated.input)
+	}
+}
+
+func TestInterruptedQueuedPromptDoesNotEnterHistoryBeforeFlush(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "queued later"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated := next.(*uiModel)
+	if len(updated.promptHistory) != 0 {
+		t.Fatalf("expected no prompt history before queued prompt flushes, got %+v", updated.promptHistory)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated = next.(*uiModel)
+	if len(updated.promptHistory) != 0 {
+		t.Fatalf("expected interrupted queued prompt not to enter history, got %+v", updated.promptHistory)
+	}
+	if updated.input != "queued later" {
+		t.Fatalf("expected queued draft restored after interrupt, got %q", updated.input)
 	}
 }
 
