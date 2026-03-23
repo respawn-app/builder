@@ -25,6 +25,25 @@ func (m *uiModel) toggleHelp() {
 	m.helpVisible = !m.helpVisible
 }
 
+func (m *uiModel) canToggleHelpWithQuestionMark() bool {
+	if m == nil || m.isInputLocked() || m.input != "" {
+		return false
+	}
+	switch m.inputMode() {
+	case uiInputModeMain, uiInputModeRollbackEdit:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *uiModel) statusHelpHint() string {
+	if m != nil && m.canToggleHelpWithQuestionMark() {
+		return "F1 or ? for help"
+	}
+	return "F1 for help"
+}
+
 func (m *uiModel) canShowHelp() bool {
 	return m.view.Mode() == tui.ModeOngoing
 }
@@ -34,7 +53,7 @@ func (m *uiModel) helpSections() []uiHelpSection {
 		{
 			Title: "Global",
 			Entries: []uiHelpEntry{
-				{Bindings: []string{"Alt + /, ?", "Cmd + /, ?"}, Description: "toggle keyboard help", Active: uiHelpAlwaysActive},
+				{Bindings: []string{"F1", "? (empty prompt)", "Alt + /", "Cmd + /"}, Description: "toggle keyboard help", Active: uiHelpAlwaysActive},
 				{Bindings: []string{"Ctrl + C"}, Description: "interrupt current run or exit", Active: uiHelpAlwaysActive},
 				{Bindings: []string{"Shift + Tab", "Ctrl + T"}, Description: "toggle transcript mode", Active: uiHelpCanToggleTranscript},
 			},

@@ -82,17 +82,26 @@ func TestNormalizeKeyMsgRecognizesHelpCSIUVariants(t *testing.T) {
 	}
 }
 
-func TestIsHelpKeyRecognizesAltSlashAndQuestionMarkRunes(t *testing.T) {
-	if !isHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}, Alt: true}) {
+func TestIsHelpKeyRecognizesPrimaryAndFallbackBindings(t *testing.T) {
+	emptyPromptModel := &uiModel{}
+	draftModel := &uiModel{input: "draft"}
+
+	if !isHelpKey(tea.KeyMsg{Type: tea.KeyF1}, draftModel) {
+		t.Fatal("expected f1 to toggle help")
+	}
+	if !isHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}, Alt: true}, draftModel) {
 		t.Fatal("expected alt+? rune key to toggle help")
 	}
-	if !isHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}, Alt: true}) {
+	if !isHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}, Alt: true}, draftModel) {
 		t.Fatal("expected alt+/ rune key to toggle help")
 	}
-	if isHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}}) {
-		t.Fatal("did not expect plain ? rune key to toggle help")
+	if !isHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}}, emptyPromptModel) {
+		t.Fatal("expected plain ? to toggle help from an empty prompt")
 	}
-	if isHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}) {
+	if isHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}}, draftModel) {
+		t.Fatal("did not expect plain ? rune key to toggle help while a draft is present")
+	}
+	if isHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}, emptyPromptModel) {
 		t.Fatal("did not expect plain / rune key to toggle help")
 	}
 }
