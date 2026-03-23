@@ -130,7 +130,7 @@ class ${formula_class} < Formula
   depends_on "go" => :build
 
   def install
-    system "go", "build", *std_go_args(ldflags: "-s -w -X builder/internal/buildinfo.Version=#{version}"), "./cmd/builder"
+    system "go", "build", *std_go_args(output: bin/"builder", ldflags: "-s -w -X builder/internal/buildinfo.Version=#{version}"), "./cmd/builder"
   end
 
   test do
