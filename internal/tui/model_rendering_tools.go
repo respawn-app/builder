@@ -60,7 +60,7 @@ func compactReviewerStatusForOngoing(text string) string {
 	if trimmed == "" {
 		return ""
 	}
-	if strings.Contains(trimmed, "\n\nSupervisor suggested:\n") {
+	if strings.Contains(trimmed, " suggestions:\n1. ") || strings.Contains(trimmed, " suggestion:\n1. ") {
 		return trimmed
 	}
 	for _, line := range strings.Split(trimmed, "\n") {

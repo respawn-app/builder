@@ -2808,7 +2808,7 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 				followUpIdx = idx
 			}
 		}
-		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "applied.") {
+		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "Supervisor ran: applied 1 suggestion:") {
 			foundAppliedStatus = true
 		}
 	}
@@ -2954,7 +2954,7 @@ func TestReviewerVerboseOutputIncludesSuggestionsInFinalStatus(t *testing.T) {
 		if entry.Role != "reviewer_status" {
 			continue
 		}
-		if strings.Contains(entry.Text, "Supervisor suggested:\n1. Add final verification notes.") {
+		if strings.Contains(entry.Text, "Supervisor ran: applied 1 suggestion:\n1. Add final verification notes.") {
 			foundVerboseStatus = true
 			break
 		}
@@ -2973,7 +2973,7 @@ func TestReviewerVerboseOutputIncludesSuggestionsInFinalStatus(t *testing.T) {
 		if entry.Role != "reviewer_status" {
 			continue
 		}
-		if strings.Contains(entry.Text, "Supervisor suggested:\n1. Add final verification notes.") {
+		if strings.Contains(entry.Text, "Supervisor ran: applied 1 suggestion:\n1. Add final verification notes.") {
 			foundRestoredVerboseStatus = true
 			break
 		}
@@ -3061,6 +3061,9 @@ func TestReviewerStatusTextIncludesReviewerCacheHitMetadata(t *testing.T) {
 		CacheHitPercent:       85,
 		HasCacheHitPercentage: true,
 	}, []string{"one", "two"})
+	if !strings.Contains(text, "Supervisor ran: applied 2 suggestions:\n1. one\n2. two") {
+		t.Fatalf("expected verbose reviewer status header and suggestions, got %q", text)
+	}
 	if !strings.Contains(text, "85% cache hit") {
 		t.Fatalf("expected reviewer cache hit metadata in reviewer status text, got %q", text)
 	}
@@ -5979,6 +5982,88 @@ func TestShouldAutoCompactUsesPreciseRequestInputTokenCountWhenAvailable(t *test
 	}
 }
 
+func TestPreSubmitCompactionTokenLimitUsesSmallerOfWindowHeadroomAndLeadCap(t *testing.T) {
+	tests := []struct {
+		name     string
+		window   int
+		limit    int
+		leadCap  int
+		expected int
+	}{
+		{
+			name:     "window headroom smaller than lead cap",
+			window:   200_000,
+			limit:    190_000,
+			leadCap:  15_000,
+			expected: 180_000,
+		},
+		{
+			name:     "lead cap smaller than window headroom",
+			window:   400_000,
+			limit:    380_000,
+			leadCap:  15_000,
+			expected: 365_000,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			store, err := session.Create(dir, "ws", dir)
+			if err != nil {
+				t.Fatalf("create store: %v", err)
+			}
+
+			eng, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{
+				Model:                         "gpt-5",
+				AutoCompactTokenLimit:         tt.limit,
+				ContextWindowTokens:           tt.window,
+				PreSubmitCompactionLeadTokens: tt.leadCap,
+			})
+			if err != nil {
+				t.Fatalf("new engine: %v", err)
+			}
+
+			if got := eng.preSubmitCompactionTokenLimit(context.Background()); got != tt.expected {
+				t.Fatalf("unexpected pre-submit compaction threshold: got %d want %d", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestShouldCompactBeforeUserMessageUsesPromptGrowthBelowPreSubmitBand(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &preciseCompactionClient{inputTokenCount: 960, contextWindow: 1000}
+	eng, err := New(store, client, tools.NewRegistry(), Config{
+		Model:                         "gpt-5",
+		AutoCompactTokenLimit:         950,
+		ContextWindowTokens:           1000,
+		PreSubmitCompactionLeadTokens: 50,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: strings.Repeat("a", 3400)}); err != nil {
+		t.Fatalf("append message: %v", err)
+	}
+
+	shouldCompact, err := eng.ShouldCompactBeforeUserMessage(context.Background(), strings.Repeat("b", 400))
+	if err != nil {
+		t.Fatalf("ShouldCompactBeforeUserMessage: %v", err)
+	}
+	if !shouldCompact {
+		t.Fatal("expected pre-submit compaction when prompt growth would cross the real threshold")
+	}
+	if client.countCalls == 0 {
+		t.Fatal("expected precise request token count to be used for prompt-growth check")
+	}
+}
+
 func TestShouldAutoCompactRechecksProviderBeforeCompactingOnLargeEstimate(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -6208,6 +6293,62 @@ func TestManualCompactionLocalAppendsSlashCommandArgumentsToPrompt(t *testing.T)
 	}
 	if !found {
 		t.Fatalf("expected local compact prompt to include appended slash command args, got %+v", client.calls[0].Items)
+	}
+}
+
+func TestManualCompactionAppendsLastVisibleUserMessageCarryover(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		compactionResponses: []llm.CompactionResponse{
+			{
+				OutputItems: []llm.ResponseItem{
+					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: prompts.CompactionSummaryPrefix + "\ncondensed summary"},
+					{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+				},
+				Usage: llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
+			},
+		},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "please keep tests green"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: prompts.CompactionSummaryPrefix + "\nolder summary"}); err != nil {
+		t.Fatalf("append compaction summary: %v", err)
+	}
+
+	if err := eng.CompactContext(context.Background(), ""); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+
+	messages := eng.snapshotMessages()
+	if len(messages) == 0 {
+		t.Fatal("expected messages after manual compaction")
+	}
+	carryover := messages[len(messages)-1]
+	if carryover.Role != llm.RoleDeveloper {
+		t.Fatalf("expected developer carryover message, got role=%q", carryover.Role)
+	}
+	if carryover.MessageType != llm.MessageTypeManualCompactionCarryover {
+		t.Fatalf("expected manual compaction carryover message type, got %q", carryover.MessageType)
+	}
+	if !strings.Contains(carryover.Content, "please keep tests green") {
+		t.Fatalf("expected carryover to include last visible user message, got %q", carryover.Content)
+	}
+	if strings.Contains(carryover.Content, "older summary") {
+		t.Fatalf("did not expect prior compaction summary in carryover, got %q", carryover.Content)
 	}
 }
 
