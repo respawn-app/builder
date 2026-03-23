@@ -39,10 +39,6 @@ var catalogEntries = []CatalogEntry{
       "type": "string",
       "description": "Command line to execute in login shell."
     },
-    "cmd": {
-      "type": "string",
-      "description": "Alias for command."
-    },
     "timeout_seconds": {
       "type": "integer",
       "description": "Optional timeout in seconds (max 3600)."
@@ -95,11 +91,11 @@ var catalogEntries = []CatalogEntry{
     },
     "yield_time_ms": {
       "type": "integer",
-      "description": "How long to wait in milliseconds for output before yielding control and backgrounding the process. Omit this for most commands. 15000 is a reasonable minimum"
+      "description": "How long to wait in milliseconds for output before yielding control and backgrounding the process. Omit this for most commands."
     },
     "max_output_tokens": {
       "type": "integer",
-      "description": "Maximum amount of output to return to the model. Excess output will be truncated, and the full clean log remains available on disk."
+      "description": "Maximum amount of output to return to the model. Excess output will be truncated, and the full clean log remains available on disk. Omit this unless you want an override."
     }
   }
 }`),
@@ -145,7 +141,7 @@ var catalogEntries = []CatalogEntry{
 	{
 		ID:             ToolViewImage,
 		Aliases:        []string{"read_image"},
-		Description:    "Read a local image or PDF file by path and attach it to the model as native multimodal input content. Files larger than 500 KiB are rejected; compress the image or PDF first and try again.",
+		Description:    "View a local image or PDF file by path. You will see PDFs as images (not OCR/text).",
 		DefaultEnabled: true,
 		Contract: localContract(
 			LocalRuntimeBuilderViewImage,
@@ -163,7 +159,7 @@ var catalogEntries = []CatalogEntry{
   "properties": {
     "path": {
       "type": "string",
-      "description": "Local filesystem path to an image or PDF file. Relative paths resolve from the workspace root. Files larger than 500 KiB are rejected; compress them before retrying."
+      "description": "Local filesystem path to an image or PDF file. Relative paths resolve from the workspace root."
     }
   }
 }`),
@@ -197,7 +193,7 @@ var catalogEntries = []CatalogEntry{
 	{
 		ID:             ToolAskQuestion,
 		Aliases:        nil,
-		Description:    "Ask the user a question. You should ask the user when planning your work or working to make product decisions, resolve ambiguities, define missing pieces that you cannot resolve by yourself, brainstorming with the user. You should ask the user a lot of questions when you're planning/brainstorming together to learn their desires, preferences, design, product vision, or implementation approach, and sometimes ask them questions when already working if you encounter a problem you can't resolve, a caveat, an undefined area that materially affects the result or direction of your work, etc. You should avoid asking the user obvious or harmless questions like 'Should I run tests?' or 'Where is file X?' which you can answer yourself. Each question pings the user, so treat it like pinging a coworker on Slack: unless they're actively chatting with you, pinging them could distract them. Stick to ONE question per this tool call, for multiple questions call this tool in parallel. Strive to provide multiple suggestions/options with every question if you can.",
+		Description:    "Ask the user a question. You should ask the user when planning your work or working to make product decisions, resolve ambiguities, define missing pieces that you cannot resolve by yourself, brainstorming with the user. You should ask the user a lot of questions when you're planning/brainstorming together to learn their desires, preferences, design, product vision, or implementation approach, and sometimes ask them questions when already working if you encounter a problem you can't resolve, a caveat, an undefined area that materially affects the result or direction of your work, etc. You should avoid asking the user obvious or harmless questions like 'Should I run tests?' or 'Where is file X?' which you can answer yourself. Each question pings the user, so treat it like pinging a coworker on Slack: unless they're actively chatting with you, pinging them could distract them. Stick to ONE question per this tool call, for multiple questions call this tool in parallel. Strive to provide multiple suggestions/options with every question if you can. You must always choose exactly one recommended option if you provide suggestions.",
 		DefaultEnabled: true,
 		Contract: localContract(
 			LocalRuntimeBuilderAskQuestion,
@@ -206,7 +202,7 @@ var catalogEntries = []CatalogEntry{
 			transcript.ToolCallRenderBehaviorAskQuestion,
 			false,
 			askQuestionToolCallMeta(ToolAskQuestion),
-			formatGenericToolResult,
+			formatAskQuestionToolResult,
 		),
 		Schema: json.RawMessage(`{
   "type": "object",
@@ -219,8 +215,12 @@ var catalogEntries = []CatalogEntry{
     },
     "suggestions": {
       "type": "array",
-      "description": "Optional choice suggestions. To fill this you should anticipate best practices or options, explain them in the item text briefly, pick exactly one recommended option and mark it as such. Strive to give users the best, sensible options possible, following best-practices, guidelines, and common sense.",
+      "description": "Optional choice suggestions. Omit this field when you want a freeform-only answer. If you provide suggestions, you must also provide recommended_option_index. Strive to give users the best, sensible options possible, following best-practices, guidelines, and common sense.",
       "items": {"type": "string"}
+    },
+    "recommended_option_index": {
+      "type": "integer",
+      "description": "Optional 1-based index of the recommended suggestion. Omit this only when suggestions is omitted. Use this field instead of adding recommendation markers to suggestion text."
     }
   }
 }`),
@@ -228,7 +228,7 @@ var catalogEntries = []CatalogEntry{
 	{
 		ID:             ToolWebSearch,
 		Aliases:        nil,
-		Description:    "Search the web for up-to-date external information using the provider-native web search capability when available. Use this when local workspace context is insufficient or the fact could be stale. Prefer primary and official sources, and prefer MCP resources/templates over web search when possible.",
+		Description:    "Search the web for up-to-date external information. Use this when local workspace context is insufficient or the fact could be stale, or for information beyond your model knowledge cutoff. Prefer primary and official sources over social media or untrusted articles.",
 		DefaultEnabled: true,
 		Contract: hostedContract(
 			RequestExposure{Enabled: false},

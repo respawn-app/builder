@@ -37,22 +37,23 @@ type ToolRenderHint struct {
 }
 
 type ToolCallMeta struct {
-	ToolName             string
-	Presentation         ToolPresentationKind
-	RenderBehavior       ToolCallRenderBehavior
-	IsShell              bool
-	UserInitiated        bool
-	Command              string
-	CompactText          string
-	InlineMeta           string
-	TimeoutLabel         string
-	PatchSummary         string
-	PatchDetail          string
-	PatchRender          *patchformat.RenderedPatch
-	RenderHint           *ToolRenderHint
-	Question             string
-	Suggestions          []string
-	OmitSuccessfulResult bool
+	ToolName               string
+	Presentation           ToolPresentationKind
+	RenderBehavior         ToolCallRenderBehavior
+	IsShell                bool
+	UserInitiated          bool
+	Command                string
+	CompactText            string
+	InlineMeta             string
+	TimeoutLabel           string
+	PatchSummary           string
+	PatchDetail            string
+	PatchRender            *patchformat.RenderedPatch
+	RenderHint             *ToolRenderHint
+	Question               string
+	Suggestions            []string
+	RecommendedOptionIndex int
+	OmitSuccessfulResult   bool
 }
 
 func NormalizeToolCallMeta(in ToolCallMeta) ToolCallMeta {
@@ -61,7 +62,7 @@ func NormalizeToolCallMeta(in ToolCallMeta) ToolCallMeta {
 		switch {
 		case out.RenderBehavior == ToolCallRenderBehaviorShell || out.IsShell:
 			out.Presentation = ToolPresentationShell
-		case out.RenderBehavior == ToolCallRenderBehaviorAskQuestion || strings.TrimSpace(out.Question) != "" || len(out.Suggestions) > 0:
+		case out.RenderBehavior == ToolCallRenderBehaviorAskQuestion || strings.TrimSpace(out.Question) != "" || len(out.Suggestions) > 0 || out.RecommendedOptionIndex > 0:
 			out.Presentation = ToolPresentationAskQuestion
 		default:
 			out.Presentation = ToolPresentationDefault
@@ -71,7 +72,7 @@ func NormalizeToolCallMeta(in ToolCallMeta) ToolCallMeta {
 		switch {
 		case out.Presentation == ToolPresentationShell || out.IsShell:
 			out.RenderBehavior = ToolCallRenderBehaviorShell
-		case out.Presentation == ToolPresentationAskQuestion || strings.TrimSpace(out.Question) != "" || len(out.Suggestions) > 0:
+		case out.Presentation == ToolPresentationAskQuestion || strings.TrimSpace(out.Question) != "" || len(out.Suggestions) > 0 || out.RecommendedOptionIndex > 0:
 			out.RenderBehavior = ToolCallRenderBehaviorAskQuestion
 		default:
 			out.RenderBehavior = ToolCallRenderBehaviorDefault

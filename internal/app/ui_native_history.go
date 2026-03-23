@@ -369,6 +369,7 @@ func nativeEntryEqual(left tui.TranscriptEntry, right tui.TranscriptEntry) bool 
 		left.ToolCall.InlineMeta != right.ToolCall.InlineMeta ||
 		left.ToolCall.TimeoutLabel != right.ToolCall.TimeoutLabel ||
 		left.ToolCall.Question != right.ToolCall.Question ||
+		left.ToolCall.RecommendedOptionIndex != right.ToolCall.RecommendedOptionIndex ||
 		left.ToolCall.PatchSummary != right.ToolCall.PatchSummary ||
 		left.ToolCall.PatchDetail != right.ToolCall.PatchDetail ||
 		left.ToolCall.IsShell != right.ToolCall.IsShell ||

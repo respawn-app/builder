@@ -69,11 +69,18 @@
 - `ask_question` is shared by model and runtime, with unified UI.
 - Runtime `ask_question` pauses active pipeline until answered.
 - Waits indefinitely (no timeout/default cancel).
-- Supports suggestions + freeform override:
-- With suggestions: option picker + `none of the above`, and `Tab` can switch to freeform.
+- Model-callable `ask_question` is limited to ordinary question/suggestion/freeform asks. Approval prompts are internal automated workflows only and are not exposed to the model tool schema.
+- Supports suggestions + freeform override.
+- With suggestions: option picker includes a dedicated `Something else` branch, and `Tab` toggles between picker and freeform editing.
+- Suggestion asks use a schema-level `recommended_option_index` (1-based) instead of embedding `Recommended:` into suggestion text. Runtime validation requires that field whenever suggestions are present, but freeform-only asks omit both suggestions and the recommended index.
+- The recommended suggestion is highlighted in green in the ask UI and transcript/detail suggestion rendering without adding textual labels.
+- Selecting `Something else` with empty input opens freeform editing; submitting from that path still requires non-empty commentary.
+- For suggestion asks, returning to picker keeps any pending freeform draft visible as muted text and submits/restores that draft when the user picks an option or tabs back into editing.
+- For internal approval asks, the picker only shows the fixed built-in options `Allow once`, `Allow for this session`, and `Deny`; `Tab` adds commentary for the currently selected option and that commentary is injected through the regular queued user-message steering flow. Allowing continues transparently to the model. Denial fails the original guarded tool call with an authoritative rejection error instead of surfacing a separate approval answer event.
+- Freeform ask input uses the same prompt-box editing/cursor behavior as the main input.
 - Without suggestions: freeform directly.
 - Source origin is not labeled in UI.
-- Answers are persisted as full text.
+- Answers are persisted as explicit summary text (including selected option number and any additional freeform commentary).
 - Queue semantics are strict FIFO, in-memory only, and submitted answers are not editable.
 - Optional post-answer action binding is supported.
 - Action handling uses typed registry (stable id + payload schema + handler).

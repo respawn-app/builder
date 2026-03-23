@@ -312,6 +312,7 @@ type uiModel struct {
 	askFreeform     bool
 	askFreeformMode askFreeformMode
 	askInput        string
+	askInputCursor  int
 
 	termWidth       int
 	termHeight      int
@@ -405,6 +406,7 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 		reviewerMode:             "off",
 		autoCompactionEnabled:    true,
 		conversationFreshness:    session.ConversationFreshnessFresh,
+		askInputCursor:           -1,
 	}
 	for _, opt := range opts {
 		opt(m)

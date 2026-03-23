@@ -93,16 +93,17 @@ func shellToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) transcr
 
 func askQuestionToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
 	return func(ctx ToolCallContext, raw json.RawMessage) transcript.ToolCallMeta {
-		question, suggestions, ok := parseAskQuestionToolCall(raw)
+		question, suggestions, recommendedOptionIndex, ok := parseAskQuestionToolCall(raw)
 		if !ok {
 			return defaultToolCallMeta(toolID)(ctx, raw)
 		}
 		return transcript.ToolCallMeta{
-			ToolName:    string(toolID),
-			Command:     question,
-			CompactText: question,
-			Question:    question,
-			Suggestions: suggestions,
+			ToolName:               string(toolID),
+			Command:                question,
+			CompactText:            question,
+			Question:               question,
+			Suggestions:            suggestions,
+			RecommendedOptionIndex: recommendedOptionIndex,
 		}
 	}
 }
@@ -155,6 +156,60 @@ func formatGenericToolResult(result Result) string {
 	return output
 }
 
+func formatAskQuestionToolResult(result Result) string {
+	if result.IsError {
+		return formatGenericToolResult(result)
+	}
+	if formatted, ok := formatAskQuestionToolOutput(result.Output); ok {
+		return formatted
+	}
+	return formatGenericToolResult(result)
+}
+
+func formatAskQuestionToolOutput(raw json.RawMessage) (string, bool) {
+	var payload struct {
+		Summary              string `json:"summary"`
+		Answer               string `json:"answer,omitempty"`
+		SelectedOptionNumber int    `json:"selected_option_number,omitempty"`
+		FreeformAnswer       string `json:"freeform_answer,omitempty"`
+		Approval             *struct {
+			Decision   string `json:"decision"`
+			Commentary string `json:"commentary,omitempty"`
+		} `json:"approval,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return "", false
+	}
+	if summary := strings.TrimSpace(payload.Summary); summary != "" {
+		return summary, true
+	}
+	if payload.Approval != nil {
+		// Legacy/internal compatibility: model-callable ask_question no longer
+		// accepts approval fields, but older stored transcripts and internal
+		// approval responses may still contain this shape.
+		decision := strings.TrimSpace(payload.Approval.Decision)
+		if decision == "" {
+			return "", false
+		}
+		return fmt.Sprintf("User answered approval: %s.", decision), true
+	}
+	freeform := strings.TrimSpace(payload.FreeformAnswer)
+	if freeform == "" {
+		freeform = strings.TrimSpace(payload.Answer)
+	}
+	if payload.SelectedOptionNumber > 0 {
+		base := fmt.Sprintf("User answered and picked option %d.", payload.SelectedOptionNumber)
+		if freeform == "" {
+			return base, true
+		}
+		return base + "\nUser also said:\n" + freeform, true
+	}
+	if freeform == "" {
+		return "", false
+	}
+	return "User answered: " + freeform, true
+}
+
 func formatPatchToolResult(result Result) string {
 	if !result.IsError {
 		return ""
@@ -187,27 +242,43 @@ func parseShellToolCallUserInitiated(raw json.RawMessage) bool {
 	return in.UserInitiated
 }
 
-func parseAskQuestionToolCall(raw json.RawMessage) (string, []string, bool) {
+func parseAskQuestionToolCall(raw json.RawMessage) (string, []string, int, bool) {
 	var in struct {
-		Question    string   `json:"question"`
-		Suggestions []string `json:"suggestions,omitempty"`
+		Question               string   `json:"question"`
+		Suggestions            []string `json:"suggestions,omitempty"`
+		RecommendedOptionIndex int      `json:"recommended_option_index,omitempty"`
 	}
 	if err := json.Unmarshal(raw, &in); err != nil {
-		return "", nil, false
+		return "", nil, 0, false
 	}
 	question := strings.TrimSpace(in.Question)
 	if question == "" {
-		return "", nil, false
+		return "", nil, 0, false
 	}
-	suggestions := make([]string, 0, len(in.Suggestions))
-	for _, suggestion := range in.Suggestions {
+	suggestions := normalizeAskQuestionSuggestions(in.Suggestions)
+	recommendedOptionIndex := in.RecommendedOptionIndex
+	if recommendedOptionIndex < 1 || recommendedOptionIndex > len(suggestions) {
+		recommendedOptionIndex = 0
+	}
+	return question, suggestions, recommendedOptionIndex, true
+}
+
+func normalizeAskQuestionSuggestions(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, suggestion := range in {
 		trimmed := strings.TrimSpace(suggestion)
 		if trimmed == "" {
 			continue
 		}
-		suggestions = append(suggestions, trimmed)
+		out = append(out, trimmed)
 	}
-	return question, suggestions, true
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func parseWebSearchToolCall(raw json.RawMessage) (string, bool) {
