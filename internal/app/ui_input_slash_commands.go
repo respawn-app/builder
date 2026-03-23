@@ -2,6 +2,9 @@ package app
 
 import (
 	"fmt"
+	"strings"
+
+	"builder/internal/app/commands"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -17,6 +20,10 @@ func (c uiInputController) handleQueuedSlashCommandInput(text string) (bool, tea
 	}
 	if !selection.hasCommand || selection.commandText() == "" {
 		return false, m, nil
+	}
+	if errText, blocked := m.blockedDeferredSlashCommand(selection.commandText()); blocked {
+		m.appendLocalEntry("error", errText)
+		return true, m, c.showErrorStatus(errText)
 	}
 	next, cmd := c.queueOrStartSubmission(selection.commandText())
 	return true, next, cmd
@@ -43,4 +50,31 @@ func (c uiInputController) handleEnteredSlashCommandInput(text string) (bool, te
 		return true, next, cmd
 	}
 	return false, m, nil
+}
+
+func (m *uiModel) blockedDeferredSlashCommand(commandText string) (string, bool) {
+	if m.commandRegistry == nil {
+		return "", false
+	}
+	commandResult := m.commandRegistry.Execute(commandText)
+	if !commandResult.Handled {
+		return "", false
+	}
+	switch commandResult.Action {
+	case commands.ActionBack:
+		if !m.hasParentSession() {
+			return "No parent session available", true
+		}
+	case commands.ActionSetFast:
+		available, _ := m.fastModeState()
+		if !available {
+			return "Fast mode is only available for OpenAI-based Responses providers", true
+		}
+	case commands.ActionProcesses:
+		args := strings.Fields(strings.TrimSpace(commandResult.Args))
+		if len(args) > 0 && m.backgroundManager == nil {
+			return "background process manager is unavailable", true
+		}
+	}
+	return "", false
 }
