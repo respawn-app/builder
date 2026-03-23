@@ -324,7 +324,7 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 	waitForManagerCount(t, manager, 0, 3*time.Second)
 }
 
-func TestExecCommandClampsShortYieldTimeAndWarns(t *testing.T) {
+func TestExecCommandClampsShortYieldTimeSilently(t *testing.T) {
 	workspace := t.TempDir()
 	manager, err := NewManager(WithMinimumExecToBgTime(1500 * time.Millisecond))
 	if err != nil {
@@ -347,8 +347,8 @@ func TestExecCommandClampsShortYieldTimeAndWarns(t *testing.T) {
 		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
 	}
 	text := decodeStringToolOutput(t, result)
-	if !strings.Contains(text, "Warning: yield_time_ms below the minimum exec-to-background time of 250ms; clamped to 1500ms.") {
-		t.Fatalf("expected clamp warning, got %q", text)
+	if strings.Contains(text, "Warning: yield_time_ms below the minimum exec-to-background time") {
+		t.Fatalf("did not expect clamp warning, got %q", text)
 	}
 	if strings.Contains(text, "Process moved to background.") {
 		t.Fatalf("expected command to stay foreground after clamp, got %q", text)
@@ -371,20 +371,19 @@ func TestNormalizeExecYieldTimeDoesNotCapConfiguredMinimum(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = manager.Close() })
 
-	yieldTime, warning := manager.normalizeExecYieldTime(250 * time.Millisecond)
+	yieldTime := manager.normalizeExecYieldTime(250 * time.Millisecond)
 	if yieldTime != 45*time.Second {
 		t.Fatalf("yield time = %s, want %s", yieldTime, 45*time.Second)
 	}
-	if !strings.Contains(warning, "clamped to 45000ms") {
-		t.Fatalf("expected warning to mention configured minimum, got %q", warning)
-	}
 
-	yieldTime, warning = manager.normalizeExecYieldTime(50 * time.Second)
+	yieldTime = manager.normalizeExecYieldTime(50 * time.Second)
 	if yieldTime != 50*time.Second {
 		t.Fatalf("yield time = %s, want %s", yieldTime, 50*time.Second)
 	}
-	if warning != "" {
-		t.Fatalf("did not expect warning for value above minimum, got %q", warning)
+
+	yieldTime = manager.normalizeExecYieldTime(0)
+	if yieldTime != 45*time.Second {
+		t.Fatalf("yield time = %s, want %s for zero input", yieldTime, 45*time.Second)
 	}
 }
 
