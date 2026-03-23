@@ -101,6 +101,7 @@ type ReviewerSettings struct {
 	Model          string
 	ThinkingLevel  string
 	TimeoutSeconds int
+	VerboseOutput  bool
 }
 
 type SourceReport struct {

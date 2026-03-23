@@ -3529,7 +3529,7 @@ func TestInitAutoSubmitsStartupPrompt(t *testing.T) {
 	}
 }
 
-func TestReviewerStatusEndToEnd_OngoingShortDetailFull(t *testing.T) {
+func TestReviewerStatusEndToEnd_VerboseOngoingShortDetailFull(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {

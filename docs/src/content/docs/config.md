@@ -55,6 +55,7 @@ web_search = true
 [reviewer]
 frequency = "edits"
 timeout_seconds = 60
+verbose_output = false
 ```
 
 ## CLI Overrides
@@ -120,6 +121,7 @@ Related, but not part of the settings model:
 | `reviewer.model` | string | inherits `model` | `BUILDER_REVIEWER_MODEL` | Separate model for the reviewer pass. If unset, Builder copies the effective `model`. |
 | `reviewer.thinking_level` | string | inherits `thinking_level` | `BUILDER_REVIEWER_THINKING_LEVEL` | Allowed: `low`, `medium`, `high`, `xhigh`. |
 | `reviewer.timeout_seconds` | int | `60` | `BUILDER_REVIEWER_TIMEOUT_SECONDS` | Reviewer HTTP timeout. Must be `> 0`. |
+| `reviewer.verbose_output` | bool | `false` | `BUILDER_REVIEWER_VERBOSE_OUTPUT` | Controls whether reviewer suggestion text is shown at all. When `false`, Builder only shows the concise reviewer result/status line. When `true`, ongoing mode keeps the initial reviewer entry compact and shows the full suggestion list only in the final reviewer status, while detail mode shows the suggestions both when issued and in the final reviewer status. |
 
 ### Model Capability Overrides
 

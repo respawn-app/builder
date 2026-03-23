@@ -214,6 +214,7 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 			Frequency:     active.Reviewer.Frequency,
 			Model:         active.Reviewer.Model,
 			ThinkingLevel: active.Reviewer.ThinkingLevel,
+			VerboseOutput: active.Reviewer.VerboseOutput,
 			Client:        reviewerClient,
 			ClientFactory: newReviewerClient,
 		},
