@@ -15,15 +15,8 @@ type persistedMessageEnvelope struct {
 }
 
 func firstPromptPreviewFromEvent(kind string, payload json.RawMessage) (string, bool) {
-	if strings.TrimSpace(kind) != "message" || len(payload) == 0 {
-		return "", false
-	}
-
-	var msg persistedMessageEnvelope
-	if err := json.Unmarshal(payload, &msg); err != nil {
-		return "", false
-	}
-	if !isVisibleUserMessage(msg) {
+	msg, ok := visibleUserMessageFromEvent(kind, payload)
+	if !ok {
 		return "", false
 	}
 
@@ -32,6 +25,21 @@ func firstPromptPreviewFromEvent(kind string, payload json.RawMessage) (string, 
 		return "", false
 	}
 	return preview, true
+}
+
+func visibleUserMessageFromEvent(kind string, payload json.RawMessage) (persistedMessageEnvelope, bool) {
+	if strings.TrimSpace(kind) != "message" || len(payload) == 0 {
+		return persistedMessageEnvelope{}, false
+	}
+
+	var msg persistedMessageEnvelope
+	if err := json.Unmarshal(payload, &msg); err != nil {
+		return persistedMessageEnvelope{}, false
+	}
+	if !isVisibleUserMessage(msg) {
+		return persistedMessageEnvelope{}, false
+	}
+	return msg, true
 }
 
 func normalizeFirstPromptPreview(content string) string {

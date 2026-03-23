@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"builder/internal/llm"
+	"builder/internal/session"
 	"builder/internal/tools"
 )
 
@@ -263,6 +264,10 @@ func (e *Engine) SessionID() string {
 
 func (e *Engine) ParentSessionID() string {
 	return strings.TrimSpace(e.store.Meta().ParentSessionID)
+}
+
+func (e *Engine) ConversationFreshness() session.ConversationFreshness {
+	return e.store.ConversationFreshness()
 }
 
 func mustJSON(v any) json.RawMessage {

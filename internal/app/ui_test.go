@@ -3230,7 +3230,12 @@ func TestAutoDrainStopsAfterQueuedPSInlineAppendsToInput(t *testing.T) {
 }
 
 func TestBusyQueuedReviewSlashCommandStartsFreshSessionAfterTurn(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIConversationFreshness(session.ConversationFreshnessEstablished),
+	).(*uiModel)
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.input = "/review internal/app"
@@ -3257,6 +3262,53 @@ func TestBusyQueuedReviewSlashCommandStartsFreshSessionAfterTurn(t *testing.T) {
 	}
 	if len(updated.queued) != 0 {
 		t.Fatalf("expected queued /review drained, got %+v", updated.queued)
+	}
+}
+
+func TestQueuedReviewUsesEngineConversationFreshnessWhenUIDidNotReceiveRuntimeUpdateYet(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, &runtimeAdapterFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "/review internal/app"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated := next.(*uiModel)
+	if len(updated.queued) != 1 || updated.queued[0] != "/review internal/app" {
+		t.Fatalf("expected queued /review command, got %+v", updated.queued)
+	}
+	if updated.conversationFreshness != session.ConversationFreshnessFresh {
+		t.Fatalf("expected UI freshness to remain fresh before runtime sync, got %v", updated.conversationFreshness)
+	}
+	if _, err := store.AppendEvent("s1", "message", llm.Message{Role: llm.RoleUser, Content: "first prompt"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if got := eng.ConversationFreshness(); got != session.ConversationFreshnessEstablished {
+		t.Fatalf("expected engine freshness established after first prompt, got %v", got)
+	}
+
+	next, cmd := updated.Update(submitDoneMsg{message: "done"})
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected quit cmd for queued /review handoff")
+	}
+	if updated.Action() != UIActionNewSession {
+		t.Fatalf("expected UIActionNewSession, got %q", updated.Action())
+	}
+	if strings.TrimSpace(updated.nextSessionInitialPrompt) == "" {
+		t.Fatal("expected queued /review to populate the next-session prompt")
+	}
+	if updated.conversationFreshness != session.ConversationFreshnessEstablished {
+		t.Fatalf("expected UI freshness synced from engine during drain, got %v", updated.conversationFreshness)
 	}
 }
 
@@ -3311,28 +3363,23 @@ func TestBuiltInReviewSlashCommandSubmitsInjectedUserPrompt(t *testing.T) {
 		WithUICommandRegistry(r),
 	).(*uiModel)
 	m.input = "/review internal/app"
-	expected := r.Execute("/review internal/app")
-	if !expected.Handled || !expected.SubmitUser {
-		t.Fatalf("expected /review command to submit injected user prompt, got %+v", expected)
+	if got := r.Execute("/review internal/app"); !got.Handled || !got.SubmitUser {
+		t.Fatalf("expected /review command to submit injected user prompt, got %+v", got)
 	}
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
 	if cmd == nil {
-		t.Fatal("expected quit cmd for /review fresh-conversation handoff")
+		t.Fatal("expected submission cmd for /review")
 	}
-	if updated.Action() != UIActionNewSession {
-		t.Fatalf("expected UIActionNewSession, got %q", updated.Action())
+	if updated.Action() != UIActionNone {
+		t.Fatalf("expected no session transition for empty-session /review, got %q", updated.Action())
 	}
-	if strings.TrimSpace(updated.nextSessionInitialPrompt) == "" {
-		t.Fatal("expected next-session prompt payload for /review")
+	if !updated.busy {
+		t.Fatal("expected /review to submit in place for an empty session")
 	}
-	if updated.nextSessionInitialPrompt != expected.User {
-		t.Fatalf("expected handoff payload to match /review command output\nwant: %q\n got: %q", expected.User, updated.nextSessionInitialPrompt)
-	}
-	plain := stripANSIAndTrimRight(updated.View())
-	if strings.Contains(plain, "/review internal/app") {
-		t.Fatalf("expected command text to be consumed by fresh-session handoff, got %q", plain)
+	if updated.nextSessionInitialPrompt != "" {
+		t.Fatalf("expected no handoff payload for empty-session /review, got %q", updated.nextSessionInitialPrompt)
 	}
 }
 
@@ -3343,20 +3390,41 @@ func TestBuiltInInitSlashCommandSubmitsInjectedUserPrompt(t *testing.T) {
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
 	if cmd == nil {
-		t.Fatal("expected quit cmd for /init fresh-conversation handoff")
+		t.Fatal("expected submission cmd for /init")
+	}
+	if updated.Action() != UIActionNone {
+		t.Fatalf("expected no session transition for empty-session /init, got %q", updated.Action())
+	}
+	if !updated.busy {
+		t.Fatal("expected /init to submit in place for an empty session")
+	}
+	if updated.nextSessionInitialPrompt != "" {
+		t.Fatalf("expected no handoff payload for empty-session /init, got %q", updated.nextSessionInitialPrompt)
+	}
+}
+
+func TestBuiltInReviewSlashCommandStartsFreshSessionWhenCurrentSessionHasVisibleUserPrompt(t *testing.T) {
+	r := commands.NewDefaultRegistry()
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUICommandRegistry(r),
+		WithUIConversationFreshness(session.ConversationFreshnessEstablished),
+	).(*uiModel)
+	m.input = "/review internal/app"
+	expected := r.Execute("/review internal/app")
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected quit cmd for non-empty-session /review handoff")
 	}
 	if updated.Action() != UIActionNewSession {
 		t.Fatalf("expected UIActionNewSession, got %q", updated.Action())
 	}
-	if strings.TrimSpace(updated.nextSessionInitialPrompt) == "" {
-		t.Fatal("expected next-session prompt payload for /init")
-	}
-	if !strings.Contains(updated.nextSessionInitialPrompt, "starter repo") {
-		t.Fatalf("expected init args in handoff payload, got %q", updated.nextSessionInitialPrompt)
-	}
-	plain := stripANSIAndTrimRight(updated.View())
-	if strings.Contains(plain, "/init starter repo") {
-		t.Fatalf("expected command text to be consumed by fresh-session handoff, got %q", plain)
+	if updated.nextSessionInitialPrompt != expected.User {
+		t.Fatalf("expected handoff payload to match /review command output\nwant: %q\n got: %q", expected.User, updated.nextSessionInitialPrompt)
 	}
 }
 

@@ -335,6 +335,54 @@ func TestAppendEventPersistsFirstPromptPreview(t *testing.T) {
 	}
 }
 
+func TestConversationFreshnessAdvancesOnlyForVisibleUserMessages(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if got := store.ConversationFreshness(); got != ConversationFreshnessFresh {
+		t.Fatalf("freshness = %v, want fresh", got)
+	}
+	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "assistant", "content": "hello"}); err != nil {
+		t.Fatalf("append assistant event: %v", err)
+	}
+	if got := store.ConversationFreshness(); got != ConversationFreshnessFresh {
+		t.Fatalf("freshness after assistant = %v, want fresh", got)
+	}
+	if _, err := store.AppendEvent("s2", "message", map[string]any{"role": "user", "content": prompts.CompactionSummaryPrefix + "\nsummary"}); err != nil {
+		t.Fatalf("append compaction summary event: %v", err)
+	}
+	if got := store.ConversationFreshness(); got != ConversationFreshnessFresh {
+		t.Fatalf("freshness after compaction summary = %v, want fresh", got)
+	}
+	if _, err := store.AppendEvent("s3", "message", map[string]any{"role": "user", "content": "Investigate config load failures"}); err != nil {
+		t.Fatalf("append user event: %v", err)
+	}
+	if got := store.ConversationFreshness(); got != ConversationFreshnessEstablished {
+		t.Fatalf("freshness after visible user message = %v, want established", got)
+	}
+}
+
+func TestOpenRehydratesConversationFreshnessFromEvents(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "user", "content": "Investigate config load failures"}); err != nil {
+		t.Fatalf("append user event: %v", err)
+	}
+
+	opened, err := Open(store.Dir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if got := opened.ConversationFreshness(); got != ConversationFreshnessEstablished {
+		t.Fatalf("reopened freshness = %v, want established", got)
+	}
+}
+
 func TestFirstPromptPreviewSkipsCompactionSummaryMessages(t *testing.T) {
 	root := t.TempDir()
 	store, err := Create(root, "workspace-x", "/tmp/work")
