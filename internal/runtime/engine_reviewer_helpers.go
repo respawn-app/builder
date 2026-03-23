@@ -394,10 +394,13 @@ func reviewerStatusText(status ReviewerStatus, suggestions []string) string {
 		}
 		return statusText
 	}
+	header := reviewerVerboseStatusHeader(status)
+	if strings.TrimSpace(header) == "" {
+		header = statusText
+	}
 	b := strings.Builder{}
-	b.WriteString(statusText)
-	b.WriteString("\n\n")
-	b.WriteString("Supervisor suggested:\n")
+	b.WriteString(header)
+	b.WriteString("\n")
 	for idx, suggestion := range suggestions {
 		b.WriteString(strconv.Itoa(idx + 1))
 		b.WriteString(". ")
@@ -411,6 +414,22 @@ func reviewerStatusText(status ReviewerStatus, suggestions []string) string {
 		b.WriteString(fmt.Sprintf("%d%% cache hit", status.CacheHitPercent))
 	}
 	return b.String()
+}
+
+func reviewerVerboseStatusHeader(status ReviewerStatus) string {
+	switch strings.TrimSpace(status.Outcome) {
+	case "noop":
+		return fmt.Sprintf("Supervisor ran, ignored %s:", reviewerSuggestionCountLabel(status.SuggestionsCount))
+	case "applied":
+		return fmt.Sprintf("Supervisor ran, applied %s:", reviewerSuggestionCountLabel(status.SuggestionsCount))
+	case "followup_failed":
+		if strings.TrimSpace(status.Error) != "" {
+			return fmt.Sprintf("Supervisor ran, follow-up failed after %s: %s", reviewerSuggestionCountLabel(status.SuggestionsCount), status.Error)
+		}
+		return fmt.Sprintf("Supervisor ran, follow-up failed after %s:", reviewerSuggestionCountLabel(status.SuggestionsCount))
+	default:
+		return ""
+	}
 }
 
 func reviewerSuggestionsText(suggestions []string) string {

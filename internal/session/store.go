@@ -27,6 +27,7 @@ type Store struct {
 	sessionFP             string
 	eventsFP              string
 	meta                  Meta
+	conversationFreshness ConversationFreshness
 	persisted             bool
 	options               storeOptions
 	eventsFileSizeBytes   int64
@@ -64,7 +65,8 @@ func NewLazy(workspaceContainerDir, workspaceContainerName, workspaceRoot string
 			CreatedAt:          now,
 			UpdatedAt:          now,
 		},
-		persisted: false,
+		conversationFreshness: ConversationFreshnessFresh,
+		persisted:             false,
 	}, nil
 }
 
@@ -185,6 +187,12 @@ func (s *Store) Meta() Meta {
 	return s.meta
 }
 
+func (s *Store) ConversationFreshness() ConversationFreshness {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.conversationFreshness
+}
+
 func (s *Store) MarkInFlight(inFlight bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -263,6 +271,7 @@ func (s *Store) AppendEvent(stepID, kind string, payload any) (Event, error) {
 		Payload:   body,
 	}
 	s.captureFirstPromptPreviewLocked([]Event{evt})
+	s.advanceConversationFreshnessLocked([]Event{evt})
 
 	if err := s.appendEventsAtomicLocked([]Event{evt}); err != nil {
 		return Event{}, err
@@ -295,6 +304,7 @@ func (s *Store) AppendTurnAtomic(stepID string, events []EventInput) ([]Event, e
 		})
 	}
 	s.captureFirstPromptPreviewLocked(built)
+	s.advanceConversationFreshnessLocked(built)
 
 	if err := s.appendEventsAtomicLocked(built); err != nil {
 		return nil, err
@@ -330,6 +340,7 @@ func (s *Store) AppendReplayEvents(events []ReplayEvent) ([]Event, error) {
 		})
 	}
 	s.captureFirstPromptPreviewLocked(built)
+	s.advanceConversationFreshnessLocked(built)
 
 	if err := s.appendEventsAtomicLocked(built); err != nil {
 		return nil, err
@@ -447,6 +458,18 @@ func (s *Store) captureFirstPromptPreviewLocked(events []Event) {
 	for _, evt := range events {
 		if preview, ok := firstPromptPreviewFromEvent(evt.Kind, evt.Payload); ok {
 			s.meta.FirstPromptPreview = preview
+			return
+		}
+	}
+}
+
+func (s *Store) advanceConversationFreshnessLocked(events []Event) {
+	if s.conversationFreshness == ConversationFreshnessEstablished {
+		return
+	}
+	for _, evt := range events {
+		if hasVisibleUserMessageEvent(evt.Kind, evt.Payload) {
+			s.conversationFreshness = ConversationFreshnessEstablished
 			return
 		}
 	}

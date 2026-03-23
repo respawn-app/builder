@@ -1164,6 +1164,44 @@ func TestHostedWebSearchExecutionUsesURLAsQueryFallback(t *testing.T) {
 	}
 }
 
+func TestHostedWebSearchExecutionRejectsWhitespaceSearchQuery(t *testing.T) {
+	item := llm.ResponseItem{
+		Type: llm.ResponseItemTypeOther,
+		Raw: json.RawMessage(`{
+			"type":"web_search_call",
+			"id":"ws_3",
+			"status":"completed",
+			"action":{"type":"search","query":"   "}
+		}`),
+	}
+
+	executions := hostedToolExecutionsFromOutputItems([]llm.ResponseItem{item}, tools.DefinitionsFor([]tools.ID{tools.ToolWebSearch}))
+	if len(executions) != 1 {
+		t.Fatal("expected hosted web search execution")
+	}
+	execution := executions[0]
+	if !execution.Result.IsError {
+		t.Fatalf("expected hosted whitespace query to fail, got %+v", execution.Result)
+	}
+	var output map[string]string
+	if err := json.Unmarshal(execution.Result.Output, &output); err != nil {
+		t.Fatalf("decode hosted output: %v", err)
+	}
+	if output["error"] != tools.InvalidWebSearchQueryMessage {
+		t.Fatalf("expected invalid query error, got %+v", output)
+	}
+	var input map[string]string
+	if err := json.Unmarshal(execution.Call.Input, &input); err != nil {
+		t.Fatalf("decode hosted input: %v", err)
+	}
+	if _, ok := input["query"]; !ok {
+		t.Fatalf("expected hosted input to preserve query field, got %+v", input)
+	}
+	if input["query"] != "" {
+		t.Fatalf("expected hosted input query to stay empty, got %+v", input)
+	}
+}
+
 func TestSubmitUserMessageContinuesAfterHostedToolOnlyTurn(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -2134,6 +2172,7 @@ func TestReviewerRunsOnAllFrequencyWithoutToolCalls(t *testing.T) {
 			Frequency:     "all",
 			Model:         "gpt-5",
 			ThinkingLevel: "low",
+			VerboseOutput: true,
 			Client:        reviewerClient,
 		},
 	})
@@ -2381,6 +2420,7 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 			Frequency:     "all",
 			Model:         "gpt-5",
 			ThinkingLevel: "low",
+			VerboseOutput: true,
 			Client:        reviewerClient,
 		},
 	})
@@ -2553,6 +2593,7 @@ func TestReviewerNoSuggestionsPersistsStatusEntry(t *testing.T) {
 			Frequency:     "all",
 			Model:         "gpt-5",
 			ThinkingLevel: "low",
+			VerboseOutput: true,
 			Client:        reviewerClient,
 		},
 	})
@@ -2613,6 +2654,7 @@ func TestReviewerArrayPayloadIsIgnoredAsNoSuggestions(t *testing.T) {
 			Frequency:     "all",
 			Model:         "gpt-5",
 			ThinkingLevel: "low",
+			VerboseOutput: true,
 			Client:        reviewerClient,
 		},
 	})
@@ -2732,6 +2774,7 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 			Frequency:     "all",
 			Model:         "gpt-5",
 			ThinkingLevel: "low",
+			VerboseOutput: true,
 			Client:        reviewerClient,
 		},
 	})
@@ -2765,7 +2808,7 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 				followUpIdx = idx
 			}
 		}
-		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "applied.") {
+		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "Supervisor ran, applied 1 suggestion:") {
 			foundAppliedStatus = true
 		}
 	}
@@ -2802,12 +2845,141 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 	}
 }
 
+func TestReviewerDefaultOutputOmitsReviewerSuggestionsEntry(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "original final"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}, {
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "updated final after review"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["Add final verification notes."]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			Client:        reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "updated final after review" {
+		t.Fatalf("assistant content = %q, want updated final after review", msg.Content)
+	}
+
+	snapshot := eng.ChatSnapshot()
+	for _, entry := range snapshot.Entries {
+		if entry.Role == "reviewer_suggestions" {
+			t.Fatalf("expected reviewer_suggestions entry to be omitted by default, got %+v", snapshot.Entries)
+		}
+		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "Supervisor suggested:") {
+			t.Fatalf("expected concise reviewer status by default, got %+v", entry)
+		}
+	}
+}
+
 func TestReviewerSuggestionsOngoingTextUsesLockedWording(t *testing.T) {
 	if got := reviewerSuggestionsOngoingText([]string{"one"}); got != "Supervisor made 1 suggestion." {
 		t.Fatalf("unexpected single-suggestion ongoing text: %q", got)
 	}
 	if got := reviewerSuggestionsOngoingText([]string{"one", "two"}); got != "Supervisor made 2 suggestions." {
 		t.Fatalf("unexpected multi-suggestion ongoing text: %q", got)
+	}
+}
+
+func TestReviewerVerboseOutputIncludesSuggestionsInFinalStatus(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "original final"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}, {
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "updated final after review"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["Add final verification notes."]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		Reviewer: ReviewerConfig{
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			VerboseOutput: true,
+			Client:        reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "updated final after review" {
+		t.Fatalf("assistant content = %q, want updated final after review", msg.Content)
+	}
+
+	snapshot := eng.ChatSnapshot()
+	foundVerboseStatus := false
+	for _, entry := range snapshot.Entries {
+		if entry.Role != "reviewer_status" {
+			continue
+		}
+		if strings.Contains(entry.Text, "Supervisor ran, applied 1 suggestion:\n1. Add final verification notes.") {
+			foundVerboseStatus = true
+			break
+		}
+	}
+	if !foundVerboseStatus {
+		t.Fatalf("expected verbose reviewer status entry in snapshot, got %+v", snapshot.Entries)
+	}
+
+	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	restoredSnapshot := restored.ChatSnapshot()
+	foundRestoredVerboseStatus := false
+	for _, entry := range restoredSnapshot.Entries {
+		if entry.Role != "reviewer_status" {
+			continue
+		}
+		if strings.Contains(entry.Text, "Supervisor ran, applied 1 suggestion:\n1. Add final verification notes.") {
+			foundRestoredVerboseStatus = true
+			break
+		}
+	}
+	if !foundRestoredVerboseStatus {
+		t.Fatalf("expected restored verbose reviewer status entry, got %+v", restoredSnapshot.Entries)
 	}
 }
 
@@ -2889,6 +3061,9 @@ func TestReviewerStatusTextIncludesReviewerCacheHitMetadata(t *testing.T) {
 		CacheHitPercent:       85,
 		HasCacheHitPercentage: true,
 	}, []string{"one", "two"})
+	if !strings.Contains(text, "Supervisor ran, applied 2 suggestions:\n1. one\n2. two") {
+		t.Fatalf("expected verbose reviewer status header and suggestions, got %q", text)
+	}
 	if !strings.Contains(text, "85% cache hit") {
 		t.Fatalf("expected reviewer cache hit metadata in reviewer status text, got %q", text)
 	}
@@ -2901,6 +3076,15 @@ func TestReviewerStatusTextIncludesReviewerCacheHitMetadata(t *testing.T) {
 	}, nil)
 	if !strings.Contains(text, "85% cache hit") {
 		t.Fatalf("expected reviewer cache hit metadata even without suggestions, got %q", text)
+	}
+
+	text = reviewerStatusText(ReviewerStatus{
+		Outcome:          "followup_failed",
+		SuggestionsCount: 2,
+		Error:            "tool crashed",
+	}, []string{"one", "two"})
+	if !strings.Contains(text, "Supervisor ran, follow-up failed after 2 suggestions: tool crashed\n1. one\n2. two") {
+		t.Fatalf("expected verbose follow-up failure to include error and suggestions, got %q", text)
 	}
 }
 
@@ -4356,6 +4540,46 @@ func TestExecuteToolCallsFailsOnToolCompletionPersistence(t *testing.T) {
 	}
 }
 
+func TestExecuteToolCallsRejectsWhitespaceWebSearchQuery(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	results, err := eng.executeToolCalls(context.Background(), "step", []llm.ToolCall{{
+		ID:    "call-web",
+		Name:  string(tools.ToolWebSearch),
+		Input: json.RawMessage(`{"query":"   "}`),
+	}})
+	if err != nil {
+		t.Fatalf("execute tool calls: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected one result, got %d", len(results))
+	}
+	if !results[0].IsError {
+		t.Fatalf("expected invalid web search query to fail, got %+v", results[0])
+	}
+	var output map[string]string
+	if err := json.Unmarshal(results[0].Output, &output); err != nil {
+		t.Fatalf("decode result output: %v", err)
+	}
+	if output["error"] != tools.InvalidWebSearchQueryMessage {
+		t.Fatalf("expected invalid query error, got %+v", output)
+	}
+	if completion, ok := eng.chat.toolCompletions["call-web"]; !ok {
+		t.Fatal("expected tool completion to be recorded")
+	} else if !completion.IsError {
+		t.Fatalf("expected persisted completion to be error, got %+v", completion)
+	}
+}
+
 func TestStreamingRetryResetsAttemptDeltas(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -5767,6 +5991,88 @@ func TestShouldAutoCompactUsesPreciseRequestInputTokenCountWhenAvailable(t *test
 	}
 }
 
+func TestPreSubmitCompactionTokenLimitUsesSmallerOfWindowHeadroomAndLeadCap(t *testing.T) {
+	tests := []struct {
+		name     string
+		window   int
+		limit    int
+		leadCap  int
+		expected int
+	}{
+		{
+			name:     "window headroom smaller than lead cap",
+			window:   200_000,
+			limit:    190_000,
+			leadCap:  15_000,
+			expected: 180_000,
+		},
+		{
+			name:     "lead cap smaller than window headroom",
+			window:   400_000,
+			limit:    380_000,
+			leadCap:  15_000,
+			expected: 365_000,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			store, err := session.Create(dir, "ws", dir)
+			if err != nil {
+				t.Fatalf("create store: %v", err)
+			}
+
+			eng, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{
+				Model:                         "gpt-5",
+				AutoCompactTokenLimit:         tt.limit,
+				ContextWindowTokens:           tt.window,
+				PreSubmitCompactionLeadTokens: tt.leadCap,
+			})
+			if err != nil {
+				t.Fatalf("new engine: %v", err)
+			}
+
+			if got := eng.preSubmitCompactionTokenLimit(context.Background()); got != tt.expected {
+				t.Fatalf("unexpected pre-submit compaction threshold: got %d want %d", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestShouldCompactBeforeUserMessageUsesPromptGrowthBelowPreSubmitBand(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &preciseCompactionClient{inputTokenCount: 960, contextWindow: 1000}
+	eng, err := New(store, client, tools.NewRegistry(), Config{
+		Model:                         "gpt-5",
+		AutoCompactTokenLimit:         950,
+		ContextWindowTokens:           1000,
+		PreSubmitCompactionLeadTokens: 50,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: strings.Repeat("a", 3400)}); err != nil {
+		t.Fatalf("append message: %v", err)
+	}
+
+	shouldCompact, err := eng.ShouldCompactBeforeUserMessage(context.Background(), strings.Repeat("b", 400))
+	if err != nil {
+		t.Fatalf("ShouldCompactBeforeUserMessage: %v", err)
+	}
+	if !shouldCompact {
+		t.Fatal("expected pre-submit compaction when prompt growth would cross the real threshold")
+	}
+	if client.countCalls == 0 {
+		t.Fatal("expected precise request token count to be used for prompt-growth check")
+	}
+}
+
 func TestShouldAutoCompactRechecksProviderBeforeCompactingOnLargeEstimate(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -5996,6 +6302,62 @@ func TestManualCompactionLocalAppendsSlashCommandArgumentsToPrompt(t *testing.T)
 	}
 	if !found {
 		t.Fatalf("expected local compact prompt to include appended slash command args, got %+v", client.calls[0].Items)
+	}
+}
+
+func TestManualCompactionAppendsLastVisibleUserMessageCarryover(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		compactionResponses: []llm.CompactionResponse{
+			{
+				OutputItems: []llm.ResponseItem{
+					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: prompts.CompactionSummaryPrefix + "\ncondensed summary"},
+					{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+				},
+				Usage: llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
+			},
+		},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "please keep tests green"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: prompts.CompactionSummaryPrefix + "\nolder summary"}); err != nil {
+		t.Fatalf("append compaction summary: %v", err)
+	}
+
+	if err := eng.CompactContext(context.Background(), ""); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+
+	messages := eng.snapshotMessages()
+	if len(messages) == 0 {
+		t.Fatal("expected messages after manual compaction")
+	}
+	carryover := messages[len(messages)-1]
+	if carryover.Role != llm.RoleDeveloper {
+		t.Fatalf("expected developer carryover message, got role=%q", carryover.Role)
+	}
+	if carryover.MessageType != llm.MessageTypeManualCompactionCarryover {
+		t.Fatalf("expected manual compaction carryover message type, got %q", carryover.MessageType)
+	}
+	if !strings.Contains(carryover.Content, "please keep tests green") {
+		t.Fatalf("expected carryover to include last visible user message, got %q", carryover.Content)
+	}
+	if strings.Contains(carryover.Content, "older summary") {
+		t.Fatalf("did not expect prior compaction summary in carryover, got %q", carryover.Content)
 	}
 }
 

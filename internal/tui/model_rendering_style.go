@@ -81,6 +81,9 @@ func toolBlockRoleFromResult(role, baseRole string) string {
 		if baseRole == "tool_question" {
 			return "tool_question_error"
 		}
+		if baseRole == "tool_web_search" {
+			return "tool_web_search_error"
+		}
 		if baseRole == "tool_shell" {
 			return "tool_shell_error"
 		}
@@ -90,6 +93,9 @@ func toolBlockRoleFromResult(role, baseRole string) string {
 		if baseRole == "tool_question" {
 			return "tool_question"
 		}
+		if baseRole == "tool_web_search" {
+			return "tool_web_search_success"
+		}
 		if baseRole == "tool_shell" {
 			return "tool_shell_success"
 		}
@@ -97,6 +103,9 @@ func toolBlockRoleFromResult(role, baseRole string) string {
 	}
 	if baseRole == "tool_shell" {
 		return "tool_shell"
+	}
+	if baseRole == "tool_web_search" {
+		return "tool_web_search"
 	}
 	return "tool"
 }
@@ -107,7 +116,7 @@ func (m Model) roleSymbol(role string) string {
 		return ""
 	}
 	switch role {
-	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error", "tool_question", "tool_question_error":
+	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error", "tool_question", "tool_question_error", "tool_web_search", "tool_web_search_success", "tool_web_search_error":
 		return styleForRole(role, m.palette()).Render(prefix)
 	case "error":
 		return styleForRole(role, m.palette()).Render(prefix)
@@ -126,6 +135,8 @@ func rolePrefix(role string) string {
 		return "❮"
 	case "tool", "tool_success", "tool_error":
 		return "•"
+	case "tool_web_search", "tool_web_search_success", "tool_web_search_error":
+		return "@"
 	case "tool_shell", "tool_shell_success", "tool_shell_error":
 		return "$"
 	case "tool_question", "tool_question_error":
@@ -133,7 +144,7 @@ func rolePrefix(role string) string {
 	case "compaction_notice", "compaction_summary":
 		return "@"
 	case "reviewer_status", "reviewer_suggestions":
-		return "@"
+		return "§"
 	case "error":
 		return "!"
 	default:
@@ -163,6 +174,12 @@ func styleForRole(role string, p palette) lipgloss.Style {
 	case "tool_success", "tool_result_ok":
 		return p.toolSuccess
 	case "tool_error", "tool_result_error":
+		return p.toolError
+	case "tool_web_search":
+		return p.tool
+	case "tool_web_search_success":
+		return p.toolSuccess
+	case "tool_web_search_error":
 		return p.toolError
 	case "tool_shell":
 		return p.tool

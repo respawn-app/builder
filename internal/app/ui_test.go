@@ -1377,6 +1377,493 @@ func TestMainInputUpDownMultilineMoveAcrossLines(t *testing.T) {
 	}
 }
 
+func TestPromptHistoryUpDownBrowseSubmittedPrompts(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIPromptHistory([]string{"first prompt", "second line\nthird line", "/resume"}),
+	).(*uiModel)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated := next.(*uiModel)
+	if updated.input != "/resume" {
+		t.Fatalf("expected newest prompt selected first, got %q", updated.input)
+	}
+	if updated.cursorIndex() != len([]rune(updated.input)) {
+		t.Fatalf("expected history recall to place cursor at end, got %d", updated.cursorIndex())
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated = next.(*uiModel)
+	if updated.input != "second line\nthird line" {
+		t.Fatalf("expected previous prompt selected, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	if updated.input != "/resume" {
+		t.Fatalf("expected down to move toward newer prompt, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	if updated.input != "" {
+		t.Fatalf("expected down past newest to restore draft, got %q", updated.input)
+	}
+	if updated.inputCursor != -1 {
+		t.Fatalf("expected restored empty draft to track tail cursor, got %d", updated.inputCursor)
+	}
+}
+
+func TestPromptHistoryUpCanEnterFromNewDraftAndRestoreItAfterReuse(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIPromptHistory([]string{"hello"}),
+	).(*uiModel)
+	m.input = "world"
+	m.inputCursor = -1
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated := next.(*uiModel)
+	if updated.input != "world" {
+		t.Fatalf("expected first up from draft tail to stay on draft, got %q", updated.input)
+	}
+	if updated.inputCursor != 0 {
+		t.Fatalf("expected first up from draft tail to move cursor to start, got %d", updated.inputCursor)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated = next.(*uiModel)
+	if updated.input != "hello" {
+		t.Fatalf("expected second up from draft start to recall history, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyHome})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Hi!!")})
+	updated = next.(*uiModel)
+	if updated.input != "Hi!!hello" {
+		t.Fatalf("expected edited recalled prompt, got %q", updated.input)
+	}
+
+	next, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if updated.input != "world" {
+		t.Fatalf("expected parked draft restored after submitting recalled prompt, got %q", updated.input)
+	}
+	if cmd == nil {
+		t.Fatal("expected submission command")
+	}
+}
+
+func TestPromptHistoryUpFromMultilineDraftTailMovesWithinDraftBeforeRecall(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIPromptHistory([]string{"hello"}),
+	).(*uiModel)
+	m.input = "one\ntwo"
+	m.inputCursor = -1
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated := next.(*uiModel)
+	if updated.input != "one\ntwo" {
+		t.Fatalf("expected first up from multiline draft tail to stay on draft, got %q", updated.input)
+	}
+	if updated.inputCursor != 3 {
+		t.Fatalf("expected first up from multiline draft tail to move to previous line, got %d", updated.inputCursor)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated = next.(*uiModel)
+	if updated.input != "one\ntwo" {
+		t.Fatalf("expected second up within multiline draft to stay on draft, got %q", updated.input)
+	}
+	if updated.inputCursor != 0 {
+		t.Fatalf("expected second up within multiline draft to reach buffer start, got %d", updated.inputCursor)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated = next.(*uiModel)
+	if updated.input != "hello" {
+		t.Fatalf("expected third up from multiline draft start to recall history, got %q", updated.input)
+	}
+}
+
+func TestPromptHistoryUsesBoundaryNavigationForMultilineSelection(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIPromptHistory([]string{"one\ntwo\nthree", "older"}),
+	).(*uiModel)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated := next.(*uiModel)
+	if updated.input != "older" {
+		t.Fatalf("expected newest prompt selected, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated = next.(*uiModel)
+	if updated.input != "one\ntwo\nthree" {
+		t.Fatalf("expected multiline prompt selected, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyHome})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	if updated.input != "older" {
+		t.Fatalf("expected down at buffer start to browse newer history, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyHome})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRight})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	if updated.input != "one\ntwo\nthree" {
+		t.Fatalf("expected down after sideways edit intent to stay in selected prompt, got %q", updated.input)
+	}
+	if updated.inputCursor != 5 {
+		t.Fatalf("expected down to move within multiline prompt after leaving history mode, got %d", updated.inputCursor)
+	}
+}
+
+func TestPromptHistoryBellWritesRawTerminalBell(t *testing.T) {
+	var out bytes.Buffer
+	previous := writeTerminalSequence
+	writeTerminalSequence = func(sequence string) {
+		_, _ = out.WriteString(sequence)
+	}
+	t.Cleanup(func() {
+		writeTerminalSequence = previous
+	})
+
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIPromptHistory([]string{"only prompt"}),
+	).(*uiModel)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated := next.(*uiModel)
+	next, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected bell command")
+	}
+	_ = cmd()
+
+	if got := out.String(); got != terminalBell {
+		t.Fatalf("expected raw terminal bell, got %q", got)
+	}
+	if updated.input != "only prompt" {
+		t.Fatalf("expected prompt selection unchanged after bell miss, got %q", updated.input)
+	}
+}
+
+func TestInterruptedQueuedPromptDoesNotEnterHistoryBeforeFlush(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "queued later"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated := next.(*uiModel)
+	if len(updated.promptHistory) != 0 {
+		t.Fatalf("expected no prompt history before queued prompt flushes, got %+v", updated.promptHistory)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated = next.(*uiModel)
+	if len(updated.promptHistory) != 0 {
+		t.Fatalf("expected interrupted queued prompt not to enter history, got %+v", updated.promptHistory)
+	}
+	if updated.input != "queued later" {
+		t.Fatalf("expected queued draft restored after interrupt, got %q", updated.input)
+	}
+}
+
+func TestPreSubmitCompactionQueuesPromptUntilCompactionCompletes(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &runtimeAdapterFakeClient{}
+	eng, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{
+		Model:                         "gpt-5",
+		PreSubmitCompactionLeadTokens: 50,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "continue"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if !updated.busy {
+		t.Fatal("expected busy while pre-submit compaction check is in flight")
+	}
+	if updated.pendingPreSubmitText != "continue" {
+		t.Fatalf("expected pending pre-submit text preserved, got %q", updated.pendingPreSubmitText)
+	}
+	if len(updated.queued) != 1 || updated.queued[0] != "continue" {
+		t.Fatalf("expected prompt queued before compaction decision, got %+v", updated.queued)
+	}
+
+	next, _ = updated.Update(preSubmitCompactionCheckDoneMsg{
+		token:         updated.preSubmitCheckToken,
+		text:          "continue",
+		shouldCompact: true,
+	})
+	updated = next.(*uiModel)
+	if !updated.compacting {
+		t.Fatal("expected compaction state after pre-submit compaction decision")
+	}
+	if updated.pendingPreSubmitText != "continue" {
+		t.Fatalf("expected pending pre-submit text kept while compaction runs, got %q", updated.pendingPreSubmitText)
+	}
+
+	next, _ = updated.Update(compactDoneMsg{})
+	updated = next.(*uiModel)
+	if !updated.busy {
+		t.Fatal("expected queued prompt to resume submission immediately after compaction")
+	}
+	if updated.pendingPreSubmitText != "continue" {
+		t.Fatalf("expected resumed queued prompt to become pending pre-submit text again, got %q", updated.pendingPreSubmitText)
+	}
+	if len(updated.queued) != 1 || updated.queued[0] != "continue" {
+		t.Fatalf("expected resumed queued prompt buffered for submission, got %+v", updated.queued)
+	}
+
+	next, _ = updated.Update(preSubmitCompactionCheckDoneMsg{
+		token:         updated.preSubmitCheckToken,
+		text:          "continue",
+		shouldCompact: false,
+	})
+	updated = next.(*uiModel)
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued prompt consumed before final submit, got %+v", updated.queued)
+	}
+	if got := updated.promptHistory[len(updated.promptHistory)-1]; got != "continue" {
+		t.Fatalf("expected resumed queued prompt recorded when final submit begins, got %+v", updated.promptHistory)
+	}
+
+	next, _ = updated.Update(submitDoneMsg{})
+	updated = next.(*uiModel)
+	if updated.busy {
+		t.Fatal("expected idle state after resumed queued prompt submits")
+	}
+	if updated.pendingPreSubmitText != "" {
+		t.Fatalf("expected pending pre-submit text cleared after submit, got %q", updated.pendingPreSubmitText)
+	}
+	if updated.compacting {
+		t.Fatal("expected compacting state cleared after resumed queued prompt submits")
+	}
+}
+
+func TestPreSubmitCompactionKeepsDuplicateQueuedPromptsInOrder(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &runtimeAdapterFakeClient{}
+	eng, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "continue"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	updated.queued = append(updated.queued, "fix", "continue")
+
+	next, _ = updated.Update(preSubmitCompactionCheckDoneMsg{
+		token:         updated.preSubmitCheckToken,
+		text:          "continue",
+		shouldCompact: false,
+	})
+	updated = next.(*uiModel)
+	if len(updated.queued) != 2 {
+		t.Fatalf("expected two queued prompts to remain, got %+v", updated.queued)
+	}
+	if updated.queued[0] != "fix" || updated.queued[1] != "continue" {
+		t.Fatalf("expected duplicate queued prompts to preserve order, got %+v", updated.queued)
+	}
+}
+
+func TestCtrlCWhilePreSubmitCheckRestoresDraftAndIgnoresStaleDecision(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, &runtimeAdapterFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "continue"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	originalToken := updated.preSubmitCheckToken
+	if len(updated.promptHistory) != 0 {
+		t.Fatalf("expected no prompt history before pre-submit decision, got %+v", updated.promptHistory)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated = next.(*uiModel)
+	if updated.busy {
+		t.Fatal("expected busy=false after ctrl+c during pre-submit check")
+	}
+	if updated.activity != uiActivityInterrupted {
+		t.Fatalf("expected interrupted activity, got %v", updated.activity)
+	}
+	if updated.input != "continue" {
+		t.Fatalf("expected draft restored after ctrl+c, got %q", updated.input)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued draft restored into input and cleared, got %+v", updated.queued)
+	}
+	if updated.pendingPreSubmitText != "" {
+		t.Fatalf("expected pending pre-submit text cleared after ctrl+c, got %q", updated.pendingPreSubmitText)
+	}
+	if len(updated.promptHistory) != 0 {
+		t.Fatalf("expected ctrl+c before submit start to avoid prompt history persistence, got %+v", updated.promptHistory)
+	}
+
+	next, cmd := updated.Update(preSubmitCompactionCheckDoneMsg{token: originalToken, text: "continue", shouldCompact: true})
+	updated = next.(*uiModel)
+	if cmd != nil {
+		t.Fatal("expected stale pre-submit result to be ignored")
+	}
+	if updated.input != "continue" {
+		t.Fatalf("expected stale result to leave restored draft untouched, got %q", updated.input)
+	}
+	if updated.busy {
+		t.Fatal("expected stale result not to restart submission")
+	}
+	if len(updated.promptHistory) != 0 {
+		t.Fatalf("expected stale result not to record prompt history, got %+v", updated.promptHistory)
+	}
+}
+
+func TestPreSubmitCompactionFailureKeepsPromptOutOfHistory(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, &runtimeAdapterFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "continue"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(preSubmitCompactionCheckDoneMsg{
+		token:         updated.preSubmitCheckToken,
+		text:          "continue",
+		shouldCompact: true,
+	})
+	updated = next.(*uiModel)
+
+	next, _ = updated.Update(compactDoneMsg{err: errors.New("compact failed")})
+	updated = next.(*uiModel)
+	if updated.busy {
+		t.Fatal("expected busy=false after compaction failure")
+	}
+	if updated.activity != uiActivityError {
+		t.Fatalf("expected error activity after compaction failure, got %v", updated.activity)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected failed pre-submit prompt removed from queue, got %+v", updated.queued)
+	}
+	if updated.pendingPreSubmitText != "" {
+		t.Fatalf("expected pending pre-submit text cleared after compaction failure, got %q", updated.pendingPreSubmitText)
+	}
+	if updated.input != "continue" {
+		t.Fatalf("expected failed pre-submit prompt restored into input, got %q", updated.input)
+	}
+	if len(updated.promptHistory) != 0 {
+		t.Fatalf("expected compaction failure before submit start not to record prompt history, got %+v", updated.promptHistory)
+	}
+}
+
+func TestPreSubmitCheckErrorUnlocksInjectedInput(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, &runtimeAdapterFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "continue"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	updated.input = "later"
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if !updated.inputSubmitLocked {
+		t.Fatal("expected follow-up enter during pre-submit check to lock input")
+	}
+	if updated.lockedInjectText != "later" {
+		t.Fatalf("expected locked injected text recorded, got %q", updated.lockedInjectText)
+	}
+	if len(updated.pendingInjected) != 1 || updated.pendingInjected[0] != "later" {
+		t.Fatalf("expected pending injected follow-up recorded, got %+v", updated.pendingInjected)
+	}
+
+	next, _ = updated.Update(preSubmitCompactionCheckDoneMsg{
+		token: updated.preSubmitCheckToken,
+		text:  "continue",
+		err:   errors.New("pre-submit failed"),
+	})
+	updated = next.(*uiModel)
+	if updated.inputSubmitLocked {
+		t.Fatal("expected pre-submit check error to unlock input")
+	}
+	if updated.lockedInjectText != "" {
+		t.Fatalf("expected locked injected text cleared, got %q", updated.lockedInjectText)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected pending injected follow-up cleared, got %+v", updated.pendingInjected)
+	}
+	if updated.pendingPreSubmitText != "" {
+		t.Fatalf("expected pending pre-submit text cleared after error, got %q", updated.pendingPreSubmitText)
+	}
+	if updated.input != "later\n\ncontinue" {
+		t.Fatalf("expected restored prompt and unlocked follow-up draft, got %q", updated.input)
+	}
+}
+
 func TestAskFreeformAcceptsSpaceKey(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	reply := make(chan askReply, 1)
@@ -2743,7 +3230,12 @@ func TestAutoDrainStopsAfterQueuedPSInlineAppendsToInput(t *testing.T) {
 }
 
 func TestBusyQueuedReviewSlashCommandStartsFreshSessionAfterTurn(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIConversationFreshness(session.ConversationFreshnessEstablished),
+	).(*uiModel)
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.input = "/review internal/app"
@@ -2770,6 +3262,53 @@ func TestBusyQueuedReviewSlashCommandStartsFreshSessionAfterTurn(t *testing.T) {
 	}
 	if len(updated.queued) != 0 {
 		t.Fatalf("expected queued /review drained, got %+v", updated.queued)
+	}
+}
+
+func TestQueuedReviewUsesEngineConversationFreshnessWhenUIDidNotReceiveRuntimeUpdateYet(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, &runtimeAdapterFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "/review internal/app"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated := next.(*uiModel)
+	if len(updated.queued) != 1 || updated.queued[0] != "/review internal/app" {
+		t.Fatalf("expected queued /review command, got %+v", updated.queued)
+	}
+	if updated.conversationFreshness != session.ConversationFreshnessFresh {
+		t.Fatalf("expected UI freshness to remain fresh before runtime sync, got %v", updated.conversationFreshness)
+	}
+	if _, err := store.AppendEvent("s1", "message", llm.Message{Role: llm.RoleUser, Content: "first prompt"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if got := eng.ConversationFreshness(); got != session.ConversationFreshnessEstablished {
+		t.Fatalf("expected engine freshness established after first prompt, got %v", got)
+	}
+
+	next, cmd := updated.Update(submitDoneMsg{message: "done"})
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected quit cmd for queued /review handoff")
+	}
+	if updated.Action() != UIActionNewSession {
+		t.Fatalf("expected UIActionNewSession, got %q", updated.Action())
+	}
+	if strings.TrimSpace(updated.nextSessionInitialPrompt) == "" {
+		t.Fatal("expected queued /review to populate the next-session prompt")
+	}
+	if updated.conversationFreshness != session.ConversationFreshnessEstablished {
+		t.Fatalf("expected UI freshness synced from engine during drain, got %v", updated.conversationFreshness)
 	}
 }
 
@@ -2824,28 +3363,23 @@ func TestBuiltInReviewSlashCommandSubmitsInjectedUserPrompt(t *testing.T) {
 		WithUICommandRegistry(r),
 	).(*uiModel)
 	m.input = "/review internal/app"
-	expected := r.Execute("/review internal/app")
-	if !expected.Handled || !expected.SubmitUser {
-		t.Fatalf("expected /review command to submit injected user prompt, got %+v", expected)
+	if got := r.Execute("/review internal/app"); !got.Handled || !got.SubmitUser {
+		t.Fatalf("expected /review command to submit injected user prompt, got %+v", got)
 	}
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
 	if cmd == nil {
-		t.Fatal("expected quit cmd for /review fresh-conversation handoff")
+		t.Fatal("expected submission cmd for /review")
 	}
-	if updated.Action() != UIActionNewSession {
-		t.Fatalf("expected UIActionNewSession, got %q", updated.Action())
+	if updated.Action() != UIActionNone {
+		t.Fatalf("expected no session transition for empty-session /review, got %q", updated.Action())
 	}
-	if strings.TrimSpace(updated.nextSessionInitialPrompt) == "" {
-		t.Fatal("expected next-session prompt payload for /review")
+	if !updated.busy {
+		t.Fatal("expected /review to submit in place for an empty session")
 	}
-	if updated.nextSessionInitialPrompt != expected.User {
-		t.Fatalf("expected handoff payload to match /review command output\nwant: %q\n got: %q", expected.User, updated.nextSessionInitialPrompt)
-	}
-	plain := stripANSIAndTrimRight(updated.View())
-	if strings.Contains(plain, "/review internal/app") {
-		t.Fatalf("expected command text to be consumed by fresh-session handoff, got %q", plain)
+	if updated.nextSessionInitialPrompt != "" {
+		t.Fatalf("expected no handoff payload for empty-session /review, got %q", updated.nextSessionInitialPrompt)
 	}
 }
 
@@ -2856,20 +3390,41 @@ func TestBuiltInInitSlashCommandSubmitsInjectedUserPrompt(t *testing.T) {
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
 	if cmd == nil {
-		t.Fatal("expected quit cmd for /init fresh-conversation handoff")
+		t.Fatal("expected submission cmd for /init")
+	}
+	if updated.Action() != UIActionNone {
+		t.Fatalf("expected no session transition for empty-session /init, got %q", updated.Action())
+	}
+	if !updated.busy {
+		t.Fatal("expected /init to submit in place for an empty session")
+	}
+	if updated.nextSessionInitialPrompt != "" {
+		t.Fatalf("expected no handoff payload for empty-session /init, got %q", updated.nextSessionInitialPrompt)
+	}
+}
+
+func TestBuiltInReviewSlashCommandStartsFreshSessionWhenCurrentSessionHasVisibleUserPrompt(t *testing.T) {
+	r := commands.NewDefaultRegistry()
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUICommandRegistry(r),
+		WithUIConversationFreshness(session.ConversationFreshnessEstablished),
+	).(*uiModel)
+	m.input = "/review internal/app"
+	expected := r.Execute("/review internal/app")
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected quit cmd for non-empty-session /review handoff")
 	}
 	if updated.Action() != UIActionNewSession {
 		t.Fatalf("expected UIActionNewSession, got %q", updated.Action())
 	}
-	if strings.TrimSpace(updated.nextSessionInitialPrompt) == "" {
-		t.Fatal("expected next-session prompt payload for /init")
-	}
-	if !strings.Contains(updated.nextSessionInitialPrompt, "starter repo") {
-		t.Fatalf("expected init args in handoff payload, got %q", updated.nextSessionInitialPrompt)
-	}
-	plain := stripANSIAndTrimRight(updated.View())
-	if strings.Contains(plain, "/init starter repo") {
-		t.Fatalf("expected command text to be consumed by fresh-session handoff, got %q", plain)
+	if updated.nextSessionInitialPrompt != expected.User {
+		t.Fatalf("expected handoff payload to match /review command output\nwant: %q\n got: %q", expected.User, updated.nextSessionInitialPrompt)
 	}
 }
 
@@ -3529,7 +4084,7 @@ func TestInitAutoSubmitsStartupPrompt(t *testing.T) {
 	}
 }
 
-func TestReviewerStatusEndToEnd_OngoingShortDetailFull(t *testing.T) {
+func TestReviewerStatusEndToEnd_VerboseOngoingShortDetailFull(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {

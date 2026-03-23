@@ -78,6 +78,116 @@ func TestAppendEventMonotonicSequence(t *testing.T) {
 	}
 }
 
+func TestReadPromptHistoryFallsBackToVisibleUserMessages(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "user", "content": "first\nline"}); err != nil {
+		t.Fatalf("append first user message: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "assistant", "content": "ignored"}); err != nil {
+		t.Fatalf("append assistant message: %v", err)
+	}
+	if _, err := store.AppendEvent("s2", "message", map[string]any{"role": "user", "content": "second"}); err != nil {
+		t.Fatalf("append second user message: %v", err)
+	}
+
+	history, err := store.ReadPromptHistory()
+	if err != nil {
+		t.Fatalf("read prompt history: %v", err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("expected 2 prompt history entries, got %d", len(history))
+	}
+	if history[0] != "first\nline" || history[1] != "second" {
+		t.Fatalf("unexpected prompt history: %+v", history)
+	}
+}
+
+func TestReadPromptHistoryUsesExplicitPromptHistoryEvents(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("", "prompt_history", map[string]any{"text": "/resume"}); err != nil {
+		t.Fatalf("append slash command history: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "user", "content": "plain user message"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if _, err := store.AppendEvent("", "prompt_history", map[string]any{"text": "plain user message"}); err != nil {
+		t.Fatalf("append explicit user history: %v", err)
+	}
+
+	history, err := store.ReadPromptHistory()
+	if err != nil {
+		t.Fatalf("read prompt history: %v", err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("expected 2 explicit prompt history entries, got %d", len(history))
+	}
+	if history[0] != "/resume" || history[1] != "plain user message" {
+		t.Fatalf("unexpected prompt history: %+v", history)
+	}
+}
+
+func TestReadPromptHistoryKeepsLegacyEntriesBeforeFirstExplicitEvent(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "user", "content": "legacy one"}); err != nil {
+		t.Fatalf("append legacy one: %v", err)
+	}
+	if _, err := store.AppendEvent("s2", "message", map[string]any{"role": "user", "content": "legacy two"}); err != nil {
+		t.Fatalf("append legacy two: %v", err)
+	}
+	if _, err := store.AppendEvent("", "prompt_history", map[string]any{"text": "/resume"}); err != nil {
+		t.Fatalf("append explicit history: %v", err)
+	}
+	if _, err := store.AppendEvent("s3", "message", map[string]any{"role": "user", "content": "expanded later user message"}); err != nil {
+		t.Fatalf("append post-upgrade user message: %v", err)
+	}
+
+	history, err := store.ReadPromptHistory()
+	if err != nil {
+		t.Fatalf("read prompt history: %v", err)
+	}
+	if len(history) != 3 {
+		t.Fatalf("expected 3 history entries, got %d", len(history))
+	}
+	if history[0] != "legacy one" || history[1] != "legacy two" || history[2] != "/resume" {
+		t.Fatalf("unexpected prompt history: %+v", history)
+	}
+}
+
+func TestReadPromptHistoryPreservesExactStoredText(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	want := "  line one\nline two  "
+	if _, err := store.AppendEvent("", "prompt_history", map[string]any{"text": want}); err != nil {
+		t.Fatalf("append prompt history: %v", err)
+	}
+
+	history, err := store.ReadPromptHistory()
+	if err != nil {
+		t.Fatalf("read prompt history: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("expected 1 history entry, got %d", len(history))
+	}
+	if history[0] != want {
+		t.Fatalf("expected exact stored prompt text, got %q want %q", history[0], want)
+	}
+}
+
 func TestListSessionsSortedByUpdatedAt(t *testing.T) {
 	root := t.TempDir()
 	s1, err := Create(root, "workspace-x", "/tmp/work")
@@ -222,6 +332,54 @@ func TestAppendEventPersistsFirstPromptPreview(t *testing.T) {
 	}
 	if items[0].FirstPromptPreview != "Investigate config load failures" {
 		t.Fatalf("list preview = %q, want %q", items[0].FirstPromptPreview, "Investigate config load failures")
+	}
+}
+
+func TestConversationFreshnessAdvancesOnlyForVisibleUserMessages(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if got := store.ConversationFreshness(); got != ConversationFreshnessFresh {
+		t.Fatalf("freshness = %v, want fresh", got)
+	}
+	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "assistant", "content": "hello"}); err != nil {
+		t.Fatalf("append assistant event: %v", err)
+	}
+	if got := store.ConversationFreshness(); got != ConversationFreshnessFresh {
+		t.Fatalf("freshness after assistant = %v, want fresh", got)
+	}
+	if _, err := store.AppendEvent("s2", "message", map[string]any{"role": "user", "content": prompts.CompactionSummaryPrefix + "\nsummary"}); err != nil {
+		t.Fatalf("append compaction summary event: %v", err)
+	}
+	if got := store.ConversationFreshness(); got != ConversationFreshnessFresh {
+		t.Fatalf("freshness after compaction summary = %v, want fresh", got)
+	}
+	if _, err := store.AppendEvent("s3", "message", map[string]any{"role": "user", "content": "Investigate config load failures"}); err != nil {
+		t.Fatalf("append user event: %v", err)
+	}
+	if got := store.ConversationFreshness(); got != ConversationFreshnessEstablished {
+		t.Fatalf("freshness after visible user message = %v, want established", got)
+	}
+}
+
+func TestOpenRehydratesConversationFreshnessFromEvents(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "user", "content": "Investigate config load failures"}); err != nil {
+		t.Fatalf("append user event: %v", err)
+	}
+
+	opened, err := Open(store.Dir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if got := opened.ConversationFreshness(); got != ConversationFreshnessEstablished {
+		t.Fatalf("reopened freshness = %v, want established", got)
 	}
 }
 

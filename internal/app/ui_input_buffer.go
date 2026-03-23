@@ -14,6 +14,7 @@ func (m *uiModel) cursorIndex() int {
 func (m *uiModel) clearInput() {
 	m.input = ""
 	m.inputCursor = -1
+	m.resetPromptHistoryNavigation()
 	m.refreshSlashCommandFilterFromInput()
 }
 
@@ -35,6 +36,7 @@ func (m *uiModel) insertInputRunes(chars []rune) {
 	cleaned, cleanedCursor, _ := stripMouseSGRRunesWithCursor(updated, nextCursor)
 	m.input = string(cleaned)
 	m.inputCursor = cleanedCursor
+	m.syncPromptHistorySelectionToInput()
 	m.refreshSlashCommandFilterFromInput()
 }
 
@@ -49,6 +51,7 @@ func (m *uiModel) backspaceInput() bool {
 	updated = append(updated, runes[cursor:]...)
 	m.input = string(updated)
 	m.inputCursor = cursor - 1
+	m.syncPromptHistorySelectionToInput()
 	m.refreshSlashCommandFilterFromInput()
 	return true
 }
@@ -128,6 +131,7 @@ func (m *uiModel) deleteCurrentInputLine() bool {
 	}
 	m.input = updated
 	m.inputCursor = nextCursor
+	m.syncPromptHistorySelectionToInput()
 	m.refreshSlashCommandFilterFromInput()
 	return true
 }

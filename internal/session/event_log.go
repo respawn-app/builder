@@ -34,6 +34,7 @@ func (s *Store) bootstrapEventLogStateLocked() error {
 			s.eventsFileSizeBytes = 0
 			s.pendingFsyncWrites = 0
 			s.writesSinceCompaction = 0
+			s.conversationFreshness = ConversationFreshnessFresh
 			if s.meta.LastSequence != 0 {
 				s.meta.LastSequence = 0
 				s.meta.UpdatedAt = time.Now().UTC()
@@ -48,6 +49,7 @@ func (s *Store) bootstrapEventLogStateLocked() error {
 	s.eventsFileSizeBytes = parsed.totalBytes
 	s.pendingFsyncWrites = 0
 	s.writesSinceCompaction = 0
+	s.conversationFreshness = conversationFreshnessFromEvents(parsed.events)
 	if parsed.lastSequence != s.meta.LastSequence {
 		s.meta.LastSequence = parsed.lastSequence
 		s.meta.UpdatedAt = time.Now().UTC()

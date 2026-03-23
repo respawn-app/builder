@@ -69,6 +69,7 @@ func (m *uiModel) helpSections() []uiHelpSection {
 			Entries: []uiHelpEntry{
 				{Bindings: []string{"Enter"}, Description: "submit, run the selected slash command, or flush the next queued item", Active: uiHelpInMainInput},
 				{Bindings: []string{"Tab", "Ctrl + Enter"}, Description: "autocomplete a selected slash command, or queue/send the current input", Active: uiHelpInMainInput},
+				{Bindings: []string{"↑, ↓"}, Description: "browse submitted prompts at input boundaries; otherwise move within multiline input", Active: uiHelpInTextEditing},
 				{Bindings: []string{"Shift + Enter", "Ctrl + J"}, Description: "insert a newline", Active: uiHelpInTextEditing},
 				{Bindings: deleteCurrentLineBindings(), Description: "delete the current input line", Active: uiHelpInTextEditing},
 				{Bindings: []string{"Alt + ←, →", "Ctrl + ←, →"}, Description: "move the cursor by word", Active: uiHelpInTextEditing},

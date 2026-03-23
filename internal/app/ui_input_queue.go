@@ -34,7 +34,9 @@ func (c uiInputController) queueOrStartSubmission(text string) (tea.Model, tea.C
 	if m.isInputLocked() {
 		return m, nil
 	}
+	draftText, draftCursor, restoreDraft := m.capturePromptHistoryDraftForReuse()
 	m.queueInput(text)
+	m.restoreCapturedPromptHistoryDraft(draftText, draftCursor, restoreDraft)
 	if m.busy {
 		return m, nil
 	}
@@ -52,6 +54,22 @@ func (c uiInputController) restoreQueuedMessagesIntoInput() {
 		m.input = joined
 	} else {
 		m.input = strings.TrimRight(m.input, "\n") + "\n\n" + joined
+	}
+	m.inputCursor = -1
+	m.refreshSlashCommandFilterFromInput()
+}
+
+func (c uiInputController) restorePendingPreSubmitTextIntoInput() {
+	m := c.model
+	pending := strings.TrimSpace(m.pendingPreSubmitText)
+	if pending == "" {
+		return
+	}
+	m.pendingPreSubmitText = ""
+	if strings.TrimSpace(m.input) == "" {
+		m.input = pending
+	} else {
+		m.input = strings.TrimRight(m.input, "\n") + "\n\n" + pending
 	}
 	m.inputCursor = -1
 	m.refreshSlashCommandFilterFromInput()
@@ -108,11 +126,11 @@ func (c uiInputController) dispatchQueuedInput(text string) tea.Cmd {
 		if _, knownCommand := m.commandRegistry.Command(text); knownCommand {
 			if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
 				_, cmd := c.applyCommandResult(commandResult)
-				return cmd
+				return sequenceCmds(m.recordPromptHistory(text), cmd)
 			}
 		}
 	}
-	return c.startSubmission(text)
+	return c.startSubmissionWithPromptHistory(text)
 }
 
 func (m *uiModel) shouldContinueQueuedInputAutoDrain() bool {
@@ -132,4 +150,19 @@ func (m *uiModel) popQueued() string {
 	next := m.queued[0]
 	m.queued = m.queued[1:]
 	return next
+}
+
+func (m *uiModel) discardQueuedText(text string) bool {
+	needle := strings.TrimSpace(text)
+	if needle == "" {
+		return false
+	}
+	for i := 0; i < len(m.queued); i++ {
+		if strings.TrimSpace(m.queued[i]) != needle {
+			continue
+		}
+		m.queued = append(m.queued[:i], m.queued[i+1:]...)
+		return true
+	}
+	return false
 }

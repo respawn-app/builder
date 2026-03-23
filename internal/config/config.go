@@ -72,6 +72,7 @@ type Settings struct {
 	AllowNonCwdEdits                 bool
 	ModelContextWindow               int
 	ContextCompactionThresholdTokens int
+	PreSubmitCompactionLeadTokens    int
 	MinimumExecToBgSeconds           int
 	CompactionMode                   CompactionMode
 	EnabledTools                     map[tools.ID]bool
@@ -101,6 +102,7 @@ type ReviewerSettings struct {
 	Model          string
 	ThinkingLevel  string
 	TimeoutSeconds int
+	VerboseOutput  bool
 }
 
 type SourceReport struct {

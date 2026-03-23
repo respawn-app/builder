@@ -402,10 +402,10 @@ func TestFormatToolCallWebSearchUsesQueryOnly(t *testing.T) {
 	if rendered.Role != "tool_call" {
 		t.Fatalf("expected tool_call role, got %+v", rendered)
 	}
-	if rendered.Text != "latest golang release" {
+	if rendered.Text != `web search: "latest golang release"` {
 		t.Fatalf("expected query-only text, got %q", rendered.Text)
 	}
-	if rendered.ToolCall == nil || rendered.ToolCall.Command != "latest golang release" {
+	if rendered.ToolCall == nil || rendered.ToolCall.Command != `web search: "latest golang release"` {
 		t.Fatalf("expected command to match query, got %+v", rendered.ToolCall)
 	}
 }

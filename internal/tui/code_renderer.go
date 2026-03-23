@@ -12,6 +12,7 @@ import (
 	"github.com/alecthomas/chroma/v2/formatters"
 	"github.com/alecthomas/chroma/v2/lexers"
 	chromastyles "github.com/alecthomas/chroma/v2/styles"
+	xansi "github.com/charmbracelet/x/ansi"
 )
 
 const codeCacheLimit = 512
@@ -265,8 +266,93 @@ func applyBackgroundTint(line string, bg string) string {
 	if line == "" || bg == "" {
 		return line
 	}
-	body := strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+bg)
-	return bg + body + "\x1b[0m"
+	if !strings.Contains(line, "\x1b[") {
+		return bg + line + "\x1b[0m"
+	}
+
+	parser := xansi.GetParser()
+	defer xansi.PutParser(parser)
+
+	var out strings.Builder
+	out.Grow(len(line) + len(bg)*4 + len("\x1b[0m"))
+	out.WriteString(bg)
+
+	state := byte(0)
+	input := line
+	for len(input) > 0 {
+		seq, width, n, newState := xansi.GraphemeWidth.DecodeSequenceInString(input, state, parser)
+		if n <= 0 {
+			out.WriteString(input)
+			break
+		}
+		state = newState
+		input = input[n:]
+		out.WriteString(seq)
+		if width > 0 || xansi.Cmd(parser.Command()).Final() != 'm' {
+			continue
+		}
+		if sgrAffectsBackground(parser.Params()) {
+			out.WriteString(bg)
+		}
+	}
+	out.WriteString("\x1b[0m")
+	return out.String()
+}
+
+func sgrAffectsBackground(params xansi.Params) bool {
+	if len(params) == 0 {
+		return true
+	}
+	for idx := 0; idx < len(params); {
+		param, _, ok := params.Param(idx, -1)
+		if !ok || param < 0 {
+			idx++
+			continue
+		}
+		switch {
+		case param == 0:
+			return true
+		case param == 38:
+			idx += skipANSIExtendedColorParams(params, idx)
+		case param == 48:
+			return true
+		case param == 49:
+			return true
+		case 40 <= param && param <= 47:
+			return true
+		case 100 <= param && param <= 107:
+			return true
+		default:
+			idx++
+		}
+	}
+	return false
+}
+
+func skipANSIExtendedColorParams(params xansi.Params, start int) int {
+	mode, _, ok := params.Param(start+1, -1)
+	if !ok || mode < 0 {
+		return 1
+	}
+	if mode == 5 {
+		return 3
+	}
+	if mode != 2 {
+		return 1
+	}
+	r1, _, ok1 := params.Param(start+2, -1)
+	g1, _, ok2 := params.Param(start+3, -1)
+	b1, _, ok3 := params.Param(start+4, -1)
+	if ok1 && ok2 && ok3 && r1 >= 0 && g1 >= 0 && b1 >= 0 {
+		return 5
+	}
+	r2, _, ok1 := params.Param(start+3, -1)
+	g2, _, ok2 := params.Param(start+4, -1)
+	b2, _, ok3 := params.Param(start+5, -1)
+	if ok1 && ok2 && ok3 && r2 >= 0 && g2 >= 0 && b2 >= 0 {
+		return 6
+	}
+	return 1
 }
 
 func bgEscape(hex string) string {
