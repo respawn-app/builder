@@ -647,10 +647,7 @@ func (m *uiModel) Transition() UITransition {
 }
 
 func (m *uiModel) windowTitle() string {
-	if strings.TrimSpace(m.sessionName) == "" {
-		return "builder"
-	}
-	return m.sessionName
+	return sessionTitle(m.sessionName)
 }
 
 func (m *uiModel) logf(format string, args ...any) {

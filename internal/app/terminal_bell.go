@@ -143,23 +143,35 @@ func (r *osc9TerminalNotifier) Notify(message string) {
 type bellHooks struct {
 	mu          sync.Mutex
 	notifier    terminalNotifier
+	title       func() string
 	currentStep string
 	toolCalls   int
 }
 
-func newBellHooks(notifier terminalNotifier) *bellHooks {
+func newBellHooks(notifier terminalNotifier, title func() string) *bellHooks {
 	if notifier == nil {
 		notifier = newBELTerminalNotifier(io.Discard)
 	}
-	return &bellHooks{notifier: notifier}
+	if title == nil {
+		title = func() string { return defaultSessionTitle }
+	}
+	return &bellHooks{notifier: notifier, title: title}
 }
 
 func (h *bellHooks) OnAsk(req askquestion.Request) {
-	message := "Builder: action required"
-	if !req.Approval {
-		message = "Builder: question from agent"
+	question := formatAssistantPreview(req.Question, terminalNotificationPreviewLimit)
+	if question == "" {
+		if req.Approval {
+			question = "action required"
+		} else {
+			question = "question from agent"
+		}
 	}
-	h.notifier.Notify(message)
+	label := "Question"
+	if req.Approval {
+		label = "Action required"
+	}
+	h.notifier.Notify(h.formatMessage(label + ": " + question))
 }
 
 func (h *bellHooks) OnRuntimeEvent(evt runtime.Event) {
@@ -199,10 +211,18 @@ func (h *bellHooks) ringIfToolHeavyTurnEnd(stepID, assistantContent string) {
 	}
 	h.mu.Unlock()
 	if shouldRing {
-		message := "Builder: turn complete"
+		message := "turn complete"
 		if preview := formatAssistantPreview(assistantContent, terminalNotificationPreviewLimit); preview != "" {
-			message = "Builder: " + preview
+			message = preview
 		}
-		h.notifier.Notify(message)
+		h.notifier.Notify(h.formatMessage(message))
 	}
+}
+
+func (h *bellHooks) formatMessage(message string) string {
+	title := defaultSessionTitle
+	if h != nil && h.title != nil {
+		title = sessionTitle(h.title())
+	}
+	return title + ": " + sanitizeTerminalNotificationMessage(message)
 }

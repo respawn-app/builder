@@ -116,7 +116,9 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 }
 
 func newRuntimeWiringWithBackground(store *session.Store, active config.Settings, enabledTools []tools.ID, workspaceRoot string, mgr *auth.Manager, logger *runLogger, background *shelltool.Manager, opts runtimeWiringOptions) (*runtimeWiring, error) {
-	bells := newBellHooks(defaultTerminalNotifier(active.NotificationMethod))
+	bells := newBellHooks(defaultTerminalNotifier(active.NotificationMethod), func() string {
+		return store.Meta().Name
+	})
 
 	toolRegistry, askBroker, background, err := buildToolRegistry(
 		workspaceRoot,
