@@ -211,6 +211,7 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		}(),
 		EnabledTools:                  enabledTools,
 		AutoCompactTokenLimit:         active.ContextCompactionThresholdTokens,
+		PreSubmitCompactionLeadTokens: active.PreSubmitCompactionLeadTokens,
 		ContextWindowTokens:           active.ModelContextWindow,
 		EffectiveContextWindowPercent: 95,
 		LocalCompactionCarryoverLimit: 20_000,

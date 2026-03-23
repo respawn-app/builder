@@ -6,21 +6,22 @@ import (
 )
 
 const (
-	defaultModel               = "gpt-5.4"
-	defaultThinkingLevel       = "medium"
-	defaultModelVerbosity      = ModelVerbosityMedium
-	defaultTheme               = "dark"
-	defaultModelContextWindow  = 272_000
-	defaultModelTimeoutSeconds = 400
-	defaultShellTimeoutSeconds = 300
-	defaultMinimumExecToBgSec  = 15
-	defaultShellOutputMaxChars = 16_000
-	defaultBGShellsOutput      = "default"
-	defaultCompactionThreshold = defaultModelContextWindow * 95 / 100
-	defaultReviewerFrequency   = "edits"
-	defaultReviewerTimeoutSec  = 60
-	defaultTUIAlternateScreen  = "auto"
-	defaultCompactionMode      = "local"
+	defaultModel                         = "gpt-5.4"
+	defaultThinkingLevel                 = "medium"
+	defaultModelVerbosity                = ModelVerbosityMedium
+	defaultTheme                         = "dark"
+	defaultModelContextWindow            = 272_000
+	defaultModelTimeoutSeconds           = 400
+	defaultShellTimeoutSeconds           = 300
+	defaultMinimumExecToBgSec            = 15
+	defaultShellOutputMaxChars           = 16_000
+	defaultBGShellsOutput                = "default"
+	defaultCompactionThreshold           = defaultModelContextWindow * 95 / 100
+	defaultPreSubmitCompactionLeadTokens = 15_000
+	defaultReviewerFrequency             = "edits"
+	defaultReviewerTimeoutSec            = 60
+	defaultTUIAlternateScreen            = "auto"
+	defaultCompactionMode                = "local"
 )
 
 func defaultSettings() Settings {

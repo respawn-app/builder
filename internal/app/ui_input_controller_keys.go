@@ -84,8 +84,10 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.engine != nil {
 				_ = m.engine.Interrupt()
 			}
+			m.preSubmitCheckToken++
 			c.releaseLockedInjectedInput(true)
 			c.restoreQueuedMessagesIntoInput()
+			m.pendingPreSubmitText = ""
 			m.busy = false
 			m.activity = uiActivityInterrupted
 			m.clearReviewerState()
@@ -149,10 +151,9 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			next, cmd := c.applyCommandResult(commandResult)
 			return next, sequenceCmds(recordCmd, cmd)
 		}
-		recordCmd := m.recordPromptHistory(text)
 		m.clearInput()
 		m.restoreCapturedPromptHistoryDraft(draftText, draftCursor, restoreDraft)
-		return m, sequenceCmds(recordCmd, c.startSubmission(text))
+		return m, c.startSubmissionWithPromptHistory(text)
 	case tea.KeyCtrlJ, keyTypeShiftEnterCSI:
 		if m.isInputLocked() {
 			return m, nil

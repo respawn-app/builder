@@ -59,6 +59,22 @@ func (c uiInputController) restoreQueuedMessagesIntoInput() {
 	m.refreshSlashCommandFilterFromInput()
 }
 
+func (c uiInputController) restorePendingPreSubmitTextIntoInput() {
+	m := c.model
+	pending := strings.TrimSpace(m.pendingPreSubmitText)
+	if pending == "" {
+		return
+	}
+	m.pendingPreSubmitText = ""
+	if strings.TrimSpace(m.input) == "" {
+		m.input = pending
+	} else {
+		m.input = strings.TrimRight(m.input, "\n") + "\n\n" + pending
+	}
+	m.inputCursor = -1
+	m.refreshSlashCommandFilterFromInput()
+}
+
 func (c uiInputController) unlockInputAfterSubmissionError() {
 	c.releaseLockedInjectedInput(true)
 }
@@ -114,7 +130,7 @@ func (c uiInputController) dispatchQueuedInput(text string) tea.Cmd {
 			}
 		}
 	}
-	return sequenceCmds(m.recordPromptHistory(text), c.startSubmission(text))
+	return c.startSubmissionWithPromptHistory(text)
 }
 
 func (m *uiModel) shouldContinueQueuedInputAutoDrain() bool {
@@ -134,4 +150,19 @@ func (m *uiModel) popQueued() string {
 	next := m.queued[0]
 	m.queued = m.queued[1:]
 	return next
+}
+
+func (m *uiModel) discardQueuedText(text string) bool {
+	needle := strings.TrimSpace(text)
+	if needle == "" {
+		return false
+	}
+	for i := len(m.queued) - 1; i >= 0; i-- {
+		if strings.TrimSpace(m.queued[i]) != needle {
+			continue
+		}
+		m.queued = append(m.queued[:i], m.queued[i+1:]...)
+		return true
+	}
+	return false
 }

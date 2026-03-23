@@ -15,6 +15,10 @@ import (
 )
 
 func (e *Engine) buildRequest(ctx context.Context, _ string, allowTools bool) (llm.Request, error) {
+	return e.buildRequestWithExtraMessages(ctx, nil, allowTools)
+}
+
+func (e *Engine) buildRequestWithExtraMessages(ctx context.Context, extra []llm.Message, allowTools bool) (llm.Request, error) {
 	locked, err := e.ensureLocked()
 	if err != nil {
 		return llm.Request{}, err
@@ -28,8 +32,14 @@ func (e *Engine) buildRequest(ctx context.Context, _ string, allowTools bool) (l
 	}
 
 	msgs := e.snapshotMessages()
+	if len(extra) > 0 {
+		msgs = append(msgs, extra...)
+	}
 	msgs = sanitizeMessagesForLLM(msgs)
 	items := e.snapshotItems()
+	if len(extra) > 0 {
+		items = append(items, llm.ItemsFromMessages(extra)...)
+	}
 	items = sanitizeItemsForLLM(items)
 
 	req, err := llm.RequestFromLockedContractWithItems(locked, e.systemPrompt(locked), msgs, items, requestTools)

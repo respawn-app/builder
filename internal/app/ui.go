@@ -21,6 +21,13 @@ type submitDoneMsg struct {
 	err     error
 }
 
+type preSubmitCompactionCheckDoneMsg struct {
+	token         uint64
+	text          string
+	shouldCompact bool
+	err           error
+}
+
 type promptHistoryPersistErrMsg struct {
 	err error
 }
@@ -264,7 +271,9 @@ type uiModel struct {
 	reviewerMode             string
 	autoCompactionEnabled    bool
 
-	queued []string
+	queued               []string
+	preSubmitCheckToken  uint64
+	pendingPreSubmitText string
 
 	pendingInjected   []string
 	lockedInjectText  string
@@ -479,7 +488,7 @@ func (m *uiModel) Init() tea.Cmd {
 	}
 	cmds = append([]tea.Cmd{tea.ClearScreen}, cmds...)
 	if startupText := strings.TrimSpace(m.startupSubmit); startupText != "" {
-		cmds = append(cmds, sequenceCmds(m.recordPromptHistory(startupText), m.inputController().startSubmission(startupText)))
+		cmds = append(cmds, m.inputController().startSubmissionWithPromptHistory(startupText))
 	}
 	if len(m.startupCmds) > 0 {
 		cmds = append(cmds, m.startupCmds...)
@@ -592,6 +601,10 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.setTransientStatusWithKind("prompt history persistence failed: "+msg.err.Error(), uiStatusNoticeError)
 	case submitDoneMsg:
 		next, cmd := m.inputController().handleSubmitDone(msg)
+		next.(*uiModel).syncViewport()
+		return next, cmd
+	case preSubmitCompactionCheckDoneMsg:
+		next, cmd := m.inputController().handlePreSubmitCompactionCheckDone(msg)
 		next.(*uiModel).syncViewport()
 		return next, cmd
 	case compactDoneMsg:
