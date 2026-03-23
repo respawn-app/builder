@@ -4084,7 +4084,7 @@ func TestInitAutoSubmitsStartupPrompt(t *testing.T) {
 	}
 }
 
-func TestReviewerStatusEndToEnd_VerboseOngoingShortDetailFull(t *testing.T) {
+func TestReviewerStatusEndToEnd_VerboseSuggestionsIssuedAndStatusConcise(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -4094,7 +4094,7 @@ func TestReviewerStatusEndToEnd_VerboseOngoingShortDetailFull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	eng.AppendLocalEntryWithOngoingText("reviewer_suggestions", "Supervisor suggested:\n1. First detailed suggestion text\n2. Second detailed suggestion text", "Supervisor made 2 suggestions.")
+	eng.AppendLocalEntryWithOngoingText("reviewer_suggestions", "Supervisor suggested:\n1. First detailed suggestion text\n2. Second detailed suggestion text", "Supervisor suggested:\n1. First detailed suggestion text\n2. Second detailed suggestion text")
 	eng.AppendLocalEntry("reviewer_status", "Supervisor ran: 2 suggestions, no changes applied.")
 
 	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
@@ -4102,14 +4102,14 @@ func TestReviewerStatusEndToEnd_VerboseOngoingShortDetailFull(t *testing.T) {
 	m.termHeight = 24
 
 	ongoing := stripANSIAndTrimRight(m.view.OngoingSnapshot())
-	if !strings.Contains(ongoing, "Supervisor made 2 suggestions.") {
-		t.Fatalf("expected compact reviewer suggestions in ongoing mode, got %q", ongoing)
+	if !containsInOrder(ongoing, "Supervisor suggested:", "1. First detailed suggestion text", "2. Second detailed suggestion text") {
+		t.Fatalf("expected verbose reviewer suggestions in ongoing mode, got %q", ongoing)
 	}
 	if !strings.Contains(ongoing, "Supervisor ran: 2 suggestions, no changes applied.") {
 		t.Fatalf("expected short reviewer status in ongoing mode, got %q", ongoing)
 	}
-	if strings.Contains(ongoing, "Supervisor suggested:") || strings.Contains(ongoing, "First detailed suggestion") {
-		t.Fatalf("expected full reviewer suggestions hidden in ongoing mode, got %q", ongoing)
+	if strings.Count(ongoing, "Supervisor suggested:") != 1 {
+		t.Fatalf("expected reviewer suggestions details only at issuance time in ongoing mode, got %q", ongoing)
 	}
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})

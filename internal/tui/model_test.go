@@ -871,22 +871,22 @@ func TestReviewerStatusRendersConciseWithoutSuggestionsEntry(t *testing.T) {
 	}
 }
 
-func TestReviewerVerboseStatusRendersFullOnlyInFinalOngoingBlockAndTwiceInDetail(t *testing.T) {
+func TestReviewerVerboseSuggestionsRenderWhenIssuedAndStatusStaysConcise(t *testing.T) {
 	m := NewModel(WithPreviewLines(30))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "run task"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "reviewer_suggestions", Text: "Supervisor suggested:\n1. First\n2. Second", OngoingText: "Supervisor made 2 suggestions."})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "reviewer_status", Text: "Supervisor ran, applied 2 suggestions:\n1. First\n2. Second"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "reviewer_suggestions", Text: "Supervisor suggested:\n1. First\n2. Second", OngoingText: "Supervisor suggested:\n1. First\n2. Second"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "reviewer_status", Text: "Supervisor ran: 2 suggestions, applied."})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "done"})
 
 	ongoing := plainTranscript(m.View())
-	if !strings.Contains(ongoing, "Supervisor made 2 suggestions.") {
-		t.Fatalf("expected compact reviewer suggestions entry in ongoing view, got %q", ongoing)
+	if !containsInOrder(ongoing, "Supervisor suggested:", "1. First", "2. Second") {
+		t.Fatalf("expected verbose reviewer suggestions entry in ongoing view, got %q", ongoing)
 	}
-	if !containsInOrder(ongoing, "Supervisor ran, applied 2 suggestions:", "1. First", "2. Second") {
-		t.Fatalf("expected verbose reviewer status in ongoing view, got %q", ongoing)
+	if !strings.Contains(ongoing, "Supervisor ran: 2 suggestions, applied.") {
+		t.Fatalf("expected concise reviewer status in ongoing view, got %q", ongoing)
 	}
-	if strings.Contains(ongoing, "Supervisor suggested:") {
-		t.Fatalf("expected verbose reviewer status to avoid separate suggestions label, got %q", ongoing)
+	if strings.Count(ongoing, "Supervisor suggested:") != 1 {
+		t.Fatalf("expected reviewer suggestions details only at issuance time in ongoing view, got %q", ongoing)
 	}
 
 	m = updateModel(t, m, ToggleModeMsg{})
@@ -894,7 +894,7 @@ func TestReviewerVerboseStatusRendersFullOnlyInFinalOngoingBlockAndTwiceInDetail
 	if strings.Count(detail, "Supervisor suggested:") != 1 {
 		t.Fatalf("expected detailed suggestion text only in the dedicated reviewer_suggestions entry, got %q", detail)
 	}
-	if !containsInOrder(detail, "❯", "run task", "§", "Supervisor suggested:", "1. First", "2. Second", "§", "Supervisor ran, applied 2 suggestions:", "1. First", "2. Second", "❮", "done") {
+	if !containsInOrder(detail, "❯", "run task", "§", "Supervisor suggested:", "1. First", "2. Second", "§", "Supervisor ran: 2 suggestions, applied.", "❮", "done") {
 		t.Fatalf("expected verbose reviewer detail ordering, got %q", detail)
 	}
 }
