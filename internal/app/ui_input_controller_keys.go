@@ -48,6 +48,18 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if !m.isInputLocked() && !msg.Alt {
 		switch msg.Type {
+		case tea.KeyUp:
+			if handled, cmd := c.handlePromptHistoryKey(-1); handled {
+				return m, cmd
+			}
+		case tea.KeyDown:
+			if handled, cmd := c.handlePromptHistoryKey(1); handled {
+				return m, cmd
+			}
+		}
+	}
+	if !m.isInputLocked() && !msg.Alt {
+		switch msg.Type {
 		case tea.KeyUp, tea.KeyLeft:
 			if m.navigateSlashCommandPicker(-1) {
 				return m, nil
@@ -113,19 +125,23 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		_, isUserShell := parseUserShellCommand(text)
 		if m.busy {
+			recordCmd := m.recordPromptHistory(text)
 			if isUserShell {
 				m.queueInput(text)
-				return m, nil
+				return m, recordCmd
 			}
 			m.lockInjectedInput(text)
-			return m, nil
+			return m, recordCmd
 		}
 		if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
+			recordCmd := m.recordPromptHistory(text)
 			m.clearInput()
-			return c.applyCommandResult(commandResult)
+			next, cmd := c.applyCommandResult(commandResult)
+			return next, sequenceCmds(recordCmd, cmd)
 		}
+		recordCmd := m.recordPromptHistory(text)
 		m.clearInput()
-		return m, c.startSubmission(text)
+		return m, sequenceCmds(recordCmd, c.startSubmission(text))
 	case tea.KeyCtrlJ, keyTypeShiftEnterCSI:
 		if m.isInputLocked() {
 			return m, nil
@@ -196,20 +212,14 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.forwardToView(tea.KeyMsg{Type: tea.KeyUp})
 			return m, nil
 		}
-		moved := m.moveCursorUpLine()
-		if !moved && !strings.ContainsRune(m.input, '\n') {
-			m.forwardToView(tea.KeyMsg{Type: tea.KeyUp})
-		}
+		m.moveCursorUpLine()
 		return m, nil
 	case tea.KeyDown:
 		if m.isInputLocked() {
 			m.forwardToView(tea.KeyMsg{Type: tea.KeyDown})
 			return m, nil
 		}
-		moved := m.moveCursorDownLine()
-		if !moved && !strings.ContainsRune(m.input, '\n') {
-			m.forwardToView(tea.KeyMsg{Type: tea.KeyDown})
-		}
+		m.moveCursorDownLine()
 		return m, nil
 	case tea.KeyPgUp:
 		m.forwardToView(tea.KeyMsg{Type: tea.KeyPgUp})
@@ -233,6 +243,17 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+}
+
+func (c uiInputController) handlePromptHistoryKey(delta int) (bool, tea.Cmd) {
+	m := c.model
+	if !m.shouldAttemptPromptHistoryNavigation(delta) {
+		return false, nil
+	}
+	if m.navigatePromptHistory(delta) {
+		return true, nil
+	}
+	return true, ringBellCmd()
 }
 
 func (c uiInputController) handleRollbackSelectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

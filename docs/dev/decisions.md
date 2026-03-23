@@ -221,6 +221,8 @@
 - Pending tool-call previews in the live region use the same rendering/layout as normal committed `tool_call` previews, with no pending-only labels, keywords, or extra markers.
 - Tool completion in ongoing mode appends exactly one final committed line for that tool, already rendered in its terminal state. Ongoing mode must never recolor or otherwise mutate an earlier emitted tool line.
 - Parallel tool calls in ongoing mode commit through a stable frontier: later completed calls remain in the live region until all earlier pending calls are ready, but they render in their final tool state immediately; only still-running calls show the spinner. Newly committable final lines append once in transcript order.
+- In ongoing main-input mode, `Up`/`Down` are reserved for prompt-history recall at whole-buffer boundaries and for normal multiline cursor movement otherwise; they do not scroll the ongoing transcript.
+- Ongoing transcript scrolling remains on `PgUp`/`PgDn`; failed prompt-history navigation attempts emit a plain terminal BEL with no transient UI notification.
 - Rationale: terminal normal-buffer scrollback cannot be safely rewritten portably; committed replay is the single source of truth for persistent formatted history.
 - Ongoing mode keeps mouse capture disabled by default to preserve native text selection behavior.
 - Ongoing mode never enables terminal alternate-scroll (`?1007`).

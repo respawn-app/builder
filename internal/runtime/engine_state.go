@@ -50,6 +50,15 @@ func (e *Engine) AppendLocalEntryWithOngoingText(role, text, ongoingText string)
 	e.emit(Event{Kind: EventConversationUpdated, StepID: ""})
 }
 
+func (e *Engine) RecordPromptHistory(text string) error {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	_, err := e.store.AppendEvent("", "prompt_history", map[string]any{"text": text})
+	return err
+}
+
 func (e *Engine) SetOngoingError(text string) {
 	e.chat.setOngoingError(text)
 	e.emit(Event{Kind: EventConversationUpdated, StepID: ""})

@@ -1377,6 +1377,123 @@ func TestMainInputUpDownMultilineMoveAcrossLines(t *testing.T) {
 	}
 }
 
+func TestPromptHistoryUpDownBrowseSubmittedPrompts(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIPromptHistory([]string{"first prompt", "second line\nthird line", "/resume"}),
+	).(*uiModel)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated := next.(*uiModel)
+	if updated.input != "/resume" {
+		t.Fatalf("expected newest prompt selected first, got %q", updated.input)
+	}
+	if updated.cursorIndex() != len([]rune(updated.input)) {
+		t.Fatalf("expected history recall to place cursor at end, got %d", updated.cursorIndex())
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated = next.(*uiModel)
+	if updated.input != "second line\nthird line" {
+		t.Fatalf("expected previous prompt selected, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	if updated.input != "/resume" {
+		t.Fatalf("expected down to move toward newer prompt, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	if updated.input != "" {
+		t.Fatalf("expected down past newest to restore draft, got %q", updated.input)
+	}
+	if updated.inputCursor != -1 {
+		t.Fatalf("expected restored empty draft to track tail cursor, got %d", updated.inputCursor)
+	}
+}
+
+func TestPromptHistoryUsesBoundaryNavigationForMultilineSelection(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIPromptHistory([]string{"one\ntwo\nthree", "older"}),
+	).(*uiModel)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated := next.(*uiModel)
+	if updated.input != "older" {
+		t.Fatalf("expected newest prompt selected, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated = next.(*uiModel)
+	if updated.input != "one\ntwo\nthree" {
+		t.Fatalf("expected multiline prompt selected, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyHome})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	if updated.input != "older" {
+		t.Fatalf("expected down at buffer start to browse newer history, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyHome})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRight})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	if updated.input != "one\ntwo\nthree" {
+		t.Fatalf("expected down after sideways edit intent to stay in selected prompt, got %q", updated.input)
+	}
+	if updated.inputCursor != 5 {
+		t.Fatalf("expected down to move within multiline prompt after leaving history mode, got %d", updated.inputCursor)
+	}
+}
+
+func TestPromptHistoryBellWritesRawTerminalBell(t *testing.T) {
+	var out bytes.Buffer
+	previous := writeTerminalSequence
+	writeTerminalSequence = func(sequence string) {
+		_, _ = out.WriteString(sequence)
+	}
+	t.Cleanup(func() {
+		writeTerminalSequence = previous
+	})
+
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIPromptHistory([]string{"only prompt"}),
+	).(*uiModel)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated := next.(*uiModel)
+	next, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected bell command")
+	}
+	_ = cmd()
+
+	if got := out.String(); got != terminalBell {
+		t.Fatalf("expected raw terminal bell, got %q", got)
+	}
+	if updated.input != "only prompt" {
+		t.Fatalf("expected prompt selection unchanged after bell miss, got %q", updated.input)
+	}
+}
+
 func TestAskFreeformAcceptsSpaceKey(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	reply := make(chan askReply, 1)
