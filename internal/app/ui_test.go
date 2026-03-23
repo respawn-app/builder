@@ -3703,7 +3703,7 @@ func TestStatusLineRendersReasoningHeaderBeforeContextUsage(t *testing.T) {
 	if !containsInOrder(line, "Summarizing fix and investigation", "0%") {
 		t.Fatalf("expected reasoning header immediately left of context usage, got %q", line)
 	}
-	if strings.Contains(line, statusHelpHint) {
+	if strings.Contains(line, m.statusHelpHint()) {
 		t.Fatalf("did not expect help hint while reasoning header is present, got %q", line)
 	}
 }
@@ -3721,8 +3721,30 @@ func TestStatusLineShowsHelpHintWhenIdleInOngoingMode(t *testing.T) {
 	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
-	if !containsInOrder(line, statusHelpHint, "0%") {
+	if !containsInOrder(line, m.statusHelpHint(), "0%") {
 		t.Fatalf("expected help hint immediately left of context usage while idle, got %q", line)
+	}
+}
+
+func TestStatusLineFallsBackToF1HelpHintWhenQuestionMarkWouldType(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "draft"
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !containsInOrder(line, m.statusHelpHint(), "0%") {
+		t.Fatalf("expected f1-only help hint immediately left of context usage while typing, got %q", line)
+	}
+	if strings.Contains(line, "F1 or ? for help") {
+		t.Fatalf("did not expect question mark help hint while typing, got %q", line)
 	}
 }
 
@@ -3763,7 +3785,7 @@ func TestStatusLineHidesHelpHintWhenOngoingModeIsNotIdle(t *testing.T) {
 			tc.apply(m)
 
 			line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
-			if strings.Contains(line, statusHelpHint) {
+			if strings.Contains(line, m.statusHelpHint()) || strings.Contains(line, "F1 or ? for help") || strings.Contains(line, "F1 for help") {
 				t.Fatalf("did not expect help hint while ongoing mode is active but not idle, got %q", line)
 			}
 		})
@@ -3784,7 +3806,7 @@ func TestStatusLineHidesHelpHintOutsideOngoingMode(t *testing.T) {
 	m.forwardToView(tui.ToggleModeMsg{})
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
-	if strings.Contains(line, statusHelpHint) {
+	if strings.Contains(line, m.statusHelpHint()) || strings.Contains(line, "F1 or ? for help") || strings.Contains(line, "F1 for help") {
 		t.Fatalf("did not expect help hint outside ongoing mode, got %q", line)
 	}
 }
@@ -4116,7 +4138,7 @@ func (statusLineAzureClient) ProviderCapabilities(context.Context) (llm.Provider
 
 func TestHelpToggleRendersBelowQueuedMessagesAndInput(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
-	m.termWidth = 80
+	m.termWidth = 120
 	m.termHeight = 40
 	m.windowSizeKnown = true
 	m.queued = []string{"queued latest"}
@@ -4133,7 +4155,7 @@ func TestHelpToggleRendersBelowQueuedMessagesAndInput(t *testing.T) {
 	if !containsInOrder(plain, "queued latest", "Global", "› draft") {
 		t.Fatalf("expected help above input and below queue, got %q", plain)
 	}
-	if !containsInOrder(plain, "Global\nAlt + /, ? | Cmd + /, ?", "\n\nTranscript\nPgUp", "\n\nMain Input\nEnter", "\n\nRollback Mode\nEsc | Esc") {
+	if !containsInOrder(plain, "Global\nF1 | ? (empty prompt) | Alt + / | Cmd + /", "\n\nTranscript\nPgUp", "\n\nMain Input\nEnter", "\n\nRollback Mode\nEsc | Esc") {
 		t.Fatalf("expected blank line between visible help sections, got %q", plain)
 	}
 	if !containsInOrder(plain, "Alt + ←, → | Ctrl + ←, →", "move the cursor by word") {
@@ -4145,7 +4167,7 @@ func TestHelpToggleRendersBelowQueuedMessagesAndInput(t *testing.T) {
 	if !strings.Contains(plain, "cancel or go back") {
 		t.Fatalf("expected rollback escape copy in help pane, got %q", plain)
 	}
-	if !strings.Contains(plain, "Alt + /, ?") || !strings.Contains(plain, "Cmd + /, ?") || !strings.Contains(plain, "Shift + Tab") {
+	if !strings.Contains(plain, "F1") || !strings.Contains(plain, "? (empty prompt)") || !strings.Contains(plain, "Alt + /") || !strings.Contains(plain, "Cmd + /") || !strings.Contains(plain, "Shift + Tab") {
 		t.Fatalf("expected indexed shortcuts in help pane, got %q", plain)
 	}
 	for _, unwanted := range []string{"Keyboard Help", "Press any registered key to dismiss", "Slash Commands", "Ask Prompt", "Process List", "Printable keys", "start editing from the selected rollback point", "fork from the selected rollback point", "close rollback selection", "return to rollback selection when the edit prompt is empty"} {
@@ -4223,6 +4245,41 @@ func TestHelpDismissesOnAnyKeypress(t *testing.T) {
 	}
 }
 
+func TestQuestionMarkTogglesHelpWhenInputIsEmpty(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	updated := next.(*uiModel)
+
+	if !updated.helpVisible {
+		t.Fatal("expected ? to open help from an empty prompt")
+	}
+}
+
+func TestQuestionMarkInsertsLiteralWhenInputIsNotEmpty(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.input = "draft"
+	m.inputCursor = len([]rune(m.input))
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	updated := next.(*uiModel)
+
+	if updated.helpVisible {
+		t.Fatal("did not expect ? to open help while a draft is present")
+	}
+	if updated.input != "draft?" {
+		t.Fatalf("expected ? to be inserted into the draft, got %q", updated.input)
+	}
+}
+
 func TestAltQuestionMarkTogglesHelp(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 80
@@ -4235,6 +4292,21 @@ func TestAltQuestionMarkTogglesHelp(t *testing.T) {
 
 	if !updated.helpVisible {
 		t.Fatal("expected alt+? to open help")
+	}
+}
+
+func TestF1TogglesHelp(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyF1})
+	updated := next.(*uiModel)
+
+	if !updated.helpVisible {
+		t.Fatal("expected f1 to open help")
 	}
 }
 

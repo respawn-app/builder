@@ -477,13 +477,13 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.helpVisible {
 			m.helpVisible = false
-			if isHelpKey(keyMsg) && m.canShowHelp() {
+			if isHelpKey(keyMsg, m) && m.canShowHelp() {
 				m.lastEscAt = time.Time{}
 				m.syncViewport()
 				return m, nil
 			}
 		}
-		if isHelpKey(keyMsg) && m.canShowHelp() {
+		if isHelpKey(keyMsg, m) && m.canShowHelp() {
 			m.lastEscAt = time.Time{}
 			m.toggleHelp()
 			m.syncViewport()
