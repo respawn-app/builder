@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-REPO="${BUILDER_REPO:-respawn-app/agent}"
+REPO="${BUILDER_REPO:-respawn-app/builder}"
 VERSION="${BUILDER_VERSION:-${VERSION:-}}"
 PREFIX="${BUILDER_PREFIX:-}"
 RELEASE_BASE="${BUILDER_RELEASE_BASE:-https://github.com/${REPO}/releases/download}"
@@ -17,7 +17,7 @@ Options:
 Environment:
   BUILDER_VERSION       Override version
   BUILDER_PREFIX        Override prefix
-  BUILDER_REPO          Override repo (default: respawn-app/agent)
+  BUILDER_REPO          Override repo (default: respawn-app/builder)
   BUILDER_RELEASE_BASE  Override release base URL
   GITHUB_TOKEN          GitHub token for API rate limits
   GH_TOKEN              GitHub token for API rate limits

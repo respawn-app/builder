@@ -1,5 +1,5 @@
 ---
-title: Subagents / Headless
+title: Headless runs
 description: Headless Builder runs, scriptable output modes, and how interactive Builder uses the same mechanism for subagents.
 ---
 
@@ -34,12 +34,7 @@ For the full list of shared overrides, see [Configuration](/config/).
 
 ## Output Modes
 
-The default output mode is plain final text:
-
-```bash
-builder run "write a one-line summary"
-```
-
+The default output mode is plain final text.
 In `final-text` mode, Builder writes the final assistant text to `stdout`. When continuation metadata is available, Builder may append a follow-up hint such as:
 
 ```text
@@ -68,21 +63,7 @@ JSON mode emits exactly one final object on `stdout`.
 
 On failure, JSON mode emits `status: "error"` and an `error` object instead of `result`.
 
-## Progress And Timeouts
-
-Headless mode is quiet by default.
-
-If you want runtime progress events, send them to `stderr`:
-
-```bash
-builder run --progress-mode=stderr "review this package"
-```
-
-You can bound execution with `--timeout`:
-
-```bash
-builder run --timeout=10m "run a full repo review"
-```
+---
 
 Supported run-specific flags:
 
@@ -92,6 +73,7 @@ Supported run-specific flags:
 | `--output-mode` | `final-text` or `json`. Default is `final-text`. |
 | `--progress-mode` | `quiet` or `stderr`. Default is `quiet`. |
 | `--continue` | Continue a previous session by id. |
+
 
 ## Non-Interactive Constraint
 

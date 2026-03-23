@@ -1,16 +1,16 @@
 const DEFAULT_SITE_URL = 'https://respawn-app.github.io';
-const DEFAULT_BASE_PATH = '/agent';
+const DEFAULT_BASE_PATH = '/builder';
 const SITE_TITLE = 'Builder';
 const DOCS_HOME_LABEL = 'Builder';
 const DOCS_HOME_TITLE = 'Home';
 const DOCS_HOME_VISIBLE_TITLE = 'Builder';
 const DOCS_HOME_SLUG = 'docs';
 const DOCS_HOME_PATH = '/docs/';
-const REPO_URL = 'https://github.com/respawn-app/agent';
+const REPO_URL = 'https://github.com/respawn-app/builder';
 const REPO_DEFAULT_BRANCH = 'main';
 const REPO_EDIT_ROOT_URL = `${REPO_URL}/edit/${REPO_DEFAULT_BRANCH}/`;
 const REPO_BLOB_ROOT_URL = `${REPO_URL}/blob/${REPO_DEFAULT_BRANCH}/`;
-const REPO_RAW_ROOT_URL = `https://raw.githubusercontent.com/respawn-app/agent/${REPO_DEFAULT_BRANCH}/`;
+const REPO_RAW_ROOT_URL = `https://raw.githubusercontent.com/respawn-app/builder/${REPO_DEFAULT_BRANCH}/`;
 
 function firstNonEmpty(value) {
   if (typeof value !== 'string') {

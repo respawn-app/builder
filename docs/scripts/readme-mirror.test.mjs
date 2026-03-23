@@ -29,11 +29,11 @@ test('mirrorReadme removes the top-level heading and rewrites relative links', (
   assert.equal(output.includes('- [x] Done item'), true);
   assert.equal(output.includes('- [ ] Todo item'), true);
   assert.equal(
-    output.includes('https://github.com/respawn-app/agent/blob/main/CHANGELOG.md'),
+    output.includes('https://github.com/respawn-app/builder/blob/main/CHANGELOG.md'),
     true,
   );
   assert.equal(
-    output.includes('https://raw.githubusercontent.com/respawn-app/agent/main/docs/static/logo.svg'),
+    output.includes('https://raw.githubusercontent.com/respawn-app/builder/main/docs/static/logo.svg'),
     true,
   );
   assert.equal(output.includes('- [Anchor](#features)'), true);
