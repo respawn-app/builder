@@ -2808,7 +2808,7 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 				followUpIdx = idx
 			}
 		}
-		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "Supervisor ran: applied 1 suggestion:") {
+		if entry.Role == "reviewer_status" && strings.Contains(entry.Text, "Supervisor ran, applied 1 suggestion:") {
 			foundAppliedStatus = true
 		}
 	}
@@ -2954,7 +2954,7 @@ func TestReviewerVerboseOutputIncludesSuggestionsInFinalStatus(t *testing.T) {
 		if entry.Role != "reviewer_status" {
 			continue
 		}
-		if strings.Contains(entry.Text, "Supervisor ran: applied 1 suggestion:\n1. Add final verification notes.") {
+		if strings.Contains(entry.Text, "Supervisor ran, applied 1 suggestion:\n1. Add final verification notes.") {
 			foundVerboseStatus = true
 			break
 		}
@@ -2973,7 +2973,7 @@ func TestReviewerVerboseOutputIncludesSuggestionsInFinalStatus(t *testing.T) {
 		if entry.Role != "reviewer_status" {
 			continue
 		}
-		if strings.Contains(entry.Text, "Supervisor ran: applied 1 suggestion:\n1. Add final verification notes.") {
+		if strings.Contains(entry.Text, "Supervisor ran, applied 1 suggestion:\n1. Add final verification notes.") {
 			foundRestoredVerboseStatus = true
 			break
 		}
@@ -3061,7 +3061,7 @@ func TestReviewerStatusTextIncludesReviewerCacheHitMetadata(t *testing.T) {
 		CacheHitPercent:       85,
 		HasCacheHitPercentage: true,
 	}, []string{"one", "two"})
-	if !strings.Contains(text, "Supervisor ran: applied 2 suggestions:\n1. one\n2. two") {
+	if !strings.Contains(text, "Supervisor ran, applied 2 suggestions:\n1. one\n2. two") {
 		t.Fatalf("expected verbose reviewer status header and suggestions, got %q", text)
 	}
 	if !strings.Contains(text, "85% cache hit") {

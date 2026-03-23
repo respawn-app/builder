@@ -419,11 +419,11 @@ func reviewerStatusText(status ReviewerStatus, suggestions []string) string {
 func reviewerVerboseStatusHeader(status ReviewerStatus) string {
 	switch strings.TrimSpace(status.Outcome) {
 	case "noop":
-		return fmt.Sprintf("Supervisor ran: ignored %s:", reviewerSuggestionCountLabel(status.SuggestionsCount))
+		return fmt.Sprintf("Supervisor ran, ignored %s:", reviewerSuggestionCountLabel(status.SuggestionsCount))
 	case "applied":
-		return fmt.Sprintf("Supervisor ran: applied %s:", reviewerSuggestionCountLabel(status.SuggestionsCount))
+		return fmt.Sprintf("Supervisor ran, applied %s:", reviewerSuggestionCountLabel(status.SuggestionsCount))
 	case "followup_failed":
-		return fmt.Sprintf("Supervisor ran: follow-up failed after %s:", reviewerSuggestionCountLabel(status.SuggestionsCount))
+		return fmt.Sprintf("Supervisor ran, follow-up failed after %s:", reviewerSuggestionCountLabel(status.SuggestionsCount))
 	default:
 		return ""
 	}
