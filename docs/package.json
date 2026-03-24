@@ -7,7 +7,7 @@
     "dev": "node ./scripts/sync-readme.mjs && astro dev",
     "build": "node ./scripts/sync-readme.mjs && astro build && node ./scripts/emit-deployment-files.mjs",
     "preview": "astro preview",
-    "test": "node --test ./scripts/readme-mirror.test.mjs",
+    "test": "node --test ./scripts/readme-mirror.test.mjs ./scripts/sync-readme.test.mjs",
     "astro": "astro"
   },
   "dependencies": {
