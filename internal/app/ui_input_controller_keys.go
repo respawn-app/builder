@@ -92,6 +92,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.preSubmitCheckToken++
 			c.releaseLockedInjectedInput(true)
+			c.restorePendingInjectedIntoInput()
 			c.restoreQueuedMessagesIntoInput()
 			m.pendingPreSubmitText = ""
 			m.busy = false
@@ -146,7 +147,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.restoreCapturedPromptHistoryDraft(draftText, draftCursor, restoreDraft)
 				return m, nil
 			}
-			m.lockInjectedInput(text)
+			m.queueInjectedInput(text)
 			m.restoreCapturedPromptHistoryDraft(draftText, draftCursor, restoreDraft)
 			return m, nil
 		}

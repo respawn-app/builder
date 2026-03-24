@@ -2189,7 +2189,7 @@ func TestPreSubmitCompactionFailureKeepsPromptOutOfHistory(t *testing.T) {
 	}
 }
 
-func TestPreSubmitCheckErrorUnlocksInjectedInput(t *testing.T) {
+func TestPreSubmitCheckErrorRestoresQueuedSteeringInput(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -2209,11 +2209,11 @@ func TestPreSubmitCheckErrorUnlocksInjectedInput(t *testing.T) {
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated = next.(*uiModel)
-	if !updated.inputSubmitLocked {
-		t.Fatal("expected follow-up enter during pre-submit check to lock input")
+	if updated.inputSubmitLocked {
+		t.Fatal("did not expect follow-up enter during pre-submit check to lock input")
 	}
-	if updated.lockedInjectText != "later" {
-		t.Fatalf("expected locked injected text recorded, got %q", updated.lockedInjectText)
+	if updated.input != "" {
+		t.Fatalf("expected queued steering input cleared immediately, got %q", updated.input)
 	}
 	if len(updated.pendingInjected) != 1 || updated.pendingInjected[0] != "later" {
 		t.Fatalf("expected pending injected follow-up recorded, got %+v", updated.pendingInjected)
@@ -2226,10 +2226,7 @@ func TestPreSubmitCheckErrorUnlocksInjectedInput(t *testing.T) {
 	})
 	updated = next.(*uiModel)
 	if updated.inputSubmitLocked {
-		t.Fatal("expected pre-submit check error to unlock input")
-	}
-	if updated.lockedInjectText != "" {
-		t.Fatalf("expected locked injected text cleared, got %q", updated.lockedInjectText)
+		t.Fatal("did not expect pre-submit check error to leave input locked")
 	}
 	if len(updated.pendingInjected) != 0 {
 		t.Fatalf("expected pending injected follow-up cleared, got %+v", updated.pendingInjected)
@@ -2239,6 +2236,61 @@ func TestPreSubmitCheckErrorUnlocksInjectedInput(t *testing.T) {
 	}
 	if updated.input != "later\n\ncontinue" {
 		t.Fatalf("expected restored prompt and unlocked follow-up draft, got %q", updated.input)
+	}
+}
+
+func TestPreSubmitCheckErrorRestoresQueuedSteeringAndDiscardsEngineQueue(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &requestCaptureFakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "continue"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	updated.input = "later"
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(preSubmitCompactionCheckDoneMsg{
+		token: updated.preSubmitCheckToken,
+		text:  "continue",
+		err:   errors.New("pre-submit failed"),
+	})
+	updated = next.(*uiModel)
+
+	if updated.input != "later\n\ncontinue" {
+		t.Fatalf("expected restored steering and pre-submit text in input, got %q", updated.input)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected UI pending steering cleared after restore, got %+v", updated.pendingInjected)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "fresh prompt")
+	if err != nil {
+		t.Fatalf("submit fresh prompt: %v", err)
+	}
+	if msg.Content != "ok" {
+		t.Fatalf("assistant content = %q, want ok", msg.Content)
+	}
+	requests := client.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("expected one model request without stale runtime steering, got %d", len(requests))
+	}
+	for _, message := range requests[0].Messages {
+		if message.Role == llm.RoleUser && message.Content == "later" {
+			t.Fatalf("did not expect restored steering to remain queued in runtime request: %+v", requests[0].Messages)
+		}
 	}
 }
 
@@ -2481,33 +2533,114 @@ func TestArrowNavigationDoesNotMutateInput(t *testing.T) {
 	}
 }
 
-func TestBusyEnterLocksInputUntilFlushed(t *testing.T) {
+func TestBusyEnterQueuesSteeringUntilFlushed(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.busy = true
 	m.input = "please continue with tests"
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	if !updated.inputSubmitLocked {
-		t.Fatal("expected input submit lock after enter while busy")
+	if updated.inputSubmitLocked {
+		t.Fatal("did not expect input submit lock after enter while busy")
 	}
-	if updated.input != "please continue with tests" {
-		t.Fatalf("expected input text preserved while locked, got %q", updated.input)
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after queueing steering, got %q", updated.input)
 	}
 	if len(updated.pendingInjected) != 1 {
 		t.Fatalf("expected one pending injected message, got %d", len(updated.pendingInjected))
 	}
 
 	next, _ = updated.Update(runtimeEventMsg{event: runtime.Event{
-		Kind:        runtime.EventUserMessageFlushed,
-		UserMessage: "please continue with tests",
+		Kind:             runtime.EventUserMessageFlushed,
+		UserMessage:      "please continue with tests",
+		UserMessageBatch: []string{"please continue with tests"},
 	}})
 	updated = next.(*uiModel)
 	if updated.inputSubmitLocked {
-		t.Fatal("expected input unlock after flush")
+		t.Fatal("did not expect input lock after flush")
 	}
 	if updated.input != "" {
 		t.Fatalf("expected input cleared after flush, got %q", updated.input)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected queued steering cleared after flush, got %+v", updated.pendingInjected)
+	}
+}
+
+func TestBusyEnterCanQueueMultipleSteeringMessages(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.input = "first steering message"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	updated.input = "second steering message"
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if len(updated.pendingInjected) != 2 {
+		t.Fatalf("expected two queued steering messages, got %+v", updated.pendingInjected)
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after queueing multiple steering messages, got %q", updated.input)
+	}
+
+	next, _ = updated.Update(runtimeEventMsg{event: runtime.Event{
+		Kind:             runtime.EventUserMessageFlushed,
+		UserMessage:      "first steering message\n\nsecond steering message",
+		UserMessageBatch: []string{"first steering message", "second steering message"},
+	}})
+	updated = next.(*uiModel)
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected queued steering cleared after batched flush, got %+v", updated.pendingInjected)
+	}
+}
+
+func TestBusySteeringBatchFlushPreservesPostTurnQueueOrder(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.input = "first steering message"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	updated.input = "second steering message"
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	updated.input = "queued after turn"
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated = next.(*uiModel)
+	if len(updated.pendingInjected) != 2 {
+		t.Fatalf("expected two queued steering messages, got %+v", updated.pendingInjected)
+	}
+	if len(updated.queued) != 1 || updated.queued[0] != "queued after turn" {
+		t.Fatalf("expected normal queued input preserved, got %+v", updated.queued)
+	}
+
+	next, _ = updated.Update(runtimeEventMsg{event: runtime.Event{
+		Kind:             runtime.EventUserMessageFlushed,
+		UserMessage:      "first steering message\n\nsecond steering message",
+		UserMessageBatch: []string{"first steering message", "second steering message"},
+	}})
+	updated = next.(*uiModel)
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected steering queue cleared after batched flush, got %+v", updated.pendingInjected)
+	}
+	if len(updated.queued) != 1 || updated.queued[0] != "queued after turn" {
+		t.Fatalf("expected post-turn queue preserved until turn completion, got %+v", updated.queued)
+	}
+
+	next, cmd := updated.Update(submitDoneMsg{})
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected post-turn queue to start draining after turn completion")
+	}
+	if !updated.busy {
+		t.Fatal("expected queued post-turn input to begin submission after steering flush")
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected post-turn queue drained in order, got %+v", updated.queued)
 	}
 }
 
@@ -2532,15 +2665,15 @@ func TestBusyEnterWithUserShellPrefixQueuesInsteadOfInjecting(t *testing.T) {
 	}
 }
 
-func TestSubmitErrorUnlocksInputAndClearsLockedPendingState(t *testing.T) {
+func TestSubmitErrorRestoresQueuedSteeringInput(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.busy = true
 	m.input = "please continue with tests"
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	if !updated.inputSubmitLocked {
-		t.Fatal("expected input submit lock after enter while busy")
+	if updated.inputSubmitLocked {
+		t.Fatal("did not expect input submit lock after enter while busy")
 	}
 	if len(updated.pendingInjected) != 1 {
 		t.Fatalf("expected one pending injected message, got %d", len(updated.pendingInjected))
@@ -2549,20 +2682,69 @@ func TestSubmitErrorUnlocksInputAndClearsLockedPendingState(t *testing.T) {
 	updated.queued = append(updated.queued, "follow-up")
 	next, cmd := updated.Update(submitDoneMsg{err: errors.New("network failure")})
 	updated = next.(*uiModel)
-	if cmd == nil {
-		t.Fatal("expected follow-up queued submission to start")
+	if cmd != nil {
+		t.Fatal("did not expect follow-up queued submission to start while restored steering input is present")
 	}
-	if !updated.busy {
-		t.Fatal("expected busy after starting follow-up submission")
+	if updated.busy {
+		t.Fatal("did not expect busy after submission error")
 	}
 	if updated.inputSubmitLocked {
-		t.Fatal("expected submit lock cleared after submission error")
+		t.Fatal("did not expect submit lock after submission error")
 	}
-	if updated.lockedInjectText != "" {
-		t.Fatalf("expected lockedInjectText cleared, got %q", updated.lockedInjectText)
+	if updated.input != "please continue with tests" {
+		t.Fatalf("expected queued steering restored into input, got %q", updated.input)
 	}
 	if len(updated.pendingInjected) != 0 {
-		t.Fatalf("expected locked pending injection removed, got %d", len(updated.pendingInjected))
+		t.Fatalf("expected pending injection queue cleared after restore, got %d", len(updated.pendingInjected))
+	}
+}
+
+func TestSubmitErrorRestoresQueuedSteeringAndDiscardsEngineQueue(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &requestCaptureFakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.input = "restored steering"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(submitDoneMsg{err: errors.New("network failure")})
+	updated = next.(*uiModel)
+
+	if updated.input != "restored steering" {
+		t.Fatalf("expected steering restored into input, got %q", updated.input)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected UI pending steering cleared after restore, got %+v", updated.pendingInjected)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "fresh prompt")
+	if err != nil {
+		t.Fatalf("submit fresh prompt: %v", err)
+	}
+	if msg.Content != "ok" {
+		t.Fatalf("assistant content = %q, want ok", msg.Content)
+	}
+	requests := client.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("expected one model request without stale runtime steering, got %d", len(requests))
+	}
+	for _, message := range requests[0].Messages {
+		if message.Role == llm.RoleUser && message.Content == "restored steering" {
+			t.Fatalf("did not expect restored steering to remain queued in runtime request: %+v", requests[0].Messages)
+		}
 	}
 }
 
@@ -2669,8 +2851,60 @@ func TestCtrlCWhileBusyUnlocksSubmitLockedInput(t *testing.T) {
 	if updated.lockedInjectText != "" {
 		t.Fatalf("expected lockedInjectText cleared, got %q", updated.lockedInjectText)
 	}
-	if len(updated.pendingInjected) != 1 || updated.pendingInjected[0] != "another" {
-		t.Fatalf("expected locked pending injection removed, got %+v", updated.pendingInjected)
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected pending injected queue restored into input and cleared, got %+v", updated.pendingInjected)
+	}
+	if updated.input != "another" {
+		t.Fatalf("expected remaining queued steering restored into input, got %q", updated.input)
+	}
+}
+
+func TestCtrlCRestoresQueuedSteeringAndDiscardsEngineQueue(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &requestCaptureFakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.input = "restored steering"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated = next.(*uiModel)
+
+	if updated.input != "restored steering" {
+		t.Fatalf("expected steering restored into input, got %q", updated.input)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected UI pending steering cleared after restore, got %+v", updated.pendingInjected)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "fresh prompt")
+	if err != nil {
+		t.Fatalf("submit fresh prompt: %v", err)
+	}
+	if msg.Content != "ok" {
+		t.Fatalf("assistant content = %q, want ok", msg.Content)
+	}
+	requests := client.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("expected one model request without stale runtime steering, got %d", len(requests))
+	}
+	for _, message := range requests[0].Messages {
+		if message.Role == llm.RoleUser && message.Content == "restored steering" {
+			t.Fatalf("did not expect restored steering to remain queued in runtime request: %+v", requests[0].Messages)
+		}
 	}
 }
 
@@ -2703,15 +2937,15 @@ func TestInterruptedSubmitDoneRestoresQueueIntoInputAndDoesNotAutoDrain(t *testi
 	}
 }
 
-func TestCompactDoneUnlocksInputAndClearsLockedPendingState(t *testing.T) {
+func TestCompactDoneKeepsQueuedSteeringPending(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.busy = true
 	m.input = "please continue with tests"
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	if !updated.inputSubmitLocked {
-		t.Fatal("expected input submit lock after enter while busy")
+	if updated.inputSubmitLocked {
+		t.Fatal("did not expect input submit lock after enter while busy")
 	}
 	if len(updated.pendingInjected) != 1 {
 		t.Fatalf("expected one pending injected message, got %d", len(updated.pendingInjected))
@@ -2720,13 +2954,10 @@ func TestCompactDoneUnlocksInputAndClearsLockedPendingState(t *testing.T) {
 	next, _ = updated.Update(compactDoneMsg{})
 	updated = next.(*uiModel)
 	if updated.inputSubmitLocked {
-		t.Fatal("expected submit lock cleared after compaction completion")
+		t.Fatal("did not expect submit lock after compaction completion")
 	}
-	if updated.lockedInjectText != "" {
-		t.Fatalf("expected lockedInjectText cleared, got %q", updated.lockedInjectText)
-	}
-	if len(updated.pendingInjected) != 0 {
-		t.Fatalf("expected locked pending injection removed, got %d", len(updated.pendingInjected))
+	if len(updated.pendingInjected) != 1 || updated.pendingInjected[0] != "please continue with tests" {
+		t.Fatalf("expected queued steering preserved across compaction completion, got %+v", updated.pendingInjected)
 	}
 }
 
@@ -5020,11 +5251,11 @@ func TestBusyEnterDuringReviewerUsesSteeringInjection(t *testing.T) {
 	if len(updated.pendingInjected) != 1 || updated.pendingInjected[0] != "steer after review" {
 		t.Fatalf("expected reviewer steering injected for earliest flush, got %+v", updated.pendingInjected)
 	}
-	if !updated.inputSubmitLocked {
-		t.Fatal("expected submit lock while waiting for reviewer steering flush")
+	if updated.inputSubmitLocked {
+		t.Fatal("did not expect submit lock while waiting for reviewer steering flush")
 	}
-	if updated.input != "steer after review" {
-		t.Fatalf("expected input preserved while waiting for reviewer steering flush, got %q", updated.input)
+	if updated.input != "" {
+		t.Fatalf("expected input cleared immediately after queueing reviewer steering, got %q", updated.input)
 	}
 }
 
@@ -5114,6 +5345,12 @@ type busyToggleFakeClient struct {
 	delay     time.Duration
 }
 
+type requestCaptureFakeClient struct {
+	mu        sync.Mutex
+	responses []llm.Response
+	requests  []llm.Request
+}
+
 func (f *busyToggleFakeClient) Generate(ctx context.Context, _ llm.Request) (llm.Response, error) {
 	if f.delay > 0 {
 		select {
@@ -5137,6 +5374,37 @@ func (f *busyToggleFakeClient) CallCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.calls
+}
+
+func (f *requestCaptureFakeClient) Generate(_ context.Context, req llm.Request) (llm.Response, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.requests = append(f.requests, req)
+	if len(f.responses) == 0 {
+		return llm.Response{}, errors.New("no fake response configured")
+	}
+	resp := f.responses[0]
+	f.responses = f.responses[1:]
+	return resp, nil
+}
+
+func (f *requestCaptureFakeClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	return llm.ProviderCapabilities{
+		ProviderID:                    "openai",
+		SupportsResponsesAPI:          true,
+		SupportsResponsesCompact:      true,
+		SupportsReasoningEncrypted:    true,
+		SupportsServerSideContextEdit: true,
+		IsOpenAIFirstParty:            true,
+	}, nil
+}
+
+func (f *requestCaptureFakeClient) Requests() []llm.Request {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]llm.Request, len(f.requests))
+	copy(out, f.requests)
+	return out
 }
 
 type busyTogglePatchTool struct {
