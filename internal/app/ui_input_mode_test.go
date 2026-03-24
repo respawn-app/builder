@@ -4,24 +4,30 @@ import (
 	"testing"
 
 	"builder/internal/tools/askquestion"
+	"builder/internal/tui"
 )
 
 func TestInputModePrioritizesExclusiveUIFlows(t *testing.T) {
+	detailView := tui.NewModel()
+	next, _ := detailView.Update(tui.ToggleModeMsg{})
+	detailView = next.(tui.Model)
+
 	tests := []struct {
 		name  string
 		model uiModel
 		want  uiInputMode
 	}{
 		{
-			name: "ask overrides process list and rollback",
+			name: "process list overrides ask and rollback",
 			model: uiModel{
 				activeAsk:       &askEvent{req: askquestion.Request{Question: "Proceed?"}},
 				psVisible:       true,
 				rollbackMode:    true,
 				rollbackEditing: true,
 			},
-			want: uiInputModeAsk,
+			want: uiInputModeProcessList,
 		},
+		{name: "detail view defers ask", model: uiModel{activeAsk: &askEvent{req: askquestion.Request{Question: "Proceed?"}}, view: detailView}, want: uiInputModeMain},
 		{name: "process list overrides rollback", model: uiModel{psVisible: true, rollbackMode: true}, want: uiInputModeProcessList},
 		{name: "rollback selection overrides rollback edit", model: uiModel{rollbackMode: true, rollbackEditing: true}, want: uiInputModeRollbackSelection},
 		{name: "rollback edit", model: uiModel{rollbackEditing: true}, want: uiInputModeRollbackEdit},

@@ -31,6 +31,12 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown:
 			m.forwardToView(tea.KeyMsg{Type: msg.Type})
 			return m, nil
+		case tea.KeyShiftTab, tea.KeyCtrlT:
+			return m, m.toggleTranscriptMode()
+		case tea.KeyCtrlC:
+			// Preserve the normal interrupt/quit path below.
+		default:
+			return m, nil
 		}
 	}
 	if isQueueSubmissionKey(msg) {
