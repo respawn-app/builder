@@ -116,7 +116,7 @@ jobs:
       - name: Update tap formula
         env:
           BUILDER_VERSION: ${{ needs.release.outputs.tag }}
-        run: scripts/update-brew-tap.sh --tap "$GITHUB_WORKSPACE/homebrew-tap" --formula "$BREW_FORMULA_NAME"
+        run: bash scripts/update-brew-tap.sh --tap "$GITHUB_WORKSPACE/homebrew-tap" --formula "$BREW_FORMULA_NAME"
 
       - name: Ensure pr-pull label exists
         uses: actions/github-script@v8
