@@ -7,7 +7,7 @@
     "dev": "astro dev",
     "build": "astro build && node ./scripts/emit-deployment-files.mjs",
     "preview": "astro preview",
-    "test": "node --test ./scripts/readme-mirror.test.mjs ./scripts/sync-readme.test.mjs ./scripts/astro-loader-migration.test.mjs ./scripts/docs-collection-loader.test.mjs",
+    "test": "node --test ./scripts/readme-mirror.test.mjs ./scripts/sync-readme.test.mjs ./scripts/astro-loader-migration.test.mjs ./scripts/docs-collection-loader.test.mjs ./scripts/sync-mirrored-docs.test.mjs",
     "astro": "astro"
   },
   "dependencies": {
