@@ -4,6 +4,8 @@ import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
+import { mirroredDocuments } from './mirrored-documents.mjs';
+
 function runCommand(command, args, workdir) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -65,4 +67,41 @@ test('astro build ignores stale legacy mirrored docs in src/content/docs', async
   }
 
   assert.equal(true, true);
+});
+
+test('astro build generates mirrored docs without a pre-sync step', async () => {
+  const workdir = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+  const generatedDocsDirectory = path.join(workdir, 'src', '.generated', 'content', 'docs');
+  const previousMirroredDocs = await Promise.all(
+    mirroredDocuments.map(async (document) => {
+      const outputPath = path.join(generatedDocsDirectory, document.outputFileName);
+      return {
+        outputPath,
+        contents: await readFile(outputPath, 'utf8').catch(() => undefined),
+      };
+    }),
+  );
+
+  await mkdir(generatedDocsDirectory, { recursive: true });
+  await Promise.all(previousMirroredDocs.map(({ outputPath }) => removeIfExists(outputPath)));
+
+  let generatedDocs;
+
+  try {
+    await runCommand('pnpm', ['astro', 'build'], workdir);
+    generatedDocs = await readFile(path.join(generatedDocsDirectory, 'docs.md'), 'utf8');
+  } finally {
+    await Promise.all(
+      previousMirroredDocs.map(async ({ outputPath, contents }) => {
+        if (contents === undefined) {
+          await removeIfExists(outputPath);
+          return;
+        }
+
+        await writeFile(outputPath, contents, 'utf8');
+      }),
+    );
+  }
+
+  assert.equal(generatedDocs.includes('title: Home'), true);
 });

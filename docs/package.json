@@ -4,8 +4,8 @@
   "type": "module",
   "version": "0.0.1",
   "scripts": {
-    "dev": "node ./scripts/sync-readme.mjs && astro dev",
-    "build": "node ./scripts/sync-readme.mjs && astro build && node ./scripts/emit-deployment-files.mjs",
+    "dev": "astro dev",
+    "build": "astro build && node ./scripts/emit-deployment-files.mjs",
     "preview": "astro preview",
     "test": "node --test ./scripts/readme-mirror.test.mjs ./scripts/sync-readme.test.mjs ./scripts/astro-loader-migration.test.mjs",
     "astro": "astro"
