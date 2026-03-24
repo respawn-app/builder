@@ -1,5 +1,7 @@
 package app
 
+import "builder/internal/tui"
+
 type uiInputMode string
 
 const (
@@ -22,17 +24,28 @@ func (m *uiModel) inputMode() uiInputMode {
 	switch {
 	case m == nil:
 		return uiInputModeMain
-	case m.activeAsk != nil:
-		return uiInputModeAsk
 	case m.psVisible:
 		return uiInputModeProcessList
 	case m.rollbackMode:
 		return uiInputModeRollbackSelection
 	case m.rollbackEditing:
 		return uiInputModeRollbackEdit
+	case m.askCanOwnInput():
+		return uiInputModeAsk
 	default:
 		return uiInputModeMain
 	}
+}
+
+func (m *uiModel) askCanOwnInput() bool {
+	if m == nil || m.activeAsk == nil {
+		return false
+	}
+	if m.psVisible || m.rollbackMode || m.rollbackEditing {
+		return false
+	}
+	mode := m.view.Mode()
+	return mode == "" || mode == tui.ModeOngoing
 }
 
 func (m *uiModel) inputModeState() uiInputModeState {
