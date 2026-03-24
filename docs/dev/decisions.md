@@ -4,7 +4,7 @@
 
 - Build a minimal terminal coding agent focused on output quality, speed, and professional workflows.
 - Tech stack: Go + Bubble Tea; no TypeScript.
-- Public docs site uses Astro + Starlight from the repository `docs/` directory, deploys as a fully static GitHub Pages site, and mirrors the root `README.md` as the initial docs home.
+- Public docs site uses Astro + Starlight from the repository `docs/` directory, deploys as a fully static GitHub Pages site, mirrors the root `README.md` as the initial docs home, and uses Algolia DocSearch for site search.
 - v1 excludes MCP, plugins, and native subagent orchestration.
 - Skills are supported via AGENTS-driven `SKILL.md` discovery/injection from `~/.builder/skills` and `<workspace>/.builder/skills`.
 - Full-access execution in v1 (no sandbox).

@@ -1,6 +1,7 @@
 import { defineConfig } from 'astro/config';
 import sitemap from '@astrojs/sitemap';
 import starlight from '@astrojs/starlight';
+import starlightDocSearch from '@astrojs/starlight-docsearch';
 import remarkGfm from 'remark-gfm';
 
 import { resolveDocsConfig } from './scripts/site-config.mjs';
@@ -67,6 +68,13 @@ export default defineConfig({
       favicon: '/favicon.svg',
       credits: false,
       disable404Route: true,
+      plugins: [
+        starlightDocSearch({
+          appId: docsConfig.docSearch.appId,
+          apiKey: docsConfig.docSearch.apiKey,
+          indexName: docsConfig.docSearch.indexName,
+        }),
+      ],
       head: [
         {
           tag: 'link',

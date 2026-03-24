@@ -31,6 +31,9 @@ jobs:
           DOCS_SITE_URL: ${{ vars.DOCS_SITE_URL }}
           DOCS_BASE_PATH: ${{ vars.DOCS_BASE_PATH }}
           DOCS_CUSTOM_DOMAIN: ${{ vars.DOCS_CUSTOM_DOMAIN }}
+          DOCSEARCH_APP_ID: ${{ vars.DOCSEARCH_APP_ID }}
+          DOCSEARCH_API_KEY: ${{ vars.DOCSEARCH_API_KEY }}
+          DOCSEARCH_INDEX_NAME: ${{ vars.DOCSEARCH_INDEX_NAME }}
 
   deploy:
     needs: build
