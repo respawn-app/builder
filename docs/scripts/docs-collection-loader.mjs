@@ -1,10 +1,11 @@
+import { unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { glob } from 'astro/loaders';
 
 import { mirroredDocuments } from './mirrored-documents.mjs';
-import { syncMirroredDocs } from './sync-mirrored-docs.mjs';
+import { resolveMirroredDocsPaths, syncMirroredDocs } from './sync-mirrored-docs.mjs';
 
 function buildDocsGlobPatterns() {
   const legacyMirroredFileNames = mirroredDocuments.map((document) => path.posix.parse(document.outputFileName).name);
@@ -39,9 +40,33 @@ function createMirrorSourcePaths(repoRoot) {
   return mirroredDocuments.map((document) => path.join(repoRoot, document.sourcePath));
 }
 
-function isMirrorSourcePath(changedPath, mirrorSourcePaths) {
+function findMirroredDocumentBySourcePath(changedPath, repoRoot) {
   const normalizedChangedPath = path.resolve(changedPath);
-  return mirrorSourcePaths.some((sourcePath) => path.resolve(sourcePath) === normalizedChangedPath);
+  return mirroredDocuments.find(
+    (document) => path.resolve(path.join(repoRoot, document.sourcePath)) === normalizedChangedPath,
+  );
+}
+
+async function removeIfExists(filePath) {
+  try {
+    await unlink(filePath);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      throw error;
+    }
+  }
+}
+
+export async function removeMirroredDocForSourcePath(changedPath, docsRoot, repoRoot) {
+  const mirroredDocument = findMirroredDocumentBySourcePath(changedPath, repoRoot);
+
+  if (!mirroredDocument) {
+    return false;
+  }
+
+  const { outputDirectory } = resolveMirroredDocsPaths(docsRoot);
+  await removeIfExists(path.join(outputDirectory, mirroredDocument.outputFileName));
+  return true;
 }
 
 export function createDocsCollectionLoader() {
@@ -70,7 +95,7 @@ export function createDocsCollectionLoader() {
       context.watcher.add(mirrorSourcePaths);
 
       const reloadMirroredDocs = async (changedPath) => {
-        if (!isMirrorSourcePath(changedPath, mirrorSourcePaths)) {
+        if (!findMirroredDocumentBySourcePath(changedPath, repoRoot)) {
           return;
         }
 
@@ -81,8 +106,21 @@ export function createDocsCollectionLoader() {
         }
       };
 
+      const removeMirroredDoc = async (changedPath) => {
+        try {
+          const removed = await removeMirroredDocForSourcePath(changedPath, docsRoot, repoRoot);
+
+          if (!removed) {
+            return;
+          }
+        } catch (error) {
+          context.logger.error(`Error removing mirrored docs for ${changedPath}: ${error.message}`);
+        }
+      };
+
       context.watcher.on('add', reloadMirroredDocs);
       context.watcher.on('change', reloadMirroredDocs);
+      context.watcher.on('unlink', removeMirroredDoc);
     },
   };
 }
