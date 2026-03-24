@@ -1,4 +1,4 @@
 .astro/
-.generated/
+src/.generated/
 dist/
 node_modules/

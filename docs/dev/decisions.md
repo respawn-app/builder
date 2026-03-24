@@ -113,10 +113,13 @@
 
 ## Interrupts, Queueing, And In-Turn Messaging
 
-- In-turn user messaging supports both mid-run injection and queued post-turn send.
+- In-turn user messaging supports both steering queueing and queued post-turn send.
 - Queue/send hotkey is `Tab`; compatibility alias: `Ctrl+Enter`.
 - Known `Ctrl+Enter` CSI encodings normalize to the same queue action.
-- Mid-run injection is soft-insert only (delivered at safe boundary after current tool completion; no forced interruption).
+- Mid-run steering is soft-insert only (delivered at safe boundary after current tool completion; no forced interruption).
+- Steering submissions never lock the input box; each `Enter` while busy queues another steering message immediately.
+- Pending steering order is strict FIFO.
+- When multiple steering messages flush at the same boundary, they are coalesced into one user message separated by blank lines before sending to the model.
 - Pending user message order is strict FIFO.
 - Pending queue is unbounded.
 - Queued hotkey messages are in-memory only.
@@ -154,8 +157,17 @@
 - Auth is global app-level (not per-session).
 - Valid auth is required before startup completes.
 - Startup auth failure uses blocking error screen with retry.
-- Startup auth menu exposes exactly three OAuth methods:
+- Startup auth selection uses the same themed startup picker style as session selection.
+- Startup auth picker exposes exactly three OAuth methods:
 - `oauth_browser`, `oauth_browser_paste`, `oauth_device`.
+- Startup auth picker uses friendly titles with one-line explanations and does not show raw method ids in the rows.
+- Interactive startup treats `OPENAI_API_KEY` as a chooser-backed auth source, not an unconditional override.
+- When `OPENAI_API_KEY` is present, the startup auth picker may also show a separate non-OAuth option: `Use existing OPENAI_API_KEY from now on`.
+- When saved subscription auth and `OPENAI_API_KEY` are both present with no remembered preference, startup shows a picker to choose which source should win from now on.
+- When `OPENAI_API_KEY` is present and no saved subscription auth is configured, startup auth adds `Use existing OPENAI_API_KEY from now on` as a first-class picker option.
+- Choosing the env-key path remembers `prefer env api key when available`; choosing OAuth while an env key is available remembers `prefer saved/subscription auth`.
+- `/logout` clears both the active auth method and the remembered env-vs-saved-auth preference so re-auth starts from a clean choice.
+- After an interactive auth success or first-time env-key adoption, startup shows a centered success screen before session selection continues. Conflict-only auth-source preference resolution does not. The title is `Auth success for: <email>` when OAuth token claims provide an email; otherwise it is `Auth success`.
 - OAuth failure does not auto-fallback to API key.
 - OAuth tokens auto-refresh silently; only refresh failures are surfaced.
 - Global auth method can be switched only while idle.

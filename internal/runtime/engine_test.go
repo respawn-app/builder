@@ -5646,6 +5646,71 @@ func TestQueuedUserMessageFlushesWhenAssistantReturnsWithoutTools(t *testing.T) 
 	}
 }
 
+func TestQueuedUserMessagesCoalesceIntoSingleFlush(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "first"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "after flush"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	var flushed Event
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			if evt.Kind == EventUserMessageFlushed {
+				flushed = evt
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	eng.QueueUserMessage("steer now")
+	eng.QueueUserMessage("and keep tests focused")
+	msg, err := eng.SubmitUserMessage(context.Background(), "start")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "after flush" {
+		t.Fatalf("assistant content = %q, want after flush", msg.Content)
+	}
+	if flushed.UserMessage != "steer now\n\nand keep tests focused" {
+		t.Fatalf("unexpected flushed user message %q", flushed.UserMessage)
+	}
+	if len(flushed.UserMessageBatch) != 2 {
+		t.Fatalf("expected two flushed user messages in batch, got %+v", flushed.UserMessageBatch)
+	}
+	if len(client.calls) < 2 {
+		t.Fatalf("expected at least 2 model calls, got %d", len(client.calls))
+	}
+	second := client.calls[1]
+	userMessages := make([]llm.Message, 0, len(second.Messages))
+	for _, m := range second.Messages {
+		if m.Role == llm.RoleUser {
+			userMessages = append(userMessages, m)
+		}
+	}
+	if len(userMessages) < 2 {
+		t.Fatalf("expected initial and flushed user messages, got %+v", second.Messages)
+	}
+	last := userMessages[len(userMessages)-1]
+	if last.Content != "steer now\n\nand keep tests focused" {
+		t.Fatalf("expected coalesced flushed user message, got %+v", userMessages)
+	}
+}
+
 func TestRequestMessagesNeverContainANSIEscapes(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

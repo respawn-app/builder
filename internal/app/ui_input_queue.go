@@ -19,13 +19,21 @@ func (m *uiModel) queueInput(text string) {
 	m.activity = uiActivityQueued
 }
 
-func (m *uiModel) lockInjectedInput(text string) {
-	if m.engine != nil {
-		m.engine.QueueUserMessage(text)
+func (m *uiModel) enqueueInjectedInput(text string) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return
 	}
-	m.pendingInjected = append(m.pendingInjected, text)
-	m.lockedInjectText = text
-	m.inputSubmitLocked = true
+	if m.engine != nil {
+		m.engine.QueueUserMessage(trimmed)
+	}
+	m.pendingInjected = append(m.pendingInjected, trimmed)
+	m.activity = uiActivityQueued
+}
+
+func (m *uiModel) queueInjectedInput(text string) {
+	m.enqueueInjectedInput(text)
+	m.clearInput()
 	m.activity = uiActivityQueued
 }
 
@@ -70,6 +78,28 @@ func (c uiInputController) restorePendingPreSubmitTextIntoInput() {
 		m.input = pending
 	} else {
 		m.input = strings.TrimRight(m.input, "\n") + "\n\n" + pending
+	}
+	m.inputCursor = -1
+	m.refreshSlashCommandFilterFromInput()
+}
+
+func (c uiInputController) restorePendingInjectedIntoInput() {
+	m := c.model
+	if len(m.pendingInjected) == 0 {
+		return
+	}
+	pending := append([]string(nil), m.pendingInjected...)
+	if m.engine != nil {
+		for _, text := range pending {
+			m.engine.DiscardQueuedUserMessagesMatching(text)
+		}
+	}
+	joined := strings.Join(pending, "\n\n")
+	m.pendingInjected = nil
+	if strings.TrimSpace(m.input) == "" {
+		m.input = joined
+	} else {
+		m.input = strings.TrimRight(m.input, "\n") + "\n\n" + joined
 	}
 	m.inputCursor = -1
 	m.refreshSlashCommandFilterFromInput()

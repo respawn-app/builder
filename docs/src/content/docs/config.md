@@ -178,7 +178,7 @@ These are real runtime knobs, but they are not part of the typed settings regist
 
 | Env var | Description |
 | --- | --- |
-| `OPENAI_API_KEY` | API-key auth override. In headless mode it overrides saved auth state. During interactive startup it can also auto-configure auth. |
+| `OPENAI_API_KEY` | API-key auth source. In headless mode it still overrides saved auth state. During interactive startup, Builder can offer it as a remembered auth source and may ask you to choose between it and saved subscription auth when both are available. |
 | `BUILDER_OAUTH_ISSUER` | OAuth issuer override for login flows. |
 | `BUILDER_OAUTH_CLIENT_ID` | OAuth client ID override for login flows. |
 | `BUILDER_DEBUG_KEYS` | Debug-only UI key rendering toggle. |

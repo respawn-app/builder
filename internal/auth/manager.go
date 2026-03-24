@@ -48,39 +48,71 @@ func (m *Manager) EnsureStartupReady(ctx context.Context) error {
 }
 
 func (m *Manager) SwitchMethod(ctx context.Context, method Method, isIdle bool) (State, error) {
+	return m.SwitchMethodAndSetEnvAPIKeyPreference(ctx, method, EnvAPIKeyPreferenceUnspecified, false, isIdle)
+}
+
+func (m *Manager) SwitchMethodAndSetEnvAPIKeyPreference(
+	ctx context.Context,
+	method Method,
+	preference EnvAPIKeyPreference,
+	setPreference bool,
+	isIdle bool,
+) (State, error) {
 	if err := EnsureIdleForMethodSwitch(isIdle); err != nil {
 		return State{}, err
 	}
 	if err := method.Validate(); err != nil {
 		return State{}, err
 	}
-
-	state, err := m.Load(ctx)
-	if err != nil {
-		return State{}, err
-	}
-	state.Scope = ScopeGlobal
-	state.Method = method
-	state.UpdatedAt = m.now().UTC()
-	if m.store != nil {
-		if err := m.store.Save(ctx, state); err != nil {
+	if setPreference {
+		if err := preference.Validate(); err != nil {
 			return State{}, err
 		}
 	}
-	return state, nil
+	return m.updateState(ctx, func(state *State) error {
+		state.Method = method
+		if setPreference {
+			state.EnvAPIKeyPreference = preference
+		}
+		return nil
+	})
 }
 
 func (m *Manager) ClearMethod(ctx context.Context, isIdle bool) (State, error) {
 	if err := EnsureIdleForMethodSwitch(isIdle); err != nil {
 		return State{}, err
 	}
+	return m.updateState(ctx, func(state *State) error {
+		state.Method = Method{Type: MethodNone}
+		state.EnvAPIKeyPreference = EnvAPIKeyPreferenceUnspecified
+		return nil
+	})
+}
 
+func (m *Manager) SetEnvAPIKeyPreference(ctx context.Context, preference EnvAPIKeyPreference, isIdle bool) (State, error) {
+	if err := EnsureIdleForMethodSwitch(isIdle); err != nil {
+		return State{}, err
+	}
+	if err := preference.Validate(); err != nil {
+		return State{}, err
+	}
+	return m.updateState(ctx, func(state *State) error {
+		state.EnvAPIKeyPreference = preference
+		return nil
+	})
+}
+
+func (m *Manager) updateState(ctx context.Context, mutate func(*State) error) (State, error) {
 	state, err := m.Load(ctx)
 	if err != nil {
 		return State{}, err
 	}
 	state.Scope = ScopeGlobal
-	state.Method = Method{Type: MethodNone}
+	if mutate != nil {
+		if err := mutate(&state); err != nil {
+			return State{}, err
+		}
+	}
 	state.UpdatedAt = m.now().UTC()
 	if m.store != nil {
 		if err := m.store.Save(ctx, state); err != nil {

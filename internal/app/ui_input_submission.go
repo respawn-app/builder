@@ -159,6 +159,7 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 	m.pendingPreSubmitText = ""
 	if msg.err != nil {
 		c.unlockInputAfterSubmissionError()
+		c.restorePendingInjectedIntoInput()
 		if errors.Is(msg.err, errSubmissionInterrupted) {
 			c.restoreQueuedMessagesIntoInput()
 			m.activity = uiActivityInterrupted
@@ -170,7 +171,7 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 		m.activity = uiActivityError
 		m.appendLocalEntry("error", detailErr)
 		m.logf("step.error err=%q", detailErr)
-		if len(m.queued) > 0 {
+		if len(m.queued) > 0 && strings.TrimSpace(m.input) == "" {
 			return c.flushQueuedInputs(queueDrainAuto)
 		}
 		m.syncViewport()
@@ -202,6 +203,7 @@ func (c uiInputController) handlePreSubmitCompactionCheckDone(msg preSubmitCompa
 		c.finishBusyActivity(false)
 		c.releaseLockedInjectedInput(true)
 		m.discardQueuedText(msg.text)
+		c.restorePendingInjectedIntoInput()
 		c.restorePendingPreSubmitTextIntoInput()
 		detailErr := formatSubmissionError(msg.err)
 		m.activity = uiActivityError
@@ -239,6 +241,7 @@ func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea
 	c.releaseLockedInjectedInput(true)
 	if msg.err != nil {
 		m.discardQueuedText(m.pendingPreSubmitText)
+		c.restorePendingInjectedIntoInput()
 		c.restorePendingPreSubmitTextIntoInput()
 		detailErr := formatSubmissionError(msg.err)
 		m.activity = uiActivityError
