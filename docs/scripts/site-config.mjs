@@ -6,6 +6,8 @@ const DOCS_HOME_TITLE = 'Home';
 const DOCS_HOME_VISIBLE_TITLE = 'Builder';
 const DOCS_HOME_SLUG = 'docs';
 const DOCS_HOME_PATH = '/docs/';
+const CONTRIBUTING_PATH = '/contributing/';
+const SECURITY_PATH = '/security/';
 const REPO_URL = 'https://github.com/respawn-app/builder';
 const REPO_DEFAULT_BRANCH = 'main';
 const REPO_EDIT_ROOT_URL = `${REPO_URL}/edit/${REPO_DEFAULT_BRANCH}/`;
@@ -96,6 +98,8 @@ export function resolveDocsConfig(env = process.env) {
     docsHomeVisibleTitle: DOCS_HOME_VISIBLE_TITLE,
     docsHomeSlug: DOCS_HOME_SLUG,
     docsHomePath: DOCS_HOME_PATH,
+    contributingPath: CONTRIBUTING_PATH,
+    securityPath: SECURITY_PATH,
     siteUrl,
     basePath,
     customDomain,

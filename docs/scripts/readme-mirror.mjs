@@ -42,9 +42,25 @@ function splitHash(url) {
   };
 }
 
+function getMirroredRootDocumentPath(pathname, docsConfig) {
+  const mirroredPaths = new Map([
+    ['README.md', docsConfig.docsHomePath],
+    ['CONTRIBUTING.md', docsConfig.contributingPath],
+    ['SECURITY.md', docsConfig.securityPath],
+  ]);
+
+  return mirroredPaths.get(pathname);
+}
+
 function rewriteRelativeUrl(url, docsConfig) {
   const { pathname, hash } = splitHash(url);
   const normalizedPath = path.posix.normalize(pathname);
+  const mirroredRootDocumentPath = getMirroredRootDocumentPath(normalizedPath, docsConfig);
+
+  if (mirroredRootDocumentPath) {
+    return `${mirroredRootDocumentPath}${hash}`;
+  }
+
   const isDirectory = pathname.endsWith('/');
   const extension = path.posix.extname(normalizedPath).toLowerCase();
   const isImage = ['.avif', '.gif', '.jpeg', '.jpg', '.png', '.svg', '.webp'].includes(extension);
@@ -59,7 +75,18 @@ function rewriteRelativeUrl(url, docsConfig) {
   return new URL(normalizedPath, `${targetRoot}`).toString() + hash;
 }
 
-export function mirrorReadme(markdown, docsConfig) {
+function buildFrontmatter(title, editUrl) {
+  return [
+    '---',
+    `title: ${title}`,
+    `editUrl: ${editUrl}`,
+    '---',
+    '',
+  ].join('\n');
+}
+
+export function mirrorRepoMarkdownDocument(markdown, docsConfig, options) {
+  const { title, editPath } = options;
   const processor = unified()
     .use(remarkParse)
     .use(remarkGfm)
@@ -88,13 +115,14 @@ export function mirrorReadme(markdown, docsConfig) {
     });
 
   const transformedBody = String(processor.processSync(markdown)).trim();
-  const frontmatter = [
-    '---',
-    `title: ${docsConfig.docsHomeTitle}`,
-    `editUrl: ${docsConfig.repoEditRootUrl}README.md`,
-    '---',
-    '',
-  ].join('\n');
+  const frontmatter = buildFrontmatter(title, `${docsConfig.repoEditRootUrl}${editPath}`);
 
   return `${frontmatter}${transformedBody}\n`;
+}
+
+export function mirrorReadme(markdown, docsConfig) {
+  return mirrorRepoMarkdownDocument(markdown, docsConfig, {
+    title: docsConfig.docsHomeTitle,
+    editPath: 'README.md',
+  });
 }
