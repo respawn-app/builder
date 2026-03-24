@@ -22,6 +22,10 @@ func (s *stubAuthInteractor) WrapStore(base auth.Store) auth.Store {
 	return base
 }
 
+func (s *stubAuthInteractor) NeedsInteraction(req authInteraction) bool {
+	return !req.Gate.Ready
+}
+
 func (s *stubAuthInteractor) Interact(ctx context.Context, req authInteraction) error {
 	s.callCount++
 	if s.interact == nil {
@@ -33,7 +37,7 @@ func (s *stubAuthInteractor) Interact(ctx context.Context, req authInteraction) 
 func TestEnsureAuthReadyHeadlessReturnsStartupErrorWithoutCredentials(t *testing.T) {
 	mgr := auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now)
 
-	err := ensureAuthReady(context.Background(), mgr, auth.OpenAIOAuthOptions{}, &headlessAuthInteractor{
+	err := ensureAuthReady(context.Background(), mgr, auth.OpenAIOAuthOptions{}, "dark", config.TUIAlternateScreenAuto, &headlessAuthInteractor{
 		lookupEnv: func(string) string { return "" },
 	})
 	if !errors.Is(err, auth.ErrAuthNotConfigured) {

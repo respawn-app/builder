@@ -118,9 +118,8 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					if !ok {
 						return m, nil
 					}
-					if commentary != "" && m.engine != nil {
-						m.engine.QueueUserMessage(commentary)
-						m.pendingInjected = append(m.pendingInjected, commentary)
+					if commentary != "" {
+						m.enqueueInjectedInput(commentary)
 					}
 					resp = askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: decision, Commentary: commentary}}
 				}

@@ -170,6 +170,18 @@ func extractReviewerCacheHitLine(text string) string {
 	return ""
 }
 
+func normalizeQueuedUserMessages(messages []string) []string {
+	out := make([]string, 0, len(messages))
+	for _, message := range messages {
+		trimmed := strings.TrimSpace(message)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
 func (m *defaultMessageLifecycle) FlushPendingUserInjections(stepID string) (int, error) {
 	e := m.engine
 	e.mu.Lock()
@@ -181,12 +193,14 @@ func (m *defaultMessageLifecycle) FlushPendingUserInjections(stepID string) (int
 	e.mu.Unlock()
 	flushed := 0
 
-	for _, pendingMessage := range pending {
-		if err := e.appendUserMessage(stepID, pendingMessage); err != nil {
+	queuedMessages := normalizeQueuedUserMessages(pending)
+	if len(queuedMessages) > 0 {
+		joined := strings.Join(queuedMessages, "\n\n")
+		if err := e.appendUserMessage(stepID, joined); err != nil {
 			return flushed, err
 		}
 		flushed++
-		e.emit(Event{Kind: EventUserMessageFlushed, StepID: stepID, UserMessage: pendingMessage})
+		e.emit(Event{Kind: EventUserMessageFlushed, StepID: stepID, UserMessage: joined, UserMessageBatch: queuedMessages})
 	}
 	for _, notice := range pendingNotices {
 		if err := e.appendMessage(stepID, notice); err != nil {

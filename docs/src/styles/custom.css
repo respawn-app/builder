@@ -31,6 +31,11 @@
   --sl-text-code-sm: 0.85rem;
   --sl-line-height: 1.8;
   --sl-line-height-headings: 1.2;
+  --builder-header-offset: var(--sl-nav-height);
+}
+
+:root[data-header-state='hidden'] {
+  --builder-header-offset: 0rem;
 }
 
 :root[data-theme='dark'] {
@@ -132,6 +137,21 @@
 
 header.header {
   backdrop-filter: saturate(140%) blur(12px);
+}
+
+mobile-starlight-toc nav,
+.right-sidebar {
+  transition: top 160ms ease, padding-top 160ms ease;
+}
+
+mobile-starlight-toc nav {
+  top: calc(var(--builder-header-offset) - 1px);
+}
+
+@media (min-width: 72rem) {
+  .right-sidebar {
+    padding-top: var(--builder-header-offset);
+  }
 }
 
 .site-title img {

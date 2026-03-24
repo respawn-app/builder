@@ -29,20 +29,21 @@ const (
 )
 
 type Event struct {
-	Kind           EventKind
-	StepID         string
-	Error          string
-	AssistantDelta string
-	ReasoningDelta *llm.ReasoningSummaryDelta
-	UserMessage    string
-	Message        llm.Message
-	ModelResponse  *ModelResponseTrace
-	ToolCall       *llm.ToolCall
-	ToolResult     *tools.Result
-	Reviewer       *ReviewerStatus
-	Compaction     *CompactionStatus
-	RunState       *RunState
-	Background     *BackgroundShellEvent
+	Kind             EventKind
+	StepID           string
+	Error            string
+	AssistantDelta   string
+	ReasoningDelta   *llm.ReasoningSummaryDelta
+	UserMessage      string
+	UserMessageBatch []string
+	Message          llm.Message
+	ModelResponse    *ModelResponseTrace
+	ToolCall         *llm.ToolCall
+	ToolResult       *tools.Result
+	Reviewer         *ReviewerStatus
+	Compaction       *CompactionStatus
+	RunState         *RunState
+	Background       *BackgroundShellEvent
 }
 
 type RunState struct {

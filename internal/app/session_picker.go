@@ -61,7 +61,7 @@ func newSessionPickerModel(summaries []session.Summary, theme string) *sessionPi
 		theme:    theme,
 		styles:   newSessionPickerStyles(theme),
 	}
-	m.headerMD = newSessionPickerMarkdownRenderer(theme)
+	m.headerMD = newStartupMarkdownRenderer(theme)
 	return m
 }
 
@@ -314,7 +314,7 @@ func newSessionPickerStyles(theme string) sessionPickerStyles {
 	}
 }
 
-func newSessionPickerMarkdownRenderer(theme string) *glamour.TermRenderer {
+func newStartupMarkdownRenderer(theme string) *glamour.TermRenderer {
 	style := "dark"
 	if strings.EqualFold(strings.TrimSpace(theme), "light") {
 		style = "light"
@@ -339,7 +339,7 @@ func humanTime(ts time.Time) string {
 func runSessionPicker(summaries []session.Summary, theme string, alternateScreen config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
 	model := newSessionPickerModel(summaries, theme)
 	options := []tea.ProgramOption{}
-	if shouldUseSessionPickerAltScreen(alternateScreen) {
+	if shouldUseStartupPickerAltScreen(alternateScreen) {
 		options = append(options, tea.WithAltScreen())
 	}
 	program := tea.NewProgram(model, options...)
