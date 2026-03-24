@@ -6,11 +6,16 @@ const DOCS_HOME_TITLE = 'Home';
 const DOCS_HOME_VISIBLE_TITLE = 'Builder';
 const DOCS_HOME_SLUG = 'docs';
 const DOCS_HOME_PATH = '/docs/';
+const CONTRIBUTING_PATH = '/contributing/';
+const SECURITY_PATH = '/security/';
 const REPO_URL = 'https://github.com/respawn-app/builder';
 const REPO_DEFAULT_BRANCH = 'main';
 const REPO_EDIT_ROOT_URL = `${REPO_URL}/edit/${REPO_DEFAULT_BRANCH}/`;
 const REPO_BLOB_ROOT_URL = `${REPO_URL}/blob/${REPO_DEFAULT_BRANCH}/`;
 const REPO_RAW_ROOT_URL = `https://raw.githubusercontent.com/respawn-app/builder/${REPO_DEFAULT_BRANCH}/`;
+const DOCSEARCH_APP_ID = 'YFIMJHUME7';
+const DOCSEARCH_API_KEY = '87f58a573c52b1bb4aa289030dbb9ed9';
+const DOCSEARCH_INDEX_NAME = 'builder';
 
 function firstNonEmpty(value) {
   if (typeof value !== 'string') {
@@ -80,6 +85,11 @@ export function resolveDocsConfig(env = process.env) {
   const siteUrl = normalizeSiteUrl(firstNonEmpty(env.DOCS_SITE_URL) ?? DEFAULT_SITE_URL);
   const basePath = normalizeBasePath(firstNonEmpty(env.DOCS_BASE_PATH) ?? DEFAULT_BASE_PATH);
   const customDomain = normalizeDomain(firstNonEmpty(env.DOCS_CUSTOM_DOMAIN));
+  const docSearch = {
+    appId: firstNonEmpty(env.DOCSEARCH_APP_ID) ?? DOCSEARCH_APP_ID,
+    apiKey: firstNonEmpty(env.DOCSEARCH_API_KEY) ?? DOCSEARCH_API_KEY,
+    indexName: firstNonEmpty(env.DOCSEARCH_INDEX_NAME) ?? DOCSEARCH_INDEX_NAME,
+  };
 
   return {
     siteTitle: SITE_TITLE,
@@ -88,6 +98,8 @@ export function resolveDocsConfig(env = process.env) {
     docsHomeVisibleTitle: DOCS_HOME_VISIBLE_TITLE,
     docsHomeSlug: DOCS_HOME_SLUG,
     docsHomePath: DOCS_HOME_PATH,
+    contributingPath: CONTRIBUTING_PATH,
+    securityPath: SECURITY_PATH,
     siteUrl,
     basePath,
     customDomain,
@@ -96,6 +108,7 @@ export function resolveDocsConfig(env = process.env) {
     repoEditRootUrl: REPO_EDIT_ROOT_URL,
     repoBlobRootUrl: REPO_BLOB_ROOT_URL,
     repoRawRootUrl: REPO_RAW_ROOT_URL,
+    docSearch,
     getPublicUrl(pathname = '/') {
       const publicPath = joinPath(basePath, pathname);
       return new URL(publicPath, `${siteUrl}/`).toString();
