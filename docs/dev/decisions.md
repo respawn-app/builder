@@ -167,6 +167,7 @@
 - When `OPENAI_API_KEY` is present and no saved subscription auth is configured, startup auth adds `Use existing OPENAI_API_KEY from now on` as a first-class picker option.
 - Choosing the env-key path remembers `prefer env api key when available`; choosing OAuth while an env key is available remembers `prefer saved/subscription auth`.
 - `/logout` clears both the active auth method and the remembered env-vs-saved-auth preference so re-auth starts from a clean choice.
+- After an interactive auth success or first-time env-key adoption, startup shows a centered success screen before session selection continues. Conflict-only auth-source preference resolution does not. The title is `Auth success for: <email>` when OAuth token claims provide an email; otherwise it is `Auth success`.
 - OAuth failure does not auto-fallback to API key.
 - OAuth tokens auto-refresh silently; only refresh failures are surfaced.
 - Global auth method can be switched only while idle.

@@ -74,7 +74,7 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 			return m.setTransientStatusWithKind(fmt.Sprintf("background shell %s %s", evt.Background.ID, evt.Background.State), kind)
 		}
 	case runtime.EventUserMessageFlushed:
-		shouldRecordHistory := a.onUserMessageFlushed(evt.UserMessage)
+		shouldRecordHistory := a.onUserMessageFlushed(evt.UserMessage, evt.UserMessageBatch)
 		if shouldRecordHistory {
 			return sequenceCmds(a.syncConversationFromEngine(), m.recordPromptHistory(evt.UserMessage))
 		}
@@ -83,17 +83,23 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 	return nil
 }
 
-func (a uiRuntimeAdapter) onUserMessageFlushed(text string) bool {
+func (a uiRuntimeAdapter) onUserMessageFlushed(text string, batch []string) bool {
 	m := a.model
 	m.conversationFreshness = session.ConversationFreshnessEstablished
+	if len(batch) == 0 && strings.TrimSpace(text) != "" {
+		batch = []string{text}
+	}
 	shouldRecordHistory := false
-	for i, pending := range m.pendingInjected {
-		if strings.TrimSpace(pending) != strings.TrimSpace(text) {
-			continue
+	consumed := 0
+	for consumed < len(batch) && consumed < len(m.pendingInjected) {
+		if strings.TrimSpace(m.pendingInjected[consumed]) != strings.TrimSpace(batch[consumed]) {
+			break
 		}
-		m.pendingInjected = append(m.pendingInjected[:i], m.pendingInjected[i+1:]...)
+		consumed++
+	}
+	if consumed > 0 {
+		m.pendingInjected = append([]string(nil), m.pendingInjected[consumed:]...)
 		shouldRecordHistory = true
-		break
 	}
 	if m.inputSubmitLocked && strings.TrimSpace(m.lockedInjectText) == strings.TrimSpace(text) {
 		if strings.TrimSpace(m.input) == strings.TrimSpace(m.lockedInjectText) {
@@ -174,7 +180,7 @@ func (m *uiModel) handleRuntimeEvent(evt runtime.Event) {
 }
 
 func (m *uiModel) onUserMessageFlushed(text string) {
-	_ = m.runtimeAdapter().onUserMessageFlushed(text)
+	_ = m.runtimeAdapter().onUserMessageFlushed(text, nil)
 }
 
 func (m *uiModel) syncConversationFromEngine() {
