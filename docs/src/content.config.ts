@@ -4,6 +4,15 @@ import path from 'node:path';
 import { glob } from 'astro/loaders';
 import { docsSchema } from '@astrojs/starlight/schema';
 
+import { mirroredDocuments } from '../scripts/mirrored-documents.mjs';
+
+function buildDocsGlobPatterns(): string[] {
+  const legacyMirroredFileNames = mirroredDocuments.map((document) => path.posix.parse(document.outputFileName).name);
+  const excludedLegacyMirroredFiles = `!src/content/docs/{${legacyMirroredFileNames.join(',')}}.md`;
+
+  return ['src/content/docs/**/*.md', excludedLegacyMirroredFiles, '.generated/content/docs/**/*.md'];
+}
+
 function trimDocsPrefix(entryPath: string, prefix: string): string | undefined {
   return entryPath.startsWith(prefix) ? entryPath.slice(prefix.length) : undefined;
 }
@@ -30,7 +39,7 @@ export const collections = {
   docs: defineCollection({
     loader: glob({
       base: '.',
-      pattern: ['src/content/docs/**/*.md', '.generated/content/docs/**/*.md'],
+      pattern: buildDocsGlobPatterns(),
       generateId: generateDocsEntryId,
     }),
     schema: docsSchema(),
