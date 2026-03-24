@@ -43,6 +43,14 @@ export default defineConfig({
           label: 'Configuration',
           link: '/config/',
         },
+        {
+          label: 'Contributing',
+          link: docsConfig.contributingPath,
+        },
+        {
+          label: 'Security',
+          link: docsConfig.securityPath,
+        },
       ],
       editLink: {
         baseUrl: docsConfig.repoEditRootUrl,
