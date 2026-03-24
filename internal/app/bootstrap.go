@@ -61,7 +61,7 @@ func bootstrapApp(ctx context.Context, opts Options, interactor authInteractor) 
 		auth.NewOpenAIOAuthRefresher(oauthOpts, time.Now, 5*time.Minute),
 		time.Now,
 	)
-	if err := ensureAuthReady(ctx, mgr, oauthOpts, interactor); err != nil {
+	if err := ensureAuthReady(ctx, mgr, oauthOpts, cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen, interactor); err != nil {
 		return appBootstrap{}, err
 	}
 

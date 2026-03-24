@@ -30,10 +30,19 @@ const (
 	MethodOAuth  MethodType = "oauth"
 )
 
+type EnvAPIKeyPreference string
+
+const (
+	EnvAPIKeyPreferenceUnspecified EnvAPIKeyPreference = ""
+	EnvAPIKeyPreferencePreferSaved EnvAPIKeyPreference = "prefer_saved_auth"
+	EnvAPIKeyPreferencePreferEnv   EnvAPIKeyPreference = "prefer_env_api_key"
+)
+
 type State struct {
-	Scope     Scope     `json:"scope"`
-	Method    Method    `json:"method"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Scope               Scope               `json:"scope"`
+	Method              Method              `json:"method"`
+	EnvAPIKeyPreference EnvAPIKeyPreference `json:"env_api_key_preference,omitempty"`
+	UpdatedAt           time.Time           `json:"updated_at"`
 }
 
 func EmptyState() State {
@@ -51,6 +60,9 @@ func (s State) Validate() error {
 	if s.Scope != ScopeGlobal {
 		return fmt.Errorf("%w: %q", ErrInvalidAuthScope, s.Scope)
 	}
+	if err := s.EnvAPIKeyPreference.Validate(); err != nil {
+		return err
+	}
 	if s.Method.Type == MethodNone {
 		return nil
 	}
@@ -58,6 +70,15 @@ func (s State) Validate() error {
 		return err
 	}
 	return nil
+}
+
+func (p EnvAPIKeyPreference) Validate() error {
+	switch p {
+	case EnvAPIKeyPreferenceUnspecified, EnvAPIKeyPreferencePreferSaved, EnvAPIKeyPreferencePreferEnv:
+		return nil
+	default:
+		return fmt.Errorf("invalid env api key preference: %q", p)
+	}
 }
 
 type Method struct {
@@ -76,6 +97,7 @@ type OAuthMethod struct {
 	TokenType    string    `json:"token_type"`
 	Expiry       time.Time `json:"expiry"`
 	AccountID    string    `json:"account_id,omitempty"`
+	Email        string    `json:"email,omitempty"`
 }
 
 func (m Method) Validate() error {

@@ -16,7 +16,7 @@ func shouldUseDetailAltScreen(policy config.TUIAlternateScreenPolicy) bool {
 	return policy != config.TUIAlternateScreenNever
 }
 
-func shouldUseSessionPickerAltScreen(policy config.TUIAlternateScreenPolicy) bool {
+func shouldUseStartupPickerAltScreen(policy config.TUIAlternateScreenPolicy) bool {
 	return policy != config.TUIAlternateScreenNever
 }
 

@@ -21,10 +21,10 @@ func TestAltScreenPolicyHelpers(t *testing.T) {
 	if shouldUseDetailAltScreen(config.TUIAlternateScreenNever) {
 		t.Fatal("expected never policy to keep detail in normal screen")
 	}
-	if !shouldUseSessionPickerAltScreen(config.TUIAlternateScreenAuto) {
+	if !shouldUseStartupPickerAltScreen(config.TUIAlternateScreenAuto) {
 		t.Fatal("expected auto policy to use picker alt-screen")
 	}
-	if shouldUseSessionPickerAltScreen(config.TUIAlternateScreenNever) {
+	if shouldUseStartupPickerAltScreen(config.TUIAlternateScreenNever) {
 		t.Fatal("expected never policy to disable picker alt-screen")
 	}
 }
