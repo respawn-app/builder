@@ -229,8 +229,8 @@ func (m *sessionPickerModel) rowVisibleFromOffset(offset, index int) bool {
 	return false
 }
 
-func (m *sessionPickerModel) needsSeparatorAfterRow(row sessionPickerVisibleRow) bool {
-	return row.index == 0 || row.showPreview
+func (m *sessionPickerModel) needsSeparatorAfterRow(_ sessionPickerVisibleRow) bool {
+	return true
 }
 
 func (m *sessionPickerModel) itemCount() int {
@@ -292,13 +292,6 @@ func sessionPickerTitle(item session.Summary) string {
 		return title
 	}
 	return item.SessionID
-}
-
-func (m *sessionPickerModel) rowLineCount(index int) int {
-	if m.hasPreview(index) {
-		return 2
-	}
-	return 1
 }
 
 func (m *sessionPickerModel) hasPreview(index int) bool {
