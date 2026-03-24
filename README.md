@@ -1,4 +1,12 @@
-Builder is a highly opinionated, minimal terminal coding agent for professional Agentic Engineers, focusing on output quality. Currently only supporting OpenAI/codex models.
+Builder is a highly opinionated terminal coding agent for professional Agentic Engineers, focusing on output quality. 
+
+Current state: Alpha:
+- Supports OpenAI/codex models w/subscription
+- macOS / Linux / WSL only
+
+## Get started 
+
+[https://opensource.respawn.pro/builder/](https://opensource.respawn.pro/builder/)
 
 ## Install
 
@@ -16,12 +24,6 @@ curl -fsSL https://raw.githubusercontent.com/respawn-app/builder/main/scripts/in
 ```
 
 Check the installed version with `builder --version`.
-
-## Compatibility
-
-- Published release binaries: macOS, Linux, Windows on `x64` (`amd64`) and `arm64`.
-- Homebrew install path: macOS and Linux.
-- Building from source currently requires Go `1.25`.
 
 ### Features:
 
@@ -49,12 +51,6 @@ Check the installed version with `builder --version`.
 - [x] Model verbosity for openai models
 - [x] Native terminal scrollback, selection, copy-paste
 
-### Important things not done yet
-
-- [ ] Arrow-up in input box to scroll through previous prompts and repeat them.
-- [ ] @-file mentioning
-- [ ] Any other providers except Codex (since no other exist that I know that allow to use their subscription in a 3rd party harness)
-
 ### What will likely never be implemented
 
 These features are controversial or questionable for model performance, and usually have a better replacement.
@@ -70,17 +66,20 @@ Here is where this project has to be highly opinionated:
 - Sandboxing - Codex's sandbox is annoying, doesn't work with many tools (gradle, java etc), junie's sandbox can be bypassed, claude code's sandbox is brittle and can also be bypassed. Frontier models are not so stupid anymore and are trained not to destroy your PC.
 - WebFetch tool or similar. Just use [jina.ai](https://r.jina.ai) to fetch urls.
 - Fancy summaries, UI, minimal mode, features for "vibe coding". The philosophy is to build something for professionals (agentic engineers)
-
-## Project Docs
-
-- Contribution guide: `CONTRIBUTING.md`
-- Security policy: `SECURITY.md`
-- Code of conduct: `CODE_OF_CONDUCT.md`
-
+- Anthropic, Gemini, Antigravity subscription usage. Not until that becomes legal.
 
 ## License
 
 Builder is licensed under `AGPL-3.0-only`. See `LICENSE`.
 
-If you deploy a modified network-accessible version, AGPL section 13 requires
-you to offer the corresponding source of that modified version to its users.
+```
+IN NO EVENT UNLESS REQUIRED BY APPLICABLE LAW OR AGREED TO IN WRITING
+WILL ANY COPYRIGHT HOLDER, OR ANY OTHER PARTY WHO MODIFIES AND/OR CONVEYS
+THE PROGRAM AS PERMITTED ABOVE, BE LIABLE TO YOU FOR DAMAGES, INCLUDING ANY
+GENERAL, SPECIAL, INCIDENTAL OR CONSEQUENTIAL DAMAGES ARISING OUT OF THE
+USE OR INABILITY TO USE THE PROGRAM (INCLUDING BUT NOT LIMITED TO LOSS OF
+DATA OR DATA BEING RENDERED INACCURATE OR LOSSES SUSTAINED BY YOU OR THIRD
+PARTIES OR A FAILURE OF THE PROGRAM TO OPERATE WITH ANY OTHER PROGRAMS),
+EVEN IF SUCH HOLDER OR OTHER PARTY HAS BEEN ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGES.
+```
