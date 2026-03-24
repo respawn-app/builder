@@ -583,7 +583,7 @@ func TestRenderNativeScrollbackSnapshotMatchesLegacyAppendPath(t *testing.T) {
 		{Role: "tool_call", Text: "ls -la", ToolCallID: "call_1", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "ls -la"}},
 		{Role: "tool_result_ok", Text: "total 8\n-rw-r--r-- a.txt", ToolCallID: "call_1"},
 		{Role: "tool_call", Text: "Choose scope?", ToolCallID: "call_2", ToolCall: &transcript.ToolCallMeta{ToolName: "ask_question", Question: "Choose scope?", Suggestions: []string{"full"}, RecommendedOptionIndex: 1}},
-		{Role: "tool_result_ok", Text: "User answered and picked option 1.\nUser also said:\nNeed to include generated files.", ToolCallID: "call_2"},
+		{Role: "tool_result_ok", Text: "ask result summary", ToolCallID: "call_2"},
 		{Role: "tool_call", Text: "Edited:\n./a.go +1 -1", ToolCallID: "call_3", ToolCall: &transcript.ToolCallMeta{ToolName: "patch", PatchSummary: "Edited:\n./a.go +1 -1", PatchDetail: "Edited:\n/work/a.go\n-old\n+new", RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff}}},
 		{Role: "tool_result_ok", Text: "", ToolCallID: "call_3"},
 	}
@@ -597,17 +597,14 @@ func TestRenderNativeScrollbackSnapshotMatchesLegacyAppendPath(t *testing.T) {
 func TestRenderNativeScrollbackSnapshotPreservesAskQuestionStructuredAnswerText(t *testing.T) {
 	out := renderNativeScrollbackSnapshot([]tui.TranscriptEntry{
 		{Role: "tool_call", Text: "Choose scope?", ToolCallID: "call_ask", ToolCall: &transcript.ToolCallMeta{ToolName: "ask_question", Question: "Choose scope?", Suggestions: []string{"full", "Fast only"}, RecommendedOptionIndex: 1}},
-		{Role: "tool_result_ok", Text: "User answered and picked option 2.\nUser also said:\nNeed to include generated files.", ToolCallID: "call_ask"},
+		{Role: "tool_result_ok", Text: "ask result summary", ToolCallID: "call_ask"},
 	}, "dark", 100)
 	plain := stripANSIText(out)
 	if !strings.Contains(plain, "Choose scope?") {
 		t.Fatalf("expected ask question preserved, got %q", out)
 	}
-	if !strings.Contains(plain, "User answered and picked option 2.") {
-		t.Fatalf("expected structured ask answer summary preserved, got %q", out)
-	}
-	if !strings.Contains(plain, "User also said:") || !strings.Contains(plain, "Need to include generated files.") {
-		t.Fatalf("expected structured ask freeform commentary preserved, got %q", out)
+	if !strings.Contains(plain, "ask result summary") {
+		t.Fatalf("expected ask result text preserved, got %q", out)
 	}
 	if strings.Contains(plain, "full") || strings.Contains(plain, "Fast only") {
 		t.Fatalf("expected native ongoing snapshot to omit ask suggestions, got %q", out)

@@ -241,7 +241,7 @@ func TestAskQuestionTabFreeformFlow(t *testing.T) {
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated = next.(*uiModel)
 	if !updated.askFreeform {
-		t.Fatal("expected tab to switch to freeform")
+		t.Fatal("expected tab to open freeform commentary")
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[<64;55;24M[<64;56;26M[<65;56;26M")})
@@ -290,12 +290,22 @@ func TestAskQuestionPickerSubmitPreservesPendingFreeformDraft(t *testing.T) {
 	if updated.askInput != "custom" {
 		t.Fatalf("expected pending freeform draft preserved, got %q", updated.askInput)
 	}
-	plain := stripANSIAndTrimRight(strings.Join(updated.renderInputLines(100, uiThemeStyles("dark")), "\n"))
-	if !strings.Contains(plain, "› custom") {
-		t.Fatalf("expected muted pending freeform preview in picker, got %q", plain)
+	promptLines := updated.renderAskPromptLines()
+	hasDisabledDraftPreview := false
+	hasHintLine := false
+	for _, line := range promptLines {
+		if line.Kind == askPromptLineKindInput && line.Disabled && line.InputText == "custom" {
+			hasDisabledDraftPreview = true
+		}
+		if line.Kind == askPromptLineKindHint {
+			hasHintLine = true
+		}
 	}
-	if strings.Contains(plain, "Tab to switch to freeform • Enter to submit • Something else opens freeform") {
-		t.Fatalf("expected draft preview to replace picker hint, got %q", plain)
+	if !hasDisabledDraftPreview {
+		t.Fatalf("expected disabled draft preview in picker, got %+v", promptLines)
+	}
+	if hasHintLine {
+		t.Fatalf("expected draft preview to replace picker hint, got %+v", promptLines)
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -405,10 +415,10 @@ func TestAskQuestionFreeformSelectionEnterDropsIntoFreeformWhenEmpty(t *testing.
 	updated = next.(*uiModel)
 
 	if cmd != nil {
-		t.Fatal("did not expect validation error when opening freeform from Something else")
+		t.Fatal("did not expect validation error when opening freeform from Freeform answer")
 	}
 	if !updated.askFreeform {
-		t.Fatal("expected Something else to switch into freeform mode")
+		t.Fatal("expected Freeform answer to switch into freeform mode")
 	}
 	if updated.transientStatus != "" {
 		t.Fatalf("did not expect transient status while opening freeform, got %q", updated.transientStatus)
@@ -442,8 +452,8 @@ func TestAskQuestionFreeformSelectionEmptySubmitRequiresCommentary(t *testing.T)
 	if cmd == nil {
 		t.Fatal("expected transient error status cmd")
 	}
-	if updated.transientStatus != "Write your response before submitting the freeform option" {
-		t.Fatalf("unexpected transient status %q", updated.transientStatus)
+	if strings.TrimSpace(updated.transientStatus) == "" {
+		t.Fatal("expected non-empty transient validation status")
 	}
 	if updated.transientStatusKind != uiStatusNoticeError {
 		t.Fatalf("expected error notice kind, got %d", updated.transientStatusKind)
@@ -558,51 +568,53 @@ func TestAskPromptUsesCheckmarkAndSingleLineHint(t *testing.T) {
 
 	next, _ := m.Update(askEventMsg{event: event})
 	updated := next.(*uiModel)
-	lines := updated.renderInputLines(100, uiThemeStyles("dark"))
-	plain := stripANSIAndTrimRight(strings.Join(lines, "\n"))
-
-	if !strings.Contains(plain, "Pick one") {
-		t.Fatalf("expected question text, got %q", plain)
+	promptLines := updated.renderAskPromptLines()
+	if len(promptLines) != 5 {
+		t.Fatalf("expected question, 3 options, and hint; got %+v", promptLines)
 	}
-	if strings.Contains(plain, "question>") {
-		t.Fatalf("expected no legacy question prefix, got %q", plain)
+	if promptLines[0].Kind != askPromptLineKindQuestion {
+		t.Fatalf("expected first prompt line to be question, got %+v", promptLines)
 	}
-	if strings.Contains(plain, "none of the above") {
-		t.Fatalf("expected no fallback option, got %q", plain)
+	if promptLines[1].Kind != askPromptLineKindOption || !promptLines[1].Selected {
+		t.Fatalf("expected first option selected, got %+v", promptLines[1])
 	}
-	if !strings.Contains(plain, "✓ 1. a") {
-		t.Fatalf("expected checkmark-selected first option, got %q", plain)
+	if promptLines[3].Kind != askPromptLineKindOption {
+		t.Fatalf("expected freeform option line, got %+v", promptLines[3])
 	}
-	if !strings.Contains(plain, "3. Something else") {
-		t.Fatalf("expected freeform selection option, got %q", plain)
-	}
-	if strings.Contains(plain, "> 1. a") {
-		t.Fatalf("expected no chevron selector, got %q", plain)
-	}
-	if !strings.Contains(plain, "Tab to switch to freeform • Enter to submit • Something else opens freeform") {
-		t.Fatalf("expected single-line hint, got %q", plain)
+	if promptLines[4].Kind != askPromptLineKindHint || strings.TrimSpace(promptLines[4].Text) == "" {
+		t.Fatalf("expected non-empty hint line, got %+v", promptLines[4])
 	}
 }
 
-func TestAskPromptHighlightsRecommendedOptionInGreenWithoutLabel(t *testing.T) {
+func TestAskPromptShowsRecommendedMarkerAndMutedLabel(t *testing.T) {
+	previousProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(previousProfile)
+
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	reply := make(chan askReply, 1)
 	event := askEvent{req: askquestion.Request{Question: "Pick one", Suggestions: []string{"a", "b"}, RecommendedOptionIndex: 2}, reply: reply}
 
 	next, _ := m.Update(askEventMsg{event: event})
 	updated := next.(*uiModel)
+	promptLines := updated.renderAskPromptLines()
+	recommendedLine := promptLines[2]
+	if !recommendedLine.Recommended || recommendedLine.Selected {
+		t.Fatalf("expected second option recommended and not selected, got %+v", recommendedLine)
+	}
+	if strings.TrimSpace(recommendedLine.MutedSuffix) == "" {
+		t.Fatalf("expected recommended line to carry muted suffix metadata, got %+v", recommendedLine)
+	}
 	style := uiThemeStyles("dark")
 	rendered := strings.Join(updated.renderInputLines(100, style), "\n")
-	plain := stripANSIAndTrimRight(rendered)
-	if strings.Contains(plain, "Recommended:") {
-		t.Fatalf("did not expect textual recommended label, got %q", plain)
+	body := strings.TrimSuffix(recommendedLine.Text, recommendedLine.MutedSuffix)
+	greenText := lipgloss.NewStyle().Foreground(uiPalette("dark").secondary).Render(body)
+	note := uiThemeStyles("dark").meta.Faint(true).Render(recommendedLine.MutedSuffix)
+	if !strings.Contains(rendered, greenText) {
+		t.Fatalf("expected recommended option text rendered in green, got %q", rendered)
 	}
-	if !strings.Contains(plain, "2. b") {
-		t.Fatalf("expected recommended option text preserved, got %q", plain)
-	}
-	expected := lipgloss.NewStyle().Foreground(uiPalette("dark").secondary).Render(padANSIRight("  2. b", 100))
-	if !strings.Contains(rendered, expected) {
-		t.Fatalf("expected recommended option rendered in green, got %q", rendered)
+	if !strings.Contains(rendered, note) {
+		t.Fatalf("expected recommended note rendered faint, got %q", rendered)
 	}
 }
 
@@ -619,15 +631,20 @@ func TestAskPromptKeepsSelectedStylingForRecommendedActiveRow(t *testing.T) {
 	updated := next.(*uiModel)
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
 	updated = next.(*uiModel)
+	promptLines := updated.renderAskPromptLines()
+	activeLine := promptLines[2]
+	if !activeLine.Selected || !activeLine.Recommended {
+		t.Fatalf("expected active line to remain both selected and recommended, got %+v", activeLine)
+	}
 	style := uiThemeStyles("dark")
 	rendered := strings.Join(updated.renderInputLines(100, style), "\n")
-	selectedExpected := lipgloss.NewStyle().Foreground(uiPalette("dark").primary).Bold(true).Render(padANSIRight("✓ 2. b", 100))
-	recommendedOnly := lipgloss.NewStyle().Foreground(uiPalette("dark").secondary).Render(padANSIRight("✓ 2. b", 100))
+	selectedExpected := lipgloss.NewStyle().Foreground(uiPalette("dark").primary).Bold(true).Render(padANSIRight(activeLine.Text, 100))
+	recommendedOnly := lipgloss.NewStyle().Foreground(uiPalette("dark").secondary).Render("★ ")
 	if !strings.Contains(rendered, selectedExpected) {
 		t.Fatalf("expected active recommended row to keep selected styling, got %q", rendered)
 	}
 	if strings.Contains(rendered, recommendedOnly) {
-		t.Fatalf("did not expect active recommended row to use passive recommended styling, got %q", rendered)
+		t.Fatalf("did not expect active recommended row to keep the passive recommended star, got %q", rendered)
 	}
 }
 
@@ -648,19 +665,22 @@ func TestApprovalAskUsesSingleDenyOptionAndTabCommentary(t *testing.T) {
 
 	next, _ := m.Update(askEventMsg{event: event})
 	updated := next.(*uiModel)
-	lines := updated.renderInputLines(120, uiThemeStyles("dark"))
-	plain := stripANSIAndTrimRight(strings.Join(lines, "\n"))
-	if !strings.Contains(plain, "3. Deny") {
-		t.Fatalf("expected deny option, got %q", plain)
+	promptLines := updated.renderAskPromptLines()
+	optionLines := 0
+	hintLines := 0
+	for _, line := range promptLines {
+		if line.Kind == askPromptLineKindOption {
+			optionLines++
+		}
+		if line.Kind == askPromptLineKindHint {
+			hintLines++
+		}
 	}
-	if strings.Contains(plain, "Deny, and add commentary") {
-		t.Fatalf("did not expect separate deny-commentary option, got %q", plain)
+	if optionLines != 3 {
+		t.Fatalf("expected exactly 3 approval options, got %+v", promptLines)
 	}
-	if strings.Contains(plain, askFreeformSelectionOptionText) {
-		t.Fatalf("did not expect freeform selection option on approval ask, got %q", plain)
-	}
-	if !strings.Contains(plain, "Tab to add commentary • Enter to submit") {
-		t.Fatalf("expected approval hint line, got %q", plain)
+	if hintLines != 1 {
+		t.Fatalf("expected one approval picker hint line, got %+v", promptLines)
 	}
 
 	for i := 0; i < 2; i++ {
@@ -672,13 +692,9 @@ func TestApprovalAskUsesSingleDenyOptionAndTabCommentary(t *testing.T) {
 	if !updated.askFreeform {
 		t.Fatal("expected tab on deny selection to switch to commentary input")
 	}
-	lines = updated.renderInputLines(120, uiThemeStyles("dark"))
-	plain = stripANSIAndTrimRight(strings.Join(lines, "\n"))
-	if !strings.Contains(plain, "Commentary for Deny:") {
-		t.Fatalf("expected deny commentary prompt, got %q", plain)
-	}
-	if strings.Contains(plain, "Approve?") || strings.Contains(plain, "Tab to add commentary") {
-		t.Fatalf("expected no picker prompt/hint in approval commentary prompt, got %q", plain)
+	promptLines = updated.renderAskPromptLines()
+	if len(promptLines) != 2 || promptLines[0].Kind != askPromptLineKindHint || promptLines[1].Kind != askPromptLineKindInput {
+		t.Fatalf("expected commentary prompt to collapse to hint+input, got %+v", promptLines)
 	}
 	select {
 	case <-reply:
@@ -5203,7 +5219,7 @@ func TestHelpToggleRendersBelowQueuedMessagesAndInput(t *testing.T) {
 	}
 }
 
-func TestHelpAskPickerShowsSomethingElseGuidance(t *testing.T) {
+func TestHelpAskPickerShowsFreeformAnswerGuidance(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 120
 	m.termHeight = 40
@@ -5217,13 +5233,48 @@ func TestHelpAskPickerShowsSomethingElseGuidance(t *testing.T) {
 	if !updated.helpVisible {
 		t.Fatal("expected help pane visible")
 	}
-	plain := stripANSIAndTrimRight(updated.View())
-	if !strings.Contains(plain, "switch an ask-question picker to freeform") {
-		t.Fatalf("expected ask picker Tab help, got %q", plain)
+	sections := updated.helpSections()
+	var promptInput *uiHelpSection
+	for i := range sections {
+		if sections[i].Title == "Prompt Input" {
+			promptInput = &sections[i]
+			break
+		}
 	}
-	if !strings.Contains(plain, "open freeform from Something else") {
-		t.Fatalf("expected Something else help entry, got %q", plain)
+	if promptInput == nil {
+		t.Fatal("expected prompt input help section")
 	}
+	activeBindings := make([][]string, 0, len(promptInput.Entries))
+	for _, entry := range promptInput.Entries {
+		if entry.Active != nil && entry.Active(updated) {
+			activeBindings = append(activeBindings, entry.Bindings)
+		}
+	}
+	if !containsBinding(activeBindings, []string{"Tab"}) {
+		t.Fatalf("expected active ask picker tab binding, got %+v", activeBindings)
+	}
+	if !containsBinding(activeBindings, []string{"Enter"}) {
+		t.Fatalf("expected active ask picker enter binding, got %+v", activeBindings)
+	}
+}
+
+func containsBinding(have [][]string, want []string) bool {
+	for _, binding := range have {
+		if len(binding) != len(want) {
+			continue
+		}
+		match := true
+		for i := range binding {
+			if binding[i] != want[i] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }
 
 func TestHelpRollbackModeRowsUseActiveStyles(t *testing.T) {

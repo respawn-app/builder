@@ -46,23 +46,41 @@ func (l uiViewLayout) renderAskInputLines(width int, style uiStyles) []string {
 	wrapped := l.visibleAskPromptLines(width)
 	selectedStyle := lipgloss.NewStyle().Foreground(uiPalette(l.model.theme).primary).Bold(true)
 	recommendedStyle := lipgloss.NewStyle().Foreground(uiPalette(l.model.theme).secondary)
+	recommendedNoteStyle := style.meta.Faint(true)
 	rendered := make([]string, 0, len(wrapped))
 	for _, line := range wrapped {
-		padded := padANSIRight(line.Text, width)
 		switch {
 		case line.Line.Kind == askPromptLineKindHint:
-			rendered = append(rendered, style.meta.Render(padded))
+			rendered = append(rendered, style.meta.Render(padANSIRight(line.Text, width)))
 		case line.Line.Disabled:
-			rendered = append(rendered, style.inputDisabled.Render(padded))
+			rendered = append(rendered, style.inputDisabled.Render(padANSIRight(line.Text, width)))
 		case line.Line.Selected:
-			rendered = append(rendered, selectedStyle.Render(padded))
+			rendered = append(rendered, selectedStyle.Render(padANSIRight(line.Text, width)))
 		case line.Line.Recommended:
-			rendered = append(rendered, recommendedStyle.Render(padded))
+			rendered = append(rendered, renderRecommendedAskLine(line.Text, line.Line.MutedSuffix, width, recommendedStyle, recommendedNoteStyle))
 		default:
-			rendered = append(rendered, style.input.Render(padded))
+			rendered = append(rendered, style.input.Render(padANSIRight(line.Text, width)))
 		}
 	}
 	return l.renderInputFrame(width, rendered)
+}
+
+func renderRecommendedAskLine(text string, mutedSuffix string, width int, recommendedStyle lipgloss.Style, noteStyle lipgloss.Style) string {
+	body := text
+	suffix := ""
+	if mutedSuffix != "" && strings.HasSuffix(body, mutedSuffix) {
+		body = strings.TrimSuffix(body, mutedSuffix)
+		suffix = mutedSuffix
+	}
+	if strings.HasPrefix(body, "★ ") {
+		body = strings.TrimPrefix(body, "★ ")
+		body = "★ " + body
+	}
+	rendered := recommendedStyle.Render(body)
+	if suffix != "" {
+		rendered += noteStyle.Render(suffix)
+	}
+	return padANSIRight(rendered, width)
 }
 
 func (l uiViewLayout) mainInputPrefix() string {
@@ -113,7 +131,11 @@ func (l uiViewLayout) wrappedAskPromptLines(width int) ([]wrappedAskPromptLine, 
 			parts = []string{""}
 		}
 		for _, part := range parts {
-			out = append(out, wrappedAskPromptLine{Text: part, Line: line})
+			wrappedLine := line
+			if wrappedLine.MutedSuffix != "" && !strings.HasSuffix(part, wrappedLine.MutedSuffix) {
+				wrappedLine.MutedSuffix = ""
+			}
+			out = append(out, wrappedAskPromptLine{Text: part, Line: wrappedLine})
 		}
 	}
 	if len(out) == 0 {

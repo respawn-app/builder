@@ -92,6 +92,7 @@ func (b *Broker) Ask(ctx context.Context, req Request) (Response, error) {
 		req.ID = uuid.NewString()
 	}
 	req.Suggestions = normalizedSuggestions(req.Suggestions)
+	req.RecommendedOptionIndex = normalizedRecommendedOptionIndex(req.RecommendedOptionIndex, len(req.Suggestions))
 	if req.Question == "" {
 		return Response{}, errors.New("question is required")
 	}
@@ -202,18 +203,6 @@ func validateRequest(req Request) error {
 			return errors.New("approval questions must not set suggestions")
 		}
 	}
-	if len(req.Suggestions) == 0 {
-		if req.RecommendedOptionIndex != 0 {
-			return errors.New("recommended_option_index requires suggestions")
-		}
-	} else {
-		if req.RecommendedOptionIndex == 0 {
-			return errors.New("questions with suggestions require recommended_option_index")
-		}
-		if req.RecommendedOptionIndex < 1 || req.RecommendedOptionIndex > len(req.Suggestions) {
-			return fmt.Errorf("recommended_option_index %d is out of range", req.RecommendedOptionIndex)
-		}
-	}
 	if !req.Approval {
 		return nil
 	}
@@ -252,6 +241,16 @@ func normalizedSuggestions(in []string) []string {
 		return nil
 	}
 	return out
+}
+
+func normalizedRecommendedOptionIndex(index int, suggestionCount int) int {
+	if suggestionCount == 0 {
+		return 0
+	}
+	if index < 1 || index > suggestionCount {
+		return 0
+	}
+	return index
 }
 
 func validateResponse(req Request, resp Response) error {
@@ -298,11 +297,11 @@ func buildToolOutputSummary(resp Response) (string, error) {
 }
 
 func selectedOptionToolOutputSummary(optionNumber int, freeform string) string {
-	base := fmt.Sprintf("User answered and picked option %d.", optionNumber)
+	base := fmt.Sprintf("User chose option #%d.", optionNumber)
 	if freeform == "" {
 		return base
 	}
-	return base + "\nUser also said:\n" + freeform
+	return base + " They also said: " + freeform
 }
 
 func freeformToolOutputSummary(freeform string) string {

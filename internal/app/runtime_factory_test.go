@@ -195,8 +195,15 @@ func TestBuildToolRegistry_ViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("expected success result, got %s", string(result.Output))
 	}
-	if strings.Contains(string(result.Output), "User answered approval") {
-		t.Fatalf("did not expect approval ask output to leak into guarded tool result, got %s", string(result.Output))
+	var contentItems []map[string]any
+	if err := json.Unmarshal(result.Output, &contentItems); err != nil {
+		t.Fatalf("decode view_image output: %v", err)
+	}
+	if len(contentItems) != 1 {
+		t.Fatalf("expected one view_image content item, got %+v", contentItems)
+	}
+	if contentItems[0]["type"] != "input_file" {
+		t.Fatalf("expected view_image success payload, got %+v", contentItems)
 	}
 
 	if err := logger.Close(); err != nil {

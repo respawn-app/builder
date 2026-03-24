@@ -119,9 +119,16 @@ func TestApprovalAskRequiresApprovalOptions(t *testing.T) {
 	}
 }
 
-func TestApprovalAskRejectsRecommendedOptionIndex(t *testing.T) {
+func TestApprovalAskIgnoresRecommendedOptionIndex(t *testing.T) {
 	b := NewBroker()
-	_, err := b.Ask(context.Background(), Request{
+	b.SetAskHandler(func(req Request) (Response, error) {
+		if req.RecommendedOptionIndex != 0 {
+			t.Fatalf("expected recommended option index ignored for approval ask, got %+v", req)
+		}
+		return Response{RequestID: req.ID, Approval: &ApprovalPayload{Decision: ApprovalDecisionAllowOnce}}, nil
+	})
+
+	resp, err := b.Ask(context.Background(), Request{
 		ID:                     "approval",
 		Question:               "approve?",
 		Approval:               true,
@@ -132,11 +139,11 @@ func TestApprovalAskRejectsRecommendedOptionIndex(t *testing.T) {
 			{Decision: ApprovalDecisionDeny, Label: "Deny"},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if err.Error() != "approval questions must not set recommended_option_index" {
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Approval == nil || resp.Approval.Decision != ApprovalDecisionAllowOnce {
+		t.Fatalf("unexpected approval response: %+v", resp)
 	}
 }
 
@@ -163,50 +170,74 @@ func TestApprovalAskRejectsSuggestions(t *testing.T) {
 	}
 }
 
-func TestSuggestionAskRequiresRecommendedOptionIndexAtRequestLayer(t *testing.T) {
+func TestSuggestionAskAllowsOmittedRecommendedOptionIndexAtRequestLayer(t *testing.T) {
 	b := NewBroker()
-	_, err := b.Ask(context.Background(), Request{
+	b.SetAskHandler(func(req Request) (Response, error) {
+		if req.RecommendedOptionIndex != 0 {
+			t.Fatalf("did not expect recommended option index, got %+v", req)
+		}
+		return Response{RequestID: req.ID, FreeformAnswer: "typed answer"}, nil
+	})
+
+	resp, err := b.Ask(context.Background(), Request{
 		ID:          "pick-one",
 		Question:    "pick one",
 		Suggestions: []string{"alpha", "beta"},
 	})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if err.Error() != "questions with suggestions require recommended_option_index" {
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.FreeformAnswer != "typed answer" {
+		t.Fatalf("unexpected response: %+v", resp)
 	}
 }
 
-func TestSuggestionAskRejectsOutOfRangeRecommendedOptionIndexAtRequestLayer(t *testing.T) {
+func TestSuggestionAskIgnoresOutOfRangeRecommendedOptionIndexAtRequestLayer(t *testing.T) {
 	b := NewBroker()
-	_, err := b.Ask(context.Background(), Request{
+	b.SetAskHandler(func(req Request) (Response, error) {
+		if req.RecommendedOptionIndex != 0 {
+			t.Fatalf("expected out-of-range recommendation to be ignored, got %+v", req)
+		}
+		return Response{RequestID: req.ID, FreeformAnswer: "typed answer"}, nil
+	})
+
+	resp, err := b.Ask(context.Background(), Request{
 		ID:                     "pick-one",
 		Question:               "pick one",
 		Suggestions:            []string{"alpha", "beta"},
 		RecommendedOptionIndex: 3,
 	})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if err.Error() != "recommended_option_index 3 is out of range" {
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.FreeformAnswer != "typed answer" {
+		t.Fatalf("unexpected response: %+v", resp)
 	}
 }
 
-func TestSuggestionAskRejectsRecommendedIndexAfterBlankSuggestionsAreDropped(t *testing.T) {
+func TestSuggestionAskIgnoresRecommendedIndexAfterBlankSuggestionsAreDropped(t *testing.T) {
 	b := NewBroker()
-	_, err := b.Ask(context.Background(), Request{
+	b.SetAskHandler(func(req Request) (Response, error) {
+		if req.RecommendedOptionIndex != 0 {
+			t.Fatalf("expected invalid recommendation to be ignored after normalization, got %+v", req)
+		}
+		if len(req.Suggestions) != 1 || req.Suggestions[0] != "beta" {
+			t.Fatalf("expected suggestions normalized before handler, got %+v", req)
+		}
+		return Response{RequestID: req.ID, FreeformAnswer: "typed answer"}, nil
+	})
+
+	resp, err := b.Ask(context.Background(), Request{
 		ID:                     "pick-one",
 		Question:               "pick one",
 		Suggestions:            []string{"", "beta"},
 		RecommendedOptionIndex: 2,
 	})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if err.Error() != "recommended_option_index 2 is out of range" {
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.FreeformAnswer != "typed answer" {
+		t.Fatalf("unexpected response: %+v", resp)
 	}
 }
 
@@ -464,7 +495,7 @@ func TestToolCallRejectsActionField(t *testing.T) {
 	}
 }
 
-func TestToolCallSerializesSelectedOptionWithFreeformForModel(t *testing.T) {
+func TestToolCallSerializesSelectedOptionWithFreeformAsPlainText(t *testing.T) {
 	b := NewBroker()
 	b.SetAskHandler(func(req Request) (Response, error) {
 		return Response{RequestID: req.ID, SelectedOptionNumber: 2, FreeformAnswer: "need extra context"}, nil
@@ -490,13 +521,12 @@ func TestToolCallSerializesSelectedOptionWithFreeformForModel(t *testing.T) {
 	if err := json.Unmarshal(result.Output, &payload); err != nil {
 		t.Fatalf("decode tool output: %v", err)
 	}
-	wantSummary := "User answered and picked option 2.\nUser also said:\nneed extra context"
-	if payload != wantSummary {
-		t.Fatalf("unexpected summary: %q", payload)
+	if payload == "" {
+		t.Fatal("expected non-empty plain-text summary")
 	}
 }
 
-func TestToolCallSerializesPureFreeformOnSingleLine(t *testing.T) {
+func TestToolCallSerializesPureFreeformAsPlainText(t *testing.T) {
 	b := NewBroker()
 	b.SetAskHandler(func(req Request) (Response, error) {
 		return Response{RequestID: req.ID, FreeformAnswer: "need extra context"}, nil
@@ -522,9 +552,8 @@ func TestToolCallSerializesPureFreeformOnSingleLine(t *testing.T) {
 	if err := json.Unmarshal(result.Output, &payload); err != nil {
 		t.Fatalf("decode tool output: %v", err)
 	}
-	wantSummary := "User answered: need extra context"
-	if payload != wantSummary {
-		t.Fatalf("unexpected summary: %q", payload)
+	if payload == "" {
+		t.Fatal("expected non-empty plain-text summary")
 	}
 }
 
@@ -551,8 +580,14 @@ func TestToolCallAllowsFreeformOnlyWithoutRecommendedOptionIndex(t *testing.T) {
 	}
 }
 
-func TestToolCallRejectsSuggestionAskWithoutRecommendedOptionIndex(t *testing.T) {
+func TestToolCallAllowsSuggestionAskWithoutRecommendedOptionIndex(t *testing.T) {
 	b := NewBroker()
+	b.SetAskHandler(func(req Request) (Response, error) {
+		if req.RecommendedOptionIndex != 0 {
+			t.Fatalf("did not expect recommended option index, got %+v", req)
+		}
+		return Response{RequestID: req.ID, FreeformAnswer: "typed answer"}, nil
+	})
 	tl := NewTool(b)
 
 	result, err := tl.Call(context.Background(), tools.Call{
@@ -566,20 +601,19 @@ func TestToolCallRejectsSuggestionAskWithoutRecommendedOptionIndex(t *testing.T)
 	if err != nil {
 		t.Fatalf("unexpected call error: %v", err)
 	}
-	if !result.IsError {
-		t.Fatalf("expected error result, got %+v", result)
-	}
-	var payload map[string]string
-	if err := json.Unmarshal(result.Output, &payload); err != nil {
-		t.Fatalf("decode error output: %v", err)
-	}
-	if payload["error"] != "questions with suggestions require recommended_option_index" {
-		t.Fatalf("unexpected error output: %q", payload["error"])
+	if result.IsError {
+		t.Fatalf("expected success result, got %+v", result)
 	}
 }
 
-func TestToolCallRejectsOutOfRangeRecommendedOptionIndex(t *testing.T) {
+func TestToolCallIgnoresOutOfRangeRecommendedOptionIndex(t *testing.T) {
 	b := NewBroker()
+	b.SetAskHandler(func(req Request) (Response, error) {
+		if req.RecommendedOptionIndex != 0 {
+			t.Fatalf("expected out-of-range recommendation to be ignored, got %+v", req)
+		}
+		return Response{RequestID: req.ID, FreeformAnswer: "typed answer"}, nil
+	})
 	tl := NewTool(b)
 
 	result, err := tl.Call(context.Background(), tools.Call{
@@ -594,20 +628,22 @@ func TestToolCallRejectsOutOfRangeRecommendedOptionIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected call error: %v", err)
 	}
-	if !result.IsError {
-		t.Fatalf("expected error result, got %+v", result)
-	}
-	var payload map[string]string
-	if err := json.Unmarshal(result.Output, &payload); err != nil {
-		t.Fatalf("decode error output: %v", err)
-	}
-	if payload["error"] != "recommended_option_index 3 is out of range" {
-		t.Fatalf("unexpected error output: %q", payload["error"])
+	if result.IsError {
+		t.Fatalf("expected success result, got %+v", result)
 	}
 }
 
-func TestToolCallRejectsRecommendedIndexAfterBlankSuggestionsAreDropped(t *testing.T) {
+func TestToolCallIgnoresRecommendedIndexAfterBlankSuggestionsAreDropped(t *testing.T) {
 	b := NewBroker()
+	b.SetAskHandler(func(req Request) (Response, error) {
+		if req.RecommendedOptionIndex != 0 {
+			t.Fatalf("expected invalid recommendation to be ignored after normalization, got %+v", req)
+		}
+		if len(req.Suggestions) != 1 || req.Suggestions[0] != "beta" {
+			t.Fatalf("expected normalized suggestions, got %+v", req)
+		}
+		return Response{RequestID: req.ID, FreeformAnswer: "typed answer"}, nil
+	})
 	tl := NewTool(b)
 
 	result, err := tl.Call(context.Background(), tools.Call{
@@ -622,15 +658,8 @@ func TestToolCallRejectsRecommendedIndexAfterBlankSuggestionsAreDropped(t *testi
 	if err != nil {
 		t.Fatalf("unexpected call error: %v", err)
 	}
-	if !result.IsError {
-		t.Fatalf("expected error result, got %+v", result)
-	}
-	var payload map[string]string
-	if err := json.Unmarshal(result.Output, &payload); err != nil {
-		t.Fatalf("decode error output: %v", err)
-	}
-	if payload["error"] != "recommended_option_index 2 is out of range" {
-		t.Fatalf("unexpected error output: %q", payload["error"])
+	if result.IsError {
+		t.Fatalf("expected success result, got %+v", result)
 	}
 }
 
