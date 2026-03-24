@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 import { removeLegacyMirroredDocuments } from './legacy-mirrored-documents.mjs';
@@ -14,7 +15,15 @@ export function resolveMirroredDocsPaths(docsRoot) {
   };
 }
 
-export async function syncMirroredDocs({ docsRoot, repoRoot, docsConfig = resolveDocsConfig() }) {
+const syncQueues = new Map();
+
+async function writeFileAtomically(filePath, contents) {
+  const temporaryFilePath = `${filePath}.tmp-${randomUUID()}`;
+  await writeFile(temporaryFilePath, contents, 'utf8');
+  await rename(temporaryFilePath, filePath);
+}
+
+async function performSyncMirroredDocs({ docsRoot, repoRoot, docsConfig }) {
   const { outputDirectory, legacyOutputDirectory, deprecatedGeneratedOutputDirectory } =
     resolveMirroredDocsPaths(docsRoot);
 
@@ -31,7 +40,24 @@ export async function syncMirroredDocs({ docsRoot, repoRoot, docsConfig = resolv
         title: document.title,
         editPath: document.editPath,
       });
-      await writeFile(outputFilePath, mirroredMarkdown, 'utf8');
+      await writeFileAtomically(outputFilePath, mirroredMarkdown);
     }),
   );
+}
+
+export async function syncMirroredDocs({ docsRoot, repoRoot, docsConfig = resolveDocsConfig() }) {
+  const previousSync = syncQueues.get(docsRoot) ?? Promise.resolve();
+  const nextSync = previousSync.catch(() => {}).then(() =>
+    performSyncMirroredDocs({ docsRoot, repoRoot, docsConfig }),
+  );
+
+  syncQueues.set(docsRoot, nextSync);
+
+  try {
+    await nextSync;
+  } finally {
+    if (syncQueues.get(docsRoot) === nextSync) {
+      syncQueues.delete(docsRoot);
+    }
+  }
 }
