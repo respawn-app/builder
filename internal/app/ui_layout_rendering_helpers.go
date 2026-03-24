@@ -47,6 +47,66 @@ func (m *uiModel) shouldRenderSoftCursor() bool {
 	return m.layout().shouldRenderSoftCursor()
 }
 
+type uiEditableInputRenderSpec struct {
+	Prefix       string
+	Text         string
+	CursorIndex  int
+	RenderCursor bool
+}
+
+func wrappedEditableInputLines(width int, spec uiEditableInputRenderSpec) []string {
+	return wrapPlainLines(splitPlainLines(spec.Prefix+spec.Text), width)
+}
+
+func visibleEditableInputLines(width, maxContentLines int, spec uiEditableInputRenderSpec) []string {
+	wrapped := wrappedEditableInputLines(width, spec)
+	if len(wrapped) == 0 {
+		wrapped = []string{""}
+	}
+	visibleStart := visibleWrappedLineStart(len(wrapped), maxContentLines, editableInputCursorLine(width, spec), spec.RenderCursor)
+	end := visibleStart + maxContentLines
+	if end > len(wrapped) {
+		end = len(wrapped)
+	}
+	visible := append([]string(nil), wrapped[visibleStart:end]...)
+	if !spec.RenderCursor {
+		return visible
+	}
+	cursorLine, cursorCol := inputCursorDisplayPosition(spec.Prefix, spec.Text, spec.CursorIndex, width)
+	visibleCursorLine := cursorLine - visibleStart
+	if visibleCursorLine < 0 || visibleCursorLine >= len(visible) {
+		return visible
+	}
+	visible[visibleCursorLine] = overlayCursorOnLine(visible[visibleCursorLine], cursorCol, width, lipgloss.NewStyle().Reverse(true))
+	return visible
+}
+
+func editableInputCursorLine(width int, spec uiEditableInputRenderSpec) int {
+	if !spec.RenderCursor {
+		return -1
+	}
+	line, _ := inputCursorDisplayPosition(spec.Prefix, spec.Text, spec.CursorIndex, width)
+	return line
+}
+
+func visibleWrappedLineStart(totalLines, maxContentLines, cursorLine int, trackCursor bool) int {
+	if maxContentLines < 1 || totalLines <= maxContentLines {
+		return 0
+	}
+	maxStart := totalLines - maxContentLines
+	if !trackCursor || cursorLine < 0 {
+		return maxStart
+	}
+	start := cursorLine - maxContentLines + 1
+	if start < 0 {
+		return 0
+	}
+	if start > maxStart {
+		return maxStart
+	}
+	return start
+}
+
 func inputCursorDisplayPosition(prefix, text string, cursorIndex, width int) (line, col int) {
 	textRunes := []rune(text)
 	cursor := clampCursor(cursorIndex, len(textRunes))

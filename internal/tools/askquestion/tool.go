@@ -5,18 +5,31 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"builder/internal/tools"
 	"github.com/google/uuid"
 )
 
+// Request is the internal broker request. It is intentionally not the
+// model-facing tool payload shape because internal approval workflows carry
+// fields that must never be exposed through the ask_question tool contract.
 type Request struct {
-	ID              string           `json:"id"`
-	Question        string           `json:"question"`
-	Suggestions     []string         `json:"suggestions,omitempty"`
-	Approval        bool             `json:"approval,omitempty"`
-	ApprovalOptions []ApprovalOption `json:"approval_options,omitempty"`
+	ID                     string           `json:"-"`
+	Question               string           `json:"-"`
+	Suggestions            []string         `json:"-"`
+	RecommendedOptionIndex int              `json:"-"`
+	Approval               bool             `json:"-"`
+	ApprovalOptions        []ApprovalOption `json:"-"`
+}
+
+// ToolRequest is the model-facing ask_question payload. Keep this limited to
+// ordinary question flows; internal approval uses Request instead.
+type ToolRequest struct {
+	Question               string   `json:"question"`
+	Suggestions            []string `json:"suggestions,omitempty"`
+	RecommendedOptionIndex int      `json:"recommended_option_index,omitempty"`
 }
 
 type ApprovalDecision string
@@ -38,9 +51,11 @@ type ApprovalPayload struct {
 }
 
 type Response struct {
-	RequestID string           `json:"request_id"`
-	Answer    string           `json:"answer"`
-	Approval  *ApprovalPayload `json:"approval,omitempty"`
+	RequestID            string           `json:"request_id"`
+	Answer               string           `json:"answer,omitempty"`
+	SelectedOptionNumber int              `json:"selected_option_number,omitempty"`
+	FreeformAnswer       string           `json:"freeform_answer,omitempty"`
+	Approval             *ApprovalPayload `json:"approval,omitempty"`
 }
 
 type Broker struct {
@@ -76,6 +91,8 @@ func (b *Broker) Ask(ctx context.Context, req Request) (Response, error) {
 	if req.ID == "" {
 		req.ID = uuid.NewString()
 	}
+	req.Suggestions = normalizedSuggestions(req.Suggestions)
+	req.RecommendedOptionIndex = normalizedRecommendedOptionIndex(req.RecommendedOptionIndex, len(req.Suggestions))
 	if req.Question == "" {
 		return Response{}, errors.New("question is required")
 	}
@@ -178,6 +195,14 @@ func (b *Broker) deliverPendingResponseLocked(p *pending, rr responseResult) err
 }
 
 func validateRequest(req Request) error {
+	if req.Approval {
+		if req.RecommendedOptionIndex != 0 {
+			return errors.New("approval questions must not set recommended_option_index")
+		}
+		if len(req.Suggestions) > 0 {
+			return errors.New("approval questions must not set suggestions")
+		}
+	}
 	if !req.Approval {
 		return nil
 	}
@@ -200,10 +225,50 @@ func validateRequest(req Request) error {
 	return nil
 }
 
+func normalizedSuggestions(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, suggestion := range in {
+		trimmed := strings.TrimSpace(suggestion)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func normalizedRecommendedOptionIndex(index int, suggestionCount int) int {
+	if suggestionCount == 0 {
+		return 0
+	}
+	if index < 1 || index > suggestionCount {
+		return 0
+	}
+	return index
+}
+
 func validateResponse(req Request, resp Response) error {
 	if !req.Approval {
 		if resp.Approval != nil {
 			return errors.New("non-approval questions must not return approval payloads")
+		}
+		if resp.SelectedOptionNumber > 0 {
+			if len(req.Suggestions) == 0 {
+				return errors.New("selected option numbers require suggestions")
+			}
+			if resp.SelectedOptionNumber > len(req.Suggestions) {
+				return fmt.Errorf("selected option number %d is out of range", resp.SelectedOptionNumber)
+			}
+			return nil
+		}
+		if normalizedFreeformAnswer(resp) == "" {
+			return errors.New("non-approval questions require an answer")
 		}
 		return nil
 	}
@@ -211,6 +276,36 @@ func validateResponse(req Request, resp Response) error {
 		return errors.New("approval questions require approval responses")
 	}
 	return validateApprovalDecision(resp.Approval.Decision)
+}
+
+func normalizedFreeformAnswer(resp Response) string {
+	if trimmed := strings.TrimSpace(resp.FreeformAnswer); trimmed != "" {
+		return trimmed
+	}
+	return strings.TrimSpace(resp.Answer)
+}
+
+func buildToolOutputSummary(resp Response) (string, error) {
+	freeform := normalizedFreeformAnswer(resp)
+	if resp.SelectedOptionNumber > 0 {
+		return selectedOptionToolOutputSummary(resp.SelectedOptionNumber, freeform), nil
+	}
+	if freeform == "" {
+		return "", errors.New("non-approval questions require an answer")
+	}
+	return freeformToolOutputSummary(freeform), nil
+}
+
+func selectedOptionToolOutputSummary(optionNumber int, freeform string) string {
+	base := fmt.Sprintf("User chose option #%d.", optionNumber)
+	if freeform == "" {
+		return base
+	}
+	return base + " They also said: " + freeform
+}
+
+func freeformToolOutputSummary(freeform string) string {
+	return "User answered: " + freeform
 }
 
 func validateApprovalDecision(decision ApprovalDecision) error {
@@ -245,9 +340,13 @@ func (b *Broker) dequeue(requestID string) {
 	b.queue = out
 }
 
-type input struct {
-	Question    string   `json:"question"`
-	Suggestions []string `json:"suggestions,omitempty"`
+func (r ToolRequest) request(callID string) Request {
+	return Request{
+		ID:                     callID,
+		Question:               r.Question,
+		Suggestions:            r.Suggestions,
+		RecommendedOptionIndex: r.RecommendedOptionIndex,
+	}
 }
 
 type Tool struct {
@@ -270,20 +369,26 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 	if _, ok := raw["action"]; ok {
 		return tools.ErrorResult(c, "invalid input: field \"action\" is not allowed"), nil
 	}
+	if _, ok := raw["approval"]; ok {
+		return tools.ErrorResult(c, "invalid input: field \"approval\" is not allowed"), nil
+	}
+	if _, ok := raw["approval_options"]; ok {
+		return tools.ErrorResult(c, "invalid input: field \"approval_options\" is not allowed"), nil
+	}
 
-	var in input
+	var in ToolRequest
 	if err := json.Unmarshal(c.Input, &in); err != nil {
 		return tools.ErrorResult(c, fmt.Sprintf("invalid input: %v", err)), nil
 	}
-	resp, err := t.broker.Ask(ctx, Request{
-		ID:          c.ID,
-		Question:    in.Question,
-		Suggestions: in.Suggestions,
-	})
+	resp, err := t.broker.Ask(ctx, in.request(c.ID))
 	if err != nil {
 		return tools.ErrorResult(c, err.Error()), nil
 	}
-	body, marshalErr := json.Marshal(resp)
+	summary, summaryErr := buildToolOutputSummary(resp)
+	if summaryErr != nil {
+		return tools.Result{}, summaryErr
+	}
+	body, marshalErr := json.Marshal(summary)
 	if marshalErr != nil {
 		return tools.Result{}, marshalErr
 	}

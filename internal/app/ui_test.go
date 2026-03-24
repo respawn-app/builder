@@ -26,6 +26,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 )
 
 func TestTabQueuesAndStartsSubmission(t *testing.T) {
@@ -240,7 +241,7 @@ func TestAskQuestionTabFreeformFlow(t *testing.T) {
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated = next.(*uiModel)
 	if !updated.askFreeform {
-		t.Fatal("expected tab to switch to freeform")
+		t.Fatal("expected tab to open freeform commentary")
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[<64;55;24M[<64;56;26M[<65;56;26M")})
@@ -258,8 +259,305 @@ func TestAskQuestionTabFreeformFlow(t *testing.T) {
 	if resp.response.Answer != "custom" {
 		t.Fatalf("unexpected answer: %q", resp.response.Answer)
 	}
+	if resp.response.FreeformAnswer != "custom" {
+		t.Fatalf("unexpected freeform answer: %q", resp.response.FreeformAnswer)
+	}
+	if resp.response.SelectedOptionNumber != 1 {
+		t.Fatalf("expected selected option 1 preserved when switching to freeform, got %+v", resp.response)
+	}
 	if updated.activeAsk != nil {
 		t.Fatal("ask should be resolved")
+	}
+}
+
+func TestAskQuestionPickerSubmitPreservesPendingFreeformDraft(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	reply := make(chan askReply, 1)
+	event := askEvent{req: askquestion.Request{Question: "Pick one", Suggestions: []string{"a", "b"}}, reply: reply}
+
+	next, _ := m.Update(askEventMsg{event: event})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("custom")})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated = next.(*uiModel)
+
+	if updated.askFreeform {
+		t.Fatal("expected tab to return to picker mode")
+	}
+	if updated.askInput != "custom" {
+		t.Fatalf("expected pending freeform draft preserved, got %q", updated.askInput)
+	}
+	promptLines := updated.renderAskPromptLines()
+	hasDisabledDraftPreview := false
+	hasHintLine := false
+	for _, line := range promptLines {
+		if line.Kind == askPromptLineKindInput && line.Disabled && line.InputText == "custom" {
+			hasDisabledDraftPreview = true
+		}
+		if line.Kind == askPromptLineKindHint {
+			hasHintLine = true
+		}
+	}
+	if !hasDisabledDraftPreview {
+		t.Fatalf("expected disabled draft preview in picker, got %+v", promptLines)
+	}
+	if hasHintLine {
+		t.Fatalf("expected draft preview to replace picker hint, got %+v", promptLines)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+
+	resp := <-reply
+	if resp.response.SelectedOptionNumber != 2 {
+		t.Fatalf("expected selected option number 2, got %+v", resp.response)
+	}
+	if resp.response.FreeformAnswer != "custom" {
+		t.Fatalf("expected pending freeform draft submitted with picker answer, got %+v", resp.response)
+	}
+	if updated.activeAsk != nil {
+		t.Fatal("ask should be resolved")
+	}
+}
+
+func TestAskQuestionTabRoundTripRestoresPendingFreeformDraftAndCursor(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	reply := make(chan askReply, 1)
+	event := askEvent{req: askquestion.Request{Question: "Pick one", Suggestions: []string{"a", "b"}}, reply: reply}
+
+	next, _ := m.Update(askEventMsg{event: event})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("custom")})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	updated = next.(*uiModel)
+	wantCursor := updated.askInputCursor
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated = next.(*uiModel)
+
+	if !updated.askFreeform {
+		t.Fatal("expected tab to restore freeform editing")
+	}
+	if updated.askCursor != 1 {
+		t.Fatalf("expected changed picker selection preserved, got %d", updated.askCursor)
+	}
+	if updated.askInput != "custom" {
+		t.Fatalf("expected pending freeform draft restored, got %q", updated.askInput)
+	}
+	if updated.askInputCursor != wantCursor {
+		t.Fatalf("expected freeform cursor restored, got %d want %d", updated.askInputCursor, wantCursor)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("X")})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+
+	resp := <-reply
+	if resp.response.SelectedOptionNumber != 2 {
+		t.Fatalf("expected selected option number 2 after round-trip, got %+v", resp.response)
+	}
+	if resp.response.FreeformAnswer != "custoXm" {
+		t.Fatalf("expected restored draft to remain editable, got %+v", resp.response)
+	}
+	if updated.activeAsk != nil {
+		t.Fatal("ask should be resolved")
+	}
+}
+
+func TestAskQuestionPickerSubmitReturnsSelectedOptionNumber(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	reply := make(chan askReply, 1)
+	event := askEvent{req: askquestion.Request{Question: "Pick one", Suggestions: []string{"a", "b"}}, reply: reply}
+
+	next, _ := m.Update(askEventMsg{event: event})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+
+	resp := <-reply
+	if resp.response.SelectedOptionNumber != 2 {
+		t.Fatalf("expected selected option number 2, got %+v", resp.response)
+	}
+	if resp.response.Answer != "" || resp.response.FreeformAnswer != "" {
+		t.Fatalf("expected structured picker response without raw answer text, got %+v", resp.response)
+	}
+	if updated.activeAsk != nil {
+		t.Fatal("ask should be resolved")
+	}
+}
+
+func TestAskQuestionFreeformSelectionEnterDropsIntoFreeformWhenEmpty(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	reply := make(chan askReply, 1)
+	event := askEvent{req: askquestion.Request{Question: "Pick one", Suggestions: []string{"a", "b"}}, reply: reply}
+
+	next, _ := m.Update(askEventMsg{event: event})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	next, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+
+	if cmd != nil {
+		t.Fatal("did not expect validation error when opening freeform from Freeform answer")
+	}
+	if !updated.askFreeform {
+		t.Fatal("expected Freeform answer to switch into freeform mode")
+	}
+	if updated.transientStatus != "" {
+		t.Fatalf("did not expect transient status while opening freeform, got %q", updated.transientStatus)
+	}
+	if updated.activeAsk == nil {
+		t.Fatal("expected ask to remain active after switching to freeform")
+	}
+	select {
+	case resp := <-reply:
+		t.Fatalf("did not expect reply while opening freeform, got %+v", resp)
+	default:
+	}
+}
+
+func TestAskQuestionFreeformSelectionEmptySubmitRequiresCommentary(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	reply := make(chan askReply, 1)
+	event := askEvent{req: askquestion.Request{Question: "Pick one", Suggestions: []string{"a", "b"}}, reply: reply}
+
+	next, _ := m.Update(askEventMsg{event: event})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	next, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+
+	if cmd == nil {
+		t.Fatal("expected transient error status cmd")
+	}
+	if strings.TrimSpace(updated.transientStatus) == "" {
+		t.Fatal("expected non-empty transient validation status")
+	}
+	if updated.transientStatusKind != uiStatusNoticeError {
+		t.Fatalf("expected error notice kind, got %d", updated.transientStatusKind)
+	}
+	if updated.activeAsk == nil {
+		t.Fatal("expected ask to remain active after validation error")
+	}
+	select {
+	case resp := <-reply:
+		t.Fatalf("did not expect reply on validation error, got %+v", resp)
+	default:
+	}
+}
+
+func TestAskQuestionFreeformSelectionSubmitsFreeformOnly(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	reply := make(chan askReply, 1)
+	event := askEvent{req: askquestion.Request{Question: "Pick one", Suggestions: []string{"a", "b"}}, reply: reply}
+
+	next, _ := m.Update(askEventMsg{event: event})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("custom")})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+
+	resp := <-reply
+	if resp.response.SelectedOptionNumber != 0 {
+		t.Fatalf("expected freeform selection to submit without selected option number, got %+v", resp.response)
+	}
+	if resp.response.Answer != "custom" || resp.response.FreeformAnswer != "custom" {
+		t.Fatalf("unexpected freeform selection response: %+v", resp.response)
+	}
+	if updated.activeAsk != nil {
+		t.Fatal("ask should be resolved")
+	}
+}
+
+func TestAskFreeformUsesMainEditingStack(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	reply := make(chan askReply, 1)
+	event := askEvent{req: askquestion.Request{Question: "Type answer"}, reply: reply}
+
+	next, _ := m.Update(askEventMsg{event: event})
+	updated := next.(*uiModel)
+	if !updated.askFreeform {
+		t.Fatal("expected freeform ask input")
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hello world")})
+	updated = next.(*uiModel)
+	for range 5 {
+		next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyLeft})
+		updated = next.(*uiModel)
+	}
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("_")})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyHome})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(">")})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+
+	resp := <-reply
+	if resp.response.Answer != ">hello _worl" {
+		t.Fatalf("unexpected inline edit result: %q", resp.response.Answer)
+	}
+	if updated.activeAsk != nil {
+		t.Fatal("ask should be resolved")
+	}
+}
+
+func TestAskFreeformViewRendersPromptBoxAndCursor(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 40
+	m.termHeight = 16
+	m.windowSizeKnown = true
+	reply := make(chan askReply, 1)
+	event := askEvent{req: askquestion.Request{Question: "Type answer"}, reply: reply}
+
+	next, _ := m.Update(askEventMsg{event: event})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hello world")})
+	updated = next.(*uiModel)
+	updated.syncViewport()
+
+	view := updated.View()
+	if !strings.Contains(view, ansiHideCursor) {
+		t.Fatalf("expected terminal cursor hidden in ask view: %q", view)
+	}
+	plain := stripANSIAndTrimRight(view)
+	if !strings.Contains(plain, "› hello world") {
+		t.Fatalf("expected ask input text preserved in view, got %q", plain)
 	}
 }
 
@@ -270,61 +568,133 @@ func TestAskPromptUsesCheckmarkAndSingleLineHint(t *testing.T) {
 
 	next, _ := m.Update(askEventMsg{event: event})
 	updated := next.(*uiModel)
-	lines := updated.renderInputLines(100, uiThemeStyles("dark"))
-	plain := stripANSIAndTrimRight(strings.Join(lines, "\n"))
-
-	if !strings.Contains(plain, "Pick one") {
-		t.Fatalf("expected question text, got %q", plain)
+	promptLines := updated.renderAskPromptLines()
+	if len(promptLines) != 5 {
+		t.Fatalf("expected question, 3 options, and hint; got %+v", promptLines)
 	}
-	if strings.Contains(plain, "question>") {
-		t.Fatalf("expected no legacy question prefix, got %q", plain)
+	if promptLines[0].Kind != askPromptLineKindQuestion {
+		t.Fatalf("expected first prompt line to be question, got %+v", promptLines)
 	}
-	if strings.Contains(plain, "none of the above") {
-		t.Fatalf("expected no fallback option, got %q", plain)
+	if promptLines[1].Kind != askPromptLineKindOption || !promptLines[1].Selected {
+		t.Fatalf("expected first option selected, got %+v", promptLines[1])
 	}
-	if !strings.Contains(plain, "✓ 1. a") {
-		t.Fatalf("expected checkmark-selected first option, got %q", plain)
+	if promptLines[3].Kind != askPromptLineKindOption {
+		t.Fatalf("expected freeform option line, got %+v", promptLines[3])
 	}
-	if strings.Contains(plain, "> 1. a") {
-		t.Fatalf("expected no chevron selector, got %q", plain)
-	}
-	if !strings.Contains(plain, "Tab to switch to freeform • Enter to submit") {
-		t.Fatalf("expected single-line hint, got %q", plain)
+	if promptLines[4].Kind != askPromptLineKindHint || strings.TrimSpace(promptLines[4].Text) == "" {
+		t.Fatalf("expected non-empty hint line, got %+v", promptLines[4])
 	}
 }
 
-func TestApprovalAskSupportsDenyWithCommentary(t *testing.T) {
+func TestAskPromptShowsRecommendedMarkerAndMutedLabel(t *testing.T) {
+	previousProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(previousProfile)
+
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	reply := make(chan askReply, 1)
+	event := askEvent{req: askquestion.Request{Question: "Pick one", Suggestions: []string{"a", "b"}, RecommendedOptionIndex: 2}, reply: reply}
+
+	next, _ := m.Update(askEventMsg{event: event})
+	updated := next.(*uiModel)
+	promptLines := updated.renderAskPromptLines()
+	recommendedLine := promptLines[2]
+	if !recommendedLine.Recommended || recommendedLine.Selected {
+		t.Fatalf("expected second option recommended and not selected, got %+v", recommendedLine)
+	}
+	if strings.TrimSpace(recommendedLine.MutedSuffix) == "" {
+		t.Fatalf("expected recommended line to carry muted suffix metadata, got %+v", recommendedLine)
+	}
+	style := uiThemeStyles("dark")
+	rendered := strings.Join(updated.renderInputLines(100, style), "\n")
+	body := strings.TrimSuffix(recommendedLine.Text, recommendedLine.MutedSuffix)
+	greenText := lipgloss.NewStyle().Foreground(uiPalette("dark").secondary).Render(body)
+	note := uiThemeStyles("dark").meta.Faint(true).Render(recommendedLine.MutedSuffix)
+	if !strings.Contains(rendered, greenText) {
+		t.Fatalf("expected recommended option text rendered in green, got %q", rendered)
+	}
+	if !strings.Contains(rendered, note) {
+		t.Fatalf("expected recommended note rendered faint, got %q", rendered)
+	}
+}
+
+func TestAskPromptKeepsSelectedStylingForRecommendedActiveRow(t *testing.T) {
+	previousProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(previousProfile)
+
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	reply := make(chan askReply, 1)
+	event := askEvent{req: askquestion.Request{Question: "Pick one", Suggestions: []string{"a", "b"}, RecommendedOptionIndex: 2}, reply: reply}
+
+	next, _ := m.Update(askEventMsg{event: event})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	promptLines := updated.renderAskPromptLines()
+	activeLine := promptLines[2]
+	if !activeLine.Selected || !activeLine.Recommended {
+		t.Fatalf("expected active line to remain both selected and recommended, got %+v", activeLine)
+	}
+	style := uiThemeStyles("dark")
+	rendered := strings.Join(updated.renderInputLines(100, style), "\n")
+	selectedExpected := lipgloss.NewStyle().Foreground(uiPalette("dark").primary).Bold(true).Render(padANSIRight(activeLine.Text, 100))
+	recommendedOnly := lipgloss.NewStyle().Foreground(uiPalette("dark").secondary).Render("★ ")
+	if !strings.Contains(rendered, selectedExpected) {
+		t.Fatalf("expected active recommended row to keep selected styling, got %q", rendered)
+	}
+	if strings.Contains(rendered, recommendedOnly) {
+		t.Fatalf("did not expect active recommended row to keep the passive recommended star, got %q", rendered)
+	}
+}
+
+func TestApprovalAskUsesSingleDenyOptionAndTabCommentary(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
 	reply := make(chan askReply, 1)
 	event := askEvent{req: askquestion.Request{Question: "Approve?", Approval: true, ApprovalOptions: []askquestion.ApprovalOption{{Decision: askquestion.ApprovalDecisionAllowOnce, Label: "Allow once"}, {Decision: askquestion.ApprovalDecisionAllowSession, Label: "Allow for this session"}, {Decision: askquestion.ApprovalDecisionDeny, Label: "Deny"}}}, reply: reply}
 
 	next, _ := m.Update(askEventMsg{event: event})
 	updated := next.(*uiModel)
-	lines := updated.renderInputLines(120, uiThemeStyles("dark"))
-	plain := stripANSIAndTrimRight(strings.Join(lines, "\n"))
-	if !strings.Contains(plain, "4. Deny, and add commentary") {
-		t.Fatalf("expected deny-commentary option, got %q", plain)
+	promptLines := updated.renderAskPromptLines()
+	optionLines := 0
+	hintLines := 0
+	for _, line := range promptLines {
+		if line.Kind == askPromptLineKindOption {
+			optionLines++
+		}
+		if line.Kind == askPromptLineKindHint {
+			hintLines++
+		}
 	}
-	if !strings.Contains(plain, "Tab to allow and add commentary • Enter to submit") {
-		t.Fatalf("expected approval hint line, got %q", plain)
+	if optionLines != 3 {
+		t.Fatalf("expected exactly 3 approval options, got %+v", promptLines)
+	}
+	if hintLines != 1 {
+		t.Fatalf("expected one approval picker hint line, got %+v", promptLines)
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 2; i++ {
 		next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
 		updated = next.(*uiModel)
 	}
-	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated = next.(*uiModel)
 	if !updated.askFreeform {
-		t.Fatal("expected commentary option to switch to freeform")
+		t.Fatal("expected tab on deny selection to switch to commentary input")
 	}
-	lines = updated.renderInputLines(120, uiThemeStyles("dark"))
-	plain = stripANSIAndTrimRight(strings.Join(lines, "\n"))
-	if !strings.Contains(plain, "Your comment:") {
-		t.Fatalf("expected minimal deny-commentary prompt, got %q", plain)
-	}
-	if strings.Contains(plain, "Approve?") || strings.Contains(plain, "Tab to allow and add commentary") {
-		t.Fatalf("expected no question/hint in deny-commentary prompt, got %q", plain)
+	promptLines = updated.renderAskPromptLines()
+	if len(promptLines) != 2 || promptLines[0].Kind != askPromptLineKindHint || promptLines[1].Kind != askPromptLineKindInput {
+		t.Fatalf("expected commentary prompt to collapse to hint+input, got %+v", promptLines)
 	}
 	select {
 	case <-reply:
@@ -343,6 +713,9 @@ func TestApprovalAskSupportsDenyWithCommentary(t *testing.T) {
 	}
 	if resp.response.Approval.Decision != askquestion.ApprovalDecisionDeny || resp.response.Approval.Commentary != "blocked by policy" {
 		t.Fatalf("unexpected approval response: %+v", resp.response.Approval)
+	}
+	if len(updated.pendingInjected) != 1 || updated.pendingInjected[0] != "blocked by policy" {
+		t.Fatalf("expected deny commentary injected into regular user-said flow, got %+v", updated.pendingInjected)
 	}
 	if updated.activeAsk != nil {
 		t.Fatal("expected ask to resolve after commentary submit")
@@ -1046,7 +1419,12 @@ func TestApprovalAskTabAllowsWithCommentary(t *testing.T) {
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated = next.(*uiModel)
 	if !updated.askFreeform {
-		t.Fatal("expected tab to switch approval prompt to allow-commentary freeform")
+		t.Fatal("expected tab to switch approval prompt to commentary freeform")
+	}
+	lines := updated.renderInputLines(120, uiThemeStyles("dark"))
+	plain := stripANSIAndTrimRight(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "Commentary for Allow once:") {
+		t.Fatalf("expected commentary prompt for selected approval option, got %q", plain)
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("ok but please keep it minimal")})
@@ -1065,7 +1443,7 @@ func TestApprovalAskTabAllowsWithCommentary(t *testing.T) {
 		t.Fatalf("expected queued user commentary injection, got %+v", updated.pendingInjected)
 	}
 	if updated.activeAsk != nil {
-		t.Fatal("expected ask to resolve after allow-commentary submit")
+		t.Fatal("expected ask to resolve after approval commentary submit")
 	}
 }
 
@@ -1093,8 +1471,8 @@ func TestAskEventsQueueUntilCurrentQuestionAnswered(t *testing.T) {
 	updated = next.(*uiModel)
 
 	first := <-reply1
-	if first.response.Answer != "one" {
-		t.Fatalf("unexpected first answer: %q", first.response.Answer)
+	if first.response.SelectedOptionNumber != 1 || first.response.Answer != "" || first.response.FreeformAnswer != "" {
+		t.Fatalf("unexpected first answer: %+v", first.response)
 	}
 	if updated.activeAsk == nil || updated.activeAsk.req.Question != "Second" {
 		t.Fatalf("expected second ask to become active, got %#v", updated.activeAsk)
@@ -1104,8 +1482,8 @@ func TestAskEventsQueueUntilCurrentQuestionAnswered(t *testing.T) {
 	updated = next.(*uiModel)
 
 	second := <-reply2
-	if second.response.Answer != "two" {
-		t.Fatalf("unexpected second answer: %q", second.response.Answer)
+	if second.response.SelectedOptionNumber != 1 || second.response.Answer != "" || second.response.FreeformAnswer != "" {
+		t.Fatalf("unexpected second answer: %+v", second.response)
 	}
 	if updated.activeAsk != nil {
 		t.Fatal("expected no active ask after queue is drained")
@@ -1889,6 +2267,97 @@ func TestAskFreeformAcceptsSpaceKey(t *testing.T) {
 	}
 }
 
+func TestApprovalAskTabInCommentaryDoesNotReturnToPicker(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	reply := make(chan askReply, 1)
+	event := askEvent{req: askquestion.Request{Question: "Approve?", Approval: true, ApprovalOptions: []askquestion.ApprovalOption{{Decision: askquestion.ApprovalDecisionAllowOnce, Label: "Allow once"}, {Decision: askquestion.ApprovalDecisionAllowSession, Label: "Allow for this session"}, {Decision: askquestion.ApprovalDecisionDeny, Label: "Deny"}}}, reply: reply}
+
+	next, _ := m.Update(askEventMsg{event: event})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated = next.(*uiModel)
+	if !updated.askFreeform {
+		t.Fatal("expected approval tab to enter commentary mode")
+	}
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("commentary")})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated = next.(*uiModel)
+	if !updated.askFreeform {
+		t.Fatal("did not expect approval commentary tab to return to picker")
+	}
+	if updated.askInput != "commentary" {
+		t.Fatalf("expected commentary preserved in approval freeform, got %q", updated.askInput)
+	}
+}
+
+func TestApprovalAskTabCommentaryUsesCurrentSelection(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	reply := make(chan askReply, 1)
+	event := askEvent{req: askquestion.Request{Question: "Approve?", Approval: true, ApprovalOptions: []askquestion.ApprovalOption{{Decision: askquestion.ApprovalDecisionAllowOnce, Label: "Allow once"}, {Decision: askquestion.ApprovalDecisionAllowSession, Label: "Allow for this session"}, {Decision: askquestion.ApprovalDecisionDeny, Label: "Deny"}}}, reply: reply}
+
+	next, _ := m.Update(askEventMsg{event: event})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("session only")})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+
+	resp := <-reply
+	if resp.response.Approval == nil {
+		t.Fatal("expected typed approval response")
+	}
+	if resp.response.Approval.Decision != askquestion.ApprovalDecisionAllowSession || resp.response.Approval.Commentary != "session only" {
+		t.Fatalf("unexpected approval response: %+v", resp.response.Approval)
+	}
+	if len(updated.pendingInjected) != 1 || updated.pendingInjected[0] != "session only" {
+		t.Fatalf("expected selected approval commentary injected, got %+v", updated.pendingInjected)
+	}
+}
+
+func TestApprovalAskPickerSubmitIgnoresPendingCommentaryDraft(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	reply := make(chan askReply, 1)
+	event := askEvent{req: askquestion.Request{Question: "Approve?", Approval: true, ApprovalOptions: []askquestion.ApprovalOption{{Decision: askquestion.ApprovalDecisionAllowOnce, Label: "Allow once"}, {Decision: askquestion.ApprovalDecisionAllowSession, Label: "Allow for this session"}, {Decision: askquestion.ApprovalDecisionDeny, Label: "Deny"}}}, reply: reply}
+
+	next, _ := m.Update(askEventMsg{event: event})
+	updated := next.(*uiModel)
+	updated.askInput = "stale commentary"
+	updated.askInputCursor = len([]rune(updated.askInput))
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+
+	resp := <-reply
+	if resp.response.Approval == nil {
+		t.Fatal("expected typed approval response")
+	}
+	if resp.response.Approval.Decision != askquestion.ApprovalDecisionAllowSession {
+		t.Fatalf("unexpected approval decision: %+v", resp.response.Approval)
+	}
+	if resp.response.Approval.Commentary != "" {
+		t.Fatalf("did not expect picker submission to include commentary draft, got %+v", resp.response.Approval)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("did not expect picker submission to inject commentary, got %+v", updated.pendingInjected)
+	}
+}
+
 func TestBusyInputRemainsEditableUntilSubmitLock(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.busy = true
@@ -1965,6 +2434,24 @@ func TestViewHidesCursorWhenInputLocked(t *testing.T) {
 	plain := stripANSIAndTrimRight(view)
 	if !strings.Contains(plain, "⨯ hello world") {
 		t.Fatalf("expected locked input text preserved, got %q", plain)
+	}
+}
+
+func TestMainInputViewportTracksCursorLine(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 20
+	m.termHeight = 6
+	m.windowSizeKnown = true
+	m.input = "first\nsecond\nthird\nfourth"
+	m.inputCursor = 1
+	m.syncViewport()
+
+	plain := stripANSIAndTrimRight(strings.Join(m.renderInputLines(20, uiThemeStyles("dark")), "\n"))
+	if !strings.Contains(plain, "› first") || !strings.Contains(plain, "second") {
+		t.Fatalf("expected viewport to keep cursor line visible, got %q", plain)
+	}
+	if strings.Contains(plain, "fourth") {
+		t.Fatalf("expected viewport not to pin to tail while cursor is near top, got %q", plain)
 	}
 }
 
@@ -4710,7 +5197,7 @@ func TestHelpToggleRendersBelowQueuedMessagesAndInput(t *testing.T) {
 	if !containsInOrder(plain, "queued latest", "Global", "› draft") {
 		t.Fatalf("expected help above input and below queue, got %q", plain)
 	}
-	if !containsInOrder(plain, "Global\nF1 | ? (empty prompt) | Alt + / | Cmd + /", "\n\nTranscript\nPgUp", "\n\nMain Input\nEnter", "\n\nRollback Mode\nEsc | Esc") {
+	if !containsInOrder(plain, "Global\nF1 | ? (empty prompt) | Alt + / | Cmd + /", "\n\nTranscript\nPgUp", "\n\nPrompt Input\nEnter", "\n\nRollback Mode\nEsc | Esc") {
 		t.Fatalf("expected blank line between visible help sections, got %q", plain)
 	}
 	if !containsInOrder(plain, "Alt + ←, → | Ctrl + ←, →", "move the cursor by word") {
@@ -4730,6 +5217,64 @@ func TestHelpToggleRendersBelowQueuedMessagesAndInput(t *testing.T) {
 			t.Fatalf("did not expect %q in help pane, got %q", unwanted, plain)
 		}
 	}
+}
+
+func TestHelpAskPickerShowsFreeformAnswerGuidance(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 120
+	m.termHeight = 40
+	m.windowSizeKnown = true
+	m.activeAsk = &askEvent{req: askquestion.Request{Question: "Pick one", Suggestions: []string{"a", "b"}}}
+	m.syncViewport()
+
+	next, _ := m.Update(customKeyMsg{Kind: customKeyHelp})
+	updated := next.(*uiModel)
+
+	if !updated.helpVisible {
+		t.Fatal("expected help pane visible")
+	}
+	sections := updated.helpSections()
+	var promptInput *uiHelpSection
+	for i := range sections {
+		if sections[i].Title == "Prompt Input" {
+			promptInput = &sections[i]
+			break
+		}
+	}
+	if promptInput == nil {
+		t.Fatal("expected prompt input help section")
+	}
+	activeBindings := make([][]string, 0, len(promptInput.Entries))
+	for _, entry := range promptInput.Entries {
+		if entry.Active != nil && entry.Active(updated) {
+			activeBindings = append(activeBindings, entry.Bindings)
+		}
+	}
+	if !containsBinding(activeBindings, []string{"Tab"}) {
+		t.Fatalf("expected active ask picker tab binding, got %+v", activeBindings)
+	}
+	if !containsBinding(activeBindings, []string{"Enter"}) {
+		t.Fatalf("expected active ask picker enter binding, got %+v", activeBindings)
+	}
+}
+
+func containsBinding(have [][]string, want []string) bool {
+	for _, binding := range have {
+		if len(binding) != len(want) {
+			continue
+		}
+		match := true
+		for i := range binding {
+			if binding[i] != want[i] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }
 
 func TestHelpRollbackModeRowsUseActiveStyles(t *testing.T) {
