@@ -101,9 +101,11 @@ formula_class="$(printf '%s\n' "$formula" | awk -F'[-_]' '{for (i = 1; i <= NF; 
 url="https://github.com/${repo}/archive/refs/tags/${version}.tar.gz"
 
 tmp_file="$(mktemp)"
+tmp_formula="$(mktemp)"
 cleanup() {
   if command -v trash >/dev/null 2>&1; then
     trash "$tmp_file" >/dev/null 2>&1 || true
+    trash "$tmp_formula" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -118,9 +120,8 @@ else
   exit 1
 fi
 
-if [[ ! -f "$formula_path" ]]; then
-  mkdir -p "$(dirname "$formula_path")"
-  cat > "$formula_path" <<EOF
+mkdir -p "$(dirname "$formula_path")"
+cat > "$tmp_formula" <<EOF
 class ${formula_class} < Formula
   desc "Minimal terminal coding agent for professional engineering workflows"
   homepage "https://github.com/respawn-app/builder"
@@ -132,9 +133,9 @@ class ${formula_class} < Formula
     root_url "https://ghcr.io/v2/respawn-app/tap"
   end
 
+  depends_on "go" => :build
   depends_on "git"
   depends_on "ripgrep"
-  depends_on "go" => :build
 
   def install
     system "go", "build", *std_go_args(output: bin/"builder", ldflags: "-s -w -X builder/internal/buildinfo.Version=#{version}"), "./cmd/builder"
@@ -145,21 +146,13 @@ class ${formula_class} < Formula
   end
 end
 EOF
+
+if [[ ! -f "$formula_path" ]] || ! cmp -s "$tmp_formula" "$formula_path"; then
+  mv "$tmp_formula" "$formula_path"
+  tmp_formula="$(mktemp)"
 fi
 
-perl -0pi -e "s|^class\s+\S+\s+< Formula$|class ${formula_class} < Formula|m" "$formula_path"
-perl -0pi -e "s|^  url \".*\"|  url \"$url\"|m" "$formula_path"
-perl -0pi -e "s|^  sha256 \".*\"|  sha256 \"$sha256\"|m" "$formula_path"
-perl -0pi -e 's|^  version ".*"\n||m' "$formula_path"
-perl -0pi -e 's/^\s*bottle do\n(?:.*\n)*?\s*end\n\n/  bottle do\n    root_url "https:\/\/ghcr.io\/v2\/respawn-app\/tap"\n  end\n\n/m' "$formula_path"
-
-if ! grep -q '^  bottle do$' "$formula_path"; then
-  perl -0pi -e 's|^  license ".*"$|$&\n\n  bottle do\n    root_url "https://ghcr.io/v2/respawn-app/tap"\n  end|m' "$formula_path"
-fi
-
-perl -0pi -e 's/^  depends_on "git"\n//m' "$formula_path"
-perl -0pi -e 's/^  depends_on "ripgrep"\n//m' "$formula_path"
-perl -0pi -e 's|^  depends_on "go" => :build$|  depends_on "git"\n  depends_on "ripgrep"\n  depends_on "go" => :build|m' "$formula_path"
+chmod 0644 "$formula_path"
 
 if [[ "$do_commit" == "true" ]]; then
   git -C "$tap_dir" add "$formula_path"

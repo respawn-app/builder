@@ -651,11 +651,12 @@ func TestDetailAskQuestionRendersQuestionSuggestionsAndAnswer(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{
 		Role: "tool_call",
-		Text: "question: Choose scope?\nsuggestions: - Recommended: flat scan\n  - Recursive scan",
+		Text: "question: Choose scope?\nsuggestions: - flat scan\n  - Recursive scan",
 		ToolCall: &transcript.ToolCallMeta{
-			ToolName:    "ask_question",
-			Question:    "Choose scope?",
-			Suggestions: []string{"Recommended: flat scan", "Recursive scan"},
+			ToolName:               "ask_question",
+			Question:               "Choose scope?",
+			Suggestions:            []string{"flat scan", "Recursive scan"},
+			RecommendedOptionIndex: 1,
 		},
 	})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "Use flat scan."})
@@ -665,13 +666,16 @@ func TestDetailAskQuestionRendersQuestionSuggestionsAndAnswer(t *testing.T) {
 	if strings.Contains(plain, "question:") || strings.Contains(plain, "suggestions:") {
 		t.Fatalf("expected ask_question labels removed from detail view, got %q", plain)
 	}
-	if !containsInOrder(plain, "?", "Choose scope?", "- Recommended: flat scan", "- Recursive scan", "Use flat scan.") {
+	if !containsInOrder(plain, "?", "Choose scope?", "- flat scan", "- Recursive scan", "Use flat scan.") {
 		t.Fatalf("expected question, suggestions and answer in detail order, got %q", plain)
 	}
 
 	colored := m.View()
-	if !strings.Contains(colored, m.palette().preview.Faint(true).Render("- Recommended: flat scan")) {
-		t.Fatalf("expected suggestions to be muted in detail view, got %q", colored)
+	if !strings.Contains(colored, m.palette().model.Render("- flat scan")) {
+		t.Fatalf("expected recommended suggestion to be green in detail view, got %q", colored)
+	}
+	if !strings.Contains(colored, m.palette().preview.Faint(true).Render("- Recursive scan")) {
+		t.Fatalf("expected non-recommended suggestions to stay muted in detail view, got %q", colored)
 	}
 	if !strings.Contains(colored, m.palette().user.Render("Use flat scan.")) {
 		t.Fatalf("expected answer to use user color in detail view, got %q", colored)
@@ -682,11 +686,12 @@ func TestOngoingAskQuestionRendersQuestionAndAnswerOnly(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{
 		Role: "tool_call",
-		Text: "question: Choose scope?\nsuggestions: - Recommended: flat scan\n  - Recursive scan",
+		Text: "question: Choose scope?\nsuggestions: - flat scan\n  - Recursive scan",
 		ToolCall: &transcript.ToolCallMeta{
-			ToolName:    "ask_question",
-			Question:    "Choose scope?",
-			Suggestions: []string{"Recommended: flat scan", "Recursive scan"},
+			ToolName:               "ask_question",
+			Question:               "Choose scope?",
+			Suggestions:            []string{"flat scan", "Recursive scan"},
+			RecommendedOptionIndex: 1,
 		},
 	})
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "Use flat scan."})
@@ -695,7 +700,7 @@ func TestOngoingAskQuestionRendersQuestionAndAnswerOnly(t *testing.T) {
 	if strings.Contains(plain, "question:") || strings.Contains(plain, "suggestions:") {
 		t.Fatalf("expected ask_question labels removed from ongoing view, got %q", plain)
 	}
-	if strings.Contains(plain, "- Recommended: flat scan") || strings.Contains(plain, "- Recursive scan") {
+	if strings.Contains(plain, "- flat scan") || strings.Contains(plain, "- Recursive scan") {
 		t.Fatalf("expected ongoing view to omit ask_question suggestions, got %q", plain)
 	}
 	if !containsInOrder(plain, "?", "Choose scope?", "Use flat scan.") {

@@ -65,10 +65,13 @@ func (m *uiModel) helpSections() []uiHelpSection {
 			},
 		},
 		{
-			Title: "Main Input",
+			Title: "Prompt Input",
 			Entries: []uiHelpEntry{
-				{Bindings: []string{"Enter"}, Description: "submit, run the selected slash command, or flush the next queued item", Active: uiHelpInMainInput},
+				{Bindings: []string{"Enter"}, Description: "submit the current input, selected answer, or flush the next queued item", Active: uiHelpInPromptInput},
 				{Bindings: []string{"Tab", "Ctrl + Enter"}, Description: "autocomplete a selected slash command, or queue/send the current input", Active: uiHelpInMainInput},
+				{Bindings: []string{"Tab"}, Description: "add commentary to the selected ask option", Active: uiHelpInAskPicker},
+				{Bindings: []string{"Tab"}, Description: "return to the picker and keep the pending freeform draft", Active: uiHelpCanReturnAskDraftToPicker},
+				{Bindings: []string{"Enter"}, Description: "open freeform from Freeform answer", Active: uiHelpInAskPicker},
 				{Bindings: []string{"↑, ↓"}, Description: "browse submitted prompts at input boundaries; otherwise move within multiline input", Active: uiHelpInTextEditing},
 				{Bindings: []string{"Shift + Enter", "Ctrl + J"}, Description: "insert a newline", Active: uiHelpInTextEditing},
 				{Bindings: deleteCurrentLineBindings(), Description: "delete the current input line", Active: uiHelpInTextEditing},
@@ -122,6 +125,26 @@ func uiHelpInMainInput(m *uiModel) bool {
 	return m.inputMode() == uiInputModeMain
 }
 
+func uiHelpInPromptInput(m *uiModel) bool {
+	if m == nil {
+		return false
+	}
+	switch m.inputMode() {
+	case uiInputModeMain, uiInputModeAsk:
+		return true
+	default:
+		return false
+	}
+}
+
+func uiHelpInAskPicker(m *uiModel) bool {
+	return m != nil && m.inputMode() == uiInputModeAsk && !m.askFreeform
+}
+
+func uiHelpCanReturnAskDraftToPicker(m *uiModel) bool {
+	return m != nil && m.inputMode() == uiInputModeAsk && m.askFreeform && m.activeAsk != nil && askSupportsDraftRoundTrip(m.activeAsk.req)
+}
+
 func uiHelpInTextEditing(m *uiModel) bool {
 	if m.isInputLocked() {
 		return false
@@ -129,6 +152,8 @@ func uiHelpInTextEditing(m *uiModel) bool {
 	switch m.inputMode() {
 	case uiInputModeMain, uiInputModeRollbackEdit:
 		return true
+	case uiInputModeAsk:
+		return m.askFreeform
 	default:
 		return false
 	}

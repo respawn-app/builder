@@ -19,7 +19,7 @@ import (
 
 const maxFileSizeBytes int64 = 500 << 10
 
-const outsideWorkspaceRejectionInstruction = "do not attempt to circumvent this restriction in any way. if it's essential to the task, ask the user to place the file inside the workspace root."
+const outsideWorkspaceRejectionInstruction = "If it's essential to the task, ask the user to place the file inside the workspace root."
 
 var supportedImageMIMEs = map[string]struct{}{
 	"image/png":  {},

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -185,7 +186,7 @@ func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 	}
 
 	askQuestion, _ := DefinitionFor(ToolAskQuestion)
-	askMeta := askQuestion.BuildToolCallMeta(ToolCallContext{}, json.RawMessage(`{"question":"Choose scope?","suggestions":["Recommended: full"]}`))
+	askMeta := askQuestion.BuildToolCallMeta(ToolCallContext{}, json.RawMessage(`{"question":"Choose scope?","suggestions":["full"],"recommended_option_index":1}`))
 	if askMeta.Presentation != "ask_question" {
 		t.Fatalf("expected ask_question presentation, got %+v", askMeta)
 	}
@@ -194,6 +195,9 @@ func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 	}
 	if askMeta.Question != "Choose scope?" || len(askMeta.Suggestions) != 1 {
 		t.Fatalf("unexpected ask_question transcript metadata: %+v", askMeta)
+	}
+	if askMeta.RecommendedOptionIndex != 1 {
+		t.Fatalf("unexpected ask_question recommended option index: %+v", askMeta)
 	}
 }
 
@@ -206,5 +210,37 @@ func TestDefinitionContractsFormatEmptyShellOutputAsNoOutput(t *testing.T) {
 
 	if got != "No output" {
 		t.Fatalf("expected No output, got %q", got)
+	}
+}
+
+func TestDefinitionContractsFormatLegacyAskQuestionFreeformOnSingleLine(t *testing.T) {
+	askQuestion, _ := DefinitionFor(ToolAskQuestion)
+	got := askQuestion.FormatToolResult(Result{
+		Name: ToolAskQuestion,
+		Output: json.RawMessage(`{
+			"answer":"need extra context",
+			"freeform_answer":"need extra context"
+		}`),
+	})
+
+	if strings.TrimSpace(got) == "" {
+		t.Fatal("expected non-empty ask freeform summary")
+	}
+}
+
+func TestDefinitionContractsFormatLegacyAskQuestionApprovalCommentaryUsesDecisionOnly(t *testing.T) {
+	askQuestion, _ := DefinitionFor(ToolAskQuestion)
+	got := askQuestion.FormatToolResult(Result{
+		Name: ToolAskQuestion,
+		Output: json.RawMessage(`{
+			"approval": {
+				"decision": "deny",
+				"commentary": "do not duplicate this"
+			}
+		}`),
+	})
+
+	if strings.TrimSpace(got) == "" {
+		t.Fatal("expected non-empty approval compatibility summary")
 	}
 }

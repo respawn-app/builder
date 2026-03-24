@@ -97,14 +97,16 @@ func isReviewerCacheHitLine(text string) bool {
 	return true
 }
 
-func askQuestionDisplay(meta *transcript.ToolCallMeta, text string) (string, []string) {
+func askQuestionDisplay(meta *transcript.ToolCallMeta, text string) (string, []string, int) {
 	question := ""
 	suggestions := make([]string, 0)
+	recommendedOptionIndex := 0
 	if meta != nil {
 		question = normalizeAskQuestionQuestion(meta.Question)
 		if question == "" {
 			question = normalizeAskQuestionQuestion(meta.Command)
 		}
+		recommendedOptionIndex = meta.RecommendedOptionIndex
 		for _, suggestion := range meta.Suggestions {
 			trimmed := normalizeAskQuestionSuggestion(suggestion)
 			if trimmed == "" {
@@ -119,7 +121,7 @@ func askQuestionDisplay(meta *transcript.ToolCallMeta, text string) (string, []s
 	if question == "" {
 		question = "ask_question"
 	}
-	return question, suggestions
+	return question, suggestions, recommendedOptionIndex
 }
 
 func normalizeAskQuestionQuestion(question string) string {
@@ -142,7 +144,7 @@ func normalizeAskQuestionSuggestion(suggestion string) string {
 	return strings.TrimSpace(trimmed)
 }
 
-func (m Model) flattenAskQuestionEntry(role, question string, suggestions []string, answer string, includeSuggestions bool) []string {
+func (m Model) flattenAskQuestionEntry(role, question string, suggestions []string, recommendedOptionIndex int, answer string, includeSuggestions bool) []string {
 	renderWidth := m.viewportWidth
 	if rolePrefix(role) != "" {
 		renderWidth -= 2
@@ -165,18 +167,27 @@ func (m Model) flattenAskQuestionEntry(role, question string, suggestions []stri
 		lines = append(lines, askQuestionLine{text: line, kind: "question"})
 	}
 	if includeSuggestions {
-		for _, suggestion := range suggestions {
+		for index, suggestion := range suggestions {
 			suggestion = normalizeAskQuestionSuggestion(suggestion)
 			if suggestion == "" {
 				continue
 			}
+			recommended := recommendedOptionIndex == index+1
 			wrapped := splitLines(wrapTextForViewport(suggestion, max(1, renderWidth-2)))
 			for idx, line := range wrapped {
 				if idx == 0 {
-					lines = append(lines, askQuestionLine{text: "- " + line, kind: "suggestion"})
+					kind := "suggestion"
+					if recommended {
+						kind = "recommended_suggestion"
+					}
+					lines = append(lines, askQuestionLine{text: "- " + line, kind: kind})
 					continue
 				}
-				lines = append(lines, askQuestionLine{text: "  " + line, kind: "suggestion"})
+				kind := "suggestion"
+				if recommended {
+					kind = "recommended_suggestion"
+				}
+				lines = append(lines, askQuestionLine{text: "  " + line, kind: kind})
 			}
 		}
 	}
@@ -197,6 +208,8 @@ func (m Model) flattenAskQuestionEntry(role, question string, suggestions []stri
 		switch line.kind {
 		case "suggestion":
 			display = m.palette().preview.Faint(true).Render(display)
+		case "recommended_suggestion":
+			display = m.palette().model.Render(display)
 		case "answer":
 			if role == "tool_question_error" {
 				display = styleForRole(role, m.palette()).Render(display)

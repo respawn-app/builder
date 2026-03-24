@@ -44,7 +44,7 @@ func WithOutsideWorkspaceApprover(approver OutsideWorkspaceApprover) Option {
 	}
 }
 
-const outsideWorkspaceRejectionInstruction = "do not attempt to circumvent this restriction in any way. if it's essential to the task, ask the user to make the edit manually at the end of the task."
+const outsideWorkspaceRejectionInstruction = "If it's essential to the task, ask the user to make the edit manually at the end of the task."
 
 func (t *Tool) resolvePath(ctx context.Context, path string, mustExist bool, approvedOutside map[string]bool) (string, error) {
 	if strings.TrimSpace(path) == "" {

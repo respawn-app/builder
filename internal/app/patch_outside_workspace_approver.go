@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	outsideWorkspaceAllowOnceSuggestion    = "Allow once (recommended): permit this outside-workspace access for this tool call."
-	outsideWorkspaceAllowSessionSuggestion = "Allow for this session: permit outside-workspace access until builder exits."
-	outsideWorkspaceDenySuggestion         = "Deny: keep access limited to the workspace root."
+	outsideWorkspaceAllowOnceSuggestion    = "Allow once"
+	outsideWorkspaceAllowSessionSuggestion = "Allow for this session"
+	outsideWorkspaceDenySuggestion         = "Deny"
 )
 
 type outsideWorkspaceApprover struct {

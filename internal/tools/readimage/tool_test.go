@@ -561,6 +561,39 @@ func TestCall_OutsideWorkspaceApprovalFailureUsesReadSpecificWording(t *testing.
 	}
 }
 
+func TestCall_OutsideWorkspaceRejectionIncludesReadSpecificGuidance(t *testing.T) {
+	workspace := t.TempDir()
+	outside := filepath.Join(outsideNonTempDir(t), "outside.png")
+	if err := os.WriteFile(outside, tinyPNG, 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+
+	tool, err := New(
+		workspace,
+		true,
+		WithOutsideWorkspaceApprover(func(context.Context, patchtool.OutsideWorkspaceRequest) (patchtool.OutsideWorkspaceApproval, error) {
+			return patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionDeny, Commentary: "keep it inside the repo"}, nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("new tool: %v", err)
+	}
+
+	input := json.RawMessage(`{"path":"` + strings.ReplaceAll(outside, `\`, `\\`) + `"}`)
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-deny-guidance", Name: tools.ToolViewImage, Input: input})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected error result")
+	}
+	errMessage := toolError(t, result)
+	want := `view_image path outside workspace rejected by user: ` + outside + `. User rejected the approval request for this tool call, and said: "keep it inside the repo". Do not attempt to circumvent, hack around, or re-execute the same path. Treat this rejection as authoritative. If it's essential to the task, ask the user to place the file inside the workspace root.`
+	if errMessage != want {
+		t.Fatalf("unexpected rejection error, got %q want %q", errMessage, want)
+	}
+}
+
 func TestCall_CaseVariantAbsolutePathInsideWorkspaceDoesNotTriggerOutsideApproval(t *testing.T) {
 	workspace := t.TempDir()
 	imagePath := filepath.Join(workspace, "img.png")
