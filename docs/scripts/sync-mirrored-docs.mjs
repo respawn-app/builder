@@ -17,7 +17,7 @@ export function resolveMirroredDocsPaths(docsRoot) {
 
 const syncQueues = new Map();
 
-async function writeFileAtomically(filePath, contents) {
+export async function writeFileAtomically(filePath, contents) {
   const temporaryFilePath = `${filePath}.tmp-${randomUUID()}`;
   await writeFile(temporaryFilePath, contents, 'utf8');
   await rename(temporaryFilePath, filePath);
