@@ -294,6 +294,64 @@ func TestSessionPickerScrollsWithTwoLineEntries(t *testing.T) {
 	}
 }
 
+func TestSessionPickerScrollsWithSingleLineEntriesAndBlankSeparators(t *testing.T) {
+	now := time.Date(2026, time.February, 8, 12, 0, 0, 0, time.UTC)
+	m := newSessionPickerModel([]session.Summary{
+		{
+			SessionID: "s-00",
+			Name:      "Session 0",
+			UpdatedAt: now,
+		},
+		{
+			SessionID: "s-01",
+			Name:      "Session 1",
+			UpdatedAt: now.Add(-time.Minute),
+		},
+		{
+			SessionID: "s-02",
+			Name:      "Session 2",
+			UpdatedAt: now.Add(-2 * time.Minute),
+		},
+	}, "dark")
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 5})
+	m = next.(*sessionPickerModel)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = next.(*sessionPickerModel)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = next.(*sessionPickerModel)
+
+	if m.cursor != 2 {
+		t.Fatalf("cursor=%d want 2", m.cursor)
+	}
+	if m.offset != 1 {
+		t.Fatalf("offset=%d want 1", m.offset)
+	}
+	out := ansi.Strip(m.View())
+	if !strings.Contains(out, "Session 0") || !strings.Contains(out, "Session 1") {
+		t.Fatalf("expected adjacent single-line sessions visible, got %q", out)
+	}
+	lines := strings.Split(out, "\n")
+	session0Line := -1
+	for i, line := range lines {
+		if strings.Contains(line, "Session 0") {
+			session0Line = i
+			break
+		}
+	}
+	if session0Line < 0 || session0Line+2 >= len(lines) {
+		t.Fatalf("expected visible session followed by blank separator and cursor row, got %q", out)
+	}
+	if strings.TrimSpace(lines[session0Line+1]) != "" {
+		t.Fatalf("expected blank separator between single-line sessions, got %q", out)
+	}
+	if !strings.Contains(lines[session0Line+2], "Session 1") {
+		t.Fatalf("expected cursor row after blank separator, got %q", out)
+	}
+	if strings.Contains(out, "Session 2") {
+		t.Fatalf("did not expect extra session to fit in tight viewport, got %q", out)
+	}
+}
+
 func TestSessionPickerTightViewportShowsTitleWithoutOverflowingPreview(t *testing.T) {
 	now := time.Date(2026, time.February, 8, 12, 0, 0, 0, time.UTC)
 	m := newSessionPickerModel([]session.Summary{{
