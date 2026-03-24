@@ -61,6 +61,7 @@ type oauthTokenResponse struct {
 
 type idTokenClaims struct {
 	ChatGPTAccountID string `json:"chatgpt_account_id"`
+	Email            string `json:"email"`
 	Organizations    []struct {
 		ID string `json:"id"`
 	} `json:"organizations"`
@@ -287,6 +288,7 @@ func exchangeOpenAIAuthorizationCode(ctx context.Context, opts OpenAIOAuthOption
 			TokenType:    tokenType,
 			Expiry:       expiresAt,
 			AccountID:    extractAccountID(parsed),
+			Email:        extractEmail(parsed),
 		},
 	}, nil
 }
@@ -353,6 +355,9 @@ func RefreshOpenAIAuthToken(ctx context.Context, opts OpenAIOAuthOptions, method
 	}
 	if accountID := extractAccountID(parsed); strings.TrimSpace(accountID) != "" {
 		updated.OAuth.AccountID = accountID
+	}
+	if email := extractEmail(parsed); strings.TrimSpace(email) != "" {
+		updated.OAuth.Email = email
 	}
 	if parsed.ExpiresIn > 0 {
 		updated.OAuth.Expiry = time.Now().UTC().Add(time.Duration(parsed.ExpiresIn) * time.Second)
@@ -433,6 +438,22 @@ func extractAccountID(tokens oauthTokenResponse) string {
 	return ""
 }
 
+func extractEmail(tokens oauthTokenResponse) string {
+	if strings.TrimSpace(tokens.IDToken) != "" {
+		if claims, err := parseJWTClaims(tokens.IDToken); err == nil {
+			if email := extractEmailFromClaims(claims); email != "" {
+				return email
+			}
+		}
+	}
+	if strings.TrimSpace(tokens.AccessToken) != "" {
+		if claims, err := parseJWTClaims(tokens.AccessToken); err == nil {
+			return extractEmailFromClaims(claims)
+		}
+	}
+	return ""
+}
+
 func extractAccountIDFromClaims(claims idTokenClaims) string {
 	if v := strings.TrimSpace(claims.ChatGPTAccountID); v != "" {
 		return v
@@ -444,6 +465,10 @@ func extractAccountIDFromClaims(claims idTokenClaims) string {
 		return strings.TrimSpace(claims.Organizations[0].ID)
 	}
 	return ""
+}
+
+func extractEmailFromClaims(claims idTokenClaims) string {
+	return strings.TrimSpace(claims.Email)
 }
 
 func parseJWTClaims(token string) (idTokenClaims, error) {
