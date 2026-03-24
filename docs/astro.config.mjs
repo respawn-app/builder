@@ -32,6 +32,10 @@ export default defineConfig({
           link: docsConfig.docsHomePath,
         },
         {
+          label: 'Quickstart',
+          link: '/quickstart/',
+        },
+        {
           label: 'Slash Commands',
           link: '/slash-commands/',
         },
