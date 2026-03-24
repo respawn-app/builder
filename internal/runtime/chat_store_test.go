@@ -407,7 +407,7 @@ func TestChatStoreSnapshotFormatsAskQuestionStructuredAnswer(t *testing.T) {
 		Role:       llm.RoleTool,
 		ToolCallID: "call_ask",
 		Name:       string(tools.ToolAskQuestion),
-		Content:    `"User answered and picked option 2.\nUser also said:\nneed extra context"`,
+		Content:    `"ask result summary"`,
 	})
 
 	snap := s.snapshot()
@@ -417,7 +417,7 @@ func TestChatStoreSnapshotFormatsAskQuestionStructuredAnswer(t *testing.T) {
 	if snap.Entries[1].Role != "tool_result_ok" {
 		t.Fatalf("expected ask result entry, got %+v", snap.Entries[1])
 	}
-	want := "User answered and picked option 2.\nUser also said:\nneed extra context"
+	want := "ask result summary"
 	if snap.Entries[1].Text != want {
 		t.Fatalf("unexpected ask result text: %q", snap.Entries[1].Text)
 	}

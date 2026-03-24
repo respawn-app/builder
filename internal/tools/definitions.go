@@ -193,7 +193,7 @@ var catalogEntries = []CatalogEntry{
 	{
 		ID:             ToolAskQuestion,
 		Aliases:        nil,
-		Description:    "Ask the user a question. You should ask the user when planning your work or working to make product decisions, resolve ambiguities, define missing pieces that you cannot resolve by yourself, brainstorming with the user. You should ask the user a lot of questions when you're planning/brainstorming together to learn their desires, preferences, design, product vision, or implementation approach, and sometimes ask them questions when already working if you encounter a problem you can't resolve, a caveat, an undefined area that materially affects the result or direction of your work, etc. You should avoid asking the user obvious or harmless questions like 'Should I run tests?' or 'Where is file X?' which you can answer yourself. Each question pings the user, so treat it like pinging a coworker on Slack: unless they're actively chatting with you, pinging them could distract them. Stick to ONE question per this tool call, for multiple questions call this tool in parallel. Strive to provide multiple suggestions/options with every question if you can. You must always choose exactly one recommended option if you provide suggestions.",
+		Description:    "Ask the user a question. You should ask the user when planning your work or working to make product decisions, resolve ambiguities, define missing pieces that you cannot resolve by yourself, brainstorming with the user. You should ask the user a lot of questions when you're planning/brainstorming together to learn their desires, preferences, design, product vision, or implementation approach, and sometimes ask them questions when already working if you encounter a problem you can't resolve, a caveat, an undefined area that materially affects the result or direction of your work, etc. You should avoid asking the user obvious or harmless questions like 'Should I run tests?' or 'Where is file X?' which you can answer yourself. Each question pings the user, so treat it like messaging a coworker on Slack: unless they're actively chatting with you, pinging them could distract them. Stick to ONE question per this tool call, for multiple questions call this tool in parallel. Strive to provide multiple suggestions/options with every question if applicable, and choosing one recommended option you deem best for user goals.",
 		DefaultEnabled: true,
 		Contract: localContract(
 			LocalRuntimeBuilderAskQuestion,
@@ -215,12 +215,12 @@ var catalogEntries = []CatalogEntry{
     },
     "suggestions": {
       "type": "array",
-      "description": "Optional choice suggestions. Omit this field when you want a freeform-only answer. If you provide suggestions, you must also provide recommended_option_index. Strive to give users the best, sensible options possible, following best-practices, guidelines, and common sense.",
+      "description": "Optional choice suggestions. Omit this field when you want a freeform-only answer. If you provide >1 suggestions, provide recommended_option_index. Strive to give users the best, sensible options possible, following best-practices, guidelines, and common sense.",
       "items": {"type": "string"}
     },
     "recommended_option_index": {
       "type": "integer",
-      "description": "Optional 1-based index of the recommended suggestion. Omit this only when suggestions is omitted. Use this field instead of adding recommendation markers to suggestion text."
+      "description": "Optional 1-based index of the recommended suggestion."
     }
   }
 }`),
@@ -228,7 +228,7 @@ var catalogEntries = []CatalogEntry{
 	{
 		ID:             ToolWebSearch,
 		Aliases:        nil,
-		Description:    "Search the web for up-to-date external information. Use this when local workspace context is insufficient or the fact could be stale, or for information beyond your model knowledge cutoff. Prefer primary and official sources over social media or untrusted articles.",
+		Description:    "Search the web for up-to-date external information. Use this when local workspace context is insufficient or the fact could be stale, or for information beyond your model knowledge cutoff. Prefer primary and official sources.",
 		DefaultEnabled: true,
 		Contract: hostedContract(
 			RequestExposure{Enabled: false},

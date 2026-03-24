@@ -27,6 +27,7 @@ type askPromptLine struct {
 	Kind        askPromptLineKind
 	Selected    bool
 	Recommended bool
+	MutedSuffix string
 	Disabled    bool
 	InputPrefix string
 	InputText   string
@@ -41,7 +42,7 @@ const (
 	askFreeformModeApprovalCommentary
 )
 
-const askFreeformSelectionOptionText = "Something else"
+const askFreeformSelectionOptionText = "Freeform answer"
 
 func (c uiAskController) acceptEvent(evt askEvent) {
 	m := c.model
@@ -298,18 +299,26 @@ func (c uiAskController) renderPromptLines() []askPromptLine {
 		for i, s := range visibleOptions {
 			selected := i == m.askCursor
 			recommended := askOptionIsRecommended(req, i)
-			prefix := "  "
+			marker := "  "
 			if selected {
-				prefix = "✓ "
+				marker = "✔︎ "
+			} else if recommended {
+				marker = "★ "
 			}
-			lines = append(lines, askPromptLine{Text: fmt.Sprintf("%s%d. %s", prefix, i+1, s), Kind: askPromptLineKindOption, Selected: selected, Recommended: recommended})
+			text := fmt.Sprintf("%s%d. %s", marker, i+1, s)
+			mutedSuffix := ""
+			if recommended {
+				mutedSuffix = " • recommended"
+				text += mutedSuffix
+			}
+			lines = append(lines, askPromptLine{Text: text, Kind: askPromptLineKindOption, Selected: selected, Recommended: recommended, MutedSuffix: mutedSuffix})
 		}
 		if askHasFreeformSelectionOption(req) {
 			idx := len(visibleOptions) + 1
 			selected := m.askCursor == len(visibleOptions)
 			prefix := "  "
 			if selected {
-				prefix = "✓ "
+				prefix = "✔︎ "
 			}
 			lines = append(lines, askPromptLine{Text: fmt.Sprintf("%s%d. %s", prefix, idx, askFreeformSelectionOptionText), Kind: askPromptLineKindOption, Selected: selected})
 		}
@@ -317,7 +326,7 @@ func (c uiAskController) renderPromptLines() []askPromptLine {
 			lines = append(lines, askPromptLine{Kind: askPromptLineKindInput, Disabled: true, InputPrefix: m.askInputPrefix(), InputText: m.askInput, InputCursor: m.askInputCursor, ShowsCursor: false})
 			return lines
 		}
-		hint := "Tab to switch to freeform • Enter to submit • Something else opens freeform"
+		hint := "Tab to add commentary • Enter to submit"
 		if approvalSupportsCommentary(req) {
 			hint = "Tab to add commentary • Enter to submit"
 		}

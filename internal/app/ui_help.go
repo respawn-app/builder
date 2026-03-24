@@ -69,9 +69,9 @@ func (m *uiModel) helpSections() []uiHelpSection {
 			Entries: []uiHelpEntry{
 				{Bindings: []string{"Enter"}, Description: "submit the current input, selected answer, or flush the next queued item", Active: uiHelpInPromptInput},
 				{Bindings: []string{"Tab", "Ctrl + Enter"}, Description: "autocomplete a selected slash command, or queue/send the current input", Active: uiHelpInMainInput},
-				{Bindings: []string{"Tab"}, Description: "switch an ask-question picker to freeform", Active: uiHelpInAskPicker},
+				{Bindings: []string{"Tab"}, Description: "add commentary to the selected ask option", Active: uiHelpInAskPicker},
 				{Bindings: []string{"Tab"}, Description: "return to the picker and keep the pending freeform draft", Active: uiHelpCanReturnAskDraftToPicker},
-				{Bindings: []string{"Enter"}, Description: "open freeform from Something else", Active: uiHelpInAskPicker},
+				{Bindings: []string{"Enter"}, Description: "open freeform from Freeform answer", Active: uiHelpInAskPicker},
 				{Bindings: []string{"↑, ↓"}, Description: "browse submitted prompts at input boundaries; otherwise move within multiline input", Active: uiHelpInTextEditing},
 				{Bindings: []string{"Shift + Enter", "Ctrl + J"}, Description: "insert a newline", Active: uiHelpInTextEditing},
 				{Bindings: deleteCurrentLineBindings(), Description: "delete the current input line", Active: uiHelpInTextEditing},
