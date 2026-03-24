@@ -42,10 +42,9 @@ async function removeIfExists(filePath) {
 }
 
 test('astro build ignores stale legacy mirrored docs in src/content/docs', async () => {
-  const docsRoot = new URL('..', import.meta.url);
   const workdir = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
   const legacyDocsPath = path.join(workdir, 'src', 'content', 'docs', 'docs.md');
-  const generatedDocsDirectory = path.join(workdir, '.generated', 'content', 'docs');
+  const generatedDocsDirectory = path.join(workdir, 'src', '.generated', 'content', 'docs');
   const generatedDocsPath = path.join(generatedDocsDirectory, 'docs.md');
   const previousGeneratedDocs = await readFile(generatedDocsPath, 'utf8').catch(() => undefined);
 

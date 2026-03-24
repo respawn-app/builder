@@ -8,9 +8,9 @@ import { mirroredDocuments } from '../scripts/mirrored-documents.mjs';
 
 function buildDocsGlobPatterns(): string[] {
   const legacyMirroredFileNames = mirroredDocuments.map((document) => path.posix.parse(document.outputFileName).name);
-  const excludedLegacyMirroredFiles = `!src/content/docs/{${legacyMirroredFileNames.join(',')}}.md`;
+  const excludedLegacyMirroredFiles = `!content/docs/{${legacyMirroredFileNames.join(',')}}.md`;
 
-  return ['src/content/docs/**/*.md', excludedLegacyMirroredFiles, '.generated/content/docs/**/*.md'];
+  return ['content/docs/**/*.md', excludedLegacyMirroredFiles, '.generated/content/docs/**/*.md'];
 }
 
 function trimDocsPrefix(entryPath: string, prefix: string): string | undefined {
@@ -25,7 +25,7 @@ function stripMarkdownExtension(entryPath: string): string {
 function generateDocsEntryId({ entry }: { entry: string }): string {
   const normalizedEntryPath = entry.split(path.sep).join(path.posix.sep);
   const relativeDocsPath =
-    trimDocsPrefix(normalizedEntryPath, 'src/content/docs/') ??
+    trimDocsPrefix(normalizedEntryPath, 'content/docs/') ??
     trimDocsPrefix(normalizedEntryPath, '.generated/content/docs/');
 
   if (!relativeDocsPath) {
@@ -38,7 +38,7 @@ function generateDocsEntryId({ entry }: { entry: string }): string {
 export const collections = {
   docs: defineCollection({
     loader: glob({
-      base: '.',
+      base: 'src',
       pattern: buildDocsGlobPatterns(),
       generateId: generateDocsEntryId,
     }),

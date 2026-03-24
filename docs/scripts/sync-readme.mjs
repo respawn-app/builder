@@ -10,11 +10,12 @@ import { resolveDocsConfig } from './site-config.mjs';
 const currentFilePath = fileURLToPath(import.meta.url);
 const docsRoot = path.dirname(path.dirname(currentFilePath));
 const repoRoot = path.dirname(docsRoot);
-const outputDirectory = path.join(docsRoot, '.generated', 'content', 'docs');
+const outputDirectory = path.join(docsRoot, 'src', '.generated', 'content', 'docs');
 const legacyOutputDirectory = path.join(docsRoot, 'src', 'content', 'docs');
 
 await mkdir(outputDirectory, { recursive: true });
 await removeLegacyMirroredDocuments(legacyOutputDirectory, mirroredDocuments);
+await removeLegacyMirroredDocuments(path.join(docsRoot, '.generated', 'content', 'docs'), mirroredDocuments);
 
 const docsConfig = resolveDocsConfig();
 
