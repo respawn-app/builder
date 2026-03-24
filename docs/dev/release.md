@@ -46,6 +46,15 @@ The tap repo automation is part of the release, not an optional follow-up.
 3. `brew pr-pull` pushes bottle metadata to tap `master`.
 4. After that, `brew update && brew install builder-cli` should resolve to the new version.
 
+## Recovery If The Tap Step Fails After Publish
+
+If the app release workflow publishes `vX.Y.Z` successfully but fails in `update_brew_tap`, do not cut a second app release.
+
+1. Fix the workflow or tap updater script on `main` first if the failure is in release plumbing.
+2. Create the tap change manually from this repo using `scripts/update-brew-tap.sh` against a fresh clone of `respawn-app/homebrew-tap` on a branch like `chore/builder-cli-vX.Y.Z`.
+3. Open the tap PR with label `pr-pull`.
+4. Wait for `brew test-bot`, then `brew pr-pull`, and only then consider the release complete.
+
 ## Verification
 
 Verify all of these before considering the release done:
