@@ -40,6 +40,10 @@ func settingsTOML(settings Settings) string {
 	return settingsTOMLWithOptions(settings, true)
 }
 
+func settingsTOMLForOnboarding(settings Settings) string {
+	return settingsTOMLWithPreservedDefaults(settings, true, map[string]bool{"theme": true})
+}
+
 func onboardingDefaultSettingsTOML(selectedTheme string) string {
 	settings := defaultSettings()
 	if normalized := theme.Normalize(selectedTheme); normalized != "" {
@@ -49,6 +53,10 @@ func onboardingDefaultSettingsTOML(selectedTheme string) string {
 }
 
 func settingsTOMLWithOptions(settings Settings, includeToolSection bool) string {
+	return settingsTOMLWithPreservedDefaults(settings, includeToolSection, nil)
+}
+
+func settingsTOMLWithPreservedDefaults(settings Settings, includeToolSection bool, preservedDefaults map[string]bool) string {
 	state := configRegistry.defaultState()
 	state.Settings = settings
 	inheritReviewerDefaults(&state.Settings)
@@ -58,7 +66,7 @@ func settingsTOMLWithOptions(settings Settings, includeToolSection bool) string 
 	timeoutLines := filterDefaultLines(lines, "timeouts")
 	reviewerLines := filterDefaultLines(lines, "reviewer")
 	if includeToolSection {
-		rootLines = omitDefaultAssignments(rootLines, filterDefaultLines(defaultLines, ""))
+		rootLines = omitDefaultAssignments(rootLines, filterDefaultLines(defaultLines, ""), preservedDefaults)
 		timeoutLines = omitDefaultAssignments(timeoutLines, filterDefaultLines(defaultLines, "timeouts"))
 		reviewerLines = omitDefaultAssignments(reviewerLines, filterDefaultLines(defaultLines, "reviewer"))
 	}
@@ -112,9 +120,13 @@ func settingsTOMLWithOptions(settings Settings, includeToolSection bool) string 
 	return out.String()
 }
 
-func omitDefaultAssignments(lines []defaultConfigLine, defaults []defaultConfigLine) []defaultConfigLine {
+func omitDefaultAssignments(lines []defaultConfigLine, defaults []defaultConfigLine, preserved ...map[string]bool) []defaultConfigLine {
 	if len(lines) == 0 {
 		return nil
+	}
+	preservedKeys := map[string]bool{}
+	if len(preserved) > 0 && preserved[0] != nil {
+		preservedKeys = preserved[0]
 	}
 	defaultValues := make(map[string]string, len(defaults))
 	for _, line := range defaults {
@@ -123,6 +135,10 @@ func omitDefaultAssignments(lines []defaultConfigLine, defaults []defaultConfigL
 	filtered := make([]defaultConfigLine, 0, len(lines))
 	for _, line := range lines {
 		key := strings.Join(line.Path, ".")
+		if preservedKeys[key] {
+			filtered = append(filtered, line)
+			continue
+		}
 		if defaultValue, ok := defaultValues[key]; ok && defaultValue == renderTOMLValue(line.Value) {
 			continue
 		}
