@@ -165,6 +165,37 @@ func TestDiscoverProviderCommandSymlinkItemsPreferRootCommandsDirectory(t *testi
 	}
 }
 
+func TestDiscoverProviderCommandSymlinkItemsFallBackToPromptsWhenCommandsHasNoDirectMarkdown(t *testing.T) {
+	base := t.TempDir()
+	commandsDir := filepath.Join(base, "commands")
+	promptsDir := filepath.Join(base, "prompts")
+	if err := os.MkdirAll(filepath.Join(commandsDir, "nested"), 0o755); err != nil {
+		t.Fatalf("mkdir nested commands: %v", err)
+	}
+	if err := os.MkdirAll(promptsDir, 0o755); err != nil {
+		t.Fatalf("mkdir prompts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(commandsDir, "nested", "ignored.md"), []byte("ignored"), 0o644); err != nil {
+		t.Fatalf("write nested command: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(promptsDir, "review.md"), []byte("prompts"), 0o644); err != nil {
+		t.Fatalf("write prompt command: %v", err)
+	}
+	root, items, err := discoverProviderCommandSymlinkItems(onboardingImportProvider{ID: onboardingImportProviderClaudeCode, Label: "Claude Code"}, base)
+	if err != nil {
+		t.Fatalf("discover provider command symlink items: %v", err)
+	}
+	if root != promptsDir {
+		t.Fatalf("expected prompt symlink root %q, got %q", promptsDir, root)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected prompts fallback to expose one direct command, got %+v", items)
+	}
+	if items[0].TargetFileName != "review.md" {
+		t.Fatalf("expected review.md prompt command to be symlinked, got %+v", items[0])
+	}
+}
+
 func TestDiscoverProviderSkillsDedupesSameProviderTarget(t *testing.T) {
 	base := t.TempDir()
 	olderDir := filepath.Join(base, "plugins", "one", "skills", "configure")
