@@ -83,6 +83,13 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 			store.Meta().Name,
 			store.Meta().Locked != nil,
 			boot.cfg.Settings.Model,
+			uiStatusConfig{
+				WorkspaceRoot: boot.cfg.WorkspaceRoot,
+				Settings:      active,
+				Source:        boot.cfg.Source,
+				AuthManager:   boot.authManager,
+				AuthStatePath: config.GlobalAuthConfigPath(boot.cfg),
+			},
 		)
 		if boot.backgroundRouter != nil {
 			boot.backgroundRouter.ClearActiveSession(store.Meta().SessionID)

@@ -125,6 +125,27 @@ func TestToggleToDetailStartsAtBottom(t *testing.T) {
 	}
 }
 
+func TestToggleToDetailCanSkipWarmup(t *testing.T) {
+	m := NewModel(WithPreviewLines(2))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a1"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a2"})
+
+	m = updateModel(t, m, ToggleModeMsg{SkipDetailWarmup: true})
+
+	if got := m.Mode(); got != ModeDetail {
+		t.Fatalf("mode after skip-warmup toggle = %q, want %q", got, ModeDetail)
+	}
+	if !m.detailDirty {
+		t.Fatal("expected detail snapshot to remain dirty when warmup is skipped")
+	}
+	if len(m.detailLines) != 0 {
+		t.Fatalf("expected no detail snapshot lines after skip-warmup toggle, got %d", len(m.detailLines))
+	}
+	if got := m.detailScroll; got != 0 {
+		t.Fatalf("detail scroll after skip-warmup toggle = %d, want 0", got)
+	}
+}
+
 func TestOngoingShowsFullConversationContext(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "first question"})

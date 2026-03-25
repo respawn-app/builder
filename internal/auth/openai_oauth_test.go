@@ -223,11 +223,11 @@ func TestExtractEmail(t *testing.T) {
 	idToken := jwt(map[string]any{"email": "user@example.com"})
 	accessToken := jwt(map[string]any{"email": "other@example.com"})
 
-	if got := extractEmail(oauthTokenResponse{IDToken: idToken}); got != "user@example.com" {
-		t.Fatalf("expected email from id token, got %q", got)
+	if got := extractEmail(oauthTokenResponse{IDToken: idToken}); got != "" {
+		t.Fatalf("expected no email from unverified id token, got %q", got)
 	}
-	if got := extractEmail(oauthTokenResponse{AccessToken: accessToken}); got != "other@example.com" {
-		t.Fatalf("expected email from access token, got %q", got)
+	if got := extractEmail(oauthTokenResponse{AccessToken: accessToken}); got != "" {
+		t.Fatalf("expected no email from access token, got %q", got)
 	}
 }
 

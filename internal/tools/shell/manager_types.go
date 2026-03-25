@@ -2,12 +2,13 @@ package shell
 
 import (
 	"io"
-	"math"
 	"os"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
+
+	"builder/internal/tokenutil"
 )
 
 const (
@@ -350,10 +351,7 @@ func waitForEntryDone(entry *processEntry, timeout time.Duration) bool {
 }
 
 func approxTokenCount(chars int) int {
-	if chars <= 0 {
-		return 0
-	}
-	return int(math.Ceil(float64(chars) / 4.0))
+	return tokenutil.ApproxTokenCount(chars)
 }
 
 func countOutputLines(text string) int {

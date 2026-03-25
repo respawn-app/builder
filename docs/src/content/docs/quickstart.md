@@ -41,16 +41,17 @@ You can switch later with `/logout`.
 
 - Use `Enter` to steer the model, `Tab` to queue messages.
 - Use `Shift+Tab` to toggle between detailed transcript mode and ongoing mode.
-- Use `Esc-Esc` double-click to go into "Fork mode" which will let you go back in time and edit a previous message, then fork the session into a new one. File edits will stay.
-- Use arrow up and down to pick and re-send prompts you previously used.
-- Press `F1` to invoke help with othre hotkeys.
+- Press `Esc` twice to enter Edit mode, which lets you go back in time, edit a previous message, and fork the session into a new one. File edits stay.
+- Use the `Up`/`Down` arrow keys to select and resend previous prompts.
+- Press `F1` to invoke help with other hotkeys.
 
-Supervisor is a feature that will automatically review the edits made by the model. It increases costs by ~20% but improves results, often significantly.
+Supervisor is a feature that will automatically review the edits made by the model. It increases costs by ~20% but improves results.
 
 - Use `/supervisor` to toggle reviewer invocation for the current session. Initial value is config's `reviewer.frequency`, and default is on.
 - `review flow`: use `/review` to start a review. In a non-empty session, Builder opens that review in a fresh child session. After the review finishes, you can use `/back` to teleport to the original session.
 - `/name` will set your session name in the picker and terminal title.
 - `/autocompaction` will toggle compaction, and `/compact` will trigger one. If autocompact is off, you can go above 100% context usage if model allows it, it may incur additional costs.
+- `/status` opens a read-only inspection overlay for the current account/session/config/git/context state and progressively fills in quotas, skills, and AGENTS files.
 
 For the full command reference, see [Slash Commands](/slash-commands/).
 

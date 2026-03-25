@@ -25,12 +25,16 @@ var writeTerminalSequence = func(sequence string) {
 }
 
 func (m *uiModel) toggleTranscriptMode() tea.Cmd {
-	return m.toggleTranscriptModeWithNativeReplay(true)
+	return m.toggleTranscriptModeWithOptions(true, false)
 }
 
 func (m *uiModel) toggleTranscriptModeWithNativeReplay(emitNativeReplay bool) tea.Cmd {
+	return m.toggleTranscriptModeWithOptions(emitNativeReplay, false)
+}
+
+func (m *uiModel) toggleTranscriptModeWithOptions(emitNativeReplay bool, skipDetailWarmup bool) tea.Cmd {
 	prevMode := m.view.Mode()
-	m.forwardToView(tui.ToggleModeMsg{})
+	m.forwardToView(tui.ToggleModeMsg{SkipDetailWarmup: skipDetailWarmup})
 	nextMode := m.view.Mode()
 	if nextMode != tui.ModeOngoing {
 		m.helpVisible = false

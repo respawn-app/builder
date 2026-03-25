@@ -27,7 +27,7 @@ func (m *Model) reduce(msg tea.Msg) {
 	case tea.MouseMsg:
 		m.reduceMouseMsg(msg)
 	case ToggleModeMsg:
-		m.reduceToggleModeMsg()
+		m.reduceToggleModeMsg(msg)
 	case ScrollOngoingMsg:
 		m.reduceScrollOngoingMsg(msg)
 	case SetViewportLinesMsg:
@@ -66,7 +66,7 @@ func (m *Model) reduce(msg tea.Msg) {
 func (m *Model) reduceKeyMsg(msg tea.KeyMsg) {
 	switch msg.Type {
 	case tea.KeyTab:
-		*m = m.toggleMode()
+		*m = m.toggleMode(false)
 	case tea.KeyUp:
 		*m = m.scrollActive(-1)
 	case tea.KeyDown:
@@ -87,11 +87,11 @@ func (m *Model) reduceMouseMsg(msg tea.MouseMsg) {
 	}
 }
 
-func (m *Model) reduceToggleModeMsg() {
+func (m *Model) reduceToggleModeMsg(msg ToggleModeMsg) {
 	if m.mode == ModeDetail && m.ongoingDirty {
 		m.rebuildOngoingSnapshot()
 	}
-	*m = m.toggleMode()
+	*m = m.toggleMode(msg.SkipDetailWarmup)
 }
 
 func (m *Model) reduceScrollOngoingMsg(msg ScrollOngoingMsg) {
