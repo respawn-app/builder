@@ -32,7 +32,7 @@ Check the installed version with `builder --version`.
 - [x] Support for Codex login and OpenAI api keys.
 - [x] Compaction, including auto, using native Codex/OpenAI endpoints.
 - [x] Compact UI mode for ongoing work, and detailed mode to review thinking, tool calls, prompts, summaries.
-- [x] Queueing messages, steering the model (Tab to queue, Enter to steer)
+- [x] Queueing messages, steering the model (Tab to queue, Enter to steer, pending steering stays visible as `next:` until sent)
 - [x] Asking user questions via a tool
 - [x] Terminal bell notifications for asks/approvals and tool-heavy turn completion
 - [x] Config file with model selection, tool config, compact threshold, timeouts.

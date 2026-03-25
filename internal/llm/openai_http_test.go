@@ -688,6 +688,72 @@ func TestBuildPayload_AppliesReasoningEffortForOpenAIModels(t *testing.T) {
 	}
 }
 
+func TestBuildPayload_SkipsReasoningSummaryForUnknownModels(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	payload, err := transport.buildPayload(OpenAIRequest{
+		Model:           "custom-model",
+		ReasoningEffort: "high",
+	}, openAIAuthMode{}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+	if payload.Reasoning.Effort != "high" {
+		t.Fatalf("expected reasoning payload for unknown model, got %+v", payload.Reasoning)
+	}
+	if payload.Reasoning.Summary != "" {
+		t.Fatalf("expected reasoning.summary to be omitted for unknown model, got %q", payload.Reasoning.Summary)
+	}
+	if len(payload.Include) == 0 {
+		t.Fatalf("expected encrypted reasoning include for unknown model, got %+v", payload.Include)
+	}
+
+	jsonPayload := mustMarshalObject(t, payload)
+	reasoning, ok := jsonPayload["reasoning"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected reasoning to be present for unknown model, got %+v", jsonPayload)
+	}
+	if _, ok := reasoning["summary"]; ok {
+		t.Fatalf("expected reasoning.summary omitted for unknown model, got %+v", reasoning)
+	}
+}
+
+func TestBuildPayload_SkipsReasoningSummaryForCodexSpark(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	transport.ModelVerbosity = "medium"
+	payload, err := transport.buildPayload(OpenAIRequest{
+		Model:           "gpt-5.3-codex-spark",
+		ReasoningEffort: "high",
+	}, openAIAuthMode{IsOAuth: true}, requireProviderCapabilities(t, transport, openAIAuthMode{IsOAuth: true}))
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+	if payload.Reasoning.Effort != "high" {
+		t.Fatalf("expected reasoning payload for codex spark, got %+v", payload.Reasoning)
+	}
+	if payload.Reasoning.Summary != "" {
+		t.Fatalf("expected reasoning.summary omitted for codex spark, got %+v", payload.Reasoning)
+	}
+	if len(payload.Include) != 1 || payload.Include[0] != responses.ResponseIncludableReasoningEncryptedContent {
+		t.Fatalf("expected reasoning.encrypted_content include for codex spark, got %+v", payload.Include)
+	}
+
+	jsonPayload := mustMarshalObject(t, payload)
+	reasoning, ok := jsonPayload["reasoning"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected reasoning to be present for codex spark, got %+v", jsonPayload)
+	}
+	if _, ok := reasoning["summary"]; ok {
+		t.Fatalf("expected reasoning.summary omitted for codex spark, got %+v", reasoning)
+	}
+	text, ok := jsonPayload["text"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected text config in payload for codex spark, got %#v", jsonPayload["text"])
+	}
+	if got := text["verbosity"]; got != "medium" {
+		t.Fatalf("expected text.verbosity=medium for codex spark, got %#v", got)
+	}
+}
+
 func TestBuildPayload_AppliesFastModeForCodexProvider(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	payload, err := transport.buildPayload(OpenAIRequest{
@@ -765,6 +831,9 @@ func TestBuildPayload_DefaultsReasoningEffortForUnknownModelFamily(t *testing.T)
 	}
 	if payload.Reasoning.Effort != "high" {
 		t.Fatalf("expected reasoning payload for unknown model, got %+v", payload.Reasoning)
+	}
+	if payload.Reasoning.Summary != "" {
+		t.Fatalf("expected unknown model to omit reasoning summary, got %+v", payload.Reasoning)
 	}
 	if len(payload.Include) == 0 {
 		t.Fatalf("expected encrypted reasoning include for unknown model, got %+v", payload.Include)

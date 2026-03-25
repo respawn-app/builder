@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"builder/internal/config"
+	"builder/internal/llm"
 	"builder/internal/session"
 	"builder/internal/tools"
 )
@@ -64,7 +65,7 @@ func effectiveSettings(base config.Settings, locked *session.LockedContract) con
 	return out
 }
 
-func activeToolIDs(settings config.Settings, locked *session.LockedContract) []tools.ID {
+func activeToolIDs(settings config.Settings, source config.SourceReport, locked *session.LockedContract) []tools.ID {
 	if locked != nil {
 		ids := make([]tools.ID, 0, len(locked.EnabledTools))
 		for _, raw := range locked.EnabledTools {
@@ -74,7 +75,24 @@ func activeToolIDs(settings config.Settings, locked *session.LockedContract) []t
 		}
 		return dedupeSortToolIDs(ids)
 	}
-	return dedupeSortToolIDs(config.EnabledToolIDs(settings))
+	ids := config.EnabledToolIDs(settings)
+	if strings.TrimSpace(source.Sources["tools."+string(tools.ToolMultiToolUseParallel)]) != "default" {
+		return dedupeSortToolIDs(ids)
+	}
+	enabled := map[tools.ID]bool{}
+	for _, id := range ids {
+		enabled[id] = true
+	}
+	if llm.SupportsMultiToolUseParallelModel(settings.Model) {
+		enabled[tools.ToolMultiToolUseParallel] = true
+	} else {
+		delete(enabled, tools.ToolMultiToolUseParallel)
+	}
+	resolved := make([]tools.ID, 0, len(enabled))
+	for id := range enabled {
+		resolved = append(resolved, id)
+	}
+	return dedupeSortToolIDs(resolved)
 }
 
 func dedupeSortToolIDs(ids []tools.ID) []tools.ID {

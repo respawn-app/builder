@@ -50,6 +50,27 @@ func resetEnabledToolMap(enabled []tools.ID) map[tools.ID]bool {
 	return out
 }
 
+func DisabledSkillToggles(settings Settings) map[string]bool {
+	if len(settings.SkillToggles) == 0 {
+		return nil
+	}
+	disabled := make(map[string]bool, len(settings.SkillToggles))
+	for name, enabled := range settings.SkillToggles {
+		if enabled {
+			continue
+		}
+		normalized := normalizeSkillToggleKey(name)
+		if normalized == "" {
+			continue
+		}
+		disabled[normalized] = true
+	}
+	if len(disabled) == 0 {
+		return nil
+	}
+	return disabled
+}
+
 func parseBoolString(raw string, envName string) (*bool, error) {
 	parsed, err := strconv.ParseBool(raw)
 	if err != nil {

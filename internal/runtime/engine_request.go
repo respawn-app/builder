@@ -131,8 +131,10 @@ func hostedToolExecutionsFromOutputItems(items []llm.ResponseItem, defs []tools.
 }
 
 func (e *Engine) requestTools() []llm.Tool {
-	supportsVision := llm.LockedContractSupportsVisionInputs(e.store.Meta().Locked, e.cfg.Model)
-	defs := tools.RequestExposedDefinitionsForSession(e.cfg.EnabledTools, e.registry.Definitions(), supportsVision)
+	exposure := tools.RequestExposureContext{
+		SupportsVision: llm.LockedContractSupportsVisionInputs(e.store.Meta().Locked, e.cfg.Model),
+	}
+	defs := tools.RequestExposedDefinitionsForSession(e.cfg.EnabledTools, e.registry.Definitions(), exposure)
 	if len(defs) == 0 {
 		return nil
 	}

@@ -83,6 +83,7 @@ type Config struct {
 	WebSearchMode                 string
 	ProviderCapabilitiesOverride  *llm.ProviderCapabilities
 	EnabledTools                  []tools.ID
+	DisabledSkills                map[string]bool
 	AutoCompactTokenLimit         int
 	PreSubmitCompactionLeadTokens int
 	ContextWindowTokens           int
@@ -191,6 +192,20 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 	}
 	if !cfg.ModelCapabilities.SupportsReasoningEffort && !cfg.ModelCapabilities.SupportsVisionInputs {
 		cfg.ModelCapabilities = llm.LockedModelCapabilitiesForModel(cfg.Model)
+	}
+	if cfg.DisabledSkills != nil {
+		cloned := make(map[string]bool, len(cfg.DisabledSkills))
+		for name, disabled := range cfg.DisabledSkills {
+			if !disabled {
+				continue
+			}
+			normalized := normalizeSkillToggleName(name)
+			if normalized == "" {
+				continue
+			}
+			cloned[normalized] = true
+		}
+		cfg.DisabledSkills = cloned
 	}
 
 	eng := &Engine{

@@ -76,6 +76,7 @@ type Settings struct {
 	MinimumExecToBgSeconds           int
 	CompactionMode                   CompactionMode
 	EnabledTools                     map[tools.ID]bool
+	SkillToggles                     map[string]bool
 	Timeouts                         Timeouts
 	ShellOutputMaxChars              int
 	BGShellsOutput                   BGShellsOutputMode

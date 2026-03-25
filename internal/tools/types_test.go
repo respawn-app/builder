@@ -112,7 +112,7 @@ func TestDefinitionContractsDriveRuntimeAndRequestExposure(t *testing.T) {
 	if shell.LocalRuntimeBuilder() != LocalRuntimeBuilderShell {
 		t.Fatalf("expected %s local runtime builder, got %q", ToolShell, shell.LocalRuntimeBuilder())
 	}
-	if !shell.ExposedToModelRequest(false) {
+	if !shell.ExposedToModelRequest(RequestExposureContext{}) {
 		t.Fatalf("expected %s to be request-exposed without vision", ToolShell)
 	}
 
@@ -126,11 +126,19 @@ func TestDefinitionContractsDriveRuntimeAndRequestExposure(t *testing.T) {
 	if viewImage.LocalRuntimeBuilder() != LocalRuntimeBuilderViewImage {
 		t.Fatalf("expected %s local runtime builder, got %q", ToolViewImage, viewImage.LocalRuntimeBuilder())
 	}
-	if viewImage.ExposedToModelRequest(false) {
+	if viewImage.ExposedToModelRequest(RequestExposureContext{}) {
 		t.Fatalf("expected %s to remain hidden without vision support", ToolViewImage)
 	}
-	if !viewImage.ExposedToModelRequest(true) {
+	if !viewImage.ExposedToModelRequest(RequestExposureContext{SupportsVision: true}) {
 		t.Fatalf("expected %s to be request-exposed with vision support", ToolViewImage)
+	}
+
+	parallel, ok := DefinitionFor(ToolMultiToolUseParallel)
+	if !ok {
+		t.Fatalf("expected %s definition", ToolMultiToolUseParallel)
+	}
+	if !parallel.ExposedToModelRequest(RequestExposureContext{}) {
+		t.Fatalf("expected %s to be request-exposed when enabled", ToolMultiToolUseParallel)
 	}
 
 	webSearch, ok := DefinitionFor(ToolWebSearch)
@@ -143,7 +151,7 @@ func TestDefinitionContractsDriveRuntimeAndRequestExposure(t *testing.T) {
 	if webSearch.LocalRuntimeBuilder() != "" {
 		t.Fatalf("expected %s to have no local runtime builder, got %q", ToolWebSearch, webSearch.LocalRuntimeBuilder())
 	}
-	if webSearch.ExposedToModelRequest(true) {
+	if webSearch.ExposedToModelRequest(RequestExposureContext{SupportsVision: true}) {
 		t.Fatalf("expected %s to stay hidden from request tool declarations", ToolWebSearch)
 	}
 	if !webSearch.EnablesNativeWebSearch("native") {
