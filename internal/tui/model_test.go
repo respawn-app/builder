@@ -873,6 +873,25 @@ func TestCompactionNoticeAndSummaryRenderingByMode(t *testing.T) {
 	}
 }
 
+func TestManualCompactionCarryoverRenderingByMode(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role: roleManualCompactionCarryover,
+		Text: "# Last user message before manual compaction\n\nplease keep tests green",
+	})
+
+	ongoing := plainTranscript(m.View())
+	if strings.Contains(ongoing, "Last user message before manual compaction") || strings.Contains(ongoing, "please keep tests green") {
+		t.Fatalf("expected manual compaction carryover hidden in ongoing view, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detail := plainTranscript(m.View())
+	if !containsInOrder(detail, "@", "# Last user message before manual compaction", "please keep tests green") {
+		t.Fatalf("expected manual compaction carryover visible in detail view, got %q", detail)
+	}
+}
+
 func TestReviewerStatusRendersConciseWithoutSuggestionsEntry(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "run task"})

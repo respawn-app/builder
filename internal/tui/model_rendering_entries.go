@@ -83,7 +83,7 @@ func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *
 			displayChunk = m.palette().preview.Faint(true).Render(displayChunk)
 		} else if isThinkingRole(role) {
 			displayChunk = styleForRole(role, m.palette()).Render(displayChunk)
-		} else if role == "compaction_notice" || role == "compaction_summary" || role == "reviewer_status" || role == "reviewer_suggestions" || role == "error" {
+		} else if isStyledMetaRole(role) {
 			displayChunk = styleForRole(role, m.palette()).Render(displayChunk)
 		}
 		if i == 0 {
@@ -275,9 +275,12 @@ func (m Model) applyEntryDefaultForeground(role, text string, muteText bool) str
 		return text
 	}
 	switch role {
-	case "compaction_notice", "compaction_summary", "reviewer_status", "reviewer_suggestions", "error":
+	case "reviewer_status", "reviewer_suggestions", "error":
 		return text
 	default:
+		if isCompactionRole(role) {
+			return text
+		}
 		return applyDefaultForeground(text, m.palette().foregroundColor)
 	}
 }
