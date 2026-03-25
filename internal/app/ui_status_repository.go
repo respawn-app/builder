@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -140,7 +141,12 @@ func statusAuthCacheKey(req uiStatusRequest) string {
 }
 
 func statusGitCacheKey(workdir string) string {
-	return strings.TrimSpace(workdir)
+	trimmed := strings.TrimSpace(workdir)
+	if trimmed == "" {
+		return ""
+	}
+	normalized := strings.ReplaceAll(trimmed, "\\", "/")
+	return path.Clean(normalized)
 }
 
 func statusEnvironmentCacheKey(req uiStatusRequest) string {
