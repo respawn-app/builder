@@ -14,8 +14,6 @@ Builder resolves settings in this order (lower=higher):
 
 When you `continue` a session, Builder reuses the saved workspace root and saved continuation `openai_base_url` unless you explicitly pass `--workspace` or `--openai-base-url`.
 
-If `~/.builder/config.toml` does not exist after the first successful auth, interactive startup opens a first-time setup flow and writes the file only after that flow completes. The flow asks for a theme before any other setup choices, preselects `light` or `dark` from terminal background detection, and keeps `theme = "auto"` if you accept that detected default. It only writes an explicit `light` or `dark` when you intentionally override the detected choice.
-
 ## Locations
 
 ### Settings file
@@ -31,8 +29,6 @@ Changing `persistence_root` does not move `config.toml`.
 ### Persistence root
 
 `persistence_root` controls where Builder stores auth state, sessions, and workspace mappings. The default is `~/.builder`.
-
-`persistence_root` supports `~` expansion, is made absolute, and is created automatically.
 
 ## Example
 
@@ -78,11 +74,6 @@ These flags overlay settings at startup.
 | `--tools` | entire tool set | CSV replacement, not a merge |
 | `--openai-base-url` | `openai_base_url` | Also affects continuation behavior |
 
-Related, but not part of the settings model:
-
-- `--workspace` selects the workspace root.
-- `--session` and `--continue` select the session to resume.
-- `builder run --timeout`, `--output-mode`, and `--progress-mode` are run-mode flags, not persisted settings.
 
 ## Reference
 
@@ -102,14 +93,14 @@ Related, but not part of the settings model:
 | `provider_override` | string | `""` | `BUILDER_PROVIDER_OVERRIDE` | `--provider-override` | Forces provider family for custom or alias model names. Allowed: `openai`, `anthropic`. Requires an explicit `model` override. |
 | `openai_base_url` | string | `""` | `BUILDER_OPENAI_BASE_URL` | `--openai-base-url` | OpenAI-compatible base URL. Must be used with `provider_override=openai` or with no explicit provider override. Persisted into session continuation metadata. |
 | `store` | bool | `false` | `BUILDER_STORE` |  | Sets OpenAI Responses `store=true` for main model requests. Reviewer requests still use `store=false`. |
-| `allow_non_cwd_edits` | bool | `false` | `BUILDER_ALLOW_NON_CWD_EDITS` |  | Lets the `patch` tool edit files outside the workspace root, still gated by approval. |
+| `allow_non_cwd_edits` | bool | `false` | `BUILDER_ALLOW_NON_CWD_EDITS` |  | Lets the `patch` tool edit files outside the workspace root. |
 | `model_context_window` | int | `272000` | `BUILDER_MODEL_CONTEXT_WINDOW` |  | Explicit context-window size used for compaction and token accounting. Must be `> 0`. |
 | `context_compaction_threshold_tokens` | int | `258400` | `BUILDER_CONTEXT_COMPACTION_THRESHOLD_TOKENS` |  | Auto-compaction threshold. Must be `> 0` and `< model_context_window`. The default is derived from the default context window. |
 | `pre_submit_compaction_lead_tokens` | int | `15000` | `BUILDER_PRE_SUBMIT_COMPACTION_LEAD_TOKENS` |  | Lead-band cap for compact-before-submit. Builder compacts before sending the next user prompt when current usage is within `min(model_context_window - context_compaction_threshold_tokens, pre_submit_compaction_lead_tokens)` tokens of the normal threshold. Must be `> 0`. Very large prompts can still trigger pre-submit compaction even below this band. |
 | `minimum_exec_to_bg_seconds` | int | `15` | `BUILDER_MINIMUM_EXEC_TO_BG_SECONDS` |  | Minimum `exec_command` yield time before Builder backgrounds the command. Lower values are clamped up. |
 | `compaction_mode` | string | `local` | `BUILDER_COMPACTION_MODE` |  | Allowed: `native`, `local`, `none`. `native` prefers provider-native compaction and falls back to local compaction. `local` always uses local summary compaction. `none` disables auto-compaction and makes manual compaction fail. |
-| `shell_output_max_chars` | int | `16000` | `BUILDER_SHELL_OUTPUT_MAX_CHARS` |  | Output budget for shell tools and background-shell notices. Must be `> 0`. |
-| `bg_shells_output` | string | `default` | `BUILDER_BG_SHELLS_OUTPUT` |  | Background-shell summarization mode. Allowed: `default`, `verbose`, `concise`. Applies directly to successful background shells. |
+| `shell_output_max_chars` | int | `16000` | `BUILDER_SHELL_OUTPUT_MAX_CHARS` |  | Output budget for shell tools and background-shell notices before they are truncated. Must be `> 0`. |
+| `bg_shells_output` | string | `default` | `BUILDER_BG_SHELLS_OUTPUT` |  | Background-shell output mode (injection of outputs into model context). Allowed: `default`, `verbose`, `concise`. Verbose dumps all output into the main agent's model. Concise forces it to read output files. Default outputs truncated previews + gives a file path. |
 | `persistence_root` | string | `~/.builder` | `BUILDER_PERSISTENCE_ROOT` |  | Root for auth, session, and workspace index storage. Supports `~` expansion. Does not change the location of `~/.builder/config.toml`. |
 
 ### Timeouts
@@ -164,28 +155,23 @@ Builder's generated `config.toml` omits `[tools]` entirely until you want explic
 
 | Key | Default | What enabling it exposes |
 | --- | --- | --- |
-| `tools.ask_question` | `true` | The `ask_question` tool |
-| `tools.exec_command` | `true` | The `exec_command` tool |
-| `tools.multi_tool_use_parallel` | `model-derived` | The `multi_tool_use_parallel` tool |
-| `tools.patch` | `true` | The `patch` tool |
-| `tools.shell` | `true` | The `shell` tool |
-| `tools.view_image` | `true` | The `view_image` tool |
-| `tools.web_search` | `true` | The hosted `web_search` tool |
-| `tools.write_stdin` | `true` | The `write_stdin` tool |
+| `tools.ask_question` | `true` | Tool to ask interactive questions |
+| `tools.exec_command` | `true` | The primary shell tool |
+| `tools.multi_tool_use_parallel` | `model-derived` | parallel use tool only needed for compatibility with -codex models. Parallelism is already supported natively without this tool. |
+| `tools.patch` | `true` | The edit tool |
+| `tools.view_image` | `true` | Abitily to view images and PDFs (if supported) |
+| `tools.web_search` | `true` | Tool to search the web |
+| `tools.write_stdin` | `true` | Interaction with background shells. |
 
 Notes:
 
-- `tools.web_search = true` does not force web search on. Native search still depends on `web_search = "native"` and provider support.
-- If `tools.multi_tool_use_parallel` is not explicitly set, Builder derives its default from the configured model capability contract. Explicit file/env/CLI tool settings take precedence.
-- Older generated configs that already wrote an explicit `[tools]` value for `multi_tool_use_parallel` keep that explicit override until you remove that key.
-- `tools.view_image = true` does not bypass model capability checks. If the model does not support vision inputs, the tool will not be request-exposed.
-- `BUILDER_TOOLS` and `--tools` accept a comma-separated list of canonical tool IDs such as `shell,patch,ask_question`.
+- `tools.web_search = true` does not force web search on. Native search still depends on `web_search = "native"` and provider suppor
+- `multi_tool_use_parallel` tool is only needed for Codex models (because they are post trained on it). All other models default to that tool being disabled.
 
 ### Skills
 
-`[skills]` is a file-only per-skill boolean table in `config.toml`.
+`[skills]` is a file-only per-skill boolean table in `config.toml` to disable unneeded skills. Keys are matched case-insensitively.
 
-Unspecified skills default to enabled. Keys are matched against discovered skill names case-insensitively.
 
 | Key | Default | Description |
 | --- | --- | --- |
@@ -193,18 +179,5 @@ Unspecified skills default to enabled. Keys are matched against discovered skill
 
 Notes:
 
-- Skill toggles are only applied when Builder creates a new conversation/session. Existing sessions keep the already-injected skills developer message from their transcript.
-- Quoted TOML keys work for skill names containing spaces, for example `"Local Helper" = false`.
-
-## Environment-Only Knobs Outside `config.toml`
-
-These are real runtime knobs, but they are not part of the typed settings registry.
-
-| Env var | Description |
-| --- | --- |
-| `OPENAI_API_KEY` | API-key auth source. In headless mode it still overrides saved auth state for that run. During interactive startup, Builder remembers only which auth source you prefer when both `OPENAI_API_KEY` and saved auth state are available; it does not copy or persist the `OPENAI_API_KEY` secret into saved auth state, so the stored state keeps only the preference, not the secret. |
-| `BUILDER_OAUTH_CLIENT_ID` | OAuth client ID override for login flows. |
-| `BUILDER_DEBUG_KEYS` | Debug-only UI key rendering toggle. |
-| `BUILDER_CONTEXT_WINDOW` | Low-level transport fallback for context-window size. In normal Builder startup it is usually superseded by `model_context_window`. |
-
-For `/status` quota display, custom `openai_base_url` values suppress ChatGPT subscription usage fetches. Explicit official ChatGPT hosts (`https://chatgpt.com`, `https://chat.openai.com`, with optional `/backend-api`) are still treated as first-party and continue to show quota data.
+- Skill toggles are only applied when Builder creates a new conversation/session.
+- Use `"quoted names"` to refer to skill keys containing spaces.
