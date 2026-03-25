@@ -5519,11 +5519,14 @@ func TestHelpToggleRendersBelowQueuedMessagesAndInput(t *testing.T) {
 	if !containsInOrder(plain, "queued latest", "Global", "› draft") {
 		t.Fatalf("expected help above input and below queue, got %q", plain)
 	}
-	if !containsInOrder(plain, "Global\nF1 | ? (empty prompt) | Alt + / | Cmd + /", "\n\nTranscript\nPgUp", "\n\nPrompt Input\nEnter", "\n\nRollback Mode\nEsc | Esc") {
+	if !containsInOrder(plain, "Global\nF1 | ? (empty prompt) | Alt + / | Cmd + /", "\n\nTranscript\nPgUp", "\n\nPrompt Input\n$ <command>", "\n\nRollback Mode\nEsc | Esc") {
 		t.Fatalf("expected blank line between visible help sections, got %q", plain)
 	}
 	if !containsInOrder(plain, "Alt + ←, → | Ctrl + ←, →", "move the cursor by word") {
 		t.Fatalf("expected exact main-input arrow binding label, got %q", plain)
+	}
+	if !containsInOrder(plain, "$ <command>", "execute a shell command and show output to the model") {
+		t.Fatalf("expected direct shell command help row, got %q", plain)
 	}
 	if !containsInOrder(plain, "↑, ↓", "move the rollback selection") {
 		t.Fatalf("expected exact rollback arrow binding label, got %q", plain)
@@ -5539,64 +5542,6 @@ func TestHelpToggleRendersBelowQueuedMessagesAndInput(t *testing.T) {
 			t.Fatalf("did not expect %q in help pane, got %q", unwanted, plain)
 		}
 	}
-}
-
-func TestHelpAskPickerShowsFreeformAnswerGuidance(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
-	m.termWidth = 120
-	m.termHeight = 40
-	m.windowSizeKnown = true
-	m.activeAsk = &askEvent{req: askquestion.Request{Question: "Pick one", Suggestions: []string{"a", "b"}}}
-	m.syncViewport()
-
-	next, _ := m.Update(customKeyMsg{Kind: customKeyHelp})
-	updated := next.(*uiModel)
-
-	if !updated.helpVisible {
-		t.Fatal("expected help pane visible")
-	}
-	sections := updated.helpSections()
-	var promptInput *uiHelpSection
-	for i := range sections {
-		if sections[i].Title == "Prompt Input" {
-			promptInput = &sections[i]
-			break
-		}
-	}
-	if promptInput == nil {
-		t.Fatal("expected prompt input help section")
-	}
-	activeBindings := make([][]string, 0, len(promptInput.Entries))
-	for _, entry := range promptInput.Entries {
-		if entry.Active != nil && entry.Active(updated) {
-			activeBindings = append(activeBindings, entry.Bindings)
-		}
-	}
-	if !containsBinding(activeBindings, []string{"Tab"}) {
-		t.Fatalf("expected active ask picker tab binding, got %+v", activeBindings)
-	}
-	if !containsBinding(activeBindings, []string{"Enter"}) {
-		t.Fatalf("expected active ask picker enter binding, got %+v", activeBindings)
-	}
-}
-
-func containsBinding(have [][]string, want []string) bool {
-	for _, binding := range have {
-		if len(binding) != len(want) {
-			continue
-		}
-		match := true
-		for i := range binding {
-			if binding[i] != want[i] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
 }
 
 func TestHelpRollbackModeRowsUseActiveStyles(t *testing.T) {

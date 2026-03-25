@@ -549,6 +549,26 @@ func TestChatStoreSnapshotIncludesCompactTextForBackgroundNotice(t *testing.T) {
 	}
 }
 
+func TestChatStoreSnapshotIncludesManualCompactionCarryoverAsDedicatedRole(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{
+		Role:        llm.RoleDeveloper,
+		MessageType: llm.MessageTypeManualCompactionCarryover,
+		Content:     "# Last user message before manual compaction\n\nplease keep tests green",
+	})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if snap.Entries[0].Role != string(transcript.EntryRoleManualCompactionCarryover) {
+		t.Fatalf("expected manual compaction carryover role, got %+v", snap.Entries[0])
+	}
+	if snap.Entries[0].Text != "# Last user message before manual compaction\n\nplease keep tests green" {
+		t.Fatalf("unexpected carryover text: %+v", snap.Entries[0])
+	}
+}
+
 func TestChatStoreSnapshotKeepsLocalEntryOrderingWithDeveloperErrorFeedback(t *testing.T) {
 	s := newChatStore()
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "first"})

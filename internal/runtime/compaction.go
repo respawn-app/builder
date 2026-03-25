@@ -26,7 +26,7 @@ const (
 	manualCompactionCarryoverMaxChars    = 4_000
 
 	additionalCompactionInstructionsHeader = "# Additional user instructions or commentary for this task:"
-	manualCompactionCarryoverHeader        = "# Last user message before manual compaction"
+	manualCompactionCarryoverHeader        = "# Last user message before compaction (work may have been done after it was sent):"
 )
 
 var errRemoteCompactionMissingCheckpoint = errors.New("remote compaction output missing checkpoint item")

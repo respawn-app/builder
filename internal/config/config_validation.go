@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"builder/internal/theme"
 )
 
 func validateSettings(v Settings, sources map[string]string) error {
@@ -53,12 +55,8 @@ func validateProviderCapabilitiesProviderID(state settingsState, _ map[string]st
 }
 
 func validateThinkingLevel(state settingsState, _ map[string]string) error {
-	switch strings.ToLower(strings.TrimSpace(state.Settings.ThinkingLevel)) {
-	case "low", "medium", "high", "xhigh":
-		return nil
-	default:
-		return fmt.Errorf("invalid thinking_level %q (expected low|medium|high|xhigh)", state.Settings.ThinkingLevel)
-	}
+	// Custom/provider-specific thinking levels are intentionally allowed.
+	return nil
 }
 
 func validateModelVerbosity(state settingsState, _ map[string]string) error {
@@ -71,10 +69,12 @@ func validateModelVerbosity(state settingsState, _ map[string]string) error {
 }
 
 func validateTheme(state settingsState, _ map[string]string) error {
-	if strings.EqualFold(strings.TrimSpace(state.Settings.Theme), "light") || strings.EqualFold(strings.TrimSpace(state.Settings.Theme), "dark") {
+	switch theme.Normalize(state.Settings.Theme) {
+	case theme.Auto, theme.Light, theme.Dark:
 		return nil
+	default:
+		return fmt.Errorf("invalid theme %q (expected auto|light|dark)", state.Settings.Theme)
 	}
-	return fmt.Errorf("invalid theme %q (expected light|dark)", state.Settings.Theme)
 }
 
 func validateTUIAlternateScreen(state settingsState, _ map[string]string) error {
@@ -170,11 +170,6 @@ func validateReviewer(state settingsState, _ map[string]string) error {
 	case "off", "all", "edits":
 	default:
 		return fmt.Errorf("invalid reviewer.frequency %q (expected off|all|edits)", reviewer.Frequency)
-	}
-	switch strings.ToLower(strings.TrimSpace(reviewer.ThinkingLevel)) {
-	case "low", "medium", "high", "xhigh":
-	default:
-		return fmt.Errorf("invalid reviewer.thinking_level %q (expected low|medium|high|xhigh)", reviewer.ThinkingLevel)
 	}
 	if strings.TrimSpace(reviewer.Model) == "" {
 		return fmt.Errorf("reviewer.model must not be empty")

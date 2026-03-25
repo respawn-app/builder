@@ -24,12 +24,7 @@ func ongoingDividerGroup(role string) string {
 }
 
 func skipInOngoing(role string) bool {
-	switch strings.ToLower(strings.TrimSpace(role)) {
-	case "thinking", "thinking_trace", "reasoning", "compaction_summary", "error":
-		return true
-	default:
-		return false
-	}
+	return isDetailOnlyRole(role)
 }
 
 func compactToolCallText(meta *transcript.ToolCallMeta, text string) string {
