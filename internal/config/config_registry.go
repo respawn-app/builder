@@ -63,6 +63,7 @@ type scalarSetting[T any] struct {
 }
 
 type toolsSetting struct{}
+type skillsSetting struct{}
 
 var configRegistry = newSettingsRegistry()
 
@@ -244,6 +245,7 @@ func newSettingsRegistry() settingsRegistry {
 			normalizeCompactionMode,
 			settingDocOptions{}),
 		toolsSetting{},
+		skillsSetting{},
 		newIntSetting("timeouts.model_request_seconds", defaultModelTimeoutSeconds,
 			func(state *settingsState, value int) { state.Settings.Timeouts.ModelRequestSeconds = value },
 			func(state settingsState) int { return state.Settings.Timeouts.ModelRequestSeconds },
@@ -691,6 +693,50 @@ func (toolsSetting) appendDefaultLines(lines *[]defaultConfigLine, state setting
 	}
 }
 
+func (skillsSetting) applyDefault(state *settingsState) {
+	state.Settings.SkillToggles = map[string]bool{}
+}
+
+func (skillsSetting) initSources(map[string]string) {}
+
+func (skillsSetting) applyFile(raw settingsFile, settingsPath string, state *settingsState, sources map[string]string) error {
+	table, ok, err := lookupFileTable(raw, []string{"skills"})
+	if err != nil || !ok {
+		return err
+	}
+	for key, rawValue := range table {
+		normalized := normalizeSkillToggleKey(key)
+		if normalized == "" {
+			return fmt.Errorf("invalid skills key in %s: %q", settingsPath, key)
+		}
+		enabled, ok := rawValue.(bool)
+		if !ok {
+			return invalidSettingsTypeError(append([]string{"skills"}, key), "boolean")
+		}
+		state.Settings.SkillToggles[normalized] = enabled
+		sources[skillSourceKey(normalized)] = "file"
+	}
+	return nil
+}
+
+func (skillsSetting) applyEnv(envLookup, *settingsState, map[string]string) error {
+	return nil
+}
+
+func (skillsSetting) applyCLI(LoadOptions, *settingsState, map[string]string) error {
+	return nil
+}
+
+func (skillsSetting) registerFileKeys(tree *fileKeyTree) {
+	tree.allowDynamicChildren([]string{"skills"}, func(key string) bool {
+		return normalizeSkillToggleKey(key) != ""
+	})
+}
+
+func (skillsSetting) appendDefaultPayload(map[string]any, settingsState) {}
+
+func (skillsSetting) appendDefaultLines(*[]defaultConfigLine, settingsState) {}
+
 func newFileKeyTree() *fileKeyTree {
 	return &fileKeyTree{children: map[string]*fileKeyTree{}}
 }
@@ -876,6 +922,14 @@ func splitSettingKey(key string) []string {
 
 func toolSourceKey(id tools.ID) string {
 	return "tools." + string(id)
+}
+
+func skillSourceKey(name string) string {
+	return "skills." + normalizeSkillToggleKey(name)
+}
+
+func normalizeSkillToggleKey(raw string) string {
+	return strings.ToLower(strings.Join(strings.Fields(raw), " "))
 }
 
 func defaultEnabledToolMap() map[tools.ID]bool {

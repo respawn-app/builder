@@ -46,10 +46,10 @@ func parseReviewerSuggestionsObject(content string) []string {
 	return payload.Suggestions
 }
 
-func buildReviewerRequestMessages(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool) ([]llm.Message, error) {
+func buildReviewerRequestMessages(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool, disabledSkills map[string]bool) ([]llm.Message, error) {
 	metaMessages, transcriptSource := splitReviewerMetaMessages(messages)
 	var err error
-	metaMessages, err = appendMissingReviewerMetaContext(metaMessages, workspaceRoot, model, thinkingLevel, headless)
+	metaMessages, err = appendMissingReviewerMetaContext(metaMessages, workspaceRoot, model, thinkingLevel, headless, disabledSkills)
 	if err != nil {
 		return nil, err
 	}
@@ -426,7 +426,7 @@ func reviewerSessionID(sessionID string) string {
 	return trimmed + "-review"
 }
 
-func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool) ([]llm.Message, error) {
+func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool, disabledSkills map[string]bool) ([]llm.Message, error) {
 	haveEnvironment := false
 	haveAgents := false
 	haveSkills := false
@@ -476,7 +476,7 @@ func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot stri
 	}
 
 	if !haveSkills {
-		skills, found, skillsErr := skillsContextMessage(workspaceRoot)
+		skills, found, skillsErr := skillsContextMessageWithDisabled(workspaceRoot, disabledSkills)
 		if skillsErr != nil {
 			return nil, skillsErr
 		}

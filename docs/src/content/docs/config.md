@@ -52,6 +52,9 @@ patch = true
 view_image = true
 web_search = true
 
+[skills]
+apiresult = false
+
 [reviewer]
 frequency = "edits"
 timeout_seconds = 60
@@ -171,6 +174,21 @@ Notes:
 - `tools.web_search = true` does not force web search on. Native search still depends on `web_search = "native"` and provider support.
 - `tools.view_image = true` does not bypass model capability checks. If the model does not support vision inputs, the tool will not be request-exposed.
 - `BUILDER_TOOLS` and `--tools` accept a comma-separated list of canonical tool IDs such as `shell,patch,ask_question`.
+
+### Skills
+
+`[skills]` is a file-only per-skill boolean table in `config.toml`.
+
+Unspecified skills default to enabled. Keys are matched against discovered skill names case-insensitively.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `skills.<skill name>` | `true` | Enables or disables a discovered skill for new sessions. Disabled skills are omitted from the injected skills developer message and shown as `disabled` in `/status`. |
+
+Notes:
+
+- Skill toggles are only applied when Builder creates a new conversation/session. Existing sessions keep the already-injected skills developer message from their transcript.
+- Quoted TOML keys work for skill names containing spaces, for example `"Local Helper" = false`.
 
 ## Environment-Only Knobs Outside `config.toml`
 

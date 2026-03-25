@@ -138,7 +138,8 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 	if l.statusSectionLoading(uiStatusSectionEnvironment) && len(snapshot.Skills) == 0 {
 		appendWrapped("Loading skills...", subtleStyle)
 	} else {
-		for _, group := range statusGroupSkillsByDirectory(append(append([]runtime.SkillInspection(nil), loadedSkills...), failedSkills...)) {
+		visibleSkills := append(append([]runtime.SkillInspection(nil), loadedSkills...), failedSkills...)
+		for _, group := range statusGroupSkillsByDirectory(visibleSkills) {
 			appendWrapped(statusDisplayPath(group.Directory, snapshot.Workdir), directoryStyle)
 			for idx, skill := range group.Skills {
 				branch := "├─"
@@ -147,7 +148,7 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 				}
 				line := treeStyle.Render(branch + " ")
 				if skill.Loaded {
-					line += statusSkillTokenLine(skill, snapshot.SkillTokenCounts)
+					line += statusSkillLine(skill, snapshot.SkillTokenCounts)
 				} else {
 					line += errorStyle.Render("! ") + statusSkillFailureLine(skill)
 				}
@@ -519,10 +520,13 @@ func statusContextCompactionSummary(context uiStatusContextInfo) string {
 	return fmt.Sprintf("Compaction at %s (%s).", statusTokenShort(context.ThresholdTokens), statusPercentInt(context.ThresholdTokens, context.WindowTokens))
 }
 
-func statusSkillTokenLine(skill runtime.SkillInspection, tokenCounts map[string]int) string {
+func statusSkillLine(skill runtime.SkillInspection, tokenCounts map[string]int) string {
 	name := strings.TrimSpace(skill.Name)
 	if name == "" {
 		name = filepath.Base(filepath.Dir(skill.Path))
+	}
+	if skill.Disabled {
+		return name + " " + lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true).Render("disabled")
 	}
 	return fmt.Sprintf("%s (%s)", name, statusTokenShort(tokenCounts[strings.TrimSpace(skill.Path)]))
 }

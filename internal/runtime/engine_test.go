@@ -3157,7 +3157,7 @@ func TestAppendMissingReviewerMetaContextPrependsAgentsAndEnvironmentWhenMissing
 	}
 
 	in := []llm.Message{{Role: llm.RoleUser, Content: "request"}}
-	got, err := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false)
+	got, err := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false, nil)
 	if err != nil {
 		t.Fatalf("appendMissingReviewerMetaContext: %v", err)
 	}
@@ -3198,7 +3198,7 @@ func TestAppendMissingReviewerMetaContextKeepsExistingMetaMessages(t *testing.T)
 		existingEnv,
 		{Role: llm.RoleUser, Content: "request"},
 	}
-	got, err := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false)
+	got, err := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false, nil)
 	if err != nil {
 		t.Fatalf("appendMissingReviewerMetaContext: %v", err)
 	}
@@ -3236,7 +3236,7 @@ func TestAppendMissingReviewerMetaContextBackfillsSkillsBetweenAgentsAndEnvironm
 		{Role: llm.RoleUser, Content: "request"},
 	}
 
-	got, err := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false)
+	got, err := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false, nil)
 	if err != nil {
 		t.Fatalf("appendMissingReviewerMetaContext: %v", err)
 	}
@@ -3274,7 +3274,7 @@ func TestAppendMissingReviewerMetaContextBackfillsSkillsBeforeEnvironmentWhenNoA
 		{Role: llm.RoleUser, Content: "request"},
 	}
 
-	got, err := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false)
+	got, err := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false, nil)
 	if err != nil {
 		t.Fatalf("appendMissingReviewerMetaContext: %v", err)
 	}
@@ -5242,6 +5242,51 @@ func TestInjectsSkillsContextBeforeEnvironmentAndPersists(t *testing.T) {
 	}
 }
 
+func TestDisabledSkillsAreNotInjectedIntoNewSessions(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	homeSkillPath := writeTestSkill(t, filepath.Join(home, ".builder", "skills", "home-skill"), "home-skill", "from home")
+	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "Workspace Skill", "from workspace")
+
+	storeRoot := t.TempDir()
+	store, err := session.Create(storeRoot, "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"}, Usage: llm.Usage{WindowTokens: 200000}}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:          "gpt-5",
+		DisabledSkills: map[string]bool{"workspace skill": true},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "first"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected one model call, got %d", len(client.calls))
+	}
+
+	for _, msg := range client.calls[0].Messages {
+		if msg.Role != llm.RoleDeveloper || msg.MessageType != llm.MessageTypeSkills {
+			continue
+		}
+		if strings.Contains(msg.Content, "Workspace Skill") {
+			t.Fatalf("did not expect disabled workspace skill in injected skills context, got %q", msg.Content)
+		}
+		if !strings.Contains(msg.Content, "- home-skill: from home (file: "+filepath.ToSlash(homeSkillPath)+")") {
+			t.Fatalf("expected enabled home skill to remain, got %q", msg.Content)
+		}
+		return
+	}
+	t.Fatalf("expected skills developer message in first request, messages=%+v", client.calls[0].Messages)
+}
+
 func TestEnvironmentContextMessageIncludesStatusLineModelLabel(t *testing.T) {
 	workspace := t.TempDir()
 	msg := environmentContextMessage(workspace, "gpt-5.3-codex", "high", time.Unix(0, 0).UTC())
@@ -5643,6 +5688,69 @@ func TestQueuedUserMessageFlushesWhenAssistantReturnsWithoutTools(t *testing.T) 
 	}
 	if !hasInjected {
 		t.Fatalf("expected flushed user message in second request, messages=%+v", second.Messages)
+	}
+}
+
+func TestQueuedUserMessageFlushedEventPrecedesConversationUpdateForInjectedMessage(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "first"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "after flush"},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	var (
+		eng                   *Engine
+		eventIndex            int
+		flushIndex            = -1
+		userConversationIndex = -1
+	)
+	eng, err = New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			eventIndex++
+			if evt.Kind == EventUserMessageFlushed && evt.UserMessage == "steer now" && flushIndex < 0 {
+				flushIndex = eventIndex
+			}
+			if evt.Kind != EventConversationUpdated || eng == nil || userConversationIndex >= 0 {
+				return
+			}
+			snapshot := eng.ChatSnapshot()
+			if len(snapshot.Entries) == 0 {
+				return
+			}
+			last := snapshot.Entries[len(snapshot.Entries)-1]
+			if last.Role == string(llm.RoleUser) && last.Text == "steer now" {
+				userConversationIndex = eventIndex
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	eng.QueueUserMessage("steer now")
+	if _, err := eng.SubmitUserMessage(context.Background(), "start"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if flushIndex < 0 {
+		t.Fatal("expected user_message_flushed event")
+	}
+	if userConversationIndex < 0 {
+		t.Fatal("expected conversation_updated event for injected user message")
+	}
+	if flushIndex >= userConversationIndex {
+		t.Fatalf("expected flushed event before conversation update, got flush=%d conversation=%d", flushIndex, userConversationIndex)
 	}
 }
 

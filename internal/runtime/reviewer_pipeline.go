@@ -140,7 +140,7 @@ func (r *defaultReviewerPipeline) RunSuggestions(ctx context.Context, reviewerCl
 	})
 
 	messages := sanitizeMessagesForLLM(e.snapshotMessages())
-	reviewerMessages, err := buildReviewerRequestMessages(messages, e.store.Meta().WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), e.cfg.HeadlessMode)
+	reviewerMessages, err := buildReviewerRequestMessages(messages, e.store.Meta().WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), e.cfg.HeadlessMode, e.cfg.DisabledSkills)
 	if err != nil {
 		return reviewerSuggestionsResult{}, fmt.Errorf("build reviewer request messages: %w", err)
 	}
