@@ -383,7 +383,7 @@ func (defaultUIStatusCollector) CollectGit(ctx context.Context, _ uiStatusReques
 func (defaultUIStatusCollector) CollectEnvironment(_ context.Context, req uiStatusRequest, _ uiStatusSnapshot) uiStatusEnvironmentStageResult {
 	result := uiStatusEnvironmentStageResult{}
 	warnings := make([]string, 0, 2)
-	skills, skillsErr := runtime.InspectSkills(req.WorkspaceRoot)
+	skills, skillsErr := runtime.InspectSkills(req.WorkspaceRoot, config.DisabledSkillToggles(req.Settings))
 	if skillsErr != nil {
 		warnings = append(warnings, "skills: "+skillsErr.Error())
 	} else {
@@ -725,7 +725,7 @@ func statusAuthInfo(state auth.State, settings config.Settings, statusErr error)
 func statusEstimateSkillTokens(skills []runtime.SkillInspection) map[string]int {
 	paths := make([]string, 0, len(skills))
 	for _, skill := range skills {
-		if !skill.Loaded {
+		if !skill.Loaded || skill.Disabled {
 			continue
 		}
 		path := strings.TrimSpace(skill.Path)

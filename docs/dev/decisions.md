@@ -7,6 +7,7 @@
 - Public docs site uses Astro + Starlight from the repository `docs/` directory, deploys as a fully static GitHub Pages site, mirrors the root `README.md` as the initial docs home, and uses Algolia DocSearch for site search.
 - v1 excludes MCP, plugins, and native subagent orchestration.
 - Skills are supported via AGENTS-driven `SKILL.md` discovery/injection from `~/.builder/skills` and `<workspace>/.builder/skills`.
+- `config.toml` supports a file-only `[skills]` boolean table for per-skill new-session enable/disable toggles; disabled skills remain visible in `/status` and only affect future skills-message injection.
 - Full-access execution in v1 (no sandbox).
 - Architecture must remain pluggable/composable with low-friction extension points.
 - Working name is `builder` and must stay easy to rename.
@@ -286,7 +287,7 @@
 - `/autocompaction` controls runtime auto-compaction invocation for the current session only.
 - `/autocompaction` toggles when called without args; `/autocompaction on|off` sets explicitly.
 - `/autocompaction` emits user-visible confirmation in transcript + status line and does not persist to config.
-- `/status` opens a read-only detail overlay with account/subscription status, workdir, session ids, compact git summary, context usage, model/config state, skills, `AGENTS.md` paths, and compaction count.
+- `/status` opens a read-only detail overlay with account/subscription status, workdir, session ids, compact git summary, context usage, model/config state, skills (including config-disabled markers), `AGENTS.md` paths, and compaction count.
 - `/status` refreshes progressively on open: the base snapshot renders immediately, then account, git, and environment sections fill in asynchronously. It uses the same detail-surface alt-screen policy and native text-selection behavior as other detail overlays.
 - Built-in prompt commands use embedded markdown templates.
 - Slash commands support file-backed prompts from:

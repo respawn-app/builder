@@ -99,6 +99,7 @@ func TestStatusCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 		},
 		Skills: []runtime.SkillInspection{
 			{Name: "apiresult", Path: "/Users/test/.builder/skills/apiresult/SKILL.md", Loaded: true},
+			{Name: "local helper", Path: "/Users/test/.builder/skills/local-helper/SKILL.md", Loaded: true, Disabled: true},
 			{Name: "broken", Path: "/Users/test/.builder/skills/broken/SKILL.md", Loaded: false, Reason: "missing SKILL.md"},
 		},
 		AgentsPaths:     []string{"/Users/test/.builder/AGENTS.md", "/tmp/workdir/AGENTS.md"},
@@ -146,7 +147,7 @@ func TestStatusCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 			t.Fatalf("expected status overlay to contain %q, got %q", want, plain)
 		}
 	}
-	for _, want := range []string{"2 skills", "/Users/test/.builder/skills", "├─ apiresult (0k)", "└─ ! broken (missing SKILL.md)"} {
+	for _, want := range []string{"3 skills", "/Users/test/.builder/skills", "├─ apiresult (0k)", "├─ local helper disabled", "└─ ! broken (missing SKILL.md)"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected grouped skill rendering to contain %q, got %q", want, plain)
 		}

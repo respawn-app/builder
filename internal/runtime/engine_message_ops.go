@@ -36,6 +36,11 @@ func (e *Engine) appendUserMessage(stepID, text string) error {
 	return e.appendMessage(stepID, msg)
 }
 
+func (e *Engine) appendUserMessageWithoutConversationUpdate(stepID, text string) error {
+	msg := llm.Message{Role: llm.RoleUser, Content: text}
+	return e.appendMessageWithoutConversationUpdate(stepID, msg)
+}
+
 func (e *Engine) injectHeadlessModeTransitionPromptIfNeeded(stepID string) error {
 	messages := e.snapshotMessages()
 	if e.cfg.HeadlessMode {
@@ -123,6 +128,12 @@ func (e *Engine) appendMessage(stepID string, msg llm.Message) error {
 	if err == nil {
 		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
 	}
+	return err
+}
+
+func (e *Engine) appendMessageWithoutConversationUpdate(stepID string, msg llm.Message) error {
+	e.chat.appendMessage(msg)
+	_, err := e.store.AppendEvent(stepID, "message", msg)
 	return err
 }
 
