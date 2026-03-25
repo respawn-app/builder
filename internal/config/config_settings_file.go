@@ -114,7 +114,7 @@ func WriteSettingsFileForOnboarding(settings Settings) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := writeSettingsFile(path, settingsTOML(normalized)); err != nil {
+	if err := writeSettingsFile(path, settingsTOMLForOnboarding(normalized)); err != nil {
 		return "", err
 	}
 	return path, nil

@@ -466,6 +466,38 @@ func TestOnboardingDefaultsPathPreservesAutoWhenUsingDetectedDefault(t *testing.
 	}
 }
 
+func TestOnboardingCustomPathPreservesAutoWhenUsingDetectedDefault(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("load defaults: %v", err)
+	}
+	model := newOnboardingModel(t.TempDir(), onboardingFlowState{
+		settings:         cfg.Settings,
+		baselineSettings: cfg.Settings,
+		theme:            theme.Auto,
+		skillImport:      onboardingImportSelection{Mode: onboardingImportModeNone},
+		commandImport:    onboardingImportSelection{Mode: onboardingImportModeNone},
+	})
+	msg := model.finalizeCmd(false)()
+	done, ok := msg.(onboardingFinalizeDoneMsg)
+	if !ok {
+		t.Fatalf("expected onboarding finalize message, got %T", msg)
+	}
+	if done.err != nil {
+		t.Fatalf("finalize custom path: %v", done.err)
+	}
+	contents, err := os.ReadFile(done.result.SettingsPath)
+	if err != nil {
+		t.Fatalf("read written settings: %v", err)
+	}
+	if !strings.Contains(string(contents), "theme = \"auto\"") {
+		t.Fatalf("expected custom path to preserve auto theme, got %q", string(contents))
+	}
+}
+
 func TestOnboardingProviderCapabilitiesFromAuthMode(t *testing.T) {
 	oauthCaps, err := onboardingProviderCapabilities(auth.State{Method: auth.Method{Type: auth.MethodOAuth}}, config.Settings{})
 	if err != nil {

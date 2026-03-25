@@ -191,6 +191,22 @@ func TestWriteDefaultSettingsFileUsesAutoThemeByDefault(t *testing.T) {
 	}
 }
 
+func TestWriteSettingsFileForOnboardingPreservesAutoTheme(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path, err := WriteSettingsFileForOnboarding(defaultSettings())
+	if err != nil {
+		t.Fatalf("write onboarding settings: %v", err)
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read settings file: %v", err)
+	}
+	if !strings.Contains(string(contents), "theme = \"auto\"") {
+		t.Fatalf("expected onboarding settings file to preserve auto theme, got %q", string(contents))
+	}
+}
+
 func TestValidateThemeAllowsAutoAndEmpty(t *testing.T) {
 	for _, value := range []string{"", "auto", "light", "dark"} {
 		if err := validateTheme(settingsState{Settings: Settings{Theme: value}}, nil); err != nil {
