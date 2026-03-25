@@ -162,7 +162,7 @@ File-based tool toggles merge with defaults. `BUILDER_TOOLS` and `--tools` behav
 | --- | --- | --- |
 | `tools.ask_question` | `true` | The `ask_question` tool |
 | `tools.exec_command` | `true` | The `exec_command` tool |
-| `tools.multi_tool_use_parallel` | `true` | The `multi_tool_use_parallel` tool |
+| `tools.multi_tool_use_parallel` | `model-derived` | The `multi_tool_use_parallel` tool |
 | `tools.patch` | `true` | The `patch` tool |
 | `tools.shell` | `true` | The `shell` tool |
 | `tools.view_image` | `true` | The `view_image` tool |
@@ -172,6 +172,7 @@ File-based tool toggles merge with defaults. `BUILDER_TOOLS` and `--tools` behav
 Notes:
 
 - `tools.web_search = true` does not force web search on. Native search still depends on `web_search = "native"` and provider support.
+- If `tools.multi_tool_use_parallel` is not explicitly set, Builder derives its default from the configured model capability contract. Explicit file/env/CLI tool settings take precedence.
 - `tools.view_image = true` does not bypass model capability checks. If the model does not support vision inputs, the tool will not be request-exposed.
 - `BUILDER_TOOLS` and `--tools` accept a comma-separated list of canonical tool IDs such as `shell,patch,ask_question`.
 
