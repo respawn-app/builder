@@ -14,6 +14,8 @@ Builder resolves settings in this order (lower=higher):
 
 When you `continue` a session, Builder reuses the saved workspace root and saved continuation `openai_base_url` unless you explicitly pass `--workspace` or `--openai-base-url`.
 
+If `~/.builder/config.toml` does not exist after the first successful auth, interactive startup opens a first-time setup flow and writes the file only after that flow completes. The flow asks for a theme before any other setup choices, preselects `light` or `dark` from terminal background detection, and keeps `theme = "auto"` if you accept that detected default. It only writes an explicit `light` or `dark` when you intentionally override the detected choice.
+
 ## Locations
 
 ### Settings file
@@ -38,7 +40,7 @@ Changing `persistence_root` does not move `config.toml`.
 model = "gpt-5.4"
 thinking_level = "medium" # low, medium, high, xhigh
 model_verbosity = "medium" # or "low"
-theme = "dark" # or light
+theme = "auto" # or light / dark
 web_search = "native"
 compaction_mode = "local" # or "native" (if supported)
 
@@ -91,7 +93,7 @@ Related, but not part of the settings model:
 | `model` | string | `gpt-5.4` | `BUILDER_MODEL` | `--model` | Model name. If provider inference from the model name is not enough, set `provider_override` too. |
 | `thinking_level` | string | `medium` | `BUILDER_THINKING_LEVEL` | `--thinking-level` | Reasoning effort. Allowed: `low`, `medium`, `high`, `xhigh`. |
 | `model_verbosity` | string | `medium` |  |  | Text verbosity hint for supported models. Allowed: `""`, `low`, `medium`, `high`. Unsupported models ignore it. |
-| `theme` | string | `dark` | `BUILDER_THEME` | `--theme` | TUI theme. Allowed: `light`, `dark`. |
+| `theme` | string | `auto` | `BUILDER_THEME` | `--theme` | TUI theme. Allowed: `auto`, `light`, `dark`. `light` and `dark` force Builder's fixed palettes. `auto` or an omitted value falls back to terminal background detection. |
 | `tui_alternate_screen` | string | `auto` | `BUILDER_TUI_ALTERNATE_SCREEN` |  | Alternate-screen policy. Allowed: `auto`, `always`, `never`. |
 | `notification_method` | string | `auto` | `BUILDER_NOTIFICATION_METHOD` |  | Terminal notification style for asks and tool-heavy turn completion. Ask notifications include the question text and use the session title when set. Allowed: `auto`, `osc9`, `bel`. `auto` chooses `osc9` on supported terminals and falls back to `bel`. |
 | `tool_preambles` | bool | `true` | `BUILDER_TOOL_PREAMBLES` |  | Includes tool-usage preambles in the main system prompt for interactive runs. Headless `builder run` still suppresses them. |
@@ -158,7 +160,7 @@ Use these only for custom providers or stale provider contracts.
 
 File-based tool toggles merge with defaults. `BUILDER_TOOLS` and `--tools` behave differently: they replace the entire tool set with the CSV you provide.
 
-Builder's auto-generated default `config.toml` omits `[tools]` entirely until you want explicit per-tool overrides.
+Builder's generated `config.toml` omits `[tools]` entirely until you want explicit per-tool overrides.
 
 | Key | Default | What enabling it exposes |
 | --- | --- | --- |

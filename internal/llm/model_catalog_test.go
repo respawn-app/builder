@@ -36,6 +36,33 @@ func TestLookupModelMetadataForCodexSpark(t *testing.T) {
 	}
 }
 
+func TestLookupModelMetadataForGPT54LargeContext(t *testing.T) {
+	meta, ok := LookupModelMetadata("gpt-5.4")
+	if !ok {
+		t.Fatal("expected model metadata for gpt-5.4")
+	}
+	if meta.ContextWindowTokens != 272_000 {
+		t.Fatalf("unexpected default context window: %d", meta.ContextWindowTokens)
+	}
+	if meta.LargeContextWindowTokens != 1_000_000 {
+		t.Fatalf("unexpected large context window: %d", meta.LargeContextWindowTokens)
+	}
+}
+
+func TestSupportedThinkingLevelsModel(t *testing.T) {
+	levels := SupportedThinkingLevelsModel("gpt-5.4")
+	if got := len(levels); got != 4 {
+		t.Fatalf("expected 4 gpt-5.4 thinking levels, got %d (%v)", got, levels)
+	}
+	if levels[3] != "xhigh" {
+		t.Fatalf("expected xhigh support for gpt-5.4, got %v", levels)
+	}
+	unknown := SupportedThinkingLevelsModel("custom-alias")
+	if got := len(unknown); got != 3 {
+		t.Fatalf("expected default thinking levels for unknown model, got %d (%v)", got, unknown)
+	}
+}
+
 func TestSupportsReasoningEffortModel(t *testing.T) {
 	tests := []struct {
 		model string

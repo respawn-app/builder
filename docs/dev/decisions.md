@@ -178,14 +178,16 @@
 
 ## Configuration
 
-- User settings are loaded from `~/.builder/config.toml` with first-run auto-bootstrap.
+- User settings are loaded from `~/.builder/config.toml`.
+- If `~/.builder/config.toml` does not exist after the first successful auth, interactive startup runs a first-time setup flow before session selection. The first screen is a theme picker with a live preview. That picker preselects `light` or `dark` from terminal background detection, preserves `theme = "auto"` when the user accepts the detected default, and only writes an explicit `light` or `dark` when the user overrides that detected choice. Headless startup writes the default config directly with `theme = "auto"`.
+- `theme=light` and `theme=dark` select Builder's own fixed palettes. `theme=auto` or an omitted theme falls back to terminal background detection.
 - Unknown `config.toml` keys are rejected as configuration errors.
 - Configuration precedence: `CLI overrides > environment > settings file > built-in defaults`.
-- Thinking level passes OpenAI values through unchanged (including `xhigh`) and applies only to OpenAI model families.
-- Context window is explicit setting: `model_context_window` (default `400000`).
+- Thinking level passes configured values through unchanged and applies only to OpenAI model families.
+- Context window is explicit setting: `model_context_window` (default `272000`).
 - Validation requires `context_compaction_threshold_tokens < model_context_window`.
 - Responses API `store` is configurable via `store` / `BUILDER_STORE`, default `false`.
-- Compaction routing is configurable by `compaction_mode` (`native|local|none`, default `native`).
+- Compaction routing is configurable by `compaction_mode` (`native|local|none`, default `local`).
 - Terminal notification backend is configurable by `notification_method` (`auto|osc9|bel`, default `auto`).
 - TUI alternate-screen policy is configurable by `tui_alternate_screen` (`auto|always|never`, default `auto`).
 - `tools.web_search` is enabled by default; `web_search` controls whether provider-native web search is activated (`native`) or disabled (`off`).

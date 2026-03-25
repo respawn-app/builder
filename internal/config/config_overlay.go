@@ -17,6 +17,23 @@ func inheritReviewerDefaults(settings *Settings) {
 	}
 }
 
+func NormalizeSettingsForPersistence(settings Settings) (Settings, error) {
+	normalized := settings
+	if normalized.EnabledTools == nil {
+		normalized.EnabledTools = defaultEnabledToolMap()
+	}
+	if normalized.SkillToggles == nil {
+		normalized.SkillToggles = map[string]bool{}
+	}
+	inheritReviewerDefaults(&normalized)
+	sources := configRegistry.defaultSourceMap()
+	sources["model"] = "file"
+	if err := validateSettings(normalized, sources); err != nil {
+		return Settings{}, err
+	}
+	return normalized, nil
+}
+
 func parseEnabledToolsCSV(raw string) ([]tools.ID, error) {
 	parts := strings.Split(raw, ",")
 	seen := map[tools.ID]bool{}

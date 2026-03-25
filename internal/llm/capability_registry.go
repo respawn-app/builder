@@ -17,9 +17,12 @@ import (
 type ModelCapabilityContract struct {
 	Model                        string
 	ContextWindowTokens          int
+	LargeContextWindowTokens     int
 	SupportsReasoningEffort      bool
+	SupportedReasoningEfforts    []string
 	SupportsReasoningSummary     bool
 	SupportsVerbosity            bool
+	SupportedVerbosityLevels     []string
 	SupportsVisionInputs         bool
 	SupportsMultiToolUseParallel bool
 }

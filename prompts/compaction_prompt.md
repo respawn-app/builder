@@ -153,10 +153,10 @@ Fully list mistakes that were made that required correction during the session a
 
 # Style and constraints for the handoff document
 
-- Write in clear, concise technical English.
+- Your handoff will not be exposed to users, only as internal reasoning document for the next agent. Use same terse style as for the `analysis` channel.
 - Prefer specifics (file paths, function names, commands) over vague descriptions.
 - Avoid restating generic project documentation or common knowledge
-- Be thorough, do not attempt to save tokens, space, or follow verbosity instructions that apply outside of this task.
+- Do not follow verbosity instructions that apply outside of this task.
 - Do not include any overall document headers like "# HANDOFF".
 - Do NOT repeat the content or instructions from AGENTS.md files in your handoff (the next agent will see those). However, treat instructions from the user (as User messages in this conversation) as essential.
 

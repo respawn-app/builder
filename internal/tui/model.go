@@ -195,7 +195,7 @@ func NewModel(opts ...Option) Model {
 		mode:          ModeOngoing,
 		viewportLines: DefaultPreviewLines,
 		viewportWidth: 120,
-		theme:         "dark",
+		theme:         normalizeTheme(""),
 		ongoingDirty:  true,
 		detailDirty:   true,
 	}

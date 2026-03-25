@@ -40,6 +40,7 @@ You can switch later with `/logout`.
 ## Main Workflows
 
 - Use `Enter` to steer the model, `Tab` to queue messages.
+- Type `$ <command>` to execute a shell command and show its output to the model.
 - While the model is still working, `Enter` adds a pending steering message instead of hiding it. Pending steering stays visible in the queue area as `next: ...` until it is sent.
 - Use `Shift+Tab` to toggle between detailed transcript mode and ongoing mode.
 - Press `Esc` twice to enter Edit mode, which lets you go back in time, edit a previous message, and fork the session into a new one. File edits stay.
@@ -58,14 +59,16 @@ For the full command reference, see [Slash Commands](/slash-commands/).
 
 ## Configuration
 
-Builder reads settings from `~/.builder/config.toml`, which will be auto-created on first start.
+Builder reads settings from `~/.builder/config.toml`.
+
+On the first successful auth, if that file does not exist yet, Builder runs a short first-time setup flow. It asks for your theme first, then lets you either keep the defaults or write a customized config before session startup continues. If you keep the detected theme choice, Builder preserves `theme = "auto"`; it only writes explicit `light` or `dark` when you override the detected default.
 
 The full reference is on the [Configuration](/config/) page.
 
 The most useful options to review early are:
 - `model` to choose your default model.
 - `thinking_level` and `model_verbosity` to control reasoning effort and response density.
-- `theme` to match your terminal workflow.
+- `theme` to match your terminal workflow. `auto` follows terminal background detection.
 - `web_search` to enable or disable native web search.
 - `compaction_mode` and `context_compaction_threshold_tokens` to control context management.
 - `tools.ask_question` to control whether you want the agent to ask you questions.

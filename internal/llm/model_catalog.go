@@ -3,8 +3,12 @@ package llm
 import "strings"
 
 type ModelMetadata struct {
-	ContextWindowTokens int
+	ContextWindowTokens      int
+	LargeContextWindowTokens int
 }
+
+var defaultSupportedThinkingLevels = []string{"low", "medium", "high"}
+var defaultSupportedVerbosityLevels = []string{"low", "medium", "high"}
 
 func ModelDisplayLabel(model string, thinkingLevel string) string {
 	modelLabel := strings.TrimSpace(model)
@@ -79,5 +83,35 @@ func LookupModelMetadata(model string) (ModelMetadata, bool) {
 	if !ok {
 		return ModelMetadata{}, false
 	}
-	return ModelMetadata{ContextWindowTokens: contract.ContextWindowTokens}, contract.ContextWindowTokens > 0
+	return ModelMetadata{
+		ContextWindowTokens:      contract.ContextWindowTokens,
+		LargeContextWindowTokens: contract.LargeContextWindowTokens,
+	}, contract.ContextWindowTokens > 0 || contract.LargeContextWindowTokens > 0
+}
+
+func SupportedThinkingLevelsModel(model string) []string {
+	if !SupportsReasoningEffortModel(model) {
+		return nil
+	}
+	contract, ok := LookupModelCapabilityContract(model)
+	if ok && len(contract.SupportedReasoningEfforts) > 0 {
+		return append([]string(nil), contract.SupportedReasoningEfforts...)
+	}
+	return append([]string(nil), defaultSupportedThinkingLevels...)
+}
+
+func SupportedVerbosityLevelsModel(model string) []string {
+	if !SupportsVerbosityModel(model) {
+		return nil
+	}
+	contract, ok := LookupModelCapabilityContract(model)
+	if ok && len(contract.SupportedVerbosityLevels) > 0 {
+		return append([]string(nil), contract.SupportedVerbosityLevels...)
+	}
+	return append([]string(nil), defaultSupportedVerbosityLevels...)
+}
+
+func SupportsLargeContextWindowModel(model string) bool {
+	contract, ok := LookupModelCapabilityContract(model)
+	return ok && contract.LargeContextWindowTokens > 0
 }

@@ -10,6 +10,7 @@ import (
 	"builder/internal/config"
 	"builder/internal/runtime"
 	"builder/internal/session"
+	"builder/internal/theme"
 	"builder/internal/tools/askquestion"
 	shelltool "builder/internal/tools/shell"
 	"builder/internal/tui"
@@ -412,7 +413,7 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 		promptHistoryDraftCursor: -1,
 		commandRegistry:          commands.NewDefaultRegistry(),
 		exitAction:               UIActionNone,
-		theme:                    "dark",
+		theme:                    theme.Auto,
 		tuiAlternateScreen:       config.TUIAlternateScreenAuto,
 		debugKeys:                envFlagEnabled("BUILDER_DEBUG_KEYS"),
 		reviewerMode:             "off",

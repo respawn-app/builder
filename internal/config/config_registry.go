@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"builder/internal/theme"
 	"builder/internal/tools"
 )
 
@@ -107,7 +108,7 @@ func newSettingsRegistry() settingsRegistry {
 			func(state settingsState) string { return state.Settings.Theme },
 			"BUILDER_THEME",
 			func(opts LoadOptions) (string, bool, error) { return trimmedCLIString(opts.Theme) },
-			nil,
+			theme.Normalize,
 			settingDocOptions{}),
 		newStringSetting("tui_alternate_screen", TUIAlternateScreenPolicy(defaultTUIAlternateScreen),
 			func(state *settingsState, value TUIAlternateScreenPolicy) { state.Settings.TUIAlternateScreen = value },
