@@ -215,7 +215,6 @@ func discoverProviderCommandSymlinkItems(provider onboardingImportProvider, base
 		if len(items) > 0 {
 			return root, items, nil
 		}
-		return root, nil, nil
 	}
 	return "", nil, nil
 }
