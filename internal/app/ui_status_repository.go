@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"path"
 	"strings"
 	"sync"
@@ -191,11 +193,15 @@ func statusAuthIdentity(state auth.State) string {
 		if oauth == nil {
 			return "oauth"
 		}
-		return strings.Join([]string{
+		parts := []string{
 			"oauth",
 			strings.TrimSpace(oauth.AccountID),
 			strings.TrimSpace(oauth.Email),
-		}, "|")
+		}
+		if parts[1] == "" && parts[2] == "" {
+			parts = append(parts, statusOpaqueOAuthIdentity(*oauth))
+		}
+		return strings.Join(parts, "|")
 	case auth.MethodAPIKey:
 		return strings.Join([]string{
 			"apikey",
@@ -204,4 +210,16 @@ func statusAuthIdentity(state auth.State) string {
 	default:
 		return "auth:none"
 	}
+}
+
+func statusOpaqueOAuthIdentity(oauth auth.OAuthMethod) string {
+	token := strings.TrimSpace(oauth.RefreshToken)
+	if token == "" {
+		token = strings.TrimSpace(oauth.AccessToken)
+	}
+	if token == "" {
+		return "opaque"
+	}
+	sum := sha256.Sum256([]byte(token))
+	return fmt.Sprintf("opaque:%x", sum[:8])
 }

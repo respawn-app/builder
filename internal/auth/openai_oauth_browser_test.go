@@ -116,18 +116,16 @@ func TestCompleteOpenAIBrowserFlow(t *testing.T) {
 	defer server.Close()
 
 	session, err := BeginOpenAIBrowserFlow(OpenAIOAuthOptions{
-		Issuer:     server.URL,
 		ClientID:   "client-1",
-		HTTPClient: server.Client(),
+		HTTPClient: rewriteOAuthIssuerClient(server),
 	}, "http://127.0.0.1:5555/callback")
 	if err != nil {
 		t.Fatalf("begin flow: %v", err)
 	}
 
 	method, err := CompleteOpenAIBrowserFlow(context.Background(), OpenAIOAuthOptions{
-		Issuer:     server.URL,
 		ClientID:   "client-1",
-		HTTPClient: server.Client(),
+		HTTPClient: rewriteOAuthIssuerClient(server),
 	}, session, "http://127.0.0.1:5555/callback?code=auth-code-1&state="+session.State)
 	if err != nil {
 		t.Fatalf("complete flow: %v", err)
@@ -169,7 +167,6 @@ func TestCompleteOpenAIBrowserFlowWithDefaultHTTPClient(t *testing.T) {
 	defer server.Close()
 
 	session, err := BeginOpenAIBrowserFlow(OpenAIOAuthOptions{
-		Issuer:   server.URL,
 		ClientID: "client-2",
 	}, "http://localhost:1455/auth/callback")
 	if err != nil {
@@ -177,8 +174,8 @@ func TestCompleteOpenAIBrowserFlowWithDefaultHTTPClient(t *testing.T) {
 	}
 
 	method, err := CompleteOpenAIBrowserFlow(context.Background(), OpenAIOAuthOptions{
-		Issuer:   server.URL,
-		ClientID: "client-2",
+		ClientID:   "client-2",
+		HTTPClient: rewriteOAuthIssuerClient(server),
 	}, session, "http://localhost:1455/auth/callback?code=auth-code-2&state="+session.State)
 	if err != nil {
 		t.Fatalf("complete flow: %v", err)

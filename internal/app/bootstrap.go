@@ -48,7 +48,7 @@ func bootstrapApp(ctx context.Context, opts Options, interactor authInteractor) 
 	}
 
 	oauthOpts := auth.OpenAIOAuthOptions{
-		Issuer:   textutil.FirstNonEmpty(strings.TrimSpace(os.Getenv("BUILDER_OAUTH_ISSUER")), auth.DefaultOpenAIIssuer),
+		Issuer:   auth.DefaultOpenAIIssuer,
 		ClientID: textutil.FirstNonEmpty(strings.TrimSpace(os.Getenv("BUILDER_OAUTH_CLIENT_ID")), auth.DefaultOpenAIClientID),
 	}
 	if interactor == nil {

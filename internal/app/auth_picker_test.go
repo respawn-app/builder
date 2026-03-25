@@ -24,6 +24,32 @@ type stubOAuthCallbackListener struct {
 	closed   int
 }
 
+type oauthIssuerRewriteRoundTripper func(*http.Request) (*http.Response, error)
+
+func (fn oauthIssuerRewriteRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
+func rewriteOAuthIssuerClient(server *httptest.Server) *http.Client {
+	target, err := url.Parse(server.URL)
+	if err != nil {
+		panic(err)
+	}
+	client := server.Client()
+	base := client.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	client.Transport = oauthIssuerRewriteRoundTripper(func(req *http.Request) (*http.Response, error) {
+		clone := req.Clone(req.Context())
+		clone.URL.Scheme = target.Scheme
+		clone.URL.Host = target.Host
+		clone.Host = target.Host
+		return base.RoundTrip(clone)
+	})
+	return client
+}
+
 func (l *stubOAuthCallbackListener) RedirectURI() string {
 	return "http://127.0.0.1:0/callback"
 }
@@ -581,7 +607,6 @@ func TestRunOAuthBrowserAutoClosesListenerAfterWaitFailure(t *testing.T) {
 
 func TestRunOAuthBrowserAutoClosesListenerAfterSuccessfulCompletion(t *testing.T) {
 	listener := &stubOAuthCallbackListener{callback: auth.BrowserCallback{Code: "code-1"}}
-	var issuer string
 	const clientID = "client-1"
 	callbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -610,7 +635,6 @@ func TestRunOAuthBrowserAutoClosesListenerAfterSuccessfulCompletion(t *testing.T
 		}
 	}))
 	defer callbackServer.Close()
-	issuer = callbackServer.URL
 
 	interactor := &interactiveAuthInteractor{
 		startCallbackListener: func() (oauthCallbackListener, error) {
@@ -628,9 +652,8 @@ func TestRunOAuthBrowserAutoClosesListenerAfterSuccessfulCompletion(t *testing.T
 	}
 
 	method, err := interactor.runOAuthBrowserAuto(context.Background(), auth.OpenAIOAuthOptions{
-		Issuer:     issuer,
 		ClientID:   clientID,
-		HTTPClient: callbackServer.Client(),
+		HTTPClient: rewriteOAuthIssuerClient(callbackServer),
 	}, "dark")
 	if err != nil {
 		t.Fatalf("expected successful browser auth, got %v", err)

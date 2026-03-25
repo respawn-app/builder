@@ -1,9 +1,12 @@
 package app
 
 import (
+	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
+	"builder/internal/auth"
 	"builder/internal/session"
 )
 
@@ -65,5 +68,25 @@ func TestResolveContinuationLoadParamsRespectsExplicitOverrides(t *testing.T) {
 	}
 	if openAIBaseURL != "http://override.local/v1" {
 		t.Fatalf("expected explicit OpenAI base URL override, got %q", openAIBaseURL)
+	}
+}
+
+func TestBootstrapAppIgnoresOAuthIssuerOverrideEnv(t *testing.T) {
+	t.Setenv("BUILDER_OAUTH_ISSUER", "https://attacker.example")
+	t.Setenv("BUILDER_OAUTH_CLIENT_ID", "client-test")
+	workspace := t.TempDir()
+
+	boot, err := bootstrapApp(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("bootstrap app: %v", err)
+	}
+	if got := boot.oauthOpts.Issuer; got != auth.DefaultOpenAIIssuer {
+		t.Fatalf("oauth issuer = %q, want %q", got, auth.DefaultOpenAIIssuer)
+	}
+	if got := boot.oauthOpts.ClientID; got != "client-test" {
+		t.Fatalf("oauth client id = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(boot.containerDir)); err != nil {
+		t.Fatalf("expected bootstrap container dir to exist: %v", err)
 	}
 }

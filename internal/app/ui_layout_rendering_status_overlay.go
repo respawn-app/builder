@@ -110,9 +110,11 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 	}
 	appendWrapped(statusValueOrFallback(snapshot.SessionID, "session unknown"), subtleStyle)
 
-	if l.statusSectionLoading(uiStatusSectionGit) || snapshot.Git.Visible {
+	if l.statusSectionLoading(uiStatusSectionGit) || snapshot.Git.Visible || strings.TrimSpace(snapshot.Git.Error) != "" {
 		appendSectionTitle("Git")
-		if snapshot.Git.Visible {
+		if errorText := strings.TrimSpace(snapshot.Git.Error); errorText != "" {
+			appendWrapped(errorText, warningStyle)
+		} else if snapshot.Git.Visible {
 			appendWrapped(snapshot.Git.Branch, boldStyle)
 			appendANSI(l.renderStatusGitSummaryLine(width, snapshot.Git))
 		} else {
@@ -191,12 +193,20 @@ func (l uiViewLayout) renderStatusSubscriptionLine(width int, window uiStatusSub
 	}
 	paddedLabel := statusPadRight(label, labelWidth)
 	leftStyled := lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("%.0f%% left", remaining))
-	resetText := statusSubscriptionResetMeta(window.ResetAt, time.Now())
-	metaStyled := ""
-	if resetText != "" {
-		metaStyled = lipgloss.NewStyle().Foreground(palette.muted).Faint(true).Render("• resets " + resetText)
+	metaParts := make([]string, 0, 2)
+	if qualifier := strings.TrimSpace(window.Qualifier); qualifier != "" {
+		metaParts = append(metaParts, qualifier)
 	}
-	barWidth := statusSubscriptionBarWidthForLine(width, paddedLabel, fmt.Sprintf("%.0f%% left", remaining), resetText)
+	resetText := statusSubscriptionResetMeta(window.ResetAt, time.Now())
+	if resetText != "" {
+		metaParts = append(metaParts, "resets "+resetText)
+	}
+	metaText := strings.Join(metaParts, " • ")
+	metaStyled := ""
+	if metaText != "" {
+		metaStyled = lipgloss.NewStyle().Foreground(palette.muted).Faint(true).Render("• " + metaText)
+	}
+	barWidth := statusSubscriptionBarWidthForLine(width, paddedLabel, fmt.Sprintf("%.0f%% left", remaining), metaText)
 	bar := l.statusSubscriptionBar(barWidth, remaining)
 	line := paddedLabel + " | " + bar + " | " + leftStyled
 	if metaStyled != "" {
@@ -309,10 +319,10 @@ func statusSubscriptionBarWidth(width int) int {
 	return barWidth
 }
 
-func statusSubscriptionBarWidthForLine(width int, label, leftText, resetText string) int {
+func statusSubscriptionBarWidthForLine(width int, label, leftText, metaText string) int {
 	reserved := lipgloss.Width(label) + lipgloss.Width(leftText) + 6
-	if strings.TrimSpace(resetText) != "" {
-		reserved += lipgloss.Width("• resets "+resetText) + 1
+	if strings.TrimSpace(metaText) != "" {
+		reserved += lipgloss.Width("• "+metaText) + 1
 	}
 	available := width - reserved
 	if available < 4 {

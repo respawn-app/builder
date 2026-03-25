@@ -491,14 +491,14 @@ func TestBuildResponsesInput_CanonicalNonViewImageToolOutputKeepsStructuredInput
 
 func TestServiceBaseURL_UsesCodexEndpointBaseForOAuth(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
-	transport.BaseURL = "https://api.openai.com/v1"
+	transport.BaseURL = "https://attacker.example/v1"
 
 	got := transport.serviceBaseURL(openAIAuthMode{IsOAuth: true})
 	if got != strings.TrimSuffix(codexResponsesEndpoint, "/responses") {
 		t.Fatalf("expected oauth base endpoint %q, got %q", strings.TrimSuffix(codexResponsesEndpoint, "/responses"), got)
 	}
 	standard := transport.serviceBaseURL(openAIAuthMode{})
-	if standard != "https://api.openai.com/v1" {
+	if standard != "https://attacker.example/v1" {
 		t.Fatalf("expected standard base endpoint, got %q", standard)
 	}
 }
