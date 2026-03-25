@@ -3,8 +3,10 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -418,14 +420,18 @@ func collectGitStatus(ctx context.Context, workdir string) uiStatusGitInfo {
 	if _, err := exec.LookPath("git"); err != nil {
 		return uiStatusGitInfo{}
 	}
+	isRepo, probeErr := statusGitRepositoryProbe(trimmedWorkdir)
+	if probeErr != nil {
+		return uiStatusGitInfo{Visible: true, Error: statusGitError(probeErr, "")}
+	}
+	if !isRepo {
+		return uiStatusGitInfo{}
+	}
 	gitCtx, cancel := context.WithTimeout(ctx, statusGitTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(gitCtx, "git", "-C", trimmedWorkdir, "status", "--porcelain=v2", "--branch")
 	out, err := cmd.CombinedOutput()
 	if gitCtx.Err() == context.DeadlineExceeded || err != nil {
-		if statusGitShouldHide(err, string(out)) {
-			return uiStatusGitInfo{}
-		}
 		return uiStatusGitInfo{Visible: true, Error: statusGitError(err, string(out))}
 	}
 	gitInfo := uiStatusGitInfo{Visible: true}
@@ -463,15 +469,31 @@ func collectGitStatus(ctx context.Context, workdir string) uiStatusGitInfo {
 	return gitInfo
 }
 
-func statusGitShouldHide(err error, output string) bool {
-	if err == nil {
-		return false
+func statusGitRepositoryProbe(workdir string) (bool, error) {
+	info, err := os.Stat(workdir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("inspect git workdir: %w", err)
 	}
-	text := strings.ToLower(strings.TrimSpace(output))
-	if text == "" {
-		text = strings.ToLower(err.Error())
+	if !info.IsDir() {
+		return false, nil
 	}
-	return strings.Contains(text, "not a git repository") || strings.Contains(text, "cannot change to") || strings.Contains(text, "no such file")
+	current := filepath.Clean(workdir)
+	for {
+		gitMetadataPath := filepath.Join(current, ".git")
+		if _, err := os.Lstat(gitMetadataPath); err == nil {
+			return true, nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return false, fmt.Errorf("inspect git metadata: %w", err)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return false, nil
+		}
+		current = parent
+	}
 }
 
 func statusGitError(err error, output string) string {
@@ -508,7 +530,7 @@ func statusShouldFetchSubscriptionUsage(settings config.Settings, state auth.Sta
 	if strings.TrimSpace(settings.ProviderOverride) != "" {
 		return false
 	}
-	if strings.TrimSpace(settings.OpenAIBaseURL) != "" {
+	if baseURL := strings.TrimSpace(settings.OpenAIBaseURL); baseURL != "" && !statusIsOfficialChatGPTBaseURL(baseURL) {
 		return false
 	}
 	return true
@@ -662,7 +684,7 @@ func statusAuthInfo(state auth.State, settings config.Settings, statusErr error)
 	}
 	details := make([]string, 0, 2)
 	baseURL := strings.TrimSpace(settings.OpenAIBaseURL)
-	if baseURL != "" && !statusIsDefaultOpenAIBaseURL(baseURL) {
+	if baseURL != "" && !statusIsOfficialChatGPTBaseURL(baseURL) {
 		details = append(details, filepath.ToSlash(baseURL))
 	}
 	switch state.Method.Type {
@@ -770,9 +792,24 @@ func statusConfigOverrideSources(src config.SourceReport) []string {
 	return ordered
 }
 
-func statusIsDefaultOpenAIBaseURL(baseURL string) bool {
-	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	return trimmed == "" || trimmed == "https://chatgpt.com" || trimmed == "https://chatgpt.com/backend-api" || trimmed == "https://chat.openai.com" || trimmed == "https://chat.openai.com/backend-api"
+func statusIsOfficialChatGPTBaseURL(baseURL string) bool {
+	trimmed := strings.TrimSpace(baseURL)
+	if trimmed == "" {
+		return true
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return false
+	}
+	if !strings.EqualFold(parsed.Scheme, "https") {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host != "chatgpt.com" && host != "chat.openai.com" {
+		return false
+	}
+	pathValue := strings.TrimRight(strings.TrimSpace(parsed.EscapedPath()), "/")
+	return pathValue == "" || pathValue == "/backend-api"
 }
 
 func statusModelSummary(req uiStatusRequest) string {

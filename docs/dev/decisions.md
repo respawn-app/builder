@@ -161,6 +161,7 @@
 - Startup auth picker exposes exactly three OAuth methods:
 - `oauth_browser`, `oauth_browser_paste`, `oauth_device`.
 - OAuth issuer routing is not configurable in production. Builder hardcodes the official provider issuer per provider, and `BUILDER_OAUTH_ISSUER` is intentionally unsupported to prevent credential routing to overridden domains.
+- `/status` subscription quota fetch uses a fixed ChatGPT usage endpoint. Custom `openai_base_url` values suppress quota fetch, but explicitly configured official ChatGPT hosts (`chatgpt.com`, `chat.openai.com`, with optional `/backend-api`) still allow it.
 - Startup auth picker uses friendly titles with one-line explanations and does not show raw method ids in the rows.
 - Interactive startup treats `OPENAI_API_KEY` as a chooser-backed auth source, not an unconditional override.
 - When `OPENAI_API_KEY` is present, the startup auth picker may also show a separate non-OAuth option: `Use existing OPENAI_API_KEY from now on`.

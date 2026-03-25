@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -437,6 +439,10 @@ func TestStatusRepositoryNormalizesGitCacheKeysAcrossSlashStyles(t *testing.T) {
 
 func TestCollectGitStatusSurfacesUnexpectedErrors(t *testing.T) {
 	workdir := t.TempDir()
+	cmd := exec.Command("git", "-C", workdir, "init")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v (%s)", err, out)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -449,6 +455,39 @@ func TestCollectGitStatusSurfacesUnexpectedErrors(t *testing.T) {
 	}
 	if !strings.Contains(git.Error, context.Canceled.Error()) {
 		t.Fatalf("expected git error to include underlying failure, got %+v", git)
+	}
+}
+
+func TestCollectGitStatusHidesOutsideRepository(t *testing.T) {
+	git := collectGitStatus(context.Background(), t.TempDir())
+	if git.Visible {
+		t.Fatalf("expected git section hidden outside repositories, got %+v", git)
+	}
+	if git.Error != "" {
+		t.Fatalf("expected no git error outside repositories, got %+v", git)
+	}
+}
+
+func TestCollectGitStatusDetectsNestedRepositorySubdirectory(t *testing.T) {
+	repoRoot := t.TempDir()
+	cmd := exec.Command("git", "-C", repoRoot, "init")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v (%s)", err, out)
+	}
+	nestedDir := filepath.Join(repoRoot, "a", "b", "c")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatalf("mkdir nested dir: %v", err)
+	}
+
+	git := collectGitStatus(context.Background(), nestedDir)
+	if !git.Visible {
+		t.Fatalf("expected git section visible for nested repository dir, got %+v", git)
+	}
+	if git.Error != "" {
+		t.Fatalf("expected no git error for nested repository dir, got %+v", git)
+	}
+	if strings.TrimSpace(git.Branch) == "" {
+		t.Fatalf("expected git branch detected for nested repository dir, got %+v", git)
 	}
 }
 
@@ -875,8 +914,18 @@ func TestStatusShouldFetchSubscriptionUsageOnlyForDefaultOpenAIOAuth(t *testing.
 	if !statusShouldFetchSubscriptionUsage(config.Settings{}, oauthState) {
 		t.Fatal("expected default OAuth configuration to allow subscription usage fetch")
 	}
-	if statusShouldFetchSubscriptionUsage(config.Settings{OpenAIBaseURL: "https://chatgpt.com/backend-api"}, oauthState) {
-		t.Fatal("expected explicit base URL override to disable subscription usage fetch")
+	for _, baseURL := range []string{
+		"https://chatgpt.com",
+		"https://chatgpt.com/backend-api",
+		"https://chat.openai.com",
+		"https://chat.openai.com/backend-api",
+	} {
+		if !statusShouldFetchSubscriptionUsage(config.Settings{OpenAIBaseURL: baseURL}, oauthState) {
+			t.Fatalf("expected official ChatGPT base URL %q to allow subscription usage fetch", baseURL)
+		}
+	}
+	if statusShouldFetchSubscriptionUsage(config.Settings{OpenAIBaseURL: "https://example.com/backend-api"}, oauthState) {
+		t.Fatal("expected custom base URL override to disable subscription usage fetch")
 	}
 	if statusShouldFetchSubscriptionUsage(config.Settings{ProviderOverride: "anthropic"}, oauthState) {
 		t.Fatal("expected provider override to disable subscription usage fetch")
@@ -890,9 +939,12 @@ func TestCollectSubscriptionStatusDoesNotFetchForOverrides(t *testing.T) {
 	originalFetcher := statusUsagePayloadFetcher
 	defer func() { statusUsagePayloadFetcher = originalFetcher }()
 	called := false
-	statusUsagePayloadFetcher = func(context.Context, string, auth.State) (statusUsagePayload, error) {
+	statusUsagePayloadFetcher = func(_ context.Context, baseURL string, _ auth.State) (statusUsagePayload, error) {
 		called = true
-		return statusUsagePayload{}, nil
+		if baseURL != statusUsageBaseURL {
+			t.Fatalf("usage fetch base URL = %q, want %q", baseURL, statusUsageBaseURL)
+		}
+		return statusUsagePayload{PlanType: "pro"}, nil
 	}
 	state := auth.State{Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "access-token", AccountID: "acct-123"}}}
 
@@ -906,6 +958,43 @@ func TestCollectSubscriptionStatusDoesNotFetchForOverrides(t *testing.T) {
 	}
 	if called {
 		t.Fatal("did not expect subscription usage fetcher to be called for overrides")
+	}
+
+	status = collectSubscriptionStatus(context.Background(), uiStatusRequest{Settings: config.Settings{OpenAIBaseURL: "https://chatgpt.com/backend-api"}}, state, nil)
+	if !status.Applicable || status.Summary != "Pro subscription" {
+		t.Fatalf("expected official ChatGPT base URL to preserve subscription status, got %+v", status)
+	}
+	if !called {
+		t.Fatal("expected subscription usage fetcher to be called for official ChatGPT base URL")
+	}
+}
+
+func TestCollectSubscriptionStatusUsesFixedUsageEndpointForOfficialChatGPTHost(t *testing.T) {
+	originalFetcher := statusUsagePayloadFetcher
+	defer func() { statusUsagePayloadFetcher = originalFetcher }()
+	called := false
+	statusUsagePayloadFetcher = func(_ context.Context, baseURL string, _ auth.State) (statusUsagePayload, error) {
+		called = true
+		if baseURL != statusUsageBaseURL {
+			t.Fatalf("usage fetch base URL = %q, want %q", baseURL, statusUsageBaseURL)
+		}
+		return statusUsagePayload{
+			PlanType: "pro",
+			RateLimit: &statusUsageRateLimit{
+				PrimaryWindow: &statusUsageWindow{UsedPercent: 12.5, LimitWindowSeconds: 5 * 3600, ResetAt: 1704069000},
+			},
+		}, nil
+	}
+	state := auth.State{Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "access-token", AccountID: "acct-123"}}}
+	status := collectSubscriptionStatus(context.Background(), uiStatusRequest{Settings: config.Settings{OpenAIBaseURL: "https://chatgpt.com"}}, state, nil)
+	if !called {
+		t.Fatal("expected subscription usage fetcher to be called")
+	}
+	if !status.Applicable || status.Summary != "Pro subscription" {
+		t.Fatalf("expected official ChatGPT host to preserve subscription status, got %+v", status)
+	}
+	if len(status.Windows) != 1 || status.Windows[0].Label != "5h" {
+		t.Fatalf("expected quota window preserved, got %+v", status.Windows)
 	}
 }
 
