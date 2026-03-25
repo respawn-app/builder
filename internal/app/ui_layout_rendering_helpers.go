@@ -3,6 +3,7 @@ package app
 import (
 	"strings"
 
+	"builder/internal/theme"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 )
@@ -322,30 +323,31 @@ type uiColors struct {
 	inputBg    lipgloss.TerminalColor
 }
 
-func uiPalette(theme string) uiColors {
-	theme = strings.ToLower(strings.TrimSpace(theme))
-	if theme == "light" {
+func uiPalette(themeName string) uiColors {
+	switch theme.Resolve(themeName) {
+	case theme.Light:
 		return uiColors{
-			primary:    lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "4", ANSI256: "33", TrueColor: "#4078F2"}, Dark: lipgloss.CompleteColor{ANSI: "4", ANSI256: "33", TrueColor: "#61AFEF"}},
-			secondary:  lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "6", ANSI256: "36", TrueColor: "#2AA876"}, Dark: lipgloss.CompleteColor{ANSI: "6", ANSI256: "79", TrueColor: "#7FDBA6"}},
-			foreground: lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "0", ANSI256: "235", TrueColor: "#383A42"}, Dark: lipgloss.CompleteColor{ANSI: "7", ANSI256: "252", TrueColor: "#ABB2BF"}},
-			muted:      lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "8", ANSI256: "245", TrueColor: "#A0A1A7"}, Dark: lipgloss.CompleteColor{ANSI: "8", ANSI256: "243", TrueColor: "#5C6370"}},
-			border:     lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "7", ANSI256: "250", TrueColor: "#D0D0D0"}, Dark: lipgloss.CompleteColor{ANSI: "8", ANSI256: "240", TrueColor: "#3D434F"}},
-			modeBg:     lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "7", ANSI256: "252", TrueColor: "#EAEAEB"}, Dark: lipgloss.CompleteColor{ANSI: "8", ANSI256: "238", TrueColor: "#353B45"}},
-			modeText:   lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "0", ANSI256: "235", TrueColor: "#383A42"}, Dark: lipgloss.CompleteColor{ANSI: "7", ANSI256: "252", TrueColor: "#ABB2BF"}},
-			chatBg:     lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "7", ANSI256: "255", TrueColor: "#F8F8F8"}, Dark: lipgloss.CompleteColor{ANSI: "0", ANSI256: "235", TrueColor: "#1E222A"}},
-			inputBg:    lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "7", ANSI256: "254", TrueColor: "#F2F3F5"}, Dark: lipgloss.CompleteColor{ANSI: "0", ANSI256: "236", TrueColor: "#2A2F37"}},
+			primary:    lipgloss.CompleteColor{ANSI: "4", ANSI256: "26", TrueColor: "#005CC5"},
+			secondary:  lipgloss.CompleteColor{ANSI: "2", ANSI256: "29", TrueColor: "#1B7F5A"},
+			foreground: lipgloss.CompleteColor{ANSI: "0", ANSI256: "235", TrueColor: "#1F2328"},
+			muted:      lipgloss.CompleteColor{ANSI: "8", ANSI256: "244", TrueColor: "#6A737D"},
+			border:     lipgloss.CompleteColor{ANSI: "7", ANSI256: "250", TrueColor: "#D0D7DE"},
+			modeBg:     lipgloss.CompleteColor{ANSI: "7", ANSI256: "254", TrueColor: "#EEF2F6"},
+			modeText:   lipgloss.CompleteColor{ANSI: "0", ANSI256: "235", TrueColor: "#1F2328"},
+			chatBg:     lipgloss.CompleteColor{ANSI: "7", ANSI256: "255", TrueColor: "#F6F8FA"},
+			inputBg:    lipgloss.CompleteColor{ANSI: "7", ANSI256: "254", TrueColor: "#FFFFFF"},
 		}
-	}
-	return uiColors{
-		primary:    lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "4", ANSI256: "33", TrueColor: "#4078F2"}, Dark: lipgloss.CompleteColor{ANSI: "4", ANSI256: "75", TrueColor: "#61AFEF"}},
-		secondary:  lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "6", ANSI256: "36", TrueColor: "#2AA876"}, Dark: lipgloss.CompleteColor{ANSI: "6", ANSI256: "79", TrueColor: "#7FDBA6"}},
-		foreground: lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "0", ANSI256: "235", TrueColor: "#383A42"}, Dark: lipgloss.CompleteColor{ANSI: "7", ANSI256: "252", TrueColor: "#ABB2BF"}},
-		muted:      lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "8", ANSI256: "245", TrueColor: "#A0A1A7"}, Dark: lipgloss.CompleteColor{ANSI: "8", ANSI256: "243", TrueColor: "#5C6370"}},
-		border:     lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "7", ANSI256: "250", TrueColor: "#D0D0D0"}, Dark: lipgloss.CompleteColor{ANSI: "8", ANSI256: "240", TrueColor: "#3D434F"}},
-		modeBg:     lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "7", ANSI256: "252", TrueColor: "#EAEAEB"}, Dark: lipgloss.CompleteColor{ANSI: "8", ANSI256: "238", TrueColor: "#353B45"}},
-		modeText:   lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "0", ANSI256: "235", TrueColor: "#383A42"}, Dark: lipgloss.CompleteColor{ANSI: "7", ANSI256: "252", TrueColor: "#ABB2BF"}},
-		chatBg:     lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "7", ANSI256: "255", TrueColor: "#F8F8F8"}, Dark: lipgloss.CompleteColor{ANSI: "0", ANSI256: "235", TrueColor: "#1E222A"}},
-		inputBg:    lipgloss.CompleteAdaptiveColor{Light: lipgloss.CompleteColor{ANSI: "7", ANSI256: "254", TrueColor: "#F2F3F5"}, Dark: lipgloss.CompleteColor{ANSI: "0", ANSI256: "236", TrueColor: "#2A2F37"}},
+	default:
+		return uiColors{
+			primary:    lipgloss.CompleteColor{ANSI: "4", ANSI256: "75", TrueColor: "#61AFEF"},
+			secondary:  lipgloss.CompleteColor{ANSI: "6", ANSI256: "79", TrueColor: "#7FDBA6"},
+			foreground: lipgloss.CompleteColor{ANSI: "7", ANSI256: "252", TrueColor: "#D7DAE0"},
+			muted:      lipgloss.CompleteColor{ANSI: "8", ANSI256: "243", TrueColor: "#7D8590"},
+			border:     lipgloss.CompleteColor{ANSI: "8", ANSI256: "240", TrueColor: "#3D444D"},
+			modeBg:     lipgloss.CompleteColor{ANSI: "8", ANSI256: "238", TrueColor: "#2D333B"},
+			modeText:   lipgloss.CompleteColor{ANSI: "7", ANSI256: "252", TrueColor: "#D7DAE0"},
+			chatBg:     lipgloss.CompleteColor{ANSI: "0", ANSI256: "235", TrueColor: "#161B22"},
+			inputBg:    lipgloss.CompleteColor{ANSI: "0", ANSI256: "236", TrueColor: "#22272E"},
+		}
 	}
 }

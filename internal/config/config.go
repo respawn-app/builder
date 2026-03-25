@@ -108,6 +108,7 @@ type ReviewerSettings struct {
 
 type SourceReport struct {
 	SettingsPath         string
+	SettingsFileExists   bool
 	CreatedDefaultConfig bool
 	Sources              map[string]string
 }

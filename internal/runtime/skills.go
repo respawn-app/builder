@@ -28,6 +28,12 @@ type injectedSkill struct {
 	Path        string
 }
 
+type SkillMetadata struct {
+	Name        string
+	Description string
+	Path        string
+}
+
 type skillFrontmatter struct {
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
@@ -139,6 +145,14 @@ func parseInjectedSkill(path string) (injectedSkill, bool) {
 		Description: description,
 		Path:        filepath.ToSlash(resolvedPath),
 	}, true
+}
+
+func ParseSkillMetadata(path string) (SkillMetadata, bool) {
+	skill, ok := parseInjectedSkill(path)
+	if !ok {
+		return SkillMetadata{}, false
+	}
+	return SkillMetadata{Name: skill.Name, Description: skill.Description, Path: skill.Path}, true
 }
 
 func extractSkillFrontmatter(contents string) (string, bool) {

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +14,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
+func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -23,11 +24,14 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	}
 
 	settingsPath := filepath.Join(home, ".builder", "config.toml")
-	if _, err := os.Stat(settingsPath); err != nil {
-		t.Fatalf("expected config file to exist: %v", err)
+	if _, err := os.Stat(settingsPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected config file to stay absent, got err=%v", err)
 	}
-	if !cfg.Source.CreatedDefaultConfig {
-		t.Fatalf("expected CreatedDefaultConfig=true")
+	if cfg.Source.CreatedDefaultConfig {
+		t.Fatalf("expected CreatedDefaultConfig=false")
+	}
+	if cfg.Source.SettingsFileExists {
+		t.Fatalf("expected SettingsFileExists=false")
 	}
 	if cfg.Settings.Model != defaultModel {
 		t.Fatalf("default model mismatch: %q", cfg.Settings.Model)
@@ -107,10 +111,7 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.Reviewer.VerboseOutput {
 		t.Fatalf("expected default reviewer verbose_output=false")
 	}
-	settingsBytes, err := os.ReadFile(settingsPath)
-	if err != nil {
-		t.Fatalf("read settings file: %v", err)
-	}
+	settingsBytes := []byte(defaultSettingsTOML())
 	if !strings.Contains(string(settingsBytes), "model_verbosity = \"medium\"") {
 		t.Fatalf("expected default config to expose model_verbosity option, got %q", string(settingsBytes))
 	}
@@ -128,6 +129,192 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	}
 	if strings.Contains(string(settingsBytes), "[tools]") {
 		t.Fatalf("expected default config to omit [tools] section entirely, got %q", string(settingsBytes))
+	}
+	if strings.Contains(string(settingsBytes), "This JSON block mirrors") {
+		t.Fatalf("expected default config to omit mirrored JSON block, got %q", string(settingsBytes))
+	}
+}
+
+func TestSettingsTOMLOmitsDefaultAssignmentsForOnboarding(t *testing.T) {
+	toml := settingsTOML(defaultSettings())
+	if strings.Contains(toml, "theme =") {
+		t.Fatalf("expected onboarding config to omit auto theme default, got %q", toml)
+	}
+	for _, forbidden := range []string{
+		"provider_override = \"\"",
+		"openai_base_url = \"\"",
+		"This JSON block mirrors",
+		"[reviewer]",
+		"[timeouts]",
+	} {
+		if strings.Contains(toml, forbidden) {
+			t.Fatalf("expected onboarding config to omit %q, got %q", forbidden, toml)
+		}
+	}
+}
+
+func TestSettingsTOMLRoundTripsCapabilityOverrides(t *testing.T) {
+	settings := defaultSettings()
+	settings.ModelCapabilities.SupportsReasoningEffort = true
+	settings.ProviderCapabilities = ProviderCapabilitiesOverride{
+		ProviderID:                    "openai-compatible",
+		SupportsResponsesAPI:          true,
+		SupportsServerSideContextEdit: true,
+	}
+	toml := settingsTOML(settings)
+	for _, want := range []string{
+		"[model_capabilities]",
+		"supports_reasoning_effort = true",
+		"[provider_capabilities]",
+		"provider_id = \"openai-compatible\"",
+		"supports_responses_api = true",
+		"supports_server_side_context_edit = true",
+	} {
+		if !strings.Contains(toml, want) {
+			t.Fatalf("expected serialized settings to contain %q, got %q", want, toml)
+		}
+	}
+	if strings.Contains(toml, "# [model_capabilities]") {
+		t.Fatalf("expected model_capabilities section to be active when overrides exist, got %q", toml)
+	}
+	if strings.Contains(toml, "# [provider_capabilities]") {
+		t.Fatalf("expected provider_capabilities section to be active when overrides exist, got %q", toml)
+	}
+
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(toml), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	raw, err := readSettingsFile(path)
+	if err != nil {
+		t.Fatalf("read settings file: %v", err)
+	}
+	state := configRegistry.defaultState()
+	sources := configRegistry.defaultSourceMap()
+	if err := configRegistry.applyFile(raw, path, &state, sources); err != nil {
+		t.Fatalf("apply file: %v", err)
+	}
+	if !state.Settings.ModelCapabilities.SupportsReasoningEffort {
+		t.Fatal("expected model capability override to round-trip")
+	}
+	if state.Settings.ProviderCapabilities.ProviderID != "openai-compatible" {
+		t.Fatalf("expected provider_id to round-trip, got %q", state.Settings.ProviderCapabilities.ProviderID)
+	}
+	if !state.Settings.ProviderCapabilities.SupportsResponsesAPI {
+		t.Fatal("expected supports_responses_api to round-trip")
+	}
+	if !state.Settings.ProviderCapabilities.SupportsServerSideContextEdit {
+		t.Fatal("expected supports_server_side_context_edit to round-trip")
+	}
+}
+
+func TestWriteDefaultSettingsFileWithThemePersistsSelectedTheme(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path, created, err := WriteDefaultSettingsFileWithTheme("light")
+	if err != nil {
+		t.Fatalf("write default settings with theme: %v", err)
+	}
+	if !created {
+		t.Fatal("expected default settings file to be created")
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read settings file: %v", err)
+	}
+	if !strings.Contains(string(contents), "theme = \"light\"") {
+		t.Fatalf("expected selected theme to be persisted, got %q", string(contents))
+	}
+}
+
+func TestWriteDefaultSettingsFileUsesAutoThemeByDefault(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path, created, err := WriteDefaultSettingsFile()
+	if err != nil {
+		t.Fatalf("write default settings: %v", err)
+	}
+	if !created {
+		t.Fatal("expected default settings file to be created")
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read settings file: %v", err)
+	}
+	if !strings.Contains(string(contents), "theme = \"auto\"") {
+		t.Fatalf("expected default settings file to persist auto theme, got %q", string(contents))
+	}
+}
+
+func TestWriteSettingsFileForOnboardingPreservesAutoTheme(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path, err := WriteSettingsFileForOnboarding(defaultSettings())
+	if err != nil {
+		t.Fatalf("write onboarding settings: %v", err)
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read settings file: %v", err)
+	}
+	if !strings.Contains(string(contents), "theme = \"auto\"") {
+		t.Fatalf("expected onboarding settings file to preserve auto theme, got %q", string(contents))
+	}
+}
+
+func TestWriteSettingsFileForOnboardingPreservesModelWhenProviderOverrideIsSet(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	settings := defaultSettings()
+	settings.ProviderOverride = "openai"
+	path, err := WriteSettingsFileForOnboarding(settings)
+	if err != nil {
+		t.Fatalf("write onboarding settings: %v", err)
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read settings file: %v", err)
+	}
+	if !strings.Contains(string(contents), "model = \"gpt-5.4\"") {
+		t.Fatalf("expected onboarding settings to preserve explicit model with provider_override, got %q", string(contents))
+	}
+	if !strings.Contains(string(contents), "provider_override = \"openai\"") {
+		t.Fatalf("expected provider_override to be persisted, got %q", string(contents))
+	}
+	if _, err := Load(workspace, LoadOptions{}); err != nil {
+		t.Fatalf("expected persisted provider_override config to load successfully, got %v", err)
+	}
+}
+
+func TestWriteSettingsFileForOnboardingDoesNotOverwriteExistingFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model = \"existing\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_, err := WriteSettingsFileForOnboarding(defaultSettings())
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected existing settings file error, got %v", err)
+	}
+	contents, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read settings file: %v", err)
+	}
+	if string(contents) != "model = \"existing\"\n" {
+		t.Fatalf("expected existing settings file contents to remain unchanged, got %q", string(contents))
+	}
+}
+
+func TestValidateThemeAllowsAutoAndEmpty(t *testing.T) {
+	for _, value := range []string{"", "auto", "light", "dark"} {
+		if err := validateTheme(settingsState{Settings: Settings{Theme: value}}, nil); err != nil {
+			t.Fatalf("validate theme %q: %v", value, err)
+		}
 	}
 }
 
@@ -1051,14 +1238,18 @@ func TestLoadBGShellsOutputPrecedenceAndValidation(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsInvalidThinkingLevel(t *testing.T) {
+func TestLoadAcceptsCustomThinkingLevel(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("BUILDER_THINKING_LEVEL", "ultra")
 
-	if _, err := Load(workspace, LoadOptions{}); err == nil {
-		t.Fatal("expected invalid thinking level error")
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.ThinkingLevel != "ultra" {
+		t.Fatalf("expected custom thinking level preserved, got %q", cfg.Settings.ThinkingLevel)
 	}
 }
 
@@ -1100,6 +1291,44 @@ func TestLoadOpenAIBaseURLPrecedence(t *testing.T) {
 	}
 	if got := cfg.Source.Sources["openai_base_url"]; got != "cli" {
 		t.Fatalf("expected openai_base_url source cli, got %q", got)
+	}
+}
+
+func TestNormalizeSettingsForPersistence_AllowsDisabledThinkingWithReviewerInheritance(t *testing.T) {
+	settings := defaultSettings()
+	settings.Model = "gpt-5.4"
+	settings.ThinkingLevel = ""
+	settings.Reviewer = ReviewerSettings{
+		Frequency:      "edits",
+		Model:          "",
+		ThinkingLevel:  "",
+		TimeoutSeconds: defaultReviewerTimeoutSec,
+		VerboseOutput:  false,
+	}
+
+	normalized, err := NormalizeSettingsForPersistence(settings)
+	if err != nil {
+		t.Fatalf("normalize settings for persistence: %v", err)
+	}
+	if normalized.Reviewer.Model != "gpt-5.4" {
+		t.Fatalf("expected reviewer model to inherit main model, got %q", normalized.Reviewer.Model)
+	}
+	if normalized.Reviewer.ThinkingLevel != "" {
+		t.Fatalf("expected reviewer thinking to stay disabled, got %q", normalized.Reviewer.ThinkingLevel)
+	}
+}
+
+func TestNormalizeSettingsForPersistence_AllowsProviderOverrideWithExplicitPersistedModel(t *testing.T) {
+	settings := defaultSettings()
+	settings.Model = "my-team-alias"
+	settings.ProviderOverride = "openai"
+
+	normalized, err := NormalizeSettingsForPersistence(settings)
+	if err != nil {
+		t.Fatalf("normalize settings for persistence: %v", err)
+	}
+	if normalized.ProviderOverride != "openai" {
+		t.Fatalf("expected provider_override preserved, got %q", normalized.ProviderOverride)
 	}
 }
 

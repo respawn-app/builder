@@ -27,12 +27,15 @@ type appBootstrap struct {
 }
 
 func bootstrapApp(ctx context.Context, opts Options, interactor authInteractor) (appBootstrap, error) {
-	cfg, err := loadBootstrapConfig(opts, requestedWorkspaceRoot(opts), opts.OpenAIBaseURL, opts.OpenAIBaseURLExplicit)
+	workspaceRoot := requestedWorkspaceRoot(opts)
+	openAIBaseURL := opts.OpenAIBaseURL
+	useOpenAIBaseURL := opts.OpenAIBaseURLExplicit
+	cfg, err := loadBootstrapConfig(opts, workspaceRoot, openAIBaseURL, useOpenAIBaseURL)
 	if err != nil {
 		return appBootstrap{}, err
 	}
 	if strings.TrimSpace(opts.SessionID) != "" {
-		workspaceRoot, openAIBaseURL, useOpenAIBaseURL, err := resolveContinuationLoadParams(cfg.PersistenceRoot, opts)
+		workspaceRoot, openAIBaseURL, useOpenAIBaseURL, err = resolveContinuationLoadParams(cfg.PersistenceRoot, opts)
 		if err != nil {
 			return appBootstrap{}, err
 		}
@@ -62,6 +65,11 @@ func bootstrapApp(ctx context.Context, opts Options, interactor authInteractor) 
 		time.Now,
 	)
 	if err := ensureAuthReady(ctx, mgr, oauthOpts, cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen, interactor); err != nil {
+		return appBootstrap{}, err
+	}
+	if cfg, _, err = ensureOnboardingReady(ctx, cfg, mgr, interactor, func() (config.App, error) {
+		return loadBootstrapConfig(opts, workspaceRoot, openAIBaseURL, useOpenAIBaseURL)
+	}); err != nil {
 		return appBootstrap{}, err
 	}
 

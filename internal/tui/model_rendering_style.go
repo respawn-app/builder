@@ -2,6 +2,7 @@ package tui
 
 import (
 	"builder/internal/llm"
+	"builder/internal/theme"
 	"builder/internal/transcript"
 	"fmt"
 	"strings"
@@ -120,14 +121,20 @@ func (m Model) roleSymbol(role string) string {
 		return styleForRole(role, m.palette()).Render(prefix)
 	case "error":
 		return styleForRole(role, m.palette()).Render(prefix)
-	case "compaction_notice", "compaction_summary", "reviewer_status", "reviewer_suggestions":
+	case "reviewer_status", "reviewer_suggestions":
 		return styleForRole(role, m.palette()).Render(prefix)
 	default:
+		if isCompactionRole(role) {
+			return styleForRole(role, m.palette()).Render(prefix)
+		}
 		return prefix
 	}
 }
 
 func rolePrefix(role string) string {
+	if isCompactionRole(role) {
+		return "@"
+	}
 	switch role {
 	case "user":
 		return "❯"
@@ -141,8 +148,6 @@ func rolePrefix(role string) string {
 		return "$"
 	case "tool_question", "tool_question_error":
 		return "?"
-	case "compaction_notice", "compaction_summary":
-		return "@"
 	case "reviewer_status", "reviewer_suggestions":
 		return "§"
 	case "error":
@@ -162,6 +167,9 @@ func isThinkingRole(role string) bool {
 }
 
 func styleForRole(role string, p palette) lipgloss.Style {
+	if isCompactionRole(role) {
+		return p.compaction
+	}
 	switch role {
 	case "user":
 		return p.user
@@ -197,7 +205,7 @@ func styleForRole(role string, p palette) lipgloss.Style {
 		return p.system
 	case "error":
 		return p.error
-	case "compaction_notice", "compaction_summary", "reviewer_status", "reviewer_suggestions":
+	case "reviewer_status", "reviewer_suggestions":
 		return p.compaction
 	default:
 		return p.preview
@@ -291,11 +299,8 @@ func (c rgbColor) hexString() string {
 	return fmt.Sprintf("#%02X%02X%02X", c.r, c.g, c.b)
 }
 
-func normalizeTheme(theme string) string {
-	if strings.EqualFold(strings.TrimSpace(theme), "light") {
-		return "light"
-	}
-	return "dark"
+func normalizeTheme(themeName string) string {
+	return theme.Resolve(themeName)
 }
 
 func splitLines(v string) []string {
