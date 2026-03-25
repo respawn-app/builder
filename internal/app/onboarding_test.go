@@ -363,6 +363,45 @@ func TestExecuteCommandImportSymlinksRootDirectory(t *testing.T) {
 	}
 }
 
+func TestCopyPathRewritesRelativeSymlinksForNewLocation(t *testing.T) {
+	srcRoot := t.TempDir()
+	dstRoot := t.TempDir()
+	targetDir := filepath.Join(srcRoot, "targets")
+	linkDir := filepath.Join(srcRoot, "links")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("mkdir target dir: %v", err)
+	}
+	if err := os.MkdirAll(linkDir, 0o755); err != nil {
+		t.Fatalf("mkdir link dir: %v", err)
+	}
+	targetFile := filepath.Join(targetDir, "demo.txt")
+	if err := os.WriteFile(targetFile, []byte("demo"), 0o644); err != nil {
+		t.Fatalf("write target file: %v", err)
+	}
+	srcLink := filepath.Join(linkDir, "demo-link")
+	if err := os.Symlink("../targets/demo.txt", srcLink); err != nil {
+		t.Fatalf("create source symlink: %v", err)
+	}
+	dstLink := filepath.Join(dstRoot, "copied", "demo-link")
+	if err := os.MkdirAll(filepath.Dir(dstLink), 0o755); err != nil {
+		t.Fatalf("mkdir destination dir: %v", err)
+	}
+	if err := copyPath(srcLink, dstLink); err != nil {
+		t.Fatalf("copy symlink: %v", err)
+	}
+	resolved, err := os.Readlink(dstLink)
+	if err != nil {
+		t.Fatalf("read copied symlink: %v", err)
+	}
+	resolvedPath := resolved
+	if !filepath.IsAbs(resolvedPath) {
+		resolvedPath = filepath.Clean(filepath.Join(filepath.Dir(dstLink), resolvedPath))
+	}
+	if resolvedPath != targetFile {
+		t.Fatalf("expected copied symlink to resolve to %q, got %q via %q", targetFile, resolvedPath, resolved)
+	}
+}
+
 func TestOnboardingModelBackspaceTogglesMultiSelect(t *testing.T) {
 	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
 	model.currentScreen = onboardingScreen{
