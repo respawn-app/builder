@@ -355,6 +355,29 @@ func TestBuildSkillImportScreenIncludesSymlinkOnlySkillCandidates(t *testing.T) 
 	}
 }
 
+func TestBuildCommandImportScreenIncludesSymlinkOnlyCommandCandidates(t *testing.T) {
+	state := &onboardingFlowState{imports: onboardingImportDiscovery{
+		commandSymlinkItems: map[onboardingImportProviderID][]onboardingCommandImportItem{
+			onboardingImportProviderCodex: {
+				{ID: "codex:review", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetFileName: "review.md", DisplayName: "review"},
+			},
+		},
+	}}
+	if !state.imports.hasCommandCandidates() {
+		t.Fatal("expected symlink-only commands to count as import candidates")
+	}
+	screen := buildCommandImportScreen(state)
+	if !strings.Contains(screen.Body, "Codex") {
+		t.Fatalf("expected command import body to mention symlink-only provider, got %q", screen.Body)
+	}
+	if !containsOnboardingOption(screen.Options, "symlink:codex") {
+		t.Fatalf("expected command import screen to offer symlink-only provider, got %+v", screen.Options)
+	}
+	if screen.DefaultOptionID != "symlink:codex" {
+		t.Fatalf("expected symlink-only provider to become default command import action, got %q", screen.DefaultOptionID)
+	}
+}
+
 func TestExecuteCommandImportSymlinksRootDirectory(t *testing.T) {
 	home := t.TempDir()
 	globalRoot := t.TempDir()
@@ -616,6 +639,32 @@ func TestOnboardingDefaultsPathPreservesAutoWhenUsingDetectedDefault(t *testing.
 	}
 	if !strings.Contains(string(contents), "theme = \"auto\"") {
 		t.Fatalf("expected defaults path to preserve auto theme, got %q", string(contents))
+	}
+}
+
+func TestOnboardingImportDiscoveryKeepsTypedInput(t *testing.T) {
+	model := newOnboardingModel(t.TempDir(), onboardingFlowState{settings: config.Settings{Model: "gpt-5.4"}})
+	steps := model.workflow.visibleSteps(&model.state)
+	modelStepIndex := -1
+	for index, step := range steps {
+		if step.ID() == "model" {
+			modelStepIndex = index
+			break
+		}
+	}
+	if modelStepIndex < 0 {
+		t.Fatal("expected model input step to be visible")
+	}
+	model.stepIndex = modelStepIndex
+	model.syncScreen(true)
+	model.input.SetValue("draft-model-alias")
+	next, _ := model.Update(onboardingImportDiscoveryDoneMsg{discovery: onboardingImportDiscovery{skills: map[onboardingImportProviderID][]onboardingSkillImportItem{}, commands: map[onboardingImportProviderID][]onboardingCommandImportItem{}}})
+	updated := next.(*onboardingModel)
+	if updated.currentScreen.ID != "model" {
+		t.Fatalf("expected to stay on model input screen, got %q", updated.currentScreen.ID)
+	}
+	if got := updated.input.Value(); got != "draft-model-alias" {
+		t.Fatalf("expected import discovery refresh to preserve typed input, got %q", got)
 	}
 }
 

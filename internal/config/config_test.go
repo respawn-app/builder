@@ -262,6 +262,31 @@ func TestWriteSettingsFileForOnboardingPreservesAutoTheme(t *testing.T) {
 	}
 }
 
+func TestWriteSettingsFileForOnboardingPreservesModelWhenProviderOverrideIsSet(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	settings := defaultSettings()
+	settings.ProviderOverride = "openai"
+	path, err := WriteSettingsFileForOnboarding(settings)
+	if err != nil {
+		t.Fatalf("write onboarding settings: %v", err)
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read settings file: %v", err)
+	}
+	if !strings.Contains(string(contents), "model = \"gpt-5.4\"") {
+		t.Fatalf("expected onboarding settings to preserve explicit model with provider_override, got %q", string(contents))
+	}
+	if !strings.Contains(string(contents), "provider_override = \"openai\"") {
+		t.Fatalf("expected provider_override to be persisted, got %q", string(contents))
+	}
+	if _, err := Load(workspace, LoadOptions{}); err != nil {
+		t.Fatalf("expected persisted provider_override config to load successfully, got %v", err)
+	}
+}
+
 func TestWriteSettingsFileForOnboardingDoesNotOverwriteExistingFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

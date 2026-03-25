@@ -41,7 +41,12 @@ func settingsTOML(settings Settings) string {
 }
 
 func settingsTOMLForOnboarding(settings Settings) string {
-	return settingsTOMLWithPreservedDefaults(settings, true, map[string]bool{"theme": true})
+	preserved := map[string]bool{"theme": true}
+	if strings.TrimSpace(settings.ProviderOverride) != "" {
+		// provider_override must round-trip with an explicit model line.
+		preserved["model"] = true
+	}
+	return settingsTOMLWithPreservedDefaults(settings, true, preserved)
 }
 
 func onboardingDefaultSettingsTOML(selectedTheme string) string {
