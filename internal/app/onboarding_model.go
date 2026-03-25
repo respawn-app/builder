@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -282,8 +283,10 @@ func (m *onboardingModel) submitCurrentScreen() (tea.Model, tea.Cmd) {
 	}
 	if err != nil {
 		m.errorText = err.Error()
+		m.currentScreen.ErrorText = m.errorText
 		return m, nil
 	}
+	m.currentScreen.ErrorText = ""
 	switch m.state.pendingAction {
 	case onboardingPendingActionRestart:
 		m.state.pendingAction = onboardingPendingActionNone
@@ -315,10 +318,16 @@ func (m *onboardingModel) finalizeCmd(writeDefaults bool) tea.Cmd {
 			path, _, err := config.WriteDefaultSettingsFileWithTheme(state.settings.Theme)
 			return onboardingFinalizeDoneMsg{result: onboardingResult{Completed: err == nil, CreatedDefaultConfig: err == nil, SettingsPath: path}, err: err}
 		}
-		if err := executeOnboardingImports(globalRoot, state); err != nil {
+		rollback, err := executeOnboardingImports(globalRoot, state)
+		if err != nil {
 			return onboardingFinalizeDoneMsg{err: err}
 		}
 		path, err := config.WriteSettingsFileForOnboarding(state.settings)
+		if err != nil {
+			if rollbackErr := rollback(); rollbackErr != nil {
+				err = errors.Join(err, rollbackErr)
+			}
+		}
 		return onboardingFinalizeDoneMsg{result: onboardingResult{Completed: err == nil, SettingsPath: path}, err: err}
 	}
 }

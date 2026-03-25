@@ -248,7 +248,7 @@ func TestExecuteSkillImportSymlinksRootDirectory(t *testing.T) {
 	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
 		t.Fatalf("mkdir source: %v", err)
 	}
-	if err := executeSkillImport(globalRoot, onboardingImportDiscovery{}, onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderCodex}, nil); err != nil {
+	if _, err := executeSkillImport(globalRoot, onboardingImportDiscovery{}, onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderCodex}, nil); err != nil {
 		t.Fatalf("execute skill import: %v", err)
 	}
 	targetPath := filepath.Join(globalRoot, "skills")
@@ -298,7 +298,7 @@ func TestExecuteCommandImportSymlinksRootDirectory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sourceDir, "review.md"), []byte("review"), 0o644); err != nil {
 		t.Fatalf("write source command: %v", err)
 	}
-	if err := executeCommandImport(globalRoot, onboardingImportDiscovery{}, onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderClaudeCode}, []onboardingCommandImportItem{{TargetFileName: "review.md"}}); err != nil {
+	if _, err := executeCommandImport(globalRoot, onboardingImportDiscovery{}, onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderClaudeCode}, []onboardingCommandImportItem{{TargetFileName: "review.md"}}); err != nil {
 		t.Fatalf("execute command import: %v", err)
 	}
 	targetPath := filepath.Join(globalRoot, "prompts")
@@ -351,6 +351,21 @@ func TestOnboardingModelCtrlHTogglesMultiSelect(t *testing.T) {
 	updated := next.(*onboardingModel)
 	if updated.selection["one"] {
 		t.Fatal("expected ctrl+h to toggle the current multi-select option off")
+	}
+}
+
+func TestOnboardingSubmitCurrentScreenShowsValidationError(t *testing.T) {
+	model := newOnboardingModel(t.TempDir(), onboardingFlowState{})
+	model.stepIndex = 2
+	model.syncScreen(true)
+	model.input.SetValue("")
+	next, _ := model.submitCurrentScreen()
+	updated := next.(*onboardingModel)
+	if updated.errorText == "" {
+		t.Fatal("expected submit validation error to be captured")
+	}
+	if updated.currentScreen.ErrorText == "" {
+		t.Fatal("expected submit validation error to be shown on the current screen")
 	}
 }
 
@@ -526,6 +541,112 @@ func TestOnboardingCustomPathPreservesAutoWhenUsingDetectedDefault(t *testing.T)
 	}
 	if !strings.Contains(string(contents), "theme = \"auto\"") {
 		t.Fatalf("expected custom path to preserve auto theme, got %q", string(contents))
+	}
+}
+
+func TestOnboardingCustomPathRollsBackImportsWhenSettingsWriteFails(t *testing.T) {
+	home := t.TempDir()
+	globalRoot := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("load defaults: %v", err)
+	}
+	sourceDir := filepath.Join(t.TempDir(), "skill-source")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill source: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "SKILL.md"), []byte("---\nname: demo\ndescription: demo\n---\n"), 0o644); err != nil {
+		t.Fatalf("write skill source: %v", err)
+	}
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model = \"existing\"\n"), 0o644); err != nil {
+		t.Fatalf("write existing config: %v", err)
+	}
+	state := onboardingFlowState{
+		settings: cfg.Settings,
+		imports: onboardingImportDiscovery{skills: map[onboardingImportProviderID][]onboardingSkillImportItem{
+			onboardingImportProviderClaudeCode: {{
+				ID:            "claude:demo",
+				Provider:      onboardingImportProviderClaudeCode,
+				ProviderLabel: "Claude Code",
+				SourceDir:     sourceDir,
+				TargetDirName: "demo-skill",
+				SkillName:     "demo",
+			}},
+		}},
+		skillImport:   onboardingImportSelection{Mode: onboardingImportModeCopyProvider, Provider: onboardingImportProviderClaudeCode},
+		commandImport: onboardingImportSelection{Mode: onboardingImportModeNone},
+	}
+	model := newOnboardingModel(globalRoot, state)
+	msg := model.finalizeCmd(false)()
+	done, ok := msg.(onboardingFinalizeDoneMsg)
+	if !ok {
+		t.Fatalf("expected onboarding finalize message, got %T", msg)
+	}
+	if done.err == nil {
+		t.Fatal("expected settings write failure when config file already exists")
+	}
+	if _, err := os.Stat(filepath.Join(globalRoot, "skills", "demo-skill")); !os.IsNotExist(err) {
+		t.Fatalf("expected imported skill to be rolled back, got err=%v", err)
+	}
+}
+
+func TestExecuteOnboardingImportsRollsBackSkillsWhenCommandImportFails(t *testing.T) {
+	globalRoot := t.TempDir()
+	skillSourceDir := filepath.Join(t.TempDir(), "skill-source")
+	if err := os.MkdirAll(skillSourceDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill source: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillSourceDir, "SKILL.md"), []byte("---\nname: demo\ndescription: demo\n---\n"), 0o644); err != nil {
+		t.Fatalf("write skill source: %v", err)
+	}
+	commandSourceDir := t.TempDir()
+	commandSourceFile := filepath.Join(commandSourceDir, "review.md")
+	if err := os.WriteFile(commandSourceFile, []byte("review"), 0o644); err != nil {
+		t.Fatalf("write command source: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(globalRoot, "prompts"), 0o755); err != nil {
+		t.Fatalf("mkdir prompts target: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(globalRoot, "prompts", "review.md"), []byte("existing"), 0o644); err != nil {
+		t.Fatalf("write existing prompt: %v", err)
+	}
+	_, err := executeOnboardingImports(globalRoot, onboardingFlowState{
+		imports: onboardingImportDiscovery{
+			skills: map[onboardingImportProviderID][]onboardingSkillImportItem{
+				onboardingImportProviderClaudeCode: {{
+					ID:            "claude:demo",
+					Provider:      onboardingImportProviderClaudeCode,
+					ProviderLabel: "Claude Code",
+					SourceDir:     skillSourceDir,
+					TargetDirName: "demo-skill",
+					SkillName:     "demo",
+				}},
+			},
+			commands: map[onboardingImportProviderID][]onboardingCommandImportItem{
+				onboardingImportProviderClaudeCode: {{
+					ID:             "claude:review",
+					Provider:       onboardingImportProviderClaudeCode,
+					ProviderLabel:  "Claude Code",
+					SourceFile:     commandSourceFile,
+					TargetFileName: "review.md",
+					DisplayName:    "review",
+				}},
+			},
+		},
+		skillImport:   onboardingImportSelection{Mode: onboardingImportModeCopyProvider, Provider: onboardingImportProviderClaudeCode},
+		commandImport: onboardingImportSelection{Mode: onboardingImportModeCopyProvider, Provider: onboardingImportProviderClaudeCode},
+	})
+	if err == nil {
+		t.Fatal("expected command import failure")
+	}
+	if _, err := os.Stat(filepath.Join(globalRoot, "skills", "demo-skill")); !os.IsNotExist(err) {
+		t.Fatalf("expected imported skill to be rolled back after command import failure, got err=%v", err)
 	}
 }
 

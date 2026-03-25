@@ -55,9 +55,7 @@ func validateProviderCapabilitiesProviderID(state settingsState, _ map[string]st
 }
 
 func validateThinkingLevel(state settingsState, _ map[string]string) error {
-	if strings.TrimSpace(state.Settings.ThinkingLevel) == "" {
-		return nil
-	}
+	// Custom/provider-specific thinking levels are intentionally allowed.
 	return nil
 }
 

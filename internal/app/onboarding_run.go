@@ -72,7 +72,7 @@ func runOnboardingFlow(cfg config.App, authState auth.State) (onboardingResult, 
 		skillImport:          onboardingImportSelection{Mode: onboardingImportModeMergeCopy},
 		commandImport:        onboardingImportSelection{Mode: onboardingImportModeNone},
 	}
-	model := newOnboardingModel(filepathDir(cfg.Source.SettingsPath), state)
+	model := newOnboardingModel(cfg.PersistenceRoot, state)
 	options := []tea.ProgramOption{}
 	if shouldUseStartupPickerAltScreen(cfg.Settings.TUIAlternateScreen) {
 		options = append(options, tea.WithAltScreen())

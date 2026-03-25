@@ -88,7 +88,8 @@ func settingsTOMLWithPreservedDefaults(settings Settings, includeToolSection boo
 	out.WriteString("\n")
 	out.WriteString("# Optional explicit capability overrides for custom/alias models. Uncomment only\n")
 	out.WriteString("# when the reviewed registry does not cover your configured model.\n")
-	writeOptionalSection(&out, "model_capabilities", filterDefaultLines(lines, "model_capabilities"), hasModelCapabilityOverrides(state.Settings))
+	modelCapabilityLines := filterDefaultLines(lines, "model_capabilities")
+	writeOptionalSection(&out, "model_capabilities", modelCapabilityLines, hasNonDefaultConfigSection(modelCapabilityLines, filterDefaultLines(defaultLines, "model_capabilities")))
 	out.WriteString("\n")
 	out.WriteString("# Optional explicit provider selection for custom/alias model names when\n")
 	out.WriteString("# provider inference from model family is insufficient. Set together with\n")
@@ -96,7 +97,8 @@ func settingsTOMLWithPreservedDefaults(settings Settings, includeToolSection boo
 	out.WriteString("# Optional explicit provider capability overrides. These are only needed for\n")
 	out.WriteString("# custom providers or stale built-in contracts. Keep them conservative to\n")
 	out.WriteString("# avoid unsupported provider-native features.\n")
-	writeOptionalSection(&out, "provider_capabilities", filterDefaultLines(lines, "provider_capabilities"), hasProviderCapabilityOverrides(state.Settings))
+	providerCapabilityLines := filterDefaultLines(lines, "provider_capabilities")
+	writeOptionalSection(&out, "provider_capabilities", providerCapabilityLines, hasNonDefaultConfigSection(providerCapabilityLines, filterDefaultLines(defaultLines, "provider_capabilities")))
 	if includeToolSection {
 		out.WriteString("\n# Optional tool toggles. Omitted tools keep Builder defaults.\n")
 		writeExplicitToolOverrides(&out, state.Settings.EnabledTools)
@@ -147,13 +149,8 @@ func omitDefaultAssignments(lines []defaultConfigLine, defaults []defaultConfigL
 	return filtered
 }
 
-func hasModelCapabilityOverrides(settings Settings) bool {
-	return settings.ModelCapabilities.SupportsReasoningEffort || settings.ModelCapabilities.SupportsVisionInputs
-}
-
-func hasProviderCapabilityOverrides(settings Settings) bool {
-	caps := settings.ProviderCapabilities
-	return strings.TrimSpace(caps.ProviderID) != "" || caps.SupportsResponsesAPI || caps.SupportsResponsesCompact || caps.SupportsNativeWebSearch || caps.SupportsReasoningEncrypted || caps.SupportsServerSideContextEdit || caps.IsOpenAIFirstParty
+func hasNonDefaultConfigSection(lines []defaultConfigLine, defaults []defaultConfigLine) bool {
+	return len(omitDefaultAssignments(lines, defaults)) > 0
 }
 
 func writeOptionalSection(builder *strings.Builder, section string, lines []defaultConfigLine, enabled bool) {

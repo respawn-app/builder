@@ -69,6 +69,27 @@ func writeSettingsFile(path string, contents string) error {
 	return nil
 }
 
+func writeSettingsFileIfMissing(path string, contents string) (bool, error) {
+	if err := ensureSettingsDir(path); err != nil {
+		return false, err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("create settings file: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+	if _, err := file.WriteString(contents); err != nil {
+		return false, fmt.Errorf("write settings file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return false, fmt.Errorf("close settings file: %w", err)
+	}
+	return true, nil
+}
+
 func WriteDefaultSettingsFile() (path string, created bool, err error) {
 	path, err = resolveSettingsFilePath()
 	if err != nil {
@@ -81,10 +102,11 @@ func WriteDefaultSettingsFile() (path string, created bool, err error) {
 	if exists {
 		return path, false, nil
 	}
-	if err := writeSettingsFile(path, defaultSettingsTOML()); err != nil {
+	created, err = writeSettingsFileIfMissing(path, defaultSettingsTOML())
+	if err != nil {
 		return "", false, fmt.Errorf("write default settings file: %w", err)
 	}
-	return path, true, nil
+	return path, created, nil
 }
 
 func WriteDefaultSettingsFileWithTheme(selectedTheme string) (path string, created bool, err error) {
@@ -99,10 +121,11 @@ func WriteDefaultSettingsFileWithTheme(selectedTheme string) (path string, creat
 	if exists {
 		return path, false, nil
 	}
-	if err := writeSettingsFile(path, onboardingDefaultSettingsTOML(theme.Normalize(selectedTheme))); err != nil {
+	created, err = writeSettingsFileIfMissing(path, onboardingDefaultSettingsTOML(theme.Normalize(selectedTheme)))
+	if err != nil {
 		return "", false, fmt.Errorf("write default settings file: %w", err)
 	}
-	return path, true, nil
+	return path, created, nil
 }
 
 func WriteSettingsFileForOnboarding(settings Settings) (string, error) {
@@ -114,8 +137,12 @@ func WriteSettingsFileForOnboarding(settings Settings) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := writeSettingsFile(path, settingsTOMLForOnboarding(normalized)); err != nil {
+	created, err := writeSettingsFileIfMissing(path, settingsTOMLForOnboarding(normalized))
+	if err != nil {
 		return "", err
+	}
+	if !created {
+		return path, fmt.Errorf("settings file already exists: %s", path)
 	}
 	return path, nil
 }
