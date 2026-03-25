@@ -67,11 +67,9 @@ func (m *uiModel) helpSections() []uiHelpSection {
 		{
 			Title: "Prompt Input",
 			Entries: []uiHelpEntry{
+				{Bindings: []string{"$ <command>"}, Description: "execute a shell command and show output to the model", Active: uiHelpInMainInput},
 				{Bindings: []string{"Enter"}, Description: "submit the current input, selected answer, or flush the next queued item", Active: uiHelpInPromptInput},
 				{Bindings: []string{"Tab", "Ctrl + Enter"}, Description: "autocomplete a selected slash command, or queue/send the current input", Active: uiHelpInMainInput},
-				{Bindings: []string{"Tab"}, Description: "add commentary to the selected ask option", Active: uiHelpInAskPicker},
-				{Bindings: []string{"Tab"}, Description: "return to the picker and keep the pending freeform draft", Active: uiHelpCanReturnAskDraftToPicker},
-				{Bindings: []string{"Enter"}, Description: "open freeform from Freeform answer", Active: uiHelpInAskPicker},
 				{Bindings: []string{"↑, ↓"}, Description: "browse submitted prompts at input boundaries; otherwise move within multiline input", Active: uiHelpInTextEditing},
 				{Bindings: []string{"Shift + Enter", "Ctrl + J"}, Description: "insert a newline", Active: uiHelpInTextEditing},
 				{Bindings: deleteCurrentLineBindings(), Description: "delete the current input line", Active: uiHelpInTextEditing},
@@ -135,14 +133,6 @@ func uiHelpInPromptInput(m *uiModel) bool {
 	default:
 		return false
 	}
-}
-
-func uiHelpInAskPicker(m *uiModel) bool {
-	return m != nil && m.inputMode() == uiInputModeAsk && !m.askFreeform
-}
-
-func uiHelpCanReturnAskDraftToPicker(m *uiModel) bool {
-	return m != nil && m.inputMode() == uiInputModeAsk && m.askFreeform && m.activeAsk != nil && askSupportsDraftRoundTrip(m.activeAsk.req)
 }
 
 func uiHelpInTextEditing(m *uiModel) bool {

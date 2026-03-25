@@ -2,6 +2,7 @@ package tui
 
 import (
 	"builder/internal/llm"
+	"builder/internal/theme"
 	"builder/internal/transcript"
 	"fmt"
 	"strings"
@@ -298,11 +299,8 @@ func (c rgbColor) hexString() string {
 	return fmt.Sprintf("#%02X%02X%02X", c.r, c.g, c.b)
 }
 
-func normalizeTheme(theme string) string {
-	if strings.EqualFold(strings.TrimSpace(theme), "light") {
-		return "light"
-	}
-	return "dark"
+func normalizeTheme(themeName string) string {
+	return theme.Resolve(themeName)
 }
 
 func splitLines(v string) []string {

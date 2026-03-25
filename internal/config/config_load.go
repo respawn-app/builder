@@ -17,14 +17,21 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		return App{}, fmt.Errorf("resolve workspace root: %w", err)
 	}
 
-	settingsPath, created, err := ensureDefaultSettingsFile()
+	settingsPath, err := resolveSettingsFilePath()
+	if err != nil {
+		return App{}, err
+	}
+	settingsExists, err := settingsFileExists(settingsPath)
 	if err != nil {
 		return App{}, err
 	}
 
-	fileConfig, err := readSettingsFile(settingsPath)
-	if err != nil {
-		return App{}, err
+	fileConfig := settingsFile{}
+	if settingsExists {
+		fileConfig, err = readSettingsFile(settingsPath)
+		if err != nil {
+			return App{}, err
+		}
 	}
 
 	state := configRegistry.defaultState()
@@ -57,7 +64,8 @@ func Load(workspaceRoot string, opts LoadOptions) (App, error) {
 		Settings:        state.Settings,
 		Source: SourceReport{
 			SettingsPath:         settingsPath,
-			CreatedDefaultConfig: created,
+			SettingsFileExists:   settingsExists,
+			CreatedDefaultConfig: false,
 			Sources:              sources,
 		},
 	}, nil
