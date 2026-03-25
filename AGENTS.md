@@ -74,9 +74,11 @@ The scope is intentionally narrow and quality-oriented.
 
 ## Commit guidelines
 
-Format: `<type>[!]: [description]`, `!` = breaking change.
+Format: `<type>[!]: [description]`, `!` = breaking change (requiring migration from users of Builder).
 Use one of these types for all commits: `feat`, `fix`, `feat!`/`breaking`/`api`, `docs`,  `refactor`,  `chore`.
 Examples: `feat: add state recovery`, `feat!: change Saver API`
+If user asks you to fix a github issue and you commit the fix, use 'closes #xx' in description.
+
 
 ## Important rules:
 
@@ -88,5 +90,4 @@ Examples: `feat: add state recovery`, `feat!: change Saver API`
 - Ongoing mode must not use `?1007`.
 - Ongoing normal-buffer transcript history is append-only after startup. Once a line is emitted into scrollback, it is immutable: never retroactively restyle it, rewrite it, clear-and-replay it, or re-emit the full buffer to reflect later tool state.
 - Proactively keep documentation up-to-date on your own when you make UX or other user-facing changes. Example areas that warrant a docs check include setup, startup, config, env variables, slash commands, model providers, etc.
-- if user asks you to fix a github issue and you commit the fix, use 'closes #xx' in description.
 - Keep this AGENTS.md file up-to-date and comprehensive. Avoid adding info that can become outdated, otherwise keep this as project guidelines, rules, and learnings for future team members. Persist info that should be preserved here.
