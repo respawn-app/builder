@@ -26,6 +26,16 @@ func TestLookupModelMetadataCaseInsensitive(t *testing.T) {
 	}
 }
 
+func TestLookupModelMetadataForCodexSpark(t *testing.T) {
+	meta, ok := LookupModelMetadata("gpt-5.3-codex-spark")
+	if !ok {
+		t.Fatal("expected model metadata for gpt-5.3-codex-spark")
+	}
+	if meta.ContextWindowTokens != 400_000 {
+		t.Fatalf("unexpected context window: %d", meta.ContextWindowTokens)
+	}
+}
+
 func TestSupportsReasoningEffortModel(t *testing.T) {
 	tests := []struct {
 		model string
@@ -33,6 +43,7 @@ func TestSupportsReasoningEffortModel(t *testing.T) {
 	}{
 		{model: "gpt-5.4", want: true},
 		{model: "gpt-5.3-codex", want: true},
+		{model: "gpt-5.3-codex-spark", want: true},
 		{model: " GPT-4o ", want: true},
 		{model: "o3-mini", want: true},
 		{model: "claude-3-7-sonnet", want: true},
@@ -47,12 +58,33 @@ func TestSupportsReasoningEffortModel(t *testing.T) {
 	}
 }
 
+func TestSupportsReasoningSummaryModel(t *testing.T) {
+	tests := []struct {
+		model string
+		want  bool
+	}{
+		{model: "gpt-5.4", want: true},
+		{model: "gpt-5.3-codex", want: true},
+		{model: "gpt-5.3-codex-spark", want: false},
+		{model: " GPT-4o ", want: true},
+		{model: "custom-alias", want: false},
+		{model: "", want: false},
+	}
+
+	for _, tc := range tests {
+		if got := SupportsReasoningSummaryModel(tc.model); got != tc.want {
+			t.Fatalf("SupportsReasoningSummaryModel(%q)=%v, want %v", tc.model, got, tc.want)
+		}
+	}
+}
+
 func TestSupportsVisionInputsModel(t *testing.T) {
 	tests := []struct {
 		model string
 		want  bool
 	}{
 		{model: "gpt-5.3-codex", want: true},
+		{model: "gpt-5.3-codex-spark", want: true},
 		{model: " GPT-4.1 ", want: true},
 		{model: "gpt-4o-mini", want: true},
 		{model: "o3", want: true},
@@ -68,6 +100,27 @@ func TestSupportsVisionInputsModel(t *testing.T) {
 	}
 }
 
+func TestSupportsMultiToolUseParallelModel(t *testing.T) {
+	tests := []struct {
+		model string
+		want  bool
+	}{
+		{model: "gpt-5.3-codex", want: true},
+		{model: "gpt-5.3-codex-spark", want: true},
+		{model: " GPT-5.3-CODEX ", want: true},
+		{model: "gpt-5.4", want: false},
+		{model: "gpt-4o", want: false},
+		{model: "custom-alias", want: false},
+		{model: "", want: false},
+	}
+
+	for _, tc := range tests {
+		if got := SupportsMultiToolUseParallelModel(tc.model); got != tc.want {
+			t.Fatalf("SupportsMultiToolUseParallelModel(%q)=%v, want %v", tc.model, got, tc.want)
+		}
+	}
+}
+
 func TestSupportsVerbosityModel(t *testing.T) {
 	tests := []struct {
 		model string
@@ -75,6 +128,7 @@ func TestSupportsVerbosityModel(t *testing.T) {
 	}{
 		{model: "gpt-5.4", want: true},
 		{model: "gpt-5.3-codex", want: true},
+		{model: "gpt-5.3-codex-spark", want: true},
 		{model: " GPT-5-preview ", want: true},
 		{model: "gpt-4o", want: false},
 		{model: "custom-alias", want: false},

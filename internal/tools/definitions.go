@@ -266,7 +266,7 @@ var catalogEntries = []CatalogEntry{
 		ID:             ToolMultiToolUseParallel,
 		Aliases:        []string{"parallel"},
 		Description:    "Use this function to run multiple tools simultaneously, but only if they can operate in parallel.",
-		DefaultEnabled: true,
+		DefaultEnabled: false,
 		Contract: localContract(
 			LocalRuntimeBuilderMultiToolUseParallel,
 			RequestExposure{Enabled: true},

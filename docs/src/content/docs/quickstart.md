@@ -40,6 +40,7 @@ You can switch later with `/logout`.
 ## Main Workflows
 
 - Use `Enter` to steer the model, `Tab` to queue messages.
+- While the model is still working, `Enter` adds a pending steering message instead of hiding it. Pending steering stays visible in the queue area as `next: ...` until it is sent.
 - Use `Shift+Tab` to toggle between detailed transcript mode and ongoing mode.
 - Press `Esc` twice to enter Edit mode, which lets you go back in time, edit a previous message, and fork the session into a new one. File edits stay.
 - Use the `Up`/`Down` arrow keys to select and resend previous prompts.
@@ -90,3 +91,12 @@ Each top-level `.md` file becomes a `/prompt:<name>` command.
 The cleanest setup is usually to keep one provider-managed source of truth and symlink Builder's discovery directories to it. In practice, that means symlinking the whole `skills`, `prompts`, or `commands` directories, not individual entries.
 
 Builder directly supports the standard `SKILL.md`-based skill layout, so existing Codex/Claude Code skills can be reused cleanly.
+
+You can disable individual skills for new sessions in `~/.builder/config.toml`:
+
+```toml
+[skills]
+apiresult = false
+```
+
+Disabled skills stay on disk, show up as `disabled` in `/status`, and are skipped only when Builder injects the skills developer message for a new conversation.

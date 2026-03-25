@@ -210,6 +210,7 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 			return &providerCapsOverride
 		}(),
 		EnabledTools:                  enabledTools,
+		DisabledSkills:                config.DisabledSkillToggles(active),
 		AutoCompactTokenLimit:         active.ContextCompactionThresholdTokens,
 		PreSubmitCompactionLeadTokens: active.PreSubmitCompactionLeadTokens,
 		ContextWindowTokens:           active.ModelContextWindow,

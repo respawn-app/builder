@@ -70,7 +70,7 @@ func TestAppendMissingReviewerMetaContextPrependsSkillsWhenMissing(t *testing.T)
 	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "workspace-skill", "from workspace")
 
 	in := []llm.Message{{Role: llm.RoleUser, Content: "request"}}
-	got, err := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false)
+	got, err := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false, nil)
 	if err != nil {
 		t.Fatalf("appendMissingReviewerMetaContext: %v", err)
 	}
@@ -192,6 +192,82 @@ func TestBuildReviewerTranscriptMessagesSkipsSkillsContextEntries(t *testing.T) 
 	}
 	if strings.Contains(transcript[0].Content, skillsInjectedHeader) {
 		t.Fatalf("did not expect skills context in transcript entry, got %q", transcript[0].Content)
+	}
+}
+
+func TestSkillsContextMessageSkipsConfigDisabledSkills(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	writeTestSkill(t, filepath.Join(home, ".builder", "skills", "home-skill"), "Home Skill", "from home")
+	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "Workspace Skill", "from workspace")
+
+	content, found, err := skillsContextMessageWithDisabled(workspace, map[string]bool{"workspace skill": true})
+	if err != nil {
+		t.Fatalf("skillsContextMessageWithDisabled: %v", err)
+	}
+	if !found {
+		t.Fatal("expected skills context to be found")
+	}
+	if strings.Contains(content, "Workspace Skill") {
+		t.Fatalf("expected disabled workspace skill to be omitted, got %q", content)
+	}
+	if !strings.Contains(content, "Home Skill") {
+		t.Fatalf("expected enabled home skill to remain, got %q", content)
+	}
+}
+
+func TestInspectSkillsMarksConfigDisabledSkills(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "Workspace Skill", "from workspace")
+
+	inspections, err := InspectSkills(workspace, map[string]bool{"workspace skill": true})
+	if err != nil {
+		t.Fatalf("InspectSkills: %v", err)
+	}
+	if len(inspections) != 1 {
+		t.Fatalf("expected one inspection, got %d", len(inspections))
+	}
+	if !inspections[0].Loaded {
+		t.Fatalf("expected skill to stay loadable, got %+v", inspections[0])
+	}
+	if !inspections[0].Disabled {
+		t.Fatalf("expected skill to be marked disabled, got %+v", inspections[0])
+	}
+}
+
+func TestBuildReviewerRequestMessagesSkipsDisabledSkillsWhenBackfillingMeta(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	writeTestSkill(t, filepath.Join(home, ".builder", "skills", "home-skill"), "Home Skill", "from home")
+	writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "workspace-skill"), "Workspace Skill", "from workspace")
+
+	messages := []llm.Message{{Role: llm.RoleUser, Content: "request"}}
+	got, err := buildReviewerRequestMessages(messages, workspace, "gpt-5", "high", false, map[string]bool{"workspace skill": true})
+	if err != nil {
+		t.Fatalf("buildReviewerRequestMessages: %v", err)
+	}
+	foundSkills := false
+	for _, msg := range got {
+		if msg.Role != llm.RoleDeveloper || msg.MessageType != llm.MessageTypeSkills {
+			continue
+		}
+		foundSkills = true
+		if strings.Contains(msg.Content, "Workspace Skill") {
+			t.Fatalf("expected disabled workspace skill to be omitted from reviewer meta, got %q", msg.Content)
+		}
+		if !strings.Contains(msg.Content, "Home Skill") {
+			t.Fatalf("expected enabled home skill in reviewer meta, got %q", msg.Content)
+		}
+	}
+	if !foundSkills {
+		t.Fatalf("expected backfilled reviewer skills meta message, got %+v", got)
 	}
 }
 

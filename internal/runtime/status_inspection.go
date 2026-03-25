@@ -15,6 +15,7 @@ type SkillInspection struct {
 	Description string
 	Path        string
 	Loaded      bool
+	Disabled    bool
 	Reason      string
 }
 
@@ -24,7 +25,8 @@ func (e *Engine) CompactionCount() int {
 	return e.compactionCount
 }
 
-func InspectSkills(workspaceRoot string) ([]SkillInspection, error) {
+func InspectSkills(workspaceRoot string, disabledSkills map[string]bool) ([]SkillInspection, error) {
+	disabledSkills = normalizedDisabledSkills(disabledSkills)
 	roots, err := skillsInjectionRoots(workspaceRoot)
 	if err != nil {
 		return nil, err
@@ -48,8 +50,12 @@ func InspectSkills(workspaceRoot string) ([]SkillInspection, error) {
 			skillPath := filepath.Join(skillDir, skillFileName)
 			inspection := inspectSkillAtPath(entry.Name(), skillPath)
 			if inspection.Loaded {
+				if disabledSkills[normalizeSkillToggleName(inspection.Name)] {
+					inspection.Disabled = true
+				}
 				if seenLoadedPaths[inspection.Path] {
 					inspection.Loaded = false
+					inspection.Disabled = false
 					inspection.Reason = "duplicate resolved SKILL.md path"
 				} else {
 					seenLoadedPaths[inspection.Path] = true
@@ -60,6 +66,9 @@ func InspectSkills(workspaceRoot string) ([]SkillInspection, error) {
 	}
 
 	sort.Slice(inspections, func(i, j int) bool {
+		if inspections[i].Disabled != inspections[j].Disabled {
+			return !inspections[i].Disabled && inspections[j].Disabled
+		}
 		if inspections[i].Loaded != inspections[j].Loaded {
 			return inspections[i].Loaded && !inspections[j].Loaded
 		}

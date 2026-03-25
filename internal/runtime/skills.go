@@ -34,7 +34,11 @@ type skillFrontmatter struct {
 }
 
 func skillsContextMessage(workspaceRoot string) (string, bool, error) {
-	skills, err := discoverInjectedSkills(workspaceRoot)
+	return skillsContextMessageWithDisabled(workspaceRoot, nil)
+}
+
+func skillsContextMessageWithDisabled(workspaceRoot string, disabledSkills map[string]bool) (string, bool, error) {
+	skills, err := discoverInjectedSkills(workspaceRoot, normalizedDisabledSkills(disabledSkills))
 	if err != nil {
 		return "", false, err
 	}
@@ -44,7 +48,7 @@ func skillsContextMessage(workspaceRoot string) (string, bool, error) {
 	return renderSkillsContext(skills), true, nil
 }
 
-func discoverInjectedSkills(workspaceRoot string) ([]injectedSkill, error) {
+func discoverInjectedSkills(workspaceRoot string, disabledSkills map[string]bool) ([]injectedSkill, error) {
 	roots, err := skillsInjectionRoots(workspaceRoot)
 	if err != nil {
 		return nil, err
@@ -66,6 +70,9 @@ func discoverInjectedSkills(workspaceRoot string) ([]injectedSkill, error) {
 			skillPath := filepath.Join(root, entry.Name(), skillFileName)
 			skill, ok := parseInjectedSkill(skillPath)
 			if !ok {
+				continue
+			}
+			if disabledSkills[normalizeSkillToggleName(skill.Name)] {
 				continue
 			}
 			if seenPaths[skill.Path] {
@@ -161,6 +168,28 @@ func sanitizeSkillSingleLine(raw string) string {
 		return ""
 	}
 	return strings.Join(parts, " ")
+}
+
+func normalizeSkillToggleName(raw string) string {
+	return strings.ToLower(sanitizeSkillSingleLine(raw))
+}
+
+func normalizedDisabledSkills(disabledSkills map[string]bool) map[string]bool {
+	if len(disabledSkills) == 0 {
+		return nil
+	}
+	normalized := make(map[string]bool, len(disabledSkills))
+	for name, disabled := range disabledSkills {
+		if !disabled {
+			continue
+		}
+		key := normalizeSkillToggleName(name)
+		if key == "" {
+			continue
+		}
+		normalized[key] = true
+	}
+	return normalized
 }
 
 func renderSkillsContext(skills []injectedSkill) string {

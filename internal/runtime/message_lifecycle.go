@@ -196,11 +196,12 @@ func (m *defaultMessageLifecycle) FlushPendingUserInjections(stepID string) (int
 	queuedMessages := normalizeQueuedUserMessages(pending)
 	if len(queuedMessages) > 0 {
 		joined := strings.Join(queuedMessages, "\n\n")
-		if err := e.appendUserMessage(stepID, joined); err != nil {
+		if err := e.appendUserMessageWithoutConversationUpdate(stepID, joined); err != nil {
 			return flushed, err
 		}
 		flushed++
 		e.emit(Event{Kind: EventUserMessageFlushed, StepID: stepID, UserMessage: joined, UserMessageBatch: queuedMessages})
+		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
 	}
 	for _, notice := range pendingNotices {
 		if err := e.appendMessage(stepID, notice); err != nil {
@@ -235,7 +236,7 @@ func (m *defaultMessageLifecycle) InjectAgentsIfNeeded(stepID string) error {
 			return err
 		}
 	}
-	skills, found, err := skillsContextMessage(meta.WorkspaceRoot)
+	skills, found, err := skillsContextMessageWithDisabled(meta.WorkspaceRoot, e.cfg.DisabledSkills)
 	if err != nil {
 		return err
 	}

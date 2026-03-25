@@ -72,6 +72,12 @@ The scope is intentionally narrow and quality-oriented.
 - Handle common errors and hand the error message back to the model with a clear message and an instruction, e.g. avoid "status 124", instead: "tool timed out, try specifying a larger `timeout` param or adjusting the tool call to be faster".
 - Keep frequently edited files easily accessible, like the global "system_prompt.md" or "tool_definitions.go" files.
 
+## Commit guidelines
+
+Format: `<type>[!]: [description]`, `!` = breaking change.
+Use one of these types for all commits: `feat`, `fix`, `feat!`/`breaking`/`api`, `docs`,  `refactor`,  `chore`.
+Examples: `feat: add state recovery`, `feat!: change Saver API`
+
 ## Important rules:
 
 - All business logic covered by tests. Production code is written to be unit-testable.

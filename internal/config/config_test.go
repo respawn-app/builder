@@ -56,8 +56,11 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(cfg.PersistenceRoot, sessionsDirName)); err != nil {
 		t.Fatalf("expected sessions root to exist: %v", err)
 	}
-	if !cfg.Settings.EnabledTools[tools.ToolShell] || !cfg.Settings.EnabledTools[tools.ToolViewImage] || !cfg.Settings.EnabledTools[tools.ToolPatch] || !cfg.Settings.EnabledTools[tools.ToolAskQuestion] || !cfg.Settings.EnabledTools[tools.ToolMultiToolUseParallel] {
+	if !cfg.Settings.EnabledTools[tools.ToolShell] || !cfg.Settings.EnabledTools[tools.ToolViewImage] || !cfg.Settings.EnabledTools[tools.ToolPatch] || !cfg.Settings.EnabledTools[tools.ToolAskQuestion] {
 		t.Fatalf("expected all default tools enabled: %+v", cfg.Settings.EnabledTools)
+	}
+	if cfg.Settings.EnabledTools[tools.ToolMultiToolUseParallel] {
+		t.Fatalf("expected %s disabled in static defaults; it should be derived from model capability", tools.ToolMultiToolUseParallel)
 	}
 	if !cfg.Settings.EnabledTools[tools.ToolWebSearch] {
 		t.Fatalf("expected web_search tool enabled by default: %+v", cfg.Settings.EnabledTools)
@@ -116,6 +119,9 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	}
 	if !strings.Contains(string(settingsBytes), "verbose_output = false") {
 		t.Fatalf("expected default config to expose reviewer.verbose_output, got %q", string(settingsBytes))
+	}
+	if !strings.Contains(string(settingsBytes), "# [skills]") {
+		t.Fatalf("expected default config to mention skills toggles, got %q", string(settingsBytes))
 	}
 }
 
@@ -619,6 +625,81 @@ func TestLoadWebSearchNativeRespectsExplicitToolToggle(t *testing.T) {
 	}
 	if got := cfg.Source.Sources["tools.web_search"]; got != "file" {
 		t.Fatalf("expected tools.web_search source file, got %q", got)
+	}
+}
+
+func TestLoadSkillTogglesFromFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("[skills]\nApiResult = false\n\"Local Helper\" = true\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.SkillToggles["apiresult"] {
+		t.Fatalf("expected apiresult skill to be explicitly disabled, got %+v", cfg.Settings.SkillToggles)
+	}
+	if !cfg.Settings.SkillToggles["local helper"] {
+		t.Fatalf("expected quoted skill key to stay enabled, got %+v", cfg.Settings.SkillToggles)
+	}
+	if got := cfg.Source.Sources["skills.apiresult"]; got != "file" {
+		t.Fatalf("expected skills.apiresult source file, got %q", got)
+	}
+	if got := cfg.Source.Sources["skills.local helper"]; got != "file" {
+		t.Fatalf("expected skills.local helper source file, got %q", got)
+	}
+}
+
+func TestLoadRejectsNonBooleanSkillToggle(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("[skills]\napiresult = \"off\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid skills type error")
+	} else if !strings.Contains(err.Error(), "skills.apiresult") {
+		t.Fatalf("expected skills.apiresult in error, got %v", err)
+	}
+}
+
+func TestLoadRejectsDuplicateNormalizedSkillToggleKeys(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("[skills]\nApiResult = false\napiresult = true\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected duplicate normalized skills key error")
+	} else {
+		for _, want := range []string{"ApiResult", "apiresult", "both normalize to"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("expected %q in error, got %v", want, err)
+			}
+		}
 	}
 }
 

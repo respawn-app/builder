@@ -25,11 +25,15 @@ type RequestExposure struct {
 	RequiresVision bool
 }
 
-func (r RequestExposure) Allowed(supportsVision bool) bool {
+type RequestExposureContext struct {
+	SupportsVision bool
+}
+
+func (r RequestExposure) Allowed(ctx RequestExposureContext) bool {
 	if !r.Enabled {
 		return false
 	}
-	if r.RequiresVision && !supportsVision {
+	if r.RequiresVision && !ctx.SupportsVision {
 		return false
 	}
 	return true
@@ -98,8 +102,8 @@ func (d Definition) LocalRuntimeBuilder() LocalRuntimeBuilder {
 	return d.contract.Runtime.LocalBuilder
 }
 
-func (d Definition) ExposedToModelRequest(supportsVision bool) bool {
-	return d.contract.Request.Allowed(supportsVision)
+func (d Definition) ExposedToModelRequest(ctx RequestExposureContext) bool {
+	return d.contract.Request.Allowed(ctx)
 }
 
 func (d Definition) BuildToolCallMeta(ctx ToolCallContext, raw json.RawMessage) transcript.ToolCallMeta {
@@ -224,25 +228,25 @@ func DefinitionsFor(ids []ID) []Definition {
 	return defs
 }
 
-func FilterRequestExposedDefinitions(defs []Definition, supportsVision bool) []Definition {
+func FilterRequestExposedDefinitions(defs []Definition, ctx RequestExposureContext) []Definition {
 	out := make([]Definition, 0, len(defs))
 	for _, def := range defs {
-		if def.ExposedToModelRequest(supportsVision) {
+		if def.ExposedToModelRequest(ctx) {
 			out = append(out, def)
 		}
 	}
 	return out
 }
 
-func RequestExposedDefinitions(ids []ID, supportsVision bool) []Definition {
-	return FilterRequestExposedDefinitions(DefinitionsFor(ids), supportsVision)
+func RequestExposedDefinitions(ids []ID, ctx RequestExposureContext) []Definition {
+	return FilterRequestExposedDefinitions(DefinitionsFor(ids), ctx)
 }
 
-func RequestExposedDefinitionsForSession(enabled []ID, registered []Definition, supportsVision bool) []Definition {
+func RequestExposedDefinitionsForSession(enabled []ID, registered []Definition, ctx RequestExposureContext) []Definition {
 	if len(enabled) > 0 {
-		return RequestExposedDefinitions(enabled, supportsVision)
+		return RequestExposedDefinitions(enabled, ctx)
 	}
-	return FilterRequestExposedDefinitions(registered, supportsVision)
+	return FilterRequestExposedDefinitions(registered, ctx)
 }
 
 func NeedsNativeWebSearch(ids []ID, mode string) bool {
