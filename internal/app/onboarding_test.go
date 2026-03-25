@@ -287,6 +287,51 @@ func TestProviderSkillSymlinkSourcePrefersCodexLocalSkills(t *testing.T) {
 	}
 }
 
+func TestProviderSkillSymlinkSourceErrorsWithoutSkillsRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatalf("mkdir provider home: %v", err)
+	}
+	_, err := providerSkillSymlinkSource(onboardingImportProviderClaudeCode)
+	if err == nil {
+		t.Fatal("expected missing skills root to fail")
+	}
+	if !strings.Contains(err.Error(), "no skills directory found") {
+		t.Fatalf("expected missing skills root error, got %v", err)
+	}
+}
+
+func TestBuildSkillImportScreenSymlinkCountsUseActualSymlinkRoot(t *testing.T) {
+	state := &onboardingFlowState{imports: onboardingImportDiscovery{
+		skills: map[onboardingImportProviderID][]onboardingSkillImportItem{
+			onboardingImportProviderCodex: {
+				{ID: "codex:local", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetDirName: "local-skill"},
+				{ID: "codex:system", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetDirName: "system-skill"},
+			},
+		},
+		skillSymlinkItems: map[onboardingImportProviderID][]onboardingSkillImportItem{
+			onboardingImportProviderCodex: {
+				{ID: "codex:local", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetDirName: "local-skill"},
+			},
+		},
+	}}
+	screen := buildSkillImportScreen(state)
+	joined := strings.Join(func() []string {
+		lines := make([]string, 0, len(screen.Options))
+		for _, option := range screen.Options {
+			lines = append(lines, option.Title)
+		}
+		return lines
+	}(), "\n")
+	if !strings.Contains(joined, "Symlink to Codex (1 found)") {
+		t.Fatalf("expected symlink option count to reflect actual symlink root, got %q", joined)
+	}
+	if strings.Contains(joined, "Symlink to Codex (2 found)") {
+		t.Fatalf("expected symlink option not to count non-symlinkable discovered skills, got %q", joined)
+	}
+}
+
 func TestExecuteCommandImportSymlinksRootDirectory(t *testing.T) {
 	home := t.TempDir()
 	globalRoot := t.TempDir()
