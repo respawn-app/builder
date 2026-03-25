@@ -126,23 +126,29 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 	appendWrapped("auto-compaction "+statusOnOff(snapshot.Config.AutoCompaction), lipgloss.Style{})
 	appendWrapped(fmt.Sprintf("%d compactions", snapshot.CompactionCount), lipgloss.Style{})
 
-	loadedSkills, _ := statusPartitionSkills(snapshot.Skills)
+	loadedSkills, failedSkills := statusPartitionSkills(snapshot.Skills)
 	subheaderStyle := lipgloss.NewStyle().Foreground(palette.primary).Bold(true)
 	directoryStyle := lipgloss.NewStyle().Foreground(palette.foreground)
 	treeStyle := lipgloss.NewStyle().Foreground(palette.muted).Faint(true)
+	errorStyle := lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true)
 	appendGap()
-	appendWrapped(fmt.Sprintf("%d skills", len(loadedSkills)), subheaderStyle)
-	if l.statusSectionLoading(uiStatusSectionEnvironment) && len(loadedSkills) == 0 {
+	appendWrapped(fmt.Sprintf("%d skills", len(snapshot.Skills)), subheaderStyle)
+	if l.statusSectionLoading(uiStatusSectionEnvironment) && len(snapshot.Skills) == 0 {
 		appendWrapped("Loading skills...", subtleStyle)
 	} else {
-		for _, group := range statusGroupSkillsByDirectory(loadedSkills) {
+		for _, group := range statusGroupSkillsByDirectory(append(append([]runtime.SkillInspection(nil), loadedSkills...), failedSkills...)) {
 			appendWrapped(statusDisplayPath(group.Directory, snapshot.Workdir), directoryStyle)
 			for idx, skill := range group.Skills {
 				branch := "├─"
 				if idx == len(group.Skills)-1 {
 					branch = "└─"
 				}
-				line := treeStyle.Render(branch+" ") + statusSkillTokenLine(skill, snapshot.SkillTokenCounts)
+				line := treeStyle.Render(branch + " ")
+				if skill.Loaded {
+					line += statusSkillTokenLine(skill, snapshot.SkillTokenCounts)
+				} else {
+					line += errorStyle.Render("! ") + statusSkillFailureLine(skill)
+				}
 				appendANSI(padANSIRight(line, width))
 			}
 		}
@@ -509,6 +515,18 @@ func statusSkillTokenLine(skill runtime.SkillInspection, tokenCounts map[string]
 		name = filepath.Base(filepath.Dir(skill.Path))
 	}
 	return fmt.Sprintf("%s (%s)", name, statusTokenShort(tokenCounts[strings.TrimSpace(skill.Path)]))
+}
+
+func statusSkillFailureLine(skill runtime.SkillInspection) string {
+	name := strings.TrimSpace(skill.Name)
+	if name == "" {
+		name = filepath.Base(filepath.Dir(skill.Path))
+	}
+	reason := strings.TrimSpace(skill.Reason)
+	if reason == "" {
+		return name
+	}
+	return fmt.Sprintf("%s (%s)", name, reason)
 }
 
 func statusAgentTokenLine(path string, tokenCounts map[string]int, workdir string) string {

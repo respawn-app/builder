@@ -144,7 +144,7 @@ func TestStatusCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 			t.Fatalf("expected status overlay to contain %q, got %q", want, plain)
 		}
 	}
-	for _, want := range []string{"1 skills", "/Users/test/.builder/skills", "└─ apiresult (0k)"} {
+	for _, want := range []string{"2 skills", "/Users/test/.builder/skills", "├─ apiresult (0k)", "└─ ! broken (missing SKILL.md)"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected grouped skill rendering to contain %q, got %q", want, plain)
 		}
