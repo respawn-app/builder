@@ -439,18 +439,7 @@ func extractAccountID(tokens oauthTokenResponse) string {
 }
 
 func extractEmail(tokens oauthTokenResponse) string {
-	if strings.TrimSpace(tokens.IDToken) != "" {
-		if claims, err := parseJWTClaims(tokens.IDToken); err == nil {
-			if email := extractEmailFromClaims(claims); email != "" {
-				return email
-			}
-		}
-	}
-	if strings.TrimSpace(tokens.AccessToken) != "" {
-		if claims, err := parseJWTClaims(tokens.AccessToken); err == nil {
-			return extractEmailFromClaims(claims)
-		}
-	}
+	_ = tokens
 	return ""
 }
 

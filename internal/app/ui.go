@@ -333,6 +333,18 @@ type uiModel struct {
 	psEntries                []shelltool.Snapshot
 	helpVisible              bool
 	reasoningStatusHeader    string
+	statusConfig             uiStatusConfig
+	statusCollector          uiStatusCollector
+	statusRepository         uiStatusRepository
+	statusVisible            bool
+	statusOverlayPushed      bool
+	statusLoading            bool
+	statusScroll             int
+	statusSnapshot           uiStatusSnapshot
+	statusError              string
+	statusRefreshToken       uint64
+	statusPendingSections    map[uiStatusSection]bool
+	statusSectionWarnings    map[uiStatusSection]string
 
 	transientStatus      string
 	transientStatusKind  uiStatusNoticeKind
@@ -407,6 +419,7 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 		autoCompactionEnabled:    true,
 		conversationFreshness:    session.ConversationFreshnessFresh,
 		askInputCursor:           -1,
+		statusRepository:         newMemoryUIStatusRepository(),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -635,6 +648,93 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshProcessEntries()
 		m.syncViewport()
 		return m, waitProcessListRefresh()
+	case statusRefreshDoneMsg:
+		if msg.token != m.statusRefreshToken {
+			m.syncViewport()
+			return m, nil
+		}
+		m.statusPendingSections = nil
+		m.statusSectionWarnings = nil
+		m.statusLoading = false
+		if msg.err != nil {
+			m.statusError = msg.err.Error()
+			m.syncViewport()
+			return m, m.setTransientStatusWithKind(msg.err.Error(), uiStatusNoticeError)
+		}
+		m.statusError = ""
+		m.statusSnapshot = msg.snapshot
+		m.syncViewport()
+		return m, nil
+	case statusBaseRefreshDoneMsg:
+		if msg.token != m.statusRefreshToken {
+			m.syncViewport()
+			return m, nil
+		}
+		m.statusError = ""
+		snapshot := msg.snapshot
+		if statusHasAuthData(m.statusSnapshot) {
+			snapshot.Auth = m.statusSnapshot.Auth
+			snapshot.Subscription = m.statusSnapshot.Subscription
+		}
+		if m.statusSnapshot.Git.Visible {
+			snapshot.Git = m.statusSnapshot.Git
+		}
+		if m.statusSnapshot.Skills != nil {
+			snapshot.Skills = m.statusSnapshot.Skills
+		}
+		if m.statusSnapshot.SkillTokenCounts != nil {
+			snapshot.SkillTokenCounts = m.statusSnapshot.SkillTokenCounts
+		}
+		if m.statusSnapshot.AgentsPaths != nil {
+			snapshot.AgentsPaths = m.statusSnapshot.AgentsPaths
+		}
+		if m.statusSnapshot.AgentTokenCounts != nil {
+			snapshot.AgentTokenCounts = m.statusSnapshot.AgentTokenCounts
+		}
+		m.statusSnapshot = snapshot
+		m.finishStatusSectionRefresh(uiStatusSectionBase, msg.snapshot.CollectorWarning)
+		m.syncViewport()
+		return m, nil
+	case statusAuthRefreshDoneMsg:
+		if msg.token != m.statusRefreshToken {
+			m.syncViewport()
+			return m, nil
+		}
+		m.statusSnapshot.Auth = msg.result.Auth
+		m.statusSnapshot.Subscription = msg.result.Subscription
+		if m.statusRepository != nil {
+			m.statusRepository.StoreAuth(m.newStatusRequest(time.Now()), msg.result, time.Now())
+		}
+		m.finishStatusSectionRefresh(uiStatusSectionAuth, msg.result.Warning)
+		m.syncViewport()
+		return m, nil
+	case statusGitRefreshDoneMsg:
+		if msg.token != m.statusRefreshToken {
+			m.syncViewport()
+			return m, nil
+		}
+		m.statusSnapshot.Git = msg.result.Git
+		if m.statusRepository != nil {
+			m.statusRepository.StoreGit(m.newStatusRequest(time.Now()), msg.result, time.Now())
+		}
+		m.finishStatusSectionRefresh(uiStatusSectionGit, "")
+		m.syncViewport()
+		return m, nil
+	case statusEnvironmentRefreshDoneMsg:
+		if msg.token != m.statusRefreshToken {
+			m.syncViewport()
+			return m, nil
+		}
+		m.statusSnapshot.Skills = msg.result.Skills
+		m.statusSnapshot.SkillTokenCounts = msg.result.SkillTokenCounts
+		m.statusSnapshot.AgentsPaths = msg.result.AgentsPaths
+		m.statusSnapshot.AgentTokenCounts = msg.result.AgentTokenCounts
+		if m.statusRepository != nil {
+			m.statusRepository.StoreEnvironment(m.newStatusRequest(time.Now()), msg.result, time.Now())
+		}
+		m.finishStatusSectionRefresh(uiStatusSectionEnvironment, msg.result.CollectorWarning)
+		m.syncViewport()
+		return m, nil
 	case openProcessLogsDoneMsg:
 		m.syncViewport()
 		if msg.err != nil {
@@ -669,6 +769,10 @@ func envFlagEnabled(name string) bool {
 	default:
 		return true
 	}
+}
+
+func statusHasAuthData(snapshot uiStatusSnapshot) bool {
+	return strings.TrimSpace(snapshot.Auth.Summary) != "" || len(snapshot.Auth.Details) > 0 || snapshot.Subscription.Applicable || strings.TrimSpace(snapshot.Subscription.Summary) != "" || len(snapshot.Subscription.Windows) > 0
 }
 
 func (m *uiModel) forwardToView(msg tea.Msg) {

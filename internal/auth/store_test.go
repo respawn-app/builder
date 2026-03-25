@@ -281,3 +281,13 @@ func TestEnvAPIKeyOverrideStoreSaveDelegatesToBaseStore(t *testing.T) {
 		t.Fatalf("expected delegated saved key, got %+v", loaded.Method.APIKey)
 	}
 }
+
+func TestNewEnvAPIKeyOverrideStorePanicsOnInvalidMode(t *testing.T) {
+	defer func() {
+		if recovered := recover(); recovered == nil {
+			t.Fatal("expected invalid env override mode to panic")
+		}
+	}()
+
+	_ = NewEnvAPIKeyOverrideStore(NewMemoryStore(EmptyState()), func(string) (string, bool) { return "", false }, EnvAPIKeyOverrideMode("typo"))
+}

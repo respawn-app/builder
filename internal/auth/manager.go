@@ -39,6 +39,14 @@ func (m *Manager) Load(ctx context.Context) (State, error) {
 	return state, nil
 }
 
+func (m *Manager) CurrentState(ctx context.Context) (State, error) {
+	state, err := m.Load(ctx)
+	if err != nil {
+		return State{}, err
+	}
+	return m.resolveState(ctx, state)
+}
+
 func (m *Manager) EnsureStartupReady(ctx context.Context) error {
 	state, err := m.Load(ctx)
 	if err != nil {
@@ -123,38 +131,19 @@ func (m *Manager) updateState(ctx context.Context, mutate func(*State) error) (S
 }
 
 func (m *Manager) AuthorizationHeader(ctx context.Context) (string, error) {
-	state, err := m.Load(ctx)
+	state, err := m.CurrentState(ctx)
 	if err != nil {
 		return "", err
 	}
 	if !state.IsConfigured() {
 		return "", ErrAuthNotConfigured
 	}
-
-	method := state.Method
-	if m.refresher != nil {
-		var refreshed bool
-		method, refreshed, err = m.refresher.MaybeRefresh(ctx, method)
-		if err != nil {
-			return "", err
-		}
-		if refreshed {
-			state.Method = method
-			state.UpdatedAt = m.now().UTC()
-			if m.store != nil {
-				if err := m.store.Save(ctx, state); err != nil {
-					return "", err
-				}
-			}
-		}
-	}
-
-	return method.AuthHeaderValue()
+	return state.Method.AuthHeaderValue()
 }
 
 // OpenAIAuthMetadata exposes auth mode details for OpenAI transport behavior.
 func (m *Manager) OpenAIAuthMetadata(ctx context.Context) (method string, accountID string, err error) {
-	state, err := m.Load(ctx)
+	state, err := m.CurrentState(ctx)
 	if err != nil {
 		return "", "", err
 	}
@@ -169,4 +158,29 @@ func (m *Manager) OpenAIAuthMetadata(ctx context.Context) (method string, accoun
 	default:
 		return "", "", nil
 	}
+}
+
+func (m *Manager) resolveState(ctx context.Context, state State) (State, error) {
+	if !state.IsConfigured() {
+		return state, nil
+	}
+	method := state.Method
+	if m.refresher == nil {
+		return state, nil
+	}
+	updated, refreshed, err := m.refresher.MaybeRefresh(ctx, method)
+	if err != nil {
+		return State{}, err
+	}
+	if !refreshed {
+		return state, nil
+	}
+	state.Method = updated
+	state.UpdatedAt = m.now().UTC()
+	if m.store != nil {
+		if err := m.store.Save(ctx, state); err != nil {
+			return State{}, err
+		}
+	}
+	return state, nil
 }

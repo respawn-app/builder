@@ -50,9 +50,16 @@ func (c uiInputController) handleEnteredSlashCommandInput(text string) (bool, te
 		m.clearInput()
 		m.restoreCapturedPromptHistoryDraft(draftText, draftCursor, restoreDraft)
 		next, cmd := c.applyCommandResult(commandResult)
-		return true, next, sequenceCmds(recordCmd, cmd)
+		return true, next, finalizeSlashCommandCmd(commandResult.Action, cmd, recordCmd)
 	}
 	return false, m, nil
+}
+
+func finalizeSlashCommandCmd(action commands.Action, primary tea.Cmd, record tea.Cmd) tea.Cmd {
+	if action == commands.ActionStatus {
+		return tea.Batch(primary, record)
+	}
+	return sequenceCmds(record, primary)
 }
 
 func (m *uiModel) blockedDeferredSlashCommand(commandText string) (string, bool) {

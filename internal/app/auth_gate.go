@@ -190,6 +190,9 @@ func (i *interactiveAuthInteractor) Interact(ctx context.Context, req authIntera
 		var method auth.Method
 		switch choice {
 		case authMethodChoiceEnvAPIKey:
+			if !req.HasEnvAPIKey {
+				return errors.New("OPENAI_API_KEY is not available")
+			}
 			_, err = req.Manager.SetEnvAPIKeyPreference(ctx, auth.EnvAPIKeyPreferencePreferEnv, true)
 			if err != nil {
 				return fmt.Errorf("save env api key preference: %w", err)
@@ -211,8 +214,7 @@ func (i *interactiveAuthInteractor) Interact(ctx context.Context, req authIntera
 				})
 			})
 		default:
-			req.FlowErr = fmt.Errorf("unknown auth method %q", choice)
-			continue
+			return fmt.Errorf("unknown auth method %q", choice)
 		}
 		if err != nil {
 			req.FlowErr = err
@@ -292,9 +294,11 @@ func (i *interactiveAuthInteractor) runOAuthBrowserAuto(ctx context.Context, opt
 	if err != nil {
 		return auth.Method{}, err
 	}
+	defer func() {
+		_ = listener.Close()
+	}()
 	session, err := auth.BeginOpenAIBrowserFlow(opts, listener.RedirectURI())
 	if err != nil {
-		_ = listener.Close()
 		return auth.Method{}, err
 	}
 	lines := []string{authURLStyle(theme).Render(session.AuthorizeURL)}

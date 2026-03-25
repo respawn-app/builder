@@ -10,6 +10,9 @@ import (
 )
 
 func (l uiViewLayout) renderChatPanel(width, height int, style uiStyles) []string {
+	if l.model.statusVisible {
+		return l.renderStatusOverlay(width, height, style)
+	}
 	if l.model.psVisible {
 		return l.renderProcessList(width, height, style)
 	}

@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { removeLegacyMirroredDocuments } from './legacy-mirrored-documents.mjs';
 import { writeFileAtomically } from './sync-mirrored-docs.mjs';
 
 test('writeFileAtomically only exposes complete file contents during repeated writes', async () => {
@@ -32,4 +33,16 @@ test('writeFileAtomically only exposes complete file contents during repeated wr
 
   const finalContents = await readFile(filePath, 'utf8');
   assert.equal(allowedContents.has(finalContents), true);
+});
+
+test('removeLegacyMirroredDocuments rejects paths that escape the legacy docs directory', async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'builder-docs-legacy-'));
+  const legacyDocsDirectory = path.join(tempRoot, 'src', 'content', 'docs');
+
+  await mkdir(legacyDocsDirectory, { recursive: true });
+
+  await assert.rejects(
+    removeLegacyMirroredDocuments(legacyDocsDirectory, [{ outputFileName: '../outside.md' }]),
+    /refusing to remove mirrored document outside/,
+  );
 });

@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +17,28 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 )
+
+type stubOAuthCallbackListener struct {
+	callback auth.BrowserCallback
+	waitErr  error
+	closed   int
+}
+
+func (l *stubOAuthCallbackListener) RedirectURI() string {
+	return "http://127.0.0.1:0/callback"
+}
+
+func (l *stubOAuthCallbackListener) Wait(context.Context, time.Duration) (auth.BrowserCallback, error) {
+	if l.waitErr != nil {
+		return auth.BrowserCallback{}, l.waitErr
+	}
+	return l.callback, nil
+}
+
+func (l *stubOAuthCallbackListener) Close() error {
+	l.closed++
+	return nil
+}
 
 func TestAuthMethodPickerViewUsesFriendlyTitlesAndDescriptions(t *testing.T) {
 	m := newAuthMethodPickerModel("dark", startupPickerNotice{
@@ -75,6 +100,18 @@ func TestAuthMethodPickerSelectsSecondOption(t *testing.T) {
 	m = next.(*startupPickerModel)
 	if m.result.ChoiceID != string(authMethodChoiceBrowserPaste) {
 		t.Fatalf("choice=%q want %q", m.result.ChoiceID, authMethodChoiceBrowserPaste)
+	}
+}
+
+func TestStartupPickerEnterDoesNothingWhenThereAreNoItems(t *testing.T) {
+	m := newStartupPickerModel("**Header**", "Header", "dark", startupPickerNotice{}, nil)
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*startupPickerModel)
+	if cmd != nil {
+		t.Fatal("did not expect quit command for empty picker")
+	}
+	if updated.result.ChoiceID != "" || updated.result.Canceled {
+		t.Fatalf("expected empty result for empty picker, got %+v", updated.result)
 	}
 }
 
@@ -304,6 +341,45 @@ func TestInteractiveAuthInteractorOffersEnvAPIKeyChoiceWhenAvailable(t *testing.
 	}
 }
 
+func TestInteractiveAuthInteractorRejectsEnvAPIKeyChoiceWithoutAvailableKey(t *testing.T) {
+	interactor := &interactiveAuthInteractor{
+		pickMethod: func(authInteraction) (authMethodPickerResult, error) {
+			return authMethodPickerResult{Choice: authMethodChoiceEnvAPIKey}, nil
+		},
+	}
+
+	err := interactor.Interact(context.Background(), authInteraction{
+		Manager:         auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now),
+		State:           auth.EmptyState(),
+		Gate:            auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},
+		Theme:           "dark",
+		AlternateScreen: config.TUIAlternateScreenAuto,
+		HasEnvAPIKey:    false,
+	})
+	if err == nil || err.Error() != "OPENAI_API_KEY is not available" {
+		t.Fatalf("expected missing OPENAI_API_KEY error, got %v", err)
+	}
+}
+
+func TestInteractiveAuthInteractorRejectsUnknownAuthMethodChoice(t *testing.T) {
+	interactor := &interactiveAuthInteractor{
+		pickMethod: func(authInteraction) (authMethodPickerResult, error) {
+			return authMethodPickerResult{Choice: authMethodChoice("bogus")}, nil
+		},
+	}
+
+	err := interactor.Interact(context.Background(), authInteraction{
+		Manager:         auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now),
+		State:           auth.EmptyState(),
+		Gate:            auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},
+		Theme:           "dark",
+		AlternateScreen: config.TUIAlternateScreenAuto,
+	})
+	if err == nil || err.Error() != "unknown auth method \"bogus\"" {
+		t.Fatalf("expected unknown auth method error, got %v", err)
+	}
+}
+
 func TestInteractiveAuthInteractorResolvesEnvConflictAndRemembersPreference(t *testing.T) {
 	ctx := context.Background()
 	mgr := auth.NewManager(auth.NewMemoryStore(auth.State{
@@ -481,5 +557,88 @@ func TestInteractiveAuthInteractorRetriesWithFlowErrorAndClearsOnSuccess(t *test
 	}
 	if state.Method.Type != auth.MethodOAuth {
 		t.Fatalf("expected oauth auth, got %q", state.Method.Type)
+	}
+}
+
+func TestRunOAuthBrowserAutoClosesListenerAfterWaitFailure(t *testing.T) {
+	listener := &stubOAuthCallbackListener{waitErr: errors.New("wait failed")}
+	interactor := &interactiveAuthInteractor{
+		startCallbackListener: func() (oauthCallbackListener, error) {
+			return listener, nil
+		},
+		openBrowser: func(string) error { return nil },
+		stderr:      io.Discard,
+	}
+
+	_, err := interactor.runOAuthBrowserAuto(context.Background(), auth.OpenAIOAuthOptions{}, "dark")
+	if err == nil || err.Error() != "wait failed" {
+		t.Fatalf("expected wait failure, got %v", err)
+	}
+	if listener.closed != 1 {
+		t.Fatalf("expected listener to be closed once, got %d", listener.closed)
+	}
+}
+
+func TestRunOAuthBrowserAutoClosesListenerAfterSuccessfulCompletion(t *testing.T) {
+	listener := &stubOAuthCallbackListener{callback: auth.BrowserCallback{Code: "code-1"}}
+	var issuer string
+	const clientID = "client-1"
+	callbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/token":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse form: %v", err)
+			}
+			if got := r.Form.Get("grant_type"); got != "authorization_code" {
+				t.Fatalf("unexpected grant_type %q", got)
+			}
+			if got := r.Form.Get("code"); got != "code-1" {
+				t.Fatalf("unexpected code %q", got)
+			}
+			if got := r.Form.Get("state"); got != "" {
+				t.Fatalf("unexpected state form value %q", got)
+			}
+			if got := r.Form.Get("client_id"); got != clientID {
+				t.Fatalf("unexpected client_id %q", got)
+			}
+			if got := r.Form.Get("redirect_uri"); got != listener.RedirectURI() {
+				t.Fatalf("unexpected redirect_uri %q", got)
+			}
+			_, _ = w.Write([]byte(`{"access_token":"browser-access","refresh_token":"browser-refresh","token_type":"Bearer","expires_in":1800}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer callbackServer.Close()
+	issuer = callbackServer.URL
+
+	interactor := &interactiveAuthInteractor{
+		startCallbackListener: func() (oauthCallbackListener, error) {
+			return listener, nil
+		},
+		openBrowser: func(rawURL string) error {
+			parsed, err := url.Parse(rawURL)
+			if err != nil {
+				return err
+			}
+			listener.callback.State = parsed.Query().Get("state")
+			return nil
+		},
+		stderr: io.Discard,
+	}
+
+	method, err := interactor.runOAuthBrowserAuto(context.Background(), auth.OpenAIOAuthOptions{
+		Issuer:     issuer,
+		ClientID:   clientID,
+		HTTPClient: callbackServer.Client(),
+	}, "dark")
+	if err != nil {
+		t.Fatalf("expected successful browser auth, got %v", err)
+	}
+	if method.Type != auth.MethodOAuth || method.OAuth == nil {
+		t.Fatalf("unexpected method %+v", method)
+	}
+	if listener.closed != 1 {
+		t.Fatalf("expected listener to be closed once, got %d", listener.closed)
 	}
 }

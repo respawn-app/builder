@@ -54,6 +54,8 @@ func (c uiInputController) applyCommandResult(commandResult commands.Result) (te
 		return c.handleAutoCompactionCommand(commandResult.AutoCompactionMode)
 	case commands.ActionCompact:
 		return m, c.startCompaction(commandResult.Args)
+	case commands.ActionStatus:
+		return m, c.startStatusFlowCmd()
 	case commands.ActionProcesses:
 		args := strings.Fields(strings.TrimSpace(commandResult.Args))
 		if len(args) == 0 {

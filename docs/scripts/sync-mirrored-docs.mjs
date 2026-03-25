@@ -31,7 +31,7 @@ async function performSyncMirroredDocs({ docsRoot, repoRoot, docsConfig }) {
   await removeLegacyMirroredDocuments(legacyOutputDirectory, mirroredDocuments);
   await removeLegacyMirroredDocuments(deprecatedGeneratedOutputDirectory, mirroredDocuments);
 
-  await Promise.all(
+  const results = await Promise.allSettled(
     mirroredDocuments.map(async (document) => {
       const sourceFilePath = path.join(repoRoot, document.sourcePath);
       const outputFilePath = path.join(outputDirectory, document.outputFileName);
@@ -42,6 +42,18 @@ async function performSyncMirroredDocs({ docsRoot, repoRoot, docsConfig }) {
       });
       await writeFileAtomically(outputFilePath, mirroredMarkdown);
     }),
+  );
+
+  const failures = results.filter((result) => result.status === 'rejected');
+  if (failures.length === 0) {
+    return;
+  }
+  if (failures.length === 1) {
+    throw failures[0].reason;
+  }
+  throw new AggregateError(
+    failures.map((result) => result.reason),
+    'sync mirrored docs failed',
   );
 }
 

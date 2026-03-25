@@ -273,7 +273,7 @@
 - `Enter` runs the currently selected slash command, including the default first match for partial input.
 - `Tab` on a partial selected slash command autocompletes it and inserts a trailing space for arguments.
 - Unknown slash commands are sent to model as normal user prompts.
-- Built-in commands: `/logout`, `/exit`, `/new`, `/resume`, `/compact`, `/name`, `/thinking`, `/fast`, `/review`, `/init`, `/supervisor`, `/autocompaction`, `/ps`, `/back`.
+- Built-in commands: `/logout`, `/exit`, `/new`, `/resume`, `/compact`, `/name`, `/thinking`, `/fast`, `/review`, `/init`, `/supervisor`, `/autocompaction`, `/status`, `/ps`, `/back`.
 - Exact known slash commands use the normal queued-input drain path when queued, including conditionally fresh-session commands like `/review` and `/init`; they are never sent to the model as plain user prompts.
 - Run-safe commands execute immediately while busy.
 - Non-run-safe known commands while busy are rejected with transient status-line error.
@@ -284,6 +284,8 @@
 - `/autocompaction` controls runtime auto-compaction invocation for the current session only.
 - `/autocompaction` toggles when called without args; `/autocompaction on|off` sets explicitly.
 - `/autocompaction` emits user-visible confirmation in transcript + status line and does not persist to config.
+- `/status` opens a read-only detail overlay with account/subscription status, workdir, session ids, compact git summary, context usage, model/config state, skills, `AGENTS.md` paths, and compaction count.
+- `/status` refreshes progressively on open: the base snapshot renders immediately, then account, git, and environment sections fill in asynchronously. It uses the same detail-surface alt-screen policy and native text-selection behavior as other detail overlays.
 - Built-in prompt commands use embedded markdown templates.
 - Slash commands support file-backed prompts from:
 - `./.builder/prompts`, `./.builder/commands`, `~/.builder/prompts`, `~/.builder/commands`.
