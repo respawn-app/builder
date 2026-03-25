@@ -351,10 +351,10 @@ func providerLabel(provider onboardingImportProviderID) string {
 }
 
 func applyImportChoice(selection *onboardingImportSelection, choiceID string) error {
-	parts := strings.Split(choiceID, ":")
-	if len(parts) == 0 {
+	if strings.TrimSpace(choiceID) == "" {
 		return fmt.Errorf("invalid import choice")
 	}
+	parts := strings.Split(choiceID, ":")
 	switch parts[0] {
 	case "none":
 		*selection = onboardingImportSelection{Mode: onboardingImportModeNone}
@@ -1168,6 +1168,15 @@ func copyPath(src, dst string) error {
 		if err != nil {
 			return err
 		}
+		if !filepath.IsAbs(linkTarget) {
+			resolvedTarget := filepath.Clean(filepath.Join(filepath.Dir(src), linkTarget))
+			relativeTarget, relErr := filepath.Rel(filepath.Dir(dst), resolvedTarget)
+			if relErr == nil {
+				linkTarget = relativeTarget
+			} else {
+				linkTarget = resolvedTarget
+			}
+		}
 		return os.Symlink(linkTarget, dst)
 	}
 	if info.IsDir() {
@@ -1194,9 +1203,16 @@ func copyPath(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = out.Close() }()
-	if _, err := io.Copy(out, in); err != nil {
-		return err
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		if closeErr != nil {
+			return errors.Join(copyErr, closeErr)
+		}
+		return copyErr
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 	return nil
 }

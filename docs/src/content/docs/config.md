@@ -157,7 +157,7 @@ Builder's generated `config.toml` omits `[tools]` entirely until you want explic
 | --- | --- | --- |
 | `tools.ask_question` | `true` | Tool to ask interactive questions |
 | `tools.exec_command` | `true` | The primary shell tool |
-| `tools.multi_tool_use_parallel` | `model-derived` | parallel use tool only needed for compatibility with -codex models. Parallelism is already supported natively without this tool. |
+| `tools.multi_tool_use_parallel` | `model-derived` | Parallel tool-use compatibility layer for Codex models. Parallelism is already supported natively without this tool. |
 | `tools.patch` | `true` | The edit tool |
 | `tools.view_image` | `true` | Ability to view images and PDFs (if supported) |
 | `tools.web_search` | `true` | Tool to search the web |
@@ -166,7 +166,7 @@ Builder's generated `config.toml` omits `[tools]` entirely until you want explic
 Notes:
 
 - `tools.web_search = true` does not force web search on. Native search still depends on `web_search = "native"` and provider support.
-- `multi_tool_use_parallel` tool is only needed for Codex models (because they are post trained on it). All other models default to that tool being disabled.
+- `multi_tool_use_parallel` tool is only needed for Codex models (because they are post-trained on it). All other models default to that tool being disabled.
 
 ### Skills
 
