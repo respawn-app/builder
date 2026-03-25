@@ -142,7 +142,7 @@ func providerContracts() []ProviderContract {
 				{Model: "gpt-5", SupportsReasoningEffort: true, SupportsReasoningSummary: true, SupportsVerbosity: true, SupportsVisionInputs: true},
 				{Model: "gpt-5.4", SupportsReasoningEffort: true, SupportsReasoningSummary: true, SupportsVerbosity: true, SupportsVisionInputs: true},
 				{Model: "gpt-5.3-codex", ContextWindowTokens: 400_000, SupportsReasoningEffort: true, SupportsReasoningSummary: true, SupportsVerbosity: true, SupportsVisionInputs: true, SupportsMultiToolUseParallel: true},
-				{Model: "gpt-5.3-codex-spark", ContextWindowTokens: 400_000, SupportsReasoningEffort: true, SupportsVerbosity: true, SupportsVisionInputs: true, SupportsMultiToolUseParallel: true},
+				{Model: "gpt-5.3-codex-spark", ContextWindowTokens: 128_000, SupportsReasoningEffort: true, SupportsVerbosity: true, SupportsVisionInputs: false, SupportsMultiToolUseParallel: true},
 				{Model: "gpt-4.1", SupportsReasoningEffort: true, SupportsReasoningSummary: true, SupportsVisionInputs: true},
 				{Model: "gpt-4o", SupportsReasoningEffort: true, SupportsReasoningSummary: true, SupportsVisionInputs: true},
 				{Model: "gpt-4o-mini", SupportsReasoningEffort: true, SupportsReasoningSummary: true, SupportsVisionInputs: true},

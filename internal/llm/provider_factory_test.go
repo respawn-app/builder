@@ -65,6 +65,27 @@ func TestNewProviderClient_OpenAI(t *testing.T) {
 	}
 }
 
+func TestNewProviderClient_CodexSparkUsesSparkMetadata(t *testing.T) {
+	client, err := NewProviderClient(ProviderClientOptions{
+		Model: "gpt-5.3-codex-spark",
+		Auth:  providerTestAuth{},
+	})
+	if err != nil {
+		t.Fatalf("new provider client: %v", err)
+	}
+	openAIClient, ok := client.(*OpenAIClient)
+	if !ok {
+		t.Fatalf("expected *OpenAIClient, got %T", client)
+	}
+	transport, ok := openAIClient.transport.(*HTTPTransport)
+	if !ok {
+		t.Fatalf("expected *HTTPTransport, got %T", openAIClient.transport)
+	}
+	if transport.ContextWindowTokens != 128_000 {
+		t.Fatalf("expected spark context window from model metadata, got %d", transport.ContextWindowTokens)
+	}
+}
+
 func TestNewProviderClient_AnthropicNotImplemented(t *testing.T) {
 	_, err := NewProviderClient(ProviderClientOptions{
 		Model: "claude-3-7-sonnet",
