@@ -81,8 +81,7 @@ brew install respawn-app/tap/builder-cli
 
 - Installed binary name stays `builder`. Formula name is `builder-cli`.
 - Do not create the git tag manually unless you are intentionally bypassing the workflow behavior.
-- Short-name Homebrew installs may require `brew update` on machines with stale tap metadata.
-- Future formula dependency changes are driven by `scripts/update-brew-tap.sh`. For example, `git` and `ripgrep` will start applying from `0.2+` because they were intentionally not backported into `0.1`.
+- When polling workflows, use long poll times (10-20 minutes). Avoid short polls or waits.
 
 ## Alternate Path
 
