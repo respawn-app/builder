@@ -105,6 +105,9 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 	if sessionName := strings.TrimSpace(snapshot.SessionName); sessionName != "" {
 		appendWrapped(sessionName, boldStyle)
 	}
+	if parentSummary := statusParentSessionSummary(snapshot); parentSummary != "" {
+		appendWrapped(parentSummary, lipgloss.Style{})
+	}
 	appendWrapped(statusValueOrFallback(snapshot.SessionID, "session unknown"), subtleStyle)
 
 	if l.statusSectionLoading(uiStatusSectionGit) || snapshot.Git.Visible {
@@ -390,6 +393,17 @@ func statusVisibleAuthSummary(auth uiStatusAuthInfo, subscription uiStatusSubscr
 		return ""
 	}
 	return summary
+}
+
+func statusParentSessionSummary(snapshot uiStatusSnapshot) string {
+	parentID := strings.TrimSpace(snapshot.ParentSessionID)
+	if parentID == "" {
+		return ""
+	}
+	if parentName := strings.TrimSpace(snapshot.ParentSessionName); parentName != "" {
+		return fmt.Sprintf("Parent session: %s <%s>", parentName, parentID)
+	}
+	return fmt.Sprintf("Parent session: %s", parentID)
 }
 
 func statusPartitionSkills(skills []runtime.SkillInspection) ([]runtime.SkillInspection, []runtime.SkillInspection) {
