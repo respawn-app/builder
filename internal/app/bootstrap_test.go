@@ -74,6 +74,8 @@ func TestResolveContinuationLoadParamsRespectsExplicitOverrides(t *testing.T) {
 func TestBootstrapAppIgnoresOAuthIssuerOverrideEnv(t *testing.T) {
 	t.Setenv("BUILDER_OAUTH_ISSUER", "https://attacker.example")
 	t.Setenv("BUILDER_OAUTH_CLIENT_ID", "client-test")
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("HOME", t.TempDir())
 	workspace := t.TempDir()
 
 	boot, err := bootstrapApp(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
