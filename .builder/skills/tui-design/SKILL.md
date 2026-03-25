@@ -170,7 +170,7 @@ Guidelines:
 
 ## Information design
 
-- Each screen should have a way to surface errors or toasts/tranient messages to the user. Prefer reusable architecture and UI for error/toast surfacing.
+- Each screen should have a way to surface errors or toasts/transient messages to the user. Prefer reusable architecture and UI for error/toast surfacing.
 - Each screen should indicate loading in some way. No blank screens, no freezes, no placeholder values.
 
 ### What not to include
@@ -237,4 +237,3 @@ Before shipping a TUI screen, check:
 - Does alt-screen usage match the screen's purpose?
 - Can the main scrollback be restored cleanly?
 - Are cached and loading states honest?
-
