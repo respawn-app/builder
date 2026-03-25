@@ -54,7 +54,7 @@ func (b openAIRequestPayloadBuilder) BuildResponse(request OpenAIRequest, mode o
 		out.ParallelToolCalls = openai.Bool(true)
 	}
 	if shouldApplyReasoningEffort(request.SupportsReasoningEffort, request.Model, request.ReasoningEffort) {
-		out.Reasoning = shared.ReasoningParam{Effort: shared.ReasoningEffort(strings.TrimSpace(request.ReasoningEffort)), Summary: shared.ReasoningSummaryConcise}
+		out.Reasoning = buildReasoningParam(request.Model, request.ReasoningEffort)
 		out.Include = append(out.Include, responses.ResponseIncludableReasoningEncryptedContent)
 	}
 	if request.FastMode && SupportsFastModeProvider(b.capabilities) {
@@ -95,7 +95,7 @@ func (b openAIRequestPayloadBuilder) BuildInputTokenCount(request OpenAIRequest)
 		out.ParallelToolCalls = param.NewOpt(true)
 	}
 	if shouldApplyReasoningEffort(request.SupportsReasoningEffort, request.Model, request.ReasoningEffort) {
-		out.Reasoning = shared.ReasoningParam{Effort: shared.ReasoningEffort(strings.TrimSpace(request.ReasoningEffort)), Summary: shared.ReasoningSummaryConcise}
+		out.Reasoning = buildReasoningParam(request.Model, request.ReasoningEffort)
 	}
 	textConfig, ok, err := buildInputTokenCountTextConfig(request.StructuredOutput, configuredTextVerbosity(request.Model, b.modelVerbosity))
 	if err != nil {
@@ -220,6 +220,14 @@ func shouldApplyReasoningEffort(contractSupport bool, model, effort string) bool
 		return true
 	}
 	return SupportsReasoningEffortModel(model)
+}
+
+func buildReasoningParam(model, effort string) shared.ReasoningParam {
+	param := shared.ReasoningParam{Effort: shared.ReasoningEffort(strings.TrimSpace(effort))}
+	if SupportsReasoningSummaryModel(model) {
+		param.Summary = shared.ReasoningSummaryConcise
+	}
+	return param
 }
 
 func configuredTextVerbosity(model, configured string) string {
