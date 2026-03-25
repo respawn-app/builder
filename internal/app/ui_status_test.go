@@ -491,6 +491,33 @@ func TestCollectGitStatusDetectsNestedRepositorySubdirectory(t *testing.T) {
 	}
 }
 
+func TestCollectGitStatusDetectsSymlinkedRepositorySubdirectory(t *testing.T) {
+	repoRoot := t.TempDir()
+	cmd := exec.Command("git", "-C", repoRoot, "init")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v (%s)", err, out)
+	}
+	realDir := filepath.Join(repoRoot, "real", "nested")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatalf("mkdir real dir: %v", err)
+	}
+	linkPath := filepath.Join(t.TempDir(), "workspace-link")
+	if err := os.Symlink(realDir, linkPath); err != nil {
+		t.Fatalf("symlink workdir: %v", err)
+	}
+
+	git := collectGitStatus(context.Background(), linkPath)
+	if !git.Visible {
+		t.Fatalf("expected git section visible for symlinked repository dir, got %+v", git)
+	}
+	if git.Error != "" {
+		t.Fatalf("expected no git error for symlinked repository dir, got %+v", git)
+	}
+	if strings.TrimSpace(git.Branch) == "" {
+		t.Fatalf("expected branch detected for symlinked repository dir, got %+v", git)
+	}
+}
+
 func TestStatusOverlayRendersGitErrorState(t *testing.T) {
 	collector := &stubStatusCollector{snapshot: uiStatusSnapshot{
 		CollectedAt: time.Date(2026, time.March, 24, 21, 15, 0, 0, time.UTC),

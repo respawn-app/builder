@@ -481,6 +481,11 @@ func statusGitRepositoryProbe(workdir string) (bool, error) {
 		return false, nil
 	}
 	current := filepath.Clean(workdir)
+	if resolved, err := filepath.EvalSymlinks(current); err == nil {
+		current = filepath.Clean(resolved)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("resolve git workdir: %w", err)
+	}
 	for {
 		gitMetadataPath := filepath.Join(current, ".git")
 		if _, err := os.Lstat(gitMetadataPath); err == nil {
