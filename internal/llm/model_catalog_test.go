@@ -31,7 +31,7 @@ func TestLookupModelMetadataForCodexSpark(t *testing.T) {
 	if !ok {
 		t.Fatal("expected model metadata for gpt-5.3-codex-spark")
 	}
-	if meta.ContextWindowTokens != 400_000 {
+	if meta.ContextWindowTokens != 128_000 {
 		t.Fatalf("unexpected context window: %d", meta.ContextWindowTokens)
 	}
 }
@@ -84,7 +84,7 @@ func TestSupportsVisionInputsModel(t *testing.T) {
 		want  bool
 	}{
 		{model: "gpt-5.3-codex", want: true},
-		{model: "gpt-5.3-codex-spark", want: true},
+		{model: "gpt-5.3-codex-spark", want: false},
 		{model: " GPT-4.1 ", want: true},
 		{model: "gpt-4o-mini", want: true},
 		{model: "o3", want: true},
