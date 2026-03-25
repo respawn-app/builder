@@ -277,7 +277,7 @@ func TestStatusRepositorySeparatesAuthCacheByOAuthIdentity(t *testing.T) {
 	reqB := uiStatusRequest{WorkspaceRoot: "/tmp/workdir", AuthManager: managerB}
 	base := uiStatusSnapshot{Workdir: "/tmp/workdir"}
 
-	repo.StoreAuth(reqA, uiStatusAuthStageResult{
+	repo.StoreAuth(statusAuthCacheKey(reqA), uiStatusAuthStageResult{
 		Auth:         uiStatusAuthInfo{Summary: "a@example.com"},
 		Subscription: uiStatusSubscriptionInfo{Applicable: true, Summary: "Pro subscription"},
 	}, time.Now())
@@ -295,10 +295,47 @@ func TestStatusRepositorySeparatesAuthCacheByOAuthIdentity(t *testing.T) {
 	}
 }
 
+func TestStatusRepositoryStoresAuthUnderCapturedIdentityKey(t *testing.T) {
+	store := auth.NewMemoryStore(auth.State{
+		Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "token-a", AccountID: "acct-a", Email: "a@example.com"}},
+	})
+	manager := auth.NewManager(store, nil, time.Now)
+	req := uiStatusRequest{WorkspaceRoot: "/tmp/workdir", AuthManager: manager}
+	base := uiStatusSnapshot{Workdir: "/tmp/workdir"}
+	cacheKey := statusAuthCacheKey(req)
+
+	if err := store.Save(context.Background(), auth.State{
+		Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "token-b", AccountID: "acct-b", Email: "b@example.com"}},
+	}); err != nil {
+		t.Fatalf("switch auth identity: %v", err)
+	}
+
+	repo := newMemoryUIStatusRepository()
+	repo.StoreAuth(cacheKey, uiStatusAuthStageResult{
+		Auth:         uiStatusAuthInfo{Summary: "a@example.com"},
+		Subscription: uiStatusSubscriptionInfo{Applicable: true, Summary: "Pro subscription"},
+	}, time.Now())
+
+	seedB := repo.SeedSnapshot(req, base, time.Now())
+	if got := seedB.Snapshot.Auth.Summary; got != "" {
+		t.Fatalf("expected no auth cached under switched identity, got %q", got)
+	}
+
+	if err := store.Save(context.Background(), auth.State{
+		Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "token-a", AccountID: "acct-a", Email: "a@example.com"}},
+	}); err != nil {
+		t.Fatalf("restore auth identity: %v", err)
+	}
+	seedA := repo.SeedSnapshot(req, base, time.Now())
+	if got := seedA.Snapshot.Auth.Summary; got != "a@example.com" {
+		t.Fatalf("expected cached auth under original captured identity, got %q", got)
+	}
+}
+
 func TestStatusCommandRefreshesGitWhenCachedResultIsInvisible(t *testing.T) {
 	repo := newMemoryUIStatusRepository()
 	repo.StoreGit(
-		uiStatusRequest{WorkspaceRoot: "/tmp/workdir"},
+		statusGitCacheKey("/tmp/workdir"),
 		uiStatusGitStageResult{Git: uiStatusGitInfo{}},
 		time.Now(),
 	)
@@ -348,7 +385,7 @@ func TestStatusRepositoryNormalizesGitCacheKeysAcrossSlashStyles(t *testing.T) {
 	repo := newMemoryUIStatusRepository()
 	now := time.Now()
 	repo.StoreGit(
-		uiStatusRequest{WorkspaceRoot: `C:\repo`},
+		statusGitCacheKey(`C:\repo`),
 		uiStatusGitStageResult{Git: uiStatusGitInfo{Visible: true, Branch: "main", Ahead: 1}},
 		now,
 	)

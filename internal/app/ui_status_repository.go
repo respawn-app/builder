@@ -19,9 +19,9 @@ const (
 
 type uiStatusRepository interface {
 	SeedSnapshot(req uiStatusRequest, base uiStatusSnapshot, now time.Time) uiStatusSeedResult
-	StoreAuth(req uiStatusRequest, result uiStatusAuthStageResult, now time.Time)
-	StoreGit(req uiStatusRequest, result uiStatusGitStageResult, now time.Time)
-	StoreEnvironment(req uiStatusRequest, result uiStatusEnvironmentStageResult, now time.Time)
+	StoreAuth(cacheKey string, result uiStatusAuthStageResult, now time.Time)
+	StoreGit(cacheKey string, result uiStatusGitStageResult, now time.Time)
+	StoreEnvironment(cacheKey string, result uiStatusEnvironmentStageResult, now time.Time)
 }
 
 type uiStatusSeedResult struct {
@@ -106,22 +106,31 @@ func (r *memoryUIStatusRepository) SeedSnapshot(req uiStatusRequest, base uiStat
 	return seed
 }
 
-func (r *memoryUIStatusRepository) StoreAuth(req uiStatusRequest, result uiStatusAuthStageResult, now time.Time) {
+func (r *memoryUIStatusRepository) StoreAuth(cacheKey string, result uiStatusAuthStageResult, now time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.authByKey[statusAuthCacheKey(req)] = uiStatusAuthCacheEntry{fetchedAt: statusRepositoryTime(now), result: result}
+	if strings.TrimSpace(cacheKey) == "" {
+		return
+	}
+	r.authByKey[cacheKey] = uiStatusAuthCacheEntry{fetchedAt: statusRepositoryTime(now), result: result}
 }
 
-func (r *memoryUIStatusRepository) StoreGit(req uiStatusRequest, result uiStatusGitStageResult, now time.Time) {
+func (r *memoryUIStatusRepository) StoreGit(cacheKey string, result uiStatusGitStageResult, now time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.gitByKey[statusGitCacheKey(statusWorkdir(req.WorkspaceRoot))] = uiStatusGitCacheEntry{fetchedAt: statusRepositoryTime(now), result: result}
+	if strings.TrimSpace(cacheKey) == "" {
+		return
+	}
+	r.gitByKey[cacheKey] = uiStatusGitCacheEntry{fetchedAt: statusRepositoryTime(now), result: result}
 }
 
-func (r *memoryUIStatusRepository) StoreEnvironment(req uiStatusRequest, result uiStatusEnvironmentStageResult, now time.Time) {
+func (r *memoryUIStatusRepository) StoreEnvironment(cacheKey string, result uiStatusEnvironmentStageResult, now time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.envByKey[statusEnvironmentCacheKey(req)] = uiStatusEnvironmentCacheEntry{fetchedAt: statusRepositoryTime(now), result: result}
+	if strings.TrimSpace(cacheKey) == "" {
+		return
+	}
+	r.envByKey[cacheKey] = uiStatusEnvironmentCacheEntry{fetchedAt: statusRepositoryTime(now), result: result}
 }
 
 func statusRepositoryTime(now time.Time) time.Time {

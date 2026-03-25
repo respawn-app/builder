@@ -703,7 +703,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusSnapshot.Auth = msg.result.Auth
 		m.statusSnapshot.Subscription = msg.result.Subscription
 		if m.statusRepository != nil {
-			m.statusRepository.StoreAuth(m.newStatusRequest(time.Now()), msg.result, time.Now())
+			m.statusRepository.StoreAuth(msg.cacheKey, msg.result, time.Now())
 		}
 		m.finishStatusSectionRefresh(uiStatusSectionAuth, msg.result.Warning)
 		m.syncViewport()
@@ -715,7 +715,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.statusSnapshot.Git = msg.result.Git
 		if m.statusRepository != nil {
-			m.statusRepository.StoreGit(m.newStatusRequest(time.Now()), msg.result, time.Now())
+			m.statusRepository.StoreGit(msg.cacheKey, msg.result, time.Now())
 		}
 		m.finishStatusSectionRefresh(uiStatusSectionGit, "")
 		m.syncViewport()
@@ -730,7 +730,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusSnapshot.AgentsPaths = msg.result.AgentsPaths
 		m.statusSnapshot.AgentTokenCounts = msg.result.AgentTokenCounts
 		if m.statusRepository != nil {
-			m.statusRepository.StoreEnvironment(m.newStatusRequest(time.Now()), msg.result, time.Now())
+			m.statusRepository.StoreEnvironment(msg.cacheKey, msg.result, time.Now())
 		}
 		m.finishStatusSectionRefresh(uiStatusSectionEnvironment, msg.result.CollectorWarning)
 		m.syncViewport()
