@@ -153,6 +153,61 @@ func TestSettingsTOMLOmitsDefaultAssignmentsForOnboarding(t *testing.T) {
 	}
 }
 
+func TestSettingsTOMLRoundTripsCapabilityOverrides(t *testing.T) {
+	settings := defaultSettings()
+	settings.ModelCapabilities.SupportsReasoningEffort = true
+	settings.ProviderCapabilities = ProviderCapabilitiesOverride{
+		ProviderID:                    "openai-compatible",
+		SupportsResponsesAPI:          true,
+		SupportsServerSideContextEdit: true,
+	}
+	toml := settingsTOML(settings)
+	for _, want := range []string{
+		"[model_capabilities]",
+		"supports_reasoning_effort = true",
+		"[provider_capabilities]",
+		"provider_id = \"openai-compatible\"",
+		"supports_responses_api = true",
+		"supports_server_side_context_edit = true",
+	} {
+		if !strings.Contains(toml, want) {
+			t.Fatalf("expected serialized settings to contain %q, got %q", want, toml)
+		}
+	}
+	if strings.Contains(toml, "# [model_capabilities]") {
+		t.Fatalf("expected model_capabilities section to be active when overrides exist, got %q", toml)
+	}
+	if strings.Contains(toml, "# [provider_capabilities]") {
+		t.Fatalf("expected provider_capabilities section to be active when overrides exist, got %q", toml)
+	}
+
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(toml), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	raw, err := readSettingsFile(path)
+	if err != nil {
+		t.Fatalf("read settings file: %v", err)
+	}
+	state := configRegistry.defaultState()
+	sources := configRegistry.defaultSourceMap()
+	if err := configRegistry.applyFile(raw, path, &state, sources); err != nil {
+		t.Fatalf("apply file: %v", err)
+	}
+	if !state.Settings.ModelCapabilities.SupportsReasoningEffort {
+		t.Fatal("expected model capability override to round-trip")
+	}
+	if state.Settings.ProviderCapabilities.ProviderID != "openai-compatible" {
+		t.Fatalf("expected provider_id to round-trip, got %q", state.Settings.ProviderCapabilities.ProviderID)
+	}
+	if !state.Settings.ProviderCapabilities.SupportsResponsesAPI {
+		t.Fatal("expected supports_responses_api to round-trip")
+	}
+	if !state.Settings.ProviderCapabilities.SupportsServerSideContextEdit {
+		t.Fatal("expected supports_server_side_context_edit to round-trip")
+	}
+}
+
 func TestWriteDefaultSettingsFileWithThemePersistsSelectedTheme(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -204,6 +259,29 @@ func TestWriteSettingsFileForOnboardingPreservesAutoTheme(t *testing.T) {
 	}
 	if !strings.Contains(string(contents), "theme = \"auto\"") {
 		t.Fatalf("expected onboarding settings file to preserve auto theme, got %q", string(contents))
+	}
+}
+
+func TestWriteSettingsFileForOnboardingDoesNotOverwriteExistingFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model = \"existing\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_, err := WriteSettingsFileForOnboarding(defaultSettings())
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected existing settings file error, got %v", err)
+	}
+	contents, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read settings file: %v", err)
+	}
+	if string(contents) != "model = \"existing\"\n" {
+		t.Fatalf("expected existing settings file contents to remain unchanged, got %q", string(contents))
 	}
 }
 

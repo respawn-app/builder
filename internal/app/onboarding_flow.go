@@ -322,7 +322,7 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				levels := llm.SupportedVerbosityLevelsModel(state.settings.Model)
 				options := make([]onboardingOption, 0, len(levels))
 				for _, level := range levels {
-					options = append(options, onboardingOption{ID: level, Title: strings.Title(level)})
+					options = append(options, onboardingOption{ID: level, Title: titleCaseASCII(level)})
 				}
 				return onboardingScreen{ID: "verbosity", Kind: onboardingScreenChoice, Title: "Choose a verbosity level", Body: "Choose how verbose the model should be when it responds.", Options: options, DefaultOptionID: string(state.settings.ModelVerbosity)}
 			},
@@ -516,6 +516,16 @@ func onboardingThemeSummary(value string) string {
 		return theme.Resolve(value)
 	}
 	return theme.Auto + " (" + theme.Resolve(value) + ")"
+}
+
+func titleCaseASCII(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	runes := []rune(trimmed)
+	runes[0] = []rune(strings.ToUpper(string(runes[0])))[0]
+	return string(runes)
 }
 
 func containsOnboardingOption(options []onboardingOption, target string) bool {

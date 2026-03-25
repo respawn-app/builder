@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -149,7 +150,10 @@ func discoverProviderSkills(provider onboardingImportProvider, base string) ([]o
 		}
 		info, err := os.Stat(path)
 		if err != nil {
-			return nil
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return fmt.Errorf("inspect %s skill %s: %w", provider.Label, path, err)
 		}
 		targetDirName := filepath.Base(filepath.Dir(path))
 		itemID := string(provider.ID) + ":" + filepath.ToSlash(filepath.Dir(path))
@@ -185,7 +189,10 @@ func discoverProviderCommands(provider onboardingImportProvider, base string) ([
 		}
 		info, err := os.Stat(path)
 		if err != nil {
-			return nil
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return fmt.Errorf("inspect %s command %s: %w", provider.Label, path, err)
 		}
 		targetFileName := filepath.Base(path)
 		displayName := strings.TrimSuffix(targetFileName, filepath.Ext(targetFileName))
@@ -779,121 +786,206 @@ func commandImportSummary(state *onboardingFlowState) string {
 	}
 }
 
-func executeOnboardingImports(globalRoot string, state onboardingFlowState) error {
-	if err := executeSkillImport(globalRoot, state.imports, state.skillImport, plannedSkillImports(&state)); err != nil {
-		return err
+func executeOnboardingImports(globalRoot string, state onboardingFlowState) (func() error, error) {
+	createdPaths := []string{}
+	skillPaths, err := executeSkillImport(globalRoot, state.imports, state.skillImport, plannedSkillImports(&state))
+	if err != nil {
+		return func() error { return nil }, err
 	}
-	if err := executeCommandImport(globalRoot, state.imports, state.commandImport, plannedCommandImports(&state)); err != nil {
-		return err
+	createdPaths = append(createdPaths, skillPaths...)
+	commandPaths, err := executeCommandImport(globalRoot, state.imports, state.commandImport, plannedCommandImports(&state))
+	if err != nil {
+		rollbackErr := rollbackOnboardingCreatedPaths(createdPaths)
+		if rollbackErr != nil {
+			err = errors.Join(err, rollbackErr)
+		}
+		return func() error { return nil }, err
 	}
-	return nil
+	createdPaths = append(createdPaths, commandPaths...)
+	return func() error {
+		return rollbackOnboardingCreatedPaths(createdPaths)
+	}, nil
 }
 
-func executeSkillImport(globalRoot string, discovery onboardingImportDiscovery, selection onboardingImportSelection, items []onboardingSkillImportItem) error {
+func executeSkillImport(globalRoot string, discovery onboardingImportDiscovery, selection onboardingImportSelection, items []onboardingSkillImportItem) ([]string, error) {
 	if discovery.skipSkills {
 		if selection.Mode != onboardingImportModeNone {
-			return fmt.Errorf("skills import should have been skipped because existing content was found")
+			return nil, fmt.Errorf("skills import should have been skipped because existing content was found")
 		}
-		return nil
+		return nil, nil
 	}
 	if selection.Mode == onboardingImportModeNone {
-		return nil
+		return nil, nil
 	}
 	targetRoot := filepath.Join(globalRoot, "skills")
+	createdPaths := []string{}
 	if selection.Mode == onboardingImportModeSymlinkSource {
 		exists, err := pathExists(targetRoot)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if exists {
-			return fmt.Errorf("skills symlink target already exists: %s", targetRoot)
+			return nil, fmt.Errorf("skills symlink target already exists: %s", targetRoot)
 		}
 		sourcePath, err := providerSkillSymlinkSource(selection.Provider)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if err := os.MkdirAll(filepath.Dir(targetRoot), 0o755); err != nil {
-			return fmt.Errorf("create skills parent root: %w", err)
+			return nil, fmt.Errorf("create skills parent root: %w", err)
 		}
 		if err := os.Symlink(sourcePath, targetRoot); err != nil {
-			return fmt.Errorf("symlink skills source %s: %w", providerLabel(selection.Provider), err)
+			return nil, fmt.Errorf("symlink skills source %s: %w", providerLabel(selection.Provider), err)
 		}
-		return nil
+		return []string{targetRoot}, nil
 	}
 	if len(items) == 0 {
-		return nil
+		return nil, nil
+	}
+	rootExists, err := pathExists(targetRoot)
+	if err != nil {
+		return nil, err
 	}
 	if err := os.MkdirAll(targetRoot, 0o755); err != nil {
-		return fmt.Errorf("create skills import root: %w", err)
+		return nil, fmt.Errorf("create skills import root: %w", err)
+	}
+	if !rootExists {
+		createdPaths = append(createdPaths, targetRoot)
 	}
 	for _, item := range items {
 		targetPath := filepath.Join(targetRoot, item.TargetDirName)
 		exists, err := pathExists(targetPath)
 		if err != nil {
-			return err
+			rollbackErr := rollbackOnboardingCreatedPaths(createdPaths)
+			if rollbackErr != nil {
+				err = errors.Join(err, rollbackErr)
+			}
+			return nil, err
 		}
 		if exists {
-			return fmt.Errorf("skills import target already exists: %s", targetPath)
+			err := fmt.Errorf("skills import target already exists: %s", targetPath)
+			rollbackErr := rollbackOnboardingCreatedPaths(createdPaths)
+			if rollbackErr != nil {
+				err = errors.Join(err, rollbackErr)
+			}
+			return nil, err
 		}
 		if err := copyPath(item.SourceDir, targetPath); err != nil {
-			return fmt.Errorf("copy skill %s: %w", item.TargetDirName, err)
+			err = fmt.Errorf("copy skill %s: %w", item.TargetDirName, err)
+			rollbackErr := rollbackOnboardingCreatedPaths(createdPaths)
+			if rollbackErr != nil {
+				err = errors.Join(err, rollbackErr)
+			}
+			return nil, err
 		}
+		createdPaths = append(createdPaths, targetPath)
 	}
-	return nil
+	return createdPaths, nil
 }
 
-func executeCommandImport(globalRoot string, discovery onboardingImportDiscovery, selection onboardingImportSelection, items []onboardingCommandImportItem) error {
+func executeCommandImport(globalRoot string, discovery onboardingImportDiscovery, selection onboardingImportSelection, items []onboardingCommandImportItem) ([]string, error) {
 	if discovery.skipCommands {
 		if selection.Mode != onboardingImportModeNone {
-			return fmt.Errorf("slash command import should have been skipped because existing content was found")
+			return nil, fmt.Errorf("slash command import should have been skipped because existing content was found")
 		}
-		return nil
+		return nil, nil
 	}
 	if len(items) == 0 || selection.Mode == onboardingImportModeNone {
-		return nil
+		return nil, nil
 	}
 	targetRoot := filepath.Join(globalRoot, "prompts")
+	createdPaths := []string{}
 	if selection.Mode == onboardingImportModeSymlinkSource {
 		exists, err := pathExists(targetRoot)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if exists {
-			return fmt.Errorf("slash command symlink target already exists: %s", targetRoot)
+			return nil, fmt.Errorf("slash command symlink target already exists: %s", targetRoot)
 		}
 		sourcePath := strings.TrimSpace(discovery.commandSymlinkRoots[selection.Provider])
 		if sourcePath == "" {
 			fallbackPath, fallbackErr := providerCommandSymlinkSource(selection.Provider)
 			if fallbackErr != nil {
-				return fallbackErr
+				return nil, fallbackErr
 			}
 			sourcePath = fallbackPath
 		}
 		if err := os.MkdirAll(filepath.Dir(targetRoot), 0o755); err != nil {
-			return fmt.Errorf("create prompts parent root: %w", err)
+			return nil, fmt.Errorf("create prompts parent root: %w", err)
 		}
 		if err := os.Symlink(sourcePath, targetRoot); err != nil {
-			return fmt.Errorf("symlink slash commands from %s: %w", providerLabel(selection.Provider), err)
+			return nil, fmt.Errorf("symlink slash commands from %s: %w", providerLabel(selection.Provider), err)
 		}
-		return nil
+		return []string{targetRoot}, nil
+	}
+	rootExists, err := pathExists(targetRoot)
+	if err != nil {
+		return nil, err
 	}
 	if err := os.MkdirAll(targetRoot, 0o755); err != nil {
-		return fmt.Errorf("create prompts import root: %w", err)
+		return nil, fmt.Errorf("create prompts import root: %w", err)
+	}
+	if !rootExists {
+		createdPaths = append(createdPaths, targetRoot)
 	}
 	for _, item := range items {
 		targetPath := filepath.Join(targetRoot, item.TargetFileName)
 		exists, err := pathExists(targetPath)
 		if err != nil {
-			return err
+			rollbackErr := rollbackOnboardingCreatedPaths(createdPaths)
+			if rollbackErr != nil {
+				err = errors.Join(err, rollbackErr)
+			}
+			return nil, err
 		}
 		if exists {
-			return fmt.Errorf("slash command import target already exists: %s", targetPath)
+			err := fmt.Errorf("slash command import target already exists: %s", targetPath)
+			rollbackErr := rollbackOnboardingCreatedPaths(createdPaths)
+			if rollbackErr != nil {
+				err = errors.Join(err, rollbackErr)
+			}
+			return nil, err
 		}
 		if err := copyPath(item.SourceFile, targetPath); err != nil {
-			return fmt.Errorf("copy slash command %s: %w", item.TargetFileName, err)
+			err = fmt.Errorf("copy slash command %s: %w", item.TargetFileName, err)
+			rollbackErr := rollbackOnboardingCreatedPaths(createdPaths)
+			if rollbackErr != nil {
+				err = errors.Join(err, rollbackErr)
+			}
+			return nil, err
+		}
+		createdPaths = append(createdPaths, targetPath)
+	}
+	return createdPaths, nil
+}
+
+func rollbackOnboardingCreatedPaths(paths []string) error {
+	var rollbackErr error
+	for index := len(paths) - 1; index >= 0; index-- {
+		path := strings.TrimSpace(paths[index])
+		if path == "" {
+			continue
+		}
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("rollback import path %s: %w", path, err))
+			continue
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				rollbackErr = errors.Join(rollbackErr, fmt.Errorf("rollback import path %s: %w", path, err))
+			}
+			continue
+		}
+		if err := os.RemoveAll(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("rollback import path %s: %w", path, err))
 		}
 	}
-	return nil
+	return rollbackErr
 }
 
 func providerSkillSymlinkSource(providerID onboardingImportProviderID) (string, error) {
