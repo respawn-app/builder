@@ -9,6 +9,18 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+type queuedPaneEntryKind uint8
+
+const (
+	queuedPaneEntryQueued queuedPaneEntryKind = iota
+	queuedPaneEntryPending
+)
+
+type queuedPaneEntry struct {
+	Text string
+	Kind queuedPaneEntryKind
+}
+
 func (l uiViewLayout) renderChatPanel(width, height int, style uiStyles) []string {
 	if l.model.statusVisible {
 		return l.renderStatusOverlay(width, height, style)
@@ -93,15 +105,24 @@ func (l uiViewLayout) renderQueuedMessagesPane(width int) []string {
 	if width < 1 {
 		return nil
 	}
-	lines := l.queuedMessagePaneLines(width)
-	if len(lines) == 0 {
+	visible, hidden := l.queuedVisibleMessages()
+	if len(visible) == 0 {
 		return nil
 	}
 	palette := uiPalette(l.model.theme)
 	queueStyle := lipgloss.NewStyle().Foreground(palette.secondary).Faint(true)
-	out := make([]string, 0, len(lines))
-	for _, line := range lines {
-		out = append(out, queueStyle.Render(padANSIRight(line, width)))
+	pendingStyle := lipgloss.NewStyle().Foreground(palette.primary)
+	out := make([]string, 0, len(visible)+1)
+	if hidden > 0 {
+		out = append(out, queueStyle.Render(padANSIRight(fmt.Sprintf("%d more messages", hidden), width)))
+	}
+	for _, entry := range visible {
+		line := truncateQueuedMessageLine(entry.displayText(), width)
+		style := queueStyle
+		if entry.Kind == queuedPaneEntryPending {
+			style = pendingStyle
+		}
+		out = append(out, style.Render(padANSIRight(line, width)))
 	}
 	return out
 }
@@ -117,23 +138,9 @@ func (l uiViewLayout) queuedPaneLineCount() int {
 	return len(visible)
 }
 
-func (l uiViewLayout) queuedMessagePaneLines(width int) []string {
-	visible, hidden := l.queuedVisibleMessages()
-	if width < 1 || len(visible) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(visible)+1)
-	if hidden > 0 {
-		out = append(out, fmt.Sprintf("%d more messages", hidden))
-	}
-	for _, message := range visible {
-		out = append(out, truncateQueuedMessageLine(message, width))
-	}
-	return out
-}
-
-func (l uiViewLayout) queuedVisibleMessages() ([]string, int) {
-	total := len(l.model.queued)
+func (l uiViewLayout) queuedVisibleMessages() ([]queuedPaneEntry, int) {
+	entries := l.queuedMessages()
+	total := len(entries)
 	if total == 0 {
 		return nil, 0
 	}
@@ -141,6 +148,24 @@ func (l uiViewLayout) queuedVisibleMessages() ([]string, int) {
 	if total > queuedMessagesLimit {
 		start = total - queuedMessagesLimit
 	}
-	visible := l.model.queued[start:]
+	visible := entries[start:]
 	return visible, total - len(visible)
+}
+
+func (l uiViewLayout) queuedMessages() []queuedPaneEntry {
+	entries := make([]queuedPaneEntry, 0, len(l.model.queued)+len(l.model.pendingInjected))
+	for _, message := range l.model.queued {
+		entries = append(entries, queuedPaneEntry{Text: message, Kind: queuedPaneEntryQueued})
+	}
+	for _, message := range l.model.pendingInjected {
+		entries = append(entries, queuedPaneEntry{Text: message, Kind: queuedPaneEntryPending})
+	}
+	return entries
+}
+
+func (e queuedPaneEntry) displayText() string {
+	if e.Kind == queuedPaneEntryPending {
+		return "next: " + e.Text
+	}
+	return e.Text
 }

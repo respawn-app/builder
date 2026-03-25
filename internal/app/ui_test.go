@@ -3140,6 +3140,42 @@ func TestRenderQueuedMessagesPaneTruncatesToOneLineWithEllipsis(t *testing.T) {
 	}
 }
 
+func TestRenderQueuedMessagesPaneShowsPendingInjectedAfterQueuedMessages(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.queued = []string{"queued later"}
+	m.pendingInjected = []string{"please continue with tests"}
+
+	lines := m.renderQueuedMessagesPane(80)
+	plain := strings.Split(stripANSIAndTrimRight(strings.Join(lines, "\n")), "\n")
+	want := []string{"queued later", "next: please continue with tests"}
+	if len(plain) != len(want) {
+		t.Fatalf("expected %d plain lines, got %d", len(want), len(plain))
+	}
+	for i := range want {
+		if plain[i] != want[i] {
+			t.Fatalf("line %d = %q want %q", i, plain[i], want[i])
+		}
+	}
+}
+
+func TestRenderQueuedMessagesPanePrioritizesPendingInjectedWithinVisibleLimit(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.queued = []string{"one", "two", "three", "four", "five", "six"}
+	m.pendingInjected = []string{"first steering", "second steering"}
+
+	lines := m.renderQueuedMessagesPane(80)
+	plain := strings.Split(stripANSIAndTrimRight(strings.Join(lines, "\n")), "\n")
+	want := []string{"3 more messages", "four", "five", "six", "next: first steering", "next: second steering"}
+	if len(plain) != len(want) {
+		t.Fatalf("expected %d plain lines, got %d", len(want), len(plain))
+	}
+	for i := range want {
+		if plain[i] != want[i] {
+			t.Fatalf("line %d = %q want %q", i, plain[i], want[i])
+		}
+	}
+}
+
 func TestViewPlacesQueuedPaneBetweenSlashPickerAndInput(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.termWidth = 80
