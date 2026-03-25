@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -517,7 +518,14 @@ func fetchStatusUsagePayload(ctx context.Context, baseURL string, state auth.Sta
 }
 
 func statusUsageWindowsByLabel(payload statusUsagePayload) []uiStatusSubscriptionWindow {
+	type orderedWindow struct {
+		window        uiStatusSubscriptionWindow
+		durationSecs  int
+		discoveryRank int
+	}
 	windowMap := map[string]uiStatusSubscriptionWindow{}
+	windowOrder := map[string]orderedWindow{}
+	discoveryRank := 0
 	addWindow := func(window *statusUsageWindow) {
 		if window == nil {
 			return
@@ -537,6 +545,12 @@ func statusUsageWindowsByLabel(payload statusUsagePayload) []uiStatusSubscriptio
 				ResetAt:     time.Unix(window.ResetAt, 0).UTC(),
 			}
 		}
+		windowOrder[label] = orderedWindow{
+			window:        windowMap[label],
+			durationSecs:  window.LimitWindowSeconds,
+			discoveryRank: discoveryRank,
+		}
+		discoveryRank++
 	}
 	if payload.RateLimit != nil {
 		addWindow(payload.RateLimit.PrimaryWindow)
@@ -549,12 +563,19 @@ func statusUsageWindowsByLabel(payload statusUsagePayload) []uiStatusSubscriptio
 		addWindow(extra.RateLimit.PrimaryWindow)
 		addWindow(extra.RateLimit.SecondaryWindow)
 	}
-	order := []string{"5h", "weekly", "monthly", "annual"}
-	windows := make([]uiStatusSubscriptionWindow, 0, len(windowMap))
-	for _, label := range order {
-		if window := windowMap[label]; window.Label != "" {
-			windows = append(windows, window)
+	ordered := make([]orderedWindow, 0, len(windowOrder))
+	for _, window := range windowOrder {
+		ordered = append(ordered, window)
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].durationSecs != ordered[j].durationSecs {
+			return ordered[i].durationSecs < ordered[j].durationSecs
 		}
+		return ordered[i].discoveryRank < ordered[j].discoveryRank
+	})
+	windows := make([]uiStatusSubscriptionWindow, 0, len(ordered))
+	for _, window := range ordered {
+		windows = append(windows, window.window)
 	}
 	return windows
 }

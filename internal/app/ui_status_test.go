@@ -342,6 +342,30 @@ func TestStatusCommandRefreshesGitWhenCachedResultIsInvisible(t *testing.T) {
 	}
 }
 
+func TestStatusRepositoryNormalizesGitCacheKeysAcrossSlashStyles(t *testing.T) {
+	repo := newMemoryUIStatusRepository()
+	now := time.Now()
+	repo.StoreGit(
+		uiStatusRequest{WorkspaceRoot: `C:\repo`},
+		uiStatusGitStageResult{Git: uiStatusGitInfo{Visible: true, Branch: "main", Ahead: 1}},
+		now,
+	)
+
+	seed := repo.SeedSnapshot(
+		uiStatusRequest{WorkspaceRoot: `C:\repo`},
+		uiStatusSnapshot{Workdir: "C:/repo"},
+		now,
+	)
+	if !seed.Snapshot.Git.Visible || seed.Snapshot.Git.Branch != "main" {
+		t.Fatalf("expected cached git snapshot reused across slash styles, got %+v", seed.Snapshot.Git)
+	}
+	for _, section := range seed.PendingSections {
+		if section == uiStatusSectionGit {
+			t.Fatalf("did not expect git refresh when normalized cache key matches, got %+v", seed.PendingSections)
+		}
+	}
+}
+
 func TestStatusCommandProgressiveAuthWarningIsRendered(t *testing.T) {
 	collector := &stubProgressiveStatusCollector{
 		base: uiStatusSnapshot{
@@ -513,6 +537,28 @@ func TestStatusLimitDurationMatchesCodexBuckets(t *testing.T) {
 	}
 	if got := statusLimitDuration(60 * 24 * 7); got != "weekly" {
 		t.Fatalf("weekly window label = %q, want %q", got, "weekly")
+	}
+}
+
+func TestStatusUsageWindowsByLabelKeepsNonWhitelistedHourDurations(t *testing.T) {
+	windows := statusUsageWindowsByLabel(statusUsagePayload{
+		RateLimit: &statusUsageRateLimit{
+			PrimaryWindow:   &statusUsageWindow{UsedPercent: 10, LimitWindowSeconds: 3600},
+			SecondaryWindow: &statusUsageWindow{UsedPercent: 20, LimitWindowSeconds: 3 * 3600},
+		},
+		AdditionalRateLimits: []statusUsageExtraBucket{{
+			RateLimit: &statusUsageRateLimit{
+				PrimaryWindow: &statusUsageWindow{UsedPercent: 30, LimitWindowSeconds: 24 * 3600},
+			},
+		}},
+	})
+	got := make([]string, 0, len(windows))
+	for _, window := range windows {
+		got = append(got, window.Label)
+	}
+	want := []string{"1h", "3h", "24h"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("window labels = %v, want %v", got, want)
 	}
 }
 
