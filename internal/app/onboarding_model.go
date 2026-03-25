@@ -353,12 +353,18 @@ func (m *onboardingModel) syncScreen(resetViewport bool) {
 	}
 	screen := step.Build(&m.state)
 	previousID := m.currentScreen.ID
+	previousKind := m.currentScreen.Kind
+	inputDraft := m.input.Value()
 	m.currentScreen = screen
 	if resetViewport || previousID != screen.ID {
 		m.offset = 0
 	}
 	if screen.Kind == onboardingScreenInput {
-		m.input.SetValue(screen.InputValue)
+		if !resetViewport && previousID == screen.ID && previousKind == onboardingScreenInput {
+			m.input.SetValue(inputDraft)
+		} else {
+			m.input.SetValue(screen.InputValue)
+		}
 		m.input.Placeholder = screen.Placeholder
 		m.input.EchoMode = textinput.EchoNormal
 		if screen.SensitiveInput {
