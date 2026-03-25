@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -66,12 +67,13 @@ func (s *stubProgressiveStatusCollector) CollectEnvironment(_ context.Context, _
 
 func TestStatusCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 	collector := &stubStatusCollector{snapshot: uiStatusSnapshot{
-		CollectedAt:     time.Date(2026, time.March, 24, 21, 15, 0, 0, time.UTC),
-		Workdir:         "/tmp/workdir",
-		SessionName:     "incident",
-		SessionID:       "session-123",
-		ParentSessionID: "parent-456",
-		Git:             uiStatusGitInfo{Visible: true, Branch: "master", Dirty: true, Ahead: 2, Behind: 1},
+		CollectedAt:       time.Date(2026, time.March, 24, 21, 15, 0, 0, time.UTC),
+		Workdir:           "/tmp/workdir",
+		SessionName:       "incident",
+		SessionID:         "session-123",
+		ParentSessionID:   "parent-456",
+		ParentSessionName: "incident-root",
+		Git:               uiStatusGitInfo{Visible: true, Branch: "master", Dirty: true, Ahead: 2, Behind: 1},
 		Auth: uiStatusAuthInfo{
 			Summary: "user@example.com",
 		},
@@ -137,7 +139,7 @@ func TestStatusCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 	next, _ = updated.Update(statusRefreshDoneMsg{token: updated.statusRefreshToken, snapshot: collector.snapshot})
 	updated = next.(*uiModel)
 	plain := stripANSIAndTrimRight(updated.View())
-	for _, want := range []string{"Pro subscription", "CWD: /tmp/workdir", "Model: gpt-5 high fast", "incident", "session-123", "master", "dirty | ahead 2 | behind 1"} {
+	for _, want := range []string{"Pro subscription", "CWD: /tmp/workdir", "Model: gpt-5 high fast", "incident", "Parent session: incident-root <parent-456>", "session-123", "master", "dirty | ahead 2 | behind 1"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected status overlay to contain %q, got %q", want, plain)
 		}
@@ -559,6 +561,21 @@ func TestStatusUsageWindowsByLabelKeepsNonWhitelistedHourDurations(t *testing.T)
 	want := []string{"1h", "3h", "24h"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("window labels = %v, want %v", got, want)
+	}
+}
+
+func TestStatusParentSessionNameResolvesFromPersistenceRoot(t *testing.T) {
+	persistenceRoot := t.TempDir()
+	containerDir := filepath.Join(persistenceRoot, "sessions", "workspace-a")
+	parentStore, err := session.Create(containerDir, "workspace-a", "/tmp/work-a")
+	if err != nil {
+		t.Fatalf("create parent store: %v", err)
+	}
+	if err := parentStore.SetName("incident-root"); err != nil {
+		t.Fatalf("set parent name: %v", err)
+	}
+	if got := statusParentSessionName(persistenceRoot, parentStore.Meta().SessionID); got != "incident-root" {
+		t.Fatalf("parent session name = %q", got)
 	}
 }
 

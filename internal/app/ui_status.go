@@ -16,6 +16,7 @@ import (
 	"builder/internal/config"
 	"builder/internal/llm"
 	"builder/internal/runtime"
+	"builder/internal/session"
 	"builder/internal/tokenutil"
 	"builder/internal/tui"
 
@@ -28,11 +29,12 @@ const (
 )
 
 type uiStatusConfig struct {
-	WorkspaceRoot string
-	Settings      config.Settings
-	Source        config.SourceReport
-	AuthManager   *auth.Manager
-	AuthStatePath string
+	WorkspaceRoot   string
+	PersistenceRoot string
+	Settings        config.Settings
+	Source          config.SourceReport
+	AuthManager     *auth.Manager
+	AuthStatePath   string
 }
 
 type uiStatusCollector interface {
@@ -58,6 +60,7 @@ const (
 type uiStatusRequest struct {
 	Engine                *runtime.Engine
 	WorkspaceRoot         string
+	PersistenceRoot       string
 	Settings              config.Settings
 	Source                config.SourceReport
 	AuthManager           *auth.Manager
@@ -76,23 +79,24 @@ type uiStatusRequest struct {
 }
 
 type uiStatusSnapshot struct {
-	CollectedAt      time.Time
-	Workdir          string
-	SessionName      string
-	SessionID        string
-	ParentSessionID  string
-	Git              uiStatusGitInfo
-	Auth             uiStatusAuthInfo
-	Context          uiStatusContextInfo
-	Model            uiStatusModelInfo
-	Config           uiStatusConfigInfo
-	Subscription     uiStatusSubscriptionInfo
-	Skills           []runtime.SkillInspection
-	SkillTokenCounts map[string]int
-	AgentsPaths      []string
-	AgentTokenCounts map[string]int
-	CompactionCount  int
-	CollectorWarning string
+	CollectedAt       time.Time
+	Workdir           string
+	SessionName       string
+	SessionID         string
+	ParentSessionID   string
+	ParentSessionName string
+	Git               uiStatusGitInfo
+	Auth              uiStatusAuthInfo
+	Context           uiStatusContextInfo
+	Model             uiStatusModelInfo
+	Config            uiStatusConfigInfo
+	Subscription      uiStatusSubscriptionInfo
+	Skills            []runtime.SkillInspection
+	SkillTokenCounts  map[string]int
+	AgentsPaths       []string
+	AgentTokenCounts  map[string]int
+	CompactionCount   int
+	CollectorWarning  string
 }
 
 type uiStatusAuthInfo struct {
@@ -236,6 +240,7 @@ func (m *uiModel) newStatusRequest(now time.Time) uiStatusRequest {
 	return uiStatusRequest{
 		Engine:                m.engine,
 		WorkspaceRoot:         strings.TrimSpace(m.statusConfig.WorkspaceRoot),
+		PersistenceRoot:       strings.TrimSpace(m.statusConfig.PersistenceRoot),
 		Settings:              m.statusConfig.Settings,
 		Source:                m.statusConfig.Source,
 		AuthManager:           m.statusConfig.AuthManager,
@@ -288,6 +293,7 @@ func (defaultUIStatusCollector) CollectBase(req uiStatusRequest) uiStatusSnapsho
 	workdir := statusWorkdir(req.WorkspaceRoot)
 	contextInfo := uiStatusContextInfo{ThresholdTokens: req.Settings.ContextCompactionThresholdTokens}
 	parentSessionID := ""
+	parentSessionName := ""
 	compactionCount := 0
 	if req.Engine != nil {
 		usage := req.Engine.ContextUsage()
@@ -298,16 +304,18 @@ func (defaultUIStatusCollector) CollectBase(req uiStatusRequest) uiStatusSnapsho
 			contextInfo.AvailableTokens = 0
 		}
 		parentSessionID = strings.TrimSpace(req.Engine.ParentSessionID())
+		parentSessionName = statusParentSessionName(req.PersistenceRoot, parentSessionID)
 		compactionCount = req.Engine.CompactionCount()
 	}
 	return uiStatusSnapshot{
-		CollectedAt:     collectedAt,
-		Workdir:         filepath.ToSlash(strings.TrimSpace(workdir)),
-		SessionName:     strings.TrimSpace(req.SessionName),
-		SessionID:       strings.TrimSpace(req.SessionID),
-		ParentSessionID: parentSessionID,
-		Context:         contextInfo,
-		Model:           uiStatusModelInfo{Summary: statusModelSummary(req)},
+		CollectedAt:       collectedAt,
+		Workdir:           filepath.ToSlash(strings.TrimSpace(workdir)),
+		SessionName:       strings.TrimSpace(req.SessionName),
+		SessionID:         strings.TrimSpace(req.SessionID),
+		ParentSessionID:   parentSessionID,
+		ParentSessionName: parentSessionName,
+		Context:           contextInfo,
+		Model:             uiStatusModelInfo{Summary: statusModelSummary(req)},
 		Config: uiStatusConfigInfo{
 			SettingsPath:    filepath.ToSlash(strings.TrimSpace(req.Source.SettingsPath)),
 			OverrideSources: statusConfigOverrideSources(req.Source),
@@ -316,6 +324,19 @@ func (defaultUIStatusCollector) CollectBase(req uiStatusRequest) uiStatusSnapsho
 		},
 		CompactionCount: compactionCount,
 	}
+}
+
+func statusParentSessionName(persistenceRoot, parentSessionID string) string {
+	root := strings.TrimSpace(persistenceRoot)
+	parentID := strings.TrimSpace(parentSessionID)
+	if root == "" || parentID == "" {
+		return ""
+	}
+	store, err := session.OpenByID(root, parentID)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(store.Meta().Name)
 }
 
 func (defaultUIStatusCollector) CollectAuth(ctx context.Context, req uiStatusRequest, _ uiStatusSnapshot) uiStatusAuthStageResult {
