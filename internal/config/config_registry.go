@@ -704,15 +704,26 @@ func (skillsSetting) applyFile(raw settingsFile, settingsPath string, state *set
 	if err != nil || !ok {
 		return err
 	}
-	for key, rawValue := range table {
+	keys := make([]string, 0, len(table))
+	for key := range table {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	seenNormalized := make(map[string]string, len(keys))
+	for _, key := range keys {
+		rawValue := table[key]
 		normalized := normalizeSkillToggleKey(key)
 		if normalized == "" {
 			return fmt.Errorf("invalid skills key in %s: %q", settingsPath, key)
+		}
+		if priorKey, exists := seenNormalized[normalized]; exists {
+			return fmt.Errorf("duplicate skills keys in %s: %q and %q both normalize to %q", settingsPath, priorKey, key, normalized)
 		}
 		enabled, ok := rawValue.(bool)
 		if !ok {
 			return invalidSettingsTypeError(append([]string{"skills"}, key), "boolean")
 		}
+		seenNormalized[normalized] = key
 		state.Settings.SkillToggles[normalized] = enabled
 		sources[skillSourceKey(normalized)] = "file"
 	}
