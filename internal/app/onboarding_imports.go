@@ -321,19 +321,18 @@ func (d onboardingImportDiscovery) hasSkillCandidates() bool {
 	if d.skipSkills {
 		return false
 	}
-	for _, items := range d.skills {
-		if len(items) > 0 {
-			return true
-		}
-	}
-	return false
+	return hasImportProviderItems(d.skills) || hasImportProviderItems(d.skillSymlinkItems)
 }
 
 func (d onboardingImportDiscovery) hasCommandCandidates() bool {
 	if d.skipCommands {
 		return false
 	}
-	for _, items := range d.commands {
+	return hasImportProviderItems(d.commands) || hasImportProviderItems(d.commandSymlinkItems)
+}
+
+func hasImportProviderItems[T any](byProvider map[onboardingImportProviderID][]T) bool {
+	for _, items := range byProvider {
 		if len(items) > 0 {
 			return true
 		}
@@ -413,8 +412,8 @@ func buildSkillImportScreen(state *onboardingFlowState) onboardingScreen {
 }
 
 func importSkillsBody(discovery onboardingImportDiscovery) string {
-	providers := make([]string, 0, len(discovery.skills))
-	for _, provider := range sortedImportProviders(discovery.skills) {
+	providers := make([]string, 0)
+	for _, provider := range importProviderUnion(discovery.skills, discovery.skillSymlinkItems) {
 		providers = append(providers, providerLabel(provider))
 	}
 	return "Builder found importable skills from " + strings.Join(providers, ", ") + ". Which do you want to import?"
@@ -457,11 +456,33 @@ func buildCommandImportScreen(state *onboardingFlowState) onboardingScreen {
 }
 
 func importCommandsBody(discovery onboardingImportDiscovery) string {
-	providers := make([]string, 0, len(discovery.commands))
-	for _, provider := range sortedImportProviders(discovery.commands) {
+	providers := make([]string, 0)
+	for _, provider := range importProviderUnion(discovery.commands, discovery.commandSymlinkItems) {
 		providers = append(providers, providerLabel(provider))
 	}
 	return "Builder found importable slash commands from " + strings.Join(providers, ", ") + ". Which do you want to import?"
+}
+
+func importProviderUnion[A any, B any](primary map[onboardingImportProviderID][]A, secondary map[onboardingImportProviderID][]B) []onboardingImportProviderID {
+	providers := make(map[onboardingImportProviderID]struct{}, len(primary)+len(secondary))
+	for provider, items := range primary {
+		if len(items) == 0 {
+			continue
+		}
+		providers[provider] = struct{}{}
+	}
+	for provider, items := range secondary {
+		if len(items) == 0 {
+			continue
+		}
+		providers[provider] = struct{}{}
+	}
+	ordered := make([]onboardingImportProviderID, 0, len(providers))
+	for provider := range providers {
+		ordered = append(ordered, provider)
+	}
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i] < ordered[j] })
+	return ordered
 }
 
 func buildSkillSelectionScreen(state *onboardingFlowState) onboardingScreen {

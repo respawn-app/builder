@@ -332,6 +332,29 @@ func TestBuildSkillImportScreenSymlinkCountsUseActualSymlinkRoot(t *testing.T) {
 	}
 }
 
+func TestBuildSkillImportScreenIncludesSymlinkOnlySkillCandidates(t *testing.T) {
+	state := &onboardingFlowState{imports: onboardingImportDiscovery{
+		skillSymlinkItems: map[onboardingImportProviderID][]onboardingSkillImportItem{
+			onboardingImportProviderCodex: {
+				{ID: "codex:local", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetDirName: "local-skill"},
+			},
+		},
+	}}
+	if !state.imports.hasSkillCandidates() {
+		t.Fatal("expected symlink-only skills to count as import candidates")
+	}
+	screen := buildSkillImportScreen(state)
+	if !strings.Contains(screen.Body, "Codex") {
+		t.Fatalf("expected skill import body to mention symlink-only provider, got %q", screen.Body)
+	}
+	if !containsOnboardingOption(screen.Options, "symlink:codex") {
+		t.Fatalf("expected skill import screen to offer symlink-only provider, got %+v", screen.Options)
+	}
+	if screen.DefaultOptionID != "symlink:codex" {
+		t.Fatalf("expected symlink-only provider to become default import action, got %q", screen.DefaultOptionID)
+	}
+}
+
 func TestExecuteCommandImportSymlinksRootDirectory(t *testing.T) {
 	home := t.TempDir()
 	globalRoot := t.TempDir()
