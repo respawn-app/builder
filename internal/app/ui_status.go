@@ -177,18 +177,21 @@ type statusBaseRefreshDoneMsg struct {
 }
 
 type statusAuthRefreshDoneMsg struct {
-	token  uint64
-	result uiStatusAuthStageResult
+	token    uint64
+	cacheKey string
+	result   uiStatusAuthStageResult
 }
 
 type statusGitRefreshDoneMsg struct {
-	token  uint64
-	result uiStatusGitStageResult
+	token    uint64
+	cacheKey string
+	result   uiStatusGitStageResult
 }
 
 type statusEnvironmentRefreshDoneMsg struct {
-	token  uint64
-	result uiStatusEnvironmentStageResult
+	token    uint64
+	cacheKey string
+	result   uiStatusEnvironmentStageResult
 }
 
 type uiStatusAuthStageResult struct {
@@ -927,11 +930,11 @@ func (m *uiModel) statusRefreshCmd() tea.Cmd {
 		for _, section := range seed.PendingSections {
 			switch section {
 			case uiStatusSectionAuth:
-				cmds = append(cmds, m.statusAuthRefreshCmd(token, request, progressive, base))
+				cmds = append(cmds, m.statusAuthRefreshCmd(token, statusAuthCacheKey(request), request, progressive, base))
 			case uiStatusSectionGit:
-				cmds = append(cmds, m.statusGitRefreshCmd(token, request, progressive, base))
+				cmds = append(cmds, m.statusGitRefreshCmd(token, statusGitCacheKey(base.Workdir), request, progressive, base))
 			case uiStatusSectionEnvironment:
-				cmds = append(cmds, m.statusEnvironmentRefreshCmd(token, request, progressive, base))
+				cmds = append(cmds, m.statusEnvironmentRefreshCmd(token, statusEnvironmentCacheKey(request), request, progressive, base))
 			}
 		}
 		if len(cmds) == 0 {
@@ -955,27 +958,27 @@ func (m *uiModel) statusBaseRefreshCmd(token uint64, request uiStatusRequest, co
 	}
 }
 
-func (m *uiModel) statusAuthRefreshCmd(token uint64, request uiStatusRequest, collector uiStatusProgressiveCollector, base uiStatusSnapshot) tea.Cmd {
+func (m *uiModel) statusAuthRefreshCmd(token uint64, cacheKey string, request uiStatusRequest, collector uiStatusProgressiveCollector, base uiStatusSnapshot) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), statusRefreshTimeout)
 		defer cancel()
-		return statusAuthRefreshDoneMsg{token: token, result: collector.CollectAuth(ctx, request, base)}
+		return statusAuthRefreshDoneMsg{token: token, cacheKey: cacheKey, result: collector.CollectAuth(ctx, request, base)}
 	}
 }
 
-func (m *uiModel) statusGitRefreshCmd(token uint64, request uiStatusRequest, collector uiStatusProgressiveCollector, base uiStatusSnapshot) tea.Cmd {
+func (m *uiModel) statusGitRefreshCmd(token uint64, cacheKey string, request uiStatusRequest, collector uiStatusProgressiveCollector, base uiStatusSnapshot) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), statusRefreshTimeout)
 		defer cancel()
-		return statusGitRefreshDoneMsg{token: token, result: collector.CollectGit(ctx, request, base)}
+		return statusGitRefreshDoneMsg{token: token, cacheKey: cacheKey, result: collector.CollectGit(ctx, request, base)}
 	}
 }
 
-func (m *uiModel) statusEnvironmentRefreshCmd(token uint64, request uiStatusRequest, collector uiStatusProgressiveCollector, base uiStatusSnapshot) tea.Cmd {
+func (m *uiModel) statusEnvironmentRefreshCmd(token uint64, cacheKey string, request uiStatusRequest, collector uiStatusProgressiveCollector, base uiStatusSnapshot) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), statusRefreshTimeout)
 		defer cancel()
-		return statusEnvironmentRefreshDoneMsg{token: token, result: collector.CollectEnvironment(ctx, request, base)}
+		return statusEnvironmentRefreshDoneMsg{token: token, cacheKey: cacheKey, result: collector.CollectEnvironment(ctx, request, base)}
 	}
 }
 
