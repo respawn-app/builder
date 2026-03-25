@@ -295,6 +295,36 @@ func TestStatusRepositorySeparatesAuthCacheByOAuthIdentity(t *testing.T) {
 	}
 }
 
+func TestStatusRepositorySeparatesOpaqueOAuthCacheByTokenFingerprint(t *testing.T) {
+	repo := newMemoryUIStatusRepository()
+	managerA := auth.NewManager(auth.NewMemoryStore(auth.State{
+		Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "token-a"}},
+	}), nil, time.Now)
+	managerB := auth.NewManager(auth.NewMemoryStore(auth.State{
+		Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "token-b"}},
+	}), nil, time.Now)
+	reqA := uiStatusRequest{WorkspaceRoot: "/tmp/workdir", AuthManager: managerA}
+	reqB := uiStatusRequest{WorkspaceRoot: "/tmp/workdir", AuthManager: managerB}
+	base := uiStatusSnapshot{Workdir: "/tmp/workdir"}
+
+	repo.StoreAuth(statusAuthCacheKey(reqA), uiStatusAuthStageResult{
+		Auth:         uiStatusAuthInfo{Summary: "opaque-a"},
+		Subscription: uiStatusSubscriptionInfo{Applicable: true, Summary: "Pro subscription"},
+	}, time.Now())
+
+	seedA := repo.SeedSnapshot(reqA, base, time.Now())
+	if got := seedA.Snapshot.Auth.Summary; got != "opaque-a" {
+		t.Fatalf("expected cached auth summary for opaque token A, got %q", got)
+	}
+	seedB := repo.SeedSnapshot(reqB, base, time.Now())
+	if got := seedB.Snapshot.Auth.Summary; got != "" {
+		t.Fatalf("expected no cached auth summary for opaque token B, got %q", got)
+	}
+	if len(seedB.PendingSections) == 0 || seedB.PendingSections[0] != uiStatusSectionAuth {
+		t.Fatalf("expected opaque token B to require auth refresh, got %+v", seedB.PendingSections)
+	}
+}
+
 func TestStatusRepositoryStoresAuthUnderCapturedIdentityKey(t *testing.T) {
 	store := auth.NewMemoryStore(auth.State{
 		Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "token-a", AccountID: "acct-a", Email: "a@example.com"}},
@@ -402,6 +432,55 @@ func TestStatusRepositoryNormalizesGitCacheKeysAcrossSlashStyles(t *testing.T) {
 		if section == uiStatusSectionGit {
 			t.Fatalf("did not expect git refresh when normalized cache key matches, got %+v", seed.PendingSections)
 		}
+	}
+}
+
+func TestCollectGitStatusSurfacesUnexpectedErrors(t *testing.T) {
+	workdir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	git := collectGitStatus(ctx, workdir)
+	if !git.Visible {
+		t.Fatalf("expected git section to remain visible on unexpected errors, got %+v", git)
+	}
+	if !strings.Contains(git.Error, "git status failed") {
+		t.Fatalf("expected git error surfaced, got %+v", git)
+	}
+	if !strings.Contains(git.Error, context.Canceled.Error()) {
+		t.Fatalf("expected git error to include underlying failure, got %+v", git)
+	}
+}
+
+func TestStatusOverlayRendersGitErrorState(t *testing.T) {
+	collector := &stubStatusCollector{snapshot: uiStatusSnapshot{
+		CollectedAt: time.Date(2026, time.March, 24, 21, 15, 0, 0, time.UTC),
+		Workdir:     "/tmp/workdir",
+		Git:         uiStatusGitInfo{Visible: true, Error: "git status failed: context canceled"},
+	}}
+
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir"}),
+		WithUIStatusCollector(collector),
+	).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.input = "/status"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(statusRefreshDoneMsg{token: updated.statusRefreshToken, snapshot: collector.snapshot})
+	updated = next.(*uiModel)
+	plain := stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(plain, "Git") || !strings.Contains(plain, "git status failed: context canceled") {
+		t.Fatalf("expected git error section rendered, got %q", plain)
+	}
+	if strings.Contains(plain, "Loading git...") {
+		t.Fatalf("did not expect loading placeholder when git error exists, got %q", plain)
 	}
 }
 
@@ -601,6 +680,74 @@ func TestStatusUsageWindowsByLabelKeepsNonWhitelistedHourDurations(t *testing.T)
 	}
 }
 
+func TestStatusUsageWindowsByLabelKeepsDuplicateDurationBuckets(t *testing.T) {
+	resetAt := time.Date(2026, time.March, 25, 2, 0, 0, 0, time.UTC).Unix()
+	windows := statusUsageWindowsByLabel(statusUsagePayload{
+		RateLimit: &statusUsageRateLimit{
+			PrimaryWindow: &statusUsageWindow{UsedPercent: 10, LimitWindowSeconds: 5 * 3600, ResetAt: resetAt},
+		},
+		AdditionalRateLimits: []statusUsageExtraBucket{{
+			MeteredFeature: "images",
+			LimitName:      "vision",
+			RateLimit: &statusUsageRateLimit{
+				PrimaryWindow: &statusUsageWindow{UsedPercent: 30, LimitWindowSeconds: 5 * 3600, ResetAt: resetAt},
+			},
+		}},
+	})
+	if len(windows) != 2 {
+		t.Fatalf("windows len = %d, want 2", len(windows))
+	}
+	if windows[0].Label != "5h" || windows[1].Label != "5h" {
+		t.Fatalf("window labels = %#v", windows)
+	}
+	if windows[0].Qualifier != "" {
+		t.Fatalf("first qualifier = %q, want empty", windows[0].Qualifier)
+	}
+	if windows[1].Qualifier != "vision / images" {
+		t.Fatalf("second qualifier = %q, want %q", windows[1].Qualifier, "vision / images")
+	}
+}
+
+func TestStatusUsageWindowsByLabelDisambiguatesDuplicateExtraBucketsWithoutUniqueQualifier(t *testing.T) {
+	resetAt := time.Date(2026, time.March, 25, 2, 0, 0, 0, time.UTC).Unix()
+	windows := statusUsageWindowsByLabel(statusUsagePayload{
+		AdditionalRateLimits: []statusUsageExtraBucket{
+			{
+				RateLimit: &statusUsageRateLimit{
+					PrimaryWindow: &statusUsageWindow{UsedPercent: 10, LimitWindowSeconds: 5 * 3600, ResetAt: resetAt},
+				},
+			},
+			{
+				RateLimit: &statusUsageRateLimit{
+					PrimaryWindow: &statusUsageWindow{UsedPercent: 20, LimitWindowSeconds: 5 * 3600, ResetAt: resetAt},
+				},
+			},
+			{
+				MeteredFeature: "images",
+				LimitName:      "images",
+				RateLimit: &statusUsageRateLimit{
+					PrimaryWindow: &statusUsageWindow{UsedPercent: 30, LimitWindowSeconds: 5 * 3600, ResetAt: resetAt},
+				},
+			},
+			{
+				MeteredFeature: "images",
+				LimitName:      "images",
+				RateLimit: &statusUsageRateLimit{
+					PrimaryWindow: &statusUsageWindow{UsedPercent: 40, LimitWindowSeconds: 5 * 3600, ResetAt: resetAt},
+				},
+			},
+		},
+	})
+	got := make([]string, 0, len(windows))
+	for _, window := range windows {
+		got = append(got, window.Qualifier)
+	}
+	want := []string{"extra", "extra #2", "images", "images #2"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("qualifiers = %v, want %v", got, want)
+	}
+}
+
 func TestStatusParentSessionNameResolvesFromPersistenceRoot(t *testing.T) {
 	persistenceRoot := t.TempDir()
 	containerDir := filepath.Join(persistenceRoot, "sessions", "workspace-a")
@@ -634,6 +781,44 @@ func TestStatusSubscriptionResetMetaIncludesRelativeDuration(t *testing.T) {
 	}
 	if !strings.Contains(got, "at ") {
 		t.Fatalf("expected local timestamp in reset meta, got %q", got)
+	}
+}
+
+func TestStatusOverlayRendersQualifiedDuplicateSubscriptionBuckets(t *testing.T) {
+	collector := &stubStatusCollector{snapshot: uiStatusSnapshot{
+		CollectedAt: time.Date(2026, time.March, 24, 21, 15, 0, 0, time.UTC),
+		Subscription: uiStatusSubscriptionInfo{
+			Applicable: true,
+			Summary:    "Pro subscription",
+			Windows: []uiStatusSubscriptionWindow{
+				{Label: "5h", UsedPercent: 10},
+				{Label: "5h", Qualifier: "vision / images", UsedPercent: 30},
+			},
+		},
+	}}
+
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir"}),
+		WithUIStatusCollector(collector),
+	).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.input = "/status"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(statusRefreshDoneMsg{token: updated.statusRefreshToken, snapshot: collector.snapshot})
+	updated = next.(*uiModel)
+	plain := stripANSIAndTrimRight(updated.View())
+	if strings.Count(plain, "5h") < 2 {
+		t.Fatalf("expected duplicate 5h rows, got %q", plain)
+	}
+	if !strings.Contains(plain, "vision / images") {
+		t.Fatalf("expected qualified bucket rendered, got %q", plain)
 	}
 }
 
@@ -685,16 +870,46 @@ func TestStatusCollectorPrefersWorkspaceRootForWorkdir(t *testing.T) {
 	}
 }
 
-func TestStatusUsageBaseURLNormalizesChatGPTHosts(t *testing.T) {
-	if got := statusUsageBaseURL(config.Settings{OpenAIBaseURL: "https://chatgpt.com"}); got != "https://chatgpt.com/backend-api" {
-		t.Fatalf("chatgpt.com base URL = %q", got)
+func TestStatusShouldFetchSubscriptionUsageOnlyForDefaultOpenAIOAuth(t *testing.T) {
+	oauthState := auth.State{Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "access-token", AccountID: "acct-123"}}}
+	if !statusShouldFetchSubscriptionUsage(config.Settings{}, oauthState) {
+		t.Fatal("expected default OAuth configuration to allow subscription usage fetch")
 	}
-	if got := statusUsageBaseURL(config.Settings{OpenAIBaseURL: "https://chat.openai.com/"}); got != "https://chat.openai.com/backend-api" {
-		t.Fatalf("chat.openai.com base URL = %q", got)
+	if statusShouldFetchSubscriptionUsage(config.Settings{OpenAIBaseURL: "https://chatgpt.com/backend-api"}, oauthState) {
+		t.Fatal("expected explicit base URL override to disable subscription usage fetch")
+	}
+	if statusShouldFetchSubscriptionUsage(config.Settings{ProviderOverride: "anthropic"}, oauthState) {
+		t.Fatal("expected provider override to disable subscription usage fetch")
+	}
+	if statusShouldFetchSubscriptionUsage(config.Settings{}, auth.State{}) {
+		t.Fatal("expected non-OAuth auth state to disable subscription usage fetch")
 	}
 }
 
-func TestCollectSubscriptionStatusFetchesWhamUsageWithOAuthHeaders(t *testing.T) {
+func TestCollectSubscriptionStatusDoesNotFetchForOverrides(t *testing.T) {
+	originalFetcher := statusUsagePayloadFetcher
+	defer func() { statusUsagePayloadFetcher = originalFetcher }()
+	called := false
+	statusUsagePayloadFetcher = func(context.Context, string, auth.State) (statusUsagePayload, error) {
+		called = true
+		return statusUsagePayload{}, nil
+	}
+	state := auth.State{Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "access-token", AccountID: "acct-123"}}}
+
+	status := collectSubscriptionStatus(context.Background(), uiStatusRequest{Settings: config.Settings{OpenAIBaseURL: "https://example.com/backend-api"}}, state, nil)
+	if status.Applicable {
+		t.Fatalf("expected overridden base URL to disable subscription status, got %+v", status)
+	}
+	status = collectSubscriptionStatus(context.Background(), uiStatusRequest{Settings: config.Settings{ProviderOverride: "openai-compatible"}}, state, nil)
+	if status.Applicable {
+		t.Fatalf("expected provider override to disable subscription status, got %+v", status)
+	}
+	if called {
+		t.Fatal("did not expect subscription usage fetcher to be called for overrides")
+	}
+}
+
+func TestFetchStatusUsagePayloadFetchesWhamUsageWithOAuthHeaders(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/backend-api/wham/usage" {
 			t.Fatalf("path = %q", r.URL.Path)
@@ -716,40 +931,33 @@ func TestCollectSubscriptionStatusFetchesWhamUsageWithOAuthHeaders(t *testing.T)
 	}))
 	defer server.Close()
 
-	status := collectSubscriptionStatus(context.Background(), uiStatusRequest{
-		Settings: config.Settings{OpenAIBaseURL: server.URL + "/backend-api"},
-	}, auth.State{Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "access-token", AccountID: "acct-123"}}}, nil)
+	status, err := fetchStatusUsagePayload(context.Background(), server.URL+"/backend-api", auth.State{Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "access-token", AccountID: "acct-123"}}})
+	if err != nil {
+		t.Fatalf("fetch status usage payload: %v", err)
+	}
 
-	if !status.Applicable {
-		t.Fatal("expected subscription status to be applicable")
+	if status.PlanType != "pro" {
+		t.Fatalf("plan type = %q", status.PlanType)
 	}
-	if status.Summary != "Pro subscription" {
-		t.Fatalf("summary = %q", status.Summary)
+	windows := statusUsageWindowsByLabel(status)
+	if len(windows) != 2 {
+		t.Fatalf("windows len = %d", len(windows))
 	}
-	if len(status.Windows) != 2 {
-		t.Fatalf("windows len = %d", len(status.Windows))
-	}
-	if status.Windows[0].Label != "5h" || status.Windows[1].Label != "weekly" {
-		t.Fatalf("windows = %#v", status.Windows)
+	if windows[0].Label != "5h" || windows[1].Label != "weekly" {
+		t.Fatalf("windows = %#v", windows)
 	}
 }
 
-func TestCollectSubscriptionStatusHandlesUsageErrors(t *testing.T) {
+func TestFetchStatusUsagePayloadHandlesUsageErrors(t *testing.T) {
 	t.Run("non-2xx", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "boom", http.StatusBadGateway)
 		}))
 		defer server.Close()
 
-		status := collectSubscriptionStatus(context.Background(), uiStatusRequest{
-			Settings: config.Settings{OpenAIBaseURL: server.URL + "/backend-api"},
-		}, auth.State{Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "access-token"}}}, nil)
-
-		if !status.Applicable {
-			t.Fatal("expected subscription status to stay applicable")
-		}
-		if !strings.Contains(status.Summary, "usage request failed") {
-			t.Fatalf("summary = %q", status.Summary)
+		_, err := fetchStatusUsagePayload(context.Background(), server.URL+"/backend-api", auth.State{Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "access-token"}}})
+		if err == nil || !strings.Contains(err.Error(), "usage request failed") {
+			t.Fatalf("err = %v", err)
 		}
 	})
 
@@ -759,15 +967,9 @@ func TestCollectSubscriptionStatusHandlesUsageErrors(t *testing.T) {
 		}))
 		defer server.Close()
 
-		status := collectSubscriptionStatus(context.Background(), uiStatusRequest{
-			Settings: config.Settings{OpenAIBaseURL: server.URL + "/backend-api"},
-		}, auth.State{Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "access-token"}}}, nil)
-
-		if !status.Applicable {
-			t.Fatal("expected subscription status to stay applicable")
-		}
-		if !strings.Contains(status.Summary, "decode usage response") {
-			t.Fatalf("summary = %q", status.Summary)
+		_, err := fetchStatusUsagePayload(context.Background(), server.URL+"/backend-api", auth.State{Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "access-token"}}})
+		if err == nil || !strings.Contains(err.Error(), "decode usage response") {
+			t.Fatalf("err = %v", err)
 		}
 	})
 }
@@ -801,23 +1003,29 @@ func TestStatusCollectorUsesRefreshedOAuthStateForUsageFetch(t *testing.T) {
 		}, nil
 	}
 	manager := auth.NewManager(store, refresher, func() time.Time { return now.Add(time.Minute) })
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("Authorization"); got != "Bearer fresh-token" {
-			t.Fatalf("authorization header = %q", got)
+	originalFetcher := statusUsagePayloadFetcher
+	defer func() { statusUsagePayloadFetcher = originalFetcher }()
+	statusUsagePayloadFetcher = func(_ context.Context, baseURL string, state auth.State) (statusUsagePayload, error) {
+		if baseURL != statusUsageBaseURL {
+			t.Fatalf("base URL = %q", baseURL)
 		}
-		if got := r.Header.Get("ChatGPT-Account-Id"); got != "acct-456" {
-			t.Fatalf("ChatGPT-Account-Id header = %q", got)
+		authorization, err := state.Method.AuthHeaderValue()
+		if err != nil {
+			t.Fatalf("auth header value: %v", err)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":12.5,"limit_window_seconds":18000,"reset_at":1704069000}}}`))
-	}))
-	defer server.Close()
+		if got := authorization; got != "Bearer fresh-token" {
+			t.Fatalf("authorization header value = %q", got)
+		}
+		if got := strings.TrimSpace(state.Method.OAuth.AccountID); got != "acct-456" {
+			t.Fatalf("ChatGPT-Account-Id value = %q", got)
+		}
+		return statusUsagePayload{PlanType: "pro", RateLimit: &statusUsageRateLimit{PrimaryWindow: &statusUsageWindow{UsedPercent: 12.5, LimitWindowSeconds: 18000, ResetAt: 1704069000}}}, nil
+	}
 
 	collector := defaultUIStatusCollector{}
 	snapshot, err := collector.Collect(context.Background(), uiStatusRequest{
 		WorkspaceRoot: t.TempDir(),
-		Settings:      config.Settings{OpenAIBaseURL: server.URL + "/backend-api"},
+		Settings:      config.Settings{},
 		AuthManager:   manager,
 	})
 	if err != nil {
@@ -860,7 +1068,7 @@ func TestStatusCollectorPreservesStoredAuthStateWhenRefreshFails(t *testing.T) {
 	collector := defaultUIStatusCollector{}
 	snapshot, err := collector.Collect(context.Background(), uiStatusRequest{
 		WorkspaceRoot: t.TempDir(),
-		Settings:      config.Settings{OpenAIBaseURL: "https://chatgpt.com/backend-api"},
+		Settings:      config.Settings{},
 		AuthManager:   manager,
 	})
 	if err != nil {

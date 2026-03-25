@@ -26,7 +26,10 @@ import (
 const (
 	statusRefreshTimeout = 10 * time.Second
 	statusGitTimeout     = 4 * time.Second
+	statusUsageBaseURL   = "https://chatgpt.com/backend-api"
 )
+
+var statusUsagePayloadFetcher = fetchStatusUsagePayload
 
 type uiStatusConfig struct {
 	WorkspaceRoot   string
@@ -110,6 +113,7 @@ type uiStatusGitInfo struct {
 	Dirty   bool
 	Ahead   int
 	Behind  int
+	Error   string
 }
 
 type uiStatusContextInfo struct {
@@ -138,6 +142,7 @@ type uiStatusSubscriptionInfo struct {
 
 type uiStatusSubscriptionWindow struct {
 	Label       string
+	Qualifier   string
 	UsedPercent float64
 	ResetAt     time.Time
 }
@@ -421,7 +426,7 @@ func collectGitStatus(ctx context.Context, workdir string) uiStatusGitInfo {
 		if statusGitShouldHide(err, string(out)) {
 			return uiStatusGitInfo{}
 		}
-		return uiStatusGitInfo{}
+		return uiStatusGitInfo{Visible: true, Error: statusGitError(err, string(out))}
 	}
 	gitInfo := uiStatusGitInfo{Visible: true}
 	for _, line := range splitPlainLines(strings.TrimSpace(string(out))) {
@@ -469,24 +474,44 @@ func statusGitShouldHide(err error, output string) bool {
 	return strings.Contains(text, "not a git repository") || strings.Contains(text, "cannot change to") || strings.Contains(text, "no such file")
 }
 
+func statusGitError(err error, output string) string {
+	message := strings.TrimSpace(output)
+	if message == "" && err != nil {
+		message = strings.TrimSpace(err.Error())
+	}
+	if message == "" {
+		return "git status failed"
+	}
+	return "git status failed: " + message
+}
+
 func collectSubscriptionStatus(ctx context.Context, req uiStatusRequest, state auth.State, authStateErr error) uiStatusSubscriptionInfo {
-	if state.Method.Type != auth.MethodOAuth || state.Method.OAuth == nil {
+	if !statusShouldFetchSubscriptionUsage(req.Settings, state) {
 		return uiStatusSubscriptionInfo{}
 	}
 	if authStateErr != nil {
 		return uiStatusSubscriptionInfo{Applicable: true, Summary: "Subscription unavailable: " + authStateErr.Error()}
 	}
-	baseURL := statusUsageBaseURL(req.Settings)
-	if !strings.Contains(baseURL, "/backend-api") {
-		return uiStatusSubscriptionInfo{}
-	}
-	payload, err := fetchStatusUsagePayload(ctx, baseURL, state)
+	payload, err := statusUsagePayloadFetcher(ctx, statusUsageBaseURL, state)
 	if err != nil {
 		return uiStatusSubscriptionInfo{Applicable: true, Summary: "Subscription unavailable: " + err.Error()}
 	}
 	windows := statusUsageWindowsByLabel(payload)
 	summary := statusSubscriptionPlanSummary(payload.PlanType)
 	return uiStatusSubscriptionInfo{Applicable: true, Summary: summary, Windows: windows}
+}
+
+func statusShouldFetchSubscriptionUsage(settings config.Settings, state auth.State) bool {
+	if state.Method.Type != auth.MethodOAuth || state.Method.OAuth == nil {
+		return false
+	}
+	if strings.TrimSpace(settings.ProviderOverride) != "" {
+		return false
+	}
+	if strings.TrimSpace(settings.OpenAIBaseURL) != "" {
+		return false
+	}
+	return true
 }
 
 func statusSubscriptionPlanSummary(plan string) string {
@@ -496,20 +521,6 @@ func statusSubscriptionPlanSummary(plan string) string {
 	}
 	normalized := strings.ToLower(trimmed)
 	return strings.ToUpper(normalized[:1]) + normalized[1:] + " subscription"
-}
-
-func statusUsageBaseURL(settings config.Settings) string {
-	baseURL := strings.TrimSpace(settings.OpenAIBaseURL)
-	if baseURL == "" {
-		baseURL = "https://chatgpt.com"
-	}
-	for strings.HasSuffix(baseURL, "/") {
-		baseURL = strings.TrimSuffix(baseURL, "/")
-	}
-	if (strings.HasPrefix(baseURL, "https://chatgpt.com") || strings.HasPrefix(baseURL, "https://chat.openai.com")) && !strings.Contains(baseURL, "/backend-api") {
-		baseURL += "/backend-api"
-	}
-	return baseURL
 }
 
 func fetchStatusUsagePayload(ctx context.Context, baseURL string, state auth.State) (statusUsagePayload, error) {
@@ -547,49 +558,43 @@ func statusUsageWindowsByLabel(payload statusUsagePayload) []uiStatusSubscriptio
 		durationSecs  int
 		discoveryRank int
 	}
-	windowMap := map[string]uiStatusSubscriptionWindow{}
-	windowOrder := map[string]orderedWindow{}
+	qualifierCounts := map[string]int{}
+	ordered := make([]orderedWindow, 0, 2+len(payload.AdditionalRateLimits)*2)
 	discoveryRank := 0
-	addWindow := func(window *statusUsageWindow) {
+	addWindow := func(window *statusUsageWindow, qualifier string) {
 		if window == nil {
 			return
 		}
 		label := statusLimitDuration(window.LimitWindowSeconds / 60)
-		if label == "" || windowMap[label].Label != "" {
+		if label == "" {
 			return
 		}
-		windowMap[label] = uiStatusSubscriptionWindow{
+		snapshot := uiStatusSubscriptionWindow{
 			Label:       label,
+			Qualifier:   qualifier,
 			UsedPercent: window.UsedPercent,
 		}
 		if window.ResetAt > 0 {
-			windowMap[label] = uiStatusSubscriptionWindow{
-				Label:       label,
-				UsedPercent: window.UsedPercent,
-				ResetAt:     time.Unix(window.ResetAt, 0).UTC(),
-			}
+			snapshot.ResetAt = time.Unix(window.ResetAt, 0).UTC()
 		}
-		windowOrder[label] = orderedWindow{
-			window:        windowMap[label],
+		ordered = append(ordered, orderedWindow{
+			window:        snapshot,
 			durationSecs:  window.LimitWindowSeconds,
 			discoveryRank: discoveryRank,
-		}
+		})
 		discoveryRank++
 	}
 	if payload.RateLimit != nil {
-		addWindow(payload.RateLimit.PrimaryWindow)
-		addWindow(payload.RateLimit.SecondaryWindow)
+		addWindow(payload.RateLimit.PrimaryWindow, "")
+		addWindow(payload.RateLimit.SecondaryWindow, "")
 	}
 	for _, extra := range payload.AdditionalRateLimits {
 		if extra.RateLimit == nil {
 			continue
 		}
-		addWindow(extra.RateLimit.PrimaryWindow)
-		addWindow(extra.RateLimit.SecondaryWindow)
-	}
-	ordered := make([]orderedWindow, 0, len(windowOrder))
-	for _, window := range windowOrder {
-		ordered = append(ordered, window)
+		qualifier := statusUsageWindowQualifier(extra, qualifierCounts)
+		addWindow(extra.RateLimit.PrimaryWindow, qualifier)
+		addWindow(extra.RateLimit.SecondaryWindow, qualifier)
 	}
 	sort.SliceStable(ordered, func(i, j int) bool {
 		if ordered[i].durationSecs != ordered[j].durationSecs {
@@ -602,6 +607,27 @@ func statusUsageWindowsByLabel(payload statusUsagePayload) []uiStatusSubscriptio
 		windows = append(windows, window.window)
 	}
 	return windows
+}
+
+func statusUsageWindowQualifier(bucket statusUsageExtraBucket, counts map[string]int) string {
+	limitName := strings.TrimSpace(bucket.LimitName)
+	feature := strings.TrimSpace(bucket.MeteredFeature)
+	base := ""
+	switch {
+	case limitName == "" && feature == "":
+		base = "extra"
+	case limitName == "":
+		base = feature
+	case feature == "" || strings.EqualFold(limitName, feature):
+		base = limitName
+	default:
+		base = limitName + " / " + feature
+	}
+	counts[base]++
+	if counts[base] == 1 {
+		return base
+	}
+	return fmt.Sprintf("%s #%d", base, counts[base])
 }
 
 func statusLimitDuration(windowMinutes int) string {

@@ -71,9 +71,7 @@ type idTokenClaims struct {
 }
 
 func normalizeOpenAIOAuthOptions(opts OpenAIOAuthOptions) OpenAIOAuthOptions {
-	if strings.TrimSpace(opts.Issuer) == "" {
-		opts.Issuer = DefaultOpenAIIssuer
-	}
+	opts.Issuer = DefaultOpenAIIssuer
 	if strings.TrimSpace(opts.ClientID) == "" {
 		opts.ClientID = DefaultOpenAIClientID
 	}
