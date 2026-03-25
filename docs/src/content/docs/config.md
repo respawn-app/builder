@@ -158,6 +158,8 @@ Use these only for custom providers or stale provider contracts.
 
 File-based tool toggles merge with defaults. `BUILDER_TOOLS` and `--tools` behave differently: they replace the entire tool set with the CSV you provide.
 
+Builder's auto-generated default `config.toml` omits `[tools]` entirely until you want explicit per-tool overrides.
+
 | Key | Default | What enabling it exposes |
 | --- | --- | --- |
 | `tools.ask_question` | `true` | The `ask_question` tool |
@@ -173,6 +175,7 @@ Notes:
 
 - `tools.web_search = true` does not force web search on. Native search still depends on `web_search = "native"` and provider support.
 - If `tools.multi_tool_use_parallel` is not explicitly set, Builder derives its default from the configured model capability contract. Explicit file/env/CLI tool settings take precedence.
+- Older generated configs that already wrote an explicit `[tools]` value for `multi_tool_use_parallel` keep that explicit override until you remove that key.
 - `tools.view_image = true` does not bypass model capability checks. If the model does not support vision inputs, the tool will not be request-exposed.
 - `BUILDER_TOOLS` and `--tools` accept a comma-separated list of canonical tool IDs such as `shell,patch,ask_question`.
 

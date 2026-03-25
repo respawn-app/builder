@@ -66,8 +66,6 @@ func defaultSettingsTOML() string {
 	out.WriteString("# avoid unsupported provider-native features.\n")
 	out.WriteString("# [provider_capabilities]\n")
 	writeDefaultLines(&out, filterDefaultLines(lines, "provider_capabilities"))
-	out.WriteString("\n[tools]\n")
-	writeDefaultLines(&out, filterDefaultLines(lines, "tools"))
 	out.WriteString("\n# Optional per-skill toggles for new sessions only. Disabled skills still\n")
 	out.WriteString("# appear in /status as disabled. Keys are matched against discovered skill\n")
 	out.WriteString("# names case-insensitively.\n")
