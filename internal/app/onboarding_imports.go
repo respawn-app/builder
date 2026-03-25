@@ -33,6 +33,8 @@ type onboardingImportDiscovery struct {
 	skipSkills          bool
 	skipCommands        bool
 	skills              map[onboardingImportProviderID][]onboardingSkillImportItem
+	skillSymlinkRoots   map[onboardingImportProviderID]string
+	skillSymlinkItems   map[onboardingImportProviderID][]onboardingSkillImportItem
 	commands            map[onboardingImportProviderID][]onboardingCommandImportItem
 	commandSymlinkRoots map[onboardingImportProviderID]string
 	commandSymlinkItems map[onboardingImportProviderID][]onboardingCommandImportItem
@@ -71,6 +73,8 @@ func supportedOnboardingImportProviders() []onboardingImportProvider {
 func discoverOnboardingImports(globalRoot string) onboardingImportDiscovery {
 	discovery := onboardingImportDiscovery{
 		skills:              map[onboardingImportProviderID][]onboardingSkillImportItem{},
+		skillSymlinkRoots:   map[onboardingImportProviderID]string{},
+		skillSymlinkItems:   map[onboardingImportProviderID][]onboardingSkillImportItem{},
 		commands:            map[onboardingImportProviderID][]onboardingCommandImportItem{},
 		commandSymlinkRoots: map[onboardingImportProviderID]string{},
 		commandSymlinkItems: map[onboardingImportProviderID][]onboardingCommandImportItem{},
@@ -101,6 +105,15 @@ func discoverOnboardingImports(globalRoot string) onboardingImportDiscovery {
 			}
 			if len(skills) > 0 {
 				discovery.skills[provider.ID] = skills
+			}
+			skillRoot, symlinkSkills, symlinkSkillsErr := discoverProviderSkillSymlinkItems(provider, base)
+			if symlinkSkillsErr != nil {
+				discovery.err = symlinkSkillsErr
+				return discovery
+			}
+			if strings.TrimSpace(skillRoot) != "" && len(symlinkSkills) > 0 {
+				discovery.skillSymlinkRoots[provider.ID] = skillRoot
+				discovery.skillSymlinkItems[provider.ID] = symlinkSkills
 			}
 		}
 		if !discovery.skipCommands {
@@ -164,6 +177,57 @@ func discoverProviderSkills(provider onboardingImportProvider, base string) ([]o
 		return nil, fmt.Errorf("discover %s skills: %w", provider.Label, err)
 	}
 	return dedupeSkillImportsByTarget(items), nil
+}
+
+func discoverProviderSkillSymlinkItems(provider onboardingImportProvider, base string) (string, []onboardingSkillImportItem, error) {
+	root, err := providerSkillSymlinkSourceAtBase(provider, base)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil, nil
+		}
+		return "", nil, err
+	}
+	items, err := discoverDirectProviderSkills(provider, root)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(items) == 0 {
+		return "", nil, nil
+	}
+	return root, items, nil
+}
+
+func discoverDirectProviderSkills(provider onboardingImportProvider, root string) ([]onboardingSkillImportItem, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("discover %s direct skills: %w", provider.Label, err)
+	}
+	items := make([]onboardingSkillImportItem, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		skillDir := filepath.Join(root, entry.Name())
+		skillFile := filepath.Join(skillDir, "SKILL.md")
+		meta, ok := runtime.ParseSkillMetadata(skillFile)
+		if !ok {
+			continue
+		}
+		info, err := os.Stat(skillFile)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("inspect %s skill %s: %w", provider.Label, skillFile, err)
+		}
+		itemID := string(provider.ID) + ":" + filepath.ToSlash(skillDir)
+		items = append(items, onboardingSkillImportItem{ID: itemID, Provider: provider.ID, ProviderLabel: provider.Label, SourceDir: skillDir, TargetDirName: entry.Name(), SkillName: meta.Name, ModifiedAt: info.ModTime()})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].TargetDirName < items[j].TargetDirName })
+	return items, nil
 }
 
 func discoverProviderCommands(provider onboardingImportProvider, base string) ([]onboardingCommandImportItem, error) {
@@ -338,8 +402,8 @@ func buildSkillImportScreen(state *onboardingFlowState) onboardingScreen {
 	if len(state.imports.skills) > 1 {
 		options = append(options, onboardingOption{ID: "merge", Title: fmt.Sprintf("Merge all found via copy (%d found)", len(mergeSkillImports(state.imports.skills)))})
 	}
-	for _, provider := range sortedImportProviders(state.imports.skills) {
-		count := len(state.imports.skills[provider])
+	for _, provider := range sortedImportProviders(state.imports.skillSymlinkItems) {
+		count := len(state.imports.skillSymlinkItems[provider])
 		options = append(options, onboardingOption{ID: "symlink:" + string(provider), Title: fmt.Sprintf("Symlink to %s (%d found)", providerLabel(provider), count)})
 	}
 	if !containsOnboardingOption(options, defaultID) && len(options) > 1 {
@@ -430,8 +494,10 @@ func rawSkillCandidatesForSelection(discovery onboardingImportDiscovery, selecti
 	switch selection.Mode {
 	case onboardingImportModeNone:
 		return nil
-	case onboardingImportModeCopyProvider, onboardingImportModeSymlinkSource:
+	case onboardingImportModeCopyProvider:
 		return append([]onboardingSkillImportItem(nil), discovery.skills[selection.Provider]...)
+	case onboardingImportModeSymlinkSource:
+		return append([]onboardingSkillImportItem(nil), discovery.skillSymlinkItems[selection.Provider]...)
 	case onboardingImportModeMergeCopy:
 		merged := make([]onboardingSkillImportItem, 0)
 		for _, provider := range sortedImportProviders(discovery.skills) {
@@ -827,9 +893,13 @@ func executeSkillImport(globalRoot string, discovery onboardingImportDiscovery, 
 		if exists {
 			return nil, fmt.Errorf("skills symlink target already exists: %s", targetRoot)
 		}
-		sourcePath, err := providerSkillSymlinkSource(selection.Provider)
-		if err != nil {
-			return nil, err
+		sourcePath := strings.TrimSpace(discovery.skillSymlinkRoots[selection.Provider])
+		if sourcePath == "" {
+			fallbackPath, fallbackErr := providerSkillSymlinkSource(selection.Provider)
+			if fallbackErr != nil {
+				return nil, fallbackErr
+			}
+			sourcePath = fallbackPath
 		}
 		if err := os.MkdirAll(filepath.Dir(targetRoot), 0o755); err != nil {
 			return nil, fmt.Errorf("create skills parent root: %w", err)
@@ -997,20 +1067,27 @@ func providerSkillSymlinkSource(providerID onboardingImportProviderID) (string, 
 		if provider.ID != providerID {
 			continue
 		}
-		base := filepath.Join(home, provider.HomeEntry)
-		if provider.ID == onboardingImportProviderCodex {
-			preferredLocal := filepath.Join(base, "skills", "local")
-			if ok, err := pathExists(preferredLocal); err == nil && ok {
-				return preferredLocal, nil
-			}
-		}
-		preferred := filepath.Join(base, "skills")
-		if ok, err := pathExists(preferred); err == nil && ok {
-			return preferred, nil
-		}
-		return base, nil
+		return providerSkillSymlinkSourceAtBase(provider, filepath.Join(home, provider.HomeEntry))
 	}
 	return "", fmt.Errorf("unknown skills import provider %q", providerID)
+}
+
+func providerSkillSymlinkSourceAtBase(provider onboardingImportProvider, base string) (string, error) {
+	if provider.ID == onboardingImportProviderCodex {
+		preferredLocal := filepath.Join(base, "skills", "local")
+		if ok, err := pathExists(preferredLocal); err == nil && ok {
+			return preferredLocal, nil
+		} else if err != nil {
+			return "", err
+		}
+	}
+	preferred := filepath.Join(base, "skills")
+	if ok, err := pathExists(preferred); err == nil && ok {
+		return preferred, nil
+	} else if err != nil {
+		return "", err
+	}
+	return "", fmt.Errorf("%w: no skills directory found for %s", os.ErrNotExist, provider.Label)
 }
 
 func providerCommandSymlinkSource(providerID onboardingImportProviderID) (string, error) {

@@ -36,7 +36,7 @@ description: Available slash commands, how their input is parsed, and how file-b
 Builder supports markdown file-backed custom prompt commands discovered from `.builder/prompts` or `.builder/commands`
 
 - If the prompt body contains the exact token `$ARGUMENTS`, Builder replaces every occurrence with the trailing input.
-- Otherwise, if trailing input was provided, Builder appends it to the end of the prompt body separated by a blank line.
+- Otherwise, if trailing input was provided, Builder appends it to the end of the prompt body.
 
 To add a custom prompt, create a Markdown file in one of these directories:
 
