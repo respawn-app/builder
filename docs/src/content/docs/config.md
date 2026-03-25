@@ -182,3 +182,5 @@ These are real runtime knobs, but they are not part of the typed settings regist
 | `BUILDER_OAUTH_CLIENT_ID` | OAuth client ID override for login flows. |
 | `BUILDER_DEBUG_KEYS` | Debug-only UI key rendering toggle. |
 | `BUILDER_CONTEXT_WINDOW` | Low-level transport fallback for context-window size. In normal Builder startup it is usually superseded by `model_context_window`. |
+
+For `/status` quota display, custom `openai_base_url` values suppress ChatGPT subscription usage fetches. Explicit official ChatGPT hosts (`https://chatgpt.com`, `https://chat.openai.com`, with optional `/backend-api`) are still treated as first-party and continue to show quota data.
