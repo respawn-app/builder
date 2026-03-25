@@ -2772,6 +2772,24 @@ func TestBusyTabQueuesPostTurnSubmissionAndKeepsInputUnlocked(t *testing.T) {
 	}
 }
 
+func TestQueueInjectedInputIgnoresBlankTextWithoutClearingInput(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.input = "keep this draft"
+	m.activity = uiActivityIdle
+
+	m.queueInjectedInput("   \n\t  ")
+
+	if m.input != "keep this draft" {
+		t.Fatalf("expected blank injected input to leave draft untouched, got %q", m.input)
+	}
+	if len(m.pendingInjected) != 0 {
+		t.Fatalf("expected no queued injected messages, got %+v", m.pendingInjected)
+	}
+	if m.activity != uiActivityIdle {
+		t.Fatalf("expected blank injected input to leave activity unchanged, got %q", m.activity)
+	}
+}
+
 func TestCtrlCWhileBusyRestoresQueuedMessagesIntoInput(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.busy = true

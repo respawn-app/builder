@@ -1,0 +1,586 @@
+package app
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"builder/internal/runtime"
+
+	bubbleprogress "github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/lipgloss"
+)
+
+const statusSubscriptionBarMaxWidth = 18
+
+func (l uiViewLayout) renderStatusOverlay(width, height int, _ uiStyles) []string {
+	if width < 1 || height < 1 {
+		return []string{padRight("", width)}
+	}
+	content := l.statusOverlayContentLines(width)
+	contentHeight := max(1, height)
+	maxScroll := max(0, len(content)-contentHeight)
+	if l.model.statusScroll > maxScroll {
+		l.model.statusScroll = maxScroll
+	}
+	if l.model.statusScroll < 0 {
+		l.model.statusScroll = 0
+	}
+	start := l.model.statusScroll
+	end := min(len(content), start+contentHeight)
+	visible := append([]string(nil), content[start:end]...)
+	for len(visible) < contentHeight {
+		visible = append(visible, padRight("", width))
+	}
+	return visible
+}
+
+func (l uiViewLayout) statusOverlayContentLines(width int) []string {
+	m := l.model
+	palette := uiPalette(m.theme)
+	titleStyle := lipgloss.NewStyle().Foreground(palette.primary).Bold(true)
+	boldStyle := lipgloss.NewStyle().Bold(true)
+	subtleStyle := lipgloss.NewStyle().Foreground(palette.muted).Faint(true)
+	warningStyle := lipgloss.NewStyle().Foreground(statusAmberColor()).Bold(true)
+	lines := make([]string, 0, 96)
+
+	appendWrapped := func(text string, lineStyle lipgloss.Style) {
+		wrapped := wrapLine(strings.TrimRight(text, " \t"), width)
+		if len(wrapped) == 0 {
+			lines = append(lines, padRight("", width))
+			return
+		}
+		for _, line := range wrapped {
+			lines = append(lines, padANSIRight(lineStyle.Render(line), width))
+		}
+	}
+	appendANSI := func(line string) {
+		lines = append(lines, padANSIRight(line, width))
+	}
+	appendGap := func() {
+		if len(lines) == 0 {
+			return
+		}
+		lines = append(lines, padRight("", width))
+	}
+	appendSectionTitle := func(title string) {
+		appendGap()
+		appendWrapped(title, titleStyle)
+	}
+
+	if strings.TrimSpace(m.statusError) != "" && m.statusSnapshot.CollectedAt.IsZero() {
+		appendSectionTitle("Status")
+		appendWrapped(m.statusError, warningStyle)
+		return lines
+	}
+
+	snapshot := m.statusSnapshot
+
+	appendSectionTitle("Account")
+	if summary := statusVisibleAuthSummary(snapshot.Auth, snapshot.Subscription); summary != "" {
+		appendWrapped(summary, boldStyle)
+	} else if l.statusSectionLoading(uiStatusSectionAuth) {
+		appendWrapped("Loading account...", subtleStyle)
+	}
+	if summary := strings.TrimSpace(snapshot.Subscription.Summary); summary != "" {
+		appendWrapped(summary, boldStyle)
+	}
+	if len(snapshot.Subscription.Windows) > 0 {
+		labelWidth := statusSubscriptionLabelWidth(snapshot.Subscription.Windows)
+		for _, window := range snapshot.Subscription.Windows {
+			appendANSI(l.renderStatusSubscriptionLine(width, window, labelWidth))
+		}
+	} else if l.statusSectionLoading(uiStatusSectionAuth) {
+		appendWrapped("Loading limits...", subtleStyle)
+	}
+	for _, detail := range snapshot.Auth.Details {
+		appendWrapped(detail, subtleStyle)
+	}
+
+	appendSectionTitle("Session")
+	appendWrapped("CWD: "+statusValueOrFallback(snapshot.Workdir, "<unknown>"), boldStyle)
+	appendANSI(l.renderStatusModelLine(width, snapshot.Model.Summary))
+	if sessionName := strings.TrimSpace(snapshot.SessionName); sessionName != "" {
+		appendWrapped(sessionName, boldStyle)
+	}
+	if parentSummary := statusParentSessionSummary(snapshot); parentSummary != "" {
+		appendWrapped(parentSummary, lipgloss.Style{})
+	}
+	appendWrapped(statusValueOrFallback(snapshot.SessionID, "session unknown"), subtleStyle)
+
+	if l.statusSectionLoading(uiStatusSectionGit) || snapshot.Git.Visible || strings.TrimSpace(snapshot.Git.Error) != "" {
+		appendSectionTitle("Git")
+		if errorText := strings.TrimSpace(snapshot.Git.Error); errorText != "" {
+			appendWrapped(errorText, warningStyle)
+		} else if snapshot.Git.Visible {
+			appendWrapped(snapshot.Git.Branch, boldStyle)
+			appendANSI(l.renderStatusGitSummaryLine(width, snapshot.Git))
+		} else {
+			appendWrapped("Loading git...", subtleStyle)
+		}
+	}
+
+	appendSectionTitle("Context")
+	appendWrapped(statusContextRemainingSummary(snapshot.Context), boldStyle)
+	appendWrapped(statusContextCompactionSummary(snapshot.Context), lipgloss.Style{})
+	appendWrapped("auto-compaction "+statusOnOff(snapshot.Config.AutoCompaction), lipgloss.Style{})
+	appendWrapped(fmt.Sprintf("%d compactions", snapshot.CompactionCount), lipgloss.Style{})
+
+	loadedSkills, failedSkills := statusPartitionSkills(snapshot.Skills)
+	subheaderStyle := lipgloss.NewStyle().Foreground(palette.primary).Bold(true)
+	directoryStyle := lipgloss.NewStyle().Foreground(palette.foreground)
+	treeStyle := lipgloss.NewStyle().Foreground(palette.muted).Faint(true)
+	errorStyle := lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true)
+	appendGap()
+	appendWrapped(fmt.Sprintf("%d skills", len(snapshot.Skills)), subheaderStyle)
+	if l.statusSectionLoading(uiStatusSectionEnvironment) && len(snapshot.Skills) == 0 {
+		appendWrapped("Loading skills...", subtleStyle)
+	} else {
+		for _, group := range statusGroupSkillsByDirectory(append(append([]runtime.SkillInspection(nil), loadedSkills...), failedSkills...)) {
+			appendWrapped(statusDisplayPath(group.Directory, snapshot.Workdir), directoryStyle)
+			for idx, skill := range group.Skills {
+				branch := "├─"
+				if idx == len(group.Skills)-1 {
+					branch = "└─"
+				}
+				line := treeStyle.Render(branch + " ")
+				if skill.Loaded {
+					line += statusSkillTokenLine(skill, snapshot.SkillTokenCounts)
+				} else {
+					line += errorStyle.Render("! ") + statusSkillFailureLine(skill)
+				}
+				appendANSI(padANSIRight(line, width))
+			}
+		}
+	}
+
+	appendGap()
+	appendWrapped(fmt.Sprintf("%d agents files", len(snapshot.AgentsPaths)), boldStyle)
+	if l.statusSectionLoading(uiStatusSectionEnvironment) && len(snapshot.AgentsPaths) == 0 {
+		appendWrapped("Loading AGENTS.md...", subtleStyle)
+	} else {
+		for _, path := range snapshot.AgentsPaths {
+			appendWrapped(statusAgentTokenLine(path, snapshot.AgentTokenCounts, snapshot.Workdir), lipgloss.Style{})
+		}
+	}
+
+	appendSectionTitle("Config")
+	appendWrapped(statusDisplayPath(snapshot.Config.SettingsPath, snapshot.Workdir), subtleStyle)
+	if len(snapshot.Config.OverrideSources) > 0 {
+		appendWrapped("overrides: "+strings.Join(snapshot.Config.OverrideSources, ", "), lipgloss.Style{})
+	}
+	appendWrapped("supervisor "+snapshot.Config.Supervisor, lipgloss.Style{})
+
+	if warning := strings.TrimSpace(snapshot.CollectorWarning); warning != "" {
+		appendSectionTitle("Warnings")
+		appendWrapped(warning, warningStyle)
+	}
+	return lines
+}
+
+func (l uiViewLayout) statusSectionLoading(section uiStatusSection) bool {
+	return l.model.statusPendingSections != nil && l.model.statusPendingSections[section]
+}
+
+func (l uiViewLayout) renderStatusSubscriptionLine(width int, window uiStatusSubscriptionWindow, labelWidth int) string {
+	palette := uiPalette(l.model.theme)
+	remaining := statusSubscriptionRemaining(window.UsedPercent)
+	label := strings.TrimSpace(window.Label)
+	if label == "" {
+		label = "limit"
+	}
+	paddedLabel := statusPadRight(label, labelWidth)
+	leftStyled := lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("%.0f%% left", remaining))
+	metaParts := make([]string, 0, 2)
+	if qualifier := strings.TrimSpace(window.Qualifier); qualifier != "" {
+		metaParts = append(metaParts, qualifier)
+	}
+	resetText := statusSubscriptionResetMeta(window.ResetAt, time.Now())
+	if resetText != "" {
+		metaParts = append(metaParts, "resets "+resetText)
+	}
+	metaText := strings.Join(metaParts, " • ")
+	metaStyled := ""
+	if metaText != "" {
+		metaStyled = lipgloss.NewStyle().Foreground(palette.muted).Faint(true).Render("• " + metaText)
+	}
+	barWidth := statusSubscriptionBarWidthForLine(width, paddedLabel, fmt.Sprintf("%.0f%% left", remaining), metaText)
+	bar := l.statusSubscriptionBar(barWidth, remaining)
+	line := paddedLabel + " | " + bar + " | " + leftStyled
+	if metaStyled != "" {
+		line += " " + metaStyled
+	}
+	if lipgloss.Width(line) <= width {
+		return padANSIRight(line, width)
+	}
+	compact := paddedLabel + " | " + bar + " | " + leftStyled
+	return padANSIRight(truncateQueuedMessageLine(compact, width), width)
+}
+
+func (l uiViewLayout) renderStatusGitSummaryLine(width int, git uiStatusGitInfo) string {
+	palette := uiPalette(l.model.theme)
+	cleanText := "clean"
+	cleanliness := lipgloss.NewStyle().Bold(true).Foreground(statusGreenColor()).Render(cleanText)
+	if git.Dirty {
+		cleanText = "dirty"
+		cleanliness = lipgloss.NewStyle().Bold(true).Foreground(statusRedColor()).Render(cleanText)
+	}
+	aheadStyle := lipgloss.NewStyle().Foreground(palette.foreground)
+	aheadText := fmt.Sprintf("ahead %d", git.Ahead)
+	if git.Ahead > 0 {
+		aheadStyle = lipgloss.NewStyle().Foreground(statusGreenColor()).Bold(true)
+	}
+	behindStyle := lipgloss.NewStyle().Foreground(palette.foreground)
+	behindText := fmt.Sprintf("behind %d", git.Behind)
+	if git.Behind > 0 {
+		behindStyle = lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true)
+	}
+	joinParts := func(parts ...string) string {
+		return strings.Join(parts, " | ")
+	}
+	plainFull := joinParts(cleanText, aheadText, behindText)
+	if lipgloss.Width(plainFull) <= width {
+		return padANSIRight(joinParts(cleanliness, aheadStyle.Render(aheadText), behindStyle.Render(behindText)), width)
+	}
+	shortAheadText := fmt.Sprintf("+%d", git.Ahead)
+	shortBehindText := fmt.Sprintf("-%d", git.Behind)
+	plainShort := joinParts(cleanText, shortAheadText, shortBehindText)
+	if lipgloss.Width(plainShort) <= width {
+		return padANSIRight(joinParts(cleanliness, aheadStyle.Render(shortAheadText), behindStyle.Render(shortBehindText)), width)
+	}
+	if lipgloss.Width(cleanText) <= width {
+		return padANSIRight(cleanliness, width)
+	}
+	line := strings.Join([]string{
+		cleanliness,
+		aheadStyle.Render(shortAheadText),
+		behindStyle.Render(shortBehindText),
+	}, " | ")
+	return padANSIRight(line, width)
+}
+
+func (l uiViewLayout) renderStatusModelLine(width int, summary string) string {
+	text := "Model: " + statusValueOrFallback(summary, "<unset>")
+	if !strings.HasSuffix(text, " fast") || lipgloss.Width(text) > width {
+		return padANSIRight(lipgloss.NewStyle().Bold(true).Render(text), width)
+	}
+	base := strings.TrimSuffix(text, " fast")
+	boldStyle := lipgloss.NewStyle().Bold(true)
+	fastStyle := lipgloss.NewStyle().Bold(true).Foreground(statusAmberColor())
+	return padANSIRight(boldStyle.Render(base)+" "+fastStyle.Render("fast"), width)
+}
+
+func (l uiViewLayout) statusSubscriptionBar(width int, remaining float64) string {
+	bar := bubbleprogress.New(
+		bubbleprogress.WithWidth(max(4, width)),
+		bubbleprogress.WithoutPercentage(),
+		bubbleprogress.WithSolidFill(statusSubscriptionFillHex(l.model.theme, remaining)),
+		bubbleprogress.WithFillCharacters('▮', '▯'),
+	)
+	bar.EmptyColor = statusContextEmptyHex(l.model.theme)
+	return bar.ViewAs(remaining / 100.0)
+}
+
+func statusSubscriptionFillHex(theme string, remaining float64) string {
+	return statusContextZoneHex(theme, int(100-remaining))
+}
+
+func statusSubscriptionRemaining(usedPercent float64) float64 {
+	remaining := 100 - statusClampPercent(usedPercent)
+	if remaining < 0 {
+		return 0
+	}
+	if remaining > 100 {
+		return 100
+	}
+	return remaining
+}
+
+func statusClampPercent(value float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > 100 {
+		return 100
+	}
+	return value
+}
+
+func statusSubscriptionBarWidth(width int) int {
+	barWidth := width / 5
+	if barWidth > statusSubscriptionBarMaxWidth {
+		barWidth = statusSubscriptionBarMaxWidth
+	}
+	if barWidth < 4 {
+		barWidth = 4
+	}
+	return barWidth
+}
+
+func statusSubscriptionBarWidthForLine(width int, label, leftText, metaText string) int {
+	reserved := lipgloss.Width(label) + lipgloss.Width(leftText) + 6
+	if strings.TrimSpace(metaText) != "" {
+		reserved += lipgloss.Width("• "+metaText) + 1
+	}
+	available := width - reserved
+	if available < 4 {
+		available = 4
+	}
+	if available > statusSubscriptionBarMaxWidth {
+		available = statusSubscriptionBarMaxWidth
+	}
+	return available
+}
+
+func statusSubscriptionLabelWidth(windows []uiStatusSubscriptionWindow) int {
+	width := 0
+	for _, window := range windows {
+		label := strings.TrimSpace(window.Label)
+		if label == "" {
+			label = "limit"
+		}
+		labelWidth := lipgloss.Width(label)
+		if labelWidth > width {
+			width = labelWidth
+		}
+	}
+	if width < 1 {
+		return 1
+	}
+	return width
+}
+
+func statusLocalTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.In(time.Local).Format("Jan 2, 3:04 PM MST")
+}
+
+func statusSubscriptionResetMeta(resetAt, now time.Time) string {
+	if resetAt.IsZero() {
+		return ""
+	}
+	local := statusLocalTime(resetAt)
+	relative := statusRelativeDuration(resetAt.Sub(now))
+	if relative == "" {
+		return local
+	}
+	if local == "" {
+		return "in " + relative
+	}
+	return "in " + relative + " at " + local
+}
+
+func statusRelativeDuration(value time.Duration) string {
+	if value <= 0 {
+		return "0m"
+	}
+	rounded := value.Round(time.Minute)
+	if rounded < time.Minute {
+		rounded = time.Minute
+	}
+	totalMinutes := int(rounded / time.Minute)
+	days := totalMinutes / (24 * 60)
+	totalMinutes -= days * 24 * 60
+	hours := totalMinutes / 60
+	minutes := totalMinutes - (hours * 60)
+	parts := make([]string, 0, 3)
+	if days > 0 {
+		parts = append(parts, fmt.Sprintf("%dd", days))
+	}
+	if hours > 0 {
+		parts = append(parts, fmt.Sprintf("%dh", hours))
+	}
+	if minutes > 0 || len(parts) == 0 {
+		parts = append(parts, fmt.Sprintf("%dm", minutes))
+	}
+	return strings.Join(parts, "")
+}
+
+func statusVisibleAuthSummary(auth uiStatusAuthInfo, subscription uiStatusSubscriptionInfo) string {
+	summary := strings.TrimSpace(auth.Summary)
+	if summary == "" {
+		return ""
+	}
+	if strings.EqualFold(summary, "subscription") && strings.TrimSpace(subscription.Summary) != "" {
+		return ""
+	}
+	return summary
+}
+
+func statusParentSessionSummary(snapshot uiStatusSnapshot) string {
+	parentID := strings.TrimSpace(snapshot.ParentSessionID)
+	if parentID == "" {
+		return ""
+	}
+	if parentName := strings.TrimSpace(snapshot.ParentSessionName); parentName != "" {
+		return fmt.Sprintf("Parent session: %s <%s>", parentName, parentID)
+	}
+	return fmt.Sprintf("Parent session: %s", parentID)
+}
+
+func statusPartitionSkills(skills []runtime.SkillInspection) ([]runtime.SkillInspection, []runtime.SkillInspection) {
+	loaded := make([]runtime.SkillInspection, 0, len(skills))
+	unloaded := make([]runtime.SkillInspection, 0, len(skills))
+	for _, skill := range skills {
+		if skill.Loaded {
+			loaded = append(loaded, skill)
+			continue
+		}
+		unloaded = append(unloaded, skill)
+	}
+	return loaded, unloaded
+}
+
+func statusDisplayPath(path, workdir string) string {
+	trimmed := filepath.ToSlash(strings.TrimSpace(path))
+	if trimmed == "" {
+		return "<unknown>"
+	}
+	if work := filepath.ToSlash(strings.TrimSpace(workdir)); work != "" {
+		if trimmed == work {
+			return trimmed
+		}
+		if strings.HasPrefix(trimmed, work+"/") {
+			return "." + strings.TrimPrefix(trimmed, work)
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		home = filepath.ToSlash(strings.TrimSpace(home))
+		if home != "" {
+			if trimmed == home {
+				return "~"
+			}
+			if strings.HasPrefix(trimmed, home+"/") {
+				return "~" + strings.TrimPrefix(trimmed, home)
+			}
+		}
+	}
+	return trimmed
+}
+
+func statusJoinNonEmpty(separator string, parts ...string) string {
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			filtered = append(filtered, trimmed)
+		}
+	}
+	return strings.Join(filtered, separator)
+}
+
+func statusValueOrFallback(value, fallback string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fallback
+	}
+	return trimmed
+}
+
+func statusTokenShort(tokens int) string {
+	if tokens <= 0 {
+		return "0k"
+	}
+	whole := tokens / 1000
+	remainder := tokens % 1000
+	if whole >= 10 || remainder == 0 {
+		return fmt.Sprintf("%dk", whole)
+	}
+	return fmt.Sprintf("%d.%dk", whole, remainder/100)
+}
+
+func statusPercent(value, total int) string {
+	if total <= 0 || value <= 0 {
+		return "0%"
+	}
+	pct := (value * 100) / total
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	return fmt.Sprintf("%d%%", pct)
+}
+
+func statusPercentInt(value, total int) string {
+	return statusPercent(value, total)
+}
+
+func statusContextRemainingSummary(context uiStatusContextInfo) string {
+	return fmt.Sprintf("%s (%s) left of %s", statusPercentInt(context.AvailableTokens, context.WindowTokens), statusTokenShort(context.AvailableTokens), statusTokenShort(context.WindowTokens))
+}
+
+func statusContextCompactionSummary(context uiStatusContextInfo) string {
+	return fmt.Sprintf("Compaction at %s (%s).", statusTokenShort(context.ThresholdTokens), statusPercentInt(context.ThresholdTokens, context.WindowTokens))
+}
+
+func statusSkillTokenLine(skill runtime.SkillInspection, tokenCounts map[string]int) string {
+	name := strings.TrimSpace(skill.Name)
+	if name == "" {
+		name = filepath.Base(filepath.Dir(skill.Path))
+	}
+	return fmt.Sprintf("%s (%s)", name, statusTokenShort(tokenCounts[strings.TrimSpace(skill.Path)]))
+}
+
+func statusSkillFailureLine(skill runtime.SkillInspection) string {
+	name := strings.TrimSpace(skill.Name)
+	if name == "" {
+		name = filepath.Base(filepath.Dir(skill.Path))
+	}
+	reason := strings.TrimSpace(skill.Reason)
+	if reason == "" {
+		return name
+	}
+	return fmt.Sprintf("%s (%s)", name, reason)
+}
+
+func statusAgentTokenLine(path string, tokenCounts map[string]int, workdir string) string {
+	return fmt.Sprintf("%s (%s)", statusDisplayPath(path, workdir), statusTokenShort(tokenCounts[strings.TrimSpace(path)]))
+}
+
+type statusSkillDirectoryGroup struct {
+	Directory string
+	Skills    []runtime.SkillInspection
+}
+
+func statusGroupSkillsByDirectory(skills []runtime.SkillInspection) []statusSkillDirectoryGroup {
+	groups := make([]statusSkillDirectoryGroup, 0, len(skills))
+	indexByDirectory := map[string]int{}
+	for _, skill := range skills {
+		directory := statusSkillDirectory(skill.Path)
+		idx, ok := indexByDirectory[directory]
+		if !ok {
+			idx = len(groups)
+			indexByDirectory[directory] = idx
+			groups = append(groups, statusSkillDirectoryGroup{Directory: directory})
+		}
+		groups[idx].Skills = append(groups[idx].Skills, skill)
+	}
+	return groups
+}
+
+func statusSkillDirectory(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return ""
+	}
+	directory := filepath.Dir(trimmed)
+	parent := filepath.Dir(directory)
+	if parent == "." || parent == string(filepath.Separator) || parent == directory {
+		return directory
+	}
+	return parent
+}
+
+func statusPadRight(text string, width int) string {
+	padding := width - lipgloss.Width(text)
+	if padding <= 0 {
+		return text
+	}
+	return text + strings.Repeat(" ", padding)
+}

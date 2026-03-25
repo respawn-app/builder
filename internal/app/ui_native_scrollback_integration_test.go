@@ -37,6 +37,32 @@ func normalizedOutput(v string) string {
 	return strings.Join(strings.Fields(xansi.Strip(v)), " ")
 }
 
+func waitForTestCondition(t *testing.T, timeout time.Duration, description string, check func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if check() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", description)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitForSubmitResult(t *testing.T, timeout time.Duration, submitDone <-chan error) {
+	t.Helper()
+	select {
+	case err := <-submitDone:
+		if err != nil {
+			t.Fatalf("submit user message: %v", err)
+		}
+	case <-time.After(timeout):
+		t.Fatal("timed out waiting for submit user message completion")
+	}
+}
+
 type singleChunkStreamClient struct {
 	delta string
 }
@@ -152,7 +178,7 @@ func TestNativeScrollbackProgramOutputContract(t *testing.T) {
 	program.Send(nativeHistoryFlushMsg{Text: "delta replay line"})
 	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
 	time.Sleep(20 * time.Millisecond)
-	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	program.Quit()
 
 	select {
 	case err := <-done:
@@ -279,7 +305,7 @@ func TestNativeResizeReplaysOngoingScreenAfterRealResize(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	time.Sleep(40 * time.Millisecond)
-	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	program.Quit()
 
 	select {
 	case err := <-done:
@@ -356,7 +382,7 @@ func TestNativeResizeClearWithoutHistoryRedrawsSingleLiveRegion(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	time.Sleep(40 * time.Millisecond)
-	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	program.Quit()
 
 	select {
 	case err := <-done:
@@ -438,7 +464,9 @@ func TestNativeRollbackOverlayCtrlCBalancesAltScreenAndAlternateScroll(t *testin
 	time.Sleep(20 * time.Millisecond)
 	program.Send(tea.KeyMsg{Type: tea.KeyEsc})
 	program.Send(tea.KeyMsg{Type: tea.KeyEsc})
-	time.Sleep(20 * time.Millisecond)
+	waitForTestCondition(t, 2*time.Second, "rollback overlay to open", func() bool {
+		return model.rollbackMode && model.rollbackOverlayPushed && model.view.Mode() == tui.ModeDetail
+	})
 	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
 
 	select {
@@ -508,8 +536,10 @@ func TestNativePSOverlayEscBalancesAltScreenAndAlternateScroll(t *testing.T) {
 	program.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	time.Sleep(20 * time.Millisecond)
 	program.Send(tea.KeyMsg{Type: tea.KeyEsc})
-	time.Sleep(20 * time.Millisecond)
-	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	waitForTestCondition(t, 2*time.Second, "/ps overlay to close", func() bool {
+		return !model.psVisible && !model.psOverlayPushed && model.view.Mode() == tui.ModeOngoing
+	})
+	program.Quit()
 
 	select {
 	case err := <-done:
@@ -582,7 +612,7 @@ func TestNativePSOverlayUsesClearScreenWhenAltScreenNever(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	program.Send(tea.KeyMsg{Type: tea.KeyEsc})
 	time.Sleep(20 * time.Millisecond)
-	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	program.Quit()
 
 	select {
 	case err := <-done:
@@ -652,11 +682,27 @@ func TestNativeFinalizeDoesNotBlinkDuplicateTailTokens(t *testing.T) {
 
 	time.Sleep(40 * time.Millisecond)
 	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	submitDone := make(chan error, 1)
 	go func() {
-		_, _ = eng.SubmitUserMessage(context.Background(), "trigger")
+		_, err := eng.SubmitUserMessage(context.Background(), "trigger")
+		submitDone <- err
 	}()
-	time.Sleep(220 * time.Millisecond)
-	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	waitForTestCondition(t, 2*time.Second, "noop final to clear ongoing state", func() bool {
+		if strings.TrimSpace(model.view.OngoingStreamingText()) != "" {
+			return false
+		}
+		if model.sawAssistantDelta {
+			return false
+		}
+		for _, entry := range eng.ChatSnapshot().Entries {
+			if strings.Contains(entry.Text, "NO_OP") {
+				return false
+			}
+		}
+		return true
+	})
+	waitForSubmitResult(t, 2*time.Second, submitDone)
+	program.Quit()
 
 	select {
 	case runErr := <-done:
@@ -716,11 +762,14 @@ func TestNativeFinalizeSuppressesLateAsyncDeltaArtifacts(t *testing.T) {
 
 	time.Sleep(40 * time.Millisecond)
 	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	submitDone := make(chan error, 1)
 	go func() {
-		_, _ = eng.SubmitUserMessage(context.Background(), "trigger")
+		_, err := eng.SubmitUserMessage(context.Background(), "trigger")
+		submitDone <- err
 	}()
 	time.Sleep(260 * time.Millisecond)
-	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	waitForSubmitResult(t, 2*time.Second, submitDone)
+	program.Quit()
 
 	select {
 	case runErr := <-done:
@@ -789,11 +838,27 @@ func TestNativeNoopFinalNeverAppearsOnScreen(t *testing.T) {
 
 	time.Sleep(40 * time.Millisecond)
 	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	submitDone := make(chan error, 1)
 	go func() {
-		_, _ = eng.SubmitUserMessage(context.Background(), "trigger")
+		_, err := eng.SubmitUserMessage(context.Background(), "trigger")
+		submitDone <- err
 	}()
-	time.Sleep(220 * time.Millisecond)
-	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	waitForTestCondition(t, 2*time.Second, "noop final to clear ongoing state", func() bool {
+		if strings.TrimSpace(model.view.OngoingStreamingText()) != "" {
+			return false
+		}
+		if model.sawAssistantDelta {
+			return false
+		}
+		for _, entry := range eng.ChatSnapshot().Entries {
+			if strings.Contains(entry.Text, "NO_OP") {
+				return false
+			}
+		}
+		return true
+	})
+	waitForSubmitResult(t, 2*time.Second, submitDone)
+	program.Quit()
 
 	select {
 	case runErr := <-done:

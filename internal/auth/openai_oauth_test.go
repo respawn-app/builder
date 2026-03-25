@@ -6,10 +6,37 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func rewriteOAuthIssuerClient(server *httptest.Server) *http.Client {
+	target, err := url.Parse(server.URL)
+	if err != nil {
+		panic(err)
+	}
+	client := server.Client()
+	base := client.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	client.Transport = roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		clone := req.Clone(req.Context())
+		clone.URL.Scheme = target.Scheme
+		clone.URL.Host = target.Host
+		clone.Host = target.Host
+		return base.RoundTrip(clone)
+	})
+	return client
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
 
 func TestParsePollInterval(t *testing.T) {
 	tests := []struct {
@@ -97,9 +124,8 @@ func TestRunOpenAIDeviceCodeFlow(t *testing.T) {
 
 	var shown DeviceCode
 	method, err := RunOpenAIDeviceCodeFlow(context.Background(), OpenAIOAuthOptions{
-		Issuer:      server.URL,
 		ClientID:    "client-1",
-		HTTPClient:  server.Client(),
+		HTTPClient:  rewriteOAuthIssuerClient(server),
 		PollTimeout: 10 * time.Second,
 	}, func(code DeviceCode) {
 		shown = code
@@ -131,9 +157,8 @@ func TestRequestOpenAIDeviceCodeUnsupported(t *testing.T) {
 	defer server.Close()
 
 	_, err := requestOpenAIDeviceCode(context.Background(), OpenAIOAuthOptions{
-		Issuer:     server.URL,
 		ClientID:   "client-1",
-		HTTPClient: server.Client(),
+		HTTPClient: rewriteOAuthIssuerClient(server),
 	})
 	if err != ErrDeviceCodeUnsupported {
 		t.Fatalf("expected ErrDeviceCodeUnsupported, got %v", err)
@@ -165,9 +190,8 @@ func TestRefreshOpenAIAuthToken(t *testing.T) {
 	defer server.Close()
 
 	updated, err := RefreshOpenAIAuthToken(context.Background(), OpenAIOAuthOptions{
-		Issuer:     server.URL,
 		ClientID:   "client-1",
-		HTTPClient: server.Client(),
+		HTTPClient: rewriteOAuthIssuerClient(server),
 	}, Method{
 		Type: MethodOAuth,
 		OAuth: &OAuthMethod{
@@ -223,11 +247,11 @@ func TestExtractEmail(t *testing.T) {
 	idToken := jwt(map[string]any{"email": "user@example.com"})
 	accessToken := jwt(map[string]any{"email": "other@example.com"})
 
-	if got := extractEmail(oauthTokenResponse{IDToken: idToken}); got != "user@example.com" {
-		t.Fatalf("expected email from id token, got %q", got)
+	if got := extractEmail(oauthTokenResponse{IDToken: idToken}); got != "" {
+		t.Fatalf("expected no email from unverified id token, got %q", got)
 	}
-	if got := extractEmail(oauthTokenResponse{AccessToken: accessToken}); got != "other@example.com" {
-		t.Fatalf("expected email from access token, got %q", got)
+	if got := extractEmail(oauthTokenResponse{AccessToken: accessToken}); got != "" {
+		t.Fatalf("expected no email from access token, got %q", got)
 	}
 }
 

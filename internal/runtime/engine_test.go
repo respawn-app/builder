@@ -5664,11 +5664,15 @@ func TestQueuedUserMessagesCoalesceIntoSingleFlush(t *testing.T) {
 		},
 	}}
 
-	var flushed Event
+	var (
+		flushCount int
+		flushed    Event
+	)
 	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			if evt.Kind == EventUserMessageFlushed {
+				flushCount++
 				flushed = evt
 			}
 		},
@@ -5691,6 +5695,9 @@ func TestQueuedUserMessagesCoalesceIntoSingleFlush(t *testing.T) {
 	}
 	if len(flushed.UserMessageBatch) != 2 {
 		t.Fatalf("expected two flushed user messages in batch, got %+v", flushed.UserMessageBatch)
+	}
+	if flushCount != 1 {
+		t.Fatalf("expected one flush event, got %d", flushCount)
 	}
 	if len(client.calls) < 2 {
 		t.Fatalf("expected at least 2 model calls, got %d", len(client.calls))

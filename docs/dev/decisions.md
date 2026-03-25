@@ -160,6 +160,8 @@
 - Startup auth selection uses the same themed startup picker style as session selection.
 - Startup auth picker exposes exactly three OAuth methods:
 - `oauth_browser`, `oauth_browser_paste`, `oauth_device`.
+- OAuth issuer routing is not configurable in production. Builder hardcodes the official provider issuer per provider, and `BUILDER_OAUTH_ISSUER` is intentionally unsupported to prevent credential routing to overridden domains.
+- `/status` subscription quota fetch uses a fixed ChatGPT usage endpoint. Custom `openai_base_url` values suppress quota fetch, but explicitly configured official ChatGPT hosts (`chatgpt.com`, `chat.openai.com`, with optional `/backend-api`) still allow it.
 - Startup auth picker uses friendly titles with one-line explanations and does not show raw method ids in the rows.
 - Interactive startup treats `OPENAI_API_KEY` as a chooser-backed auth source, not an unconditional override.
 - When `OPENAI_API_KEY` is present, the startup auth picker may also show a separate non-OAuth option: `Use existing OPENAI_API_KEY from now on`.
@@ -273,7 +275,7 @@
 - `Enter` runs the currently selected slash command, including the default first match for partial input.
 - `Tab` on a partial selected slash command autocompletes it and inserts a trailing space for arguments.
 - Unknown slash commands are sent to model as normal user prompts.
-- Built-in commands: `/logout`, `/exit`, `/new`, `/resume`, `/compact`, `/name`, `/thinking`, `/fast`, `/review`, `/init`, `/supervisor`, `/autocompaction`, `/ps`, `/back`.
+- Built-in commands: `/logout`, `/exit`, `/new`, `/resume`, `/compact`, `/name`, `/thinking`, `/fast`, `/review`, `/init`, `/supervisor`, `/autocompaction`, `/status`, `/ps`, `/back`.
 - Exact known slash commands use the normal queued-input drain path when queued, including conditionally fresh-session commands like `/review` and `/init`; they are never sent to the model as plain user prompts.
 - Run-safe commands execute immediately while busy.
 - Non-run-safe known commands while busy are rejected with transient status-line error.
@@ -284,6 +286,8 @@
 - `/autocompaction` controls runtime auto-compaction invocation for the current session only.
 - `/autocompaction` toggles when called without args; `/autocompaction on|off` sets explicitly.
 - `/autocompaction` emits user-visible confirmation in transcript + status line and does not persist to config.
+- `/status` opens a read-only detail overlay with account/subscription status, workdir, session ids, compact git summary, context usage, model/config state, skills, `AGENTS.md` paths, and compaction count.
+- `/status` refreshes progressively on open: the base snapshot renders immediately, then account, git, and environment sections fill in asynchronously. It uses the same detail-surface alt-screen policy and native text-selection behavior as other detail overlays.
 - Built-in prompt commands use embedded markdown templates.
 - Slash commands support file-backed prompts from:
 - `./.builder/prompts`, `./.builder/commands`, `~/.builder/prompts`, `~/.builder/commands`.

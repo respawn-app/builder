@@ -19,22 +19,24 @@ func (m *uiModel) queueInput(text string) {
 	m.activity = uiActivityQueued
 }
 
-func (m *uiModel) enqueueInjectedInput(text string) {
+func (m *uiModel) enqueueInjectedInput(text string) bool {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
-		return
+		return false
 	}
 	if m.engine != nil {
 		m.engine.QueueUserMessage(trimmed)
 	}
 	m.pendingInjected = append(m.pendingInjected, trimmed)
 	m.activity = uiActivityQueued
+	return true
 }
 
 func (m *uiModel) queueInjectedInput(text string) {
-	m.enqueueInjectedInput(text)
+	if !m.enqueueInjectedInput(text) {
+		return
+	}
 	m.clearInput()
-	m.activity = uiActivityQueued
 }
 
 func (c uiInputController) queueOrStartSubmission(text string) (tea.Model, tea.Cmd) {
@@ -156,7 +158,7 @@ func (c uiInputController) dispatchQueuedInput(text string) tea.Cmd {
 		if _, knownCommand := m.commandRegistry.Command(text); knownCommand {
 			if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
 				_, cmd := c.applyCommandResult(commandResult)
-				return sequenceCmds(m.recordPromptHistory(text), cmd)
+				return finalizeSlashCommandCmd(commandResult.Action, cmd, m.recordPromptHistory(text))
 			}
 		}
 	}

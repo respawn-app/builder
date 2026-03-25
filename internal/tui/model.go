@@ -38,7 +38,9 @@ type StreamingReasoningEntry struct {
 	Text string
 }
 
-type ToggleModeMsg struct{}
+type ToggleModeMsg struct {
+	SkipDetailWarmup bool
+}
 
 type ScrollOngoingMsg struct {
 	Delta int
@@ -274,11 +276,11 @@ func FormatOngoingError(err error) string {
 	return fmt.Sprintf("error: %s", msg)
 }
 
-func (m Model) toggleMode() Model {
+func (m Model) toggleMode(skipDetailWarmup bool) Model {
 	if m.mode == ModeOngoing {
 		m.mode = ModeDetail
 		m.snapOngoingOnViewportResize = false
-		if m.detailDirty || len(m.detailLines) == 0 {
+		if !skipDetailWarmup && (m.detailDirty || len(m.detailLines) == 0) {
 			m.rebuildDetailSnapshot()
 		}
 		m.detailScroll = m.maxDetailScroll()

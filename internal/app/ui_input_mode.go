@@ -7,6 +7,7 @@ type uiInputMode string
 const (
 	uiInputModeMain              uiInputMode = "main"
 	uiInputModeAsk               uiInputMode = "ask"
+	uiInputModeStatus            uiInputMode = "status"
 	uiInputModeRollbackSelection uiInputMode = "rollback_selection"
 	uiInputModeRollbackEdit      uiInputMode = "rollback_edit"
 	uiInputModeProcessList       uiInputMode = "process_list"
@@ -24,6 +25,8 @@ func (m *uiModel) inputMode() uiInputMode {
 	switch {
 	case m == nil:
 		return uiInputModeMain
+	case m.statusVisible:
+		return uiInputModeStatus
 	case m.psVisible:
 		return uiInputModeProcessList
 	case m.rollbackMode:
