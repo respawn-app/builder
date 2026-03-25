@@ -62,6 +62,9 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.EnabledTools[tools.ToolMultiToolUseParallel] {
 		t.Fatalf("expected %s disabled in static defaults; it should be derived from model capability", tools.ToolMultiToolUseParallel)
 	}
+	if got := cfg.Source.Sources["tools.multi_tool_use_parallel"]; got != "default" {
+		t.Fatalf("expected untouched %s source to remain default, got %q", tools.ToolMultiToolUseParallel, got)
+	}
 	if !cfg.Settings.EnabledTools[tools.ToolWebSearch] {
 		t.Fatalf("expected web_search tool enabled by default: %+v", cfg.Settings.EnabledTools)
 	}
@@ -122,6 +125,9 @@ func TestLoadCreatesDefaultConfigOnFirstUse(t *testing.T) {
 	}
 	if !strings.Contains(string(settingsBytes), "# [skills]") {
 		t.Fatalf("expected default config to mention skills toggles, got %q", string(settingsBytes))
+	}
+	if strings.Contains(string(settingsBytes), "[tools]") {
+		t.Fatalf("expected default config to omit [tools] section entirely, got %q", string(settingsBytes))
 	}
 }
 

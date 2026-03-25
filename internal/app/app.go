@@ -76,7 +76,8 @@ func activeToolIDs(settings config.Settings, source config.SourceReport, locked 
 		return dedupeSortToolIDs(ids)
 	}
 	ids := config.EnabledToolIDs(settings)
-	if strings.TrimSpace(source.Sources["tools."+string(tools.ToolMultiToolUseParallel)]) != "default" {
+	sourceKind := strings.TrimSpace(source.Sources["tools."+string(tools.ToolMultiToolUseParallel)])
+	if sourceKind != "" && sourceKind != "default" {
 		return dedupeSortToolIDs(ids)
 	}
 	enabled := map[tools.ID]bool{}

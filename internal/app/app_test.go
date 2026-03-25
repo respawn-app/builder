@@ -48,6 +48,14 @@ func TestActiveToolIDs_ConfigSourceOverridesDerivedMultiToolDefault(t *testing.T
 	}
 }
 
+func TestActiveToolIDs_MissingSourceEntryStillUsesDerivedMultiToolDefault(t *testing.T) {
+	settings := config.Settings{Model: "gpt-5.3-codex", EnabledTools: map[tools.ID]bool{tools.ToolShell: true, tools.ToolMultiToolUseParallel: false}}
+	ids := activeToolIDs(settings, config.SourceReport{}, nil)
+	if !containsToolID(ids, tools.ToolMultiToolUseParallel) {
+		t.Fatalf("expected missing source entry to behave like default, got %+v", ids)
+	}
+}
+
 func TestActiveToolIDs_UsesLockedEnabledToolsVerbatim(t *testing.T) {
 	locked := &session.LockedContract{EnabledTools: []string{string(tools.ToolShell), string(tools.ToolMultiToolUseParallel)}}
 	ids := activeToolIDs(config.Settings{Model: "gpt-5.4"}, config.SourceReport{}, locked)
