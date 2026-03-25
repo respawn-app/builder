@@ -16,6 +16,7 @@ description: Available slash commands, how their input is parsed, and how file-b
 | <code>/fast [on&#124;off&#124;status]</code> | optional single value | Toggle or inspect Fast mode. |
 | <code>/supervisor [on&#124;off]</code> | optional single value | Toggle reviewer invocation. |
 | <code>/autocompaction [on&#124;off]</code> | optional single value | Toggle auto-compaction. |
+| `/status` | none | Open a read-only status overlay with progressively loaded account, session, compact git, context, config, skills, and quota details. |
 | <code>/ps [kill&#124;inline&#124;logs] &lt;id&gt;</code> | optional action + id | Open the background-process picker, or manage a specific background shell. |
 | `/back` | none | Open the parent session when the current session was spawned from one. |
 | `/review <what to review>` | optional free-form text | Use the built-in review prompt. In an empty session it submits in place; otherwise it starts a fresh child review session. Trailing text is appended to the prompt body. |

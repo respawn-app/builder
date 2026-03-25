@@ -58,7 +58,7 @@ func (m *uiModel) pushProcessOverlayIfNeeded() tea.Cmd {
 		return nil
 	}
 	m.psOverlayPushed = true
-	if transitionCmd := m.toggleTranscriptMode(); transitionCmd != nil {
+	if transitionCmd := m.toggleTranscriptModeWithOptions(true, true); transitionCmd != nil {
 		return transitionCmd
 	}
 	return tea.ClearScreen

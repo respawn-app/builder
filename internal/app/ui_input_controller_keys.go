@@ -21,6 +21,11 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if inputState.Mode == uiInputModeRollbackSelection {
 		return c.handleRollbackSelectionKey(msg)
 	}
+	if inputState.Mode == uiInputModeStatus {
+		next, cmd := c.handleStatusOverlayKey(msg)
+		next.(*uiModel).syncViewport()
+		return next, cmd
+	}
 	if inputState.Mode == uiInputModeProcessList {
 		next, cmd := c.handleProcessListKey(msg)
 		next.(*uiModel).syncViewport()
@@ -156,7 +161,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clearInput()
 			m.restoreCapturedPromptHistoryDraft(draftText, draftCursor, restoreDraft)
 			next, cmd := c.applyCommandResult(commandResult)
-			return next, sequenceCmds(recordCmd, cmd)
+			return next, finalizeSlashCommandCmd(commandResult.Action, cmd, recordCmd)
 		}
 		m.clearInput()
 		m.restoreCapturedPromptHistoryDraft(draftText, draftCursor, restoreDraft)

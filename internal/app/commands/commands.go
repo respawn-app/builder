@@ -21,6 +21,7 @@ const (
 	ActionSetFast           Action = "set_fast"
 	ActionSetSupervisor     Action = "set_supervisor"
 	ActionSetAutoCompaction Action = "set_auto_compaction"
+	ActionStatus            Action = "status"
 	ActionProcesses         Action = "processes"
 	ActionBack              Action = "back"
 	ActionUnhandled         Action = "unhandled"
@@ -93,6 +94,9 @@ func NewDefaultRegistry() *Registry {
 	})
 	r.RegisterWithOptions("autocompaction", "Toggle auto-compaction (usage: /autocompaction [on|off]; empty toggles)", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
 		return Result{Handled: true, Action: ActionSetAutoCompaction, AutoCompactionMode: strings.ToLower(strings.TrimSpace(args))}
+	})
+	r.RegisterWithOptions("status", "Open a detailed status overlay for the current session/runtime", RegisterOptions{RunWhileBusy: true}, func(string) Result {
+		return Result{Handled: true, Action: ActionStatus}
 	})
 	r.RegisterWithOptions("ps", "List background processes or manage one (usage: /ps [kill|inline|logs] <id>)", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
 		return Result{Handled: true, Action: ActionProcesses, Args: strings.TrimSpace(args)}

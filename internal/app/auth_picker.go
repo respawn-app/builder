@@ -116,6 +116,9 @@ func (m *startupPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case tea.KeyEnter:
+			if len(m.items) == 0 || m.cursor < 0 || m.cursor >= len(m.items) {
+				return m, nil
+			}
 			m.result = startupPickerResult{ChoiceID: m.items[m.cursor].ID}
 			return m, tea.Quit
 		case tea.KeyEsc, tea.KeyCtrlC:

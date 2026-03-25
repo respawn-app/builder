@@ -8,10 +8,10 @@ import (
 )
 
 func runUILoop(wiring *runtimeWiring, active config.Settings, logger *runLogger, commandRegistry *commands.Registry) (tea.Model, error) {
-	return runUILoopWithInitialPrompt(wiring, active, logger, commandRegistry, "", "", false, active.Model)
+	return runUILoopWithInitialPrompt(wiring, active, logger, commandRegistry, "", "", false, active.Model, uiStatusConfig{})
 }
 
-func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, logger *runLogger, commandRegistry *commands.Registry, initialPrompt string, sessionName string, modelContractLocked bool, configuredModelName string) (tea.Model, error) {
+func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, logger *runLogger, commandRegistry *commands.Registry, initialPrompt string, sessionName string, modelContractLocked bool, configuredModelName string, statusConfig uiStatusConfig) (tea.Model, error) {
 	options := mainUIProgramOptions(active)
 
 	program := tea.NewProgram(NewUIModel(
@@ -31,6 +31,7 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 		WithUIStartupSubmit(initialPrompt),
 		WithUISessionName(sessionName),
 		WithUISessionID(wiring.engine.SessionID()),
+		WithUIStatusConfig(statusConfig),
 	), options...)
 
 	finalModel, runErr := program.Run()

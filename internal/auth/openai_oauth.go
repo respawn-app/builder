@@ -71,9 +71,7 @@ type idTokenClaims struct {
 }
 
 func normalizeOpenAIOAuthOptions(opts OpenAIOAuthOptions) OpenAIOAuthOptions {
-	if strings.TrimSpace(opts.Issuer) == "" {
-		opts.Issuer = DefaultOpenAIIssuer
-	}
+	opts.Issuer = DefaultOpenAIIssuer
 	if strings.TrimSpace(opts.ClientID) == "" {
 		opts.ClientID = DefaultOpenAIClientID
 	}
@@ -439,18 +437,7 @@ func extractAccountID(tokens oauthTokenResponse) string {
 }
 
 func extractEmail(tokens oauthTokenResponse) string {
-	if strings.TrimSpace(tokens.IDToken) != "" {
-		if claims, err := parseJWTClaims(tokens.IDToken); err == nil {
-			if email := extractEmailFromClaims(claims); email != "" {
-				return email
-			}
-		}
-	}
-	if strings.TrimSpace(tokens.AccessToken) != "" {
-		if claims, err := parseJWTClaims(tokens.AccessToken); err == nil {
-			return extractEmailFromClaims(claims)
-		}
-	}
+	_ = tokens
 	return ""
 }
 

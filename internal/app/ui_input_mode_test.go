@@ -18,17 +18,18 @@ func TestInputModePrioritizesExclusiveUIFlows(t *testing.T) {
 		want  uiInputMode
 	}{
 		{
-			name: "process list overrides ask and rollback",
+			name: "status overrides process list ask and rollback",
 			model: uiModel{
 				activeAsk:       &askEvent{req: askquestion.Request{Question: "Proceed?"}},
+				statusVisible:   true,
 				psVisible:       true,
 				rollbackMode:    true,
 				rollbackEditing: true,
 			},
-			want: uiInputModeProcessList,
+			want: uiInputModeStatus,
 		},
-		{name: "detail view defers ask", model: uiModel{activeAsk: &askEvent{req: askquestion.Request{Question: "Proceed?"}}, view: detailView}, want: uiInputModeMain},
 		{name: "process list overrides rollback", model: uiModel{psVisible: true, rollbackMode: true}, want: uiInputModeProcessList},
+		{name: "detail view defers ask", model: uiModel{activeAsk: &askEvent{req: askquestion.Request{Question: "Proceed?"}}, view: detailView}, want: uiInputModeMain},
 		{name: "rollback selection overrides rollback edit", model: uiModel{rollbackMode: true, rollbackEditing: true}, want: uiInputModeRollbackSelection},
 		{name: "rollback edit", model: uiModel{rollbackEditing: true}, want: uiInputModeRollbackEdit},
 		{name: "main", model: uiModel{}, want: uiInputModeMain},
