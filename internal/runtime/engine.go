@@ -199,7 +199,11 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 			if !disabled {
 				continue
 			}
-			cloned[normalizeSkillToggleName(name)] = true
+			normalized := normalizeSkillToggleName(name)
+			if normalized == "" {
+				continue
+			}
+			cloned[normalized] = true
 		}
 		cfg.DisabledSkills = cloned
 	}

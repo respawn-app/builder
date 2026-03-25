@@ -15,7 +15,7 @@
 ## Core Runtime And Tools
 
 - Core tools: `shell`, `view_image`, `patch`, `ask_question`.
-- Compatibility wrapper tool `multi_tool_use_parallel` is supported (Codex-style schema) and executes referenced `functions.*` tools concurrently while returning results in declared order.
+- Compatibility wrapper tool `multi_tool_use_parallel` is supported (Codex-style schema), executes referenced `functions.*` tools concurrently while returning results in declared order, and defaults on only when the configured model capability contract explicitly supports it; explicit tool config overrides take precedence.
 - One app instance runs one active conversation.
 - Tool execution concurrency inside a model step is unbounded.
 - Parallel call results are always returned in model-declared order.

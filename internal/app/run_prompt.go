@@ -41,7 +41,7 @@ func runPrompt(ctx context.Context, boot appBootstrap, initialSessionID, prompt 
 	if err := store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: active.OpenAIBaseURL}); err != nil {
 		return RunPromptResult{}, err
 	}
-	enabledTools := activeToolIDs(active, store.Meta().Locked)
+	enabledTools := activeToolIDs(active, boot.cfg.Source, store.Meta().Locked)
 
 	logger, err := newRunLogger(store.Dir(), func(diag runLoggerDiagnostic) {
 		reportRunLoggerDiagnostic(progress, diag)
