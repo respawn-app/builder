@@ -195,7 +195,7 @@ func (e *Engine) ShouldCompactBeforeUserMessage(ctx context.Context, text string
 	if estimatedCurrentTotal+promptEstimate < limit {
 		return false, nil
 	}
-	req, err := e.buildRequestWithExtraMessages(ctx, []llm.Message{{Role: llm.RoleUser, Content: text}}, true)
+	req, err := e.buildRequestWithExtraItems(ctx, []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: text}}, true)
 	if err != nil {
 		return false, err
 	}
@@ -598,11 +598,9 @@ func (e *Engine) localCompactionSummary(ctx context.Context, input []llm.Respons
 		Role:    llm.RoleDeveloper,
 		Content: instructions,
 	})
-	messages := llm.MessagesFromItems(items)
-	messages = sanitizeMessagesForLLM(messages)
 	items = sanitizeItemsForLLM(items)
 
-	req, err := llm.RequestFromLockedContractWithItems(locked, prompts.BaseSystemPrompt(), messages, items, e.requestTools())
+	req, err := llm.RequestFromLockedContract(locked, prompts.BaseSystemPrompt(), items, e.requestTools())
 	if err != nil {
 		return "", err
 	}

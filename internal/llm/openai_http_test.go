@@ -38,7 +38,7 @@ func TestBuildPayload_SerializesAssistantToolCalls(t *testing.T) {
 	payload, err := transport.buildPayload(OpenAIRequest{
 		Model:        "gpt-5",
 		SystemPrompt: "sys",
-		Messages: []Message{
+		Items: ItemsFromMessages([]Message{
 			{
 				Role:    RoleAssistant,
 				Content: "",
@@ -47,7 +47,7 @@ func TestBuildPayload_SerializesAssistantToolCalls(t *testing.T) {
 				},
 			},
 			{Role: RoleTool, ToolCallID: "call-1", Name: "shell", Content: "{}"},
-		},
+		}),
 	}, openAIAuthMode{}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
 	if err != nil {
 		t.Fatalf("build payload: %v", err)
@@ -93,10 +93,10 @@ func TestBuildPayload_SerializesAssistantToolCalls(t *testing.T) {
 }
 
 func TestBuildResponsesInput_AssistantUsesTypedMessageInput(t *testing.T) {
-	items := buildResponsesInput([]Message{
+	items := buildResponsesInput(ItemsFromMessages([]Message{
 		{Role: RoleUser, Content: "u1"},
 		{Role: RoleAssistant, Content: "a1"},
-	}, nil)
+	}))
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
 	}
@@ -120,7 +120,7 @@ func TestBuildResponsesInput_AssistantUsesTypedMessageInput(t *testing.T) {
 }
 
 func TestBuildResponsesInput_AssistantPreservesPhase(t *testing.T) {
-	items := buildResponsesInput([]Message{{Role: RoleAssistant, Content: "a1", Phase: MessagePhaseCommentary}}, nil)
+	items := buildResponsesInput(ItemsFromMessages([]Message{{Role: RoleAssistant, Content: "a1", Phase: MessagePhaseCommentary}}))
 	if len(items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(items))
 	}
@@ -141,7 +141,7 @@ func TestBuildResponsesInput_AssistantPreservesPhase(t *testing.T) {
 }
 
 func TestBuildResponsesInput_CanonicalAssistantPreservesPhase(t *testing.T) {
-	items := buildResponsesInput(nil, []ResponseItem{{
+	items := buildResponsesInput([]ResponseItem{{
 		Type:    ResponseItemTypeMessage,
 		Role:    RoleAssistant,
 		Content: "done",
@@ -167,11 +167,11 @@ func TestBuildResponsesInput_CanonicalAssistantPreservesPhase(t *testing.T) {
 }
 
 func TestBuildResponsesInput_NonAssistantRolesUseInputText(t *testing.T) {
-	items := buildResponsesInput([]Message{
+	items := buildResponsesInput(ItemsFromMessages([]Message{
 		{Role: RoleSystem, Content: "s1"},
 		{Role: RoleDeveloper, Content: "d1"},
 		{Role: RoleUser, Content: "u1"},
-	}, nil)
+	}))
 	if len(items) != 3 {
 		t.Fatalf("expected 3 items, got %d", len(items))
 	}
@@ -185,13 +185,13 @@ func TestBuildResponsesInput_NonAssistantRolesUseInputText(t *testing.T) {
 }
 
 func TestBuildResponsesInput_ToolOutputSupportsStructuredInputImageItems(t *testing.T) {
-	items := buildResponsesInput([]Message{
+	items := buildResponsesInput(ItemsFromMessages([]Message{
 		{
 			Role:       RoleTool,
 			ToolCallID: "call_1",
 			Content:    `[{"type":"input_image","image_url":"data:image/png;base64,abc"}]`,
 		},
-	}, nil)
+	}))
 	if len(items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(items))
 	}
@@ -364,7 +364,7 @@ func TestCompactErrorPath_ReturnsProviderAPIErrorWithDetectedProviderID(t *testi
 
 func TestBuildResponsesInput_CanonicalToolOutputPromotesStructuredInputFileItems(t *testing.T) {
 	const pdfDataURL = "data:application/pdf;base64,Zm9v"
-	items := buildResponsesInput(nil, []ResponseItem{
+	items := buildResponsesInput([]ResponseItem{
 		{
 			Type:   ResponseItemTypeFunctionCallOutput,
 			CallID: "call_1",
@@ -418,14 +418,14 @@ func TestBuildResponsesInput_CanonicalToolOutputPromotesStructuredInputFileItems
 
 func TestBuildResponsesInput_MessageToolOutputPromotesPDFToInputMessage(t *testing.T) {
 	const pdfDataURL = "data:application/pdf;base64,Zm9v"
-	items := buildResponsesInput([]Message{
+	items := buildResponsesInput(ItemsFromMessages([]Message{
 		{
 			Role:       RoleTool,
 			ToolCallID: "call_1",
 			Name:       string(tools.ToolViewImage),
 			Content:    `[{"type":"input_file","file_data":"data:application/pdf;base64,Zm9v","filename":"doc.pdf"}]`,
 		},
-	}, nil)
+	}))
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
 	}
@@ -460,7 +460,7 @@ func TestBuildResponsesInput_MessageToolOutputPromotesPDFToInputMessage(t *testi
 }
 
 func TestBuildResponsesInput_CanonicalNonViewImageToolOutputKeepsStructuredInputFileItems(t *testing.T) {
-	items := buildResponsesInput(nil, []ResponseItem{
+	items := buildResponsesInput([]ResponseItem{
 		{
 			Type:   ResponseItemTypeFunctionCallOutput,
 			CallID: "call_1",
@@ -846,7 +846,7 @@ func TestBuildPayload_DefaultsReasoningEffortForUnknownModelFamily(t *testing.T)
 }
 
 func TestBuildResponsesInput_AssistantReasoningItemsUseEncryptedContentOnly(t *testing.T) {
-	items := buildResponsesInput([]Message{
+	items := buildResponsesInput(ItemsFromMessages([]Message{
 		{
 			Role:    RoleAssistant,
 			Content: "a1",
@@ -854,7 +854,7 @@ func TestBuildResponsesInput_AssistantReasoningItemsUseEncryptedContentOnly(t *t
 				{ID: "rs_1", EncryptedContent: "enc_1"},
 			},
 		},
-	}, nil)
+	}))
 	if len(items) != 2 {
 		t.Fatalf("expected assistant message + reasoning item, got %d", len(items))
 	}
@@ -924,7 +924,7 @@ func TestBuildPayload_AddsAdditionalPropertiesFalseToToolSchemas(t *testing.T) {
 }
 
 func TestBuildResponsesInput_CanonicalCompactionItemRoundTrip(t *testing.T) {
-	items := buildResponsesInput(nil, []ResponseItem{
+	items := buildResponsesInput([]ResponseItem{
 		{Type: ResponseItemTypeMessage, Role: RoleUser, Content: "u1"},
 		{Type: ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
 	})

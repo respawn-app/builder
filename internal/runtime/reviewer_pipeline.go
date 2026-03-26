@@ -139,11 +139,12 @@ func (r *defaultReviewerPipeline) RunSuggestions(ctx context.Context, reviewerCl
 		"required": []string{"suggestions"},
 	})
 
-	messages := sanitizeMessagesForLLM(e.snapshotMessages())
+	messages := llm.MessagesFromItems(sanitizeItemsForLLM(e.snapshotItems()))
 	reviewerMessages, err := buildReviewerRequestMessages(messages, e.store.Meta().WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), e.cfg.HeadlessMode, e.cfg.DisabledSkills)
 	if err != nil {
 		return reviewerSuggestionsResult{}, fmt.Errorf("build reviewer request messages: %w", err)
 	}
+	reviewerItems := sanitizeItemsForLLM(llm.ItemsFromMessages(reviewerMessages))
 	req := llm.Request{
 		Model:           reviewerCfg.Model,
 		Temperature:     1,
@@ -152,8 +153,7 @@ func (r *defaultReviewerPipeline) RunSuggestions(ctx context.Context, reviewerCl
 		ReasoningEffort: reviewerCfg.ThinkingLevel,
 		SystemPrompt:    prompts.ReviewerSystemPrompt,
 		SessionID:       reviewerSessionID(e.store.Meta().SessionID),
-		Messages:        reviewerMessages,
-		Items:           []llm.ResponseItem{},
+		Items:           reviewerItems,
 		Tools:           []llm.Tool{},
 		StructuredOutput: &llm.StructuredOutput{
 			Name:   "reviewer_suggestions",

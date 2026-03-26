@@ -29,6 +29,10 @@ import (
 	"github.com/muesli/termenv"
 )
 
+func requestMessages(req llm.Request) []llm.Message {
+	return llm.MessagesFromItems(req.Items)
+}
+
 func TestTabQueuesAndStartsSubmission(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "echo hi"
@@ -2287,9 +2291,9 @@ func TestPreSubmitCheckErrorRestoresQueuedSteeringAndDiscardsEngineQueue(t *test
 	if len(requests) != 1 {
 		t.Fatalf("expected one model request without stale runtime steering, got %d", len(requests))
 	}
-	for _, message := range requests[0].Messages {
+	for _, message := range requestMessages(requests[0]) {
 		if message.Role == llm.RoleUser && message.Content == "later" {
-			t.Fatalf("did not expect restored steering to remain queued in runtime request: %+v", requests[0].Messages)
+			t.Fatalf("did not expect restored steering to remain queued in runtime request: %+v", requestMessages(requests[0]))
 		}
 	}
 }
@@ -2741,9 +2745,9 @@ func TestSubmitErrorRestoresQueuedSteeringAndDiscardsEngineQueue(t *testing.T) {
 	if len(requests) != 1 {
 		t.Fatalf("expected one model request without stale runtime steering, got %d", len(requests))
 	}
-	for _, message := range requests[0].Messages {
+	for _, message := range requestMessages(requests[0]) {
 		if message.Role == llm.RoleUser && message.Content == "restored steering" {
-			t.Fatalf("did not expect restored steering to remain queued in runtime request: %+v", requests[0].Messages)
+			t.Fatalf("did not expect restored steering to remain queued in runtime request: %+v", requestMessages(requests[0]))
 		}
 	}
 }
@@ -2919,9 +2923,9 @@ func TestCtrlCRestoresQueuedSteeringAndDiscardsEngineQueue(t *testing.T) {
 	if len(requests) != 1 {
 		t.Fatalf("expected one model request without stale runtime steering, got %d", len(requests))
 	}
-	for _, message := range requests[0].Messages {
+	for _, message := range requestMessages(requests[0]) {
 		if message.Role == llm.RoleUser && message.Content == "restored steering" {
-			t.Fatalf("did not expect restored steering to remain queued in runtime request: %+v", requests[0].Messages)
+			t.Fatalf("did not expect restored steering to remain queued in runtime request: %+v", requestMessages(requests[0]))
 		}
 	}
 }
