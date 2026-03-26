@@ -123,6 +123,32 @@ func TestSkillsContextMessageLoadsSkillFromSymlinkedGlobalSkillsRoot(t *testing.
 	}
 }
 
+func TestSkillsContextMessageSkipsBrokenSymlinkedSkillDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	validSkillPath := writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "valid-skill"), "valid-skill", "from workspace")
+	brokenLinkPath := filepath.Join(workspace, ".builder", "skills", "broken-skill")
+	if err := os.Symlink(filepath.Join(t.TempDir(), "missing-skill-dir"), brokenLinkPath); err != nil {
+		t.Fatalf("symlink broken skill dir: %v", err)
+	}
+
+	content, found, err := skillsContextMessage(workspace)
+	if err != nil {
+		t.Fatalf("skillsContextMessage: %v", err)
+	}
+	if !found {
+		t.Fatal("expected valid skill to remain discoverable")
+	}
+	if !strings.Contains(content, "- valid-skill: from workspace (file: "+filepath.ToSlash(validSkillPath)+")") {
+		t.Fatalf("expected valid skill entry to remain, got %q", content)
+	}
+	if strings.Contains(content, "broken-skill") {
+		t.Fatalf("did not expect broken symlinked skill in context, got %q", content)
+	}
+}
+
 func TestAppendMissingReviewerMetaContextPrependsSkillsWhenMissing(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -327,6 +353,37 @@ func TestInspectSkillsLoadsSymlinkedSkillDirectory(t *testing.T) {
 	}
 	if inspections[0].Path != filepath.ToSlash(targetSkillPath) {
 		t.Fatalf("expected inspection path %q, got %+v", filepath.ToSlash(targetSkillPath), inspections[0])
+	}
+}
+
+func TestInspectSkillsReportsBrokenSymlinkedSkillDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	brokenLinkPath := filepath.Join(workspace, ".builder", "skills", "broken-skill")
+	if err := os.MkdirAll(filepath.Dir(brokenLinkPath), 0o755); err != nil {
+		t.Fatalf("mkdir broken symlink parent: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "missing-skill-dir"), brokenLinkPath); err != nil {
+		t.Fatalf("symlink broken skill dir: %v", err)
+	}
+
+	inspections, err := InspectSkills(workspace, nil)
+	if err != nil {
+		t.Fatalf("InspectSkills: %v", err)
+	}
+	if len(inspections) != 1 {
+		t.Fatalf("expected one inspection, got %d", len(inspections))
+	}
+	if inspections[0].Loaded {
+		t.Fatalf("expected broken symlinked skill inspection to fail, got %+v", inspections[0])
+	}
+	if inspections[0].Path != filepath.ToSlash(brokenLinkPath) {
+		t.Fatalf("expected inspection path %q, got %+v", filepath.ToSlash(brokenLinkPath), inspections[0])
+	}
+	if !strings.Contains(inspections[0].Reason, "no such file") {
+		t.Fatalf("expected missing target reason, got %+v", inspections[0])
 	}
 }
 
