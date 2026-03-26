@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -29,37 +28,15 @@ func runPrompt(ctx context.Context, boot appBootstrap, initialSessionID, prompt 
 		return RunPromptResult{}, errors.New("prompt is required")
 	}
 
-	store, err := openOrCreateSessionNonInteractive(boot.cfg.PersistenceRoot, boot.containerDir, initialSessionID, boot.cfg.WorkspaceRoot)
-	if err != nil {
-		return RunPromptResult{}, err
-	}
-	if err := ensureSubagentSessionName(store); err != nil {
-		return RunPromptResult{}, err
-	}
-
-	active := effectiveSettings(boot.cfg.Settings, store.Meta().Locked)
-	if err := store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: active.OpenAIBaseURL}); err != nil {
-		return RunPromptResult{}, err
-	}
-	enabledTools := activeToolIDs(active, boot.cfg.Source, store.Meta().Locked)
-
-	logger, err := newRunLogger(store.Dir(), func(diag runLoggerDiagnostic) {
-		reportRunLoggerDiagnostic(progress, diag)
+	planner := newSessionLaunchPlanner(&boot)
+	plan, err := planner.PlanSession(sessionLaunchRequest{
+		Mode:              launchModeHeadless,
+		SelectedSessionID: initialSessionID,
 	})
 	if err != nil {
 		return RunPromptResult{}, err
 	}
-	defer func() {
-		_ = logger.Close()
-	}()
-
-	logger.Logf("app.run_prompt.start session_id=%s workspace=%s model=%s", store.Meta().SessionID, boot.cfg.WorkspaceRoot, active.Model)
-	logger.Logf("config.settings path=%s created=%t", boot.cfg.Source.SettingsPath, boot.cfg.Source.CreatedDefaultConfig)
-	for _, line := range configSourceLines(boot.cfg.Source) {
-		logger.Logf("config.source %s", line)
-	}
-
-	wiring, err := newRuntimeWiringWithBackground(store, active, enabledTools, boot.cfg.WorkspaceRoot, boot.authManager, logger, boot.background, runtimeWiringOptions{
+	runtimePlan, err := planner.PrepareRuntime(plan, progress, "app.run_prompt.start session_id="+plan.Store.Meta().SessionID+" workspace="+plan.WorkspaceRoot+" model="+plan.ActiveSettings.Model, runtimeWiringOptions{
 		AskHandler: runPromptAskHandler,
 		Headless:   true,
 		FastMode:   boot.fastModeState,
@@ -70,14 +47,8 @@ func runPrompt(ctx context.Context, boot appBootstrap, initialSessionID, prompt 
 	if err != nil {
 		return RunPromptResult{}, err
 	}
-	if boot.backgroundRouter != nil {
-		boot.backgroundRouter.SetActiveSession(store.Meta().SessionID, wiring.engine)
-	}
 	defer func() {
-		if boot.backgroundRouter != nil {
-			boot.backgroundRouter.ClearActiveSession(store.Meta().SessionID)
-		}
-		_ = wiring.Close()
+		runtimePlan.Close()
 	}()
 
 	runCtx := ctx
@@ -88,31 +59,23 @@ func runPrompt(ctx context.Context, boot appBootstrap, initialSessionID, prompt 
 	}
 
 	startedAt := time.Now()
-	assistant, runErr := wiring.engine.SubmitUserMessage(runCtx, prompt)
+	assistant, runErr := runtimePlan.Wiring.engine.SubmitUserMessage(runCtx, prompt)
 	duration := time.Since(startedAt)
 	result := RunPromptResult{
-		SessionID:   wiring.engine.SessionID(),
-		SessionName: wiring.engine.SessionName(),
+		SessionID:   runtimePlan.Wiring.engine.SessionID(),
+		SessionName: runtimePlan.Wiring.engine.SessionName(),
 		Result:      assistant.Content,
 		Duration:    duration,
 	}
-	if dropped := wiring.eventBridge.Dropped(); dropped > 0 {
-		logger.Logf("runtime.event.drop.total=%d", dropped)
+	if dropped := runtimePlan.Wiring.eventBridge.Dropped(); dropped > 0 {
+		runtimePlan.Logger.Logf("runtime.event.drop.total=%d", dropped)
 	}
 	if runErr != nil {
-		logger.Logf("app.run_prompt.exit err=%q", runErr.Error())
+		runtimePlan.Logger.Logf("app.run_prompt.exit err=%q", runErr.Error())
 		return result, runErr
 	}
-	logger.Logf("app.run_prompt.exit ok")
+	runtimePlan.Logger.Logf("app.run_prompt.exit ok")
 	return result, nil
-}
-
-func openOrCreateSessionNonInteractive(persistenceRoot, containerDir, selectedID, workspaceRoot string) (*session.Store, error) {
-	if strings.TrimSpace(selectedID) != "" {
-		return session.OpenByID(persistenceRoot, selectedID)
-	}
-	containerName := filepath.Base(containerDir)
-	return session.NewLazy(containerDir, containerName, workspaceRoot)
 }
 
 func ensureSubagentSessionName(store *session.Store) error {
