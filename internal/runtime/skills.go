@@ -70,10 +70,14 @@ func discoverInjectedSkills(workspaceRoot string, disabledSkills map[string]bool
 			return nil, fmt.Errorf("read skills directory %q: %w", root, readErr)
 		}
 		for _, entry := range entries {
-			if !entry.IsDir() {
+			skillDir, ok, err := resolveSkillDir(root, entry.Name())
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
 				continue
 			}
-			skillPath := filepath.Join(root, entry.Name(), skillFileName)
+			skillPath := filepath.Join(skillDir, skillFileName)
 			skill, ok := parseInjectedSkill(skillPath)
 			if !ok {
 				continue
@@ -89,6 +93,21 @@ func discoverInjectedSkills(workspaceRoot string, disabledSkills map[string]bool
 		}
 	}
 	return out, nil
+}
+
+func resolveSkillDir(root string, entryName string) (string, bool, error) {
+	skillDir := filepath.Join(root, entryName)
+	info, err := os.Stat(skillDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("stat skill path %q: %w", skillDir, err)
+	}
+	if !info.IsDir() {
+		return "", false, nil
+	}
+	return skillDir, true, nil
 }
 
 func skillsInjectionRoots(workspaceRoot string) ([]string, error) {

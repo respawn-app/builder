@@ -62,6 +62,67 @@ func TestSkillsContextMessageSkipsInvalidSkills(t *testing.T) {
 	}
 }
 
+func TestSkillsContextMessageLoadsSymlinkedSkillDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	targetSkillPath := writeTestSkill(t, filepath.Join(t.TempDir(), "shared-skills", "linked-skill"), "linked-skill", "from symlink")
+	linkPath := filepath.Join(workspace, ".builder", "skills", "linked-skill")
+	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+		t.Fatalf("mkdir symlink parent: %v", err)
+	}
+	if err := os.Symlink(filepath.Dir(targetSkillPath), linkPath); err != nil {
+		t.Fatalf("symlink skill dir: %v", err)
+	}
+
+	content, found, err := skillsContextMessage(workspace)
+	if err != nil {
+		t.Fatalf("skillsContextMessage: %v", err)
+	}
+	if !found {
+		t.Fatal("expected symlinked skill to be discovered")
+	}
+	want := "- linked-skill: from symlink (file: " + filepath.ToSlash(targetSkillPath) + ")"
+	if !strings.Contains(content, want) {
+		t.Fatalf("expected symlinked skill entry %q, got %q", want, content)
+	}
+}
+
+func TestSkillsContextMessageLoadsSkillFromSymlinkedGlobalSkillsRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	sharedSkillsRoot := filepath.Join(t.TempDir(), "shared-skills")
+	targetSkillPath := writeTestSkill(t, filepath.Join(t.TempDir(), "external-skills", "linked-skill"), "linked-skill", "from symlinked global root")
+	if err := os.MkdirAll(sharedSkillsRoot, 0o755); err != nil {
+		t.Fatalf("mkdir shared skills root: %v", err)
+	}
+	if err := os.Symlink(filepath.Dir(targetSkillPath), filepath.Join(sharedSkillsRoot, "linked-skill")); err != nil {
+		t.Fatalf("symlink skill dir in global root: %v", err)
+	}
+	globalSkillsRoot := filepath.Join(home, ".builder", "skills")
+	if err := os.MkdirAll(filepath.Dir(globalSkillsRoot), 0o755); err != nil {
+		t.Fatalf("mkdir global skills parent: %v", err)
+	}
+	if err := os.Symlink(sharedSkillsRoot, globalSkillsRoot); err != nil {
+		t.Fatalf("symlink global skills root: %v", err)
+	}
+
+	content, found, err := skillsContextMessage(workspace)
+	if err != nil {
+		t.Fatalf("skillsContextMessage: %v", err)
+	}
+	if !found {
+		t.Fatal("expected skill from symlinked global skills root to be discovered")
+	}
+	want := "- linked-skill: from symlinked global root (file: " + filepath.ToSlash(targetSkillPath) + ")"
+	if !strings.Contains(content, want) {
+		t.Fatalf("expected symlinked global skill entry %q, got %q", want, content)
+	}
+}
+
 func TestAppendMissingReviewerMetaContextPrependsSkillsWhenMissing(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -237,6 +298,35 @@ func TestInspectSkillsMarksConfigDisabledSkills(t *testing.T) {
 	}
 	if !inspections[0].Disabled {
 		t.Fatalf("expected skill to be marked disabled, got %+v", inspections[0])
+	}
+}
+
+func TestInspectSkillsLoadsSymlinkedSkillDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	targetSkillPath := writeTestSkill(t, filepath.Join(t.TempDir(), "shared-skills", "linked-skill"), "linked-skill", "from symlink")
+	linkPath := filepath.Join(workspace, ".builder", "skills", "linked-skill")
+	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+		t.Fatalf("mkdir symlink parent: %v", err)
+	}
+	if err := os.Symlink(filepath.Dir(targetSkillPath), linkPath); err != nil {
+		t.Fatalf("symlink skill dir: %v", err)
+	}
+
+	inspections, err := InspectSkills(workspace, nil)
+	if err != nil {
+		t.Fatalf("InspectSkills: %v", err)
+	}
+	if len(inspections) != 1 {
+		t.Fatalf("expected one inspection, got %d", len(inspections))
+	}
+	if !inspections[0].Loaded {
+		t.Fatalf("expected symlinked skill inspection to load, got %+v", inspections[0])
+	}
+	if inspections[0].Path != filepath.ToSlash(targetSkillPath) {
+		t.Fatalf("expected inspection path %q, got %+v", filepath.ToSlash(targetSkillPath), inspections[0])
 	}
 }
 
