@@ -180,9 +180,7 @@ jobs:
           labels: pr-pull
 
   persist_version_bump:
-    needs:
-      - release
-      - update_brew_tap
+    needs: release
     if: ${{ needs.release.outputs.version_bumped == 'true' }}
     runs-on: ubuntu-latest
     permissions:
