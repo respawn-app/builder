@@ -43,10 +43,13 @@ func InspectSkills(workspaceRoot string, disabledSkills map[string]bool) ([]Skil
 			return nil, fmt.Errorf("read skills directory %q: %w", root, readErr)
 		}
 		for _, entry := range entries {
-			if !entry.IsDir() {
+			skillDir, ok, err := resolveSkillDir(root, entry.Name())
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
 				continue
 			}
-			skillDir := filepath.Join(root, entry.Name())
 			skillPath := filepath.Join(skillDir, skillFileName)
 			inspection := inspectSkillAtPath(entry.Name(), skillPath)
 			if inspection.Loaded {
