@@ -112,14 +112,8 @@ type skillDirResolution struct {
 
 func resolveSkillDir(root string, entry os.DirEntry) skillDirResolution {
 	skillDir := filepath.Join(root, entry.Name())
-	if entry.IsDir() {
-		return skillDirResolution{SkillDir: skillDir, Discoverable: true}
-	}
-	info, err := os.Stat(skillDir)
+	info, err := os.Lstat(skillDir)
 	if err != nil {
-		if entry.Type()&os.ModeSymlink == 0 {
-			return skillDirResolution{}
-		}
 		return skillDirResolution{Issue: &skillDiscoveryIssue{
 			Name:   sanitizeSkillSingleLine(entry.Name()),
 			Path:   filepath.ToSlash(skillDir),
@@ -129,8 +123,19 @@ func resolveSkillDir(root string, entry os.DirEntry) skillDirResolution {
 	if info.IsDir() {
 		return skillDirResolution{SkillDir: skillDir, Discoverable: true}
 	}
-	if entry.Type()&os.ModeSymlink == 0 {
+	if info.Mode()&os.ModeSymlink == 0 {
 		return skillDirResolution{}
+	}
+	targetInfo, err := os.Stat(skillDir)
+	if err != nil {
+		return skillDirResolution{Issue: &skillDiscoveryIssue{
+			Name:   sanitizeSkillSingleLine(entry.Name()),
+			Path:   filepath.ToSlash(skillDir),
+			Reason: formatSkillDirResolutionFailure(err),
+		}}
+	}
+	if targetInfo.IsDir() {
+		return skillDirResolution{SkillDir: skillDir, Discoverable: true}
 	}
 	return skillDirResolution{Issue: &skillDiscoveryIssue{
 		Name:   sanitizeSkillSingleLine(entry.Name()),
@@ -140,6 +145,9 @@ func resolveSkillDir(root string, entry os.DirEntry) skillDirResolution {
 }
 
 func formatSkillDirResolutionFailure(err error) string {
+	if os.IsNotExist(err) {
+		return "symlink target does not exist"
+	}
 	var pathErr *fs.PathError
 	if errors.As(err, &pathErr) {
 		return strings.TrimSpace(pathErr.Err.Error())
