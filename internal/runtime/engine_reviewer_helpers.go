@@ -4,15 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"builder/internal/llm"
-	"builder/prompts"
 )
 
 type reviewerSuggestionsResult struct {
@@ -47,73 +44,25 @@ func parseReviewerSuggestionsObject(content string) []string {
 }
 
 func buildReviewerRequestMessages(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool, disabledSkills map[string]bool) ([]llm.Message, error) {
-	metaMessages, transcriptSource := splitReviewerMetaMessages(messages)
-	var err error
-	metaMessages, err = appendMissingReviewerMetaContext(metaMessages, workspaceRoot, model, thinkingLevel, headless, disabledSkills)
+	metaMessages, transcriptSource := splitMetaContextMessages(messages)
+	builder := newMetaContextBuilder(workspaceRoot, model, thinkingLevel, disabledSkills, time.Now())
+	metaResult, err := builder.Build(metaContextBuildOptions{
+		ExistingMessages:          metaMessages,
+		IncludeAgents:             true,
+		IncludeSkills:             true,
+		IncludeEnvironment:        true,
+		IncludeHeadless:           headless,
+		PermissiveAgentsReadError: true,
+	})
 	if err != nil {
 		return nil, err
 	}
+	metaMessages = metaResult.OrderedMetaMessages()
 	out := make([]llm.Message, 0, len(metaMessages)+2+len(transcriptSource))
 	out = append(out, metaMessages...)
 	out = append(out, llm.Message{Role: llm.RoleDeveloper, Content: reviewerMetaBoundaryMessage})
 	out = append(out, buildReviewerTranscriptMessages(transcriptSource)...)
 	return out, nil
-}
-
-func splitReviewerMetaMessages(messages []llm.Message) ([]llm.Message, []llm.Message) {
-	meta := make([]llm.Message, 0, 3)
-	transcript := make([]llm.Message, 0, len(messages))
-	seenEnvironment := false
-	seenHeadless := false
-	seenHeadlessExit := false
-	seenAgentContent := map[string]bool{}
-	seenSkillsContent := map[string]bool{}
-	for _, message := range messages {
-		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeAgentsMD {
-			normalized := strings.TrimSpace(message.Content)
-			if normalized == "" || seenAgentContent[normalized] {
-				continue
-			}
-			seenAgentContent[normalized] = true
-			meta = append(meta, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeAgentsMD, Content: message.Content})
-			continue
-		}
-		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeSkills {
-			normalized := strings.TrimSpace(message.Content)
-			if normalized == "" || seenSkillsContent[normalized] {
-				continue
-			}
-			seenSkillsContent[normalized] = true
-			meta = append(meta, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeSkills, Content: message.Content})
-			continue
-		}
-		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeEnvironment {
-			if seenEnvironment {
-				continue
-			}
-			seenEnvironment = true
-			meta = append(meta, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: message.Content})
-			continue
-		}
-		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeHeadlessMode {
-			if seenHeadless {
-				continue
-			}
-			seenHeadless = true
-			meta = append(meta, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessMode, Content: message.Content})
-			continue
-		}
-		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeHeadlessModeExit {
-			if seenHeadlessExit {
-				continue
-			}
-			seenHeadlessExit = true
-			meta = append(meta, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessModeExit, Content: message.Content})
-			continue
-		}
-		transcript = append(transcript, message)
-	}
-	return meta, transcript
 }
 
 func buildReviewerTranscriptMessages(messages []llm.Message) []llm.Message {
@@ -182,17 +131,10 @@ func shouldIncludeReviewerMessage(message llm.Message) bool {
 		if content == "" {
 			return false
 		}
-		if message.MessageType == llm.MessageTypeEnvironment || message.MessageType == llm.MessageTypeSkills || message.MessageType == llm.MessageTypeHeadlessMode || message.MessageType == llm.MessageTypeHeadlessModeExit {
+		if _, ok := classifyMetaContextMessage(message); ok {
 			return false
 		}
 		if message.MessageType == llm.MessageTypeErrorFeedback || message.MessageType == llm.MessageTypeInterruption {
-			return false
-		}
-		// Backward compatibility for persisted transcripts created before message_type.
-		if strings.Contains(content, environmentInjectedHeader) {
-			return false
-		}
-		if strings.Contains(content, skillsInjectedHeader+"\n") {
 			return false
 		}
 	}
@@ -427,131 +369,19 @@ func reviewerSessionID(sessionID string) string {
 }
 
 func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool, disabledSkills map[string]bool) ([]llm.Message, error) {
-	haveEnvironment := false
-	haveAgents := false
-	haveSkills := false
-	haveHeadless := false
-	for _, msg := range messages {
-		if msg.Role != llm.RoleDeveloper {
-			continue
-		}
-		if msg.MessageType == llm.MessageTypeAgentsMD {
-			haveAgents = true
-		}
-		if msg.MessageType == llm.MessageTypeSkills {
-			haveSkills = true
-		}
-		if msg.MessageType == llm.MessageTypeEnvironment {
-			haveEnvironment = true
-		}
-		if msg.MessageType == llm.MessageTypeHeadlessMode {
-			haveHeadless = true
-		}
-	}
-	needHeadless := headless && strings.TrimSpace(prompts.HeadlessModePrompt) != ""
-	if haveAgents && haveSkills && haveEnvironment && (!needHeadless || haveHeadless) {
-		return messages, nil
-	}
-	out := append([]llm.Message(nil), messages...)
-	paths, err := agentsInjectionPaths(workspaceRoot)
+	metaMessages, transcript := splitMetaContextMessages(messages)
+	builder := newMetaContextBuilder(workspaceRoot, model, thinkingLevel, disabledSkills, time.Now())
+	metaResult, err := builder.Build(metaContextBuildOptions{
+		ExistingMessages:          metaMessages,
+		IncludeAgents:             true,
+		IncludeSkills:             true,
+		IncludeEnvironment:        true,
+		IncludeHeadless:           headless,
+		PermissiveAgentsReadError: true,
+	})
 	if err != nil {
-		paths = nil
+		return nil, err
 	}
-	agentsToInsert := make([]llm.Message, 0, len(paths))
-	if !haveAgents {
-		for _, path := range paths {
-			data, readErr := os.ReadFile(path)
-			if readErr != nil {
-				if errors.Is(readErr, os.ErrNotExist) {
-					continue
-				}
-				continue
-			}
-			injected := fmt.Sprintf("%s\nsource: %s\n\n```%s\n%s\n```", agentsInjectedHeader, path, agentsInjectedFenceLabel, string(data))
-			agentsToInsert = append(agentsToInsert, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeAgentsMD, Content: injected})
-		}
-		if len(agentsToInsert) > 0 {
-			out = append(agentsToInsert, out...)
-		}
-	}
-
-	if !haveSkills {
-		skills, found, skillsErr := skillsContextMessageWithDisabled(workspaceRoot, disabledSkills)
-		if skillsErr != nil {
-			return nil, skillsErr
-		}
-		if found {
-			skillsMessage := llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeSkills, Content: skills}
-			insertAt := firstMetaBoundaryIndex(out)
-			lastAgentsIndex := -1
-			firstEnvironmentIndex := -1
-			for idx, msg := range out {
-				if msg.Role != llm.RoleDeveloper {
-					continue
-				}
-				if msg.MessageType == llm.MessageTypeAgentsMD {
-					lastAgentsIndex = idx
-					continue
-				}
-				if msg.MessageType == llm.MessageTypeEnvironment && firstEnvironmentIndex < 0 {
-					firstEnvironmentIndex = idx
-				}
-			}
-			if lastAgentsIndex >= 0 {
-				insertAt = lastAgentsIndex + 1
-			} else if firstEnvironmentIndex >= 0 {
-				insertAt = firstEnvironmentIndex
-			}
-			out = insertMessageAt(out, insertAt, skillsMessage)
-		}
-	}
-
-	if !haveEnvironment {
-		environmentMessage := llm.Message{
-			Role:        llm.RoleDeveloper,
-			MessageType: llm.MessageTypeEnvironment,
-			Content:     environmentContextMessage(workspaceRoot, model, thinkingLevel, time.Now()),
-		}
-		insertAt := firstMetaBoundaryIndex(out)
-		out = insertMessageAt(out, insertAt, environmentMessage)
-	}
-	if needHeadless && !haveHeadless {
-		headlessMessage := llm.Message{
-			Role:        llm.RoleDeveloper,
-			MessageType: llm.MessageTypeHeadlessMode,
-			Content:     strings.TrimSpace(prompts.HeadlessModePrompt),
-		}
-		insertAt := firstMetaBoundaryIndex(out)
-		out = insertMessageAt(out, insertAt, headlessMessage)
-	}
-
-	if len(out) == len(messages) {
-		return messages, nil
-	}
+	out := append(metaResult.OrderedMetaMessages(), transcript...)
 	return out, nil
-}
-
-func firstMetaBoundaryIndex(messages []llm.Message) int {
-	for idx, msg := range messages {
-		if msg.Role != llm.RoleDeveloper {
-			return idx
-		}
-		if msg.MessageType != llm.MessageTypeAgentsMD && msg.MessageType != llm.MessageTypeSkills && msg.MessageType != llm.MessageTypeEnvironment && msg.MessageType != llm.MessageTypeHeadlessMode && msg.MessageType != llm.MessageTypeHeadlessModeExit {
-			return idx
-		}
-	}
-	return len(messages)
-}
-
-func insertMessageAt(messages []llm.Message, index int, message llm.Message) []llm.Message {
-	if index < 0 {
-		index = 0
-	}
-	if index > len(messages) {
-		index = len(messages)
-	}
-	messages = append(messages, llm.Message{})
-	copy(messages[index+1:], messages[index:])
-	messages[index] = message
-	return messages
 }
