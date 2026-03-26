@@ -30,8 +30,10 @@ jobs:
 
       - name: Read version
         id: version
+        env:
+          GH_TOKEN: ${{ secrets.OPENSOURCE_PAT || github.token }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          git fetch --force --tags origin
           version="$(tr -d ' \n' < VERSION)"
           if [ -z "$version" ]; then
             echo "VERSION file is empty" >&2
@@ -48,7 +50,11 @@ jobs:
           tag="v${version}"
 
           version_bumped="false"
-          while git show-ref --tags --verify --quiet "refs/tags/${tag}"; do
+          while true; do
+            draft_state="$(gh api "repos/${REPOSITORY}/releases/tags/${tag}" --jq '.draft' 2>/dev/null || echo missing)"
+            if [ "$draft_state" != "false" ]; then
+              break
+            fi
             patch="$((patch + 1))"
             version="${major}.${minor}.${patch}"
             tag="v${version}"
@@ -57,7 +63,7 @@ jobs:
 
           if [ "$version_bumped" = "true" ]; then
             printf '%s\n' "$version" > VERSION
-            echo "Release tag already existed; bumped VERSION to $version for this release."
+            echo "Published release already existed; bumped VERSION to $version for this release."
           fi
 
           {
@@ -65,6 +71,33 @@ jobs:
             echo "tag=$tag"
             echo "version_bumped=$version_bumped"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Persist bumped VERSION before tagging
+        if: ${{ steps.version.outputs.version_bumped == 'true' }}
+        env:
+          RELEASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          current_version="$(tr -d ' \n' < VERSION)"
+          current_version="${current_version#v}"
+          if [ "$current_version" = "$RELEASE_VERSION" ]; then
+            echo "VERSION already set to $RELEASE_VERSION"
+            exit 0
+          fi
+
+          printf '%s\n' "$RELEASE_VERSION" > VERSION
+          git add VERSION
+
+          if git diff --cached --quiet; then
+            echo "No VERSION change to commit"
+            exit 0
+          fi
+
+          git commit -m "chore: bump version to ${RELEASE_VERSION} [skip ci]"
+          git push origin "HEAD:${RELEASE_REF}"
 
       - name: Create tag
         env:
@@ -111,7 +144,7 @@ jobs:
             done
           done
 
-      - name: Create draft release
+      - name: Create or update release
         uses: softprops/action-gh-release@v2.6.1
         with:
           tag_name: ${{ steps.version.outputs.tag }}
@@ -178,42 +211,3 @@ jobs:
           title: "${{ env.BREW_FORMULA_NAME }} ${{ needs.release.outputs.tag }}"
           body: "Automated formula bump for ${{ env.BREW_FORMULA_NAME }} ${{ needs.release.outputs.tag }}."
           labels: pr-pull
-
-  persist_version_bump:
-    needs: release
-    if: ${{ needs.release.outputs.version_bumped == 'true' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v6.0.2
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.pull_request.base.ref || github.ref_name }}
-          token: ${{ secrets.OPENSOURCE_PAT || github.token }}
-
-      - name: Persist VERSION bump
-        env:
-          RELEASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
-          RELEASE_VERSION: ${{ needs.release.outputs.version }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          current_version="$(tr -d ' \n' < VERSION)"
-          current_version="${current_version#v}"
-          if [ "$current_version" = "$RELEASE_VERSION" ]; then
-            echo "VERSION already set to $RELEASE_VERSION"
-            exit 0
-          fi
-
-          printf '%s\n' "$RELEASE_VERSION" > VERSION
-          git add VERSION
-
-          if git diff --cached --quiet; then
-            echo "No VERSION change to commit"
-            exit 0
-          fi
-
-          git commit -m "chore: bump version to ${RELEASE_VERSION} [skip ci]"
-          git push origin "HEAD:${RELEASE_REF}"

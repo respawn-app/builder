@@ -408,8 +408,9 @@ func TestInspectSkillsReportsBrokenSymlinkedSkillDirectory(t *testing.T) {
 	if inspections[0].Loaded {
 		t.Fatalf("expected broken symlinked skill inspection to fail, got %+v", inspections[0])
 	}
-	if inspections[0].Path != filepath.ToSlash(brokenLinkPath) {
-		t.Fatalf("expected inspection path %q, got %+v", filepath.ToSlash(brokenLinkPath), inspections[0])
+	brokenSkillPath := filepath.ToSlash(filepath.Join(brokenLinkPath, skillFileName))
+	if inspections[0].Path != brokenSkillPath {
+		t.Fatalf("expected inspection path %q, got %+v", brokenSkillPath, inspections[0])
 	}
 	if inspections[0].Reason != "symlink target does not exist" {
 		t.Fatalf("expected missing target reason, got %+v", inspections[0])

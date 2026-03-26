@@ -45,9 +45,10 @@ func InspectSkills(workspaceRoot string, disabledSkills map[string]bool) ([]Skil
 		for _, entry := range entries {
 			resolution := resolveSkillDir(root, entry)
 			if resolution.Issue != nil {
+				issueSkillPath := filepath.ToSlash(filepath.Join(strings.TrimSpace(resolution.Issue.Path), skillFileName))
 				inspections = append(inspections, SkillInspection{
 					Name:   resolution.Issue.Name,
-					Path:   resolution.Issue.Path,
+					Path:   issueSkillPath,
 					Loaded: false,
 					Reason: resolution.Issue.Reason,
 				})
