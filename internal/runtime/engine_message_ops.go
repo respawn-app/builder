@@ -11,7 +11,6 @@ import (
 
 	"builder/internal/llm"
 	"builder/internal/tools"
-	"builder/prompts"
 )
 
 func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
@@ -43,24 +42,31 @@ func (e *Engine) appendUserMessageWithoutConversationUpdate(stepID, text string)
 
 func (e *Engine) injectHeadlessModeTransitionPromptIfNeeded(stepID string) error {
 	messages := e.snapshotMessages()
+	builder := newMetaContextBuilder(e.store.Meta().WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), e.cfg.DisabledSkills, time.Now())
 	if e.cfg.HeadlessMode {
 		if !shouldInjectHeadlessModePrompt(messages) {
 			return nil
 		}
-		return e.appendMessage(stepID, llm.Message{
-			Role:        llm.RoleDeveloper,
-			MessageType: llm.MessageTypeHeadlessMode,
-			Content:     strings.TrimSpace(prompts.HeadlessModePrompt),
-		})
+		metaResult, err := builder.Build(metaContextBuildOptions{IncludeHeadless: true})
+		if err != nil {
+			return err
+		}
+		if len(metaResult.Headless) == 0 {
+			return nil
+		}
+		return e.appendMessage(stepID, metaResult.Headless[0])
 	}
 	if !shouldInjectHeadlessModeExitPrompt(messages) {
 		return nil
 	}
-	return e.appendMessage(stepID, llm.Message{
-		Role:        llm.RoleDeveloper,
-		MessageType: llm.MessageTypeHeadlessModeExit,
-		Content:     strings.TrimSpace(prompts.HeadlessModeExitPrompt),
-	})
+	metaResult, err := builder.Build(metaContextBuildOptions{IncludeHeadlessExit: true})
+	if err != nil {
+		return err
+	}
+	if len(metaResult.HeadlessExit) == 0 {
+		return nil
+	}
+	return e.appendMessage(stepID, metaResult.HeadlessExit[0])
 }
 
 func shouldInjectHeadlessModePrompt(messages []llm.Message) bool {

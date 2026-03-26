@@ -229,7 +229,7 @@ func TestSkillsContextMessageFailsOnUnreadableSkillsDirectory(t *testing.T) {
 	}
 }
 
-func TestSplitReviewerMetaMessagesDeduplicatesSkillsContext(t *testing.T) {
+func TestSplitMetaContextMessagesSeparatesMetaContextWithoutDeduplication(t *testing.T) {
 	skillsMessage := llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeSkills, Content: "## Skills\n### Available skills"}
 	messages := []llm.Message{
 		skillsMessage,
@@ -238,22 +238,38 @@ func TestSplitReviewerMetaMessagesDeduplicatesSkillsContext(t *testing.T) {
 		{Role: llm.RoleUser, Content: "request"},
 	}
 
-	meta, transcript := splitReviewerMetaMessages(messages)
-	if len(meta) != 2 {
-		t.Fatalf("expected one skills + one environment meta message, got %d", len(meta))
+	meta, transcript := splitMetaContextMessages(messages)
+	if len(meta) != 3 {
+		t.Fatalf("expected split to preserve duplicate meta candidates, got %d", len(meta))
 	}
 	if meta[0].MessageType != llm.MessageTypeSkills {
 		t.Fatalf("expected first meta message to be skills context, got %+v", meta[0])
 	}
-	if meta[1].MessageType != llm.MessageTypeEnvironment {
-		t.Fatalf("expected second meta message to be environment context, got %+v", meta[1])
+	if meta[1].MessageType != llm.MessageTypeSkills {
+		t.Fatalf("expected second meta message to remain duplicate skills context, got %+v", meta[1])
+	}
+	if meta[2].MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected third meta message to be environment context, got %+v", meta[2])
 	}
 	if len(transcript) != 1 || transcript[0].Role != llm.RoleUser || transcript[0].Content != "request" {
 		t.Fatalf("expected transcript to contain only user request, got %+v", transcript)
 	}
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	rebuilt, err := appendMissingReviewerMetaContext(messages, t.TempDir(), "gpt-5", "high", false, nil)
+	if err != nil {
+		t.Fatalf("appendMissingReviewerMetaContext: %v", err)
+	}
+	if len(rebuilt) != 3 {
+		t.Fatalf("expected builder to canonicalize duplicate meta messages, got %d", len(rebuilt))
+	}
+	if rebuilt[0].MessageType != llm.MessageTypeSkills || rebuilt[1].MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected canonical skills -> environment ordering, got %+v", rebuilt)
+	}
 }
 
-func TestSplitReviewerMetaMessagesTreatsHeadlessContextAsMeta(t *testing.T) {
+func TestSplitMetaContextMessagesTreatsHeadlessContextAsMeta(t *testing.T) {
 	headless := llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessMode, Content: "headless mode instructions"}
 	messages := []llm.Message{
 		headless,
@@ -261,9 +277,9 @@ func TestSplitReviewerMetaMessagesTreatsHeadlessContextAsMeta(t *testing.T) {
 		{Role: llm.RoleUser, Content: "request"},
 	}
 
-	meta, transcript := splitReviewerMetaMessages(messages)
-	if len(meta) != 1 {
-		t.Fatalf("expected one headless meta message, got %d", len(meta))
+	meta, transcript := splitMetaContextMessages(messages)
+	if len(meta) != 2 {
+		t.Fatalf("expected split to preserve duplicate headless meta messages, got %d", len(meta))
 	}
 	if meta[0].MessageType != llm.MessageTypeHeadlessMode {
 		t.Fatalf("expected headless meta message, got %+v", meta[0])
@@ -271,9 +287,22 @@ func TestSplitReviewerMetaMessagesTreatsHeadlessContextAsMeta(t *testing.T) {
 	if len(transcript) != 1 || transcript[0].Role != llm.RoleUser || transcript[0].Content != "request" {
 		t.Fatalf("expected transcript to contain only user request, got %+v", transcript)
 	}
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	rebuilt, err := appendMissingReviewerMetaContext(messages, t.TempDir(), "gpt-5", "high", true, nil)
+	if err != nil {
+		t.Fatalf("appendMissingReviewerMetaContext: %v", err)
+	}
+	if len(rebuilt) != 3 {
+		t.Fatalf("expected builder to reconstruct environment + headless + transcript, got %d", len(rebuilt))
+	}
+	if rebuilt[0].MessageType != llm.MessageTypeEnvironment || rebuilt[1].MessageType != llm.MessageTypeHeadlessMode {
+		t.Fatalf("expected canonical environment -> headless ordering, got %+v", rebuilt)
+	}
 }
 
-func TestSplitReviewerMetaMessagesTreatsHeadlessExitContextAsMeta(t *testing.T) {
+func TestSplitMetaContextMessagesTreatsHeadlessExitContextAsMeta(t *testing.T) {
 	headlessExit := llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessModeExit, Content: "interactive mode instructions"}
 	messages := []llm.Message{
 		headlessExit,
@@ -281,15 +310,28 @@ func TestSplitReviewerMetaMessagesTreatsHeadlessExitContextAsMeta(t *testing.T) 
 		{Role: llm.RoleUser, Content: "request"},
 	}
 
-	meta, transcript := splitReviewerMetaMessages(messages)
-	if len(meta) != 1 {
-		t.Fatalf("expected one headless exit meta message, got %d", len(meta))
+	meta, transcript := splitMetaContextMessages(messages)
+	if len(meta) != 2 {
+		t.Fatalf("expected split to preserve duplicate headless exit meta messages, got %d", len(meta))
 	}
 	if meta[0].MessageType != llm.MessageTypeHeadlessModeExit {
 		t.Fatalf("expected headless exit meta message, got %+v", meta[0])
 	}
 	if len(transcript) != 1 || transcript[0].Role != llm.RoleUser || transcript[0].Content != "request" {
 		t.Fatalf("expected transcript to contain only user request, got %+v", transcript)
+	}
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	rebuilt, err := appendMissingReviewerMetaContext(messages, t.TempDir(), "gpt-5", "high", false, nil)
+	if err != nil {
+		t.Fatalf("appendMissingReviewerMetaContext: %v", err)
+	}
+	if len(rebuilt) != 3 {
+		t.Fatalf("expected builder to reconstruct environment + headless exit + transcript, got %d", len(rebuilt))
+	}
+	if rebuilt[0].MessageType != llm.MessageTypeEnvironment || rebuilt[1].MessageType != llm.MessageTypeHeadlessModeExit {
+		t.Fatalf("expected canonical environment -> headless exit ordering, got %+v", rebuilt)
 	}
 }
 

@@ -2,9 +2,7 @@ package runtime
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -46,7 +44,7 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 				return fmt.Errorf("decode history_replaced event: %w", err)
 			}
 			if strings.TrimSpace(payload.Engine) == "reviewer_rollback" {
-				e.chat.restoreMessagesFromItems(payload.Items)
+				e.chat.restoreHistoryItems(payload.Items)
 			} else {
 				e.chat.replaceHistory(payload.Items)
 				e.compactionCount++
@@ -218,41 +216,20 @@ func (m *defaultMessageLifecycle) InjectAgentsIfNeeded(stepID string) error {
 	if meta.AgentsInjected {
 		return nil
 	}
-	paths, err := agentsInjectionPaths(meta.WorkspaceRoot)
+	builder := newMetaContextBuilder(meta.WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), e.cfg.DisabledSkills, time.Now())
+	metaResult, err := builder.Build(metaContextBuildOptions{
+		IncludeAgents:        true,
+		IncludeSkills:        true,
+		IncludeEnvironment:   true,
+		IncludeSkillWarnings: true,
+	})
 	if err != nil {
 		return err
 	}
-
-	for _, path := range paths {
-		data, readErr := os.ReadFile(path)
-		if readErr != nil {
-			if errors.Is(readErr, os.ErrNotExist) {
-				continue
-			}
-			return fmt.Errorf("read AGENTS.md: %w", readErr)
-		}
-		injected := fmt.Sprintf("%s\nsource: %s\n\n```%s\n%s\n```", agentsInjectedHeader, path, agentsInjectedFenceLabel, string(data))
-		if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeAgentsMD, Content: injected}); err != nil {
+	for _, message := range metaResult.OrderedInjectionMessages() {
+		if err := e.appendMessage(stepID, message); err != nil {
 			return err
 		}
-	}
-	skills, issues, err := discoverInjectedSkills(meta.WorkspaceRoot, normalizedDisabledSkills(e.cfg.DisabledSkills))
-	if err != nil {
-		return err
-	}
-	for _, issue := range issues {
-		if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: formatSkillDiscoveryWarning(issue)}); err != nil {
-			return err
-		}
-	}
-	if len(skills) > 0 {
-		if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeSkills, Content: renderSkillsContext(skills)}); err != nil {
-			return err
-		}
-	}
-	environment := environmentContextMessage(meta.WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), time.Now())
-	if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: environment}); err != nil {
-		return err
 	}
 
 	return e.store.MarkAgentsInjected()

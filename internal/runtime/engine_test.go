@@ -27,6 +27,10 @@ type fakeClient struct {
 	capsErr   error
 }
 
+func requestMessages(req llm.Request) []llm.Message {
+	return llm.MessagesFromItems(req.Items)
+}
+
 func (f *fakeClient) Generate(_ context.Context, req llm.Request) (llm.Response, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1351,7 +1355,7 @@ func TestSubmitUserMessageCommentaryWithoutToolCallsForcesNextLoop(t *testing.T)
 
 	secondReq := client.calls[1]
 	foundWarning := false
-	for _, reqMsg := range secondReq.Messages {
+	for _, reqMsg := range requestMessages(secondReq) {
 		if reqMsg.Role == llm.RoleDeveloper && strings.Contains(reqMsg.Content, commentaryWithoutToolCallsWarning) {
 			if reqMsg.MessageType != llm.MessageTypeErrorFeedback {
 				t.Fatalf("expected commentary warning message type error_feedback, got %+v", reqMsg)
@@ -1361,7 +1365,7 @@ func TestSubmitUserMessageCommentaryWithoutToolCallsForcesNextLoop(t *testing.T)
 		}
 	}
 	if !foundWarning {
-		t.Fatalf("expected commentary warning in next request, got %+v", secondReq.Messages)
+		t.Fatalf("expected commentary warning in next request, got %+v", requestMessages(secondReq))
 	}
 
 	events, err := store.ReadEvents()
@@ -1707,7 +1711,7 @@ func TestSubmitUserMessageMissingPhaseDefaultsToCommentaryAndWarns(t *testing.T)
 
 	secondReq := client.calls[1]
 	foundWarning := false
-	for _, reqMsg := range secondReq.Messages {
+	for _, reqMsg := range requestMessages(secondReq) {
 		if reqMsg.Role == llm.RoleDeveloper && strings.Contains(reqMsg.Content, missingAssistantPhaseWarning) {
 			if reqMsg.MessageType != llm.MessageTypeErrorFeedback {
 				t.Fatalf("expected missing-phase warning message type error_feedback, got %+v", reqMsg)
@@ -1717,7 +1721,7 @@ func TestSubmitUserMessageMissingPhaseDefaultsToCommentaryAndWarns(t *testing.T)
 		}
 	}
 	if !foundWarning {
-		t.Fatalf("expected missing-phase warning in next request, got %+v", secondReq.Messages)
+		t.Fatalf("expected missing-phase warning in next request, got %+v", requestMessages(secondReq))
 	}
 
 	events, err := store.ReadEvents()
@@ -2058,7 +2062,7 @@ func TestSubmitUserMessageFinalAnswerWithoutContentForcesNextLoop(t *testing.T) 
 
 	secondReq := client.calls[1]
 	foundWarning := false
-	for _, reqMsg := range secondReq.Messages {
+	for _, reqMsg := range requestMessages(secondReq) {
 		if reqMsg.Role == llm.RoleDeveloper && strings.Contains(reqMsg.Content, finalWithoutContentWarning) {
 			if reqMsg.MessageType != llm.MessageTypeErrorFeedback {
 				t.Fatalf("expected final-without-content warning message type error_feedback, got %+v", reqMsg)
@@ -2068,7 +2072,7 @@ func TestSubmitUserMessageFinalAnswerWithoutContentForcesNextLoop(t *testing.T) 
 		}
 	}
 	if !foundWarning {
-		t.Fatalf("expected final-without-content warning in next request, got %+v", secondReq.Messages)
+		t.Fatalf("expected final-without-content warning in next request, got %+v", requestMessages(secondReq))
 	}
 }
 
@@ -2484,7 +2488,7 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 
 	req := mainClient.calls[2]
 	foundReviewInstruction := false
-	for _, message := range req.Messages {
+	for _, message := range requestMessages(req) {
 		if message.Role == llm.RoleDeveloper && strings.Contains(message.Content, "Supervisor agent gave you suggestions") {
 			if message.MessageType != llm.MessageTypeReviewerFeedback {
 				t.Fatalf("expected reviewer feedback message type, got %+v", message)
@@ -2504,16 +2508,16 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 	if reviewerReq.SessionID != store.Meta().SessionID+"-review" {
 		t.Fatalf("expected reviewer session id suffix, got %q", reviewerReq.SessionID)
 	}
-	if len(reviewerReq.Messages) == 0 {
+	if len(requestMessages(reviewerReq)) == 0 {
 		t.Fatalf("expected reviewer request to include transcript entry messages")
 	}
-	if reviewerReq.Messages[0].Role != llm.RoleDeveloper || reviewerReq.Messages[0].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(reviewerReq.Messages[0].Content, "source: "+globalPath) {
-		t.Fatalf("expected reviewer message[0] to be AGENTS meta developer message, got %+v", reviewerReq.Messages[0])
+	if requestMessages(reviewerReq)[0].Role != llm.RoleDeveloper || requestMessages(reviewerReq)[0].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(requestMessages(reviewerReq)[0].Content, "source: "+globalPath) {
+		t.Fatalf("expected reviewer message[0] to be AGENTS meta developer message, got %+v", requestMessages(reviewerReq)[0])
 	}
 	environmentIdx := -1
 	boundaryIdx := -1
 	skillsMetaIdx := -1
-	for idx, message := range reviewerReq.Messages {
+	for idx, message := range requestMessages(reviewerReq) {
 		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeEnvironment {
 			environmentIdx = idx
 		}
@@ -2526,10 +2530,10 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 		}
 	}
 	if environmentIdx < 0 {
-		t.Fatalf("expected reviewer metadata to include environment context, got %+v", reviewerReq.Messages)
+		t.Fatalf("expected reviewer metadata to include environment context, got %+v", requestMessages(reviewerReq))
 	}
 	if boundaryIdx < 0 {
-		t.Fatalf("expected reviewer metadata to include transcript boundary message, got %+v", reviewerReq.Messages)
+		t.Fatalf("expected reviewer metadata to include transcript boundary message, got %+v", requestMessages(reviewerReq))
 	}
 	if environmentIdx >= boundaryIdx {
 		t.Fatalf("expected environment metadata before boundary, env=%d boundary=%d", environmentIdx, boundaryIdx)
@@ -2541,7 +2545,7 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 	foundToolCallJSON := false
 	foundToolOutputField := false
 	foundSeparateToolOutput := false
-	for _, message := range reviewerReq.Messages[boundaryIdx+1:] {
+	for _, message := range requestMessages(reviewerReq)[boundaryIdx+1:] {
 		if message.Role != llm.RoleUser {
 			t.Fatalf("expected reviewer transcript entries after metadata to be user role messages, got %q", message.Role)
 		}
@@ -2559,19 +2563,19 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 		}
 	}
 	if !foundAgentLabel {
-		t.Fatalf("expected reviewer request to include agent labels, messages=%+v", reviewerReq.Messages)
+		t.Fatalf("expected reviewer request to include agent labels, messages=%+v", requestMessages(reviewerReq))
 	}
 	if !foundToolCallJSON {
-		t.Fatalf("expected reviewer request to include tool call json args, messages=%+v", reviewerReq.Messages)
+		t.Fatalf("expected reviewer request to include tool call json args, messages=%+v", requestMessages(reviewerReq))
 	}
 	if !foundToolOutputField {
-		t.Fatalf("expected reviewer request to include tool output in tool call payload, messages=%+v", reviewerReq.Messages)
+		t.Fatalf("expected reviewer request to include tool output in tool call payload, messages=%+v", requestMessages(reviewerReq))
 	}
 	if foundSeparateToolOutput {
-		t.Fatalf("did not expect separate tool output entries when output is paired, messages=%+v", reviewerReq.Messages)
+		t.Fatalf("did not expect separate tool output entries when output is paired, messages=%+v", requestMessages(reviewerReq))
 	}
-	if len(reviewerReq.Items) != 0 {
-		t.Fatalf("expected reviewer request items to be empty when using transcript entry messages, got %d", len(reviewerReq.Items))
+	if len(reviewerReq.Items) == 0 {
+		t.Fatalf("expected reviewer request items to carry canonical transcript history")
 	}
 	if len(reviewerReq.Tools) != 0 {
 		t.Fatalf("expected reviewer request with no tools")
@@ -3332,6 +3336,107 @@ func TestAppendMissingReviewerMetaContextBackfillsSkillsBeforeEnvironmentWhenNoA
 	}
 }
 
+func TestAppendMissingReviewerMetaContextBackfillsMissingWorkspaceAgentsSource(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, agentsGlobalDirName)
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatalf("mkdir global agents dir: %v", err)
+	}
+	globalPath := filepath.Join(globalDir, agentsFileName)
+	if err := os.WriteFile(globalPath, []byte("global rule"), 0o644); err != nil {
+		t.Fatalf("write global AGENTS: %v", err)
+	}
+
+	workspace := t.TempDir()
+	workspacePath := filepath.Join(workspace, agentsFileName)
+	if err := os.WriteFile(workspacePath, []byte("workspace rule"), 0o644); err != nil {
+		t.Fatalf("write workspace AGENTS: %v", err)
+	}
+
+	in := []llm.Message{
+		{
+			Role:        llm.RoleDeveloper,
+			MessageType: llm.MessageTypeAgentsMD,
+			Content:     agentsInjectedHeader + "\nsource: " + globalPath + "\n\n```md\nglobal rule\n```",
+		},
+		{Role: llm.RoleUser, Content: "request"},
+	}
+	got, err := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false, nil)
+	if err != nil {
+		t.Fatalf("appendMissingReviewerMetaContext: %v", err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("expected global+workspace agents, environment, and transcript, got %d", len(got))
+	}
+	if got[0].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[0].Content, "source: "+globalPath) {
+		t.Fatalf("expected global AGENTS first, got %+v", got[0])
+	}
+	if got[1].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[1].Content, "source: "+workspacePath) {
+		t.Fatalf("expected missing workspace AGENTS to be backfilled second, got %+v", got[1])
+	}
+	if got[2].MessageType != llm.MessageTypeEnvironment {
+		t.Fatalf("expected environment after AGENTS, got %+v", got[2])
+	}
+	if got[3].Role != llm.RoleUser || got[3].Content != "request" {
+		t.Fatalf("expected transcript content at tail, got %+v", got[3])
+	}
+}
+
+func TestAppendMissingReviewerMetaContextPreservesLegacyUntypedMetaAndBackfillsLiveAgents(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, agentsGlobalDirName)
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatalf("mkdir global agents dir: %v", err)
+	}
+	globalPath := filepath.Join(globalDir, agentsFileName)
+	if err := os.WriteFile(globalPath, []byte("global rule"), 0o644); err != nil {
+		t.Fatalf("write global AGENTS: %v", err)
+	}
+
+	workspace := t.TempDir()
+	legacyWorkspacePath := filepath.Join(workspace, agentsFileName)
+	in := []llm.Message{
+		{
+			Role:    llm.RoleDeveloper,
+			Content: agentsInjectedHeader + "\nsource: " + legacyWorkspacePath + "\n\n```md\nlegacy workspace rule\n```",
+		},
+		{
+			Role:    llm.RoleDeveloper,
+			Content: skillsInjectedHeader + "\n" + skillsAvailableHeader + "\n- legacy-skill: legacy description (file: /tmp/legacy/SKILL.md)",
+		},
+		{
+			Role:    llm.RoleDeveloper,
+			Content: environmentInjectedHeader + "\nOS: darwin",
+		},
+		{Role: llm.RoleUser, Content: "request"},
+	}
+
+	got, err := appendMissingReviewerMetaContext(in, workspace, "gpt-5", "high", false, nil)
+	if err != nil {
+		t.Fatalf("appendMissingReviewerMetaContext: %v", err)
+	}
+	if len(got) != 5 {
+		t.Fatalf("expected global agents + legacy agents + legacy skills + legacy environment + transcript, got %d", len(got))
+	}
+	if got[0].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[0].Content, "source: "+globalPath) {
+		t.Fatalf("expected live global AGENTS to be backfilled first, got %+v", got[0])
+	}
+	if got[1].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[1].Content, "source: "+legacyWorkspacePath) {
+		t.Fatalf("expected legacy workspace AGENTS to be preserved and canonicalized, got %+v", got[1])
+	}
+	if got[2].MessageType != llm.MessageTypeSkills || !strings.Contains(got[2].Content, "legacy-skill") {
+		t.Fatalf("expected legacy skills meta to be preserved and canonicalized, got %+v", got[2])
+	}
+	if got[3].MessageType != llm.MessageTypeEnvironment || !strings.Contains(got[3].Content, environmentInjectedHeader) {
+		t.Fatalf("expected legacy environment meta to be preserved and canonicalized, got %+v", got[3])
+	}
+	if got[4].Role != llm.RoleUser || got[4].Content != "request" {
+		t.Fatalf("expected transcript content at tail, got %+v", got[4])
+	}
+}
+
 func TestFastExecCommandCompletionDoesNotQueueBackgroundNotice(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -3499,7 +3604,7 @@ func TestBackgroundShellNoticeFlushesOnFirstAvailableSlot(t *testing.T) {
 	}
 
 	containsNotice := func(req llm.Request) bool {
-		for _, msg := range req.Messages {
+		for _, msg := range requestMessages(req) {
 			if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeBackgroundNotice && strings.Contains(msg.Content, "Background shell 1000 completed.") {
 				return true
 			}
@@ -3507,7 +3612,7 @@ func TestBackgroundShellNoticeFlushesOnFirstAvailableSlot(t *testing.T) {
 		return false
 	}
 	if !containsNotice(requests[1]) {
-		t.Fatalf("expected background notice in first available in-turn follow-up, messages=%+v", requests[1].Messages)
+		t.Fatalf("expected background notice in first available in-turn follow-up, messages=%+v", requestMessages(requests[1]))
 	}
 	time.Sleep(300 * time.Millisecond)
 	client.mu.Lock()
@@ -3871,7 +3976,7 @@ func TestBackgroundShellNoticeSameTurnNoopAddsNoAssistantMessage(t *testing.T) {
 	}
 
 	containsNotice := func(req llm.Request) bool {
-		for _, msg := range req.Messages {
+		for _, msg := range requestMessages(req) {
 			if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeBackgroundNotice && strings.Contains(msg.Content, "Background shell 1000 completed.") {
 				return true
 			}
@@ -3879,7 +3984,7 @@ func TestBackgroundShellNoticeSameTurnNoopAddsNoAssistantMessage(t *testing.T) {
 		return false
 	}
 	if !containsNotice(requests[1]) {
-		t.Fatalf("expected background notice in same-turn follow-up, messages=%+v", requests[1].Messages)
+		t.Fatalf("expected background notice in same-turn follow-up, messages=%+v", requestMessages(requests[1]))
 	}
 	time.Sleep(300 * time.Millisecond)
 	client.mu.Lock()
@@ -3996,7 +4101,7 @@ func TestMultipleBackgroundShellNoticesFlushTogetherOnFirstAvailableSlot(t *test
 	}
 
 	containsNotice := func(req llm.Request, shellID string) bool {
-		for _, msg := range req.Messages {
+		for _, msg := range requestMessages(req) {
 			if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeBackgroundNotice && strings.Contains(msg.Content, "Background shell "+shellID+" completed.") {
 				return true
 			}
@@ -4004,7 +4109,7 @@ func TestMultipleBackgroundShellNoticesFlushTogetherOnFirstAvailableSlot(t *test
 		return false
 	}
 	if !containsNotice(requests[1], "1000") || !containsNotice(requests[1], "1001") {
-		t.Fatalf("expected both background notices in the same in-turn follow-up, messages=%+v", requests[1].Messages)
+		t.Fatalf("expected both background notices in the same in-turn follow-up, messages=%+v", requestMessages(requests[1]))
 	}
 
 	time.Sleep(300 * time.Millisecond)
@@ -4384,7 +4489,7 @@ func TestParallelToolsReturnDeclaredOrder(t *testing.T) {
 	}
 	secondReq := client.calls[1]
 	foundAssistantWithCalls := false
-	for _, msg := range secondReq.Messages {
+	for _, msg := range requestMessages(secondReq) {
 		if msg.Role == llm.RoleAssistant && len(msg.ToolCalls) == 2 {
 			if msg.ToolCalls[0].ID == "a" && msg.ToolCalls[1].ID == "b" {
 				foundAssistantWithCalls = true
@@ -4393,7 +4498,7 @@ func TestParallelToolsReturnDeclaredOrder(t *testing.T) {
 		}
 	}
 	if !foundAssistantWithCalls {
-		t.Fatalf("second request is missing assistant tool call metadata: %+v", secondReq.Messages)
+		t.Fatalf("second request is missing assistant tool call metadata: %+v", requestMessages(secondReq))
 	}
 
 }
@@ -5099,25 +5204,25 @@ func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserM
 	}
 
 	firstReq := client.calls[0]
-	if len(firstReq.Messages) < 5 {
-		t.Fatalf("expected at least 5 messages in first request, got %d", len(firstReq.Messages))
+	if len(requestMessages(firstReq)) < 5 {
+		t.Fatalf("expected at least 5 messages in first request, got %d", len(requestMessages(firstReq)))
 	}
-	if firstReq.Messages[0].Role != llm.RoleDeveloper || firstReq.Messages[0].Content != "existing context" {
-		t.Fatalf("expected first message to be existing context, got %+v", firstReq.Messages[0])
+	if requestMessages(firstReq)[0].Role != llm.RoleDeveloper || requestMessages(firstReq)[0].Content != "existing context" {
+		t.Fatalf("expected first message to be existing context, got %+v", requestMessages(firstReq)[0])
 	}
-	if firstReq.Messages[1].Role != llm.RoleDeveloper || !strings.Contains(firstReq.Messages[1].Content, "source: "+globalPath) {
-		t.Fatalf("expected second message to be global developer AGENTS injection, got %+v", firstReq.Messages[1])
+	if requestMessages(firstReq)[1].Role != llm.RoleDeveloper || !strings.Contains(requestMessages(firstReq)[1].Content, "source: "+globalPath) {
+		t.Fatalf("expected second message to be global developer AGENTS injection, got %+v", requestMessages(firstReq)[1])
 	}
-	if firstReq.Messages[1].MessageType != llm.MessageTypeAgentsMD {
-		t.Fatalf("expected global AGENTS message type, got %+v", firstReq.Messages[1])
+	if requestMessages(firstReq)[1].MessageType != llm.MessageTypeAgentsMD {
+		t.Fatalf("expected global AGENTS message type, got %+v", requestMessages(firstReq)[1])
 	}
-	if firstReq.Messages[2].Role != llm.RoleDeveloper || !strings.Contains(firstReq.Messages[2].Content, "source: "+workspacePath) {
-		t.Fatalf("expected third message to be workspace developer AGENTS injection, got %+v", firstReq.Messages[2])
+	if requestMessages(firstReq)[2].Role != llm.RoleDeveloper || !strings.Contains(requestMessages(firstReq)[2].Content, "source: "+workspacePath) {
+		t.Fatalf("expected third message to be workspace developer AGENTS injection, got %+v", requestMessages(firstReq)[2])
 	}
-	if firstReq.Messages[2].MessageType != llm.MessageTypeAgentsMD {
-		t.Fatalf("expected workspace AGENTS message type, got %+v", firstReq.Messages[2])
+	if requestMessages(firstReq)[2].MessageType != llm.MessageTypeAgentsMD {
+		t.Fatalf("expected workspace AGENTS message type, got %+v", requestMessages(firstReq)[2])
 	}
-	envMsg := firstReq.Messages[3]
+	envMsg := requestMessages(firstReq)[3]
 	if envMsg.Role != llm.RoleDeveloper || !strings.Contains(envMsg.Content, environmentInjectedHeader) {
 		t.Fatalf("expected fourth message to be environment developer injection, got %+v", envMsg)
 	}
@@ -5137,14 +5242,14 @@ func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserM
 			t.Fatalf("expected environment message to contain %q, got %q", required, envMsg.Content)
 		}
 	}
-	if firstReq.Messages[4].Role != llm.RoleUser || firstReq.Messages[4].Content != "first" {
-		t.Fatalf("expected user message after injections, got %+v", firstReq.Messages[4])
+	if requestMessages(firstReq)[4].Role != llm.RoleUser || requestMessages(firstReq)[4].Content != "first" {
+		t.Fatalf("expected user message after injections, got %+v", requestMessages(firstReq)[4])
 	}
 
 	secondReq := client.calls[1]
 	injectedCount := 0
 	envInjectedCount := 0
-	for _, msg := range secondReq.Messages {
+	for _, msg := range requestMessages(secondReq) {
 		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeAgentsMD {
 			injectedCount++
 		}
@@ -5188,17 +5293,17 @@ func TestInjectsEnvironmentInfoWithoutAnyAgentsFiles(t *testing.T) {
 		t.Fatalf("expected one model call, got %d", len(client.calls))
 	}
 	req := client.calls[0]
-	if len(req.Messages) < 2 {
-		t.Fatalf("expected at least 2 messages, got %d", len(req.Messages))
+	if len(requestMessages(req)) < 2 {
+		t.Fatalf("expected at least 2 messages, got %d", len(requestMessages(req)))
 	}
-	if req.Messages[0].Role != llm.RoleDeveloper || !strings.Contains(req.Messages[0].Content, environmentInjectedHeader) {
-		t.Fatalf("expected first message to be environment injection, got %+v", req.Messages[0])
+	if requestMessages(req)[0].Role != llm.RoleDeveloper || !strings.Contains(requestMessages(req)[0].Content, environmentInjectedHeader) {
+		t.Fatalf("expected first message to be environment injection, got %+v", requestMessages(req)[0])
 	}
-	if !strings.Contains(req.Messages[0].Content, "\ngpt-5\n") {
-		t.Fatalf("expected environment injection to include model label, got %+v", req.Messages[0])
+	if !strings.Contains(requestMessages(req)[0].Content, "\ngpt-5\n") {
+		t.Fatalf("expected environment injection to include model label, got %+v", requestMessages(req)[0])
 	}
-	if req.Messages[1].Role != llm.RoleUser || req.Messages[1].Content != "first" {
-		t.Fatalf("expected user message after environment injection, got %+v", req.Messages[1])
+	if requestMessages(req)[1].Role != llm.RoleUser || requestMessages(req)[1].Content != "first" {
+		t.Fatalf("expected user message after environment injection, got %+v", requestMessages(req)[1])
 	}
 }
 
@@ -5240,7 +5345,7 @@ func TestInjectsSkillsContextBeforeEnvironmentAndPersists(t *testing.T) {
 	skillsIdx := -1
 	envIdx := -1
 	userIdx := -1
-	for i, msg := range firstReq.Messages {
+	for i, msg := range requestMessages(firstReq) {
 		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeSkills {
 			skillsIdx = i
 			if !strings.Contains(msg.Content, "- home-skill: from home (file: "+filepath.ToSlash(homeSkillPath)+")") {
@@ -5258,13 +5363,13 @@ func TestInjectsSkillsContextBeforeEnvironmentAndPersists(t *testing.T) {
 		}
 	}
 	if skillsIdx < 0 {
-		t.Fatalf("expected injected skills developer message in first request, messages=%+v", firstReq.Messages)
+		t.Fatalf("expected injected skills developer message in first request, messages=%+v", requestMessages(firstReq))
 	}
 	if envIdx < 0 {
-		t.Fatalf("expected injected environment developer message in first request, messages=%+v", firstReq.Messages)
+		t.Fatalf("expected injected environment developer message in first request, messages=%+v", requestMessages(firstReq))
 	}
 	if userIdx < 0 {
-		t.Fatalf("expected first user message in first request, messages=%+v", firstReq.Messages)
+		t.Fatalf("expected first user message in first request, messages=%+v", requestMessages(firstReq))
 	}
 	if !(skillsIdx < envIdx && envIdx < userIdx) {
 		t.Fatalf("expected skills -> environment -> user ordering, got skills=%d env=%d user=%d", skillsIdx, envIdx, userIdx)
@@ -5272,7 +5377,7 @@ func TestInjectsSkillsContextBeforeEnvironmentAndPersists(t *testing.T) {
 
 	secondReq := client.calls[1]
 	skillsInjectedCount := 0
-	for _, msg := range secondReq.Messages {
+	for _, msg := range requestMessages(secondReq) {
 		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeSkills {
 			skillsInjectedCount++
 		}
@@ -5312,7 +5417,7 @@ func TestDisabledSkillsAreNotInjectedIntoNewSessions(t *testing.T) {
 		t.Fatalf("expected one model call, got %d", len(client.calls))
 	}
 
-	for _, msg := range client.calls[0].Messages {
+	for _, msg := range requestMessages(client.calls[0]) {
 		if msg.Role != llm.RoleDeveloper || msg.MessageType != llm.MessageTypeSkills {
 			continue
 		}
@@ -5324,7 +5429,7 @@ func TestDisabledSkillsAreNotInjectedIntoNewSessions(t *testing.T) {
 		}
 		return
 	}
-	t.Fatalf("expected skills developer message in first request, messages=%+v", client.calls[0].Messages)
+	t.Fatalf("expected skills developer message in first request, messages=%+v", requestMessages(client.calls[0]))
 }
 
 func TestBrokenSymlinkedSkillsAreSkippedAndWarnedInTranscript(t *testing.T) {
@@ -5358,7 +5463,7 @@ func TestBrokenSymlinkedSkillsAreSkippedAndWarnedInTranscript(t *testing.T) {
 	}
 
 	foundSkills := false
-	for _, msg := range client.calls[0].Messages {
+	for _, msg := range requestMessages(client.calls[0]) {
 		if msg.Role != llm.RoleDeveloper || msg.MessageType != llm.MessageTypeSkills {
 			continue
 		}
@@ -5371,7 +5476,7 @@ func TestBrokenSymlinkedSkillsAreSkippedAndWarnedInTranscript(t *testing.T) {
 		}
 	}
 	if !foundSkills {
-		t.Fatalf("expected skills developer message in first request, messages=%+v", client.calls[0].Messages)
+		t.Fatalf("expected skills developer message in first request, messages=%+v", requestMessages(client.calls[0]))
 	}
 
 	snapshot := eng.ChatSnapshot()
@@ -5437,10 +5542,10 @@ func TestSubmitInjectsEnvironmentLineWithStatusModelLabel(t *testing.T) {
 		t.Fatalf("expected one model call, got %d", len(client.calls))
 	}
 	req := client.calls[0]
-	if len(req.Messages) < 2 {
-		t.Fatalf("expected environment and user messages, got %d", len(req.Messages))
+	if len(requestMessages(req)) < 2 {
+		t.Fatalf("expected environment and user messages, got %d", len(requestMessages(req)))
 	}
-	envMsg := req.Messages[0]
+	envMsg := requestMessages(req)[0]
 	if envMsg.Role != llm.RoleDeveloper || envMsg.MessageType != llm.MessageTypeEnvironment {
 		t.Fatalf("expected first request message to be environment context, got %+v", envMsg)
 	}
@@ -5557,7 +5662,7 @@ func TestSubmitUserMessageInjectsHeadlessEnterPromptWhenContinuingRegularSession
 	firstReq := headlessClient.calls[0]
 	headlessIdx := -1
 	userIdx := -1
-	for i, msg := range firstReq.Messages {
+	for i, msg := range requestMessages(firstReq) {
 		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeHeadlessMode {
 			headlessIdx = i
 		}
@@ -5566,20 +5671,20 @@ func TestSubmitUserMessageInjectsHeadlessEnterPromptWhenContinuingRegularSession
 		}
 	}
 	if headlessIdx < 0 {
-		t.Fatalf("expected enter prompt when switching regular session into headless mode, messages=%+v", firstReq.Messages)
+		t.Fatalf("expected enter prompt when switching regular session into headless mode, messages=%+v", requestMessages(firstReq))
 	}
 	if userIdx < 0 || headlessIdx >= userIdx {
-		t.Fatalf("expected headless enter prompt before user message, headless=%d user=%d messages=%+v", headlessIdx, userIdx, firstReq.Messages)
+		t.Fatalf("expected headless enter prompt before user message, headless=%d user=%d messages=%+v", headlessIdx, userIdx, requestMessages(firstReq))
 	}
 	secondReq := headlessClient.calls[1]
 	headlessCount := 0
-	for _, msg := range secondReq.Messages {
+	for _, msg := range requestMessages(secondReq) {
 		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeHeadlessMode {
 			headlessCount++
 		}
 	}
 	if headlessCount != 1 {
-		t.Fatalf("expected exactly one persisted headless enter marker, got %d messages=%+v", headlessCount, secondReq.Messages)
+		t.Fatalf("expected exactly one persisted headless enter marker, got %d messages=%+v", headlessCount, requestMessages(secondReq))
 	}
 }
 
@@ -5659,7 +5764,7 @@ func TestSubmitUserMessageInjectsHeadlessExitPromptOnFirstInteractiveTurn(t *tes
 	headlessIdx := -1
 	exitIdx := -1
 	userIdx := -1
-	for i, msg := range firstReq.Messages {
+	for i, msg := range requestMessages(firstReq) {
 		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeHeadlessMode {
 			headlessIdx = i
 		}
@@ -5671,13 +5776,13 @@ func TestSubmitUserMessageInjectsHeadlessExitPromptOnFirstInteractiveTurn(t *tes
 		}
 	}
 	if headlessIdx < 0 {
-		t.Fatalf("expected prior headless prompt in first interactive request, messages=%+v", firstReq.Messages)
+		t.Fatalf("expected prior headless prompt in first interactive request, messages=%+v", requestMessages(firstReq))
 	}
 	if exitIdx < 0 {
-		t.Fatalf("expected exit prompt in first interactive request, messages=%+v", firstReq.Messages)
+		t.Fatalf("expected exit prompt in first interactive request, messages=%+v", requestMessages(firstReq))
 	}
 	if userIdx < 0 {
-		t.Fatalf("expected interactive user message in first request, messages=%+v", firstReq.Messages)
+		t.Fatalf("expected interactive user message in first request, messages=%+v", requestMessages(firstReq))
 	}
 	if !(headlessIdx < exitIdx && exitIdx < userIdx) {
 		t.Fatalf("expected headless -> exit -> user ordering, got headless=%d exit=%d user=%d", headlessIdx, exitIdx, userIdx)
@@ -5685,13 +5790,13 @@ func TestSubmitUserMessageInjectsHeadlessExitPromptOnFirstInteractiveTurn(t *tes
 
 	secondReq := interactiveClient.calls[1]
 	exitCount := 0
-	for _, msg := range secondReq.Messages {
+	for _, msg := range requestMessages(secondReq) {
 		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeHeadlessModeExit {
 			exitCount++
 		}
 	}
 	if exitCount != 1 {
-		t.Fatalf("expected exactly one persisted exit prompt in later requests, got %d messages=%+v", exitCount, secondReq.Messages)
+		t.Fatalf("expected exactly one persisted exit prompt in later requests, got %d messages=%+v", exitCount, requestMessages(secondReq))
 	}
 }
 
@@ -5729,9 +5834,9 @@ func TestSubmitUserMessageDoesNotInjectHeadlessExitPromptForNormalSession(t *tes
 	if len(client.calls) != 1 {
 		t.Fatalf("expected one model call, got %d", len(client.calls))
 	}
-	for _, msg := range client.calls[0].Messages {
+	for _, msg := range requestMessages(client.calls[0]) {
 		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeHeadlessModeExit {
-			t.Fatalf("did not expect headless exit prompt in normal session, messages=%+v", client.calls[0].Messages)
+			t.Fatalf("did not expect headless exit prompt in normal session, messages=%+v", requestMessages(client.calls[0]))
 		}
 	}
 }
@@ -5783,14 +5888,14 @@ func TestQueuedUserMessageFlushesWhenAssistantReturnsWithoutTools(t *testing.T) 
 	}
 	second := client.calls[1]
 	hasInjected := false
-	for _, m := range second.Messages {
+	for _, m := range requestMessages(second) {
 		if m.Role == llm.RoleUser && m.Content == "steer now" {
 			hasInjected = true
 			break
 		}
 	}
 	if !hasInjected {
-		t.Fatalf("expected flushed user message in second request, messages=%+v", second.Messages)
+		t.Fatalf("expected flushed user message in second request, messages=%+v", requestMessages(second))
 	}
 }
 
@@ -5914,14 +6019,14 @@ func TestQueuedUserMessagesCoalesceIntoSingleFlush(t *testing.T) {
 		t.Fatalf("expected at least 2 model calls, got %d", len(client.calls))
 	}
 	second := client.calls[1]
-	userMessages := make([]llm.Message, 0, len(second.Messages))
-	for _, m := range second.Messages {
+	userMessages := make([]llm.Message, 0, len(requestMessages(second)))
+	for _, m := range requestMessages(second) {
 		if m.Role == llm.RoleUser {
 			userMessages = append(userMessages, m)
 		}
 	}
 	if len(userMessages) < 2 {
-		t.Fatalf("expected initial and flushed user messages, got %+v", second.Messages)
+		t.Fatalf("expected initial and flushed user messages, got %+v", requestMessages(second))
 	}
 	last := userMessages[len(userMessages)-1]
 	if last.Content != "steer now\n\nand keep tests focused" {
@@ -5959,7 +6064,7 @@ func TestRequestMessagesNeverContainANSIEscapes(t *testing.T) {
 	}
 
 	for _, req := range client.calls {
-		for _, msg := range req.Messages {
+		for _, msg := range requestMessages(req) {
 			if strings.Contains(msg.Content, "\x1b[") {
 				t.Fatalf("request message contains ANSI escape sequence: role=%s content=%q", msg.Role, msg.Content)
 			}
@@ -5968,19 +6073,20 @@ func TestRequestMessagesNeverContainANSIEscapes(t *testing.T) {
 }
 
 func TestSanitizeMessagesForLLMNormalizesToolJSONEscapes(t *testing.T) {
-	input := []llm.Message{
-		{Role: llm.RoleTool, Content: `{"exit_code":0,"output":"a =\u003e b \u003c c \u0026 d","truncated":false}`},
+	input := []llm.ResponseItem{
+		{Type: llm.ResponseItemTypeFunctionCallOutput, CallID: "call_1", Output: json.RawMessage(`{"exit_code":0,"output":"a =\u003e b \u003c c \u0026 d","truncated":false}`)},
 	}
 
-	got := sanitizeMessagesForLLM(input)
+	got := sanitizeItemsForLLM(input)
 	if len(got) != 1 {
-		t.Fatalf("unexpected message count: %d", len(got))
+		t.Fatalf("unexpected item count: %d", len(got))
 	}
-	if strings.Contains(got[0].Content, `\u003e`) || strings.Contains(got[0].Content, `\u003c`) || strings.Contains(got[0].Content, `\u0026`) {
-		t.Fatalf("expected HTML escapes to be normalized, got %q", got[0].Content)
+	normalized := string(got[0].Output)
+	if strings.Contains(normalized, `\u003e`) || strings.Contains(normalized, `\u003c`) || strings.Contains(normalized, `\u0026`) {
+		t.Fatalf("expected HTML escapes to be normalized, got %q", normalized)
 	}
-	if !strings.Contains(got[0].Content, "=>") || !strings.Contains(got[0].Content, "<") || !strings.Contains(got[0].Content, "&") {
-		t.Fatalf("expected decoded operators in normalized tool content, got %q", got[0].Content)
+	if !strings.Contains(normalized, "=>") || !strings.Contains(normalized, "<") || !strings.Contains(normalized, "&") {
+		t.Fatalf("expected decoded operators in normalized tool content, got %q", normalized)
 	}
 }
 
@@ -6025,7 +6131,7 @@ func TestReasoningSummaryVisibleAndEncryptedReasoningRoundTrips(t *testing.T) {
 	}
 	secondReq := client.calls[1]
 	foundReasoningItem := false
-	for _, msg := range secondReq.Messages {
+	for _, msg := range requestMessages(secondReq) {
 		if msg.Role != llm.RoleAssistant || msg.Content != "first" {
 			continue
 		}
@@ -6036,11 +6142,11 @@ func TestReasoningSummaryVisibleAndEncryptedReasoningRoundTrips(t *testing.T) {
 		}
 	}
 	if !foundReasoningItem {
-		t.Fatalf("expected prior assistant message to carry encrypted reasoning item, got %+v", secondReq.Messages)
+		t.Fatalf("expected prior assistant message to carry encrypted reasoning item, got %+v", requestMessages(secondReq))
 	}
-	for _, msg := range secondReq.Messages {
+	for _, msg := range requestMessages(secondReq) {
 		if strings.Contains(msg.Content, "Plan summary") {
-			t.Fatalf("reasoning summary text should not be sent back to model input, found in %+v", secondReq.Messages)
+			t.Fatalf("reasoning summary text should not be sent back to model input, found in %+v", requestMessages(secondReq))
 		}
 	}
 
