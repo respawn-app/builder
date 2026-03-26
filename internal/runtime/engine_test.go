@@ -5327,6 +5327,69 @@ func TestDisabledSkillsAreNotInjectedIntoNewSessions(t *testing.T) {
 	t.Fatalf("expected skills developer message in first request, messages=%+v", client.calls[0].Messages)
 }
 
+func TestBrokenSymlinkedSkillsAreSkippedAndWarnedInTranscript(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	validSkillPath := writeTestSkill(t, filepath.Join(workspace, ".builder", "skills", "valid-skill"), "valid-skill", "from workspace")
+	brokenLinkPath := filepath.Join(workspace, ".builder", "skills", "broken-skill")
+	if err := os.Symlink(filepath.Join(t.TempDir(), "missing-skill-dir"), brokenLinkPath); err != nil {
+		t.Fatalf("symlink broken skill dir: %v", err)
+	}
+
+	storeRoot := t.TempDir()
+	store, err := session.Create(storeRoot, "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "ok"}, Usage: llm.Usage{WindowTokens: 200000}}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "first"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected one model call, got %d", len(client.calls))
+	}
+
+	foundSkills := false
+	for _, msg := range client.calls[0].Messages {
+		if msg.Role != llm.RoleDeveloper || msg.MessageType != llm.MessageTypeSkills {
+			continue
+		}
+		foundSkills = true
+		if !strings.Contains(msg.Content, "- valid-skill: from workspace (file: "+filepath.ToSlash(validSkillPath)+")") {
+			t.Fatalf("expected valid skill to remain injected, got %q", msg.Content)
+		}
+		if strings.Contains(msg.Content, "broken-skill") {
+			t.Fatalf("did not expect broken symlinked skill in injected context, got %q", msg.Content)
+		}
+	}
+	if !foundSkills {
+		t.Fatalf("expected skills developer message in first request, messages=%+v", client.calls[0].Messages)
+	}
+
+	snapshot := eng.ChatSnapshot()
+	foundWarning := false
+	for _, entry := range snapshot.Entries {
+		if entry.Role != "error" {
+			continue
+		}
+		if strings.Contains(entry.Text, "Skipped skill \"broken-skill\"") && strings.Contains(entry.Text, filepath.ToSlash(brokenLinkPath)) {
+			foundWarning = true
+			break
+		}
+	}
+	if !foundWarning {
+		t.Fatalf("expected broken skill warning in transcript, entries=%+v", snapshot.Entries)
+	}
+}
+
 func TestEnvironmentContextMessageIncludesStatusLineModelLabel(t *testing.T) {
 	workspace := t.TempDir()
 	msg := environmentContextMessage(workspace, "gpt-5.3-codex", "high", time.Unix(0, 0).UTC())

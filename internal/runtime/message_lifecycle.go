@@ -236,12 +236,17 @@ func (m *defaultMessageLifecycle) InjectAgentsIfNeeded(stepID string) error {
 			return err
 		}
 	}
-	skills, found, err := skillsContextMessageWithDisabled(meta.WorkspaceRoot, e.cfg.DisabledSkills)
+	skills, issues, err := discoverInjectedSkills(meta.WorkspaceRoot, normalizedDisabledSkills(e.cfg.DisabledSkills))
 	if err != nil {
 		return err
 	}
-	if found {
-		if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeSkills, Content: skills}); err != nil {
+	for _, issue := range issues {
+		if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: formatSkillDiscoveryWarning(issue)}); err != nil {
+			return err
+		}
+	}
+	if len(skills) > 0 {
+		if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeSkills, Content: renderSkillsContext(skills)}); err != nil {
 			return err
 		}
 	}
