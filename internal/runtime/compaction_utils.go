@@ -41,7 +41,7 @@ func (e *Engine) replaceHistory(stepID, engine string, mode compactionMode, item
 		Items:  llm.CloneResponseItems(items),
 	}
 	if payload.Engine == "reviewer_rollback" {
-		e.chat.restoreMessagesFromItems(payload.Items)
+		e.chat.restoreHistoryItems(payload.Items)
 	} else {
 		e.chat.replaceHistory(payload.Items)
 	}
@@ -280,7 +280,6 @@ func buildTokenCountRequestForItems(model string, instructions string, items []l
 		SystemPrompt: strings.TrimSpace(instructions),
 		Items:        sanitizeItemsForLLM(items),
 		Tools:        []llm.Tool{},
-		Messages:     []llm.Message{},
 	}
 	if err := req.Validate(); err != nil {
 		return llm.Request{}, false

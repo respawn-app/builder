@@ -15,10 +15,10 @@ import (
 )
 
 func (e *Engine) buildRequest(ctx context.Context, _ string, allowTools bool) (llm.Request, error) {
-	return e.buildRequestWithExtraMessages(ctx, nil, allowTools)
+	return e.buildRequestWithExtraItems(ctx, nil, allowTools)
 }
 
-func (e *Engine) buildRequestWithExtraMessages(ctx context.Context, extra []llm.Message, allowTools bool) (llm.Request, error) {
+func (e *Engine) buildRequestWithExtraItems(ctx context.Context, extra []llm.ResponseItem, allowTools bool) (llm.Request, error) {
 	locked, err := e.ensureLocked()
 	if err != nil {
 		return llm.Request{}, err
@@ -31,18 +31,13 @@ func (e *Engine) buildRequestWithExtraMessages(ctx context.Context, extra []llm.
 		requestTools = []llm.Tool{}
 	}
 
-	msgs := e.snapshotMessages()
-	if len(extra) > 0 {
-		msgs = append(msgs, extra...)
-	}
-	msgs = sanitizeMessagesForLLM(msgs)
 	items := e.snapshotItems()
 	if len(extra) > 0 {
-		items = append(items, llm.ItemsFromMessages(extra)...)
+		items = append(items, llm.CloneResponseItems(extra)...)
 	}
 	items = sanitizeItemsForLLM(items)
 
-	req, err := llm.RequestFromLockedContractWithItems(locked, e.systemPrompt(locked), msgs, items, requestTools)
+	req, err := llm.RequestFromLockedContract(locked, e.systemPrompt(locked), items, requestTools)
 	if err != nil {
 		return llm.Request{}, err
 	}
@@ -143,22 +138,6 @@ func (e *Engine) requestTools() []llm.Tool {
 		out = append(out, llm.Tool{Name: string(d.ID), Description: d.Description, Schema: d.Schema})
 	}
 	return out
-}
-
-func sanitizeMessagesForLLM(messages []llm.Message) []llm.Message {
-	if len(messages) == 0 {
-		return messages
-	}
-	cleaned := make([]llm.Message, len(messages))
-	for i, msg := range messages {
-		cleaned[i] = msg
-		content := xansi.Strip(msg.Content)
-		if msg.Role == llm.RoleTool {
-			content = normalizeToolMessageForLLM(content)
-		}
-		cleaned[i].Content = content
-	}
-	return cleaned
 }
 
 func sanitizeItemsForLLM(items []llm.ResponseItem) []llm.ResponseItem {

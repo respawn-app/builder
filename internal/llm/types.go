@@ -313,7 +313,6 @@ type Request struct {
 	EnableNativeWebSearch   bool              `json:"enable_native_web_search,omitempty"`
 	SystemPrompt            string            `json:"system_prompt"`
 	SessionID               string            `json:"session_id,omitempty"`
-	Messages                []Message         `json:"messages"`
 	Items                   []ResponseItem    `json:"items,omitempty"`
 	Tools                   []Tool            `json:"tools,omitempty"`
 	StructuredOutput        *StructuredOutput `json:"structured_output,omitempty"`
@@ -325,11 +324,6 @@ func (r Request) Validate() error {
 	}
 	if r.MaxTokens < 0 {
 		return fmt.Errorf("%w: max_tokens must be >= 0", ErrInvalidRequest)
-	}
-	for i := range r.Messages {
-		if r.Messages[i].Role == "" {
-			return fmt.Errorf("%w: message role is required at index %d", ErrInvalidRequest, i)
-		}
 	}
 	for i := range r.Items {
 		if strings.TrimSpace(string(r.Items[i].Type)) == "" {
@@ -355,11 +349,7 @@ func (r Request) Validate() error {
 	return nil
 }
 
-func RequestFromLockedContract(locked session.LockedContract, systemPrompt string, messages []Message, tools []Tool) (Request, error) {
-	return RequestFromLockedContractWithItems(locked, systemPrompt, messages, ItemsFromMessages(messages), tools)
-}
-
-func RequestFromLockedContractWithItems(locked session.LockedContract, systemPrompt string, messages []Message, items []ResponseItem, tools []Tool) (Request, error) {
+func RequestFromLockedContract(locked session.LockedContract, systemPrompt string, items []ResponseItem, tools []Tool) (Request, error) {
 	if locked.Model == "" {
 		return Request{}, fmt.Errorf("%w: locked model is required", ErrInvalidRequest)
 	}
@@ -375,7 +365,6 @@ func RequestFromLockedContractWithItems(locked session.LockedContract, systemPro
 		EnableNativeWebSearch:   false,
 		SystemPrompt:            systemPrompt,
 		SessionID:               "",
-		Messages:                append([]Message(nil), messages...),
 		Items:                   CloneResponseItems(items),
 		Tools:                   append([]Tool(nil), tools...),
 	}
