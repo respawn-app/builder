@@ -268,6 +268,26 @@ func TestStatusCommandPersistsPromptHistoryWithoutBlockingOpen(t *testing.T) {
 	}
 }
 
+func TestStatusGroupSkillsByDirectoryKeepsBrokenSkillUnderSkillsRoot(t *testing.T) {
+	groups := statusGroupSkillsByDirectory([]runtime.SkillInspection{
+		{Name: "apiresult", Path: "/Users/test/.builder/skills/apiresult/SKILL.md", Loaded: true},
+		{Name: "broken", Path: "/Users/test/.builder/skills/broken/SKILL.md", Loaded: false, Reason: "symlink target does not exist"},
+	})
+
+	if len(groups) != 1 {
+		t.Fatalf("expected one skills directory group, got %+v", groups)
+	}
+	if groups[0].Directory != "/Users/test/.builder/skills" {
+		t.Fatalf("expected skills root grouping, got %+v", groups)
+	}
+	if len(groups[0].Skills) != 2 {
+		t.Fatalf("expected both skills in the same group, got %+v", groups)
+	}
+	if groups[0].Skills[1].Path != "/Users/test/.builder/skills/broken/SKILL.md" {
+		t.Fatalf("expected broken skill path to remain in SKILL.md form, got %+v", groups[0].Skills[1])
+	}
+}
+
 func TestStatusRepositorySeparatesAuthCacheByOAuthIdentity(t *testing.T) {
 	repo := newMemoryUIStatusRepository()
 	managerA := auth.NewManager(auth.NewMemoryStore(auth.State{

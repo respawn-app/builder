@@ -2,7 +2,9 @@ package runtime
 
 import (
 	"builder/prompts"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,12 +41,18 @@ type skillFrontmatter struct {
 	Description string `yaml:"description"`
 }
 
+type skillDiscoveryIssue struct {
+	Name   string
+	Path   string
+	Reason string
+}
+
 func skillsContextMessage(workspaceRoot string) (string, bool, error) {
 	return skillsContextMessageWithDisabled(workspaceRoot, nil)
 }
 
 func skillsContextMessageWithDisabled(workspaceRoot string, disabledSkills map[string]bool) (string, bool, error) {
-	skills, err := discoverInjectedSkills(workspaceRoot, normalizedDisabledSkills(disabledSkills))
+	skills, _, err := discoverInjectedSkills(workspaceRoot, normalizedDisabledSkills(disabledSkills))
 	if err != nil {
 		return "", false, err
 	}
@@ -54,12 +62,13 @@ func skillsContextMessageWithDisabled(workspaceRoot string, disabledSkills map[s
 	return renderSkillsContext(skills), true, nil
 }
 
-func discoverInjectedSkills(workspaceRoot string, disabledSkills map[string]bool) ([]injectedSkill, error) {
+func discoverInjectedSkills(workspaceRoot string, disabledSkills map[string]bool) ([]injectedSkill, []skillDiscoveryIssue, error) {
 	roots, err := skillsInjectionRoots(workspaceRoot)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([]injectedSkill, 0)
+	issues := make([]skillDiscoveryIssue, 0)
 	seenPaths := map[string]bool{}
 	for _, root := range roots {
 		entries, readErr := readSkillsDir(root)
@@ -67,17 +76,17 @@ func discoverInjectedSkills(workspaceRoot string, disabledSkills map[string]bool
 			if os.IsNotExist(readErr) {
 				continue
 			}
-			return nil, fmt.Errorf("read skills directory %q: %w", root, readErr)
+			return nil, nil, fmt.Errorf("read skills directory %q: %w", root, readErr)
 		}
 		for _, entry := range entries {
-			skillDir, ok, err := resolveSkillDir(root, entry.Name())
-			if err != nil {
-				return nil, err
+			resolution := resolveSkillDir(root, entry)
+			if resolution.Issue != nil {
+				issues = append(issues, *resolution.Issue)
 			}
-			if !ok {
+			if !resolution.Discoverable {
 				continue
 			}
-			skillPath := filepath.Join(skillDir, skillFileName)
+			skillPath := filepath.Join(resolution.SkillDir, skillFileName)
 			skill, ok := parseInjectedSkill(skillPath)
 			if !ok {
 				continue
@@ -92,22 +101,69 @@ func discoverInjectedSkills(workspaceRoot string, disabledSkills map[string]bool
 			out = append(out, skill)
 		}
 	}
-	return out, nil
+	return out, issues, nil
 }
 
-func resolveSkillDir(root string, entryName string) (string, bool, error) {
-	skillDir := filepath.Join(root, entryName)
-	info, err := os.Stat(skillDir)
+type skillDirResolution struct {
+	SkillDir     string
+	Discoverable bool
+	Issue        *skillDiscoveryIssue
+}
+
+func resolveSkillDir(root string, entry os.DirEntry) skillDirResolution {
+	skillDir := filepath.Join(root, entry.Name())
+	info, err := os.Lstat(skillDir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", false, nil
-		}
-		return "", false, fmt.Errorf("stat skill path %q: %w", skillDir, err)
+		return skillDirResolution{Issue: &skillDiscoveryIssue{
+			Name:   sanitizeSkillSingleLine(entry.Name()),
+			Path:   filepath.ToSlash(skillDir),
+			Reason: formatSkillDirResolutionFailure(err),
+		}}
 	}
-	if !info.IsDir() {
-		return "", false, nil
+	if info.IsDir() {
+		return skillDirResolution{SkillDir: skillDir, Discoverable: true}
 	}
-	return skillDir, true, nil
+	if info.Mode()&os.ModeSymlink == 0 {
+		return skillDirResolution{}
+	}
+	targetInfo, err := os.Stat(skillDir)
+	if err != nil {
+		return skillDirResolution{Issue: &skillDiscoveryIssue{
+			Name:   sanitizeSkillSingleLine(entry.Name()),
+			Path:   filepath.ToSlash(skillDir),
+			Reason: formatSkillDirResolutionFailure(err),
+		}}
+	}
+	if targetInfo.IsDir() {
+		return skillDirResolution{SkillDir: skillDir, Discoverable: true}
+	}
+	return skillDirResolution{Issue: &skillDiscoveryIssue{
+		Name:   sanitizeSkillSingleLine(entry.Name()),
+		Path:   filepath.ToSlash(skillDir),
+		Reason: "symlink target is not a directory",
+	}}
+}
+
+func formatSkillDirResolutionFailure(err error) string {
+	if os.IsNotExist(err) {
+		return "symlink target does not exist"
+	}
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) {
+		return strings.TrimSpace(pathErr.Err.Error())
+	}
+	return strings.TrimSpace(err.Error())
+}
+
+func formatSkillDiscoveryWarning(issue skillDiscoveryIssue) string {
+	name := strings.TrimSpace(issue.Name)
+	if name == "" {
+		name = filepath.Base(strings.TrimSpace(issue.Path))
+	}
+	if strings.TrimSpace(issue.Path) == "" {
+		return fmt.Sprintf("Skipped skill %q: %s", name, issue.Reason)
+	}
+	return fmt.Sprintf("Skipped skill %q at %s: %s", name, issue.Path, issue.Reason)
 }
 
 func skillsInjectionRoots(workspaceRoot string) ([]string, error) {
