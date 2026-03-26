@@ -21,21 +21,21 @@ func TestResolveContinuationLoadParamsUsesSessionWorkspaceAndPersistedBaseURL(t 
 		t.Fatalf("set continuation context: %v", err)
 	}
 
-	workspaceRoot, openAIBaseURL, useOpenAIBaseURL, err := resolveContinuationLoadParams(persistenceRoot, Options{
+	plan, err := newBootstrapLaunchPlanner(persistenceRoot).PlanBootstrap(Options{
 		WorkspaceRoot: "/tmp/current-dir",
 		SessionID:     store.Meta().SessionID,
 	})
 	if err != nil {
 		t.Fatalf("resolve continuation load params: %v", err)
 	}
-	if workspaceRoot != "/tmp/original-workspace" {
-		t.Fatalf("expected session workspace root, got %q", workspaceRoot)
+	if plan.WorkspaceRoot != "/tmp/original-workspace" {
+		t.Fatalf("expected session workspace root, got %q", plan.WorkspaceRoot)
 	}
-	if !useOpenAIBaseURL {
+	if !plan.UseOpenAIBaseURL {
 		t.Fatal("expected persisted OpenAI base URL to be reused")
 	}
-	if openAIBaseURL != "http://persisted.local/v1" {
-		t.Fatalf("expected persisted OpenAI base URL, got %q", openAIBaseURL)
+	if plan.OpenAIBaseURL != "http://persisted.local/v1" {
+		t.Fatalf("expected persisted OpenAI base URL, got %q", plan.OpenAIBaseURL)
 	}
 }
 
@@ -50,7 +50,7 @@ func TestResolveContinuationLoadParamsRespectsExplicitOverrides(t *testing.T) {
 		t.Fatalf("set continuation context: %v", err)
 	}
 
-	workspaceRoot, openAIBaseURL, useOpenAIBaseURL, err := resolveContinuationLoadParams(persistenceRoot, Options{
+	plan, err := newBootstrapLaunchPlanner(persistenceRoot).PlanBootstrap(Options{
 		WorkspaceRoot:         "/tmp/override-workspace",
 		WorkspaceRootExplicit: true,
 		SessionID:             store.Meta().SessionID,
@@ -60,14 +60,14 @@ func TestResolveContinuationLoadParamsRespectsExplicitOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve continuation load params: %v", err)
 	}
-	if workspaceRoot != "/tmp/override-workspace" {
-		t.Fatalf("expected explicit workspace override, got %q", workspaceRoot)
+	if plan.WorkspaceRoot != "/tmp/override-workspace" {
+		t.Fatalf("expected explicit workspace override, got %q", plan.WorkspaceRoot)
 	}
-	if !useOpenAIBaseURL {
+	if !plan.UseOpenAIBaseURL {
 		t.Fatal("expected explicit OpenAI base URL override to be applied")
 	}
-	if openAIBaseURL != "http://override.local/v1" {
-		t.Fatalf("expected explicit OpenAI base URL override, got %q", openAIBaseURL)
+	if plan.OpenAIBaseURL != "http://override.local/v1" {
+		t.Fatalf("expected explicit OpenAI base URL override, got %q", plan.OpenAIBaseURL)
 	}
 }
 

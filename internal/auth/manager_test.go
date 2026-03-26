@@ -222,6 +222,96 @@ func TestClearMethodResetsEnvAPIKeyPreference(t *testing.T) {
 	}
 }
 
+func TestSetEnvAPIKeyPreferenceDoesNotPersistBootstrapEnvMethod(t *testing.T) {
+	now := time.Date(2026, time.January, 1, 10, 0, 0, 0, time.UTC)
+	base := NewMemoryStore(State{
+		Scope: ScopeGlobal,
+		Method: Method{
+			Type: MethodOAuth,
+			OAuth: &OAuthMethod{
+				AccessToken:  "oauth-token",
+				RefreshToken: "oauth-refresh",
+				TokenType:    "Bearer",
+				Expiry:       now.Add(time.Hour),
+			},
+		},
+		UpdatedAt: now,
+	})
+	store := NewEnvAPIKeyOverrideStore(base, func(string) (string, bool) {
+		return "sk-env", true
+	})
+	mgr := NewManager(store, nil, func() time.Time { return now.Add(time.Minute) })
+
+	state, err := mgr.SetEnvAPIKeyPreference(context.Background(), EnvAPIKeyPreferencePreferSaved, true)
+	if err != nil {
+		t.Fatalf("set env api key preference: %v", err)
+	}
+	if state.Method.Type != MethodOAuth {
+		t.Fatalf("expected stored oauth method to remain durable, got %q", state.Method.Type)
+	}
+	persisted, err := base.Load(context.Background())
+	if err != nil {
+		t.Fatalf("load persisted state: %v", err)
+	}
+	if persisted.Method.Type != MethodOAuth {
+		t.Fatalf("expected persisted oauth method, got %q", persisted.Method.Type)
+	}
+	if persisted.Method.APIKey != nil {
+		t.Fatalf("did not expect bootstrap env key to persist, got %+v", persisted.Method.APIKey)
+	}
+	if persisted.EnvAPIKeyPreference != EnvAPIKeyPreferencePreferSaved {
+		t.Fatalf("expected persisted saved-auth preference, got %q", persisted.EnvAPIKeyPreference)
+	}
+}
+
+func TestSwitchMethodDoesNotPersistBootstrapEnvMethod(t *testing.T) {
+	now := time.Date(2026, time.January, 1, 10, 0, 0, 0, time.UTC)
+	base := NewMemoryStore(State{
+		Scope: ScopeGlobal,
+		Method: Method{
+			Type: MethodOAuth,
+			OAuth: &OAuthMethod{
+				AccessToken:  "oauth-token",
+				RefreshToken: "oauth-refresh",
+				TokenType:    "Bearer",
+				Expiry:       now.Add(time.Hour),
+			},
+		},
+		UpdatedAt: now,
+	})
+	store := NewEnvAPIKeyOverrideStore(base, func(string) (string, bool) {
+		return "sk-env", true
+	})
+	mgr := NewManager(store, nil, func() time.Time { return now.Add(time.Minute) })
+
+	state, err := mgr.SwitchMethod(context.Background(), Method{
+		Type:   MethodAPIKey,
+		APIKey: &APIKeyMethod{Key: "sk-saved"},
+	}, true)
+	if err != nil {
+		t.Fatalf("switch method: %v", err)
+	}
+	if state.Method.Type != MethodAPIKey {
+		t.Fatalf("expected api key method, got %q", state.Method.Type)
+	}
+	if state.Method.APIKey == nil || state.Method.APIKey.Key != "sk-saved" {
+		t.Fatalf("expected switched saved api key, got %+v", state.Method.APIKey)
+	}
+	persisted, err := base.Load(context.Background())
+	if err != nil {
+		t.Fatalf("load persisted state: %v", err)
+	}
+	if persisted.Method.Type != MethodAPIKey {
+		t.Fatalf("expected persisted api key method, got %q", persisted.Method.Type)
+	}
+	if persisted.Method.APIKey == nil || persisted.Method.APIKey.Key != "sk-saved" {
+		t.Fatalf("expected persisted switched api key, got %+v", persisted.Method.APIKey)
+	}
+	if persisted.Method.APIKey.Key == "sk-env" {
+		t.Fatal("did not expect bootstrap env api key to persist")
+	}
+}
+
 type stubTokenFactory struct {
 	source OAuthTokenSource
 }

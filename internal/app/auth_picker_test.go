@@ -307,7 +307,16 @@ func TestInteractiveAuthInteractorNeedsInteractionForEnvConflict(t *testing.T) {
 	interactor := &interactiveAuthInteractor{}
 	if !interactor.NeedsInteraction(authInteraction{
 		Gate:         auth.StartupGate{Ready: true},
-		State:        auth.State{Scope: auth.ScopeGlobal, Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "x"}}},
+		State:        auth.State{Scope: auth.ScopeGlobal, Method: auth.Method{Type: auth.MethodAPIKey, APIKey: &auth.APIKeyMethod{Key: "sk-env"}}},
+		StoredState:  auth.EmptyState(),
+		HasEnvAPIKey: true,
+	}) {
+		t.Fatal("expected env-only startup without saved preference to require method selection")
+	}
+	if !interactor.NeedsInteraction(authInteraction{
+		Gate:         auth.StartupGate{Ready: true},
+		State:        auth.State{Scope: auth.ScopeGlobal, Method: auth.Method{Type: auth.MethodAPIKey, APIKey: &auth.APIKeyMethod{Key: "sk-env"}}},
+		StoredState:  auth.State{Scope: auth.ScopeGlobal, Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "x"}}},
 		HasEnvAPIKey: true,
 	}) {
 		t.Fatal("expected unresolved env-vs-oauth conflict to require interaction")
@@ -315,6 +324,7 @@ func TestInteractiveAuthInteractorNeedsInteractionForEnvConflict(t *testing.T) {
 	if interactor.NeedsInteraction(authInteraction{
 		Gate:         auth.StartupGate{Ready: true},
 		State:        auth.State{Scope: auth.ScopeGlobal, Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "x"}}, EnvAPIKeyPreference: auth.EnvAPIKeyPreferencePreferSaved},
+		StoredState:  auth.State{Scope: auth.ScopeGlobal, Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "x"}}, EnvAPIKeyPreference: auth.EnvAPIKeyPreferencePreferSaved},
 		HasEnvAPIKey: true,
 	}) {
 		t.Fatal("did not expect saved preference to reopen conflict picker")
@@ -419,6 +429,9 @@ func TestInteractiveAuthInteractorResolvesEnvConflictAndRemembersPreference(t *t
 	}), nil, time.Now)
 	successCalls := 0
 	interactor := &interactiveAuthInteractor{
+		pickMethod: func(authInteraction) (authMethodPickerResult, error) {
+			return authMethodPickerResult{}, errors.New("unexpected auth method picker invocation")
+		},
 		pickConflict: func(authInteraction) (authConflictPickerResult, error) {
 			return authConflictPickerResult{Choice: authConflictChoiceEnvAPIKey}, nil
 		},
@@ -436,6 +449,7 @@ func TestInteractiveAuthInteractorResolvesEnvConflictAndRemembersPreference(t *t
 	err := interactor.Interact(ctx, authInteraction{
 		Manager:         mgr,
 		State:           auth.State{Scope: auth.ScopeGlobal, Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "oauth-token"}}},
+		StoredState:     auth.State{Scope: auth.ScopeGlobal, Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "oauth-token"}}},
 		Gate:            auth.StartupGate{Ready: true},
 		Theme:           "dark",
 		AlternateScreen: config.TUIAlternateScreenAuto,

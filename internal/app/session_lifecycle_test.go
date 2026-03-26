@@ -113,10 +113,26 @@ func TestNewSessionTransitionKeepsBackgroundProcessesAlive(t *testing.T) {
 		t.Fatalf("close wiring: %v", err)
 	}
 
-	store, err := openOrCreateSession(root, root, nextSessionID, workdir, "dark", config.TUIAlternateScreenAuto, forceNewSession, parentSessionID)
+	planner := &launchPlanner{
+		boot: &appBootstrap{
+			cfg: config.App{
+				WorkspaceRoot:   workdir,
+				PersistenceRoot: root,
+				Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
+			},
+			containerDir: root,
+		},
+	}
+	storePlan, err := planner.PlanSession(sessionLaunchRequest{
+		Mode:              launchModeInteractive,
+		SelectedSessionID: nextSessionID,
+		ForceNewSession:   forceNewSession,
+		ParentSessionID:   parentSessionID,
+	})
 	if err != nil {
 		t.Fatalf("open or create next session: %v", err)
 	}
+	store := storePlan.Store
 	if store.Meta().ParentSessionID != "parent-1" {
 		t.Fatalf("expected parent session id preserved across new session transition, got %q", store.Meta().ParentSessionID)
 	}
