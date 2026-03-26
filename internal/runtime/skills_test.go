@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,6 +121,34 @@ func TestSkillsContextMessageLoadsSkillFromSymlinkedGlobalSkillsRoot(t *testing.
 	want := "- linked-skill: from symlinked global root (file: " + filepath.ToSlash(targetSkillPath) + ")"
 	if !strings.Contains(content, want) {
 		t.Fatalf("expected symlinked global skill entry %q, got %q", want, content)
+	}
+}
+
+func TestResolveSkillDirUsesLstatWhenDirEntryTypeIsUnknown(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+	brokenLinkPath := filepath.Join(workspace, ".builder", "skills", "broken-skill")
+	if err := os.MkdirAll(filepath.Dir(brokenLinkPath), 0o755); err != nil {
+		t.Fatalf("mkdir broken symlink parent: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "missing-skill-dir"), brokenLinkPath); err != nil {
+		t.Fatalf("symlink broken skill dir: %v", err)
+	}
+
+	resolution := resolveSkillDir(filepath.Dir(brokenLinkPath), fakeDirEntry{name: filepath.Base(brokenLinkPath)})
+	if resolution.Discoverable {
+		t.Fatalf("expected broken symlink with unknown entry type to stay undiscoverable, got %+v", resolution)
+	}
+	if resolution.Issue == nil {
+		t.Fatalf("expected broken symlink with unknown entry type to surface an issue, got %+v", resolution)
+	}
+	if resolution.Issue.Path != filepath.ToSlash(brokenLinkPath) {
+		t.Fatalf("expected issue path %q, got %+v", filepath.ToSlash(brokenLinkPath), resolution)
+	}
+	if resolution.Issue.Reason != "symlink target does not exist" {
+		t.Fatalf("expected stable missing-target reason, got %+v", resolution)
 	}
 }
 
@@ -382,7 +411,7 @@ func TestInspectSkillsReportsBrokenSymlinkedSkillDirectory(t *testing.T) {
 	if inspections[0].Path != filepath.ToSlash(brokenLinkPath) {
 		t.Fatalf("expected inspection path %q, got %+v", filepath.ToSlash(brokenLinkPath), inspections[0])
 	}
-	if !strings.Contains(inspections[0].Reason, "no such file") {
+	if inspections[0].Reason != "symlink target does not exist" {
 		t.Fatalf("expected missing target reason, got %+v", inspections[0])
 	}
 }
@@ -433,3 +462,12 @@ func writeTestSkill(t *testing.T, dir string, name string, description string) s
 	}
 	return skillPath
 }
+
+type fakeDirEntry struct {
+	name string
+}
+
+func (f fakeDirEntry) Name() string             { return f.name }
+func (fakeDirEntry) IsDir() bool                { return false }
+func (fakeDirEntry) Type() fs.FileMode          { return 0 }
+func (fakeDirEntry) Info() (fs.FileInfo, error) { return nil, fs.ErrNotExist }
