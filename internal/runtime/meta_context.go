@@ -185,6 +185,7 @@ func (b metaContextBuilder) discoverAgents(permissive bool) ([]llm.Message, erro
 		out = append(out, llm.Message{
 			Role:        llm.RoleDeveloper,
 			MessageType: llm.MessageTypeAgentsMD,
+			SourcePath:  path,
 			Content:     renderAgentsContext(path, string(data)),
 		})
 	}
@@ -370,10 +371,13 @@ func classifyMetaContextMessage(message llm.Message) (metaContextClassification,
 	}
 	switch message.MessageType {
 	case llm.MessageTypeAgentsMD:
-		sourcePath, _ := parseAgentsContextSource(message.Content)
+		sourcePath := agentSourceKey(message.SourcePath)
+		if sourcePath == "" {
+			return metaContextClassification{}, false
+		}
 		return metaContextClassification{
 			kind:        metaContextKindAgents,
-			key:         agentMessageKey(sourcePath, message.Content),
+			key:         sourcePath,
 			sourcePath:  sourcePath,
 			messageType: llm.MessageTypeAgentsMD,
 		}, true
@@ -386,20 +390,6 @@ func classifyMetaContextMessage(message llm.Message) (metaContextClassification,
 	case llm.MessageTypeHeadlessModeExit:
 		return metaContextClassification{kind: metaContextKindHeadlessExit, key: "headless_exit", messageType: llm.MessageTypeHeadlessModeExit}, true
 	}
-	if sourcePath, ok := parseAgentsContextSource(message.Content); ok {
-		return metaContextClassification{
-			kind:        metaContextKindAgents,
-			key:         agentMessageKey(sourcePath, message.Content),
-			sourcePath:  sourcePath,
-			messageType: llm.MessageTypeAgentsMD,
-		}, true
-	}
-	if hasInjectedHeader(message.Content, skillsInjectedHeader) {
-		return metaContextClassification{kind: metaContextKindSkills, key: "skills", messageType: llm.MessageTypeSkills}, true
-	}
-	if hasInjectedHeader(message.Content, environmentInjectedHeader) {
-		return metaContextClassification{kind: metaContextKindEnvironment, key: "environment", messageType: llm.MessageTypeEnvironment}, true
-	}
 	return metaContextClassification{}, false
 }
 
@@ -407,42 +397,6 @@ func canonicalizeMetaContextMessage(message llm.Message, classification metaCont
 	message.Role = llm.RoleDeveloper
 	message.MessageType = classification.messageType
 	return message
-}
-
-func hasInjectedHeader(content, header string) bool {
-	firstLine, _, _ := strings.Cut(strings.TrimSpace(content), "\n")
-	return strings.TrimSpace(firstLine) == header
-}
-
-func parseAgentsContextSource(content string) (string, bool) {
-	trimmed := strings.TrimSpace(content)
-	if trimmed == "" {
-		return "", false
-	}
-	lines := strings.Split(trimmed, "\n")
-	if len(lines) < 2 || strings.TrimSpace(lines[0]) != agentsInjectedHeader {
-		return "", false
-	}
-	rest, ok := strings.CutPrefix(strings.TrimSpace(lines[1]), "source: ")
-	if !ok {
-		return "", false
-	}
-	source := strings.TrimSpace(rest)
-	if source == "" {
-		return "", false
-	}
-	return filepath.Clean(source), true
-}
-
-func agentMessageKey(sourcePath, content string) string {
-	if key := agentSourceKey(sourcePath); key != "" {
-		return key
-	}
-	trimmed := strings.TrimSpace(content)
-	if trimmed == "" {
-		return ""
-	}
-	return "content:" + trimmed
 }
 
 func agentSourceKey(path string) string {

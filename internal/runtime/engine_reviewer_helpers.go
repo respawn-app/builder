@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	"builder/internal/llm"
+	"builder/internal/transcript"
 )
 
 type reviewerSuggestionsResult struct {
@@ -169,55 +169,81 @@ func formatReviewerTranscriptEntry(message llm.Message, toolOutputsByCallID map[
 			if callID := strings.TrimSpace(call.ID); callID != "" {
 				output = strings.TrimSpace(toolOutputsByCallID[callID])
 			}
-			b.WriteString(formatReviewerToolCallPayload(call.Input, output))
+			b.WriteString(formatReviewerToolCallPayload(call, output))
 			b.WriteString("\n")
 		}
 	}
 	return strings.TrimSpace(b.String())
 }
 
-func formatReviewerToolCallPayload(input json.RawMessage, output string) string {
-	payload := map[string]any{
-		"input": reviewerJSONValueFromRaw(input),
+func formatReviewerToolCallPayload(call llm.ToolCall, output string) string {
+	sections := make([]string, 0, 2)
+	if input := reviewerToolInputText(call); strings.TrimSpace(input) != "" {
+		sections = append(sections, "Input:\n"+indentReviewerBlock(input))
 	}
-	if strings.TrimSpace(output) != "" {
-		payload["output"] = reviewerJSONValueFromString(output)
+	if output = strings.TrimSpace(output); output != "" {
+		sections = append(sections, "Output:\n"+indentReviewerBlock(output))
 	}
-	data, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
+	if len(sections) == 0 {
 		return "{}"
 	}
-	return string(data)
+	return strings.Join(sections, "\n")
 }
 
-func reviewerJSONValueFromRaw(raw json.RawMessage) any {
-	trimmed := strings.TrimSpace(string(raw))
-	if trimmed == "" {
-		return map[string]any{}
+func reviewerToolInputText(call llm.ToolCall) string {
+	if meta := decodeToolCallMeta(call); meta != nil {
+		if text := reviewerToolPresentationText(meta); text != "" {
+			return text
+		}
 	}
-	if !json.Valid([]byte(trimmed)) {
-		return trimmed
-	}
-	var decoded any
-	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
-		return trimmed
-	}
-	return decoded
+	return compactReviewerRawJSON(call.Input)
 }
 
-func reviewerJSONValueFromString(content string) any {
-	trimmed := strings.TrimSpace(content)
-	if trimmed == "" {
+func reviewerToolPresentationText(meta *transcript.ToolCallMeta) string {
+	if meta == nil {
 		return ""
 	}
-	if !json.Valid([]byte(trimmed)) {
-		return trimmed
+	if meta.UsesAskQuestionRendering() {
+		lines := make([]string, 0, len(meta.Suggestions)+2)
+		if question := strings.TrimSpace(meta.Question); question != "" {
+			lines = append(lines, "question: "+question)
+		}
+		for _, suggestion := range meta.Suggestions {
+			trimmed := strings.TrimSpace(suggestion)
+			if trimmed == "" {
+				continue
+			}
+			lines = append(lines, "suggestion: "+trimmed)
+		}
+		if meta.RecommendedOptionIndex > 0 {
+			lines = append(lines, fmt.Sprintf("recommended_option_index: %d", meta.RecommendedOptionIndex))
+		}
+		return strings.Join(lines, "\n")
 	}
-	var decoded any
-	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
-		return trimmed
+	lines := make([]string, 0, 4)
+	if command := strings.TrimSpace(meta.Command); command != "" {
+		lines = append(lines, command)
+	} else if compact := strings.TrimSpace(meta.CompactText); compact != "" {
+		lines = append(lines, compact)
 	}
-	return decoded
+	if inlineMeta := strings.TrimSpace(meta.InlineMeta); inlineMeta != "" {
+		lines = append(lines, "meta: "+inlineMeta)
+	}
+	if detail := strings.TrimSpace(meta.PatchDetail); detail != "" {
+		lines = append(lines, detail)
+	}
+	if len(lines) == 0 {
+		return strings.TrimSpace(meta.ToolName)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func indentReviewerBlock(text string) string {
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	for i := range lines {
+		lines[i] = "  " + lines[i]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func reviewerTranscriptContent(message llm.Message) string {
@@ -276,7 +302,7 @@ func compactReviewerToolOutput(content string) string {
 	return string(encoded)
 }
 
-func prettyReviewerJSON(raw json.RawMessage) string {
+func compactReviewerRawJSON(raw json.RawMessage) string {
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" {
 		return "{}"
@@ -284,11 +310,15 @@ func prettyReviewerJSON(raw json.RawMessage) string {
 	if !json.Valid([]byte(trimmed)) {
 		return trimmed
 	}
-	var formatted bytes.Buffer
-	if err := json.Indent(&formatted, []byte(trimmed), "", "  "); err != nil {
+	var payload any
+	if err := json.Unmarshal(raw, &payload); err != nil {
 		return trimmed
 	}
-	return formatted.String()
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return trimmed
+	}
+	return string(encoded)
 }
 
 func formatReviewerDeveloperInstruction(suggestions []string) string {

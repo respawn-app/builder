@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"builder/prompts"
 )
 
 func TestNewLazyDoesNotPersistUntilFirstWrite(t *testing.T) {
@@ -350,7 +348,7 @@ func TestConversationFreshnessAdvancesOnlyForVisibleUserMessages(t *testing.T) {
 	if got := store.ConversationFreshness(); got != ConversationFreshnessFresh {
 		t.Fatalf("freshness after assistant = %v, want fresh", got)
 	}
-	if _, err := store.AppendEvent("s2", "message", map[string]any{"role": "user", "content": prompts.CompactionSummaryPrefix + "\nsummary"}); err != nil {
+	if _, err := store.AppendEvent("s2", "message", map[string]any{"role": "user", "message_type": "compaction_summary", "content": "summary"}); err != nil {
 		t.Fatalf("append compaction summary event: %v", err)
 	}
 	if got := store.ConversationFreshness(); got != ConversationFreshnessFresh {
@@ -389,7 +387,7 @@ func TestFirstPromptPreviewSkipsCompactionSummaryMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "user", "content": prompts.CompactionSummaryPrefix + "\nsummary"}); err != nil {
+	if _, err := store.AppendEvent("s1", "message", map[string]any{"role": "user", "message_type": "compaction_summary", "content": "summary"}); err != nil {
 		t.Fatalf("append compaction summary event: %v", err)
 	}
 	if got := store.Meta().FirstPromptPreview; got != "" {

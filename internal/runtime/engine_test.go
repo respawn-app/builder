@@ -2552,10 +2552,10 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 		if strings.Contains(message.Content, "Agent:") {
 			foundAgentLabel = true
 		}
-		if strings.Contains(message.Content, "Tool calls:") && strings.Contains(message.Content, "\"command\": \"pwd\"") {
+		if strings.Contains(message.Content, "Tool calls:") && strings.Contains(message.Content, "Input:") && strings.Contains(message.Content, "pwd") {
 			foundToolCallJSON = true
 		}
-		if strings.Contains(message.Content, "\"output\"") {
+		if strings.Contains(message.Content, "Output:") && strings.Contains(message.Content, "{\"tool\":\"shell\"}") {
 			foundToolOutputField = true
 		}
 		if strings.Contains(message.Content, "Tool output:") {
@@ -2889,7 +2889,7 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 	}
 }
 
-func TestRestoreMessagesNormalizesLegacyReviewerEntries(t *testing.T) {
+func TestRestoreMessagesKeepsStoredReviewerEntriesVerbatim(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -2917,11 +2917,11 @@ func TestRestoreMessagesNormalizesLegacyReviewerEntries(t *testing.T) {
 	if len(snapshot.Entries) != 2 {
 		t.Fatalf("expected 2 restored entries, got %+v", snapshot.Entries)
 	}
-	if snapshot.Entries[0].Role != "reviewer_suggestions" || snapshot.Entries[0].OngoingText != "Supervisor suggested:\n1. Add final verification notes." {
-		t.Fatalf("expected normalized restored reviewer_suggestions entry, got %+v", snapshot.Entries[0])
+	if snapshot.Entries[0].Role != "reviewer_suggestions" || snapshot.Entries[0].OngoingText != "Supervisor made 1 suggestion." {
+		t.Fatalf("expected stored reviewer_suggestions entry, got %+v", snapshot.Entries[0])
 	}
-	if snapshot.Entries[1].Role != "reviewer_status" || snapshot.Entries[1].Text != "Supervisor ran: 1 suggestion, applied." {
-		t.Fatalf("expected normalized restored reviewer_status entry, got %+v", snapshot.Entries[1])
+	if snapshot.Entries[1].Role != "reviewer_status" || snapshot.Entries[1].Text != "Supervisor ran, applied 1 suggestion:\n1. Add final verification notes." {
+		t.Fatalf("expected stored reviewer_status entry, got %+v", snapshot.Entries[1])
 	}
 }
 
@@ -3084,7 +3084,7 @@ func TestBuildReviewerTranscriptMessagesIncludesConversationAndToolCalls(t *test
 		{Role: llm.RoleAssistant, Content: "Running command now.", Phase: llm.MessagePhaseCommentary, ToolCalls: []llm.ToolCall{{ID: "call_1", Name: "shell", Input: json.RawMessage(`{"command":"pwd"}`)}}},
 		{Role: llm.RoleAssistant, Content: "assistant response", Phase: llm.MessagePhaseFinal},
 		{Role: llm.RoleTool, Name: "shell", ToolCallID: "call_1", Content: "{\"output\":\"ok\"}"},
-		{Role: llm.RoleDeveloper, Content: environmentInjectedHeader + "\nOS: darwin"},
+		{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: environmentInjectedHeader + "\nOS: darwin"},
 	}
 
 	reviewerMessages := buildReviewerTranscriptMessages(messages)
@@ -3100,14 +3100,14 @@ func TestBuildReviewerTranscriptMessagesIncludesConversationAndToolCalls(t *test
 	if !strings.Contains(reviewerMessages[2].Content, "Running command now.") {
 		t.Fatalf("expected short commentary preamble text to be preserved when tool calls exist, message=%q", reviewerMessages[2].Content)
 	}
-	if !strings.Contains(reviewerMessages[2].Content, "Tool calls:") || !strings.Contains(reviewerMessages[2].Content, "\"command\": \"pwd\"") {
-		t.Fatalf("expected tool call arguments in json format, message=%q", reviewerMessages[2].Content)
+	if !strings.Contains(reviewerMessages[2].Content, "Tool calls:") || !strings.Contains(reviewerMessages[2].Content, "Input:") || !strings.Contains(reviewerMessages[2].Content, "pwd") {
+		t.Fatalf("expected tool call arguments in typed format, message=%q", reviewerMessages[2].Content)
 	}
 	if strings.Contains(reviewerMessages[2].Content, "(id=") {
 		t.Fatalf("did not expect tool call id in reviewer transcript, message=%q", reviewerMessages[2].Content)
 	}
-	if !strings.Contains(reviewerMessages[2].Content, "\"output\"") || !strings.Contains(reviewerMessages[2].Content, "\"ok\"") {
-		t.Fatalf("expected paired tool output field in tool call payload, message=%q", reviewerMessages[2].Content)
+	if !strings.Contains(reviewerMessages[2].Content, "Output:") || !strings.Contains(reviewerMessages[2].Content, "\"ok\"") {
+		t.Fatalf("expected paired tool output section in tool call payload, message=%q", reviewerMessages[2].Content)
 	}
 	if !strings.Contains(reviewerMessages[3].Content, "Agent:") {
 		t.Fatalf("expected assistant final answer entry to use agent label, message=%q", reviewerMessages[3].Content)
@@ -3261,11 +3261,13 @@ func TestAppendMissingReviewerMetaContextBackfillsSkillsBetweenAgentsAndEnvironm
 	existingGlobalAgents := llm.Message{
 		Role:        llm.RoleDeveloper,
 		MessageType: llm.MessageTypeAgentsMD,
+		SourcePath:  "/tmp/global/AGENTS.md",
 		Content:     agentsInjectedHeader + "\nsource: /tmp/global/AGENTS.md\n\n```md\nglobal\n```",
 	}
 	existingWorkspaceAgents := llm.Message{
 		Role:        llm.RoleDeveloper,
 		MessageType: llm.MessageTypeAgentsMD,
+		SourcePath:  "/tmp/workspace/AGENTS.md",
 		Content:     agentsInjectedHeader + "\nsource: /tmp/workspace/AGENTS.md\n\n```md\nworkspace\n```",
 	}
 	existingEnv := llm.Message{
@@ -3358,6 +3360,7 @@ func TestAppendMissingReviewerMetaContextBackfillsMissingWorkspaceAgentsSource(t
 		{
 			Role:        llm.RoleDeveloper,
 			MessageType: llm.MessageTypeAgentsMD,
+			SourcePath:  globalPath,
 			Content:     agentsInjectedHeader + "\nsource: " + globalPath + "\n\n```md\nglobal rule\n```",
 		},
 		{Role: llm.RoleUser, Content: "request"},
@@ -3383,7 +3386,7 @@ func TestAppendMissingReviewerMetaContextBackfillsMissingWorkspaceAgentsSource(t
 	}
 }
 
-func TestAppendMissingReviewerMetaContextPreservesLegacyUntypedMetaAndBackfillsLiveAgents(t *testing.T) {
+func TestAppendMissingReviewerMetaContextLeavesUntypedLegacyMetaInTranscript(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	globalDir := filepath.Join(home, agentsGlobalDirName)
@@ -3417,23 +3420,26 @@ func TestAppendMissingReviewerMetaContextPreservesLegacyUntypedMetaAndBackfillsL
 	if err != nil {
 		t.Fatalf("appendMissingReviewerMetaContext: %v", err)
 	}
-	if len(got) != 5 {
-		t.Fatalf("expected global agents + legacy agents + legacy skills + legacy environment + transcript, got %d", len(got))
+	if len(got) != 6 {
+		t.Fatalf("expected live metadata plus preserved legacy transcript entries, got %d", len(got))
 	}
 	if got[0].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[0].Content, "source: "+globalPath) {
 		t.Fatalf("expected live global AGENTS to be backfilled first, got %+v", got[0])
 	}
-	if got[1].MessageType != llm.MessageTypeAgentsMD || !strings.Contains(got[1].Content, "source: "+legacyWorkspacePath) {
-		t.Fatalf("expected legacy workspace AGENTS to be preserved and canonicalized, got %+v", got[1])
+	if got[1].MessageType != llm.MessageTypeEnvironment || !strings.Contains(got[1].Content, environmentInjectedHeader) {
+		t.Fatalf("expected live environment metadata second, got %+v", got[1])
 	}
-	if got[2].MessageType != llm.MessageTypeSkills || !strings.Contains(got[2].Content, "legacy-skill") {
-		t.Fatalf("expected legacy skills meta to be preserved and canonicalized, got %+v", got[2])
+	if got[2].Role != llm.RoleDeveloper || !strings.Contains(got[2].Content, legacyWorkspacePath) {
+		t.Fatalf("expected untyped legacy AGENTS text to remain transcript content, got %+v", got[2])
 	}
-	if got[3].MessageType != llm.MessageTypeEnvironment || !strings.Contains(got[3].Content, environmentInjectedHeader) {
-		t.Fatalf("expected legacy environment meta to be preserved and canonicalized, got %+v", got[3])
+	if got[3].Role != llm.RoleDeveloper || !strings.Contains(got[3].Content, "legacy-skill") {
+		t.Fatalf("expected untyped legacy skills text to remain transcript content, got %+v", got[3])
 	}
-	if got[4].Role != llm.RoleUser || got[4].Content != "request" {
-		t.Fatalf("expected transcript content at tail, got %+v", got[4])
+	if got[4].Role != llm.RoleDeveloper || !strings.Contains(got[4].Content, environmentInjectedHeader) {
+		t.Fatalf("expected untyped legacy environment text to remain transcript content, got %+v", got[4])
+	}
+	if got[5].Role != llm.RoleUser || got[5].Content != "request" {
+		t.Fatalf("expected transcript content at tail, got %+v", got[5])
 	}
 }
 
@@ -6741,7 +6747,7 @@ func TestManualCompactionAppendsLastVisibleUserMessageCarryover(t *testing.T) {
 		compactionResponses: []llm.CompactionResponse{
 			{
 				OutputItems: []llm.ResponseItem{
-					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: prompts.CompactionSummaryPrefix + "\ncondensed summary"},
+					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "condensed summary"},
 					{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
 				},
 				Usage: llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
@@ -6756,7 +6762,7 @@ func TestManualCompactionAppendsLastVisibleUserMessageCarryover(t *testing.T) {
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "please keep tests green"}); err != nil {
 		t.Fatalf("append user message: %v", err)
 	}
-	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: prompts.CompactionSummaryPrefix + "\nolder summary"}); err != nil {
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "older summary"}); err != nil {
 		t.Fatalf("append compaction summary: %v", err)
 	}
 
@@ -6915,7 +6921,7 @@ func TestManualCompactionLocalUsesHistorySinceLastCompactionCheckpoint(t *testin
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, Content: "old assistant response"}); err != nil {
 		t.Fatalf("append old assistant message: %v", err)
 	}
-	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: prompts.CompactionSummaryPrefix + "\n\nold compacted summary"}); err != nil {
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "old compacted summary"}); err != nil {
 		t.Fatalf("append compaction checkpoint: %v", err)
 	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "new user request"}); err != nil {
@@ -6947,7 +6953,7 @@ func TestManualCompactionLocalUsesHistorySinceLastCompactionCheckpoint(t *testin
 		if item.Role == llm.RoleDeveloper && item.Content == "canonical context" {
 			foundCanonical = true
 		}
-		if item.Role == llm.RoleUser && strings.HasPrefix(item.Content, prompts.CompactionSummaryPrefix) {
+		if item.Role == llm.RoleUser && item.MessageType == llm.MessageTypeCompactionSummary {
 			foundCheckpoint = true
 		}
 		if item.Role == llm.RoleUser && item.Content == "new user request" {
@@ -7379,7 +7385,7 @@ func TestRemoteCompactionMissingCheckpointFallsBackToLocal(t *testing.T) {
 	foundLocalSummaryCarryover := false
 	for _, req := range client.calls {
 		for _, item := range req.Items {
-			if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleUser && strings.Contains(item.Content, prompts.CompactionSummaryPrefix) {
+			if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleUser && item.MessageType == llm.MessageTypeCompactionSummary {
 				foundLocalSummaryCarryover = true
 				break
 			}
@@ -7604,7 +7610,7 @@ func TestOpenAIModelCompact404DoesNotFallbackToLocalCompaction(t *testing.T) {
 	}
 	for _, req := range client.calls {
 		for _, item := range req.Items {
-			if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleUser && strings.Contains(item.Content, prompts.CompactionSummaryPrefix) {
+			if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleUser && item.MessageType == llm.MessageTypeCompactionSummary {
 				t.Fatalf("did not expect local compaction summary fallback, request=%+v", req.Items)
 			}
 		}

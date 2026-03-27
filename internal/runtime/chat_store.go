@@ -4,7 +4,6 @@ import (
 	"builder/internal/llm"
 	"builder/internal/tools"
 	"builder/internal/transcript"
-	"builder/prompts"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -76,6 +75,7 @@ func newChatStore() *chatStore {
 func (s *chatStore) appendMessage(msg llm.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	msg = normalizeMessageForTranscript(msg, s.cwd)
 	if msg.Role == llm.RoleAssistant && strings.TrimSpace(msg.Content) != "" {
 		s.ongoing = ""
 		s.ongoingError = ""
@@ -264,8 +264,7 @@ func (s *chatStore) snapshot() ChatSnapshot {
 		switch msg.Role {
 		case llm.RoleUser:
 			content := strings.TrimSpace(msg.Content)
-			if content != "" &&
-				!strings.HasPrefix(content, prompts.CompactionSummaryPrefix+"\n") {
+			if content != "" && msg.MessageType != llm.MessageTypeCompactionSummary {
 				entries = append(entries, ChatEntry{Role: "user", Text: msg.Content})
 			}
 		case llm.RoleAssistant:
@@ -356,12 +355,11 @@ func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
 }
 
 func (s *chatStore) formatToolCall(call llm.ToolCall) ChatEntry {
-	built := tools.BuildCallTranscriptMeta(call.Name, tools.ToolCallContext{
-		WorkingDir:                 s.cwd,
-		DefaultShellTimeoutSeconds: defaultShellTimeoutSecond,
-	}, call.Input)
-	meta := &built
-	text := strings.TrimSpace(meta.Command)
+	meta := decodeToolCallMeta(call)
+	text := "tool call"
+	if meta != nil {
+		text = strings.TrimSpace(meta.Command)
+	}
 	if text == "" {
 		text = "tool call"
 	}

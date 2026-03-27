@@ -48,6 +48,7 @@ const (
 	MessageTypeAgentsMD                  MessageType = "agents.md"
 	MessageTypeSkills                    MessageType = "skills"
 	MessageTypeEnvironment               MessageType = "environment"
+	MessageTypeCompactionSummary         MessageType = "compaction_summary"
 	MessageTypeInterruption              MessageType = "interruption"
 	MessageTypeErrorFeedback             MessageType = "error_feedback"
 	MessageTypeReviewerFeedback          MessageType = "reviewer_feedback"
@@ -60,6 +61,7 @@ const (
 type Message struct {
 	Role           Role            `json:"role"`
 	MessageType    MessageType     `json:"message_type,omitempty"`
+	SourcePath     string          `json:"source_path,omitempty"`
 	Content        string          `json:"content,omitempty"`
 	CompactContent string          `json:"compact_content,omitempty"`
 	Name           string          `json:"name,omitempty"`
@@ -84,12 +86,14 @@ type ResponseItem struct {
 	Type             ResponseItemType `json:"type"`
 	Role             Role             `json:"role,omitempty"`
 	MessageType      MessageType      `json:"message_type,omitempty"`
+	SourcePath       string           `json:"source_path,omitempty"`
 	Phase            MessagePhase     `json:"phase,omitempty"`
 	ID               string           `json:"id,omitempty"`
 	Name             string           `json:"name,omitempty"`
 	CallID           string           `json:"call_id,omitempty"`
 	Content          string           `json:"content,omitempty"`
 	CompactContent   string           `json:"compact_content,omitempty"`
+	ToolPresentation json.RawMessage  `json:"tool_presentation,omitempty"`
 	Arguments        json.RawMessage  `json:"arguments,omitempty"`
 	Output           json.RawMessage  `json:"output,omitempty"`
 	ReasoningSummary []ReasoningEntry `json:"reasoning_summary,omitempty"`
@@ -109,6 +113,9 @@ func CloneResponseItems(items []ResponseItem) []ResponseItem {
 		}
 		if len(item.Output) > 0 {
 			copyItem.Output = append(json.RawMessage(nil), item.Output...)
+		}
+		if len(item.ToolPresentation) > 0 {
+			copyItem.ToolPresentation = append(json.RawMessage(nil), item.ToolPresentation...)
 		}
 		if len(item.Raw) > 0 {
 			copyItem.Raw = append(json.RawMessage(nil), item.Raw...)
@@ -131,6 +138,7 @@ func ItemsFromMessages(messages []Message) []ResponseItem {
 					Type:           ResponseItemTypeMessage,
 					Role:           RoleAssistant,
 					MessageType:    msg.MessageType,
+					SourcePath:     msg.SourcePath,
 					Phase:          msg.Phase,
 					Content:        msg.Content,
 					CompactContent: msg.CompactContent,
@@ -142,11 +150,12 @@ func ItemsFromMessages(messages []Message) []ResponseItem {
 					continue
 				}
 				out = append(out, ResponseItem{
-					Type:      ResponseItemTypeFunctionCall,
-					ID:        callID,
-					CallID:    callID,
-					Name:      tc.Name,
-					Arguments: normalizeToolInput(string(tc.Input)),
+					Type:             ResponseItemTypeFunctionCall,
+					ID:               callID,
+					CallID:           callID,
+					Name:             tc.Name,
+					ToolPresentation: append(json.RawMessage(nil), tc.Presentation...),
+					Arguments:        normalizeToolInput(string(tc.Input)),
 				})
 			}
 			for _, ri := range msg.ReasoningItems {
@@ -180,6 +189,7 @@ func ItemsFromMessages(messages []Message) []ResponseItem {
 				Type:           ResponseItemTypeMessage,
 				Role:           msg.Role,
 				MessageType:    msg.MessageType,
+				SourcePath:     msg.SourcePath,
 				Content:        msg.Content,
 				CompactContent: msg.CompactContent,
 				Name:           msg.Name,
@@ -207,6 +217,7 @@ func MessagesFromItems(items []ResponseItem) []Message {
 			msg := Message{
 				Role:           role,
 				MessageType:    item.MessageType,
+				SourcePath:     item.SourcePath,
 				Phase:          item.Phase,
 				Content:        item.Content,
 				CompactContent: item.CompactContent,
@@ -225,9 +236,10 @@ func MessagesFromItems(items []ResponseItem) []Message {
 				callID = strings.TrimSpace(item.ID)
 			}
 			out[lastAssistantIdx].ToolCalls = append(out[lastAssistantIdx].ToolCalls, ToolCall{
-				ID:    callID,
-				Name:  item.Name,
-				Input: normalizeToolInput(string(item.Arguments)),
+				ID:           callID,
+				Name:         item.Name,
+				Presentation: append(json.RawMessage(nil), item.ToolPresentation...),
+				Input:        normalizeToolInput(string(item.Arguments)),
 			})
 		case ResponseItemTypeFunctionCallOutput:
 			callID := strings.TrimSpace(item.CallID)
@@ -284,9 +296,10 @@ type Tool struct {
 }
 
 type ToolCall struct {
-	ID    string          `json:"id"`
-	Name  string          `json:"name"`
-	Input json.RawMessage `json:"input"`
+	ID           string          `json:"id"`
+	Name         string          `json:"name"`
+	Presentation json.RawMessage `json:"presentation,omitempty"`
+	Input        json.RawMessage `json:"input"`
 }
 
 type ToolResult struct {
