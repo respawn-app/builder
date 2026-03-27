@@ -345,6 +345,7 @@
 - Official release binaries are built through `scripts/build.sh`; the release profile is `CGO_ENABLED=0`, `-trimpath`, `-buildvcs=false`, and `-ldflags "-s -w -X builder/internal/buildinfo.Version=..."`.
 - Release archive packaging and verification live in `scripts/release-artifacts.sh`; workflow YAML should stay orchestration-focused.
 - Supported release targets are `darwin/arm64`, `linux/amd64`, `linux/arm64`, `windows/amd64`, and `windows/arm64`; macOS Intel is unsupported and must not be added back.
+- Workflow runner labels should use `*-latest` aliases where GitHub provides them. ARM smoke-test jobs currently stay on `ubuntu-24.04-arm` and `windows-11-arm` because GitHub does not publish `-latest` aliases for those hosted runners.
 - Linux release binaries must stay statically linked; do not enable PIE or other dynamic-linking release modes.
 - GitHub releases must publish `checksums.txt`, and `scripts/install.sh` verifies archive checksums when that manifest is present.
 - The release workflow must verify the checksum manifest and smoke-test packaged binaries on Linux, macOS, and Windows before publishing.

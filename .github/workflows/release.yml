@@ -163,6 +163,7 @@ jobs:
             goarch: amd64
             archive_ext: tar.gz
             binary_ext: ""
+          # GitHub does not currently provide an ubuntu-latest arm64 alias.
           - runs_on: ubuntu-24.04-arm
             goos: linux
             goarch: arm64
@@ -178,6 +179,7 @@ jobs:
             goarch: amd64
             archive_ext: zip
             binary_ext: .exe
+          # GitHub does not currently provide a windows-latest arm64 alias.
           - runs_on: windows-11-arm
             goos: windows
             goarch: arm64
