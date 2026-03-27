@@ -825,6 +825,9 @@ func TestRollbackEditingSubmitQuitsIntoForkTransition(t *testing.T) {
 	if updated.nextSessionInitialPrompt != "edited user message" {
 		t.Fatalf("expected startup prompt to match edited input, got %q", updated.nextSessionInitialPrompt)
 	}
+	if updated.input != "" {
+		t.Fatalf("expected rollback edit buffer cleared before quit, got %q", updated.input)
+	}
 }
 
 func TestRollbackSelectionRecentersTranscript(t *testing.T) {
@@ -4144,6 +4147,110 @@ func TestQueuedReviewUsesEngineConversationFreshnessWhenUIDidNotReceiveRuntimeUp
 	}
 }
 
+func TestBackSlashCommandCopiesLatestAssistantOutputWhenAvailable(t *testing.T) {
+	tests := []struct {
+		name       string
+		activity   uiActivity
+		transcript []llm.Message
+		localEntry string
+		ongoing    string
+		want       string
+	}{
+		{name: "idle committed final assistant reply", activity: uiActivityIdle, transcript: []llm.Message{{Role: llm.RoleAssistant, Content: "test", Phase: llm.MessagePhaseFinal}}, want: "test"},
+		{name: "interrupted streaming reply ignored", activity: uiActivityInterrupted, ongoing: "review findings", want: ""},
+		{name: "last committed entry must be assistant final", activity: uiActivityIdle, transcript: []llm.Message{{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal}, {Role: llm.RoleTool, Name: "shell", ToolCallID: "call-1", Content: `{"ok":true}`}}, want: ""},
+		{name: "commentary assistant reply ignored", activity: uiActivityIdle, transcript: []llm.Message{{Role: llm.RoleAssistant, Content: "commentary", Phase: llm.MessagePhaseCommentary}}, want: ""},
+		{name: "local entry after final assistant does not block copy", activity: uiActivityIdle, transcript: []llm.Message{{Role: llm.RoleAssistant, Content: "test", Phase: llm.MessagePhaseFinal}}, localEntry: "Supervisor ran: ok", want: "test"},
+		{name: "no assistant response", activity: uiActivityIdle, want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			store, err := session.Create(dir, "ws", dir)
+			if err != nil {
+				t.Fatalf("create store: %v", err)
+			}
+			if err := store.SetParentSessionID("parent-1"); err != nil {
+				t.Fatalf("set parent session id: %v", err)
+			}
+			for idx, message := range tt.transcript {
+				if _, err := store.AppendEvent("step-1", "message", message); err != nil {
+					t.Fatalf("append transcript message %d: %v", idx, err)
+				}
+			}
+			eng, err := runtime.New(store, &runtimeAdapterFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+			if err != nil {
+				t.Fatalf("new engine: %v", err)
+			}
+			if tt.localEntry != "" {
+				eng.AppendLocalEntry("reviewer_status", tt.localEntry)
+			}
+
+			m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+			m.activity = tt.activity
+			m.forwardToView(tui.SetConversationMsg{Ongoing: tt.ongoing})
+			m.input = "/back"
+
+			next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			updated := next.(*uiModel)
+			if cmd == nil {
+				t.Fatal("expected quit cmd for /back teleport")
+			}
+			if updated.Action() != UIActionOpenSession {
+				t.Fatalf("expected UIActionOpenSession, got %q", updated.Action())
+			}
+			if updated.nextSessionID != "parent-1" {
+				t.Fatalf("expected parent target session, got %q", updated.nextSessionID)
+			}
+			if updated.nextSessionInitialInput != tt.want {
+				t.Fatalf("expected copied input %q, got %q", tt.want, updated.nextSessionInitialInput)
+			}
+		})
+	}
+}
+
+func TestBackSlashCommandIgnoresRestoredPromptHistoryDraftInChildSession(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.SetParentSessionID("parent-1"); err != nil {
+		t.Fatalf("set parent session id: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: "latest reply", Phase: llm.MessagePhaseFinal}); err != nil {
+		t.Fatalf("append assistant reply: %v", err)
+	}
+	eng, err := runtime.New(store, &runtimeAdapterFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.promptHistory = []string{"/back"}
+	m.promptHistoryDraft = "parked child draft"
+	m.promptHistoryDraftCursor = -1
+	m.promptHistorySelection = 0
+	m.input = "/back"
+	m.inputCursor = -1
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected quit cmd for /back teleport")
+	}
+	if updated.Action() != UIActionOpenSession {
+		t.Fatalf("expected UIActionOpenSession, got %q", updated.Action())
+	}
+	if updated.input != "parked child draft" {
+		t.Fatalf("expected parked child draft restored locally, got %q", updated.input)
+	}
+	if updated.nextSessionInitialInput != "latest reply" {
+		t.Fatalf("expected /back to still copy assistant reply, got %q", updated.nextSessionInitialInput)
+	}
+}
+
 func TestUnknownSlashCommandIsSubmittedAsPrompt(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.input = "/nope"
@@ -4913,6 +5020,25 @@ func TestInitAutoSubmitsStartupPrompt(t *testing.T) {
 	plain := stripANSIAndTrimRight(m.view.OngoingSnapshot())
 	if !strings.Contains(plain, "run review") {
 		t.Fatalf("expected startup prompt in transcript, got %q", plain)
+	}
+}
+
+func TestInitialInputSeedsDraftWithoutAutoSubmit(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIInitialInput("draft reply"),
+	).(*uiModel)
+
+	if m.input != "draft reply" {
+		t.Fatalf("expected initial input draft, got %q", m.input)
+	}
+	if m.inputCursor != -1 {
+		t.Fatalf("expected initial input cursor at tail, got %d", m.inputCursor)
+	}
+	if m.busy {
+		t.Fatal("did not expect initial input to auto-submit")
 	}
 }
 

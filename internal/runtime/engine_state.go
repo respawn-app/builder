@@ -24,6 +24,24 @@ func (e *Engine) ChatSnapshot() ChatSnapshot {
 	return e.chat.snapshot()
 }
 
+func (e *Engine) LastCommittedAssistantFinalAnswer() string {
+	messages := e.chat.snapshotMessages()
+	if len(messages) == 0 {
+		return ""
+	}
+	message := messages[len(messages)-1]
+	if message.Role != llm.RoleAssistant {
+		return ""
+	}
+	if message.Phase != llm.MessagePhaseFinal {
+		return ""
+	}
+	if strings.TrimSpace(message.Content) == "" {
+		return ""
+	}
+	return message.Content
+}
+
 func (e *Engine) ContextUsage() ContextUsage {
 	window := e.contextWindowTokens()
 	used := e.currentTokenUsage()
