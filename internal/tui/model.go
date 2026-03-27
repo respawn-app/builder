@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 type Mode string
@@ -471,7 +470,7 @@ func (m Model) renderDetailSnapshot() string {
 			selectedEntry = m.selectedTranscriptEntry
 		}
 	}
-	selectedStyle := lipgloss.NewStyle().Background(lipgloss.Color("15")).Foreground(lipgloss.Color("0"))
+	selectedStyle := m.palette().selection
 	out := make([]string, 0, m.viewportLines)
 	for i := start; i < end; i++ {
 		line := lines[i]

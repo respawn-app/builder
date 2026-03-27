@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"builder/internal/llm"
+	"builder/internal/theme"
 
 	bubbleprogress "github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/lipgloss"
@@ -202,30 +203,12 @@ func (l uiViewLayout) renderContextUsage(style uiStyles) string {
 	return label + " " + bar
 }
 
-func statusContextZoneHex(theme string, percent int) string {
-	if strings.EqualFold(strings.TrimSpace(theme), "light") {
-		if percent < 50 {
-			return "#22863A"
-		}
-		if percent < 80 {
-			return "#9A6700"
-		}
-		return "#CB2431"
-	}
-	if percent < 50 {
-		return "#98C379"
-	}
-	if percent < 80 {
-		return "#E5C07B"
-	}
-	return "#F97583"
+func statusContextZoneHex(themeName string, percent int) string {
+	return statusContextZone(themeName, percent).TrueColor
 }
 
-func statusContextEmptyHex(theme string) string {
-	if strings.EqualFold(strings.TrimSpace(theme), "light") {
-		return "#A0A1A7"
-	}
-	return "#5C6370"
+func statusContextEmptyHex(themeName string) string {
+	return theme.ResolvePalette(themeName).Status.ContextEmpty.TrueColor
 }
 
 func statusContextZoneColor(percent int) lipgloss.TerminalColor {
@@ -239,24 +222,26 @@ func statusContextZoneColor(percent int) lipgloss.TerminalColor {
 }
 
 func statusGreenColor() lipgloss.CompleteAdaptiveColor {
-	return lipgloss.CompleteAdaptiveColor{
-		Light: lipgloss.CompleteColor{ANSI: "2", ANSI256: "34", TrueColor: "#22863A"},
-		Dark:  lipgloss.CompleteColor{ANSI: "2", ANSI256: "114", TrueColor: "#98C379"},
-	}
+	return theme.DefaultPalette().Status.Success.Adaptive()
 }
 
 func statusAmberColor() lipgloss.CompleteAdaptiveColor {
-	return lipgloss.CompleteAdaptiveColor{
-		Light: lipgloss.CompleteColor{ANSI: "3", ANSI256: "136", TrueColor: "#9A6700"},
-		Dark:  lipgloss.CompleteColor{ANSI: "3", ANSI256: "180", TrueColor: "#E5C07B"},
-	}
+	return theme.DefaultPalette().Status.Warning.Adaptive()
 }
 
 func statusRedColor() lipgloss.CompleteAdaptiveColor {
-	return lipgloss.CompleteAdaptiveColor{
-		Light: lipgloss.CompleteColor{ANSI: "1", ANSI256: "160", TrueColor: "#CB2431"},
-		Dark:  lipgloss.CompleteColor{ANSI: "1", ANSI256: "203", TrueColor: "#F97583"},
+	return theme.DefaultPalette().Status.Error.Adaptive()
+}
+
+func statusContextZone(themeName string, percent int) theme.Color {
+	palette := theme.ResolvePalette(themeName).Status
+	if percent < 50 {
+		return palette.Success
 	}
+	if percent < 80 {
+		return palette.Warning
+	}
+	return palette.Error
 }
 
 func renderStatusDot(theme string, activity uiActivity, frame int) string {

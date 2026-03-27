@@ -131,7 +131,7 @@ jobs:
         run: echo "name=release-assets-${TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: ${{ steps.artifact.outputs.name }}
           path: dist/*
@@ -144,7 +144,7 @@ jobs:
       - uses: actions/checkout@v6.0.2
 
       - name: Download release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.1
         with:
           name: ${{ needs.prepare_release.outputs.artifact_name }}
           path: dist
@@ -193,7 +193,7 @@ jobs:
       - uses: actions/checkout@v6.0.2
 
       - name: Download release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.1
         with:
           name: ${{ needs.prepare_release.outputs.artifact_name }}
           path: dist
@@ -231,7 +231,7 @@ jobs:
       - uses: actions/checkout@v6.0.2
 
       - name: Download release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.1
         with:
           name: ${{ needs.prepare_release.outputs.artifact_name }}
           path: dist
