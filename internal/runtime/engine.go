@@ -126,10 +126,6 @@ type Engine struct {
 	locked *session.LockedContract
 
 	pendingInjected []string
-	pendingNotices  []llm.Message
-	cancelCurrent   context.CancelFunc
-	busy            bool
-	noticeScheduled bool
 
 	lastUsage llm.Usage
 
@@ -147,11 +143,14 @@ type Engine struct {
 	compactionTokenCountCacheValue int
 	collaboratorsOnce              sync.Once
 
-	phaseProtocol phaseProtocolEnforcer
-	reviewerFlow  reviewerPipeline
-	messageFlow   messageLifecycle
-	stepFlow      stepExecutor
-	toolFlow      toolExecutor
+	phaseProtocol  phaseProtocolEnforcer
+	stepLifecycle  exclusiveStepLifecycle
+	backgroundFlow backgroundNoticeScheduler
+	compactionFlow contextCompactor
+	reviewerFlow   reviewerPipeline
+	messageFlow    messageLifecycle
+	stepFlow       stepExecutor
+	toolFlow       toolExecutor
 }
 
 func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg Config) (*Engine, error) {
@@ -282,23 +281,8 @@ func (e *Engine) DiscardQueuedUserMessagesMatching(text string) int {
 }
 
 func (e *Engine) Interrupt() error {
-	e.mu.Lock()
-	cancel := e.cancelCurrent
-	busy := e.busy
-	e.mu.Unlock()
-
-	if !busy || cancel == nil {
-		return nil
-	}
-	cancel()
-
-	if err := e.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeInterruption, Content: interruptMessage}); err != nil {
-		return err
-	}
-	if err := e.store.MarkInFlight(false); err != nil {
-		return err
-	}
-	return nil
+	e.ensureOrchestrationCollaborators()
+	return e.stepLifecycle.Interrupt()
 }
 
 func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (assistant llm.Message, err error) {
@@ -306,58 +290,22 @@ func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (assistant 
 		return llm.Message{}, errors.New("empty message")
 	}
 
-	e.mu.Lock()
-	if e.busy {
-		e.mu.Unlock()
-		return llm.Message{}, errors.New("agent is busy")
-	}
-	e.busy = true
-	stepCtx, cancel := context.WithCancel(ctx)
-	e.cancelCurrent = cancel
-	e.mu.Unlock()
-	e.emit(Event{Kind: EventRunStateChanged, RunState: &RunState{Busy: true}})
-	stepID := ""
-	defer func() {
-		e.mu.Lock()
-		e.busy = false
-		e.cancelCurrent = nil
-		hasQueuedNotices := len(e.pendingNotices) > 0 && !e.noticeScheduled
-		if hasQueuedNotices {
-			e.noticeScheduled = true
+	e.ensureOrchestrationCollaborators()
+	err = e.stepLifecycle.Run(ctx, exclusiveStepOptions{EmitRunState: true}, func(stepCtx context.Context, stepID string) error {
+		if err := e.injectAgentsIfNeeded(stepID); err != nil {
+			return err
 		}
-		e.mu.Unlock()
-		e.emit(Event{Kind: EventRunStateChanged, StepID: stepID, RunState: &RunState{Busy: false}})
-		if hasQueuedNotices {
-			go e.processQueuedNotices(context.Background())
+		if err := e.injectHeadlessModeTransitionPromptIfNeeded(stepID); err != nil {
+			return err
 		}
-		if clearErr := e.store.MarkInFlight(false); clearErr != nil {
-			wrapped := fmt.Errorf("mark in-flight false: %w", clearErr)
-			e.emit(Event{Kind: EventInFlightClearFailed, StepID: stepID, Error: wrapped.Error()})
-			err = errors.Join(err, wrapped)
+		if err := e.appendUserMessage(stepID, text); err != nil {
+			return err
 		}
-	}()
-
-	if err = e.store.MarkInFlight(true); err != nil {
-		return llm.Message{}, err
-	}
-
-	stepID = uuid.NewString()
-
-	if err = e.injectAgentsIfNeeded(stepID); err != nil {
-		return llm.Message{}, err
-	}
-	if err = e.injectHeadlessModeTransitionPromptIfNeeded(stepID); err != nil {
-		return llm.Message{}, err
-	}
-	if err = e.appendUserMessage(stepID, text); err != nil {
-		return llm.Message{}, err
-	}
-
-	assistant, err = e.runStepLoop(stepCtx, stepID)
-	if err != nil {
-		return llm.Message{}, err
-	}
-	return assistant, nil
+		msg, runErr := e.runStepLoop(stepCtx, stepID)
+		assistant = msg
+		return runErr
+	})
+	return assistant, err
 }
 
 func (e *Engine) SubmitUserShellCommand(ctx context.Context, command string) (result tools.Result, err error) {
@@ -366,84 +314,49 @@ func (e *Engine) SubmitUserShellCommand(ctx context.Context, command string) (re
 		return tools.Result{}, errors.New("empty command")
 	}
 
-	e.mu.Lock()
-	if e.busy {
-		e.mu.Unlock()
-		return tools.Result{}, errors.New("agent is busy")
-	}
-	e.busy = true
-	stepCtx, cancel := context.WithCancel(ctx)
-	e.cancelCurrent = cancel
-	e.mu.Unlock()
-	e.emit(Event{Kind: EventRunStateChanged, RunState: &RunState{Busy: true}})
-	stepID := ""
-	defer func() {
-		e.mu.Lock()
-		e.busy = false
-		e.cancelCurrent = nil
-		hasQueuedNotices := len(e.pendingNotices) > 0 && !e.noticeScheduled
-		if hasQueuedNotices {
-			e.noticeScheduled = true
+	e.ensureOrchestrationCollaborators()
+	err = e.stepLifecycle.Run(ctx, exclusiveStepOptions{EmitRunState: true}, func(stepCtx context.Context, stepID string) error {
+		if err := e.injectAgentsIfNeeded(stepID); err != nil {
+			return err
 		}
-		e.mu.Unlock()
-		e.emit(Event{Kind: EventRunStateChanged, StepID: stepID, RunState: &RunState{Busy: false}})
-		if hasQueuedNotices {
-			go e.processQueuedNotices(context.Background())
+		if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, Content: fmt.Sprintf("User ran shell command directly:\n%s", command)}); err != nil {
+			return err
 		}
-		if clearErr := e.store.MarkInFlight(false); clearErr != nil {
-			wrapped := fmt.Errorf("mark in-flight false: %w", clearErr)
-			e.emit(Event{Kind: EventInFlightClearFailed, StepID: stepID, Error: wrapped.Error()})
-			err = errors.Join(err, wrapped)
+
+		call := llm.ToolCall{
+			ID:   uuid.NewString(),
+			Name: string(tools.ToolShell),
+			Input: mustJSON(map[string]any{
+				"command":        command,
+				"user_initiated": true,
+			}),
 		}
-	}()
-
-	if err = e.store.MarkInFlight(true); err != nil {
-		return tools.Result{}, err
-	}
-
-	stepID = uuid.NewString()
-
-	if err = e.injectAgentsIfNeeded(stepID); err != nil {
-		return tools.Result{}, err
-	}
-	if err = e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, Content: fmt.Sprintf("User ran shell command directly:\n%s", command)}); err != nil {
-		return tools.Result{}, err
-	}
-
-	call := llm.ToolCall{
-		ID:   uuid.NewString(),
-		Name: string(tools.ToolShell),
-		Input: mustJSON(map[string]any{
-			"command":        command,
-			"user_initiated": true,
-		}),
-	}
-	if err = e.appendAssistantMessage(stepID, llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call}}); err != nil {
-		return tools.Result{}, err
-	}
-	if _, ok := e.registry.Get(tools.ToolShell); !ok {
-		e.emit(Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: copiedToolCall(call)})
-		result = tools.Result{CallID: call.ID, Name: tools.ToolShell, IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
-		if err = e.persistToolCompletion(stepID, result); err != nil {
-			return result, fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", call.ID, result.Name, err)
+		if err := e.appendAssistantMessage(stepID, llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call}}); err != nil {
+			return err
 		}
-		e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: copiedToolResult(result)})
+		if _, ok := e.registry.Get(tools.ToolShell); !ok {
+			e.emit(Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: copiedToolCall(call)})
+			result = tools.Result{CallID: call.ID, Name: tools.ToolShell, IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
+			if err := e.persistToolCompletion(stepID, result); err != nil {
+				return fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", call.ID, result.Name, err)
+			}
+			e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: copiedToolResult(result)})
+			if appendErr := e.appendMessage(stepID, llm.Message{Role: llm.RoleTool, Content: string(result.Output), ToolCallID: result.CallID, Name: string(result.Name)}); appendErr != nil {
+				return appendErr
+			}
+			return errors.New("unknown tool")
+		}
+
+		results, execErr := e.executeToolCalls(stepCtx, stepID, []llm.ToolCall{call})
+		if len(results) == 0 {
+			return errors.New("shell tool execution returned no result")
+		}
+		result = results[0]
 		if appendErr := e.appendMessage(stepID, llm.Message{Role: llm.RoleTool, Content: string(result.Output), ToolCallID: result.CallID, Name: string(result.Name)}); appendErr != nil {
-			return result, appendErr
+			return errors.Join(execErr, appendErr)
 		}
-		return result, errors.New("unknown tool")
-	}
-
-	results, execErr := e.executeToolCalls(stepCtx, stepID, []llm.ToolCall{call})
-	if len(results) == 0 {
-		return tools.Result{}, errors.New("shell tool execution returned no result")
-	}
-	result = results[0]
-	err = execErr
-	if appendErr := e.appendMessage(stepID, llm.Message{Role: llm.RoleTool, Content: string(result.Output), ToolCallID: result.CallID, Name: string(result.Name)}); appendErr != nil {
-		return result, errors.Join(err, appendErr)
-	}
-
+		return execErr
+	})
 	return result, err
 }
 

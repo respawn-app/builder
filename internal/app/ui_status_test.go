@@ -126,10 +126,10 @@ func TestStatusCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	if !updated.statusVisible {
+	if !updated.status.isOpen() {
 		t.Fatal("expected /status to open the status overlay")
 	}
-	if !updated.statusOverlayPushed {
+	if !updated.status.ownsTranscriptMode {
 		t.Fatal("expected /status to push a dedicated overlay")
 	}
 	if updated.view.Mode() != tui.ModeDetail {
@@ -139,7 +139,7 @@ func TestStatusCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 		t.Fatal("expected /status open to emit a screen transition command")
 	}
 
-	next, _ = updated.Update(statusRefreshDoneMsg{token: updated.statusRefreshToken, snapshot: collector.snapshot})
+	next, _ = updated.Update(statusRefreshDoneMsg{token: updated.status.refreshToken, snapshot: collector.snapshot})
 	updated = next.(*uiModel)
 	plain := stripANSIAndTrimRight(updated.View())
 	for _, want := range []string{"Pro subscription", "CWD: /tmp/workdir", "Model: gpt-5 high fast", "incident", "Parent session: incident-root <parent-456>", "session-123", "master", "dirty | ahead 2 | behind 1"} {
@@ -164,10 +164,10 @@ func TestStatusCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if updated.statusVisible {
+	if updated.status.isOpen() {
 		t.Fatal("expected esc to close the status overlay")
 	}
-	if updated.statusOverlayPushed {
+	if updated.status.ownsTranscriptMode {
 		t.Fatal("expected status overlay state cleared after close")
 	}
 	if updated.view.Mode() != tui.ModeOngoing {
@@ -212,7 +212,7 @@ func TestStatusCommandProgressivelyLoadsSections(t *testing.T) {
 		}
 	}
 
-	next, _ = updated.Update(statusGitRefreshDoneMsg{token: updated.statusRefreshToken, result: collector.gitResult})
+	next, _ = updated.Update(statusGitRefreshDoneMsg{token: updated.status.refreshToken, result: collector.gitResult})
 	updated = next.(*uiModel)
 	plain = stripANSIAndTrimRight(updated.View())
 	if !strings.Contains(plain, "master") || !strings.Contains(plain, "dirty | ahead 1 | behind 0") {
@@ -246,7 +246,7 @@ func TestStatusCommandPersistsPromptHistoryWithoutBlockingOpen(t *testing.T) {
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	if !updated.statusVisible {
+	if !updated.status.isOpen() {
 		t.Fatal("expected /status to open immediately before prompt-history persistence completes")
 	}
 	if got := updated.promptHistory[len(updated.promptHistory)-1]; got != "/status" {
@@ -418,15 +418,15 @@ func TestStatusCommandRefreshesGitWhenCachedResultIsInvisible(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	if updated.statusPendingSections == nil || !updated.statusPendingSections[uiStatusSectionGit] {
-		t.Fatalf("expected git section to refresh when cached git result is invisible, got %+v", updated.statusPendingSections)
+	if updated.status.pendingSections == nil || !updated.status.pendingSections[uiStatusSectionGit] {
+		t.Fatalf("expected git section to refresh when cached git result is invisible, got %+v", updated.status.pendingSections)
 	}
 	plain := stripANSIAndTrimRight(updated.View())
 	if !strings.Contains(plain, "Loading git...") {
 		t.Fatalf("expected git section placeholder before refreshed result, got %q", plain)
 	}
 
-	next, _ = updated.Update(statusGitRefreshDoneMsg{token: updated.statusRefreshToken, result: collector.gitResult})
+	next, _ = updated.Update(statusGitRefreshDoneMsg{token: updated.status.refreshToken, result: collector.gitResult})
 	updated = next.(*uiModel)
 	plain = stripANSIAndTrimRight(updated.View())
 	if !strings.Contains(plain, "master") || !strings.Contains(plain, "dirty | ahead 2 | behind 1") {
@@ -560,7 +560,7 @@ func TestStatusOverlayRendersGitErrorState(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	next, _ = updated.Update(statusRefreshDoneMsg{token: updated.statusRefreshToken, snapshot: collector.snapshot})
+	next, _ = updated.Update(statusRefreshDoneMsg{token: testStatusRefreshToken(updated), snapshot: collector.snapshot})
 	updated = next.(*uiModel)
 	plain := stripANSIAndTrimRight(updated.View())
 	if !strings.Contains(plain, "Git") || !strings.Contains(plain, "git status failed: context canceled") {
@@ -600,15 +600,15 @@ func TestStatusCommandProgressiveAuthWarningIsRendered(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	next, _ = updated.Update(statusBaseRefreshDoneMsg{token: updated.statusRefreshToken, snapshot: collector.base})
+	next, _ = updated.Update(statusBaseRefreshDoneMsg{token: testStatusRefreshToken(updated), snapshot: collector.base})
 	updated = next.(*uiModel)
-	next, _ = updated.Update(statusAuthRefreshDoneMsg{token: updated.statusRefreshToken, result: collector.authResult})
+	next, _ = updated.Update(statusAuthRefreshDoneMsg{token: testStatusRefreshToken(updated), result: collector.authResult})
 	updated = next.(*uiModel)
-	if updated.statusSnapshot.CollectorWarning != "auth: oauth refresh failed" {
-		t.Fatalf("collector warning = %q", updated.statusSnapshot.CollectorWarning)
+	if updated.status.snapshot.CollectorWarning != "auth: oauth refresh failed" {
+		t.Fatalf("collector warning = %q", updated.status.snapshot.CollectorWarning)
 	}
-	if updated.statusSnapshot.Subscription.Summary != "Subscription unavailable: oauth refresh failed" {
-		t.Fatalf("subscription summary = %q", updated.statusSnapshot.Subscription.Summary)
+	if updated.status.snapshot.Subscription.Summary != "Subscription unavailable: oauth refresh failed" {
+		t.Fatalf("subscription summary = %q", updated.status.snapshot.Subscription.Summary)
 	}
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnd})
 	updated = next.(*uiModel)
@@ -647,7 +647,7 @@ func TestStatusOverlaySubscriptionBarDoesNotLeakANSIFragments(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	next, _ = updated.Update(statusRefreshDoneMsg{token: updated.statusRefreshToken, snapshot: collector.snapshot})
+	next, _ = updated.Update(statusRefreshDoneMsg{token: testStatusRefreshToken(updated), snapshot: collector.snapshot})
 	updated = next.(*uiModel)
 	raw := updated.View()
 	if strings.Contains(raw, "\n38;2;") || strings.Contains(raw, "\n2;") {
@@ -686,7 +686,7 @@ func TestStatusOverlaySubscriptionLineShowsRelativeResetTime(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	next, _ = updated.Update(statusRefreshDoneMsg{token: updated.statusRefreshToken, snapshot: collector.snapshot})
+	next, _ = updated.Update(statusRefreshDoneMsg{token: testStatusRefreshToken(updated), snapshot: collector.snapshot})
 	updated = next.(*uiModel)
 	plain := stripANSIAndTrimRight(updated.View())
 	if !strings.Contains(plain, "resets in 2d1h") {
@@ -727,7 +727,7 @@ func TestStatusOverlaySubscriptionBarFitsNarrowWidth(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	next, _ = updated.Update(statusRefreshDoneMsg{token: updated.statusRefreshToken, snapshot: collector.snapshot})
+	next, _ = updated.Update(statusRefreshDoneMsg{token: testStatusRefreshToken(updated), snapshot: collector.snapshot})
 	updated = next.(*uiModel)
 	for _, line := range strings.Split(strings.TrimSuffix(updated.View(), ansiHideCursor), "\n") {
 		if lipgloss.Width(line) > m.termWidth {
@@ -898,7 +898,7 @@ func TestStatusOverlayRendersQualifiedDuplicateSubscriptionBuckets(t *testing.T)
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	next, _ = updated.Update(statusRefreshDoneMsg{token: updated.statusRefreshToken, snapshot: collector.snapshot})
+	next, _ = updated.Update(statusRefreshDoneMsg{token: testStatusRefreshToken(updated), snapshot: collector.snapshot})
 	updated = next.(*uiModel)
 	plain := stripANSIAndTrimRight(updated.View())
 	if strings.Count(plain, "5h") < 2 {
@@ -934,7 +934,7 @@ func TestStatusConfigHidesEmptyOverrideLine(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	next, _ = updated.Update(statusRefreshDoneMsg{token: updated.statusRefreshToken, snapshot: collector.snapshot})
+	next, _ = updated.Update(statusRefreshDoneMsg{token: testStatusRefreshToken(updated), snapshot: collector.snapshot})
 	updated = next.(*uiModel)
 	plain := stripANSIAndTrimRight(updated.View())
 	if strings.Contains(plain, "overrides: none") {

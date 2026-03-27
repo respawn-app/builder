@@ -141,6 +141,7 @@
 - Tool definitions are also the single source of truth for tool runtime availability, request exposure/gating (including multimodal and native-web-search opt-in), hosted-output decoding, transcript metadata, and render hints.
 - Prompts/tool definitions are build-embedded (runtime-hardcoded from source files; no runtime file loading dependency).
 - Instruction precedence follows provider/API role semantics (no custom override layer).
+- Modern transcript semantics are typed and persisted end-to-end: tool-call display uses explicit tool-presentation payloads, meta-context classification uses structured fields (`message_type`, `source_path`), and compaction summaries persist as typed transcript items rather than content prefixes or header parsing.
 
 ## AGENTS.md Injection
 
@@ -209,6 +210,7 @@
 - Native compaction eligibility is capability-driven and user-configurable.
 - `type=compaction` items and encrypted reasoning/compaction payloads are treated as opaque and replayed unchanged.
 - Compaction lifecycle emits and persists started/completed/failed events.
+- Local compaction summaries persist internally as `message_type=compaction_summary`; any model-facing summary prefix is added only at the provider input boundary.
 - UI shows one compacted notice line per successful compaction; ongoing suppresses detailed summary content; detail shows full local summary when available.
 
 ## Model Defaults
@@ -227,6 +229,16 @@
 - Ongoing preview sizing is fixed: command max `80`, file max `60`, soft-wrap allowed.
 - Ongoing line prefix is `> `.
 - Shell command previews remain syntax-highlighted in both modes; ongoing renders them with lower-contrast `preview` styling plus terminal `faint`, while detail keeps full syntax colors.
+- Transcript rendering stages are explicit and ordered: `content render -> low-level semantic transform -> wrap -> line layout -> final decoration`.
+- Style ownership is fixed by layer:
+- Formatter config owns syntax backgrounds and formatter base foreground.
+- Transcript rendering owns role styling, subdued shell preview styling, and diff semantics.
+- Layout owns prefixes, indentation, and wrapping only.
+- Rendering/style invariants:
+- Detail shell commands are full syntax color.
+- Ongoing shell commands are syntax-highlighted but subdued.
+- Formatted text uses the app foreground as its base text color.
+- Syntax-highlighted output must not emit backgrounds unless explicitly intended, such as final diff added/removed decoration.
 - Assistant text streams in ongoing mode.
 - Tool output is not streamed live; show running status and reveal on completion.
 - `detail` is a non-streaming snapshot view.
@@ -237,6 +249,7 @@
 - Step-end markers appear in detail only.
 - Switching detail -> ongoing restores prior ongoing scroll position.
 - Mode-toggle events are UI-ephemeral and not persisted.
+- App interaction/overlay control is modeled as explicit typed states with allowed transitions. `ask`, `rollback`, `process list`, and `status` own isolated controller state; overlapping boolean precedence is forbidden.
 - Detail is a fullscreen pager-style transcript overlay (input/queued/picker hidden).
 - Ongoing mode uses native terminal scrollback by replaying committed transcript history into the normal buffer and appending only new committed transcript deltas.
 - Main UI startup stays in the normal buffer even when `tui_alternate_screen=always`, because ongoing-mode replay must remain visible in terminal scrollback.

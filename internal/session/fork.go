@@ -1,7 +1,6 @@
 package session
 
 import (
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -24,16 +23,10 @@ func ForkAtUserMessage(parent *Store, userMessageIndex int, forkName string) (*S
 	replay := make([]ReplayEvent, 0, len(events))
 	visibleUserCount := 0
 	for _, evt := range events {
-		if evt.Kind == "message" {
-			var msg persistedMessageEnvelope
-			if err := json.Unmarshal(evt.Payload, &msg); err != nil {
-				return nil, fmt.Errorf("decode message event: %w", err)
-			}
-			if isVisibleUserMessage(msg) {
-				visibleUserCount++
-				if visibleUserCount == userMessageIndex {
-					break
-				}
+		if hasVisibleUserMessageEvent(evt.Kind, evt.Payload) {
+			visibleUserCount++
+			if visibleUserCount == userMessageIndex {
+				break
 			}
 		}
 		replay = append(replay, ReplayEvent{StepID: evt.StepID, Kind: evt.Kind, Payload: evt.Payload})

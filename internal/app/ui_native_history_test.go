@@ -67,6 +67,34 @@ func TestNativeScrollbackStartupReplayIncludesFullTranscript(t *testing.T) {
 	}
 }
 
+func TestNativeScrollbackStartupReplayContinuesPastEmptyToolResult(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "user", Text: "before tool"},
+		{Role: "tool_call", Text: "apply patch", ToolCallID: "call_patch", ToolCall: &transcript.ToolCallMeta{ToolName: "patch"}},
+		{Role: "tool_result_ok", Text: "", ToolCallID: "call_patch"},
+		{Role: "assistant", Text: "after empty result"},
+	}
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	next, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg after first window size, got %T", cmd())
+	}
+	plain := stripANSIText(msg.Text)
+	if !strings.Contains(plain, "after empty result") {
+		t.Fatalf("expected startup replay to continue past empty tool result, got %q", msg.Text)
+	}
+	if strings.Contains(plain, "tool_result_ok") {
+		t.Fatalf("did not expect empty tool result entry to render, got %q", msg.Text)
+	}
+}
+
 func TestNativeScrollbackStartupEmptyConversationEmitsBlankScreenSpacer(t *testing.T) {
 	m := NewUIModel(
 		nil,
@@ -240,11 +268,8 @@ func TestNativeResizeReplayDebouncedToLatestResize(t *testing.T) {
 
 	next, replayCmd := m.Update(nativeResizeReplayMsg{token: secondToken})
 	m = next.(*uiModel)
-	if replayCmd == nil {
-		t.Fatal("expected latest resize replay token to emit replay command")
-	}
-	if msg := replayCmd(); msg == nil {
-		t.Fatal("expected replay command to return a message")
+	if replayCmd != nil {
+		t.Fatalf("expected latest resize replay token to skip non-append history rewrite, got %T", replayCmd)
 	}
 	if m.nativeFormatterWidth != 100 {
 		t.Fatalf("expected formatter width rebased to latest resize width 100, got %d", m.nativeFormatterWidth)
@@ -577,20 +602,14 @@ func renderNativeScrollbackSnapshotLegacy(entries []tui.TranscriptEntry, theme s
 	return styleNativeReplayDividers(tuiModel.OngoingCommittedSnapshot(), theme, width)
 }
 
-func TestRenderNativeScrollbackSnapshotMatchesLegacyAppendPath(t *testing.T) {
-	entries := []tui.TranscriptEntry{
-		{Role: "user", Text: "show files"},
-		{Role: "tool_call", Text: "ls -la", ToolCallID: "call_1", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "ls -la"}},
-		{Role: "tool_result_ok", Text: "total 8\n-rw-r--r-- a.txt", ToolCallID: "call_1"},
-		{Role: "tool_call", Text: "Choose scope?", ToolCallID: "call_2", ToolCall: &transcript.ToolCallMeta{ToolName: "ask_question", Question: "Choose scope?", Suggestions: []string{"full"}, RecommendedOptionIndex: 1}},
-		{Role: "tool_result_ok", Text: "ask result summary", ToolCallID: "call_2"},
-		{Role: "tool_call", Text: "Edited:\n./a.go +1 -1", ToolCallID: "call_3", ToolCall: &transcript.ToolCallMeta{ToolName: "patch", PatchSummary: "Edited:\n./a.go +1 -1", PatchDetail: "Edited:\n/work/a.go\n-old\n+new", RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff}}},
-		{Role: "tool_result_ok", Text: "", ToolCallID: "call_3"},
+func TestStyleNativeReplayDividersKeepsRawRuleLikeLinesAsContent(t *testing.T) {
+	out := styleNativeReplayDividers("───\nbody", "dark", 10)
+	lines := strings.Split(stripANSIPreserve(out), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected two lines, got %q", out)
 	}
-	modern := renderNativeScrollbackSnapshot(entries, "dark", 120)
-	legacy := renderNativeScrollbackSnapshotLegacy(entries, "dark", 120)
-	if modern != legacy {
-		t.Fatalf("expected native snapshot output to match legacy append path")
+	if lines[0] != "───" {
+		t.Fatalf("expected raw divider-like content preserved, got %q", lines[0])
 	}
 }
 
@@ -1453,7 +1472,23 @@ func TestNativeHistoryReplayDefersWhileDetailAndFlushesOnReturn(t *testing.T) {
 	if !strings.Contains(plain, "steered message") {
 		t.Fatalf("expected deferred replay to include steered message, got %q", plain)
 	}
-	if strings.Contains(plain, "seed") {
-		t.Fatalf("expected deferred replay to emit only the missing delta, got %q", plain)
+}
+
+func TestNativeHistorySnapshotSkipsNonAppendRewriteInOngoingMode(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.windowSizeKnown = true
+	initial := tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{{Role: "assistant", Lines: []string{"before"}}}}
+	m.nativeProjection = initial
+	m.nativeRenderedProjection = initial
+	m.nativeRenderedSnapshot = initial.Render(tui.TranscriptDivider)
+	m.nativeProjection = tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{{Role: "assistant", Lines: []string{"after"}}}}
+
+	cmd := m.emitCurrentNativeHistorySnapshot(false)
+	if cmd != nil {
+		t.Fatalf("expected non-append native replay to be skipped in ongoing mode, got %T", cmd)
+	}
+	if got := m.nativeRenderedSnapshot; got != initial.Render(tui.TranscriptDivider) {
+		t.Fatalf("expected rendered snapshot to remain unchanged, got %q", got)
 	}
 }

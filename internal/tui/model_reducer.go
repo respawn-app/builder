@@ -28,6 +28,8 @@ func (m *Model) reduce(msg tea.Msg) {
 		m.reduceMouseMsg(msg)
 	case ToggleModeMsg:
 		m.reduceToggleModeMsg(msg)
+	case SetModeMsg:
+		m.reduceSetModeMsg(msg)
 	case ScrollOngoingMsg:
 		m.reduceScrollOngoingMsg(msg)
 	case SetViewportLinesMsg:
@@ -64,38 +66,91 @@ func (m *Model) reduce(msg tea.Msg) {
 }
 
 func (m *Model) reduceKeyMsg(msg tea.KeyMsg) {
-	switch msg.Type {
-	case tea.KeyTab:
-		*m = m.toggleMode(false)
-	case tea.KeyUp:
-		*m = m.scrollActive(-1)
-	case tea.KeyDown:
-		*m = m.scrollActive(1)
-	case tea.KeyPgUp:
-		*m = m.scrollActive(-max(1, m.viewportLines-1))
-	case tea.KeyPgDown:
-		*m = m.scrollActive(max(1, m.viewportLines-1))
+	switch m.mode {
+	case ModeDetail:
+		m.reduceDetailKeyMsg(msg)
+	default:
+		m.reduceOngoingKeyMsg(msg)
 	}
 }
 
 func (m *Model) reduceMouseMsg(msg tea.MouseMsg) {
-	switch msg.Type {
-	case tea.MouseWheelUp:
-		*m = m.scrollActive(-1)
-	case tea.MouseWheelDown:
-		*m = m.scrollActive(1)
+	switch m.mode {
+	case ModeDetail:
+		m.reduceDetailMouseMsg(msg)
+	default:
+		m.reduceOngoingMouseMsg(msg)
 	}
 }
 
 func (m *Model) reduceToggleModeMsg(msg ToggleModeMsg) {
-	if m.mode == ModeDetail && m.ongoingDirty {
+	target := ModeDetail
+	if m.mode == ModeDetail {
+		target = ModeOngoing
+	}
+	m.reduceSetModeMsg(SetModeMsg{Mode: target, SkipDetailWarmup: msg.SkipDetailWarmup})
+}
+
+func (m *Model) reduceSetModeMsg(msg SetModeMsg) {
+	if msg.Mode == "" || msg.Mode == m.mode {
+		return
+	}
+	if m.mode == ModeDetail && msg.Mode == ModeOngoing && m.ongoingDirty {
 		m.rebuildOngoingSnapshot()
 	}
-	*m = m.toggleMode(msg.SkipDetailWarmup)
+	*m = m.transitionMode(msg.Mode, msg.SkipDetailWarmup)
 }
 
 func (m *Model) reduceScrollOngoingMsg(msg ScrollOngoingMsg) {
-	*m = m.scrollActive(msg.Delta)
+	*m = m.scrollOngoing(msg.Delta)
+}
+
+func (m *Model) reduceOngoingKeyMsg(msg tea.KeyMsg) {
+	switch msg.Type {
+	case tea.KeyTab:
+		*m = m.transitionMode(ModeDetail, false)
+	case tea.KeyUp:
+		*m = m.scrollOngoing(-1)
+	case tea.KeyDown:
+		*m = m.scrollOngoing(1)
+	case tea.KeyPgUp:
+		*m = m.scrollOngoing(-max(1, m.viewportLines-1))
+	case tea.KeyPgDown:
+		*m = m.scrollOngoing(max(1, m.viewportLines-1))
+	}
+}
+
+func (m *Model) reduceDetailKeyMsg(msg tea.KeyMsg) {
+	switch msg.Type {
+	case tea.KeyTab:
+		*m = m.transitionMode(ModeOngoing, false)
+	case tea.KeyUp:
+		*m = m.scrollDetail(-1)
+	case tea.KeyDown:
+		*m = m.scrollDetail(1)
+	case tea.KeyPgUp:
+		*m = m.scrollDetail(-max(1, m.viewportLines-1))
+	case tea.KeyPgDown:
+		*m = m.scrollDetail(max(1, m.viewportLines-1))
+	}
+}
+
+func (m *Model) reduceOngoingMouseMsg(msg tea.MouseMsg) {
+	switch msg.Type {
+	case tea.MouseWheelUp:
+		*m = m.scrollOngoing(-1)
+	case tea.MouseWheelDown:
+		*m = m.scrollOngoing(1)
+	}
+}
+
+func (m *Model) reduceDetailMouseMsg(msg tea.MouseMsg) {
+	switch msg.Type {
+	case tea.MouseWheelUp:
+		*m = m.scrollDetail(-1)
+	case tea.MouseWheelDown:
+		*m = m.scrollDetail(1)
+	}
 }
 
 func (m *Model) reduceViewportLinesMsg(msg SetViewportLinesMsg) bool {

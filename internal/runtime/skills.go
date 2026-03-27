@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -52,14 +53,15 @@ func skillsContextMessage(workspaceRoot string) (string, bool, error) {
 }
 
 func skillsContextMessageWithDisabled(workspaceRoot string, disabledSkills map[string]bool) (string, bool, error) {
-	skills, _, err := discoverInjectedSkills(workspaceRoot, normalizedDisabledSkills(disabledSkills))
+	builder := newMetaContextBuilder(workspaceRoot, "", "", disabledSkills, time.Time{})
+	metaResult, err := builder.Build(metaContextBuildOptions{IncludeSkills: true})
 	if err != nil {
 		return "", false, err
 	}
-	if len(skills) == 0 {
+	if len(metaResult.Skills) == 0 {
 		return "", false, nil
 	}
-	return renderSkillsContext(skills), true, nil
+	return metaResult.Skills[0].Content, true, nil
 }
 
 func discoverInjectedSkills(workspaceRoot string, disabledSkills map[string]bool) ([]injectedSkill, []skillDiscoveryIssue, error) {

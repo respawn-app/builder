@@ -32,6 +32,13 @@ type TranscriptEntry struct {
 	ToolCall    *transcript.ToolCallMeta
 }
 
+type VisibleLineKind uint8
+
+const (
+	VisibleLineContent VisibleLineKind = iota
+	VisibleLineDivider
+)
+
 type StreamingReasoningEntry struct {
 	Key  string
 	Role string
@@ -39,6 +46,11 @@ type StreamingReasoningEntry struct {
 }
 
 type ToggleModeMsg struct {
+	SkipDetailWarmup bool
+}
+
+type SetModeMsg struct {
+	Mode             Mode
 	SkipDetailWarmup bool
 }
 
@@ -166,11 +178,13 @@ type Model struct {
 
 	detailSnapshot          string
 	detailLines             []string
+	detailLineKinds         []VisibleLineKind
 	detailLineEntryIndices  []int
 	detailEntryLineRanges   []lineRange
 	detailDirty             bool
 	ongoingSnapshot         string
 	ongoingLineCache        []string
+	ongoingLineKinds        []VisibleLineKind
 	ongoingDirty            bool
 	ongoingError            string
 	theme                   string
@@ -183,6 +197,7 @@ type ongoingBlock struct {
 	role       string
 	lines      []string
 	entryIndex int
+	entryEnd   int
 }
 
 type lineRange struct {
@@ -238,6 +253,49 @@ func (m Model) View() string {
 	return m.renderOngoing()
 }
 
+func (m *Model) VisibleLineKinds() []VisibleLineKind {
+	if m == nil {
+		return nil
+	}
+	if m.mode == ModeDetail {
+		if m.detailDirty && len(m.detailLines) == 0 {
+			m.rebuildDetailSnapshot()
+		}
+		kinds := m.detailLineKinds
+		if len(kinds) == 0 {
+			kinds = make([]VisibleLineKind, len(m.detailSnapshotLines()))
+		}
+		return sliceVisibleLineKinds(kinds, m.detailScroll, m.maxDetailScroll(), m.viewportLines)
+	}
+	if m.ongoingDirty {
+		m.rebuildOngoingSnapshot()
+	}
+	kinds := m.ongoingLineKinds
+	if len(kinds) == 0 {
+		kinds = make([]VisibleLineKind, len(m.ongoingLines()))
+	}
+	return sliceVisibleLineKinds(kinds, m.ongoingScroll, m.maxOngoingScroll(), m.viewportLines)
+}
+
+func sliceVisibleLineKinds(kinds []VisibleLineKind, scroll, maxScroll, viewportLines int) []VisibleLineKind {
+	if viewportLines <= 0 {
+		return nil
+	}
+	if len(kinds) == 0 {
+		return append(make([]VisibleLineKind, 0, viewportLines), VisibleLineContent)
+	}
+	start := clamp(scroll, 0, maxScroll)
+	end := start + viewportLines
+	if end > len(kinds) {
+		end = len(kinds)
+	}
+	out := append([]VisibleLineKind(nil), kinds[start:end]...)
+	for len(out) < viewportLines {
+		out = append(out, VisibleLineContent)
+	}
+	return out
+}
+
 func (m Model) Mode() Mode {
 	return m.mode
 }
@@ -277,31 +335,44 @@ func FormatOngoingError(err error) string {
 }
 
 func (m Model) toggleMode(skipDetailWarmup bool) Model {
-	if m.mode == ModeOngoing {
+	target := ModeDetail
+	if m.mode == ModeDetail {
+		target = ModeOngoing
+	}
+	return m.transitionMode(target, skipDetailWarmup)
+}
+
+func (m Model) transitionMode(target Mode, skipDetailWarmup bool) Model {
+	if target == "" || target == m.mode {
+		return m
+	}
+	switch target {
+	case ModeDetail:
 		m.mode = ModeDetail
 		m.snapOngoingOnViewportResize = false
 		if !skipDetailWarmup && (m.detailDirty || len(m.detailLines) == 0) {
 			m.rebuildDetailSnapshot()
 		}
 		m.detailScroll = m.maxDetailScroll()
-		return m
+	case ModeOngoing:
+		m.mode = ModeOngoing
+		// Ongoing mode is the live tail view, so exiting detail always snaps to
+		// the latest visible transcript content.
+		m.ongoingScroll = m.maxOngoingScroll()
+		// App-level layout shrinks the viewport when returning to ongoing. Re-snap
+		// on the next viewport resize so we stay on the true latest tail.
+		m.snapOngoingOnViewportResize = true
 	}
-	m.mode = ModeOngoing
-	// Ongoing mode is the live tail view, so exiting detail always snaps to
-	// the latest visible transcript content.
-	m.ongoingScroll = m.maxOngoingScroll()
-	// App-level layout shrinks the viewport when returning to ongoing. Re-snap
-	// on the next viewport resize so we stay on the true latest tail.
-	m.snapOngoingOnViewportResize = true
 	return m
 }
 
-func (m Model) scrollActive(delta int) Model {
-	if m.mode == ModeDetail {
-		m.detailScroll = clamp(m.detailScroll+delta, 0, m.maxDetailScroll())
-		return m
-	}
+func (m Model) scrollOngoing(delta int) Model {
 	m.ongoingScroll = clamp(m.ongoingScroll+delta, 0, m.maxOngoingScroll())
+	return m
+}
+
+func (m Model) scrollDetail(delta int) Model {
+	m.detailScroll = clamp(m.detailScroll+delta, 0, m.maxDetailScroll())
 	return m
 }
 
@@ -359,9 +430,24 @@ func (m *Model) invalidateOngoingSnapshot() {
 }
 
 func (m *Model) rebuildOngoingSnapshot() {
-	snapshot := m.renderFlatOngoingTranscript()
-	m.ongoingSnapshot = snapshot
-	m.ongoingLineCache = splitLines(snapshot)
+	projection := m.OngoingProjection(true)
+	lines := projection.Lines(detailDivider())
+	if len(lines) == 0 {
+		m.ongoingSnapshot = ""
+		m.ongoingLineCache = []string{""}
+		m.ongoingLineKinds = []VisibleLineKind{VisibleLineContent}
+		m.ongoingDirty = false
+		return
+	}
+	plain := make([]string, 0, len(lines))
+	kinds := make([]VisibleLineKind, 0, len(lines))
+	for _, line := range lines {
+		plain = append(plain, line.Text)
+		kinds = append(kinds, line.Kind)
+	}
+	m.ongoingSnapshot = strings.Join(plain, "\n")
+	m.ongoingLineCache = plain
+	m.ongoingLineKinds = kinds
 	m.ongoingDirty = false
 }
 
@@ -416,12 +502,14 @@ func (m *Model) rebuildDetailSnapshot() {
 	if len(blocks) == 0 {
 		m.detailSnapshot = ""
 		m.detailLines = []string{""}
+		m.detailLineKinds = []VisibleLineKind{VisibleLineContent}
 		m.detailLineEntryIndices = []int{-1}
 		m.detailEntryLineRanges = nil
 		m.detailDirty = false
 		return
 	}
 	lines := make([]string, 0, len(blocks)*2)
+	lineKinds := make([]VisibleLineKind, 0, len(blocks)*2)
 	lineOwners := make([]int, 0, len(blocks)*2)
 	ranges := make([]lineRange, len(m.transcript))
 	for i := range ranges {
@@ -430,10 +518,14 @@ func (m *Model) rebuildDetailSnapshot() {
 	for idx, block := range blocks {
 		if idx > 0 {
 			lines = append(lines, detailDivider())
+			lineKinds = append(lineKinds, VisibleLineDivider)
 			lineOwners = append(lineOwners, -1)
 		}
 		start := len(lines)
 		lines = append(lines, block.lines...)
+		for range block.lines {
+			lineKinds = append(lineKinds, VisibleLineContent)
+		}
 		for range block.lines {
 			lineOwners = append(lineOwners, block.entryIndex)
 		}
@@ -448,6 +540,7 @@ func (m *Model) rebuildDetailSnapshot() {
 	}
 	m.detailSnapshot = strings.Join(lines, "\n")
 	m.detailLines = lines
+	m.detailLineKinds = lineKinds
 	m.detailLineEntryIndices = lineOwners
 	m.detailEntryLineRanges = ranges
 	m.detailDirty = false

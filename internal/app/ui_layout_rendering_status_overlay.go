@@ -22,13 +22,13 @@ func (l uiViewLayout) renderStatusOverlay(width, height int, _ uiStyles) []strin
 	content := l.statusOverlayContentLines(width)
 	contentHeight := max(1, height)
 	maxScroll := max(0, len(content)-contentHeight)
-	if l.model.statusScroll > maxScroll {
-		l.model.statusScroll = maxScroll
+	if l.model.status.scroll > maxScroll {
+		l.model.status.scroll = maxScroll
 	}
-	if l.model.statusScroll < 0 {
-		l.model.statusScroll = 0
+	if l.model.status.scroll < 0 {
+		l.model.status.scroll = 0
 	}
-	start := l.model.statusScroll
+	start := l.model.status.scroll
 	end := min(len(content), start+contentHeight)
 	visible := append([]string(nil), content[start:end]...)
 	for len(visible) < contentHeight {
@@ -70,13 +70,13 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 		appendWrapped(title, titleStyle)
 	}
 
-	if strings.TrimSpace(m.statusError) != "" && m.statusSnapshot.CollectedAt.IsZero() {
+	if strings.TrimSpace(m.status.error) != "" && m.status.snapshot.CollectedAt.IsZero() {
 		appendSectionTitle("Status")
-		appendWrapped(m.statusError, warningStyle)
+		appendWrapped(m.status.error, warningStyle)
 		return lines
 	}
 
-	snapshot := m.statusSnapshot
+	snapshot := m.status.snapshot
 
 	appendSectionTitle("Account")
 	if summary := statusVisibleAuthSummary(snapshot.Auth, snapshot.Subscription); summary != "" {
@@ -182,7 +182,7 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 }
 
 func (l uiViewLayout) statusSectionLoading(section uiStatusSection) bool {
-	return l.model.statusPendingSections != nil && l.model.statusPendingSections[section]
+	return l.model.status.pendingSections != nil && l.model.status.pendingSections[section]
 }
 
 func (l uiViewLayout) renderStatusSubscriptionLine(width int, window uiStatusSubscriptionWindow, labelWidth int) string {

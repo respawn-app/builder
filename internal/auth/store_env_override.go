@@ -2,42 +2,34 @@ package auth
 
 import (
 	"context"
-	"fmt"
 	"strings"
 )
 
 type envLookup func(string) (string, bool)
 
-type EnvAPIKeyOverrideMode string
-
-const (
-	EnvAPIKeyOverrideAlways                  EnvAPIKeyOverrideMode = "always"
-	EnvAPIKeyOverrideRespectStoredPreference EnvAPIKeyOverrideMode = "respect_stored_preference"
-)
-
 type EnvAPIKeyOverrideStore struct {
 	base      Store
 	lookupEnv envLookup
-	mode      EnvAPIKeyOverrideMode
 }
 
-func NewEnvAPIKeyOverrideStore(base Store, lookupEnv envLookup, mode EnvAPIKeyOverrideMode) *EnvAPIKeyOverrideStore {
+func NewEnvAPIKeyOverrideStore(base Store, lookupEnv envLookup) *EnvAPIKeyOverrideStore {
 	if lookupEnv == nil {
 		lookupEnv = func(string) (string, bool) { return "", false }
 	}
-	return &EnvAPIKeyOverrideStore{base: base, lookupEnv: lookupEnv, mode: normalizeEnvAPIKeyOverrideMode(mode)}
+	return &EnvAPIKeyOverrideStore{base: base, lookupEnv: lookupEnv}
 }
 
-func normalizeEnvAPIKeyOverrideMode(mode EnvAPIKeyOverrideMode) EnvAPIKeyOverrideMode {
-	if mode == "" {
-		return EnvAPIKeyOverrideAlways
+func (s *EnvAPIKeyOverrideStore) LoadPersisted(ctx context.Context) (State, error) {
+	if err := ctx.Err(); err != nil {
+		return State{}, err
 	}
-	switch mode {
-	case EnvAPIKeyOverrideAlways, EnvAPIKeyOverrideRespectStoredPreference:
-		return mode
-	default:
-		panic(fmt.Sprintf("invalid env api key override mode %q", mode))
+	if s == nil || s.base == nil {
+		return EmptyState(), nil
 	}
+	if loader, ok := s.base.(PersistedStateLoader); ok {
+		return loader.LoadPersisted(ctx)
+	}
+	return s.base.Load(ctx)
 }
 
 func (s *EnvAPIKeyOverrideStore) Load(ctx context.Context) (State, error) {
@@ -45,15 +37,9 @@ func (s *EnvAPIKeyOverrideStore) Load(ctx context.Context) (State, error) {
 		return State{}, err
 	}
 
-	state := EmptyState()
-	if s == nil || s.base == nil {
-		state = EmptyState()
-	} else {
-		var err error
-		state, err = s.base.Load(ctx)
-		if err != nil {
-			return State{}, err
-		}
+	state, err := s.LoadPersisted(ctx)
+	if err != nil {
+		return State{}, err
 	}
 
 	trimmed, ok := "", false
@@ -66,17 +52,7 @@ func (s *EnvAPIKeyOverrideStore) Load(ctx context.Context) (State, error) {
 	if !ok {
 		return state, nil
 	}
-
-	shouldOverride := false
-	switch s.mode {
-	case EnvAPIKeyOverrideAlways:
-		shouldOverride = true
-	case EnvAPIKeyOverrideRespectStoredPreference:
-		shouldOverride = state.EnvAPIKeyPreference == EnvAPIKeyPreferencePreferEnv
-	default:
-		return State{}, fmt.Errorf("invalid env api key override mode %q", s.mode)
-	}
-	if !shouldOverride {
+	if state.EnvAPIKeyPreference == EnvAPIKeyPreferencePreferSaved {
 		return state, nil
 	}
 	state.Scope = ScopeGlobal

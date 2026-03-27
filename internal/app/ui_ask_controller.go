@@ -2,6 +2,7 @@ package app
 
 import (
 	"builder/internal/tools/askquestion"
+	"builder/internal/tui"
 	"errors"
 	"fmt"
 	"strings"
@@ -46,23 +47,26 @@ const askFreeformSelectionOptionText = "Freeform answer"
 
 func (c uiAskController) acceptEvent(evt askEvent) {
 	m := c.model
-	if m.activeAsk == nil {
+	if !m.ask.hasCurrent() {
 		c.setActiveAsk(evt)
 		m.activity = uiActivityQuestion
+		if m.inputMode() == uiInputModeMain && (m.view.Mode() == "" || m.view.Mode() == tui.ModeOngoing) {
+			m.setInputMode(uiInputModeAsk)
+		}
 		return
 	}
-	m.askQueue = append(m.askQueue, evt)
+	m.ask.queue = append(m.ask.queue, evt)
 }
 
 func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := c.model
-	if m.activeAsk == nil {
+	if !m.ask.hasCurrent() {
 		return m, nil
 	}
 	if msg.Type != tea.KeyEnter && msg.Type != keyTypeShiftEnterCSI {
 		m.inputController().clearPendingCSIShiftEnter()
 	}
-	req := m.activeAsk.req
+	req := m.ask.current.req
 
 	switch msg.Type {
 	case tea.KeyCtrlC:
@@ -88,33 +92,33 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyTab:
-		if m.askFreeform {
+		if m.ask.freeform {
 			if !askSupportsDraftRoundTrip(req) {
 				return m, nil
 			}
-			m.askFreeform = false
+			m.ask.freeform = false
 			return m, nil
 		}
-		m.askFreeform = true
+		m.ask.freeform = true
 		if approvalSupportsCommentary(req) {
-			m.askFreeformMode = askFreeformModeApprovalCommentary
+			m.ask.freeformMode = askFreeformModeApprovalCommentary
 			m.clearAskInput()
 		}
 		return m, nil
 	case tea.KeyEnter:
 		m.inputController().normalizePendingCSIShiftEnterOnEnter()
-		if m.askFreeform {
-			commentary := strings.TrimSpace(m.askInput)
-			if askRequiresFreeformSelectionCommentary(req, m.askCursor) && commentary == "" {
+		if m.ask.freeform {
+			commentary := strings.TrimSpace(m.ask.input)
+			if askRequiresFreeformSelectionCommentary(req, m.ask.cursor) && commentary == "" {
 				return m, c.showFreeformSelectionCommentaryRequiredError()
 			}
 			resp := askquestion.Response{Answer: commentary, FreeformAnswer: commentary}
-			if optionNumber, ok := selectedAskOptionNumber(req, m.askCursor); ok {
+			if optionNumber, ok := selectedAskOptionNumber(req, m.ask.cursor); ok {
 				resp.SelectedOptionNumber = optionNumber
 			}
 			if req.Approval {
-				if m.askFreeformMode == askFreeformModeApprovalCommentary {
-					decision, ok := selectedApprovalDecision(req, m.askCursor)
+				if m.ask.freeformMode == askFreeformModeApprovalCommentary {
+					decision, ok := selectedApprovalDecision(req, m.ask.cursor)
 					if !ok {
 						return m, nil
 					}
@@ -134,13 +138,13 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		optionCount := askOptionCount(req)
 		if optionCount == 0 {
-			m.askFreeform = true
+			m.ask.freeform = true
 			return m, nil
 		}
-		if askHasFreeformSelectionOption(req) && m.askCursor == len(askVisibleOptions(req)) {
-			commentary := strings.TrimSpace(m.askInput)
+		if askHasFreeformSelectionOption(req) && m.ask.cursor == len(askVisibleOptions(req)) {
+			commentary := strings.TrimSpace(m.ask.input)
 			if commentary == "" {
-				m.askFreeform = true
+				m.ask.freeform = true
 				return m, nil
 			}
 			hasNext := c.answer(askquestion.Response{Answer: commentary, FreeformAnswer: commentary}, nil)
@@ -152,17 +156,17 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		visibleOptions := askVisibleOptions(req)
-		if m.askCursor < 0 || m.askCursor >= len(visibleOptions) {
-			m.askFreeform = true
+		if m.ask.cursor < 0 || m.ask.cursor >= len(visibleOptions) {
+			m.ask.freeform = true
 			m.clearAskInput()
 			return m, nil
 		}
-		resp := askquestion.Response{SelectedOptionNumber: m.askCursor + 1}
-		if commentary := strings.TrimSpace(m.askInput); askSupportsDraftRoundTrip(req) && commentary != "" {
+		resp := askquestion.Response{SelectedOptionNumber: m.ask.cursor + 1}
+		if commentary := strings.TrimSpace(m.ask.input); askSupportsDraftRoundTrip(req) && commentary != "" {
 			resp.FreeformAnswer = commentary
 		}
-		if req.Approval && m.askCursor < len(req.ApprovalOptions) {
-			resp = askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: req.ApprovalOptions[m.askCursor].Decision}}
+		if req.Approval && m.ask.cursor < len(req.ApprovalOptions) {
+			resp = askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: req.ApprovalOptions[m.ask.cursor].Decision}}
 		}
 		hasNext := c.answer(resp, nil)
 		if hasNext {
@@ -172,26 +176,26 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyUp:
-		if m.askFreeform {
+		if m.ask.freeform {
 			m.moveAskCursorUpLine()
 			return m, nil
 		}
-		if m.askCursor > 0 {
-			m.askCursor--
+		if m.ask.cursor > 0 {
+			m.ask.cursor--
 		}
 		return m, nil
 	case tea.KeyDown:
-		if m.askFreeform {
+		if m.ask.freeform {
 			m.moveAskCursorDownLine()
 			return m, nil
 		}
 		maxIdx := askOptionCount(req) - 1
-		if maxIdx >= 0 && m.askCursor < maxIdx {
-			m.askCursor++
+		if maxIdx >= 0 && m.ask.cursor < maxIdx {
+			m.ask.cursor++
 		}
 		return m, nil
 	case tea.KeyCtrlJ, keyTypeShiftEnterCSI:
-		if !m.askFreeform {
+		if !m.ask.freeform {
 			return m, nil
 		}
 		m.insertAskInputRunes([]rune{'\n'})
@@ -200,17 +204,17 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyBackspace:
-		if m.askFreeform {
+		if m.ask.freeform {
 			m.backspaceAskInput()
 		}
 		return m, nil
 	case tea.KeySpace:
-		if m.askFreeform {
+		if m.ask.freeform {
 			m.insertAskInputRunes([]rune{' '})
 		}
 		return m, nil
 	case tea.KeyLeft:
-		if !m.askFreeform {
+		if !m.ask.freeform {
 			return m, nil
 		}
 		if msg.Alt {
@@ -220,7 +224,7 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.moveAskCursorLeft()
 		return m, nil
 	case tea.KeyRight:
-		if !m.askFreeform {
+		if !m.ask.freeform {
 			return m, nil
 		}
 		if msg.Alt {
@@ -230,40 +234,40 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.moveAskCursorRight()
 		return m, nil
 	case tea.KeyHome, tea.KeyCtrlA:
-		if m.askFreeform {
+		if m.ask.freeform {
 			m.moveAskCursorStart()
 		}
 		return m, nil
 	case tea.KeyEnd, tea.KeyCtrlE, tea.KeyCtrlEnd:
-		if m.askFreeform {
+		if m.ask.freeform {
 			m.moveAskCursorEnd()
 		}
 		return m, nil
 	case tea.KeyCtrlLeft:
-		if m.askFreeform {
+		if m.ask.freeform {
 			m.moveAskCursorWordLeft()
 		}
 		return m, nil
 	case tea.KeyCtrlRight:
-		if m.askFreeform {
+		if m.ask.freeform {
 			m.moveAskCursorWordRight()
 		}
 		return m, nil
 	default:
 		if isDeleteCurrentLineKey(msg) {
-			if m.askFreeform {
+			if m.ask.freeform {
 				m.deleteCurrentAskInputLine()
 			}
 			return m, nil
 		}
 		if isShiftEnterKey(msg) {
-			if !m.askFreeform {
+			if !m.ask.freeform {
 				return m, nil
 			}
 			m.insertAskInputRunes([]rune{'\n'})
 			return m, nil
 		}
-		if m.askFreeform && msg.Type == tea.KeyRunes {
+		if m.ask.freeform && msg.Type == tea.KeyRunes {
 			m.insertAskInputRunes(msg.Runes)
 			return m, nil
 		}
@@ -282,21 +286,21 @@ func (c uiAskController) renderPrompt() string {
 
 func (c uiAskController) renderPromptLines() []askPromptLine {
 	m := c.model
-	if m.activeAsk == nil {
+	if !m.ask.hasCurrent() {
 		return nil
 	}
-	req := m.activeAsk.req
-	if isApprovalCommentaryPrompt(req, m.askFreeform, m.askFreeformMode) {
+	req := m.ask.current.req
+	if isApprovalCommentaryPrompt(req, m.ask.freeform, m.ask.freeformMode) {
 		return []askPromptLine{
-			{Text: approvalCommentaryLabel(req, m.askCursor), Kind: askPromptLineKindHint},
-			{Kind: askPromptLineKindInput, InputPrefix: m.askInputPrefix(), InputText: m.askInput, InputCursor: m.askInputCursor, ShowsCursor: true},
+			{Text: approvalCommentaryLabel(req, m.ask.cursor), Kind: askPromptLineKindHint},
+			{Kind: askPromptLineKindInput, InputPrefix: m.askInputPrefix(), InputText: m.ask.input, InputCursor: m.ask.inputCursor, ShowsCursor: true},
 		}
 	}
 	lines := []askPromptLine{{Text: strings.TrimSpace(req.Question), Kind: askPromptLineKindQuestion}}
-	if askOptionCount(req) > 0 && !m.askFreeform {
+	if askOptionCount(req) > 0 && !m.ask.freeform {
 		visibleOptions := askVisibleOptions(req)
 		for i, s := range visibleOptions {
-			selected := i == m.askCursor
+			selected := i == m.ask.cursor
 			recommended := askOptionIsRecommended(req, i)
 			marker := "  "
 			if selected {
@@ -314,15 +318,15 @@ func (c uiAskController) renderPromptLines() []askPromptLine {
 		}
 		if askHasFreeformSelectionOption(req) {
 			idx := len(visibleOptions) + 1
-			selected := m.askCursor == len(visibleOptions)
+			selected := m.ask.cursor == len(visibleOptions)
 			prefix := "  "
 			if selected {
 				prefix = "✔︎ "
 			}
 			lines = append(lines, askPromptLine{Text: fmt.Sprintf("%s%d. %s", prefix, idx, askFreeformSelectionOptionText), Kind: askPromptLineKindOption, Selected: selected})
 		}
-		if askSupportsDraftRoundTrip(req) && askHasPendingFreeformDraft(m.askInput) {
-			lines = append(lines, askPromptLine{Kind: askPromptLineKindInput, Disabled: true, InputPrefix: m.askInputPrefix(), InputText: m.askInput, InputCursor: m.askInputCursor, ShowsCursor: false})
+		if askSupportsDraftRoundTrip(req) && askHasPendingFreeformDraft(m.ask.input) {
+			lines = append(lines, askPromptLine{Kind: askPromptLineKindInput, Disabled: true, InputPrefix: m.askInputPrefix(), InputText: m.ask.input, InputCursor: m.ask.inputCursor, ShowsCursor: false})
 			return lines
 		}
 		hint := "Tab to add commentary • Enter to submit"
@@ -334,13 +338,13 @@ func (c uiAskController) renderPromptLines() []askPromptLine {
 	}
 
 	inputLabel := ""
-	if isApprovalCommentaryPrompt(req, m.askFreeform, m.askFreeformMode) {
-		inputLabel = approvalCommentaryLabel(req, m.askCursor)
+	if isApprovalCommentaryPrompt(req, m.ask.freeform, m.ask.freeformMode) {
+		inputLabel = approvalCommentaryLabel(req, m.ask.cursor)
 	}
 	if inputLabel != "" {
 		lines = append(lines, askPromptLine{Text: inputLabel, Kind: askPromptLineKindHint})
 	}
-	lines = append(lines, askPromptLine{Kind: askPromptLineKindInput, InputPrefix: m.askInputPrefix(), InputText: m.askInput, InputCursor: m.askInputCursor, ShowsCursor: true})
+	lines = append(lines, askPromptLine{Kind: askPromptLineKindInput, InputPrefix: m.askInputPrefix(), InputText: m.ask.input, InputCursor: m.ask.inputCursor, ShowsCursor: true})
 	hint := "Enter to submit"
 	if askSupportsDraftRoundTrip(req) {
 		hint = "Tab to return to picker • Enter to submit"
@@ -351,35 +355,37 @@ func (c uiAskController) renderPromptLines() []askPromptLine {
 
 func (c uiAskController) answer(resp askquestion.Response, err error) bool {
 	m := c.model
-	if m.activeAsk == nil {
+	if !m.ask.hasCurrent() {
 		return false
 	}
 	if resp.RequestID == "" {
-		resp.RequestID = m.activeAsk.req.ID
+		resp.RequestID = m.ask.current.req.ID
 	}
-	m.activeAsk.reply <- askReply{response: resp, err: err}
-	if len(m.askQueue) == 0 {
-		m.activeAsk = nil
-		m.askCursor = 0
+	m.ask.current.reply <- askReply{response: resp, err: err}
+	if len(m.ask.queue) == 0 {
+		m.ask.current = nil
+		m.ask.cursor = 0
 		m.clearAskInput()
-		m.askFreeform = false
-		m.askFreeformMode = askFreeformModeGeneric
+		m.ask.freeform = false
+		m.ask.freeformMode = askFreeformModeGeneric
+		m.restorePrimaryInputMode()
 		return false
 	}
-	next := m.askQueue[0]
-	m.askQueue = m.askQueue[1:]
+	next := m.ask.queue[0]
+	m.ask.queue = m.ask.queue[1:]
 	c.setActiveAsk(next)
+	m.setInputMode(uiInputModeAsk)
 	return true
 }
 
 func (c uiAskController) setActiveAsk(evt askEvent) {
 	m := c.model
 	current := evt
-	m.activeAsk = &current
-	m.askCursor = 0
+	m.ask.current = &current
+	m.ask.cursor = 0
 	m.clearAskInput()
-	m.askFreeform = askOptionCount(current.req) == 0
-	m.askFreeformMode = askFreeformModeGeneric
+	m.ask.freeform = askOptionCount(current.req) == 0
+	m.ask.freeformMode = askFreeformModeGeneric
 }
 
 func (m *uiModel) askInputPrefix() string {

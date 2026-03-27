@@ -179,7 +179,7 @@ func TestEnvAPIKeyOverrideStoreLoadAlwaysPrefersEnvironmentWithoutPersistedState
 			return "  sk-env  ", true
 		}
 		return "", false
-	}, EnvAPIKeyOverrideAlways)
+	})
 
 	state, err := store.Load(context.Background())
 	if err != nil {
@@ -211,7 +211,7 @@ func TestEnvAPIKeyOverrideStoreRespectsSavedPreference(t *testing.T) {
 			return "sk-env", true
 		}
 		return "", false
-	}, EnvAPIKeyOverrideRespectStoredPreference)
+	})
 
 	state, err := store.Load(context.Background())
 	if err != nil {
@@ -243,7 +243,7 @@ func TestEnvAPIKeyOverrideStoreKeepsSavedOAuthWhenPreferencePrefersSaved(t *test
 			return "sk-env", true
 		}
 		return "", false
-	}, EnvAPIKeyOverrideRespectStoredPreference)
+	})
 
 	state, err := store.Load(context.Background())
 	if err != nil {
@@ -256,7 +256,7 @@ func TestEnvAPIKeyOverrideStoreKeepsSavedOAuthWhenPreferencePrefersSaved(t *test
 
 func TestEnvAPIKeyOverrideStoreSaveDelegatesToBaseStore(t *testing.T) {
 	base := NewMemoryStore(EmptyState())
-	store := NewEnvAPIKeyOverrideStore(base, func(string) (string, bool) { return "", false }, EnvAPIKeyOverrideAlways)
+	store := NewEnvAPIKeyOverrideStore(base, func(string) (string, bool) { return "", false })
 
 	want := State{
 		Scope: ScopeGlobal,
@@ -282,12 +282,70 @@ func TestEnvAPIKeyOverrideStoreSaveDelegatesToBaseStore(t *testing.T) {
 	}
 }
 
-func TestNewEnvAPIKeyOverrideStorePanicsOnInvalidMode(t *testing.T) {
-	defer func() {
-		if recovered := recover(); recovered == nil {
-			t.Fatal("expected invalid env override mode to panic")
+func TestEnvAPIKeyOverrideStoreLoadPersistedReturnsBaseState(t *testing.T) {
+	base := NewMemoryStore(State{
+		Scope: ScopeGlobal,
+		Method: Method{
+			Type: MethodOAuth,
+			OAuth: &OAuthMethod{
+				AccessToken:  "oauth-access",
+				RefreshToken: "oauth-refresh",
+				TokenType:    "Bearer",
+				Expiry:       time.Date(2026, time.January, 1, 11, 0, 0, 0, time.UTC),
+			},
+		},
+	})
+	store := NewEnvAPIKeyOverrideStore(base, func(key string) (string, bool) {
+		if key == "OPENAI_API_KEY" {
+			return "sk-env", true
 		}
-	}()
+		return "", false
+	})
 
-	_ = NewEnvAPIKeyOverrideStore(NewMemoryStore(EmptyState()), func(string) (string, bool) { return "", false }, EnvAPIKeyOverrideMode("typo"))
+	loaded, err := store.LoadPersisted(context.Background())
+	if err != nil {
+		t.Fatalf("load persisted state: %v", err)
+	}
+	if loaded.Method.Type != MethodOAuth {
+		t.Fatalf("expected base oauth state, got %q", loaded.Method.Type)
+	}
+}
+
+type persistedDecoratorStore struct {
+	loadState      State
+	persistedState State
+}
+
+func (s *persistedDecoratorStore) Load(context.Context) (State, error) {
+	return s.loadState, nil
+}
+
+func (s *persistedDecoratorStore) LoadPersisted(context.Context) (State, error) {
+	return s.persistedState, nil
+}
+
+func (s *persistedDecoratorStore) Save(context.Context, State) error {
+	return nil
+}
+
+func TestEnvAPIKeyOverrideStoreLoadPersistedDelegatesToBasePersistedLoader(t *testing.T) {
+	base := &persistedDecoratorStore{
+		loadState: State{
+			Scope:  ScopeGlobal,
+			Method: Method{Type: MethodAPIKey, APIKey: &APIKeyMethod{Key: "runtime-key"}},
+		},
+		persistedState: State{
+			Scope:  ScopeGlobal,
+			Method: Method{Type: MethodOAuth, OAuth: &OAuthMethod{AccessToken: "persisted-access", RefreshToken: "persisted-refresh", TokenType: "Bearer"}},
+		},
+	}
+	store := NewEnvAPIKeyOverrideStore(base, func(string) (string, bool) { return "sk-env", true })
+
+	loaded, err := store.LoadPersisted(context.Background())
+	if err != nil {
+		t.Fatalf("load persisted state: %v", err)
+	}
+	if loaded.Method.Type != MethodOAuth {
+		t.Fatalf("expected persisted oauth state, got %q", loaded.Method.Type)
+	}
 }

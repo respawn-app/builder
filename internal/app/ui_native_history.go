@@ -3,7 +3,6 @@ package app
 import (
 	"strings"
 
-	patchformat "builder/internal/tools/patch/format"
 	"builder/internal/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,10 +12,10 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 	if !m.windowSizeKnown {
 		return nil
 	}
-	committedEntries := nativeCommittedEntries(m.transcriptEntries)
+	committedEntries := tui.CommittedOngoingEntries(m.transcriptEntries)
 	if len(committedEntries) == 0 {
 		alreadyReplayed := m.nativeHistoryReplayed
-		m.resetNativeFormatterState()
+		m.resetNativeHistoryState()
 		m.nativeHistoryReplayed = true
 		if alreadyReplayed || !m.shouldEmitNativeHistory() {
 			return nil
@@ -24,74 +23,33 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 		return m.emitCurrentNativeScrollbackState(false)
 	}
 
-	if m.nativeFlushedEntryCount < 0 || m.nativeFlushedEntryCount > len(committedEntries) {
-		if m.nativeFormatterReady {
-			m.rebaseNativeFormatterSnapshot()
-			return nil
-		}
-		m.resetNativeFormatterState()
+	projection := m.view.CommittedOngoingProjection()
+	committedCount := len(committedEntries)
+	if m.nativeFlushedEntryCount < 0 || m.nativeFlushedEntryCount > committedCount {
+		m.rebaseNativeProjection(projection, committedCount)
+		return nil
 	}
-
-	if !m.nativeFormatterReady {
-		if len(committedEntries) == 0 {
-			m.nativeFormatterEntries = nil
-			m.nativeFormatterSnapshot = ""
-			m.nativeFlushedEntryCount = 0
-			m.nativeHistoryReplayed = true
-			return nil
-		}
-		m.initNativeFormatterModel()
-		next, _ := m.nativeFormatter.Update(tui.SetConversationMsg{Entries: committedEntries})
-		if casted, ok := next.(tui.Model); ok {
-			m.nativeFormatter = casted
-		}
-		rawSnapshot := m.nativeFormatter.OngoingCommittedSnapshot()
-		m.nativeFormatterSnapshot = rawSnapshot
-		m.nativeFormatterEntries = cloneNativeEntries(committedEntries)
-		m.nativeFlushedEntryCount = len(committedEntries)
-		m.nativeHistoryReplayed = true
+	if !m.nativeHistoryReplayed || m.nativeProjection.Empty() {
+		m.rebaseNativeProjection(projection, committedCount)
 		if !m.shouldEmitNativeHistory() {
 			return nil
 		}
-		return m.emitCurrentNativeHistorySnapshot(false)
+		return m.emitCurrentNativeScrollbackState(false)
 	}
 
-	if !nativeEntriesPrefixEqual(committedEntries, m.nativeFormatterEntries) {
-		m.rebaseNativeFormatterSnapshot()
+	previousBlockCount := len(m.nativeProjection.Blocks)
+	delta, ok := projection.RenderAppendDeltaFrom(m.nativeProjection, tui.TranscriptDivider)
+	m.rebaseNativeProjection(projection, committedCount)
+	if !ok || !m.shouldEmitNativeHistory() {
 		return nil
 	}
-
-	start := m.nativeFlushedEntryCount
-	if start >= len(committedEntries) {
+	delta = strings.TrimPrefix(delta, "\n")
+	if strings.TrimSpace(delta) == "" {
 		return nil
 	}
-
-	for _, entry := range committedEntries[start:] {
-		if strings.TrimSpace(ongoingTranscriptText(entry)) == "" {
-			continue
-		}
-		next, _ := m.nativeFormatter.Update(tui.AppendTranscriptMsg{
-			Role:        entry.Role,
-			Text:        entry.Text,
-			OngoingText: entry.OngoingText,
-			Phase:       entry.Phase,
-			ToolCallID:  entry.ToolCallID,
-			ToolCall:    entry.ToolCall,
-		})
-		if casted, ok := next.(tui.Model); ok {
-			m.nativeFormatter = casted
-		}
-	}
-
-	rawSnapshot := m.nativeFormatter.OngoingCommittedSnapshot()
-	m.nativeFormatterSnapshot = rawSnapshot
-	m.nativeFormatterEntries = cloneNativeEntries(committedEntries)
-	m.nativeFlushedEntryCount = len(committedEntries)
-	m.nativeHistoryReplayed = true
-	if !m.shouldEmitNativeHistory() {
-		return nil
-	}
-	return m.emitCurrentNativeHistorySnapshot(false)
+	m.nativeRenderedProjection = projection
+	m.nativeRenderedSnapshot = projection.Render(tui.TranscriptDivider)
+	return m.emitNativeRenderedText(renderStyledNativeProjectionLines(projection.LinesFromBlock(previousBlockCount, tui.TranscriptDivider), m.theme, m.nativeReplayRenderWidth()))
 }
 
 func (m *uiModel) shouldEmitNativeHistory() bool {
@@ -108,55 +66,22 @@ func (m *uiModel) nativeReplayRenderWidth() int {
 	return 120
 }
 
-func (m *uiModel) initNativeFormatterModel() {
-	width := m.nativeReplayRenderWidth()
-	formatter := tui.NewModel(tui.WithTheme(m.theme), tui.WithPreviewLines(200000))
-	next, _ := formatter.Update(tui.SetViewportSizeMsg{Lines: 200000, Width: width})
-	if casted, ok := next.(tui.Model); ok {
-		formatter = casted
-	}
-	m.nativeFormatter = formatter
-	m.nativeFormatterReady = true
-	m.nativeFormatterWidth = width
-	m.nativeFormatterSnapshot = ""
-}
-
-func (m *uiModel) resetNativeFormatterState() {
+func (m *uiModel) resetNativeHistoryState() {
 	m.nativeFlushedEntryCount = 0
 	m.nativeHistoryReplayed = false
-	m.nativeFormatterReady = false
-	m.nativeFormatterWidth = 0
-	m.nativeFormatterSnapshot = ""
+	m.nativeProjection = tui.TranscriptProjection{}
+	m.nativeRenderedProjection = tui.TranscriptProjection{}
 	m.nativeRenderedSnapshot = ""
-	m.nativeFormatterEntries = nil
-	m.nativeFormatter = tui.Model{}
 }
 
-func (m *uiModel) rebaseNativeFormatterSnapshot() {
-	if !m.nativeFormatterReady {
-		return
-	}
-	m.initNativeFormatterModel()
-	committedEntries := nativeCommittedEntries(m.transcriptEntries)
-	if len(committedEntries) == 0 {
-		m.nativeFormatterSnapshot = ""
-		m.nativeFormatterEntries = nil
-		m.nativeFlushedEntryCount = 0
-		m.nativeHistoryReplayed = true
-		return
-	}
-	next, _ := m.nativeFormatter.Update(tui.SetConversationMsg{Entries: committedEntries})
-	if casted, ok := next.(tui.Model); ok {
-		m.nativeFormatter = casted
-	}
-	m.nativeFormatterSnapshot = m.nativeFormatter.OngoingCommittedSnapshot()
-	m.nativeFormatterEntries = cloneNativeEntries(committedEntries)
-	m.nativeFlushedEntryCount = len(committedEntries)
+func (m *uiModel) rebaseNativeProjection(projection tui.TranscriptProjection, committedCount int) {
+	m.nativeProjection = projection
+	m.nativeFlushedEntryCount = committedCount
 	m.nativeHistoryReplayed = true
 }
 
 func (m *uiModel) emitCurrentNativeScrollbackState(forceFull bool) tea.Cmd {
-	if strings.TrimSpace(m.nativeFormatterSnapshot) != "" {
+	if !m.nativeProjection.Empty() {
 		return m.emitCurrentNativeHistorySnapshot(forceFull)
 	}
 	return m.emitEmptyNativeScrollbackSpacer(forceFull)
@@ -185,40 +110,69 @@ func (m *uiModel) nativeEmptyScrollbackSpacerText() string {
 }
 
 func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool) tea.Cmd {
-	rawSnapshot := m.nativeFormatterSnapshot
+	rawSnapshot := m.nativeProjection.Render(tui.TranscriptDivider)
 	if strings.TrimSpace(rawSnapshot) == "" {
-		m.nativeRenderedSnapshot = ""
 		return nil
 	}
-	previousRawSnapshot := m.nativeRenderedSnapshot
-	styled := styleNativeReplayDividers(rawSnapshot, m.theme, m.nativeFormatterWidth)
-	if strings.TrimSpace(styled) == "" {
-		m.nativeRenderedSnapshot = rawSnapshot
-		return nil
-	}
-	if !forceFull && m.nativeRenderedSnapshot != "" {
-		if strings.HasPrefix(rawSnapshot, m.nativeRenderedSnapshot) {
-			previousStyled := styleNativeReplayDividers(previousRawSnapshot, m.theme, m.nativeFormatterWidth)
+	rewriteRenderedHistory := m.view.Mode() == tui.ModeOngoing && !m.nativeRenderedProjection.Empty()
+	if !m.nativeRenderedProjection.Empty() {
+		previousBlockCount := len(m.nativeRenderedProjection.Blocks)
+		delta, ok := m.nativeProjection.RenderAppendDeltaFrom(m.nativeRenderedProjection, tui.TranscriptDivider)
+		delta = strings.TrimPrefix(delta, "\n")
+		if ok && strings.TrimSpace(delta) != "" {
+			styledDelta := renderStyledNativeProjectionLines(m.nativeProjection.LinesFromBlock(previousBlockCount, tui.TranscriptDivider), m.theme, m.nativeReplayRenderWidth())
+			m.nativeRenderedProjection = m.nativeProjection
 			m.nativeRenderedSnapshot = rawSnapshot
-			if !strings.HasPrefix(styled, previousStyled) {
-				forceFull = true
-			} else {
-				delta := styled[len(previousStyled):]
-				delta = strings.TrimPrefix(delta, "\n")
-				if len(delta) == 0 {
-					return nil
-				}
-				return m.emitNativeRenderedText(delta)
+			if strings.TrimSpace(styledDelta) != "" {
+				return m.emitNativeRenderedText(styledDelta)
 			}
-		} else {
-			forceFull = true
+		}
+		if ok && strings.TrimSpace(delta) == "" {
+			m.nativeRenderedProjection = m.nativeProjection
+			m.nativeRenderedSnapshot = rawSnapshot
+			return nil
+		}
+		if rewriteRenderedHistory {
+			return nil
+		}
+		forceFull = true
+	}
+	if !forceFull {
+		if deltaRaw, ok := nativeRenderedDelta(m.nativeRenderedSnapshot, rawSnapshot); ok {
+			styledDelta := styleNativeReplayDividers(deltaRaw, m.theme, m.nativeReplayRenderWidth())
+			m.nativeRenderedProjection = m.nativeProjection
+			m.nativeRenderedSnapshot = rawSnapshot
+			if strings.TrimSpace(styledDelta) == "" {
+				return nil
+			}
+			return m.emitNativeRenderedText(styledDelta)
 		}
 	}
+	if rewriteRenderedHistory {
+		return nil
+	}
+	styled := renderStyledNativeProjection(m.nativeProjection, m.theme, m.nativeReplayRenderWidth())
+	if strings.TrimSpace(styled) == "" {
+		return nil
+	}
+	m.nativeRenderedProjection = m.nativeProjection
 	m.nativeRenderedSnapshot = rawSnapshot
-	if forceFull && strings.TrimSpace(previousRawSnapshot) != "" {
+	if forceFull {
 		return tea.Sequence(tea.ClearScreen, m.emitNativeRenderedText(styled))
 	}
 	return m.emitNativeRenderedText(styled)
+}
+
+func nativeRenderedDelta(previous, current string) (string, bool) {
+	if strings.TrimSpace(previous) == "" || previous == current {
+		return "", false
+	}
+	if !strings.HasPrefix(current, previous) {
+		return "", false
+	}
+	delta := strings.TrimPrefix(current, previous)
+	delta = strings.TrimPrefix(delta, "\n")
+	return delta, true
 }
 
 func (m *uiModel) replayNativeTranscriptThroughEntry(entryIndex int) tea.Cmd {
@@ -228,206 +182,25 @@ func (m *uiModel) replayNativeTranscriptThroughEntry(entryIndex int) tea.Cmd {
 	if entryIndex < 0 || entryIndex >= len(m.transcriptEntries) {
 		return nil
 	}
+	projection := nativeCommittedProjection(m.transcriptEntries[:entryIndex+1], m.theme, m.nativeReplayRenderWidth())
 	rawSnapshot := renderNativeCommittedSnapshot(m.transcriptEntries[:entryIndex+1], m.theme, m.nativeReplayRenderWidth())
+	m.nativeRenderedProjection = projection
 	m.nativeRenderedSnapshot = rawSnapshot
 	if strings.TrimSpace(rawSnapshot) == "" {
 		return tea.ClearScreen
 	}
 	return tea.Sequence(
 		tea.ClearScreen,
-		m.emitNativeRenderedText(styleNativeReplayDividers(rawSnapshot, m.theme, m.nativeReplayRenderWidth())),
+		m.emitNativeRenderedText(renderStyledNativeProjection(projection, m.theme, m.nativeReplayRenderWidth())),
 	)
 }
 
-func nonEmptyNativeEntries(entries []tui.TranscriptEntry) []tui.TranscriptEntry {
-	filtered := make([]tui.TranscriptEntry, 0, len(entries))
-	for _, entry := range entries {
-		if strings.TrimSpace(entry.Text) == "" {
-			if strings.TrimSpace(entry.OngoingText) == "" {
-				continue
-			}
-		}
-		filtered = append(filtered, entry)
-	}
-	return filtered
-}
-
 func nativeCommittedEntries(entries []tui.TranscriptEntry) []tui.TranscriptEntry {
-	if len(entries) == 0 {
-		return nil
-	}
-	prefixEnd := nativeCommittedPrefixEnd(entries)
-	if prefixEnd <= 0 {
-		return nil
-	}
-	return nonEmptyNativeEntries(entries[:prefixEnd])
+	return tui.CommittedOngoingEntries(entries)
 }
 
 func nativePendingEntries(entries []tui.TranscriptEntry) []tui.TranscriptEntry {
-	if len(entries) == 0 {
-		return nil
-	}
-	prefixEnd := nativeCommittedPrefixEnd(entries)
-	if prefixEnd >= len(entries) {
-		return nil
-	}
-	return nonEmptyNativeEntries(entries[prefixEnd:])
-}
-
-func nativeCommittedPrefixEnd(entries []tui.TranscriptEntry) int {
-	consumedResults := make(map[int]struct{})
-	for idx, entry := range entries {
-		if strings.TrimSpace(entry.Role) != "tool_call" {
-			continue
-		}
-		if strings.TrimSpace(ongoingTranscriptText(entry)) == "" {
-			continue
-		}
-		resultIdx := nativeFindMatchingToolResultIndex(entries, idx, consumedResults)
-		if resultIdx < 0 {
-			return idx
-		}
-		consumedResults[resultIdx] = struct{}{}
-	}
-	return len(entries)
-}
-
-func nativeFindMatchingToolResultIndex(entries []tui.TranscriptEntry, callIdx int, consumed map[int]struct{}) int {
-	if callIdx < 0 || callIdx >= len(entries) {
-		return -1
-	}
-	callID := strings.TrimSpace(entries[callIdx].ToolCallID)
-	nextIdx := callIdx + 1
-	if nextIdx < len(entries) {
-		if _, used := consumed[nextIdx]; !used && nativeIsToolResultRole(entries[nextIdx].Role) {
-			nextCallID := strings.TrimSpace(entries[nextIdx].ToolCallID)
-			if callID == nextCallID {
-				return nextIdx
-			}
-		}
-	}
-	if callID == "" {
-		return -1
-	}
-	for idx := callIdx + 1; idx < len(entries); idx++ {
-		if _, used := consumed[idx]; used || !nativeIsToolResultRole(entries[idx].Role) {
-			continue
-		}
-		if strings.TrimSpace(entries[idx].ToolCallID) == callID {
-			return idx
-		}
-	}
-	return -1
-}
-
-func nativeIsToolResultRole(role string) bool {
-	switch strings.TrimSpace(role) {
-	case "tool_result", "tool_result_ok", "tool_result_error":
-		return true
-	default:
-		return false
-	}
-}
-
-func ongoingTranscriptText(entry tui.TranscriptEntry) string {
-	if strings.TrimSpace(entry.OngoingText) != "" {
-		return entry.OngoingText
-	}
-	return entry.Text
-}
-
-func cloneNativeEntries(entries []tui.TranscriptEntry) []tui.TranscriptEntry {
-	cloned := make([]tui.TranscriptEntry, len(entries))
-	copy(cloned, entries)
-	return cloned
-}
-
-func nativeEntriesPrefixEqual(entries []tui.TranscriptEntry, prefix []tui.TranscriptEntry) bool {
-	if len(prefix) > len(entries) {
-		return false
-	}
-	for index := range prefix {
-		if !nativeEntryEqual(entries[index], prefix[index]) {
-			return false
-		}
-	}
-	return true
-}
-
-func nativeEntryEqual(left tui.TranscriptEntry, right tui.TranscriptEntry) bool {
-	if left.Role != right.Role || left.Text != right.Text || left.OngoingText != right.OngoingText || left.Phase != right.Phase || left.ToolCallID != right.ToolCallID {
-		return false
-	}
-	if left.ToolCall == nil || right.ToolCall == nil {
-		return left.ToolCall == nil && right.ToolCall == nil
-	}
-	if left.ToolCall.ToolName != right.ToolCall.ToolName ||
-		left.ToolCall.Presentation != right.ToolCall.Presentation ||
-		left.ToolCall.RenderBehavior != right.ToolCall.RenderBehavior ||
-		left.ToolCall.Command != right.ToolCall.Command ||
-		left.ToolCall.CompactText != right.ToolCall.CompactText ||
-		left.ToolCall.InlineMeta != right.ToolCall.InlineMeta ||
-		left.ToolCall.TimeoutLabel != right.ToolCall.TimeoutLabel ||
-		left.ToolCall.Question != right.ToolCall.Question ||
-		left.ToolCall.RecommendedOptionIndex != right.ToolCall.RecommendedOptionIndex ||
-		left.ToolCall.PatchSummary != right.ToolCall.PatchSummary ||
-		left.ToolCall.PatchDetail != right.ToolCall.PatchDetail ||
-		left.ToolCall.IsShell != right.ToolCall.IsShell ||
-		left.ToolCall.UserInitiated != right.ToolCall.UserInitiated ||
-		left.ToolCall.OmitSuccessfulResult != right.ToolCall.OmitSuccessfulResult {
-		return false
-	}
-	if len(left.ToolCall.Suggestions) != len(right.ToolCall.Suggestions) {
-		return false
-	}
-	for index := range left.ToolCall.Suggestions {
-		if left.ToolCall.Suggestions[index] != right.ToolCall.Suggestions[index] {
-			return false
-		}
-	}
-	if !nativePatchRenderEqual(left.ToolCall.PatchRender, right.ToolCall.PatchRender) {
-		return false
-	}
-	if left.ToolCall.RenderHint == nil || right.ToolCall.RenderHint == nil {
-		return left.ToolCall.RenderHint == nil && right.ToolCall.RenderHint == nil
-	}
-	return left.ToolCall.RenderHint.Kind == right.ToolCall.RenderHint.Kind &&
-		left.ToolCall.RenderHint.Path == right.ToolCall.RenderHint.Path &&
-		left.ToolCall.RenderHint.ResultOnly == right.ToolCall.RenderHint.ResultOnly
-}
-
-func nativePatchRenderEqual(left *patchformat.RenderedPatch, right *patchformat.RenderedPatch) bool {
-	if left == nil || right == nil {
-		return left == nil && right == nil
-	}
-	if len(left.Files) != len(right.Files) || len(left.SummaryLines) != len(right.SummaryLines) || len(left.DetailLines) != len(right.DetailLines) {
-		return false
-	}
-	for index := range left.Files {
-		if left.Files[index].AbsPath != right.Files[index].AbsPath ||
-			left.Files[index].RelPath != right.Files[index].RelPath ||
-			left.Files[index].Added != right.Files[index].Added ||
-			left.Files[index].Removed != right.Files[index].Removed ||
-			len(left.Files[index].Diff) != len(right.Files[index].Diff) {
-			return false
-		}
-		for diffIndex := range left.Files[index].Diff {
-			if left.Files[index].Diff[diffIndex] != right.Files[index].Diff[diffIndex] {
-				return false
-			}
-		}
-	}
-	for index := range left.SummaryLines {
-		if left.SummaryLines[index] != right.SummaryLines[index] {
-			return false
-		}
-	}
-	for index := range left.DetailLines {
-		if left.DetailLines[index] != right.DetailLines[index] {
-			return false
-		}
-	}
-	return true
+	return tui.PendingOngoingEntries(entries)
 }
 
 func (m *uiModel) emitNativeRenderedText(rendered string) tea.Cmd {
@@ -500,35 +273,59 @@ func splitNativeScrollbackChunks(rendered string, maxBytes int) []string {
 }
 
 func renderNativeScrollbackSnapshot(entries []tui.TranscriptEntry, theme string, width int) string {
-	rawSnapshot := renderNativeCommittedSnapshot(entries, theme, width)
-	return styleNativeReplayDividers(rawSnapshot, theme, width)
-}
-
-func renderNativeCommittedSnapshot(entries []tui.TranscriptEntry, theme string, width int) string {
-	if len(entries) == 0 {
-		return ""
-	}
 	if width <= 0 {
 		width = 120
 	}
-	tuiModel := tui.NewModel(tui.WithTheme(theme), tui.WithPreviewLines(200000))
-	next, _ := tuiModel.Update(tui.SetViewportSizeMsg{Lines: 200000, Width: width})
+	model := tui.NewModel(tui.WithTheme(theme), tui.WithPreviewLines(200000))
+	next, _ := model.Update(tui.SetViewportSizeMsg{Lines: 200000, Width: width})
 	if casted, ok := next.(tui.Model); ok {
-		tuiModel = casted
+		model = casted
 	}
-	filtered := nonEmptyNativeEntries(entries)
-	if len(filtered) == 0 {
-		return ""
-	}
-	next, _ = tuiModel.Update(tui.SetConversationMsg{Entries: filtered})
+	next, _ = model.Update(tui.SetConversationMsg{Entries: entries})
 	if casted, ok := next.(tui.Model); ok {
-		tuiModel = casted
+		model = casted
 	}
-	return tuiModel.OngoingCommittedSnapshot()
+	return renderStyledNativeProjection(model.CommittedOngoingProjection(), theme, width)
 }
 
-func styleNativeReplayDividers(snapshot, theme string, width int) string {
-	if strings.TrimSpace(snapshot) == "" {
+func renderNativeCommittedSnapshot(entries []tui.TranscriptEntry, theme string, width int) string {
+	return tui.RenderCommittedOngoingSnapshot(entries, theme, width)
+}
+
+func nativeCommittedProjection(entries []tui.TranscriptEntry, theme string, width int) tui.TranscriptProjection {
+	if width <= 0 {
+		width = 120
+	}
+	model := tui.NewModel(tui.WithTheme(theme), tui.WithPreviewLines(200000))
+	next, _ := model.Update(tui.SetViewportSizeMsg{Lines: 200000, Width: width})
+	if casted, ok := next.(tui.Model); ok {
+		model = casted
+	}
+	next, _ = model.Update(tui.SetConversationMsg{Entries: entries})
+	if casted, ok := next.(tui.Model); ok {
+		model = casted
+	}
+	return model.CommittedOngoingProjection()
+}
+
+func renderStyledNativeProjection(projection tui.TranscriptProjection, theme string, width int) string {
+	return renderStyledNativeProjectionLines(projection.Lines(tui.TranscriptDivider), theme, width)
+}
+
+func styleNativeReplayDividers(rendered, theme string, width int) string {
+	if strings.TrimSpace(rendered) == "" {
+		return rendered
+	}
+	rawLines := splitPlainLines(rendered)
+	lines := make([]tui.TranscriptProjectionLine, 0, len(rawLines))
+	for _, line := range rawLines {
+		lines = append(lines, tui.TranscriptProjectionLine{Kind: tui.VisibleLineContent, Text: line})
+	}
+	return renderStyledNativeProjectionLines(lines, theme, width)
+}
+
+func renderStyledNativeProjectionLines(lines []tui.TranscriptProjectionLine, theme string, width int) string {
+	if len(lines) == 0 {
 		return ""
 	}
 	if width <= 0 {
@@ -536,11 +333,13 @@ func styleNativeReplayDividers(snapshot, theme string, width int) string {
 	}
 	style := uiThemeStyles(theme)
 	divider := style.meta.Render(strings.Repeat("─", width))
-	lines := strings.Split(snapshot, "\n")
-	for idx, line := range lines {
-		if line == tui.TranscriptDivider {
-			lines[idx] = divider
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line.Kind == tui.VisibleLineDivider {
+			out = append(out, divider)
+			continue
 		}
+		out = append(out, line.Text)
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(out, "\n")
 }

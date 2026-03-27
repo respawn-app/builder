@@ -4,7 +4,6 @@ import (
 	"builder/internal/llm"
 	"builder/internal/tools"
 	"builder/internal/transcript"
-	"builder/prompts"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -41,10 +40,9 @@ type storedToolCompletion struct {
 type chatStore struct {
 	mu sync.RWMutex
 
-	messages []llm.Message
-	items    []llm.ResponseItem
-	compact  *compactionCheckpoint
-	local    []localChatEntry
+	items   []llm.ResponseItem
+	compact *compactionCheckpoint
+	local   []localChatEntry
 
 	toolCompletions map[string]tools.Result
 	ongoing         string
@@ -77,11 +75,11 @@ func newChatStore() *chatStore {
 func (s *chatStore) appendMessage(msg llm.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	msg = normalizeMessageForTranscript(msg, s.cwd)
 	if msg.Role == llm.RoleAssistant && strings.TrimSpace(msg.Content) != "" {
 		s.ongoing = ""
 		s.ongoingError = ""
 	}
-	s.messages = append(s.messages, msg)
 	s.items = append(s.items, llm.ItemsFromMessages([]llm.Message{msg})...)
 	s.providerTokenEstimateDirty = true
 }
@@ -95,12 +93,10 @@ func (s *chatStore) replaceHistory(items []llm.ResponseItem) {
 	s.providerTokenEstimateDirty = true
 }
 
-func (s *chatStore) restoreMessagesFromItems(items []llm.ResponseItem) {
+func (s *chatStore) restoreHistoryItems(items []llm.ResponseItem) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	restored := llm.CloneResponseItems(items)
-	s.messages = llm.MessagesFromItems(restored)
-	s.items = restored
+	s.items = llm.CloneResponseItems(items)
 	s.compact = nil
 	s.providerTokenEstimateDirty = true
 }
@@ -199,16 +195,21 @@ func (s *chatStore) appendLocalEntryWithOngoingText(role, text, ongoingText stri
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	messageCount := len(s.snapshotMessagesLocked())
 	s.local = append(s.local, localChatEntry{
 		Entry:             ChatEntry{Role: role, Text: text, OngoingText: strings.TrimSpace(ongoingText)},
-		AfterMessageCount: len(s.messages),
+		AfterMessageCount: messageCount,
 	})
 }
 
 func (s *chatStore) snapshotMessages() []llm.Message {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return llm.MessagesFromItems(s.snapshotProviderItemsLocked())
+	return s.snapshotMessagesLocked()
+}
+
+func (s *chatStore) snapshotMessagesLocked() []llm.Message {
+	return llm.MessagesFromItems(llm.CloneResponseItems(s.items))
 }
 
 func (s *chatStore) snapshotProviderItemsLocked() []llm.ResponseItem {
@@ -234,9 +235,10 @@ func (s *chatStore) snapshot() ChatSnapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	entries := make([]ChatEntry, 0, len(s.messages)+len(s.local))
+	messages := s.snapshotMessagesLocked()
+	entries := make([]ChatEntry, 0, len(messages)+len(s.local))
 	materializedToolResults := make(map[string]struct{})
-	for _, msg := range s.messages {
+	for _, msg := range messages {
 		if msg.Role != llm.RoleTool {
 			continue
 		}
@@ -258,12 +260,11 @@ func (s *chatStore) snapshot() ChatSnapshot {
 	}
 	appendLocalEntries(0)
 	processedMessages := 0
-	for _, msg := range s.messages {
+	for _, msg := range messages {
 		switch msg.Role {
 		case llm.RoleUser:
 			content := strings.TrimSpace(msg.Content)
-			if content != "" &&
-				!strings.HasPrefix(content, prompts.CompactionSummaryPrefix+"\n") {
+			if content != "" && msg.MessageType != llm.MessageTypeCompactionSummary {
 				entries = append(entries, ChatEntry{Role: "user", Text: msg.Content})
 			}
 		case llm.RoleAssistant:
@@ -310,7 +311,7 @@ func (s *chatStore) snapshot() ChatSnapshot {
 		processedMessages++
 		appendLocalEntries(processedMessages)
 	}
-	appendLocalEntries(len(s.messages))
+	appendLocalEntries(len(messages))
 	return ChatSnapshot{
 		Entries:      entries,
 		Ongoing:      s.ongoing,
@@ -354,12 +355,11 @@ func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
 }
 
 func (s *chatStore) formatToolCall(call llm.ToolCall) ChatEntry {
-	built := tools.BuildCallTranscriptMeta(call.Name, tools.ToolCallContext{
-		WorkingDir:                 s.cwd,
-		DefaultShellTimeoutSeconds: defaultShellTimeoutSecond,
-	}, call.Input)
-	meta := &built
-	text := strings.TrimSpace(meta.Command)
+	meta := decodeToolCallMeta(call)
+	text := "tool call"
+	if meta != nil {
+		text = strings.TrimSpace(meta.Command)
+	}
 	if text == "" {
 		text = "tool call"
 	}

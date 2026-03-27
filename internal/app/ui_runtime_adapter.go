@@ -11,6 +11,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+const uiNoopFinalToken = "NO_OP"
+
 type uiRuntimeAdapter struct {
 	model *uiModel
 }
@@ -22,6 +24,9 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 		return a.syncConversationFromEngine()
 	case runtime.EventAssistantDelta:
 		delta := evt.AssistantDelta
+		if strings.TrimSpace(delta) == uiNoopFinalToken {
+			return nil
+		}
 		m.sawAssistantDelta = delta != ""
 		if delta != "" {
 			m.forwardToView(tui.StreamAssistantMsg{Delta: delta})
@@ -124,6 +129,9 @@ func (a uiRuntimeAdapter) applyChatSnapshot(snapshot runtime.ChatSnapshot) tea.C
 	m := a.model
 	if len(m.startupCmds) > 0 {
 		m.startupCmds = nil
+		m.nativeProjection = tui.TranscriptProjection{}
+		m.nativeRenderedProjection = tui.TranscriptProjection{}
+		m.nativeFlushedEntryCount = 0
 		m.nativeRenderedSnapshot = ""
 	}
 	entries := make([]tui.TranscriptEntry, 0, len(snapshot.Entries))

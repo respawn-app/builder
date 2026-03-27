@@ -166,7 +166,7 @@ func (c uiInputController) dispatchQueuedInput(text string) tea.Cmd {
 }
 
 func (m *uiModel) shouldContinueQueuedInputAutoDrain() bool {
-	if len(m.queued) == 0 || m.busy || m.isInputLocked() || m.exitAction != UIActionNone || m.activeAsk != nil {
+	if len(m.queued) == 0 || m.busy || m.isInputLocked() || m.exitAction != UIActionNone || m.ask.hasCurrent() {
 		return false
 	}
 	if m.inputMode() != uiInputModeMain {

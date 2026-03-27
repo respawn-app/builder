@@ -295,6 +295,13 @@ func themeForegroundColor(theme string) rgbColor {
 	return rgbColorFromHex("#ABB2BF")
 }
 
+func themePreviewColor(theme string) rgbColor {
+	if strings.EqualFold(strings.TrimSpace(theme), "light") {
+		return rgbColorFromHex("#5C6370")
+	}
+	return rgbColorFromHex("#7F848E")
+}
+
 func (c rgbColor) hexString() string {
 	return fmt.Sprintf("#%02X%02X%02X", c.r, c.g, c.b)
 }

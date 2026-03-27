@@ -18,6 +18,10 @@ func (m Model) flattenEntryWithMutedText(role, text string, muteText bool) []str
 }
 
 func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *transcript.ToolCallMeta) []string {
+	return m.flattenEntryWithMetaAndSymbol(role, text, muteText, toolMeta, "")
+}
+
+func (m Model) flattenEntryWithMetaAndSymbol(role, text string, muteText bool, toolMeta *transcript.ToolCallMeta, symbolOverride string) []string {
 	renderWidth := m.viewportWidth
 	if rolePrefix(role) != "" {
 		renderWidth -= 2
@@ -25,89 +29,19 @@ func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *
 	if isThinkingRole(role) {
 		return m.flattenThinkingEntry(role, text, renderWidth)
 	}
-	type lineWithKind struct {
-		text string
-		kind string
-	}
-	rendered := ""
-	lines := make([]lineWithKind, 0, 8)
-	if !muteText {
-		if diffLines, ok := m.renderDiffToolLines(text, renderWidth, toolMeta); ok {
-			for _, line := range diffLines {
-				item := lineWithKind{text: line.Text}
-				switch line.Kind {
-				case diffRenderAdd:
-					item.kind = "add"
-				case diffRenderRemove:
-					item.kind = "remove"
-				}
-				lines = append(lines, item)
-			}
-		} else {
-			rendered = m.renderEntryText(role, text, renderWidth, toolMeta, muteText)
-			for _, chunk := range splitLines(rendered) {
-				lines = append(lines, lineWithKind{text: chunk})
-			}
-		}
-	} else {
-		rendered = m.renderEntryText(role, text, renderWidth, toolMeta, muteText)
-		for _, chunk := range splitLines(rendered) {
-			lines = append(lines, lineWithKind{text: chunk})
-		}
-	}
-	if len(lines) == 0 {
-		lines = []lineWithKind{{text: ""}}
-	}
-	plainLines := make([]string, 0, len(lines))
-	for _, line := range lines {
-		plainLines = append(plainLines, line.text)
+	content := m.renderEntryContentStage(role, text, renderWidth, toolMeta, muteText)
+	content = m.applyEntrySemanticTransformStage(content)
+	content = m.wrapEntryContentStage(content, renderWidth)
+	plainLines := make([]string, 0, len(content.Lines))
+	for _, line := range content.Lines {
+		plainLines = append(plainLines, line.Text)
 	}
 	isEditedBlock := isEditedToolBlock(plainLines)
-	symbol := m.roleSymbol(role)
-	usesLowLevelMutedShellStyle := muteText && shouldUseLowLevelMutedShellStyle(role, text, toolMeta)
-	out := make([]string, 0, len(lines))
-	for i, line := range lines {
-		displayChunk := line.text
-		diffKind := line.kind
-		if isToolHeadlineRole(role) {
-			if i == 0 {
-				displayChunk = m.renderToolHeadline(displayChunk, renderWidth)
-			}
-			displayChunk = m.styleToolLine(displayChunk)
-		}
-		if muteText && strings.TrimSpace(displayChunk) != "" && !isEditedBlock {
-			if !usesLowLevelMutedShellStyle {
-				displayChunk = m.palette().preview.Faint(true).Render(displayChunk)
-			}
-		} else if role == "reviewer_status" && isReviewerCacheHitLine(displayChunk) {
-			displayChunk = m.palette().preview.Faint(true).Render(displayChunk)
-		} else if isThinkingRole(role) {
-			displayChunk = styleForRole(role, m.palette()).Render(displayChunk)
-		} else if isStyledMetaRole(role) {
-			displayChunk = styleForRole(role, m.palette()).Render(displayChunk)
-		}
-		if i == 0 {
-			formattedLine := ""
-			if symbol == "" {
-				formattedLine = displayChunk
-			} else {
-				formattedLine = fmt.Sprintf("%s %s", symbol, displayChunk)
-			}
-			if diffKind != "" {
-				formattedLine = m.tintToolDiffLine(formattedLine, diffKind)
-			}
-			out = append(out, formattedLine)
-			continue
-		}
-		if strings.TrimSpace(displayChunk) == "" {
-			out = append(out, "")
-			continue
-		}
-		formattedLine := "  " + displayChunk
-		if diffKind != "" {
-			formattedLine = m.tintToolDiffLine(formattedLine, diffKind)
-		}
-		out = append(out, formattedLine)
+	laidOut := m.layoutEntryContentStage(role, content)
+	out := m.decorateEntryLayoutStage(role, laidOut, renderWidth, muteText, isEditedBlock, symbolOverride)
+	if muteText && isShellPreviewRole(role) {
+		joined := applyANSIStyleIntents(strings.Join(out, "\n"), ansiIntentPalette{ThemeForeground: m.palette().foregroundColor, SubduedForeground: m.palette().previewColor}, Subdued)
+		out = splitLines(joined)
 	}
 	if muteText && isShellPreviewRole(role) && shellPreviewShouldCollapse(text) {
 		ellipsis := "  " + m.palette().preview.Faint(true).Render("…")
@@ -115,6 +49,123 @@ func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *
 			return []string{"", ellipsis}
 		}
 		return []string{out[0], ellipsis}
+	}
+	return out
+}
+
+func (m Model) renderEntryContentStage(role, text string, width int, toolMeta *transcript.ToolCallMeta, muteText bool) transcriptRenderContent {
+	if !muteText {
+		if diffLines, ok := m.renderDiffToolLines(text, width, toolMeta); ok {
+			return transcriptRenderContent{Lines: diffLines, WrapMode: transcriptRenderWrapModePreserved}
+		}
+	}
+	rendered, intents, wrapMode := m.renderEntryTextStage(role, text, width, toolMeta, muteText)
+	return transcriptRenderContent{Lines: []transcriptRenderLine{{Text: rendered, Intents: intents}}, WrapMode: wrapMode}
+}
+
+func (m Model) applyEntrySemanticTransformStage(content transcriptRenderContent) transcriptRenderContent {
+	palette := ansiIntentPalette{ThemeForeground: m.palette().foregroundColor, SubduedForeground: m.palette().previewColor}
+	out := transcriptRenderContent{WrapMode: content.WrapMode, Lines: make([]transcriptRenderLine, 0, len(content.Lines))}
+	for _, line := range content.Lines {
+		if line.Intents.Has(Subdued) && line.Intents.Has(SyntaxHighlighted) {
+			out.Lines = append(out.Lines, line)
+			continue
+		}
+		if line.Intents.Has(SyntaxHighlighted) || strings.Contains(line.Text, "\x1b[") {
+			line.Text = applyANSIStyleIntents(line.Text, palette, line.Intents)
+		}
+		out.Lines = append(out.Lines, line)
+	}
+	if len(out.Lines) == 0 {
+		out.Lines = []transcriptRenderLine{{}}
+	}
+	return out
+}
+
+func (m Model) wrapEntryContentStage(content transcriptRenderContent, width int) transcriptRenderContent {
+	if width < 1 {
+		width = 1
+	}
+	if content.WrapMode == transcriptRenderWrapModePreserved {
+		if len(content.Lines) == 0 {
+			content.Lines = []transcriptRenderLine{{}}
+		}
+		return content
+	}
+	out := transcriptRenderContent{WrapMode: transcriptRenderWrapModePreserved, Lines: make([]transcriptRenderLine, 0, len(content.Lines))}
+	for _, line := range content.Lines {
+		wrapped := splitLines(m.wrapRenderedEntryContent(line.Text, width))
+		if len(wrapped) == 0 {
+			wrapped = []string{""}
+		}
+		for _, chunk := range wrapped {
+			out.Lines = append(out.Lines, transcriptRenderLine{Text: chunk, Intents: line.Intents})
+		}
+	}
+	if len(out.Lines) == 0 {
+		out.Lines = []transcriptRenderLine{{}}
+	}
+	return out
+}
+
+func (m Model) layoutEntryContentStage(role string, content transcriptRenderContent) []transcriptLayoutLine {
+	symbol := rolePrefix(role)
+	out := make([]transcriptLayoutLine, 0, len(content.Lines))
+	for idx, line := range content.Lines {
+		prefix := "  "
+		if idx == 0 {
+			prefix = ""
+			if symbol != "" {
+				prefix = symbol + " "
+			}
+		}
+		out = append(out, transcriptLayoutLine{Prefix: prefix, Text: line.Text, Intents: line.Intents})
+	}
+	if len(out) == 0 {
+		out = []transcriptLayoutLine{{}}
+	}
+	return out
+}
+
+func (m Model) decorateEntryLayoutStage(role string, lines []transcriptLayoutLine, renderWidth int, muteText bool, isEditedBlock bool, symbolOverride string) []string {
+	out := make([]string, 0, len(lines))
+	for idx, line := range lines {
+		display := line.Text
+		if isToolHeadlineRole(role) {
+			if idx == 0 {
+				display = m.renderToolHeadline(display, renderWidth)
+			}
+			display = m.styleToolLine(display)
+		}
+		if !strings.Contains(display, "\x1b[") {
+			display = applyANSIStyleIntents(display, ansiIntentPalette{ThemeForeground: m.palette().foregroundColor, SubduedForeground: m.palette().previewColor}, line.Intents)
+		}
+		if muteText && strings.TrimSpace(display) != "" && !isEditedBlock && !line.Intents.Has(Subdued) {
+			display = m.palette().preview.Faint(true).Render(display)
+		} else if isStyledMetaRole(role) {
+			display = styleForRole(role, m.palette()).Render(display)
+		}
+		formatted := display
+		if idx == 0 {
+			if line.Prefix != "" {
+				symbol := symbolOverride
+				if symbol == "" {
+					symbol = m.roleSymbol(role)
+				}
+				formatted = symbol + " " + display
+			}
+		} else if strings.TrimSpace(display) == "" {
+			formatted = ""
+		} else {
+			formatted = line.Prefix + display
+		}
+		if line.Intents.Has(DiffAdded) {
+			formatted = m.tintToolDiffLine(formatted, "add")
+		}
+		if line.Intents.Has(DiffRemoved) {
+			formatted = m.tintToolDiffLine(formatted, "remove")
+		}
+		out = append(out, formatted)
 	}
 	return out
 }
@@ -155,7 +206,7 @@ func isEditedToolBlock(lines []string) bool {
 	return false
 }
 
-func (m Model) renderDiffToolLines(text string, width int, toolMeta *transcript.ToolCallMeta) ([]diffRenderedLine, bool) {
+func (m Model) renderDiffToolLines(text string, width int, toolMeta *transcript.ToolCallMeta) ([]transcriptRenderLine, bool) {
 	_ = text
 	if toolMeta == nil || !toolMeta.HasRenderHint() || m.code == nil {
 		return nil, false
@@ -171,7 +222,20 @@ func (m Model) renderDiffToolLines(text string, width int, toolMeta *transcript.
 	if !ok {
 		return nil, false
 	}
-	return lines, true
+	out := make([]transcriptRenderLine, 0, len(lines))
+	for _, line := range lines {
+		intents := ThemeForeground
+		switch line.Kind {
+		case diffRenderAdd:
+			intents |= SyntaxHighlighted | DiffAdded
+		case diffRenderRemove:
+			intents |= SyntaxHighlighted | DiffRemoved
+		case diffRenderContext:
+			intents |= SyntaxHighlighted
+		}
+		out = append(out, transcriptRenderLine{Text: line.Text, Intents: intents})
+	}
+	return out, true
 }
 
 func (m Model) flattenEntryPlain(role, text string) []string {
@@ -222,71 +286,65 @@ func (m Model) maybeSelectedUserBlock(entryIndex int, role string, lines []strin
 }
 
 func (m Model) renderEntryText(role, text string, width int, toolMeta *transcript.ToolCallMeta, muteText bool) string {
+	rendered, intents, wrapMode := m.renderEntryTextStage(role, text, width, toolMeta, muteText)
+	content := transcriptRenderContent{Lines: []transcriptRenderLine{{Text: rendered, Intents: intents}}, WrapMode: wrapMode}
+	content = m.applyEntrySemanticTransformStage(content)
+	content = m.wrapEntryContentStage(content, width)
+	palette := ansiIntentPalette{ThemeForeground: m.palette().foregroundColor, SubduedForeground: m.palette().previewColor}
+	parts := make([]string, 0, len(content.Lines))
+	for _, line := range content.Lines {
+		if !muteText && !strings.Contains(line.Text, "\x1b[") {
+			line.Text = applyANSIStyleIntents(line.Text, palette, line.Intents)
+		}
+		parts = append(parts, line.Text)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func (m Model) renderEntryTextStage(role, text string, width int, toolMeta *transcript.ToolCallMeta, muteText bool) (string, StyleIntent, transcriptRenderWrapMode) {
 	if strings.TrimSpace(text) == "" {
-		return text
+		return text, 0, transcriptRenderWrapModeViewport
 	}
 	if isThinkingRole(role) {
-		return m.wrapRenderedEntryContent(text, width)
+		return text, 0, transcriptRenderWrapModeViewport
 	}
-	if rendered, ok := m.renderEntryContent(role, text, toolMeta, muteText); ok {
-		rendered = m.applyEntryDefaultForeground(role, rendered, muteText)
-		return m.wrapRenderedEntryContent(rendered, width)
+	if rendered, intents, ok := m.renderToolTextWithHighlight(role, text, toolMeta, muteText); ok {
+		return rendered, intents, transcriptRenderWrapModeViewport
 	}
 	if !isMarkdownRole(role) {
-		text = m.applyEntryDefaultForeground(role, text, muteText)
-		return m.wrapRenderedEntryContent(text, width)
+		intents := m.defaultEntryStyleIntents(role, muteText)
+		if isToolHeadlineRole(role) && strings.Contains(text, "\n") {
+			intents &^= ThemeForeground
+		}
+		return text, intents, transcriptRenderWrapModeViewport
 	}
 	if m.md == nil {
-		text = m.applyEntryDefaultForeground(role, text, muteText)
-		return m.wrapRenderedEntryContent(text, width)
+		return text, m.defaultEntryStyleIntents(role, muteText), transcriptRenderWrapModeViewport
 	}
 	rendered, err := m.md.render(role, text, width)
 	if err != nil {
-		text = m.applyEntryDefaultForeground(role, text, muteText)
-		return m.wrapRenderedEntryContent(text, width)
+		return text, m.defaultEntryStyleIntents(role, muteText), transcriptRenderWrapModeViewport
 	}
-	rendered = m.applyEntryDefaultForeground(role, rendered, muteText)
-	return rendered
-}
-
-func (m Model) renderEntryContent(role, text string, toolMeta *transcript.ToolCallMeta, muteText bool) (string, bool) {
-	rendered, ok := m.renderToolTextWithHighlight(role, text, toolMeta)
-	if !ok {
-		return "", false
-	}
-	if muteText && shouldUseLowLevelMutedShellStyle(role, text, toolMeta) {
-		return m.applyLowLevelMutedShellStyle(rendered), true
-	}
-	if muteText {
-		return "", false
-	}
-	return rendered, true
-}
-
-func (m Model) applyLowLevelMutedShellStyle(text string) string {
-	return muteANSIOutput(text, m.palette().previewColor)
-}
-
-func (m Model) applyEntryDefaultForeground(role, text string, muteText bool) string {
-	if strings.TrimSpace(text) == "" {
-		return text
-	}
-	if muteText || isThinkingRole(role) {
-		return text
-	}
-	switch role {
-	case "reviewer_status", "reviewer_suggestions", "error":
-		return text
-	default:
-		if isCompactionRole(role) {
-			return text
-		}
-		return applyDefaultForeground(text, m.palette().foregroundColor)
-	}
+	return rendered, ThemeForeground, transcriptRenderWrapModeViewport
 }
 
 func (m Model) wrapRenderedEntryContent(text string, width int) string {
 	return wrapTextForViewport(text, width)
+}
+
+func (m Model) defaultEntryStyleIntents(role string, muteText bool) StyleIntent {
+	if muteText {
+		return Subdued
+	}
+	switch role {
+	case "reviewer_status", "reviewer_suggestions", "error":
+		return 0
+	default:
+		if isCompactionRole(role) {
+			return 0
+		}
+		return ThemeForeground
+	}
 }
 
 func shouldUseLowLevelMutedShellStyle(role, text string, toolMeta *transcript.ToolCallMeta) bool {
@@ -303,32 +361,42 @@ func shouldUseLowLevelMutedShellStyle(role, text string, toolMeta *transcript.To
 	return shouldFallbackToShellPreviewHint(role, text, toolMeta, hint)
 }
 
-func (m Model) renderToolTextWithHighlight(role, text string, toolMeta *transcript.ToolCallMeta) (string, bool) {
+func (m Model) renderToolTextWithHighlight(role, text string, toolMeta *transcript.ToolCallMeta, muteText bool) (string, StyleIntent, bool) {
 	hint, ok := resolveToolRenderHint(role, text, toolMeta)
 	if !ok || m.code == nil {
-		return "", false
+		return "", 0, false
+	}
+	if muteText && !shouldUseLowLevelMutedShellStyle(role, text, toolMeta) {
+		return "", 0, false
 	}
 	if hint.Kind == transcript.ToolRenderKindDiff {
-		return "", false
+		return "", 0, false
 	}
 	highlightTarget := text
 	prefix := ""
 	if hint.ResultOnly {
 		parts := strings.SplitN(text, "\n", 2)
 		if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
-			return "", false
+			return "", 0, false
 		}
 		prefix = parts[0]
 		highlightTarget = parts[1]
 	}
 	rendered, ok := m.code.render(hint, highlightTarget)
 	if !ok {
-		return "", false
+		return "", 0, false
 	}
 	if prefix != "" {
 		rendered = prefix + "\n" + rendered
 	}
-	return rendered, true
+	intents := ThemeForeground | SyntaxHighlighted
+	if isShellPreviewRole(role) {
+		intents |= ShellPreview
+		if muteText && shouldUseLowLevelMutedShellStyle(role, text, toolMeta) {
+			intents |= Subdued
+		}
+	}
+	return rendered, intents, true
 }
 
 func resolveToolRenderHint(role, text string, toolMeta *transcript.ToolCallMeta) (*transcript.ToolRenderHint, bool) {

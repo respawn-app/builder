@@ -6,63 +6,13 @@ import (
 
 	"builder/internal/shared/textutil"
 	"builder/internal/tools"
+	"builder/prompts"
 
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 )
 
-func buildResponsesInput(messages []Message, canonical []ResponseItem) []responses.ResponseInputItemUnionParam {
-	if len(canonical) > 0 {
-		return buildResponsesInputFromItems(canonical)
-	}
-	return buildResponsesInputFromMessages(messages)
-}
-
-func buildResponsesInputFromMessages(messages []Message) []responses.ResponseInputItemUnionParam {
-	var items []responses.ResponseInputItemUnionParam
-	for _, msg := range messages {
-		switch msg.Role {
-		case RoleTool:
-			if strings.TrimSpace(msg.ToolCallID) == "" {
-				continue
-			}
-			items = append(items, functionCallOutputInputItems(msg.ToolCallID, msg.Name, normalizeToolInput(msg.Content))...)
-		case RoleAssistant:
-			if strings.TrimSpace(msg.Content) != "" {
-				items = append(items, messageInput(string(msg.Role), msg.Content, msg.Phase))
-			}
-			for _, tc := range msg.ToolCalls {
-				callID := strings.TrimSpace(tc.ID)
-				if callID == "" {
-					continue
-				}
-				items = append(items, responses.ResponseInputItemParamOfFunctionCall(normalizeToolArguments(string(tc.Input)), callID, tc.Name))
-			}
-			for _, ri := range msg.ReasoningItems {
-				id := strings.TrimSpace(ri.ID)
-				encrypted := strings.TrimSpace(ri.EncryptedContent)
-				if id == "" || encrypted == "" {
-					continue
-				}
-				items = append(items, responses.ResponseInputItemUnionParam{
-					OfReasoning: &responses.ResponseReasoningItemParam{
-						ID:               id,
-						Summary:          []responses.ResponseReasoningItemSummaryParam{},
-						EncryptedContent: param.NewOpt(encrypted),
-					},
-				})
-			}
-		default:
-			if strings.TrimSpace(msg.Content) == "" {
-				continue
-			}
-			items = append(items, messageInput(string(msg.Role), msg.Content, ""))
-		}
-	}
-	return items
-}
-
-func buildResponsesInputFromItems(canonical []ResponseItem) []responses.ResponseInputItemUnionParam {
+func buildResponsesInput(canonical []ResponseItem) []responses.ResponseInputItemUnionParam {
 	items := make([]responses.ResponseInputItemUnionParam, 0, len(canonical))
 	for _, item := range canonical {
 		switch item.Type {
@@ -70,7 +20,7 @@ func buildResponsesInputFromItems(canonical []ResponseItem) []responses.Response
 			if strings.TrimSpace(item.Content) == "" {
 				continue
 			}
-			items = append(items, messageInput(string(item.Role), item.Content, item.Phase))
+			items = append(items, messageInput(item, item.Content))
 		case ResponseItemTypeFunctionCall:
 			callID := textutil.FirstNonEmpty(strings.TrimSpace(item.CallID), strings.TrimSpace(item.ID))
 			if callID == "" {
@@ -126,7 +76,11 @@ func buildResponsesInputFromItems(canonical []ResponseItem) []responses.Response
 	return items
 }
 
-func messageInput(role, text string, phase MessagePhase) responses.ResponseInputItemUnionParam {
+func messageInput(item ResponseItem, text string) responses.ResponseInputItemUnionParam {
+	role := strings.TrimSpace(string(item.Role))
+	if item.MessageType == MessageTypeCompactionSummary {
+		text = prompts.CompactionSummaryPrefix + "\n\n" + strings.TrimSpace(text)
+	}
 	role = strings.TrimSpace(role)
 	if role == string(RoleAssistant) {
 		content := []responses.ResponseOutputMessageContentUnionParam{{
@@ -135,11 +89,11 @@ func messageInput(role, text string, phase MessagePhase) responses.ResponseInput
 				Text:        text,
 			},
 		}}
-		item := responses.ResponseInputItemParamOfOutputMessage(content, "", responses.ResponseOutputMessageStatusCompleted)
-		if item.OfOutputMessage != nil && phase != "" {
-			item.OfOutputMessage.Phase = responses.ResponseOutputMessagePhase(phase)
+		messageItem := responses.ResponseInputItemParamOfOutputMessage(content, "", responses.ResponseOutputMessageStatusCompleted)
+		if messageItem.OfOutputMessage != nil && item.Phase != "" {
+			messageItem.OfOutputMessage.Phase = responses.ResponseOutputMessagePhase(item.Phase)
 		}
-		return item
+		return messageItem
 	}
 
 	inputRole := string(RoleUser)

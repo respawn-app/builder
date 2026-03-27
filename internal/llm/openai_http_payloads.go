@@ -36,7 +36,7 @@ func (t *HTTPTransport) buildCompactPayload(request OpenAICompactionRequest) (re
 }
 
 func (b openAIRequestPayloadBuilder) BuildResponse(request OpenAIRequest, mode openAIAuthMode) (responses.ResponseNewParams, error) {
-	input := buildResponsesInput(request.Messages, request.Items)
+	input := buildResponsesInput(request.Items)
 	tools, err := b.buildTools(request.Tools, request.EnableNativeWebSearch)
 	if err != nil {
 		return responses.ResponseNewParams{}, err
@@ -77,7 +77,7 @@ func (b openAIRequestPayloadBuilder) BuildResponse(request OpenAIRequest, mode o
 }
 
 func (b openAIRequestPayloadBuilder) BuildInputTokenCount(request OpenAIRequest) (responses.InputTokenCountParams, error) {
-	input := buildResponsesInput(request.Messages, request.Items)
+	input := buildResponsesInput(request.Items)
 	tools, err := b.buildTools(request.Tools, request.EnableNativeWebSearch)
 	if err != nil {
 		return responses.InputTokenCountParams{}, err
@@ -111,7 +111,7 @@ func (openAIRequestPayloadBuilder) BuildCompact(request OpenAICompactionRequest)
 	if strings.TrimSpace(request.Model) == "" {
 		return responses.ResponseCompactParams{}, fmt.Errorf("compaction model is required")
 	}
-	input := buildResponsesInput(nil, request.InputItems)
+	input := buildResponsesInput(request.InputItems)
 	out := responses.ResponseCompactParams{Model: responses.ResponseCompactParamsModel(request.Model)}
 	if len(input) > 0 {
 		out.Input = responses.ResponseCompactParamsInputUnion{OfResponseInputItemArray: input}

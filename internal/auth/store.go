@@ -17,6 +17,10 @@ type Store interface {
 	Save(ctx context.Context, state State) error
 }
 
+type PersistedStateLoader interface {
+	LoadPersisted(ctx context.Context) (State, error)
+}
+
 type FileStore struct {
 	path string
 }
