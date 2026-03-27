@@ -103,10 +103,7 @@ url="https://github.com/${repo}/archive/refs/tags/${version}.tar.gz"
 tmp_file="$(mktemp)"
 tmp_formula="$(mktemp)"
 cleanup() {
-	if command -v trash >/dev/null 2>&1; then
-		trash "$tmp_file" >/dev/null 2>&1 || true
-		trash "$tmp_formula" >/dev/null 2>&1 || true
-	fi
+	rm -f "$tmp_file" "$tmp_formula"
 }
 trap cleanup EXIT
 

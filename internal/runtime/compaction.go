@@ -295,6 +295,12 @@ func (e *Engine) compactionSoonReminderLimit(ctx context.Context) int {
 }
 
 func (e *Engine) maybeAppendCompactionSoonReminder(ctx context.Context, stepID string) error {
+	if !e.AutoCompactionEnabled() || e.compactionMode() == "none" {
+		e.mu.Lock()
+		e.compactionSoonReminderIssued = false
+		e.mu.Unlock()
+		return nil
+	}
 	limit := e.compactionSoonReminderLimit(ctx)
 	if limit <= 0 {
 		e.mu.Lock()
@@ -306,9 +312,6 @@ func (e *Engine) maybeAppendCompactionSoonReminder(ctx context.Context, stepID s
 		e.mu.Lock()
 		e.compactionSoonReminderIssued = false
 		e.mu.Unlock()
-		return nil
-	}
-	if !e.AutoCompactionEnabled() || e.compactionMode() == "none" {
 		return nil
 	}
 	content := strings.TrimSpace(prompts.CompactionSoonReminderPrompt)

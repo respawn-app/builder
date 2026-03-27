@@ -143,3 +143,41 @@ func TestResolveSessionActionLogoutUsesBootstrapAuthInteractor(t *testing.T) {
 		t.Fatalf("expected logout flow to restore auth method, got %+v", state.Method.APIKey)
 	}
 }
+
+func TestResolveSessionActionLogoutAllowsNilStore(t *testing.T) {
+	ctx := context.Background()
+	mgr := auth.NewManager(auth.NewMemoryStore(auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "sk-before"},
+		},
+	}), nil, time.Now)
+	interactor := &stubAuthInteractor{}
+	interactor.interact = func(ctx context.Context, req authInteraction) error {
+		_, err := req.Manager.SwitchMethod(ctx, auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "sk-after"},
+		}, true)
+		return err
+	}
+
+	resolved, err := resolveSessionAction(
+		ctx,
+		appBootstrap{authManager: mgr, authInteractor: interactor},
+		nil,
+		UITransition{Action: UIActionLogout},
+	)
+	if err != nil {
+		t.Fatalf("resolve session action: %v", err)
+	}
+	if interactor.callCount != 1 {
+		t.Fatalf("expected auth interactor to be called once, got %d", interactor.callCount)
+	}
+	if !resolved.ShouldContinue {
+		t.Fatal("expected logout flow to continue after reauth")
+	}
+	if resolved.NextSessionID != "" {
+		t.Fatalf("expected no next session id without a current store, got %q", resolved.NextSessionID)
+	}
+}

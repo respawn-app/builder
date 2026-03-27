@@ -1,1 +1,3 @@
-Heads-up: soon, you will be asked to hand off your work to another agent. This reminder is for you to see if you want to make a quick detour to do any preparation for this, such as persisting memories, plans or pending changes - to help the next agent continue your work cleanly after handoff. There's nothing to worry about: don't let this affect scope/quality of your work or stop because of this
+Heads-up: a handoff to another agent may happen soon.
+Keep working normally. Do not reduce scope or quality, and do not stop because of this reminder.
+If useful, take a brief detour to persist key memories, plan updates, or pending changes so the next agent can resume cleanly.

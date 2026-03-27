@@ -35,48 +35,62 @@ require_value() {
 	exit 1
 }
 
+clean_dist_release_artifacts() {
+	local dist_path="$1"
+	find "$dist_path" -maxdepth 1 -type f \( -name 'builder_*.tar.gz' -o -name 'builder_*.zip' -o -name 'checksums.txt' \) -delete
+}
+
+release_targets() {
+	cat <<'EOF'
+darwin arm64
+linux amd64
+linux arm64
+windows amd64
+windows arm64
+EOF
+}
+
 build_archives() {
 	require_value "--version" "$version"
 
 	local dist_path
 	dist_path="$(resolve_path "$dist_dir")"
 	mkdir -p "$dist_path"
+	clean_dist_release_artifacts "$dist_path"
 
 	local staging_dir
 	staging_dir="$(mktemp -d)"
 
 	local build_os build_arch ext archive_ext out
-	for build_os in darwin linux windows; do
-		for build_arch in amd64 arm64; do
-			if [ "$build_os" = "windows" ]; then
-				ext=".exe"
-				archive_ext="zip"
-			else
-				ext=""
-				archive_ext="tar.gz"
-			fi
+	while read -r build_os build_arch; do
+		if [ "$build_os" = "windows" ]; then
+			ext=".exe"
+			archive_ext="zip"
+		else
+			ext=""
+			archive_ext="tar.gz"
+		fi
 
-			out="builder_${version}_${build_os}_${build_arch}"
-			env GOOS="$build_os" GOARCH="$build_arch" BUILDER_VERSION="$version" \
-				bash scripts/build.sh --output "$staging_dir/${out}${ext}"
+		out="builder_${version}_${build_os}_${build_arch}"
+		env GOOS="$build_os" GOARCH="$build_arch" BUILDER_VERSION="$version" \
+			bash scripts/build.sh --output "$staging_dir/${out}${ext}"
 
-			if [ "$archive_ext" = "zip" ]; then
-				(
-					cd "$staging_dir"
-					zip -q "$dist_path/${out}.zip" "${out}${ext}"
-				)
-			else
-				(
-					cd "$staging_dir"
-					tar -czf "$dist_path/${out}.tar.gz" "${out}${ext}"
-				)
-			fi
-		done
-	done
+		if [ "$archive_ext" = "zip" ]; then
+			(
+				cd "$staging_dir"
+				zip -q "$dist_path/${out}.zip" "${out}${ext}"
+			)
+		else
+			(
+				cd "$staging_dir"
+				tar -czf "$dist_path/${out}.tar.gz" "${out}${ext}"
+			)
+		fi
+	done < <(release_targets)
 
 	(
 		cd "$dist_path"
-		shasum -a 256 ./*.tar.gz ./*.zip >checksums.txt
+		shasum -a 256 "builder_${version}_"*.tar.gz "builder_${version}_"*.zip >checksums.txt
 	)
 }
 
@@ -149,7 +163,13 @@ smoke_test() {
 	esac
 
 	binary_path="$smoke_dir/${asset_base}${binary_ext}"
-	"$binary_path" --version
+	local version_output expected_version
+	version_output="$("$binary_path" --version)"
+	expected_version="${version#v}"
+	if [ "$version_output" != "$expected_version" ]; then
+		echo "unexpected version output for ${binary_path}: got ${version_output}, want ${expected_version}" >&2
+		exit 1
+	fi
 	"$binary_path" --help >/dev/null
 }
 
