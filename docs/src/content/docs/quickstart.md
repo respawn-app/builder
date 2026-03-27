@@ -42,6 +42,7 @@ You can switch later with `/logout`.
 - Use `Shift+Tab` to toggle between detailed transcript mode and ongoing mode.
 - Press `Esc` twice to enter Edit mode, which lets you go back in time, edit a previous message, and fork the session into a new one. File edits stay.
 - Use the `Up`/`Down` arrow keys to select and resend previous prompts.
+- Press `Ctrl+V` or `Ctrl+D` to paste a clipboard screenshot into the prompt as an image file path.
 - Press `F1` to invoke help with other hotkeys.
 - Use `/supervisor` to toggle reviewer invocation for the current session. Initial value is config's `reviewer.frequency`, and default is on. Supervisor is a feature that will automatically review the edits made by the model. It increases costs by ~20% but improves results.
 - Use `/review` to start a code review. In a non-empty session, Builder opens that review in a fresh child session. After the review finishes, you can use `/back` to teleport to the original session.

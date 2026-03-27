@@ -116,6 +116,7 @@
 
 - In-turn user messaging supports both steering queueing and queued post-turn send.
 - Queue/send hotkey is `Tab`; compatibility alias: `Ctrl+Enter`.
+- Clipboard image paste hotkeys are `Ctrl+V` and `Ctrl+D`; they save clipboard images to temp PNG files and insert the resulting path into the active text input.
 - Known `Ctrl+Enter` CSI encodings normalize to the same queue action.
 - Mid-run steering is soft-insert only (delivered at safe boundary after current tool completion; no forced interruption).
 - Steering submissions never lock the input box; each `Enter` while busy queues another steering message immediately.
