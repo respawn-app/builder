@@ -256,6 +256,9 @@ func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea
 	if len(m.queued) > 0 {
 		return c.flushQueuedInputs(queueDrainAuto)
 	}
+	if m.engine != nil && m.engine.HasQueuedUserWork() {
+		return m, c.startQueuedInjectionSubmission()
+	}
 	m.syncViewport()
 	return m, nil
 }

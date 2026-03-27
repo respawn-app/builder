@@ -1,0 +1,87 @@
+package runtime
+
+import (
+	"context"
+	"testing"
+
+	"builder/internal/llm"
+	"builder/internal/session"
+	"builder/internal/tools"
+)
+
+func TestSubmitQueuedUserMessagesStartsTurnFromQueuedInjection(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "after queued steer"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	var flushed Event
+	eng, err := New(store, client, tools.NewRegistry(), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			if evt.Kind == EventUserMessageFlushed {
+				flushed = evt
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	eng.QueueUserMessage("steer now")
+
+	msg, err := eng.SubmitQueuedUserMessages(context.Background())
+	if err != nil {
+		t.Fatalf("submit queued user messages: %v", err)
+	}
+	if msg.Content != "after queued steer" {
+		t.Fatalf("assistant content = %q, want after queued steer", msg.Content)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected one model call for queued submission, got %d", len(client.calls))
+	}
+	if flushed.UserMessage != "steer now" {
+		t.Fatalf("unexpected flushed user message %q", flushed.UserMessage)
+	}
+
+	hasQueuedUser := false
+	for _, message := range requestMessages(client.calls[0]) {
+		if message.Role == llm.RoleUser && message.Content == "steer now" {
+			hasQueuedUser = true
+			break
+		}
+	}
+	if !hasQueuedUser {
+		t.Fatalf("expected first request to include queued user message, got %+v", requestMessages(client.calls[0]))
+	}
+}
+
+func TestHasQueuedUserWorkDetectsBackgroundNotices(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	steps := &stubExclusiveStepLifecycle{busy: true}
+	eng.stepLifecycle = steps
+	eng.backgroundFlow = &defaultBackgroundNoticeScheduler{engine: eng, steps: steps}
+	if eng.HasQueuedUserWork() {
+		t.Fatal("did not expect queued work in fresh engine")
+	}
+
+	eng.HandleBackgroundShellUpdate(BackgroundShellEvent{ID: "42", Type: "completed", State: "done"}, true)
+	if !eng.HasQueuedUserWork() {
+		t.Fatal("expected queued work after background notice was queued")
+	}
+}
