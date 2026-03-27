@@ -280,7 +280,7 @@ func TestLastCommittedAssistantFinalAnswerSkipsTrailingReminderEntries(t *testin
 	}
 }
 
-func TestLastCommittedAssistantFinalAnswerSkipsTrailingTypedDeveloperMetadata(t *testing.T) {
+func TestLastCommittedAssistantFinalAnswerSkipsTrailingErrorFeedback(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {

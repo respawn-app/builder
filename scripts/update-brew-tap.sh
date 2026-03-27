@@ -80,8 +80,7 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
-repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"
-if [[ -z "$repo_root" ]]; then
+if ! repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
 	echo "Not inside a git repo" >&2
 	exit 1
 fi

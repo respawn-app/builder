@@ -62,6 +62,57 @@ func TestSubmitQueuedUserMessagesStartsTurnFromQueuedInjection(t *testing.T) {
 	}
 }
 
+func TestSubmitQueuedUserMessagesRetriesTransientBusyErrors(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "after queued steer"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	attempts := 0
+	eng.stepLifecycle = &stubExclusiveStepLifecycle{runFn: func(ctx context.Context, options exclusiveStepOptions, fn func(stepCtx context.Context, stepID string) error) error {
+		attempts++
+		if attempts == 1 {
+			return errExclusiveStepBusy
+		}
+		return fn(ctx, "stub-step")
+	}}
+	eng.QueueUserMessage("steer now")
+
+	msg, err := eng.SubmitQueuedUserMessages(context.Background())
+	if err != nil {
+		t.Fatalf("submit queued user messages: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected busy retry before success, got %d attempts", attempts)
+	}
+	if msg.Content != "after queued steer" {
+		t.Fatalf("assistant content = %q, want after queued steer", msg.Content)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected one model call after retry, got %d", len(client.calls))
+	}
+	hasQueuedUser := false
+	for _, message := range requestMessages(client.calls[0]) {
+		if message.Role == llm.RoleUser && message.Content == "steer now" {
+			hasQueuedUser = true
+			break
+		}
+	}
+	if !hasQueuedUser {
+		t.Fatalf("expected retried request to include queued user message, got %+v", requestMessages(client.calls[0]))
+	}
+}
+
 func TestHasQueuedUserWorkDetectsBackgroundNotices(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
