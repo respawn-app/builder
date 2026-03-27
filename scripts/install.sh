@@ -210,7 +210,11 @@ case "$bin_dir" in
 esac
 
 mkdir -p "$bin_dir"
-target="$bin_dir/builder"
+target_name="builder"
+if [ "$os" = "windows" ]; then
+	target_name="builder.exe"
+fi
+target="$bin_dir/$target_name"
 if [ -e "$target" ]; then
 	if [ -d "$target" ]; then
 		echo "Refusing to overwrite directory $target" >&2
