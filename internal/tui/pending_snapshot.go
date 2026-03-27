@@ -1,6 +1,10 @@
 package tui
 
-import "strings"
+import (
+	"strings"
+
+	xansi "github.com/charmbracelet/x/ansi"
+)
 
 func RenderPendingToolSnapshot(entries []TranscriptEntry, theme string, width int, spinner string) string {
 	if len(entries) == 0 {
@@ -51,14 +55,17 @@ func (m Model) applyPendingSpinner(blocks []ongoingBlock, entries []TranscriptEn
 			out = append(out, block)
 			continue
 		}
-		prefix := symbol + " "
-		if !strings.HasPrefix(block.lines[0], prefix) {
+		plainPrefix := rolePrefix(block.role) + " "
+		plainFirstLine := xansi.Strip(block.lines[0])
+		if !strings.HasPrefix(plainFirstLine, plainPrefix) {
 			out = append(out, block)
 			continue
 		}
 		lines := append([]string(nil), block.lines...)
 		spinnerSymbol := styleForRole(block.role, m.palette()).Render(trimmedSpinner)
-		lines[0] = spinnerSymbol + " " + strings.TrimPrefix(lines[0], prefix)
+		body := strings.TrimPrefix(plainFirstLine, plainPrefix)
+		body = m.palette().preview.Faint(true).Render(body)
+		lines[0] = spinnerSymbol + " " + body
 		out = append(out, ongoingBlock{role: block.role, lines: lines, entryIndex: block.entryIndex})
 	}
 	return out

@@ -227,6 +227,16 @@
 - Ongoing preview sizing is fixed: command max `80`, file max `60`, soft-wrap allowed.
 - Ongoing line prefix is `> `.
 - Shell command previews remain syntax-highlighted in both modes; ongoing renders them with lower-contrast `preview` styling plus terminal `faint`, while detail keeps full syntax colors.
+- Transcript rendering stages are explicit and ordered: `content render -> low-level semantic transform -> wrap -> line layout -> final decoration`.
+- Style ownership is fixed by layer:
+- Formatter config owns syntax backgrounds and formatter base foreground.
+- Transcript rendering owns role styling, subdued shell preview styling, and diff semantics.
+- Layout owns prefixes, indentation, and wrapping only.
+- Rendering/style invariants:
+- Detail shell commands are full syntax color.
+- Ongoing shell commands are syntax-highlighted but subdued.
+- Formatted text uses the app foreground as its base text color.
+- Syntax-highlighted output must not emit backgrounds unless explicitly intended, such as final diff added/removed decoration.
 - Assistant text streams in ongoing mode.
 - Tool output is not streamed live; show running status and reveal on completion.
 - `detail` is a non-streaming snapshot view.
