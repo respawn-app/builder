@@ -26,20 +26,23 @@ func (e *Engine) ChatSnapshot() ChatSnapshot {
 
 func (e *Engine) LastCommittedAssistantFinalAnswer() string {
 	messages := e.chat.snapshotMessages()
-	if len(messages) == 0 {
-		return ""
+	for idx := len(messages) - 1; idx >= 0; idx-- {
+		message := messages[idx]
+		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeCompactionSoonReminder {
+			continue
+		}
+		if message.Role != llm.RoleAssistant {
+			return ""
+		}
+		if message.Phase != llm.MessagePhaseFinal {
+			return ""
+		}
+		if strings.TrimSpace(message.Content) == "" {
+			return ""
+		}
+		return message.Content
 	}
-	message := messages[len(messages)-1]
-	if message.Role != llm.RoleAssistant {
-		return ""
-	}
-	if message.Phase != llm.MessagePhaseFinal {
-		return ""
-	}
-	if strings.TrimSpace(message.Content) == "" {
-		return ""
-	}
-	return message.Content
+	return ""
 }
 
 func (e *Engine) ContextUsage() ContextUsage {

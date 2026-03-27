@@ -257,6 +257,29 @@ func (f *fakeStreamClient) GenerateStream(_ context.Context, req llm.Request, on
 	}
 }
 
+func TestLastCommittedAssistantFinalAnswerSkipsTrailingReminderEntries(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "final handoff"}); err != nil {
+		t.Fatalf("append assistant final: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSoonReminder, Content: "heads up"}); err != nil {
+		t.Fatalf("append reminder: %v", err)
+	}
+
+	if got := eng.LastCommittedAssistantFinalAnswer(); got != "final handoff" {
+		t.Fatalf("LastCommittedAssistantFinalAnswer() = %q, want %q", got, "final handoff")
+	}
+}
+
 func (fakeAsyncLateDeltaClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
 	return llm.Response{}, errors.New("not implemented")
 }
