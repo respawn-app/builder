@@ -143,7 +143,7 @@ func uiHelpInTextEditing(m *uiModel) bool {
 	case uiInputModeMain, uiInputModeRollbackEdit:
 		return true
 	case uiInputModeAsk:
-		return m.askFreeform
+		return m.ask.freeform
 	default:
 		return false
 	}

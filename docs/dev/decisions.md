@@ -141,6 +141,7 @@
 - Tool definitions are also the single source of truth for tool runtime availability, request exposure/gating (including multimodal and native-web-search opt-in), hosted-output decoding, transcript metadata, and render hints.
 - Prompts/tool definitions are build-embedded (runtime-hardcoded from source files; no runtime file loading dependency).
 - Instruction precedence follows provider/API role semantics (no custom override layer).
+- Modern transcript semantics are typed and persisted end-to-end: tool-call display uses explicit tool-presentation payloads, meta-context classification uses structured fields (`message_type`, `source_path`), and compaction summaries persist as typed transcript items rather than content prefixes or header parsing.
 
 ## AGENTS.md Injection
 
@@ -209,6 +210,7 @@
 - Native compaction eligibility is capability-driven and user-configurable.
 - `type=compaction` items and encrypted reasoning/compaction payloads are treated as opaque and replayed unchanged.
 - Compaction lifecycle emits and persists started/completed/failed events.
+- Local compaction summaries persist internally as `message_type=compaction_summary`; any model-facing summary prefix is added only at the provider input boundary.
 - UI shows one compacted notice line per successful compaction; ongoing suppresses detailed summary content; detail shows full local summary when available.
 
 ## Model Defaults
@@ -247,6 +249,7 @@
 - Step-end markers appear in detail only.
 - Switching detail -> ongoing restores prior ongoing scroll position.
 - Mode-toggle events are UI-ephemeral and not persisted.
+- App interaction/overlay control is modeled as explicit typed states with allowed transitions. `ask`, `rollback`, `process list`, and `status` own isolated controller state; overlapping boolean precedence is forbidden.
 - Detail is a fullscreen pager-style transcript overlay (input/queued/picker hidden).
 - Ongoing mode uses native terminal scrollback by replaying committed transcript history into the normal buffer and appending only new committed transcript deltas.
 - Main UI startup stays in the normal buffer even when `tui_alternate_screen=always`, because ongoing-mode replay must remain visible in terminal scrollback.

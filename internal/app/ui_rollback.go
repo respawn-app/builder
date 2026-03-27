@@ -22,83 +22,86 @@ func (m *uiModel) refreshRollbackCandidates() {
 			Text:             entry.Text,
 		})
 	}
-	m.rollbackCandidates = candidates
-	if len(m.rollbackCandidates) == 0 {
-		m.rollbackSelection = 0
-		m.rollbackMode = false
-		m.rollbackEditing = false
-		m.rollbackOverlayPushed = false
-		m.rollbackSelectedUserMessageIndex = 0
+	m.rollback.candidates = candidates
+	if len(m.rollback.candidates) == 0 {
+		m.rollback.selection = 0
+		m.rollback.phase = uiRollbackPhaseInactive
+		m.rollback.ownsTranscriptMode = false
+		m.rollback.selectedUserMessageIndex = 0
 		m.clearRollbackSelectionHighlight()
+		if m.inputMode() == uiInputModeRollbackSelection || m.inputMode() == uiInputModeRollbackEdit {
+			m.restorePrimaryInputMode()
+		}
 		return
 	}
-	if m.rollbackSelection < 0 {
-		m.rollbackSelection = 0
+	if m.rollback.selection < 0 {
+		m.rollback.selection = 0
 	}
-	if m.rollbackSelection >= len(m.rollbackCandidates) {
-		m.rollbackSelection = len(m.rollbackCandidates) - 1
+	if m.rollback.selection >= len(m.rollback.candidates) {
+		m.rollback.selection = len(m.rollback.candidates) - 1
 	}
-	if m.rollbackMode {
+	if m.rollback.isSelecting() {
 		m.applyRollbackSelectionHighlight()
 	}
 }
 
 func (m *uiModel) startRollbackSelectionMode() bool {
-	if !m.rollbackMode && !m.rollbackEditing && !m.rollbackRestoreScrollActive {
-		m.rollbackRestoreOngoingScroll = m.view.OngoingScroll()
-		m.rollbackRestoreScrollActive = true
+	if !m.rollback.isActive() && !m.rollback.restoreScrollActive {
+		m.rollback.restoreOngoingScroll = m.view.OngoingScroll()
+		m.rollback.restoreScrollActive = true
 	}
 	m.refreshRollbackCandidates()
-	if len(m.rollbackCandidates) == 0 {
+	if len(m.rollback.candidates) == 0 {
 		return false
 	}
-	if m.rollbackSelectedUserMessageIndex > 0 {
+	if m.rollback.selectedUserMessageIndex > 0 {
 		matched := -1
-		for idx, candidate := range m.rollbackCandidates {
-			if candidate.UserMessageIndex == m.rollbackSelectedUserMessageIndex {
+		for idx, candidate := range m.rollback.candidates {
+			if candidate.UserMessageIndex == m.rollback.selectedUserMessageIndex {
 				matched = idx
 				break
 			}
 		}
 		if matched >= 0 {
-			m.rollbackSelection = matched
+			m.rollback.selection = matched
 		}
 	} else {
-		m.rollbackSelection = len(m.rollbackCandidates) - 1
+		m.rollback.selection = len(m.rollback.candidates) - 1
 	}
-	m.rollbackMode = true
-	m.rollbackEditing = false
-	m.rollbackSelectedUserMessageIndex = 0
+	m.rollback.phase = uiRollbackPhaseSelection
+	m.rollback.selectedUserMessageIndex = 0
+	m.setInputMode(uiInputModeRollbackSelection)
 	m.clearInput()
 	m.applyRollbackSelectionHighlight()
 	return true
 }
 
 func (m *uiModel) stopRollbackSelectionMode() {
-	m.rollbackMode = false
+	m.rollback.phase = uiRollbackPhaseInactive
 	m.clearRollbackSelectionHighlight()
-	if m.rollbackRestoreScrollActive {
-		m.forwardToView(tui.SetOngoingScrollMsg{Scroll: m.rollbackRestoreOngoingScroll})
+	if m.rollback.restoreScrollActive {
+		m.forwardToView(tui.SetOngoingScrollMsg{Scroll: m.rollback.restoreOngoingScroll})
 		m.forwardToView(tui.SetSelectedTranscriptEntryMsg{Active: false, EntryIndex: -1, RefreshDetailSnapshot: true})
-		m.rollbackRestoreScrollActive = false
+		m.rollback.restoreScrollActive = false
 	}
+	m.restorePrimaryInputMode()
 }
 
 func (m *uiModel) applyRollbackSelectionHighlight() {
-	if !m.rollbackMode || len(m.rollbackCandidates) == 0 {
+	if !m.rollback.isSelecting() || len(m.rollback.candidates) == 0 {
 		m.clearRollbackSelectionHighlight()
 		return
 	}
-	candidate := m.rollbackCandidates[m.rollbackSelection]
+	candidate := m.rollback.candidates[m.rollback.selection]
 	m.forwardToView(tui.SetSelectedTranscriptEntryMsg{Active: true, EntryIndex: candidate.TranscriptIndex, RefreshDetailSnapshot: false})
 	m.focusRollbackSelection()
 }
 
 func (m *uiModel) focusRollbackSelection() {
-	if !m.rollbackMode || len(m.rollbackCandidates) == 0 {
+	if !m.rollback.isSelecting() || len(m.rollback.candidates) == 0 {
 		return
 	}
-	candidate := m.rollbackCandidates[m.rollbackSelection]
+	candidate := m.rollback.candidates[m.rollback.selection]
 	m.forwardToView(tui.FocusTranscriptEntryMsg{EntryIndex: candidate.TranscriptIndex, Center: true})
 }
 
@@ -107,27 +110,27 @@ func (m *uiModel) clearRollbackSelectionHighlight() {
 }
 
 func (m *uiModel) moveRollbackSelection(delta int) {
-	if len(m.rollbackCandidates) == 0 {
+	if len(m.rollback.candidates) == 0 {
 		return
 	}
-	m.rollbackSelection += delta
-	if m.rollbackSelection < 0 {
-		m.rollbackSelection = 0
+	m.rollback.selection += delta
+	if m.rollback.selection < 0 {
+		m.rollback.selection = 0
 	}
-	if m.rollbackSelection >= len(m.rollbackCandidates) {
-		m.rollbackSelection = len(m.rollbackCandidates) - 1
+	if m.rollback.selection >= len(m.rollback.candidates) {
+		m.rollback.selection = len(m.rollback.candidates) - 1
 	}
 	m.applyRollbackSelectionHighlight()
 }
 
 func (m *uiModel) beginRollbackEditing() (int, bool) {
-	if !m.rollbackMode || len(m.rollbackCandidates) == 0 {
+	if !m.rollback.isSelecting() || len(m.rollback.candidates) == 0 {
 		return -1, false
 	}
-	selected := m.rollbackCandidates[m.rollbackSelection]
-	m.rollbackSelectedUserMessageIndex = selected.UserMessageIndex
-	m.rollbackMode = false
-	m.rollbackEditing = true
+	selected := m.rollback.candidates[m.rollback.selection]
+	m.rollback.selectedUserMessageIndex = selected.UserMessageIndex
+	m.rollback.phase = uiRollbackPhaseEditing
+	m.setInputMode(uiInputModeRollbackEdit)
 	m.input = selected.Text
 	m.inputCursor = -1
 	m.clearRollbackSelectionHighlight()
@@ -135,31 +138,31 @@ func (m *uiModel) beginRollbackEditing() (int, bool) {
 }
 
 func (m *uiModel) cancelRollbackEditingBackToSelection() bool {
-	if !m.rollbackEditing {
+	if !m.rollback.isEditing() {
 		return false
 	}
-	m.rollbackEditing = false
+	m.rollback.phase = uiRollbackPhaseInactive
 	return m.startRollbackSelectionMode()
 }
 
 func (m *uiModel) clearRollbackFlow() {
-	m.rollbackMode = false
-	m.rollbackEditing = false
-	m.rollbackOverlayPushed = false
-	m.rollbackSelectedUserMessageIndex = 0
-	m.rollbackRestoreScrollActive = false
+	m.rollback.phase = uiRollbackPhaseInactive
+	m.rollback.ownsTranscriptMode = false
+	m.rollback.selectedUserMessageIndex = 0
+	m.rollback.restoreScrollActive = false
 	m.clearRollbackSelectionHighlight()
+	m.restorePrimaryInputMode()
 }
 
 func (m *uiModel) pushRollbackOverlayIfNeeded() tea.Cmd {
-	if m.rollbackOverlayPushed {
+	if m.rollback.ownsTranscriptMode {
 		return nil
 	}
 	if m.view.Mode() != tui.ModeOngoing {
 		return nil
 	}
-	m.rollbackOverlayPushed = true
-	if transitionCmd := m.toggleTranscriptMode(); transitionCmd != nil {
+	m.rollback.ownsTranscriptMode = true
+	if transitionCmd := m.transitionTranscriptMode(tui.ModeDetail, false, true); transitionCmd != nil {
 		return transitionCmd
 	}
 	return tea.ClearScreen
@@ -170,14 +173,14 @@ func (m *uiModel) popRollbackOverlayIfNeeded() tea.Cmd {
 }
 
 func (m *uiModel) popRollbackOverlayWithNativeReplay(emitNativeReplay bool) tea.Cmd {
-	if !m.rollbackOverlayPushed {
+	if !m.rollback.ownsTranscriptMode {
 		return nil
 	}
-	m.rollbackOverlayPushed = false
+	m.rollback.ownsTranscriptMode = false
 	if m.view.Mode() != tui.ModeDetail {
 		return nil
 	}
-	if transitionCmd := m.toggleTranscriptModeWithNativeReplay(emitNativeReplay); transitionCmd != nil {
+	if transitionCmd := m.transitionTranscriptMode(tui.ModeOngoing, false, emitNativeReplay); transitionCmd != nil {
 		return transitionCmd
 	}
 	return tea.ClearScreen

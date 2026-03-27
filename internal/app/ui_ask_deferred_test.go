@@ -79,8 +79,8 @@ func TestAskEventDefersWhileProcessListOverlayIsOpen(t *testing.T) {
 	m.input = "/ps"
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if !m.psVisible || m.view.Mode() != tui.ModeDetail {
-		t.Fatalf("expected process list overlay in detail mode, visible=%t mode=%q", m.psVisible, m.view.Mode())
+	if !m.processList.isOpen() || m.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected process list overlay in detail mode, visible=%t mode=%q", m.processList.isOpen(), m.view.Mode())
 	}
 
 	m = updateUIModel(t, m, askEventMsg{event: askEvent{req: askquestion.Request{Question: "Pick one", Suggestions: []string{"a", "b"}}, reply: reply}})
@@ -95,7 +95,7 @@ func TestAskEventDefersWhileProcessListOverlayIsOpen(t *testing.T) {
 	}
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
-	if m.psVisible {
+	if m.processList.isOpen() {
 		t.Fatal("expected esc to close process list overlay")
 	}
 	if m.view.Mode() != tui.ModeOngoing {
@@ -151,13 +151,13 @@ func TestAskEventDefersWhileRollbackEditIsActive(t *testing.T) {
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
-	if !m.rollbackMode || m.view.Mode() != tui.ModeDetail {
-		t.Fatalf("expected rollback selection in detail mode, rollback=%t mode=%q", m.rollbackMode, m.view.Mode())
+	if !m.rollback.isSelecting() || m.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected rollback selection in detail mode, rollback=%t mode=%q", m.rollback.isSelecting(), m.view.Mode())
 	}
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if !m.rollbackEditing || m.view.Mode() != tui.ModeOngoing {
-		t.Fatalf("expected rollback edit in ongoing mode, editing=%t mode=%q", m.rollbackEditing, m.view.Mode())
+	if !m.rollback.isEditing() || m.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected rollback edit in ongoing mode, editing=%t mode=%q", m.rollback.isEditing(), m.view.Mode())
 	}
 	original := m.input
 
@@ -179,16 +179,16 @@ func TestAskEventDefersWhileRollbackEditIsActive(t *testing.T) {
 
 	m.input = ""
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
-	if !m.rollbackMode || m.rollbackEditing || m.view.Mode() != tui.ModeDetail {
-		t.Fatalf("expected esc to return to rollback selection, rollback=%t editing=%t mode=%q", m.rollbackMode, m.rollbackEditing, m.view.Mode())
+	if !m.rollback.isSelecting() || m.rollback.isEditing() || m.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected esc to return to rollback selection, rollback=%t editing=%t mode=%q", m.rollback.isSelecting(), m.rollback.isEditing(), m.view.Mode())
 	}
 	if got := m.inputMode(); got != uiInputModeRollbackSelection {
 		t.Fatalf("expected rollback selection to keep focus while ask is pending, got %q", got)
 	}
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
-	if m.rollbackMode || m.rollbackEditing || m.view.Mode() != tui.ModeOngoing {
-		t.Fatalf("expected rollback flow canceled back to ongoing, rollback=%t editing=%t mode=%q", m.rollbackMode, m.rollbackEditing, m.view.Mode())
+	if m.rollback.isSelecting() || m.rollback.isEditing() || m.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected rollback flow canceled back to ongoing, rollback=%t editing=%t mode=%q", m.rollback.isSelecting(), m.rollback.isEditing(), m.view.Mode())
 	}
 	if got := m.inputMode(); got != uiInputModeAsk {
 		t.Fatalf("expected ask to become interactive after exiting rollback flow, got %q", got)

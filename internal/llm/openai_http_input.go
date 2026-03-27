@@ -6,6 +6,7 @@ import (
 
 	"builder/internal/shared/textutil"
 	"builder/internal/tools"
+	"builder/prompts"
 
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
@@ -19,7 +20,7 @@ func buildResponsesInput(canonical []ResponseItem) []responses.ResponseInputItem
 			if strings.TrimSpace(item.Content) == "" {
 				continue
 			}
-			items = append(items, messageInput(string(item.Role), item.Content, item.Phase))
+			items = append(items, messageInput(item, item.Content))
 		case ResponseItemTypeFunctionCall:
 			callID := textutil.FirstNonEmpty(strings.TrimSpace(item.CallID), strings.TrimSpace(item.ID))
 			if callID == "" {
@@ -75,7 +76,11 @@ func buildResponsesInput(canonical []ResponseItem) []responses.ResponseInputItem
 	return items
 }
 
-func messageInput(role, text string, phase MessagePhase) responses.ResponseInputItemUnionParam {
+func messageInput(item ResponseItem, text string) responses.ResponseInputItemUnionParam {
+	role := strings.TrimSpace(string(item.Role))
+	if item.MessageType == MessageTypeCompactionSummary {
+		text = prompts.CompactionSummaryPrefix + "\n\n" + strings.TrimSpace(text)
+	}
 	role = strings.TrimSpace(role)
 	if role == string(RoleAssistant) {
 		content := []responses.ResponseOutputMessageContentUnionParam{{
@@ -84,11 +89,11 @@ func messageInput(role, text string, phase MessagePhase) responses.ResponseInput
 				Text:        text,
 			},
 		}}
-		item := responses.ResponseInputItemParamOfOutputMessage(content, "", responses.ResponseOutputMessageStatusCompleted)
-		if item.OfOutputMessage != nil && phase != "" {
-			item.OfOutputMessage.Phase = responses.ResponseOutputMessagePhase(phase)
+		messageItem := responses.ResponseInputItemParamOfOutputMessage(content, "", responses.ResponseOutputMessageStatusCompleted)
+		if messageItem.OfOutputMessage != nil && item.Phase != "" {
+			messageItem.OfOutputMessage.Phase = responses.ResponseOutputMessagePhase(item.Phase)
 		}
-		return item
+		return messageItem
 	}
 
 	inputRole := string(RoleUser)

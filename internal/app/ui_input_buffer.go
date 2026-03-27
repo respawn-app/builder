@@ -89,76 +89,76 @@ func (m *uiModel) deleteCurrentInputLine() bool {
 }
 
 func (m *uiModel) askCursorIndex() int {
-	return bufferCursorIndex(m.askInput, m.askInputCursor)
+	return bufferCursorIndex(m.ask.input, m.ask.inputCursor)
 }
 
 func (m *uiModel) clearAskInput() {
-	m.askInput = ""
-	m.askInputCursor = -1
+	m.ask.input = ""
+	m.ask.inputCursor = -1
 }
 
 func (m *uiModel) insertAskInputRunes(chars []rune) {
-	updated, nextCursor, ok := insertBufferRunes(m.askInput, m.askInputCursor, chars)
+	updated, nextCursor, ok := insertBufferRunes(m.ask.input, m.ask.inputCursor, chars)
 	if !ok {
 		return
 	}
-	m.askInput = updated
-	m.askInputCursor = nextCursor
+	m.ask.input = updated
+	m.ask.inputCursor = nextCursor
 }
 
 func (m *uiModel) backspaceAskInput() bool {
-	updated, nextCursor, ok := backspaceBuffer(m.askInput, m.askInputCursor)
+	updated, nextCursor, ok := backspaceBuffer(m.ask.input, m.ask.inputCursor)
 	if !ok {
 		return false
 	}
-	m.askInput = updated
-	m.askInputCursor = nextCursor
+	m.ask.input = updated
+	m.ask.inputCursor = nextCursor
 	return true
 }
 
 func (m *uiModel) moveAskCursorLeft() {
-	m.askInputCursor = moveBufferCursorLeft(m.askInput, m.askInputCursor)
+	m.ask.inputCursor = moveBufferCursorLeft(m.ask.input, m.ask.inputCursor)
 }
 
 func (m *uiModel) moveAskCursorRight() {
-	m.askInputCursor = moveBufferCursorRight(m.askInput, m.askInputCursor)
+	m.ask.inputCursor = moveBufferCursorRight(m.ask.input, m.ask.inputCursor)
 }
 
 func (m *uiModel) moveAskCursorStart() {
-	m.askInputCursor = moveBufferCursorStart()
+	m.ask.inputCursor = moveBufferCursorStart()
 }
 
 func (m *uiModel) moveAskCursorEnd() {
-	m.askInputCursor = moveBufferCursorEnd()
+	m.ask.inputCursor = moveBufferCursorEnd()
 }
 
 func (m *uiModel) moveAskCursorWordLeft() {
-	m.askInputCursor = moveBufferCursorWordLeft(m.askInput, m.askInputCursor)
+	m.ask.inputCursor = moveBufferCursorWordLeft(m.ask.input, m.ask.inputCursor)
 }
 
 func (m *uiModel) moveAskCursorWordRight() {
-	m.askInputCursor = moveBufferCursorWordRight(m.askInput, m.askInputCursor)
+	m.ask.inputCursor = moveBufferCursorWordRight(m.ask.input, m.ask.inputCursor)
 }
 
 func (m *uiModel) moveAskCursorUpLine() bool {
-	nextCursor, moved := moveBufferCursorUpLine(m.askInput, m.askInputCursor)
-	m.askInputCursor = nextCursor
+	nextCursor, moved := moveBufferCursorUpLine(m.ask.input, m.ask.inputCursor)
+	m.ask.inputCursor = nextCursor
 	return moved
 }
 
 func (m *uiModel) moveAskCursorDownLine() bool {
-	nextCursor, moved := moveBufferCursorDownLine(m.askInput, m.askInputCursor)
-	m.askInputCursor = nextCursor
+	nextCursor, moved := moveBufferCursorDownLine(m.ask.input, m.ask.inputCursor)
+	m.ask.inputCursor = nextCursor
 	return moved
 }
 
 func (m *uiModel) deleteCurrentAskInputLine() bool {
-	updated, nextCursor, ok := deleteCurrentBufferLine(m.askInput, m.askInputCursor)
+	updated, nextCursor, ok := deleteCurrentBufferLine(m.ask.input, m.ask.inputCursor)
 	if !ok {
 		return false
 	}
-	m.askInput = updated
-	m.askInputCursor = nextCursor
+	m.ask.input = updated
+	m.ask.inputCursor = nextCursor
 	return true
 }
 

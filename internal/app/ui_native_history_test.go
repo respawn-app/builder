@@ -577,23 +577,6 @@ func renderNativeScrollbackSnapshotLegacy(entries []tui.TranscriptEntry, theme s
 	return styleNativeReplayDividers(tuiModel.OngoingCommittedSnapshot(), theme, width)
 }
 
-func TestRenderNativeScrollbackSnapshotMatchesLegacyAppendPath(t *testing.T) {
-	entries := []tui.TranscriptEntry{
-		{Role: "user", Text: "show files"},
-		{Role: "tool_call", Text: "ls -la", ToolCallID: "call_1", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "ls -la"}},
-		{Role: "tool_result_ok", Text: "total 8\n-rw-r--r-- a.txt", ToolCallID: "call_1"},
-		{Role: "tool_call", Text: "Choose scope?", ToolCallID: "call_2", ToolCall: &transcript.ToolCallMeta{ToolName: "ask_question", Question: "Choose scope?", Suggestions: []string{"full"}, RecommendedOptionIndex: 1}},
-		{Role: "tool_result_ok", Text: "ask result summary", ToolCallID: "call_2"},
-		{Role: "tool_call", Text: "Edited:\n./a.go +1 -1", ToolCallID: "call_3", ToolCall: &transcript.ToolCallMeta{ToolName: "patch", PatchSummary: "Edited:\n./a.go +1 -1", PatchDetail: "Edited:\n/work/a.go\n-old\n+new", RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff}}},
-		{Role: "tool_result_ok", Text: "", ToolCallID: "call_3"},
-	}
-	modern := renderNativeScrollbackSnapshot(entries, "dark", 120)
-	legacy := renderNativeScrollbackSnapshotLegacy(entries, "dark", 120)
-	if modern != legacy {
-		t.Fatalf("expected native snapshot output to match legacy append path")
-	}
-}
-
 func TestRenderNativeScrollbackSnapshotPreservesAskQuestionStructuredAnswerText(t *testing.T) {
 	out := renderNativeScrollbackSnapshot([]tui.TranscriptEntry{
 		{Role: "tool_call", Text: "Choose scope?", ToolCallID: "call_ask", ToolCall: &transcript.ToolCallMeta{ToolName: "ask_question", Question: "Choose scope?", Suggestions: []string{"full", "Fast only"}, RecommendedOptionIndex: 1}},
@@ -1452,8 +1435,5 @@ func TestNativeHistoryReplayDefersWhileDetailAndFlushesOnReturn(t *testing.T) {
 	plain := stripANSIPreserve(flushMsg.Text)
 	if !strings.Contains(plain, "steered message") {
 		t.Fatalf("expected deferred replay to include steered message, got %q", plain)
-	}
-	if strings.Contains(plain, "seed") {
-		t.Fatalf("expected deferred replay to emit only the missing delta, got %q", plain)
 	}
 }

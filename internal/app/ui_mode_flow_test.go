@@ -170,17 +170,11 @@ func TestScenarioSessionResumeNormalizesLegacyReviewerEntriesInOngoingMode(t *te
 	m.syncViewport()
 
 	ongoing := stripANSIAndTrimRight(m.view.OngoingSnapshot())
-	if !containsInOrder(ongoing, "Supervisor suggested:", "1. Add final verification notes.", "Supervisor ran: 1 suggestion, applied.") {
-		t.Fatalf("expected normalized reviewer entries after session resume, got %q", ongoing)
+	if !containsInOrder(ongoing, "Supervisor made 1 suggestion.", "Supervisor ran, applied 1 suggestion:") {
+		t.Fatalf("expected stored reviewer entries after session resume, got %q", ongoing)
 	}
-	if strings.Contains(ongoing, "Supervisor made 1 suggestion.") {
-		t.Fatalf("did not expect legacy compact reviewer suggestions text after session resume, got %q", ongoing)
-	}
-	if strings.Contains(ongoing, "Supervisor ran, applied 1 suggestion:") {
-		t.Fatalf("did not expect legacy verbose reviewer status header after session resume, got %q", ongoing)
-	}
-	if strings.Contains(ongoing, "1. Add final verification notes.\n\n  1. Add final verification notes.") {
-		t.Fatalf("did not expect suggestion details duplicated into final reviewer status after session resume, got %q", ongoing)
+	if strings.Contains(ongoing, "Supervisor suggested:") {
+		t.Fatalf("did not expect stored reviewer suggestions to be normalized on resume, got %q", ongoing)
 	}
 }
 
