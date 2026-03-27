@@ -304,10 +304,7 @@ func (m Model) tintToolDiffLine(line, kind string) string {
 
 func (m Model) diffLineBackgroundEscapes() (string, string) {
 	p := m.palette()
-	if m.theme == "light" {
-		return bgEscape(p.diffAddBackgroundLight), bgEscape(p.diffRemoveBackgroundLight)
-	}
-	return bgEscape(p.diffAddBackgroundDark), bgEscape(p.diffRemoveBackgroundDark)
+	return bgEscape(p.diffAddBackground), bgEscape(p.diffRemoveBackground)
 }
 
 func (m Model) styleToolLine(line string) string {
