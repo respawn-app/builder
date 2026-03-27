@@ -1,6 +1,8 @@
 package app
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -95,6 +97,79 @@ func TestSessionLaunchPlannerInteractiveUsesPickerSelection(t *testing.T) {
 	}
 	if plan.Store.Meta().SessionID == first.Meta().SessionID {
 		t.Fatalf("did not expect first session %q", first.Meta().SessionID)
+	}
+}
+
+func TestSessionLaunchPlannerInteractiveUsesLegacyWorkspaceContainerMapping(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	legacyContainer := "workspace-a-legacy"
+	indexPath := filepath.Join(cfg.PersistenceRoot, "workspaces.json")
+	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
+		t.Fatalf("mkdir workspace index dir: %v", err)
+	}
+	indexData, err := json.Marshal(map[string]any{"entries": map[string]string{cfg.WorkspaceRoot: legacyContainer}})
+	if err != nil {
+		t.Fatalf("marshal workspace index: %v", err)
+	}
+	if err := os.WriteFile(indexPath, indexData, 0o644); err != nil {
+		t.Fatalf("write workspace index: %v", err)
+	}
+
+	legacyContainerDir, err := filepath.Abs(filepath.Join(cfg.PersistenceRoot, "sessions", legacyContainer))
+	if err != nil {
+		t.Fatalf("abs legacy container dir: %v", err)
+	}
+	legacySession, err := session.Create(legacyContainerDir, legacyContainer, cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("create legacy session: %v", err)
+	}
+	if err := legacySession.SetName("legacy session"); err != nil {
+		t.Fatalf("persist legacy session meta: %v", err)
+	}
+
+	containerName, containerDir, err := config.ResolveWorkspaceContainer(cfg)
+	if err != nil {
+		t.Fatalf("resolve workspace container: %v", err)
+	}
+	if containerName != legacyContainer {
+		t.Fatalf("expected legacy container %q, got %q", legacyContainer, containerName)
+	}
+
+	planner := &launchPlanner{
+		boot: &appBootstrap{
+			cfg: config.App{
+				WorkspaceRoot:   cfg.WorkspaceRoot,
+				PersistenceRoot: cfg.PersistenceRoot,
+				Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
+			},
+			containerDir: containerDir,
+		},
+		pickSession: func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
+			if len(summaries) != 1 {
+				t.Fatalf("expected one legacy summary, got %d", len(summaries))
+			}
+			if summaries[0].SessionID != legacySession.Meta().SessionID {
+				t.Fatalf("expected legacy session %q, got %q", legacySession.Meta().SessionID, summaries[0].SessionID)
+			}
+			picked := summaries[0]
+			return sessionPickerResult{Session: &picked}, nil
+		},
+	}
+
+	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	if plan.Store.Meta().SessionID != legacySession.Meta().SessionID {
+		t.Fatalf("expected legacy session %q, got %q", legacySession.Meta().SessionID, plan.Store.Meta().SessionID)
 	}
 }
 
