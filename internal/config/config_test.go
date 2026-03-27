@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -668,6 +669,85 @@ func TestResolveWorkspaceContainerUsesSessionsSubdirectory(t *testing.T) {
 	}
 	if againName != containerName || againDir != containerDir {
 		t.Fatalf("expected stable workspace container, got %q %q after %q %q", againName, againDir, containerName, containerDir)
+	}
+	canonicalRoot, err := canonicalWorkspaceRoot(cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("canonical workspace root: %v", err)
+	}
+	wantName := deterministicWorkspaceContainerName(canonicalRoot)
+	if containerName != wantName {
+		t.Fatalf("expected deterministic container name %q, got %q", wantName, containerName)
+	}
+}
+
+func TestResolveWorkspaceContainerUsesLegacyWorkspaceIndexMapping(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	legacyContainer := "workspace-a-legacy"
+	indexPath := filepath.Join(cfg.PersistenceRoot, workspaceIndexName)
+	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
+		t.Fatalf("mkdir workspace index dir: %v", err)
+	}
+	indexData, err := json.Marshal(workspaceIndex{Entries: map[string]string{cfg.WorkspaceRoot: legacyContainer}})
+	if err != nil {
+		t.Fatalf("marshal workspace index: %v", err)
+	}
+	if err := os.WriteFile(indexPath, indexData, 0o644); err != nil {
+		t.Fatalf("write workspace index: %v", err)
+	}
+
+	containerName, containerDir, err := ResolveWorkspaceContainer(cfg)
+	if err != nil {
+		t.Fatalf("resolve workspace container: %v", err)
+	}
+	if containerName != legacyContainer {
+		t.Fatalf("expected legacy workspace container %q, got %q", legacyContainer, containerName)
+	}
+	if got := filepath.Base(containerDir); got != legacyContainer {
+		t.Fatalf("expected legacy container dir %q, got %q", legacyContainer, got)
+	}
+	if _, err := os.Stat(containerDir); err != nil {
+		t.Fatalf("expected legacy container dir to exist: %v", err)
+	}
+}
+
+func TestResolveWorkspaceContainerCanonicalizesSymlinkedWorkspace(t *testing.T) {
+	home := t.TempDir()
+	realWorkspace := t.TempDir()
+	linkParent := t.TempDir()
+	symlinkPath := filepath.Join(linkParent, "workspace-link")
+	if err := os.Symlink(realWorkspace, symlinkPath); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	t.Setenv("HOME", home)
+
+	realCfg, err := Load(realWorkspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load real workspace: %v", err)
+	}
+	realName, realDir, err := ResolveWorkspaceContainer(realCfg)
+	if err != nil {
+		t.Fatalf("resolve real workspace container: %v", err)
+	}
+
+	symlinkCfg, err := Load(symlinkPath, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load symlink workspace: %v", err)
+	}
+	symlinkName, symlinkDir, err := ResolveWorkspaceContainer(symlinkCfg)
+	if err != nil {
+		t.Fatalf("resolve symlink workspace container: %v", err)
+	}
+
+	if symlinkName != realName || symlinkDir != realDir {
+		t.Fatalf("expected symlinked workspace to reuse deterministic container, got %q %q want %q %q", symlinkName, symlinkDir, realName, realDir)
 	}
 }
 
