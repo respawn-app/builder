@@ -6727,6 +6727,68 @@ func TestCompactionSoonReminderCanBeIssuedAfterReEnablingAutoCompactionAboveRemi
 	}
 }
 
+func TestCompactionSoonReminderSkipsPreciseCountingWhenSuppressed(t *testing.T) {
+	tests := []struct {
+		name           string
+		compactionMode string
+		disableAuto    bool
+	}{
+		{name: "auto compaction disabled", compactionMode: "local", disableAuto: true},
+		{name: "compaction mode none", compactionMode: "none"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			store, err := session.Create(dir, "ws", dir)
+			if err != nil {
+				t.Fatalf("create store: %v", err)
+			}
+
+			client := &preciseCompactionClient{inputTokenCount: 890, contextWindow: 2_000}
+			eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+				Model:                 "gpt-5",
+				ContextWindowTokens:   2_000,
+				AutoCompactTokenLimit: 1_000,
+				CompactionMode:        tt.compactionMode,
+			})
+			if err != nil {
+				t.Fatalf("new engine: %v", err)
+			}
+			if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+				t.Fatalf("append seed message: %v", err)
+			}
+			eng.setLastUsage(llm.Usage{InputTokens: 890, WindowTokens: 2_000})
+			eng.mu.Lock()
+			eng.compactionSoonReminderIssued = true
+			eng.mu.Unlock()
+
+			if tt.disableAuto {
+				changed, enabled := eng.SetAutoCompactionEnabled(false)
+				if !changed || enabled {
+					t.Fatalf("expected auto compaction toggle off, changed=%v enabled=%v", changed, enabled)
+				}
+			}
+
+			if err := eng.maybeAppendCompactionSoonReminder(context.Background(), "suppressed"); err != nil {
+				t.Fatalf("suppressed reminder check: %v", err)
+			}
+			if client.countCalls != 0 {
+				t.Fatalf("expected suppressed reminder path to skip precise token counting, got %d calls", client.countCalls)
+			}
+			if got := len(eng.ChatSnapshot().Entries); got != 1 {
+				t.Fatalf("expected no reminder entry while suppressed, got %d entries", got)
+			}
+			eng.mu.Lock()
+			issued := eng.compactionSoonReminderIssued
+			eng.mu.Unlock()
+			if issued {
+				t.Fatal("expected suppressed reminder path to reset issued state")
+			}
+		})
+	}
+}
+
 func TestRunStepLoopSkipsCompactionSoonReminderWhenImmediateAutoCompactionRuns(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

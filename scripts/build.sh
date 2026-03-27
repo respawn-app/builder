@@ -22,7 +22,7 @@ USAGE
 read_version() {
 	local version="${BUILDER_VERSION:-}"
 	if [ -z "$version" ] && [ -f VERSION ]; then
-		version="$(tr -d ' \n' <VERSION)"
+		version="$(tr -d '[:space:]' <VERSION)"
 	fi
 	printf '%s' "${version#v}"
 }

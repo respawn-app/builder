@@ -89,6 +89,7 @@ brew install respawn-app/tap/builder-cli
 ## Notes
 
 - Installed binary name stays `builder`. Formula name is `builder-cli`.
+- Official release targets are `darwin/arm64`, `linux/amd64`, `linux/arm64`, `windows/amd64`, and `windows/arm64`. macOS Intel is unsupported.
 - Do not create the git tag manually unless you are intentionally bypassing the workflow behavior.
 - Linux release binaries must stay statically linked; do not switch the release pipeline to PIE or other dynamic-linking modes.
 - Keep archive packaging and release verification logic in `scripts/release-artifacts.sh`; `release.yml` should stay orchestration-focused.

@@ -156,7 +156,11 @@ func resolveSessionAction(ctx context.Context, boot appBootstrap, store *session
 		if err := ensureAuthReady(ctx, boot.authManager, boot.oauthOpts, boot.cfg.Settings.Theme, boot.cfg.Settings.TUIAlternateScreen, boot.authInteractor); err != nil {
 			return resolvedSessionAction{}, err
 		}
-		return resolvedSessionAction{NextSessionID: store.Meta().SessionID, ShouldContinue: true}, nil
+		sessionID := ""
+		if store != nil {
+			sessionID = store.Meta().SessionID
+		}
+		return resolvedSessionAction{NextSessionID: sessionID, ShouldContinue: true}, nil
 	default:
 		return resolvedSessionAction{}, nil
 	}
