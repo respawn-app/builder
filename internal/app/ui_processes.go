@@ -21,6 +21,10 @@ const (
 )
 
 func (m *uiModel) refreshProcessEntries() {
+	selectedID := ""
+	if m.processList.selection >= 0 && m.processList.selection < len(m.processList.entries) {
+		selectedID = m.processList.entries[m.processList.selection].ID
+	}
 	if m.backgroundManager == nil {
 		m.processList.entries = nil
 		m.processList.selection = 0
@@ -30,6 +34,14 @@ func (m *uiModel) refreshProcessEntries() {
 	if len(m.processList.entries) == 0 {
 		m.processList.selection = 0
 		return
+	}
+	if selectedID != "" {
+		for idx, entry := range m.processList.entries {
+			if entry.ID == selectedID {
+				m.processList.selection = idx
+				return
+			}
+		}
 	}
 	if m.processList.selection < 0 {
 		m.processList.selection = 0

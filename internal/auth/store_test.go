@@ -310,3 +310,42 @@ func TestEnvAPIKeyOverrideStoreLoadPersistedReturnsBaseState(t *testing.T) {
 		t.Fatalf("expected base oauth state, got %q", loaded.Method.Type)
 	}
 }
+
+type persistedDecoratorStore struct {
+	loadState      State
+	persistedState State
+}
+
+func (s *persistedDecoratorStore) Load(context.Context) (State, error) {
+	return s.loadState, nil
+}
+
+func (s *persistedDecoratorStore) LoadPersisted(context.Context) (State, error) {
+	return s.persistedState, nil
+}
+
+func (s *persistedDecoratorStore) Save(context.Context, State) error {
+	return nil
+}
+
+func TestEnvAPIKeyOverrideStoreLoadPersistedDelegatesToBasePersistedLoader(t *testing.T) {
+	base := &persistedDecoratorStore{
+		loadState: State{
+			Scope:  ScopeGlobal,
+			Method: Method{Type: MethodAPIKey, APIKey: &APIKeyMethod{Key: "runtime-key"}},
+		},
+		persistedState: State{
+			Scope:  ScopeGlobal,
+			Method: Method{Type: MethodOAuth, OAuth: &OAuthMethod{AccessToken: "persisted-access", RefreshToken: "persisted-refresh", TokenType: "Bearer"}},
+		},
+	}
+	store := NewEnvAPIKeyOverrideStore(base, func(string) (string, bool) { return "sk-env", true })
+
+	loaded, err := store.LoadPersisted(context.Background())
+	if err != nil {
+		t.Fatalf("load persisted state: %v", err)
+	}
+	if loaded.Method.Type != MethodOAuth {
+		t.Fatalf("expected persisted oauth state, got %q", loaded.Method.Type)
+	}
+}

@@ -114,7 +114,8 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool) tea.Cmd {
 	if strings.TrimSpace(rawSnapshot) == "" {
 		return nil
 	}
-	if !forceFull && !m.nativeRenderedProjection.Empty() {
+	rewriteRenderedHistory := m.view.Mode() == tui.ModeOngoing && !m.nativeRenderedProjection.Empty()
+	if !m.nativeRenderedProjection.Empty() {
 		previousBlockCount := len(m.nativeRenderedProjection.Blocks)
 		delta, ok := m.nativeProjection.RenderAppendDeltaFrom(m.nativeRenderedProjection, tui.TranscriptDivider)
 		delta = strings.TrimPrefix(delta, "\n")
@@ -131,6 +132,9 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool) tea.Cmd {
 			m.nativeRenderedSnapshot = rawSnapshot
 			return nil
 		}
+		if rewriteRenderedHistory {
+			return nil
+		}
 		forceFull = true
 	}
 	if !forceFull {
@@ -143,6 +147,9 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool) tea.Cmd {
 			}
 			return m.emitNativeRenderedText(styledDelta)
 		}
+	}
+	if rewriteRenderedHistory {
+		return nil
 	}
 	styled := renderStyledNativeProjection(m.nativeProjection, m.theme, m.nativeReplayRenderWidth())
 	if strings.TrimSpace(styled) == "" {
@@ -312,26 +319,9 @@ func styleNativeReplayDividers(rendered, theme string, width int) string {
 	rawLines := splitPlainLines(rendered)
 	lines := make([]tui.TranscriptProjectionLine, 0, len(rawLines))
 	for _, line := range rawLines {
-		kind := tui.VisibleLineContent
-		if isNativeReplayDividerLine(line) {
-			kind = tui.VisibleLineDivider
-		}
-		lines = append(lines, tui.TranscriptProjectionLine{Kind: kind, Text: line})
+		lines = append(lines, tui.TranscriptProjectionLine{Kind: tui.VisibleLineContent, Text: line})
 	}
 	return renderStyledNativeProjectionLines(lines, theme, width)
-}
-
-func isNativeReplayDividerLine(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	if trimmed == "" {
-		return false
-	}
-	for _, r := range trimmed {
-		if r != '─' {
-			return false
-		}
-	}
-	return true
 }
 
 func renderStyledNativeProjectionLines(lines []tui.TranscriptProjectionLine, theme string, width int) string {

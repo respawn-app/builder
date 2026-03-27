@@ -19,6 +19,20 @@ type stubExclusiveStepLifecycle struct {
 	runFn    func(ctx context.Context, options exclusiveStepOptions, fn func(stepCtx context.Context, stepID string) error) error
 }
 
+type stubBackgroundNoticeScheduler struct {
+	scheduleIfIdle func()
+}
+
+func (s *stubBackgroundNoticeScheduler) HandleBackgroundShellUpdate(BackgroundShellEvent, bool) {}
+func (s *stubBackgroundNoticeScheduler) QueueDeveloperNotice(llm.Message)                       {}
+func (s *stubBackgroundNoticeScheduler) DrainPendingNotices() []llm.Message                     { return nil }
+func (s *stubBackgroundNoticeScheduler) ConsumePendingBackgroundNotice(string) bool             { return false }
+func (s *stubBackgroundNoticeScheduler) ScheduleIfIdle() {
+	if s != nil && s.scheduleIfIdle != nil {
+		s.scheduleIfIdle()
+	}
+}
+
 func (s *stubExclusiveStepLifecycle) Run(ctx context.Context, options exclusiveStepOptions, fn func(stepCtx context.Context, stepID string) error) error {
 	s.mu.Lock()
 	s.runCalls++
@@ -147,6 +161,76 @@ func TestExclusiveStepLifecycleInterruptAppendsMessageAndClearsInFlight(t *testi
 	}
 	if last.Content != interruptMessage {
 		t.Fatalf("unexpected interruption content %q", last.Content)
+	}
+}
+
+func TestExclusiveStepLifecycleInterruptSkipsStaleRunCleanup(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	lifecycle := &defaultExclusiveStepLifecycle{engine: eng}
+	lifecycle.busy = true
+	lifecycle.activeRun = 1
+	lifecycle.cancel = func() {
+		lifecycle.mu.Lock()
+		lifecycle.busy = true
+		lifecycle.activeRun = 2
+		lifecycle.mu.Unlock()
+	}
+	if err := store.MarkInFlight(true); err != nil {
+		t.Fatalf("mark in-flight true: %v", err)
+	}
+
+	if err := lifecycle.Interrupt(); err != nil {
+		t.Fatalf("interrupt: %v", err)
+	}
+	if !store.Meta().InFlightStep {
+		t.Fatal("expected stale interrupt to leave new run in-flight marker intact")
+	}
+	if len(eng.snapshotMessages()) != 0 {
+		t.Fatalf("expected stale interrupt to avoid appending interruption message, got %+v", eng.snapshotMessages())
+	}
+}
+
+func TestExclusiveStepLifecycleClearsInFlightBeforeSchedulingBackground(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	scheduled := false
+	lifecycle := &defaultExclusiveStepLifecycle{
+		engine: eng,
+		background: &stubBackgroundNoticeScheduler{scheduleIfIdle: func() {
+			scheduled = true
+			if store.Meta().InFlightStep {
+				t.Fatal("expected in-flight step to be cleared before scheduling background work")
+			}
+		}},
+	}
+
+	if err := lifecycle.Run(context.Background(), exclusiveStepOptions{}, func(context.Context, string) error {
+		if !store.Meta().InFlightStep {
+			t.Fatal("expected in-flight step during exclusive run")
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !scheduled {
+		t.Fatal("expected background scheduler to run after exclusive step completion")
 	}
 }
 

@@ -240,11 +240,8 @@ func TestNativeResizeReplayDebouncedToLatestResize(t *testing.T) {
 
 	next, replayCmd := m.Update(nativeResizeReplayMsg{token: secondToken})
 	m = next.(*uiModel)
-	if replayCmd == nil {
-		t.Fatal("expected latest resize replay token to emit replay command")
-	}
-	if msg := replayCmd(); msg == nil {
-		t.Fatal("expected replay command to return a message")
+	if replayCmd != nil {
+		t.Fatalf("expected latest resize replay token to skip non-append history rewrite, got %T", replayCmd)
 	}
 	if m.nativeFormatterWidth != 100 {
 		t.Fatalf("expected formatter width rebased to latest resize width 100, got %d", m.nativeFormatterWidth)
@@ -575,6 +572,17 @@ func renderNativeScrollbackSnapshotLegacy(entries []tui.TranscriptEntry, theme s
 		}
 	}
 	return styleNativeReplayDividers(tuiModel.OngoingCommittedSnapshot(), theme, width)
+}
+
+func TestStyleNativeReplayDividersKeepsRawRuleLikeLinesAsContent(t *testing.T) {
+	out := styleNativeReplayDividers("───\nbody", "dark", 10)
+	lines := strings.Split(stripANSIPreserve(out), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected two lines, got %q", out)
+	}
+	if lines[0] != "───" {
+		t.Fatalf("expected raw divider-like content preserved, got %q", lines[0])
+	}
 }
 
 func TestRenderNativeScrollbackSnapshotPreservesAskQuestionStructuredAnswerText(t *testing.T) {
@@ -1435,5 +1443,24 @@ func TestNativeHistoryReplayDefersWhileDetailAndFlushesOnReturn(t *testing.T) {
 	plain := stripANSIPreserve(flushMsg.Text)
 	if !strings.Contains(plain, "steered message") {
 		t.Fatalf("expected deferred replay to include steered message, got %q", plain)
+	}
+}
+
+func TestNativeHistorySnapshotSkipsNonAppendRewriteInOngoingMode(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.windowSizeKnown = true
+	initial := tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{{Role: "assistant", Lines: []string{"before"}}}}
+	m.nativeProjection = initial
+	m.nativeRenderedProjection = initial
+	m.nativeRenderedSnapshot = initial.Render(tui.TranscriptDivider)
+	m.nativeProjection = tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{{Role: "assistant", Lines: []string{"after"}}}}
+
+	cmd := m.emitCurrentNativeHistorySnapshot(false)
+	if cmd != nil {
+		t.Fatalf("expected non-append native replay to be skipped in ongoing mode, got %T", cmd)
+	}
+	if got := m.nativeRenderedSnapshot; got != initial.Render(tui.TranscriptDivider) {
+		t.Fatalf("expected rendered snapshot to remain unchanged, got %q", got)
 	}
 }

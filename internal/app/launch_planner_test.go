@@ -183,12 +183,15 @@ func TestSessionLaunchPlannerSelectedSessionIDBypassesPicker(t *testing.T) {
 	if err := store.SetName("selected"); err != nil {
 		t.Fatalf("persist selected session meta: %v", err)
 	}
+	if err := store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: "http://session.local/v1"}); err != nil {
+		t.Fatalf("persist continuation context: %v", err)
+	}
 	planner := &launchPlanner{
 		boot: &appBootstrap{
 			cfg: config.App{
 				WorkspaceRoot:   "/tmp/workspace-a",
 				PersistenceRoot: root,
-				Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
+				Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto, OpenAIBaseURL: "http://config.local/v1"},
 			},
 			containerDir: containerDir,
 		},
@@ -204,5 +207,11 @@ func TestSessionLaunchPlannerSelectedSessionIDBypassesPicker(t *testing.T) {
 	}
 	if plan.Store.Meta().SessionID != store.Meta().SessionID {
 		t.Fatalf("expected explicit session %q, got %q", store.Meta().SessionID, plan.Store.Meta().SessionID)
+	}
+	if plan.ActiveSettings.OpenAIBaseURL != "http://session.local/v1" {
+		t.Fatalf("expected session continuation base url, got %q", plan.ActiveSettings.OpenAIBaseURL)
+	}
+	if got := plan.Store.Meta().Continuation; got == nil || got.OpenAIBaseURL != "http://session.local/v1" {
+		t.Fatalf("expected continuation base url preserved, got %+v", got)
 	}
 }

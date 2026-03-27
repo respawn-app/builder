@@ -121,7 +121,13 @@ func (p *launchPlanner) PlanSession(req sessionLaunchRequest) (sessionLaunchPlan
 			return sessionLaunchPlan{}, err
 		}
 	}
-	active := effectiveSettings(p.boot.cfg.Settings, store.Meta().Locked)
+	meta := store.Meta()
+	active := effectiveSettings(p.boot.cfg.Settings, meta.Locked)
+	if meta.Continuation != nil {
+		if baseURL := strings.TrimSpace(meta.Continuation.OpenAIBaseURL); baseURL != "" {
+			active.OpenAIBaseURL = baseURL
+		}
+	}
 	if err := store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: active.OpenAIBaseURL}); err != nil {
 		return sessionLaunchPlan{}, err
 	}
@@ -129,10 +135,10 @@ func (p *launchPlanner) PlanSession(req sessionLaunchRequest) (sessionLaunchPlan
 		Mode:                req.Mode,
 		Store:               store,
 		ActiveSettings:      active,
-		EnabledTools:        activeToolIDs(active, p.boot.cfg.Source, store.Meta().Locked),
+		EnabledTools:        activeToolIDs(active, p.boot.cfg.Source, meta.Locked),
 		ConfiguredModelName: p.boot.cfg.Settings.Model,
-		SessionName:         store.Meta().Name,
-		ModelContractLocked: store.Meta().Locked != nil,
+		SessionName:         meta.Name,
+		ModelContractLocked: meta.Locked != nil,
 		StatusConfig: uiStatusConfig{
 			WorkspaceRoot:   p.boot.cfg.WorkspaceRoot,
 			PersistenceRoot: p.boot.cfg.PersistenceRoot,

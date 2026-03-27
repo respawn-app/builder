@@ -24,6 +24,10 @@ func (a rendererStyleAdapter) markdownConfig() glamouransi.StyleConfig {
 	} else {
 		cfg = styles.DarkStyleConfig
 	}
+	if cfg.CodeBlock.Chroma != nil {
+		chromaCfg := *cfg.CodeBlock.Chroma
+		cfg.CodeBlock.Chroma = &chromaCfg
+	}
 	foreground := themeForegroundColor(a.theme).hexString()
 	zero := uint(0)
 	cfg.Document.Margin = &zero
