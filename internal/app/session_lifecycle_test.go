@@ -273,6 +273,7 @@ func TestBackTeleportLifecycleSeedsParentDraftWithoutAutoSubmit(t *testing.T) {
 		want                string
 	}{
 		{name: "copy idle child final assistant reply", childMessages: []llm.Message{{Role: llm.RoleAssistant, Content: "test", Phase: llm.MessagePhaseFinal}}, childActivity: uiActivityIdle, want: "test"},
+		{name: "copy latest child final assistant reply past reminder entry", childMessages: []llm.Message{{Role: llm.RoleAssistant, Content: "test", Phase: llm.MessagePhaseFinal}, {Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSoonReminder, Content: "heads up"}}, childActivity: uiActivityIdle, want: "test"},
 		{name: "ignore interrupted child streaming reply", childOngoing: "review findings", childActivity: uiActivityInterrupted, want: ""},
 		{name: "preserve existing parent draft", childMessages: []llm.Message{{Role: llm.RoleAssistant, Content: "test", Phase: llm.MessagePhaseFinal}}, childActivity: uiActivityIdle, existingParentDraft: "keep existing", want: "keep existing"},
 	}
