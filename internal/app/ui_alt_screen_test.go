@@ -120,3 +120,30 @@ func TestToggleTranscriptModeAlwaysKeepsAltScreenWithoutDetailTransition(t *test
 		t.Fatal("expected alt-screen to remain active for always policy")
 	}
 }
+
+func TestNativeReplayCmdForModeTransitionPreservesAppendOnlyWhenScreenNotReplaced(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.windowSizeKnown = true
+	m.termWidth = 80
+	initial := tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{{Role: "assistant", Lines: []string{"before"}}}}
+	updated := tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{{Role: "assistant", Lines: []string{"before"}}, {Role: "assistant", Lines: []string{"after"}}}}
+	m.nativeProjection = updated
+	m.nativeRenderedProjection = initial
+	m.nativeRenderedSnapshot = initial.Render(tui.TranscriptDivider)
+
+	cmd := m.nativeReplayCmdForModeTransition(tui.ModeDetail, tui.ModeOngoing, true)
+	if cmd == nil {
+		t.Fatal("expected append-only replay command")
+	}
+	msgs := collectCmdMessages(t, cmd)
+	if len(msgs) != 1 {
+		t.Fatalf("expected append-only replay without clear-screen, got %d message(s)", len(msgs))
+	}
+	flush, ok := msgs[0].(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", msgs[0])
+	}
+	if got := stripANSIText(flush.Text); got != "after" {
+		t.Fatalf("expected append-only replay of deferred delta, got %q", got)
+	}
+}

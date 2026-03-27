@@ -24,6 +24,39 @@ func (e *Engine) ChatSnapshot() ChatSnapshot {
 	return e.chat.snapshot()
 }
 
+func (e *Engine) LastCommittedAssistantFinalAnswer() string {
+	messages := e.chat.snapshotMessages()
+	for idx := len(messages) - 1; idx >= 0; idx-- {
+		message := messages[idx]
+		if shouldSkipTrailingAssistantHandoffMessage(message) {
+			continue
+		}
+		if message.Role != llm.RoleAssistant {
+			return ""
+		}
+		if message.Phase != llm.MessagePhaseFinal {
+			return ""
+		}
+		if strings.TrimSpace(message.Content) == "" {
+			return ""
+		}
+		return message.Content
+	}
+	return ""
+}
+
+func shouldSkipTrailingAssistantHandoffMessage(message llm.Message) bool {
+	if message.Role != llm.RoleDeveloper {
+		return false
+	}
+	switch message.MessageType {
+	case llm.MessageTypeCompactionSoonReminder, llm.MessageTypeErrorFeedback:
+		return true
+	default:
+		return false
+	}
+}
+
 func (e *Engine) ContextUsage() ContextUsage {
 	window := e.contextWindowTokens()
 	used := e.currentTokenUsage()

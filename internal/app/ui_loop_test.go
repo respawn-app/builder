@@ -8,6 +8,7 @@ func TestExtractUITransitionIncludesInitialPrompt(t *testing.T) {
 	model := &uiModel{
 		exitAction:               UIActionNewSession,
 		nextSessionInitialPrompt: "review prompt payload",
+		nextSessionInitialInput:  "draft payload",
 	}
 	transition := extractUITransition(model)
 	if transition.Action != UIActionNewSession {
@@ -15,5 +16,8 @@ func TestExtractUITransitionIncludesInitialPrompt(t *testing.T) {
 	}
 	if transition.InitialPrompt != "review prompt payload" {
 		t.Fatalf("expected initial prompt payload, got %q", transition.InitialPrompt)
+	}
+	if transition.InitialInput != "draft payload" {
+		t.Fatalf("expected initial input payload, got %q", transition.InitialInput)
 	}
 }

@@ -186,6 +186,46 @@ func TestReadPromptHistoryPreservesExactStoredText(t *testing.T) {
 	}
 }
 
+func TestSetInputDraftPersistsAcrossReopen(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewLazy(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("new lazy store: %v", err)
+	}
+	want := "draft line one\nline two"
+	if err := store.SetInputDraft(want); err != nil {
+		t.Fatalf("set input draft: %v", err)
+	}
+	reopened, err := Open(store.Dir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if reopened.Meta().InputDraft != want {
+		t.Fatalf("expected persisted draft %q, got %q", want, reopened.Meta().InputDraft)
+	}
+}
+
+func TestSetInputDraftClearsPersistedValue(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.SetInputDraft("draft"); err != nil {
+		t.Fatalf("set draft: %v", err)
+	}
+	if err := store.SetInputDraft(""); err != nil {
+		t.Fatalf("clear draft: %v", err)
+	}
+	reopened, err := Open(store.Dir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if reopened.Meta().InputDraft != "" {
+		t.Fatalf("expected cleared draft, got %q", reopened.Meta().InputDraft)
+	}
+}
+
 func TestListSessionsSortedByUpdatedAt(t *testing.T) {
 	root := t.TempDir()
 	s1, err := Create(root, "workspace-x", "/tmp/work")

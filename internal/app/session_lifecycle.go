@@ -15,6 +15,7 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 	planner := newSessionLaunchPlanner(&boot)
 	currentSessionID := strings.TrimSpace(initialSessionID)
 	nextSessionInitialPrompt := ""
+	nextSessionInitialInput := ""
 	nextSessionParentID := ""
 	forceNewSession := false
 	for {
@@ -38,6 +39,7 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 			runtimePlan.Close()
 			return err
 		}
+		initialInput := sessionLaunchInitialInput(plan.Store, nextSessionInitialInput)
 
 		finalModel, runErr := runUILoopWithInitialPrompt(
 			runtimePlan.Wiring,
@@ -45,6 +47,7 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 			runtimePlan.Logger,
 			commandRegistry,
 			nextSessionInitialPrompt,
+			initialInput,
 			plan.SessionName,
 			plan.ModelContractLocked,
 			plan.ConfiguredModelName,
@@ -52,39 +55,84 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 		)
 		runtimePlan.Close()
 		nextSessionInitialPrompt = ""
+		nextSessionInitialInput = ""
 		if runErr != nil {
 			return runErr
 		}
+		if err := persistSessionDraft(plan.Store, finalModel); err != nil {
+			return err
+		}
 
 		transition := extractUITransition(finalModel)
-		nextSessionID, initialPrompt, parentSessionID, nextForceNewSession, shouldContinue, err := resolveSessionAction(ctx, boot, plan.Store, transition)
+		resolved, err := resolveSessionAction(ctx, boot, plan.Store, transition)
 		if err != nil {
 			return err
 		}
-		if !shouldContinue {
+		if !resolved.ShouldContinue {
 			return nil
 		}
-		currentSessionID = nextSessionID
-		nextSessionInitialPrompt = initialPrompt
-		nextSessionParentID = parentSessionID
-		forceNewSession = nextForceNewSession
+		currentSessionID = resolved.NextSessionID
+		nextSessionInitialPrompt = resolved.InitialPrompt
+		nextSessionInitialInput = resolved.InitialInput
+		nextSessionParentID = resolved.ParentSessionID
+		forceNewSession = resolved.ForceNewSession
 	}
 }
 
-func resolveSessionAction(ctx context.Context, boot appBootstrap, store *session.Store, transition UITransition) (string, string, string, bool, bool, error) {
+func sessionLaunchInitialInput(store *session.Store, transitionInput string) string {
+	if store == nil {
+		return transitionInput
+	}
+	meta := store.Meta()
+	if meta.InputDraft != "" {
+		return meta.InputDraft
+	}
+	return transitionInput
+}
+
+func persistSessionDraft(store *session.Store, model any) error {
+	if store == nil {
+		return nil
+	}
+	ui, ok := model.(*uiModel)
+	if !ok || ui == nil {
+		return nil
+	}
+	return store.SetInputDraft(ui.input)
+}
+
+type resolvedSessionAction struct {
+	NextSessionID   string
+	InitialPrompt   string
+	InitialInput    string
+	ParentSessionID string
+	ForceNewSession bool
+	ShouldContinue  bool
+}
+
+func resolveSessionAction(ctx context.Context, boot appBootstrap, store *session.Store, transition UITransition) (resolvedSessionAction, error) {
 	switch transition.Action {
 	case UIActionNewSession:
-		return "", transition.InitialPrompt, transition.ParentSessionID, true, true, nil
+		return resolvedSessionAction{
+			InitialPrompt:   transition.InitialPrompt,
+			ParentSessionID: transition.ParentSessionID,
+			ForceNewSession: true,
+			ShouldContinue:  true,
+		}, nil
 	case UIActionResume:
-		return "", "", "", false, true, nil
+		return resolvedSessionAction{ShouldContinue: true}, nil
 	case UIActionOpenSession:
-		return strings.TrimSpace(transition.TargetSessionID), "", "", false, true, nil
+		return resolvedSessionAction{
+			NextSessionID:  strings.TrimSpace(transition.TargetSessionID),
+			InitialInput:   transition.InitialInput,
+			ShouldContinue: true,
+		}, nil
 	case UIActionForkRollback:
 		if store == nil {
-			return "", "", "", false, false, errors.New("current store is required for rollback fork")
+			return resolvedSessionAction{}, errors.New("current store is required for rollback fork")
 		}
 		if transition.ForkUserMessageIndex <= 0 {
-			return "", "", "", false, false, errors.New("rollback fork user message index must be > 0")
+			return resolvedSessionAction{}, errors.New("rollback fork user message index must be > 0")
 		}
 		parentMeta := store.Meta()
 		baseName := strings.TrimSpace(parentMeta.Name)
@@ -94,18 +142,26 @@ func resolveSessionAction(ctx context.Context, boot appBootstrap, store *session
 		forkName := strings.TrimSpace(baseName + " → edit u" + strconv.Itoa(transition.ForkUserMessageIndex))
 		forkedStore, err := session.ForkAtUserMessage(store, transition.ForkUserMessageIndex, forkName)
 		if err != nil {
-			return "", "", "", false, false, err
+			return resolvedSessionAction{}, err
 		}
-		return forkedStore.Meta().SessionID, transition.InitialPrompt, "", false, true, nil
+		return resolvedSessionAction{
+			NextSessionID:  forkedStore.Meta().SessionID,
+			InitialPrompt:  transition.InitialPrompt,
+			ShouldContinue: true,
+		}, nil
 	case UIActionLogout:
 		if _, err := boot.authManager.ClearMethod(ctx, true); err != nil {
-			return "", "", "", false, false, err
+			return resolvedSessionAction{}, err
 		}
 		if err := ensureAuthReady(ctx, boot.authManager, boot.oauthOpts, boot.cfg.Settings.Theme, boot.cfg.Settings.TUIAlternateScreen, boot.authInteractor); err != nil {
-			return "", "", "", false, false, err
+			return resolvedSessionAction{}, err
 		}
-		return store.Meta().SessionID, "", "", false, true, nil
+		sessionID := ""
+		if store != nil {
+			sessionID = store.Meta().SessionID
+		}
+		return resolvedSessionAction{NextSessionID: sessionID, ShouldContinue: true}, nil
 	default:
-		return "", "", "", false, false, nil
+		return resolvedSessionAction{}, nil
 	}
 }

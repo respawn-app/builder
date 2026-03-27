@@ -71,6 +71,7 @@ func (c uiInputController) startRollbackFork(text string) (tea.Model, tea.Cmd) {
 	m := c.model
 	m.nextForkUserMessageIndex = m.rollback.selectedUserMessageIndex
 	m.nextSessionInitialPrompt = text
+	m.clearInput()
 	m.exitAction = UIActionForkRollback
 	m.rollback.phase = uiRollbackPhaseInactive
 	return m, tea.Quit

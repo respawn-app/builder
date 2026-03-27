@@ -345,6 +345,8 @@ func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
 	switch msg.MessageType {
 	case llm.MessageTypeErrorFeedback:
 		return ChatEntry{Role: "error", Text: msg.Content}, true
+	case llm.MessageTypeCompactionSoonReminder:
+		return ChatEntry{Role: "warning", Text: msg.Content}, true
 	case llm.MessageTypeBackgroundNotice:
 		return ChatEntry{Role: "system", Text: msg.Content, OngoingText: msg.CompactContent}, true
 	case llm.MessageTypeManualCompactionCarryover:

@@ -23,6 +23,8 @@ brew install builder-cli
 curl -fsSL https://raw.githubusercontent.com/respawn-app/builder/main/scripts/install.sh | sh
 ```
 
+The installer verifies release checksums when the release publishes `checksums.txt`.
+
 Check the installed version with `builder --version`.
 
 ### Features:
