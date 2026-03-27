@@ -18,6 +18,10 @@ func (m Model) flattenEntryWithMutedText(role, text string, muteText bool) []str
 }
 
 func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *transcript.ToolCallMeta) []string {
+	return m.flattenEntryWithMetaAndSymbol(role, text, muteText, toolMeta, "")
+}
+
+func (m Model) flattenEntryWithMetaAndSymbol(role, text string, muteText bool, toolMeta *transcript.ToolCallMeta, symbolOverride string) []string {
 	renderWidth := m.viewportWidth
 	if rolePrefix(role) != "" {
 		renderWidth -= 2
@@ -34,7 +38,7 @@ func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *
 	}
 	isEditedBlock := isEditedToolBlock(plainLines)
 	laidOut := m.layoutEntryContentStage(role, content)
-	out := m.decorateEntryLayoutStage(role, laidOut, renderWidth, muteText, isEditedBlock)
+	out := m.decorateEntryLayoutStage(role, laidOut, renderWidth, muteText, isEditedBlock, symbolOverride)
 	if muteText && isShellPreviewRole(role) {
 		joined := applyANSIStyleIntents(strings.Join(out, "\n"), ansiIntentPalette{ThemeForeground: m.palette().foregroundColor, SubduedForeground: m.palette().previewColor}, Subdued)
 		out = splitLines(joined)
@@ -123,7 +127,7 @@ func (m Model) layoutEntryContentStage(role string, content transcriptRenderCont
 	return out
 }
 
-func (m Model) decorateEntryLayoutStage(role string, lines []transcriptLayoutLine, renderWidth int, muteText bool, isEditedBlock bool) []string {
+func (m Model) decorateEntryLayoutStage(role string, lines []transcriptLayoutLine, renderWidth int, muteText bool, isEditedBlock bool, symbolOverride string) []string {
 	out := make([]string, 0, len(lines))
 	for idx, line := range lines {
 		display := line.Text
@@ -138,15 +142,17 @@ func (m Model) decorateEntryLayoutStage(role string, lines []transcriptLayoutLin
 		}
 		if muteText && strings.TrimSpace(display) != "" && !isEditedBlock && !line.Intents.Has(Subdued) {
 			display = m.palette().preview.Faint(true).Render(display)
-		} else if role == "reviewer_status" && isReviewerCacheHitLine(display) {
-			display = m.palette().preview.Faint(true).Render(display)
 		} else if isStyledMetaRole(role) {
 			display = styleForRole(role, m.palette()).Render(display)
 		}
 		formatted := display
 		if idx == 0 {
 			if line.Prefix != "" {
-				formatted = m.roleSymbol(role) + " " + display
+				symbol := symbolOverride
+				if symbol == "" {
+					symbol = m.roleSymbol(role)
+				}
+				formatted = symbol + " " + display
 			}
 		} else if strings.TrimSpace(display) == "" {
 			formatted = ""

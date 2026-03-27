@@ -22,19 +22,21 @@ type queuedPaneEntry struct {
 }
 
 func (l uiViewLayout) renderChatPanel(width, height int, style uiStyles) []string {
-	if l.model.statusVisible {
+	if l.model.status.isOpen() {
 		return l.renderStatusOverlay(width, height, style)
 	}
-	if l.model.psVisible {
+	if l.model.processList.isOpen() {
 		return l.renderProcessList(width, height, style)
 	}
 	if width < 1 {
 		return []string{padRight("", width)}
 	}
 	contentLines := append([]string(nil), splitPlainLines(l.model.view.View())...)
+	lineKinds := l.model.view.VisibleLineKinds()
 	if len(contentLines) < height {
 		for len(contentLines) < height {
 			contentLines = append(contentLines, "")
+			lineKinds = append(lineKinds, tui.VisibleLineContent)
 		}
 	} else if len(contentLines) > height {
 		end := len(contentLines)
@@ -49,18 +51,28 @@ func (l uiViewLayout) renderChatPanel(width, height int, style uiStyles) []strin
 			start = 0
 		}
 		contentLines = contentLines[start:end]
+		if len(lineKinds) > start {
+			if end > len(lineKinds) {
+				end = len(lineKinds)
+			}
+			lineKinds = lineKinds[start:end]
+		}
 	}
-	return l.renderChatContentLines(contentLines, width, style)
+	return l.renderChatContentLines(contentLines, lineKinds, width, style)
 }
 
-func (l uiViewLayout) renderChatContentLines(rawLines []string, width int, style uiStyles) []string {
+func (l uiViewLayout) renderChatContentLines(rawLines []string, lineKinds []tui.VisibleLineKind, width int, style uiStyles) []string {
 	contentWidth := width
 	if contentWidth < 1 {
 		contentWidth = 1
 	}
 	out := make([]string, 0, len(rawLines))
-	for _, line := range rawLines {
-		if line == tui.TranscriptDivider {
+	for idx, line := range rawLines {
+		kind := tui.VisibleLineContent
+		if idx < len(lineKinds) {
+			kind = lineKinds[idx]
+		}
+		if kind == tui.VisibleLineDivider {
 			out = append(out, style.meta.Render(strings.Repeat("─", contentWidth)))
 			continue
 		}

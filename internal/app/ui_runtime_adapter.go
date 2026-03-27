@@ -124,6 +124,9 @@ func (a uiRuntimeAdapter) applyChatSnapshot(snapshot runtime.ChatSnapshot) tea.C
 	m := a.model
 	if len(m.startupCmds) > 0 {
 		m.startupCmds = nil
+		m.nativeProjection = tui.TranscriptProjection{}
+		m.nativeRenderedProjection = tui.TranscriptProjection{}
+		m.nativeFlushedEntryCount = 0
 		m.nativeRenderedSnapshot = ""
 	}
 	entries := make([]tui.TranscriptEntry, 0, len(snapshot.Entries))
