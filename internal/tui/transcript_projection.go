@@ -169,24 +169,22 @@ func CommittedOngoingEntries(entries []TranscriptEntry) []TranscriptEntry {
 	if len(entries) == 0 {
 		return nil
 	}
-	filtered := nonEmptyTranscriptEntries(entries)
-	prefixEnd := committedOngoingPrefixEnd(filtered)
+	prefixEnd := committedOngoingPrefixEnd(entries)
 	if prefixEnd <= 0 {
 		return nil
 	}
-	return filtered[:prefixEnd]
+	return nonEmptyTranscriptEntries(entries[:prefixEnd])
 }
 
 func PendingOngoingEntries(entries []TranscriptEntry) []TranscriptEntry {
 	if len(entries) == 0 {
 		return nil
 	}
-	filtered := nonEmptyTranscriptEntries(entries)
-	prefixEnd := committedOngoingPrefixEnd(filtered)
-	if prefixEnd >= len(filtered) {
+	prefixEnd := committedOngoingPrefixEnd(entries)
+	if prefixEnd >= len(entries) {
 		return nil
 	}
-	return filtered[prefixEnd:]
+	return nonEmptyTranscriptEntries(entries[prefixEnd:])
 }
 
 func PendingToolEntries(entries []TranscriptEntry) []TranscriptEntry {

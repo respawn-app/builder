@@ -67,6 +67,34 @@ func TestNativeScrollbackStartupReplayIncludesFullTranscript(t *testing.T) {
 	}
 }
 
+func TestNativeScrollbackStartupReplayContinuesPastEmptyToolResult(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "user", Text: "before tool"},
+		{Role: "tool_call", Text: "apply patch", ToolCallID: "call_patch", ToolCall: &transcript.ToolCallMeta{ToolName: "patch"}},
+		{Role: "tool_result_ok", Text: "", ToolCallID: "call_patch"},
+		{Role: "assistant", Text: "after empty result"},
+	}
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	next, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg after first window size, got %T", cmd())
+	}
+	plain := stripANSIText(msg.Text)
+	if !strings.Contains(plain, "after empty result") {
+		t.Fatalf("expected startup replay to continue past empty tool result, got %q", msg.Text)
+	}
+	if strings.Contains(plain, "tool_result_ok") {
+		t.Fatalf("did not expect empty tool result entry to render, got %q", msg.Text)
+	}
+}
+
 func TestNativeScrollbackStartupEmptyConversationEmitsBlankScreenSpacer(t *testing.T) {
 	m := NewUIModel(
 		nil,
