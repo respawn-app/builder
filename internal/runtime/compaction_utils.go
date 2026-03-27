@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"builder/internal/llm"
-	"builder/prompts"
 )
 
 const (
@@ -423,7 +422,7 @@ func (e *Engine) rebuildLocalCompactionHistory(ctx context.Context, model string
 	contextItems := extractCanonicalContext(items)
 	userMessages := make([]llm.ResponseItem, 0, len(items))
 	for _, item := range items {
-		if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleUser && strings.TrimSpace(item.Content) != "" {
+		if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleUser && item.MessageType != llm.MessageTypeCompactionSummary && strings.TrimSpace(item.Content) != "" {
 			userMessages = append(userMessages, item)
 		}
 	}
@@ -434,9 +433,10 @@ func (e *Engine) rebuildLocalCompactionHistory(ctx context.Context, model string
 	selected := e.selectLocalCarryoverMessages(ctx, model, userMessages, carryoverLimit)
 
 	summaryMessage := llm.ResponseItem{
-		Type:    llm.ResponseItemTypeMessage,
-		Role:    llm.RoleUser,
-		Content: prompts.CompactionSummaryPrefix + "\n\n" + strings.TrimSpace(summary),
+		Type:        llm.ResponseItemTypeMessage,
+		Role:        llm.RoleUser,
+		MessageType: llm.MessageTypeCompactionSummary,
+		Content:     strings.TrimSpace(summary),
 	}
 
 	out := make([]llm.ResponseItem, 0, len(contextItems)+len(selected)+1)

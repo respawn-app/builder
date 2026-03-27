@@ -651,7 +651,7 @@ func isCompactionBoundaryItem(item llm.ResponseItem) bool {
 		return true
 	}
 	if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleUser {
-		return strings.HasPrefix(strings.TrimSpace(item.Content), prompts.CompactionSummaryPrefix)
+		return item.MessageType == llm.MessageTypeCompactionSummary
 	}
 	return false
 }
@@ -664,7 +664,7 @@ func (e *Engine) lastVisibleUserMessage() string {
 			continue
 		}
 		content := strings.TrimSpace(msg.Content)
-		if content == "" || strings.HasPrefix(content, prompts.CompactionSummaryPrefix+"\n") {
+		if content == "" || msg.MessageType == llm.MessageTypeCompactionSummary {
 			continue
 		}
 		return msg.Content

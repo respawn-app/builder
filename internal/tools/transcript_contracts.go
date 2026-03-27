@@ -604,7 +604,7 @@ func formatOutputDefault(raw json.RawMessage) string {
 	}
 	obj, ok := payload.(map[string]any)
 	if !ok {
-		return renderPlain(payload)
+		return compactJSONPayload(payload)
 	}
 
 	if msg, ok := asString(obj["error"]); ok {
@@ -627,7 +627,7 @@ func formatOutputDefault(raw json.RawMessage) string {
 	if answer, ok := asString(obj["answer"]); ok {
 		return answer
 	}
-	return renderPlain(payload)
+	return compactJSONPayload(payload)
 }
 
 func formatViewImageOutput(raw json.RawMessage) (string, bool) {
@@ -675,9 +675,17 @@ func formatRawJSON(raw json.RawMessage) string {
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return strings.TrimSpace(string(raw))
 	}
-	formatted, err := json.MarshalIndent(payload, "", "  ")
+	formatted, err := json.Marshal(payload)
 	if err != nil {
 		return strings.TrimSpace(string(raw))
+	}
+	return string(formatted)
+}
+
+func compactJSONPayload(payload any) string {
+	formatted, err := json.Marshal(payload)
+	if err != nil {
+		return ""
 	}
 	return string(formatted)
 }

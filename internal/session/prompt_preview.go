@@ -3,15 +3,16 @@ package session
 import (
 	"encoding/json"
 	"strings"
-
-	"builder/prompts"
 )
+
+const persistedMessageTypeCompactionSummary = "compaction_summary"
 
 const firstPromptPreviewMaxChars = 120
 
 type persistedMessageEnvelope struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role        string `json:"role"`
+	MessageType string `json:"message_type,omitempty"`
+	Content     string `json:"content"`
 }
 
 func firstPromptPreviewFromEvent(kind string, payload json.RawMessage) (string, bool) {
@@ -76,7 +77,7 @@ func isVisibleUserMessage(msg persistedMessageEnvelope) bool {
 	if content == "" {
 		return false
 	}
-	if strings.HasPrefix(content, prompts.CompactionSummaryPrefix+"\n") {
+	if strings.TrimSpace(msg.MessageType) == persistedMessageTypeCompactionSummary {
 		return false
 	}
 	return true

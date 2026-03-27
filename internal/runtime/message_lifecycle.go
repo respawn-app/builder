@@ -37,7 +37,6 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 			if err := json.Unmarshal(evt.Payload, &entry); err != nil {
 				return fmt.Errorf("decode local_entry event: %w", err)
 			}
-			entry = normalizeRestoredLocalEntry(entry)
 			e.chat.appendLocalEntryWithOngoingText(entry.Role, entry.Text, entry.OngoingText)
 		case "history_replaced":
 			var payload historyReplacementPayload
@@ -54,121 +53,6 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 	}
 	return nil
 }
-
-func normalizeRestoredLocalEntry(entry storedLocalEntry) storedLocalEntry {
-	role := strings.TrimSpace(entry.Role)
-	if role == "reviewer_suggestions" {
-		entry.OngoingText = strings.TrimSpace(entry.Text)
-		return entry
-	}
-	if role != "reviewer_status" {
-		return entry
-	}
-	entry.Text = normalizeLegacyReviewerStatusText(entry.Text)
-	if strings.TrimSpace(entry.OngoingText) != "" {
-		entry.OngoingText = normalizeLegacyReviewerStatusText(entry.OngoingText)
-	}
-	return entry
-}
-
-func normalizeLegacyReviewerStatusText(text string) string {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
-		return ""
-	}
-	firstLine := trimmed
-	if head, _, ok := strings.Cut(trimmed, "\n"); ok {
-		firstLine = strings.TrimSpace(head)
-	}
-	if normalized, ok := normalizeLegacyReviewerStatusHeader(firstLine); ok {
-		if cacheLine := extractReviewerCacheHitLine(trimmed); cacheLine != "" {
-			return normalized + "\n\n" + cacheLine
-		}
-		return normalized
-	}
-	return text
-}
-
-func normalizeLegacyReviewerStatusHeader(line string) (string, bool) {
-	trimmed := strings.TrimSpace(line)
-	if normalized, ok := normalizeLegacyReviewerStatusAppliedHeader(trimmed, "Supervisor ran, applied "); ok {
-		return normalized, true
-	}
-	if normalized, ok := normalizeLegacyReviewerStatusAppliedHeader(trimmed, "Supervisor ran: applied "); ok {
-		return normalized, true
-	}
-	if normalized, ok := normalizeLegacyReviewerStatusIgnoredHeader(trimmed, "Supervisor ran, ignored "); ok {
-		return normalized, true
-	}
-	if normalized, ok := normalizeLegacyReviewerStatusIgnoredHeader(trimmed, "Supervisor ran: ignored "); ok {
-		return normalized, true
-	}
-	if normalized, ok := normalizeLegacyReviewerStatusFollowUpFailedHeader(trimmed, "Supervisor ran, follow-up failed after "); ok {
-		return normalized, true
-	}
-	if normalized, ok := normalizeLegacyReviewerStatusFollowUpFailedHeader(trimmed, "Supervisor ran: follow-up failed after "); ok {
-		return normalized, true
-	}
-	return "", false
-}
-
-func normalizeLegacyReviewerStatusAppliedHeader(line, prefix string) (string, bool) {
-	rest, ok := strings.CutPrefix(line, prefix)
-	if !ok {
-		return "", false
-	}
-	label := strings.TrimSpace(strings.TrimSuffix(rest, ":"))
-	if label == "" || label == rest {
-		return "", false
-	}
-	return fmt.Sprintf("Supervisor ran: %s, applied.", label), true
-}
-
-func normalizeLegacyReviewerStatusIgnoredHeader(line, prefix string) (string, bool) {
-	rest, ok := strings.CutPrefix(line, prefix)
-	if !ok {
-		return "", false
-	}
-	label := strings.TrimSpace(strings.TrimSuffix(rest, ":"))
-	if label == "" || label == rest {
-		return "", false
-	}
-	return fmt.Sprintf("Supervisor ran: %s, no changes applied.", label), true
-}
-
-func normalizeLegacyReviewerStatusFollowUpFailedHeader(line, prefix string) (string, bool) {
-	rest, ok := strings.CutPrefix(line, prefix)
-	if !ok {
-		return "", false
-	}
-	label, tail, haveTail := strings.Cut(rest, ":")
-	label = strings.TrimSpace(label)
-	if label == "" {
-		return "", false
-	}
-	errorText := ""
-	if haveTail {
-		errorText = strings.TrimSpace(tail)
-	}
-	if errorText != "" {
-		return fmt.Sprintf("Supervisor ran: %s, but follow-up failed: %s", label, errorText), true
-	}
-	return fmt.Sprintf("Supervisor ran: %s, but follow-up failed.", label), true
-}
-
-func extractReviewerCacheHitLine(text string) string {
-	for _, line := range strings.Split(text, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		if strings.HasSuffix(trimmed, "cache hit") && strings.Contains(trimmed, "%") {
-			return trimmed
-		}
-	}
-	return ""
-}
-
 func normalizeQueuedUserMessages(messages []string) []string {
 	out := make([]string, 0, len(messages))
 	for _, message := range messages {
