@@ -26,9 +26,6 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 		if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
 			return llm.Message{}, executedToolCall, false, err
 		}
-		if err := e.maybeAppendCompactionSoonReminder(ctx, stepID); err != nil {
-			return llm.Message{}, executedToolCall, false, err
-		}
 
 		req, err := e.buildRequest(ctx, stepID, true)
 		if err != nil {
@@ -127,6 +124,9 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 				if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
 					return llm.Message{}, executedToolCall, false, err
 				}
+				if err := e.maybeAppendCompactionSoonReminder(ctx, stepID); err != nil {
+					return llm.Message{}, executedToolCall, false, err
+				}
 				continue
 			}
 			if phaseTurn.EnforcePhaseProtocol && assistantMsg.Phase != llm.MessagePhaseFinal {
@@ -137,6 +137,9 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 					return llm.Message{}, executedToolCall, false, err
 				}
 				if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
+					return llm.Message{}, executedToolCall, false, err
+				}
+				if err := e.maybeAppendCompactionSoonReminder(ctx, stepID); err != nil {
 					return llm.Message{}, executedToolCall, false, err
 				}
 				continue
@@ -151,6 +154,9 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 				if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
 					return llm.Message{}, executedToolCall, false, err
 				}
+				if err := e.maybeAppendCompactionSoonReminder(ctx, stepID); err != nil {
+					return llm.Message{}, executedToolCall, false, err
+				}
 				continue
 			}
 			flushed, err := s.messages.FlushPendingUserInjections(stepID)
@@ -162,9 +168,15 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 					deferredFinal = assistantMsg
 					hasDeferredFinal = true
 				}
+				if err := e.maybeAppendCompactionSoonReminder(ctx, stepID); err != nil {
+					return llm.Message{}, executedToolCall, false, err
+				}
 				continue
 			}
 			if len(hostedToolExecutions) > 0 {
+				if err := e.maybeAppendCompactionSoonReminder(ctx, stepID); err != nil {
+					return llm.Message{}, executedToolCall, false, err
+				}
 				continue
 			}
 			resolved := assistantMsg
@@ -187,6 +199,9 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 				if err == nil {
 					resolved = reviewed
 				}
+			}
+			if err := e.maybeAppendCompactionSoonReminder(ctx, stepID); err != nil {
+				return llm.Message{}, executedToolCall, false, err
 			}
 			if options.EmitAssistantEvent {
 				e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: resolved})
@@ -218,6 +233,9 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 			return llm.Message{}, executedToolCall, false, err
 		}
 		if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
+			return llm.Message{}, executedToolCall, false, err
+		}
+		if err := e.maybeAppendCompactionSoonReminder(ctx, stepID); err != nil {
 			return llm.Message{}, executedToolCall, false, err
 		}
 	}
