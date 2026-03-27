@@ -377,8 +377,12 @@ func (m Model) defaultEntryStyleIntents(role string, muteText bool) StyleIntent 
 		return Subdued
 	}
 	switch role {
-	case "reviewer_status", "reviewer_suggestions", "error":
-		return 0
+	case "reviewer_status", "reviewer_suggestions":
+		return SuccessForeground
+	case "warning":
+		return WarningForeground
+	case "error":
+		return ErrorForeground
 	default:
 		if isCompactionRole(role) {
 			return 0

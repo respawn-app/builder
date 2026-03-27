@@ -228,6 +228,9 @@ type palette struct {
 	foregroundColor rgbColor
 	preview         lipgloss.Style
 	previewColor    rgbColor
+	successColor    rgbColor
+	warningColor    rgbColor
+	errorColor      rgbColor
 	user            lipgloss.Style
 	model           lipgloss.Style
 	tool            lipgloss.Style
@@ -272,6 +275,9 @@ func (m Model) palette() palette {
 		foregroundColor: foregroundColor,
 		preview:         lipgloss.NewStyle().Foreground(base),
 		previewColor:    previewColor,
+		successColor:    adaptiveColorRGB(m.theme, success),
+		warningColor:    adaptiveColorRGB(m.theme, warning),
+		errorColor:      adaptiveColorRGB(m.theme, err),
 		user:            lipgloss.NewStyle().Foreground(user),
 		model:           lipgloss.NewStyle().Foreground(model),
 		tool:            lipgloss.NewStyle().Foreground(tool),
@@ -288,6 +294,13 @@ func (m Model) palette() palette {
 		diffAddBackgroundDark:     "#1F2A22",
 		diffRemoveBackgroundDark:  "#2B1F22",
 	}
+}
+
+func adaptiveColorRGB(theme string, color lipgloss.AdaptiveColor) rgbColor {
+	if strings.EqualFold(strings.TrimSpace(theme), "light") {
+		return rgbColorFromHex(color.Light)
+	}
+	return rgbColorFromHex(color.Dark)
 }
 
 func rgbColorFromHex(hex string) rgbColor {
@@ -310,6 +323,27 @@ func themePreviewColor(theme string) rgbColor {
 		return rgbColorFromHex("#5C6370")
 	}
 	return rgbColorFromHex("#7F848E")
+}
+
+func themeSuccessColor(theme string) rgbColor {
+	if strings.EqualFold(strings.TrimSpace(theme), "light") {
+		return rgbColorFromHex("#22863A")
+	}
+	return rgbColorFromHex("#98C379")
+}
+
+func themeWarningColor(theme string) rgbColor {
+	if strings.EqualFold(strings.TrimSpace(theme), "light") {
+		return rgbColorFromHex("#8A5A00")
+	}
+	return rgbColorFromHex("#E5C07B")
+}
+
+func themeErrorColor(theme string) rgbColor {
+	if strings.EqualFold(strings.TrimSpace(theme), "light") {
+		return rgbColorFromHex("#D73A49")
+	}
+	return rgbColorFromHex("#E06C75")
 }
 
 func (c rgbColor) hexString() string {
