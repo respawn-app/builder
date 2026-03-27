@@ -114,6 +114,15 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool) tea.Cmd {
 	if strings.TrimSpace(rawSnapshot) == "" {
 		return nil
 	}
+	if forceFull {
+		styled := renderStyledNativeProjection(m.nativeProjection, m.theme, m.nativeReplayRenderWidth())
+		if strings.TrimSpace(styled) == "" {
+			return nil
+		}
+		m.nativeRenderedProjection = m.nativeProjection
+		m.nativeRenderedSnapshot = rawSnapshot
+		return tea.Sequence(tea.ClearScreen, m.emitNativeRenderedText(styled))
+	}
 	rewriteRenderedHistory := m.view.Mode() == tui.ModeOngoing && !m.nativeRenderedProjection.Empty()
 	if !m.nativeRenderedProjection.Empty() {
 		previousBlockCount := len(m.nativeRenderedProjection.Blocks)
