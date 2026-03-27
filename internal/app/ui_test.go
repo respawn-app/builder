@@ -4929,11 +4929,12 @@ func TestReviewerStatusEndToEnd_VerboseSuggestionsIssuedAndStatusConcise(t *test
 	eng.AppendLocalEntryWithOngoingText("reviewer_suggestions", "Supervisor suggested:\n1. First detailed suggestion text\n2. Second detailed suggestion text", "Supervisor suggested:\n1. First detailed suggestion text\n2. Second detailed suggestion text")
 	eng.AppendLocalEntry("reviewer_status", "Supervisor ran: 2 suggestions, no changes applied.")
 
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent), WithUITheme("dark")).(*uiModel)
 	m.termWidth = 100
 	m.termHeight = 24
 
-	ongoing := stripANSIAndTrimRight(m.view.OngoingSnapshot())
+	rawOngoing := m.view.OngoingSnapshot()
+	ongoing := stripANSIAndTrimRight(rawOngoing)
 	if !containsInOrder(ongoing, "Supervisor suggested:", "1. First detailed suggestion text", "2. Second detailed suggestion text") {
 		t.Fatalf("expected verbose reviewer suggestions in ongoing mode, got %q", ongoing)
 	}
@@ -4943,11 +4944,25 @@ func TestReviewerStatusEndToEnd_VerboseSuggestionsIssuedAndStatusConcise(t *test
 	if strings.Count(ongoing, "Supervisor suggested:") != 1 {
 		t.Fatalf("expected reviewer suggestions details only at issuance time in ongoing mode, got %q", ongoing)
 	}
+	green := lipgloss.NewStyle().Foreground(lipgloss.Color("#98C379"))
+	if !strings.Contains(rawOngoing, green.Render("Supervisor suggested:")) {
+		t.Fatalf("expected reviewer suggestions to use success styling in ongoing mode, got %q", rawOngoing)
+	}
+	if !strings.Contains(rawOngoing, green.Render("Supervisor ran: 2 suggestions, no changes applied.")) {
+		t.Fatalf("expected reviewer status to use success styling in ongoing mode, got %q", rawOngoing)
+	}
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
-	detail := stripANSIAndTrimRight(next.(*uiModel).View())
+	rawDetail := next.(*uiModel).View()
+	detail := stripANSIAndTrimRight(rawDetail)
 	if !containsInOrder(detail, "Supervisor suggested:", "1. First detailed suggestion text", "2. Second detailed suggestion text", "Supervisor ran: 2 suggestions, no changes applied.") {
 		t.Fatalf("expected full reviewer suggestions in detail mode, got %q", detail)
+	}
+	if !strings.Contains(rawDetail, green.Render("Supervisor suggested:")) {
+		t.Fatalf("expected reviewer suggestions to use success styling in detail mode, got %q", rawDetail)
+	}
+	if !strings.Contains(rawDetail, green.Render("Supervisor ran: 2 suggestions, no changes applied.")) {
+		t.Fatalf("expected reviewer status to use success styling in detail mode, got %q", rawDetail)
 	}
 }
 

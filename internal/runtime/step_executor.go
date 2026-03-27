@@ -26,6 +26,9 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 		if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
 			return llm.Message{}, executedToolCall, false, err
 		}
+		if err := e.maybeAppendCompactionSoonReminder(ctx, stepID); err != nil {
+			return llm.Message{}, executedToolCall, false, err
+		}
 
 		req, err := e.buildRequest(ctx, stepID, true)
 		if err != nil {

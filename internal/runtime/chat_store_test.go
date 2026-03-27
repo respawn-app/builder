@@ -546,6 +546,21 @@ func TestChatStoreSnapshotIncludesDeveloperErrorFeedbackAsErrorRole(t *testing.T
 	}
 }
 
+func TestChatStoreSnapshotIncludesDeveloperCompactionSoonReminderAsWarningRole(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "task"})
+	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSoonReminder, Content: "heads up"})
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "done"})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if snap.Entries[1].Role != "warning" || snap.Entries[1].Text != "heads up" {
+		t.Fatalf("expected compaction reminder mapped to warning role, got %+v", snap.Entries[1])
+	}
+}
+
 func TestChatStoreSnapshotIncludesCompactTextForBackgroundNotice(t *testing.T) {
 	s := newChatStore()
 	s.appendMessage(llm.Message{
