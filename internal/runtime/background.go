@@ -106,6 +106,12 @@ func (b *defaultBackgroundNoticeScheduler) DrainPendingNotices() []llm.Message {
 	return pending
 }
 
+func (b *defaultBackgroundNoticeScheduler) HasPendingNotices() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.pending) > 0
+}
+
 func (b *defaultBackgroundNoticeScheduler) ConsumePendingBackgroundNotice(sessionID string) bool {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {

@@ -21,6 +21,7 @@ type backgroundNoticeScheduler interface {
 	HandleBackgroundShellUpdate(evt BackgroundShellEvent, queueNotice bool)
 	QueueDeveloperNotice(msg llm.Message)
 	DrainPendingNotices() []llm.Message
+	HasPendingNotices() bool
 	ConsumePendingBackgroundNotice(sessionID string) bool
 	ScheduleIfIdle()
 }

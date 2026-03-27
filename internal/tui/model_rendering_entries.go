@@ -62,7 +62,7 @@ func (m Model) renderEntryContentStage(role, text string, width int, toolMeta *t
 }
 
 func (m Model) applyEntrySemanticTransformStage(content transcriptRenderContent) transcriptRenderContent {
-	palette := ansiIntentPalette{ThemeForeground: m.palette().foregroundColor, SubduedForeground: m.palette().previewColor}
+	palette := m.ansiIntentPalette()
 	out := transcriptRenderContent{WrapMode: content.WrapMode, Lines: make([]transcriptRenderLine, 0, len(content.Lines))}
 	for _, line := range content.Lines {
 		if shouldDeferEntrySemanticTransform(line.Intents) {
@@ -128,7 +128,7 @@ func (m Model) applyDeferredDecoratedLayoutTransformStage(lines []transcriptLayo
 	if len(lines) == 0 {
 		return lines
 	}
-	palette := ansiIntentPalette{ThemeForeground: m.palette().foregroundColor, SubduedForeground: m.palette().previewColor}
+	palette := m.ansiIntentPalette()
 	out := append([]transcriptLayoutLine(nil), lines...)
 	for start := 0; start < len(out); {
 		if !shouldDeferEntrySemanticTransform(out[start].Intents) {
@@ -169,7 +169,7 @@ func (m Model) decorateEntryLayoutBodyStage(role string, lines []transcriptLayou
 			display = m.styleToolLine(display)
 		}
 		if !strings.Contains(display, "\x1b[") {
-			display = applyANSIStyleIntents(display, ansiIntentPalette{ThemeForeground: m.palette().foregroundColor, SubduedForeground: m.palette().previewColor}, line.Intents)
+			display = applyANSIStyleIntents(display, m.ansiIntentPalette(), line.Intents)
 		}
 		if muteText && strings.TrimSpace(display) != "" && !isEditedBlock && !line.Intents.Has(Subdued) {
 			display = m.palette().preview.Faint(true).Render(display)
@@ -330,7 +330,7 @@ func (m Model) renderEntryText(role, text string, width int, toolMeta *transcrip
 	content := transcriptRenderContent{Lines: []transcriptRenderLine{{Text: rendered, Intents: intents}}, WrapMode: wrapMode}
 	content = m.applyEntrySemanticTransformStage(content)
 	content = m.wrapEntryContentStage(content, width)
-	palette := ansiIntentPalette{ThemeForeground: m.palette().foregroundColor, SubduedForeground: m.palette().previewColor}
+	palette := m.ansiIntentPalette()
 	parts := make([]string, 0, len(content.Lines))
 	for _, line := range content.Lines {
 		if !muteText && !strings.Contains(line.Text, "\x1b[") {

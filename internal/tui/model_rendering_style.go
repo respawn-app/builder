@@ -346,6 +346,17 @@ func themeErrorColor(theme string) rgbColor {
 	return rgbColorFromHex("#E06C75")
 }
 
+func (m Model) ansiIntentPalette() ansiIntentPalette {
+	colors := m.palette()
+	return ansiIntentPalette{
+		ThemeForeground:   colors.foregroundColor,
+		SubduedForeground: colors.previewColor,
+		SuccessForeground: colors.successColor,
+		WarningForeground: colors.warningColor,
+		ErrorForeground:   colors.errorColor,
+	}
+}
+
 func (c rgbColor) hexString() string {
 	return fmt.Sprintf("#%02X%02X%02X", c.r, c.g, c.b)
 }
