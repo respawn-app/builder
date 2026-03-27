@@ -113,7 +113,7 @@ func TestResolveSessionActionLogoutUsesBootstrapAuthInteractor(t *testing.T) {
 		t.Fatalf("create session store: %v", err)
 	}
 
-	nextSessionID, initialPrompt, parentSessionID, forceNewSession, shouldContinue, err := resolveSessionAction(
+	resolved, err := resolveSessionAction(
 		ctx,
 		appBootstrap{authManager: mgr, authInteractor: interactor},
 		store,
@@ -125,14 +125,14 @@ func TestResolveSessionActionLogoutUsesBootstrapAuthInteractor(t *testing.T) {
 	if interactor.callCount != 1 {
 		t.Fatalf("expected auth interactor to be called once, got %d", interactor.callCount)
 	}
-	if !shouldContinue {
+	if !resolved.ShouldContinue {
 		t.Fatal("expected logout flow to continue after reauth")
 	}
-	if nextSessionID != store.Meta().SessionID {
-		t.Fatalf("expected session to continue in place, got %q", nextSessionID)
+	if resolved.NextSessionID != store.Meta().SessionID {
+		t.Fatalf("expected session to continue in place, got %q", resolved.NextSessionID)
 	}
-	if initialPrompt != "" || parentSessionID != "" || forceNewSession {
-		t.Fatalf("unexpected logout transition values prompt=%q parent=%q forceNew=%t", initialPrompt, parentSessionID, forceNewSession)
+	if resolved.InitialPrompt != "" || resolved.InitialInput != "" || resolved.ParentSessionID != "" || resolved.ForceNewSession {
+		t.Fatalf("unexpected logout transition values prompt=%q input=%q parent=%q forceNew=%t", resolved.InitialPrompt, resolved.InitialInput, resolved.ParentSessionID, resolved.ForceNewSession)
 	}
 
 	state, err := mgr.Load(ctx)

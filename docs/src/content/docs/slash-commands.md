@@ -18,7 +18,7 @@ description: Available slash commands, how their input is parsed, and how file-b
 | <code>/autocompaction [on&#124;off]</code> | optional single value | Toggle auto-compaction. |
 | `/status` | none | Open a read-only status overlay with progressively loaded account, session, compact git, context, config, skills, disabled skill toggles, and quota details. |
 | <code>/ps [kill&#124;inline&#124;logs] &lt;id&gt;</code> | optional action + id | Open the background-process picker, or manage a specific background shell. |
-| `/back` | none | Open the parent session when the current session was spawned from one. |
+| `/back` | none | Open the parent session when the current session was spawned from one. Builder copies the child session's last committed assistant `final_answer` only when it is also the last committed message, and it will not overwrite an existing parent draft. |
 | `/review <what to review>` | optional free-form text | Use the built-in review prompt. In an empty session it submits in place; otherwise it starts a fresh child review session. Trailing text is appended to the prompt body. |
 | `/init <instructions>` | optional free-form text | Use the built-in init prompt. In an empty session it submits in place; otherwise it starts a fresh child initialization session. Trailing text is appended to the prompt body. |
 | `/prompt:<name>` | optional free-form text | Run a custom Markdown prompt discovered from disk. |

@@ -46,7 +46,7 @@ You can switch later with `/logout`.
 - Use the `Up`/`Down` arrow keys to select and resend previous prompts.
 - Press `F1` to invoke help with other hotkeys.
 - Use `/supervisor` to toggle reviewer invocation for the current session. Initial value is config's `reviewer.frequency`, and default is on. Supervisor is a feature that will automatically review the edits made by the model. It increases costs by ~20% but improves results.
-- Use `/review` to start a code review. In a non-empty session, Builder opens that review in a fresh child session. After the review finishes, you can use `/back` to teleport to the original session. If you interrupt the child after it starts replying, Builder carries that reply back into the parent input draft without overwriting an existing parent draft.
+- Use `/review` to start a code review. In a non-empty session, Builder opens that review in a fresh child session. After the review finishes, you can use `/back` to teleport to the original session. Builder copies the child session's last committed assistant `final_answer` back into the parent input draft only when it is also the last committed message, without overwriting an existing parent draft.
 - `/name` will set your session name in the picker and terminal title.
 - `/autocompaction` will toggle compaction, and `/compact` will trigger one. If autocompact is off, you can go above 100% context usage if model allows it, it may incur additional costs.
 - `/status` 

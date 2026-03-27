@@ -296,7 +296,7 @@
 - Run-safe commands execute immediately while busy.
 - Non-run-safe known commands while busy are rejected with transient status-line error.
 - `/review` auto-submits the embedded review rubric prompt; it stays in-place for empty sessions and forks a fresh child session once the current session already has a visible user prompt. Optional args are appended as review scope.
-- `/back` reopens the parent session when available; if the child session is interrupted while assistant output is still streaming, that in-progress assistant text becomes the parent input draft on return unless the parent already has its own saved draft.
+- `/back` reopens the parent session when available; the parent draft becomes the child session's last committed assistant `final_answer` only when that message is also the last committed message, unless the parent already has its own saved draft.
 - `/supervisor` controls runtime reviewer invocation for the current session only.
 - `/supervisor` toggles when called without args; `/supervisor on|off` sets explicitly.
 - `/supervisor` emits user-visible confirmation in transcript + status line and does not persist to config.

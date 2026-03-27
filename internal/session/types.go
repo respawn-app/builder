@@ -39,6 +39,7 @@ type Meta struct {
 	SessionID          string               `json:"session_id"`
 	Name               string               `json:"name,omitempty"`
 	FirstPromptPreview string               `json:"first_prompt_preview,omitempty"`
+	InputDraft         string               `json:"input_draft,omitempty"`
 	ParentSessionID    string               `json:"parent_session_id,omitempty"`
 	WorkspaceRoot      string               `json:"workspace_root"`
 	WorkspaceContainer string               `json:"workspace_container"`
