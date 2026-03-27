@@ -10,7 +10,6 @@ import (
 
 	"builder/internal/llm"
 	"builder/prompts"
-	"github.com/google/uuid"
 )
 
 type compactionMode string
@@ -40,50 +39,47 @@ type compactionResult struct {
 	summary           string
 }
 
-func (e *Engine) CompactContext(ctx context.Context, args string) (err error) {
-	return e.compactContext(ctx, compactionModeManual, args, true)
+type defaultContextCompactor struct {
+	engine *Engine
+	steps  exclusiveStepLifecycle
 }
 
-func (e *Engine) CompactContextForPreSubmit(ctx context.Context) (err error) {
-	return e.compactContext(ctx, compactionModeManual, "", false)
+func (e *Engine) CompactContext(ctx context.Context, args string) error {
+	e.ensureOrchestrationCollaborators()
+	return e.compactionFlow.CompactContext(ctx, args)
 }
 
-func (e *Engine) compactContext(ctx context.Context, mode compactionMode, args string, includeManualCarryover bool) (err error) {
-	e.mu.Lock()
-	if e.busy {
-		e.mu.Unlock()
-		return errors.New("agent is busy")
-	}
-	e.busy = true
-	stepCtx, cancel := context.WithCancel(ctx)
-	e.cancelCurrent = cancel
-	e.mu.Unlock()
-	stepID := ""
-	defer func() {
-		e.mu.Lock()
-		e.busy = false
-		e.cancelCurrent = nil
-		e.mu.Unlock()
-		if clearErr := e.store.MarkInFlight(false); clearErr != nil {
-			wrapped := fmt.Errorf("mark in-flight false: %w", clearErr)
-			e.emit(Event{Kind: EventInFlightClearFailed, StepID: stepID, Error: wrapped.Error()})
-			err = errors.Join(err, wrapped)
+func (e *Engine) CompactContextForPreSubmit(ctx context.Context) error {
+	e.ensureOrchestrationCollaborators()
+	return e.compactionFlow.CompactContextForPreSubmit(ctx)
+}
+
+func (c *defaultContextCompactor) CompactContext(ctx context.Context, args string) error {
+	return c.compactContext(ctx, compactionModeManual, args, true)
+}
+
+func (c *defaultContextCompactor) CompactContextForPreSubmit(ctx context.Context) error {
+	return c.compactContext(ctx, compactionModeManual, "", false)
+}
+
+func (c *defaultContextCompactor) compactContext(ctx context.Context, mode compactionMode, args string, includeManualCarryover bool) error {
+	e := c.engine
+	return c.steps.Run(ctx, exclusiveStepOptions{}, func(stepCtx context.Context, stepID string) error {
+		if err := e.injectAgentsIfNeeded(stepID); err != nil {
+			return err
 		}
-	}()
-
-	if err = e.store.MarkInFlight(true); err != nil {
+		_, err := e.compactNow(stepCtx, stepID, mode, args, includeManualCarryover)
 		return err
-	}
-
-	stepID = uuid.NewString()
-	if err = e.injectAgentsIfNeeded(stepID); err != nil {
-		return err
-	}
-	_, err = e.compactNow(stepCtx, stepID, mode, args, includeManualCarryover)
-	return err
+	})
 }
 
 func (e *Engine) autoCompactIfNeeded(ctx context.Context, stepID string, mode compactionMode) error {
+	e.ensureOrchestrationCollaborators()
+	return e.compactionFlow.AutoCompactIfNeeded(ctx, stepID, mode)
+}
+
+func (c *defaultContextCompactor) AutoCompactIfNeeded(ctx context.Context, stepID string, mode compactionMode) error {
+	e := c.engine
 	if mode == compactionModeAuto && !e.shouldAutoCompactWithContext(ctx) {
 		return nil
 	}
@@ -172,6 +168,12 @@ func (e *Engine) preSubmitCompactionTokenLimit(ctx context.Context) int {
 }
 
 func (e *Engine) ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error) {
+	e.ensureOrchestrationCollaborators()
+	return e.compactionFlow.ShouldCompactBeforeUserMessage(ctx, text)
+}
+
+func (c *defaultContextCompactor) ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error) {
+	e := c.engine
 	if strings.TrimSpace(text) == "" {
 		return false, nil
 	}

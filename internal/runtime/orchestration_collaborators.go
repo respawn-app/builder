@@ -7,6 +7,31 @@ import (
 	"builder/internal/tools"
 )
 
+type exclusiveStepOptions struct {
+	EmitRunState bool
+}
+
+type exclusiveStepLifecycle interface {
+	Run(ctx context.Context, options exclusiveStepOptions, fn func(stepCtx context.Context, stepID string) error) error
+	Interrupt() error
+	IsBusy() bool
+}
+
+type backgroundNoticeScheduler interface {
+	HandleBackgroundShellUpdate(evt BackgroundShellEvent, queueNotice bool)
+	QueueDeveloperNotice(msg llm.Message)
+	DrainPendingNotices() []llm.Message
+	ConsumePendingBackgroundNotice(sessionID string) bool
+	ScheduleIfIdle()
+}
+
+type contextCompactor interface {
+	CompactContext(ctx context.Context, args string) error
+	CompactContextForPreSubmit(ctx context.Context) error
+	AutoCompactIfNeeded(ctx context.Context, stepID string, mode compactionMode) error
+	ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error)
+}
+
 type stepLoopOptions struct {
 	ReviewerFrequency              string
 	ReviewerClient                 llm.Client
@@ -54,14 +79,26 @@ type phaseProtocolEnforcer interface {
 
 func (e *Engine) ensureOrchestrationCollaborators() {
 	e.collaboratorsOnce.Do(func() {
+		if e.stepLifecycle == nil {
+			e.stepLifecycle = &defaultExclusiveStepLifecycle{engine: e}
+		}
+		if e.backgroundFlow == nil {
+			e.backgroundFlow = &defaultBackgroundNoticeScheduler{engine: e, steps: e.stepLifecycle}
+		}
+		if lifecycle, ok := e.stepLifecycle.(*defaultExclusiveStepLifecycle); ok && lifecycle.background == nil {
+			lifecycle.background = e.backgroundFlow
+		}
 		if e.phaseProtocol == nil {
 			e.phaseProtocol = &defaultPhaseProtocol{engine: e}
 		}
 		if e.messageFlow == nil {
-			e.messageFlow = &defaultMessageLifecycle{engine: e}
+			e.messageFlow = &defaultMessageLifecycle{engine: e, background: e.backgroundFlow}
 		}
 		if e.toolFlow == nil {
 			e.toolFlow = &defaultToolExecutor{engine: e}
+		}
+		if e.compactionFlow == nil {
+			e.compactionFlow = &defaultContextCompactor{engine: e, steps: e.stepLifecycle}
 		}
 		if e.reviewerFlow == nil {
 			e.reviewerFlow = &defaultReviewerPipeline{engine: e}

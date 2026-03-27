@@ -10,7 +10,8 @@ import (
 )
 
 type defaultMessageLifecycle struct {
-	engine *Engine
+	engine     *Engine
+	background backgroundNoticeScheduler
 }
 
 func (m *defaultMessageLifecycle) RestoreMessages() error {
@@ -185,11 +186,12 @@ func (m *defaultMessageLifecycle) FlushPendingUserInjections(stepID string) (int
 	e.mu.Lock()
 	pending := append([]string(nil), e.pendingInjected...)
 	e.pendingInjected = nil
-	pendingNotices := append([]llm.Message(nil), e.pendingNotices...)
-	e.pendingNotices = nil
-	e.noticeScheduled = false
 	e.mu.Unlock()
 	flushed := 0
+	pendingNotices := []llm.Message(nil)
+	if m.background != nil {
+		pendingNotices = m.background.DrainPendingNotices()
+	}
 
 	queuedMessages := normalizeQueuedUserMessages(pending)
 	if len(queuedMessages) > 0 {
