@@ -173,8 +173,11 @@ func TestScenarioSessionResumeNormalizesLegacyReviewerEntriesInOngoingMode(t *te
 	if !containsInOrder(ongoing, "Supervisor made 1 suggestion.", "Supervisor ran, applied 1 suggestion:") {
 		t.Fatalf("expected stored reviewer entries after session resume, got %q", ongoing)
 	}
-	if strings.Contains(ongoing, "Supervisor suggested:") {
+	if strings.Contains(ongoing, "Supervisor suggested") {
 		t.Fatalf("did not expect legacy reviewer suggestion header after resume, got %q", ongoing)
+	}
+	if strings.Contains(ongoing, "Supervisor ran: 1 suggestion, applied.") {
+		t.Fatalf("did not expect legacy reviewer status summary after resume, got %q", ongoing)
 	}
 }
 
