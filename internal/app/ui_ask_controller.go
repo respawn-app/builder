@@ -67,6 +67,9 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.inputController().clearPendingCSIShiftEnter()
 	}
 	req := m.ask.current.req
+	if m.ask.freeform && isClipboardImagePasteKey(msg) {
+		return m, m.pasteClipboardImageCmd(uiClipboardPasteTargetAsk)
+	}
 
 	switch msg.Type {
 	case tea.KeyCtrlC:
