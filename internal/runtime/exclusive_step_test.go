@@ -292,7 +292,9 @@ func TestBackgroundNoticeSchedulerSchedulesAfterBusyStepEnds(t *testing.T) {
 	if steps.calls() != 1 {
 		t.Fatalf("expected one scheduled run after idle transition, got %d", steps.calls())
 	}
+	client.mu.Lock()
 	request := client.calls[0]
+	client.mu.Unlock()
 	foundNotice := false
 	for _, msg := range requestMessages(request) {
 		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeBackgroundNotice && msg.Name == "1000" {
@@ -334,7 +336,10 @@ func TestContextCompactorUsesExclusiveStepLifecycle(t *testing.T) {
 	if steps.calls() != 1 {
 		t.Fatalf("expected compaction to execute through exclusive step lifecycle once, got %d", steps.calls())
 	}
-	if len(client.calls) != 1 {
-		t.Fatalf("expected one local compaction model call, got %d", len(client.calls))
+	client.mu.Lock()
+	callCount := len(client.calls)
+	client.mu.Unlock()
+	if callCount != 1 {
+		t.Fatalf("expected one local compaction model call, got %d", callCount)
 	}
 }
