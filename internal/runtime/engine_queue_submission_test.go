@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"builder/internal/llm"
@@ -110,6 +111,37 @@ func TestSubmitQueuedUserMessagesRetriesTransientBusyErrors(t *testing.T) {
 	}
 	if !hasQueuedUser {
 		t.Fatalf("expected retried request to include queued user message, got %+v", requestMessages(client.calls[0]))
+	}
+}
+
+func TestSubmitQueuedUserMessagesStopsRetryingWhenContextIsCanceled(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	attempts := 0
+	eng.stepLifecycle = &stubExclusiveStepLifecycle{runFn: func(ctx context.Context, options exclusiveStepOptions, fn func(stepCtx context.Context, stepID string) error) error {
+		attempts++
+		return errExclusiveStepBusy
+	}}
+	eng.QueueUserMessage("steer now")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	msg, err := eng.SubmitQueuedUserMessages(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got msg=%+v err=%v", msg, err)
+	}
+	if attempts != 1 {
+		t.Fatalf("expected one busy attempt before cancellation, got %d", attempts)
 	}
 }
 
