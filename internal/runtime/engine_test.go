@@ -6784,6 +6784,158 @@ func TestRunStepLoopSkipsCompactionSoonReminderWhenImmediateAutoCompactionRuns(t
 	}
 }
 
+func TestRunStepLoopAppendsCompactionSoonReminderImmediatelyAfterFinalAnswerBoundary(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		responses: []llm.Response{{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{InputTokens: 890, WindowTokens: 2_000},
+		}},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   2_000,
+		AutoCompactTokenLimit: 1_000,
+		CompactionMode:        "local",
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+
+	msg, err := eng.runStepLoop(context.Background(), "step-1")
+	if err != nil {
+		t.Fatalf("runStepLoop: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("unexpected assistant message: %+v", msg)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected exactly one model request, got %d", len(client.calls))
+	}
+	for _, reqMsg := range requestMessages(client.calls[0]) {
+		if reqMsg.Role == llm.RoleDeveloper && reqMsg.MessageType == llm.MessageTypeCompactionSoonReminder {
+			t.Fatalf("did not expect reminder in the request that produced the final answer, messages=%+v", requestMessages(client.calls[0]))
+		}
+	}
+
+	snap := eng.ChatSnapshot()
+	assistantIdx := -1
+	reminderIdx := -1
+	reminders := 0
+	for idx, entry := range snap.Entries {
+		if entry.Role == "assistant" && entry.Text == "done" {
+			assistantIdx = idx
+		}
+		if entry.Role == "warning" && entry.Text == strings.TrimSpace(prompts.CompactionSoonReminderPrompt) {
+			reminders++
+			reminderIdx = idx
+		}
+	}
+	if reminders != 1 {
+		t.Fatalf("expected exactly one reminder entry, got %d entries=%+v", reminders, snap.Entries)
+	}
+	if assistantIdx < 0 || reminderIdx != assistantIdx+1 {
+		t.Fatalf("expected reminder immediately after final assistant entry, assistantIdx=%d reminderIdx=%d entries=%+v", assistantIdx, reminderIdx, snap.Entries)
+	}
+}
+
+func TestRunStepLoopAppendsCompactionSoonReminderImmediatelyAfterToolOutputBoundary(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		responses: []llm.Response{
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "checking", Phase: llm.MessagePhaseCommentary},
+				ToolCalls: []llm.ToolCall{{ID: "call_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+				Usage:     llm.Usage{InputTokens: 100, WindowTokens: 2_000},
+			},
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+				Usage:     llm.Usage{InputTokens: 920, WindowTokens: 2_000},
+			},
+		},
+		inputTokenCountFn: func(req llm.Request) int {
+			hasToolResult := false
+			for _, msg := range requestMessages(req) {
+				if msg.Role == llm.RoleTool {
+					hasToolResult = true
+					break
+				}
+			}
+			if hasToolResult {
+				return 890
+			}
+			return 100
+		},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   2_000,
+		AutoCompactTokenLimit: 1_000,
+		CompactionMode:        "local",
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+
+	msg, err := eng.runStepLoop(context.Background(), "step-1")
+	if err != nil {
+		t.Fatalf("runStepLoop: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("unexpected assistant message: %+v", msg)
+	}
+	if len(client.calls) != 2 {
+		t.Fatalf("expected two model requests, got %d", len(client.calls))
+	}
+	remindersInSecondRequest := 0
+	for _, reqMsg := range requestMessages(client.calls[1]) {
+		if reqMsg.Role == llm.RoleDeveloper && reqMsg.MessageType == llm.MessageTypeCompactionSoonReminder {
+			remindersInSecondRequest++
+		}
+	}
+	if remindersInSecondRequest != 1 {
+		t.Fatalf("expected exactly one reminder in second request, got %d messages=%+v", remindersInSecondRequest, requestMessages(client.calls[1]))
+	}
+
+	snap := eng.ChatSnapshot()
+	toolIdx := -1
+	reminderIdx := -1
+	reminders := 0
+	for idx, entry := range snap.Entries {
+		if strings.HasPrefix(entry.Role, "tool_result") {
+			toolIdx = idx
+		}
+		if entry.Role == "warning" && entry.Text == strings.TrimSpace(prompts.CompactionSoonReminderPrompt) {
+			reminders++
+			reminderIdx = idx
+		}
+	}
+	if reminders != 1 {
+		t.Fatalf("expected exactly one reminder entry, got %d entries=%+v", reminders, snap.Entries)
+	}
+	if toolIdx < 0 || reminderIdx != toolIdx+1 {
+		t.Fatalf("expected reminder immediately after tool output, toolIdx=%d reminderIdx=%d entries=%+v", toolIdx, reminderIdx, snap.Entries)
+	}
+}
+
 func TestManualCompactionRemotePassesSlashCommandArgumentsAsInstructions(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

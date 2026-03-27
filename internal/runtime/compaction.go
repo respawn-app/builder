@@ -315,6 +315,9 @@ func (e *Engine) maybeAppendCompactionSoonReminder(ctx context.Context, stepID s
 	if content == "" {
 		return nil
 	}
+	if e.shouldAutoCompactWithContext(ctx) {
+		return nil
+	}
 	e.mu.Lock()
 	if e.compactionSoonReminderIssued {
 		e.mu.Unlock()
