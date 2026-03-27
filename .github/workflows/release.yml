@@ -205,7 +205,19 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           ARCHIVE_EXT: ${{ matrix.archive_ext }}
           BINARY_EXT: ${{ matrix.binary_ext }}
-        run: bash scripts/release-artifacts.sh smoke-test --version "$VERSION" --goos "$GOOS" --goarch "$GOARCH" --archive-ext "$ARCHIVE_EXT" --binary-ext "$BINARY_EXT" --dist-dir dist
+        run: |
+          args=(
+            smoke-test
+            --version "$VERSION"
+            --goos "$GOOS"
+            --goarch "$GOARCH"
+            --archive-ext "$ARCHIVE_EXT"
+            --dist-dir dist
+          )
+          if [[ -n "$BINARY_EXT" ]]; then
+            args+=(--binary-ext "$BINARY_EXT")
+          fi
+          bash scripts/release-artifacts.sh "${args[@]}"
 
   publish_release:
     needs:
