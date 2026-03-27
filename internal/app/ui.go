@@ -38,7 +38,9 @@ type compactDoneMsg struct {
 	err error
 }
 
-type spinnerTickMsg struct{}
+type spinnerTickMsg struct {
+	token uint64
+}
 
 type processListRefreshTickMsg struct{}
 
@@ -321,6 +323,7 @@ type uiModel struct {
 	fastModeEnabled       bool
 	modelContractLocked   bool
 	spinnerFrame          int
+	spinnerTickToken      uint64
 	commandRegistry       *commands.Registry
 	slashCommandFilter    string
 	slashCommandFilterSet bool
@@ -672,7 +675,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		next.(*uiModel).syncViewport()
 		return next, cmd
 	case spinnerTickMsg:
-		next, cmd := m.inputController().handleSpinnerTick()
+		next, cmd := m.inputController().handleSpinnerTick(msg)
 		next.(*uiModel).syncViewport()
 		return next, cmd
 	case processListRefreshTickMsg:
@@ -682,7 +685,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.refreshProcessEntries()
 		m.syncViewport()
-		return m, waitProcessListRefresh()
+		return m, tea.Batch(waitProcessListRefresh(), m.ensureSpinnerTicking())
 	case statusRefreshDoneMsg:
 		if msg.token != m.status.refreshToken {
 			m.syncViewport()
