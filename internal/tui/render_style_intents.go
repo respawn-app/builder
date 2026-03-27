@@ -33,9 +33,10 @@ type transcriptRenderLine struct {
 }
 
 type transcriptLayoutLine struct {
-	Prefix  string
-	Text    string
-	Intents StyleIntent
+	Prefix         string
+	Text           string
+	Intents        StyleIntent
+	ShowRoleSymbol bool
 }
 
 type ansiIntentPalette struct {

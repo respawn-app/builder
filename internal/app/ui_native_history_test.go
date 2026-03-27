@@ -227,9 +227,13 @@ func TestNativeScrollbackResizeRebasesFormatterWidth(t *testing.T) {
 
 func TestNativeResizeReplayDebouncedToLatestResize(t *testing.T) {
 	previousDebounce := nativeResizeReplayDebounce
+	previousNow := nativeResizeReplayNow
 	nativeResizeReplayDebounce = time.Millisecond
+	now := time.Unix(1, 0)
+	nativeResizeReplayNow = func() time.Time { return now }
 	t.Cleanup(func() {
 		nativeResizeReplayDebounce = previousDebounce
+		nativeResizeReplayNow = previousNow
 	})
 
 	m := NewUIModel(
@@ -266,13 +270,65 @@ func TestNativeResizeReplayDebouncedToLatestResize(t *testing.T) {
 		t.Fatalf("expected stale resize replay token ignored, got %T", staleCmd)
 	}
 
+	now = now.Add(500 * time.Microsecond)
 	next, replayCmd := m.Update(nativeResizeReplayMsg{token: secondToken})
 	m = next.(*uiModel)
-	if replayCmd != nil {
-		t.Fatalf("expected latest resize replay token to skip non-append history rewrite, got %T", replayCmd)
+	if replayCmd == nil {
+		t.Fatal("expected latest resize replay token to stay deferred until quiet period elapses")
+	}
+	deferredMsgs := collectCmdMessages(t, replayCmd)
+	if len(deferredMsgs) != 1 {
+		t.Fatalf("expected deferred resize replay to reschedule exactly one timer, got %d message(s)", len(deferredMsgs))
+	}
+	deferred, ok := deferredMsgs[0].(nativeResizeReplayMsg)
+	if !ok {
+		t.Fatalf("expected deferred nativeResizeReplayMsg, got %T", deferredMsgs[0])
+	}
+	if deferred.token != secondToken {
+		t.Fatalf("expected deferred resize replay token %d, got %d", secondToken, deferred.token)
+	}
+
+	now = now.Add(500 * time.Microsecond)
+	next, replayCmd = m.Update(nativeResizeReplayMsg{token: secondToken})
+	m = next.(*uiModel)
+	if replayCmd == nil {
+		t.Fatal("expected latest resize replay token to trigger full history replay after quiet period")
+	}
+	msgs := collectCmdMessages(t, replayCmd)
+	if len(msgs) != 2 {
+		t.Fatalf("expected clear-screen plus native history flush for resize replay, got %d message(s)", len(msgs))
+	}
+	flush, ok := msgs[1].(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg as second replay message, got %T", msgs[1])
+	}
+	if !strings.Contains(stripANSIText(flush.Text), "old line") {
+		t.Fatalf("expected full resize replay to include existing transcript, got %q", flush.Text)
 	}
 	if m.nativeFormatterWidth != 100 {
 		t.Fatalf("expected formatter width rebased to latest resize width 100, got %d", m.nativeFormatterWidth)
+	}
+}
+
+func TestNativeHeightOnlyResizeDoesNotScheduleFullReplay(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
+	).(*uiModel)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+
+	next, cmd := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = next.(*uiModel)
+	if cmd != nil {
+		t.Fatalf("expected height-only resize to avoid full native replay scheduling, got %T", cmd)
+	}
+	if m.nativeResizeReplayToken != 0 {
+		t.Fatalf("expected height-only resize to avoid changing replay token, got %d", m.nativeResizeReplayToken)
 	}
 }
 
@@ -831,6 +887,35 @@ func TestNativeScrollbackReviewerUsesSectionSignPrefix(t *testing.T) {
 	}
 	if strings.Contains(plain, "@ Supervisor ran: 2 suggestions, no changes applied.") {
 		t.Fatalf("did not expect reviewer replay to keep @ prefix, got %q", plain)
+	}
+}
+
+func TestNativeScrollbackWarningStaysHiddenFromOngoingReplayAndShowsInDetail(t *testing.T) {
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUITheme("dark"),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "warning", Text: "Heads-up warning text."}}),
+	).(*uiModel)
+
+	_, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	if cmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	plain := stripANSIPreserve(msg.Text)
+	if strings.Contains(plain, "Heads-up warning text.") {
+		t.Fatalf("did not expect warning in ongoing native replay, got %q", plain)
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	detail := stripANSIPreserve(next.(*uiModel).View())
+	if !strings.Contains(detail, "⚠ Heads-up warning text.") {
+		t.Fatalf("expected warning with caution prefix in detail view, got %q", detail)
 	}
 }
 
@@ -1490,5 +1575,35 @@ func TestNativeHistorySnapshotSkipsNonAppendRewriteInOngoingMode(t *testing.T) {
 	}
 	if got := m.nativeRenderedSnapshot; got != initial.Render(tui.TranscriptDivider) {
 		t.Fatalf("expected rendered snapshot to remain unchanged, got %q", got)
+	}
+}
+
+func TestNativeHistorySnapshotForceFullRewriteReplaysInOngoingMode(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.termWidth = 80
+	m.windowSizeKnown = true
+	initial := tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{{Role: "assistant", Lines: []string{"before"}}}}
+	updated := tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{{Role: "assistant", Lines: []string{"after"}}}}
+	m.nativeProjection = updated
+	m.nativeRenderedProjection = initial
+	m.nativeRenderedSnapshot = initial.Render(tui.TranscriptDivider)
+
+	cmd := m.emitCurrentNativeHistorySnapshot(true)
+	if cmd == nil {
+		t.Fatal("expected force-full native replay command")
+	}
+	msgs := collectCmdMessages(t, cmd)
+	if len(msgs) != 2 {
+		t.Fatalf("expected clear-screen plus native history flush for force-full replay, got %d message(s)", len(msgs))
+	}
+	flush, ok := msgs[1].(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg as second force-full replay message, got %T", msgs[1])
+	}
+	if !strings.Contains(stripANSIText(flush.Text), "after") {
+		t.Fatalf("expected force-full replay to include updated history, got %q", flush.Text)
+	}
+	if got := m.nativeRenderedSnapshot; got != updated.Render(tui.TranscriptDivider) {
+		t.Fatalf("expected rendered snapshot updated after force-full replay, got %q", got)
 	}
 }

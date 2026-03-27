@@ -113,6 +113,7 @@ type UITranscriptEntry struct {
 type UITransition struct {
 	Action               UIAction
 	InitialPrompt        string
+	InitialInput         string
 	TargetSessionID      string
 	ForkUserMessageIndex int
 	ParentSessionID      string
@@ -129,6 +130,7 @@ const (
 )
 
 var nativeResizeReplayDebounce = time.Second
+var nativeResizeReplayNow = time.Now
 
 func WithUILogger(logger uiLogger) UIOption {
 	return func(m *uiModel) {
@@ -213,6 +215,18 @@ func WithUICommandRegistry(registry *commands.Registry) UIOption {
 func WithUIStartupSubmit(text string) UIOption {
 	return func(m *uiModel) {
 		m.startupSubmit = text
+	}
+}
+
+func WithUIInitialInput(text string) UIOption {
+	return func(m *uiModel) {
+		if text == "" || m.input != "" {
+			return
+		}
+		m.input = text
+		m.inputCursor = -1
+		m.syncPromptHistorySelectionToInput()
+		m.refreshSlashCommandFilterFromInput()
 	}
 }
 
@@ -318,6 +332,7 @@ type uiModel struct {
 	startupSubmit     string
 
 	nextSessionInitialPrompt string
+	nextSessionInitialInput  string
 	nextSessionID            string
 	nextForkUserMessageIndex int
 	nextParentSessionID      string
@@ -349,6 +364,7 @@ type uiModel struct {
 	nativeLiveRegionPad      int
 	nativeStreamingActive    bool
 	nativeResizeReplayToken  uint64
+	nativeResizeReplayAt     time.Time
 
 	lastEscAt              time.Time
 	pendingCSIShiftEnterAt time.Time
@@ -559,8 +575,13 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.nativeHistoryReplayed {
 			return m, m.syncNativeHistoryFromTranscript()
 		}
-		if previousWidth > 0 && previousHeight > 0 && (previousWidth != msg.Width || previousHeight != msg.Height) && m.view.Mode() == tui.ModeOngoing {
+		if previousWidth > 0 && previousHeight > 0 && previousWidth != msg.Width && m.view.Mode() == tui.ModeOngoing {
+			// Only width changes need a native replay: horizontal resize changes the
+			// committed scrollback wrapping, while height-only resize affects only the
+			// live viewport. After the width has been quiet for the debounce window,
+			// clear and replay ongoing history so emitted lines and dividers match.
 			m.nativeResizeReplayToken++
+			m.nativeResizeReplayAt = nativeResizeReplayNow().Add(nativeResizeReplayDebounce)
 			token := m.nativeResizeReplayToken
 			return m, tea.Tick(nativeResizeReplayDebounce, func(time.Time) tea.Msg {
 				return nativeResizeReplayMsg{token: token}
@@ -571,6 +592,19 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.token != m.nativeResizeReplayToken || m.view.Mode() != tui.ModeOngoing {
 			return m, nil
 		}
+		if !m.nativeResizeReplayAt.IsZero() {
+			remaining := time.Until(m.nativeResizeReplayAt)
+			if now := nativeResizeReplayNow(); !now.IsZero() {
+				remaining = m.nativeResizeReplayAt.Sub(now)
+			}
+			if remaining > 0 {
+				token := m.nativeResizeReplayToken
+				return m, tea.Tick(remaining, func(time.Time) tea.Msg {
+					return nativeResizeReplayMsg{token: token}
+				})
+			}
+		}
+		m.nativeResizeReplayAt = time.Time{}
 		if replay := m.emitCurrentNativeScrollbackState(true); replay != nil {
 			return m, replay
 		}
@@ -778,6 +812,7 @@ func (m *uiModel) Transition() UITransition {
 	return UITransition{
 		Action:               m.exitAction,
 		InitialPrompt:        m.nextSessionInitialPrompt,
+		InitialInput:         m.nextSessionInitialInput,
 		TargetSessionID:      strings.TrimSpace(m.nextSessionID),
 		ForkUserMessageIndex: m.nextForkUserMessageIndex,
 		ParentSessionID:      strings.TrimSpace(m.nextParentSessionID),
