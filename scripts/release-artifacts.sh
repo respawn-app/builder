@@ -35,6 +35,17 @@ require_value() {
 	exit 1
 }
 
+require_option_arg() {
+	local opt="$1"
+	local next="${2-}"
+	if [[ -n "$next" && "$next" != --* ]]; then
+		return
+	fi
+	echo "Missing required argument value: ${opt}" >&2
+	usage >&2
+	exit 1
+}
+
 clean_dist_release_artifacts() {
 	local dist_path="$1"
 	find "$dist_path" -maxdepth 1 -type f \( -name 'builder_*.tar.gz' -o -name 'builder_*.zip' -o -name 'checksums.txt' \) -delete
@@ -193,26 +204,32 @@ binary_ext=""
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--dist-dir)
+		require_option_arg "$1" "${2-}"
 		dist_dir="${2:-}"
 		shift 2
 		;;
 	--version)
+		require_option_arg "$1" "${2-}"
 		version="${2:-}"
 		shift 2
 		;;
 	--goos)
+		require_option_arg "$1" "${2-}"
 		goos="${2:-}"
 		shift 2
 		;;
 	--goarch)
+		require_option_arg "$1" "${2-}"
 		goarch="${2:-}"
 		shift 2
 		;;
 	--archive-ext)
+		require_option_arg "$1" "${2-}"
 		archive_ext="${2:-}"
 		shift 2
 		;;
 	--binary-ext)
+		require_option_arg "$1" "${2-}"
 		binary_ext="${2:-}"
 		shift 2
 		;;

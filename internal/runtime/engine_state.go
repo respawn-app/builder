@@ -46,7 +46,15 @@ func (e *Engine) LastCommittedAssistantFinalAnswer() string {
 }
 
 func shouldSkipTrailingAssistantHandoffMessage(message llm.Message) bool {
-	return message.Role == llm.RoleDeveloper && message.MessageType != ""
+	if message.Role != llm.RoleDeveloper {
+		return false
+	}
+	switch message.MessageType {
+	case llm.MessageTypeCompactionSoonReminder, llm.MessageTypeErrorFeedback:
+		return true
+	default:
+		return false
+	}
 }
 
 func (e *Engine) ContextUsage() ContextUsage {
