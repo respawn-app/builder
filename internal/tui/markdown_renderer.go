@@ -7,8 +7,6 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	glamouransi "github.com/charmbracelet/glamour/ansi"
-	"github.com/charmbracelet/glamour/styles"
-	xansi "github.com/charmbracelet/x/ansi"
 )
 
 const markdownCacheLimit = 1024
@@ -17,6 +15,7 @@ type markdownRendererErrorReporter func(RenderDiagnostic)
 
 type markdownRenderer struct {
 	theme               string
+	styles              rendererStyleAdapter
 	renderers           map[int]*glamour.TermRenderer
 	cache               map[string]string
 	reportErr           markdownRendererErrorReporter
@@ -27,6 +26,7 @@ type markdownRenderer struct {
 func newMarkdownRenderer(theme string, reportErr markdownRendererErrorReporter) *markdownRenderer {
 	return &markdownRenderer{
 		theme:           theme,
+		styles:          newRendererStyleAdapter(theme),
 		renderers:       make(map[int]*glamour.TermRenderer, 8),
 		cache:           make(map[string]string, 128),
 		reportErr:       reportErr,
@@ -68,7 +68,6 @@ func (r *markdownRenderer) render(role, text string, width int) (string, error) 
 		return "", err
 	}
 	out = strings.TrimRight(out, "\n")
-	out = xansi.Wordwrap(out, width, " ,.;-+|")
 
 	if len(r.cache) >= markdownCacheLimit {
 		r.cache = make(map[string]string, 128)
@@ -93,26 +92,7 @@ func (r *markdownRenderer) getRenderer(width int) (*glamour.TermRenderer, error)
 }
 
 func (r *markdownRenderer) styleConfig() glamouransi.StyleConfig {
-	var cfg glamouransi.StyleConfig
-	if strings.EqualFold(strings.TrimSpace(r.theme), "light") {
-		cfg = styles.LightStyleConfig
-	} else {
-		cfg = styles.DarkStyleConfig
-	}
-	foreground := themeForegroundColor(r.theme).hexString()
-	zero := uint(0)
-	cfg.Document.Margin = &zero
-	cfg.Document.BlockPrefix = ""
-	cfg.Document.BlockSuffix = ""
-	cfg.Document.Color = &foreground
-	cfg.Text.Color = &foreground
-	cfg.CodeBlock.StylePrimitive.Color = &foreground
-	if cfg.CodeBlock.Chroma != nil {
-		cfg.CodeBlock.Chroma.Text.Color = &foreground
-		cfg.CodeBlock.Chroma.Name.Color = &foreground
-	}
-	clearMarkdownBackgrounds(&cfg)
-	return cfg
+	return r.styles.markdownConfig()
 }
 
 func isMarkdownRole(role string) bool {

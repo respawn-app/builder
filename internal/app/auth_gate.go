@@ -19,6 +19,7 @@ import (
 type authInteraction struct {
 	Manager         *auth.Manager
 	State           auth.State
+	StoredState     auth.State
 	Gate            auth.StartupGate
 	StartupErr      error
 	FlowErr         error
@@ -75,25 +76,21 @@ func newHeadlessAuthInteractor() authInteractor {
 }
 
 func (i *interactiveAuthInteractor) WrapStore(base auth.Store) auth.Store {
-	lookupEnv := i.lookupEnv
-	if lookupEnv == nil {
-		lookupEnv = os.Getenv
-	}
-	return auth.NewEnvAPIKeyOverrideStore(base, func(key string) (string, bool) {
-		value := lookupEnv(key)
-		return value, strings.TrimSpace(value) != ""
-	}, auth.EnvAPIKeyOverrideRespectStoredPreference)
+	return wrapStoreWithEnvAPIKeyOverride(base, i.lookupEnv)
 }
 
 func (i *headlessAuthInteractor) WrapStore(base auth.Store) auth.Store {
-	lookupEnv := i.lookupEnv
+	return wrapStoreWithEnvAPIKeyOverride(base, i.lookupEnv)
+}
+
+func wrapStoreWithEnvAPIKeyOverride(base auth.Store, lookupEnv func(string) string) auth.Store {
 	if lookupEnv == nil {
 		lookupEnv = os.Getenv
 	}
 	return auth.NewEnvAPIKeyOverrideStore(base, func(key string) (string, bool) {
 		value := lookupEnv(key)
 		return value, strings.TrimSpace(value) != ""
-	}, auth.EnvAPIKeyOverrideAlways)
+	})
 }
 
 func ensureAuthReady(ctx context.Context, mgr *auth.Manager, oauthOpts auth.OpenAIOAuthOptions, theme string, alternateScreen config.TUIAlternateScreenPolicy, interactor authInteractor) error {
@@ -109,6 +106,10 @@ func ensureAuthReady(ctx context.Context, mgr *auth.Manager, oauthOpts auth.Open
 		if err != nil {
 			return err
 		}
+		storedState, err := mgr.StoredState(ctx)
+		if err != nil {
+			return err
+		}
 		gate := auth.EvaluateStartupGate(state)
 		var startupErr error
 		if !gate.Ready {
@@ -117,6 +118,7 @@ func ensureAuthReady(ctx context.Context, mgr *auth.Manager, oauthOpts auth.Open
 		req := authInteraction{
 			Manager:         mgr,
 			State:           state,
+			StoredState:     storedState,
 			Gate:            gate,
 			StartupErr:      startupErr,
 			OAuthOptions:    oauthOpts,
@@ -162,10 +164,7 @@ func (i *headlessAuthInteractor) NeedsInteraction(req authInteraction) bool {
 }
 
 func (i *interactiveAuthInteractor) NeedsInteraction(req authInteraction) bool {
-	if !req.Gate.Ready {
-		return true
-	}
-	return req.HasEnvAPIKey && req.State.EnvAPIKeyPreference == auth.EnvAPIKeyPreferenceUnspecified && req.State.Method.Type == auth.MethodOAuth
+	return interactiveNeedsAuthMethodSelection(req) || interactiveNeedsEnvConflictResolution(req)
 }
 
 func (i *headlessAuthInteractor) Interact(ctx context.Context, req authInteraction) error {
@@ -176,7 +175,7 @@ func (i *headlessAuthInteractor) Interact(ctx context.Context, req authInteracti
 }
 
 func (i *interactiveAuthInteractor) Interact(ctx context.Context, req authInteraction) error {
-	if i.NeedsInteraction(req) && req.Gate.Ready {
+	if interactiveNeedsEnvConflictResolution(req) {
 		return i.resolveEnvAPIKeyConflict(ctx, req)
 	}
 
@@ -234,6 +233,17 @@ func (i *interactiveAuthInteractor) Interact(ctx context.Context, req authIntera
 		}
 		return nil
 	}
+}
+
+func interactiveNeedsAuthMethodSelection(req authInteraction) bool {
+	if !req.Gate.Ready {
+		return true
+	}
+	return req.HasEnvAPIKey && req.StoredState.EnvAPIKeyPreference == auth.EnvAPIKeyPreferenceUnspecified && !req.StoredState.IsConfigured()
+}
+
+func interactiveNeedsEnvConflictResolution(req authInteraction) bool {
+	return req.Gate.Ready && req.HasEnvAPIKey && req.StoredState.EnvAPIKeyPreference == auth.EnvAPIKeyPreferenceUnspecified && req.StoredState.Method.Type == auth.MethodOAuth
 }
 
 func (i *interactiveAuthInteractor) resolveEnvAPIKeyConflict(ctx context.Context, req authInteraction) error {

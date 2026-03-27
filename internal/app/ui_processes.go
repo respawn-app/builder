@@ -21,74 +21,88 @@ const (
 )
 
 func (m *uiModel) refreshProcessEntries() {
+	selectedID := ""
+	if m.processList.selection >= 0 && m.processList.selection < len(m.processList.entries) {
+		selectedID = m.processList.entries[m.processList.selection].ID
+	}
 	if m.backgroundManager == nil {
-		m.psEntries = nil
-		m.psSelection = 0
+		m.processList.entries = nil
+		m.processList.selection = 0
 		return
 	}
-	m.psEntries = m.backgroundManager.List()
-	if len(m.psEntries) == 0 {
-		m.psSelection = 0
+	m.processList.entries = m.backgroundManager.List()
+	if len(m.processList.entries) == 0 {
+		m.processList.selection = 0
 		return
 	}
-	if m.psSelection < 0 {
-		m.psSelection = 0
+	if selectedID != "" {
+		for idx, entry := range m.processList.entries {
+			if entry.ID == selectedID {
+				m.processList.selection = idx
+				return
+			}
+		}
 	}
-	if m.psSelection >= len(m.psEntries) {
-		m.psSelection = len(m.psEntries) - 1
+	if m.processList.selection < 0 {
+		m.processList.selection = 0
+	}
+	if m.processList.selection >= len(m.processList.entries) {
+		m.processList.selection = len(m.processList.entries) - 1
 	}
 }
 
 func (m *uiModel) openProcessList() {
-	m.psVisible = true
+	m.processList.open = true
+	m.setInputMode(uiInputModeProcessList)
 	m.refreshProcessEntries()
 }
 
 func (m *uiModel) closeProcessList() {
-	m.psVisible = false
-	m.psOverlayPushed = false
+	m.processList.open = false
+	m.processList.ownsTranscriptMode = false
 	m.refreshProcessEntries()
+	m.restorePrimaryInputMode()
 }
 
 func (m *uiModel) pushProcessOverlayIfNeeded() tea.Cmd {
-	if m.psOverlayPushed {
+	if m.processList.ownsTranscriptMode {
 		return nil
 	}
 	if m.view.Mode() != tui.ModeOngoing {
 		return nil
 	}
-	m.psOverlayPushed = true
-	if transitionCmd := m.toggleTranscriptModeWithOptions(true, true); transitionCmd != nil {
+	m.processList.ownsTranscriptMode = true
+	if transitionCmd := m.transitionTranscriptMode(tui.ModeDetail, true, true); transitionCmd != nil {
 		return transitionCmd
 	}
 	return tea.ClearScreen
 }
 
 func (m *uiModel) popProcessOverlayIfNeeded() tea.Cmd {
-	if !m.psOverlayPushed {
+	if !m.processList.ownsTranscriptMode {
 		return nil
 	}
-	m.psOverlayPushed = false
+	m.processList.ownsTranscriptMode = false
 	if m.view.Mode() != tui.ModeDetail {
 		return nil
 	}
-	if transitionCmd := m.toggleTranscriptMode(); transitionCmd != nil {
+	if transitionCmd := m.transitionTranscriptMode(tui.ModeOngoing, false, true); transitionCmd != nil {
 		return transitionCmd
 	}
 	return tea.ClearScreen
 }
 
 func (m *uiModel) moveProcessSelection(delta int) {
-	if len(m.psEntries) == 0 {
-		m.psSelection = 0
+	if len(m.processList.entries) == 0 {
+		m.processList.selection = 0
 		return
 	}
-	m.psSelection += delta
-	if m.psSelection < 0 {
-		m.psSelection = 0
+	m.processList.selection += delta
+	if m.processList.selection < 0 {
+		m.processList.selection = 0
 	}
-	if m.psSelection >= len(m.psEntries) {
-		m.psSelection = len(m.psEntries) - 1
+	if m.processList.selection >= len(m.processList.entries) {
+		m.processList.selection = len(m.processList.entries) - 1
 	}
 }
 
@@ -110,26 +124,26 @@ func (m *uiModel) processListRowsPerPage() int {
 }
 
 func (m *uiModel) selectFirstProcess() {
-	if len(m.psEntries) == 0 {
-		m.psSelection = 0
+	if len(m.processList.entries) == 0 {
+		m.processList.selection = 0
 		return
 	}
-	m.psSelection = 0
+	m.processList.selection = 0
 }
 
 func (m *uiModel) selectLastProcess() {
-	if len(m.psEntries) == 0 {
-		m.psSelection = 0
+	if len(m.processList.entries) == 0 {
+		m.processList.selection = 0
 		return
 	}
-	m.psSelection = len(m.psEntries) - 1
+	m.processList.selection = len(m.processList.entries) - 1
 }
 
 func (m *uiModel) selectedProcess() (shelltool.Snapshot, bool) {
-	if len(m.psEntries) == 0 || m.psSelection < 0 || m.psSelection >= len(m.psEntries) {
+	if len(m.processList.entries) == 0 || m.processList.selection < 0 || m.processList.selection >= len(m.processList.entries) {
 		return shelltool.Snapshot{}, false
 	}
-	return m.psEntries[m.psSelection], true
+	return m.processList.entries[m.processList.selection], true
 }
 
 func (c uiInputController) handleProcessListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -164,7 +178,7 @@ func (c uiInputController) handleProcessListKey(msg tea.KeyMsg) (tea.Model, tea.
 		return m, nil
 	case "r":
 		m.refreshProcessEntries()
-		return m, c.showTransientStatus(fmt.Sprintf("refreshed %d processes", len(m.psEntries)))
+		return m, c.showTransientStatus(fmt.Sprintf("refreshed %d processes", len(m.processList.entries)))
 	case "enter":
 		return c.runProcessListAction("inline")
 	case "k":
@@ -305,7 +319,7 @@ func (l uiViewLayout) renderProcessList(width, height int, style uiStyles) []str
 	}
 	m.refreshProcessEntries()
 	footerLines := []string{
-		style.meta.Bold(true).Render(fmt.Sprintf("Background Processes (%d)", len(m.psEntries))),
+		style.meta.Bold(true).Render(fmt.Sprintf("Background Processes (%d)", len(m.processList.entries))),
 		style.meta.Render("Esc/q close | Enter/i paste transcript | k kill | o open logs | PgUp/PgDn/Home/End move | auto-refresh + r refresh"),
 	}
 	contentHeight := height - len(footerLines)
@@ -313,17 +327,17 @@ func (l uiViewLayout) renderProcessList(width, height int, style uiStyles) []str
 		contentHeight = 1
 	}
 	content := make([]string, 0, contentHeight)
-	if len(m.psEntries) == 0 {
+	if len(m.processList.entries) == 0 {
 		content = append(content, style.meta.Render("No background processes."))
 		for len(content) < contentHeight {
 			content = append(content, "")
 		}
-		return l.renderChatContentLines(append(content[:contentHeight], footerLines...), width, style)
+		return l.renderChatContentLines(append(content[:contentHeight], footerLines...), nil, width, style)
 	}
-	visibleRows := make([]string, 0, len(m.psEntries)*processListEntryLines)
-	for idx, entry := range m.psEntries {
+	visibleRows := make([]string, 0, len(m.processList.entries)*processListEntryLines)
+	for idx, entry := range m.processList.entries {
 		prefix := "  "
-		if idx == m.psSelection {
+		if idx == m.processList.selection {
 			prefix = "> "
 		}
 		state := entry.State
@@ -342,7 +356,7 @@ func (l uiViewLayout) renderProcessList(width, height int, style uiStyles) []str
 		visibleRows = append(visibleRows, line1, line2, line3, line4, "")
 	}
 	available := contentHeight
-	start := processListStartRow(m.psSelection, len(m.psEntries), contentHeight)
+	start := processListStartRow(m.processList.selection, len(m.processList.entries), contentHeight)
 	end := start + available
 	if end > len(visibleRows) {
 		end = len(visibleRows)
@@ -351,7 +365,7 @@ func (l uiViewLayout) renderProcessList(width, height int, style uiStyles) []str
 	for len(content) < contentHeight {
 		content = append(content, "")
 	}
-	return l.renderChatContentLines(append(content[:contentHeight], footerLines...), width, style)
+	return l.renderChatContentLines(append(content[:contentHeight], footerLines...), nil, width, style)
 }
 
 func processListStartRow(selection, entryCount, contentHeight int) int {

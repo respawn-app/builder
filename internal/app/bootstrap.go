@@ -10,7 +10,6 @@ import (
 	"builder/internal/auth"
 	"builder/internal/config"
 	"builder/internal/runtime"
-	"builder/internal/session"
 	"builder/internal/shared/textutil"
 	shelltool "builder/internal/tools/shell"
 )
@@ -27,22 +26,23 @@ type appBootstrap struct {
 }
 
 func bootstrapApp(ctx context.Context, opts Options, interactor authInteractor) (appBootstrap, error) {
-	workspaceRoot := requestedWorkspaceRoot(opts)
-	openAIBaseURL := opts.OpenAIBaseURL
-	useOpenAIBaseURL := opts.OpenAIBaseURLExplicit
-	cfg, err := loadBootstrapConfig(opts, workspaceRoot, openAIBaseURL, useOpenAIBaseURL)
+	bootstrapPlan := bootstrapLaunchPlan{
+		WorkspaceRoot:    requestedWorkspaceRoot(opts),
+		OpenAIBaseURL:    strings.TrimSpace(opts.OpenAIBaseURL),
+		UseOpenAIBaseURL: opts.OpenAIBaseURLExplicit,
+	}
+	cfg, err := loadBootstrapConfig(opts, bootstrapPlan.WorkspaceRoot, bootstrapPlan.OpenAIBaseURL, bootstrapPlan.UseOpenAIBaseURL)
 	if err != nil {
 		return appBootstrap{}, err
 	}
-	if strings.TrimSpace(opts.SessionID) != "" {
-		workspaceRoot, openAIBaseURL, useOpenAIBaseURL, err = resolveContinuationLoadParams(cfg.PersistenceRoot, opts)
-		if err != nil {
-			return appBootstrap{}, err
-		}
-		cfg, err = loadBootstrapConfig(opts, workspaceRoot, openAIBaseURL, useOpenAIBaseURL)
-		if err != nil {
-			return appBootstrap{}, err
-		}
+	planner := newBootstrapLaunchPlanner(cfg.PersistenceRoot)
+	bootstrapPlan, err = planner.PlanBootstrap(opts)
+	if err != nil {
+		return appBootstrap{}, err
+	}
+	cfg, err = loadBootstrapConfig(opts, bootstrapPlan.WorkspaceRoot, bootstrapPlan.OpenAIBaseURL, bootstrapPlan.UseOpenAIBaseURL)
+	if err != nil {
+		return appBootstrap{}, err
 	}
 
 	_, containerDir, err := config.ResolveWorkspaceContainer(cfg)
@@ -68,7 +68,12 @@ func bootstrapApp(ctx context.Context, opts Options, interactor authInteractor) 
 		return appBootstrap{}, err
 	}
 	if cfg, _, err = ensureOnboardingReady(ctx, cfg, mgr, interactor, func() (config.App, error) {
-		return loadBootstrapConfig(opts, workspaceRoot, openAIBaseURL, useOpenAIBaseURL)
+		refreshPlanner := newBootstrapLaunchPlanner(cfg.PersistenceRoot)
+		refreshedPlan, err := refreshPlanner.PlanBootstrap(opts)
+		if err != nil {
+			return config.App{}, err
+		}
+		return loadBootstrapConfig(opts, refreshedPlan.WorkspaceRoot, refreshedPlan.OpenAIBaseURL, refreshedPlan.UseOpenAIBaseURL)
 	}); err != nil {
 		return appBootstrap{}, err
 	}
@@ -118,25 +123,4 @@ func requestedWorkspaceRoot(opts Options) string {
 		return "."
 	}
 	return workspaceRoot
-}
-
-func resolveContinuationLoadParams(persistenceRoot string, opts Options) (string, string, bool, error) {
-	store, err := session.OpenByID(persistenceRoot, opts.SessionID)
-	if err != nil {
-		return "", "", false, err
-	}
-	meta := store.Meta()
-
-	workspaceRoot := requestedWorkspaceRoot(opts)
-	if !opts.WorkspaceRootExplicit && strings.TrimSpace(meta.WorkspaceRoot) != "" {
-		workspaceRoot = strings.TrimSpace(meta.WorkspaceRoot)
-	}
-
-	if opts.OpenAIBaseURLExplicit {
-		return workspaceRoot, strings.TrimSpace(opts.OpenAIBaseURL), true, nil
-	}
-	if meta.Continuation != nil && strings.TrimSpace(meta.Continuation.OpenAIBaseURL) != "" {
-		return workspaceRoot, strings.TrimSpace(meta.Continuation.OpenAIBaseURL), true, nil
-	}
-	return workspaceRoot, "", false, nil
 }

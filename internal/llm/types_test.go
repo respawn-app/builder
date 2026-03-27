@@ -14,7 +14,7 @@ func TestRequestFromLockedContract_UsesBinaryPromptAndExplicitTools(t *testing.T
 	}
 	tool := Tool{Name: "shell", Schema: []byte(`{"type":"object"}`)}
 
-	req, err := RequestFromLockedContract(locked, "sys", []Message{{Role: RoleUser, Content: "hi"}}, []Tool{tool})
+	req, err := RequestFromLockedContract(locked, "sys", []ResponseItem{{Type: ResponseItemTypeMessage, Role: RoleUser, Content: "hi"}}, []Tool{tool})
 	if err != nil {
 		t.Fatalf("request from contract: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestRequestFromLockedContract_RespectsExplicitToolDisable(t *testing.T) {
 		Temperature:    1,
 		MaxOutputToken: 0,
 	}
-	req, err := RequestFromLockedContract(locked, "sys", []Message{{Role: RoleUser, Content: "hi"}}, []Tool{})
+	req, err := RequestFromLockedContract(locked, "sys", []ResponseItem{{Type: ResponseItemTypeMessage, Role: RoleUser, Content: "hi"}}, []Tool{})
 	if err != nil {
 		t.Fatalf("request from contract: %v", err)
 	}

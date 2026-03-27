@@ -1,0 +1,345 @@
+package runtime
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"testing"
+	"time"
+
+	"builder/internal/llm"
+	"builder/internal/session"
+	"builder/internal/tools"
+)
+
+type stubExclusiveStepLifecycle struct {
+	mu       sync.Mutex
+	busy     bool
+	runCalls int
+	runFn    func(ctx context.Context, options exclusiveStepOptions, fn func(stepCtx context.Context, stepID string) error) error
+}
+
+type stubBackgroundNoticeScheduler struct {
+	scheduleIfIdle func()
+}
+
+func (s *stubBackgroundNoticeScheduler) HandleBackgroundShellUpdate(BackgroundShellEvent, bool) {}
+func (s *stubBackgroundNoticeScheduler) QueueDeveloperNotice(llm.Message)                       {}
+func (s *stubBackgroundNoticeScheduler) DrainPendingNotices() []llm.Message                     { return nil }
+func (s *stubBackgroundNoticeScheduler) ConsumePendingBackgroundNotice(string) bool             { return false }
+func (s *stubBackgroundNoticeScheduler) ScheduleIfIdle() {
+	if s != nil && s.scheduleIfIdle != nil {
+		s.scheduleIfIdle()
+	}
+}
+
+func (s *stubExclusiveStepLifecycle) Run(ctx context.Context, options exclusiveStepOptions, fn func(stepCtx context.Context, stepID string) error) error {
+	s.mu.Lock()
+	s.runCalls++
+	s.mu.Unlock()
+	if s.runFn != nil {
+		return s.runFn(ctx, options, fn)
+	}
+	return fn(ctx, "stub-step")
+}
+
+func (s *stubExclusiveStepLifecycle) Interrupt() error {
+	return nil
+}
+
+func (s *stubExclusiveStepLifecycle) IsBusy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.busy
+}
+
+func (s *stubExclusiveStepLifecycle) setBusy(busy bool) {
+	s.mu.Lock()
+	s.busy = busy
+	s.mu.Unlock()
+}
+
+func (s *stubExclusiveStepLifecycle) calls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.runCalls
+}
+
+func TestExclusiveStepLifecycleRejectsConcurrentRun(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	lifecycle := &defaultExclusiveStepLifecycle{engine: eng}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- lifecycle.Run(context.Background(), exclusiveStepOptions{}, func(stepCtx context.Context, stepID string) error {
+			close(started)
+			<-release
+			return nil
+		})
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for first exclusive step")
+	}
+
+	err = lifecycle.Run(context.Background(), exclusiveStepOptions{}, func(stepCtx context.Context, stepID string) error {
+		return nil
+	})
+	if !errors.Is(err, errExclusiveStepBusy) {
+		t.Fatalf("expected busy error, got %v", err)
+	}
+
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if lifecycle.IsBusy() {
+		t.Fatal("expected exclusive step lifecycle to be idle after completion")
+	}
+}
+
+func TestExclusiveStepLifecycleInterruptAppendsMessageAndClearsInFlight(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	lifecycle := &defaultExclusiveStepLifecycle{engine: eng}
+	started := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- lifecycle.Run(context.Background(), exclusiveStepOptions{}, func(stepCtx context.Context, stepID string) error {
+			close(started)
+			<-stepCtx.Done()
+			return stepCtx.Err()
+		})
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for interruptible step")
+	}
+
+	if err := lifecycle.Interrupt(); err != nil {
+		t.Fatalf("interrupt: %v", err)
+	}
+	if store.Meta().InFlightStep {
+		t.Fatal("expected in-flight step to be cleared immediately after interrupt")
+	}
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled run, got %v", err)
+	}
+	if store.Meta().InFlightStep {
+		t.Fatal("expected in-flight step to remain cleared after interrupted run exits")
+	}
+
+	messages := eng.snapshotMessages()
+	if len(messages) == 0 {
+		t.Fatal("expected interruption message")
+	}
+	last := messages[len(messages)-1]
+	if last.MessageType != llm.MessageTypeInterruption {
+		t.Fatalf("expected interruption message type, got %+v", last)
+	}
+	if last.Content != interruptMessage {
+		t.Fatalf("unexpected interruption content %q", last.Content)
+	}
+}
+
+func TestExclusiveStepLifecycleInterruptSkipsStaleRunCleanup(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	lifecycle := &defaultExclusiveStepLifecycle{engine: eng}
+	lifecycle.busy = true
+	lifecycle.activeRun = 1
+	lifecycle.cancel = func() {
+		lifecycle.mu.Lock()
+		lifecycle.busy = true
+		lifecycle.activeRun = 2
+		lifecycle.mu.Unlock()
+	}
+	if err := store.MarkInFlight(true); err != nil {
+		t.Fatalf("mark in-flight true: %v", err)
+	}
+
+	if err := lifecycle.Interrupt(); err != nil {
+		t.Fatalf("interrupt: %v", err)
+	}
+	if !store.Meta().InFlightStep {
+		t.Fatal("expected stale interrupt to leave new run in-flight marker intact")
+	}
+	if len(eng.snapshotMessages()) != 0 {
+		t.Fatalf("expected stale interrupt to avoid appending interruption message, got %+v", eng.snapshotMessages())
+	}
+}
+
+func TestExclusiveStepLifecycleClearsInFlightBeforeSchedulingBackground(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	scheduled := false
+	lifecycle := &defaultExclusiveStepLifecycle{
+		engine: eng,
+		background: &stubBackgroundNoticeScheduler{scheduleIfIdle: func() {
+			scheduled = true
+			if store.Meta().InFlightStep {
+				t.Fatal("expected in-flight step to be cleared before scheduling background work")
+			}
+		}},
+	}
+
+	if err := lifecycle.Run(context.Background(), exclusiveStepOptions{}, func(context.Context, string) error {
+		if !store.Meta().InFlightStep {
+			t.Fatal("expected in-flight step during exclusive run")
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !scheduled {
+		t.Fatal("expected background scheduler to run after exclusive step completion")
+	}
+}
+
+func TestBackgroundNoticeSchedulerSchedulesAfterBusyStepEnds(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "background done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	steps := &stubExclusiveStepLifecycle{}
+	steps.setBusy(true)
+	scheduler := &defaultBackgroundNoticeScheduler{engine: eng, steps: steps}
+
+	scheduler.QueueDeveloperNotice(llm.Message{
+		Role:        llm.RoleDeveloper,
+		MessageType: llm.MessageTypeBackgroundNotice,
+		Name:        "1000",
+		Content:     "Background shell 1000 completed.",
+	})
+
+	if steps.calls() != 0 {
+		t.Fatalf("expected no scheduler run while busy, got %d", steps.calls())
+	}
+	client.mu.Lock()
+	busyCalls := len(client.calls)
+	client.mu.Unlock()
+	if busyCalls != 0 {
+		t.Fatalf("expected no model calls while scheduler busy, got %d", busyCalls)
+	}
+
+	steps.setBusy(false)
+	scheduler.ScheduleIfIdle()
+
+	deadline := time.After(3 * time.Second)
+	for {
+		client.mu.Lock()
+		callCount := len(client.calls)
+		client.mu.Unlock()
+		if callCount == 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for scheduled background run, calls=%d runs=%d", callCount, steps.calls())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	if steps.calls() != 1 {
+		t.Fatalf("expected one scheduled run after idle transition, got %d", steps.calls())
+	}
+	client.mu.Lock()
+	request := client.calls[0]
+	client.mu.Unlock()
+	foundNotice := false
+	for _, msg := range requestMessages(request) {
+		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeBackgroundNotice && msg.Name == "1000" {
+			foundNotice = true
+			break
+		}
+	}
+	if !foundNotice {
+		t.Fatalf("expected scheduled request to include queued background notice, messages=%+v", requestMessages(request))
+	}
+	if pending := scheduler.pendingSnapshot(); len(pending) != 0 {
+		t.Fatalf("expected queued notices to be drained, got %+v", pending)
+	}
+}
+
+func TestContextCompactorUsesExclusiveStepLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "summary"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+
+	steps := &stubExclusiveStepLifecycle{}
+	compactor := &defaultContextCompactor{engine: eng, steps: steps}
+	if err := compactor.CompactContext(context.Background(), ""); err != nil {
+		t.Fatalf("compact context: %v", err)
+	}
+	if steps.calls() != 1 {
+		t.Fatalf("expected compaction to execute through exclusive step lifecycle once, got %d", steps.calls())
+	}
+	client.mu.Lock()
+	callCount := len(client.calls)
+	client.mu.Unlock()
+	if callCount != 1 {
+		t.Fatalf("expected one local compaction model call, got %d", callCount)
+	}
+}

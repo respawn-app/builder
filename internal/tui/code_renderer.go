@@ -11,7 +11,6 @@ import (
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/formatters"
 	"github.com/alecthomas/chroma/v2/lexers"
-	chromastyles "github.com/alecthomas/chroma/v2/styles"
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
@@ -25,6 +24,7 @@ const (
 type codeRenderer struct {
 	theme          string
 	baseForeground rgbColor
+	styles         rendererStyleAdapter
 	cache          map[string]string
 	diffCache      map[string][]diffRenderedLine
 	formatter      chroma.Formatter
@@ -48,6 +48,7 @@ func newCodeRenderer(theme string) *codeRenderer {
 	return &codeRenderer{
 		theme:          theme,
 		baseForeground: themeForegroundColor(theme),
+		styles:         newRendererStyleAdapter(theme),
 		cache:          make(map[string]string, 128),
 		diffCache:      make(map[string][]diffRenderedLine, 64),
 		formatter:      formatters.TTY256,
@@ -379,24 +380,9 @@ func parseHexColor(hex string) (int, int, int, bool) {
 }
 
 func (r *codeRenderer) style() *chroma.Style {
-	base := r.baseStyle()
-	return withTransparentChromaBackgrounds(base, chroma.MustParseColour(r.baseForeground.hexString()))
+	return r.styles.chromaStyle()
 }
 
 func (r *codeRenderer) baseStyle() *chroma.Style {
-	if strings.EqualFold(strings.TrimSpace(r.theme), "light") {
-		if style := chromastyles.Get("github"); style != nil {
-			return style
-		}
-		if style := chromastyles.Get("friendly"); style != nil {
-			return style
-		}
-	}
-	if style := chromastyles.Get("github-dark"); style != nil {
-		return style
-	}
-	if style := chromastyles.Get("monokai"); style != nil {
-		return style
-	}
-	return chromastyles.Fallback
+	return r.styles.baseChromaStyle()
 }

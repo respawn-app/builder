@@ -317,12 +317,12 @@ func TestNativeResizeReplaysOngoingScreenAfterRealResize(t *testing.T) {
 	}
 
 	raw := out.String()
-	if count := strings.Count(raw, "\x1b[2J"); count < 2 {
-		t.Fatalf("expected startup clear plus one debounced resize clear, got %d occurrences in %q", count, raw)
+	if count := strings.Count(raw, "\x1b[2J"); count != 1 {
+		t.Fatalf("expected only the startup clear when resize replay is skipped, got %d occurrences in %q", count, raw)
 	}
 	plain := xansi.Strip(raw)
-	if strings.Count(normalizedOutput(raw), "seed replay line") < 2 {
-		t.Fatalf("expected committed history replayed after debounced resize, got %q", normalizedOutput(raw))
+	if strings.Count(normalizedOutput(raw), "seed replay line") != 1 {
+		t.Fatalf("expected committed history not to be replayed after debounced resize, got %q", normalizedOutput(raw))
 	}
 	for _, line := range strings.Split(plain, "\n") {
 		if strings.Count(line, "ongoing | ") > 1 {
@@ -465,7 +465,7 @@ func TestNativeRollbackOverlayCtrlCBalancesAltScreenAndAlternateScroll(t *testin
 	program.Send(tea.KeyMsg{Type: tea.KeyEsc})
 	program.Send(tea.KeyMsg{Type: tea.KeyEsc})
 	waitForTestCondition(t, 2*time.Second, "rollback overlay to open", func() bool {
-		return model.rollbackMode && model.rollbackOverlayPushed && model.view.Mode() == tui.ModeDetail
+		return model.rollback.isSelecting() && model.rollback.ownsTranscriptMode && model.view.Mode() == tui.ModeDetail
 	})
 	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
 
@@ -537,7 +537,10 @@ func TestNativePSOverlayEscBalancesAltScreenAndAlternateScroll(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	program.Send(tea.KeyMsg{Type: tea.KeyEsc})
 	waitForTestCondition(t, 2*time.Second, "/ps overlay to close", func() bool {
-		return !model.psVisible && !model.psOverlayPushed && model.view.Mode() == tui.ModeOngoing
+		return !model.processList.isOpen() && !model.processList.ownsTranscriptMode && model.view.Mode() == tui.ModeOngoing
+	})
+	waitForTestCondition(t, 2*time.Second, "/ps alternate scroll to disable", func() bool {
+		return strings.Count(strings.Join(terminalSequences, ""), "\x1b[?1007l") > 0
 	})
 	program.Quit()
 

@@ -4,12 +4,23 @@ import (
 	"builder/internal/llm"
 	"builder/internal/tools"
 	"builder/internal/transcript"
-	"builder/prompts"
 	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
 )
+
+func toolCallWithPresentation(t *testing.T, s *chatStore, call llm.ToolCall) llm.ToolCall {
+	t.Helper()
+	normalized := normalizeToolCallsForTranscript([]llm.ToolCall{call}, s.cwd)
+	if len(normalized) != 1 {
+		t.Fatalf("expected exactly one normalized tool call, got %d", len(normalized))
+	}
+	if len(normalized[0].Presentation) == 0 {
+		t.Fatalf("expected normalized tool presentation for %+v", call)
+	}
+	return normalized[0]
+}
 
 func TestChatStoreSnapshotProjectsConversation(t *testing.T) {
 	s := newChatStore()
@@ -181,6 +192,7 @@ func TestPatchToolCallFormattingCapturesSummaryAndDetailMeta(t *testing.T) {
 		Name:  string(tools.ToolPatch),
 		Input: json.RawMessage(`{"patch":` + strconv.Quote(patchText) + `}`),
 	}
+	call = toolCallWithPresentation(t, s, call)
 	rendered := s.formatToolCall(call)
 	if rendered.ToolCall == nil {
 		t.Fatalf("expected tool metadata on patch call")
@@ -220,6 +232,7 @@ func TestPatchToolCallFormattingSingleFileUsesInlineEditedHeader(t *testing.T) {
 		Name:  string(tools.ToolPatch),
 		Input: json.RawMessage(`{"patch":` + strconv.Quote(patchText) + `}`),
 	}
+	call = toolCallWithPresentation(t, s, call)
 	rendered := s.formatToolCall(call)
 	if rendered.ToolCall == nil {
 		t.Fatalf("expected tool metadata on patch call")
@@ -250,6 +263,7 @@ func TestPatchToolCallFormattingFallsBackToRawPatchWhenFileViewParseFails(t *tes
 		Name:  string(tools.ToolPatch),
 		Input: json.RawMessage(`{"patch":` + strconv.Quote(patchText) + `}`),
 	}
+	call = toolCallWithPresentation(t, s, call)
 	rendered := s.formatToolCall(call)
 	if rendered.ToolCall == nil {
 		t.Fatalf("expected tool metadata on patch call fallback")
@@ -275,6 +289,7 @@ func TestFormatToolCallShellAddsShellMetadata(t *testing.T) {
 		Name:  string(tools.ToolShell),
 		Input: json.RawMessage(`{"command":"cat internal/tui/model.go"}`),
 	}
+	call = toolCallWithPresentation(t, s, call)
 
 	rendered := s.formatToolCall(call)
 	if rendered.ToolCall == nil || !rendered.ToolCall.IsShell {
@@ -307,6 +322,7 @@ func TestFormatToolCallShellCapturesUserInitiatedMarker(t *testing.T) {
 		Name:  string(tools.ToolShell),
 		Input: json.RawMessage(`{"command":"pwd","user_initiated":true}`),
 	}
+	call = toolCallWithPresentation(t, s, call)
 
 	rendered := s.formatToolCall(call)
 	if rendered.ToolCall == nil {
@@ -324,6 +340,7 @@ func TestFormatToolCallWriteStdinPollUsesDurationInTranscript(t *testing.T) {
 		Name:  string(tools.ToolWriteStdin),
 		Input: json.RawMessage(`{"session_id":1149,"yield_time_ms":2000}`),
 	}
+	call = toolCallWithPresentation(t, s, call)
 
 	rendered := s.formatToolCall(call)
 	if rendered.Role != "tool_call" {
@@ -356,6 +373,7 @@ func TestFormatToolCallAskQuestionUsesQuestionAndSuggestionsMeta(t *testing.T) {
 		Name:  string(tools.ToolAskQuestion),
 		Input: json.RawMessage(`{"question":"Choose scope?","suggestions":["flat scan","Recursive scan"],"recommended_option_index":1}`),
 	}
+	call = toolCallWithPresentation(t, s, call)
 
 	rendered := s.formatToolCall(call)
 	if rendered.Role != "tool_call" {
@@ -430,6 +448,7 @@ func TestFormatToolCallAskQuestionRejectsApprovalShapeAtToolLayer(t *testing.T) 
 		Name:  string(tools.ToolAskQuestion),
 		Input: json.RawMessage(`{"question":"Approve?","approval":true}`),
 	}
+	call = toolCallWithPresentation(t, s, call)
 
 	rendered := s.formatToolCall(call)
 	if rendered.Text != "Approve?" {
@@ -447,6 +466,7 @@ func TestFormatToolCallAskQuestionDropsImpossibleRecommendedMetadataAfterNormali
 		Name:  string(tools.ToolAskQuestion),
 		Input: json.RawMessage(`{"question":"Choose scope?","suggestions":["", "beta"],"recommended_option_index":2}`),
 	}
+	call = toolCallWithPresentation(t, s, call)
 
 	rendered := s.formatToolCall(call)
 	if rendered.ToolCall == nil {
@@ -467,6 +487,7 @@ func TestFormatToolCallWebSearchUsesQueryOnly(t *testing.T) {
 		Name:  string(tools.ToolWebSearch),
 		Input: json.RawMessage(`{"query":"latest golang release"}`),
 	}
+	call = toolCallWithPresentation(t, s, call)
 
 	rendered := s.formatToolCall(call)
 	if rendered.Role != "tool_call" {
@@ -480,7 +501,7 @@ func TestFormatToolCallWebSearchUsesQueryOnly(t *testing.T) {
 	}
 }
 
-func TestFormatToolResultWebSearchUsesPrettyJSON(t *testing.T) {
+func TestFormatToolResultWebSearchUsesCompactJSON(t *testing.T) {
 	result := tools.Result{
 		CallID: "call_web",
 		Name:   tools.ToolWebSearch,
@@ -488,17 +509,17 @@ func TestFormatToolResultWebSearchUsesPrettyJSON(t *testing.T) {
 	}
 
 	rendered := formatToolResult(result)
-	if !strings.Contains(rendered, "\"type\": \"web_search_call\"") {
-		t.Fatalf("expected pretty json type field, got %q", rendered)
+	if !strings.Contains(rendered, "\"type\":\"web_search_call\"") {
+		t.Fatalf("expected compact json type field, got %q", rendered)
 	}
-	if !strings.Contains(rendered, "\"query\": \"builder cli\"") {
-		t.Fatalf("expected pretty json query field, got %q", rendered)
+	if !strings.Contains(rendered, "\"query\":\"builder cli\"") {
+		t.Fatalf("expected compact json query field, got %q", rendered)
 	}
 }
 
 func TestChatStoreHidesSyntheticCompactionSummaryMessage(t *testing.T) {
 	s := newChatStore()
-	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: prompts.CompactionSummaryPrefix + "\n\nsummary"})
+	s.appendMessage(llm.Message{Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "summary"})
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "real user input"})
 
 	snap := s.snapshot()

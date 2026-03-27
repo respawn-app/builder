@@ -21,26 +21,15 @@ type ansiStyleTransform struct {
 }
 
 func muteANSIOutput(text string, target rgbColor) string {
-	if text == "" {
-		return text
-	}
-	return applyANSIStyleTransform(text, ansiStyleTransform{
-		DefaultForeground: &target,
-		ForceFaint:        true,
-	})
+	return applyANSIStyleIntents(text, ansiIntentPalette{SubduedForeground: target}, Subdued)
 }
 
 func applyDefaultForeground(text string, target rgbColor) string {
-	if text == "" {
-		return text
-	}
-	return applyANSIStyleTransform(text, ansiStyleTransform{
-		DefaultForeground: &target,
-	})
+	return applyANSIStyleIntents(text, ansiIntentPalette{ThemeForeground: target}, ThemeForeground)
 }
 
 func ApplyThemeDefaultForeground(text, theme string) string {
-	return applyDefaultForeground(text, themeForegroundColor(theme))
+	return ApplyThemeStyleIntents(text, theme, ThemeForeground)
 }
 
 func applyANSIStyleTransform(text string, transform ansiStyleTransform) string {

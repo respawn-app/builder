@@ -23,10 +23,30 @@ func NewManager(store Store, refresher *OAuthRefresher, now func() time.Time) *M
 }
 
 func (m *Manager) Load(ctx context.Context) (State, error) {
+	return m.loadState(ctx, false)
+}
+
+func (m *Manager) StoredState(ctx context.Context) (State, error) {
+	return m.loadState(ctx, true)
+}
+
+func (m *Manager) loadState(ctx context.Context, persistedOnly bool) (State, error) {
 	if m.store == nil {
 		return EmptyState(), nil
 	}
-	state, err := m.store.Load(ctx)
+	var (
+		state State
+		err   error
+	)
+	if persistedOnly {
+		if loader, ok := m.store.(PersistedStateLoader); ok {
+			state, err = loader.LoadPersisted(ctx)
+		} else {
+			state, err = m.store.Load(ctx)
+		}
+	} else {
+		state, err = m.store.Load(ctx)
+	}
 	if err != nil {
 		return State{}, err
 	}
@@ -111,7 +131,7 @@ func (m *Manager) SetEnvAPIKeyPreference(ctx context.Context, preference EnvAPIK
 }
 
 func (m *Manager) updateState(ctx context.Context, mutate func(*State) error) (State, error) {
-	state, err := m.Load(ctx)
+	state, err := m.StoredState(ctx)
 	if err != nil {
 		return State{}, err
 	}

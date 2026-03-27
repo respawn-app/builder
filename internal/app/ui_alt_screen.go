@@ -25,19 +25,37 @@ var writeTerminalSequence = func(sequence string) {
 }
 
 func (m *uiModel) toggleTranscriptMode() tea.Cmd {
-	return m.toggleTranscriptModeWithOptions(true, false)
+	target := tui.ModeDetail
+	if m.view.Mode() == tui.ModeDetail {
+		target = tui.ModeOngoing
+	}
+	return m.transitionTranscriptMode(target, false, true)
 }
 
 func (m *uiModel) toggleTranscriptModeWithNativeReplay(emitNativeReplay bool) tea.Cmd {
-	return m.toggleTranscriptModeWithOptions(emitNativeReplay, false)
+	target := tui.ModeDetail
+	if m.view.Mode() == tui.ModeDetail {
+		target = tui.ModeOngoing
+	}
+	return m.transitionTranscriptMode(target, false, emitNativeReplay)
 }
 
 func (m *uiModel) toggleTranscriptModeWithOptions(emitNativeReplay bool, skipDetailWarmup bool) tea.Cmd {
+	target := tui.ModeDetail
+	if m.view.Mode() == tui.ModeDetail {
+		target = tui.ModeOngoing
+	}
+	return m.transitionTranscriptMode(target, skipDetailWarmup, emitNativeReplay)
+}
+
+func (m *uiModel) transitionTranscriptMode(target tui.Mode, skipDetailWarmup bool, emitNativeReplay bool) tea.Cmd {
 	prevMode := m.view.Mode()
-	m.forwardToView(tui.ToggleModeMsg{SkipDetailWarmup: skipDetailWarmup})
+	m.forwardToView(tui.SetModeMsg{Mode: target, SkipDetailWarmup: skipDetailWarmup})
 	nextMode := m.view.Mode()
 	if nextMode != tui.ModeOngoing {
 		m.helpVisible = false
+	} else if prevMode != nextMode && m.inputMode() == uiInputModeMain {
+		m.restorePrimaryInputMode()
 	}
 	if prevMode != nextMode {
 		m.invalidateNativeResizeReplay()

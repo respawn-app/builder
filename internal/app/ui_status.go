@@ -860,67 +860,69 @@ func statusYesNo(value bool) string {
 }
 
 func (m *uiModel) openStatusOverlay() {
-	m.statusVisible = true
-	m.statusScroll = 0
-	m.statusError = ""
-	m.statusLoading = false
-	m.statusPendingSections = nil
-	m.statusSectionWarnings = nil
+	m.status.open = true
+	m.status.scroll = 0
+	m.status.error = ""
+	m.status.loading = false
+	m.status.pendingSections = nil
+	m.status.sectionWarnings = nil
+	m.setInputMode(uiInputModeStatus)
 	if m.statusCollector == nil {
 		m.statusCollector = defaultUIStatusCollector{}
 	}
 }
 
 func (m *uiModel) closeStatusOverlay() {
-	m.statusVisible = false
-	m.statusOverlayPushed = false
-	m.statusScroll = 0
-	m.statusLoading = false
-	m.statusPendingSections = nil
-	m.statusSectionWarnings = nil
+	m.status.open = false
+	m.status.ownsTranscriptMode = false
+	m.status.scroll = 0
+	m.status.loading = false
+	m.status.pendingSections = nil
+	m.status.sectionWarnings = nil
+	m.restorePrimaryInputMode()
 }
 
 func (m *uiModel) startStatusSectionRefresh(sections ...uiStatusSection) {
 	if len(sections) == 0 {
-		m.statusLoading = false
+		m.status.loading = false
 		return
 	}
-	if m.statusPendingSections == nil {
-		m.statusPendingSections = map[uiStatusSection]bool{}
+	if m.status.pendingSections == nil {
+		m.status.pendingSections = map[uiStatusSection]bool{}
 	}
-	if m.statusSectionWarnings == nil {
-		m.statusSectionWarnings = map[uiStatusSection]string{}
+	if m.status.sectionWarnings == nil {
+		m.status.sectionWarnings = map[uiStatusSection]string{}
 	}
 	for _, section := range sections {
-		m.statusPendingSections[section] = true
-		delete(m.statusSectionWarnings, section)
+		m.status.pendingSections[section] = true
+		delete(m.status.sectionWarnings, section)
 	}
-	m.statusLoading = len(m.statusPendingSections) > 0
+	m.status.loading = len(m.status.pendingSections) > 0
 }
 
 func (m *uiModel) finishStatusSectionRefresh(section uiStatusSection, warning string) {
-	if m.statusPendingSections != nil {
-		delete(m.statusPendingSections, section)
+	if m.status.pendingSections != nil {
+		delete(m.status.pendingSections, section)
 	}
-	if m.statusSectionWarnings == nil {
-		m.statusSectionWarnings = map[uiStatusSection]string{}
+	if m.status.sectionWarnings == nil {
+		m.status.sectionWarnings = map[uiStatusSection]string{}
 	}
 	if strings.TrimSpace(warning) == "" {
-		delete(m.statusSectionWarnings, section)
+		delete(m.status.sectionWarnings, section)
 	} else {
-		m.statusSectionWarnings[section] = strings.TrimSpace(warning)
+		m.status.sectionWarnings[section] = strings.TrimSpace(warning)
 	}
-	m.statusLoading = len(m.statusPendingSections) > 0
-	m.statusSnapshot.CollectorWarning = m.statusCombinedWarnings()
+	m.status.loading = len(m.status.pendingSections) > 0
+	m.status.snapshot.CollectorWarning = m.statusCombinedWarnings()
 }
 
 func (m *uiModel) statusCombinedWarnings() string {
-	if len(m.statusSectionWarnings) == 0 {
+	if len(m.status.sectionWarnings) == 0 {
 		return ""
 	}
-	parts := make([]string, 0, len(m.statusSectionWarnings))
+	parts := make([]string, 0, len(m.status.sectionWarnings))
 	for _, section := range []uiStatusSection{uiStatusSectionBase, uiStatusSectionEnvironment, uiStatusSectionGit, uiStatusSectionAuth} {
-		if warning := strings.TrimSpace(m.statusSectionWarnings[section]); warning != "" {
+		if warning := strings.TrimSpace(m.status.sectionWarnings[section]); warning != "" {
 			parts = append(parts, warning)
 		}
 	}
@@ -928,37 +930,37 @@ func (m *uiModel) statusCombinedWarnings() string {
 }
 
 func (m *uiModel) pushStatusOverlayIfNeeded() tea.Cmd {
-	if m.statusOverlayPushed {
+	if m.status.ownsTranscriptMode {
 		return nil
 	}
 	if m.view.Mode() != tui.ModeOngoing {
 		return nil
 	}
-	m.statusOverlayPushed = true
-	if transitionCmd := m.toggleTranscriptModeWithOptions(true, true); transitionCmd != nil {
+	m.status.ownsTranscriptMode = true
+	if transitionCmd := m.transitionTranscriptMode(tui.ModeDetail, true, true); transitionCmd != nil {
 		return transitionCmd
 	}
 	return tea.ClearScreen
 }
 
 func (m *uiModel) popStatusOverlayIfNeeded() tea.Cmd {
-	if !m.statusOverlayPushed {
+	if !m.status.ownsTranscriptMode {
 		return nil
 	}
-	m.statusOverlayPushed = false
+	m.status.ownsTranscriptMode = false
 	if m.view.Mode() != tui.ModeDetail {
 		return nil
 	}
-	if transitionCmd := m.toggleTranscriptMode(); transitionCmd != nil {
+	if transitionCmd := m.transitionTranscriptMode(tui.ModeOngoing, false, true); transitionCmd != nil {
 		return transitionCmd
 	}
 	return tea.ClearScreen
 }
 
 func (m *uiModel) moveStatusScroll(delta int) {
-	m.statusScroll += delta
-	if m.statusScroll < 0 {
-		m.statusScroll = 0
+	m.status.scroll += delta
+	if m.status.scroll < 0 {
+		m.status.scroll = 0
 	}
 }
 
@@ -976,8 +978,8 @@ func (m *uiModel) statusRowsPerPage() int {
 }
 
 func (m *uiModel) statusRefreshCmd() tea.Cmd {
-	m.statusRefreshToken++
-	token := m.statusRefreshToken
+	m.status.refreshToken++
+	token := m.status.refreshToken
 	request := m.newStatusRequest(time.Now())
 	collector := m.statusCollector
 	if collector == nil {
@@ -989,10 +991,10 @@ func (m *uiModel) statusRefreshCmd() tea.Cmd {
 		if m.statusRepository != nil {
 			seed = m.statusRepository.SeedSnapshot(request, base, request.CurrentTime)
 		}
-		m.statusSnapshot = seed.Snapshot
-		m.statusError = ""
-		m.statusPendingSections = nil
-		m.statusSectionWarnings = seed.Warnings
+		m.status.snapshot = seed.Snapshot
+		m.status.error = ""
+		m.status.pendingSections = nil
+		m.status.sectionWarnings = seed.Warnings
 		m.startStatusSectionRefresh(seed.PendingSections...)
 		cmds := make([]tea.Cmd, 0, len(seed.PendingSections))
 		for _, section := range seed.PendingSections {
@@ -1006,8 +1008,8 @@ func (m *uiModel) statusRefreshCmd() tea.Cmd {
 			}
 		}
 		if len(cmds) == 0 {
-			m.statusLoading = false
-			m.statusSnapshot.CollectorWarning = m.statusCombinedWarnings()
+			m.status.loading = false
+			m.status.snapshot.CollectorWarning = m.statusCombinedWarnings()
 			return nil
 		}
 		return tea.Batch(cmds...)
@@ -1109,10 +1111,10 @@ func (c uiInputController) handleStatusOverlayKey(msg tea.KeyMsg) (tea.Model, te
 		m.moveStatusScrollPage(1)
 		return m, nil
 	case "home":
-		m.statusScroll = 0
+		m.status.scroll = 0
 		return m, nil
 	case "end":
-		m.statusScroll = 1 << 30
+		m.status.scroll = 1 << 30
 		return m, nil
 	default:
 		return m, nil

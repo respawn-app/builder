@@ -3,27 +3,42 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"builder/internal/llm"
 	"builder/internal/tools"
-	"github.com/google/uuid"
 )
+
+type defaultBackgroundNoticeScheduler struct {
+	engine *Engine
+	steps  exclusiveStepLifecycle
+
+	mu        sync.Mutex
+	pending   []llm.Message
+	scheduled bool
+}
 
 func (e *Engine) HandleBackgroundShellEvent(evt BackgroundShellEvent) {
 	e.HandleBackgroundShellUpdate(evt, true)
 }
 
 func (e *Engine) HandleBackgroundShellUpdate(evt BackgroundShellEvent, queueNotice bool) {
-	e.emit(Event{Kind: EventBackgroundUpdated, Background: &evt})
+	e.ensureOrchestrationCollaborators()
+	e.backgroundFlow.HandleBackgroundShellUpdate(evt, queueNotice)
+}
+
+func (b *defaultBackgroundNoticeScheduler) HandleBackgroundShellUpdate(evt BackgroundShellEvent, queueNotice bool) {
+	b.engine.emit(Event{Kind: EventBackgroundUpdated, Background: &evt})
 	if !queueNotice {
 		return
 	}
 	if evt.Type != "completed" && evt.Type != "killed" {
 		return
 	}
-	e.queueDeveloperNotice(llm.Message{
+	b.QueueDeveloperNotice(llm.Message{
 		Role:           llm.RoleDeveloper,
 		MessageType:    llm.MessageTypeBackgroundNotice,
 		Name:           strings.TrimSpace(evt.ID),
@@ -61,44 +76,74 @@ func formatBackgroundShellCompact(evt BackgroundShellEvent) string {
 	return text
 }
 
-func (e *Engine) queueDeveloperNotice(msg llm.Message) {
+func (b *defaultBackgroundNoticeScheduler) QueueDeveloperNotice(msg llm.Message) {
 	if strings.TrimSpace(msg.Content) == "" {
 		return
 	}
 	shouldSchedule := false
-	e.mu.Lock()
-	e.pendingNotices = append(e.pendingNotices, msg)
-	if !e.busy && !e.noticeScheduled {
-		e.noticeScheduled = true
+	b.mu.Lock()
+	b.pending = append(b.pending, msg)
+	if !b.scheduled && (b.steps == nil || !b.steps.IsBusy()) {
+		b.scheduled = true
 		shouldSchedule = true
 	}
-	e.mu.Unlock()
+	b.mu.Unlock()
 	if shouldSchedule {
-		go e.processQueuedNotices(context.Background())
+		go b.processQueuedNotices(context.Background())
 	}
 }
 
-func (e *Engine) consumePendingBackgroundNotice(sessionID string) bool {
+func (b *defaultBackgroundNoticeScheduler) DrainPendingNotices() []llm.Message {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.pending) == 0 {
+		b.scheduled = false
+		return nil
+	}
+	pending := append([]llm.Message(nil), b.pending...)
+	b.pending = nil
+	b.scheduled = false
+	return pending
+}
+
+func (b *defaultBackgroundNoticeScheduler) ConsumePendingBackgroundNotice(sessionID string) bool {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return false
 	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	removed := false
-	e.mu.Lock()
-	filtered := e.pendingNotices[:0]
-	for _, msg := range e.pendingNotices {
+	filtered := b.pending[:0]
+	for _, msg := range b.pending {
 		if msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeBackgroundNotice && strings.TrimSpace(msg.Name) == sessionID {
 			removed = true
 			continue
 		}
 		filtered = append(filtered, msg)
 	}
-	e.pendingNotices = filtered
-	if len(e.pendingNotices) == 0 {
-		e.noticeScheduled = false
+	b.pending = filtered
+	if len(b.pending) == 0 {
+		b.scheduled = false
 	}
-	e.mu.Unlock()
 	return removed
+}
+
+func (b *defaultBackgroundNoticeScheduler) ScheduleIfIdle() {
+	if b.steps != nil && b.steps.IsBusy() {
+		return
+	}
+	shouldSchedule := false
+	b.mu.Lock()
+	if len(b.pending) > 0 && !b.scheduled {
+		b.scheduled = true
+		shouldSchedule = true
+	}
+	b.mu.Unlock()
+	if shouldSchedule {
+		go b.processQueuedNotices(context.Background())
+	}
 }
 
 type harvestedBackgroundCompletion struct {
@@ -121,70 +166,49 @@ func harvestedBackgroundCompletionSessionID(res tools.Result) (string, bool) {
 	return fmt.Sprintf("%d", out.SessionID), true
 }
 
-func (e *Engine) processQueuedNotices(ctx context.Context) {
-	defer func() {
-		shouldSchedule := false
-		e.mu.Lock()
-		if !e.busy {
-			e.noticeScheduled = false
-			if len(e.pendingNotices) > 0 {
-				e.noticeScheduled = true
-				shouldSchedule = true
-			}
-		}
-		e.mu.Unlock()
-		if shouldSchedule {
-			go e.processQueuedNotices(context.Background())
-		}
-	}()
-	if _, err := e.runQueuedNotices(ctx); err != nil {
-		e.AppendLocalEntry("error", fmt.Sprintf("background continuation failed: %v", err))
+func (b *defaultBackgroundNoticeScheduler) processQueuedNotices(ctx context.Context) {
+	if _, err := b.runQueuedNotices(ctx); err != nil {
+		b.engine.AppendLocalEntry("error", fmt.Sprintf("background continuation failed: %v", err))
 	}
 }
 
-func (e *Engine) runQueuedNotices(ctx context.Context) (llm.Message, error) {
-	e.mu.Lock()
-	if e.busy || len(e.pendingNotices) == 0 {
-		e.noticeScheduled = false
-		e.mu.Unlock()
+func (b *defaultBackgroundNoticeScheduler) runQueuedNotices(ctx context.Context) (assistant llm.Message, err error) {
+	if len(b.pendingSnapshot()) == 0 {
+		b.clearScheduled()
 		return llm.Message{}, nil
 	}
-	e.busy = true
-	stepCtx, cancel := context.WithCancel(ctx)
-	e.cancelCurrent = cancel
-	pending := append([]llm.Message(nil), e.pendingNotices...)
-	e.pendingNotices = nil
-	e.mu.Unlock()
-	e.emit(Event{Kind: EventRunStateChanged, RunState: &RunState{Busy: true}})
-	stepID := ""
-	var err error
-	defer func() {
-		e.mu.Lock()
-		e.busy = false
-		e.cancelCurrent = nil
-		e.mu.Unlock()
-		e.emit(Event{Kind: EventRunStateChanged, StepID: stepID, RunState: &RunState{Busy: false}})
-		if clearErr := e.store.MarkInFlight(false); clearErr != nil {
-			wrapped := fmt.Errorf("mark in-flight false: %w", clearErr)
-			e.emit(Event{Kind: EventInFlightClearFailed, StepID: stepID, Error: wrapped.Error()})
-			err = wrapped
+	err = b.steps.Run(ctx, exclusiveStepOptions{EmitRunState: true}, func(stepCtx context.Context, stepID string) error {
+		pending := b.DrainPendingNotices()
+		if len(pending) == 0 {
+			return nil
 		}
-	}()
-	if err = e.store.MarkInFlight(true); err != nil {
-		return llm.Message{}, err
-	}
-	stepID = uuid.NewString()
-	if err = e.injectAgentsIfNeeded(stepID); err != nil {
-		return llm.Message{}, err
-	}
-	for _, msg := range pending {
-		if err = e.appendMessage(stepID, msg); err != nil {
-			return llm.Message{}, err
+		if err := b.engine.injectAgentsIfNeeded(stepID); err != nil {
+			return err
 		}
-	}
-	assistant, runErr := e.runStepLoop(stepCtx, stepID)
-	if runErr != nil {
-		return llm.Message{}, runErr
+		for _, msg := range pending {
+			if err := b.engine.appendMessage(stepID, msg); err != nil {
+				return err
+			}
+		}
+		msg, runErr := b.engine.runStepLoop(stepCtx, stepID)
+		assistant = msg
+		return runErr
+	})
+	if errors.Is(err, errExclusiveStepBusy) {
+		b.clearScheduled()
+		return llm.Message{}, nil
 	}
 	return assistant, err
+}
+
+func (b *defaultBackgroundNoticeScheduler) pendingSnapshot() []llm.Message {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]llm.Message(nil), b.pending...)
+}
+
+func (b *defaultBackgroundNoticeScheduler) clearScheduled() {
+	b.mu.Lock()
+	b.scheduled = false
+	b.mu.Unlock()
 }

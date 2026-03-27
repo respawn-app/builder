@@ -59,6 +59,34 @@ func TestMarkdownRendererOverridesBaseTextColorWithAppForegroundLight(t *testing
 	testMarkdownRendererOverridesBaseTextColorWithAppForeground(t, "light", *styles.LightStyleConfig.Document.Color)
 }
 
+func TestMarkdownRendererClonesGlamourChromaConfigBeforeMutation(t *testing.T) {
+	original := styles.LightStyleConfig.CodeBlock.Chroma
+	if original == nil {
+		t.Fatal("expected light markdown chroma config")
+	}
+	originalTextColor := original.Text.Color
+	originalNameColor := original.Name.Color
+	t.Cleanup(func() {
+		styles.LightStyleConfig.CodeBlock.Chroma = original
+		styles.LightStyleConfig.CodeBlock.Chroma.Text.Color = originalTextColor
+		styles.LightStyleConfig.CodeBlock.Chroma.Name.Color = originalNameColor
+	})
+
+	cfg := newRendererStyleAdapter("light").markdownConfig()
+	if cfg.CodeBlock.Chroma == nil {
+		t.Fatal("expected markdown config chroma settings")
+	}
+	if cfg.CodeBlock.Chroma == styles.LightStyleConfig.CodeBlock.Chroma {
+		t.Fatal("expected markdown config to clone shared glamour chroma config")
+	}
+	if styles.LightStyleConfig.CodeBlock.Chroma.Text.Color != originalTextColor {
+		t.Fatalf("expected shared glamour chroma text color to remain unchanged, got %+v want %+v", styles.LightStyleConfig.CodeBlock.Chroma.Text.Color, originalTextColor)
+	}
+	if styles.LightStyleConfig.CodeBlock.Chroma.Name.Color != originalNameColor {
+		t.Fatalf("expected shared glamour chroma name color to remain unchanged, got %+v want %+v", styles.LightStyleConfig.CodeBlock.Chroma.Name.Color, originalNameColor)
+	}
+}
+
 func testMarkdownRendererOverridesBaseTextColorWithAppForeground(t *testing.T, theme, oldDefault string) {
 	t.Helper()
 	r := newMarkdownRenderer(theme, nil)

@@ -135,14 +135,14 @@ func (m *uiModel) clampSlashCommandSelection() {
 }
 
 func (m *uiModel) slashCommandPicker() slashCommandPickerState {
-	if m.rollbackMode {
+	if m.rollback.isSelecting() {
 		return slashCommandPickerState{}
 	}
 	if m.shouldSuppressSlashCommandPicker() {
 		return slashCommandPickerState{}
 	}
 	parsed := parseSlashCommandInput(m.input)
-	if !parsed.active || parsed.argumentMode || m.isInputLocked() || m.activeAsk != nil {
+	if !parsed.active || parsed.argumentMode || m.isInputLocked() || m.ask.hasCurrent() {
 		return slashCommandPickerState{}
 	}
 	matches := m.currentSlashCommandMatches(parsed.token)

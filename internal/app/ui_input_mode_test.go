@@ -9,7 +9,7 @@ import (
 
 func TestInputModePrioritizesExclusiveUIFlows(t *testing.T) {
 	detailView := tui.NewModel()
-	next, _ := detailView.Update(tui.ToggleModeMsg{})
+	next, _ := detailView.Update(tui.SetModeMsg{Mode: tui.ModeDetail})
 	detailView = next.(tui.Model)
 
 	tests := []struct {
@@ -18,20 +18,14 @@ func TestInputModePrioritizesExclusiveUIFlows(t *testing.T) {
 		want  uiInputMode
 	}{
 		{
-			name: "status overrides process list ask and rollback",
-			model: uiModel{
-				activeAsk:       &askEvent{req: askquestion.Request{Question: "Proceed?"}},
-				statusVisible:   true,
-				psVisible:       true,
-				rollbackMode:    true,
-				rollbackEditing: true,
-			},
-			want: uiInputModeStatus,
+			name:  "status mode",
+			model: uiModel{interaction: uiInteractionState{Mode: uiInputModeStatus}},
+			want:  uiInputModeStatus,
 		},
-		{name: "process list overrides rollback", model: uiModel{psVisible: true, rollbackMode: true}, want: uiInputModeProcessList},
-		{name: "detail view defers ask", model: uiModel{activeAsk: &askEvent{req: askquestion.Request{Question: "Proceed?"}}, view: detailView}, want: uiInputModeMain},
-		{name: "rollback selection overrides rollback edit", model: uiModel{rollbackMode: true, rollbackEditing: true}, want: uiInputModeRollbackSelection},
-		{name: "rollback edit", model: uiModel{rollbackEditing: true}, want: uiInputModeRollbackEdit},
+		{name: "process list mode", model: uiModel{interaction: uiInteractionState{Mode: uiInputModeProcessList}}, want: uiInputModeProcessList},
+		{name: "rollback selection mode", model: uiModel{interaction: uiInteractionState{Mode: uiInputModeRollbackSelection}}, want: uiInputModeRollbackSelection},
+		{name: "rollback edit mode", model: uiModel{interaction: uiInteractionState{Mode: uiInputModeRollbackEdit}}, want: uiInputModeRollbackEdit},
+		{name: "ask mode", model: uiModel{interaction: uiInteractionState{Mode: uiInputModeAsk}, ask: uiAskState{current: &askEvent{req: askquestion.Request{Question: "Proceed?"}}}, view: detailView}, want: uiInputModeAsk},
 		{name: "main", model: uiModel{}, want: uiInputModeMain},
 	}
 
@@ -44,8 +38,45 @@ func TestInputModePrioritizesExclusiveUIFlows(t *testing.T) {
 	}
 }
 
+func TestRestorePrimaryInputModeFollowsAskAndTranscriptMode(t *testing.T) {
+	detailView := tui.NewModel()
+	next, _ := detailView.Update(tui.SetModeMsg{Mode: tui.ModeDetail})
+	detailView = next.(tui.Model)
+
+	tests := []struct {
+		name  string
+		model *uiModel
+		want  uiInputMode
+	}{
+		{
+			name:  "active ask in ongoing mode restores ask input",
+			model: &uiModel{ask: uiAskState{current: &askEvent{req: askquestion.Request{Question: "Proceed?"}}}},
+			want:  uiInputModeAsk,
+		},
+		{
+			name:  "active ask in detail mode restores main input",
+			model: &uiModel{ask: uiAskState{current: &askEvent{req: askquestion.Request{Question: "Proceed?"}}}, view: detailView},
+			want:  uiInputModeMain,
+		},
+		{
+			name:  "no ask restores main input",
+			model: &uiModel{},
+			want:  uiInputModeMain,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.model.restorePrimaryInputMode()
+			if got := tc.model.inputMode(); got != tc.want {
+				t.Fatalf("input mode = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestInputModeStateExposesRenderingAndInteractionFlags(t *testing.T) {
-	m := &uiModel{rollbackEditing: true, busy: true, inputSubmitLocked: true}
+	m := &uiModel{busy: true, inputSubmitLocked: true, interaction: uiInteractionState{Mode: uiInputModeRollbackEdit}}
 	state := m.inputModeState()
 
 	if state.Mode != uiInputModeRollbackEdit {
