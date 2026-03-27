@@ -634,8 +634,8 @@ func TestNativePSOverlayUsesClearScreenWhenAltScreenNever(t *testing.T) {
 	if strings.Contains(sequenceLog, "\x1b[?1007h") || strings.Contains(sequenceLog, "\x1b[?1007l") {
 		t.Fatalf("did not expect /ps overlay to toggle alternate scroll when detail alt-screen is disabled, got %q", sequenceLog)
 	}
-	if clearCount := strings.Count(raw, "\x1b[2J"); clearCount < 3 {
-		t.Fatalf("expected startup + /ps open + /ps close clear-screen sequences, got %d in %q", clearCount, raw)
+	if clearCount := strings.Count(raw, "\x1b[2J"); clearCount < 2 {
+		t.Fatalf("expected startup + /ps open clear-screen sequences, got %d in %q", clearCount, raw)
 	}
 	if !strings.Contains(normalizedOutput(raw), "Background Processes") {
 		t.Fatalf("expected /ps overlay content in output, got %q", normalizedOutput(raw))

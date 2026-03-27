@@ -131,7 +131,7 @@ func TestNativeReplayCmdForModeTransitionPreservesAppendOnlyWhenScreenNotReplace
 	m.nativeRenderedProjection = initial
 	m.nativeRenderedSnapshot = initial.Render(tui.TranscriptDivider)
 
-	cmd := m.nativeReplayCmdForModeTransition(tui.ModeDetail, tui.ModeOngoing, false, true)
+	cmd := m.nativeReplayCmdForModeTransition(tui.ModeDetail, tui.ModeOngoing, true)
 	if cmd == nil {
 		t.Fatal("expected append-only replay command")
 	}
