@@ -19,6 +19,7 @@ import (
 	"builder/internal/llm"
 	"builder/internal/runtime"
 	"builder/internal/session"
+	"builder/internal/theme"
 	"builder/internal/tools"
 	"builder/internal/tools/askquestion"
 	shelltool "builder/internal/tools/shell"
@@ -5585,6 +5586,18 @@ func TestStatusContextZoneColorBoundaries(t *testing.T) {
 	assertLightColor(50, "#9A6700")
 	assertLightColor(79, "#9A6700")
 	assertLightColor(80, "#CB2431")
+}
+
+func TestStatusNoticeStyleUsesCentralThemeStatusErrorToken(t *testing.T) {
+	style := statusNoticeStyle("light", uiStatusNoticeError)
+	foreground, ok := style.GetForeground().(lipgloss.CompleteAdaptiveColor)
+	if !ok {
+		t.Fatalf("expected adaptive foreground token, got %T", style.GetForeground())
+	}
+	want := theme.DefaultPalette().Status.Error.Adaptive()
+	if foreground.Light.TrueColor != want.Light.TrueColor || foreground.Dark.TrueColor != want.Dark.TrueColor {
+		t.Fatalf("unexpected status error token: light=%s dark=%s want light=%s dark=%s", foreground.Light.TrueColor, foreground.Dark.TrueColor, want.Light.TrueColor, want.Dark.TrueColor)
+	}
 }
 
 type statusLineFakeClient struct{}

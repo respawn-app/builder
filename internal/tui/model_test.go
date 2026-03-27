@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"builder/internal/theme"
 	"builder/internal/tools"
 	patchformat "builder/internal/tools/patch/format"
 	"builder/internal/transcript"
@@ -11,8 +12,10 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
+	"github.com/muesli/termenv"
 )
 
 func testPatchRender(lines ...patchformat.RenderedLine) *patchformat.RenderedPatch {
@@ -1724,6 +1727,37 @@ func TestReviewerAndWarningViewUseSemanticForegroundInLightTheme(t *testing.T) {
 	}
 	if !strings.Contains(warningLine, foregroundEscape(themeWarningColor("light"))) {
 		t.Fatalf("expected detail warning to use warning foreground, got %q", warningLine)
+	}
+}
+
+func TestSelectedUserLineUsesCentralThemeSelectionTokens(t *testing.T) {
+	previousProfile := lipgloss.ColorProfile()
+	previousBackground := lipgloss.HasDarkBackground()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	lipgloss.SetHasDarkBackground(false)
+	defer lipgloss.SetColorProfile(previousProfile)
+	defer lipgloss.SetHasDarkBackground(previousBackground)
+
+	m := NewModel(WithTheme("light"), WithPreviewLines(20))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "selected user prompt"})
+	m.selectedTranscriptEntry = 0
+	m.selectedTranscriptActive = true
+	m = updateModel(t, m, ToggleModeMsg{})
+
+	raw := m.View()
+	selectedLine := lineContaining(raw, "selected user prompt")
+	if selectedLine == "" {
+		t.Fatalf("expected detail view to contain selected user line, got %q", plainTranscript(raw))
+	}
+	tokens := theme.ResolvePalette("light").Transcript
+	selectionBackground := rgbColorFromHex(tokens.SelectionBackground.TrueColor)
+	if !strings.Contains(selectedLine, fmt.Sprintf("48;2;%d;%d;%d", selectionBackground.r, selectionBackground.g, selectionBackground.b)) {
+		t.Fatalf("expected selected line to use selection background %s, got %q", tokens.SelectionBackground.TrueColor, selectedLine)
+	}
+	selectionForeground := rgbColorFromHex(tokens.SelectionForeground.TrueColor)
+	if !strings.Contains(selectedLine, fmt.Sprintf("38;2;%d;%d;%d", selectionForeground.r, selectionForeground.g, selectionForeground.b)) {
+		t.Fatalf("expected selected line to use selection foreground %s, got %q", tokens.SelectionForeground.TrueColor, selectedLine)
 	}
 }
 
