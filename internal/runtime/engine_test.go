@@ -280,6 +280,52 @@ func TestLastCommittedAssistantFinalAnswerSkipsTrailingReminderEntries(t *testin
 	}
 }
 
+func TestLastCommittedAssistantFinalAnswerSkipsTrailingTypedDeveloperMetadata(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "final handoff"}); err != nil {
+		t.Fatalf("append assistant final: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: "phase mismatch"}); err != nil {
+		t.Fatalf("append warning: %v", err)
+	}
+
+	if got := eng.LastCommittedAssistantFinalAnswer(); got != "final handoff" {
+		t.Fatalf("LastCommittedAssistantFinalAnswer() = %q, want %q", got, "final handoff")
+	}
+}
+
+func TestLastCommittedAssistantFinalAnswerDoesNotSkipTrailingUntypedDeveloperMessage(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "final handoff"}); err != nil {
+		t.Fatalf("append assistant final: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, Content: "User ran shell command directly:\npwd"}); err != nil {
+		t.Fatalf("append developer message: %v", err)
+	}
+
+	if got := eng.LastCommittedAssistantFinalAnswer(); got != "" {
+		t.Fatalf("LastCommittedAssistantFinalAnswer() = %q, want empty", got)
+	}
+}
+
 func (fakeAsyncLateDeltaClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
 	return llm.Response{}, errors.New("not implemented")
 }

@@ -28,7 +28,7 @@ func (e *Engine) LastCommittedAssistantFinalAnswer() string {
 	messages := e.chat.snapshotMessages()
 	for idx := len(messages) - 1; idx >= 0; idx-- {
 		message := messages[idx]
-		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeCompactionSoonReminder {
+		if shouldSkipTrailingAssistantHandoffMessage(message) {
 			continue
 		}
 		if message.Role != llm.RoleAssistant {
@@ -43,6 +43,10 @@ func (e *Engine) LastCommittedAssistantFinalAnswer() string {
 		return message.Content
 	}
 	return ""
+}
+
+func shouldSkipTrailingAssistantHandoffMessage(message llm.Message) bool {
+	return message.Role == llm.RoleDeveloper && message.MessageType != ""
 }
 
 func (e *Engine) ContextUsage() ContextUsage {
