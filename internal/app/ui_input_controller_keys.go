@@ -88,6 +88,9 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
+	if !m.isInputLocked() && isClipboardImagePasteKey(msg) {
+		return m, m.pasteClipboardImageCmd(uiClipboardPasteTargetMain)
+	}
 
 	switch msg.Type {
 	case tea.KeyCtrlC:
