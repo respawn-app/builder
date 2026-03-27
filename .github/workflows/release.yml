@@ -7,7 +7,7 @@ on:
       - closed
 
 jobs:
-  release:
+  prepare_release:
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'autorelease')) }}
     permissions:
@@ -16,6 +16,8 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
       version_bumped: ${{ steps.version.outputs.version_bumped }}
+      changelog: ${{ steps.changelog.outputs.changelog }}
+      artifact_name: ${{ steps.artifact.outputs.name }}
     steps:
       - uses: actions/checkout@v6.0.2
         with:
@@ -81,13 +83,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          current_version="$(tr -d ' \n' < VERSION)"
-          current_version="${current_version#v}"
-          if [ "$current_version" = "$RELEASE_VERSION" ]; then
-            echo "VERSION already set to $RELEASE_VERSION"
-            exit 0
-          fi
-
           printf '%s\n' "$RELEASE_VERSION" > VERSION
           git add VERSION
 
@@ -119,42 +114,117 @@ jobs:
           commitMode: true
           configuration: ".github/changelog_config.json"
 
-      - name: Build binaries
+      - name: Build release archives
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          VERSION_VAR: builder/internal/buildinfo.Version
-        run: |
-          mkdir -p dist
-          for GOOS in darwin linux windows; do
-            for GOARCH in amd64 arm64; do
-              if [ "$GOOS" = "windows" ]; then
-                ext=".exe"
-              else
-                ext=""
-              fi
-              out="builder_${VERSION}_${GOOS}_${GOARCH}"
-              env CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
-                go build -ldflags "-X ${VERSION_VAR}=${VERSION}" -o "dist/${out}${ext}" ./cmd/builder
-              if [ "$GOOS" = "windows" ]; then
-                (cd dist && zip "${out}.zip" "${out}${ext}")
-              else
-                (cd dist && tar -czf "${out}.tar.gz" "${out}${ext}")
-              fi
-              rm -f "dist/${out}${ext}"
-            done
-          done
+        run: bash scripts/release-artifacts.sh build --version "$VERSION" --dist-dir dist
+
+      - name: Validate Linux release binaries are statically linked
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: bash scripts/release-artifacts.sh verify-linux-static --version "$VERSION" --dist-dir dist
+
+      - name: Capture release artifact name
+        id: artifact
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: echo "name=release-assets-${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  verify_release_manifest:
+    needs: prepare_release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.prepare_release.outputs.artifact_name }}
+          path: dist
+
+      - name: Verify release checksums
+        run: bash scripts/release-artifacts.sh verify-manifest --dist-dir dist
+
+  smoke_release_assets:
+    needs: prepare_release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runs_on: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            archive_ext: tar.gz
+            binary_ext: ""
+          - runs_on: macos-14
+            goos: darwin
+            goarch: arm64
+            archive_ext: tar.gz
+            binary_ext: ""
+          - runs_on: windows-latest
+            goos: windows
+            goarch: amd64
+            archive_ext: zip
+            binary_ext: .exe
+    runs-on: ${{ matrix.runs_on }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.prepare_release.outputs.artifact_name }}
+          path: dist
+
+      - name: Smoke test packaged binary
+        env:
+          VERSION: ${{ needs.prepare_release.outputs.version }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          ARCHIVE_EXT: ${{ matrix.archive_ext }}
+          BINARY_EXT: ${{ matrix.binary_ext }}
+        run: bash scripts/release-artifacts.sh smoke-test --version "$VERSION" --goos "$GOOS" --goarch "$GOARCH" --archive-ext "$ARCHIVE_EXT" --binary-ext "$BINARY_EXT" --dist-dir dist
+
+  publish_release:
+    needs:
+      - prepare_release
+      - verify_release_manifest
+      - smoke_release_assets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.prepare_release.outputs.artifact_name }}
+          path: dist
 
       - name: Create or update release
         uses: softprops/action-gh-release@v2.6.1
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: ${{ steps.version.outputs.tag }}
+          tag_name: ${{ needs.prepare_release.outputs.tag }}
+          name: ${{ needs.prepare_release.outputs.tag }}
           draft: false
-          body: ${{ steps.changelog.outputs.changelog }}
+          body: ${{ needs.prepare_release.outputs.changelog }}
           files: dist/*
 
   update_brew_tap:
-    needs: release
+    needs:
+      - prepare_release
+      - publish_release
     runs-on: ubuntu-latest
     env:
       BREW_FORMULA_NAME: builder-cli
@@ -176,7 +246,7 @@ jobs:
 
       - name: Update tap formula
         env:
-          BUILDER_VERSION: ${{ needs.release.outputs.tag }}
+          BUILDER_VERSION: ${{ needs.prepare_release.outputs.tag }}
         run: bash scripts/update-brew-tap.sh --tap "$GITHUB_WORKSPACE/homebrew-tap" --formula "$BREW_FORMULA_NAME"
 
       - name: Ensure pr-pull label exists
@@ -206,8 +276,8 @@ jobs:
           token: ${{ secrets.RESPAWN_BREW_TAP_TOKEN }}
           path: homebrew-tap
           base: master
-          branch: chore/${{ env.BREW_FORMULA_NAME }}-${{ needs.release.outputs.tag }}
-          commit-message: "${{ env.BREW_FORMULA_NAME }} ${{ needs.release.outputs.tag }}"
-          title: "${{ env.BREW_FORMULA_NAME }} ${{ needs.release.outputs.tag }}"
-          body: "Automated formula bump for ${{ env.BREW_FORMULA_NAME }} ${{ needs.release.outputs.tag }}."
+          branch: chore/${{ env.BREW_FORMULA_NAME }}-${{ needs.prepare_release.outputs.tag }}
+          commit-message: "${{ env.BREW_FORMULA_NAME }} ${{ needs.prepare_release.outputs.tag }}"
+          title: "${{ env.BREW_FORMULA_NAME }} ${{ needs.prepare_release.outputs.tag }}"
+          body: "Automated formula bump for ${{ env.BREW_FORMULA_NAME }} ${{ needs.prepare_release.outputs.tag }}."
           labels: pr-pull
