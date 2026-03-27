@@ -3657,6 +3657,65 @@ func TestPSOverlayRefreshTickUpdatesEntriesWhileOpen(t *testing.T) {
 	}
 }
 
+func TestPSOverlayRefreshPreservesSelectionByProcessID(t *testing.T) {
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	workdir := t.TempDir()
+	first, err := manager.Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "printf 'first\n'; sleep 30"},
+		DisplayCommand: "first",
+		Workdir:        workdir,
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start first job: %v", err)
+	}
+	second, err := manager.Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "printf 'second\n'; sleep 30"},
+		DisplayCommand: "second",
+		Workdir:        workdir,
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start second job: %v", err)
+	}
+
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m.refreshProcessEntries()
+	if len(m.processList.entries) != 2 {
+		t.Fatalf("expected two process entries, got %d", len(m.processList.entries))
+	}
+	selectedID := first.SessionID
+	if m.processList.entries[0].ID == selectedID {
+		selectedID = second.SessionID
+	}
+	for idx, entry := range m.processList.entries {
+		if entry.ID == selectedID {
+			m.processList.selection = idx
+			break
+		}
+	}
+
+	_, err = manager.Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "printf 'third\n'; sleep 30"},
+		DisplayCommand: "third",
+		Workdir:        workdir,
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start third job: %v", err)
+	}
+
+	m.refreshProcessEntries()
+	if m.processList.entries[m.processList.selection].ID != selectedID {
+		t.Fatalf("expected selection to remain on process %s, got %s", selectedID, m.processList.entries[m.processList.selection].ID)
+	}
+}
+
 func TestOpenLogsFallsBackToEditorCommandWhenDefaultOpenFails(t *testing.T) {
 	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
 	if err != nil {

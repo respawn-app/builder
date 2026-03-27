@@ -26,6 +26,9 @@ func (s *EnvAPIKeyOverrideStore) LoadPersisted(ctx context.Context) (State, erro
 	if s == nil || s.base == nil {
 		return EmptyState(), nil
 	}
+	if loader, ok := s.base.(PersistedStateLoader); ok {
+		return loader.LoadPersisted(ctx)
+	}
 	return s.base.Load(ctx)
 }
 

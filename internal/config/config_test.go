@@ -718,6 +718,37 @@ func TestResolveWorkspaceContainerUsesLegacyWorkspaceIndexMapping(t *testing.T) 
 	}
 }
 
+func TestResolveWorkspaceContainerRejectsInvalidLegacyWorkspaceIndexMapping(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	indexPath := filepath.Join(cfg.PersistenceRoot, workspaceIndexName)
+	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
+		t.Fatalf("mkdir workspace index dir: %v", err)
+	}
+	indexData, err := json.Marshal(workspaceIndex{Entries: map[string]string{cfg.WorkspaceRoot: "../outside"}})
+	if err != nil {
+		t.Fatalf("marshal workspace index: %v", err)
+	}
+	if err := os.WriteFile(indexPath, indexData, 0o644); err != nil {
+		t.Fatalf("write workspace index: %v", err)
+	}
+
+	_, _, err = ResolveWorkspaceContainer(cfg)
+	if err == nil {
+		t.Fatal("expected invalid legacy container error")
+	}
+	if !strings.Contains(err.Error(), "invalid legacy workspace container") {
+		t.Fatalf("expected invalid legacy container error, got %v", err)
+	}
+}
+
 func TestResolveWorkspaceContainerCanonicalizesSymlinkedWorkspace(t *testing.T) {
 	home := t.TempDir()
 	realWorkspace := t.TempDir()

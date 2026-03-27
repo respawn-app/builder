@@ -317,12 +317,12 @@ func TestNativeResizeReplaysOngoingScreenAfterRealResize(t *testing.T) {
 	}
 
 	raw := out.String()
-	if count := strings.Count(raw, "\x1b[2J"); count < 2 {
-		t.Fatalf("expected startup clear plus one debounced resize clear, got %d occurrences in %q", count, raw)
+	if count := strings.Count(raw, "\x1b[2J"); count != 1 {
+		t.Fatalf("expected only the startup clear when resize replay is skipped, got %d occurrences in %q", count, raw)
 	}
 	plain := xansi.Strip(raw)
-	if strings.Count(normalizedOutput(raw), "seed replay line") < 2 {
-		t.Fatalf("expected committed history replayed after debounced resize, got %q", normalizedOutput(raw))
+	if strings.Count(normalizedOutput(raw), "seed replay line") != 1 {
+		t.Fatalf("expected committed history not to be replayed after debounced resize, got %q", normalizedOutput(raw))
 	}
 	for _, line := range strings.Split(plain, "\n") {
 		if strings.Count(line, "ongoing | ") > 1 {

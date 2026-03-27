@@ -574,6 +574,9 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if replay := m.emitCurrentNativeScrollbackState(true); replay != nil {
 			return m, replay
 		}
+		if !m.nativeRenderedProjection.Empty() {
+			return m, nil
+		}
 		return m, tea.ClearScreen
 	case runtimeEventMsg:
 		historyCmd := m.runtimeAdapter().handleRuntimeEvent(msg.event)

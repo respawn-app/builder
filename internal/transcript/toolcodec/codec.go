@@ -28,6 +28,9 @@ func DecodeToolCallMeta(raw json.RawMessage) (*transcript.ToolCallMeta, bool) {
 		return nil, false
 	}
 	normalized := transcript.NormalizeToolCallMeta(meta)
+	if isEmptyToolCallMeta(normalized) {
+		return nil, false
+	}
 	return &normalized, true
 }
 

@@ -253,7 +253,10 @@ func (m Model) View() string {
 	return m.renderOngoing()
 }
 
-func (m Model) VisibleLineKinds() []VisibleLineKind {
+func (m *Model) VisibleLineKinds() []VisibleLineKind {
+	if m == nil {
+		return nil
+	}
 	if m.mode == ModeDetail {
 		if m.detailDirty && len(m.detailLines) == 0 {
 			m.rebuildDetailSnapshot()

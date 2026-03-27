@@ -28,6 +28,9 @@ func ResolveWorkspaceContainer(cfg App) (string, string, error) {
 	if legacyContainer, ok, err := legacyWorkspaceContainer(cfg, canonicalRoot); err != nil {
 		return "", "", err
 	} else if ok {
+		if !isValidWorkspaceContainerName(legacyContainer) {
+			return "", "", fmt.Errorf("invalid legacy workspace container %q", legacyContainer)
+		}
 		containerDir := filepath.Join(sessionsRoot, legacyContainer)
 		if err := os.MkdirAll(containerDir, 0o755); err != nil {
 			return "", "", fmt.Errorf("create workspace container: %w", err)
@@ -150,6 +153,17 @@ func sanitizedWorkspaceContainerPrefix(base string) string {
 		}
 	}
 	return prefix
+}
+
+func isValidWorkspaceContainerName(name string) bool {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" || trimmed == "." || trimmed == ".." || filepath.IsAbs(trimmed) {
+		return false
+	}
+	if strings.ContainsAny(trimmed, `/\\`) {
+		return false
+	}
+	return filepath.Clean(trimmed) == trimmed && filepath.Base(trimmed) == trimmed
 }
 
 func isASCIILetter(c byte) bool {
