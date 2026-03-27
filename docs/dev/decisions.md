@@ -296,6 +296,7 @@
 - Run-safe commands execute immediately while busy.
 - Non-run-safe known commands while busy are rejected with transient status-line error.
 - `/review` auto-submits the embedded review rubric prompt; it stays in-place for empty sessions and forks a fresh child session once the current session already has a visible user prompt. Optional args are appended as review scope.
+- `/back` reopens the parent session when available; if the child session is interrupted while assistant output is still streaming, that in-progress assistant text becomes the parent input draft on return unless the parent already has its own saved draft.
 - `/supervisor` controls runtime reviewer invocation for the current session only.
 - `/supervisor` toggles when called without args; `/supervisor on|off` sets explicitly.
 - `/supervisor` emits user-visible confirmation in transcript + status line and does not persist to config.
@@ -338,6 +339,15 @@
 - JSON mode emits exactly one final object on `stdout`: `status`, `result`/`error`, `session_id`, `session_name`, `duration_ms`, plus continuation metadata when available.
 - Final-text mode emits the final assistant text to `stdout`, optionally followed by a continue hint.
 - Progress is quiet by default and is emitted to `stderr` only when `--progress-mode=stderr`.
+
+## Release Engineering
+
+- Official release binaries are built through `scripts/build.sh`; the release profile is `CGO_ENABLED=0`, `-trimpath`, `-buildvcs=false`, and `-ldflags "-s -w -X builder/internal/buildinfo.Version=..."`.
+- Release archive packaging and verification live in `scripts/release-artifacts.sh`; workflow YAML should stay orchestration-focused.
+- Linux release binaries must stay statically linked; do not enable PIE or other dynamic-linking release modes.
+- GitHub releases must publish `checksums.txt`, and `scripts/install.sh` verifies archive checksums when that manifest is present.
+- The release workflow must verify the checksum manifest and smoke-test packaged binaries on Linux, macOS, and Windows before publishing.
+- GitHub artifact attestations are intentionally not part of the release pipeline.
 
 ## Experimental Reviewer
 
