@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
@@ -317,7 +316,7 @@ func (m Model) maybeSelectedUserBlock(entryIndex int, role string, lines []strin
 	if strings.TrimSpace(role) != "user" {
 		return lines
 	}
-	style := lipgloss.NewStyle().Background(lipgloss.Color("15")).Foreground(lipgloss.Color("0"))
+	style := m.palette().selection
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {
 		out = append(out, style.Render(line))

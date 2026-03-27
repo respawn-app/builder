@@ -234,6 +234,7 @@
 - Formatter config owns syntax backgrounds and formatter base foreground.
 - Transcript rendering owns role styling, subdued shell preview styling, and diff semantics.
 - Layout owns prefixes, indentation, and wrapping only.
+- Semantic color tokens are centralized in `internal/theme`; TUI and app surfaces resolve colors from that palette instead of hardcoding inline hex values in renderers.
 - Rendering/style invariants:
 - Detail shell commands are full syntax color.
 - Ongoing shell commands are syntax-highlighted but subdued.
