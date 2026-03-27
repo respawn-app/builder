@@ -42,6 +42,12 @@ func TestRenderRunCommandPreservesQuotedExecutablePath(t *testing.T) {
 	}
 }
 
+func TestCompactionSoonReminderPromptIsEmbedded(t *testing.T) {
+	if strings.TrimSpace(CompactionSoonReminderPrompt) == "" {
+		t.Fatal("expected compaction soon reminder prompt to be embedded")
+	}
+}
+
 func selfcmdTestRunCommandPrefix() string {
 	return "\"/tmp/path with space/builder\" run"
 }

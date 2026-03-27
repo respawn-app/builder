@@ -119,7 +119,7 @@ func (m Model) roleSymbol(role string) string {
 	switch role {
 	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error", "tool_question", "tool_question_error", "tool_web_search", "tool_web_search_success", "tool_web_search_error":
 		return styleForRole(role, m.palette()).Render(prefix)
-	case "error":
+	case "error", "warning":
 		return styleForRole(role, m.palette()).Render(prefix)
 	case "reviewer_status", "reviewer_suggestions":
 		return styleForRole(role, m.palette()).Render(prefix)
@@ -152,6 +152,8 @@ func rolePrefix(role string) string {
 		return "§"
 	case "error":
 		return "!"
+	case "warning":
+		return "⚠"
 	default:
 		return ""
 	}
@@ -205,8 +207,10 @@ func styleForRole(role string, p palette) lipgloss.Style {
 		return p.system
 	case "error":
 		return p.error
+	case "warning":
+		return p.warning
 	case "reviewer_status", "reviewer_suggestions":
-		return p.compaction
+		return p.success
 	default:
 		return p.preview
 	}
@@ -231,6 +235,8 @@ type palette struct {
 	toolError       lipgloss.Style
 	system          lipgloss.Style
 	error           lipgloss.Style
+	warning         lipgloss.Style
+	success         lipgloss.Style
 	compaction      lipgloss.Style
 
 	diffAddBackgroundLight    string
@@ -254,6 +260,8 @@ func (m Model) palette() palette {
 	toolError := lipgloss.AdaptiveColor{Light: "#D73A49", Dark: "#E06C75"}
 	system := lipgloss.AdaptiveColor{Light: "#6A737D", Dark: "#ABB2BF"}
 	err := lipgloss.AdaptiveColor{Light: "#D73A49", Dark: "#E06C75"}
+	warning := lipgloss.AdaptiveColor{Light: "#8A5A00", Dark: "#E5C07B"}
+	success := lipgloss.AdaptiveColor{Light: "#22863A", Dark: "#98C379"}
 	compaction := lipgloss.AdaptiveColor{Light: "#8A5A00", Dark: "#E5C07B"}
 	if m.theme == "light" {
 		base = lipgloss.AdaptiveColor{Light: previewLight, Dark: previewLight}
@@ -271,6 +279,8 @@ func (m Model) palette() palette {
 		toolError:       lipgloss.NewStyle().Foreground(toolError),
 		system:          lipgloss.NewStyle().Foreground(system).Faint(true),
 		error:           lipgloss.NewStyle().Foreground(err),
+		warning:         lipgloss.NewStyle().Foreground(warning),
+		success:         lipgloss.NewStyle().Foreground(success),
 		compaction:      lipgloss.NewStyle().Foreground(compaction),
 
 		diffAddBackgroundLight:    "#E6FFED",

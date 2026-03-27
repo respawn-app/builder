@@ -21,6 +21,7 @@ const (
 	defaultContextWindowTokens           = 200_000
 	compactOverflowRetries               = 2
 	autoCompactNearLimitMargin           = 8_000
+	compactionSoonReminderPercent        = 85
 	defaultPreSubmitCompactionLeadTokens = 15_000
 	manualCompactionCarryoverMaxChars    = 4_000
 
@@ -108,19 +109,7 @@ func (e *Engine) shouldAutoCompactWithContext(ctx context.Context) bool {
 	if limit <= 0 {
 		return false
 	}
-
-	reservedOutput := e.reservedOutputTokens()
-	estimatedInput := e.currentTokenUsage()
-	estimatedTotal := estimatedInput + reservedOutput
-	margin := autoCompactPrecisionMarginForLimit(limit)
-	if estimatedTotal < limit && estimatedTotal+margin < limit {
-		return false
-	}
-	preciseInput, ok := e.currentInputTokensPrecisely(ctx)
-	if !ok {
-		return estimatedTotal >= limit
-	}
-	return preciseInput+reservedOutput >= limit
+	return e.usageAtOrAboveLimit(ctx, limit)
 }
 
 func (e *Engine) autoCompactTokenLimit(ctx context.Context) int {
@@ -273,6 +262,76 @@ func autoCompactPrecisionMarginForLimit(limit int) int {
 		return percentMargin
 	}
 	return autoCompactNearLimitMargin
+}
+
+func (e *Engine) usageAtOrAboveLimit(ctx context.Context, limit int) bool {
+	if limit <= 0 {
+		return false
+	}
+	reservedOutput := e.reservedOutputTokens()
+	estimatedInput := e.currentTokenUsage()
+	estimatedTotal := estimatedInput + reservedOutput
+	margin := autoCompactPrecisionMarginForLimit(limit)
+	if estimatedTotal < limit && estimatedTotal+margin < limit {
+		return false
+	}
+	preciseInput, ok := e.currentInputTokensPrecisely(ctx)
+	if !ok {
+		return estimatedTotal >= limit
+	}
+	return preciseInput+reservedOutput >= limit
+}
+
+func (e *Engine) compactionSoonReminderLimit(ctx context.Context) int {
+	limit := e.autoCompactTokenLimit(ctx)
+	if limit <= 0 {
+		return 0
+	}
+	reminderLimit := (limit * compactionSoonReminderPercent) / 100
+	if reminderLimit < 1 {
+		return 1
+	}
+	return reminderLimit
+}
+
+func (e *Engine) maybeAppendCompactionSoonReminder(ctx context.Context, stepID string) error {
+	limit := e.compactionSoonReminderLimit(ctx)
+	if limit <= 0 {
+		e.mu.Lock()
+		e.compactionSoonReminderIssued = false
+		e.mu.Unlock()
+		return nil
+	}
+	if !e.usageAtOrAboveLimit(ctx, limit) {
+		e.mu.Lock()
+		e.compactionSoonReminderIssued = false
+		e.mu.Unlock()
+		return nil
+	}
+	if !e.AutoCompactionEnabled() || e.compactionMode() == "none" {
+		return nil
+	}
+	content := strings.TrimSpace(prompts.CompactionSoonReminderPrompt)
+	if content == "" {
+		return nil
+	}
+	e.mu.Lock()
+	if e.compactionSoonReminderIssued {
+		e.mu.Unlock()
+		return nil
+	}
+	e.mu.Unlock()
+	if err := e.appendMessage(stepID, llm.Message{
+		Role:        llm.RoleDeveloper,
+		MessageType: llm.MessageTypeCompactionSoonReminder,
+		Content:     content,
+	}); err != nil {
+		return err
+	}
+	e.mu.Lock()
+	e.compactionSoonReminderIssued = true
+	e.mu.Unlock()
+	return nil
 }
 
 func (e *Engine) currentInputTokensPrecisely(ctx context.Context) (int, bool) {
