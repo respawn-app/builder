@@ -62,6 +62,19 @@ func TestAssistantDeltaAppendsStreamingText(t *testing.T) {
 	}
 }
 
+func TestAssistantDeltaSkipsNoopFinalToken(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: uiNoopFinalToken})
+
+	if got := m.view.OngoingStreamingText(); got != "" {
+		t.Fatalf("expected noop final token to stay out of streaming text, got %q", got)
+	}
+	if m.sawAssistantDelta {
+		t.Fatal("expected sawAssistantDelta to remain false for noop final token")
+	}
+}
+
 func TestAssistantDeltaResetClearsStreamingText(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.forwardToView(tui.SetConversationMsg{Ongoing: "partial"})
