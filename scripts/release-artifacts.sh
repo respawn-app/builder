@@ -12,7 +12,7 @@ Usage:
   scripts/release-artifacts.sh build --version X.Y.Z [--dist-dir dist]
   scripts/release-artifacts.sh verify-manifest [--dist-dir dist]
   scripts/release-artifacts.sh verify-linux-static --version X.Y.Z [--dist-dir dist]
-  scripts/release-artifacts.sh smoke-test --version X.Y.Z --goos <os> --goarch <arch> --archive-ext <ext> --binary-ext <ext> [--dist-dir dist]
+  scripts/release-artifacts.sh smoke-test --version X.Y.Z --goos <os> --goarch <arch> --archive-ext <ext> [--binary-ext <ext>] [--dist-dir dist]
 USAGE
 }
 
@@ -140,6 +140,9 @@ smoke_test() {
 	require_value "--goos" "$goos"
 	require_value "--goarch" "$goarch"
 	require_value "--archive-ext" "$archive_ext"
+	if [ "$goos" = "windows" ]; then
+		require_value "--binary-ext" "$binary_ext"
+	fi
 
 	local dist_path
 	dist_path="$(resolve_path "$dist_dir")"

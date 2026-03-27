@@ -19,6 +19,17 @@ Flags:
 USAGE
 }
 
+require_option_value() {
+	local flag="$1"
+	local value="${2:-}"
+	if [[ -n "$value" && "$value" != --* ]]; then
+		return
+	fi
+	echo "${flag} requires a value" >&2
+	usage >&2
+	exit 1
+}
+
 version=""
 repo="respawn-app/builder"
 formula="builder-cli"
@@ -29,18 +40,22 @@ do_push="false"
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--version)
+		require_option_value "--version" "${2:-}"
 		version="$2"
 		shift 2
 		;;
 	--repo)
+		require_option_value "--repo" "${2:-}"
 		repo="$2"
 		shift 2
 		;;
 	--formula)
+		require_option_value "--formula" "${2:-}"
 		formula="$2"
 		shift 2
 		;;
 	--tap)
+		require_option_value "--tap" "${2:-}"
 		tap_dir="$2"
 		shift 2
 		;;
