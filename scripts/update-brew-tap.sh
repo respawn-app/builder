@@ -138,7 +138,8 @@ class ${formula_class} < Formula
   depends_on "ripgrep"
 
   def install
-    system({ "BUILDER_VERSION" => version.to_s }, "bash", "scripts/build.sh", "--output", bin/"builder")
+    ENV["BUILDER_VERSION"] = version.to_s
+    system "bash", "scripts/build.sh", "--output", bin/"builder"
   end
 
   test do
