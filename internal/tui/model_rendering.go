@@ -6,18 +6,7 @@ import (
 )
 
 func (m Model) renderFlatDetailTranscript() string {
-	blocks := m.buildDetailBlocks(true, true)
-	if len(blocks) == 0 {
-		return ""
-	}
-	lines := make([]string, 0, len(blocks)*2)
-	for idx, block := range blocks {
-		if idx > 0 {
-			lines = append(lines, detailDivider())
-		}
-		lines = append(lines, block.lines...)
-	}
-	return strings.Join(lines, "\n")
+	return m.DetailProjection(true, true).Render(detailDivider())
 }
 
 func (m Model) buildDetailBlocks(includeStreaming bool, applySelection bool) []ongoingBlock {
@@ -33,22 +22,11 @@ func (m Model) renderFlatOngoingTranscript() string {
 }
 
 func (m Model) renderFlatCommittedOngoingTranscript() string {
-	return m.renderFlatOngoingTranscriptWithStreaming(false)
+	return m.CommittedOngoingProjection().Render(detailDivider())
 }
 
 func (m Model) renderFlatOngoingTranscriptWithStreaming(includeStreaming bool) string {
-	blocks := m.buildOngoingBlocks(includeStreaming)
-	if len(blocks) == 0 {
-		return ""
-	}
-	lines := make([]string, 0, len(blocks)*2)
-	for idx, block := range blocks {
-		if idx > 0 && ongoingDividerGroup(blocks[idx-1].role) != ongoingDividerGroup(block.role) {
-			lines = append(lines, detailDivider())
-		}
-		lines = append(lines, block.lines...)
-	}
-	return strings.Join(lines, "\n")
+	return m.OngoingProjection(includeStreaming).Render(detailDivider())
 }
 
 func (m Model) buildOngoingBlocks(includeStreaming bool) []ongoingBlock {
@@ -104,7 +82,7 @@ func (m Model) prefixedReasoningBlock(entryIndex int, consumed map[int]struct{},
 	if !ok {
 		return ongoingBlock{}, false
 	}
-	return ongoingBlock{role: "reasoning", lines: thinkingBlock, entryIndex: -1}, true
+	return ongoingBlock{role: "reasoning", lines: thinkingBlock, entryIndex: -1, entryEnd: -1}, true
 }
 
 func (m Model) entryBlock(entryIndex int, entry TranscriptEntry, role string, consumed map[int]struct{}, resultIndex toolResultIndex, opts transcriptBlockOptions) (ongoingBlock, bool) {
@@ -120,6 +98,7 @@ func (m Model) entryBlock(entryIndex int, entry TranscriptEntry, role string, co
 			role:       blockRole,
 			lines:      m.flattenEntry(blockRole, entry.Text),
 			entryIndex: entryIndex,
+			entryEnd:   entryIndex,
 		}, true
 	default:
 		return m.standardEntryBlock(entryIndex, entry, role, consumed, opts), true
@@ -137,11 +116,16 @@ func (m Model) toolCallBlock(entryIndex int, entry TranscriptEntry, consumed map
 		blockRole = "tool_shell"
 	}
 	combined := m.toolCallDisplayText(entry, blockRole, opts)
-	blockRole, combined = m.applyToolResult(entryIndex, entry.ToolCall, blockRole, combined, consumed, resultIndex, opts)
+	entryEnd := entryIndex
+	blockRole, combined, resultIdx := m.applyToolResult(entryIndex, entry.ToolCall, blockRole, combined, consumed, resultIndex, opts)
+	if resultIdx >= 0 {
+		entryEnd = resultIdx
+	}
 	return ongoingBlock{
 		role:       blockRole,
 		lines:      m.flattenEntryWithMeta(blockRole, combined, opts.mode == transcriptBlockModeOngoing, entry.ToolCall),
 		entryIndex: entryIndex,
+		entryEnd:   entryEnd,
 	}
 }
 
@@ -161,6 +145,7 @@ func (m Model) askQuestionBlock(entryIndex int, entry TranscriptEntry, consumed 
 		role:       blockRole,
 		lines:      m.flattenAskQuestionEntry(blockRole, question, suggestions, recommendedOptionIndex, answer, opts.mode == transcriptBlockModeDetail),
 		entryIndex: entryIndex,
+		entryEnd:   entryIndex,
 	}
 }
 
@@ -175,10 +160,10 @@ func (m Model) toolCallDisplayText(entry TranscriptEntry, blockRole string, opts
 	return combined
 }
 
-func (m Model) applyToolResult(entryIndex int, meta *transcript.ToolCallMeta, blockRole string, combined string, consumed map[int]struct{}, resultIndex toolResultIndex, opts transcriptBlockOptions) (string, string) {
+func (m Model) applyToolResult(entryIndex int, meta *transcript.ToolCallMeta, blockRole string, combined string, consumed map[int]struct{}, resultIndex toolResultIndex, opts transcriptBlockOptions) (string, string, int) {
 	resultIdx := resultIndex.findMatchingToolResultIndex(m.transcript, entryIndex, consumed)
 	if resultIdx < 0 {
-		return blockRole, combined
+		return blockRole, combined, -1
 	}
 	nextRole := strings.TrimSpace(m.transcript[resultIdx].Role)
 	if opts.mode == transcriptBlockModeDetail {
@@ -192,7 +177,7 @@ func (m Model) applyToolResult(entryIndex int, meta *transcript.ToolCallMeta, bl
 		blockRole = toolBlockRoleFromResult(nextRole, blockRole)
 		consumed[resultIdx] = struct{}{}
 	}
-	return blockRole, combined
+	return blockRole, combined, resultIdx
 }
 
 func (m Model) standardEntryBlock(entryIndex int, entry TranscriptEntry, role string, consumed map[int]struct{}, opts transcriptBlockOptions) ongoingBlock {
@@ -201,6 +186,7 @@ func (m Model) standardEntryBlock(entryIndex int, entry TranscriptEntry, role st
 			role:       role,
 			lines:      m.flattenEntry(role, m.combinedThinkingText(entryIndex, consumed)),
 			entryIndex: entryIndex,
+			entryEnd:   entryIndex,
 		}
 	}
 	text := entry.Text
@@ -216,7 +202,7 @@ func (m Model) standardEntryBlock(entryIndex int, entry TranscriptEntry, role st
 	if opts.applySelection {
 		lines = m.maybeSelectedUserBlock(entryIndex, role, lines)
 	}
-	return ongoingBlock{role: role, lines: lines, entryIndex: entryIndex}
+	return ongoingBlock{role: role, lines: lines, entryIndex: entryIndex, entryEnd: entryIndex}
 }
 
 func (m Model) combinedThinkingText(entryIndex int, consumed map[int]struct{}) string {
@@ -244,7 +230,7 @@ func (m Model) combinedThinkingText(entryIndex int, consumed map[int]struct{}) s
 func (m Model) appendStreamingBlocks(blocks []ongoingBlock, opts transcriptBlockOptions) []ongoingBlock {
 	if opts.includeStreaming && opts.mode == transcriptBlockModeDetail {
 		if lines := m.streamingReasoningLines(); len(lines) > 0 {
-			blocks = append(blocks, ongoingBlock{role: "reasoning", lines: lines, entryIndex: -1})
+			blocks = append(blocks, ongoingBlock{role: "reasoning", lines: lines, entryIndex: -1, entryEnd: -1})
 		}
 	}
 	if !opts.includeStreaming || m.ongoing == "" {
@@ -254,7 +240,7 @@ func (m Model) appendStreamingBlocks(blocks []ongoingBlock, opts transcriptBlock
 	if opts.mode == transcriptBlockModeOngoing {
 		lines = m.flattenEntryPlain("assistant", m.ongoing)
 	}
-	return append(blocks, ongoingBlock{role: "assistant", lines: lines, entryIndex: -1})
+	return append(blocks, ongoingBlock{role: "assistant", lines: lines, entryIndex: -1, entryEnd: -1})
 }
 
 func (m Model) streamingReasoningLines() []string {

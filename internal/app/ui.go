@@ -307,13 +307,8 @@ type uiModel struct {
 	sawAssistantDelta bool
 	logger            uiLogger
 
-	activeAsk       *askEvent
-	askQueue        []askEvent
-	askCursor       int
-	askFreeform     bool
-	askFreeformMode askFreeformMode
-	askInput        string
-	askInputCursor  int
+	interaction uiInteractionState
+	ask         uiAskState
 
 	termWidth       int
 	termHeight      int
@@ -328,58 +323,38 @@ type uiModel struct {
 	nextParentSessionID      string
 	sessionName              string
 	sessionID                string
-	psVisible                bool
-	psOverlayPushed          bool
-	psSelection              int
-	psEntries                []shelltool.Snapshot
+	processList              uiProcessListState
 	helpVisible              bool
 	reasoningStatusHeader    string
 	statusConfig             uiStatusConfig
 	statusCollector          uiStatusCollector
 	statusRepository         uiStatusRepository
-	statusVisible            bool
-	statusOverlayPushed      bool
-	statusLoading            bool
-	statusScroll             int
-	statusSnapshot           uiStatusSnapshot
-	statusError              string
-	statusRefreshToken       uint64
-	statusPendingSections    map[uiStatusSection]bool
-	statusSectionWarnings    map[uiStatusSection]string
+	status                   uiStatusOverlayState
 
 	transientStatus      string
 	transientStatusKind  uiStatusNoticeKind
 	transientStatusToken uint64
 	debugKeys            bool
 
-	transcriptEntries       []tui.TranscriptEntry
-	nativeFlushedEntryCount int
-	nativeHistoryReplayed   bool
-	nativeReplayWidth       int
-	nativeFormatter         tui.Model
-	nativeFormatterReady    bool
-	nativeFormatterWidth    int
-	nativeFormatterSnapshot string
-	nativeRenderedSnapshot  string
-	nativeFormatterEntries  []tui.TranscriptEntry
-	startupCmds             []tea.Cmd
-	nativeLiveRegionLines   int
-	nativeLiveRegionPad     int
-	nativeStreamingActive   bool
-	nativeResizeReplayToken uint64
+	transcriptEntries        []tui.TranscriptEntry
+	nativeFlushedEntryCount  int
+	nativeHistoryReplayed    bool
+	nativeReplayWidth        int
+	nativeFormatterWidth     int
+	nativeProjection         tui.TranscriptProjection
+	nativeRenderedProjection tui.TranscriptProjection
+	nativeRenderedSnapshot   string
+	startupCmds              []tea.Cmd
+	nativeLiveRegionLines    int
+	nativeLiveRegionPad      int
+	nativeStreamingActive    bool
+	nativeResizeReplayToken  uint64
 
 	lastEscAt              time.Time
 	pendingCSIShiftEnterAt time.Time
 	pendingCSIShiftEnter   bool
 
-	rollbackMode                     bool
-	rollbackEditing                  bool
-	rollbackOverlayPushed            bool
-	rollbackCandidates               []rollbackCandidate
-	rollbackSelection                int
-	rollbackSelectedUserMessageIndex int
-	rollbackRestoreOngoingScroll     int
-	rollbackRestoreScrollActive      bool
+	rollback uiRollbackState
 }
 
 func (m *uiModel) isInputLocked() bool {
@@ -419,7 +394,9 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 		reviewerMode:             "off",
 		autoCompactionEnabled:    true,
 		conversationFreshness:    session.ConversationFreshnessFresh,
-		askInputCursor:           -1,
+		interaction:              uiInteractionState{Mode: uiInputModeMain},
+		ask:                      uiAskState{inputCursor: -1},
+		rollback:                 uiRollbackState{phase: uiRollbackPhaseInactive},
 		statusRepository:         newMemoryUIStatusRepository(),
 	}
 	for _, opt := range opts {
@@ -569,10 +546,16 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.termWidth = msg.Width
 		m.termHeight = msg.Height
 		m.windowSizeKnown = true
-		if m.nativeFormatterReady && previousWidth > 0 && previousWidth != msg.Width {
-			m.rebaseNativeFormatterSnapshot()
-		}
 		m.syncViewport()
+		if m.nativeHistoryReplayed && previousWidth > 0 && previousWidth != msg.Width {
+			committedEntries := tui.CommittedOngoingEntries(m.transcriptEntries)
+			if len(committedEntries) == 0 {
+				m.resetNativeHistoryState()
+				m.nativeHistoryReplayed = true
+			} else {
+				m.rebaseNativeProjection(m.view.CommittedOngoingProjection(), len(committedEntries))
+			}
+		}
 		if !m.nativeHistoryReplayed {
 			return m, m.syncNativeHistoryFromTranscript()
 		}
@@ -642,7 +625,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		next.(*uiModel).syncViewport()
 		return next, cmd
 	case processListRefreshTickMsg:
-		if !m.psVisible {
+		if !m.processList.isOpen() {
 			m.syncViewport()
 			return m, nil
 		}
@@ -650,59 +633,59 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncViewport()
 		return m, waitProcessListRefresh()
 	case statusRefreshDoneMsg:
-		if msg.token != m.statusRefreshToken {
+		if msg.token != m.status.refreshToken {
 			m.syncViewport()
 			return m, nil
 		}
-		m.statusPendingSections = nil
-		m.statusSectionWarnings = nil
-		m.statusLoading = false
+		m.status.pendingSections = nil
+		m.status.sectionWarnings = nil
+		m.status.loading = false
 		if msg.err != nil {
-			m.statusError = msg.err.Error()
+			m.status.error = msg.err.Error()
 			m.syncViewport()
 			return m, m.setTransientStatusWithKind(msg.err.Error(), uiStatusNoticeError)
 		}
-		m.statusError = ""
-		m.statusSnapshot = msg.snapshot
+		m.status.error = ""
+		m.status.snapshot = msg.snapshot
 		m.syncViewport()
 		return m, nil
 	case statusBaseRefreshDoneMsg:
-		if msg.token != m.statusRefreshToken {
+		if msg.token != m.status.refreshToken {
 			m.syncViewport()
 			return m, nil
 		}
-		m.statusError = ""
+		m.status.error = ""
 		snapshot := msg.snapshot
-		if statusHasAuthData(m.statusSnapshot) {
-			snapshot.Auth = m.statusSnapshot.Auth
-			snapshot.Subscription = m.statusSnapshot.Subscription
+		if statusHasAuthData(m.status.snapshot) {
+			snapshot.Auth = m.status.snapshot.Auth
+			snapshot.Subscription = m.status.snapshot.Subscription
 		}
-		if m.statusSnapshot.Git.Visible {
-			snapshot.Git = m.statusSnapshot.Git
+		if m.status.snapshot.Git.Visible {
+			snapshot.Git = m.status.snapshot.Git
 		}
-		if m.statusSnapshot.Skills != nil {
-			snapshot.Skills = m.statusSnapshot.Skills
+		if m.status.snapshot.Skills != nil {
+			snapshot.Skills = m.status.snapshot.Skills
 		}
-		if m.statusSnapshot.SkillTokenCounts != nil {
-			snapshot.SkillTokenCounts = m.statusSnapshot.SkillTokenCounts
+		if m.status.snapshot.SkillTokenCounts != nil {
+			snapshot.SkillTokenCounts = m.status.snapshot.SkillTokenCounts
 		}
-		if m.statusSnapshot.AgentsPaths != nil {
-			snapshot.AgentsPaths = m.statusSnapshot.AgentsPaths
+		if m.status.snapshot.AgentsPaths != nil {
+			snapshot.AgentsPaths = m.status.snapshot.AgentsPaths
 		}
-		if m.statusSnapshot.AgentTokenCounts != nil {
-			snapshot.AgentTokenCounts = m.statusSnapshot.AgentTokenCounts
+		if m.status.snapshot.AgentTokenCounts != nil {
+			snapshot.AgentTokenCounts = m.status.snapshot.AgentTokenCounts
 		}
-		m.statusSnapshot = snapshot
+		m.status.snapshot = snapshot
 		m.finishStatusSectionRefresh(uiStatusSectionBase, msg.snapshot.CollectorWarning)
 		m.syncViewport()
 		return m, nil
 	case statusAuthRefreshDoneMsg:
-		if msg.token != m.statusRefreshToken {
+		if msg.token != m.status.refreshToken {
 			m.syncViewport()
 			return m, nil
 		}
-		m.statusSnapshot.Auth = msg.result.Auth
-		m.statusSnapshot.Subscription = msg.result.Subscription
+		m.status.snapshot.Auth = msg.result.Auth
+		m.status.snapshot.Subscription = msg.result.Subscription
 		if m.statusRepository != nil {
 			m.statusRepository.StoreAuth(msg.cacheKey, msg.result, time.Now())
 		}
@@ -710,11 +693,11 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncViewport()
 		return m, nil
 	case statusGitRefreshDoneMsg:
-		if msg.token != m.statusRefreshToken {
+		if msg.token != m.status.refreshToken {
 			m.syncViewport()
 			return m, nil
 		}
-		m.statusSnapshot.Git = msg.result.Git
+		m.status.snapshot.Git = msg.result.Git
 		if m.statusRepository != nil {
 			m.statusRepository.StoreGit(msg.cacheKey, msg.result, time.Now())
 		}
@@ -722,14 +705,14 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncViewport()
 		return m, nil
 	case statusEnvironmentRefreshDoneMsg:
-		if msg.token != m.statusRefreshToken {
+		if msg.token != m.status.refreshToken {
 			m.syncViewport()
 			return m, nil
 		}
-		m.statusSnapshot.Skills = msg.result.Skills
-		m.statusSnapshot.SkillTokenCounts = msg.result.SkillTokenCounts
-		m.statusSnapshot.AgentsPaths = msg.result.AgentsPaths
-		m.statusSnapshot.AgentTokenCounts = msg.result.AgentTokenCounts
+		m.status.snapshot.Skills = msg.result.Skills
+		m.status.snapshot.SkillTokenCounts = msg.result.SkillTokenCounts
+		m.status.snapshot.AgentsPaths = msg.result.AgentsPaths
+		m.status.snapshot.AgentTokenCounts = msg.result.AgentTokenCounts
 		if m.statusRepository != nil {
 			m.statusRepository.StoreEnvironment(msg.cacheKey, msg.result, time.Now())
 		}

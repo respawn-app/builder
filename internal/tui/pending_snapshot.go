@@ -2,13 +2,19 @@ package tui
 
 import (
 	"strings"
-
-	xansi "github.com/charmbracelet/x/ansi"
 )
 
 func RenderPendingToolSnapshot(entries []TranscriptEntry, theme string, width int, spinner string) string {
+	return renderPendingToolSnapshotProjection(entries, theme, width, spinner).Render(TranscriptDivider)
+}
+
+func RenderPendingToolSnapshotLines(entries []TranscriptEntry, theme string, width int, spinner string) []TranscriptProjectionLine {
+	return renderPendingToolSnapshotProjection(entries, theme, width, spinner).Lines(TranscriptDivider)
+}
+
+func renderPendingToolSnapshotProjection(entries []TranscriptEntry, theme string, width int, spinner string) TranscriptProjection {
 	if len(entries) == 0 {
-		return ""
+		return TranscriptProjection{}
 	}
 	if width <= 0 {
 		width = 120
@@ -25,16 +31,9 @@ func RenderPendingToolSnapshot(entries []TranscriptEntry, theme string, width in
 	blocks := model.buildOngoingBlocks(false)
 	blocks = model.applyPendingSpinner(blocks, entries, spinner)
 	if len(blocks) == 0 {
-		return ""
+		return TranscriptProjection{}
 	}
-	lines := make([]string, 0, len(blocks)*2)
-	for idx, block := range blocks {
-		if idx > 0 && ongoingDividerGroup(blocks[idx-1].role) != ongoingDividerGroup(block.role) {
-			lines = append(lines, detailDivider())
-		}
-		lines = append(lines, block.lines...)
-	}
-	return strings.Join(lines, "\n")
+	return projectionFromOngoingBlocks(blocks)
 }
 
 func (m Model) applyPendingSpinner(blocks []ongoingBlock, entries []TranscriptEntry, spinner string) []ongoingBlock {
@@ -50,25 +49,34 @@ func (m Model) applyPendingSpinner(blocks []ongoingBlock, entries []TranscriptEn
 			out = append(out, block)
 			continue
 		}
-		symbol := m.roleSymbol(block.role)
-		if symbol == "" {
-			out = append(out, block)
-			continue
-		}
-		plainPrefix := rolePrefix(block.role) + " "
-		plainFirstLine := xansi.Strip(block.lines[0])
-		if !strings.HasPrefix(plainFirstLine, plainPrefix) {
-			out = append(out, block)
-			continue
-		}
-		lines := append([]string(nil), block.lines...)
 		spinnerSymbol := styleForRole(block.role, m.palette()).Render(trimmedSpinner)
-		body := strings.TrimPrefix(plainFirstLine, plainPrefix)
-		body = m.palette().preview.Faint(true).Render(body)
-		lines[0] = spinnerSymbol + " " + body
-		out = append(out, ongoingBlock{role: block.role, lines: lines, entryIndex: block.entryIndex})
+		rebuilt, ok := m.renderPendingSpinnerBlock(block, entries, spinnerSymbol)
+		if !ok {
+			out = append(out, block)
+			continue
+		}
+		out = append(out, rebuilt)
 	}
 	return out
+}
+
+func (m Model) renderPendingSpinnerBlock(block ongoingBlock, entries []TranscriptEntry, spinnerSymbol string) (ongoingBlock, bool) {
+	if block.entryIndex < 0 || block.entryIndex >= len(entries) {
+		return ongoingBlock{}, false
+	}
+	entry := entries[block.entryIndex]
+	if strings.TrimSpace(entry.Role) != "tool_call" {
+		return ongoingBlock{}, false
+	}
+	lines := block.lines
+	if isAskQuestionToolCall(entry.ToolCall) {
+		question, suggestions, recommendedOptionIndex := askQuestionDisplay(entry.ToolCall, entry.Text)
+		lines = m.flattenAskQuestionEntryWithSymbol(block.role, question, suggestions, recommendedOptionIndex, "", false, spinnerSymbol)
+	} else {
+		combined := m.toolCallDisplayText(entry, block.role, transcriptBlockOptions{mode: transcriptBlockModeOngoing})
+		lines = m.flattenEntryWithMetaAndSymbol(block.role, combined, true, entry.ToolCall, spinnerSymbol)
+	}
+	return ongoingBlock{role: block.role, lines: lines, entryIndex: block.entryIndex, entryEnd: block.entryEnd}, true
 }
 
 func (m Model) shouldRenderPendingSpinner(block ongoingBlock, entries []TranscriptEntry, consumedResults map[int]struct{}, resultIndex toolResultIndex) bool {

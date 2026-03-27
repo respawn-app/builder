@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	xansi "github.com/charmbracelet/x/ansi"
 )
 
 func detailDivider() string {
@@ -68,31 +67,8 @@ func compactReviewerSuggestionsForOngoing(text string) string {
 	return strings.TrimSpace(text)
 }
 
-func isReviewerCacheHitLine(text string) bool {
-	line := strings.ToLower(strings.TrimSpace(xansi.Strip(text)))
-	if line == "" {
-		return false
-	}
-	if !strings.HasSuffix(line, "cache hit") {
-		return false
-	}
-	prefix := strings.TrimSpace(strings.TrimSuffix(line, "cache hit"))
-	if !strings.HasSuffix(prefix, "%") {
-		return false
-	}
-	digits := strings.TrimSpace(strings.TrimSuffix(prefix, "%"))
-	if digits == "" {
-		return false
-	}
-	for _, r := range digits {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
-}
-
 func askQuestionDisplay(meta *transcript.ToolCallMeta, text string) (string, []string, int) {
+	_ = text
 	question := ""
 	suggestions := make([]string, 0)
 	recommendedOptionIndex := 0
@@ -111,9 +87,6 @@ func askQuestionDisplay(meta *transcript.ToolCallMeta, text string) (string, []s
 		}
 	}
 	if question == "" {
-		question = normalizeAskQuestionQuestion(text)
-	}
-	if question == "" {
 		question = "ask_question"
 	}
 	return question, suggestions, recommendedOptionIndex
@@ -127,19 +100,18 @@ func normalizeAskQuestionQuestion(question string) string {
 	if strings.EqualFold(trimmed, "ask_question") {
 		return ""
 	}
-	if strings.HasPrefix(strings.ToLower(trimmed), "question:") {
-		trimmed = strings.TrimSpace(trimmed[len("question:"):])
-	}
 	return trimmed
 }
 
 func normalizeAskQuestionSuggestion(suggestion string) string {
-	trimmed := strings.TrimSpace(suggestion)
-	trimmed = strings.TrimPrefix(trimmed, "-")
-	return strings.TrimSpace(trimmed)
+	return strings.TrimSpace(suggestion)
 }
 
 func (m Model) flattenAskQuestionEntry(role, question string, suggestions []string, recommendedOptionIndex int, answer string, includeSuggestions bool) []string {
+	return m.flattenAskQuestionEntryWithSymbol(role, question, suggestions, recommendedOptionIndex, answer, includeSuggestions, "")
+}
+
+func (m Model) flattenAskQuestionEntryWithSymbol(role, question string, suggestions []string, recommendedOptionIndex int, answer string, includeSuggestions bool, symbolOverride string) []string {
 	renderWidth := m.viewportWidth
 	if rolePrefix(role) != "" {
 		renderWidth -= 2
@@ -196,7 +168,10 @@ func (m Model) flattenAskQuestionEntry(role, question string, suggestions []stri
 		lines = append(lines, askQuestionLine{text: "", kind: "question"})
 	}
 
-	symbol := m.roleSymbol(role)
+	symbol := symbolOverride
+	if symbol == "" {
+		symbol = m.roleSymbol(role)
+	}
 	out := make([]string, 0, len(lines))
 	for idx, line := range lines {
 		display := line.text
