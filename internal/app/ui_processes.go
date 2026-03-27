@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
+	"builder/internal/shared/textutil"
+	"builder/internal/tools"
 	shelltool "builder/internal/tools/shell"
 	"builder/internal/tui"
 
@@ -16,8 +19,10 @@ import (
 )
 
 const (
-	processListEntryLines  = 5
-	processListFooterLines = 2
+	processListHeaderLines = 1
+	processListEntryLines  = 4
+	processListFooterLines = 1
+	processListRailGlyph   = "│"
 )
 
 func (m *uiModel) refreshProcessEntries() {
@@ -112,7 +117,7 @@ func (m *uiModel) moveProcessSelectionPage(deltaPages int) {
 }
 
 func (m *uiModel) processListRowsPerPage() int {
-	available := m.termHeight - 1 - processListFooterLines // status line + footer
+	available := m.termHeight - 1 - processListHeaderLines - processListFooterLines // status line + header + footer
 	if available < processListEntryLines {
 		return 1
 	}
@@ -144,6 +149,18 @@ func (m *uiModel) selectedProcess() (shelltool.Snapshot, bool) {
 		return shelltool.Snapshot{}, false
 	}
 	return m.processList.entries[m.processList.selection], true
+}
+
+func (m *uiModel) processListHasRunningEntries() bool {
+	if m == nil || !m.processList.isOpen() {
+		return false
+	}
+	for _, entry := range m.processList.entries {
+		if entry.Running || strings.TrimSpace(entry.State) == "starting" || strings.TrimSpace(entry.State) == "running" {
+			return true
+		}
+	}
+	return false
 }
 
 func (c uiInputController) handleProcessListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -318,54 +335,244 @@ func (l uiViewLayout) renderProcessList(width, height int, style uiStyles) []str
 		return []string{padRight("", width)}
 	}
 	m.refreshProcessEntries()
-	footerLines := []string{
-		style.meta.Bold(true).Render(fmt.Sprintf("Background Processes (%d)", len(m.processList.entries))),
-		style.meta.Render("Esc/q close | Enter/i paste transcript | k kill | o open logs | PgUp/PgDn/Home/End move | auto-refresh + r refresh"),
+	headerLines := []string{renderProcessListHeader(m.processList.entries, width, style)}
+	remainingHeight := height - len(headerLines)
+	if remainingHeight < 0 {
+		remainingHeight = 0
 	}
-	contentHeight := height - len(footerLines)
-	if contentHeight < 1 {
-		contentHeight = 1
+	footerLines := []string{}
+	if remainingHeight >= processListEntryLines+processListFooterLines {
+		footerLines = []string{renderProcessListFooter(width, style)}
+		remainingHeight -= len(footerLines)
 	}
-	content := make([]string, 0, contentHeight)
-	if len(m.processList.entries) == 0 {
-		content = append(content, style.meta.Render("No background processes."))
+	contentHeight := remainingHeight
+	content := make([]string, 0, max(0, contentHeight))
+	if contentHeight > 0 {
+		if len(m.processList.entries) == 0 {
+			content = append(content, style.meta.Render("○ No background processes."))
+		} else {
+			visibleRows := make([]string, 0, len(m.processList.entries)*processListEntryLines)
+			for idx, entry := range m.processList.entries {
+				visibleRows = append(visibleRows, renderProcessListEntry(entry, idx == m.processList.selection, width, m.theme, m.spinnerFrame, style)...)
+			}
+			start := processListStartRow(m.processList.selection, len(m.processList.entries), contentHeight)
+			end := start + contentHeight
+			if end > len(visibleRows) {
+				end = len(visibleRows)
+			}
+			content = append(content, visibleRows[start:end]...)
+		}
 		for len(content) < contentHeight {
 			content = append(content, "")
 		}
-		return l.renderChatContentLines(append(content[:contentHeight], footerLines...), nil, width, style)
 	}
-	visibleRows := make([]string, 0, len(m.processList.entries)*processListEntryLines)
-	for idx, entry := range m.processList.entries {
-		prefix := "  "
-		if idx == m.processList.selection {
-			prefix = "> "
+	lines := make([]string, 0, len(headerLines)+len(content)+len(footerLines))
+	lines = append(lines, headerLines...)
+	lines = append(lines, content...)
+	lines = append(lines, footerLines...)
+	return l.renderChatContentLines(lines, nil, width, style)
+}
+
+func renderProcessListHeader(entries []shelltool.Snapshot, width int, style uiStyles) string {
+	running := 0
+	for _, entry := range entries {
+		if entry.Running {
+			running++
 		}
-		state := entry.State
-		if strings.TrimSpace(state) == "" {
-			state = "running"
+	}
+	title := fmt.Sprintf("Background Processes (%d)", len(entries))
+	if len(entries) > 0 {
+		title = fmt.Sprintf("%s  %d running", title, running)
+	}
+	return style.brand.Render(truncateQueuedMessageLine(title, width))
+}
+
+func renderProcessListFooter(width int, style uiStyles) string {
+	controls := "Esc/q close | Enter/i paste | k kill | o logs | PgUp/PgDn/Home/End move | r refresh"
+	return style.meta.Render(truncateQueuedMessageLine(controls, width))
+}
+
+func renderProcessListEntry(entry shelltool.Snapshot, selected bool, width int, theme string, spinnerFrame int, style uiStyles) []string {
+	palette := uiPalette(theme)
+	entryStyles := newProcessListEntryStyles(theme, selected, processStateColor(entry, palette))
+	railGlyph := " "
+	separatorGlyph := ""
+	if selected {
+		railGlyph = processListRailGlyph
+		separatorGlyph = processListRailGlyph
+	}
+	indicator := renderProcessStateIndicator(entry, spinnerFrame)
+	stateMeta := []string{processStateLabel(entry)}
+	if age := humanAge(entry.StartedAt); age != "--" {
+		stateMeta = append(stateMeta, age)
+	}
+	if workdir := processListWorkdirLabel(entry.Workdir); workdir != "" {
+		stateMeta = append(stateMeta, workdir)
+	}
+	line1Parts := []string{entryStyles.rail.Render(railGlyph), entryStyles.line.Render(" "), entryStyles.indicator.Render(indicator), entryStyles.line.Render(" "), entryStyles.id.Render(entry.ID)}
+	if meta := strings.Join(stateMeta, "  "); meta != "" {
+		prefixWidth := processListVisibleWidth(line1Parts)
+		line1Parts = append(line1Parts, entryStyles.line.Render(" "), entryStyles.meta.Render(truncateQueuedMessageLine(meta, max(1, width-prefixWidth-1))))
+	}
+
+	command := compactProcessCommandPreview(entry.Command)
+	line2Parts := []string{entryStyles.rail.Render(railGlyph), entryStyles.line.Render("   "), entryStyles.prompt.Render("$"), entryStyles.line.Render(" "), entryStyles.text.Render(truncateQueuedMessageLine(command, max(1, width-processListVisibleWidth([]string{entryStyles.rail.Render(railGlyph), entryStyles.line.Render("   "), entryStyles.prompt.Render("$"), entryStyles.line.Render(" ")}))))}
+
+	output := processListOutputPreview(entry.RecentOutput)
+	if output == "" {
+		output = "<no output yet>"
+		line3Parts := []string{entryStyles.rail.Render(railGlyph), entryStyles.line.Render("   "), entryStyles.output.Render(truncateQueuedMessageLine(output, max(1, width-processListVisibleWidth([]string{entryStyles.rail.Render(railGlyph), entryStyles.line.Render("   ")}))))}
+		return []string{
+			processListPadLine(line1Parts, width, entryStyles.line),
+			processListPadLine(line2Parts, width, entryStyles.line),
+			processListPadLine(line3Parts, width, entryStyles.line),
+			processListPadLine([]string{entryStyles.rail.Render(separatorGlyph)}, width, entryStyles.line),
 		}
-		age := humanAge(entry.StartedAt)
-		line1 := fmt.Sprintf("%s[%s] %s  %s  %s", prefix, state, entry.ID, age, entry.Command)
-		line2 := fmt.Sprintf("   cwd: %s", entry.Workdir)
-		line3 := fmt.Sprintf("   log: %s", entry.LogPath)
-		preview := strings.TrimSpace(strings.ReplaceAll(entry.RecentOutput, "\n", " "))
-		if preview == "" {
-			preview = "<no output yet>"
+	}
+	line3Parts := []string{entryStyles.rail.Render(railGlyph), entryStyles.line.Render("   "), entryStyles.output.Render(truncateQueuedMessageLine(output, max(1, width-processListVisibleWidth([]string{entryStyles.rail.Render(railGlyph), entryStyles.line.Render("   ")}))))}
+	return []string{
+		processListPadLine(line1Parts, width, entryStyles.line),
+		processListPadLine(line2Parts, width, entryStyles.line),
+		processListPadLine(line3Parts, width, entryStyles.line),
+		processListPadLine([]string{entryStyles.rail.Render(separatorGlyph)}, width, entryStyles.line),
+	}
+}
+
+type processListEntryStyles struct {
+	rail      lipgloss.Style
+	line      lipgloss.Style
+	indicator lipgloss.Style
+	id        lipgloss.Style
+	meta      lipgloss.Style
+	prompt    lipgloss.Style
+	text      lipgloss.Style
+	output    lipgloss.Style
+}
+
+func newProcessListEntryStyles(theme string, selected bool, stateColor lipgloss.TerminalColor) processListEntryStyles {
+	palette := uiPalette(theme)
+	line := lipgloss.NewStyle().Foreground(palette.foreground)
+	if selected {
+		line = line.Background(palette.modeBg).Foreground(palette.foreground)
+	}
+	meta := line.Copy().Foreground(palette.muted).Faint(true)
+	return processListEntryStyles{
+		rail:      line.Copy().Foreground(palette.primary).Bold(true).Faint(false),
+		line:      line,
+		indicator: line.Copy().Foreground(stateColor).Bold(true).Faint(false),
+		id:        line.Copy().Bold(true).Faint(false),
+		meta:      meta,
+		prompt:    line.Copy().Foreground(palette.primary).Bold(true).Faint(false),
+		text:      line.Copy().Faint(false),
+		output:    meta,
+	}
+}
+
+func processListVisibleWidth(parts []string) int {
+	width := 0
+	for _, part := range parts {
+		width += lipgloss.Width(part)
+	}
+	return width
+}
+
+func processListPadLine(parts []string, width int, fill lipgloss.Style) string {
+	line := strings.Join(parts, "")
+	remaining := width - lipgloss.Width(line)
+	if remaining <= 0 {
+		return line
+	}
+	return line + fill.Render(strings.Repeat(" ", remaining))
+}
+
+func processStateColor(entry shelltool.Snapshot, palette uiColors) lipgloss.TerminalColor {
+	state := strings.TrimSpace(entry.State)
+	switch state {
+	case "completed":
+		return statusGreenColor()
+	case "failed", "killed":
+		return statusRedColor()
+	case "starting", "running":
+		return palette.primary
+	default:
+		if entry.Running {
+			return palette.primary
 		}
-		line4 := fmt.Sprintf("   out: %s", preview)
-		visibleRows = append(visibleRows, line1, line2, line3, line4, "")
+		if entry.ExitCode != nil && *entry.ExitCode == 0 {
+			return statusGreenColor()
+		}
+		if entry.ExitCode != nil {
+			return statusRedColor()
+		}
+		return palette.muted
 	}
-	available := contentHeight
-	start := processListStartRow(m.processList.selection, len(m.processList.entries), contentHeight)
-	end := start + available
-	if end > len(visibleRows) {
-		end = len(visibleRows)
+}
+
+func renderProcessStateIndicator(entry shelltool.Snapshot, spinnerFrame int) string {
+	state := strings.TrimSpace(entry.State)
+	if state == "starting" || state == "running" || (state == "" && entry.Running) {
+		if len(pendingToolSpinner.Frames) == 0 {
+			return "●"
+		}
+		index := spinnerFrame % len(pendingToolSpinner.Frames)
+		if index < 0 {
+			index = 0
+		}
+		return pendingToolSpinner.Frames[index]
 	}
-	content = append(content, visibleRows[start:end]...)
-	for len(content) < contentHeight {
-		content = append(content, "")
+	return "●"
+}
+
+func processStateLabel(entry shelltool.Snapshot) string {
+	state := strings.TrimSpace(entry.State)
+	if state != "" {
+		return state
 	}
-	return l.renderChatContentLines(append(content[:contentHeight], footerLines...), nil, width, style)
+	if entry.Running {
+		return "running"
+	}
+	if entry.ExitCode != nil && *entry.ExitCode == 0 {
+		return "completed"
+	}
+	if entry.ExitCode != nil {
+		return "failed"
+	}
+	return "queued"
+}
+
+func processListWorkdirLabel(workdir string) string {
+	trimmed := strings.TrimSpace(workdir)
+	if trimmed == "" {
+		return ""
+	}
+	base := filepath.Base(trimmed)
+	if base == "." || base == string(filepath.Separator) {
+		return trimmed
+	}
+	return base
+}
+
+func compactProcessCommandPreview(command string) string {
+	preview := tools.CompactToolCallText(nil, command)
+	if preview == "" {
+		preview = "<no command>"
+	}
+	normalized := textutil.NormalizeCRLF(command)
+	if strings.Contains(normalized, "\n") && !strings.HasSuffix(preview, " …") {
+		preview += " …"
+	}
+	return preview
+}
+
+func processListOutputPreview(output string) string {
+	lines := textutil.SplitLinesCRLF(output)
+	for idx := len(lines) - 1; idx >= 0; idx-- {
+		line := strings.TrimSpace(lines[idx])
+		if line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 func processListStartRow(selection, entryCount, contentHeight int) int {

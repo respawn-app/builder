@@ -15,7 +15,7 @@ func (c uiInputController) startQueuedInjectionSubmission() tea.Cmd {
 	c.startBusyActivity(false)
 	m.logf("step.resume_queued_injected pending_injected=%d", len(m.pendingInjected))
 	m.syncViewport()
-	return tea.Batch(c.submitQueuedUserMessagesCmd(), tickSpinner())
+	return tea.Batch(c.submitQueuedUserMessagesCmd(), c.model.ensureSpinnerTicking())
 }
 
 func (c uiInputController) submitQueuedUserMessagesCmd() tea.Cmd {

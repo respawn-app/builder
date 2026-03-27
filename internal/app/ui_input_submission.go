@@ -30,16 +30,16 @@ func (c uiInputController) startSubmission(text string) tea.Cmd {
 	}
 	m.syncViewport()
 	if isUserShell {
-		return tea.Batch(c.submitUserShellCmd(command), tickSpinner())
+		return tea.Batch(c.submitUserShellCmd(command), m.ensureSpinnerTicking())
 	}
 	if m.engine != nil {
 		m.preSubmitCheckToken++
 		token := m.preSubmitCheckToken
 		m.pendingPreSubmitText = text
 		m.queued = append(m.queued, text)
-		return tea.Batch(c.preSubmitCompactionCheckCmd(token, text), tickSpinner())
+		return tea.Batch(c.preSubmitCompactionCheckCmd(token, text), m.ensureSpinnerTicking())
 	}
-	return tea.Batch(c.submitCmd(text), tickSpinner())
+	return tea.Batch(c.submitCmd(text), m.ensureSpinnerTicking())
 }
 
 func (c uiInputController) startSubmissionWithPromptHistory(text string) tea.Cmd {
@@ -101,7 +101,7 @@ func (c uiInputController) startCompaction(args string) tea.Cmd {
 	c.startBusyActivity(true)
 	m.logf("compaction.start args_chars=%d", len(strings.TrimSpace(args)))
 	m.syncViewport()
-	return tea.Batch(c.compactCmd(args), tickSpinner())
+	return tea.Batch(c.compactCmd(args), m.ensureSpinnerTicking())
 }
 
 func (c uiInputController) startPreSubmitCompaction() tea.Cmd {
@@ -109,7 +109,7 @@ func (c uiInputController) startPreSubmitCompaction() tea.Cmd {
 	c.startBusyActivity(true)
 	m.logf("compaction.pre_submit.start")
 	m.syncViewport()
-	return tea.Batch(c.preSubmitCompactCmd(), tickSpinner())
+	return tea.Batch(c.preSubmitCompactCmd(), m.ensureSpinnerTicking())
 }
 
 func (c uiInputController) compactCmd(args string) tea.Cmd {
@@ -148,6 +148,9 @@ func (c uiInputController) finishBusyActivity(compacting bool) {
 	m.busy = false
 	m.clearReviewerState()
 	m.spinnerFrame = 0
+	if !m.shouldAnimateSpinner() {
+		m.stopSpinnerTicking()
+	}
 	if compacting {
 		m.compacting = false
 	}
@@ -221,9 +224,13 @@ func (c uiInputController) handlePreSubmitCompactionCheckDone(msg preSubmitCompa
 	return m, c.startPreSubmitCompaction()
 }
 
-func (c uiInputController) handleSpinnerTick() (tea.Model, tea.Cmd) {
+func (c uiInputController) handleSpinnerTick(msg spinnerTickMsg) (tea.Model, tea.Cmd) {
 	m := c.model
-	if !m.busy {
+	if msg.token == 0 || msg.token != m.spinnerTickToken {
+		return m, nil
+	}
+	if !m.shouldAnimateSpinner() {
+		m.stopSpinnerTicking()
 		return m, nil
 	}
 	frameCount := len(pendingToolSpinner.Frames)
@@ -232,7 +239,7 @@ func (c uiInputController) handleSpinnerTick() (tea.Model, tea.Cmd) {
 	}
 	m.spinnerFrame = (m.spinnerFrame + 1) % frameCount
 	m.syncViewport()
-	return m, tickSpinner()
+	return m, tickSpinner(msg.token)
 }
 
 func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
