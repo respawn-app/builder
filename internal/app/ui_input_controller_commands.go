@@ -77,9 +77,17 @@ func (c uiInputController) handleBackCommand() (tea.Model, tea.Cmd) {
 		m.appendLocalEntry("system", "No parent session available")
 		return m, nil
 	}
+	m.nextSessionInitialInput = m.backTeleportInput()
 	m.nextSessionID = strings.TrimSpace(m.engine.ParentSessionID())
 	m.exitAction = UIActionOpenSession
 	return m, tea.Quit
+}
+
+func (m *uiModel) backTeleportInput() string {
+	if m.engine == nil {
+		return ""
+	}
+	return m.engine.LastCommittedAssistantFinalAnswer()
 }
 
 func (c uiInputController) handleSessionNameCommand(sessionName string) (tea.Model, tea.Cmd) {

@@ -296,6 +296,7 @@
 - Run-safe commands execute immediately while busy.
 - Non-run-safe known commands while busy are rejected with transient status-line error.
 - `/review` auto-submits the embedded review rubric prompt; it stays in-place for empty sessions and forks a fresh child session once the current session already has a visible user prompt. Optional args are appended as review scope.
+- `/back` reopens the parent session when available; the parent draft becomes the child session's last committed assistant `final_answer` only when that message is also the last committed message, unless the parent already has its own saved draft.
 - `/supervisor` controls runtime reviewer invocation for the current session only.
 - `/supervisor` toggles when called without args; `/supervisor on|off` sets explicitly.
 - `/supervisor` emits user-visible confirmation in transcript + status line and does not persist to config.
@@ -338,6 +339,17 @@
 - JSON mode emits exactly one final object on `stdout`: `status`, `result`/`error`, `session_id`, `session_name`, `duration_ms`, plus continuation metadata when available.
 - Final-text mode emits the final assistant text to `stdout`, optionally followed by a continue hint.
 - Progress is quiet by default and is emitted to `stderr` only when `--progress-mode=stderr`.
+
+## Release Engineering
+
+- Official release binaries are built through `scripts/build.sh`; the release profile is `CGO_ENABLED=0`, `-trimpath`, `-buildvcs=false`, and `-ldflags "-s -w -X builder/internal/buildinfo.Version=..."`.
+- Release archive packaging and verification live in `scripts/release-artifacts.sh`; workflow YAML should stay orchestration-focused.
+- Supported release targets are `darwin/arm64`, `linux/amd64`, `linux/arm64`, `windows/amd64`, and `windows/arm64`; macOS Intel is unsupported and must not be added back.
+- Workflow runner labels should use `*-latest` aliases where GitHub provides them. ARM smoke-test jobs currently stay on `ubuntu-24.04-arm` and `windows-11-arm` because GitHub does not publish `-latest` aliases for those hosted runners.
+- Linux release binaries must stay statically linked; do not enable PIE or other dynamic-linking release modes.
+- GitHub releases must publish `checksums.txt`, and `scripts/install.sh` verifies archive checksums when that manifest is present.
+- The release workflow must verify the checksum manifest and smoke-test packaged binaries on Linux, macOS, and Windows before publishing.
+- GitHub artifact attestations are intentionally not part of the release pipeline.
 
 ## Experimental Reviewer
 

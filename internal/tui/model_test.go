@@ -1664,6 +1664,69 @@ func testRenderEntryTextUsesAppForegroundForHighlightedToolText(t *testing.T, th
 	}
 }
 
+func TestRenderEntryTextUsesSemanticForegroundForReviewerStatusByTheme(t *testing.T) {
+	for _, theme := range []string{"dark", "light"} {
+		t.Run(theme, func(t *testing.T) {
+			m := NewModel(WithTheme(theme))
+			out := m.renderEntryText("reviewer_status", "Supervisor ran: ok", 80, nil, false)
+			if !strings.HasPrefix(out, foregroundEscape(themeSuccessColor(theme))) {
+				t.Fatalf("expected reviewer status text to start with success foreground for %s theme, got %q", theme, out)
+			}
+			if got := ansi.Strip(out); got != "Supervisor ran: ok" {
+				t.Fatalf("expected reviewer status text preserved, got %q", got)
+			}
+		})
+	}
+}
+
+func TestRenderEntryTextUsesSemanticForegroundForWarningByTheme(t *testing.T) {
+	for _, theme := range []string{"dark", "light"} {
+		t.Run(theme, func(t *testing.T) {
+			m := NewModel(WithTheme(theme))
+			out := m.renderEntryText("warning", "Heads-up", 80, nil, false)
+			if !strings.HasPrefix(out, foregroundEscape(themeWarningColor(theme))) {
+				t.Fatalf("expected warning text to start with warning foreground for %s theme, got %q", theme, out)
+			}
+			if got := ansi.Strip(out); got != "Heads-up" {
+				t.Fatalf("expected warning text preserved, got %q", got)
+			}
+		})
+	}
+}
+
+func TestReviewerAndWarningViewUseSemanticForegroundInLightTheme(t *testing.T) {
+	m := NewModel(WithTheme("light"), WithPreviewLines(20))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "reviewer_status", Text: "Supervisor ran: ok"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "warning", Text: "Heads-up"})
+
+	rawOngoing := m.View()
+	reviewerLine := lineContaining(rawOngoing, "Supervisor ran: ok")
+	if reviewerLine == "" {
+		t.Fatalf("expected ongoing view to contain reviewer status, got %q", plainTranscript(rawOngoing))
+	}
+	if !strings.Contains(reviewerLine, foregroundEscape(themeSuccessColor("light"))) {
+		t.Fatalf("expected ongoing reviewer status to use success foreground, got %q", reviewerLine)
+	}
+	if strings.Contains(plainTranscript(rawOngoing), "Heads-up") {
+		t.Fatalf("expected warning hidden in ongoing view, got %q", plainTranscript(rawOngoing))
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	rawDetail := m.View()
+	reviewerLine = lineContaining(rawDetail, "Supervisor ran: ok")
+	warningLine := lineContaining(rawDetail, "Heads-up")
+	if reviewerLine == "" || warningLine == "" {
+		t.Fatalf("expected detail view to contain reviewer and warning lines, got %q", plainTranscript(rawDetail))
+	}
+	if !strings.Contains(reviewerLine, foregroundEscape(themeSuccessColor("light"))) {
+		t.Fatalf("expected detail reviewer status to use success foreground, got %q", reviewerLine)
+	}
+	if !strings.Contains(warningLine, foregroundEscape(themeWarningColor("light"))) {
+		t.Fatalf("expected detail warning to use warning foreground, got %q", warningLine)
+	}
+}
+
 func TestDetailWrapsNonMarkdownRoles(t *testing.T) {
 	m := NewModel()
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 10, Width: 28})
@@ -1766,10 +1829,15 @@ func testFlattenEntryWithMetaKeepsMutedShellHighlightWhenMuted(t *testing.T, the
 	command := "./gradlew -p apps/respawn detektFormat > docs/tmp/build-triage-2026-03-15/detektFormat.log 2>&1"
 
 	detail := m.renderEntryText("tool_shell_success", command, 120, meta, false)
-	ongoing := strings.Join(m.flattenEntryWithMeta("tool_shell_success", command, true, meta), "\n")
+	ongoingLines := m.flattenEntryWithMeta("tool_shell_success", command, true, meta)
+	ongoing := strings.Join(ongoingLines, "\n")
 
 	if !strings.Contains(detail, "\x1b[") {
 		t.Fatalf("expected detail shell command to remain highlighted, got %q", detail)
+	}
+	expectedPrefix := m.roleSymbol("tool_shell_success") + " "
+	if len(ongoingLines) == 0 || !strings.HasPrefix(ongoingLines[0], expectedPrefix) {
+		t.Fatalf("expected ongoing shell preview to preserve the full-color shell prefix, got %q want prefix %q", ongoing, expectedPrefix)
 	}
 	if !strings.Contains(ongoing, "\x1b[") {
 		t.Fatalf("expected ongoing shell command to keep muted highlighting, got %q", ongoing)
@@ -1837,6 +1905,9 @@ func TestOngoingWrappedShellPreviewKeepsMutedHighlightAcrossVisualLines(t *testi
 		t.Fatalf("expected wrapped ongoing shell preview to span multiple visual lines, got %d (%q)", len(lines), lines)
 	}
 	joined := strings.Join(lines, "\n")
+	if expectedPrefix := m.roleSymbol("tool_shell_success") + " "; !strings.HasPrefix(lines[0], expectedPrefix) {
+		t.Fatalf("expected wrapped shell preview to preserve the full-color shell prefix, got %q want prefix %q", lines[0], expectedPrefix)
+	}
 	if !strings.Contains(joined, ";2m") {
 		t.Fatalf("expected wrapped shell preview to remain faint across visual lines, got %q", joined)
 	}

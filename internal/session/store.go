@@ -220,6 +220,21 @@ func (s *Store) SetParentSessionID(parentSessionID string) error {
 	return s.persistMetaLocked()
 }
 
+func (s *Store) SetInputDraft(inputDraft string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.meta.InputDraft == inputDraft && (!s.persisted || hasSessionMeta(s.sessionDir)) {
+		return nil
+	}
+	s.meta.InputDraft = inputDraft
+	s.meta.UpdatedAt = time.Now().UTC()
+	if !s.persisted && inputDraft == "" {
+		return nil
+	}
+	return s.persistMetaLocked()
+}
+
 func (s *Store) SetContinuationContext(ctx ContinuationContext) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

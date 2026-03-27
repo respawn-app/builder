@@ -38,11 +38,9 @@ func (m Model) flattenEntryWithMetaAndSymbol(role, text string, muteText bool, t
 	}
 	isEditedBlock := isEditedToolBlock(plainLines)
 	laidOut := m.layoutEntryContentStage(role, content)
-	out := m.decorateEntryLayoutStage(role, laidOut, renderWidth, muteText, isEditedBlock, symbolOverride)
-	if muteText && isShellPreviewRole(role) {
-		joined := applyANSIStyleIntents(strings.Join(out, "\n"), ansiIntentPalette{ThemeForeground: m.palette().foregroundColor, SubduedForeground: m.palette().previewColor}, Subdued)
-		out = splitLines(joined)
-	}
+	decorated := m.decorateEntryLayoutBodyStage(role, laidOut, renderWidth, muteText, isEditedBlock)
+	decorated = m.applyDeferredDecoratedLayoutTransformStage(decorated)
+	out := m.attachRoleSymbolStage(role, decorated, symbolOverride)
 	if muteText && isShellPreviewRole(role) && shellPreviewShouldCollapse(text) {
 		ellipsis := "  " + m.palette().preview.Faint(true).Render("…")
 		if len(out) == 0 {
@@ -64,10 +62,10 @@ func (m Model) renderEntryContentStage(role, text string, width int, toolMeta *t
 }
 
 func (m Model) applyEntrySemanticTransformStage(content transcriptRenderContent) transcriptRenderContent {
-	palette := ansiIntentPalette{ThemeForeground: m.palette().foregroundColor, SubduedForeground: m.palette().previewColor}
+	palette := m.ansiIntentPalette()
 	out := transcriptRenderContent{WrapMode: content.WrapMode, Lines: make([]transcriptRenderLine, 0, len(content.Lines))}
 	for _, line := range content.Lines {
-		if line.Intents.Has(Subdued) && line.Intents.Has(SyntaxHighlighted) {
+		if shouldDeferEntrySemanticTransform(line.Intents) {
 			out.Lines = append(out.Lines, line)
 			continue
 		}
@@ -109,17 +107,16 @@ func (m Model) wrapEntryContentStage(content transcriptRenderContent, width int)
 }
 
 func (m Model) layoutEntryContentStage(role string, content transcriptRenderContent) []transcriptLayoutLine {
-	symbol := rolePrefix(role)
+	hasRoleSymbol := rolePrefix(role) != ""
 	out := make([]transcriptLayoutLine, 0, len(content.Lines))
 	for idx, line := range content.Lines {
-		prefix := "  "
+		layoutLine := transcriptLayoutLine{Text: line.Text, Intents: line.Intents}
 		if idx == 0 {
-			prefix = ""
-			if symbol != "" {
-				prefix = symbol + " "
-			}
+			layoutLine.ShowRoleSymbol = hasRoleSymbol
+		} else {
+			layoutLine.Prefix = "  "
 		}
-		out = append(out, transcriptLayoutLine{Prefix: prefix, Text: line.Text, Intents: line.Intents})
+		out = append(out, layoutLine)
 	}
 	if len(out) == 0 {
 		out = []transcriptLayoutLine{{}}
@@ -127,8 +124,42 @@ func (m Model) layoutEntryContentStage(role string, content transcriptRenderCont
 	return out
 }
 
-func (m Model) decorateEntryLayoutStage(role string, lines []transcriptLayoutLine, renderWidth int, muteText bool, isEditedBlock bool, symbolOverride string) []string {
-	out := make([]string, 0, len(lines))
+func (m Model) applyDeferredDecoratedLayoutTransformStage(lines []transcriptLayoutLine) []transcriptLayoutLine {
+	if len(lines) == 0 {
+		return lines
+	}
+	palette := m.ansiIntentPalette()
+	out := append([]transcriptLayoutLine(nil), lines...)
+	for start := 0; start < len(out); {
+		if !shouldDeferEntrySemanticTransform(out[start].Intents) {
+			start++
+			continue
+		}
+		intents := out[start].Intents
+		end := start + 1
+		for end < len(out) && out[end].Intents == intents && shouldDeferEntrySemanticTransform(out[end].Intents) {
+			end++
+		}
+		joined := make([]string, 0, end-start)
+		for idx := start; idx < end; idx++ {
+			joined = append(joined, out[idx].Text)
+		}
+		transformed := applyANSIStyleIntents(strings.Join(joined, "\n"), palette, intents)
+		transformedLines := splitLines(transformed)
+		if len(transformedLines) != end-start {
+			start = end
+			continue
+		}
+		for idx := start; idx < end; idx++ {
+			out[idx].Text = transformedLines[idx-start]
+		}
+		start = end
+	}
+	return out
+}
+
+func (m Model) decorateEntryLayoutBodyStage(role string, lines []transcriptLayoutLine, renderWidth int, muteText bool, isEditedBlock bool) []transcriptLayoutLine {
+	out := make([]transcriptLayoutLine, 0, len(lines))
 	for idx, line := range lines {
 		display := line.Text
 		if isToolHeadlineRole(role) {
@@ -138,7 +169,7 @@ func (m Model) decorateEntryLayoutStage(role string, lines []transcriptLayoutLin
 			display = m.styleToolLine(display)
 		}
 		if !strings.Contains(display, "\x1b[") {
-			display = applyANSIStyleIntents(display, ansiIntentPalette{ThemeForeground: m.palette().foregroundColor, SubduedForeground: m.palette().previewColor}, line.Intents)
+			display = applyANSIStyleIntents(display, m.ansiIntentPalette(), line.Intents)
 		}
 		if muteText && strings.TrimSpace(display) != "" && !isEditedBlock && !line.Intents.Has(Subdued) {
 			display = m.palette().preview.Faint(true).Render(display)
@@ -146,17 +177,9 @@ func (m Model) decorateEntryLayoutStage(role string, lines []transcriptLayoutLin
 			display = styleForRole(role, m.palette()).Render(display)
 		}
 		formatted := display
-		if idx == 0 {
-			if line.Prefix != "" {
-				symbol := symbolOverride
-				if symbol == "" {
-					symbol = m.roleSymbol(role)
-				}
-				formatted = symbol + " " + display
-			}
-		} else if strings.TrimSpace(display) == "" {
+		if idx > 0 && strings.TrimSpace(display) == "" {
 			formatted = ""
-		} else {
+		} else if idx > 0 {
 			formatted = line.Prefix + display
 		}
 		if line.Intents.Has(DiffAdded) {
@@ -164,6 +187,23 @@ func (m Model) decorateEntryLayoutStage(role string, lines []transcriptLayoutLin
 		}
 		if line.Intents.Has(DiffRemoved) {
 			formatted = m.tintToolDiffLine(formatted, "remove")
+		}
+		line.Text = formatted
+		out = append(out, line)
+	}
+	return out
+}
+
+func (m Model) attachRoleSymbolStage(role string, lines []transcriptLayoutLine, symbolOverride string) []string {
+	out := make([]string, 0, len(lines))
+	for idx, line := range lines {
+		formatted := line.Text
+		if idx == 0 && line.ShowRoleSymbol {
+			symbol := symbolOverride
+			if symbol == "" {
+				symbol = m.roleSymbol(role)
+			}
+			formatted = symbol + " " + formatted
 		}
 		out = append(out, formatted)
 	}
@@ -290,7 +330,7 @@ func (m Model) renderEntryText(role, text string, width int, toolMeta *transcrip
 	content := transcriptRenderContent{Lines: []transcriptRenderLine{{Text: rendered, Intents: intents}}, WrapMode: wrapMode}
 	content = m.applyEntrySemanticTransformStage(content)
 	content = m.wrapEntryContentStage(content, width)
-	palette := ansiIntentPalette{ThemeForeground: m.palette().foregroundColor, SubduedForeground: m.palette().previewColor}
+	palette := m.ansiIntentPalette()
 	parts := make([]string, 0, len(content.Lines))
 	for _, line := range content.Lines {
 		if !muteText && !strings.Contains(line.Text, "\x1b[") {
@@ -337,14 +377,22 @@ func (m Model) defaultEntryStyleIntents(role string, muteText bool) StyleIntent 
 		return Subdued
 	}
 	switch role {
-	case "reviewer_status", "reviewer_suggestions", "error":
-		return 0
+	case "reviewer_status", "reviewer_suggestions":
+		return SuccessForeground
+	case "warning":
+		return WarningForeground
+	case "error":
+		return ErrorForeground
 	default:
 		if isCompactionRole(role) {
 			return 0
 		}
 		return ThemeForeground
 	}
+}
+
+func shouldDeferEntrySemanticTransform(intents StyleIntent) bool {
+	return intents.Has(Subdued) && intents.Has(SyntaxHighlighted)
 }
 
 func shouldUseLowLevelMutedShellStyle(role, text string, toolMeta *transcript.ToolCallMeta) bool {

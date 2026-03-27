@@ -297,14 +297,14 @@ func TestNativeResizeReplaysOngoingScreenAfterRealResize(t *testing.T) {
 	time.Sleep(40 * time.Millisecond)
 	for _, size := range []tea.WindowSizeMsg{
 		{Width: 120, Height: 30},
-		{Width: 96, Height: 24},
-		{Width: 110, Height: 28},
-		{Width: 84, Height: 22},
+		{Width: 96, Height: 30},
+		{Width: 110, Height: 30},
+		{Width: 84, Height: 30},
 	} {
 		program.Send(size)
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
-	time.Sleep(40 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	program.Quit()
 
 	select {
@@ -317,12 +317,12 @@ func TestNativeResizeReplaysOngoingScreenAfterRealResize(t *testing.T) {
 	}
 
 	raw := out.String()
-	if count := strings.Count(raw, "\x1b[2J"); count != 1 {
-		t.Fatalf("expected only the startup clear when resize replay is skipped, got %d occurrences in %q", count, raw)
+	if count := strings.Count(raw, "\x1b[2J"); count < 2 || count > 3 {
+		t.Fatalf("expected startup clear plus 1-2 width-resize replay clears, got %d occurrences in %q", count, raw)
 	}
 	plain := xansi.Strip(raw)
-	if strings.Count(normalizedOutput(raw), "seed replay line") != 1 {
-		t.Fatalf("expected committed history not to be replayed after debounced resize, got %q", normalizedOutput(raw))
+	if count := strings.Count(normalizedOutput(raw), "seed replay line"); count < 2 || count > 3 {
+		t.Fatalf("expected committed history to replay at least once after debounced width resize burst, got %q", normalizedOutput(raw))
 	}
 	for _, line := range strings.Split(plain, "\n") {
 		if strings.Count(line, "ongoing | ") > 1 {
@@ -335,10 +335,10 @@ func TestNativeResizeReplaysOngoingScreenAfterRealResize(t *testing.T) {
 			borderLines++
 		}
 	}
-	if borderLines > 16 {
+	if borderLines > 24 {
 		t.Fatalf("expected bounded border redraw count during resize, got %d", borderLines)
 	}
-	if strings.Count(plain, "ongoing | ") > 12 {
+	if strings.Count(plain, "ongoing | ") > 16 {
 		t.Fatalf("expected bounded status redraw count during resize, got %d", strings.Count(plain, "ongoing | "))
 	}
 }
@@ -634,8 +634,8 @@ func TestNativePSOverlayUsesClearScreenWhenAltScreenNever(t *testing.T) {
 	if strings.Contains(sequenceLog, "\x1b[?1007h") || strings.Contains(sequenceLog, "\x1b[?1007l") {
 		t.Fatalf("did not expect /ps overlay to toggle alternate scroll when detail alt-screen is disabled, got %q", sequenceLog)
 	}
-	if clearCount := strings.Count(raw, "\x1b[2J"); clearCount < 3 {
-		t.Fatalf("expected startup + /ps open + /ps close clear-screen sequences, got %d in %q", clearCount, raw)
+	if clearCount := strings.Count(raw, "\x1b[2J"); clearCount < 2 {
+		t.Fatalf("expected startup + /ps open clear-screen sequences, got %d in %q", clearCount, raw)
 	}
 	if !strings.Contains(normalizedOutput(raw), "Background Processes") {
 		t.Fatalf("expected /ps overlay content in output, got %q", normalizedOutput(raw))

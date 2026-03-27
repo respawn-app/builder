@@ -61,21 +61,23 @@ func (m *uiModel) transitionTranscriptMode(target tui.Mode, skipDetailWarmup boo
 		m.invalidateNativeResizeReplay()
 	}
 	transitionCmd := m.altScreenCmdForModeTransition(prevMode, nextMode)
-	nativeReplayCmd := m.nativeReplayCmdForModeTransition(prevMode, nextMode, emitNativeReplay && transitionCmd == nil, emitNativeReplay)
+	nativeReplayCmd := m.nativeReplayCmdForModeTransition(prevMode, nextMode, emitNativeReplay)
 	if transitionCmd == nil && nativeReplayCmd == nil {
 		return tea.ClearScreen
 	}
 	return sequenceCmds(transitionCmd, nativeReplayCmd)
 }
 
-func (m *uiModel) nativeReplayCmdForModeTransition(prev, next tui.Mode, forceFull bool, enabled bool) tea.Cmd {
+func (m *uiModel) nativeReplayCmdForModeTransition(prev, next tui.Mode, enabled bool) tea.Cmd {
 	if !enabled {
 		return nil
 	}
 	if prev != tui.ModeDetail || next != tui.ModeOngoing {
 		return nil
 	}
-	return m.emitCurrentNativeScrollbackState(forceFull)
+	// Detail -> ongoing replay must stay append-only; callers must not request a
+	// force-full replay into ongoing mode.
+	return m.emitCurrentNativeScrollbackState(false)
 }
 
 func sequenceCmds(cmds ...tea.Cmd) tea.Cmd {

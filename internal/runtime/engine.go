@@ -139,6 +139,8 @@ type Engine struct {
 
 	compactionCount int
 
+	compactionSoonReminderIssued bool
+
 	compactionTokenCountCacheKey   string
 	compactionTokenCountCacheValue int
 	collaboratorsOnce              sync.Once

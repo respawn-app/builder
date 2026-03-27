@@ -26,6 +26,7 @@ type stubBackgroundNoticeScheduler struct {
 func (s *stubBackgroundNoticeScheduler) HandleBackgroundShellUpdate(BackgroundShellEvent, bool) {}
 func (s *stubBackgroundNoticeScheduler) QueueDeveloperNotice(llm.Message)                       {}
 func (s *stubBackgroundNoticeScheduler) DrainPendingNotices() []llm.Message                     { return nil }
+func (s *stubBackgroundNoticeScheduler) HasPendingNotices() bool                                { return false }
 func (s *stubBackgroundNoticeScheduler) ConsumePendingBackgroundNotice(string) bool             { return false }
 func (s *stubBackgroundNoticeScheduler) ScheduleIfIdle() {
 	if s != nil && s.scheduleIfIdle != nil {

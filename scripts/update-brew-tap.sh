@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  cat <<'USAGE'
+	cat <<'USAGE'
 Usage: scripts/update-brew-tap.sh [--version vX.Y.Z] [--tap /path/to/homebrew-tap] [--repo owner/name] [--formula name] [--commit] [--push]
 
 Updates the Homebrew tap formula for builder-cli with a new tag tarball + sha256.
@@ -19,6 +19,17 @@ Flags:
 USAGE
 }
 
+require_option_value() {
+	local flag="$1"
+	local value="${2:-}"
+	if [[ -n "$value" && "$value" != --* ]]; then
+		return
+	fi
+	echo "${flag} requires a value" >&2
+	usage >&2
+	exit 1
+}
+
 version=""
 repo="respawn-app/builder"
 formula="builder-cli"
@@ -27,73 +38,76 @@ do_commit="false"
 do_push="false"
 
 while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --version)
-      version="$2"
-      shift 2
-      ;;
-    --repo)
-      repo="$2"
-      shift 2
-      ;;
-    --formula)
-      formula="$2"
-      shift 2
-      ;;
-    --tap)
-      tap_dir="$2"
-      shift 2
-      ;;
-    --commit)
-      do_commit="true"
-      shift
-      ;;
-    --push)
-      do_commit="true"
-      do_push="true"
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "Unknown arg: $1" >&2
-      usage >&2
-      exit 1
-      ;;
-  esac
+	case "$1" in
+	--version)
+		require_option_value "--version" "${2:-}"
+		version="$2"
+		shift 2
+		;;
+	--repo)
+		require_option_value "--repo" "${2:-}"
+		repo="$2"
+		shift 2
+		;;
+	--formula)
+		require_option_value "--formula" "${2:-}"
+		formula="$2"
+		shift 2
+		;;
+	--tap)
+		require_option_value "--tap" "${2:-}"
+		tap_dir="$2"
+		shift 2
+		;;
+	--commit)
+		do_commit="true"
+		shift
+		;;
+	--push)
+		do_commit="true"
+		do_push="true"
+		shift
+		;;
+	-h | --help)
+		usage
+		exit 0
+		;;
+	*)
+		echo "Unknown arg: $1" >&2
+		usage >&2
+		exit 1
+		;;
+	esac
 done
 
-repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"
-if [[ -z "$repo_root" ]]; then
-  echo "Not inside a git repo" >&2
-  exit 1
+if ! repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+	echo "Not inside a git repo" >&2
+	exit 1
 fi
 
 if [[ -z "$version" ]]; then
-  if [[ -n "${BUILDER_VERSION:-}" ]]; then
-    version="${BUILDER_VERSION}"
-  elif [[ -n "${GITHUB_REF_NAME:-}" ]]; then
-    version="${GITHUB_REF_NAME}"
-  elif [[ -n "${GITHUB_REF:-}" ]]; then
-    version="${GITHUB_REF##*/}"
-  else
-    version="$(git -C "$repo_root" describe --tags --abbrev=0)"
-  fi
+	if [[ -n "${BUILDER_VERSION:-}" ]]; then
+		version="${BUILDER_VERSION}"
+	elif [[ -n "${GITHUB_REF_NAME:-}" ]]; then
+		version="${GITHUB_REF_NAME}"
+	elif [[ -n "${GITHUB_REF:-}" ]]; then
+		version="${GITHUB_REF##*/}"
+	else
+		version="$(git -C "$repo_root" describe --tags --abbrev=0)"
+	fi
 fi
 
 if [[ -z "$tap_dir" ]]; then
-  if [[ -n "${BUILDER_TAP_PATH:-}" ]]; then
-    tap_dir="$BUILDER_TAP_PATH"
-  elif [[ -n "${HOMEBREW_TAP_PATH:-}" ]]; then
-    tap_dir="$HOMEBREW_TAP_PATH"
-  elif [[ -d "$repo_root/../homebrew-tap" ]]; then
-    tap_dir="$repo_root/../homebrew-tap"
-  else
-    echo "Tap repo not found. Provide --tap or set HOMEBREW_TAP_PATH" >&2
-    exit 1
-  fi
+	if [[ -n "${BUILDER_TAP_PATH:-}" ]]; then
+		tap_dir="$BUILDER_TAP_PATH"
+	elif [[ -n "${HOMEBREW_TAP_PATH:-}" ]]; then
+		tap_dir="$HOMEBREW_TAP_PATH"
+	elif [[ -d "$repo_root/../homebrew-tap" ]]; then
+		tap_dir="$repo_root/../homebrew-tap"
+	else
+		echo "Tap repo not found. Provide --tap or set HOMEBREW_TAP_PATH" >&2
+		exit 1
+	fi
 fi
 
 formula_path="$tap_dir/Formula/${formula}.rb"
@@ -103,25 +117,22 @@ url="https://github.com/${repo}/archive/refs/tags/${version}.tar.gz"
 tmp_file="$(mktemp)"
 tmp_formula="$(mktemp)"
 cleanup() {
-  if command -v trash >/dev/null 2>&1; then
-    trash "$tmp_file" >/dev/null 2>&1 || true
-    trash "$tmp_formula" >/dev/null 2>&1 || true
-  fi
+	rm -f "$tmp_file" "$tmp_formula"
 }
 trap cleanup EXIT
 
 curl -fsSL "$url" -o "$tmp_file"
 if command -v sha256sum >/dev/null 2>&1; then
-  sha256="$(sha256sum "$tmp_file" | awk '{print $1}')"
+	sha256="$(sha256sum "$tmp_file" | awk '{print $1}')"
 elif command -v shasum >/dev/null 2>&1; then
-  sha256="$(shasum -a 256 "$tmp_file" | awk '{print $1}')"
+	sha256="$(shasum -a 256 "$tmp_file" | awk '{print $1}')"
 else
-  echo "sha256sum or shasum required" >&2
-  exit 1
+	echo "sha256sum or shasum required" >&2
+	exit 1
 fi
 
 mkdir -p "$(dirname "$formula_path")"
-cat > "$tmp_formula" <<EOF
+cat >"$tmp_formula" <<EOF
 class ${formula_class} < Formula
   desc "Minimal terminal coding agent for professional engineering workflows"
   homepage "https://github.com/respawn-app/builder"
@@ -138,7 +149,8 @@ class ${formula_class} < Formula
   depends_on "ripgrep"
 
   def install
-    system "go", "build", *std_go_args(output: bin/"builder", ldflags: "-s -w -X builder/internal/buildinfo.Version=#{version}"), "./cmd/builder"
+    ENV["BUILDER_VERSION"] = version.to_s
+    system "bash", "scripts/build.sh", "--output", bin/"builder"
   end
 
   test do
@@ -148,23 +160,23 @@ end
 EOF
 
 if [[ ! -f "$formula_path" ]] || ! cmp -s "$tmp_formula" "$formula_path"; then
-  mv "$tmp_formula" "$formula_path"
-  tmp_formula="$(mktemp)"
+	mv "$tmp_formula" "$formula_path"
+	tmp_formula="$(mktemp)"
 fi
 
 chmod 0644 "$formula_path"
 
 if [[ "$do_commit" == "true" ]]; then
-  git -C "$tap_dir" add "$formula_path"
-  if git -C "$tap_dir" diff --cached --quiet; then
-    echo "No formula changes to commit"
-  else
-    git -C "$tap_dir" commit -m "${formula} ${version}"
-  fi
+	git -C "$tap_dir" add "$formula_path"
+	if git -C "$tap_dir" diff --cached --quiet; then
+		echo "No formula changes to commit"
+	else
+		git -C "$tap_dir" commit -m "${formula} ${version}"
+	fi
 fi
 
 if [[ "$do_push" == "true" ]]; then
-  git -C "$tap_dir" push
+	git -C "$tap_dir" push
 fi
 
 echo "Updated ${formula_path}"

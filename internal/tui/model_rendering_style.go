@@ -10,6 +10,19 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+var (
+	userAdaptiveColor        = lipgloss.AdaptiveColor{Light: "#005CC5", Dark: "#61AFEF"}
+	modelAdaptiveColor       = lipgloss.AdaptiveColor{Light: "#22863A", Dark: "#98C379"}
+	toolAdaptiveColor        = lipgloss.AdaptiveColor{Light: "#4078F2", Dark: "#61AFEF"}
+	toolSuccessAdaptiveColor = lipgloss.AdaptiveColor{Light: "#22863A", Dark: "#98C379"}
+	toolErrorAdaptiveColor   = lipgloss.AdaptiveColor{Light: "#D73A49", Dark: "#E06C75"}
+	systemAdaptiveColor      = lipgloss.AdaptiveColor{Light: "#6A737D", Dark: "#ABB2BF"}
+	errorAdaptiveColor       = lipgloss.AdaptiveColor{Light: "#D73A49", Dark: "#E06C75"}
+	warningAdaptiveColor     = lipgloss.AdaptiveColor{Light: "#8A5A00", Dark: "#E5C07B"}
+	successAdaptiveColor     = lipgloss.AdaptiveColor{Light: "#22863A", Dark: "#98C379"}
+	compactionAdaptiveColor  = lipgloss.AdaptiveColor{Light: "#8A5A00", Dark: "#E5C07B"}
+)
+
 func isToolResultRole(role string) bool {
 	switch strings.TrimSpace(role) {
 	case "tool_result", "tool_result_ok", "tool_result_error":
@@ -119,7 +132,7 @@ func (m Model) roleSymbol(role string) string {
 	switch role {
 	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error", "tool_question", "tool_question_error", "tool_web_search", "tool_web_search_success", "tool_web_search_error":
 		return styleForRole(role, m.palette()).Render(prefix)
-	case "error":
+	case "error", "warning":
 		return styleForRole(role, m.palette()).Render(prefix)
 	case "reviewer_status", "reviewer_suggestions":
 		return styleForRole(role, m.palette()).Render(prefix)
@@ -152,6 +165,8 @@ func rolePrefix(role string) string {
 		return "§"
 	case "error":
 		return "!"
+	case "warning":
+		return "⚠"
 	default:
 		return ""
 	}
@@ -205,8 +220,10 @@ func styleForRole(role string, p palette) lipgloss.Style {
 		return p.system
 	case "error":
 		return p.error
+	case "warning":
+		return p.warning
 	case "reviewer_status", "reviewer_suggestions":
-		return p.compaction
+		return p.success
 	default:
 		return p.preview
 	}
@@ -224,6 +241,9 @@ type palette struct {
 	foregroundColor rgbColor
 	preview         lipgloss.Style
 	previewColor    rgbColor
+	successColor    rgbColor
+	warningColor    rgbColor
+	errorColor      rgbColor
 	user            lipgloss.Style
 	model           lipgloss.Style
 	tool            lipgloss.Style
@@ -231,6 +251,8 @@ type palette struct {
 	toolError       lipgloss.Style
 	system          lipgloss.Style
 	error           lipgloss.Style
+	warning         lipgloss.Style
+	success         lipgloss.Style
 	compaction      lipgloss.Style
 
 	diffAddBackgroundLight    string
@@ -247,14 +269,6 @@ func (m Model) palette() palette {
 	base := lipgloss.AdaptiveColor{Light: previewLight, Dark: previewDark}
 	foregroundColor := rgbColorFromHex(foregroundDark)
 	previewColor := rgbColorFromHex(previewDark)
-	user := lipgloss.AdaptiveColor{Light: "#005CC5", Dark: "#61AFEF"}
-	model := lipgloss.AdaptiveColor{Light: "#22863A", Dark: "#98C379"}
-	tool := lipgloss.AdaptiveColor{Light: "#4078F2", Dark: "#61AFEF"}
-	toolSuccess := lipgloss.AdaptiveColor{Light: "#22863A", Dark: "#98C379"}
-	toolError := lipgloss.AdaptiveColor{Light: "#D73A49", Dark: "#E06C75"}
-	system := lipgloss.AdaptiveColor{Light: "#6A737D", Dark: "#ABB2BF"}
-	err := lipgloss.AdaptiveColor{Light: "#D73A49", Dark: "#E06C75"}
-	compaction := lipgloss.AdaptiveColor{Light: "#8A5A00", Dark: "#E5C07B"}
 	if m.theme == "light" {
 		base = lipgloss.AdaptiveColor{Light: previewLight, Dark: previewLight}
 		foregroundColor = rgbColorFromHex(foregroundLight)
@@ -264,20 +278,32 @@ func (m Model) palette() palette {
 		foregroundColor: foregroundColor,
 		preview:         lipgloss.NewStyle().Foreground(base),
 		previewColor:    previewColor,
-		user:            lipgloss.NewStyle().Foreground(user),
-		model:           lipgloss.NewStyle().Foreground(model),
-		tool:            lipgloss.NewStyle().Foreground(tool),
-		toolSuccess:     lipgloss.NewStyle().Foreground(toolSuccess),
-		toolError:       lipgloss.NewStyle().Foreground(toolError),
-		system:          lipgloss.NewStyle().Foreground(system).Faint(true),
-		error:           lipgloss.NewStyle().Foreground(err),
-		compaction:      lipgloss.NewStyle().Foreground(compaction),
+		successColor:    adaptiveColorRGB(m.theme, successAdaptiveColor),
+		warningColor:    adaptiveColorRGB(m.theme, warningAdaptiveColor),
+		errorColor:      adaptiveColorRGB(m.theme, errorAdaptiveColor),
+		user:            lipgloss.NewStyle().Foreground(userAdaptiveColor),
+		model:           lipgloss.NewStyle().Foreground(modelAdaptiveColor),
+		tool:            lipgloss.NewStyle().Foreground(toolAdaptiveColor),
+		toolSuccess:     lipgloss.NewStyle().Foreground(toolSuccessAdaptiveColor),
+		toolError:       lipgloss.NewStyle().Foreground(toolErrorAdaptiveColor),
+		system:          lipgloss.NewStyle().Foreground(systemAdaptiveColor).Faint(true),
+		error:           lipgloss.NewStyle().Foreground(errorAdaptiveColor),
+		warning:         lipgloss.NewStyle().Foreground(warningAdaptiveColor),
+		success:         lipgloss.NewStyle().Foreground(successAdaptiveColor),
+		compaction:      lipgloss.NewStyle().Foreground(compactionAdaptiveColor),
 
 		diffAddBackgroundLight:    "#E6FFED",
 		diffRemoveBackgroundLight: "#FFECEF",
 		diffAddBackgroundDark:     "#1F2A22",
 		diffRemoveBackgroundDark:  "#2B1F22",
 	}
+}
+
+func adaptiveColorRGB(theme string, color lipgloss.AdaptiveColor) rgbColor {
+	if strings.EqualFold(strings.TrimSpace(theme), "light") {
+		return rgbColorFromHex(color.Light)
+	}
+	return rgbColorFromHex(color.Dark)
 }
 
 func rgbColorFromHex(hex string) rgbColor {
@@ -300,6 +326,29 @@ func themePreviewColor(theme string) rgbColor {
 		return rgbColorFromHex("#5C6370")
 	}
 	return rgbColorFromHex("#7F848E")
+}
+
+func themeSuccessColor(theme string) rgbColor {
+	return adaptiveColorRGB(theme, successAdaptiveColor)
+}
+
+func themeWarningColor(theme string) rgbColor {
+	return adaptiveColorRGB(theme, warningAdaptiveColor)
+}
+
+func themeErrorColor(theme string) rgbColor {
+	return adaptiveColorRGB(theme, errorAdaptiveColor)
+}
+
+func (m Model) ansiIntentPalette() ansiIntentPalette {
+	colors := m.palette()
+	return ansiIntentPalette{
+		ThemeForeground:   colors.foregroundColor,
+		SubduedForeground: colors.previewColor,
+		SuccessForeground: colors.successColor,
+		WarningForeground: colors.warningColor,
+		ErrorForeground:   colors.errorColor,
+	}
 }
 
 func (c rgbColor) hexString() string {
