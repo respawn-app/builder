@@ -238,20 +238,20 @@ func TestAskQuestionTabFreeformFlow(t *testing.T) {
 
 	next, _ := m.Update(askEventMsg{event: event})
 	updated := next.(*uiModel)
-	if updated.askFreeform {
+	if testAskFreeform(updated) {
 		t.Fatal("expected picker mode first")
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated = next.(*uiModel)
-	if !updated.askFreeform {
+	if !testAskFreeform(updated) {
 		t.Fatal("expected tab to open freeform commentary")
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[<64;55;24M[<64;56;26M[<65;56;26M")})
 	updated = next.(*uiModel)
-	if updated.askInput != "" {
-		t.Fatalf("expected mouse sgr sequence ignored in ask freeform input, got %q", updated.askInput)
+	if testAskInput(updated) != "" {
+		t.Fatalf("expected mouse sgr sequence ignored in ask freeform input, got %q", testAskInput(updated))
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("custom")})
@@ -269,7 +269,7 @@ func TestAskQuestionTabFreeformFlow(t *testing.T) {
 	if resp.response.SelectedOptionNumber != 1 {
 		t.Fatalf("expected selected option 1 preserved when switching to freeform, got %+v", resp.response)
 	}
-	if updated.activeAsk != nil {
+	if testActiveAsk(updated) != nil {
 		t.Fatal("ask should be resolved")
 	}
 }
@@ -288,11 +288,11 @@ func TestAskQuestionPickerSubmitPreservesPendingFreeformDraft(t *testing.T) {
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated = next.(*uiModel)
 
-	if updated.askFreeform {
+	if testAskFreeform(updated) {
 		t.Fatal("expected tab to return to picker mode")
 	}
-	if updated.askInput != "custom" {
-		t.Fatalf("expected pending freeform draft preserved, got %q", updated.askInput)
+	if testAskInput(updated) != "custom" {
+		t.Fatalf("expected pending freeform draft preserved, got %q", testAskInput(updated))
 	}
 	promptLines := updated.renderAskPromptLines()
 	hasDisabledDraftPreview := false
@@ -324,7 +324,7 @@ func TestAskQuestionPickerSubmitPreservesPendingFreeformDraft(t *testing.T) {
 	if resp.response.FreeformAnswer != "custom" {
 		t.Fatalf("expected pending freeform draft submitted with picker answer, got %+v", resp.response)
 	}
-	if updated.activeAsk != nil {
+	if testActiveAsk(updated) != nil {
 		t.Fatal("ask should be resolved")
 	}
 }
@@ -342,7 +342,7 @@ func TestAskQuestionTabRoundTripRestoresPendingFreeformDraftAndCursor(t *testing
 	updated = next.(*uiModel)
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyLeft})
 	updated = next.(*uiModel)
-	wantCursor := updated.askInputCursor
+	wantCursor := testAskInputCursor(updated)
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated = next.(*uiModel)
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -350,17 +350,17 @@ func TestAskQuestionTabRoundTripRestoresPendingFreeformDraftAndCursor(t *testing
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated = next.(*uiModel)
 
-	if !updated.askFreeform {
+	if !testAskFreeform(updated) {
 		t.Fatal("expected tab to restore freeform editing")
 	}
-	if updated.askCursor != 1 {
-		t.Fatalf("expected changed picker selection preserved, got %d", updated.askCursor)
+	if testAskCursor(updated) != 1 {
+		t.Fatalf("expected changed picker selection preserved, got %d", testAskCursor(updated))
 	}
-	if updated.askInput != "custom" {
-		t.Fatalf("expected pending freeform draft restored, got %q", updated.askInput)
+	if testAskInput(updated) != "custom" {
+		t.Fatalf("expected pending freeform draft restored, got %q", testAskInput(updated))
 	}
-	if updated.askInputCursor != wantCursor {
-		t.Fatalf("expected freeform cursor restored, got %d want %d", updated.askInputCursor, wantCursor)
+	if testAskInputCursor(updated) != wantCursor {
+		t.Fatalf("expected freeform cursor restored, got %d want %d", testAskInputCursor(updated), wantCursor)
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("X")})
@@ -375,7 +375,7 @@ func TestAskQuestionTabRoundTripRestoresPendingFreeformDraftAndCursor(t *testing
 	if resp.response.FreeformAnswer != "custoXm" {
 		t.Fatalf("expected restored draft to remain editable, got %+v", resp.response)
 	}
-	if updated.activeAsk != nil {
+	if testActiveAsk(updated) != nil {
 		t.Fatal("ask should be resolved")
 	}
 }
@@ -399,7 +399,7 @@ func TestAskQuestionPickerSubmitReturnsSelectedOptionNumber(t *testing.T) {
 	if resp.response.Answer != "" || resp.response.FreeformAnswer != "" {
 		t.Fatalf("expected structured picker response without raw answer text, got %+v", resp.response)
 	}
-	if updated.activeAsk != nil {
+	if testActiveAsk(updated) != nil {
 		t.Fatal("ask should be resolved")
 	}
 }
@@ -421,13 +421,13 @@ func TestAskQuestionFreeformSelectionEnterDropsIntoFreeformWhenEmpty(t *testing.
 	if cmd != nil {
 		t.Fatal("did not expect validation error when opening freeform from Freeform answer")
 	}
-	if !updated.askFreeform {
+	if !testAskFreeform(updated) {
 		t.Fatal("expected Freeform answer to switch into freeform mode")
 	}
 	if updated.transientStatus != "" {
 		t.Fatalf("did not expect transient status while opening freeform, got %q", updated.transientStatus)
 	}
-	if updated.activeAsk == nil {
+	if testActiveAsk(updated) == nil {
 		t.Fatal("expected ask to remain active after switching to freeform")
 	}
 	select {
@@ -462,7 +462,7 @@ func TestAskQuestionFreeformSelectionEmptySubmitRequiresCommentary(t *testing.T)
 	if updated.transientStatusKind != uiStatusNoticeError {
 		t.Fatalf("expected error notice kind, got %d", updated.transientStatusKind)
 	}
-	if updated.activeAsk == nil {
+	if testActiveAsk(updated) == nil {
 		t.Fatal("expected ask to remain active after validation error")
 	}
 	select {
@@ -497,7 +497,7 @@ func TestAskQuestionFreeformSelectionSubmitsFreeformOnly(t *testing.T) {
 	if resp.response.Answer != "custom" || resp.response.FreeformAnswer != "custom" {
 		t.Fatalf("unexpected freeform selection response: %+v", resp.response)
 	}
-	if updated.activeAsk != nil {
+	if testActiveAsk(updated) != nil {
 		t.Fatal("ask should be resolved")
 	}
 }
@@ -509,7 +509,7 @@ func TestAskFreeformUsesMainEditingStack(t *testing.T) {
 
 	next, _ := m.Update(askEventMsg{event: event})
 	updated := next.(*uiModel)
-	if !updated.askFreeform {
+	if !testAskFreeform(updated) {
 		t.Fatal("expected freeform ask input")
 	}
 
@@ -536,7 +536,7 @@ func TestAskFreeformUsesMainEditingStack(t *testing.T) {
 	if resp.response.Answer != ">hello _worl" {
 		t.Fatalf("unexpected inline edit result: %q", resp.response.Answer)
 	}
-	if updated.activeAsk != nil {
+	if testActiveAsk(updated) != nil {
 		t.Fatal("ask should be resolved")
 	}
 }
@@ -693,7 +693,7 @@ func TestApprovalAskUsesSingleDenyOptionAndTabCommentary(t *testing.T) {
 	}
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated = next.(*uiModel)
-	if !updated.askFreeform {
+	if !testAskFreeform(updated) {
 		t.Fatal("expected tab on deny selection to switch to commentary input")
 	}
 	promptLines = updated.renderAskPromptLines()
@@ -721,7 +721,7 @@ func TestApprovalAskUsesSingleDenyOptionAndTabCommentary(t *testing.T) {
 	if len(updated.pendingInjected) != 1 || updated.pendingInjected[0] != "blocked by policy" {
 		t.Fatalf("expected deny commentary injected into regular user-said flow, got %+v", updated.pendingInjected)
 	}
-	if updated.activeAsk != nil {
+	if testActiveAsk(updated) != nil {
 		t.Fatal("expected ask to resolve after commentary submit")
 	}
 }
@@ -760,19 +760,19 @@ func TestDoubleEscEntersRollbackSelectionAndEnterStartsEditing(t *testing.T) {
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
 
-	if !updated.rollbackMode {
+	if !testRollbackSelecting(updated) {
 		t.Fatal("expected rollback selection mode after double esc")
 	}
-	if updated.rollbackSelection != 1 {
-		t.Fatalf("expected last user message selected by default, got %d", updated.rollbackSelection)
+	if testRollbackSelection(updated) != 1 {
+		t.Fatalf("expected last user message selected by default, got %d", testRollbackSelection(updated))
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated = next.(*uiModel)
-	if !updated.rollbackEditing {
+	if !testRollbackEditing(updated) {
 		t.Fatal("expected rollback editing mode after enter")
 	}
-	if updated.rollbackMode {
+	if testRollbackSelecting(updated) {
 		t.Fatal("did not expect rollback selection mode while editing")
 	}
 	if updated.input != "u2" {
@@ -786,35 +786,32 @@ func TestRollbackEditingEscRequiresEmptyInput(t *testing.T) {
 		{Role: "assistant", Text: "a1"},
 		{Role: "user", Text: "u2"},
 	})).(*uiModel)
-	m.rollbackEditing = true
-	m.rollbackSelection = 1
-	m.rollbackSelectedUserMessageIndex = 2
+	testSetRollbackEditing(m, 1, 2)
 	m.input = "edited"
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated := next.(*uiModel)
-	if !updated.rollbackEditing {
+	if !testRollbackEditing(updated) {
 		t.Fatal("expected rollback editing to stay active while input non-empty")
 	}
-	if updated.rollbackMode {
+	if testRollbackSelecting(updated) {
 		t.Fatal("did not expect rollback selection mode while input non-empty")
 	}
 
 	updated.input = ""
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if !updated.rollbackMode {
+	if !testRollbackSelecting(updated) {
 		t.Fatal("expected rollback selection mode after esc on empty input")
 	}
-	if updated.rollbackSelection != 1 {
-		t.Fatalf("expected rollback selection preserved, got %d", updated.rollbackSelection)
+	if testRollbackSelection(updated) != 1 {
+		t.Fatalf("expected rollback selection preserved, got %d", testRollbackSelection(updated))
 	}
 }
 
 func TestRollbackEditingSubmitQuitsIntoForkTransition(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
-	m.rollbackEditing = true
-	m.rollbackSelectedUserMessageIndex = 3
+	testSetRollbackEditing(m, 0, 3)
 	m.input = "edited user message"
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -854,7 +851,7 @@ func TestRollbackSelectionRecentersTranscript(t *testing.T) {
 		updated = next.(*uiModel)
 	}
 
-	selected := updated.rollbackCandidates[updated.rollbackSelection].Text
+	selected := testRollbackCandidates(updated)[testRollbackSelection(updated)].Text
 	lines := strings.Split(stripANSIAndTrimRight(updated.view.View()), "\n")
 	selectedLine := -1
 	for idx, line := range lines {
@@ -894,7 +891,7 @@ func TestRollbackSelectionCancelRestoresPriorOngoingScroll(t *testing.T) {
 	updated = next.(*uiModel)
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if !updated.rollbackMode {
+	if !testRollbackSelecting(updated) {
 		t.Fatal("expected rollback mode after double esc")
 	}
 	if updated.view.Mode() != tui.ModeDetail {
@@ -908,7 +905,7 @@ func TestRollbackSelectionCancelRestoresPriorOngoingScroll(t *testing.T) {
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if updated.rollbackMode {
+	if testRollbackSelecting(updated) {
 		t.Fatal("expected rollback mode to be canceled")
 	}
 	if updated.view.Mode() != tui.ModeOngoing {
@@ -931,20 +928,20 @@ func TestRollbackTransitionsUseDetailOverlayInNativeMode(t *testing.T) {
 	updated := next.(*uiModel)
 	next, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if !updated.rollbackMode {
+	if !testRollbackSelecting(updated) {
 		t.Fatal("expected rollback mode after double esc")
 	}
 	if updated.view.Mode() != tui.ModeDetail {
 		t.Fatalf("expected rollback selection in detail overlay, got mode %q", updated.view.Mode())
 	}
-	if !updated.rollbackOverlayPushed {
+	if !testRollbackOwnsTranscriptMode(updated) {
 		t.Fatal("expected rollback overlay to be pushed in native mode")
 	}
 	if cmd == nil {
 		t.Fatal("expected native rollback entry to emit detail overlay transition command")
 	}
 
-	selected := updated.rollbackCandidates[updated.rollbackSelection].Text
+	selected := testRollbackCandidates(updated)[testRollbackSelection(updated)].Text
 	lines := strings.Split(stripANSIAndTrimRight(updated.View()), "\n")
 	selectedLine := -1
 	for idx, line := range lines {
@@ -963,13 +960,13 @@ func TestRollbackTransitionsUseDetailOverlayInNativeMode(t *testing.T) {
 
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if updated.rollbackMode {
+	if testRollbackSelecting(updated) {
 		t.Fatal("expected rollback mode canceled")
 	}
 	if updated.view.Mode() != tui.ModeOngoing {
 		t.Fatalf("expected cancel to return to ongoing mode, got %q", updated.view.Mode())
 	}
-	if updated.rollbackOverlayPushed {
+	if testRollbackOwnsTranscriptMode(updated) {
 		t.Fatal("expected rollback overlay state cleared after cancel")
 	}
 	if cmd == nil {
@@ -990,7 +987,7 @@ func TestNativeRollbackOverlayUsesClearScreenWhenAltScreenNever(t *testing.T) {
 	updated := next.(*uiModel)
 	next, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if !updated.rollbackMode {
+	if !testRollbackSelecting(updated) {
 		t.Fatal("expected rollback mode after double esc")
 	}
 	if updated.view.Mode() != tui.ModeDetail {
@@ -1002,7 +999,7 @@ func TestNativeRollbackOverlayUsesClearScreenWhenAltScreenNever(t *testing.T) {
 
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if updated.rollbackMode {
+	if testRollbackSelecting(updated) {
 		t.Fatal("expected rollback mode canceled")
 	}
 	if updated.view.Mode() != tui.ModeOngoing {
@@ -1035,7 +1032,7 @@ func TestNativeRollbackOverlayFullSelectionFlowPreservesHistory(t *testing.T) {
 
 	assertSelectionCentered := func(model *uiModel) {
 		t.Helper()
-		selected := model.rollbackCandidates[model.rollbackSelection].Text
+		selected := testRollbackCandidates(model)[testRollbackSelection(model)].Text
 		lines := strings.Split(stripANSIAndTrimRight(model.View()), "\n")
 		selectedLine := -1
 		for idx, line := range lines {
@@ -1057,8 +1054,8 @@ func TestNativeRollbackOverlayFullSelectionFlowPreservesHistory(t *testing.T) {
 	updated = next.(*uiModel)
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if !updated.rollbackMode || updated.view.Mode() != tui.ModeDetail {
-		t.Fatalf("expected rollback selection detail overlay, mode=%q rollback=%t", updated.view.Mode(), updated.rollbackMode)
+	if !testRollbackSelecting(updated) || updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected rollback selection detail overlay, mode=%q rollback=%t", updated.view.Mode(), testRollbackSelecting(updated))
 	}
 	assertSelectionCentered(updated)
 
@@ -1075,22 +1072,22 @@ func TestNativeRollbackOverlayFullSelectionFlowPreservesHistory(t *testing.T) {
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated = next.(*uiModel)
-	if !updated.rollbackEditing || updated.view.Mode() != tui.ModeOngoing {
-		t.Fatalf("expected rollback editing in ongoing mode, mode=%q editing=%t", updated.view.Mode(), updated.rollbackEditing)
+	if !testRollbackEditing(updated) || updated.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected rollback editing in ongoing mode, mode=%q editing=%t", updated.view.Mode(), testRollbackEditing(updated))
 	}
 
 	updated.input = ""
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if !updated.rollbackMode || updated.view.Mode() != tui.ModeDetail {
-		t.Fatalf("expected esc from empty edit input to return to rollback overlay, mode=%q rollback=%t", updated.view.Mode(), updated.rollbackMode)
+	if !testRollbackSelecting(updated) || updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected esc from empty edit input to return to rollback overlay, mode=%q rollback=%t", updated.view.Mode(), testRollbackSelecting(updated))
 	}
 	assertSelectionCentered(updated)
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if updated.rollbackMode || updated.view.Mode() != tui.ModeOngoing {
-		t.Fatalf("expected final esc to cancel rollback overlay back to ongoing, mode=%q rollback=%t", updated.view.Mode(), updated.rollbackMode)
+	if testRollbackSelecting(updated) || updated.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected final esc to cancel rollback overlay back to ongoing, mode=%q rollback=%t", updated.view.Mode(), testRollbackSelecting(updated))
 	}
 
 	committedAfter := stripANSIAndTrimRight(updated.view.OngoingCommittedSnapshot())
@@ -1126,26 +1123,26 @@ func TestNativeRollbackEditCancelPreservesCommittedHistory(t *testing.T) {
 	updated = next.(*uiModel)
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if !updated.rollbackMode || updated.view.Mode() != tui.ModeDetail {
-		t.Fatalf("expected native rollback selection in detail overlay, mode=%q rollback=%t", updated.view.Mode(), updated.rollbackMode)
+	if !testRollbackSelecting(updated) || updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected native rollback selection in detail overlay, mode=%q rollback=%t", updated.view.Mode(), testRollbackSelecting(updated))
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated = next.(*uiModel)
-	if !updated.rollbackEditing || updated.view.Mode() != tui.ModeOngoing {
-		t.Fatalf("expected rollback editing in ongoing mode, mode=%q editing=%t", updated.view.Mode(), updated.rollbackEditing)
+	if !testRollbackEditing(updated) || updated.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected rollback editing in ongoing mode, mode=%q editing=%t", updated.view.Mode(), testRollbackEditing(updated))
 	}
 
 	updated.input = ""
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if !updated.rollbackMode || updated.view.Mode() != tui.ModeDetail {
-		t.Fatalf("expected esc from empty edit input to restore rollback selection overlay, mode=%q rollback=%t", updated.view.Mode(), updated.rollbackMode)
+	if !testRollbackSelecting(updated) || updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected esc from empty edit input to restore rollback selection overlay, mode=%q rollback=%t", updated.view.Mode(), testRollbackSelecting(updated))
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if updated.rollbackMode {
+	if testRollbackSelecting(updated) {
 		t.Fatal("expected rollback mode canceled")
 	}
 	if updated.view.Mode() != tui.ModeOngoing {
@@ -1183,7 +1180,7 @@ func TestRollbackEditCancelChainRestoresPriorOngoingScroll(t *testing.T) {
 	updated = next.(*uiModel)
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if !updated.rollbackMode {
+	if !testRollbackSelecting(updated) {
 		t.Fatal("expected rollback mode after double esc")
 	}
 	if updated.view.Mode() != tui.ModeDetail {
@@ -1193,20 +1190,20 @@ func TestRollbackEditCancelChainRestoresPriorOngoingScroll(t *testing.T) {
 	updated = next.(*uiModel)
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated = next.(*uiModel)
-	if !updated.rollbackEditing {
+	if !testRollbackEditing(updated) {
 		t.Fatal("expected rollback editing mode after enter")
 	}
 
 	updated.input = ""
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if !updated.rollbackMode {
+	if !testRollbackSelecting(updated) {
 		t.Fatal("expected rollback selection mode after esc on empty edit input")
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if updated.rollbackMode {
+	if testRollbackSelecting(updated) {
 		t.Fatal("expected rollback mode canceled")
 	}
 	if updated.view.Mode() != tui.ModeOngoing {
@@ -1245,17 +1242,17 @@ func TestNativeRollbackEditAnchorsToSelectedConversationPoint(t *testing.T) {
 	if overlayCmd := m.pushRollbackOverlayIfNeeded(); overlayCmd == nil {
 		t.Fatal("expected rollback overlay transition command")
 	}
-	m.rollbackSelection = 3
+	m.rollback.selection = 3
 	m.applyRollbackSelectionHighlight()
-	target := m.rollbackCandidates[m.rollbackSelection].TranscriptIndex
+	target := testRollbackCandidates(m)[testRollbackSelection(m)].TranscriptIndex
 	laterTail := m.transcriptEntries[len(m.transcriptEntries)-1].Text
 
 	cmd := m.inputController().beginRollbackEditingFlowCmd()
 	if cmd == nil {
 		t.Fatal("expected rollback edit transition command")
 	}
-	if !m.rollbackEditing || m.view.Mode() != tui.ModeOngoing {
-		t.Fatalf("expected rollback editing in ongoing mode, mode=%q editing=%t", m.view.Mode(), m.rollbackEditing)
+	if !testRollbackEditing(m) || m.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected rollback editing in ongoing mode, mode=%q editing=%t", m.view.Mode(), testRollbackEditing(m))
 	}
 	expected := renderNativeCommittedSnapshot(m.transcriptEntries[:target+1], m.theme, m.nativeReplayRenderWidth())
 	if m.nativeRenderedSnapshot != expected {
@@ -1298,14 +1295,14 @@ func TestNativeRollbackEditCommandSequenceClearsBeforeAnchoredReplay(t *testing.
 	}
 	next, secondEscCmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = next.(*uiModel)
-	if !m.rollbackMode || m.view.Mode() != tui.ModeDetail {
-		t.Fatalf("expected rollback selection in detail mode, mode=%q rollback=%t", m.view.Mode(), m.rollbackMode)
+	if !testRollbackSelecting(m) || m.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected rollback selection in detail mode, mode=%q rollback=%t", m.view.Mode(), testRollbackSelecting(m))
 	}
 	_ = collectCmdMessages(t, secondEscCmd)
 
-	m.rollbackSelection = 2
+	m.rollback.selection = 2
 	m.applyRollbackSelectionHighlight()
-	target := m.rollbackCandidates[m.rollbackSelection].TranscriptIndex
+	target := testRollbackCandidates(m)[testRollbackSelection(m)].TranscriptIndex
 	targetText := m.transcriptEntries[target].Text
 	laterTail := m.transcriptEntries[len(m.transcriptEntries)-1].Text
 
@@ -1342,8 +1339,8 @@ func TestNativeRollbackEditCommandSequenceClearsBeforeAnchoredReplay(t *testing.
 	if strings.Contains(flushText, laterTail) {
 		t.Fatalf("expected anchored replay to exclude later tail %q, got %q", laterTail, flushText)
 	}
-	if !m.rollbackEditing || m.view.Mode() != tui.ModeOngoing {
-		t.Fatalf("expected rollback editing in ongoing mode after command, mode=%q editing=%t", m.view.Mode(), m.rollbackEditing)
+	if !testRollbackEditing(m) || m.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected rollback editing in ongoing mode after command, mode=%q editing=%t", m.view.Mode(), testRollbackEditing(m))
 	}
 }
 
@@ -1360,7 +1357,7 @@ func TestRollbackTransitionsDoNotClearScreenWhenNotInAltScreen(t *testing.T) {
 	updated := next.(*uiModel)
 	next, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if !updated.rollbackMode {
+	if !testRollbackSelecting(updated) {
 		t.Fatal("expected rollback mode after double esc")
 	}
 	if cmd == nil {
@@ -1369,7 +1366,7 @@ func TestRollbackTransitionsDoNotClearScreenWhenNotInAltScreen(t *testing.T) {
 
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated = next.(*uiModel)
-	if !updated.rollbackEditing {
+	if !testRollbackEditing(updated) {
 		t.Fatal("expected rollback editing mode after enter")
 	}
 	if cmd == nil {
@@ -1379,7 +1376,7 @@ func TestRollbackTransitionsDoNotClearScreenWhenNotInAltScreen(t *testing.T) {
 	updated.input = ""
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if !updated.rollbackMode {
+	if !testRollbackSelecting(updated) {
 		t.Fatal("expected rollback mode after esc from empty rollback edit")
 	}
 	if cmd == nil {
@@ -1388,7 +1385,7 @@ func TestRollbackTransitionsDoNotClearScreenWhenNotInAltScreen(t *testing.T) {
 
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if updated.rollbackMode {
+	if testRollbackSelecting(updated) {
 		t.Fatal("expected rollback mode canceled")
 	}
 	if cmd == nil {
@@ -1422,7 +1419,7 @@ func TestApprovalAskTabAllowsWithCommentary(t *testing.T) {
 	updated := next.(*uiModel)
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated = next.(*uiModel)
-	if !updated.askFreeform {
+	if !testAskFreeform(updated) {
 		t.Fatal("expected tab to switch approval prompt to commentary freeform")
 	}
 	lines := updated.renderInputLines(120, uiThemeStyles("dark"))
@@ -1446,7 +1443,7 @@ func TestApprovalAskTabAllowsWithCommentary(t *testing.T) {
 	if len(updated.pendingInjected) != 1 || updated.pendingInjected[0] != "ok but please keep it minimal" {
 		t.Fatalf("expected queued user commentary injection, got %+v", updated.pendingInjected)
 	}
-	if updated.activeAsk != nil {
+	if testActiveAsk(updated) != nil {
 		t.Fatal("expected ask to resolve after approval commentary submit")
 	}
 }
@@ -1464,11 +1461,11 @@ func TestAskEventsQueueUntilCurrentQuestionAnswered(t *testing.T) {
 	next, _ = updated.Update(askEventMsg{event: ask2})
 	updated = next.(*uiModel)
 
-	if updated.activeAsk == nil || updated.activeAsk.req.Question != "First" {
-		t.Fatalf("expected first ask to remain active, got %#v", updated.activeAsk)
+	if testActiveAsk(updated) == nil || testActiveAsk(updated).req.Question != "First" {
+		t.Fatalf("expected first ask to remain active, got %#v", testActiveAsk(updated))
 	}
-	if len(updated.askQueue) != 1 {
-		t.Fatalf("expected one queued ask, got %d", len(updated.askQueue))
+	if len(testAskQueue(updated)) != 1 {
+		t.Fatalf("expected one queued ask, got %d", len(testAskQueue(updated)))
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -1478,8 +1475,8 @@ func TestAskEventsQueueUntilCurrentQuestionAnswered(t *testing.T) {
 	if first.response.SelectedOptionNumber != 1 || first.response.Answer != "" || first.response.FreeformAnswer != "" {
 		t.Fatalf("unexpected first answer: %+v", first.response)
 	}
-	if updated.activeAsk == nil || updated.activeAsk.req.Question != "Second" {
-		t.Fatalf("expected second ask to become active, got %#v", updated.activeAsk)
+	if testActiveAsk(updated) == nil || testActiveAsk(updated).req.Question != "Second" {
+		t.Fatalf("expected second ask to become active, got %#v", testActiveAsk(updated))
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -1489,7 +1486,7 @@ func TestAskEventsQueueUntilCurrentQuestionAnswered(t *testing.T) {
 	if second.response.SelectedOptionNumber != 1 || second.response.Answer != "" || second.response.FreeformAnswer != "" {
 		t.Fatalf("unexpected second answer: %+v", second.response)
 	}
-	if updated.activeAsk != nil {
+	if testActiveAsk(updated) != nil {
 		t.Fatal("expected no active ask after queue is drained")
 	}
 }
@@ -2318,7 +2315,7 @@ func TestAskFreeformAcceptsSpaceKey(t *testing.T) {
 	if resp.response.Answer != "hello world" {
 		t.Fatalf("expected freeform answer with space, got %q", resp.response.Answer)
 	}
-	if updated.activeAsk != nil {
+	if testActiveAsk(updated) != nil {
 		t.Fatal("ask should be resolved")
 	}
 }
@@ -2332,18 +2329,18 @@ func TestApprovalAskTabInCommentaryDoesNotReturnToPicker(t *testing.T) {
 	updated := next.(*uiModel)
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated = next.(*uiModel)
-	if !updated.askFreeform {
+	if !testAskFreeform(updated) {
 		t.Fatal("expected approval tab to enter commentary mode")
 	}
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("commentary")})
 	updated = next.(*uiModel)
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated = next.(*uiModel)
-	if !updated.askFreeform {
+	if !testAskFreeform(updated) {
 		t.Fatal("did not expect approval commentary tab to return to picker")
 	}
-	if updated.askInput != "commentary" {
-		t.Fatalf("expected commentary preserved in approval freeform, got %q", updated.askInput)
+	if testAskInput(updated) != "commentary" {
+		t.Fatalf("expected commentary preserved in approval freeform, got %q", testAskInput(updated))
 	}
 }
 
@@ -2392,8 +2389,8 @@ func TestApprovalAskPickerSubmitIgnoresPendingCommentaryDraft(t *testing.T) {
 
 	next, _ := m.Update(askEventMsg{event: event})
 	updated := next.(*uiModel)
-	updated.askInput = "stale commentary"
-	updated.askInputCursor = len([]rune(updated.askInput))
+	testSetAskInput(updated, "stale commentary")
+	testSetAskInputCursor(updated, len([]rune(testAskInput(updated))))
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
 	updated = next.(*uiModel)
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -3317,10 +3314,10 @@ func TestPSCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	if !updated.psVisible {
+	if !testProcessListOpen(updated) {
 		t.Fatal("expected /ps to open the process list")
 	}
-	if !updated.psOverlayPushed {
+	if !testProcessListOwnsTranscriptMode(updated) {
 		t.Fatal("expected /ps to push a dedicated overlay")
 	}
 	if updated.view.Mode() != tui.ModeDetail {
@@ -3350,10 +3347,10 @@ func TestPSCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated = next.(*uiModel)
-	if updated.psVisible {
+	if testProcessListOpen(updated) {
 		t.Fatal("expected esc to close the process list")
 	}
-	if updated.psOverlayPushed {
+	if testProcessListOwnsTranscriptMode(updated) {
 		t.Fatal("expected process overlay state cleared after close")
 	}
 	if updated.view.Mode() != tui.ModeOngoing {
@@ -3540,7 +3537,7 @@ func TestPSOverlayInlineAppendsOutputToInputAndReturnsToOngoing(t *testing.T) {
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated = next.(*uiModel)
-	if updated.psVisible {
+	if testProcessListOpen(updated) {
 		t.Fatal("expected inline paste to close the process overlay")
 	}
 	if updated.view.Mode() != tui.ModeOngoing {
@@ -3629,7 +3626,7 @@ func TestPSOverlayRefreshTickUpdatesEntriesWhileOpen(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	if got := len(updated.psEntries); got != 0 {
+	if got := len(updated.processList.entries); got != 0 {
 		t.Fatalf("expected empty /ps list before refresh tick, got %d", got)
 	}
 
@@ -3649,11 +3646,11 @@ func TestPSOverlayRefreshTickUpdatesEntriesWhileOpen(t *testing.T) {
 
 	next, cmd := updated.Update(processListRefreshTickMsg{})
 	updated = next.(*uiModel)
-	if got := len(updated.psEntries); got != 1 {
+	if got := len(updated.processList.entries); got != 1 {
 		t.Fatalf("expected refresh tick to pull new process entry, got %d", got)
 	}
-	if updated.psEntries[0].ID != res.SessionID {
-		t.Fatalf("expected refresh tick to load session %s, got %s", res.SessionID, updated.psEntries[0].ID)
+	if updated.processList.entries[0].ID != res.SessionID {
+		t.Fatalf("expected refresh tick to load session %s, got %s", res.SessionID, updated.processList.entries[0].ID)
 	}
 	if cmd == nil {
 		t.Fatal("expected refresh tick to schedule the next refresh")
@@ -3767,14 +3764,14 @@ func TestPSOverlayIgnoresTranscriptModeTogglesWhileOpen(t *testing.T) {
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := next.(*uiModel)
-	if !updated.psVisible || updated.view.Mode() != tui.ModeDetail {
-		t.Fatalf("expected /ps overlay open in detail mode, visible=%t mode=%q", updated.psVisible, updated.view.Mode())
+	if !testProcessListOpen(updated) || updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected /ps overlay open in detail mode, visible=%t mode=%q", testProcessListOpen(updated), updated.view.Mode())
 	}
 
 	next, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	updated = next.(*uiModel)
-	if !updated.psVisible || !updated.psOverlayPushed {
-		t.Fatalf("expected shift+tab ignored while /ps overlay open, visible=%t overlay=%t", updated.psVisible, updated.psOverlayPushed)
+	if !testProcessListOpen(updated) || !testProcessListOwnsTranscriptMode(updated) {
+		t.Fatalf("expected shift+tab ignored while /ps overlay open, visible=%t overlay=%t", testProcessListOpen(updated), testProcessListOwnsTranscriptMode(updated))
 	}
 	if updated.view.Mode() != tui.ModeDetail {
 		t.Fatalf("expected shift+tab to keep detail mode while /ps overlay open, got %q", updated.view.Mode())
@@ -3785,8 +3782,8 @@ func TestPSOverlayIgnoresTranscriptModeTogglesWhileOpen(t *testing.T) {
 
 	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
 	updated = next.(*uiModel)
-	if !updated.psVisible || !updated.psOverlayPushed {
-		t.Fatalf("expected ctrl+t ignored while /ps overlay open, visible=%t overlay=%t", updated.psVisible, updated.psOverlayPushed)
+	if !testProcessListOpen(updated) || !testProcessListOwnsTranscriptMode(updated) {
+		t.Fatalf("expected ctrl+t ignored while /ps overlay open, visible=%t overlay=%t", testProcessListOpen(updated), testProcessListOwnsTranscriptMode(updated))
 	}
 	if updated.view.Mode() != tui.ModeDetail {
 		t.Fatalf("expected ctrl+t to keep detail mode while /ps overlay open, got %q", updated.view.Mode())
@@ -5600,7 +5597,7 @@ func TestHelpDismissesOnAnyKeypress(t *testing.T) {
 	m.termWidth = 80
 	m.termHeight = 24
 	m.windowSizeKnown = true
-	m.activeAsk = &askEvent{req: askquestion.Request{Question: "Proceed?", Suggestions: []string{"Yes", "No"}}}
+	testSetActiveAsk(m, &askEvent{req: askquestion.Request{Question: "Proceed?", Suggestions: []string{"Yes", "No"}}})
 	m.syncViewport()
 
 	next, _ := m.Update(customKeyMsg{Kind: customKeyHelp})
@@ -5611,7 +5608,7 @@ func TestHelpDismissesOnAnyKeypress(t *testing.T) {
 	if updated.helpVisible {
 		t.Fatal("expected any keypress to dismiss help")
 	}
-	if updated.askFreeform {
+	if testAskFreeform(updated) {
 		t.Fatal("did not expect plain rune key to alter ask prompt state")
 	}
 }
@@ -5723,7 +5720,7 @@ func TestHelpToggleClearsRollbackEscArming(t *testing.T) {
 	if updated.helpVisible {
 		t.Fatal("expected esc to dismiss help")
 	}
-	if updated.rollbackMode {
+	if testRollbackSelecting(updated) {
 		t.Fatal("did not expect esc after help toggle to open rollback selection")
 	}
 	if updated.lastEscAt.IsZero() {
@@ -5812,15 +5809,15 @@ func TestHelpRollbackSelectionDismissesAndMovesSelection(t *testing.T) {
 
 	next, _ := m.Update(customKeyMsg{Kind: customKeyHelp})
 	updated := next.(*uiModel)
-	updated.rollbackSelection = 0
+	updated.rollback.selection = 0
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
 	updated = next.(*uiModel)
 
 	if updated.helpVisible {
 		t.Fatal("expected rollback selection key to dismiss help")
 	}
-	if updated.rollbackSelection != 1 {
-		t.Fatalf("expected rollback selection to move, got %d", updated.rollbackSelection)
+	if testRollbackSelection(updated) != 1 {
+		t.Fatalf("expected rollback selection to move, got %d", testRollbackSelection(updated))
 	}
 }
 
@@ -5847,8 +5844,8 @@ func TestHelpRollbackEditDismissesAndReturnsToSelection(t *testing.T) {
 	if updated.helpVisible {
 		t.Fatal("expected rollback edit key to dismiss help")
 	}
-	if !updated.rollbackMode || updated.rollbackEditing {
-		t.Fatalf("expected esc to return to rollback selection, rollbackMode=%t rollbackEditing=%t", updated.rollbackMode, updated.rollbackEditing)
+	if !testRollbackSelecting(updated) || testRollbackEditing(updated) {
+		t.Fatalf("expected esc to return to rollback selection, rollbackMode=%t rollbackEditing=%t", testRollbackSelecting(updated), testRollbackEditing(updated))
 	}
 }
 

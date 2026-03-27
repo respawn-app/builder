@@ -1,6 +1,10 @@
 package app
 
-import "builder/internal/tui"
+import (
+	"builder/internal/tui"
+
+	shelltool "builder/internal/tools/shell"
+)
 
 type uiInputMode string
 
@@ -13,6 +17,81 @@ const (
 	uiInputModeProcessList       uiInputMode = "process_list"
 )
 
+type uiInteractionState struct {
+	Mode uiInputMode
+}
+
+type uiAskState struct {
+	current      *askEvent
+	queue        []askEvent
+	cursor       int
+	freeform     bool
+	freeformMode askFreeformMode
+	input        string
+	inputCursor  int
+}
+
+type uiProcessListState struct {
+	open               bool
+	ownsTranscriptMode bool
+	selection          int
+	entries            []shelltool.Snapshot
+}
+
+type uiRollbackPhase string
+
+const (
+	uiRollbackPhaseInactive  uiRollbackPhase = "inactive"
+	uiRollbackPhaseSelection uiRollbackPhase = "selection"
+	uiRollbackPhaseEditing   uiRollbackPhase = "editing"
+)
+
+type uiRollbackState struct {
+	phase                    uiRollbackPhase
+	ownsTranscriptMode       bool
+	candidates               []rollbackCandidate
+	selection                int
+	selectedUserMessageIndex int
+	restoreOngoingScroll     int
+	restoreScrollActive      bool
+}
+
+type uiStatusOverlayState struct {
+	open               bool
+	ownsTranscriptMode bool
+	loading            bool
+	scroll             int
+	snapshot           uiStatusSnapshot
+	error              string
+	refreshToken       uint64
+	pendingSections    map[uiStatusSection]bool
+	sectionWarnings    map[uiStatusSection]string
+}
+
+func (s uiAskState) hasCurrent() bool {
+	return s.current != nil
+}
+
+func (s uiProcessListState) isOpen() bool {
+	return s.open
+}
+
+func (s uiRollbackState) isSelecting() bool {
+	return s.phase == uiRollbackPhaseSelection
+}
+
+func (s uiRollbackState) isEditing() bool {
+	return s.phase == uiRollbackPhaseEditing
+}
+
+func (s uiRollbackState) isActive() bool {
+	return s.phase != uiRollbackPhaseInactive
+}
+
+func (s uiStatusOverlayState) isOpen() bool {
+	return s.open
+}
+
 type uiInputModeState struct {
 	Mode           uiInputMode
 	InputLocked    bool
@@ -22,33 +101,31 @@ type uiInputModeState struct {
 }
 
 func (m *uiModel) inputMode() uiInputMode {
-	switch {
-	case m == nil:
-		return uiInputModeMain
-	case m.statusVisible:
-		return uiInputModeStatus
-	case m.psVisible:
-		return uiInputModeProcessList
-	case m.rollbackMode:
-		return uiInputModeRollbackSelection
-	case m.rollbackEditing:
-		return uiInputModeRollbackEdit
-	case m.askCanOwnInput():
-		return uiInputModeAsk
-	default:
+	if m == nil || m.interaction.Mode == "" {
 		return uiInputModeMain
 	}
+	return m.interaction.Mode
 }
 
-func (m *uiModel) askCanOwnInput() bool {
-	if m == nil || m.activeAsk == nil {
-		return false
+func (m *uiModel) setInputMode(mode uiInputMode) {
+	if m == nil {
+		return
 	}
-	if m.psVisible || m.rollbackMode || m.rollbackEditing {
-		return false
+	if mode == "" {
+		mode = uiInputModeMain
 	}
-	mode := m.view.Mode()
-	return mode == "" || mode == tui.ModeOngoing
+	m.interaction.Mode = mode
+}
+
+func (m *uiModel) restorePrimaryInputMode() {
+	if m == nil {
+		return
+	}
+	if m.ask.hasCurrent() && (m.view.Mode() == "" || m.view.Mode() == tui.ModeOngoing) {
+		m.setInputMode(uiInputModeAsk)
+		return
+	}
+	m.setInputMode(uiInputModeMain)
 }
 
 func (m *uiModel) inputModeState() uiInputModeState {

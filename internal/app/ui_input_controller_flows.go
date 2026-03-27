@@ -69,10 +69,10 @@ func (c uiInputController) cancelRollbackEditingToSelectionFlowCmd() tea.Cmd {
 
 func (c uiInputController) startRollbackFork(text string) (tea.Model, tea.Cmd) {
 	m := c.model
-	m.nextForkUserMessageIndex = m.rollbackSelectedUserMessageIndex
+	m.nextForkUserMessageIndex = m.rollback.selectedUserMessageIndex
 	m.nextSessionInitialPrompt = text
 	m.exitAction = UIActionForkRollback
-	m.rollbackEditing = false
+	m.rollback.phase = uiRollbackPhaseInactive
 	return m, tea.Quit
 }
 
