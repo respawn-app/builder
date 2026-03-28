@@ -11,6 +11,7 @@ func testSetActiveAsk(m *uiModel, event *askEvent) {
 	if m == nil {
 		return
 	}
+	m.ask.currentToken = nextNonZeroToken(m.ask.currentToken)
 	m.ask.current = event
 	if event != nil {
 		m.setInputMode(uiInputModeAsk)

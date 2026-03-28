@@ -10,15 +10,25 @@ func (m *uiModel) cursorIndex() int {
 	return bufferCursorIndex(m.input, m.inputCursor)
 }
 
-func (m *uiModel) clearInput() {
-	m.input = ""
-	m.inputCursor = -1
-	m.mainInputDraftToken++
-	if m.mainInputDraftToken == 0 {
-		m.mainInputDraftToken = 1
+func nextNonZeroToken(token uint64) uint64 {
+	token++
+	if token == 0 {
+		return 1
 	}
-	m.resetPromptHistoryNavigation()
+	return token
+}
+
+func (m *uiModel) replaceMainInput(text string, cursor int) {
+	m.mainInputDraftToken = nextNonZeroToken(m.mainInputDraftToken)
+	m.input = text
+	m.inputCursor = cursor
+	m.syncPromptHistorySelectionToInput()
 	m.refreshSlashCommandFilterFromInput()
+}
+
+func (m *uiModel) clearInput() {
+	m.replaceMainInput("", -1)
+	m.resetPromptHistoryNavigation()
 }
 
 func (m *uiModel) insertInputRunes(chars []rune) {

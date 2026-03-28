@@ -168,9 +168,7 @@ func (m *uiModel) hasPromptHistoryDraft() bool {
 }
 
 func (m *uiModel) restorePromptHistoryDraft() {
-	m.input = m.promptHistoryDraft
-	m.inputCursor = m.promptHistoryDraftCursor
-	m.refreshSlashCommandFilterFromInput()
+	m.replaceMainInput(m.promptHistoryDraft, m.promptHistoryDraftCursor)
 	m.resetPromptHistoryNavigation()
 }
 
@@ -203,9 +201,7 @@ func (m *uiModel) applyPromptHistorySelection() {
 	if !m.promptHistorySelectionActive() {
 		return
 	}
-	m.input = m.promptHistory[m.promptHistorySelection]
-	m.inputCursor = -1
-	m.refreshSlashCommandFilterFromInput()
+	m.replaceMainInput(m.promptHistory[m.promptHistorySelection], -1)
 }
 
 func (m *uiModel) recordPromptHistory(text string) tea.Cmd {

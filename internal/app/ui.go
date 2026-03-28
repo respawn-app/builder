@@ -76,6 +76,7 @@ type runLoggerDiagnosticMsg struct {
 type clipboardImagePasteDoneMsg struct {
 	Target         uiClipboardPasteTarget
 	MainDraftToken uint64
+	AskToken       uint64
 	Path           string
 	Err            error
 }
