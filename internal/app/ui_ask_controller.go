@@ -367,6 +367,7 @@ func (c uiAskController) answer(resp askquestion.Response, err error) bool {
 	m.ask.current.reply <- askReply{response: resp, err: err}
 	if len(m.ask.queue) == 0 {
 		m.ask.current = nil
+		m.ask.currentToken = nextNonZeroToken(m.ask.currentToken)
 		m.ask.cursor = 0
 		m.clearAskInput()
 		m.ask.freeform = false
@@ -384,6 +385,7 @@ func (c uiAskController) answer(resp askquestion.Response, err error) bool {
 func (c uiAskController) setActiveAsk(evt askEvent) {
 	m := c.model
 	current := evt
+	m.ask.currentToken = nextNonZeroToken(m.ask.currentToken)
 	m.ask.current = &current
 	m.ask.cursor = 0
 	m.clearAskInput()

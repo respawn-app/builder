@@ -100,6 +100,32 @@ func TestClipboardImagePasteSkipsStaleMainDraft(t *testing.T) {
 	}
 }
 
+func TestClipboardImagePasteSkipsPromptHistoryDraftSwitch(t *testing.T) {
+	paster := &stubClipboardImagePaster{path: "/tmp/builder-clipboard-main.png"}
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
+	m.promptHistory = []string{"older prompt"}
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlV})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected clipboard paste command")
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated = next.(*uiModel)
+	if got := updated.input; got != "older prompt" {
+		t.Fatalf("expected prompt history selection to load older draft, got %q", got)
+	}
+	next, followCmd := updated.Update(cmd())
+	updated = next.(*uiModel)
+	if got := updated.input; got != "older prompt" {
+		t.Fatalf("expected stale clipboard completion not to modify history draft, got %q", got)
+	}
+	if followCmd != nil {
+		t.Fatalf("did not expect follow-up command after skipped history draft paste, got %T", followCmd())
+	}
+}
+
 func TestCtrlDClipboardImagePasteInsertsIntoAskFreeform(t *testing.T) {
 	paster := &stubClipboardImagePaster{path: "/tmp/builder-clipboard-ask.png"}
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
@@ -153,6 +179,40 @@ func TestClipboardImagePasteSkipsDismissedAsk(t *testing.T) {
 	}
 	if updated.transientStatus != "" {
 		t.Fatalf("did not expect transient status when skipping stale ask paste, got %q", updated.transientStatus)
+	}
+}
+
+func TestClipboardImagePasteSkipsReplacedAsk(t *testing.T) {
+	paster := &stubClipboardImagePaster{path: "/tmp/builder-clipboard-ask.png"}
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
+	controller := uiAskController{model: m}
+	controller.setActiveAsk(askEvent{req: askquestion.Request{Question: "Ask A?"}})
+	m.ask.freeform = true
+	testSetAskInput(m, "A: ")
+	testSetAskInputCursor(m, len([]rune(testAskInput(m))))
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected clipboard paste command")
+	}
+
+	controller = uiAskController{model: updated}
+	controller.setActiveAsk(askEvent{req: askquestion.Request{Question: "Ask B?"}})
+	updated.ask.freeform = true
+	testSetAskInput(updated, "B: ")
+	testSetAskInputCursor(updated, len([]rune(testAskInput(updated))))
+
+	next, followCmd := updated.Update(cmd())
+	updated = next.(*uiModel)
+	if got := testAskInput(updated); got != "B: " {
+		t.Fatalf("expected stale ask paste not to modify replacement ask input, got %q", got)
+	}
+	if followCmd != nil {
+		t.Fatalf("did not expect follow-up command after skipped replacement ask paste, got %T", followCmd())
+	}
+	if updated.transientStatus != "" {
+		t.Fatalf("did not expect transient status when skipping replacement ask paste, got %q", updated.transientStatus)
 	}
 }
 

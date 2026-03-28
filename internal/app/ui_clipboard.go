@@ -336,14 +336,15 @@ func isClipboardImagePasteKey(msg tea.KeyMsg) bool {
 func (m *uiModel) pasteClipboardImageCmd(target uiClipboardPasteTarget) tea.Cmd {
 	paster := m.clipboardImagePaster
 	mainDraftToken := m.mainInputDraftToken
+	askToken := m.ask.currentToken
 	return func() tea.Msg {
 		if paster == nil {
-			return clipboardImagePasteDoneMsg{Target: target, MainDraftToken: mainDraftToken, Err: &uiClipboardPasteError{Kind: uiClipboardPasteErrorUnsupported, Message: "Clipboard image paste is unavailable"}}
+			return clipboardImagePasteDoneMsg{Target: target, MainDraftToken: mainDraftToken, AskToken: askToken, Err: &uiClipboardPasteError{Kind: uiClipboardPasteErrorUnsupported, Message: "Clipboard image paste is unavailable"}}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), clipboardImagePasteTimeout)
 		defer cancel()
 		path, err := paster.PasteImage(ctx)
-		return clipboardImagePasteDoneMsg{Target: target, MainDraftToken: mainDraftToken, Path: filepath.Clean(path), Err: err}
+		return clipboardImagePasteDoneMsg{Target: target, MainDraftToken: mainDraftToken, AskToken: askToken, Path: filepath.Clean(path), Err: err}
 	}
 }
 
@@ -357,7 +358,7 @@ func (m *uiModel) handleClipboardImagePasteDone(msg clipboardImagePasteDoneMsg) 
 	}
 	switch msg.Target {
 	case uiClipboardPasteTargetAsk:
-		if !m.ask.hasCurrent() || !m.ask.freeform {
+		if !m.ask.hasCurrent() || !m.ask.freeform || msg.AskToken == 0 || msg.AskToken != m.ask.currentToken {
 			return nil
 		}
 		m.insertAskInputRunes([]rune(msg.Path))
