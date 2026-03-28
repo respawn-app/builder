@@ -131,8 +131,7 @@ func (m *uiModel) beginRollbackEditing() (int, bool) {
 	m.rollback.selectedUserMessageIndex = selected.UserMessageIndex
 	m.rollback.phase = uiRollbackPhaseEditing
 	m.setInputMode(uiInputModeRollbackEdit)
-	m.input = selected.Text
-	m.inputCursor = -1
+	m.replaceMainInput(selected.Text, -1)
 	m.clearRollbackSelectionHighlight()
 	return selected.TranscriptIndex, true
 }

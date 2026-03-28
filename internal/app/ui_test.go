@@ -3337,15 +3337,19 @@ func TestPSCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 	if !strings.Contains(plain, "Esc/q close") {
 		t.Fatalf("expected process list help text in overlay, got %q", plain)
 	}
+	rawLines := strings.Split(updated.View(), "\n")
 	lines := strings.Split(plain, "\n")
 	if len(lines) < 3 {
 		t.Fatalf("expected multi-line /ps overlay, got %q", plain)
 	}
-	if strings.Contains(lines[0], "Background Processes") || strings.Contains(lines[0], "Esc/q close") {
-		t.Fatalf("expected /ps controls moved out of the header, top line=%q", lines[0])
+	if !strings.Contains(lines[0], "Background Processes") {
+		t.Fatalf("expected /ps title at top of overlay, got %q", lines[0])
 	}
-	footer := strings.Join(lines[max(0, len(lines)-3):], "\n")
-	if !strings.Contains(footer, "Background Processes") || !strings.Contains(footer, "Esc/q close") {
+	if rawLines[0] == lines[0] {
+		t.Fatalf("expected /ps title to be styled, raw=%q plain=%q", rawLines[0], lines[0])
+	}
+	footer := strings.Join(lines[max(0, len(lines)-2):], "\n")
+	if !strings.Contains(footer, "Esc/q close") {
 		t.Fatalf("expected /ps controls near the bottom of the overlay, footer=%q", footer)
 	}
 
@@ -3362,6 +3366,50 @@ func TestPSCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("expected /ps close to emit a screen transition command")
+	}
+}
+
+func TestPSTightHeightKeepsTitleVisibleWithoutTailCropping(t *testing.T) {
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "printf 'tiny\n'; sleep 30"},
+		DisplayCommand: "printf tiny",
+		Workdir:        t.TempDir(),
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start tight-height job: %v", err)
+	}
+	if !res.Backgrounded {
+		t.Fatal("expected tight-height job to move to background")
+	}
+
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m.termWidth = 90
+	m.termHeight = 3
+	m.windowSizeKnown = true
+	m.input = "/ps"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	plain := stripANSIAndTrimRight(updated.View())
+	lines := strings.Split(plain, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected tight-height frame to stay bounded to terminal height, got %d lines in %q", len(lines), plain)
+	}
+	if !strings.Contains(lines[0], "Background Processes") {
+		t.Fatalf("expected tight-height /ps view to keep title visible at top, got %q", lines[0])
+	}
+	if strings.Contains(plain, "Esc/q close") {
+		t.Fatalf("did not expect footer controls when height is too tight, got %q", plain)
+	}
+	if strings.TrimSpace(lines[1]) == "" || strings.Contains(lines[1], "$ ") {
+		t.Fatalf("expected single visible process row under tight height, got %q", lines[1])
 	}
 }
 
@@ -3407,17 +3455,20 @@ func TestPSOverlayScrollKeepsEntryHeadersVisibleAtTop(t *testing.T) {
 	}
 
 	lines := strings.Split(stripANSIAndTrimRight(updated.View()), "\n")
-	if len(lines) == 0 {
+	if len(lines) < 2 {
 		t.Fatal("expected rendered /ps overlay")
 	}
-	top := strings.TrimSpace(lines[0])
-	if top == "" {
-		t.Fatalf("expected top line to begin with a process header, got blank line in %q", lines[0])
+	if !strings.Contains(lines[0], "Background Processes") {
+		t.Fatalf("expected /ps title to remain visible at top, got %q", lines[0])
 	}
-	if strings.Contains(top, "cwd:") || strings.Contains(top, "log:") || strings.Contains(top, "out:") {
+	top := strings.TrimSpace(lines[1])
+	if top == "" {
+		t.Fatalf("expected first visible process row after title, got blank line in %q", lines[1])
+	}
+	if strings.Contains(top, "$ ") || strings.Contains(top, "job-") && strings.Contains(top, "output") {
 		t.Fatalf("expected /ps overlay to start on a process header, got %q", top)
 	}
-	if !strings.Contains(top, "[") {
+	if !strings.Contains(top, "running") {
 		t.Fatalf("expected /ps header line with process state at top, got %q", top)
 	}
 }
@@ -3467,17 +3518,433 @@ func TestPSOverlayScrollShowsSelectedEntryFullyNearBottom(t *testing.T) {
 	}
 
 	plain := stripANSIAndTrimRight(updated.View())
-	if !strings.Contains(plain, "> [running]") {
+	if strings.Contains(plain, "> ") {
+		t.Fatalf("did not expect legacy selection chevron in /ps overlay, got %q", plain)
+	}
+	if !strings.Contains(plain, "running") {
 		t.Fatalf("expected selected entry header to remain visible near bottom, got %q", plain)
 	}
 	if !strings.Contains(plain, "job-1-command") {
 		t.Fatalf("expected selected entry command visible near bottom, got %q", plain)
 	}
-	if !strings.Contains(plain, "cwd: ") || !strings.Contains(plain, "/job-1") {
-		t.Fatalf("expected selected entry cwd visible near bottom, got %q", plain)
+	if !strings.Contains(plain, "job-1") {
+		t.Fatalf("expected selected entry workdir context visible near bottom, got %q", plain)
 	}
-	if !strings.Contains(plain, "out: job-1-output") {
+	if !strings.Contains(plain, "job-1-output") {
 		t.Fatalf("expected selected entry output visible near bottom, got %q", plain)
+	}
+}
+
+func TestPSOverlayMultilineCommandsKeepTitleAndFirstShellVisible(t *testing.T) {
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	command := strings.Join([]string{
+		"cat > /tmp/demo.txt <<'EOF'",
+		"first line",
+		"second line",
+		"EOF",
+	}, "\n")
+	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "printf 'final-output\n'; sleep 30"},
+		DisplayCommand: command,
+		Workdir:        t.TempDir(),
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start multiline job: %v", err)
+	}
+	if !res.Backgrounded {
+		t.Fatal("expected multiline job to move to background")
+	}
+
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m.termWidth = 90
+	m.termHeight = 12
+	m.windowSizeKnown = true
+	m.input = "/ps"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	raw := updated.View()
+	plain := stripANSIAndTrimRight(raw)
+	lines := strings.Split(plain, "\n")
+	rawLines := strings.Split(raw, "\n")
+	if len(lines) < 4 {
+		t.Fatalf("expected multiline /ps overlay, got %q", plain)
+	}
+	if !strings.Contains(lines[0], "Background Processes") {
+		t.Fatalf("expected process list title at top, got %q", lines[0])
+	}
+	if rawLines[0] == lines[0] {
+		t.Fatalf("expected process list title to be styled, raw=%q plain=%q", rawLines[0], lines[0])
+	}
+	if strings.TrimSpace(lines[1]) == "" || strings.Contains(lines[1], "$ ") {
+		t.Fatalf("expected first process header immediately below the title, got %q", lines[1])
+	}
+	if !strings.Contains(plain, "$ cat > /tmp/demo.txt <<'EOF' …") {
+		t.Fatalf("expected multiline command preview collapsed to one line, got %q", plain)
+	}
+	if strings.Contains(plain, "second line") || strings.Contains(plain, "\n  EOF") {
+		t.Fatalf("did not expect multiline shell body to spill into /ps preview, got %q", plain)
+	}
+	if !strings.Contains(plain, "final-output") {
+		t.Fatalf("expected last output line visible in /ps preview, got %q", plain)
+	}
+}
+
+func TestRenderProcessListHeaderCountsStartingEntriesAsRunning(t *testing.T) {
+	style := uiThemeStyles("dark")
+	header := stripANSIAndTrimRight(renderProcessListHeader([]shelltool.Snapshot{{ID: "1000", State: "starting"}}, 120, style))
+	if !strings.Contains(header, "1 running") {
+		t.Fatalf("expected starting entry to count as running in header, got %q", header)
+	}
+}
+
+func TestRenderProcessListEntryUsesSemanticStateIndicators(t *testing.T) {
+	style := uiThemeStyles("dark")
+	palette := uiPalette("dark")
+	running := renderProcessListEntry(shelltool.Snapshot{ID: "1000", State: "running", Running: true, Command: "echo running"}, false, 120, "dark", 0, style)
+	completed := renderProcessListEntry(shelltool.Snapshot{ID: "1001", State: "completed", Command: "echo completed"}, false, 120, "dark", 0, style)
+	failed := renderProcessListEntry(shelltool.Snapshot{ID: "1002", State: "failed", Command: "echo failed"}, false, 120, "dark", 0, style)
+	selected := renderProcessListEntry(shelltool.Snapshot{ID: "1003", State: "running", Running: true, Command: "echo selected"}, true, 120, "dark", 0, style)
+
+	runningIndicator := lipgloss.NewStyle().Foreground(palette.primary).Bold(true).Render(renderProcessStateIndicator(shelltool.Snapshot{State: "running", Running: true}, 0))
+	completedIndicator := lipgloss.NewStyle().Foreground(statusGreenColor()).Bold(true).Render("●")
+	failedIndicator := lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true).Render("●")
+
+	if !strings.Contains(running[0], runningIndicator) {
+		t.Fatalf("expected running entry to use primary spinner indicator, got %q", running[0])
+	}
+	if !strings.Contains(completed[0], completedIndicator) {
+		t.Fatalf("expected completed entry to use green indicator, got %q", completed[0])
+	}
+	if !strings.Contains(failed[0], failedIndicator) {
+		t.Fatalf("expected failed entry to use red indicator, got %q", failed[0])
+	}
+
+	dollarStyle := lipgloss.NewStyle().Foreground(palette.primary).Bold(true)
+	if !strings.Contains(running[1], dollarStyle.Render("$")) {
+		t.Fatalf("expected shell prompt dollar sign to use primary color, got %q", running[1])
+	}
+	if !strings.Contains(running[2], uiThemeStyles("dark").meta.Render("<no output yet>")) {
+		t.Fatalf("expected output preview to use faint metadata styling, got %q", running[2])
+	}
+	if got := len(running); got != processListEntryLines {
+		t.Fatalf("expected process list entry to use %d visual lines, got %d", processListEntryLines, got)
+	}
+	if strings.TrimSpace(stripANSIAndTrimRight(running[3])) != "" {
+		t.Fatalf("expected unselected process entries to end with a blank separator line, got %q", running[3])
+	}
+	for idx, line := range selected {
+		plain := stripANSIAndTrimRight(line)
+		if !strings.HasPrefix(strings.TrimRight(plain, " "), processListRailGlyph) {
+			t.Fatalf("expected selected process line %d to use a continuous left rail, got %q", idx, line)
+		}
+	}
+}
+
+func TestPSOverlayRendersSemanticStateIndicators(t *testing.T) {
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	workdir := t.TempDir()
+	start := func(command, display string) string {
+		res, startErr := manager.Start(context.Background(), shelltool.ExecRequest{
+			Command:        []string{"sh", "-c", command},
+			DisplayCommand: display,
+			Workdir:        workdir,
+			YieldTime:      250 * time.Millisecond,
+		})
+		if startErr != nil {
+			t.Fatalf("start %s: %v", display, startErr)
+		}
+		if !res.Backgrounded {
+			t.Fatalf("expected %s to move to background", display)
+		}
+		return res.SessionID
+	}
+
+	_ = start("printf 'running-output\n'; sleep 30", "running-job")
+	_ = start("printf 'completed-output\n'; sleep 0.4", "completed-job")
+	_ = start("printf 'failed-output\n'; sleep 0.4; exit 2", "failed-job")
+	time.Sleep(900 * time.Millisecond)
+
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 14
+	m.windowSizeKnown = true
+	m.spinnerFrame = 0
+	m.input = "/ps"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	raw := updated.View()
+	plain := stripANSIAndTrimRight(raw)
+	palette := uiPalette("dark")
+	styles := uiThemeStyles("dark")
+	runningIndicator := lipgloss.NewStyle().Foreground(palette.primary).Bold(true).Render(renderProcessStateIndicator(shelltool.Snapshot{State: "running", Running: true}, 0))
+	completedIndicator := lipgloss.NewStyle().Foreground(statusGreenColor()).Bold(true).Render("●")
+	failedIndicator := lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true).Render("●")
+	dollarStyle := lipgloss.NewStyle().Foreground(palette.primary).Bold(true)
+
+	if !strings.Contains(raw, runningIndicator) {
+		t.Fatalf("expected running indicator in rendered /ps overlay, got %q", raw)
+	}
+	if !strings.Contains(raw, completedIndicator) {
+		t.Fatalf("expected completed indicator in rendered /ps overlay, got %q", raw)
+	}
+	if !strings.Contains(raw, failedIndicator) {
+		t.Fatalf("expected failed indicator in rendered /ps overlay, got %q", raw)
+	}
+	if !strings.Contains(raw, dollarStyle.Render("$")) {
+		t.Fatalf("expected rendered /ps overlay to color shell prompt dollar sign in primary color, got %q", raw)
+	}
+	if !strings.Contains(raw, styles.meta.Render("running-output")) {
+		t.Fatalf("expected rendered /ps overlay to render output preview as faint metadata, got %q", raw)
+	}
+	if !strings.Contains(plain, "\n\n") {
+		t.Fatalf("expected blank separator lines between process items in rendered /ps overlay, got %q", plain)
+	}
+	if strings.Contains(plain, "> ") {
+		t.Fatalf("did not expect legacy chevron selection in rendered /ps overlay, got %q", raw)
+	}
+}
+
+func TestPSOverlaySelectedRowUsesFullWidthHighlightAndContinuousRail(t *testing.T) {
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	workdir := t.TempDir()
+	start := func(label string) string {
+		res, startErr := manager.Start(context.Background(), shelltool.ExecRequest{
+			Command:        []string{"sh", "-c", fmt.Sprintf("printf '%s-output\n'; sleep 30", label)},
+			DisplayCommand: label,
+			Workdir:        workdir,
+			YieldTime:      250 * time.Millisecond,
+		})
+		if startErr != nil {
+			t.Fatalf("start %s: %v", label, startErr)
+		}
+		if !res.Backgrounded {
+			t.Fatalf("expected %s to move to background", label)
+		}
+		return res.SessionID
+	}
+
+	firstID := start("first-job")
+	_ = start("second-job")
+
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 14
+	m.windowSizeKnown = true
+	m.input = "/ps"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated = next.(*uiModel)
+
+	raw := updated.View()
+	plain := stripANSIAndTrimRight(raw)
+	rawLines := strings.Split(raw, "\n")
+	plainLines := strings.Split(plain, "\n")
+	selectedStart := -1
+	for idx, line := range plainLines {
+		if strings.Contains(line, firstID) {
+			selectedStart = idx
+			break
+		}
+	}
+	if selectedStart < 0 {
+		t.Fatalf("expected selected process %s in rendered overlay, got %q", firstID, plain)
+	}
+	if selectedStart+3 >= len(rawLines) {
+		t.Fatalf("expected full selected process block, got %q", raw)
+	}
+	selectedStyle := newProcessListEntryStyles("dark", true, uiPalette("dark").primary)
+	styledSpace := selectedStyle.line.Render(" ")
+	for offset := 0; offset < processListEntryLines; offset++ {
+		plainLine := strings.TrimRight(plainLines[selectedStart+offset], " ")
+		if !strings.HasPrefix(plainLine, processListRailGlyph) {
+			t.Fatalf("expected selected line %d to keep continuous left rail, got %q", offset, plainLines[selectedStart+offset])
+		}
+		if !strings.Contains(rawLines[selectedStart+offset], styledSpace) {
+			t.Fatalf("expected selected line %d to include highlighted trailing spaces across full width, got %q", offset, rawLines[selectedStart+offset])
+		}
+	}
+	if strings.TrimRight(plainLines[selectedStart+3], " ") != processListRailGlyph {
+		t.Fatalf("expected selected separator line to continue the rail without gaps, got %q", plainLines[selectedStart+3])
+	}
+	if !strings.Contains(rawLines[selectedStart+3], styledSpace) {
+		t.Fatalf("expected selected separator line to keep full-width highlight, got %q", rawLines[selectedStart+3])
+	}
+	if strings.Contains(plain, "> ") {
+		t.Fatalf("did not expect legacy chevron selection in rendered /ps overlay, got %q", plain)
+	}
+}
+
+func TestPSOverlaySpinnerTickAnimatesRunningEntriesWhileIdle(t *testing.T) {
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "printf 'spin\n'; sleep 30"},
+		DisplayCommand: "spin-job",
+		Workdir:        t.TempDir(),
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start spin job: %v", err)
+	}
+	if !res.Backgrounded {
+		t.Fatal("expected spin job to move to background")
+	}
+
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 14
+	m.windowSizeKnown = true
+	m.input = "/ps"
+	m.busy = false
+	m.spinnerFrame = 0
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	before := updated.View()
+	token := updated.spinnerTickToken
+	if token == 0 {
+		t.Fatal("expected /ps open to start a spinner loop token for running entries")
+	}
+	next, cmd := updated.Update(spinnerTickMsg{token: token})
+	updated = next.(*uiModel)
+	after := updated.View()
+	if before == after {
+		t.Fatalf("expected /ps spinner tick to animate running entries while idle, before=%q after=%q", before, after)
+	}
+	if cmd == nil {
+		t.Fatal("expected spinner tick to schedule another tick while /ps has running entries")
+	}
+}
+
+func TestPSOverlayIgnoresStaleSpinnerTickTokens(t *testing.T) {
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "printf 'spin\n'; sleep 30"},
+		DisplayCommand: "spin-job",
+		Workdir:        t.TempDir(),
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start spin job: %v", err)
+	}
+	if !res.Backgrounded {
+		t.Fatal("expected spin job to move to background")
+	}
+
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 14
+	m.windowSizeKnown = true
+	m.input = "/ps"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	currentToken := updated.spinnerTickToken
+	if currentToken == 0 {
+		t.Fatal("expected active spinner token for running /ps entries")
+	}
+	before := updated.spinnerFrame
+	next, cmd := updated.Update(spinnerTickMsg{token: currentToken + 1})
+	updated = next.(*uiModel)
+	if updated.spinnerFrame != before {
+		t.Fatalf("expected stale spinner token not to advance frame, got %d from %d", updated.spinnerFrame, before)
+	}
+	if cmd != nil {
+		t.Fatalf("did not expect stale spinner tick to schedule another timer, got %T", cmd)
+	}
+}
+
+func TestPSOverlayIgnoresStaleSpinnerTickAfterRestart(t *testing.T) {
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "printf 'spin\n'; sleep 30"},
+		DisplayCommand: "spin-job",
+		Workdir:        t.TempDir(),
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start spin job: %v", err)
+	}
+	if !res.Backgrounded {
+		t.Fatal("expected spin job to move to background")
+	}
+
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 14
+	m.windowSizeKnown = true
+	m.input = "/ps"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	oldToken := updated.spinnerTickToken
+	if oldToken == 0 {
+		t.Fatal("expected active spinner token for running /ps entries")
+	}
+	oldFrame := updated.spinnerFrame
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if updated.spinnerTickToken != 0 {
+		t.Fatalf("expected spinner token cleared after closing /ps, got %d", updated.spinnerTickToken)
+	}
+
+	updated.input = "/ps"
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	newToken := updated.spinnerTickToken
+	if newToken == 0 {
+		t.Fatal("expected restarted spinner token for running /ps entries")
+	}
+	if newToken == oldToken {
+		t.Fatalf("expected restarted spinner token to differ from stale token, got %d", newToken)
+	}
+
+	before := updated.spinnerFrame
+	next, cmd := updated.Update(spinnerTickMsg{token: oldToken})
+	updated = next.(*uiModel)
+	if updated.spinnerFrame != before {
+		t.Fatalf("expected stale spinner tick after restart not to advance frame, got %d from %d", updated.spinnerFrame, before)
+	}
+	if updated.spinnerFrame != oldFrame {
+		t.Fatalf("expected stale spinner tick to preserve frame %d, got %d", oldFrame, updated.spinnerFrame)
+	}
+	if cmd != nil {
+		t.Fatalf("did not expect stale spinner tick after restart to schedule another timer, got %T", cmd)
 	}
 }
 

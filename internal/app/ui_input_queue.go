@@ -60,13 +60,13 @@ func (c uiInputController) restoreQueuedMessagesIntoInput() {
 	}
 	joined := strings.Join(m.queued, "\n\n")
 	m.queued = nil
+	newInput := joined
 	if strings.TrimSpace(m.input) == "" {
-		m.input = joined
+		newInput = joined
 	} else {
-		m.input = strings.TrimRight(m.input, "\n") + "\n\n" + joined
+		newInput = strings.TrimRight(m.input, "\n") + "\n\n" + joined
 	}
-	m.inputCursor = -1
-	m.refreshSlashCommandFilterFromInput()
+	m.replaceMainInput(newInput, -1)
 }
 
 func (c uiInputController) restorePendingPreSubmitTextIntoInput() {
@@ -76,13 +76,13 @@ func (c uiInputController) restorePendingPreSubmitTextIntoInput() {
 		return
 	}
 	m.pendingPreSubmitText = ""
+	newInput := pending
 	if strings.TrimSpace(m.input) == "" {
-		m.input = pending
+		newInput = pending
 	} else {
-		m.input = strings.TrimRight(m.input, "\n") + "\n\n" + pending
+		newInput = strings.TrimRight(m.input, "\n") + "\n\n" + pending
 	}
-	m.inputCursor = -1
-	m.refreshSlashCommandFilterFromInput()
+	m.replaceMainInput(newInput, -1)
 }
 
 func (c uiInputController) restorePendingInjectedIntoInput() {
@@ -98,13 +98,13 @@ func (c uiInputController) restorePendingInjectedIntoInput() {
 	}
 	joined := strings.Join(pending, "\n\n")
 	m.pendingInjected = nil
+	newInput := joined
 	if strings.TrimSpace(m.input) == "" {
-		m.input = joined
+		newInput = joined
 	} else {
-		m.input = strings.TrimRight(m.input, "\n") + "\n\n" + joined
+		newInput = strings.TrimRight(m.input, "\n") + "\n\n" + joined
 	}
-	m.inputCursor = -1
-	m.refreshSlashCommandFilterFromInput()
+	m.replaceMainInput(newInput, -1)
 }
 
 func (c uiInputController) unlockInputAfterSubmissionError() {

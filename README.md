@@ -31,6 +31,7 @@ Check the installed version with `builder --version`.
 
 - [x] Agentic loop with `shell`, `ask_question`, `patch` tools.
 - [x] Native local image/PDF attachment tool (`view_image`) for path-based multimodal reading.
+- [x] Explicit clipboard screenshot paste hotkeys (`Ctrl+V`, `Ctrl+D`) that insert temp image paths into the prompt.
 - [x] Support for Codex login and OpenAI api keys.
 - [x] Compaction, including auto, using native Codex/OpenAI endpoints.
 - [x] Compact UI mode for ongoing work, and detailed mode to review thinking, tool calls, prompts, summaries.
