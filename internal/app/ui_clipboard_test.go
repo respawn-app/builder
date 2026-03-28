@@ -126,6 +126,36 @@ func TestClipboardImagePasteSkipsPromptHistoryDraftSwitch(t *testing.T) {
 	}
 }
 
+func TestClipboardImagePasteSkipsSlashAutocompleteReplacement(t *testing.T) {
+	paster := &stubClipboardImagePaster{path: "/tmp/builder-clipboard-main.png"}
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
+	m.input = "/ne"
+	m.refreshSlashCommandFilterFromInput()
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlV})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected clipboard paste command")
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated = next.(*uiModel)
+	if got := updated.input; got != "/new " {
+		t.Fatalf("expected slash autocomplete to replace draft, got %q", got)
+	}
+	next, followCmd := updated.Update(cmd())
+	updated = next.(*uiModel)
+	if got := updated.input; got != "/new " {
+		t.Fatalf("expected stale clipboard completion not to modify autocompleted slash draft, got %q", got)
+	}
+	if followCmd != nil {
+		t.Fatalf("did not expect follow-up command after skipped slash autocomplete paste, got %T", followCmd())
+	}
+	if updated.transientStatus != "" {
+		t.Fatalf("did not expect transient status when skipping stale slash autocomplete paste, got %q", updated.transientStatus)
+	}
+}
+
 func TestCtrlDClipboardImagePasteInsertsIntoAskFreeform(t *testing.T) {
 	paster := &stubClipboardImagePaster{path: "/tmp/builder-clipboard-ask.png"}
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
