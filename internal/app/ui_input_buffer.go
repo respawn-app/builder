@@ -13,6 +13,10 @@ func (m *uiModel) cursorIndex() int {
 func (m *uiModel) clearInput() {
 	m.input = ""
 	m.inputCursor = -1
+	m.mainInputDraftToken++
+	if m.mainInputDraftToken == 0 {
+		m.mainInputDraftToken = 1
+	}
 	m.resetPromptHistoryNavigation()
 	m.refreshSlashCommandFilterFromInput()
 }

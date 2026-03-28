@@ -335,14 +335,15 @@ func isClipboardImagePasteKey(msg tea.KeyMsg) bool {
 
 func (m *uiModel) pasteClipboardImageCmd(target uiClipboardPasteTarget) tea.Cmd {
 	paster := m.clipboardImagePaster
+	mainDraftToken := m.mainInputDraftToken
 	return func() tea.Msg {
 		if paster == nil {
-			return clipboardImagePasteDoneMsg{Target: target, Err: &uiClipboardPasteError{Kind: uiClipboardPasteErrorUnsupported, Message: "Clipboard image paste is unavailable"}}
+			return clipboardImagePasteDoneMsg{Target: target, MainDraftToken: mainDraftToken, Err: &uiClipboardPasteError{Kind: uiClipboardPasteErrorUnsupported, Message: "Clipboard image paste is unavailable"}}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), clipboardImagePasteTimeout)
 		defer cancel()
 		path, err := paster.PasteImage(ctx)
-		return clipboardImagePasteDoneMsg{Target: target, Path: filepath.Clean(path), Err: err}
+		return clipboardImagePasteDoneMsg{Target: target, MainDraftToken: mainDraftToken, Path: filepath.Clean(path), Err: err}
 	}
 }
 
@@ -361,6 +362,9 @@ func (m *uiModel) handleClipboardImagePasteDone(msg clipboardImagePasteDoneMsg) 
 		}
 		m.insertAskInputRunes([]rune(msg.Path))
 	default:
+		if m.inputMode() != uiInputModeMain || msg.MainDraftToken == 0 || msg.MainDraftToken != m.mainInputDraftToken {
+			return nil
+		}
 		m.insertInputRunes([]rune(msg.Path))
 	}
 	return nil

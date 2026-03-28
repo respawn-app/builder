@@ -74,9 +74,10 @@ type runLoggerDiagnosticMsg struct {
 }
 
 type clipboardImagePasteDoneMsg struct {
-	Target uiClipboardPasteTarget
-	Path   string
-	Err    error
+	Target         uiClipboardPasteTarget
+	MainDraftToken uint64
+	Path           string
+	Err            error
 }
 
 type askEvent struct {
@@ -294,6 +295,7 @@ type uiModel struct {
 
 	input                    string
 	inputCursor              int // rune index; -1 means "track tail"
+	mainInputDraftToken      uint64
 	promptHistory            []string
 	promptHistorySelection   int
 	promptHistoryDraft       string
@@ -417,6 +419,7 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 		runtimeEvents:            runtimeEvents,
 		askEvents:                askEvents,
 		inputCursor:              -1,
+		mainInputDraftToken:      1,
 		promptHistorySelection:   -1,
 		promptHistoryDraftCursor: -1,
 		commandRegistry:          commands.NewDefaultRegistry(),
