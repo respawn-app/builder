@@ -3874,6 +3874,71 @@ func TestPSOverlayIgnoresStaleSpinnerTickTokens(t *testing.T) {
 	}
 }
 
+func TestPSOverlayIgnoresStaleSpinnerTickAfterRestart(t *testing.T) {
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "printf 'spin\n'; sleep 30"},
+		DisplayCommand: "spin-job",
+		Workdir:        t.TempDir(),
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start spin job: %v", err)
+	}
+	if !res.Backgrounded {
+		t.Fatal("expected spin job to move to background")
+	}
+
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m.termWidth = 100
+	m.termHeight = 14
+	m.windowSizeKnown = true
+	m.input = "/ps"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	oldToken := updated.spinnerTickToken
+	if oldToken == 0 {
+		t.Fatal("expected active spinner token for running /ps entries")
+	}
+	oldFrame := updated.spinnerFrame
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+	if updated.spinnerTickToken != 0 {
+		t.Fatalf("expected spinner token cleared after closing /ps, got %d", updated.spinnerTickToken)
+	}
+
+	updated.input = "/ps"
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	newToken := updated.spinnerTickToken
+	if newToken == 0 {
+		t.Fatal("expected restarted spinner token for running /ps entries")
+	}
+	if newToken == oldToken {
+		t.Fatalf("expected restarted spinner token to differ from stale token, got %d", newToken)
+	}
+
+	before := updated.spinnerFrame
+	next, cmd := updated.Update(spinnerTickMsg{token: oldToken})
+	updated = next.(*uiModel)
+	if updated.spinnerFrame != before {
+		t.Fatalf("expected stale spinner tick after restart not to advance frame, got %d from %d", updated.spinnerFrame, before)
+	}
+	if updated.spinnerFrame != oldFrame {
+		t.Fatalf("expected stale spinner tick to preserve frame %d, got %d", oldFrame, updated.spinnerFrame)
+	}
+	if cmd != nil {
+		t.Fatalf("did not expect stale spinner tick after restart to schedule another timer, got %T", cmd)
+	}
+}
+
 func TestPSOverlayInlineAppendsOutputToInputAndReturnsToOngoing(t *testing.T) {
 	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
 	if err != nil {

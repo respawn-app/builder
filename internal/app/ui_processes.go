@@ -416,12 +416,12 @@ func renderProcessListEntry(entry shelltool.Snapshot, selected bool, width int, 
 	}
 
 	command := compactProcessCommandPreview(entry.Command)
-	line2Parts := []string{entryStyles.rail.Render(railGlyph), entryStyles.line.Render("   "), entryStyles.prompt.Render("$"), entryStyles.line.Render(" "), entryStyles.text.Render(truncateQueuedMessageLine(command, max(1, width-processListVisibleWidth([]string{entryStyles.rail.Render(railGlyph), entryStyles.line.Render("   "), entryStyles.prompt.Render("$"), entryStyles.line.Render(" ")}))))}
+	line2Parts := []string{entryStyles.rail.Render(railGlyph), entryStyles.line.Render("   "), entryStyles.prompt.Render("$"), entryStyles.line.Render(" "), entryStyles.text.Render(truncateQueuedMessageLine(command, max(1, width-processListContentIndentWidth(railGlyph, entryStyles, entryStyles.prompt.Render("$"), entryStyles.line.Render(" ")))))}
 
 	output := processListOutputPreview(entry.RecentOutput)
 	if output == "" {
 		output = "<no output yet>"
-		line3Parts := []string{entryStyles.rail.Render(railGlyph), entryStyles.line.Render("   "), entryStyles.output.Render(truncateQueuedMessageLine(output, max(1, width-processListVisibleWidth([]string{entryStyles.rail.Render(railGlyph), entryStyles.line.Render("   ")}))))}
+		line3Parts := []string{entryStyles.rail.Render(railGlyph), entryStyles.line.Render("   "), entryStyles.output.Render(truncateQueuedMessageLine(output, max(1, width-processListContentIndentWidth(railGlyph, entryStyles))))}
 		return []string{
 			processListPadLine(line1Parts, width, entryStyles.line),
 			processListPadLine(line2Parts, width, entryStyles.line),
@@ -429,7 +429,7 @@ func renderProcessListEntry(entry shelltool.Snapshot, selected bool, width int, 
 			processListPadLine([]string{entryStyles.rail.Render(separatorGlyph)}, width, entryStyles.line),
 		}
 	}
-	line3Parts := []string{entryStyles.rail.Render(railGlyph), entryStyles.line.Render("   "), entryStyles.output.Render(truncateQueuedMessageLine(output, max(1, width-processListVisibleWidth([]string{entryStyles.rail.Render(railGlyph), entryStyles.line.Render("   ")}))))}
+	line3Parts := []string{entryStyles.rail.Render(railGlyph), entryStyles.line.Render("   "), entryStyles.output.Render(truncateQueuedMessageLine(output, max(1, width-processListContentIndentWidth(railGlyph, entryStyles))))}
 	return []string{
 		processListPadLine(line1Parts, width, entryStyles.line),
 		processListPadLine(line2Parts, width, entryStyles.line),
@@ -474,6 +474,12 @@ func processListVisibleWidth(parts []string) int {
 		width += lipgloss.Width(part)
 	}
 	return width
+}
+
+func processListContentIndentWidth(railGlyph string, entryStyles processListEntryStyles, extraParts ...string) int {
+	parts := []string{entryStyles.rail.Render(railGlyph), entryStyles.line.Render("   ")}
+	parts = append(parts, extraParts...)
+	return processListVisibleWidth(parts)
 }
 
 func processListPadLine(parts []string, width int, fill lipgloss.Style) string {
@@ -557,8 +563,15 @@ func compactProcessCommandPreview(command string) string {
 	if preview == "" {
 		preview = "<no command>"
 	}
-	normalized := textutil.NormalizeCRLF(command)
-	if strings.Contains(normalized, "\n") && !strings.HasSuffix(preview, " …") {
+	normalizedPreview := textutil.NormalizeCRLF(preview)
+	previewLines := textutil.SplitLinesCRLF(normalizedPreview)
+	preview = strings.TrimSpace(previewLines[0])
+	if preview == "" {
+		preview = "<no command>"
+	}
+	normalizedCommand := textutil.NormalizeCRLF(strings.TrimSpace(command))
+	truncated := len(previewLines) > 1 || (strings.Contains(normalizedCommand, "\n") && strings.TrimSpace(normalizedCommand) != preview)
+	if truncated && !strings.HasSuffix(preview, " …") {
 		preview += " …"
 	}
 	return preview

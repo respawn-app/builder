@@ -20,6 +20,18 @@ type stubClipboardCommandRunner struct {
 	runFn    func(name string, args ...string) error
 }
 
+type stubExitCodeError struct {
+	code int
+}
+
+func (e stubExitCodeError) Error() string {
+	return "exit status"
+}
+
+func (e stubExitCodeError) ExitCode() int {
+	return e.code
+}
+
 func (r *stubClipboardCommandRunner) Output(_ context.Context, name string, args ...string) ([]byte, error) {
 	key := clipboardCommandKey(name, args...)
 	r.commands = append(r.commands, key)
@@ -166,7 +178,7 @@ func TestSystemClipboardImagePasterLinuxX11NoImage(t *testing.T) {
 		return ""
 	}
 	paster.lookPath = stubLookPath("xclip")
-	runner.outErrs[clipboardCommandKey("xclip", "-selection", "clipboard", "-target", "image/png", "-o")] = errors.New("target image/png not available")
+	runner.outputs[clipboardCommandKey("xclip", "-selection", "clipboard", "-target", "image/png", "-o")] = []byte{}
 
 	_, err := paster.PasteImage(context.Background())
 	var pasteErr *uiClipboardPasteError
@@ -177,6 +189,30 @@ func TestSystemClipboardImagePasterLinuxX11NoImage(t *testing.T) {
 		t.Fatalf("expected no-image error, got %d", pasteErr.Kind)
 	}
 	if pasteErr.Message != "Clipboard does not contain an image" {
+		t.Fatalf("unexpected error message %q", pasteErr.Message)
+	}
+}
+
+func TestSystemClipboardImagePasterLinuxX11CommandFailure(t *testing.T) {
+	paster, runner, _ := newTestSystemClipboardImagePaster(t, "linux")
+	paster.getenv = func(name string) string {
+		if name == "DISPLAY" {
+			return ":0"
+		}
+		return ""
+	}
+	paster.lookPath = stubLookPath("xclip")
+	runner.outErrs[clipboardCommandKey("xclip", "-selection", "clipboard", "-target", "image/png", "-o")] = errors.New("target image/png not available")
+
+	_, err := paster.PasteImage(context.Background())
+	var pasteErr *uiClipboardPasteError
+	if !errors.As(err, &pasteErr) {
+		t.Fatalf("expected uiClipboardPasteError, got %T", err)
+	}
+	if pasteErr.Kind != uiClipboardPasteErrorFailed {
+		t.Fatalf("expected failed error, got %d", pasteErr.Kind)
+	}
+	if pasteErr.Message != "Clipboard image paste failed" {
 		t.Fatalf("unexpected error message %q", pasteErr.Message)
 	}
 }
@@ -269,7 +305,7 @@ func TestSystemClipboardImagePasterWindowsNoImage(t *testing.T) {
 		if name != "pwsh" {
 			return nil
 		}
-		return errors.New("clipboard empty")
+		return stubExitCodeError{code: 3}
 	}
 
 	_, err := paster.PasteImage(context.Background())
@@ -281,6 +317,29 @@ func TestSystemClipboardImagePasterWindowsNoImage(t *testing.T) {
 		t.Fatalf("expected no-image error, got %d", pasteErr.Kind)
 	}
 	if pasteErr.Message != "Clipboard does not contain an image" {
+		t.Fatalf("unexpected error message %q", pasteErr.Message)
+	}
+}
+
+func TestSystemClipboardImagePasterWindowsCommandFailure(t *testing.T) {
+	paster, runner, _ := newTestSystemClipboardImagePaster(t, "windows")
+	paster.lookPath = stubLookPath("pwsh")
+	runner.runFn = func(name string, args ...string) error {
+		if name != "pwsh" {
+			return nil
+		}
+		return errors.New("powershell failed")
+	}
+
+	_, err := paster.PasteImage(context.Background())
+	var pasteErr *uiClipboardPasteError
+	if !errors.As(err, &pasteErr) {
+		t.Fatalf("expected uiClipboardPasteError, got %T", err)
+	}
+	if pasteErr.Kind != uiClipboardPasteErrorFailed {
+		t.Fatalf("expected failed error, got %d", pasteErr.Kind)
+	}
+	if pasteErr.Message != "Clipboard image paste failed" {
 		t.Fatalf("unexpected error message %q", pasteErr.Message)
 	}
 }
