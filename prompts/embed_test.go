@@ -47,8 +47,11 @@ func TestCompactionSoonReminderPromptIsEmbedded(t *testing.T) {
 	if trimmed == "" {
 		t.Fatal("expected compaction soon reminder prompt to be embedded")
 	}
-	if !strings.Contains(trimmed, "handoff to another agent may happen soon") {
-		t.Fatalf("expected reminder prompt to include concise handoff warning, got %q", trimmed)
+	if !strings.Contains(trimmed, "asked to hand off your work to another agent") {
+		t.Fatalf("expected reminder prompt to mention handoff to another agent, got %q", trimmed)
+	}
+	if !strings.Contains(trimmed, "will not have the tool call history") {
+		t.Fatalf("expected reminder prompt to mention missing prior context, got %q", trimmed)
 	}
 }
 
