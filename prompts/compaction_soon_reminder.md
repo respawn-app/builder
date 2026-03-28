@@ -1,3 +1,1 @@
-Heads-up: a handoff to another agent may happen soon.
-Keep working normally. Do not reduce scope or quality, and do not stop because of this reminder.
-If useful, take a brief detour to persist key memories, plan updates, or pending changes so the next agent can resume cleanly.
+Heads-up: soon you will be asked to hand off your work to another agent, they will not have the tool call history or this conversation's context, including user input. Don't stop or let this affect scope or quality of your work - just see if there is a need to make a quick detour to help the next agent resume cleanly, e.g. persisting memories, writing down plans, checking off todos etc.

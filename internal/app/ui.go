@@ -38,7 +38,9 @@ type compactDoneMsg struct {
 	err error
 }
 
-type spinnerTickMsg struct{}
+type spinnerTickMsg struct {
+	token uint64
+}
 
 type processListRefreshTickMsg struct{}
 
@@ -69,6 +71,14 @@ type renderDiagnosticMsg struct {
 
 type runLoggerDiagnosticMsg struct {
 	diagnostic runLoggerDiagnostic
+}
+
+type clipboardImagePasteDoneMsg struct {
+	Target         uiClipboardPasteTarget
+	MainDraftToken uint64
+	AskToken       uint64
+	Path           string
+	Err            error
 }
 
 type askEvent struct {
@@ -223,10 +233,7 @@ func WithUIInitialInput(text string) UIOption {
 		if text == "" || m.input != "" {
 			return
 		}
-		m.input = text
-		m.inputCursor = -1
-		m.syncPromptHistorySelectionToInput()
-		m.refreshSlashCommandFilterFromInput()
+		m.replaceMainInput(text, -1)
 	}
 }
 
@@ -251,6 +258,12 @@ func WithUIBackgroundManager(manager *shelltool.Manager) UIOption {
 func WithUIPromptHistory(history []string) UIOption {
 	return func(m *uiModel) {
 		m.loadPromptHistory(history)
+	}
+}
+
+func WithUIClipboardImagePaster(paster uiClipboardImagePaster) UIOption {
+	return func(m *uiModel) {
+		m.clipboardImagePaster = paster
 	}
 }
 
@@ -280,6 +293,7 @@ type uiModel struct {
 
 	input                    string
 	inputCursor              int // rune index; -1 means "track tail"
+	mainInputDraftToken      uint64
 	promptHistory            []string
 	promptHistorySelection   int
 	promptHistoryDraft       string
@@ -309,6 +323,8 @@ type uiModel struct {
 	fastModeEnabled       bool
 	modelContractLocked   bool
 	spinnerFrame          int
+	spinnerGeneration     uint64
+	spinnerTickToken      uint64
 	commandRegistry       *commands.Registry
 	slashCommandFilter    string
 	slashCommandFilterSet bool
@@ -345,6 +361,7 @@ type uiModel struct {
 	statusCollector          uiStatusCollector
 	statusRepository         uiStatusRepository
 	status                   uiStatusOverlayState
+	clipboardImagePaster     uiClipboardImagePaster
 
 	transientStatus      string
 	transientStatusKind  uiStatusNoticeKind
@@ -400,6 +417,7 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 		runtimeEvents:            runtimeEvents,
 		askEvents:                askEvents,
 		inputCursor:              -1,
+		mainInputDraftToken:      1,
 		promptHistorySelection:   -1,
 		promptHistoryDraftCursor: -1,
 		commandRegistry:          commands.NewDefaultRegistry(),
@@ -414,6 +432,7 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 		ask:                      uiAskState{inputCursor: -1},
 		rollback:                 uiRollbackState{phase: uiRollbackPhaseInactive},
 		statusRepository:         newMemoryUIStatusRepository(),
+		clipboardImagePaster:     newSystemClipboardImagePaster(),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -658,7 +677,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		next.(*uiModel).syncViewport()
 		return next, cmd
 	case spinnerTickMsg:
-		next, cmd := m.inputController().handleSpinnerTick()
+		next, cmd := m.inputController().handleSpinnerTick(msg)
 		next.(*uiModel).syncViewport()
 		return next, cmd
 	case processListRefreshTickMsg:
@@ -668,7 +687,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.refreshProcessEntries()
 		m.syncViewport()
-		return m, waitProcessListRefresh()
+		return m, tea.Batch(waitProcessListRefresh(), m.ensureSpinnerTicking())
 	case statusRefreshDoneMsg:
 		if msg.token != m.status.refreshToken {
 			m.syncViewport()
@@ -762,6 +781,10 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.setTransientStatusWithKind(msg.err.Error(), uiStatusNoticeError)
 		}
 		return m, nil
+	case clipboardImagePasteDoneMsg:
+		cmd := m.handleClipboardImagePasteDone(msg)
+		m.syncViewport()
+		return m, cmd
 	}
 
 	m.forwardToView(msg)

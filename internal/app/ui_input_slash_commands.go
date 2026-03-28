@@ -13,9 +13,7 @@ func (c uiInputController) handleQueuedSlashCommandInput(text string) (bool, tea
 	m := c.model
 	selection := m.resolveSlashCommandSelection(text)
 	if selection.shouldAutocomplete() {
-		m.input = selection.autocompleteText()
-		m.inputCursor = -1
-		m.refreshSlashCommandFilterFromInput()
+		m.replaceMainInput(selection.autocompleteText(), -1)
 		return true, m, nil
 	}
 	if !selection.hasCommand || selection.commandText() == "" {

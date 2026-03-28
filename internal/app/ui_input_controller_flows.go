@@ -81,20 +81,22 @@ func (c uiInputController) startProcessListFlowCmd() tea.Cmd {
 	m := c.model
 	m.openProcessList()
 	refreshCmd := waitProcessListRefresh()
+	spinnerCmd := m.ensureSpinnerTicking()
 	if overlayCmd := m.pushProcessOverlayIfNeeded(); overlayCmd != nil {
-		return tea.Batch(overlayCmd, refreshCmd)
+		return tea.Batch(overlayCmd, refreshCmd, spinnerCmd)
 	}
-	return refreshCmd
+	return tea.Batch(refreshCmd, spinnerCmd)
 }
 
 func (c uiInputController) stopProcessListFlowCmd() tea.Cmd {
 	m := c.model
 	overlayCmd := m.popProcessOverlayIfNeeded()
 	m.closeProcessList()
+	spinnerCmd := m.ensureSpinnerTicking()
 	if overlayCmd != nil {
-		return overlayCmd
+		return tea.Batch(overlayCmd, spinnerCmd)
 	}
-	return nil
+	return spinnerCmd
 }
 
 func (c uiInputController) markPendingCSIShiftEnter() {

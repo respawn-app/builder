@@ -31,10 +31,44 @@ func waitProcessListRefresh() tea.Cmd {
 	})
 }
 
-func tickSpinner() tea.Cmd {
+func tickSpinner(token uint64) tea.Cmd {
 	return tea.Tick(spinnerTickInterval, func(time.Time) tea.Msg {
-		return spinnerTickMsg{}
+		return spinnerTickMsg{token: token}
 	})
+}
+
+func (m *uiModel) shouldAnimateSpinner() bool {
+	if m == nil {
+		return false
+	}
+	return m.busy || m.processListHasRunningEntries()
+}
+
+func (m *uiModel) ensureSpinnerTicking() tea.Cmd {
+	if m == nil {
+		return nil
+	}
+	if !m.shouldAnimateSpinner() {
+		m.stopSpinnerTicking()
+		return nil
+	}
+	if m.spinnerTickToken != 0 {
+		return nil
+	}
+	m.spinnerGeneration++
+	m.spinnerTickToken = m.spinnerGeneration
+	if m.spinnerTickToken == 0 {
+		m.spinnerGeneration++
+		m.spinnerTickToken = m.spinnerGeneration
+	}
+	return tickSpinner(m.spinnerTickToken)
+}
+
+func (m *uiModel) stopSpinnerTicking() {
+	if m == nil {
+		return
+	}
+	m.spinnerTickToken = 0
 }
 
 func formatSubmissionError(err error) string {

@@ -27,7 +27,7 @@ If the file already exists, then just update the existing one using the new stru
 
 ### Handling Unknowns & Gaps:
 
-If information is missing, incomplete, or patterns cannot be confidently derived (e.g., no CI, missing test commands, undocumented commit formats), do not invent standards and do not add placeholder text like "Ask the team" or "TBD". Either omit the specific instruction entirely or explicitly document the missing piece under a "Known Gaps & Assumptions" section so agents know to work around it instead of hallucinating commands.
+If information is missing, incomplete, or patterns cannot be confidently derived (e.g., no CI, missing test commands, undocumented commit formats), do not invent standards, do not add placeholder text like "Ask the team" or "TBD", and do not complain about it in the file (e.g. "there is no test suite so test section is not provided"). Instead, just omit the specific part of the final file.
 
 ### Structure the file using the following sections (omit or combine if not applicable to the specific repository):
 
@@ -53,12 +53,13 @@ If information is missing, incomplete, or patterns cannot be confidently derived
 
 ## Execution Rules:
 
-- Be strictly factual and concise. Keep the file under ~1000 lines of text. Avoid fancy graphics, global headers (like "# AGENTS.md"), or eye-candy formatting, like tables, charts, and ascii file trees.
+- Be strictly factual and concise. Keep the file under ~400 lines of text. Avoid fancy graphics, global file-level headers (like "# AGENTS.md"), or eye-candy formatting, like tables, charts, and ascii file trees. You may use any other markdown formatting if necessary.
 - Exclude high-level project marketing or boilerplate fluff.
+- Do not include temporal data in the file or maintain change logs or history, e.g. "Authentication was implemented recently"
 - This file is instructions for devs as a reminder to maintain high standards and output quality, so use imperative tone where any guidance is issued.
 - Don't put into AGENTS.md info that frequently changes, such as a full descriptive list of product features (since they can be added/removed), timestamps, update dates, any historical context or decisions, or unnecessarily specific commands like "how to execute a dependency upgrade script" (prefer more general like "useful scripts for deps update, jira are at `/scripts`") because that places a burden on maintaining the file and can go out of date and become misleading.
 - Don't include generic boilerplate like common practices that most devs follow, already well established industry standards, guidance on using common popular technologies, or generic educational content (e.g. "how to make a git commit") since that can be inferred from the code and is implicitly assumed.
-- Use relative paths everywhere and make no assumptions about environment or leak private data - this file will be checked into git and used by the entire team.
+- Use relative paths from project root everywhere and make no assumptions about environment or leak private data/preferences - this file will be checked into git and used by the entire team.
 - If the repo is a fresh start, or there is not enough context to create even a minimal but functional AGENTS.md file, then the user wants you to create a file for a **future** project or documentation. In this case, ask the user for the missing information.
 - If only some information is missing to populate a section, or you see a contradiction, and your tooling allows you to ask the user questions, then ask the user for missing pieces with best-practice defaults/suggestions. Avoid asking questions you can answer yourself. Ask questions in one batch before creating a file, not every time you find something new.
 - Avoid focusing on specific code files in the file: "that one test references this data". Such information becomes stale. AGENTS.md is high-level guidance, not low-level analysis.
