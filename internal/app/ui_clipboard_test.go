@@ -95,6 +95,32 @@ func TestClipboardImagePasteEmptyPathDoesNotInsertDot(t *testing.T) {
 	}
 }
 
+func TestClipboardImagePasteInsertsIntoRollbackEditInput(t *testing.T) {
+	paster := &stubClipboardImagePaster{path: "/tmp/builder-clipboard-rollback.png"}
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
+	testSetRollbackEditing(m, 0, 1)
+	m.input = "rollback: "
+	m.inputCursor = len([]rune(m.input))
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlV})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected clipboard paste command")
+	}
+
+	next, followCmd := updated.Update(cmd())
+	updated = next.(*uiModel)
+	if got := updated.input; got != "rollback: /tmp/builder-clipboard-rollback.png" {
+		t.Fatalf("expected pasted image path in rollback edit input, got %q", got)
+	}
+	if followCmd != nil {
+		t.Fatalf("did not expect follow-up command after successful rollback paste, got %T", followCmd())
+	}
+	if updated.transientStatus != "" {
+		t.Fatalf("did not expect transient status on successful rollback paste, got %q", updated.transientStatus)
+	}
+}
+
 func TestClipboardImagePasteSkipsStaleMainDraft(t *testing.T) {
 	paster := &stubClipboardImagePaster{path: "/tmp/builder-clipboard-main.png"}
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
