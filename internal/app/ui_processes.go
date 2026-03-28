@@ -274,9 +274,7 @@ func (c uiInputController) runProcessAction(action, id string) (tea.Model, tea.C
 func (m *uiModel) appendProcessOutputToInput(id, output string) {
 	payload := fmt.Sprintf("Output of bg shell %s:\n%s\n", id, output)
 	if strings.TrimSpace(m.input) == "" {
-		m.input = payload
-		m.inputCursor = -1
-		m.refreshSlashCommandFilterFromInput()
+		m.replaceMainInput(payload, -1)
 		return
 	}
 	m.moveCursorEnd()

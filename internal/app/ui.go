@@ -233,10 +233,7 @@ func WithUIInitialInput(text string) UIOption {
 		if text == "" || m.input != "" {
 			return
 		}
-		m.input = text
-		m.inputCursor = -1
-		m.syncPromptHistorySelectionToInput()
-		m.refreshSlashCommandFilterFromInput()
+		m.replaceMainInput(text, -1)
 	}
 }
 
