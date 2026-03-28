@@ -3595,6 +3595,14 @@ func TestPSOverlayMultilineCommandsKeepTitleAndFirstShellVisible(t *testing.T) {
 	}
 }
 
+func TestRenderProcessListHeaderCountsStartingEntriesAsRunning(t *testing.T) {
+	style := uiThemeStyles("dark")
+	header := stripANSIAndTrimRight(renderProcessListHeader([]shelltool.Snapshot{{ID: "1000", State: "starting"}}, 120, style))
+	if !strings.Contains(header, "1 running") {
+		t.Fatalf("expected starting entry to count as running in header, got %q", header)
+	}
+}
+
 func TestRenderProcessListEntryUsesSemanticStateIndicators(t *testing.T) {
 	style := uiThemeStyles("dark")
 	palette := uiPalette("dark")

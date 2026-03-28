@@ -374,7 +374,8 @@ func (l uiViewLayout) renderProcessList(width, height int, style uiStyles) []str
 func renderProcessListHeader(entries []shelltool.Snapshot, width int, style uiStyles) string {
 	running := 0
 	for _, entry := range entries {
-		if entry.Running {
+		state := strings.TrimSpace(entry.State)
+		if entry.Running || state == "starting" || state == "running" {
 			running++
 		}
 	}
