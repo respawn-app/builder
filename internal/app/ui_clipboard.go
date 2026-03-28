@@ -367,7 +367,7 @@ func (m *uiModel) handleClipboardImagePasteDone(msg clipboardImagePasteDoneMsg) 
 		}
 		m.insertAskInputRunes([]rune(msg.Path))
 	default:
-		if m.inputMode() != uiInputModeMain || msg.MainDraftToken == 0 || msg.MainDraftToken != m.mainInputDraftToken {
+		if !m.inputMode().showsMainInput() || msg.MainDraftToken == 0 || msg.MainDraftToken != m.mainInputDraftToken {
 			return nil
 		}
 		m.insertInputRunes([]rune(msg.Path))
