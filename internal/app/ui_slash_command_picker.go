@@ -235,6 +235,7 @@ func (m *uiModel) navigateSlashCommandPicker(delta int) bool {
 	}
 	nextSelection := clampSlashPickerIndex(state.selection+delta, 0, len(state.matches)-1)
 	m.slashCommandSelection = nextSelection
+	m.invalidateMainInputDraftToken()
 	m.input = "/" + state.matches[nextSelection].Name
 	m.inputCursor = -1
 	return true

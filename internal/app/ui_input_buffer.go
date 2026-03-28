@@ -18,8 +18,12 @@ func nextNonZeroToken(token uint64) uint64 {
 	return token
 }
 
-func (m *uiModel) replaceMainInput(text string, cursor int) {
+func (m *uiModel) invalidateMainInputDraftToken() {
 	m.mainInputDraftToken = nextNonZeroToken(m.mainInputDraftToken)
+}
+
+func (m *uiModel) replaceMainInput(text string, cursor int) {
+	m.invalidateMainInputDraftToken()
 	m.input = text
 	m.inputCursor = cursor
 	m.syncPromptHistorySelectionToInput()
