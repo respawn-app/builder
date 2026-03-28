@@ -73,6 +73,28 @@ func TestCtrlVClipboardImagePasteInsertsIntoMainInput(t *testing.T) {
 	}
 }
 
+func TestClipboardImagePasteEmptyPathDoesNotInsertDot(t *testing.T) {
+	paster := &stubClipboardImagePaster{path: ""}
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
+	m.input = "draft"
+	m.inputCursor = len([]rune(m.input))
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlV})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected clipboard paste command")
+	}
+
+	next, followCmd := updated.Update(cmd())
+	updated = next.(*uiModel)
+	if got := updated.input; got != "draft" {
+		t.Fatalf("expected empty clipboard path not to modify input, got %q", got)
+	}
+	if followCmd != nil {
+		t.Fatalf("did not expect follow-up command after empty clipboard path, got %T", followCmd())
+	}
+}
+
 func TestClipboardImagePasteSkipsStaleMainDraft(t *testing.T) {
 	paster := &stubClipboardImagePaster{path: "/tmp/builder-clipboard-main.png"}
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)

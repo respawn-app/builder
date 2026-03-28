@@ -344,7 +344,11 @@ func (m *uiModel) pasteClipboardImageCmd(target uiClipboardPasteTarget) tea.Cmd 
 		ctx, cancel := context.WithTimeout(context.Background(), clipboardImagePasteTimeout)
 		defer cancel()
 		path, err := paster.PasteImage(ctx)
-		return clipboardImagePasteDoneMsg{Target: target, MainDraftToken: mainDraftToken, AskToken: askToken, Path: filepath.Clean(path), Err: err}
+		cleanPath := ""
+		if strings.TrimSpace(path) != "" {
+			cleanPath = filepath.Clean(path)
+		}
+		return clipboardImagePasteDoneMsg{Target: target, MainDraftToken: mainDraftToken, AskToken: askToken, Path: cleanPath, Err: err}
 	}
 }
 
