@@ -195,8 +195,11 @@ func (p *systemClipboardImagePaster) pasteLinux(ctx context.Context) (string, er
 	if wayland {
 		if _, err := p.lookPath("wl-paste"); err == nil {
 			data, readErr := p.runner.Output(ctx, "wl-paste", "--no-newline", "--type", "image/png")
-			if readErr != nil || len(data) == 0 {
-				return "", &uiClipboardPasteError{Kind: uiClipboardPasteErrorNoImage, Message: "Clipboard does not contain an image", Err: readErr}
+			if readErr != nil {
+				return "", &uiClipboardPasteError{Kind: uiClipboardPasteErrorFailed, Message: "Clipboard image paste failed", Err: readErr}
+			}
+			if len(data) == 0 {
+				return "", &uiClipboardPasteError{Kind: uiClipboardPasteErrorNoImage, Message: "Clipboard does not contain an image"}
 			}
 			return p.savePNG(data)
 		}
@@ -204,8 +207,11 @@ func (p *systemClipboardImagePaster) pasteLinux(ctx context.Context) (string, er
 	if x11 {
 		if _, err := p.lookPath("xclip"); err == nil {
 			data, readErr := p.runner.Output(ctx, "xclip", "-selection", "clipboard", "-target", "image/png", "-o")
-			if readErr != nil || len(data) == 0 {
-				return "", &uiClipboardPasteError{Kind: uiClipboardPasteErrorNoImage, Message: "Clipboard does not contain an image", Err: readErr}
+			if readErr != nil {
+				return "", &uiClipboardPasteError{Kind: uiClipboardPasteErrorFailed, Message: "Clipboard image paste failed", Err: readErr}
+			}
+			if len(data) == 0 {
+				return "", &uiClipboardPasteError{Kind: uiClipboardPasteErrorNoImage, Message: "Clipboard does not contain an image"}
 			}
 			return p.savePNG(data)
 		}
@@ -231,7 +237,11 @@ func (p *systemClipboardImagePaster) pasteWindows(ctx context.Context) (string, 
 	script := fmt.Sprintf("Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; if (-not [System.Windows.Forms.Clipboard]::ContainsImage()) { exit 3 }; $image = [System.Windows.Forms.Clipboard]::GetImage(); if ($null -eq $image) { exit 3 }; $image.Save('%s', [System.Drawing.Imaging.ImageFormat]::Png)", escapePowerShellSingleQuoted(path))
 	if err := p.runner.Run(ctx, powershell, "-NoProfile", "-NonInteractive", "-STA", "-Command", script); err != nil {
 		cleanup()
-		return "", &uiClipboardPasteError{Kind: uiClipboardPasteErrorNoImage, Message: "Clipboard does not contain an image", Err: err}
+		var exitCoder interface{ ExitCode() int }
+		if errors.As(err, &exitCoder) && exitCoder.ExitCode() == 3 {
+			return "", &uiClipboardPasteError{Kind: uiClipboardPasteErrorNoImage, Message: "Clipboard does not contain an image", Err: err}
+		}
+		return "", &uiClipboardPasteError{Kind: uiClipboardPasteErrorFailed, Message: "Clipboard image paste failed", Err: err}
 	}
 	if err := p.ensureNonEmptyFile(path); err != nil {
 		cleanup()
@@ -346,6 +356,9 @@ func (m *uiModel) handleClipboardImagePasteDone(msg clipboardImagePasteDoneMsg) 
 	}
 	switch msg.Target {
 	case uiClipboardPasteTargetAsk:
+		if !m.ask.hasCurrent() || !m.ask.freeform {
+			return nil
+		}
 		m.insertAskInputRunes([]rune(msg.Path))
 	default:
 		m.insertInputRunes([]rune(msg.Path))

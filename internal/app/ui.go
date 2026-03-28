@@ -323,6 +323,7 @@ type uiModel struct {
 	fastModeEnabled       bool
 	modelContractLocked   bool
 	spinnerFrame          int
+	spinnerGeneration     uint64
 	spinnerTickToken      uint64
 	commandRegistry       *commands.Registry
 	slashCommandFilter    string

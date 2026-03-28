@@ -55,9 +55,11 @@ func (m *uiModel) ensureSpinnerTicking() tea.Cmd {
 	if m.spinnerTickToken != 0 {
 		return nil
 	}
-	m.spinnerTickToken++
+	m.spinnerGeneration++
+	m.spinnerTickToken = m.spinnerGeneration
 	if m.spinnerTickToken == 0 {
-		m.spinnerTickToken = 1
+		m.spinnerGeneration++
+		m.spinnerTickToken = m.spinnerGeneration
 	}
 	return tickSpinner(m.spinnerTickToken)
 }

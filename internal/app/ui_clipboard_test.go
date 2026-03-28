@@ -100,6 +100,35 @@ func TestCtrlDClipboardImagePasteInsertsIntoAskFreeform(t *testing.T) {
 	}
 }
 
+func TestClipboardImagePasteSkipsDismissedAsk(t *testing.T) {
+	paster := &stubClipboardImagePaster{path: "/tmp/builder-clipboard-ask.png"}
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
+	testSetActiveAsk(m, &askEvent{req: askquestion.Request{Question: "Add context?"}})
+	m.ask.freeform = true
+	testSetAskInput(m, "image: ")
+	testSetAskInputCursor(m, len([]rune(testAskInput(m))))
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected clipboard paste command")
+	}
+
+	testSetActiveAsk(updated, nil)
+	updated.ask.freeform = false
+	next, followCmd := updated.Update(cmd())
+	updated = next.(*uiModel)
+	if got := testAskInput(updated); got != "image: " {
+		t.Fatalf("expected dismissed ask input to remain unchanged, got %q", got)
+	}
+	if followCmd != nil {
+		t.Fatalf("did not expect follow-up command after skipped ask paste, got %T", followCmd())
+	}
+	if updated.transientStatus != "" {
+		t.Fatalf("did not expect transient status when skipping stale ask paste, got %q", updated.transientStatus)
+	}
+}
+
 func TestClipboardImagePasteNoImageShowsTransientStatusAndPreservesInput(t *testing.T) {
 	paster := &stubClipboardImagePaster{err: &uiClipboardPasteError{Kind: uiClipboardPasteErrorNoImage, Message: "Clipboard does not contain an image"}}
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
