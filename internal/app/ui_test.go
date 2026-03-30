@@ -4082,6 +4082,151 @@ func TestPSOverlayInlineUnlocksLockedInputBeforeAppending(t *testing.T) {
 	}
 }
 
+func TestDirectPSInlineCommandPastesTranscriptIntoInput(t *testing.T) {
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	workdir := t.TempDir()
+	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "printf 'direct-inline\n'; sleep 30"},
+		DisplayCommand: "direct-inline",
+		Workdir:        workdir,
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start direct-inline: %v", err)
+	}
+	if !res.Backgrounded {
+		t.Fatal("expected background process")
+	}
+
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m.input = "/ps inline " + res.SessionID
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+
+	if updated.busy {
+		t.Fatal("did not expect /ps inline to start a normal run")
+	}
+	if testProcessListOpen(updated) {
+		t.Fatal("did not expect /ps inline direct command to leave process overlay open")
+	}
+	if !strings.Contains(updated.input, "Output of bg shell "+res.SessionID+":") {
+		t.Fatalf("expected inline shell transcript pasted into input, got %q", updated.input)
+	}
+	if !strings.Contains(updated.input, "direct-inline") {
+		t.Fatalf("expected pasted shell transcript content in input, got %q", updated.input)
+	}
+	if !strings.Contains(stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark"))), "Pasted shell transcript") {
+		t.Fatal("expected direct /ps inline to show pasted shell transcript notice")
+	}
+}
+
+func TestDirectPSLogsCommandUsesDefaultOpenSuccess(t *testing.T) {
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	workdir := t.TempDir()
+	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "printf 'direct-logs\n'; sleep 30"},
+		DisplayCommand: "direct-logs",
+		Workdir:        workdir,
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start direct-logs: %v", err)
+	}
+	if !res.Backgrounded {
+		t.Fatal("expected background process")
+	}
+
+	originalOpenDefault := openDefault
+	var openedPath string
+	openDefault = func(path string) error {
+		openedPath = path
+		return nil
+	}
+	defer func() { openDefault = originalOpenDefault }()
+
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m.input = "/ps logs " + res.SessionID
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+
+	if openedPath != res.OutputPath {
+		t.Fatalf("expected direct /ps logs to open %q, got %q", res.OutputPath, openedPath)
+	}
+	if !strings.Contains(stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark"))), "Opened logs") {
+		t.Fatal("expected direct /ps logs to show opened logs notice")
+	}
+	if updated.input != "" {
+		t.Fatalf("did not expect /ps logs to modify the input buffer, got %q", updated.input)
+	}
+}
+
+func TestDirectPSKillCommandSignalsBackgroundProcess(t *testing.T) {
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	workdir := t.TempDir()
+	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "printf 'direct-kill\n'; sleep 30"},
+		DisplayCommand: "direct-kill",
+		Workdir:        workdir,
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start direct-kill: %v", err)
+	}
+	if !res.Backgrounded {
+		t.Fatal("expected background process")
+	}
+
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m.input = "/ps kill " + res.SessionID
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+
+	if !strings.Contains(stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark"))), "sent terminate signal to "+res.SessionID) {
+		t.Fatalf("expected direct /ps kill to show kill notice, got %q", stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark"))))
+	}
+	waitForTestCondition(t, 2*time.Second, "background process kill request to be reflected in manager state", func() bool {
+		snapshot, ok := findBackgroundSnapshot(manager.List(), res.SessionID)
+		return ok && (snapshot.KillRequested || !snapshot.Running)
+	})
+	snapshot, ok := findBackgroundSnapshot(manager.List(), res.SessionID)
+	if !ok {
+		t.Fatalf("expected killed process %s to remain visible in manager list", res.SessionID)
+	}
+	if !snapshot.KillRequested && snapshot.Running {
+		t.Fatalf("expected process %s to be kill-requested or stopped, got %+v", res.SessionID, snapshot)
+	}
+	if updated.input != "" {
+		t.Fatalf("did not expect /ps kill to modify the input buffer, got %q", updated.input)
+	}
+}
+
+func findBackgroundSnapshot(entries []shelltool.Snapshot, id string) (shelltool.Snapshot, bool) {
+	for _, entry := range entries {
+		if entry.ID == id {
+			return entry, true
+		}
+	}
+	return shelltool.Snapshot{}, false
+}
+
 func TestPSOverlayRefreshTickUpdatesEntriesWhileOpen(t *testing.T) {
 	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
 	if err != nil {
