@@ -4547,6 +4547,115 @@ func TestNewNormalizesPersistedInFlightStepOnReopen(t *testing.T) {
 	}
 }
 
+func TestReopenCarriesInterruptedAskQuestionToolAttemptIntoNextModelRequest(t *testing.T) {
+	testReopenCarriesInterruptedToolAttemptIntoNextModelRequest(t, llm.ToolCall{
+		ID:    "call_ask",
+		Name:  string(tools.ToolAskQuestion),
+		Input: json.RawMessage(`{"question":"Choose scope?","suggestions":["full","fast"],"recommended_option_index":1}`),
+		Presentation: toolcodec.EncodeToolCallMeta(transcript.ToolCallMeta{
+			ToolName:               string(tools.ToolAskQuestion),
+			Presentation:           transcript.ToolPresentationAskQuestion,
+			RenderBehavior:         transcript.ToolCallRenderBehaviorAskQuestion,
+			Question:               "Choose scope?",
+			Suggestions:            []string{"full", "fast"},
+			RecommendedOptionIndex: 1,
+			Command:                "Choose scope?",
+		}),
+	})
+}
+
+func TestReopenCarriesInterruptedShellToolAttemptIntoNextModelRequest(t *testing.T) {
+	testReopenCarriesInterruptedToolAttemptIntoNextModelRequest(t, llm.ToolCall{
+		ID:    "call_shell",
+		Name:  string(tools.ToolShell),
+		Input: json.RawMessage(`{"command":"pwd"}`),
+		Presentation: toolcodec.EncodeToolCallMeta(transcript.ToolCallMeta{
+			ToolName:       string(tools.ToolShell),
+			Presentation:   transcript.ToolPresentationShell,
+			RenderBehavior: transcript.ToolCallRenderBehaviorShell,
+			IsShell:        true,
+			Command:        "pwd",
+			TimeoutLabel:   "timeout: 5m",
+		}),
+	})
+}
+
+func testReopenCarriesInterruptedToolAttemptIntoNextModelRequest(t *testing.T, call llm.ToolCall) {
+	t.Helper()
+
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("legacy-step", "message", llm.Message{Role: llm.RoleUser, Content: "do the thing"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if _, err := store.AppendEvent("legacy-step", "message", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call}}); err != nil {
+		t.Fatalf("append assistant tool call message: %v", err)
+	}
+	if err := store.MarkInFlight(true); err != nil {
+		t.Fatalf("mark in-flight true: %v", err)
+	}
+
+	reopenedStore, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("re-open store: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "decided anew", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	restored, err := New(reopenedStore, client, tools.NewRegistry(), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	if reopenedStore.Meta().InFlightStep {
+		t.Fatal("expected reopen path to clear persisted in-flight flag")
+	}
+
+	msg, err := restored.SubmitUserMessage(context.Background(), "continue")
+	if err != nil {
+		t.Fatalf("submit after reopen: %v", err)
+	}
+	if msg.Content != "decided anew" {
+		t.Fatalf("assistant content = %q, want decided anew", msg.Content)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected one resumed model call, got %d", len(client.calls))
+	}
+
+	var (
+		foundPriorAttempt    bool
+		foundUnexpectedReply bool
+	)
+	for _, item := range client.calls[0].Items {
+		switch {
+		case item.Type == llm.ResponseItemTypeFunctionCall && item.CallID == call.ID && item.Name == call.Name:
+			foundPriorAttempt = true
+		case item.Type == llm.ResponseItemTypeFunctionCallOutput && item.CallID == call.ID:
+			foundUnexpectedReply = true
+		}
+	}
+	if !foundPriorAttempt {
+		t.Fatalf("expected resumed request to include prior interrupted tool call attempt, items=%+v", client.calls[0].Items)
+	}
+	if foundUnexpectedReply {
+		t.Fatalf("did not expect resumed request to fabricate completed tool output for interrupted call, items=%+v", client.calls[0].Items)
+	}
+
+	seenInterruption := false
+	for _, reqMsg := range requestMessages(client.calls[0]) {
+		if reqMsg.Role == llm.RoleDeveloper && reqMsg.MessageType == llm.MessageTypeInterruption && reqMsg.Content == interruptMessage {
+			seenInterruption = true
+			break
+		}
+	}
+	if !seenInterruption {
+		t.Fatalf("expected resumed request to include interruption marker, messages=%+v", requestMessages(client.calls[0]))
+	}
+}
+
 func TestSubmitUserShellCommandPersistsDeveloperNoticeAndToolEntries(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
