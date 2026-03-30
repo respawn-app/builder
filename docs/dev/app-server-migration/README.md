@@ -43,7 +43,3 @@ Files:
 `analysis/`
 
 - `analysis/persistence-audit.md`: initial audit of current on-disk session/persistence shape and migration pressure points.
-
-`review/`
-
-- `review/reviewer-prompt.md`: standalone prompt for external review, critique, and follow-up planning.
