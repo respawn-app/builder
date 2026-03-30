@@ -25,7 +25,7 @@ jobs:
           ref: ${{ github.event.pull_request.base.ref || github.ref_name }}
           token: ${{ secrets.OPENSOURCE_PAT || github.token }}
 
-      - uses: actions/setup-go@v6.3.0
+      - uses: actions/setup-go@v6.4.0
         with:
           go-version-file: go.mod
           check-latest: true
@@ -109,7 +109,7 @@ jobs:
 
       - name: Build changelog
         id: changelog
-        uses: mikepenz/release-changelog-builder-action@v6.1.1
+        uses: mikepenz/release-changelog-builder-action@v6.2.0
         with:
           commitMode: true
           configuration: ".github/changelog_config.json"
