@@ -193,7 +193,7 @@ The first acceptance wave should prove that the CLI is no longer privileged befo
 | Resume existing session by ID and continue work | Yes | Proves resume is boundary-driven rather than picker/UI-driven. | List or attach by session ID, submit again, hydrate transcript. |
 | Attach a second client to the same session | Yes | Proves multiple frontends can rehydrate without privileged in-process state. | Attach existing session, read run state/events, reload transcript. |
 | Interrupt active run and reconnect | Yes | Covers active-run lifecycle without relying on TUI state. | Submit long-running work, interrupt, disconnect/reconnect, inspect final state. |
-| Ask/approval pause and deterministic resume | Yes | Current headless CLI cannot answer asks, so this is the first mandatory non-CLI-only proof. | Observe pending ask, answer it, verify one resume path. |
+| Ask/approval pause and deterministic resume | Yes | Current headless CLI cannot answer asks, so this is the first mandatory non-CLI-only proof. For the current monolith this should be read as live-process queued behavior only, not as evidence that pending ask/approval state already survives restart. | Observe pending ask, answer it, verify one resume path. |
 | Background process list/inspect/kill across reconnect | Yes | Current repo already has owner-session routing and reconnect-sensitive behavior that must survive extraction. | Start process, list/inspect, reconnect, kill, verify final state. |
 | Slow subscriber gap handling with transcript rehydrate | Yes | Current `runtimeEventBridge` drops under pressure; the boundary must make that recoverable. | Subscribe, lag intentionally, detect gap, reload transcript/read models. |
 | Duplicate retry without duplicate side effects | Yes | Required to prove request identity lives at the boundary, not in the CLI process. | Retry submit/approval after timeout/disconnect, assert one durable outcome. |
@@ -230,7 +230,7 @@ Concrete helper patterns worth reusing when the harness is implemented:
 Important current gap:
 
 - there is no current black-box test that proves `RunPrompt(...)`-style create/submit/resume behavior through a non-CLI client boundary
-- there is no current acceptance-style proof for ask/approval handling outside the TUI path
+- there is no current acceptance-style proof that pending ask/approval state survives process restart or reopen; current evidence points to broker-memory-only behavior today
 - there is no client-boundary proof yet that embedded mode and daemon mode behave identically
 
 ## Current Tests That Are Too UI-Coupled
@@ -241,6 +241,12 @@ The following tests are valuable CLI characterization, but they are too tied to 
 - `internal/app/ui_native_scrollback_integration_test.go`: it proves normal-buffer transcript behavior, not transport-neutral session/runtime semantics.
 - UI-driven portions of `internal/app/session_lifecycle_test.go`: cases such as `/back` draft handoff and fork startup replay currently prove lifecycle behavior through `UITransition`, `NewUIModel(...)`, and Bubble Tea quit mechanics.
 - `internal/app/ask_bridge_test.go`: useful for current synchronous ask plumbing, but it proves a UI bridge, not a future non-CLI client contract.
+
+Current clarification for planning:
+
+- Non-UI ask/approval proof in Phase 0 should cover queued pending-state visibility and deterministic single completion while the process remains alive.
+- Restart-durable pending ask/approval state appears not to be a current invariant of the monolith.
+- If the app-server target should preserve pending asks/approvals across restart, that must be locked explicitly as a target behavior rather than inferred from today's product.
 
 These tests should stay, but they need complementary client-boundary acceptance cases before the migration can claim that the CLI is just another frontend.
 

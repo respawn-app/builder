@@ -74,6 +74,7 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 - Frontends should authenticate to the builder server rather than directly to providers.
 - The server is the sole policy enforcer for guarded actions and blocks on approval requests until a frontend answers.
 - Any attached frontend with access to the session may answer asks or approvals; the server applies the first committed authoritative response.
+- Whether pending asks or approvals must survive server restart is not yet a locked product decision. Planning must not assume either restart-durable resume or automatic cancellation until that target behavior is decided explicitly.
 - The server binds locally by default. Remote listeners require explicit opt-in.
 - The frontend must be able to show which server or execution host it is attached to.
 
