@@ -38,11 +38,33 @@ No transport work should start before this checkpoint is complete.
 
 ## 2. Persistence And Data Adoption Audit
 
-- [ ] Document the current on-disk layout and durable files used by `internal/session`.
-- [ ] Separate durable source-of-truth data from derived or cache-like data.
-- [ ] Identify which new metadata is minimally required for project registry, run identity, approval state, and process state.
-- [ ] Record explicit adoption risks for old `session.json` / `events.jsonl` data.
-- [ ] Decide whether adoption should be direct-read compatible, lazy-upgraded, or fixture-transformed in tests.
+- [x] Document the current on-disk layout and durable files used by `internal/session`.
+- [x] Separate durable source-of-truth data from derived or cache-like data.
+- [x] Identify which new metadata is minimally required for project registry, run identity, approval state, and process state.
+- [x] Record explicit adoption risks for old `session.json` / `events.jsonl` data.
+- [x] Decide whether adoption should be direct-read compatible, lazy-upgraded, or fixture-transformed in tests.
+
+Current locked findings for Workstream B:
+
+- Durable compatibility baseline is still `session.json` plus `events.jsonl`; `steps.log` is observability only.
+- Restore-critical metadata today includes `workspace_root`, `continuation.openai_base_url`, `locked.*`, `in_flight_step`, `agents_injected`, `parent_session_id`, `input_draft`, picker-facing `name` / `first_prompt_preview`, and `updated_at` ordering.
+- Restore-critical event payloads are broader than the old audit said: `message` persists transcript/tool-presentation state, `tool_completed` joins by `call_id`, `local_entry` preserves reviewer/local text verbatim, and `history_replaced` persists full `[]llm.ResponseItem` replacement payloads with a restore-semantic split between `reviewer_rollback` and non-rollback replay.
+- Adoption strategy should stay direct-read compatible for existing session directories, with only lazy additive repair/metadata upgrade. Do not require eager migration of old sessions for Phase 1.
+- Session creation itself is already asymmetric: `NewLazy` sessions may never hit disk, `SetName` / `SetParentSessionID` eagerly persist, and `SetContinuationContext` can remain memory-only until a later durable write.
+
+Sharp edges now explicitly called out:
+
+- `OpenByID` accepts `sessions/<sessionID>` and `sessions/<container>/<sessionID>`, but still ignores the older root-flat `/<container>/<sessionID>` layout.
+- Prompt-history restore is already versionless but bifurcated: legacy user `message` backfill stops at the first explicit `prompt_history` event.
+- Transcript rendering metadata already lives in persisted `message` payloads through `llm.ToolCall.Presentation` / `transcript.ToolCallMeta`.
+- Opening a store can mutate legacy data by reconciling `last_sequence`, recreating missing `events.jsonl`, or compacting away a truncated EOF tail.
+- `in_flight_step` recovery already has two durable outcomes: successful reopen clears it after appending the interruption message, but a clear/persist failure leaves the durable flag set.
+- A session directory without `session.json` is effectively invisible even if `events.jsonl` exists.
+
+Fixture/adoption checklist tightened in `../analysis/persistence-audit.md`:
+
+- keep current covered fixtures for workspace-container reuse, prompt-history mixed semantics, continuation restore, stale `last_sequence`, and truncated event-log repair
+- add explicit migration fixtures for missing-file partial sessions, accepted `sessions/<sessionID>` layout, malformed session metadata, stored tool-presentation payloads, `history_replaced` compatibility, both `in_flight_step` reopen outcomes, and lazy-session persistence transitions
 
 ## 3. Boundary Map And First Cut Line
 

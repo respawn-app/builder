@@ -1,270 +1,358 @@
 # App Server Migration: Boundary Map
 
-Status: initial repo-grounded cut analysis
+Status: refined repo-grounded seam analysis
 
 This document maps the current codebase onto the first intended frontend/server boundary.
 
-It is not a final package design. It is the starting point for Phase 1 extraction.
+It is not a final package design. It is the Phase 1 extraction starting point grounded in the current repo.
 
-## Current Composition Path
+## Current Composition Paths
 
-The current high-level flow is:
+Interactive path today:
 
-- `cmd/builder/main.go`
-  - CLI parsing for interactive and headless entrypoints
-- `internal/app/app.go`
-  - app-level composition root for both interactive and headless flows
-- `internal/app/bootstrap.go`
-  - bootstrap root for config, auth manager, onboarding, background shell manager, and fast-mode state
-- `internal/app/launch_planner.go`
-  - session/runtime planning root for store open/create, effective settings, tool selection, and runtime preparation
-- `internal/app/session_lifecycle.go`
-  - interactive session loop and cross-session transitions
-- `internal/app/runtime_factory.go`
-  - runtime, auth, tools, background shell manager, reviewer client, and event bridge wiring
+- `cmd/builder/main.go:rootCommand`
+  - parses CLI flags and calls `app.Run(...)`
+- `internal/app/app.go:Run`
+  - selects interactive auth flow and shared bootstrap
+- `internal/app/bootstrap.go:bootstrapApp`
+  - loads config, resolves workspace/container, creates `auth.Manager`, runs auth/onboarding gates, creates background shell manager/router, creates fast-mode state
+- `internal/app/session_lifecycle.go:runSessionLifecycle`
+  - owns the cross-session UI loop
+- `internal/app/launch_planner.go:PlanSession` / `PrepareRuntime`
+  - opens or creates `session.Store`, derives effective settings and enabled tools, prepares status config, creates runtime wiring
+- `internal/app/runtime_factory.go:newRuntimeWiringWithBackground`
+  - builds tool registry, ask broker, provider clients, reviewer client, `runtime.Engine`, and runtime event bridge
 - `internal/app/ui_runtime_adapter.go`
-  - runtime event to TUI projection coupling
+  - projects `runtime.Event` and `runtime.ChatSnapshot` directly into Bubble Tea/TUI state
 
-This confirms that `internal/app` is currently both composition root and architectural knot.
+Headless path today:
+
+- `cmd/builder/main.go:runSubcommand`
+  - parses run-only flags and calls `app.RunPrompt(...)`
+- `internal/app/app.go:RunPrompt`
+  - selects headless auth flow and shared bootstrap
+- `internal/app/run_prompt.go:runPrompt`
+  - plans session, prepares runtime, then directly calls `runtimePlan.Wiring.engine.SubmitUserMessage(...)`
+
+This makes two things clear:
+
+- `cmd/builder/main.go` is already a thin CLI shell and should stay frontend-only.
+- `internal/app` is the real monolithic composition root today.
+
+## Tightened Composition Roots
+
+The repo already suggests three composition roots, but they are collapsed into `internal/app`.
+
+## 1. CLI / Frontend Root
+
+Should own only:
+
+- flag parsing and command routing in `cmd/builder/main.go`
+- mode selection in `internal/app/app.go`
+- Bubble Tea startup, overlays, and command mapping in `internal/app/session_lifecycle.go` and `internal/app/ui*.go`
+
+Must not own:
+
+- session persistence access
+- runtime creation
+- tool registry creation
+- auth state mutation beyond invoking a client/server boundary
+
+## 2. Server Composition Root
+
+Currently scattered across:
+
+- `internal/app/bootstrap.go`
+- `internal/app/launch_planner.go`
+- `internal/app/runtime_factory.go`
+
+This root should own:
+
+- config-derived runtime settings
+- `session.Store` open/create/list operations
+- `auth.Manager` creation and readiness checks
+- background shell manager/router ownership
+- tool registry construction from `internal/tools`
+- LLM provider client construction from `internal/llm`
+- `runtime.Engine` construction from `internal/runtime`
+
+This is already server composition in substance; it is only living in the wrong package.
+
+## 3. Frontend View-Model Root
+
+Currently concentrated in:
+
+- `internal/app/session_lifecycle.go`
+- `internal/app/ui_runtime_adapter.go`
+- `internal/app/ui_status.go`
+- `internal/app/ui_processes.go`
+
+This root should own:
+
+- frontend navigation
+- TUI read-model state
+- overlay state and input handling
+- projection from client/resource events into TUI messages
+
+It should eventually depend on client DTOs and hydration views, not `runtime.Event`, `runtime.ChatSnapshot`, `session.Store`, or `shelltool.Manager`.
 
 ## Current Package Direction
 
 ## Strong Server-Side Candidates
 
-These packages are already aligned with the future server authority boundary:
+These packages are already aligned with future server authority and should stay behind the boundary:
 
 - `internal/runtime`
-  - agent execution, step loop, compaction, reviewer pipeline, run-state transitions, background event handling, status inspection
+  - owns the agent step loop and run authority via `runtime.Engine`
+  - depends directly on `session.Store`, `llm.Client`, and `tools.Registry`
+  - emits rich runtime-only events in `internal/runtime/events.go`
 - `internal/session`
-  - persisted session store, event log, prompt history, forking, continuity metadata
+  - owns persisted session metadata and event log (`session.json`, `events.jsonl`)
+  - exposes create/open/list/fork primitives that frontend code must eventually stop calling directly
 - `internal/tools`
-  - tool contracts and implementations, shell manager, patch machinery, ask-question tool plumbing
+  - owns model-visible tool contracts, runtime availability, transcript formatting, and local runtime handler selection
+  - `runtime.Engine.buildRequest` already treats it as authoritative tool-contract state
 - `internal/llm`
-  - provider clients and model/provider capability logic
+  - owns provider clients, request/response model, provider capability contracts, and transport variants
 - `internal/auth`
-  - provider auth state and credential plumbing
-- `internal/transcript`
-  - transcript-specific structures/codecs used to represent durable conversational state
+  - owns auth state, refresh, startup gate, and authorization-header resolution
+
+Repo-grounded conclusion: these packages already form the server-side core; the missing piece is the application-service layer in front of them.
 
 ## Strong Frontend-Side Candidates
 
-These areas should end up on the frontend side of the boundary:
+These areas are already frontend-facing and should stay on the client side of the seam:
 
+- `cmd/builder/main.go`
+  - CLI shell only; currently thin enough to keep as frontend entrypoint
 - `internal/tui`
-  - rendering surface and transcript projection/rendering details
-- frontend parts of `internal/app`
-  - input handling, slash-command picker, overlays, navigation, startup selection UX, runtime-to-view translation that should later become client-state translation
-  - likely includes `ui*.go`, `session_picker.go`, `auth_picker.go`, `auth_success_screen.go`, `onboarding_*.go`, `mouse_sgr.go`, and `terminal_bell.go`
+  - rendering surface and layout behavior
+- `internal/app/ui*.go`
+  - Bubble Tea state, layout, input handling, overlays, rendering helpers
+- `internal/app/session_picker.go`
+- `internal/app/auth_picker.go`
+- `internal/app/auth_success_screen.go`
+- `internal/app/mouse_sgr.go`
+- `internal/app/terminal_bell.go`
+- `internal/app/onboarding_*.go`
+
+These files can stay where they are temporarily, but they should consume a client boundary rather than privileged runtime/session access.
 
 ## Mixed / Needs Splitting
 
-- `internal/app`
-  - currently mixes startup/auth gating, runtime wiring, session lifecycle, command translation, UI projection, and direct runtime coupling
-- `cmd/builder/main.go`
-  - should eventually become mostly CLI-shell and client/bootstrap entrypoint logic
-- `internal/config`
-  - likely splits into server-owned persistence/runtime config versus frontend bootstrap and presentation config
-- `internal/actions`
-  - likely evolves toward frontend command catalog/request translation or becomes thinner if frontend command mapping consolidates elsewhere
-
-Close-to-server but currently somewhat mixed:
-
-- `internal/config`
-  - broadly server-oriented today, but may later need a smaller frontend bootstrap/view subset
-- `internal/auth`
-  - auth state/refresh logic is server-oriented, while some browser/callback flow pieces are more UX-facing
+- `internal/app/app.go`
+  - good public entrypoints (`Run`, `RunPrompt`), but still reaches shared bootstrap directly
+- `internal/app/bootstrap.go`
+  - mixes server bootstrap (`auth.Manager`, background manager, fast mode) with frontend auth/onboarding interaction
+- `internal/app/launch_planner.go`
+  - mixes server launch decisions (`session.OpenByID`, `session.NewLazy`) with frontend session-picker and UI status setup
+- `internal/app/run_prompt.go`
+  - smallest end-to-end non-TUI workflow, but still reaches `runtime.Engine` directly
+- `internal/app/session_lifecycle.go`
+  - owns frontend navigation while also calling `session.ForkAtUserMessage`, `authManager.ClearMethod`, and `ensureAuthReady`
+- `internal/app/auth_gate.go`
+  - mixes server auth readiness with interactive browser/device UX and env-preference conflict resolution
 
 ## Highest-Risk Re-Coupling Hotspots
 
-These are the places most likely to silently preserve the monolith under a different outer shape:
+These are the places most likely to preserve the monolith behind a new transport wrapper.
 
 ## 1. Runtime Wiring In `internal/app/runtime_factory.go`
 
 Why it is dangerous:
 
-- it directly composes runtime engine, auth, tools, reviewer client, shell manager, ask bridge, event bridge, and session store
-- it is the easiest place for future CLI-only shortcuts to keep leaking into runtime concerns
+- `newRuntimeWiringWithBackground(...)` is already the server composition root in everything but name
+- it constructs the tool registry, ask broker, background shell manager integration, provider client, reviewer client, `runtime.Engine`, and event bridge in one place
+- `buildToolRegistry(...)` binds `internal/tools` definitions to local runtime builders for `shell`, `exec_command`, `write_stdin`, `patch`, `ask_question`, `view_image`, and `multi_tool_use_parallel`
 
 Required outcome:
 
-- this logic must migrate behind a transport-neutral server application-service boundary and server composition root
+- this logic must move behind the server boundary unchanged in authority
+- frontend code must stop receiving `*runtime.Engine`, `*askBridge`, `*runtimeEventBridge`, or `*shelltool.Manager`
 
-## 2. Session Loop In `internal/app/session_lifecycle.go`
+## 2. Launch Planning In `internal/app/launch_planner.go`
 
 Why it is dangerous:
 
-- it currently owns frontend flow and also drives direct store/runtime transitions across sessions
-- slash-command-driven navigation and session creation/resume/fork behavior are concentrated here
+- `PlanBootstrap(...)` opens session storage to recover workspace root and continuation base URL from prior session metadata
+- `PlanSession(...)` directly calls `session.OpenByID`, `session.ListSessions`, and `session.NewLazy`
+- `PlanSession(...)` also returns `uiStatusConfig`, which means a persistence/runtime planning function already leaks frontend-specific view wiring
+- `PrepareRuntime(...)` is the bridge from store/settings into runtime construction
 
 Required outcome:
 
-- frontend session flow must use client-facing session/project operations instead of direct store/runtime orchestration
+- split this into server launch use cases plus frontend-only selection UX
+- do not let a future client call a transport wrapper that still returns `session.Store`, `config.Settings`, or `uiStatusConfig`
 
-## 3. UI Runtime Adapter In `internal/app/ui_runtime_adapter.go`
+## 3. Headless Run Path In `internal/app/run_prompt.go`
 
 Why it is dangerous:
 
-- it assumes direct access to `runtime.Event`, engine snapshots, and chat snapshots
-- it can become the loophole through which the CLI keeps privileged runtime knowledge
+- this is the smallest useful seam and therefore the most tempting place to ship a fake boundary
+- it currently does the right high-level orchestration, but the critical line is still `runtimePlan.Wiring.engine.SubmitUserMessage(...)`
+- it also reads dropped-event counts from the runtime event bridge and uses runtime logger details directly
 
 Required outcome:
 
-- frontend state updates must eventually depend on client protocol/resource models, not direct runtime package types
+- keep this path as the first migrated workflow, but replace direct `runtime.Engine` access with client-facing use cases and DTOs
 
-## 4. Status / Process Surfaces In `internal/app/ui_status*.go` And `internal/app/ui_processes.go`
+## 4. Session Loop In `internal/app/session_lifecycle.go`
 
 Why it is dangerous:
 
-- these are high-value UX surfaces that will tempt direct runtime inspection shortcuts
-- they are rich enough that a weak boundary would immediately leak server internals
+- it looks like frontend flow, but `resolveSessionAction(...)` still performs privileged operations directly
+- it calls `session.ForkAtUserMessage(...)`
+- it calls `boot.authManager.ClearMethod(...)` and `ensureAuthReady(...)`
+- it assumes direct access to `session.Store` for input draft persistence
 
 Required outcome:
 
-- these views must be powered by typed hydration reads and process resources, not direct runtime inspection
+- keep the Bubble Tea loop frontend-side, but route session/auth mutations through client-facing operations
 
-## 5. Launch Planning In `internal/app/launch_planner.go`
+## 5. UI Runtime Adapter In `internal/app/ui_runtime_adapter.go`
 
 Why it is dangerous:
 
-- it already acts like a service boundary, but is still embedded inside the monolithic app package
-- it mixes store/open-create logic, effective settings resolution, and runtime preparation with app-shell concerns
+- it consumes `runtime.Event` directly
+- it reads `runtime.ChatSnapshot` directly from `engine.ChatSnapshot()`
+- it uses `session.ConversationFreshness` directly in frontend state
+- this will become the main loophole for privileged runtime imports if not cut deliberately
 
 Required outcome:
 
-- this should become part of the first transport-neutral server application-service seam rather than staying trapped in `internal/app`
+- replace runtime-native events and snapshots with transport-neutral event/resource DTOs before interactive extraction is considered complete
 
-## 6. Status Gathering In `internal/app/ui_status.go`
+## 6. Status And Process Surfaces In `internal/app/ui_status.go`, `internal/app/ui_status_repository.go`, And `internal/app/ui_processes.go`
 
 Why it is dangerous:
 
-- it reaches across runtime state, auth state, git/filesystem/environment reads, and remote usage HTTP
-- this is exactly the sort of rich view that can drag direct server-internal access back into the frontend
+- `ui_status.go` is not a pure view; it collects auth state, git state, skill/environment inspection, token estimates, and remote subscription usage HTTP
+- `ui_processes.go` is a frontend overlay built directly on `shelltool.Manager` and `shelltool.Snapshot`
+- these files create strong pressure to keep "just one more direct runtime call" available to the CLI
 
 Required outcome:
 
-- status must eventually become a frontend composition over typed server-backed reads rather than direct engine/auth/environment inspection
+- treat them as deferred frontend knots
+- when they migrate, they should consume typed server-backed reads and process resources rather than direct auth/runtime/shell-manager access
 
-## First Transport-Neutral Service Boundary
+## 7. Auth Gate In `internal/app/auth_gate.go`
 
-The first cut should be expressed as application use cases, not RPC methods.
+Why it is dangerous:
 
-The best current starting seam is the already-headless execution path rather than the interactive UI loop.
+- it currently owns both auth readiness checks and interactive browser/device/env-conflict UX
+- that makes it easy to keep auth state management privileged in the frontend forever
 
-Why:
+Required outcome:
 
-- `builder run` already exercises a non-TUI flow
-- it has smaller surface area than the interactive session lifecycle
-- it provides immediate value for proving a transport-neutral runtime boundary without first untangling Bubble Tea UX
+- separate server auth state/readiness from frontend auth method selection and callback UX
 
-Minimum service groups:
+## First Transport-Neutral Boundary
 
-## Project Service
+The smallest high-value boundary is the current headless session/run workflow used by `builder run`.
 
-Owns:
+That slice is the best first seam because:
 
-- register project
-- list projects
-- get project overview
-- resolve canonical project for root path
+- it is already a complete non-TUI flow
+- it goes through the same core server packages as the interactive path
+- it avoids prematurely untangling Bubble Tea event projection
+- it gives a hard proof point: `cmd/builder/main.go` can stop reaching server internals first
 
-## Session Service
+## Recommended First Client-Facing Use Cases
 
-Owns:
+These use cases should be expressed as transport-neutral application operations, not raw transport methods.
 
-- create session
-- list sessions for project
-- get session overview
-- attach to session context
-- rename session
-- fork/create child session with lineage
-- load transcript page/main view
+- `ResolveLaunchContext`
+  - current source: `launch_planner.PlanBootstrap(...)`
+  - responsibility: resolve canonical workspace/session continuation context from CLI inputs without exposing `session.Store`
+- `OpenOrCreateSession`
+  - current source: `launch_planner.openStore(...)` and `createSession(...)`
+  - responsibility: open existing session or create a new one and return a client-safe session handle/summary
+- `SubmitUserMessage`
+  - current source: `run_prompt.go` plus `runtime.Engine.SubmitUserMessage(...)`
+  - responsibility: submit a user prompt to the authoritative runtime for a session
+- `GetSessionSnapshot`
+  - current source: `runtime.Engine.ChatSnapshot()` and session metadata reads
+  - responsibility: return transport-neutral session/read-model state instead of runtime-native structs
+- `SubscribeSessionEvents`
+  - current source: `runtimeEventBridge` and `runtime.Event`
+  - responsibility: stream transport-neutral run/session events for CLI progress and future remote clients
+- `InterruptRun`
+  - current source: `runtime.Engine.Interrupt()`
+  - responsibility: cancel the active run without exposing `runtime.Engine`
 
-## Run Service
+Boundary rule for these use cases:
 
-Owns:
+- request/response/event types must not expose `runtime.Event`, `runtime.ChatSnapshot`, `session.Store`, `auth.Manager`, `tools.Registry`, or `llm.Client`
 
-- submit user request
-- interrupt active run
-- inspect active or historical run
-- report busy state
-- manage session-scoped live settings such as thinking/fast
-- trigger compaction
+## Server-Internal Collaborators Behind The First Seam
 
-## Process Service
+The first seam does not need new domain logic; it needs a clean server-facing facade over logic that already exists.
 
-Owns:
+Behind the new boundary, keep these collaborators server-owned:
 
-- list processes
-- inspect process
-- kill or control process
-- read or stream process output
+- config/settings resolver from `bootstrap.go` and `app.go`
+- session repository built on `internal/session`
+- runtime factory from `runtime_factory.go`
+- auth manager and startup readiness from `internal/auth` plus the server side of `auth_gate.go`
+- event publication currently modeled by `runtimeEventBridge`
+- runtime execution authority in `internal/runtime.Engine`
 
-## Approval / Ask Service
+## Deferred Knots After The First Seam
 
-Owns:
+These should not block the first transport-neutral extraction:
 
-- list pending approvals/asks
-- answer approval
-- answer ask
-- expose authoritative status and race outcomes
+- Bubble Tea runtime projection in `internal/app/ui_runtime_adapter.go`
+- interactive session navigation in `internal/app/session_lifecycle.go`
+- status overlay and caches in `internal/app/ui_status*.go`
+- process overlay and controls in `internal/app/ui_processes.go`
+- interactive auth pickers and browser/device UX in `internal/app/auth_gate.go`, `auth_picker.go`, and `auth_success_screen.go`
+- onboarding/import UX in `internal/app/onboarding_*.go`
 
-## System / Attachment Service
-
-Owns:
-
-- handshake and capability reporting
-- attach/detach semantics
-- discovery/bootstrap support
-- frontend connection tracking if needed
+They are important, but they are not the right first proof of the architecture.
 
 ## Recommended Phase 1 Package Direction
 
-This is the initial split to aim for, not a final architecture decree.
+This is the file/package direction to aim for, not a final naming decree.
 
-- keep server-side internals under existing packages where possible:
+- keep server-only authority where it already lives:
   - `internal/runtime`
   - `internal/session`
   - `internal/tools`
   - `internal/llm`
   - `internal/auth`
-- introduce a transport-neutral server application-service layer:
+- extract a transport-neutral server application-service layer in front of them:
   - `internal/serverapi` or equivalent
-- introduce a client-facing abstraction used even in loopback mode:
+- require a client-facing abstraction even for embedded mode:
   - `internal/client`
-- reserve wire types and transport adapters for later:
+- keep real wire protocol types/adapters for later:
   - `internal/protocol`
-- split `internal/app` into:
-  - CLI/frontend composition and UX glue
-  - server composition/bootstrap glue
+- split current `internal/app` ownership along file seams:
+  - frontend shell and Bubble Tea UX: `app.go`, `session_lifecycle.go`, `ui*.go`, pickers, onboarding
+  - server composition/bootstrap: code extracted from `bootstrap.go`, `launch_planner.go`, and `runtime_factory.go`
 
 ## First Extraction Candidate
 
-The first transport-neutral boundary should likely wrap the current headless path built from:
+The first concrete extraction should wrap the current headless path built from:
 
+- `cmd/builder/main.go:runSubcommand`
+- `internal/app/app.go:RunPrompt`
 - `internal/app/run_prompt.go`
 - `internal/app/launch_planner.go`
 - `internal/app/runtime_factory.go`
-- `internal/runtime/engine.go`
 
-Suggested first use cases:
+Recommended shape:
 
-- `OpenOrResumeSession`
-- `SubmitUserMessage`
-- `GetSnapshot`
-- `InterruptSession`
+- `cmd/builder/main.go`
+  - remains CLI-only and talks to a client boundary
+- `internal/app/run_prompt.go`
+  - shrinks to headless CLI presentation/orchestration over client use cases
+- server-side launch/runtime code
+  - moves behind the new server application-service layer
 
-Suggested first collaborators behind that service boundary:
-
-- config resolver
-- session repository
-- runtime factory
-- ask handler
-- event stream / snapshot reader
-
-This is the smallest boundary with real product value and the least immediate UI churn.
+This is the smallest boundary with immediate product value and the least UI churn.
 
 ## Phase 1 Success Condition
 
-Phase 1 is successful only when the CLI can perform migrated flows through the client-facing boundary without importing runtime/session/tools/auth internals directly.
+Phase 1 starts proving itself when the `builder run` path no longer reaches `runtime.Engine`, `session.Store`, `auth.Manager`, `tools.Registry`, or `llm.Client` directly.
 
-That is the first real proof that the new architecture exists.
+Phase 1 is fully successful only when migrated CLI/frontend flows depend on the client-facing boundary rather than privileged imports, and no new direct frontend imports of server internals are introduced while the deferred interactive knots are still being untangled.

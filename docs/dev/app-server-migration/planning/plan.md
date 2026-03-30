@@ -44,9 +44,9 @@ Create the real application-service boundary before any network transport work s
 
 Deliverables:
 
-- transport-neutral service layer for project, session, run, process, approval, and ask operations
+- transport-neutral service layer for project, session, run, process, approval, and ask operations, with the first mandatory extracted slice being session launch/run for `builder run`
 - loopback or in-process client adapter that talks through that service layer
-- CLI switched onto the client-style boundary instead of direct runtime access
+- CLI switched onto the client-style boundary instead of direct runtime access, starting with `cmd/builder/main.go:runSubcommand`
 - boundary enforcement preventing TUI or CLI packages from importing server internals directly
 
 Expected cut lines from the current repo:
@@ -57,30 +57,48 @@ Expected cut lines from the current repo:
   - `internal/tools`
   - `internal/llm`
   - `internal/auth`
+- server-composition extraction targets:
+  - `internal/app/bootstrap.go`
+  - `internal/app/launch_planner.go`
+  - `internal/app/runtime_factory.go`
 - frontend-only:
+  - `cmd/builder/main.go`
   - `internal/tui`
-  - CLI shell and command translation pieces
+  - `internal/app/ui*.go`
+  - session/auth pickers and onboarding UX
 - likely split:
-  - `internal/app` -> server composition and CLI composition
+  - `internal/app/app.go`
+  - `internal/app/run_prompt.go`
+  - `internal/app/session_lifecycle.go`
+  - `internal/app/auth_gate.go`
 - new shared boundary packages:
   - `internal/protocol`
   - `internal/client`
   - `internal/serverapi` or equivalent service-layer package
 
+Repo-grounded implementation order:
+
+1. Extract the server-owned launch/runtime composition now trapped in `bootstrap.go`, `launch_planner.go`, and `runtime_factory.go`.
+2. Introduce the first client-facing use cases around the current headless path: `ResolveLaunchContext`, `OpenOrCreateSession`, `SubmitUserMessage`, `GetSessionSnapshot`, `SubscribeSessionEvents`, and `InterruptRun`.
+3. Remap `cmd/builder/main.go:runSubcommand` and `internal/app/run_prompt.go` onto the loopback client boundary without exposing `runtime.Engine`, `session.Store`, `runtime.Event`, or `runtime.ChatSnapshot`.
+4. Only after the headless seam is real, widen the boundary to interactive session/open flows and richer read models.
+5. Keep `internal/app/ui_runtime_adapter.go`, `internal/app/ui_status*.go`, `internal/app/ui_processes.go`, `internal/app/auth_gate.go`, and onboarding/import UX as deferred knots until client DTOs and hydration views exist.
+
 Intermediate state:
 
 - same binary
 - no network transport yet
-- CLI still fully functional, but now through the boundary that future frontends will use
+- CLI still fully functional, but the headless path is already using the same boundary future frontends will use
 
 Primary risks:
 
 - creating a god-service instead of a cohesive application-service layer
 - leaving hidden import leaks that re-couple the CLI to runtime internals
+- preserving frontend access to runtime-native types such as `runtime.Event` and `runtime.ChatSnapshot` under a thin wrapper
 
 Rollback point:
 
-- thin adapters may temporarily route selected flows through old internals while extraction completes, but the intended direction remains boundary-first
+- thin adapters may temporarily route selected flows through old internals while extraction completes, but only if the client-facing requests/responses/events remain transport-neutral and do not leak server-native types
 
 ## Phase 2: Stabilize Resource Model, Hydration Views, And Event Hub
 
@@ -224,7 +242,7 @@ Can be parallelized once phase 1 exists:
 ## Proof Gates Per Phase
 
 - Phase 0 exit gate: compatibility inventory and characterization plan are accepted.
-- Phase 1 exit gate: CLI no longer depends on privileged runtime access for migrated flows.
+- Phase 1 exit gate: at minimum the `builder run` flow and migrated launch/run flows no longer depend on privileged runtime access, and the frontend reaches them only through the client boundary.
 - Phase 2 exit gate: second client can hydrate and observe one session in tests.
 - Phase 3 exit gate: CLI works against embedded and external server through the same client boundary.
 - Phase 4 exit gate: reconnect, approval races, and slow-subscriber failure modes are covered.
