@@ -3,12 +3,18 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 
 	"builder/internal/auth"
+	"builder/internal/config"
+	"builder/internal/llm"
 	"builder/internal/runtime"
 	"builder/internal/session"
 	"builder/internal/tools/askquestion"
@@ -101,5 +107,97 @@ func TestRunPromptWithoutAuthReturnsErrAuthNotConfiguredWithoutReadingStdin(t *t
 	_, err = RunPrompt(context.Background(), Options{WorkspaceRoot: workspace}, "hello", 0, nil)
 	if !errors.Is(err, auth.ErrAuthNotConfigured) {
 		t.Fatalf("expected auth not configured without stdin prompt, got %v", err)
+	}
+}
+
+func TestRunPromptCreatesSessionAndPersistsDurableTranscript(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if got := strings.TrimSpace(r.Header.Get("Authorization")); got == "" {
+			t.Fatal("expected authorization header")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello from fake\"}]}]}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	result, err := RunPrompt(context.Background(), Options{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+		OpenAIBaseURL:         server.URL,
+		OpenAIBaseURLExplicit: true,
+	}, "hello from user", 0, nil)
+	if err != nil {
+		t.Fatalf("RunPrompt: %v", err)
+	}
+	if result.Result != "hello from fake" {
+		t.Fatalf("result = %q, want %q", result.Result, "hello from fake")
+	}
+	if strings.TrimSpace(result.SessionID) == "" {
+		t.Fatal("expected session id")
+	}
+	if !strings.HasSuffix(result.SessionName, " "+subagentSessionSuffix) {
+		t.Fatalf("expected subagent session name, got %q", result.SessionName)
+	}
+
+	cfg, err := config.Load(workspace, config.LoadOptions{OpenAIBaseURL: server.URL})
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	store, err := session.OpenByID(cfg.PersistenceRoot, result.SessionID)
+	if err != nil {
+		t.Fatalf("open session by id: %v", err)
+	}
+	meta := store.Meta()
+	if meta.WorkspaceRoot != cfg.WorkspaceRoot {
+		t.Fatalf("workspace root = %q, want %q", meta.WorkspaceRoot, cfg.WorkspaceRoot)
+	}
+	if meta.FirstPromptPreview != "hello from user" {
+		t.Fatalf("first prompt preview = %q, want %q", meta.FirstPromptPreview, "hello from user")
+	}
+	if meta.Continuation == nil || meta.Continuation.OpenAIBaseURL != server.URL {
+		t.Fatalf("unexpected continuation context: %+v", meta.Continuation)
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	var (
+		sawUser      bool
+		sawAssistant bool
+	)
+	for _, evt := range events {
+		if evt.Kind != "message" {
+			continue
+		}
+		var msg llm.Message
+		if err := json.Unmarshal(evt.Payload, &msg); err != nil {
+			t.Fatalf("unmarshal message payload: %v", err)
+		}
+		if msg.Role == llm.RoleUser && msg.Content == "hello from user" {
+			sawUser = true
+		}
+		if msg.Role == llm.RoleAssistant && msg.Content == "hello from fake" && msg.Phase == llm.MessagePhaseFinal {
+			sawAssistant = true
+		}
+	}
+	if !sawUser {
+		t.Fatal("expected persisted user message in event log")
+	}
+	if !sawAssistant {
+		t.Fatal("expected persisted final assistant message in event log")
 	}
 }
