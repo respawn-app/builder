@@ -107,6 +107,14 @@ Next unresolved Phase 0 execution target:
 
 - add the migration fixtures listed by `../analysis/persistence-audit.md`
 
+Immediate persistence-fixture resume note for the next execution batch:
+
+- add missing-file partial-session fixtures
+- add stored tool-presentation payload fixtures
+- add `history_replaced` compatibility fixtures
+- add both `in_flight_step` reopen outcome fixtures
+- add lazy-session persistence transition fixtures
+
 ## 5. Boundary Enforcement Plan
 
 - [x] Decide how import-boundary enforcement will work once extraction starts.
