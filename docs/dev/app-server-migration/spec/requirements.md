@@ -265,6 +265,12 @@ Requirements:
 - the server applies the answer and continues or rejects the guarded action,
 - approval semantics are consistent regardless of which frontend answers.
 
+Current clarification for planning:
+
+- The current monolith only has Phase 0 proof for live-process queued ask or approval behavior while the process remains alive.
+- Whether pending asks or approvals must survive server restart is not yet locked for the target architecture.
+- Planning and implementation must not assume restart-durable pending asks or approvals until that target behavior is explicitly decided.
+
 ## Workflow Ownership Requirements
 
 The server should own workflows that create durable state or affect system behavior in a frontend-independent way.

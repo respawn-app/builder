@@ -4627,6 +4627,41 @@ func TestBusyQueuedSlashCommandDrainContinuesIntoQueuedPrompt(t *testing.T) {
 	}
 }
 
+func TestBusyQueuedUnknownSlashDrainsAsPromptSubmission(t *testing.T) {
+	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "/nope queued"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated := next.(*uiModel)
+	if len(updated.queued) != 1 || updated.queued[0] != "/nope queued" {
+		t.Fatalf("expected unknown slash text queued verbatim, got %+v", updated.queued)
+	}
+	if updated.sessionName != "" {
+		t.Fatalf("did not expect unknown slash queue-submit to execute as command, got session name %q", updated.sessionName)
+	}
+
+	next, cmd := updated.Update(submitDoneMsg{})
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected queued unknown slash to start submission after turn completion")
+	}
+	if !updated.busy {
+		t.Fatal("expected queued unknown slash to start prompt submission during drain")
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued unknown slash drained, got %+v", updated.queued)
+	}
+	if updated.sessionName != "" {
+		t.Fatalf("did not expect unknown slash drain to route through slash command execution, got session name %q", updated.sessionName)
+	}
+	plain := stripANSIAndTrimRight(updated.view.OngoingSnapshot())
+	if !strings.Contains(plain, "/nope queued") {
+		t.Fatalf("expected queued unknown slash in transcript as prompt text, got %q", plain)
+	}
+}
+
 func TestAutoDrainStopsAfterQueuedPSInlineAppendsToInput(t *testing.T) {
 	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
 	if err != nil {
