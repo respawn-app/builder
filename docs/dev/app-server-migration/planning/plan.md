@@ -18,10 +18,11 @@ Deliverables:
 
 Required outputs:
 
-- `behavior-preservation.md` complete and cross-checked against the codebase
+- `../spec/behavior-preservation.md` complete and cross-checked against the codebase
 - `phase-0-checkpoint.md` complete and used as the execution checklist
+- `phase-0-workstreams.md` complete enough to drive bounded parallel work
 - `boundary-map.md` complete enough to define the first extraction seam
-- `persistence-audit.md` complete enough to define the old-data adoption baseline
+- `../analysis/persistence-audit.md` complete enough to define the old-data adoption baseline
 - session fixture corpus for old data adoption
 - explicit list of busy-safe versus busy-blocked operations
 

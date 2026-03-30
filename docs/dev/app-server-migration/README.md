@@ -24,14 +24,26 @@ Planning can begin from this file group, but not by ignoring the blockers. Sever
 
 Files:
 
-- `requirements.md`: full product requirements spec for the migration.
-- `locked-decisions.md`: decisions already locked for this feature.
-- `session-run-model.md`: minimum project/session/run/process model and queue semantics baseline.
-- `behavior-preservation.md`: compatibility inventory and proof obligations for preserving current behavior.
-- `phase-0-checkpoint.md`: executable pre-refactor checklist for Phase 0.
-- `boundary-map.md`: initial repo-grounded frontend/server cut analysis.
-- `persistence-audit.md`: initial audit of current on-disk session/persistence shape and migration pressure points.
-- `command-ownership.md`: command-surface inventory and ownership/mapping across the frontend-server boundary.
-- `open-questions.md`: split between planning blockers and later schema questions.
-- `plan.md`: phased migration plan derived from the current requirements set.
-- `reviewer-prompt.md`: standalone prompt for external review, critique, and follow-up planning.
+`spec/`
+
+- `spec/requirements.md`: full product requirements spec for the migration.
+- `spec/locked-decisions.md`: decisions already locked for this feature.
+- `spec/session-run-model.md`: minimum project/session/run/process model and queue semantics baseline.
+- `spec/behavior-preservation.md`: compatibility inventory and proof obligations for preserving current behavior.
+- `spec/command-ownership.md`: command-surface inventory and ownership/mapping across the frontend-server boundary.
+- `spec/open-questions.md`: split between planning blockers and later schema questions.
+
+`planning/`
+
+- `planning/plan.md`: phased migration plan derived from the current requirements set.
+- `planning/phase-0-checkpoint.md`: executable pre-refactor checklist for Phase 0.
+- `planning/boundary-map.md`: initial repo-grounded frontend/server cut analysis.
+- `planning/phase-0-workstreams.md`: agent-ready parallel work packets for the current Phase 0 step.
+
+`analysis/`
+
+- `analysis/persistence-audit.md`: initial audit of current on-disk session/persistence shape and migration pressure points.
+
+`review/`
+
+- `review/reviewer-prompt.md`: standalone prompt for external review, critique, and follow-up planning.
