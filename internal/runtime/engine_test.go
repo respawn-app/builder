@@ -7251,6 +7251,45 @@ func TestManualCompactionLocalAppendsSlashCommandArgumentsToPrompt(t *testing.T)
 	}
 }
 
+func TestManualCompactionLocalSendsPromptAsDeveloperMessage(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{
+		responses: []llm.Response{{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "summary"},
+		}},
+	}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append message: %v", err)
+	}
+
+	if err := eng.CompactContext(context.Background(), ""); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected one local-summary model call, got %d", len(client.calls))
+	}
+
+	found := false
+	for _, item := range client.calls[0].Items {
+		if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleDeveloper && item.Content == prompts.CompactionPrompt {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected local compaction prompt as developer message, got %+v", client.calls[0].Items)
+	}
+}
+
 func TestManualCompactionAppendsLastVisibleUserMessageCarryover(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -7280,7 +7319,7 @@ func TestManualCompactionAppendsLastVisibleUserMessageCarryover(t *testing.T) {
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "please keep tests green"}); err != nil {
 		t.Fatalf("append user message: %v", err)
 	}
-	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "older summary"}); err != nil {
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSummary, Content: "older summary"}); err != nil {
 		t.Fatalf("append compaction summary: %v", err)
 	}
 
@@ -7292,7 +7331,18 @@ func TestManualCompactionAppendsLastVisibleUserMessageCarryover(t *testing.T) {
 	if len(messages) == 0 {
 		t.Fatal("expected messages after manual compaction")
 	}
-	carryover := messages[len(messages)-1]
+	carryoverIndex := -1
+	var carryover llm.Message
+	for i, message := range messages {
+		switch message.MessageType {
+		case llm.MessageTypeManualCompactionCarryover:
+			carryoverIndex = i
+			carryover = message
+		}
+	}
+	if carryoverIndex < 0 {
+		t.Fatalf("expected manual compaction carryover in message history, got %+v", messages)
+	}
 	if carryover.Role != llm.RoleDeveloper {
 		t.Fatalf("expected developer carryover message, got role=%q", carryover.Role)
 	}
@@ -7304,6 +7354,55 @@ func TestManualCompactionAppendsLastVisibleUserMessageCarryover(t *testing.T) {
 	}
 	if strings.Contains(carryover.Content, "older summary") {
 		t.Fatalf("did not expect prior compaction summary in carryover, got %q", carryover.Content)
+	}
+}
+
+func TestManualLocalCompactionPlacesSummaryBeforeCarryoverInTranscript(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		responses: []llm.Response{{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+			Usage:     llm.Usage{InputTokens: 1000, OutputTokens: 100, WindowTokens: 200000},
+		}},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", CompactionMode: "local"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "please keep tests green"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+
+	if err := eng.CompactContext(context.Background(), ""); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+
+	entries := eng.ChatSnapshot().Entries
+	if len(entries) < 3 {
+		t.Fatalf("expected transcript entries after compaction, got %+v", entries)
+	}
+
+	summaryIndex := -1
+	carryoverIndex := -1
+	for i, entry := range entries {
+		switch entry.Role {
+		case "compaction_summary":
+			summaryIndex = i
+		case "manual_compaction_carryover":
+			carryoverIndex = i
+		}
+	}
+	if summaryIndex < 0 || carryoverIndex < 0 {
+		t.Fatalf("expected summary and carryover entries, got %+v", entries)
+	}
+	if summaryIndex >= carryoverIndex {
+		t.Fatalf("expected compaction summary before manual carryover, got %+v", entries)
 	}
 }
 
@@ -7439,7 +7538,7 @@ func TestManualCompactionLocalUsesHistorySinceLastCompactionCheckpoint(t *testin
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, Content: "old assistant response"}); err != nil {
 		t.Fatalf("append old assistant message: %v", err)
 	}
-	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "old compacted summary"}); err != nil {
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSummary, Content: "old compacted summary"}); err != nil {
 		t.Fatalf("append compaction checkpoint: %v", err)
 	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "new user request"}); err != nil {
@@ -7471,7 +7570,7 @@ func TestManualCompactionLocalUsesHistorySinceLastCompactionCheckpoint(t *testin
 		if item.Role == llm.RoleDeveloper && item.Content == "canonical context" {
 			foundCanonical = true
 		}
-		if item.Role == llm.RoleUser && item.MessageType == llm.MessageTypeCompactionSummary {
+		if item.Role == llm.RoleDeveloper && item.MessageType == llm.MessageTypeCompactionSummary {
 			foundCheckpoint = true
 		}
 		if item.Role == llm.RoleUser && item.Content == "new user request" {
@@ -7903,7 +8002,7 @@ func TestRemoteCompactionMissingCheckpointFallsBackToLocal(t *testing.T) {
 	foundLocalSummaryCarryover := false
 	for _, req := range client.calls {
 		for _, item := range req.Items {
-			if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleUser && item.MessageType == llm.MessageTypeCompactionSummary {
+			if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleDeveloper && item.MessageType == llm.MessageTypeCompactionSummary {
 				foundLocalSummaryCarryover = true
 				break
 			}
@@ -8128,7 +8227,7 @@ func TestOpenAIModelCompact404DoesNotFallbackToLocalCompaction(t *testing.T) {
 	}
 	for _, req := range client.calls {
 		for _, item := range req.Items {
-			if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleUser && item.MessageType == llm.MessageTypeCompactionSummary {
+			if item.Type == llm.ResponseItemTypeMessage && item.MessageType == llm.MessageTypeCompactionSummary {
 				t.Fatalf("did not expect local compaction summary fallback, request=%+v", req.Items)
 			}
 		}

@@ -434,7 +434,7 @@ func (e *Engine) rebuildLocalCompactionHistory(ctx context.Context, model string
 
 	summaryMessage := llm.ResponseItem{
 		Type:        llm.ResponseItemTypeMessage,
-		Role:        llm.RoleUser,
+		Role:        llm.RoleDeveloper,
 		MessageType: llm.MessageTypeCompactionSummary,
 		Content:     strings.TrimSpace(summary),
 	}

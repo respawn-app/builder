@@ -519,7 +519,7 @@ func TestFormatToolResultWebSearchUsesCompactJSON(t *testing.T) {
 
 func TestChatStoreHidesSyntheticCompactionSummaryMessage(t *testing.T) {
 	s := newChatStore()
-	s.appendMessage(llm.Message{Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "summary"})
+	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSummary, Content: "summary"})
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "real user input"})
 
 	snap := s.snapshot()
