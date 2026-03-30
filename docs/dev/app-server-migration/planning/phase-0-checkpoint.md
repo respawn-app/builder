@@ -76,16 +76,79 @@ Fixture/adoption checklist tightened in `../analysis/persistence-audit.md`:
 
 ## 4. Characterization Coverage Plan
 
-- [ ] Enumerate characterization tests to add before behavior-heavy refactors.
-- [ ] Mark which current tests already cover each required workflow.
+- [x] Enumerate characterization tests to add before behavior-heavy refactors.
+- [x] Mark which current tests already cover each required workflow.
 - [x] Identify the first set of black-box acceptance tests that will need a non-CLI test client.
 - [x] Record any existing areas where current tests are UI-coupled and will need abstraction later.
 
+Current characterization coverage map:
+
+| Workflow | Current coverage already in repo | Missing coverage to add before behavior-heavy refactors |
+| --- | --- | --- |
+| Headless launch, create, resume, and continuation-context resolution | `internal/app/launch_planner_test.go`: `TestSessionLaunchPlannerHeadlessCreatesNewSessionAndAppliesContinuationContext`, `TestSessionLaunchPlannerSelectedSessionIDBypassesPicker` | Add one success-path characterization for `RunPrompt(...)` that proves create-or-open plus submit plus durable transcript result, not only auth failure and ask rejection. |
+| Unknown slash fallback and built-in command resolution | `internal/app/commands/commands_test.go`: `TestExecuteBuiltins`, `TestExecuteUnknown`, `TestMatchReturnsBestSubstringFirst`; `internal/app/ui_slash_command_picker_test.go`: whitespace-after-slash normalization cases | Add one explicit queued-input characterization showing unknown slash input stays on the normal prompt path during queue drain, rather than being re-dispatched as a command. |
+| File-backed prompt discovery and expansion | `internal/app/commands/file_prompts_test.go`: precedence, normalization collision, filtering, empty-file skipping, `$ARGUMENTS` replacement, append behavior, top-level-only discovery | No Phase 0 blocker beyond keeping this suite green. These tests already freeze the frontend-local contract well enough for the first extraction. |
+| Busy-state command behavior and queue drain | `internal/app/ui_slash_command_picker_test.go`: busy `/fast` and `/back` cases; `internal/app/ui_compaction_resume_test.go`: queued steering resume; `internal/runtime/engine_queue_submission_test.go` and `internal/runtime/exclusive_step_test.go`: busy-run and interrupt lifecycle | Add one table-driven characterization that cross-checks the current busy baseline from `behavior-preservation.md` against the actual registry and queue-submit paths so command-by-command behavior cannot drift silently during refactor. |
+| Status overlay lifecycle and progressive loading | `internal/app/ui_status_test.go`: `TestStatusCommandOpensDetailOverlayInNativeMode`, `TestStatusCommandProgressivelyLoadsSections`, `TestStatusCommandPersistsPromptHistoryWithoutBlockingOpen` | No additional monolith characterization required before Phase 1. Future work belongs in the client-boundary acceptance suite, not more Bubble Tea-only tests. |
+| Background process continuity and `/ps` overlay behavior | `internal/app/session_lifecycle_test.go`: `TestNewSessionTransitionKeepsBackgroundProcessesAlive`; `internal/app/runtime_factory_test.go`: background-event routing and owner-session behavior; `internal/app/ui_native_scrollback_integration_test.go`: `/ps` overlay open/close behavior in native mode | Add explicit characterization for `/ps kill|inline|logs <id>` user-visible side effects and selection-retention behavior so process UI semantics are frozen before the backend split. |
+| Review, back-navigation, new-session, and logout lifecycle | `internal/app/session_lifecycle_test.go`: new session, fork rollback, back teleport, startup replay; `internal/app/auth_gate_test.go`: logout re-auth and same-session continuity | Add direct `/init` fresh-session handoff characterization. Current docs infer it from the shared prompt-command path, but the repo does not yet characterize it as explicitly as `/review`. |
+| Existing-session adoption and persistence repair | `internal/session/store_test.go`: prompt history variants, input draft persistence, session naming, continuation persistence, `OpenByID`, truncated-tail repair, `last_sequence` reconciliation, canonical compaction rewrite | Add fixtures for missing-file partial sessions, stored tool-presentation payloads, `history_replaced` compatibility, both `in_flight_step` reopen outcomes, and lazy-session persistence transitions as called out in `../analysis/persistence-audit.md`. |
+| Ask/approval lifecycle | `internal/app/ask_bridge_test.go` for the current synchronous bridge; `internal/app/run_prompt_test.go`: headless ask prohibition | Add deterministic non-UI ask/approval coverage that proves pause, answer, and single-resume semantics outside the TUI path. This is required before the migration can claim that the CLI is not privileged. |
+| Disconnect/reconnect and lossy event behavior | `internal/app/runtime_event_bridge_test.go`: lossy bridge characterization; `internal/app/runtime_factory_test.go`: reconnect-sensitive background routing | Add boundary-level acceptance scenarios for disconnect/reconnect, explicit gap handling, and duplicate retry semantics once the client boundary exists. The monolith does not currently prove these through a frontend-neutral seam. |
+
+Concrete characterization backlog to carry into implementation planning:
+
+- add a successful `RunPrompt(...)` create-or-open plus submit plus transcript persistence test
+- add queue-drain characterization for unknown slash fallback
+- add table-driven busy command coverage against the documented compatibility baseline
+- add `/ps kill|inline|logs <id>` characterization before process behavior is refactored
+- add direct `/init` fresh-session handoff characterization
+- add the migration fixtures listed by `../analysis/persistence-audit.md`
+- add deterministic ask/approval lifecycle proof outside the current UI bridge
+
 ## 5. Boundary Enforcement Plan
 
-- [ ] Decide how import-boundary enforcement will work once extraction starts.
-- [ ] Identify the first packages that must be prevented from importing runtime/session/tools/auth internals directly.
+- [x] Decide how import-boundary enforcement will work once extraction starts.
+- [x] Identify the first packages that must be prevented from importing runtime/session/tools/auth internals directly.
 - [x] Define the proof that embedded mode and external-daemon mode will use the same client boundary.
+
+Boundary-enforcement decision:
+
+- Enforce the frontend/server import cut with a repo-local architecture test, not with prompt discipline and not with a heavyweight linter migration.
+- The enforcement should use Go package metadata or parsed imports, not grep heuristics, so failures point to real package/file import violations.
+- The test should run in normal `./scripts/test.sh` CI and fail the build as soon as a protected frontend package or file imports a banned server package.
+- Start narrow and ratchet: enforce the first seam immediately, then expand the protected set as more frontend code is extracted out of the mixed `internal/app` package.
+
+Initial enforcement shape to carry into Phase 1:
+
+1. Add one architecture test package, for example `internal/architecture`, that asserts protected frontend code does not import banned server internals.
+2. Source package/file metadata from the Go toolchain (`go list` or equivalent package inspection), so the rule follows real import edges.
+3. Keep the deny list focused on server-authority packages for the first cut:
+   - `builder/internal/runtime`
+   - `builder/internal/session`
+   - `builder/internal/auth`
+   - `builder/internal/tools` except presentation-only leaves that are explicitly allowlisted for rendering, such as `builder/internal/tools/patch/format`
+4. Do not block `internal/llm` in the first enforcement pass. Today some frontend rendering still depends on model-facing types, and that is a later DTO cleanup rather than the first server-authority cut.
+
+First protected package/file set:
+
+- `cmd/builder`
+  - already thin and should remain a pure frontend shell
+  - must continue to route through `internal/app` or a future client package, never directly into runtime/session/auth/tools internals
+- extracted frontend packages that replace the current mixed `internal/app` UI files
+  - this is the first real boundary target once Phase 1 starts
+  - candidate sources already identified in `boundary-map.md`: `session_lifecycle.go`, `ui*.go`, `session_picker.go`, `auth_picker.go`, `auth_success_screen.go`, and `onboarding_*.go`
+- `internal/tui`
+  - once the first client DTOs exist, prevent it from importing runtime/session/auth or non-rendering tool packages directly
+
+Important constraint:
+
+- Do not try to enforce the whole current `internal/app` package at once. It is intentionally mixed today. The enforcement boundary must start with `cmd/builder` and with whichever new frontend package is created first during extraction, then grow as files move out of `internal/app`.
+
+Phase 1 enforcement success condition:
+
+- after the first `builder run` seam lands, `cmd/builder` and the migrated frontend package must be clean of direct imports from `internal/runtime`, `internal/session`, `internal/auth`, and runtime-bearing `internal/tools` packages
+- CI must fail if any new direct import crosses that boundary
 
 ## Current Grounding In This Repo
 
@@ -189,7 +252,7 @@ First acceptance matrix to carry into extraction planning:
 
 ## Exit Criteria
 
-Remaining unchecked items in this checklist are the Phase 0 follow-ups that still need tighter execution detail before implementation starts, not missing workstream outputs.
+This checklist is now closed as a planning artifact. Phase 0 itself is still incomplete until the characterization additions, fixture additions, and boundary-enforcement test described above are executed in the repo.
 
 Phase 0 is complete only when all of the following are true:
 
