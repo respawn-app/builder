@@ -201,7 +201,7 @@ func (m *Manager) WriteStdin(ctx context.Context, req WriteRequest) (ExecResult,
 	entry.interactMu.Lock()
 	defer entry.interactMu.Unlock()
 
-	yieldTime := clampWriteYieldTime(req.YieldTime, defaultWriteYieldTime)
+	yieldTime := normalizeWriteYieldTime(req.YieldTime, defaultWriteYieldTime)
 	maxOutputChars := normalizeOutputChars(req.MaxOutputChars)
 	if req.Input != "" {
 		entry.mu.Lock()

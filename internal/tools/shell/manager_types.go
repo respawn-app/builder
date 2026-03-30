@@ -17,7 +17,6 @@ const (
 	closeGracePeriod           = 1 * time.Second
 	closeWaitTimeout           = 5 * time.Second
 	minWriteYieldTime          = 250 * time.Millisecond
-	maxWriteYieldTime          = 30 * time.Second
 	defaultOutputTokenCap      = 10_000
 	maxPendingOutputBytes      = 1 << 20
 	maxRecentPreviewBytes      = 4096
@@ -315,15 +314,12 @@ func normalizeOutputChars(maxChars int) int {
 	return maxChars
 }
 
-func clampWriteYieldTime(value time.Duration, fallback time.Duration) time.Duration {
+func normalizeWriteYieldTime(value time.Duration, fallback time.Duration) time.Duration {
 	if value <= 0 {
 		value = fallback
 	}
 	if value < minWriteYieldTime {
 		return minWriteYieldTime
-	}
-	if value > maxWriteYieldTime {
-		return maxWriteYieldTime
 	}
 	return value
 }

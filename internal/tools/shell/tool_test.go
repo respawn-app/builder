@@ -387,6 +387,77 @@ func TestNormalizeExecYieldTimeDoesNotCapConfiguredMinimum(t *testing.T) {
 	}
 }
 
+func TestNormalizeWriteYieldTimeDoesNotCapLongPolls(t *testing.T) {
+	yieldTime := normalizeWriteYieldTime(5*time.Minute, defaultWriteYieldTime)
+	if yieldTime != 5*time.Minute {
+		t.Fatalf("yield time = %s, want %s", yieldTime, 5*time.Minute)
+	}
+
+	yieldTime = normalizeWriteYieldTime(100*time.Millisecond, defaultWriteYieldTime)
+	if yieldTime != minWriteYieldTime {
+		t.Fatalf("yield time = %s, want %s for short input", yieldTime, minWriteYieldTime)
+	}
+
+	yieldTime = normalizeWriteYieldTime(0, defaultWriteYieldTime)
+	if yieldTime != defaultWriteYieldTime {
+		t.Fatalf("yield time = %s, want %s for zero input", yieldTime, defaultWriteYieldTime)
+	}
+}
+
+func TestWriteStdinPollHonorsRequestedDuration(t *testing.T) {
+	workspace := t.TempDir()
+	manager := newBackgroundTestManager(t)
+	execTool := NewExecCommandTool(workspace, 16_000, manager, "")
+	pollTool := NewWriteStdinTool(16_000, manager)
+
+	execInput, _ := json.Marshal(map[string]any{
+		"cmd":           "sleep 3",
+		"shell":         "/bin/sh",
+		"login":         false,
+		"yield_time_ms": 250,
+	})
+	result, err := execTool.Call(context.Background(), tools.Call{ID: "poll-duration-exec", Name: tools.ToolExecCommand, Input: execInput})
+	if err != nil {
+		t.Fatalf("exec_command call error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
+	}
+
+	pollInput, _ := json.Marshal(map[string]any{
+		"session_id":        1000,
+		"yield_time_ms":     1200,
+		"max_output_tokens": 32,
+	})
+	start := time.Now()
+	pollResult, err := pollTool.Call(context.Background(), tools.Call{ID: "poll-duration-poll", Name: tools.ToolWriteStdin, Input: pollInput})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("write_stdin call error: %v", err)
+	}
+	if pollResult.IsError {
+		t.Fatalf("unexpected write_stdin error: %s", string(pollResult.Output))
+	}
+	if elapsed < time.Second {
+		t.Fatalf("poll returned too early: %s", elapsed)
+	}
+	if elapsed > 2500*time.Millisecond {
+		t.Fatalf("poll took too long: %s", elapsed)
+	}
+
+	var payload writeStdinOutput
+	if err := json.Unmarshal(pollResult.Output, &payload); err != nil {
+		t.Fatalf("decode write_stdin output: %v", err)
+	}
+	if !payload.BackgroundRunning {
+		t.Fatalf("expected session to still be running after requested poll window, got %+v", payload)
+	}
+	if !payload.Backgrounded {
+		t.Fatalf("expected session to remain backgrounded, got %+v", payload)
+	}
+	waitForManagerCount(t, manager, 0, 4*time.Second)
+}
+
 func TestExecCommandForegroundTruncationUsesForegroundBanner(t *testing.T) {
 	workspace := t.TempDir()
 	manager := newBackgroundTestManager(t)
