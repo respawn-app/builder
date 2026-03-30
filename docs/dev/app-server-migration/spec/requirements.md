@@ -267,9 +267,9 @@ Requirements:
 
 Current clarification for planning:
 
-- The current monolith only has Phase 0 proof for live-process queued ask or approval behavior while the process remains alive.
-- Whether pending asks or approvals must survive server restart is not yet locked for the target architecture.
-- Planning and implementation must not assume restart-durable pending asks or approvals until that target behavior is explicitly decided.
+- The current monolith now has Phase 0 proof for both live-process queued ask or approval behavior and restart recovery of interrupted tool-call attempts through persisted conversation state.
+- Current restart behavior is transcript-driven: the interrupted tool-call attempt remains durable, reopen appends the interruption marker, and the next model turn re-evaluates what to do.
+- Planning and implementation should preserve that restart behavior rather than assuming a durable broker-queue object or inventing a different default contract silently.
 
 ## Workflow Ownership Requirements
 

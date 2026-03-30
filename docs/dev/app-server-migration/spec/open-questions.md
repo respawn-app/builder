@@ -21,11 +21,6 @@ If an item appears under `Blockers Before Implementation`, the migration plan sh
 - The exact acceptance-test harness that proves the CLI now talks through the client boundary instead of privileged runtime access.
 - The minimum reference non-CLI test client scope needed to prove the protocol is real.
 
-### Ask And Approval Durability
-
-- Whether pending asks or approvals must survive server restart in the target app-server architecture, or instead resolve into an explicit cancelled or expired state on restart.
-- If restart durability is required, what durable state and reopen semantics are authoritative: resume blocked run in place, re-emit the pending ask or approval, or expose an explicit recovery state that the frontend must acknowledge.
-
 ### Local Discovery And Startup UX
 
 - Exact local discovery mechanism for the well-known local control endpoint or socket across supported operating systems.
@@ -55,3 +50,4 @@ These are intentionally no longer open:
 - Richer frontend-owned command metadata may eventually cross the boundary through a structured submission envelope, not through server-provisioned slash commands.
 - Replay is not the normal reconnect path. Rehydrate first, then resubscribe, with best-effort catch-up only when available.
 - Runtime tuning operations such as `/thinking` and `/fast` are session-scoped live settings rather than per-run-only settings.
+- Current ask/approval restart behavior is transcript-driven rather than broker-queue-driven: interrupted tool-call attempts remain in conversation state, reopen appends the interruption marker, and the next model turn re-evaluates what to do.
