@@ -92,7 +92,7 @@ Current characterization coverage map:
 | Status overlay lifecycle and progressive loading | `internal/app/ui_status_test.go`: `TestStatusCommandOpensDetailOverlayInNativeMode`, `TestStatusCommandProgressivelyLoadsSections`, `TestStatusCommandPersistsPromptHistoryWithoutBlockingOpen` | No additional monolith characterization required before Phase 1. Future work belongs in the client-boundary acceptance suite, not more Bubble Tea-only tests. |
 | Background process continuity and `/ps` overlay behavior | `internal/app/session_lifecycle_test.go`: `TestNewSessionTransitionKeepsBackgroundProcessesAlive`; `internal/app/runtime_factory_test.go`: background-event routing and owner-session behavior; `internal/app/ui_native_scrollback_integration_test.go`: `/ps` overlay open/close behavior in native mode; `internal/app/ui_test.go`: queued `/ps inline` drain, direct `/ps kill|inline|logs <id>` command-path behavior, log-opening fallback, and selection-retention behavior | Keep the command-path and overlay-path cases green. Extend this area only when a process action still depends on inferred behavior instead of explicit coverage. |
 | Review, back-navigation, new-session, and logout lifecycle | `internal/app/session_lifecycle_test.go`: new session, fork rollback, back teleport, startup replay; `internal/app/auth_gate_test.go`: logout re-auth and same-session continuity; `internal/app/ui_test.go`: `/review` and `/init` fresh-session handoff characterization | Keep the `/review` and `/init` handoff cases symmetric. Extend this area only when a session-transition workflow is still inferred rather than explicitly characterized. |
-| Existing-session adoption and persistence repair | `internal/session/store_test.go`: prompt history variants, input draft persistence, session naming, continuation persistence, `OpenByID`, truncated-tail repair, `last_sequence` reconciliation, canonical compaction rewrite | Add fixtures for missing-file partial sessions, stored tool-presentation payloads, `history_replaced` compatibility, both `in_flight_step` reopen outcomes, and lazy-session persistence transitions as called out in `../analysis/persistence-audit.md`. |
+| Existing-session adoption and persistence repair | `internal/session/store_test.go`: prompt history variants, input draft persistence, session naming, continuation persistence, `OpenByID`, truncated-tail repair, `last_sequence` reconciliation, canonical compaction rewrite, missing-file partial-session fixtures, malformed session metadata skip behavior, accepted `sessions/<sessionID>` lookup, and lazy-session metadata persistence transitions; `internal/runtime/engine_test.go`: stored tool-presentation restore, `history_replaced` compatibility, malformed restore payload failure, and both `in_flight_step` reopen outcomes | Keep this fixture batch green and extend it only when a newly discovered persistence edge is not already explicitly covered. |
 | Ask/approval lifecycle | `internal/app/ask_bridge_test.go` for the current synchronous bridge; `internal/app/run_prompt_test.go`: headless ask prohibition | Add deterministic non-UI ask/approval coverage that proves pause, answer, and single-resume semantics outside the TUI path. This is required before the migration can claim that the CLI is not privileged. |
 | Disconnect/reconnect and lossy event behavior | `internal/app/runtime_event_bridge_test.go`: lossy bridge characterization; `internal/app/runtime_factory_test.go`: reconnect-sensitive background routing | Add boundary-level acceptance scenarios for disconnect/reconnect, explicit gap handling, and duplicate retry semantics once the client boundary exists. The monolith does not currently prove these through a frontend-neutral seam. |
 
@@ -100,20 +100,17 @@ Concrete characterization backlog to carry into implementation planning:
 
 - add a successful `RunPrompt(...)` create-or-open plus submit plus transcript persistence test
 - add queue-drain characterization for unknown slash fallback
-- add the migration fixtures listed by `../analysis/persistence-audit.md`
 - add deterministic ask/approval lifecycle proof outside the current UI bridge
 
 Next unresolved Phase 0 execution target:
 
-- add the migration fixtures listed by `../analysis/persistence-audit.md`
+- add deterministic non-UI ask/approval lifecycle proof outside the current UI bridge
 
-Immediate persistence-fixture resume note for the next execution batch:
+Immediate ask/approval resume note for the next execution batch:
 
-- add missing-file partial-session fixtures
-- add stored tool-presentation payload fixtures
-- add `history_replaced` compatibility fixtures
-- add both `in_flight_step` reopen outcome fixtures
-- add lazy-session persistence transition fixtures
+- prove ask creation and persistence without relying on Bubble Tea-only orchestration
+- prove deterministic single-resume semantics after answering or denying an ask/approval
+- prove a non-UI caller can pause, answer, and continue a blocked run without privileged frontend shortcuts
 
 ## 5. Boundary Enforcement Plan
 
