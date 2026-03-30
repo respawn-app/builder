@@ -30,11 +30,11 @@ No transport work should start before this checkpoint is complete.
 
 ## 1. Compatibility Freeze
 
-- [ ] Verify the built-in slash-command inventory against the actual registry and any related frontend-only behaviors.
-- [ ] Cross-check `../spec/behavior-preservation.md` against current tests and add any missing workflow.
-- [ ] Capture explicit unknown-slash fallback behavior as a required compatibility case.
-- [ ] Confirm the current busy-safe vs busy-blocked command distinctions from the command registry and UI behavior.
-- [ ] Identify any non-slash workflow that is critical but not yet represented in the preservation matrix.
+- [x] Verify the built-in slash-command inventory against the actual registry and any related frontend-only behaviors.
+- [x] Cross-check `../spec/behavior-preservation.md` against current tests and add any missing workflow.
+- [x] Capture explicit unknown-slash fallback behavior as a required compatibility case.
+- [x] Confirm the current busy-safe vs busy-blocked command distinctions from the command registry and UI behavior.
+- [x] Identify any non-slash workflow that is critical but not yet represented in the preservation matrix.
 
 ## 2. Persistence And Data Adoption Audit
 
@@ -68,24 +68,24 @@ Fixture/adoption checklist tightened in `../analysis/persistence-audit.md`:
 
 ## 3. Boundary Map And First Cut Line
 
-- [ ] Identify current composition roots and lifecycle entrypoints.
-- [ ] Identify frontend-only packages and files.
-- [ ] Identify server-only packages and files.
-- [ ] Identify the highest-risk re-coupling hotspots inside `internal/app`.
-- [ ] Define the first transport-neutral application service surface in terms of use cases, not transport methods.
+- [x] Identify current composition roots and lifecycle entrypoints.
+- [x] Identify frontend-only packages and files.
+- [x] Identify server-only packages and files.
+- [x] Identify the highest-risk re-coupling hotspots inside `internal/app`.
+- [x] Define the first transport-neutral application service surface in terms of use cases, not transport methods.
 
 ## 4. Characterization Coverage Plan
 
 - [ ] Enumerate characterization tests to add before behavior-heavy refactors.
 - [ ] Mark which current tests already cover each required workflow.
-- [ ] Identify the first set of black-box acceptance tests that will need a non-CLI test client.
-- [ ] Record any existing areas where current tests are UI-coupled and will need abstraction later.
+- [x] Identify the first set of black-box acceptance tests that will need a non-CLI test client.
+- [x] Record any existing areas where current tests are UI-coupled and will need abstraction later.
 
 ## 5. Boundary Enforcement Plan
 
 - [ ] Decide how import-boundary enforcement will work once extraction starts.
 - [ ] Identify the first packages that must be prevented from importing runtime/session/tools/auth internals directly.
-- [ ] Define the proof that embedded mode and external-daemon mode will use the same client boundary.
+- [x] Define the proof that embedded mode and external-daemon mode will use the same client boundary.
 
 ## Current Grounding In This Repo
 
@@ -164,7 +164,32 @@ Output:
 
 - acceptance-harness outline and required helper abstractions
 
+Current locked findings for Workstream D:
+
+- The current headless seam in `internal/app/run_prompt.go` is the first credible acceptance target because it already bypasses Bubble Tea and drives `launchPlanner.PlanSession(...)`, `PrepareRuntime(...)`, and `runtime.Engine.SubmitUserMessage(...)` directly.
+- The future acceptance suite must run the exact same client contract against two targets: embedded in-process server and external daemon. Only server bootstrap changes across modes; test logic and assertions do not.
+- The minimum non-CLI client for the first wave does not need slash-command parsing or TUI rendering. It does need typed capabilities for: create/list/attach session, submit prompt, await terminal result, inspect transcript/session metadata, observe coarse run events, interrupt active work, answer asks/approvals, list/inspect/kill background processes, and disconnect/reconnect.
+- Ask/approval proof cannot rely on today's headless CLI path because `runPromptAskHandler(...)` intentionally hard-fails asks in background mode. Approval cases therefore need the future non-CLI client boundary, not `RunPrompt(...)` itself.
+- The first acceptance wave should stay biased toward headless-compatible behavior already grounded in the repo: create session, resume by session ID, transcript hydration from durable storage, background-process ownership/reattach, disconnect/reconnect continuity, slow-subscriber handling, and idempotent retry protection.
+- `internal/app/launch_planner_test.go`, `internal/app/runtime_event_bridge_test.go`, `internal/app/runtime_factory_test.go`, `internal/runtime/engine_test.go`, `internal/runtime/engine_queue_submission_test.go`, and `internal/session/store_test.go` are the best current seed coverage/helpers for the future harness.
+- The following current tests are too UI-coupled to serve as privilege-removal proof and should be treated as CLI characterization only: `internal/app/ui_test.go`, `internal/app/ui_native_scrollback_integration_test.go`, most of `internal/app/ui_*_test.go`, and the `NewUIModel(...)` / `tea.KeyMsg` driven lifecycle coverage in `internal/app/session_lifecycle_test.go`.
+
+First acceptance matrix to carry into extraction planning:
+
+| Case | Why first | Required client abilities | Current grounding |
+| --- | --- | --- | --- |
+| Headless create + submit + durable transcript | Closest match to current `RunPrompt(...)` seam; proves CLI is not needed for the primary run path. | Create session, submit prompt, await completion, read transcript/session metadata. | `internal/app/run_prompt.go`, `internal/app/launch_planner_test.go`, `internal/session/store_test.go` |
+| Resume existing session by ID | Proves session continuity without picker/UI ownership. | List or open by session ID, attach, submit again, hydrate transcript. | `internal/app/launch_planner_test.go`, `internal/session/store.go` |
+| Second client attach during/after run | Proves attach/rehydrate is boundary-based rather than CLI-local state. | Attach existing session, read run state/events, reload transcript. | `internal/app/runtime_event_bridge_test.go`, `internal/runtime/events.go` |
+| Ask/approval pause and deterministic resume | Required because headless CLI cannot answer asks; this is where non-CLI capability becomes mandatory. | Observe pending ask, answer it, verify single resume outcome. | `internal/app/ask_bridge_test.go`, `internal/tools/askquestion`, runtime tests with deterministic fake clients |
+| Background process ownership, list, kill, and reconnect | Proves active work/process state is not privileged to the active CLI. | Start process, list/inspect process, reconnect, kill, observe final state. | `internal/app/runtime_factory_test.go` background-router coverage |
+| Disconnect/reconnect during active work | Direct proof that frontend disconnect does not kill work. | Disconnect client, reconnect another client, hydrate transcript/run state. | `internal/app/runtime_factory_test.go`, `internal/runtime/engine_queue_submission_test.go` |
+| Slow subscriber / event-gap handling | Current runtime event bridge is lossy under pressure, so the boundary must make loss explicit and recoverable via rehydrate. | Subscribe to events, intentionally lag, detect gap, reload transcript/read models. | `internal/app/runtime_event_bridge_test.go` |
+| Duplicate retry without duplicate side effects | Needed to falsify client privilege and prove request idempotency. | Retry submit/approval after induced disconnect or timeout, assert one durable outcome. | current queue-submission/runtime tests plus future boundary request IDs |
+
 ## Exit Criteria
+
+Remaining unchecked items in this checklist are the Phase 0 follow-ups that still need tighter execution detail before implementation starts, not missing workstream outputs.
 
 Phase 0 is complete only when all of the following are true:
 
