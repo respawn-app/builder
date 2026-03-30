@@ -211,7 +211,7 @@
 - Native compaction eligibility is capability-driven and user-configurable.
 - `type=compaction` items and encrypted reasoning/compaction payloads are treated as opaque and replayed unchanged.
 - Compaction lifecycle emits and persists started/completed/failed events.
-- Local compaction summaries persist internally as `message_type=compaction_summary`; any model-facing summary prefix is added only at the provider input boundary.
+- Local compaction instructions are sent as `developer` messages, and local compaction summaries/checkpoints persist internally as `developer` messages with `message_type=compaction_summary`; any model-facing summary prefix is added only at the provider input boundary. Native/remote compaction has no transcript-message prompt equivalent because it uses provider `Instructions` plus opaque provider output, which Builder replays unchanged.
 - UI shows one compacted notice line per successful compaction; ongoing suppresses detailed summary content; detail shows full local summary when available.
 
 ## Model Defaults

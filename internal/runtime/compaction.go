@@ -491,6 +491,12 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 		_ = e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
 		return compactionResult{}, err
 	}
+	if strings.TrimSpace(result.summary) != "" {
+		if err := e.appendPersistedLocalEntry(stepID, "compaction_summary", strings.TrimSpace(result.summary)); err != nil {
+			_ = e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
+			return compactionResult{}, err
+		}
+	}
 	if mode == compactionModeManual {
 		if carryover := manualCompactionCarryoverMessage(manualCarryover); strings.TrimSpace(carryover.Content) != "" {
 			if err := e.appendMessage(stepID, carryover); err != nil {
@@ -500,12 +506,6 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 		}
 	}
 	compactionNumber := e.nextCompactionCount()
-	if strings.TrimSpace(result.summary) != "" {
-		if err := e.appendPersistedLocalEntry(stepID, "compaction_summary", strings.TrimSpace(result.summary)); err != nil {
-			_ = e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
-			return compactionResult{}, err
-		}
-	}
 	windowTokens := result.usage.WindowTokens
 	if windowTokens <= 0 {
 		windowTokens = e.contextWindowTokens()
@@ -715,7 +715,7 @@ func isCompactionBoundaryItem(item llm.ResponseItem) bool {
 	if item.Type == llm.ResponseItemTypeCompaction {
 		return true
 	}
-	if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleUser {
+	if item.Type == llm.ResponseItemTypeMessage {
 		return item.MessageType == llm.MessageTypeCompactionSummary
 	}
 	return false
