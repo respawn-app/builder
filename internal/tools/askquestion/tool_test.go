@@ -400,6 +400,78 @@ func TestSubmitRejectsSecondCompletionForQueuedRequest(t *testing.T) {
 	}
 }
 
+func TestToolCallBlocksUntilQueuedAnswerSubmitted(t *testing.T) {
+	b := NewBroker()
+	tl := NewTool(b)
+	type callResult struct {
+		result tools.Result
+		err    error
+	}
+	done := make(chan callResult, 1)
+
+	go func() {
+		result, err := tl.Call(context.Background(), tools.Call{
+			ID:   "call-queued",
+			Name: tools.ToolAskQuestion,
+			Input: json.RawMessage(`{
+				"question":"Pick one",
+				"suggestions":["alpha","beta"]
+			}`),
+		})
+		done <- callResult{result: result, err: err}
+	}()
+
+	pending := waitForPendingRequests(t, b, 1)
+	if len(pending) != 1 {
+		t.Fatalf("expected one pending request, got %+v", pending)
+	}
+	if pending[0].ID != "call-queued" {
+		t.Fatalf("expected pending request id call-queued, got %+v", pending[0])
+	}
+	if pending[0].Question != "Pick one" {
+		t.Fatalf("unexpected pending question: %+v", pending[0])
+	}
+	if len(pending[0].Suggestions) != 2 || pending[0].Suggestions[0] != "alpha" || pending[0].Suggestions[1] != "beta" {
+		t.Fatalf("unexpected pending suggestions: %+v", pending[0])
+	}
+
+	select {
+	case result := <-done:
+		t.Fatalf("tool call returned before answer submission: %+v", result)
+	default:
+	}
+
+	if err := b.Submit("call-queued", Response{SelectedOptionNumber: 2, FreeformAnswer: "need extra context"}); err != nil {
+		t.Fatalf("submit answer: %v", err)
+	}
+	if err := b.Submit("call-queued", Response{SelectedOptionNumber: 1}); err == nil {
+		t.Fatal("expected duplicate submission to fail after queued tool answer")
+	}
+
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatalf("tool call err: %v", result.err)
+		}
+		if result.result.IsError {
+			t.Fatalf("expected success result, got %+v", result.result)
+		}
+		var output string
+		if err := json.Unmarshal(result.result.Output, &output); err != nil {
+			t.Fatalf("decode output summary: %v", err)
+		}
+		if output != "User chose option #2. They also said: need extra context" {
+			t.Fatalf("unexpected tool output summary: %q", output)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queued tool answer")
+	}
+
+	if pending := b.Pending(); len(pending) != 0 {
+		t.Fatalf("expected queue drained after completion, got %+v", pending)
+	}
+}
+
 func TestAskHandlerModeHonorsCanceledContextBeforeInvocation(t *testing.T) {
 	b := NewBroker()
 	called := false
@@ -471,6 +543,19 @@ func TestCanceledAskIsRemovedFromPendingQueue(t *testing.T) {
 	if pending := b.Pending(); len(pending) != 0 {
 		t.Fatalf("pending queue should be empty after cancellation, got %+v", pending)
 	}
+}
+
+func waitForPendingRequests(t *testing.T, b *Broker, want int) []Request {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		pending := b.Pending()
+		if len(pending) == want {
+			return pending
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return b.Pending()
 }
 
 func TestToolCallRejectsActionField(t *testing.T) {

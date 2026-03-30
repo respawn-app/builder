@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"builder/internal/tools/askquestion"
 	patchtool "builder/internal/tools/patch"
@@ -137,4 +138,140 @@ func TestOutsideWorkspaceApproverUsesReadPromptText(t *testing.T) {
 	if askCalls != 1 {
 		t.Fatalf("expected one ask call, got %d", askCalls)
 	}
+}
+
+func TestOutsideWorkspaceApproverQueuedApprovalBlocksUntilSubmitted(t *testing.T) {
+	broker := askquestion.NewBroker()
+	approver := newOutsideWorkspaceApprover(broker, "editing")
+	req := patchtool.OutsideWorkspaceRequest{RequestedPath: "../x.txt", ResolvedPath: "/tmp/x.txt", WorkspaceRoot: "/tmp/w"}
+	type out struct {
+		approval patchtool.OutsideWorkspaceApproval
+		err      error
+	}
+	done := make(chan out, 1)
+
+	go func() {
+		approval, err := approver.Approve(context.Background(), req)
+		done <- out{approval: approval, err: err}
+	}()
+
+	pending := waitForPendingApprovals(t, broker, 1)
+	if len(pending) != 1 {
+		t.Fatalf("expected one pending approval, got %+v", pending)
+	}
+	if !pending[0].Approval {
+		t.Fatalf("expected queued request to be approval-backed, got %+v", pending[0])
+	}
+	if len(pending[0].Suggestions) != 0 {
+		t.Fatalf("expected no suggestion list for approval request, got %+v", pending[0].Suggestions)
+	}
+	if len(pending[0].ApprovalOptions) != 3 {
+		t.Fatalf("expected three approval options, got %+v", pending[0].ApprovalOptions)
+	}
+	if pending[0].ApprovalOptions[0].Decision != askquestion.ApprovalDecisionAllowOnce || pending[0].ApprovalOptions[1].Decision != askquestion.ApprovalDecisionAllowSession || pending[0].ApprovalOptions[2].Decision != askquestion.ApprovalDecisionDeny {
+		t.Fatalf("unexpected approval options: %+v", pending[0].ApprovalOptions)
+	}
+	if !strings.Contains(pending[0].Question, "Allow editing /tmp/x.txt (outside workspace dir)?") {
+		t.Fatalf("unexpected queued approval question: %q", pending[0].Question)
+	}
+
+	select {
+	case result := <-done:
+		t.Fatalf("approval returned before submission: %+v", result)
+	default:
+	}
+
+	if err := broker.Submit(pending[0].ID, askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionDeny, Commentary: "no"}}); err != nil {
+		t.Fatalf("submit denial: %v", err)
+	}
+	if err := broker.Submit(pending[0].ID, askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowOnce}}); err == nil {
+		t.Fatal("expected duplicate approval resolution to fail")
+	}
+
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatalf("approve: %v", result.err)
+		}
+		if result.approval.Decision != patchtool.OutsideWorkspaceDecisionDeny {
+			t.Fatalf("unexpected approval decision: %+v", result.approval)
+		}
+		if result.approval.Commentary != "no" {
+			t.Fatalf("unexpected approval commentary: %+v", result.approval)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queued approval result")
+	}
+
+	if pending := broker.Pending(); len(pending) != 0 {
+		t.Fatalf("expected pending approvals cleared after completion, got %+v", pending)
+	}
+}
+
+func TestOutsideWorkspaceApproverQueuedAllowSessionCachesWithoutSecondPrompt(t *testing.T) {
+	broker := askquestion.NewBroker()
+	approver := newOutsideWorkspaceApprover(broker, "editing")
+	req := patchtool.OutsideWorkspaceRequest{RequestedPath: "../x.txt", ResolvedPath: "/tmp/x.txt", WorkspaceRoot: "/tmp/w"}
+	type out struct {
+		approval patchtool.OutsideWorkspaceApproval
+		err      error
+	}
+	done := make(chan out, 1)
+
+	go func() {
+		approval, err := approver.Approve(context.Background(), req)
+		done <- out{approval: approval, err: err}
+	}()
+
+	pending := waitForPendingApprovals(t, broker, 1)
+	if err := broker.Submit(pending[0].ID, askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowSession}}); err != nil {
+		t.Fatalf("submit allow-session approval: %v", err)
+	}
+
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatalf("approve: %v", result.err)
+		}
+		if result.approval.Decision != patchtool.OutsideWorkspaceDecisionAllowSession {
+			t.Fatalf("unexpected first approval decision: %+v", result.approval)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for allow-session approval")
+	}
+
+	secondDone := make(chan out, 1)
+	go func() {
+		approval, err := approver.Approve(context.Background(), req)
+		secondDone <- out{approval: approval, err: err}
+	}()
+
+	select {
+	case result := <-secondDone:
+		if result.err != nil {
+			t.Fatalf("second approve: %v", result.err)
+		}
+		if result.approval.Decision != patchtool.OutsideWorkspaceDecisionAllowSession {
+			t.Fatalf("unexpected cached approval decision: %+v", result.approval)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected cached allow-session approval to return immediately")
+	}
+
+	if pending := broker.Pending(); len(pending) != 0 {
+		t.Fatalf("expected no second queued approval after allow-session cache, got %+v", pending)
+	}
+}
+
+func waitForPendingApprovals(t *testing.T, broker *askquestion.Broker, want int) []askquestion.Request {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		pending := broker.Pending()
+		if len(pending) == want {
+			return pending
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return broker.Pending()
 }
