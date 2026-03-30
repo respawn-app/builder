@@ -4580,6 +4580,14 @@ func TestReopenCarriesInterruptedShellToolAttemptIntoNextModelRequest(t *testing
 	})
 }
 
+func TestReopenCarriesInterruptedApprovalBackedPatchToolAttemptIntoNextModelRequest(t *testing.T) {
+	testReopenCarriesInterruptedToolAttemptIntoNextModelRequest(t, llm.ToolCall{
+		ID:    "call_patch",
+		Name:  string(tools.ToolPatch),
+		Input: json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: ../outside.txt\n+hello\n*** End Patch\n"}`),
+	})
+}
+
 func testReopenCarriesInterruptedToolAttemptIntoNextModelRequest(t *testing.T, call llm.ToolCall) {
 	t.Helper()
 
