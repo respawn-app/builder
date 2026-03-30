@@ -4835,6 +4835,31 @@ func TestBuiltInReviewSlashCommandStartsFreshSessionWhenCurrentSessionHasVisible
 	}
 }
 
+func TestBuiltInInitSlashCommandStartsFreshSessionWhenCurrentSessionHasVisibleUserPrompt(t *testing.T) {
+	r := commands.NewDefaultRegistry()
+	m := NewUIModel(
+		nil,
+		make(chan runtime.Event),
+		make(chan askEvent),
+		WithUICommandRegistry(r),
+		WithUIConversationFreshness(session.ConversationFreshnessEstablished),
+	).(*uiModel)
+	m.input = "/init starter repo"
+	expected := r.Execute("/init starter repo")
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected quit cmd for non-empty-session /init handoff")
+	}
+	if updated.Action() != UIActionNewSession {
+		t.Fatalf("expected UIActionNewSession, got %q", updated.Action())
+	}
+	if updated.nextSessionInitialPrompt != expected.User {
+		t.Fatalf("expected handoff payload to match /init command output\nwant: %q\n got: %q", expected.User, updated.nextSessionInitialPrompt)
+	}
+}
+
 func TestBusySlashNameExecutesImmediatelyWithoutQueueing(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 	m.busy = true
