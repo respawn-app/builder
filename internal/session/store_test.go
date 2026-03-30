@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewLazyDoesNotPersistUntilFirstWrite(t *testing.T) {
@@ -573,6 +574,60 @@ func TestSetParentSessionIDPersists(t *testing.T) {
 	}
 }
 
+func TestSetNamePersistsLazySessionBeforeAnyEvents(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewLazy(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("new lazy store: %v", err)
+	}
+
+	if err := store.SetName("Incident Triage"); err != nil {
+		t.Fatalf("set name: %v", err)
+	}
+
+	opened, err := Open(store.Dir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if opened.Meta().Name != "Incident Triage" {
+		t.Fatalf("expected persisted name, got %q", opened.Meta().Name)
+	}
+	events, err := opened.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("expected empty event log after lazy metadata persistence, got %+v", events)
+	}
+}
+
+func TestSetParentSessionIDPersistsLazySessionBeforeAnyEvents(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewLazy(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("new lazy store: %v", err)
+	}
+
+	if err := store.SetParentSessionID("parent-session-1"); err != nil {
+		t.Fatalf("set parent session id: %v", err)
+	}
+
+	opened, err := Open(store.Dir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if opened.Meta().ParentSessionID != "parent-session-1" {
+		t.Fatalf("expected parent session id persisted, got %q", opened.Meta().ParentSessionID)
+	}
+	events, err := opened.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("expected empty event log after lazy metadata persistence, got %+v", events)
+	}
+}
+
 func TestSetContinuationContextStaysLazyUntilFirstWrite(t *testing.T) {
 	root := t.TempDir()
 	store, err := NewLazy(root, "workspace-x", "/tmp/work")
@@ -699,6 +754,109 @@ func TestOpenByIDRejectsLegacyPersistenceRootLayout(t *testing.T) {
 
 	if _, err := OpenByID(root, store.Meta().SessionID); err == nil {
 		t.Fatal("expected legacy persistence root layout to be ignored")
+	}
+}
+
+func TestOpenByIDFindsLegacySessionDirectlyUnderSessionsRoot(t *testing.T) {
+	root := t.TempDir()
+	sessionDir := filepath.Join(root, sessionsDirName, "legacy-session")
+	writeSessionFixtureMeta(t, sessionDir, Meta{
+		SessionID:          "legacy-session",
+		WorkspaceRoot:      "/tmp/work-legacy",
+		WorkspaceContainer: "workspace-legacy",
+		CreatedAt:          time.Now().UTC(),
+		UpdatedAt:          time.Now().UTC(),
+	})
+
+	opened, err := OpenByID(root, "legacy-session")
+	if err != nil {
+		t.Fatalf("open by id: %v", err)
+	}
+	if opened.Meta().SessionID != "legacy-session" {
+		t.Fatalf("expected legacy session id, got %q", opened.Meta().SessionID)
+	}
+	if opened.Meta().WorkspaceRoot != "/tmp/work-legacy" {
+		t.Fatalf("expected legacy workspace root, got %q", opened.Meta().WorkspaceRoot)
+	}
+}
+
+func TestEventLogOnlySessionDirectoryRemainsUndiscoverable(t *testing.T) {
+	root := t.TempDir()
+	container := filepath.Join(root, sessionsDirName, "workspace-x")
+	sessionDir := filepath.Join(container, "ghost-session")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	writeSessionFixtureEvents(t, sessionDir, []Event{{
+		Seq:       1,
+		Timestamp: time.Now().UTC(),
+		Kind:      "message",
+		StepID:    "legacy-step",
+		Payload:   mustFixtureJSON(t, map[string]any{"role": "user", "content": "hello"}),
+	}})
+
+	items, err := ListSessions(container)
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected event-log-only session to stay invisible in picker, got %+v", items)
+	}
+	if _, err := Open(sessionDir); err == nil || !strings.Contains(err.Error(), "read session meta") {
+		t.Fatalf("expected direct open to fail on missing session meta, got %v", err)
+	}
+	if _, err := OpenByID(root, "ghost-session"); err == nil {
+		t.Fatal("expected event-log-only session to remain undiscoverable via OpenByID")
+	}
+}
+
+func TestListSessionsSkipsMalformedSessionMetadata(t *testing.T) {
+	root := t.TempDir()
+	sessionDir := filepath.Join(root, "bad-session")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, sessionFile), []byte("{"), 0o644); err != nil {
+		t.Fatalf("write malformed session file: %v", err)
+	}
+
+	items, err := ListSessions(root)
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected malformed metadata to be skipped, got %+v", items)
+	}
+}
+
+func TestOpenInitializesMissingEventsFileFromSessionMetadata(t *testing.T) {
+	root := t.TempDir()
+	sessionDir := filepath.Join(root, "session-without-events")
+	writeSessionFixtureMeta(t, sessionDir, Meta{
+		SessionID:          "session-without-events",
+		WorkspaceRoot:      "/tmp/work",
+		WorkspaceContainer: "workspace-x",
+		CreatedAt:          time.Now().UTC(),
+		UpdatedAt:          time.Now().UTC(),
+		LastSequence:       3,
+	})
+
+	opened, err := Open(sessionDir)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sessionDir, eventsFile)); err != nil {
+		t.Fatalf("expected missing events file to be recreated: %v", err)
+	}
+	if opened.Meta().LastSequence != 0 {
+		t.Fatalf("expected reopened last sequence to reconcile to zero, got %d", opened.Meta().LastSequence)
+	}
+	events, err := opened.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("expected recreated events file to be empty, got %+v", events)
 	}
 }
 
@@ -864,4 +1022,41 @@ func TestPeriodicCompactionRewritesCanonicalEventsLog(t *testing.T) {
 	if strings.Contains(string(raw), "\n\n") {
 		t.Fatalf("expected compaction to remove blank lines from events log")
 	}
+}
+
+func writeSessionFixtureMeta(t *testing.T, sessionDir string, meta Meta) {
+	t.Helper()
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal session meta: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, sessionFile), data, 0o644); err != nil {
+		t.Fatalf("write session meta: %v", err)
+	}
+}
+
+func writeSessionFixtureEvents(t *testing.T, sessionDir string, events []Event) {
+	t.Helper()
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	lines, err := encodeEventLines(events, false)
+	if err != nil {
+		t.Fatalf("encode events: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, eventsFile), lines, 0o644); err != nil {
+		t.Fatalf("write events: %v", err)
+	}
+}
+
+func mustFixtureJSON(t *testing.T, payload any) json.RawMessage {
+	t.Helper()
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal fixture payload: %v", err)
+	}
+	return data
 }

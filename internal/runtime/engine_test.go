@@ -16,6 +16,8 @@ import (
 	"builder/internal/session"
 	"builder/internal/tools"
 	shelltool "builder/internal/tools/shell"
+	"builder/internal/transcript"
+	"builder/internal/transcript/toolcodec"
 	"builder/prompts"
 )
 
@@ -2994,6 +2996,132 @@ func TestRestoreMessagesKeepsStoredReviewerEntriesVerbatim(t *testing.T) {
 	}
 }
 
+func TestRestoreMessagesKeepsStoredToolCallPresentationPayload(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	presentation := toolcodec.EncodeToolCallMeta(transcript.ToolCallMeta{
+		ToolName:       string(tools.ToolShell),
+		Presentation:   transcript.ToolPresentationShell,
+		RenderBehavior: transcript.ToolCallRenderBehaviorShell,
+		IsShell:        true,
+		Command:        "pwd",
+		TimeoutLabel:   "timeout: 5m",
+	})
+	if _, err := store.AppendEvent("legacy-step", "message", llm.Message{
+		Role:    llm.RoleAssistant,
+		Content: "working",
+		ToolCalls: []llm.ToolCall{{
+			ID:           "call_1",
+			Name:         string(tools.ToolShell),
+			Input:        json.RawMessage(`{"command":"pwd"}`),
+			Presentation: presentation,
+		}},
+	}); err != nil {
+		t.Fatalf("append assistant tool call message: %v", err)
+	}
+
+	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	snapshot := restored.ChatSnapshot()
+	if len(snapshot.Entries) != 2 {
+		t.Fatalf("expected assistant and tool call entries, got %+v", snapshot.Entries)
+	}
+	toolEntry := snapshot.Entries[1]
+	if toolEntry.Role != "tool_call" {
+		t.Fatalf("expected tool_call entry, got %+v", toolEntry)
+	}
+	if toolEntry.ToolCall == nil || !toolEntry.ToolCall.IsShell {
+		t.Fatalf("expected restored shell tool metadata, got %+v", toolEntry.ToolCall)
+	}
+	if toolEntry.ToolCall.Command != "pwd" {
+		t.Fatalf("expected restored shell command, got %+v", toolEntry.ToolCall)
+	}
+	if toolEntry.ToolCall.TimeoutLabel != "timeout: 5m" {
+		t.Fatalf("expected restored timeout label, got %+v", toolEntry.ToolCall)
+	}
+}
+
+func TestRestoreMessagesReplaysLegacyReviewerRollbackHistoryReplacement(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	presentation := toolcodec.EncodeToolCallMeta(transcript.ToolCallMeta{
+		ToolName:       string(tools.ToolShell),
+		Presentation:   transcript.ToolPresentationShell,
+		RenderBehavior: transcript.ToolCallRenderBehaviorShell,
+		IsShell:        true,
+		Command:        "pwd",
+	})
+	legacyItems := []llm.ResponseItem{
+		{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "before"},
+		{
+			Type:             llm.ResponseItemTypeFunctionCall,
+			CallID:           "call_1",
+			Name:             string(tools.ToolShell),
+			ToolPresentation: presentation,
+			Arguments:        json.RawMessage(`{"command":"pwd"}`),
+		},
+	}
+	if _, err := store.AppendEvent("legacy-step", "history_replaced", historyReplacementPayload{
+		Engine: "reviewer_rollback",
+		Mode:   "manual",
+		Items:  legacyItems,
+	}); err != nil {
+		t.Fatalf("append history replacement: %v", err)
+	}
+
+	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	items := restored.snapshotItems()
+	if len(items) != len(legacyItems) {
+		t.Fatalf("expected %d restored items, got %+v", len(legacyItems), items)
+	}
+	if items[0].Role != llm.RoleUser || items[0].Content != "before" {
+		t.Fatalf("unexpected restored first item: %+v", items[0])
+	}
+	if items[1].Type != llm.ResponseItemTypeFunctionCall || items[1].CallID != "call_1" {
+		t.Fatalf("unexpected restored function call item: %+v", items[1])
+	}
+	if string(items[1].ToolPresentation) != string(presentation) {
+		t.Fatalf("expected stored tool presentation preserved, got %+v", items[1])
+	}
+	snapshot := restored.ChatSnapshot()
+	if len(snapshot.Entries) != 2 {
+		t.Fatalf("expected restored user and tool call entries, got %+v", snapshot.Entries)
+	}
+	if snapshot.Entries[1].Role != "tool_call" || snapshot.Entries[1].ToolCall == nil || snapshot.Entries[1].ToolCall.Command != "pwd" {
+		t.Fatalf("expected restored tool call transcript entry, got %+v", snapshot.Entries[1])
+	}
+}
+
+func TestRestoreMessagesFailsOnMalformedHistoryReplacementPayload(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendReplayEvents([]session.ReplayEvent{{
+		StepID:  "legacy-step",
+		Kind:    "history_replaced",
+		Payload: json.RawMessage(`{"engine":"reviewer_rollback","items":"not-an-array"}`),
+	}}); err != nil {
+		t.Fatalf("append malformed replay event: %v", err)
+	}
+
+	if _, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"}); err == nil || !strings.Contains(err.Error(), "decode history_replaced event") {
+		t.Fatalf("expected malformed history replacement decode error, got %v", err)
+	}
+}
+
 func TestReviewerDefaultOutputOmitsReviewerSuggestionsEntry(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -4375,6 +4503,47 @@ func TestSubmitUserMessageSurfacesInFlightClearFailure(t *testing.T) {
 	}
 	if !reopened.Meta().InFlightStep {
 		t.Fatalf("expected persisted in-flight flag to remain true after clear failure")
+	}
+}
+
+func TestNewNormalizesPersistedInFlightStepOnReopen(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("legacy-step", "message", llm.Message{Role: llm.RoleUser, Content: "hello"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if err := store.MarkInFlight(true); err != nil {
+		t.Fatalf("mark in-flight true: %v", err)
+	}
+
+	reopenedStore, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("re-open store: %v", err)
+	}
+	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	if reopenedStore.Meta().InFlightStep {
+		t.Fatal("expected reopen path to clear persisted in-flight flag")
+	}
+	messages := restored.snapshotMessages()
+	if len(messages) != 2 {
+		t.Fatalf("expected original user message plus interruption marker, got %+v", messages)
+	}
+	last := messages[len(messages)-1]
+	if last.Role != llm.RoleDeveloper || last.MessageType != llm.MessageTypeInterruption || last.Content != interruptMessage {
+		t.Fatalf("expected interruption developer message, got %+v", last)
+	}
+	events, err := reopenedStore.ReadEvents()
+	if err != nil {
+		t.Fatalf("read reopened events: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected persisted interruption event appended on reopen, got %+v", events)
 	}
 }
 
