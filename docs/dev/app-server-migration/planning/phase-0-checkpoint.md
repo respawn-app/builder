@@ -4,6 +4,8 @@ Status: actionable pre-refactor checkpoint
 
 This document turns Phase 0 from `plan.md` into a concrete checklist and work packet.
 
+For parallel execution, pair this with `phase-0-workstreams.md`.
+
 Phase 0 exists to freeze current behavior, define the proof surface, and remove the biggest unknowns before the server extraction begins.
 
 No transport work should start before this checkpoint is complete.
@@ -17,7 +19,7 @@ No transport work should start before this checkpoint is complete.
 
 ## Required Outputs
 
-- completed compatibility inventory in `behavior-preservation.md`
+- completed compatibility inventory in `../spec/behavior-preservation.md`
 - package and use-case cut analysis in `boundary-map.md`
 - persistence and data-adoption audit with explicit risks
 - characterization test list for behavior-heavy workflows
@@ -29,7 +31,7 @@ No transport work should start before this checkpoint is complete.
 ## 1. Compatibility Freeze
 
 - [ ] Verify the built-in slash-command inventory against the actual registry and any related frontend-only behaviors.
-- [ ] Cross-check `behavior-preservation.md` against current tests and add any missing workflow.
+- [ ] Cross-check `../spec/behavior-preservation.md` against current tests and add any missing workflow.
 - [ ] Capture explicit unknown-slash fallback behavior as a required compatibility case.
 - [ ] Confirm the current busy-safe vs busy-blocked command distinctions from the command registry and UI behavior.
 - [ ] Identify any non-slash workflow that is critical but not yet represented in the preservation matrix.
@@ -93,8 +95,8 @@ Inputs:
 
 - `internal/app/commands/commands.go`
 - `internal/app/ui_*`
-- `docs/dev/app-server-migration/behavior-preservation.md`
-- `docs/dev/app-server-migration/command-ownership.md`
+- `docs/dev/app-server-migration/spec/behavior-preservation.md`
+- `docs/dev/app-server-migration/spec/command-ownership.md`
 
 Output:
 

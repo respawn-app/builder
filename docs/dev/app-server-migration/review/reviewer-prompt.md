@@ -64,13 +64,16 @@ The server should own runtime state and execution. Frontends should be replaceab
 
 Start with these files:
 
-- `docs/dev/app-server-migration/requirements.md`
-- `docs/dev/app-server-migration/locked-decisions.md`
-- `docs/dev/app-server-migration/session-run-model.md`
-- `docs/dev/app-server-migration/behavior-preservation.md`
-- `docs/dev/app-server-migration/open-questions.md`
-- `docs/dev/app-server-migration/command-ownership.md`
-- `docs/dev/app-server-migration/plan.md`
+- `docs/dev/app-server-migration/spec/requirements.md`
+- `docs/dev/app-server-migration/spec/locked-decisions.md`
+- `docs/dev/app-server-migration/spec/session-run-model.md`
+- `docs/dev/app-server-migration/spec/behavior-preservation.md`
+- `docs/dev/app-server-migration/spec/open-questions.md`
+- `docs/dev/app-server-migration/spec/command-ownership.md`
+- `docs/dev/app-server-migration/planning/plan.md`
+- `docs/dev/app-server-migration/planning/phase-0-checkpoint.md`
+- `docs/dev/app-server-migration/planning/boundary-map.md`
+- `docs/dev/app-server-migration/analysis/persistence-audit.md`
 
 Then cross-check against:
 
