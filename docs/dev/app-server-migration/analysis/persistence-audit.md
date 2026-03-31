@@ -10,12 +10,12 @@ It is intentionally conservative. The goal is to identify durable truth, current
 
 Primary implementation:
 
-- `internal/session/store.go`
-- `internal/session/types.go`
-- `internal/session/event_log.go`
-- `internal/config/config_workspace_index.go`
-- `internal/app/launch_planner.go`
-- `internal/runtime/message_lifecycle.go`
+- `server/session/store.go`
+- `server/session/types.go`
+- `server/session/event_log.go`
+- `shared/config/config_workspace_index.go`
+- `cli/app/launch_planner.go`
+- `server/runtime/message_lifecycle.go`
 
 Current layout is rooted under the configured persistence root:
 
@@ -66,7 +66,7 @@ Migration consequence:
 
 ### `session.json`
 
-`internal/session/types.go` defines durable session metadata. Current fields are:
+`server/session/types.go` defines durable session metadata. Current fields are:
 
 - `session_id`
 - `name`
@@ -92,7 +92,7 @@ This file is not optional in practice today:
 
 ### `events.jsonl`
 
-`events.jsonl` is append-oriented durable conversation history. `internal/session/event_log.go` currently treats it as authoritative enough to:
+`events.jsonl` is append-oriented durable conversation history. `server/session/event_log.go` currently treats it as authoritative enough to:
 
 - rebuild `last_sequence` on open if `session.json` drifted
 - rebuild conversation freshness on open
@@ -117,7 +117,7 @@ Current durable event kinds that materially affect restore/adoption are:
 
 ### `steps.log`
 
-`internal/app/runlog.go` writes `steps.log` as append-only operational diagnostics.
+`cli/app/runlog.go` writes `steps.log` as append-only operational diagnostics.
 
 It is not restore-critical today:
 
@@ -143,7 +143,7 @@ Migration consequence: server-owned process/approval/run state cannot rely on `s
 
 - picker summaries from `session.ListSessions`
 - conversation freshness from visible user `message` events
-- chat snapshot / transcript ordering rebuilt by `internal/runtime/message_lifecycle.go`
+- chat snapshot / transcript ordering rebuilt by `server/runtime/message_lifecycle.go`
 - tool-call render hints rebuilt from persisted `llm.Message.ToolCalls[].Presentation`
 - compaction count rebuilt by replaying `history_replaced`
 - current UI ongoing text/state outside persisted `local_entry.ongoing_text`
@@ -216,8 +216,8 @@ This is the concrete state that existing restore paths actually consume.
 
 This matters because transcript-related metadata is already embedded in durable message payloads:
 
-- `internal/runtime/tool_presentation.go` injects `ToolCall.Presentation` before persistence when missing
-- `internal/transcript/toolcodec` round-trips `transcript.ToolCallMeta`
+- `server/runtime/tool_presentation.go` injects `ToolCall.Presentation` before persistence when missing
+- `shared/transcript/toolcodec` round-trips `transcript.ToolCallMeta`
 - old sessions therefore already carry transcript rendering hints inside persisted `message` payloads
 
 `tool_completed` restore depends on:
@@ -280,7 +280,7 @@ That means old layouts are not uniformly supported. The exact accepted legacy sh
 
 ### Lazy Store Adoption
 
-`internal/app/launch_planner.go` and `internal/session/store.go` already depend on lazy-store behavior:
+`cli/app/launch_planner.go` and `server/session/store.go` already depend on lazy-store behavior:
 
 - interactive new sessions are created with `session.NewLazy`
 - a brand-new interactive session can disappear entirely if the user never triggers a write
@@ -301,7 +301,7 @@ This means opening a legacy session can mutate its files even before any new use
 
 ### Prompt-History Mixed Semantics
 
-`internal/session/prompt_history.go` already encodes a mixed adoption rule:
+`server/session/prompt_history.go` already encodes a mixed adoption rule:
 
 - before the first explicit `prompt_history` event, visible user `message` events backfill prompt history
 - after the first explicit `prompt_history` event, later user `message` events are not auto-adopted into prompt history
@@ -391,7 +391,7 @@ Migration consequence:
 
 Current behavior:
 
-- `internal/transcript` does not own files on disk
+- `shared/transcript` does not own files on disk
 - but `transcript.ToolCallMeta` is serialized into `llm.ToolCall.Presentation` and persisted inside `message` events
 
 Migration consequence:
@@ -496,13 +496,13 @@ For new capabilities, prefer additive event kinds or adjacent records over rewri
 
 ## Inspection Targets For Follow-Up
 
-- `internal/session/fork.go`
-- `internal/session/prompt_history.go`
-- `internal/session/conversation_freshness.go`
-- `internal/app/launch_planner.go`
-- `internal/app/session_lifecycle.go`
-- `internal/config/config_workspace_index.go`
-- `internal/runtime/message_lifecycle.go`
-- `internal/runtime/tool_presentation.go`
+- `server/session/fork.go`
+- `server/session/prompt_history.go`
+- `server/session/conversation_freshness.go`
+- `cli/app/launch_planner.go`
+- `cli/app/session_lifecycle.go`
+- `shared/config/config_workspace_index.go`
+- `server/runtime/message_lifecycle.go`
+- `server/runtime/tool_presentation.go`
 
 This is the minimum persistence/adoption grounding needed before Phase 1 extraction begins.

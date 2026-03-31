@@ -9,25 +9,25 @@ The scope is intentionally narrow and quality-oriented.
 
 ## Repository Layout
 
-- `cmd/builder/main.go`
+- `cli/builder/main.go`
   - CLI entrypoint for launching the Bubble Tea app.
 - `VERSION`
   - Source of truth for release version/tag used by the release workflow and versioned builds.
-- `internal/app`
+- `cli/app`
   - Startup orchestration, auth gating, session selection, and top-level UI composition.
-- `internal/runtime`
+- `server/runtime`
   - Agent step loop, retries, transcript assembly, tool orchestration, lock handling, interrupts.
-- `internal/session`
+- `server/session`
   - Session persistence (`session.json`, `events.jsonl`) and resume/list primitives.
-- `internal/tools`
+- `server/tools`
   - Tool contracts and concrete tools (`shell`, `patch`, `ask_question`).
-- `internal/llm`
+- `server/llm`
   - Model-facing contracts and OpenAI transport/client adapters.
-- `internal/auth`
+- `server/auth`
   - Global auth state, method switching policy, startup gate, OAuth refresh plumbing.
-- `internal/tui`
+- `cli/tui`
   - Mode-specific UI behavior (`ongoing`/`detail`) and rendering helpers.
-- `internal/config`
+- `shared/config`
   - Persistence root/workspace container resolution and app-level paths.
 - `internal/actions`
   - Typed action registry scaffold for `ask_question` post-answer hooks.
@@ -35,7 +35,7 @@ The scope is intentionally narrow and quality-oriented.
   - Public Astro/Starlight documentation site. Internal product/engineering docs stay under `docs/dev`, and scratch/internal working notes stay under `docs/tmp`. Keep docs up-to-date on your own and proactively.
 - `prompts`
   - Embedded prompt source files.
-- `internal/tools/definitions.go`
+- `server/tools/definitions.go`
   - Centralized compile-time tool interface declarations (name, descriptions, JSON schemas).
 - `~/.builder/config.toml`
   - Home settings file (auto-created on first run) for model, thinking level, tool toggles, timeouts, and theme.

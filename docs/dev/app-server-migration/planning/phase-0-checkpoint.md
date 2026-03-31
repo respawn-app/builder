@@ -38,7 +38,7 @@ No transport work should start before this checkpoint is complete.
 
 ## 2. Persistence And Data Adoption Audit
 
-- [x] Document the current on-disk layout and durable files used by `internal/session`.
+- [x] Document the current on-disk layout and durable files used by `server/session`.
 - [x] Separate durable source-of-truth data from derived or cache-like data.
 - [x] Identify which new metadata is minimally required for project registry, run identity, approval state, and process state.
 - [x] Record explicit adoption risks for old `session.json` / `events.jsonl` data.
@@ -71,7 +71,7 @@ Fixture/adoption checklist tightened in `../analysis/persistence-audit.md`:
 - [x] Identify current composition roots and lifecycle entrypoints.
 - [x] Identify frontend-only packages and files.
 - [x] Identify server-only packages and files.
-- [x] Identify the highest-risk re-coupling hotspots inside `internal/app`.
+- [x] Identify the highest-risk re-coupling hotspots inside `cli/app`.
 - [x] Define the first transport-neutral application service surface in terms of use cases, not transport methods.
 
 ## 4. Characterization Coverage Plan
@@ -85,16 +85,16 @@ Current characterization coverage map:
 
 | Workflow | Current coverage already in repo | Missing coverage to add before behavior-heavy refactors |
 | --- | --- | --- |
-| Headless launch, create, resume, and continuation-context resolution | `internal/app/launch_planner_test.go`: `TestSessionLaunchPlannerHeadlessCreatesNewSessionAndAppliesContinuationContext`, `TestSessionLaunchPlannerSelectedSessionIDBypassesPicker`; `internal/app/run_prompt_test.go`: `TestRunPromptCreatesSessionAndPersistsDurableTranscript`, `TestHeadlessRunPromptClientResumesExistingSessionByID`, `TestHeadlessRunPromptClientRestoresContinuationContextFromSelectedSession` | The first Phase 1 loopback client/service seam is now landed for `builder run`; keep this coverage green while the remaining server composition moves out of `internal/app`. |
-| Unknown slash fallback and built-in command resolution | `internal/app/commands/commands_test.go`: `TestExecuteBuiltins`, `TestExecuteUnknown`, `TestMatchReturnsBestSubstringFirst`; `internal/app/ui_slash_command_picker_test.go`: whitespace-after-slash normalization cases; `internal/app/ui_test.go`: direct unknown-slash submission and queued unknown-slash post-turn drain characterization | Keep this coverage green. Extend it only if a new slash-resolution path appears that bypasses the current prompt-submission fallback contract. |
-| File-backed prompt discovery and expansion | `internal/app/commands/file_prompts_test.go`: precedence, normalization collision, filtering, empty-file skipping, `$ARGUMENTS` replacement, append behavior, top-level-only discovery | No Phase 0 blocker beyond keeping this suite green. These tests already freeze the frontend-local contract well enough for the first extraction. |
-| Busy-state command behavior and queue drain | `internal/app/ui_slash_command_picker_test.go`: busy `/fast` and `/back` cases; `internal/app/ui_compaction_resume_test.go`: queued steering resume; `internal/runtime/engine_queue_submission_test.go` and `internal/runtime/exclusive_step_test.go`: busy-run and interrupt lifecycle; `internal/app/ui_busy_commands_test.go`: registry contract, representative busy `Enter` behavior, representative busy queue-submit behavior, and queued `/compact` drain into compaction | Keep the new suite green and extend it only when newly discovered busy-path behavior is not already characterized. |
-| Status overlay lifecycle and progressive loading | `internal/app/ui_status_test.go`: `TestStatusCommandOpensDetailOverlayInNativeMode`, `TestStatusCommandProgressivelyLoadsSections`, `TestStatusCommandPersistsPromptHistoryWithoutBlockingOpen` | No additional monolith characterization required before Phase 1. Future work belongs in the client-boundary acceptance suite, not more Bubble Tea-only tests. |
-| Background process continuity and `/ps` overlay behavior | `internal/app/session_lifecycle_test.go`: `TestNewSessionTransitionKeepsBackgroundProcessesAlive`; `internal/app/runtime_factory_test.go`: background-event routing and owner-session behavior; `internal/app/ui_native_scrollback_integration_test.go`: `/ps` overlay open/close behavior in native mode; `internal/app/ui_test.go`: queued `/ps inline` drain, direct `/ps kill|inline|logs <id>` command-path behavior, log-opening fallback, and selection-retention behavior | Keep the command-path and overlay-path cases green. Extend this area only when a process action still depends on inferred behavior instead of explicit coverage. |
-| Review, back-navigation, new-session, and logout lifecycle | `internal/app/session_lifecycle_test.go`: new session, fork rollback, back teleport, startup replay; `internal/app/auth_gate_test.go`: logout re-auth and same-session continuity; `internal/app/ui_test.go`: `/review` and `/init` fresh-session handoff characterization | Keep the `/review` and `/init` handoff cases symmetric. Extend this area only when a session-transition workflow is still inferred rather than explicitly characterized. |
-| Existing-session adoption and persistence repair | `internal/session/store_test.go`: prompt history variants, input draft persistence, session naming, continuation persistence, `OpenByID`, truncated-tail repair, `last_sequence` reconciliation, canonical compaction rewrite, missing-file partial-session fixtures, malformed session metadata skip behavior, accepted `sessions/<sessionID>` lookup, and lazy-session metadata persistence transitions; `internal/runtime/engine_test.go`: stored tool-presentation restore, `history_replaced` compatibility, malformed restore payload failure, and both `in_flight_step` reopen outcomes | Keep this fixture batch green and extend it only when a newly discovered persistence edge is not already explicitly covered. |
-| Ask/approval lifecycle | `internal/app/ask_bridge_test.go` for the current synchronous bridge; `internal/app/run_prompt_test.go`: headless ask prohibition; `internal/tools/askquestion/tool_test.go`: queued ask blocking, pending visibility, single completion, and duplicate-resolution rejection; `internal/app/patch_outside_workspace_approver_test.go`: queued approval blocking, deny path, and `allow_session` caching without the TUI; `internal/runtime/engine_test.go`: interrupted `ask_question` and shell tool-call attempts carried through reopen into the next model request | Current Phase 0 proof now covers both live-process non-UI ask/approval lifecycle and restart recovery of interrupted tool-call attempts. Current behavior is not “persist pending broker queue objects”; it is “persist the interrupted tool-call attempt in conversation state, reopen with interruption normalization, and let the next model turn decide anew.” Preserve that behavior in the migration. |
-| Disconnect/reconnect and lossy event behavior | `internal/app/runtime_event_bridge_test.go`: lossy bridge characterization; `internal/app/runtime_factory_test.go`: reconnect-sensitive background routing | Add boundary-level acceptance scenarios for disconnect/reconnect, explicit gap handling, and duplicate retry semantics once the client boundary exists. The monolith does not currently prove these through a frontend-neutral seam. |
+| Headless launch, create, resume, and continuation-context resolution | `cli/app/launch_planner_test.go`: `TestSessionLaunchPlannerHeadlessCreatesNewSessionAndAppliesContinuationContext`, `TestSessionLaunchPlannerSelectedSessionIDBypassesPicker`; `cli/app/run_prompt_test.go`: `TestRunPromptCreatesSessionAndPersistsDurableTranscript`, `TestHeadlessRunPromptClientResumesExistingSessionByID`, `TestHeadlessRunPromptClientRestoresContinuationContextFromSelectedSession` | The first Phase 1 loopback client/service seam is now landed for `builder run`; keep this coverage green while the remaining server composition moves out of `cli/app`. |
+| Unknown slash fallback and built-in command resolution | `cli/app/commands/commands_test.go`: `TestExecuteBuiltins`, `TestExecuteUnknown`, `TestMatchReturnsBestSubstringFirst`; `cli/app/ui_slash_command_picker_test.go`: whitespace-after-slash normalization cases; `cli/app/ui_test.go`: direct unknown-slash submission and queued unknown-slash post-turn drain characterization | Keep this coverage green. Extend it only if a new slash-resolution path appears that bypasses the current prompt-submission fallback contract. |
+| File-backed prompt discovery and expansion | `cli/app/commands/file_prompts_test.go`: precedence, normalization collision, filtering, empty-file skipping, `$ARGUMENTS` replacement, append behavior, top-level-only discovery | No Phase 0 blocker beyond keeping this suite green. These tests already freeze the frontend-local contract well enough for the first extraction. |
+| Busy-state command behavior and queue drain | `cli/app/ui_slash_command_picker_test.go`: busy `/fast` and `/back` cases; `cli/app/ui_compaction_resume_test.go`: queued steering resume; `server/runtime/engine_queue_submission_test.go` and `server/runtime/exclusive_step_test.go`: busy-run and interrupt lifecycle; `cli/app/ui_busy_commands_test.go`: registry contract, representative busy `Enter` behavior, representative busy queue-submit behavior, and queued `/compact` drain into compaction | Keep the new suite green and extend it only when newly discovered busy-path behavior is not already characterized. |
+| Status overlay lifecycle and progressive loading | `cli/app/ui_status_test.go`: `TestStatusCommandOpensDetailOverlayInNativeMode`, `TestStatusCommandProgressivelyLoadsSections`, `TestStatusCommandPersistsPromptHistoryWithoutBlockingOpen` | No additional monolith characterization required before Phase 1. Future work belongs in the client-boundary acceptance suite, not more Bubble Tea-only tests. |
+| Background process continuity and `/ps` overlay behavior | `cli/app/session_lifecycle_test.go`: `TestNewSessionTransitionKeepsBackgroundProcessesAlive`; `cli/app/runtime_factory_test.go`: background-event routing and owner-session behavior; `cli/app/ui_native_scrollback_integration_test.go`: `/ps` overlay open/close behavior in native mode; `cli/app/ui_test.go`: queued `/ps inline` drain, direct `/ps kill|inline|logs <id>` command-path behavior, log-opening fallback, and selection-retention behavior | Keep the command-path and overlay-path cases green. Extend this area only when a process action still depends on inferred behavior instead of explicit coverage. |
+| Review, back-navigation, new-session, and logout lifecycle | `cli/app/session_lifecycle_test.go`: new session, fork rollback, back teleport, startup replay; `cli/app/auth_gate_test.go`: logout re-auth and same-session continuity; `cli/app/ui_test.go`: `/review` and `/init` fresh-session handoff characterization | Keep the `/review` and `/init` handoff cases symmetric. Extend this area only when a session-transition workflow is still inferred rather than explicitly characterized. |
+| Existing-session adoption and persistence repair | `server/session/store_test.go`: prompt history variants, input draft persistence, session naming, continuation persistence, `OpenByID`, truncated-tail repair, `last_sequence` reconciliation, canonical compaction rewrite, missing-file partial-session fixtures, malformed session metadata skip behavior, accepted `sessions/<sessionID>` lookup, and lazy-session metadata persistence transitions; `server/runtime/engine_test.go`: stored tool-presentation restore, `history_replaced` compatibility, malformed restore payload failure, and both `in_flight_step` reopen outcomes | Keep this fixture batch green and extend it only when a newly discovered persistence edge is not already explicitly covered. |
+| Ask/approval lifecycle | `cli/app/ask_bridge_test.go` for the current synchronous bridge; `cli/app/run_prompt_test.go`: headless ask prohibition; `server/tools/askquestion/tool_test.go`: queued ask blocking, pending visibility, single completion, and duplicate-resolution rejection; `cli/app/patch_outside_workspace_approver_test.go`: queued approval blocking, deny path, and `allow_session` caching without the TUI; `server/runtime/engine_test.go`: interrupted `ask_question` and shell tool-call attempts carried through reopen into the next model request | Current Phase 0 proof now covers both live-process non-UI ask/approval lifecycle and restart recovery of interrupted tool-call attempts. Current behavior is not “persist pending broker queue objects”; it is “persist the interrupted tool-call attempt in conversation state, reopen with interruption normalization, and let the next model turn decide anew.” Preserve that behavior in the migration. |
+| Disconnect/reconnect and lossy event behavior | `cli/app/runtime_event_bridge_test.go`: lossy bridge characterization; `cli/app/runtime_factory_test.go`: reconnect-sensitive background routing | Add boundary-level acceptance scenarios for disconnect/reconnect, explicit gap handling, and duplicate retry semantics once the client boundary exists. The monolith does not currently prove these through a frontend-neutral seam. |
 
 Next unresolved Phase 0 execution target:
 
@@ -117,49 +117,49 @@ Boundary-enforcement decision:
 - Enforce the frontend/server import cut with a repo-local architecture test, not with prompt discipline and not with a heavyweight linter migration.
 - The enforcement should use Go package metadata or parsed imports, not grep heuristics, so failures point to real package/file import violations.
 - The test should run in normal `./scripts/test.sh` CI and fail the build as soon as a protected frontend package or file imports a banned server package.
-- Start narrow and ratchet: enforce the first seam immediately, then expand the protected set as more frontend code is extracted out of the mixed `internal/app` package.
+- Start narrow and ratchet: enforce the first seam immediately, then expand the protected set as more frontend code is extracted out of the mixed `cli/app` package.
 
 Initial enforcement shape to carry into Phase 1:
 
 1. Add one architecture test package, for example `internal/architecture`, that asserts protected frontend code does not import banned server internals.
 2. Source package/file metadata from the Go toolchain (`go list` or equivalent package inspection), so the rule follows real import edges.
 3. Keep the deny list focused on server-authority packages for the first cut:
-   - `builder/internal/runtime`
-   - `builder/internal/session`
-   - `builder/internal/auth`
-   - `builder/internal/tools` except presentation-only leaves that are explicitly allowlisted for rendering, such as `builder/internal/tools/patch/format`
-4. Do not block `internal/llm` in the first enforcement pass. Today some frontend rendering still depends on model-facing types, and that is a later DTO cleanup rather than the first server-authority cut.
+   - `builder/server/runtime`
+   - `builder/server/session`
+   - `builder/server/auth`
+   - `builder/server/tools` except presentation-only leaves that are explicitly allowlisted for rendering, such as `builder/server/tools/patch/format`
+4. Do not block `server/llm` in the first enforcement pass. Today some frontend rendering still depends on model-facing types, and that is a later DTO cleanup rather than the first server-authority cut.
 
 First protected package/file set:
 
-- `cmd/builder`
+- `cli/builder`
   - already thin and should remain a pure frontend shell
-  - must continue to route through `internal/app` or a future client package, never directly into runtime/session/auth/tools internals
-- extracted frontend packages that replace the current mixed `internal/app` UI files
+  - must continue to route through `cli/app` or a future client package, never directly into runtime/session/auth/tools internals
+- extracted frontend packages that replace the current mixed `cli/app` UI files
   - this is the first real boundary target once Phase 1 starts
   - candidate sources already identified in `boundary-map.md`: `session_lifecycle.go`, `ui*.go`, `session_picker.go`, `auth_picker.go`, `auth_success_screen.go`, and `onboarding_*.go`
-- `internal/tui`
+- `cli/tui`
   - once the first client DTOs exist, prevent it from importing runtime/session/auth or non-rendering tool packages directly
 
 Important constraint:
 
-- Do not try to enforce the whole current `internal/app` package at once. It is intentionally mixed today. The enforcement boundary must start with `cmd/builder` and with whichever new frontend package is created first during extraction, then grow as files move out of `internal/app`.
+- Do not try to enforce the whole current `cli/app` package at once. It is intentionally mixed today. The enforcement boundary must start with `cli/builder` and with whichever new frontend package is created first during extraction, then grow as files move out of `cli/app`.
 
 Phase 1 enforcement success condition:
 
-- after the first `builder run` seam lands, `cmd/builder` and the migrated frontend package must be clean of direct imports from `internal/runtime`, `internal/session`, `internal/auth`, and runtime-bearing `internal/tools` packages
+- after the first `builder run` seam lands, `cli/builder` and the migrated frontend package must be clean of direct imports from `server/runtime`, `server/session`, `server/auth`, and runtime-bearing `server/tools` packages
 - CI must fail if any new direct import crosses that boundary
 
 ## Current Grounding In This Repo
 
 The current codebase already points to the first extraction seam:
 
-- CLI entrypoint: `cmd/builder/main.go`
-- monolithic composition root: `internal/app/app.go`
-- session lifecycle orchestration: `internal/app/session_lifecycle.go`
-- runtime/tool/auth wiring knot: `internal/app/runtime_factory.go`
-- UI/runtime event coupling: `internal/app/ui_runtime_adapter.go`
-- current session persistence: `internal/session/store.go`
+- CLI entrypoint: `cli/builder/main.go`
+- monolithic composition root: `cli/app/app.go`
+- session lifecycle orchestration: `cli/app/session_lifecycle.go`
+- runtime/tool/auth wiring knot: `cli/app/runtime_factory.go`
+- UI/runtime event coupling: `cli/app/ui_runtime_adapter.go`
+- current session persistence: `server/session/store.go`
 
 These files must be treated as primary Phase 0 inspection targets.
 
@@ -178,8 +178,8 @@ Focus:
 
 Inputs:
 
-- `internal/app/commands/commands.go`
-- `internal/app/ui_*`
+- `cli/app/commands/commands.go`
+- `cli/app/ui_*`
 - `docs/dev/app-server-migration/spec/behavior-preservation.md`
 - `docs/dev/app-server-migration/spec/command-ownership.md`
 
@@ -191,8 +191,8 @@ Output:
 
 Focus:
 
-- `internal/session`
-- `internal/transcript`
+- `server/session`
+- `shared/transcript`
 - any persistence-relevant runtime metadata
 
 Output:
@@ -203,13 +203,13 @@ Output:
 
 Focus:
 
-- `cmd/builder/main.go`
-- `internal/app`
-- `internal/runtime`
-- `internal/session`
-- `internal/tools`
-- `internal/llm`
-- `internal/auth`
+- `cli/builder/main.go`
+- `cli/app`
+- `server/runtime`
+- `server/session`
+- `server/tools`
+- `server/llm`
+- `server/auth`
 
 Output:
 
@@ -229,25 +229,25 @@ Output:
 
 Current locked findings for Workstream D:
 
-- The current headless seam in `internal/app/run_prompt.go` was the first credible acceptance target because it already bypassed Bubble Tea and directly exercised the authoritative runtime path. The first Phase 1 slice is now landed: `internal/app/run_prompt.go` calls a loopback client/service boundary, but embedded launch/runtime composition still needs to move out of `internal/app`.
+- The current headless seam in `cli/app/run_prompt.go` was the first credible acceptance target because it already bypassed Bubble Tea and directly exercised the authoritative runtime path. The first Phase 1 slice is now landed: `cli/app/run_prompt.go` calls a loopback client/service boundary, but embedded launch/runtime composition still needs to move out of `cli/app`.
 - The future acceptance suite must run the exact same client contract against two targets: embedded in-process server and external daemon. Only server bootstrap changes across modes; test logic and assertions do not.
 - The minimum non-CLI client for the first wave does not need slash-command parsing or TUI rendering. It does need typed capabilities for: create/list/attach session, submit prompt, await terminal result, inspect transcript/session metadata, observe coarse run events, interrupt active work, answer asks/approvals, list/inspect/kill background processes, and disconnect/reconnect.
 - Ask/approval proof cannot rely on today's headless CLI path because `runPromptAskHandler(...)` intentionally hard-fails asks in background mode. Approval cases therefore need the future non-CLI client boundary, not `RunPrompt(...)` itself.
 - The first acceptance wave should stay biased toward headless-compatible behavior already grounded in the repo: create session, resume by session ID, transcript hydration from durable storage, background-process ownership/reattach, disconnect/reconnect continuity, slow-subscriber handling, and idempotent retry protection.
-- `internal/app/launch_planner_test.go`, `internal/app/runtime_event_bridge_test.go`, `internal/app/runtime_factory_test.go`, `internal/runtime/engine_test.go`, `internal/runtime/engine_queue_submission_test.go`, and `internal/session/store_test.go` are the best current seed coverage/helpers for the future harness.
-- The following current tests are too UI-coupled to serve as privilege-removal proof and should be treated as CLI characterization only: `internal/app/ui_test.go`, `internal/app/ui_native_scrollback_integration_test.go`, most of `internal/app/ui_*_test.go`, and the `NewUIModel(...)` / `tea.KeyMsg` driven lifecycle coverage in `internal/app/session_lifecycle_test.go`.
+- `cli/app/launch_planner_test.go`, `cli/app/runtime_event_bridge_test.go`, `cli/app/runtime_factory_test.go`, `server/runtime/engine_test.go`, `server/runtime/engine_queue_submission_test.go`, and `server/session/store_test.go` are the best current seed coverage/helpers for the future harness.
+- The following current tests are too UI-coupled to serve as privilege-removal proof and should be treated as CLI characterization only: `cli/app/ui_test.go`, `cli/app/ui_native_scrollback_integration_test.go`, most of `cli/app/ui_*_test.go`, and the `NewUIModel(...)` / `tea.KeyMsg` driven lifecycle coverage in `cli/app/session_lifecycle_test.go`.
 
 First acceptance matrix to carry into extraction planning:
 
 | Case | Why first | Required client abilities | Current grounding |
 | --- | --- | --- | --- |
-| Headless create + submit + durable transcript | Closest match to current `RunPrompt(...)` seam; proves CLI is not needed for the primary run path. | Create session, submit prompt, await completion, read transcript/session metadata. | `internal/app/run_prompt.go`, `internal/app/launch_planner_test.go`, `internal/session/store_test.go` |
-| Resume existing session by ID | Proves session continuity without picker/UI ownership. | List or open by session ID, attach, submit again, hydrate transcript. | `internal/app/launch_planner_test.go`, `internal/session/store.go` |
-| Second client attach during/after run | Proves attach/rehydrate is boundary-based rather than CLI-local state. | Attach existing session, read run state/events, reload transcript. | `internal/app/runtime_event_bridge_test.go`, `internal/runtime/events.go` |
-| Ask/approval pause and deterministic resume | Required because headless CLI cannot answer asks; this is where non-CLI capability becomes mandatory. | Observe pending ask, answer it, verify single resume outcome. | `internal/app/ask_bridge_test.go`, `internal/tools/askquestion`, runtime tests with deterministic fake clients |
-| Background process ownership, list, kill, and reconnect | Proves active work/process state is not privileged to the active CLI. | Start process, list/inspect process, reconnect, kill, observe final state. | `internal/app/runtime_factory_test.go` background-router coverage |
-| Disconnect/reconnect during active work | Direct proof that frontend disconnect does not kill work. | Disconnect client, reconnect another client, hydrate transcript/run state. | `internal/app/runtime_factory_test.go`, `internal/runtime/engine_queue_submission_test.go` |
-| Slow subscriber / event-gap handling | Current runtime event bridge is lossy under pressure, so the boundary must make loss explicit and recoverable via rehydrate. | Subscribe to events, intentionally lag, detect gap, reload transcript/read models. | `internal/app/runtime_event_bridge_test.go` |
+| Headless create + submit + durable transcript | Closest match to current `RunPrompt(...)` seam; proves CLI is not needed for the primary run path. | Create session, submit prompt, await completion, read transcript/session metadata. | `cli/app/run_prompt.go`, `cli/app/launch_planner_test.go`, `server/session/store_test.go` |
+| Resume existing session by ID | Proves session continuity without picker/UI ownership. | List or open by session ID, attach, submit again, hydrate transcript. | `cli/app/launch_planner_test.go`, `server/session/store.go` |
+| Second client attach during/after run | Proves attach/rehydrate is boundary-based rather than CLI-local state. | Attach existing session, read run state/events, reload transcript. | `cli/app/runtime_event_bridge_test.go`, `server/runtime/events.go` |
+| Ask/approval pause and deterministic resume | Required because headless CLI cannot answer asks; this is where non-CLI capability becomes mandatory. | Observe pending ask, answer it, verify single resume outcome. | `cli/app/ask_bridge_test.go`, `server/tools/askquestion`, runtime tests with deterministic fake clients |
+| Background process ownership, list, kill, and reconnect | Proves active work/process state is not privileged to the active CLI. | Start process, list/inspect process, reconnect, kill, observe final state. | `cli/app/runtime_factory_test.go` background-router coverage |
+| Disconnect/reconnect during active work | Direct proof that frontend disconnect does not kill work. | Disconnect client, reconnect another client, hydrate transcript/run state. | `cli/app/runtime_factory_test.go`, `server/runtime/engine_queue_submission_test.go` |
+| Slow subscriber / event-gap handling | Current runtime event bridge is lossy under pressure, so the boundary must make loss explicit and recoverable via rehydrate. | Subscribe to events, intentionally lag, detect gap, reload transcript/read models. | `cli/app/runtime_event_bridge_test.go` |
 | Duplicate retry without duplicate side effects | Needed to falsify client privilege and prove request idempotency. | Retry submit/approval after induced disconnect or timeout, assert one durable outcome. | current queue-submission/runtime tests plus future boundary request IDs |
 
 ## Exit Criteria
@@ -265,7 +265,7 @@ Phase 0 is complete only when all of the following are true:
 ## What This Checkpoint Does Not Do
 
 - it does not finalize transport payload schemas
-- it did not yet introduce `internal/protocol` at the time this checkpoint was written; `internal/client` and `internal/serverapi` now exist for the first Phase 1 headless slice, and the remaining work is extracting server-owned composition out of `internal/app`
+- it did not yet introduce `internal/protocol` at the time this checkpoint was written; `shared/client` and `shared/serverapi` now exist for the first Phase 1 headless slice, and the remaining work is extracting server-owned composition out of `cli/app`
 - it does not start the refactor
 - it does not replace the phased plan in `plan.md`
 

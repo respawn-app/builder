@@ -46,43 +46,43 @@ Deliverables:
 
 - transport-neutral service layer for project, session, run, process, approval, and ask operations, with the first mandatory extracted slice being session launch/run for `builder run`
 - loopback or in-process client adapter that talks through that service layer
-- CLI switched onto the client-style boundary instead of direct runtime access, starting with `cmd/builder/main.go:runSubcommand`
+- CLI switched onto the client-style boundary instead of direct runtime access, starting with `cli/builder/main.go:runSubcommand`
 - boundary enforcement preventing TUI or CLI packages from importing server internals directly
 
 Expected cut lines from the current repo:
 
 - server-only:
-  - `internal/runtime`
-  - `internal/session`
-  - `internal/tools`
-  - `internal/llm`
-  - `internal/auth`
+  - `server/runtime`
+  - `server/session`
+  - `server/tools`
+  - `server/llm`
+  - `server/auth`
 - server-composition extraction targets:
-  - `internal/app/bootstrap.go`
-  - `internal/app/launch_planner.go`
-  - `internal/app/runtime_factory.go`
+  - `cli/app/bootstrap.go`
+  - `cli/app/launch_planner.go`
+  - `cli/app/runtime_factory.go`
 - frontend-only:
-  - `cmd/builder/main.go`
-  - `internal/tui`
-  - `internal/app/ui*.go`
+  - `cli/builder/main.go`
+  - `cli/tui`
+  - `cli/app/ui*.go`
   - session/auth pickers and onboarding UX
 - likely split:
-  - `internal/app/app.go`
-  - `internal/app/run_prompt.go`
-  - `internal/app/session_lifecycle.go`
-  - `internal/app/auth_gate.go`
+  - `cli/app/app.go`
+  - `cli/app/run_prompt.go`
+  - `cli/app/session_lifecycle.go`
+  - `cli/app/auth_gate.go`
 - new shared boundary packages:
   - `internal/protocol`
-  - `internal/client`
-  - `internal/serverapi` or equivalent service-layer package
+  - `shared/client`
+  - `shared/serverapi` or equivalent service-layer package
 
 Repo-grounded implementation order:
 
 1. Extract the server-owned launch/runtime composition now trapped in `bootstrap.go`, `launch_planner.go`, and `runtime_factory.go`.
 2. Introduce the first client-facing use cases around the current headless path: `ResolveLaunchContext`, `OpenOrCreateSession`, `SubmitUserMessage`, `GetSessionSnapshot`, `SubscribeSessionEvents`, and `InterruptRun`.
-3. Remap `cmd/builder/main.go:runSubcommand` and `internal/app/run_prompt.go` onto the loopback client boundary without exposing `runtime.Engine`, `session.Store`, `runtime.Event`, or `runtime.ChatSnapshot`.
+3. Remap `cli/builder/main.go:runSubcommand` and `cli/app/run_prompt.go` onto the loopback client boundary without exposing `runtime.Engine`, `session.Store`, `runtime.Event`, or `runtime.ChatSnapshot`.
 4. Only after the headless seam is real, widen the boundary to interactive session/open flows and richer read models.
-5. Keep `internal/app/ui_runtime_adapter.go`, `internal/app/ui_status*.go`, `internal/app/ui_processes.go`, `internal/app/auth_gate.go`, and onboarding/import UX as deferred knots until client DTOs and hydration views exist.
+5. Keep `cli/app/ui_runtime_adapter.go`, `cli/app/ui_status*.go`, `cli/app/ui_processes.go`, `cli/app/auth_gate.go`, and onboarding/import UX as deferred knots until client DTOs and hydration views exist.
 
 Intermediate state:
 

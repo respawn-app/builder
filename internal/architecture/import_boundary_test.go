@@ -11,28 +11,28 @@ import (
 )
 
 // Protect the first extracted frontend seam immediately: the CLI shell in
-// cmd/builder must stay client-facing and must not grow direct imports of
+// cli/builder must stay client-facing and must not grow direct imports of
 // server-authority packages.
 func TestCmdBuilderDoesNotImportServerAuthorityPackagesDirectly(t *testing.T) {
 	repoRoot := repositoryRoot(t)
-	targetDir := filepath.Join(repoRoot, "cmd", "builder")
+	targetDir := filepath.Join(repoRoot, "cli", "builder")
 	files, err := filepath.Glob(filepath.Join(targetDir, "*.go"))
 	if err != nil {
-		t.Fatalf("glob cmd/builder files: %v", err)
+		t.Fatalf("glob cli/builder files: %v", err)
 	}
 	if len(files) == 0 {
-		t.Fatal("expected cmd/builder Go files")
+		t.Fatal("expected cli/builder Go files")
 	}
-	assertFilesDoNotImportBannedPackages(t, files, "cmd/builder")
+	assertFilesDoNotImportBannedPackages(t, files, "cli/builder")
 }
 
 // Ratchet the first extracted Phase 1 headless seam immediately: the thin
-// frontend adapter in internal/app/run_prompt.go must stay client-facing and
+// frontend adapter in cli/app/run_prompt.go must stay client-facing and
 // must not regain direct imports of runtime/session/auth/tools internals.
 func TestRunPromptAdapterDoesNotImportServerAuthorityPackagesDirectly(t *testing.T) {
 	repoRoot := repositoryRoot(t)
-	files := []string{filepath.Join(repoRoot, "internal", "app", "run_prompt.go")}
-	assertFilesDoNotImportBannedPackages(t, files, "internal/app/run_prompt.go")
+	files := []string{filepath.Join(repoRoot, "cli", "app", "run_prompt.go")}
+	assertFilesDoNotImportBannedPackages(t, files, "cli/app/run_prompt.go")
 }
 
 func assertFilesDoNotImportBannedPackages(t *testing.T, files []string, owner string) {
@@ -70,11 +70,11 @@ func repositoryRoot(t *testing.T) string {
 
 func isBannedFrontendImport(path string) bool {
 	path = strings.TrimSpace(path)
-	if path == "builder/internal/runtime" || path == "builder/internal/session" || path == "builder/internal/auth" {
+	if path == "builder/server/runtime" || path == "builder/server/session" || path == "builder/server/auth" {
 		return true
 	}
-	if path == "builder/internal/tools/patch/format" {
+	if path == "builder/server/tools/patch/format" {
 		return false
 	}
-	return path == "builder/internal/tools" || strings.HasPrefix(path, "builder/internal/tools/")
+	return path == "builder/server/tools" || strings.HasPrefix(path, "builder/server/tools/")
 }
