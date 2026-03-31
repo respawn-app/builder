@@ -3,10 +3,17 @@ package runprompt
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"builder/server/auth"
+	"builder/server/session"
+	"builder/shared/config"
 	"builder/shared/serverapi"
 )
 
@@ -172,5 +179,72 @@ func TestDeduplicatingPromptServiceDoesNotCacheCanceledErrors(t *testing.T) {
 	}
 	if response.Result != "ok" {
 		t.Fatalf("retry response result = %q, want ok", response.Result)
+	}
+}
+
+func TestLoopbackRunPromptClientUsesSelectedSessionContinuationContext(t *testing.T) {
+	resetRunPromptDedupeRegistry()
+	t.Cleanup(resetRunPromptDedupeRegistry)
+
+	root := t.TempDir()
+	containerDir := filepath.Join(root, "sessions", "workspace-a")
+	store, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got == "" {
+			t.Fatal("expected authorization header")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final\",\"content\":[{\"type\":\"output_text\",\"text\":\"from persisted continuation\"}]}]}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	if err := store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: server.URL}); err != nil {
+		t.Fatalf("set continuation context: %v", err)
+	}
+
+	authManager := auth.NewManager(auth.NewMemoryStore(auth.State{
+		Method: auth.Method{Type: auth.MethodAPIKey, APIKey: &auth.APIKeyMethod{Key: "test-key"}},
+	}), nil, time.Now)
+
+	client := NewLoopbackRunPromptClient(HeadlessBootstrap{
+		Config: config.App{
+			WorkspaceRoot:   "/tmp/workspace-a",
+			PersistenceRoot: root,
+			Settings: config.Settings{
+				Model:         "gpt-5",
+				OpenAIBaseURL: "http://wrong.invalid",
+			},
+		},
+		ContainerDir: containerDir,
+		AuthManager:  authManager,
+	})
+
+	response, err := client.RunPrompt(context.Background(), serverapi.RunPromptRequest{
+		ClientRequestID:   "continuation-direct-1",
+		SelectedSessionID: store.Meta().SessionID,
+		Prompt:            "hello",
+	}, nil)
+	if err != nil {
+		t.Fatalf("RunPrompt: %v", err)
+	}
+	if response.SessionID != store.Meta().SessionID {
+		t.Fatalf("session id = %q, want %q", response.SessionID, store.Meta().SessionID)
+	}
+	if response.Result != "from persisted continuation" {
+		t.Fatalf("result = %q, want from persisted continuation", response.Result)
+	}
+	if got := store.Meta().Continuation; got == nil || got.OpenAIBaseURL != server.URL {
+		t.Fatalf("expected persisted continuation preserved, got %+v", got)
 	}
 }
