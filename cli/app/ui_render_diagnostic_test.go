@@ -18,7 +18,7 @@ func (l *testUILogger) Logf(format string, args ...any) {
 
 func TestHandleRenderDiagnosticRoutesThroughUpdateAndAutoClears(t *testing.T) {
 	logger := &testUILogger{}
-	m := NewUIModel(nil, nil, nil, WithUILogger(logger)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUILogger(logger))
 
 	m.handleRenderDiagnostic(tui.RenderDiagnostic{
 		Component: "markdown_renderer",
@@ -68,7 +68,7 @@ func TestHandleRenderDiagnosticRoutesThroughUpdateAndAutoClears(t *testing.T) {
 
 func TestApplyRunLoggerDiagnosticSetsErrorTransientStatus(t *testing.T) {
 	logger := &testUILogger{}
-	m := NewUIModel(nil, nil, nil, WithUILogger(logger)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUILogger(logger))
 
 	m.handleRunLoggerDiagnostic(runLoggerDiagnostic{
 		Kind:    "write_failed",

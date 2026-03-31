@@ -131,7 +131,7 @@ func TestInterruptedResumedQueuedSteeringRestoresInput(t *testing.T) {
 		t.Fatalf("new engine: %v", err)
 	}
 
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.busy = true
 	m.compacting = true
 	m.activity = uiActivityRunning
