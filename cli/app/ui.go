@@ -8,7 +8,6 @@ import (
 
 	"builder/cli/app/commands"
 	"builder/cli/tui"
-	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
@@ -408,10 +407,6 @@ type rollbackCandidate struct {
 	TranscriptIndex  int
 	UserMessageIndex int
 	Text             string
-}
-
-func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
-	return NewProjectedUIModel(newUIRuntimeClient(engine), projectRuntimeEventChannel(runtimeEvents), askEvents, opts...)
 }
 
 func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-chan clientui.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
