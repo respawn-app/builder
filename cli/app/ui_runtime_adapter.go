@@ -8,7 +8,9 @@ import (
 	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/server/session"
+	patchformat "builder/server/tools/patch/format"
 	"builder/shared/clientui"
+	"builder/shared/transcript"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -144,7 +146,7 @@ func (a uiRuntimeAdapter) applyProjectedChatSnapshot(snapshot clientui.ChatSnaps
 			OngoingText: entry.OngoingText,
 			Phase:       llm.MessagePhase(entry.Phase),
 			ToolCallID:  entry.ToolCallID,
-			ToolCall:    entry.ToolCall,
+			ToolCall:    transcriptToolCallMeta(entry.ToolCall),
 		})
 	}
 	m.transcriptEntries = append(m.transcriptEntries[:0], entries...)
@@ -173,13 +175,13 @@ func (a uiRuntimeAdapter) applyChatSnapshot(snapshot runtime.ChatSnapshot) tea.C
 	return a.applyProjectedChatSnapshot(projectChatSnapshot(snapshot))
 }
 
-func waitRuntimeEvent(ch <-chan runtime.Event) tea.Cmd {
+func waitRuntimeEvent(ch <-chan clientui.Event) tea.Cmd {
 	return func() tea.Msg {
 		evt, ok := <-ch
 		if !ok {
 			return nil
 		}
-		return runtimeEventMsg{event: projectRuntimeEvent(evt)}
+		return runtimeEventMsg{event: evt}
 	}
 }
 
@@ -203,4 +205,64 @@ func (m *uiModel) onUserMessageFlushed(text string) {
 
 func (m *uiModel) syncConversationFromEngine() {
 	_ = m.runtimeAdapter().syncConversationFromEngine()
+}
+
+func transcriptToolCallMeta(meta *clientui.ToolCallMeta) *transcript.ToolCallMeta {
+	if meta == nil {
+		return nil
+	}
+	out := &transcript.ToolCallMeta{
+		ToolName:               meta.ToolName,
+		Presentation:           transcript.ToolPresentationKind(meta.Presentation),
+		RenderBehavior:         transcript.ToolCallRenderBehavior(meta.RenderBehavior),
+		IsShell:                meta.IsShell,
+		UserInitiated:          meta.UserInitiated,
+		Command:                meta.Command,
+		CompactText:            meta.CompactText,
+		InlineMeta:             meta.InlineMeta,
+		TimeoutLabel:           meta.TimeoutLabel,
+		PatchSummary:           meta.PatchSummary,
+		PatchDetail:            meta.PatchDetail,
+		Question:               meta.Question,
+		RecommendedOptionIndex: meta.RecommendedOptionIndex,
+		OmitSuccessfulResult:   meta.OmitSuccessfulResult,
+	}
+	if len(meta.Suggestions) > 0 {
+		out.Suggestions = append([]string(nil), meta.Suggestions...)
+	}
+	if meta.RenderHint != nil {
+		out.RenderHint = &transcript.ToolRenderHint{
+			Kind:       transcript.ToolRenderKind(meta.RenderHint.Kind),
+			Path:       meta.RenderHint.Path,
+			ResultOnly: meta.RenderHint.ResultOnly,
+		}
+	}
+	if meta.PatchRender != nil {
+		out.PatchRender = cloneRenderedPatch(meta.PatchRender)
+	}
+	return out
+}
+
+func cloneRenderedPatch(in *patchformat.RenderedPatch) *patchformat.RenderedPatch {
+	if in == nil {
+		return nil
+	}
+	out := &patchformat.RenderedPatch{}
+	if len(in.Files) > 0 {
+		out.Files = make([]patchformat.RenderedFile, 0, len(in.Files))
+		for _, file := range in.Files {
+			copyFile := file
+			if len(file.Diff) > 0 {
+				copyFile.Diff = append([]string(nil), file.Diff...)
+			}
+			out.Files = append(out.Files, copyFile)
+		}
+	}
+	if len(in.SummaryLines) > 0 {
+		out.SummaryLines = append([]patchformat.RenderedLine(nil), in.SummaryLines...)
+	}
+	if len(in.DetailLines) > 0 {
+		out.DetailLines = append([]patchformat.RenderedLine(nil), in.DetailLines...)
+	}
+	return out
 }

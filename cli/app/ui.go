@@ -289,7 +289,7 @@ type uiModel struct {
 
 	backgroundManager *shelltool.Manager
 
-	runtimeEvents <-chan runtime.Event
+	runtimeEvents <-chan clientui.Event
 	askEvents     <-chan askEvent
 
 	input                    string
@@ -411,6 +411,10 @@ type rollbackCandidate struct {
 }
 
 func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
+	return newProjectedUIModel(engine, projectRuntimeEventChannel(runtimeEvents), askEvents, opts...)
+}
+
+func newProjectedUIModel(engine *runtime.Engine, runtimeEvents <-chan clientui.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
 	m := &uiModel{
 		engine:                   engine,
 		view:                     tui.NewModel(),
