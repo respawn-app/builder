@@ -29,7 +29,7 @@ The scope is intentionally narrow and quality-oriented.
   - Mode-specific UI behavior (`ongoing`/`detail`) and rendering helpers.
 - `shared/config`
   - Persistence root/workspace container resolution and app-level paths.
-- `internal/actions`
+- `cli/actions`
   - Typed action registry scaffold for `ask_question` post-answer hooks.
 - `docs`
   - Public Astro/Starlight documentation site. Internal product/engineering docs stay under `docs/dev`, and scratch/internal working notes stay under `docs/tmp`. Keep docs up-to-date on your own and proactively.
