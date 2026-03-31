@@ -3549,7 +3549,7 @@ func TestPSOverlayMultilineCommandsKeepTitleAndFirstShellVisible(t *testing.T) {
 
 func TestRenderProcessListHeaderCountsStartingEntriesAsRunning(t *testing.T) {
 	style := uiThemeStyles("dark")
-	header := stripANSIAndTrimRight(renderProcessListHeader([]shelltool.Snapshot{{ID: "1000", State: "starting"}}, 120, style))
+	header := stripANSIAndTrimRight(renderProcessListHeader([]clientui.BackgroundProcess{{ID: "1000", State: "starting"}}, 120, style))
 	if !strings.Contains(header, "1 running") {
 		t.Fatalf("expected starting entry to count as running in header, got %q", header)
 	}
@@ -3558,12 +3558,12 @@ func TestRenderProcessListHeaderCountsStartingEntriesAsRunning(t *testing.T) {
 func TestRenderProcessListEntryUsesSemanticStateIndicators(t *testing.T) {
 	style := uiThemeStyles("dark")
 	palette := uiPalette("dark")
-	running := renderProcessListEntry(shelltool.Snapshot{ID: "1000", State: "running", Running: true, Command: "echo running"}, false, 120, "dark", 0, style)
-	completed := renderProcessListEntry(shelltool.Snapshot{ID: "1001", State: "completed", Command: "echo completed"}, false, 120, "dark", 0, style)
-	failed := renderProcessListEntry(shelltool.Snapshot{ID: "1002", State: "failed", Command: "echo failed"}, false, 120, "dark", 0, style)
-	selected := renderProcessListEntry(shelltool.Snapshot{ID: "1003", State: "running", Running: true, Command: "echo selected"}, true, 120, "dark", 0, style)
+	running := renderProcessListEntry(clientui.BackgroundProcess{ID: "1000", State: "running", Running: true, Command: "echo running"}, false, 120, "dark", 0, style)
+	completed := renderProcessListEntry(clientui.BackgroundProcess{ID: "1001", State: "completed", Command: "echo completed"}, false, 120, "dark", 0, style)
+	failed := renderProcessListEntry(clientui.BackgroundProcess{ID: "1002", State: "failed", Command: "echo failed"}, false, 120, "dark", 0, style)
+	selected := renderProcessListEntry(clientui.BackgroundProcess{ID: "1003", State: "running", Running: true, Command: "echo selected"}, true, 120, "dark", 0, style)
 
-	runningIndicator := lipgloss.NewStyle().Foreground(palette.primary).Bold(true).Render(renderProcessStateIndicator(shelltool.Snapshot{State: "running", Running: true}, 0))
+	runningIndicator := lipgloss.NewStyle().Foreground(palette.primary).Bold(true).Render(renderProcessStateIndicator(clientui.BackgroundProcess{State: "running", Running: true}, 0))
 	completedIndicator := lipgloss.NewStyle().Foreground(statusGreenColor()).Bold(true).Render("●")
 	failedIndicator := lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true).Render("●")
 
@@ -3640,7 +3640,7 @@ func TestPSOverlayRendersSemanticStateIndicators(t *testing.T) {
 	plain := stripANSIAndTrimRight(raw)
 	palette := uiPalette("dark")
 	styles := uiThemeStyles("dark")
-	runningIndicator := lipgloss.NewStyle().Foreground(palette.primary).Bold(true).Render(renderProcessStateIndicator(shelltool.Snapshot{State: "running", Running: true}, 0))
+	runningIndicator := lipgloss.NewStyle().Foreground(palette.primary).Bold(true).Render(renderProcessStateIndicator(clientui.BackgroundProcess{State: "running", Running: true}, 0))
 	completedIndicator := lipgloss.NewStyle().Foreground(statusGreenColor()).Bold(true).Render("●")
 	failedIndicator := lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true).Render("●")
 	dollarStyle := lipgloss.NewStyle().Foreground(palette.primary).Bold(true)
