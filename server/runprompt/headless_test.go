@@ -51,6 +51,12 @@ func resetRunPromptDedupeRegistry() {
 	runPromptDedupeRegistry.entries = map[string]*dedupeEntry{}
 }
 
+func runPromptDedupeEntryCount() int {
+	runPromptDedupeRegistry.mu.Lock()
+	defer runPromptDedupeRegistry.mu.Unlock()
+	return len(runPromptDedupeRegistry.entries)
+}
+
 func TestDeduplicatingPromptServiceSharesInFlightAndCachedResult(t *testing.T) {
 	resetRunPromptDedupeRegistry()
 	t.Cleanup(resetRunPromptDedupeRegistry)
@@ -216,6 +222,46 @@ func TestDeduplicatingPromptServiceScopesClientRequestIDByWorkspace(t *testing.T
 	}
 	if responseB.Result != "workspace-b" {
 		t.Fatalf("service B result = %q, want workspace-b", responseB.Result)
+	}
+}
+
+func TestDeduplicatingPromptServiceEvictsExpiredCacheEntries(t *testing.T) {
+	resetRunPromptDedupeRegistry()
+	t.Cleanup(resetRunPromptDedupeRegistry)
+
+	originalNow := runPromptDedupeNow
+	now := time.Unix(1_700_000_000, 0)
+	runPromptDedupeNow = func() time.Time { return now }
+	t.Cleanup(func() { runPromptDedupeNow = originalNow })
+
+	inner := &stubRunPromptService{}
+	inner.run = func(_ context.Context, req serverapi.RunPromptRequest, _ serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
+		return serverapi.RunPromptResponse{SessionID: req.SelectedSessionID, Result: fmt.Sprintf("call-%d", inner.CallCount())}, nil
+	}
+	service := newDeduplicatingPromptService("scope-ttl", inner)
+	req := serverapi.RunPromptRequest{ClientRequestID: "dup-ttl", SelectedSessionID: "session-ttl", Prompt: "hello"}
+
+	first, err := service.RunPrompt(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("first run error: %v", err)
+	}
+	if got := runPromptDedupeEntryCount(); got != 1 {
+		t.Fatalf("entry count after first run = %d, want 1", got)
+	}
+
+	now = now.Add(runPromptDedupeRetention + time.Second)
+	second, err := service.RunPrompt(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("second run error: %v", err)
+	}
+	if got := inner.CallCount(); got != 2 {
+		t.Fatalf("inner call count after expired replay = %d, want 2", got)
+	}
+	if first.Result == second.Result {
+		t.Fatalf("expired cache entry reused old response: first=%+v second=%+v", first, second)
+	}
+	if got := runPromptDedupeEntryCount(); got != 1 {
+		t.Fatalf("entry count after eviction + rerun = %d, want 1", got)
 	}
 }
 

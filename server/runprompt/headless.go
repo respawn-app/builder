@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"builder/server/auth"
 	"builder/server/launch"
@@ -210,8 +211,13 @@ type dedupeEntry struct {
 	err         error
 	done        bool
 	cacheable   bool
+	completedAt time.Time
 	ready       chan struct{}
 }
+
+const runPromptDedupeRetention = 10 * time.Minute
+
+var runPromptDedupeNow = time.Now
 
 var runPromptDedupeRegistry = struct {
 	mu      sync.Mutex
@@ -222,12 +228,24 @@ func newDeduplicatingPromptService(scopeID string, inner serverapi.RunPromptServ
 	return &deduplicatingPromptService{scopeID: strings.TrimSpace(scopeID), inner: inner}
 }
 
+func sweepExpiredRunPromptDedupeEntriesLocked(now time.Time) {
+	for key, entry := range runPromptDedupeRegistry.entries {
+		if entry == nil || !entry.done || !entry.cacheable || entry.completedAt.IsZero() {
+			continue
+		}
+		if now.Sub(entry.completedAt) >= runPromptDedupeRetention {
+			delete(runPromptDedupeRegistry.entries, key)
+		}
+	}
+}
+
 func (s *deduplicatingPromptService) RunPrompt(ctx context.Context, req serverapi.RunPromptRequest, progress serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
 	for {
 		key := strings.Join([]string{s.scopeID, strings.TrimSpace(req.SelectedSessionID), strings.TrimSpace(req.ClientRequestID)}, "|")
 		fp := dedupeFingerprint{selectedSessionID: strings.TrimSpace(req.SelectedSessionID), prompt: strings.TrimSpace(req.Prompt)}
 
 		runPromptDedupeRegistry.mu.Lock()
+		sweepExpiredRunPromptDedupeEntriesLocked(runPromptDedupeNow())
 		entry, exists := runPromptDedupeRegistry.entries[key]
 		if exists {
 			if entry.fingerprint != fp {
@@ -266,6 +284,7 @@ func (s *deduplicatingPromptService) RunPrompt(ctx context.Context, req serverap
 		entry.err = err
 		entry.done = true
 		entry.cacheable = cacheable
+		entry.completedAt = runPromptDedupeNow()
 		close(entry.ready)
 		runPromptDedupeRegistry.mu.Unlock()
 		return response, err

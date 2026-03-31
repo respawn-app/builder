@@ -651,7 +651,7 @@ func TestNativeFinalizeDoesNotBlinkDuplicateTailTokens(t *testing.T) {
 	}
 
 	out := &bytes.Buffer{}
-	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents), closedAskEvents())
+	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil), closedAskEvents())
 
 	program := tea.NewProgram(
 		model,
@@ -727,7 +727,7 @@ func TestNativeFinalizeSuppressesLateAsyncDeltaArtifacts(t *testing.T) {
 	}
 
 	out := &bytes.Buffer{}
-	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents), closedAskEvents())
+	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil), closedAskEvents())
 
 	program := tea.NewProgram(
 		model,
@@ -799,7 +799,7 @@ func TestNativeNoopFinalNeverAppearsOnScreen(t *testing.T) {
 	}
 
 	out := &bytes.Buffer{}
-	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents), closedAskEvents())
+	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil), closedAskEvents())
 
 	program := tea.NewProgram(
 		model,
