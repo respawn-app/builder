@@ -3286,11 +3286,7 @@ func TestRenderChatPanelKeepsNewestLinesWhenContentOverflows(t *testing.T) {
 }
 
 func TestPSCommandOpensDetailOverlayInNativeMode(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
-	).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 100
 	m.termHeight = 14
 	m.windowSizeKnown = true
@@ -3369,7 +3365,7 @@ func TestPSTightHeightKeepsTitleVisibleWithoutTailCropping(t *testing.T) {
 		t.Fatal("expected tight-height job to move to background")
 	}
 
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIBackgroundManager(manager))
 	m.termWidth = 90
 	m.termHeight = 3
 	m.windowSizeKnown = true
@@ -3416,12 +3412,7 @@ func TestPSOverlayScrollKeepsEntryHeadersVisibleAtTop(t *testing.T) {
 		}
 	}
 
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
-		WithUIBackgroundManager(manager),
-	).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIBackgroundManager(manager))
 	m.termWidth = 120
 	m.termHeight = 17
 	m.windowSizeKnown = true
@@ -3479,12 +3470,7 @@ func TestPSOverlayScrollShowsSelectedEntryFullyNearBottom(t *testing.T) {
 		}
 	}
 
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
-		WithUIBackgroundManager(manager),
-	).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIBackgroundManager(manager))
 	m.termWidth = 120
 	m.termHeight = 17
 	m.windowSizeKnown = true
@@ -3541,7 +3527,7 @@ func TestPSOverlayMultilineCommandsKeepTitleAndFirstShellVisible(t *testing.T) {
 		t.Fatal("expected multiline job to move to background")
 	}
 
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIBackgroundManager(manager))
 	m.termWidth = 90
 	m.termHeight = 12
 	m.windowSizeKnown = true
@@ -3656,7 +3642,7 @@ func TestPSOverlayRendersSemanticStateIndicators(t *testing.T) {
 	_ = start("printf 'failed-output\n'; sleep 0.4; exit 2", "failed-job")
 	time.Sleep(900 * time.Millisecond)
 
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIBackgroundManager(manager))
 	m.termWidth = 100
 	m.termHeight = 14
 	m.windowSizeKnown = true
@@ -3724,7 +3710,7 @@ func TestPSOverlaySelectedRowUsesFullWidthHighlightAndContinuousRail(t *testing.
 	firstID := start("first-job")
 	_ = start("second-job")
 
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIBackgroundManager(manager))
 	m.termWidth = 100
 	m.termHeight = 14
 	m.windowSizeKnown = true
@@ -3794,7 +3780,7 @@ func TestPSOverlaySpinnerTickAnimatesRunningEntriesWhileIdle(t *testing.T) {
 		t.Fatal("expected spin job to move to background")
 	}
 
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIBackgroundManager(manager))
 	m.termWidth = 100
 	m.termHeight = 14
 	m.windowSizeKnown = true
@@ -3840,7 +3826,7 @@ func TestPSOverlayIgnoresStaleSpinnerTickTokens(t *testing.T) {
 		t.Fatal("expected spin job to move to background")
 	}
 
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIBackgroundManager(manager))
 	m.termWidth = 100
 	m.termHeight = 14
 	m.windowSizeKnown = true
@@ -3883,7 +3869,7 @@ func TestPSOverlayIgnoresStaleSpinnerTickAfterRestart(t *testing.T) {
 		t.Fatal("expected spin job to move to background")
 	}
 
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIBackgroundManager(manager))
 	m.termWidth = 100
 	m.termHeight = 14
 	m.windowSizeKnown = true
@@ -3955,12 +3941,7 @@ func TestPSOverlayInlineAppendsOutputToInputAndReturnsToOngoing(t *testing.T) {
 	firstID := start("first-job")
 	secondID := start("second-job")
 
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
-		WithUIBackgroundManager(manager),
-	).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIBackgroundManager(manager))
 	m.termWidth = 100
 	m.termHeight = 14
 	m.windowSizeKnown = true
@@ -4026,7 +4007,7 @@ func TestPSOverlayInlineUnlocksLockedInputBeforeAppending(t *testing.T) {
 		t.Fatal("expected background process")
 	}
 
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIBackgroundManager(manager))
 	m.termWidth = 100
 	m.termHeight = 14
 	m.windowSizeKnown = true
@@ -4083,7 +4064,7 @@ func TestDirectPSInlineCommandPastesTranscriptIntoInput(t *testing.T) {
 		t.Fatal("expected background process")
 	}
 
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIBackgroundManager(manager))
 	m.input = "/ps inline " + res.SessionID
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -4135,7 +4116,7 @@ func TestDirectPSLogsCommandUsesDefaultOpenSuccess(t *testing.T) {
 	}
 	defer func() { openDefault = originalOpenDefault }()
 
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIBackgroundManager(manager))
 	m.input = "/ps logs " + res.SessionID
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -4173,7 +4154,7 @@ func TestDirectPSKillCommandSignalsBackgroundProcess(t *testing.T) {
 		t.Fatal("expected background process")
 	}
 
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIBackgroundManager(manager))
 	m.input = "/ps kill " + res.SessionID
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -4214,7 +4195,7 @@ func TestPSOverlayRefreshTickUpdatesEntriesWhileOpen(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = manager.Close() })
 
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIBackgroundManager(manager))
 	m.termWidth = 100
 	m.termHeight = 14
 	m.windowSizeKnown = true
@@ -4369,7 +4350,7 @@ func TestOpenLogsFallsBackToEditorCommandWhenDefaultOpenFails(t *testing.T) {
 	}()
 
 	out := &bytes.Buffer{}
-	model := NewUIModel(nil, closedRuntimeEvents(), closedAskEvents(), WithUIBackgroundManager(manager)).(*uiModel)
+	model := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), closedAskEvents(), WithUIBackgroundManager(manager))
 	model.input = "/ps"
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
 	done := make(chan error, 1)
@@ -4407,11 +4388,7 @@ func TestOpenLogsFallsBackToEditorCommandWhenDefaultOpenFails(t *testing.T) {
 }
 
 func TestPSOverlayIgnoresTranscriptModeTogglesWhileOpen(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
-	).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 100
 	m.termHeight = 14
 	m.windowSizeKnown = true
