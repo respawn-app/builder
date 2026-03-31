@@ -337,6 +337,138 @@ func TestHeadlessRunPromptClientRestoresContinuationContextFromSelectedSession(t
 	}
 }
 
+func TestHeadlessRunPromptClientDeduplicatesDuplicateClientRequestID(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	secondRelease := make(chan struct{})
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if got := strings.TrimSpace(r.Header.Get("Authorization")); got == "" {
+			t.Fatal("expected authorization header")
+		}
+		index := int(hits.Add(1)) - 1
+		switch index {
+		case 0:
+		case 1:
+			<-secondRelease
+		default:
+			t.Fatalf("unexpected response request index %d", index)
+		}
+		reply := []string{"created", "deduped"}[index]
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final\",\"content\":[{\"type\":\"output_text\",\"text\":%q}]}]}}\n\n", reply)
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	created, err := RunPrompt(context.Background(), Options{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+		OpenAIBaseURL:         server.URL,
+		OpenAIBaseURLExplicit: true,
+	}, "first prompt", 0, nil)
+	if err != nil {
+		t.Fatalf("initial RunPrompt: %v", err)
+	}
+
+	boot, err := bootstrapApp(context.Background(), Options{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		SessionID:             created.SessionID,
+		Model:                 "gpt-5",
+		OpenAIBaseURL:         server.URL,
+		OpenAIBaseURLExplicit: true,
+	}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("bootstrap app: %v", err)
+	}
+	defer func() {
+		if boot.background != nil {
+			_ = boot.background.Close()
+		}
+	}()
+
+	runClient := newHeadlessRunPromptClient(boot)
+	req := serverapi.RunPromptRequest{
+		ClientRequestID:   "dup-e2e-1",
+		SelectedSessionID: created.SessionID,
+		Prompt:            "second prompt",
+	}
+
+	type runResult struct {
+		response serverapi.RunPromptResponse
+		err      error
+	}
+	results := make(chan runResult, 2)
+	go func() {
+		response, err := runClient.RunPrompt(context.Background(), req, nil)
+		results <- runResult{response: response, err: err}
+	}()
+	go func() {
+		response, err := runClient.RunPrompt(context.Background(), req, nil)
+		results <- runResult{response: response, err: err}
+	}()
+
+	close(secondRelease)
+	first := <-results
+	second := <-results
+	if first.err != nil {
+		t.Fatalf("first duplicate run error: %v", first.err)
+	}
+	if second.err != nil {
+		t.Fatalf("second duplicate run error: %v", second.err)
+	}
+	if first.response != second.response {
+		t.Fatalf("duplicate run responses differ: first=%+v second=%+v", first.response, second.response)
+	}
+	if first.response.SessionID != created.SessionID {
+		t.Fatalf("duplicate run session id = %q, want %q", first.response.SessionID, created.SessionID)
+	}
+	if first.response.Result != "deduped" {
+		t.Fatalf("duplicate run result = %q, want deduped", first.response.Result)
+	}
+	if got := hits.Load(); got != 2 {
+		t.Fatalf("fake response server hit count = %d, want 2 total requests", got)
+	}
+
+	store, err := openWorkspaceSessionStore(workspace, server.URL, created.SessionID)
+	if err != nil {
+		t.Fatalf("open workspace session store: %v", err)
+	}
+	messages, err := readStoredMessages(store)
+	if err != nil {
+		t.Fatalf("read stored messages: %v", err)
+	}
+	assertMessagePresent(t, messages, llm.RoleUser, "first prompt")
+	assertMessagePresent(t, messages, llm.RoleAssistant, "created")
+	assertMessagePresent(t, messages, llm.RoleUser, "second prompt")
+	assertMessagePresent(t, messages, llm.RoleAssistant, "deduped")
+
+	secondPromptUsers := 0
+	secondPromptAssistants := 0
+	for _, msg := range messages {
+		if msg.Role == llm.RoleUser && msg.Content == "second prompt" {
+			secondPromptUsers++
+		}
+		if msg.Role == llm.RoleAssistant && msg.Content == "deduped" {
+			secondPromptAssistants++
+		}
+	}
+	if secondPromptUsers != 1 || secondPromptAssistants != 1 {
+		t.Fatalf("expected deduped transcript entries once, got users=%d assistants=%d messages=%+v", secondPromptUsers, secondPromptAssistants, messages)
+	}
+}
+
 func newFakeResponsesServer(t *testing.T, assistantReplies []string) (*httptest.Server, *atomic.Int32) {
 	t.Helper()
 	var hits atomic.Int32
