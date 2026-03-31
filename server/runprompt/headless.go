@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"builder/server/auth"
+	"builder/server/launch"
 	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/server/session"
@@ -21,8 +21,6 @@ import (
 	"builder/shared/config"
 	"builder/shared/serverapi"
 )
-
-const SubagentSessionSuffix = "subagent"
 
 type HeadlessBootstrap struct {
 	Config           config.App
@@ -47,7 +45,8 @@ type headlessPromptLauncher struct {
 }
 
 func (l *headlessPromptLauncher) PrepareHeadlessPrompt(_ context.Context, req serverapi.RunPromptRequest, progress serverapi.RunPromptProgressSink) (serverapi.PromptSessionRuntime, error) {
-	plan, err := l.planSession(req.SelectedSessionID)
+	planner := launch.Planner{Config: l.boot.Config, ContainerDir: l.boot.ContainerDir}
+	plan, err := planner.PlanSession(launch.SessionRequest{Mode: launch.ModeHeadless, SelectedSessionID: req.SelectedSessionID})
 	if err != nil {
 		return nil, err
 	}
@@ -56,14 +55,6 @@ func (l *headlessPromptLauncher) PrepareHeadlessPrompt(_ context.Context, req se
 		return nil, err
 	}
 	return &headlessPromptRuntime{plan: runtimePlan}, nil
-}
-
-type headlessSessionPlan struct {
-	Store          *session.Store
-	ActiveSettings config.Settings
-	EnabledTools   []tools.ID
-	WorkspaceRoot  string
-	Source         config.SourceReport
 }
 
 type headlessRuntimePlan struct {
@@ -91,42 +82,7 @@ type headlessRuntimeWiring struct {
 	background  *shelltool.Manager
 }
 
-func (l *headlessPromptLauncher) planSession(selectedSessionID string) (headlessSessionPlan, error) {
-	store, err := l.openStore(selectedSessionID)
-	if err != nil {
-		return headlessSessionPlan{}, err
-	}
-	if err := EnsureSubagentSessionName(store); err != nil {
-		return headlessSessionPlan{}, err
-	}
-	meta := store.Meta()
-	active := EffectiveSettings(l.boot.Config.Settings, meta.Locked)
-	if meta.Continuation != nil {
-		if baseURL := strings.TrimSpace(meta.Continuation.OpenAIBaseURL); baseURL != "" {
-			active.OpenAIBaseURL = baseURL
-		}
-	}
-	if err := store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: active.OpenAIBaseURL}); err != nil {
-		return headlessSessionPlan{}, err
-	}
-	return headlessSessionPlan{
-		Store:          store,
-		ActiveSettings: active,
-		EnabledTools:   ActiveToolIDs(active, l.boot.Config.Source, meta.Locked),
-		WorkspaceRoot:  l.boot.Config.WorkspaceRoot,
-		Source:         l.boot.Config.Source,
-	}, nil
-}
-
-func (l *headlessPromptLauncher) openStore(selectedSessionID string) (*session.Store, error) {
-	if strings.TrimSpace(selectedSessionID) != "" {
-		return session.OpenByID(l.boot.Config.PersistenceRoot, selectedSessionID)
-	}
-	containerName := filepath.Base(l.boot.ContainerDir)
-	return session.NewLazy(l.boot.ContainerDir, containerName, l.boot.Config.WorkspaceRoot)
-}
-
-func (l *headlessPromptLauncher) prepareRuntime(plan headlessSessionPlan, progress serverapi.RunPromptProgressSink) (*headlessRuntimePlan, error) {
+func (l *headlessPromptLauncher) prepareRuntime(plan launch.SessionPlan, progress serverapi.RunPromptProgressSink) (*headlessRuntimePlan, error) {
 	logger, err := NewRunLogger(plan.Store.Dir(), func(diag RunLoggerDiagnostic) {
 		if progress != nil {
 			progress.PublishRunPromptProgress(serverapi.RunPromptProgress{Kind: serverapi.RunPromptProgressKindWarning, Message: "Run logging degraded"})
@@ -301,21 +257,6 @@ func (r *headlessPromptRuntime) Close() error {
 	}
 	r.plan.Close()
 	return nil
-}
-
-func EnsureSubagentSessionName(store *session.Store) error {
-	if store == nil {
-		return errors.New("session store is required")
-	}
-	meta := store.Meta()
-	if strings.TrimSpace(meta.Name) != "" {
-		return nil
-	}
-	name := strings.TrimSpace(meta.SessionID + " " + SubagentSessionSuffix)
-	if name == "" {
-		return nil
-	}
-	return store.SetName(name)
 }
 
 func RunPromptAskHandler(req askquestion.Request) (askquestion.Response, error) {

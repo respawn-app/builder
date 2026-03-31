@@ -16,10 +16,12 @@ Interactive path today:
   - selects interactive auth flow and shared bootstrap
 - `cli/app/bootstrap.go:bootstrapApp`
   - loads config, resolves workspace/container, creates `auth.Manager`, runs auth/onboarding gates, creates background shell manager/router, creates fast-mode state
+- `server/launch.ResolveBootstrapPlan`
+  - server-owned continuation resolution for workspace root and persisted OpenAI base URL before config reload
 - `cli/app/session_lifecycle.go:runSessionLifecycle`
   - owns the cross-session UI loop
 - `cli/app/launch_planner.go:PlanSession` / `PrepareRuntime`
-  - opens or creates `session.Store`, derives effective settings and enabled tools, prepares status config, creates runtime wiring
+  - adapts frontend session-picker and status config onto `server/launch.Planner`, then prepares runtime wiring
 - `cli/app/runtime_factory.go:newRuntimeWiringWithBackground`
   - builds tool registry, ask broker, provider clients, reviewer client, `runtime.Engine`, and runtime event bridge
 - `cli/app/ui_runtime_adapter.go`
@@ -35,6 +37,8 @@ Headless path today:
   - acts as a thin frontend adapter over `shared/client.RunPromptClient`
 - `cli/app/headless_prompt_server.go` -> `server/runprompt`
   - wrapper entrypoint into the server-owned headless launch/runtime composition and duplicate-suppression layer
+- `server/runprompt` -> `server/launch`
+  - headless run path now reuses the same server-owned session bootstrap/open-create planning used by interactive launch planning
 
 This makes two things clear:
 
@@ -62,8 +66,9 @@ Must not own:
 
 ## 2. Server Composition Root
 
-Currently scattered across:
+Currently split between landed server packages and remaining mixed adapters:
 
+- `server/launch`
 - `cli/app/bootstrap.go`
 - `cli/app/launch_planner.go`
 - `cli/app/runtime_factory.go`
@@ -145,9 +150,9 @@ These files can stay where they are temporarily, but they should consume a clien
 - `cli/app/app.go`
   - good public entrypoints (`Run`, `RunPrompt`), but still reaches shared bootstrap directly
 - `cli/app/bootstrap.go`
-  - mixes server bootstrap (`auth.Manager`, background manager, fast mode) with frontend auth/onboarding interaction
+  - now delegates continuation resolution to `server/launch`, but still mixes server bootstrap (`auth.Manager`, background manager, fast mode) with frontend auth/onboarding interaction
 - `cli/app/launch_planner.go`
-  - mixes server launch decisions (`session.OpenByID`, `session.NewLazy`) with frontend session-picker and UI status setup
+  - now wraps `server/launch` for session open/create/hydration, but still mixes frontend session-picker and UI status setup with runtime preparation
 - `cli/app/run_prompt.go`
   - smallest end-to-end non-TUI workflow, but still reaches `runtime.Engine` directly
 - `cli/app/session_lifecycle.go`
@@ -176,14 +181,14 @@ Required outcome:
 
 Why it is dangerous:
 
-- `PlanBootstrap(...)` opens session storage to recover workspace root and continuation base URL from prior session metadata
-- `PlanSession(...)` directly calls `session.OpenByID`, `session.ListSessions`, and `session.NewLazy`
-- `PlanSession(...)` also returns `uiStatusConfig`, which means a persistence/runtime planning function already leaks frontend-specific view wiring
+- `PrepareRuntime(...)` is still the bridge from store/settings into runtime construction
+- `cli/app/bootstrap.go` still owns server bootstrap object creation instead of delegating to a stable embedded-server bootstrap
+- `cli/app/launch_planner.go` still returns `uiStatusConfig`, which means the frontend adapter is still partially entangled with server launch data
 - `PrepareRuntime(...)` is the bridge from store/settings into runtime construction
 
 Required outcome:
 
-- split this into server launch use cases plus frontend-only selection UX
+- keep session open/create/hydration in `server/launch`, then continue splitting runtime preparation into server-owned use cases plus frontend-only selection UX
 - do not let a future client call a transport wrapper that still returns `session.Store`, `config.Settings`, or `uiStatusConfig`
 
 ## 3. Headless Run Path In `cli/app/run_prompt.go`
@@ -264,10 +269,10 @@ That slice is the best first seam because:
 These use cases should be expressed as transport-neutral application operations, not raw transport methods.
 
 - `ResolveLaunchContext`
-  - current source: `launch_planner.PlanBootstrap(...)`
+  - current source: `server/launch.ResolveBootstrapPlan(...)`, with `cli/app/bootstrap.go` acting as the frontend adapter
   - responsibility: resolve canonical workspace/session continuation context from CLI inputs without exposing `session.Store`
 - `OpenOrCreateSession`
-  - current source: `launch_planner.openStore(...)` and `createSession(...)`
+  - current source: `server/launch.Planner.PlanSession(...)`, with `cli/app/launch_planner.go` adapting picker/UI concerns onto it
   - responsibility: open existing session or create a new one and return a client-safe session handle/summary
 - `SubmitUserMessage`
   - current source: `run_prompt.go` plus `runtime.Engine.SubmitUserMessage(...)`
@@ -339,13 +344,21 @@ Status update:
 - The first Phase 1 slice has landed.
 - `cli/app/run_prompt.go` is now a thin frontend adapter over `shared/client` and `shared/serverapi` request/result DTOs for the headless `builder run` path.
 - `RunPromptRequest` now includes a required `client_request_id`, and the server-owned headless seam already performs process-local duplicate suppression keyed by request scope.
-- The remaining gap for this extraction target is that the interactive-side bootstrap/planner/runtime-factory code in `cli/app` is still mixed and partially duplicated. The next extraction step is to keep moving launch-context resolution, session open/create, and runtime preparation into server-owned packages so the embedded client no longer depends on mixed app-private construction.
+- The remaining gap for this extraction target is that the interactive-side bootstrap/runtime-factory code in `cli/app` is still mixed and partially duplicated. The next extraction step is to move runtime preparation and embedded bootstrap ownership farther into server-owned packages so the embedded client no longer depends on mixed app-private construction.
 
 The first concrete extraction should wrap the current headless path built from:
 
 - `cli/builder/main.go:runSubcommand`
 - `cli/app/app.go:RunPrompt`
 - `cli/app/run_prompt.go`
+- `cli/app/launch_planner.go`
+- `cli/app/runtime_factory.go`
+
+Today that extraction is split across:
+
+- `server/launch`
+- `server/runprompt`
+- `cli/app/bootstrap.go`
 - `cli/app/launch_planner.go`
 - `cli/app/runtime_factory.go`
 

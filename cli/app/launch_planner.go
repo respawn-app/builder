@@ -3,9 +3,9 @@ package app
 import (
 	"errors"
 	"io"
-	"path/filepath"
 	"strings"
 
+	"builder/server/launch"
 	"builder/server/session"
 	"builder/server/tools"
 	"builder/shared/config"
@@ -79,76 +79,67 @@ func newSessionLaunchPlanner(boot *appBootstrap) *launchPlanner {
 }
 
 func (p *launchPlanner) PlanBootstrap(opts Options) (bootstrapLaunchPlan, error) {
-	plan := bootstrapLaunchPlan{
-		WorkspaceRoot:    requestedWorkspaceRoot(opts),
-		OpenAIBaseURL:    strings.TrimSpace(opts.OpenAIBaseURL),
-		UseOpenAIBaseURL: opts.OpenAIBaseURLExplicit,
-	}
-	if strings.TrimSpace(opts.SessionID) == "" {
-		return plan, nil
-	}
-	if strings.TrimSpace(p.persistenceRoot) == "" {
-		return bootstrapLaunchPlan{}, errors.New("launch planner persistence root is required")
-	}
-	store, err := session.OpenByID(p.persistenceRoot, opts.SessionID)
+	plan, err := launch.ResolveBootstrapPlan(p.persistenceRoot, launch.BootstrapRequest{
+		WorkspaceRoot:         requestedWorkspaceRoot(opts),
+		WorkspaceRootExplicit: opts.WorkspaceRootExplicit,
+		SessionID:             strings.TrimSpace(opts.SessionID),
+		OpenAIBaseURL:         strings.TrimSpace(opts.OpenAIBaseURL),
+		OpenAIBaseURLExplicit: opts.OpenAIBaseURLExplicit,
+	})
 	if err != nil {
 		return bootstrapLaunchPlan{}, err
 	}
-	meta := store.Meta()
-	if !opts.WorkspaceRootExplicit && strings.TrimSpace(meta.WorkspaceRoot) != "" {
-		plan.WorkspaceRoot = strings.TrimSpace(meta.WorkspaceRoot)
-	}
-	if opts.OpenAIBaseURLExplicit {
-		return plan, nil
-	}
-	if meta.Continuation != nil && strings.TrimSpace(meta.Continuation.OpenAIBaseURL) != "" {
-		plan.OpenAIBaseURL = strings.TrimSpace(meta.Continuation.OpenAIBaseURL)
-		plan.UseOpenAIBaseURL = true
-	}
-	return plan, nil
+	return bootstrapLaunchPlan(plan), nil
 }
 
 func (p *launchPlanner) PlanSession(req sessionLaunchRequest) (sessionLaunchPlan, error) {
 	if p == nil || p.boot == nil {
 		return sessionLaunchPlan{}, errors.New("launch planner bootstrap is required")
 	}
-	store, err := p.openStore(req)
+	planner := launch.Planner{
+		Config:       p.boot.cfg,
+		ContainerDir: p.boot.containerDir,
+		PickSession: func(summaries []session.Summary) (launch.SessionSelection, error) {
+			runPicker := p.pickSession
+			if runPicker == nil {
+				runPicker = func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
+					return runSessionPicker(summaries, theme, alternateScreenPolicy)
+				}
+			}
+			picked, err := runPicker(summaries, p.boot.cfg.Settings.Theme, p.boot.cfg.Settings.TUIAlternateScreen)
+			if err != nil {
+				return launch.SessionSelection{}, err
+			}
+			return launch.SessionSelection{Session: picked.Session, CreateNew: picked.CreateNew, Canceled: picked.Canceled}, nil
+		},
+	}
+	serverPlan, err := planner.PlanSession(launch.SessionRequest{
+		Mode:              launch.Mode(req.Mode),
+		SelectedSessionID: req.SelectedSessionID,
+		ForceNewSession:   req.ForceNewSession,
+		ParentSessionID:   req.ParentSessionID,
+	})
 	if err != nil {
-		return sessionLaunchPlan{}, err
-	}
-	if req.Mode == launchModeHeadless {
-		if err := ensureSubagentSessionName(store); err != nil {
-			return sessionLaunchPlan{}, err
-		}
-	}
-	meta := store.Meta()
-	active := effectiveSettings(p.boot.cfg.Settings, meta.Locked)
-	if meta.Continuation != nil {
-		if baseURL := strings.TrimSpace(meta.Continuation.OpenAIBaseURL); baseURL != "" {
-			active.OpenAIBaseURL = baseURL
-		}
-	}
-	if err := store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: active.OpenAIBaseURL}); err != nil {
 		return sessionLaunchPlan{}, err
 	}
 	return sessionLaunchPlan{
 		Mode:                req.Mode,
-		Store:               store,
-		ActiveSettings:      active,
-		EnabledTools:        activeToolIDs(active, p.boot.cfg.Source, meta.Locked),
-		ConfiguredModelName: p.boot.cfg.Settings.Model,
-		SessionName:         meta.Name,
-		ModelContractLocked: meta.Locked != nil,
+		Store:               serverPlan.Store,
+		ActiveSettings:      serverPlan.ActiveSettings,
+		EnabledTools:        serverPlan.EnabledTools,
+		ConfiguredModelName: serverPlan.ConfiguredModelName,
+		SessionName:         serverPlan.SessionName,
+		ModelContractLocked: serverPlan.ModelContractLocked,
 		StatusConfig: uiStatusConfig{
 			WorkspaceRoot:   p.boot.cfg.WorkspaceRoot,
 			PersistenceRoot: p.boot.cfg.PersistenceRoot,
-			Settings:        active,
-			Source:          p.boot.cfg.Source,
+			Settings:        serverPlan.ActiveSettings,
+			Source:          serverPlan.Source,
 			AuthManager:     p.boot.authManager,
 			AuthStatePath:   config.GlobalAuthConfigPath(p.boot.cfg),
 		},
-		WorkspaceRoot: p.boot.cfg.WorkspaceRoot,
-		Source:        p.boot.cfg.Source,
+		WorkspaceRoot: serverPlan.WorkspaceRoot,
+		Source:        serverPlan.Source,
 	}, nil
 }
 
@@ -182,62 +173,6 @@ func (p *launchPlanner) PrepareRuntime(plan sessionLaunchPlan, diagnosticWriter 
 			_ = logger.Close()
 		},
 	}, nil
-}
-
-func (p *launchPlanner) openStore(req sessionLaunchRequest) (*session.Store, error) {
-	if p == nil || p.boot == nil {
-		return nil, errors.New("launch planner bootstrap is required")
-	}
-	if strings.TrimSpace(req.SelectedSessionID) != "" {
-		return session.OpenByID(p.boot.cfg.PersistenceRoot, req.SelectedSessionID)
-	}
-	if req.ForceNewSession || req.Mode == launchModeHeadless {
-		return p.createSession(req.ParentSessionID)
-	}
-	summaries, err := session.ListSessions(p.boot.containerDir)
-	if err != nil {
-		return nil, err
-	}
-	if len(summaries) == 0 {
-		return p.createSession(req.ParentSessionID)
-	}
-	runPicker := p.pickSession
-	if runPicker == nil {
-		runPicker = func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
-			return runSessionPicker(summaries, theme, alternateScreenPolicy)
-		}
-	}
-	picked, err := runPicker(summaries, p.boot.cfg.Settings.Theme, p.boot.cfg.Settings.TUIAlternateScreen)
-	if err != nil {
-		return nil, err
-	}
-	if picked.Canceled {
-		return nil, errors.New("startup canceled by user")
-	}
-	if picked.CreateNew {
-		return p.createSession(req.ParentSessionID)
-	}
-	if picked.Session == nil {
-		return nil, errors.New("no session selected")
-	}
-	return session.Open(picked.Session.Path)
-}
-
-func (p *launchPlanner) createSession(parentSessionID string) (*session.Store, error) {
-	if p == nil || p.boot == nil {
-		return nil, errors.New("launch planner bootstrap is required")
-	}
-	containerName := filepath.Base(p.boot.containerDir)
-	created, err := session.NewLazy(p.boot.containerDir, containerName, p.boot.cfg.WorkspaceRoot)
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(parentSessionID) != "" {
-		if err := created.SetParentSessionID(parentSessionID); err != nil {
-			return nil, err
-		}
-	}
-	return created, nil
 }
 
 func logLaunchPlanStart(logger *runLogger, plan sessionLaunchPlan, startLogLine string) {
