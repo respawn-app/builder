@@ -80,7 +80,7 @@ func newSessionLaunchPlanner(boot *appBootstrap) *launchPlanner {
 
 func (p *launchPlanner) PlanBootstrap(opts Options) (bootstrapLaunchPlan, error) {
 	plan, err := launch.ResolveBootstrapPlan(p.persistenceRoot, launch.BootstrapRequest{
-		WorkspaceRoot:         requestedWorkspaceRoot(opts),
+		WorkspaceRoot:         requestedWorkspaceRootValue(opts.WorkspaceRoot),
 		WorkspaceRootExplicit: opts.WorkspaceRootExplicit,
 		SessionID:             strings.TrimSpace(opts.SessionID),
 		OpenAIBaseURL:         strings.TrimSpace(opts.OpenAIBaseURL),
@@ -90,6 +90,13 @@ func (p *launchPlanner) PlanBootstrap(opts Options) (bootstrapLaunchPlan, error)
 		return bootstrapLaunchPlan{}, err
 	}
 	return bootstrapLaunchPlan(plan), nil
+}
+
+func requestedWorkspaceRootValue(workspaceRoot string) string {
+	if strings.TrimSpace(workspaceRoot) == "" {
+		return "."
+	}
+	return workspaceRoot
 }
 
 func (p *launchPlanner) PlanSession(req sessionLaunchRequest) (sessionLaunchPlan, error) {
