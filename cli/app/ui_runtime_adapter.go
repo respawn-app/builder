@@ -124,11 +124,19 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 	if m.engine == nil {
 		return nil
 	}
-	m.conversationFreshness = m.runtimeStatus().ConversationFreshness
-	return a.applyProjectedChatSnapshot(m.engine.ChatSnapshot())
+	return a.applyProjectedSessionView(m.engine.SessionView())
 }
 
 func (a uiRuntimeAdapter) applyProjectedChatSnapshot(snapshot clientui.ChatSnapshot) tea.Cmd {
+	return a.applyProjectedSessionView(clientui.RuntimeSessionView{
+		SessionID:             a.model.sessionID,
+		SessionName:           a.model.sessionName,
+		ConversationFreshness: a.model.conversationFreshness,
+		Chat:                  snapshot,
+	})
+}
+
+func (a uiRuntimeAdapter) applyProjectedSessionView(view clientui.RuntimeSessionView) tea.Cmd {
 	m := a.model
 	if len(m.startupCmds) > 0 {
 		m.startupCmds = nil
@@ -137,8 +145,12 @@ func (a uiRuntimeAdapter) applyProjectedChatSnapshot(snapshot clientui.ChatSnaps
 		m.nativeFlushedEntryCount = 0
 		m.nativeRenderedSnapshot = ""
 	}
-	entries := make([]tui.TranscriptEntry, 0, len(snapshot.Entries))
-	for _, entry := range snapshot.Entries {
+	previousWindowTitle := m.windowTitle()
+	m.sessionID = strings.TrimSpace(view.SessionID)
+	m.sessionName = strings.TrimSpace(view.SessionName)
+	m.conversationFreshness = view.ConversationFreshness
+	entries := make([]tui.TranscriptEntry, 0, len(view.Chat.Entries))
+	for _, entry := range view.Chat.Entries {
 		entries = append(entries, tui.TranscriptEntry{
 			Role:        entry.Role,
 			Text:        entry.Text,
@@ -154,16 +166,20 @@ func (a uiRuntimeAdapter) applyProjectedChatSnapshot(snapshot clientui.ChatSnaps
 	m.forwardToView(tui.ClearStreamingReasoningMsg{})
 	m.forwardToView(tui.SetConversationMsg{
 		Entries:      entries,
-		Ongoing:      snapshot.Ongoing,
-		OngoingError: snapshot.OngoingError,
+		Ongoing:      view.Chat.Ongoing,
+		OngoingError: view.Chat.OngoingError,
 	})
 	if m.view.Mode() == tui.ModeOngoing {
 		m.forwardToView(tui.SetOngoingScrollMsg{Scroll: m.view.OngoingScroll()})
 	}
-	if strings.TrimSpace(snapshot.Ongoing) == "" {
+	if strings.TrimSpace(view.Chat.Ongoing) == "" {
 		m.sawAssistantDelta = false
 	}
-	return m.syncNativeHistoryFromTranscript()
+	cmds := []tea.Cmd{m.syncNativeHistoryFromTranscript()}
+	if previousWindowTitle != m.windowTitle() {
+		cmds = append(cmds, tea.SetWindowTitle(m.windowTitle()))
+	}
+	return sequenceCmds(cmds...)
 }
 
 func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {

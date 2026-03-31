@@ -35,15 +35,22 @@ type RuntimeStatus struct {
 	CompactionCount                   int
 }
 
+type RuntimeSessionView struct {
+	SessionID             string
+	SessionName           string
+	ConversationFreshness ConversationFreshness
+	Chat                  ChatSnapshot
+}
+
 type RuntimeClient interface {
 	Status() RuntimeStatus
+	SessionView() RuntimeSessionView
 	SetSessionName(name string) error
 	SetThinkingLevel(level string) error
 	SetFastModeEnabled(enabled bool) (bool, error)
 	SetReviewerEnabled(enabled bool) (bool, string, error)
 	SetAutoCompactionEnabled(enabled bool) (bool, bool)
 	AppendLocalEntry(role, text string)
-	ChatSnapshot() ChatSnapshot
 	ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error)
 	SubmitUserMessage(ctx context.Context, text string) (string, error)
 	SubmitUserShellCommand(ctx context.Context, command string) error
