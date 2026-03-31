@@ -23,7 +23,7 @@ Interactive path today:
 - `cli/app/launch_planner.go:PlanSession` / `PrepareRuntime`
   - adapts frontend session-picker and status config onto `server/launch.Planner`, then prepares runtime wiring
 - `cli/app/runtime_factory.go:newRuntimeWiringWithBackground`
-  - builds tool registry, ask broker, provider clients, reviewer client, `runtime.Engine`, and runtime event bridge
+  - adapts interactive ask/bell UX onto `server/runtimewire` runtime preparation
 - `cli/app/ui_runtime_adapter.go`
   - projects `runtime.Event` and `runtime.ChatSnapshot` directly into Bubble Tea/TUI state
 
@@ -69,6 +69,7 @@ Must not own:
 Currently split between landed server packages and remaining mixed adapters:
 
 - `server/launch`
+- `server/runtimewire`
 - `cli/app/bootstrap.go`
 - `cli/app/launch_planner.go`
 - `cli/app/runtime_factory.go`
@@ -153,8 +154,10 @@ These files can stay where they are temporarily, but they should consume a clien
   - now delegates continuation resolution to `server/launch`, but still mixes server bootstrap (`auth.Manager`, background manager, fast mode) with frontend auth/onboarding interaction
 - `cli/app/launch_planner.go`
   - now wraps `server/launch` for session open/create/hydration, but still mixes frontend session-picker and UI status setup with runtime preparation
+- `cli/app/runtime_factory.go`
+  - now wraps `server/runtimewire` for runtime preparation, but still mixes interactive ask bridge and terminal bell UX into the adapter layer
 - `cli/app/run_prompt.go`
-  - smallest end-to-end non-TUI workflow, but still reaches `runtime.Engine` directly
+  - thin frontend workflow over the loopback client boundary
 - `cli/app/session_lifecycle.go`
   - owns frontend navigation while also calling `session.ForkAtUserMessage`, `authManager.ClearMethod`, and `ensureAuthReady`
 - `cli/app/auth_gate.go`
@@ -164,40 +167,39 @@ These files can stay where they are temporarily, but they should consume a clien
 
 These are the places most likely to preserve the monolith behind a new transport wrapper.
 
-## 1. Runtime Wiring In `cli/app/runtime_factory.go`
+## 1. Embedded Bootstrap In `cli/app/bootstrap.go`
 
 Why it is dangerous:
 
-- `newRuntimeWiringWithBackground(...)` is already the server composition root in everything but name
-- it constructs the tool registry, ask broker, background shell manager integration, provider client, reviewer client, `runtime.Engine`, and event bridge in one place
-- `buildToolRegistry(...)` binds `server/tools` definitions to local runtime builders for `shell`, `exec_command`, `write_stdin`, `patch`, `ask_question`, `view_image`, and `multi_tool_use_parallel`
+- it still creates `auth.Manager`, background manager/router, and fast-mode state inside `cli/app`
+- it still interleaves server bootstrap concerns with interactive auth readiness and onboarding flow
+- this is now the main remaining place where embedded mode can accidentally keep constructing server authority inside the frontend package
 
 Required outcome:
 
-- this logic must move behind the server boundary unchanged in authority
-- frontend code must stop receiving `*runtime.Engine`, `*askBridge`, `*runtimeEventBridge`, or `*shelltool.Manager`
+- move embedded bootstrap authority behind a server-owned composition entrypoint
+- keep frontend auth/onboarding UX, but stop letting `cli/app` directly own server bootstrap objects
 
-## 2. Launch Planning In `cli/app/launch_planner.go`
+## 2. Interactive Lifecycle In `cli/app/session_lifecycle.go`
 
 Why it is dangerous:
 
-- `PrepareRuntime(...)` is still the bridge from store/settings into runtime construction
-- `cli/app/bootstrap.go` still owns server bootstrap object creation instead of delegating to a stable embedded-server bootstrap
-- `cli/app/launch_planner.go` still returns `uiStatusConfig`, which means the frontend adapter is still partially entangled with server launch data
-- `PrepareRuntime(...)` is the bridge from store/settings into runtime construction
+- it still performs privileged mutations directly (`session.ForkAtUserMessage`, `authManager.ClearMethod`, `ensureAuthReady`)
+- it still assumes direct `session.Store` access for draft persistence and transitions
+- once launch/runtime preparation moved server-side, this becomes the highest-risk place to accidentally preserve frontend privilege
 
 Required outcome:
 
-- keep session open/create/hydration in `server/launch`, then continue splitting runtime preparation into server-owned use cases plus frontend-only selection UX
-- do not let a future client call a transport wrapper that still returns `session.Store`, `config.Settings`, or `uiStatusConfig`
+- keep Bubble Tea loop/frontend navigation in `cli/app`, but route privileged mutations through client-facing operations
+- stop coupling session transitions to direct server package calls
 
 ## 3. Headless Run Path In `cli/app/run_prompt.go`
 
 Why it is dangerous:
 
 - this is the smallest useful seam and therefore the easiest place to accidentally stop halfway
-- the frontend adapter is now thin, but the surrounding launch/runtime composition is still only partially extracted from `cli/app`
-- helper-level duplication between `cli/app` and `server/runprompt` can still blur ownership if it is left in place too long
+- the frontend adapter is now thin, and its launch/runtime composition is server-owned
+- the remaining risk for this path is embedded bootstrap ownership rather than duplicated runtime wiring
 
 Required outcome:
 
@@ -344,7 +346,7 @@ Status update:
 - The first Phase 1 slice has landed.
 - `cli/app/run_prompt.go` is now a thin frontend adapter over `shared/client` and `shared/serverapi` request/result DTOs for the headless `builder run` path.
 - `RunPromptRequest` now includes a required `client_request_id`, and the server-owned headless seam already performs process-local duplicate suppression keyed by request scope.
-- The remaining gap for this extraction target is that the interactive-side bootstrap/runtime-factory code in `cli/app` is still mixed and partially duplicated. The next extraction step is to move runtime preparation and embedded bootstrap ownership farther into server-owned packages so the embedded client no longer depends on mixed app-private construction.
+- The remaining gap for this extraction target is that the interactive-side embedded bootstrap/auth flow and lifecycle mutations in `cli/app` are still mixed and privileged. The next extraction step is to move embedded bootstrap ownership farther into server-owned packages and then route interactive lifecycle mutations through the client boundary.
 
 The first concrete extraction should wrap the current headless path built from:
 
