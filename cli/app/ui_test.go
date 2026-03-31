@@ -2305,7 +2305,7 @@ func TestAskFreeformAcceptsSpaceKey(t *testing.T) {
 }
 
 func TestApprovalAskTabInCommentaryDoesNotReturnToPicker(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	reply := make(chan askReply, 1)
 	event := askEvent{req: askquestion.Request{Question: "Approve?", Approval: true, ApprovalOptions: []askquestion.ApprovalOption{{Decision: askquestion.ApprovalDecisionAllowOnce, Label: "Allow once"}, {Decision: askquestion.ApprovalDecisionAllowSession, Label: "Allow for this session"}, {Decision: askquestion.ApprovalDecisionDeny, Label: "Deny"}}}, reply: reply}
 
@@ -2475,7 +2475,7 @@ func TestViewHidesCursorWhenInputLocked(t *testing.T) {
 }
 
 func TestMainInputViewportTracksCursorLine(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 20
 	m.termHeight = 6
 	m.windowSizeKnown = true
@@ -2493,7 +2493,7 @@ func TestMainInputViewportTracksCursorLine(t *testing.T) {
 }
 
 func TestArrowNavigationDoesNotMutateInput(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.input = "abcdef"
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyLeft})
@@ -2519,7 +2519,7 @@ func TestArrowNavigationDoesNotMutateInput(t *testing.T) {
 }
 
 func TestBusyEnterQueuesSteeringUntilFlushed(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.input = "please continue with tests"
 
@@ -2553,7 +2553,7 @@ func TestBusyEnterQueuesSteeringUntilFlushed(t *testing.T) {
 }
 
 func TestBusyEnterCanQueueMultipleSteeringMessages(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.input = "first steering message"
 
@@ -2582,7 +2582,7 @@ func TestBusyEnterCanQueueMultipleSteeringMessages(t *testing.T) {
 }
 
 func TestBusySteeringBatchFlushPreservesPostTurnQueueOrder(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.input = "first steering message"
 
@@ -2630,7 +2630,7 @@ func TestBusySteeringBatchFlushPreservesPostTurnQueueOrder(t *testing.T) {
 }
 
 func TestBusyEnterWithUserShellPrefixQueuesInsteadOfInjecting(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.input = "$ pwd"
 
@@ -2651,7 +2651,7 @@ func TestBusyEnterWithUserShellPrefixQueuesInsteadOfInjecting(t *testing.T) {
 }
 
 func TestSubmitErrorRestoresQueuedSteeringInput(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.input = "please continue with tests"
 
