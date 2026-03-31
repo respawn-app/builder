@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"builder/internal/selfcmd"
+	"builder/cli/selfcmd"
 )
 
 func TestMainSystemPromptIncludesToolPreamblesWhenEnabled(t *testing.T) {

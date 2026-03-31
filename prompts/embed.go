@@ -4,7 +4,7 @@ import (
 	_ "embed"
 	"strings"
 
-	"builder/internal/selfcmd"
+	"builder/cli/selfcmd"
 )
 
 const runCommandPlaceholder = "{{builder_run_command}}"
