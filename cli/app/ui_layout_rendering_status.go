@@ -25,7 +25,7 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 		style.meta.Render(string(m.view.Mode())),
 		style.meta.Render(l.statusModelLabel()),
 	}
-	if label := processCountLabel(m.backgroundManager); label != "" {
+	if label := processCountLabel(m.listProcesses()); label != "" {
 		segments = append(segments, style.meta.Render(label))
 	}
 	if cacheSection := l.renderCacheHitSection(style); cacheSection != "" {
