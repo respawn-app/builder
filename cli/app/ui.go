@@ -284,7 +284,7 @@ func (b *askBridge) Handle(req askquestion.Request) (askquestion.Response, error
 }
 
 type uiModel struct {
-	engine *runtime.Engine
+	engine uiRuntimeClient
 	view   tui.Model
 
 	backgroundManager *shelltool.Manager
@@ -416,7 +416,7 @@ func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askE
 
 func newProjectedUIModel(engine *runtime.Engine, runtimeEvents <-chan clientui.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
 	m := &uiModel{
-		engine:                   engine,
+		engine:                   newUIRuntimeClient(engine),
 		view:                     tui.NewModel(),
 		activity:                 uiActivityIdle,
 		runtimeEvents:            runtimeEvents,
