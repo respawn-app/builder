@@ -63,7 +63,7 @@ const (
 )
 
 type uiStatusRequest struct {
-	Engine                *runtime.Engine
+	Runtime               uiRuntimeClient
 	WorkspaceRoot         string
 	PersistenceRoot       string
 	Settings              config.Settings
@@ -248,7 +248,7 @@ func WithUIStatusRepository(repository uiStatusRepository) UIOption {
 
 func (m *uiModel) newStatusRequest(now time.Time) uiStatusRequest {
 	return uiStatusRequest{
-		Engine:                m.engine,
+		Runtime:               m.engine,
 		WorkspaceRoot:         strings.TrimSpace(m.statusConfig.WorkspaceRoot),
 		PersistenceRoot:       strings.TrimSpace(m.statusConfig.PersistenceRoot),
 		Settings:              m.statusConfig.Settings,
@@ -305,17 +305,17 @@ func (defaultUIStatusCollector) CollectBase(req uiStatusRequest) uiStatusSnapsho
 	parentSessionID := ""
 	parentSessionName := ""
 	compactionCount := 0
-	if req.Engine != nil {
-		usage := req.Engine.ContextUsage()
+	if req.Runtime != nil {
+		usage := req.Runtime.ContextUsage()
 		contextInfo.UsedTokens = usage.UsedTokens
 		contextInfo.WindowTokens = usage.WindowTokens
 		contextInfo.AvailableTokens = usage.WindowTokens - usage.UsedTokens
 		if contextInfo.AvailableTokens < 0 {
 			contextInfo.AvailableTokens = 0
 		}
-		parentSessionID = strings.TrimSpace(req.Engine.ParentSessionID())
+		parentSessionID = strings.TrimSpace(req.Runtime.ParentSessionID())
 		parentSessionName = statusParentSessionName(req.PersistenceRoot, parentSessionID)
-		compactionCount = req.Engine.CompactionCount()
+		compactionCount = req.Runtime.CompactionCount()
 	}
 	return uiStatusSnapshot{
 		CollectedAt:       collectedAt,

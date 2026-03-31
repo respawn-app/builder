@@ -68,14 +68,14 @@ func (c uiInputController) submitCmd(text string) tea.Cmd {
 		if m.engine == nil {
 			return submitDoneMsg{err: errors.New("runtime engine is not configured")}
 		}
-		msg, err := m.engine.SubmitUserMessage(context.Background(), text)
+		message, err := m.engine.SubmitUserMessage(context.Background(), text)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return submitDoneMsg{err: errSubmissionInterrupted}
 			}
 			return submitDoneMsg{err: err}
 		}
-		return submitDoneMsg{message: msg.Content}
+		return submitDoneMsg{message: message}
 	}
 }
 
@@ -85,7 +85,7 @@ func (c uiInputController) submitUserShellCmd(command string) tea.Cmd {
 		if m.engine == nil {
 			return submitDoneMsg{err: errors.New("runtime engine is not configured")}
 		}
-		_, err := m.engine.SubmitUserShellCommand(context.Background(), command)
+		err := m.engine.SubmitUserShellCommand(context.Background(), command)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return submitDoneMsg{err: errSubmissionInterrupted}

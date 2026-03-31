@@ -31,6 +31,6 @@ func (c uiInputController) submitQueuedUserMessagesCmd() tea.Cmd {
 			}
 			return submitDoneMsg{err: err}
 		}
-		return submitDoneMsg{message: msg.Content}
+		return submitDoneMsg{message: msg}
 	}
 }
