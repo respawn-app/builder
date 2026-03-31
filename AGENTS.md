@@ -17,6 +17,8 @@ The scope is intentionally narrow and quality-oriented.
   - Startup orchestration, auth gating, session selection, and top-level UI composition.
 - `server/runtime`
   - Agent step loop, retries, transcript assembly, tool orchestration, lock handling, interrupts.
+- `server/bootstrap`
+  - Server-owned embedded bootstrap composition for config/container resolution, auth-manager creation, and runtime-support setup shared by CLI flows.
 - `server/launch`
   - Server-owned bootstrap continuation resolution and session open/create/hydration planning shared by interactive and headless flows.
 - `server/runtimewire`
