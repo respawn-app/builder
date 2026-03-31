@@ -1711,7 +1711,7 @@ func TestMainInputUpDownSingleLineMoveToStartAndEnd(t *testing.T) {
 }
 
 func TestMainInputUpDownMultilineMoveAcrossLines(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.input = "1111\n22\n3333"
 	m.inputCursor = -1 // end of the input
 
@@ -1741,12 +1741,9 @@ func TestMainInputUpDownMultilineMoveAcrossLines(t *testing.T) {
 }
 
 func TestPromptHistoryUpDownBrowseSubmittedPrompts(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIPromptHistory([]string{"first prompt", "second line\nthird line", "/resume"}),
-	).(*uiModel)
+	)
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	updated := next.(*uiModel)
@@ -1780,12 +1777,9 @@ func TestPromptHistoryUpDownBrowseSubmittedPrompts(t *testing.T) {
 }
 
 func TestPromptHistoryUpCanEnterFromNewDraftAndRestoreItAfterReuse(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIPromptHistory([]string{"hello"}),
-	).(*uiModel)
+	)
 	m.input = "world"
 	m.inputCursor = -1
 
@@ -1823,12 +1817,9 @@ func TestPromptHistoryUpCanEnterFromNewDraftAndRestoreItAfterReuse(t *testing.T)
 }
 
 func TestPromptHistoryUpFromMultilineDraftTailMovesWithinDraftBeforeRecall(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIPromptHistory([]string{"hello"}),
-	).(*uiModel)
+	)
 	m.input = "one\ntwo"
 	m.inputCursor = -1
 
@@ -1858,12 +1849,9 @@ func TestPromptHistoryUpFromMultilineDraftTailMovesWithinDraftBeforeRecall(t *te
 }
 
 func TestPromptHistoryUsesBoundaryNavigationForMultilineSelection(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIPromptHistory([]string{"one\ntwo\nthree", "older"}),
-	).(*uiModel)
+	)
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	updated := next.(*uiModel)
@@ -1911,12 +1899,9 @@ func TestPromptHistoryBellWritesRawTerminalBell(t *testing.T) {
 		writeTerminalSequence = previous
 	})
 
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIPromptHistory([]string{"only prompt"}),
-	).(*uiModel)
+	)
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	updated := next.(*uiModel)
@@ -1936,7 +1921,7 @@ func TestPromptHistoryBellWritesRawTerminalBell(t *testing.T) {
 }
 
 func TestInterruptedQueuedPromptDoesNotEnterHistoryBeforeFlush(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.input = "queued later"
@@ -2239,7 +2224,7 @@ func TestPreSubmitCheckErrorRestoresQueuedSteeringAndDiscardsEngineQueue(t *test
 		t.Fatalf("new engine: %v", err)
 	}
 
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.input = "continue"
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -2699,7 +2684,7 @@ func TestSubmitErrorRestoresQueuedSteeringAndDiscardsEngineQueue(t *testing.T) {
 		t.Fatalf("new engine: %v", err)
 	}
 
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.busy = true
 	m.input = "restored steering"
 
@@ -2734,7 +2719,7 @@ func TestSubmitErrorRestoresQueuedSteeringAndDiscardsEngineQueue(t *testing.T) {
 }
 
 func TestBusyTabQueuesPostTurnSubmissionAndKeepsInputUnlocked(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.input = "queue this"
 
@@ -2758,7 +2743,7 @@ func TestBusyTabQueuesPostTurnSubmissionAndKeepsInputUnlocked(t *testing.T) {
 }
 
 func TestQueueInjectedInputIgnoresBlankTextWithoutClearingInput(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.input = "keep this draft"
 	m.activity = uiActivityIdle
 
@@ -2776,7 +2761,7 @@ func TestQueueInjectedInputIgnoresBlankTextWithoutClearingInput(t *testing.T) {
 }
 
 func TestCtrlCWhileBusyRestoresQueuedMessagesIntoInput(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.queued = []string{"first queued", "second queued", "third queued"}
 
@@ -2801,7 +2786,7 @@ func TestCtrlCWhileBusyRestoresQueuedMessagesIntoInput(t *testing.T) {
 }
 
 func TestCtrlCWhileBusyRestoresQueuedSlashCommandsIntoInput(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.queued = []string{"/name queued title"}
 
@@ -2823,7 +2808,7 @@ func TestCtrlCWhileBusyRestoresQueuedSlashCommandsIntoInput(t *testing.T) {
 }
 
 func TestCtrlCWhileBusyRestoresMixedQueuedInputsIntoInput(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.queued = []string{"draft one", "draft two", "/name queued title", "later draft"}
 
@@ -2839,7 +2824,7 @@ func TestCtrlCWhileBusyRestoresMixedQueuedInputsIntoInput(t *testing.T) {
 }
 
 func TestCtrlCWhileBusyUnlocksSubmitLockedInput(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.inputSubmitLocked = true
 	m.lockedInjectText = "keep this message"
@@ -2877,7 +2862,7 @@ func TestCtrlCRestoresQueuedSteeringAndDiscardsEngineQueue(t *testing.T) {
 		t.Fatalf("new engine: %v", err)
 	}
 
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.busy = true
 	m.input = "restored steering"
 
@@ -2912,7 +2897,7 @@ func TestCtrlCRestoresQueuedSteeringAndDiscardsEngineQueue(t *testing.T) {
 }
 
 func TestInterruptedSubmitDoneRestoresQueueIntoInputAndDoesNotAutoDrain(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.queued = []string{"first", "second"}
 
@@ -2941,7 +2926,7 @@ func TestInterruptedSubmitDoneRestoresQueueIntoInputAndDoesNotAutoDrain(t *testi
 }
 
 func TestCompactDoneKeepsQueuedSteeringPending(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.input = "please continue with tests"
 
@@ -2965,7 +2950,7 @@ func TestCompactDoneKeepsQueuedSteeringPending(t *testing.T) {
 }
 
 func TestRenderInputLinesUsesHorizontalBordersOnly(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 40
 	m.termHeight = 16
 	m.input = "hello world"
@@ -2988,7 +2973,7 @@ func TestRenderInputLinesUsesHorizontalBordersOnly(t *testing.T) {
 }
 
 func TestCalcChatLinesShrinksWhenInputWraps(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 20
 	m.termHeight = 12
 
@@ -3004,7 +2989,7 @@ func TestCalcChatLinesShrinksWhenInputWraps(t *testing.T) {
 }
 
 func TestCalcChatLinesUsesFullHeightInDetailMode(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 20
 	m.termHeight = 12
 	m.input = strings.Repeat("x", 80)
@@ -3036,7 +3021,7 @@ func TestCalcChatLinesRemainsViewportBasedDuringActiveWork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.termWidth = 100
 	m.termHeight = 24
 	m.busy = true
@@ -3063,7 +3048,7 @@ func TestViewDuringActiveWorkKeepsCommittedTranscriptVisible(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.termWidth = 100
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -3089,7 +3074,7 @@ func TestViewDuringActiveWorkKeepsCommittedTranscriptVisible(t *testing.T) {
 }
 
 func TestRenderQueuedMessagesPaneShowsNewestFiveAndOverflowLine(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.queued = []string{"one", "two", "three", "four", "five", "six", "seven"}
 
 	lines := m.renderQueuedMessagesPane(40)
@@ -3109,7 +3094,7 @@ func TestRenderQueuedMessagesPaneShowsNewestFiveAndOverflowLine(t *testing.T) {
 }
 
 func TestRenderQueuedMessagesPaneTruncatesToOneLineWithEllipsis(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.queued = []string{"short\nsecond line", "abcdefghijklmnopqrstuvwxyz"}
 
 	lines := m.renderQueuedMessagesPane(10)
@@ -3126,7 +3111,7 @@ func TestRenderQueuedMessagesPaneTruncatesToOneLineWithEllipsis(t *testing.T) {
 }
 
 func TestRenderQueuedMessagesPaneShowsPendingInjectedAfterQueuedMessages(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.queued = []string{"queued later"}
 	m.pendingInjected = []string{"please continue with tests"}
 
@@ -3144,7 +3129,7 @@ func TestRenderQueuedMessagesPaneShowsPendingInjectedAfterQueuedMessages(t *test
 }
 
 func TestRenderQueuedMessagesPanePrioritizesPendingInjectedWithinVisibleLimit(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.queued = []string{"one", "two", "three", "four", "five", "six"}
 	m.pendingInjected = []string{"first steering", "second steering"}
 
@@ -3162,7 +3147,7 @@ func TestRenderQueuedMessagesPanePrioritizesPendingInjectedWithinVisibleLimit(t 
 }
 
 func TestViewPlacesQueuedPaneBetweenSlashPickerAndInput(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 18
 	m.windowSizeKnown = true
@@ -3187,7 +3172,7 @@ func TestSlashPickerShowsFastForOpenAIFirstPartyResponsesProvider(t *testing.T) 
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.input = "/"
 	m.refreshSlashCommandFilterFromInput()
 
@@ -3210,7 +3195,7 @@ func TestSlashPickerHidesFastForNonFirstPartyResponsesProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.input = "/"
 	m.refreshSlashCommandFilterFromInput()
 
@@ -3224,7 +3209,7 @@ func TestSlashPickerHidesFastForNonFirstPartyResponsesProvider(t *testing.T) {
 }
 
 func TestCalcChatLinesShrinksForQueuedPane(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 40
 	m.termHeight = 20
 	m.input = "ok"
@@ -3243,7 +3228,7 @@ func TestCalcChatLinesShrinksForQueuedPane(t *testing.T) {
 }
 
 func TestRenderChatPanelRendersFullWidthMetaDivider(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	style := uiThemeStyles("dark")
 
 	m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: "hello"})
@@ -3267,7 +3252,7 @@ func TestRenderChatPanelRendersFullWidthMetaDivider(t *testing.T) {
 }
 
 func TestRenderChatPanelKeepsNewestLinesWhenContentOverflows(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	style := uiThemeStyles("dark")
 	m.forwardToView(tui.SetViewportSizeMsg{Lines: 6, Width: 80})
 	m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "a1"})
@@ -4261,7 +4246,7 @@ func TestPSOverlayRefreshPreservesSelectionByProcessID(t *testing.T) {
 		t.Fatalf("start second job: %v", err)
 	}
 
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIBackgroundManager(manager))
 	m.refreshProcessEntries()
 	if len(m.processList.entries) != 2 {
 		t.Fatalf("expected two process entries, got %d", len(m.processList.entries))
@@ -4426,7 +4411,7 @@ func TestPSOverlayIgnoresTranscriptModeTogglesWhileOpen(t *testing.T) {
 }
 
 func TestSlashCommandPickerRendersSevenLines(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.input = "/"
 
 	lines := m.renderSlashCommandPicker(80)
@@ -4440,7 +4425,7 @@ func TestSlashCommandPickerRendersSevenLines(t *testing.T) {
 }
 
 func TestSlashCommandPickerHidesInArgumentMode(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
 	updated := next.(*uiModel)
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("new")})
@@ -4455,7 +4440,7 @@ func TestSlashCommandPickerHidesInArgumentMode(t *testing.T) {
 }
 
 func TestSlashCommandArrowKeysNavigatePickerAndReplaceInput(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
 	updated := next.(*uiModel)
 
@@ -4473,7 +4458,7 @@ func TestSlashCommandArrowKeysNavigatePickerAndReplaceInput(t *testing.T) {
 }
 
 func TestSlashCommandArrowKeysDoNotOverrideArgumentMode(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.input = "/new arg"
 	m.inputCursor = -1
 
@@ -4488,7 +4473,7 @@ func TestSlashCommandArrowKeysDoNotOverrideArgumentMode(t *testing.T) {
 }
 
 func TestSlashCommandTabAutocompletesSelectedCommandAndAddsSpace(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.input = "/ne"
 	m.refreshSlashCommandFilterFromInput()
 
@@ -4506,7 +4491,7 @@ func TestSlashCommandTabAutocompletesSelectedCommandAndAddsSpace(t *testing.T) {
 }
 
 func TestSlashCommandEnterExecutesSelectedPartialMatch(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.input = "/ex"
 	m.refreshSlashCommandFilterFromInput()
 
@@ -4524,7 +4509,7 @@ func TestSlashCommandEnterExecutesSelectedPartialMatch(t *testing.T) {
 }
 
 func TestBusyTabQueuesSlashCommandAndFlushesAfterTurn(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.input = "/name queued title"
@@ -4552,7 +4537,7 @@ func TestBusyTabQueuesSlashCommandAndFlushesAfterTurn(t *testing.T) {
 }
 
 func TestBusyQueuedSlashCommandDrainContinuesIntoQueuedPrompt(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.input = "/name queued title"
@@ -4585,7 +4570,7 @@ func TestBusyQueuedSlashCommandDrainContinuesIntoQueuedPrompt(t *testing.T) {
 }
 
 func TestBusyQueuedUnknownSlashDrainsAsPromptSubmission(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.input = "/nope queued"
@@ -4640,7 +4625,7 @@ func TestAutoDrainStopsAfterQueuedPSInlineAppendsToInput(t *testing.T) {
 		t.Fatal("expected background process")
 	}
 
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIBackgroundManager(manager)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIBackgroundManager(manager))
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.queued = []string{"/ps inline " + res.SessionID, "summarize this"}
@@ -4670,12 +4655,9 @@ func TestAutoDrainStopsAfterQueuedPSInlineAppendsToInput(t *testing.T) {
 }
 
 func TestBusyQueuedReviewSlashCommandStartsFreshSessionAfterTurn(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIConversationFreshness(session.ConversationFreshnessEstablished),
-	).(*uiModel)
+	)
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.input = "/review cli/app"
@@ -4716,7 +4698,7 @@ func TestQueuedReviewUsesEngineConversationFreshnessWhenUIDidNotReceiveRuntimeUp
 		t.Fatalf("new engine: %v", err)
 	}
 
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.input = "/review cli/app"
@@ -4857,7 +4839,7 @@ func TestBackSlashCommandIgnoresRestoredPromptHistoryDraftInChildSession(t *test
 }
 
 func TestUnknownSlashCommandIsSubmittedAsPrompt(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.input = "/nope"
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -4876,12 +4858,9 @@ func TestFileSlashCommandSubmitsInjectedUserPrompt(t *testing.T) {
 	r.Register("prompt:review", "", func(string) commands.Result {
 		return commands.Result{Handled: true, SubmitUser: true, User: "# review\nexact body\n"}
 	})
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUICommandRegistry(r),
-	).(*uiModel)
+	)
 	m.input = "/prompt:review"
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -4900,12 +4879,9 @@ func TestFileSlashCommandSubmitsInjectedUserPrompt(t *testing.T) {
 
 func TestBuiltInReviewSlashCommandSubmitsInjectedUserPrompt(t *testing.T) {
 	r := commands.NewDefaultRegistry()
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUICommandRegistry(r),
-	).(*uiModel)
+	)
 	m.input = "/review cli/app"
 	if got := r.Execute("/review cli/app"); !got.Handled || !got.SubmitUser {
 		t.Fatalf("expected /review command to submit injected user prompt, got %+v", got)
@@ -4928,7 +4904,7 @@ func TestBuiltInReviewSlashCommandSubmitsInjectedUserPrompt(t *testing.T) {
 }
 
 func TestBuiltInInitSlashCommandSubmitsInjectedUserPrompt(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.input = "/init starter repo"
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -5531,7 +5507,7 @@ func TestSlashAutoCompactionShowsCompactionModeNoneNote(t *testing.T) {
 }
 
 func TestBusyUnsupportedSlashCommandShowsTransientErrorAndDoesNotQueue(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.input = "/compact keep details"
@@ -5569,7 +5545,7 @@ func TestBusyUnsupportedSlashCommandShowsTransientErrorAndDoesNotQueue(t *testin
 }
 
 func TestSlashCommandSetsExitAction(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.input = "/exit"
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -5583,7 +5559,7 @@ func TestSlashCommandSetsExitAction(t *testing.T) {
 }
 
 func TestSlashCommandSetsResumeAction(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.input = "/resume"
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -5597,15 +5573,12 @@ func TestSlashCommandSetsResumeAction(t *testing.T) {
 }
 
 func TestInitialTranscriptVisibleImmediately(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{
 			{Role: "user", Text: "hello"},
 			{Role: "assistant", Text: "world"},
 		}),
-	).(*uiModel)
+	)
 	m.termWidth = 80
 	m.termHeight = 20
 
@@ -5622,12 +5595,9 @@ func TestInitialTranscriptVisibleImmediately(t *testing.T) {
 }
 
 func TestInitAutoSubmitsStartupPrompt(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIStartupSubmit("run review"),
-	).(*uiModel)
+	)
 	m.termWidth = 80
 	m.termHeight = 20
 
@@ -5643,12 +5613,9 @@ func TestInitAutoSubmitsStartupPrompt(t *testing.T) {
 }
 
 func TestInitialInputSeedsDraftWithoutAutoSubmit(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialInput("draft reply"),
-	).(*uiModel)
+	)
 
 	if m.input != "draft reply" {
 		t.Fatalf("expected initial input draft, got %q", m.input)
@@ -5674,7 +5641,7 @@ func TestReviewerStatusEndToEnd_VerboseSuggestionsIssuedAndStatusConcise(t *test
 	eng.AppendLocalEntryWithOngoingText("reviewer_suggestions", "Supervisor suggested:\n1. First detailed suggestion text\n2. Second detailed suggestion text", "Supervisor suggested:\n1. First detailed suggestion text\n2. Second detailed suggestion text")
 	eng.AppendLocalEntry("reviewer_status", "Supervisor ran: 2 suggestions, no changes applied.")
 
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent), WithUITheme("dark")).(*uiModel)
+	m := newProjectedEngineUIModel(eng, WithUITheme("dark"))
 	m.termWidth = 100
 	m.termHeight = 24
 
@@ -5721,7 +5688,7 @@ func TestStatusLineShowsContextUsageWhenAvailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(line, "cache --") {
@@ -5736,13 +5703,10 @@ func TestStatusLineShowsContextUsageWhenAvailable(t *testing.T) {
 }
 
 func TestStatusLineShowsThinkingLevelForReasoningModels(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIModelName("gpt-5.3-codex"),
 		WithUIThinkingLevel("high"),
-	).(*uiModel)
+	)
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(line, "gpt-5.3-codex high") {
@@ -5751,15 +5715,12 @@ func TestStatusLineShowsThinkingLevelForReasoningModels(t *testing.T) {
 }
 
 func TestStatusLineShowsFastAfterThinkingLevelWhenAvailableAndEnabled(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIModelName("gpt-5.3-codex"),
 		WithUIThinkingLevel("high"),
 		WithUIFastModeAvailable(true),
 		WithUIFastModeEnabled(true),
-	).(*uiModel)
+	)
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(line, "gpt-5.3-codex high fast") {
@@ -5768,14 +5729,11 @@ func TestStatusLineShowsFastAfterThinkingLevelWhenAvailableAndEnabled(t *testing
 }
 
 func TestStatusLineOmitsFastWhenUnavailable(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIModelName("gpt-5.3-codex"),
 		WithUIThinkingLevel("high"),
 		WithUIFastModeEnabled(true),
-	).(*uiModel)
+	)
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
 	if strings.Contains(line, " high fast") {
@@ -5784,12 +5742,9 @@ func TestStatusLineOmitsFastWhenUnavailable(t *testing.T) {
 }
 
 func TestStatusLineRightAlignsTransientNotice(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIModelName("gpt-5"),
-	).(*uiModel)
+	)
 	m.setTransientStatusWithKind("done", uiStatusNoticeSuccess)
 
 	line := stripANSIPreserve(m.renderStatusLine(80, uiThemeStyles("dark")))
@@ -5815,7 +5770,7 @@ func TestStatusLineTruncatesRightNoticeWithoutPushingOutContextUsage(t *testing.
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.setTransientStatusWithKind("this is a very long background completion notice that should truncate before it reaches the context progress bar", uiStatusNoticeSuccess)
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(70, uiThemeStyles("dark")))
@@ -5843,7 +5798,7 @@ func TestStatusLineRendersReasoningHeaderBeforeContextUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.reasoningStatusHeader = "Summarizing fix and investigation"
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
@@ -5865,7 +5820,7 @@ func TestStatusLineShowsHelpHintWhenIdleInOngoingMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
 	if !containsInOrder(line, m.statusHelpHint(), "0%") {
@@ -5883,7 +5838,7 @@ func TestStatusLineFallsBackToF1HelpHintWhenQuestionMarkWouldType(t *testing.T) 
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.input = "draft"
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
@@ -5928,7 +5883,7 @@ func TestStatusLineHidesHelpHintWhenOngoingModeIsNotIdle(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+			m := newProjectedEngineUIModel(eng)
 			tc.apply(m)
 
 			line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
@@ -5949,7 +5904,7 @@ func TestStatusLineHidesHelpHintOutsideOngoingMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.forwardToView(tui.ToggleModeMsg{})
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
@@ -6122,7 +6077,7 @@ func TestBusyEnterDuringReviewerUsesSteeringInjection(t *testing.T) {
 }
 
 func TestMouseSGRReportRunesDoNotPolluteInput(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.input = "draft"
 	m.inputCursor = len([]rune(m.input))
 
@@ -6159,7 +6114,7 @@ func TestMouseSGRReportRunesDoNotPolluteInput(t *testing.T) {
 }
 
 func TestMouseSGRSplitEscAndRunesDoNotArmRollback(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated := next.(*uiModel)
@@ -6321,7 +6276,7 @@ func (statusLineAzureClient) ProviderCapabilities(context.Context) (llm.Provider
 }
 
 func TestHelpToggleRendersBelowQueuedMessagesAndInput(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 120
 	m.termHeight = 40
 	m.windowSizeKnown = true
@@ -6365,7 +6320,7 @@ func TestHelpToggleRendersBelowQueuedMessagesAndInput(t *testing.T) {
 }
 
 func TestHelpRollbackModeRowsUseActiveStyles(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.helpVisible = true
 	m.windowSizeKnown = true
 	width := 180
@@ -6392,7 +6347,7 @@ func TestHelpRollbackModeRowsUseActiveStyles(t *testing.T) {
 }
 
 func TestHelpDismissesOnRegisteredKeyAndAppliesAction(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -6412,7 +6367,7 @@ func TestHelpDismissesOnRegisteredKeyAndAppliesAction(t *testing.T) {
 }
 
 func TestHelpDismissesOnAnyKeypress(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -6433,7 +6388,7 @@ func TestHelpDismissesOnAnyKeypress(t *testing.T) {
 }
 
 func TestQuestionMarkTogglesHelpWhenInputIsEmpty(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -6448,7 +6403,7 @@ func TestQuestionMarkTogglesHelpWhenInputIsEmpty(t *testing.T) {
 }
 
 func TestQuestionMarkInsertsLiteralWhenInputIsNotEmpty(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -6468,7 +6423,7 @@ func TestQuestionMarkInsertsLiteralWhenInputIsNotEmpty(t *testing.T) {
 }
 
 func TestAltQuestionMarkTogglesHelp(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -6483,7 +6438,7 @@ func TestAltQuestionMarkTogglesHelp(t *testing.T) {
 }
 
 func TestF1TogglesHelp(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -6498,7 +6453,7 @@ func TestF1TogglesHelp(t *testing.T) {
 }
 
 func TestAltSlashTogglesHelp(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -6513,7 +6468,7 @@ func TestAltSlashTogglesHelp(t *testing.T) {
 }
 
 func TestHelpToggleClearsRollbackEscArming(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -6548,7 +6503,7 @@ func TestHelpToggleClearsRollbackEscArming(t *testing.T) {
 }
 
 func TestCmdSlashCSIUTogglesHelp(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -6563,7 +6518,7 @@ func TestCmdSlashCSIUTogglesHelp(t *testing.T) {
 }
 
 func TestHelpToggleKeyHidesVisibleHelp(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -6580,7 +6535,7 @@ func TestHelpToggleKeyHidesVisibleHelp(t *testing.T) {
 }
 
 func TestHelpToggleIgnoredInDetailMode(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -6596,7 +6551,7 @@ func TestHelpToggleIgnoredInDetailMode(t *testing.T) {
 }
 
 func TestTranscriptToggleClosesVisibleHelp(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -6616,7 +6571,7 @@ func TestTranscriptToggleClosesVisibleHelp(t *testing.T) {
 }
 
 func TestHelpRollbackSelectionDismissesAndMovesSelection(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -6641,7 +6596,7 @@ func TestHelpRollbackSelectionDismissesAndMovesSelection(t *testing.T) {
 }
 
 func TestHelpRollbackEditDismissesAndReturnsToSelection(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -6669,7 +6624,7 @@ func TestHelpRollbackEditDismissesAndReturnsToSelection(t *testing.T) {
 }
 
 func TestLockedInputEditKeysDismissHelpAndStillNoOp(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 24
 	m.windowSizeKnown = true
