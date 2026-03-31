@@ -121,7 +121,7 @@ Boundary-enforcement decision:
 
 Initial enforcement shape to carry into Phase 1:
 
-1. Add one architecture test package, for example `internal/architecture`, that asserts protected frontend code does not import banned server internals.
+1. Add one architecture-boundary enforcement layer that asserts protected frontend code does not import banned server internals.
 2. Source package/file metadata from the Go toolchain (`go list` or equivalent package inspection), so the rule follows real import edges.
 3. Keep the deny list focused on server-authority packages for the first cut:
    - `builder/server/runtime`
