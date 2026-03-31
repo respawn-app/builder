@@ -3,8 +3,8 @@ package app
 import "builder/shared/clientui"
 
 func (m *uiModel) runtimeStatus() clientui.RuntimeStatus {
-	if m.engine != nil {
-		return m.engine.Status()
+	if client := m.runtimeClient(); client != nil {
+		return client.Status()
 	}
 	return clientui.RuntimeStatus{
 		ReviewerFrequency:     m.reviewerMode,

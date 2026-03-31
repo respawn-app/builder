@@ -3,8 +3,8 @@ package app
 import "builder/shared/clientui"
 
 func (m *uiModel) runtimeSessionView() clientui.RuntimeSessionView {
-	if m.engine != nil {
-		return m.engine.SessionView()
+	if client := m.runtimeClient(); client != nil {
+		return client.SessionView()
 	}
 	entries := make([]clientui.ChatEntry, 0, len(m.transcriptEntries))
 	for _, entry := range m.transcriptEntries {
