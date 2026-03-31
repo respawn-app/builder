@@ -15,7 +15,9 @@ Interactive path today:
 - `cli/app/app.go:Run`
   - selects interactive auth flow and shared bootstrap
 - `cli/app/bootstrap.go:bootstrapApp`
-  - loads config, resolves workspace/container, creates `auth.Manager`, runs auth/onboarding gates, creates background shell manager/router, creates fast-mode state
+  - coordinates frontend auth/onboarding UX over server-owned bootstrap state
+- `server/bootstrap`
+  - owns config/container resolution, `auth.Manager` creation, and runtime-support setup for embedded CLI flows
 - `server/launch.ResolveBootstrapPlan`
   - server-owned continuation resolution for workspace root and persisted OpenAI base URL before config reload
 - `cli/app/session_lifecycle.go:runSessionLifecycle`
@@ -68,6 +70,7 @@ Must not own:
 
 Currently split between landed server packages and remaining mixed adapters:
 
+- `server/bootstrap`
 - `server/launch`
 - `server/runtimewire`
 - `cli/app/bootstrap.go`
@@ -84,7 +87,7 @@ This root should own:
 - LLM provider client construction from `server/llm`
 - `runtime.Engine` construction from `server/runtime`
 
-This is already server composition in substance; it is only living in the wrong package.
+This is now mostly server composition in code as well; the main remaining leak is that `cli/app/bootstrap.go` still drives auth/onboarding interaction and `cli/app/session_lifecycle.go` still performs privileged lifecycle mutations directly.
 
 ## 3. Frontend View-Model Root
 

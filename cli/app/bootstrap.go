@@ -3,16 +3,12 @@ package app
 import (
 	"context"
 	"errors"
-	"os"
-	"strings"
-	"time"
 
 	"builder/server/auth"
-	"builder/server/launch"
+	serverbootstrap "builder/server/bootstrap"
 	"builder/server/runtime"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/config"
-	"builder/shared/textutil"
 )
 
 type appBootstrap struct {
@@ -27,111 +23,69 @@ type appBootstrap struct {
 }
 
 func bootstrapApp(ctx context.Context, opts Options, interactor authInteractor) (appBootstrap, error) {
-	bootstrapPlan := launch.BootstrapPlan{
-		WorkspaceRoot:    requestedWorkspaceRoot(opts),
-		OpenAIBaseURL:    strings.TrimSpace(opts.OpenAIBaseURL),
-		UseOpenAIBaseURL: opts.OpenAIBaseURLExplicit,
-	}
-	cfg, err := loadBootstrapConfig(opts, bootstrapPlan.WorkspaceRoot, bootstrapPlan.OpenAIBaseURL, bootstrapPlan.UseOpenAIBaseURL)
-	if err != nil {
-		return appBootstrap{}, err
-	}
-	bootstrapPlan, err = launch.ResolveBootstrapPlan(cfg.PersistenceRoot, launch.BootstrapRequest{
-		WorkspaceRoot:         requestedWorkspaceRoot(opts),
-		WorkspaceRootExplicit: opts.WorkspaceRootExplicit,
-		SessionID:             strings.TrimSpace(opts.SessionID),
-		OpenAIBaseURL:         strings.TrimSpace(opts.OpenAIBaseURL),
-		OpenAIBaseURLExplicit: opts.OpenAIBaseURLExplicit,
-	})
-	if err != nil {
-		return appBootstrap{}, err
-	}
-	cfg, err = loadBootstrapConfig(opts, bootstrapPlan.WorkspaceRoot, bootstrapPlan.OpenAIBaseURL, bootstrapPlan.UseOpenAIBaseURL)
-	if err != nil {
-		return appBootstrap{}, err
-	}
-
-	_, containerDir, err := config.ResolveWorkspaceContainer(cfg)
-	if err != nil {
-		return appBootstrap{}, err
-	}
-
-	oauthOpts := auth.OpenAIOAuthOptions{
-		Issuer:   auth.DefaultOpenAIIssuer,
-		ClientID: textutil.FirstNonEmpty(strings.TrimSpace(os.Getenv("BUILDER_OAUTH_CLIENT_ID")), auth.DefaultOpenAIClientID),
-	}
 	if interactor == nil {
 		return appBootstrap{}, errors.New("auth interactor is required")
 	}
-	store := interactor.WrapStore(auth.NewFileStore(config.GlobalAuthConfigPath(cfg)))
-
-	mgr := auth.NewManager(
-		store,
-		auth.NewOpenAIOAuthRefresher(oauthOpts, time.Now, 5*time.Minute),
-		time.Now,
-	)
-	if err := ensureAuthReady(ctx, mgr, oauthOpts, cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen, interactor); err != nil {
-		return appBootstrap{}, err
-	}
-	if cfg, _, err = ensureOnboardingReady(ctx, cfg, mgr, interactor, func() (config.App, error) {
-		refreshedPlan, err := launch.ResolveBootstrapPlan(cfg.PersistenceRoot, launch.BootstrapRequest{
-			WorkspaceRoot:         requestedWorkspaceRoot(opts),
-			WorkspaceRootExplicit: opts.WorkspaceRootExplicit,
-			SessionID:             strings.TrimSpace(opts.SessionID),
-			OpenAIBaseURL:         strings.TrimSpace(opts.OpenAIBaseURL),
-			OpenAIBaseURLExplicit: opts.OpenAIBaseURLExplicit,
-		})
-		if err != nil {
-			return config.App{}, err
-		}
-		return loadBootstrapConfig(opts, refreshedPlan.WorkspaceRoot, refreshedPlan.OpenAIBaseURL, refreshedPlan.UseOpenAIBaseURL)
-	}); err != nil {
-		return appBootstrap{}, err
-	}
-
-	background, err := shelltool.NewManager(
-		shelltool.WithMinimumExecToBgTime(time.Duration(cfg.Settings.MinimumExecToBgSeconds) * time.Second),
-	)
+	request := buildBootstrapRequest(opts, resolveEnvLookup(interactor))
+	resolved, err := serverbootstrap.ResolveConfig(request)
 	if err != nil {
 		return appBootstrap{}, err
 	}
-
+	cfg := resolved.Config
+	store := interactor.WrapStore(auth.NewFileStore(config.GlobalAuthConfigPath(cfg)))
+	authSupport, err := serverbootstrap.BuildAuthSupport(store, request.LookupEnv, request.Now)
+	if err != nil {
+		return appBootstrap{}, err
+	}
+	if err := ensureAuthReady(ctx, authSupport.AuthManager, authSupport.OAuthOptions, cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen, interactor); err != nil {
+		return appBootstrap{}, err
+	}
+	if cfg, _, err = ensureOnboardingReady(ctx, cfg, authSupport.AuthManager, interactor, func() (config.App, error) {
+		refreshed, err := serverbootstrap.ResolveConfig(request)
+		if err != nil {
+			return config.App{}, err
+		}
+		return refreshed.Config, nil
+	}); err != nil {
+		return appBootstrap{}, err
+	}
+	runtimeSupport, err := serverbootstrap.BuildRuntimeSupport(cfg)
+	if err != nil {
+		return appBootstrap{}, err
+	}
 	return appBootstrap{
 		cfg:            cfg,
-		containerDir:   containerDir,
-		oauthOpts:      oauthOpts,
-		authManager:    mgr,
+		containerDir:   resolved.ContainerDir,
+		oauthOpts:      authSupport.OAuthOptions,
+		authManager:    authSupport.AuthManager,
 		authInteractor: interactor,
-		fastModeState:  runtime.NewFastModeState(cfg.Settings.PriorityRequestMode),
-		background:     background,
-		backgroundRouter: newBackgroundEventRouter(
-			background,
-			cfg.Settings.ShellOutputMaxChars,
-			shelltool.NormalizeBackgroundOutputMode(string(cfg.Settings.BGShellsOutput)),
-		),
+		fastModeState:  runtimeSupport.FastModeState,
+		background:     runtimeSupport.Background,
+		backgroundRouter: &backgroundEventRouter{
+			inner:       runtimeSupport.BackgroundRouter,
+			background:  runtimeSupport.Background,
+			outputLimit: cfg.Settings.ShellOutputMaxChars,
+			outputMode:  shelltool.NormalizeBackgroundOutputMode(string(cfg.Settings.BGShellsOutput)),
+		},
 	}, nil
 }
 
-func loadBootstrapConfig(opts Options, workspaceRoot, openAIBaseURL string, useOpenAIBaseURL bool) (config.App, error) {
-	loadOpts := config.LoadOptions{
-		Model:               opts.Model,
-		ProviderOverride:    opts.ProviderOverride,
-		ThinkingLevel:       opts.ThinkingLevel,
-		Theme:               opts.Theme,
-		ModelTimeoutSeconds: opts.ModelTimeoutSeconds,
-		ShellTimeoutSeconds: opts.ShellTimeoutSeconds,
-		Tools:               opts.Tools,
+func buildBootstrapRequest(opts Options, lookupEnv func(string) string) serverbootstrap.Request {
+	return serverbootstrap.Request{
+		WorkspaceRoot:         opts.WorkspaceRoot,
+		WorkspaceRootExplicit: opts.WorkspaceRootExplicit,
+		SessionID:             opts.SessionID,
+		OpenAIBaseURL:         opts.OpenAIBaseURL,
+		OpenAIBaseURLExplicit: opts.OpenAIBaseURLExplicit,
+		LookupEnv:             lookupEnv,
+		LoadOptions: config.LoadOptions{
+			Model:               opts.Model,
+			ProviderOverride:    opts.ProviderOverride,
+			ThinkingLevel:       opts.ThinkingLevel,
+			Theme:               opts.Theme,
+			ModelTimeoutSeconds: opts.ModelTimeoutSeconds,
+			ShellTimeoutSeconds: opts.ShellTimeoutSeconds,
+			Tools:               opts.Tools,
+		},
 	}
-	if useOpenAIBaseURL {
-		loadOpts.OpenAIBaseURL = openAIBaseURL
-	}
-	return config.Load(workspaceRoot, loadOpts)
-}
-
-func requestedWorkspaceRoot(opts Options) string {
-	workspaceRoot := strings.TrimSpace(opts.WorkspaceRoot)
-	if workspaceRoot == "" {
-		return "."
-	}
-	return workspaceRoot
 }
