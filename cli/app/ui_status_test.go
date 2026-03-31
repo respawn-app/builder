@@ -106,10 +106,7 @@ func TestStatusCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 		CompactionCount: 3,
 	}}
 
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIStatusConfig(uiStatusConfig{
 			WorkspaceRoot: "/tmp/workdir",
 			Settings: config.Settings{
@@ -118,7 +115,7 @@ func TestStatusCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 			Source: config.SourceReport{SettingsPath: "/Users/test/.builder/config.toml"},
 		}),
 		WithUIStatusCollector(collector),
-	).(*uiModel)
+	)
 	m.termWidth = 100
 	m.termHeight = 40
 	m.windowSizeKnown = true
@@ -191,13 +188,10 @@ func TestStatusCommandProgressivelyLoadsSections(t *testing.T) {
 		gitResult: uiStatusGitStageResult{Git: uiStatusGitInfo{Visible: true, Branch: "master", Dirty: true, Ahead: 1}},
 	}
 
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir"}),
 		WithUIStatusCollector(collector),
-	).(*uiModel)
+	)
 	m.termWidth = 100
 	m.termHeight = 40
 	m.windowSizeKnown = true
@@ -232,13 +226,11 @@ func TestStatusCommandPersistsPromptHistoryWithoutBlockingOpen(t *testing.T) {
 		t.Fatalf("new engine: %v", err)
 	}
 
-	m := NewUIModel(
+	m := newProjectedEngineUIModel(
 		eng,
-		make(chan runtime.Event),
-		make(chan askEvent),
 		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: dir}),
 		WithUIStatusCollector(&stubProgressiveStatusCollector{}),
-	).(*uiModel)
+	)
 	m.termWidth = 100
 	m.termHeight = 40
 	m.windowSizeKnown = true
@@ -403,14 +395,11 @@ func TestStatusCommandRefreshesGitWhenCachedResultIsInvisible(t *testing.T) {
 		gitResult: uiStatusGitStageResult{Git: uiStatusGitInfo{Visible: true, Branch: "master", Dirty: true, Ahead: 2, Behind: 1}},
 	}
 
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir"}),
 		WithUIStatusCollector(collector),
 		WithUIStatusRepository(repo),
-	).(*uiModel)
+	)
 	m.termWidth = 100
 	m.termHeight = 40
 	m.windowSizeKnown = true
@@ -546,13 +535,10 @@ func TestStatusOverlayRendersGitErrorState(t *testing.T) {
 		Git:         uiStatusGitInfo{Visible: true, Error: "git status failed: context canceled"},
 	}}
 
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir"}),
 		WithUIStatusCollector(collector),
-	).(*uiModel)
+	)
 	m.termWidth = 100
 	m.termHeight = 20
 	m.windowSizeKnown = true
@@ -586,13 +572,10 @@ func TestStatusCommandProgressiveAuthWarningIsRendered(t *testing.T) {
 		},
 	}
 
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir"}),
 		WithUIStatusCollector(collector),
-	).(*uiModel)
+	)
 	m.termWidth = 100
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -633,13 +616,10 @@ func TestStatusOverlaySubscriptionBarDoesNotLeakANSIFragments(t *testing.T) {
 		},
 	}}
 
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir"}),
 		WithUIStatusCollector(collector),
-	).(*uiModel)
+	)
 	m.termWidth = 60
 	m.termHeight = 20
 	m.windowSizeKnown = true
@@ -672,13 +652,10 @@ func TestStatusOverlaySubscriptionLineShowsRelativeResetTime(t *testing.T) {
 		},
 	}}
 
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir"}),
 		WithUIStatusCollector(collector),
-	).(*uiModel)
+	)
 	m.termWidth = 80
 	m.termHeight = 20
 	m.windowSizeKnown = true
@@ -713,13 +690,10 @@ func TestStatusOverlaySubscriptionBarFitsNarrowWidth(t *testing.T) {
 		},
 	}}
 
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir"}),
 		WithUIStatusCollector(collector),
-	).(*uiModel)
+	)
 	m.termWidth = 18
 	m.termHeight = 20
 	m.windowSizeKnown = true
@@ -884,13 +858,10 @@ func TestStatusOverlayRendersQualifiedDuplicateSubscriptionBuckets(t *testing.T)
 		},
 	}}
 
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir"}),
 		WithUIStatusCollector(collector),
-	).(*uiModel)
+	)
 	m.termWidth = 100
 	m.termHeight = 20
 	m.windowSizeKnown = true
@@ -920,13 +891,10 @@ func TestStatusConfigHidesEmptyOverrideLine(t *testing.T) {
 		},
 	}}
 
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir"}),
 		WithUIStatusCollector(collector),
-	).(*uiModel)
+	)
 	m.termWidth = 100
 	m.termHeight = 20
 	m.windowSizeKnown = true

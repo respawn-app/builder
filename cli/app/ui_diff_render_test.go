@@ -2,7 +2,6 @@ package app
 
 import (
 	"builder/cli/tui"
-	"builder/server/runtime"
 	patchformat "builder/server/tools/patch/format"
 	"builder/shared/transcript"
 	"strings"
@@ -13,7 +12,7 @@ import (
 )
 
 func TestDetailDiffBackgroundCoversSyntaxHighlightedCodeInAppView(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 18
 	m.syncViewport()

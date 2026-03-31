@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"builder/cli/tui"
-	"builder/server/runtime"
 )
 
 func TestUIRenderFrameRenderRespectsPaddingPolicy(t *testing.T) {
@@ -29,7 +28,7 @@ func TestUIRenderFrameRenderRespectsPaddingPolicy(t *testing.T) {
 }
 
 func TestComputeNativeLiveRegionStateTracksStreamingBoundary(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 40
 	m.termHeight = 10
 	m.windowSizeKnown = true
@@ -65,7 +64,7 @@ func TestComputeNativeLiveRegionStateTracksStreamingBoundary(t *testing.T) {
 }
 
 func TestComputeNativeLiveRegionStatePadsFreshConversationToTerminalHeight(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 40
 	m.termHeight = 10
 	m.windowSizeKnown = true
