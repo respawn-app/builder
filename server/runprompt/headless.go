@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -32,8 +33,30 @@ type HeadlessBootstrap struct {
 
 func NewLoopbackRunPromptClient(boot HeadlessBootstrap) client.RunPromptClient {
 	launcher := &headlessPromptLauncher{boot: boot}
-	service := newDeduplicatingPromptService(strings.TrimSpace(boot.Config.PersistenceRoot), serverapi.NewPromptService(launcher))
+	service := newDeduplicatingPromptService(runPromptDedupeScopeID(boot), serverapi.NewPromptService(launcher))
 	return client.NewLoopbackRunPromptClient(service)
+}
+
+func runPromptDedupeScopeID(boot HeadlessBootstrap) string {
+	parts := make([]string, 0, 3)
+	if part := normalizedRunPromptScopePart(boot.Config.PersistenceRoot); part != "" {
+		parts = append(parts, part)
+	}
+	if part := normalizedRunPromptScopePart(boot.ContainerDir); part != "" {
+		parts = append(parts, part)
+	}
+	if part := normalizedRunPromptScopePart(boot.Config.WorkspaceRoot); part != "" {
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, "|")
+}
+
+func normalizedRunPromptScopePart(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	return filepath.Clean(trimmed)
 }
 
 type headlessPromptLauncher struct {
