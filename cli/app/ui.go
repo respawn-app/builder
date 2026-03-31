@@ -456,12 +456,12 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 	m.fastModeAvailable = status.FastModeAvailable
 	m.fastModeEnabled = status.FastModeEnabled
 	m.conversationFreshness = status.ConversationFreshness
-	if m.engine == nil {
+	if !m.hasRuntimeClient() {
 		m.reviewerEnabled = strings.TrimSpace(m.reviewerMode) != "" && strings.TrimSpace(m.reviewerMode) != "off"
 	}
 	m.refreshProcessEntries()
 	var startupNativeHistoryCmd tea.Cmd
-	if m.engine != nil {
+	if m.hasRuntimeClient() {
 		startupNativeHistoryCmd = m.runtimeAdapter().syncConversationFromEngine()
 	} else {
 		for _, entry := range m.initialTranscript {
