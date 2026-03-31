@@ -205,7 +205,7 @@ func TestForkRollbackLifecycleDoesNotPersistEditedPromptAsSourceDraft(t *testing
 		t.Fatalf("append assistant message: %v", err)
 	}
 
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	testSetRollbackEditing(m, 0, 1)
 	m.input = "edited user message"
 
@@ -312,7 +312,7 @@ func TestBackTeleportLifecycleSeedsParentDraftWithoutAutoSubmit(t *testing.T) {
 			if err != nil {
 				t.Fatalf("new child engine after transcript seed: %v", err)
 			}
-			childModel := NewUIModel(childEngine, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+			childModel := newProjectedEngineUIModel(childEngine)
 			childModel.activity = tt.childActivity
 			if tt.childOngoing != "" {
 				childModel.forwardToView(tui.SetConversationMsg{Entries: childModel.transcriptEntries, Ongoing: tt.childOngoing})
@@ -347,12 +347,10 @@ func TestBackTeleportLifecycleSeedsParentDraftWithoutAutoSubmit(t *testing.T) {
 			if err != nil {
 				t.Fatalf("new parent engine: %v", err)
 			}
-			parentModel := NewUIModel(
+			parentModel := newProjectedEngineUIModel(
 				parentEngine,
-				make(chan runtime.Event),
-				make(chan askEvent),
 				WithUIInitialInput(sessionLaunchInitialInput(reopenedParent, resolved.InitialInput)),
-			).(*uiModel)
+			)
 
 			if parentModel.input != tt.want {
 				t.Fatalf("expected parent draft %q, got %q", tt.want, parentModel.input)
@@ -412,11 +410,7 @@ func TestForkRollbackNativeStartupReplayUsesForkedHistory(t *testing.T) {
 		t.Fatalf("new runtime for fork: %v", err)
 	}
 
-	m := NewUIModel(
-		eng,
-		make(chan runtime.Event),
-		make(chan askEvent),
-	).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	next, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	updated := next.(*uiModel)
 	if cmd == nil {
