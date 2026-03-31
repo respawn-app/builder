@@ -17,6 +17,8 @@ if [ ${#args[@]} -eq 0 ]; then
 	args=(./...)
 fi
 
+"$repo_root/scripts/check-no-legacy-ui-constructor.sh"
+
 if go test "${args[@]}" >"$log_file" 2>&1; then
 	exit 0
 fi
