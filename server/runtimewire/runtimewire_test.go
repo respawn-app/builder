@@ -3,16 +3,22 @@ package runtimewire
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"builder/server/llm"
+	"builder/server/runtime"
+	"builder/server/session"
 	"builder/server/tools"
 	"builder/server/tools/askquestion"
 	patchtool "builder/server/tools/patch"
+	shelltool "builder/server/tools/shell"
 )
 
 func TestBuildToolRegistryAllowsHostedWebSearchWithoutLocalRuntimeBuilder(t *testing.T) {
@@ -97,6 +103,79 @@ func TestBuildToolRegistryViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 	}
 }
 
+func TestBackgroundEventRouterSkipsDeveloperNoticeForOrphanedShells(t *testing.T) {
+	root := t.TempDir()
+	storeA, err := session.Create(root, "ws-a", root)
+	if err != nil {
+		t.Fatalf("create store A: %v", err)
+	}
+	storeB, err := session.Create(root, "ws-b", root)
+	if err != nil {
+		t.Fatalf("create store B: %v", err)
+	}
+	clientA := &busyToggleFakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "a", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200_000}}}}
+	clientB := &busyToggleFakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "b", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200_000}}}}
+	var mu sync.Mutex
+	backgroundUpdates := 0
+	_, err = runtime.New(storeA, clientA, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine A: %v", err)
+	}
+	engB, err := runtime.New(storeB, clientB, tools.NewRegistry(), runtime.Config{Model: "gpt-5", OnEvent: func(evt runtime.Event) {
+		if evt.Kind == runtime.EventBackgroundUpdated {
+			mu.Lock()
+			backgroundUpdates++
+			mu.Unlock()
+		}
+	}})
+	if err != nil {
+		t.Fatalf("new engine B: %v", err)
+	}
+
+	router := &BackgroundEventRouter{}
+	router.SetActiveSession(storeB.Meta().SessionID, engB)
+	router.Handle(shelltool.Event{Snapshot: shelltool.Snapshot{ID: "1000", OwnerSessionID: storeA.Meta().SessionID, State: "completed", Command: "builder run", Workdir: root, LogPath: filepath.Join(root, "1000.log")}, Type: shelltool.EventCompleted, Preview: "done"})
+
+	time.Sleep(150 * time.Millisecond)
+	if got := clientB.CallCount(); got != 0 {
+		t.Fatalf("expected orphaned completion to skip model notice for active session, got %d client calls", got)
+	}
+	mu.Lock()
+	updates := backgroundUpdates
+	mu.Unlock()
+	if updates != 1 {
+		t.Fatalf("expected orphaned completion to still emit one background update event, got %d", updates)
+	}
+	if got := clientA.CallCount(); got != 0 {
+		t.Fatalf("did not expect inactive owner engine to be called, got %d", got)
+	}
+}
+
+func TestBackgroundEventRouterQueuesNoticeForActiveOwnerSession(t *testing.T) {
+	root := t.TempDir()
+	store, err := session.Create(root, "ws", root)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &busyToggleFakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "notice handled", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200_000}}}}
+	eng, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	router := &BackgroundEventRouter{}
+	router.SetActiveSession(store.Meta().SessionID, eng)
+	router.Handle(shelltool.Event{Snapshot: shelltool.Snapshot{ID: "1001", OwnerSessionID: store.Meta().SessionID, State: "completed", Command: "builder run", Workdir: root, LogPath: filepath.Join(root, "1001.log")}, Type: shelltool.EventCompleted, Preview: "done"})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for client.CallCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := client.CallCount(); got == 0 {
+		t.Fatal("expected active owner completion to queue a model notice")
+	}
+}
+
 type testLogger struct {
 	lines []string
 }
@@ -139,4 +218,31 @@ func outsideNonTempDir(t *testing.T) string {
 	}
 	t.Skip("unable to create non-temporary outside directory for test")
 	return ""
+}
+
+type busyToggleFakeClient struct {
+	mu        sync.Mutex
+	responses []llm.Response
+	calls     int
+}
+
+func (f *busyToggleFakeClient) Generate(ctx context.Context, _ llm.Request) (llm.Response, error) {
+	if err := ctx.Err(); err != nil {
+		return llm.Response{}, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	if len(f.responses) == 0 {
+		return llm.Response{}, errors.New("no fake response configured")
+	}
+	resp := f.responses[0]
+	f.responses = f.responses[1:]
+	return resp, nil
+}
+
+func (f *busyToggleFakeClient) CallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
 }
