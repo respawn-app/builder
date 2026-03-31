@@ -30,8 +30,10 @@ Interactive path today:
   - adapts frontend session-picker and status config onto `server/launch.Planner`, then prepares runtime wiring
 - `cli/app/runtime_factory.go:newRuntimeWiringWithBackground`
   - adapts interactive ask/bell UX onto `server/runtimewire` runtime preparation
+- `server/runtimeview`
+  - projects runtime-native events and chat snapshots into client-facing UI DTOs
 - `cli/app/ui_runtime_adapter.go`
-  - projects `runtime.Event` and `runtime.ChatSnapshot` directly into Bubble Tea/TUI state
+  - projects client-facing UI DTOs into Bubble Tea/TUI state
 
 Headless path today:
 
@@ -78,6 +80,7 @@ Currently split between landed server packages and remaining mixed adapters:
 - `server/authflow`
 - `server/lifecycle`
 - `server/launch`
+- `server/runtimeview`
 - `server/runtimewire`
 - `cli/app/bootstrap.go`
 - `cli/app/launch_planner.go`
@@ -112,6 +115,7 @@ This root should own:
 - projection from client/resource events into TUI messages
 
 It should eventually depend on client DTOs and hydration views, not `runtime.Event`, `runtime.ChatSnapshot`, `session.Store`, or `shelltool.Manager`.
+The first step of that cut is now landed for the runtime event/chat-snapshot adapter path via `shared/clientui` and `server/runtimeview`.
 
 ## Current Package Direction
 

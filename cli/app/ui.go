@@ -12,6 +12,7 @@ import (
 	"builder/server/session"
 	"builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
+	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/theme"
 
@@ -62,7 +63,7 @@ type nativeHistoryFlushMsg struct {
 }
 
 type runtimeEventMsg struct {
-	event runtime.Event
+	event clientui.Event
 }
 
 type renderDiagnosticMsg struct {
@@ -632,7 +633,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.ClearScreen
 	case runtimeEventMsg:
-		historyCmd := m.runtimeAdapter().handleRuntimeEvent(msg.event)
+		historyCmd := m.runtimeAdapter().handleProjectedRuntimeEvent(msg.event)
 		m.syncViewport()
 		return m, tea.Batch(waitRuntimeEvent(m.runtimeEvents), historyCmd)
 	case renderDiagnosticMsg:

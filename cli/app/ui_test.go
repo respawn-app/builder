@@ -2555,11 +2555,11 @@ func TestBusyEnterQueuesSteeringUntilFlushed(t *testing.T) {
 		t.Fatalf("expected one pending injected message, got %d", len(updated.pendingInjected))
 	}
 
-	next, _ = updated.Update(runtimeEventMsg{event: runtime.Event{
+	next, _ = updated.Update(projectedRuntimeEventMsg(runtime.Event{
 		Kind:             runtime.EventUserMessageFlushed,
 		UserMessage:      "please continue with tests",
 		UserMessageBatch: []string{"please continue with tests"},
-	}})
+	}))
 	updated = next.(*uiModel)
 	if updated.inputSubmitLocked {
 		t.Fatal("did not expect input lock after flush")
@@ -2590,11 +2590,11 @@ func TestBusyEnterCanQueueMultipleSteeringMessages(t *testing.T) {
 		t.Fatalf("expected input cleared after queueing multiple steering messages, got %q", updated.input)
 	}
 
-	next, _ = updated.Update(runtimeEventMsg{event: runtime.Event{
+	next, _ = updated.Update(projectedRuntimeEventMsg(runtime.Event{
 		Kind:             runtime.EventUserMessageFlushed,
 		UserMessage:      "first steering message\n\nsecond steering message",
 		UserMessageBatch: []string{"first steering message", "second steering message"},
-	}})
+	}))
 	updated = next.(*uiModel)
 	if len(updated.pendingInjected) != 0 {
 		t.Fatalf("expected queued steering cleared after batched flush, got %+v", updated.pendingInjected)
@@ -2623,11 +2623,11 @@ func TestBusySteeringBatchFlushPreservesPostTurnQueueOrder(t *testing.T) {
 		t.Fatalf("expected normal queued input preserved, got %+v", updated.queued)
 	}
 
-	next, _ = updated.Update(runtimeEventMsg{event: runtime.Event{
+	next, _ = updated.Update(projectedRuntimeEventMsg(runtime.Event{
 		Kind:             runtime.EventUserMessageFlushed,
 		UserMessage:      "first steering message\n\nsecond steering message",
 		UserMessageBatch: []string{"first steering message", "second steering message"},
-	}})
+	}))
 	updated = next.(*uiModel)
 	if len(updated.pendingInjected) != 0 {
 		t.Fatalf("expected steering queue cleared after batched flush, got %+v", updated.pendingInjected)
@@ -6088,14 +6088,14 @@ func TestStatusLineShowsLockedModelMarkerWhenConfiguredModelDiffers(t *testing.T
 func TestStatusLineShowsCompactionProgressWarning(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 
-	next, _ := m.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventCompactionStarted}})
+	next, _ := m.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventCompactionStarted}))
 	started := next.(*uiModel)
 	line := stripANSIAndTrimRight(started.renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(strings.ToLower(line), "compacting") {
 		t.Fatalf("expected compaction warning in status line, got %q", line)
 	}
 
-	next, _ = started.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventCompactionCompleted}})
+	next, _ = started.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventCompactionCompleted}))
 	completed := next.(*uiModel)
 	line = stripANSIAndTrimRight(completed.renderStatusLine(120, uiThemeStyles("dark")))
 	if strings.Contains(strings.ToLower(line), "compacting") {
@@ -6106,14 +6106,14 @@ func TestStatusLineShowsCompactionProgressWarning(t *testing.T) {
 func TestStatusLineShowsReviewerProgressWarning(t *testing.T) {
 	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
 
-	next, _ := m.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventReviewerStarted}})
+	next, _ := m.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventReviewerStarted}))
 	started := next.(*uiModel)
 	line := stripANSIAndTrimRight(started.renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(strings.ToLower(line), "review") {
 		t.Fatalf("expected reviewer warning in status line, got %q", line)
 	}
 
-	next, _ = started.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventReviewerCompleted}})
+	next, _ = started.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventReviewerCompleted}))
 	completed := next.(*uiModel)
 	line = stripANSIAndTrimRight(completed.renderStatusLine(120, uiThemeStyles("dark")))
 	if strings.Contains(strings.ToLower(line), "reviewing") || strings.Contains(strings.ToLower(line), "review in progress") {
@@ -6127,7 +6127,7 @@ func TestReviewerProgressKeepsInputEditable(t *testing.T) {
 	m.activity = uiActivityRunning
 	m.input = "keep this draft"
 
-	next, _ := m.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventReviewerStarted}})
+	next, _ := m.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventReviewerStarted}))
 	started := next.(*uiModel)
 	if !started.reviewerBlocking {
 		t.Fatal("expected reviewer state to be marked running")
@@ -6144,7 +6144,7 @@ func TestReviewerProgressKeepsInputEditable(t *testing.T) {
 		t.Fatalf("expected key input accepted while reviewer runs, got %q", locked.input)
 	}
 
-	next, _ = locked.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventReviewerCompleted}})
+	next, _ = locked.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventReviewerCompleted}))
 	completed := next.(*uiModel)
 	if completed.reviewerBlocking {
 		t.Fatal("expected reviewer state cleared after completion")
@@ -6162,7 +6162,7 @@ func TestBusyEnterDuringReviewerUsesSteeringInjection(t *testing.T) {
 	m.activity = uiActivityRunning
 	m.input = "steer after review"
 
-	next, _ := m.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventReviewerStarted}})
+	next, _ := m.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventReviewerStarted}))
 	started := next.(*uiModel)
 	if !started.reviewerRunning {
 		t.Fatal("expected reviewer to be running")

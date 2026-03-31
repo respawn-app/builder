@@ -5,8 +5,10 @@ import (
 	"strings"
 
 	"builder/cli/tui"
+	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/server/session"
+	"builder/shared/clientui"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -17,12 +19,12 @@ type uiRuntimeAdapter struct {
 	model *uiModel
 }
 
-func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
+func (a uiRuntimeAdapter) handleProjectedRuntimeEvent(evt clientui.Event) tea.Cmd {
 	m := a.model
 	switch evt.Kind {
-	case runtime.EventConversationUpdated:
+	case clientui.EventConversationUpdated:
 		return a.syncConversationFromEngine()
-	case runtime.EventAssistantDelta:
+	case clientui.EventAssistantDelta:
 		delta := evt.AssistantDelta
 		if strings.TrimSpace(delta) == uiNoopFinalToken {
 			return nil
@@ -31,28 +33,28 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 		if delta != "" {
 			m.forwardToView(tui.StreamAssistantMsg{Delta: delta})
 		}
-	case runtime.EventAssistantDeltaReset:
+	case clientui.EventAssistantDeltaReset:
 		m.sawAssistantDelta = false
 		m.forwardToView(tui.ClearOngoingAssistantMsg{})
-	case runtime.EventReasoningDelta:
+	case clientui.EventReasoningDelta:
 		if evt.ReasoningDelta != nil {
 			if header := extractReasoningStatusHeader(evt.ReasoningDelta.Text); header != "" {
 				m.reasoningStatusHeader = header
 			}
 			m.forwardToView(tui.UpsertStreamingReasoningMsg{Key: evt.ReasoningDelta.Key, Role: evt.ReasoningDelta.Role, Text: evt.ReasoningDelta.Text})
 		}
-	case runtime.EventReasoningDeltaReset:
+	case clientui.EventReasoningDeltaReset:
 		m.forwardToView(tui.ClearStreamingReasoningMsg{})
-	case runtime.EventCompactionStarted:
+	case clientui.EventCompactionStarted:
 		m.compacting = true
-	case runtime.EventCompactionCompleted, runtime.EventCompactionFailed:
+	case clientui.EventCompactionCompleted, clientui.EventCompactionFailed:
 		m.compacting = false
-	case runtime.EventReviewerStarted:
+	case clientui.EventReviewerStarted:
 		m.reviewerRunning = true
 		m.reviewerBlocking = true
-	case runtime.EventReviewerCompleted:
+	case clientui.EventReviewerCompleted:
 		m.clearReviewerState()
-	case runtime.EventRunStateChanged:
+	case clientui.EventRunStateChanged:
 		if evt.RunState != nil {
 			m.busy = evt.RunState.Busy
 			if evt.RunState.Busy {
@@ -66,7 +68,7 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 				m.forwardToView(tui.ClearStreamingReasoningMsg{})
 			}
 		}
-	case runtime.EventBackgroundUpdated:
+	case clientui.EventBackgroundUpdated:
 		m.refreshProcessEntries()
 		if evt.Background != nil && (evt.Background.Type == "completed" || evt.Background.Type == "killed") {
 			if evt.Background.NoticeSuppressed {
@@ -78,7 +80,7 @@ func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
 			}
 			return m.setTransientStatusWithKind(fmt.Sprintf("background shell %s %s", evt.Background.ID, evt.Background.State), kind)
 		}
-	case runtime.EventUserMessageFlushed:
+	case clientui.EventUserMessageFlushed:
 		shouldRecordHistory := a.onUserMessageFlushed(evt.UserMessage, evt.UserMessageBatch)
 		if shouldRecordHistory {
 			return sequenceCmds(a.syncConversationFromEngine(), m.recordPromptHistory(evt.UserMessage))
@@ -122,10 +124,10 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 		return nil
 	}
 	m.conversationFreshness = m.engine.ConversationFreshness()
-	return a.applyChatSnapshot(m.engine.ChatSnapshot())
+	return a.applyProjectedChatSnapshot(projectChatSnapshot(m.engine.ChatSnapshot()))
 }
 
-func (a uiRuntimeAdapter) applyChatSnapshot(snapshot runtime.ChatSnapshot) tea.Cmd {
+func (a uiRuntimeAdapter) applyProjectedChatSnapshot(snapshot clientui.ChatSnapshot) tea.Cmd {
 	m := a.model
 	if len(m.startupCmds) > 0 {
 		m.startupCmds = nil
@@ -140,7 +142,7 @@ func (a uiRuntimeAdapter) applyChatSnapshot(snapshot runtime.ChatSnapshot) tea.C
 			Role:        entry.Role,
 			Text:        entry.Text,
 			OngoingText: entry.OngoingText,
-			Phase:       entry.Phase,
+			Phase:       llm.MessagePhase(entry.Phase),
 			ToolCallID:  entry.ToolCallID,
 			ToolCall:    entry.ToolCall,
 		})
@@ -163,13 +165,21 @@ func (a uiRuntimeAdapter) applyChatSnapshot(snapshot runtime.ChatSnapshot) tea.C
 	return m.syncNativeHistoryFromTranscript()
 }
 
+func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
+	return a.handleProjectedRuntimeEvent(projectRuntimeEvent(evt))
+}
+
+func (a uiRuntimeAdapter) applyChatSnapshot(snapshot runtime.ChatSnapshot) tea.Cmd {
+	return a.applyProjectedChatSnapshot(projectChatSnapshot(snapshot))
+}
+
 func waitRuntimeEvent(ch <-chan runtime.Event) tea.Cmd {
 	return func() tea.Msg {
 		evt, ok := <-ch
 		if !ok {
 			return nil
 		}
-		return runtimeEventMsg{event: evt}
+		return runtimeEventMsg{event: projectRuntimeEvent(evt)}
 	}
 }
 
@@ -183,8 +193,8 @@ func waitAskEvent(ch <-chan askEvent) tea.Cmd {
 	}
 }
 
-func (m *uiModel) handleRuntimeEvent(evt runtime.Event) {
-	_ = m.runtimeAdapter().handleRuntimeEvent(evt)
+func (m *uiModel) handleRuntimeEvent(evt clientui.Event) {
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(evt)
 }
 
 func (m *uiModel) onUserMessageFlushed(text string) {

@@ -23,6 +23,8 @@ The scope is intentionally narrow and quality-oriented.
   - Server-owned auth readiness loop and env-backed auth-store policy used by CLI auth UX.
 - `server/lifecycle`
   - Server-owned interactive lifecycle mutations such as draft persistence, rollback fork creation, and logout-state clearing.
+- `server/runtimeview`
+  - Server-owned projection from runtime-native events and chat snapshots into client-facing UI DTOs.
 - `server/launch`
   - Server-owned bootstrap continuation resolution and session open/create/hydration planning shared by interactive and headless flows.
 - `server/runtimewire`
@@ -39,6 +41,8 @@ The scope is intentionally narrow and quality-oriented.
   - Mode-specific UI behavior (`ongoing`/`detail`) and rendering helpers.
 - `shared/config`
   - Persistence root/workspace container resolution and app-level paths.
+- `shared/clientui`
+  - Client-facing UI event and snapshot DTOs used by frontend adapters instead of runtime-native structs.
 - `cli/actions`
   - Typed action registry scaffold for `ask_question` post-answer hooks.
 - `docs`

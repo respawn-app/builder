@@ -100,7 +100,7 @@ func TestScenarioHarnessRestartAndSessionResumeKeepsTranscriptVisible(t *testing
 	}
 
 	eng.AppendLocalEntry("assistant", "post-resume live update")
-	next, _ := m.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventConversationUpdated}})
+	next, _ := m.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventConversationUpdated}))
 	updated := next.(*uiModel)
 	live := stripANSIAndTrimRight(updated.view.OngoingSnapshot())
 	if !strings.Contains(live, "post-resume live update") {
