@@ -13,9 +13,14 @@ func runUILoop(wiring *runtimeWiring, active config.Settings, logger *runLogger,
 
 func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, logger *runLogger, commandRegistry *commands.Registry, initialPrompt string, initialInput string, sessionName string, modelContractLocked bool, configuredModelName string, statusConfig uiStatusConfig) (tea.Model, error) {
 	options := mainUIProgramOptions(active)
+	runtimeClient := newUIRuntimeClient(wiring.engine)
+	sessionID := ""
+	if runtimeClient != nil {
+		sessionID = runtimeClient.SessionView().SessionID
+	}
 
 	program := tea.NewProgram(NewProjectedUIModel(
-		newUIRuntimeClient(wiring.engine),
+		runtimeClient,
 		projectRuntimeEventChannel(wiring.eventBridge.Channel()),
 		wiring.askBridge.Events(),
 		WithUILogger(logger),
@@ -31,7 +36,7 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 		WithUIStartupSubmit(initialPrompt),
 		WithUIInitialInput(initialInput),
 		WithUISessionName(sessionName),
-		WithUISessionID(wiring.engine.SessionID()),
+		WithUISessionID(sessionID),
 		WithUIStatusConfig(statusConfig),
 	), options...)
 

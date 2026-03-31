@@ -57,6 +57,7 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 - Process overlay hydration now also reads through a shared client-facing process surface instead of treating `shelltool.Snapshot` as the UI read model.
 - Conversation re-sync now also reads through a shared client-facing session view instead of composing separate transcript and freshness reads by hand.
 - Interactive UI command/submission flows now also depend on one model-level runtime control seam instead of treating `m.engine` as a special loopback object in each controller file.
+- Direct `engine` references inside `cli/app` are now confined to the deliberate loopback adapter implementation in `ui_runtime_client.go`; the UI-side control/read helpers call through model-level runtime seams instead of reaching into loopback runtime methods ad hoc.
 - The full existing UI characterization surface now exercises the projected/shared constructor directly.
 - `NewProjectedUIModel(...)` is now the only UI constructor entrypoint in `cli/app`; the engine-shaped compatibility wrapper has been deleted rather than retained as long-term API debt.
 - Repo-wide search now shows no remaining `NewUIModel(...)` callers in `cli/app`.
