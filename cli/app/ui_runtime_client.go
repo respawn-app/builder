@@ -19,22 +19,31 @@ func newUIRuntimeClient(engine *runtime.Engine) clientui.RuntimeClient {
 	return engineUIRuntimeClient{engine: engine}
 }
 
-func (c engineUIRuntimeClient) ReviewerFrequency() string   { return c.engine.ReviewerFrequency() }
-func (c engineUIRuntimeClient) ReviewerEnabled() bool       { return c.engine.ReviewerEnabled() }
-func (c engineUIRuntimeClient) AutoCompactionEnabled() bool { return c.engine.AutoCompactionEnabled() }
-func (c engineUIRuntimeClient) FastModeAvailable() bool     { return c.engine.FastModeAvailable() }
-func (c engineUIRuntimeClient) FastModeEnabled() bool       { return c.engine.FastModeEnabled() }
-func (c engineUIRuntimeClient) ConversationFreshness() clientui.ConversationFreshness {
-	return mapConversationFreshness(c.engine.ConversationFreshness())
-}
-func (c engineUIRuntimeClient) ParentSessionID() string { return c.engine.ParentSessionID() }
-func (c engineUIRuntimeClient) LastCommittedAssistantFinalAnswer() string {
-	return c.engine.LastCommittedAssistantFinalAnswer()
+func (c engineUIRuntimeClient) Status() clientui.RuntimeStatus {
+	usage := c.engine.ContextUsage()
+	return clientui.RuntimeStatus{
+		ReviewerFrequency:                 c.engine.ReviewerFrequency(),
+		ReviewerEnabled:                   c.engine.ReviewerEnabled(),
+		AutoCompactionEnabled:             c.engine.AutoCompactionEnabled(),
+		FastModeAvailable:                 c.engine.FastModeAvailable(),
+		FastModeEnabled:                   c.engine.FastModeEnabled(),
+		ConversationFreshness:             mapConversationFreshness(c.engine.ConversationFreshness()),
+		ParentSessionID:                   c.engine.ParentSessionID(),
+		LastCommittedAssistantFinalAnswer: c.engine.LastCommittedAssistantFinalAnswer(),
+		ThinkingLevel:                     c.engine.ThinkingLevel(),
+		CompactionMode:                    c.engine.CompactionMode(),
+		ContextUsage: clientui.RuntimeContextUsage{
+			UsedTokens:            usage.UsedTokens,
+			WindowTokens:          usage.WindowTokens,
+			CacheHitPercent:       usage.CacheHitPercent,
+			HasCacheHitPercentage: usage.HasCacheHitPercentage,
+		},
+		CompactionCount: c.engine.CompactionCount(),
+	}
 }
 func (c engineUIRuntimeClient) SetSessionName(name string) error {
 	return c.engine.SetSessionName(name)
 }
-func (c engineUIRuntimeClient) ThinkingLevel() string { return c.engine.ThinkingLevel() }
 func (c engineUIRuntimeClient) SetThinkingLevel(level string) error {
 	return c.engine.SetThinkingLevel(level)
 }
@@ -44,7 +53,6 @@ func (c engineUIRuntimeClient) SetFastModeEnabled(enabled bool) (bool, error) {
 func (c engineUIRuntimeClient) SetReviewerEnabled(enabled bool) (bool, string, error) {
 	return c.engine.SetReviewerEnabled(enabled)
 }
-func (c engineUIRuntimeClient) CompactionMode() string { return c.engine.CompactionMode() }
 func (c engineUIRuntimeClient) SetAutoCompactionEnabled(enabled bool) (bool, bool) {
 	return c.engine.SetAutoCompactionEnabled(enabled)
 }
@@ -84,16 +92,6 @@ func (c engineUIRuntimeClient) DiscardQueuedUserMessagesMatching(text string) in
 func (c engineUIRuntimeClient) RecordPromptHistory(text string) error {
 	return c.engine.RecordPromptHistory(text)
 }
-func (c engineUIRuntimeClient) ContextUsage() clientui.RuntimeContextUsage {
-	usage := c.engine.ContextUsage()
-	return clientui.RuntimeContextUsage{
-		UsedTokens:            usage.UsedTokens,
-		WindowTokens:          usage.WindowTokens,
-		CacheHitPercent:       usage.CacheHitPercent,
-		HasCacheHitPercentage: usage.HasCacheHitPercentage,
-	}
-}
-func (c engineUIRuntimeClient) CompactionCount() int { return c.engine.CompactionCount() }
 
 func mapConversationFreshness(freshness session.ConversationFreshness) clientui.ConversationFreshness {
 	if freshness.IsFresh() {

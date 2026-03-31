@@ -20,21 +20,27 @@ type RuntimeContextUsage struct {
 	HasCacheHitPercentage bool
 }
 
+type RuntimeStatus struct {
+	ReviewerFrequency                 string
+	ReviewerEnabled                   bool
+	AutoCompactionEnabled             bool
+	FastModeAvailable                 bool
+	FastModeEnabled                   bool
+	ConversationFreshness             ConversationFreshness
+	ParentSessionID                   string
+	LastCommittedAssistantFinalAnswer string
+	ThinkingLevel                     string
+	CompactionMode                    string
+	ContextUsage                      RuntimeContextUsage
+	CompactionCount                   int
+}
+
 type RuntimeClient interface {
-	ReviewerFrequency() string
-	ReviewerEnabled() bool
-	AutoCompactionEnabled() bool
-	FastModeAvailable() bool
-	FastModeEnabled() bool
-	ConversationFreshness() ConversationFreshness
-	ParentSessionID() string
-	LastCommittedAssistantFinalAnswer() string
+	Status() RuntimeStatus
 	SetSessionName(name string) error
-	ThinkingLevel() string
 	SetThinkingLevel(level string) error
 	SetFastModeEnabled(enabled bool) (bool, error)
 	SetReviewerEnabled(enabled bool) (bool, string, error)
-	CompactionMode() string
 	SetAutoCompactionEnabled(enabled bool) (bool, bool)
 	AppendLocalEntry(role, text string)
 	ChatSnapshot() ChatSnapshot
@@ -49,6 +55,4 @@ type RuntimeClient interface {
 	QueueUserMessage(text string)
 	DiscardQueuedUserMessagesMatching(text string) int
 	RecordPromptHistory(text string) error
-	ContextUsage() RuntimeContextUsage
-	CompactionCount() int
 }
