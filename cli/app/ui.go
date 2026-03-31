@@ -181,7 +181,7 @@ func WithUIFastModeEnabled(enabled bool) UIOption {
 
 func WithUIConversationFreshness(freshness session.ConversationFreshness) UIOption {
 	return func(m *uiModel) {
-		m.conversationFreshness = freshness
+		m.conversationFreshness = mapConversationFreshness(freshness)
 	}
 }
 
@@ -284,7 +284,7 @@ func (b *askBridge) Handle(req askquestion.Request) (askquestion.Response, error
 }
 
 type uiModel struct {
-	engine uiRuntimeClient
+	engine clientui.RuntimeClient
 	view   tui.Model
 
 	backgroundManager *shelltool.Manager
@@ -307,7 +307,7 @@ type uiModel struct {
 	reviewerEnabled          bool
 	reviewerMode             string
 	autoCompactionEnabled    bool
-	conversationFreshness    session.ConversationFreshness
+	conversationFreshness    clientui.ConversationFreshness
 
 	queued               []string
 	preSubmitCheckToken  uint64
@@ -411,12 +411,12 @@ type rollbackCandidate struct {
 }
 
 func NewUIModel(engine *runtime.Engine, runtimeEvents <-chan runtime.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
-	return newProjectedUIModel(engine, projectRuntimeEventChannel(runtimeEvents), askEvents, opts...)
+	return NewProjectedUIModel(newUIRuntimeClient(engine), projectRuntimeEventChannel(runtimeEvents), askEvents, opts...)
 }
 
-func newProjectedUIModel(engine *runtime.Engine, runtimeEvents <-chan clientui.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
+func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-chan clientui.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
 	m := &uiModel{
-		engine:                   newUIRuntimeClient(engine),
+		engine:                   runtimeClient,
 		view:                     tui.NewModel(),
 		activity:                 uiActivityIdle,
 		runtimeEvents:            runtimeEvents,
@@ -432,7 +432,7 @@ func newProjectedUIModel(engine *runtime.Engine, runtimeEvents <-chan clientui.E
 		debugKeys:                envFlagEnabled("BUILDER_DEBUG_KEYS"),
 		reviewerMode:             "off",
 		autoCompactionEnabled:    true,
-		conversationFreshness:    session.ConversationFreshnessFresh,
+		conversationFreshness:    clientui.ConversationFreshnessFresh,
 		interaction:              uiInteractionState{Mode: uiInputModeMain},
 		ask:                      uiAskState{inputCursor: -1},
 		rollback:                 uiRollbackState{phase: uiRollbackPhaseInactive},

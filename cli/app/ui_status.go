@@ -19,6 +19,7 @@ import (
 	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/server/session"
+	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/tokenutil"
 
@@ -63,7 +64,7 @@ const (
 )
 
 type uiStatusRequest struct {
-	Runtime               uiRuntimeClient
+	Runtime               clientui.RuntimeClient
 	WorkspaceRoot         string
 	PersistenceRoot       string
 	Settings              config.Settings
