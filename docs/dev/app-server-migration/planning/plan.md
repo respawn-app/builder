@@ -72,9 +72,9 @@ Expected cut lines from the current repo:
   - `cli/app/session_lifecycle.go`
   - `cli/app/auth_gate.go`
 - new shared boundary packages:
-  - `internal/protocol`
   - `shared/client`
-  - `shared/serverapi` or equivalent service-layer package
+  - `shared/serverapi`
+  - future `shared/protocol` transport-envelope types only if the RPC layer needs a separate home
 
 Repo-grounded implementation order:
 
