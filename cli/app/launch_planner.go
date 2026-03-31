@@ -7,6 +7,7 @@ import (
 
 	"builder/server/launch"
 	"builder/server/session"
+	"builder/server/sessioncontrol"
 	"builder/server/tools"
 	"builder/shared/config"
 )
@@ -104,24 +105,25 @@ func (p *launchPlanner) PlanSession(req sessionLaunchRequest) (sessionLaunchPlan
 		return sessionLaunchPlan{}, errors.New("launch planner bootstrap is required")
 	}
 	cfg := p.server.Config()
-	planner := launch.Planner{
+	controller := sessioncontrol.Controller{
 		Config:       cfg,
 		ContainerDir: p.server.ContainerDir(),
-		PickSession: func(summaries []session.Summary) (launch.SessionSelection, error) {
+		AuthManager:  p.server.AuthManager(),
+		PickSession: func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (launch.SessionSelection, error) {
 			runPicker := p.pickSession
 			if runPicker == nil {
 				runPicker = func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
 					return runSessionPicker(summaries, theme, alternateScreenPolicy)
 				}
 			}
-			picked, err := runPicker(summaries, cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen)
+			picked, err := runPicker(summaries, theme, alternateScreenPolicy)
 			if err != nil {
 				return launch.SessionSelection{}, err
 			}
 			return launch.SessionSelection{Session: picked.Session, CreateNew: picked.CreateNew, Canceled: picked.Canceled}, nil
 		},
 	}
-	serverPlan, err := planner.PlanSession(launch.SessionRequest{
+	serverPlan, err := controller.PlanSession(launch.SessionRequest{
 		Mode:              launch.Mode(req.Mode),
 		SelectedSessionID: req.SelectedSessionID,
 		ForceNewSession:   req.ForceNewSession,
