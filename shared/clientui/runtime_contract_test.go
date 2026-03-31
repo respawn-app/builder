@@ -21,6 +21,8 @@ func TestRuntimeClientUsesBundledStatusReadModel(t *testing.T) {
 		"FastModeAvailable",
 		"FastModeEnabled",
 		"ConversationFreshness",
+		"SessionName",
+		"SessionID",
 		"ParentSessionID",
 		"LastCommittedAssistantFinalAnswer",
 		"ThinkingLevel",
