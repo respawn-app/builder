@@ -224,7 +224,7 @@ func TestHeadlessRunPromptClientResumesExistingSessionByID(t *testing.T) {
 		t.Fatalf("initial RunPrompt: %v", err)
 	}
 
-	boot, err := bootstrapApp(context.Background(), Options{
+	boot, err := startEmbeddedServer(context.Background(), Options{
 		WorkspaceRoot:         workspace,
 		WorkspaceRootExplicit: true,
 		SessionID:             created.SessionID,
@@ -235,11 +235,7 @@ func TestHeadlessRunPromptClientResumesExistingSessionByID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bootstrap app: %v", err)
 	}
-	defer func() {
-		if boot.background != nil {
-			_ = boot.background.Close()
-		}
-	}()
+	defer func() { _ = boot.Close() }()
 
 	runClient := newHeadlessRunPromptClient(boot)
 	resumed, err := runClient.RunPrompt(context.Background(), serverapi.RunPromptRequest{
@@ -297,7 +293,7 @@ func TestHeadlessRunPromptClientRestoresContinuationContextFromSelectedSession(t
 		t.Fatalf("initial RunPrompt: %v", err)
 	}
 
-	boot, err := bootstrapApp(context.Background(), Options{
+	boot, err := startEmbeddedServer(context.Background(), Options{
 		WorkspaceRoot:         workspace,
 		WorkspaceRootExplicit: true,
 		SessionID:             created.SessionID,
@@ -306,11 +302,7 @@ func TestHeadlessRunPromptClientRestoresContinuationContextFromSelectedSession(t
 	if err != nil {
 		t.Fatalf("bootstrap app: %v", err)
 	}
-	defer func() {
-		if boot.background != nil {
-			_ = boot.background.Close()
-		}
-	}()
+	defer func() { _ = boot.Close() }()
 
 	runClient := newHeadlessRunPromptClient(boot)
 	resumed, err := runClient.RunPrompt(context.Background(), serverapi.RunPromptRequest{
@@ -381,7 +373,7 @@ func TestHeadlessRunPromptClientDeduplicatesDuplicateClientRequestID(t *testing.
 		t.Fatalf("initial RunPrompt: %v", err)
 	}
 
-	boot, err := bootstrapApp(context.Background(), Options{
+	boot, err := startEmbeddedServer(context.Background(), Options{
 		WorkspaceRoot:         workspace,
 		WorkspaceRootExplicit: true,
 		SessionID:             created.SessionID,
@@ -392,11 +384,7 @@ func TestHeadlessRunPromptClientDeduplicatesDuplicateClientRequestID(t *testing.
 	if err != nil {
 		t.Fatalf("bootstrap app: %v", err)
 	}
-	defer func() {
-		if boot.background != nil {
-			_ = boot.background.Close()
-		}
-	}()
+	defer func() { _ = boot.Close() }()
 
 	runClient := newHeadlessRunPromptClient(boot)
 	req := serverapi.RunPromptRequest{

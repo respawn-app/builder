@@ -78,17 +78,18 @@ func TestBootstrapAppIgnoresOAuthIssuerOverrideEnv(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	workspace := t.TempDir()
 
-	boot, err := bootstrapApp(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	boot, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
 	if err != nil {
 		t.Fatalf("bootstrap app: %v", err)
 	}
-	if got := boot.oauthOpts.Issuer; got != auth.DefaultOpenAIIssuer {
+	defer func() { _ = boot.Close() }()
+	if got := boot.OAuthOptions().Issuer; got != auth.DefaultOpenAIIssuer {
 		t.Fatalf("oauth issuer = %q, want %q", got, auth.DefaultOpenAIIssuer)
 	}
-	if got := boot.oauthOpts.ClientID; got != "client-test" {
+	if got := boot.OAuthOptions().ClientID; got != "client-test" {
 		t.Fatalf("oauth client id = %q", got)
 	}
-	if _, err := os.Stat(filepath.Join(boot.containerDir)); err != nil {
+	if _, err := os.Stat(filepath.Join(boot.ContainerDir())); err != nil {
 		t.Fatalf("expected bootstrap container dir to exist: %v", err)
 	}
 }
