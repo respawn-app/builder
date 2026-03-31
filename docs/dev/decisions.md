@@ -10,6 +10,7 @@
 - `config.toml` supports a file-only `[skills]` boolean table for per-skill new-session enable/disable toggles; disabled skills remain visible in `/status` and only affect future skills-message injection.
 - Full-access execution in v1 (no sandbox).
 - Architecture must remain pluggable/composable with low-friction extension points.
+- Source layout is a single Go module organized under top-level `cli/`, `server/`, and `shared/` roots: CLI/frontend-owned packages live under `cli/`, authoritative runtime/persistence/tool/auth packages live under `server/`, and boundary-safe shared contracts/helpers live under `shared/`.
 - Working name is `builder` and must stay easy to rename.
 
 ## Core Runtime And Tools
@@ -235,7 +236,7 @@
 - Formatter config owns syntax backgrounds and formatter base foreground.
 - Transcript rendering owns role styling, subdued shell preview styling, and diff semantics.
 - Layout owns prefixes, indentation, and wrapping only.
-- Semantic color tokens are centralized in `internal/theme`; TUI and app surfaces resolve colors from that palette instead of hardcoding inline hex values in renderers.
+- Semantic color tokens are centralized in `shared/theme`; TUI and app surfaces resolve colors from that palette instead of hardcoding inline hex values in renderers.
 - Rendering/style invariants:
 - Detail shell commands are full syntax color.
 - Ongoing shell commands are syntax-highlighted but subdued.
@@ -344,7 +345,7 @@
 
 ## Release Engineering
 
-- Official release binaries are built through `scripts/build.sh`; the release profile is `CGO_ENABLED=0`, `-trimpath`, `-buildvcs=false`, and `-ldflags "-s -w -X builder/internal/buildinfo.Version=..."`.
+- Official release binaries are built through `scripts/build.sh`; the release profile is `CGO_ENABLED=0`, `-trimpath`, `-buildvcs=false`, and `-ldflags "-s -w -X builder/shared/buildinfo.Version=..."`.
 - Release archive packaging and verification live in `scripts/release-artifacts.sh`; workflow YAML should stay orchestration-focused.
 - Supported release targets are `darwin/arm64`, `linux/amd64`, `linux/arm64`, `windows/amd64`, and `windows/arm64`; macOS Intel is unsupported and must not be added back.
 - Workflow runner labels should use `*-latest` aliases where GitHub provides them. ARM smoke-test jobs currently stay on `ubuntu-24.04-arm` and `windows-11-arm` because GitHub does not publish `-latest` aliases for those hosted runners.

@@ -1,0 +1,92 @@
+package runtime
+
+import (
+	"builder/server/llm"
+	"builder/server/tools"
+)
+
+type EventKind string
+
+const (
+	EventConversationUpdated EventKind = "conversation_updated"
+	EventAssistantDelta      EventKind = "assistant_delta"
+	EventAssistantDeltaReset EventKind = "assistant_delta_reset"
+	EventReasoningDelta      EventKind = "reasoning_delta"
+	EventReasoningDeltaReset EventKind = "reasoning_delta_reset"
+	EventAssistantMessage    EventKind = "assistant_message"
+	EventModelResponse       EventKind = "model_response_received"
+	EventUserMessageFlushed  EventKind = "user_message_flushed"
+	EventToolCallStarted     EventKind = "tool_call_started"
+	EventToolCallCompleted   EventKind = "tool_call_completed"
+	EventReviewerStarted     EventKind = "reviewer_started"
+	EventReviewerCompleted   EventKind = "reviewer_completed"
+	EventInFlightClearFailed EventKind = "in_flight_clear_failed"
+	EventCompactionStarted   EventKind = "context_compaction_started"
+	EventCompactionCompleted EventKind = "context_compaction_completed"
+	EventCompactionFailed    EventKind = "context_compaction_failed"
+	EventRunStateChanged     EventKind = "run_state_changed"
+	EventBackgroundUpdated   EventKind = "background_updated"
+)
+
+type Event struct {
+	Kind             EventKind
+	StepID           string
+	Error            string
+	AssistantDelta   string
+	ReasoningDelta   *llm.ReasoningSummaryDelta
+	UserMessage      string
+	UserMessageBatch []string
+	Message          llm.Message
+	ModelResponse    *ModelResponseTrace
+	ToolCall         *llm.ToolCall
+	ToolResult       *tools.Result
+	Reviewer         *ReviewerStatus
+	Compaction       *CompactionStatus
+	RunState         *RunState
+	Background       *BackgroundShellEvent
+}
+
+type RunState struct {
+	Busy bool
+}
+
+type BackgroundShellEvent struct {
+	Type              string
+	ID                string
+	State             string
+	Command           string
+	Workdir           string
+	LogPath           string
+	NoticeText        string
+	CompactText       string
+	Preview           string
+	Removed           int
+	ExitCode          *int
+	UserRequestedKill bool
+	NoticeSuppressed  bool
+}
+
+type ReviewerStatus struct {
+	Outcome               string `json:"outcome,omitempty"`
+	SuggestionsCount      int    `json:"suggestions_count,omitempty"`
+	CacheHitPercent       int    `json:"cache_hit_percent,omitempty"`
+	HasCacheHitPercentage bool   `json:"has_cache_hit_percentage,omitempty"`
+	Error                 string `json:"error,omitempty"`
+}
+
+type ModelResponseTrace struct {
+	AssistantPhase   llm.MessagePhase `json:"assistant_phase,omitempty"`
+	AssistantChars   int              `json:"assistant_chars,omitempty"`
+	ToolCallsCount   int              `json:"tool_calls_count,omitempty"`
+	OutputItemsCount int              `json:"output_items_count,omitempty"`
+	OutputItemTypes  []string         `json:"output_item_types,omitempty"`
+}
+
+type CompactionStatus struct {
+	Mode              string
+	Engine            string
+	Provider          string
+	TrimmedItemsCount int
+	Count             int
+	Error             string
+}
