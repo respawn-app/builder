@@ -21,12 +21,6 @@ import (
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
-func closedRuntimeEvents() <-chan runtime.Event {
-	ch := make(chan runtime.Event)
-	close(ch)
-	return ch
-}
-
 func closedAskEvents() <-chan askEvent {
 	ch := make(chan askEvent)
 	close(ch)
@@ -151,15 +145,15 @@ func (c *gatedStreamClient) GenerateStream(_ context.Context, req llm.Request, o
 
 func TestNativeScrollbackProgramOutputContract(t *testing.T) {
 	out := &bytes.Buffer{}
-	model := NewUIModel(
+	model := newProjectedTestUIModel(
 		nil,
-		closedRuntimeEvents(),
+		closedProjectedRuntimeEvents(),
 		closedAskEvents(),
 		WithUIInitialTranscript([]UITranscriptEntry{
 			{Role: "user", Text: "first replay line"},
 			{Role: "assistant", Text: "second replay line"},
 		}),
-	).(*uiModel)
+	)
 
 	program := tea.NewProgram(
 		model,
@@ -219,11 +213,7 @@ func TestNativeScrollbackInitClearsOnEachProgramRun(t *testing.T) {
 	run := func() string {
 		t.Helper()
 		out := &bytes.Buffer{}
-		model := NewUIModel(
-			nil,
-			closedRuntimeEvents(),
-			closedAskEvents(),
-		).(*uiModel)
+		model := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), closedAskEvents())
 
 		program := tea.NewProgram(
 			model,
@@ -273,12 +263,12 @@ func TestNativeResizeReplaysOngoingScreenAfterRealResize(t *testing.T) {
 	})
 
 	out := &bytes.Buffer{}
-	model := NewUIModel(
+	model := newProjectedTestUIModel(
 		nil,
-		closedRuntimeEvents(),
+		closedProjectedRuntimeEvents(),
 		closedAskEvents(),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed replay line"}}),
-	).(*uiModel)
+	)
 	model.input = "line one\nline two"
 
 	program := tea.NewProgram(
@@ -351,11 +341,7 @@ func TestNativeResizeClearWithoutHistoryRedrawsSingleLiveRegion(t *testing.T) {
 	})
 
 	out := &bytes.Buffer{}
-	model := NewUIModel(
-		nil,
-		closedRuntimeEvents(),
-		closedAskEvents(),
-	).(*uiModel)
+	model := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), closedAskEvents())
 	model.input = "top\ncurrent\nbottom"
 
 	program := tea.NewProgram(
@@ -434,9 +420,9 @@ func TestNativeRollbackOverlayCtrlCBalancesAltScreenAndAlternateScroll(t *testin
 	}()
 
 	out := &bytes.Buffer{}
-	model := NewUIModel(
+	model := newProjectedTestUIModel(
 		nil,
-		closedRuntimeEvents(),
+		closedProjectedRuntimeEvents(),
 		closedAskEvents(),
 		WithUIAlternateScreenPolicy(config.TUIAlternateScreenAuto),
 		WithUIInitialTranscript([]UITranscriptEntry{
@@ -444,7 +430,7 @@ func TestNativeRollbackOverlayCtrlCBalancesAltScreenAndAlternateScroll(t *testin
 			{Role: "assistant", Text: "a1"},
 			{Role: "user", Text: "u2"},
 		}),
-	).(*uiModel)
+	)
 
 	program := tea.NewProgram(
 		model,
@@ -509,12 +495,12 @@ func TestNativePSOverlayEscBalancesAltScreenAndAlternateScroll(t *testing.T) {
 	}()
 
 	out := &bytes.Buffer{}
-	model := NewUIModel(
+	model := newProjectedTestUIModel(
 		nil,
-		closedRuntimeEvents(),
+		closedProjectedRuntimeEvents(),
 		closedAskEvents(),
 		WithUIAlternateScreenPolicy(config.TUIAlternateScreenAuto),
-	).(*uiModel)
+	)
 	model.input = "/ps"
 
 	program := tea.NewProgram(
@@ -587,12 +573,12 @@ func TestNativePSOverlayUsesClearScreenWhenAltScreenNever(t *testing.T) {
 	}()
 
 	out := &bytes.Buffer{}
-	model := NewUIModel(
+	model := newProjectedTestUIModel(
 		nil,
-		closedRuntimeEvents(),
+		closedProjectedRuntimeEvents(),
 		closedAskEvents(),
 		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
-	).(*uiModel)
+	)
 	model.input = "/ps"
 
 	program := tea.NewProgram(
@@ -665,11 +651,7 @@ func TestNativeFinalizeDoesNotBlinkDuplicateTailTokens(t *testing.T) {
 	}
 
 	out := &bytes.Buffer{}
-	model := NewUIModel(
-		eng,
-		runtimeEvents,
-		closedAskEvents(),
-	).(*uiModel)
+	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents), closedAskEvents())
 
 	program := tea.NewProgram(
 		model,
@@ -745,11 +727,7 @@ func TestNativeFinalizeSuppressesLateAsyncDeltaArtifacts(t *testing.T) {
 	}
 
 	out := &bytes.Buffer{}
-	model := NewUIModel(
-		eng,
-		runtimeEvents,
-		closedAskEvents(),
-	).(*uiModel)
+	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents), closedAskEvents())
 
 	program := tea.NewProgram(
 		model,
@@ -821,11 +799,7 @@ func TestNativeNoopFinalNeverAppearsOnScreen(t *testing.T) {
 	}
 
 	out := &bytes.Buffer{}
-	model := NewUIModel(
-		eng,
-		runtimeEvents,
-		closedAskEvents(),
-	).(*uiModel)
+	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents), closedAskEvents())
 
 	program := tea.NewProgram(
 		model,
@@ -891,11 +865,7 @@ func TestNativeNoopFinalNeverAppearsOnScreen(t *testing.T) {
 
 func TestNativeSubmitAndFlushDoesNotDuplicateStatusLines(t *testing.T) {
 	out := &bytes.Buffer{}
-	model := NewUIModel(
-		nil,
-		closedRuntimeEvents(),
-		closedAskEvents(),
-	).(*uiModel)
+	model := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), closedAskEvents())
 
 	program := tea.NewProgram(
 		model,
@@ -950,12 +920,12 @@ func TestNativeSubmitAndFlushDoesNotDuplicateStatusLines(t *testing.T) {
 
 func TestNativeReplayOutputContainsMarkdownStyling(t *testing.T) {
 	out := &bytes.Buffer{}
-	model := NewUIModel(
+	model := newProjectedTestUIModel(
 		nil,
-		closedRuntimeEvents(),
+		closedProjectedRuntimeEvents(),
 		closedAskEvents(),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "**bold** and `code`"}}),
-	).(*uiModel)
+	)
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
 	done := make(chan error, 1)
 	go func() {
@@ -989,12 +959,12 @@ func TestNativeReplayOutputContainsMarkdownStyling(t *testing.T) {
 
 func TestNativeProgramKeepsPendingToolTailLiveOnlyUntilCompletion(t *testing.T) {
 	out := &bytes.Buffer{}
-	model := NewUIModel(
+	model := newProjectedTestUIModel(
 		nil,
-		closedRuntimeEvents(),
+		closedProjectedRuntimeEvents(),
 		closedAskEvents(),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
-	).(*uiModel)
+	)
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
 	done := make(chan error, 1)
 	go func() {
@@ -1077,12 +1047,12 @@ func TestNativeProgramKeepsPendingToolTailLiveOnlyUntilCompletion(t *testing.T) 
 
 func TestNativeStreamingInterleavedWithStatusRedrawStaysCoherent(t *testing.T) {
 	out := &bytes.Buffer{}
-	model := NewUIModel(
+	model := newProjectedTestUIModel(
 		nil,
-		closedRuntimeEvents(),
+		closedProjectedRuntimeEvents(),
 		closedAskEvents(),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
-	).(*uiModel)
+	)
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
 	done := make(chan error, 1)
 	go func() {
@@ -1128,12 +1098,12 @@ func TestNativeStreamingInterleavedWithStatusRedrawStaysCoherent(t *testing.T) {
 
 func TestNativeAssistantDeltaSuppressedInDetailMode(t *testing.T) {
 	out := &bytes.Buffer{}
-	model := NewUIModel(
+	model := newProjectedTestUIModel(
 		nil,
-		closedRuntimeEvents(),
+		closedProjectedRuntimeEvents(),
 		closedAskEvents(),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
-	).(*uiModel)
+	)
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
 	done := make(chan error, 1)
 	go func() {
@@ -1162,11 +1132,7 @@ func TestNativeAssistantDeltaSuppressedInDetailMode(t *testing.T) {
 
 func TestNativeStreamingTinyDeltasRemainContiguous(t *testing.T) {
 	out := &bytes.Buffer{}
-	model := NewUIModel(
-		nil,
-		closedRuntimeEvents(),
-		closedAskEvents(),
-	).(*uiModel)
+	model := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), closedAskEvents())
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
 	done := make(chan error, 1)
 	go func() {
@@ -1199,11 +1165,7 @@ func TestNativeStreamingTinyDeltasRemainContiguous(t *testing.T) {
 
 func TestNativeStreamingWithoutNewlineStillVisible(t *testing.T) {
 	out := &bytes.Buffer{}
-	model := NewUIModel(
-		nil,
-		closedRuntimeEvents(),
-		closedAskEvents(),
-	).(*uiModel)
+	model := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), closedAskEvents())
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
 	done := make(chan error, 1)
 	go func() {
@@ -1232,11 +1194,7 @@ func TestNativeStreamingWithoutNewlineStillVisible(t *testing.T) {
 
 func TestNativeProgramClearsResidualLivePadAfterStreamingCommit(t *testing.T) {
 	out := &bytes.Buffer{}
-	model := NewUIModel(
-		nil,
-		closedRuntimeEvents(),
-		closedAskEvents(),
-	).(*uiModel)
+	model := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), closedAskEvents())
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
 	done := make(chan error, 1)
 	go func() {
@@ -1270,11 +1228,7 @@ func TestNativeProgramClearsResidualLivePadAfterStreamingCommit(t *testing.T) {
 
 func TestNativeStreamingInterleavedRendersKeepsLinesLeftAligned(t *testing.T) {
 	out := &bytes.Buffer{}
-	model := NewUIModel(
-		nil,
-		closedRuntimeEvents(),
-		closedAskEvents(),
-	).(*uiModel)
+	model := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), closedAskEvents())
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
 	done := make(chan error, 1)
 	go func() {

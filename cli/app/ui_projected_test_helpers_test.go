@@ -5,6 +5,18 @@ import (
 	"builder/shared/clientui"
 )
 
+func closedRuntimeEvents() <-chan runtime.Event {
+	ch := make(chan runtime.Event)
+	close(ch)
+	return ch
+}
+
+func closedProjectedRuntimeEvents() <-chan clientui.Event {
+	ch := make(chan clientui.Event)
+	close(ch)
+	return ch
+}
+
 func newProjectedTestUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-chan clientui.Event, askEvents <-chan askEvent, opts ...UIOption) *uiModel {
 	if runtimeEvents == nil {
 		runtimeEvents = make(chan clientui.Event)

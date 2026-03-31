@@ -11,7 +11,7 @@ import (
 )
 
 func TestPageKeysScrollTranscriptWhileInputFocused(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 8
 
@@ -34,7 +34,7 @@ func TestPageKeysScrollTranscriptWhileInputFocused(t *testing.T) {
 }
 
 func TestDetailModeUpDownScrollTranscript(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 8
 	m.syncViewport()
@@ -63,7 +63,7 @@ func TestDetailModeUpDownScrollTranscript(t *testing.T) {
 }
 
 func TestDetailModeMouseWheelScrollTranscript(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 8
 	m.syncViewport()
@@ -92,7 +92,7 @@ func TestDetailModeMouseWheelScrollTranscript(t *testing.T) {
 }
 
 func TestUpDownRouteByTranscriptMode(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIPromptHistory([]string{"hello"})).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIPromptHistory([]string{"hello"}))
 	m.termWidth = 80
 	m.termHeight = 8
 	m.syncViewport()
@@ -130,7 +130,7 @@ func TestUpDownRouteByTranscriptMode(t *testing.T) {
 }
 
 func TestMainInputUpDownAtBoundsStayInInput(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 8
 	m.syncViewport()
@@ -183,7 +183,7 @@ func TestMainInputUpDownAtBoundsStayInInput(t *testing.T) {
 }
 
 func TestReviewerRunStillAllowsEditingWithoutTranscriptScroll(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 8
 	m.syncViewport()
