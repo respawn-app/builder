@@ -22,6 +22,7 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 - Moved that interactive runtime control/read contract into `shared/clientui`, leaving `cli/app` with only the loopback adapter implementation.
 - Introduced `shared/clientui.RuntimeStatus` as the first bundled interactive read model beyond event/chat projection, and migrated status-line, slash-availability, `/back`, conversation-freshness, and status-collector reads onto that snapshot instead of a fanout of loopback getter calls.
 - Introduced `shared/clientui.ProcessClient` plus `BackgroundProcess` as the first non-runtime interactive read surface, and migrated process-list hydration, status-line process counts, and process log-path lookups onto shared process snapshots instead of direct `shelltool.Manager.List()` reads in UI code.
+- Introduced `shared/clientui.RuntimeSessionView` as the first bundled session/conversation hydration surface, and migrated runtime conversation sync to hydrate session metadata, conversation freshness, and transcript state from one shared view instead of pairing `Status()` with a separate chat snapshot read.
 - Added a projected UI test helper and migrated representative TUI suites onto `NewProjectedUIModel(...)`, including the runtime-adapter, status, alt-screen, clipboard, diff-render, compaction-resume, render-diagnostic, layout-seam, ask-deferral, and mode-flow coverage.
 - Drained the remaining non-monolithic UI suites off the compatibility constructor, including native-history, native-scrollback integration, slash-command picker, busy-command, scroll-key, session-lifecycle, mode-transition, and rollback-benchmark coverage.
 - Added service- and client-level tests for the new seam.
@@ -47,6 +48,7 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 - That interactive control/read path is now defined in a shared client-facing package rather than locally inside `cli/app`.
 - The first bundled interactive read surface now exists: `cli/app` reads runtime status through `clientui.RuntimeStatus` in the main UI/status paths instead of directly mirroring a long list of engine getters.
 - Process overlay hydration now also reads through a shared client-facing process surface instead of treating `shelltool.Snapshot` as the UI read model.
+- Conversation re-sync now also reads through a shared client-facing session view instead of composing separate transcript and freshness reads by hand.
 - The full existing UI characterization surface now exercises the projected/shared constructor directly.
 - `NewProjectedUIModel(...)` is now the only UI constructor entrypoint in `cli/app`; the engine-shaped compatibility wrapper has been deleted rather than retained as long-term API debt.
 - Repo-wide search now shows no remaining `NewUIModel(...)` callers in `cli/app`.
@@ -64,7 +66,7 @@ Current limitations:
 - Decide how the remaining auth/onboarding interaction loop moves onto a stable client/server bootstrap boundary without reintroducing frontend ownership of server state.
 - Continue replacing the remaining loopback-only adapter implementation with richer shared client-facing interactive controls and read models beyond the first runtime-event/chat-snapshot seam.
 - Continue widening shared client-facing interactive read models beyond `RuntimeStatus`, with process/hydration/control surfaces next in line.
-- Continue widening shared client-facing interactive read models beyond `RuntimeStatus` and `ProcessClient`, with session hydration/control surfaces next in line.
+- Continue widening shared client-facing interactive read models beyond `RuntimeStatus`, `ProcessClient`, and `RuntimeSessionView`, with session control/hydration-adjacent surfaces next in line.
 - Expand import-boundary enforcement once more frontend files stop depending on mixed `cli/app` server composition.
 - Expand the first acceptance-style embedded test client coverage so the same scenarios can later run unchanged against external daemon mode.
 - Replace runtime-native UI event/snapshot consumption with client-facing read models and events now that the embedded server bootstrap boundary is explicit.
