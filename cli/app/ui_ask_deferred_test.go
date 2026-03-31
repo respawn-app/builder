@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"builder/cli/tui"
-	"builder/server/runtime"
 	"builder/server/tools/askquestion"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,7 +12,7 @@ import (
 
 func TestAskEventDefersWhileDetailModeActive(t *testing.T) {
 	reply := make(chan askReply, 1)
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 90
 	m.termHeight = 12
 	m.windowSizeKnown = true
@@ -72,7 +71,7 @@ func TestAskEventDefersWhileDetailModeActive(t *testing.T) {
 
 func TestAskEventDefersWhileProcessListOverlayIsOpen(t *testing.T) {
 	reply := make(chan askReply, 1)
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 100
 	m.termHeight = 14
 	m.windowSizeKnown = true
@@ -117,7 +116,7 @@ func TestAskEventDefersWhileProcessListOverlayIsOpen(t *testing.T) {
 }
 
 func TestDetailModeIgnoresHiddenMainInputKeys(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 90
 	m.termHeight = 12
 	m.windowSizeKnown = true
@@ -143,11 +142,11 @@ func TestDetailModeIgnoresHiddenMainInputKeys(t *testing.T) {
 
 func TestAskEventDefersWhileRollbackEditIsActive(t *testing.T) {
 	reply := make(chan askReply, 1)
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIInitialTranscript([]UITranscriptEntry{
+	m := newProjectedStaticUIModel(WithUIInitialTranscript([]UITranscriptEntry{
 		{Role: "user", Text: "u1"},
 		{Role: "assistant", Text: "a1"},
 		{Role: "user", Text: "u2"},
-	})).(*uiModel)
+	}))
 
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
 	m = updateUIModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})

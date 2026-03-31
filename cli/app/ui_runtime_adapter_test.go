@@ -42,7 +42,7 @@ func (f *runtimeAdapterFakeClient) ProviderCapabilities(context.Context) (llm.Pr
 }
 
 func TestApplyChatSnapshotSetsOngoingFromSnapshot(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 
 	_ = m.runtimeAdapter().applyChatSnapshot(runtime.ChatSnapshot{Ongoing: "hello"})
 
@@ -52,7 +52,7 @@ func TestApplyChatSnapshotSetsOngoingFromSnapshot(t *testing.T) {
 }
 
 func TestAssistantDeltaAppendsStreamingText(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "hello"})
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: " world"})
@@ -63,7 +63,7 @@ func TestAssistantDeltaAppendsStreamingText(t *testing.T) {
 }
 
 func TestAssistantDeltaSkipsNoopFinalToken(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: uiNoopFinalToken})
 
@@ -76,7 +76,7 @@ func TestAssistantDeltaSkipsNoopFinalToken(t *testing.T) {
 }
 
 func TestAssistantDeltaResetClearsStreamingText(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.forwardToView(tui.SetConversationMsg{Ongoing: "partial"})
 
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDeltaReset})
@@ -87,7 +87,7 @@ func TestAssistantDeltaResetClearsStreamingText(t *testing.T) {
 }
 
 func TestReasoningDeltaUpdatesDetailTranscriptLive(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
 	m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: "u"})
 	m.forwardToView(tui.ToggleModeMsg{})
@@ -103,7 +103,7 @@ func TestReasoningDeltaUpdatesDetailTranscriptLive(t *testing.T) {
 }
 
 func TestReasoningDeltaResetClearsLiveReasoningTranscript(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
 	m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: "u"})
 	m.forwardToView(tui.ToggleModeMsg{})
@@ -117,7 +117,7 @@ func TestReasoningDeltaResetClearsLiveReasoningTranscript(t *testing.T) {
 }
 
 func TestReasoningDeltaPreservesStreamingWhitespaceAcrossUpdates(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
 	m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: "u"})
 	m.forwardToView(tui.ToggleModeMsg{})
@@ -130,7 +130,7 @@ func TestReasoningDeltaPreservesStreamingWhitespaceAcrossUpdates(t *testing.T) {
 }
 
 func TestReasoningDeltaBoldOnlyUpdatesStatusLineHeader(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
 	m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: "u"})
 	m.forwardToView(tui.ToggleModeMsg{})
@@ -148,7 +148,7 @@ func TestReasoningDeltaBoldOnlyUpdatesStatusLineHeader(t *testing.T) {
 }
 
 func TestReasoningDeltaMixedContentUsesFirstBoldSpanForStatusLineHeader(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
 	m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: "u"})
 	m.forwardToView(tui.ToggleModeMsg{})
@@ -167,7 +167,7 @@ func TestReasoningDeltaMixedContentUsesFirstBoldSpanForStatusLineHeader(t *testi
 }
 
 func TestReasoningDeltaRegularSummaryDoesNotReplaceStatusLineHeader(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
 	m.forwardToView(tui.AppendTranscriptMsg{Role: "user", Text: "u"})
 	m.forwardToView(tui.ToggleModeMsg{})
@@ -200,7 +200,7 @@ func TestReasoningDeltaRegularSummaryDoesNotReplaceStatusLineHeader(t *testing.T
 }
 
 func TestConversationSnapshotCommitClearsSawAssistantDelta(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 100
 	m.termHeight = 20
 	m.windowSizeKnown = true
@@ -223,7 +223,7 @@ func TestConversationSnapshotCommitClearsSawAssistantDelta(t *testing.T) {
 }
 
 func TestApplyChatSnapshotShowsMixedParallelPendingStatesInLiveView(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 100
 	m.termHeight = 20
 	m.windowSizeKnown = true
@@ -270,7 +270,7 @@ func TestUserMessageFlushedSyncsConversationForNativeReplay(t *testing.T) {
 		t.Fatalf("new engine: %v", err)
 	}
 
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.termWidth = 100
 	m.termHeight = 20
 	m.windowSizeKnown = true
@@ -308,7 +308,7 @@ func TestUserMessageFlushedAfterConversationUpdatedDoesNotDuplicateNativeReplay(
 		t.Fatalf("new engine: %v", err)
 	}
 
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.termWidth = 100
 	m.termHeight = 20
 	m.windowSizeKnown = true
@@ -343,13 +343,10 @@ func TestDeferredNativeReplayFlushesAutomaticallyOnDetailExit(t *testing.T) {
 	}
 	for _, policy := range policies {
 		t.Run(string(policy), func(t *testing.T) {
-			m := NewUIModel(
-				nil,
-				make(chan runtime.Event),
-				make(chan askEvent),
+			m := newProjectedStaticUIModel(
 				WithUIAlternateScreenPolicy(policy),
 				WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
-			).(*uiModel)
+			)
 
 			next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 			m = next.(*uiModel)
@@ -401,7 +398,7 @@ func TestDeferredNativeReplayFlushesAutomaticallyOnDetailExit(t *testing.T) {
 }
 
 func TestBackgroundUpdatedUsesTransientStatusLifecycle(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 
 	cmd := m.runtimeAdapter().handleRuntimeEvent(runtime.Event{
 		Kind: runtime.EventBackgroundUpdated,
@@ -435,7 +432,7 @@ func TestBackgroundUpdatedUsesTransientStatusLifecycle(t *testing.T) {
 }
 
 func TestBackgroundUpdatedWhileBusyUsesCompletionStatus(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{
@@ -453,7 +450,7 @@ func TestBackgroundUpdatedWhileBusyUsesCompletionStatus(t *testing.T) {
 }
 
 func TestBackgroundUpdatedWithSuppressedNoticeSkipsTransientStatus(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.transientStatus = "existing"
 
 	cmd := m.runtimeAdapter().handleRuntimeEvent(runtime.Event{
@@ -481,13 +478,10 @@ func TestDeferredNativeReplayFlushesBackgroundNoticeOnDetailExit(t *testing.T) {
 	}
 	for _, policy := range policies {
 		t.Run(string(policy), func(t *testing.T) {
-			m := NewUIModel(
-				nil,
-				make(chan runtime.Event),
-				make(chan askEvent),
+			m := newProjectedStaticUIModel(
 				WithUIAlternateScreenPolicy(policy),
 				WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
-			).(*uiModel)
+			)
 
 			next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 			m = next.(*uiModel)
@@ -543,7 +537,7 @@ func TestDeferredNativeReplayFlushesBackgroundNoticeOnDetailExit(t *testing.T) {
 }
 
 func TestRunStateChangedTransitionsRunningStateToIdleWhenTurnEnds(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.activity = uiActivityRunning
 
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventRunStateChanged, RunState: &runtime.RunState{Busy: false}})
@@ -554,7 +548,7 @@ func TestRunStateChangedTransitionsRunningStateToIdleWhenTurnEnds(t *testing.T) 
 }
 
 func TestUserRequestedKilledBackgroundUsesSuccessNotice(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{
 		Kind: runtime.EventBackgroundUpdated,

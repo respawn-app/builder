@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"builder/cli/tui"
-	"builder/server/runtime"
 	"builder/shared/config"
 )
 
@@ -30,12 +29,9 @@ func TestAltScreenPolicyHelpers(t *testing.T) {
 }
 
 func TestToggleTranscriptModeAutoUsesDetailAltScreen(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIAlternateScreenPolicy(config.TUIAlternateScreenAuto),
-	).(*uiModel)
+	)
 
 	if m.view.Mode() != tui.ModeOngoing {
 		t.Fatalf("mode=%q want ongoing", m.view.Mode())
@@ -68,12 +64,9 @@ func TestToggleTranscriptModeAutoUsesDetailAltScreen(t *testing.T) {
 }
 
 func TestToggleTranscriptModeNeverDoesNotEnterAltScreen(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
-	).(*uiModel)
+	)
 
 	cmd := m.toggleTranscriptMode()
 	if cmd == nil {
@@ -88,12 +81,9 @@ func TestToggleTranscriptModeNeverDoesNotEnterAltScreen(t *testing.T) {
 }
 
 func TestToggleTranscriptModeAlwaysKeepsAltScreenWithoutDetailTransition(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIAlternateScreenPolicy(config.TUIAlternateScreenAlways),
-	).(*uiModel)
+	)
 	if !m.altScreenActive {
 		t.Fatal("expected alt-screen active at startup for always policy")
 	}
@@ -122,7 +112,7 @@ func TestToggleTranscriptModeAlwaysKeepsAltScreenWithoutDetailTransition(t *test
 }
 
 func TestNativeReplayCmdForModeTransitionPreservesAppendOnlyWhenScreenNotReplaced(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.windowSizeKnown = true
 	m.termWidth = 80
 	initial := tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{{Role: "assistant", Lines: []string{"before"}}}}

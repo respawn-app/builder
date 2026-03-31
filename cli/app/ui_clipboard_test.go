@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"builder/server/runtime"
 	"builder/server/tools/askquestion"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -37,7 +36,7 @@ func TestIsClipboardImagePasteKeyRecognizesConfiguredBindings(t *testing.T) {
 }
 
 func TestBracketedTextPasteStillInsertsText(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hello"), Paste: true})
 	updated := next.(*uiModel)
 	if updated.input != "hello" {
@@ -47,7 +46,7 @@ func TestBracketedTextPasteStillInsertsText(t *testing.T) {
 
 func TestCtrlVClipboardImagePasteInsertsIntoMainInput(t *testing.T) {
 	paster := &stubClipboardImagePaster{path: "/tmp/builder-clipboard-main.png"}
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIClipboardImagePaster(paster))
 	m.input = "see "
 	m.inputCursor = len([]rune(m.input))
 
@@ -75,7 +74,7 @@ func TestCtrlVClipboardImagePasteInsertsIntoMainInput(t *testing.T) {
 
 func TestClipboardImagePasteEmptyPathDoesNotInsertDot(t *testing.T) {
 	paster := &stubClipboardImagePaster{path: ""}
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIClipboardImagePaster(paster))
 	m.input = "draft"
 	m.inputCursor = len([]rune(m.input))
 
@@ -97,7 +96,7 @@ func TestClipboardImagePasteEmptyPathDoesNotInsertDot(t *testing.T) {
 
 func TestClipboardImagePasteInsertsIntoRollbackEditInput(t *testing.T) {
 	paster := &stubClipboardImagePaster{path: "/tmp/builder-clipboard-rollback.png"}
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIClipboardImagePaster(paster))
 	testSetRollbackEditing(m, 0, 1)
 	m.input = "rollback: "
 	m.inputCursor = len([]rune(m.input))
@@ -123,7 +122,7 @@ func TestClipboardImagePasteInsertsIntoRollbackEditInput(t *testing.T) {
 
 func TestClipboardImagePasteSkipsStaleMainDraft(t *testing.T) {
 	paster := &stubClipboardImagePaster{path: "/tmp/builder-clipboard-main.png"}
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIClipboardImagePaster(paster))
 	m.input = "first prompt"
 	m.inputCursor = len([]rune(m.input))
 
@@ -150,7 +149,7 @@ func TestClipboardImagePasteSkipsStaleMainDraft(t *testing.T) {
 
 func TestClipboardImagePasteSkipsPromptHistoryDraftSwitch(t *testing.T) {
 	paster := &stubClipboardImagePaster{path: "/tmp/builder-clipboard-main.png"}
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIClipboardImagePaster(paster))
 	m.promptHistory = []string{"older prompt"}
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlV})
@@ -176,7 +175,7 @@ func TestClipboardImagePasteSkipsPromptHistoryDraftSwitch(t *testing.T) {
 
 func TestClipboardImagePasteSkipsSlashAutocompleteReplacement(t *testing.T) {
 	paster := &stubClipboardImagePaster{path: "/tmp/builder-clipboard-main.png"}
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIClipboardImagePaster(paster))
 	m.input = "/ne"
 	m.refreshSlashCommandFilterFromInput()
 
@@ -206,7 +205,7 @@ func TestClipboardImagePasteSkipsSlashAutocompleteReplacement(t *testing.T) {
 
 func TestClipboardImagePasteSkipsSlashPickerNavigationReplacement(t *testing.T) {
 	paster := &stubClipboardImagePaster{path: "/tmp/builder-clipboard-main.png"}
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIClipboardImagePaster(paster))
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
 	updated := next.(*uiModel)
 
@@ -236,7 +235,7 @@ func TestClipboardImagePasteSkipsSlashPickerNavigationReplacement(t *testing.T) 
 
 func TestCtrlDClipboardImagePasteInsertsIntoAskFreeform(t *testing.T) {
 	paster := &stubClipboardImagePaster{path: "/tmp/builder-clipboard-ask.png"}
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIClipboardImagePaster(paster))
 	testSetActiveAsk(m, &askEvent{req: askquestion.Request{Question: "Add context?"}})
 	m.ask.freeform = true
 	testSetAskInput(m, "image: ")
@@ -263,7 +262,7 @@ func TestCtrlDClipboardImagePasteInsertsIntoAskFreeform(t *testing.T) {
 
 func TestClipboardImagePasteSkipsDismissedAsk(t *testing.T) {
 	paster := &stubClipboardImagePaster{path: "/tmp/builder-clipboard-ask.png"}
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIClipboardImagePaster(paster))
 	testSetActiveAsk(m, &askEvent{req: askquestion.Request{Question: "Add context?"}})
 	m.ask.freeform = true
 	testSetAskInput(m, "image: ")
@@ -292,7 +291,7 @@ func TestClipboardImagePasteSkipsDismissedAsk(t *testing.T) {
 
 func TestClipboardImagePasteSkipsReplacedAsk(t *testing.T) {
 	paster := &stubClipboardImagePaster{path: "/tmp/builder-clipboard-ask.png"}
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIClipboardImagePaster(paster))
 	controller := uiAskController{model: m}
 	controller.setActiveAsk(askEvent{req: askquestion.Request{Question: "Ask A?"}})
 	m.ask.freeform = true
@@ -326,7 +325,7 @@ func TestClipboardImagePasteSkipsReplacedAsk(t *testing.T) {
 
 func TestClipboardImagePasteNoImageShowsTransientStatusAndPreservesInput(t *testing.T) {
 	paster := &stubClipboardImagePaster{err: &uiClipboardPasteError{Kind: uiClipboardPasteErrorNoImage, Message: "Clipboard does not contain an image"}}
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIClipboardImagePaster(paster))
 	m.input = "draft"
 	m.inputCursor = len([]rune(m.input))
 
@@ -354,7 +353,7 @@ func TestClipboardImagePasteNoImageShowsTransientStatusAndPreservesInput(t *test
 
 func TestClipboardImagePasteMissingToolShowsErrorStatusAndPreservesInput(t *testing.T) {
 	paster := &stubClipboardImagePaster{err: &uiClipboardPasteError{Kind: uiClipboardPasteErrorMissingTool, Message: "Clipboard image paste on macOS requires `osascript`"}}
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent), WithUIClipboardImagePaster(paster)).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIClipboardImagePaster(paster))
 	m.input = "draft"
 	m.inputCursor = len([]rune(m.input))
 
@@ -378,7 +377,7 @@ func TestClipboardImagePasteMissingToolShowsErrorStatusAndPreservesInput(t *test
 }
 
 func TestHelpSectionsIncludeClipboardImagePasteEntry(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	sections := m.helpSections()
 	for _, section := range sections {
 		for _, entry := range section.Entries {

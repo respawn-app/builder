@@ -17,7 +17,7 @@ import (
 )
 
 func TestScenarioDetailWhileAgentWorksReturnsToLatestOngoingTail(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 100
 	m.termHeight = 18
 	m.input = "/"
@@ -58,7 +58,7 @@ func TestScenarioDetailWhileAgentWorksReturnsToLatestOngoingTail(t *testing.T) {
 }
 
 func TestCtrlTTogglesTranscriptModeLikeShiftTab(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 100
 	m.termHeight = 16
 	m.syncViewport()
@@ -89,7 +89,7 @@ func TestScenarioHarnessRestartAndSessionResumeKeepsTranscriptVisible(t *testing
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.termWidth = 90
 	m.termHeight = 16
 	m.syncViewport()
@@ -115,7 +115,7 @@ func TestScenarioHarnessRestartAndSessionResumeKeepsTranscriptVisible(t *testing
 	if err != nil {
 		t.Fatalf("new engine after restart: %v", err)
 	}
-	m2 := NewUIModel(eng2, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m2 := newProjectedEngineUIModel(eng2)
 	m2.termWidth = 90
 	m2.termHeight = 16
 	m2.syncViewport()
@@ -164,7 +164,7 @@ func TestScenarioSessionResumeNormalizesLegacyReviewerEntriesInOngoingMode(t *te
 	if err != nil {
 		t.Fatalf("new engine after restart: %v", err)
 	}
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.termWidth = 90
 	m.termHeight = 16
 	m.syncViewport()
@@ -201,7 +201,7 @@ func TestScenarioTeleportBetweenSessionsResetsVisibleConversation(t *testing.T) 
 	if err != nil {
 		t.Fatalf("new engine A: %v", err)
 	}
-	modelA := NewUIModel(engA, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	modelA := newProjectedEngineUIModel(engA)
 	modelA.termWidth = 80
 	modelA.termHeight = 14
 	modelA.syncViewport()
@@ -214,7 +214,7 @@ func TestScenarioTeleportBetweenSessionsResetsVisibleConversation(t *testing.T) 
 	if err != nil {
 		t.Fatalf("new engine B: %v", err)
 	}
-	modelB := NewUIModel(engB, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	modelB := newProjectedEngineUIModel(engB)
 	modelB.termWidth = 80
 	modelB.termHeight = 14
 	modelB.syncViewport()
@@ -231,7 +231,7 @@ func TestScenarioTeleportBetweenSessionsResetsVisibleConversation(t *testing.T) 
 	if err != nil {
 		t.Fatalf("new engine A2: %v", err)
 	}
-	modelA2 := NewUIModel(engA2, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	modelA2 := newProjectedEngineUIModel(engA2)
 	modelA2.termWidth = 80
 	modelA2.termHeight = 14
 	modelA2.syncViewport()
@@ -242,7 +242,7 @@ func TestScenarioTeleportBetweenSessionsResetsVisibleConversation(t *testing.T) 
 }
 
 func TestScenarioScrollAttemptsAcrossModesAfterLongDetailStay(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 10
 	m.syncViewport()
@@ -285,12 +285,9 @@ func TestScenarioScrollAttemptsAcrossModesAfterLongDetailStay(t *testing.T) {
 }
 
 func TestAlwaysAltScreenPolicyStartsInAltScreen(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIAlternateScreenPolicy(config.TUIAlternateScreenAlways),
-	).(*uiModel)
+	)
 	if !m.altScreenActive {
 		t.Fatal("expected alt-screen active in always policy")
 	}
