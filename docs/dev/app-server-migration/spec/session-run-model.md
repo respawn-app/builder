@@ -130,7 +130,7 @@ If the migration changes any of these semantics, the change must be deliberate a
 
 - Mutating operations serialize per session.
 - Ordering is authoritative on the server, not inferred by clients.
-- Idempotency is keyed by `client_request_id` within explicit server-defined scope.
+- Idempotency is keyed by `client_request_id` within explicit server-defined scope and retention window.
 - A duplicated mutating request must not create duplicated prompt submission, approval outcome, or process-control effect.
 
 The protocol must be explicit about whether a rejected operation failed because the session was busy, because a resource was already resolved, or because the caller sent a duplicate request.

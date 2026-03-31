@@ -71,7 +71,7 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 Current limitations:
 
 - Bubble Tea auth/onboarding screens, terminal bell behavior, and direct background-process control remain frontend-owned adapters by design in Phase 1. They no longer own server policy or runtime state, but they are not yet transport-neutral client SDK surfaces.
-- The current duplicate suppression is process-local and scoped to the embedded server boundary; broader protocol-wide idempotency for future server methods remains Phase 2 work.
+- The current duplicate suppression is process-local, scoped to the embedded server boundary, and retained in memory for a bounded 10-minute window; broader protocol-wide idempotency scope, durability, and retention policy for future server methods remain Phase 2 work.
 - The full-suite proof gate still includes a flaky native scrollback test (`TestNativeFinalizeDoesNotBlinkDuplicateTailTokens`): it failed once during this checkpoint, passed immediately in isolation, and the subsequent full rerun was green. Treat it as existing test instability unless it starts reproducing under focused changes in the native transcript path.
 
 ## Phase 1 Exit Gate
@@ -85,4 +85,4 @@ Current limitations:
 
 - Define the durable resource model for project, session, run, process, approval, and ask identities.
 - Add typed hydration views and stream semantics that support multi-client attach/reconnect beyond the current loopback CLI path.
-- Generalize idempotency, replay/gap handling, and process/output retention beyond the current `RunPrompt` duplicate-suppression slice.
+- Generalize idempotency, replay/gap handling, and process/output retention beyond the current `RunPrompt` duplicate-suppression slice, including a protocol-level retention/durability contract for `client_request_id` replay.
