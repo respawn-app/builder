@@ -159,11 +159,10 @@ func (m *uiModel) shouldShowModelLockedLabel() bool {
 }
 
 func (l uiViewLayout) renderCacheHitSection(style uiStyles) string {
-	m := l.model
-	if m.engine == nil {
+	usage := l.model.runtimeStatus().ContextUsage
+	if usage.WindowTokens <= 0 && !usage.HasCacheHitPercentage {
 		return ""
 	}
-	usage := m.engine.ContextUsage()
 	if !usage.HasCacheHitPercentage {
 		return style.meta.Render("cache --")
 	}
@@ -171,11 +170,7 @@ func (l uiViewLayout) renderCacheHitSection(style uiStyles) string {
 }
 
 func (l uiViewLayout) renderContextUsage(style uiStyles) string {
-	m := l.model
-	if m.engine == nil {
-		return ""
-	}
-	usage := m.engine.ContextUsage()
+	usage := l.model.runtimeStatus().ContextUsage
 	if usage.WindowTokens <= 0 {
 		return ""
 	}
@@ -194,10 +189,10 @@ func (l uiViewLayout) renderContextUsage(style uiStyles) string {
 	barProgress := bubbleprogress.New(
 		bubbleprogress.WithWidth(statusContextBarWidth),
 		bubbleprogress.WithoutPercentage(),
-		bubbleprogress.WithSolidFill(statusContextZoneHex(m.theme, rawPercent)),
+		bubbleprogress.WithSolidFill(statusContextZoneHex(l.model.theme, rawPercent)),
 		bubbleprogress.WithFillCharacters('▮', '▯'),
 	)
-	barProgress.EmptyColor = statusContextEmptyHex(m.theme)
+	barProgress.EmptyColor = statusContextEmptyHex(l.model.theme)
 	bar := barProgress.ViewAs(float64(barPercent) / 100.0)
 	label := style.meta.Render(fmt.Sprintf("%d%%", rawPercent))
 	return label + " " + bar

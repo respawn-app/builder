@@ -115,10 +115,7 @@ func (m *uiModel) filterSlashCommandMatches(matches []commands.Command) []comman
 }
 
 func (m *uiModel) hasParentSession() bool {
-	if m.engine == nil {
-		return false
-	}
-	return strings.TrimSpace(m.engine.ParentSessionID()) != ""
+	return strings.TrimSpace(m.runtimeStatus().ParentSessionID) != ""
 }
 
 func (m *uiModel) clampSlashCommandSelection() {

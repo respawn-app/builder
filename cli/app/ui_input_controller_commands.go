@@ -73,21 +73,19 @@ func (c uiInputController) applyCommandResult(commandResult commands.Result) (te
 
 func (c uiInputController) handleBackCommand() (tea.Model, tea.Cmd) {
 	m := c.model
-	if m.engine == nil || strings.TrimSpace(m.engine.ParentSessionID()) == "" {
+	status := m.runtimeStatus()
+	if strings.TrimSpace(status.ParentSessionID) == "" {
 		m.appendLocalEntry("system", "No parent session available")
 		return m, nil
 	}
 	m.nextSessionInitialInput = m.backTeleportInput()
-	m.nextSessionID = strings.TrimSpace(m.engine.ParentSessionID())
+	m.nextSessionID = strings.TrimSpace(status.ParentSessionID)
 	m.exitAction = UIActionOpenSession
 	return m, tea.Quit
 }
 
 func (m *uiModel) backTeleportInput() string {
-	if m.engine == nil {
-		return ""
-	}
-	return m.engine.LastCommittedAssistantFinalAnswer()
+	return m.runtimeStatus().LastCommittedAssistantFinalAnswer
 }
 
 func (c uiInputController) handleSessionNameCommand(sessionName string) (tea.Model, tea.Cmd) {
@@ -108,7 +106,7 @@ func (c uiInputController) handleThinkingLevelCommand(requested string) (tea.Mod
 	if requested == "" {
 		current := strings.TrimSpace(m.thinkingLevel)
 		if m.engine != nil {
-			current = m.engine.ThinkingLevel()
+			current = m.runtimeStatus().ThinkingLevel
 		}
 		if current == "" {
 			current = "unknown"
@@ -128,7 +126,7 @@ func (c uiInputController) handleThinkingLevelCommand(requested string) (tea.Mod
 			m.appendLocalEntry("error", formatSubmissionError(err))
 			return m, nil
 		}
-		m.thinkingLevel = m.engine.ThinkingLevel()
+		m.thinkingLevel = m.runtimeStatus().ThinkingLevel
 		m.appendLocalEntry("system", "Thinking level set to "+m.thinkingLevel)
 		return m, nil
 	}
@@ -182,7 +180,7 @@ func (c uiInputController) handleFastModeCommand(requested string) (tea.Model, t
 			m.appendLocalEntry("error", detailErr)
 			return m, c.showErrorStatus(detailErr)
 		}
-		m.fastModeEnabled = m.engine.FastModeEnabled()
+		m.fastModeEnabled = m.runtimeStatus().FastModeEnabled
 	} else {
 		m.fastModeEnabled = targetEnabled
 	}
@@ -239,7 +237,7 @@ func (c uiInputController) handleAutoCompactionCommand(requested string) (tea.Mo
 	currentEnabled := m.autoCompactionState()
 	currentCompactionMode := "native"
 	if m.engine != nil {
-		currentCompactionMode = m.engine.CompactionMode()
+		currentCompactionMode = m.runtimeStatus().CompactionMode
 	}
 	targetEnabled := currentEnabled
 	switch requested {

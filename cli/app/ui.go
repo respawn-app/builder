@@ -437,14 +437,14 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 	for _, opt := range opts {
 		opt(m)
 	}
-	if m.engine != nil {
-		m.reviewerMode = m.engine.ReviewerFrequency()
-		m.reviewerEnabled = m.engine.ReviewerEnabled()
-		m.autoCompactionEnabled = m.engine.AutoCompactionEnabled()
-		m.fastModeAvailable = m.engine.FastModeAvailable()
-		m.fastModeEnabled = m.engine.FastModeEnabled()
-		m.conversationFreshness = m.engine.ConversationFreshness()
-	} else {
+	status := m.runtimeStatus()
+	m.reviewerMode = status.ReviewerFrequency
+	m.reviewerEnabled = status.ReviewerEnabled
+	m.autoCompactionEnabled = status.AutoCompactionEnabled
+	m.fastModeAvailable = status.FastModeAvailable
+	m.fastModeEnabled = status.FastModeEnabled
+	m.conversationFreshness = status.ConversationFreshness
+	if m.engine == nil {
 		m.reviewerEnabled = strings.TrimSpace(m.reviewerMode) != "" && strings.TrimSpace(m.reviewerMode) != "off"
 	}
 	m.refreshProcessEntries()
