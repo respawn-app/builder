@@ -385,7 +385,7 @@ func TestNativeStreamingContractViewportDuringStreamCommittedReplayOnFinish(t *t
 		t.Fatalf("expected one committed transcript entry at start, got %d", len(m.transcriptEntries))
 	}
 
-	next, _ := m.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "stream line"}})
+	next, _ := m.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "stream line"}))
 	updated, ok := next.(*uiModel)
 	if !ok {
 		t.Fatalf("unexpected model type %T", next)
