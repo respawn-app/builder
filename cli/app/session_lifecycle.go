@@ -8,6 +8,7 @@ import (
 	"builder/cli/app/commands"
 	serverlifecycle "builder/server/lifecycle"
 	"builder/server/session"
+	"builder/server/sessioncontrol"
 )
 
 func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor authInteractor, initialSessionID string) error {
@@ -104,26 +105,25 @@ type resolvedSessionAction struct {
 }
 
 func resolveSessionAction(ctx context.Context, server embeddedServer, interactor authInteractor, store *session.Store, transition UITransition) (resolvedSessionAction, error) {
-	resolved, err := serverlifecycle.Resolve(ctx, serverlifecycle.ResolveRequest{
-		Store:       store,
-		AuthManager: server.AuthManager(),
-		Transition: serverlifecycle.Transition{
-			Action:               serverlifecycle.Action(transition.Action),
-			InitialPrompt:        transition.InitialPrompt,
-			InitialInput:         transition.InitialInput,
-			TargetSessionID:      transition.TargetSessionID,
-			ForkUserMessageIndex: transition.ForkUserMessageIndex,
-			ParentSessionID:      transition.ParentSessionID,
+	controller := sessioncontrol.Controller{
+		Config:       server.Config(),
+		ContainerDir: server.ContainerDir(),
+		AuthManager:  server.AuthManager(),
+		Reauth: func(ctx context.Context) error {
+			cfg := server.Config()
+			return ensureAuthReady(ctx, server.AuthManager(), server.OAuthOptions(), cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen, interactor)
 		},
+	}
+	resolved, err := controller.ResolveTransition(ctx, store, serverlifecycle.Transition{
+		Action:               serverlifecycle.Action(transition.Action),
+		InitialPrompt:        transition.InitialPrompt,
+		InitialInput:         transition.InitialInput,
+		TargetSessionID:      transition.TargetSessionID,
+		ForkUserMessageIndex: transition.ForkUserMessageIndex,
+		ParentSessionID:      transition.ParentSessionID,
 	})
 	if err != nil {
 		return resolvedSessionAction{}, err
-	}
-	if resolved.RequiresReauth {
-		cfg := server.Config()
-		if err := ensureAuthReady(ctx, server.AuthManager(), server.OAuthOptions(), cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen, interactor); err != nil {
-			return resolvedSessionAction{}, err
-		}
 	}
 	return resolvedSessionAction{
 		NextSessionID:   resolved.NextSessionID,

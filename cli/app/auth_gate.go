@@ -13,6 +13,7 @@ import (
 
 	"builder/server/auth"
 	"builder/server/authflow"
+	serverstartup "builder/server/startup"
 	"builder/shared/config"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -23,6 +24,8 @@ type authInteractor interface {
 	WrapStore(base auth.Store) auth.Store
 	NeedsInteraction(req authInteraction) bool
 	Interact(ctx context.Context, req authInteraction) error
+	LookupEnv(key string) string
+	Interactive() bool
 }
 
 type headlessAuthInteractor struct {
@@ -73,41 +76,47 @@ func (i *headlessAuthInteractor) WrapStore(base auth.Store) auth.Store {
 	return authflow.WrapStoreWithEnvAPIKeyOverride(base, i.lookupEnv)
 }
 
+type authReadyState struct {
+	cfg       config.App
+	oauthOpts auth.OpenAIOAuthOptions
+	mgr       *auth.Manager
+}
+
+func (s authReadyState) Config() config.App                    { return s.cfg }
+func (s authReadyState) OAuthOptions() auth.OpenAIOAuthOptions { return s.oauthOpts }
+func (s authReadyState) AuthManager() *auth.Manager            { return s.mgr }
+
 func ensureAuthReady(ctx context.Context, mgr *auth.Manager, oauthOpts auth.OpenAIOAuthOptions, theme string, alternateScreen config.TUIAlternateScreenPolicy, interactor authInteractor) error {
-	if mgr == nil {
-		return errors.New("auth manager is required")
-	}
 	if interactor == nil {
 		return errors.New("auth interactor is required")
 	}
-	return authflow.EnsureReady(ctx, mgr, oauthOpts, theme, alternateScreen, resolveEnvLookup(interactor), authInteractorHandler{inner: interactor})
+	return serverstartup.EnsureReady(ctx, authReadyState{
+		cfg: config.App{Settings: config.Settings{
+			Theme:              theme,
+			TUIAlternateScreen: alternateScreen,
+		}},
+		oauthOpts: oauthOpts,
+		mgr:       mgr,
+	}, interactor)
 }
 
-type authInteractorHandler struct {
-	inner authInteractor
-}
-
-func (h authInteractorHandler) NeedsInteraction(req authflow.InteractionRequest) bool {
-	return h.inner.NeedsInteraction(req)
-}
-
-func (h authInteractorHandler) Interact(ctx context.Context, req authflow.InteractionRequest) error {
-	return h.inner.Interact(ctx, req)
-}
-
-func resolveEnvLookup(interactor authInteractor) func(string) string {
-	switch v := interactor.(type) {
-	case *interactiveAuthInteractor:
-		if v.lookupEnv != nil {
-			return v.lookupEnv
-		}
-	case *headlessAuthInteractor:
-		if v.lookupEnv != nil {
-			return v.lookupEnv
-		}
+func (i *interactiveAuthInteractor) LookupEnv(key string) string {
+	if i == nil || i.lookupEnv == nil {
+		return os.Getenv(key)
 	}
-	return os.Getenv
+	return i.lookupEnv(key)
 }
+
+func (i *interactiveAuthInteractor) Interactive() bool { return true }
+
+func (i *headlessAuthInteractor) LookupEnv(key string) string {
+	if i == nil || i.lookupEnv == nil {
+		return os.Getenv(key)
+	}
+	return i.lookupEnv(key)
+}
+
+func (i *headlessAuthInteractor) Interactive() bool { return false }
 
 func (i *headlessAuthInteractor) NeedsInteraction(req authInteraction) bool {
 	return !req.Gate.Ready
