@@ -17,6 +17,10 @@ The scope is intentionally narrow and quality-oriented.
   - Startup orchestration, auth gating, session selection, and top-level UI composition.
 - `server/runtime`
   - Agent step loop, retries, transcript assembly, tool orchestration, lock handling, interrupts.
+- `server/launch`
+  - Server-owned bootstrap continuation resolution and session open/create/hydration planning shared by interactive and headless flows.
+- `server/runtimewire`
+  - Server-owned runtime preparation, local tool registry construction, background-event routing, outside-workspace approvals, and runtime event bridging.
 - `server/session`
   - Session persistence (`session.json`, `events.jsonl`) and resume/list primitives.
 - `server/tools`
