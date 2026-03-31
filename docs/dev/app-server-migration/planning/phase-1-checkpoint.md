@@ -26,6 +26,7 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 - Introduced `shared/clientui.RuntimeStatus` as the first bundled interactive read model beyond event/chat projection, and migrated status-line, slash-availability, `/back`, conversation-freshness, and status-collector reads onto that snapshot instead of a fanout of loopback getter calls.
 - Introduced `shared/clientui.ProcessClient` plus `BackgroundProcess` as the first non-runtime interactive read surface, and migrated process-list hydration, status-line process counts, and process log-path lookups onto shared process snapshots instead of direct `shelltool.Manager.List()` reads in UI code.
 - Introduced `shared/clientui.RuntimeSessionView` as the first bundled session/conversation hydration surface, and migrated runtime conversation sync to hydrate session metadata, conversation freshness, and transcript state from one shared view instead of pairing `Status()` with a separate chat snapshot read.
+- Normalized the remaining interactive runtime control paths in `cli/app` around model helpers backed by `shared/clientui.RuntimeClient`, so command toggles, submission/compaction, queue draining, prompt-history persistence, and interrupt flows no longer branch directly on loopback runtime calls scattered through the UI controller files.
 - Added a projected UI test helper and migrated representative TUI suites onto `NewProjectedUIModel(...)`, including the runtime-adapter, status, alt-screen, clipboard, diff-render, compaction-resume, render-diagnostic, layout-seam, ask-deferral, and mode-flow coverage.
 - Drained the remaining non-monolithic UI suites off the compatibility constructor, including native-history, native-scrollback integration, slash-command picker, busy-command, scroll-key, session-lifecycle, mode-transition, and rollback-benchmark coverage.
 - Added service- and client-level tests for the new seam.
@@ -55,6 +56,7 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 - The first bundled interactive read surface now exists: `cli/app` reads runtime status through `clientui.RuntimeStatus` in the main UI/status paths instead of directly mirroring a long list of engine getters.
 - Process overlay hydration now also reads through a shared client-facing process surface instead of treating `shelltool.Snapshot` as the UI read model.
 - Conversation re-sync now also reads through a shared client-facing session view instead of composing separate transcript and freshness reads by hand.
+- Interactive UI command/submission flows now also depend on one model-level runtime control seam instead of treating `m.engine` as a special loopback object in each controller file.
 - The full existing UI characterization surface now exercises the projected/shared constructor directly.
 - `NewProjectedUIModel(...)` is now the only UI constructor entrypoint in `cli/app`; the engine-shaped compatibility wrapper has been deleted rather than retained as long-term API debt.
 - Repo-wide search now shows no remaining `NewUIModel(...)` callers in `cli/app`.
@@ -63,14 +65,14 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 
 Current limitations:
 
-- `server/bootstrap`, `server/embedded`, `server/authflow`, `server/runprompt`, `server/launch`, `server/lifecycle`, `server/sessioncontrol`, `server/startup`, `server/onboarding`, `server/runtimewire`, and `server/runtimeview` now own the first real server-side launch/runtime path, but `cli/app` still owns the interactive onboarding/auth UX flows themselves and the remaining interactive runtime adapter surface that still needs to move onto shared client-facing contracts in later Phase 1 slices.
+- `server/bootstrap`, `server/embedded`, `server/authflow`, `server/runprompt`, `server/launch`, `server/lifecycle`, `server/sessioncontrol`, `server/startup`, `server/onboarding`, `server/runtimewire`, and `server/runtimeview` now own the first real server-side launch/runtime path, and `cli/app` runtime control paths now mostly route through model-level helpers over `shared/clientui.RuntimeClient`, but `cli/app` still owns the interactive onboarding/auth UX flows themselves plus remaining interactive runtime adapter/event orchestration that still needs to move onto shared client-facing contracts in later Phase 1 slices.
 - The current duplicate suppression is process-local and scoped to the embedded server boundary; broader protocol-wide idempotency for future server methods remains Phase 2 work.
 - The full-suite proof gate still includes a flaky native scrollback test (`TestNativeFinalizeDoesNotBlinkDuplicateTailTokens`): it failed once during this checkpoint, passed immediately in isolation, and the subsequent full rerun was green. Treat it as existing test instability unless it starts reproducing under focused changes in the native transcript path.
 
 ## Remaining Work In Phase 1
 
 - Move the remaining interactive auth/onboarding UX flow orchestration onto shared client-facing surfaces without reintroducing frontend ownership of server state.
-- Continue replacing the remaining loopback-only adapter implementation with richer shared client-facing interactive controls and read models beyond the first runtime-event/chat-snapshot seam.
+- Continue replacing the remaining loopback-only adapter implementation with richer shared client-facing interactive controls and read models beyond the first runtime-event/chat-snapshot seam, especially where event orchestration still lives in `ui_runtime_adapter.go`.
 - Continue widening shared client-facing interactive read models beyond `RuntimeStatus`, with process/hydration/control surfaces next in line.
 - Continue widening shared client-facing interactive read models beyond `RuntimeStatus`, `ProcessClient`, and `RuntimeSessionView`, with session control/hydration-adjacent surfaces next in line.
 - Next concrete cut line: move the remaining interactive onboarding/auth UX orchestration and the interactive runtime adapter/control surfaces out of `cli/app`-owned orchestration now that startup/session/onboarding policy already routes through server-owned packages.

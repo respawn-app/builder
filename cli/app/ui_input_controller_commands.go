@@ -90,11 +90,9 @@ func (m *uiModel) backTeleportInput() string {
 
 func (c uiInputController) handleSessionNameCommand(sessionName string) (tea.Model, tea.Cmd) {
 	m := c.model
-	if m.engine != nil {
-		if err := m.engine.SetSessionName(sessionName); err != nil {
-			m.appendLocalEntry("error", formatSubmissionError(err))
-			return m, nil
-		}
+	if err := m.setRuntimeSessionName(sessionName); err != nil {
+		m.appendLocalEntry("error", formatSubmissionError(err))
+		return m, nil
 	}
 	m.sessionName = strings.TrimSpace(sessionName)
 	return m, tea.SetWindowTitle(m.windowTitle())
@@ -105,7 +103,7 @@ func (c uiInputController) handleThinkingLevelCommand(requested string) (tea.Mod
 	requested = strings.TrimSpace(requested)
 	if requested == "" {
 		current := strings.TrimSpace(m.thinkingLevel)
-		if m.engine != nil {
+		if m.hasRuntimeClient() {
 			current = m.runtimeStatus().ThinkingLevel
 		}
 		if current == "" {
@@ -121,11 +119,11 @@ func (c uiInputController) handleThinkingLevelCommand(requested string) (tea.Mod
 		m.appendLocalEntry("error", errText)
 		return m, nil
 	}
-	if m.engine != nil {
-		if err := m.engine.SetThinkingLevel(normalized); err != nil {
-			m.appendLocalEntry("error", formatSubmissionError(err))
-			return m, nil
-		}
+	if err := m.setRuntimeThinkingLevel(normalized); err != nil {
+		m.appendLocalEntry("error", formatSubmissionError(err))
+		return m, nil
+	}
+	if m.hasRuntimeClient() {
 		m.thinkingLevel = m.runtimeStatus().ThinkingLevel
 		m.appendLocalEntry("system", "Thinking level set to "+m.thinkingLevel)
 		return m, nil
@@ -172,9 +170,9 @@ func (c uiInputController) handleFastModeCommand(requested string) (tea.Model, t
 	}
 
 	changed := currentEnabled != targetEnabled
-	if m.engine != nil {
+	if m.hasRuntimeClient() {
 		var err error
-		changed, err = m.engine.SetFastModeEnabled(targetEnabled)
+		changed, err = m.setRuntimeFastModeEnabled(targetEnabled)
 		if err != nil {
 			detailErr := formatSubmissionError(err)
 			m.appendLocalEntry("error", detailErr)
@@ -210,9 +208,9 @@ func (c uiInputController) handleSupervisorModeCommand(requested string) (tea.Mo
 
 	changed := false
 	nextMode := currentMode
-	if m.engine != nil {
+	if m.hasRuntimeClient() {
 		var err error
-		changed, nextMode, err = m.engine.SetReviewerEnabled(targetEnabled)
+		changed, nextMode, err = m.setRuntimeReviewerEnabled(targetEnabled)
 		if err != nil {
 			m.appendLocalEntry("error", formatSubmissionError(err))
 			return m, nil
@@ -236,7 +234,7 @@ func (c uiInputController) handleAutoCompactionCommand(requested string) (tea.Mo
 	requested = strings.ToLower(strings.TrimSpace(requested))
 	currentEnabled := m.autoCompactionState()
 	currentCompactionMode := "native"
-	if m.engine != nil {
+	if m.hasRuntimeClient() {
 		currentCompactionMode = m.runtimeStatus().CompactionMode
 	}
 	targetEnabled := currentEnabled
@@ -255,8 +253,8 @@ func (c uiInputController) handleAutoCompactionCommand(requested string) (tea.Mo
 
 	changed := false
 	nextEnabled := currentEnabled
-	if m.engine != nil {
-		changed, nextEnabled = m.engine.SetAutoCompactionEnabled(targetEnabled)
+	if m.hasRuntimeClient() {
+		changed, nextEnabled = m.setRuntimeAutoCompactionEnabled(targetEnabled)
 	} else {
 		nextEnabled = targetEnabled
 		changed = currentEnabled != targetEnabled

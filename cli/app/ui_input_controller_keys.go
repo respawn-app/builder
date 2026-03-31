@@ -95,9 +95,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		if m.busy {
-			if m.engine != nil {
-				_ = m.engine.Interrupt()
-			}
+			_ = m.interruptRuntime()
 			m.preSubmitCheckToken++
 			c.releaseLockedInjectedInput(true)
 			c.restorePendingInjectedIntoInput()

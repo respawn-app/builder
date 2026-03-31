@@ -20,7 +20,7 @@ func (c uiInputController) startSubmission(text string) tea.Cmd {
 	} else {
 		m.logf("step.start user_chars=%d", len(text))
 	}
-	if m.engine == nil {
+	if !m.hasRuntimeClient() {
 		if isUserShell {
 			m.forwardToView(tui.AppendTranscriptMsg{Role: "tool_call", Text: command})
 		} else {
@@ -32,7 +32,7 @@ func (c uiInputController) startSubmission(text string) tea.Cmd {
 	if isUserShell {
 		return tea.Batch(c.submitUserShellCmd(command), m.ensureSpinnerTicking())
 	}
-	if m.engine != nil {
+	if m.hasRuntimeClient() {
 		m.preSubmitCheckToken++
 		token := m.preSubmitCheckToken
 		m.pendingPreSubmitText = text
@@ -45,7 +45,7 @@ func (c uiInputController) startSubmission(text string) tea.Cmd {
 func (c uiInputController) startSubmissionWithPromptHistory(text string) tea.Cmd {
 	m := c.model
 	_, isUserShell := parseUserShellCommand(text)
-	if m.engine != nil && !isUserShell {
+	if m.hasRuntimeClient() && !isUserShell {
 		return c.startSubmission(text)
 	}
 	return sequenceCmds(m.recordPromptHistory(text), c.startSubmission(text))
@@ -54,10 +54,10 @@ func (c uiInputController) startSubmissionWithPromptHistory(text string) tea.Cmd
 func (c uiInputController) preSubmitCompactionCheckCmd(token uint64, text string) tea.Cmd {
 	m := c.model
 	return func() tea.Msg {
-		if m.engine == nil {
+		if !m.hasRuntimeClient() {
 			return preSubmitCompactionCheckDoneMsg{token: token, text: text}
 		}
-		shouldCompact, err := m.engine.ShouldCompactBeforeUserMessage(context.Background(), text)
+		shouldCompact, err := m.runtimeShouldCompactBeforeUserMessage(context.Background(), text)
 		return preSubmitCompactionCheckDoneMsg{token: token, text: text, shouldCompact: shouldCompact, err: err}
 	}
 }
@@ -65,10 +65,10 @@ func (c uiInputController) preSubmitCompactionCheckCmd(token uint64, text string
 func (c uiInputController) submitCmd(text string) tea.Cmd {
 	m := c.model
 	return func() tea.Msg {
-		if m.engine == nil {
+		if !m.hasRuntimeClient() {
 			return submitDoneMsg{err: errors.New("runtime engine is not configured")}
 		}
-		message, err := m.engine.SubmitUserMessage(context.Background(), text)
+		message, err := m.submitRuntimeUserMessage(context.Background(), text)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return submitDoneMsg{err: errSubmissionInterrupted}
@@ -82,10 +82,10 @@ func (c uiInputController) submitCmd(text string) tea.Cmd {
 func (c uiInputController) submitUserShellCmd(command string) tea.Cmd {
 	m := c.model
 	return func() tea.Msg {
-		if m.engine == nil {
+		if !m.hasRuntimeClient() {
 			return submitDoneMsg{err: errors.New("runtime engine is not configured")}
 		}
-		err := m.engine.SubmitUserShellCommand(context.Background(), command)
+		err := m.submitRuntimeUserShellCommand(context.Background(), command)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return submitDoneMsg{err: errSubmissionInterrupted}
@@ -115,20 +115,20 @@ func (c uiInputController) startPreSubmitCompaction() tea.Cmd {
 func (c uiInputController) compactCmd(args string) tea.Cmd {
 	m := c.model
 	return func() tea.Msg {
-		if m.engine == nil {
+		if !m.hasRuntimeClient() {
 			return compactDoneMsg{err: errors.New("runtime engine is not configured")}
 		}
-		return compactDoneMsg{err: m.engine.CompactContext(context.Background(), args)}
+		return compactDoneMsg{err: m.compactRuntimeContext(context.Background(), args)}
 	}
 }
 
 func (c uiInputController) preSubmitCompactCmd() tea.Cmd {
 	m := c.model
 	return func() tea.Msg {
-		if m.engine == nil {
+		if !m.hasRuntimeClient() {
 			return compactDoneMsg{err: errors.New("runtime engine is not configured")}
 		}
-		return compactDoneMsg{err: m.engine.CompactContextForPreSubmit(context.Background())}
+		return compactDoneMsg{err: m.compactRuntimeContextForPreSubmit(context.Background())}
 	}
 }
 
@@ -182,7 +182,7 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 	}
 
 	m.activity = uiActivityIdle
-	if m.engine == nil {
+	if !m.hasRuntimeClient() {
 		if !m.sawAssistantDelta && msg.message != "" {
 			m.forwardToView(tui.StreamAssistantMsg{Delta: msg.message})
 		}
@@ -263,7 +263,7 @@ func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea
 	if len(m.queued) > 0 {
 		return c.flushQueuedInputs(queueDrainAuto)
 	}
-	if m.engine != nil && m.engine.HasQueuedUserWork() {
+	if m.hasQueuedRuntimeUserWork() {
 		return m, c.startQueuedInjectionSubmission()
 	}
 	m.syncViewport()

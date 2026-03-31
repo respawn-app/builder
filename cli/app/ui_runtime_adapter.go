@@ -121,7 +121,7 @@ func (a uiRuntimeAdapter) onUserMessageFlushed(text string, batch []string) bool
 
 func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 	m := a.model
-	if m.engine == nil {
+	if !m.hasRuntimeClient() {
 		return nil
 	}
 	return a.applyProjectedSessionView(m.runtimeSessionView())
