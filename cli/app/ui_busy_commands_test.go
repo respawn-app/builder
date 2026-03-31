@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"builder/cli/app/commands"
-	"builder/server/runtime"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -102,7 +101,7 @@ func TestBusyEnterCommandBehavior(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+			m := newProjectedStaticUIModel()
 			m.busy = true
 			m.activity = uiActivityRunning
 			m.input = tt.input
@@ -195,7 +194,7 @@ func TestBusyQueueSubmissionCommandBehavior(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+			m := newProjectedStaticUIModel()
 			m.busy = true
 			m.activity = uiActivityRunning
 			m.input = tt.input
@@ -248,7 +247,7 @@ func TestBusyQueueSubmissionCommandBehavior(t *testing.T) {
 }
 
 func TestBusyQueuedCompactStartsCompactionAfterTurnDrains(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.input = "/compact tighten summary"

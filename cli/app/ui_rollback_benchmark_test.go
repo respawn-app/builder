@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	"builder/server/runtime"
-
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -21,12 +19,7 @@ func benchmarkRollbackOverlayEntries(count int) []UITranscriptEntry {
 }
 
 func benchmarkRollbackOverlayModel(entries []UITranscriptEntry) *uiModel {
-	model := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
-		WithUIInitialTranscript(entries),
-	).(*uiModel)
+	model := newProjectedStaticUIModel(WithUIInitialTranscript(entries))
 	next, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	updated, _ := next.(*uiModel)
 	if updated == nil {

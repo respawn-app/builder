@@ -5,13 +5,12 @@ import (
 	"testing"
 
 	"builder/cli/app/commands"
-	"builder/server/runtime"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestSlashCommandEnterIgnoresWhitespaceImmediatelyAfterSlash(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.sessionName = "existing"
 	m.input = "/ name"
 
@@ -30,12 +29,7 @@ func TestSlashCommandEnterIgnoresWhitespaceImmediatelyAfterSlash(t *testing.T) {
 
 func TestBuiltInReviewSlashCommandWithWhitespaceAfterSlashDoesNotDuplicateArgs(t *testing.T) {
 	r := commands.NewDefaultRegistry()
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
-		WithUICommandRegistry(r),
-	).(*uiModel)
+	m := newProjectedStaticUIModel(WithUICommandRegistry(r))
 	m.input = "/ review cli/app"
 	if got := r.Execute("/review cli/app"); !got.Handled || !got.SubmitUser {
 		t.Fatalf("expected /review command to submit injected user prompt, got %+v", got)
@@ -65,7 +59,7 @@ func TestBuiltInReviewSlashCommandWithWhitespaceAfterSlashDoesNotDuplicateArgs(t
 }
 
 func TestBusyEnterRecognizesExactFastCommandEvenWhenPickerHidesIt(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.input = "/fast on"
@@ -94,7 +88,7 @@ func TestBusyEnterRecognizesExactFastCommandEvenWhenPickerHidesIt(t *testing.T) 
 }
 
 func TestBusyTabBackWithoutParentShowsLocalErrorAndDoesNotQueue(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.input = "/back"

@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"builder/server/runtime"
 	"builder/shared/config"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -25,12 +24,9 @@ func TestModeTogglesUseDetailAltScreenNative(t *testing.T) {
 		sequenceMu.Unlock()
 	}
 	defer func() { writeTerminalSequence = originalSequenceWriter }()
-	model := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	model := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "history marker"}}),
-	).(*uiModel)
+	)
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
 	done := make(chan error, 1)
 	go func() {
@@ -78,11 +74,7 @@ func TestModeTogglesUseDetailAltScreenAltMode(t *testing.T) {
 		sequenceMu.Unlock()
 	}
 	defer func() { writeTerminalSequence = originalSequenceWriter }()
-	model := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
-	).(*uiModel)
+	model := newProjectedStaticUIModel()
 	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
 	done := make(chan error, 1)
 	go func() {
@@ -118,12 +110,9 @@ func TestModeTogglesUseDetailAltScreenAltMode(t *testing.T) {
 func TestNativeAlwaysPolicyDisablesAltScreenAndShowsReplayAfterWindowSize(t *testing.T) {
 	out := &bytes.Buffer{}
 	settings := config.Settings{TUIAlternateScreen: config.TUIAlternateScreenAlways}
-	model := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	model := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "startup replay marker"}}),
-	).(*uiModel)
+	)
 	program := tea.NewProgram(model, append(mainUIProgramOptions(settings), tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())...)
 	done := make(chan error, 1)
 	go func() {

@@ -35,15 +35,12 @@ func pendingSpinnerFrame(frame int) string {
 }
 
 func TestNativeScrollbackStartupReplayIncludesFullTranscript(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{
 			{Role: "user", Text: "first message"},
 			{Role: "assistant", Text: "last message"},
 		}),
-	).(*uiModel)
+	)
 
 	if len(m.startupCmds) != 0 {
 		t.Fatalf("expected startup native history replay deferred until window size, got %d startup cmd(s)", len(m.startupCmds))
@@ -68,7 +65,7 @@ func TestNativeScrollbackStartupReplayIncludesFullTranscript(t *testing.T) {
 }
 
 func TestNativeScrollbackStartupReplayContinuesPastEmptyToolResult(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.transcriptEntries = []tui.TranscriptEntry{
 		{Role: "user", Text: "before tool"},
 		{Role: "tool_call", Text: "apply patch", ToolCallID: "call_patch", ToolCall: &transcript.ToolCallMeta{ToolName: "patch"}},
@@ -96,11 +93,7 @@ func TestNativeScrollbackStartupReplayContinuesPastEmptyToolResult(t *testing.T)
 }
 
 func TestNativeScrollbackStartupEmptyConversationEmitsBlankScreenSpacer(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
-	).(*uiModel)
+	m := newProjectedStaticUIModel()
 
 	next, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	updated, ok := next.(*uiModel)
@@ -133,12 +126,9 @@ func TestNativeScrollbackStartupEmptyConversationEmitsBlankScreenSpacer(t *testi
 }
 
 func TestNativeScrollbackEmitsOnlyNewTranscriptLines(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "old line"}}),
-	).(*uiModel)
+	)
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m.nativeHistoryReplayed = true
 	m.nativeFlushedEntryCount = len(m.transcriptEntries)
@@ -167,12 +157,9 @@ func TestNativeScrollbackEmitsOnlyNewTranscriptLines(t *testing.T) {
 }
 
 func TestNativeScrollbackRebasesFormatterSilentlyOnNonAppendMutation(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "old line"}, {Role: "assistant", Text: "tail line"}}),
-	).(*uiModel)
+	)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	if startupCmd == nil {
 		t.Fatal("expected startup replay command")
@@ -187,12 +174,9 @@ func TestNativeScrollbackRebasesFormatterSilentlyOnNonAppendMutation(t *testing.
 }
 
 func TestNativeScrollbackResizeRebasesFormatterWidth(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "old line"}}),
-	).(*uiModel)
+	)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 40, Height: 20})
 	if startupCmd == nil {
 		t.Fatal("expected startup replay command")
@@ -236,12 +220,9 @@ func TestNativeResizeReplayDebouncedToLatestResize(t *testing.T) {
 		nativeResizeReplayNow = previousNow
 	})
 
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "old line"}}),
-	).(*uiModel)
+	)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 40, Height: 20})
 	if startupCmd == nil {
 		t.Fatal("expected startup replay command")
@@ -311,12 +292,9 @@ func TestNativeResizeReplayDebouncedToLatestResize(t *testing.T) {
 }
 
 func TestNativeHeightOnlyResizeDoesNotScheduleFullReplay(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
-	).(*uiModel)
+	)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	if startupCmd == nil {
 		t.Fatal("expected startup replay command")
@@ -333,12 +311,9 @@ func TestNativeHeightOnlyResizeDoesNotScheduleFullReplay(t *testing.T) {
 }
 
 func TestNativeResizeReplayInvalidatedAcrossModeSwitch(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
-	).(*uiModel)
+	)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 40, Height: 20})
 	if startupCmd == nil {
 		t.Fatal("expected startup replay command")
@@ -371,12 +346,9 @@ func TestNativeResizeReplayInvalidatedAcrossModeSwitch(t *testing.T) {
 }
 
 func TestNativeStreamingContractViewportDuringStreamCommittedReplayOnFinish(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
-	).(*uiModel)
+	)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	if startupCmd == nil {
 		t.Fatal("expected startup replay command")
@@ -415,12 +387,9 @@ func TestNativeStreamingContractViewportDuringStreamCommittedReplayOnFinish(t *t
 }
 
 func TestNativeScrollbackShrinkRebasesWithoutReemittingHistory(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "line one"}, {Role: "assistant", Text: "line two"}}),
-	).(*uiModel)
+	)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	if startupCmd == nil {
 		t.Fatal("expected startup replay command")
@@ -435,12 +404,9 @@ func TestNativeScrollbackShrinkRebasesWithoutReemittingHistory(t *testing.T) {
 }
 
 func TestNativeScrollbackRepeatedConversationRefreshDoesNotDuplicateUserPrompt(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
-	).(*uiModel)
+	)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	if startupCmd == nil {
 		t.Fatal("expected startup replay command")
@@ -476,12 +442,9 @@ func TestNativeScrollbackRepeatedConversationRefreshDoesNotDuplicateUserPrompt(t
 }
 
 func TestNativeScrollbackIncrementalFlushConcatenationMatchesFullSnapshot(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "line 1"}}),
-	).(*uiModel)
+	)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	if startupCmd == nil {
 		t.Fatal("expected startup replay command")
@@ -522,12 +485,9 @@ func TestNativeScrollbackFlowIntegration(t *testing.T) {
 	for i := 1; i <= 120; i++ {
 		entries = append(entries, UITranscriptEntry{Role: "assistant", Text: fmt.Sprintf("message %d", i)})
 	}
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript(entries),
-	).(*uiModel)
+	)
 	nextModel, startupCmd := m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
 	updatedModel, ok := nextModel.(*uiModel)
 	if !ok {
@@ -866,12 +826,9 @@ func TestNativePendingCompletedMultilineShellPreviewStaysTwoLinesWithoutWaitingA
 }
 
 func TestNativeScrollbackReviewerUsesSectionSignPrefix(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "reviewer_status", Text: "Supervisor ran: 2 suggestions, no changes applied."}}),
-	).(*uiModel)
+	)
 
 	_, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	if cmd == nil {
@@ -891,13 +848,10 @@ func TestNativeScrollbackReviewerUsesSectionSignPrefix(t *testing.T) {
 }
 
 func TestNativeScrollbackWarningStaysHiddenFromOngoingReplayAndShowsInDetail(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUITheme("dark"),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "warning", Text: "Heads-up warning text."}}),
-	).(*uiModel)
+	)
 
 	_, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	if cmd == nil {
@@ -920,7 +874,7 @@ func TestNativeScrollbackWarningStaysHiddenFromOngoingReplayAndShowsInDetail(t *
 }
 
 func TestNativeScrollbackCommittedWebSearchUsesAtPrefixAndVerboseQuery(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.transcriptEntries = []tui.TranscriptEntry{{
 		Role:       "tool_call",
 		Text:       `web search: "latest golang release"`,
@@ -978,12 +932,9 @@ func TestNativePendingCompletedErrorToolKeepsFinalStateWithoutSpinner(t *testing
 }
 
 func TestNativePendingToolCallStaysLiveUntilResultThenAppendsFinalBlock(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
-	).(*uiModel)
+	)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	if startupCmd == nil {
 		t.Fatal("expected startup replay command")
@@ -1037,12 +988,9 @@ func TestNativePendingToolCallStaysLiveUntilResultThenAppendsFinalBlock(t *testi
 }
 
 func TestNativePendingToolPreviewUsesBubbleTeaDotSpinnerWithoutCommittingScrollback(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
-	).(*uiModel)
+	)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	if startupCmd == nil {
 		t.Fatal("expected startup replay command")
@@ -1081,12 +1029,9 @@ func TestNativePendingToolPreviewUsesBubbleTeaDotSpinnerWithoutCommittingScrollb
 }
 
 func TestNativeParallelToolCompletionWaitsForStablePrefixBeforeAppend(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt once"}}),
-	).(*uiModel)
+	)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	if startupCmd == nil {
 		t.Fatal("expected startup replay command")
@@ -1146,7 +1091,7 @@ func TestNativeParallelToolCompletionWaitsForStablePrefixBeforeAppend(t *testing
 }
 
 func TestUIInitClearsScreen(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	cmd := m.Init()
 	if cmd == nil {
 		t.Fatal("expected init command")
@@ -1237,7 +1182,7 @@ func TestNativeReplayDividerStyledAndExpandedToWidth(t *testing.T) {
 }
 
 func TestNativeOngoingShrinksLiveRegionAfterInputShrinkWhenNotStreaming(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 20
 	m.windowSizeKnown = true
@@ -1261,7 +1206,7 @@ func TestNativeOngoingShrinksLiveRegionAfterInputShrinkWhenNotStreaming(t *testi
 }
 
 func TestNativeOngoingKeepsInputAndStatusAtBottomOfLiveRegion(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 12
 	m.windowSizeKnown = true
@@ -1288,7 +1233,7 @@ func TestNativeOngoingKeepsInputAndStatusAtBottomOfLiveRegion(t *testing.T) {
 }
 
 func TestNativeOngoingDoesNotRenderBeforeWindowSizeKnown(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.input = "hello"
 	got := stripANSIPreserve(m.View())
 	if got != "" {
@@ -1297,7 +1242,7 @@ func TestNativeOngoingDoesNotRenderBeforeWindowSizeKnown(t *testing.T) {
 }
 
 func TestNativeOngoingRendersWhenTrimmedToHeight(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 4
 	m.windowSizeKnown = true
@@ -1313,7 +1258,7 @@ func TestNativeOngoingRendersWhenTrimmedToHeight(t *testing.T) {
 }
 
 func TestNativeOngoingClearsLiveRegionPadWhenStreamingEnds(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 12
 	m.windowSizeKnown = true
@@ -1333,12 +1278,9 @@ func TestNativeOngoingClearsLiveRegionPadWhenStreamingEnds(t *testing.T) {
 }
 
 func TestNativeDeltaFlushForSingleLineUserMessageHasNoExtraBlankLine(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
-	).(*uiModel)
+	)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	if startupCmd == nil {
 		t.Fatal("expected startup replay command")
@@ -1362,7 +1304,7 @@ func TestNativeDeltaFlushForSingleLineUserMessageHasNoExtraBlankLine(t *testing.
 }
 
 func TestNativeStreamingLinesHiddenWhenNotBusy(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.termHeight = 20
 	m.windowSizeKnown = true
@@ -1381,12 +1323,9 @@ func TestNativeStreamingLinesHiddenWhenNotBusy(t *testing.T) {
 }
 
 func TestNativeStreamingLinesIncludeDividerAndAssistantPrefix(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "try again"}}),
-	).(*uiModel)
+	)
 	m.termWidth = 100
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -1405,12 +1344,9 @@ func TestNativeStreamingLinesIncludeDividerAndAssistantPrefix(t *testing.T) {
 }
 
 func TestNativeDeltaFlushDoesNotInsertBlankBeforeDivider(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "try again"}}),
-	).(*uiModel)
+	)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	if startupCmd == nil {
 		t.Fatal("expected startup replay command")
@@ -1437,12 +1373,9 @@ func TestNativeDeltaFlushDoesNotInsertBlankBeforeDivider(t *testing.T) {
 }
 
 func TestNativePostCommitRedrawStableWithoutExtraBlankBeforeDivider(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "try again"}}),
-	).(*uiModel)
+	)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	if startupCmd == nil {
 		t.Fatal("expected startup replay command")
@@ -1484,12 +1417,9 @@ func TestNativePostCommitRedrawStableWithoutExtraBlankBeforeDivider(t *testing.T
 }
 
 func TestNativeStreamingDividerPersistsInTightViewport(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt"}}),
-	).(*uiModel)
+	)
 	m.termWidth = 40
 	m.termHeight = 6
 	m.windowSizeKnown = true
@@ -1508,12 +1438,9 @@ func TestNativeStreamingDividerPersistsInTightViewport(t *testing.T) {
 }
 
 func TestNativeHistoryReplayDefersWhileDetailAndFlushesOnReturn(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
-	).(*uiModel)
+	)
 	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	if startupCmd == nil {
 		t.Fatal("expected startup replay command")
@@ -1560,7 +1487,7 @@ func TestNativeHistoryReplayDefersWhileDetailAndFlushesOnReturn(t *testing.T) {
 }
 
 func TestNativeHistorySnapshotSkipsNonAppendRewriteInOngoingMode(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.windowSizeKnown = true
 	initial := tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{{Role: "assistant", Lines: []string{"before"}}}}
@@ -1579,7 +1506,7 @@ func TestNativeHistorySnapshotSkipsNonAppendRewriteInOngoingMode(t *testing.T) {
 }
 
 func TestNativeHistorySnapshotForceFullRewriteReplaysInOngoingMode(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.windowSizeKnown = true
 	initial := tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{{Role: "assistant", Lines: []string{"before"}}}}

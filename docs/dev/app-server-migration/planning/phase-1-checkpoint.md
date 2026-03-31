@@ -21,6 +21,7 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 - Replaced the TUI's concrete `*runtime.Engine` dependency with a frontend runtime interface inside `cli/app`: the UI model, submission flow, and status collector now depend on a loopback adapter boundary rather than a concrete runtime object.
 - Moved that interactive runtime control/read contract into `shared/clientui`, leaving `cli/app` with only the loopback adapter implementation and a compatibility wrapper for the old engine-shaped constructor.
 - Added a projected UI test helper and migrated representative TUI suites onto `NewProjectedUIModel(...)`, including the runtime-adapter, status, alt-screen, clipboard, diff-render, compaction-resume, render-diagnostic, layout-seam, ask-deferral, and mode-flow coverage.
+- Drained the remaining non-monolithic UI suites off the compatibility constructor, including native-history, native-scrollback integration, slash-command picker, busy-command, scroll-key, session-lifecycle, mode-transition, and rollback-benchmark coverage.
 - Added service- and client-level tests for the new seam.
 - Added the first acceptance-style embedded loopback test around `server/embedded.Start(...).RunPromptClient()` to prove the in-process server object is a real runnable boundary, not just a packaging wrapper.
 - Established the first frontend-facing seam for `cli/app/run_prompt.go`, with future boundary enforcement still to be rebuilt in a less brittle form.
@@ -44,6 +45,7 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 - That interactive control/read path is now defined in a shared client-facing package rather than locally inside `cli/app`.
 - A larger slice of the existing UI characterization surface now exercises the projected/shared constructor directly, shrinking the compatibility role of `NewUIModel(...)` to the remaining legacy-heavy test files.
 - `NewUIModel(...)` no longer has any non-test callers outside `cli/app/ui.go`; at this checkpoint it exists only as a compatibility wrapper plus remaining legacy test usage.
+- At this checkpoint, the only remaining test usage is the monolithic `cli/app/ui_test.go` characterization file.
 - Runtime preparation and local runtime/tool wiring now also have one server-owned implementation shared by both interactive and headless flows.
 
 Current limitations:
@@ -55,7 +57,7 @@ Current limitations:
 
 - Decide how the remaining auth/onboarding interaction loop moves onto a stable client/server bootstrap boundary without reintroducing frontend ownership of server state.
 - Continue replacing the remaining loopback-only adapter implementation with richer shared client-facing interactive controls and read models beyond the first runtime-event/chat-snapshot seam.
-- Drain the remaining `NewUIModel(...)` compatibility-heavy test suites, with `ui_native_history_test.go` and `ui_native_scrollback_integration_test.go` as the next priority because they are the biggest remaining risk for engine-shaped/runtime-native assumptions.
+- Drain the remaining `NewUIModel(...)` compatibility-heavy test usage in `cli/app/ui_test.go`, then delete or sharply de-emphasize the compatibility wrapper in `cli/app/ui.go`.
 - Expand import-boundary enforcement once more frontend files stop depending on mixed `cli/app` server composition.
 - Expand the first acceptance-style embedded test client coverage so the same scenarios can later run unchanged against external daemon mode.
 - Replace runtime-native UI event/snapshot consumption with client-facing read models and events now that the embedded server bootstrap boundary is explicit.
