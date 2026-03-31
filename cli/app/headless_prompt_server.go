@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	"builder/server/launch"
 	"builder/server/runprompt"
 	"builder/server/runtime"
 	"builder/server/session"
@@ -25,7 +26,7 @@ func newHeadlessRunPromptClient(boot appBootstrap) client.RunPromptClient {
 }
 
 func ensureSubagentSessionName(store *session.Store) error {
-	return runprompt.EnsureSubagentSessionName(store)
+	return launch.EnsureSubagentSessionName(store)
 }
 
 func runPromptAskHandler(req askquestion.Request) (askquestion.Response, error) {

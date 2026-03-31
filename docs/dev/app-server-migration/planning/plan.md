@@ -79,6 +79,7 @@ Expected cut lines from the current repo:
 Repo-grounded implementation order:
 
 1. Extract the server-owned launch/runtime composition now trapped in `bootstrap.go`, `launch_planner.go`, and `runtime_factory.go`.
+   Progress: `server/runprompt` now owns the headless `builder run` launch path, and `server/launch` now owns bootstrap continuation resolution plus session open/create/hydration. The next sub-slice is runtime preparation from `cli/app/runtime_factory.go`.
 2. Introduce the first client-facing use cases around the current headless path: `ResolveLaunchContext`, `OpenOrCreateSession`, `SubmitUserMessage`, `GetSessionSnapshot`, `SubscribeSessionEvents`, and `InterruptRun`.
 3. Remap `cli/builder/main.go:runSubcommand` and `cli/app/run_prompt.go` onto the loopback client boundary without exposing `runtime.Engine`, `session.Store`, `runtime.Event`, or `runtime.ChatSnapshot`.
 4. Only after the headless seam is real, widen the boundary to interactive session/open flows and richer read models.

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"builder/server/auth"
+	"builder/server/launch"
 	"builder/server/runtime"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/config"
@@ -26,7 +27,7 @@ type appBootstrap struct {
 }
 
 func bootstrapApp(ctx context.Context, opts Options, interactor authInteractor) (appBootstrap, error) {
-	bootstrapPlan := bootstrapLaunchPlan{
+	bootstrapPlan := launch.BootstrapPlan{
 		WorkspaceRoot:    requestedWorkspaceRoot(opts),
 		OpenAIBaseURL:    strings.TrimSpace(opts.OpenAIBaseURL),
 		UseOpenAIBaseURL: opts.OpenAIBaseURLExplicit,
@@ -35,8 +36,13 @@ func bootstrapApp(ctx context.Context, opts Options, interactor authInteractor) 
 	if err != nil {
 		return appBootstrap{}, err
 	}
-	planner := newBootstrapLaunchPlanner(cfg.PersistenceRoot)
-	bootstrapPlan, err = planner.PlanBootstrap(opts)
+	bootstrapPlan, err = launch.ResolveBootstrapPlan(cfg.PersistenceRoot, launch.BootstrapRequest{
+		WorkspaceRoot:         requestedWorkspaceRoot(opts),
+		WorkspaceRootExplicit: opts.WorkspaceRootExplicit,
+		SessionID:             strings.TrimSpace(opts.SessionID),
+		OpenAIBaseURL:         strings.TrimSpace(opts.OpenAIBaseURL),
+		OpenAIBaseURLExplicit: opts.OpenAIBaseURLExplicit,
+	})
 	if err != nil {
 		return appBootstrap{}, err
 	}
@@ -68,8 +74,13 @@ func bootstrapApp(ctx context.Context, opts Options, interactor authInteractor) 
 		return appBootstrap{}, err
 	}
 	if cfg, _, err = ensureOnboardingReady(ctx, cfg, mgr, interactor, func() (config.App, error) {
-		refreshPlanner := newBootstrapLaunchPlanner(cfg.PersistenceRoot)
-		refreshedPlan, err := refreshPlanner.PlanBootstrap(opts)
+		refreshedPlan, err := launch.ResolveBootstrapPlan(cfg.PersistenceRoot, launch.BootstrapRequest{
+			WorkspaceRoot:         requestedWorkspaceRoot(opts),
+			WorkspaceRootExplicit: opts.WorkspaceRootExplicit,
+			SessionID:             strings.TrimSpace(opts.SessionID),
+			OpenAIBaseURL:         strings.TrimSpace(opts.OpenAIBaseURL),
+			OpenAIBaseURLExplicit: opts.OpenAIBaseURLExplicit,
+		})
 		if err != nil {
 			return config.App{}, err
 		}
