@@ -11,7 +11,7 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 - Reduced `cli/app/run_prompt.go` to a thin frontend adapter that maps CLI/headless inputs onto `serverapi.RunPromptRequest` and result DTOs.
 - Moved headless runtime launch/orchestration behind an app-owned launcher adapter in `cli/app/headless_prompt_server.go`.
 - Added service- and client-level tests for the new seam.
-- Ratcheted `internal/architecture/import_boundary_test.go` so `cli/app/run_prompt.go` cannot regain direct imports of server-authority packages.
+- Established the first frontend-facing seam for `cli/app/run_prompt.go`, with future boundary enforcement still to be rebuilt in a less brittle form.
 - `RunPromptRequest` now carries a required `client_request_id`, so the first mutating client contract matches the locked migration requirements.
 
 ## What This Proves
