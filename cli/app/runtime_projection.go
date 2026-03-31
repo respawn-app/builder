@@ -18,15 +18,28 @@ func projectedRuntimeEventMsg(evt runtime.Event) runtimeEventMsg {
 	return runtimeEventMsg{event: projectRuntimeEvent(evt)}
 }
 
-func projectRuntimeEventChannel(src <-chan runtime.Event) <-chan clientui.Event {
+func projectRuntimeEventChannel(src <-chan runtime.Event, stop <-chan struct{}) <-chan clientui.Event {
 	if src == nil {
 		return nil
 	}
 	out := make(chan clientui.Event, cap(src))
 	go func() {
 		defer close(out)
-		for evt := range src {
-			out <- projectRuntimeEvent(evt)
+		for {
+			select {
+			case <-stop:
+				return
+			case evt, ok := <-src:
+				if !ok {
+					return
+				}
+				projected := projectRuntimeEvent(evt)
+				select {
+				case <-stop:
+					return
+				case out <- projected:
+				}
+			}
 		}
 	}()
 	return out
