@@ -53,7 +53,7 @@ The built-in slash-command compatibility surface is defined in `command-ownershi
 Repo cross-check result:
 
 - The slash-command inventory is complete for the current interactive CLI once file-backed `/prompt:<name>` commands are counted.
-- `internal/app/session_lifecycle.go` installs `commands.NewDefaultRegistryWithFilePrompts(...)`, so the live command surface is `NewDefaultRegistry()` built-ins plus discovered file-backed prompt commands.
+- `cli/app/session_lifecycle.go` installs `commands.NewDefaultRegistryWithFilePrompts(...)`, so the live command surface is `NewDefaultRegistry()` built-ins plus discovered file-backed prompt commands.
 - The adjacent UI/controller files inspected for this workstream do not register extra slash commands. They only add picker visibility rules, busy-state gating, queue or defer semantics, overlays, and lifecycle transitions.
 
 Any newly discovered command or behavior must be added to the compatibility inventory before implementation starts for that area.
@@ -99,13 +99,13 @@ From the current registry, UI controller flow, and tests, the migration must pre
 
 | Concern | Current Owner | Current Behavior |
 | --- | --- | --- |
-| Busy-safe registry bit | `internal/app/commands/commands.go` | `RunWhileBusy=true` only for `/name`, `/thinking`, `/supervisor`, `/autocompaction`, `/status`, and `/ps`. Everything else defaults to not-run-safe. |
-| Busy `Enter` path | `internal/app/ui_input_slash_commands.go` | Exact known commands with `RunWhileBusy=false` clear the input and show `cannot run /<name> while model is working`. They do not queue. |
-| Busy immediate execution | `internal/app/ui_input_controller_commands.go` | `/name`, `/thinking`, `/supervisor`, `/autocompaction`, `/status`, and `/ps` execute immediately while the run stays busy. `/supervisor` changes can affect in-flight run completion. |
-| Busy queue-submit path | `internal/app/ui_input_slash_commands.go` + `internal/app/ui_input_queue.go` | Queue-submit keys can still queue exact known slash commands for post-turn drain even if `RunWhileBusy=false`. Drain later re-dispatches them as commands, not plain prompts. |
-| Deferred queue rejection | `internal/app/ui_input_slash_commands.go` | Queueing is rejected early for `/back` without a parent session, unavailable `/fast`, and `/ps <action>` when no background manager exists. |
-| Picker visibility vs execution | `internal/app/ui_slash_command_picker.go` | The picker hides `/fast` when unavailable and `/back` when there is no parent session, but exact typed commands still parse and execute or fail through the normal path. |
-| Queue auto-drain stop conditions | `internal/app/ui_input_queue.go` | Auto-drain stops when a queued action starts a run, exits, opens a non-main input mode, shows an ask, or leaves non-empty input. `/ps inline <id>` is a current example: it pastes output into input and leaves later queued prompts pending. |
+| Busy-safe registry bit | `cli/app/commands/commands.go` | `RunWhileBusy=true` only for `/name`, `/thinking`, `/supervisor`, `/autocompaction`, `/status`, and `/ps`. Everything else defaults to not-run-safe. |
+| Busy `Enter` path | `cli/app/ui_input_slash_commands.go` | Exact known commands with `RunWhileBusy=false` clear the input and show `cannot run /<name> while model is working`. They do not queue. |
+| Busy immediate execution | `cli/app/ui_input_controller_commands.go` | `/name`, `/thinking`, `/supervisor`, `/autocompaction`, `/status`, and `/ps` execute immediately while the run stays busy. `/supervisor` changes can affect in-flight run completion. |
+| Busy queue-submit path | `cli/app/ui_input_slash_commands.go` + `cli/app/ui_input_queue.go` | Queue-submit keys can still queue exact known slash commands for post-turn drain even if `RunWhileBusy=false`. Drain later re-dispatches them as commands, not plain prompts. |
+| Deferred queue rejection | `cli/app/ui_input_slash_commands.go` | Queueing is rejected early for `/back` without a parent session, unavailable `/fast`, and `/ps <action>` when no background manager exists. |
+| Picker visibility vs execution | `cli/app/ui_slash_command_picker.go` | The picker hides `/fast` when unavailable and `/back` when there is no parent session, but exact typed commands still parse and execute or fail through the normal path. |
+| Queue auto-drain stop conditions | `cli/app/ui_input_queue.go` | Auto-drain stops when a queued action starts a run, exits, opens a non-main input mode, shows an ask, or leaves non-empty input. `/ps inline <id>` is a current example: it pastes output into input and leaves later queued prompts pending. |
 
 Operational baseline implied by that split:
 
@@ -147,14 +147,14 @@ At least one non-CLI test client must exist for this suite. Otherwise the CLI re
 
 ## Acceptance Harness Outline
 
-The first harness target should be the current headless seam in `internal/app/run_prompt.go` because it already avoids Bubble Tea and goes through session planning, runtime wiring, and `runtime.Engine.SubmitUserMessage(...)` directly.
+The first harness target should be the current headless seam in `cli/app/run_prompt.go` because it already avoids Bubble Tea and goes through session planning, runtime wiring, and `runtime.Engine.SubmitUserMessage(...)` directly.
 
 The future acceptance suite should be structured as one shared scenario suite parameterized by execution mode:
 
 - embedded mode: start the app server in-process and talk to it through the client boundary
 - external-daemon mode: start the daemon as a child process and talk to it through the same client boundary
 
-Only server startup differs between those modes. The scenario steps, assertions, and client helpers must stay identical. If a scenario needs CLI-only setup or reads `internal/runtime`, `internal/session`, or `internal/app/ui*` directly, it does not count as privilege-removal proof.
+Only server startup differs between those modes. The scenario steps, assertions, and client helpers must stay identical. If a scenario needs CLI-only setup or reads `server/runtime`, `server/session`, or `cli/app/ui*` directly, it does not count as privilege-removal proof.
 
 Recommended harness layers:
 
@@ -213,19 +213,19 @@ Those remain important, but they are CLI characterization concerns until they ar
 
 Best current seed coverage for the future acceptance harness:
 
-- `internal/app/launch_planner_test.go` for headless session creation, selected-session resume, and continuation context
-- `internal/app/runtime_event_bridge_test.go` for lossy event-stream characterization
-- `internal/app/runtime_factory_test.go` for background-process ownership, no-retroactive-notice behavior, and active-session routing
-- `internal/app/run_prompt_test.go` for the headless ask prohibition and progress-event filtering
-- `internal/runtime/engine_test.go` and `internal/runtime/engine_queue_submission_test.go` for deterministic fake model behavior and queued/retried run semantics
-- `internal/session/store_test.go` plus `internal/session/fork.go` for durable fixture seeding, resume, and lineage state
+- `cli/app/launch_planner_test.go` for headless session creation, selected-session resume, and continuation context
+- `cli/app/runtime_event_bridge_test.go` for lossy event-stream characterization
+- `cli/app/runtime_factory_test.go` for background-process ownership, no-retroactive-notice behavior, and active-session routing
+- `cli/app/run_prompt_test.go` for the headless ask prohibition and progress-event filtering
+- `server/runtime/engine_test.go` and `server/runtime/engine_queue_submission_test.go` for deterministic fake model behavior and queued/retried run semantics
+- `server/session/store_test.go` plus `server/session/fork.go` for durable fixture seeding, resume, and lineage state
 
 Concrete helper patterns worth reusing when the harness is implemented:
 
-- `fakeClient` and related stream fakes in `internal/runtime/engine_test.go` for deterministic model/run scripting
-- `busyToggleFakeClient` in `internal/app/runtime_factory_test.go` for active-run and background-notice timing cases
-- `session.Create(...)`, `session.NewLazy(...)`, `Store.AppendEvent(...)`, and `Store.AppendReplayEvents(...)` from `internal/session/*` tests for persisted fixture seeding
-- `shelltool.NewManager(...)`-based fixtures in `internal/app/runtime_factory_test.go` and `internal/app/session_lifecycle_test.go` for background-process ownership and reconnect scenarios
+- `fakeClient` and related stream fakes in `server/runtime/engine_test.go` for deterministic model/run scripting
+- `busyToggleFakeClient` in `cli/app/runtime_factory_test.go` for active-run and background-notice timing cases
+- `session.Create(...)`, `session.NewLazy(...)`, `Store.AppendEvent(...)`, and `Store.AppendReplayEvents(...)` from `server/session/*` tests for persisted fixture seeding
+- `shelltool.NewManager(...)`-based fixtures in `cli/app/runtime_factory_test.go` and `cli/app/session_lifecycle_test.go` for background-process ownership and reconnect scenarios
 
 Important current gap:
 
@@ -237,10 +237,10 @@ Important current gap:
 
 The following tests are valuable CLI characterization, but they are too tied to Bubble Tea or terminal rendering to count as proof that the CLI is no longer privileged:
 
-- `internal/app/ui_test.go` and most other `internal/app/ui_*_test.go`: they encode workflow behavior through `NewUIModel(...)`, `tea.KeyMsg`, view modes, and render output.
-- `internal/app/ui_native_scrollback_integration_test.go`: it proves normal-buffer transcript behavior, not transport-neutral session/runtime semantics.
-- UI-driven portions of `internal/app/session_lifecycle_test.go`: cases such as `/back` draft handoff and fork startup replay currently prove lifecycle behavior through `UITransition`, `NewUIModel(...)`, and Bubble Tea quit mechanics.
-- `internal/app/ask_bridge_test.go`: useful for current synchronous ask plumbing, but it proves a UI bridge, not a future non-CLI client contract.
+- `cli/app/ui_test.go` and most other `cli/app/ui_*_test.go`: they encode workflow behavior through `NewUIModel(...)`, `tea.KeyMsg`, view modes, and render output.
+- `cli/app/ui_native_scrollback_integration_test.go`: it proves normal-buffer transcript behavior, not transport-neutral session/runtime semantics.
+- UI-driven portions of `cli/app/session_lifecycle_test.go`: cases such as `/back` draft handoff and fork startup replay currently prove lifecycle behavior through `UITransition`, `NewUIModel(...)`, and Bubble Tea quit mechanics.
+- `cli/app/ask_bridge_test.go`: useful for current synchronous ask plumbing, but it proves a UI bridge, not a future non-CLI client contract.
 
 Current clarification for planning:
 

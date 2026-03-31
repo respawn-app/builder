@@ -12,12 +12,12 @@ This file is part of the compatibility proof obligation. A partial inventory is 
 
 Source of truth at the time of writing:
 
-- `internal/app/commands/commands.go`
-- `internal/app/commands/file_prompts.go`
-- `internal/app/session_lifecycle.go`
-- `internal/app/ui_input_slash_commands.go`
-- `internal/app/ui_input_queue.go`
-- `internal/app/ui_slash_command_picker.go`
+- `cli/app/commands/commands.go`
+- `cli/app/commands/file_prompts.go`
+- `cli/app/session_lifecycle.go`
+- `cli/app/ui_input_slash_commands.go`
+- `cli/app/ui_input_queue.go`
+- `cli/app/ui_slash_command_picker.go`
 
 Built-in commands currently registered there:
 

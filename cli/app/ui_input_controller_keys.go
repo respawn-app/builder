@@ -1,0 +1,312 @@
+package app
+
+import (
+	"strings"
+	"time"
+
+	"builder/cli/tui"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := c.model
+	inputState := m.inputModeState()
+	if msg.Type != tea.KeyEnter && msg.Type != keyTypeShiftEnterCSI {
+		c.clearPendingCSIShiftEnter()
+	}
+	if msg.Type != tea.KeyEsc {
+		m.lastEscAt = time.Time{}
+	}
+	if inputState.Mode == uiInputModeRollbackSelection {
+		return c.handleRollbackSelectionKey(msg)
+	}
+	if inputState.Mode == uiInputModeStatus {
+		next, cmd := c.handleStatusOverlayKey(msg)
+		next.(*uiModel).syncViewport()
+		return next, cmd
+	}
+	if inputState.Mode == uiInputModeProcessList {
+		next, cmd := c.handleProcessListKey(msg)
+		next.(*uiModel).syncViewport()
+		return next, cmd
+	}
+	if m.view.Mode() == tui.ModeDetail {
+		switch msg.Type {
+		case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown:
+			m.forwardToView(tea.KeyMsg{Type: msg.Type})
+			return m, nil
+		case tea.KeyShiftTab, tea.KeyCtrlT:
+			return m, m.toggleTranscriptMode()
+		case tea.KeyCtrlC:
+			// Preserve the normal interrupt/quit path below.
+		default:
+			return m, nil
+		}
+	}
+	if isQueueSubmissionKey(msg) {
+		text := strings.TrimSpace(m.input)
+		if text == "" {
+			return m, nil
+		}
+		if inputState.Mode == uiInputModeRollbackEdit && !inputState.Busy {
+			return c.startRollbackFork(text)
+		}
+		if handled, next, cmd := c.handleQueuedSlashCommandInput(text); handled {
+			return next, cmd
+		}
+		return c.queueOrStartSubmission(text)
+	}
+	if isDeleteCurrentLineKey(msg) {
+		if m.isInputLocked() {
+			return m, nil
+		}
+		m.deleteCurrentInputLine()
+		return m, nil
+	}
+	if !m.isInputLocked() && !msg.Alt {
+		switch msg.Type {
+		case tea.KeyUp:
+			if handled, cmd := c.handlePromptHistoryKey(-1); handled {
+				return m, cmd
+			}
+		case tea.KeyDown:
+			if handled, cmd := c.handlePromptHistoryKey(1); handled {
+				return m, cmd
+			}
+		}
+	}
+	if !m.isInputLocked() && !msg.Alt {
+		switch msg.Type {
+		case tea.KeyUp, tea.KeyLeft:
+			if m.navigateSlashCommandPicker(-1) {
+				return m, nil
+			}
+		case tea.KeyDown, tea.KeyRight:
+			if m.navigateSlashCommandPicker(1) {
+				return m, nil
+			}
+		}
+	}
+	if !m.isInputLocked() && isClipboardImagePasteKey(msg) {
+		return m, m.pasteClipboardImageCmd(uiClipboardPasteTargetMain)
+	}
+
+	switch msg.Type {
+	case tea.KeyCtrlC:
+		if m.busy {
+			if m.engine != nil {
+				_ = m.engine.Interrupt()
+			}
+			m.preSubmitCheckToken++
+			c.releaseLockedInjectedInput(true)
+			c.restorePendingInjectedIntoInput()
+			c.restoreQueuedMessagesIntoInput()
+			m.pendingPreSubmitText = ""
+			m.busy = false
+			m.activity = uiActivityInterrupted
+			m.clearReviewerState()
+			return m, nil
+		}
+		m.exitAction = UIActionExit
+		return m, tea.Quit
+	case tea.KeyShiftTab, tea.KeyCtrlT:
+		return m, m.toggleTranscriptMode()
+	case tea.KeyEsc:
+		if inputState.Mode == uiInputModeRollbackEdit {
+			if strings.TrimSpace(m.input) == "" {
+				return m, c.cancelRollbackEditingToSelectionFlowCmd()
+			}
+			return m, nil
+		}
+		if m.view.Mode() != tui.ModeOngoing {
+			return m, nil
+		}
+		if m.busy || m.isInputLocked() || strings.TrimSpace(m.input) != "" {
+			return m, nil
+		}
+		now := time.Now()
+		if !m.lastEscAt.IsZero() && now.Sub(m.lastEscAt) <= rollbackDoubleEscWindow {
+			m.lastEscAt = time.Time{}
+			return m, c.startRollbackSelectionFlowCmd()
+		}
+		m.lastEscAt = now
+		return m, nil
+	case tea.KeyEnter:
+		c.normalizePendingCSIShiftEnterOnEnter()
+		text := strings.TrimSpace(m.input)
+		if text == "" {
+			if !m.busy && len(m.queued) > 0 {
+				return c.flushQueuedInputs(queueDrainOne)
+			}
+			return m, nil
+		}
+		if inputState.Mode == uiInputModeRollbackEdit && !inputState.Busy {
+			return c.startRollbackFork(text)
+		}
+		if handled, next, cmd := c.handleEnteredSlashCommandInput(text); handled {
+			return next, cmd
+		}
+		_, isUserShell := parseUserShellCommand(text)
+		draftText, draftCursor, restoreDraft := m.capturePromptHistoryDraftForReuse()
+		if m.busy {
+			if isUserShell {
+				m.queueInput(text)
+				m.restoreCapturedPromptHistoryDraft(draftText, draftCursor, restoreDraft)
+				return m, nil
+			}
+			m.queueInjectedInput(text)
+			m.restoreCapturedPromptHistoryDraft(draftText, draftCursor, restoreDraft)
+			return m, nil
+		}
+		if commandResult := m.commandRegistry.Execute(text); commandResult.Handled {
+			recordCmd := m.recordPromptHistory(text)
+			m.clearInput()
+			m.restoreCapturedPromptHistoryDraft(draftText, draftCursor, restoreDraft)
+			next, cmd := c.applyCommandResult(commandResult)
+			return next, finalizeSlashCommandCmd(commandResult.Action, cmd, recordCmd)
+		}
+		m.clearInput()
+		m.restoreCapturedPromptHistoryDraft(draftText, draftCursor, restoreDraft)
+		return m, c.startSubmissionWithPromptHistory(text)
+	case tea.KeyCtrlJ, keyTypeShiftEnterCSI:
+		if m.isInputLocked() {
+			return m, nil
+		}
+		m.insertInputRunes([]rune{'\n'})
+		if msg.Type == keyTypeShiftEnterCSI {
+			c.markPendingCSIShiftEnter()
+		}
+		return m, nil
+	case tea.KeyBackspace:
+		if m.isInputLocked() {
+			return m, nil
+		}
+		m.backspaceInput()
+		return m, nil
+	case tea.KeySpace:
+		if m.isInputLocked() {
+			return m, nil
+		}
+		m.insertInputRunes([]rune{' '})
+		return m, nil
+	case tea.KeyLeft:
+		if m.isInputLocked() {
+			return m, nil
+		}
+		if msg.Alt {
+			m.moveCursorWordLeft()
+			return m, nil
+		}
+		m.moveCursorLeft()
+		return m, nil
+	case tea.KeyRight:
+		if m.isInputLocked() {
+			return m, nil
+		}
+		if msg.Alt {
+			m.moveCursorWordRight()
+			return m, nil
+		}
+		m.moveCursorRight()
+		return m, nil
+	case tea.KeyHome, tea.KeyCtrlA:
+		if m.isInputLocked() {
+			return m, nil
+		}
+		m.moveCursorStart()
+		return m, nil
+	case tea.KeyEnd, tea.KeyCtrlE, tea.KeyCtrlEnd:
+		if m.isInputLocked() {
+			return m, nil
+		}
+		m.moveCursorEnd()
+		return m, nil
+	case tea.KeyCtrlLeft:
+		if m.isInputLocked() {
+			return m, nil
+		}
+		m.moveCursorWordLeft()
+		return m, nil
+	case tea.KeyCtrlRight:
+		if m.isInputLocked() {
+			return m, nil
+		}
+		m.moveCursorWordRight()
+		return m, nil
+	case tea.KeyUp:
+		if m.isInputLocked() {
+			m.forwardToView(tea.KeyMsg{Type: tea.KeyUp})
+			return m, nil
+		}
+		m.moveCursorUpLine()
+		return m, nil
+	case tea.KeyDown:
+		if m.isInputLocked() {
+			m.forwardToView(tea.KeyMsg{Type: tea.KeyDown})
+			return m, nil
+		}
+		m.moveCursorDownLine()
+		return m, nil
+	case tea.KeyPgUp:
+		m.forwardToView(tea.KeyMsg{Type: tea.KeyPgUp})
+		return m, nil
+	case tea.KeyPgDown:
+		m.forwardToView(tea.KeyMsg{Type: tea.KeyPgDown})
+		return m, nil
+	default:
+		if isShiftEnterKey(msg) {
+			if m.isInputLocked() {
+				return m, nil
+			}
+			m.insertInputRunes([]rune{'\n'})
+			return m, nil
+		}
+		if msg.Type == tea.KeyRunes {
+			if m.isInputLocked() {
+				return m, nil
+			}
+			m.insertInputRunes(msg.Runes)
+		}
+		return m, nil
+	}
+}
+
+func (c uiInputController) handlePromptHistoryKey(delta int) (bool, tea.Cmd) {
+	m := c.model
+	if !m.shouldAttemptPromptHistoryNavigation(delta) {
+		return false, nil
+	}
+	if m.navigatePromptHistory(delta) {
+		return true, nil
+	}
+	return true, ringBellCmd()
+}
+
+func (c uiInputController) handleRollbackSelectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := c.model
+	switch msg.Type {
+	case tea.KeyCtrlC:
+		m.exitAction = UIActionExit
+		if overlayCmd := m.popRollbackOverlayIfNeeded(); overlayCmd != nil {
+			m.stopRollbackSelectionMode()
+			return m, tea.Sequence(overlayCmd, tea.Quit)
+		}
+		return m, tea.Quit
+	case tea.KeyEsc:
+		return m, c.stopRollbackSelectionFlowCmd()
+	case tea.KeyUp:
+		m.moveRollbackSelection(-1)
+		return m, nil
+	case tea.KeyDown:
+		m.moveRollbackSelection(1)
+		return m, nil
+	case tea.KeyEnter:
+		return m, c.beginRollbackEditingFlowCmd()
+	case tea.KeyPgUp, tea.KeyPgDown:
+		m.forwardToView(msg)
+		return m, nil
+	default:
+		return m, nil
+	}
+}

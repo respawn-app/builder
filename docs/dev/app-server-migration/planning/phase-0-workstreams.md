@@ -27,13 +27,13 @@ Primary docs to update:
 
 Primary code targets:
 
-- `internal/app/commands/commands.go`
-- `internal/app/commands/commands_test.go`
-- `internal/app/ui_input_slash_commands.go`
-- `internal/app/ui_input_controller_*.go`
-- `internal/app/ui_status*.go`
-- `internal/app/ui_processes.go`
-- `internal/app/session_lifecycle.go`
+- `cli/app/commands/commands.go`
+- `cli/app/commands/commands_test.go`
+- `cli/app/ui_input_slash_commands.go`
+- `cli/app/ui_input_controller_*.go`
+- `cli/app/ui_status*.go`
+- `cli/app/ui_processes.go`
+- `cli/app/session_lifecycle.go`
 
 Questions to answer:
 
@@ -66,10 +66,10 @@ Primary docs to update:
 
 Primary code targets:
 
-- `internal/session/*`
-- `internal/config/config_workspace_index.go`
-- `internal/app/launch_planner.go`
-- `internal/transcript/*`
+- `server/session/*`
+- `shared/config/config_workspace_index.go`
+- `cli/app/launch_planner.go`
+- `shared/transcript/*`
 
 Questions to answer:
 
@@ -102,18 +102,18 @@ Primary docs to update:
 
 Primary code targets:
 
-- `cmd/builder/main.go`
-- `internal/app/*`
-- `internal/runtime/*`
-- `internal/session/*`
-- `internal/tools/*`
-- `internal/llm/*`
-- `internal/auth/*`
+- `cli/builder/main.go`
+- `cli/app/*`
+- `server/runtime/*`
+- `server/session/*`
+- `server/tools/*`
+- `server/llm/*`
+- `server/auth/*`
 
 Questions to answer:
 
 - What is the smallest high-value transport-neutral boundary?
-- Which `internal/app` files are frontend composition, server composition, or mixed knots?
+- Which `cli/app` files are frontend composition, server composition, or mixed knots?
 - Which interfaces/use-cases need to exist before any WebSocket work?
 - Where is the most likely re-coupling path during extraction?
 
@@ -141,8 +141,8 @@ Primary docs to update:
 
 Primary code targets:
 
-- current headless path in `internal/app/run_prompt.go`
-- session lifecycle and runtime event handling in `internal/app/*`
+- current headless path in `cli/app/run_prompt.go`
+- session lifecycle and runtime event handling in `cli/app/*`
 - existing test helpers relevant to app/runtime/session flows
 
 Questions to answer:
