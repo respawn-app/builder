@@ -12,22 +12,12 @@ import (
 	"time"
 
 	"builder/server/auth"
+	"builder/server/authflow"
 	"builder/shared/config"
 	"github.com/charmbracelet/lipgloss"
 )
 
-type authInteraction struct {
-	Manager         *auth.Manager
-	State           auth.State
-	StoredState     auth.State
-	Gate            auth.StartupGate
-	StartupErr      error
-	FlowErr         error
-	OAuthOptions    auth.OpenAIOAuthOptions
-	Theme           string
-	AlternateScreen config.TUIAlternateScreenPolicy
-	HasEnvAPIKey    bool
-}
+type authInteraction = authflow.InteractionRequest
 
 type authInteractor interface {
 	WrapStore(base auth.Store) auth.Store
@@ -76,21 +66,11 @@ func newHeadlessAuthInteractor() authInteractor {
 }
 
 func (i *interactiveAuthInteractor) WrapStore(base auth.Store) auth.Store {
-	return wrapStoreWithEnvAPIKeyOverride(base, i.lookupEnv)
+	return authflow.WrapStoreWithEnvAPIKeyOverride(base, i.lookupEnv)
 }
 
 func (i *headlessAuthInteractor) WrapStore(base auth.Store) auth.Store {
-	return wrapStoreWithEnvAPIKeyOverride(base, i.lookupEnv)
-}
-
-func wrapStoreWithEnvAPIKeyOverride(base auth.Store, lookupEnv func(string) string) auth.Store {
-	if lookupEnv == nil {
-		lookupEnv = os.Getenv
-	}
-	return auth.NewEnvAPIKeyOverrideStore(base, func(key string) (string, bool) {
-		value := lookupEnv(key)
-		return value, strings.TrimSpace(value) != ""
-	})
+	return authflow.WrapStoreWithEnvAPIKeyOverride(base, i.lookupEnv)
 }
 
 func ensureAuthReady(ctx context.Context, mgr *auth.Manager, oauthOpts auth.OpenAIOAuthOptions, theme string, alternateScreen config.TUIAlternateScreenPolicy, interactor authInteractor) error {
@@ -100,42 +80,19 @@ func ensureAuthReady(ctx context.Context, mgr *auth.Manager, oauthOpts auth.Open
 	if interactor == nil {
 		return errors.New("auth interactor is required")
 	}
+	return authflow.EnsureReady(ctx, mgr, oauthOpts, theme, alternateScreen, resolveEnvLookup(interactor), authInteractorHandler{inner: interactor})
+}
 
-	for {
-		state, err := mgr.Load(ctx)
-		if err != nil {
-			return err
-		}
-		storedState, err := mgr.StoredState(ctx)
-		if err != nil {
-			return err
-		}
-		gate := auth.EvaluateStartupGate(state)
-		var startupErr error
-		if !gate.Ready {
-			startupErr = auth.EnsureStartupReady(state)
-		}
-		req := authInteraction{
-			Manager:         mgr,
-			State:           state,
-			StoredState:     storedState,
-			Gate:            gate,
-			StartupErr:      startupErr,
-			OAuthOptions:    oauthOpts,
-			Theme:           theme,
-			AlternateScreen: alternateScreen,
-			HasEnvAPIKey:    hasNonEmptyEnvValue(resolveEnvLookup(interactor), "OPENAI_API_KEY"),
-		}
-		if !interactor.NeedsInteraction(req) {
-			if startupErr != nil {
-				return startupErr
-			}
-			return nil
-		}
-		if err := interactor.Interact(ctx, req); err != nil {
-			return err
-		}
-	}
+type authInteractorHandler struct {
+	inner authInteractor
+}
+
+func (h authInteractorHandler) NeedsInteraction(req authflow.InteractionRequest) bool {
+	return h.inner.NeedsInteraction(req)
+}
+
+func (h authInteractorHandler) Interact(ctx context.Context, req authflow.InteractionRequest) error {
+	return h.inner.Interact(ctx, req)
 }
 
 func resolveEnvLookup(interactor authInteractor) func(string) string {
@@ -150,13 +107,6 @@ func resolveEnvLookup(interactor authInteractor) func(string) string {
 		}
 	}
 	return os.Getenv
-}
-
-func hasNonEmptyEnvValue(lookupEnv func(string) string, key string) bool {
-	if lookupEnv == nil {
-		lookupEnv = os.Getenv
-	}
-	return strings.TrimSpace(lookupEnv(key)) != ""
 }
 
 func (i *headlessAuthInteractor) NeedsInteraction(req authInteraction) bool {

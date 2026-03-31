@@ -16,6 +16,8 @@ Interactive path today:
   - selects interactive auth flow and shared bootstrap
 - `cli/app/bootstrap.go:bootstrapApp`
   - coordinates frontend auth/onboarding UX over server-owned bootstrap state
+- `server/authflow`
+  - owns auth readiness polling and env-backed auth-store policy
 - `server/bootstrap`
   - owns config/container resolution, `auth.Manager` creation, and runtime-support setup for embedded CLI flows
 - `server/launch.ResolveBootstrapPlan`
@@ -73,6 +75,7 @@ Must not own:
 Currently split between landed server packages and remaining mixed adapters:
 
 - `server/bootstrap`
+- `server/authflow`
 - `server/lifecycle`
 - `server/launch`
 - `server/runtimewire`
@@ -90,7 +93,7 @@ This root should own:
 - LLM provider client construction from `server/llm`
 - `runtime.Engine` construction from `server/runtime`
 
-This is now mostly server composition in code as well; the main remaining leak is that `cli/app/bootstrap.go` still drives auth/onboarding interaction and the TUI still consumes runtime-native state directly.
+This is now mostly server composition in code as well; the main remaining leak is that `cli/app` still owns auth/onboarding interaction UX and the TUI still consumes runtime-native state directly.
 
 ## 3. Frontend View-Model Root
 
