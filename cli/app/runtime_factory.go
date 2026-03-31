@@ -2,19 +2,15 @@ package app
 
 import (
 	"fmt"
-	"net/http"
 	"sort"
-	"strings"
-	"sync"
 	"time"
 
 	"builder/server/auth"
-	"builder/server/llm"
 	"builder/server/runtime"
+	"builder/server/runtimewire"
 	"builder/server/session"
 	"builder/server/tools"
 	askquestion "builder/server/tools/askquestion"
-	multitooluseparallel "builder/server/tools/multitooluseparallel"
 	patchtool "builder/server/tools/patch"
 	readimagetool "builder/server/tools/readimage"
 	shelltool "builder/server/tools/shell"
@@ -30,79 +26,47 @@ type runtimeWiring struct {
 }
 
 type backgroundEventRouter struct {
-	mu              sync.RWMutex
-	activeSessionID string
-	activeSince     time.Time
-	activeEngine    *runtime.Engine
-	outputLimit     int
-	outputMode      shelltool.BackgroundOutputMode
+	inner       *runtimewire.BackgroundEventRouter
+	background  *shelltool.Manager
+	outputLimit int
+	outputMode  shelltool.BackgroundOutputMode
 }
 
 func newBackgroundEventRouter(background *shelltool.Manager, outputLimit int, outputMode shelltool.BackgroundOutputMode) *backgroundEventRouter {
-	router := &backgroundEventRouter{outputLimit: outputLimit, outputMode: outputMode}
-	if background != nil {
-		background.SetEventHandler(router.handle)
+	return &backgroundEventRouter{
+		inner:       runtimewire.NewBackgroundEventRouter(background, outputLimit, outputMode),
+		background:  background,
+		outputLimit: outputLimit,
+		outputMode:  outputMode,
 	}
-	return router
+}
+
+func (r *backgroundEventRouter) ensureInner() *runtimewire.BackgroundEventRouter {
+	if r == nil {
+		return nil
+	}
+	if r.inner == nil {
+		r.inner = runtimewire.NewBackgroundEventRouter(r.background, r.outputLimit, r.outputMode)
+	}
+	return r.inner
 }
 
 func (r *backgroundEventRouter) SetActiveSession(sessionID string, engine *runtime.Engine) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.activeSessionID = strings.TrimSpace(sessionID)
-	r.activeSince = time.Now().UTC()
-	r.activeEngine = engine
+	if inner := r.ensureInner(); inner != nil {
+		inner.SetActiveSession(sessionID, engine)
+	}
 }
 
 func (r *backgroundEventRouter) ClearActiveSession(sessionID string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if strings.TrimSpace(sessionID) != "" && r.activeSessionID != strings.TrimSpace(sessionID) {
-		return
+	if inner := r.ensureInner(); inner != nil {
+		inner.ClearActiveSession(sessionID)
 	}
-	r.activeSessionID = ""
-	r.activeSince = time.Time{}
-	r.activeEngine = nil
 }
 
 func (r *backgroundEventRouter) handle(evt shelltool.Event) {
-	r.mu.RLock()
-	activeSessionID := r.activeSessionID
-	activeSince := r.activeSince
-	activeEngine := r.activeEngine
-	outputLimit := r.outputLimit
-	outputMode := r.outputMode
-	r.mu.RUnlock()
-	if activeEngine == nil {
-		return
+	if inner := r.ensureInner(); inner != nil {
+		inner.Handle(evt)
 	}
-	summary := shelltool.BackgroundNoticeSummary{}
-	if evt.Type == shelltool.EventCompleted || evt.Type == shelltool.EventKilled {
-		summary = shelltool.SummarizeBackgroundEvent(evt, shelltool.BackgroundNoticeOptions{
-			MaxChars:          outputLimit,
-			SuccessOutputMode: outputMode,
-		})
-	}
-	ownerSessionID := strings.TrimSpace(evt.Snapshot.OwnerSessionID)
-	shouldNotify := ownerSessionID != "" && ownerSessionID == activeSessionID && !evt.NoticeSuppressed
-	if shouldNotify && !evt.Snapshot.FinishedAt.IsZero() && evt.Snapshot.FinishedAt.Before(activeSince) {
-		shouldNotify = false
-	}
-	activeEngine.HandleBackgroundShellUpdate(runtime.BackgroundShellEvent{
-		Type:              string(evt.Type),
-		ID:                evt.Snapshot.ID,
-		State:             evt.Snapshot.State,
-		Command:           evt.Snapshot.Command,
-		Workdir:           evt.Snapshot.Workdir,
-		LogPath:           evt.Snapshot.LogPath,
-		NoticeText:        summary.DetailText,
-		CompactText:       summary.OngoingText,
-		Preview:           evt.Preview,
-		Removed:           evt.Removed,
-		ExitCode:          cloneIntPtr(evt.Snapshot.ExitCode),
-		UserRequestedKill: evt.Snapshot.KillRequested,
-		NoticeSuppressed:  evt.NoticeSuppressed,
-	}, shouldNotify)
 }
 
 type runtimeWiringOptions struct {
@@ -117,27 +81,21 @@ func newRuntimeWiring(store *session.Store, active config.Settings, enabledTools
 }
 
 func newRuntimeWiringWithBackground(store *session.Store, active config.Settings, enabledTools []tools.ID, workspaceRoot string, mgr *auth.Manager, logger *runLogger, background *shelltool.Manager, opts runtimeWiringOptions) (*runtimeWiring, error) {
-	promptHistory, err := store.ReadPromptHistory()
-	if err != nil {
-		return nil, err
-	}
-
 	bells := newBellHooks(defaultTerminalNotifier(active.NotificationMethod), func() string {
 		return store.Meta().Name
 	})
 
-	toolRegistry, askBroker, background, err := buildToolRegistry(
-		workspaceRoot,
-		store.Meta().SessionID,
-		enabledTools,
-		time.Duration(active.Timeouts.ShellDefaultSeconds)*time.Second,
-		time.Duration(active.MinimumExecToBgSeconds)*time.Second,
-		active.ShellOutputMaxChars,
-		active.AllowNonCwdEdits,
-		llm.LockedContractSupportsVisionInputs(store.Meta().Locked, active.Model),
-		logger,
-		background,
-	)
+	wiring, err := runtimewire.NewRuntimeWiringWithBackground(store, active, enabledTools, workspaceRoot, mgr, logger, background, runtimewire.RuntimeWiringOptions{
+		Headless: opts.Headless,
+		FastMode: opts.FastMode,
+		OnEvent: func(evt runtime.Event) {
+			logger.Logf("%s", formatRuntimeEvent(evt))
+			bells.OnRuntimeEvent(evt)
+			if opts.OnEvent != nil {
+				opts.OnEvent(evt)
+			}
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -146,123 +104,23 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 	if opts.AskHandler != nil {
 		askHandler = opts.AskHandler
 	}
-	askBroker.SetAskHandler(func(req askquestion.Request) (askquestion.Response, error) {
-		bells.OnAsk(req)
-		return askHandler(req)
-	})
-
-	modelHTTPClient := &http.Client{Timeout: time.Duration(active.Timeouts.ModelRequestSeconds) * time.Second}
-	client, err := llm.NewProviderClient(llm.ProviderClientOptions{
-		Provider:            llm.Provider(strings.TrimSpace(active.ProviderOverride)),
-		Model:               active.Model,
-		Auth:                mgr,
-		HTTPClient:          modelHTTPClient,
-		OpenAIBaseURL:       active.OpenAIBaseURL,
-		ModelVerbosity:      string(active.ModelVerbosity),
-		Store:               active.Store,
-		ContextWindowTokens: active.ModelContextWindow,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	newReviewerClient := func() (llm.Client, error) {
-		reviewerHTTPClient := &http.Client{Timeout: time.Duration(active.Reviewer.TimeoutSeconds) * time.Second}
-		return llm.NewProviderClient(llm.ProviderClientOptions{
-			Provider:            llm.Provider(strings.TrimSpace(active.ProviderOverride)),
-			Model:               active.Reviewer.Model,
-			Auth:                mgr,
-			HTTPClient:          reviewerHTTPClient,
-			OpenAIBaseURL:       active.OpenAIBaseURL,
-			ModelVerbosity:      string(active.ModelVerbosity),
-			Store:               false,
-			ContextWindowTokens: active.ModelContextWindow,
+	if wiring.AskBroker != nil {
+		wiring.AskBroker.SetAskHandler(func(req askquestion.Request) (askquestion.Response, error) {
+			bells.OnAsk(req)
+			return askHandler(req)
 		})
 	}
-
-	var reviewerClient llm.Client
-	if strings.ToLower(strings.TrimSpace(active.Reviewer.Frequency)) != "off" {
-		reviewerClient, err = newReviewerClient()
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	eventBridge := newRuntimeEventBridge(2048, func(total uint64, evt runtime.Event) {
-		if total == 1 || total%100 == 0 {
-			logger.Logf("runtime.event.drop count=%d kind=%s step_id=%s", total, evt.Kind, evt.StepID)
-		}
-	})
-	providerCapsOverride, hasProviderCapsOverride := llm.ProviderCapabilitiesFromOverride(active.ProviderCapabilities)
-	eng, err := runtime.New(store, client, toolRegistry, runtime.Config{
-		Model:             active.Model,
-		Temperature:       1,
-		MaxTokens:         0,
-		ThinkingLevel:     active.ThinkingLevel,
-		ModelCapabilities: llm.LockedModelCapabilitiesForConfig(active.Model, active.ModelCapabilities),
-		FastModeEnabled:   active.PriorityRequestMode,
-		FastModeState:     opts.FastMode,
-		WebSearchMode:     active.WebSearch,
-		ProviderCapabilitiesOverride: func() *llm.ProviderCapabilities {
-			if !hasProviderCapsOverride {
-				return nil
-			}
-			return &providerCapsOverride
-		}(),
-		EnabledTools:                  enabledTools,
-		DisabledSkills:                config.DisabledSkillToggles(active),
-		AutoCompactTokenLimit:         active.ContextCompactionThresholdTokens,
-		PreSubmitCompactionLeadTokens: active.PreSubmitCompactionLeadTokens,
-		ContextWindowTokens:           active.ModelContextWindow,
-		EffectiveContextWindowPercent: 95,
-		LocalCompactionCarryoverLimit: 20_000,
-		CompactionMode:                string(active.CompactionMode),
-		AutoCompactionEnabled:         boolRef(true),
-		HeadlessMode:                  opts.Headless,
-		ToolPreambles:                 active.ToolPreambles,
-		Reviewer: runtime.ReviewerConfig{
-			Frequency:     active.Reviewer.Frequency,
-			Model:         active.Reviewer.Model,
-			ThinkingLevel: active.Reviewer.ThinkingLevel,
-			VerboseOutput: active.Reviewer.VerboseOutput,
-			Client:        reviewerClient,
-			ClientFactory: newReviewerClient,
-		},
-		OnEvent: func(evt runtime.Event) {
-			logger.Logf("%s", formatRuntimeEvent(evt))
-			bells.OnRuntimeEvent(evt)
-			if opts.OnEvent != nil {
-				opts.OnEvent(evt)
-			}
-			eventBridge.Publish(evt)
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
 	return &runtimeWiring{
-		engine:        eng,
+		engine:        wiring.Engine,
 		askBridge:     askBridge,
-		eventBridge:   eventBridge,
-		background:    background,
-		promptHistory: append([]string(nil), promptHistory...),
+		eventBridge:   wiring.EventBridge,
+		background:    wiring.Background,
+		promptHistory: append([]string(nil), wiring.PromptHistory...),
 	}, nil
 }
 
 func (w *runtimeWiring) Close() error {
 	return nil
-}
-
-func boolRef(v bool) *bool {
-	return &v
-}
-
-func cloneIntPtr(v *int) *int {
-	if v == nil {
-		return nil
-	}
-	out := *v
-	return &out
 }
 
 func configSourceLines(src config.SourceReport) []string {
@@ -294,127 +152,33 @@ type localToolRuntimeContext struct {
 }
 
 func buildLocalRuntimeHandler(def tools.Definition, ctx localToolRuntimeContext) (tools.Handler, error) {
-	switch def.LocalRuntimeBuilder() {
-	case tools.LocalRuntimeBuilderShell:
-		return shelltool.New(
-			ctx.workspaceRoot,
-			ctx.shellOutputMaxChars,
-			shelltool.WithDefaultTimeout(ctx.shellDefaultTimeout),
-		), nil
-	case tools.LocalRuntimeBuilderExecCommand:
-		if ctx.backgroundShellManager == nil {
-			return nil, fmt.Errorf("exec_command background manager is unavailable")
-		}
-		return shelltool.NewExecCommandTool(
-			ctx.workspaceRoot,
-			ctx.shellOutputMaxChars,
-			ctx.backgroundShellManager,
-			ctx.ownerSessionID,
-		), nil
-	case tools.LocalRuntimeBuilderWriteStdin:
-		if ctx.backgroundShellManager == nil {
-			return nil, fmt.Errorf("write_stdin background manager is unavailable")
-		}
-		return shelltool.NewWriteStdinTool(ctx.shellOutputMaxChars, ctx.backgroundShellManager), nil
-	case tools.LocalRuntimeBuilderPatch:
-		if ctx.outsideWorkspaceEditApprover == nil {
-			return nil, fmt.Errorf("patch outside-workspace approver is unavailable")
-		}
-		return patchtool.New(
-			ctx.workspaceRoot,
-			true,
-			patchtool.WithAllowOutsideWorkspace(ctx.allowNonCwdEdits),
-			patchtool.WithOutsideWorkspaceApprover(ctx.outsideWorkspaceEditApprover),
-		)
-	case tools.LocalRuntimeBuilderAskQuestion:
-		if ctx.askQuestionBroker == nil {
-			return nil, fmt.Errorf("ask_question broker is unavailable")
-		}
-		return askquestion.NewTool(ctx.askQuestionBroker), nil
-	case tools.LocalRuntimeBuilderViewImage:
-		if ctx.outsideWorkspaceReadApprover == nil {
-			return nil, fmt.Errorf("view_image outside-workspace approver is unavailable")
-		}
-		opts := []readimagetool.Option{
-			readimagetool.WithAllowOutsideWorkspace(ctx.allowNonCwdEdits),
-			readimagetool.WithOutsideWorkspaceApprover(ctx.outsideWorkspaceReadApprover),
-		}
-		if ctx.viewImageOutsideWorkspaceLogger != nil {
-			opts = append(opts, readimagetool.WithOutsideWorkspaceAuditLogger(ctx.viewImageOutsideWorkspaceLogger))
-		}
-		return readimagetool.New(ctx.workspaceRoot, ctx.supportsVision, opts...)
-	case tools.LocalRuntimeBuilderMultiToolUseParallel:
-		if ctx.registryProvider == nil {
-			return nil, fmt.Errorf("multi_tool_use_parallel registry provider is unavailable")
-		}
-		return multitooluseparallel.New(ctx.registryProvider), nil
-	default:
-		return nil, fmt.Errorf("unsupported local runtime builder %q for tool %q", def.LocalRuntimeBuilder(), def.ID)
-	}
+	return runtimewire.BuildLocalRuntimeHandler(def, runtimewire.LocalToolRuntimeContext{
+		WorkspaceRoot:                   ctx.workspaceRoot,
+		OwnerSessionID:                  ctx.ownerSessionID,
+		ShellDefaultTimeout:             ctx.shellDefaultTimeout,
+		ShellOutputMaxChars:             ctx.shellOutputMaxChars,
+		AllowNonCwdEdits:                ctx.allowNonCwdEdits,
+		SupportsVision:                  ctx.supportsVision,
+		RegistryProvider:                ctx.registryProvider,
+		AskQuestionBroker:               ctx.askQuestionBroker,
+		BackgroundShellManager:          ctx.backgroundShellManager,
+		OutsideWorkspaceEditApprover:    ctx.outsideWorkspaceEditApprover,
+		OutsideWorkspaceReadApprover:    ctx.outsideWorkspaceReadApprover,
+		ViewImageOutsideWorkspaceLogger: ctx.viewImageOutsideWorkspaceLogger,
+	})
 }
 
 func buildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []tools.ID, shellDefaultTimeout time.Duration, minimumExecToBgTime time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsVision bool, logger *runLogger, background *shelltool.Manager) (*tools.Registry, *askquestion.Broker, *shelltool.Manager, error) {
-	broker := askquestion.NewBroker()
-	if background == nil {
-		var err error
-		background, err = shelltool.NewManager(shelltool.WithMinimumExecToBgTime(minimumExecToBgTime))
-		if err != nil {
-			return nil, nil, nil, err
-		}
-	}
-	background.SetMinimumExecToBgTime(minimumExecToBgTime)
-	patchOutsideWorkspaceApprover := newOutsideWorkspaceApprover(broker, "editing")
-	readOutsideWorkspaceApprover := newOutsideWorkspaceApprover(broker, "reading")
-	ctx := localToolRuntimeContext{
-		workspaceRoot:                workspaceRoot,
-		ownerSessionID:               ownerSessionID,
-		shellDefaultTimeout:          shellDefaultTimeout,
-		shellOutputMaxChars:          shellOutputMaxChars,
-		allowNonCwdEdits:             allowNonCwdEdits,
-		supportsVision:               supportsVision,
-		askQuestionBroker:            broker,
-		backgroundShellManager:       background,
-		outsideWorkspaceEditApprover: patchtool.OutsideWorkspaceApprover(patchOutsideWorkspaceApprover.Approve),
-		outsideWorkspaceReadApprover: patchtool.OutsideWorkspaceApprover(readOutsideWorkspaceApprover.Approve),
-		viewImageOutsideWorkspaceLogger: readimagetool.OutsideWorkspaceAuditLogger(func(entry readimagetool.OutsideWorkspaceAudit) {
-			if logger == nil {
-				return
-			}
-			logger.Logf(
-				"tool.view_image.outside_workspace.approved requested=%q resolved=%q reason=%s",
-				entry.RequestedPath,
-				entry.ResolvedPath,
-				entry.Reason,
-			)
-		}),
-	}
-	enabledSet := make(map[tools.ID]struct{}, len(enabled))
-	for _, id := range enabled {
-		enabledSet[id] = struct{}{}
-	}
-	handlers := make([]tools.Handler, 0, len(enabledSet))
-	var registry *tools.Registry
-	ctx.registryProvider = func() *tools.Registry { return registry }
-	for _, id := range tools.CatalogIDs() {
-		if _, ok := enabledSet[id]; !ok {
-			continue
-		}
-		def, ok := tools.DefinitionFor(id)
-		if !ok {
-			return nil, nil, nil, fmt.Errorf("missing tool definition for %q", id)
-		}
-		if !def.AvailableInLocalRuntime() {
-			continue
-		}
-		handler, err := buildLocalRuntimeHandler(def, ctx)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		handlers = append(handlers, handler)
-		registry = tools.NewRegistry(handlers...)
-	}
-	if registry == nil {
-		registry = tools.NewRegistry()
-	}
-	return registry, broker, background, nil
+	return runtimewire.BuildToolRegistry(
+		workspaceRoot,
+		ownerSessionID,
+		enabled,
+		shellDefaultTimeout,
+		minimumExecToBgTime,
+		shellOutputMaxChars,
+		allowNonCwdEdits,
+		supportsVision,
+		logger,
+		background,
+	)
 }

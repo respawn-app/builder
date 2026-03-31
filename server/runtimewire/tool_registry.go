@@ -1,18 +1,19 @@
-package runprompt
+package runtimewire
 
 import (
-	"fmt"
-	"sort"
-	"strings"
-	"time"
-
 	"builder/server/tools"
 	askquestion "builder/server/tools/askquestion"
 	multitooluseparallel "builder/server/tools/multitooluseparallel"
 	patchtool "builder/server/tools/patch"
 	readimagetool "builder/server/tools/readimage"
 	shelltool "builder/server/tools/shell"
+	"fmt"
+	"time"
 )
+
+type Logger interface {
+	Logf(format string, args ...any)
+}
 
 type LocalToolRuntimeContext struct {
 	WorkspaceRoot                   string
@@ -80,7 +81,7 @@ func BuildLocalRuntimeHandler(def tools.Definition, ctx LocalToolRuntimeContext)
 	}
 }
 
-func BuildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []tools.ID, shellDefaultTimeout time.Duration, minimumExecToBgTime time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsVision bool, logger *RunLogger, background *shelltool.Manager) (*tools.Registry, *askquestion.Broker, *shelltool.Manager, error) {
+func BuildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []tools.ID, shellDefaultTimeout time.Duration, minimumExecToBgTime time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsVision bool, logger Logger, background *shelltool.Manager) (*tools.Registry, *askquestion.Broker, *shelltool.Manager, error) {
 	broker := askquestion.NewBroker()
 	if background == nil {
 		var err error
@@ -144,17 +145,4 @@ func BuildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []to
 		registry = tools.NewRegistry()
 	}
 	return registry, broker, background, nil
-}
-
-func ConfigSourceLines(src map[string]string) []string {
-	keys := make([]string, 0, len(src))
-	for k := range src {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	lines := make([]string, 0, len(keys))
-	for _, k := range keys {
-		lines = append(lines, fmt.Sprintf("%s=%s", k, strings.TrimSpace(src[k])))
-	}
-	return lines
 }

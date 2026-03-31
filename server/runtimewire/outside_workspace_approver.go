@@ -1,4 +1,4 @@
-package runprompt
+package runtimewire
 
 import (
 	"context"
