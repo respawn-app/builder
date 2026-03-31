@@ -132,6 +132,9 @@ func outsideNonTempDir(t *testing.T) string {
 			_ = os.RemoveAll(dir)
 			continue
 		}
+		t.Cleanup(func() {
+			_ = os.RemoveAll(dir)
+		})
 		return abs
 	}
 	t.Skip("unable to create non-temporary outside directory for test")
