@@ -7,7 +7,6 @@ import (
 
 	"builder/server/launch"
 	"builder/server/session"
-	"builder/server/sessioncontrol"
 	"builder/server/tools"
 	"builder/shared/config"
 )
@@ -104,85 +103,14 @@ func (p *launchPlanner) PlanSession(req sessionLaunchRequest) (sessionLaunchPlan
 	if p == nil || p.server == nil {
 		return sessionLaunchPlan{}, errors.New("launch planner bootstrap is required")
 	}
-	cfg := p.server.Config()
-	controller := sessioncontrol.Controller{
-		Config:       cfg,
-		ContainerDir: p.server.ContainerDir(),
-		AuthManager:  p.server.AuthManager(),
-		PickSession: func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (launch.SessionSelection, error) {
-			runPicker := p.pickSession
-			if runPicker == nil {
-				runPicker = func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
-					return runSessionPicker(summaries, theme, alternateScreenPolicy)
-				}
-			}
-			picked, err := runPicker(summaries, theme, alternateScreenPolicy)
-			if err != nil {
-				return launch.SessionSelection{}, err
-			}
-			return launch.SessionSelection{Session: picked.Session, CreateNew: picked.CreateNew, Canceled: picked.Canceled}, nil
-		},
-	}
-	serverPlan, err := controller.PlanSession(launch.SessionRequest{
-		Mode:              launch.Mode(req.Mode),
-		SelectedSessionID: req.SelectedSessionID,
-		ForceNewSession:   req.ForceNewSession,
-		ParentSessionID:   req.ParentSessionID,
-	})
-	if err != nil {
-		return sessionLaunchPlan{}, err
-	}
-	return sessionLaunchPlan{
-		Mode:                req.Mode,
-		Store:               serverPlan.Store,
-		ActiveSettings:      serverPlan.ActiveSettings,
-		EnabledTools:        serverPlan.EnabledTools,
-		ConfiguredModelName: serverPlan.ConfiguredModelName,
-		SessionName:         serverPlan.SessionName,
-		ModelContractLocked: serverPlan.ModelContractLocked,
-		StatusConfig: uiStatusConfig{
-			WorkspaceRoot:   cfg.WorkspaceRoot,
-			PersistenceRoot: cfg.PersistenceRoot,
-			Settings:        serverPlan.ActiveSettings,
-			Source:          serverPlan.Source,
-			AuthManager:     p.server.AuthManager(),
-			AuthStatePath:   config.GlobalAuthConfigPath(cfg),
-		},
-		WorkspaceRoot: serverPlan.WorkspaceRoot,
-		Source:        serverPlan.Source,
-	}, nil
+	return p.server.PlanSession(req, p.pickSession)
 }
 
-func (p *launchPlanner) PrepareRuntime(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string, opts runtimeWiringOptions) (*runtimeLaunchPlan, error) {
+func (p *launchPlanner) PrepareRuntime(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
 	if p == nil || p.server == nil {
-		return nil, errors.New("launch planner bootstrap is required")
+		return nil, io.ErrClosedPipe
 	}
-	logger, err := newRunLogger(plan.Store.Dir(), func(diag runLoggerDiagnostic) {
-		reportRunLoggerDiagnostic(diagnosticWriter, diag)
-	})
-	if err != nil {
-		return nil, err
-	}
-	logLaunchPlanStart(logger, plan, startLogLine)
-	wiring, err := newRuntimeWiringWithBackground(plan.Store, plan.ActiveSettings, plan.EnabledTools, plan.WorkspaceRoot, p.server.AuthManager(), logger, p.server.Background(), opts)
-	if err != nil {
-		_ = logger.Close()
-		return nil, err
-	}
-	if router := p.server.BackgroundRouter(); router != nil {
-		router.SetActiveSession(plan.Store.Meta().SessionID, wiring.engine)
-	}
-	return &runtimeLaunchPlan{
-		Logger: logger,
-		Wiring: wiring,
-		close: func() {
-			if router := p.server.BackgroundRouter(); router != nil {
-				router.ClearActiveSession(plan.Store.Meta().SessionID)
-			}
-			_ = wiring.Close()
-			_ = logger.Close()
-		},
-	}, nil
+	return p.server.PrepareRuntime(plan, diagnosticWriter, startLogLine)
 }
 
 func logLaunchPlanStart(logger *runLogger, plan sessionLaunchPlan, startLogLine string) {

@@ -1,7 +1,6 @@
 package app
 
 import (
-	"fmt"
 	"strings"
 
 	"builder/cli/tui"
@@ -22,68 +21,39 @@ type uiRuntimeAdapter struct {
 
 func (a uiRuntimeAdapter) handleProjectedRuntimeEvent(evt clientui.Event) tea.Cmd {
 	m := a.model
-	switch evt.Kind {
-	case clientui.EventConversationUpdated:
-		return a.syncConversationFromEngine()
-	case clientui.EventAssistantDelta:
-		delta := evt.AssistantDelta
-		if strings.TrimSpace(delta) == uiNoopFinalToken {
+	update := clientui.ReduceRuntimeEvent(
+		a.runtimeEventState(),
+		a.pendingInputState(),
+		m.activity == uiActivityRunning,
+		evt,
+	)
+	a.applyRuntimeEventUpdate(update)
+	if update.AssistantDelta != "" {
+		if strings.TrimSpace(update.AssistantDelta) == uiNoopFinalToken {
 			return nil
 		}
-		m.sawAssistantDelta = delta != ""
-		if delta != "" {
-			m.forwardToView(tui.StreamAssistantMsg{Delta: delta})
-		}
-	case clientui.EventAssistantDeltaReset:
+		m.sawAssistantDelta = true
+		m.forwardToView(tui.StreamAssistantMsg{Delta: update.AssistantDelta})
+	}
+	if update.ClearAssistantStream {
 		m.sawAssistantDelta = false
 		m.forwardToView(tui.ClearOngoingAssistantMsg{})
-	case clientui.EventReasoningDelta:
-		if evt.ReasoningDelta != nil {
-			if header := extractReasoningStatusHeader(evt.ReasoningDelta.Text); header != "" {
-				m.reasoningStatusHeader = header
-			}
-			m.forwardToView(tui.UpsertStreamingReasoningMsg{Key: evt.ReasoningDelta.Key, Role: evt.ReasoningDelta.Role, Text: evt.ReasoningDelta.Text})
-		}
-	case clientui.EventReasoningDeltaReset:
+	}
+	if update.ReasoningDelta != nil {
+		m.forwardToView(tui.UpsertStreamingReasoningMsg{Key: update.ReasoningDelta.Key, Role: update.ReasoningDelta.Role, Text: update.ReasoningDelta.Text})
+	}
+	if update.ClearReasoningStream {
 		m.forwardToView(tui.ClearStreamingReasoningMsg{})
-	case clientui.EventCompactionStarted:
-		m.compacting = true
-	case clientui.EventCompactionCompleted, clientui.EventCompactionFailed:
-		m.compacting = false
-	case clientui.EventReviewerStarted:
-		m.reviewerRunning = true
-		m.reviewerBlocking = true
-	case clientui.EventReviewerCompleted:
-		m.clearReviewerState()
-	case clientui.EventRunStateChanged:
-		if evt.RunState != nil {
-			m.busy = evt.RunState.Busy
-			if evt.RunState.Busy {
-				m.pendingPreSubmitText = ""
-				m.activity = uiActivityRunning
-			} else {
-				if m.activity == uiActivityRunning {
-					m.activity = uiActivityIdle
-				}
-				m.reasoningStatusHeader = ""
-				m.forwardToView(tui.ClearStreamingReasoningMsg{})
-			}
+	}
+	if update.BackgroundNotice != nil {
+		kind := uiStatusNoticeSuccess
+		if update.BackgroundNotice.Kind == clientui.BackgroundNoticeError {
+			kind = uiStatusNoticeError
 		}
-	case clientui.EventBackgroundUpdated:
-		m.refreshProcessEntries()
-		if evt.Background != nil && (evt.Background.Type == "completed" || evt.Background.Type == "killed") {
-			if evt.Background.NoticeSuppressed {
-				return nil
-			}
-			kind := uiStatusNoticeSuccess
-			if evt.Background.Type == "killed" && !evt.Background.UserRequestedKill {
-				kind = uiStatusNoticeError
-			}
-			return m.setTransientStatusWithKind(fmt.Sprintf("background shell %s %s", evt.Background.ID, evt.Background.State), kind)
-		}
-	case clientui.EventUserMessageFlushed:
-		shouldRecordHistory := a.onUserMessageFlushed(evt.UserMessage, evt.UserMessageBatch)
-		if shouldRecordHistory {
+		return m.setTransientStatusWithKind(update.BackgroundNotice.Message, kind)
+	}
+	if update.SyncSessionView {
+		if update.RecordPromptHistory {
 			return sequenceCmds(a.syncConversationFromEngine(), m.recordPromptHistory(evt.UserMessage))
 		}
 		return a.syncConversationFromEngine()
@@ -91,32 +61,54 @@ func (a uiRuntimeAdapter) handleProjectedRuntimeEvent(evt clientui.Event) tea.Cm
 	return nil
 }
 
-func (a uiRuntimeAdapter) onUserMessageFlushed(text string, batch []string) bool {
+func (a uiRuntimeAdapter) runtimeEventState() clientui.RuntimeEventState {
 	m := a.model
-	m.conversationFreshness = clientui.ConversationFreshnessEstablished
-	if len(batch) == 0 && strings.TrimSpace(text) != "" {
-		batch = []string{text}
+	return clientui.RuntimeEventState{
+		Busy:                  m.busy,
+		Compacting:            m.compacting,
+		ReviewerRunning:       m.reviewerRunning,
+		ReviewerBlocking:      m.reviewerBlocking,
+		ConversationFreshness: m.conversationFreshness,
+		ReasoningStatusHeader: m.reasoningStatusHeader,
 	}
-	shouldRecordHistory := false
-	consumed := 0
-	for consumed < len(batch) && consumed < len(m.pendingInjected) {
-		if strings.TrimSpace(m.pendingInjected[consumed]) != strings.TrimSpace(batch[consumed]) {
-			break
-		}
-		consumed++
+}
+
+func (a uiRuntimeAdapter) pendingInputState() clientui.PendingInputState {
+	m := a.model
+	return clientui.PendingInputState{
+		Input:             m.input,
+		PendingInjected:   append([]string(nil), m.pendingInjected...),
+		LockedInjectText:  m.lockedInjectText,
+		InputSubmitLocked: m.inputSubmitLocked,
 	}
-	if consumed > 0 {
-		m.pendingInjected = append([]string(nil), m.pendingInjected[consumed:]...)
-		shouldRecordHistory = true
+}
+
+func (a uiRuntimeAdapter) applyRuntimeEventUpdate(update clientui.RuntimeEventUpdate) {
+	m := a.model
+	m.busy = update.State.Busy
+	m.compacting = update.State.Compacting
+	m.reviewerRunning = update.State.ReviewerRunning
+	m.reviewerBlocking = update.State.ReviewerBlocking
+	m.conversationFreshness = update.State.ConversationFreshness
+	m.reasoningStatusHeader = update.State.ReasoningStatusHeader
+	m.pendingInjected = update.Input.PendingInjected
+	m.lockedInjectText = update.Input.LockedInjectText
+	m.inputSubmitLocked = update.Input.InputSubmitLocked
+	if update.ClearInput {
+		m.clearInput()
 	}
-	if m.inputSubmitLocked && strings.TrimSpace(m.lockedInjectText) == strings.TrimSpace(text) {
-		if strings.TrimSpace(m.input) == strings.TrimSpace(m.lockedInjectText) {
-			m.clearInput()
-		}
-		m.lockedInjectText = ""
-		m.inputSubmitLocked = false
+	if update.ClearPendingPreSubmit {
+		m.pendingPreSubmitText = ""
 	}
-	return shouldRecordHistory
+	if update.SetActivityRunning {
+		m.activity = uiActivityRunning
+	}
+	if update.SetActivityIdle {
+		m.activity = uiActivityIdle
+	}
+	if update.RefreshProcesses {
+		m.refreshProcessEntries()
+	}
 }
 
 func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
@@ -209,10 +201,6 @@ func waitAskEvent(ch <-chan askEvent) tea.Cmd {
 
 func (m *uiModel) handleRuntimeEvent(evt clientui.Event) {
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(evt)
-}
-
-func (m *uiModel) onUserMessageFlushed(text string) {
-	_ = m.runtimeAdapter().onUserMessageFlushed(text, nil)
 }
 
 func (m *uiModel) syncConversationFromEngine() {

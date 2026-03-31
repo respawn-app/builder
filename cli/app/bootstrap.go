@@ -9,11 +9,11 @@ import (
 	"builder/shared/config"
 )
 
-func startEmbeddedServer(ctx context.Context, opts Options, interactor authInteractor) (*serverembedded.Server, error) {
+func startEmbeddedServer(ctx context.Context, opts Options, interactor authInteractor) (*embeddedAppServer, error) {
 	if interactor == nil {
 		return nil, errors.New("auth interactor is required")
 	}
-	return serverstartup.Start(ctx, serverstartup.Request{
+	server, err := serverstartup.Start(ctx, serverstartup.Request{
 		WorkspaceRoot:         opts.WorkspaceRoot,
 		WorkspaceRootExplicit: opts.WorkspaceRootExplicit,
 		SessionID:             opts.SessionID,
@@ -27,6 +27,10 @@ func startEmbeddedServer(ctx context.Context, opts Options, interactor authInter
 		OpenAIBaseURL:         opts.OpenAIBaseURL,
 		OpenAIBaseURLExplicit: opts.OpenAIBaseURLExplicit,
 	}, interactor, frontendOnboardingHandler{inner: interactor})
+	if err != nil {
+		return nil, err
+	}
+	return newEmbeddedAppServer(server), nil
 }
 
 type frontendOnboardingHandler struct {
