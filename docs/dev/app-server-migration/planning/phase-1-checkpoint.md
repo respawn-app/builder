@@ -46,12 +46,14 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 - The full existing UI characterization surface now exercises the projected/shared constructor directly.
 - `NewProjectedUIModel(...)` is now the only UI constructor entrypoint in `cli/app`; the engine-shaped compatibility wrapper has been deleted rather than retained as long-term API debt.
 - Repo-wide search now shows no remaining `NewUIModel(...)` callers in `cli/app`.
+- `scripts/check-no-legacy-ui-constructor.sh`, invoked by `./scripts/test.sh`, now keeps that constructor-removal milestone from silently regressing.
 - Runtime preparation and local runtime/tool wiring now also have one server-owned implementation shared by both interactive and headless flows.
 
 Current limitations:
 
 - `server/bootstrap`, `server/embedded`, `server/authflow`, `server/runprompt`, `server/launch`, `server/lifecycle`, `server/runtimewire`, and `server/runtimeview` now own the first real server-side launch/runtime path, but `cli/app` still owns auth/onboarding interaction flow and the remaining interactive runtime adapter surface that still needs to move onto shared client-facing contracts in later Phase 1 slices.
 - The current duplicate suppression is process-local and scoped to the embedded server boundary; broader protocol-wide idempotency for future server methods remains Phase 2 work.
+- The full-suite proof gate still includes a flaky native scrollback test (`TestNativeFinalizeDoesNotBlinkDuplicateTailTokens`): it failed once during this checkpoint, passed immediately in isolation, and the subsequent full rerun was green. Treat it as existing test instability unless it starts reproducing under focused changes in the native transcript path.
 
 ## Remaining Work In Phase 1
 
