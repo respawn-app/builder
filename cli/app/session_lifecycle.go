@@ -10,8 +10,8 @@ import (
 	"builder/server/session"
 )
 
-func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionID string) error {
-	planner := newSessionLaunchPlanner(&boot)
+func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor authInteractor, initialSessionID string) error {
+	planner := newSessionLaunchPlanner(server)
 	currentSessionID := strings.TrimSpace(initialSessionID)
 	nextSessionInitialPrompt := ""
 	nextSessionInitialInput := ""
@@ -29,11 +29,12 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 		}
 		forceNewSession = false
 		nextSessionParentID = ""
-		runtimePlan, err := planner.PrepareRuntime(plan, os.Stderr, "app.start session_id="+plan.Store.Meta().SessionID+" workspace="+plan.WorkspaceRoot+" model="+plan.ActiveSettings.Model, runtimeWiringOptions{FastMode: boot.fastModeState})
+		runtimePlan, err := planner.PrepareRuntime(plan, os.Stderr, "app.start session_id="+plan.Store.Meta().SessionID+" workspace="+plan.WorkspaceRoot+" model="+plan.ActiveSettings.Model, runtimeWiringOptions{FastMode: server.FastModeState()})
 		if err != nil {
 			return err
 		}
-		commandRegistry, err := commands.NewDefaultRegistryWithFilePrompts(boot.cfg.WorkspaceRoot, boot.cfg.Source.SettingsPath)
+		cfg := server.Config()
+		commandRegistry, err := commands.NewDefaultRegistryWithFilePrompts(cfg.WorkspaceRoot, cfg.Source.SettingsPath)
 		if err != nil {
 			runtimePlan.Close()
 			return err
@@ -63,7 +64,7 @@ func runSessionLifecycle(ctx context.Context, boot appBootstrap, initialSessionI
 		}
 
 		transition := extractUITransition(finalModel)
-		resolved, err := resolveSessionAction(ctx, boot, plan.Store, transition)
+		resolved, err := resolveSessionAction(ctx, server, interactor, plan.Store, transition)
 		if err != nil {
 			return err
 		}
@@ -102,10 +103,10 @@ type resolvedSessionAction struct {
 	ShouldContinue  bool
 }
 
-func resolveSessionAction(ctx context.Context, boot appBootstrap, store *session.Store, transition UITransition) (resolvedSessionAction, error) {
+func resolveSessionAction(ctx context.Context, server embeddedServer, interactor authInteractor, store *session.Store, transition UITransition) (resolvedSessionAction, error) {
 	resolved, err := serverlifecycle.Resolve(ctx, serverlifecycle.ResolveRequest{
 		Store:       store,
-		AuthManager: boot.authManager,
+		AuthManager: server.AuthManager(),
 		Transition: serverlifecycle.Transition{
 			Action:               serverlifecycle.Action(transition.Action),
 			InitialPrompt:        transition.InitialPrompt,
@@ -119,7 +120,8 @@ func resolveSessionAction(ctx context.Context, boot appBootstrap, store *session
 		return resolvedSessionAction{}, err
 	}
 	if resolved.RequiresReauth {
-		if err := ensureAuthReady(ctx, boot.authManager, boot.oauthOpts, boot.cfg.Settings.Theme, boot.cfg.Settings.TUIAlternateScreen, boot.authInteractor); err != nil {
+		cfg := server.Config()
+		if err := ensureAuthReady(ctx, server.AuthManager(), server.OAuthOptions(), cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen, interactor); err != nil {
 			return resolvedSessionAction{}, err
 		}
 	}
