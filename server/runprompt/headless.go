@@ -230,7 +230,7 @@ func newDeduplicatingPromptService(scopeID string, inner serverapi.RunPromptServ
 
 func sweepExpiredRunPromptDedupeEntriesLocked(now time.Time) {
 	for key, entry := range runPromptDedupeRegistry.entries {
-		if entry == nil || !entry.done || !entry.cacheable || entry.completedAt.IsZero() {
+		if entry == nil || !entry.done || entry.completedAt.IsZero() {
 			continue
 		}
 		if now.Sub(entry.completedAt) >= runPromptDedupeRetention {
@@ -286,6 +286,9 @@ func (s *deduplicatingPromptService) RunPrompt(ctx context.Context, req serverap
 		entry.cacheable = cacheable
 		entry.completedAt = runPromptDedupeNow()
 		close(entry.ready)
+		if !cacheable {
+			delete(runPromptDedupeRegistry.entries, key)
+		}
 		runPromptDedupeRegistry.mu.Unlock()
 		return response, err
 	}

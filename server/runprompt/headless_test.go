@@ -175,6 +175,9 @@ func TestDeduplicatingPromptServiceDoesNotCacheCanceledErrors(t *testing.T) {
 	if got := inner.CallCount(); got != 1 {
 		t.Fatalf("inner call count after canceled run = %d, want 1", got)
 	}
+	if got := runPromptDedupeEntryCount(); got != 0 {
+		t.Fatalf("entry count after canceled run = %d, want 0", got)
+	}
 
 	response, err := service.RunPrompt(context.Background(), req, nil)
 	if err != nil {
