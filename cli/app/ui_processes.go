@@ -11,7 +11,7 @@ import (
 
 	"builder/cli/tui"
 	"builder/server/tools"
-	shelltool "builder/server/tools/shell"
+	"builder/shared/clientui"
 	"builder/shared/textutil"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -30,12 +30,12 @@ func (m *uiModel) refreshProcessEntries() {
 	if m.processList.selection >= 0 && m.processList.selection < len(m.processList.entries) {
 		selectedID = m.processList.entries[m.processList.selection].ID
 	}
-	if m.backgroundManager == nil {
+	if m.processClient == nil {
 		m.processList.entries = nil
 		m.processList.selection = 0
 		return
 	}
-	m.processList.entries = m.backgroundManager.List()
+	m.processList.entries = m.listProcesses()
 	if len(m.processList.entries) == 0 {
 		m.processList.selection = 0
 		return
@@ -144,9 +144,9 @@ func (m *uiModel) selectLastProcess() {
 	m.processList.selection = len(m.processList.entries) - 1
 }
 
-func (m *uiModel) selectedProcess() (shelltool.Snapshot, bool) {
+func (m *uiModel) selectedProcess() (clientui.BackgroundProcess, bool) {
 	if len(m.processList.entries) == 0 || m.processList.selection < 0 || m.processList.selection >= len(m.processList.entries) {
-		return shelltool.Snapshot{}, false
+		return clientui.BackgroundProcess{}, false
 	}
 	return m.processList.entries[m.processList.selection], true
 }
@@ -248,7 +248,7 @@ func (c uiInputController) runProcessAction(action, id string) (tea.Model, tea.C
 		m.appendProcessOutputToInput(id, preview)
 		return m, tea.Batch(c.stopProcessListFlowCmd(), c.showTransientStatus("Pasted shell transcript"))
 	case "logs":
-		path, err := processLogPath(m.backgroundManager, id)
+		path, err := processLogPath(m.listProcesses(), id)
 		if err != nil {
 			return m, c.showErrorStatus(err.Error())
 		}
@@ -285,8 +285,8 @@ func (m *uiModel) appendProcessOutputToInput(id, output string) {
 	m.insertInputRunes([]rune(prefix + payload))
 }
 
-func processLogPath(manager *shelltool.Manager, id string) (string, error) {
-	for _, entry := range manager.List() {
+func processLogPath(entries []clientui.BackgroundProcess, id string) (string, error) {
+	for _, entry := range entries {
 		if entry.ID == id {
 			if strings.TrimSpace(entry.LogPath) == "" {
 				return "", fmt.Errorf("process %s has no log file", id)
@@ -371,7 +371,7 @@ func (l uiViewLayout) renderProcessList(width, height int, style uiStyles) []str
 	return l.renderChatContentLines(lines, nil, width, style)
 }
 
-func renderProcessListHeader(entries []shelltool.Snapshot, width int, style uiStyles) string {
+func renderProcessListHeader(entries []clientui.BackgroundProcess, width int, style uiStyles) string {
 	running := 0
 	for _, entry := range entries {
 		state := strings.TrimSpace(entry.State)
@@ -391,7 +391,7 @@ func renderProcessListFooter(width int, style uiStyles) string {
 	return style.meta.Render(truncateQueuedMessageLine(controls, width))
 }
 
-func renderProcessListEntry(entry shelltool.Snapshot, selected bool, width int, theme string, spinnerFrame int, style uiStyles) []string {
+func renderProcessListEntry(entry clientui.BackgroundProcess, selected bool, width int, theme string, spinnerFrame int, style uiStyles) []string {
 	palette := uiPalette(theme)
 	entryStyles := newProcessListEntryStyles(theme, selected, processStateColor(entry, palette))
 	railGlyph := " "
@@ -490,7 +490,7 @@ func processListPadLine(parts []string, width int, fill lipgloss.Style) string {
 	return line + fill.Render(strings.Repeat(" ", remaining))
 }
 
-func processStateColor(entry shelltool.Snapshot, palette uiColors) lipgloss.TerminalColor {
+func processStateColor(entry clientui.BackgroundProcess, palette uiColors) lipgloss.TerminalColor {
 	state := strings.TrimSpace(entry.State)
 	switch state {
 	case "completed":
@@ -513,7 +513,7 @@ func processStateColor(entry shelltool.Snapshot, palette uiColors) lipgloss.Term
 	}
 }
 
-func renderProcessStateIndicator(entry shelltool.Snapshot, spinnerFrame int) string {
+func renderProcessStateIndicator(entry clientui.BackgroundProcess, spinnerFrame int) string {
 	state := strings.TrimSpace(entry.State)
 	if state == "starting" || state == "running" || (state == "" && entry.Running) {
 		if len(pendingToolSpinner.Frames) == 0 {
@@ -528,7 +528,7 @@ func renderProcessStateIndicator(entry shelltool.Snapshot, spinnerFrame int) str
 	return "●"
 }
 
-func processStateLabel(entry shelltool.Snapshot) string {
+func processStateLabel(entry clientui.BackgroundProcess) string {
 	state := strings.TrimSpace(entry.State)
 	if state != "" {
 		return state
@@ -622,11 +622,17 @@ func humanAge(t time.Time) string {
 	return fmt.Sprintf("%dh", int(d.Hours()))
 }
 
-func processCountLabel(manager *shelltool.Manager) string {
-	if manager == nil {
+func processCountLabel(entries []clientui.BackgroundProcess) string {
+	if len(entries) == 0 {
 		return ""
 	}
-	count := manager.Count()
+	count := 0
+	for _, entry := range entries {
+		state := strings.TrimSpace(entry.State)
+		if entry.Running || state == "starting" || state == "running" {
+			count++
+		}
+	}
 	if count == 0 {
 		return ""
 	}

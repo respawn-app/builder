@@ -3,7 +3,7 @@ package app
 import (
 	"builder/cli/tui"
 
-	shelltool "builder/server/tools/shell"
+	"builder/shared/clientui"
 )
 
 type uiInputMode string
@@ -36,7 +36,7 @@ type uiProcessListState struct {
 	open               bool
 	ownsTranscriptMode bool
 	selection          int
-	entries            []shelltool.Snapshot
+	entries            []clientui.BackgroundProcess
 }
 
 type uiRollbackPhase string
