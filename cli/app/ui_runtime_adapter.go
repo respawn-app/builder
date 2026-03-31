@@ -7,7 +7,6 @@ import (
 	"builder/cli/tui"
 	"builder/server/llm"
 	"builder/server/runtime"
-	"builder/server/session"
 	patchformat "builder/server/tools/patch/format"
 	"builder/shared/clientui"
 	"builder/shared/transcript"
@@ -94,7 +93,7 @@ func (a uiRuntimeAdapter) handleProjectedRuntimeEvent(evt clientui.Event) tea.Cm
 
 func (a uiRuntimeAdapter) onUserMessageFlushed(text string, batch []string) bool {
 	m := a.model
-	m.conversationFreshness = session.ConversationFreshnessEstablished
+	m.conversationFreshness = clientui.ConversationFreshnessEstablished
 	if len(batch) == 0 && strings.TrimSpace(text) != "" {
 		batch = []string{text}
 	}

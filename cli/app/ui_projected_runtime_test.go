@@ -20,7 +20,7 @@ func TestWaitRuntimeEventReturnsProjectedMessage(t *testing.T) {
 }
 
 func TestProjectedRuntimeEventUpdateStreamsAssistantDelta(t *testing.T) {
-	m := newProjectedUIModel(nil, make(chan clientui.Event), make(chan askEvent)).(*uiModel)
+	m := NewProjectedUIModel(nil, make(chan clientui.Event), make(chan askEvent)).(*uiModel)
 	next, _ := m.Update(runtimeEventMsg{event: clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "hello"}})
 	updated := next.(*uiModel)
 	if got := updated.view.OngoingStreamingText(); got != "hello" {
