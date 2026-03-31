@@ -19,8 +19,8 @@ type RunPromptResult struct {
 	Duration    time.Duration
 }
 
-func runPrompt(ctx context.Context, boot appBootstrap, initialSessionID, prompt string, timeout time.Duration, progress io.Writer) (RunPromptResult, error) {
-	client := newHeadlessRunPromptClient(boot)
+func runPrompt(ctx context.Context, server embeddedServer, initialSessionID, prompt string, timeout time.Duration, progress io.Writer) (RunPromptResult, error) {
+	client := server.RunPromptClient()
 	response, err := client.RunPrompt(ctx, serverapi.RunPromptRequest{
 		ClientRequestID:   uuid.NewString(),
 		SelectedSessionID: strings.TrimSpace(initialSessionID),

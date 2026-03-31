@@ -20,7 +20,8 @@ import (
 func TestResolveSessionActionResumeReopensPicker(t *testing.T) {
 	resolved, err := resolveSessionAction(
 		context.Background(),
-		appBootstrap{},
+		&testEmbeddedServer{},
+		nil,
 		nil,
 		UITransition{Action: UIActionResume},
 	)
@@ -47,7 +48,8 @@ func TestResolveSessionActionResumeReopensPicker(t *testing.T) {
 func TestResolveSessionActionNewSessionUsesForceNewFlow(t *testing.T) {
 	resolved, err := resolveSessionAction(
 		context.Background(),
-		appBootstrap{},
+		&testEmbeddedServer{},
+		nil,
 		nil,
 		UITransition{Action: UIActionNewSession, InitialPrompt: "hello", ParentSessionID: "parent-1"},
 	)
@@ -95,7 +97,8 @@ func TestNewSessionTransitionKeepsBackgroundProcessesAlive(t *testing.T) {
 	root := t.TempDir()
 	resolved, err := resolveSessionAction(
 		context.Background(),
-		appBootstrap{background: manager},
+		&testEmbeddedServer{background: manager},
+		nil,
 		nil,
 		UITransition{Action: UIActionNewSession, InitialPrompt: "hello", ParentSessionID: "parent-1"},
 	)
@@ -115,7 +118,7 @@ func TestNewSessionTransitionKeepsBackgroundProcessesAlive(t *testing.T) {
 	}
 
 	planner := &launchPlanner{
-		boot: &appBootstrap{
+		server: &testEmbeddedServer{
 			cfg: config.App{
 				WorkspaceRoot:   workdir,
 				PersistenceRoot: root,
@@ -161,7 +164,8 @@ func TestResolveSessionActionForkRollbackTeleportsToForkWithPrompt(t *testing.T)
 
 	resolved, err := resolveSessionAction(
 		context.Background(),
-		appBootstrap{},
+		&testEmbeddedServer{},
+		nil,
 		store,
 		UITransition{Action: UIActionForkRollback, InitialPrompt: "edited user message", ForkUserMessageIndex: 1},
 	)
@@ -221,7 +225,7 @@ func TestForkRollbackLifecycleDoesNotPersistEditedPromptAsSourceDraft(t *testing
 		t.Fatalf("expected no persisted source draft after fork handoff, got %q", reopenedSource.Meta().InputDraft)
 	}
 
-	resolved, err := resolveSessionAction(context.Background(), appBootstrap{}, reopenedSource, updated.Transition())
+	resolved, err := resolveSessionAction(context.Background(), &testEmbeddedServer{}, nil, reopenedSource, updated.Transition())
 	if err != nil {
 		t.Fatalf("resolve session action: %v", err)
 	}
@@ -236,7 +240,8 @@ func TestForkRollbackLifecycleDoesNotPersistEditedPromptAsSourceDraft(t *testing
 func TestResolveSessionActionOpenSessionUsesTargetID(t *testing.T) {
 	resolved, err := resolveSessionAction(
 		context.Background(),
-		appBootstrap{},
+		&testEmbeddedServer{},
+		nil,
 		nil,
 		UITransition{Action: UIActionOpenSession, TargetSessionID: "session-42", InitialInput: "draft reply"},
 	)
@@ -323,7 +328,7 @@ func TestBackTeleportLifecycleSeedsParentDraftWithoutAutoSubmit(t *testing.T) {
 				t.Fatalf("persist child draft: %v", err)
 			}
 
-			resolved, err := resolveSessionAction(context.Background(), appBootstrap{}, childStore, updatedChild.Transition())
+			resolved, err := resolveSessionAction(context.Background(), &testEmbeddedServer{}, nil, childStore, updatedChild.Transition())
 			if err != nil {
 				t.Fatalf("resolve session action: %v", err)
 			}
@@ -386,7 +391,8 @@ func TestForkRollbackNativeStartupReplayUsesForkedHistory(t *testing.T) {
 
 	resolved, err := resolveSessionAction(
 		context.Background(),
-		appBootstrap{},
+		&testEmbeddedServer{},
+		nil,
 		store,
 		UITransition{Action: UIActionForkRollback, InitialPrompt: "edited user message", ForkUserMessageIndex: 2},
 	)

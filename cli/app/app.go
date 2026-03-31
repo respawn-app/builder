@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	serverembedded "builder/server/embedded"
 	"builder/server/launch"
 	"builder/server/session"
 	"builder/server/tools"
@@ -28,30 +29,25 @@ type Options struct {
 }
 
 func Run(ctx context.Context, opts Options) error {
-	boot, err := bootstrapApp(ctx, opts, newInteractiveAuthInteractor())
+	interactor := newInteractiveAuthInteractor()
+	server, err := startEmbeddedServer(ctx, opts, interactor)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if boot.background != nil {
-			_ = boot.background.Close()
-		}
-	}()
-	return runSessionLifecycle(ctx, boot, strings.TrimSpace(opts.SessionID))
+	defer func() { _ = server.Close() }()
+	return runSessionLifecycle(ctx, server, interactor, strings.TrimSpace(opts.SessionID))
 }
 
 func RunPrompt(ctx context.Context, opts Options, prompt string, timeout time.Duration, progress io.Writer) (RunPromptResult, error) {
-	boot, err := bootstrapApp(ctx, opts, newHeadlessAuthInteractor())
+	server, err := startEmbeddedServer(ctx, opts, newHeadlessAuthInteractor())
 	if err != nil {
 		return RunPromptResult{}, err
 	}
-	defer func() {
-		if boot.background != nil {
-			_ = boot.background.Close()
-		}
-	}()
-	return runPrompt(ctx, boot, strings.TrimSpace(opts.SessionID), prompt, timeout, progress)
+	defer func() { _ = server.Close() }()
+	return runPrompt(ctx, server, strings.TrimSpace(opts.SessionID), prompt, timeout, progress)
 }
+
+var _ embeddedServer = (*serverembedded.Server)(nil)
 
 func effectiveSettings(base config.Settings, locked *session.LockedContract) config.Settings {
 	return launch.EffectiveSettings(base, locked)

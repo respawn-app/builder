@@ -14,15 +14,8 @@ import (
 	"builder/shared/serverapi"
 )
 
-func newHeadlessRunPromptClient(boot appBootstrap) client.RunPromptClient {
-	return runprompt.NewLoopbackRunPromptClient(runprompt.HeadlessBootstrap{
-		Config:           boot.cfg,
-		ContainerDir:     boot.containerDir,
-		AuthManager:      boot.authManager,
-		FastModeState:    boot.fastModeState,
-		Background:       boot.background,
-		BackgroundRouter: boot.backgroundRouter,
-	})
+func newHeadlessRunPromptClient(server embeddedServer) client.RunPromptClient {
+	return server.RunPromptClient()
 }
 
 func ensureSubagentSessionName(store *session.Store) error {

@@ -61,7 +61,7 @@ type sessionPickerRunner func([]session.Summary, string, config.TUIAlternateScre
 
 type launchPlanner struct {
 	persistenceRoot string
-	boot            *appBootstrap
+	server          embeddedServer
 	pickSession     sessionPickerRunner
 }
 
@@ -69,9 +69,9 @@ func newBootstrapLaunchPlanner(persistenceRoot string) *launchPlanner {
 	return &launchPlanner{persistenceRoot: strings.TrimSpace(persistenceRoot)}
 }
 
-func newSessionLaunchPlanner(boot *appBootstrap) *launchPlanner {
+func newSessionLaunchPlanner(server embeddedServer) *launchPlanner {
 	return &launchPlanner{
-		boot: boot,
+		server: server,
 		pickSession: func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
 			return runSessionPicker(summaries, theme, alternateScreenPolicy)
 		},
@@ -100,12 +100,13 @@ func requestedWorkspaceRootValue(workspaceRoot string) string {
 }
 
 func (p *launchPlanner) PlanSession(req sessionLaunchRequest) (sessionLaunchPlan, error) {
-	if p == nil || p.boot == nil {
+	if p == nil || p.server == nil {
 		return sessionLaunchPlan{}, errors.New("launch planner bootstrap is required")
 	}
+	cfg := p.server.Config()
 	planner := launch.Planner{
-		Config:       p.boot.cfg,
-		ContainerDir: p.boot.containerDir,
+		Config:       cfg,
+		ContainerDir: p.server.ContainerDir(),
 		PickSession: func(summaries []session.Summary) (launch.SessionSelection, error) {
 			runPicker := p.pickSession
 			if runPicker == nil {
@@ -113,7 +114,7 @@ func (p *launchPlanner) PlanSession(req sessionLaunchRequest) (sessionLaunchPlan
 					return runSessionPicker(summaries, theme, alternateScreenPolicy)
 				}
 			}
-			picked, err := runPicker(summaries, p.boot.cfg.Settings.Theme, p.boot.cfg.Settings.TUIAlternateScreen)
+			picked, err := runPicker(summaries, cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen)
 			if err != nil {
 				return launch.SessionSelection{}, err
 			}
@@ -138,12 +139,12 @@ func (p *launchPlanner) PlanSession(req sessionLaunchRequest) (sessionLaunchPlan
 		SessionName:         serverPlan.SessionName,
 		ModelContractLocked: serverPlan.ModelContractLocked,
 		StatusConfig: uiStatusConfig{
-			WorkspaceRoot:   p.boot.cfg.WorkspaceRoot,
-			PersistenceRoot: p.boot.cfg.PersistenceRoot,
+			WorkspaceRoot:   cfg.WorkspaceRoot,
+			PersistenceRoot: cfg.PersistenceRoot,
 			Settings:        serverPlan.ActiveSettings,
 			Source:          serverPlan.Source,
-			AuthManager:     p.boot.authManager,
-			AuthStatePath:   config.GlobalAuthConfigPath(p.boot.cfg),
+			AuthManager:     p.server.AuthManager(),
+			AuthStatePath:   config.GlobalAuthConfigPath(cfg),
 		},
 		WorkspaceRoot: serverPlan.WorkspaceRoot,
 		Source:        serverPlan.Source,
@@ -151,7 +152,7 @@ func (p *launchPlanner) PlanSession(req sessionLaunchRequest) (sessionLaunchPlan
 }
 
 func (p *launchPlanner) PrepareRuntime(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string, opts runtimeWiringOptions) (*runtimeLaunchPlan, error) {
-	if p == nil || p.boot == nil {
+	if p == nil || p.server == nil {
 		return nil, errors.New("launch planner bootstrap is required")
 	}
 	logger, err := newRunLogger(plan.Store.Dir(), func(diag runLoggerDiagnostic) {
@@ -161,20 +162,20 @@ func (p *launchPlanner) PrepareRuntime(plan sessionLaunchPlan, diagnosticWriter 
 		return nil, err
 	}
 	logLaunchPlanStart(logger, plan, startLogLine)
-	wiring, err := newRuntimeWiringWithBackground(plan.Store, plan.ActiveSettings, plan.EnabledTools, plan.WorkspaceRoot, p.boot.authManager, logger, p.boot.background, opts)
+	wiring, err := newRuntimeWiringWithBackground(plan.Store, plan.ActiveSettings, plan.EnabledTools, plan.WorkspaceRoot, p.server.AuthManager(), logger, p.server.Background(), opts)
 	if err != nil {
 		_ = logger.Close()
 		return nil, err
 	}
-	if p.boot.backgroundRouter != nil {
-		p.boot.backgroundRouter.SetActiveSession(plan.Store.Meta().SessionID, wiring.engine)
+	if router := p.server.BackgroundRouter(); router != nil {
+		router.SetActiveSession(plan.Store.Meta().SessionID, wiring.engine)
 	}
 	return &runtimeLaunchPlan{
 		Logger: logger,
 		Wiring: wiring,
 		close: func() {
-			if p.boot.backgroundRouter != nil {
-				p.boot.backgroundRouter.ClearActiveSession(plan.Store.Meta().SessionID)
+			if router := p.server.BackgroundRouter(); router != nil {
+				router.ClearActiveSession(plan.Store.Meta().SessionID)
 			}
 			_ = wiring.Close()
 			_ = logger.Close()

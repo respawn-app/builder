@@ -14,7 +14,7 @@ import (
 func TestSessionLaunchPlannerHeadlessCreatesNewSessionAndAppliesContinuationContext(t *testing.T) {
 	root := t.TempDir()
 	containerDir := filepath.Join(root, "sessions", "workspace-a")
-	planner := newSessionLaunchPlanner(&appBootstrap{
+	planner := newSessionLaunchPlanner(&testEmbeddedServer{
 		cfg: config.App{
 			WorkspaceRoot:   "/tmp/workspace-a",
 			PersistenceRoot: root,
@@ -65,7 +65,7 @@ func TestSessionLaunchPlannerInteractiveUsesPickerSelection(t *testing.T) {
 		t.Fatalf("persist second session meta: %v", err)
 	}
 	planner := &launchPlanner{
-		boot: &appBootstrap{
+		server: &testEmbeddedServer{
 			cfg: config.App{
 				WorkspaceRoot:   "/tmp/workspace-a",
 				PersistenceRoot: root,
@@ -144,7 +144,7 @@ func TestSessionLaunchPlannerInteractiveUsesLegacyWorkspaceContainerMapping(t *t
 	}
 
 	planner := &launchPlanner{
-		boot: &appBootstrap{
+		server: &testEmbeddedServer{
 			cfg: config.App{
 				WorkspaceRoot:   cfg.WorkspaceRoot,
 				PersistenceRoot: cfg.PersistenceRoot,
@@ -187,7 +187,7 @@ func TestSessionLaunchPlannerSelectedSessionIDBypassesPicker(t *testing.T) {
 		t.Fatalf("persist continuation context: %v", err)
 	}
 	planner := &launchPlanner{
-		boot: &appBootstrap{
+		server: &testEmbeddedServer{
 			cfg: config.App{
 				WorkspaceRoot:   "/tmp/workspace-a",
 				PersistenceRoot: root,

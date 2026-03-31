@@ -51,17 +51,13 @@ func TestBootstrapAppHeadlessUsesEnvAPIKeyWithoutPersistingAuthState(t *testing.
 	t.Setenv("HOME", home)
 	t.Setenv("OPENAI_API_KEY", "sk-env")
 
-	boot, err := bootstrapApp(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	boot, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
 	if err != nil {
 		t.Fatalf("bootstrap app: %v", err)
 	}
-	defer func() {
-		if boot.background != nil {
-			_ = boot.background.Close()
-		}
-	}()
+	defer func() { _ = boot.Close() }()
 
-	state, err := boot.authManager.Load(context.Background())
+	state, err := boot.AuthManager().Load(context.Background())
 	if err != nil {
 		t.Fatalf("load auth state: %v", err)
 	}
@@ -72,7 +68,7 @@ func TestBootstrapAppHeadlessUsesEnvAPIKeyWithoutPersistingAuthState(t *testing.
 		t.Fatalf("expected env api key to be visible through manager, got %+v", state.Method.APIKey)
 	}
 
-	authPath := config.GlobalAuthConfigPath(boot.cfg)
+	authPath := config.GlobalAuthConfigPath(boot.Config())
 	if _, err := os.Stat(authPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected no persisted auth state at %q, got err=%v", authPath, err)
 	}
@@ -115,7 +111,8 @@ func TestResolveSessionActionLogoutUsesBootstrapAuthInteractor(t *testing.T) {
 
 	resolved, err := resolveSessionAction(
 		ctx,
-		appBootstrap{authManager: mgr, authInteractor: interactor},
+		&testEmbeddedServer{authManager: mgr},
+		interactor,
 		store,
 		UITransition{Action: UIActionLogout},
 	)
@@ -164,7 +161,8 @@ func TestResolveSessionActionLogoutAllowsNilStore(t *testing.T) {
 
 	resolved, err := resolveSessionAction(
 		ctx,
-		appBootstrap{authManager: mgr, authInteractor: interactor},
+		&testEmbeddedServer{authManager: mgr},
+		interactor,
 		nil,
 		UITransition{Action: UIActionLogout},
 	)
