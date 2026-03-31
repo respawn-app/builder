@@ -91,7 +91,7 @@ func TestCompactDoneResumesQueuedSteeringAsNewTurn(t *testing.T) {
 	for {
 		select {
 		case evt := <-runtimeEvents:
-			next, _ = updated.Update(runtimeEventMsg{event: evt})
+			next, _ = updated.Update(projectedRuntimeEventMsg(evt))
 			updated = next.(*uiModel)
 		default:
 			next, _ = updated.Update(submitDone)

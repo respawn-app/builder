@@ -199,7 +199,7 @@ func TestReviewerRunStillAllowsEditingWithoutTranscriptScroll(t *testing.T) {
 		t.Fatal("expected ongoing transcript to be scrollable")
 	}
 
-	next, _ := m.Update(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventReviewerStarted}})
+	next, _ := m.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventReviewerStarted}))
 	locked := next.(*uiModel)
 	if !locked.reviewerBlocking {
 		t.Fatal("expected reviewer running state")

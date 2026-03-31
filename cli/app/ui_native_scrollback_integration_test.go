@@ -1091,9 +1091,9 @@ func TestNativeStreamingInterleavedWithStatusRedrawStaysCoherent(t *testing.T) {
 	}()
 	time.Sleep(30 * time.Millisecond)
 	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
-	program.Send(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "line1\n"}})
+	program.Send(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "line1\n"}))
 	program.Send(spinnerTickMsg{})
-	program.Send(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "line2\n"}})
+	program.Send(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "line2\n"}))
 	program.Send(spinnerTickMsg{})
 	time.Sleep(40 * time.Millisecond)
 	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
@@ -1144,7 +1144,7 @@ func TestNativeAssistantDeltaSuppressedInDetailMode(t *testing.T) {
 	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
 	program.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
 	time.Sleep(20 * time.Millisecond)
-	program.Send(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "hidden-delta"}})
+	program.Send(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "hidden-delta"}))
 	time.Sleep(20 * time.Millisecond)
 	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
 	select {
@@ -1176,7 +1176,7 @@ func TestNativeStreamingTinyDeltasRemainContiguous(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
 	for _, delta := range []string{"he", "llo", " ", "wor", "ld", "\n"} {
-		program.Send(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: delta}})
+		program.Send(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: delta}))
 	}
 	time.Sleep(40 * time.Millisecond)
 	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
@@ -1213,7 +1213,7 @@ func TestNativeStreamingWithoutNewlineStillVisible(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
 	for _, delta := range []string{"long", " paragraph", " without", " newline"} {
-		program.Send(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: delta}})
+		program.Send(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: delta}))
 	}
 	time.Sleep(40 * time.Millisecond)
 	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
@@ -1245,7 +1245,7 @@ func TestNativeProgramClearsResidualLivePadAfterStreamingCommit(t *testing.T) {
 	}()
 	time.Sleep(30 * time.Millisecond)
 	program.Send(tea.WindowSizeMsg{Width: 120, Height: 20})
-	program.Send(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "line1\nline2"}})
+	program.Send(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "line1\nline2"}))
 	time.Sleep(30 * time.Millisecond)
 	program.Send(tui.SetConversationMsg{Entries: []tui.TranscriptEntry{}, Ongoing: ""})
 	time.Sleep(30 * time.Millisecond)
@@ -1285,7 +1285,7 @@ func TestNativeStreamingInterleavedRendersKeepsLinesLeftAligned(t *testing.T) {
 	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
 	expected := []string{"LADDER-01", "LADDER-02", "LADDER-03", "LADDER-04"}
 	for _, token := range expected {
-		program.Send(runtimeEventMsg{event: runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: token + "\n"}})
+		program.Send(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: token + "\n"}))
 		program.Send(spinnerTickMsg{})
 	}
 	time.Sleep(50 * time.Millisecond)
