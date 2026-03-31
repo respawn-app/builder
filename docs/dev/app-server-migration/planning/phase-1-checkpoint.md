@@ -11,6 +11,7 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 - Reduced `cli/app/run_prompt.go` to a thin frontend adapter that maps CLI/headless inputs onto `serverapi.RunPromptRequest` and result DTOs.
 - Introduced `server/runprompt` as the first server-owned application-service package for the headless `builder run` path, with `cli/app/headless_prompt_server.go` reduced to a wrapper.
 - Introduced `server/bootstrap` as the server-owned home for embedded bootstrap composition: config/container resolution, auth-manager creation, and runtime-support setup now come from a server package instead of being constructed directly inside `cli/app/bootstrap.go`.
+- Introduced `server/authflow` as the server-owned home for auth readiness polling and env-backed auth-store policy, leaving `cli/app/auth_gate.go` with only frontend interaction behavior.
 - Introduced `server/launch` as the server-owned home for bootstrap continuation resolution and session open/create/hydration planning, with `cli/app/bootstrap.go` and `cli/app/launch_planner.go` now acting as adapters around it.
 - Introduced `server/lifecycle` as the server-owned home for interactive lifecycle mutations: draft persistence, rollback fork creation, and logout-state clearing now come from a server package instead of being performed directly in `cli/app/session_lifecycle.go`.
 - Introduced `server/runtimewire` as the server-owned home for runtime preparation, local tool registry construction, background-event routing, outside-workspace approvals, and runtime event bridging; `cli/app/runtime_factory.go` and `server/runprompt/headless.go` now delegate to it instead of owning those implementations directly.
@@ -27,12 +28,13 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 - The first mutating seam now has real retry protection at the server boundary rather than only carrying the `client_request_id` shape.
 - Session bootstrap continuation lookup and session open/create/hydration now have a server-owned implementation shared by both interactive and headless flows.
 - Embedded bootstrap state for auth/runtime support now also comes from a server-owned package rather than being constructed ad hoc in the frontend package.
+- Auth readiness polling and env-backed auth-store policy now also come from a server-owned package; the frontend only supplies the interactive auth UX.
 - Interactive lifecycle mutations now also go through a server-owned package, leaving the frontend to translate `UITransition` and drive re-auth UX only.
 - Runtime preparation and local runtime/tool wiring now also have one server-owned implementation shared by both interactive and headless flows.
 
 Current limitations:
 
-- `server/bootstrap`, `server/runprompt`, `server/launch`, `server/lifecycle`, and `server/runtimewire` now own the first real server-side launch/runtime path, but `cli/app` still owns auth/onboarding interaction flow and runtime-native UI adapters that need further extraction in later Phase 1 slices.
+- `server/bootstrap`, `server/authflow`, `server/runprompt`, `server/launch`, `server/lifecycle`, and `server/runtimewire` now own the first real server-side launch/runtime path, but `cli/app` still owns auth/onboarding interaction flow and runtime-native UI adapters that need further extraction in later Phase 1 slices.
 - The current duplicate suppression is process-local and scoped to the embedded server boundary; broader protocol-wide idempotency for future server methods remains Phase 2 work.
 
 ## Remaining Work In Phase 1
