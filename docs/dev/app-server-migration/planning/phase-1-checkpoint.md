@@ -47,6 +47,7 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 - `NewUIModel(...)` no longer has any non-test callers outside `cli/app/ui.go`; at this checkpoint it exists only as a compatibility wrapper plus remaining legacy test usage.
 - At this checkpoint, the only remaining test usage is the monolithic `cli/app/ui_test.go` characterization file.
 - The remaining `cli/app/ui_test.go` migration should be executed in bounded slices: pure static/local behavior, background-manager/process-list coverage, then the engine-backed runtime/reviewer/status groups. The endgame is to delete `NewUIModel(...)` once that file is drained, not keep it as a long-term public compatibility API.
+- After the latest reviewer/runtime/status slice, `cli/app/ui_test.go` still contains 87 `NewUIModel(...)` usages. The next planned batch is the remaining tail static/local sections; after that, the wrapper should be removable rather than merely de-emphasized.
 - Runtime preparation and local runtime/tool wiring now also have one server-owned implementation shared by both interactive and headless flows.
 
 Current limitations:
