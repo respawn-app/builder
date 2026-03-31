@@ -22,6 +22,7 @@ import (
 	"builder/server/tools"
 	"builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
+	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/theme"
 	tea "github.com/charmbracelet/bubbletea"
@@ -4769,7 +4770,7 @@ func TestQueuedReviewUsesEngineConversationFreshnessWhenUIDidNotReceiveRuntimeUp
 	if len(updated.queued) != 1 || updated.queued[0] != "/review cli/app" {
 		t.Fatalf("expected queued /review command, got %+v", updated.queued)
 	}
-	if updated.conversationFreshness != session.ConversationFreshnessFresh {
+	if updated.conversationFreshness != clientui.ConversationFreshnessFresh {
 		t.Fatalf("expected UI freshness to remain fresh before runtime sync, got %v", updated.conversationFreshness)
 	}
 	if _, err := store.AppendEvent("s1", "message", llm.Message{Role: llm.RoleUser, Content: "first prompt"}); err != nil {
@@ -4790,7 +4791,7 @@ func TestQueuedReviewUsesEngineConversationFreshnessWhenUIDidNotReceiveRuntimeUp
 	if strings.TrimSpace(updated.nextSessionInitialPrompt) == "" {
 		t.Fatal("expected queued /review to populate the next-session prompt")
 	}
-	if updated.conversationFreshness != session.ConversationFreshnessEstablished {
+	if updated.conversationFreshness != clientui.ConversationFreshnessEstablished {
 		t.Fatalf("expected UI freshness synced from engine during drain, got %v", updated.conversationFreshness)
 	}
 }

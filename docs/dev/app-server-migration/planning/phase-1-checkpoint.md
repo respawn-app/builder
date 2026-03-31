@@ -19,6 +19,7 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 - Introduced `shared/clientui` plus `server/runtimeview` as the first client-facing UI projection seam: the TUI runtime adapter now consumes projected UI DTOs instead of reading `runtime.Event` and `runtime.ChatSnapshot` directly in its main update path.
 - Tightened that first UI seam so the `uiModel` event channel path now consumes projected `shared/clientui.Event` values directly, and client-facing tool-call metadata no longer aliases mutable server transcript structures.
 - Replaced the TUI's concrete `*runtime.Engine` dependency with a frontend runtime interface inside `cli/app`: the UI model, submission flow, and status collector now depend on a loopback adapter boundary rather than a concrete runtime object.
+- Moved that interactive runtime control/read contract into `shared/clientui`, leaving `cli/app` with only the loopback adapter implementation and a compatibility wrapper for the old engine-shaped constructor.
 - Added service- and client-level tests for the new seam.
 - Added the first acceptance-style embedded loopback test around `server/embedded.Start(...).RunPromptClient()` to prove the in-process server object is a real runnable boundary, not just a packaging wrapper.
 - Established the first frontend-facing seam for `cli/app/run_prompt.go`, with future boundary enforcement still to be rebuilt in a less brittle form.
@@ -39,6 +40,7 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 - Interactive lifecycle mutations now also go through a server-owned package, leaving the frontend to translate `UITransition` and drive re-auth UX only.
 - The first TUI adapter path now consumes client-facing projected UI DTOs instead of raw runtime-native event/snapshot structs.
 - The TUI control/read path now also depends on a frontend runtime interface rather than a concrete `*runtime.Engine`, with the concrete loopback adapter isolated to one file.
+- That interactive control/read path is now defined in a shared client-facing package rather than locally inside `cli/app`.
 - Runtime preparation and local runtime/tool wiring now also have one server-owned implementation shared by both interactive and headless flows.
 
 Current limitations:
@@ -49,7 +51,7 @@ Current limitations:
 ## Remaining Work In Phase 1
 
 - Decide how the remaining auth/onboarding interaction loop moves onto a stable client/server bootstrap boundary without reintroducing frontend ownership of server state.
-- Continue replacing the remaining loopback-only TUI runtime interface with shared client-facing interactive controls and read models beyond the first runtime-event/chat-snapshot seam.
+- Continue replacing the remaining loopback-only adapter implementation with richer shared client-facing interactive controls and read models beyond the first runtime-event/chat-snapshot seam.
 - Expand import-boundary enforcement once more frontend files stop depending on mixed `cli/app` server composition.
 - Expand the first acceptance-style embedded test client coverage so the same scenarios can later run unchanged against external daemon mode.
 - Replace runtime-native UI event/snapshot consumption with client-facing read models and events now that the embedded server bootstrap boundary is explicit.

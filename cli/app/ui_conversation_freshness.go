@@ -1,8 +1,8 @@
 package app
 
-import "builder/server/session"
+import "builder/shared/clientui"
 
-func (m *uiModel) currentConversationFreshness() session.ConversationFreshness {
+func (m *uiModel) currentConversationFreshness() clientui.ConversationFreshness {
 	if m.engine == nil {
 		return m.conversationFreshness
 	}

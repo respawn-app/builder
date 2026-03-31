@@ -35,7 +35,7 @@ func TestCompactDoneResumesQueuedSteeringAsNewTurn(t *testing.T) {
 		t.Fatalf("new engine: %v", err)
 	}
 
-	m := newProjectedUIModel(eng, projectedEvents, make(chan askEvent)).(*uiModel)
+	m := NewProjectedUIModel(newUIRuntimeClient(eng), projectedEvents, make(chan askEvent)).(*uiModel)
 	m.busy = true
 	m.compacting = true
 	m.activity = uiActivityRunning

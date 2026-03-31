@@ -8,51 +8,11 @@ import (
 	"builder/shared/clientui"
 )
 
-type uiRuntimeContextUsage struct {
-	UsedTokens            int
-	WindowTokens          int
-	CacheHitPercent       int
-	HasCacheHitPercentage bool
-}
-
-type uiRuntimeClient interface {
-	ReviewerFrequency() string
-	ReviewerEnabled() bool
-	AutoCompactionEnabled() bool
-	FastModeAvailable() bool
-	FastModeEnabled() bool
-	ConversationFreshness() session.ConversationFreshness
-	ParentSessionID() string
-	LastCommittedAssistantFinalAnswer() string
-	SetSessionName(name string) error
-	ThinkingLevel() string
-	SetThinkingLevel(level string) error
-	SetFastModeEnabled(enabled bool) (bool, error)
-	SetReviewerEnabled(enabled bool) (bool, string, error)
-	CompactionMode() string
-	SetAutoCompactionEnabled(enabled bool) (bool, bool)
-	AppendLocalEntry(role, text string)
-	ChatSnapshot() clientui.ChatSnapshot
-	ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error)
-	SubmitUserMessage(ctx context.Context, text string) (string, error)
-	SubmitUserShellCommand(ctx context.Context, command string) error
-	CompactContext(ctx context.Context, args string) error
-	CompactContextForPreSubmit(ctx context.Context) error
-	HasQueuedUserWork() bool
-	SubmitQueuedUserMessages(ctx context.Context) (string, error)
-	Interrupt() error
-	QueueUserMessage(text string)
-	DiscardQueuedUserMessagesMatching(text string) int
-	RecordPromptHistory(text string) error
-	ContextUsage() uiRuntimeContextUsage
-	CompactionCount() int
-}
-
 type engineUIRuntimeClient struct {
 	engine *runtime.Engine
 }
 
-func newUIRuntimeClient(engine *runtime.Engine) uiRuntimeClient {
+func newUIRuntimeClient(engine *runtime.Engine) clientui.RuntimeClient {
 	if engine == nil {
 		return nil
 	}
@@ -64,8 +24,8 @@ func (c engineUIRuntimeClient) ReviewerEnabled() bool       { return c.engine.Re
 func (c engineUIRuntimeClient) AutoCompactionEnabled() bool { return c.engine.AutoCompactionEnabled() }
 func (c engineUIRuntimeClient) FastModeAvailable() bool     { return c.engine.FastModeAvailable() }
 func (c engineUIRuntimeClient) FastModeEnabled() bool       { return c.engine.FastModeEnabled() }
-func (c engineUIRuntimeClient) ConversationFreshness() session.ConversationFreshness {
-	return c.engine.ConversationFreshness()
+func (c engineUIRuntimeClient) ConversationFreshness() clientui.ConversationFreshness {
+	return mapConversationFreshness(c.engine.ConversationFreshness())
 }
 func (c engineUIRuntimeClient) ParentSessionID() string { return c.engine.ParentSessionID() }
 func (c engineUIRuntimeClient) LastCommittedAssistantFinalAnswer() string {
@@ -124,9 +84,9 @@ func (c engineUIRuntimeClient) DiscardQueuedUserMessagesMatching(text string) in
 func (c engineUIRuntimeClient) RecordPromptHistory(text string) error {
 	return c.engine.RecordPromptHistory(text)
 }
-func (c engineUIRuntimeClient) ContextUsage() uiRuntimeContextUsage {
+func (c engineUIRuntimeClient) ContextUsage() clientui.RuntimeContextUsage {
 	usage := c.engine.ContextUsage()
-	return uiRuntimeContextUsage{
+	return clientui.RuntimeContextUsage{
 		UsedTokens:            usage.UsedTokens,
 		WindowTokens:          usage.WindowTokens,
 		CacheHitPercent:       usage.CacheHitPercent,
@@ -134,3 +94,10 @@ func (c engineUIRuntimeClient) ContextUsage() uiRuntimeContextUsage {
 	}
 }
 func (c engineUIRuntimeClient) CompactionCount() int { return c.engine.CompactionCount() }
+
+func mapConversationFreshness(freshness session.ConversationFreshness) clientui.ConversationFreshness {
+	if freshness.IsFresh() {
+		return clientui.ConversationFreshnessFresh
+	}
+	return clientui.ConversationFreshnessEstablished
+}
