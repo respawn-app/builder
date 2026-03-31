@@ -265,7 +265,7 @@ Phase 0 is complete only when all of the following are true:
 ## What This Checkpoint Does Not Do
 
 - it does not finalize transport payload schemas
-- it did not yet introduce `internal/protocol` at the time this checkpoint was written; `shared/client` and `shared/serverapi` now exist for the first Phase 1 headless slice, and the remaining work is extracting server-owned composition out of `cli/app`
+- it did not yet introduce the future transport-envelope package at the time this checkpoint was written; `shared/client` and `shared/serverapi` now exist for the first Phase 1 headless slice, and the remaining work is extracting server-owned composition out of `cli/app`
 - it does not start the refactor
 - it does not replace the phased plan in `plan.md`
 

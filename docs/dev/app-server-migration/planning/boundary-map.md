@@ -32,7 +32,9 @@ Headless path today:
 - `cli/app/app.go:RunPrompt`
   - selects headless auth flow and shared bootstrap
 - `cli/app/run_prompt.go:runPrompt`
-  - plans session, prepares runtime, then directly calls `runtimePlan.Wiring.engine.SubmitUserMessage(...)`
+  - acts as a thin frontend adapter over `shared/client.RunPromptClient`
+- `cli/app/headless_prompt_server.go` -> `server/runprompt`
+  - wrapper entrypoint into the server-owned headless launch/runtime composition and duplicate-suppression layer
 
 This makes two things clear:
 
@@ -188,13 +190,13 @@ Required outcome:
 
 Why it is dangerous:
 
-- this is the smallest useful seam and therefore the most tempting place to ship a fake boundary
-- it currently does the right high-level orchestration, but the critical line is still `runtimePlan.Wiring.engine.SubmitUserMessage(...)`
-- it also reads dropped-event counts from the runtime event bridge and uses runtime logger details directly
+- this is the smallest useful seam and therefore the easiest place to accidentally stop halfway
+- the frontend adapter is now thin, but the surrounding launch/runtime composition is still only partially extracted from `cli/app`
+- helper-level duplication between `cli/app` and `server/runprompt` can still blur ownership if it is left in place too long
 
 Required outcome:
 
-- keep this path as the first migrated workflow, but replace direct `runtime.Engine` access with client-facing use cases and DTOs
+- keep this path as the first migrated workflow, with the frontend reaching only `shared/client` and the server-owned composition living under `server/runprompt`
 
 ## 4. Session Loop In `cli/app/session_lifecycle.go`
 
@@ -321,11 +323,11 @@ This is the file/package direction to aim for, not a final naming decree.
   - `server/llm`
   - `server/auth`
 - extract a transport-neutral server application-service layer in front of them:
-  - `shared/serverapi` or equivalent
+  - `shared/serverapi`
 - require a client-facing abstraction even for embedded mode:
   - `shared/client`
 - keep real wire protocol types/adapters for later:
-  - `internal/protocol`
+  - future `shared/protocol` transport-envelope types only if the RPC layer needs a separate home
 - split current `cli/app` ownership along file seams:
   - frontend shell and Bubble Tea UX: `app.go`, `session_lifecycle.go`, `ui*.go`, pickers, onboarding
   - server composition/bootstrap: code extracted from `bootstrap.go`, `launch_planner.go`, and `runtime_factory.go`
@@ -336,8 +338,8 @@ Status update:
 
 - The first Phase 1 slice has landed.
 - `cli/app/run_prompt.go` is now a thin frontend adapter over `shared/client` and `shared/serverapi` request/result DTOs for the headless `builder run` path.
-- `RunPromptRequest` now includes a required `client_request_id`, but duplicate suppression semantics are not implemented yet; the request-shape contract exists before replay protection.
-- The remaining gap for this extraction target is that the authoritative launch/runtime composition still lives in `cli/app` via the current bootstrap/planner/runtime-factory code. The next extraction step is to move launch-context resolution, session open/create, and runtime preparation into a server-owned package so the embedded client no longer depends on mixed app-private construction.
+- `RunPromptRequest` now includes a required `client_request_id`, and the server-owned headless seam already performs process-local duplicate suppression keyed by request scope.
+- The remaining gap for this extraction target is that the interactive-side bootstrap/planner/runtime-factory code in `cli/app` is still mixed and partially duplicated. The next extraction step is to keep moving launch-context resolution, session open/create, and runtime preparation into server-owned packages so the embedded client no longer depends on mixed app-private construction.
 
 The first concrete extraction should wrap the current headless path built from:
 
