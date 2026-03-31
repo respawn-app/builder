@@ -3,6 +3,7 @@ package runtimeview
 import (
 	"builder/server/llm"
 	"builder/server/runtime"
+	patchformat "builder/server/tools/patch/format"
 	"builder/shared/clientui"
 	"builder/shared/transcript"
 )
@@ -68,23 +69,64 @@ func ChatSnapshotFromRuntime(snapshot runtime.ChatSnapshot) clientui.ChatSnapsho
 	}
 }
 
-func cloneToolCallMeta(meta *transcript.ToolCallMeta) *transcript.ToolCallMeta {
+func cloneToolCallMeta(meta *transcript.ToolCallMeta) *clientui.ToolCallMeta {
 	if meta == nil {
 		return nil
 	}
-	copyMeta := *meta
+	copyMeta := &clientui.ToolCallMeta{
+		ToolName:               meta.ToolName,
+		Presentation:           clientui.ToolPresentationKind(meta.Presentation),
+		RenderBehavior:         clientui.ToolCallRenderBehavior(meta.RenderBehavior),
+		IsShell:                meta.IsShell,
+		UserInitiated:          meta.UserInitiated,
+		Command:                meta.Command,
+		CompactText:            meta.CompactText,
+		InlineMeta:             meta.InlineMeta,
+		TimeoutLabel:           meta.TimeoutLabel,
+		PatchSummary:           meta.PatchSummary,
+		PatchDetail:            meta.PatchDetail,
+		Question:               meta.Question,
+		RecommendedOptionIndex: meta.RecommendedOptionIndex,
+		OmitSuccessfulResult:   meta.OmitSuccessfulResult,
+	}
 	if len(meta.Suggestions) > 0 {
 		copyMeta.Suggestions = append([]string(nil), meta.Suggestions...)
 	}
 	if meta.RenderHint != nil {
-		renderHint := *meta.RenderHint
-		copyMeta.RenderHint = &renderHint
+		copyMeta.RenderHint = &clientui.ToolRenderHint{
+			Kind:       clientui.ToolRenderKind(meta.RenderHint.Kind),
+			Path:       meta.RenderHint.Path,
+			ResultOnly: meta.RenderHint.ResultOnly,
+		}
 	}
 	if meta.PatchRender != nil {
-		patchRender := *meta.PatchRender
-		copyMeta.PatchRender = &patchRender
+		copyMeta.PatchRender = cloneRenderedPatch(meta.PatchRender)
 	}
-	return &copyMeta
+	return copyMeta
+}
+
+func cloneRenderedPatch(in *patchformat.RenderedPatch) *patchformat.RenderedPatch {
+	if in == nil {
+		return nil
+	}
+	out := &patchformat.RenderedPatch{}
+	if len(in.Files) > 0 {
+		out.Files = make([]patchformat.RenderedFile, 0, len(in.Files))
+		for _, file := range in.Files {
+			copyFile := file
+			if len(file.Diff) > 0 {
+				copyFile.Diff = append([]string(nil), file.Diff...)
+			}
+			out.Files = append(out.Files, copyFile)
+		}
+	}
+	if len(in.SummaryLines) > 0 {
+		out.SummaryLines = append([]patchformat.RenderedLine(nil), in.SummaryLines...)
+	}
+	if len(in.DetailLines) > 0 {
+		out.DetailLines = append([]patchformat.RenderedLine(nil), in.DetailLines...)
+	}
+	return out
 }
 
 func MessagePhase(raw string) llm.MessagePhase {

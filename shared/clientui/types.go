@@ -1,6 +1,6 @@
 package clientui
 
-import "builder/shared/transcript"
+import patchformat "builder/server/tools/patch/format"
 
 type EventKind string
 
@@ -69,11 +69,55 @@ type ChatEntry struct {
 	OngoingText string
 	Phase       string
 	ToolCallID  string
-	ToolCall    *transcript.ToolCallMeta
+	ToolCall    *ToolCallMeta
 }
 
 type ChatSnapshot struct {
 	Entries      []ChatEntry
 	Ongoing      string
 	OngoingError string
+}
+
+type ToolPresentationKind string
+type ToolCallRenderBehavior string
+type ToolRenderKind string
+
+const (
+	ToolPresentationDefault     ToolPresentationKind = "default"
+	ToolPresentationShell       ToolPresentationKind = "shell"
+	ToolPresentationAskQuestion ToolPresentationKind = "ask_question"
+
+	ToolCallRenderBehaviorDefault     ToolCallRenderBehavior = "default"
+	ToolCallRenderBehaviorShell       ToolCallRenderBehavior = "shell"
+	ToolCallRenderBehaviorAskQuestion ToolCallRenderBehavior = "ask_question"
+
+	ToolRenderKindShell  ToolRenderKind = "shell"
+	ToolRenderKindDiff   ToolRenderKind = "diff"
+	ToolRenderKindSource ToolRenderKind = "source"
+)
+
+type ToolRenderHint struct {
+	Kind       ToolRenderKind
+	Path       string
+	ResultOnly bool
+}
+
+type ToolCallMeta struct {
+	ToolName               string
+	Presentation           ToolPresentationKind
+	RenderBehavior         ToolCallRenderBehavior
+	IsShell                bool
+	UserInitiated          bool
+	Command                string
+	CompactText            string
+	InlineMeta             string
+	TimeoutLabel           string
+	PatchSummary           string
+	PatchDetail            string
+	PatchRender            *patchformat.RenderedPatch
+	RenderHint             *ToolRenderHint
+	Question               string
+	Suggestions            []string
+	RecommendedOptionIndex int
+	OmitSuccessfulResult   bool
 }

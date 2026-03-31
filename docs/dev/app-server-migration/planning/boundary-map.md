@@ -34,6 +34,7 @@ Interactive path today:
   - projects runtime-native events and chat snapshots into client-facing UI DTOs
 - `cli/app/ui_runtime_adapter.go`
   - projects client-facing UI DTOs into Bubble Tea/TUI state
+  - `uiModel` now receives projected client-facing runtime events on its event channel path rather than raw `runtime.Event` values
 
 Headless path today:
 

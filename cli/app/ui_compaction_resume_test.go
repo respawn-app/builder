@@ -3,11 +3,13 @@ package app
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/clientui"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -22,18 +24,18 @@ func TestCompactDoneResumesQueuedSteeringAsNewTurn(t *testing.T) {
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "resumed"},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	runtimeEvents := make(chan runtime.Event, 32)
+	projectedEvents := make(chan clientui.Event, 32)
 	eng, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{
 		Model: "gpt-5",
 		OnEvent: func(evt runtime.Event) {
-			runtimeEvents <- evt
+			projectedEvents <- projectRuntimeEvent(evt)
 		},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
 
-	m := NewUIModel(eng, runtimeEvents, make(chan askEvent)).(*uiModel)
+	m := newProjectedUIModel(eng, projectedEvents, make(chan askEvent)).(*uiModel)
 	m.busy = true
 	m.compacting = true
 	m.activity = uiActivityRunning
@@ -88,23 +90,34 @@ func TestCompactDoneResumesQueuedSteeringAsNewTurn(t *testing.T) {
 		t.Fatalf("expected resumed request to include steered message, got %+v", requestMessages(requests[0]))
 	}
 
-	for {
+	deadline := time.Now().Add(2 * time.Second)
+	submitApplied := false
+	for time.Now().Before(deadline) {
 		select {
-		case evt := <-runtimeEvents:
-			next, _ = updated.Update(projectedRuntimeEventMsg(evt))
+		case evt := <-projectedEvents:
+			next, _ = updated.Update(runtimeEventMsg{event: evt})
 			updated = next.(*uiModel)
 		default:
-			next, _ = updated.Update(submitDone)
-			updated = next.(*uiModel)
-			if updated.busy {
-				t.Fatal("expected resumed steering turn to finish idle")
+			if !submitApplied {
+				next, _ = updated.Update(submitDone)
+				updated = next.(*uiModel)
+				submitApplied = true
+				if updated.busy {
+					t.Fatal("expected resumed steering turn to finish idle")
+				}
+				if len(updated.pendingInjected) == 0 {
+					return
+				}
+				continue
 			}
 			if len(updated.pendingInjected) != 0 {
-				t.Fatalf("expected resumed steering queue cleared after flush, got %+v", updated.pendingInjected)
+				time.Sleep(10 * time.Millisecond)
+				continue
 			}
 			return
 		}
 	}
+	t.Fatal("timed out waiting for resumed steering flush")
 }
 
 func TestInterruptedResumedQueuedSteeringRestoresInput(t *testing.T) {

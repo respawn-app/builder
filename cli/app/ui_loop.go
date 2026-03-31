@@ -14,9 +14,9 @@ func runUILoop(wiring *runtimeWiring, active config.Settings, logger *runLogger,
 func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, logger *runLogger, commandRegistry *commands.Registry, initialPrompt string, initialInput string, sessionName string, modelContractLocked bool, configuredModelName string, statusConfig uiStatusConfig) (tea.Model, error) {
 	options := mainUIProgramOptions(active)
 
-	program := tea.NewProgram(NewUIModel(
+	program := tea.NewProgram(newProjectedUIModel(
 		wiring.engine,
-		wiring.eventBridge.Channel(),
+		projectRuntimeEventChannel(wiring.eventBridge.Channel()),
 		wiring.askBridge.Events(),
 		WithUILogger(logger),
 		WithUIModelName(active.Model),
