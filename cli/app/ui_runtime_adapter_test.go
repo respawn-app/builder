@@ -52,6 +52,33 @@ func TestApplyChatSnapshotSetsOngoingFromSnapshot(t *testing.T) {
 	}
 }
 
+func TestRuntimeSessionViewUsesLocalFallbackWhenRuntimeClientMissing(t *testing.T) {
+	m := newProjectedStaticUIModel(
+		WithUISessionName("incident triage"),
+		WithUISessionID("session-123"),
+		WithUIConversationFreshness(session.ConversationFreshnessEstablished),
+	)
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "hello"}}
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, Ongoing: "streaming"})
+
+	view := m.runtimeSessionView()
+	if view.SessionName != "incident triage" {
+		t.Fatalf("session name = %q, want incident triage", view.SessionName)
+	}
+	if view.SessionID != "session-123" {
+		t.Fatalf("session id = %q, want session-123", view.SessionID)
+	}
+	if view.ConversationFreshness != clientui.ConversationFreshnessEstablished {
+		t.Fatalf("conversation freshness = %v, want established", view.ConversationFreshness)
+	}
+	if len(view.Chat.Entries) != 1 || view.Chat.Entries[0].Text != "hello" {
+		t.Fatalf("unexpected fallback chat entries: %+v", view.Chat.Entries)
+	}
+	if view.Chat.Ongoing != "streaming" {
+		t.Fatalf("ongoing = %q, want streaming", view.Chat.Ongoing)
+	}
+}
+
 func TestSyncConversationFromEngineUsesBundledSessionViewMetadata(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

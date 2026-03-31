@@ -124,16 +124,13 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 	if m.engine == nil {
 		return nil
 	}
-	return a.applyProjectedSessionView(m.engine.SessionView())
+	return a.applyProjectedSessionView(m.runtimeSessionView())
 }
 
 func (a uiRuntimeAdapter) applyProjectedChatSnapshot(snapshot clientui.ChatSnapshot) tea.Cmd {
-	return a.applyProjectedSessionView(clientui.RuntimeSessionView{
-		SessionID:             a.model.sessionID,
-		SessionName:           a.model.sessionName,
-		ConversationFreshness: a.model.conversationFreshness,
-		Chat:                  snapshot,
-	})
+	view := a.model.runtimeSessionView()
+	view.Chat = snapshot
+	return a.applyProjectedSessionView(view)
 }
 
 func (a uiRuntimeAdapter) applyProjectedSessionView(view clientui.RuntimeSessionView) tea.Cmd {
