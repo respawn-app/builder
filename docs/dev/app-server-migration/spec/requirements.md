@@ -52,7 +52,7 @@ The resulting frontends should:
 ## Architectural Invariants
 
 - Frontend packages must not import server-owned runtime, persistence, tool, process, or provider-auth packages directly.
-- All mutating protocol requests must carry a client-generated `client_request_id` and be idempotent within an explicit server-defined scope.
+- All mutating protocol requests must carry a client-generated `client_request_id` and be idempotent within an explicit server-defined scope and retention window.
 - `project_id`, `session_id`, `run_id`, `process_id`, `approval_id`, and `ask_id` are opaque server-assigned IDs. Filesystem paths are never protocol identity.
 - v1 supports at most one active primary run per session.
 - Typed queries and hydration views are the source of truth for initial render and reconnect.
@@ -233,7 +233,7 @@ The server must allow multiple frontends to attach to and control the same sessi
 Requirements:
 
 - mutating operations are serialized through authoritative per-session ordering,
-- every mutating request is idempotent through `client_request_id`,
+- every mutating request is idempotent through `client_request_id` within a documented server-side retention window,
 - duplicate retries must not create duplicate prompt submissions, duplicate approvals, or duplicate process-control actions,
 - the server must define which operations are rejected while a primary run is already active,
 - reads remain available regardless of active-run state,
