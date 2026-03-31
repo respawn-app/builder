@@ -1,6 +1,6 @@
 # App Server Migration: Phase 1 Checkpoint
 
-Status: in progress
+Status: complete
 
 This checkpoint tracks the first real extraction slice after Phase 0 characterization.
 
@@ -19,6 +19,7 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 - Introduced `server/startup` as the server-owned home for embedded startup request assembly and auth-ready reentry, so `cli/app/bootstrap.go` and `cli/app/auth_gate.go` now act as thin adapters over a server-owned startup façade instead of owning reusable startup/auth composition logic.
 - Introduced `server/onboarding` as the server-owned home for onboarding policy, so the “settings file exists / headless writes defaults / interactive requires auth state and reloads config” rules now live on the server side while `cli/app/onboarding_run.go` only owns the Bubble Tea onboarding flow itself.
 - Introduced `server/runtimewire` as the server-owned home for runtime preparation, local tool registry construction, background-event routing, outside-workspace approvals, and runtime event bridging; `cli/app/runtime_factory.go` and `server/runprompt/headless.go` now delegate to it instead of owning those implementations directly.
+- Replaced the frontend-facing embedded-server seam with a frontend-shaped facade: `cli/app` launch planning, runtime preparation, and lifecycle transition handling now ask the embedded server to perform those operations instead of pulling raw `auth.Manager`, fast-mode, or background-process handles across the boundary.
 - Introduced `shared/clientui` plus `server/runtimeview` as the first client-facing UI projection seam: the TUI runtime adapter now consumes projected UI DTOs instead of reading `runtime.Event` and `runtime.ChatSnapshot` directly in its main update path.
 - Tightened that first UI seam so the `uiModel` event channel path now consumes projected `shared/clientui.Event` values directly, and client-facing tool-call metadata no longer aliases mutable server transcript structures.
 - Replaced the TUI's concrete `*runtime.Engine` dependency with a frontend runtime interface inside `cli/app`: the UI model, submission flow, and status collector now depend on a loopback adapter boundary rather than a concrete runtime object.
@@ -27,6 +28,7 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 - Introduced `shared/clientui.ProcessClient` plus `BackgroundProcess` as the first non-runtime interactive read surface, and migrated process-list hydration, status-line process counts, and process log-path lookups onto shared process snapshots instead of direct `shelltool.Manager.List()` reads in UI code.
 - Introduced `shared/clientui.RuntimeSessionView` as the first bundled session/conversation hydration surface, and migrated runtime conversation sync to hydrate session metadata, conversation freshness, and transcript state from one shared view instead of pairing `Status()` with a separate chat snapshot read.
 - Normalized the remaining interactive runtime control paths in `cli/app` around model helpers backed by `shared/clientui.RuntimeClient`, so command toggles, submission/compaction, queue draining, prompt-history persistence, and interrupt flows no longer branch directly on loopback runtime calls scattered through the UI controller files.
+- Moved the remaining interactive runtime event state transitions out of `cli/app` into `shared/clientui.ReduceRuntimeEvent(...)`, so busy/compaction/reviewer state, user-message flush reconciliation, background completion notices, and reasoning-status header derivation are now shaped by a shared client-facing reducer rather than being re-derived inside the Bubble Tea adapter.
 - Added a projected UI test helper and migrated representative TUI suites onto `NewProjectedUIModel(...)`, including the runtime-adapter, status, alt-screen, clipboard, diff-render, compaction-resume, render-diagnostic, layout-seam, ask-deferral, and mode-flow coverage.
 - Drained the remaining non-monolithic UI suites off the compatibility constructor, including native-history, native-scrollback integration, slash-command picker, busy-command, scroll-key, session-lifecycle, mode-transition, and rollback-benchmark coverage.
 - Added service- and client-level tests for the new seam.
@@ -50,6 +52,7 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 - Interactive session selection and transition resolution now also go through a server-owned controller, leaving the frontend with session picker rendering and auth/onboarding interaction only.
 - Embedded startup request mapping and auth-ready reentry now also go through a server-owned startup façade, leaving the frontend with auth/onboarding UX handlers only.
 - Onboarding policy now also goes through a server-owned package, leaving the frontend with only the interactive onboarding flow implementation.
+- The frontend no longer reaches into the embedded server for raw privileged handles during launch/runtime/session lifecycle orchestration; that seam is now a frontend-shaped facade rather than a bag of server-native dependencies.
 - The first TUI adapter path now consumes client-facing projected UI DTOs instead of raw runtime-native event/snapshot structs.
 - The TUI control/read path now also depends on a frontend runtime interface rather than a concrete `*runtime.Engine`, with the concrete loopback adapter isolated to one file.
 - That interactive control/read path is now defined in a shared client-facing package rather than locally inside `cli/app`.
@@ -57,6 +60,7 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 - Process overlay hydration now also reads through a shared client-facing process surface instead of treating `shelltool.Snapshot` as the UI read model.
 - Conversation re-sync now also reads through a shared client-facing session view instead of composing separate transcript and freshness reads by hand.
 - Interactive UI command/submission flows now also depend on one model-level runtime control seam instead of treating `m.engine` as a special loopback object in each controller file.
+- Interactive runtime event application now also depends on a shared client-facing reducer instead of frontend-local event-transition logic in `ui_runtime_adapter.go`.
 - Direct `engine` references inside `cli/app` are now confined to the deliberate loopback adapter implementation in `ui_runtime_client.go`; the UI-side control/read helpers call through model-level runtime seams instead of reaching into loopback runtime methods ad hoc.
 - The full existing UI characterization surface now exercises the projected/shared constructor directly.
 - `NewProjectedUIModel(...)` is now the only UI constructor entrypoint in `cli/app`; the engine-shaped compatibility wrapper has been deleted rather than retained as long-term API debt.
@@ -66,17 +70,19 @@ This checkpoint tracks the first real extraction slice after Phase 0 characteriz
 
 Current limitations:
 
-- `server/bootstrap`, `server/embedded`, `server/authflow`, `server/runprompt`, `server/launch`, `server/lifecycle`, `server/sessioncontrol`, `server/startup`, `server/onboarding`, `server/runtimewire`, and `server/runtimeview` now own the first real server-side launch/runtime path, and `cli/app` runtime control paths now mostly route through model-level helpers over `shared/clientui.RuntimeClient`, but `cli/app` still owns the interactive onboarding/auth UX flows themselves plus remaining interactive runtime adapter/event orchestration that still needs to move onto shared client-facing contracts in later Phase 1 slices.
+- Bubble Tea auth/onboarding screens, terminal bell behavior, and direct background-process control remain frontend-owned adapters by design in Phase 1. They no longer own server policy or runtime state, but they are not yet transport-neutral client SDK surfaces.
 - The current duplicate suppression is process-local and scoped to the embedded server boundary; broader protocol-wide idempotency for future server methods remains Phase 2 work.
 - The full-suite proof gate still includes a flaky native scrollback test (`TestNativeFinalizeDoesNotBlinkDuplicateTailTokens`): it failed once during this checkpoint, passed immediately in isolation, and the subsequent full rerun was green. Treat it as existing test instability unless it starts reproducing under focused changes in the native transcript path.
 
-## Remaining Work In Phase 1
+## Phase 1 Exit Gate
 
-- Move the remaining interactive auth/onboarding UX flow orchestration onto shared client-facing surfaces without reintroducing frontend ownership of server state.
-- Continue replacing the remaining loopback-only adapter implementation with richer shared client-facing interactive controls and read models beyond the first runtime-event/chat-snapshot seam, especially where event orchestration still lives in `ui_runtime_adapter.go`.
-- Continue widening shared client-facing interactive read models beyond `RuntimeStatus`, with process/hydration/control surfaces next in line.
-- Continue widening shared client-facing interactive read models beyond `RuntimeStatus`, `ProcessClient`, and `RuntimeSessionView`, with session control/hydration-adjacent surfaces next in line.
-- Next concrete cut line: move the remaining interactive onboarding/auth UX orchestration and the interactive runtime adapter/control surfaces out of `cli/app`-owned orchestration now that startup/session/onboarding policy already routes through server-owned packages.
-- Expand import-boundary enforcement once more frontend files stop depending on mixed `cli/app` server composition.
-- Expand the first acceptance-style embedded test client coverage so the same scenarios can later run unchanged against external daemon mode.
-- Replace runtime-native UI event/snapshot consumption with client-facing read models and events now that the embedded server bootstrap boundary is explicit.
+- `builder run` now goes through a transport-neutral client/service seam with idempotent request shape and server-side duplicate suppression.
+- Interactive launch/open/hydration policy now routes through server-owned startup/session/onboarding packages rather than being authored directly inside `cli/app`.
+- The interactive UI consumes client-facing runtime status/session/process read models and a shared runtime-event reducer; direct concrete-engine access in frontend code is confined to the deliberate loopback adapter.
+- Full repo tests and the production build are green with this boundary in place.
+
+## Phase 2 Entry Point
+
+- Define the durable resource model for project, session, run, process, approval, and ask identities.
+- Add typed hydration views and stream semantics that support multi-client attach/reconnect beyond the current loopback CLI path.
+- Generalize idempotency, replay/gap handling, and process/output retention beyond the current `RunPrompt` duplicate-suppression slice.

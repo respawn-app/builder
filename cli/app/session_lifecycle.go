@@ -8,7 +8,6 @@ import (
 	"builder/cli/app/commands"
 	serverlifecycle "builder/server/lifecycle"
 	"builder/server/session"
-	"builder/server/sessioncontrol"
 )
 
 func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor authInteractor, initialSessionID string) error {
@@ -30,7 +29,7 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 		}
 		forceNewSession = false
 		nextSessionParentID = ""
-		runtimePlan, err := planner.PrepareRuntime(plan, os.Stderr, "app.start session_id="+plan.Store.Meta().SessionID+" workspace="+plan.WorkspaceRoot+" model="+plan.ActiveSettings.Model, runtimeWiringOptions{FastMode: server.FastModeState()})
+		runtimePlan, err := planner.PrepareRuntime(plan, os.Stderr, "app.start session_id="+plan.Store.Meta().SessionID+" workspace="+plan.WorkspaceRoot+" model="+plan.ActiveSettings.Model)
 		if err != nil {
 			return err
 		}
@@ -105,32 +104,5 @@ type resolvedSessionAction struct {
 }
 
 func resolveSessionAction(ctx context.Context, server embeddedServer, interactor authInteractor, store *session.Store, transition UITransition) (resolvedSessionAction, error) {
-	controller := sessioncontrol.Controller{
-		Config:       server.Config(),
-		ContainerDir: server.ContainerDir(),
-		AuthManager:  server.AuthManager(),
-		Reauth: func(ctx context.Context) error {
-			cfg := server.Config()
-			return ensureAuthReady(ctx, server.AuthManager(), server.OAuthOptions(), cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen, interactor)
-		},
-	}
-	resolved, err := controller.ResolveTransition(ctx, store, serverlifecycle.Transition{
-		Action:               serverlifecycle.Action(transition.Action),
-		InitialPrompt:        transition.InitialPrompt,
-		InitialInput:         transition.InitialInput,
-		TargetSessionID:      transition.TargetSessionID,
-		ForkUserMessageIndex: transition.ForkUserMessageIndex,
-		ParentSessionID:      transition.ParentSessionID,
-	})
-	if err != nil {
-		return resolvedSessionAction{}, err
-	}
-	return resolvedSessionAction{
-		NextSessionID:   resolved.NextSessionID,
-		InitialPrompt:   resolved.InitialPrompt,
-		InitialInput:    resolved.InitialInput,
-		ParentSessionID: resolved.ParentSessionID,
-		ForceNewSession: resolved.ForceNewSession,
-		ShouldContinue:  resolved.ShouldContinue,
-	}, nil
+	return server.ResolveTransition(ctx, interactor, store, transition)
 }

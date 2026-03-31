@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	serverembedded "builder/server/embedded"
 	"builder/server/launch"
 	"builder/server/session"
 	"builder/server/tools"
@@ -46,9 +45,6 @@ func RunPrompt(ctx context.Context, opts Options, prompt string, timeout time.Du
 	defer func() { _ = server.Close() }()
 	return runPrompt(ctx, server, strings.TrimSpace(opts.SessionID), prompt, timeout, progress)
 }
-
-var _ embeddedServer = (*serverembedded.Server)(nil)
-
 func effectiveSettings(base config.Settings, locked *session.LockedContract) config.Settings {
 	return launch.EffectiveSettings(base, locked)
 }
