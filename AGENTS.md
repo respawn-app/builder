@@ -19,6 +19,8 @@ The scope is intentionally narrow and quality-oriented.
   - Agent step loop, retries, transcript assembly, tool orchestration, lock handling, interrupts.
 - `server/bootstrap`
   - Server-owned embedded bootstrap composition for config/container resolution, auth-manager creation, and runtime-support setup shared by CLI flows.
+- `server/lifecycle`
+  - Server-owned interactive lifecycle mutations such as draft persistence, rollback fork creation, and logout-state clearing.
 - `server/launch`
   - Server-owned bootstrap continuation resolution and session open/create/hydration planning shared by interactive and headless flows.
 - `server/runtimewire`
