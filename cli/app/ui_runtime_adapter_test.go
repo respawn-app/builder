@@ -11,6 +11,7 @@ import (
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/transcript"
 	tea "github.com/charmbracelet/bubbletea"
@@ -48,6 +49,48 @@ func TestApplyChatSnapshotSetsOngoingFromSnapshot(t *testing.T) {
 
 	if got := m.view.OngoingStreamingText(); got != "hello" {
 		t.Fatalf("expected snapshot ongoing text, got %q", got)
+	}
+}
+
+func TestSyncConversationFromEngineUsesBundledSessionViewMetadata(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.SetName("incident triage"); err != nil {
+		t.Fatalf("set name: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "hello user"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: "hello", Phase: llm.MessagePhaseFinal}); err != nil {
+		t.Fatalf("append assistant message: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	m := newProjectedEngineUIModel(eng)
+	m.sessionName = "stale"
+	m.sessionID = "stale"
+
+	cmd := m.runtimeAdapter().syncConversationFromEngine()
+	if cmd == nil {
+		t.Fatal("expected sync command")
+	}
+	if m.sessionName != "incident triage" {
+		t.Fatalf("session name = %q, want incident triage", m.sessionName)
+	}
+	if m.sessionID != store.Meta().SessionID {
+		t.Fatalf("session id = %q, want %q", m.sessionID, store.Meta().SessionID)
+	}
+	if m.conversationFreshness != clientui.ConversationFreshnessEstablished {
+		t.Fatalf("conversation freshness = %v, want established", m.conversationFreshness)
+	}
+	if got := m.view.OngoingSnapshot(); !strings.Contains(got, "hello") {
+		t.Fatalf("expected synced conversation in view, got %q", got)
 	}
 }
 

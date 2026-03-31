@@ -41,6 +41,16 @@ func (c engineUIRuntimeClient) Status() clientui.RuntimeStatus {
 		CompactionCount: c.engine.CompactionCount(),
 	}
 }
+
+func (c engineUIRuntimeClient) SessionView() clientui.RuntimeSessionView {
+	return clientui.RuntimeSessionView{
+		SessionID:             c.engine.SessionID(),
+		SessionName:           c.engine.SessionName(),
+		ConversationFreshness: mapConversationFreshness(c.engine.ConversationFreshness()),
+		Chat:                  projectChatSnapshot(c.engine.ChatSnapshot()),
+	}
+}
+
 func (c engineUIRuntimeClient) SetSessionName(name string) error {
 	return c.engine.SetSessionName(name)
 }
@@ -58,9 +68,6 @@ func (c engineUIRuntimeClient) SetAutoCompactionEnabled(enabled bool) (bool, boo
 }
 func (c engineUIRuntimeClient) AppendLocalEntry(role, text string) {
 	c.engine.AppendLocalEntry(role, text)
-}
-func (c engineUIRuntimeClient) ChatSnapshot() clientui.ChatSnapshot {
-	return projectChatSnapshot(c.engine.ChatSnapshot())
 }
 func (c engineUIRuntimeClient) ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error) {
 	return c.engine.ShouldCompactBeforeUserMessage(ctx, text)

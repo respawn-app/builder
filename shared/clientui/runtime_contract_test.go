@@ -10,6 +10,9 @@ func TestRuntimeClientUsesBundledStatusReadModel(t *testing.T) {
 	if _, ok := clientType.MethodByName("Status"); !ok {
 		t.Fatal("expected RuntimeClient to expose bundled Status() read model")
 	}
+	if _, ok := clientType.MethodByName("SessionView"); !ok {
+		t.Fatal("expected RuntimeClient to expose bundled SessionView() hydration model")
+	}
 
 	legacyReadMethods := []string{
 		"ReviewerFrequency",
@@ -24,6 +27,7 @@ func TestRuntimeClientUsesBundledStatusReadModel(t *testing.T) {
 		"CompactionMode",
 		"ContextUsage",
 		"CompactionCount",
+		"ChatSnapshot",
 	}
 	for _, methodName := range legacyReadMethods {
 		if _, ok := clientType.MethodByName(methodName); ok {
