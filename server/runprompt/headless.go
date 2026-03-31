@@ -4,17 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"sync"
-	"time"
 
 	"builder/server/auth"
 	"builder/server/launch"
-	"builder/server/llm"
 	"builder/server/runtime"
-	"builder/server/session"
-	"builder/server/tools"
+	"builder/server/runtimewire"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
@@ -60,7 +56,7 @@ func (l *headlessPromptLauncher) PrepareHeadlessPrompt(_ context.Context, req se
 type headlessRuntimePlan struct {
 	logger      *RunLogger
 	engine      *runtime.Engine
-	eventBridge *RuntimeEventBridge
+	eventBridge *runtimewire.EventBridge
 	close       func()
 }
 
@@ -69,17 +65,6 @@ func (p *headlessRuntimePlan) Close() {
 		return
 	}
 	p.close()
-}
-
-type headlessRuntimeWiringOptions struct {
-	OnEvent  func(evt runtime.Event)
-	FastMode *runtime.FastModeState
-}
-
-type headlessRuntimeWiring struct {
-	engine      *runtime.Engine
-	eventBridge *RuntimeEventBridge
-	background  *shelltool.Manager
 }
 
 func (l *headlessPromptLauncher) prepareRuntime(plan launch.SessionPlan, progress serverapi.RunPromptProgressSink) (*headlessRuntimePlan, error) {
@@ -93,12 +78,14 @@ func (l *headlessPromptLauncher) prepareRuntime(plan launch.SessionPlan, progres
 	}
 	logger.Logf("app.run_prompt.start session_id=%s workspace=%s model=%s", plan.Store.Meta().SessionID, plan.WorkspaceRoot, plan.ActiveSettings.Model)
 	logger.Logf("config.settings path=%s created=%t", plan.Source.SettingsPath, plan.Source.CreatedDefaultConfig)
-	for _, line := range ConfigSourceLines(plan.Source.Sources) {
+	for _, line := range configSourceLines(plan.Source.Sources) {
 		logger.Logf("config.source %s", line)
 	}
-	wiring, err := newHeadlessRuntimeWiringWithBackground(plan.Store, plan.ActiveSettings, plan.EnabledTools, plan.WorkspaceRoot, l.boot.AuthManager, logger, l.boot.Background, headlessRuntimeWiringOptions{
+	wiring, err := runtimewire.NewRuntimeWiringWithBackground(plan.Store, plan.ActiveSettings, plan.EnabledTools, plan.WorkspaceRoot, l.boot.AuthManager, logger, l.boot.Background, runtimewire.RuntimeWiringOptions{
+		Headless: true,
 		FastMode: l.boot.FastModeState,
 		OnEvent: func(evt runtime.Event) {
+			logger.Logf("%s", FormatRuntimeEvent(evt))
 			PublishRunPromptProgress(progress, evt)
 		},
 	})
@@ -106,135 +93,24 @@ func (l *headlessPromptLauncher) prepareRuntime(plan launch.SessionPlan, progres
 		_ = logger.Close()
 		return nil, err
 	}
+	if wiring.AskBroker != nil {
+		wiring.AskBroker.SetAskHandler(RunPromptAskHandler)
+	}
 	if l.boot.BackgroundRouter != nil {
-		l.boot.BackgroundRouter.SetActiveSession(plan.Store.Meta().SessionID, wiring.engine)
+		l.boot.BackgroundRouter.SetActiveSession(plan.Store.Meta().SessionID, wiring.Engine)
 	}
 	return &headlessRuntimePlan{
 		logger:      logger,
-		engine:      wiring.engine,
-		eventBridge: wiring.eventBridge,
+		engine:      wiring.Engine,
+		eventBridge: wiring.EventBridge,
 		close: func() {
 			if l.boot.BackgroundRouter != nil {
 				l.boot.BackgroundRouter.ClearActiveSession(plan.Store.Meta().SessionID)
 			}
-			_ = wiring.Close()
 			_ = logger.Close()
 		},
 	}, nil
 }
-
-func newHeadlessRuntimeWiringWithBackground(store *session.Store, active config.Settings, enabledTools []tools.ID, workspaceRoot string, mgr *auth.Manager, logger *RunLogger, background *shelltool.Manager, opts headlessRuntimeWiringOptions) (*headlessRuntimeWiring, error) {
-	toolRegistry, askBroker, background, err := BuildToolRegistry(
-		workspaceRoot,
-		store.Meta().SessionID,
-		enabledTools,
-		time.Duration(active.Timeouts.ShellDefaultSeconds)*time.Second,
-		time.Duration(active.MinimumExecToBgSeconds)*time.Second,
-		active.ShellOutputMaxChars,
-		active.AllowNonCwdEdits,
-		llm.LockedContractSupportsVisionInputs(store.Meta().Locked, active.Model),
-		logger,
-		background,
-	)
-	if err != nil {
-		return nil, err
-	}
-	askBroker.SetAskHandler(RunPromptAskHandler)
-
-	modelHTTPClient := &http.Client{Timeout: time.Duration(active.Timeouts.ModelRequestSeconds) * time.Second}
-	providerClient, err := llm.NewProviderClient(llm.ProviderClientOptions{
-		Provider:            llm.Provider(strings.TrimSpace(active.ProviderOverride)),
-		Model:               active.Model,
-		Auth:                mgr,
-		HTTPClient:          modelHTTPClient,
-		OpenAIBaseURL:       active.OpenAIBaseURL,
-		ModelVerbosity:      string(active.ModelVerbosity),
-		Store:               active.Store,
-		ContextWindowTokens: active.ModelContextWindow,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	newReviewerClient := func() (llm.Client, error) {
-		reviewerHTTPClient := &http.Client{Timeout: time.Duration(active.Reviewer.TimeoutSeconds) * time.Second}
-		return llm.NewProviderClient(llm.ProviderClientOptions{
-			Provider:            llm.Provider(strings.TrimSpace(active.ProviderOverride)),
-			Model:               active.Reviewer.Model,
-			Auth:                mgr,
-			HTTPClient:          reviewerHTTPClient,
-			OpenAIBaseURL:       active.OpenAIBaseURL,
-			ModelVerbosity:      string(active.ModelVerbosity),
-			Store:               false,
-			ContextWindowTokens: active.ModelContextWindow,
-		})
-	}
-
-	var reviewerClient llm.Client
-	if strings.ToLower(strings.TrimSpace(active.Reviewer.Frequency)) != "off" {
-		reviewerClient, err = newReviewerClient()
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	eventBridge := NewRuntimeEventBridge(2048, func(total uint64, evt runtime.Event) {
-		if total == 1 || total%100 == 0 {
-			logger.Logf("runtime.event.drop count=%d kind=%s step_id=%s", total, evt.Kind, evt.StepID)
-		}
-	})
-	providerCapsOverride, hasProviderCapsOverride := llm.ProviderCapabilitiesFromOverride(active.ProviderCapabilities)
-	engine, err := runtime.New(store, providerClient, toolRegistry, runtime.Config{
-		Model:             active.Model,
-		Temperature:       1,
-		MaxTokens:         0,
-		ThinkingLevel:     active.ThinkingLevel,
-		ModelCapabilities: llm.LockedModelCapabilitiesForConfig(active.Model, active.ModelCapabilities),
-		FastModeEnabled:   active.PriorityRequestMode,
-		FastModeState:     opts.FastMode,
-		WebSearchMode:     active.WebSearch,
-		ProviderCapabilitiesOverride: func() *llm.ProviderCapabilities {
-			if !hasProviderCapsOverride {
-				return nil
-			}
-			return &providerCapsOverride
-		}(),
-		EnabledTools:                  enabledTools,
-		DisabledSkills:                config.DisabledSkillToggles(active),
-		AutoCompactTokenLimit:         active.ContextCompactionThresholdTokens,
-		PreSubmitCompactionLeadTokens: active.PreSubmitCompactionLeadTokens,
-		ContextWindowTokens:           active.ModelContextWindow,
-		EffectiveContextWindowPercent: 95,
-		LocalCompactionCarryoverLimit: 20_000,
-		CompactionMode:                string(active.CompactionMode),
-		AutoCompactionEnabled:         boolRef(true),
-		HeadlessMode:                  true,
-		ToolPreambles:                 active.ToolPreambles,
-		Reviewer: runtime.ReviewerConfig{
-			Frequency:     active.Reviewer.Frequency,
-			Model:         active.Reviewer.Model,
-			ThinkingLevel: active.Reviewer.ThinkingLevel,
-			VerboseOutput: active.Reviewer.VerboseOutput,
-			Client:        reviewerClient,
-			ClientFactory: newReviewerClient,
-		},
-		OnEvent: func(evt runtime.Event) {
-			logger.Logf("%s", FormatRuntimeEvent(evt))
-			if opts.OnEvent != nil {
-				opts.OnEvent(evt)
-			}
-			eventBridge.Publish(evt)
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &headlessRuntimeWiring{engine: engine, eventBridge: eventBridge, background: background}, nil
-}
-
-func (w *headlessRuntimeWiring) Close() error { return nil }
-
-func boolRef(v bool) *bool { return &v }
 
 type headlessPromptRuntime struct {
 	plan *headlessRuntimePlan

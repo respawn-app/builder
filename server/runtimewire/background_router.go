@@ -1,4 +1,4 @@
-package runprompt
+package runtimewire
 
 import (
 	"strings"
@@ -83,6 +83,10 @@ func (r *BackgroundEventRouter) handle(evt shelltool.Event) {
 		UserRequestedKill: evt.Snapshot.KillRequested,
 		NoticeSuppressed:  evt.NoticeSuppressed,
 	}, shouldNotify)
+}
+
+func (r *BackgroundEventRouter) Handle(evt shelltool.Event) {
+	r.handle(evt)
 }
 
 func cloneIntPtr(v *int) *int {
