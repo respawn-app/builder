@@ -1,0 +1,77 @@
+package authflow
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"builder/server/auth"
+	"builder/shared/config"
+)
+
+type stubHandler struct {
+	needs    func(InteractionRequest) bool
+	interact func(context.Context, InteractionRequest) error
+}
+
+func (h stubHandler) NeedsInteraction(req InteractionRequest) bool {
+	if h.needs == nil {
+		return false
+	}
+	return h.needs(req)
+}
+
+func (h stubHandler) Interact(ctx context.Context, req InteractionRequest) error {
+	if h.interact == nil {
+		return nil
+	}
+	return h.interact(ctx, req)
+}
+
+func TestEnsureReadyReturnsStartupErrorWithoutInteractiveHandler(t *testing.T) {
+	mgr := auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now)
+	err := EnsureReady(context.Background(), mgr, auth.OpenAIOAuthOptions{}, "dark", config.TUIAlternateScreenAuto, func(string) string { return "" }, stubHandler{
+		needs: func(InteractionRequest) bool { return false },
+	})
+	if !errors.Is(err, auth.ErrAuthNotConfigured) {
+		t.Fatalf("expected auth not configured, got %v", err)
+	}
+}
+
+func TestEnsureReadyLoopsAfterInteractionUntilAuthConfigured(t *testing.T) {
+	mgr := auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now)
+	callCount := 0
+	err := EnsureReady(context.Background(), mgr, auth.OpenAIOAuthOptions{}, "dark", config.TUIAlternateScreenAuto, func(key string) string {
+		if key == "OPENAI_API_KEY" {
+			return "sk-env"
+		}
+		return ""
+	}, stubHandler{
+		needs: func(req InteractionRequest) bool { return !req.Gate.Ready },
+		interact: func(ctx context.Context, req InteractionRequest) error {
+			callCount++
+			if !req.HasEnvAPIKey {
+				t.Fatal("expected env api key to be visible in interaction request")
+			}
+			_, err := req.Manager.SwitchMethod(ctx, auth.Method{
+				Type:   auth.MethodAPIKey,
+				APIKey: &auth.APIKeyMethod{Key: "sk-after"},
+			}, true)
+			return err
+		},
+	})
+	if err != nil {
+		t.Fatalf("ensure ready: %v", err)
+	}
+	if callCount != 1 {
+		t.Fatalf("expected one interaction, got %d", callCount)
+	}
+	state, err := mgr.Load(context.Background())
+	if err != nil {
+		t.Fatalf("load auth state: %v", err)
+	}
+	if state.Method.APIKey == nil || state.Method.APIKey.Key != "sk-after" {
+		t.Fatalf("expected configured auth state, got %+v", state.Method.APIKey)
+	}
+}
