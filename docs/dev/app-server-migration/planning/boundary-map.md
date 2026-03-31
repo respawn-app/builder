@@ -21,7 +21,9 @@ Interactive path today:
 - `server/launch.ResolveBootstrapPlan`
   - server-owned continuation resolution for workspace root and persisted OpenAI base URL before config reload
 - `cli/app/session_lifecycle.go:runSessionLifecycle`
-  - owns the cross-session UI loop
+  - owns the cross-session UI loop and translates UI transitions onto server lifecycle operations
+- `server/lifecycle`
+  - owns draft persistence, rollback fork creation, and logout-state clearing for the interactive loop
 - `cli/app/launch_planner.go:PlanSession` / `PrepareRuntime`
   - adapts frontend session-picker and status config onto `server/launch.Planner`, then prepares runtime wiring
 - `cli/app/runtime_factory.go:newRuntimeWiringWithBackground`
@@ -71,6 +73,7 @@ Must not own:
 Currently split between landed server packages and remaining mixed adapters:
 
 - `server/bootstrap`
+- `server/lifecycle`
 - `server/launch`
 - `server/runtimewire`
 - `cli/app/bootstrap.go`
@@ -87,7 +90,7 @@ This root should own:
 - LLM provider client construction from `server/llm`
 - `runtime.Engine` construction from `server/runtime`
 
-This is now mostly server composition in code as well; the main remaining leak is that `cli/app/bootstrap.go` still drives auth/onboarding interaction and `cli/app/session_lifecycle.go` still performs privileged lifecycle mutations directly.
+This is now mostly server composition in code as well; the main remaining leak is that `cli/app/bootstrap.go` still drives auth/onboarding interaction and the TUI still consumes runtime-native state directly.
 
 ## 3. Frontend View-Model Root
 
