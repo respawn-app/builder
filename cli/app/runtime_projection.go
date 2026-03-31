@@ -17,3 +17,17 @@ func projectChatSnapshot(snapshot runtime.ChatSnapshot) clientui.ChatSnapshot {
 func projectedRuntimeEventMsg(evt runtime.Event) runtimeEventMsg {
 	return runtimeEventMsg{event: projectRuntimeEvent(evt)}
 }
+
+func projectRuntimeEventChannel(src <-chan runtime.Event) <-chan clientui.Event {
+	if src == nil {
+		return nil
+	}
+	out := make(chan clientui.Event, cap(src))
+	go func() {
+		defer close(out)
+		for evt := range src {
+			out <- projectRuntimeEvent(evt)
+		}
+	}()
+	return out
+}
