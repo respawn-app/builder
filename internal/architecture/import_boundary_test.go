@@ -23,7 +23,20 @@ func TestCmdBuilderDoesNotImportServerAuthorityPackagesDirectly(t *testing.T) {
 	if len(files) == 0 {
 		t.Fatal("expected cmd/builder Go files")
 	}
+	assertFilesDoNotImportBannedPackages(t, files, "cmd/builder")
+}
 
+// Ratchet the first extracted Phase 1 headless seam immediately: the thin
+// frontend adapter in internal/app/run_prompt.go must stay client-facing and
+// must not regain direct imports of runtime/session/auth/tools internals.
+func TestRunPromptAdapterDoesNotImportServerAuthorityPackagesDirectly(t *testing.T) {
+	repoRoot := repositoryRoot(t)
+	files := []string{filepath.Join(repoRoot, "internal", "app", "run_prompt.go")}
+	assertFilesDoNotImportBannedPackages(t, files, "internal/app/run_prompt.go")
+}
+
+func assertFilesDoNotImportBannedPackages(t *testing.T, files []string, owner string) {
+	t.Helper()
 	fset := token.NewFileSet()
 	for _, file := range files {
 		if strings.HasSuffix(file, "_test.go") {
@@ -41,7 +54,7 @@ func TestCmdBuilderDoesNotImportServerAuthorityPackagesDirectly(t *testing.T) {
 			if !isBannedFrontendImport(path) {
 				continue
 			}
-			t.Fatalf("cmd/builder must not import %q directly (%s)", path, filepath.Base(file))
+			t.Fatalf("%s must not import %q directly (%s)", owner, path, filepath.Base(file))
 		}
 	}
 }

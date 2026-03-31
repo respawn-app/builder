@@ -1,6 +1,6 @@
 # App Server Migration: Phase 0 Checkpoint
 
-Status: actionable pre-refactor checkpoint
+Status: historical Phase 0 checkpoint; characterization complete and the first Phase 1 headless extraction slice has landed. See `phase-1-checkpoint.md` for current extraction status.
 
 This document turns Phase 0 from `plan.md` into a concrete checklist and work packet.
 
@@ -85,7 +85,7 @@ Current characterization coverage map:
 
 | Workflow | Current coverage already in repo | Missing coverage to add before behavior-heavy refactors |
 | --- | --- | --- |
-| Headless launch, create, resume, and continuation-context resolution | `internal/app/launch_planner_test.go`: `TestSessionLaunchPlannerHeadlessCreatesNewSessionAndAppliesContinuationContext`, `TestSessionLaunchPlannerSelectedSessionIDBypassesPicker`; `internal/app/run_prompt_test.go`: `TestRunPromptCreatesSessionAndPersistsDurableTranscript` | Keep this coverage green and extend it only if the headless seam picks up new lifecycle responsibilities that are not already characterized. |
+| Headless launch, create, resume, and continuation-context resolution | `internal/app/launch_planner_test.go`: `TestSessionLaunchPlannerHeadlessCreatesNewSessionAndAppliesContinuationContext`, `TestSessionLaunchPlannerSelectedSessionIDBypassesPicker`; `internal/app/run_prompt_test.go`: `TestRunPromptCreatesSessionAndPersistsDurableTranscript`, `TestHeadlessRunPromptClientResumesExistingSessionByID`, `TestHeadlessRunPromptClientRestoresContinuationContextFromSelectedSession` | The first Phase 1 loopback client/service seam is now landed for `builder run`; keep this coverage green while the remaining server composition moves out of `internal/app`. |
 | Unknown slash fallback and built-in command resolution | `internal/app/commands/commands_test.go`: `TestExecuteBuiltins`, `TestExecuteUnknown`, `TestMatchReturnsBestSubstringFirst`; `internal/app/ui_slash_command_picker_test.go`: whitespace-after-slash normalization cases; `internal/app/ui_test.go`: direct unknown-slash submission and queued unknown-slash post-turn drain characterization | Keep this coverage green. Extend it only if a new slash-resolution path appears that bypasses the current prompt-submission fallback contract. |
 | File-backed prompt discovery and expansion | `internal/app/commands/file_prompts_test.go`: precedence, normalization collision, filtering, empty-file skipping, `$ARGUMENTS` replacement, append behavior, top-level-only discovery | No Phase 0 blocker beyond keeping this suite green. These tests already freeze the frontend-local contract well enough for the first extraction. |
 | Busy-state command behavior and queue drain | `internal/app/ui_slash_command_picker_test.go`: busy `/fast` and `/back` cases; `internal/app/ui_compaction_resume_test.go`: queued steering resume; `internal/runtime/engine_queue_submission_test.go` and `internal/runtime/exclusive_step_test.go`: busy-run and interrupt lifecycle; `internal/app/ui_busy_commands_test.go`: registry contract, representative busy `Enter` behavior, representative busy queue-submit behavior, and queued `/compact` drain into compaction | Keep the new suite green and extend it only when newly discovered busy-path behavior is not already characterized. |
@@ -229,7 +229,7 @@ Output:
 
 Current locked findings for Workstream D:
 
-- The current headless seam in `internal/app/run_prompt.go` is the first credible acceptance target because it already bypasses Bubble Tea and drives `launchPlanner.PlanSession(...)`, `PrepareRuntime(...)`, and `runtime.Engine.SubmitUserMessage(...)` directly.
+- The current headless seam in `internal/app/run_prompt.go` was the first credible acceptance target because it already bypassed Bubble Tea and directly exercised the authoritative runtime path. The first Phase 1 slice is now landed: `internal/app/run_prompt.go` calls a loopback client/service boundary, but embedded launch/runtime composition still needs to move out of `internal/app`.
 - The future acceptance suite must run the exact same client contract against two targets: embedded in-process server and external daemon. Only server bootstrap changes across modes; test logic and assertions do not.
 - The minimum non-CLI client for the first wave does not need slash-command parsing or TUI rendering. It does need typed capabilities for: create/list/attach session, submit prompt, await terminal result, inspect transcript/session metadata, observe coarse run events, interrupt active work, answer asks/approvals, list/inspect/kill background processes, and disconnect/reconnect.
 - Ask/approval proof cannot rely on today's headless CLI path because `runPromptAskHandler(...)` intentionally hard-fails asks in background mode. Approval cases therefore need the future non-CLI client boundary, not `RunPrompt(...)` itself.
@@ -265,7 +265,7 @@ Phase 0 is complete only when all of the following are true:
 ## What This Checkpoint Does Not Do
 
 - it does not finalize transport payload schemas
-- it does not introduce `internal/protocol` or `internal/client` yet
+- it did not yet introduce `internal/protocol` at the time this checkpoint was written; `internal/client` and `internal/serverapi` now exist for the first Phase 1 headless slice, and the remaining work is extracting server-owned composition out of `internal/app`
 - it does not start the refactor
 - it does not replace the phased plan in `plan.md`
 

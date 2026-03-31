@@ -332,6 +332,13 @@ This is the file/package direction to aim for, not a final naming decree.
 
 ## First Extraction Candidate
 
+Status update:
+
+- The first Phase 1 slice has landed.
+- `internal/app/run_prompt.go` is now a thin frontend adapter over `internal/client` and `internal/serverapi` request/result DTOs for the headless `builder run` path.
+- `RunPromptRequest` now includes a required `client_request_id`, but duplicate suppression semantics are not implemented yet; the request-shape contract exists before replay protection.
+- The remaining gap for this extraction target is that the authoritative launch/runtime composition still lives in `internal/app` via the current bootstrap/planner/runtime-factory code. The next extraction step is to move launch-context resolution, session open/create, and runtime preparation into a server-owned package so the embedded client no longer depends on mixed app-private construction.
+
 The first concrete extraction should wrap the current headless path built from:
 
 - `cmd/builder/main.go:runSubcommand`
@@ -349,10 +356,10 @@ Recommended shape:
 - server-side launch/runtime code
   - moves behind the new server application-service layer
 
-This is the smallest boundary with immediate product value and the least UI churn.
+This is the smallest boundary with immediate product value and the least UI churn. The first adapter slice is in place; the remaining work is moving server composition out of `internal/app` rather than leaving it behind the thin frontend adapter.
 
 ## Phase 1 Success Condition
 
 Phase 1 starts proving itself when the `builder run` path no longer reaches `runtime.Engine`, `session.Store`, `auth.Manager`, `tools.Registry`, or `llm.Client` directly.
 
-Phase 1 is fully successful only when migrated CLI/frontend flows depend on the client-facing boundary rather than privileged imports, and no new direct frontend imports of server internals are introduced while the deferred interactive knots are still being untangled.
+Phase 1 is fully successful only when migrated CLI/frontend flows depend on the client-facing boundary rather than privileged imports, the embedded client bootstrap and launch/open/hydration composition are server-owned instead of living in `internal/app`, and no new direct frontend imports of server internals are introduced while the deferred interactive knots are still being untangled.
