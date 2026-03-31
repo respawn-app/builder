@@ -106,3 +106,22 @@ func BenchmarkDetailSelectionFocusStepWithRefresh(b *testing.B) {
 		_ = model.View()
 	}
 }
+
+func BenchmarkOngoingStreamingUpdateLargeHistory(b *testing.B) {
+	entries := benchmarkDetailEntries(600)
+	base := NewModel(WithTheme("dark"))
+	next, _ := base.Update(SetViewportSizeMsg{Lines: 40, Width: 120})
+	base = next.(Model)
+	next, _ = base.Update(SetConversationMsg{Entries: entries})
+	base = next.(Model)
+	_ = base.View()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		local := base
+		next, _ = local.Update(StreamAssistantMsg{Delta: "x"})
+		local = next.(Model)
+		_ = local.View()
+	}
+}

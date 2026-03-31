@@ -7,11 +7,12 @@ import (
 )
 
 type modelUpdateResult struct {
-	viewportChanged    bool
-	ongoingChanged     bool
-	detailChanged      bool
-	forceDetailRefresh bool
-	autoFollowOngoing  bool
+	viewportChanged         bool
+	ongoingChanged          bool
+	ongoingStreamingChanged bool
+	detailChanged           bool
+	forceDetailRefresh      bool
+	autoFollowOngoing       bool
 }
 
 func (m *Model) reduce(msg tea.Msg) {
@@ -157,6 +158,9 @@ func (m *Model) reduceViewportLinesMsg(msg SetViewportLinesMsg) bool {
 	if msg.Lines <= 0 {
 		return false
 	}
+	if m.viewportLines == msg.Lines {
+		return false
+	}
 	m.viewportLines = msg.Lines
 	return true
 }
@@ -165,7 +169,7 @@ func (m *Model) reduceViewportSizeMsg(msg SetViewportSizeMsg, result *modelUpdat
 	if result == nil {
 		return
 	}
-	if msg.Lines > 0 {
+	if msg.Lines > 0 && m.viewportLines != msg.Lines {
 		m.viewportLines = msg.Lines
 		result.viewportChanged = true
 	}
@@ -249,14 +253,14 @@ func (m *Model) reduceSetOngoingScrollMsg(msg SetOngoingScrollMsg) {
 func (m *Model) reduceStreamAssistantMsg(msg StreamAssistantMsg, result *modelUpdateResult) {
 	m.ongoing += msg.Delta
 	result.autoFollowOngoing = true
-	result.ongoingChanged = true
+	result.ongoingStreamingChanged = true
 	result.detailChanged = true
 }
 
 func (m *Model) reduceClearOngoingAssistantMsg(result *modelUpdateResult) {
 	m.ongoing = ""
 	m.ongoingScroll = 0
-	result.ongoingChanged = true
+	result.ongoingStreamingChanged = true
 	result.detailChanged = true
 }
 
@@ -318,6 +322,8 @@ func (m *Model) reduceCommitAssistantMsg(result *modelUpdateResult) {
 func (m *Model) applyUpdateResult(result modelUpdateResult, wasAtOngoingBottom bool) {
 	if result.ongoingChanged {
 		m.invalidateOngoingSnapshot()
+	} else if result.ongoingStreamingChanged {
+		m.invalidateOngoingStreamingSnapshot()
 	}
 	if result.detailChanged {
 		m.invalidateDetailSnapshot()

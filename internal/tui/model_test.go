@@ -2454,6 +2454,24 @@ func TestDetailStreamingUpdateAllocsStayBounded(t *testing.T) {
 	}
 }
 
+func TestOngoingStreamingUpdateAllocsStayBounded(t *testing.T) {
+	entries := benchmarkDetailEntries(300)
+	m := NewModel(WithTheme("dark"))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 40, Width: 120})
+	m = updateModel(t, m, SetConversationMsg{Entries: entries})
+
+	base := m
+	allocs := testing.AllocsPerRun(20, func() {
+		local := base
+		next, _ := local.Update(StreamAssistantMsg{Delta: "x"})
+		local = next.(Model)
+		_ = local.View()
+	})
+	if allocs > 120 {
+		t.Fatalf("expected ongoing streaming update allocations to stay bounded, got %.2f allocs/op", allocs)
+	}
+}
+
 func TestOngoingStreamingAccessorsStableAcrossModeTogglesAndRefresh(t *testing.T) {
 	m := NewModel(WithTheme("dark"))
 	m = updateModel(t, m, SetConversationMsg{Entries: []TranscriptEntry{{Role: "assistant", Text: "committed"}}, Ongoing: "stream one", OngoingError: "error one"})

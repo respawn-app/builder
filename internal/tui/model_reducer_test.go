@@ -79,3 +79,22 @@ func TestApplyUpdateResultAutoFollowsOngoingAtBottom(t *testing.T) {
 		t.Fatalf("expected auto follow to keep ongoing at bottom, got %d want %d", got, want)
 	}
 }
+
+func TestReduceSetViewportSizeMsgNoopWhenSizeUnchanged(t *testing.T) {
+	m := NewModel()
+	m.viewportLines = 20
+	m.viewportWidth = 80
+	m.ongoingBaseDirty = false
+	m.ongoingDirty = false
+	m.detailDirty = false
+
+	next, _ := m.Update(SetViewportSizeMsg{Lines: 20, Width: 80})
+	updated := next.(Model)
+
+	if updated.viewportLines != 20 || updated.viewportWidth != 80 {
+		t.Fatalf("expected viewport to remain unchanged, got lines=%d width=%d", updated.viewportLines, updated.viewportWidth)
+	}
+	if updated.ongoingDirty || updated.detailDirty {
+		t.Fatalf("expected unchanged viewport update to avoid dirtying snapshots, got ongoingDirty=%v detailDirty=%v", updated.ongoingDirty, updated.detailDirty)
+	}
+}

@@ -184,6 +184,13 @@ type Model struct {
 	ongoingSnapshot         string
 	ongoingLineCache        []string
 	ongoingLineKinds        []VisibleLineKind
+	ongoingBaseLines        []string
+	ongoingBaseLineKinds    []VisibleLineKind
+	ongoingBaseLastGroup    string
+	ongoingStreamingLines   []string
+	ongoingStreamingKinds   []VisibleLineKind
+	ongoingStreamingDivider bool
+	ongoingBaseDirty        bool
 	ongoingDirty            bool
 	ongoingError            string
 	theme                   string
@@ -206,12 +213,13 @@ type lineRange struct {
 
 func NewModel(opts ...Option) Model {
 	m := Model{
-		mode:          ModeOngoing,
-		viewportLines: DefaultPreviewLines,
-		viewportWidth: 120,
-		theme:         normalizeTheme(""),
-		ongoingDirty:  true,
-		detailDirty:   true,
+		mode:             ModeOngoing,
+		viewportLines:    DefaultPreviewLines,
+		viewportWidth:    120,
+		theme:            normalizeTheme(""),
+		ongoingBaseDirty: true,
+		ongoingDirty:     true,
+		detailDirty:      true,
 	}
 	for _, opt := range opts {
 		opt(&m)
@@ -269,11 +277,7 @@ func (m *Model) VisibleLineKinds() []VisibleLineKind {
 	if m.ongoingDirty {
 		m.rebuildOngoingSnapshot()
 	}
-	kinds := m.ongoingLineKinds
-	if len(kinds) == 0 {
-		kinds = make([]VisibleLineKind, len(m.ongoingLines()))
-	}
-	return sliceVisibleLineKinds(kinds, m.ongoingScroll, m.maxOngoingScroll(), m.viewportLines)
+	return m.visibleOngoingLineKinds()
 }
 
 func sliceVisibleLineKinds(kinds []VisibleLineKind, scroll, maxScroll, viewportLines int) []VisibleLineKind {
@@ -304,10 +308,13 @@ func (m Model) OngoingScroll() int {
 }
 
 func (m Model) OngoingSnapshot() string {
+	if m.ongoingDirty {
+		return m.renderFlatOngoingTranscript()
+	}
 	if m.ongoingSnapshot != "" {
 		return m.ongoingSnapshot
 	}
-	return m.renderFlatOngoingTranscript()
+	return strings.Join(m.ongoingLines(), "\n")
 }
 
 func (m Model) OngoingCommittedSnapshot() string {
@@ -376,11 +383,11 @@ func (m Model) scrollDetail(delta int) Model {
 }
 
 func (m Model) maxOngoingScroll() int {
-	lines := m.ongoingLines()
-	if len(lines) <= m.viewportLines {
+	lineCount := m.ongoingRenderedLineCount()
+	if lineCount <= m.viewportLines {
 		return 0
 	}
-	return len(lines) - m.viewportLines
+	return lineCount - m.viewportLines
 }
 
 func (m Model) maxDetailScroll() int {
@@ -396,20 +403,16 @@ func (m Model) isOngoingAtBottom() bool {
 }
 
 func (m Model) renderOngoing() string {
-	lines := m.ongoingLines()
-	if len(lines) == 0 {
-		lines = []string{""}
-	}
-
+	lineCount := m.ongoingRenderedLineCount()
 	start := clamp(m.ongoingScroll, 0, m.maxOngoingScroll())
 	end := start + m.viewportLines
-	if end > len(lines) {
-		end = len(lines)
+	if end > lineCount {
+		end = lineCount
 	}
 
 	out := make([]string, 0, m.viewportLines+1)
 	for i := start; i < end; i++ {
-		out = append(out, lines[i])
+		out = append(out, m.ongoingLineAt(i))
 	}
 	for len(out) < m.viewportLines {
 		out = append(out, "")
@@ -418,36 +421,143 @@ func (m Model) renderOngoing() string {
 }
 
 func (m Model) ongoingLines() []string {
+	if m.ongoingDirty {
+		return splitLines(m.renderFlatOngoingTranscript())
+	}
 	if len(m.ongoingLineCache) > 0 {
 		return m.ongoingLineCache
 	}
-	return splitLines(m.renderFlatOngoingTranscript())
+	lineCount := m.ongoingRenderedLineCount()
+	lines := make([]string, 0, lineCount)
+	for idx := 0; idx < lineCount; idx++ {
+		lines = append(lines, m.ongoingLineAt(idx))
+	}
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
 }
 
 func (m *Model) invalidateOngoingSnapshot() {
+	m.ongoingBaseDirty = true
 	m.ongoingDirty = true
+	m.ongoingSnapshot = ""
+	m.ongoingLineCache = nil
+	m.ongoingLineKinds = nil
+}
+
+func (m *Model) invalidateOngoingStreamingSnapshot() {
+	m.ongoingDirty = true
+	m.ongoingSnapshot = ""
+	m.ongoingLineCache = nil
+	m.ongoingLineKinds = nil
 }
 
 func (m *Model) rebuildOngoingSnapshot() {
-	projection := m.OngoingProjection(true)
-	lines := projection.Lines(detailDivider())
-	if len(lines) == 0 {
-		m.ongoingSnapshot = ""
-		m.ongoingLineCache = []string{""}
-		m.ongoingLineKinds = []VisibleLineKind{VisibleLineContent}
-		m.ongoingDirty = false
-		return
+	if m.ongoingBaseDirty {
+		projection := m.OngoingProjection(false)
+		lines := projection.Lines(detailDivider())
+		m.ongoingBaseLines = m.ongoingBaseLines[:0]
+		m.ongoingBaseLineKinds = m.ongoingBaseLineKinds[:0]
+		m.ongoingBaseLastGroup = ""
+		for _, line := range lines {
+			m.ongoingBaseLines = append(m.ongoingBaseLines, line.Text)
+			m.ongoingBaseLineKinds = append(m.ongoingBaseLineKinds, line.Kind)
+		}
+		if blockCount := len(projection.Blocks); blockCount > 0 {
+			m.ongoingBaseLastGroup = projection.Blocks[blockCount-1].DividerGroup
+		}
+		m.ongoingBaseDirty = false
 	}
-	plain := make([]string, 0, len(lines))
-	kinds := make([]VisibleLineKind, 0, len(lines))
-	for _, line := range lines {
-		plain = append(plain, line.Text)
-		kinds = append(kinds, line.Kind)
+	m.ongoingStreamingLines = m.ongoingStreamingLines[:0]
+	m.ongoingStreamingKinds = m.ongoingStreamingKinds[:0]
+	m.ongoingStreamingDivider = false
+	if strings.TrimSpace(m.ongoing) != "" {
+		m.ongoingStreamingLines = append(m.ongoingStreamingLines, m.flattenEntryPlain("assistant", m.ongoing)...)
+		if len(m.ongoingStreamingLines) > 0 {
+			m.ongoingStreamingKinds = make([]VisibleLineKind, len(m.ongoingStreamingLines))
+			if len(m.ongoingBaseLines) > 0 && m.ongoingBaseLastGroup != ongoingDividerGroup("assistant") {
+				m.ongoingStreamingDivider = true
+			}
+		}
 	}
-	m.ongoingSnapshot = strings.Join(plain, "\n")
-	m.ongoingLineCache = plain
-	m.ongoingLineKinds = kinds
 	m.ongoingDirty = false
+}
+
+func (m Model) ongoingRenderedLineCount() int {
+	total := len(m.ongoingBaseLines) + len(m.ongoingStreamingLines)
+	if m.ongoingStreamingDivider {
+		total++
+	}
+	if total == 0 {
+		return 1
+	}
+	return total
+}
+
+func (m Model) ongoingLineAt(index int) string {
+	if index < 0 || index >= m.ongoingRenderedLineCount() {
+		return ""
+	}
+	if len(m.ongoingBaseLines) == 0 && !m.ongoingStreamingDivider && len(m.ongoingStreamingLines) == 0 {
+		return ""
+	}
+	if index < len(m.ongoingBaseLines) {
+		return m.ongoingBaseLines[index]
+	}
+	index -= len(m.ongoingBaseLines)
+	if m.ongoingStreamingDivider {
+		if index == 0 {
+			return detailDivider()
+		}
+		index--
+	}
+	if index >= 0 && index < len(m.ongoingStreamingLines) {
+		return m.ongoingStreamingLines[index]
+	}
+	return ""
+}
+
+func (m Model) ongoingLineKindAt(index int) VisibleLineKind {
+	if index < 0 || index >= m.ongoingRenderedLineCount() {
+		return VisibleLineContent
+	}
+	if len(m.ongoingBaseLines) == 0 && !m.ongoingStreamingDivider && len(m.ongoingStreamingLines) == 0 {
+		return VisibleLineContent
+	}
+	if index < len(m.ongoingBaseLineKinds) {
+		return m.ongoingBaseLineKinds[index]
+	}
+	index -= len(m.ongoingBaseLineKinds)
+	if m.ongoingStreamingDivider {
+		if index == 0 {
+			return VisibleLineDivider
+		}
+		index--
+	}
+	if index >= 0 && index < len(m.ongoingStreamingKinds) {
+		return m.ongoingStreamingKinds[index]
+	}
+	return VisibleLineContent
+}
+
+func (m Model) visibleOngoingLineKinds() []VisibleLineKind {
+	if m.viewportLines <= 0 {
+		return nil
+	}
+	start := clamp(m.ongoingScroll, 0, m.maxOngoingScroll())
+	end := start + m.viewportLines
+	if total := m.ongoingRenderedLineCount(); end > total {
+		end = total
+	}
+	out := make([]VisibleLineKind, 0, m.viewportLines)
+	for idx := start; idx < end; idx++ {
+		out = append(out, m.ongoingLineKindAt(idx))
+	}
+	for len(out) < m.viewportLines {
+		out = append(out, VisibleLineContent)
+	}
+	return out
 }
 
 func (m Model) renderDetailSnapshot() string {
