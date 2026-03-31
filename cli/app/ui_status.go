@@ -307,16 +307,17 @@ func (defaultUIStatusCollector) CollectBase(req uiStatusRequest) uiStatusSnapsho
 	parentSessionName := ""
 	compactionCount := 0
 	if req.Runtime != nil {
-		usage := req.Runtime.ContextUsage()
+		status := req.Runtime.Status()
+		usage := status.ContextUsage
 		contextInfo.UsedTokens = usage.UsedTokens
 		contextInfo.WindowTokens = usage.WindowTokens
 		contextInfo.AvailableTokens = usage.WindowTokens - usage.UsedTokens
 		if contextInfo.AvailableTokens < 0 {
 			contextInfo.AvailableTokens = 0
 		}
-		parentSessionID = strings.TrimSpace(req.Runtime.ParentSessionID())
+		parentSessionID = strings.TrimSpace(status.ParentSessionID)
 		parentSessionName = statusParentSessionName(req.PersistenceRoot, parentSessionID)
-		compactionCount = req.Runtime.CompactionCount()
+		compactionCount = status.CompactionCount
 	}
 	return uiStatusSnapshot{
 		CollectedAt:       collectedAt,

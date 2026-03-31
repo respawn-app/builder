@@ -124,7 +124,7 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 	if m.engine == nil {
 		return nil
 	}
-	m.conversationFreshness = m.engine.ConversationFreshness()
+	m.conversationFreshness = m.runtimeStatus().ConversationFreshness
 	return a.applyProjectedChatSnapshot(m.engine.ChatSnapshot())
 }
 
