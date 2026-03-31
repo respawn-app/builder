@@ -34,6 +34,14 @@ func (s *stubAuthInteractor) Interact(ctx context.Context, req authInteraction) 
 	return s.interact(ctx, req)
 }
 
+func (s *stubAuthInteractor) LookupEnv(string) string {
+	return ""
+}
+
+func (s *stubAuthInteractor) Interactive() bool {
+	return true
+}
+
 func TestEnsureAuthReadyHeadlessReturnsStartupErrorWithoutCredentials(t *testing.T) {
 	mgr := auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now)
 
