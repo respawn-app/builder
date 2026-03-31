@@ -1693,7 +1693,7 @@ func TestMainInputSupportsWordNavigation(t *testing.T) {
 }
 
 func TestMainInputUpDownSingleLineMoveToStartAndEnd(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.input = "abcd"
 	m.inputCursor = 2
 
@@ -4792,7 +4792,7 @@ func TestBackSlashCommandCopiesLatestAssistantOutputWhenAvailable(t *testing.T) 
 				eng.AppendLocalEntry("reviewer_status", tt.localEntry)
 			}
 
-			m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+			m := newProjectedEngineUIModel(eng)
 			m.activity = tt.activity
 			m.forwardToView(tui.SetConversationMsg{Ongoing: tt.ongoing})
 			m.input = "/back"
@@ -4832,7 +4832,7 @@ func TestBackSlashCommandIgnoresRestoredPromptHistoryDraftInChildSession(t *test
 		t.Fatalf("new engine: %v", err)
 	}
 
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.promptHistory = []string{"/back"}
 	m.promptHistoryDraft = "parked child draft"
 	m.promptHistoryDraftCursor = -1
@@ -4949,13 +4949,10 @@ func TestBuiltInInitSlashCommandSubmitsInjectedUserPrompt(t *testing.T) {
 
 func TestBuiltInReviewSlashCommandStartsFreshSessionWhenCurrentSessionHasVisibleUserPrompt(t *testing.T) {
 	r := commands.NewDefaultRegistry()
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUICommandRegistry(r),
 		WithUIConversationFreshness(session.ConversationFreshnessEstablished),
-	).(*uiModel)
+	)
 	m.input = "/review cli/app"
 	expected := r.Execute("/review cli/app")
 
@@ -4974,13 +4971,10 @@ func TestBuiltInReviewSlashCommandStartsFreshSessionWhenCurrentSessionHasVisible
 
 func TestBuiltInInitSlashCommandStartsFreshSessionWhenCurrentSessionHasVisibleUserPrompt(t *testing.T) {
 	r := commands.NewDefaultRegistry()
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUICommandRegistry(r),
 		WithUIConversationFreshness(session.ConversationFreshnessEstablished),
-	).(*uiModel)
+	)
 	m.input = "/init starter repo"
 	expected := r.Execute("/init starter repo")
 
@@ -4998,7 +4992,7 @@ func TestBuiltInInitSlashCommandStartsFreshSessionWhenCurrentSessionHasVisibleUs
 }
 
 func TestBusySlashNameExecutesImmediatelyWithoutQueueing(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.input = "/name incident triage"
@@ -5026,7 +5020,7 @@ func TestBusySlashNameExecutesImmediatelyWithoutQueueing(t *testing.T) {
 }
 
 func TestBusySlashThinkingExecutesImmediatelyWithoutQueueing(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.thinkingLevel = "high"
@@ -5055,12 +5049,7 @@ func TestBusySlashThinkingExecutesImmediatelyWithoutQueueing(t *testing.T) {
 }
 
 func TestSlashFastTogglesAndShowsStatus(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
-		WithUIFastModeAvailable(true),
-	).(*uiModel)
+	m := newProjectedStaticUIModel(WithUIFastModeAvailable(true))
 	m.termWidth = 100
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -5112,7 +5101,7 @@ func TestSlashFastTogglesAndShowsStatus(t *testing.T) {
 }
 
 func TestSlashFastUnavailableShowsError(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 100
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -5146,7 +5135,7 @@ func TestSlashFastWithEngineTogglesRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.input = "/fast on"
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -5173,7 +5162,7 @@ func TestSlashFastWithEngineTogglesRuntime(t *testing.T) {
 }
 
 func TestSlashSupervisorTogglesReviewerInvocationAndShowsStatus(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 100
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -5220,7 +5209,7 @@ func TestSlashSupervisorTogglesReviewerInvocationAndShowsStatus(t *testing.T) {
 }
 
 func TestBusySlashSupervisorExecutesImmediatelyWithoutQueueing(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.input = "/supervisor on"
@@ -5277,7 +5266,7 @@ func TestBusySlashSupervisorOffAppliesToInFlightRunCompletion(t *testing.T) {
 		t.Fatalf("new engine: %v", err)
 	}
 
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.busy = true
 	m.activity = uiActivityRunning
 
@@ -5340,7 +5329,7 @@ func TestBusySlashSupervisorOnAppliesToInFlightRunCompletion(t *testing.T) {
 		t.Fatalf("new engine: %v", err)
 	}
 
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.busy = true
 	m.activity = uiActivityRunning
 
@@ -5387,7 +5376,7 @@ func TestSlashSupervisorWithEngineTogglesRuntimeReviewer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.input = "/supervisor on"
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -5417,7 +5406,7 @@ func TestSlashSupervisorWithEngineTogglesRuntimeReviewer(t *testing.T) {
 }
 
 func TestSlashAutoCompactionTogglesAndShowsStatus(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 100
 	m.termHeight = 24
 	m.windowSizeKnown = true
@@ -5458,7 +5447,7 @@ func TestSlashAutoCompactionTogglesAndShowsStatus(t *testing.T) {
 }
 
 func TestBusySlashAutoCompactionExecutesImmediatelyWithoutQueueing(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.input = "/autocompaction off"
@@ -5495,7 +5484,7 @@ func TestSlashAutoCompactionWithEngineTogglesRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.input = "/autocompaction off"
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -5531,7 +5520,7 @@ func TestSlashAutoCompactionShowsCompactionModeNoneNote(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	m := NewUIModel(eng, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedEngineUIModel(eng)
 	m.input = "/autocompaction on"
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -5970,13 +5959,10 @@ func TestStatusLineHidesHelpHintOutsideOngoingMode(t *testing.T) {
 }
 
 func TestStatusLineShowsThinkingLevelForUnknownModels(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIModelName("claude-3-7-sonnet"),
 		WithUIThinkingLevel("high"),
-	).(*uiModel)
+	)
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(line, "claude-3-7-sonnet high") {
@@ -5988,14 +5974,11 @@ func TestStatusLineShowsThinkingLevelForUnknownModels(t *testing.T) {
 }
 
 func TestStatusLineShowsLockedModelContractMarker(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIModelName("gpt-5.3-codex"),
 		WithUIThinkingLevel("high"),
 		WithUIModelContractLocked(true),
-	).(*uiModel)
+	)
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(line, "gpt-5.3-codex high (model locked)") {
@@ -6004,17 +5987,14 @@ func TestStatusLineShowsLockedModelContractMarker(t *testing.T) {
 }
 
 func TestStatusLineHidesLockedModelMarkerWhenConfiguredModelMatches(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIModelName("gpt-5.3-codex"),
 		WithUIConfiguredModelName("gpt-5.3-codex"),
 		WithUIThinkingLevel("high"),
 		WithUIFastModeAvailable(true),
 		WithUIFastModeEnabled(true),
 		WithUIModelContractLocked(true),
-	).(*uiModel)
+	)
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(line, "gpt-5.3-codex high fast") {
@@ -6026,15 +6006,12 @@ func TestStatusLineHidesLockedModelMarkerWhenConfiguredModelMatches(t *testing.T
 }
 
 func TestStatusLineShowsLockedModelMarkerWhenConfiguredModelDiffers(t *testing.T) {
-	m := NewUIModel(
-		nil,
-		make(chan runtime.Event),
-		make(chan askEvent),
+	m := newProjectedStaticUIModel(
 		WithUIModelName("gpt-5.3-codex"),
 		WithUIConfiguredModelName("gpt-5.4"),
 		WithUIThinkingLevel("low"),
 		WithUIModelContractLocked(true),
-	).(*uiModel)
+	)
 
 	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(line, "gpt-5.3-codex low (model locked)") {
@@ -6043,7 +6020,7 @@ func TestStatusLineShowsLockedModelMarkerWhenConfiguredModelDiffers(t *testing.T
 }
 
 func TestStatusLineShowsCompactionProgressWarning(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 
 	next, _ := m.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventCompactionStarted}))
 	started := next.(*uiModel)
@@ -6061,7 +6038,7 @@ func TestStatusLineShowsCompactionProgressWarning(t *testing.T) {
 }
 
 func TestStatusLineShowsReviewerProgressWarning(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 
 	next, _ := m.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventReviewerStarted}))
 	started := next.(*uiModel)
@@ -6079,7 +6056,7 @@ func TestStatusLineShowsReviewerProgressWarning(t *testing.T) {
 }
 
 func TestReviewerProgressKeepsInputEditable(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.input = "keep this draft"
@@ -6114,7 +6091,7 @@ func TestReviewerProgressKeepsInputEditable(t *testing.T) {
 }
 
 func TestBusyEnterDuringReviewerUsesSteeringInjection(t *testing.T) {
-	m := NewUIModel(nil, make(chan runtime.Event), make(chan askEvent)).(*uiModel)
+	m := newProjectedStaticUIModel()
 	m.busy = true
 	m.activity = uiActivityRunning
 	m.input = "steer after review"
