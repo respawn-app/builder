@@ -182,6 +182,43 @@ func TestDeduplicatingPromptServiceDoesNotCacheCanceledErrors(t *testing.T) {
 	}
 }
 
+func TestDeduplicatingPromptServiceScopesClientRequestIDByWorkspace(t *testing.T) {
+	resetRunPromptDedupeRegistry()
+	t.Cleanup(resetRunPromptDedupeRegistry)
+
+	serviceA := newDeduplicatingPromptService(runPromptDedupeScopeID(HeadlessBootstrap{
+		Config:       config.App{PersistenceRoot: "/tmp/persistence", WorkspaceRoot: "/tmp/workspace-a"},
+		ContainerDir: "/tmp/persistence/workspace-a",
+	}), &stubRunPromptService{run: func(_ context.Context, _ serverapi.RunPromptRequest, _ serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
+		return serverapi.RunPromptResponse{SessionID: "session-a", Result: "workspace-a"}, nil
+	}})
+	serviceB := newDeduplicatingPromptService(runPromptDedupeScopeID(HeadlessBootstrap{
+		Config:       config.App{PersistenceRoot: "/tmp/persistence", WorkspaceRoot: "/tmp/workspace-b"},
+		ContainerDir: "/tmp/persistence/workspace-b",
+	}), &stubRunPromptService{run: func(_ context.Context, _ serverapi.RunPromptRequest, _ serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
+		return serverapi.RunPromptResponse{SessionID: "session-b", Result: "workspace-b"}, nil
+	}})
+
+	req := serverapi.RunPromptRequest{ClientRequestID: "dup-same", Prompt: "hello"}
+	responseA, err := serviceA.RunPrompt(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("service A run error: %v", err)
+	}
+	responseB, err := serviceB.RunPrompt(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("service B run error: %v", err)
+	}
+	if responseA.SessionID == responseB.SessionID {
+		t.Fatalf("workspace-scoped dedupe collided: responseA=%+v responseB=%+v", responseA, responseB)
+	}
+	if responseA.Result != "workspace-a" {
+		t.Fatalf("service A result = %q, want workspace-a", responseA.Result)
+	}
+	if responseB.Result != "workspace-b" {
+		t.Fatalf("service B result = %q, want workspace-b", responseB.Result)
+	}
+}
+
 func TestLoopbackRunPromptClientUsesSelectedSessionContinuationContext(t *testing.T) {
 	resetRunPromptDedupeRegistry()
 	t.Cleanup(resetRunPromptDedupeRegistry)
