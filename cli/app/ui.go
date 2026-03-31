@@ -252,13 +252,16 @@ func WithUISessionID(sessionID string) UIOption {
 func WithUIBackgroundManager(manager *shelltool.Manager) UIOption {
 	return func(m *uiModel) {
 		m.backgroundManager = manager
-		m.processClient = newUIProcessClient(manager)
+		if !m.processClientExplicit {
+			m.processClient = newUIProcessClient(manager)
+		}
 	}
 }
 
 func WithUIProcessClient(client clientui.ProcessClient) UIOption {
 	return func(m *uiModel) {
 		m.processClient = client
+		m.processClientExplicit = true
 	}
 }
 
@@ -293,8 +296,9 @@ type uiModel struct {
 	engine clientui.RuntimeClient
 	view   tui.Model
 
-	backgroundManager *shelltool.Manager
-	processClient     clientui.ProcessClient
+	backgroundManager     *shelltool.Manager
+	processClient         clientui.ProcessClient
+	processClientExplicit bool
 
 	runtimeEvents <-chan clientui.Event
 	askEvents     <-chan askEvent

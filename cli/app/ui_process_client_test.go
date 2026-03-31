@@ -6,7 +6,18 @@ import (
 	"time"
 
 	shelltool "builder/server/tools/shell"
+	"builder/shared/clientui"
 )
+
+type fixedUIProcessClient struct {
+	entries []clientui.BackgroundProcess
+}
+
+func (c fixedUIProcessClient) ListProcesses() []clientui.BackgroundProcess {
+	out := make([]clientui.BackgroundProcess, len(c.entries))
+	copy(out, c.entries)
+	return out
+}
 
 func TestUIProcessClientProjectsManagerSnapshots(t *testing.T) {
 	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
@@ -75,4 +86,30 @@ func TestUIProcessClientProjectsManagerSnapshots(t *testing.T) {
 		}
 	}
 	t.Fatalf("expected projected process entry for %s on second read", res.SessionID)
+}
+
+func TestExplicitUIProcessClientWinsOverBackgroundManagerOptionOrder(t *testing.T) {
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("new background manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	explicit := fixedUIProcessClient{entries: []clientui.BackgroundProcess{{ID: "explicit-process"}}}
+
+	first := newProjectedStaticUIModel(
+		WithUIBackgroundManager(manager),
+		WithUIProcessClient(explicit),
+	)
+	if got := first.listProcesses(); len(got) != 1 || got[0].ID != "explicit-process" {
+		t.Fatalf("expected explicit process client to win when applied last, got %+v", got)
+	}
+
+	second := newProjectedStaticUIModel(
+		WithUIProcessClient(explicit),
+		WithUIBackgroundManager(manager),
+	)
+	if got := second.listProcesses(); len(got) != 1 || got[0].ID != "explicit-process" {
+		t.Fatalf("expected explicit process client to win when applied first, got %+v", got)
+	}
 }
