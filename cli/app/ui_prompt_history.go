@@ -210,11 +210,11 @@ func (m *uiModel) recordPromptHistory(text string) tea.Cmd {
 	}
 	m.promptHistory = append(m.promptHistory, text)
 	m.resetPromptHistoryNavigation()
-	if m.engine == nil {
+	if !m.hasRuntimeClient() {
 		return nil
 	}
 	return func() tea.Msg {
-		if err := m.engine.RecordPromptHistory(text); err != nil {
+		if err := m.recordRuntimePromptHistory(text); err != nil {
 			return promptHistoryPersistErrMsg{err: err}
 		}
 		return nil

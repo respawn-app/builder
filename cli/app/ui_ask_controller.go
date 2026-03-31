@@ -75,9 +75,7 @@ func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlC:
 		hasNext := c.answer(askquestion.Response{}, errors.New("interrupted"))
 		if m.busy {
-			if m.engine != nil {
-				_ = m.engine.Interrupt()
-			}
+			_ = m.interruptRuntime()
 			m.busy = false
 		}
 		if hasNext {

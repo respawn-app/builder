@@ -102,8 +102,8 @@ func (m *uiModel) appendLocalEntry(role, text string) {
 	if text == "" {
 		return
 	}
-	if m.engine != nil {
-		m.engine.AppendLocalEntry(role, text)
+	if m.hasRuntimeClient() {
+		m.appendRuntimeLocalEntry(role, text)
 		return
 	}
 	m.forwardToView(tui.AppendTranscriptMsg{Role: role, Text: text})

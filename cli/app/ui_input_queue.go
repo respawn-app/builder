@@ -24,8 +24,8 @@ func (m *uiModel) enqueueInjectedInput(text string) bool {
 	if trimmed == "" {
 		return false
 	}
-	if m.engine != nil {
-		m.engine.QueueUserMessage(trimmed)
+	if m.hasRuntimeClient() {
+		m.queueRuntimeUserMessage(trimmed)
 	}
 	m.pendingInjected = append(m.pendingInjected, trimmed)
 	m.activity = uiActivityQueued
@@ -91,9 +91,9 @@ func (c uiInputController) restorePendingInjectedIntoInput() {
 		return
 	}
 	pending := append([]string(nil), m.pendingInjected...)
-	if m.engine != nil {
+	if m.hasRuntimeClient() {
 		for _, text := range pending {
-			m.engine.DiscardQueuedUserMessagesMatching(text)
+			m.discardQueuedRuntimeUserMessagesMatching(text)
 		}
 	}
 	joined := strings.Join(pending, "\n\n")
@@ -126,8 +126,8 @@ func (c uiInputController) releaseLockedInjectedInput(discardEngineQueue bool) {
 			filtered = append(filtered, pending)
 		}
 		m.pendingInjected = filtered
-		if discardEngineQueue && m.engine != nil {
-			m.engine.DiscardQueuedUserMessagesMatching(locked)
+		if discardEngineQueue && m.hasRuntimeClient() {
+			m.discardQueuedRuntimeUserMessagesMatching(locked)
 		}
 	}
 	m.inputSubmitLocked = false

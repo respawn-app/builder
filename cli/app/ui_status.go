@@ -1079,9 +1079,7 @@ func (c uiInputController) handleStatusOverlayKey(msg tea.KeyMsg) (tea.Model, te
 	switch strings.ToLower(msg.String()) {
 	case "ctrl+c":
 		if m.busy {
-			if m.engine != nil {
-				_ = m.engine.Interrupt()
-			}
+			_ = m.interruptRuntime()
 			m.preSubmitCheckToken++
 			c.releaseLockedInjectedInput(true)
 			c.restorePendingInjectedIntoInput()
