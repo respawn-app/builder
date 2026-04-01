@@ -24,11 +24,18 @@ type runtimeWiring struct {
 	askBroker       *askquestion.Broker
 	askBridge       *askBridge
 	eventBridge     *runtimeEventBridge
+	runtimeEvents   <-chan clientui.Event
+	askEvents       <-chan askEvent
 	background      *shelltool.Manager
 	runtimeClient   clientui.RuntimeClient
+	promptControl   client.PromptControlClient
+	runtimeControls client.RuntimeControlClient
 	processControls client.ProcessControlClient
 	processOutput   client.ProcessOutputClient
 	processViews    client.ProcessViewClient
+	approvalViews   client.ApprovalViewClient
+	askViews        client.AskViewClient
+	sessionActivity client.SessionActivityClient
 	sessionViews    client.SessionViewClient
 	promptHistory   []string
 }

@@ -15,10 +15,22 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 	options := mainUIProgramOptions(active)
 	runtimeClient := wiring.runtimeClient
 	if runtimeClient == nil {
-		runtimeClient = newUIRuntimeClientWithReads(wiring.engine, wiring.sessionViews)
+		sessionID := ""
+		if wiring.engine != nil {
+			sessionID = wiring.engine.SessionID()
+		}
+		runtimeClient = newUIRuntimeClientWithReads(sessionID, wiring.sessionViews, wiring.runtimeControls)
 	}
 	runtimeEventStop := make(chan struct{})
 	defer close(runtimeEventStop)
+	runtimeEvents := wiring.runtimeEvents
+	if runtimeEvents == nil && wiring.eventBridge != nil {
+		runtimeEvents = projectRuntimeEventChannel(wiring.eventBridge.Channel(), runtimeEventStop)
+	}
+	askEvents := wiring.askEvents
+	if askEvents == nil && wiring.askBridge != nil {
+		askEvents = wiring.askBridge.Events()
+	}
 	sessionID := ""
 	if runtimeClient != nil {
 		sessionID = runtimeClient.MainView().Session.SessionID
@@ -26,8 +38,8 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 
 	program := tea.NewProgram(NewProjectedUIModel(
 		runtimeClient,
-		projectRuntimeEventChannel(wiring.eventBridge.Channel(), runtimeEventStop),
-		wiring.askBridge.Events(),
+		runtimeEvents,
+		askEvents,
 		WithUILogger(logger),
 		WithUIModelName(active.Model),
 		WithUIConfiguredModelName(configuredModelName),
@@ -47,8 +59,10 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 	), options...)
 
 	finalModel, runErr := program.Run()
-	if dropped := wiring.eventBridge.Dropped(); dropped > 0 {
+	if wiring.eventBridge != nil {
+		if dropped := wiring.eventBridge.Dropped(); dropped > 0 {
 		logger.Logf("runtime.event.drop.total=%d", dropped)
+		}
 	}
 	if runErr != nil {
 		logger.Logf("app.exit err=%q", runErr.Error())

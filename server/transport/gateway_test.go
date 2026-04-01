@@ -11,7 +11,9 @@ import (
 	serverbootstrap "builder/server/bootstrap"
 	"builder/server/core"
 	"builder/server/runtime"
+	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
+	"builder/shared/clientui"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
 	"golang.org/x/net/websocket"
@@ -230,6 +232,66 @@ func TestGatewayProcessOutputSubscriptionStreamsOutputAndCompletion(t *testing.T
 	}
 	if complete.Code != 0 || complete.Message != "" {
 		t.Fatalf("unexpected completion params: %+v", complete)
+	}
+}
+
+func TestGatewayPromptActivitySubscriptionStreamsPendingResolvedAndCompletion(t *testing.T) {
+	appCore, server := newGatewayTestServer(t)
+	defer server.Close()
+
+	appCore.RegisterRuntime("session-1", &runtime.Engine{})
+	defer appCore.UnregisterRuntime("session-1")
+	appCore.BeginPendingPrompt("session-1", askquestion.Request{ID: "ask-1", Question: "Proceed?", Suggestions: []string{"Yes", "No"}})
+
+	conn := dialGateway(t, server)
+	defer func() { _ = conn.Close() }()
+	handshakeGateway(t, conn)
+	callGateway(t, conn, "attach", protocol.MethodAttachSession, protocol.AttachSessionRequest{SessionID: "session-1"}, nil)
+	callGateway(t, conn, "subscribe", protocol.MethodPromptSubscribeActivity, serverapi.PromptActivitySubscribeRequest{SessionID: "session-1"}, nil)
+
+	var notif protocol.Request
+	if err := websocket.JSON.Receive(conn, &notif); err != nil {
+		t.Fatalf("receive prompt pending: %v", err)
+	}
+	if notif.Method != protocol.MethodPromptActivityEvent {
+		t.Fatalf("prompt event method = %q", notif.Method)
+	}
+	var pending protocol.PromptActivityEventParams
+	if err := json.Unmarshal(notif.Params, &pending); err != nil {
+		t.Fatalf("decode prompt pending: %v", err)
+	}
+	if pending.Event.Type != clientui.PendingPromptEventPending || pending.Event.PromptID != "ask-1" || pending.Event.Question != "Proceed?" {
+		t.Fatalf("unexpected pending prompt event: %+v", pending.Event)
+	}
+
+	appCore.CompletePendingPrompt("session-1", "ask-1")
+	if err := websocket.JSON.Receive(conn, &notif); err != nil {
+		t.Fatalf("receive prompt resolved: %v", err)
+	}
+	if notif.Method != protocol.MethodPromptActivityEvent {
+		t.Fatalf("resolved prompt method = %q", notif.Method)
+	}
+	var resolved protocol.PromptActivityEventParams
+	if err := json.Unmarshal(notif.Params, &resolved); err != nil {
+		t.Fatalf("decode prompt resolved: %v", err)
+	}
+	if resolved.Event.Type != clientui.PendingPromptEventResolved || resolved.Event.PromptID != "ask-1" {
+		t.Fatalf("unexpected resolved prompt event: %+v", resolved.Event)
+	}
+
+	appCore.UnregisterRuntime("session-1")
+	if err := websocket.JSON.Receive(conn, &notif); err != nil {
+		t.Fatalf("receive prompt completion: %v", err)
+	}
+	if notif.Method != protocol.MethodPromptActivityComplete {
+		t.Fatalf("prompt completion method = %q", notif.Method)
+	}
+	var complete protocol.StreamCompleteParams
+	if err := json.Unmarshal(notif.Params, &complete); err != nil {
+		t.Fatalf("decode prompt completion: %v", err)
+	}
+	if complete.Code != 0 || complete.Message != "" {
+		t.Fatalf("unexpected prompt completion params: %+v", complete)
 	}
 }
 
