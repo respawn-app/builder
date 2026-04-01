@@ -51,6 +51,14 @@ func (m *Manager) Count() int {
 	return count
 }
 
+func (m *Manager) Snapshot(id string) (Snapshot, error) {
+	entry, err := m.entry(strings.TrimSpace(id))
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return entry.snapshot(), nil
+}
+
 func (m *Manager) Close() error {
 	m.mu.Lock()
 	if m.closed {

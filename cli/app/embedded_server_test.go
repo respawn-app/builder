@@ -28,6 +28,7 @@ type testEmbeddedServer struct {
 	background        *shelltool.Manager
 	backgroundRouter  serverembedded.BackgroundRouter
 	runPromptClient   client.RunPromptClient
+	processViewClient client.ProcessViewClient
 	sessionViewClient client.SessionViewClient
 	planSession       func(req sessionLaunchRequest, pick sessionPickerRunner) (sessionLaunchPlan, error)
 	prepareRuntime    func(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error)
@@ -45,6 +46,9 @@ func (s *testEmbeddedServer) BackgroundRouter() serverembedded.BackgroundRouter 
 	return s.backgroundRouter
 }
 func (s *testEmbeddedServer) RunPromptClient() client.RunPromptClient { return s.runPromptClient }
+func (s *testEmbeddedServer) ProcessViewClient() client.ProcessViewClient {
+	return s.processViewClient
+}
 func (s *testEmbeddedServer) SessionViewClient() client.SessionViewClient {
 	return s.sessionViewClient
 }
