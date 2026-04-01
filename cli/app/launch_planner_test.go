@@ -327,3 +327,32 @@ func TestApplyCLIOverridesToSessionPlanRecomputesEnabledToolsForCLIModelOverride
 		t.Fatalf("expected recomputed tools for overridden model, got %+v", updated.EnabledTools)
 	}
 }
+
+func TestApplyCLIOverridesToSessionPlanKeepsExplicitCLIToolsWhenModelAlsoOverrides(t *testing.T) {
+	plan := sessionLaunchPlan{
+		ActiveSettings: config.Settings{
+			Model:        "gpt-5.4",
+			EnabledTools: map[tools.ID]bool{tools.ToolShell: true},
+		},
+		EnabledTools:        []tools.ID{tools.ToolShell},
+		ConfiguredModelName: "gpt-5.4",
+		Source:              config.SourceReport{Sources: map[string]string{"model": "file", "tools.shell": "default", "tools.multi_tool_use_parallel": "default"}},
+		StatusConfig:        uiStatusConfig{},
+	}
+	cfg := config.App{Settings: config.Settings{
+		Model:        "gpt-5.3-codex",
+		EnabledTools: map[tools.ID]bool{tools.ToolShell: true},
+	}, Source: config.SourceReport{Sources: map[string]string{
+		"model":                         "cli",
+		"tools.shell":                   "cli",
+		"tools.multi_tool_use_parallel": "cli",
+	}}}
+
+	updated := applyCLIOverridesToSessionPlan(plan, cfg)
+	if updated.ActiveSettings.Model != "gpt-5.3-codex" {
+		t.Fatalf("expected cli model override, got %q", updated.ActiveSettings.Model)
+	}
+	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != tools.ToolShell {
+		t.Fatalf("expected explicit cli tools to suppress model defaults, got %+v", updated.EnabledTools)
+	}
+}
