@@ -2,6 +2,7 @@ package sessioncontrol
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -48,9 +49,12 @@ func TestControllerPlanSessionForwardsPickerThemeAndPolicy(t *testing.T) {
 		},
 		ContainerDir: containerDir,
 		ProjectID:    "project-1",
-		ProjectViews: client.NewLoopbackProjectViewClient(&stubControllerProjectViewService{sessions: serverapi.SessionListByProjectResponse{Sessions: []clientui.SessionSummary{
-			{SessionID: first.Meta().SessionID, Name: "first", UpdatedAt: first.Meta().UpdatedAt},
-			{SessionID: store.Meta().SessionID, Name: "second", UpdatedAt: store.Meta().UpdatedAt},
+		ProjectViews: client.NewLoopbackProjectViewClient(&stubControllerProjectViewService{overview: serverapi.ProjectGetOverviewResponse{Overview: clientui.ProjectOverview{
+			Project: clientui.ProjectSummary{ProjectID: "project-1", DisplayName: "workspace-a", RootPath: "/tmp/workspace-a"},
+			Sessions: []clientui.SessionSummary{
+				{SessionID: first.Meta().SessionID, Name: "first", UpdatedAt: first.Meta().UpdatedAt},
+				{SessionID: store.Meta().SessionID, Name: "second", UpdatedAt: store.Meta().UpdatedAt},
+			},
 		}}}),
 		PickSession: func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (launch.SessionSelection, error) {
 			pickedCalled = true
@@ -89,7 +93,7 @@ func TestControllerPlanSessionForwardsPickerThemeAndPolicy(t *testing.T) {
 }
 
 type stubControllerProjectViewService struct {
-	sessions serverapi.SessionListByProjectResponse
+	overview serverapi.ProjectGetOverviewResponse
 }
 
 func (s *stubControllerProjectViewService) ListProjects(_ context.Context, _ serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
@@ -97,11 +101,11 @@ func (s *stubControllerProjectViewService) ListProjects(_ context.Context, _ ser
 }
 
 func (s *stubControllerProjectViewService) GetProjectOverview(_ context.Context, _ serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
-	return serverapi.ProjectGetOverviewResponse{}, nil
+	return s.overview, nil
 }
 
 func (s *stubControllerProjectViewService) ListSessionsByProject(_ context.Context, _ serverapi.SessionListByProjectRequest) (serverapi.SessionListByProjectResponse, error) {
-	return s.sessions, nil
+	return serverapi.SessionListByProjectResponse{}, errors.New("ListSessionsByProject should not be called when project overview is available")
 }
 
 func TestControllerResolveTransitionLogoutReauthsThroughCallback(t *testing.T) {

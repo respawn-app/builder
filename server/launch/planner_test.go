@@ -2,6 +2,7 @@ package launch
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -117,6 +118,13 @@ func TestPlannerInteractiveUsesProjectViewSessionsAndReopensBySessionID(t *testi
 	if err := second.SetName("second"); err != nil {
 		t.Fatalf("persist second session meta: %v", err)
 	}
+	projectViews := &stubLaunchProjectViewService{overview: serverapi.ProjectGetOverviewResponse{Overview: clientui.ProjectOverview{
+		Project: clientui.ProjectSummary{ProjectID: "project-1", DisplayName: "workspace-a", RootPath: "/tmp/workspace-a"},
+		Sessions: []clientui.SessionSummary{
+			{SessionID: first.Meta().SessionID, Name: "first", UpdatedAt: first.Meta().UpdatedAt},
+			{SessionID: second.Meta().SessionID, Name: "second", UpdatedAt: second.Meta().UpdatedAt},
+		},
+	}}}
 	planner := Planner{
 		Config: config.App{
 			WorkspaceRoot:   "/tmp/workspace-a",
@@ -125,10 +133,7 @@ func TestPlannerInteractiveUsesProjectViewSessionsAndReopensBySessionID(t *testi
 		},
 		ContainerDir: containerDir,
 		ProjectID:    "project-1",
-		ProjectViews: client.NewLoopbackProjectViewClient(&stubLaunchProjectViewService{sessions: serverapi.SessionListByProjectResponse{Sessions: []clientui.SessionSummary{
-			{SessionID: first.Meta().SessionID, Name: "first", UpdatedAt: first.Meta().UpdatedAt},
-			{SessionID: second.Meta().SessionID, Name: "second", UpdatedAt: second.Meta().UpdatedAt},
-		}}}),
+		ProjectViews: client.NewLoopbackProjectViewClient(projectViews),
 		PickSession: func(summaries []session.Summary) (SessionSelection, error) {
 			if len(summaries) != 2 {
 				t.Fatalf("expected two summaries, got %d", len(summaries))
@@ -145,10 +150,14 @@ func TestPlannerInteractiveUsesProjectViewSessionsAndReopensBySessionID(t *testi
 	if plan.Store.Meta().SessionID != second.Meta().SessionID {
 		t.Fatalf("expected selected session %q, got %q", second.Meta().SessionID, plan.Store.Meta().SessionID)
 	}
+	if projectViews.overviewCalls != 1 {
+		t.Fatalf("expected project overview to be used once, got %d", projectViews.overviewCalls)
+	}
 }
 
 type stubLaunchProjectViewService struct {
-	sessions serverapi.SessionListByProjectResponse
+	overview      serverapi.ProjectGetOverviewResponse
+	overviewCalls int
 }
 
 func (s *stubLaunchProjectViewService) ListProjects(_ context.Context, _ serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
@@ -156,9 +165,10 @@ func (s *stubLaunchProjectViewService) ListProjects(_ context.Context, _ servera
 }
 
 func (s *stubLaunchProjectViewService) GetProjectOverview(_ context.Context, _ serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
-	return serverapi.ProjectGetOverviewResponse{}, nil
+	s.overviewCalls++
+	return s.overview, nil
 }
 
 func (s *stubLaunchProjectViewService) ListSessionsByProject(_ context.Context, _ serverapi.SessionListByProjectRequest) (serverapi.SessionListByProjectResponse, error) {
-	return s.sessions, nil
+	return serverapi.SessionListByProjectResponse{}, errors.New("ListSessionsByProject should not be called when project overview is available")
 }

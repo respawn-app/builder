@@ -46,6 +46,14 @@ func ResolveWorkspaceContainer(cfg App) (string, string, error) {
 	return container, containerDir, nil
 }
 
+func ProjectIDForWorkspaceRoot(workspaceRoot string) (string, error) {
+	canonicalRoot, err := canonicalWorkspaceRoot(workspaceRoot)
+	if err != nil {
+		return "", err
+	}
+	return deterministicProjectID(canonicalRoot), nil
+}
+
 func canonicalWorkspaceRoot(workspaceRoot string) (string, error) {
 	absRoot, err := filepath.Abs(workspaceRoot)
 	if err != nil {
@@ -65,6 +73,11 @@ func deterministicWorkspaceContainerName(canonicalRoot string) string {
 	base := sanitizedWorkspaceContainerPrefix(filepath.Base(canonicalRoot))
 	sum := sha256.Sum256([]byte(canonicalRoot))
 	return fmt.Sprintf("%s-%s", base, hex.EncodeToString(sum[:]))
+}
+
+func deterministicProjectID(canonicalRoot string) string {
+	sum := sha256.Sum256([]byte(canonicalRoot))
+	return fmt.Sprintf("project-%s", hex.EncodeToString(sum[:]))
 }
 
 func legacyWorkspaceContainer(cfg App, canonicalRoot string) (string, bool, error) {
