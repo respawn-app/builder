@@ -13,7 +13,8 @@ Continue Phase 3 execution until the full phase is complete according to `../pla
 - Latest checkpoints:
   - `d7860fd` `feat: add daemon transport and headless attach path`
   - `f5fbc22` `feat: auto-start local daemon for headless runs`
-  - pending checkpoint: lifecycle seam extraction behind `shared/serverapi/session_lifecycle.go`
+  - `8a4e595` `feat: extract session lifecycle boundary`
+  - `99dd37f` `feat: extract session launch boundary`
 - `builder serve` is now a real standalone headless daemon host with:
   - local-only HTTP bootstrap in `server/serve`
   - health/readiness endpoints
