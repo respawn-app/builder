@@ -15,6 +15,7 @@ import (
 	readimagetool "builder/server/tools/readimage"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
+	"builder/shared/clientui"
 	"builder/shared/config"
 )
 
@@ -24,6 +25,7 @@ type runtimeWiring struct {
 	askBridge       *askBridge
 	eventBridge     *runtimeEventBridge
 	background      *shelltool.Manager
+	runtimeClient   clientui.RuntimeClient
 	processControls client.ProcessControlClient
 	processOutput   client.ProcessOutputClient
 	processViews    client.ProcessViewClient

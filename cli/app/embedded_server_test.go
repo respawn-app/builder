@@ -12,6 +12,7 @@ import (
 	serverembedded "builder/server/embedded"
 	"builder/server/launch"
 	serverlifecycle "builder/server/lifecycle"
+	"builder/server/primaryrun"
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/sessioncontrol"
@@ -575,5 +576,41 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessOutputClient(t *testing.T) {
 	defer runtimePlan.Close()
 	if runtimePlan.Wiring.processOutput == nil {
 		t.Fatal("expected PrepareRuntime to wire process output client")
+	}
+}
+
+func TestEmbeddedAppServerPrepareRuntimeUsesPrimaryRunGuardedRuntimeClient(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("start embedded server: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test prepare runtime primary run gate")
+	if err != nil {
+		t.Fatalf("prepare runtime: %v", err)
+	}
+	defer runtimePlan.Close()
+	if runtimePlan.Wiring.runtimeClient == nil {
+		t.Fatal("expected PrepareRuntime to wire guarded runtime client")
+	}
+
+	lease, err := server.inner.AcquirePrimaryRun(plan.Store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("AcquirePrimaryRun: %v", err)
+	}
+	defer lease.Release()
+	if _, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "hello"); !errors.Is(err, primaryrun.ErrActivePrimaryRun) {
+		t.Fatalf("SubmitUserMessage error = %v, want active primary run", err)
 	}
 }
