@@ -273,6 +273,63 @@ func TestManagerSubscribeOutputStreamsTailAndEndsAtEOF(t *testing.T) {
 	}
 }
 
+func TestManagerSubscribeOutputRejectsInvalidOffset(t *testing.T) {
+	manager := newBackgroundTestManager(t)
+	if _, err := manager.SubscribeOutput(context.Background(), "proc-1", -1); err == nil {
+		t.Fatal("expected invalid offset error")
+	}
+}
+
+func TestManagerSubscribeOutputRejectsUnknownProcess(t *testing.T) {
+	manager := newBackgroundTestManager(t)
+	if _, err := manager.SubscribeOutput(context.Background(), "missing", 0); err == nil {
+		t.Fatal("expected unknown process error")
+	}
+}
+
+func TestManagerSubscribeOutputCloseUnblocksNext(t *testing.T) {
+	manager := newBackgroundTestManager(t)
+	workspace := t.TempDir()
+
+	result, err := manager.Start(context.Background(), ExecRequest{
+		Command:        []string{"sh", "-c", "sleep 30"},
+		DisplayCommand: "tail-close-test",
+		Workdir:        workspace,
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if !result.Backgrounded {
+		t.Fatalf("expected backgrounded process, got %+v", result)
+	}
+
+	sub, err := manager.SubscribeOutput(context.Background(), result.SessionID, 0)
+	if err != nil {
+		t.Fatalf("SubscribeOutput: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := sub.Next(context.Background())
+		done <- err
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	if err := sub.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != io.EOF {
+			t.Fatalf("expected EOF after Close, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Next to unblock after Close")
+	}
+	_ = manager.Kill(result.SessionID)
+}
+
 func TestTruncateBackgroundOutputBannerReferencesLogFile(t *testing.T) {
 	in := strings.Repeat("a", headTailSize+headTailSize+10)
 	out, truncated, removed := truncateBackgroundOutput(in, 100)

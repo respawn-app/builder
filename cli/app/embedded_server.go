@@ -24,6 +24,7 @@ type embeddedServer interface {
 	ProjectViewClient() client.ProjectViewClient
 	RunPromptClient() client.RunPromptClient
 	ProcessControlClient() client.ProcessControlClient
+	ProcessOutputClient() client.ProcessOutputClient
 	ProcessViewClient() client.ProcessViewClient
 	SessionViewClient() client.SessionViewClient
 	PlanSession(req sessionLaunchRequest, pick sessionPickerRunner) (sessionLaunchPlan, error)
@@ -96,6 +97,13 @@ func (s *embeddedAppServer) ProcessControlClient() client.ProcessControlClient {
 		return nil
 	}
 	return s.inner.ProcessControlClient()
+}
+
+func (s *embeddedAppServer) ProcessOutputClient() client.ProcessOutputClient {
+	if s == nil || s.inner == nil {
+		return nil
+	}
+	return s.inner.ProcessOutputClient()
 }
 
 func (s *embeddedAppServer) OAuthOptions() auth.OpenAIOAuthOptions {
@@ -206,6 +214,7 @@ func (s *embeddedAppServer) PrepareRuntime(plan sessionLaunchPlan, diagnosticWri
 	}
 	s.inner.RegisterRuntime(plan.Store.Meta().SessionID, wiring.engine)
 	wiring.processControls = s.inner.ProcessControlClient()
+	wiring.processOutput = s.inner.ProcessOutputClient()
 	wiring.processViews = s.inner.ProcessViewClient()
 	wiring.sessionViews = s.inner.SessionViewClient()
 	return &runtimeLaunchPlan{
