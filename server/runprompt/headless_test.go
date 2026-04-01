@@ -159,6 +159,54 @@ func TestDeduplicatingPromptServiceRejectsPayloadMismatch(t *testing.T) {
 	}
 }
 
+func TestDeduplicatingPromptServiceRejectsOverrideMismatch(t *testing.T) {
+	resetRunPromptDedupeRegistry()
+	t.Cleanup(resetRunPromptDedupeRegistry)
+
+	inner := &stubRunPromptService{
+		run: func(_ context.Context, req serverapi.RunPromptRequest, _ serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
+			return serverapi.RunPromptResponse{SessionID: req.SelectedSessionID, Result: req.Prompt}, nil
+		},
+	}
+	service := newDeduplicatingPromptService("scope-b-overrides", inner)
+	base := serverapi.RunPromptRequest{
+		ClientRequestID:   "dup-2-overrides",
+		SelectedSessionID: "session-2",
+		Prompt:            "first",
+		Timeout:           5 * time.Second,
+		Overrides: serverapi.RunPromptOverrides{
+			Model:         "gpt-5.4",
+			Tools:         "shell,patch",
+			OpenAIBaseURL: "http://127.0.0.1:11434/v1",
+		},
+	}
+
+	if _, err := service.RunPrompt(context.Background(), base, nil); err != nil {
+		t.Fatalf("first run error: %v", err)
+	}
+
+	_, err := service.RunPrompt(context.Background(), serverapi.RunPromptRequest{
+		ClientRequestID:   base.ClientRequestID,
+		SelectedSessionID: base.SelectedSessionID,
+		Prompt:            base.Prompt,
+		Timeout:           6 * time.Second,
+		Overrides: serverapi.RunPromptOverrides{
+			Model:         "gpt-5.4-mini",
+			Tools:         base.Overrides.Tools,
+			OpenAIBaseURL: base.Overrides.OpenAIBaseURL,
+		},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected payload mismatch error")
+	}
+	if got := err.Error(); got != "client_request_id \"dup-2-overrides\" reused with different payload" {
+		t.Fatalf("unexpected mismatch error: %v", err)
+	}
+	if got := inner.CallCount(); got != 1 {
+		t.Fatalf("inner call count = %d, want 1", got)
+	}
+}
+
 func TestDeduplicatingPromptServiceDoesNotCacheCanceledErrors(t *testing.T) {
 	resetRunPromptDedupeRegistry()
 	t.Cleanup(resetRunPromptDedupeRegistry)
