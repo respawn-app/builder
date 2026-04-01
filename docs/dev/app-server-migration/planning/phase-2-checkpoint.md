@@ -15,6 +15,7 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - Added `server/runtimeview.Reader` as the first server-owned application read service for active-session hydration, with the CLI loopback runtime client delegating read paths through that service.
 - Switched the CLI runtime client and local UI hydration helpers onto `RuntimeMainView`, so the new bundled hydration surface is exercised in production code rather than existing only as an unused type.
 - Added durable run lifecycle entries to the existing session event log and `server/session` run reducers, so completed and interrupted runs can now be reconstructed after reopen through `ReadRuns()` / `LatestRun()`.
+- Split live run-state emission from durable run-history persistence, so only explicit primary-run paths write durable run lifecycle entries.
 - Added focused lifecycle coverage proving `EventRunStateChanged` emits stable `run_id`, status, and timing for both completed and interrupted runs.
 - Added a real-engine loopback test proving `RuntimeClient.MainView()` exposes active-run hydration while a run is in flight.
 
@@ -28,6 +29,7 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 ## Current Limitations
 
 - Durable run history currently covers lifecycle metadata only. There is still no richer run-scoped index for processes, asks, approvals, or delegated task state.
+- Reopen semantics currently reconstruct unfinished durable runs from `run_started` without a matching `run_finished`, but that state is not yet surfaced through a higher-level application read API.
 - The current read service is still runtime-local to a live engine. The future protocol/read-model work still needs a broader transport-neutral application read service that is not scoped only to one in-memory runtime.
 - The UI is hydrating through `RuntimeMainView`, but it is not yet rendering run-specific UX beyond carrying the typed data.
 
