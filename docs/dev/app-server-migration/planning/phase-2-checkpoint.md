@@ -18,7 +18,7 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - Split live run-state emission from durable run-history persistence, so only explicit primary-run paths write durable run lifecycle entries.
 - Added the first transport-neutral application read service via `shared/serverapi` + `shared/client` + `server/sessionview`, with typed `session.getMainView` / `run.get`-style requests backed by either a live runtime or durable session state.
 - Reworked `server/sessionview` around explicit session/runtime resolvers keyed by `session_id`, so the read service is no longer a single pre-bound session helper.
-- Made dormant session hydration side-effect-free by replaying against an isolated cloned store, and added proof that read APIs do not mutate persisted session files.
+- Made dormant session hydration side-effect-free by reconstructing state from persisted storage against an isolated cloned store, and added proof that read APIs do not mutate persisted session files.
 - Moved the CLI loopback read path onto that application read service and removed the direct runtime-projection fallback.
 - Added read-only `server/session.Snapshot` loaders plus embedded-server runtime/session registries, so the production `sessionview` path now resolves dormant sessions from persistence root and active runtimes from server-owned state rather than static one-session wiring.
 - Added focused lifecycle coverage proving `EventRunStateChanged` emits stable `run_id`, status, and timing for both completed and interrupted runs.
