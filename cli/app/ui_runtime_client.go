@@ -21,45 +21,15 @@ func newUIRuntimeClient(engine *runtime.Engine) clientui.RuntimeClient {
 }
 
 func (c engineUIRuntimeClient) MainView() clientui.RuntimeMainView {
-	status := c.Status()
-	sessionView := c.SessionView()
-	return clientui.RuntimeMainView{
-		Status:    status,
-		Session:   sessionView,
-		ActiveRun: runtimeview.RunViewFromRuntime(sessionView.SessionID, c.engine.ActiveRun()),
-	}
+	return runtimeview.MainViewFromRuntime(c.engine)
 }
 
 func (c engineUIRuntimeClient) Status() clientui.RuntimeStatus {
-	usage := c.engine.ContextUsage()
-	return clientui.RuntimeStatus{
-		ReviewerFrequency:                 c.engine.ReviewerFrequency(),
-		ReviewerEnabled:                   c.engine.ReviewerEnabled(),
-		AutoCompactionEnabled:             c.engine.AutoCompactionEnabled(),
-		FastModeAvailable:                 c.engine.FastModeAvailable(),
-		FastModeEnabled:                   c.engine.FastModeEnabled(),
-		ConversationFreshness:             mapConversationFreshness(c.engine.ConversationFreshness()),
-		ParentSessionID:                   c.engine.ParentSessionID(),
-		LastCommittedAssistantFinalAnswer: c.engine.LastCommittedAssistantFinalAnswer(),
-		ThinkingLevel:                     c.engine.ThinkingLevel(),
-		CompactionMode:                    c.engine.CompactionMode(),
-		ContextUsage: clientui.RuntimeContextUsage{
-			UsedTokens:            usage.UsedTokens,
-			WindowTokens:          usage.WindowTokens,
-			CacheHitPercent:       usage.CacheHitPercent,
-			HasCacheHitPercentage: usage.HasCacheHitPercentage,
-		},
-		CompactionCount: c.engine.CompactionCount(),
-	}
+	return runtimeview.StatusFromRuntime(c.engine)
 }
 
 func (c engineUIRuntimeClient) SessionView() clientui.RuntimeSessionView {
-	return clientui.RuntimeSessionView{
-		SessionID:             c.engine.SessionID(),
-		SessionName:           c.engine.SessionName(),
-		ConversationFreshness: mapConversationFreshness(c.engine.ConversationFreshness()),
-		Chat:                  projectChatSnapshot(c.engine.ChatSnapshot()),
-	}
+	return runtimeview.SessionViewFromRuntime(c.engine)
 }
 
 func (c engineUIRuntimeClient) SetSessionName(name string) error {

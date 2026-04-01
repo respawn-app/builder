@@ -170,6 +170,127 @@ func TestExclusiveStepLifecycleSnapshotTracksActiveRun(t *testing.T) {
 	}
 }
 
+func TestExclusiveStepLifecycleEmitsCompletedRunStatePayloads(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	var (
+		mu     sync.Mutex
+		events []Event
+	)
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			events = append(events, evt)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	lifecycle := &defaultExclusiveStepLifecycle{engine: eng}
+	if err := lifecycle.Run(context.Background(), exclusiveStepOptions{EmitRunState: true}, func(context.Context, string) error {
+		return nil
+	}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	runEvents := collectRunStateEvents(events)
+	if len(runEvents) != 2 {
+		t.Fatalf("expected 2 run-state events, got %+v", runEvents)
+	}
+	started := runEvents[0]
+	finished := runEvents[1]
+	if !started.Busy || started.RunID == "" {
+		t.Fatalf("expected busy start event with run id, got %+v", started)
+	}
+	if started.Status != RunStatusRunning || started.StartedAt.IsZero() || !started.FinishedAt.IsZero() {
+		t.Fatalf("unexpected start event payload: %+v", started)
+	}
+	if finished.Busy {
+		t.Fatalf("expected final run-state event to clear busy, got %+v", finished)
+	}
+	if finished.RunID != started.RunID {
+		t.Fatalf("expected stable run id across lifecycle, started=%+v finished=%+v", started, finished)
+	}
+	if finished.Status != RunStatusCompleted || finished.StartedAt.IsZero() || finished.FinishedAt.IsZero() {
+		t.Fatalf("unexpected finished payload: %+v", finished)
+	}
+	if finished.FinishedAt.Before(finished.StartedAt) {
+		t.Fatalf("expected finished timestamp after start, got %+v", finished)
+	}
+}
+
+func TestExclusiveStepLifecycleEmitsInterruptedRunStatePayloads(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	var (
+		mu     sync.Mutex
+		events []Event
+	)
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			events = append(events, evt)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	lifecycle := &defaultExclusiveStepLifecycle{engine: eng}
+	started := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- lifecycle.Run(context.Background(), exclusiveStepOptions{EmitRunState: true}, func(stepCtx context.Context, stepID string) error {
+			close(started)
+			<-stepCtx.Done()
+			return stepCtx.Err()
+		})
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for interruptible step")
+	}
+
+	if err := lifecycle.Interrupt(); err != nil {
+		t.Fatalf("interrupt: %v", err)
+	}
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled run, got %v", err)
+	}
+
+	runEvents := collectRunStateEvents(events)
+	if len(runEvents) != 2 {
+		t.Fatalf("expected 2 run-state events, got %+v", runEvents)
+	}
+	startedEvent := runEvents[0]
+	finished := runEvents[1]
+	if startedEvent.RunID == "" || startedEvent.Status != RunStatusRunning {
+		t.Fatalf("unexpected start event payload: %+v", startedEvent)
+	}
+	if finished.RunID != startedEvent.RunID {
+		t.Fatalf("expected stable run id across interruption, started=%+v finished=%+v", startedEvent, finished)
+	}
+	if finished.Busy || finished.Status != RunStatusInterrupted {
+		t.Fatalf("expected interrupted final state, got %+v", finished)
+	}
+	if finished.FinishedAt.IsZero() || finished.StartedAt.IsZero() {
+		t.Fatalf("expected interrupted payload timestamps, got %+v", finished)
+	}
+}
+
 func TestExclusiveStepLifecycleInterruptAppendsMessageAndClearsInFlight(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -222,6 +343,17 @@ func TestExclusiveStepLifecycleInterruptAppendsMessageAndClearsInFlight(t *testi
 	if last.Content != interruptMessage {
 		t.Fatalf("unexpected interruption content %q", last.Content)
 	}
+}
+
+func collectRunStateEvents(events []Event) []RunState {
+	runEvents := make([]RunState, 0, len(events))
+	for _, evt := range events {
+		if evt.Kind != EventRunStateChanged || evt.RunState == nil {
+			continue
+		}
+		runEvents = append(runEvents, *evt.RunState)
+	}
+	return runEvents
 }
 
 func TestExclusiveStepLifecycleInterruptSkipsStaleRunCleanup(t *testing.T) {
