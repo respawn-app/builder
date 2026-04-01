@@ -70,14 +70,118 @@ func (c *Remote) ListSessionsByProject(ctx context.Context, req serverapi.Sessio
 	return resp, c.call(ctx, protocol.MethodSessionListByProject, req, &resp)
 }
 
+func (c *Remote) PlanSession(ctx context.Context, req serverapi.SessionPlanRequest) (serverapi.SessionPlanResponse, error) {
+	var resp serverapi.SessionPlanResponse
+	return resp, c.call(ctx, protocol.MethodSessionPlan, req, &resp)
+}
+
 func (c *Remote) GetSessionMainView(ctx context.Context, req serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
 	var resp serverapi.SessionMainViewResponse
 	return resp, c.call(ctx, protocol.MethodSessionGetMainView, req, &resp)
 }
 
+func (c *Remote) GetInitialInput(ctx context.Context, req serverapi.SessionInitialInputRequest) (serverapi.SessionInitialInputResponse, error) {
+	var resp serverapi.SessionInitialInputResponse
+	return resp, c.call(ctx, protocol.MethodSessionGetInitialInput, req, &resp)
+}
+
+func (c *Remote) PersistInputDraft(ctx context.Context, req serverapi.SessionPersistInputDraftRequest) (serverapi.SessionPersistInputDraftResponse, error) {
+	var resp serverapi.SessionPersistInputDraftResponse
+	return resp, c.call(ctx, protocol.MethodSessionPersistInputDraft, req, &resp)
+}
+
+func (c *Remote) ResolveTransition(ctx context.Context, req serverapi.SessionResolveTransitionRequest) (serverapi.SessionResolveTransitionResponse, error) {
+	var resp serverapi.SessionResolveTransitionResponse
+	return resp, c.call(ctx, protocol.MethodSessionResolveTransition, req, &resp)
+}
+
 func (c *Remote) GetRun(ctx context.Context, req serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {
 	var resp serverapi.RunGetResponse
 	return resp, c.call(ctx, protocol.MethodRunGet, req, &resp)
+}
+
+func (c *Remote) ActivateSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeActivateRequest) error {
+	return c.call(ctx, protocol.MethodSessionRuntimeActivate, req, nil)
+}
+
+func (c *Remote) ReleaseSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeReleaseRequest) error {
+	return c.call(ctx, protocol.MethodSessionRuntimeRelease, req, nil)
+}
+
+func (c *Remote) SetSessionName(ctx context.Context, req serverapi.RuntimeSetSessionNameRequest) error {
+	return c.call(ctx, protocol.MethodRuntimeSetSessionName, req, nil)
+}
+
+func (c *Remote) SetThinkingLevel(ctx context.Context, req serverapi.RuntimeSetThinkingLevelRequest) error {
+	return c.call(ctx, protocol.MethodRuntimeSetThinkingLevel, req, nil)
+}
+
+func (c *Remote) SetFastModeEnabled(ctx context.Context, req serverapi.RuntimeSetFastModeEnabledRequest) (serverapi.RuntimeSetFastModeEnabledResponse, error) {
+	var resp serverapi.RuntimeSetFastModeEnabledResponse
+	return resp, c.call(ctx, protocol.MethodRuntimeSetFastModeEnabled, req, &resp)
+}
+
+func (c *Remote) SetReviewerEnabled(ctx context.Context, req serverapi.RuntimeSetReviewerEnabledRequest) (serverapi.RuntimeSetReviewerEnabledResponse, error) {
+	var resp serverapi.RuntimeSetReviewerEnabledResponse
+	return resp, c.call(ctx, protocol.MethodRuntimeSetReviewerEnabled, req, &resp)
+}
+
+func (c *Remote) SetAutoCompactionEnabled(ctx context.Context, req serverapi.RuntimeSetAutoCompactionEnabledRequest) (serverapi.RuntimeSetAutoCompactionEnabledResponse, error) {
+	var resp serverapi.RuntimeSetAutoCompactionEnabledResponse
+	return resp, c.call(ctx, protocol.MethodRuntimeSetAutoCompactionEnabled, req, &resp)
+}
+
+func (c *Remote) AppendLocalEntry(ctx context.Context, req serverapi.RuntimeAppendLocalEntryRequest) error {
+	return c.call(ctx, protocol.MethodRuntimeAppendLocalEntry, req, nil)
+}
+
+func (c *Remote) ShouldCompactBeforeUserMessage(ctx context.Context, req serverapi.RuntimeShouldCompactBeforeUserMessageRequest) (serverapi.RuntimeShouldCompactBeforeUserMessageResponse, error) {
+	var resp serverapi.RuntimeShouldCompactBeforeUserMessageResponse
+	return resp, c.call(ctx, protocol.MethodRuntimeShouldCompactBeforeUserMessage, req, &resp)
+}
+
+func (c *Remote) SubmitUserMessage(ctx context.Context, req serverapi.RuntimeSubmitUserMessageRequest) (serverapi.RuntimeSubmitUserMessageResponse, error) {
+	var resp serverapi.RuntimeSubmitUserMessageResponse
+	return resp, c.call(ctx, protocol.MethodRuntimeSubmitUserMessage, req, &resp)
+}
+
+func (c *Remote) SubmitUserShellCommand(ctx context.Context, req serverapi.RuntimeSubmitUserShellCommandRequest) error {
+	return c.call(ctx, protocol.MethodRuntimeSubmitUserShellCommand, req, nil)
+}
+
+func (c *Remote) CompactContext(ctx context.Context, req serverapi.RuntimeCompactContextRequest) error {
+	return c.call(ctx, protocol.MethodRuntimeCompactContext, req, nil)
+}
+
+func (c *Remote) CompactContextForPreSubmit(ctx context.Context, req serverapi.RuntimeCompactContextForPreSubmitRequest) error {
+	return c.call(ctx, protocol.MethodRuntimeCompactContextForPreSubmit, req, nil)
+}
+
+func (c *Remote) HasQueuedUserWork(ctx context.Context, req serverapi.RuntimeHasQueuedUserWorkRequest) (serverapi.RuntimeHasQueuedUserWorkResponse, error) {
+	var resp serverapi.RuntimeHasQueuedUserWorkResponse
+	return resp, c.call(ctx, protocol.MethodRuntimeHasQueuedUserWork, req, &resp)
+}
+
+func (c *Remote) SubmitQueuedUserMessages(ctx context.Context, req serverapi.RuntimeSubmitQueuedUserMessagesRequest) (serverapi.RuntimeSubmitQueuedUserMessagesResponse, error) {
+	var resp serverapi.RuntimeSubmitQueuedUserMessagesResponse
+	return resp, c.call(ctx, protocol.MethodRuntimeSubmitQueuedUserMessages, req, &resp)
+}
+
+func (c *Remote) Interrupt(ctx context.Context, req serverapi.RuntimeInterruptRequest) error {
+	return c.call(ctx, protocol.MethodRuntimeInterrupt, req, nil)
+}
+
+func (c *Remote) QueueUserMessage(ctx context.Context, req serverapi.RuntimeQueueUserMessageRequest) error {
+	return c.call(ctx, protocol.MethodRuntimeQueueUserMessage, req, nil)
+}
+
+func (c *Remote) DiscardQueuedUserMessagesMatching(ctx context.Context, req serverapi.RuntimeDiscardQueuedUserMessagesMatchingRequest) (serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse, error) {
+	var resp serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse
+	return resp, c.call(ctx, protocol.MethodRuntimeDiscardQueuedUserMessagesMatching, req, &resp)
+}
+
+func (c *Remote) RecordPromptHistory(ctx context.Context, req serverapi.RuntimeRecordPromptHistoryRequest) error {
+	return c.call(ctx, protocol.MethodRuntimeRecordPromptHistory, req, nil)
 }
 
 func (c *Remote) ListProcesses(ctx context.Context, req serverapi.ProcessListRequest) (serverapi.ProcessListResponse, error) {
@@ -105,9 +209,41 @@ func (c *Remote) ListPendingAsksBySession(ctx context.Context, req serverapi.Ask
 	return resp, c.call(ctx, protocol.MethodAskListPending, req, &resp)
 }
 
+func (c *Remote) AnswerAsk(ctx context.Context, req serverapi.AskAnswerRequest) error {
+	return c.call(ctx, protocol.MethodAskAnswer, req, nil)
+}
+
 func (c *Remote) ListPendingApprovalsBySession(ctx context.Context, req serverapi.ApprovalListPendingBySessionRequest) (serverapi.ApprovalListPendingBySessionResponse, error) {
 	var resp serverapi.ApprovalListPendingBySessionResponse
 	return resp, c.call(ctx, protocol.MethodApprovalListPending, req, &resp)
+}
+
+func (c *Remote) AnswerApproval(ctx context.Context, req serverapi.ApprovalAnswerRequest) error {
+	return c.call(ctx, protocol.MethodApprovalAnswer, req, nil)
+}
+
+func (c *Remote) SubscribePromptActivity(ctx context.Context, req serverapi.PromptActivitySubscribeRequest) (serverapi.PromptActivitySubscription, error) {
+	if err := c.ensureOpen(); err != nil {
+		return nil, err
+	}
+	conn, cleanup, err := dialRPC(ctx, c.record.RPCURL)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := handshakeRPC(ctx, conn); err != nil {
+		cleanup()
+		return nil, err
+	}
+	if err := callRPC(ctx, conn, "attach-session", protocol.MethodAttachSession, protocol.AttachSessionRequest{SessionID: req.SessionID}, nil); err != nil {
+		cleanup()
+		return nil, err
+	}
+	var ack protocol.SubscribeResponse
+	if err := callRPC(ctx, conn, "subscribe-prompt-activity", protocol.MethodPromptSubscribeActivity, req, &ack); err != nil {
+		cleanup()
+		return nil, err
+	}
+	return &remotePromptActivitySubscription{conn: conn, close: cleanup}, nil
 }
 
 func (c *Remote) RunPrompt(ctx context.Context, req serverapi.RunPromptRequest, progress serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
@@ -236,6 +372,12 @@ type remoteSessionActivitySubscription struct {
 	once  sync.Once
 }
 
+type remotePromptActivitySubscription struct {
+	conn  *websocket.Conn
+	close func()
+	once  sync.Once
+}
+
 func (s *remoteSessionActivitySubscription) Next(ctx context.Context) (clientui.Event, error) {
 	notif, err := receiveNotification(ctx, s.conn)
 	if err != nil {
@@ -261,6 +403,42 @@ func (s *remoteSessionActivitySubscription) Next(ctx context.Context) (clientui.
 }
 
 func (s *remoteSessionActivitySubscription) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.once.Do(func() {
+		if s.close != nil {
+			s.close()
+		}
+	})
+	return nil
+}
+
+func (s *remotePromptActivitySubscription) Next(ctx context.Context) (clientui.PendingPromptEvent, error) {
+	notif, err := receiveNotification(ctx, s.conn)
+	if err != nil {
+		return clientui.PendingPromptEvent{}, serverapi.NormalizeStreamError(err)
+	}
+	switch notif.Method {
+	case protocol.MethodPromptActivityEvent:
+		var params protocol.PromptActivityEventParams
+		if err := json.Unmarshal(notif.Params, &params); err != nil {
+			return clientui.PendingPromptEvent{}, errors.Join(serverapi.ErrStreamFailed, err)
+		}
+		return params.Event, nil
+	case protocol.MethodPromptActivityComplete:
+		var params protocol.StreamCompleteParams
+		if err := json.Unmarshal(notif.Params, &params); err != nil {
+			return clientui.PendingPromptEvent{}, errors.Join(serverapi.ErrStreamFailed, err)
+		}
+		_ = s.Close()
+		return clientui.PendingPromptEvent{}, streamCompleteError(params)
+	default:
+		return clientui.PendingPromptEvent{}, errors.Join(serverapi.ErrStreamFailed, fmt.Errorf("unexpected notification method %q", notif.Method))
+	}
+}
+
+func (s *remotePromptActivitySubscription) Close() error {
 	if s == nil {
 		return nil
 	}
@@ -464,11 +642,16 @@ func streamCompleteError(params protocol.StreamCompleteParams) error {
 }
 
 var _ ProjectViewClient = (*Remote)(nil)
+var _ SessionLaunchClient = (*Remote)(nil)
 var _ SessionViewClient = (*Remote)(nil)
+var _ SessionLifecycleClient = (*Remote)(nil)
+var _ SessionRuntimeClient = (*Remote)(nil)
+var _ RuntimeControlClient = (*Remote)(nil)
 var _ ProcessViewClient = (*Remote)(nil)
 var _ ProcessControlClient = (*Remote)(nil)
 var _ ProcessOutputClient = (*Remote)(nil)
 var _ SessionActivityClient = (*Remote)(nil)
 var _ RunPromptClient = (*Remote)(nil)
 var _ AskViewClient = (*Remote)(nil)
+var _ PromptControlClient = (*Remote)(nil)
 var _ ApprovalViewClient = (*Remote)(nil)

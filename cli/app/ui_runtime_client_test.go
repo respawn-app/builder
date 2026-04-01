@@ -3,29 +3,20 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"sync"
 	"testing"
 	"time"
 
+	sharedclient "builder/shared/client"
+	"builder/shared/clientui"
 	"builder/server/llm"
+	"builder/server/registry"
 	"builder/server/runtime"
+	"builder/server/runtimecontrol"
 	"builder/server/session"
+	"builder/server/sessionview"
 	"builder/server/tools"
-	"builder/shared/serverapi"
 )
-
-type failingSessionViewClient struct {
-	err error
-}
-
-func (c failingSessionViewClient) GetSessionMainView(context.Context, serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
-	return serverapi.SessionMainViewResponse{}, c.err
-}
-
-func (c failingSessionViewClient) GetRun(context.Context, serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {
-	return serverapi.RunGetResponse{}, c.err
-}
 
 type runtimeClientFakeLLM struct {
 	mu        sync.Mutex
@@ -80,7 +71,7 @@ func TestRuntimeClientMainViewIncludesActiveRunFromRealEngine(t *testing.T) {
 	}
 	started := make(chan struct{})
 	release := make(chan struct{})
-	client := &runtimeClientFakeLLM{responses: []llm.Response{
+	fakeLLM := &runtimeClientFakeLLM{responses: []llm.Response{
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
 			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
@@ -91,12 +82,18 @@ func TestRuntimeClientMainViewIncludesActiveRunFromRealEngine(t *testing.T) {
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 	}}
-	eng, err := runtime.New(store, client, tools.NewRegistry(runtimeClientBlockingTool{started: started, release: release}), runtime.Config{Model: "gpt-5"})
+	eng, err := runtime.New(store, fakeLLM, tools.NewRegistry(runtimeClientBlockingTool{started: started, release: release}), runtime.Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
+	runtimeRegistry := registry.NewRuntimeRegistry()
+	runtimeRegistry.Register(store.Meta().SessionID, eng)
 
-	runtimeClient := newUIRuntimeClient(eng)
+	runtimeClient := newRuntimeClient(
+		store.Meta().SessionID,
+		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry)),
+		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(runtimeRegistry, runtimeRegistry)),
+	)
 	result := make(chan error, 1)
 	go func() {
 		_, submitErr := eng.SubmitUserMessage(context.Background(), "run tools")
@@ -148,8 +145,14 @@ func TestRuntimeClientMainViewFallsBackToLocalRuntimeProjectionOnReadError(t *te
 	if err := eng.SetThinkingLevel("high"); err != nil {
 		t.Fatalf("set thinking level: %v", err)
 	}
+	runtimeRegistry := registry.NewRuntimeRegistry()
+	runtimeRegistry.Register(store.Meta().SessionID, eng)
 
-	runtimeClient := newUIRuntimeClientWithReads(eng, failingSessionViewClient{err: errors.New("boom")})
+	runtimeClient := newUIRuntimeClientWithReads(
+		store.Meta().SessionID,
+		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry)),
+		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(runtimeRegistry, runtimeRegistry)),
+	)
 	view := runtimeClient.MainView()
 	if view.Session.SessionID != store.Meta().SessionID {
 		t.Fatalf("session id = %q, want %q", view.Session.SessionID, store.Meta().SessionID)
@@ -160,4 +163,14 @@ func TestRuntimeClientMainViewFallsBackToLocalRuntimeProjectionOnReadError(t *te
 	if view.Status.ThinkingLevel != "high" {
 		t.Fatalf("thinking level = %q, want high", view.Status.ThinkingLevel)
 	}
+}
+
+func TestRuntimeClientWithoutClientsIsNil(t *testing.T) {
+	if client := newUIRuntimeClientWithReads("session-1", nil, nil); client != nil {
+		t.Fatalf("expected nil runtime client, got %#v", client)
+	}
+	if client := newRuntimeClient("session-1", nil, nil); client != nil {
+		t.Fatalf("expected nil runtime client, got %#v", client)
+	}
+	_ = clientui.RuntimeMainView{}
 }

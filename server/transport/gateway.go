@@ -139,13 +139,105 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 		return decodeAndHandle(req, func(params serverapi.SessionListByProjectRequest) (serverapi.SessionListByProjectResponse, error) {
 			return g.core.ProjectViewClient().ListSessionsByProject(ctx, params)
 		})
+	case protocol.MethodSessionPlan:
+		return decodeAndHandle(req, func(params serverapi.SessionPlanRequest) (serverapi.SessionPlanResponse, error) {
+			return g.core.SessionLaunchClient().PlanSession(ctx, params)
+		})
 	case protocol.MethodSessionGetMainView:
 		return decodeAndHandle(req, func(params serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
 			return g.core.SessionViewClient().GetSessionMainView(ctx, params)
 		})
+	case protocol.MethodSessionGetInitialInput:
+		return decodeAndHandle(req, func(params serverapi.SessionInitialInputRequest) (serverapi.SessionInitialInputResponse, error) {
+			return g.core.SessionLifecycleClient().GetInitialInput(ctx, params)
+		})
+	case protocol.MethodSessionPersistInputDraft:
+		return decodeAndHandle(req, func(params serverapi.SessionPersistInputDraftRequest) (serverapi.SessionPersistInputDraftResponse, error) {
+			return g.core.SessionLifecycleClient().PersistInputDraft(ctx, params)
+		})
+	case protocol.MethodSessionResolveTransition:
+		return decodeAndHandle(req, func(params serverapi.SessionResolveTransitionRequest) (serverapi.SessionResolveTransitionResponse, error) {
+			return g.core.SessionLifecycleClient().ResolveTransition(ctx, params)
+		})
+	case protocol.MethodSessionRuntimeActivate:
+		return decodeAndHandle(req, func(params serverapi.SessionRuntimeActivateRequest) (struct{}, error) {
+			return struct{}{}, g.core.SessionRuntimeClient().ActivateSessionRuntime(ctx, params)
+		})
+	case protocol.MethodSessionRuntimeRelease:
+		return decodeAndHandle(req, func(params serverapi.SessionRuntimeReleaseRequest) (struct{}, error) {
+			return struct{}{}, g.core.SessionRuntimeClient().ReleaseSessionRuntime(ctx, params)
+		})
 	case protocol.MethodRunGet:
 		return decodeAndHandle(req, func(params serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {
 			return g.core.SessionViewClient().GetRun(ctx, params)
+		})
+	case protocol.MethodRuntimeSetSessionName:
+		return decodeAndHandle(req, func(params serverapi.RuntimeSetSessionNameRequest) (struct{}, error) {
+			return struct{}{}, g.core.RuntimeControlClient().SetSessionName(ctx, params)
+		})
+	case protocol.MethodRuntimeSetThinkingLevel:
+		return decodeAndHandle(req, func(params serverapi.RuntimeSetThinkingLevelRequest) (struct{}, error) {
+			return struct{}{}, g.core.RuntimeControlClient().SetThinkingLevel(ctx, params)
+		})
+	case protocol.MethodRuntimeSetFastModeEnabled:
+		return decodeAndHandle(req, func(params serverapi.RuntimeSetFastModeEnabledRequest) (serverapi.RuntimeSetFastModeEnabledResponse, error) {
+			return g.core.RuntimeControlClient().SetFastModeEnabled(ctx, params)
+		})
+	case protocol.MethodRuntimeSetReviewerEnabled:
+		return decodeAndHandle(req, func(params serverapi.RuntimeSetReviewerEnabledRequest) (serverapi.RuntimeSetReviewerEnabledResponse, error) {
+			return g.core.RuntimeControlClient().SetReviewerEnabled(ctx, params)
+		})
+	case protocol.MethodRuntimeSetAutoCompactionEnabled:
+		return decodeAndHandle(req, func(params serverapi.RuntimeSetAutoCompactionEnabledRequest) (serverapi.RuntimeSetAutoCompactionEnabledResponse, error) {
+			return g.core.RuntimeControlClient().SetAutoCompactionEnabled(ctx, params)
+		})
+	case protocol.MethodRuntimeAppendLocalEntry:
+		return decodeAndHandle(req, func(params serverapi.RuntimeAppendLocalEntryRequest) (struct{}, error) {
+			return struct{}{}, g.core.RuntimeControlClient().AppendLocalEntry(ctx, params)
+		})
+	case protocol.MethodRuntimeShouldCompactBeforeUserMessage:
+		return decodeAndHandle(req, func(params serverapi.RuntimeShouldCompactBeforeUserMessageRequest) (serverapi.RuntimeShouldCompactBeforeUserMessageResponse, error) {
+			return g.core.RuntimeControlClient().ShouldCompactBeforeUserMessage(ctx, params)
+		})
+	case protocol.MethodRuntimeSubmitUserMessage:
+		return decodeAndHandle(req, func(params serverapi.RuntimeSubmitUserMessageRequest) (serverapi.RuntimeSubmitUserMessageResponse, error) {
+			return g.core.RuntimeControlClient().SubmitUserMessage(ctx, params)
+		})
+	case protocol.MethodRuntimeSubmitUserShellCommand:
+		return decodeAndHandle(req, func(params serverapi.RuntimeSubmitUserShellCommandRequest) (struct{}, error) {
+			return struct{}{}, g.core.RuntimeControlClient().SubmitUserShellCommand(ctx, params)
+		})
+	case protocol.MethodRuntimeCompactContext:
+		return decodeAndHandle(req, func(params serverapi.RuntimeCompactContextRequest) (struct{}, error) {
+			return struct{}{}, g.core.RuntimeControlClient().CompactContext(ctx, params)
+		})
+	case protocol.MethodRuntimeCompactContextForPreSubmit:
+		return decodeAndHandle(req, func(params serverapi.RuntimeCompactContextForPreSubmitRequest) (struct{}, error) {
+			return struct{}{}, g.core.RuntimeControlClient().CompactContextForPreSubmit(ctx, params)
+		})
+	case protocol.MethodRuntimeHasQueuedUserWork:
+		return decodeAndHandle(req, func(params serverapi.RuntimeHasQueuedUserWorkRequest) (serverapi.RuntimeHasQueuedUserWorkResponse, error) {
+			return g.core.RuntimeControlClient().HasQueuedUserWork(ctx, params)
+		})
+	case protocol.MethodRuntimeSubmitQueuedUserMessages:
+		return decodeAndHandle(req, func(params serverapi.RuntimeSubmitQueuedUserMessagesRequest) (serverapi.RuntimeSubmitQueuedUserMessagesResponse, error) {
+			return g.core.RuntimeControlClient().SubmitQueuedUserMessages(ctx, params)
+		})
+	case protocol.MethodRuntimeInterrupt:
+		return decodeAndHandle(req, func(params serverapi.RuntimeInterruptRequest) (struct{}, error) {
+			return struct{}{}, g.core.RuntimeControlClient().Interrupt(ctx, params)
+		})
+	case protocol.MethodRuntimeQueueUserMessage:
+		return decodeAndHandle(req, func(params serverapi.RuntimeQueueUserMessageRequest) (struct{}, error) {
+			return struct{}{}, g.core.RuntimeControlClient().QueueUserMessage(ctx, params)
+		})
+	case protocol.MethodRuntimeDiscardQueuedUserMessagesMatching:
+		return decodeAndHandle(req, func(params serverapi.RuntimeDiscardQueuedUserMessagesMatchingRequest) (serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse, error) {
+			return g.core.RuntimeControlClient().DiscardQueuedUserMessagesMatching(ctx, params)
+		})
+	case protocol.MethodRuntimeRecordPromptHistory:
+		return decodeAndHandle(req, func(params serverapi.RuntimeRecordPromptHistoryRequest) (struct{}, error) {
+			return struct{}{}, g.core.RuntimeControlClient().RecordPromptHistory(ctx, params)
 		})
 	case protocol.MethodProcessList:
 		return decodeAndHandle(req, func(params serverapi.ProcessListRequest) (serverapi.ProcessListResponse, error) {
@@ -167,9 +259,17 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 		return decodeAndHandle(req, func(params serverapi.AskListPendingBySessionRequest) (serverapi.AskListPendingBySessionResponse, error) {
 			return g.core.AskViewClient().ListPendingAsksBySession(ctx, params)
 		})
+	case protocol.MethodAskAnswer:
+		return decodeAndHandle(req, func(params serverapi.AskAnswerRequest) (struct{}, error) {
+			return struct{}{}, g.core.PromptControlClient().AnswerAsk(ctx, params)
+		})
 	case protocol.MethodApprovalListPending:
 		return decodeAndHandle(req, func(params serverapi.ApprovalListPendingBySessionRequest) (serverapi.ApprovalListPendingBySessionResponse, error) {
 			return g.core.ApprovalViewClient().ListPendingApprovalsBySession(ctx, params)
+		})
+	case protocol.MethodApprovalAnswer:
+		return decodeAndHandle(req, func(params serverapi.ApprovalAnswerRequest) (struct{}, error) {
+			return struct{}{}, g.core.PromptControlClient().AnswerApproval(ctx, params)
 		})
 	case protocol.MethodRunPrompt:
 		return decodeAndHandle(req, func(params serverapi.RunPromptRequest) (serverapi.RunPromptResponse, error) {
@@ -252,6 +352,39 @@ func (g *Gateway) serveSubscription(ws *websocket.Conn, ctx context.Context, sta
 				return
 			}
 		}
+	case protocol.MethodPromptSubscribeActivity:
+		params, err := decodeParams[serverapi.PromptActivitySubscribeRequest](req.Params)
+		if err != nil {
+			_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
+			return
+		}
+		if err := params.Validate(); err != nil {
+			_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
+			return
+		}
+		if state.attachedSession != params.SessionID {
+			_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidRequest, "session attach is required before subscribing"))
+			return
+		}
+		sub, err := g.core.PromptActivityClient().SubscribePromptActivity(ctx, params)
+		if err != nil {
+			_ = websocket.JSON.Send(ws, responseForError(req.ID, err))
+			return
+		}
+		defer func() { _ = sub.Close() }()
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.SubscribeResponse{Stream: protocol.MethodPromptActivityEvent})); err != nil {
+			return
+		}
+		for {
+			evt, err := sub.Next(ctx)
+			if err != nil {
+				_ = sendNotification(ws, protocol.MethodPromptActivityComplete, streamCompleteParams(err))
+				return
+			}
+			if err := sendNotification(ws, protocol.MethodPromptActivityEvent, protocol.PromptActivityEventParams{Event: evt}); err != nil {
+				return
+			}
+		}
 	default:
 		_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeMethodNotFound, fmt.Sprintf("method %q not found", req.Method)))
 	}
@@ -271,7 +404,7 @@ func decodeAndHandle[TReq any, TResp any](req protocol.Request, handler func(TRe
 
 func isSubscriptionMethod(method string) bool {
 	switch method {
-	case protocol.MethodSessionSubscribeActivity, protocol.MethodProcessSubscribeOutput:
+	case protocol.MethodSessionSubscribeActivity, protocol.MethodPromptSubscribeActivity, protocol.MethodProcessSubscribeOutput:
 		return true
 	default:
 		return false

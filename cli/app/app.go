@@ -29,7 +29,7 @@ type Options struct {
 
 func Run(ctx context.Context, opts Options) error {
 	interactor := newInteractiveAuthInteractor()
-	server, err := startEmbeddedServer(ctx, opts, interactor)
+	server, err := startSessionServer(ctx, opts, interactor)
 	if err != nil {
 		return err
 	}

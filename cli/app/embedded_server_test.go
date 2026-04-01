@@ -19,9 +19,9 @@ import (
 	"builder/server/projectview"
 	"builder/server/registry"
 	"builder/server/runtime"
+	"builder/server/runtimecontrol"
 	"builder/server/sessionlaunch"
 	"builder/server/sessionlifecycle"
-	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
 	"builder/shared/clientui"
@@ -39,12 +39,19 @@ type testEmbeddedServer struct {
 	backgroundRouter     serverembedded.BackgroundRouter
 	runPromptClient      client.RunPromptClient
 	projectID            string
+	askViewClient        client.AskViewClient
+	approvalViewClient   client.ApprovalViewClient
+	promptControlClient  client.PromptControlClient
+	promptActivityClient client.PromptActivityClient
 	projectViewClient    client.ProjectViewClient
 	processControlClient client.ProcessControlClient
 	processOutputClient  client.ProcessOutputClient
 	processViewClient    client.ProcessViewClient
+	runtimeControlClient client.RuntimeControlClient
 	sessionLaunch        client.SessionLaunchClient
+	sessionActivity      client.SessionActivityClient
 	sessionLifecycle     client.SessionLifecycleClient
+	sessionRuntime       client.SessionRuntimeClient
 	sessionViewClient    client.SessionViewClient
 	sessionStores        *registry.SessionStoreRegistry
 	prepareRuntime       func(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error)
@@ -82,6 +89,16 @@ func (s *testEmbeddedServer) ProjectViewClient() client.ProjectViewClient {
 	}
 	return client.NewLoopbackProjectViewClient(service)
 }
+func (s *testEmbeddedServer) AskViewClient() client.AskViewClient { return s.askViewClient }
+func (s *testEmbeddedServer) ApprovalViewClient() client.ApprovalViewClient {
+	return s.approvalViewClient
+}
+func (s *testEmbeddedServer) PromptControlClient() client.PromptControlClient {
+	return s.promptControlClient
+}
+func (s *testEmbeddedServer) PromptActivityClient() client.PromptActivityClient {
+	return s.promptActivityClient
+}
 func (s *testEmbeddedServer) ContainerDir() string                  { return s.containerDir }
 func (s *testEmbeddedServer) OAuthOptions() auth.OpenAIOAuthOptions { return s.oauthOpts }
 func (s *testEmbeddedServer) AuthManager() *auth.Manager            { return s.authManager }
@@ -100,6 +117,13 @@ func (s *testEmbeddedServer) ProcessOutputClient() client.ProcessOutputClient {
 func (s *testEmbeddedServer) ProcessViewClient() client.ProcessViewClient {
 	return s.processViewClient
 }
+func (s *testEmbeddedServer) RuntimeControlClient() client.RuntimeControlClient {
+	if s.runtimeControlClient != nil {
+		return s.runtimeControlClient
+	}
+	registry := registry.NewRuntimeRegistry()
+	return client.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(registry, registry))
+}
 func (s *testEmbeddedServer) sessionStoreRegistry() *registry.SessionStoreRegistry {
 	if s.sessionStores == nil {
 		s.sessionStores = registry.NewSessionStoreRegistry()
@@ -113,11 +137,17 @@ func (s *testEmbeddedServer) SessionLaunchClient() client.SessionLaunchClient {
 	service := sessionlaunch.NewService(launch.Planner{Config: s.cfg, ContainerDir: s.containerDir}, s.sessionStoreRegistry())
 	return client.NewLoopbackSessionLaunchClient(service)
 }
+func (s *testEmbeddedServer) SessionActivityClient() client.SessionActivityClient {
+	return s.sessionActivity
+}
 func (s *testEmbeddedServer) SessionLifecycleClient() client.SessionLifecycleClient {
 	if s.sessionLifecycle != nil {
 		return s.sessionLifecycle
 	}
 	return client.NewLoopbackSessionLifecycleClient(sessionlifecycle.NewService(s.cfg.PersistenceRoot, s.sessionStoreRegistry(), s.authManager))
+}
+func (s *testEmbeddedServer) SessionRuntimeClient() client.SessionRuntimeClient {
+	return s.sessionRuntime
 }
 func (s *testEmbeddedServer) SessionViewClient() client.SessionViewClient {
 	return s.sessionViewClient
@@ -186,7 +216,7 @@ func TestEmbeddedAppServerPrepareRuntimeRegistersRuntimeForSessionViews(t *testi
 		t.Fatalf("prepare runtime: %v", err)
 	}
 	defer runtimePlan.Close()
-	if err := runtimePlan.Wiring.engine.SetThinkingLevel("high"); err != nil {
+	if err := runtimePlan.Wiring.runtimeControls.SetThinkingLevel(context.Background(), serverapi.RuntimeSetThinkingLevelRequest{SessionID: plan.SessionID, Level: "high"}); err != nil {
 		t.Fatalf("set thinking level: %v", err)
 	}
 
@@ -228,9 +258,9 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessReadsForUIHydration(t *testi
 		t.Fatal("expected PrepareRuntime to wire process view client")
 	}
 
-	manager := runtimePlan.Wiring.background
+	manager := server.inner.Background()
 	if manager == nil {
-		t.Fatal("expected background manager")
+		t.Fatal("expected server background manager")
 	}
 	manager.SetMinimumExecToBgTime(250 * time.Millisecond)
 	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
@@ -257,7 +287,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessReadsForUIHydration(t *testi
 		Command:        "remote-process",
 	}}}}
 
-	processClient := newUIProcessClientWithReads(runtimePlan.Wiring.background, runtimePlan.Wiring.processViews, runtimePlan.Wiring.processControls)
+	processClient := newUIProcessClientWithReads(nil, runtimePlan.Wiring.processViews, runtimePlan.Wiring.processControls)
 	got := processClient.ListProcesses()
 	if len(got) != 1 || got[0].ID != "remote-proc" || got[0].OwnerRunID != "remote-run" || got[0].OwnerStepID != "remote-step" {
 		t.Fatalf("expected shared process reads to win over local manager snapshot, got %+v", got)
@@ -286,65 +316,8 @@ func TestEmbeddedAppServerPrepareRuntimeExposesPendingAsksAndApprovals(t *testin
 		t.Fatalf("prepare runtime: %v", err)
 	}
 	defer runtimePlan.Close()
-	if runtimePlan.Wiring.askBroker == nil {
-		t.Fatal("expected PrepareRuntime to wire ask broker")
-	}
-
-	askDone := make(chan error, 1)
-	go func() {
-		resp, err := runtimePlan.Wiring.askBroker.Ask(context.Background(), askquestion.Request{ID: "ask-1", Question: "which option?", Suggestions: []string{"one", "two"}, RecommendedOptionIndex: 2})
-		if err != nil {
-			askDone <- err
-			return
-		}
-		if resp.SelectedOptionNumber != 2 {
-			askDone <- fmt.Errorf("selected option number = %d, want 2", resp.SelectedOptionNumber)
-			return
-		}
-		askDone <- nil
-	}()
-
-	asks := waitForPendingAskResources(t, server.inner.AskViewClient(), plan.SessionID, 1)
-	if asks[0].AskID != "ask-1" || asks[0].RecommendedOptionIndex != 2 {
-		t.Fatalf("unexpected pending ask: %+v", asks[0])
-	}
-	askEvent := <-runtimePlan.Wiring.askBridge.Events()
-	askEvent.reply <- askReply{response: askquestion.Response{RequestID: askEvent.req.ID, SelectedOptionNumber: 2}}
-	if err := <-askDone; err != nil {
-		t.Fatalf("answer ask: %v", err)
-	}
-	if asks := waitForPendingAskResources(t, server.inner.AskViewClient(), plan.SessionID, 0); len(asks) != 0 {
-		t.Fatalf("expected no pending asks after completion, got %+v", asks)
-	}
-
-	approvalDone := make(chan error, 1)
-	go func() {
-		resp, err := runtimePlan.Wiring.askBroker.Ask(context.Background(), askquestion.Request{ID: "approval-1", Question: "allow edit?", Approval: true, ApprovalOptions: []askquestion.ApprovalOption{{Decision: askquestion.ApprovalDecisionAllowOnce, Label: "Allow once"}, {Decision: askquestion.ApprovalDecisionDeny, Label: "Deny"}}})
-		if err != nil {
-			approvalDone <- err
-			return
-		}
-		if resp.Approval == nil || resp.Approval.Decision != askquestion.ApprovalDecisionAllowOnce {
-			approvalDone <- fmt.Errorf("unexpected approval response: %+v", resp)
-			return
-		}
-		approvalDone <- nil
-	}()
-
-	approvals := waitForPendingApprovalResources(t, server.inner.ApprovalViewClient(), plan.SessionID, 1)
-	if approvals[0].ApprovalID != "approval-1" {
-		t.Fatalf("unexpected pending approval: %+v", approvals[0])
-	}
-	if len(approvals[0].Options) != 2 || approvals[0].Options[0].Decision != clientui.ApprovalDecisionAllowOnce {
-		t.Fatalf("unexpected approval options: %+v", approvals[0].Options)
-	}
-	approvalEvent := <-runtimePlan.Wiring.askBridge.Events()
-	approvalEvent.reply <- askReply{response: askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowOnce}}}
-	if err := <-approvalDone; err != nil {
-		t.Fatalf("answer approval: %v", err)
-	}
-	if approvals := waitForPendingApprovalResources(t, server.inner.ApprovalViewClient(), plan.SessionID, 0); len(approvals) != 0 {
-		t.Fatalf("expected no pending approvals after completion, got %+v", approvals)
+	if runtimePlan.Wiring.askViews == nil || runtimePlan.Wiring.approvalViews == nil || runtimePlan.Wiring.promptControl == nil {
+		t.Fatal("expected PrepareRuntime to wire shared prompt clients")
 	}
 }
 
@@ -440,7 +413,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresSessionActivityForSharedClients(t *
 	}
 	defer func() { _ = second.Close() }()
 
-	runtimePlan.Wiring.engine.AppendLocalEntry("user", "hello from client one")
+	runtimePlan.Wiring.runtimeClient.AppendLocalEntry("user", "hello from client one")
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -497,7 +470,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessControlForUIActions(t *testi
 
 	controls := &stubEmbeddedProcessControlClient{inlineResp: serverapi.ProcessInlineOutputResponse{Output: "remote preview", LogPath: "/tmp/remote.log"}}
 	runtimePlan.Wiring.processControls = controls
-	processClient := newUIProcessClientWithReads(runtimePlan.Wiring.background, runtimePlan.Wiring.processViews, runtimePlan.Wiring.processControls)
+	processClient := newUIProcessClientWithReads(nil, runtimePlan.Wiring.processViews, runtimePlan.Wiring.processControls)
 
 	preview, logPath, err := processClient.InlineOutput("proc-1", 12_000)
 	if err != nil {

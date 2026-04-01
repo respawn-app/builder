@@ -8,28 +8,56 @@ import (
 )
 
 const (
-	MethodHandshake                = "protocol.handshake"
-	MethodAttachProject            = "project.attach"
-	MethodAttachSession            = "session.attach"
-	MethodProjectList              = "project.list"
-	MethodProjectGetOverview       = "project.getOverview"
-	MethodSessionListByProject     = "session.listByProject"
-	MethodSessionGetMainView       = "session.getMainView"
-	MethodRunGet                   = "run.get"
-	MethodProcessList              = "process.list"
-	MethodProcessGet               = "process.get"
-	MethodProcessKill              = "process.kill"
-	MethodProcessInlineOutput      = "process.inlineOutput"
-	MethodAskListPending           = "ask.listPendingBySession"
-	MethodApprovalListPending      = "approval.listPendingBySession"
-	MethodRunPrompt                = "run.prompt"
-	MethodRunPromptProgress        = "run.prompt.progress"
-	MethodSessionSubscribeActivity = "session.subscribeActivity"
-	MethodSessionActivityEvent     = "session.activity"
-	MethodSessionActivityComplete  = "session.activity.complete"
-	MethodProcessSubscribeOutput   = "process.subscribeOutput"
-	MethodProcessOutputEvent       = "process.output"
-	MethodProcessOutputComplete    = "process.output.complete"
+	MethodHandshake                                = "protocol.handshake"
+	MethodAttachProject                            = "project.attach"
+	MethodAttachSession                            = "session.attach"
+	MethodProjectList                              = "project.list"
+	MethodProjectGetOverview                       = "project.getOverview"
+	MethodSessionListByProject                     = "session.listByProject"
+	MethodSessionPlan                              = "session.plan"
+	MethodSessionGetMainView                       = "session.getMainView"
+	MethodSessionGetInitialInput                   = "session.getInitialInput"
+	MethodSessionPersistInputDraft                 = "session.persistInputDraft"
+	MethodSessionResolveTransition                 = "session.resolveTransition"
+	MethodSessionRuntimeActivate                   = "session.runtime.activate"
+	MethodSessionRuntimeRelease                    = "session.runtime.release"
+	MethodRunGet                                   = "run.get"
+	MethodRuntimeSetSessionName                    = "runtime.setSessionName"
+	MethodRuntimeSetThinkingLevel                  = "runtime.setThinkingLevel"
+	MethodRuntimeSetFastModeEnabled                = "runtime.setFastModeEnabled"
+	MethodRuntimeSetReviewerEnabled                = "runtime.setReviewerEnabled"
+	MethodRuntimeSetAutoCompactionEnabled          = "runtime.setAutoCompactionEnabled"
+	MethodRuntimeAppendLocalEntry                  = "runtime.appendLocalEntry"
+	MethodRuntimeShouldCompactBeforeUserMessage    = "runtime.shouldCompactBeforeUserMessage"
+	MethodRuntimeSubmitUserMessage                 = "runtime.submitUserMessage"
+	MethodRuntimeSubmitUserShellCommand            = "runtime.submitUserShellCommand"
+	MethodRuntimeCompactContext                    = "runtime.compactContext"
+	MethodRuntimeCompactContextForPreSubmit        = "runtime.compactContextForPreSubmit"
+	MethodRuntimeHasQueuedUserWork                 = "runtime.hasQueuedUserWork"
+	MethodRuntimeSubmitQueuedUserMessages          = "runtime.submitQueuedUserMessages"
+	MethodRuntimeInterrupt                         = "runtime.interrupt"
+	MethodRuntimeQueueUserMessage                  = "runtime.queueUserMessage"
+	MethodRuntimeDiscardQueuedUserMessagesMatching = "runtime.discardQueuedUserMessagesMatching"
+	MethodRuntimeRecordPromptHistory               = "runtime.recordPromptHistory"
+	MethodProcessList                              = "process.list"
+	MethodProcessGet                               = "process.get"
+	MethodProcessKill                              = "process.kill"
+	MethodProcessInlineOutput                      = "process.inlineOutput"
+	MethodAskListPending                           = "ask.listPendingBySession"
+	MethodAskAnswer                                = "ask.answer"
+	MethodApprovalListPending                      = "approval.listPendingBySession"
+	MethodApprovalAnswer                           = "approval.answer"
+	MethodPromptSubscribeActivity                  = "prompt.subscribeActivity"
+	MethodPromptActivityEvent                      = "prompt.activity"
+	MethodPromptActivityComplete                   = "prompt.activity.complete"
+	MethodRunPrompt                                = "run.prompt"
+	MethodRunPromptProgress                        = "run.prompt.progress"
+	MethodSessionSubscribeActivity                 = "session.subscribeActivity"
+	MethodSessionActivityEvent                     = "session.activity"
+	MethodSessionActivityComplete                  = "session.activity.complete"
+	MethodProcessSubscribeOutput                   = "process.subscribeOutput"
+	MethodProcessOutputEvent                       = "process.output"
+	MethodProcessOutputComplete                    = "process.output.complete"
 )
 
 type HandshakeRequest struct {
@@ -64,6 +92,10 @@ type SessionActivityEventParams struct {
 
 type ProcessOutputEventParams struct {
 	Chunk clientui.ProcessOutputChunk `json:"chunk"`
+}
+
+type PromptActivityEventParams struct {
+	Event clientui.PendingPromptEvent `json:"event"`
 }
 
 type StreamCompleteParams struct {
