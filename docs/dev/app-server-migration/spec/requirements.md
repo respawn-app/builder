@@ -56,7 +56,7 @@ The resulting frontends should:
 - `project_id`, `session_id`, `run_id`, `process_id`, `approval_id`, and `ask_id` are opaque server-assigned IDs. Filesystem paths are never protocol identity.
 - v1 supports at most one active primary run per session.
 - Typed queries and hydration views are the source of truth for initial render and reconnect.
-- Event replay and catch-up are best-effort within explicit retention windows, not a guaranteed universal contract.
+- Reconnect and hydration are snapshot/page based. The protocol does not require a stream-history or cursor recovery contract for correctness.
 - The protocol must distinguish durable state changes from high-rate live feeds.
 - Existing persisted sessions must remain loadable, either directly or through lazy server migration/adoption.
 - The server binds locally by default. Remote listeners require explicit opt-in.
@@ -78,7 +78,7 @@ The following are already locked for this feature and should be treated as requi
 - Ownership boundary: the server owns runtime, persistence, tools, provider credentials, background processes, and policy enforcement.
 - Presentation boundary: frontends own all UX and rendering.
 - Control model: multiple frontends may control one session; the server serializes mutating commands per session.
-- Reconnect model: frontends should normally refetch fresh state or typed hydration views; stream catch-up is optional or best-effort rather than the standard reconnect path.
+- Reconnect model: frontends refetch authoritative state through typed hydration views and transcript pages, then resubscribe to live streams. A stream-history or cursor recovery contract is not required.
 - Trust model: local/single-user in v1, but future remote authn/authz must remain architecturally possible.
 - Frontend submissions: structured request objects from day one.
 - Submission shape: a generic user-intent/request envelope rather than a separate RPC shape per submission style.
@@ -154,6 +154,8 @@ The server must expose typed read models sufficient for at least these day-one f
 - active run inspection,
 - session and project overview surfaces.
 
+Transcript hydration should scale through explicit pagination and, where useful, compression of large payloads rather than by depending on live-stream history to reconstruct state.
+
 At minimum, the design must admit typed views equivalent to:
 
 - `project.list`,
@@ -177,21 +179,21 @@ The event contract must not collapse all activity into one undifferentiated stre
 The server must define at least these classes of stream:
 
 - durable lower-volume state transitions,
-- live session activity for partial assistant output and progress,
+- live session activity for ephemeral run/progress state and non-durable notifications,
 - prompt activity for pending and resolved ask or approval resources,
 - process output streams for stdout and stderr.
 
 Requirements:
 
 - streams are ordered within their own stream scope,
-- replay or catch-up is best-effort within explicit retention windows,
-- clients can detect a gap or expired cursor explicitly,
+- transcript recovery uses typed reads such as `session.getMainView` and `session.getTranscriptPage`,
+- if a live stream drops or a client falls behind, the recovery path is rehydrate plus resubscribe,
 - slow subscribers receive an explicit gap or backpressure failure rather than silent truncation,
-- durable transcript state remains distinct from partial live output,
+- durable transcript state remains distinct from ephemeral live activity,
 - prompt activity remains distinct from hydration reads such as `ask.listPendingBySession` and `approval.listPendingBySession`, which are still used for attach and reconnect,
 - process output retention is defined independently from process state retention.
 
-The protocol must make it obvious which feeds are durable, which are ephemeral, and how clients recover after falling behind.
+The protocol must make it obvious which feeds are durable, which are ephemeral, and that falling behind is recovered by rehydrating authoritative reads.
 
 ## Project Model
 
@@ -373,7 +375,7 @@ The migration is only acceptable when all of the following are true:
 - A single running server can host multiple sessions across multiple projects.
 - A CLI frontend can attach to that server and perform the current product workflows end to end.
 - A second frontend can attach to the same session, receive authoritative state and live activity, and issue control requests.
-- Reconnect works through authoritative hydration views and, where available, best-effort catch-up without silent state loss.
+- Reconnect works through authoritative hydration views and transcript pages.
 - A CLI crash or disconnect does not stop an active run unless explicitly requested.
 - Duplicate retries do not create duplicate submissions, approvals, or process actions.
 - A slow subscriber receives an explicit gap or backpressure failure.
