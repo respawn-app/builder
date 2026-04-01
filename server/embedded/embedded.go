@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 
+	"builder/server/approvalview"
+	"builder/server/askview"
 	"builder/server/auth"
 	"builder/server/authflow"
 	serverbootstrap "builder/server/bootstrap"
@@ -15,6 +17,7 @@ import (
 	"builder/server/runtimewire"
 	"builder/server/sessionactivity"
 	"builder/server/sessionview"
+	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
 	"builder/shared/config"
@@ -59,6 +62,8 @@ type Server struct {
 	runtimeRegistry  *registry.RuntimeRegistry
 	projectID        string
 	projectViews     client.ProjectViewClient
+	askViews         client.AskViewClient
+	approvalViews    client.ApprovalViewClient
 	processControls  client.ProcessControlClient
 	processViews     client.ProcessViewClient
 	sessionViews     client.SessionViewClient
@@ -115,6 +120,8 @@ func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) 
 	if err != nil {
 		return nil, err
 	}
+	askService := askview.NewService(runtimeRegistry)
+	approvalService := approvalview.NewService(runtimeRegistry)
 	processService := processview.NewService(runtimeSupport.Background)
 	return &Server{
 		cfg:              cfg,
@@ -128,6 +135,12 @@ func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) 
 		projectID:        projectService.ProjectID(),
 		projectViews: client.NewLoopbackProjectViewClient(
 			projectService,
+		),
+		askViews: client.NewLoopbackAskViewClient(
+			askService,
+		),
+		approvalViews: client.NewLoopbackApprovalViewClient(
+			approvalService,
 		),
 		processControls: client.NewLoopbackProcessControlClient(
 			processService,
@@ -221,6 +234,20 @@ func (s *Server) ProjectViewClient() client.ProjectViewClient {
 	return s.projectViews
 }
 
+func (s *Server) AskViewClient() client.AskViewClient {
+	if s == nil {
+		return nil
+	}
+	return s.askViews
+}
+
+func (s *Server) ApprovalViewClient() client.ApprovalViewClient {
+	if s == nil {
+		return nil
+	}
+	return s.approvalViews
+}
+
 func (s *Server) ProcessViewClient() client.ProcessViewClient {
 	if s == nil {
 		return nil
@@ -261,6 +288,20 @@ func (s *Server) PublishRuntimeEvent(sessionID string, evt runtime.Event) {
 		return
 	}
 	s.runtimeRegistry.PublishRuntimeEvent(sessionID, evt)
+}
+
+func (s *Server) BeginPendingPrompt(sessionID string, req askquestion.Request) {
+	if s == nil || s.runtimeRegistry == nil {
+		return
+	}
+	s.runtimeRegistry.BeginPendingPrompt(sessionID, req)
+}
+
+func (s *Server) CompletePendingPrompt(sessionID string, requestID string) {
+	if s == nil || s.runtimeRegistry == nil {
+		return
+	}
+	s.runtimeRegistry.CompletePendingPrompt(sessionID, requestID)
 }
 
 func (s *Server) RunPromptClient() client.RunPromptClient {
