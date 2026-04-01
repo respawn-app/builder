@@ -27,10 +27,10 @@ func TestLoopbackProcessControlClientDelegatesToService(t *testing.T) {
 	svc := &stubProcessControlService{inlineResp: serverapi.ProcessInlineOutputResponse{Output: "hello", LogPath: "/tmp/proc.log"}}
 	client := NewLoopbackProcessControlClient(svc)
 
-	if _, err := client.KillProcess(context.Background(), serverapi.ProcessKillRequest{ProcessID: "proc-1"}); err != nil {
+	if _, err := client.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: "req-1", ProcessID: "proc-1"}); err != nil {
 		t.Fatalf("KillProcess: %v", err)
 	}
-	if svc.killedReq.ProcessID != "proc-1" {
+	if svc.killedReq.ClientRequestID != "req-1" || svc.killedReq.ProcessID != "proc-1" {
 		t.Fatalf("unexpected kill request: %+v", svc.killedReq)
 	}
 
@@ -48,7 +48,7 @@ func TestLoopbackProcessControlClientDelegatesToService(t *testing.T) {
 
 func TestLoopbackProcessControlClientRequiresService(t *testing.T) {
 	client := NewLoopbackProcessControlClient(nil)
-	if _, err := client.KillProcess(context.Background(), serverapi.ProcessKillRequest{ProcessID: "proc-1"}); err == nil {
+	if _, err := client.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: "req-1", ProcessID: "proc-1"}); err == nil {
 		t.Fatal("expected KillProcess to fail without service")
 	}
 	if _, err := client.GetInlineOutput(context.Background(), serverapi.ProcessInlineOutputRequest{ProcessID: "proc-1"}); err == nil {
