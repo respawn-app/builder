@@ -144,8 +144,9 @@ func TestGatewaySessionActivitySubscriptionStreamsEventsAndCompletion(t *testing
 	appCore, server := newGatewayTestServer(t)
 	defer server.Close()
 
-	appCore.RegisterRuntime("session-1", &runtime.Engine{})
-	defer appCore.UnregisterRuntime("session-1")
+	engine := &runtime.Engine{}
+	appCore.RegisterRuntime("session-1", engine)
+	defer appCore.UnregisterRuntime("session-1", engine)
 
 	conn := dialGateway(t, server)
 	defer func() { _ = conn.Close() }()
@@ -169,7 +170,7 @@ func TestGatewaySessionActivitySubscriptionStreamsEventsAndCompletion(t *testing
 		t.Fatalf("unexpected event: %+v", event.Event)
 	}
 
-	appCore.UnregisterRuntime("session-1")
+	appCore.UnregisterRuntime("session-1", engine)
 	if err := websocket.JSON.Receive(conn, &notif); err != nil {
 		t.Fatalf("receive completion: %v", err)
 	}
@@ -239,8 +240,9 @@ func TestGatewayPromptActivitySubscriptionStreamsPendingResolvedAndCompletion(t 
 	appCore, server := newGatewayTestServer(t)
 	defer server.Close()
 
-	appCore.RegisterRuntime("session-1", &runtime.Engine{})
-	defer appCore.UnregisterRuntime("session-1")
+	engine := &runtime.Engine{}
+	appCore.RegisterRuntime("session-1", engine)
+	defer appCore.UnregisterRuntime("session-1", engine)
 	appCore.BeginPendingPrompt("session-1", askquestion.Request{ID: "ask-1", Question: "Proceed?", Suggestions: []string{"Yes", "No"}})
 
 	conn := dialGateway(t, server)
@@ -279,7 +281,7 @@ func TestGatewayPromptActivitySubscriptionStreamsPendingResolvedAndCompletion(t 
 		t.Fatalf("unexpected resolved prompt event: %+v", resolved.Event)
 	}
 
-	appCore.UnregisterRuntime("session-1")
+	appCore.UnregisterRuntime("session-1", engine)
 	if err := websocket.JSON.Receive(conn, &notif); err != nil {
 		t.Fatalf("receive prompt completion: %v", err)
 	}

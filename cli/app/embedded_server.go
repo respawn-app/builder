@@ -232,8 +232,12 @@ func prepareSharedRuntime(server embeddedServer, plan sessionLaunchPlan, diagnos
 		_ = server.SessionRuntimeClient().ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{ClientRequestID: uuid.NewString(), SessionID: plan.SessionID})
 		return nil, err
 	}
-	runtimeEvents, stopRuntimeEvents := startSessionActivityEvents(context.Background(), sub)
-	askEvents, stopAskEvents := startPendingPromptEvents(context.Background(), promptSub, server.PromptControlClient())
+	runtimeEvents, stopRuntimeEvents := startSessionActivityEvents(context.Background(), sub, func(ctx context.Context) (serverapi.SessionActivitySubscription, error) {
+		return server.SessionActivityClient().SubscribeSessionActivity(ctx, serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID})
+	})
+	askEvents, stopAskEvents := startPendingPromptEvents(context.Background(), promptSub, func(ctx context.Context) (serverapi.PromptActivitySubscription, error) {
+		return server.PromptActivityClient().SubscribePromptActivity(ctx, serverapi.PromptActivitySubscribeRequest{SessionID: plan.SessionID})
+	}, server.PromptControlClient())
 	logger := &runLogger{}
 	_ = diagnosticWriter
 	logger.Logf("%s", startLogLine)
