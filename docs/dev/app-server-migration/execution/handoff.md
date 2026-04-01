@@ -50,6 +50,20 @@ Continue Phase 3 execution until the full phase is complete according to `../pla
   2. expose the remaining live ask/approval answer path on the same shared boundary
   3. wire those new interactive surfaces through the real transport so external-daemon interactive mode can attach without embedded-only fallbacks
 
+## Runtime-Control Mapping Notes
+
+- `shared/clientui.RuntimeClient` methods currently still terminate in `cli/app/ui_runtime_client.go` against `*runtime.Engine` directly.
+- Server-owned runtime operations that need a shared `serverapi` + `shared/client` surface next:
+  - `SetSessionName`, `SetThinkingLevel`, `SetFastModeEnabled`, `SetReviewerEnabled`, `SetAutoCompactionEnabled`
+  - `AppendLocalEntry`, `ShouldCompactBeforeUserMessage`
+  - `SubmitUserMessage`, `SubmitUserShellCommand`, `CompactContext`, `CompactContextForPreSubmit`, `Interrupt`
+  - `HasQueuedUserWork`, `SubmitQueuedUserMessages`, `QueueUserMessage`, `DiscardQueuedUserMessagesMatching`, `RecordPromptHistory`
+- Frontend-local state that should remain frontend-owned even after runtime control moves server-side:
+  - `uiModel.queued`
+  - `pendingInjected`
+  - input-lock bookkeeping and prompt-history draft reuse mechanics
+- The next extraction should introduce a server runtime-control service over a runtime resolver (likely the existing runtime registry), then refactor `cli/app/ui_runtime_client.go` into a wrapper over shared read + control clients instead of a concrete engine wrapper.
+
 ## Resume Rules
 
 1. Read `phase-3-todo.md` first.
