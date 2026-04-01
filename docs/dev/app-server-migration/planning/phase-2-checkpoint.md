@@ -17,7 +17,9 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - Added durable run lifecycle entries to the existing session event log and `server/session` run reducers, so completed and interrupted runs can now be reconstructed after reopen through `ReadRuns()` / `LatestRun()`.
 - Split live run-state emission from durable run-history persistence, so only explicit primary-run paths write durable run lifecycle entries.
 - Added the first transport-neutral application read service via `shared/serverapi` + `shared/client` + `server/sessionview`, with typed `session.getMainView` / `run.get`-style requests backed by either a live runtime or durable session state.
-- Moved the CLI loopback read path onto that application read service while keeping a temporary direct-projection fallback for resilience.
+- Reworked `server/sessionview` around explicit session/runtime resolvers keyed by `session_id`, so the read service is no longer a single pre-bound session helper.
+- Made dormant session hydration side-effect-free by replaying against an isolated cloned store, and added proof that read APIs do not mutate persisted session files.
+- Moved the CLI loopback read path onto that application read service and removed the direct runtime-projection fallback.
 - Added focused lifecycle coverage proving `EventRunStateChanged` emits stable `run_id`, status, and timing for both completed and interrupted runs.
 - Added a real-engine loopback test proving `RuntimeClient.MainView()` exposes active-run hydration while a run is in flight.
 
@@ -27,16 +29,17 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - The client-facing contract now has a single active-session hydration bundle backed by a server-owned read/projection surface that can grow into the Phase 2 `session.getMainView` shape.
 - Run lifecycle metadata now survives engine teardown through the existing session log, giving Phase 2 its first durable `run.get` building block without introducing a new storage subsystem.
 - The first transport-neutral read boundary now exists for session main-view hydration and run lookup rather than reads living only as live-engine helpers.
+- The read boundary now resolves resources by ID and can hydrate dormant sessions without mutating persisted state, which is the minimum correctness bar for future daemon/web clients.
 - Phase 2 can proceed incrementally without introducing a durable run store or transport-level event redesign yet.
 
 ## Current Limitations
 
 - Durable run history currently covers lifecycle metadata only. There is still no richer run-scoped index for processes, asks, approvals, or delegated task state.
 - Reopen semantics currently reconstruct unfinished durable runs from `run_started` without a matching `run_finished`, but that state is not yet surfaced through a higher-level application read API.
-- The new application read service is still scoped to a single active session and uses partial dormant reconstruction rather than richer persisted read models for settings/process/approval state.
+- The new application read service still uses partial dormant reconstruction rather than richer persisted read models for settings/process/approval state, and current wiring still supplies only static resolvers rather than a broader server registry.
 - The UI is hydrating through `RuntimeMainView`, but it is not yet rendering run-specific UX beyond carrying the typed data.
 
 ## Next Slice
 
-- Broaden the new application read service beyond one active session so it can serve session selection, detached hydration, and later transport handlers without relying on a single live engine handle.
+- Broaden the new application read service from static resolvers to real server-owned registries so it can serve session selection, detached hydration, and later transport handlers across multiple sessions/projects.
 - Introduce explicit process/run ownership links and session/run hydration tests that assume more than one run over time.

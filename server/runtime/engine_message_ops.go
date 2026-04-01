@@ -261,7 +261,3 @@ func (e *Engine) restoreMessages() error {
 	e.ensureOrchestrationCollaborators()
 	return e.messageFlow.RestoreMessages()
 }
-
-func (e *Engine) RestorePersistedConversation() error {
-	return e.restoreMessages()
-}

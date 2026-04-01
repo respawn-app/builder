@@ -3,6 +3,8 @@ package sessionview
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,18 +15,8 @@ import (
 	"builder/shared/serverapi"
 )
 
-type serviceFastClient struct{}
-
 type serviceFakeLLM struct {
 	responses []llm.Response
-}
-
-func (serviceFastClient) Generate(context.Context, llm.Request) (llm.Response, error) {
-	return llm.Response{}, nil
-}
-
-func (serviceFastClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
-	return llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}, nil
 }
 
 func (f *serviceFakeLLM) Generate(context.Context, llm.Request) (llm.Response, error) {
@@ -81,7 +73,7 @@ func TestServiceGetSessionMainViewUsesLiveRuntimeWhenAttached(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	svc := NewService(store, eng)
+	svc := NewService(NewStaticSessionResolver(store), NewStaticRuntimeResolver(eng))
 
 	done := make(chan error, 1)
 	go func() {
@@ -130,7 +122,7 @@ func TestServiceGetSessionMainViewFallsBackToDurableSessionState(t *testing.T) {
 		t.Fatalf("append run start: %v", err)
 	}
 
-	svc := NewService(store, nil)
+	svc := NewService(NewStaticSessionResolver(store), nil)
 	resp, err := svc.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: store.Meta().SessionID})
 	if err != nil {
 		t.Fatalf("get session main view: %v", err)
@@ -164,12 +156,65 @@ func TestServiceGetRunReturnsDurableRunRecord(t *testing.T) {
 		t.Fatalf("append run finish: %v", err)
 	}
 
-	svc := NewService(store, nil)
+	svc := NewService(NewStaticSessionResolver(store), nil)
 	resp, err := svc.GetRun(context.Background(), serverapi.RunGetRequest{SessionID: store.Meta().SessionID, RunID: "run-1"})
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
 	if resp.Run == nil || resp.Run.RunID != "run-1" || resp.Run.Status != "completed" {
 		t.Fatalf("unexpected run response: %+v", resp.Run)
+	}
+}
+
+func TestServiceGetSessionMainViewDoesNotMutatePersistedSessionFiles(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "hello"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	startedAt := time.Now().UTC().Add(-time.Minute)
+	if _, err := store.AppendRunStarted(session.RunRecord{RunID: "run-1", StepID: "step-1", StartedAt: startedAt}); err != nil {
+		t.Fatalf("append run start: %v", err)
+	}
+	if err := store.MarkInFlight(true); err != nil {
+		t.Fatalf("mark in-flight: %v", err)
+	}
+
+	sessionPath := filepath.Join(store.Dir(), "session.json")
+	eventsPath := filepath.Join(store.Dir(), "events.jsonl")
+	beforeSession, err := os.ReadFile(sessionPath)
+	if err != nil {
+		t.Fatalf("read session file before: %v", err)
+	}
+	beforeEvents, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatalf("read events file before: %v", err)
+	}
+
+	svc := NewService(NewStaticSessionResolver(store), nil)
+	resp, err := svc.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("get session main view: %v", err)
+	}
+	if resp.MainView.ActiveRun == nil || resp.MainView.ActiveRun.RunID != "run-1" {
+		t.Fatalf("expected durable running active run, got %+v", resp.MainView.ActiveRun)
+	}
+
+	afterSession, err := os.ReadFile(sessionPath)
+	if err != nil {
+		t.Fatalf("read session file after: %v", err)
+	}
+	afterEvents, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatalf("read events file after: %v", err)
+	}
+	if string(beforeSession) != string(afterSession) {
+		t.Fatalf("session file mutated during read\nbefore=%s\nafter=%s", string(beforeSession), string(afterSession))
+	}
+	if string(beforeEvents) != string(afterEvents) {
+		t.Fatalf("events file mutated during read\nbefore=%s\nafter=%s", string(beforeEvents), string(afterEvents))
 	}
 }
