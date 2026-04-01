@@ -3,6 +3,7 @@ package processoutput
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	shelltool "builder/server/tools/shell"
 	"builder/shared/clientui"
@@ -13,20 +14,42 @@ type Subscriber interface {
 	SubscribeOutput(ctx context.Context, processID string, offsetBytes int64) (shelltool.OutputSubscription, error)
 }
 
-type Service struct {
-	subscriber Subscriber
+type ProcessSource interface {
+	Snapshot(id string) (shelltool.Snapshot, error)
 }
 
-func NewService(subscriber Subscriber) *Service {
-	return &Service{subscriber: subscriber}
+type Service struct {
+	subscriber Subscriber
+	processes  ProcessSource
+}
+
+func NewService(subscriber Subscriber, processes ProcessSource) *Service {
+	return &Service{subscriber: subscriber, processes: processes}
 }
 
 func (s *Service) SubscribeProcessOutput(ctx context.Context, req serverapi.ProcessOutputSubscribeRequest) (serverapi.ProcessOutputSubscription, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
-	if s == nil || s.subscriber == nil {
+	if s == nil || s.subscriber == nil || s.processes == nil {
 		return nil, errors.New("process output subscriber is required")
+	}
+	snapshot, err := s.processes.Snapshot(req.ProcessID)
+	if err != nil {
+		return nil, fmt.Errorf("process output stream for %q is unavailable: %w", req.ProcessID, serverapi.ErrProcessOutputUnavailable)
+	}
+	if !snapshot.OutputAvailable {
+		return nil, fmt.Errorf("process output stream for %q is unavailable: %w", req.ProcessID, serverapi.ErrProcessOutputUnavailable)
+	}
+	if req.OffsetBytes < snapshot.OutputRetainedFromBytes || req.OffsetBytes > snapshot.OutputRetainedToBytes {
+		return nil, fmt.Errorf(
+			"process output offset %d is outside retained range [%d,%d] for %q: %w",
+			req.OffsetBytes,
+			snapshot.OutputRetainedFromBytes,
+			snapshot.OutputRetainedToBytes,
+			req.ProcessID,
+			serverapi.ErrProcessOutputGap,
+		)
 	}
 	sub, err := s.subscriber.SubscribeOutput(ctx, req.ProcessID, req.OffsetBytes)
 	if err != nil {

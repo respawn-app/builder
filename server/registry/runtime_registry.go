@@ -133,7 +133,7 @@ func (r *RuntimeRegistry) SubscribeSessionActivity(_ context.Context, sessionID 
 	entry := r.engines[id]
 	r.mu.RUnlock()
 	if entry == nil || entry.hub == nil {
-		return nil, fmt.Errorf("session %q is not active", id)
+		return nil, fmt.Errorf("session activity stream for %q is unavailable: %w", id, serverapi.ErrSessionActivityUnavailable)
 	}
 	return entry.hub.subscribe(), nil
 }
@@ -276,7 +276,7 @@ func (h *sessionActivityHub) publish(evt clientui.Event) {
 	h.mu.Unlock()
 	for _, sub := range subs {
 		if !sub.publish(evt) {
-			sub.closeWithError(serverapi.ErrSessionActivityGap)
+			sub.closeWithError(serverapi.ErrStreamGap)
 		}
 	}
 }
