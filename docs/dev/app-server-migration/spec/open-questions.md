@@ -39,7 +39,7 @@ If an item appears under `Blockers Before Implementation`, the migration plan sh
 
 - Exact payload schemas for typed hydration views such as `session.getMainView`.
 - Exact normalized event payload shapes for durable state streams.
-- Exact payload shapes for live session activity and process output streams.
+- Exact payload shapes for live session activity, prompt activity, and process output streams.
 - Exact cursor and retention metadata that the protocol should expose.
 
 ## Closed Questions
@@ -51,3 +51,4 @@ These are intentionally no longer open:
 - Replay is not the normal reconnect path. Rehydrate first, then resubscribe, with best-effort catch-up only when available.
 - Runtime tuning operations such as `/thinking` and `/fast` are session-scoped live settings rather than per-run-only settings.
 - Current ask/approval restart behavior is transcript-driven rather than broker-queue-driven: interrupted tool-call attempts remain in conversation state, reopen appends the interruption marker, and the next model turn re-evaluates what to do.
+- Pending asks and approvals are delivered live through a dedicated prompt activity stream; `ask.listPendingBySession` and `approval.listPendingBySession` remain hydration reads rather than the primary live-delivery path.

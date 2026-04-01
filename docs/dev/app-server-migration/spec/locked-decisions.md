@@ -14,7 +14,7 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 
 - The primary frontend/server contract is JSON-RPC 2.0 over WebSocket.
 - Normal application methods must not use the reserved `rpc.*` namespace.
-- Method taxonomy should be resource-oriented, e.g. `project.*`, `session.*`, `run.*`, `process.*`, `approval.*`, `ask.*`, `subscription.*`, `system.*`.
+- Method taxonomy should be resource-oriented, e.g. `project.*`, `session.*`, `run.*`, `process.*`, `approval.*`, `ask.*`, `prompt.*`, `subscription.*`, `system.*`.
 - Query and read APIs should use dedicated typed methods per resource or view rather than a generic query endpoint.
 - Versioning uses a single protocol version for the whole frontend/server contract.
 - Handshake must happen before normal operations and must return protocol version plus capability flags.
@@ -74,6 +74,7 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 - Frontends should authenticate to the builder server rather than directly to providers.
 - The server is the sole policy enforcer for guarded actions and blocks on approval requests until a frontend answers.
 - Any attached frontend with access to the session may answer asks or approvals; the server applies the first committed authoritative response.
+- Pending ask and approval delivery is a first-class server-driven prompt activity stream; attach and reconnect still use explicit pending-resource reads for hydration.
 - Restart recovery should preserve the current transcript-driven behavior: interrupted tool-call attempts remain durable in conversation state, reopen appends the interruption marker, and the next model turn re-evaluates what to do. This is distinct from persisting broker queue state as a first-class durable object.
 - The server binds locally by default. Remote listeners require explicit opt-in.
 - The frontend must be able to show which server or execution host it is attached to.
@@ -115,6 +116,7 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 - Ordered stream catch-up is best-effort within retention windows; it is not a universal replay contract.
 - If a cursor is no longer replayable, the server should return an explicit cursor-expired or gap error and require rehydration plus resubscription.
 - The protocol must distinguish durable lower-volume state transitions from high-rate live feeds.
+- Prompt activity is a distinct live stream class, separate from both session activity and list-style pending prompt reads.
 - Process output is a separate stream class from process state.
 - Subscriptions should target explicit resource-scoped streams rather than a single multiplexed server-wide feed.
 - Subscriptions are live-only; initial state should come from separate explicit queries or hydration views rather than being bundled into subscribe.

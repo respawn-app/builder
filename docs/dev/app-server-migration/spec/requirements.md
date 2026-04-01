@@ -67,7 +67,7 @@ The resulting frontends should:
 The following are already locked for this feature and should be treated as requirements rather than open design topics:
 
 - Primary protocol: JSON-RPC 2.0 over WebSocket.
-- Method taxonomy: resource-oriented namespaces such as `project.*`, `session.*`, `run.*`, `process.*`, `approval.*`, `ask.*`, `subscription.*`, and `system.*`.
+- Method taxonomy: resource-oriented namespaces such as `project.*`, `session.*`, `run.*`, `process.*`, `approval.*`, `ask.*`, `prompt.*`, `subscription.*`, and `system.*`.
 - Read/query style: dedicated typed methods per resource/view rather than a generic query endpoint.
 - Versioning model: a single protocol version for the whole frontend/server contract, complemented by explicit capability flags in handshake.
 - Supporting HTTP surface: minimal endpoints only, for concerns like health, auth, and bootstrap.
@@ -135,6 +135,7 @@ The protocol must:
 - keep project attachment lightweight so project/session index state is fetched through explicit queries rather than implicitly returned on attach,
 - support explicit snapshot and hydration-view requests in addition to streaming events,
 - support server-initiated asks and approval requests with client responses,
+- expose prompt delivery as a first-class server-driven stream rather than requiring clients to poll list reads for pending asks or approvals,
 - carry only normalized domain events and live-feed payloads that frontends can depend on safely,
 - avoid exposing frontend-specific rendering assumptions as protocol requirements,
 - be versionable so future frontends can negotiate compatibility.
@@ -177,6 +178,7 @@ The server must define at least these classes of stream:
 
 - durable lower-volume state transitions,
 - live session activity for partial assistant output and progress,
+- prompt activity for pending and resolved ask or approval resources,
 - process output streams for stdout and stderr.
 
 Requirements:
@@ -186,6 +188,7 @@ Requirements:
 - clients can detect a gap or expired cursor explicitly,
 - slow subscribers receive an explicit gap or backpressure failure rather than silent truncation,
 - durable transcript state remains distinct from partial live output,
+- prompt activity remains distinct from hydration reads such as `ask.listPendingBySession` and `approval.listPendingBySession`, which are still used for attach and reconnect,
 - process output retention is defined independently from process state retention.
 
 The protocol must make it obvious which feeds are durable, which are ephemeral, and how clients recover after falling behind.
