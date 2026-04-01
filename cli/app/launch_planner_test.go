@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"builder/server/session"
+	"builder/server/tools"
 	"builder/shared/config"
 )
 
@@ -221,5 +222,79 @@ func TestSessionLaunchPlannerSelectedSessionIDBypassesPicker(t *testing.T) {
 	}
 	if got := reopened.Meta().Continuation; got == nil || got.OpenAIBaseURL != "http://session.local/v1" {
 		t.Fatalf("expected continuation base url preserved, got %+v", got)
+	}
+}
+
+func TestApplyCLIOverridesToSessionPlanIgnoresNonCLISources(t *testing.T) {
+	plan := sessionLaunchPlan{
+		ActiveSettings: config.Settings{
+			Model:         "server-model",
+			ThinkingLevel: "low",
+			EnabledTools:  map[tools.ID]bool{tools.ToolShell: true},
+			Timeouts:      config.Timeouts{ModelRequestSeconds: 20, ShellDefaultSeconds: 30},
+		},
+		EnabledTools:        []tools.ID{tools.ToolShell},
+		ConfiguredModelName: "server-model",
+		Source:              config.SourceReport{Sources: map[string]string{"model": "file"}},
+		StatusConfig:        uiStatusConfig{},
+	}
+	cfg := config.App{Settings: config.Settings{
+		Model:         "local-model",
+		ThinkingLevel: "high",
+		EnabledTools:  map[tools.ID]bool{tools.ToolPatch: true},
+		Timeouts:      config.Timeouts{ModelRequestSeconds: 99, ShellDefaultSeconds: 77},
+	}, Source: config.SourceReport{Sources: map[string]string{
+		"model":                          "env",
+		"thinking_level":                 "env",
+		"tools.shell":                    "env",
+		"tools.patch":                    "env",
+		"timeouts.model_request_seconds": "env",
+	}}}
+
+	updated := applyCLIOverridesToSessionPlan(plan, cfg)
+	if updated.ActiveSettings.Model != "server-model" || updated.ConfiguredModelName != "server-model" {
+		t.Fatalf("expected server model preserved, got %+v", updated.ActiveSettings)
+	}
+	if updated.ActiveSettings.ThinkingLevel != "low" {
+		t.Fatalf("expected server thinking level preserved, got %q", updated.ActiveSettings.ThinkingLevel)
+	}
+	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != tools.ToolShell {
+		t.Fatalf("expected server tools preserved, got %+v", updated.EnabledTools)
+	}
+	if updated.ActiveSettings.Timeouts.ModelRequestSeconds != 20 {
+		t.Fatalf("expected server timeout preserved, got %+v", updated.ActiveSettings.Timeouts)
+	}
+	if updated.Source.Sources["model"] != "file" {
+		t.Fatalf("expected source metadata preserved, got %+v", updated.Source.Sources)
+	}
+}
+
+func TestApplyCLIOverridesToSessionPlanRespectsLockedModelContract(t *testing.T) {
+	plan := sessionLaunchPlan{
+		ActiveSettings: config.Settings{
+			Model:         "locked-model",
+			ThinkingLevel: "medium",
+			EnabledTools:  map[tools.ID]bool{tools.ToolShell: true},
+		},
+		EnabledTools:        []tools.ID{tools.ToolShell},
+		ConfiguredModelName: "locked-model",
+		ModelContractLocked: true,
+		StatusConfig:        uiStatusConfig{},
+	}
+	cfg := config.App{Settings: config.Settings{
+		Model:        "cli-model",
+		EnabledTools: map[tools.ID]bool{tools.ToolPatch: true},
+	}, Source: config.SourceReport{Sources: map[string]string{
+		"model":       "cli",
+		"tools.shell": "cli",
+		"tools.patch": "cli",
+	}}}
+
+	updated := applyCLIOverridesToSessionPlan(plan, cfg)
+	if updated.ActiveSettings.Model != "locked-model" || updated.ConfiguredModelName != "locked-model" {
+		t.Fatalf("expected locked model preserved, got %+v", updated.ActiveSettings)
+	}
+	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != tools.ToolShell {
+		t.Fatalf("expected locked tools preserved, got %+v", updated.EnabledTools)
 	}
 }
