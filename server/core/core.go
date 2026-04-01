@@ -16,6 +16,7 @@ import (
 	"builder/server/runtime"
 	"builder/server/runtimewire"
 	"builder/server/sessionactivity"
+	"builder/server/sessionlifecycle"
 	"builder/server/sessionview"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
@@ -39,6 +40,7 @@ type Core struct {
 	processOutput    client.ProcessOutputClient
 	processViews     client.ProcessViewClient
 	sessionViews     client.SessionViewClient
+	sessionLifecycle client.SessionLifecycleClient
 	sessionActivity  client.SessionActivityClient
 	runPrompt        client.RunPromptClient
 }
@@ -68,6 +70,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	processService := processview.NewService(runtimeSupport.Background)
 	processOutputService := processoutput.NewService(runtimeSupport.Background, runtimeSupport.Background)
 	sessionViewService := sessionview.NewService(registry.NewPersistenceSessionResolver(cfg.PersistenceRoot), runtimeRegistry)
+	sessionLifecycleService := sessionlifecycle.NewService(cfg.PersistenceRoot, authSupport.AuthManager)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
 	core := &Core{
 		cfg:              cfg,
@@ -85,6 +88,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		processOutput:    client.NewLoopbackProcessOutputClient(processOutputService),
 		processViews:     client.NewLoopbackProcessViewClient(processService),
 		sessionViews:     client.NewLoopbackSessionViewClient(sessionViewService),
+		sessionLifecycle: client.NewLoopbackSessionLifecycleClient(sessionLifecycleService),
 		sessionActivity:  client.NewLoopbackSessionActivityClient(sessionActivityService),
 	}
 	core.runPrompt = runprompt.NewLoopbackRunPromptClient(runprompt.HeadlessBootstrap{
@@ -216,6 +220,13 @@ func (s *Core) SessionActivityClient() client.SessionActivityClient {
 		return nil
 	}
 	return s.sessionActivity
+}
+
+func (s *Core) SessionLifecycleClient() client.SessionLifecycleClient {
+	if s == nil {
+		return nil
+	}
+	return s.sessionLifecycle
 }
 
 func (s *Core) RegisterRuntime(sessionID string, engine *runtime.Engine) {

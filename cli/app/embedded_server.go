@@ -8,7 +8,6 @@ import (
 	"builder/server/auth"
 	serverembedded "builder/server/embedded"
 	"builder/server/launch"
-	serverlifecycle "builder/server/lifecycle"
 	"builder/server/primaryrun"
 	"builder/server/runtime"
 	"builder/server/session"
@@ -27,10 +26,11 @@ type embeddedServer interface {
 	ProcessControlClient() client.ProcessControlClient
 	ProcessOutputClient() client.ProcessOutputClient
 	ProcessViewClient() client.ProcessViewClient
+	SessionLifecycleClient() client.SessionLifecycleClient
 	SessionViewClient() client.SessionViewClient
 	PlanSession(req sessionLaunchRequest, pick sessionPickerRunner) (sessionLaunchPlan, error)
 	PrepareRuntime(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error)
-	ResolveTransition(ctx context.Context, interactor authInteractor, store *session.Store, transition UITransition) (resolvedSessionAction, error)
+	Reauthenticate(ctx context.Context, interactor authInteractor) error
 }
 
 type embeddedAppServer struct {
@@ -84,6 +84,13 @@ func (s *embeddedAppServer) SessionViewClient() client.SessionViewClient {
 		return nil
 	}
 	return s.inner.SessionViewClient()
+}
+
+func (s *embeddedAppServer) SessionLifecycleClient() client.SessionLifecycleClient {
+	if s == nil || s.inner == nil {
+		return nil
+	}
+	return s.inner.SessionLifecycleClient()
 }
 
 func (s *embeddedAppServer) ProcessViewClient() client.ProcessViewClient {
@@ -233,38 +240,12 @@ func (s *embeddedAppServer) PrepareRuntime(plan sessionLaunchPlan, diagnosticWri
 	}, nil
 }
 
-func (s *embeddedAppServer) ResolveTransition(ctx context.Context, interactor authInteractor, store *session.Store, transition UITransition) (resolvedSessionAction, error) {
+func (s *embeddedAppServer) Reauthenticate(ctx context.Context, interactor authInteractor) error {
 	if s == nil || s.inner == nil {
-		return resolvedSessionAction{}, errors.New("embedded server is required")
+		return errors.New("embedded server is required")
 	}
-	controller := sessioncontrol.Controller{
-		Config:       s.inner.Config(),
-		ContainerDir: s.inner.ContainerDir(),
-		AuthManager:  s.inner.AuthManager(),
-		Reauth: func(ctx context.Context) error {
-			cfg := s.inner.Config()
-			return ensureAuthReady(ctx, s.inner.AuthManager(), s.inner.OAuthOptions(), cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen, interactor)
-		},
-	}
-	resolved, err := controller.ResolveTransition(ctx, store, serverlifecycle.Transition{
-		Action:               serverlifecycle.Action(transition.Action),
-		InitialPrompt:        transition.InitialPrompt,
-		InitialInput:         transition.InitialInput,
-		TargetSessionID:      transition.TargetSessionID,
-		ForkUserMessageIndex: transition.ForkUserMessageIndex,
-		ParentSessionID:      transition.ParentSessionID,
-	})
-	if err != nil {
-		return resolvedSessionAction{}, err
-	}
-	return resolvedSessionAction{
-		NextSessionID:   resolved.NextSessionID,
-		InitialPrompt:   resolved.InitialPrompt,
-		InitialInput:    resolved.InitialInput,
-		ParentSessionID: resolved.ParentSessionID,
-		ForceNewSession: resolved.ForceNewSession,
-		ShouldContinue:  resolved.ShouldContinue,
-	}, nil
+	cfg := s.inner.Config()
+	return ensureAuthReady(ctx, s.inner.AuthManager(), s.inner.OAuthOptions(), cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen, interactor)
 }
 
 var _ embeddedServer = (*embeddedAppServer)(nil)
