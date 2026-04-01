@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"time"
 
 	"builder/server/auth"
 	serverembedded "builder/server/embedded"
@@ -15,6 +16,7 @@ import (
 	"builder/server/sessioncontrol"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
+	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
 )
@@ -33,6 +35,12 @@ type testEmbeddedServer struct {
 	planSession       func(req sessionLaunchRequest, pick sessionPickerRunner) (sessionLaunchPlan, error)
 	prepareRuntime    func(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error)
 	resolveAction     func(ctx context.Context, interactor authInteractor, store *session.Store, transition UITransition) (resolvedSessionAction, error)
+}
+
+type stubEmbeddedProcessViewClient struct {
+	listResp serverapi.ProcessListResponse
+	getResp  serverapi.ProcessGetResponse
+	err      error
 }
 
 func (s *testEmbeddedServer) Close() error                          { return nil }
@@ -142,6 +150,20 @@ func (s *testEmbeddedServer) ResolveTransition(ctx context.Context, interactor a
 	}, nil
 }
 
+func (s *stubEmbeddedProcessViewClient) ListProcesses(context.Context, serverapi.ProcessListRequest) (serverapi.ProcessListResponse, error) {
+	if s.err != nil {
+		return serverapi.ProcessListResponse{}, s.err
+	}
+	return s.listResp, nil
+}
+
+func (s *stubEmbeddedProcessViewClient) GetProcess(context.Context, serverapi.ProcessGetRequest) (serverapi.ProcessGetResponse, error) {
+	if s.err != nil {
+		return serverapi.ProcessGetResponse{}, s.err
+	}
+	return s.getResp, nil
+}
+
 func TestEmbeddedAppServerPrepareRuntimeRegistersRuntimeForSessionViews(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -177,5 +199,67 @@ func TestEmbeddedAppServerPrepareRuntimeRegistersRuntimeForSessionViews(t *testi
 	}
 	if resp.MainView.Status.ThinkingLevel != "high" {
 		t.Fatalf("thinking level = %q, want high", resp.MainView.Status.ThinkingLevel)
+	}
+}
+
+func TestEmbeddedAppServerPrepareRuntimeWiresProcessReadsForUIHydration(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("start embedded server: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test prepare runtime process reads")
+	if err != nil {
+		t.Fatalf("prepare runtime: %v", err)
+	}
+	defer runtimePlan.Close()
+	if runtimePlan.Wiring.processViews == nil {
+		t.Fatal("expected PrepareRuntime to wire process view client")
+	}
+
+	manager := runtimePlan.Wiring.background
+	if manager == nil {
+		t.Fatal("expected background manager")
+	}
+	manager.SetMinimumExecToBgTime(250 * time.Millisecond)
+	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "printf 'local\n'; sleep 1"},
+		DisplayCommand: "local-process",
+		OwnerSessionID: plan.Store.Meta().SessionID,
+		OwnerRunID:     "local-run",
+		OwnerStepID:    "local-step",
+		Workdir:        workspace,
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start background process: %v", err)
+	}
+	if !res.Backgrounded {
+		t.Fatal("expected backgrounded local process")
+	}
+
+	runtimePlan.Wiring.processViews = &stubEmbeddedProcessViewClient{listResp: serverapi.ProcessListResponse{Processes: []clientui.BackgroundProcess{{
+		ID:             "remote-proc",
+		OwnerSessionID: plan.Store.Meta().SessionID,
+		OwnerRunID:     "remote-run",
+		OwnerStepID:    "remote-step",
+		Command:        "remote-process",
+	}}}}
+
+	processClient := newUIProcessClientWithReads(runtimePlan.Wiring.background, runtimePlan.Wiring.processViews)
+	got := processClient.ListProcesses()
+	if len(got) != 1 || got[0].ID != "remote-proc" || got[0].OwnerRunID != "remote-run" || got[0].OwnerStepID != "remote-step" {
+		t.Fatalf("expected shared process reads to win over local manager snapshot, got %+v", got)
 	}
 }
