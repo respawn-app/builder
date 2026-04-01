@@ -479,7 +479,7 @@ func TestSessionViewClientUsesRegisteredRuntimeByID(t *testing.T) {
 		t.Fatalf("new engine: %v", err)
 	}
 	server.RegisterRuntime(store.Meta().SessionID, eng)
-	defer server.UnregisterRuntime(store.Meta().SessionID)
+	defer server.UnregisterRuntime(store.Meta().SessionID, eng)
 
 	resp, err := server.SessionViewClient().GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: store.Meta().SessionID})
 	if err != nil {
