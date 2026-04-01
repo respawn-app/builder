@@ -113,7 +113,7 @@ func (r *RuntimeRegistry) Register(sessionID string, engine *runtime.Engine) {
 	}
 }
 
-func (r *RuntimeRegistry) Unregister(sessionID string) {
+func (r *RuntimeRegistry) Unregister(sessionID string, engine *runtime.Engine) {
 	if r == nil {
 		return
 	}
@@ -123,6 +123,10 @@ func (r *RuntimeRegistry) Unregister(sessionID string) {
 	}
 	r.mu.Lock()
 	entry := r.engines[id]
+	if entry == nil || (engine != nil && entry.engine != engine) {
+		r.mu.Unlock()
+		return
+	}
 	delete(r.engines, id)
 	r.mu.Unlock()
 	if entry != nil {
