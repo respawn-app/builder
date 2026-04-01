@@ -11,6 +11,7 @@ import (
 	"builder/server/auth"
 	"builder/server/serve"
 	serverstartup "builder/server/startup"
+	"builder/server/tools"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
@@ -195,6 +196,65 @@ func TestStartSessionServerUsesInvocationOverridesWhenAttachingToDiscoveredDaemo
 	}
 	if defaultHits.Load() != 0 {
 		t.Fatalf("expected daemon default llm endpoint unused, got %d", defaultHits.Load())
+	}
+
+	cancel()
+	if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
+		t.Fatalf("Serve error = %v, want context canceled", serveErr)
+	}
+}
+
+func TestStartSessionServerPreservesExplicitCLIToolsWithCLIModelOverride(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srv, err := serve.Start(context.Background(), serverstartup.Request{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5.4",
+	}, memoryAuthHandler{state: auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "test-key"},
+		},
+		UpdatedAt: time.Now().UTC(),
+	}}, autoOnboarding{})
+	if err != nil {
+		t.Fatalf("serve.Start: %v", err)
+	}
+	defer func() { _ = srv.Close() }()
+
+	serveCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Serve(serveCtx)
+	}()
+	waitForDiscoveryRecord(t, workspace)
+
+	server, err := startSessionServer(context.Background(), Options{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5.3-codex",
+		Tools:                 "shell",
+	}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("startSessionServer: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
+	if err != nil {
+		t.Fatalf("PlanSession: %v", err)
+	}
+	if plan.ActiveSettings.Model != "gpt-5.3-codex" {
+		t.Fatalf("model = %q, want gpt-5.3-codex", plan.ActiveSettings.Model)
+	}
+	if len(plan.EnabledTools) != 1 || plan.EnabledTools[0] != tools.ToolShell {
+		t.Fatalf("enabled tools = %+v, want only shell", plan.EnabledTools)
 	}
 
 	cancel()

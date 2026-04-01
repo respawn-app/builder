@@ -223,6 +223,7 @@ func sessionSummariesFromProjectView(items []clientui.SessionSummary) []session.
 
 func applyCLIOverridesToSessionPlan(plan sessionLaunchPlan, cfg config.App) sessionLaunchPlan {
 	sources := cfg.Source.Sources
+	mergedSource := mergeCLISources(plan.Source, cfg.Source)
 	if sourceIsCLI(sources, "model") && !plan.ModelContractLocked {
 		plan.ActiveSettings.Model = cfg.Settings.Model
 		plan.ConfiguredModelName = cfg.Settings.Model
@@ -250,10 +251,10 @@ func applyCLIOverridesToSessionPlan(plan sessionLaunchPlan, cfg config.App) sess
 			plan.ActiveSettings.EnabledTools = cloneEnabledToolSet(cfg.Settings.EnabledTools)
 		}
 		if hasCLIToolOverride(cfg.Source) || sourceIsCLI(sources, "model") {
-			plan.EnabledTools = dedupeSortToolIDs(activeToolIDs(plan.ActiveSettings, plan.Source, nil))
+			plan.EnabledTools = dedupeSortToolIDs(activeToolIDs(plan.ActiveSettings, mergedSource, nil))
 		}
 	}
-	plan.Source = mergeCLISources(plan.Source, cfg.Source)
+	plan.Source = mergedSource
 	plan.StatusConfig.Settings = plan.ActiveSettings
 	plan.StatusConfig.Source = plan.Source
 	return plan
