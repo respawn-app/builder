@@ -17,6 +17,7 @@ type stubExclusiveStepLifecycle struct {
 	busy     bool
 	runCalls int
 	runFn    func(ctx context.Context, options exclusiveStepOptions, fn func(stepCtx context.Context, stepID string) error) error
+	snapshot *RunSnapshot
 }
 
 type stubBackgroundNoticeScheduler struct {
@@ -52,6 +53,12 @@ func (s *stubExclusiveStepLifecycle) IsBusy() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.busy
+}
+
+func (s *stubExclusiveStepLifecycle) Snapshot() *RunSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return cloneRunSnapshot(s.snapshot)
 }
 
 func (s *stubExclusiveStepLifecycle) setBusy(busy bool) {
@@ -108,6 +115,58 @@ func TestExclusiveStepLifecycleRejectsConcurrentRun(t *testing.T) {
 	}
 	if lifecycle.IsBusy() {
 		t.Fatal("expected exclusive step lifecycle to be idle after completion")
+	}
+}
+
+func TestExclusiveStepLifecycleSnapshotTracksActiveRun(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	lifecycle := &defaultExclusiveStepLifecycle{engine: eng}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- lifecycle.Run(context.Background(), exclusiveStepOptions{}, func(stepCtx context.Context, stepID string) error {
+			close(started)
+			<-release
+			return nil
+		})
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for run start")
+	}
+
+	snapshot := lifecycle.Snapshot()
+	if snapshot == nil {
+		t.Fatal("expected active run snapshot")
+	}
+	if snapshot.RunID == "" || snapshot.StepID == "" {
+		t.Fatalf("expected run and step ids, got %+v", snapshot)
+	}
+	if snapshot.Status != RunStatusRunning {
+		t.Fatalf("run status = %q, want running", snapshot.Status)
+	}
+	if snapshot.StartedAt.IsZero() {
+		t.Fatal("expected started timestamp")
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if snapshot := lifecycle.Snapshot(); snapshot != nil {
+		t.Fatalf("expected run snapshot cleared after completion, got %+v", snapshot)
 	}
 }
 

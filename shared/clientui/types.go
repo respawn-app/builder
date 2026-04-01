@@ -1,6 +1,7 @@
 package clientui
 
 import patchformat "builder/server/tools/patch/format"
+import "time"
 
 type EventKind string
 
@@ -44,7 +45,11 @@ type ReasoningDelta struct {
 }
 
 type RunState struct {
-	Busy bool
+	Busy       bool
+	RunID      string
+	Status     RunStatus
+	StartedAt  time.Time
+	FinishedAt time.Time
 }
 
 type BackgroundShellEvent struct {

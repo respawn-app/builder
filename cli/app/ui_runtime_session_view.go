@@ -3,9 +3,10 @@ package app
 import "builder/shared/clientui"
 
 func (m *uiModel) runtimeSessionView() clientui.RuntimeSessionView {
-	if client := m.runtimeClient(); client != nil {
-		return client.SessionView()
-	}
+	return m.runtimeMainView().Session
+}
+
+func (m *uiModel) localRuntimeSessionView() clientui.RuntimeSessionView {
 	entries := make([]clientui.ChatEntry, 0, len(m.transcriptEntries))
 	for _, entry := range m.transcriptEntries {
 		entries = append(entries, clientui.ChatEntry{

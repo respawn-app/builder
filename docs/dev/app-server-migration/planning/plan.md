@@ -119,6 +119,10 @@ Deliverables:
 - event hub with explicit stream classes and gap semantics
 - process output buffering and retention policy
 
+Progress:
+
+- The first Phase 2 slice is landed: the live runtime now exposes explicit active-run identity/status, `shared/clientui.RuntimeMainView` now bundles active-session hydration, and the CLI already consumes that bundled view through the client boundary.
+
 Intermediate state:
 
 - still one binary

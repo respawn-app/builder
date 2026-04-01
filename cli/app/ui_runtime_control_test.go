@@ -11,6 +11,7 @@ import (
 type runtimeControlFakeClient struct {
 	status                clientui.RuntimeStatus
 	sessionView           clientui.RuntimeSessionView
+	mainView              clientui.RuntimeMainView
 	setSessionNameArg     string
 	setThinkingLevelArg   string
 	setFastModeArg        bool
@@ -34,6 +35,12 @@ type runtimeControlFakeClient struct {
 	err                   error
 }
 
+func (f *runtimeControlFakeClient) MainView() clientui.RuntimeMainView {
+	if f.mainView.Session.SessionID != "" || f.mainView.Status.ThinkingLevel != "" || f.mainView.ActiveRun != nil {
+		return f.mainView
+	}
+	return clientui.RuntimeMainView{Status: f.status, Session: f.sessionView}
+}
 func (f *runtimeControlFakeClient) Status() clientui.RuntimeStatus { return f.status }
 func (f *runtimeControlFakeClient) SessionView() clientui.RuntimeSessionView {
 	return f.sessionView

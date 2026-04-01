@@ -25,7 +25,13 @@ func EventFromRuntime(evt runtime.Event) clientui.Event {
 		}
 	}
 	if evt.RunState != nil {
-		view.RunState = &clientui.RunState{Busy: evt.RunState.Busy}
+		view.RunState = &clientui.RunState{
+			Busy:       evt.RunState.Busy,
+			RunID:      evt.RunState.RunID,
+			Status:     clientui.RunStatus(evt.RunState.Status),
+			StartedAt:  evt.RunState.StartedAt,
+			FinishedAt: evt.RunState.FinishedAt,
+		}
 	}
 	if evt.Background != nil {
 		view.Background = &clientui.BackgroundShellEvent{
@@ -48,6 +54,20 @@ func EventFromRuntime(evt runtime.Event) clientui.Event {
 		}
 	}
 	return view
+}
+
+func RunViewFromRuntime(sessionID string, snapshot *runtime.RunSnapshot) *clientui.RunView {
+	if snapshot == nil {
+		return nil
+	}
+	return &clientui.RunView{
+		RunID:      snapshot.RunID,
+		SessionID:  sessionID,
+		StepID:     snapshot.StepID,
+		Status:     clientui.RunStatus(snapshot.Status),
+		StartedAt:  snapshot.StartedAt,
+		FinishedAt: snapshot.FinishedAt,
+	}
 }
 
 func ChatSnapshotFromRuntime(snapshot runtime.ChatSnapshot) clientui.ChatSnapshot {

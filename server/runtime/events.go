@@ -3,6 +3,7 @@ package runtime
 import (
 	"builder/server/llm"
 	"builder/server/tools"
+	"time"
 )
 
 type EventKind string
@@ -47,7 +48,11 @@ type Event struct {
 }
 
 type RunState struct {
-	Busy bool
+	Busy       bool
+	RunID      string
+	Status     RunStatus
+	StartedAt  time.Time
+	FinishedAt time.Time
 }
 
 type BackgroundShellEvent struct {
