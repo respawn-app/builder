@@ -106,6 +106,8 @@ func (m *Manager) Start(ctx context.Context, req ExecRequest) (ExecResult, error
 	entry := &processEntry{
 		id:             id,
 		ownerSessionID: strings.TrimSpace(req.OwnerSessionID),
+		ownerRunID:     strings.TrimSpace(req.OwnerRunID),
+		ownerStepID:    strings.TrimSpace(req.OwnerStepID),
 		command:        strings.TrimSpace(req.DisplayCommand),
 		workdir:        workdir,
 		startedAt:      time.Now().UTC(),

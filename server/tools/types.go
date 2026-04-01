@@ -27,6 +27,7 @@ type Call struct {
 	ID     string
 	Name   ID
 	Input  json.RawMessage
+	RunID  string
 	StepID string
 }
 

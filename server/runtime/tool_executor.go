@@ -20,6 +20,7 @@ func (t *defaultToolExecutor) ExecuteToolCalls(ctx context.Context, stepID strin
 	results := make([]tools.Result, len(calls))
 	callErrs := make([]error, len(calls))
 	wg := sync.WaitGroup{}
+	runID := activeRunIDForStep(e, stepID)
 
 	for i := range calls {
 		call := calls[i]
@@ -46,7 +47,7 @@ func (t *defaultToolExecutor) ExecuteToolCalls(ctx context.Context, stepID strin
 			h, ok := e.registry.Get(toolID)
 			if toolID == tools.ToolWebSearch {
 				if err := tools.ValidateWebSearchInput(tc.Input); err != nil {
-					results[idx] = tools.ErrorResult(tools.Call{ID: tc.ID, Name: toolID, Input: tc.Input, StepID: stepID}, tools.InvalidWebSearchQueryMessage)
+					results[idx] = tools.ErrorResult(tools.Call{ID: tc.ID, Name: toolID, Input: tc.Input, RunID: runID, StepID: stepID}, tools.InvalidWebSearchQueryMessage)
 					if err := e.persistToolCompletion(stepID, results[idx]); err != nil {
 						callErrs[idx] = fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", tc.ID, results[idx].Name, err)
 					} else {
@@ -64,7 +65,7 @@ func (t *defaultToolExecutor) ExecuteToolCalls(ctx context.Context, stepID strin
 				}
 				return
 			}
-			res, err := h.Call(ctx, tools.Call{ID: tc.ID, Name: toolID, Input: tc.Input, StepID: stepID})
+			res, err := h.Call(ctx, tools.Call{ID: tc.ID, Name: toolID, Input: tc.Input, RunID: runID, StepID: stepID})
 			if err != nil {
 				callErr = err
 				res = tools.Result{CallID: tc.ID, Name: toolID, IsError: true, Output: mustJSON(map[string]any{"error": err.Error()})}
@@ -92,6 +93,17 @@ func (t *defaultToolExecutor) ExecuteToolCalls(ctx context.Context, stepID strin
 		return results, joined
 	}
 	return results, nil
+}
+
+func activeRunIDForStep(engine *Engine, stepID string) string {
+	if engine == nil {
+		return ""
+	}
+	snapshot := engine.ActiveRun()
+	if snapshot == nil || snapshot.StepID != stepID {
+		return ""
+	}
+	return snapshot.RunID
 }
 
 func copiedToolCall(call llm.ToolCall) *llm.ToolCall {

@@ -24,6 +24,10 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - Added focused lifecycle coverage proving `EventRunStateChanged` emits stable `run_id`, status, and timing for both completed and interrupted runs.
 - Added a real-engine loopback test proving `RuntimeClient.MainView()` exposes active-run hydration while a run is in flight.
 - Added integration coverage proving the real `cli/app` `PrepareRuntime(...)` path registers the live runtime into the shared `SessionViewClient` read surface, rather than only through manual test registration.
+- Threaded explicit process ownership through shell-backed background execution, so background processes now carry owning `session_id`, `run_id`, and `step_id` rather than only a session-scoped manager identity.
+- Added the first transport-neutral process read service via `shared/serverapi` + `shared/client` + `server/processview`, with embedded-mode production reads resolving through the server-owned background manager.
+- Switched the CLI `/ps` list hydration path onto that process read service while preserving the existing local background-manager control path for kill/inline/log actions.
+- Added focused coverage proving process ownership is stamped at creation time, survives projection through the server read service, and is available through embedded-mode loopback reads.
 
 ## What This Proves
 
@@ -33,16 +37,18 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - The first transport-neutral read boundary now exists for session main-view hydration and run lookup rather than reads living only as live-engine helpers.
 - The read boundary now resolves resources by ID and can hydrate dormant sessions without mutating persisted state, which is the minimum correctness bar for future daemon/web clients.
 - The embedded server now owns the production resolver path for session hydration, which is the first concrete move from loopback-only helpers toward a real multi-session app-server read layer.
+- Process resources now have explicit session/run ownership on the server side, and `/ps` list hydration no longer depends on CLI-local snapshot projection of the background manager.
 - Phase 2 can proceed incrementally without introducing a durable run store or transport-level event redesign yet.
 
 ## Current Limitations
 
-- Durable run history currently covers lifecycle metadata only. There is still no richer run-scoped index for processes, asks, approvals, or delegated task state.
+- Durable run history currently covers lifecycle metadata only. There is still no durable run-scoped index for processes, asks, approvals, or delegated task state after process exit or restart.
 - Reopen semantics currently reconstruct unfinished durable runs from `run_started` without a matching `run_finished`, but that state is not yet surfaced through a higher-level application read API.
-- The new application read service still uses partial dormant reconstruction rather than richer persisted read models for settings/process/approval state, and the current server-owned registries are embedded-mode only rather than shared daemon infrastructure.
-- The UI is hydrating through `RuntimeMainView`, but it is not yet rendering run-specific UX beyond carrying the typed data.
+- The new application read services still use partial dormant reconstruction rather than richer persisted read models for settings/approval state, and the current server-owned registries are embedded-mode only rather than shared daemon infrastructure.
+- Process control remains a frontend-local loopback path over `shelltool.Manager`; only process reads are on the new shared boundary so far.
+- The UI is hydrating through `RuntimeMainView` and the process read service, but it is not yet rendering richer run/process-specific UX beyond carrying the typed data.
 
 ## Next Slice
 
-- Promote the current embedded-mode registries into reusable server infrastructure so session selection, detached hydration, and later transport handlers can all resolve sessions/runtimes through the same server-owned registry layer.
-- Introduce explicit process/run ownership links and session/run hydration tests that assume more than one run over time.
+- Promote the current embedded-mode registries into reusable server infrastructure so session selection, detached hydration, and later transport handlers can all resolve sessions/runtimes/processes through the same server-owned registry layer.
+- Extend the process surface from read-only ownership metadata into typed process inspect/control contracts, and widen run-scoped hydration/tests beyond the single active-run case.

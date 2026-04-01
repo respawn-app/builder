@@ -34,6 +34,7 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 		WithUIAlternateScreenPolicy(active.TUIAlternateScreen),
 		WithUICommandRegistry(commandRegistry),
 		WithUIBackgroundManager(wiring.background),
+		WithUIProcessClient(newUIProcessClientWithReads(wiring.background, wiring.processViews)),
 		WithUIPromptHistory(wiring.promptHistory),
 		WithUIStartupSubmit(initialPrompt),
 		WithUIInitialInput(initialInput),

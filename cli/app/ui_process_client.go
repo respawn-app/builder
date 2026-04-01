@@ -1,19 +1,29 @@
 package app
 
 import (
+	"context"
+
+	"builder/server/processview"
 	shelltool "builder/server/tools/shell"
+	"builder/shared/client"
 	"builder/shared/clientui"
+	"builder/shared/serverapi"
 )
 
 type backgroundUIProcessClient struct {
 	manager *shelltool.Manager
+	reads   client.ProcessViewClient
 }
 
 func newUIProcessClient(manager *shelltool.Manager) clientui.ProcessClient {
-	if manager == nil {
+	return newUIProcessClientWithReads(manager, nil)
+}
+
+func newUIProcessClientWithReads(manager *shelltool.Manager, reads client.ProcessViewClient) clientui.ProcessClient {
+	if manager == nil && reads == nil {
 		return nil
 	}
-	return backgroundUIProcessClient{manager: manager}
+	return backgroundUIProcessClient{manager: manager, reads: reads}
 }
 
 func (m *uiModel) listProcesses() []clientui.BackgroundProcess {
@@ -24,38 +34,19 @@ func (m *uiModel) listProcesses() []clientui.BackgroundProcess {
 }
 
 func (c backgroundUIProcessClient) ListProcesses() []clientui.BackgroundProcess {
+	if c.reads != nil {
+		resp, err := c.reads.ListProcesses(context.Background(), serverapi.ProcessListRequest{})
+		if err == nil {
+			return resp.Processes
+		}
+	}
+	if c.manager == nil {
+		return nil
+	}
 	entries := c.manager.List()
 	out := make([]clientui.BackgroundProcess, 0, len(entries))
 	for _, entry := range entries {
-		out = append(out, projectBackgroundProcess(entry))
+		out = append(out, processview.ProcessFromSnapshot(entry))
 	}
 	return out
-}
-
-func projectBackgroundProcess(entry shelltool.Snapshot) clientui.BackgroundProcess {
-	return clientui.BackgroundProcess{
-		ID:             entry.ID,
-		OwnerSessionID: entry.OwnerSessionID,
-		State:          entry.State,
-		Command:        entry.Command,
-		Workdir:        entry.Workdir,
-		StartedAt:      entry.StartedAt,
-		FinishedAt:     entry.FinishedAt,
-		ExitCode:       cloneInt(entry.ExitCode),
-		LogPath:        entry.LogPath,
-		RecentOutput:   entry.RecentOutput,
-		Running:        entry.Running,
-		StdinOpen:      entry.StdinOpen,
-		Backgrounded:   entry.Backgrounded,
-		KillRequested:  entry.KillRequested,
-		LastUpdatedAt:  entry.LastUpdatedAt,
-	}
-}
-
-func cloneInt(value *int) *int {
-	if value == nil {
-		return nil
-	}
-	copy := *value
-	return &copy
 }

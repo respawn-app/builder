@@ -9,6 +9,7 @@ import (
 	"builder/server/auth"
 	"builder/server/authflow"
 	serverbootstrap "builder/server/bootstrap"
+	"builder/server/processview"
 	"builder/server/runprompt"
 	"builder/server/runtime"
 	"builder/server/runtimewire"
@@ -56,6 +57,7 @@ type Server struct {
 	background       *shelltool.Manager
 	backgroundRouter *runtimewire.BackgroundEventRouter
 	runtimeRegistry  *runtimeRegistry
+	processViews     client.ProcessViewClient
 	sessionViews     client.SessionViewClient
 }
 
@@ -164,6 +166,9 @@ func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) 
 		background:       runtimeSupport.Background,
 		backgroundRouter: runtimeSupport.BackgroundRouter,
 		runtimeRegistry:  runtimeRegistry,
+		processViews: client.NewLoopbackProcessViewClient(
+			processview.NewService(runtimeSupport.Background),
+		),
 		sessionViews: client.NewLoopbackSessionViewClient(
 			sessionview.NewService(persistenceSessionResolver{persistenceRoot: cfg.PersistenceRoot}, runtimeRegistry),
 		),
@@ -231,6 +236,13 @@ func (s *Server) SessionViewClient() client.SessionViewClient {
 		return nil
 	}
 	return s.sessionViews
+}
+
+func (s *Server) ProcessViewClient() client.ProcessViewClient {
+	if s == nil {
+		return nil
+	}
+	return s.processViews
 }
 
 func (s *Server) RegisterRuntime(sessionID string, engine *runtime.Engine) {

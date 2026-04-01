@@ -5,6 +5,8 @@ import "time"
 type BackgroundProcess struct {
 	ID             string
 	OwnerSessionID string
+	OwnerRunID     string
+	OwnerStepID    string
 	State          string
 	Command        string
 	Workdir        string
