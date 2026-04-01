@@ -99,7 +99,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err := discovery.Write(discoveryPath, record); err != nil {
 		return err
 	}
-	defer func() { _ = discovery.Remove(discoveryPath) }()
+	defer func() { _ = cleanupDiscoveryRecord(discoveryPath, record) }()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(protocol.HealthPath, func(w http.ResponseWriter, _ *http.Request) {
@@ -146,6 +146,17 @@ func (s *Server) Serve(ctx context.Context) error {
 	case serveErr := <-errCh:
 		return serveErr
 	}
+}
+
+func cleanupDiscoveryRecord(path string, record protocol.DiscoveryRecord) error {
+	current, err := discovery.Read(path)
+	if err != nil {
+		return nil
+	}
+	if current.Identity.ServerID != record.Identity.ServerID || current.StartedAt != record.StartedAt {
+		return nil
+	}
+	return discovery.Remove(path)
 }
 
 func writeStatusJSON(w http.ResponseWriter, status int, body map[string]any) {

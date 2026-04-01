@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"builder/server/session"
+	"builder/server/tools"
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
@@ -152,6 +153,71 @@ func TestPlannerInteractiveUsesProjectViewSessionsAndReopensBySessionID(t *testi
 	}
 	if projectViews.overviewCalls != 1 {
 		t.Fatalf("expected project overview to be used once, got %d", projectViews.overviewCalls)
+	}
+}
+
+func TestApplyRunPromptOverridesOverridesHeadlessSettingsWithoutMutatingBasePlan(t *testing.T) {
+	root := t.TempDir()
+	workspace := t.TempDir()
+	containerDir := filepath.Join(root, "sessions", "workspace-a")
+	store, err := session.Create(containerDir, "workspace-a", workspace)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	plan := SessionPlan{
+		Store: store,
+		ActiveSettings: config.Settings{
+			Model:         "base-model",
+			ThinkingLevel: "low",
+			Theme:         "dark",
+			EnabledTools: map[tools.ID]bool{
+				tools.ToolShell: true,
+			},
+			Timeouts: config.Timeouts{ModelRequestSeconds: 100, ShellDefaultSeconds: 200},
+		},
+		EnabledTools:        []tools.ID{tools.ToolShell},
+		ConfiguredModelName: "base-model",
+		WorkspaceRoot:       workspace,
+	}
+
+	updated, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{
+		Model:               "gpt-5-mini",
+		ThinkingLevel:       "medium",
+		Theme:               "light",
+		ModelTimeoutSeconds: 12,
+		ShellTimeoutSeconds: 34,
+		Tools:               "shell,patch",
+		OpenAIBaseURL:       "http://override.local/v1",
+	})
+	if err != nil {
+		t.Fatalf("ApplyRunPromptOverrides: %v", err)
+	}
+	if updated.ActiveSettings.Model != "gpt-5-mini" {
+		t.Fatalf("model = %q, want gpt-5-mini", updated.ActiveSettings.Model)
+	}
+	if updated.ConfiguredModelName != "gpt-5-mini" {
+		t.Fatalf("configured model = %q, want gpt-5-mini", updated.ConfiguredModelName)
+	}
+	if updated.ActiveSettings.ThinkingLevel != "medium" {
+		t.Fatalf("thinking level = %q, want medium", updated.ActiveSettings.ThinkingLevel)
+	}
+	if updated.ActiveSettings.Theme != "light" {
+		t.Fatalf("theme = %q, want light", updated.ActiveSettings.Theme)
+	}
+	if updated.ActiveSettings.Timeouts.ModelRequestSeconds != 12 || updated.ActiveSettings.Timeouts.ShellDefaultSeconds != 34 {
+		t.Fatalf("timeouts = %+v, want 12/34", updated.ActiveSettings.Timeouts)
+	}
+	if len(updated.EnabledTools) != 2 || updated.EnabledTools[0] != tools.ToolPatch || updated.EnabledTools[1] != tools.ToolShell {
+		t.Fatalf("enabled tools = %+v, want patch+shell", updated.EnabledTools)
+	}
+	if updated.ActiveSettings.OpenAIBaseURL != "http://override.local/v1" {
+		t.Fatalf("openai base url = %q, want http://override.local/v1", updated.ActiveSettings.OpenAIBaseURL)
+	}
+	if got := updated.Store.Meta().Continuation; got == nil || got.OpenAIBaseURL != "http://override.local/v1" {
+		t.Fatalf("continuation = %+v, want override url", got)
+	}
+	if plan.ActiveSettings.Model != "base-model" {
+		t.Fatalf("base plan mutated: %+v", plan.ActiveSettings)
 	}
 }
 

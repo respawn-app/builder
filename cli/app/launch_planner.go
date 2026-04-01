@@ -123,7 +123,7 @@ func (p *launchPlanner) PlanSession(req sessionLaunchRequest) (sessionLaunchPlan
 		}
 	}
 	cfg := p.server.Config()
-	return sessionLaunchPlan{
+	plan := sessionLaunchPlan{
 		Mode:                req.Mode,
 		SessionID:           resp.Plan.SessionID,
 		ActiveSettings:      resp.Plan.ActiveSettings,
@@ -141,7 +141,8 @@ func (p *launchPlanner) PlanSession(req sessionLaunchRequest) (sessionLaunchPlan
 		},
 		WorkspaceRoot: resp.Plan.WorkspaceRoot,
 		Source:        resp.Plan.Source,
-	}, nil
+	}
+	return applyCLIOverridesToSessionPlan(plan, cfg), nil
 }
 
 func (p *launchPlanner) PrepareRuntime(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
@@ -216,6 +217,81 @@ func sessionSummariesFromProjectView(items []clientui.SessionSummary) []session.
 			FirstPromptPreview: item.FirstPromptPreview,
 			UpdatedAt:          item.UpdatedAt,
 		})
+	}
+	return out
+}
+
+func applyCLIOverridesToSessionPlan(plan sessionLaunchPlan, cfg config.App) sessionLaunchPlan {
+	sources := cfg.Source.Sources
+	if sourceIsCLI(sources, "model") && !plan.ModelContractLocked {
+		plan.ActiveSettings.Model = cfg.Settings.Model
+		plan.ConfiguredModelName = cfg.Settings.Model
+	}
+	if sourceIsCLI(sources, "provider_override") {
+		plan.ActiveSettings.ProviderOverride = cfg.Settings.ProviderOverride
+	}
+	if sourceIsCLI(sources, "thinking_level") {
+		plan.ActiveSettings.ThinkingLevel = cfg.Settings.ThinkingLevel
+	}
+	if sourceIsCLI(sources, "theme") {
+		plan.ActiveSettings.Theme = cfg.Settings.Theme
+	}
+	if sourceIsCLI(sources, "timeouts.model_request_seconds") {
+		plan.ActiveSettings.Timeouts.ModelRequestSeconds = cfg.Settings.Timeouts.ModelRequestSeconds
+	}
+	if sourceIsCLI(sources, "timeouts.shell_default_seconds") {
+		plan.ActiveSettings.Timeouts.ShellDefaultSeconds = cfg.Settings.Timeouts.ShellDefaultSeconds
+	}
+	if sourceIsCLI(sources, "openai_base_url") {
+		plan.ActiveSettings.OpenAIBaseURL = cfg.Settings.OpenAIBaseURL
+	}
+	if hasCLIToolOverride(cfg.Source) && !plan.ModelContractLocked {
+		plan.ActiveSettings.EnabledTools = cloneEnabledToolSet(cfg.Settings.EnabledTools)
+		plan.EnabledTools = dedupeSortToolIDs(activeToolIDs(cfg.Settings, cfg.Source, nil))
+	}
+	plan.Source = mergeCLISources(plan.Source, cfg.Source)
+	plan.StatusConfig.Settings = plan.ActiveSettings
+	plan.StatusConfig.Source = plan.Source
+	return plan
+}
+
+func sourceIsCLI(sources map[string]string, key string) bool {
+	return strings.TrimSpace(sources[key]) == "cli"
+}
+
+func hasCLIToolOverride(source config.SourceReport) bool {
+	for _, id := range tools.CatalogIDs() {
+		if sourceIsCLI(source.Sources, "tools."+string(id)) {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeCLISources(base config.SourceReport, override config.SourceReport) config.SourceReport {
+	merged := base
+	merged.SettingsPath = override.SettingsPath
+	merged.SettingsFileExists = override.SettingsFileExists
+	merged.CreatedDefaultConfig = override.CreatedDefaultConfig
+	merged.Sources = make(map[string]string, len(base.Sources)+len(override.Sources))
+	for key, value := range base.Sources {
+		merged.Sources[key] = value
+	}
+	for key, value := range override.Sources {
+		if strings.TrimSpace(value) == "cli" {
+			merged.Sources[key] = value
+		}
+	}
+	return merged
+}
+
+func cloneEnabledToolSet(in map[tools.ID]bool) map[tools.ID]bool {
+	if len(in) == 0 {
+		return map[tools.ID]bool{}
+	}
+	out := make(map[tools.ID]bool, len(in))
+	for id, enabled := range in {
+		out[id] = enabled
 	}
 	return out
 }
