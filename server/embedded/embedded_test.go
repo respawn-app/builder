@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -622,6 +623,82 @@ func TestProcessViewClientListsBackgroundProcessesWithRunOwnership(t *testing.T)
 	}
 	if resp.Processes[0].OwnerRunID != "run-1" || resp.Processes[0].OwnerStepID != "step-1" {
 		t.Fatalf("unexpected process ownership: %+v", resp.Processes[0])
+	}
+}
+
+func TestProcessOutputClientStreamsBackgroundProcessOutput(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	server, err := Start(context.Background(), Request{
+		WorkspaceRoot: workspace,
+		LookupEnv:     os.Getenv,
+	}, StartHooks{
+		Auth: &testAuthHandler{lookupEnv: os.Getenv},
+		Onboarding: &testOnboardingHandler{
+			ensure: func(_ context.Context, req OnboardingRequest) (config.App, error) {
+				path, created, err := config.WriteDefaultSettingsFile()
+				if err != nil {
+					return config.App{}, err
+				}
+				reloaded, err := req.ReloadConfig()
+				if err != nil {
+					return config.App{}, err
+				}
+				reloaded.Source.CreatedDefaultConfig = created
+				reloaded.Source.SettingsPath = path
+				reloaded.Source.SettingsFileExists = true
+				return reloaded, nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start embedded server: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+	server.Background().SetMinimumExecToBgTime(250 * time.Millisecond)
+
+	result, err := server.Background().Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "printf 'first\\n'; sleep 0.4; printf 'second\\n'"},
+		DisplayCommand: "embedded-process-output",
+		OwnerSessionID: "session-1",
+		OwnerRunID:     "run-1",
+		OwnerStepID:    "step-1",
+		Workdir:        workspace,
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start background process: %v", err)
+	}
+	if !result.Backgrounded {
+		t.Fatal("expected backgrounded process")
+	}
+
+	sub, err := server.ProcessOutputClient().SubscribeProcessOutput(context.Background(), serverapi.ProcessOutputSubscribeRequest{ProcessID: result.SessionID})
+	if err != nil {
+		t.Fatalf("SubscribeProcessOutput: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	first, err := sub.Next(context.Background())
+	if err != nil {
+		t.Fatalf("first Next: %v", err)
+	}
+	if first.ProcessID != result.SessionID || !strings.Contains(first.Text, "first") {
+		t.Fatalf("unexpected first chunk: %+v", first)
+	}
+
+	second, err := sub.Next(context.Background())
+	if err != nil {
+		t.Fatalf("second Next: %v", err)
+	}
+	if second.OffsetBytes <= first.OffsetBytes || !strings.Contains(second.Text, "second") {
+		t.Fatalf("unexpected second chunk: %+v", second)
+	}
+	if _, err := sub.Next(context.Background()); !errors.Is(err, io.EOF) {
+		t.Fatalf("expected EOF after process exit, got %v", err)
 	}
 }
 

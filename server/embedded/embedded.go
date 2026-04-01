@@ -9,6 +9,7 @@ import (
 	"builder/server/auth"
 	"builder/server/authflow"
 	serverbootstrap "builder/server/bootstrap"
+	"builder/server/processoutput"
 	"builder/server/processview"
 	"builder/server/projectview"
 	"builder/server/registry"
@@ -65,6 +66,7 @@ type Server struct {
 	askViews         client.AskViewClient
 	approvalViews    client.ApprovalViewClient
 	processControls  client.ProcessControlClient
+	processOutput    client.ProcessOutputClient
 	processViews     client.ProcessViewClient
 	sessionViews     client.SessionViewClient
 	sessionActivity  client.SessionActivityClient
@@ -123,6 +125,7 @@ func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) 
 	askService := askview.NewService(runtimeRegistry)
 	approvalService := approvalview.NewService(runtimeRegistry)
 	processService := processview.NewService(runtimeSupport.Background)
+	processOutputService := processoutput.NewService(runtimeSupport.Background)
 	return &Server{
 		cfg:              cfg,
 		containerDir:     containerDir,
@@ -144,6 +147,9 @@ func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) 
 		),
 		processControls: client.NewLoopbackProcessControlClient(
 			processService,
+		),
+		processOutput: client.NewLoopbackProcessOutputClient(
+			processOutputService,
 		),
 		processViews: client.NewLoopbackProcessViewClient(
 			processService,
@@ -260,6 +266,13 @@ func (s *Server) ProcessControlClient() client.ProcessControlClient {
 		return nil
 	}
 	return s.processControls
+}
+
+func (s *Server) ProcessOutputClient() client.ProcessOutputClient {
+	if s == nil {
+		return nil
+	}
+	return s.processOutput
 }
 
 func (s *Server) SessionActivityClient() client.SessionActivityClient {

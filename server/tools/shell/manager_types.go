@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"context"
 	"io"
 	"os"
 	"os/exec"
@@ -93,6 +94,17 @@ type BackgroundNoticeSummary struct {
 	LineCount   int
 	Truncated   bool
 	LogPath     string
+}
+
+type OutputChunk struct {
+	ProcessID   string
+	OffsetBytes int64
+	Text        string
+}
+
+type OutputSubscription interface {
+	Next(ctx context.Context) (OutputChunk, error)
+	Close() error
 }
 
 type BackgroundOutputMode string
