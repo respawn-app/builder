@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -11,7 +12,20 @@ import (
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/serverapi"
 )
+
+type failingSessionViewClient struct {
+	err error
+}
+
+func (c failingSessionViewClient) GetSessionMainView(context.Context, serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
+	return serverapi.SessionMainViewResponse{}, c.err
+}
+
+func (c failingSessionViewClient) GetRun(context.Context, serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {
+	return serverapi.RunGetResponse{}, c.err
+}
 
 type runtimeClientFakeLLM struct {
 	mu        sync.Mutex
@@ -115,5 +129,35 @@ func TestRuntimeClientMainViewIncludesActiveRunFromRealEngine(t *testing.T) {
 	close(release)
 	if err := <-result; err != nil {
 		t.Fatalf("submit user message: %v", err)
+	}
+}
+
+func TestRuntimeClientMainViewFallsBackToLocalRuntimeProjectionOnReadError(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.SetParentSessionID("parent-123"); err != nil {
+		t.Fatalf("set parent session id: %v", err)
+	}
+	eng, err := runtime.New(store, &runtimeClientFakeLLM{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.SetThinkingLevel("high"); err != nil {
+		t.Fatalf("set thinking level: %v", err)
+	}
+
+	runtimeClient := newUIRuntimeClientWithReads(eng, failingSessionViewClient{err: errors.New("boom")})
+	view := runtimeClient.MainView()
+	if view.Session.SessionID != store.Meta().SessionID {
+		t.Fatalf("session id = %q, want %q", view.Session.SessionID, store.Meta().SessionID)
+	}
+	if view.Status.ParentSessionID != "parent-123" {
+		t.Fatalf("parent session id = %q, want parent-123", view.Status.ParentSessionID)
+	}
+	if view.Status.ThinkingLevel != "high" {
+		t.Fatalf("thinking level = %q, want high", view.Status.ThinkingLevel)
 	}
 }

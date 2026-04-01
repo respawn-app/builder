@@ -23,6 +23,7 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - Added read-only `server/session.Snapshot` loaders plus embedded-server runtime/session registries, so the production `sessionview` path now resolves dormant sessions from persistence root and active runtimes from server-owned state rather than static one-session wiring.
 - Added focused lifecycle coverage proving `EventRunStateChanged` emits stable `run_id`, status, and timing for both completed and interrupted runs.
 - Added a real-engine loopback test proving `RuntimeClient.MainView()` exposes active-run hydration while a run is in flight.
+- Added integration coverage proving the real `cli/app` `PrepareRuntime(...)` path registers the live runtime into the shared `SessionViewClient` read surface, rather than only through manual test registration.
 
 ## What This Proves
 

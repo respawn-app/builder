@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"testing"
 
 	"builder/server/auth"
 	serverembedded "builder/server/embedded"
@@ -15,6 +16,7 @@ import (
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
 	"builder/shared/config"
+	"builder/shared/serverapi"
 )
 
 type testEmbeddedServer struct {
@@ -134,4 +136,42 @@ func (s *testEmbeddedServer) ResolveTransition(ctx context.Context, interactor a
 		ForceNewSession: resolved.ForceNewSession,
 		ShouldContinue:  resolved.ShouldContinue,
 	}, nil
+}
+
+func TestEmbeddedAppServerPrepareRuntimeRegistersRuntimeForSessionViews(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("start embedded server: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test prepare runtime")
+	if err != nil {
+		t.Fatalf("prepare runtime: %v", err)
+	}
+	defer runtimePlan.Close()
+	if err := runtimePlan.Wiring.engine.SetThinkingLevel("high"); err != nil {
+		t.Fatalf("set thinking level: %v", err)
+	}
+
+	resp, err := server.SessionViewClient().GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: plan.Store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("get session main view while runtime attached: %v", err)
+	}
+	if resp.MainView.Session.SessionID != plan.Store.Meta().SessionID {
+		t.Fatalf("session id = %q, want %q", resp.MainView.Session.SessionID, plan.Store.Meta().SessionID)
+	}
+	if resp.MainView.Status.ThinkingLevel != "high" {
+		t.Fatalf("thinking level = %q, want high", resp.MainView.Status.ThinkingLevel)
+	}
 }
