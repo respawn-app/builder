@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	askquestion "builder/server/tools/askquestion"
@@ -24,10 +25,19 @@ func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivityS
 		return out, func() {}
 	}
 	pollCtx, cancel := context.WithCancel(ctx)
+	var pendingMu sync.Mutex
+	pendingPromptIDs := make(map[string]struct{})
+	var requeue func(clientui.PendingPromptEvent)
+	requeue = func(item clientui.PendingPromptEvent) {
+		select {
+		case <-pollCtx.Done():
+			return
+		case out <- pendingPromptEvent(pollCtx, item, control, requeue):
+		}
+	}
 	go func() {
 		defer close(out)
 		current := sub
-		pendingPromptIDs := make(map[string]struct{})
 		for {
 			evt, err := current.Next(pollCtx)
 			if err != nil {
@@ -46,13 +56,18 @@ func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivityS
 			}
 			switch evt.Type {
 			case clientui.PendingPromptEventResolved:
+				pendingMu.Lock()
 				delete(pendingPromptIDs, evt.PromptID)
+				pendingMu.Unlock()
 				continue
 			case clientui.PendingPromptEventPending:
+				pendingMu.Lock()
 				if _, exists := pendingPromptIDs[evt.PromptID]; exists {
+					pendingMu.Unlock()
 					continue
 				}
 				pendingPromptIDs[evt.PromptID] = struct{}{}
+				pendingMu.Unlock()
 			default:
 				continue
 			}
@@ -60,7 +75,7 @@ func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivityS
 			case <-pollCtx.Done():
 				_ = current.Close()
 				return
-			case out <- pendingPromptEvent(evt, control):
+			case out <- pendingPromptEvent(pollCtx, evt, control, requeue):
 			}
 		}
 	}()
@@ -93,7 +108,7 @@ func waitPromptActivityRetry(ctx context.Context) bool {
 	}
 }
 
-func pendingPromptEvent(item clientui.PendingPromptEvent, control client.PromptControlClient) askEvent {
+func pendingPromptEvent(ctx context.Context, item clientui.PendingPromptEvent, control client.PromptControlClient, retry func(clientui.PendingPromptEvent)) askEvent {
 	req := askquestion.Request{
 		ID:                     item.PromptID,
 		Question:               item.Question,
@@ -123,7 +138,11 @@ func pendingPromptEvent(item clientui.PendingPromptEvent, control client.PromptC
 			} else {
 				answerReq.ErrorMessage = errors.New("approval response is required").Error()
 			}
-			_ = control.AnswerApproval(context.Background(), answerReq)
+			if err := control.AnswerApproval(ctx, answerReq); err != nil {
+				if retry != nil && !errors.Is(err, context.Canceled) {
+					retry(item)
+				}
+			}
 			return
 		}
 		answerReq := serverapi.AskAnswerRequest{ClientRequestID: uuid.NewString(), SessionID: item.SessionID, AskID: item.PromptID}
@@ -134,7 +153,11 @@ func pendingPromptEvent(item clientui.PendingPromptEvent, control client.PromptC
 			answerReq.SelectedOptionNumber = result.response.SelectedOptionNumber
 			answerReq.FreeformAnswer = result.response.FreeformAnswer
 		}
-		_ = control.AnswerAsk(context.Background(), answerReq)
+		if err := control.AnswerAsk(ctx, answerReq); err != nil {
+			if retry != nil && !errors.Is(err, context.Canceled) {
+				retry(item)
+			}
+		}
 	}()
 	return askEvent{req: req, reply: reply}
 }
