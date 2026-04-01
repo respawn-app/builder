@@ -1,6 +1,7 @@
 package launch
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"sort"
@@ -9,7 +10,10 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/client"
+	"builder/shared/clientui"
 	"builder/shared/config"
+	"builder/shared/serverapi"
 )
 
 const (
@@ -24,6 +28,8 @@ type Mode string
 type Planner struct {
 	Config       config.App
 	ContainerDir string
+	ProjectID    string
+	ProjectViews client.ProjectViewClient
 	PickSession  SessionPicker
 }
 
@@ -102,6 +108,13 @@ func (p Planner) openStore(req SessionRequest) (*session.Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	if p.ProjectViews != nil && strings.TrimSpace(p.ProjectID) != "" {
+		resp, err := p.ProjectViews.ListSessionsByProject(context.Background(), serverapi.SessionListByProjectRequest{ProjectID: p.ProjectID})
+		if err != nil {
+			return nil, err
+		}
+		summaries = sessionSummariesFromProjectView(resp.Sessions)
+	}
 	if len(summaries) == 0 {
 		return p.createSession(req.ParentSessionID)
 	}
@@ -121,7 +134,20 @@ func (p Planner) openStore(req SessionRequest) (*session.Store, error) {
 	if picked.Session == nil {
 		return nil, errors.New("no session selected")
 	}
-	return session.Open(picked.Session.Path)
+	return session.OpenByID(p.Config.PersistenceRoot, picked.Session.SessionID)
+}
+
+func sessionSummariesFromProjectView(items []clientui.SessionSummary) []session.Summary {
+	out := make([]session.Summary, 0, len(items))
+	for _, item := range items {
+		out = append(out, session.Summary{
+			SessionID:          item.SessionID,
+			Name:               item.Name,
+			FirstPromptPreview: item.FirstPromptPreview,
+			UpdatedAt:          item.UpdatedAt,
+		})
+	}
+	return out
 }
 
 func (p Planner) createSession(parentSessionID string) (*session.Store, error) {

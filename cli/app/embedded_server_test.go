@@ -30,6 +30,8 @@ type testEmbeddedServer struct {
 	background           *shelltool.Manager
 	backgroundRouter     serverembedded.BackgroundRouter
 	runPromptClient      client.RunPromptClient
+	projectID            string
+	projectViewClient    client.ProjectViewClient
 	processControlClient client.ProcessControlClient
 	processViewClient    client.ProcessViewClient
 	sessionViewClient    client.SessionViewClient
@@ -50,13 +52,15 @@ type stubEmbeddedProcessControlClient struct {
 	killed     []string
 }
 
-func (s *testEmbeddedServer) Close() error                          { return nil }
-func (s *testEmbeddedServer) Config() config.App                    { return s.cfg }
-func (s *testEmbeddedServer) ContainerDir() string                  { return s.containerDir }
-func (s *testEmbeddedServer) OAuthOptions() auth.OpenAIOAuthOptions { return s.oauthOpts }
-func (s *testEmbeddedServer) AuthManager() *auth.Manager            { return s.authManager }
-func (s *testEmbeddedServer) FastModeState() *runtime.FastModeState { return s.fastModeState }
-func (s *testEmbeddedServer) Background() *shelltool.Manager        { return s.background }
+func (s *testEmbeddedServer) Close() error                                { return nil }
+func (s *testEmbeddedServer) Config() config.App                          { return s.cfg }
+func (s *testEmbeddedServer) ProjectID() string                           { return s.projectID }
+func (s *testEmbeddedServer) ProjectViewClient() client.ProjectViewClient { return s.projectViewClient }
+func (s *testEmbeddedServer) ContainerDir() string                        { return s.containerDir }
+func (s *testEmbeddedServer) OAuthOptions() auth.OpenAIOAuthOptions       { return s.oauthOpts }
+func (s *testEmbeddedServer) AuthManager() *auth.Manager                  { return s.authManager }
+func (s *testEmbeddedServer) FastModeState() *runtime.FastModeState       { return s.fastModeState }
+func (s *testEmbeddedServer) Background() *shelltool.Manager              { return s.background }
 func (s *testEmbeddedServer) BackgroundRouter() serverembedded.BackgroundRouter {
 	return s.backgroundRouter
 }
@@ -77,6 +81,8 @@ func (s *testEmbeddedServer) PlanSession(req sessionLaunchRequest, pick sessionP
 	controller := sessioncontrol.Controller{
 		Config:       s.cfg,
 		ContainerDir: s.containerDir,
+		ProjectID:    s.projectID,
+		ProjectViews: s.projectViewClient,
 		AuthManager:  s.authManager,
 		PickSession: func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (launch.SessionSelection, error) {
 			runPicker := pick

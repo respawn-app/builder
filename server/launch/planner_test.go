@@ -1,12 +1,16 @@
 package launch
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"builder/server/session"
+	"builder/shared/client"
+	"builder/shared/clientui"
 	"builder/shared/config"
+	"builder/shared/serverapi"
 )
 
 func TestPlannerHeadlessCreatesNewSessionAndAppliesContinuationContext(t *testing.T) {
@@ -94,4 +98,67 @@ func TestPlannerInteractiveUsesPickerSelection(t *testing.T) {
 	if plan.Store.Meta().SessionID == first.Meta().SessionID {
 		t.Fatalf("did not expect first session %q", first.Meta().SessionID)
 	}
+}
+
+func TestPlannerInteractiveUsesProjectViewSessionsAndReopensBySessionID(t *testing.T) {
+	root := t.TempDir()
+	containerDir := filepath.Join(root, "sessions", "workspace-a")
+	first, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
+	if err != nil {
+		t.Fatalf("create first session: %v", err)
+	}
+	if err := first.SetName("first"); err != nil {
+		t.Fatalf("persist first session meta: %v", err)
+	}
+	second, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
+	if err != nil {
+		t.Fatalf("create second session: %v", err)
+	}
+	if err := second.SetName("second"); err != nil {
+		t.Fatalf("persist second session meta: %v", err)
+	}
+	planner := Planner{
+		Config: config.App{
+			WorkspaceRoot:   "/tmp/workspace-a",
+			PersistenceRoot: root,
+			Settings:        config.Settings{},
+		},
+		ContainerDir: containerDir,
+		ProjectID:    "project-1",
+		ProjectViews: client.NewLoopbackProjectViewClient(&stubLaunchProjectViewService{sessions: serverapi.SessionListByProjectResponse{Sessions: []clientui.SessionSummary{
+			{SessionID: first.Meta().SessionID, Name: "first", UpdatedAt: first.Meta().UpdatedAt},
+			{SessionID: second.Meta().SessionID, Name: "second", UpdatedAt: second.Meta().UpdatedAt},
+		}}}),
+		PickSession: func(summaries []session.Summary) (SessionSelection, error) {
+			if len(summaries) != 2 {
+				t.Fatalf("expected two summaries, got %d", len(summaries))
+			}
+			picked := summaries[1]
+			return SessionSelection{Session: &picked}, nil
+		},
+	}
+
+	plan, err := planner.PlanSession(SessionRequest{Mode: ModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	if plan.Store.Meta().SessionID != second.Meta().SessionID {
+		t.Fatalf("expected selected session %q, got %q", second.Meta().SessionID, plan.Store.Meta().SessionID)
+	}
+}
+
+type stubLaunchProjectViewService struct {
+	sessions serverapi.SessionListByProjectResponse
+}
+
+func (s *stubLaunchProjectViewService) ListProjects(_ context.Context, _ serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
+	return serverapi.ProjectListResponse{}, nil
+}
+
+func (s *stubLaunchProjectViewService) GetProjectOverview(_ context.Context, _ serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
+	return serverapi.ProjectGetOverviewResponse{}, nil
+}
+
+func (s *stubLaunchProjectViewService) ListSessionsByProject(_ context.Context, _ serverapi.SessionListByProjectRequest) (serverapi.SessionListByProjectResponse, error) {
+	return s.sessions, nil
 }
