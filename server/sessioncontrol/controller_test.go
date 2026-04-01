@@ -10,7 +10,10 @@ import (
 	"builder/server/launch"
 	"builder/server/lifecycle"
 	"builder/server/session"
+	"builder/shared/client"
+	"builder/shared/clientui"
 	"builder/shared/config"
+	"builder/shared/serverapi"
 )
 
 func TestControllerPlanSessionForwardsPickerThemeAndPolicy(t *testing.T) {
@@ -44,6 +47,11 @@ func TestControllerPlanSessionForwardsPickerThemeAndPolicy(t *testing.T) {
 			},
 		},
 		ContainerDir: containerDir,
+		ProjectID:    "project-1",
+		ProjectViews: client.NewLoopbackProjectViewClient(&stubControllerProjectViewService{sessions: serverapi.SessionListByProjectResponse{Sessions: []clientui.SessionSummary{
+			{SessionID: first.Meta().SessionID, Name: "first", UpdatedAt: first.Meta().UpdatedAt},
+			{SessionID: store.Meta().SessionID, Name: "second", UpdatedAt: store.Meta().UpdatedAt},
+		}}}),
 		PickSession: func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (launch.SessionSelection, error) {
 			pickedCalled = true
 			gotTheme = theme
@@ -78,6 +86,22 @@ func TestControllerPlanSessionForwardsPickerThemeAndPolicy(t *testing.T) {
 	if plan.Store.Meta().SessionID != store.Meta().SessionID {
 		t.Fatalf("planned session = %q, want %q", plan.Store.Meta().SessionID, store.Meta().SessionID)
 	}
+}
+
+type stubControllerProjectViewService struct {
+	sessions serverapi.SessionListByProjectResponse
+}
+
+func (s *stubControllerProjectViewService) ListProjects(_ context.Context, _ serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
+	return serverapi.ProjectListResponse{}, nil
+}
+
+func (s *stubControllerProjectViewService) GetProjectOverview(_ context.Context, _ serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
+	return serverapi.ProjectGetOverviewResponse{}, nil
+}
+
+func (s *stubControllerProjectViewService) ListSessionsByProject(_ context.Context, _ serverapi.SessionListByProjectRequest) (serverapi.SessionListByProjectResponse, error) {
+	return s.sessions, nil
 }
 
 func TestControllerResolveTransitionLogoutReauthsThroughCallback(t *testing.T) {

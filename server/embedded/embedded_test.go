@@ -489,6 +489,80 @@ func TestSessionViewClientUsesRegisteredRuntimeByID(t *testing.T) {
 	}
 }
 
+func TestProjectViewClientListsCurrentProjectAndSessions(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	server, err := Start(context.Background(), Request{
+		WorkspaceRoot: workspace,
+		LookupEnv:     os.Getenv,
+	}, StartHooks{
+		Auth: &testAuthHandler{lookupEnv: os.Getenv},
+		Onboarding: &testOnboardingHandler{
+			ensure: func(_ context.Context, req OnboardingRequest) (config.App, error) {
+				path, created, err := config.WriteDefaultSettingsFile()
+				if err != nil {
+					return config.App{}, err
+				}
+				reloaded, err := req.ReloadConfig()
+				if err != nil {
+					return config.App{}, err
+				}
+				reloaded.Source.CreatedDefaultConfig = created
+				reloaded.Source.SettingsPath = path
+				reloaded.Source.SettingsFileExists = true
+				return reloaded, nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start embedded server: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	first, err := session.Create(server.ContainerDir(), "workspace-x", workspace)
+	if err != nil {
+		t.Fatalf("create first session: %v", err)
+	}
+	if err := first.SetName("first"); err != nil {
+		t.Fatalf("persist first session meta: %v", err)
+	}
+	second, err := session.Create(server.ContainerDir(), "workspace-x", workspace)
+	if err != nil {
+		t.Fatalf("create second session: %v", err)
+	}
+	if err := second.SetName("second"); err != nil {
+		t.Fatalf("persist second session meta: %v", err)
+	}
+
+	projects, err := server.ProjectViewClient().ListProjects(context.Background(), serverapi.ProjectListRequest{})
+	if err != nil {
+		t.Fatalf("ListProjects: %v", err)
+	}
+	if len(projects.Projects) != 1 {
+		t.Fatalf("expected one project, got %+v", projects)
+	}
+	if projects.Projects[0].ProjectID != server.ProjectID() {
+		t.Fatalf("unexpected project id: %+v", projects.Projects[0])
+	}
+	if projects.Projects[0].SessionCount != 2 {
+		t.Fatalf("unexpected project session count: %+v", projects.Projects[0])
+	}
+
+	sessions, err := server.ProjectViewClient().ListSessionsByProject(context.Background(), serverapi.SessionListByProjectRequest{ProjectID: server.ProjectID()})
+	if err != nil {
+		t.Fatalf("ListSessionsByProject: %v", err)
+	}
+	if len(sessions.Sessions) != 2 {
+		t.Fatalf("expected two sessions, got %+v", sessions)
+	}
+	if sessions.Sessions[0].SessionID != second.Meta().SessionID {
+		t.Fatalf("expected most recent session first, got %+v", sessions.Sessions)
+	}
+}
+
 func TestProcessViewClientListsBackgroundProcessesWithRunOwnership(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

@@ -3,11 +3,13 @@ package embedded
 import (
 	"context"
 	"errors"
+	"path/filepath"
 
 	"builder/server/auth"
 	"builder/server/authflow"
 	serverbootstrap "builder/server/bootstrap"
 	"builder/server/processview"
+	"builder/server/projectview"
 	"builder/server/registry"
 	"builder/server/runprompt"
 	"builder/server/runtime"
@@ -56,6 +58,8 @@ type Server struct {
 	background       *shelltool.Manager
 	backgroundRouter *runtimewire.BackgroundEventRouter
 	runtimeRegistry  *registry.RuntimeRegistry
+	projectID        string
+	projectViews     client.ProjectViewClient
 	processControls  client.ProcessControlClient
 	processViews     client.ProcessViewClient
 	sessionViews     client.SessionViewClient
@@ -104,6 +108,10 @@ func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) 
 		return nil, err
 	}
 	runtimeRegistry := registry.NewRuntimeRegistry()
+	projectService, err := projectview.NewService(filepath.Base(containerDir), cfg.WorkspaceRoot, containerDir)
+	if err != nil {
+		return nil, err
+	}
 	processService := processview.NewService(runtimeSupport.Background)
 	return &Server{
 		cfg:              cfg,
@@ -114,6 +122,10 @@ func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) 
 		background:       runtimeSupport.Background,
 		backgroundRouter: runtimeSupport.BackgroundRouter,
 		runtimeRegistry:  runtimeRegistry,
+		projectID:        projectService.ProjectID(),
+		projectViews: client.NewLoopbackProjectViewClient(
+			projectService,
+		),
 		processControls: client.NewLoopbackProcessControlClient(
 			processService,
 		),
@@ -190,6 +202,20 @@ func (s *Server) SessionViewClient() client.SessionViewClient {
 		return nil
 	}
 	return s.sessionViews
+}
+
+func (s *Server) ProjectID() string {
+	if s == nil {
+		return ""
+	}
+	return s.projectID
+}
+
+func (s *Server) ProjectViewClient() client.ProjectViewClient {
+	if s == nil {
+		return nil
+	}
+	return s.projectViews
 }
 
 func (s *Server) ProcessViewClient() client.ProcessViewClient {
