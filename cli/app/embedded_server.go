@@ -12,6 +12,7 @@ import (
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/sessioncontrol"
+	askquestion "builder/server/tools/askquestion"
 	"builder/shared/client"
 	"builder/shared/config"
 )
@@ -186,6 +187,12 @@ func (s *embeddedAppServer) PrepareRuntime(plan sessionLaunchPlan, diagnosticWri
 	logLaunchPlanStart(logger, plan, startLogLine)
 	wiring, err := newRuntimeWiringWithBackground(plan.Store, plan.ActiveSettings, plan.EnabledTools, plan.WorkspaceRoot, s.inner.AuthManager(), logger, s.inner.Background(), runtimeWiringOptions{
 		FastMode: s.inner.FastModeState(),
+		OnAskStart: func(req askquestion.Request) {
+			s.inner.BeginPendingPrompt(plan.Store.Meta().SessionID, req)
+		},
+		OnAskDone: func(req askquestion.Request, _ askquestion.Response, _ error) {
+			s.inner.CompletePendingPrompt(plan.Store.Meta().SessionID, req.ID)
+		},
 		OnEvent: func(evt runtime.Event) {
 			s.inner.PublishRuntimeEvent(plan.Store.Meta().SessionID, evt)
 		},

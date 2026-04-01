@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/sessioncontrol"
+	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
 	"builder/shared/clientui"
@@ -293,6 +295,132 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessReadsForUIHydration(t *testi
 	if len(got) != 1 || got[0].ID != "remote-proc" || got[0].OwnerRunID != "remote-run" || got[0].OwnerStepID != "remote-step" {
 		t.Fatalf("expected shared process reads to win over local manager snapshot, got %+v", got)
 	}
+}
+
+func TestEmbeddedAppServerPrepareRuntimeExposesPendingAsksAndApprovals(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("start embedded server: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test prepare runtime pending prompts")
+	if err != nil {
+		t.Fatalf("prepare runtime: %v", err)
+	}
+	defer runtimePlan.Close()
+	if runtimePlan.Wiring.askBroker == nil {
+		t.Fatal("expected PrepareRuntime to wire ask broker")
+	}
+
+	askDone := make(chan error, 1)
+	go func() {
+		resp, err := runtimePlan.Wiring.askBroker.Ask(context.Background(), askquestion.Request{ID: "ask-1", Question: "which option?", Suggestions: []string{"one", "two"}, RecommendedOptionIndex: 2})
+		if err != nil {
+			askDone <- err
+			return
+		}
+		if resp.SelectedOptionNumber != 2 {
+			askDone <- fmt.Errorf("selected option number = %d, want 2", resp.SelectedOptionNumber)
+			return
+		}
+		askDone <- nil
+	}()
+
+	asks := waitForPendingAskResources(t, server.inner.AskViewClient(), plan.Store.Meta().SessionID, 1)
+	if asks[0].AskID != "ask-1" || asks[0].RecommendedOptionIndex != 2 {
+		t.Fatalf("unexpected pending ask: %+v", asks[0])
+	}
+	askEvent := <-runtimePlan.Wiring.askBridge.Events()
+	askEvent.reply <- askReply{response: askquestion.Response{RequestID: askEvent.req.ID, SelectedOptionNumber: 2}}
+	if err := <-askDone; err != nil {
+		t.Fatalf("answer ask: %v", err)
+	}
+	if asks := waitForPendingAskResources(t, server.inner.AskViewClient(), plan.Store.Meta().SessionID, 0); len(asks) != 0 {
+		t.Fatalf("expected no pending asks after completion, got %+v", asks)
+	}
+
+	approvalDone := make(chan error, 1)
+	go func() {
+		resp, err := runtimePlan.Wiring.askBroker.Ask(context.Background(), askquestion.Request{ID: "approval-1", Question: "allow edit?", Approval: true, ApprovalOptions: []askquestion.ApprovalOption{{Decision: askquestion.ApprovalDecisionAllowOnce, Label: "Allow once"}, {Decision: askquestion.ApprovalDecisionDeny, Label: "Deny"}}})
+		if err != nil {
+			approvalDone <- err
+			return
+		}
+		if resp.Approval == nil || resp.Approval.Decision != askquestion.ApprovalDecisionAllowOnce {
+			approvalDone <- fmt.Errorf("unexpected approval response: %+v", resp)
+			return
+		}
+		approvalDone <- nil
+	}()
+
+	approvals := waitForPendingApprovalResources(t, server.inner.ApprovalViewClient(), plan.Store.Meta().SessionID, 1)
+	if approvals[0].ApprovalID != "approval-1" {
+		t.Fatalf("unexpected pending approval: %+v", approvals[0])
+	}
+	if len(approvals[0].Options) != 2 || approvals[0].Options[0].Decision != clientui.ApprovalDecisionAllowOnce {
+		t.Fatalf("unexpected approval options: %+v", approvals[0].Options)
+	}
+	approvalEvent := <-runtimePlan.Wiring.askBridge.Events()
+	approvalEvent.reply <- askReply{response: askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowOnce}}}
+	if err := <-approvalDone; err != nil {
+		t.Fatalf("answer approval: %v", err)
+	}
+	if approvals := waitForPendingApprovalResources(t, server.inner.ApprovalViewClient(), plan.Store.Meta().SessionID, 0); len(approvals) != 0 {
+		t.Fatalf("expected no pending approvals after completion, got %+v", approvals)
+	}
+}
+
+func waitForPendingAskResources(t *testing.T, client client.AskViewClient, sessionID string, want int) []clientui.PendingAsk {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := client.ListPendingAsksBySession(context.Background(), serverapi.AskListPendingBySessionRequest{SessionID: sessionID})
+		if err != nil {
+			t.Fatalf("ListPendingAsksBySession: %v", err)
+		}
+		if len(resp.Asks) == want {
+			return resp.Asks
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	resp, err := client.ListPendingAsksBySession(context.Background(), serverapi.AskListPendingBySessionRequest{SessionID: sessionID})
+	if err != nil {
+		t.Fatalf("ListPendingAsksBySession final: %v", err)
+	}
+	t.Fatalf("timed out waiting for %d pending asks, got %+v", want, resp.Asks)
+	return nil
+}
+
+func waitForPendingApprovalResources(t *testing.T, client client.ApprovalViewClient, sessionID string, want int) []clientui.PendingApproval {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := client.ListPendingApprovalsBySession(context.Background(), serverapi.ApprovalListPendingBySessionRequest{SessionID: sessionID})
+		if err != nil {
+			t.Fatalf("ListPendingApprovalsBySession: %v", err)
+		}
+		if len(resp.Approvals) == want {
+			return resp.Approvals
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	resp, err := client.ListPendingApprovalsBySession(context.Background(), serverapi.ApprovalListPendingBySessionRequest{SessionID: sessionID})
+	if err != nil {
+		t.Fatalf("ListPendingApprovalsBySession final: %v", err)
+	}
+	t.Fatalf("timed out waiting for %d pending approvals, got %+v", want, resp.Approvals)
+	return nil
 }
 
 func TestEmbeddedAppServerPrepareRuntimeWiresSessionActivityForSharedClients(t *testing.T) {
