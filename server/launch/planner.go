@@ -91,6 +91,57 @@ func (p Planner) PlanSession(req SessionRequest) (SessionPlan, error) {
 	}, nil
 }
 
+func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOverrides) (SessionPlan, error) {
+	if !overrides.HasAny() {
+		return plan, nil
+	}
+	loaded, err := config.Load(plan.WorkspaceRoot, config.LoadOptions{
+		Model:               strings.TrimSpace(overrides.Model),
+		ProviderOverride:    strings.TrimSpace(overrides.ProviderOverride),
+		ThinkingLevel:       strings.TrimSpace(overrides.ThinkingLevel),
+		Theme:               strings.TrimSpace(overrides.Theme),
+		ModelTimeoutSeconds: overrides.ModelTimeoutSeconds,
+		ShellTimeoutSeconds: overrides.ShellTimeoutSeconds,
+		Tools:               strings.TrimSpace(overrides.Tools),
+		OpenAIBaseURL:       strings.TrimSpace(overrides.OpenAIBaseURL),
+	})
+	if err != nil {
+		return SessionPlan{}, err
+	}
+	next := plan
+	locked := plan.Store.Meta().Locked
+	if strings.TrimSpace(overrides.Model) != "" && !next.ModelContractLocked {
+		next.ActiveSettings.Model = loaded.Settings.Model
+		next.ConfiguredModelName = loaded.Settings.Model
+	}
+	if strings.TrimSpace(overrides.ProviderOverride) != "" {
+		next.ActiveSettings.ProviderOverride = loaded.Settings.ProviderOverride
+	}
+	if strings.TrimSpace(overrides.ThinkingLevel) != "" {
+		next.ActiveSettings.ThinkingLevel = loaded.Settings.ThinkingLevel
+	}
+	if strings.TrimSpace(overrides.Theme) != "" {
+		next.ActiveSettings.Theme = loaded.Settings.Theme
+	}
+	if overrides.ModelTimeoutSeconds > 0 {
+		next.ActiveSettings.Timeouts.ModelRequestSeconds = loaded.Settings.Timeouts.ModelRequestSeconds
+	}
+	if overrides.ShellTimeoutSeconds > 0 {
+		next.ActiveSettings.Timeouts.ShellDefaultSeconds = loaded.Settings.Timeouts.ShellDefaultSeconds
+	}
+	if strings.TrimSpace(overrides.Tools) != "" && locked == nil {
+		next.ActiveSettings.EnabledTools = cloneEnabledToolSet(loaded.Settings.EnabledTools)
+		next.EnabledTools = ActiveToolIDs(next.ActiveSettings, loaded.Source, locked)
+	}
+	if strings.TrimSpace(overrides.OpenAIBaseURL) != "" {
+		next.ActiveSettings.OpenAIBaseURL = loaded.Settings.OpenAIBaseURL
+		if err := next.Store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: next.ActiveSettings.OpenAIBaseURL}); err != nil {
+			return SessionPlan{}, err
+		}
+	}
+	return next, nil
+}
+
 func (p Planner) openStore(req SessionRequest) (*session.Store, error) {
 	if strings.TrimSpace(p.Config.PersistenceRoot) == "" {
 		return nil, errors.New("launch planner persistence root is required")
@@ -224,6 +275,17 @@ func ActiveToolIDs(settings config.Settings, source config.SourceReport, locked 
 		resolved = append(resolved, id)
 	}
 	return DedupeSortToolIDs(resolved)
+}
+
+func cloneEnabledToolSet(in map[tools.ID]bool) map[tools.ID]bool {
+	if len(in) == 0 {
+		return map[tools.ID]bool{}
+	}
+	out := make(map[tools.ID]bool, len(in))
+	for id, enabled := range in {
+		out[id] = enabled
+	}
+	return out
 }
 
 func DedupeSortToolIDs(ids []tools.ID) []tools.ID {

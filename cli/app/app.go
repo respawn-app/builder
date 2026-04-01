@@ -47,7 +47,7 @@ func RunPrompt(ctx context.Context, opts Options, prompt string, timeout time.Du
 			_ = closeFn()
 		}
 	}()
-	return runPrompt(ctx, runClient, strings.TrimSpace(opts.SessionID), prompt, timeout, progress)
+	return runPrompt(ctx, runClient, opts, strings.TrimSpace(opts.SessionID), prompt, timeout, progress)
 }
 func effectiveSettings(base config.Settings, locked *session.LockedContract) config.Settings {
 	return launch.EffectiveSettings(base, locked)

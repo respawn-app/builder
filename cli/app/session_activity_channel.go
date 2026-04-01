@@ -23,7 +23,6 @@ func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivi
 	go func() {
 		defer close(out)
 		current := sub
-		resubscribed := false
 		for {
 			evt, err := current.Next(pollCtx)
 			if err != nil {
@@ -35,10 +34,6 @@ func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivi
 				if err != nil {
 					return
 				}
-				if resubscribed {
-					continue
-				}
-				resubscribed = true
 				select {
 				case <-pollCtx.Done():
 					_ = current.Close()

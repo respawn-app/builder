@@ -131,15 +131,10 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 			_ = logger.Close()
 		},
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if current := s.handles[sessionID]; current != nil {
-		current.activationRequests[requestID] = struct{}{}
-		current.refs++
+	if !s.installHandle(sessionID, requestID, handle) {
 		handle.close()
 		return nil
 	}
-	s.handles[sessionID] = handle
 	return nil
 }
 
@@ -194,6 +189,21 @@ func (s *Service) resolveStore(_ context.Context, sessionID string) (*session.St
 		s.sessionStores.RegisterStore(store)
 	}
 	return store, nil
+}
+
+func (s *Service) installHandle(sessionID string, requestID string, handle *runtimeHandle) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if current := s.handles[sessionID]; current != nil {
+		if _, exists := current.activationRequests[requestID]; exists {
+			return false
+		}
+		current.activationRequests[requestID] = struct{}{}
+		current.refs++
+		return false
+	}
+	s.handles[sessionID] = handle
+	return true
 }
 
 func parseToolIDs(raw []string) ([]tools.ID, error) {

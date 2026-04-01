@@ -228,6 +228,91 @@ func TestRunPromptUsesDiscoveredDaemonWithoutLocalAuth(t *testing.T) {
 	}
 }
 
+func TestRunPromptUsesInvocationOverridesWhenAttachingToDiscoveredDaemon(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	defaultResponses, defaultHits := newFakeResponsesServer(t, []string{"daemon default"})
+	defer defaultResponses.Close()
+	overrideResponses, overrideHits := newFakeResponsesServer(t, []string{"override reply"})
+	defer overrideResponses.Close()
+
+	srv, err := serve.Start(context.Background(), serverstartup.Request{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+		OpenAIBaseURL:         defaultResponses.URL,
+		OpenAIBaseURLExplicit: true,
+	}, memoryAuthHandler{state: auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "test-key"},
+		},
+		UpdatedAt: time.Now().UTC(),
+	}}, autoOnboarding{})
+	if err != nil {
+		t.Fatalf("serve.Start: %v", err)
+	}
+	defer func() { _ = srv.Close() }()
+
+	serveCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Serve(serveCtx)
+	}()
+
+	loadCfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	_, containerDir, err := config.ResolveWorkspaceContainer(loadCfg)
+	if err != nil {
+		t.Fatalf("ResolveWorkspaceContainer: %v", err)
+	}
+	discoveryPath, err := discovery.PathForContainer(containerDir)
+	if err != nil {
+		t.Fatalf("PathForContainer: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := discovery.Read(discoveryPath); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("discovery record did not appear at %s", discoveryPath)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	result, err := RunPrompt(context.Background(), Options{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+		OpenAIBaseURL:         overrideResponses.URL,
+		OpenAIBaseURLExplicit: true,
+	}, "hello through override", 0, nil)
+	if err != nil {
+		t.Fatalf("RunPrompt: %v", err)
+	}
+	if result.Result != "override reply" {
+		t.Fatalf("result = %q, want %q", result.Result, "override reply")
+	}
+	if overrideHits.Load() != 1 {
+		t.Fatalf("expected override llm call once, got %d", overrideHits.Load())
+	}
+	if defaultHits.Load() != 0 {
+		t.Fatalf("expected daemon default llm endpoint unused, got %d", defaultHits.Load())
+	}
+
+	cancel()
+	if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
+		t.Fatalf("Serve error = %v, want context canceled", serveErr)
+	}
+}
+
 func TestRunPromptCreatesSessionAndPersistsDurableTranscript(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

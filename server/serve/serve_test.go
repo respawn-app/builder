@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -196,5 +197,33 @@ func TestServePublishesDiscoveryAndHealthEndpoints(t *testing.T) {
 	}
 	if _, err := os.Stat(discoveryPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected discovery record removed after shutdown, got err=%v", err)
+	}
+}
+
+func TestCleanupDiscoveryRecordLeavesReplacementDaemonRecord(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "discovery.json")
+	first := protocol.DiscoveryRecord{Identity: protocol.ServerIdentity{ServerID: "server-a"}, StartedAt: time.Unix(1, 0).UTC()}
+	second := protocol.DiscoveryRecord{Identity: protocol.ServerIdentity{ServerID: "server-b"}, StartedAt: time.Unix(2, 0).UTC()}
+	if err := discovery.Write(path, first); err != nil {
+		t.Fatalf("write first discovery record: %v", err)
+	}
+	if err := discovery.Write(path, second); err != nil {
+		t.Fatalf("write second discovery record: %v", err)
+	}
+	if err := cleanupDiscoveryRecord(path, first); err != nil {
+		t.Fatalf("cleanupDiscoveryRecord first: %v", err)
+	}
+	current, err := discovery.Read(path)
+	if err != nil {
+		t.Fatalf("read replacement discovery record: %v", err)
+	}
+	if current.Identity.ServerID != second.Identity.ServerID {
+		t.Fatalf("server id = %q, want %q", current.Identity.ServerID, second.Identity.ServerID)
+	}
+	if err := cleanupDiscoveryRecord(path, second); err != nil {
+		t.Fatalf("cleanupDiscoveryRecord second: %v", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected cleanup to remove owned discovery record, got err=%v", err)
 	}
 }
