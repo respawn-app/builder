@@ -1,6 +1,6 @@
 # App Server Migration: Phase 2 Checkpoint
 
-Status: in progress
+Status: complete
 
 This checkpoint tracks the first resource-model and hydration slice after the Phase 1 client-boundary completion.
 
@@ -30,6 +30,10 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - Switched the CLI `/ps` surface onto that shared process boundary for list hydration plus kill/inline control, while preserving local log opening as a frontend action over server-provided log paths.
 - Added focused coverage proving process ownership is stamped at creation time, survives projection through the server read service, and is available through embedded-mode loopback reads.
 - Added focused coverage proving the real embedded `PrepareRuntime(...)` path wires both process reads and process control through the shared client boundary rather than the local manager path.
+- Promoted the embedded-only runtime and persistence resolvers into reusable `server/registry` infrastructure, so server-owned read and live-session services no longer depend on private one-off helper types trapped inside `server/embedded`.
+- Added the first transport-neutral live session-activity subscription seam via `shared/serverapi` + `shared/client` + `server/sessionactivity`, backed by server-owned runtime registries rather than CLI-local event bridges.
+- Added explicit lag handling for live session-activity subscribers: a subscriber that falls behind receives a deterministic gap error and must rehydrate rather than silently missing events.
+- Added focused coverage proving the real `cli/app` `PrepareRuntime(...)` path wires shared session-activity publication, so two shared clients can hydrate the same active session and observe the same runtime-originated session update through the embedded server boundary.
 
 ## What This Proves
 
@@ -41,18 +45,19 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - The embedded server now owns the production resolver path for session hydration, which is the first concrete move from loopback-only helpers toward a real multi-session app-server read layer.
 - Live process resources now have explicit session/run ownership on the server side, and `/ps` list hydration no longer depends on CLI-local snapshot projection of the background manager.
 - `/ps` control actions now also flow through the same shared process boundary, so the CLI no longer owns direct kill/inline process mutations.
-- Phase 2 can proceed incrementally without introducing a durable run store or transport-level event redesign yet.
+- Live session activity now has a shared server-owned observation seam with explicit lag failure semantics, rather than existing only as a CLI-local runtime event bridge.
+- The Phase 2 exit gate is now satisfied: a second shared client can hydrate and observe the same active session in tests.
 
 ## Current Limitations
 
 - Durable run history currently covers lifecycle metadata only. There is still no durable run-scoped index for processes, asks, approvals, or delegated task state after process exit or restart.
 - Process ownership/read metadata is currently live-only and in-memory. Restarting the app server loses process resources and their run/step ownership history.
 - Reopen semantics currently reconstruct unfinished durable runs from `run_started` without a matching `run_finished`, but that state is not yet surfaced through a higher-level application read API.
-- The new application read services still use partial dormant reconstruction rather than richer persisted read models for settings/approval state, and the current server-owned registries are embedded-mode only rather than shared daemon infrastructure.
+- The new application read services still use partial dormant reconstruction rather than richer persisted read models for settings/approval state.
 - Process control is only partially on the new boundary so far: `kill` and `inline-output` are shared, `kill` now carries `client_request_id` as a mutating contract, but log opening remains a frontend-local action over server-provided file paths.
 - The UI is hydrating through `RuntimeMainView` and the process read service, but it is not yet rendering richer run/process-specific UX beyond carrying the typed data.
+- The live session-activity stream is active-session-only, live-only, and best-effort. It does not yet provide replay, cursors, or typed process-output substreams.
 
 ## Next Slice
 
-- Promote the current embedded-mode registries into reusable server infrastructure so session selection, detached hydration, and later transport handlers can all resolve sessions/runtimes/processes through the same server-owned registry layer.
-- Extend the process surface beyond the current list/get/kill/inline subset into richer typed inspect/control/output contracts, and widen run-scoped hydration/tests beyond the single active-run case.
+- Move to Phase 3 transport work: expose the already-extracted server boundary over the real attach/handshake protocol while keeping embedded mode on the same client boundary.

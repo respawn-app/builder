@@ -9,6 +9,7 @@ import (
 	serverembedded "builder/server/embedded"
 	"builder/server/launch"
 	serverlifecycle "builder/server/lifecycle"
+	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/sessioncontrol"
 	"builder/shared/client"
@@ -165,7 +166,12 @@ func (s *embeddedAppServer) PrepareRuntime(plan sessionLaunchPlan, diagnosticWri
 		return nil, err
 	}
 	logLaunchPlanStart(logger, plan, startLogLine)
-	wiring, err := newRuntimeWiringWithBackground(plan.Store, plan.ActiveSettings, plan.EnabledTools, plan.WorkspaceRoot, s.inner.AuthManager(), logger, s.inner.Background(), runtimeWiringOptions{FastMode: s.inner.FastModeState()})
+	wiring, err := newRuntimeWiringWithBackground(plan.Store, plan.ActiveSettings, plan.EnabledTools, plan.WorkspaceRoot, s.inner.AuthManager(), logger, s.inner.Background(), runtimeWiringOptions{
+		FastMode: s.inner.FastModeState(),
+		OnEvent: func(evt runtime.Event) {
+			s.inner.PublishRuntimeEvent(plan.Store.Meta().SessionID, evt)
+		},
+	})
 	if err != nil {
 		_ = logger.Close()
 		return nil, err

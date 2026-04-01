@@ -3,17 +3,16 @@ package embedded
 import (
 	"context"
 	"errors"
-	"strings"
-	"sync"
 
 	"builder/server/auth"
 	"builder/server/authflow"
 	serverbootstrap "builder/server/bootstrap"
 	"builder/server/processview"
+	"builder/server/registry"
 	"builder/server/runprompt"
 	"builder/server/runtime"
 	"builder/server/runtimewire"
-	"builder/server/session"
+	"builder/server/sessionactivity"
 	"builder/server/sessionview"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
@@ -56,64 +55,11 @@ type Server struct {
 	fastModeState    *runtime.FastModeState
 	background       *shelltool.Manager
 	backgroundRouter *runtimewire.BackgroundEventRouter
-	runtimeRegistry  *runtimeRegistry
+	runtimeRegistry  *registry.RuntimeRegistry
 	processControls  client.ProcessControlClient
 	processViews     client.ProcessViewClient
 	sessionViews     client.SessionViewClient
-}
-
-type runtimeRegistry struct {
-	mu      sync.RWMutex
-	engines map[string]*runtime.Engine
-}
-
-type persistenceSessionResolver struct {
-	persistenceRoot string
-}
-
-func newRuntimeRegistry() *runtimeRegistry {
-	return &runtimeRegistry{engines: make(map[string]*runtime.Engine)}
-}
-
-func (r *runtimeRegistry) Register(sessionID string, engine *runtime.Engine) {
-	if r == nil || engine == nil {
-		return
-	}
-	id := strings.TrimSpace(sessionID)
-	if id == "" {
-		return
-	}
-	r.mu.Lock()
-	r.engines[id] = engine
-	r.mu.Unlock()
-}
-
-func (r *runtimeRegistry) Unregister(sessionID string) {
-	if r == nil {
-		return
-	}
-	id := strings.TrimSpace(sessionID)
-	if id == "" {
-		return
-	}
-	r.mu.Lock()
-	delete(r.engines, id)
-	r.mu.Unlock()
-}
-
-func (r *runtimeRegistry) ResolveRuntime(_ context.Context, sessionID string) (*runtime.Engine, error) {
-	if r == nil {
-		return nil, nil
-	}
-	id := strings.TrimSpace(sessionID)
-	r.mu.RLock()
-	engine := r.engines[id]
-	r.mu.RUnlock()
-	return engine, nil
-}
-
-func (r persistenceSessionResolver) ResolveSession(_ context.Context, sessionID string) (session.Snapshot, error) {
-	return session.SnapshotByID(r.persistenceRoot, strings.TrimSpace(sessionID))
+	sessionActivity  client.SessionActivityClient
 }
 
 func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) {
@@ -157,7 +103,8 @@ func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) 
 	if err != nil {
 		return nil, err
 	}
-	runtimeRegistry := newRuntimeRegistry()
+	runtimeRegistry := registry.NewRuntimeRegistry()
+	processService := processview.NewService(runtimeSupport.Background)
 	return &Server{
 		cfg:              cfg,
 		containerDir:     containerDir,
@@ -168,13 +115,16 @@ func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) 
 		backgroundRouter: runtimeSupport.BackgroundRouter,
 		runtimeRegistry:  runtimeRegistry,
 		processControls: client.NewLoopbackProcessControlClient(
-			processview.NewService(runtimeSupport.Background),
+			processService,
 		),
 		processViews: client.NewLoopbackProcessViewClient(
-			processview.NewService(runtimeSupport.Background),
+			processService,
 		),
 		sessionViews: client.NewLoopbackSessionViewClient(
-			sessionview.NewService(persistenceSessionResolver{persistenceRoot: cfg.PersistenceRoot}, runtimeRegistry),
+			sessionview.NewService(registry.NewPersistenceSessionResolver(cfg.PersistenceRoot), runtimeRegistry),
+		),
+		sessionActivity: client.NewLoopbackSessionActivityClient(
+			sessionactivity.NewService(runtimeRegistry),
 		),
 	}, nil
 }
@@ -256,6 +206,13 @@ func (s *Server) ProcessControlClient() client.ProcessControlClient {
 	return s.processControls
 }
 
+func (s *Server) SessionActivityClient() client.SessionActivityClient {
+	if s == nil {
+		return nil
+	}
+	return s.sessionActivity
+}
+
 func (s *Server) RegisterRuntime(sessionID string, engine *runtime.Engine) {
 	if s == nil || s.runtimeRegistry == nil {
 		return
@@ -268,6 +225,13 @@ func (s *Server) UnregisterRuntime(sessionID string) {
 		return
 	}
 	s.runtimeRegistry.Unregister(sessionID)
+}
+
+func (s *Server) PublishRuntimeEvent(sessionID string, evt runtime.Event) {
+	if s == nil || s.runtimeRegistry == nil {
+		return
+	}
+	s.runtimeRegistry.PublishRuntimeEvent(sessionID, evt)
 }
 
 func (s *Server) RunPromptClient() client.RunPromptClient {
