@@ -121,7 +121,7 @@ Deliverables:
 
 Progress:
 
-- The first Phase 2 slice is landed: the live runtime now exposes explicit active-run identity/status, `shared/clientui.RuntimeMainView` now bundles active-session hydration, and the CLI already consumes that bundled view through the client boundary.
+- The first Phase 2 slice is landed: the live runtime now exposes explicit active-run identity/status, `shared/clientui.RuntimeMainView` now bundles active-session hydration, `server/runtimeview` now owns the runtime-to-main-view projection, the CLI consumes that bundled view through the client boundary, and focused coverage now proves run-state payload semantics for completed and interrupted runs.
 
 Intermediate state:
 
