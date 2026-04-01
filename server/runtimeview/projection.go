@@ -128,6 +128,20 @@ func RunViewFromRuntime(sessionID string, snapshot *runtime.RunSnapshot) *client
 	}
 }
 
+func RunViewFromSessionRecord(sessionID string, record *session.RunRecord) *clientui.RunView {
+	if record == nil {
+		return nil
+	}
+	return &clientui.RunView{
+		RunID:      record.RunID,
+		SessionID:  sessionID,
+		StepID:     record.StepID,
+		Status:     clientui.RunStatus(record.Status),
+		StartedAt:  record.StartedAt,
+		FinishedAt: record.FinishedAt,
+	}
+}
+
 func ChatSnapshotFromRuntime(snapshot runtime.ChatSnapshot) clientui.ChatSnapshot {
 	entries := make([]clientui.ChatEntry, 0, len(snapshot.Entries))
 	for _, entry := range snapshot.Entries {
