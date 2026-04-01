@@ -57,6 +57,9 @@ func TestServiceListProcessesIncludesRunOwnership(t *testing.T) {
 	if !process.Backgrounded || !process.Running {
 		t.Fatalf("expected backgrounded running process, got %+v", process)
 	}
+	if !process.OutputAvailable || process.OutputRetainedFromBytes != 0 || process.OutputRetainedToBytes <= 0 {
+		t.Fatalf("expected retained output metadata, got %+v", process)
+	}
 
 	got, err := svc.GetProcess(context.Background(), serverapi.ProcessGetRequest{ProcessID: process.ID})
 	if err != nil {
@@ -64,6 +67,9 @@ func TestServiceListProcessesIncludesRunOwnership(t *testing.T) {
 	}
 	if got.Process == nil || got.Process.OwnerRunID != "run-1" || got.Process.OwnerStepID != "step-1" {
 		t.Fatalf("unexpected process payload: %+v", got.Process)
+	}
+	if !got.Process.OutputAvailable || got.Process.OutputRetainedFromBytes != 0 || got.Process.OutputRetainedToBytes < process.OutputRetainedToBytes {
+		t.Fatalf("expected retained output metadata from get, got %+v", got.Process)
 	}
 }
 

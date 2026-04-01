@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"builder/server/primaryrun"
 	"builder/shared/clientui"
 )
 
@@ -237,6 +238,25 @@ func TestRuntimeControlHelpersFallbackWithoutRuntimeClient(t *testing.T) {
 	}
 	if err := m.recordRuntimePromptHistory("prompt history"); err != nil {
 		t.Fatalf("record runtime prompt history without client: %v", err)
+	}
+}
+
+func TestSubmitErrorWithRuntimeClientAppendsActivePrimaryRunEntry(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedStaticUIModel()
+	m.engine = client
+	m.busy = true
+
+	next, _ := m.Update(submitDoneMsg{err: primaryrun.ErrActivePrimaryRun})
+	updated := next.(*uiModel)
+	if updated.busy {
+		t.Fatal("did not expect busy after active primary run error")
+	}
+	if updated.activity != uiActivityError {
+		t.Fatalf("expected error activity, got %v", updated.activity)
+	}
+	if client.appendedRole != "error" || client.appendedText != primaryrun.ErrActivePrimaryRun.Error() {
+		t.Fatalf("unexpected runtime local entry: role=%q text=%q", client.appendedRole, client.appendedText)
 	}
 }
 

@@ -42,23 +42,26 @@ type Event struct {
 }
 
 type Snapshot struct {
-	ID             string
-	OwnerSessionID string
-	OwnerRunID     string
-	OwnerStepID    string
-	State          string
-	Command        string
-	Workdir        string
-	StartedAt      time.Time
-	FinishedAt     time.Time
-	ExitCode       *int
-	LogPath        string
-	RecentOutput   string
-	Running        bool
-	StdinOpen      bool
-	Backgrounded   bool
-	KillRequested  bool
-	LastUpdatedAt  time.Time
+	ID                      string
+	OwnerSessionID          string
+	OwnerRunID              string
+	OwnerStepID             string
+	State                   string
+	Command                 string
+	Workdir                 string
+	StartedAt               time.Time
+	FinishedAt              time.Time
+	ExitCode                *int
+	LogPath                 string
+	RecentOutput            string
+	OutputAvailable         bool
+	OutputRetainedFromBytes int64
+	OutputRetainedToBytes   int64
+	Running                 bool
+	StdinOpen               bool
+	Backgrounded            bool
+	KillRequested           bool
+	LastUpdatedAt           time.Time
 }
 
 type ExecRequest struct {
@@ -148,6 +151,7 @@ type processEntry struct {
 	lastUpdatedAt  time.Time
 	recentOutput   []byte
 	pendingOutput  []byte
+	outputBytes    int64
 	notify         chan struct{}
 	done           chan struct{}
 	killRequested  bool
@@ -165,23 +169,26 @@ func (p *processEntry) signal() {
 
 func (p *processEntry) snapshotLocked() Snapshot {
 	return Snapshot{
-		ID:             p.id,
-		OwnerSessionID: p.ownerSessionID,
-		OwnerRunID:     p.ownerRunID,
-		OwnerStepID:    p.ownerStepID,
-		State:          p.state,
-		Command:        p.command,
-		Workdir:        p.workdir,
-		StartedAt:      p.startedAt,
-		FinishedAt:     p.finishedAt,
-		ExitCode:       cloneIntPtr(p.exitCode),
-		LogPath:        p.logPath,
-		RecentOutput:   sanitizeOutput(string(p.recentOutput)),
-		Running:        p.running,
-		StdinOpen:      p.stdinOpen,
-		Backgrounded:   p.backgrounded,
-		KillRequested:  p.killRequested,
-		LastUpdatedAt:  p.lastUpdatedAt,
+		ID:                      p.id,
+		OwnerSessionID:          p.ownerSessionID,
+		OwnerRunID:              p.ownerRunID,
+		OwnerStepID:             p.ownerStepID,
+		State:                   p.state,
+		Command:                 p.command,
+		Workdir:                 p.workdir,
+		StartedAt:               p.startedAt,
+		FinishedAt:              p.finishedAt,
+		ExitCode:                cloneIntPtr(p.exitCode),
+		LogPath:                 p.logPath,
+		RecentOutput:            sanitizeOutput(string(p.recentOutput)),
+		OutputAvailable:         p.logPath != "",
+		OutputRetainedFromBytes: 0,
+		OutputRetainedToBytes:   p.outputBytes,
+		Running:                 p.running,
+		StdinOpen:               p.stdinOpen,
+		Backgrounded:            p.backgrounded,
+		KillRequested:           p.killRequested,
+		LastUpdatedAt:           p.lastUpdatedAt,
 	}
 }
 
@@ -208,6 +215,7 @@ func (p *processEntry) writeOutput(chunk []byte) error {
 			return err
 		}
 	}
+	p.outputBytes += int64(len(chunk))
 	p.pendingOutput = append(p.pendingOutput, chunk...)
 	if len(p.pendingOutput) > maxPendingOutputBytes {
 		p.pendingOutput = append([]byte(nil), p.pendingOutput[len(p.pendingOutput)-maxPendingOutputBytes:]...)
