@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"time"
 
 	"builder/server/primaryrun"
 	"builder/server/runtime"
@@ -179,5 +180,27 @@ func TestRuntimeRegistryAcquirePrimaryRunEnforcesSingleLeasePerSession(t *testin
 	}
 	if _, err := registry.AcquirePrimaryRun("session-2"); err != nil {
 		t.Fatalf("AcquirePrimaryRun other session: %v", err)
+	}
+}
+
+func TestRuntimeEntryClosePendingPromptsDoesNotBlockWhenResponseAlreadyBuffered(t *testing.T) {
+	entry := &runtimeEntry{pendingPrompt: map[string]*pendingPromptEntry{}}
+	pending := &pendingPromptEntry{
+		PendingPromptSnapshot: PendingPromptSnapshot{Request: askquestion.Request{ID: "ask-1"}},
+		response:              make(chan promptResponseResult, 1),
+	}
+	pending.response <- promptResponseResult{response: askquestion.Response{RequestID: "ask-1"}}
+	entry.pendingPrompt["ask-1"] = pending
+
+	done := make(chan struct{})
+	go func() {
+		entry.closePendingPrompts(io.EOF)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("closePendingPrompts blocked with buffered response")
 	}
 }
