@@ -23,6 +23,7 @@ type runtimeWiring struct {
 	askBridge     *askBridge
 	eventBridge   *runtimeEventBridge
 	background    *shelltool.Manager
+	processViews  client.ProcessViewClient
 	sessionViews  client.SessionViewClient
 	promptHistory []string
 }

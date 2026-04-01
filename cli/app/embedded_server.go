@@ -19,6 +19,7 @@ type embeddedServer interface {
 	Close() error
 	Config() config.App
 	RunPromptClient() client.RunPromptClient
+	ProcessViewClient() client.ProcessViewClient
 	SessionViewClient() client.SessionViewClient
 	PlanSession(req sessionLaunchRequest, pick sessionPickerRunner) (sessionLaunchPlan, error)
 	PrepareRuntime(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error)
@@ -62,6 +63,13 @@ func (s *embeddedAppServer) SessionViewClient() client.SessionViewClient {
 		return nil
 	}
 	return s.inner.SessionViewClient()
+}
+
+func (s *embeddedAppServer) ProcessViewClient() client.ProcessViewClient {
+	if s == nil || s.inner == nil {
+		return nil
+	}
+	return s.inner.ProcessViewClient()
 }
 
 func (s *embeddedAppServer) OAuthOptions() auth.OpenAIOAuthOptions {
@@ -158,6 +166,7 @@ func (s *embeddedAppServer) PrepareRuntime(plan sessionLaunchPlan, diagnosticWri
 		router.SetActiveSession(plan.Store.Meta().SessionID, wiring.engine)
 	}
 	s.inner.RegisterRuntime(plan.Store.Meta().SessionID, wiring.engine)
+	wiring.processViews = s.inner.ProcessViewClient()
 	wiring.sessionViews = s.inner.SessionViewClient()
 	return &runtimeLaunchPlan{
 		Logger: logger,

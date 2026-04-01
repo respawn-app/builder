@@ -1,0 +1,36 @@
+package processview
+
+import (
+	shelltool "builder/server/tools/shell"
+	"builder/shared/clientui"
+)
+
+func ProcessFromSnapshot(snapshot shelltool.Snapshot) clientui.BackgroundProcess {
+	return clientui.BackgroundProcess{
+		ID:             snapshot.ID,
+		OwnerSessionID: snapshot.OwnerSessionID,
+		OwnerRunID:     snapshot.OwnerRunID,
+		OwnerStepID:    snapshot.OwnerStepID,
+		State:          snapshot.State,
+		Command:        snapshot.Command,
+		Workdir:        snapshot.Workdir,
+		StartedAt:      snapshot.StartedAt,
+		FinishedAt:     snapshot.FinishedAt,
+		ExitCode:       cloneInt(snapshot.ExitCode),
+		LogPath:        snapshot.LogPath,
+		RecentOutput:   snapshot.RecentOutput,
+		Running:        snapshot.Running,
+		StdinOpen:      snapshot.StdinOpen,
+		Backgrounded:   snapshot.Backgrounded,
+		KillRequested:  snapshot.KillRequested,
+		LastUpdatedAt:  snapshot.LastUpdatedAt,
+	}
+}
+
+func cloneInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}

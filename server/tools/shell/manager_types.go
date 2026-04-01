@@ -43,6 +43,8 @@ type Event struct {
 type Snapshot struct {
 	ID             string
 	OwnerSessionID string
+	OwnerRunID     string
+	OwnerStepID    string
 	State          string
 	Command        string
 	Workdir        string
@@ -62,6 +64,8 @@ type ExecRequest struct {
 	Command        []string
 	DisplayCommand string
 	OwnerSessionID string
+	OwnerRunID     string
+	OwnerStepID    string
 	Workdir        string
 	YieldTime      time.Duration
 	MaxOutputChars int
@@ -114,6 +118,8 @@ type WriteRequest struct {
 type processEntry struct {
 	id             string
 	ownerSessionID string
+	ownerRunID     string
+	ownerStepID    string
 	command        string
 	workdir        string
 	startedAt      time.Time
@@ -149,6 +155,8 @@ func (p *processEntry) snapshotLocked() Snapshot {
 	return Snapshot{
 		ID:             p.id,
 		OwnerSessionID: p.ownerSessionID,
+		OwnerRunID:     p.ownerRunID,
+		OwnerStepID:    p.ownerStepID,
 		State:          p.state,
 		Command:        p.command,
 		Workdir:        p.workdir,

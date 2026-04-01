@@ -130,6 +130,7 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 				ID:     subCallID,
 				Name:   call.toolID,
 				Input:  call.input,
+				RunID:  c.RunID,
 				StepID: c.StepID,
 			})
 			if err != nil {
