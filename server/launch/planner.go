@@ -129,9 +129,13 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 	if overrides.ShellTimeoutSeconds > 0 {
 		next.ActiveSettings.Timeouts.ShellDefaultSeconds = loaded.Settings.Timeouts.ShellDefaultSeconds
 	}
-	if strings.TrimSpace(overrides.Tools) != "" && locked == nil {
-		next.ActiveSettings.EnabledTools = cloneEnabledToolSet(loaded.Settings.EnabledTools)
-		next.EnabledTools = ActiveToolIDs(next.ActiveSettings, loaded.Source, locked)
+	if locked == nil {
+		if strings.TrimSpace(overrides.Tools) != "" {
+			next.ActiveSettings.EnabledTools = cloneEnabledToolSet(loaded.Settings.EnabledTools)
+		}
+		if strings.TrimSpace(overrides.Tools) != "" || strings.TrimSpace(overrides.Model) != "" {
+			next.EnabledTools = ActiveToolIDs(next.ActiveSettings, loaded.Source, locked)
+		}
 	}
 	if strings.TrimSpace(overrides.OpenAIBaseURL) != "" {
 		next.ActiveSettings.OpenAIBaseURL = loaded.Settings.OpenAIBaseURL
