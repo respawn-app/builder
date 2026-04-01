@@ -66,6 +66,7 @@ const (
 )
 
 var runInteractiveApp = app.Run
+var runPromptApp = app.RunPrompt
 
 func main() {
 	if exitCode := rootCommand(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); exitCode != 0 {
@@ -76,6 +77,9 @@ func main() {
 func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "run" {
 		return runSubcommand(args[1:])
+	}
+	if len(args) > 0 && args[0] == "serve" {
+		return serveSubcommand(args[1:], stdout, stderr)
 	}
 	if stdin == nil {
 		stdin = strings.NewReader("")
@@ -111,8 +115,8 @@ func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wri
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	markExplicitCommonFlags(rootFS, &flags)
-	sessionID, err := effectiveSessionID(flags)
+	markExplicitCommonFlags(rootFS, flags)
+	sessionID, err := effectiveSessionID(*flags)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
@@ -127,7 +131,7 @@ func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wri
 		ThinkingLevel:         flags.ThinkingLevel,
 		Theme:                 flags.Theme,
 		ModelTimeoutSeconds:   flags.ModelTimeoutSeconds,
-		ShellTimeoutSeconds:   effectiveShellTimeout(flags),
+		ShellTimeoutSeconds:   effectiveShellTimeout(*flags),
 		Tools:                 flags.Tools,
 		OpenAIBaseURL:         flags.OpenAIBaseURL,
 		OpenAIBaseURLExplicit: flags.OpenAIBaseURLExplicit,
@@ -181,8 +185,8 @@ func runSubcommand(args []string) int {
 		emitRunUsageError(usageOutputMode, err.Error())
 		return 2
 	}
-	markExplicitCommonFlags(runFS, &flags)
-	sessionID, err := effectiveSessionID(flags)
+	markExplicitCommonFlags(runFS, flags)
+	sessionID, err := effectiveSessionID(*flags)
 	if err != nil {
 		emitRunUsageError(usageOutputMode, err.Error())
 		return 2
@@ -227,7 +231,7 @@ func runSubcommand(args []string) int {
 		ThinkingLevel:         flags.ThinkingLevel,
 		Theme:                 flags.Theme,
 		ModelTimeoutSeconds:   flags.ModelTimeoutSeconds,
-		ShellTimeoutSeconds:   effectiveShellTimeout(flags),
+		ShellTimeoutSeconds:   effectiveShellTimeout(*flags),
 		Tools:                 flags.Tools,
 		OpenAIBaseURL:         flags.OpenAIBaseURL,
 		OpenAIBaseURLExplicit: flags.OpenAIBaseURLExplicit,
@@ -237,7 +241,7 @@ func runSubcommand(args []string) int {
 	if progressMode == runProgressModeStderr {
 		progress = os.Stderr
 	}
-	result, runErr := app.RunPrompt(ctx, opts, prompt, timeout, progress)
+	result, runErr := runPromptApp(ctx, opts, prompt, timeout, progress)
 	continueID := strings.TrimSpace(result.SessionID)
 	continueCmd := buildRunContinueCommand(continueID)
 	continueHint := buildRunContinueHint(continueID)
@@ -284,8 +288,8 @@ func runSubcommand(args []string) int {
 	return 0
 }
 
-func registerCommonFlags(fs *flag.FlagSet) commonFlags {
-	flags := commonFlags{}
+func registerCommonFlags(fs *flag.FlagSet) *commonFlags {
+	flags := &commonFlags{}
 	fs.StringVar(&flags.WorkspaceRoot, "workspace", ".", "workspace root")
 	fs.StringVar(&flags.SessionID, "session", "", "session id to resume")
 	fs.StringVar(&flags.ContinueID, "continue", "", "session id to continue")

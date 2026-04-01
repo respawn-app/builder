@@ -5,14 +5,33 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"builder/cli/app"
 	"builder/cli/selfcmd"
+	serverstartup "builder/server/startup"
 	"builder/shared/buildinfo"
+	"builder/shared/config"
 )
+
+type stubServeServer struct {
+	serveErr error
+	cfg      config.App
+	project  string
+}
+
+func (s *stubServeServer) Close() error { return nil }
+func (s *stubServeServer) Config() config.App {
+	return s.cfg
+}
+func (s *stubServeServer) ProjectID() string { return s.project }
+func (s *stubServeServer) Serve(context.Context) error {
+	return s.serveErr
+}
 
 func TestRootCommandPrintsVersion(t *testing.T) {
 	original := buildinfo.Version
@@ -94,6 +113,198 @@ func TestRootCommandForceInteractiveBypassesTerminalCheck(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRootCommandMapsCommonFlagsToInteractiveApp(t *testing.T) {
+	original := runInteractiveApp
+	t.Cleanup(func() {
+		runInteractiveApp = original
+	})
+	var got app.Options
+	runInteractiveApp = func(ctx context.Context, opts app.Options) error {
+		got = opts
+		return nil
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	args := []string{
+		"--force-interactive",
+		"--workspace", "/tmp/workspace",
+		"--session", "session-123",
+		"--model", "gpt-5",
+		"--provider-override", "openai",
+		"--thinking-level", "high",
+		"--theme", "dark",
+		"--model-timeout-seconds", "45",
+		"--shell-timeout-seconds", "30",
+		"--tools", "shell,patch",
+		"--openai-base-url", "http://example.test/v1",
+	}
+	if code := rootCommand(args, strings.NewReader(""), &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if got.WorkspaceRoot != "/tmp/workspace" || !got.WorkspaceRootExplicit {
+		t.Fatalf("unexpected workspace mapping: %+v", got)
+	}
+	if got.SessionID != "session-123" || got.Model != "gpt-5" || got.ProviderOverride != "openai" || got.ThinkingLevel != "high" || got.Theme != "dark" {
+		t.Fatalf("unexpected interactive option mapping: %+v", got)
+	}
+	if got.ModelTimeoutSeconds != 45 || got.ShellTimeoutSeconds != 30 {
+		t.Fatalf("unexpected timeout mapping: %+v", got)
+	}
+	if got.Tools != "shell,patch" {
+		t.Fatalf("tools = %q, want shell,patch", got.Tools)
+	}
+	if got.OpenAIBaseURL != "http://example.test/v1" || !got.OpenAIBaseURLExplicit {
+		t.Fatalf("unexpected base url mapping: %+v", got)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("unexpected output stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestRootCommandServeUsesStandaloneServerPath(t *testing.T) {
+	originalStart := startServeServer
+	originalHandlers := newServeStartupHandlers
+	t.Cleanup(func() {
+		startServeServer = originalStart
+		newServeStartupHandlers = originalHandlers
+	})
+	var called bool
+	var got serverstartup.Request
+	startServeServer = func(_ context.Context, req serverstartup.Request, _ serverstartup.AuthHandler, _ serverstartup.OnboardingHandler) (serveCommandServer, error) {
+		called = true
+		got = req
+		return &stubServeServer{
+			serveErr: context.Canceled,
+			cfg:      config.App{WorkspaceRoot: "/tmp/work"},
+			project:  "project-123",
+		}, nil
+	}
+	newServeStartupHandlers = func() (serverstartup.AuthHandler, serverstartup.OnboardingHandler) {
+		return nil, nil
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := rootCommand([]string{"serve", "--workspace", "/tmp/work", "--model", "gpt-5", "--openai-base-url", "http://example.test/v1"}, strings.NewReader(""), &stdout, &stderr); code != 130 {
+		t.Fatalf("exit code = %d, want 130", code)
+	}
+	if !called {
+		t.Fatal("expected serve startup path to run")
+	}
+	if got.WorkspaceRoot != "/tmp/work" || !got.WorkspaceRootExplicit {
+		t.Fatalf("unexpected workspace mapping: %+v", got)
+	}
+	if got.Model != "gpt-5" {
+		t.Fatalf("model = %q, want gpt-5", got.Model)
+	}
+	if got.OpenAIBaseURL != "http://example.test/v1" || !got.OpenAIBaseURLExplicit {
+		t.Fatalf("unexpected base url mapping: %+v", got)
+	}
+	if !strings.Contains(stderr.String(), "Builder server ready for workspace") {
+		t.Fatalf("stderr = %q, want serve startup message", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if got.SessionID != "" {
+		t.Fatalf("expected empty session id for serve request, got %q", got.SessionID)
+	}
+	if got.ShellTimeoutSeconds != 0 {
+		t.Fatalf("shell timeout = %d, want 0", got.ShellTimeoutSeconds)
+	}
+}
+
+func TestServeSubcommandRejectsSessionFlags(t *testing.T) {
+	originalHandlers := newServeStartupHandlers
+	t.Cleanup(func() {
+		newServeStartupHandlers = originalHandlers
+	})
+	newServeStartupHandlers = func() (serverstartup.AuthHandler, serverstartup.OnboardingHandler) {
+		return nil, nil
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := rootCommand([]string{"serve", "--session", "session-123"}, strings.NewReader(""), &stdout, &stderr); code != 2 {
+		t.Fatalf("exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "does not accept --session or --continue") {
+		t.Fatalf("stderr = %q, want serve session rejection", stderr.String())
+	}
+}
+
+func TestRunSubcommandMapsCommonFlagsToRunPrompt(t *testing.T) {
+	original := runPromptApp
+	t.Cleanup(func() {
+		runPromptApp = original
+	})
+	var gotOpts app.Options
+	var gotPrompt string
+	var gotTimeout time.Duration
+	runPromptApp = func(ctx context.Context, opts app.Options, prompt string, timeout time.Duration, progress io.Writer) (app.RunPromptResult, error) {
+		gotOpts = opts
+		gotPrompt = prompt
+		gotTimeout = timeout
+		return app.RunPromptResult{Result: "done"}, nil
+	}
+
+	originalStdout := os.Stdout
+	originalStderr := os.Stderr
+	stdoutFile, err := os.CreateTemp(t.TempDir(), "stdout")
+	if err != nil {
+		t.Fatalf("create stdout temp file: %v", err)
+	}
+	stderrFile, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatalf("create stderr temp file: %v", err)
+	}
+	os.Stdout = stdoutFile
+	os.Stderr = stderrFile
+	t.Cleanup(func() {
+		os.Stdout = originalStdout
+		os.Stderr = originalStderr
+		_ = stdoutFile.Close()
+		_ = stderrFile.Close()
+	})
+
+	args := []string{
+		"run",
+		"--workspace", "/tmp/run-workspace",
+		"--session", "session-456",
+		"--model", "gpt-5-mini",
+		"--provider-override", "openai",
+		"--thinking-level", "medium",
+		"--theme", "light",
+		"--model-timeout-seconds", "12",
+		"--shell-timeout-seconds", "34",
+		"--tools", "shell",
+		"--openai-base-url", "http://run.example/v1",
+		"--timeout", "2m",
+		"hello from test",
+	}
+	if code := rootCommand(args, strings.NewReader(""), io.Discard, io.Discard); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if gotPrompt != "hello from test" || gotTimeout != 2*time.Minute {
+		t.Fatalf("unexpected run prompt mapping prompt=%q timeout=%v", gotPrompt, gotTimeout)
+	}
+	if gotOpts.WorkspaceRoot != "/tmp/run-workspace" || !gotOpts.WorkspaceRootExplicit {
+		t.Fatalf("unexpected workspace mapping: %+v", gotOpts)
+	}
+	if gotOpts.SessionID != "session-456" || gotOpts.Model != "gpt-5-mini" || gotOpts.ProviderOverride != "openai" || gotOpts.ThinkingLevel != "medium" || gotOpts.Theme != "light" {
+		t.Fatalf("unexpected run option mapping: %+v", gotOpts)
+	}
+	if gotOpts.ModelTimeoutSeconds != 12 || gotOpts.ShellTimeoutSeconds != 34 {
+		t.Fatalf("unexpected timeout mapping: %+v", gotOpts)
+	}
+	if gotOpts.Tools != "shell" {
+		t.Fatalf("tools = %q, want shell", gotOpts.Tools)
+	}
+	if gotOpts.OpenAIBaseURL != "http://run.example/v1" || !gotOpts.OpenAIBaseURLExplicit {
+		t.Fatalf("unexpected base url mapping: %+v", gotOpts)
 	}
 }
 
@@ -240,7 +451,7 @@ func TestMarkExplicitCommonFlagsTracksOnlyParsedFlags(t *testing.T) {
 	if err := fs.Parse([]string{"--workspace", "/tmp/w", "--openai-base-url=http://local/v1", "prompt"}); err != nil {
 		t.Fatalf("parse flags: %v", err)
 	}
-	markExplicitCommonFlags(fs, &flags)
+	markExplicitCommonFlags(fs, flags)
 	if !flags.WorkspaceExplicit {
 		t.Fatal("expected workspace override to be marked explicit")
 	}
@@ -256,7 +467,7 @@ func TestMarkExplicitCommonFlagsIgnoresFlagTextInsidePrompt(t *testing.T) {
 	if err := fs.Parse([]string{"--continue", "session-123", prompt}); err != nil {
 		t.Fatalf("parse flags: %v", err)
 	}
-	markExplicitCommonFlags(fs, &flags)
+	markExplicitCommonFlags(fs, flags)
 	if flags.WorkspaceExplicit {
 		t.Fatal("did not expect prompt text to mark workspace explicit")
 	}
