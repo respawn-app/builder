@@ -193,7 +193,7 @@ func TestExclusiveStepLifecycleEmitsCompletedRunStatePayloads(t *testing.T) {
 	}
 
 	lifecycle := &defaultExclusiveStepLifecycle{engine: eng}
-	if err := lifecycle.Run(context.Background(), exclusiveStepOptions{EmitRunState: true}, func(context.Context, string) error {
+	if err := lifecycle.Run(context.Background(), exclusiveStepOptions{EmitRunState: true, PersistRunLifecycle: true}, func(context.Context, string) error {
 		return nil
 	}); err != nil {
 		t.Fatalf("run: %v", err)
@@ -261,7 +261,7 @@ func TestExclusiveStepLifecycleEmitsInterruptedRunStatePayloads(t *testing.T) {
 	started := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		done <- lifecycle.Run(context.Background(), exclusiveStepOptions{EmitRunState: true}, func(stepCtx context.Context, stepID string) error {
+		done <- lifecycle.Run(context.Background(), exclusiveStepOptions{EmitRunState: true, PersistRunLifecycle: true}, func(stepCtx context.Context, stepID string) error {
 			close(started)
 			<-stepCtx.Done()
 			return stepCtx.Err()
@@ -362,6 +362,41 @@ func TestExclusiveStepLifecycleInterruptAppendsMessageAndClearsInFlight(t *testi
 	}
 	if last.Content != interruptMessage {
 		t.Fatalf("unexpected interruption content %q", last.Content)
+	}
+}
+
+func TestExclusiveStepLifecycleCanEmitRunStateWithoutPersistingDurableRun(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	var events []Event
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			events = append(events, evt)
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	lifecycle := &defaultExclusiveStepLifecycle{engine: eng}
+	if err := lifecycle.Run(context.Background(), exclusiveStepOptions{EmitRunState: true}, func(context.Context, string) error {
+		return nil
+	}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if runEvents := collectRunStateEvents(events); len(runEvents) != 2 {
+		t.Fatalf("expected run-state events, got %+v", runEvents)
+	}
+	runs, err := store.ReadRuns()
+	if err != nil {
+		t.Fatalf("read runs: %v", err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("expected no durable runs when persistence is disabled, got %+v", runs)
 	}
 }
 

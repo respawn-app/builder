@@ -293,7 +293,7 @@ func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (assistant 
 	}
 
 	e.ensureOrchestrationCollaborators()
-	err = e.stepLifecycle.Run(ctx, exclusiveStepOptions{EmitRunState: true}, func(stepCtx context.Context, stepID string) error {
+	err = e.stepLifecycle.Run(ctx, exclusiveStepOptions{EmitRunState: true, PersistRunLifecycle: true}, func(stepCtx context.Context, stepID string) error {
 		if err := e.injectAgentsIfNeeded(stepID); err != nil {
 			return err
 		}
@@ -317,7 +317,7 @@ func (e *Engine) SubmitUserShellCommand(ctx context.Context, command string) (re
 	}
 
 	e.ensureOrchestrationCollaborators()
-	err = e.stepLifecycle.Run(ctx, exclusiveStepOptions{EmitRunState: true}, func(stepCtx context.Context, stepID string) error {
+	err = e.stepLifecycle.Run(ctx, exclusiveStepOptions{EmitRunState: true, PersistRunLifecycle: true}, func(stepCtx context.Context, stepID string) error {
 		if err := e.injectAgentsIfNeeded(stepID); err != nil {
 			return err
 		}

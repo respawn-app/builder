@@ -4504,6 +4504,16 @@ func TestSubmitUserMessageSurfacesInFlightClearFailure(t *testing.T) {
 	if !reopened.Meta().InFlightStep {
 		t.Fatalf("expected persisted in-flight flag to remain true after clear failure")
 	}
+	runs, err := reopened.ReadRuns()
+	if err != nil {
+		t.Fatalf("read durable runs after reopen: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected only the started durable run to persist, got %+v", runs)
+	}
+	if runs[0].Status != session.RunStatusRunning || !runs[0].FinishedAt.IsZero() {
+		t.Fatalf("expected unfinished durable run after clear failure, got %+v", runs[0])
+	}
 }
 
 func TestNewNormalizesPersistedInFlightStepOnReopen(t *testing.T) {
