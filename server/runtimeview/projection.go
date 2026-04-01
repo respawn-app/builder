@@ -3,10 +3,68 @@ package runtimeview
 import (
 	"builder/server/llm"
 	"builder/server/runtime"
+	"builder/server/session"
 	patchformat "builder/server/tools/patch/format"
 	"builder/shared/clientui"
 	"builder/shared/transcript"
 )
+
+func MainViewFromRuntime(engine *runtime.Engine) clientui.RuntimeMainView {
+	if engine == nil {
+		return clientui.RuntimeMainView{}
+	}
+	sessionView := SessionViewFromRuntime(engine)
+	return clientui.RuntimeMainView{
+		Status:    StatusFromRuntime(engine),
+		Session:   sessionView,
+		ActiveRun: RunViewFromRuntime(sessionView.SessionID, engine.ActiveRun()),
+	}
+}
+
+func StatusFromRuntime(engine *runtime.Engine) clientui.RuntimeStatus {
+	if engine == nil {
+		return clientui.RuntimeStatus{}
+	}
+	usage := engine.ContextUsage()
+	return clientui.RuntimeStatus{
+		ReviewerFrequency:                 engine.ReviewerFrequency(),
+		ReviewerEnabled:                   engine.ReviewerEnabled(),
+		AutoCompactionEnabled:             engine.AutoCompactionEnabled(),
+		FastModeAvailable:                 engine.FastModeAvailable(),
+		FastModeEnabled:                   engine.FastModeEnabled(),
+		ConversationFreshness:             ConversationFreshnessFromSession(engine.ConversationFreshness()),
+		ParentSessionID:                   engine.ParentSessionID(),
+		LastCommittedAssistantFinalAnswer: engine.LastCommittedAssistantFinalAnswer(),
+		ThinkingLevel:                     engine.ThinkingLevel(),
+		CompactionMode:                    engine.CompactionMode(),
+		ContextUsage: clientui.RuntimeContextUsage{
+			UsedTokens:            usage.UsedTokens,
+			WindowTokens:          usage.WindowTokens,
+			CacheHitPercent:       usage.CacheHitPercent,
+			HasCacheHitPercentage: usage.HasCacheHitPercentage,
+		},
+		CompactionCount: engine.CompactionCount(),
+	}
+}
+
+func SessionViewFromRuntime(engine *runtime.Engine) clientui.RuntimeSessionView {
+	if engine == nil {
+		return clientui.RuntimeSessionView{}
+	}
+	return clientui.RuntimeSessionView{
+		SessionID:             engine.SessionID(),
+		SessionName:           engine.SessionName(),
+		ConversationFreshness: ConversationFreshnessFromSession(engine.ConversationFreshness()),
+		Chat:                  ChatSnapshotFromRuntime(engine.ChatSnapshot()),
+	}
+}
+
+func ConversationFreshnessFromSession(freshness session.ConversationFreshness) clientui.ConversationFreshness {
+	if freshness.IsFresh() {
+		return clientui.ConversationFreshnessFresh
+	}
+	return clientui.ConversationFreshnessEstablished
+}
 
 func EventFromRuntime(evt runtime.Event) clientui.Event {
 	view := clientui.Event{

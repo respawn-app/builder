@@ -1,13 +1,27 @@
 package runtimeview
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"builder/server/llm"
 	"builder/server/runtime"
+	"builder/server/session"
+	"builder/server/tools"
 	"builder/shared/transcript"
 )
+
+type projectionFastClient struct{}
+
+func (projectionFastClient) Generate(context.Context, llm.Request) (llm.Response, error) {
+	return llm.Response{}, errors.New("not implemented")
+}
+
+func (projectionFastClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	return llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}, nil
+}
 
 func TestEventFromRuntimeProjectsReasoningAndBackground(t *testing.T) {
 	exitCode := 17
@@ -71,6 +85,55 @@ func TestRunViewFromRuntimeCopiesSnapshot(t *testing.T) {
 	}
 	if view.Status != "completed" || !view.StartedAt.Equal(startedAt) || !view.FinishedAt.Equal(finishedAt) {
 		t.Fatalf("unexpected run view timing/status: %+v", view)
+	}
+}
+
+func TestMainViewFromRuntimeBundlesStatusAndSession(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.SetName("Session Name"); err != nil {
+		t.Fatalf("set name: %v", err)
+	}
+	if err := store.SetParentSessionID("parent-123"); err != nil {
+		t.Fatalf("set parent session id: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: "final answer", Phase: llm.MessagePhaseFinal}); err != nil {
+		t.Fatalf("append assistant message: %v", err)
+	}
+	eng, err := runtime.New(store, projectionFastClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.SetThinkingLevel("high"); err != nil {
+		t.Fatalf("set thinking level: %v", err)
+	}
+	if changed, err := eng.SetFastModeEnabled(true); err != nil {
+		t.Fatalf("enable fast mode: %v", err)
+	} else if !changed {
+		t.Fatal("expected fast mode enable to report changed=true")
+	}
+	if changed, enabled := eng.SetAutoCompactionEnabled(false); !changed || enabled {
+		t.Fatalf("expected auto-compaction disabled, changed=%v enabled=%v", changed, enabled)
+	}
+
+	view := MainViewFromRuntime(eng)
+	if view.Session.SessionID != store.Meta().SessionID || view.Session.SessionName != "Session Name" {
+		t.Fatalf("unexpected session hydration: %+v", view.Session)
+	}
+	if view.Status.ParentSessionID != "parent-123" || view.Status.LastCommittedAssistantFinalAnswer != "final answer" {
+		t.Fatalf("unexpected status hydration: %+v", view.Status)
+	}
+	if view.Status.ThinkingLevel != "high" || !view.Status.FastModeEnabled || view.Status.AutoCompactionEnabled {
+		t.Fatalf("unexpected runtime flags: %+v", view.Status)
+	}
+	if view.Status.ContextUsage.WindowTokens != 400_000 {
+		t.Fatalf("context window tokens = %d, want 400000", view.Status.ContextUsage.WindowTokens)
+	}
+	if view.ActiveRun != nil {
+		t.Fatalf("expected no active run in idle main view, got %+v", view.ActiveRun)
 	}
 }
 
