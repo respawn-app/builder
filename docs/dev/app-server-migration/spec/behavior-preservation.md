@@ -181,7 +181,7 @@ It does need to support all of the following:
 - disconnect and reconnect without losing the ability to rehydrate state
 - retry a request with a stable request identity so duplicate side effects can be detected or prevented
 
-For the first extraction seam, token-by-token rendering parity is not required. The current headless path only exposes a coarse progress stream via `writeRunProgressEvent(...)`, and the durable transcript remains the source of truth.
+For the first extraction seam, live progressive rendering parity is not required. The current headless path only exposes a coarse progress stream via `writeRunProgressEvent(...)`, and the durable transcript remains the source of truth.
 
 ## First Acceptance Wave
 
