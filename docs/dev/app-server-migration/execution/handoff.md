@@ -13,6 +13,7 @@ Continue Phase 3 execution until the full phase is complete according to `../pla
 - Latest checkpoints:
   - `d7860fd` `feat: add daemon transport and headless attach path`
   - `f5fbc22` `feat: auto-start local daemon for headless runs`
+  - pending checkpoint: lifecycle seam extraction behind `shared/serverapi/session_lifecycle.go`
 - `builder serve` is now a real standalone headless daemon host with:
   - local-only HTTP bootstrap in `server/serve`
   - health/readiness endpoints
@@ -34,14 +35,16 @@ Continue Phase 3 execution until the full phase is complete according to `../pla
 
 - The next Phase 3 blocker is interactive write/orchestration, not transport.
 - Remaining private `cli/app -> server/*` seams called out by the latest investigation are:
-  - session transition resolution + draft-input lifecycle
   - session planning / launch orchestration
   - transport-backed interactive runtime control surface
   - live ask/approval answer path
+- Newly completed extraction slice:
+  - session transition resolution + draft-input lifecycle now route through `shared/serverapi/session_lifecycle.go`, `shared/client/session_lifecycle.go`, and `server/sessionlifecycle`
+  - `server/core` now wires a loopback lifecycle client, and focused coverage exists in `server/sessionlifecycle/service_test.go`
 - Recommended next cut:
-  1. move session transition resolution and input-draft lifecycle behind shared `serverapi`/`shared/client` surfaces
-  2. then move session planning off `embedded_server.go`
-  3. only after that widen the interactive runtime-control API used by `shared/clientui.RuntimeClient`
+  1. move session planning off `embedded_server.go`
+  2. then widen the interactive runtime-control API used by `shared/clientui.RuntimeClient`
+  3. add the remaining live ask/approval answer path on the same shared boundary before claiming external interactive parity
 
 ## Resume Rules
 

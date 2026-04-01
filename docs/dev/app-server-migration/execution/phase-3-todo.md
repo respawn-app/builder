@@ -31,6 +31,12 @@ Completion rule:
 - [ ] No real transport exists yet.
 - [ ] No external daemon attach path exists yet.
 
+## Recent Checkpoints
+
+- [x] Shared lifecycle seam exists for session initial input, draft persistence, and transition resolution via `shared/serverapi/session_lifecycle.go`, `shared/client/session_lifecycle.go`, and `server/sessionlifecycle`.
+- [x] `server/core` exposes `SessionLifecycleClient()` for embedded and future transport-backed clients.
+- [x] Focused lifecycle coverage exists in `server/sessionlifecycle/service_test.go`, `server/core/core_test.go`, and `cli/app` characterization tests.
+
 ## Phase 3 Core
 
 ### A. Transport And Host Surface
@@ -149,4 +155,4 @@ Completion rule:
 
 ## Immediate Next Slice
 
-- [ ] Build the real JSON-RPC-over-WebSocket gateway on top of the new `server/serve` HTTP host and wire the first vertical transport-backed path (`handshake` + `project/session/process/run_prompt` reads/mutations + subscriptions where already available).
+- [ ] Extract session planning / launch orchestration off `cli/app/embedded_server.go` onto a shared `serverapi` + `shared/client` boundary without leaking `*session.Store`.
