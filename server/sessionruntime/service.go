@@ -79,6 +79,9 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 	if err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	logger, err := runprompt.NewRunLogger(store.Dir(), nil)
 	if err != nil {
 		return err
@@ -171,9 +174,12 @@ func (s *Service) ReleaseSessionRuntime(_ context.Context, req serverapi.Session
 	return nil
 }
 
-func (s *Service) resolveStore(_ context.Context, sessionID string) (*session.Store, error) {
+func (s *Service) resolveStore(ctx context.Context, sessionID string) (*session.Store, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if s.sessionStores != nil {
-		store, err := s.sessionStores.ResolveStore(context.Background(), sessionID)
+		store, err := s.sessionStores.ResolveStore(ctx, sessionID)
 		if err != nil {
 			return nil, err
 		}
@@ -183,6 +189,9 @@ func (s *Service) resolveStore(_ context.Context, sessionID string) (*session.St
 	}
 	store, err := session.OpenByID(s.persistenceRoot, sessionID)
 	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if s.sessionStores != nil {
