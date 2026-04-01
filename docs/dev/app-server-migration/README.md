@@ -22,6 +22,10 @@ The doc set now distinguishes between:
 
 Planning can begin from this file group, but not by ignoring the blockers. Several questions that were previously framed as later protocol details are now explicitly treated as implementation-planning blockers.
 
+Implementation note:
+
+- Phase 3 transport work established live prompt delivery as a dedicated prompt activity stream alongside session activity and process output; the spec docs in this folder should treat that as part of the boundary rather than as a client-side polling convention.
+
 Files:
 
 `spec/`
