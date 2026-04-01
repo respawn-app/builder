@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	serverembedded "builder/server/embedded"
 	serverstartup "builder/server/startup"
 	"builder/shared/config"
 )
@@ -37,7 +36,7 @@ type frontendOnboardingHandler struct {
 	inner authInteractor
 }
 
-func (h frontendOnboardingHandler) EnsureOnboardingReady(ctx context.Context, req serverembedded.OnboardingRequest) (config.App, error) {
+func (h frontendOnboardingHandler) EnsureOnboardingReady(ctx context.Context, req serverstartup.OnboardingRequest) (config.App, error) {
 	cfg, _, err := ensureOnboardingReady(ctx, req.Config, req.AuthManager, h.inner, req.ReloadConfig)
 	if err != nil {
 		return config.App{}, err
