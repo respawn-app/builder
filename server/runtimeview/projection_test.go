@@ -2,6 +2,7 @@ package runtimeview
 
 import (
 	"testing"
+	"time"
 
 	"builder/server/llm"
 	"builder/server/runtime"
@@ -15,7 +16,7 @@ func TestEventFromRuntimeProjectsReasoningAndBackground(t *testing.T) {
 		StepID:         "step-1",
 		AssistantDelta: "delta",
 		ReasoningDelta: &llm.ReasoningSummaryDelta{Key: "k", Role: "reasoning", Text: "thinking"},
-		RunState:       &runtime.RunState{Busy: true},
+		RunState:       &runtime.RunState{Busy: true, RunID: "run-1", Status: runtime.RunStatusRunning},
 		Background: &runtime.BackgroundShellEvent{
 			Type:              "completed",
 			ID:                "123",
@@ -41,11 +42,35 @@ func TestEventFromRuntimeProjectsReasoningAndBackground(t *testing.T) {
 	if view.RunState == nil || !view.RunState.Busy {
 		t.Fatalf("expected busy run state, got %+v", view.RunState)
 	}
+	if view.RunState.RunID != "run-1" || view.RunState.Status != "running" {
+		t.Fatalf("expected run identity in projected run state, got %+v", view.RunState)
+	}
 	if view.Background == nil || view.Background.ID != "123" {
 		t.Fatalf("expected background projection, got %+v", view.Background)
 	}
 	if view.Background.ExitCode == nil || *view.Background.ExitCode != 17 {
 		t.Fatalf("expected copied exit code, got %+v", view.Background.ExitCode)
+	}
+}
+
+func TestRunViewFromRuntimeCopiesSnapshot(t *testing.T) {
+	startedAt := time.Now().UTC().Add(-time.Minute)
+	finishedAt := time.Now().UTC()
+	view := RunViewFromRuntime("session-1", &runtime.RunSnapshot{
+		RunID:      "run-1",
+		StepID:     "step-1",
+		Status:     runtime.RunStatusCompleted,
+		StartedAt:  startedAt,
+		FinishedAt: finishedAt,
+	})
+	if view == nil {
+		t.Fatal("expected run view")
+	}
+	if view.RunID != "run-1" || view.SessionID != "session-1" || view.StepID != "step-1" {
+		t.Fatalf("unexpected run view ids: %+v", view)
+	}
+	if view.Status != "completed" || !view.StartedAt.Equal(startedAt) || !view.FinishedAt.Equal(finishedAt) {
+		t.Fatalf("unexpected run view timing/status: %+v", view)
 	}
 }
 

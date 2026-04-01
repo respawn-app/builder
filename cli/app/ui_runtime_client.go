@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"builder/server/runtime"
+	"builder/server/runtimeview"
 	"builder/server/session"
 	"builder/shared/clientui"
 )
@@ -17,6 +18,16 @@ func newUIRuntimeClient(engine *runtime.Engine) clientui.RuntimeClient {
 		return nil
 	}
 	return engineUIRuntimeClient{engine: engine}
+}
+
+func (c engineUIRuntimeClient) MainView() clientui.RuntimeMainView {
+	status := c.Status()
+	sessionView := c.SessionView()
+	return clientui.RuntimeMainView{
+		Status:    status,
+		Session:   sessionView,
+		ActiveRun: runtimeview.RunViewFromRuntime(sessionView.SessionID, c.engine.ActiveRun()),
+	}
 }
 
 func (c engineUIRuntimeClient) Status() clientui.RuntimeStatus {

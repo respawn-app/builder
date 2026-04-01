@@ -15,6 +15,7 @@ type exclusiveStepLifecycle interface {
 	Run(ctx context.Context, options exclusiveStepOptions, fn func(stepCtx context.Context, stepID string) error) error
 	Interrupt() error
 	IsBusy() bool
+	Snapshot() *RunSnapshot
 }
 
 type backgroundNoticeScheduler interface {
