@@ -244,6 +244,7 @@ func (s *Server) RunPromptClient() client.RunPromptClient {
 		AuthManager:      s.authManager,
 		FastModeState:    s.fastModeState,
 		Background:       s.background,
+		RuntimeRegistry:  s.runtimeRegistry,
 		BackgroundRouter: s.backgroundRouter,
 	})
 }
