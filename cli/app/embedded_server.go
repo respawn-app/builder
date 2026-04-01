@@ -19,6 +19,8 @@ import (
 type embeddedServer interface {
 	Close() error
 	Config() config.App
+	ProjectID() string
+	ProjectViewClient() client.ProjectViewClient
 	RunPromptClient() client.RunPromptClient
 	ProcessControlClient() client.ProcessControlClient
 	ProcessViewClient() client.ProcessViewClient
@@ -51,6 +53,20 @@ func (s *embeddedAppServer) Config() config.App {
 		return config.App{}
 	}
 	return s.inner.Config()
+}
+
+func (s *embeddedAppServer) ProjectID() string {
+	if s == nil || s.inner == nil {
+		return ""
+	}
+	return s.inner.ProjectID()
+}
+
+func (s *embeddedAppServer) ProjectViewClient() client.ProjectViewClient {
+	if s == nil || s.inner == nil {
+		return nil
+	}
+	return s.inner.ProjectViewClient()
 }
 
 func (s *embeddedAppServer) RunPromptClient() client.RunPromptClient {
@@ -110,6 +126,8 @@ func (s *embeddedAppServer) PlanSession(req sessionLaunchRequest, pick sessionPi
 	controller := sessioncontrol.Controller{
 		Config:       cfg,
 		ContainerDir: s.inner.ContainerDir(),
+		ProjectID:    s.inner.ProjectID(),
+		ProjectViews: s.inner.ProjectViewClient(),
 		AuthManager:  s.inner.AuthManager(),
 		PickSession: func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (launch.SessionSelection, error) {
 			runPicker := pick
