@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"builder/server/runtime"
-	"builder/server/runtimeview"
 	"builder/server/session"
 	"builder/server/sessionview"
 	"builder/shared/client"
@@ -25,17 +24,17 @@ func newUIRuntimeClient(engine *runtime.Engine) clientui.RuntimeClient {
 	return engineUIRuntimeClient{
 		engine:    engine,
 		sessionID: engine.SessionID(),
-		reads:     client.NewLoopbackSessionViewClient(sessionview.NewService(nil, engine)),
+		reads:     client.NewLoopbackSessionViewClient(sessionview.NewService(nil, sessionview.NewStaticRuntimeResolver(engine))),
 	}
 }
 
 func (c engineUIRuntimeClient) MainView() clientui.RuntimeMainView {
 	if c.reads == nil {
-		return runtimeview.MainViewFromRuntime(c.engine)
+		return clientui.RuntimeMainView{}
 	}
 	resp, err := c.reads.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: c.sessionID})
 	if err != nil {
-		return runtimeview.MainViewFromRuntime(c.engine)
+		return clientui.RuntimeMainView{}
 	}
 	return resp.MainView
 }
