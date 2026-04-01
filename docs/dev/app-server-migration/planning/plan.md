@@ -187,7 +187,8 @@ Deliverables:
 - two real clients attached to one session in tests
 - deterministic approval and ask race handling
 - reconnect with hydration-first recovery
-- best-effort catch-up with explicit gap handling
+- transcript paging/compression strategy for large-session rehydrate
+- explicit stream-drop handling that forces rehydrate plus resubscribe
 - process-control race coverage
 - slow-client handling and bounded buffering
 
@@ -199,7 +200,7 @@ Primary risks:
 
 Rollback point:
 
-- if stream catch-up proves too fragile, force full rehydrate on reconnect and keep replay narrow and best-effort
+- if any live stream proves too fragile under load, drop the stream and keep reconnect strictly snapshot/page based until a stronger read model exists
 
 ## Phase 5: Data Adoption, Standalone Polish, And Boundary Proof
 

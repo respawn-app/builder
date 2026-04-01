@@ -32,7 +32,7 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - Added focused coverage proving the real embedded `PrepareRuntime(...)` path wires both process reads and process control through the shared client boundary rather than the local manager path.
 - Promoted the embedded-only runtime and persistence resolvers into reusable `server/registry` infrastructure, so server-owned read and live-session services no longer depend on private one-off helper types trapped inside `server/embedded`.
 - Added the first transport-neutral live session-activity subscription seam via `shared/serverapi` + `shared/client` + `server/sessionactivity`, backed by server-owned runtime registries rather than CLI-local event bridges.
-- Added explicit lag handling for live session-activity subscribers: a subscriber that falls behind receives a deterministic gap error and must rehydrate rather than silently missing events.
+- Added explicit lag handling for live session-activity subscribers: a subscriber that falls behind receives a deterministic stream failure and must rehydrate rather than silently missing events.
 - Added focused coverage proving the real `cli/app` `PrepareRuntime(...)` path wires shared session-activity publication, so two shared clients can hydrate the same active session and observe the same runtime-originated session update through the embedded server boundary.
 
 ## What This Proves
@@ -56,8 +56,8 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - The new application read services still use partial dormant reconstruction rather than richer persisted read models for settings/approval state.
 - Process control is only partially on the new boundary so far: `kill` and `inline-output` are shared, `kill` now carries `client_request_id` as a mutating contract, but log opening remains a frontend-local action over server-provided file paths.
 - The UI is hydrating through `RuntimeMainView` and the process read service, but it is not yet rendering richer run/process-specific UX beyond carrying the typed data.
-- The live session-activity stream is active-session-only, live-only, and best-effort. It does not yet provide replay, cursors, or typed process-output substreams.
-- This checkpoint does not mean all Phase 2 requirements are done. Still open from the broader spec: project registry/read surfaces, ask and approval resource/read surfaces, fuller event/live-feed classes, and the protocol-facing retention/replay model.
+- The live session-activity stream is active-session-only, live-only, and non-authoritative for reconnect. Reconnect is expected to rehydrate from reads.
+- This checkpoint does not mean all Phase 2 requirements are done. Still open from the broader spec: project registry/read surfaces, ask and approval resource/read surfaces, fuller event/live-feed classes, and the transcript paging/compression model for large-session hydration.
 
 ## Next Slice
 

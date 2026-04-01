@@ -12,6 +12,12 @@ The intended target remains:
 - replaceable frontends attached through a stable protocol,
 - CLI as the first frontend, not a privileged architectural special case.
 
+Current locked reconnect direction:
+
+- reconnect is snapshot/page based,
+- transcript truth comes from hydration reads,
+- future large-session handling should prefer pagination and compression over stream-history recovery or delta-based transcript delivery.
+
 The doc set now distinguishes between:
 
 - locked requirements and architecture constraints,
