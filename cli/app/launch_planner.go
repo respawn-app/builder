@@ -245,9 +245,13 @@ func applyCLIOverridesToSessionPlan(plan sessionLaunchPlan, cfg config.App) sess
 	if sourceIsCLI(sources, "openai_base_url") {
 		plan.ActiveSettings.OpenAIBaseURL = cfg.Settings.OpenAIBaseURL
 	}
-	if hasCLIToolOverride(cfg.Source) && !plan.ModelContractLocked {
-		plan.ActiveSettings.EnabledTools = cloneEnabledToolSet(cfg.Settings.EnabledTools)
-		plan.EnabledTools = dedupeSortToolIDs(activeToolIDs(cfg.Settings, cfg.Source, nil))
+	if !plan.ModelContractLocked {
+		if hasCLIToolOverride(cfg.Source) {
+			plan.ActiveSettings.EnabledTools = cloneEnabledToolSet(cfg.Settings.EnabledTools)
+		}
+		if hasCLIToolOverride(cfg.Source) || sourceIsCLI(sources, "model") {
+			plan.EnabledTools = dedupeSortToolIDs(activeToolIDs(plan.ActiveSettings, plan.Source, nil))
+		}
 	}
 	plan.Source = mergeCLISources(plan.Source, cfg.Source)
 	plan.StatusConfig.Settings = plan.ActiveSettings
