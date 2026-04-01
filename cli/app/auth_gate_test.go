@@ -112,14 +112,15 @@ func TestResolveSessionActionLogoutUsesBootstrapAuthInteractor(t *testing.T) {
 		return err
 	}
 
-	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/work")
+	root := t.TempDir()
+	store, err := session.Create(root, "workspace-x", "/tmp/work")
 	if err != nil {
 		t.Fatalf("create session store: %v", err)
 	}
 
 	resolved, err := resolveSessionAction(
 		ctx,
-		&testEmbeddedServer{authManager: mgr},
+		&testEmbeddedServer{cfg: config.App{PersistenceRoot: root}, authManager: mgr},
 		interactor,
 		store,
 		UITransition{Action: UIActionLogout},

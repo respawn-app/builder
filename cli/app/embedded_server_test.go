@@ -15,11 +15,11 @@ import (
 	"builder/server/auth"
 	serverembedded "builder/server/embedded"
 	"builder/server/launch"
-	serverlifecycle "builder/server/lifecycle"
 	"builder/server/primaryrun"
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/sessioncontrol"
+	"builder/server/sessionlifecycle"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
@@ -42,10 +42,11 @@ type testEmbeddedServer struct {
 	processControlClient client.ProcessControlClient
 	processOutputClient  client.ProcessOutputClient
 	processViewClient    client.ProcessViewClient
+	sessionLifecycle     client.SessionLifecycleClient
 	sessionViewClient    client.SessionViewClient
 	planSession          func(req sessionLaunchRequest, pick sessionPickerRunner) (sessionLaunchPlan, error)
 	prepareRuntime       func(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error)
-	resolveAction        func(ctx context.Context, interactor authInteractor, store *session.Store, transition UITransition) (resolvedSessionAction, error)
+	reauthenticate       func(ctx context.Context, interactor authInteractor) error
 }
 
 type stubEmbeddedProcessViewClient struct {
@@ -81,6 +82,12 @@ func (s *testEmbeddedServer) ProcessOutputClient() client.ProcessOutputClient {
 }
 func (s *testEmbeddedServer) ProcessViewClient() client.ProcessViewClient {
 	return s.processViewClient
+}
+func (s *testEmbeddedServer) SessionLifecycleClient() client.SessionLifecycleClient {
+	if s.sessionLifecycle != nil {
+		return s.sessionLifecycle
+	}
+	return client.NewLoopbackSessionLifecycleClient(sessionlifecycle.NewService(s.cfg.PersistenceRoot, s.authManager))
 }
 func (s *testEmbeddedServer) SessionViewClient() client.SessionViewClient {
 	return s.sessionViewClient
@@ -144,37 +151,11 @@ func (s *testEmbeddedServer) PrepareRuntime(plan sessionLaunchPlan, diagnosticWr
 	}
 	return nil, errors.New("test embedded server prepare runtime not configured")
 }
-func (s *testEmbeddedServer) ResolveTransition(ctx context.Context, interactor authInteractor, store *session.Store, transition UITransition) (resolvedSessionAction, error) {
-	if s.resolveAction != nil {
-		return s.resolveAction(ctx, interactor, store, transition)
+func (s *testEmbeddedServer) Reauthenticate(ctx context.Context, interactor authInteractor) error {
+	if s.reauthenticate != nil {
+		return s.reauthenticate(ctx, interactor)
 	}
-	controller := sessioncontrol.Controller{
-		Config:       s.cfg,
-		ContainerDir: s.containerDir,
-		AuthManager:  s.authManager,
-		Reauth: func(ctx context.Context) error {
-			return ensureAuthReady(ctx, s.authManager, s.oauthOpts, s.cfg.Settings.Theme, s.cfg.Settings.TUIAlternateScreen, interactor)
-		},
-	}
-	resolved, err := controller.ResolveTransition(ctx, store, serverlifecycle.Transition{
-		Action:               serverlifecycle.Action(transition.Action),
-		InitialPrompt:        transition.InitialPrompt,
-		InitialInput:         transition.InitialInput,
-		TargetSessionID:      transition.TargetSessionID,
-		ForkUserMessageIndex: transition.ForkUserMessageIndex,
-		ParentSessionID:      transition.ParentSessionID,
-	})
-	if err != nil {
-		return resolvedSessionAction{}, err
-	}
-	return resolvedSessionAction{
-		NextSessionID:   resolved.NextSessionID,
-		InitialPrompt:   resolved.InitialPrompt,
-		InitialInput:    resolved.InitialInput,
-		ParentSessionID: resolved.ParentSessionID,
-		ForceNewSession: resolved.ForceNewSession,
-		ShouldContinue:  resolved.ShouldContinue,
-	}, nil
+	return ensureAuthReady(ctx, s.authManager, s.oauthOpts, s.cfg.Settings.Theme, s.cfg.Settings.TUIAlternateScreen, interactor)
 }
 
 func (s *stubEmbeddedProcessViewClient) ListProcesses(context.Context, serverapi.ProcessListRequest) (serverapi.ProcessListResponse, error) {
