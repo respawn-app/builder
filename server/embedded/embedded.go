@@ -57,6 +57,7 @@ type Server struct {
 	background       *shelltool.Manager
 	backgroundRouter *runtimewire.BackgroundEventRouter
 	runtimeRegistry  *runtimeRegistry
+	processControls  client.ProcessControlClient
 	processViews     client.ProcessViewClient
 	sessionViews     client.SessionViewClient
 }
@@ -166,6 +167,9 @@ func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) 
 		background:       runtimeSupport.Background,
 		backgroundRouter: runtimeSupport.BackgroundRouter,
 		runtimeRegistry:  runtimeRegistry,
+		processControls: client.NewLoopbackProcessControlClient(
+			processview.NewService(runtimeSupport.Background),
+		),
 		processViews: client.NewLoopbackProcessViewClient(
 			processview.NewService(runtimeSupport.Background),
 		),
@@ -243,6 +247,13 @@ func (s *Server) ProcessViewClient() client.ProcessViewClient {
 		return nil
 	}
 	return s.processViews
+}
+
+func (s *Server) ProcessControlClient() client.ProcessControlClient {
+	if s == nil {
+		return nil
+	}
+	return s.processControls
 }
 
 func (s *Server) RegisterRuntime(sessionID string, engine *runtime.Engine) {

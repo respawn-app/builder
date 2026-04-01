@@ -3,6 +3,7 @@ package processview
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -100,6 +101,71 @@ func TestServiceListProcessesFiltersByOwnerRunID(t *testing.T) {
 	}
 }
 
+func TestServiceGetInlineOutputReturnsManagerPreview(t *testing.T) {
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	workspace := t.TempDir()
+	tool := shelltool.NewExecCommandTool(workspace, 16_000, manager, "session-1")
+	input, err := json.Marshal(map[string]any{
+		"cmd":           "printf 'inline-preview\n'; sleep 1",
+		"yield_time_ms": 250,
+	})
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-inline", Name: tools.ToolExecCommand, Input: input, RunID: "run-1", StepID: "step-1"})
+	if err != nil {
+		t.Fatalf("tool call: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected successful tool result, got %+v", result)
+	}
+
+	svc := NewService(manager)
+	resp, err := svc.GetInlineOutput(context.Background(), serverapi.ProcessInlineOutputRequest{ProcessID: "1000", MaxChars: 12_000})
+	if err != nil {
+		t.Fatalf("GetInlineOutput: %v", err)
+	}
+	if resp.LogPath == "" || !strings.Contains(resp.Output, "inline-preview") {
+		t.Fatalf("unexpected inline output response: %+v", resp)
+	}
+}
+
+func TestServiceKillProcessSignalsManagerEntry(t *testing.T) {
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	workspace := t.TempDir()
+	tool := shelltool.NewExecCommandTool(workspace, 16_000, manager, "session-1")
+	input, err := json.Marshal(map[string]any{
+		"cmd":           "sleep 30",
+		"yield_time_ms": 250,
+	})
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-kill", Name: tools.ToolExecCommand, Input: input, RunID: "run-1", StepID: "step-1"})
+	if err != nil {
+		t.Fatalf("tool call: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected successful tool result, got %+v", result)
+	}
+
+	svc := NewService(manager)
+	if _, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ProcessID: "1000"}); err != nil {
+		t.Fatalf("KillProcess: %v", err)
+	}
+	waitForProcessKilled(t, manager, "1000")
+}
+
 func waitForProcessCount(t *testing.T, manager *shelltool.Manager, count int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -110,4 +176,18 @@ func waitForProcessCount(t *testing.T, manager *shelltool.Manager, count int) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %d processes", count)
+}
+
+func waitForProcessKilled(t *testing.T, manager *shelltool.Manager, id string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, entry := range manager.List() {
+			if entry.ID == id && (entry.KillRequested || !entry.Running) {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for process %s to be kill-requested", id)
 }

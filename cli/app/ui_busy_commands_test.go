@@ -185,10 +185,10 @@ func TestBusyQueueSubmissionCommandBehavior(t *testing.T) {
 			wantStatusContains: "No parent session available",
 		},
 		{
-			name:               "ps action is rejected without background manager",
+			name:               "ps action is rejected without process client",
 			input:              "/ps kill proc-1",
 			wantInput:          "/ps kill proc-1",
-			wantStatusContains: "background process manager is unavailable",
+			wantStatusContains: "background process client is unavailable",
 		},
 	}
 

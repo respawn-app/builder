@@ -220,8 +220,8 @@ func (c uiInputController) runProcessListAction(action string) (tea.Model, tea.C
 
 func (c uiInputController) runProcessAction(action, id string) (tea.Model, tea.Cmd) {
 	m := c.model
-	if m.backgroundManager == nil {
-		return m, c.showErrorStatus("background process manager is unavailable")
+	if m.processClient == nil {
+		return m, c.showErrorStatus("background process client is unavailable")
 	}
 	action = strings.ToLower(strings.TrimSpace(action))
 	id = strings.TrimSpace(id)
@@ -230,13 +230,13 @@ func (c uiInputController) runProcessAction(action, id string) (tea.Model, tea.C
 	}
 	switch action {
 	case "kill":
-		if err := m.backgroundManager.Kill(id); err != nil {
+		if err := m.processClient.KillProcess(id); err != nil {
 			return m, c.showErrorStatus(err.Error())
 		}
 		m.refreshProcessEntries()
 		return m, c.showTransientStatus(fmt.Sprintf("sent terminate signal to %s", id))
 	case "inline":
-		preview, _, err := m.backgroundManager.InlineOutput(id, 12_000)
+		preview, _, err := m.processClient.InlineOutput(id, 12_000)
 		if err != nil {
 			return m, c.showErrorStatus(err.Error())
 		}
