@@ -123,7 +123,7 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 		releaseRequests:    make(map[string]struct{}),
 		close: func() {
 			if s.runtimes != nil {
-				s.runtimes.Unregister(sessionID)
+				s.runtimes.Unregister(sessionID, wiring.Engine)
 			}
 			if s.backgroundRouter != nil {
 				s.backgroundRouter.ClearActiveSession(sessionID)
