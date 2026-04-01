@@ -3,6 +3,7 @@ package shell
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -216,6 +217,59 @@ func TestTruncateBannerUsesByteWording(t *testing.T) {
 	}
 	if !strings.Contains(out, "omitted ") || !strings.Contains(out, " bytes.") {
 		t.Fatalf("expected byte-based truncation banner, output = %q", out)
+	}
+}
+
+func TestManagerSubscribeOutputStreamsTailAndEndsAtEOF(t *testing.T) {
+	manager := newBackgroundTestManager(t)
+	workspace := t.TempDir()
+
+	result, err := manager.Start(context.Background(), ExecRequest{
+		Command:        []string{"sh", "-c", "printf 'hello\\n'; sleep 0.4; printf 'world\\n'"},
+		DisplayCommand: "tail-test",
+		Workdir:        workspace,
+		YieldTime:      250 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if !result.Backgrounded {
+		t.Fatalf("expected backgrounded process, got %+v", result)
+	}
+
+	sub, err := manager.SubscribeOutput(context.Background(), result.SessionID, 0)
+	if err != nil {
+		t.Fatalf("SubscribeOutput: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	first, err := sub.Next(context.Background())
+	if err != nil {
+		t.Fatalf("first Next: %v", err)
+	}
+	if first.ProcessID != result.SessionID || !strings.Contains(first.Text, "hello") {
+		t.Fatalf("unexpected first chunk: %+v", first)
+	}
+
+	second, err := sub.Next(context.Background())
+	if err != nil {
+		t.Fatalf("second Next: %v", err)
+	}
+	if second.OffsetBytes <= first.OffsetBytes || !strings.Contains(second.Text, "world") {
+		t.Fatalf("unexpected second chunk: %+v", second)
+	}
+
+	if _, err := sub.Next(context.Background()); err != io.EOF {
+		t.Fatalf("expected EOF after process exit, got %v", err)
+	}
+
+	tailSub, err := manager.SubscribeOutput(context.Background(), result.SessionID, second.OffsetBytes+int64(len([]byte("world\n"))))
+	if err != nil {
+		t.Fatalf("SubscribeOutput from tail: %v", err)
+	}
+	defer func() { _ = tailSub.Close() }()
+	if _, err := tailSub.Next(context.Background()); err != io.EOF {
+		t.Fatalf("expected EOF for tail subscription at end, got %v", err)
 	}
 }
 
