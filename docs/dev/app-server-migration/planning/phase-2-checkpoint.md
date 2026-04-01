@@ -26,8 +26,10 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - Added integration coverage proving the real `cli/app` `PrepareRuntime(...)` path registers the live runtime into the shared `SessionViewClient` read surface, rather than only through manual test registration.
 - Threaded explicit process ownership through shell-backed background execution, so live background processes now carry owning `session_id`, `run_id`, and `step_id` rather than only a session-scoped manager identity.
 - Added the first transport-neutral process read service via `shared/serverapi` + `shared/client` + `server/processview`, with embedded-mode production reads resolving through the server-owned background manager.
-- Switched the CLI `/ps` list hydration path onto that process read service while preserving the existing local background-manager control path for kill/inline/log actions.
+- Added the first transport-neutral process control service for kill and inline-output actions via the same `server/processview` / `shared/client` boundary.
+- Switched the CLI `/ps` surface onto that shared process boundary for list hydration plus kill/inline control, while preserving local log opening as a frontend action over server-provided log paths.
 - Added focused coverage proving process ownership is stamped at creation time, survives projection through the server read service, and is available through embedded-mode loopback reads.
+- Added focused coverage proving the real embedded `PrepareRuntime(...)` path wires both process reads and process control through the shared client boundary rather than the local manager path.
 
 ## What This Proves
 
@@ -38,6 +40,7 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - The read boundary now resolves resources by ID and can hydrate dormant sessions without mutating persisted state, which is the minimum correctness bar for future daemon/web clients.
 - The embedded server now owns the production resolver path for session hydration, which is the first concrete move from loopback-only helpers toward a real multi-session app-server read layer.
 - Live process resources now have explicit session/run ownership on the server side, and `/ps` list hydration no longer depends on CLI-local snapshot projection of the background manager.
+- `/ps` control actions now also flow through the same shared process boundary, so the CLI no longer owns direct kill/inline process mutations.
 - Phase 2 can proceed incrementally without introducing a durable run store or transport-level event redesign yet.
 
 ## Current Limitations
@@ -46,10 +49,10 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - Process ownership/read metadata is currently live-only and in-memory. Restarting the app server loses process resources and their run/step ownership history.
 - Reopen semantics currently reconstruct unfinished durable runs from `run_started` without a matching `run_finished`, but that state is not yet surfaced through a higher-level application read API.
 - The new application read services still use partial dormant reconstruction rather than richer persisted read models for settings/approval state, and the current server-owned registries are embedded-mode only rather than shared daemon infrastructure.
-- Process control remains a frontend-local loopback path over `shelltool.Manager`; only process reads are on the new shared boundary so far.
+- Process control is only partially on the new boundary so far: kill and inline-output are shared, but log opening remains a frontend-local action over server-provided file paths.
 - The UI is hydrating through `RuntimeMainView` and the process read service, but it is not yet rendering richer run/process-specific UX beyond carrying the typed data.
 
 ## Next Slice
 
 - Promote the current embedded-mode registries into reusable server infrastructure so session selection, detached hydration, and later transport handlers can all resolve sessions/runtimes/processes through the same server-owned registry layer.
-- Extend the process surface from read-only ownership metadata into typed process inspect/control contracts, and widen run-scoped hydration/tests beyond the single active-run case.
+- Extend the process surface beyond the current list/get/kill/inline subset into richer typed inspect/control/output contracts, and widen run-scoped hydration/tests beyond the single active-run case.

@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"strings"
 
 	"builder/server/processview"
 	shelltool "builder/server/tools/shell"
@@ -13,17 +15,18 @@ import (
 type backgroundUIProcessClient struct {
 	manager *shelltool.Manager
 	reads   client.ProcessViewClient
+	control client.ProcessControlClient
 }
 
 func newUIProcessClient(manager *shelltool.Manager) clientui.ProcessClient {
-	return newUIProcessClientWithReads(manager, nil)
+	return newUIProcessClientWithReads(manager, nil, nil)
 }
 
-func newUIProcessClientWithReads(manager *shelltool.Manager, reads client.ProcessViewClient) clientui.ProcessClient {
-	if manager == nil && reads == nil {
+func newUIProcessClientWithReads(manager *shelltool.Manager, reads client.ProcessViewClient, control client.ProcessControlClient) clientui.ProcessClient {
+	if manager == nil && reads == nil && control == nil {
 		return nil
 	}
-	return backgroundUIProcessClient{manager: manager, reads: reads}
+	return backgroundUIProcessClient{manager: manager, reads: reads, control: control}
 }
 
 func (m *uiModel) listProcesses() []clientui.BackgroundProcess {
@@ -49,4 +52,42 @@ func (c backgroundUIProcessClient) ListProcesses() []clientui.BackgroundProcess 
 		out = append(out, processview.ProcessFromSnapshot(entry))
 	}
 	return out
+}
+
+func (c backgroundUIProcessClient) KillProcess(id string) error {
+	id = strings.TrimSpace(id)
+	var lastErr error
+	if c.control != nil {
+		_, err := c.control.KillProcess(context.Background(), serverapi.ProcessKillRequest{ProcessID: id})
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+	}
+	if c.manager == nil {
+		if lastErr != nil {
+			return lastErr
+		}
+		return errors.New("background process manager is unavailable")
+	}
+	return c.manager.Kill(id)
+}
+
+func (c backgroundUIProcessClient) InlineOutput(id string, maxChars int) (string, string, error) {
+	id = strings.TrimSpace(id)
+	var lastErr error
+	if c.control != nil {
+		resp, err := c.control.GetInlineOutput(context.Background(), serverapi.ProcessInlineOutputRequest{ProcessID: id, MaxChars: maxChars})
+		if err == nil {
+			return resp.Output, resp.LogPath, nil
+		}
+		lastErr = err
+	}
+	if c.manager == nil {
+		if lastErr != nil {
+			return "", "", lastErr
+		}
+		return "", "", errors.New("background process manager is unavailable")
+	}
+	return c.manager.InlineOutput(id, maxChars)
 }

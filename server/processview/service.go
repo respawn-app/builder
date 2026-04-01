@@ -13,6 +13,8 @@ import (
 type ProcessSource interface {
 	List() []shelltool.Snapshot
 	Snapshot(id string) (shelltool.Snapshot, error)
+	Kill(id string) error
+	InlineOutput(id string, maxChars int) (string, string, error)
 }
 
 type Service struct {
@@ -56,4 +58,31 @@ func (s *Service) GetProcess(_ context.Context, req serverapi.ProcessGetRequest)
 	}
 	process := ProcessFromSnapshot(snapshot)
 	return serverapi.ProcessGetResponse{Process: &process}, nil
+}
+
+func (s *Service) KillProcess(_ context.Context, req serverapi.ProcessKillRequest) (serverapi.ProcessKillResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.ProcessKillResponse{}, err
+	}
+	if s == nil || s.processes == nil {
+		return serverapi.ProcessKillResponse{}, fmt.Errorf("process source is required")
+	}
+	if err := s.processes.Kill(strings.TrimSpace(req.ProcessID)); err != nil {
+		return serverapi.ProcessKillResponse{}, err
+	}
+	return serverapi.ProcessKillResponse{}, nil
+}
+
+func (s *Service) GetInlineOutput(_ context.Context, req serverapi.ProcessInlineOutputRequest) (serverapi.ProcessInlineOutputResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.ProcessInlineOutputResponse{}, err
+	}
+	if s == nil || s.processes == nil {
+		return serverapi.ProcessInlineOutputResponse{}, fmt.Errorf("process source is required")
+	}
+	output, logPath, err := s.processes.InlineOutput(strings.TrimSpace(req.ProcessID), req.MaxChars)
+	if err != nil {
+		return serverapi.ProcessInlineOutputResponse{}, err
+	}
+	return serverapi.ProcessInlineOutputResponse{Output: output, LogPath: logPath}, nil
 }
