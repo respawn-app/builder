@@ -215,6 +215,127 @@ func TestRunPromptClientRunsLoopbackThroughEmbeddedServer(t *testing.T) {
 	}
 }
 
+func TestRunPromptClientPublishesHeadlessSessionActivity(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	releaseResponse := make(chan struct{})
+	responseServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		<-releaseResponse
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello from headless activity\"}]}]}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}))
+	defer responseServer.Close()
+
+	server, err := Start(context.Background(), Request{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		OpenAIBaseURL:         responseServer.URL,
+		OpenAIBaseURLExplicit: true,
+		LoadOptions: config.LoadOptions{
+			Model: "gpt-5",
+		},
+		LookupEnv: os.Getenv,
+	}, StartHooks{
+		Auth: &testAuthHandler{lookupEnv: os.Getenv},
+		Onboarding: &testOnboardingHandler{
+			ensure: func(_ context.Context, req OnboardingRequest) (config.App, error) {
+				path, created, err := config.WriteDefaultSettingsFile()
+				if err != nil {
+					return config.App{}, err
+				}
+				reloaded, err := req.ReloadConfig()
+				if err != nil {
+					return config.App{}, err
+				}
+				reloaded.Source.CreatedDefaultConfig = created
+				reloaded.Source.SettingsPath = path
+				reloaded.Source.SettingsFileExists = true
+				return reloaded, nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start embedded server: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	store, err := session.Create(server.ContainerDir(), "workspace-x", workspace)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := store.SetName("headless activity"); err != nil {
+		t.Fatalf("set session name: %v", err)
+	}
+	if _, err := session.OpenByID(server.Config().PersistenceRoot, store.Meta().SessionID); err != nil {
+		t.Fatalf("preflight OpenByID failed: %v (persistence_root=%q container_dir=%q session_id=%q)", err, server.Config().PersistenceRoot, server.ContainerDir(), store.Meta().SessionID)
+	}
+
+	responseCh := make(chan serverapi.RunPromptResponse, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		resp, err := server.RunPromptClient().RunPrompt(context.Background(), serverapi.RunPromptRequest{
+			ClientRequestID:   "embedded-run-activity-1",
+			SelectedSessionID: store.Meta().SessionID,
+			Prompt:            "hello from user",
+		}, nil)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		responseCh <- resp
+	}()
+
+	activity := server.SessionActivityClient()
+	if activity == nil {
+		t.Fatal("expected session activity client")
+	}
+	var sub serverapi.SessionActivitySubscription
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	for {
+		sub, err = activity.SubscribeSessionActivity(ctx, serverapi.SessionActivitySubscribeRequest{SessionID: store.Meta().SessionID})
+		if err == nil {
+			break
+		}
+		select {
+		case runErr := <-errCh:
+			t.Fatalf("RunPrompt early failure: %v", runErr)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	defer func() { _ = sub.Close() }()
+
+	close(releaseResponse)
+	evt, err := sub.Next(ctx)
+	if err != nil {
+		t.Fatalf("headless session activity Next: %v", err)
+	}
+	if evt.Kind == "" {
+		t.Fatalf("expected a projected headless activity event, got %+v", evt)
+	}
+
+	select {
+	case runErr := <-errCh:
+		t.Fatalf("RunPrompt: %v", runErr)
+	case resp := <-responseCh:
+		if resp.Result != "hello from headless activity" {
+			t.Fatalf("unexpected result: %+v", resp)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for headless run prompt response")
+	}
+}
+
 func TestStartPropagatesAuthFailureBeforeOnboarding(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	workspace := t.TempDir()
