@@ -35,6 +35,7 @@ type testEmbeddedServer struct {
 	projectID            string
 	projectViewClient    client.ProjectViewClient
 	processControlClient client.ProcessControlClient
+	processOutputClient  client.ProcessOutputClient
 	processViewClient    client.ProcessViewClient
 	sessionViewClient    client.SessionViewClient
 	planSession          func(req sessionLaunchRequest, pick sessionPickerRunner) (sessionLaunchPlan, error)
@@ -69,6 +70,9 @@ func (s *testEmbeddedServer) BackgroundRouter() serverembedded.BackgroundRouter 
 func (s *testEmbeddedServer) RunPromptClient() client.RunPromptClient { return s.runPromptClient }
 func (s *testEmbeddedServer) ProcessControlClient() client.ProcessControlClient {
 	return s.processControlClient
+}
+func (s *testEmbeddedServer) ProcessOutputClient() client.ProcessOutputClient {
+	return s.processOutputClient
 }
 func (s *testEmbeddedServer) ProcessViewClient() client.ProcessViewClient {
 	return s.processViewClient
@@ -544,5 +548,32 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessControlForUIActions(t *testi
 	}
 	if len(controls.killed) != 1 || controls.killed[0] != "proc-1" {
 		t.Fatalf("expected shared process control client to handle kill, got %+v", controls.killed)
+	}
+}
+
+func TestEmbeddedAppServerPrepareRuntimeWiresProcessOutputClient(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("start embedded server: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test prepare runtime process output")
+	if err != nil {
+		t.Fatalf("prepare runtime: %v", err)
+	}
+	defer runtimePlan.Close()
+	if runtimePlan.Wiring.processOutput == nil {
+		t.Fatal("expected PrepareRuntime to wire process output client")
 	}
 }
