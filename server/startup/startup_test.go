@@ -252,3 +252,43 @@ func TestStartWrapsCoreWithSameClientAssembly(t *testing.T) {
 		t.Fatalf("project listing mismatch core=%+v started=%+v", coreProjects.Projects[0], startedProjects.Projects[0])
 	}
 }
+
+func TestHeadlessHandlersStartCoreWithoutCLIFrontendDependencies(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	authHandler, onboardingHandler := NewHeadlessHandlers(nil)
+	appCore, err := StartCore(context.Background(), Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, authHandler, onboardingHandler)
+	if err != nil {
+		t.Fatalf("StartCore: %v", err)
+	}
+	defer func() { _ = appCore.Close() }()
+
+	if appCore.Config().WorkspaceRoot != workspace {
+		t.Fatalf("workspace root = %q, want %q", appCore.Config().WorkspaceRoot, workspace)
+	}
+	if !appCore.Config().Source.SettingsFileExists {
+		t.Fatal("expected headless startup onboarding to ensure settings file exists")
+	}
+	if appCore.Config().Source.SettingsPath == "" {
+		t.Fatal("expected settings path to be populated after headless onboarding")
+	}
+	if _, err := os.Stat(appCore.Config().Source.SettingsPath); err != nil {
+		t.Fatalf("expected settings file to exist: %v", err)
+	}
+}
+
+func TestHeadlessHandlersFailFastWithoutCredentials(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "")
+
+	authHandler, onboardingHandler := NewHeadlessHandlers(nil)
+	_, err := StartCore(context.Background(), Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, authHandler, onboardingHandler)
+	if !errors.Is(err, auth.ErrAuthNotConfigured) {
+		t.Fatalf("expected auth not configured, got %v", err)
+	}
+}
