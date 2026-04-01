@@ -13,14 +13,18 @@ import (
 	"builder/server/processoutput"
 	"builder/server/processview"
 	"builder/server/projectview"
+	"builder/server/promptactivity"
+	"builder/server/promptcontrol"
 	"builder/server/registry"
 	"builder/server/runprompt"
 	"builder/server/runtime"
+	"builder/server/runtimecontrol"
 	"builder/server/runtimewire"
 	"builder/server/session"
 	"builder/server/sessionactivity"
 	"builder/server/sessionlaunch"
 	"builder/server/sessionlifecycle"
+	"builder/server/sessionruntime"
 	"builder/server/sessionview"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
@@ -44,7 +48,11 @@ type Core struct {
 	processControls  client.ProcessControlClient
 	processOutput    client.ProcessOutputClient
 	processViews     client.ProcessViewClient
+	promptControl    client.PromptControlClient
+	promptActivity   client.PromptActivityClient
+	runtimeControls  client.RuntimeControlClient
 	sessionLaunch    client.SessionLaunchClient
+	sessionRuntime   client.SessionRuntimeClient
 	sessionViews     client.SessionViewClient
 	sessionLifecycle client.SessionLifecycleClient
 	sessionActivity  client.SessionActivityClient
@@ -76,12 +84,16 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	approvalService := approvalview.NewService(runtimeRegistry)
 	processService := processview.NewService(runtimeSupport.Background)
 	processOutputService := processoutput.NewService(runtimeSupport.Background, runtimeSupport.Background)
+	promptControlService := promptcontrol.NewService(runtimeRegistry)
+	promptActivityService := promptactivity.NewService(runtimeRegistry)
+	runtimeControlService := runtimecontrol.NewService(runtimeRegistry, runtimeRegistry)
 	sessionViewService := sessionview.NewService(registry.NewPersistenceSessionResolver(cfg.PersistenceRoot), runtimeRegistry)
 	sessionLaunchService := sessionlaunch.NewDeduplicatingService(
 		sessionlaunch.ScopeID(cfg, containerDir),
 		sessionlaunch.NewService(launch.Planner{Config: cfg, ContainerDir: containerDir}, sessionStoreRegistry),
 	)
 	sessionLifecycleService := sessionlifecycle.NewService(cfg.PersistenceRoot, sessionStoreRegistry, authSupport.AuthManager)
+	sessionRuntimeService := sessionruntime.NewService(cfg.PersistenceRoot, authSupport.AuthManager, runtimeSupport.FastModeState, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, sessionStoreRegistry)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
 	core := &Core{
 		cfg:              cfg,
@@ -99,7 +111,11 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		processControls:  client.NewLoopbackProcessControlClient(processService),
 		processOutput:    client.NewLoopbackProcessOutputClient(processOutputService),
 		processViews:     client.NewLoopbackProcessViewClient(processService),
+		promptControl:    client.NewLoopbackPromptControlClient(promptControlService),
+		promptActivity:   client.NewLoopbackPromptActivityClient(promptActivityService),
+		runtimeControls:  client.NewLoopbackRuntimeControlClient(runtimeControlService),
 		sessionLaunch:    client.NewLoopbackSessionLaunchClient(sessionLaunchService),
+		sessionRuntime:   client.NewLoopbackSessionRuntimeClient(sessionRuntimeService),
 		sessionViews:     client.NewLoopbackSessionViewClient(sessionViewService),
 		sessionLifecycle: client.NewLoopbackSessionLifecycleClient(sessionLifecycleService),
 		sessionActivity:  client.NewLoopbackSessionActivityClient(sessionActivityService),
@@ -214,6 +230,27 @@ func (s *Core) ProcessViewClient() client.ProcessViewClient {
 	return s.processViews
 }
 
+func (s *Core) RuntimeControlClient() client.RuntimeControlClient {
+	if s == nil {
+		return nil
+	}
+	return s.runtimeControls
+}
+
+func (s *Core) PromptControlClient() client.PromptControlClient {
+	if s == nil {
+		return nil
+	}
+	return s.promptControl
+}
+
+func (s *Core) PromptActivityClient() client.PromptActivityClient {
+	if s == nil {
+		return nil
+	}
+	return s.promptActivity
+}
+
 func (s *Core) ProcessControlClient() client.ProcessControlClient {
 	if s == nil {
 		return nil
@@ -240,6 +277,13 @@ func (s *Core) SessionLaunchClient() client.SessionLaunchClient {
 		return nil
 	}
 	return s.sessionLaunch
+}
+
+func (s *Core) SessionRuntimeClient() client.SessionRuntimeClient {
+	if s == nil {
+		return nil
+	}
+	return s.sessionRuntime
 }
 
 func (s *Core) SessionLifecycleClient() client.SessionLifecycleClient {
@@ -296,6 +340,13 @@ func (s *Core) CompletePendingPrompt(sessionID string, requestID string) {
 		return
 	}
 	s.runtimeRegistry.CompletePendingPrompt(sessionID, requestID)
+}
+
+func (s *Core) AwaitPromptResponse(ctx context.Context, sessionID string, req askquestion.Request) (askquestion.Response, error) {
+	if s == nil || s.runtimeRegistry == nil {
+		return askquestion.Response{}, fmt.Errorf("runtime registry is required")
+	}
+	return s.runtimeRegistry.AwaitPromptResponse(ctx, sessionID, req)
 }
 
 func (s *Core) AcquirePrimaryRun(sessionID string) (primaryrun.Lease, error) {

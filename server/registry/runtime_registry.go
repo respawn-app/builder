@@ -17,7 +17,10 @@ import (
 	"builder/shared/serverapi"
 )
 
-const sessionActivityBufferSize = 256
+const (
+	sessionActivityBufferSize = 256
+	promptActivityBufferSize  = 64
+)
 
 type RuntimeRegistry struct {
 	mu         sync.RWMutex
@@ -29,13 +32,25 @@ type RuntimeRegistry struct {
 type runtimeEntry struct {
 	engine        *runtime.Engine
 	hub           *sessionActivityHub
+	promptHub     *promptActivityHub
 	pendingMu     sync.RWMutex
-	pendingPrompt map[string]PendingPromptSnapshot
+	pendingPrompt map[string]*pendingPromptEntry
 }
 
 type PendingPromptSnapshot struct {
 	Request   askquestion.Request
 	CreatedAt time.Time
+}
+
+type pendingPromptEntry struct {
+	PendingPromptSnapshot
+	response chan promptResponseResult
+	closed   bool
+}
+
+type promptResponseResult struct {
+	response askquestion.Response
+	err      error
 }
 
 type sessionActivityHub struct {
@@ -45,8 +60,24 @@ type sessionActivityHub struct {
 	subscribers map[uint64]*sessionActivitySubscription
 }
 
+type promptActivityHub struct {
+	mu          sync.Mutex
+	nextID      uint64
+	closed      bool
+	subscribers map[uint64]*promptActivitySubscription
+}
+
 type sessionActivitySubscription struct {
 	ch      chan clientui.Event
+	onClose func()
+
+	mu   sync.Mutex
+	err  error
+	done bool
+}
+
+type promptActivitySubscription struct {
+	ch      chan clientui.PendingPromptEvent
 	onClose func()
 
 	mu   sync.Mutex
@@ -66,11 +97,17 @@ func (r *RuntimeRegistry) Register(sessionID string, engine *runtime.Engine) {
 	if id == "" {
 		return
 	}
-	entry := &runtimeEntry{engine: engine, hub: newSessionActivityHub(), pendingPrompt: make(map[string]PendingPromptSnapshot)}
+	entry := &runtimeEntry{engine: engine, hub: newSessionActivityHub(), promptHub: newPromptActivityHub(), pendingPrompt: make(map[string]*pendingPromptEntry)}
 	r.mu.Lock()
 	previous := r.engines[id]
 	r.engines[id] = entry
 	r.mu.Unlock()
+	if previous != nil {
+		previous.closePendingPrompts(io.EOF)
+	}
+	if previous != nil && previous.promptHub != nil {
+		previous.promptHub.close(io.EOF)
+	}
 	if previous != nil && previous.hub != nil {
 		previous.hub.close(io.EOF)
 	}
@@ -88,6 +125,12 @@ func (r *RuntimeRegistry) Unregister(sessionID string) {
 	entry := r.engines[id]
 	delete(r.engines, id)
 	r.mu.Unlock()
+	if entry != nil {
+		entry.closePendingPrompts(io.EOF)
+	}
+	if entry != nil && entry.promptHub != nil {
+		entry.promptHub.close(io.EOF)
+	}
 	if entry != nil && entry.hub != nil {
 		entry.hub.close(io.EOF)
 	}
@@ -138,6 +181,30 @@ func (r *RuntimeRegistry) SubscribeSessionActivity(_ context.Context, sessionID 
 	return entry.hub.subscribe(), nil
 }
 
+func (r *RuntimeRegistry) SubscribePromptActivity(_ context.Context, sessionID string) (serverapi.PromptActivitySubscription, error) {
+	if r == nil {
+		return nil, fmt.Errorf("runtime registry is required")
+	}
+	id := strings.TrimSpace(sessionID)
+	r.mu.RLock()
+	entry := r.engines[id]
+	r.mu.RUnlock()
+	if entry == nil || entry.promptHub == nil {
+		return nil, fmt.Errorf("prompt activity stream for %q is unavailable: %w", id, serverapi.ErrStreamUnavailable)
+	}
+	sub := entry.promptHub.subscribe()
+	if sub == nil {
+		return nil, fmt.Errorf("prompt activity stream for %q is unavailable: %w", id, serverapi.ErrStreamUnavailable)
+	}
+	for _, item := range entry.listPendingPrompts() {
+		if !sub.publish(pendingPromptEventFromSnapshot(id, item, clientui.PendingPromptEventPending)) {
+			sub.closeWithError(serverapi.ErrStreamGap)
+			break
+		}
+	}
+	return sub, nil
+}
+
 func (r *RuntimeRegistry) BeginPendingPrompt(sessionID string, req askquestion.Request) {
 	if r == nil {
 		return
@@ -153,9 +220,11 @@ func (r *RuntimeRegistry) BeginPendingPrompt(sessionID string, req askquestion.R
 	if entry == nil {
 		return
 	}
+	snapshot := PendingPromptSnapshot{Request: req, CreatedAt: time.Now()}
 	entry.pendingMu.Lock()
-	entry.pendingPrompt[requestID] = PendingPromptSnapshot{Request: req, CreatedAt: time.Now()}
+	entry.pendingPrompt[requestID] = &pendingPromptEntry{PendingPromptSnapshot: snapshot}
 	entry.pendingMu.Unlock()
+	entry.publishPendingPrompt(id, snapshot, clientui.PendingPromptEventPending)
 }
 
 func (r *RuntimeRegistry) CompletePendingPrompt(sessionID string, requestID string) {
@@ -173,9 +242,17 @@ func (r *RuntimeRegistry) CompletePendingPrompt(sessionID string, requestID stri
 	if entry == nil {
 		return
 	}
+	var snapshot PendingPromptSnapshot
 	entry.pendingMu.Lock()
+	if pending, ok := entry.pendingPrompt[trimmedRequestID]; ok {
+		pending.closed = true
+		snapshot = pending.PendingPromptSnapshot
+	}
 	delete(entry.pendingPrompt, trimmedRequestID)
 	entry.pendingMu.Unlock()
+	if snapshot.Request.ID != "" {
+		entry.publishPendingPrompt(id, snapshot, clientui.PendingPromptEventResolved)
+	}
 }
 
 func (r *RuntimeRegistry) ListPendingPrompts(sessionID string) []PendingPromptSnapshot {
@@ -195,7 +272,10 @@ func (r *RuntimeRegistry) ListPendingPrompts(sessionID string) []PendingPromptSn
 	entry.pendingMu.RLock()
 	items := make([]PendingPromptSnapshot, 0, len(entry.pendingPrompt))
 	for _, item := range entry.pendingPrompt {
-		items = append(items, item)
+		if item == nil {
+			continue
+		}
+		items = append(items, item.PendingPromptSnapshot)
 	}
 	entry.pendingMu.RUnlock()
 	sort.Slice(items, func(i, j int) bool {
@@ -205,6 +285,92 @@ func (r *RuntimeRegistry) ListPendingPrompts(sessionID string) []PendingPromptSn
 		return items[i].CreatedAt.Before(items[j].CreatedAt)
 	})
 	return items
+}
+
+func (r *RuntimeRegistry) AwaitPromptResponse(ctx context.Context, sessionID string, req askquestion.Request) (askquestion.Response, error) {
+	if r == nil {
+		return askquestion.Response{}, fmt.Errorf("runtime registry is required")
+	}
+	id := strings.TrimSpace(sessionID)
+	requestID := strings.TrimSpace(req.ID)
+	if id == "" || requestID == "" {
+		return askquestion.Response{}, fmt.Errorf("session id and request id are required")
+	}
+	r.mu.RLock()
+	entry := r.engines[id]
+	r.mu.RUnlock()
+	if entry == nil {
+		return askquestion.Response{}, fmt.Errorf("runtime %q is unavailable", id)
+	}
+	pending := &pendingPromptEntry{
+		PendingPromptSnapshot: PendingPromptSnapshot{Request: req, CreatedAt: time.Now()},
+		response:              make(chan promptResponseResult, 1),
+	}
+	entry.pendingMu.Lock()
+	if _, exists := entry.pendingPrompt[requestID]; exists {
+		entry.pendingMu.Unlock()
+		return askquestion.Response{}, fmt.Errorf("prompt %q is already pending", requestID)
+	}
+	entry.pendingPrompt[requestID] = pending
+	entry.pendingMu.Unlock()
+	entry.publishPendingPrompt(id, pending.PendingPromptSnapshot, clientui.PendingPromptEventPending)
+	defer func() {
+		var shouldPublishResolved bool
+		entry.pendingMu.Lock()
+		current, ok := entry.pendingPrompt[requestID]
+		if ok && current == pending {
+			shouldPublishResolved = !current.closed
+			current.closed = true
+			delete(entry.pendingPrompt, requestID)
+		}
+		entry.pendingMu.Unlock()
+		if shouldPublishResolved {
+			entry.publishPendingPrompt(id, pending.PendingPromptSnapshot, clientui.PendingPromptEventResolved)
+		}
+	}()
+	select {
+	case <-ctx.Done():
+		return askquestion.Response{}, ctx.Err()
+	case result := <-pending.response:
+		return result.response, result.err
+	}
+}
+
+func (r *RuntimeRegistry) SubmitPromptResponse(sessionID string, resp askquestion.Response, err error) error {
+	if r == nil {
+		return fmt.Errorf("runtime registry is required")
+	}
+	id := strings.TrimSpace(sessionID)
+	requestID := strings.TrimSpace(resp.RequestID)
+	if id == "" || requestID == "" {
+		return fmt.Errorf("session id and request id are required")
+	}
+	r.mu.RLock()
+	entry := r.engines[id]
+	r.mu.RUnlock()
+	if entry == nil {
+		return fmt.Errorf("runtime %q is unavailable", id)
+	}
+	entry.pendingMu.Lock()
+	pending := entry.pendingPrompt[requestID]
+	if pending == nil {
+		entry.pendingMu.Unlock()
+		return fmt.Errorf("prompt %q not found", requestID)
+	}
+	if pending.closed {
+		entry.pendingMu.Unlock()
+		return fmt.Errorf("prompt %q is already resolved", requestID)
+	}
+	pending.closed = true
+	snapshot := pending.PendingPromptSnapshot
+	ch := pending.response
+	entry.pendingMu.Unlock()
+	if ch == nil {
+		return fmt.Errorf("prompt %q cannot be answered through the shared boundary", requestID)
+	}
+	ch <- promptResponseResult{response: resp, err: err}
+	entry.publishPendingPrompt(id, snapshot, clientui.PendingPromptEventResolved)
+	return nil
 }
 
 func (r *RuntimeRegistry) AcquirePrimaryRun(sessionID string) (primaryrun.Lease, error) {
@@ -235,6 +401,63 @@ func (r *RuntimeRegistry) AcquirePrimaryRun(sessionID string) (primaryrun.Lease,
 
 func newSessionActivityHub() *sessionActivityHub {
 	return &sessionActivityHub{subscribers: make(map[uint64]*sessionActivitySubscription)}
+}
+
+func newPromptActivityHub() *promptActivityHub {
+	return &promptActivityHub{subscribers: make(map[uint64]*promptActivitySubscription)}
+}
+
+func (e *runtimeEntry) closePendingPrompts(err error) {
+	if e == nil {
+		return
+	}
+	e.pendingMu.Lock()
+	items := make([]*pendingPromptEntry, 0, len(e.pendingPrompt))
+	for id, pending := range e.pendingPrompt {
+		if pending == nil {
+			delete(e.pendingPrompt, id)
+			continue
+		}
+		pending.closed = true
+		items = append(items, pending)
+		delete(e.pendingPrompt, id)
+	}
+	e.pendingMu.Unlock()
+	for _, pending := range items {
+		if pending.response == nil {
+			continue
+		}
+		pending.response <- promptResponseResult{err: err}
+	}
+}
+
+func (e *runtimeEntry) listPendingPrompts() []PendingPromptSnapshot {
+	if e == nil {
+		return nil
+	}
+	e.pendingMu.RLock()
+	items := make([]PendingPromptSnapshot, 0, len(e.pendingPrompt))
+	for _, item := range e.pendingPrompt {
+		if item == nil {
+			continue
+		}
+		items = append(items, item.PendingPromptSnapshot)
+	}
+	e.pendingMu.RUnlock()
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].Request.ID < items[j].Request.ID
+		}
+		return items[i].CreatedAt.Before(items[j].CreatedAt)
+	})
+	return items
+}
+
+func (e *runtimeEntry) publishPendingPrompt(sessionID string, snapshot PendingPromptSnapshot, eventType clientui.PendingPromptEventType) {
+	if e == nil || e.promptHub == nil || snapshot.Request.ID == "" {
+		return
+	}
+	e.promptHub.publish(pendingPromptEventFromSnapshot(sessionID, snapshot, eventType))
 }
 
 func (h *sessionActivityHub) subscribe() *sessionActivitySubscription {
@@ -367,4 +590,155 @@ func (s *sessionActivitySubscription) closeWithError(err error) {
 	}
 }
 
+func (h *promptActivityHub) subscribe() *promptActivitySubscription {
+	if h == nil {
+		return nil
+	}
+	sub := &promptActivitySubscription{ch: make(chan clientui.PendingPromptEvent, promptActivityBufferSize)}
+	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		sub.closeWithError(io.EOF)
+		return sub
+	}
+	id := h.nextID
+	h.nextID++
+	h.subscribers[id] = sub
+	h.mu.Unlock()
+	sub.onClose = func() {
+		h.mu.Lock()
+		delete(h.subscribers, id)
+		h.mu.Unlock()
+	}
+	return sub
+}
+
+func (h *promptActivityHub) publish(evt clientui.PendingPromptEvent) {
+	if h == nil || evt.IsZero() {
+		return
+	}
+	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		return
+	}
+	subs := make([]*promptActivitySubscription, 0, len(h.subscribers))
+	for _, sub := range h.subscribers {
+		subs = append(subs, sub)
+	}
+	h.mu.Unlock()
+	for _, sub := range subs {
+		if !sub.publish(evt) {
+			sub.closeWithError(serverapi.ErrStreamGap)
+		}
+	}
+}
+
+func (h *promptActivityHub) close(err error) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		return
+	}
+	h.closed = true
+	subs := make([]*promptActivitySubscription, 0, len(h.subscribers))
+	for id, sub := range h.subscribers {
+		subs = append(subs, sub)
+		delete(h.subscribers, id)
+	}
+	h.mu.Unlock()
+	for _, sub := range subs {
+		sub.closeWithError(err)
+	}
+}
+
+func (s *promptActivitySubscription) publish(evt clientui.PendingPromptEvent) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.done {
+		return false
+	}
+	select {
+	case s.ch <- evt:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *promptActivitySubscription) Next(ctx context.Context) (clientui.PendingPromptEvent, error) {
+	if s == nil {
+		return clientui.PendingPromptEvent{}, io.EOF
+	}
+	select {
+	case <-ctx.Done():
+		return clientui.PendingPromptEvent{}, ctx.Err()
+	case evt, ok := <-s.ch:
+		if ok {
+			return evt, nil
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.err != nil {
+			return clientui.PendingPromptEvent{}, serverapi.NormalizeStreamError(s.err)
+		}
+		return clientui.PendingPromptEvent{}, io.EOF
+	}
+}
+
+func (s *promptActivitySubscription) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.closeWithError(io.EOF)
+	return nil
+}
+
+func (s *promptActivitySubscription) closeWithError(err error) {
+	if s == nil {
+		return
+	}
+	var onClose func()
+	s.mu.Lock()
+	if s.done {
+		s.mu.Unlock()
+		return
+	}
+	s.done = true
+	s.err = err
+	close(s.ch)
+	onClose = s.onClose
+	s.mu.Unlock()
+	if onClose != nil {
+		onClose()
+	}
+}
+
+func pendingPromptEventFromSnapshot(sessionID string, snapshot PendingPromptSnapshot, eventType clientui.PendingPromptEventType) clientui.PendingPromptEvent {
+	evt := clientui.PendingPromptEvent{
+		Type:                   eventType,
+		PromptID:               snapshot.Request.ID,
+		SessionID:              sessionID,
+		Question:               snapshot.Request.Question,
+		Suggestions:            append([]string(nil), snapshot.Request.Suggestions...),
+		RecommendedOptionIndex: snapshot.Request.RecommendedOptionIndex,
+		Approval:               snapshot.Request.Approval,
+		CreatedAt:              snapshot.CreatedAt,
+	}
+	if len(snapshot.Request.ApprovalOptions) > 0 {
+		evt.ApprovalOptions = make([]clientui.ApprovalOption, 0, len(snapshot.Request.ApprovalOptions))
+		for _, option := range snapshot.Request.ApprovalOptions {
+			evt.ApprovalOptions = append(evt.ApprovalOptions, clientui.ApprovalOption{Decision: clientui.ApprovalDecision(option.Decision), Label: option.Label})
+		}
+	}
+	return evt
+}
+
 var _ serverapi.SessionActivitySubscription = (*sessionActivitySubscription)(nil)
+var _ serverapi.PromptActivitySubscription = (*promptActivitySubscription)(nil)

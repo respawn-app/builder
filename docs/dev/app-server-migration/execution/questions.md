@@ -18,25 +18,25 @@ The user requested that work continue through automated continue prompts until P
 2. Should current Phase 3 work expand into multi-workspace hosting?
    - Answer: no. Current implementation remains single-workspace for this phase.
 
+3. What exact local control endpoint shape should v1 use?
+   - Answer: local-only HTTP with WebSocket JSON-RPC plus `/healthz` and `/readyz`, published through a workspace discovery record.
+
+4. What exact discovery mechanism should CLI use first?
+   - Answer: a workspace-container discovery record owned by the daemon host.
+
+5. What exact handshake payload shape should v1 return?
+   - Answer: protocol version, server identity, workspace/project identity, and capability flags.
+
+6. What exact attachment scope should be mandatory in v1?
+   - Answer: explicit project attach and session attach.
+
+7. What should default CLI mode selection do once external daemon mode exists?
+   - Answer: prefer attaching to a compatible running daemon for the workspace; if none exists, attempt local daemon startup; embedded mode remains the fallback path using the same shared boundary.
+
 ## Open Questions (Do Not Block Execution)
 
-1. What exact local control endpoint shape should v1 use?
-   - Working assumption: implement a local-only HTTP server that exposes WebSocket JSON-RPC plus health/readiness endpoints, with bind/bootstrap details chosen for minimal CLI attach-or-start friction.
-
-2. What exact discovery mechanism should CLI use first?
-   - Working assumption: use an explicit local endpoint file / address bootstrap owned by the daemon host rather than introducing platform-specific service management up front.
-
-3. What exact handshake payload shape should v1 return?
-   - Working assumption: include protocol version, server identity, workspace/project identity, and capability flags sufficient for client gating.
-
-4. What exact attachment scope should be mandatory in v1?
-   - Working assumption: support explicit project attach plus session attach needed for current CLI workflows; avoid inventing broader scope concepts unless implementation requires them.
-
-5. How much catch-up/replay is needed in Phase 3 vs Phase 4?
+1. How much catch-up/replay is needed in Phase 3 vs Phase 4?
    - Working assumption: preserve the currently implemented stream error model and current live-subscription semantics; deeper reconnect hardening remains Phase 4 unless transport viability forces a minimal addition.
-
-6. What should default CLI mode selection do once external daemon mode exists?
-   - Working assumption: preserve current product behavior while adding daemon support. The CLI should prefer attaching to a compatible running daemon for the current workspace when one exists. If none exists, interactive CLI should offer local server startup rather than silently changing all startup behavior; headless flows may start a local daemon automatically where prompting is impossible. Embedded mode remains available and must continue using the same client boundary.
 
 ## Assumptions Made During Execution
 
