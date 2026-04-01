@@ -10,6 +10,9 @@ func TestRuntimeClientUsesBundledStatusReadModel(t *testing.T) {
 	if _, ok := clientType.MethodByName("Status"); !ok {
 		t.Fatal("expected RuntimeClient to expose bundled Status() read model")
 	}
+	if _, ok := clientType.MethodByName("MainView"); !ok {
+		t.Fatal("expected RuntimeClient to expose bundled MainView() hydration model")
+	}
 	if _, ok := clientType.MethodByName("SessionView"); !ok {
 		t.Fatal("expected RuntimeClient to expose bundled SessionView() hydration model")
 	}

@@ -18,7 +18,7 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 	defer close(runtimeEventStop)
 	sessionID := ""
 	if runtimeClient != nil {
-		sessionID = runtimeClient.SessionView().SessionID
+		sessionID = runtimeClient.MainView().Session.SessionID
 	}
 
 	program := tea.NewProgram(NewProjectedUIModel(

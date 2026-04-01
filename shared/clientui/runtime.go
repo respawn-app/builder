@@ -1,6 +1,9 @@
 package clientui
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type ConversationFreshness uint8
 
@@ -35,6 +38,30 @@ type RuntimeStatus struct {
 	CompactionCount                   int
 }
 
+type RunStatus string
+
+const (
+	RunStatusRunning     RunStatus = "running"
+	RunStatusCompleted   RunStatus = "completed"
+	RunStatusInterrupted RunStatus = "interrupted"
+	RunStatusFailed      RunStatus = "failed"
+)
+
+type RunView struct {
+	RunID      string
+	SessionID  string
+	StepID     string
+	Status     RunStatus
+	StartedAt  time.Time
+	FinishedAt time.Time
+}
+
+type RuntimeMainView struct {
+	Status    RuntimeStatus
+	Session   RuntimeSessionView
+	ActiveRun *RunView
+}
+
 type RuntimeSessionView struct {
 	SessionID             string
 	SessionName           string
@@ -43,6 +70,7 @@ type RuntimeSessionView struct {
 }
 
 type RuntimeClient interface {
+	MainView() RuntimeMainView
 	Status() RuntimeStatus
 	SessionView() RuntimeSessionView
 	SetSessionName(name string) error

@@ -24,6 +24,13 @@ func (e *Engine) ChatSnapshot() ChatSnapshot {
 	return e.chat.snapshot()
 }
 
+func (e *Engine) ActiveRun() *RunSnapshot {
+	if e == nil || e.stepLifecycle == nil {
+		return nil
+	}
+	return e.stepLifecycle.Snapshot()
+}
+
 func (e *Engine) LastCommittedAssistantFinalAnswer() string {
 	messages := e.chat.snapshotMessages()
 	for idx := len(messages) - 1; idx >= 0; idx-- {
