@@ -5,6 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -612,5 +616,111 @@ func TestEmbeddedAppServerPrepareRuntimeUsesPrimaryRunGuardedRuntimeClient(t *te
 	defer lease.Release()
 	if _, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "hello"); !errors.Is(err, primaryrun.ErrActivePrimaryRun) {
 		t.Fatalf("SubmitUserMessage error = %v, want active primary run", err)
+	}
+}
+
+func TestEmbeddedAppServerPrepareRuntimeRejectsConcurrentPrimarySubmitWhileRunInFlight(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	firstStarted := make(chan struct{})
+	firstRelease := make(chan struct{})
+	var requests atomic.Int32
+	responseServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if got := strings.TrimSpace(r.Header.Get("Authorization")); got == "" {
+			t.Fatal("expected authorization header")
+		}
+		index := int(requests.Add(1))
+		switch index {
+		case 1:
+			close(firstStarted)
+			<-firstRelease
+		case 2:
+		default:
+			t.Fatalf("unexpected responses request index %d", index)
+		}
+		reply := map[int]string{1: "first reply", 2: "second reply"}[index]
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final\",\"content\":[{\"type\":\"output_text\",\"text\":%q}]}]}}\n\n", reply)
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}))
+	defer responseServer.Close()
+
+	server, err := startEmbeddedServer(context.Background(), Options{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+		OpenAIBaseURL:         responseServer.URL,
+		OpenAIBaseURLExplicit: true,
+	}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("start embedded server: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test prepare runtime in-flight primary run gate")
+	if err != nil {
+		t.Fatalf("prepare runtime: %v", err)
+	}
+	defer runtimePlan.Close()
+
+	type submitResult struct {
+		message string
+		err     error
+	}
+	firstDone := make(chan submitResult, 1)
+	go func() {
+		message, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "first prompt")
+		firstDone <- submitResult{message: message, err: err}
+	}()
+
+	select {
+	case <-firstStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for first submit to start")
+	}
+
+	if _, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "second prompt"); !errors.Is(err, primaryrun.ErrActivePrimaryRun) {
+		t.Fatalf("second SubmitUserMessage error = %v, want active primary run", err)
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("responses request count during rejected concurrent submit = %d, want 1", got)
+	}
+
+	close(firstRelease)
+	select {
+	case result := <-firstDone:
+		if result.err != nil {
+			t.Fatalf("first SubmitUserMessage error: %v", result.err)
+		}
+		if result.message != "first reply" {
+			t.Fatalf("first SubmitUserMessage message = %q, want first reply", result.message)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for first submit to finish")
+	}
+
+	message, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "third prompt")
+	if err != nil {
+		t.Fatalf("third SubmitUserMessage error: %v", err)
+	}
+	if message != "second reply" {
+		t.Fatalf("third SubmitUserMessage message = %q, want second reply", message)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("responses request count after third submit = %d, want 2", got)
 	}
 }
