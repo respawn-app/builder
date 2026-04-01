@@ -9,19 +9,39 @@ Continue Phase 3 execution until the full phase is complete according to `../pla
 ## Current Starting Point
 
 - Branch: `app-server-phase-3`
-- Baseline checkpoint commit before this branch: `7cd6397` (`refactor: add standalone server host startup path`)
-- `builder serve` exists as a standalone headless host shell.
-- Server host startup no longer depends on `cli/app` startup handlers.
-- Local-only HTTP daemon bootstrap now exists in `server/serve`.
-- Discovery record publication/removal now exists in `server/discovery` + `shared/protocol`.
-- Health/readiness endpoints now exist on the daemon host.
-- Phase 3 transport, handshake, subscriptions over transport, and external attach are not implemented yet.
+- Working branch is currently clean.
+- Latest checkpoints:
+  - `d7860fd` `feat: add daemon transport and headless attach path`
+  - `f5fbc22` `feat: auto-start local daemon for headless runs`
+- `builder serve` is now a real standalone headless daemon host with:
+  - local-only HTTP bootstrap in `server/serve`
+  - health/readiness endpoints
+  - discovery record publication/removal in `shared/discovery`
+  - JSON-RPC-over-WebSocket gateway in `server/transport`
+- Shared external client transport now exists in `shared/client/remote.go`.
+- Headless `RunPrompt` now:
+  - attaches to a compatible discovered daemon when present
+  - auto-starts `builder serve` when no daemon exists and the current executable is a real builder binary
+  - stays on embedded fallback under `go test` binaries by design
+- Transport-backed coverage now exists for:
+  - handshake and unary project reads
+  - `run.prompt` progress notifications through the remote client
+  - session activity stream over the real gateway
+  - process output stream over the real gateway
+  - app-level proof that `RunPrompt` can use a discovered daemon without local client auth
 
 ## Current Next Step
 
-- Build the JSON-RPC-over-WebSocket gateway on top of the new `server/serve` host.
-- Start with handshake/capabilities plus transport adapters for already-existing shared service surfaces (`project`, `session view`, `process view/control`, `run prompt`, `session activity`, `process output`, `ask view`, `approval view`).
-- After that, add the external client implementation and only then widen the remaining interactive control/session-plan seams.
+- The next Phase 3 blocker is interactive write/orchestration, not transport.
+- Remaining private `cli/app -> server/*` seams called out by the latest investigation are:
+  - session transition resolution + draft-input lifecycle
+  - session planning / launch orchestration
+  - transport-backed interactive runtime control surface
+  - live ask/approval answer path
+- Recommended next cut:
+  1. move session transition resolution and input-draft lifecycle behind shared `serverapi`/`shared/client` surfaces
+  2. then move session planning off `embedded_server.go`
+  3. only after that widen the interactive runtime-control API used by `shared/clientui.RuntimeClient`
 
 ## Resume Rules
 
