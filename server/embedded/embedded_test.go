@@ -11,11 +11,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"builder/server/auth"
 	"builder/server/authflow"
 	"builder/server/llm"
+	"builder/server/runtime"
 	"builder/server/session"
+	"builder/server/tools"
 	"builder/shared/config"
 	"builder/shared/serverapi"
 )
@@ -227,4 +230,149 @@ func TestStartPropagatesAuthFailureBeforeOnboarding(t *testing.T) {
 	if onboarding.called {
 		t.Fatal("did not expect onboarding after auth failure")
 	}
+}
+
+func TestSessionViewClientReadsDormantSessionByIDWithoutMutatingFiles(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	server, err := Start(context.Background(), Request{
+		WorkspaceRoot: workspace,
+		LookupEnv:     os.Getenv,
+	}, StartHooks{
+		Auth: &testAuthHandler{lookupEnv: os.Getenv},
+		Onboarding: &testOnboardingHandler{
+			ensure: func(_ context.Context, req OnboardingRequest) (config.App, error) {
+				path, created, err := config.WriteDefaultSettingsFile()
+				if err != nil {
+					return config.App{}, err
+				}
+				reloaded, err := req.ReloadConfig()
+				if err != nil {
+					return config.App{}, err
+				}
+				reloaded.Source.CreatedDefaultConfig = created
+				reloaded.Source.SettingsPath = path
+				reloaded.Source.SettingsFileExists = true
+				return reloaded, nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start embedded server: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	store, err := session.Create(server.ContainerDir(), "workspace-x", workspace)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := store.SetName("incident triage"); err != nil {
+		t.Fatalf("set name: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "hello"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if _, err := store.AppendRunStarted(session.RunRecord{RunID: "run-1", StepID: "step-1", StartedAt: time.Now().UTC().Add(-time.Minute)}); err != nil {
+		t.Fatalf("append run start: %v", err)
+	}
+
+	sessionPath := filepath.Join(store.Dir(), "session.json")
+	eventsPath := filepath.Join(store.Dir(), "events.jsonl")
+	beforeSession, err := os.ReadFile(sessionPath)
+	if err != nil {
+		t.Fatalf("read session file before: %v", err)
+	}
+	beforeEvents, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatalf("read events file before: %v", err)
+	}
+
+	resp, err := server.SessionViewClient().GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("get session main view: %v", err)
+	}
+	if resp.MainView.Session.SessionName != "incident triage" || resp.MainView.ActiveRun == nil || resp.MainView.ActiveRun.RunID != "run-1" {
+		t.Fatalf("unexpected main view: %+v", resp.MainView)
+	}
+
+	afterSession, err := os.ReadFile(sessionPath)
+	if err != nil {
+		t.Fatalf("read session file after: %v", err)
+	}
+	afterEvents, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatalf("read events file after: %v", err)
+	}
+	if string(beforeSession) != string(afterSession) {
+		t.Fatalf("session file mutated during dormant read")
+	}
+	if string(beforeEvents) != string(afterEvents) {
+		t.Fatalf("events file mutated during dormant read")
+	}
+}
+
+func TestSessionViewClientUsesRegisteredRuntimeByID(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	server, err := Start(context.Background(), Request{
+		WorkspaceRoot: workspace,
+		LookupEnv:     os.Getenv,
+	}, StartHooks{
+		Auth: &testAuthHandler{lookupEnv: os.Getenv},
+		Onboarding: &testOnboardingHandler{
+			ensure: func(_ context.Context, req OnboardingRequest) (config.App, error) {
+				path, created, err := config.WriteDefaultSettingsFile()
+				if err != nil {
+					return config.App{}, err
+				}
+				reloaded, err := req.ReloadConfig()
+				if err != nil {
+					return config.App{}, err
+				}
+				reloaded.Source.CreatedDefaultConfig = created
+				reloaded.Source.SettingsPath = path
+				reloaded.Source.SettingsFileExists = true
+				return reloaded, nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start embedded server: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	store, err := session.Create(server.ContainerDir(), "workspace-x", workspace)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	eng, err := runtime.New(store, &fakeEmbeddedClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	server.RegisterRuntime(store.Meta().SessionID, eng)
+	defer server.UnregisterRuntime(store.Meta().SessionID)
+
+	resp, err := server.SessionViewClient().GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("get session main view: %v", err)
+	}
+	if resp.MainView.Session.SessionID != store.Meta().SessionID {
+		t.Fatalf("unexpected session main view: %+v", resp.MainView)
+	}
+}
+
+type fakeEmbeddedClient struct{}
+
+func (*fakeEmbeddedClient) Generate(context.Context, llm.Request) (llm.Response, error) {
+	return llm.Response{}, nil
+}
+
+func (*fakeEmbeddedClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	return llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}, nil
 }

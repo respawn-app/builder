@@ -3,6 +3,8 @@ package embedded
 import (
 	"context"
 	"errors"
+	"strings"
+	"sync"
 
 	"builder/server/auth"
 	"builder/server/authflow"
@@ -10,6 +12,8 @@ import (
 	"builder/server/runprompt"
 	"builder/server/runtime"
 	"builder/server/runtimewire"
+	"builder/server/session"
+	"builder/server/sessionview"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
 	"builder/shared/config"
@@ -51,6 +55,62 @@ type Server struct {
 	fastModeState    *runtime.FastModeState
 	background       *shelltool.Manager
 	backgroundRouter *runtimewire.BackgroundEventRouter
+	runtimeRegistry  *runtimeRegistry
+	sessionViews     client.SessionViewClient
+}
+
+type runtimeRegistry struct {
+	mu      sync.RWMutex
+	engines map[string]*runtime.Engine
+}
+
+type persistenceSessionResolver struct {
+	persistenceRoot string
+}
+
+func newRuntimeRegistry() *runtimeRegistry {
+	return &runtimeRegistry{engines: make(map[string]*runtime.Engine)}
+}
+
+func (r *runtimeRegistry) Register(sessionID string, engine *runtime.Engine) {
+	if r == nil || engine == nil {
+		return
+	}
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		return
+	}
+	r.mu.Lock()
+	r.engines[id] = engine
+	r.mu.Unlock()
+}
+
+func (r *runtimeRegistry) Unregister(sessionID string) {
+	if r == nil {
+		return
+	}
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		return
+	}
+	r.mu.Lock()
+	delete(r.engines, id)
+	r.mu.Unlock()
+}
+
+func (r *runtimeRegistry) ResolveRuntime(_ context.Context, sessionID string) (*runtime.Engine, error) {
+	if r == nil {
+		return nil, nil
+	}
+	id := strings.TrimSpace(sessionID)
+	r.mu.RLock()
+	engine := r.engines[id]
+	r.mu.RUnlock()
+	return engine, nil
+}
+
+func (r persistenceSessionResolver) ResolveSession(_ context.Context, sessionID string) (session.Snapshot, error) {
+	return session.SnapshotByID(r.persistenceRoot, strings.TrimSpace(sessionID))
 }
 
 func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) {
@@ -94,6 +154,7 @@ func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) 
 	if err != nil {
 		return nil, err
 	}
+	runtimeRegistry := newRuntimeRegistry()
 	return &Server{
 		cfg:              cfg,
 		containerDir:     containerDir,
@@ -102,6 +163,10 @@ func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) 
 		fastModeState:    runtimeSupport.FastModeState,
 		background:       runtimeSupport.Background,
 		backgroundRouter: runtimeSupport.BackgroundRouter,
+		runtimeRegistry:  runtimeRegistry,
+		sessionViews: client.NewLoopbackSessionViewClient(
+			sessionview.NewService(persistenceSessionResolver{persistenceRoot: cfg.PersistenceRoot}, runtimeRegistry),
+		),
 	}, nil
 }
 
@@ -159,6 +224,27 @@ func (s *Server) BackgroundRouter() BackgroundRouter {
 		return nil
 	}
 	return s.backgroundRouter
+}
+
+func (s *Server) SessionViewClient() client.SessionViewClient {
+	if s == nil {
+		return nil
+	}
+	return s.sessionViews
+}
+
+func (s *Server) RegisterRuntime(sessionID string, engine *runtime.Engine) {
+	if s == nil || s.runtimeRegistry == nil {
+		return
+	}
+	s.runtimeRegistry.Register(sessionID, engine)
+}
+
+func (s *Server) UnregisterRuntime(sessionID string) {
+	if s == nil || s.runtimeRegistry == nil {
+		return
+	}
+	s.runtimeRegistry.Unregister(sessionID)
 }
 
 func (s *Server) RunPromptClient() client.RunPromptClient {
