@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"builder/server/runtime"
+	"builder/server/runtimeview"
 	"builder/server/session"
 	"builder/server/sessionview"
 	"builder/shared/client"
@@ -37,11 +38,11 @@ func newUIRuntimeClientWithReads(engine *runtime.Engine, reads client.SessionVie
 
 func (c engineUIRuntimeClient) MainView() clientui.RuntimeMainView {
 	if c.reads == nil {
-		return clientui.RuntimeMainView{}
+		return runtimeview.MainViewFromRuntime(c.engine)
 	}
 	resp, err := c.reads.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: c.sessionID})
 	if err != nil {
-		return clientui.RuntimeMainView{}
+		return runtimeview.MainViewFromRuntime(c.engine)
 	}
 	return resp.MainView
 }
