@@ -289,6 +289,85 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessReadsForUIHydration(t *testi
 	}
 }
 
+func TestEmbeddedAppServerPrepareRuntimeWiresSessionActivityForSharedClients(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("start embedded server: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test prepare runtime session activity")
+	if err != nil {
+		t.Fatalf("prepare runtime: %v", err)
+	}
+	defer runtimePlan.Close()
+
+	reads := server.SessionViewClient()
+	if reads == nil {
+		t.Fatal("expected session view client")
+	}
+	hydrated, err := reads.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: plan.Store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("GetSessionMainView: %v", err)
+	}
+	if hydrated.MainView.Session.SessionID != plan.Store.Meta().SessionID {
+		t.Fatalf("unexpected hydrated session: %+v", hydrated.MainView.Session)
+	}
+
+	activity := server.inner.SessionActivityClient()
+	if activity == nil {
+		t.Fatal("expected session activity client")
+	}
+	first, err := activity.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: plan.Store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity first: %v", err)
+	}
+	defer func() { _ = first.Close() }()
+	second, err := activity.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: plan.Store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity second: %v", err)
+	}
+	defer func() { _ = second.Close() }()
+
+	runtimePlan.Wiring.engine.AppendLocalEntry("user", "hello from client one")
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	firstEvt, err := first.Next(ctx)
+	if err != nil {
+		t.Fatalf("first.Next: %v", err)
+	}
+	secondEvt, err := second.Next(ctx)
+	if err != nil {
+		t.Fatalf("second.Next: %v", err)
+	}
+	if firstEvt.Kind != clientui.EventConversationUpdated || secondEvt.Kind != clientui.EventConversationUpdated {
+		t.Fatalf("unexpected activity events: first=%+v second=%+v", firstEvt, secondEvt)
+	}
+
+	refreshed, err := reads.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: plan.Store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("GetSessionMainView refreshed: %v", err)
+	}
+	if len(refreshed.MainView.Session.Chat.Entries) == 0 {
+		t.Fatalf("expected hydrated chat entries after activity: %+v", refreshed.MainView.Session.Chat)
+	}
+	last := refreshed.MainView.Session.Chat.Entries[len(refreshed.MainView.Session.Chat.Entries)-1]
+	if last.Text != "hello from client one" {
+		t.Fatalf("unexpected hydrated entry: %+v", last)
+	}
+}
+
 func TestEmbeddedAppServerPrepareRuntimeWiresProcessControlForUIActions(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
