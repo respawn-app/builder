@@ -5,7 +5,7 @@ description: Settings locations, precedence, CLI and environment overrides, and 
 
 ## Precedence
 
-Builder resolves settings in this order (lower=higher):
+Builder resolves settings in this order (higher no. = higher priority):
 
 1. Built-in defaults
 2. `~/.builder/config.toml`
@@ -29,6 +29,8 @@ Changing `persistence_root` does not move `config.toml`.
 ### Persistence root
 
 `persistence_root` controls where Builder stores auth state, sessions, and workspace mappings. The default is `~/.builder`.
+
+You can create it interactively during the first `builder` run.
 
 ## Example
 

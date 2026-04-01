@@ -6,26 +6,7 @@ Current state: Alpha:
 
 ## Get started 
 
-[https://opensource.respawn.pro/builder/](https://opensource.respawn.pro/builder/)
-
-## Install
-
-### Homebrew (macOS/Linux)
-
-```bash
-brew tap respawn-app/tap
-brew install builder-cli
-```
-
-### Standalone binaries via GitHub Releases
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/respawn-app/builder/main/scripts/install.sh | sh
-```
-
-The installer verifies release checksums when the release publishes `checksums.txt`.
-
-Check the installed version with `builder --version`.
+Everything you need is in the [Quicktart Guide](https://opensource.respawn.pro/builder/quickstart) - start there.
 
 ### Features:
 
@@ -33,26 +14,27 @@ Check the installed version with `builder --version`.
 - [x] Native local image/PDF attachment tool (`view_image`) for path-based multimodal reading.
 - [x] Explicit clipboard screenshot paste hotkeys (`Ctrl+V`, `Ctrl+D`) that insert temp image paths into the prompt.
 - [x] Support for Codex login and OpenAI api keys.
-- [x] Compaction, including auto, using native Codex/OpenAI endpoints.
+- [x] Compaction, including auto, using native Codex/OpenAI endpoints, or our own custom prompt.
 - [x] Compact UI mode for ongoing work, and detailed mode to review thinking, tool calls, prompts, summaries.
-- [x] Queueing messages, steering the model (Tab to queue, Enter to steer, pending steering stays visible as `next:` until sent)
-- [x] Asking user questions via a tool
-- [x] Terminal bell notifications for asks/approvals and tool-heavy turn completion
+- [x] Queueing messages, steering the model (Tab to queue, Enter to steer)
+- [x] Asking interactive questions
+- [x] Terminal and system notifications for asks/approvals and turn completion
 - [x] Config file with model selection, tool config, compact threshold, timeouts.
 - [x] Local and global `AGENTS.md` support
 - [x] Session and history persistence and resumption
 - [x] Markdown rendering
 - [x] Saved prompts
-- [x] Info about agent environment, such as shell env, machine, os etc.
 - [x] Syntax highlighting
 - [x] Native Web search (for now only OpenAI)
 - [x] Calling shell directly via `$`
 - [x] Premade prompts for review, compaction, init.
 - [x] Esc-esc-style editing of messages and history rewrites
-- [x] Agent skills.
+- [x] Agent skills support
 - [x] Background shells, which enable subagents via headless mode: `builder run`
 - [x] Model verbosity for openai models
 - [x] Native terminal scrollback, selection, copy-paste
+- [x] `/fast` mode
+- [x] Native code review
 
 ### What will likely never be implemented
 
