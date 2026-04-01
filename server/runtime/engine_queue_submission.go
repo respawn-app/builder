@@ -16,7 +16,7 @@ const queuedUserSubmissionBusyRetryDelay = 25 * time.Millisecond
 func (e *Engine) SubmitQueuedUserMessages(ctx context.Context) (assistant llm.Message, err error) {
 	e.ensureOrchestrationCollaborators()
 	for {
-		err = e.stepLifecycle.Run(ctx, exclusiveStepOptions{EmitRunState: true}, func(stepCtx context.Context, stepID string) error {
+		err = e.stepLifecycle.Run(ctx, exclusiveStepOptions{EmitRunState: true, PersistRunLifecycle: true}, func(stepCtx context.Context, stepID string) error {
 			if err := e.injectAgentsIfNeeded(stepID); err != nil {
 				return err
 			}

@@ -81,3 +81,31 @@ func TestStoreLatestRunReturnsNewestDurableRun(t *testing.T) {
 		t.Fatalf("unexpected latest run: %+v", latest)
 	}
 }
+
+func TestStoreReadRunsTreatsStartedWithoutFinishAsRunning(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	startedAt := time.Now().UTC().Add(-time.Minute)
+	if _, err := store.AppendRunStarted(RunRecord{RunID: "run-1", StepID: "step-1", StartedAt: startedAt}); err != nil {
+		t.Fatalf("append run start: %v", err)
+	}
+
+	reopened, err := Open(store.Dir())
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	runs, err := reopened.ReadRuns()
+	if err != nil {
+		t.Fatalf("read runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run, got %+v", runs)
+	}
+	if runs[0].RunID != "run-1" || runs[0].Status != RunStatusRunning || !runs[0].StartedAt.Equal(startedAt) || !runs[0].FinishedAt.IsZero() {
+		t.Fatalf("unexpected running run reconstruction: %+v", runs[0])
+	}
+}

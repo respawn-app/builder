@@ -8,7 +8,8 @@ import (
 )
 
 type exclusiveStepOptions struct {
-	EmitRunState bool
+	EmitRunState        bool
+	PersistRunLifecycle bool
 }
 
 type exclusiveStepLifecycle interface {
