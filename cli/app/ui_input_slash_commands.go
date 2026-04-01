@@ -80,8 +80,8 @@ func (m *uiModel) blockedDeferredSlashCommand(commandText string) (string, bool)
 		}
 	case commands.ActionProcesses:
 		args := strings.Fields(strings.TrimSpace(commandResult.Args))
-		if len(args) > 0 && m.backgroundManager == nil {
-			return "background process manager is unavailable", true
+		if len(args) > 0 && m.processClient == nil {
+			return "background process client is unavailable", true
 		}
 	}
 	return "", false

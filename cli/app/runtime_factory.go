@@ -19,13 +19,14 @@ import (
 )
 
 type runtimeWiring struct {
-	engine        *runtime.Engine
-	askBridge     *askBridge
-	eventBridge   *runtimeEventBridge
-	background    *shelltool.Manager
-	processViews  client.ProcessViewClient
-	sessionViews  client.SessionViewClient
-	promptHistory []string
+	engine          *runtime.Engine
+	askBridge       *askBridge
+	eventBridge     *runtimeEventBridge
+	background      *shelltool.Manager
+	processControls client.ProcessControlClient
+	processViews    client.ProcessViewClient
+	sessionViews    client.SessionViewClient
+	promptHistory   []string
 }
 
 type backgroundEventRouter struct {

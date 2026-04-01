@@ -22,25 +22,32 @@ import (
 )
 
 type testEmbeddedServer struct {
-	cfg               config.App
-	containerDir      string
-	oauthOpts         auth.OpenAIOAuthOptions
-	authManager       *auth.Manager
-	fastModeState     *runtime.FastModeState
-	background        *shelltool.Manager
-	backgroundRouter  serverembedded.BackgroundRouter
-	runPromptClient   client.RunPromptClient
-	processViewClient client.ProcessViewClient
-	sessionViewClient client.SessionViewClient
-	planSession       func(req sessionLaunchRequest, pick sessionPickerRunner) (sessionLaunchPlan, error)
-	prepareRuntime    func(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error)
-	resolveAction     func(ctx context.Context, interactor authInteractor, store *session.Store, transition UITransition) (resolvedSessionAction, error)
+	cfg                  config.App
+	containerDir         string
+	oauthOpts            auth.OpenAIOAuthOptions
+	authManager          *auth.Manager
+	fastModeState        *runtime.FastModeState
+	background           *shelltool.Manager
+	backgroundRouter     serverembedded.BackgroundRouter
+	runPromptClient      client.RunPromptClient
+	processControlClient client.ProcessControlClient
+	processViewClient    client.ProcessViewClient
+	sessionViewClient    client.SessionViewClient
+	planSession          func(req sessionLaunchRequest, pick sessionPickerRunner) (sessionLaunchPlan, error)
+	prepareRuntime       func(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error)
+	resolveAction        func(ctx context.Context, interactor authInteractor, store *session.Store, transition UITransition) (resolvedSessionAction, error)
 }
 
 type stubEmbeddedProcessViewClient struct {
 	listResp serverapi.ProcessListResponse
 	getResp  serverapi.ProcessGetResponse
 	err      error
+}
+
+type stubEmbeddedProcessControlClient struct {
+	inlineResp serverapi.ProcessInlineOutputResponse
+	err        error
+	killed     []string
 }
 
 func (s *testEmbeddedServer) Close() error                          { return nil }
@@ -54,6 +61,9 @@ func (s *testEmbeddedServer) BackgroundRouter() serverembedded.BackgroundRouter 
 	return s.backgroundRouter
 }
 func (s *testEmbeddedServer) RunPromptClient() client.RunPromptClient { return s.runPromptClient }
+func (s *testEmbeddedServer) ProcessControlClient() client.ProcessControlClient {
+	return s.processControlClient
+}
 func (s *testEmbeddedServer) ProcessViewClient() client.ProcessViewClient {
 	return s.processViewClient
 }
@@ -164,6 +174,21 @@ func (s *stubEmbeddedProcessViewClient) GetProcess(context.Context, serverapi.Pr
 	return s.getResp, nil
 }
 
+func (s *stubEmbeddedProcessControlClient) KillProcess(_ context.Context, req serverapi.ProcessKillRequest) (serverapi.ProcessKillResponse, error) {
+	if s.err != nil {
+		return serverapi.ProcessKillResponse{}, s.err
+	}
+	s.killed = append(s.killed, req.ProcessID)
+	return serverapi.ProcessKillResponse{}, nil
+}
+
+func (s *stubEmbeddedProcessControlClient) GetInlineOutput(context.Context, serverapi.ProcessInlineOutputRequest) (serverapi.ProcessInlineOutputResponse, error) {
+	if s.err != nil {
+		return serverapi.ProcessInlineOutputResponse{}, s.err
+	}
+	return s.inlineResp, nil
+}
+
 func TestEmbeddedAppServerPrepareRuntimeRegistersRuntimeForSessionViews(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -257,9 +282,54 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessReadsForUIHydration(t *testi
 		Command:        "remote-process",
 	}}}}
 
-	processClient := newUIProcessClientWithReads(runtimePlan.Wiring.background, runtimePlan.Wiring.processViews)
+	processClient := newUIProcessClientWithReads(runtimePlan.Wiring.background, runtimePlan.Wiring.processViews, runtimePlan.Wiring.processControls)
 	got := processClient.ListProcesses()
 	if len(got) != 1 || got[0].ID != "remote-proc" || got[0].OwnerRunID != "remote-run" || got[0].OwnerStepID != "remote-step" {
 		t.Fatalf("expected shared process reads to win over local manager snapshot, got %+v", got)
+	}
+}
+
+func TestEmbeddedAppServerPrepareRuntimeWiresProcessControlForUIActions(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("start embedded server: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test prepare runtime process control")
+	if err != nil {
+		t.Fatalf("prepare runtime: %v", err)
+	}
+	defer runtimePlan.Close()
+	if runtimePlan.Wiring.processControls == nil {
+		t.Fatal("expected PrepareRuntime to wire process control client")
+	}
+
+	controls := &stubEmbeddedProcessControlClient{inlineResp: serverapi.ProcessInlineOutputResponse{Output: "remote preview", LogPath: "/tmp/remote.log"}}
+	runtimePlan.Wiring.processControls = controls
+	processClient := newUIProcessClientWithReads(runtimePlan.Wiring.background, runtimePlan.Wiring.processViews, runtimePlan.Wiring.processControls)
+
+	preview, logPath, err := processClient.InlineOutput("proc-1", 12_000)
+	if err != nil {
+		t.Fatalf("InlineOutput: %v", err)
+	}
+	if preview != "remote preview" || logPath != "/tmp/remote.log" {
+		t.Fatalf("unexpected inline output payload preview=%q logPath=%q", preview, logPath)
+	}
+	if err := processClient.KillProcess("proc-1"); err != nil {
+		t.Fatalf("KillProcess: %v", err)
+	}
+	if len(controls.killed) != 1 || controls.killed[0] != "proc-1" {
+		t.Fatalf("expected shared process control client to handle kill, got %+v", controls.killed)
 	}
 }

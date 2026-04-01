@@ -24,4 +24,6 @@ type BackgroundProcess struct {
 
 type ProcessClient interface {
 	ListProcesses() []BackgroundProcess
+	KillProcess(id string) error
+	InlineOutput(id string, maxChars int) (string, string, error)
 }
