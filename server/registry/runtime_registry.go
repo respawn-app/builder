@@ -431,7 +431,10 @@ func (e *runtimeEntry) closePendingPrompts(err error) {
 		if pending.response == nil {
 			continue
 		}
-		pending.response <- promptResponseResult{err: err}
+		select {
+		case pending.response <- promptResponseResult{err: err}:
+		default:
+		}
 	}
 }
 
