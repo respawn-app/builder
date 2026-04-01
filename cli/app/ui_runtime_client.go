@@ -6,31 +6,46 @@ import (
 	"builder/server/runtime"
 	"builder/server/runtimeview"
 	"builder/server/session"
+	"builder/server/sessionview"
+	"builder/shared/client"
 	"builder/shared/clientui"
+	"builder/shared/serverapi"
 )
 
 type engineUIRuntimeClient struct {
-	engine *runtime.Engine
-	reads  runtimeview.Reader
+	engine    *runtime.Engine
+	reads     client.SessionViewClient
+	sessionID string
 }
 
 func newUIRuntimeClient(engine *runtime.Engine) clientui.RuntimeClient {
 	if engine == nil {
 		return nil
 	}
-	return engineUIRuntimeClient{engine: engine, reads: runtimeview.NewReader(engine)}
+	return engineUIRuntimeClient{
+		engine:    engine,
+		sessionID: engine.SessionID(),
+		reads:     client.NewLoopbackSessionViewClient(sessionview.NewService(nil, engine)),
+	}
 }
 
 func (c engineUIRuntimeClient) MainView() clientui.RuntimeMainView {
-	return c.reads.MainView()
+	if c.reads == nil {
+		return runtimeview.MainViewFromRuntime(c.engine)
+	}
+	resp, err := c.reads.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: c.sessionID})
+	if err != nil {
+		return runtimeview.MainViewFromRuntime(c.engine)
+	}
+	return resp.MainView
 }
 
 func (c engineUIRuntimeClient) Status() clientui.RuntimeStatus {
-	return c.reads.Status()
+	return c.MainView().Status
 }
 
 func (c engineUIRuntimeClient) SessionView() clientui.RuntimeSessionView {
-	return c.reads.SessionView()
+	return c.MainView().Session
 }
 
 func (c engineUIRuntimeClient) SetSessionName(name string) error {
