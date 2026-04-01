@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"builder/server/auth"
+	"builder/server/primaryrun"
 	"builder/server/session"
 	"builder/shared/config"
 	"builder/shared/serverapi"
@@ -268,6 +269,32 @@ func TestDeduplicatingPromptServiceEvictsExpiredCacheEntries(t *testing.T) {
 	}
 }
 
+func TestGuardingPromptServiceRejectsConcurrentSelectedSessionRun(t *testing.T) {
+	release := make(chan struct{})
+	inner := &stubRunPromptService{run: func(_ context.Context, req serverapi.RunPromptRequest, _ serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
+		<-release
+		return serverapi.RunPromptResponse{SessionID: req.SelectedSessionID, Result: "ok"}, nil
+	}}
+	gate := newTestPrimaryRunGate()
+	service := primaryrun.NewGuardingPromptService(gate, inner)
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := service.RunPrompt(context.Background(), serverapi.RunPromptRequest{ClientRequestID: "req-1", SelectedSessionID: "session-1", Prompt: "hello"}, nil)
+		firstDone <- err
+	}()
+
+	gate.waitForAcquire(t, 1)
+	_, err := service.RunPrompt(context.Background(), serverapi.RunPromptRequest{ClientRequestID: "req-2", SelectedSessionID: "session-1", Prompt: "different"}, nil)
+	if !errors.Is(err, primaryrun.ErrActivePrimaryRun) {
+		t.Fatalf("second RunPrompt error = %v, want active primary run", err)
+	}
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first RunPrompt error: %v", err)
+	}
+}
+
 func TestLoopbackRunPromptClientUsesSelectedSessionContinuationContext(t *testing.T) {
 	resetRunPromptDedupeRegistry()
 	t.Cleanup(resetRunPromptDedupeRegistry)
@@ -333,4 +360,44 @@ func TestLoopbackRunPromptClientUsesSelectedSessionContinuationContext(t *testin
 	if got := store.Meta().Continuation; got == nil || got.OpenAIBaseURL != server.URL {
 		t.Fatalf("expected persisted continuation preserved, got %+v", got)
 	}
+}
+
+type testPrimaryRunGate struct {
+	mu           sync.Mutex
+	active       map[string]bool
+	acquireCount int
+}
+
+func newTestPrimaryRunGate() *testPrimaryRunGate {
+	return &testPrimaryRunGate{active: map[string]bool{}}
+}
+
+func (g *testPrimaryRunGate) AcquirePrimaryRun(sessionID string) (primaryrun.Lease, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.acquireCount++
+	if g.active[sessionID] {
+		return nil, primaryrun.ErrActivePrimaryRun
+	}
+	g.active[sessionID] = true
+	return primaryrun.LeaseFunc(func() {
+		g.mu.Lock()
+		delete(g.active, sessionID)
+		g.mu.Unlock()
+	}), nil
+}
+
+func (g *testPrimaryRunGate) waitForAcquire(t *testing.T, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		g.mu.Lock()
+		got := g.acquireCount
+		g.mu.Unlock()
+		if got >= want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d primary run acquires", want)
 }

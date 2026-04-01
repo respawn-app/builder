@@ -9,6 +9,7 @@ import (
 	serverembedded "builder/server/embedded"
 	"builder/server/launch"
 	serverlifecycle "builder/server/lifecycle"
+	"builder/server/primaryrun"
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/sessioncontrol"
@@ -217,6 +218,7 @@ func (s *embeddedAppServer) PrepareRuntime(plan sessionLaunchPlan, diagnosticWri
 	wiring.processOutput = s.inner.ProcessOutputClient()
 	wiring.processViews = s.inner.ProcessViewClient()
 	wiring.sessionViews = s.inner.SessionViewClient()
+	wiring.runtimeClient = primaryrun.NewGatedRuntimeClient(plan.Store.Meta().SessionID, newUIRuntimeClientWithReads(wiring.engine, wiring.sessionViews), s.inner)
 	return &runtimeLaunchPlan{
 		Logger: logger,
 		Wiring: wiring,

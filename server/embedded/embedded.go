@@ -9,6 +9,7 @@ import (
 	"builder/server/auth"
 	"builder/server/authflow"
 	serverbootstrap "builder/server/bootstrap"
+	"builder/server/primaryrun"
 	"builder/server/processoutput"
 	"builder/server/processview"
 	"builder/server/projectview"
@@ -315,6 +316,13 @@ func (s *Server) CompletePendingPrompt(sessionID string, requestID string) {
 		return
 	}
 	s.runtimeRegistry.CompletePendingPrompt(sessionID, requestID)
+}
+
+func (s *Server) AcquirePrimaryRun(sessionID string) (primaryrun.Lease, error) {
+	if s == nil || s.runtimeRegistry == nil {
+		return nil, primaryrun.ErrActivePrimaryRun
+	}
+	return s.runtimeRegistry.AcquirePrimaryRun(sessionID)
 }
 
 func (s *Server) RunPromptClient() client.RunPromptClient {

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"builder/server/primaryrun"
 	"builder/server/runtime"
 	"builder/server/runtimeview"
 	askquestion "builder/server/tools/askquestion"
@@ -19,8 +20,10 @@ import (
 const sessionActivityBufferSize = 256
 
 type RuntimeRegistry struct {
-	mu      sync.RWMutex
-	engines map[string]*runtimeEntry
+	mu         sync.RWMutex
+	engines    map[string]*runtimeEntry
+	primaryRun map[string]uint64
+	nextLease  uint64
 }
 
 type runtimeEntry struct {
@@ -52,7 +55,7 @@ type sessionActivitySubscription struct {
 }
 
 func NewRuntimeRegistry() *RuntimeRegistry {
-	return &RuntimeRegistry{engines: make(map[string]*runtimeEntry)}
+	return &RuntimeRegistry{engines: make(map[string]*runtimeEntry), primaryRun: make(map[string]uint64)}
 }
 
 func (r *RuntimeRegistry) Register(sessionID string, engine *runtime.Engine) {
@@ -202,6 +205,32 @@ func (r *RuntimeRegistry) ListPendingPrompts(sessionID string) []PendingPromptSn
 		return items[i].CreatedAt.Before(items[j].CreatedAt)
 	})
 	return items
+}
+
+func (r *RuntimeRegistry) AcquirePrimaryRun(sessionID string) (primaryrun.Lease, error) {
+	if r == nil {
+		return nil, primaryrun.ErrActivePrimaryRun
+	}
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		return nil, primaryrun.ErrActivePrimaryRun
+	}
+	r.mu.Lock()
+	if _, busy := r.primaryRun[id]; busy {
+		r.mu.Unlock()
+		return nil, primaryrun.ErrActivePrimaryRun
+	}
+	r.nextLease++
+	leaseID := r.nextLease
+	r.primaryRun[id] = leaseID
+	r.mu.Unlock()
+	return primaryrun.LeaseFunc(func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if current, ok := r.primaryRun[id]; ok && current == leaseID {
+			delete(r.primaryRun, id)
+		}
+	}), nil
 }
 
 func newSessionActivityHub() *sessionActivityHub {
