@@ -85,4 +85,4 @@ Current limitations:
 
 - Define the durable resource model for project, session, run, process, approval, and ask identities.
 - Add typed hydration views and stream semantics that support multi-client attach/reconnect beyond the current loopback CLI path.
-- Generalize idempotency, replay/gap handling, and process/output retention beyond the current `RunPrompt` duplicate-suppression slice, including a protocol-level retention/durability contract for `client_request_id` replay.
+- Generalize idempotency, stream-drop recovery, and process/output retention beyond the current `RunPrompt` duplicate-suppression slice, including a protocol-level retention/durability contract for `client_request_id` deduplication.

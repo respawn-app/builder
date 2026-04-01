@@ -137,10 +137,10 @@ The protocol must be explicit about whether a rejected operation failed because 
 
 ## Transcript And Live Output
 
-- Durable transcript state and partial live output are distinct.
-- Partial assistant output may be streamed live before the durable transcript record is finalized.
-- Reconnect must recover durable transcript state from typed reads, not by assuming the live stream is fully replayable.
-- If a frontend misses part of a live stream, the protocol must signal a gap explicitly.
+- Durable transcript state and ephemeral live activity are distinct.
+- Transcript hydration and reconnect use typed reads and transcript pages.
+- Live session activity is not the authoritative transcript transport; it is optional progressive state for an already-attached frontend.
+- If a frontend misses part of a live stream, recovery is rehydrate plus resubscribe.
 
 ## Attachment Model
 

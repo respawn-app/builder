@@ -35,8 +35,8 @@ The user requested that work continue through automated continue prompts until P
 
 ## Open Questions (Do Not Block Execution)
 
-1. How much catch-up/replay is needed in Phase 3 vs Phase 4?
-   - Working assumption: preserve the currently implemented stream error model and current live-subscription semantics; deeper reconnect hardening remains Phase 4 unless transport viability forces a minimal addition.
+1. What is the reconnect model for large sessions?
+   - Answer: reconnect is snapshot/page based. Clients rehydrate from authoritative reads such as `session.getMainView` and future transcript-page reads, then resubscribe. Future work should prefer transcript pagination and compression over any stream-history recovery contract.
 
 ## Assumptions Made During Execution
 

@@ -113,9 +113,11 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 
 - Frontends should depend on normalized domain state and event models, not raw provider or runtime payloads.
 - Typed queries and hydration views are the source of truth for initial render and reconnect.
-- Ordered stream catch-up is best-effort within retention windows; it is not a universal replay contract.
-- If a cursor is no longer replayable, the server should return an explicit cursor-expired or gap error and require rehydration plus resubscription.
+- Reconnect is snapshot/page based. A stream-history or cursor recovery contract is not part of the required architecture.
+- Large-session reconnect should prefer transcript pagination and, where useful, compression over any stream-history reconstruction design.
+- If a live stream drops or a subscriber falls behind, the recovery path is rehydrate plus resubscribe.
 - The protocol must distinguish durable lower-volume state transitions from high-rate live feeds.
+- Transcript truth comes from typed hydration reads such as `session.getMainView` and transcript-page reads.
 - Prompt activity is a distinct live stream class, separate from both session activity and list-style pending prompt reads.
 - Process output is a separate stream class from process state.
 - Subscriptions should target explicit resource-scoped streams rather than a single multiplexed server-wide feed.
