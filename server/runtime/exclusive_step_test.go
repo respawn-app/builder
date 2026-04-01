@@ -223,6 +223,16 @@ func TestExclusiveStepLifecycleEmitsCompletedRunStatePayloads(t *testing.T) {
 	if finished.FinishedAt.Before(finished.StartedAt) {
 		t.Fatalf("expected finished timestamp after start, got %+v", finished)
 	}
+	runs, err := store.ReadRuns()
+	if err != nil {
+		t.Fatalf("read runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected one durable run, got %+v", runs)
+	}
+	if runs[0].RunID != started.RunID || runs[0].Status != session.RunStatusCompleted {
+		t.Fatalf("unexpected durable run record: %+v", runs[0])
+	}
 }
 
 func TestExclusiveStepLifecycleEmitsInterruptedRunStatePayloads(t *testing.T) {
@@ -288,6 +298,16 @@ func TestExclusiveStepLifecycleEmitsInterruptedRunStatePayloads(t *testing.T) {
 	}
 	if finished.FinishedAt.IsZero() || finished.StartedAt.IsZero() {
 		t.Fatalf("expected interrupted payload timestamps, got %+v", finished)
+	}
+	runs, err := store.ReadRuns()
+	if err != nil {
+		t.Fatalf("read runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected one durable run, got %+v", runs)
+	}
+	if runs[0].RunID != startedEvent.RunID || runs[0].Status != session.RunStatusInterrupted {
+		t.Fatalf("unexpected durable interrupted run: %+v", runs[0])
 	}
 }
 

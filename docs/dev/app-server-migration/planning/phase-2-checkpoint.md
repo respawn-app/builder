@@ -12,23 +12,27 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - Introduced `shared/clientui.RunView`, `RunStatus`, and `RuntimeMainView` as the first Phase 2 resource/hydration surface.
 - Extended `shared/clientui.RuntimeClient` with `MainView()` so frontends can fetch a typed active-session hydration bundle that includes session, status, and active-run state together.
 - Promoted `RuntimeMainView` assembly into `server/runtimeview`, so session/status/active-run hydration is now projected on the server side rather than composed in the CLI loopback adapter.
+- Added `server/runtimeview.Reader` as the first server-owned application read service for active-session hydration, with the CLI loopback runtime client delegating read paths through that service.
 - Switched the CLI runtime client and local UI hydration helpers onto `RuntimeMainView`, so the new bundled hydration surface is exercised in production code rather than existing only as an unused type.
+- Added durable run lifecycle entries to the existing session event log and `server/session` run reducers, so completed and interrupted runs can now be reconstructed after reopen through `ReadRuns()` / `LatestRun()`.
 - Added focused lifecycle coverage proving `EventRunStateChanged` emits stable `run_id`, status, and timing for both completed and interrupted runs.
 - Added a real-engine loopback test proving `RuntimeClient.MainView()` exposes active-run hydration while a run is in flight.
 
 ## What This Proves
 
 - Run identity now exists as a typed concept on the live runtime boundary instead of being implied only by step-local busy state.
-- The client-facing contract now has a single active-session hydration bundle backed by a server-owned projection surface that can grow into the Phase 2 `session.getMainView` shape.
+- The client-facing contract now has a single active-session hydration bundle backed by a server-owned read/projection surface that can grow into the Phase 2 `session.getMainView` shape.
+- Run lifecycle metadata now survives engine teardown through the existing session log, giving Phase 2 its first durable `run.get` building block without introducing a new storage subsystem.
 - Phase 2 can proceed incrementally without introducing a durable run store or transport-level event redesign yet.
 
 ## Current Limitations
 
-- Run identity is currently live-runtime state only. Historical runs and durable run indexing are not implemented yet.
-- `RuntimeMainView` is server-projected but still runtime-local. The future protocol/read-model work still needs a transport-neutral application read service behind it.
+- Durable run history currently covers lifecycle metadata only. There is still no richer run-scoped index for processes, asks, approvals, or delegated task state.
+- The current read service is still runtime-local to a live engine. The future protocol/read-model work still needs a broader transport-neutral application read service that is not scoped only to one in-memory runtime.
 - The UI is hydrating through `RuntimeMainView`, but it is not yet rendering run-specific UX beyond carrying the typed data.
 
 ## Next Slice
 
-- Add durable session/run identifiers and minimum read models suitable for `session.getMainView` and `run.get`.
+- Promote the new durable run reducers into a broader application read surface suitable for `session.getMainView` and `run.get`.
+- Broaden the active-session read service so hydration is not tied only to a live runtime instance.
 - Introduce explicit process/run ownership links and session/run hydration tests that assume more than one run over time.
