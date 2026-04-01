@@ -2668,7 +2668,6 @@ func TestSubmitErrorRestoresQueuedSteeringInput(t *testing.T) {
 		t.Fatalf("expected pending injection queue cleared after restore, got %d", len(updated.pendingInjected))
 	}
 }
-
 func TestSubmitErrorRestoresQueuedSteeringAndDiscardsEngineQueue(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

@@ -675,6 +675,13 @@ func TestProcessOutputClientStreamsBackgroundProcessOutput(t *testing.T) {
 	if !result.Backgrounded {
 		t.Fatal("expected backgrounded process")
 	}
+	processResp, err := server.ProcessViewClient().GetProcess(context.Background(), serverapi.ProcessGetRequest{ProcessID: result.SessionID})
+	if err != nil {
+		t.Fatalf("GetProcess: %v", err)
+	}
+	if processResp.Process == nil || !processResp.Process.OutputAvailable || processResp.Process.OutputRetainedFromBytes != 0 || processResp.Process.OutputRetainedToBytes <= 0 {
+		t.Fatalf("expected retained output metadata, got %+v", processResp.Process)
+	}
 
 	sub, err := server.ProcessOutputClient().SubscribeProcessOutput(context.Background(), serverapi.ProcessOutputSubscribeRequest{ProcessID: result.SessionID})
 	if err != nil {
