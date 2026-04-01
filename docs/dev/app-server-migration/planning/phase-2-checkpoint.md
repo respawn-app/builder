@@ -24,7 +24,7 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - Added focused lifecycle coverage proving `EventRunStateChanged` emits stable `run_id`, status, and timing for both completed and interrupted runs.
 - Added a real-engine loopback test proving `RuntimeClient.MainView()` exposes active-run hydration while a run is in flight.
 - Added integration coverage proving the real `cli/app` `PrepareRuntime(...)` path registers the live runtime into the shared `SessionViewClient` read surface, rather than only through manual test registration.
-- Threaded explicit process ownership through shell-backed background execution, so background processes now carry owning `session_id`, `run_id`, and `step_id` rather than only a session-scoped manager identity.
+- Threaded explicit process ownership through shell-backed background execution, so live background processes now carry owning `session_id`, `run_id`, and `step_id` rather than only a session-scoped manager identity.
 - Added the first transport-neutral process read service via `shared/serverapi` + `shared/client` + `server/processview`, with embedded-mode production reads resolving through the server-owned background manager.
 - Switched the CLI `/ps` list hydration path onto that process read service while preserving the existing local background-manager control path for kill/inline/log actions.
 - Added focused coverage proving process ownership is stamped at creation time, survives projection through the server read service, and is available through embedded-mode loopback reads.
@@ -37,12 +37,13 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - The first transport-neutral read boundary now exists for session main-view hydration and run lookup rather than reads living only as live-engine helpers.
 - The read boundary now resolves resources by ID and can hydrate dormant sessions without mutating persisted state, which is the minimum correctness bar for future daemon/web clients.
 - The embedded server now owns the production resolver path for session hydration, which is the first concrete move from loopback-only helpers toward a real multi-session app-server read layer.
-- Process resources now have explicit session/run ownership on the server side, and `/ps` list hydration no longer depends on CLI-local snapshot projection of the background manager.
+- Live process resources now have explicit session/run ownership on the server side, and `/ps` list hydration no longer depends on CLI-local snapshot projection of the background manager.
 - Phase 2 can proceed incrementally without introducing a durable run store or transport-level event redesign yet.
 
 ## Current Limitations
 
 - Durable run history currently covers lifecycle metadata only. There is still no durable run-scoped index for processes, asks, approvals, or delegated task state after process exit or restart.
+- Process ownership/read metadata is currently live-only and in-memory. Restarting the app server loses process resources and their run/step ownership history.
 - Reopen semantics currently reconstruct unfinished durable runs from `run_started` without a matching `run_finished`, but that state is not yet surfaced through a higher-level application read API.
 - The new application read services still use partial dormant reconstruction rather than richer persisted read models for settings/approval state, and the current server-owned registries are embedded-mode only rather than shared daemon infrastructure.
 - Process control remains a frontend-local loopback path over `shelltool.Manager`; only process reads are on the new shared boundary so far.
