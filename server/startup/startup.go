@@ -127,8 +127,8 @@ func EnsureReady(ctx context.Context, state AuthState, authHandler AuthHandler) 
 	)
 }
 
-func buildRequest(req Request, authHandler AuthHandler) embedded.Request {
-	return embedded.Request{
+func buildRequest(req Request, authHandler AuthHandler) serverbootstrap.Request {
+	return serverbootstrap.Request{
 		WorkspaceRoot:         req.WorkspaceRoot,
 		WorkspaceRootExplicit: req.WorkspaceRootExplicit,
 		SessionID:             req.SessionID,
