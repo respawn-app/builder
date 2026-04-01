@@ -149,20 +149,48 @@ func validateRuntimeSessionID(sessionID string) error {
 	return nil
 }
 
-func (r RuntimeSetSessionNameRequest) Validate() error                    { return validateRuntimeSessionID(r.SessionID) }
-func (r RuntimeSetThinkingLevelRequest) Validate() error                  { return validateRuntimeSessionID(r.SessionID) }
-func (r RuntimeSetFastModeEnabledRequest) Validate() error                { return validateRuntimeSessionID(r.SessionID) }
-func (r RuntimeSetReviewerEnabledRequest) Validate() error                { return validateRuntimeSessionID(r.SessionID) }
-func (r RuntimeSetAutoCompactionEnabledRequest) Validate() error          { return validateRuntimeSessionID(r.SessionID) }
-func (r RuntimeAppendLocalEntryRequest) Validate() error                  { return validateRuntimeSessionID(r.SessionID) }
-func (r RuntimeShouldCompactBeforeUserMessageRequest) Validate() error    { return validateRuntimeSessionID(r.SessionID) }
-func (r RuntimeSubmitUserMessageRequest) Validate() error                 { return validateRuntimeSessionID(r.SessionID) }
-func (r RuntimeSubmitUserShellCommandRequest) Validate() error            { return validateRuntimeSessionID(r.SessionID) }
-func (r RuntimeCompactContextRequest) Validate() error                    { return validateRuntimeSessionID(r.SessionID) }
-func (r RuntimeCompactContextForPreSubmitRequest) Validate() error        { return validateRuntimeSessionID(r.SessionID) }
-func (r RuntimeHasQueuedUserWorkRequest) Validate() error                 { return validateRuntimeSessionID(r.SessionID) }
-func (r RuntimeSubmitQueuedUserMessagesRequest) Validate() error          { return validateRuntimeSessionID(r.SessionID) }
-func (r RuntimeInterruptRequest) Validate() error                         { return validateRuntimeSessionID(r.SessionID) }
-func (r RuntimeQueueUserMessageRequest) Validate() error                  { return validateRuntimeSessionID(r.SessionID) }
-func (r RuntimeDiscardQueuedUserMessagesMatchingRequest) Validate() error { return validateRuntimeSessionID(r.SessionID) }
-func (r RuntimeRecordPromptHistoryRequest) Validate() error               { return validateRuntimeSessionID(r.SessionID) }
+func (r RuntimeSetSessionNameRequest) Validate() error { return validateRuntimeSessionID(r.SessionID) }
+func (r RuntimeSetThinkingLevelRequest) Validate() error {
+	return validateRuntimeSessionID(r.SessionID)
+}
+func (r RuntimeSetFastModeEnabledRequest) Validate() error {
+	return validateRuntimeSessionID(r.SessionID)
+}
+func (r RuntimeSetReviewerEnabledRequest) Validate() error {
+	return validateRuntimeSessionID(r.SessionID)
+}
+func (r RuntimeSetAutoCompactionEnabledRequest) Validate() error {
+	return validateRuntimeSessionID(r.SessionID)
+}
+func (r RuntimeAppendLocalEntryRequest) Validate() error {
+	return validateRuntimeSessionID(r.SessionID)
+}
+func (r RuntimeShouldCompactBeforeUserMessageRequest) Validate() error {
+	return validateRuntimeSessionID(r.SessionID)
+}
+func (r RuntimeSubmitUserMessageRequest) Validate() error {
+	return validateRuntimeSessionID(r.SessionID)
+}
+func (r RuntimeSubmitUserShellCommandRequest) Validate() error {
+	return validateRuntimeSessionID(r.SessionID)
+}
+func (r RuntimeCompactContextRequest) Validate() error { return validateRuntimeSessionID(r.SessionID) }
+func (r RuntimeCompactContextForPreSubmitRequest) Validate() error {
+	return validateRuntimeSessionID(r.SessionID)
+}
+func (r RuntimeHasQueuedUserWorkRequest) Validate() error {
+	return validateRuntimeSessionID(r.SessionID)
+}
+func (r RuntimeSubmitQueuedUserMessagesRequest) Validate() error {
+	return validateRuntimeSessionID(r.SessionID)
+}
+func (r RuntimeInterruptRequest) Validate() error { return validateRuntimeSessionID(r.SessionID) }
+func (r RuntimeQueueUserMessageRequest) Validate() error {
+	return validateRuntimeSessionID(r.SessionID)
+}
+func (r RuntimeDiscardQueuedUserMessagesMatchingRequest) Validate() error {
+	return validateRuntimeSessionID(r.SessionID)
+}
+func (r RuntimeRecordPromptHistoryRequest) Validate() error {
+	return validateRuntimeSessionID(r.SessionID)
+}

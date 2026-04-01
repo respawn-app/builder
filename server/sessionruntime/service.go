@@ -9,27 +9,27 @@ import (
 	"sync"
 
 	"builder/server/auth"
-	"builder/server/runprompt"
 	"builder/server/registry"
+	"builder/server/runprompt"
 	"builder/server/runtime"
 	"builder/server/runtimewire"
 	"builder/server/session"
 	"builder/server/tools"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
-	"builder/shared/serverapi"
 	"builder/shared/config"
+	"builder/shared/serverapi"
 	"github.com/google/uuid"
 )
 
 type Service struct {
-	persistenceRoot string
-	authManager     *auth.Manager
-	fastModeState   *runtime.FastModeState
-	background      *shelltool.Manager
+	persistenceRoot  string
+	authManager      *auth.Manager
+	fastModeState    *runtime.FastModeState
+	background       *shelltool.Manager
 	backgroundRouter *runtimewire.BackgroundEventRouter
-	runtimes        *registry.RuntimeRegistry
-	sessionStores   *registry.SessionStoreRegistry
+	runtimes         *registry.RuntimeRegistry
+	sessionStores    *registry.SessionStoreRegistry
 
 	mu      sync.Mutex
 	handles map[string]*runtimeHandle
