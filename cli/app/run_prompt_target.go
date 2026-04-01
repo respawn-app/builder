@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -21,13 +22,17 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 	if remote, ok := tryDialDiscoveredRemote(ctx, opts); ok {
 		return remote, remote.Close, nil
 	}
+	launchErr := error(nil)
 	if remote, ok, err := launchRunPromptDaemon(ctx, opts); err != nil {
-		return nil, nil, err
+		launchErr = err
 	} else if ok {
 		return remote, remote.Close, nil
 	}
 	server, err := startEmbeddedServer(ctx, opts, newHeadlessAuthInteractor())
 	if err != nil {
+		if launchErr != nil {
+			return nil, nil, errors.Join(launchErr, err)
+		}
 		return nil, nil, err
 	}
 	return server.RunPromptClient(), server.Close, nil

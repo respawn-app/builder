@@ -22,6 +22,7 @@ import (
 	"builder/server/session"
 	serverstartup "builder/server/startup"
 	"builder/server/tools/askquestion"
+	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/discovery"
 	"builder/shared/serverapi"
@@ -225,6 +226,59 @@ func TestRunPromptUsesDiscoveredDaemonWithoutLocalAuth(t *testing.T) {
 	cancel()
 	if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
 		t.Fatalf("Serve error = %v, want context canceled", serveErr)
+	}
+}
+
+func TestStartRunPromptClientFallsBackToEmbeddedWhenDaemonLaunchFails(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final\",\"content\":[{\"type\":\"output_text\",\"text\":\"embedded fallback\"}]}]}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	originalLaunch := launchRunPromptDaemon
+	t.Cleanup(func() { launchRunPromptDaemon = originalLaunch })
+	launchRunPromptDaemon = func(context.Context, Options) (*client.Remote, bool, error) {
+		return nil, false, errors.New("daemon launch failed")
+	}
+
+	runClient, closeFn, err := startRunPromptClient(context.Background(), Options{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+		OpenAIBaseURL:         server.URL,
+		OpenAIBaseURLExplicit: true,
+	})
+	if err != nil {
+		t.Fatalf("startRunPromptClient: %v", err)
+	}
+	defer func() {
+		if closeFn != nil {
+			_ = closeFn()
+		}
+	}()
+
+	response, err := runClient.RunPrompt(context.Background(), serverapi.RunPromptRequest{
+		ClientRequestID: "req-embedded-fallback",
+		Prompt:          "hello",
+	}, nil)
+	if err != nil {
+		t.Fatalf("RunPrompt: %v", err)
+	}
+	if response.Result != "embedded fallback" {
+		t.Fatalf("result = %q, want embedded fallback", response.Result)
 	}
 }
 
