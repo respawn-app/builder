@@ -3,7 +3,8 @@ package app
 import (
 	"context"
 	"errors"
-	"io"
+	"strings"
+	"time"
 
 	askquestion "builder/server/tools/askquestion"
 	"builder/shared/client"
@@ -12,35 +13,84 @@ import (
 	"github.com/google/uuid"
 )
 
-func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivitySubscription, control client.PromptControlClient) (<-chan askEvent, func()) {
+const promptActivityResubscribeDelay = 250 * time.Millisecond
+
+type promptActivitySubscriber func(context.Context) (serverapi.PromptActivitySubscription, error)
+
+func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivitySubscription, subscribe promptActivitySubscriber, control client.PromptControlClient) (<-chan askEvent, func()) {
 	out := make(chan askEvent, 16)
-	if sub == nil || control == nil {
+	if sub == nil || subscribe == nil || control == nil {
 		close(out)
 		return out, func() {}
 	}
 	pollCtx, cancel := context.WithCancel(ctx)
 	go func() {
 		defer close(out)
-		defer func() { _ = sub.Close() }()
+		current := sub
+		pendingPromptIDs := make(map[string]struct{})
 		for {
-			evt, err := sub.Next(pollCtx)
+			evt, err := current.Next(pollCtx)
 			if err != nil {
-				if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+				_ = current.Close()
+				if errors.Is(err, context.Canceled) {
 					return
 				}
-				return
+				current, err = resubscribePromptActivity(pollCtx, subscribe)
+				if err != nil {
+					return
+				}
+				continue
 			}
-			if evt.Type != clientui.PendingPromptEventPending {
+			if strings.TrimSpace(evt.PromptID) == "" {
+				continue
+			}
+			switch evt.Type {
+			case clientui.PendingPromptEventResolved:
+				delete(pendingPromptIDs, evt.PromptID)
+				continue
+			case clientui.PendingPromptEventPending:
+				if _, exists := pendingPromptIDs[evt.PromptID]; exists {
+					continue
+				}
+				pendingPromptIDs[evt.PromptID] = struct{}{}
+			default:
 				continue
 			}
 			select {
 			case <-pollCtx.Done():
+				_ = current.Close()
 				return
 			case out <- pendingPromptEvent(evt, control):
 			}
 		}
 	}()
 	return out, cancel
+}
+
+func resubscribePromptActivity(ctx context.Context, subscribe promptActivitySubscriber) (serverapi.PromptActivitySubscription, error) {
+	for {
+		if !waitPromptActivityRetry(ctx) {
+			return nil, ctx.Err()
+		}
+		sub, err := subscribe(ctx)
+		if err == nil {
+			return sub, nil
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+	}
+}
+
+func waitPromptActivityRetry(ctx context.Context) bool {
+	timer := time.NewTimer(promptActivityResubscribeDelay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func pendingPromptEvent(item clientui.PendingPromptEvent, control client.PromptControlClient) askEvent {
