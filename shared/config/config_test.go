@@ -780,6 +780,20 @@ func TestResolveWorkspaceContainerCanonicalizesSymlinkedWorkspace(t *testing.T) 
 	if symlinkName != realName || symlinkDir != realDir {
 		t.Fatalf("expected symlinked workspace to reuse deterministic container, got %q %q want %q %q", symlinkName, symlinkDir, realName, realDir)
 	}
+	realProjectID, err := ProjectIDForWorkspaceRoot(realCfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("project id for real workspace: %v", err)
+	}
+	symlinkProjectID, err := ProjectIDForWorkspaceRoot(symlinkCfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("project id for symlink workspace: %v", err)
+	}
+	if symlinkProjectID != realProjectID {
+		t.Fatalf("expected symlinked workspace to reuse project id, got %q want %q", symlinkProjectID, realProjectID)
+	}
+	if symlinkProjectID == symlinkName {
+		t.Fatalf("expected project id to differ from workspace container name %q", symlinkName)
+	}
 }
 
 func TestLoadReviewerPrecedenceAndValidation(t *testing.T) {

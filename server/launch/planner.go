@@ -104,17 +104,22 @@ func (p Planner) openStore(req SessionRequest) (*session.Store, error) {
 	if req.ForceNewSession || req.Mode == ModeHeadless {
 		return p.createSession(req.ParentSessionID)
 	}
+	if p.ProjectViews != nil && strings.TrimSpace(p.ProjectID) != "" {
+		overview, err := p.ProjectViews.GetProjectOverview(context.Background(), serverapi.ProjectGetOverviewRequest{ProjectID: p.ProjectID})
+		if err != nil {
+			return nil, err
+		}
+		summaries := sessionSummariesFromProjectView(overview.Overview.Sessions)
+		return p.pickOrCreateSession(req, summaries)
+	}
 	summaries, err := session.ListSessions(p.ContainerDir)
 	if err != nil {
 		return nil, err
 	}
-	if p.ProjectViews != nil && strings.TrimSpace(p.ProjectID) != "" {
-		resp, err := p.ProjectViews.ListSessionsByProject(context.Background(), serverapi.SessionListByProjectRequest{ProjectID: p.ProjectID})
-		if err != nil {
-			return nil, err
-		}
-		summaries = sessionSummariesFromProjectView(resp.Sessions)
-	}
+	return p.pickOrCreateSession(req, summaries)
+}
+
+func (p Planner) pickOrCreateSession(req SessionRequest, summaries []session.Summary) (*session.Store, error) {
 	if len(summaries) == 0 {
 		return p.createSession(req.ParentSessionID)
 	}

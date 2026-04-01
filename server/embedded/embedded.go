@@ -3,7 +3,6 @@ package embedded
 import (
 	"context"
 	"errors"
-	"path/filepath"
 
 	"builder/server/auth"
 	"builder/server/authflow"
@@ -103,12 +102,16 @@ func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) 
 	if err != nil {
 		return nil, err
 	}
+	projectID, err := config.ProjectIDForWorkspaceRoot(cfg.WorkspaceRoot)
+	if err != nil {
+		return nil, err
+	}
 	runtimeSupport, err := serverbootstrap.BuildRuntimeSupport(cfg)
 	if err != nil {
 		return nil, err
 	}
 	runtimeRegistry := registry.NewRuntimeRegistry()
-	projectService, err := projectview.NewService(filepath.Base(containerDir), cfg.WorkspaceRoot, containerDir)
+	projectService, err := projectview.NewService(projectID, cfg.WorkspaceRoot, containerDir)
 	if err != nil {
 		return nil, err
 	}
