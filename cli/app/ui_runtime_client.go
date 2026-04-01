@@ -11,25 +11,26 @@ import (
 
 type engineUIRuntimeClient struct {
 	engine *runtime.Engine
+	reads  runtimeview.Reader
 }
 
 func newUIRuntimeClient(engine *runtime.Engine) clientui.RuntimeClient {
 	if engine == nil {
 		return nil
 	}
-	return engineUIRuntimeClient{engine: engine}
+	return engineUIRuntimeClient{engine: engine, reads: runtimeview.NewReader(engine)}
 }
 
 func (c engineUIRuntimeClient) MainView() clientui.RuntimeMainView {
-	return runtimeview.MainViewFromRuntime(c.engine)
+	return c.reads.MainView()
 }
 
 func (c engineUIRuntimeClient) Status() clientui.RuntimeStatus {
-	return runtimeview.StatusFromRuntime(c.engine)
+	return c.reads.Status()
 }
 
 func (c engineUIRuntimeClient) SessionView() clientui.RuntimeSessionView {
-	return runtimeview.SessionViewFromRuntime(c.engine)
+	return c.reads.SessionView()
 }
 
 func (c engineUIRuntimeClient) SetSessionName(name string) error {

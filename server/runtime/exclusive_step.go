@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"builder/server/llm"
+	"builder/server/session"
 	"github.com/google/uuid"
 )
 
@@ -34,6 +35,18 @@ func (s *defaultExclusiveStepLifecycle) Run(ctx context.Context, options exclusi
 	}
 	if options.EmitRunState {
 		if snapshot := s.Snapshot(); snapshot != nil {
+			if _, persistErr := s.engine.store.AppendRunStarted(session.RunRecord{
+				RunID:     snapshot.RunID,
+				StepID:    snapshot.StepID,
+				Status:    session.RunStatusRunning,
+				StartedAt: snapshot.StartedAt,
+			}); persistErr != nil {
+				s.end()
+				if clearErr := s.engine.store.MarkInFlight(false); clearErr != nil {
+					persistErr = errors.Join(persistErr, fmt.Errorf("mark in-flight false: %w", clearErr))
+				}
+				return persistErr
+			}
 			s.engine.emit(Event{Kind: EventRunStateChanged, StepID: stepID, RunState: &RunState{
 				Busy:      true,
 				RunID:     snapshot.RunID,
@@ -60,8 +73,21 @@ func (s *defaultExclusiveStepLifecycle) Run(ctx context.Context, options exclusi
 			wrapped := fmt.Errorf("mark in-flight false: %w", clearErr)
 			s.engine.emit(Event{Kind: EventInFlightClearFailed, StepID: stepID, Error: wrapped.Error()})
 			err = errors.Join(err, wrapped)
-		} else if s.background != nil {
-			s.background.ScheduleIfIdle()
+		} else {
+			if options.EmitRunState && snapshot != nil {
+				if _, persistErr := s.engine.store.AppendRunFinished(session.RunRecord{
+					RunID:      snapshot.RunID,
+					StepID:     snapshot.StepID,
+					Status:     session.RunStatus(snapshot.Status),
+					StartedAt:  snapshot.StartedAt,
+					FinishedAt: snapshot.FinishedAt,
+				}); persistErr != nil {
+					err = errors.Join(err, fmt.Errorf("append run finished: %w", persistErr))
+				}
+			}
+			if s.background != nil {
+				s.background.ScheduleIfIdle()
+			}
 		}
 	}()
 	return fn(stepCtx, stepID)
