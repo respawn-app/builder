@@ -29,7 +29,11 @@ func TestSessionLaunchPlannerHeadlessCreatesNewSessionAndAppliesContinuationCont
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
-	meta := plan.Store.Meta()
+	opened, err := session.OpenByID(root, plan.SessionID)
+	if err != nil {
+		t.Fatalf("open planned session: %v", err)
+	}
+	meta := opened.Meta()
 	if meta.SessionID == "" {
 		t.Fatal("expected session id")
 	}
@@ -92,10 +96,10 @@ func TestSessionLaunchPlannerInteractiveUsesPickerSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
-	if plan.Store.Meta().SessionID != second.Meta().SessionID {
-		t.Fatalf("expected selected session %q, got %q", second.Meta().SessionID, plan.Store.Meta().SessionID)
+	if plan.SessionID != second.Meta().SessionID {
+		t.Fatalf("expected selected session %q, got %q", second.Meta().SessionID, plan.SessionID)
 	}
-	if plan.Store.Meta().SessionID == first.Meta().SessionID {
+	if plan.SessionID == first.Meta().SessionID {
 		t.Fatalf("did not expect first session %q", first.Meta().SessionID)
 	}
 }
@@ -168,8 +172,8 @@ func TestSessionLaunchPlannerInteractiveUsesLegacyWorkspaceContainerMapping(t *t
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
-	if plan.Store.Meta().SessionID != legacySession.Meta().SessionID {
-		t.Fatalf("expected legacy session %q, got %q", legacySession.Meta().SessionID, plan.Store.Meta().SessionID)
+	if plan.SessionID != legacySession.Meta().SessionID {
+		t.Fatalf("expected legacy session %q, got %q", legacySession.Meta().SessionID, plan.SessionID)
 	}
 }
 
@@ -205,13 +209,17 @@ func TestSessionLaunchPlannerSelectedSessionIDBypassesPicker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
-	if plan.Store.Meta().SessionID != store.Meta().SessionID {
-		t.Fatalf("expected explicit session %q, got %q", store.Meta().SessionID, plan.Store.Meta().SessionID)
+	if plan.SessionID != store.Meta().SessionID {
+		t.Fatalf("expected explicit session %q, got %q", store.Meta().SessionID, plan.SessionID)
 	}
 	if plan.ActiveSettings.OpenAIBaseURL != "http://session.local/v1" {
 		t.Fatalf("expected session continuation base url, got %q", plan.ActiveSettings.OpenAIBaseURL)
 	}
-	if got := plan.Store.Meta().Continuation; got == nil || got.OpenAIBaseURL != "http://session.local/v1" {
+	reopened, err := session.OpenByID(root, plan.SessionID)
+	if err != nil {
+		t.Fatalf("open selected session by id: %v", err)
+	}
+	if got := reopened.Meta().Continuation; got == nil || got.OpenAIBaseURL != "http://session.local/v1" {
 		t.Fatalf("expected continuation base url preserved, got %+v", got)
 	}
 }
