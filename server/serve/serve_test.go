@@ -11,9 +11,9 @@ import (
 
 	"builder/server/auth"
 	"builder/server/authflow"
-	"builder/server/discovery"
 	"builder/server/startup"
 	"builder/shared/config"
+	"builder/shared/discovery"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
 )

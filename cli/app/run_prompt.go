@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"builder/shared/client"
 	"builder/shared/serverapi"
 	"github.com/google/uuid"
 )
@@ -19,8 +20,7 @@ type RunPromptResult struct {
 	Duration    time.Duration
 }
 
-func runPrompt(ctx context.Context, server embeddedServer, initialSessionID, prompt string, timeout time.Duration, progress io.Writer) (RunPromptResult, error) {
-	client := server.RunPromptClient()
+func runPrompt(ctx context.Context, client client.RunPromptClient, initialSessionID, prompt string, timeout time.Duration, progress io.Writer) (RunPromptResult, error) {
 	response, err := client.RunPrompt(ctx, serverapi.RunPromptRequest{
 		ClientRequestID:   uuid.NewString(),
 		SelectedSessionID: strings.TrimSpace(initialSessionID),
