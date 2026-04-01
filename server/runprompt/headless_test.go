@@ -2,6 +2,7 @@ package runprompt
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -379,7 +380,14 @@ func TestHeadlessRunPromptOverridesRespectLockedModelContract(t *testing.T) {
 		t.Fatalf("mark model dispatch locked: %v", err)
 	}
 
+	requestBodies := make(chan map[string]any, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request payload: %v", err)
+		}
+		requestBodies <- payload
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final\",\"content\":[{\"type\":\"output_text\",\"text\":\"locked response\"}]}]}}\n\n")
 		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
@@ -431,6 +439,22 @@ func TestHeadlessRunPromptOverridesRespectLockedModelContract(t *testing.T) {
 	}
 	if strings.Contains(string(runLog), "model=override-model") {
 		t.Fatalf("did not expect run log to use override model, got %q", string(runLog))
+	}
+	select {
+	case payload := <-requestBodies:
+		toolsPayload, ok := payload["tools"].([]any)
+		if !ok || len(toolsPayload) != 1 {
+			t.Fatalf("expected one locked tool in request payload, got %#v", payload["tools"])
+		}
+		toolPayload, ok := toolsPayload[0].(map[string]any)
+		if !ok {
+			t.Fatalf("unexpected tool payload: %#v", toolsPayload[0])
+		}
+		if got := toolPayload["name"]; got != string(tools.ToolShell) {
+			t.Fatalf("expected locked shell tool, got %#v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for provider request payload")
 	}
 }
 
