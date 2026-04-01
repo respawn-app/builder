@@ -160,10 +160,23 @@ func TestServiceKillProcessSignalsManagerEntry(t *testing.T) {
 	}
 
 	svc := NewService(manager)
-	if _, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ProcessID: "1000"}); err != nil {
+	if _, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "1000"}); err != nil {
 		t.Fatalf("KillProcess: %v", err)
 	}
 	waitForProcessKilled(t, manager, "1000")
+}
+
+func TestServiceKillProcessRequiresClientRequestID(t *testing.T) {
+	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	svc := NewService(manager)
+	if _, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ProcessID: "1000"}); err == nil {
+		t.Fatal("expected KillProcess to require client_request_id")
+	}
 }
 
 func waitForProcessCount(t *testing.T, manager *shelltool.Manager, count int) {

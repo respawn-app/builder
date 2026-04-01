@@ -10,6 +10,7 @@ import (
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
+	"github.com/google/uuid"
 )
 
 type backgroundUIProcessClient struct {
@@ -58,7 +59,7 @@ func (c backgroundUIProcessClient) KillProcess(id string) error {
 	id = strings.TrimSpace(id)
 	var lastErr error
 	if c.control != nil {
-		_, err := c.control.KillProcess(context.Background(), serverapi.ProcessKillRequest{ProcessID: id})
+		_, err := c.control.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: uuid.NewString(), ProcessID: id})
 		if err == nil {
 			return nil
 		}

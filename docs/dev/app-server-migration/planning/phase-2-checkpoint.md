@@ -26,7 +26,7 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - Added integration coverage proving the real `cli/app` `PrepareRuntime(...)` path registers the live runtime into the shared `SessionViewClient` read surface, rather than only through manual test registration.
 - Threaded explicit process ownership through shell-backed background execution, so live background processes now carry owning `session_id`, `run_id`, and `step_id` rather than only a session-scoped manager identity.
 - Added the first transport-neutral process read service via `shared/serverapi` + `shared/client` + `server/processview`, with embedded-mode production reads resolving through the server-owned background manager.
-- Added the first transport-neutral process control service for kill and inline-output actions via the same `server/processview` / `shared/client` boundary.
+- Added the first transport-neutral process control service for `kill` and `inline-output` actions via the same `server/processview` / `shared/client` boundary.
 - Switched the CLI `/ps` surface onto that shared process boundary for list hydration plus kill/inline control, while preserving local log opening as a frontend action over server-provided log paths.
 - Added focused coverage proving process ownership is stamped at creation time, survives projection through the server read service, and is available through embedded-mode loopback reads.
 - Added focused coverage proving the real embedded `PrepareRuntime(...)` path wires both process reads and process control through the shared client boundary rather than the local manager path.
@@ -49,7 +49,7 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - Process ownership/read metadata is currently live-only and in-memory. Restarting the app server loses process resources and their run/step ownership history.
 - Reopen semantics currently reconstruct unfinished durable runs from `run_started` without a matching `run_finished`, but that state is not yet surfaced through a higher-level application read API.
 - The new application read services still use partial dormant reconstruction rather than richer persisted read models for settings/approval state, and the current server-owned registries are embedded-mode only rather than shared daemon infrastructure.
-- Process control is only partially on the new boundary so far: kill and inline-output are shared, but log opening remains a frontend-local action over server-provided file paths.
+- Process control is only partially on the new boundary so far: `kill` and `inline-output` are shared, `kill` now carries `client_request_id` as a mutating contract, but log opening remains a frontend-local action over server-provided file paths.
 - The UI is hydrating through `RuntimeMainView` and the process read service, but it is not yet rendering richer run/process-specific UX beyond carrying the typed data.
 
 ## Next Slice
