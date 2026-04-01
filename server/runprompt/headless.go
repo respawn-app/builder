@@ -21,11 +21,16 @@ import (
 )
 
 type HeadlessBootstrap struct {
-	Config           config.App
-	ContainerDir     string
-	AuthManager      *auth.Manager
-	FastModeState    *runtime.FastModeState
-	Background       *shelltool.Manager
+	Config          config.App
+	ContainerDir    string
+	AuthManager     *auth.Manager
+	FastModeState   *runtime.FastModeState
+	Background      *shelltool.Manager
+	RuntimeRegistry interface {
+		Register(sessionID string, engine *runtime.Engine)
+		Unregister(sessionID string)
+		PublishRuntimeEvent(sessionID string, evt runtime.Event)
+	}
 	BackgroundRouter interface {
 		SetActiveSession(sessionID string, engine *runtime.Engine)
 		ClearActiveSession(sessionID string)
@@ -110,6 +115,9 @@ func (l *headlessPromptLauncher) prepareRuntime(plan launch.SessionPlan, progres
 		FastMode: l.boot.FastModeState,
 		OnEvent: func(evt runtime.Event) {
 			logger.Logf("%s", FormatRuntimeEvent(evt))
+			if l.boot.RuntimeRegistry != nil {
+				l.boot.RuntimeRegistry.PublishRuntimeEvent(plan.Store.Meta().SessionID, evt)
+			}
 			PublishRunPromptProgress(progress, evt)
 		},
 	})
@@ -120,6 +128,9 @@ func (l *headlessPromptLauncher) prepareRuntime(plan launch.SessionPlan, progres
 	if wiring.AskBroker != nil {
 		wiring.AskBroker.SetAskHandler(RunPromptAskHandler)
 	}
+	if l.boot.RuntimeRegistry != nil {
+		l.boot.RuntimeRegistry.Register(plan.Store.Meta().SessionID, wiring.Engine)
+	}
 	if l.boot.BackgroundRouter != nil {
 		l.boot.BackgroundRouter.SetActiveSession(plan.Store.Meta().SessionID, wiring.Engine)
 	}
@@ -128,6 +139,9 @@ func (l *headlessPromptLauncher) prepareRuntime(plan launch.SessionPlan, progres
 		engine:      wiring.Engine,
 		eventBridge: wiring.EventBridge,
 		close: func() {
+			if l.boot.RuntimeRegistry != nil {
+				l.boot.RuntimeRegistry.Unregister(plan.Store.Meta().SessionID)
+			}
 			if l.boot.BackgroundRouter != nil {
 				l.boot.BackgroundRouter.ClearActiveSession(plan.Store.Meta().SessionID)
 			}

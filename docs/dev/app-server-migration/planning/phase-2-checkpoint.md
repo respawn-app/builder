@@ -1,6 +1,6 @@
 # App Server Migration: Phase 2 Checkpoint
 
-Status: complete
+Status: foundation slice complete; broader Phase 2 still in progress
 
 This checkpoint tracks the first resource-model and hydration slice after the Phase 1 client-boundary completion.
 
@@ -46,7 +46,7 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - Live process resources now have explicit session/run ownership on the server side, and `/ps` list hydration no longer depends on CLI-local snapshot projection of the background manager.
 - `/ps` control actions now also flow through the same shared process boundary, so the CLI no longer owns direct kill/inline process mutations.
 - Live session activity now has a shared server-owned observation seam with explicit lag failure semantics, rather than existing only as a CLI-local runtime event bridge.
-- The Phase 2 exit gate is now satisfied: a second shared client can hydrate and observe the same active session in tests.
+- The Phase 2 foundation exit gate is now satisfied: a second shared client can hydrate and observe the same active session in tests.
 
 ## Current Limitations
 
@@ -57,7 +57,8 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 - Process control is only partially on the new boundary so far: `kill` and `inline-output` are shared, `kill` now carries `client_request_id` as a mutating contract, but log opening remains a frontend-local action over server-provided file paths.
 - The UI is hydrating through `RuntimeMainView` and the process read service, but it is not yet rendering richer run/process-specific UX beyond carrying the typed data.
 - The live session-activity stream is active-session-only, live-only, and best-effort. It does not yet provide replay, cursors, or typed process-output substreams.
+- This checkpoint does not mean all Phase 2 requirements are done. Still open from the broader spec: project registry/read surfaces, ask and approval resource/read surfaces, fuller event/live-feed classes, and the protocol-facing retention/replay model.
 
 ## Next Slice
 
-- Move to Phase 3 transport work: expose the already-extracted server boundary over the real attach/handshake protocol while keeping embedded mode on the same client boundary.
+- Continue broader Phase 2: land project registry/read surfaces, ask/approval resources, and the remaining live-feed split needed before transport work can be called complete.
