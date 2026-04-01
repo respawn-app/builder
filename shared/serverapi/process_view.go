@@ -26,7 +26,8 @@ type ProcessGetResponse struct {
 }
 
 type ProcessKillRequest struct {
-	ProcessID string
+	ClientRequestID string
+	ProcessID       string
 }
 
 type ProcessKillResponse struct{}
@@ -59,6 +60,9 @@ func (r ProcessGetRequest) Validate() error {
 }
 
 func (r ProcessKillRequest) Validate() error {
+	if strings.TrimSpace(r.ClientRequestID) == "" {
+		return errors.New("client_request_id is required")
+	}
 	if strings.TrimSpace(r.ProcessID) == "" {
 		return errors.New("process_id is required")
 	}
