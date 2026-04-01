@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"builder/shared/clientui"
 	"builder/shared/protocol"
@@ -602,16 +604,43 @@ func sendWithContext(ctx context.Context, conn *websocket.Conn, value any) error
 }
 
 func receiveWithContext(ctx context.Context, conn *websocket.Conn, out any) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := websocket.JSON.Receive(conn, out); err != nil {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := conn.SetReadDeadline(nextReceiveDeadline(ctx)); err != nil {
+			return err
+		}
+		err := websocket.JSON.Receive(conn, out)
+		if clearErr := conn.SetReadDeadline(time.Time{}); clearErr != nil && err == nil {
+			return clearErr
+		}
+		if err == nil {
+			return nil
+		}
 		if cerr := ctx.Err(); cerr != nil {
 			return cerr
 		}
+		if isReceiveTimeout(err) {
+			continue
+		}
 		return err
 	}
-	return nil
+}
+
+const receivePollInterval = 200 * time.Millisecond
+
+func nextReceiveDeadline(ctx context.Context) time.Time {
+	deadline := time.Now().Add(receivePollInterval)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		return ctxDeadline
+	}
+	return deadline
+}
+
+func isReceiveTimeout(err error) bool {
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 func protocolError(resp *protocol.ResponseError) error {

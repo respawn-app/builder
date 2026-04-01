@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
@@ -65,6 +66,64 @@ func TestRemoteRunPromptPublishesProgressNotifications(t *testing.T) {
 	}
 	if len(updates) != 2 || updates[0].Message != "Running tool" || updates[1].Message != "Tool finished" {
 		t.Fatalf("unexpected progress updates: %+v", updates)
+	}
+}
+
+func TestRemoteSessionActivitySubscriptionNextHonorsCanceledContext(t *testing.T) {
+	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
+		defer func() { _ = ws.Close() }()
+		var req protocol.Request
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1", ProjectID: "project-1"}})); err != nil {
+			return
+		}
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.AttachResponse{Kind: "session", SessionID: "session-1"})); err != nil {
+			return
+		}
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.SubscribeResponse{})); err != nil {
+			return
+		}
+		<-time.After(2 * time.Second)
+	}))
+	defer server.Close()
+
+	remote, err := DialRemote(context.Background(), protocol.DiscoveryRecord{RPCURL: "ws" + server.URL[len("http"):], Identity: protocol.ServerIdentity{ProjectID: "project-1"}})
+	if err != nil {
+		t.Fatalf("DialRemote: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	sub, err := remote.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := sub.Next(ctx)
+		errCh <- err
+	}()
+
+	<-time.After(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Next error = %v, want context canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Next to honor cancellation")
 	}
 }
 
