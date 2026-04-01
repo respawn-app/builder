@@ -83,6 +83,14 @@ func TestRuntimeRegistryRejectsInactiveSessionActivityStreamWithUnavailableError
 	}
 }
 
+func TestRuntimeRegistryNormalizesSessionActivitySubscriptionFailures(t *testing.T) {
+	sub := newSessionActivityHub().subscribe()
+	sub.closeWithError(errors.New("writer failed"))
+	if _, err := sub.Next(context.Background()); !errors.Is(err, serverapi.ErrStreamFailed) {
+		t.Fatalf("expected stream failed error, got %v", err)
+	}
+}
+
 func TestRuntimeRegistryTracksPendingPromptsPerSession(t *testing.T) {
 	registry := NewRuntimeRegistry()
 	registry.Register("session-1", &runtime.Engine{})

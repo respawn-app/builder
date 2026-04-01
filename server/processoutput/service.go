@@ -65,7 +65,7 @@ type subscription struct {
 func (s *subscription) Next(ctx context.Context) (clientui.ProcessOutputChunk, error) {
 	chunk, err := s.inner.Next(ctx)
 	if err != nil {
-		return clientui.ProcessOutputChunk{}, err
+		return clientui.ProcessOutputChunk{}, serverapi.NormalizeStreamError(err)
 	}
 	return clientui.ProcessOutputChunk{
 		ProcessID:   chunk.ProcessID,
