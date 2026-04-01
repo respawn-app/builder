@@ -3,9 +3,11 @@ package app
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
+	"builder/server/tools/askquestion"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
 )
@@ -79,6 +81,49 @@ func TestStartPendingPromptEventsResubscribesWithoutDuplicatingPendingPrompt(t *
 	}
 }
 
+func TestPendingPromptEventRequeuesWhenAnswerRPCFails(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	initial := &stubPromptActivitySubscription{steps: []stubPromptActivityStep{{evt: clientui.PendingPromptEvent{Type: clientui.PendingPromptEventPending, PromptID: "ask-1", SessionID: "session-1", Question: "First?"}}}}
+	control := &retryingPromptControlClient{askErr: errors.New("transport down")}
+
+	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
+		return nil, context.Canceled
+	}, control)
+	defer stop()
+
+	first := waitPromptEvent(t, events)
+	if first.req.ID != "ask-1" {
+		t.Fatalf("unexpected first prompt id: %q", first.req.ID)
+	}
+	first.reply <- askReply{response: askquestion.Response{RequestID: first.req.ID, Answer: "handled"}}
+
+	retried := waitPromptEvent(t, events)
+	if retried.req.ID != "ask-1" || retried.req.Question != "First?" {
+		t.Fatalf("unexpected retried prompt event: %+v", retried.req)
+	}
+	if got := control.askCallCount(); got != 1 {
+		t.Fatalf("AnswerAsk call count = %d, want 1", got)
+	}
+	if retried.reply == nil {
+		t.Fatal("retried prompt reply channel is nil")
+	}
+	if retried.reply == first.reply {
+		t.Fatal("retried prompt should use a fresh reply channel")
+	}
+	close(retried.reply)
+	stop()
+	select {
+	case _, ok := <-events:
+		if ok {
+			t.Fatal("expected prompt channel to close after stop")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for prompt channel to close")
+	}
+}
+
 type stubSessionActivityStep struct {
 	evt clientui.Event
 	err error
@@ -143,6 +188,34 @@ func (stubPromptControlClient) AnswerAsk(context.Context, serverapi.AskAnswerReq
 
 func (stubPromptControlClient) AnswerApproval(context.Context, serverapi.ApprovalAnswerRequest) error {
 	return nil
+}
+
+type retryingPromptControlClient struct {
+	mu                 sync.Mutex
+	askErr             error
+	approvalErr        error
+	askCalls           int
+	approvalCallCountV int
+}
+
+func (c *retryingPromptControlClient) askCallCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.askCalls
+}
+
+func (c *retryingPromptControlClient) AnswerAsk(context.Context, serverapi.AskAnswerRequest) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.askCalls++
+	return c.askErr
+}
+
+func (c *retryingPromptControlClient) AnswerApproval(context.Context, serverapi.ApprovalAnswerRequest) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.approvalCallCountV++
+	return c.approvalErr
 }
 
 func waitSessionActivityEvent(t *testing.T, events <-chan clientui.Event) clientui.Event {
