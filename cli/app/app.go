@@ -38,12 +38,16 @@ func Run(ctx context.Context, opts Options) error {
 }
 
 func RunPrompt(ctx context.Context, opts Options, prompt string, timeout time.Duration, progress io.Writer) (RunPromptResult, error) {
-	server, err := startEmbeddedServer(ctx, opts, newHeadlessAuthInteractor())
+	runClient, closeFn, err := startRunPromptClient(ctx, opts)
 	if err != nil {
 		return RunPromptResult{}, err
 	}
-	defer func() { _ = server.Close() }()
-	return runPrompt(ctx, server, strings.TrimSpace(opts.SessionID), prompt, timeout, progress)
+	defer func() {
+		if closeFn != nil {
+			_ = closeFn()
+		}
+	}()
+	return runPrompt(ctx, runClient, strings.TrimSpace(opts.SessionID), prompt, timeout, progress)
 }
 func effectiveSettings(base config.Settings, locked *session.LockedContract) config.Settings {
 	return launch.EffectiveSettings(base, locked)

@@ -11,8 +11,9 @@ import (
 	"time"
 
 	"builder/server/core"
-	"builder/server/discovery"
 	"builder/server/startup"
+	"builder/server/transport"
+	"builder/shared/discovery"
 	"builder/shared/protocol"
 )
 
@@ -55,24 +56,29 @@ func (s *Server) Serve(ctx context.Context) error {
 	defer func() { _ = listener.Close() }()
 
 	baseURL := "http://" + listener.Addr().String()
-	record := protocol.DiscoveryRecord{
-		Identity: protocol.ServerIdentity{
-			ProtocolVersion: protocol.Version,
-			ServerID:        fmt.Sprintf("%s:%d", s.ProjectID(), os.Getpid()),
-			ProjectID:       s.ProjectID(),
-			WorkspaceRoot:   s.Config().WorkspaceRoot,
-			PID:             os.Getpid(),
-			Capabilities: protocol.CapabilityFlags{
-				JSONRPCWebSocket:  true,
-				ProjectAttach:     true,
-				SessionAttach:     true,
-				HealthEndpoint:    true,
-				ReadinessEndpoint: true,
-				RunPrompt:         true,
-				SessionActivity:   true,
-				ProcessOutput:     true,
-			},
+	identity := protocol.ServerIdentity{
+		ProtocolVersion: protocol.Version,
+		ServerID:        fmt.Sprintf("%s:%d", s.ProjectID(), os.Getpid()),
+		ProjectID:       s.ProjectID(),
+		WorkspaceRoot:   s.Config().WorkspaceRoot,
+		PID:             os.Getpid(),
+		Capabilities: protocol.CapabilityFlags{
+			JSONRPCWebSocket:  true,
+			ProjectAttach:     true,
+			SessionAttach:     true,
+			HealthEndpoint:    true,
+			ReadinessEndpoint: true,
+			RunPrompt:         true,
+			SessionActivity:   true,
+			ProcessOutput:     true,
 		},
+	}
+	gateway, err := transport.NewGateway(s.Core, identity)
+	if err != nil {
+		return err
+	}
+	record := protocol.DiscoveryRecord{
+		Identity:  identity,
 		HTTPURL:   baseURL,
 		RPCURL:    "ws://" + listener.Addr().String() + protocol.RPCPath,
 		HealthURL: baseURL + protocol.HealthPath,
@@ -111,9 +117,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		}
 		writeStatusJSON(w, status, body)
 	})
-	mux.HandleFunc(protocol.RPCPath, func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "websocket rpc not implemented yet", http.StatusNotImplemented)
-	})
+	mux.Handle(protocol.RPCPath, gateway.Handler())
 
 	httpServer := &http.Server{Handler: mux}
 	errCh := make(chan error, 1)

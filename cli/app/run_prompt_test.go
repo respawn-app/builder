@@ -12,15 +12,57 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"builder/server/auth"
+	"builder/server/authflow"
 	"builder/server/llm"
 	"builder/server/runtime"
+	"builder/server/serve"
 	"builder/server/session"
+	serverstartup "builder/server/startup"
 	"builder/server/tools/askquestion"
 	"builder/shared/config"
+	"builder/shared/discovery"
 	"builder/shared/serverapi"
 )
+
+type memoryAuthHandler struct {
+	state auth.State
+}
+
+func (h memoryAuthHandler) WrapStore(auth.Store) auth.Store {
+	return auth.NewMemoryStore(h.state)
+}
+
+func (memoryAuthHandler) NeedsInteraction(req authflow.InteractionRequest) bool {
+	return !req.Gate.Ready
+}
+
+func (memoryAuthHandler) Interact(context.Context, authflow.InteractionRequest) error {
+	return auth.ErrAuthNotConfigured
+}
+
+func (memoryAuthHandler) LookupEnv(string) string {
+	return ""
+}
+
+type autoOnboarding struct{}
+
+func (autoOnboarding) EnsureOnboardingReady(_ context.Context, req serverstartup.OnboardingRequest) (config.App, error) {
+	path, created, err := config.WriteDefaultSettingsFile()
+	if err != nil {
+		return config.App{}, err
+	}
+	reloaded, err := req.ReloadConfig()
+	if err != nil {
+		return config.App{}, err
+	}
+	reloaded.Source.CreatedDefaultConfig = created
+	reloaded.Source.SettingsPath = path
+	reloaded.Source.SettingsFileExists = true
+	return reloaded, nil
+}
 
 func TestEnsureSubagentSessionNameSetsDefault(t *testing.T) {
 	containerDir := t.TempDir()
@@ -109,6 +151,80 @@ func TestRunPromptWithoutAuthReturnsErrAuthNotConfiguredWithoutReadingStdin(t *t
 	_, err = RunPrompt(context.Background(), Options{WorkspaceRoot: workspace}, "hello", 0, nil)
 	if !errors.Is(err, auth.ErrAuthNotConfigured) {
 		t.Fatalf("expected auth not configured without stdin prompt, got %v", err)
+	}
+}
+
+func TestRunPromptUsesDiscoveredDaemonWithoutLocalAuth(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	fakeResponses, hits := newFakeResponsesServer(t, []string{"daemon reply"})
+	defer fakeResponses.Close()
+
+	srv, err := serve.Start(context.Background(), serverstartup.Request{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+		OpenAIBaseURL:         fakeResponses.URL,
+		OpenAIBaseURLExplicit: true,
+	}, memoryAuthHandler{state: auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "test-key"},
+		},
+		UpdatedAt: time.Now().UTC(),
+	}}, autoOnboarding{})
+	if err != nil {
+		t.Fatalf("serve.Start: %v", err)
+	}
+	defer func() { _ = srv.Close() }()
+
+	serveCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Serve(serveCtx)
+	}()
+
+	loadCfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	_, containerDir, err := config.ResolveWorkspaceContainer(loadCfg)
+	if err != nil {
+		t.Fatalf("ResolveWorkspaceContainer: %v", err)
+	}
+	discoveryPath, err := discovery.PathForContainer(containerDir)
+	if err != nil {
+		t.Fatalf("PathForContainer: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := discovery.Read(discoveryPath); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("discovery record did not appear at %s", discoveryPath)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	result, err := RunPrompt(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, "hello through daemon", 0, nil)
+	if err != nil {
+		t.Fatalf("RunPrompt: %v", err)
+	}
+	if result.Result != "daemon reply" {
+		t.Fatalf("result = %q, want %q", result.Result, "daemon reply")
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("expected daemon-backed llm call once, got %d", hits.Load())
+	}
+
+	cancel()
+	if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
+		t.Fatalf("Serve error = %v, want context canceled", serveErr)
 	}
 }
 
