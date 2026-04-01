@@ -223,7 +223,7 @@ func (s *embeddedAppServer) PrepareRuntime(plan sessionLaunchPlan, diagnosticWri
 		Logger: logger,
 		Wiring: wiring,
 		close: func() {
-			s.inner.UnregisterRuntime(plan.Store.Meta().SessionID)
+			s.inner.UnregisterRuntime(plan.Store.Meta().SessionID, wiring.engine)
 			if router := s.inner.BackgroundRouter(); router != nil {
 				router.ClearActiveSession(plan.Store.Meta().SessionID)
 			}

@@ -225,11 +225,11 @@ func (s *Core) RegisterRuntime(sessionID string, engine *runtime.Engine) {
 	s.runtimeRegistry.Register(sessionID, engine)
 }
 
-func (s *Core) UnregisterRuntime(sessionID string) {
+func (s *Core) UnregisterRuntime(sessionID string, engine *runtime.Engine) {
 	if s == nil || s.runtimeRegistry == nil {
 		return
 	}
-	s.runtimeRegistry.Unregister(sessionID)
+	s.runtimeRegistry.Unregister(sessionID, engine)
 }
 
 func (s *Core) PublishRuntimeEvent(sessionID string, evt runtime.Event) {

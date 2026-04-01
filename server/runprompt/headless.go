@@ -30,7 +30,7 @@ type HeadlessBootstrap struct {
 	RuntimeRegistry interface {
 		primaryrun.Gate
 		Register(sessionID string, engine *runtime.Engine)
-		Unregister(sessionID string)
+		Unregister(sessionID string, engine *runtime.Engine)
 		PublishRuntimeEvent(sessionID string, evt runtime.Event)
 	}
 	BackgroundRouter interface {
@@ -142,7 +142,7 @@ func (l *headlessPromptLauncher) prepareRuntime(plan launch.SessionPlan, progres
 		eventBridge: wiring.EventBridge,
 		close: func() {
 			if l.boot.RuntimeRegistry != nil {
-				l.boot.RuntimeRegistry.Unregister(plan.Store.Meta().SessionID)
+				l.boot.RuntimeRegistry.Unregister(plan.Store.Meta().SessionID, wiring.Engine)
 			}
 			if l.boot.BackgroundRouter != nil {
 				l.boot.BackgroundRouter.ClearActiveSession(plan.Store.Meta().SessionID)
