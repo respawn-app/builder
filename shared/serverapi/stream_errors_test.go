@@ -17,8 +17,12 @@ func TestNormalizeStreamErrorPreservesKnownCases(t *testing.T) {
 }
 
 func TestNormalizeStreamErrorWrapsUnexpectedFailure(t *testing.T) {
-	err := NormalizeStreamError(errors.New("boom"))
+	boom := errors.New("boom")
+	err := NormalizeStreamError(boom)
 	if !errors.Is(err, ErrStreamFailed) {
 		t.Fatalf("expected ErrStreamFailed, got %v", err)
+	}
+	if !errors.Is(err, boom) {
+		t.Fatalf("expected original cause to be preserved, got %v", err)
 	}
 }

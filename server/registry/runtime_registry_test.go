@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"errors"
+	"io"
 	"testing"
 
 	"builder/server/primaryrun"
@@ -88,6 +89,23 @@ func TestRuntimeRegistryNormalizesSessionActivitySubscriptionFailures(t *testing
 	sub.closeWithError(errors.New("writer failed"))
 	if _, err := sub.Next(context.Background()); !errors.Is(err, serverapi.ErrStreamFailed) {
 		t.Fatalf("expected stream failed error, got %v", err)
+	}
+}
+
+func TestRuntimeRegistryPassesThroughSessionActivityEOF(t *testing.T) {
+	sub := newSessionActivityHub().subscribe()
+	sub.closeWithError(io.EOF)
+	if _, err := sub.Next(context.Background()); !errors.Is(err, io.EOF) {
+		t.Fatalf("expected EOF, got %v", err)
+	}
+}
+
+func TestRuntimeRegistryPassesThroughSessionActivityContextCanceled(t *testing.T) {
+	sub := newSessionActivityHub().subscribe()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := sub.Next(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }
 

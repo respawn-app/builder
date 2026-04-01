@@ -101,3 +101,31 @@ func TestServiceNormalizesSubscriptionNextFailures(t *testing.T) {
 		t.Fatalf("expected stream failed error, got %v", err)
 	}
 }
+
+func TestServicePassesThroughSubscriptionEOF(t *testing.T) {
+	svc := NewService(
+		&stubSubscriber{sub: &stubShellOutputSubscription{err: io.EOF}},
+		&stubProcessSource{snapshot: shelltool.Snapshot{ID: "proc-1", LogPath: "/tmp/proc-1.log", OutputAvailable: true, OutputRetainedToBytes: 1}},
+	)
+	sub, err := svc.SubscribeProcessOutput(context.Background(), serverapi.ProcessOutputSubscribeRequest{ProcessID: "proc-1"})
+	if err != nil {
+		t.Fatalf("SubscribeProcessOutput: %v", err)
+	}
+	if _, err := sub.Next(context.Background()); !errors.Is(err, io.EOF) {
+		t.Fatalf("expected EOF, got %v", err)
+	}
+}
+
+func TestServicePassesThroughSubscriptionContextCanceled(t *testing.T) {
+	svc := NewService(
+		&stubSubscriber{sub: &stubShellOutputSubscription{err: context.Canceled}},
+		&stubProcessSource{snapshot: shelltool.Snapshot{ID: "proc-1", LogPath: "/tmp/proc-1.log", OutputAvailable: true, OutputRetainedToBytes: 1}},
+	)
+	sub, err := svc.SubscribeProcessOutput(context.Background(), serverapi.ProcessOutputSubscribeRequest{ProcessID: "proc-1"})
+	if err != nil {
+		t.Fatalf("SubscribeProcessOutput: %v", err)
+	}
+	if _, err := sub.Next(context.Background()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}

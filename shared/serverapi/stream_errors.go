@@ -3,7 +3,6 @@ package serverapi
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 )
 
@@ -26,5 +25,5 @@ func NormalizeStreamError(err error) error {
 	if errors.Is(err, ErrStreamGap) || errors.Is(err, ErrStreamUnavailable) || errors.Is(err, ErrStreamFailed) {
 		return err
 	}
-	return fmt.Errorf("%w: %v", ErrStreamFailed, err)
+	return errors.Join(ErrStreamFailed, err)
 }
