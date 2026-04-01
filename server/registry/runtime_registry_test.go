@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"builder/server/runtime"
+	askquestion "builder/server/tools/askquestion"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
 )
@@ -71,5 +72,33 @@ func TestRuntimeRegistryClosesLaggedSubscriberWithGapError(t *testing.T) {
 	}
 	if _, err := sub.Next(context.Background()); !errors.Is(err, serverapi.ErrSessionActivityGap) {
 		t.Fatalf("expected gap error, got %v", err)
+	}
+}
+
+func TestRuntimeRegistryTracksPendingPromptsPerSession(t *testing.T) {
+	registry := NewRuntimeRegistry()
+	registry.Register("session-1", &runtime.Engine{})
+	t.Cleanup(func() { registry.Unregister("session-1") })
+
+	registry.BeginPendingPrompt("session-1", askquestion.Request{ID: "ask-1", Question: "one?"})
+	registry.BeginPendingPrompt("session-1", askquestion.Request{ID: "approval-1", Question: "allow?", Approval: true})
+
+	items := registry.ListPendingPrompts("session-1")
+	if len(items) != 2 {
+		t.Fatalf("expected two pending prompts, got %+v", items)
+	}
+	if items[0].Request.ID != "ask-1" || items[1].Request.ID != "approval-1" {
+		t.Fatalf("unexpected pending prompts ordering: %+v", items)
+	}
+
+	registry.CompletePendingPrompt("session-1", "ask-1")
+	items = registry.ListPendingPrompts("session-1")
+	if len(items) != 1 || items[0].Request.ID != "approval-1" {
+		t.Fatalf("unexpected pending prompts after completion: %+v", items)
+	}
+
+	registry.Unregister("session-1")
+	if items := registry.ListPendingPrompts("session-1"); len(items) != 0 {
+		t.Fatalf("expected no pending prompts after unregister, got %+v", items)
 	}
 }

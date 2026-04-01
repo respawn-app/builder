@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"builder/server/runtime"
 	"builder/server/runtimeview"
+	askquestion "builder/server/tools/askquestion"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
 )
@@ -21,8 +24,15 @@ type RuntimeRegistry struct {
 }
 
 type runtimeEntry struct {
-	engine *runtime.Engine
-	hub    *sessionActivityHub
+	engine        *runtime.Engine
+	hub           *sessionActivityHub
+	pendingMu     sync.RWMutex
+	pendingPrompt map[string]PendingPromptSnapshot
+}
+
+type PendingPromptSnapshot struct {
+	Request   askquestion.Request
+	CreatedAt time.Time
 }
 
 type sessionActivityHub struct {
@@ -53,7 +63,7 @@ func (r *RuntimeRegistry) Register(sessionID string, engine *runtime.Engine) {
 	if id == "" {
 		return
 	}
-	entry := &runtimeEntry{engine: engine, hub: newSessionActivityHub()}
+	entry := &runtimeEntry{engine: engine, hub: newSessionActivityHub(), pendingPrompt: make(map[string]PendingPromptSnapshot)}
 	r.mu.Lock()
 	previous := r.engines[id]
 	r.engines[id] = entry
@@ -123,6 +133,75 @@ func (r *RuntimeRegistry) SubscribeSessionActivity(_ context.Context, sessionID 
 		return nil, fmt.Errorf("session %q is not active", id)
 	}
 	return entry.hub.subscribe(), nil
+}
+
+func (r *RuntimeRegistry) BeginPendingPrompt(sessionID string, req askquestion.Request) {
+	if r == nil {
+		return
+	}
+	id := strings.TrimSpace(sessionID)
+	requestID := strings.TrimSpace(req.ID)
+	if id == "" || requestID == "" {
+		return
+	}
+	r.mu.RLock()
+	entry := r.engines[id]
+	r.mu.RUnlock()
+	if entry == nil {
+		return
+	}
+	entry.pendingMu.Lock()
+	entry.pendingPrompt[requestID] = PendingPromptSnapshot{Request: req, CreatedAt: time.Now()}
+	entry.pendingMu.Unlock()
+}
+
+func (r *RuntimeRegistry) CompletePendingPrompt(sessionID string, requestID string) {
+	if r == nil {
+		return
+	}
+	id := strings.TrimSpace(sessionID)
+	trimmedRequestID := strings.TrimSpace(requestID)
+	if id == "" || trimmedRequestID == "" {
+		return
+	}
+	r.mu.RLock()
+	entry := r.engines[id]
+	r.mu.RUnlock()
+	if entry == nil {
+		return
+	}
+	entry.pendingMu.Lock()
+	delete(entry.pendingPrompt, trimmedRequestID)
+	entry.pendingMu.Unlock()
+}
+
+func (r *RuntimeRegistry) ListPendingPrompts(sessionID string) []PendingPromptSnapshot {
+	if r == nil {
+		return nil
+	}
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		return nil
+	}
+	r.mu.RLock()
+	entry := r.engines[id]
+	r.mu.RUnlock()
+	if entry == nil {
+		return nil
+	}
+	entry.pendingMu.RLock()
+	items := make([]PendingPromptSnapshot, 0, len(entry.pendingPrompt))
+	for _, item := range entry.pendingPrompt {
+		items = append(items, item)
+	}
+	entry.pendingMu.RUnlock()
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].Request.ID < items[j].Request.ID
+		}
+		return items[i].CreatedAt.Before(items[j].CreatedAt)
+	})
+	return items
 }
 
 func newSessionActivityHub() *sessionActivityHub {

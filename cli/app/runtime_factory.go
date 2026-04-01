@@ -20,6 +20,7 @@ import (
 
 type runtimeWiring struct {
 	engine          *runtime.Engine
+	askBroker       *askquestion.Broker
 	askBridge       *askBridge
 	eventBridge     *runtimeEventBridge
 	background      *shelltool.Manager
@@ -75,6 +76,8 @@ func (r *backgroundEventRouter) handle(evt shelltool.Event) {
 
 type runtimeWiringOptions struct {
 	AskHandler func(req askquestion.Request) (askquestion.Response, error)
+	OnAskStart func(req askquestion.Request)
+	OnAskDone  func(req askquestion.Request, resp askquestion.Response, err error)
 	OnEvent    func(evt runtime.Event)
 	Headless   bool
 	FastMode   *runtime.FastModeState
@@ -111,11 +114,19 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 	if wiring.AskBroker != nil {
 		wiring.AskBroker.SetAskHandler(func(req askquestion.Request) (askquestion.Response, error) {
 			bells.OnAsk(req)
-			return askHandler(req)
+			if opts.OnAskStart != nil {
+				opts.OnAskStart(req)
+			}
+			resp, err := askHandler(req)
+			if opts.OnAskDone != nil {
+				opts.OnAskDone(req, resp, err)
+			}
+			return resp, err
 		})
 	}
 	return &runtimeWiring{
 		engine:        wiring.Engine,
+		askBroker:     wiring.AskBroker,
 		askBridge:     askBridge,
 		eventBridge:   wiring.EventBridge,
 		background:    wiring.Background,
