@@ -333,7 +333,7 @@ func (s *sessionActivitySubscription) Next(ctx context.Context) (clientui.Event,
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if s.err != nil {
-			return clientui.Event{}, s.err
+			return clientui.Event{}, serverapi.NormalizeStreamError(s.err)
 		}
 		return clientui.Event{}, io.EOF
 	}
