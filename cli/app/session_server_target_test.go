@@ -123,6 +123,86 @@ func TestStartSessionServerUsesDiscoveredDaemonForInteractiveFlow(t *testing.T) 
 	}
 }
 
+func TestStartSessionServerUsesInvocationOverridesWhenAttachingToDiscoveredDaemon(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	defaultResponses, defaultHits := newFakeResponsesServer(t, []string{"interactive daemon default"})
+	defer defaultResponses.Close()
+	overrideResponses, overrideHits := newFakeResponsesServer(t, []string{"interactive daemon override"})
+	defer overrideResponses.Close()
+
+	srv, err := serve.Start(context.Background(), serverstartup.Request{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+		OpenAIBaseURL:         defaultResponses.URL,
+		OpenAIBaseURLExplicit: true,
+	}, memoryAuthHandler{state: auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "test-key"},
+		},
+		UpdatedAt: time.Now().UTC(),
+	}}, autoOnboarding{})
+	if err != nil {
+		t.Fatalf("serve.Start: %v", err)
+	}
+	defer func() { _ = srv.Close() }()
+
+	serveCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Serve(serveCtx)
+	}()
+	waitForDiscoveryRecord(t, workspace)
+
+	server, err := startSessionServer(context.Background(), Options{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+		OpenAIBaseURL:         overrideResponses.URL,
+		OpenAIBaseURLExplicit: true,
+	}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("startSessionServer: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
+	if err != nil {
+		t.Fatalf("PlanSession: %v", err)
+	}
+	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test remote interactive runtime override")
+	if err != nil {
+		t.Fatalf("PrepareRuntime: %v", err)
+	}
+	defer runtimePlan.Close()
+
+	message, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "hello through interactive override")
+	if err != nil {
+		t.Fatalf("SubmitUserMessage: %v", err)
+	}
+	if message != "interactive daemon override" {
+		t.Fatalf("assistant message = %q, want %q", message, "interactive daemon override")
+	}
+	if overrideHits.Load() != 1 {
+		t.Fatalf("expected override llm call once, got %d", overrideHits.Load())
+	}
+	if defaultHits.Load() != 0 {
+		t.Fatalf("expected daemon default llm endpoint unused, got %d", defaultHits.Load())
+	}
+
+	cancel()
+	if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
+		t.Fatalf("Serve error = %v, want context canceled", serveErr)
+	}
+}
+
 func TestStartSessionServerUsesDiscoveredDaemonForPromptRoundTrip(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

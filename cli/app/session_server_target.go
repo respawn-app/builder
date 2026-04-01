@@ -49,5 +49,6 @@ func loadSessionServerConfig(opts Options) (config.App, error) {
 		ModelTimeoutSeconds: opts.ModelTimeoutSeconds,
 		ShellTimeoutSeconds: opts.ShellTimeoutSeconds,
 		Tools:               opts.Tools,
+		OpenAIBaseURL:       opts.OpenAIBaseURL,
 	})
 }

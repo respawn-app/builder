@@ -77,6 +77,10 @@ func (l *headlessPromptLauncher) PrepareHeadlessPrompt(_ context.Context, req se
 	if err != nil {
 		return nil, err
 	}
+	plan, err = launch.ApplyRunPromptOverrides(plan, req.Overrides)
+	if err != nil {
+		return nil, err
+	}
 	runtimePlan, err := l.prepareRuntime(plan, progress)
 	if err != nil {
 		return nil, err
