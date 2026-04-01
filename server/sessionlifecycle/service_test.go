@@ -29,7 +29,7 @@ func TestServiceGetInitialInputPrefersStoredDraft(t *testing.T) {
 		t.Fatalf("set input draft: %v", err)
 	}
 
-	service := NewService(root, nil)
+	service := NewService(root, nil, nil)
 	resp, err := service.GetInitialInput(context.Background(), serverapi.SessionInitialInputRequest{
 		SessionID:       store.Meta().SessionID,
 		TransitionInput: "transition input",
@@ -48,7 +48,7 @@ func TestServicePersistInputDraftWritesBySessionID(t *testing.T) {
 		t.Fatalf("set session name: %v", err)
 	}
 
-	service := NewService(root, nil)
+	service := NewService(root, nil, nil)
 	if _, err := service.PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{
 		SessionID: store.Meta().SessionID,
 		Input:     "saved by service",
@@ -80,7 +80,7 @@ func TestServiceResolveTransitionForkRollbackCreatesFork(t *testing.T) {
 		t.Fatalf("append second assistant message: %v", err)
 	}
 
-	service := NewService(root, nil)
+	service := NewService(root, nil, nil)
 	resp, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
 		SessionID: store.Meta().SessionID,
 		Transition: serverapi.SessionTransition{
@@ -114,7 +114,7 @@ func TestServiceResolveTransitionLogoutUsesSessionIDWithoutStoreLookup(t *testin
 			APIKey: &auth.APIKeyMethod{Key: "sk-before"},
 		},
 	}), nil, time.Now)
-	service := NewService(t.TempDir(), mgr)
+	service := NewService(t.TempDir(), nil, mgr)
 
 	resp, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
 		SessionID: "session-42",

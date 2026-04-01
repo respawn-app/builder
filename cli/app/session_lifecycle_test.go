@@ -22,7 +22,7 @@ func TestResolveSessionActionResumeReopensPicker(t *testing.T) {
 		context.Background(),
 		&testEmbeddedServer{},
 		nil,
-		nil,
+		"",
 		UITransition{Action: UIActionResume},
 	)
 	if err != nil {
@@ -50,7 +50,7 @@ func TestResolveSessionActionNewSessionUsesForceNewFlow(t *testing.T) {
 		context.Background(),
 		&testEmbeddedServer{},
 		nil,
-		nil,
+		"",
 		UITransition{Action: UIActionNewSession, InitialPrompt: "hello", ParentSessionID: "parent-1"},
 	)
 	if err != nil {
@@ -99,7 +99,7 @@ func TestNewSessionTransitionKeepsBackgroundProcessesAlive(t *testing.T) {
 		context.Background(),
 		&testEmbeddedServer{background: manager},
 		nil,
-		nil,
+		"",
 		UITransition{Action: UIActionNewSession, InitialPrompt: "hello", ParentSessionID: "parent-1"},
 	)
 	if err != nil {
@@ -117,16 +117,15 @@ func TestNewSessionTransitionKeepsBackgroundProcessesAlive(t *testing.T) {
 		t.Fatalf("close wiring: %v", err)
 	}
 
-	planner := &launchPlanner{
-		server: &testEmbeddedServer{
-			cfg: config.App{
-				WorkspaceRoot:   workdir,
-				PersistenceRoot: root,
-				Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
-			},
-			containerDir: root,
+	testServer := &testEmbeddedServer{
+		cfg: config.App{
+			WorkspaceRoot:   workdir,
+			PersistenceRoot: root,
+			Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
 		},
+		containerDir: root,
 	}
+	planner := &launchPlanner{server: testServer}
 	storePlan, err := planner.PlanSession(sessionLaunchRequest{
 		Mode:              launchModeInteractive,
 		SelectedSessionID: resolved.NextSessionID,
@@ -136,7 +135,13 @@ func TestNewSessionTransitionKeepsBackgroundProcessesAlive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open or create next session: %v", err)
 	}
-	store := storePlan.Store
+	store, err := testServer.sessionStoreRegistry().ResolveStore(context.Background(), storePlan.SessionID)
+	if err != nil {
+		t.Fatalf("resolve planned session from registry: %v", err)
+	}
+	if store == nil {
+		t.Fatal("expected planned session store in registry")
+	}
 	if store.Meta().ParentSessionID != "parent-1" {
 		t.Fatalf("expected parent session id preserved across new session transition, got %q", store.Meta().ParentSessionID)
 	}
@@ -166,7 +171,7 @@ func TestResolveSessionActionForkRollbackTeleportsToForkWithPrompt(t *testing.T)
 		context.Background(),
 		&testEmbeddedServer{cfg: config.App{PersistenceRoot: root}},
 		nil,
-		store,
+		store.Meta().SessionID,
 		UITransition{Action: UIActionForkRollback, InitialPrompt: "edited user message", ForkUserMessageIndex: 1},
 	)
 	if err != nil {
@@ -225,7 +230,7 @@ func TestForkRollbackLifecycleDoesNotPersistEditedPromptAsSourceDraft(t *testing
 		t.Fatalf("expected no persisted source draft after fork handoff, got %q", reopenedSource.Meta().InputDraft)
 	}
 
-	resolved, err := resolveSessionAction(context.Background(), &testEmbeddedServer{cfg: config.App{PersistenceRoot: root}}, nil, reopenedSource, updated.Transition())
+	resolved, err := resolveSessionAction(context.Background(), &testEmbeddedServer{cfg: config.App{PersistenceRoot: root}}, nil, reopenedSource.Meta().SessionID, updated.Transition())
 	if err != nil {
 		t.Fatalf("resolve session action: %v", err)
 	}
@@ -242,7 +247,7 @@ func TestResolveSessionActionOpenSessionUsesTargetID(t *testing.T) {
 		context.Background(),
 		&testEmbeddedServer{},
 		nil,
-		nil,
+		"",
 		UITransition{Action: UIActionOpenSession, TargetSessionID: "session-42", InitialInput: "draft reply"},
 	)
 	if err != nil {
@@ -328,7 +333,7 @@ func TestBackTeleportLifecycleSeedsParentDraftWithoutAutoSubmit(t *testing.T) {
 				t.Fatalf("persist child draft: %v", err)
 			}
 
-			resolved, err := resolveSessionAction(context.Background(), &testEmbeddedServer{cfg: config.App{PersistenceRoot: root}}, nil, childStore, updatedChild.Transition())
+			resolved, err := resolveSessionAction(context.Background(), &testEmbeddedServer{cfg: config.App{PersistenceRoot: root}}, nil, childStore.Meta().SessionID, updatedChild.Transition())
 			if err != nil {
 				t.Fatalf("resolve session action: %v", err)
 			}
@@ -391,7 +396,7 @@ func TestForkRollbackNativeStartupReplayUsesForkedHistory(t *testing.T) {
 		context.Background(),
 		&testEmbeddedServer{cfg: config.App{PersistenceRoot: root}},
 		nil,
-		store,
+		store.Meta().SessionID,
 		UITransition{Action: UIActionForkRollback, InitialPrompt: "edited user message", ForkUserMessageIndex: 2},
 	)
 	if err != nil {

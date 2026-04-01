@@ -1,12 +1,14 @@
 package core
 
 import (
+	"context"
 	"fmt"
 
 	"builder/server/approvalview"
 	"builder/server/askview"
 	"builder/server/auth"
 	serverbootstrap "builder/server/bootstrap"
+	"builder/server/launch"
 	"builder/server/primaryrun"
 	"builder/server/processoutput"
 	"builder/server/processview"
@@ -15,7 +17,9 @@ import (
 	"builder/server/runprompt"
 	"builder/server/runtime"
 	"builder/server/runtimewire"
+	"builder/server/session"
 	"builder/server/sessionactivity"
+	"builder/server/sessionlaunch"
 	"builder/server/sessionlifecycle"
 	"builder/server/sessionview"
 	askquestion "builder/server/tools/askquestion"
@@ -32,6 +36,7 @@ type Core struct {
 	background       *shelltool.Manager
 	backgroundRouter *runtimewire.BackgroundEventRouter
 	runtimeRegistry  *registry.RuntimeRegistry
+	sessionStores    *registry.SessionStoreRegistry
 	projectID        string
 	projectViews     client.ProjectViewClient
 	askViews         client.AskViewClient
@@ -39,6 +44,7 @@ type Core struct {
 	processControls  client.ProcessControlClient
 	processOutput    client.ProcessOutputClient
 	processViews     client.ProcessViewClient
+	sessionLaunch    client.SessionLaunchClient
 	sessionViews     client.SessionViewClient
 	sessionLifecycle client.SessionLifecycleClient
 	sessionActivity  client.SessionActivityClient
@@ -61,6 +67,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		return nil, fmt.Errorf("background manager is required")
 	}
 	runtimeRegistry := registry.NewRuntimeRegistry()
+	sessionStoreRegistry := registry.NewSessionStoreRegistry()
 	projectService, err := projectview.NewService(projectID, cfg.WorkspaceRoot, containerDir)
 	if err != nil {
 		return nil, err
@@ -70,7 +77,11 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	processService := processview.NewService(runtimeSupport.Background)
 	processOutputService := processoutput.NewService(runtimeSupport.Background, runtimeSupport.Background)
 	sessionViewService := sessionview.NewService(registry.NewPersistenceSessionResolver(cfg.PersistenceRoot), runtimeRegistry)
-	sessionLifecycleService := sessionlifecycle.NewService(cfg.PersistenceRoot, authSupport.AuthManager)
+	sessionLaunchService := sessionlaunch.NewDeduplicatingService(
+		sessionlaunch.ScopeID(cfg, containerDir),
+		sessionlaunch.NewService(launch.Planner{Config: cfg, ContainerDir: containerDir}, sessionStoreRegistry),
+	)
+	sessionLifecycleService := sessionlifecycle.NewService(cfg.PersistenceRoot, sessionStoreRegistry, authSupport.AuthManager)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
 	core := &Core{
 		cfg:              cfg,
@@ -80,6 +91,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		background:       runtimeSupport.Background,
 		backgroundRouter: runtimeSupport.BackgroundRouter,
 		runtimeRegistry:  runtimeRegistry,
+		sessionStores:    sessionStoreRegistry,
 		projectID:        projectService.ProjectID(),
 		projectViews:     client.NewLoopbackProjectViewClient(projectService),
 		askViews:         client.NewLoopbackAskViewClient(askService),
@@ -87,6 +99,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		processControls:  client.NewLoopbackProcessControlClient(processService),
 		processOutput:    client.NewLoopbackProcessOutputClient(processOutputService),
 		processViews:     client.NewLoopbackProcessViewClient(processService),
+		sessionLaunch:    client.NewLoopbackSessionLaunchClient(sessionLaunchService),
 		sessionViews:     client.NewLoopbackSessionViewClient(sessionViewService),
 		sessionLifecycle: client.NewLoopbackSessionLifecycleClient(sessionLifecycleService),
 		sessionActivity:  client.NewLoopbackSessionActivityClient(sessionActivityService),
@@ -222,11 +235,32 @@ func (s *Core) SessionActivityClient() client.SessionActivityClient {
 	return s.sessionActivity
 }
 
+func (s *Core) SessionLaunchClient() client.SessionLaunchClient {
+	if s == nil {
+		return nil
+	}
+	return s.sessionLaunch
+}
+
 func (s *Core) SessionLifecycleClient() client.SessionLifecycleClient {
 	if s == nil {
 		return nil
 	}
 	return s.sessionLifecycle
+}
+
+func (s *Core) RegisterSessionStore(store *session.Store) {
+	if s == nil || s.sessionStores == nil {
+		return
+	}
+	s.sessionStores.RegisterStore(store)
+}
+
+func (s *Core) ResolveSessionStore(sessionID string) (*session.Store, error) {
+	if s == nil || s.sessionStores == nil {
+		return nil, nil
+	}
+	return s.sessionStores.ResolveStore(context.Background(), sessionID)
 }
 
 func (s *Core) RegisterRuntime(sessionID string, engine *runtime.Engine) {

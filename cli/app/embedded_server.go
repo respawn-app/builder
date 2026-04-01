@@ -7,11 +7,9 @@ import (
 
 	"builder/server/auth"
 	serverembedded "builder/server/embedded"
-	"builder/server/launch"
 	"builder/server/primaryrun"
 	"builder/server/runtime"
 	"builder/server/session"
-	"builder/server/sessioncontrol"
 	askquestion "builder/server/tools/askquestion"
 	"builder/shared/client"
 	"builder/shared/config"
@@ -20,15 +18,16 @@ import (
 type embeddedServer interface {
 	Close() error
 	Config() config.App
+	AuthManager() *auth.Manager
 	ProjectID() string
 	ProjectViewClient() client.ProjectViewClient
 	RunPromptClient() client.RunPromptClient
 	ProcessControlClient() client.ProcessControlClient
 	ProcessOutputClient() client.ProcessOutputClient
 	ProcessViewClient() client.ProcessViewClient
+	SessionLaunchClient() client.SessionLaunchClient
 	SessionLifecycleClient() client.SessionLifecycleClient
 	SessionViewClient() client.SessionViewClient
-	PlanSession(req sessionLaunchRequest, pick sessionPickerRunner) (sessionLaunchPlan, error)
 	PrepareRuntime(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error)
 	Reauthenticate(ctx context.Context, interactor authInteractor) error
 }
@@ -58,6 +57,13 @@ func (s *embeddedAppServer) Config() config.App {
 	return s.inner.Config()
 }
 
+func (s *embeddedAppServer) AuthManager() *auth.Manager {
+	if s == nil || s.inner == nil {
+		return nil
+	}
+	return s.inner.AuthManager()
+}
+
 func (s *embeddedAppServer) ProjectID() string {
 	if s == nil || s.inner == nil {
 		return ""
@@ -77,6 +83,13 @@ func (s *embeddedAppServer) RunPromptClient() client.RunPromptClient {
 		return nil
 	}
 	return s.inner.RunPromptClient()
+}
+
+func (s *embeddedAppServer) SessionLaunchClient() client.SessionLaunchClient {
+	if s == nil || s.inner == nil {
+		return nil
+	}
+	return s.inner.SessionLaunchClient()
 }
 
 func (s *embeddedAppServer) SessionViewClient() client.SessionViewClient {
@@ -121,13 +134,6 @@ func (s *embeddedAppServer) OAuthOptions() auth.OpenAIOAuthOptions {
 	return s.inner.OAuthOptions()
 }
 
-func (s *embeddedAppServer) AuthManager() *auth.Manager {
-	if s == nil || s.inner == nil {
-		return nil
-	}
-	return s.inner.AuthManager()
-}
-
 func (s *embeddedAppServer) ContainerDir() string {
 	if s == nil || s.inner == nil {
 		return ""
@@ -135,82 +141,38 @@ func (s *embeddedAppServer) ContainerDir() string {
 	return s.inner.ContainerDir()
 }
 
-func (s *embeddedAppServer) PlanSession(req sessionLaunchRequest, pick sessionPickerRunner) (sessionLaunchPlan, error) {
-	if s == nil || s.inner == nil {
-		return sessionLaunchPlan{}, errors.New("embedded server is required")
-	}
-	cfg := s.inner.Config()
-	controller := sessioncontrol.Controller{
-		Config:       cfg,
-		ContainerDir: s.inner.ContainerDir(),
-		ProjectID:    s.inner.ProjectID(),
-		ProjectViews: s.inner.ProjectViewClient(),
-		AuthManager:  s.inner.AuthManager(),
-		PickSession: func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (launch.SessionSelection, error) {
-			runPicker := pick
-			if runPicker == nil {
-				runPicker = func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
-					return runSessionPicker(summaries, theme, alternateScreenPolicy)
-				}
-			}
-			picked, err := runPicker(summaries, theme, alternateScreenPolicy)
-			if err != nil {
-				return launch.SessionSelection{}, err
-			}
-			return launch.SessionSelection{Session: picked.Session, CreateNew: picked.CreateNew, Canceled: picked.Canceled}, nil
-		},
-	}
-	serverPlan, err := controller.PlanSession(launch.SessionRequest{
-		Mode:              launch.Mode(req.Mode),
-		SelectedSessionID: req.SelectedSessionID,
-		ForceNewSession:   req.ForceNewSession,
-		ParentSessionID:   req.ParentSessionID,
-	})
-	if err != nil {
-		return sessionLaunchPlan{}, err
-	}
-	return sessionLaunchPlan{
-		Mode:                req.Mode,
-		Store:               serverPlan.Store,
-		ActiveSettings:      serverPlan.ActiveSettings,
-		EnabledTools:        serverPlan.EnabledTools,
-		ConfiguredModelName: serverPlan.ConfiguredModelName,
-		SessionName:         serverPlan.SessionName,
-		ModelContractLocked: serverPlan.ModelContractLocked,
-		StatusConfig: uiStatusConfig{
-			WorkspaceRoot:   cfg.WorkspaceRoot,
-			PersistenceRoot: cfg.PersistenceRoot,
-			Settings:        serverPlan.ActiveSettings,
-			Source:          serverPlan.Source,
-			AuthManager:     s.inner.AuthManager(),
-			AuthStatePath:   config.GlobalAuthConfigPath(cfg),
-		},
-		WorkspaceRoot: serverPlan.WorkspaceRoot,
-		Source:        serverPlan.Source,
-	}, nil
-}
-
 func (s *embeddedAppServer) PrepareRuntime(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
 	if s == nil || s.inner == nil {
 		return nil, errors.New("embedded server is required")
 	}
-	logger, err := newRunLogger(plan.Store.Dir(), func(diag runLoggerDiagnostic) {
+	store, err := s.inner.ResolveSessionStore(plan.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if store == nil {
+		store, err = session.OpenByID(s.inner.Config().PersistenceRoot, plan.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		s.inner.RegisterSessionStore(store)
+	}
+	logger, err := newRunLogger(store.Dir(), func(diag runLoggerDiagnostic) {
 		reportRunLoggerDiagnostic(diagnosticWriter, diag)
 	})
 	if err != nil {
 		return nil, err
 	}
 	logLaunchPlanStart(logger, plan, startLogLine)
-	wiring, err := newRuntimeWiringWithBackground(plan.Store, plan.ActiveSettings, plan.EnabledTools, plan.WorkspaceRoot, s.inner.AuthManager(), logger, s.inner.Background(), runtimeWiringOptions{
+	wiring, err := newRuntimeWiringWithBackground(store, plan.ActiveSettings, plan.EnabledTools, plan.WorkspaceRoot, s.inner.AuthManager(), logger, s.inner.Background(), runtimeWiringOptions{
 		FastMode: s.inner.FastModeState(),
 		OnAskStart: func(req askquestion.Request) {
-			s.inner.BeginPendingPrompt(plan.Store.Meta().SessionID, req)
+			s.inner.BeginPendingPrompt(plan.SessionID, req)
 		},
 		OnAskDone: func(req askquestion.Request, _ askquestion.Response, _ error) {
-			s.inner.CompletePendingPrompt(plan.Store.Meta().SessionID, req.ID)
+			s.inner.CompletePendingPrompt(plan.SessionID, req.ID)
 		},
 		OnEvent: func(evt runtime.Event) {
-			s.inner.PublishRuntimeEvent(plan.Store.Meta().SessionID, evt)
+			s.inner.PublishRuntimeEvent(plan.SessionID, evt)
 		},
 	})
 	if err != nil {
@@ -218,21 +180,21 @@ func (s *embeddedAppServer) PrepareRuntime(plan sessionLaunchPlan, diagnosticWri
 		return nil, err
 	}
 	if router := s.inner.BackgroundRouter(); router != nil {
-		router.SetActiveSession(plan.Store.Meta().SessionID, wiring.engine)
+		router.SetActiveSession(plan.SessionID, wiring.engine)
 	}
-	s.inner.RegisterRuntime(plan.Store.Meta().SessionID, wiring.engine)
+	s.inner.RegisterRuntime(plan.SessionID, wiring.engine)
 	wiring.processControls = s.inner.ProcessControlClient()
 	wiring.processOutput = s.inner.ProcessOutputClient()
 	wiring.processViews = s.inner.ProcessViewClient()
 	wiring.sessionViews = s.inner.SessionViewClient()
-	wiring.runtimeClient = primaryrun.NewGatedRuntimeClient(plan.Store.Meta().SessionID, newUIRuntimeClientWithReads(wiring.engine, wiring.sessionViews), s.inner)
+	wiring.runtimeClient = primaryrun.NewGatedRuntimeClient(plan.SessionID, newUIRuntimeClientWithReads(wiring.engine, wiring.sessionViews), s.inner)
 	return &runtimeLaunchPlan{
 		Logger: logger,
 		Wiring: wiring,
 		close: func() {
-			s.inner.UnregisterRuntime(plan.Store.Meta().SessionID)
+			s.inner.UnregisterRuntime(plan.SessionID)
 			if router := s.inner.BackgroundRouter(); router != nil {
-				router.ClearActiveSession(plan.Store.Meta().SessionID)
+				router.ClearActiveSession(plan.SessionID)
 			}
 			_ = wiring.Close()
 			_ = logger.Close()

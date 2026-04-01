@@ -122,7 +122,7 @@ func TestResolveSessionActionLogoutUsesBootstrapAuthInteractor(t *testing.T) {
 		ctx,
 		&testEmbeddedServer{cfg: config.App{PersistenceRoot: root}, authManager: mgr},
 		interactor,
-		store,
+		store.Meta().SessionID,
 		UITransition{Action: UIActionLogout},
 	)
 	if err != nil {
@@ -172,7 +172,7 @@ func TestResolveSessionActionLogoutAllowsNilStore(t *testing.T) {
 		ctx,
 		&testEmbeddedServer{authManager: mgr},
 		interactor,
-		nil,
+		"",
 		UITransition{Action: UIActionLogout},
 	)
 	if err != nil {
