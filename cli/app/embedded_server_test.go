@@ -16,9 +16,10 @@ import (
 	serverembedded "builder/server/embedded"
 	"builder/server/launch"
 	"builder/server/primaryrun"
+	"builder/server/projectview"
+	"builder/server/registry"
 	"builder/server/runtime"
-	"builder/server/session"
-	"builder/server/sessioncontrol"
+	"builder/server/sessionlaunch"
 	"builder/server/sessionlifecycle"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
@@ -42,9 +43,10 @@ type testEmbeddedServer struct {
 	processControlClient client.ProcessControlClient
 	processOutputClient  client.ProcessOutputClient
 	processViewClient    client.ProcessViewClient
+	sessionLaunch        client.SessionLaunchClient
 	sessionLifecycle     client.SessionLifecycleClient
 	sessionViewClient    client.SessionViewClient
-	planSession          func(req sessionLaunchRequest, pick sessionPickerRunner) (sessionLaunchPlan, error)
+	sessionStores        *registry.SessionStoreRegistry
 	prepareRuntime       func(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error)
 	reauthenticate       func(ctx context.Context, interactor authInteractor) error
 }
@@ -61,15 +63,30 @@ type stubEmbeddedProcessControlClient struct {
 	killed     []string
 }
 
-func (s *testEmbeddedServer) Close() error                                { return nil }
-func (s *testEmbeddedServer) Config() config.App                          { return s.cfg }
-func (s *testEmbeddedServer) ProjectID() string                           { return s.projectID }
-func (s *testEmbeddedServer) ProjectViewClient() client.ProjectViewClient { return s.projectViewClient }
-func (s *testEmbeddedServer) ContainerDir() string                        { return s.containerDir }
-func (s *testEmbeddedServer) OAuthOptions() auth.OpenAIOAuthOptions       { return s.oauthOpts }
-func (s *testEmbeddedServer) AuthManager() *auth.Manager                  { return s.authManager }
-func (s *testEmbeddedServer) FastModeState() *runtime.FastModeState       { return s.fastModeState }
-func (s *testEmbeddedServer) Background() *shelltool.Manager              { return s.background }
+func (s *testEmbeddedServer) Close() error       { return nil }
+func (s *testEmbeddedServer) Config() config.App { return s.cfg }
+func (s *testEmbeddedServer) ProjectID() string {
+	if strings.TrimSpace(s.projectID) != "" {
+		return s.projectID
+	}
+	projectID, _ := config.ProjectIDForWorkspaceRoot(s.cfg.WorkspaceRoot)
+	return projectID
+}
+func (s *testEmbeddedServer) ProjectViewClient() client.ProjectViewClient {
+	if s.projectViewClient != nil {
+		return s.projectViewClient
+	}
+	service, err := projectview.NewService(s.ProjectID(), s.cfg.WorkspaceRoot, s.containerDir)
+	if err != nil {
+		return nil
+	}
+	return client.NewLoopbackProjectViewClient(service)
+}
+func (s *testEmbeddedServer) ContainerDir() string                  { return s.containerDir }
+func (s *testEmbeddedServer) OAuthOptions() auth.OpenAIOAuthOptions { return s.oauthOpts }
+func (s *testEmbeddedServer) AuthManager() *auth.Manager            { return s.authManager }
+func (s *testEmbeddedServer) FastModeState() *runtime.FastModeState { return s.fastModeState }
+func (s *testEmbeddedServer) Background() *shelltool.Manager        { return s.background }
 func (s *testEmbeddedServer) BackgroundRouter() serverembedded.BackgroundRouter {
 	return s.backgroundRouter
 }
@@ -83,67 +100,27 @@ func (s *testEmbeddedServer) ProcessOutputClient() client.ProcessOutputClient {
 func (s *testEmbeddedServer) ProcessViewClient() client.ProcessViewClient {
 	return s.processViewClient
 }
+func (s *testEmbeddedServer) sessionStoreRegistry() *registry.SessionStoreRegistry {
+	if s.sessionStores == nil {
+		s.sessionStores = registry.NewSessionStoreRegistry()
+	}
+	return s.sessionStores
+}
+func (s *testEmbeddedServer) SessionLaunchClient() client.SessionLaunchClient {
+	if s.sessionLaunch != nil {
+		return s.sessionLaunch
+	}
+	service := sessionlaunch.NewService(launch.Planner{Config: s.cfg, ContainerDir: s.containerDir}, s.sessionStoreRegistry())
+	return client.NewLoopbackSessionLaunchClient(service)
+}
 func (s *testEmbeddedServer) SessionLifecycleClient() client.SessionLifecycleClient {
 	if s.sessionLifecycle != nil {
 		return s.sessionLifecycle
 	}
-	return client.NewLoopbackSessionLifecycleClient(sessionlifecycle.NewService(s.cfg.PersistenceRoot, s.authManager))
+	return client.NewLoopbackSessionLifecycleClient(sessionlifecycle.NewService(s.cfg.PersistenceRoot, s.sessionStoreRegistry(), s.authManager))
 }
 func (s *testEmbeddedServer) SessionViewClient() client.SessionViewClient {
 	return s.sessionViewClient
-}
-func (s *testEmbeddedServer) PlanSession(req sessionLaunchRequest, pick sessionPickerRunner) (sessionLaunchPlan, error) {
-	if s.planSession != nil {
-		return s.planSession(req, pick)
-	}
-	controller := sessioncontrol.Controller{
-		Config:       s.cfg,
-		ContainerDir: s.containerDir,
-		ProjectID:    s.projectID,
-		ProjectViews: s.projectViewClient,
-		AuthManager:  s.authManager,
-		PickSession: func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (launch.SessionSelection, error) {
-			runPicker := pick
-			if runPicker == nil {
-				runPicker = func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
-					return runSessionPicker(summaries, theme, alternateScreenPolicy)
-				}
-			}
-			picked, err := runPicker(summaries, theme, alternateScreenPolicy)
-			if err != nil {
-				return launch.SessionSelection{}, err
-			}
-			return launch.SessionSelection{Session: picked.Session, CreateNew: picked.CreateNew, Canceled: picked.Canceled}, nil
-		},
-	}
-	serverPlan, err := controller.PlanSession(launch.SessionRequest{
-		Mode:              launch.Mode(req.Mode),
-		SelectedSessionID: req.SelectedSessionID,
-		ForceNewSession:   req.ForceNewSession,
-		ParentSessionID:   req.ParentSessionID,
-	})
-	if err != nil {
-		return sessionLaunchPlan{}, err
-	}
-	return sessionLaunchPlan{
-		Mode:                req.Mode,
-		Store:               serverPlan.Store,
-		ActiveSettings:      serverPlan.ActiveSettings,
-		EnabledTools:        serverPlan.EnabledTools,
-		ConfiguredModelName: serverPlan.ConfiguredModelName,
-		SessionName:         serverPlan.SessionName,
-		ModelContractLocked: serverPlan.ModelContractLocked,
-		StatusConfig: uiStatusConfig{
-			WorkspaceRoot:   s.cfg.WorkspaceRoot,
-			PersistenceRoot: s.cfg.PersistenceRoot,
-			Settings:        serverPlan.ActiveSettings,
-			Source:          serverPlan.Source,
-			AuthManager:     s.authManager,
-			AuthStatePath:   config.GlobalAuthConfigPath(s.cfg),
-		},
-		WorkspaceRoot: serverPlan.WorkspaceRoot,
-		Source:        serverPlan.Source,
-	}, nil
 }
 func (s *testEmbeddedServer) PrepareRuntime(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
 	if s.prepareRuntime != nil {
@@ -213,12 +190,12 @@ func TestEmbeddedAppServerPrepareRuntimeRegistersRuntimeForSessionViews(t *testi
 		t.Fatalf("set thinking level: %v", err)
 	}
 
-	resp, err := server.SessionViewClient().GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: plan.Store.Meta().SessionID})
+	resp, err := server.SessionViewClient().GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: plan.SessionID})
 	if err != nil {
 		t.Fatalf("get session main view while runtime attached: %v", err)
 	}
-	if resp.MainView.Session.SessionID != plan.Store.Meta().SessionID {
-		t.Fatalf("session id = %q, want %q", resp.MainView.Session.SessionID, plan.Store.Meta().SessionID)
+	if resp.MainView.Session.SessionID != plan.SessionID {
+		t.Fatalf("session id = %q, want %q", resp.MainView.Session.SessionID, plan.SessionID)
 	}
 	if resp.MainView.Status.ThinkingLevel != "high" {
 		t.Fatalf("thinking level = %q, want high", resp.MainView.Status.ThinkingLevel)
@@ -259,7 +236,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessReadsForUIHydration(t *testi
 	res, err := manager.Start(context.Background(), shelltool.ExecRequest{
 		Command:        []string{"sh", "-c", "printf 'local\n'; sleep 1"},
 		DisplayCommand: "local-process",
-		OwnerSessionID: plan.Store.Meta().SessionID,
+		OwnerSessionID: plan.SessionID,
 		OwnerRunID:     "local-run",
 		OwnerStepID:    "local-step",
 		Workdir:        workspace,
@@ -274,7 +251,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessReadsForUIHydration(t *testi
 
 	runtimePlan.Wiring.processViews = &stubEmbeddedProcessViewClient{listResp: serverapi.ProcessListResponse{Processes: []clientui.BackgroundProcess{{
 		ID:             "remote-proc",
-		OwnerSessionID: plan.Store.Meta().SessionID,
+		OwnerSessionID: plan.SessionID,
 		OwnerRunID:     "remote-run",
 		OwnerStepID:    "remote-step",
 		Command:        "remote-process",
@@ -327,7 +304,7 @@ func TestEmbeddedAppServerPrepareRuntimeExposesPendingAsksAndApprovals(t *testin
 		askDone <- nil
 	}()
 
-	asks := waitForPendingAskResources(t, server.inner.AskViewClient(), plan.Store.Meta().SessionID, 1)
+	asks := waitForPendingAskResources(t, server.inner.AskViewClient(), plan.SessionID, 1)
 	if asks[0].AskID != "ask-1" || asks[0].RecommendedOptionIndex != 2 {
 		t.Fatalf("unexpected pending ask: %+v", asks[0])
 	}
@@ -336,7 +313,7 @@ func TestEmbeddedAppServerPrepareRuntimeExposesPendingAsksAndApprovals(t *testin
 	if err := <-askDone; err != nil {
 		t.Fatalf("answer ask: %v", err)
 	}
-	if asks := waitForPendingAskResources(t, server.inner.AskViewClient(), plan.Store.Meta().SessionID, 0); len(asks) != 0 {
+	if asks := waitForPendingAskResources(t, server.inner.AskViewClient(), plan.SessionID, 0); len(asks) != 0 {
 		t.Fatalf("expected no pending asks after completion, got %+v", asks)
 	}
 
@@ -354,7 +331,7 @@ func TestEmbeddedAppServerPrepareRuntimeExposesPendingAsksAndApprovals(t *testin
 		approvalDone <- nil
 	}()
 
-	approvals := waitForPendingApprovalResources(t, server.inner.ApprovalViewClient(), plan.Store.Meta().SessionID, 1)
+	approvals := waitForPendingApprovalResources(t, server.inner.ApprovalViewClient(), plan.SessionID, 1)
 	if approvals[0].ApprovalID != "approval-1" {
 		t.Fatalf("unexpected pending approval: %+v", approvals[0])
 	}
@@ -366,7 +343,7 @@ func TestEmbeddedAppServerPrepareRuntimeExposesPendingAsksAndApprovals(t *testin
 	if err := <-approvalDone; err != nil {
 		t.Fatalf("answer approval: %v", err)
 	}
-	if approvals := waitForPendingApprovalResources(t, server.inner.ApprovalViewClient(), plan.Store.Meta().SessionID, 0); len(approvals) != 0 {
+	if approvals := waitForPendingApprovalResources(t, server.inner.ApprovalViewClient(), plan.SessionID, 0); len(approvals) != 0 {
 		t.Fatalf("expected no pending approvals after completion, got %+v", approvals)
 	}
 }
@@ -440,11 +417,11 @@ func TestEmbeddedAppServerPrepareRuntimeWiresSessionActivityForSharedClients(t *
 	if reads == nil {
 		t.Fatal("expected session view client")
 	}
-	hydrated, err := reads.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: plan.Store.Meta().SessionID})
+	hydrated, err := reads.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: plan.SessionID})
 	if err != nil {
 		t.Fatalf("GetSessionMainView: %v", err)
 	}
-	if hydrated.MainView.Session.SessionID != plan.Store.Meta().SessionID {
+	if hydrated.MainView.Session.SessionID != plan.SessionID {
 		t.Fatalf("unexpected hydrated session: %+v", hydrated.MainView.Session)
 	}
 
@@ -452,12 +429,12 @@ func TestEmbeddedAppServerPrepareRuntimeWiresSessionActivityForSharedClients(t *
 	if activity == nil {
 		t.Fatal("expected session activity client")
 	}
-	first, err := activity.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: plan.Store.Meta().SessionID})
+	first, err := activity.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID})
 	if err != nil {
 		t.Fatalf("SubscribeSessionActivity first: %v", err)
 	}
 	defer func() { _ = first.Close() }()
-	second, err := activity.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: plan.Store.Meta().SessionID})
+	second, err := activity.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID})
 	if err != nil {
 		t.Fatalf("SubscribeSessionActivity second: %v", err)
 	}
@@ -479,7 +456,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresSessionActivityForSharedClients(t *
 		t.Fatalf("unexpected activity events: first=%+v second=%+v", firstEvt, secondEvt)
 	}
 
-	refreshed, err := reads.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: plan.Store.Meta().SessionID})
+	refreshed, err := reads.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: plan.SessionID})
 	if err != nil {
 		t.Fatalf("GetSessionMainView refreshed: %v", err)
 	}
@@ -590,7 +567,7 @@ func TestEmbeddedAppServerPrepareRuntimeUsesPrimaryRunGuardedRuntimeClient(t *te
 		t.Fatal("expected PrepareRuntime to wire guarded runtime client")
 	}
 
-	lease, err := server.inner.AcquirePrimaryRun(plan.Store.Meta().SessionID)
+	lease, err := server.inner.AcquirePrimaryRun(plan.SessionID)
 	if err != nil {
 		t.Fatalf("AcquirePrimaryRun: %v", err)
 	}

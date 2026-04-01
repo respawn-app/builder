@@ -36,6 +36,9 @@ Completion rule:
 - [x] Shared lifecycle seam exists for session initial input, draft persistence, and transition resolution via `shared/serverapi/session_lifecycle.go`, `shared/client/session_lifecycle.go`, and `server/sessionlifecycle`.
 - [x] `server/core` exposes `SessionLifecycleClient()` for embedded and future transport-backed clients.
 - [x] Focused lifecycle coverage exists in `server/sessionlifecycle/service_test.go`, `server/core/core_test.go`, and `cli/app` characterization tests.
+- [x] Shared session-planning seam exists via `shared/serverapi/session_launch.go`, `shared/client/session_launch.go`, and `server/sessionlaunch`.
+- [x] The CLI planner now owns picker composition using `ProjectViewClient` summaries and sends explicit `client_request_id` plan requests.
+- [x] `server/core` now owns a session-store registry so planning, lifecycle, and runtime prep resolve live sessions by `session_id`.
 
 ## Phase 3 Core
 
@@ -155,4 +158,4 @@ Completion rule:
 
 ## Immediate Next Slice
 
-- [ ] Extract session planning / launch orchestration off `cli/app/embedded_server.go` onto a shared `serverapi` + `shared/client` boundary without leaking `*session.Store`.
+- [ ] Extract the remaining interactive runtime-control surface behind shared `serverapi` + `shared/client` contracts, then expose ask/approval answer mutations and wire those surfaces through the real transport for external interactive mode.

@@ -14,11 +14,16 @@ import (
 
 type Service struct {
 	persistenceRoot string
+	stores          sessionStoreResolver
 	authManager     *auth.Manager
 }
 
-func NewService(persistenceRoot string, authManager *auth.Manager) *Service {
-	return &Service{persistenceRoot: strings.TrimSpace(persistenceRoot), authManager: authManager}
+type sessionStoreResolver interface {
+	ResolveStore(ctx context.Context, sessionID string) (*session.Store, error)
+}
+
+func NewService(persistenceRoot string, stores sessionStoreResolver, authManager *auth.Manager) *Service {
+	return &Service{persistenceRoot: strings.TrimSpace(persistenceRoot), stores: stores, authManager: authManager}
 }
 
 func (s *Service) GetInitialInput(_ context.Context, req serverapi.SessionInitialInputRequest) (serverapi.SessionInitialInputResponse, error) {
@@ -102,6 +107,13 @@ func (s *Service) openStore(sessionID string) (*session.Store, error) {
 	trimmed := strings.TrimSpace(sessionID)
 	if trimmed == "" {
 		return nil, nil
+	}
+	if s != nil && s.stores != nil {
+		if store, err := s.stores.ResolveStore(context.Background(), trimmed); err != nil {
+			return nil, err
+		} else if store != nil {
+			return store, nil
+		}
 	}
 	if store, err := session.OpenByID(s.persistenceRoot, trimmed); err == nil {
 		return store, nil

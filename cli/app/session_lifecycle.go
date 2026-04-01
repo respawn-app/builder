@@ -31,7 +31,7 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 		}
 		forceNewSession = false
 		nextSessionParentID = ""
-		runtimePlan, err := planner.PrepareRuntime(plan, os.Stderr, "app.start session_id="+plan.Store.Meta().SessionID+" workspace="+plan.WorkspaceRoot+" model="+plan.ActiveSettings.Model)
+		runtimePlan, err := planner.PrepareRuntime(plan, os.Stderr, "app.start session_id="+plan.SessionID+" workspace="+plan.WorkspaceRoot+" model="+plan.ActiveSettings.Model)
 		if err != nil {
 			return err
 		}
@@ -41,7 +41,7 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 			runtimePlan.Close()
 			return err
 		}
-		initialInput := sessionLaunchInitialInputFromServer(server, plan.Store, nextSessionInitialInput)
+		initialInput := sessionLaunchInitialInputFromServer(server, plan.SessionID, nextSessionInitialInput)
 
 		finalModel, runErr := runUILoopWithInitialPrompt(
 			runtimePlan.Wiring,
@@ -61,12 +61,12 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 		if runErr != nil {
 			return runErr
 		}
-		if err := persistSessionDraftToServer(server, plan.Store, finalModel); err != nil {
+		if err := persistSessionDraftToServer(server, plan.SessionID, finalModel); err != nil {
 			return err
 		}
 
 		transition := extractUITransition(finalModel)
-		resolved, err := resolveSessionAction(ctx, server, interactor, plan.Store, transition)
+		resolved, err := resolveSessionAction(ctx, server, interactor, plan.SessionID, transition)
 		if err != nil {
 			return err
 		}
@@ -85,20 +85,16 @@ func sessionLaunchInitialInput(store *session.Store, transitionInput string) str
 	return serverlifecycle.InitialInput(store, transitionInput)
 }
 
-func sessionLaunchInitialInputFromServer(server embeddedServer, store *session.Store, transitionInput string) string {
-	sessionID := ""
-	if store != nil {
-		sessionID = store.Meta().SessionID
-	}
+func sessionLaunchInitialInputFromServer(server embeddedServer, sessionID string, transitionInput string) string {
 	if server == nil || server.SessionLifecycleClient() == nil {
-		return sessionLaunchInitialInput(store, transitionInput)
+		return transitionInput
 	}
 	resp, err := server.SessionLifecycleClient().GetInitialInput(context.Background(), serverapi.SessionInitialInputRequest{
 		SessionID:       strings.TrimSpace(sessionID),
 		TransitionInput: transitionInput,
 	})
 	if err != nil {
-		return sessionLaunchInitialInput(store, transitionInput)
+		return transitionInput
 	}
 	return resp.Input
 }
@@ -114,8 +110,8 @@ func persistSessionDraft(store *session.Store, model any) error {
 	return serverlifecycle.PersistInputDraft(store, ui.input)
 }
 
-func persistSessionDraftToServer(server embeddedServer, store *session.Store, model any) error {
-	if store == nil {
+func persistSessionDraftToServer(server embeddedServer, sessionID string, model any) error {
+	if strings.TrimSpace(sessionID) == "" {
 		return nil
 	}
 	ui, ok := model.(*uiModel)
@@ -123,9 +119,9 @@ func persistSessionDraftToServer(server embeddedServer, store *session.Store, mo
 		return nil
 	}
 	if server == nil || server.SessionLifecycleClient() == nil {
-		return persistSessionDraft(store, model)
+		return nil
 	}
-	_, err := server.SessionLifecycleClient().PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{SessionID: strings.TrimSpace(store.Meta().SessionID), Input: ui.input})
+	_, err := server.SessionLifecycleClient().PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{SessionID: strings.TrimSpace(sessionID), Input: ui.input})
 	return err
 }
 
@@ -138,13 +134,9 @@ type resolvedSessionAction struct {
 	ShouldContinue  bool
 }
 
-func resolveSessionAction(ctx context.Context, server embeddedServer, interactor authInteractor, store *session.Store, transition UITransition) (resolvedSessionAction, error) {
+func resolveSessionAction(ctx context.Context, server embeddedServer, interactor authInteractor, sessionID string, transition UITransition) (resolvedSessionAction, error) {
 	if server == nil || server.SessionLifecycleClient() == nil {
 		return resolvedSessionAction{}, errors.New("session lifecycle client is required")
-	}
-	sessionID := ""
-	if store != nil {
-		sessionID = store.Meta().SessionID
 	}
 	resolved, err := server.SessionLifecycleClient().ResolveTransition(ctx, serverapi.SessionResolveTransitionRequest{
 		SessionID: strings.TrimSpace(sessionID),

@@ -35,16 +35,19 @@ Continue Phase 3 execution until the full phase is complete according to `../pla
 
 - The next Phase 3 blocker is interactive write/orchestration, not transport.
 - Remaining private `cli/app -> server/*` seams called out by the latest investigation are:
-  - session planning / launch orchestration
   - transport-backed interactive runtime control surface
   - live ask/approval answer path
 - Newly completed extraction slice:
   - session transition resolution + draft-input lifecycle now route through `shared/serverapi/session_lifecycle.go`, `shared/client/session_lifecycle.go`, and `server/sessionlifecycle`
   - `server/core` now wires a loopback lifecycle client, and focused coverage exists in `server/sessionlifecycle/service_test.go`
+  - session planning / launch orchestration now routes through `shared/serverapi/session_launch.go`, `shared/client/session_launch.go`, and `server/sessionlaunch`
+  - the CLI planner now owns picker composition from `ProjectViewClient` summaries and sends explicit deterministic plan requests with `client_request_id`
+  - `server/core` now owns a session-store registry so planning, lifecycle, and runtime prep resolve live sessions by opaque `session_id`
+  - `server/sessionlaunch` now has direct duplicate-suppression coverage for new-session retries
 - Recommended next cut:
-  1. move session planning off `embedded_server.go`
-  2. then widen the interactive runtime-control API used by `shared/clientui.RuntimeClient`
-  3. add the remaining live ask/approval answer path on the same shared boundary before claiming external interactive parity
+  1. widen the interactive runtime-control API used by `shared/clientui.RuntimeClient` onto shared `serverapi` + `shared/client`
+  2. expose the remaining live ask/approval answer path on the same shared boundary
+  3. wire those new interactive surfaces through the real transport so external-daemon interactive mode can attach without embedded-only fallbacks
 
 ## Resume Rules
 
