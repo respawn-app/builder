@@ -223,6 +223,19 @@ type deduplicatingPromptService struct {
 type dedupeFingerprint struct {
 	selectedSessionID string
 	prompt            string
+	timeout           time.Duration
+	overrides         dedupeOverridesFingerprint
+}
+
+type dedupeOverridesFingerprint struct {
+	model               string
+	providerOverride    string
+	thinkingLevel       string
+	theme               string
+	modelTimeoutSeconds int
+	shellTimeoutSeconds int
+	tools               string
+	openAIBaseURL       string
 }
 
 type dedupeEntry struct {
@@ -259,10 +272,28 @@ func sweepExpiredRunPromptDedupeEntriesLocked(now time.Time) {
 	}
 }
 
+func fingerprintRunPromptRequest(req serverapi.RunPromptRequest) dedupeFingerprint {
+	return dedupeFingerprint{
+		selectedSessionID: strings.TrimSpace(req.SelectedSessionID),
+		prompt:            strings.TrimSpace(req.Prompt),
+		timeout:           req.Timeout,
+		overrides: dedupeOverridesFingerprint{
+			model:               strings.TrimSpace(req.Overrides.Model),
+			providerOverride:    strings.TrimSpace(req.Overrides.ProviderOverride),
+			thinkingLevel:       strings.TrimSpace(req.Overrides.ThinkingLevel),
+			theme:               strings.TrimSpace(req.Overrides.Theme),
+			modelTimeoutSeconds: req.Overrides.ModelTimeoutSeconds,
+			shellTimeoutSeconds: req.Overrides.ShellTimeoutSeconds,
+			tools:               strings.TrimSpace(req.Overrides.Tools),
+			openAIBaseURL:       strings.TrimSpace(req.Overrides.OpenAIBaseURL),
+		},
+	}
+}
+
 func (s *deduplicatingPromptService) RunPrompt(ctx context.Context, req serverapi.RunPromptRequest, progress serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
 	for {
 		key := strings.Join([]string{s.scopeID, strings.TrimSpace(req.SelectedSessionID), strings.TrimSpace(req.ClientRequestID)}, "|")
-		fp := dedupeFingerprint{selectedSessionID: strings.TrimSpace(req.SelectedSessionID), prompt: strings.TrimSpace(req.Prompt)}
+		fp := fingerprintRunPromptRequest(req)
 
 		runPromptDedupeRegistry.mu.Lock()
 		sweepExpiredRunPromptDedupeEntriesLocked(runPromptDedupeNow())
