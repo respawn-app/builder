@@ -17,7 +17,7 @@ import (
 )
 
 type SessionResolver interface {
-	ResolveSession(ctx context.Context, sessionID string) (*session.Store, error)
+	ResolveSession(ctx context.Context, sessionID string) (session.Snapshot, error)
 }
 
 type RuntimeResolver interface {
@@ -44,14 +44,14 @@ func NewStaticSessionResolver(store *session.Store) SessionResolver {
 	return staticSessionResolver{store: store}
 }
 
-func (r staticSessionResolver) ResolveSession(_ context.Context, sessionID string) (*session.Store, error) {
+func (r staticSessionResolver) ResolveSession(_ context.Context, sessionID string) (session.Snapshot, error) {
 	if r.store == nil {
-		return nil, errors.New("session store is required")
+		return session.Snapshot{}, errors.New("session store is required")
 	}
 	if strings.TrimSpace(sessionID) != strings.TrimSpace(r.store.Meta().SessionID) {
-		return nil, fmt.Errorf("session %q not available", strings.TrimSpace(sessionID))
+		return session.Snapshot{}, fmt.Errorf("session %q not available", strings.TrimSpace(sessionID))
 	}
-	return r.store, nil
+	return session.SnapshotFromStore(r.store)
 }
 
 type staticRuntimeResolver struct {
@@ -84,11 +84,11 @@ func (s *Service) GetSessionMainView(ctx context.Context, req serverapi.SessionM
 	} else if runtimeEngine != nil {
 		return serverapi.SessionMainViewResponse{MainView: runtimeview.MainViewFromRuntime(runtimeEngine)}, nil
 	}
-	store, err := s.resolveSession(ctx, req.SessionID)
+	snapshot, err := s.resolveSession(ctx, req.SessionID)
 	if err != nil {
 		return serverapi.SessionMainViewResponse{}, err
 	}
-	view, err := dormantMainView(ctx, store)
+	view, err := dormantMainView(ctx, snapshot)
 	if err != nil {
 		return serverapi.SessionMainViewResponse{}, err
 	}
@@ -106,26 +106,22 @@ func (s *Service) GetRun(ctx context.Context, req serverapi.RunGetRequest) (serv
 			return serverapi.RunGetResponse{Run: active}, nil
 		}
 	}
-	store, err := s.resolveSession(ctx, req.SessionID)
+	snapshot, err := s.resolveSession(ctx, req.SessionID)
 	if err != nil {
 		return serverapi.RunGetResponse{}, err
 	}
-	runs, err := store.ReadRuns()
-	if err != nil {
-		return serverapi.RunGetResponse{}, err
-	}
-	for _, run := range runs {
+	for _, run := range snapshot.Runs {
 		if run.RunID == strings.TrimSpace(req.RunID) {
 			copyRun := run
-			return serverapi.RunGetResponse{Run: runtimeview.RunViewFromSessionRecord(store.Meta().SessionID, &copyRun)}, nil
+			return serverapi.RunGetResponse{Run: runtimeview.RunViewFromSessionRecord(snapshot.Meta.SessionID, &copyRun)}, nil
 		}
 	}
 	return serverapi.RunGetResponse{}, fmt.Errorf("run %q not found", strings.TrimSpace(req.RunID))
 }
 
-func (s *Service) resolveSession(ctx context.Context, sessionID string) (*session.Store, error) {
+func (s *Service) resolveSession(ctx context.Context, sessionID string) (session.Snapshot, error) {
 	if s == nil || s.sessions == nil {
-		return nil, errors.New("session resolver is required")
+		return session.Snapshot{}, errors.New("session resolver is required")
 	}
 	return s.sessions.ResolveSession(ctx, sessionID)
 }
@@ -137,10 +133,10 @@ func (s *Service) resolveRuntime(ctx context.Context, sessionID string) (*runtim
 	return s.runtimes.ResolveRuntime(ctx, sessionID)
 }
 
-func dormantMainView(ctx context.Context, store *session.Store) (clientui.RuntimeMainView, error) {
-	meta := store.Meta()
-	freshness := runtimeview.ConversationFreshnessFromSession(store.ConversationFreshness())
-	chat, lastAnswer, err := replayDormantSession(ctx, store)
+func dormantMainView(ctx context.Context, snapshot session.Snapshot) (clientui.RuntimeMainView, error) {
+	meta := snapshot.Meta
+	freshness := runtimeview.ConversationFreshnessFromSession(snapshot.ConversationFreshness)
+	chat, lastAnswer, err := replayDormantSession(ctx, snapshot)
 	if err != nil {
 		return clientui.RuntimeMainView{}, err
 	}
@@ -157,12 +153,11 @@ func dormantMainView(ctx context.Context, store *session.Store) (clientui.Runtim
 			Chat:                  chat,
 		},
 	}
-	latestRun, err := store.LatestRun()
-	if err != nil {
-		return clientui.RuntimeMainView{}, err
-	}
-	if latestRun != nil && latestRun.Status == session.RunStatusRunning {
-		view.ActiveRun = runtimeview.RunViewFromSessionRecord(meta.SessionID, latestRun)
+	if len(snapshot.Runs) > 0 {
+		latestRun := snapshot.Runs[len(snapshot.Runs)-1]
+		if latestRun.Status == session.RunStatusRunning {
+			view.ActiveRun = runtimeview.RunViewFromSessionRecord(meta.SessionID, &latestRun)
+		}
 	}
 	return view, nil
 }
@@ -177,15 +172,15 @@ func (dormantReplayClient) ProviderCapabilities(context.Context) (llm.ProviderCa
 	return llm.ProviderCapabilities{ProviderID: "replay"}, nil
 }
 
-func replayDormantSession(ctx context.Context, store *session.Store) (clientui.ChatSnapshot, string, error) {
-	cloneStore, cleanup, err := cloneStoreForReplay(ctx, store)
+func replayDormantSession(ctx context.Context, snapshot session.Snapshot) (clientui.ChatSnapshot, string, error) {
+	cloneStore, cleanup, err := cloneStoreForReplay(ctx, snapshot)
 	if err != nil {
 		return clientui.ChatSnapshot{}, "", err
 	}
 	defer cleanup()
 
 	model := "gpt-5"
-	if locked := store.Meta().Locked; locked != nil && strings.TrimSpace(locked.Model) != "" {
+	if locked := snapshot.Meta.Locked; locked != nil && strings.TrimSpace(locked.Model) != "" {
 		model = strings.TrimSpace(locked.Model)
 	}
 	eng, err := runtime.New(cloneStore, dormantReplayClient{}, tools.NewRegistry(), runtime.Config{Model: model})
@@ -200,15 +195,8 @@ func replayDormantSession(ctx context.Context, store *session.Store) (clientui.C
 	return runtimeview.ChatSnapshotFromRuntime(eng.ChatSnapshot()), eng.LastCommittedAssistantFinalAnswer(), nil
 }
 
-func cloneStoreForReplay(ctx context.Context, source *session.Store) (*session.Store, func(), error) {
-	if source == nil {
-		return nil, nil, errors.New("session store is required")
-	}
-	meta := source.Meta()
-	events, err := source.ReadEvents()
-	if err != nil {
-		return nil, nil, err
-	}
+func cloneStoreForReplay(ctx context.Context, snapshot session.Snapshot) (*session.Store, func(), error) {
+	meta := snapshot.Meta
 	tempRoot, err := os.MkdirTemp("", "builder-sessionview-*")
 	if err != nil {
 		return nil, nil, err
@@ -241,8 +229,8 @@ func cloneStoreForReplay(ctx context.Context, source *session.Store) (*session.S
 			return nil, nil, err
 		}
 	}
-	replay := make([]session.ReplayEvent, 0, len(events))
-	for _, evt := range events {
+	replay := make([]session.ReplayEvent, 0, len(snapshot.Events))
+	for _, evt := range snapshot.Events {
 		select {
 		case <-ctx.Done():
 			cleanup()

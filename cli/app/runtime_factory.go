@@ -14,6 +14,7 @@ import (
 	patchtool "builder/server/tools/patch"
 	readimagetool "builder/server/tools/readimage"
 	shelltool "builder/server/tools/shell"
+	"builder/shared/client"
 	"builder/shared/config"
 )
 
@@ -22,6 +23,7 @@ type runtimeWiring struct {
 	askBridge     *askBridge
 	eventBridge   *runtimeEventBridge
 	background    *shelltool.Manager
+	sessionViews  client.SessionViewClient
 	promptHistory []string
 }
 

@@ -19,6 +19,7 @@ type embeddedServer interface {
 	Close() error
 	Config() config.App
 	RunPromptClient() client.RunPromptClient
+	SessionViewClient() client.SessionViewClient
 	PlanSession(req sessionLaunchRequest, pick sessionPickerRunner) (sessionLaunchPlan, error)
 	PrepareRuntime(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error)
 	ResolveTransition(ctx context.Context, interactor authInteractor, store *session.Store, transition UITransition) (resolvedSessionAction, error)
@@ -54,6 +55,13 @@ func (s *embeddedAppServer) RunPromptClient() client.RunPromptClient {
 		return nil
 	}
 	return s.inner.RunPromptClient()
+}
+
+func (s *embeddedAppServer) SessionViewClient() client.SessionViewClient {
+	if s == nil || s.inner == nil {
+		return nil
+	}
+	return s.inner.SessionViewClient()
 }
 
 func (s *embeddedAppServer) OAuthOptions() auth.OpenAIOAuthOptions {
@@ -149,10 +157,13 @@ func (s *embeddedAppServer) PrepareRuntime(plan sessionLaunchPlan, diagnosticWri
 	if router := s.inner.BackgroundRouter(); router != nil {
 		router.SetActiveSession(plan.Store.Meta().SessionID, wiring.engine)
 	}
+	s.inner.RegisterRuntime(plan.Store.Meta().SessionID, wiring.engine)
+	wiring.sessionViews = s.inner.SessionViewClient()
 	return &runtimeLaunchPlan{
 		Logger: logger,
 		Wiring: wiring,
 		close: func() {
+			s.inner.UnregisterRuntime(plan.Store.Meta().SessionID)
 			if router := s.inner.BackgroundRouter(); router != nil {
 				router.ClearActiveSession(plan.Store.Meta().SessionID)
 			}

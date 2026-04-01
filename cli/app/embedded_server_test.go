@@ -18,17 +18,18 @@ import (
 )
 
 type testEmbeddedServer struct {
-	cfg              config.App
-	containerDir     string
-	oauthOpts        auth.OpenAIOAuthOptions
-	authManager      *auth.Manager
-	fastModeState    *runtime.FastModeState
-	background       *shelltool.Manager
-	backgroundRouter serverembedded.BackgroundRouter
-	runPromptClient  client.RunPromptClient
-	planSession      func(req sessionLaunchRequest, pick sessionPickerRunner) (sessionLaunchPlan, error)
-	prepareRuntime   func(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error)
-	resolveAction    func(ctx context.Context, interactor authInteractor, store *session.Store, transition UITransition) (resolvedSessionAction, error)
+	cfg               config.App
+	containerDir      string
+	oauthOpts         auth.OpenAIOAuthOptions
+	authManager       *auth.Manager
+	fastModeState     *runtime.FastModeState
+	background        *shelltool.Manager
+	backgroundRouter  serverembedded.BackgroundRouter
+	runPromptClient   client.RunPromptClient
+	sessionViewClient client.SessionViewClient
+	planSession       func(req sessionLaunchRequest, pick sessionPickerRunner) (sessionLaunchPlan, error)
+	prepareRuntime    func(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error)
+	resolveAction     func(ctx context.Context, interactor authInteractor, store *session.Store, transition UITransition) (resolvedSessionAction, error)
 }
 
 func (s *testEmbeddedServer) Close() error                          { return nil }
@@ -42,6 +43,9 @@ func (s *testEmbeddedServer) BackgroundRouter() serverembedded.BackgroundRouter 
 	return s.backgroundRouter
 }
 func (s *testEmbeddedServer) RunPromptClient() client.RunPromptClient { return s.runPromptClient }
+func (s *testEmbeddedServer) SessionViewClient() client.SessionViewClient {
+	return s.sessionViewClient
+}
 func (s *testEmbeddedServer) PlanSession(req sessionLaunchRequest, pick sessionPickerRunner) (sessionLaunchPlan, error) {
 	if s.planSession != nil {
 		return s.planSession(req, pick)

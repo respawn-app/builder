@@ -18,13 +18,20 @@ type engineUIRuntimeClient struct {
 }
 
 func newUIRuntimeClient(engine *runtime.Engine) clientui.RuntimeClient {
+	return newUIRuntimeClientWithReads(engine, nil)
+}
+
+func newUIRuntimeClientWithReads(engine *runtime.Engine, reads client.SessionViewClient) clientui.RuntimeClient {
 	if engine == nil {
 		return nil
+	}
+	if reads == nil {
+		reads = client.NewLoopbackSessionViewClient(sessionview.NewService(nil, sessionview.NewStaticRuntimeResolver(engine)))
 	}
 	return engineUIRuntimeClient{
 		engine:    engine,
 		sessionID: engine.SessionID(),
-		reads:     client.NewLoopbackSessionViewClient(sessionview.NewService(nil, sessionview.NewStaticRuntimeResolver(engine))),
+		reads:     reads,
 	}
 }
 
