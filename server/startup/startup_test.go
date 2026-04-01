@@ -3,12 +3,15 @@ package startup
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
 	"builder/server/auth"
 	"builder/server/authflow"
+	"builder/server/embedded"
 	"builder/shared/config"
+	"builder/shared/serverapi"
 )
 
 type stubAuthHandler struct {
@@ -152,5 +155,100 @@ func TestLookupEnvFallsBackToProcessEnvWhenHandlerMissing(t *testing.T) {
 	t.Setenv("BUILDER_LOOKUP_ENV_FALLBACK", "fallback-value")
 	if got := lookupEnv(nil)("BUILDER_LOOKUP_ENV_FALLBACK"); got != "fallback-value" {
 		t.Fatalf("lookup env fallback = %q, want fallback-value", got)
+	}
+}
+
+type startupEnvAuthHandler struct{}
+
+func (startupEnvAuthHandler) WrapStore(base auth.Store) auth.Store {
+	return authflow.WrapStoreWithEnvAPIKeyOverride(base, os.Getenv)
+}
+
+func (startupEnvAuthHandler) NeedsInteraction(req authflow.InteractionRequest) bool {
+	return !req.Gate.Ready
+}
+
+func (startupEnvAuthHandler) Interact(context.Context, authflow.InteractionRequest) error {
+	return auth.ErrAuthNotConfigured
+}
+
+func (startupEnvAuthHandler) LookupEnv(key string) string {
+	return os.Getenv(key)
+}
+
+type startupNoopOnboarding struct{}
+
+func (startupNoopOnboarding) EnsureOnboardingReady(_ context.Context, req OnboardingRequest) (config.App, error) {
+	path, created, err := config.WriteDefaultSettingsFile()
+	if err != nil {
+		return config.App{}, err
+	}
+	reloaded, err := req.ReloadConfig()
+	if err != nil {
+		return config.App{}, err
+	}
+	reloaded.Source.CreatedDefaultConfig = created
+	reloaded.Source.SettingsPath = path
+	reloaded.Source.SettingsFileExists = true
+	return reloaded, nil
+}
+
+func TestStartWrapsCoreWithSameClientAssembly(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	request := Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
+	authHandler := startupEnvAuthHandler{}
+	onboarding := startupNoopOnboarding{}
+
+	appCore, err := StartCore(context.Background(), request, authHandler, onboarding)
+	if err != nil {
+		t.Fatalf("StartCore: %v", err)
+	}
+	defer func() { _ = appCore.Close() }()
+
+	wrapped := &embedded.Server{Core: appCore}
+	if wrapped.ProjectViewClient() != appCore.ProjectViewClient() {
+		t.Fatal("expected embedded wrapper to expose core project client")
+	}
+	if wrapped.SessionViewClient() != appCore.SessionViewClient() {
+		t.Fatal("expected embedded wrapper to expose core session client")
+	}
+	if wrapped.ProcessViewClient() != appCore.ProcessViewClient() {
+		t.Fatal("expected embedded wrapper to expose core process client")
+	}
+	if wrapped.ProcessOutputClient() != appCore.ProcessOutputClient() {
+		t.Fatal("expected embedded wrapper to expose core process output client")
+	}
+	if wrapped.RunPromptClient() != appCore.RunPromptClient() {
+		t.Fatal("expected embedded wrapper to expose core run prompt client")
+	}
+
+	started, err := Start(context.Background(), request, authHandler, onboarding)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = started.Close() }()
+	if started.Core == nil {
+		t.Fatal("expected embedded server to carry core")
+	}
+	if started.ProjectID() != appCore.ProjectID() {
+		t.Fatalf("project id mismatch: started=%q core=%q", started.ProjectID(), appCore.ProjectID())
+	}
+	coreProjects, err := appCore.ProjectViewClient().ListProjects(context.Background(), serverapi.ProjectListRequest{})
+	if err != nil {
+		t.Fatalf("core ListProjects: %v", err)
+	}
+	startedProjects, err := started.ProjectViewClient().ListProjects(context.Background(), serverapi.ProjectListRequest{})
+	if err != nil {
+		t.Fatalf("started ListProjects: %v", err)
+	}
+	if len(coreProjects.Projects) != 1 || len(startedProjects.Projects) != 1 {
+		t.Fatalf("unexpected project counts core=%d started=%d", len(coreProjects.Projects), len(startedProjects.Projects))
+	}
+	if coreProjects.Projects[0].ProjectID != startedProjects.Projects[0].ProjectID {
+		t.Fatalf("project listing mismatch core=%+v started=%+v", coreProjects.Projects[0], startedProjects.Projects[0])
 	}
 }
