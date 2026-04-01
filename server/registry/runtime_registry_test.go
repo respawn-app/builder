@@ -15,8 +15,9 @@ import (
 
 func TestRuntimeRegistryBroadcastsSessionActivityToMultipleSubscribers(t *testing.T) {
 	registry := NewRuntimeRegistry()
-	registry.Register("session-1", &runtime.Engine{})
-	t.Cleanup(func() { registry.Unregister("session-1") })
+	engine := &runtime.Engine{}
+	registry.Register("session-1", engine)
+	t.Cleanup(func() { registry.Unregister("session-1", engine) })
 
 	first, err := registry.SubscribeSessionActivity(context.Background(), "session-1")
 	if err != nil {
@@ -50,8 +51,9 @@ func TestRuntimeRegistryBroadcastsSessionActivityToMultipleSubscribers(t *testin
 
 func TestRuntimeRegistryClosesLaggedSubscriberWithGapError(t *testing.T) {
 	registry := NewRuntimeRegistry()
-	registry.Register("session-1", &runtime.Engine{})
-	t.Cleanup(func() { registry.Unregister("session-1") })
+	engine := &runtime.Engine{}
+	registry.Register("session-1", engine)
+	t.Cleanup(func() { registry.Unregister("session-1", engine) })
 
 	sub, err := registry.SubscribeSessionActivity(context.Background(), "session-1")
 	if err != nil {
@@ -111,8 +113,9 @@ func TestRuntimeRegistryPassesThroughSessionActivityContextCanceled(t *testing.T
 
 func TestRuntimeRegistryTracksPendingPromptsPerSession(t *testing.T) {
 	registry := NewRuntimeRegistry()
-	registry.Register("session-1", &runtime.Engine{})
-	t.Cleanup(func() { registry.Unregister("session-1") })
+	engine := &runtime.Engine{}
+	registry.Register("session-1", engine)
+	t.Cleanup(func() { registry.Unregister("session-1", engine) })
 
 	registry.BeginPendingPrompt("session-1", askquestion.Request{ID: "ask-1", Question: "one?"})
 	registry.BeginPendingPrompt("session-1", askquestion.Request{ID: "approval-1", Question: "allow?", Approval: true})
@@ -131,9 +134,32 @@ func TestRuntimeRegistryTracksPendingPromptsPerSession(t *testing.T) {
 		t.Fatalf("unexpected pending prompts after completion: %+v", items)
 	}
 
-	registry.Unregister("session-1")
+	registry.Unregister("session-1", engine)
 	if items := registry.ListPendingPrompts("session-1"); len(items) != 0 {
 		t.Fatalf("expected no pending prompts after unregister, got %+v", items)
+	}
+}
+
+func TestRuntimeRegistryDoesNotUnregisterNewerRuntimeForSameSession(t *testing.T) {
+	registry := NewRuntimeRegistry()
+	older := &runtime.Engine{}
+	newer := &runtime.Engine{}
+	registry.Register("session-1", older)
+	registry.Register("session-1", newer)
+	t.Cleanup(func() { registry.Unregister("session-1", newer) })
+
+	registry.Unregister("session-1", older)
+
+	resolved, err := registry.ResolveRuntime(context.Background(), "session-1")
+	if err != nil {
+		t.Fatalf("ResolveRuntime: %v", err)
+	}
+	if resolved != newer {
+		t.Fatalf("expected newer runtime to remain registered, got %p want %p", resolved, newer)
+	}
+
+	if _, err := registry.SubscribeSessionActivity(context.Background(), "session-1"); err != nil {
+		t.Fatalf("SubscribeSessionActivity after stale unregister: %v", err)
 	}
 }
 
