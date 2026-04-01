@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"builder/server/auth"
 	"builder/server/primaryrun"
 	"builder/server/session"
+	"builder/server/tools"
 	"builder/shared/config"
 	"builder/shared/serverapi"
 )
@@ -359,6 +362,75 @@ func TestLoopbackRunPromptClientUsesSelectedSessionContinuationContext(t *testin
 	}
 	if got := store.Meta().Continuation; got == nil || got.OpenAIBaseURL != server.URL {
 		t.Fatalf("expected persisted continuation preserved, got %+v", got)
+	}
+}
+
+func TestHeadlessRunPromptOverridesRespectLockedModelContract(t *testing.T) {
+	resetRunPromptDedupeRegistry()
+	t.Cleanup(resetRunPromptDedupeRegistry)
+
+	root := t.TempDir()
+	containerDir := filepath.Join(root, "sessions", "workspace-a")
+	store, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := store.MarkModelDispatchLocked(session.LockedContract{Model: "locked-model", EnabledTools: []string{string(tools.ToolShell)}}); err != nil {
+		t.Fatalf("mark model dispatch locked: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final\",\"content\":[{\"type\":\"output_text\",\"text\":\"locked response\"}]}]}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	authManager := auth.NewManager(auth.NewMemoryStore(auth.State{
+		Method: auth.Method{Type: auth.MethodAPIKey, APIKey: &auth.APIKeyMethod{Key: "test-key"}},
+	}), nil, time.Now)
+
+	client := NewLoopbackRunPromptClient(HeadlessBootstrap{
+		Config: config.App{
+			WorkspaceRoot:   "/tmp/workspace-a",
+			PersistenceRoot: root,
+			Settings: config.Settings{
+				Model:         "base-model",
+				OpenAIBaseURL: server.URL,
+				EnabledTools:  map[tools.ID]bool{tools.ToolPatch: true},
+			},
+		},
+		ContainerDir: containerDir,
+		AuthManager:  authManager,
+	})
+
+	response, err := client.RunPrompt(context.Background(), serverapi.RunPromptRequest{
+		ClientRequestID:   "locked-direct-1",
+		SelectedSessionID: store.Meta().SessionID,
+		Prompt:            "hello",
+		Overrides: serverapi.RunPromptOverrides{
+			Model: "override-model",
+			Tools: "patch",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("RunPrompt: %v", err)
+	}
+	if response.Result != "locked response" {
+		t.Fatalf("result = %q, want locked response", response.Result)
+	}
+	runLog, err := os.ReadFile(filepath.Join(store.Dir(), RunLogFileName))
+	if err != nil {
+		t.Fatalf("read run log: %v", err)
+	}
+	if !strings.Contains(string(runLog), "model=locked-model") {
+		t.Fatalf("expected run log to preserve locked model, got %q", string(runLog))
+	}
+	if strings.Contains(string(runLog), "model=override-model") {
+		t.Fatalf("did not expect run log to use override model, got %q", string(runLog))
 	}
 }
 
