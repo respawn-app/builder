@@ -8,8 +8,6 @@ import (
 	"builder/shared/clientui"
 )
 
-var ErrSessionActivityGap = errors.New("session activity subscriber fell behind and must rehydrate")
-
 type SessionActivitySubscribeRequest struct {
 	SessionID string
 }

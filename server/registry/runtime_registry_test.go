@@ -71,8 +71,15 @@ func TestRuntimeRegistryClosesLaggedSubscriberWithGapError(t *testing.T) {
 			t.Fatalf("unexpected event at %d: %+v", i, evt)
 		}
 	}
-	if _, err := sub.Next(context.Background()); !errors.Is(err, serverapi.ErrSessionActivityGap) {
+	if _, err := sub.Next(context.Background()); !errors.Is(err, serverapi.ErrStreamGap) {
 		t.Fatalf("expected gap error, got %v", err)
+	}
+}
+
+func TestRuntimeRegistryRejectsInactiveSessionActivityStreamWithUnavailableError(t *testing.T) {
+	registry := NewRuntimeRegistry()
+	if _, err := registry.SubscribeSessionActivity(context.Background(), "missing-session"); !errors.Is(err, serverapi.ErrStreamUnavailable) {
+		t.Fatalf("expected unavailable error, got %v", err)
 	}
 }
 

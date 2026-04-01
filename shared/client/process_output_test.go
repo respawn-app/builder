@@ -10,11 +10,13 @@ import (
 )
 
 type stubProcessOutputService struct {
+	req serverapi.ProcessOutputSubscribeRequest
 	sub serverapi.ProcessOutputSubscription
 	err error
 }
 
-func (s *stubProcessOutputService) SubscribeProcessOutput(context.Context, serverapi.ProcessOutputSubscribeRequest) (serverapi.ProcessOutputSubscription, error) {
+func (s *stubProcessOutputService) SubscribeProcessOutput(_ context.Context, req serverapi.ProcessOutputSubscribeRequest) (serverapi.ProcessOutputSubscription, error) {
+	s.req = req
 	return s.sub, s.err
 }
 
@@ -35,10 +37,14 @@ func (s *stubProcessOutputSubscription) Next(context.Context) (clientui.ProcessO
 func (s *stubProcessOutputSubscription) Close() error { return nil }
 
 func TestLoopbackProcessOutputClientDelegatesToService(t *testing.T) {
-	client := NewLoopbackProcessOutputClient(&stubProcessOutputService{sub: &stubProcessOutputSubscription{next: clientui.ProcessOutputChunk{ProcessID: "proc-1", OffsetBytes: 5, Text: "hello"}}})
+	svc := &stubProcessOutputService{sub: &stubProcessOutputSubscription{next: clientui.ProcessOutputChunk{ProcessID: "proc-1", OffsetBytes: 5, Text: "hello"}}}
+	client := NewLoopbackProcessOutputClient(svc)
 	sub, err := client.SubscribeProcessOutput(context.Background(), serverapi.ProcessOutputSubscribeRequest{ProcessID: "proc-1", OffsetBytes: 5})
 	if err != nil {
 		t.Fatalf("SubscribeProcessOutput: %v", err)
+	}
+	if svc.req.ProcessID != "proc-1" || svc.req.OffsetBytes != 5 {
+		t.Fatalf("unexpected subscribe request: %+v", svc.req)
 	}
 	chunk, err := sub.Next(context.Background())
 	if err != nil {

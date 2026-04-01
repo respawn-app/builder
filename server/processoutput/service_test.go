@@ -2,6 +2,7 @@ package processoutput
 
 import (
 	"context"
+	"errors"
 	"io"
 	"testing"
 
@@ -14,8 +15,20 @@ type stubSubscriber struct {
 	err error
 }
 
+type stubProcessSource struct {
+	snapshot shelltool.Snapshot
+	err      error
+}
+
 func (s *stubSubscriber) SubscribeOutput(context.Context, string, int64) (shelltool.OutputSubscription, error) {
 	return s.sub, s.err
+}
+
+func (s *stubProcessSource) Snapshot(string) (shelltool.Snapshot, error) {
+	if s.err != nil {
+		return shelltool.Snapshot{}, s.err
+	}
+	return s.snapshot, nil
 }
 
 type stubShellOutputSubscription struct {
@@ -35,7 +48,10 @@ func (s *stubShellOutputSubscription) Next(context.Context) (shelltool.OutputChu
 func (s *stubShellOutputSubscription) Close() error { return nil }
 
 func TestServiceSubscribesAndProjectsChunks(t *testing.T) {
-	svc := NewService(&stubSubscriber{sub: &stubShellOutputSubscription{chunk: shelltool.OutputChunk{ProcessID: "proc-1", OffsetBytes: 10, Text: "hello"}}})
+	svc := NewService(
+		&stubSubscriber{sub: &stubShellOutputSubscription{chunk: shelltool.OutputChunk{ProcessID: "proc-1", OffsetBytes: 10, Text: "hello"}}},
+		&stubProcessSource{snapshot: shelltool.Snapshot{ID: "proc-1", LogPath: "/tmp/proc-1.log", OutputAvailable: true, OutputRetainedToBytes: 10}},
+	)
 	sub, err := svc.SubscribeProcessOutput(context.Background(), serverapi.ProcessOutputSubscribeRequest{ProcessID: "proc-1", OffsetBytes: 10})
 	if err != nil {
 		t.Fatalf("SubscribeProcessOutput: %v", err)
@@ -50,7 +66,24 @@ func TestServiceSubscribesAndProjectsChunks(t *testing.T) {
 }
 
 func TestServiceValidatesRequest(t *testing.T) {
-	if _, err := NewService(&stubSubscriber{}).SubscribeProcessOutput(context.Background(), serverapi.ProcessOutputSubscribeRequest{}); err == nil {
+	if _, err := NewService(&stubSubscriber{}, &stubProcessSource{}).SubscribeProcessOutput(context.Background(), serverapi.ProcessOutputSubscribeRequest{}); err == nil {
 		t.Fatal("expected validation error")
+	}
+}
+
+func TestServiceRejectsUnavailableStream(t *testing.T) {
+	svc := NewService(&stubSubscriber{}, &stubProcessSource{err: errors.New("missing")})
+	if _, err := svc.SubscribeProcessOutput(context.Background(), serverapi.ProcessOutputSubscribeRequest{ProcessID: "proc-1"}); !errors.Is(err, serverapi.ErrStreamUnavailable) {
+		t.Fatalf("expected unavailable error, got %v", err)
+	}
+}
+
+func TestServiceRejectsOffsetOutsideRetainedRange(t *testing.T) {
+	svc := NewService(
+		&stubSubscriber{},
+		&stubProcessSource{snapshot: shelltool.Snapshot{ID: "proc-1", LogPath: "/tmp/proc-1.log", OutputAvailable: true, OutputRetainedFromBytes: 0, OutputRetainedToBytes: 5}},
+	)
+	if _, err := svc.SubscribeProcessOutput(context.Background(), serverapi.ProcessOutputSubscribeRequest{ProcessID: "proc-1", OffsetBytes: 6}); !errors.Is(err, serverapi.ErrStreamGap) {
+		t.Fatalf("expected gap error, got %v", err)
 	}
 }

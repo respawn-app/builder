@@ -126,7 +126,7 @@ func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) 
 	askService := askview.NewService(runtimeRegistry)
 	approvalService := approvalview.NewService(runtimeRegistry)
 	processService := processview.NewService(runtimeSupport.Background)
-	processOutputService := processoutput.NewService(runtimeSupport.Background)
+	processOutputService := processoutput.NewService(runtimeSupport.Background, runtimeSupport.Background)
 	return &Server{
 		cfg:              cfg,
 		containerDir:     containerDir,
