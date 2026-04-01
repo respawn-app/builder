@@ -14,15 +14,13 @@ brew install builder-cli
 
 ### Standalone binaries via GitHub Releases
 
+These versions are **not auto-updated**. Please keep them updated manually.
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/respawn-app/builder/main/scripts/install.sh | sh
 ```
 
-Check the installed version with:
-
-```bash
-builder --version
-```
+Check the installed version with: `builder --version`
 
 ## First Authentication
 
@@ -37,25 +35,23 @@ You can switch later with `/logout`.
 
 ## Main Workflows
 
+- Press `F1` to invoke help with hotkeys.
 - Use `Enter` to steer the model, `Tab` to queue messages.
-- Type `$ <command>` to execute a shell command and show its output to the model.
 - Use `Shift+Tab` to toggle between detailed transcript mode and ongoing mode.
+- Type `$ <command>` to execute a shell command and show its output to the model.
 - Press `Esc` twice to enter Edit mode, which lets you go back in time, edit a previous message, and fork the session into a new one. File edits stay.
 - Use the `Up`/`Down` arrow keys to select and resend previous prompts.
 - Press `Ctrl+V` or `Ctrl+D` to paste a clipboard screenshot into the prompt as an image file path.
-- Press `F1` to invoke help with other hotkeys.
-- Use `/supervisor` to toggle reviewer invocation for the current session. Initial value is config's `reviewer.frequency`, and default is on. Supervisor is a feature that will automatically review the edits made by the model. It increases costs by ~20% but improves results.
 - Use `/review` to start a code review. In a non-empty session, Builder opens that review in a fresh child session. After the review finishes, you can use `/back` to teleport to the original session.
 - `/name` will set your session name in the picker and terminal title.
-- `/autocompaction` will toggle compaction, and `/compact` will trigger one. If autocompact is off, you can go above 100% context usage if model allows it, it may incur additional costs.
-- `/status` 
+- `/autocompaction` will toggle compaction, and `/compact` will trigger one. If autocompact is off, you can go above 100% context usage if model allows it. **Going above 100% will incur additional costs**.
+- Run `/status` to get detailed info about the session.
 
 For the full command reference, see [Slash Commands](/slash-commands/).
 
 ## Configuration
 
-Builder reads settings from `~/.builder/config.toml`.
-The full reference is on the [Configuration](/config/) page.
+Builder reads settings from `~/.builder/config.toml` and will auto-create it through a UI flow on first start. The full reference is on the [Configuration](/config/) page.
 
 ## Skills And Custom Commands
 
@@ -64,7 +60,7 @@ Builder discovers skills from:
 - `~/.builder/skills`
 - `<workspace>/.builder/skills`
 
-Each skill should live in its own directory and include a `SKILL.md` file.
+You can set up skills during the onboarding flow.
 
 Builder discovers custom slash commands from Markdown files in:
 
@@ -74,11 +70,6 @@ Builder discovers custom slash commands from Markdown files in:
 - `~/.builder/commands`
 
 Each top-level `.md` file becomes a `/prompt:<name>` command.
-
-The cleanest setup is usually to keep one provider-managed source of truth and symlink Builder's discovery directories to it. In practice, that means symlinking the whole `skills`, `prompts`, or `commands` directories, not individual entries.
-
-Builder directly supports the standard `SKILL.md`-based skill layout, so existing Codex/Claude Code skills can be reused.
-
 You can disable individual skills for new sessions in `~/.builder/config.toml`:
 
 ```toml
@@ -87,3 +78,10 @@ apiresult = false
 ```
 
 Changes will take effect when you start a new sesssion.
+
+## Supervisor
+
+- Use `/supervisor` to toggle supervisor invocation for the current session. Initial value is config's `reviewer.frequency`, and default is on. Supervisor is a feature that will automatically review the edits made by the model. It increases costs by ~20% but improves results.
+
+By default supervisor uses the same model as the main one. That may be too much / too slow for you. [Configuration](/config/) page contains instructions on how to change supervisor model. 
+Running OSS models or smaller models like `gpt5.4-mini` seems to give good results while keeping costs low.
