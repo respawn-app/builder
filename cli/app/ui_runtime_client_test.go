@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	sharedclient "builder/shared/client"
-	"builder/shared/clientui"
 	"builder/server/llm"
 	"builder/server/registry"
 	"builder/server/runtime"
@@ -16,6 +14,8 @@ import (
 	"builder/server/session"
 	"builder/server/sessionview"
 	"builder/server/tools"
+	sharedclient "builder/shared/client"
+	"builder/shared/clientui"
 )
 
 type runtimeClientFakeLLM struct {

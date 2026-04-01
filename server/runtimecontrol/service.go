@@ -72,7 +72,7 @@ func (s *Service) SetFastModeEnabled(ctx context.Context, req serverapi.RuntimeS
 		return serverapi.RuntimeSetFastModeEnabledResponse{}, err
 	}
 	return serverapi.RuntimeSetFastModeEnabledResponse{Changed: changed}, nil
-	}
+}
 
 func (s *Service) SetReviewerEnabled(ctx context.Context, req serverapi.RuntimeSetReviewerEnabledRequest) (serverapi.RuntimeSetReviewerEnabledResponse, error) {
 	if err := req.Validate(); err != nil {

@@ -61,7 +61,7 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 	finalModel, runErr := program.Run()
 	if wiring.eventBridge != nil {
 		if dropped := wiring.eventBridge.Dropped(); dropped > 0 {
-		logger.Logf("runtime.event.drop.total=%d", dropped)
+			logger.Logf("runtime.event.drop.total=%d", dropped)
 		}
 	}
 	if runErr != nil {

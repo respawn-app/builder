@@ -9,11 +9,11 @@ import (
 )
 
 type SessionRuntimeActivateRequest struct {
-	ClientRequestID string          `json:"client_request_id"`
-	SessionID       string          `json:"session_id"`
-	ActiveSettings  config.Settings `json:"active_settings"`
-	EnabledToolIDs  []string        `json:"enabled_tool_ids"`
-	WorkspaceRoot   string          `json:"workspace_root"`
+	ClientRequestID string              `json:"client_request_id"`
+	SessionID       string              `json:"session_id"`
+	ActiveSettings  config.Settings     `json:"active_settings"`
+	EnabledToolIDs  []string            `json:"enabled_tool_ids"`
+	WorkspaceRoot   string              `json:"workspace_root"`
 	Source          config.SourceReport `json:"source"`
 }
 
