@@ -13,7 +13,10 @@ func runUILoop(wiring *runtimeWiring, active config.Settings, logger *runLogger,
 
 func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, logger *runLogger, commandRegistry *commands.Registry, initialPrompt string, initialInput string, sessionName string, modelContractLocked bool, configuredModelName string, statusConfig uiStatusConfig) (tea.Model, error) {
 	options := mainUIProgramOptions(active)
-	runtimeClient := newUIRuntimeClientWithReads(wiring.engine, wiring.sessionViews)
+	runtimeClient := wiring.runtimeClient
+	if runtimeClient == nil {
+		runtimeClient = newUIRuntimeClientWithReads(wiring.engine, wiring.sessionViews)
+	}
 	runtimeEventStop := make(chan struct{})
 	defer close(runtimeEventStop)
 	sessionID := ""

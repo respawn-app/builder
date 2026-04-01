@@ -11,6 +11,7 @@ import (
 
 	"builder/server/auth"
 	"builder/server/launch"
+	"builder/server/primaryrun"
 	"builder/server/runtime"
 	"builder/server/runtimewire"
 	askquestion "builder/server/tools/askquestion"
@@ -27,6 +28,7 @@ type HeadlessBootstrap struct {
 	FastModeState   *runtime.FastModeState
 	Background      *shelltool.Manager
 	RuntimeRegistry interface {
+		primaryrun.Gate
 		Register(sessionID string, engine *runtime.Engine)
 		Unregister(sessionID string)
 		PublishRuntimeEvent(sessionID string, evt runtime.Event)
@@ -39,7 +41,7 @@ type HeadlessBootstrap struct {
 
 func NewLoopbackRunPromptClient(boot HeadlessBootstrap) client.RunPromptClient {
 	launcher := &headlessPromptLauncher{boot: boot}
-	service := newDeduplicatingPromptService(runPromptDedupeScopeID(boot), serverapi.NewPromptService(launcher))
+	service := newDeduplicatingPromptService(runPromptDedupeScopeID(boot), primaryrun.NewGuardingPromptService(boot.RuntimeRegistry, serverapi.NewPromptService(launcher)))
 	return client.NewLoopbackRunPromptClient(service)
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"builder/server/primaryrun"
 	"builder/server/runtime"
 	askquestion "builder/server/tools/askquestion"
 	"builder/shared/clientui"
@@ -100,5 +101,24 @@ func TestRuntimeRegistryTracksPendingPromptsPerSession(t *testing.T) {
 	registry.Unregister("session-1")
 	if items := registry.ListPendingPrompts("session-1"); len(items) != 0 {
 		t.Fatalf("expected no pending prompts after unregister, got %+v", items)
+	}
+}
+
+func TestRuntimeRegistryAcquirePrimaryRunEnforcesSingleLeasePerSession(t *testing.T) {
+	registry := NewRuntimeRegistry()
+	lease, err := registry.AcquirePrimaryRun("session-1")
+	if err != nil {
+		t.Fatalf("AcquirePrimaryRun first: %v", err)
+	}
+	if _, err := registry.AcquirePrimaryRun("session-1"); !errors.Is(err, primaryrun.ErrActivePrimaryRun) {
+		t.Fatalf("AcquirePrimaryRun second error = %v, want active primary run", err)
+	}
+	lease.Release()
+	lease.Release()
+	if _, err := registry.AcquirePrimaryRun("session-1"); err != nil {
+		t.Fatalf("AcquirePrimaryRun after release: %v", err)
+	}
+	if _, err := registry.AcquirePrimaryRun("session-2"); err != nil {
+		t.Fatalf("AcquirePrimaryRun other session: %v", err)
 	}
 }
