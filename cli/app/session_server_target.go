@@ -9,7 +9,9 @@ import (
 var launchSessionServerDaemon = startLocalRunPromptDaemon
 
 func startSessionServer(ctx context.Context, opts Options, interactor authInteractor) (embeddedServer, error) {
-	if remote, ok := tryDialDiscoveredRemoteServer(ctx, opts); ok {
+	if remote, ok, err := tryDialDiscoveredRemoteServer(ctx, opts); err != nil {
+		return nil, err
+	} else if ok {
 		return remote, nil
 	}
 	if remote, ok, err := launchSessionServerDaemon(ctx, opts); err == nil && ok {
@@ -23,17 +25,17 @@ func startSessionServer(ctx context.Context, opts Options, interactor authIntera
 	return startEmbeddedServer(ctx, opts, interactor)
 }
 
-func tryDialDiscoveredRemoteServer(ctx context.Context, opts Options) (*remoteAppServer, bool) {
-	remote, ok := tryDialDiscoveredRemote(ctx, opts)
+func tryDialDiscoveredRemoteServer(ctx context.Context, opts Options) (*remoteAppServer, bool, error) {
+	remote, ok := tryDialDiscoveredRemote(ctx, opts, discoveredRemoteSupportsInteractiveSession)
 	if !ok {
-		return nil, false
+		return nil, false, nil
 	}
 	cfg, err := loadSessionServerConfig(opts)
 	if err != nil {
 		_ = remote.Close()
-		return nil, false
+		return nil, false, err
 	}
-	return newRemoteAppServer(remote, cfg), true
+	return newRemoteAppServer(remote, cfg), true, nil
 }
 
 func loadSessionServerConfig(opts Options) (config.App, error) {

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"builder/server/core"
@@ -19,7 +20,7 @@ import (
 
 type Server struct {
 	*core.Core
-	ready bool
+	ready atomic.Bool
 }
 
 func Start(ctx context.Context, req startup.Request, authHandler startup.AuthHandler, onboardingHandler startup.OnboardingHandler) (*Server, error) {
@@ -109,11 +110,11 @@ func (s *Server) Serve(ctx context.Context) error {
 			"workspace_root": s.Config().WorkspaceRoot,
 		})
 	})
-	s.ready = true
+	s.ready.Store(true)
 	mux.HandleFunc(protocol.ReadinessPath, func(w http.ResponseWriter, _ *http.Request) {
 		status := http.StatusServiceUnavailable
 		body := map[string]any{"ready": false}
-		if s.ready {
+		if s.ready.Load() {
 			status = http.StatusOK
 			body = map[string]any{
 				"ready":          true,

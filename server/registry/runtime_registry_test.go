@@ -141,6 +141,46 @@ func TestRuntimeRegistryTracksPendingPromptsPerSession(t *testing.T) {
 	}
 }
 
+func TestRuntimeRegistrySubmitPromptResponseRemovesPendingPromptBeforeWaiterReturns(t *testing.T) {
+	registry := NewRuntimeRegistry()
+	engine := &runtime.Engine{}
+	registry.Register("session-1", engine)
+	t.Cleanup(func() { registry.Unregister("session-1", engine) })
+
+	responseDone := make(chan error, 1)
+	go func() {
+		_, err := registry.AwaitPromptResponse(context.Background(), "session-1", askquestion.Request{ID: "ask-1", Question: "Proceed?"})
+		responseDone <- err
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		items := registry.ListPendingPrompts("session-1")
+		if len(items) == 1 && items[0].Request.ID == "ask-1" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pending prompt was not registered: %+v", items)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if err := registry.SubmitPromptResponse("session-1", askquestion.Response{RequestID: "ask-1", Answer: "yes"}, nil); err != nil {
+		t.Fatalf("SubmitPromptResponse: %v", err)
+	}
+	if items := registry.ListPendingPrompts("session-1"); len(items) != 0 {
+		t.Fatalf("expected pending prompt removed immediately, got %+v", items)
+	}
+	select {
+	case err := <-responseDone:
+		if err != nil {
+			t.Fatalf("AwaitPromptResponse error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for prompt response")
+	}
+}
+
 func TestRuntimeRegistryDoesNotUnregisterNewerRuntimeForSameSession(t *testing.T) {
 	registry := NewRuntimeRegistry()
 	older := &runtime.Engine{}

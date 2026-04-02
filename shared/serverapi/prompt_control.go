@@ -55,5 +55,12 @@ func (r ApprovalAnswerRequest) Validate() error {
 	if strings.TrimSpace(r.ApprovalID) == "" {
 		return errors.New("approval_id is required")
 	}
+	if strings.TrimSpace(r.ErrorMessage) == "" {
+		switch r.Decision {
+		case clientui.ApprovalDecisionAllowOnce, clientui.ApprovalDecisionAllowSession, clientui.ApprovalDecisionDeny:
+		default:
+			return errors.New("decision is required when error_message is empty")
+		}
+	}
 	return nil
 }

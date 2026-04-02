@@ -196,16 +196,19 @@ func (r *RuntimeRegistry) SubscribePromptActivity(_ context.Context, sessionID s
 	if entry == nil || entry.promptHub == nil {
 		return nil, fmt.Errorf("prompt activity stream for %q is unavailable: %w", id, serverapi.ErrStreamUnavailable)
 	}
+	entry.pendingMu.Lock()
 	sub := entry.promptHub.subscribe()
 	if sub == nil {
+		entry.pendingMu.Unlock()
 		return nil, fmt.Errorf("prompt activity stream for %q is unavailable: %w", id, serverapi.ErrStreamUnavailable)
 	}
-	for _, item := range entry.listPendingPrompts() {
+	for _, item := range entry.listPendingPromptsLocked() {
 		if !sub.publish(pendingPromptEventFromSnapshot(id, item, clientui.PendingPromptEventPending)) {
 			sub.closeWithError(serverapi.ErrStreamGap)
 			break
 		}
 	}
+	entry.pendingMu.Unlock()
 	return sub, nil
 }
 
@@ -365,13 +368,15 @@ func (r *RuntimeRegistry) SubmitPromptResponse(sessionID string, resp askquestio
 		entry.pendingMu.Unlock()
 		return fmt.Errorf("prompt %q is already resolved", requestID)
 	}
+	if pending.response == nil {
+		entry.pendingMu.Unlock()
+		return fmt.Errorf("prompt %q cannot be answered through the shared boundary", requestID)
+	}
 	pending.closed = true
 	snapshot := pending.PendingPromptSnapshot
 	ch := pending.response
+	delete(entry.pendingPrompt, requestID)
 	entry.pendingMu.Unlock()
-	if ch == nil {
-		return fmt.Errorf("prompt %q cannot be answered through the shared boundary", requestID)
-	}
 	ch <- promptResponseResult{response: resp, err: err}
 	entry.publishPendingPrompt(id, snapshot, clientui.PendingPromptEventResolved)
 	return nil
@@ -443,6 +448,15 @@ func (e *runtimeEntry) listPendingPrompts() []PendingPromptSnapshot {
 		return nil
 	}
 	e.pendingMu.RLock()
+	items := e.listPendingPromptsLocked()
+	e.pendingMu.RUnlock()
+	return items
+}
+
+func (e *runtimeEntry) listPendingPromptsLocked() []PendingPromptSnapshot {
+	if e == nil {
+		return nil
+	}
 	items := make([]PendingPromptSnapshot, 0, len(e.pendingPrompt))
 	for _, item := range e.pendingPrompt {
 		if item == nil {
@@ -450,7 +464,6 @@ func (e *runtimeEntry) listPendingPrompts() []PendingPromptSnapshot {
 		}
 		items = append(items, item.PendingPromptSnapshot)
 	}
-	e.pendingMu.RUnlock()
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
 			return items[i].Request.ID < items[j].Request.ID

@@ -20,7 +20,7 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 	nextSessionParentID := ""
 	forceNewSession := false
 	for {
-		plan, err := planner.PlanSession(sessionLaunchRequest{
+		plan, err := planner.PlanSession(ctx, sessionLaunchRequest{
 			Mode:              launchModeInteractive,
 			SelectedSessionID: currentSessionID,
 			ForceNewSession:   forceNewSession,
@@ -41,7 +41,7 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 			runtimePlan.Close()
 			return err
 		}
-		initialInput := sessionLaunchInitialInputFromServer(server, plan.SessionID, nextSessionInitialInput)
+		initialInput := sessionLaunchInitialInputFromServer(ctx, server, plan.SessionID, nextSessionInitialInput)
 
 		finalModel, runErr := runUILoopWithInitialPrompt(
 			runtimePlan.Wiring,
@@ -61,7 +61,7 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 		if runErr != nil {
 			return runErr
 		}
-		if err := persistSessionDraftToServer(server, plan.SessionID, finalModel); err != nil {
+		if err := persistSessionDraftToServer(ctx, server, plan.SessionID, finalModel); err != nil {
 			return err
 		}
 
@@ -85,11 +85,11 @@ func sessionLaunchInitialInput(store *session.Store, transitionInput string) str
 	return serverlifecycle.InitialInput(store, transitionInput)
 }
 
-func sessionLaunchInitialInputFromServer(server embeddedServer, sessionID string, transitionInput string) string {
+func sessionLaunchInitialInputFromServer(ctx context.Context, server embeddedServer, sessionID string, transitionInput string) string {
 	if server == nil || server.SessionLifecycleClient() == nil {
 		return transitionInput
 	}
-	resp, err := server.SessionLifecycleClient().GetInitialInput(context.Background(), serverapi.SessionInitialInputRequest{
+	resp, err := server.SessionLifecycleClient().GetInitialInput(ctx, serverapi.SessionInitialInputRequest{
 		SessionID:       strings.TrimSpace(sessionID),
 		TransitionInput: transitionInput,
 	})
@@ -110,7 +110,7 @@ func persistSessionDraft(store *session.Store, model any) error {
 	return serverlifecycle.PersistInputDraft(store, ui.input)
 }
 
-func persistSessionDraftToServer(server embeddedServer, sessionID string, model any) error {
+func persistSessionDraftToServer(ctx context.Context, server embeddedServer, sessionID string, model any) error {
 	if strings.TrimSpace(sessionID) == "" {
 		return nil
 	}
@@ -121,7 +121,7 @@ func persistSessionDraftToServer(server embeddedServer, sessionID string, model 
 	if server == nil || server.SessionLifecycleClient() == nil {
 		return nil
 	}
-	_, err := server.SessionLifecycleClient().PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{SessionID: strings.TrimSpace(sessionID), Input: ui.input})
+	_, err := server.SessionLifecycleClient().PersistInputDraft(ctx, serverapi.SessionPersistInputDraftRequest{SessionID: strings.TrimSpace(sessionID), Input: ui.input})
 	return err
 }
 
