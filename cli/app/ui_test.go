@@ -1475,6 +1475,50 @@ func TestAskEventsQueueUntilCurrentQuestionAnswered(t *testing.T) {
 	}
 }
 
+func TestAskResolutionEventDismissesCurrentAndPromotesQueuedAsk(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	reply1 := make(chan askReply, 1)
+	reply2 := make(chan askReply, 1)
+
+	first := askEvent{req: askquestion.Request{ID: "ask-1", Question: "First", Suggestions: []string{"one"}}, reply: reply1}
+	second := askEvent{req: askquestion.Request{ID: "ask-2", Question: "Second", Suggestions: []string{"two"}}, reply: reply2}
+
+	next, _ := m.Update(askEventMsg{event: first})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(askEventMsg{event: second})
+	updated = next.(*uiModel)
+
+	next, _ = updated.Update(askEventMsg{event: askEvent{resolvedPromptID: "ask-1"}})
+	updated = next.(*uiModel)
+
+	if testActiveAsk(updated) == nil || testActiveAsk(updated).req.ID != "ask-2" {
+		t.Fatalf("expected queued ask to become active after resolution, got %#v", testActiveAsk(updated))
+	}
+	if len(testAskQueue(updated)) != 0 {
+		t.Fatalf("expected queue to drain after promoting next ask, got %d", len(testAskQueue(updated)))
+	}
+	select {
+	case <-reply1:
+		t.Fatal("did not expect resolved ask to receive a reply")
+	default:
+	}
+}
+
+func TestAskResolutionEventRestoresRunningActivityWhenRuntimeIsBusy(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	first := askEvent{req: askquestion.Request{ID: "ask-1", Question: "First", Suggestions: []string{"one"}}, reply: make(chan askReply, 1)}
+
+	next, _ := m.Update(askEventMsg{event: first})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(askEventMsg{event: askEvent{resolvedPromptID: "ask-1"}})
+	updated = next.(*uiModel)
+
+	if updated.activity != uiActivityRunning {
+		t.Fatalf("activity = %v, want %v", updated.activity, uiActivityRunning)
+	}
+}
+
 func TestTabIdleAppendsUserOnce(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.input = "echo hi"

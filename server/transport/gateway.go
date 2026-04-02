@@ -282,10 +282,6 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 		return decodeAndHandle(req, func(params serverapi.ApprovalAnswerRequest) (struct{}, error) {
 			return struct{}{}, g.core.PromptControlClient().AnswerApproval(ctx, params)
 		})
-	case protocol.MethodRunPrompt:
-		return decodeAndHandle(req, func(params serverapi.RunPromptRequest) (serverapi.RunPromptResponse, error) {
-			return g.core.RunPromptClient().RunPrompt(ctx, params, nil)
-		})
 	default:
 		return protocol.NewErrorResponse(req.ID, protocol.ErrCodeMethodNotFound, fmt.Sprintf("method %q not found", req.Method))
 	}
@@ -452,6 +448,15 @@ func protocolError(err error) (int, string) {
 	}
 	if errors.Is(err, serverapi.ErrStreamFailed) {
 		return protocol.ErrCodeStreamFailed, message
+	}
+	if errors.Is(err, serverapi.ErrPromptNotFound) {
+		return protocol.ErrCodePromptNotFound, message
+	}
+	if errors.Is(err, serverapi.ErrPromptAlreadyResolved) {
+		return protocol.ErrCodePromptResolved, message
+	}
+	if errors.Is(err, serverapi.ErrPromptUnsupported) {
+		return protocol.ErrCodePromptUnsupported, message
 	}
 	return protocol.ErrCodeInternalError, message
 }

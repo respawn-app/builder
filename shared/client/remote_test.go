@@ -127,6 +127,18 @@ func TestRemoteSessionActivitySubscriptionNextHonorsCanceledContext(t *testing.T
 	}
 }
 
+func TestProtocolErrorMapsPromptTerminalCodes(t *testing.T) {
+	if err := protocolError(&protocol.ResponseError{Code: protocol.ErrCodePromptNotFound, Message: "missing"}); !errors.Is(err, serverapi.ErrPromptNotFound) {
+		t.Fatalf("expected prompt not found, got %v", err)
+	}
+	if err := protocolError(&protocol.ResponseError{Code: protocol.ErrCodePromptResolved, Message: "resolved"}); !errors.Is(err, serverapi.ErrPromptAlreadyResolved) {
+		t.Fatalf("expected prompt already resolved, got %v", err)
+	}
+	if err := protocolError(&protocol.ResponseError{Code: protocol.ErrCodePromptUnsupported, Message: "unsupported"}); !errors.Is(err, serverapi.ErrPromptUnsupported) {
+		t.Fatalf("expected prompt unsupported, got %v", err)
+	}
+}
+
 func mustJSON(t *testing.T, value any) json.RawMessage {
 	t.Helper()
 	data, err := json.Marshal(value)
