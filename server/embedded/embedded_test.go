@@ -221,13 +221,21 @@ func TestRunPromptClientPublishesHeadlessSessionActivity(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("OPENAI_API_KEY", "test-key")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 
 	releaseResponse := make(chan struct{})
 	responseServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/responses" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
-		<-releaseResponse
+		select {
+		case <-releaseResponse:
+		case <-r.Context().Done():
+			return
+		case <-ctx.Done():
+			return
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello from headless activity\"}]}]}}\n\n")
 		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
@@ -284,7 +292,7 @@ func TestRunPromptClientPublishesHeadlessSessionActivity(t *testing.T) {
 	responseCh := make(chan serverapi.RunPromptResponse, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		resp, err := server.RunPromptClient().RunPrompt(context.Background(), serverapi.RunPromptRequest{
+		resp, err := server.RunPromptClient().RunPrompt(ctx, serverapi.RunPromptRequest{
 			ClientRequestID:   "embedded-run-activity-1",
 			SelectedSessionID: store.Meta().SessionID,
 			Prompt:            "hello from user",
@@ -301,8 +309,6 @@ func TestRunPromptClientPublishesHeadlessSessionActivity(t *testing.T) {
 		t.Fatal("expected session activity client")
 	}
 	var sub serverapi.SessionActivitySubscription
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
 	for {
 		sub, err = activity.SubscribeSessionActivity(ctx, serverapi.SessionActivitySubscribeRequest{SessionID: store.Meta().SessionID})
 		if err == nil {
@@ -311,6 +317,8 @@ func TestRunPromptClientPublishesHeadlessSessionActivity(t *testing.T) {
 		select {
 		case runErr := <-errCh:
 			t.Fatalf("RunPrompt early failure: %v", runErr)
+		case <-ctx.Done():
+			t.Fatal("timed out waiting for headless session activity subscription")
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
@@ -480,6 +488,7 @@ func TestSessionViewClientUsesRegisteredRuntimeByID(t *testing.T) {
 	}
 	server.RegisterRuntime(store.Meta().SessionID, eng)
 	defer server.UnregisterRuntime(store.Meta().SessionID, eng)
+	eng.SetOngoingError("runtime-only")
 
 	resp, err := server.SessionViewClient().GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: store.Meta().SessionID})
 	if err != nil {
@@ -487,6 +496,9 @@ func TestSessionViewClientUsesRegisteredRuntimeByID(t *testing.T) {
 	}
 	if resp.MainView.Session.SessionID != store.Meta().SessionID {
 		t.Fatalf("unexpected session main view: %+v", resp.MainView)
+	}
+	if resp.MainView.Session.Chat.OngoingError != "runtime-only" {
+		t.Fatalf("expected registered runtime view, got %+v", resp.MainView.Session.Chat)
 	}
 }
 
@@ -683,13 +695,15 @@ func TestProcessOutputClientStreamsBackgroundProcessOutput(t *testing.T) {
 		t.Fatalf("expected retained output metadata, got %+v", processResp.Process)
 	}
 
-	sub, err := server.ProcessOutputClient().SubscribeProcessOutput(context.Background(), serverapi.ProcessOutputSubscribeRequest{ProcessID: result.SessionID})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	sub, err := server.ProcessOutputClient().SubscribeProcessOutput(ctx, serverapi.ProcessOutputSubscribeRequest{ProcessID: result.SessionID})
 	if err != nil {
 		t.Fatalf("SubscribeProcessOutput: %v", err)
 	}
 	defer func() { _ = sub.Close() }()
 
-	first, err := sub.Next(context.Background())
+	first, err := sub.Next(ctx)
 	if err != nil {
 		t.Fatalf("first Next: %v", err)
 	}
@@ -697,14 +711,14 @@ func TestProcessOutputClientStreamsBackgroundProcessOutput(t *testing.T) {
 		t.Fatalf("unexpected first chunk: %+v", first)
 	}
 
-	second, err := sub.Next(context.Background())
+	second, err := sub.Next(ctx)
 	if err != nil {
 		t.Fatalf("second Next: %v", err)
 	}
 	if second.OffsetBytes <= first.OffsetBytes || !strings.Contains(second.Text, "second") {
 		t.Fatalf("unexpected second chunk: %+v", second)
 	}
-	if _, err := sub.Next(context.Background()); !errors.Is(err, io.EOF) {
+	if _, err := sub.Next(ctx); !errors.Is(err, io.EOF) {
 		t.Fatalf("expected EOF after process exit, got %v", err)
 	}
 }

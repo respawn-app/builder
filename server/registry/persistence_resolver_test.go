@@ -2,8 +2,11 @@ package registry
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"builder/server/session"
 )
@@ -41,12 +44,38 @@ func TestPersistenceSessionResolverScopesLookupsToWorkspaceContainer(t *testing.
 	}
 }
 
-func TestPersistenceSessionResolverRejectsNonUUIDSessionIDs(t *testing.T) {
-	resolver := NewPersistenceSessionResolver(t.TempDir())
+func TestPersistenceSessionResolverRejectsInvalidSessionIDs(t *testing.T) {
+	containerDir := t.TempDir()
+	legacyDir := filepath.Join(containerDir, "legacy-session")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatalf("mkdir legacy session dir: %v", err)
+	}
+	metaData, err := json.Marshal(session.Meta{
+		SessionID:          "legacy-session",
+		WorkspaceContainer: "workspace-a",
+		WorkspaceRoot:      "/tmp/workspace-a",
+		CreatedAt:          time.Now().UTC(),
+		UpdatedAt:          time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("marshal legacy session meta: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "session.json"), metaData, 0o644); err != nil {
+		t.Fatalf("write legacy session meta: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "events.jsonl"), nil, 0o644); err != nil {
+		t.Fatalf("write legacy session events: %v", err)
+	}
+	resolver := NewPersistenceSessionResolver(containerDir)
 	if _, err := resolver.ResolveSession(context.Background(), "../other-container/session-id"); err == nil {
 		t.Fatal("expected resolver to reject path-traversal session id")
 	}
 	if _, err := resolver.ResolveSession(context.Background(), "/tmp/escaped-session"); err == nil {
 		t.Fatal("expected resolver to reject absolute-path session id")
+	}
+	if snapshot, err := resolver.ResolveSession(context.Background(), "legacy-session"); err != nil {
+		t.Fatalf("expected plain legacy session id to remain allowed, got %v", err)
+	} else if snapshot.Meta.SessionID != "legacy-session" {
+		t.Fatalf("resolved legacy session = %q, want legacy-session", snapshot.Meta.SessionID)
 	}
 }
