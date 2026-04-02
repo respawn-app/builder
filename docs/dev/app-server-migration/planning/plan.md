@@ -191,6 +191,9 @@ Deliverables:
 - explicit stream-drop handling that forces rehydrate plus resubscribe
 - process-control race coverage
 - slow-client handling and bounded buffering
+- transport-safe `shared/clientui.RuntimeClient` error semantics so frontend reads can distinguish RPC failure from real empty/idle state, either through explicit error-bearing reads or a shared last-known-good cache with freshness/error metadata
+- transport-crossing runtime mutations must stop silently swallowing failures; the Phase 4 design must either propagate mutation errors through the frontend boundary or provide an explicit shared error-reporting channel that preserves user input and retry affordances
+- idempotent session lifecycle transitions end-to-end, including `client_request_id` on `session.resolveTransition` plus server-side duplicate suppression for retry-safe `fork_rollback`, `logout`, and future transition actions
 
 Primary risks:
 
@@ -216,6 +219,7 @@ Deliverables:
 - at least one minimal non-CLI reference or test client
 - CI boundary enforcement active
 - acceptance suite able to run against external-daemon mode only
+- protocol/documentation cleanup for deferred transport-surface follow-ups that were intentionally held out of Phase 3 review fixes, including any remaining JSON-RPC envelope tightening that v1 frontends actually need rather than speculative spec-width expansion
 
 Primary risks:
 
