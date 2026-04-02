@@ -40,3 +40,13 @@ func TestPersistenceSessionResolverScopesLookupsToWorkspaceContainer(t *testing.
 		t.Fatal("expected resolver to reject cross-container session lookup")
 	}
 }
+
+func TestPersistenceSessionResolverRejectsNonUUIDSessionIDs(t *testing.T) {
+	resolver := NewPersistenceSessionResolver(t.TempDir())
+	if _, err := resolver.ResolveSession(context.Background(), "../other-container/session-id"); err == nil {
+		t.Fatal("expected resolver to reject path-traversal session id")
+	}
+	if _, err := resolver.ResolveSession(context.Background(), "/tmp/escaped-session"); err == nil {
+		t.Fatal("expected resolver to reject absolute-path session id")
+	}
+}
