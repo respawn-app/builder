@@ -59,6 +59,12 @@ func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivityS
 				pendingMu.Lock()
 				delete(pendingPromptIDs, evt.PromptID)
 				pendingMu.Unlock()
+				select {
+				case <-pollCtx.Done():
+					_ = current.Close()
+					return
+				case out <- resolvedPromptEvent(evt.PromptID):
+				}
 				continue
 			case clientui.PendingPromptEventPending:
 				pendingMu.Lock()
@@ -123,10 +129,19 @@ func pendingPromptEvent(ctx context.Context, item clientui.PendingPromptEvent, c
 		}
 	}
 	reply := make(chan askReply, 1)
+	promptCtx, cancelPrompt := context.WithCancel(ctx)
 	go func() {
-		result, ok := <-reply
-		if !ok {
+		var (
+			result askReply
+			ok     bool
+		)
+		select {
+		case <-promptCtx.Done():
 			return
+		case result, ok = <-reply:
+			if !ok {
+				return
+			}
 		}
 		if item.Approval {
 			answerReq := serverapi.ApprovalAnswerRequest{ClientRequestID: uuid.NewString(), SessionID: item.SessionID, ApprovalID: item.PromptID}
@@ -138,8 +153,8 @@ func pendingPromptEvent(ctx context.Context, item clientui.PendingPromptEvent, c
 			} else {
 				answerReq.ErrorMessage = errors.New("approval response is required").Error()
 			}
-			if err := control.AnswerApproval(ctx, answerReq); err != nil {
-				if retry != nil && !errors.Is(err, context.Canceled) {
+			if err := control.AnswerApproval(promptCtx, answerReq); err != nil {
+				if retry != nil && shouldRetryPromptAnswerError(err) {
 					retry(item)
 				}
 			}
@@ -153,11 +168,25 @@ func pendingPromptEvent(ctx context.Context, item clientui.PendingPromptEvent, c
 			answerReq.SelectedOptionNumber = result.response.SelectedOptionNumber
 			answerReq.FreeformAnswer = result.response.FreeformAnswer
 		}
-		if err := control.AnswerAsk(ctx, answerReq); err != nil {
-			if retry != nil && !errors.Is(err, context.Canceled) {
+		if err := control.AnswerAsk(promptCtx, answerReq); err != nil {
+			if retry != nil && shouldRetryPromptAnswerError(err) {
 				retry(item)
 			}
 		}
 	}()
-	return askEvent{req: req, reply: reply}
+	return askEvent{req: req, reply: reply, cancel: cancelPrompt}
+}
+
+func resolvedPromptEvent(promptID string) askEvent {
+	return askEvent{resolvedPromptID: strings.TrimSpace(promptID)}
+}
+
+func shouldRetryPromptAnswerError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, serverapi.ErrPromptNotFound) || errors.Is(err, serverapi.ErrPromptAlreadyResolved) || errors.Is(err, serverapi.ErrPromptUnsupported) {
+		return false
+	}
+	return true
 }

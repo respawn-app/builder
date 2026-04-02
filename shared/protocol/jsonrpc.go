@@ -18,6 +18,9 @@ const (
 	ErrCodeStreamGap         = -32010
 	ErrCodeStreamUnavailable = -32011
 	ErrCodeStreamFailed      = -32012
+	ErrCodePromptNotFound    = -32020
+	ErrCodePromptResolved    = -32021
+	ErrCodePromptUnsupported = -32022
 )
 
 type Request struct {

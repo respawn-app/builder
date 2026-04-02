@@ -409,6 +409,52 @@ func TestRunPromptUsesInvocationOverridesWhenAttachingToDiscoveredDaemon(t *test
 	}
 }
 
+func TestTryDialMatchingDiscoveredRemoteSkipsRecordThatDoesNotMatchSpawnedPID(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	_, containerDir, err := config.ResolveWorkspaceContainer(cfg)
+	if err != nil {
+		t.Fatalf("ResolveWorkspaceContainer: %v", err)
+	}
+	discoveryPath, err := discovery.PathForContainer(containerDir)
+	if err != nil {
+		t.Fatalf("PathForContainer: %v", err)
+	}
+	projectID, err := config.ProjectIDForWorkspaceRoot(cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("ProjectIDForWorkspaceRoot: %v", err)
+	}
+	if err := discovery.Write(discoveryPath, protocol.DiscoveryRecord{
+		Identity: protocol.ServerIdentity{ProjectID: projectID, PID: 111, Capabilities: protocol.CapabilityFlags{RunPrompt: true}},
+		RPCURL:   "ws://127.0.0.1:1/rpc",
+	}); err != nil {
+		t.Fatalf("discovery.Write: %v", err)
+	}
+
+	originalDial := dialDiscoveredRemote
+	var dialCalls int
+	t.Cleanup(func() { dialDiscoveredRemote = originalDial })
+	dialDiscoveredRemote = func(context.Context, protocol.DiscoveryRecord) (*client.Remote, error) {
+		dialCalls++
+		return nil, errors.New("unexpected dial")
+	}
+
+	if remote, ok := tryDialMatchingDiscoveredRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, discoveredRemoteSupportsRunPrompt, func(record protocol.DiscoveryRecord) bool {
+		return record.Identity.PID == 222
+	}); ok || remote != nil {
+		t.Fatalf("expected mismatched pid record to be skipped, got remote=%v ok=%t", remote, ok)
+	}
+	if dialCalls != 0 {
+		t.Fatalf("expected mismatched pid record to be rejected before dialing, got %d dial calls", dialCalls)
+	}
+}
+
 func TestRunPromptCreatesSessionAndPersistsDurableTranscript(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

@@ -18,6 +18,7 @@ import (
 )
 
 var launchRunPromptDaemon = startLocalRunPromptDaemon
+var dialDiscoveredRemote = client.DialRemote
 
 func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptClient, func() error, error) {
 	if remote, ok := tryDialDiscoveredRemote(ctx, opts, discoveredRemoteSupportsRunPrompt); ok {
@@ -40,6 +41,10 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 }
 
 func tryDialDiscoveredRemote(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool) (*client.Remote, bool) {
+	return tryDialMatchingDiscoveredRemote(ctx, opts, supports, nil)
+}
+
+func tryDialMatchingDiscoveredRemote(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool, accept func(protocol.DiscoveryRecord) bool) (*client.Remote, bool) {
 	workspaceRoot, err := resolveCLIWorkspaceRoot(opts)
 	if err != nil {
 		return nil, false
@@ -67,7 +72,10 @@ func tryDialDiscoveredRemote(ctx context.Context, opts Options, supports func(pr
 	if record.Identity.ProjectID != expectedProjectID {
 		return nil, false
 	}
-	remote, err := client.DialRemote(ctx, record)
+	if accept != nil && !accept(record) {
+		return nil, false
+	}
+	remote, err := dialDiscoveredRemote(ctx, record)
 	if err != nil {
 		return nil, false
 	}
@@ -130,9 +138,12 @@ func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remot
 	go func() {
 		errCh <- cmd.Wait()
 	}()
+	childPID := cmd.Process.Pid
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if remote, ok := tryDialDiscoveredRemote(ctx, opts, discoveredRemoteSupportsRunPrompt); ok {
+		if remote, ok := tryDialMatchingDiscoveredRemote(ctx, opts, discoveredRemoteSupportsRunPrompt, func(record protocol.DiscoveryRecord) bool {
+			return record.Identity.PID == childPID
+		}); ok {
 			return remote, true, nil
 		}
 		select {

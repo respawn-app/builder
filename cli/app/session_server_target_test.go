@@ -705,15 +705,21 @@ func waitForDiscoveryRecord(t *testing.T, workspace string) {
 
 func waitForRemoteAskEvent(t *testing.T, events <-chan askEvent) askEvent {
 	t.Helper()
-	select {
-	case evt, ok := <-events:
-		if !ok {
-			t.Fatal("ask event channel closed")
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case evt, ok := <-events:
+			if !ok {
+				t.Fatal("ask event channel closed")
+			}
+			if evt.isResolution() {
+				continue
+			}
+			return evt
+		case <-deadline:
+			t.Fatal("timed out waiting for ask event")
+			return askEvent{}
 		}
-		return evt
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for ask event")
-		return askEvent{}
 	}
 }
 

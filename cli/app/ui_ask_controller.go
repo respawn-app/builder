@@ -47,6 +47,10 @@ const askFreeformSelectionOptionText = "Freeform answer"
 
 func (c uiAskController) acceptEvent(evt askEvent) {
 	m := c.model
+	if evt.isResolution() {
+		c.resolvePrompt(evt.promptID())
+		return
+	}
 	if !m.ask.hasCurrent() {
 		c.setActiveAsk(evt)
 		m.activity = uiActivityQuestion
@@ -56,6 +60,49 @@ func (c uiAskController) acceptEvent(evt askEvent) {
 		return
 	}
 	m.ask.queue = append(m.ask.queue, evt)
+}
+
+func (c uiAskController) resolvePrompt(promptID string) {
+	m := c.model
+	targetID := strings.TrimSpace(promptID)
+	if targetID == "" {
+		return
+	}
+	filteredQueue := m.ask.queue[:0]
+	for _, queued := range m.ask.queue {
+		if strings.TrimSpace(queued.req.ID) == targetID {
+			queued.cancelPending()
+			continue
+		}
+		filteredQueue = append(filteredQueue, queued)
+	}
+	m.ask.queue = filteredQueue
+	if !m.ask.hasCurrent() || strings.TrimSpace(m.ask.current.req.ID) != targetID {
+		return
+	}
+	m.ask.current.cancelPending()
+	if len(m.ask.queue) > 0 {
+		next := m.ask.queue[0]
+		m.ask.queue = m.ask.queue[1:]
+		c.setActiveAsk(next)
+		m.activity = uiActivityQuestion
+		m.setInputMode(uiInputModeAsk)
+		return
+	}
+	m.ask.current = nil
+	m.ask.currentToken = nextNonZeroToken(m.ask.currentToken)
+	m.ask.cursor = 0
+	m.clearAskInput()
+	m.ask.freeform = false
+	m.ask.freeformMode = askFreeformModeGeneric
+	m.restorePrimaryInputMode()
+	if m.activity == uiActivityQuestion {
+		if m.busy {
+			m.activity = uiActivityRunning
+		} else {
+			m.activity = uiActivityIdle
+		}
+	}
 }
 
 func (c uiAskController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

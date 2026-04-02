@@ -80,9 +80,10 @@ type promptActivitySubscription struct {
 	ch      chan clientui.PendingPromptEvent
 	onClose func()
 
-	mu   sync.Mutex
-	err  error
-	done bool
+	mu      sync.Mutex
+	initial []clientui.PendingPromptEvent
+	err     error
+	done    bool
 }
 
 func NewRuntimeRegistry() *RuntimeRegistry {
@@ -199,16 +200,14 @@ func (r *RuntimeRegistry) SubscribePromptActivity(_ context.Context, sessionID s
 		return nil, fmt.Errorf("prompt activity stream for %q is unavailable: %w", id, serverapi.ErrStreamUnavailable)
 	}
 	entry.pendingMu.Lock()
-	sub := entry.promptHub.subscribe()
+	initial := make([]clientui.PendingPromptEvent, 0, len(entry.pendingPrompt))
+	for _, item := range entry.listPendingPromptsLocked() {
+		initial = append(initial, pendingPromptEventFromSnapshot(id, item, clientui.PendingPromptEventPending))
+	}
+	sub := entry.promptHub.subscribe(initial)
 	if sub == nil {
 		entry.pendingMu.Unlock()
 		return nil, fmt.Errorf("prompt activity stream for %q is unavailable: %w", id, serverapi.ErrStreamUnavailable)
-	}
-	for _, item := range entry.listPendingPromptsLocked() {
-		if !sub.publish(pendingPromptEventFromSnapshot(id, item, clientui.PendingPromptEventPending)) {
-			sub.closeWithError(serverapi.ErrStreamGap)
-			break
-		}
 	}
 	entry.pendingMu.Unlock()
 	return sub, nil
@@ -364,15 +363,15 @@ func (r *RuntimeRegistry) SubmitPromptResponse(sessionID string, resp askquestio
 	pending := entry.pendingPrompt[requestID]
 	if pending == nil {
 		entry.pendingMu.Unlock()
-		return fmt.Errorf("prompt %q not found", requestID)
+		return fmt.Errorf("prompt %q not found: %w", requestID, serverapi.ErrPromptNotFound)
 	}
 	if pending.closed {
 		entry.pendingMu.Unlock()
-		return fmt.Errorf("prompt %q is already resolved", requestID)
+		return fmt.Errorf("prompt %q is already resolved: %w", requestID, serverapi.ErrPromptAlreadyResolved)
 	}
 	if pending.response == nil {
 		entry.pendingMu.Unlock()
-		return fmt.Errorf("prompt %q cannot be answered through the shared boundary", requestID)
+		return fmt.Errorf("prompt %q cannot be answered through the shared boundary: %w", requestID, serverapi.ErrPromptUnsupported)
 	}
 	pending.closed = true
 	snapshot := pending.PendingPromptSnapshot
@@ -612,11 +611,11 @@ func (s *sessionActivitySubscription) closeWithError(err error) {
 	}
 }
 
-func (h *promptActivityHub) subscribe() *promptActivitySubscription {
+func (h *promptActivityHub) subscribe(initial []clientui.PendingPromptEvent) *promptActivitySubscription {
 	if h == nil {
 		return nil
 	}
-	sub := &promptActivitySubscription{ch: make(chan clientui.PendingPromptEvent, promptActivityBufferSize)}
+	sub := &promptActivitySubscription{ch: make(chan clientui.PendingPromptEvent, promptActivityBufferSize), initial: append([]clientui.PendingPromptEvent(nil), initial...)}
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
@@ -698,6 +697,14 @@ func (s *promptActivitySubscription) Next(ctx context.Context) (clientui.Pending
 	if s == nil {
 		return clientui.PendingPromptEvent{}, io.EOF
 	}
+	s.mu.Lock()
+	if len(s.initial) > 0 {
+		evt := s.initial[0]
+		s.initial = s.initial[1:]
+		s.mu.Unlock()
+		return evt, nil
+	}
+	s.mu.Unlock()
 	select {
 	case <-ctx.Done():
 		return clientui.PendingPromptEvent{}, ctx.Err()
