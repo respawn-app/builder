@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -39,6 +40,9 @@ func (s *Store) AppendRunStarted(run RunRecord) (Event, error) {
 
 func (s *Store) AppendRunFinished(run RunRecord) (Event, error) {
 	finished := normalizeRunRecord(run)
+	if !isTerminalRunStatus(finished.Status) {
+		return Event{}, fmt.Errorf("finished run requires a terminal status")
+	}
 	if finished.FinishedAt.IsZero() {
 		finished.FinishedAt = time.Now().UTC()
 	}
@@ -115,7 +119,17 @@ func runsFromEvents(events []Event) []RunRecord {
 func normalizeRunRecord(run RunRecord) RunRecord {
 	run.RunID = strings.TrimSpace(run.RunID)
 	run.StepID = strings.TrimSpace(run.StepID)
+	run.Status = RunStatus(strings.TrimSpace(string(run.Status)))
 	return run
+}
+
+func isTerminalRunStatus(status RunStatus) bool {
+	switch status {
+	case RunStatusCompleted, RunStatusInterrupted, RunStatusFailed:
+		return true
+	default:
+		return false
+	}
 }
 
 func mergeRunRecord(existing, next RunRecord) RunRecord {

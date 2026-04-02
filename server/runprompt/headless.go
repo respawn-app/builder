@@ -293,7 +293,7 @@ func (s *deduplicatingPromptService) RunPrompt(ctx context.Context, req serverap
 		runPromptDedupeRegistry.mu.Unlock()
 
 		response, err := s.inner.RunPrompt(ctx, req, progress)
-		cacheable := !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
+		cacheable := !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, primaryrun.ErrActivePrimaryRun)
 
 		runPromptDedupeRegistry.mu.Lock()
 		entry.response = response

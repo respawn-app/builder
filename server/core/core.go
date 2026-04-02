@@ -67,7 +67,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	approvalService := approvalview.NewService(runtimeRegistry)
 	processService := processview.NewService(runtimeSupport.Background)
 	processOutputService := processoutput.NewService(runtimeSupport.Background, runtimeSupport.Background)
-	sessionViewService := sessionview.NewService(registry.NewPersistenceSessionResolver(cfg.PersistenceRoot), runtimeRegistry)
+	sessionViewService := sessionview.NewService(registry.NewPersistenceSessionResolver(containerDir), runtimeRegistry)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
 	core := &Core{
 		cfg:              cfg,

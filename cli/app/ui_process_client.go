@@ -40,9 +40,10 @@ func (m *uiModel) listProcesses() []clientui.BackgroundProcess {
 func (c backgroundUIProcessClient) ListProcesses() []clientui.BackgroundProcess {
 	if c.reads != nil {
 		resp, err := c.reads.ListProcesses(context.Background(), serverapi.ProcessListRequest{})
-		if err == nil {
-			return resp.Processes
+		if err != nil {
+			return nil
 		}
+		return resp.Processes
 	}
 	if c.manager == nil {
 		return nil
@@ -57,18 +58,14 @@ func (c backgroundUIProcessClient) ListProcesses() []clientui.BackgroundProcess 
 
 func (c backgroundUIProcessClient) KillProcess(id string) error {
 	id = strings.TrimSpace(id)
-	var lastErr error
 	if c.control != nil {
 		_, err := c.control.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: uuid.NewString(), ProcessID: id})
-		if err == nil {
-			return nil
+		if err != nil {
+			return err
 		}
-		lastErr = err
+		return nil
 	}
 	if c.manager == nil {
-		if lastErr != nil {
-			return lastErr
-		}
 		return errors.New("background process manager is unavailable")
 	}
 	return c.manager.Kill(id)
@@ -76,18 +73,14 @@ func (c backgroundUIProcessClient) KillProcess(id string) error {
 
 func (c backgroundUIProcessClient) InlineOutput(id string, maxChars int) (string, string, error) {
 	id = strings.TrimSpace(id)
-	var lastErr error
 	if c.control != nil {
 		resp, err := c.control.GetInlineOutput(context.Background(), serverapi.ProcessInlineOutputRequest{ProcessID: id, MaxChars: maxChars})
-		if err == nil {
-			return resp.Output, resp.LogPath, nil
+		if err != nil {
+			return "", "", err
 		}
-		lastErr = err
+		return resp.Output, resp.LogPath, nil
 	}
 	if c.manager == nil {
-		if lastErr != nil {
-			return "", "", lastErr
-		}
 		return "", "", errors.New("background process manager is unavailable")
 	}
 	return c.manager.InlineOutput(id, maxChars)

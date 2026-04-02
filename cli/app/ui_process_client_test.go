@@ -177,7 +177,7 @@ func TestUIProcessClientUsesLoopbackReadsWhenAvailable(t *testing.T) {
 	}
 }
 
-func TestUIProcessClientFallsBackToManagerOnReadError(t *testing.T) {
+func TestUIProcessClientDoesNotBypassSharedReadBoundaryOnError(t *testing.T) {
 	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new background manager: %v", err)
@@ -202,12 +202,8 @@ func TestUIProcessClientFallsBackToManagerOnReadError(t *testing.T) {
 	}
 
 	processClient := newUIProcessClientWithReads(manager, client.NewLoopbackProcessViewClient(&stubProcessViewService{err: errors.New("boom")}), nil)
-	got := processClient.ListProcesses()
-	if len(got) == 0 {
-		t.Fatal("expected fallback process list")
-	}
-	if got[0].OwnerRunID != "run-1" || got[0].OwnerStepID != "step-1" {
-		t.Fatalf("unexpected fallback ownership: %+v", got[0])
+	if got := processClient.ListProcesses(); got != nil {
+		t.Fatalf("expected shared-read failure to fail closed, got %+v", got)
 	}
 }
 
@@ -233,7 +229,7 @@ func TestUIProcessClientUsesLoopbackControlWhenAvailable(t *testing.T) {
 	}
 }
 
-func TestUIProcessClientFallsBackToManagerControlOnRemoteError(t *testing.T) {
+func TestUIProcessClientDoesNotBypassSharedControlBoundaryOnError(t *testing.T) {
 	manager, err := shelltool.NewManager(shelltool.WithMinimumExecToBgTime(250 * time.Millisecond))
 	if err != nil {
 		t.Fatalf("new background manager: %v", err)
@@ -255,22 +251,15 @@ func TestUIProcessClientFallsBackToManagerControlOnRemoteError(t *testing.T) {
 	}
 
 	processClient := newUIProcessClientWithReads(manager, nil, client.NewLoopbackProcessControlClient(&stubProcessControlService{err: errors.New("boom")}))
-	preview, _, err := processClient.InlineOutput(res.SessionID, 12_000)
-	if err != nil {
-		t.Fatalf("InlineOutput fallback: %v", err)
+	if _, _, err := processClient.InlineOutput(res.SessionID, 12_000); err == nil || err.Error() != "boom" {
+		t.Fatalf("expected shared control error from InlineOutput, got %v", err)
 	}
-	if !strings.Contains(preview, "fallback-control") {
-		t.Fatalf("expected fallback inline output preview, got %q", preview)
+	if err := processClient.KillProcess(res.SessionID); err == nil || err.Error() != "boom" {
+		t.Fatalf("expected shared control error from KillProcess, got %v", err)
 	}
-	if err := processClient.KillProcess(res.SessionID); err != nil {
-		t.Fatalf("KillProcess fallback: %v", err)
-	}
-	waitForTestCondition(t, 2*time.Second, "background process kill request to be reflected in manager state", func() bool {
-		for _, entry := range manager.List() {
-			if entry.ID == res.SessionID {
-				return entry.KillRequested || !entry.Running
-			}
+	for _, entry := range manager.List() {
+		if entry.ID == res.SessionID && entry.KillRequested {
+			t.Fatalf("expected manager fallback to stay unused, got %+v", entry)
 		}
-		return false
-	})
+	}
 }

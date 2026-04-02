@@ -192,6 +192,42 @@ func TestDeduplicatingPromptServiceDoesNotCacheCanceledErrors(t *testing.T) {
 	}
 }
 
+func TestDeduplicatingPromptServiceDoesNotCacheActivePrimaryRunErrors(t *testing.T) {
+	resetRunPromptDedupeRegistry()
+	t.Cleanup(resetRunPromptDedupeRegistry)
+
+	inner := &stubRunPromptService{}
+	inner.run = func(_ context.Context, req serverapi.RunPromptRequest, _ serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
+		if inner.CallCount() == 1 {
+			return serverapi.RunPromptResponse{}, primaryrun.ErrActivePrimaryRun
+		}
+		return serverapi.RunPromptResponse{SessionID: req.SelectedSessionID, Result: "ok"}, nil
+	}
+	service := newDeduplicatingPromptService("scope-active", inner)
+	req := serverapi.RunPromptRequest{ClientRequestID: "dup-active", SelectedSessionID: "session-active", Prompt: "retry me"}
+
+	if _, err := service.RunPrompt(context.Background(), req, nil); !errors.Is(err, primaryrun.ErrActivePrimaryRun) {
+		t.Fatalf("first run error = %v, want active primary run", err)
+	}
+	if got := inner.CallCount(); got != 1 {
+		t.Fatalf("inner call count after active-run error = %d, want 1", got)
+	}
+	if got := runPromptDedupeEntryCount(); got != 0 {
+		t.Fatalf("entry count after active-run error = %d, want 0", got)
+	}
+
+	response, err := service.RunPrompt(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("retry run error: %v", err)
+	}
+	if got := inner.CallCount(); got != 2 {
+		t.Fatalf("inner call count after retry = %d, want 2", got)
+	}
+	if response.Result != "ok" {
+		t.Fatalf("retry response result = %q, want ok", response.Result)
+	}
+}
+
 func TestDeduplicatingPromptServiceScopesClientRequestIDByWorkspace(t *testing.T) {
 	resetRunPromptDedupeRegistry()
 	t.Cleanup(resetRunPromptDedupeRegistry)

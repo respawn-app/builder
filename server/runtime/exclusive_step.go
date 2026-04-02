@@ -58,8 +58,13 @@ func (s *defaultExclusiveStepLifecycle) Run(ctx context.Context, options exclusi
 		}
 	}
 	defer func() {
+		panicValue := recover()
 		finishedAt := time.Now().UTC()
-		snapshot := s.snapshotWithFinishedAt(finishedAt, statusFromRunError(err))
+		status := statusFromRunError(err)
+		if panicValue != nil {
+			status = RunStatusFailed
+		}
+		snapshot := s.snapshotWithFinishedAt(finishedAt, status)
 		s.end()
 		if options.EmitRunState {
 			state := &RunState{Busy: false}
@@ -90,6 +95,9 @@ func (s *defaultExclusiveStepLifecycle) Run(ctx context.Context, options exclusi
 			if s.background != nil {
 				s.background.ScheduleIfIdle()
 			}
+		}
+		if panicValue != nil {
+			panic(panicValue)
 		}
 	}()
 	return fn(stepCtx, stepID)
