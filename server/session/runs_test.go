@@ -109,3 +109,18 @@ func TestStoreReadRunsTreatsStartedWithoutFinishAsRunning(t *testing.T) {
 		t.Fatalf("unexpected running run reconstruction: %+v", runs[0])
 	}
 }
+
+func TestStoreAppendRunFinishedRequiresTerminalStatus(t *testing.T) {
+	root := t.TempDir()
+	store, err := Create(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	if _, err := store.AppendRunFinished(RunRecord{RunID: "run-1", StepID: "step-1", Status: RunStatusRunning}); err == nil {
+		t.Fatal("expected non-terminal run_finished status to be rejected")
+	}
+	if _, err := store.AppendRunFinished(RunRecord{RunID: "run-2", StepID: "step-2"}); err == nil {
+		t.Fatal("expected empty run_finished status to be rejected")
+	}
+}

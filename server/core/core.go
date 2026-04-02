@@ -87,7 +87,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	promptControlService := promptcontrol.NewService(runtimeRegistry)
 	promptActivityService := promptactivity.NewService(runtimeRegistry)
 	runtimeControlService := runtimecontrol.NewService(runtimeRegistry, runtimeRegistry)
-	sessionViewService := sessionview.NewService(registry.NewPersistenceSessionResolver(cfg.PersistenceRoot), runtimeRegistry)
+	sessionViewService := sessionview.NewService(registry.NewPersistenceSessionResolver(containerDir), runtimeRegistry)
 	sessionLaunchService := sessionlaunch.NewDeduplicatingService(
 		sessionlaunch.ScopeID(cfg, containerDir),
 		sessionlaunch.NewService(launch.Planner{Config: cfg, ContainerDir: containerDir}, sessionStoreRegistry),
