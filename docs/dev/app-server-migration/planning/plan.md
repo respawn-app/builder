@@ -191,9 +191,9 @@ Deliverables:
 - explicit stream-drop handling that forces rehydrate plus resubscribe
 - process-control race coverage
 - slow-client handling and bounded buffering
-- transport-safe `shared/clientui.RuntimeClient` error semantics so frontend reads can distinguish RPC failure from real empty/idle state, either through explicit error-bearing reads or a shared last-known-good cache with freshness/error metadata
-- transport-crossing runtime mutations must stop silently swallowing failures; the Phase 4 design must either propagate mutation errors through the frontend boundary or provide an explicit shared error-reporting channel that preserves user input and retry affordances
-- idempotent session lifecycle transitions end-to-end, including `client_request_id` on `session.resolveTransition` plus server-side duplicate suppression for retry-safe `fork_rollback`, `logout`, and future transition actions
+- transport-safe `shared/clientui.RuntimeClient` error semantics so frontend reads can distinguish RPC failure from real empty/idle state. Scope: replace the current zero-value fallback behavior in `cli/app/ui_runtime_client.go` with a shared contract change in `shared/clientui.RuntimeClient`, either by returning explicit read errors from runtime-view methods or by adding a last-known-good cache shape that carries freshness plus transport-failure metadata.
+- transport-crossing runtime mutations must stop silently swallowing failures. Scope: remove the current fire-and-forget behavior in `cli/app/ui_runtime_client.go` and related mutation adapters; the Phase 4 design must either propagate mutation errors through the frontend boundary or provide an explicit shared error-reporting/retry channel that preserves user input and operator visibility.
+- idempotent session lifecycle transitions end-to-end. Scope: add `client_request_id` to `shared/serverapi.SessionResolveTransitionRequest`, thread it through `cli/app/session_lifecycle.go`, and implement duplicate suppression in the server lifecycle path so retry-safe `fork_rollback`, `logout`, and future transition actions cannot be applied twice after disconnect/retry.
 
 Primary risks:
 
