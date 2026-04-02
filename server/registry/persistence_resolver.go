@@ -2,18 +2,20 @@ package registry
 
 import (
 	"context"
+	"path/filepath"
+	"strings"
 
 	"builder/server/session"
 )
 
 type PersistenceSessionResolver struct {
-	root string
+	containerDir string
 }
 
-func NewPersistenceSessionResolver(root string) PersistenceSessionResolver {
-	return PersistenceSessionResolver{root: root}
+func NewPersistenceSessionResolver(containerDir string) PersistenceSessionResolver {
+	return PersistenceSessionResolver{containerDir: strings.TrimSpace(containerDir)}
 }
 
 func (r PersistenceSessionResolver) ResolveSession(_ context.Context, sessionID string) (session.Snapshot, error) {
-	return session.SnapshotByID(r.root, sessionID)
+	return session.SnapshotFromDir(filepath.Join(r.containerDir, strings.TrimSpace(sessionID)))
 }

@@ -223,6 +223,33 @@ func TestRuntimeRegistryAcquirePrimaryRunEnforcesSingleLeasePerSession(t *testin
 	}
 }
 
+func TestRuntimeRegistryClearsPrimaryRunLeaseWhenRuntimeIsReplacedOrRemoved(t *testing.T) {
+	registry := NewRuntimeRegistry()
+	older := &runtime.Engine{}
+	newer := &runtime.Engine{}
+
+	registry.Register("session-1", older)
+	lease, err := registry.AcquirePrimaryRun("session-1")
+	if err != nil {
+		t.Fatalf("AcquirePrimaryRun first: %v", err)
+	}
+	registry.Register("session-1", newer)
+	lease.Release()
+
+	secondLease, err := registry.AcquirePrimaryRun("session-1")
+	if err != nil {
+		t.Fatalf("AcquirePrimaryRun after replace: %v", err)
+	}
+	secondLease.Release()
+
+	registry.Unregister("session-1", newer)
+	thirdLease, err := registry.AcquirePrimaryRun("session-1")
+	if err != nil {
+		t.Fatalf("AcquirePrimaryRun after unregister: %v", err)
+	}
+	thirdLease.Release()
+}
+
 func TestRuntimeEntryClosePendingPromptsDoesNotBlockWhenResponseAlreadyBuffered(t *testing.T) {
 	entry := &runtimeEntry{pendingPrompt: map[string]*pendingPromptEntry{}}
 	pending := &pendingPromptEntry{

@@ -311,6 +311,44 @@ func TestExclusiveStepLifecycleEmitsInterruptedRunStatePayloads(t *testing.T) {
 	}
 }
 
+func TestExclusiveStepLifecyclePersistsPanicsAsFailedRuns(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	lifecycle := &defaultExclusiveStepLifecycle{engine: eng}
+	func() {
+		defer func() {
+			if recovered := recover(); recovered == nil {
+				t.Fatal("expected panic from exclusive step")
+			}
+		}()
+		_ = lifecycle.Run(context.Background(), exclusiveStepOptions{EmitRunState: true, PersistRunLifecycle: true}, func(context.Context, string) error {
+			panic("boom")
+		})
+	}()
+
+	runs, err := store.ReadRuns()
+	if err != nil {
+		t.Fatalf("read runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected one durable run, got %+v", runs)
+	}
+	if runs[0].Status != session.RunStatusFailed {
+		t.Fatalf("expected panic to persist as failed run, got %+v", runs[0])
+	}
+	if runs[0].FinishedAt.IsZero() {
+		t.Fatalf("expected failed run to be finished, got %+v", runs[0])
+	}
+}
+
 func TestExclusiveStepLifecycleInterruptAppendsMessageAndClearsInFlight(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
