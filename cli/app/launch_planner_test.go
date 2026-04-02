@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -26,7 +27,7 @@ func TestSessionLaunchPlannerHeadlessCreatesNewSessionAndAppliesContinuationCont
 		containerDir: containerDir,
 	})
 
-	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeHeadless})
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeHeadless})
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
@@ -93,7 +94,7 @@ func TestSessionLaunchPlannerInteractiveUsesPickerSelection(t *testing.T) {
 		},
 	}
 
-	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive})
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
@@ -169,7 +170,7 @@ func TestSessionLaunchPlannerInteractiveUsesLegacyWorkspaceContainerMapping(t *t
 		},
 	}
 
-	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive})
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
@@ -206,7 +207,7 @@ func TestSessionLaunchPlannerSelectedSessionIDBypassesPicker(t *testing.T) {
 		},
 	}
 
-	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive, SelectedSessionID: store.Meta().SessionID})
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, SelectedSessionID: store.Meta().SessionID})
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}

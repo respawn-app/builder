@@ -25,6 +25,7 @@ import (
 	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/discovery"
+	"builder/shared/protocol"
 	"builder/shared/serverapi"
 )
 
@@ -226,6 +227,47 @@ func TestRunPromptUsesDiscoveredDaemonWithoutLocalAuth(t *testing.T) {
 	cancel()
 	if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
 		t.Fatalf("Serve error = %v, want context canceled", serveErr)
+	}
+}
+
+func TestRunPromptRejectsIncompatibleDiscoveredDaemonAndFallsBackToEmbedded(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
+	defer fakeResponses.Close()
+
+	cleanup := publishDiscoveredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{
+		JSONRPCWebSocket: true,
+		ProjectAttach:    true,
+		SessionAttach:    true,
+		SessionPlan:      true,
+		SessionLifecycle: true,
+		SessionRuntime:   true,
+		RuntimeControl:   true,
+		PromptControl:    true,
+		PromptActivity:   true,
+		SessionActivity:  true,
+	})
+	defer cleanup()
+
+	result, err := RunPrompt(context.Background(), Options{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+		OpenAIBaseURL:         fakeResponses.URL,
+		OpenAIBaseURLExplicit: true,
+	}, "hello through fallback", 0, nil)
+	if err != nil {
+		t.Fatalf("RunPrompt: %v", err)
+	}
+	if result.Result != "embedded fallback reply" {
+		t.Fatalf("result = %q, want %q", result.Result, "embedded fallback reply")
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("expected embedded fallback llm call once, got %d", hits.Load())
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	"builder/server/core"
 	"builder/shared/protocol"
@@ -77,10 +78,20 @@ func (g *Gateway) serveRunPrompt(ws *websocket.Conn, ctx context.Context, state 
 	if err != nil {
 		return sendResponse(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
 	}
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var progressBroken atomic.Bool
 	progress := serverapi.RunPromptProgressFunc(func(update serverapi.RunPromptProgress) {
-		_ = sendNotification(ws, protocol.MethodRunPromptProgress, update)
+		if progressBroken.Load() {
+			return
+		}
+		if err := sendNotification(ws, protocol.MethodRunPromptProgress, update); err != nil {
+			if progressBroken.CompareAndSwap(false, true) {
+				cancel()
+			}
+		}
 	})
-	resp, err := g.core.RunPromptClient().RunPrompt(ctx, params, progress)
+	resp, err := g.core.RunPromptClient().RunPrompt(runCtx, params, progress)
 	if err != nil {
 		return sendResponse(ws, responseForError(req.ID, err))
 	}

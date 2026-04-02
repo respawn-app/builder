@@ -14,12 +14,13 @@ import (
 	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/discovery"
+	"builder/shared/protocol"
 )
 
 var launchRunPromptDaemon = startLocalRunPromptDaemon
 
 func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptClient, func() error, error) {
-	if remote, ok := tryDialDiscoveredRemote(ctx, opts); ok {
+	if remote, ok := tryDialDiscoveredRemote(ctx, opts, discoveredRemoteSupportsRunPrompt); ok {
 		return remote, remote.Close, nil
 	}
 	launchErr := error(nil)
@@ -38,7 +39,7 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 	return server.RunPromptClient(), server.Close, nil
 }
 
-func tryDialDiscoveredRemote(ctx context.Context, opts Options) (*client.Remote, bool) {
+func tryDialDiscoveredRemote(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool) (*client.Remote, bool) {
 	workspaceRoot, err := resolveCLIWorkspaceRoot(opts)
 	if err != nil {
 		return nil, false
@@ -74,7 +75,25 @@ func tryDialDiscoveredRemote(ctx context.Context, opts Options) (*client.Remote,
 		_ = remote.Close()
 		return nil, false
 	}
+	if supports != nil && !supports(remote.Identity().Capabilities) {
+		_ = remote.Close()
+		return nil, false
+	}
 	return remote, true
+}
+
+func discoveredRemoteSupportsRunPrompt(flags protocol.CapabilityFlags) bool {
+	return flags.RunPrompt
+}
+
+func discoveredRemoteSupportsInteractiveSession(flags protocol.CapabilityFlags) bool {
+	return flags.SessionPlan &&
+		flags.SessionLifecycle &&
+		flags.SessionRuntime &&
+		flags.RuntimeControl &&
+		flags.PromptControl &&
+		flags.PromptActivity &&
+		flags.SessionActivity
 }
 
 func resolveCLIWorkspaceRoot(opts Options) (string, error) {
@@ -113,7 +132,7 @@ func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remot
 	}()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if remote, ok := tryDialDiscoveredRemote(ctx, opts); ok {
+		if remote, ok := tryDialDiscoveredRemote(ctx, opts, discoveredRemoteSupportsRunPrompt); ok {
 			return remote, true, nil
 		}
 		select {

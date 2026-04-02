@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -18,8 +19,10 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/discovery"
+	"builder/shared/protocol"
 	"builder/shared/serverapi"
 	"github.com/google/uuid"
+	"golang.org/x/net/websocket"
 )
 
 func TestStartSessionServerUsesDiscoveredDaemonForInteractiveFlow(t *testing.T) {
@@ -89,7 +92,7 @@ func TestStartSessionServerUsesDiscoveredDaemonForInteractiveFlow(t *testing.T) 
 	}
 
 	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
 	if err != nil {
 		t.Fatalf("PlanSession: %v", err)
 	}
@@ -121,6 +124,62 @@ func TestStartSessionServerUsesDiscoveredDaemonForInteractiveFlow(t *testing.T) 
 	cancel()
 	if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
 		t.Fatalf("Serve error = %v, want context canceled", serveErr)
+	}
+}
+
+func TestStartSessionServerRejectsIncompatibleDiscoveredDaemonAndFallsBack(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
+	defer fakeResponses.Close()
+
+	cleanup := publishDiscoveredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{
+		JSONRPCWebSocket: true,
+		ProjectAttach:    true,
+		SessionAttach:    true,
+		RunPrompt:        true,
+		SessionActivity:  true,
+		ProcessOutput:    true,
+	})
+	defer cleanup()
+
+	server, err := startSessionServer(context.Background(), Options{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+		OpenAIBaseURL:         fakeResponses.URL,
+		OpenAIBaseURLExplicit: true,
+	}, newHeadlessAuthInteractorWithEnvKey("test-key"))
+	if err != nil {
+		t.Fatalf("startSessionServer: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+	if _, ok := server.(*remoteAppServer); ok {
+		t.Fatal("expected incompatible discovered daemon to be rejected")
+	}
+
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
+	if err != nil {
+		t.Fatalf("PlanSession: %v", err)
+	}
+	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test embedded fallback runtime")
+	if err != nil {
+		t.Fatalf("PrepareRuntime: %v", err)
+	}
+	defer runtimePlan.Close()
+
+	message, err := runtimePlan.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "hello through embedded fallback")
+	if err != nil {
+		t.Fatalf("SubmitUserMessage: %v", err)
+	}
+	if message != "embedded fallback reply" {
+		t.Fatalf("assistant message = %q, want %q", message, "embedded fallback reply")
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("expected embedded fallback llm call once, got %d", hits.Load())
 	}
 }
 
@@ -174,7 +233,7 @@ func TestStartSessionServerUsesInvocationOverridesWhenAttachingToDiscoveredDaemo
 	defer func() { _ = server.Close() }()
 
 	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
 	if err != nil {
 		t.Fatalf("PlanSession: %v", err)
 	}
@@ -246,7 +305,7 @@ func TestStartSessionServerPreservesExplicitCLIToolsWithCLIModelOverride(t *test
 	defer func() { _ = server.Close() }()
 
 	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
 	if err != nil {
 		t.Fatalf("PlanSession: %v", err)
 	}
@@ -300,7 +359,7 @@ func TestStartSessionServerUsesDiscoveredDaemonForPromptRoundTrip(t *testing.T) 
 	defer func() { _ = server.Close() }()
 
 	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
 	if err != nil {
 		t.Fatalf("PlanSession: %v", err)
 	}
@@ -423,14 +482,14 @@ func TestStartSessionServerUsesDiscoveredDaemonForSessionLifecycleDraftPersisten
 	defer func() { _ = server.Close() }()
 
 	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
 	if err != nil {
 		t.Fatalf("PlanSession: %v", err)
 	}
 	if _, err := server.SessionLifecycleClient().PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{SessionID: plan.SessionID, Input: "saved draft"}); err != nil {
 		t.Fatalf("PersistInputDraft: %v", err)
 	}
-	if got := sessionLaunchInitialInputFromServer(server, plan.SessionID, "transition draft"); got != "saved draft" {
+	if got := sessionLaunchInitialInputFromServer(context.Background(), server, plan.SessionID, "transition draft"); got != "saved draft" {
 		t.Fatalf("sessionLaunchInitialInputFromServer = %q, want saved draft", got)
 	}
 	resolved, err := server.SessionLifecycleClient().ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
@@ -492,7 +551,7 @@ func TestStartSessionServerUsesDiscoveredDaemonForProcessFlows(t *testing.T) {
 	defer func() { _ = server.Close() }()
 
 	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
 	if err != nil {
 		t.Fatalf("PlanSession: %v", err)
 	}
@@ -713,7 +772,7 @@ func waitForRemoteInlineOutput(t *testing.T, controls client.ProcessControlClien
 func runInteractiveWorkflowScenario(t *testing.T, server embeddedServer, wantReply string) {
 	t.Helper()
 	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
 	if err != nil {
 		t.Fatalf("PlanSession: %v", err)
 	}
@@ -733,7 +792,7 @@ func runInteractiveWorkflowScenario(t *testing.T, server embeddedServer, wantRep
 	if _, err := server.SessionLifecycleClient().PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{SessionID: plan.SessionID, Input: "workflow draft"}); err != nil {
 		t.Fatalf("PersistInputDraft: %v", err)
 	}
-	if got := sessionLaunchInitialInputFromServer(server, plan.SessionID, "transition draft"); got != "workflow draft" {
+	if got := sessionLaunchInitialInputFromServer(context.Background(), server, plan.SessionID, "transition draft"); got != "workflow draft" {
 		t.Fatalf("sessionLaunchInitialInputFromServer = %q, want workflow draft", got)
 	}
 	refreshed, err := server.SessionViewClient().GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: plan.SessionID})
@@ -752,4 +811,65 @@ func newHeadlessAuthInteractorWithEnvKey(key string) authInteractor {
 		}
 		return ""
 	}}
+}
+
+func publishDiscoveredRemoteForWorkspace(t *testing.T, workspace string, caps protocol.CapabilityFlags) func() {
+	t.Helper()
+	loadCfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	_, containerDir, err := config.ResolveWorkspaceContainer(loadCfg)
+	if err != nil {
+		t.Fatalf("ResolveWorkspaceContainer: %v", err)
+	}
+	discoveryPath, err := discovery.PathForContainer(containerDir)
+	if err != nil {
+		t.Fatalf("PathForContainer: %v", err)
+	}
+	expectedProjectID, err := config.ProjectIDForWorkspaceRoot(loadCfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("ProjectIDForWorkspaceRoot: %v", err)
+	}
+	identity := protocol.ServerIdentity{
+		ProtocolVersion: protocol.Version,
+		ServerID:        "stale-daemon",
+		ProjectID:       expectedProjectID,
+		WorkspaceRoot:   loadCfg.WorkspaceRoot,
+		Capabilities:    caps,
+	}
+	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
+		defer func() { _ = ws.Close() }()
+		var req protocol.Request
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if req.Method != protocol.MethodHandshake {
+			_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidRequest, "handshake required"))
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: identity})); err != nil {
+			return
+		}
+		for {
+			if err := websocket.JSON.Receive(ws, &req); err != nil {
+				return
+			}
+			_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeMethodNotFound, "method not found"))
+		}
+	}))
+	rpcURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	record := protocol.DiscoveryRecord{
+		Identity: identity,
+		RPCURL:   rpcURL,
+		HTTPURL:  server.URL,
+	}
+	if err := discovery.Write(discoveryPath, record); err != nil {
+		server.Close()
+		t.Fatalf("discovery.Write: %v", err)
+	}
+	return func() {
+		server.Close()
+		_ = discovery.Remove(discoveryPath)
+	}
 }
