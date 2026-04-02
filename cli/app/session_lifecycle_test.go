@@ -126,7 +126,7 @@ func TestNewSessionTransitionKeepsBackgroundProcessesAlive(t *testing.T) {
 		containerDir: root,
 	}
 	planner := &launchPlanner{server: testServer}
-	storePlan, err := planner.PlanSession(sessionLaunchRequest{
+	storePlan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{
 		Mode:              launchModeInteractive,
 		SelectedSessionID: resolved.NextSessionID,
 		ForceNewSession:   resolved.ForceNewSession,

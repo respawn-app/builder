@@ -104,15 +104,15 @@ func requestedWorkspaceRootValue(workspaceRoot string) string {
 	return workspaceRoot
 }
 
-func (p *launchPlanner) PlanSession(req sessionLaunchRequest) (sessionLaunchPlan, error) {
+func (p *launchPlanner) PlanSession(ctx context.Context, req sessionLaunchRequest) (sessionLaunchPlan, error) {
 	if p == nil || p.server == nil || p.server.SessionLaunchClient() == nil {
 		return sessionLaunchPlan{}, errors.New("launch planner bootstrap is required")
 	}
-	resolved, err := p.resolvePlanRequest(req)
+	resolved, err := p.resolvePlanRequest(ctx, req)
 	if err != nil {
 		return sessionLaunchPlan{}, err
 	}
-	resp, err := p.server.SessionLaunchClient().PlanSession(context.Background(), resolved)
+	resp, err := p.server.SessionLaunchClient().PlanSession(ctx, resolved)
 	if err != nil {
 		return sessionLaunchPlan{}, err
 	}
@@ -152,7 +152,7 @@ func (p *launchPlanner) PrepareRuntime(plan sessionLaunchPlan, diagnosticWriter 
 	return p.server.PrepareRuntime(plan, diagnosticWriter, startLogLine)
 }
 
-func (p *launchPlanner) resolvePlanRequest(req sessionLaunchRequest) (serverapi.SessionPlanRequest, error) {
+func (p *launchPlanner) resolvePlanRequest(ctx context.Context, req sessionLaunchRequest) (serverapi.SessionPlanRequest, error) {
 	resolved := serverapi.SessionPlanRequest{
 		ClientRequestID:   uuid.NewString(),
 		Mode:              serverapi.SessionLaunchMode(req.Mode),
@@ -167,7 +167,7 @@ func (p *launchPlanner) resolvePlanRequest(req sessionLaunchRequest) (serverapi.
 	if resolved.SelectedSessionID != "" || resolved.ForceNewSession {
 		return resolved, nil
 	}
-	summaries, err := p.listSessionSummaries()
+	summaries, err := p.listSessionSummaries(ctx)
 	if err != nil {
 		return serverapi.SessionPlanRequest{}, err
 	}
@@ -197,11 +197,18 @@ func (p *launchPlanner) resolvePlanRequest(req sessionLaunchRequest) (serverapi.
 	return resolved, nil
 }
 
-func (p *launchPlanner) listSessionSummaries() ([]session.Summary, error) {
-	if p == nil || p.server == nil || p.server.ProjectViewClient() == nil || strings.TrimSpace(p.server.ProjectID()) == "" {
-		return nil, nil
+func (p *launchPlanner) listSessionSummaries(ctx context.Context) ([]session.Summary, error) {
+	if p == nil || p.server == nil {
+		return nil, errors.New("launch planner bootstrap is required")
 	}
-	resp, err := p.server.ProjectViewClient().GetProjectOverview(context.Background(), serverapi.ProjectGetOverviewRequest{ProjectID: p.server.ProjectID()})
+	if p.server.ProjectViewClient() == nil {
+		return nil, errors.New("project view client is required")
+	}
+	projectID := strings.TrimSpace(p.server.ProjectID())
+	if projectID == "" {
+		return nil, errors.New("project id is required")
+	}
+	resp, err := p.server.ProjectViewClient().GetProjectOverview(ctx, serverapi.ProjectGetOverviewRequest{ProjectID: projectID})
 	if err != nil {
 		return nil, err
 	}

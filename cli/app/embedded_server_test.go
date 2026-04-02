@@ -207,7 +207,7 @@ func TestEmbeddedAppServerPrepareRuntimeRegistersRuntimeForSessionViews(t *testi
 	defer func() { _ = server.Close() }()
 
 	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive})
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessReadsForUIHydration(t *testi
 	defer func() { _ = server.Close() }()
 
 	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive})
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestEmbeddedAppServerPrepareRuntimeExposesPendingAsksAndApprovals(t *testin
 	defer func() { _ = server.Close() }()
 
 	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive})
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
@@ -376,7 +376,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresSessionActivityForSharedClients(t *
 	defer func() { _ = server.Close() }()
 
 	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive})
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
@@ -455,7 +455,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessControlForUIActions(t *testi
 	defer func() { _ = server.Close() }()
 
 	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive})
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
@@ -500,7 +500,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessOutputClient(t *testing.T) {
 	defer func() { _ = server.Close() }()
 
 	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive})
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
@@ -527,7 +527,7 @@ func TestEmbeddedAppServerPrepareRuntimeUsesPrimaryRunGuardedRuntimeClient(t *te
 	defer func() { _ = server.Close() }()
 
 	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive})
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
@@ -598,7 +598,7 @@ func TestEmbeddedAppServerPrepareRuntimeRejectsConcurrentPrimarySubmitWhileRunIn
 	defer func() { _ = server.Close() }()
 
 	planner := newSessionLaunchPlanner(server)
-	plan, err := planner.PlanSession(sessionLaunchRequest{Mode: launchModeInteractive})
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
