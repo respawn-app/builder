@@ -110,6 +110,7 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 	}
 	next := plan
 	locked := plan.Store.Meta().Locked
+	mergedSource := mergeOverrideSources(plan.Source, loaded.Source)
 	if strings.TrimSpace(overrides.Model) != "" && !next.ModelContractLocked {
 		next.ActiveSettings.Model = loaded.Settings.Model
 		next.ConfiguredModelName = loaded.Settings.Model
@@ -134,7 +135,7 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 			next.ActiveSettings.EnabledTools = cloneEnabledToolSet(loaded.Settings.EnabledTools)
 		}
 		if strings.TrimSpace(overrides.Tools) != "" || strings.TrimSpace(overrides.Model) != "" {
-			next.EnabledTools = ActiveToolIDs(next.ActiveSettings, loaded.Source, locked)
+			next.EnabledTools = ActiveToolIDs(next.ActiveSettings, mergedSource, locked)
 		}
 	}
 	if strings.TrimSpace(overrides.OpenAIBaseURL) != "" {
@@ -143,7 +144,25 @@ func ApplyRunPromptOverrides(plan SessionPlan, overrides serverapi.RunPromptOver
 			return SessionPlan{}, err
 		}
 	}
+	next.Source = mergedSource
 	return next, nil
+}
+
+func mergeOverrideSources(base config.SourceReport, override config.SourceReport) config.SourceReport {
+	merged := base
+	merged.SettingsPath = override.SettingsPath
+	merged.SettingsFileExists = override.SettingsFileExists
+	merged.CreatedDefaultConfig = override.CreatedDefaultConfig
+	merged.Sources = make(map[string]string, len(base.Sources)+len(override.Sources))
+	for key, value := range base.Sources {
+		merged.Sources[key] = value
+	}
+	for key, value := range override.Sources {
+		if strings.TrimSpace(value) == "cli" {
+			merged.Sources[key] = value
+		}
+	}
+	return merged
 }
 
 func (p Planner) openStore(req SessionRequest) (*session.Store, error) {

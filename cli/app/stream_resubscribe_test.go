@@ -124,6 +124,54 @@ func TestPendingPromptEventRequeuesWhenAnswerRPCFails(t *testing.T) {
 	}
 }
 
+func TestStartPendingPromptEventsEmitsResolutionEvent(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	initial := &stubPromptActivitySubscription{steps: []stubPromptActivityStep{
+		{evt: clientui.PendingPromptEvent{Type: clientui.PendingPromptEventPending, PromptID: "ask-1", SessionID: "session-1", Question: "First?"}},
+		{evt: clientui.PendingPromptEvent{Type: clientui.PendingPromptEventResolved, PromptID: "ask-1", SessionID: "session-1"}},
+	}}
+
+	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
+		return nil, context.Canceled
+	}, stubPromptControlClient{})
+	defer stop()
+
+	first := waitPromptEvent(t, events)
+	if first.req.ID != "ask-1" {
+		t.Fatalf("unexpected first prompt event: %+v", first.req)
+	}
+	resolved := waitPromptEvent(t, events)
+	if !resolved.isResolution() || resolved.promptID() != "ask-1" {
+		t.Fatalf("expected resolution event for ask-1, got %+v", resolved)
+	}
+}
+
+func TestPendingPromptEventDoesNotRequeueOnTerminalAnswerError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	initial := &stubPromptActivitySubscription{steps: []stubPromptActivityStep{{evt: clientui.PendingPromptEvent{Type: clientui.PendingPromptEventPending, PromptID: "ask-1", SessionID: "session-1", Question: "First?"}}}}
+	control := &retryingPromptControlClient{askErr: serverapi.ErrPromptAlreadyResolved}
+
+	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
+		return nil, context.Canceled
+	}, control)
+	defer stop()
+
+	first := waitPromptEvent(t, events)
+	first.reply <- askReply{response: askquestion.Response{RequestID: first.req.ID, Answer: "handled"}}
+	select {
+	case retried := <-events:
+		t.Fatalf("did not expect retry after terminal prompt error: %+v", retried.req)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if got := control.askCallCount(); got != 1 {
+		t.Fatalf("AnswerAsk call count = %d, want 1", got)
+	}
+}
+
 type stubSessionActivityStep struct {
 	evt clientui.Event
 	err error

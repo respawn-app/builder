@@ -254,6 +254,47 @@ func TestApplyRunPromptOverridesRecomputesEnabledToolsForModelOverride(t *testin
 	}
 }
 
+func TestApplyRunPromptOverridesKeepsExplicitToolSourcesWhenOnlyModelOverrides(t *testing.T) {
+	root := t.TempDir()
+	workspace := t.TempDir()
+	containerDir := filepath.Join(root, "sessions", "workspace-a")
+	store, err := session.Create(containerDir, "workspace-a", workspace)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	plan := SessionPlan{
+		Store: store,
+		ActiveSettings: config.Settings{
+			Model: "gpt-5.4",
+			EnabledTools: map[tools.ID]bool{
+				tools.ToolShell: true,
+			},
+		},
+		EnabledTools:        []tools.ID{tools.ToolShell},
+		ConfiguredModelName: "gpt-5.4",
+		WorkspaceRoot:       workspace,
+		Source: config.SourceReport{Sources: map[string]string{
+			"model":                         "file",
+			"tools.shell":                   "cli",
+			"tools.multi_tool_use_parallel": "cli",
+		}},
+	}
+
+	updated, err := ApplyRunPromptOverrides(plan, serverapi.RunPromptOverrides{Model: "gpt-5.3-codex"})
+	if err != nil {
+		t.Fatalf("ApplyRunPromptOverrides: %v", err)
+	}
+	if updated.ActiveSettings.Model != "gpt-5.3-codex" {
+		t.Fatalf("model = %q, want gpt-5.3-codex", updated.ActiveSettings.Model)
+	}
+	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != tools.ToolShell {
+		t.Fatalf("enabled tools = %+v, want shell only", updated.EnabledTools)
+	}
+	if updated.Source.Sources["tools.multi_tool_use_parallel"] != "cli" {
+		t.Fatalf("tool source = %q, want cli", updated.Source.Sources["tools.multi_tool_use_parallel"])
+	}
+}
+
 type stubLaunchProjectViewService struct {
 	overview      serverapi.ProjectGetOverviewResponse
 	overviewCalls int

@@ -82,8 +82,27 @@ type clipboardImagePasteDoneMsg struct {
 }
 
 type askEvent struct {
-	req   askquestion.Request
-	reply chan askReply
+	req              askquestion.Request
+	reply            chan askReply
+	cancel           func()
+	resolvedPromptID string
+}
+
+func (e askEvent) promptID() string {
+	if strings.TrimSpace(e.resolvedPromptID) != "" {
+		return strings.TrimSpace(e.resolvedPromptID)
+	}
+	return strings.TrimSpace(e.req.ID)
+}
+
+func (e askEvent) isResolution() bool {
+	return strings.TrimSpace(e.resolvedPromptID) != ""
+}
+
+func (e askEvent) cancelPending() {
+	if e.cancel != nil {
+		e.cancel()
+	}
 }
 
 type askReply struct {

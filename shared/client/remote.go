@@ -658,6 +658,12 @@ func protocolError(resp *protocol.ResponseError) error {
 		return errors.Join(serverapi.ErrStreamUnavailable, errors.New(message))
 	case protocol.ErrCodeStreamFailed:
 		return errors.Join(serverapi.ErrStreamFailed, errors.New(message))
+	case protocol.ErrCodePromptNotFound:
+		return errors.Join(serverapi.ErrPromptNotFound, errors.New(message))
+	case protocol.ErrCodePromptResolved:
+		return errors.Join(serverapi.ErrPromptAlreadyResolved, errors.New(message))
+	case protocol.ErrCodePromptUnsupported:
+		return errors.Join(serverapi.ErrPromptUnsupported, errors.New(message))
 	default:
 		return errors.New(message)
 	}

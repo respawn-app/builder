@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"testing"
 	"time"
@@ -138,6 +139,39 @@ func TestRuntimeRegistryTracksPendingPromptsPerSession(t *testing.T) {
 	registry.Unregister("session-1", engine)
 	if items := registry.ListPendingPrompts("session-1"); len(items) != 0 {
 		t.Fatalf("expected no pending prompts after unregister, got %+v", items)
+	}
+}
+
+func TestRuntimeRegistrySubscribePromptActivityReplaysAllPendingPromptsBeyondBufferLimit(t *testing.T) {
+	registry := NewRuntimeRegistry()
+	engine := &runtime.Engine{}
+	registry.Register("session-1", engine)
+	t.Cleanup(func() { registry.Unregister("session-1", engine) })
+
+	for i := 0; i < promptActivityBufferSize+5; i++ {
+		registry.BeginPendingPrompt("session-1", askquestion.Request{ID: fmt.Sprintf("ask-%03d", i), Question: "pending"})
+	}
+
+	sub, err := registry.SubscribePromptActivity(context.Background(), "session-1")
+	if err != nil {
+		t.Fatalf("SubscribePromptActivity: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	for i := 0; i < promptActivityBufferSize+5; i++ {
+		evt, err := sub.Next(context.Background())
+		if err != nil {
+			t.Fatalf("Next %d: %v", i, err)
+		}
+		wantID := fmt.Sprintf("ask-%03d", i)
+		if evt.Type != clientui.PendingPromptEventPending || evt.PromptID != wantID {
+			t.Fatalf("event %d = %+v, want pending %q", i, evt, wantID)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := sub.Next(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected no extra replay events, got %v", err)
 	}
 }
 
