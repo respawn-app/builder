@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"builder/server/session"
-	"github.com/google/uuid"
 )
 
 type PersistenceSessionResolver struct {
@@ -38,7 +37,13 @@ func (r PersistenceSessionResolver) resolveSessionDir(sessionID string) (string,
 	if trimmedSessionID == "" {
 		return "", "", fmt.Errorf("session id is required")
 	}
-	if _, err := uuid.Parse(trimmedSessionID); err != nil {
+	if filepath.IsAbs(trimmedSessionID) || trimmedSessionID == "." || trimmedSessionID == ".." {
+		return "", "", fmt.Errorf("session id %q is invalid", trimmedSessionID)
+	}
+	if strings.Contains(trimmedSessionID, "/") || strings.Contains(trimmedSessionID, "\\") {
+		return "", "", fmt.Errorf("session id %q is invalid", trimmedSessionID)
+	}
+	if cleaned := filepath.Clean(trimmedSessionID); cleaned != trimmedSessionID {
 		return "", "", fmt.Errorf("session id %q is invalid", trimmedSessionID)
 	}
 	absContainerDir, err := filepath.Abs(containerDir)
