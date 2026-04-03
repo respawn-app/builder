@@ -279,7 +279,7 @@ func TestRuntimeEntryClosePendingPromptsDoesNotBlockWhenResponseAlreadyBuffered(
 	}
 }
 
-func TestRuntimeRegistryClearsPrimaryRunLeaseWhenRuntimeIsReplacedOrRemoved(t *testing.T) {
+func TestRuntimeRegistryPreservesPrimaryRunLeaseWhenRuntimeIsReplaced(t *testing.T) {
 	registry := NewRuntimeRegistry()
 	older := &runtime.Engine{}
 	newer := &runtime.Engine{}
@@ -290,6 +290,9 @@ func TestRuntimeRegistryClearsPrimaryRunLeaseWhenRuntimeIsReplacedOrRemoved(t *t
 		t.Fatalf("AcquirePrimaryRun first: %v", err)
 	}
 	registry.Register("session-1", newer)
+	if _, err := registry.AcquirePrimaryRun("session-1"); !errors.Is(err, primaryrun.ErrActivePrimaryRun) {
+		t.Fatalf("AcquirePrimaryRun after replace error = %v, want active primary run", err)
+	}
 	lease.Release()
 
 	secondLease, err := registry.AcquirePrimaryRun("session-1")
@@ -297,8 +300,20 @@ func TestRuntimeRegistryClearsPrimaryRunLeaseWhenRuntimeIsReplacedOrRemoved(t *t
 		t.Fatalf("AcquirePrimaryRun after replace: %v", err)
 	}
 	secondLease.Release()
+}
 
-	registry.Unregister("session-1", newer)
+func TestRuntimeRegistryClearsPrimaryRunLeaseWhenRuntimeIsRemoved(t *testing.T) {
+	registry := NewRuntimeRegistry()
+	engine := &runtime.Engine{}
+
+	registry.Register("session-1", engine)
+	lease, err := registry.AcquirePrimaryRun("session-1")
+	if err != nil {
+		t.Fatalf("AcquirePrimaryRun first: %v", err)
+	}
+	registry.Unregister("session-1", engine)
+	lease.Release()
+
 	thirdLease, err := registry.AcquirePrimaryRun("session-1")
 	if err != nil {
 		t.Fatalf("AcquirePrimaryRun after unregister: %v", err)
