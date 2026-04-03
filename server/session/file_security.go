@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"syscall"
 )
+
+var errSessionFileSymlink = errors.New("session file symlink")
 
 func readRegularSessionFile(path string, label string) ([]byte, error) {
 	fp, err := openRegularSessionFile(path, label)
@@ -22,9 +23,9 @@ func readRegularSessionFile(path string, label string) ([]byte, error) {
 }
 
 func openRegularSessionFile(path string, label string) (*os.File, error) {
-	fp, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	fp, err := openSessionFileReadOnly(path)
 	if err != nil {
-		if errors.Is(err, syscall.ELOOP) {
+		if isSymlinkOpenError(err) {
 			return nil, fmt.Errorf("%s must not be a symlink", label)
 		}
 		return nil, err
