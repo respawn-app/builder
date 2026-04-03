@@ -67,3 +67,26 @@ func TestResolveBootstrapPlanRespectsExplicitOverrides(t *testing.T) {
 		t.Fatalf("OpenAI base URL = %q, want http://override.local/v1", plan.OpenAIBaseURL)
 	}
 }
+
+func TestResolveBootstrapPlanStillUsesGlobalSessionLookupByID(t *testing.T) {
+	persistenceRoot := t.TempDir()
+	containerB := filepath.Join(persistenceRoot, "sessions", "workspace-b")
+	store, err := session.Create(containerB, "workspace-b", "/tmp/workspace-b")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: "http://workspace-b.local/v1"}); err != nil {
+		t.Fatalf("set continuation context: %v", err)
+	}
+
+	plan, err := ResolveBootstrapPlan(persistenceRoot, BootstrapRequest{SessionID: store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("resolve bootstrap plan: %v", err)
+	}
+	if plan.WorkspaceRoot != "/tmp/workspace-b" {
+		t.Fatalf("workspace root = %q, want /tmp/workspace-b", plan.WorkspaceRoot)
+	}
+	if plan.OpenAIBaseURL != "http://workspace-b.local/v1" || !plan.UseOpenAIBaseURL {
+		t.Fatalf("bootstrap plan = %+v, want workspace-b continuation", plan)
+	}
+}
