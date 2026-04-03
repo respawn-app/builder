@@ -101,7 +101,8 @@ func discoveredRemoteSupportsInteractiveSession(flags protocol.CapabilityFlags) 
 		flags.RuntimeControl &&
 		flags.PromptControl &&
 		flags.PromptActivity &&
-		flags.SessionActivity
+		flags.SessionActivity &&
+		flags.ProcessOutput
 }
 
 func resolveCLIWorkspaceRoot(opts Options) (string, error) {
