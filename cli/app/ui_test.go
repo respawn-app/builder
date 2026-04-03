@@ -2992,6 +2992,24 @@ func TestCompactDoneKeepsQueuedSteeringPending(t *testing.T) {
 	}
 }
 
+func TestCompactDoneSurfacesQueuedRuntimeWorkProbeFailure(t *testing.T) {
+	client := &runtimeControlFakeClient{err: errors.New("daemon stalled")}
+	m := newProjectedStaticUIModel()
+	m.engine = client
+	m.busy = true
+	m.compacting = true
+	m.activity = uiActivityRunning
+
+	next, _ := m.Update(compactDoneMsg{})
+	updated := next.(*uiModel)
+	if updated.activity != uiActivityError {
+		t.Fatalf("expected error activity after queued runtime work probe failure, got %v", updated.activity)
+	}
+	if client.appendedRole != "error" || !strings.Contains(client.appendedText, "daemon stalled") {
+		t.Fatalf("expected runtime error entry with probe failure, role=%q text=%q", client.appendedRole, client.appendedText)
+	}
+}
+
 func TestRenderInputLinesUsesHorizontalBordersOnly(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.termWidth = 40
@@ -5526,6 +5544,26 @@ func TestSlashAutoCompactionWithEngineTogglesRuntime(t *testing.T) {
 	}
 	if !updated.autoCompactionEnabled {
 		t.Fatal("expected ui auto-compaction enabled")
+	}
+}
+
+func TestSlashAutoCompactionKeepsPriorStateWhenRuntimeToggleFails(t *testing.T) {
+	client := &runtimeControlFakeClient{err: errors.New("daemon stalled")}
+	m := newProjectedStaticUIModel()
+	m.engine = client
+	m.autoCompactionEnabled = true
+	m.input = "/autocompaction off"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient status clear timer cmd")
+	}
+	if !updated.autoCompactionEnabled {
+		t.Fatal("expected prior auto-compaction state preserved on toggle failure")
+	}
+	if !strings.Contains(updated.transientStatus, "daemon stalled") {
+		t.Fatalf("expected transport error in transient status, got %q", updated.transientStatus)
 	}
 }
 

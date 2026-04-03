@@ -36,7 +36,7 @@ func (c *gatedRuntimeClient) SetFastModeEnabled(enabled bool) (bool, error) {
 func (c *gatedRuntimeClient) SetReviewerEnabled(enabled bool) (bool, string, error) {
 	return c.inner.SetReviewerEnabled(enabled)
 }
-func (c *gatedRuntimeClient) SetAutoCompactionEnabled(enabled bool) (bool, bool) {
+func (c *gatedRuntimeClient) SetAutoCompactionEnabled(enabled bool) (bool, bool, error) {
 	return c.inner.SetAutoCompactionEnabled(enabled)
 }
 func (c *gatedRuntimeClient) AppendLocalEntry(role, text string) {
@@ -72,7 +72,7 @@ func (c *gatedRuntimeClient) CompactContextForPreSubmit(ctx context.Context) err
 	return c.inner.CompactContextForPreSubmit(ctx)
 }
 
-func (c *gatedRuntimeClient) HasQueuedUserWork() bool { return c.inner.HasQueuedUserWork() }
+func (c *gatedRuntimeClient) HasQueuedUserWork() (bool, error) { return c.inner.HasQueuedUserWork() }
 
 func (c *gatedRuntimeClient) SubmitQueuedUserMessages(ctx context.Context) (string, error) {
 	lease, err := c.gate.AcquirePrimaryRun(c.sessionID)

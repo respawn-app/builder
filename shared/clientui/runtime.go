@@ -77,14 +77,14 @@ type RuntimeClient interface {
 	SetThinkingLevel(level string) error
 	SetFastModeEnabled(enabled bool) (bool, error)
 	SetReviewerEnabled(enabled bool) (bool, string, error)
-	SetAutoCompactionEnabled(enabled bool) (bool, bool)
+	SetAutoCompactionEnabled(enabled bool) (bool, bool, error)
 	AppendLocalEntry(role, text string)
 	ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error)
 	SubmitUserMessage(ctx context.Context, text string) (string, error)
 	SubmitUserShellCommand(ctx context.Context, command string) error
 	CompactContext(ctx context.Context, args string) error
 	CompactContextForPreSubmit(ctx context.Context) error
-	HasQueuedUserWork() bool
+	HasQueuedUserWork() (bool, error)
 	SubmitQueuedUserMessages(ctx context.Context) (string, error)
 	Interrupt() error
 	QueueUserMessage(text string)

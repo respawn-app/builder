@@ -263,7 +263,16 @@ func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea
 	if len(m.queued) > 0 {
 		return c.flushQueuedInputs(queueDrainAuto)
 	}
-	if m.hasQueuedRuntimeUserWork() {
+	queuedRuntimeWork, err := m.hasQueuedRuntimeUserWork()
+	if err != nil {
+		detailErr := formatSubmissionError(err)
+		m.activity = uiActivityError
+		m.appendLocalEntry("error", detailErr)
+		m.logf("queue_check.error err=%q", detailErr)
+		m.syncViewport()
+		return m, nil
+	}
+	if queuedRuntimeWork {
 		return m, c.startQueuedInjectionSubmission()
 	}
 	m.syncViewport()
