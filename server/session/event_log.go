@@ -205,7 +205,7 @@ func (s *Store) repairTrailingLineLocked(fp *os.File, fileSize int64) (bool, err
 }
 
 func readEventsFile(path string) (parsedEvents, error) {
-	fp, err := os.Open(path)
+	fp, err := openRegularSessionFile(path, "events file")
 	if err != nil {
 		return parsedEvents{}, fmt.Errorf("open events file: %w", err)
 	}
