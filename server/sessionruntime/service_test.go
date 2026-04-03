@@ -3,6 +3,7 @@ package sessionruntime
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"builder/server/registry"
@@ -143,5 +144,28 @@ func TestActivateSessionRuntimeHonorsCanceledContextBeforeInstallingHandle(t *te
 	}
 	if len(svc.handles) != 0 {
 		t.Fatalf("expected no installed handles after canceled activation, got %+v", svc.handles)
+	}
+}
+
+func TestActivateSessionRuntimeRejectsPathLikeSessionID(t *testing.T) {
+	svc := &Service{handles: make(map[string]*runtimeHandle)}
+	err := svc.ActivateSessionRuntime(context.Background(), serverapi.SessionRuntimeActivateRequest{
+		ClientRequestID: "req-1",
+		SessionID:       "../session-1",
+		WorkspaceRoot:   "/tmp/workspace-a",
+	})
+	if err == nil || !strings.Contains(err.Error(), "single session id") {
+		t.Fatalf("expected path-like session id rejection, got %v", err)
+	}
+}
+
+func TestReleaseSessionRuntimeRejectsPathLikeSessionID(t *testing.T) {
+	svc := &Service{handles: make(map[string]*runtimeHandle)}
+	err := svc.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
+		ClientRequestID: "req-1",
+		SessionID:       "sessions/workspace-a/session-1",
+	})
+	if err == nil || !strings.Contains(err.Error(), "single session id") {
+		t.Fatalf("expected path-like session id rejection, got %v", err)
 	}
 }
