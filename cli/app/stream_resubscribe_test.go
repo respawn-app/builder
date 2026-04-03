@@ -204,6 +204,31 @@ func TestPendingPromptEventRequeuesWhenAnswerRPCFails(t *testing.T) {
 	}
 }
 
+func TestPendingPromptEventRetryAfterStopDoesNotPanic(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	initial := &stubPromptActivitySubscription{steps: []stubPromptActivityStep{{evt: clientui.PendingPromptEvent{Type: clientui.PendingPromptEventPending, PromptID: "ask-1", SessionID: "session-1", Question: "First?"}}}}
+	control := &retryingPromptControlClient{askErr: errors.New("transport down")}
+
+	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
+		return nil, context.Canceled
+	}, nil, control)
+
+	first := waitPromptEvent(t, events)
+	stop()
+	first.reply <- askReply{response: askquestion.Response{RequestID: first.req.ID, Answer: "handled"}}
+	select {
+	case _, ok := <-events:
+		if ok {
+			t.Fatal("expected prompt channel to close after stop")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for prompt channel to close")
+	}
+	time.Sleep(150 * time.Millisecond)
+}
+
 func TestStartPendingPromptEventsEmitsResolutionEvent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
