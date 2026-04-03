@@ -277,6 +277,41 @@ func TestPendingPromptEventDoesNotRequeueOnTerminalAnswerError(t *testing.T) {
 	}
 }
 
+func TestPendingPromptEventDoesNotRequeueAfterPromptAlreadyResolvedLocally(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	initial := &stubPromptActivitySubscription{steps: []stubPromptActivityStep{
+		{evt: clientui.PendingPromptEvent{Type: clientui.PendingPromptEventPending, PromptID: "ask-1", SessionID: "session-1", Question: "First?"}},
+		{evt: clientui.PendingPromptEvent{Type: clientui.PendingPromptEventResolved, PromptID: "ask-1", SessionID: "session-1"}},
+	}}
+	control := &retryingPromptControlClient{askErr: errors.New("transport down")}
+
+	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
+		return nil, context.Canceled
+	}, nil, control)
+	defer stop()
+
+	first := waitPromptEvent(t, events)
+	if first.req.ID != "ask-1" {
+		t.Fatalf("unexpected first prompt event: %+v", first.req)
+	}
+	first.reply <- askReply{response: askquestion.Response{RequestID: first.req.ID, Answer: "handled"}}
+
+	resolved := waitPromptEvent(t, events)
+	if !resolved.isResolution() || resolved.promptID() != "ask-1" {
+		t.Fatalf("expected prompt resolution event, got %+v", resolved)
+	}
+	select {
+	case retried := <-events:
+		t.Fatalf("did not expect stale retry after local resolution: %+v", retried.req)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if got := control.askCallCount(); got != 1 {
+		t.Fatalf("AnswerAsk call count = %d, want 1", got)
+	}
+}
+
 type stubSessionActivityStep struct {
 	evt clientui.Event
 	err error
