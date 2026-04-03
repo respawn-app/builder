@@ -57,6 +57,13 @@ func (r SessionPersistInputDraftRequest) Validate() error {
 	return validateLifecycleSessionID(r.SessionID)
 }
 
+func (r SessionInitialInputRequest) Validate() error {
+	if strings.TrimSpace(r.SessionID) == "" {
+		return nil
+	}
+	return validateLifecycleSessionID(r.SessionID)
+}
+
 func (r SessionResolveTransitionRequest) Validate() error {
 	if strings.TrimSpace(r.SessionID) != "" {
 		if err := validateLifecycleSessionID(r.SessionID); err != nil {
