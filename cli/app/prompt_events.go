@@ -17,8 +17,9 @@ import (
 const promptActivityResubscribeDelay = 250 * time.Millisecond
 
 type promptActivitySubscriber func(context.Context) (serverapi.PromptActivitySubscription, error)
+type pendingPromptSnapshotProvider func(context.Context) (map[string]struct{}, error)
 
-func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivitySubscription, subscribe promptActivitySubscriber, control client.PromptControlClient) (<-chan askEvent, func()) {
+func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivitySubscription, subscribe promptActivitySubscriber, snapshot pendingPromptSnapshotProvider, control client.PromptControlClient) (<-chan askEvent, func()) {
 	out := make(chan askEvent, 16)
 	if sub == nil || subscribe == nil || control == nil {
 		close(out)
@@ -48,6 +49,12 @@ func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivityS
 				current, err = resubscribePromptActivity(pollCtx, subscribe)
 				if err != nil {
 					return
+				}
+				if err := reconcilePendingPromptSnapshot(pollCtx, snapshot, &pendingMu, pendingPromptIDs, out); err != nil {
+					if errors.Is(err, context.Canceled) {
+						_ = current.Close()
+						return
+					}
 				}
 				continue
 			}
@@ -86,6 +93,34 @@ func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivityS
 		}
 	}()
 	return out, cancel
+}
+
+func reconcilePendingPromptSnapshot(ctx context.Context, snapshot pendingPromptSnapshotProvider, pendingMu *sync.Mutex, pendingPromptIDs map[string]struct{}, out chan<- askEvent) error {
+	if snapshot == nil {
+		return nil
+	}
+	currentPending, err := snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	resolved := make([]string, 0)
+	pendingMu.Lock()
+	for promptID := range pendingPromptIDs {
+		if _, ok := currentPending[promptID]; ok {
+			continue
+		}
+		delete(pendingPromptIDs, promptID)
+		resolved = append(resolved, promptID)
+	}
+	pendingMu.Unlock()
+	for _, promptID := range resolved {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case out <- resolvedPromptEvent(promptID):
+		}
+	}
+	return nil
 }
 
 func resubscribePromptActivity(ctx context.Context, subscribe promptActivitySubscriber) (serverapi.PromptActivitySubscription, error) {
