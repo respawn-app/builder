@@ -9,7 +9,16 @@ import (
 
 func (c uiInputController) startQueuedInjectionSubmission() tea.Cmd {
 	m := c.model
-	if !m.hasQueuedRuntimeUserWork() {
+	queuedRuntimeWork, err := m.hasQueuedRuntimeUserWork()
+	if err != nil {
+		detailErr := formatSubmissionError(err)
+		m.activity = uiActivityError
+		m.appendLocalEntry("error", detailErr)
+		m.logf("queue_check.error err=%q", detailErr)
+		m.syncViewport()
+		return nil
+	}
+	if !queuedRuntimeWork {
 		return nil
 	}
 	c.startBusyActivity(false)

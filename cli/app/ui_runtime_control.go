@@ -45,11 +45,11 @@ func (m *uiModel) setRuntimeReviewerEnabled(enabled bool) (bool, string, error) 
 	return false, "", nil
 }
 
-func (m *uiModel) setRuntimeAutoCompactionEnabled(enabled bool) (bool, bool) {
+func (m *uiModel) setRuntimeAutoCompactionEnabled(enabled bool) (bool, bool, error) {
 	if client := m.runtimeClient(); client != nil {
 		return client.SetAutoCompactionEnabled(enabled)
 	}
-	return false, false
+	return false, false, nil
 }
 
 func (m *uiModel) appendRuntimeLocalEntry(role, text string) {
@@ -93,11 +93,11 @@ func (m *uiModel) compactRuntimeContextForPreSubmit(ctx context.Context) error {
 	return nil
 }
 
-func (m *uiModel) hasQueuedRuntimeUserWork() bool {
+func (m *uiModel) hasQueuedRuntimeUserWork() (bool, error) {
 	if client := m.runtimeClient(); client != nil {
 		return client.HasQueuedUserWork()
 	}
-	return false
+	return false, nil
 }
 
 func (m *uiModel) submitQueuedRuntimeUserMessages(ctx context.Context) (string, error) {
