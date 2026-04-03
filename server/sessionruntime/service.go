@@ -14,6 +14,7 @@ import (
 	"builder/server/runtime"
 	"builder/server/runtimewire"
 	"builder/server/session"
+	"builder/server/sessionpath"
 	"builder/server/tools"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
@@ -23,7 +24,7 @@ import (
 )
 
 type Service struct {
-	persistenceRoot  string
+	containerDir     string
 	authManager      *auth.Manager
 	fastModeState    *runtime.FastModeState
 	background       *shelltool.Manager
@@ -43,9 +44,9 @@ type runtimeHandle struct {
 	close              func()
 }
 
-func NewService(persistenceRoot string, authManager *auth.Manager, fastModeState *runtime.FastModeState, background *shelltool.Manager, backgroundRouter *runtimewire.BackgroundEventRouter, runtimes *registry.RuntimeRegistry, sessionStores *registry.SessionStoreRegistry) *Service {
+func NewService(containerDir string, authManager *auth.Manager, fastModeState *runtime.FastModeState, background *shelltool.Manager, backgroundRouter *runtimewire.BackgroundEventRouter, runtimes *registry.RuntimeRegistry, sessionStores *registry.SessionStoreRegistry) *Service {
 	return &Service{
-		persistenceRoot:  strings.TrimSpace(persistenceRoot),
+		containerDir:     strings.TrimSpace(containerDir),
 		authManager:      authManager,
 		fastModeState:    fastModeState,
 		background:       background,
@@ -72,7 +73,11 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 		handle.activationRequests[requestID] = struct{}{}
 		handle.refs++
 		s.mu.Unlock()
-		return waitForRuntimeHandleReady(ctx, handle)
+		if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
+			s.rollbackActivationClaim(sessionID, requestID, handle)
+			return err
+		}
+		return nil
 	}
 	s.mu.Unlock()
 
@@ -133,7 +138,11 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 	current, installed := s.installHandle(sessionID, requestID, handle)
 	if !installed {
 		_ = logger.Close()
-		return waitForRuntimeHandleReady(ctx, current)
+		if err := waitForRuntimeHandleReady(ctx, current); err != nil {
+			s.rollbackActivationClaim(sessionID, requestID, current)
+			return err
+		}
+		return nil
 	}
 	defer close(handle.ready)
 	if s.runtimes != nil {
@@ -195,7 +204,11 @@ func (s *Service) resolveStore(ctx context.Context, sessionID string) (*session.
 			return store, nil
 		}
 	}
-	store, err := session.OpenByID(s.persistenceRoot, sessionID)
+	sessionDir, err := sessionpath.ResolveScopedSessionDir(s.containerDir, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	store, err := session.Open(sessionDir)
 	if err != nil {
 		return nil, err
 	}
@@ -221,6 +234,25 @@ func (s *Service) installHandle(sessionID string, requestID string, handle *runt
 	}
 	s.handles[sessionID] = handle
 	return handle, true
+}
+
+func (s *Service) rollbackActivationClaim(sessionID string, requestID string, handle *runtimeHandle) {
+	if handle == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current := s.handles[strings.TrimSpace(sessionID)]
+	if current == nil || current != handle {
+		return
+	}
+	if _, ok := current.activationRequests[strings.TrimSpace(requestID)]; !ok {
+		return
+	}
+	delete(current.activationRequests, strings.TrimSpace(requestID))
+	if current.refs > 0 {
+		current.refs--
+	}
 }
 
 func waitForRuntimeHandleReady(ctx context.Context, handle *runtimeHandle) error {
