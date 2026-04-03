@@ -39,6 +39,7 @@ type runtimeHandle struct {
 	refs               int
 	activationRequests map[string]struct{}
 	releaseRequests    map[string]struct{}
+	ready              chan struct{}
 	close              func()
 }
 
@@ -66,12 +67,12 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 	if handle := s.handles[sessionID]; handle != nil {
 		if _, ok := handle.activationRequests[requestID]; ok {
 			s.mu.Unlock()
-			return nil
+			return waitForRuntimeHandleReady(ctx, handle)
 		}
 		handle.activationRequests[requestID] = struct{}{}
 		handle.refs++
 		s.mu.Unlock()
-		return nil
+		return waitForRuntimeHandleReady(ctx, handle)
 	}
 	s.mu.Unlock()
 
@@ -114,16 +115,11 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 			return s.runtimes.AwaitPromptResponse(context.Background(), sessionID, req)
 		})
 	}
-	if s.runtimes != nil {
-		s.runtimes.Register(sessionID, wiring.Engine)
-	}
-	if s.backgroundRouter != nil {
-		s.backgroundRouter.SetActiveSession(sessionID, wiring.Engine)
-	}
 	handle := &runtimeHandle{
 		refs:               1,
 		activationRequests: map[string]struct{}{requestID: {}},
 		releaseRequests:    make(map[string]struct{}),
+		ready:              make(chan struct{}),
 		close: func() {
 			if s.runtimes != nil {
 				s.runtimes.Unregister(sessionID, wiring.Engine)
@@ -134,9 +130,17 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 			_ = logger.Close()
 		},
 	}
-	if !s.installHandle(sessionID, requestID, handle) {
-		handle.close()
-		return nil
+	current, installed := s.installHandle(sessionID, requestID, handle)
+	if !installed {
+		_ = logger.Close()
+		return waitForRuntimeHandleReady(ctx, current)
+	}
+	defer close(handle.ready)
+	if s.runtimes != nil {
+		s.runtimes.Register(sessionID, wiring.Engine)
+	}
+	if s.backgroundRouter != nil {
+		s.backgroundRouter.SetActiveSession(sessionID, wiring.Engine)
 	}
 	return nil
 }
@@ -166,8 +170,12 @@ func (s *Service) ReleaseSessionRuntime(_ context.Context, req serverapi.Session
 		return nil
 	}
 	delete(s.handles, sessionID)
+	ready := handle.ready
 	closeFn := handle.close
 	s.mu.Unlock()
+	if ready != nil {
+		<-ready
+	}
 	if closeFn != nil {
 		closeFn()
 	}
@@ -200,19 +208,31 @@ func (s *Service) resolveStore(ctx context.Context, sessionID string) (*session.
 	return store, nil
 }
 
-func (s *Service) installHandle(sessionID string, requestID string, handle *runtimeHandle) bool {
+func (s *Service) installHandle(sessionID string, requestID string, handle *runtimeHandle) (*runtimeHandle, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if current := s.handles[sessionID]; current != nil {
 		if _, exists := current.activationRequests[requestID]; exists {
-			return false
+			return current, false
 		}
 		current.activationRequests[requestID] = struct{}{}
 		current.refs++
-		return false
+		return current, false
 	}
 	s.handles[sessionID] = handle
-	return true
+	return handle, true
+}
+
+func waitForRuntimeHandleReady(ctx context.Context, handle *runtimeHandle) error {
+	if handle == nil || handle.ready == nil {
+		return nil
+	}
+	select {
+	case <-handle.ready:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func parseToolIDs(raw []string) ([]tools.ID, error) {

@@ -116,7 +116,7 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 	if !m.hasRuntimeClient() {
 		return nil
 	}
-	return a.applyProjectedSessionView(m.runtimeSessionView())
+	return a.applyProjectedSessionView(m.refreshRuntimeSessionView())
 }
 
 func (a uiRuntimeAdapter) applyProjectedChatSnapshot(snapshot clientui.ChatSnapshot) tea.Cmd {

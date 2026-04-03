@@ -71,6 +71,7 @@ type RuntimeSessionView struct {
 
 type RuntimeClient interface {
 	MainView() RuntimeMainView
+	RefreshMainView() (RuntimeMainView, error)
 	Status() RuntimeStatus
 	SessionView() RuntimeSessionView
 	SetSessionName(name string) error
