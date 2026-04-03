@@ -450,6 +450,7 @@ func TestStatusRepositoryNormalizesGitCacheKeysAcrossSlashStyles(t *testing.T) {
 func TestCollectGitStatusSurfacesUnexpectedErrors(t *testing.T) {
 	workdir := t.TempDir()
 	cmd := exec.Command("git", "-C", workdir, "init")
+	cmd.Env = sanitizedGitEnv(os.Environ())
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v (%s)", err, out)
 	}
@@ -481,6 +482,7 @@ func TestCollectGitStatusHidesOutsideRepository(t *testing.T) {
 func TestCollectGitStatusDetectsNestedRepositorySubdirectory(t *testing.T) {
 	repoRoot := t.TempDir()
 	cmd := exec.Command("git", "-C", repoRoot, "init")
+	cmd.Env = sanitizedGitEnv(os.Environ())
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v (%s)", err, out)
 	}
@@ -504,6 +506,7 @@ func TestCollectGitStatusDetectsNestedRepositorySubdirectory(t *testing.T) {
 func TestCollectGitStatusDetectsSymlinkedRepositorySubdirectory(t *testing.T) {
 	repoRoot := t.TempDir()
 	cmd := exec.Command("git", "-C", repoRoot, "init")
+	cmd.Env = sanitizedGitEnv(os.Environ())
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v (%s)", err, out)
 	}
@@ -525,6 +528,30 @@ func TestCollectGitStatusDetectsSymlinkedRepositorySubdirectory(t *testing.T) {
 	}
 	if strings.TrimSpace(git.Branch) == "" {
 		t.Fatalf("expected branch detected for symlinked repository dir, got %+v", git)
+	}
+}
+
+func TestCollectGitStatusIgnoresInheritedGitRepositoryEnv(t *testing.T) {
+	repoRoot := t.TempDir()
+	cmd := exec.Command("git", "-C", repoRoot, "init")
+	cmd.Env = sanitizedGitEnv(os.Environ())
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v (%s)", err, out)
+	}
+	nestedDir := filepath.Join(repoRoot, "nested")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatalf("mkdir nested dir: %v", err)
+	}
+	t.Setenv("GIT_DIR", filepath.Join(t.TempDir(), ".git"))
+	t.Setenv("GIT_WORK_TREE", t.TempDir())
+	t.Setenv("GIT_COMMON_DIR", t.TempDir())
+
+	git := collectGitStatus(context.Background(), nestedDir)
+	if !git.Visible {
+		t.Fatalf("expected git section visible when inherited git env points elsewhere, got %+v", git)
+	}
+	if git.Error != "" {
+		t.Fatalf("expected no git error when inherited git env points elsewhere, got %+v", git)
 	}
 }
 
