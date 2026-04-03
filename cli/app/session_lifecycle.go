@@ -31,7 +31,7 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 		}
 		forceNewSession = false
 		nextSessionParentID = ""
-		runtimePlan, err := planner.PrepareRuntime(plan, os.Stderr, "app.start session_id="+plan.SessionID+" workspace="+plan.WorkspaceRoot+" model="+plan.ActiveSettings.Model)
+		runtimePlan, err := planner.PrepareRuntime(ctx, plan, os.Stderr, "app.start session_id="+plan.SessionID+" workspace="+plan.WorkspaceRoot+" model="+plan.ActiveSettings.Model)
 		if err != nil {
 			return err
 		}

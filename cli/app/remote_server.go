@@ -136,11 +136,11 @@ func (s *remoteAppServer) SessionViewClient() client.SessionViewClient {
 	}
 	return s.remote
 }
-func (s *remoteAppServer) PrepareRuntime(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
+func (s *remoteAppServer) PrepareRuntime(ctx context.Context, plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
 	if s == nil || s.remote == nil {
 		return nil, errors.New("remote server is required")
 	}
-	return prepareSharedRuntime(s, plan, diagnosticWriter, startLogLine)
+	return prepareSharedRuntime(ctx, s, plan, diagnosticWriter, startLogLine)
 }
 
 func (s *remoteAppServer) Reauthenticate(ctx context.Context, interactor authInteractor) error {

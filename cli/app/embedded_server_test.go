@@ -54,8 +54,57 @@ type testEmbeddedServer struct {
 	sessionRuntime       client.SessionRuntimeClient
 	sessionViewClient    client.SessionViewClient
 	sessionStores        *registry.SessionStoreRegistry
-	prepareRuntime       func(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error)
+	prepareRuntime       func(ctx context.Context, plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error)
 	reauthenticate       func(ctx context.Context, interactor authInteractor) error
+}
+
+type noOpSessionActivitySubscription struct{}
+
+func (noOpSessionActivitySubscription) Next(context.Context) (clientui.Event, error) {
+	return clientui.Event{}, io.EOF
+}
+
+func (noOpSessionActivitySubscription) Close() error { return nil }
+
+type recordingSessionRuntimeClient struct {
+	activate func(context.Context, serverapi.SessionRuntimeActivateRequest) error
+	release  func(context.Context, serverapi.SessionRuntimeReleaseRequest) error
+}
+
+func (c *recordingSessionRuntimeClient) ActivateSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeActivateRequest) error {
+	if c.activate != nil {
+		return c.activate(ctx, req)
+	}
+	return nil
+}
+
+func (c *recordingSessionRuntimeClient) ReleaseSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeReleaseRequest) error {
+	if c.release != nil {
+		return c.release(ctx, req)
+	}
+	return nil
+}
+
+type recordingSessionActivityClient struct {
+	subscribe func(context.Context, serverapi.SessionActivitySubscribeRequest) (serverapi.SessionActivitySubscription, error)
+}
+
+func (c *recordingSessionActivityClient) SubscribeSessionActivity(ctx context.Context, req serverapi.SessionActivitySubscribeRequest) (serverapi.SessionActivitySubscription, error) {
+	if c.subscribe != nil {
+		return c.subscribe(ctx, req)
+	}
+	return noOpSessionActivitySubscription{}, nil
+}
+
+type recordingPromptActivityClient struct {
+	subscribe func(context.Context, serverapi.PromptActivitySubscribeRequest) (serverapi.PromptActivitySubscription, error)
+}
+
+func (c *recordingPromptActivityClient) SubscribePromptActivity(ctx context.Context, req serverapi.PromptActivitySubscribeRequest) (serverapi.PromptActivitySubscription, error) {
+	if c.subscribe != nil {
+		return c.subscribe(ctx, req)
+	}
+	return nil, nil
 }
 
 type stubEmbeddedProcessViewClient struct {
@@ -152,9 +201,9 @@ func (s *testEmbeddedServer) SessionRuntimeClient() client.SessionRuntimeClient 
 func (s *testEmbeddedServer) SessionViewClient() client.SessionViewClient {
 	return s.sessionViewClient
 }
-func (s *testEmbeddedServer) PrepareRuntime(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
+func (s *testEmbeddedServer) PrepareRuntime(ctx context.Context, plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
 	if s.prepareRuntime != nil {
-		return s.prepareRuntime(plan, diagnosticWriter, startLogLine)
+		return s.prepareRuntime(ctx, plan, diagnosticWriter, startLogLine)
 	}
 	return nil, errors.New("test embedded server prepare runtime not configured")
 }
@@ -211,7 +260,7 @@ func TestEmbeddedAppServerPrepareRuntimeRegistersRuntimeForSessionViews(t *testi
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
-	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test prepare runtime")
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test prepare runtime")
 	if err != nil {
 		t.Fatalf("prepare runtime: %v", err)
 	}
@@ -249,7 +298,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessReadsForUIHydration(t *testi
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
-	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test prepare runtime process reads")
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test prepare runtime process reads")
 	if err != nil {
 		t.Fatalf("prepare runtime: %v", err)
 	}
@@ -311,7 +360,7 @@ func TestEmbeddedAppServerPrepareRuntimeExposesPendingAsksAndApprovals(t *testin
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
-	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test prepare runtime pending prompts")
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test prepare runtime pending prompts")
 	if err != nil {
 		t.Fatalf("prepare runtime: %v", err)
 	}
@@ -380,7 +429,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresSessionActivityForSharedClients(t *
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
-	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test prepare runtime session activity")
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test prepare runtime session activity")
 	if err != nil {
 		t.Fatalf("prepare runtime: %v", err)
 	}
@@ -459,7 +508,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessControlForUIActions(t *testi
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
-	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test prepare runtime process control")
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test prepare runtime process control")
 	if err != nil {
 		t.Fatalf("prepare runtime: %v", err)
 	}
@@ -504,7 +553,7 @@ func TestEmbeddedAppServerPrepareRuntimeWiresProcessOutputClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
-	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test prepare runtime process output")
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test prepare runtime process output")
 	if err != nil {
 		t.Fatalf("prepare runtime: %v", err)
 	}
@@ -531,7 +580,7 @@ func TestEmbeddedAppServerPrepareRuntimeUsesPrimaryRunGuardedRuntimeClient(t *te
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
-	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test prepare runtime primary run gate")
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test prepare runtime primary run gate")
 	if err != nil {
 		t.Fatalf("prepare runtime: %v", err)
 	}
@@ -602,7 +651,7 @@ func TestEmbeddedAppServerPrepareRuntimeRejectsConcurrentPrimarySubmitWhileRunIn
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
-	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test prepare runtime in-flight primary run gate")
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test prepare runtime in-flight primary run gate")
 	if err != nil {
 		t.Fatalf("prepare runtime: %v", err)
 	}
@@ -653,5 +702,52 @@ func TestEmbeddedAppServerPrepareRuntimeRejectsConcurrentPrimarySubmitWhileRunIn
 	}
 	if got := requests.Load(); got != 2 {
 		t.Fatalf("responses request count after third submit = %d, want 2", got)
+	}
+}
+
+func TestPrepareSharedRuntimeUsesCallerContextForAttachRPCs(t *testing.T) {
+	ctxKey := struct{}{}
+	ctxValue := "attach-context"
+	promptErr := errors.New("prompt subscribe failed")
+	server := &testEmbeddedServer{
+		sessionRuntime: &recordingSessionRuntimeClient{
+			activate: func(ctx context.Context, req serverapi.SessionRuntimeActivateRequest) error {
+				if got := ctx.Value(ctxKey); got != ctxValue {
+					t.Fatalf("activate context value = %v, want %v", got, ctxValue)
+				}
+				if req.SessionID != "session-1" {
+					t.Fatalf("unexpected activate request: %+v", req)
+				}
+				return nil
+			},
+			release: func(context.Context, serverapi.SessionRuntimeReleaseRequest) error { return nil },
+		},
+		sessionActivity: &recordingSessionActivityClient{
+			subscribe: func(ctx context.Context, req serverapi.SessionActivitySubscribeRequest) (serverapi.SessionActivitySubscription, error) {
+				if got := ctx.Value(ctxKey); got != ctxValue {
+					t.Fatalf("session activity context value = %v, want %v", got, ctxValue)
+				}
+				if req.SessionID != "session-1" {
+					t.Fatalf("unexpected session activity request: %+v", req)
+				}
+				return noOpSessionActivitySubscription{}, nil
+			},
+		},
+		promptActivityClient: &recordingPromptActivityClient{
+			subscribe: func(ctx context.Context, req serverapi.PromptActivitySubscribeRequest) (serverapi.PromptActivitySubscription, error) {
+				if got := ctx.Value(ctxKey); got != ctxValue {
+					t.Fatalf("prompt activity context value = %v, want %v", got, ctxValue)
+				}
+				if req.SessionID != "session-1" {
+					t.Fatalf("unexpected prompt activity request: %+v", req)
+				}
+				return nil, promptErr
+			},
+		},
+	}
+
+	_, err := prepareSharedRuntime(context.WithValue(context.Background(), ctxKey, ctxValue), server, sessionLaunchPlan{SessionID: "session-1", WorkspaceRoot: "/tmp/workspace"}, io.Discard, "test")
+	if !errors.Is(err, promptErr) {
+		t.Fatalf("prepareSharedRuntime error = %v, want %v", err, promptErr)
 	}
 }
