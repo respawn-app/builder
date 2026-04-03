@@ -1,15 +1,20 @@
 package session
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
+	"syscall"
 )
 
 func readRegularSessionFile(path string, label string) ([]byte, error) {
-	if err := ensureRegularSessionFile(path, label); err != nil {
+	fp, err := openRegularSessionFile(path, label)
+	if err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(path)
+	defer fp.Close()
+	data, err := io.ReadAll(fp)
 	if err != nil {
 		return nil, err
 	}
@@ -17,26 +22,29 @@ func readRegularSessionFile(path string, label string) ([]byte, error) {
 }
 
 func openRegularSessionFile(path string, label string) (*os.File, error) {
-	if err := ensureRegularSessionFile(path, label); err != nil {
+	fp, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		if errors.Is(err, syscall.ELOOP) {
+			return nil, fmt.Errorf("%s must not be a symlink", label)
+		}
 		return nil, err
 	}
-	fp, err := os.Open(path)
+	info, err := fp.Stat()
 	if err != nil {
+		_ = fp.Close()
 		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		_ = fp.Close()
+		return nil, fmt.Errorf("%s must be a regular file", label)
 	}
 	return fp, nil
 }
 
 func ensureRegularSessionFile(path string, label string) error {
-	info, err := os.Lstat(path)
+	fp, err := openRegularSessionFile(path, label)
 	if err != nil {
 		return err
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%s must not be a symlink", label)
-	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("%s must be a regular file", label)
-	}
-	return nil
+	return fp.Close()
 }
