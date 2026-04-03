@@ -432,6 +432,7 @@ func collectGitStatus(ctx context.Context, workdir string) uiStatusGitInfo {
 	gitCtx, cancel := context.WithTimeout(ctx, statusGitTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(gitCtx, "git", "-C", trimmedWorkdir, "status", "--porcelain=v2", "--branch")
+	cmd.Env = sanitizedGitEnv(os.Environ())
 	out, err := cmd.CombinedOutput()
 	if gitCtx.Err() == context.DeadlineExceeded || err != nil {
 		return uiStatusGitInfo{Visible: true, Error: statusGitError(err, string(out))}

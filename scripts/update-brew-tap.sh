@@ -37,6 +37,41 @@ tap_dir=""
 do_commit="false"
 do_push="false"
 
+unset_git_local_env() {
+	local config_count="${GIT_CONFIG_COUNT:-}"
+	unset \
+		GIT_ALTERNATE_OBJECT_DIRECTORIES \
+		GIT_COMMON_DIR \
+		GIT_CONFIG \
+		GIT_CONFIG_COUNT \
+		GIT_CONFIG_PARAMETERS \
+		GIT_DIR \
+		GIT_GLOB_PATHSPECS \
+		GIT_GRAFT_FILE \
+		GIT_ICASE_PATHSPECS \
+		GIT_IMPLICIT_WORK_TREE \
+		GIT_INDEX_FILE \
+		GIT_INTERNAL_SUPER_PREFIX \
+		GIT_LITERAL_PATHSPECS \
+		GIT_NAMESPACE \
+		GIT_NOGLOB_PATHSPECS \
+		GIT_NO_REPLACE_OBJECTS \
+		GIT_OBJECT_DIRECTORY \
+		GIT_PREFIX \
+		GIT_REPLACE_REF_BASE \
+		GIT_SHALLOW_FILE \
+		GIT_WORK_TREE
+
+	if [[ -n "$config_count" && "$config_count" =~ ^[0-9]+$ ]]; then
+		local i
+		for ((i = 0; i < config_count; i++)); do
+			unset "GIT_CONFIG_KEY_${i}" "GIT_CONFIG_VALUE_${i}"
+		done
+	fi
+}
+
+unset_git_local_env
+
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--version)
