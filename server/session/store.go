@@ -133,7 +133,7 @@ func hasSessionMeta(sessionDir string) bool {
 	if strings.TrimSpace(sessionDir) == "" {
 		return false
 	}
-	_, err := os.Stat(filepath.Join(sessionDir, sessionFile))
+	err := ensureRegularSessionFile(filepath.Join(sessionDir, sessionFile), "session meta")
 	return err == nil
 }
 
@@ -153,8 +153,7 @@ func ListSessions(workspaceContainerDir string) ([]Summary, error) {
 		}
 		sessionID := e.Name()
 		sessionPath := filepath.Join(workspaceContainerDir, sessionID)
-		metaPath := filepath.Join(sessionPath, sessionFile)
-		data, err := os.ReadFile(metaPath)
+		data, err := readRegularSessionFile(filepath.Join(sessionPath, sessionFile), "session meta")
 		if err != nil {
 			continue
 		}
@@ -389,13 +388,9 @@ func (s *Store) ReadEvents() ([]Event, error) {
 }
 
 func (s *Store) loadMetaLocked() error {
-	data, err := os.ReadFile(s.sessionFP)
+	m, err := readMetaFile(s.sessionFP)
 	if err != nil {
-		return fmt.Errorf("read session meta: %w", err)
-	}
-	var m Meta
-	if err := json.Unmarshal(data, &m); err != nil {
-		return fmt.Errorf("parse session meta: %w", err)
+		return err
 	}
 	s.meta = m
 	return nil
