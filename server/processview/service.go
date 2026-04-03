@@ -94,7 +94,7 @@ func (s *Service) GetProcess(_ context.Context, req serverapi.ProcessGetRequest)
 	return serverapi.ProcessGetResponse{Process: &process}, nil
 }
 
-func (s *Service) KillProcess(_ context.Context, req serverapi.ProcessKillRequest) (serverapi.ProcessKillResponse, error) {
+func (s *Service) KillProcess(ctx context.Context, req serverapi.ProcessKillRequest) (serverapi.ProcessKillResponse, error) {
 	if err := req.Validate(); err != nil {
 		return serverapi.ProcessKillResponse{}, err
 	}
@@ -125,8 +125,12 @@ func (s *Service) KillProcess(_ context.Context, req serverapi.ProcessKillReques
 			}
 			ready := entry.ready
 			s.killMu.Unlock()
-			<-ready
-			continue
+			select {
+			case <-ready:
+				continue
+			case <-ctx.Done():
+				return serverapi.ProcessKillResponse{}, ctx.Err()
+			}
 		}
 
 		entry = &killRequestEntry{fingerprint: fp, ready: make(chan struct{})}
