@@ -83,9 +83,10 @@ func (s *subscription) Next(ctx context.Context) (clientui.ProcessOutputChunk, e
 		return clientui.ProcessOutputChunk{}, serverapi.NormalizeStreamError(err)
 	}
 	return clientui.ProcessOutputChunk{
-		ProcessID:   chunk.ProcessID,
-		OffsetBytes: chunk.OffsetBytes,
-		Text:        chunk.Text,
+		ProcessID:       chunk.ProcessID,
+		OffsetBytes:     chunk.OffsetBytes,
+		NextOffsetBytes: chunk.NextOffsetBytes,
+		Text:            chunk.Text,
 	}, nil
 }
 

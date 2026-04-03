@@ -79,3 +79,23 @@ func TestPersistenceSessionResolverRejectsInvalidSessionIDs(t *testing.T) {
 		t.Fatalf("resolved legacy session = %q, want legacy-session", snapshot.Meta.SessionID)
 	}
 }
+
+func TestPersistenceSessionResolverRejectsSymlinkedSessionOutsideWorkspaceContainer(t *testing.T) {
+	root := t.TempDir()
+	containerDir := filepath.Join(root, "workspace-a")
+	escapedContainer := filepath.Join(root, "workspace-b")
+	if err := os.MkdirAll(containerDir, 0o755); err != nil {
+		t.Fatalf("mkdir workspace container: %v", err)
+	}
+	store, err := session.Create(escapedContainer, "workspace-b", "/tmp/workspace-b")
+	if err != nil {
+		t.Fatalf("create escaped session: %v", err)
+	}
+	if err := os.Symlink(store.Dir(), filepath.Join(containerDir, "escaped-link")); err != nil {
+		t.Fatalf("symlink escaped session: %v", err)
+	}
+	resolver := NewPersistenceSessionResolver(containerDir)
+	if _, err := resolver.ResolveSession(context.Background(), "escaped-link"); err == nil {
+		t.Fatal("expected resolver to reject symlink escaping workspace container")
+	}
+}
