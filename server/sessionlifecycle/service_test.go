@@ -2,6 +2,7 @@ package sessionlifecycle
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,7 +14,7 @@ import (
 	"builder/shared/serverapi"
 )
 
-func createPersistedSession(t *testing.T) (string, *session.Store) {
+func createPersistedSession(t *testing.T) (string, string, *session.Store) {
 	t.Helper()
 	persistenceRoot := t.TempDir()
 	containerDir := filepath.Join(persistenceRoot, "sessions", "workspace-x")
@@ -21,16 +22,16 @@ func createPersistedSession(t *testing.T) (string, *session.Store) {
 	if err != nil {
 		t.Fatalf("create session store: %v", err)
 	}
-	return persistenceRoot, store
+	return persistenceRoot, containerDir, store
 }
 
 func TestServiceGetInitialInputPrefersStoredDraft(t *testing.T) {
-	root, store := createPersistedSession(t)
+	_, containerDir, store := createPersistedSession(t)
 	if err := store.SetInputDraft("draft from store"); err != nil {
 		t.Fatalf("set input draft: %v", err)
 	}
 
-	service := NewService(root, nil, nil)
+	service := NewService(containerDir, nil, nil)
 	resp, err := service.GetInitialInput(context.Background(), serverapi.SessionInitialInputRequest{
 		SessionID:       store.Meta().SessionID,
 		TransitionInput: "transition input",
@@ -67,12 +68,12 @@ func TestServiceGetInitialInputRejectsPathLikeSessionID(t *testing.T) {
 }
 
 func TestServicePersistInputDraftWritesBySessionID(t *testing.T) {
-	root, store := createPersistedSession(t)
+	_, containerDir, store := createPersistedSession(t)
 	if err := store.SetName("session name"); err != nil {
 		t.Fatalf("set session name: %v", err)
 	}
 
-	service := NewService(root, nil, nil)
+	service := NewService(containerDir, nil, nil)
 	if _, err := service.PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{
 		SessionID: store.Meta().SessionID,
 		Input:     "saved by service",
@@ -114,7 +115,7 @@ func TestServiceResolveTransitionRejectsPathLikeSessionID(t *testing.T) {
 }
 
 func TestServiceResolveTransitionForkRollbackCreatesFork(t *testing.T) {
-	root, store := createPersistedSession(t)
+	root, containerDir, store := createPersistedSession(t)
 	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "u1"}); err != nil {
 		t.Fatalf("append user message: %v", err)
 	}
@@ -128,7 +129,7 @@ func TestServiceResolveTransitionForkRollbackCreatesFork(t *testing.T) {
 		t.Fatalf("append second assistant message: %v", err)
 	}
 
-	service := NewService(root, nil, nil)
+	service := NewService(containerDir, nil, nil)
 	resp, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
 		SessionID: store.Meta().SessionID,
 		Transition: serverapi.SessionTransition{
@@ -151,6 +152,59 @@ func TestServiceResolveTransitionForkRollbackCreatesFork(t *testing.T) {
 	}
 	if _, err := session.OpenByID(root, resp.NextSessionID); err != nil {
 		t.Fatalf("open forked session store: %v", err)
+	}
+}
+
+func TestServiceGetInitialInputRejectsSessionOutsideContainer(t *testing.T) {
+	root := t.TempDir()
+	containerA := filepath.Join(root, "sessions", "workspace-a")
+	containerB := filepath.Join(root, "sessions", "workspace-b")
+	if err := os.MkdirAll(containerA, 0o755); err != nil {
+		t.Fatalf("mkdir container A: %v", err)
+	}
+	store, err := session.Create(containerB, "workspace-b", "/tmp/workspace-b")
+	if err != nil {
+		t.Fatalf("create foreign session store: %v", err)
+	}
+	if err := store.SetInputDraft("foreign draft"); err != nil {
+		t.Fatalf("set foreign input draft: %v", err)
+	}
+
+	service := NewService(containerA, nil, nil)
+	_, err = service.GetInitialInput(context.Background(), serverapi.SessionInitialInputRequest{SessionID: store.Meta().SessionID})
+	if err == nil {
+		t.Fatal("expected foreign session lookup rejection")
+	}
+	if !strings.Contains(err.Error(), "not found") && !strings.Contains(err.Error(), "outside workspace container") {
+		t.Fatalf("expected scoped lookup rejection, got %v", err)
+	}
+}
+
+func TestServicePersistInputDraftRejectsSessionOutsideContainer(t *testing.T) {
+	root := t.TempDir()
+	containerA := filepath.Join(root, "sessions", "workspace-a")
+	containerB := filepath.Join(root, "sessions", "workspace-b")
+	if err := os.MkdirAll(containerA, 0o755); err != nil {
+		t.Fatalf("mkdir container A: %v", err)
+	}
+	store, err := session.Create(containerB, "workspace-b", "/tmp/workspace-b")
+	if err != nil {
+		t.Fatalf("create foreign session store: %v", err)
+	}
+	if err := store.SetName("foreign session"); err != nil {
+		t.Fatalf("persist foreign session meta: %v", err)
+	}
+
+	service := NewService(containerA, nil, nil)
+	_, err = service.PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{
+		SessionID: store.Meta().SessionID,
+		Input:     "should fail",
+	})
+	if err == nil {
+		t.Fatal("expected foreign session mutation rejection")
+	}
+	if !strings.Contains(err.Error(), "not found") && !strings.Contains(err.Error(), "outside workspace container") {
+		t.Fatalf("expected scoped lookup rejection, got %v", err)
 	}
 }
 

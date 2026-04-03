@@ -3,27 +3,27 @@ package sessionlifecycle
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 
 	"builder/server/auth"
 	serverlifecycle "builder/server/lifecycle"
 	"builder/server/session"
+	"builder/server/sessionpath"
 	"builder/shared/serverapi"
 )
 
 type Service struct {
-	persistenceRoot string
-	stores          sessionStoreResolver
-	authManager     *auth.Manager
+	containerDir string
+	stores       sessionStoreResolver
+	authManager  *auth.Manager
 }
 
 type sessionStoreResolver interface {
 	ResolveStore(ctx context.Context, sessionID string) (*session.Store, error)
 }
 
-func NewService(persistenceRoot string, stores sessionStoreResolver, authManager *auth.Manager) *Service {
-	return &Service{persistenceRoot: strings.TrimSpace(persistenceRoot), stores: stores, authManager: authManager}
+func NewService(containerDir string, stores sessionStoreResolver, authManager *auth.Manager) *Service {
+	return &Service{containerDir: strings.TrimSpace(containerDir), stores: stores, authManager: authManager}
 }
 
 func (s *Service) GetInitialInput(_ context.Context, req serverapi.SessionInitialInputRequest) (serverapi.SessionInitialInputResponse, error) {
@@ -118,11 +118,12 @@ func (s *Service) openStore(sessionID string) (*session.Store, error) {
 			return store, nil
 		}
 	}
-	if store, err := session.OpenByID(s.persistenceRoot, trimmed); err == nil {
-		return store, nil
-	}
-	if strings.TrimSpace(s.persistenceRoot) == "" {
+	if strings.TrimSpace(s.containerDir) == "" {
 		return nil, nil
 	}
-	return session.Open(filepath.Join(s.persistenceRoot, trimmed))
+	sessionDir, err := sessionpath.ResolveScopedSessionDir(s.containerDir, trimmed)
+	if err != nil {
+		return nil, err
+	}
+	return session.Open(sessionDir)
 }

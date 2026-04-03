@@ -193,7 +193,15 @@ func (s *testEmbeddedServer) SessionLifecycleClient() client.SessionLifecycleCli
 	if s.sessionLifecycle != nil {
 		return s.sessionLifecycle
 	}
-	return client.NewLoopbackSessionLifecycleClient(sessionlifecycle.NewService(s.cfg.PersistenceRoot, s.sessionStoreRegistry(), s.authManager))
+	containerDir := strings.TrimSpace(s.containerDir)
+	if containerDir == "" {
+		_, resolvedContainerDir, err := config.ResolveWorkspaceContainer(s.cfg)
+		if err != nil {
+			panic(err)
+		}
+		containerDir = resolvedContainerDir
+	}
+	return client.NewLoopbackSessionLifecycleClient(sessionlifecycle.NewService(containerDir, s.sessionStoreRegistry(), s.authManager))
 }
 func (s *testEmbeddedServer) SessionRuntimeClient() client.SessionRuntimeClient {
 	return s.sessionRuntime
