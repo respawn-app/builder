@@ -102,7 +102,6 @@ func (r *RuntimeRegistry) Register(sessionID string, engine *runtime.Engine) {
 	r.mu.Lock()
 	previous := r.engines[id]
 	r.engines[id] = entry
-	delete(r.primaryRun, id)
 	r.mu.Unlock()
 	if previous != nil {
 		previous.closePendingPrompts(io.EOF)
