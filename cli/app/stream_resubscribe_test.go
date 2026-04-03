@@ -61,7 +61,7 @@ func TestStartPendingPromptEventsResubscribesWithoutDuplicatingPendingPrompt(t *
 		next := remaining[0]
 		remaining = remaining[1:]
 		return next, nil
-	}, stubPromptControlClient{})
+	}, nil, stubPromptControlClient{})
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -81,6 +81,40 @@ func TestStartPendingPromptEventsResubscribesWithoutDuplicatingPendingPrompt(t *
 	}
 }
 
+func TestStartPendingPromptEventsResubscribeEmitsResolutionForPromptMissingFromSnapshot(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	initial := &stubPromptActivitySubscription{steps: []stubPromptActivityStep{{evt: clientui.PendingPromptEvent{Type: clientui.PendingPromptEventPending, PromptID: "ask-1", SessionID: "session-1", Question: "First?"}}, {err: serverapi.ErrStreamGap}}}
+	resubscribed := &stubPromptActivitySubscription{steps: []stubPromptActivityStep{{evt: clientui.PendingPromptEvent{Type: clientui.PendingPromptEventPending, PromptID: "ask-2", SessionID: "session-1", Question: "Second?"}}}}
+	remaining := []serverapi.PromptActivitySubscription{resubscribed}
+
+	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
+		if len(remaining) == 0 {
+			return nil, context.Canceled
+		}
+		next := remaining[0]
+		remaining = remaining[1:]
+		return next, nil
+	}, func(context.Context) (map[string]struct{}, error) {
+		return map[string]struct{}{"ask-2": {}}, nil
+	}, stubPromptControlClient{})
+	defer stop()
+
+	first := waitPromptEvent(t, events)
+	if first.req.ID != "ask-1" {
+		t.Fatalf("unexpected first prompt event: %+v", first.req)
+	}
+	resolved := waitPromptEvent(t, events)
+	if !resolved.isResolution() || resolved.promptID() != "ask-1" {
+		t.Fatalf("expected resolution event for ask-1 after resubscribe, got %+v", resolved)
+	}
+	second := waitPromptEvent(t, events)
+	if second.req.ID != "ask-2" || second.req.Question != "Second?" {
+		t.Fatalf("unexpected second prompt event: %+v", second.req)
+	}
+}
+
 func TestPendingPromptEventRequeuesWhenAnswerRPCFails(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -90,7 +124,7 @@ func TestPendingPromptEventRequeuesWhenAnswerRPCFails(t *testing.T) {
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, control)
+	}, nil, control)
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -135,7 +169,7 @@ func TestStartPendingPromptEventsEmitsResolutionEvent(t *testing.T) {
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, stubPromptControlClient{})
+	}, nil, stubPromptControlClient{})
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -157,7 +191,7 @@ func TestPendingPromptEventDoesNotRequeueOnTerminalAnswerError(t *testing.T) {
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, control)
+	}, nil, control)
 	defer stop()
 
 	first := waitPromptEvent(t, events)

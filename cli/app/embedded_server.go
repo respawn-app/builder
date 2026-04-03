@@ -237,6 +237,8 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 	})
 	askEvents, stopAskEvents := startPendingPromptEvents(ctx, promptSub, func(ctx context.Context) (serverapi.PromptActivitySubscription, error) {
 		return server.PromptActivityClient().SubscribePromptActivity(ctx, serverapi.PromptActivitySubscribeRequest{SessionID: plan.SessionID})
+	}, func(ctx context.Context) (map[string]struct{}, error) {
+		return listPendingPromptIDs(ctx, plan.SessionID, server.AskViewClient(), server.ApprovalViewClient())
 	}, server.PromptControlClient())
 	logger := &runLogger{}
 	_ = diagnosticWriter
@@ -265,6 +267,29 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 			_ = server.SessionRuntimeClient().ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{ClientRequestID: uuid.NewString(), SessionID: plan.SessionID})
 		},
 	}, nil
+}
+
+func listPendingPromptIDs(ctx context.Context, sessionID string, askViews client.AskViewClient, approvalViews client.ApprovalViewClient) (map[string]struct{}, error) {
+	ids := make(map[string]struct{})
+	if askViews != nil {
+		resp, err := askViews.ListPendingAsksBySession(ctx, serverapi.AskListPendingBySessionRequest{SessionID: sessionID})
+		if err != nil {
+			return nil, err
+		}
+		for _, ask := range resp.Asks {
+			ids[ask.AskID] = struct{}{}
+		}
+	}
+	if approvalViews != nil {
+		resp, err := approvalViews.ListPendingApprovalsBySession(ctx, serverapi.ApprovalListPendingBySessionRequest{SessionID: sessionID})
+		if err != nil {
+			return nil, err
+		}
+		for _, approval := range resp.Approvals {
+			ids[approval.ApprovalID] = struct{}{}
+		}
+	}
+	return ids, nil
 }
 
 func (s *embeddedAppServer) Reauthenticate(ctx context.Context, interactor authInteractor) error {
