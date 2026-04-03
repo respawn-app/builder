@@ -15,7 +15,10 @@ type stubRuntimeClient struct {
 }
 
 func (s *stubRuntimeClient) MainView() clientui.RuntimeMainView { return clientui.RuntimeMainView{} }
-func (s *stubRuntimeClient) Status() clientui.RuntimeStatus     { return clientui.RuntimeStatus{} }
+func (s *stubRuntimeClient) RefreshMainView() (clientui.RuntimeMainView, error) {
+	return clientui.RuntimeMainView{}, nil
+}
+func (s *stubRuntimeClient) Status() clientui.RuntimeStatus { return clientui.RuntimeStatus{} }
 func (s *stubRuntimeClient) SessionView() clientui.RuntimeSessionView {
 	return clientui.RuntimeSessionView{}
 }

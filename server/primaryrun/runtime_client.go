@@ -23,7 +23,10 @@ func NewGatedRuntimeClient(sessionID string, inner clientui.RuntimeClient, gate 
 	return &gatedRuntimeClient{sessionID: strings.TrimSpace(sessionID), inner: inner, gate: gate}
 }
 
-func (c *gatedRuntimeClient) MainView() clientui.RuntimeMainView       { return c.inner.MainView() }
+func (c *gatedRuntimeClient) MainView() clientui.RuntimeMainView { return c.inner.MainView() }
+func (c *gatedRuntimeClient) RefreshMainView() (clientui.RuntimeMainView, error) {
+	return c.inner.RefreshMainView()
+}
 func (c *gatedRuntimeClient) Status() clientui.RuntimeStatus           { return c.inner.Status() }
 func (c *gatedRuntimeClient) SessionView() clientui.RuntimeSessionView { return c.inner.SessionView() }
 func (c *gatedRuntimeClient) SetSessionName(name string) error         { return c.inner.SetSessionName(name) }

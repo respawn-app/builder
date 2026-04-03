@@ -16,12 +16,17 @@ func TestInstallHandleDoesNotDoubleCountDuplicateActivationRequest(t *testing.T)
 			refs:               1,
 			activationRequests: map[string]struct{}{"req-1": {}},
 			releaseRequests:    make(map[string]struct{}),
+			ready:              make(chan struct{}),
 		},
 	}}
+	close(svc.handles["session-1"].ready)
 
-	installed := svc.installHandle("session-1", "req-1", &runtimeHandle{})
+	handle, installed := svc.installHandle("session-1", "req-1", &runtimeHandle{})
 	if installed {
 		t.Fatal("expected duplicate activation to reuse existing handle")
+	}
+	if handle != svc.handles["session-1"] {
+		t.Fatal("expected duplicate activation to return existing handle")
 	}
 	if got := svc.handles["session-1"].refs; got != 1 {
 		t.Fatalf("refs = %d, want 1", got)
@@ -34,15 +39,85 @@ func TestInstallHandleCountsDistinctActivationRequestOnExistingHandle(t *testing
 			refs:               1,
 			activationRequests: map[string]struct{}{"req-1": {}},
 			releaseRequests:    make(map[string]struct{}),
+			ready:              make(chan struct{}),
 		},
 	}}
+	close(svc.handles["session-1"].ready)
 
-	installed := svc.installHandle("session-1", "req-2", &runtimeHandle{})
+	handle, installed := svc.installHandle("session-1", "req-2", &runtimeHandle{})
 	if installed {
 		t.Fatal("expected existing handle to remain authoritative")
 	}
+	if handle != svc.handles["session-1"] {
+		t.Fatal("expected distinct activation to return existing handle")
+	}
 	if got := svc.handles["session-1"].refs; got != 2 {
 		t.Fatalf("refs = %d, want 2", got)
+	}
+}
+
+func TestActivateSessionRuntimeWaitsForExistingHandleReady(t *testing.T) {
+	handle := &runtimeHandle{
+		refs:               1,
+		activationRequests: map[string]struct{}{"req-1": {}},
+		releaseRequests:    make(map[string]struct{}),
+		ready:              make(chan struct{}),
+	}
+	svc := &Service{handles: map[string]*runtimeHandle{"session-1": handle}}
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.ActivateSessionRuntime(context.Background(), serverapi.SessionRuntimeActivateRequest{
+			ClientRequestID: "req-2",
+			SessionID:       "session-1",
+			WorkspaceRoot:   "/tmp/workspace-a",
+		})
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("expected activation to wait for ready handle, got %v", err)
+	default:
+	}
+	close(handle.ready)
+	if err := <-done; err != nil {
+		t.Fatalf("ActivateSessionRuntime: %v", err)
+	}
+	if got := svc.handles["session-1"].refs; got != 2 {
+		t.Fatalf("refs = %d, want 2", got)
+	}
+}
+
+func TestReleaseSessionRuntimeWaitsForHandleReadyBeforeClose(t *testing.T) {
+	closed := make(chan struct{}, 1)
+	handle := &runtimeHandle{
+		refs:               1,
+		activationRequests: map[string]struct{}{"req-1": {}},
+		releaseRequests:    make(map[string]struct{}),
+		ready:              make(chan struct{}),
+		close: func() {
+			closed <- struct{}{}
+		},
+	}
+	svc := &Service{handles: map[string]*runtimeHandle{"session-1": handle}}
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
+			ClientRequestID: "rel-1",
+			SessionID:       "session-1",
+		})
+	}()
+	select {
+	case <-closed:
+		t.Fatal("expected release to wait for ready handle before close")
+	default:
+	}
+	close(handle.ready)
+	if err := <-done; err != nil {
+		t.Fatalf("ReleaseSessionRuntime: %v", err)
+	}
+	select {
+	case <-closed:
+	default:
+		t.Fatal("expected close after ready handle release")
 	}
 }
 
