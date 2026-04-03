@@ -3,6 +3,7 @@ package sessionlifecycle
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,6 +63,30 @@ func TestServicePersistInputDraftWritesBySessionID(t *testing.T) {
 	}
 	if reopened.Meta().InputDraft != "saved by service" {
 		t.Fatalf("input draft = %q, want %q", reopened.Meta().InputDraft, "saved by service")
+	}
+}
+
+func TestServicePersistInputDraftRejectsPathLikeSessionID(t *testing.T) {
+	service := NewService(t.TempDir(), nil, nil)
+	_, err := service.PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{
+		SessionID: "sessions/workspace-x/session-1",
+		Input:     "draft",
+	})
+	if err == nil || !strings.Contains(err.Error(), "single session id") {
+		t.Fatalf("expected path-like session id rejection, got %v", err)
+	}
+}
+
+func TestServiceResolveTransitionRejectsPathLikeSessionID(t *testing.T) {
+	service := NewService(t.TempDir(), nil, nil)
+	_, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
+		SessionID: "../session-1",
+		Transition: serverapi.SessionTransition{
+			Action: "continue",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "single session id") {
+		t.Fatalf("expected path-like session id rejection, got %v", err)
 	}
 }
 
