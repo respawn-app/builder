@@ -145,11 +145,11 @@ func (p *launchPlanner) PlanSession(ctx context.Context, req sessionLaunchReques
 	return applyCLIOverridesToSessionPlan(plan, cfg), nil
 }
 
-func (p *launchPlanner) PrepareRuntime(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
+func (p *launchPlanner) PrepareRuntime(ctx context.Context, plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
 	if p == nil || p.server == nil {
 		return nil, io.ErrClosedPipe
 	}
-	return p.server.PrepareRuntime(plan, diagnosticWriter, startLogLine)
+	return p.server.PrepareRuntime(ctx, plan, diagnosticWriter, startLogLine)
 }
 
 func (p *launchPlanner) resolvePlanRequest(ctx context.Context, req sessionLaunchRequest) (serverapi.SessionPlanRequest, error) {

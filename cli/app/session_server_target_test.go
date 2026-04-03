@@ -96,7 +96,7 @@ func TestStartSessionServerUsesDiscoveredDaemonForInteractiveFlow(t *testing.T) 
 	if err != nil {
 		t.Fatalf("PlanSession: %v", err)
 	}
-	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test remote interactive runtime")
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test remote interactive runtime")
 	if err != nil {
 		t.Fatalf("PrepareRuntime: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestStartSessionServerRejectsIncompatibleDiscoveredDaemonAndFallsBack(t *te
 	if err != nil {
 		t.Fatalf("PlanSession: %v", err)
 	}
-	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test embedded fallback runtime")
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test embedded fallback runtime")
 	if err != nil {
 		t.Fatalf("PrepareRuntime: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestStartSessionServerUsesInvocationOverridesWhenAttachingToDiscoveredDaemo
 	if err != nil {
 		t.Fatalf("PlanSession: %v", err)
 	}
-	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test remote interactive runtime override")
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test remote interactive runtime override")
 	if err != nil {
 		t.Fatalf("PrepareRuntime: %v", err)
 	}
@@ -363,7 +363,7 @@ func TestStartSessionServerUsesDiscoveredDaemonForPromptRoundTrip(t *testing.T) 
 	if err != nil {
 		t.Fatalf("PlanSession: %v", err)
 	}
-	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "test remote prompt round trip")
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test remote prompt round trip")
 	if err != nil {
 		t.Fatalf("PrepareRuntime: %v", err)
 	}
@@ -782,7 +782,7 @@ func runInteractiveWorkflowScenario(t *testing.T, server embeddedServer, wantRep
 	if err != nil {
 		t.Fatalf("PlanSession: %v", err)
 	}
-	runtimePlan, err := planner.PrepareRuntime(plan, io.Discard, "workflow parity")
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "workflow parity")
 	if err != nil {
 		t.Fatalf("PrepareRuntime: %v", err)
 	}
