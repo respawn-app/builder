@@ -90,12 +90,14 @@ func (s *outputSubscription) readNextChunk() (OutputChunk, bool, error) {
 		return OutputChunk{}, false, err
 	}
 	if len(data) > 0 {
+		nextOffset := s.offset + int64(len(data))
 		chunk := OutputChunk{
-			ProcessID:   s.processID,
-			OffsetBytes: s.offset,
-			Text:        sanitizeOutput(string(data)),
+			ProcessID:       s.processID,
+			OffsetBytes:     s.offset,
+			NextOffsetBytes: nextOffset,
+			Text:            sanitizeOutput(string(data)),
 		}
-		s.offset += int64(len(data))
+		s.offset = nextOffset
 		return chunk, false, nil
 	}
 	return OutputChunk{}, !running, nil

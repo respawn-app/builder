@@ -255,7 +255,7 @@ func TestManagerSubscribeOutputStreamsTailAndEndsAtEOF(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second Next: %v", err)
 	}
-	if second.OffsetBytes <= first.OffsetBytes || !strings.Contains(second.Text, "world") {
+	if second.OffsetBytes <= first.OffsetBytes || second.NextOffsetBytes <= second.OffsetBytes || !strings.Contains(second.Text, "world") {
 		t.Fatalf("unexpected second chunk: %+v", second)
 	}
 
@@ -263,7 +263,7 @@ func TestManagerSubscribeOutputStreamsTailAndEndsAtEOF(t *testing.T) {
 		t.Fatalf("expected EOF after process exit, got %v", err)
 	}
 
-	tailSub, err := manager.SubscribeOutput(context.Background(), result.SessionID, second.OffsetBytes+int64(len([]byte("world\n"))))
+	tailSub, err := manager.SubscribeOutput(context.Background(), result.SessionID, second.NextOffsetBytes)
 	if err != nil {
 		t.Fatalf("SubscribeOutput from tail: %v", err)
 	}
