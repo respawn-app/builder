@@ -33,7 +33,7 @@ type embeddedServer interface {
 	SessionLifecycleClient() client.SessionLifecycleClient
 	SessionRuntimeClient() client.SessionRuntimeClient
 	SessionViewClient() client.SessionViewClient
-	PrepareRuntime(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error)
+	PrepareRuntime(ctx context.Context, plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error)
 	Reauthenticate(ctx context.Context, interactor authInteractor) error
 }
 
@@ -195,14 +195,14 @@ func (s *embeddedAppServer) ContainerDir() string {
 	return s.inner.ContainerDir()
 }
 
-func (s *embeddedAppServer) PrepareRuntime(plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
+func (s *embeddedAppServer) PrepareRuntime(ctx context.Context, plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
 	if s == nil || s.inner == nil {
 		return nil, errors.New("embedded server is required")
 	}
-	return prepareSharedRuntime(s, plan, diagnosticWriter, startLogLine)
+	return prepareSharedRuntime(ctx, s, plan, diagnosticWriter, startLogLine)
 }
 
-func prepareSharedRuntime(server embeddedServer, plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
+func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error) {
 	if server == nil {
 		return nil, errors.New("server is required")
 	}
@@ -218,24 +218,24 @@ func prepareSharedRuntime(server embeddedServer, plan sessionLaunchPlan, diagnos
 		WorkspaceRoot:   plan.WorkspaceRoot,
 		Source:          plan.Source,
 	}
-	if err := server.SessionRuntimeClient().ActivateSessionRuntime(context.Background(), activateReq); err != nil {
+	if err := server.SessionRuntimeClient().ActivateSessionRuntime(ctx, activateReq); err != nil {
 		return nil, err
 	}
-	sub, err := server.SessionActivityClient().SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID})
+	sub, err := server.SessionActivityClient().SubscribeSessionActivity(ctx, serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID})
 	if err != nil {
 		_ = server.SessionRuntimeClient().ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{ClientRequestID: uuid.NewString(), SessionID: plan.SessionID})
 		return nil, err
 	}
-	promptSub, err := server.PromptActivityClient().SubscribePromptActivity(context.Background(), serverapi.PromptActivitySubscribeRequest{SessionID: plan.SessionID})
+	promptSub, err := server.PromptActivityClient().SubscribePromptActivity(ctx, serverapi.PromptActivitySubscribeRequest{SessionID: plan.SessionID})
 	if err != nil {
 		_ = sub.Close()
 		_ = server.SessionRuntimeClient().ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{ClientRequestID: uuid.NewString(), SessionID: plan.SessionID})
 		return nil, err
 	}
-	runtimeEvents, stopRuntimeEvents := startSessionActivityEvents(context.Background(), sub, func(ctx context.Context) (serverapi.SessionActivitySubscription, error) {
+	runtimeEvents, stopRuntimeEvents := startSessionActivityEvents(ctx, sub, func(ctx context.Context) (serverapi.SessionActivitySubscription, error) {
 		return server.SessionActivityClient().SubscribeSessionActivity(ctx, serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID})
 	})
-	askEvents, stopAskEvents := startPendingPromptEvents(context.Background(), promptSub, func(ctx context.Context) (serverapi.PromptActivitySubscription, error) {
+	askEvents, stopAskEvents := startPendingPromptEvents(ctx, promptSub, func(ctx context.Context) (serverapi.PromptActivitySubscription, error) {
 		return server.PromptActivityClient().SubscribePromptActivity(ctx, serverapi.PromptActivitySubscribeRequest{SessionID: plan.SessionID})
 	}, server.PromptControlClient())
 	logger := &runLogger{}
