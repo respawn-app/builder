@@ -4496,6 +4496,9 @@ func TestSubmitUserMessageSurfacesInFlightClearFailure(t *testing.T) {
 	if !seenClearFailureEvent {
 		t.Fatalf("expected %s event, got %+v", EventInFlightClearFailed, events)
 	}
+	if err := os.Chmod(sessionDir, 0o755); err != nil {
+		t.Fatalf("restore session dir permissions: %v", err)
+	}
 
 	reopened, openErr := session.Open(sessionDir)
 	if openErr != nil {
@@ -4509,10 +4512,10 @@ func TestSubmitUserMessageSurfacesInFlightClearFailure(t *testing.T) {
 		t.Fatalf("read durable runs after reopen: %v", err)
 	}
 	if len(runs) != 1 {
-		t.Fatalf("expected only the started durable run to persist, got %+v", runs)
+		t.Fatalf("expected durable run lifecycle to persist despite clear failure, got %+v", runs)
 	}
-	if runs[0].Status != session.RunStatusRunning || !runs[0].FinishedAt.IsZero() {
-		t.Fatalf("expected unfinished durable run after clear failure, got %+v", runs[0])
+	if runs[0].Status != session.RunStatusCompleted || runs[0].FinishedAt.IsZero() {
+		t.Fatalf("expected terminal durable run after clear failure, got %+v", runs[0])
 	}
 }
 

@@ -76,22 +76,22 @@ func (s *defaultExclusiveStepLifecycle) Run(ctx context.Context, options exclusi
 			}
 			s.engine.emit(Event{Kind: EventRunStateChanged, StepID: stepID, RunState: state})
 		}
+		if options.PersistRunLifecycle && snapshot != nil {
+			if _, persistErr := s.engine.store.AppendRunFinished(session.RunRecord{
+				RunID:      snapshot.RunID,
+				StepID:     snapshot.StepID,
+				Status:     session.RunStatus(snapshot.Status),
+				StartedAt:  snapshot.StartedAt,
+				FinishedAt: snapshot.FinishedAt,
+			}); persistErr != nil {
+				err = errors.Join(err, fmt.Errorf("append run finished: %w", persistErr))
+			}
+		}
 		if clearErr := s.engine.store.MarkInFlight(false); clearErr != nil {
 			wrapped := fmt.Errorf("mark in-flight false: %w", clearErr)
 			s.engine.emit(Event{Kind: EventInFlightClearFailed, StepID: stepID, Error: wrapped.Error()})
 			err = errors.Join(err, wrapped)
 		} else {
-			if options.PersistRunLifecycle && snapshot != nil {
-				if _, persistErr := s.engine.store.AppendRunFinished(session.RunRecord{
-					RunID:      snapshot.RunID,
-					StepID:     snapshot.StepID,
-					Status:     session.RunStatus(snapshot.Status),
-					StartedAt:  snapshot.StartedAt,
-					FinishedAt: snapshot.FinishedAt,
-				}); persistErr != nil {
-					err = errors.Join(err, fmt.Errorf("append run finished: %w", persistErr))
-				}
-			}
 			if s.background != nil {
 				s.background.ScheduleIfIdle()
 			}
