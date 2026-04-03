@@ -59,7 +59,7 @@ func SnapshotFromDir(sessionDir string) (Snapshot, error) {
 }
 
 func readMetaFile(path string) (Meta, error) {
-	data, err := os.ReadFile(path)
+	data, err := readRegularSessionFile(path, "session meta")
 	if err != nil {
 		return Meta{}, fmt.Errorf("read session meta: %w", err)
 	}

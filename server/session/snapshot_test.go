@@ -3,6 +3,7 @@ package session_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,5 +47,36 @@ func TestSnapshotByIDReturnsDurableSessionState(t *testing.T) {
 	}
 	if snapshot.Runs[0].RunID != "run-1" || snapshot.Runs[0].Status != session.RunStatusRunning {
 		t.Fatalf("unexpected snapshot run: %+v", snapshot.Runs[0])
+	}
+}
+
+func TestSnapshotFromDirRejectsSymlinkedEventsFile(t *testing.T) {
+	root := t.TempDir()
+	targetDir := filepath.Join(root, "target-session")
+	targetStore, err := session.Create(targetDir, "workspace-target", "/tmp/work-target")
+	if err != nil {
+		t.Fatalf("create target store: %v", err)
+	}
+	if _, err := targetStore.AppendEvent("target-step", "message", llm.Message{Role: llm.RoleUser, Content: "hello"}); err != nil {
+		t.Fatalf("append target event: %v", err)
+	}
+
+	sessionDir := filepath.Join(root, "session")
+	store, err := session.Create(sessionDir, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.SetName("session"); err != nil {
+		t.Fatalf("persist session meta: %v", err)
+	}
+	if err := os.Remove(filepath.Join(store.Dir(), "events.jsonl")); err != nil {
+		t.Fatalf("remove events file: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(targetStore.Dir(), "events.jsonl"), filepath.Join(store.Dir(), "events.jsonl")); err != nil {
+		t.Fatalf("symlink events file: %v", err)
+	}
+
+	if _, err := session.SnapshotFromDir(store.Dir()); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("expected snapshot to reject symlinked events file, got %v", err)
 	}
 }
