@@ -76,8 +76,17 @@ func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivityS
 	pollCtx, cancel := context.WithCancel(ctx)
 	var pendingMu sync.Mutex
 	pendingPromptIDs := make(map[string]struct{})
+	isPromptPending := func(promptID string) bool {
+		pendingMu.Lock()
+		defer pendingMu.Unlock()
+		_, exists := pendingPromptIDs[promptID]
+		return exists
+	}
 	var requeue func(clientui.PendingPromptEvent)
 	requeue = func(item clientui.PendingPromptEvent) {
+		if !isPromptPending(item.PromptID) {
+			return
+		}
 		_ = emitter.emit(pollCtx, pendingPromptEvent(pollCtx, item, control, requeue))
 	}
 	go func() {
