@@ -3,6 +3,7 @@ package processview
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -183,6 +184,53 @@ func TestServiceKillProcessRequiresClientRequestID(t *testing.T) {
 	if _, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ProcessID: "1000"}); err == nil {
 		t.Fatal("expected KillProcess to require client_request_id")
 	}
+}
+
+func TestServiceKillProcessDeduplicatesSuccessfulRetryByClientRequestID(t *testing.T) {
+	processes := &stubKillProcessSource{}
+	svc := NewService(processes)
+	req := serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "proc-1"}
+	if _, err := svc.KillProcess(context.Background(), req); err != nil {
+		t.Fatalf("first KillProcess: %v", err)
+	}
+	processes.killErr = errors.New("unknown session_id proc-1")
+	if _, err := svc.KillProcess(context.Background(), req); err != nil {
+		t.Fatalf("second KillProcess retry: %v", err)
+	}
+	if processes.killCalls != 1 {
+		t.Fatalf("kill call count = %d, want 1", processes.killCalls)
+	}
+}
+
+func TestServiceKillProcessRejectsClientRequestIDReuseWithDifferentPayload(t *testing.T) {
+	processes := &stubKillProcessSource{}
+	svc := NewService(processes)
+	if _, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "proc-1"}); err != nil {
+		t.Fatalf("first KillProcess: %v", err)
+	}
+	if _, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "proc-2"}); err == nil || !strings.Contains(err.Error(), "reused with different payload") {
+		t.Fatalf("expected payload reuse error, got %v", err)
+	}
+}
+
+type stubKillProcessSource struct {
+	killCalls int
+	killErr   error
+}
+
+func (s *stubKillProcessSource) List() []shelltool.Snapshot { return nil }
+
+func (s *stubKillProcessSource) Snapshot(string) (shelltool.Snapshot, error) {
+	return shelltool.Snapshot{}, nil
+}
+
+func (s *stubKillProcessSource) Kill(string) error {
+	s.killCalls++
+	return s.killErr
+}
+
+func (s *stubKillProcessSource) InlineOutput(string, int) (string, string, error) {
+	return "", "", nil
 }
 
 func waitForProcessCount(t *testing.T, manager *shelltool.Manager, count int) {
