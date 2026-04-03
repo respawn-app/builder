@@ -100,9 +100,10 @@ type BackgroundNoticeSummary struct {
 }
 
 type OutputChunk struct {
-	ProcessID   string
-	OffsetBytes int64
-	Text        string
+	ProcessID       string
+	OffsetBytes     int64
+	NextOffsetBytes int64
+	Text            string
 }
 
 type OutputSubscription interface {

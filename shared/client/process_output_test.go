@@ -37,7 +37,7 @@ func (s *stubProcessOutputSubscription) Next(context.Context) (clientui.ProcessO
 func (s *stubProcessOutputSubscription) Close() error { return nil }
 
 func TestLoopbackProcessOutputClientDelegatesToService(t *testing.T) {
-	svc := &stubProcessOutputService{sub: &stubProcessOutputSubscription{next: clientui.ProcessOutputChunk{ProcessID: "proc-1", OffsetBytes: 5, Text: "hello"}}}
+	svc := &stubProcessOutputService{sub: &stubProcessOutputSubscription{next: clientui.ProcessOutputChunk{ProcessID: "proc-1", OffsetBytes: 5, NextOffsetBytes: 10, Text: "hello"}}}
 	client := NewLoopbackProcessOutputClient(svc)
 	sub, err := client.SubscribeProcessOutput(context.Background(), serverapi.ProcessOutputSubscribeRequest{ProcessID: "proc-1", OffsetBytes: 5})
 	if err != nil {
@@ -50,7 +50,7 @@ func TestLoopbackProcessOutputClientDelegatesToService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Next: %v", err)
 	}
-	if chunk.ProcessID != "proc-1" || chunk.OffsetBytes != 5 || chunk.Text != "hello" {
+	if chunk.ProcessID != "proc-1" || chunk.OffsetBytes != 5 || chunk.NextOffsetBytes != 10 || chunk.Text != "hello" {
 		t.Fatalf("unexpected chunk: %+v", chunk)
 	}
 }
