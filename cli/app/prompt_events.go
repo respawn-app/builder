@@ -19,10 +19,58 @@ const promptActivityResubscribeDelay = 250 * time.Millisecond
 type promptActivitySubscriber func(context.Context) (serverapi.PromptActivitySubscription, error)
 type pendingPromptSnapshotProvider func(context.Context) (map[string]struct{}, error)
 
+type promptEventEmitter struct {
+	mu     sync.RWMutex
+	closed bool
+	out    chan askEvent
+}
+
+func newPromptEventEmitter(size int) *promptEventEmitter {
+	return &promptEventEmitter{out: make(chan askEvent, size)}
+}
+
+func (e *promptEventEmitter) channel() <-chan askEvent {
+	if e == nil {
+		return nil
+	}
+	return e.out
+}
+
+func (e *promptEventEmitter) emit(ctx context.Context, evt askEvent) bool {
+	if e == nil {
+		return false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.closed {
+		return false
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case e.out <- evt:
+		return true
+	}
+}
+
+func (e *promptEventEmitter) close() {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return
+	}
+	e.closed = true
+	close(e.out)
+}
+
 func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivitySubscription, subscribe promptActivitySubscriber, snapshot pendingPromptSnapshotProvider, control client.PromptControlClient) (<-chan askEvent, func()) {
-	out := make(chan askEvent, 16)
+	emitter := newPromptEventEmitter(16)
+	out := emitter.channel()
 	if sub == nil || subscribe == nil || control == nil {
-		close(out)
+		emitter.close()
 		return out, func() {}
 	}
 	pollCtx, cancel := context.WithCancel(ctx)
@@ -30,14 +78,10 @@ func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivityS
 	pendingPromptIDs := make(map[string]struct{})
 	var requeue func(clientui.PendingPromptEvent)
 	requeue = func(item clientui.PendingPromptEvent) {
-		select {
-		case <-pollCtx.Done():
-			return
-		case out <- pendingPromptEvent(pollCtx, item, control, requeue):
-		}
+		_ = emitter.emit(pollCtx, pendingPromptEvent(pollCtx, item, control, requeue))
 	}
 	go func() {
-		defer close(out)
+		defer emitter.close()
 		current := sub
 		for {
 			evt, err := current.Next(pollCtx)
@@ -51,7 +95,7 @@ func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivityS
 					if err != nil {
 						return
 					}
-					if err := reconcilePendingPromptSnapshot(pollCtx, snapshot, &pendingMu, pendingPromptIDs, out); err != nil {
+					if err := reconcilePendingPromptSnapshot(pollCtx, snapshot, &pendingMu, pendingPromptIDs, emitter); err != nil {
 						if errors.Is(err, context.Canceled) {
 							_ = nextSub.Close()
 							return
@@ -72,11 +116,9 @@ func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivityS
 				pendingMu.Lock()
 				delete(pendingPromptIDs, evt.PromptID)
 				pendingMu.Unlock()
-				select {
-				case <-pollCtx.Done():
+				if !emitter.emit(pollCtx, resolvedPromptEvent(evt.PromptID)) {
 					_ = current.Close()
 					return
-				case out <- resolvedPromptEvent(evt.PromptID):
 				}
 				continue
 			case clientui.PendingPromptEventPending:
@@ -90,18 +132,16 @@ func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivityS
 			default:
 				continue
 			}
-			select {
-			case <-pollCtx.Done():
+			if !emitter.emit(pollCtx, pendingPromptEvent(pollCtx, evt, control, requeue)) {
 				_ = current.Close()
 				return
-			case out <- pendingPromptEvent(pollCtx, evt, control, requeue):
 			}
 		}
 	}()
 	return out, cancel
 }
 
-func reconcilePendingPromptSnapshot(ctx context.Context, snapshot pendingPromptSnapshotProvider, pendingMu *sync.Mutex, pendingPromptIDs map[string]struct{}, out chan<- askEvent) error {
+func reconcilePendingPromptSnapshot(ctx context.Context, snapshot pendingPromptSnapshotProvider, pendingMu *sync.Mutex, pendingPromptIDs map[string]struct{}, emitter *promptEventEmitter) error {
 	if snapshot == nil {
 		return nil
 	}
@@ -120,10 +160,11 @@ func reconcilePendingPromptSnapshot(ctx context.Context, snapshot pendingPromptS
 	}
 	pendingMu.Unlock()
 	for _, promptID := range resolved {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case out <- resolvedPromptEvent(promptID):
+		if !emitter.emit(ctx, resolvedPromptEvent(promptID)) {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return context.Canceled
 		}
 	}
 	return nil
