@@ -2,7 +2,9 @@ package launch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -152,6 +154,98 @@ func TestPlannerInteractiveUsesProjectViewSessionsAndReopensBySessionID(t *testi
 	}
 	if projectViews.overviewCalls != 1 {
 		t.Fatalf("expected project overview to be used once, got %d", projectViews.overviewCalls)
+	}
+}
+
+func TestPlannerInteractivePickerReopensSelectedSessionWithinActiveContainer(t *testing.T) {
+	root := t.TempDir()
+	containerA := filepath.Join(root, "sessions", "workspace-a")
+	containerB := filepath.Join(root, "sessions", "workspace-b")
+	selected, err := session.Create(containerA, "workspace-a", "/tmp/workspace-a")
+	if err != nil {
+		t.Fatalf("create selected session: %v", err)
+	}
+	if err := selected.SetName("selected"); err != nil {
+		t.Fatalf("persist selected session meta: %v", err)
+	}
+	otherDir := filepath.Join(containerB, selected.Meta().SessionID)
+	if err := os.MkdirAll(otherDir, 0o755); err != nil {
+		t.Fatalf("mkdir duplicate session dir: %v", err)
+	}
+	duplicateMeta := selected.Meta()
+	duplicateMeta.WorkspaceContainer = "workspace-b"
+	duplicateMeta.WorkspaceRoot = "/tmp/workspace-b"
+	duplicateMeta.Name = "duplicate"
+	duplicateData, err := json.Marshal(duplicateMeta)
+	if err != nil {
+		t.Fatalf("marshal duplicate session meta: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(otherDir, "session.json"), duplicateData, 0o644); err != nil {
+		t.Fatalf("write duplicate session meta: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(otherDir, "events.jsonl"), nil, 0o644); err != nil {
+		t.Fatalf("write duplicate session events: %v", err)
+	}
+	planner := Planner{
+		Config:       config.App{WorkspaceRoot: "/tmp/workspace-a", PersistenceRoot: root, Settings: config.Settings{}},
+		ContainerDir: containerA,
+		PickSession: func(summaries []session.Summary) (SessionSelection, error) {
+			picked := summaries[0]
+			return SessionSelection{Session: &picked}, nil
+		},
+	}
+
+	plan, err := planner.PlanSession(SessionRequest{Mode: ModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	if plan.Store.Dir() != selected.Dir() {
+		t.Fatalf("opened session dir = %q, want %q", plan.Store.Dir(), selected.Dir())
+	}
+	if plan.Store.Meta().WorkspaceContainer != "workspace-a" {
+		t.Fatalf("opened workspace container = %q, want workspace-a", plan.Store.Meta().WorkspaceContainer)
+	}
+}
+
+func TestPlannerSelectedSessionIDUsesActiveContainerScope(t *testing.T) {
+	root := t.TempDir()
+	containerA := filepath.Join(root, "sessions", "workspace-a")
+	containerB := filepath.Join(root, "sessions", "workspace-b")
+	selected, err := session.Create(containerA, "workspace-a", "/tmp/workspace-a")
+	if err != nil {
+		t.Fatalf("create selected session: %v", err)
+	}
+	if err := selected.SetName("selected"); err != nil {
+		t.Fatalf("persist selected session meta: %v", err)
+	}
+	duplicateDir := filepath.Join(containerB, selected.Meta().SessionID)
+	if err := os.MkdirAll(duplicateDir, 0o755); err != nil {
+		t.Fatalf("mkdir duplicate session dir: %v", err)
+	}
+	duplicateMeta := selected.Meta()
+	duplicateMeta.WorkspaceContainer = "workspace-b"
+	duplicateMeta.WorkspaceRoot = "/tmp/workspace-b"
+	duplicateData, err := json.Marshal(duplicateMeta)
+	if err != nil {
+		t.Fatalf("marshal duplicate session meta: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(duplicateDir, "session.json"), duplicateData, 0o644); err != nil {
+		t.Fatalf("write duplicate session meta: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(duplicateDir, "events.jsonl"), nil, 0o644); err != nil {
+		t.Fatalf("write duplicate session events: %v", err)
+	}
+	planner := Planner{
+		Config:       config.App{WorkspaceRoot: "/tmp/workspace-a", PersistenceRoot: root, Settings: config.Settings{}},
+		ContainerDir: containerA,
+	}
+
+	plan, err := planner.PlanSession(SessionRequest{Mode: ModeInteractive, SelectedSessionID: selected.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	if plan.Store.Dir() != selected.Dir() {
+		t.Fatalf("opened session dir = %q, want %q", plan.Store.Dir(), selected.Dir())
 	}
 }
 

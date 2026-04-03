@@ -99,7 +99,7 @@ func (p Planner) openStore(req SessionRequest) (*session.Store, error) {
 		return nil, errors.New("launch planner container dir is required")
 	}
 	if strings.TrimSpace(req.SelectedSessionID) != "" {
-		return session.OpenByID(p.Config.PersistenceRoot, req.SelectedSessionID)
+		return p.openScopedSession(req.SelectedSessionID)
 	}
 	if req.ForceNewSession || req.Mode == ModeHeadless {
 		return p.createSession(req.ParentSessionID)
@@ -139,7 +139,24 @@ func (p Planner) pickOrCreateSession(req SessionRequest, summaries []session.Sum
 	if picked.Session == nil {
 		return nil, errors.New("no session selected")
 	}
-	return session.OpenByID(p.Config.PersistenceRoot, picked.Session.SessionID)
+	return p.openScopedSession(picked.Session.SessionID)
+}
+
+func (p Planner) openScopedSession(sessionID string) (*session.Store, error) {
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	if trimmedSessionID == "" {
+		return nil, errors.New("session id is required")
+	}
+	if filepath.IsAbs(trimmedSessionID) || trimmedSessionID == "." || trimmedSessionID == ".." {
+		return nil, errors.New("session id is invalid")
+	}
+	if strings.Contains(trimmedSessionID, "/") || strings.Contains(trimmedSessionID, "\\") {
+		return nil, errors.New("session id is invalid")
+	}
+	if cleaned := filepath.Clean(trimmedSessionID); cleaned != trimmedSessionID {
+		return nil, errors.New("session id is invalid")
+	}
+	return session.Open(filepath.Join(p.ContainerDir, trimmedSessionID))
 }
 
 func sessionSummariesFromProjectView(items []clientui.SessionSummary) []session.Summary {
