@@ -3,6 +3,7 @@ package serverapi
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 )
 
@@ -53,15 +54,34 @@ type SessionLifecycleService interface {
 }
 
 func (r SessionPersistInputDraftRequest) Validate() error {
-	if strings.TrimSpace(r.SessionID) == "" {
-		return errors.New("session_id is required")
+	return validateLifecycleSessionID(r.SessionID)
+}
+
+func (r SessionResolveTransitionRequest) Validate() error {
+	if strings.TrimSpace(r.SessionID) != "" {
+		if err := validateLifecycleSessionID(r.SessionID); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(r.Transition.Action) == "" {
+		return errors.New("transition.action is required")
 	}
 	return nil
 }
 
-func (r SessionResolveTransitionRequest) Validate() error {
-	if strings.TrimSpace(r.Transition.Action) == "" {
-		return errors.New("transition.action is required")
+func validateLifecycleSessionID(sessionID string) error {
+	trimmed := strings.TrimSpace(sessionID)
+	if trimmed == "" {
+		return errors.New("session_id is required")
+	}
+	if filepath.IsAbs(trimmed) || trimmed == "." || trimmed == ".." {
+		return errors.New("session_id must be a single session id")
+	}
+	if strings.Contains(trimmed, "/") || strings.Contains(trimmed, "\\") {
+		return errors.New("session_id must be a single session id")
+	}
+	if filepath.Clean(trimmed) != trimmed {
+		return errors.New("session_id must be a single session id")
 	}
 	return nil
 }

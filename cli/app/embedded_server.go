@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"time"
 
 	"builder/server/auth"
 	serverembedded "builder/server/embedded"
@@ -12,6 +13,8 @@ import (
 	"builder/shared/serverapi"
 	"github.com/google/uuid"
 )
+
+const runtimeReleaseTimeout = 3 * time.Second
 
 type embeddedServer interface {
 	Close() error
@@ -223,13 +226,13 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 	}
 	sub, err := server.SessionActivityClient().SubscribeSessionActivity(ctx, serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID})
 	if err != nil {
-		_ = server.SessionRuntimeClient().ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{ClientRequestID: uuid.NewString(), SessionID: plan.SessionID})
+		releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID)
 		return nil, err
 	}
 	promptSub, err := server.PromptActivityClient().SubscribePromptActivity(ctx, serverapi.PromptActivitySubscribeRequest{SessionID: plan.SessionID})
 	if err != nil {
 		_ = sub.Close()
-		_ = server.SessionRuntimeClient().ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{ClientRequestID: uuid.NewString(), SessionID: plan.SessionID})
+		releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID)
 		return nil, err
 	}
 	runtimeEvents, stopRuntimeEvents := startSessionActivityEvents(ctx, sub, func(ctx context.Context) (serverapi.SessionActivitySubscription, error) {
@@ -264,9 +267,18 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 		close: func() {
 			stopAskEvents()
 			stopRuntimeEvents()
-			_ = server.SessionRuntimeClient().ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{ClientRequestID: uuid.NewString(), SessionID: plan.SessionID})
+			releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID)
 		},
 	}, nil
+}
+
+func releaseSharedRuntime(client serverapi.SessionRuntimeService, sessionID string) {
+	if client == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), runtimeReleaseTimeout)
+	defer cancel()
+	_ = client.ReleaseSessionRuntime(ctx, serverapi.SessionRuntimeReleaseRequest{ClientRequestID: uuid.NewString(), SessionID: sessionID})
 }
 
 func listPendingPromptIDs(ctx context.Context, sessionID string, askViews client.AskViewClient, approvalViews client.ApprovalViewClient) (map[string]struct{}, error) {
