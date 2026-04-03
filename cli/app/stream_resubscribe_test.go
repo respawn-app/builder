@@ -115,6 +115,52 @@ func TestStartPendingPromptEventsResubscribeEmitsResolutionForPromptMissingFromS
 	}
 }
 
+func TestStartPendingPromptEventsRetriesResubscribeWhenSnapshotReadFails(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	initial := &stubPromptActivitySubscription{steps: []stubPromptActivityStep{{evt: clientui.PendingPromptEvent{Type: clientui.PendingPromptEventPending, PromptID: "ask-1", SessionID: "session-1", Question: "First?"}}, {err: serverapi.ErrStreamGap}}}
+	firstResubscribe := &stubPromptActivitySubscription{}
+	secondResubscribe := &stubPromptActivitySubscription{steps: []stubPromptActivityStep{{evt: clientui.PendingPromptEvent{Type: clientui.PendingPromptEventPending, PromptID: "ask-2", SessionID: "session-1", Question: "Second?"}}}}
+	remaining := []serverapi.PromptActivitySubscription{firstResubscribe, secondResubscribe}
+	snapshotCalls := 0
+
+	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
+		if len(remaining) == 0 {
+			return nil, context.Canceled
+		}
+		next := remaining[0]
+		remaining = remaining[1:]
+		return next, nil
+	}, func(context.Context) (map[string]struct{}, error) {
+		snapshotCalls++
+		if snapshotCalls == 1 {
+			return nil, errors.New("snapshot unavailable")
+		}
+		return map[string]struct{}{"ask-2": {}}, nil
+	}, stubPromptControlClient{})
+	defer stop()
+
+	first := waitPromptEvent(t, events)
+	if first.req.ID != "ask-1" {
+		t.Fatalf("unexpected first prompt event: %+v", first.req)
+	}
+	resolved := waitPromptEventWithin(t, events, 2*time.Second)
+	if !resolved.isResolution() || resolved.promptID() != "ask-1" {
+		t.Fatalf("expected resolution event for ask-1 after successful retry, got %+v", resolved)
+	}
+	second := waitPromptEventWithin(t, events, 2*time.Second)
+	if second.req.ID != "ask-2" || second.req.Question != "Second?" {
+		t.Fatalf("unexpected second prompt event: %+v", second.req)
+	}
+	if snapshotCalls != 2 {
+		t.Fatalf("snapshot calls = %d, want 2", snapshotCalls)
+	}
+	if !firstResubscribe.closed {
+		t.Fatal("expected failed resubscribe stream to be closed")
+	}
+}
+
 func TestPendingPromptEventRequeuesWhenAnswerRPCFails(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -312,11 +358,15 @@ func waitSessionActivityEvent(t *testing.T, events <-chan clientui.Event) client
 }
 
 func waitPromptEvent(t *testing.T, events <-chan askEvent) askEvent {
+	return waitPromptEventWithin(t, events, time.Second)
+}
+
+func waitPromptEventWithin(t *testing.T, events <-chan askEvent, timeout time.Duration) askEvent {
 	t.Helper()
 	select {
 	case evt := <-events:
 		return evt
-	case <-time.After(time.Second):
+	case <-time.After(timeout):
 		t.Fatal("timed out waiting for prompt event")
 		return askEvent{}
 	}

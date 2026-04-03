@@ -46,15 +46,21 @@ func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivityS
 				if errors.Is(err, context.Canceled) {
 					return
 				}
-				current, err = resubscribePromptActivity(pollCtx, subscribe)
-				if err != nil {
-					return
-				}
-				if err := reconcilePendingPromptSnapshot(pollCtx, snapshot, &pendingMu, pendingPromptIDs, out); err != nil {
-					if errors.Is(err, context.Canceled) {
-						_ = current.Close()
+				for {
+					nextSub, err := resubscribePromptActivity(pollCtx, subscribe)
+					if err != nil {
 						return
 					}
+					if err := reconcilePendingPromptSnapshot(pollCtx, snapshot, &pendingMu, pendingPromptIDs, out); err != nil {
+						if errors.Is(err, context.Canceled) {
+							_ = nextSub.Close()
+							return
+						}
+						_ = nextSub.Close()
+						continue
+					}
+					current = nextSub
+					break
 				}
 				continue
 			}
