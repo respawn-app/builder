@@ -513,6 +513,129 @@ func TestStartSessionServerUsesDiscoveredDaemonForSessionLifecycleDraftPersisten
 	}
 }
 
+func TestStartSessionServerListsPendingPromptSnapshotOverRemoteReads(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srv, err := serve.Start(context.Background(), serverstartup.Request{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+	}, memoryAuthHandler{state: auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "test-key"},
+		},
+		UpdatedAt: time.Now().UTC(),
+	}}, autoOnboarding{})
+	if err != nil {
+		t.Fatalf("serve.Start: %v", err)
+	}
+	defer func() { _ = srv.Close() }()
+
+	serveCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Serve(serveCtx)
+	}()
+	waitForDiscoveryRecord(t, workspace)
+
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("startSessionServer: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+	if _, ok := server.(*remoteAppServer); !ok {
+		t.Fatalf("expected remote app server, got %T", server)
+	}
+
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
+	if err != nil {
+		t.Fatalf("PlanSession: %v", err)
+	}
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test remote prompt snapshot reads")
+	if err != nil {
+		t.Fatalf("PrepareRuntime: %v", err)
+	}
+	defer runtimePlan.Close()
+
+	askDone := make(chan error, 1)
+	go func() {
+		_, err := srv.AwaitPromptResponse(context.Background(), plan.SessionID, askquestion.Request{ID: "ask-remote-1", Question: "Ask?"})
+		askDone <- err
+	}()
+	approvalDone := make(chan error, 1)
+	go func() {
+		_, err := srv.AwaitPromptResponse(context.Background(), plan.SessionID, askquestion.Request{
+			ID:              "approval-remote-1",
+			Question:        "Approve?",
+			Approval:        true,
+			ApprovalOptions: []askquestion.ApprovalOption{{Decision: askquestion.ApprovalDecisionAllowOnce, Label: "Allow once"}},
+		})
+		approvalDone <- err
+	}()
+
+	waitForPendingAskResources(t, server.AskViewClient(), plan.SessionID, 1)
+	waitForPendingApprovalResources(t, server.ApprovalViewClient(), plan.SessionID, 1)
+	ids, err := listPendingPromptIDs(context.Background(), plan.SessionID, server.AskViewClient(), server.ApprovalViewClient())
+	if err != nil {
+		t.Fatalf("listPendingPromptIDs: %v", err)
+	}
+	if _, ok := ids["ask-remote-1"]; !ok {
+		t.Fatalf("pending prompt snapshot missing ask id: %+v", ids)
+	}
+	if _, ok := ids["approval-remote-1"]; !ok {
+		t.Fatalf("pending prompt snapshot missing approval id: %+v", ids)
+	}
+
+	first := waitForRemoteAskEvent(t, runtimePlan.Wiring.askEvents)
+	second := waitForRemoteAskEvent(t, runtimePlan.Wiring.askEvents)
+	for _, evt := range []askEvent{first, second} {
+		switch evt.req.ID {
+		case "ask-remote-1":
+			evt.reply <- askReply{response: askquestion.Response{RequestID: evt.req.ID, Answer: "done"}}
+		case "approval-remote-1":
+			evt.reply <- askReply{response: askquestion.Response{RequestID: evt.req.ID, Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowOnce}}}
+		default:
+			t.Fatalf("unexpected prompt event id %q", evt.req.ID)
+		}
+	}
+
+	select {
+	case err := <-askDone:
+		if err != nil {
+			t.Fatalf("AwaitPromptResponse ask: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for remote ask response")
+	}
+	select {
+	case err := <-approvalDone:
+		if err != nil {
+			t.Fatalf("AwaitPromptResponse approval: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for remote approval response")
+	}
+
+	ids, err = listPendingPromptIDs(context.Background(), plan.SessionID, server.AskViewClient(), server.ApprovalViewClient())
+	if err != nil {
+		t.Fatalf("listPendingPromptIDs after resolution: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("expected no pending prompt ids after resolution, got %+v", ids)
+	}
+
+	cancel()
+	if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
+		t.Fatalf("Serve error = %v, want context canceled", serveErr)
+	}
+}
+
 func TestStartSessionServerUsesDiscoveredDaemonForProcessFlows(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
