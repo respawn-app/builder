@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,7 +17,33 @@ import (
 	"builder/server/tools"
 	sharedclient "builder/shared/client"
 	"builder/shared/clientui"
+	"builder/shared/serverapi"
 )
+
+type countingSessionViewClient struct {
+	view  clientui.RuntimeMainView
+	count atomic.Int32
+}
+
+func (c *countingSessionViewClient) GetSessionMainView(context.Context, serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
+	c.count.Add(1)
+	return serverapi.SessionMainViewResponse{MainView: c.view}, nil
+}
+
+func (*countingSessionViewClient) GetRun(context.Context, serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {
+	return serverapi.RunGetResponse{}, nil
+}
+
+type blockingSessionViewClient struct{}
+
+func (blockingSessionViewClient) GetSessionMainView(ctx context.Context, _ serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
+	<-ctx.Done()
+	return serverapi.SessionMainViewResponse{}, ctx.Err()
+}
+
+func (blockingSessionViewClient) GetRun(context.Context, serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {
+	return serverapi.RunGetResponse{}, nil
+}
 
 type runtimeClientFakeLLM struct {
 	mu        sync.Mutex
@@ -173,4 +200,102 @@ func TestRuntimeClientWithoutClientsIsNil(t *testing.T) {
 		t.Fatalf("expected nil runtime client, got %#v", client)
 	}
 	_ = clientui.RuntimeMainView{}
+}
+
+func TestRuntimeClientMainViewCachesSuccessfulRead(t *testing.T) {
+	reads := &countingSessionViewClient{view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1"}, Status: clientui.RuntimeStatus{ThinkingLevel: "high"}}}
+	runtimeClient := newUIRuntimeClientWithReads(
+		"session-1",
+		reads,
+		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(registry.NewRuntimeRegistry(), nil)),
+	)
+
+	first := runtimeClient.MainView()
+	second := runtimeClient.MainView()
+	third := runtimeClient.MainView()
+	if first.Status.ThinkingLevel != "high" || second.Status.ThinkingLevel != "high" || third.Status.ThinkingLevel != "high" {
+		t.Fatalf("expected cached main view to preserve projected status, got %+v / %+v / %+v", first, second, third)
+	}
+	if got := reads.count.Load(); got != 1 {
+		t.Fatalf("main view read count = %d, want 1", got)
+	}
+}
+
+func TestRuntimeClientRefreshMainViewBypassesCache(t *testing.T) {
+	reads := &countingSessionViewClient{view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1"}, Status: clientui.RuntimeStatus{ThinkingLevel: "high"}}}
+	runtimeClient := newUIRuntimeClientWithReads(
+		"session-1",
+		reads,
+		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(registry.NewRuntimeRegistry(), nil)),
+	)
+	if _, err := runtimeClient.RefreshMainView(); err != nil {
+		t.Fatalf("RefreshMainView: %v", err)
+	}
+	reads.view.Status.ThinkingLevel = "low"
+	refreshed, err := runtimeClient.RefreshMainView()
+	if err != nil {
+		t.Fatalf("RefreshMainView second call: %v", err)
+	}
+	if refreshed.Status.ThinkingLevel != "low" {
+		t.Fatalf("expected refreshed main view to bypass cache, got %+v", refreshed)
+	}
+	if got := reads.count.Load(); got != 2 {
+		t.Fatalf("refresh main view read count = %d, want 2", got)
+	}
+}
+
+func TestRuntimeClientMainViewFailsFastWhenReadStalls(t *testing.T) {
+	runtimeClient := newUIRuntimeClientWithReads(
+		"session-1",
+		blockingSessionViewClient{},
+		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(registry.NewRuntimeRegistry(), nil)),
+	)
+	start := time.Now()
+	view := runtimeClient.MainView()
+	elapsed := time.Since(start)
+	if elapsed >= time.Second {
+		t.Fatalf("expected stalled main-view read to fail fast, took %v", elapsed)
+	}
+	if view.Session.SessionID != "session-1" {
+		t.Fatalf("expected fallback main view to preserve session id, got %+v", view)
+	}
+}
+
+func TestRuntimeClientSetFastModeEnabledUpdatesCachedMainView(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, &runtimeClientFakeLLM{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	runtimeRegistry := registry.NewRuntimeRegistry()
+	runtimeRegistry.Register(store.Meta().SessionID, eng)
+	runtimeClient := newRuntimeClient(
+		store.Meta().SessionID,
+		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry)),
+		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(runtimeRegistry, nil)),
+	)
+	if _, err := runtimeClient.SetFastModeEnabled(true); err != nil {
+		t.Fatalf("SetFastModeEnabled: %v", err)
+	}
+	if !runtimeClient.MainView().Status.FastModeEnabled {
+		t.Fatalf("expected cached main view to reflect fast-mode toggle")
+	}
+}
+
+func TestRuntimeClientSetFastModeEnabledPreservesCachedMainViewOnError(t *testing.T) {
+	reads := &countingSessionViewClient{view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1"}, Status: clientui.RuntimeStatus{FastModeEnabled: true}}}
+	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, sharedclient.NewLoopbackRuntimeControlClient(nil))
+	if !runtimeClient.MainView().Status.FastModeEnabled {
+		t.Fatal("expected initial cached main view")
+	}
+	if _, err := runtimeClient.SetFastModeEnabled(false); err == nil {
+		t.Fatal("expected fast-mode toggle error")
+	}
+	if !runtimeClient.MainView().Status.FastModeEnabled {
+		t.Fatal("expected failed fast-mode toggle to preserve cached main view")
+	}
 }
