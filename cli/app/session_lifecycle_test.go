@@ -169,7 +169,7 @@ func TestResolveSessionActionForkRollbackTeleportsToForkWithPrompt(t *testing.T)
 
 	resolved, err := resolveSessionAction(
 		context.Background(),
-		&testEmbeddedServer{cfg: config.App{PersistenceRoot: root}},
+		&testEmbeddedServer{cfg: config.App{PersistenceRoot: root}, containerDir: root},
 		nil,
 		store.Meta().SessionID,
 		UITransition{Action: UIActionForkRollback, InitialPrompt: "edited user message", ForkUserMessageIndex: 1},
@@ -230,7 +230,7 @@ func TestForkRollbackLifecycleDoesNotPersistEditedPromptAsSourceDraft(t *testing
 		t.Fatalf("expected no persisted source draft after fork handoff, got %q", reopenedSource.Meta().InputDraft)
 	}
 
-	resolved, err := resolveSessionAction(context.Background(), &testEmbeddedServer{cfg: config.App{PersistenceRoot: root}}, nil, reopenedSource.Meta().SessionID, updated.Transition())
+	resolved, err := resolveSessionAction(context.Background(), &testEmbeddedServer{cfg: config.App{PersistenceRoot: root}, containerDir: root}, nil, reopenedSource.Meta().SessionID, updated.Transition())
 	if err != nil {
 		t.Fatalf("resolve session action: %v", err)
 	}
@@ -333,7 +333,7 @@ func TestBackTeleportLifecycleSeedsParentDraftWithoutAutoSubmit(t *testing.T) {
 				t.Fatalf("persist child draft: %v", err)
 			}
 
-			resolved, err := resolveSessionAction(context.Background(), &testEmbeddedServer{cfg: config.App{PersistenceRoot: root}}, nil, childStore.Meta().SessionID, updatedChild.Transition())
+			resolved, err := resolveSessionAction(context.Background(), &testEmbeddedServer{cfg: config.App{PersistenceRoot: root}, containerDir: root}, nil, childStore.Meta().SessionID, updatedChild.Transition())
 			if err != nil {
 				t.Fatalf("resolve session action: %v", err)
 			}
@@ -394,7 +394,7 @@ func TestForkRollbackNativeStartupReplayUsesForkedHistory(t *testing.T) {
 
 	resolved, err := resolveSessionAction(
 		context.Background(),
-		&testEmbeddedServer{cfg: config.App{PersistenceRoot: root}},
+		&testEmbeddedServer{cfg: config.App{PersistenceRoot: root}, containerDir: root},
 		nil,
 		store.Meta().SessionID,
 		UITransition{Action: UIActionForkRollback, InitialPrompt: "edited user message", ForkUserMessageIndex: 2},

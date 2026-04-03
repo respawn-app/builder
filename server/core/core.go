@@ -92,7 +92,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		sessionlaunch.ScopeID(cfg, containerDir),
 		sessionlaunch.NewService(launch.Planner{Config: cfg, ContainerDir: containerDir}, sessionStoreRegistry),
 	)
-	sessionLifecycleService := sessionlifecycle.NewService(cfg.PersistenceRoot, sessionStoreRegistry, authSupport.AuthManager)
+	sessionLifecycleService := sessionlifecycle.NewService(containerDir, sessionStoreRegistry, authSupport.AuthManager)
 	sessionRuntimeService := sessionruntime.NewService(containerDir, authSupport.AuthManager, runtimeSupport.FastModeState, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, sessionStoreRegistry)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
 	core := &Core{
