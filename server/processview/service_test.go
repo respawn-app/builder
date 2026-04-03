@@ -213,6 +213,26 @@ func TestServiceKillProcessRejectsClientRequestIDReuseWithDifferentPayload(t *te
 	}
 }
 
+func TestServiceKillProcessReturnsContextCanceledWhileWaitingForDuplicateInFlight(t *testing.T) {
+	processes := &blockingKillProcessSource{started: make(chan struct{}), release: make(chan struct{})}
+	svc := NewService(processes)
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "proc-1"})
+		done <- err
+	}()
+	<-processes.started
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := svc.KillProcess(ctx, serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "proc-1"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled while waiting for duplicate in-flight request, got %v", err)
+	}
+	close(processes.release)
+	if err := <-done; err != nil {
+		t.Fatalf("first KillProcess: %v", err)
+	}
+}
+
 type stubKillProcessSource struct {
 	killCalls int
 	killErr   error
@@ -230,6 +250,27 @@ func (s *stubKillProcessSource) Kill(string) error {
 }
 
 func (s *stubKillProcessSource) InlineOutput(string, int) (string, string, error) {
+	return "", "", nil
+}
+
+type blockingKillProcessSource struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingKillProcessSource) List() []shelltool.Snapshot { return nil }
+
+func (s *blockingKillProcessSource) Snapshot(string) (shelltool.Snapshot, error) {
+	return shelltool.Snapshot{}, nil
+}
+
+func (s *blockingKillProcessSource) Kill(string) error {
+	close(s.started)
+	<-s.release
+	return nil
+}
+
+func (s *blockingKillProcessSource) InlineOutput(string, int) (string, string, error) {
 	return "", "", nil
 }
 
