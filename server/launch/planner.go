@@ -3,6 +3,8 @@ package launch
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -143,20 +145,70 @@ func (p Planner) pickOrCreateSession(req SessionRequest, summaries []session.Sum
 }
 
 func (p Planner) openScopedSession(sessionID string) (*session.Store, error) {
+	containerDir, sessionDir, err := resolveScopedSessionDir(p.ContainerDir, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	realContainerDir, realSessionDir, err := resolveRealScopedSessionPath(containerDir, sessionDir)
+	if err != nil {
+		return nil, err
+	}
+	if !isDescendantScopedPath(realContainerDir, realSessionDir) {
+		return nil, fmt.Errorf("session %q is outside workspace container", strings.TrimSpace(sessionID))
+	}
+	return session.Open(realSessionDir)
+}
+
+func resolveScopedSessionDir(containerDir string, sessionID string) (string, string, error) {
+	trimmedContainerDir := strings.TrimSpace(containerDir)
 	trimmedSessionID := strings.TrimSpace(sessionID)
+	if trimmedContainerDir == "" {
+		return "", "", errors.New("launch planner container dir is required")
+	}
 	if trimmedSessionID == "" {
-		return nil, errors.New("session id is required")
+		return "", "", errors.New("session id is required")
 	}
 	if filepath.IsAbs(trimmedSessionID) || trimmedSessionID == "." || trimmedSessionID == ".." {
-		return nil, errors.New("session id is invalid")
+		return "", "", errors.New("session id is invalid")
 	}
 	if strings.Contains(trimmedSessionID, "/") || strings.Contains(trimmedSessionID, "\\") {
-		return nil, errors.New("session id is invalid")
+		return "", "", errors.New("session id is invalid")
 	}
 	if cleaned := filepath.Clean(trimmedSessionID); cleaned != trimmedSessionID {
-		return nil, errors.New("session id is invalid")
+		return "", "", errors.New("session id is invalid")
 	}
-	return session.Open(filepath.Join(p.ContainerDir, trimmedSessionID))
+	absContainerDir, err := filepath.Abs(trimmedContainerDir)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve workspace container dir: %w", err)
+	}
+	return absContainerDir, filepath.Join(absContainerDir, trimmedSessionID), nil
+}
+
+func resolveRealScopedSessionPath(containerDir string, sessionDir string) (string, string, error) {
+	realContainerDir, err := filepath.EvalSymlinks(containerDir)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve workspace container dir: %w", err)
+	}
+	realSessionDir, err := filepath.EvalSymlinks(sessionDir)
+	if err != nil {
+		if err != nil && os.IsNotExist(err) {
+			return "", "", fmt.Errorf("session dir %q not found: %w", filepath.Base(sessionDir), err)
+		}
+		return "", "", fmt.Errorf("resolve session dir: %w", err)
+	}
+	return realContainerDir, realSessionDir, nil
+}
+
+func isDescendantScopedPath(parent string, child string) bool {
+	cleanParent := filepath.Clean(strings.TrimSpace(parent))
+	cleanChild := filepath.Clean(strings.TrimSpace(child))
+	if cleanParent == "" || cleanChild == "" {
+		return false
+	}
+	if cleanParent == cleanChild {
+		return true
+	}
+	return strings.HasPrefix(cleanChild, cleanParent+string(filepath.Separator))
 }
 
 func sessionSummariesFromProjectView(items []clientui.SessionSummary) []session.Summary {

@@ -199,8 +199,16 @@ func TestPlannerInteractivePickerReopensSelectedSessionWithinActiveContainer(t *
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
-	if plan.Store.Dir() != selected.Dir() {
-		t.Fatalf("opened session dir = %q, want %q", plan.Store.Dir(), selected.Dir())
+	openedDir, err := filepath.EvalSymlinks(plan.Store.Dir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks opened dir: %v", err)
+	}
+	selectedDir, err := filepath.EvalSymlinks(selected.Dir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks selected dir: %v", err)
+	}
+	if openedDir != selectedDir {
+		t.Fatalf("opened session dir = %q, want %q", openedDir, selectedDir)
 	}
 	if plan.Store.Meta().WorkspaceContainer != "workspace-a" {
 		t.Fatalf("opened workspace container = %q, want workspace-a", plan.Store.Meta().WorkspaceContainer)
@@ -244,8 +252,40 @@ func TestPlannerSelectedSessionIDUsesActiveContainerScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
-	if plan.Store.Dir() != selected.Dir() {
-		t.Fatalf("opened session dir = %q, want %q", plan.Store.Dir(), selected.Dir())
+	openedDir, err := filepath.EvalSymlinks(plan.Store.Dir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks opened dir: %v", err)
+	}
+	selectedDir, err := filepath.EvalSymlinks(selected.Dir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks selected dir: %v", err)
+	}
+	if openedDir != selectedDir {
+		t.Fatalf("opened session dir = %q, want %q", openedDir, selectedDir)
+	}
+}
+
+func TestPlannerSelectedSessionIDRejectsSymlinkOutsideActiveContainer(t *testing.T) {
+	root := t.TempDir()
+	containerA := filepath.Join(root, "sessions", "workspace-a")
+	containerB := filepath.Join(root, "sessions", "workspace-b")
+	if err := os.MkdirAll(containerA, 0o755); err != nil {
+		t.Fatalf("mkdir container A: %v", err)
+	}
+	escaped, err := session.Create(containerB, "workspace-b", "/tmp/workspace-b")
+	if err != nil {
+		t.Fatalf("create escaped session: %v", err)
+	}
+	if err := os.Symlink(escaped.Dir(), filepath.Join(containerA, "escaped-link")); err != nil {
+		t.Fatalf("symlink escaped session: %v", err)
+	}
+	planner := Planner{
+		Config:       config.App{WorkspaceRoot: "/tmp/workspace-a", PersistenceRoot: root, Settings: config.Settings{}},
+		ContainerDir: containerA,
+	}
+
+	if _, err := planner.PlanSession(SessionRequest{Mode: ModeInteractive, SelectedSessionID: "escaped-link"}); err == nil {
+		t.Fatal("expected planner to reject symlinked selected session outside active container")
 	}
 }
 
