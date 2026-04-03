@@ -254,7 +254,13 @@ func (c uiInputController) handleAutoCompactionCommand(requested string) (tea.Mo
 	changed := false
 	nextEnabled := currentEnabled
 	if m.hasRuntimeClient() {
-		changed, nextEnabled = m.setRuntimeAutoCompactionEnabled(targetEnabled)
+		var err error
+		changed, nextEnabled, err = m.setRuntimeAutoCompactionEnabled(targetEnabled)
+		if err != nil {
+			errText := formatSubmissionError(err)
+			m.appendLocalEntry("error", errText)
+			return m, c.showTransientStatus(errText)
+		}
 	} else {
 		nextEnabled = targetEnabled
 		changed = currentEnabled != targetEnabled

@@ -23,8 +23,10 @@ func (s *stubRuntimeClient) SetSessionName(string) error                   { ret
 func (s *stubRuntimeClient) SetThinkingLevel(string) error                 { return nil }
 func (s *stubRuntimeClient) SetFastModeEnabled(bool) (bool, error)         { return false, nil }
 func (s *stubRuntimeClient) SetReviewerEnabled(bool) (bool, string, error) { return false, "", nil }
-func (s *stubRuntimeClient) SetAutoCompactionEnabled(bool) (bool, bool)    { return false, false }
-func (s *stubRuntimeClient) AppendLocalEntry(string, string)               {}
+func (s *stubRuntimeClient) SetAutoCompactionEnabled(bool) (bool, bool, error) {
+	return false, false, nil
+}
+func (s *stubRuntimeClient) AppendLocalEntry(string, string) {}
 func (s *stubRuntimeClient) ShouldCompactBeforeUserMessage(context.Context, string) (bool, error) {
 	return false, nil
 }
@@ -38,7 +40,7 @@ func (s *stubRuntimeClient) SubmitUserShellCommand(context.Context, string) erro
 }
 func (s *stubRuntimeClient) CompactContext(context.Context, string) error     { return nil }
 func (s *stubRuntimeClient) CompactContextForPreSubmit(context.Context) error { return nil }
-func (s *stubRuntimeClient) HasQueuedUserWork() bool                          { return false }
+func (s *stubRuntimeClient) HasQueuedUserWork() (bool, error)                 { return false, nil }
 func (s *stubRuntimeClient) SubmitQueuedUserMessages(context.Context) (string, error) {
 	s.queuedSubmitCalls++
 	return "ok", nil

@@ -62,9 +62,9 @@ func (f *runtimeControlFakeClient) SetReviewerEnabled(enabled bool) (bool, strin
 	f.setReviewerArg = enabled
 	return true, "edits", f.err
 }
-func (f *runtimeControlFakeClient) SetAutoCompactionEnabled(enabled bool) (bool, bool) {
+func (f *runtimeControlFakeClient) SetAutoCompactionEnabled(enabled bool) (bool, bool, error) {
 	f.setAutoCompactArg = enabled
-	return true, enabled
+	return true, enabled, f.err
 }
 func (f *runtimeControlFakeClient) AppendLocalEntry(role, text string) {
 	f.appendedRole = role
@@ -90,7 +90,9 @@ func (f *runtimeControlFakeClient) CompactContextForPreSubmit(context.Context) e
 	f.compactArgs = "__pre_submit__"
 	return f.err
 }
-func (f *runtimeControlFakeClient) HasQueuedUserWork() bool { return f.hasQueuedUserWork }
+func (f *runtimeControlFakeClient) HasQueuedUserWork() (bool, error) {
+	return f.hasQueuedUserWork, f.err
+}
 func (f *runtimeControlFakeClient) SubmitQueuedUserMessages(context.Context) (string, error) {
 	return f.submitQueuedResult, f.err
 }
@@ -131,8 +133,8 @@ func TestRuntimeControlHelpersDelegateToRuntimeClient(t *testing.T) {
 	if changed, mode, err := m.setRuntimeReviewerEnabled(true); !changed || mode != "edits" || err != nil {
 		t.Fatalf("set runtime reviewer = (%t, %q, %v)", changed, mode, err)
 	}
-	if changed, enabled := m.setRuntimeAutoCompactionEnabled(false); !changed || enabled {
-		t.Fatalf("set runtime autocompaction = (%t, %t), want (true, false)", changed, enabled)
+	if changed, enabled, err := m.setRuntimeAutoCompactionEnabled(false); !changed || enabled || err != nil {
+		t.Fatalf("set runtime autocompaction = (%t, %t, %v), want (true, false, nil)", changed, enabled, err)
 	}
 	m.appendRuntimeLocalEntry("system", "hello")
 	shouldCompact, err := m.runtimeShouldCompactBeforeUserMessage(context.Background(), "prompt")
@@ -152,7 +154,8 @@ func TestRuntimeControlHelpersDelegateToRuntimeClient(t *testing.T) {
 	if err := m.compactRuntimeContextForPreSubmit(context.Background()); err != nil {
 		t.Fatalf("compact runtime context for presubmit: %v", err)
 	}
-	if !m.hasQueuedRuntimeUserWork() {
+	queuedWork, err := m.hasQueuedRuntimeUserWork()
+	if err != nil || !queuedWork {
 		t.Fatal("expected queued runtime user work")
 	}
 	queuedMessage, err := m.submitQueuedRuntimeUserMessages(context.Background())
@@ -205,8 +208,8 @@ func TestRuntimeControlHelpersFallbackWithoutRuntimeClient(t *testing.T) {
 	if changed, mode, err := m.setRuntimeReviewerEnabled(true); changed || mode != "" || err != nil {
 		t.Fatalf("set runtime reviewer without client = (%t, %q, %v)", changed, mode, err)
 	}
-	if changed, enabled := m.setRuntimeAutoCompactionEnabled(true); changed || enabled {
-		t.Fatalf("set runtime autocompaction without client = (%t, %t), want (false, false)", changed, enabled)
+	if changed, enabled, err := m.setRuntimeAutoCompactionEnabled(true); changed || enabled || err != nil {
+		t.Fatalf("set runtime autocompaction without client = (%t, %t, %v), want (false, false, nil)", changed, enabled, err)
 	}
 	if shouldCompact, err := m.runtimeShouldCompactBeforeUserMessage(context.Background(), "prompt"); shouldCompact || err != nil {
 		t.Fatalf("runtime should compact without client = (%t, %v), want (false, nil)", shouldCompact, err)
@@ -223,7 +226,11 @@ func TestRuntimeControlHelpersFallbackWithoutRuntimeClient(t *testing.T) {
 	if err := m.compactRuntimeContextForPreSubmit(context.Background()); err != nil {
 		t.Fatalf("compact runtime context for presubmit without client: %v", err)
 	}
-	if m.hasQueuedRuntimeUserWork() {
+	queuedWork, err := m.hasQueuedRuntimeUserWork()
+	if err != nil {
+		t.Fatalf("has queued runtime user work without client: %v", err)
+	}
+	if queuedWork {
 		t.Fatal("did not expect queued runtime user work without client")
 	}
 	if message, err := m.submitQueuedRuntimeUserMessages(context.Background()); message != "" || err != nil {

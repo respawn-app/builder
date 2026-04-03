@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"builder/server/runtime"
 	"builder/server/runtimecontrol"
@@ -10,6 +11,8 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
 )
+
+const uiRuntimeControlTimeout = 3 * time.Second
 
 type sessionRuntimeClient struct {
 	reads     client.SessionViewClient
@@ -62,29 +65,45 @@ func (c sessionRuntimeClient) SessionView() clientui.RuntimeSessionView {
 	return c.MainView().Session
 }
 
+func (c sessionRuntimeClient) controlContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), uiRuntimeControlTimeout)
+}
+
 func (c sessionRuntimeClient) SetSessionName(name string) error {
-	return c.controls.SetSessionName(context.Background(), serverapi.RuntimeSetSessionNameRequest{SessionID: c.sessionID, Name: name})
+	ctx, cancel := c.controlContext()
+	defer cancel()
+	return c.controls.SetSessionName(ctx, serverapi.RuntimeSetSessionNameRequest{SessionID: c.sessionID, Name: name})
 }
 func (c sessionRuntimeClient) SetThinkingLevel(level string) error {
-	return c.controls.SetThinkingLevel(context.Background(), serverapi.RuntimeSetThinkingLevelRequest{SessionID: c.sessionID, Level: level})
+	ctx, cancel := c.controlContext()
+	defer cancel()
+	return c.controls.SetThinkingLevel(ctx, serverapi.RuntimeSetThinkingLevelRequest{SessionID: c.sessionID, Level: level})
 }
 func (c sessionRuntimeClient) SetFastModeEnabled(enabled bool) (bool, error) {
-	resp, err := c.controls.SetFastModeEnabled(context.Background(), serverapi.RuntimeSetFastModeEnabledRequest{SessionID: c.sessionID, Enabled: enabled})
+	ctx, cancel := c.controlContext()
+	defer cancel()
+	resp, err := c.controls.SetFastModeEnabled(ctx, serverapi.RuntimeSetFastModeEnabledRequest{SessionID: c.sessionID, Enabled: enabled})
 	return resp.Changed, err
 }
 func (c sessionRuntimeClient) SetReviewerEnabled(enabled bool) (bool, string, error) {
-	resp, err := c.controls.SetReviewerEnabled(context.Background(), serverapi.RuntimeSetReviewerEnabledRequest{SessionID: c.sessionID, Enabled: enabled})
+	ctx, cancel := c.controlContext()
+	defer cancel()
+	resp, err := c.controls.SetReviewerEnabled(ctx, serverapi.RuntimeSetReviewerEnabledRequest{SessionID: c.sessionID, Enabled: enabled})
 	return resp.Changed, resp.Mode, err
 }
-func (c sessionRuntimeClient) SetAutoCompactionEnabled(enabled bool) (bool, bool) {
-	resp, err := c.controls.SetAutoCompactionEnabled(context.Background(), serverapi.RuntimeSetAutoCompactionEnabledRequest{SessionID: c.sessionID, Enabled: enabled})
+func (c sessionRuntimeClient) SetAutoCompactionEnabled(enabled bool) (bool, bool, error) {
+	ctx, cancel := c.controlContext()
+	defer cancel()
+	resp, err := c.controls.SetAutoCompactionEnabled(ctx, serverapi.RuntimeSetAutoCompactionEnabledRequest{SessionID: c.sessionID, Enabled: enabled})
 	if err != nil {
-		return false, false
+		return false, false, err
 	}
-	return resp.Changed, resp.Enabled
+	return resp.Changed, resp.Enabled, nil
 }
 func (c sessionRuntimeClient) AppendLocalEntry(role, text string) {
-	_ = c.controls.AppendLocalEntry(context.Background(), serverapi.RuntimeAppendLocalEntryRequest{SessionID: c.sessionID, Role: role, Text: text})
+	ctx, cancel := c.controlContext()
+	defer cancel()
+	_ = c.controls.AppendLocalEntry(ctx, serverapi.RuntimeAppendLocalEntryRequest{SessionID: c.sessionID, Role: role, Text: text})
 }
 func (c sessionRuntimeClient) ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error) {
 	resp, err := c.controls.ShouldCompactBeforeUserMessage(ctx, serverapi.RuntimeShouldCompactBeforeUserMessageRequest{SessionID: c.sessionID, Text: text})
@@ -103,27 +122,35 @@ func (c sessionRuntimeClient) CompactContext(ctx context.Context, args string) e
 func (c sessionRuntimeClient) CompactContextForPreSubmit(ctx context.Context) error {
 	return c.controls.CompactContextForPreSubmit(ctx, serverapi.RuntimeCompactContextForPreSubmitRequest{SessionID: c.sessionID})
 }
-func (c sessionRuntimeClient) HasQueuedUserWork() bool {
-	resp, err := c.controls.HasQueuedUserWork(context.Background(), serverapi.RuntimeHasQueuedUserWorkRequest{SessionID: c.sessionID})
+func (c sessionRuntimeClient) HasQueuedUserWork() (bool, error) {
+	ctx, cancel := c.controlContext()
+	defer cancel()
+	resp, err := c.controls.HasQueuedUserWork(ctx, serverapi.RuntimeHasQueuedUserWorkRequest{SessionID: c.sessionID})
 	if err != nil {
-		return false
+		return false, err
 	}
-	return resp.HasQueuedUserWork
+	return resp.HasQueuedUserWork, nil
 }
 func (c sessionRuntimeClient) SubmitQueuedUserMessages(ctx context.Context) (string, error) {
 	resp, err := c.controls.SubmitQueuedUserMessages(ctx, serverapi.RuntimeSubmitQueuedUserMessagesRequest{SessionID: c.sessionID})
 	return resp.Message, err
 }
 func (c sessionRuntimeClient) Interrupt() error {
-	return c.controls.Interrupt(context.Background(), serverapi.RuntimeInterruptRequest{SessionID: c.sessionID})
+	ctx, cancel := c.controlContext()
+	defer cancel()
+	return c.controls.Interrupt(ctx, serverapi.RuntimeInterruptRequest{SessionID: c.sessionID})
 }
 
 func (c sessionRuntimeClient) QueueUserMessage(text string) {
-	_ = c.controls.QueueUserMessage(context.Background(), serverapi.RuntimeQueueUserMessageRequest{SessionID: c.sessionID, Text: text})
+	ctx, cancel := c.controlContext()
+	defer cancel()
+	_ = c.controls.QueueUserMessage(ctx, serverapi.RuntimeQueueUserMessageRequest{SessionID: c.sessionID, Text: text})
 }
 
 func (c sessionRuntimeClient) DiscardQueuedUserMessagesMatching(text string) int {
-	resp, err := c.controls.DiscardQueuedUserMessagesMatching(context.Background(), serverapi.RuntimeDiscardQueuedUserMessagesMatchingRequest{SessionID: c.sessionID, Text: text})
+	ctx, cancel := c.controlContext()
+	defer cancel()
+	resp, err := c.controls.DiscardQueuedUserMessagesMatching(ctx, serverapi.RuntimeDiscardQueuedUserMessagesMatchingRequest{SessionID: c.sessionID, Text: text})
 	if err != nil {
 		return 0
 	}
@@ -131,5 +158,7 @@ func (c sessionRuntimeClient) DiscardQueuedUserMessagesMatching(text string) int
 }
 
 func (c sessionRuntimeClient) RecordPromptHistory(text string) error {
-	return c.controls.RecordPromptHistory(context.Background(), serverapi.RuntimeRecordPromptHistoryRequest{SessionID: c.sessionID, Text: text})
+	ctx, cancel := c.controlContext()
+	defer cancel()
+	return c.controls.RecordPromptHistory(ctx, serverapi.RuntimeRecordPromptHistoryRequest{SessionID: c.sessionID, Text: text})
 }
