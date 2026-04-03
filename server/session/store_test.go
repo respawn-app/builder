@@ -829,6 +829,86 @@ func TestListSessionsSkipsMalformedSessionMetadata(t *testing.T) {
 	}
 }
 
+func TestListSessionsSkipsSymlinkedSessionMetadata(t *testing.T) {
+	root := t.TempDir()
+	targetDir := filepath.Join(t.TempDir(), "target-session")
+	writeSessionFixtureMeta(t, targetDir, Meta{
+		SessionID:          "target-session",
+		WorkspaceRoot:      "/tmp/work-target",
+		WorkspaceContainer: "workspace-target",
+		CreatedAt:          time.Now().UTC(),
+		UpdatedAt:          time.Now().UTC(),
+	})
+	sessionDir := filepath.Join(root, "bad-session")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(targetDir, sessionFile), filepath.Join(sessionDir, sessionFile)); err != nil {
+		t.Fatalf("symlink session meta: %v", err)
+	}
+
+	items, err := ListSessions(root)
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected symlinked metadata to be skipped, got %+v", items)
+	}
+}
+
+func TestOpenRejectsSymlinkedSessionMetadata(t *testing.T) {
+	root := t.TempDir()
+	targetDir := filepath.Join(root, "target-session")
+	writeSessionFixtureMeta(t, targetDir, Meta{
+		SessionID:          "target-session",
+		WorkspaceRoot:      "/tmp/work-target",
+		WorkspaceContainer: "workspace-target",
+		CreatedAt:          time.Now().UTC(),
+		UpdatedAt:          time.Now().UTC(),
+	})
+	sessionDir := filepath.Join(root, "bad-session")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(targetDir, sessionFile), filepath.Join(sessionDir, sessionFile)); err != nil {
+		t.Fatalf("symlink session meta: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, eventsFile), nil, 0o644); err != nil {
+		t.Fatalf("write events file: %v", err)
+	}
+
+	if _, err := Open(sessionDir); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("expected open to reject symlinked session meta, got %v", err)
+	}
+}
+
+func TestOpenRejectsSymlinkedEventsFile(t *testing.T) {
+	root := t.TempDir()
+	targetDir := filepath.Join(root, "target-session")
+	writeSessionFixtureEvents(t, targetDir, []Event{{
+		Seq:       1,
+		Timestamp: time.Now().UTC(),
+		Kind:      "message",
+		StepID:    "target-step",
+		Payload:   mustFixtureJSON(t, map[string]any{"role": "user", "content": "hello"}),
+	}})
+	sessionDir := filepath.Join(root, "bad-session")
+	writeSessionFixtureMeta(t, sessionDir, Meta{
+		SessionID:          "bad-session",
+		WorkspaceRoot:      "/tmp/work-bad",
+		WorkspaceContainer: "workspace-bad",
+		CreatedAt:          time.Now().UTC(),
+		UpdatedAt:          time.Now().UTC(),
+	})
+	if err := os.Symlink(filepath.Join(targetDir, eventsFile), filepath.Join(sessionDir, eventsFile)); err != nil {
+		t.Fatalf("symlink events file: %v", err)
+	}
+
+	if _, err := Open(sessionDir); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("expected open to reject symlinked events file, got %v", err)
+	}
+}
+
 func TestOpenInitializesMissingEventsFileFromSessionMetadata(t *testing.T) {
 	root := t.TempDir()
 	sessionDir := filepath.Join(root, "session-without-events")
