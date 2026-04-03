@@ -27,6 +27,9 @@ func NewService(persistenceRoot string, stores sessionStoreResolver, authManager
 }
 
 func (s *Service) GetInitialInput(_ context.Context, req serverapi.SessionInitialInputRequest) (serverapi.SessionInitialInputResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.SessionInitialInputResponse{}, err
+	}
 	store, err := s.openStore(req.SessionID)
 	if err != nil {
 		return serverapi.SessionInitialInputResponse{}, err

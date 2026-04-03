@@ -43,6 +43,29 @@ func TestServiceGetInitialInputPrefersStoredDraft(t *testing.T) {
 	}
 }
 
+func TestServiceGetInitialInputAllowsEmptySessionID(t *testing.T) {
+	service := NewService(t.TempDir(), nil, nil)
+	resp, err := service.GetInitialInput(context.Background(), serverapi.SessionInitialInputRequest{
+		TransitionInput: "transition input",
+	})
+	if err != nil {
+		t.Fatalf("GetInitialInput: %v", err)
+	}
+	if resp.Input != "transition input" {
+		t.Fatalf("input = %q, want %q", resp.Input, "transition input")
+	}
+}
+
+func TestServiceGetInitialInputRejectsPathLikeSessionID(t *testing.T) {
+	service := NewService(t.TempDir(), nil, nil)
+	_, err := service.GetInitialInput(context.Background(), serverapi.SessionInitialInputRequest{
+		SessionID: "../session-1",
+	})
+	if err == nil || !strings.Contains(err.Error(), "single session id") {
+		t.Fatalf("expected path-like session id rejection, got %v", err)
+	}
+}
+
 func TestServicePersistInputDraftWritesBySessionID(t *testing.T) {
 	root, store := createPersistedSession(t)
 	if err := store.SetName("session name"); err != nil {
