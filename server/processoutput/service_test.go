@@ -58,7 +58,7 @@ func (s *stubShellOutputSubscription) Close() error { return nil }
 
 func TestServiceSubscribesAndProjectsChunks(t *testing.T) {
 	svc := NewService(
-		&stubSubscriber{sub: &stubShellOutputSubscription{chunk: shelltool.OutputChunk{ProcessID: "proc-1", OffsetBytes: 10, Text: "hello"}}},
+		&stubSubscriber{sub: &stubShellOutputSubscription{chunk: shelltool.OutputChunk{ProcessID: "proc-1", OffsetBytes: 10, NextOffsetBytes: 15, Text: "hello"}}},
 		&stubProcessSource{snapshots: []shelltool.Snapshot{{ID: "proc-1", LogPath: "/tmp/proc-1.log", OutputAvailable: true, OutputRetainedToBytes: 10}}},
 	)
 	sub, err := svc.SubscribeProcessOutput(context.Background(), serverapi.ProcessOutputSubscribeRequest{ProcessID: "proc-1", OffsetBytes: 10})
@@ -69,7 +69,7 @@ func TestServiceSubscribesAndProjectsChunks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Next: %v", err)
 	}
-	if chunk.ProcessID != "proc-1" || chunk.OffsetBytes != 10 || chunk.Text != "hello" {
+	if chunk.ProcessID != "proc-1" || chunk.OffsetBytes != 10 || chunk.NextOffsetBytes != 15 || chunk.Text != "hello" {
 		t.Fatalf("unexpected chunk: %+v", chunk)
 	}
 }

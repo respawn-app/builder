@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -22,10 +23,14 @@ func (r PersistenceSessionResolver) ResolveSession(_ context.Context, sessionID 
 	if err != nil {
 		return session.Snapshot{}, err
 	}
-	if !isDescendantPath(containerDir, resolvedSessionDir) {
+	realContainerDir, realSessionDir, err := resolveRealSessionPath(containerDir, resolvedSessionDir)
+	if err != nil {
+		return session.Snapshot{}, err
+	}
+	if !isDescendantPath(realContainerDir, realSessionDir) {
 		return session.Snapshot{}, fmt.Errorf("session %q is outside workspace container", strings.TrimSpace(sessionID))
 	}
-	return session.SnapshotFromDir(resolvedSessionDir)
+	return session.SnapshotFromDir(realSessionDir)
 }
 
 func (r PersistenceSessionResolver) resolveSessionDir(sessionID string) (string, string, error) {
@@ -64,4 +69,23 @@ func isDescendantPath(parent, child string) bool {
 	}
 	prefix := cleanParent + string(filepath.Separator)
 	return strings.HasPrefix(cleanChild, prefix)
+}
+
+func resolveRealSessionPath(containerDir string, sessionDir string) (string, string, error) {
+	realContainerDir, err := filepath.EvalSymlinks(containerDir)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve workspace container dir: %w", err)
+	}
+	realSessionDir, err := filepath.EvalSymlinks(sessionDir)
+	if err != nil {
+		if errorsIsNotExist(err) {
+			return "", "", fmt.Errorf("session dir %q not found: %w", filepath.Base(sessionDir), err)
+		}
+		return "", "", fmt.Errorf("resolve session dir: %w", err)
+	}
+	return realContainerDir, realSessionDir, nil
+}
+
+func errorsIsNotExist(err error) bool {
+	return err != nil && os.IsNotExist(err)
 }

@@ -715,7 +715,7 @@ func TestProcessOutputClientStreamsBackgroundProcessOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second Next: %v", err)
 	}
-	if second.OffsetBytes <= first.OffsetBytes || !strings.Contains(second.Text, "second") {
+	if second.OffsetBytes <= first.OffsetBytes || second.NextOffsetBytes <= second.OffsetBytes || !strings.Contains(second.Text, "second") {
 		t.Fatalf("unexpected second chunk: %+v", second)
 	}
 	if _, err := sub.Next(ctx); !errors.Is(err, io.EOF) {
