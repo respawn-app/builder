@@ -486,14 +486,17 @@ func TestEmbeddedAppServerPrepareRuntimeWiresSessionActivityForSharedClients(t *
 		t.Fatalf("unexpected activity events: first=%+v second=%+v", firstEvt, secondEvt)
 	}
 
-	refreshed, err := reads.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: plan.SessionID})
-	if err != nil {
+	if _, err := reads.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: plan.SessionID}); err != nil {
 		t.Fatalf("GetSessionMainView refreshed: %v", err)
 	}
-	if len(refreshed.MainView.Session.Chat.Entries) == 0 {
-		t.Fatalf("expected hydrated chat entries after activity: %+v", refreshed.MainView.Session.Chat)
+	page, err := reads.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: plan.SessionID})
+	if err != nil {
+		t.Fatalf("GetSessionTranscriptPage refreshed: %v", err)
 	}
-	last := refreshed.MainView.Session.Chat.Entries[len(refreshed.MainView.Session.Chat.Entries)-1]
+	if len(page.Transcript.Entries) == 0 {
+		t.Fatalf("expected hydrated transcript entries after activity: %+v", page.Transcript)
+	}
+	last := page.Transcript.Entries[len(page.Transcript.Entries)-1]
 	if last.Text != "hello from client one" {
 		t.Fatalf("unexpected hydrated entry: %+v", last)
 	}
