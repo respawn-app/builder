@@ -20,6 +20,10 @@ type SessionResolver interface {
 	ResolveSession(ctx context.Context, sessionID string) (session.Snapshot, error)
 }
 
+type SessionStoreResolver interface {
+	ResolveSessionStore(ctx context.Context, sessionID string) (*session.Store, error)
+}
+
 type RuntimeResolver interface {
 	ResolveRuntime(ctx context.Context, sessionID string) (*runtime.Engine, error)
 }
@@ -54,6 +58,16 @@ func (r staticSessionResolver) ResolveSession(_ context.Context, sessionID strin
 	return session.SnapshotFromStore(r.store)
 }
 
+func (r staticSessionResolver) ResolveSessionStore(_ context.Context, sessionID string) (*session.Store, error) {
+	if r.store == nil {
+		return nil, errors.New("session store is required")
+	}
+	if strings.TrimSpace(sessionID) != strings.TrimSpace(r.store.Meta().SessionID) {
+		return nil, fmt.Errorf("session %q not available", strings.TrimSpace(sessionID))
+	}
+	return r.store, nil
+}
+
 type staticRuntimeResolver struct {
 	engine *runtime.Engine
 }
@@ -84,6 +98,15 @@ func (s *Service) GetSessionMainView(ctx context.Context, req serverapi.SessionM
 	} else if runtimeEngine != nil {
 		return serverapi.SessionMainViewResponse{MainView: runtimeview.MainViewFromRuntime(runtimeEngine)}, nil
 	}
+	if store, err := s.resolveSessionStore(ctx, req.SessionID); err != nil {
+		return serverapi.SessionMainViewResponse{}, err
+	} else if store != nil {
+		view, err := dormantMainViewFromStore(ctx, store)
+		if err != nil {
+			return serverapi.SessionMainViewResponse{}, err
+		}
+		return serverapi.SessionMainViewResponse{MainView: view}, nil
+	}
 	snapshot, err := s.resolveSession(ctx, req.SessionID)
 	if err != nil {
 		return serverapi.SessionMainViewResponse{}, err
@@ -104,6 +127,15 @@ func (s *Service) GetSessionTranscriptPage(ctx context.Context, req serverapi.Se
 		return serverapi.SessionTranscriptPageResponse{}, err
 	} else if runtimeEngine != nil {
 		return serverapi.SessionTranscriptPageResponse{Transcript: runtimeview.TranscriptPageFromRuntime(runtimeEngine, pageReq)}, nil
+	}
+	if store, err := s.resolveSessionStore(ctx, req.SessionID); err != nil {
+		return serverapi.SessionTranscriptPageResponse{}, err
+	} else if store != nil {
+		page, err := dormantTranscriptPageFromStore(ctx, store, pageReq)
+		if err != nil {
+			return serverapi.SessionTranscriptPageResponse{}, err
+		}
+		return serverapi.SessionTranscriptPageResponse{Transcript: page}, nil
 	}
 	snapshot, err := s.resolveSession(ctx, req.SessionID)
 	if err != nil {
@@ -154,6 +186,17 @@ func (s *Service) resolveSession(ctx context.Context, sessionID string) (session
 	return s.sessions.ResolveSession(ctx, sessionID)
 }
 
+func (s *Service) resolveSessionStore(ctx context.Context, sessionID string) (*session.Store, error) {
+	if s == nil || s.sessions == nil {
+		return nil, nil
+	}
+	resolver, ok := s.sessions.(SessionStoreResolver)
+	if !ok {
+		return nil, nil
+	}
+	return resolver.ResolveSessionStore(ctx, sessionID)
+}
+
 func (s *Service) resolveRuntime(ctx context.Context, sessionID string) (*runtime.Engine, error) {
 	if s == nil || s.runtimes == nil {
 		return nil, nil
@@ -192,6 +235,91 @@ func dormantMainView(ctx context.Context, snapshot session.Snapshot) (clientui.R
 		}
 	}
 	return view, nil
+}
+
+func dormantMainViewFromStore(ctx context.Context, store *session.Store) (clientui.RuntimeMainView, error) {
+	if store == nil {
+		return clientui.RuntimeMainView{}, errors.New("session store is required")
+	}
+	projector, err := projectDormantTranscript(ctx, store)
+	if err != nil {
+		return clientui.RuntimeMainView{}, err
+	}
+	chat := runtimeview.ChatSnapshotFromRuntime(projector.ChatSnapshot())
+	meta := store.Meta()
+	freshness := runtimeview.ConversationFreshnessFromSession(store.ConversationFreshness())
+	view := clientui.RuntimeMainView{
+		Status: clientui.RuntimeStatus{
+			ConversationFreshness:             freshness,
+			ParentSessionID:                   meta.ParentSessionID,
+			LastCommittedAssistantFinalAnswer: projector.LastCommittedAssistantFinalAnswer(),
+		},
+		Session: clientui.RuntimeSessionView{
+			SessionID:             meta.SessionID,
+			SessionName:           meta.Name,
+			ConversationFreshness: freshness,
+			Transcript: clientui.TranscriptMetadata{
+				Revision:            meta.LastSequence,
+				CommittedEntryCount: len(chat.Entries),
+			},
+			Chat: chat,
+		},
+	}
+	runs, err := store.ReadRuns()
+	if err != nil {
+		return clientui.RuntimeMainView{}, err
+	}
+	if len(runs) > 0 {
+		latestRun := runs[len(runs)-1]
+		if latestRun.Status == session.RunStatusRunning {
+			view.ActiveRun = runtimeview.RunViewFromSessionRecord(meta.SessionID, &latestRun)
+		}
+	}
+	return view, nil
+}
+
+func dormantTranscriptPageFromStore(ctx context.Context, store *session.Store, req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	if store == nil {
+		return clientui.TranscriptPage{}, errors.New("session store is required")
+	}
+	projector, err := projectDormantTranscript(ctx, store)
+	if err != nil {
+		return clientui.TranscriptPage{}, err
+	}
+	meta := store.Meta()
+	freshness := runtimeview.ConversationFreshnessFromSession(store.ConversationFreshness())
+	if req.Window == clientui.TranscriptWindowOngoingTail {
+		return runtimeview.TranscriptPageFromWindow(
+			meta.SessionID,
+			meta.Name,
+			freshness,
+			meta.LastSequence,
+			projector.OngoingTailSnapshot(runtimeview.OngoingTailEntryLimit),
+		), nil
+	}
+	return runtimeview.TranscriptPageFromChat(
+		meta.SessionID,
+		meta.Name,
+		freshness,
+		meta.LastSequence,
+		runtimeview.ChatSnapshotFromRuntime(projector.ChatSnapshot()),
+		req,
+	), nil
+}
+
+func projectDormantTranscript(ctx context.Context, store *session.Store) (*runtime.TranscriptProjector, error) {
+	projector := runtime.NewTranscriptProjector()
+	if err := store.WalkEvents(func(evt session.Event) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		return projector.ApplyPersistedEvent(evt)
+	}); err != nil {
+		return nil, err
+	}
+	return projector, nil
 }
 
 type dormantReplayClient struct{}

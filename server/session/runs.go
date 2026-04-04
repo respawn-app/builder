@@ -50,11 +50,11 @@ func (s *Store) AppendRunFinished(run RunRecord) (Event, error) {
 }
 
 func (s *Store) ReadRuns() ([]RunRecord, error) {
-	events, err := s.ReadEvents()
-	if err != nil {
+	projector := newRunProjector()
+	if err := s.WalkEvents(projector.ApplyEvent); err != nil {
 		return nil, err
 	}
-	return runsFromEvents(events), nil
+	return projector.Runs(), nil
 }
 
 func (s *Store) LatestRun() (*RunRecord, error) {
@@ -70,48 +70,69 @@ func (s *Store) LatestRun() (*RunRecord, error) {
 }
 
 func runsFromEvents(events []Event) []RunRecord {
-	orderedIDs := make([]string, 0)
-	byID := make(map[string]RunRecord)
+	projector := newRunProjector()
 	for _, evt := range events {
-		kind := strings.TrimSpace(evt.Kind)
-		if kind != runStartedEventKind && kind != runFinishedEventKind {
-			continue
-		}
-		if len(evt.Payload) == 0 {
-			continue
-		}
-		var run RunRecord
-		if err := json.Unmarshal(evt.Payload, &run); err != nil {
-			continue
-		}
-		run = normalizeRunRecord(run)
-		if run.RunID == "" {
-			continue
-		}
-		if run.StepID == "" {
-			run.StepID = strings.TrimSpace(evt.StepID)
-		}
-		if kind == runStartedEventKind {
-			run.Status = RunStatusRunning
-			if run.StartedAt.IsZero() {
-				run.StartedAt = evt.Timestamp
-			}
-		} else if run.FinishedAt.IsZero() {
-			run.FinishedAt = evt.Timestamp
-		}
-
-		existing, ok := byID[run.RunID]
-		if !ok {
-			orderedIDs = append(orderedIDs, run.RunID)
-			byID[run.RunID] = run
-			continue
-		}
-		byID[run.RunID] = mergeRunRecord(existing, run)
+		projector.ApplyEvent(evt)
 	}
+	return projector.Runs()
+}
 
-	out := make([]RunRecord, 0, len(orderedIDs))
-	for _, runID := range orderedIDs {
-		out = append(out, byID[runID])
+type runProjector struct {
+	orderedIDs []string
+	byID       map[string]RunRecord
+}
+
+func newRunProjector() *runProjector {
+	return &runProjector{byID: make(map[string]RunRecord)}
+}
+
+func (p *runProjector) ApplyEvent(evt Event) error {
+	if p == nil {
+		return nil
+	}
+	kind := strings.TrimSpace(evt.Kind)
+	if kind != runStartedEventKind && kind != runFinishedEventKind {
+		return nil
+	}
+	if len(evt.Payload) == 0 {
+		return nil
+	}
+	var run RunRecord
+	if err := json.Unmarshal(evt.Payload, &run); err != nil {
+		return nil
+	}
+	run = normalizeRunRecord(run)
+	if run.RunID == "" {
+		return nil
+	}
+	if run.StepID == "" {
+		run.StepID = strings.TrimSpace(evt.StepID)
+	}
+	if kind == runStartedEventKind {
+		run.Status = RunStatusRunning
+		if run.StartedAt.IsZero() {
+			run.StartedAt = evt.Timestamp
+		}
+	} else if run.FinishedAt.IsZero() {
+		run.FinishedAt = evt.Timestamp
+	}
+	existing, ok := p.byID[run.RunID]
+	if !ok {
+		p.orderedIDs = append(p.orderedIDs, run.RunID)
+		p.byID[run.RunID] = run
+		return nil
+	}
+	p.byID[run.RunID] = mergeRunRecord(existing, run)
+	return nil
+}
+
+func (p *runProjector) Runs() []RunRecord {
+	if p == nil || len(p.orderedIDs) == 0 {
+		return nil
+	}
+	out := make([]RunRecord, 0, len(p.orderedIDs))
+	for _, runID := range p.orderedIDs {
+		out = append(out, p.byID[runID])
 	}
 	return out
 }
