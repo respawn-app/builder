@@ -139,6 +139,89 @@ func TestServiceGetSessionMainViewFallsBackToDurableSessionState(t *testing.T) {
 	if resp.MainView.ActiveRun == nil || resp.MainView.ActiveRun.RunID != "run-1" || resp.MainView.ActiveRun.Status != "running" {
 		t.Fatalf("expected durable running active run, got %+v", resp.MainView.ActiveRun)
 	}
+	if resp.MainView.Session.Transcript.Revision != store.Meta().LastSequence {
+		t.Fatalf("transcript revision = %d, want %d", resp.MainView.Session.Transcript.Revision, store.Meta().LastSequence)
+	}
+	if resp.MainView.Session.Transcript.CommittedEntryCount != 2 {
+		t.Fatalf("committed entry count = %d, want 2", resp.MainView.Session.Transcript.CommittedEntryCount)
+	}
+}
+
+func TestServiceGetSessionTranscriptPageUsesLiveRuntimeWhenAttached(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.SetName("incident triage"); err != nil {
+		t.Fatalf("set name: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "hello"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: "one", Phase: llm.MessagePhaseFinal}); err != nil {
+		t.Fatalf("append assistant message: %v", err)
+	}
+	eng, err := runtime.New(store, &serviceFakeLLM{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.AppendLocalEntry("assistant", "two")
+	svc := NewService(NewStaticSessionResolver(store), NewStaticRuntimeResolver(eng))
+
+	resp, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("get session transcript page: %v", err)
+	}
+	if resp.Transcript.SessionName != "incident triage" {
+		t.Fatalf("session name = %q, want incident triage", resp.Transcript.SessionName)
+	}
+	if resp.Transcript.Revision != store.Meta().LastSequence {
+		t.Fatalf("revision = %d, want %d", resp.Transcript.Revision, store.Meta().LastSequence)
+	}
+	if len(resp.Transcript.Entries) != 3 {
+		t.Fatalf("entries = %d, want 3", len(resp.Transcript.Entries))
+	}
+	if resp.Transcript.Entries[2].Text != "two" {
+		t.Fatalf("unexpected tail entry: %+v", resp.Transcript.Entries[2])
+	}
+}
+
+func TestServiceGetSessionTranscriptPageSupportsPagination(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.SetName("incident triage"); err != nil {
+		t.Fatalf("set name: %v", err)
+	}
+	entries := []llm.Message{
+		{Role: llm.RoleUser, Content: "u1"},
+		{Role: llm.RoleAssistant, Content: "a1", Phase: llm.MessagePhaseFinal},
+		{Role: llm.RoleUser, Content: "u2"},
+		{Role: llm.RoleAssistant, Content: "a2", Phase: llm.MessagePhaseFinal},
+	}
+	for i, entry := range entries {
+		if _, err := store.AppendEvent("step-1", "message", entry); err != nil {
+			t.Fatalf("append message %d: %v", i, err)
+		}
+	}
+	svc := NewService(NewStaticSessionResolver(store), nil)
+
+	resp, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: store.Meta().SessionID, Offset: 1, Limit: 2})
+	if err != nil {
+		t.Fatalf("get session transcript page: %v", err)
+	}
+	if resp.Transcript.TotalEntries != 4 {
+		t.Fatalf("total entries = %d, want 4", resp.Transcript.TotalEntries)
+	}
+	if !resp.Transcript.HasMore || resp.Transcript.NextOffset != 3 {
+		t.Fatalf("unexpected pagination metadata: %+v", resp.Transcript)
+	}
+	if len(resp.Transcript.Entries) != 2 || resp.Transcript.Entries[0].Text != "a1" || resp.Transcript.Entries[1].Text != "u2" {
+		t.Fatalf("unexpected transcript page entries: %+v", resp.Transcript.Entries)
+	}
 }
 
 func TestServiceGetRunReturnsDurableRunRecord(t *testing.T) {

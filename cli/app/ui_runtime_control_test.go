@@ -13,6 +13,7 @@ type runtimeControlFakeClient struct {
 	status                clientui.RuntimeStatus
 	sessionView           clientui.RuntimeSessionView
 	mainView              clientui.RuntimeMainView
+	transcript            clientui.TranscriptPage
 	setSessionNameArg     string
 	setThinkingLevelArg   string
 	setFastModeArg        bool
@@ -44,6 +45,16 @@ func (f *runtimeControlFakeClient) MainView() clientui.RuntimeMainView {
 }
 func (f *runtimeControlFakeClient) RefreshMainView() (clientui.RuntimeMainView, error) {
 	return f.MainView(), f.err
+}
+func (f *runtimeControlFakeClient) Transcript() clientui.TranscriptPage {
+	if f.transcript.SessionID != "" || len(f.transcript.Entries) > 0 {
+		return f.transcript
+	}
+	view := f.SessionView()
+	return transcriptPageFromSessionView(view)
+}
+func (f *runtimeControlFakeClient) RefreshTranscript() (clientui.TranscriptPage, error) {
+	return f.Transcript(), f.err
 }
 func (f *runtimeControlFakeClient) Status() clientui.RuntimeStatus { return f.status }
 func (f *runtimeControlFakeClient) SessionView() clientui.RuntimeSessionView {

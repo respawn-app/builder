@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -22,12 +23,18 @@ import (
 
 type countingSessionViewClient struct {
 	view  clientui.RuntimeMainView
+	page  clientui.TranscriptPage
 	count atomic.Int32
 }
 
 func (c *countingSessionViewClient) GetSessionMainView(context.Context, serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
 	c.count.Add(1)
 	return serverapi.SessionMainViewResponse{MainView: c.view}, nil
+}
+
+func (c *countingSessionViewClient) GetSessionTranscriptPage(context.Context, serverapi.SessionTranscriptPageRequest) (serverapi.SessionTranscriptPageResponse, error) {
+	c.count.Add(1)
+	return serverapi.SessionTranscriptPageResponse{Transcript: c.page}, nil
 }
 
 func (*countingSessionViewClient) GetRun(context.Context, serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {
@@ -41,7 +48,58 @@ func (blockingSessionViewClient) GetSessionMainView(ctx context.Context, _ serve
 	return serverapi.SessionMainViewResponse{}, ctx.Err()
 }
 
+func (blockingSessionViewClient) GetSessionTranscriptPage(ctx context.Context, _ serverapi.SessionTranscriptPageRequest) (serverapi.SessionTranscriptPageResponse, error) {
+	<-ctx.Done()
+	return serverapi.SessionTranscriptPageResponse{}, ctx.Err()
+}
+
 func (blockingSessionViewClient) GetRun(context.Context, serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {
+	return serverapi.RunGetResponse{}, nil
+}
+
+type flakySessionViewClient struct {
+	mu        sync.Mutex
+	responses []serverapi.SessionMainViewResponse
+	pages     []serverapi.SessionTranscriptPageResponse
+	errs      []error
+	count     int
+}
+
+func (c *flakySessionViewClient) GetSessionMainView(context.Context, serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	idx := c.count
+	c.count++
+	if idx < len(c.errs) && c.errs[idx] != nil {
+		return serverapi.SessionMainViewResponse{}, c.errs[idx]
+	}
+	if idx < len(c.responses) {
+		return c.responses[idx], nil
+	}
+	if len(c.responses) > 0 {
+		return c.responses[len(c.responses)-1], nil
+	}
+	return serverapi.SessionMainViewResponse{}, nil
+}
+
+func (c *flakySessionViewClient) GetSessionTranscriptPage(context.Context, serverapi.SessionTranscriptPageRequest) (serverapi.SessionTranscriptPageResponse, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	idx := c.count
+	c.count++
+	if idx < len(c.errs) && c.errs[idx] != nil {
+		return serverapi.SessionTranscriptPageResponse{}, c.errs[idx]
+	}
+	if idx < len(c.pages) {
+		return c.pages[idx], nil
+	}
+	if len(c.pages) > 0 {
+		return c.pages[len(c.pages)-1], nil
+	}
+	return serverapi.SessionTranscriptPageResponse{}, nil
+}
+
+func (c *flakySessionViewClient) GetRun(context.Context, serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {
 	return serverapi.RunGetResponse{}, nil
 }
 
@@ -258,6 +316,27 @@ func TestRuntimeClientMainViewFailsFastWhenReadStalls(t *testing.T) {
 	}
 	if view.Session.SessionID != "session-1" {
 		t.Fatalf("expected fallback main view to preserve session id, got %+v", view)
+	}
+}
+
+func TestRuntimeClientMainViewRetriesAfterInitialReadError(t *testing.T) {
+	reads := &flakySessionViewClient{
+		responses: []serverapi.SessionMainViewResponse{{}, {MainView: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1", SessionName: "synced"}}}},
+		errs:      []error{errors.New("temporary read failure"), nil},
+	}
+	runtimeClient := newUIRuntimeClientWithReads(
+		"session-1",
+		reads,
+		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(registry.NewRuntimeRegistry(), nil)),
+	)
+
+	first := runtimeClient.MainView()
+	if first.Session.SessionID != "session-1" {
+		t.Fatalf("fallback session id = %q, want session-1", first.Session.SessionID)
+	}
+	second := runtimeClient.MainView()
+	if second.Session.SessionName != "synced" {
+		t.Fatalf("expected second read to retry and hydrate cache, got %+v", second)
 	}
 }
 

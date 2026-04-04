@@ -7,23 +7,18 @@ func (m *uiModel) runtimeSessionView() clientui.RuntimeSessionView {
 }
 
 func (m *uiModel) localRuntimeSessionView() clientui.RuntimeSessionView {
-	entries := make([]clientui.ChatEntry, 0, len(m.transcriptEntries))
-	for _, entry := range m.transcriptEntries {
-		entries = append(entries, clientui.ChatEntry{
-			Role:        entry.Role,
-			Text:        entry.Text,
-			OngoingText: entry.OngoingText,
-			Phase:       string(entry.Phase),
-			ToolCallID:  entry.ToolCallID,
-		})
-	}
+	transcript := m.localRuntimeTranscript()
 	return clientui.RuntimeSessionView{
 		SessionID:             m.sessionID,
 		SessionName:           m.sessionName,
 		ConversationFreshness: m.conversationFreshness,
+		Transcript: clientui.TranscriptMetadata{
+			Revision:            transcript.Revision,
+			CommittedEntryCount: transcript.TotalEntries,
+		},
 		Chat: clientui.ChatSnapshot{
-			Entries: entries,
-			Ongoing: m.view.OngoingStreamingText(),
+			Entries: transcript.Entries,
+			Ongoing: transcript.Ongoing,
 		},
 	}
 }

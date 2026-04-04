@@ -15,6 +15,7 @@ import (
 
 const uiRuntimeControlTimeout = 3 * time.Second
 const uiRuntimeReadTimeout = 300 * time.Millisecond
+const uiRuntimeHydrationReadTimeout = 10 * time.Second
 const uiRuntimeMainViewRefreshInterval = 250 * time.Millisecond
 
 type sessionRuntimeClient struct {
@@ -22,11 +23,15 @@ type sessionRuntimeClient struct {
 	controls  client.RuntimeControlClient
 	sessionID string
 
-	mu              sync.RWMutex
-	mainView        clientui.RuntimeMainView
-	hasMainView     bool
-	lastMainViewAt  time.Time
-	refreshInFlight bool
+	mu                        sync.RWMutex
+	mainView                  clientui.RuntimeMainView
+	hasMainView               bool
+	lastMainViewAt            time.Time
+	transcript                clientui.TranscriptPage
+	hasTranscript             bool
+	lastTranscriptAt          time.Time
+	refreshInFlight           bool
+	transcriptRefreshInFlight bool
 }
 
 func newRuntimeClient(sessionID string, reads client.SessionViewClient, controls client.RuntimeControlClient) clientui.RuntimeClient {
@@ -52,20 +57,22 @@ func newUIRuntimeClientWithReads(sessionID string, reads client.SessionViewClien
 		return nil
 	}
 	return &sessionRuntimeClient{
-		sessionID: sessionID,
-		reads:     reads,
-		controls:  controls,
-		mainView:  clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: sessionID}},
+		sessionID:  sessionID,
+		reads:      reads,
+		controls:   controls,
+		mainView:   clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: sessionID}},
+		transcript: clientui.TranscriptPage{SessionID: sessionID},
 	}
 }
 
 func (c *sessionRuntimeClient) MainView() clientui.RuntimeMainView {
 	view, hasView, stale := c.cachedMainView()
 	if !hasView {
-		refreshed, err := c.RefreshMainView()
+		refreshed, err := c.refreshMainViewSync(uiRuntimeReadTimeout)
 		if err == nil {
 			return refreshed
 		}
+		c.refreshMainViewAsync()
 		return view
 	}
 	if stale {
@@ -75,7 +82,27 @@ func (c *sessionRuntimeClient) MainView() clientui.RuntimeMainView {
 }
 
 func (c *sessionRuntimeClient) RefreshMainView() (clientui.RuntimeMainView, error) {
-	return c.refreshMainViewSync()
+	return c.refreshMainViewSync(uiRuntimeHydrationReadTimeout)
+}
+
+func (c *sessionRuntimeClient) Transcript() clientui.TranscriptPage {
+	page, hasPage, stale := c.cachedTranscript()
+	if !hasPage {
+		refreshed, err := c.refreshTranscriptSync(uiRuntimeReadTimeout)
+		if err == nil {
+			return refreshed
+		}
+		c.refreshTranscriptAsync()
+		return page
+	}
+	if stale {
+		c.refreshTranscriptAsync()
+	}
+	return page
+}
+
+func (c *sessionRuntimeClient) RefreshTranscript() (clientui.TranscriptPage, error) {
+	return c.refreshTranscriptSync(uiRuntimeHydrationReadTimeout)
 }
 
 func (c *sessionRuntimeClient) Status() clientui.RuntimeStatus {
@@ -90,8 +117,11 @@ func (c *sessionRuntimeClient) controlContext() (context.Context, context.Cancel
 	return context.WithTimeout(context.Background(), uiRuntimeControlTimeout)
 }
 
-func (c *sessionRuntimeClient) readContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), uiRuntimeReadTimeout)
+func (c *sessionRuntimeClient) readContext(timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		timeout = uiRuntimeReadTimeout
+	}
+	return context.WithTimeout(context.Background(), timeout)
 }
 
 func (c *sessionRuntimeClient) cachedMainView() (clientui.RuntimeMainView, bool, bool) {
@@ -104,6 +134,16 @@ func (c *sessionRuntimeClient) cachedMainView() (clientui.RuntimeMainView, bool,
 	return view, true, time.Since(c.lastMainViewAt) >= uiRuntimeMainViewRefreshInterval
 }
 
+func (c *sessionRuntimeClient) cachedTranscript() (clientui.TranscriptPage, bool, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	page := c.transcript
+	if !c.hasTranscript {
+		return page, false, true
+	}
+	return page, true, time.Since(c.lastTranscriptAt) >= uiRuntimeMainViewRefreshInterval
+}
+
 func (c *sessionRuntimeClient) storeMainView(view clientui.RuntimeMainView) clientui.RuntimeMainView {
 	if view.Session.SessionID == "" {
 		view.Session.SessionID = c.sessionID
@@ -112,8 +152,19 @@ func (c *sessionRuntimeClient) storeMainView(view clientui.RuntimeMainView) clie
 	c.mainView = view
 	c.hasMainView = true
 	c.lastMainViewAt = time.Now()
+	storeTranscriptFromSessionViewLocked(c, view.Session)
 	c.mu.Unlock()
 	return view
+}
+
+func (c *sessionRuntimeClient) storeTranscript(page clientui.TranscriptPage) clientui.TranscriptPage {
+	if page.SessionID == "" {
+		page.SessionID = c.sessionID
+	}
+	c.mu.Lock()
+	storeTranscriptLocked(c, page)
+	c.mu.Unlock()
+	return page
 }
 
 func (c *sessionRuntimeClient) patchMainView(apply func(view *clientui.RuntimeMainView)) {
@@ -127,19 +178,18 @@ func (c *sessionRuntimeClient) patchMainView(apply func(view *clientui.RuntimeMa
 	c.mu.Unlock()
 }
 
-func (c *sessionRuntimeClient) refreshMainViewSync() (clientui.RuntimeMainView, error) {
-	ctx, cancel := c.readContext()
+func (c *sessionRuntimeClient) refreshMainViewSync(timeout time.Duration) (clientui.RuntimeMainView, error) {
+	ctx, cancel := c.readContext(timeout)
 	defer cancel()
 	resp, err := c.reads.GetSessionMainView(ctx, serverapi.SessionMainViewRequest{SessionID: c.sessionID})
 	if err != nil {
-		c.mu.Lock()
-		if c.mainView.Session.SessionID == "" {
-			c.mainView.Session.SessionID = c.sessionID
-		}
-		c.hasMainView = true
-		c.lastMainViewAt = time.Now()
+		c.mu.RLock()
 		view := c.mainView
-		c.mu.Unlock()
+		hasView := c.hasMainView
+		c.mu.RUnlock()
+		if !hasView && view.Session.SessionID == "" {
+			view.Session.SessionID = c.sessionID
+		}
 		return view, err
 	}
 	return c.storeMainView(resp.MainView), nil
@@ -159,8 +209,119 @@ func (c *sessionRuntimeClient) refreshMainViewAsync() {
 			c.refreshInFlight = false
 			c.mu.Unlock()
 		}()
-		_, _ = c.refreshMainViewSync()
+		_, _ = c.refreshMainViewSync(uiRuntimeHydrationReadTimeout)
 	}()
+}
+
+func (c *sessionRuntimeClient) refreshTranscriptSync(timeout time.Duration) (clientui.TranscriptPage, error) {
+	ctx, cancel := c.readContext(timeout)
+	defer cancel()
+	resp, err := c.reads.GetSessionTranscriptPage(ctx, serverapi.SessionTranscriptPageRequest{SessionID: c.sessionID})
+	if err != nil {
+		c.mu.RLock()
+		page := c.transcript
+		hasPage := c.hasTranscript
+		c.mu.RUnlock()
+		if !hasPage && page.SessionID == "" {
+			page.SessionID = c.sessionID
+		}
+		return page, err
+	}
+	return c.storeTranscript(resp.Transcript), nil
+}
+
+func (c *sessionRuntimeClient) refreshTranscriptAsync() {
+	c.mu.Lock()
+	if c.transcriptRefreshInFlight {
+		c.mu.Unlock()
+		return
+	}
+	c.transcriptRefreshInFlight = true
+	c.mu.Unlock()
+	go func() {
+		defer func() {
+			c.mu.Lock()
+			c.transcriptRefreshInFlight = false
+			c.mu.Unlock()
+		}()
+		_, _ = c.refreshTranscriptSync(uiRuntimeHydrationReadTimeout)
+	}()
+}
+
+func storeTranscriptFromSessionViewLocked(c *sessionRuntimeClient, view clientui.RuntimeSessionView) {
+	page := transcriptPageFromSessionView(view)
+	if page.SessionID == "" || (len(page.Entries) == 0 && view.Transcript.CommittedEntryCount > 0) {
+		return
+	}
+	storeTranscriptLocked(c, page)
+}
+
+func storeTranscriptLocked(c *sessionRuntimeClient, page clientui.TranscriptPage) {
+	if page.SessionID == "" {
+		page.SessionID = c.sessionID
+	}
+	c.transcript = page
+	c.hasTranscript = true
+	c.lastTranscriptAt = time.Now()
+	c.mainView.Session.Transcript = clientui.TranscriptMetadata{
+		Revision:            page.Revision,
+		CommittedEntryCount: page.TotalEntries,
+	}
+	if page.Offset == 0 && !page.HasMore {
+		c.mainView.Session.Chat = clientui.ChatSnapshot{
+			Entries:      cloneTranscriptEntries(page.Entries),
+			Ongoing:      page.Ongoing,
+			OngoingError: page.OngoingError,
+		}
+	}
+}
+
+func transcriptPageFromSessionView(view clientui.RuntimeSessionView) clientui.TranscriptPage {
+	total := view.Transcript.CommittedEntryCount
+	if total == 0 {
+		total = len(view.Chat.Entries)
+	}
+	hasMore := total > len(view.Chat.Entries)
+	nextOffset := 0
+	if hasMore {
+		nextOffset = len(view.Chat.Entries)
+	}
+	return clientui.TranscriptPage{
+		SessionID:             view.SessionID,
+		SessionName:           view.SessionName,
+		ConversationFreshness: view.ConversationFreshness,
+		Revision:              view.Transcript.Revision,
+		TotalEntries:          total,
+		Offset:                0,
+		NextOffset:            nextOffset,
+		HasMore:               hasMore,
+		Entries:               cloneTranscriptEntries(view.Chat.Entries),
+		Ongoing:               view.Chat.Ongoing,
+		OngoingError:          view.Chat.OngoingError,
+	}
+}
+
+func cloneTranscriptEntries(entries []clientui.ChatEntry) []clientui.ChatEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	cloned := make([]clientui.ChatEntry, 0, len(entries))
+	for _, entry := range entries {
+		copyEntry := entry
+		if entry.ToolCall != nil {
+			copyMeta := *entry.ToolCall
+			if len(entry.ToolCall.Suggestions) > 0 {
+				copyMeta.Suggestions = append([]string(nil), entry.ToolCall.Suggestions...)
+			}
+			if entry.ToolCall.RenderHint != nil {
+				renderHint := *entry.ToolCall.RenderHint
+				copyMeta.RenderHint = &renderHint
+			}
+			copyEntry.ToolCall = &copyMeta
+		}
+		cloned = append(cloned, copyEntry)
+	}
+	return cloned
 }
 
 func (c *sessionRuntimeClient) SetSessionName(name string) error {

@@ -22,6 +22,68 @@ type runtimeAdapterFakeClient struct {
 	index     int
 }
 
+type refreshingRuntimeClient struct {
+	runtimeControlFakeClient
+	views       []clientui.RuntimeMainView
+	transcripts []clientui.TranscriptPage
+	errs        []error
+	calls       int
+}
+
+func (f *refreshingRuntimeClient) MainView() clientui.RuntimeMainView {
+	if f.calls == 0 {
+		return clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1"}}
+	}
+	idx := f.calls - 1
+	if idx >= len(f.views) {
+		idx = len(f.views) - 1
+	}
+	if idx < 0 {
+		return clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1"}}
+	}
+	return f.views[idx]
+}
+
+func (f *refreshingRuntimeClient) RefreshMainView() (clientui.RuntimeMainView, error) {
+	idx := f.calls
+	view := clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1"}}
+	if idx < len(f.views) {
+		view = f.views[idx]
+	} else if len(f.views) > 0 {
+		view = f.views[len(f.views)-1]
+	}
+	return view, nil
+}
+
+func (f *refreshingRuntimeClient) Transcript() clientui.TranscriptPage {
+	if f.calls == 0 {
+		return clientui.TranscriptPage{SessionID: "session-1"}
+	}
+	idx := f.calls - 1
+	if idx >= len(f.transcripts) {
+		idx = len(f.transcripts) - 1
+	}
+	if idx < 0 {
+		return clientui.TranscriptPage{SessionID: "session-1"}
+	}
+	return f.transcripts[idx]
+}
+
+func (f *refreshingRuntimeClient) RefreshTranscript() (clientui.TranscriptPage, error) {
+	idx := f.calls
+	f.calls++
+	page := clientui.TranscriptPage{SessionID: "session-1"}
+	if idx < len(f.transcripts) {
+		page = f.transcripts[idx]
+	} else if len(f.transcripts) > 0 {
+		page = f.transcripts[len(f.transcripts)-1]
+	}
+	if idx < len(f.errs) && f.errs[idx] != nil {
+		return page, f.errs[idx]
+	}
+	return page, nil
+}
+
 func (f *runtimeAdapterFakeClient) Generate(context.Context, llm.Request) (llm.Response, error) {
 	if f.index >= len(f.responses) {
 		return llm.Response{}, errors.New("no fake response configured")
@@ -103,10 +165,18 @@ func TestSyncConversationFromEngineUsesBundledSessionViewMetadata(t *testing.T) 
 	m.sessionName = "stale"
 	m.sessionID = "stale"
 
-	cmd := m.runtimeAdapter().syncConversationFromEngine()
-	if cmd == nil {
-		t.Fatal("expected sync command")
+	if len(m.startupCmds) != 1 || m.startupCmds[0] == nil {
+		t.Fatalf("expected startup sync command, got %d command(s)", len(m.startupCmds))
 	}
+	cmd := m.startupCmds[0]
+	m.startupCmds = nil
+	msg, ok := cmd().(runtimeTranscriptRefreshedMsg)
+	if !ok {
+		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", cmd())
+	}
+	next, followUp := m.Update(msg)
+	_ = followUp
+	m = next.(*uiModel)
 	if m.sessionName != "incident triage" {
 		t.Fatalf("session name = %q, want incident triage", m.sessionName)
 	}
@@ -118,6 +188,59 @@ func TestSyncConversationFromEngineUsesBundledSessionViewMetadata(t *testing.T) 
 	}
 	if got := m.view.OngoingSnapshot(); !strings.Contains(got, "hello") {
 		t.Fatalf("expected synced conversation in view, got %q", got)
+	}
+}
+
+func TestSyncConversationFromEngineRetriesAfterRefreshError(t *testing.T) {
+	oldDelay := uiRuntimeHydrationRetryDelay
+	uiRuntimeHydrationRetryDelay = 0
+	defer func() { uiRuntimeHydrationRetryDelay = oldDelay }()
+
+	client := &refreshingRuntimeClient{
+		transcripts: []clientui.TranscriptPage{
+			{SessionID: "session-1"},
+			{SessionID: "session-1", SessionName: "incident triage", Entries: []clientui.ChatEntry{{Role: "assistant", Text: "final answer"}}, TotalEntries: 1},
+		},
+		errs: []error{errors.New("temporary refresh failure"), nil},
+	}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+
+	if len(m.startupCmds) != 1 || m.startupCmds[0] == nil {
+		t.Fatalf("expected startup sync command, got %d command(s)", len(m.startupCmds))
+	}
+	firstCmd := m.startupCmds[0]
+	m.startupCmds = nil
+	firstMsg, ok := firstCmd().(runtimeTranscriptRefreshedMsg)
+	if !ok {
+		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", firstCmd())
+	}
+	next, retryCmd := m.Update(firstMsg)
+	if retryCmd == nil {
+		t.Fatal("expected retry command after refresh error")
+	}
+	retryMsg, ok := retryCmd().(runtimeTranscriptRetryMsg)
+	if !ok {
+		t.Fatalf("expected runtimeTranscriptRetryMsg, got %T", retryCmd())
+	}
+	next, secondCmd := next.(*uiModel).Update(retryMsg)
+	if secondCmd == nil {
+		t.Fatal("expected second sync command after retry tick")
+	}
+	secondMsg, ok := secondCmd().(runtimeTranscriptRefreshedMsg)
+	if !ok {
+		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", secondCmd())
+	}
+	next, followUp := next.(*uiModel).Update(secondMsg)
+	_ = followUp
+	updated := next.(*uiModel)
+	if updated.sessionName != "incident triage" {
+		t.Fatalf("session name = %q, want incident triage", updated.sessionName)
+	}
+	if got := stripANSIAndTrimRight(updated.view.OngoingSnapshot()); !strings.Contains(got, "final answer") {
+		t.Fatalf("expected retried sync to hydrate transcript, got %q", got)
+	}
+	if client.calls != 2 {
+		t.Fatalf("refresh call count = %d, want 2", client.calls)
 	}
 }
 
@@ -352,11 +475,20 @@ func TestUserMessageFlushedSyncsConversationForNativeReplay(t *testing.T) {
 
 	cmd := m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, UserMessage: "steered message"})
 	if cmd == nil {
-		t.Fatal("expected native replay command for flushed user message")
+		t.Fatal("expected conversation sync command for flushed user message")
 	}
-	flushMsg, ok := cmd().(nativeHistoryFlushMsg)
+	refreshMsg, ok := cmd().(runtimeTranscriptRefreshedMsg)
 	if !ok {
-		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", cmd())
+	}
+	next, flushCmd := m.Update(refreshMsg)
+	m = next.(*uiModel)
+	if flushCmd == nil {
+		t.Fatal("expected native replay command after conversation sync")
+	}
+	flushMsg, ok := flushCmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", flushCmd())
 	}
 	if !strings.Contains(stripANSIPreserve(flushMsg.Text), "steered message") {
 		t.Fatalf("expected flushed replay text to include steered message, got %q", flushMsg.Text)
@@ -390,19 +522,39 @@ func TestUserMessageFlushedAfterConversationUpdatedDoesNotDuplicateNativeReplay(
 
 	conversationCmd := m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventConversationUpdated})
 	if conversationCmd == nil {
-		t.Fatal("expected conversation update replay command")
+		t.Fatal("expected conversation sync command")
 	}
-	conversationFlush, ok := conversationCmd().(nativeHistoryFlushMsg)
+	refreshMsg, ok := conversationCmd().(runtimeTranscriptRefreshedMsg)
 	if !ok {
-		t.Fatalf("expected nativeHistoryFlushMsg, got %T", conversationCmd())
+		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", conversationCmd())
+	}
+	next, flushCmd := m.Update(refreshMsg)
+	m = next.(*uiModel)
+	if flushCmd == nil {
+		t.Fatal("expected native replay command after conversation sync")
+	}
+	conversationFlush, ok := flushCmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", flushCmd())
 	}
 	if !strings.Contains(stripANSIPreserve(conversationFlush.Text), "steered message") {
 		t.Fatalf("expected conversation replay text to include steered message, got %q", conversationFlush.Text)
 	}
 
-	flushCmd := m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, UserMessage: "steered message"})
-	if flushCmd != nil {
-		t.Fatalf("expected no duplicate replay after already-synced conversation, got %T", flushCmd())
+	flushCmd = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, UserMessage: "steered message"})
+	if flushCmd == nil {
+		return
+	}
+	secondRefresh, ok := flushCmd().(runtimeTranscriptRefreshedMsg)
+	if !ok {
+		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", flushCmd())
+	}
+	next, duplicateFlush := m.Update(secondRefresh)
+	m = next.(*uiModel)
+	if duplicateFlush != nil {
+		if _, ok := duplicateFlush().(nativeHistoryFlushMsg); ok {
+			t.Fatal("expected no duplicate native replay after already-synced conversation")
+		}
 	}
 }
 

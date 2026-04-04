@@ -116,16 +116,42 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 	if !m.hasRuntimeClient() {
 		return nil
 	}
-	return a.applyProjectedSessionView(m.refreshRuntimeSessionView())
+	return m.requestRuntimeTranscriptSync()
 }
 
 func (a uiRuntimeAdapter) applyProjectedChatSnapshot(snapshot clientui.ChatSnapshot) tea.Cmd {
-	view := a.model.runtimeSessionView()
-	view.Chat = snapshot
-	return a.applyProjectedSessionView(view)
+	page := a.model.runtimeTranscript()
+	page.Entries = cloneTranscriptEntries(snapshot.Entries)
+	page.TotalEntries = len(page.Entries)
+	page.Offset = 0
+	page.NextOffset = 0
+	page.HasMore = false
+	page.Ongoing = snapshot.Ongoing
+	page.OngoingError = snapshot.OngoingError
+	return a.applyProjectedTranscriptPage(page)
 }
 
 func (a uiRuntimeAdapter) applyProjectedSessionView(view clientui.RuntimeSessionView) tea.Cmd {
+	transcript := transcriptPageFromSessionView(view)
+	return sequenceCmds(a.applyProjectedSessionMetadata(view), a.applyProjectedTranscriptPage(transcript))
+}
+
+func (a uiRuntimeAdapter) applyProjectedSessionMetadata(view clientui.RuntimeSessionView) tea.Cmd {
+	m := a.model
+	if len(m.startupCmds) > 0 {
+		m.startupCmds = nil
+	}
+	previousWindowTitle := m.windowTitle()
+	m.sessionID = strings.TrimSpace(view.SessionID)
+	m.sessionName = strings.TrimSpace(view.SessionName)
+	m.conversationFreshness = view.ConversationFreshness
+	if previousWindowTitle != m.windowTitle() {
+		return tea.SetWindowTitle(m.windowTitle())
+	}
+	return nil
+}
+
+func (a uiRuntimeAdapter) applyProjectedTranscriptPage(page clientui.TranscriptPage) tea.Cmd {
 	m := a.model
 	if len(m.startupCmds) > 0 {
 		m.startupCmds = nil
@@ -135,11 +161,13 @@ func (a uiRuntimeAdapter) applyProjectedSessionView(view clientui.RuntimeSession
 		m.nativeRenderedSnapshot = ""
 	}
 	previousWindowTitle := m.windowTitle()
-	m.sessionID = strings.TrimSpace(view.SessionID)
-	m.sessionName = strings.TrimSpace(view.SessionName)
-	m.conversationFreshness = view.ConversationFreshness
-	entries := make([]tui.TranscriptEntry, 0, len(view.Chat.Entries))
-	for _, entry := range view.Chat.Entries {
+	m.sessionID = strings.TrimSpace(page.SessionID)
+	if strings.TrimSpace(page.SessionName) != "" {
+		m.sessionName = strings.TrimSpace(page.SessionName)
+	}
+	m.conversationFreshness = page.ConversationFreshness
+	entries := make([]tui.TranscriptEntry, 0, len(page.Entries))
+	for _, entry := range page.Entries {
 		entries = append(entries, tui.TranscriptEntry{
 			Role:        entry.Role,
 			Text:        entry.Text,
@@ -155,13 +183,13 @@ func (a uiRuntimeAdapter) applyProjectedSessionView(view clientui.RuntimeSession
 	m.forwardToView(tui.ClearStreamingReasoningMsg{})
 	m.forwardToView(tui.SetConversationMsg{
 		Entries:      entries,
-		Ongoing:      view.Chat.Ongoing,
-		OngoingError: view.Chat.OngoingError,
+		Ongoing:      page.Ongoing,
+		OngoingError: page.OngoingError,
 	})
 	if m.view.Mode() == tui.ModeOngoing {
 		m.forwardToView(tui.SetOngoingScrollMsg{Scroll: m.view.OngoingScroll()})
 	}
-	if strings.TrimSpace(view.Chat.Ongoing) == "" {
+	if strings.TrimSpace(page.Ongoing) == "" {
 		m.sawAssistantDelta = false
 	}
 	cmds := []tea.Cmd{m.syncNativeHistoryFromTranscript()}

@@ -24,6 +24,13 @@ func (e *Engine) ChatSnapshot() ChatSnapshot {
 	return e.chat.snapshot()
 }
 
+func (e *Engine) TranscriptRevision() int64 {
+	if e == nil || e.store == nil {
+		return 0
+	}
+	return e.store.Meta().LastSequence
+}
+
 func (e *Engine) ActiveRun() *RunSnapshot {
 	if e == nil || e.stepLifecycle == nil {
 		return nil

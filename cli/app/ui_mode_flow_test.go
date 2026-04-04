@@ -100,7 +100,15 @@ func TestScenarioHarnessRestartAndSessionResumeKeepsTranscriptVisible(t *testing
 	}
 
 	eng.AppendLocalEntry("assistant", "post-resume live update")
-	next, _ := m.Update(projectedRuntimeEventMsg(runtime.Event{Kind: runtime.EventConversationUpdated}))
+	cmd := m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventConversationUpdated})
+	if cmd == nil {
+		t.Fatal("expected conversation refresh command")
+	}
+	refreshMsg, ok := cmd().(runtimeTranscriptRefreshedMsg)
+	if !ok {
+		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", cmd())
+	}
+	next, _ := m.Update(refreshMsg)
 	updated := next.(*uiModel)
 	live := stripANSIAndTrimRight(updated.view.OngoingSnapshot())
 	if !strings.Contains(live, "post-resume live update") {

@@ -1,0 +1,91 @@
+package app
+
+import (
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+var uiRuntimeHydrationRetryDelay = 750 * time.Millisecond
+
+func (m *uiModel) requestRuntimeMainViewRefresh() tea.Cmd {
+	if !m.hasRuntimeClient() {
+		return nil
+	}
+	m.runtimeMainViewToken++
+	token := m.runtimeMainViewToken
+	client := m.runtimeClient()
+	return func() tea.Msg {
+		view, err := client.RefreshMainView()
+		return runtimeMainViewRefreshedMsg{token: token, view: view, err: err}
+	}
+}
+
+func (m *uiModel) requestRuntimeTranscriptSync() tea.Cmd {
+	if !m.hasRuntimeClient() {
+		return nil
+	}
+	if m.runtimeTranscriptBusy {
+		m.runtimeTranscriptDirty = true
+		m.logf("ui.runtime.transcript.mark_dirty")
+		return nil
+	}
+	m.runtimeTranscriptBusy = true
+	m.runtimeTranscriptDirty = false
+	m.runtimeTranscriptToken++
+	token := m.runtimeTranscriptToken
+	client := m.runtimeClient()
+	m.logf("ui.runtime.transcript.start token=%d", token)
+	return func() tea.Msg {
+		transcript, err := client.RefreshTranscript()
+		return runtimeTranscriptRefreshedMsg{token: token, transcript: transcript, err: err}
+	}
+}
+
+func (m *uiModel) scheduleRuntimeTranscriptRetry() tea.Cmd {
+	if !m.hasRuntimeClient() {
+		return nil
+	}
+	m.runtimeTranscriptRetry++
+	token := m.runtimeTranscriptRetry
+	m.logf("ui.runtime.transcript.retry_scheduled token=%d delay=%s", token, uiRuntimeHydrationRetryDelay)
+	return tea.Tick(uiRuntimeHydrationRetryDelay, func(time.Time) tea.Msg {
+		return runtimeTranscriptRetryMsg{token: token}
+	})
+}
+
+func (m *uiModel) handleRuntimeMainViewRefreshed(msg runtimeMainViewRefreshedMsg) tea.Cmd {
+	if msg.token != m.runtimeMainViewToken {
+		return nil
+	}
+	if msg.err != nil {
+		m.logf("ui.runtime.main_view err=%q", msg.err.Error())
+		return nil
+	}
+	return m.runtimeAdapter().applyProjectedSessionMetadata(msg.view.Session)
+}
+
+func (m *uiModel) handleRuntimeTranscriptRefreshed(msg runtimeTranscriptRefreshedMsg) tea.Cmd {
+	if msg.token != m.runtimeTranscriptToken {
+		return nil
+	}
+	m.runtimeTranscriptBusy = false
+	if msg.err != nil {
+		m.logf("ui.runtime.transcript err=%q", msg.err.Error())
+		return m.scheduleRuntimeTranscriptRetry()
+	}
+	recovered := m.runtimeTranscriptRetry != 0
+	if m.runtimeTranscriptRetry != 0 {
+		m.runtimeTranscriptRetry++
+	}
+	if recovered {
+		m.logf("ui.runtime.transcript.recovered token=%d", msg.token)
+	}
+	applyCmd := m.runtimeAdapter().applyProjectedTranscriptPage(msg.transcript)
+	if !m.runtimeTranscriptDirty {
+		return applyCmd
+	}
+	m.runtimeTranscriptDirty = false
+	m.logf("ui.runtime.transcript.repeat_after_dirty token=%d", msg.token)
+	return sequenceCmds(applyCmd, m.requestRuntimeTranscriptSync())
+}
