@@ -439,18 +439,15 @@ func (m Model) ongoingLines() []string {
 }
 
 func (m *Model) invalidateOngoingSnapshot() {
-	m.ongoingBaseDirty = true
 	m.ongoingDirty = true
 	m.ongoingSnapshot = ""
 	m.ongoingLineCache = nil
 	m.ongoingLineKinds = nil
 }
 
-func (m *Model) invalidateOngoingStreamingSnapshot() {
-	m.ongoingDirty = true
-	m.ongoingSnapshot = ""
-	m.ongoingLineCache = nil
-	m.ongoingLineKinds = nil
+func (m *Model) invalidateOngoingBaseSnapshot() {
+	m.ongoingBaseDirty = true
+	m.invalidateOngoingSnapshot()
 }
 
 func (m *Model) rebuildOngoingSnapshot() {
@@ -481,6 +478,26 @@ func (m *Model) rebuildOngoingSnapshot() {
 			}
 		}
 	}
+	if len(m.ongoingBaseLines) == 0 && !m.ongoingStreamingDivider && len(m.ongoingStreamingLines) == 0 {
+		m.ongoingSnapshot = ""
+		m.ongoingLineCache = []string{""}
+		m.ongoingLineKinds = []VisibleLineKind{VisibleLineContent}
+		m.ongoingDirty = false
+		return
+	}
+	plain := make([]string, 0, len(m.ongoingBaseLines)+len(m.ongoingStreamingLines)+1)
+	kinds := make([]VisibleLineKind, 0, len(m.ongoingBaseLineKinds)+len(m.ongoingStreamingKinds)+1)
+	plain = append(plain, m.ongoingBaseLines...)
+	kinds = append(kinds, m.ongoingBaseLineKinds...)
+	if m.ongoingStreamingDivider {
+			plain = append(plain, detailDivider())
+			kinds = append(kinds, VisibleLineDivider)
+	}
+	plain = append(plain, m.ongoingStreamingLines...)
+	kinds = append(kinds, m.ongoingStreamingKinds...)
+	m.ongoingSnapshot = strings.Join(plain, "\n")
+	m.ongoingLineCache = plain
+	m.ongoingLineKinds = kinds
 	m.ongoingDirty = false
 }
 

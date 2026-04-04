@@ -190,11 +190,16 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 	}
 	m.logf("step.done assistant_chars=%d", len(msg.message))
 	m.sawAssistantDelta = false
+	transcriptSyncCmd := tea.Cmd(nil)
+	if m.hasRuntimeClient() {
+		transcriptSyncCmd = m.requestRuntimeTranscriptSync()
+	}
 	if len(m.queued) > 0 {
-		return c.flushQueuedInputs(queueDrainAuto)
+		next, drainCmd := c.flushQueuedInputs(queueDrainAuto)
+		return next, tea.Batch(transcriptSyncCmd, drainCmd)
 	}
 	m.syncViewport()
-	return m, nil
+	return m, transcriptSyncCmd
 }
 
 func (c uiInputController) handlePreSubmitCompactionCheckDone(msg preSubmitCompactionCheckDoneMsg) (tea.Model, tea.Cmd) {

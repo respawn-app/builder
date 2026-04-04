@@ -98,3 +98,24 @@ func TestReduceSetViewportSizeMsgNoopWhenSizeUnchanged(t *testing.T) {
 		t.Fatalf("expected unchanged viewport update to avoid dirtying snapshots, got ongoingDirty=%v detailDirty=%v", updated.ongoingDirty, updated.detailDirty)
 	}
 }
+
+func TestReduceStreamAssistantMsgInvalidatesDetailOnlyOnceWhileDirty(t *testing.T) {
+	m := NewModel()
+	m.detailDirty = false
+
+	var first modelUpdateResult
+	m.reduceStreamAssistantMsg(StreamAssistantMsg{Delta: "a"}, &first)
+	if !first.detailChanged {
+		t.Fatal("expected first streaming delta to invalidate detail snapshot")
+	}
+	m.applyUpdateResult(first, true)
+	if !m.detailDirty {
+		t.Fatal("expected detail snapshot marked dirty after first streaming delta")
+	}
+
+	var second modelUpdateResult
+	m.reduceStreamAssistantMsg(StreamAssistantMsg{Delta: "b"}, &second)
+	if second.detailChanged {
+		t.Fatal("expected repeated streaming deltas to avoid redundant detail invalidation while already dirty")
+	}
+}

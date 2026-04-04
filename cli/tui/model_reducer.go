@@ -7,12 +7,12 @@ import (
 )
 
 type modelUpdateResult struct {
-	viewportChanged         bool
-	ongoingChanged          bool
-	ongoingStreamingChanged bool
-	detailChanged           bool
-	forceDetailRefresh      bool
-	autoFollowOngoing       bool
+	viewportChanged    bool
+	ongoingBaseChanged bool
+	ongoingChanged     bool
+	detailChanged      bool
+	forceDetailRefresh bool
+	autoFollowOngoing  bool
 }
 
 func (m *Model) reduce(msg tea.Msg) {
@@ -177,6 +177,7 @@ func (m *Model) reduceViewportSizeMsg(msg SetViewportSizeMsg, result *modelUpdat
 		return
 	}
 	m.viewportWidth = msg.Width
+	result.ongoingBaseChanged = true
 	result.ongoingChanged = true
 	result.detailChanged = true
 	if m.mode == ModeDetail {
@@ -198,6 +199,7 @@ func (m *Model) reduceAppendTranscriptMsg(msg AppendTranscriptMsg, result *model
 		ToolCall:    cloneToolCallMeta(msg.ToolCall),
 	})
 	result.autoFollowOngoing = true
+	result.ongoingBaseChanged = true
 	result.ongoingChanged = true
 	result.detailChanged = true
 }
@@ -216,6 +218,7 @@ func (m *Model) reduceSetConversationMsg(msg SetConversationMsg, result *modelUp
 		m.selectedTranscriptActive = false
 	}
 	result.autoFollowOngoing = true
+	result.ongoingBaseChanged = true
 	result.ongoingChanged = true
 	result.detailChanged = true
 }
@@ -253,15 +256,15 @@ func (m *Model) reduceSetOngoingScrollMsg(msg SetOngoingScrollMsg) {
 func (m *Model) reduceStreamAssistantMsg(msg StreamAssistantMsg, result *modelUpdateResult) {
 	m.ongoing += msg.Delta
 	result.autoFollowOngoing = true
-	result.ongoingStreamingChanged = true
-	result.detailChanged = true
+	result.ongoingChanged = true
+	result.detailChanged = !m.detailDirty
 }
 
 func (m *Model) reduceClearOngoingAssistantMsg(result *modelUpdateResult) {
 	m.ongoing = ""
 	m.ongoingScroll = 0
-	result.ongoingStreamingChanged = true
-	result.detailChanged = true
+	result.ongoingChanged = true
+	result.detailChanged = !m.detailDirty
 }
 
 func (m *Model) reduceUpsertStreamingReasoningMsg(msg UpsertStreamingReasoningMsg, result *modelUpdateResult) {
@@ -315,15 +318,16 @@ func (m *Model) reduceCommitAssistantMsg(result *modelUpdateResult) {
 	m.transcript = append(m.transcript, TranscriptEntry{Role: "assistant", Text: m.ongoing})
 	m.ongoing = ""
 	result.autoFollowOngoing = true
+	result.ongoingBaseChanged = true
 	result.ongoingChanged = true
 	result.detailChanged = true
 }
 
 func (m *Model) applyUpdateResult(result modelUpdateResult, wasAtOngoingBottom bool) {
-	if result.ongoingChanged {
+	if result.ongoingBaseChanged {
+		m.invalidateOngoingBaseSnapshot()
+	} else if result.ongoingChanged {
 		m.invalidateOngoingSnapshot()
-	} else if result.ongoingStreamingChanged {
-		m.invalidateOngoingStreamingSnapshot()
 	}
 	if result.detailChanged {
 		m.invalidateDetailSnapshot()
