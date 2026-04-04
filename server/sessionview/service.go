@@ -99,7 +99,7 @@ func (s *Service) GetSessionTranscriptPage(ctx context.Context, req serverapi.Se
 	if err := req.Validate(); err != nil {
 		return serverapi.SessionTranscriptPageResponse{}, err
 	}
-	pageReq := clientui.TranscriptPageRequest{Offset: req.Offset, Limit: req.Limit}
+	pageReq := clientui.TranscriptPageRequest{Offset: req.Offset, Limit: req.Limit, Page: req.Page, PageSize: req.PageSize, Window: req.Window}
 	if runtimeEngine, err := s.resolveRuntime(ctx, req.SessionID); err != nil {
 		return serverapi.SessionTranscriptPageResponse{}, err
 	} else if runtimeEngine != nil {

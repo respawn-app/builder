@@ -24,6 +24,13 @@ func (e *Engine) ChatSnapshot() ChatSnapshot {
 	return e.chat.snapshot()
 }
 
+func (e *Engine) OngoingTailTranscriptWindow(maxEntries int) TranscriptWindowSnapshot {
+	if e == nil || e.chat == nil {
+		return TranscriptWindowSnapshot{}
+	}
+	return e.chat.ongoingTailSnapshot(maxEntries)
+}
+
 func (e *Engine) TranscriptRevision() int64 {
 	if e == nil || e.store == nil {
 		return 0

@@ -10,6 +10,7 @@ import (
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/clientui"
 	"builder/shared/transcript"
 )
 
@@ -170,5 +171,60 @@ func TestChatSnapshotFromRuntimeCopiesEntries(t *testing.T) {
 	}
 	if snapshot.Ongoing != "ongoing" || snapshot.OngoingError != "warn" {
 		t.Fatalf("unexpected snapshot projection: %+v", snapshot)
+	}
+}
+
+func TestTranscriptPageFromChatSupportsPageNumberPagination(t *testing.T) {
+	snapshot := clientui.ChatSnapshot{Entries: []clientui.ChatEntry{
+		{Role: "assistant", Text: "a0"},
+		{Role: "assistant", Text: "a1"},
+		{Role: "assistant", Text: "a2"},
+		{Role: "assistant", Text: "a3"},
+		{Role: "assistant", Text: "a4"},
+	}}
+
+	page := TranscriptPageFromChat("session-1", "incident triage", clientui.ConversationFreshnessEstablished, 7, snapshot, clientui.TranscriptPageRequest{Page: 1, PageSize: 2})
+	if page.TotalEntries != 5 {
+		t.Fatalf("total entries = %d, want 5", page.TotalEntries)
+	}
+	if page.Offset != 2 {
+		t.Fatalf("offset = %d, want 2", page.Offset)
+	}
+	if !page.HasMore || page.NextOffset != 4 {
+		t.Fatalf("unexpected pagination metadata: %+v", page)
+	}
+	if len(page.Entries) != 2 || page.Entries[0].Text != "a2" || page.Entries[1].Text != "a3" {
+		t.Fatalf("unexpected page entries: %+v", page.Entries)
+	}
+}
+
+func TestTranscriptPageFromRuntimeUsesOngoingTailWindow(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	for i := 0; i < 600; i++ {
+		if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: "reply", Phase: llm.MessagePhaseFinal}); err != nil {
+			t.Fatalf("append message %d: %v", i, err)
+		}
+	}
+	eng, err := runtime.New(store, projectionFastClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	page := TranscriptPageFromRuntime(eng, clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail})
+	if page.TotalEntries != 600 {
+		t.Fatalf("total entries = %d, want 600", page.TotalEntries)
+	}
+	if page.Offset != 100 {
+		t.Fatalf("offset = %d, want 100", page.Offset)
+	}
+	if page.HasMore {
+		t.Fatalf("expected ongoing tail page to terminate at end, got %+v", page)
+	}
+	if len(page.Entries) != 500 {
+		t.Fatalf("entries = %d, want 500", len(page.Entries))
 	}
 }

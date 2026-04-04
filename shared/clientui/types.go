@@ -83,9 +83,19 @@ type ChatSnapshot struct {
 	OngoingError string
 }
 
+type TranscriptWindow string
+
+const (
+	TranscriptWindowDefault     TranscriptWindow = ""
+	TranscriptWindowOngoingTail TranscriptWindow = "ongoing_tail"
+)
+
 type TranscriptPageRequest struct {
-	Offset int
-	Limit  int
+	Offset   int
+	Limit    int
+	Page     int
+	PageSize int
+	Window   TranscriptWindow
 }
 
 type TranscriptPage struct {

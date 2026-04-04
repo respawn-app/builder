@@ -31,6 +31,9 @@ func (c *gatedRuntimeClient) Transcript() clientui.TranscriptPage { return c.inn
 func (c *gatedRuntimeClient) RefreshTranscript() (clientui.TranscriptPage, error) {
 	return c.inner.RefreshTranscript()
 }
+func (c *gatedRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	return c.inner.LoadTranscriptPage(req)
+}
 func (c *gatedRuntimeClient) Status() clientui.RuntimeStatus           { return c.inner.Status() }
 func (c *gatedRuntimeClient) SessionView() clientui.RuntimeSessionView { return c.inner.SessionView() }
 func (c *gatedRuntimeClient) SetSessionName(name string) error         { return c.inner.SetSessionName(name) }

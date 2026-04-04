@@ -102,7 +102,11 @@ func (c *sessionRuntimeClient) Transcript() clientui.TranscriptPage {
 }
 
 func (c *sessionRuntimeClient) RefreshTranscript() (clientui.TranscriptPage, error) {
-	return c.refreshTranscriptSync(uiRuntimeHydrationReadTimeout)
+	return c.LoadTranscriptPage(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail})
+}
+
+func (c *sessionRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	return c.refreshTranscriptPageSync(req, uiRuntimeHydrationReadTimeout)
 }
 
 func (c *sessionRuntimeClient) Status() clientui.RuntimeStatus {
@@ -214,9 +218,20 @@ func (c *sessionRuntimeClient) refreshMainViewAsync() {
 }
 
 func (c *sessionRuntimeClient) refreshTranscriptSync(timeout time.Duration) (clientui.TranscriptPage, error) {
+	return c.refreshTranscriptPageSync(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, timeout)
+}
+
+func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.TranscriptPageRequest, timeout time.Duration) (clientui.TranscriptPage, error) {
 	ctx, cancel := c.readContext(timeout)
 	defer cancel()
-	resp, err := c.reads.GetSessionTranscriptPage(ctx, serverapi.SessionTranscriptPageRequest{SessionID: c.sessionID})
+	resp, err := c.reads.GetSessionTranscriptPage(ctx, serverapi.SessionTranscriptPageRequest{
+		SessionID: c.sessionID,
+		Offset:    req.Offset,
+		Limit:     req.Limit,
+		Page:      req.Page,
+		PageSize:  req.PageSize,
+		Window:    req.Window,
+	})
 	if err != nil {
 		c.mu.RLock()
 		page := c.transcript

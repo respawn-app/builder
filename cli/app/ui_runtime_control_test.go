@@ -56,6 +56,10 @@ func (f *runtimeControlFakeClient) Transcript() clientui.TranscriptPage {
 func (f *runtimeControlFakeClient) RefreshTranscript() (clientui.TranscriptPage, error) {
 	return f.Transcript(), f.err
 }
+func (f *runtimeControlFakeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	_ = req
+	return f.Transcript(), f.err
+}
 func (f *runtimeControlFakeClient) Status() clientui.RuntimeStatus { return f.status }
 func (f *runtimeControlFakeClient) SessionView() clientui.RuntimeSessionView {
 	return f.sessionView

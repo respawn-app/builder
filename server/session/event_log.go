@@ -213,6 +213,15 @@ func readEventsFile(path string) (parsedEvents, error) {
 	return parseEventsFromReader(bufio.NewReader(fp))
 }
 
+func walkEventsFile(path string, visit func(Event) error) (parsedEvents, error) {
+	fp, err := openRegularSessionFile(path, "events file")
+	if err != nil {
+		return parsedEvents{}, fmt.Errorf("open events file: %w", err)
+	}
+	defer fp.Close()
+	return walkEventsFromReader(bufio.NewReader(fp), visit)
+}
+
 func parseEventsFromReader(reader *bufio.Reader) (parsedEvents, error) {
 	out := make([]Event, 0)
 	totalBytes := int64(0)
@@ -244,6 +253,40 @@ func parseEventsFromReader(reader *bufio.Reader) (parsedEvents, error) {
 		lastSequence = out[len(out)-1].Seq
 	}
 	return parsedEvents{events: out, totalBytes: totalBytes, lastSequence: lastSequence, droppedTrailingEOF: droppedTrailingEOF}, nil
+}
+
+func walkEventsFromReader(reader *bufio.Reader, visit func(Event) error) (parsedEvents, error) {
+	totalBytes := int64(0)
+	droppedTrailingEOF := false
+	lastSequence := int64(0)
+	for {
+		line, readErr := reader.ReadString('\n')
+		totalBytes += int64(len(line))
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			var evt Event
+			if err := json.Unmarshal([]byte(trimmed), &evt); err != nil {
+				if errors.Is(readErr, io.EOF) && !strings.HasSuffix(line, "\n") {
+					droppedTrailingEOF = true
+					break
+				}
+				return parsedEvents{}, fmt.Errorf("parse event line: %w", err)
+			}
+			lastSequence = evt.Seq
+			if visit != nil {
+				if err := visit(evt); err != nil {
+					return parsedEvents{}, err
+				}
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return parsedEvents{}, fmt.Errorf("read events line: %w", readErr)
+		}
+	}
+	return parsedEvents{totalBytes: totalBytes, lastSequence: lastSequence, droppedTrailingEOF: droppedTrailingEOF}, nil
 }
 
 func encodeEventLines(events []Event, hasExistingContent bool) ([]byte, error) {

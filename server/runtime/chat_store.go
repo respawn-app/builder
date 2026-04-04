@@ -30,6 +30,12 @@ type ChatSnapshot struct {
 	OngoingError string
 }
 
+type TranscriptWindowSnapshot struct {
+	Snapshot     ChatSnapshot
+	TotalEntries int
+	Offset       int
+}
+
 type storedToolCompletion struct {
 	CallID  string          `json:"call_id"`
 	Name    string          `json:"name"`
@@ -232,11 +238,43 @@ func (s *chatStore) snapshotProviderItemsLocked() []llm.ResponseItem {
 }
 
 func (s *chatStore) snapshot() ChatSnapshot {
+	return s.snapshotWithMetadata().Snapshot
+}
+
+func (s *chatStore) ongoingTailSnapshot(maxEntries int) TranscriptWindowSnapshot {
+	materialized := s.snapshotWithMetadata()
+	total := len(materialized.Snapshot.Entries)
+	start := 0
+	if maxEntries > 0 && total > maxEntries {
+		start = total - maxEntries
+	}
+	if materialized.CompactionEntryStart >= 0 && materialized.CompactionEntryStart < start {
+		start = materialized.CompactionEntryStart
+	}
+	window := ChatSnapshot{
+		Entries:      append([]ChatEntry(nil), materialized.Snapshot.Entries[start:]...),
+		Ongoing:      materialized.Snapshot.Ongoing,
+		OngoingError: materialized.Snapshot.OngoingError,
+	}
+	return TranscriptWindowSnapshot{Snapshot: window, TotalEntries: total, Offset: start}
+}
+
+type materializedChatSnapshot struct {
+	Snapshot             ChatSnapshot
+	CompactionEntryStart int
+}
+
+func (s *chatStore) snapshotWithMetadata() materializedChatSnapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	messages := s.snapshotMessagesLocked()
 	entries := make([]ChatEntry, 0, len(messages)+len(s.local))
+	compactionEntryStart := -1
+	compactionCutoff := -1
+	if s.compact != nil {
+		compactionCutoff = s.compact.CutoffItemCount
+	}
 	materializedToolResults := make(map[string]struct{})
 	for _, msg := range messages {
 		if msg.Role != llm.RoleTool {
@@ -261,6 +299,9 @@ func (s *chatStore) snapshot() ChatSnapshot {
 	appendLocalEntries(0)
 	processedMessages := 0
 	for _, msg := range messages {
+		if compactionCutoff >= 0 && compactionEntryStart < 0 && processedMessages >= compactionCutoff {
+			compactionEntryStart = len(entries)
+		}
 		switch msg.Role {
 		case llm.RoleUser:
 			content := strings.TrimSpace(msg.Content)
@@ -312,10 +353,16 @@ func (s *chatStore) snapshot() ChatSnapshot {
 		appendLocalEntries(processedMessages)
 	}
 	appendLocalEntries(len(messages))
-	return ChatSnapshot{
-		Entries:      entries,
-		Ongoing:      s.ongoing,
-		OngoingError: s.ongoingError,
+	if compactionCutoff >= 0 && compactionEntryStart < 0 {
+		compactionEntryStart = len(entries)
+	}
+	return materializedChatSnapshot{
+		Snapshot: ChatSnapshot{
+			Entries:      entries,
+			Ongoing:      s.ongoing,
+			OngoingError: s.ongoingError,
+		},
+		CompactionEntryStart: compactionEntryStart,
 	}
 }
 
