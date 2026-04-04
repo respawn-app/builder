@@ -244,6 +244,37 @@ func TestSyncConversationFromEngineRetriesAfterRefreshError(t *testing.T) {
 	}
 }
 
+func TestRunStateStartedRequestsTranscriptHydration(t *testing.T) {
+	client := &refreshingRuntimeClient{
+		transcripts: []clientui.TranscriptPage{{
+			SessionID: "session-1",
+			Entries:   []clientui.ChatEntry{{Role: "user", Text: "prompt accepted"}},
+		}},
+	}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.startupCmds = nil
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventRunStateChanged, RunState: &clientui.RunState{Busy: true}})
+	if cmd == nil {
+		t.Fatal("expected transcript sync command when run starts")
+	}
+	refreshMsg, ok := cmd().(runtimeTranscriptRefreshedMsg)
+	if !ok {
+		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", cmd())
+	}
+	next, applyCmd := m.Update(refreshMsg)
+	updated := next.(*uiModel)
+	if applyCmd != nil {
+		_ = applyCmd()
+	}
+	if got := stripANSIAndTrimRight(updated.view.OngoingSnapshot()); !strings.Contains(got, "prompt accepted") {
+		t.Fatalf("expected run-start hydration to apply transcript, got %q", got)
+	}
+	if client.calls != 1 {
+		t.Fatalf("refresh call count = %d, want 1", client.calls)
+	}
+}
+
 func TestAssistantDeltaAppendsStreamingText(t *testing.T) {
 	m := newProjectedStaticUIModel()
 

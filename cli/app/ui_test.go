@@ -4630,6 +4630,43 @@ func TestBusyQueuedSlashCommandDrainContinuesIntoQueuedPrompt(t *testing.T) {
 	}
 }
 
+func TestSubmitDoneWithRuntimeClientRequestsTranscriptCatchUp(t *testing.T) {
+	client := &refreshingRuntimeClient{
+		transcripts: []clientui.TranscriptPage{{
+			SessionID: "session-1",
+			Entries:   []clientui.ChatEntry{{Role: "assistant", Text: "final answer"}},
+		}},
+	}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.startupCmds = nil
+	m.busy = true
+	m.activity = uiActivityRunning
+
+	next, cmd := m.Update(submitDoneMsg{message: "ignored by runtime-backed flow"})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transcript sync command after runtime-backed submit completes")
+	}
+	refreshMsg, ok := cmd().(runtimeTranscriptRefreshedMsg)
+	if !ok {
+		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", cmd())
+	}
+	next, applyCmd := updated.Update(refreshMsg)
+	updated = next.(*uiModel)
+	if applyCmd != nil {
+		_ = applyCmd()
+	}
+	if updated.activity != uiActivityIdle {
+		t.Fatalf("expected idle activity after submit completion, got %v", updated.activity)
+	}
+	if got := stripANSIAndTrimRight(updated.view.OngoingSnapshot()); !strings.Contains(got, "final answer") {
+		t.Fatalf("expected transcript catch-up to hydrate final answer, got %q", got)
+	}
+	if client.calls != 1 {
+		t.Fatalf("refresh call count = %d, want 1", client.calls)
+	}
+}
+
 func TestBusyQueuedUnknownSlashDrainsAsPromptSubmission(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.busy = true

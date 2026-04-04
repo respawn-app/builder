@@ -60,6 +60,28 @@ func TestReduceRuntimeEvent_RunStateStoppedClearsReasoningAndReturnsToIdle(t *te
 	}
 }
 
+func TestReduceRuntimeEvent_RunStateStartedRequestsTranscriptSync(t *testing.T) {
+	update := ReduceRuntimeEvent(
+		RuntimeEventState{Busy: false},
+		PendingInputState{},
+		false,
+		Event{Kind: EventRunStateChanged, RunState: &RunState{Busy: true}},
+	)
+
+	if !update.State.Busy {
+		t.Fatal("expected busy set")
+	}
+	if !update.SetActivityRunning {
+		t.Fatal("expected started run to set running activity")
+	}
+	if !update.SyncSessionView {
+		t.Fatal("expected started run to request transcript sync")
+	}
+	if !update.ClearPendingPreSubmit {
+		t.Fatal("expected started run to clear pending pre-submit text")
+	}
+}
+
 func TestReduceRuntimeEvent_BackgroundCompletionProducesNotice(t *testing.T) {
 	update := ReduceRuntimeEvent(
 		RuntimeEventState{},
