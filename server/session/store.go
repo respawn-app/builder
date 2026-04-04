@@ -387,6 +387,20 @@ func (s *Store) ReadEvents() ([]Event, error) {
 	return parsed.events, nil
 }
 
+func (s *Store) WalkEvents(visit func(Event) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.persisted {
+		return nil
+	}
+	parsed, err := walkEventsFile(s.eventsFP, visit)
+	if err != nil {
+		return err
+	}
+	s.eventsFileSizeBytes = parsed.totalBytes
+	return nil
+}
+
 func (s *Store) loadMetaLocked() error {
 	m, err := readMetaFile(s.sessionFP)
 	if err != nil {

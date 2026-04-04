@@ -22,6 +22,9 @@ func (s *stubRuntimeClient) Transcript() clientui.TranscriptPage { return client
 func (s *stubRuntimeClient) RefreshTranscript() (clientui.TranscriptPage, error) {
 	return clientui.TranscriptPage{}, nil
 }
+func (s *stubRuntimeClient) LoadTranscriptPage(clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	return clientui.TranscriptPage{}, nil
+}
 func (s *stubRuntimeClient) Status() clientui.RuntimeStatus { return clientui.RuntimeStatus{} }
 func (s *stubRuntimeClient) SessionView() clientui.RuntimeSessionView {
 	return clientui.RuntimeSessionView{}

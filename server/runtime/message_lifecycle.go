@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"builder/server/llm"
+	"builder/server/session"
 )
 
 type defaultMessageLifecycle struct {
@@ -16,11 +17,7 @@ type defaultMessageLifecycle struct {
 
 func (m *defaultMessageLifecycle) RestoreMessages() error {
 	e := m.engine
-	events, err := e.store.ReadEvents()
-	if err != nil {
-		return err
-	}
-	for _, evt := range events {
+	if err := e.store.WalkEvents(func(evt session.Event) error {
 		switch evt.Kind {
 		case "message":
 			var msg llm.Message
@@ -50,6 +47,9 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 				e.compactionCount++
 			}
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	return nil
 }

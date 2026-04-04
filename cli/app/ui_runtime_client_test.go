@@ -22,9 +22,10 @@ import (
 )
 
 type countingSessionViewClient struct {
-	view  clientui.RuntimeMainView
-	page  clientui.TranscriptPage
-	count atomic.Int32
+	view              clientui.RuntimeMainView
+	page              clientui.TranscriptPage
+	count             atomic.Int32
+	lastTranscriptReq serverapi.SessionTranscriptPageRequest
 }
 
 func (c *countingSessionViewClient) GetSessionMainView(context.Context, serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
@@ -32,7 +33,9 @@ func (c *countingSessionViewClient) GetSessionMainView(context.Context, serverap
 	return serverapi.SessionMainViewResponse{MainView: c.view}, nil
 }
 
-func (c *countingSessionViewClient) GetSessionTranscriptPage(context.Context, serverapi.SessionTranscriptPageRequest) (serverapi.SessionTranscriptPageResponse, error) {
+func (c *countingSessionViewClient) GetSessionTranscriptPage(ctx context.Context, req serverapi.SessionTranscriptPageRequest) (serverapi.SessionTranscriptPageResponse, error) {
+	_ = ctx
+	c.lastTranscriptReq = req
 	c.count.Add(1)
 	return serverapi.SessionTranscriptPageResponse{Transcript: c.page}, nil
 }
@@ -146,6 +149,19 @@ func (t runtimeClientBlockingTool) Call(_ context.Context, c tools.Call) (tools.
 	<-t.release
 	out, _ := json.Marshal(map[string]any{"ok": true})
 	return tools.Result{CallID: c.ID, Name: c.Name, Output: out}, nil
+}
+
+func TestRuntimeClientRefreshTranscriptRequestsOngoingTailWindow(t *testing.T) {
+	reads := &countingSessionViewClient{page: clientui.TranscriptPage{SessionID: "session-1"}}
+	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil))
+	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, controls)
+
+	if _, err := runtimeClient.RefreshTranscript(); err != nil {
+		t.Fatalf("refresh transcript: %v", err)
+	}
+	if reads.lastTranscriptReq.Window != clientui.TranscriptWindowOngoingTail {
+		t.Fatalf("window = %q, want %q", reads.lastTranscriptReq.Window, clientui.TranscriptWindowOngoingTail)
+	}
 }
 
 func TestRuntimeClientMainViewIncludesActiveRunFromRealEngine(t *testing.T) {

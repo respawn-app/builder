@@ -5,9 +5,27 @@ import (
 	"builder/shared/clientui"
 )
 
+const ongoingTailEntryLimit = 500
+
 func TranscriptPageFromRuntime(engine *runtime.Engine, req clientui.TranscriptPageRequest) clientui.TranscriptPage {
 	if engine == nil {
 		return clientui.TranscriptPage{}
+	}
+	if req.Window == clientui.TranscriptWindowOngoingTail {
+		window := engine.OngoingTailTranscriptWindow(ongoingTailEntryLimit)
+		page := transcriptPageFromNormalizedRequest(
+			engine.SessionID(),
+			engine.SessionName(),
+			ConversationFreshnessFromSession(engine.ConversationFreshness()),
+			engine.TranscriptRevision(),
+			ChatSnapshotFromRuntime(window.Snapshot),
+			window.TotalEntries,
+			window.Offset,
+			clientui.TranscriptPageRequest{Offset: window.Offset, Limit: window.TotalEntries - window.Offset},
+		)
+		page.Ongoing = window.Snapshot.Ongoing
+		page.OngoingError = window.Snapshot.OngoingError
+		return page
 	}
 	return TranscriptPageFromChat(
 		engine.SessionID(),
@@ -21,7 +39,13 @@ func TranscriptPageFromRuntime(engine *runtime.Engine, req clientui.TranscriptPa
 
 func TranscriptPageFromChat(sessionID, sessionName string, freshness clientui.ConversationFreshness, revision int64, snapshot clientui.ChatSnapshot, req clientui.TranscriptPageRequest) clientui.TranscriptPage {
 	total := len(snapshot.Entries)
-	start := req.Offset
+	return transcriptPageFromNormalizedRequest(sessionID, sessionName, freshness, revision, snapshot, total, 0, req)
+}
+
+func transcriptPageFromNormalizedRequest(sessionID, sessionName string, freshness clientui.ConversationFreshness, revision int64, snapshot clientui.ChatSnapshot, totalEntries, baseOffset int, req clientui.TranscriptPageRequest) clientui.TranscriptPage {
+	offset, limit := normalizeTranscriptPageRequest(req, totalEntries, baseOffset)
+	total := len(snapshot.Entries)
+	start := offset - baseOffset
 	if start < 0 {
 		start = 0
 	}
@@ -29,28 +53,54 @@ func TranscriptPageFromChat(sessionID, sessionName string, freshness clientui.Co
 		start = total
 	}
 	end := total
-	if req.Limit > 0 && start+req.Limit < end {
-		end = start + req.Limit
+	if limit > 0 && start+limit < end {
+		end = start + limit
 	}
 	entries := cloneChatEntries(snapshot.Entries[start:end])
 	nextOffset := 0
-	hasMore := end < total
+	hasMore := offset+(end-start) < totalEntries
 	if hasMore {
-		nextOffset = end
+		nextOffset = offset + (end - start)
 	}
 	return clientui.TranscriptPage{
 		SessionID:             sessionID,
 		SessionName:           sessionName,
 		ConversationFreshness: freshness,
 		Revision:              revision,
-		TotalEntries:          total,
-		Offset:                start,
+		TotalEntries:          totalEntries,
+		Offset:                offset,
 		NextOffset:            nextOffset,
 		HasMore:               hasMore,
 		Entries:               entries,
 		Ongoing:               snapshot.Ongoing,
 		OngoingError:          snapshot.OngoingError,
 	}
+}
+
+func normalizeTranscriptPageRequest(req clientui.TranscriptPageRequest, totalEntries, baseOffset int) (offset, limit int) {
+	if req.PageSize > 0 {
+		limit = req.PageSize
+		offset = req.Page * req.PageSize
+	} else {
+		offset = req.Offset
+		limit = req.Limit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset < baseOffset {
+		offset = baseOffset
+	}
+	if totalEntries < 0 {
+		totalEntries = 0
+	}
+	if offset > totalEntries {
+		offset = totalEntries
+	}
+	if limit < 0 {
+		limit = 0
+	}
+	return offset, limit
 }
 
 func cloneChatEntries(entries []clientui.ChatEntry) []clientui.ChatEntry {
