@@ -51,11 +51,16 @@ func SessionViewFromRuntime(engine *runtime.Engine) clientui.RuntimeSessionView 
 	if engine == nil {
 		return clientui.RuntimeSessionView{}
 	}
+	chat := ChatSnapshotFromRuntime(engine.ChatSnapshot())
 	return clientui.RuntimeSessionView{
 		SessionID:             engine.SessionID(),
 		SessionName:           engine.SessionName(),
 		ConversationFreshness: ConversationFreshnessFromSession(engine.ConversationFreshness()),
-		Chat:                  ChatSnapshotFromRuntime(engine.ChatSnapshot()),
+		Transcript: clientui.TranscriptMetadata{
+			Revision:            engine.TranscriptRevision(),
+			CommittedEntryCount: len(chat.Entries),
+		},
+		Chat: chat,
 	}
 }
 

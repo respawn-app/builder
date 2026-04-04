@@ -158,6 +158,10 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 		return decodeAndHandle(req, func(params serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
 			return g.core.SessionViewClient().GetSessionMainView(ctx, params)
 		})
+	case protocol.MethodSessionGetTranscriptPage:
+		return decodeAndHandle(req, func(params serverapi.SessionTranscriptPageRequest) (serverapi.SessionTranscriptPageResponse, error) {
+			return g.core.SessionViewClient().GetSessionTranscriptPage(ctx, params)
+		})
 	case protocol.MethodSessionGetInitialInput:
 		return decodeAndHandle(req, func(params serverapi.SessionInitialInputRequest) (serverapi.SessionInitialInputResponse, error) {
 			return g.core.SessionLifecycleClient().GetInitialInput(ctx, params)

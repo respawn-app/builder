@@ -83,6 +83,25 @@ type ChatSnapshot struct {
 	OngoingError string
 }
 
+type TranscriptPageRequest struct {
+	Offset int
+	Limit  int
+}
+
+type TranscriptPage struct {
+	SessionID             string
+	SessionName           string
+	ConversationFreshness ConversationFreshness
+	Revision              int64
+	TotalEntries          int
+	Offset                int
+	NextOffset            int
+	HasMore               bool
+	Entries               []ChatEntry
+	Ongoing               string
+	OngoingError          string
+}
+
 type ToolPresentationKind string
 type ToolCallRenderBehavior string
 type ToolRenderKind string

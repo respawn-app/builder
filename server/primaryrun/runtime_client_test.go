@@ -18,6 +18,10 @@ func (s *stubRuntimeClient) MainView() clientui.RuntimeMainView { return clientu
 func (s *stubRuntimeClient) RefreshMainView() (clientui.RuntimeMainView, error) {
 	return clientui.RuntimeMainView{}, nil
 }
+func (s *stubRuntimeClient) Transcript() clientui.TranscriptPage { return clientui.TranscriptPage{} }
+func (s *stubRuntimeClient) RefreshTranscript() (clientui.TranscriptPage, error) {
+	return clientui.TranscriptPage{}, nil
+}
 func (s *stubRuntimeClient) Status() clientui.RuntimeStatus { return clientui.RuntimeStatus{} }
 func (s *stubRuntimeClient) SessionView() clientui.RuntimeSessionView {
 	return clientui.RuntimeSessionView{}

@@ -9,6 +9,7 @@ import (
 
 type SessionViewClient interface {
 	GetSessionMainView(ctx context.Context, req serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error)
+	GetSessionTranscriptPage(ctx context.Context, req serverapi.SessionTranscriptPageRequest) (serverapi.SessionTranscriptPageResponse, error)
 	GetRun(ctx context.Context, req serverapi.RunGetRequest) (serverapi.RunGetResponse, error)
 }
 
@@ -25,6 +26,13 @@ func (c *loopbackSessionViewClient) GetSessionMainView(ctx context.Context, req 
 		return serverapi.SessionMainViewResponse{}, errors.New("session view service is required")
 	}
 	return c.service.GetSessionMainView(ctx, req)
+}
+
+func (c *loopbackSessionViewClient) GetSessionTranscriptPage(ctx context.Context, req serverapi.SessionTranscriptPageRequest) (serverapi.SessionTranscriptPageResponse, error) {
+	if c == nil || c.service == nil {
+		return serverapi.SessionTranscriptPageResponse{}, errors.New("session view service is required")
+	}
+	return c.service.GetSessionTranscriptPage(ctx, req)
 }
 
 func (c *loopbackSessionViewClient) GetRun(ctx context.Context, req serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {

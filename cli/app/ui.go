@@ -65,6 +65,22 @@ type runtimeEventMsg struct {
 	event clientui.Event
 }
 
+type runtimeMainViewRefreshedMsg struct {
+	token uint64
+	view  clientui.RuntimeMainView
+	err   error
+}
+
+type runtimeTranscriptRefreshedMsg struct {
+	token      uint64
+	transcript clientui.TranscriptPage
+	err        error
+}
+
+type runtimeTranscriptRetryMsg struct {
+	token uint64
+}
+
 type renderDiagnosticMsg struct {
 	diagnostic tui.RenderDiagnostic
 }
@@ -398,6 +414,11 @@ type uiModel struct {
 	debugKeys            bool
 
 	transcriptEntries        []tui.TranscriptEntry
+	runtimeMainViewToken     uint64
+	runtimeTranscriptToken   uint64
+	runtimeTranscriptRetry   uint64
+	runtimeTranscriptBusy    bool
+	runtimeTranscriptDirty   bool
 	nativeFlushedEntryCount  int
 	nativeHistoryReplayed    bool
 	nativeReplayWidth        int
@@ -479,7 +500,11 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 	m.refreshProcessEntries()
 	var startupNativeHistoryCmd tea.Cmd
 	if m.hasRuntimeClient() {
-		startupNativeHistoryCmd = m.runtimeAdapter().syncConversationFromEngine()
+		seedView := m.runtimeMainView().Session
+		_ = m.runtimeAdapter().applyProjectedSessionMetadata(seedView)
+		_ = m.runtimeAdapter().applyProjectedTranscriptPage(m.runtimeTranscript())
+		startupNativeHistoryCmd = m.requestRuntimeTranscriptSync()
+		m.runtimeTranscriptBusy = false
 	} else {
 		for _, entry := range m.initialTranscript {
 			if strings.TrimSpace(entry.Text) == "" {
@@ -664,6 +689,22 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		historyCmd := m.runtimeAdapter().handleProjectedRuntimeEvent(msg.event)
 		m.syncViewport()
 		return m, tea.Batch(waitRuntimeEvent(m.runtimeEvents), historyCmd)
+	case runtimeMainViewRefreshedMsg:
+		cmd := m.handleRuntimeMainViewRefreshed(msg)
+		m.syncViewport()
+		return m, cmd
+	case runtimeTranscriptRefreshedMsg:
+		cmd := m.handleRuntimeTranscriptRefreshed(msg)
+		m.syncViewport()
+		return m, cmd
+	case runtimeTranscriptRetryMsg:
+		if msg.token != m.runtimeTranscriptRetry {
+			m.syncViewport()
+			return m, nil
+		}
+		cmd := m.requestRuntimeTranscriptSync()
+		m.syncViewport()
+		return m, cmd
 	case renderDiagnosticMsg:
 		cmd := m.applyRenderDiagnostic(msg.diagnostic)
 		m.syncViewport()

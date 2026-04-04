@@ -16,6 +16,7 @@ const (
 	MethodSessionListByProject                     = "session.listByProject"
 	MethodSessionPlan                              = "session.plan"
 	MethodSessionGetMainView                       = "session.getMainView"
+	MethodSessionGetTranscriptPage                 = "session.getTranscriptPage"
 	MethodSessionGetInitialInput                   = "session.getInitialInput"
 	MethodSessionPersistInputDraft                 = "session.persistInputDraft"
 	MethodSessionResolveTransition                 = "session.resolveTransition"

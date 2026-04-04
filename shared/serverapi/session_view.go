@@ -16,6 +16,16 @@ type SessionMainViewResponse struct {
 	MainView clientui.RuntimeMainView
 }
 
+type SessionTranscriptPageRequest struct {
+	SessionID string `json:"session_id"`
+	Offset    int    `json:"offset,omitempty"`
+	Limit     int    `json:"limit,omitempty"`
+}
+
+type SessionTranscriptPageResponse struct {
+	Transcript clientui.TranscriptPage `json:"transcript"`
+}
+
 type RunGetRequest struct {
 	SessionID string
 	RunID     string
@@ -27,6 +37,7 @@ type RunGetResponse struct {
 
 type SessionViewService interface {
 	GetSessionMainView(ctx context.Context, req SessionMainViewRequest) (SessionMainViewResponse, error)
+	GetSessionTranscriptPage(ctx context.Context, req SessionTranscriptPageRequest) (SessionTranscriptPageResponse, error)
 	GetRun(ctx context.Context, req RunGetRequest) (RunGetResponse, error)
 }
 
@@ -43,6 +54,19 @@ func (r RunGetRequest) Validate() error {
 	}
 	if strings.TrimSpace(r.RunID) == "" {
 		return errors.New("run_id is required")
+	}
+	return nil
+}
+
+func (r SessionTranscriptPageRequest) Validate() error {
+	if strings.TrimSpace(r.SessionID) == "" {
+		return errors.New("session_id is required")
+	}
+	if r.Offset < 0 {
+		return errors.New("offset must be >= 0")
+	}
+	if r.Limit < 0 {
+		return errors.New("limit must be >= 0")
 	}
 	return nil
 }

@@ -62,16 +62,24 @@ type RuntimeMainView struct {
 	ActiveRun *RunView
 }
 
+type TranscriptMetadata struct {
+	Revision            int64
+	CommittedEntryCount int
+}
+
 type RuntimeSessionView struct {
 	SessionID             string
 	SessionName           string
 	ConversationFreshness ConversationFreshness
+	Transcript            TranscriptMetadata
 	Chat                  ChatSnapshot
 }
 
 type RuntimeClient interface {
 	MainView() RuntimeMainView
 	RefreshMainView() (RuntimeMainView, error)
+	Transcript() TranscriptPage
+	RefreshTranscript() (TranscriptPage, error)
 	Status() RuntimeStatus
 	SessionView() RuntimeSessionView
 	SetSessionName(name string) error

@@ -95,6 +95,34 @@ func (s *Service) GetSessionMainView(ctx context.Context, req serverapi.SessionM
 	return serverapi.SessionMainViewResponse{MainView: view}, nil
 }
 
+func (s *Service) GetSessionTranscriptPage(ctx context.Context, req serverapi.SessionTranscriptPageRequest) (serverapi.SessionTranscriptPageResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.SessionTranscriptPageResponse{}, err
+	}
+	pageReq := clientui.TranscriptPageRequest{Offset: req.Offset, Limit: req.Limit}
+	if runtimeEngine, err := s.resolveRuntime(ctx, req.SessionID); err != nil {
+		return serverapi.SessionTranscriptPageResponse{}, err
+	} else if runtimeEngine != nil {
+		return serverapi.SessionTranscriptPageResponse{Transcript: runtimeview.TranscriptPageFromRuntime(runtimeEngine, pageReq)}, nil
+	}
+	snapshot, err := s.resolveSession(ctx, req.SessionID)
+	if err != nil {
+		return serverapi.SessionTranscriptPageResponse{}, err
+	}
+	chat, _, err := replayDormantSession(ctx, snapshot)
+	if err != nil {
+		return serverapi.SessionTranscriptPageResponse{}, err
+	}
+	return serverapi.SessionTranscriptPageResponse{Transcript: runtimeview.TranscriptPageFromChat(
+		snapshot.Meta.SessionID,
+		snapshot.Meta.Name,
+		runtimeview.ConversationFreshnessFromSession(snapshot.ConversationFreshness),
+		snapshot.Meta.LastSequence,
+		chat,
+		pageReq,
+	)}, nil
+}
+
 func (s *Service) GetRun(ctx context.Context, req serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {
 	if err := req.Validate(); err != nil {
 		return serverapi.RunGetResponse{}, err
@@ -150,7 +178,11 @@ func dormantMainView(ctx context.Context, snapshot session.Snapshot) (clientui.R
 			SessionID:             meta.SessionID,
 			SessionName:           meta.Name,
 			ConversationFreshness: freshness,
-			Chat:                  chat,
+			Transcript: clientui.TranscriptMetadata{
+				Revision:            meta.LastSequence,
+				CommittedEntryCount: len(chat.Entries),
+			},
+			Chat: chat,
 		},
 	}
 	if len(snapshot.Runs) > 0 {
