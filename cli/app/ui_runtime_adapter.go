@@ -166,17 +166,7 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptPage(page clientui.TranscriptP
 		m.sessionName = strings.TrimSpace(page.SessionName)
 	}
 	m.conversationFreshness = page.ConversationFreshness
-	entries := make([]tui.TranscriptEntry, 0, len(page.Entries))
-	for _, entry := range page.Entries {
-		entries = append(entries, tui.TranscriptEntry{
-			Role:        entry.Role,
-			Text:        entry.Text,
-			OngoingText: entry.OngoingText,
-			Phase:       llm.MessagePhase(entry.Phase),
-			ToolCallID:  entry.ToolCallID,
-			ToolCall:    transcriptToolCallMeta(entry.ToolCall),
-		})
-	}
+	entries := mergeTranscriptPageEntries(m.transcriptEntries, page)
 	m.transcriptEntries = append(m.transcriptEntries[:0], entries...)
 	m.seedPromptHistoryFromTranscriptEntries(m.transcriptEntries)
 	m.refreshRollbackCandidates()
@@ -197,6 +187,65 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptPage(page clientui.TranscriptP
 		cmds = append(cmds, tea.SetWindowTitle(m.windowTitle()))
 	}
 	return sequenceCmds(cmds...)
+}
+
+func mergeTranscriptPageEntries(existing []tui.TranscriptEntry, page clientui.TranscriptPage) []tui.TranscriptEntry {
+	incoming := transcriptEntriesFromPage(page)
+	if transcriptPageIsComplete(page) {
+		return incoming
+	}
+	if len(existing) == 0 {
+		return incoming
+	}
+	if page.Offset < 0 || page.Offset > len(existing) {
+		return incoming
+	}
+	merged := append([]tui.TranscriptEntry(nil), existing...)
+	requiredLen := page.Offset + len(incoming)
+	if page.TotalEntries > 0 && page.TotalEntries < len(merged) {
+		merged = merged[:page.TotalEntries]
+	}
+	if requiredLen > len(merged) {
+		merged = append(merged, make([]tui.TranscriptEntry, requiredLen-len(merged))...)
+	}
+	copy(merged[page.Offset:], incoming)
+	if page.TotalEntries > 0 {
+		if page.TotalEntries < len(merged) {
+			merged = merged[:page.TotalEntries]
+		}
+		if page.TotalEntries > len(merged) {
+			return incoming
+		}
+	}
+	return merged
+}
+
+func transcriptPageIsComplete(page clientui.TranscriptPage) bool {
+	if page.Offset != 0 {
+		return false
+	}
+	if page.HasMore {
+		return false
+	}
+	if page.TotalEntries == 0 {
+		return true
+	}
+	return len(page.Entries) >= page.TotalEntries
+}
+
+func transcriptEntriesFromPage(page clientui.TranscriptPage) []tui.TranscriptEntry {
+	entries := make([]tui.TranscriptEntry, 0, len(page.Entries))
+	for _, entry := range page.Entries {
+		entries = append(entries, tui.TranscriptEntry{
+			Role:        entry.Role,
+			Text:        entry.Text,
+			OngoingText: entry.OngoingText,
+			Phase:       llm.MessagePhase(entry.Phase),
+			ToolCallID:  entry.ToolCallID,
+			ToolCall:    transcriptToolCallMeta(entry.ToolCall),
+		})
+	}
+	return entries
 }
 
 func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {

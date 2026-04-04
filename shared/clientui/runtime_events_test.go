@@ -60,7 +60,7 @@ func TestReduceRuntimeEvent_RunStateStoppedClearsReasoningAndReturnsToIdle(t *te
 	}
 }
 
-func TestReduceRuntimeEvent_RunStateStartedRequestsTranscriptSync(t *testing.T) {
+func TestReduceRuntimeEvent_RunStateStartedDoesNotRequestTranscriptSync(t *testing.T) {
 	update := ReduceRuntimeEvent(
 		RuntimeEventState{Busy: false},
 		PendingInputState{},
@@ -74,8 +74,8 @@ func TestReduceRuntimeEvent_RunStateStartedRequestsTranscriptSync(t *testing.T) 
 	if !update.SetActivityRunning {
 		t.Fatal("expected started run to set running activity")
 	}
-	if !update.SyncSessionView {
-		t.Fatal("expected started run to request transcript sync")
+	if update.SyncSessionView {
+		t.Fatal("did not expect started run to request transcript sync")
 	}
 	if !update.ClearPendingPreSubmit {
 		t.Fatal("expected started run to clear pending pre-submit text")

@@ -84,6 +84,11 @@ func (f *refreshingRuntimeClient) RefreshTranscript() (clientui.TranscriptPage, 
 	return page, nil
 }
 
+func (f *refreshingRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	_ = req
+	return f.RefreshTranscript()
+}
+
 func (f *runtimeAdapterFakeClient) Generate(context.Context, llm.Request) (llm.Response, error) {
 	if f.index >= len(f.responses) {
 		return llm.Response{}, errors.New("no fake response configured")
@@ -244,34 +249,66 @@ func TestSyncConversationFromEngineRetriesAfterRefreshError(t *testing.T) {
 	}
 }
 
-func TestRunStateStartedRequestsTranscriptHydration(t *testing.T) {
-	client := &refreshingRuntimeClient{
-		transcripts: []clientui.TranscriptPage{{
-			SessionID: "session-1",
-			Entries:   []clientui.ChatEntry{{Role: "user", Text: "prompt accepted"}},
-		}},
+func TestApplyProjectedTranscriptPageMergesTailSliceWithoutDroppingExistingEntries(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	seed := []tui.TranscriptEntry{
+		{Role: "user", Text: "prompt"},
+		{Role: "tool_call", Text: "pwd"},
+		{Role: "assistant", Text: "**done**"},
 	}
-	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
-	m.startupCmds = nil
+	m.transcriptEntries = append([]tui.TranscriptEntry(nil), seed...)
+	m.forwardToView(tui.SetConversationMsg{Entries: seed})
 
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventRunStateChanged, RunState: &clientui.RunState{Busy: true}})
-	if cmd == nil {
-		t.Fatal("expected transcript sync command when run starts")
+	cmd := m.runtimeAdapter().applyProjectedTranscriptPage(clientui.TranscriptPage{
+		SessionID:    "session-1",
+		TotalEntries: 3,
+		Offset:       2,
+		Entries: []clientui.ChatEntry{{
+			Role: "assistant",
+			Text: "**done**",
+		}},
+	})
+	if cmd != nil {
+		_ = cmd()
 	}
-	refreshMsg, ok := cmd().(runtimeTranscriptRefreshedMsg)
-	if !ok {
-		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", cmd())
+
+	plain := stripANSIAndTrimRight(m.view.OngoingSnapshot())
+	if !strings.Contains(plain, "prompt") {
+		t.Fatalf("expected merged transcript to keep earlier user entry, got %q", plain)
 	}
-	next, applyCmd := m.Update(refreshMsg)
-	updated := next.(*uiModel)
-	if applyCmd != nil {
-		_ = applyCmd()
+	if !strings.Contains(plain, "pwd") {
+		t.Fatalf("expected merged transcript to keep earlier tool call, got %q", plain)
 	}
-	if got := stripANSIAndTrimRight(updated.view.OngoingSnapshot()); !strings.Contains(got, "prompt accepted") {
-		t.Fatalf("expected run-start hydration to apply transcript, got %q", got)
+	if !strings.Contains(plain, "done") {
+		t.Fatalf("expected merged transcript to keep tail entry, got %q", plain)
 	}
-	if client.calls != 1 {
-		t.Fatalf("refresh call count = %d, want 1", client.calls)
+}
+
+func TestApplyProjectedTranscriptPageReplacesTranscriptWhenPageIsComplete(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	seed := []tui.TranscriptEntry{{Role: "assistant", Text: "old"}}
+	m.transcriptEntries = append([]tui.TranscriptEntry(nil), seed...)
+	m.forwardToView(tui.SetConversationMsg{Entries: seed})
+
+	cmd := m.runtimeAdapter().applyProjectedTranscriptPage(clientui.TranscriptPage{
+		SessionID:    "session-1",
+		TotalEntries: 1,
+		Offset:       0,
+		Entries: []clientui.ChatEntry{{
+			Role: "assistant",
+			Text: "new",
+		}},
+	})
+	if cmd != nil {
+		_ = cmd()
+	}
+
+	plain := stripANSIAndTrimRight(m.view.OngoingSnapshot())
+	if strings.Contains(plain, "old") {
+		t.Fatalf("expected complete page to replace stale transcript, got %q", plain)
+	}
+	if !strings.Contains(plain, "new") {
+		t.Fatalf("expected complete page to render new transcript, got %q", plain)
 	}
 }
 
