@@ -23,3 +23,11 @@ func (r PersistenceSessionResolver) ResolveSession(_ context.Context, sessionID 
 	}
 	return session.SnapshotFromDir(realSessionDir)
 }
+
+func (r PersistenceSessionResolver) ResolveSessionStore(_ context.Context, sessionID string) (*session.Store, error) {
+	realSessionDir, err := sessionpath.ResolveScopedSessionDir(r.containerDir, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return session.Open(realSessionDir)
+}

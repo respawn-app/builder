@@ -5,27 +5,20 @@ import (
 	"builder/shared/clientui"
 )
 
-const ongoingTailEntryLimit = 500
+const OngoingTailEntryLimit = 500
 
 func TranscriptPageFromRuntime(engine *runtime.Engine, req clientui.TranscriptPageRequest) clientui.TranscriptPage {
 	if engine == nil {
 		return clientui.TranscriptPage{}
 	}
 	if req.Window == clientui.TranscriptWindowOngoingTail {
-		window := engine.OngoingTailTranscriptWindow(ongoingTailEntryLimit)
-		page := transcriptPageFromNormalizedRequest(
+		return TranscriptPageFromWindow(
 			engine.SessionID(),
 			engine.SessionName(),
 			ConversationFreshnessFromSession(engine.ConversationFreshness()),
 			engine.TranscriptRevision(),
-			ChatSnapshotFromRuntime(window.Snapshot),
-			window.TotalEntries,
-			window.Offset,
-			clientui.TranscriptPageRequest{Offset: window.Offset, Limit: window.TotalEntries - window.Offset},
+			engine.OngoingTailTranscriptWindow(OngoingTailEntryLimit),
 		)
-		page.Ongoing = window.Snapshot.Ongoing
-		page.OngoingError = window.Snapshot.OngoingError
-		return page
 	}
 	return TranscriptPageFromChat(
 		engine.SessionID(),
@@ -35,6 +28,22 @@ func TranscriptPageFromRuntime(engine *runtime.Engine, req clientui.TranscriptPa
 		ChatSnapshotFromRuntime(engine.ChatSnapshot()),
 		req,
 	)
+}
+
+func TranscriptPageFromWindow(sessionID, sessionName string, freshness clientui.ConversationFreshness, revision int64, window runtime.TranscriptWindowSnapshot) clientui.TranscriptPage {
+	page := transcriptPageFromNormalizedRequest(
+		sessionID,
+		sessionName,
+		freshness,
+		revision,
+		ChatSnapshotFromRuntime(window.Snapshot),
+		window.TotalEntries,
+		window.Offset,
+		clientui.TranscriptPageRequest{Offset: window.Offset, Limit: window.TotalEntries - window.Offset},
+	)
+	page.Ongoing = window.Snapshot.Ongoing
+	page.OngoingError = window.Snapshot.OngoingError
+	return page
 }
 
 func TranscriptPageFromChat(sessionID, sessionName string, freshness clientui.ConversationFreshness, revision int64, snapshot clientui.ChatSnapshot, req clientui.TranscriptPageRequest) clientui.TranscriptPage {

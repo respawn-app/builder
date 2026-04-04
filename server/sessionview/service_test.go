@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
 	"builder/server/llm"
 	"builder/server/runtime"
+	"builder/server/runtimeview"
 	"builder/server/session"
 	"builder/server/tools"
 	"builder/shared/serverapi"
@@ -221,6 +223,43 @@ func TestServiceGetSessionTranscriptPageSupportsPagination(t *testing.T) {
 	}
 	if len(resp.Transcript.Entries) != 2 || resp.Transcript.Entries[0].Text != "a1" || resp.Transcript.Entries[1].Text != "u2" {
 		t.Fatalf("unexpected transcript page entries: %+v", resp.Transcript.Entries)
+	}
+}
+
+func TestServiceGetSessionTranscriptPageUsesDormantOngoingTailWindow(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	for i := 0; i < runtimeview.OngoingTailEntryLimit+20; i++ {
+		if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "u" + strconv.Itoa(i)}); err != nil {
+			t.Fatalf("append message %d: %v", i, err)
+		}
+	}
+	svc := NewService(NewStaticSessionResolver(store), nil)
+
+	resp, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{
+		SessionID: store.Meta().SessionID,
+		Window:    "ongoing_tail",
+	})
+	if err != nil {
+		t.Fatalf("get session transcript page: %v", err)
+	}
+	if resp.Transcript.TotalEntries != runtimeview.OngoingTailEntryLimit+20 {
+		t.Fatalf("total entries = %d, want %d", resp.Transcript.TotalEntries, runtimeview.OngoingTailEntryLimit+20)
+	}
+	if resp.Transcript.Offset != 20 {
+		t.Fatalf("offset = %d, want 20", resp.Transcript.Offset)
+	}
+	if len(resp.Transcript.Entries) != runtimeview.OngoingTailEntryLimit {
+		t.Fatalf("entries = %d, want %d", len(resp.Transcript.Entries), runtimeview.OngoingTailEntryLimit)
+	}
+	if first := resp.Transcript.Entries[0].Text; first != "u20" {
+		t.Fatalf("first tail entry = %q, want u20", first)
+	}
+	if last := resp.Transcript.Entries[len(resp.Transcript.Entries)-1].Text; last != "u519" {
+		t.Fatalf("last tail entry = %q, want u519", last)
 	}
 }
 

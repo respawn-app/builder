@@ -1,10 +1,13 @@
 package session
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
 )
+
+var errForkReplayBoundary = errors.New("fork replay boundary reached")
 
 func ForkAtUserMessage(parent *Store, userMessageIndex int, forkName string) (*Store, error) {
 	if parent == nil {
@@ -15,21 +18,20 @@ func ForkAtUserMessage(parent *Store, userMessageIndex int, forkName string) (*S
 	}
 
 	parentMeta := parent.Meta()
-	events, err := parent.ReadEvents()
-	if err != nil {
-		return nil, fmt.Errorf("read parent events: %w", err)
-	}
-
-	replay := make([]ReplayEvent, 0, len(events))
+	replay := make([]ReplayEvent, 0)
 	visibleUserCount := 0
-	for _, evt := range events {
+	err := parent.WalkEvents(func(evt Event) error {
 		if hasVisibleUserMessageEvent(evt.Kind, evt.Payload) {
 			visibleUserCount++
 			if visibleUserCount == userMessageIndex {
-				break
+				return errForkReplayBoundary
 			}
 		}
-		replay = append(replay, ReplayEvent{StepID: evt.StepID, Kind: evt.Kind, Payload: evt.Payload})
+		replay = append(replay, ReplayEvent{StepID: evt.StepID, Kind: evt.Kind, Payload: append([]byte(nil), evt.Payload...)})
+		return nil
+	})
+	if err != nil && !errors.Is(err, errForkReplayBoundary) {
+		return nil, fmt.Errorf("read parent events: %w", err)
 	}
 
 	if visibleUserCount < userMessageIndex {
