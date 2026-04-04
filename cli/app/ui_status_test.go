@@ -796,6 +796,25 @@ func TestStatusUsageWindowsByLabelKeepsDuplicateDurationBuckets(t *testing.T) {
 	}
 }
 
+func TestStatusLineShowsEditingModeDuringRollbackFlow(t *testing.T) {
+	m := newProjectedStaticUIModel()
+
+	testSetRollbackSelecting(m, 0, 1)
+	status := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(status, "editing") {
+		t.Fatalf("expected rollback selection to show editing mode, got %q", status)
+	}
+
+	testSetRollbackEditing(m, 0, 1)
+	status = stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(status, "editing") {
+		t.Fatalf("expected rollback editing to show editing mode, got %q", status)
+	}
+	if strings.Contains(status, "ongoing") || strings.Contains(status, "detail") {
+		t.Fatalf("did not expect transcript mode label during rollback editing, got %q", status)
+	}
+}
+
 func TestStatusUsageWindowsByLabelDisambiguatesDuplicateExtraBucketsWithoutUniqueQualifier(t *testing.T) {
 	resetAt := time.Date(2026, time.March, 25, 2, 0, 0, 0, time.UTC).Unix()
 	windows := statusUsageWindowsByLabel(statusUsagePayload{

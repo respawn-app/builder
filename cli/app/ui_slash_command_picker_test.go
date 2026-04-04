@@ -115,3 +115,88 @@ func TestBusyTabBackWithoutParentShowsLocalErrorAndDoesNotQueue(t *testing.T) {
 		t.Fatalf("expected queued /back error in status line, got %q", status)
 	}
 }
+
+func TestRollbackEditHidesSlashCommandPicker(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	testSetRollbackEditing(m, 0, 1)
+	m.input = "/sta"
+	m.refreshSlashCommandFilterFromInput()
+
+	state := m.slashCommandPicker()
+	if state.visible {
+		t.Fatalf("did not expect slash picker visible while editing, got %+v", state)
+	}
+}
+
+func TestRollbackEditRejectsSlashCommandSubmitAndAutocomplete(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	testSetRollbackEditing(m, 0, 1)
+	m.input = "/status"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient status command for blocked edit-mode slash command")
+	}
+	if updated.busy {
+		t.Fatal("did not expect slash command to submit while editing")
+	}
+	if updated.status.isOpen() {
+		t.Fatal("did not expect /status to open while editing")
+	}
+	if updated.input != "/status" {
+		t.Fatalf("expected blocked slash command to remain editable, got %q", updated.input)
+	}
+	if updated.transientStatus != slashCommandEditModeError {
+		t.Fatalf("expected edit-mode slash error, got %q", updated.transientStatus)
+	}
+
+	updated.input = "/sta"
+	next, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient status command for blocked edit-mode slash autocomplete")
+	}
+	if updated.input != "/sta" {
+		t.Fatalf("expected blocked slash autocomplete to preserve input, got %q", updated.input)
+	}
+	if updated.transientStatus != slashCommandEditModeError {
+		t.Fatalf("expected edit-mode slash autocomplete error, got %q", updated.transientStatus)
+	}
+	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(status, slashCommandEditModeError) {
+		t.Fatalf("expected edit-mode slash error in status line, got %q", status)
+	}
+}
+
+func TestRollbackEditRejectsUnknownSlashInputWithoutSubmittingPrompt(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	testSetRollbackEditing(m, 0, 1)
+	m.input = "/nope"
+	before := stripANSIAndTrimRight(m.view.OngoingSnapshot())
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient status command for blocked unknown slash in edit mode")
+	}
+	if updated.busy {
+		t.Fatal("did not expect unknown slash to submit while editing")
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("did not expect queued messages, got %+v", updated.queued)
+	}
+	if updated.Action() != UIActionNone {
+		t.Fatalf("did not expect session transition action, got %q", updated.Action())
+	}
+	if updated.input != "/nope" {
+		t.Fatalf("expected blocked unknown slash to remain editable, got %q", updated.input)
+	}
+	if updated.transientStatus != slashCommandEditModeError {
+		t.Fatalf("expected edit-mode slash error, got %q", updated.transientStatus)
+	}
+	after := stripANSIAndTrimRight(updated.view.OngoingSnapshot())
+	if after != before {
+		t.Fatalf("did not expect blocked unknown slash to alter transcript, before=%q after=%q", before, after)
+	}
+}

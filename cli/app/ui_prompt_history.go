@@ -83,7 +83,10 @@ func (m *uiModel) promptHistoryCursorAtBoundary() bool {
 }
 
 func (m *uiModel) shouldSuppressSlashCommandPicker() bool {
-	return m.promptHistorySelectionMatchesInput()
+	if m.promptHistorySelectionMatchesInput() {
+		return true
+	}
+	return m.slashCommandDisabledReason() != ""
 }
 
 func (m *uiModel) syncPromptHistorySelectionToInput() {

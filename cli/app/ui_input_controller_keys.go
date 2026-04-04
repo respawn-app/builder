@@ -49,6 +49,9 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if text == "" {
 			return m, nil
 		}
+		if errText, blocked := m.slashCommandInputBlocked(text); blocked {
+			return m, c.showErrorStatus(errText)
+		}
 		if inputState.Mode == uiInputModeRollbackEdit && !inputState.Busy {
 			return c.startRollbackFork(text)
 		}
@@ -138,6 +141,9 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return c.flushQueuedInputs(queueDrainOne)
 			}
 			return m, nil
+		}
+		if errText, blocked := m.slashCommandInputBlocked(text); blocked {
+			return m, c.showErrorStatus(errText)
 		}
 		if inputState.Mode == uiInputModeRollbackEdit && !inputState.Busy {
 			return c.startRollbackFork(text)
