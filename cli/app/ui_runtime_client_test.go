@@ -151,7 +151,7 @@ func (t runtimeClientBlockingTool) Call(_ context.Context, c tools.Call) (tools.
 	return tools.Result{CallID: c.ID, Name: c.Name, Output: out}, nil
 }
 
-func TestRuntimeClientRefreshTranscriptRequestsOngoingTailWindow(t *testing.T) {
+func TestRuntimeClientRefreshTranscriptRequestsFullTranscript(t *testing.T) {
 	reads := &countingSessionViewClient{page: clientui.TranscriptPage{SessionID: "session-1"}}
 	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil))
 	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, controls)
@@ -159,8 +159,8 @@ func TestRuntimeClientRefreshTranscriptRequestsOngoingTailWindow(t *testing.T) {
 	if _, err := runtimeClient.RefreshTranscript(); err != nil {
 		t.Fatalf("refresh transcript: %v", err)
 	}
-	if reads.lastTranscriptReq.Window != clientui.TranscriptWindowOngoingTail {
-		t.Fatalf("window = %q, want %q", reads.lastTranscriptReq.Window, clientui.TranscriptWindowOngoingTail)
+	if reads.lastTranscriptReq.Window != clientui.TranscriptWindowDefault {
+		t.Fatalf("window = %q, want default full transcript", reads.lastTranscriptReq.Window)
 	}
 }
 
