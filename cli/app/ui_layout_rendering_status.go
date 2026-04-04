@@ -22,7 +22,7 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 	}
 	segments := []string{
 		spin,
-		style.meta.Render(string(m.view.Mode())),
+		style.meta.Render(l.statusModeLabel()),
 		style.meta.Render(l.statusModelLabel()),
 	}
 	if label := processCountLabel(m.listProcesses()); label != "" {
@@ -42,6 +42,13 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 		gap = 1
 	}
 	return padANSIRight(left+strings.Repeat(" ", gap)+right, width)
+}
+
+func (l uiViewLayout) statusModeLabel() string {
+	if l.model.rollback.isActive() {
+		return "editing"
+	}
+	return string(l.model.view.Mode())
 }
 
 func (l uiViewLayout) renderStatusLineRight(width int, left string, style uiStyles) string {
