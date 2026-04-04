@@ -117,8 +117,8 @@ func TestStartSessionServerUsesDiscoveredDaemonForInteractiveFlow(t *testing.T) 
 	if err != nil {
 		t.Fatalf("GetSessionMainView: %v", err)
 	}
-	if len(refreshed.MainView.Session.Chat.Entries) == 0 {
-		t.Fatalf("expected refreshed transcript entries, got %+v", refreshed.MainView.Session.Chat)
+	if refreshed.MainView.Session.Transcript.CommittedEntryCount == 0 {
+		t.Fatalf("expected refreshed transcript metadata, got %+v", refreshed.MainView.Session.Transcript)
 	}
 
 	cancel()
@@ -988,8 +988,8 @@ func runInteractiveWorkflowScenario(t *testing.T, server embeddedServer, wantRep
 	if err != nil {
 		t.Fatalf("GetSessionMainView: %v", err)
 	}
-	if len(refreshed.MainView.Session.Chat.Entries) == 0 {
-		t.Fatalf("expected transcript entries, got %+v", refreshed.MainView.Session.Chat)
+	if refreshed.MainView.Session.Transcript.CommittedEntryCount == 0 {
+		t.Fatalf("expected transcript metadata, got %+v", refreshed.MainView.Session.Transcript)
 	}
 }
 

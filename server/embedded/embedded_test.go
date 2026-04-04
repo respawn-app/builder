@@ -497,8 +497,12 @@ func TestSessionViewClientUsesRegisteredRuntimeByID(t *testing.T) {
 	if resp.MainView.Session.SessionID != store.Meta().SessionID {
 		t.Fatalf("unexpected session main view: %+v", resp.MainView)
 	}
-	if resp.MainView.Session.Chat.OngoingError != "runtime-only" {
-		t.Fatalf("expected registered runtime view, got %+v", resp.MainView.Session.Chat)
+	page, err := server.SessionViewClient().GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("get session transcript page: %v", err)
+	}
+	if page.Transcript.OngoingError != "runtime-only" {
+		t.Fatalf("expected registered runtime transcript, got %+v", page.Transcript)
 	}
 }
 

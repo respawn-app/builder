@@ -225,7 +225,6 @@ func dormantMainView(ctx context.Context, snapshot session.Snapshot) (clientui.R
 				Revision:            meta.LastSequence,
 				CommittedEntryCount: len(chat.Entries),
 			},
-			Chat: chat,
 		},
 	}
 	if len(snapshot.Runs) > 0 {
@@ -245,7 +244,7 @@ func dormantMainViewFromStore(ctx context.Context, store *session.Store) (client
 	if err != nil {
 		return clientui.RuntimeMainView{}, err
 	}
-	chat := runtimeview.ChatSnapshotFromRuntime(projector.ChatSnapshot())
+	chat := projector.ChatSnapshot()
 	meta := store.Meta()
 	freshness := runtimeview.ConversationFreshnessFromSession(store.ConversationFreshness())
 	view := clientui.RuntimeMainView{
@@ -262,7 +261,6 @@ func dormantMainViewFromStore(ctx context.Context, store *session.Store) (client
 				Revision:            meta.LastSequence,
 				CommittedEntryCount: len(chat.Entries),
 			},
-			Chat: chat,
 		},
 	}
 	runs, err := store.ReadRuns()
