@@ -81,7 +81,6 @@ func ReduceRuntimeEvent(state RuntimeEventState, input PendingInputState, activi
 		}
 		update.State.Busy = evt.RunState.Busy
 		if evt.RunState.Busy {
-			update.SyncSessionView = true
 			update.SetActivityRunning = true
 			update.ClearPendingPreSubmit = true
 			return update
