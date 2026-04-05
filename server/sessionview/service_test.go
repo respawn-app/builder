@@ -265,6 +265,60 @@ func TestServiceGetSessionTranscriptPageUsesDormantOngoingTailByDefault(t *testi
 	}
 }
 
+func TestServiceDormantReviewerRollbackReplacesTranscriptAndClearsFinalAnswer(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "u1"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: "rolled back final", Phase: llm.MessagePhaseFinal}); err != nil {
+		t.Fatalf("append assistant final: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "u2"}); err != nil {
+		t.Fatalf("append second user message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "history_replaced", map[string]any{
+		"engine": "reviewer_rollback",
+		"items":  llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "u1"}}),
+	}); err != nil {
+		t.Fatalf("append reviewer rollback: %v", err)
+	}
+
+	svc := NewService(NewStaticSessionResolver(store), nil)
+
+	transcriptResp, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{
+		SessionID: store.Meta().SessionID,
+		Offset:    0,
+		Limit:     10,
+	})
+	if err != nil {
+		t.Fatalf("get session transcript page: %v", err)
+	}
+	if transcriptResp.Transcript.TotalEntries != 1 {
+		t.Fatalf("total entries = %d, want 1", transcriptResp.Transcript.TotalEntries)
+	}
+	if len(transcriptResp.Transcript.Entries) != 1 {
+		t.Fatalf("entry count = %d, want 1", len(transcriptResp.Transcript.Entries))
+	}
+	if got := transcriptResp.Transcript.Entries[0].Text; got != "u1" {
+		t.Fatalf("visible transcript entries = %+v, want only u1", transcriptResp.Transcript.Entries)
+	}
+
+	mainViewResp, err := svc.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("get session main view: %v", err)
+	}
+	if got := mainViewResp.MainView.Status.LastCommittedAssistantFinalAnswer; got != "" {
+		t.Fatalf("last committed assistant final answer = %q, want empty after rollback", got)
+	}
+	if got := mainViewResp.MainView.Session.Transcript.CommittedEntryCount; got != 1 {
+		t.Fatalf("committed entry count = %d, want 1", got)
+	}
+}
+
 func TestServiceGetSessionTranscriptPageKeepsDormantCompactionSummaryAndCarryover(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

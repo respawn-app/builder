@@ -5,7 +5,9 @@ import (
 
 	"builder/server/llm"
 	"builder/server/session"
+	"builder/server/tools"
 	"builder/shared/transcript"
+	"builder/shared/transcript/toolcodec"
 )
 
 type PersistedTranscriptScanRequest struct {
@@ -145,7 +147,7 @@ func clonePersistedToolCallMeta(meta *transcript.ToolCallMeta) *transcript.ToolC
 }
 
 func formatPersistedToolCall(call llm.ToolCall) ChatEntry {
-	meta := transcriptToolCallMeta(call, "")
+	meta := persistedTranscriptToolCallMeta(call)
 	text := "tool call"
 	if meta != nil {
 		text = strings.TrimSpace(meta.Command)
@@ -159,4 +161,14 @@ func formatPersistedToolCall(call llm.ToolCall) ChatEntry {
 		ToolCallID: strings.TrimSpace(call.ID),
 		ToolCall:   meta,
 	}
+}
+
+func persistedTranscriptToolCallMeta(call llm.ToolCall) *transcript.ToolCallMeta {
+	if meta, ok := toolcodec.DecodeToolCallMeta(call.Presentation); ok {
+		return meta
+	}
+	built := tools.BuildCallTranscriptMeta(call.Name, tools.ToolCallContext{
+		DefaultShellTimeoutSeconds: defaultShellTimeoutSecond,
+	}, call.Input)
+	return &built
 }

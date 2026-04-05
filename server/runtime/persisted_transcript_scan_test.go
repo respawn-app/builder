@@ -145,6 +145,26 @@ func TestPersistedTranscriptScanSynthesizesCompletedToolResultWithoutToolMessage
 	}
 }
 
+func TestFormatPersistedToolCallBuildsFallbackMetadata(t *testing.T) {
+	entry := formatPersistedToolCall(llm.ToolCall{
+		ID:    "call-1",
+		Name:  string(tools.ToolShell),
+		Input: json.RawMessage(`{"command":"pwd"}`),
+	})
+	if entry.Role != "tool_call" {
+		t.Fatalf("entry role = %q, want tool_call", entry.Role)
+	}
+	if entry.Text != "pwd" {
+		t.Fatalf("entry text = %q, want pwd", entry.Text)
+	}
+	if entry.ToolCall == nil || !entry.ToolCall.IsShell {
+		t.Fatalf("expected shell tool metadata, got %+v", entry.ToolCall)
+	}
+	if entry.ToolCall.Command != "pwd" {
+		t.Fatalf("tool command = %q, want pwd", entry.ToolCall.Command)
+	}
+}
+
 func TestPersistedTranscriptScanKeepsCompactionSummaryAndCarryoverInDetailTranscript(t *testing.T) {
 	scan := NewPersistedTranscriptScan(PersistedTranscriptScanRequest{})
 	events := []session.Event{
