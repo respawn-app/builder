@@ -172,7 +172,7 @@ func TestGatewaySessionActivitySubscriptionStreamsEventsAndCompletion(t *testing
 	}
 
 	appCore.PublishRuntimeEvent("session-1", runtime.Event{
-		Kind: runtime.EventToolCallStarted,
+		Kind:     runtime.EventToolCallStarted,
 		ToolCall: &llm.ToolCall{ID: "call-1", Name: "shell"},
 	})
 	if err := websocket.JSON.Receive(conn, &notif); err != nil {
