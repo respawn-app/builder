@@ -872,6 +872,41 @@ func TestApplyRuntimeTranscriptPageInDetailModeDoesNotRebuildNativeHistoryState(
 	}
 }
 
+func TestApplyRuntimeTranscriptPageInDetailModeAdvancesRevisionEvenWhenPageMatches(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	page := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 2,
+		Entries: []clientui.ChatEntry{
+			{Role: "assistant", Text: "seed-0"},
+			{Role: "assistant", Text: "seed-1"},
+		},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Offset: 0, Limit: 2}, page); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	m.forwardToView(tui.SetModeMsg{Mode: tui.ModeDetail, SkipDetailWarmup: true})
+	m.syncViewport()
+
+	updated := page
+	updated.Revision = 11
+	cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Offset: 0, Limit: 2}, updated)
+	if cmd != nil {
+		if msg := cmd(); msg != nil {
+			t.Fatalf("expected matching detail page refresh to be skipped, got %T", msg)
+		}
+	}
+	if got := m.transcriptRevision; got != 11 {
+		t.Fatalf("transcript revision after matching detail refresh = %d, want 11", got)
+	}
+}
+
 func TestApplyRuntimeTranscriptPageResetsDetailWindowOnSessionChange(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.termWidth = 100

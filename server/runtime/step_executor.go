@@ -245,7 +245,7 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 }
 
 func liveCommittedAssistantEventMessage(msg llm.Message) (llm.Message, bool) {
-	if msg.Phase == llm.MessagePhaseFinal {
+	if msg.Phase != llm.MessagePhaseCommentary {
 		return llm.Message{}, false
 	}
 	if strings.TrimSpace(msg.Content) == "" {

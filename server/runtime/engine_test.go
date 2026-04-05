@@ -1870,6 +1870,59 @@ func TestSubmitUserMessageMissingPhaseLegacyClientRemainsTerminal(t *testing.T) 
 	}
 }
 
+func TestSubmitUserMessageMissingPhaseLegacyClientEmitsAssistantEventOnce(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{
+			Role:    llm.RoleAssistant,
+			Content: "done",
+		},
+		Usage: llm.Usage{WindowTokens: 200000},
+	}}}
+	client.caps = llm.ProviderCapabilities{ProviderID: "anthropic", SupportsResponsesAPI: false, IsOpenAIFirstParty: false}
+
+	var (
+		mu     sync.Mutex
+		events []Event
+	)
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			defer mu.Unlock()
+			events = append(events, evt)
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do the task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	assistantEvents := 0
+	for _, evt := range events {
+		if evt.Kind == EventAssistantMessage && evt.Message.Content == "done" {
+			assistantEvents++
+		}
+	}
+	if assistantEvents != 1 {
+		t.Fatalf("expected one assistant_message event for missing-phase terminal reply, got %d events=%+v", assistantEvents, events)
+	}
+}
+
 func TestSubmitUserMessageMissingPhaseOpenAILegacyResponseRemainsTerminal(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
