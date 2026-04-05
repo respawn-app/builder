@@ -26,12 +26,12 @@ func TestDormantTranscriptCacheReusesEntryForUnchangedRevision(t *testing.T) {
 		buildCalls++
 		meta := store.Meta()
 		return dormantTranscriptCacheEntry{
-			sessionDir:                    store.Dir(),
-			sessionID:                     meta.SessionID,
-			revision:                      meta.LastSequence,
-			totalEntries:                  7,
-			lastCommittedAssistantAnswer:  "done",
-			ongoingTail:                   dormantTailWindow(meta.SessionID, 2, 7, []string{"tail-1", "tail-2"}),
+			sessionDir:                   store.Dir(),
+			sessionID:                    meta.SessionID,
+			revision:                     meta.LastSequence,
+			totalEntries:                 7,
+			lastCommittedAssistantAnswer: "done",
+			ongoingTail:                  dormantTailWindow(meta.SessionID, 2, 7, []string{"tail-1", "tail-2"}),
 		}, nil
 	})
 
@@ -204,8 +204,8 @@ func dormantTailWindow(sessionID string, offset, total int, texts []string) runt
 		entries = append(entries, runtime.ChatEntry{Role: "assistant", Text: text})
 	}
 	return runtime.TranscriptWindowSnapshot{
-		Snapshot: runtime.ChatSnapshot{Entries: entries},
-		Offset:   offset,
+		Snapshot:     runtime.ChatSnapshot{Entries: entries},
+		Offset:       offset,
 		TotalEntries: total,
 	}
 }
