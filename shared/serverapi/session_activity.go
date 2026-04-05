@@ -2,8 +2,6 @@ package serverapi
 
 import (
 	"context"
-	"errors"
-	"strings"
 
 	"builder/shared/clientui"
 )
@@ -22,8 +20,5 @@ type SessionActivityService interface {
 }
 
 func (r SessionActivitySubscribeRequest) Validate() error {
-	if strings.TrimSpace(r.SessionID) == "" {
-		return errors.New("session_id is required")
-	}
-	return nil
+	return validateRequiredSessionID(r.SessionID)
 }
