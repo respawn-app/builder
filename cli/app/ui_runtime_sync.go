@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"time"
 
+	"builder/cli/tui"
+	"builder/shared/clientui"
 	"builder/shared/transcriptdiag"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -27,9 +29,22 @@ func (m *uiModel) requestRuntimeTranscriptSync() tea.Cmd {
 	if !m.hasRuntimeClient() {
 		return nil
 	}
+	return m.startRuntimeTranscriptPageRequest(m.transcriptRequestForCurrentMode(), false)
+}
+
+func (m *uiModel) requestRuntimeTranscriptPage(request clientui.TranscriptPageRequest) tea.Cmd {
+	return m.startRuntimeTranscriptPageRequest(request, true)
+}
+
+func (m *uiModel) startRuntimeTranscriptPageRequest(request clientui.TranscriptPageRequest, allowDuplicateSkip bool) tea.Cmd {
+	request = normalizeRuntimeTranscriptRequest(request)
 	if m.runtimeTranscriptBusy {
 		m.runtimeTranscriptDirty = true
 		m.logf("ui.runtime.transcript.mark_dirty")
+		return nil
+	}
+	if allowDuplicateSkip && m.shouldSkipTranscriptPageRequest(request) {
+		m.logf("ui.runtime.transcript.skip_duplicate mode=%s offset=%d limit=%d window=%s", m.view.Mode(), request.Offset, request.Limit, request.Window)
 		return nil
 	}
 	m.runtimeTranscriptBusy = true
@@ -37,7 +52,6 @@ func (m *uiModel) requestRuntimeTranscriptSync() tea.Cmd {
 	m.runtimeTranscriptToken++
 	token := m.runtimeTranscriptToken
 	client := m.runtimeClient()
-	req := m.transcriptRequestForCurrentMode()
 	m.logf("ui.runtime.transcript.start token=%d", token)
 	fields := map[string]string{
 		"session_id":            m.sessionID,
@@ -48,14 +62,27 @@ func (m *uiModel) requestRuntimeTranscriptSync() tea.Cmd {
 		"transcript_live_dirty": strconv.FormatBool(m.transcriptLiveDirty),
 		"reasoning_live_dirty":  strconv.FormatBool(m.reasoningLiveDirty),
 	}
-	for key, value := range transcriptdiag.RequestFields(req) {
+	for key, value := range transcriptdiag.RequestFields(request) {
 		fields[key] = value
 	}
 	m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.hydrate_start", fields))
 	return func() tea.Msg {
-		transcript, err := client.LoadTranscriptPage(req)
-		return runtimeTranscriptRefreshedMsg{token: token, req: req, transcript: transcript, err: err}
+		transcript, err := client.LoadTranscriptPage(request)
+		return runtimeTranscriptRefreshedMsg{token: token, req: request, transcript: transcript, err: err}
 	}
+}
+
+func (m *uiModel) shouldSkipTranscriptPageRequest(req clientui.TranscriptPageRequest) bool {
+	if m.runtimeTranscriptDirty || m.transcriptLiveDirty || m.reasoningLiveDirty {
+		return false
+	}
+	if m.view.Mode() != tui.ModeDetail {
+		return false
+	}
+	if !m.detailTranscript.loaded {
+		return false
+	}
+	return pageRequestEqual(m.detailTranscript.lastRequest, req)
 }
 
 func (m *uiModel) scheduleRuntimeTranscriptRetry() tea.Cmd {

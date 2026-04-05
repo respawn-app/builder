@@ -174,7 +174,7 @@ func TestDetailEdgePagingWaitsForFirstNavigationToResolveMetrics(t *testing.T) {
 	}
 }
 
-func TestCtrlTDeferredDetailLoadUsesBoundedTranscriptPageRequest(t *testing.T) {
+func TestCtrlTDeferredDetailLoadSkipsDuplicateSeededPageRequest(t *testing.T) {
 	seed := clientui.TranscriptPage{SessionID: "session-1", Offset: 300, TotalEntries: 500}
 	for i := 0; i < 200; i++ {
 		seed.Entries = append(seed.Entries, clientui.ChatEntry{Role: "assistant", Text: fmt.Sprintf("line %03d", 300+i)})
@@ -214,29 +214,18 @@ func TestCtrlTDeferredDetailLoadUsesBoundedTranscriptPageRequest(t *testing.T) {
 
 	next, refreshCmd := detail.Update(detailTranscriptLoadMsg{})
 	updated := next.(*uiModel)
-	if refreshCmd == nil {
-		t.Fatal("expected deferred detail load to request transcript sync")
+	if refreshCmd != nil {
+		t.Fatalf("expected duplicate seeded detail load to be skipped, got %T", refreshCmd())
 	}
-	refreshed, ok := refreshCmd().(runtimeTranscriptRefreshedMsg)
-	if !ok {
-		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", refreshCmd())
+	if got := len(client.loadRequests); got != 0 {
+		t.Fatalf("load request count = %d, want 0", got)
 	}
-	expectedReq := clientui.TranscriptPageRequest{Offset: seed.Offset, Limit: len(seed.Entries)}
-	if refreshed.req != expectedReq {
-		t.Fatalf("deferred detail request = %+v, want %+v", refreshed.req, expectedReq)
-	}
-	if got := len(client.loadRequests); got != 1 {
-		t.Fatalf("load request count = %d, want 1", got)
-	}
-	if client.loadRequests[0] != expectedReq {
-		t.Fatalf("client load request = %+v, want %+v", client.loadRequests[0], expectedReq)
-	}
-	if !updated.runtimeTranscriptBusy {
-		t.Fatal("expected transcript sync to remain busy until refresh result is applied")
+	if updated.runtimeTranscriptBusy {
+		t.Fatal("expected duplicate seeded detail load to leave transcript sync idle")
 	}
 }
 
-func TestCtrlTDeferredDetailLoadSkipsDuplicateDetailRebuildEndToEnd(t *testing.T) {
+func TestCtrlTDeferredDetailLoadSkippedDoesNotRebuildDetailEndToEnd(t *testing.T) {
 	seed := clientui.TranscriptPage{SessionID: "session-1", Offset: 300, TotalEntries: 500}
 	for i := 0; i < 200; i++ {
 		seed.Entries = append(seed.Entries, clientui.ChatEntry{Role: "assistant", Text: fmt.Sprintf("line %03d", 300+i)})
@@ -259,16 +248,10 @@ func TestCtrlTDeferredDetailLoadSkipsDuplicateDetailRebuildEndToEnd(t *testing.T
 	beforeDeferredRefresh := detail.view.DetailRebuildCount()
 
 	next, refreshCmd := detail.Update(detailTranscriptLoadMsg{})
-	detail = next.(*uiModel)
-	refreshed, ok := refreshCmd().(runtimeTranscriptRefreshedMsg)
-	if !ok {
-		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", refreshCmd())
-	}
-	next, followUp := detail.Update(refreshed)
-	if followUp != nil {
-		_ = collectCmdMessages(t, followUp)
-	}
 	updated := next.(*uiModel)
+	if refreshCmd != nil {
+		t.Fatalf("expected duplicate seeded detail load to be skipped, got %T", refreshCmd())
+	}
 	afterDeferredRefresh := updated.view.DetailRebuildCount()
 	if afterDeferredRefresh != beforeDeferredRefresh {
 		t.Fatalf("duplicate deferred detail refresh rebuilt detail %d -> %d", beforeDeferredRefresh, afterDeferredRefresh)
@@ -278,6 +261,52 @@ func TestCtrlTDeferredDetailLoadSkipsDuplicateDetailRebuildEndToEnd(t *testing.T
 	}
 	if updated.runtimeTranscriptBusy {
 		t.Fatal("expected transcript sync to clear busy state after duplicate refresh result")
+	}
+}
+
+func TestDeferredDetailLoadRefreshesWhenTranscriptDirty(t *testing.T) {
+	seed := clientui.TranscriptPage{SessionID: "session-1", Offset: 300, TotalEntries: 500}
+	for i := 0; i < 200; i++ {
+		seed.Entries = append(seed.Entries, clientui.ChatEntry{Role: "assistant", Text: fmt.Sprintf("line %03d", 300+i)})
+	}
+	client := &recordingTranscriptRuntimeClient{loadPage: seed}
+	m := newProjectedTestUIModel(
+		client,
+		closedProjectedRuntimeEvents(),
+		closedAskEvents(),
+		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
+	)
+	m.termWidth = 100
+	m.termHeight = 12
+	_ = m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, seed)
+	m.syncViewport()
+
+	next, enterCmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	detail := next.(*uiModel)
+	_ = collectCmdMessages(t, enterCmd)
+	detail.transcriptLiveDirty = true
+
+	next, refreshCmd := detail.Update(detailTranscriptLoadMsg{})
+	updated := next.(*uiModel)
+	if refreshCmd == nil {
+		t.Fatal("expected dirty detail transcript to refresh even when request matches seeded page")
+	}
+	refreshed, ok := refreshCmd().(runtimeTranscriptRefreshedMsg)
+	if !ok {
+		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", refreshCmd())
+	}
+	expectedReq := clientui.TranscriptPageRequest{Offset: seed.Offset, Limit: len(seed.Entries)}
+	if refreshed.req != expectedReq {
+		t.Fatalf("dirty deferred detail request = %+v, want %+v", refreshed.req, expectedReq)
+	}
+	if got := len(client.loadRequests); got != 1 {
+		t.Fatalf("load request count = %d, want 1", got)
+	}
+	if client.loadRequests[0] != expectedReq {
+		t.Fatalf("client load request = %+v, want %+v", client.loadRequests[0], expectedReq)
+	}
+	if !updated.runtimeTranscriptBusy {
+		t.Fatal("expected transcript sync to remain busy until dirty refresh result is applied")
 	}
 }
 

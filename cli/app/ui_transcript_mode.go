@@ -25,57 +25,25 @@ func (m *uiModel) maybeRequestDetailTranscriptPage() tea.Cmd {
 		}
 		if firstVisible <= m.view.TranscriptBaseOffset()+1 {
 			if req, ok := m.detailTranscript.pageBefore(); ok {
-				m.runtimeTranscriptBusy = true
-				m.runtimeTranscriptDirty = false
-				m.runtimeTranscriptToken++
-				token := m.runtimeTranscriptToken
-				client := m.runtimeClient()
-				return func() tea.Msg {
-					transcript, err := client.LoadTranscriptPage(req)
-					return runtimeTranscriptRefreshedMsg{token: token, req: req, transcript: transcript, err: err}
-				}
+				return m.requestRuntimeTranscriptPage(req)
 			}
 		}
 		loadedLast := m.view.TranscriptBaseOffset() + m.view.LoadedTranscriptEntryCount() - 1
 		if lastVisible >= loadedLast-1 {
 			if req, ok := m.detailTranscript.pageAfter(); ok {
-				m.runtimeTranscriptBusy = true
-				m.runtimeTranscriptDirty = false
-				m.runtimeTranscriptToken++
-				token := m.runtimeTranscriptToken
-				client := m.runtimeClient()
-				return func() tea.Msg {
-					transcript, err := client.LoadTranscriptPage(req)
-					return runtimeTranscriptRefreshedMsg{token: token, req: req, transcript: transcript, err: err}
-				}
+				return m.requestRuntimeTranscriptPage(req)
 			}
 		}
 		return nil
 	}
 	if m.view.DetailScroll() <= uiDetailTranscriptEdgeLineMargin {
 		if req, ok := m.detailTranscript.pageBefore(); ok {
-			m.runtimeTranscriptBusy = true
-			m.runtimeTranscriptDirty = false
-			m.runtimeTranscriptToken++
-			token := m.runtimeTranscriptToken
-			client := m.runtimeClient()
-			return func() tea.Msg {
-				transcript, err := client.LoadTranscriptPage(req)
-				return runtimeTranscriptRefreshedMsg{token: token, req: req, transcript: transcript, err: err}
-			}
+			return m.requestRuntimeTranscriptPage(req)
 		}
 	}
 	if m.view.DetailMaxScroll()-m.view.DetailScroll() <= uiDetailTranscriptEdgeLineMargin {
 		if req, ok := m.detailTranscript.pageAfter(); ok {
-			m.runtimeTranscriptBusy = true
-			m.runtimeTranscriptDirty = false
-			m.runtimeTranscriptToken++
-			token := m.runtimeTranscriptToken
-			client := m.runtimeClient()
-			return func() tea.Msg {
-				transcript, err := client.LoadTranscriptPage(req)
-				return runtimeTranscriptRefreshedMsg{token: token, req: req, transcript: transcript, err: err}
-			}
+			return m.requestRuntimeTranscriptPage(req)
 		}
 	}
 	return nil
