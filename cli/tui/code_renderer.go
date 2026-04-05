@@ -84,6 +84,7 @@ func (r *codeRenderer) render(hint *transcript.ToolRenderHint, text string) (str
 	if strings.TrimSpace(rendered) == "" {
 		return "", false
 	}
+	rendered = applyDefaultForeground(rendered, r.baseForeground)
 
 	if len(r.cache) >= codeCacheLimit {
 		r.cache = make(map[string]string, 128)

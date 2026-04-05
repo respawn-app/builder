@@ -1067,6 +1067,8 @@ func TestNativeProgramKeepsPendingToolTailLiveOnlyUntilCompletion(t *testing.T) 
 	if strings.Contains(finalNormalized, "/tmp") {
 		t.Fatalf("did not expect native ongoing scrollback to append shell output inline, got %q", finalNormalized)
 	}
+	assertContainsColoredShellSymbol(t, finalDelta, "dark success", transcriptToolSuccessColorHex("dark"))
+	assertNoColoredShellSymbol(t, finalDelta, "dark pending", transcriptToolPendingColorHex("dark"))
 
 	program.Quit()
 	select {
