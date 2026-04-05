@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"builder/server/tools"
+	"builder/shared/compaction"
 	"builder/shared/theme"
 )
 
@@ -21,7 +22,7 @@ const (
 	defaultShellOutputMaxChars           = 16_000
 	defaultBGShellsOutput                = "default"
 	defaultCompactionThreshold           = defaultModelContextWindow * 95 / 100
-	defaultPreSubmitCompactionLeadTokens = 15_000
+	defaultPreSubmitCompactionLeadTokens = compaction.DefaultPreSubmitRunwayTokens
 	defaultReviewerFrequency             = "edits"
 	defaultReviewerTimeoutSec            = 60
 	defaultTUIAlternateScreen            = "auto"
