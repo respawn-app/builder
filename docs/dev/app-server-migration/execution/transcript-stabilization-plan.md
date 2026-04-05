@@ -36,7 +36,7 @@ Until this plan is complete, transcript-affecting work must be treated as stabil
 - [x] Define and document one authoritative path for live active-session transcript updates.
 - [x] Define and document the role of hydration reads as recovery/repair rather than primary live UX.
 - [x] Audit the CLI for every place that can mutate transcript-visible state.
-- [ ] Remove or consolidate overlapping state update paths that can overwrite each other.
+- [x] Remove or consolidate overlapping state update paths that can overwrite each other.
 - [x] Establish a clear rule for when transcript reads may replace current UI state and when they must not.
 
 Exit criteria:
@@ -48,13 +48,13 @@ Exit criteria:
 
 - [x] Separate stabilization work around committed transcript state from ephemeral live state.
 - [x] Audit which visible elements are durable and which are transient.
-- [ ] Eliminate cases where recovery/hydration logic clears or rewrites transient live state incorrectly.
-- [ ] Eliminate cases where transient state is being treated as if it were committed durable transcript state.
+- [x] Eliminate cases where recovery/hydration logic clears or rewrites transient live state incorrectly.
+- [x] Eliminate cases where transient state is being treated as if it were committed durable transcript state.
 
 Exit criteria:
 
 - [x] Committed transcript recovery works without depending on transient live state.
-- [ ] Live commentary/tool preview behavior works without depending on transcript rehydrate.
+- [x] Live commentary/tool preview behavior works without depending on transcript rehydrate.
 
 ## Workstream 3: Ordering and Freshness
 
@@ -148,10 +148,10 @@ Must stay serialized:
 This plan is complete only when all of the following are true:
 
 - [ ] Active ongoing mode is reliable under normal work, not only after reload.
-- [ ] Detail mode and dormant-session reopen preserve committed transcript correctly.
-- [ ] Reconnect/hydration behavior no longer causes visible transcript loss.
+- [x] Detail mode and dormant-session reopen preserve committed transcript correctly.
+- [x] Reconnect/hydration behavior no longer causes visible transcript loss.
 - [ ] The same transcript-critical scenarios pass on both loopback and remote paths.
-- [ ] We have rendered-path automated proof for the key user-facing flows.
+- [x] We have rendered-path automated proof for the key user-facing flows.
 - [x] New transcript regressions are easier to localize than they are today.
 
 ## Release Gate
@@ -196,6 +196,7 @@ Authoritative proof for the checked items lives in:
 
 - `docs/dev/app-server-migration/analysis/transcript-workflow-proof.md`
 - `docs/dev/app-server-migration/analysis/transcript-observability-plan.md`
+- `docs/dev/app-server-migration/analysis/transcript-overlap-audit.md`
 
 ## Remaining Execution Slices
 
