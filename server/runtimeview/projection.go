@@ -71,13 +71,15 @@ func ConversationFreshnessFromSession(freshness session.ConversationFreshness) c
 
 func EventFromRuntime(evt runtime.Event) clientui.Event {
 	view := clientui.Event{
-		Kind:              clientui.EventKind(evt.Kind),
-		StepID:            evt.StepID,
-		Error:             evt.Error,
-		AssistantDelta:    evt.AssistantDelta,
-		UserMessage:       evt.UserMessage,
-		UserMessageBatch:  append([]string(nil), evt.UserMessageBatch...),
-		TranscriptEntries: chatEntriesFromRuntime(runtime.TranscriptEntriesFromEvent(evt)),
+		Kind:                clientui.EventKind(evt.Kind),
+		StepID:              evt.StepID,
+		TranscriptRevision:  evt.TranscriptRevision,
+		CommittedEntryCount: evt.CommittedEntryCount,
+		Error:               evt.Error,
+		AssistantDelta:      evt.AssistantDelta,
+		UserMessage:         evt.UserMessage,
+		UserMessageBatch:    append([]string(nil), evt.UserMessageBatch...),
+		TranscriptEntries:   chatEntriesFromRuntime(runtime.TranscriptEntriesFromEvent(evt)),
 	}
 	if evt.ReasoningDelta != nil {
 		view.ReasoningDelta = &clientui.ReasoningDelta{
