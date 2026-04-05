@@ -1885,6 +1885,9 @@ func TestSelectedUserLineUsesCentralThemeSelectionTokens(t *testing.T) {
 	if selectedLine == "" {
 		t.Fatalf("expected detail view to contain selected user line, got %q", plainTranscript(raw))
 	}
+	if got := lipgloss.Width(selectedLine); got != 80 {
+		t.Fatalf("expected selected line to span viewport width 80, got %d in %q", got, selectedLine)
+	}
 	tokens := theme.ResolvePalette("light").Transcript
 	selectionBackground := rgbColorFromHex(tokens.SelectionBackground.TrueColor)
 	if !strings.Contains(selectedLine, fmt.Sprintf("48;2;%d;%d;%d", selectionBackground.r, selectionBackground.g, selectionBackground.b)) {

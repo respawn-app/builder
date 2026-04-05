@@ -23,6 +23,7 @@ func (c uiInputController) startRollbackSelectionFlowCmd() tea.Cmd {
 	}
 	overlayCmd := m.pushRollbackOverlayIfNeeded()
 	if overlayCmd != nil {
+		m.applyRollbackSelectionHighlight()
 		m.focusRollbackSelection()
 		return overlayCmd
 	}
@@ -61,6 +62,7 @@ func (c uiInputController) cancelRollbackEditingToSelectionFlowCmd() tea.Cmd {
 	}
 	overlayCmd := m.pushRollbackOverlayIfNeeded()
 	if overlayCmd != nil {
+		m.applyRollbackSelectionHighlight()
 		m.focusRollbackSelection()
 		return overlayCmd
 	}
