@@ -325,6 +325,9 @@ func TestNewRuntimeWiring_ProviderOverrideSupportsAliasModelsForMainAndReviewer(
 	if wiring == nil || wiring.engine == nil {
 		t.Fatal("expected runtime wiring with engine")
 	}
+	if wiring.turnQueueHook == nil {
+		t.Fatal("expected runtime wiring to install turn queue hook")
+	}
 }
 
 func TestRuntimeWiringCloseDoesNotCloseSharedBackgroundManager(t *testing.T) {

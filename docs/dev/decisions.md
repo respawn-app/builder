@@ -351,7 +351,8 @@
 
 - Ring terminal bell when a new `ask_question` is shown.
 - Ring on turn end only if the turn executed at least two tool calls.
-- Turn-end ringing is keyed by runtime step id and `tool_call_started`/`assistant_message` events.
+- UI turn-queue lifecycle exposes a reusable queue-drained hook; terminal bell notifications are one consumer of that hook.
+- Turn-end ringing is keyed by runtime step id and projected `tool_call_started`/`assistant_message` events, but the actual notification is deferred until the queued prompt drain is fully idle.
 - Turn-end notification text includes assistant response preview when available, else `<session title>: turn complete` with `builder` as the fallback title.
 - Ask notifications include the ask text as `<session title>: Question: <question>` or `<session title>: Action required: <question>`.
 - `auto` notification method prefers OSC 9 on supported terminals and falls back to BEL.

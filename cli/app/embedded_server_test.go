@@ -1063,3 +1063,32 @@ func TestPrepareSharedRuntimeReleaseUsesBoundedContextOnFailure(t *testing.T) {
 		t.Fatal("expected runtime release on prompt subscribe failure")
 	}
 }
+
+func TestPrepareSharedRuntimeInstallsTurnQueueHook(t *testing.T) {
+	server := &testEmbeddedServer{
+		sessionRuntime: &recordingSessionRuntimeClient{
+			activate: func(context.Context, serverapi.SessionRuntimeActivateRequest) error { return nil },
+			release:  func(context.Context, serverapi.SessionRuntimeReleaseRequest) error { return nil },
+		},
+		sessionActivity: &recordingSessionActivityClient{
+			subscribe: func(context.Context, serverapi.SessionActivitySubscribeRequest) (serverapi.SessionActivitySubscription, error) {
+				return noOpSessionActivitySubscription{}, nil
+			},
+		},
+		promptActivityClient: &recordingPromptActivityClient{
+			subscribe: func(context.Context, serverapi.PromptActivitySubscribeRequest) (serverapi.PromptActivitySubscription, error) {
+				return nil, nil
+			},
+		},
+		sessionViewClient: &countingSessionViewClient{view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionName: "shared session"}}},
+	}
+
+	plan, err := prepareSharedRuntime(context.Background(), server, sessionLaunchPlan{SessionID: "session-1", SessionName: "fallback session", WorkspaceRoot: "/tmp/workspace", ActiveSettings: config.Settings{NotificationMethod: "bel"}}, io.Discard, "test")
+	if err != nil {
+		t.Fatalf("prepareSharedRuntime: %v", err)
+	}
+	defer plan.Close()
+	if plan.Wiring == nil || plan.Wiring.turnQueueHook == nil {
+		t.Fatal("expected shared runtime wiring to install turn queue hook")
+	}
+}

@@ -46,6 +46,9 @@ func (a uiRuntimeAdapter) handleProjectedRuntimeEventsBatch(events []clientui.Ev
 
 func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNativeHistory bool) runtimeEventApplyResult {
 	m := a.model
+	if m.turnQueueHook != nil {
+		m.turnQueueHook.OnProjectedRuntimeEvent(evt)
+	}
 	update := clientui.ReduceRuntimeEvent(
 		a.runtimeEventState(),
 		a.pendingInputState(),

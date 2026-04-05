@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"time"
 
 	"builder/server/auth"
@@ -253,11 +254,21 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 	}, func(ctx context.Context) (map[string]struct{}, error) {
 		return listPendingPromptIDs(ctx, plan.SessionID, server.AskViewClient(), server.ApprovalViewClient())
 	}, server.PromptControlClient())
+	runtimeClient := newUIRuntimeClientWithReads(plan.SessionID, server.SessionViewClient(), server.RuntimeControlClient())
+	turnQueueHook := newBellHooks(defaultTerminalNotifier(plan.ActiveSettings.NotificationMethod), func() string {
+		if runtimeClient != nil {
+			if sessionName := strings.TrimSpace(runtimeClient.MainView().Session.SessionName); sessionName != "" {
+				return sessionName
+			}
+		}
+		return strings.TrimSpace(plan.SessionName)
+	})
 	wiring := &runtimeWiring{
 		runtimeEvents:   runtimeEvents,
 		askEvents:       askEvents,
 		background:      nil,
-		runtimeClient:   newUIRuntimeClientWithReads(plan.SessionID, server.SessionViewClient(), server.RuntimeControlClient()),
+		turnQueueHook:   turnQueueHook,
+		runtimeClient:   runtimeClient,
 		promptControl:   server.PromptControlClient(),
 		runtimeControls: server.RuntimeControlClient(),
 		processControls: server.ProcessControlClient(),

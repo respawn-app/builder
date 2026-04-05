@@ -1,0 +1,11 @@
+package app
+
+import "builder/shared/clientui"
+
+// turnQueueHook observes projected runtime events and the user-facing queue
+// lifecycle so features can react when a queued turn sequence truly finishes.
+type turnQueueHook interface {
+	OnProjectedRuntimeEvent(evt clientui.Event)
+	OnTurnQueueDrained()
+	OnTurnQueueAborted()
+}
