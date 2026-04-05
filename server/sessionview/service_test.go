@@ -226,6 +226,81 @@ func TestServiceGetSessionTranscriptPageSupportsPagination(t *testing.T) {
 	}
 }
 
+func TestServiceGetSessionTranscriptPageReturnsFullDormantTranscriptByDefault(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	entries := []llm.Message{
+		{Role: llm.RoleUser, Content: "u1"},
+		{Role: llm.RoleAssistant, Content: "a1", Phase: llm.MessagePhaseFinal},
+		{Role: llm.RoleUser, Content: "u2"},
+	}
+	for i, entry := range entries {
+		if _, err := store.AppendEvent("step-1", "message", entry); err != nil {
+			t.Fatalf("append message %d: %v", i, err)
+		}
+	}
+	svc := NewService(NewStaticSessionResolver(store), nil)
+
+	resp, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("get session transcript page: %v", err)
+	}
+	if resp.Transcript.TotalEntries != 3 {
+		t.Fatalf("total entries = %d, want 3", resp.Transcript.TotalEntries)
+	}
+	if resp.Transcript.HasMore || resp.Transcript.NextOffset != 0 {
+		t.Fatalf("unexpected pagination metadata: %+v", resp.Transcript)
+	}
+	if len(resp.Transcript.Entries) != 3 {
+		t.Fatalf("entries = %d, want 3", len(resp.Transcript.Entries))
+	}
+	if resp.Transcript.Entries[0].Text != "u1" || resp.Transcript.Entries[1].Text != "a1" || resp.Transcript.Entries[2].Text != "u2" {
+		t.Fatalf("unexpected dormant transcript entries: %+v", resp.Transcript.Entries)
+	}
+}
+
+func TestServiceGetSessionTranscriptPageKeepsDormantCompactionSummaryAndCarryover(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "before compaction"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "history_replaced", map[string]any{
+		"engine": "local",
+		"mode":   "manual",
+		"items":  llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "condensed provider summary", MessageType: llm.MessageTypeCompactionSummary}}),
+	}); err != nil {
+		t.Fatalf("append history replacement: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "local_entry", map[string]any{"role": "compaction_summary", "text": "condensed summary"}); err != nil {
+		t.Fatalf("append compaction summary entry: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeManualCompactionCarryover, Content: "Last user message before handoff\n\ncarry this forward"}); err != nil {
+		t.Fatalf("append manual carryover: %v", err)
+	}
+	svc := NewService(NewStaticSessionResolver(store), nil)
+
+	resp, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("get session transcript page: %v", err)
+	}
+	if len(resp.Transcript.Entries) != 3 {
+		t.Fatalf("entries = %d, want 3 (%+v)", len(resp.Transcript.Entries), resp.Transcript.Entries)
+	}
+	if resp.Transcript.Entries[1].Role != "compaction_summary" || resp.Transcript.Entries[1].Text != "condensed summary" {
+		t.Fatalf("expected compaction summary entry, got %+v", resp.Transcript.Entries[1])
+	}
+	if resp.Transcript.Entries[2].Role != "manual_compaction_carryover" {
+		t.Fatalf("expected manual carryover entry, got %+v", resp.Transcript.Entries[2])
+	}
+}
+
 func TestServiceGetSessionTranscriptPageUsesDormantOngoingTailWindow(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
