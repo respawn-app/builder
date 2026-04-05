@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
+	"builder/shared/transcriptdiag"
 )
 
 const uiRuntimeControlTimeout = 3 * time.Second
@@ -233,6 +236,18 @@ func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.Transcript
 		PageSize:  req.PageSize,
 		Window:    req.Window,
 	})
+	if transcriptdiag.EnabledFromEnv(os.Getenv) {
+		fields := map[string]string{"session_id": c.sessionID, "path": "hydrate"}
+		for key, value := range transcriptdiag.RequestFields(req) {
+			fields[key] = value
+		}
+		if err != nil {
+			fields["err"] = err.Error()
+			logRuntimeClientTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.hydrate_fetch", fields))
+		} else {
+			logRuntimeClientTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.hydrate_fetch", transcriptdiag.AddPageFields(fields, resp.Transcript)))
+		}
+	}
 	if err != nil {
 		c.mu.RLock()
 		page := c.transcript
@@ -244,6 +259,12 @@ func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.Transcript
 		return page, err
 	}
 	return c.storeTranscript(resp.Transcript), nil
+}
+
+var runtimeClientTranscriptDiagLogf = func(format string, args ...any) {}
+
+func logRuntimeClientTranscriptDiag(line string) {
+	runtimeClientTranscriptDiagLogf("%s", strings.TrimSpace(line))
 }
 
 func normalizeRuntimeTranscriptRequest(req clientui.TranscriptPageRequest) clientui.TranscriptPageRequest {

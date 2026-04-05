@@ -187,6 +187,16 @@ var nativeResizeReplayNow = time.Now
 func WithUILogger(logger uiLogger) UIOption {
 	return func(m *uiModel) {
 		m.logger = logger
+		if logger != nil {
+			runtimeClientTranscriptDiagLogf = logger.Logf
+			sessionActivityTranscriptDiagLogf = logger.Logf
+		}
+	}
+}
+
+func WithUITranscriptDiagnostics(enabled bool) UIOption {
+	return func(m *uiModel) {
+		m.transcriptDiagnostics = enabled
 	}
 }
 
@@ -415,10 +425,11 @@ type uiModel struct {
 	status                   uiStatusOverlayState
 	clipboardImagePaster     uiClipboardImagePaster
 
-	transientStatus      string
-	transientStatusKind  uiStatusNoticeKind
-	transientStatusToken uint64
-	debugKeys            bool
+	transientStatus       string
+	transientStatusKind   uiStatusNoticeKind
+	transientStatusToken  uint64
+	debugKeys             bool
+	transcriptDiagnostics bool
 
 	transcriptEntries        []tui.TranscriptEntry
 	transcriptBaseOffset     int
@@ -488,6 +499,7 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 		theme:                    theme.Auto,
 		tuiAlternateScreen:       config.TUIAlternateScreenAuto,
 		debugKeys:                envFlagEnabled("BUILDER_DEBUG_KEYS"),
+		transcriptDiagnostics:    envFlagEnabled("BUILDER_TRANSCRIPT_DIAGNOSTICS"),
 		reviewerMode:             "off",
 		autoCompactionEnabled:    true,
 		conversationFreshness:    clientui.ConversationFreshnessFresh,
@@ -949,6 +961,13 @@ func (m *uiModel) logf(format string, args ...any) {
 	if m.logger != nil {
 		m.logger.Logf(format, args...)
 	}
+}
+
+func (m *uiModel) logTranscriptDiag(line string) {
+	if m == nil || !m.transcriptDiagnostics {
+		return
+	}
+	m.logf("%s", strings.TrimSpace(line))
 }
 
 func (m *uiModel) inputController() uiInputController {

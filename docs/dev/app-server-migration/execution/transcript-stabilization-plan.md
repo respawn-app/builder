@@ -36,7 +36,7 @@ Until this plan is complete, transcript-affecting work must be treated as stabil
 - [x] Define and document one authoritative path for live active-session transcript updates.
 - [x] Define and document the role of hydration reads as recovery/repair rather than primary live UX.
 - [x] Audit the CLI for every place that can mutate transcript-visible state.
-- [ ] Remove or consolidate overlapping state update paths that can overwrite each other.
+- [x] Remove or consolidate overlapping state update paths that can overwrite each other.
 - [x] Establish a clear rule for when transcript reads may replace current UI state and when they must not.
 
 Exit criteria:
@@ -48,13 +48,13 @@ Exit criteria:
 
 - [x] Separate stabilization work around committed transcript state from ephemeral live state.
 - [x] Audit which visible elements are durable and which are transient.
-- [ ] Eliminate cases where recovery/hydration logic clears or rewrites transient live state incorrectly.
-- [ ] Eliminate cases where transient state is being treated as if it were committed durable transcript state.
+- [x] Eliminate cases where recovery/hydration logic clears or rewrites transient live state incorrectly.
+- [x] Eliminate cases where transient state is being treated as if it were committed durable transcript state.
 
 Exit criteria:
 
 - [x] Committed transcript recovery works without depending on transient live state.
-- [ ] Live commentary/tool preview behavior works without depending on transcript rehydrate.
+- [x] Live commentary/tool preview behavior works without depending on transcript rehydrate.
 
 ## Workstream 3: Ordering and Freshness
 
@@ -95,28 +95,28 @@ Exit criteria:
 
 ## Workstream 5: Observability And Debugging
 
-- [ ] Add enough diagnostics to explain why visible transcript state changed.
-- [ ] Make it easy to tell whether a visible change came from a live event, a transcript read, or a recovery path.
-- [ ] Make it easy to identify ordering/freshness mismatches during debugging.
+- [x] Add enough diagnostics to explain why visible transcript state changed.
+- [x] Make it easy to tell whether a visible change came from a live event, a transcript read, or a recovery path.
+- [x] Make it easy to identify ordering/freshness mismatches during debugging.
 - [x] Add targeted debugging guidance for future transcript regressions.
 
 Exit criteria:
 
-- [ ] Transcript regressions can be diagnosed from logs/state transitions without guesswork.
-- [ ] It is possible to tell whether a failure is in server emission, transport, hydration, or frontend apply logic.
+- [x] Transcript regressions can be diagnosed from logs/state transitions without guesswork.
+- [x] It is possible to tell whether a failure is in server emission, transport, hydration, or frontend apply logic.
 
 ## Workstream 6: Regression Triage And Cleanup
 
 - [x] Inventory all currently known transcript-related regressions on `app-server-integration`.
 - [x] Group them by root cause rather than by symptom.
-- [ ] Close quick symptom patches that do not fit the stabilized model.
-- [ ] Re-test previously fixed regressions after each structural transcript change.
+- [x] Close quick symptom patches that do not fit the stabilized model.
+- [x] Re-test previously fixed regressions after each structural transcript change.
 - [x] Keep a running checklist of transcript-critical user workflows and their current status.
 
 Exit criteria:
 
-- [ ] Transcript bug backlog is organized by cause and current status.
-- [ ] No open transcript regression is being deferred silently.
+- [x] Transcript bug backlog is organized by cause and current status.
+- [x] No open transcript regression is being deferred silently.
 
 ## Sequencing
 
@@ -135,7 +135,7 @@ Parallelizable work:
 - [x] remote/session-activity regression tests
 - [x] transcript mutation-path inventory
 - [x] regression backlog inventory
-- [ ] observability/debugging additions
+- [x] observability/debugging additions
 
 Must stay serialized:
 
@@ -152,7 +152,7 @@ This plan is complete only when all of the following are true:
 - [ ] Reconnect/hydration behavior no longer causes visible transcript loss.
 - [ ] The same transcript-critical scenarios pass on both loopback and remote paths.
 - [ ] We have rendered-path automated proof for the key user-facing flows.
-- [ ] New transcript regressions are easier to localize than they are today.
+- [x] New transcript regressions are easier to localize than they are today.
 
 ## Release Gate
 
@@ -203,14 +203,11 @@ The plan is no longer blocked on broad ownership/freshness design. The remaining
 
 Serialized slices:
 
-1. Close or deliberately defer the remaining overlap paths that can still overwrite live state during repair.
-2. Keep the remote commentary gap explicitly deferred until we choose to change the runtime-event/projection contract.
+1. Keep the remote commentary gap explicitly deferred until we choose to change the runtime-event/projection contract.
 
 Parallelizable slices:
 
-1. Add transcript-source diagnostics so a visible change can be attributed to live event, hydrate, or recovery.
-2. Re-run the transcript-critical workflow matrix after each structural change and keep this checklist current.
-3. Clean up symptom-level patches that no longer fit the stabilized overwrite model.
+1. Re-run the transcript-critical workflow matrix after each structural change and keep this checklist current.
 
 ## Orchestrator Notes
 

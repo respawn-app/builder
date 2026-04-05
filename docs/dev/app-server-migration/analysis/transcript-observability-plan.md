@@ -1,6 +1,6 @@
 # Transcript Observability Plan
 
-Status: planned stabilization slice
+Status: implemented stabilization slice
 
 Last updated: 2026-04-05
 
@@ -21,6 +21,11 @@ Suggested log family:
 - `transcript.diag.*`
 
 These diagnostics should be gated behind an explicit debug flag or debug logger path so normal UX is unaffected.
+
+Current enablement:
+
+- `BUILDER_TRANSCRIPT_DIAGNOSTICS=1`
+- UI tests may also enable it with `WithUITranscriptDiagnostics(true)`
 
 ## Common Structured Fields
 
@@ -56,10 +61,12 @@ The exact hashing function is less important than stability across the server/cl
 
 Primary hooks:
 
-- `server/runtimeview/projection.go`
-  - `EventFromRuntime`
-- `server/registry/runtime_registry.go`
-  - event publication path
+- `server/sessionruntime/service.go`
+  - runtime `OnEvent` path before publish
+- `server/runprompt/headless.go`
+  - headless runtime `OnEvent` path before publish
+- `server/runprompt/logger.go`
+  - shared formatting helpers for projection/publish diagnostics
 
 Emit:
 
@@ -114,6 +121,8 @@ Purpose:
 
 Primary hooks:
 
+- `cli/app/ui_transcript_diag.go`
+  - shared frontend diagnostic formatting helpers
 - `cli/app/ui_runtime_adapter.go`
   - projected event apply path
   - transcript-entry append path
@@ -162,5 +171,19 @@ Implement it as:
 2. one gated diagnostic logger family
 3. the hook points above
 4. explicit reject/apply reasons for transcript-page decisions
+
+Implemented files:
+
+- `shared/transcriptdiag/diag.go`
+- `cli/app/ui.go`
+- `cli/app/ui_transcript_diag.go`
+- `cli/app/ui_runtime_adapter.go`
+- `cli/app/ui_runtime_sync.go`
+- `cli/app/ui_runtime_client.go`
+- `cli/app/session_activity_channel.go`
+- `server/runprompt/logger.go`
+- `server/runprompt/headless.go`
+- `server/sessionruntime/service.go`
+- `cli/app/ui_transcript_diag_test.go`
 
 Do not broaden this into generic TUI logging.

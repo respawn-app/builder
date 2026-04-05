@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strconv"
 	"strings"
 
 	"builder/cli/tui"
@@ -9,6 +10,7 @@ import (
 	patchformat "builder/server/tools/patch/format"
 	"builder/shared/clientui"
 	"builder/shared/transcript"
+	"builder/shared/transcriptdiag"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -50,6 +52,11 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 		m.activity == uiActivityRunning,
 		evt,
 	)
+	m.logTranscriptEventDiag("transcript.diag.client.apply_event", evt, map[string]string{
+		"path":                  "live_event",
+		"sync_session_view":     strconv.FormatBool(update.SyncSessionView),
+		"record_prompt_history": strconv.FormatBool(update.RecordPromptHistory),
+	})
 	a.applyRuntimeEventUpdate(update)
 	cmds := make([]tea.Cmd, 0, 4)
 	transcriptMutated := false
@@ -140,7 +147,7 @@ func (a uiRuntimeAdapter) applyRuntimeEventUpdate(update clientui.RuntimeEventUp
 		m.activity = uiActivityIdle
 	}
 	if update.RefreshProcesses {
-		m.refreshProcessEntries()
+		m.refreshProcessEntriesIfOpen()
 	}
 }
 
@@ -154,8 +161,18 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 
 func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(entries []clientui.ChatEntry, flushNativeHistory bool) (tea.Cmd, bool) {
 	m := a.model
+	incomingCount := len(entries)
 	entries = trimProjectedTranscriptOverlap(m.transcriptEntries, entries)
+	trimmedOverlap := incomingCount - len(entries)
 	if len(entries) == 0 {
+		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.append_entries", map[string]string{
+			"session_id":            strings.TrimSpace(m.sessionID),
+			"mode":                  m.transcriptModeLabel(),
+			"path":                  "live_event",
+			"incoming_count":        strconv.Itoa(incomingCount),
+			"trimmed_overlap_count": strconv.Itoa(trimmedOverlap),
+			"applied_count":         "0",
+		}))
 		return nil, false
 	}
 	m.transcriptLiveDirty = true
@@ -188,8 +205,33 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(entries []clientui.Cha
 		m.forwardToView(tui.SetOngoingScrollMsg{Scroll: m.view.OngoingScroll()})
 	}
 	if !flushNativeHistory {
+		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.append_entries", map[string]string{
+			"session_id":            strings.TrimSpace(m.sessionID),
+			"mode":                  m.transcriptModeLabel(),
+			"path":                  "live_event",
+			"incoming_count":        strconv.Itoa(incomingCount),
+			"trimmed_overlap_count": strconv.Itoa(trimmedOverlap),
+			"applied_count":         strconv.Itoa(len(entries)),
+			"start_offset":          strconv.Itoa(startOffset),
+			"entries_digest":        transcriptdiag.EntriesDigest(entries),
+			"transcript_revision":   strconv.FormatInt(m.transcriptRevision, 10),
+			"transcript_total":      strconv.Itoa(m.transcriptTotalEntries),
+		}))
 		return nil, true
 	}
+	m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.append_entries", map[string]string{
+		"session_id":            strings.TrimSpace(m.sessionID),
+		"mode":                  m.transcriptModeLabel(),
+		"path":                  "live_event",
+		"incoming_count":        strconv.Itoa(incomingCount),
+		"trimmed_overlap_count": strconv.Itoa(trimmedOverlap),
+		"applied_count":         strconv.Itoa(len(entries)),
+		"start_offset":          strconv.Itoa(startOffset),
+		"entries_digest":        transcriptdiag.EntriesDigest(entries),
+		"transcript_revision":   strconv.FormatInt(m.transcriptRevision, 10),
+		"transcript_total":      strconv.Itoa(m.transcriptTotalEntries),
+		"native_history_sync":   "true",
+	}))
 	return m.syncNativeHistoryFromTranscript(), true
 }
 
@@ -240,6 +282,7 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptPage(page clientui.TranscriptP
 
 func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPageRequest, page clientui.TranscriptPage) tea.Cmd {
 	m := a.model
+	m.logTranscriptPageDiag("transcript.diag.client.apply_page_start", req, page, map[string]string{"path": "hydrate"})
 	if len(m.startupCmds) > 0 {
 		m.startupCmds = nil
 		m.nativeProjection = tui.TranscriptProjection{}
@@ -263,7 +306,8 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPage
 	if pageReq.Window == clientui.TranscriptWindowDefault && transcriptPageLooksLikeOngoingTail(page) && m.view.Mode() == tui.ModeOngoing {
 		pageReq.Window = clientui.TranscriptWindowOngoingTail
 	}
-	if shouldRejectTranscriptPageReplacement(m, pageReq, page) {
+	if reason := transcriptPageReplacementRejectReason(m, pageReq, page); reason != "" {
+		m.logTranscriptPageDiag("transcript.diag.client.apply_page_reject", pageReq, page, map[string]string{"path": "hydrate", "reason": reason})
 		if previousWindowTitle != m.windowTitle() {
 			return tea.SetWindowTitle(m.windowTitle())
 		}
@@ -336,6 +380,14 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPage
 	if shouldSyncNativeHistory {
 		cmds = append(cmds, m.syncNativeHistoryFromTranscript())
 	}
+	m.logTranscriptPageDiag("transcript.diag.client.apply_page_commit", pageReq, page, map[string]string{
+		"path":                      "hydrate",
+		"branch":                    transcriptPageApplyBranch(pageReq, m),
+		"preserve_live_reasoning":   strconv.FormatBool(preserveLiveReasoning),
+		"transcript_revision_after": strconv.FormatInt(m.transcriptRevision, 10),
+		"transcript_total_after":    strconv.Itoa(m.transcriptTotalEntries),
+		"native_history_sync":       strconv.FormatBool(shouldSyncNativeHistory),
+	})
 	if previousWindowTitle != m.windowTitle() {
 		cmds = append(cmds, tea.SetWindowTitle(m.windowTitle()))
 	}
@@ -343,23 +395,34 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPage
 }
 
 func shouldRejectTranscriptPageReplacement(m *uiModel, req clientui.TranscriptPageRequest, page clientui.TranscriptPage) bool {
+	return transcriptPageReplacementRejectReason(m, req, page) != ""
+}
+
+func transcriptPageReplacementRejectReason(m *uiModel, req clientui.TranscriptPageRequest, page clientui.TranscriptPage) string {
 	if m == nil || page.Revision <= 0 {
-		return false
+		return ""
 	}
 	if page.Revision < m.transcriptRevision {
-		return true
+		return "stale_revision"
 	}
 	replacesOngoingTail := req.Window == clientui.TranscriptWindowOngoingTail || (req == (clientui.TranscriptPageRequest{}) && m.view.Mode() != tui.ModeDetail)
 	if !replacesOngoingTail {
-		return false
+		return ""
 	}
 	if m.transcriptLiveDirty && page.Revision <= m.transcriptRevision {
-		return true
+		return "live_dirty_same_or_older_revision"
 	}
 	if page.Revision == m.transcriptRevision && strings.TrimSpace(m.view.OngoingStreamingText()) != "" && strings.TrimSpace(page.Ongoing) == "" {
-		return true
+		return "same_revision_would_clear_ongoing"
 	}
-	return false
+	return ""
+}
+
+func transcriptPageApplyBranch(req clientui.TranscriptPageRequest, m *uiModel) string {
+	if req.Window == clientui.TranscriptWindowOngoingTail || (req == (clientui.TranscriptPageRequest{}) && m != nil && m.view.Mode() != tui.ModeDetail) {
+		return "ongoing_tail_replace"
+	}
+	return "detail_merge"
 }
 
 func shouldPreserveLiveReasoning(m *uiModel, page clientui.TranscriptPage) bool {
