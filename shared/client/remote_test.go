@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"builder/shared/clientui"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
 	"golang.org/x/net/websocket"
@@ -124,6 +125,67 @@ func TestRemoteSessionActivitySubscriptionNextHonorsCanceledContext(t *testing.T
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for Next to honor cancellation")
+	}
+}
+
+func TestRemoteSessionActivitySubscriptionPreservesTranscriptEntries(t *testing.T) {
+	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
+		defer func() { _ = ws.Close() }()
+		var req protocol.Request
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1", ProjectID: "project-1"}})); err != nil {
+			return
+		}
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.AttachResponse{Kind: "session", SessionID: "session-1"})); err != nil {
+			return
+		}
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.SubscribeResponse{})); err != nil {
+			return
+		}
+		evt := protocol.SessionActivityEventParams{Event: clientui.Event{
+			Kind: clientui.EventToolCallStarted,
+			TranscriptEntries: []clientui.ChatEntry{{
+				Role:       "tool_call",
+				Text:       "pwd",
+				ToolCallID: "call-1",
+			}},
+		}}
+		_ = websocket.JSON.Send(ws, protocol.Request{JSONRPC: protocol.JSONRPCVersion, Method: protocol.MethodSessionActivityEvent, Params: mustJSON(t, evt)})
+	}))
+	defer server.Close()
+
+	remote, err := DialRemote(context.Background(), protocol.DiscoveryRecord{RPCURL: "ws" + server.URL[len("http"):], Identity: protocol.ServerIdentity{ProjectID: "project-1"}})
+	if err != nil {
+		t.Fatalf("DialRemote: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	sub, err := remote.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	evt, err := sub.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	if evt.Kind != clientui.EventToolCallStarted {
+		t.Fatalf("event kind = %q, want %q", evt.Kind, clientui.EventToolCallStarted)
+	}
+	if len(evt.TranscriptEntries) != 1 {
+		t.Fatalf("transcript entries len = %d, want 1", len(evt.TranscriptEntries))
+	}
+	if evt.TranscriptEntries[0].Role != "tool_call" || evt.TranscriptEntries[0].Text != "pwd" {
+		t.Fatalf("unexpected transcript entry: %+v", evt.TranscriptEntries[0])
 	}
 }
 

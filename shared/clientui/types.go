@@ -27,15 +27,16 @@ const (
 )
 
 type Event struct {
-	Kind             EventKind
-	StepID           string
-	Error            string
-	AssistantDelta   string
-	ReasoningDelta   *ReasoningDelta
-	UserMessage      string
-	UserMessageBatch []string
-	RunState         *RunState
-	Background       *BackgroundShellEvent
+	Kind              EventKind
+	StepID            string
+	Error             string
+	AssistantDelta    string
+	ReasoningDelta    *ReasoningDelta
+	UserMessage       string
+	UserMessageBatch  []string
+	TranscriptEntries []ChatEntry
+	RunState          *RunState
+	Background        *BackgroundShellEvent
 }
 
 type ReasoningDelta struct {

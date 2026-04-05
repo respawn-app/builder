@@ -10,6 +10,7 @@ import (
 	"builder/server/auth"
 	serverbootstrap "builder/server/bootstrap"
 	"builder/server/core"
+	"builder/server/llm"
 	"builder/server/runtime"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
@@ -168,6 +169,26 @@ func TestGatewaySessionActivitySubscriptionStreamsEventsAndCompletion(t *testing
 	}
 	if event.Event.Kind != "conversation_updated" || event.Event.StepID != "step-1" {
 		t.Fatalf("unexpected event: %+v", event.Event)
+	}
+
+	appCore.PublishRuntimeEvent("session-1", runtime.Event{
+		Kind: runtime.EventToolCallStarted,
+		ToolCall: &llm.ToolCall{ID: "call-1", Name: "shell"},
+	})
+	if err := websocket.JSON.Receive(conn, &notif); err != nil {
+		t.Fatalf("receive tool event: %v", err)
+	}
+	if notif.Method != protocol.MethodSessionActivityEvent {
+		t.Fatalf("tool event method = %q", notif.Method)
+	}
+	if err := json.Unmarshal(notif.Params, &event); err != nil {
+		t.Fatalf("decode tool event params: %v", err)
+	}
+	if len(event.Event.TranscriptEntries) != 1 {
+		t.Fatalf("tool transcript entries len = %d, want 1", len(event.Event.TranscriptEntries))
+	}
+	if event.Event.TranscriptEntries[0].Role != "tool_call" {
+		t.Fatalf("tool transcript role = %q, want tool_call", event.Event.TranscriptEntries[0].Role)
 	}
 
 	appCore.UnregisterRuntime("session-1", engine)

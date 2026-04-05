@@ -3,6 +3,7 @@ package runtimeview
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -138,6 +139,31 @@ func TestMainViewFromRuntimeBundlesStatusAndSession(t *testing.T) {
 	}
 }
 
+func TestSessionViewFromRuntimeUsesCommittedEntryMetadata(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "hello"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "local_entry", map[string]any{"role": "system", "text": "local note", "ongoing_text": ""}); err != nil {
+		t.Fatalf("append local entry: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: "warn"}); err != nil {
+		t.Fatalf("append warning message: %v", err)
+	}
+	eng, err := runtime.New(store, projectionFastClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	view := SessionViewFromRuntime(eng)
+	if view.Transcript.CommittedEntryCount != eng.CommittedTranscriptEntryCount() {
+		t.Fatalf("projected committed entry count = %d, engine committed entry count = %d", view.Transcript.CommittedEntryCount, eng.CommittedTranscriptEntryCount())
+	}
+}
+
 func TestChatSnapshotFromRuntimeCopiesEntries(t *testing.T) {
 	toolCall := &transcript.ToolCallMeta{
 		ToolName:    "shell",
@@ -226,5 +252,42 @@ func TestTranscriptPageFromRuntimeUsesOngoingTailWindow(t *testing.T) {
 	}
 	if len(page.Entries) != 500 {
 		t.Fatalf("entries = %d, want 500", len(page.Entries))
+	}
+}
+
+func TestTranscriptPageFromRuntimeUsesPagedSnapshotForOffsetLimit(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	for i := 0; i < 600; i++ {
+		if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: fmt.Sprintf("reply-%03d", i), Phase: llm.MessagePhaseFinal}); err != nil {
+			t.Fatalf("append message %d: %v", i, err)
+		}
+	}
+	eng, err := runtime.New(store, projectionFastClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	page := TranscriptPageFromRuntime(eng, clientui.TranscriptPageRequest{Offset: 550, Limit: 25})
+	if page.TotalEntries != 600 {
+		t.Fatalf("total entries = %d, want 600", page.TotalEntries)
+	}
+	if page.Offset != 550 {
+		t.Fatalf("offset = %d, want 550", page.Offset)
+	}
+	if !page.HasMore || page.NextOffset != 575 {
+		t.Fatalf("unexpected pagination metadata: %+v", page)
+	}
+	if len(page.Entries) != 25 {
+		t.Fatalf("entries = %d, want 25", len(page.Entries))
+	}
+	if first := page.Entries[0].Text; first != "reply-550" {
+		t.Fatalf("first entry = %q, want reply-550", first)
+	}
+	if last := page.Entries[len(page.Entries)-1].Text; last != "reply-574" {
+		t.Fatalf("last entry = %q, want reply-574", last)
 	}
 }

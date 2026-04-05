@@ -35,7 +35,7 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown:
 			m.forwardToView(tea.KeyMsg{Type: msg.Type})
-			return m, nil
+			return m, m.maybeRequestDetailTranscriptPage()
 		case tea.KeyShiftTab, tea.KeyCtrlT:
 			return m, m.toggleTranscriptMode()
 		case tea.KeyCtrlC:

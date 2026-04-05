@@ -65,6 +65,10 @@ type runtimeEventMsg struct {
 	event clientui.Event
 }
 
+type runtimeEventBatchMsg struct {
+	events []clientui.Event
+}
+
 type runtimeMainViewRefreshedMsg struct {
 	token uint64
 	view  clientui.RuntimeMainView
@@ -73,6 +77,7 @@ type runtimeMainViewRefreshedMsg struct {
 
 type runtimeTranscriptRefreshedMsg struct {
 	token      uint64
+	req        clientui.TranscriptPageRequest
 	transcript clientui.TranscriptPage
 	err        error
 }
@@ -80,6 +85,8 @@ type runtimeTranscriptRefreshedMsg struct {
 type runtimeTranscriptRetryMsg struct {
 	token uint64
 }
+
+type detailTranscriptLoadMsg struct{}
 
 type renderDiagnosticMsg struct {
 	diagnostic tui.RenderDiagnostic
@@ -414,6 +421,7 @@ type uiModel struct {
 	debugKeys            bool
 
 	transcriptEntries        []tui.TranscriptEntry
+	detailTranscript         uiDetailTranscriptWindow
 	runtimeMainViewToken     uint64
 	runtimeTranscriptToken   uint64
 	runtimeTranscriptRetry   uint64
@@ -571,6 +579,12 @@ func (m *uiModel) applyRunLoggerDiagnostic(diag runLoggerDiagnostic) tea.Cmd {
 	return m.setTransientStatusWithKind(message, uiStatusNoticeError)
 }
 
+func (m *uiModel) handleRuntimeEventBatch(events []clientui.Event) (*uiModel, tea.Cmd) {
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEventsBatch(events)
+	m.syncViewport()
+	return m, tea.Batch(waitRuntimeEvent(m.runtimeEvents), cmd)
+}
+
 func (m *uiModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		waitRuntimeEvent(m.runtimeEvents),
@@ -686,9 +700,9 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.ClearScreen
 	case runtimeEventMsg:
-		historyCmd := m.runtimeAdapter().handleProjectedRuntimeEvent(msg.event)
-		m.syncViewport()
-		return m, tea.Batch(waitRuntimeEvent(m.runtimeEvents), historyCmd)
+		return m.handleRuntimeEventBatch([]clientui.Event{msg.event})
+	case runtimeEventBatchMsg:
+		return m.handleRuntimeEventBatch(msg.events)
 	case runtimeMainViewRefreshedMsg:
 		cmd := m.handleRuntimeMainViewRefreshed(msg)
 		m.syncViewport()
@@ -702,6 +716,10 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncViewport()
 			return m, nil
 		}
+		cmd := m.requestRuntimeTranscriptSync()
+		m.syncViewport()
+		return m, cmd
+	case detailTranscriptLoadMsg:
 		cmd := m.requestRuntimeTranscriptSync()
 		m.syncViewport()
 		return m, cmd
@@ -859,7 +877,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	m.forwardToView(msg)
 	m.syncViewport()
-	return m, nil
+	return m, m.maybeRequestDetailTranscriptPage()
 }
 
 func (m *uiModel) setDebugKeyTransientStatus(raw tea.Msg, normalized tea.KeyMsg, source string) {
@@ -890,10 +908,14 @@ func statusHasAuthData(snapshot uiStatusSnapshot) bool {
 }
 
 func (m *uiModel) forwardToView(msg tea.Msg) {
+	prevMode := m.view.Mode()
 	next, _ := m.view.Update(msg)
 	casted, ok := next.(tui.Model)
 	if ok {
 		m.view = casted
+	}
+	if prevMode != m.view.Mode() && m.view.Mode() == tui.ModeDetail {
+		m.primeDetailTranscriptFromCurrentTail()
 	}
 }
 
@@ -946,6 +968,22 @@ func (m *uiModel) setTransientStatusWithKind(message string, kind uiStatusNotice
 	return tea.Tick(transientStatusDuration, func(time.Time) tea.Msg {
 		return clearTransientStatusMsg{token: token}
 	})
+}
+
+func batchCmds(cmds ...tea.Cmd) tea.Cmd {
+	filtered := make([]tea.Cmd, 0, len(cmds))
+	for _, cmd := range cmds {
+		if cmd != nil {
+			filtered = append(filtered, cmd)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	if len(filtered) == 1 {
+		return filtered[0]
+	}
+	return tea.Batch(filtered...)
 }
 
 func (m *uiModel) layout() uiViewLayout {

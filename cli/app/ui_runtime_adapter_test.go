@@ -3,8 +3,11 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"builder/cli/tui"
 	"builder/server/llm"
@@ -14,6 +17,7 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/transcript"
+	"builder/shared/transcript/toolcodec"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -116,6 +120,309 @@ func TestApplyChatSnapshotSetsOngoingFromSnapshot(t *testing.T) {
 
 	if got := m.view.OngoingStreamingText(); got != "hello" {
 		t.Fatalf("expected snapshot ongoing text, got %q", got)
+	}
+}
+
+func TestProjectRuntimeEventIncludesReviewerTranscriptEntry(t *testing.T) {
+	evt := projectRuntimeEvent(runtime.Event{
+		Kind: runtime.EventReviewerCompleted,
+		Reviewer: &runtime.ReviewerStatus{
+			Outcome:          "applied",
+			SuggestionsCount: 2,
+		},
+	})
+
+	if len(evt.TranscriptEntries) != 1 {
+		t.Fatalf("expected one transcript entry, got %d", len(evt.TranscriptEntries))
+	}
+	if got := evt.TranscriptEntries[0].Role; got != "reviewer_status" {
+		t.Fatalf("reviewer transcript role = %q, want reviewer_status", got)
+	}
+	if got := evt.TranscriptEntries[0].Text; !strings.Contains(got, "2 suggestions, applied") {
+		t.Fatalf("reviewer transcript text = %q", got)
+	}
+}
+
+func TestProjectRuntimeEventIncludesBackgroundSystemTranscriptEntry(t *testing.T) {
+	evt := projectRuntimeEvent(runtime.Event{
+		Kind: runtime.EventBackgroundUpdated,
+		Background: &runtime.BackgroundShellEvent{
+			Type:        "completed",
+			ID:          "1000",
+			State:       "completed",
+			NoticeText:  "Background shell 1000 completed.\nOutput:\nhello",
+			CompactText: "Background shell 1000 completed",
+		},
+	})
+
+	if len(evt.TranscriptEntries) != 1 {
+		t.Fatalf("expected one transcript entry, got %d", len(evt.TranscriptEntries))
+	}
+	entry := evt.TranscriptEntries[0]
+	if entry.Role != "system" {
+		t.Fatalf("background transcript role = %q, want system", entry.Role)
+	}
+	if !strings.Contains(entry.Text, "Background shell 1000 completed") {
+		t.Fatalf("background transcript text = %q", entry.Text)
+	}
+	if entry.OngoingText != "Background shell 1000 completed" {
+		t.Fatalf("background transcript ongoing = %q", entry.OngoingText)
+	}
+}
+
+func TestHandleProjectedRuntimeEventAppendsTranscriptEntriesImmediately(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
+		Kind:        runtime.EventUserMessageFlushed,
+		StepID:      "step-1",
+		UserMessage: "say hi",
+	}))
+
+	callMeta := transcript.ToolCallMeta{ToolName: "shell", Command: "pwd", CompactText: "pwd", IsShell: true}
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
+		Kind:   runtime.EventToolCallStarted,
+		StepID: "step-1",
+		ToolCall: &llm.ToolCall{
+			ID:           "call-1",
+			Name:         string(tools.ToolShell),
+			Presentation: toolcodec.EncodeToolCallMeta(callMeta),
+		},
+	}))
+
+	if pending := nativePendingToolEntries(m.transcriptEntries); len(pending) != 1 {
+		t.Fatalf("expected pending tool call visible immediately, got %d pending entries", len(pending))
+	}
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
+		Kind:   runtime.EventToolCallCompleted,
+		StepID: "step-1",
+		ToolResult: &tools.Result{
+			CallID: "call-1",
+			Name:   tools.ToolShell,
+			Output: []byte("/tmp"),
+		},
+	}))
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
+		Kind:   runtime.EventAssistantMessage,
+		StepID: "step-1",
+		Message: llm.Message{
+			Role:    llm.RoleAssistant,
+			Content: "**done**",
+			Phase:   llm.MessagePhaseFinal,
+		},
+	}))
+
+	if len(m.transcriptEntries) != 4 {
+		t.Fatalf("expected four transcript entries, got %+v", m.transcriptEntries)
+	}
+	if got := m.transcriptEntries[0].Role; got != "user" {
+		t.Fatalf("entry[0].Role = %q, want user", got)
+	}
+	if got := m.transcriptEntries[1].Role; got != "tool_call" {
+		t.Fatalf("entry[1].Role = %q, want tool_call", got)
+	}
+	if got := m.transcriptEntries[1].Text; got != "pwd" {
+		t.Fatalf("entry[1].Text = %q, want pwd", got)
+	}
+	if got := m.transcriptEntries[2].Role; got != "tool_result_ok" {
+		t.Fatalf("entry[2].Role = %q, want tool_result_ok", got)
+	}
+	if got := m.transcriptEntries[2].Text; !strings.Contains(got, "/tmp") {
+		t.Fatalf("entry[2].Text = %q, want tool output", got)
+	}
+	if got := m.transcriptEntries[3].Role; got != "assistant" {
+		t.Fatalf("entry[3].Role = %q, want assistant", got)
+	}
+	if got := m.transcriptEntries[3].Text; got != "**done**" {
+		t.Fatalf("entry[3].Text = %q, want final assistant text", got)
+	}
+	if pending := nativePendingToolEntries(m.transcriptEntries); len(pending) != 0 {
+		t.Fatalf("expected pending tool call cleared after result, got %d pending entries", len(pending))
+	}
+	if loaded := m.view.LoadedTranscriptEntries(); len(loaded) != 4 {
+		t.Fatalf("view loaded transcript length = %d, want 4", len(loaded))
+	}
+}
+
+func TestRuntimeEventBatchCoalescesCommittedNativeFlushAndPreservesOrder(t *testing.T) {
+	m := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), nil,
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
+	)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	_ = collectCmdMessages(t, startupCmd)
+
+	callMeta := transcript.ToolCallMeta{ToolName: "shell", Command: "pwd", CompactText: "pwd", IsShell: true}
+	firstBatch := []clientui.Event{
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventRunStateChanged, RunState: &runtime.RunState{Busy: true}}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, StepID: "step-1", UserMessage: "say hi"}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventReviewerCompleted, StepID: "step-1", Reviewer: &runtime.ReviewerStatus{Outcome: "applied", SuggestionsCount: 2}}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventBackgroundUpdated, StepID: "step-1", Background: &runtime.BackgroundShellEvent{Type: "completed", ID: "1000", State: "completed", NoticeText: "Background shell 1000 completed.\nOutput:\nhello", CompactText: "Background shell 1000 completed"}}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1", ToolCall: &llm.ToolCall{ID: "call_1", Name: string(tools.ToolShell), Presentation: toolcodec.EncodeToolCallMeta(callMeta)}}),
+	}
+	updated, cmd := m.Update(runtimeEventBatchMsg{events: firstBatch})
+	m = updated.(*uiModel)
+	msgs := collectCmdMessages(t, cmd)
+	flushes := make([]nativeHistoryFlushMsg, 0)
+	for _, msg := range msgs {
+		flush, ok := msg.(nativeHistoryFlushMsg)
+		if ok {
+			flushes = append(flushes, flush)
+		}
+	}
+	if len(flushes) != 1 {
+		t.Fatalf("expected exactly one committed native flush for mixed batch, got %d msgs=%T", len(flushes), msgs)
+	}
+	plain := stripANSIPreserve(flushes[0].Text)
+	if !containsInOrder(plain, "say hi", "Supervisor ran", "Background shell 1000 completed") {
+		t.Fatalf("expected coalesced flush to preserve committed order, got %q", plain)
+	}
+	if strings.Contains(plain, "pwd") {
+		t.Fatalf("expected pending tool call to stay out of committed flush, got %q", plain)
+	}
+	if view := stripANSIPreserve(m.View()); !strings.Contains(view, "pwd") {
+		t.Fatalf("expected pending tool call still visible in live region, got %q", view)
+	}
+}
+
+func TestRuntimeEventBatchDoesNotSequenceNativeFlushBehindTransientStatusTimer(t *testing.T) {
+	m := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), nil,
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
+	)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	_ = collectCmdMessages(t, startupCmd)
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEventsBatch([]clientui.Event{
+		projectRuntimeEvent(runtime.Event{
+			Kind:   runtime.EventBackgroundUpdated,
+			StepID: "step-1",
+			Background: &runtime.BackgroundShellEvent{
+				Type:        "completed",
+				ID:          "1000",
+				State:       "completed",
+				NoticeText:  "Background shell 1000 completed.\nOutput:\nhello",
+				CompactText: "Background shell 1000 completed",
+			},
+		}),
+	})
+	if cmd == nil {
+		t.Fatal("expected runtime event batch command")
+	}
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("expected runtime event batch to compose with tea.Batch, got %T", cmd())
+	}
+	flushFound := false
+	for _, child := range batch {
+		msg, immediate := immediateCmdMsg(child, 20*time.Millisecond)
+		if !immediate {
+			continue
+		}
+		flush, ok := msg.(nativeHistoryFlushMsg)
+		if !ok {
+			continue
+		}
+		if strings.Contains(stripANSIPreserve(flush.Text), "Background shell 1000 completed") {
+			flushFound = true
+			break
+		}
+	}
+	if !flushFound {
+		t.Fatal("expected immediate native history flush to be present alongside delayed transient-status timer")
+	}
+}
+
+func immediateCmdMsg(cmd tea.Cmd, timeout time.Duration) (tea.Msg, bool) {
+	if cmd == nil {
+		return nil, false
+	}
+	ch := make(chan tea.Msg, 1)
+	go func() {
+		ch <- cmd()
+	}()
+	select {
+	case msg := <-ch:
+		return msg, true
+	case <-time.After(timeout):
+		return nil, false
+	}
+}
+
+func TestHandleProjectedRuntimeEventSkipsAlreadyHydratedAssistantEntry(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "same", Phase: llm.MessagePhaseFinal}}
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
+		Kind:   runtime.EventAssistantMessage,
+		StepID: "step-1",
+		Message: llm.Message{
+			Role:    llm.RoleAssistant,
+			Content: "same",
+			Phase:   llm.MessagePhaseFinal,
+		},
+	}))
+
+	if len(m.transcriptEntries) != 1 {
+		t.Fatalf("expected duplicate hydrated assistant entry to be skipped, got %+v", m.transcriptEntries)
+	}
+}
+
+func TestHandleProjectedRuntimeEventAppendsCompactionCleanupAndBackgroundEntriesImmediately(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
+		Kind:   runtime.EventCompactionCompleted,
+		StepID: "step-1",
+		Compaction: &runtime.CompactionStatus{
+			Mode:  "auto",
+			Count: 2,
+		},
+	}))
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
+		Kind:   runtime.EventCompactionFailed,
+		StepID: "step-1",
+		Compaction: &runtime.CompactionStatus{
+			Mode:  "manual",
+			Error: "quota exceeded",
+		},
+	}))
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
+		Kind:   runtime.EventInFlightClearFailed,
+		StepID: "step-1",
+		Error:  "mark in-flight false",
+	}))
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
+		Kind: runtime.EventBackgroundUpdated,
+		Background: &runtime.BackgroundShellEvent{
+			Type:        "completed",
+			ID:          "1000",
+			State:       "completed",
+			NoticeText:  "Background shell 1000 completed.\nNo output",
+			CompactText: "Background shell 1000 completed",
+		},
+	}))
+
+	if len(m.transcriptEntries) != 4 {
+		t.Fatalf("expected four immediate transcript entries, got %+v", m.transcriptEntries)
+	}
+	if got := m.transcriptEntries[0].Role; got != "compaction_notice" {
+		t.Fatalf("entry[0].Role = %q, want compaction_notice", got)
+	}
+	if got := m.transcriptEntries[1].Role; got != "error" {
+		t.Fatalf("entry[1].Role = %q, want error", got)
+	}
+	if got := m.transcriptEntries[2].Role; got != "error" {
+		t.Fatalf("entry[2].Role = %q, want error", got)
+	}
+	if got := m.transcriptEntries[3].Role; got != "system" {
+		t.Fatalf("entry[3].Role = %q, want system", got)
+	}
+	if got := m.transcriptEntries[3].OngoingText; got != "Background shell 1000 completed" {
+		t.Fatalf("background ongoing text = %q", got)
 	}
 }
 
@@ -249,7 +556,7 @@ func TestSyncConversationFromEngineRetriesAfterRefreshError(t *testing.T) {
 	}
 }
 
-func TestApplyProjectedTranscriptPageMergesTailSliceWithoutDroppingExistingEntries(t *testing.T) {
+func TestApplyProjectedTranscriptPageReplacesOngoingTailWindow(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	seed := []tui.TranscriptEntry{
 		{Role: "user", Text: "prompt"},
@@ -273,11 +580,8 @@ func TestApplyProjectedTranscriptPageMergesTailSliceWithoutDroppingExistingEntri
 	}
 
 	plain := stripANSIAndTrimRight(m.view.OngoingSnapshot())
-	if !strings.Contains(plain, "prompt") {
-		t.Fatalf("expected merged transcript to keep earlier user entry, got %q", plain)
-	}
-	if !strings.Contains(plain, "pwd") {
-		t.Fatalf("expected merged transcript to keep earlier tool call, got %q", plain)
+	if strings.Contains(plain, "prompt") || strings.Contains(plain, "pwd") {
+		t.Fatalf("expected bounded tail window to replace stale earlier entries, got %q", plain)
 	}
 	if !strings.Contains(plain, "done") {
 		t.Fatalf("expected merged transcript to keep tail entry, got %q", plain)
@@ -309,6 +613,72 @@ func TestApplyProjectedTranscriptPageReplacesTranscriptWhenPageIsComplete(t *tes
 	}
 	if !strings.Contains(plain, "new") {
 		t.Fatalf("expected complete page to render new transcript, got %q", plain)
+	}
+}
+
+func TestApplyRuntimeTranscriptPageSkipsDuplicateDetailRefresh(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 12
+	m.windowSizeKnown = true
+	page := clientui.TranscriptPage{SessionID: "session-1", Offset: 300, TotalEntries: 500}
+	for i := 0; i < 200; i++ {
+		page.Entries = append(page.Entries, clientui.ChatEntry{Role: "assistant", Text: fmt.Sprintf("line %03d", 300+i)})
+	}
+	entries := transcriptEntriesFromPage(page)
+	m.detailTranscript.replace(page)
+	m.forwardToView(tui.SetConversationMsg{BaseOffset: page.Offset, TotalEntries: page.TotalEntries, Entries: entries})
+	m.forwardToView(tui.SetModeMsg{Mode: tui.ModeDetail, SkipDetailWarmup: true})
+	m.syncViewport()
+
+	cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Offset: page.Offset, Limit: len(page.Entries)}, page)
+	if cmd != nil {
+		if msg := cmd(); msg != nil {
+			t.Fatalf("expected duplicate detail page refresh to be skipped, got %T", msg)
+		}
+	}
+	if m.view.TranscriptBaseOffset() != page.Offset || m.view.TranscriptTotalEntries() != page.TotalEntries {
+		t.Fatalf("detail transcript metadata changed unexpectedly: base=%d total=%d", m.view.TranscriptBaseOffset(), m.view.TranscriptTotalEntries())
+	}
+}
+
+func TestApplyRuntimeTranscriptPageInDetailModeDoesNotRebuildNativeHistoryState(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	ongoingPage := clientui.TranscriptPage{SessionID: "session-1", Offset: 300, TotalEntries: 500}
+	for i := 0; i < 200; i++ {
+		ongoingPage.Entries = append(ongoingPage.Entries, clientui.ChatEntry{Role: "assistant", Text: fmt.Sprintf("tail %03d", 300+i)})
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, ongoingPage); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	baselineProjection := m.nativeProjection
+	baselineRenderedProjection := m.nativeRenderedProjection
+	baselineRenderedSnapshot := m.nativeRenderedSnapshot
+	baselineFlushedEntryCount := m.nativeFlushedEntryCount
+
+	m.forwardToView(tui.SetModeMsg{Mode: tui.ModeDetail, SkipDetailWarmup: true})
+	detailPage := clientui.TranscriptPage{SessionID: "session-1", Offset: 0, TotalEntries: 500}
+	for i := 0; i < 250; i++ {
+		detailPage.Entries = append(detailPage.Entries, clientui.ChatEntry{Role: "assistant", Text: fmt.Sprintf("history %03d", i)})
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Offset: 0, Limit: 250}, detailPage); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	if !reflect.DeepEqual(m.nativeProjection, baselineProjection) {
+		t.Fatal("detail transcript apply unexpectedly changed native projection state")
+	}
+	if !reflect.DeepEqual(m.nativeRenderedProjection, baselineRenderedProjection) {
+		t.Fatal("detail transcript apply unexpectedly changed rendered native projection state")
+	}
+	if m.nativeRenderedSnapshot != baselineRenderedSnapshot {
+		t.Fatalf("detail transcript apply changed rendered native snapshot: %q -> %q", baselineRenderedSnapshot, m.nativeRenderedSnapshot)
+	}
+	if m.nativeFlushedEntryCount != baselineFlushedEntryCount {
+		t.Fatalf("detail transcript apply changed native flushed entry count: %d -> %d", baselineFlushedEntryCount, m.nativeFlushedEntryCount)
 	}
 }
 
@@ -517,46 +887,24 @@ func TestApplyChatSnapshotShowsMixedParallelPendingStatesInLiveView(t *testing.T
 }
 
 func TestUserMessageFlushedSyncsConversationForNativeReplay(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	client := &runtimeAdapterFakeClient{responses: []llm.Response{
-		{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "first"}},
-		{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "second"}},
-	}}
-	eng, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
-
-	m := newProjectedEngineUIModel(eng)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 100
 	m.termHeight = 20
 	m.windowSizeKnown = true
 
-	eng.QueueUserMessage("steered message")
-	if _, err := eng.SubmitUserMessage(context.Background(), "initial user"); err != nil {
-		t.Fatalf("submit user message: %v", err)
-	}
-
 	cmd := m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, UserMessage: "steered message"})
 	if cmd == nil {
-		t.Fatal("expected conversation sync command for flushed user message")
+		t.Fatal("expected native replay command for flushed user message")
 	}
-	refreshMsg, ok := cmd().(runtimeTranscriptRefreshedMsg)
+	flushMsg, ok := cmd().(nativeHistoryFlushMsg)
 	if !ok {
-		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", cmd())
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
 	}
-	next, flushCmd := m.Update(refreshMsg)
-	m = next.(*uiModel)
-	if flushCmd == nil {
-		t.Fatal("expected native replay command after conversation sync")
+	if got := len(m.transcriptEntries); got != 1 {
+		t.Fatalf("expected immediate transcript append, got %d entries", got)
 	}
-	flushMsg, ok := flushCmd().(nativeHistoryFlushMsg)
-	if !ok {
-		t.Fatalf("expected nativeHistoryFlushMsg, got %T", flushCmd())
+	if got := m.transcriptEntries[0].Text; got != "steered message" {
+		t.Fatalf("transcript entry text = %q, want steered message", got)
 	}
 	if !strings.Contains(stripANSIPreserve(flushMsg.Text), "steered message") {
 		t.Fatalf("expected flushed replay text to include steered message, got %q", flushMsg.Text)
@@ -564,64 +912,20 @@ func TestUserMessageFlushedSyncsConversationForNativeReplay(t *testing.T) {
 }
 
 func TestUserMessageFlushedAfterConversationUpdatedDoesNotDuplicateNativeReplay(t *testing.T) {
-	dir := t.TempDir()
-	store, err := session.Create(dir, "ws", dir)
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
-	client := &runtimeAdapterFakeClient{responses: []llm.Response{
-		{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "first"}},
-		{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "second"}},
-	}}
-	eng, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("new engine: %v", err)
-	}
-
-	m := newProjectedEngineUIModel(eng)
+	m := newProjectedStaticUIModel()
 	m.termWidth = 100
 	m.termHeight = 20
 	m.windowSizeKnown = true
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "user", Text: "steered message"}}
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
-	eng.QueueUserMessage("steered message")
-	if _, err := eng.SubmitUserMessage(context.Background(), "initial user"); err != nil {
-		t.Fatalf("submit user message: %v", err)
+	cmd := m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, UserMessage: "steered message"})
+	if len(m.transcriptEntries) != 1 {
+		t.Fatalf("expected duplicate flushed user message to be skipped, got %+v", m.transcriptEntries)
 	}
-
-	conversationCmd := m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventConversationUpdated})
-	if conversationCmd == nil {
-		t.Fatal("expected conversation sync command")
-	}
-	refreshMsg, ok := conversationCmd().(runtimeTranscriptRefreshedMsg)
-	if !ok {
-		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", conversationCmd())
-	}
-	next, flushCmd := m.Update(refreshMsg)
-	m = next.(*uiModel)
-	if flushCmd == nil {
-		t.Fatal("expected native replay command after conversation sync")
-	}
-	conversationFlush, ok := flushCmd().(nativeHistoryFlushMsg)
-	if !ok {
-		t.Fatalf("expected nativeHistoryFlushMsg, got %T", flushCmd())
-	}
-	if !strings.Contains(stripANSIPreserve(conversationFlush.Text), "steered message") {
-		t.Fatalf("expected conversation replay text to include steered message, got %q", conversationFlush.Text)
-	}
-
-	flushCmd = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, UserMessage: "steered message"})
-	if flushCmd == nil {
-		return
-	}
-	secondRefresh, ok := flushCmd().(runtimeTranscriptRefreshedMsg)
-	if !ok {
-		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", flushCmd())
-	}
-	next, duplicateFlush := m.Update(secondRefresh)
-	m = next.(*uiModel)
-	if duplicateFlush != nil {
-		if _, ok := duplicateFlush().(nativeHistoryFlushMsg); ok {
-			t.Fatal("expected no duplicate native replay after already-synced conversation")
+	if cmd != nil {
+		if _, ok := cmd().(nativeHistoryFlushMsg); ok {
+			t.Fatal("expected no duplicate native replay after already-visible user message")
 		}
 	}
 }

@@ -203,20 +203,7 @@ func (l uiViewLayout) renderNativeStreamingLines(width, maxLines int, style uiSt
 	}
 	lines = append(lines, pendingLines...)
 	if strings.TrimSpace(streamText) != "" {
-		streamLines := splitPlainLines(streamText)
-		if len(streamLines) > 0 && strings.TrimSpace(streamLines[len(streamLines)-1]) == "" {
-			streamLines = streamLines[:len(streamLines)-1]
-		}
-		for lineIndex, line := range streamLines {
-			for _, wrapped := range wrapLine(line, width) {
-				prefix := "  "
-				if lineIndex == 0 {
-					prefix = "❮ "
-				}
-				rendered := prefix + wrapped
-				lines = append(lines, style.chat.Render(padRight(rendered, width)))
-			}
-		}
+		lines = append(lines, renderNativeStreamingAssistantLines(streamText, l.model.theme, width)...)
 	}
 	if strings.TrimSpace(errText) != "" {
 		for _, line := range splitPlainLines(errText) {
@@ -246,6 +233,29 @@ func (l uiViewLayout) renderNativeStreamingLines(width, maxLines int, style uiSt
 		return result
 	}
 	return lines[len(lines)-maxLines:]
+}
+
+func renderNativeStreamingAssistantLines(streamText, theme string, width int) []string {
+	_ = theme
+	trimmed := strings.TrimSpace(streamText)
+	if trimmed == "" {
+		return nil
+	}
+	rawLines := splitPlainLines(streamText)
+	if len(rawLines) > 0 && strings.TrimSpace(rawLines[len(rawLines)-1]) == "" {
+		rawLines = rawLines[:len(rawLines)-1]
+	}
+	lines := make([]string, 0, len(rawLines))
+	for lineIndex, line := range rawLines {
+		for _, wrapped := range wrapLine(line, width) {
+			prefix := "  "
+			if lineIndex == 0 {
+				prefix = "❮ "
+			}
+			lines = append(lines, prefix+wrapped)
+		}
+	}
+	return lines
 }
 
 func (l uiViewLayout) renderNativePendingLines(width int) []string {

@@ -172,6 +172,35 @@ func TestChatStoreSnapshotPreservesLocalEntryOngoingText(t *testing.T) {
 	}
 }
 
+func TestChatStoreTranscriptPageSnapshotCollectsRequestedWindow(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "u1"})
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "a1"})
+	s.appendLocalEntry("system", "note")
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "u2"})
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "a2"})
+
+	page := s.transcriptPageSnapshot(1, 3)
+	if page.TotalEntries != 5 {
+		t.Fatalf("total entries = %d, want 5", page.TotalEntries)
+	}
+	if page.Offset != 1 {
+		t.Fatalf("offset = %d, want 1", page.Offset)
+	}
+	if len(page.Snapshot.Entries) != 3 {
+		t.Fatalf("entries = %d, want 3", len(page.Snapshot.Entries))
+	}
+	if page.Snapshot.Entries[0].Role != "assistant" || page.Snapshot.Entries[0].Text != "a1" {
+		t.Fatalf("unexpected first page entry: %+v", page.Snapshot.Entries[0])
+	}
+	if page.Snapshot.Entries[1].Role != "system" || page.Snapshot.Entries[1].Text != "note" {
+		t.Fatalf("unexpected local page entry: %+v", page.Snapshot.Entries[1])
+	}
+	if page.Snapshot.Entries[2].Role != "user" || page.Snapshot.Entries[2].Text != "u2" {
+		t.Fatalf("unexpected trailing page entry: %+v", page.Snapshot.Entries[2])
+	}
+}
+
 func TestFormatToolOutputPreservesNumberedPrefixes(t *testing.T) {
 	out := tools.FormatGenericOutput(json.RawMessage(`{"output":"  1\talpha\n  2\tbeta\n  3\tgamma","exit_code":0}`))
 	if !strings.Contains(out, "1\talpha") || !strings.Contains(out, "2\tbeta") || !strings.Contains(out, "3\tgamma") {
@@ -736,5 +765,59 @@ func TestChatStoreProviderHistoryUsesMostRecentCompactionCheckpoint(t *testing.T
 	}
 	if items[0].Content != "summary-2" || items[1].Content != "after" {
 		t.Fatalf("expected latest replacement + tail, got %+v", items)
+	}
+}
+
+func TestChatStoreCommittedEntryCountTracksVisibleTranscript(t *testing.T) {
+	s := newChatStore()
+	if got := s.committedEntryCount(); got != 0 {
+		t.Fatalf("initial committed entry count = %d, want 0", got)
+	}
+
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "hello"})
+	if got := s.committedEntryCount(); got != 1 {
+		t.Fatalf("after user message committed entry count = %d, want 1", got)
+	}
+
+	call := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)})
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call}})
+	if got := s.committedEntryCount(); got != 2 {
+		t.Fatalf("after assistant tool call committed entry count = %d, want 2", got)
+	}
+
+	s.recordToolCompletion(tools.Result{CallID: "call-1", Name: tools.ToolShell, Output: json.RawMessage(`{"output":"/tmp"}`)})
+	if got := s.committedEntryCount(); got != 3 {
+		t.Fatalf("after synthesized tool result committed entry count = %d, want 3", got)
+	}
+
+	s.appendMessage(llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(tools.ToolShell), Content: `{"output":"/tmp"}`})
+	if got := s.committedEntryCount(); got != 3 {
+		t.Fatalf("materialized tool result should not double count, got %d want 3", got)
+	}
+
+	s.appendLocalEntry("system", "note")
+	if got := s.committedEntryCount(); got != 4 {
+		t.Fatalf("after local entry committed entry count = %d, want 4", got)
+	}
+
+	if got := len(s.snapshot().Entries); got != s.committedEntryCount() {
+		t.Fatalf("snapshot entry count = %d, committed entry count = %d", got, s.committedEntryCount())
+	}
+}
+
+func TestChatStoreCommittedEntryCountRebuildsAfterRestoreHistoryItems(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "before"})
+	s.appendLocalEntry("system", "local note")
+	s.restoreHistoryItems(llm.ItemsFromMessages([]llm.Message{
+		{Role: llm.RoleAssistant, Content: "after"},
+		{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: "warn"},
+	}))
+
+	if got := s.committedEntryCount(); got != 3 {
+		t.Fatalf("committed entry count after restore = %d, want 3", got)
+	}
+	if got := len(s.snapshot().Entries); got != s.committedEntryCount() {
+		t.Fatalf("snapshot entry count = %d, committed entry count = %d", got, s.committedEntryCount())
 	}
 }

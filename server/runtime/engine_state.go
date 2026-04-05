@@ -31,11 +31,25 @@ func (e *Engine) OngoingTailTranscriptWindow(maxEntries int) TranscriptWindowSna
 	return e.chat.ongoingTailSnapshot(maxEntries)
 }
 
+func (e *Engine) TranscriptPageSnapshot(offset, limit int) transcriptPageSnapshot {
+	if e == nil || e.chat == nil {
+		return transcriptPageSnapshot{}
+	}
+	return e.chat.transcriptPageSnapshot(offset, limit)
+}
+
 func (e *Engine) TranscriptRevision() int64 {
 	if e == nil || e.store == nil {
 		return 0
 	}
 	return e.store.Meta().LastSequence
+}
+
+func (e *Engine) CommittedTranscriptEntryCount() int {
+	if e == nil || e.chat == nil {
+		return 0
+	}
+	return e.chat.committedEntryCount()
 }
 
 func (e *Engine) ActiveRun() *RunSnapshot {
@@ -46,24 +60,10 @@ func (e *Engine) ActiveRun() *RunSnapshot {
 }
 
 func (e *Engine) LastCommittedAssistantFinalAnswer() string {
-	messages := e.chat.snapshotMessages()
-	for idx := len(messages) - 1; idx >= 0; idx-- {
-		message := messages[idx]
-		if shouldSkipTrailingAssistantHandoffMessage(message) {
-			continue
-		}
-		if message.Role != llm.RoleAssistant {
-			return ""
-		}
-		if message.Phase != llm.MessagePhaseFinal {
-			return ""
-		}
-		if strings.TrimSpace(message.Content) == "" {
-			return ""
-		}
-		return message.Content
+	if e == nil || e.chat == nil {
+		return ""
 	}
-	return ""
+	return e.chat.cachedLastCommittedAssistantFinalAnswer()
 }
 
 func shouldSkipTrailingAssistantHandoffMessage(message llm.Message) bool {

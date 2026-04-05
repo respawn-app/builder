@@ -14,8 +14,10 @@ import (
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/transcript"
+	"builder/shared/transcript/toolcodec"
 
 	tea "github.com/charmbracelet/bubbletea"
 	xansi "github.com/charmbracelet/x/ansi"
@@ -1042,6 +1044,108 @@ func TestNativeProgramKeepsPendingToolTailLiveOnlyUntilCompletion(t *testing.T) 
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("program did not terminate")
+	}
+}
+
+func TestNativeProgramRendersMixedRuntimeEventsFromChannelInRealtime(t *testing.T) {
+	out := &bytes.Buffer{}
+	runtimeEvents := make(chan clientui.Event, 16)
+	model := newProjectedTestUIModel(
+		nil,
+		runtimeEvents,
+		closedAskEvents(),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
+	)
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	waitForTestCondition(t, 2*time.Second, "startup replay", func() bool {
+		return strings.Contains(normalizedOutput(out.String()), "seed")
+	})
+
+	callMeta := transcript.ToolCallMeta{ToolName: "shell", Command: "pwd", CompactText: "pwd", IsShell: true}
+	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventRunStateChanged, RunState: &runtime.RunState{Busy: true}})
+	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, StepID: "step-1", UserMessage: "say hi"})
+	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventReviewerCompleted, StepID: "step-1", Reviewer: &runtime.ReviewerStatus{Outcome: "applied", SuggestionsCount: 2}})
+	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventBackgroundUpdated, StepID: "step-1", Background: &runtime.BackgroundShellEvent{Type: "completed", ID: "1000", State: "completed", NoticeText: "Background shell 1000 completed.\nOutput:\nhello", CompactText: "Background shell 1000 completed"}})
+	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1", ToolCall: &llm.ToolCall{ID: "call_1", Name: string(tools.ToolShell), Presentation: toolcodec.EncodeToolCallMeta(callMeta)}})
+
+	lastTranscript := ""
+	lastNormalized := ""
+	firstBatchDeadline := time.Now().Add(2 * time.Second)
+	firstBatchReady := false
+	for time.Now().Before(firstBatchDeadline) {
+		transcriptText := strings.Builder{}
+		for _, entry := range model.transcriptEntries {
+			transcriptText.WriteString(entry.Text)
+			transcriptText.WriteString("\n")
+			if strings.TrimSpace(entry.OngoingText) != "" {
+				transcriptText.WriteString(entry.OngoingText)
+				transcriptText.WriteString("\n")
+			}
+		}
+		lastTranscript = transcriptText.String()
+		if !containsInOrder(lastTranscript, "say hi", "Supervisor ran", "Background shell 1000 completed") {
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+		lastNormalized = normalizedOutput(out.String())
+		if strings.Contains(lastNormalized, "pwd") && strings.Contains(lastNormalized, "background shell 1000 completed") {
+			firstBatchReady = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !firstBatchReady {
+		lastNormalized = normalizedOutput(out.String())
+		t.Fatalf(
+			"expected mixed realtime terminal order after first batch, transcript=%q output=%q committed=%q nativeProjection=%q nativeRendered=%q",
+			lastTranscript,
+			lastNormalized,
+			model.view.CommittedOngoingProjection().Render(tui.TranscriptDivider),
+			model.nativeProjection.Render(tui.TranscriptDivider),
+			model.nativeRenderedProjection.Render(tui.TranscriptDivider),
+		)
+	}
+
+	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallCompleted, StepID: "step-1", ToolResult: &tools.Result{CallID: "call_1", Name: tools.ToolShell, Output: []byte("/tmp")}})
+	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, StepID: "step-1", Message: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal}})
+	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventRunStateChanged, RunState: &runtime.RunState{Busy: false}})
+
+	waitForTestCondition(t, 2*time.Second, "assistant completion after mixed realtime events", func() bool {
+		normalized := normalizedOutput(out.String())
+		return containsInOrder(normalized, "say hi", "Supervisor ran", "Background shell 1000 completed", "pwd", "done")
+	})
+
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+	transcriptText := strings.Builder{}
+	for _, entry := range model.transcriptEntries {
+		transcriptText.WriteString(entry.Text)
+		transcriptText.WriteString("\n")
+		if strings.TrimSpace(entry.OngoingText) != "" {
+			transcriptText.WriteString(entry.OngoingText)
+			transcriptText.WriteString("\n")
+		}
+	}
+	if !containsInOrder(transcriptText.String(), "say hi", "Supervisor ran", "Background shell 1000 completed", "pwd", "done") {
+		t.Fatalf("expected mixed runtime event transcript sequence in projected transcript state, got %q", transcriptText.String())
+	}
+	if normalized := normalizedOutput(out.String()); !containsInOrder(normalized, "seed", "say hi", "Supervisor ran", "Background shell 1000 completed", "pwd", "done") {
+		t.Fatalf("expected mixed runtime event terminal sequence, got %q", normalized)
 	}
 }
 

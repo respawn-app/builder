@@ -72,22 +72,5 @@ func (p *TranscriptProjector) LastCommittedAssistantFinalAnswer() string {
 	if p == nil || p.chat == nil {
 		return ""
 	}
-	messages := p.chat.snapshotMessages()
-	for idx := len(messages) - 1; idx >= 0; idx-- {
-		message := messages[idx]
-		if shouldSkipTrailingAssistantHandoffMessage(message) {
-			continue
-		}
-		if message.Role != llm.RoleAssistant {
-			return ""
-		}
-		if message.Phase != llm.MessagePhaseFinal {
-			return ""
-		}
-		if strings.TrimSpace(message.Content) == "" {
-			return ""
-		}
-		return message.Content
-	}
-	return ""
+	return p.chat.cachedLastCommittedAssistantFinalAnswer()
 }

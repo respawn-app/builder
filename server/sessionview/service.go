@@ -240,18 +240,17 @@ func dormantMainViewFromStore(ctx context.Context, store *session.Store) (client
 	if store == nil {
 		return clientui.RuntimeMainView{}, errors.New("session store is required")
 	}
-	projector, err := projectDormantTranscript(ctx, store)
+	scan, err := scanDormantTranscript(ctx, store, runtime.PersistedTranscriptScanRequest{})
 	if err != nil {
 		return clientui.RuntimeMainView{}, err
 	}
-	chat := projector.ChatSnapshot()
 	meta := store.Meta()
 	freshness := runtimeview.ConversationFreshnessFromSession(store.ConversationFreshness())
 	view := clientui.RuntimeMainView{
 		Status: clientui.RuntimeStatus{
 			ConversationFreshness:             freshness,
 			ParentSessionID:                   meta.ParentSessionID,
-			LastCommittedAssistantFinalAnswer: projector.LastCommittedAssistantFinalAnswer(),
+			LastCommittedAssistantFinalAnswer: scan.LastCommittedAssistantFinalAnswer(),
 		},
 		Session: clientui.RuntimeSessionView{
 			SessionID:             meta.SessionID,
@@ -259,7 +258,7 @@ func dormantMainViewFromStore(ctx context.Context, store *session.Store) (client
 			ConversationFreshness: freshness,
 			Transcript: clientui.TranscriptMetadata{
 				Revision:            meta.LastSequence,
-				CommittedEntryCount: len(chat.Entries),
+				CommittedEntryCount: scan.TotalEntries(),
 			},
 		},
 	}
@@ -280,44 +279,56 @@ func dormantTranscriptPageFromStore(ctx context.Context, store *session.Store, r
 	if store == nil {
 		return clientui.TranscriptPage{}, errors.New("session store is required")
 	}
-	projector, err := projectDormantTranscript(ctx, store)
-	if err != nil {
-		return clientui.TranscriptPage{}, err
-	}
 	meta := store.Meta()
 	freshness := runtimeview.ConversationFreshnessFromSession(store.ConversationFreshness())
 	if req.Window == clientui.TranscriptWindowOngoingTail {
+		scan, err := scanDormantTranscript(ctx, store, runtime.PersistedTranscriptScanRequest{TrackOngoingTail: true, TailLimit: runtimeview.OngoingTailEntryLimit})
+		if err != nil {
+			return clientui.TranscriptPage{}, err
+		}
 		return runtimeview.TranscriptPageFromWindow(
 			meta.SessionID,
 			meta.Name,
 			freshness,
 			meta.LastSequence,
-			projector.OngoingTailSnapshot(runtimeview.OngoingTailEntryLimit),
+			scan.OngoingTailSnapshot(),
 		), nil
 	}
-	return runtimeview.TranscriptPageFromChat(
+	offset := req.Offset
+	limit := req.Limit
+	if req.PageSize > 0 {
+		offset = req.Page * req.PageSize
+		limit = req.PageSize
+	}
+	scan, err := scanDormantTranscript(ctx, store, runtime.PersistedTranscriptScanRequest{Offset: offset, Limit: limit})
+	if err != nil {
+		return clientui.TranscriptPage{}, err
+	}
+	return runtimeview.TranscriptPageFromCollectedChat(
 		meta.SessionID,
 		meta.Name,
 		freshness,
 		meta.LastSequence,
-		runtimeview.ChatSnapshotFromRuntime(projector.ChatSnapshot()),
+		runtimeview.ChatSnapshotFromRuntime(scan.CollectedPageSnapshot()),
+		scan.TotalEntries(),
+		offset,
 		req,
 	), nil
 }
 
-func projectDormantTranscript(ctx context.Context, store *session.Store) (*runtime.TranscriptProjector, error) {
-	projector := runtime.NewTranscriptProjector()
+func scanDormantTranscript(ctx context.Context, store *session.Store, req runtime.PersistedTranscriptScanRequest) (*runtime.PersistedTranscriptScan, error) {
+	scan := runtime.NewPersistedTranscriptScan(req)
 	if err := store.WalkEvents(func(evt session.Event) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-		return projector.ApplyPersistedEvent(evt)
+		return scan.ApplyPersistedEvent(evt)
 	}); err != nil {
 		return nil, err
 	}
-	return projector, nil
+	return scan, nil
 }
 
 type dormantReplayClient struct{}

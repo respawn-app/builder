@@ -51,14 +51,13 @@ func SessionViewFromRuntime(engine *runtime.Engine) clientui.RuntimeSessionView 
 	if engine == nil {
 		return clientui.RuntimeSessionView{}
 	}
-	chat := engine.ChatSnapshot()
 	return clientui.RuntimeSessionView{
 		SessionID:             engine.SessionID(),
 		SessionName:           engine.SessionName(),
 		ConversationFreshness: ConversationFreshnessFromSession(engine.ConversationFreshness()),
 		Transcript: clientui.TranscriptMetadata{
 			Revision:            engine.TranscriptRevision(),
-			CommittedEntryCount: len(chat.Entries),
+			CommittedEntryCount: engine.CommittedTranscriptEntryCount(),
 		},
 	}
 }
@@ -72,12 +71,13 @@ func ConversationFreshnessFromSession(freshness session.ConversationFreshness) c
 
 func EventFromRuntime(evt runtime.Event) clientui.Event {
 	view := clientui.Event{
-		Kind:             clientui.EventKind(evt.Kind),
-		StepID:           evt.StepID,
-		Error:            evt.Error,
-		AssistantDelta:   evt.AssistantDelta,
-		UserMessage:      evt.UserMessage,
-		UserMessageBatch: append([]string(nil), evt.UserMessageBatch...),
+		Kind:              clientui.EventKind(evt.Kind),
+		StepID:            evt.StepID,
+		Error:             evt.Error,
+		AssistantDelta:    evt.AssistantDelta,
+		UserMessage:       evt.UserMessage,
+		UserMessageBatch:  append([]string(nil), evt.UserMessageBatch...),
+		TranscriptEntries: chatEntriesFromRuntime(runtime.TranscriptEntriesFromEvent(evt)),
 	}
 	if evt.ReasoningDelta != nil {
 		view.ReasoningDelta = &clientui.ReasoningDelta{
@@ -116,6 +116,24 @@ func EventFromRuntime(evt runtime.Event) clientui.Event {
 		}
 	}
 	return view
+}
+
+func chatEntriesFromRuntime(entries []runtime.ChatEntry) []clientui.ChatEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]clientui.ChatEntry, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, clientui.ChatEntry{
+			Role:        entry.Role,
+			Text:        entry.Text,
+			OngoingText: entry.OngoingText,
+			Phase:       string(entry.Phase),
+			ToolCallID:  entry.ToolCallID,
+			ToolCall:    cloneToolCallMeta(entry.ToolCall),
+		})
+	}
+	return out
 }
 
 func RunViewFromRuntime(sessionID string, snapshot *runtime.RunSnapshot) *clientui.RunView {

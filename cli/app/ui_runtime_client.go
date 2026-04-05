@@ -102,7 +102,7 @@ func (c *sessionRuntimeClient) Transcript() clientui.TranscriptPage {
 }
 
 func (c *sessionRuntimeClient) RefreshTranscript() (clientui.TranscriptPage, error) {
-	return c.LoadTranscriptPage(clientui.TranscriptPageRequest{})
+	return c.LoadTranscriptPage(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail})
 }
 
 func (c *sessionRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {

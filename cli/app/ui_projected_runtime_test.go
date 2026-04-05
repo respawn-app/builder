@@ -12,12 +12,29 @@ func TestWaitRuntimeEventReturnsProjectedMessage(t *testing.T) {
 	ch := make(chan clientui.Event, 1)
 	ch <- clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "hello"}
 	cmd := waitRuntimeEvent(ch)
-	msg, ok := cmd().(runtimeEventMsg)
+	msg, ok := cmd().(runtimeEventBatchMsg)
 	if !ok {
-		t.Fatalf("expected runtimeEventMsg, got %T", cmd())
+		t.Fatalf("expected runtimeEventBatchMsg, got %T", cmd())
 	}
-	if msg.event.Kind != clientui.EventAssistantDelta || msg.event.AssistantDelta != "hello" {
-		t.Fatalf("unexpected projected event: %+v", msg.event)
+	if len(msg.events) != 1 {
+		t.Fatalf("events len = %d, want 1", len(msg.events))
+	}
+	if msg.events[0].Kind != clientui.EventAssistantDelta || msg.events[0].AssistantDelta != "hello" {
+		t.Fatalf("unexpected projected event: %+v", msg.events[0])
+	}
+}
+
+func TestWaitRuntimeEventDrainsQueuedBatch(t *testing.T) {
+	ch := make(chan clientui.Event, 3)
+	ch <- clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "hello"}
+	ch <- clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: " world"}
+	ch <- clientui.Event{Kind: clientui.EventRunStateChanged, RunState: &clientui.RunState{Busy: true}}
+	msg, ok := waitRuntimeEvent(ch)().(runtimeEventBatchMsg)
+	if !ok {
+		t.Fatalf("expected runtimeEventBatchMsg, got %T", waitRuntimeEvent(ch)())
+	}
+	if len(msg.events) != 3 {
+		t.Fatalf("events len = %d, want 3", len(msg.events))
 	}
 }
 

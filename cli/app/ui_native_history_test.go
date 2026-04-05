@@ -8,8 +8,12 @@ import (
 	"unicode/utf8"
 
 	"builder/cli/tui"
+	"builder/server/llm"
 	"builder/server/runtime"
+	"builder/server/tools"
+	"builder/shared/clientui"
 	"builder/shared/transcript"
+	"builder/shared/transcript/toolcodec"
 
 	tea "github.com/charmbracelet/bubbletea"
 	xansi "github.com/charmbracelet/x/ansi"
@@ -1090,6 +1094,62 @@ func TestNativeParallelToolCompletionWaitsForStablePrefixBeforeAppend(t *testing
 	}
 }
 
+func TestProjectedRuntimeBatchesPreserveImmediateLiveEventsAndLaterCommittedAppend(t *testing.T) {
+	m := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), nil,
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
+	)
+	next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	m = next.(*uiModel)
+	_ = collectCmdMessages(t, startupCmd)
+
+	callMeta := transcript.ToolCallMeta{ToolName: "shell", Command: "pwd", CompactText: "pwd", IsShell: true}
+	firstBatch := []clientui.Event{
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, StepID: "step-1", UserMessage: "say hi"}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventReviewerCompleted, StepID: "step-1", Reviewer: &runtime.ReviewerStatus{Outcome: "applied", SuggestionsCount: 2}}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventBackgroundUpdated, StepID: "step-1", Background: &runtime.BackgroundShellEvent{Type: "completed", ID: "1000", State: "completed", NoticeText: "Background shell 1000 completed.\nOutput:\nhello", CompactText: "Background shell 1000 completed"}}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1", ToolCall: &llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Presentation: toolcodec.EncodeToolCallMeta(callMeta)}}),
+	}
+	next, cmd := m.Update(runtimeEventBatchMsg{events: firstBatch})
+	m = next.(*uiModel)
+	msgs := collectCmdMessages(t, cmd)
+	flushText := strings.Builder{}
+	for _, msg := range msgs {
+		if flush, ok := msg.(nativeHistoryFlushMsg); ok {
+			flushText.WriteString(stripANSIPreserve(flush.Text))
+			flushText.WriteString("\n")
+		}
+	}
+	if !containsInOrder(flushText.String(), "say hi", "Supervisor ran", "Background shell 1000 completed") {
+		t.Fatalf("expected first batch committed flush to preserve event order, got %q", flushText.String())
+	}
+	view := stripANSIPreserve(m.View())
+	if !strings.Contains(view, "pwd") {
+		t.Fatalf("expected pending tool call visible immediately in ongoing mode, got %q", view)
+	}
+
+	secondBatch := []clientui.Event{
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallCompleted, StepID: "step-1", ToolResult: &tools.Result{CallID: "call-1", Name: tools.ToolShell, Output: []byte("/tmp")}}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, StepID: "step-1", Message: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal}}),
+	}
+	next, cmd = m.Update(runtimeEventBatchMsg{events: secondBatch})
+	m = next.(*uiModel)
+	msgs = collectCmdMessages(t, cmd)
+	flushText.Reset()
+	for _, msg := range msgs {
+		if flush, ok := msg.(nativeHistoryFlushMsg); ok {
+			flushText.WriteString(stripANSIPreserve(flush.Text))
+			flushText.WriteString("\n")
+		}
+	}
+	if !containsInOrder(flushText.String(), "pwd", "done") {
+		t.Fatalf("expected later committed append after tool completion, got %q", flushText.String())
+	}
+	view = stripANSIPreserve(m.View())
+	if strings.Contains(view, "pwd") {
+		t.Fatalf("expected pending tool preview cleared after completion, got %q", view)
+	}
+}
+
 func TestUIInitClearsScreen(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	cmd := m.Init()
@@ -1340,6 +1400,31 @@ func TestNativeStreamingLinesIncludeDividerAndAssistantPrefix(t *testing.T) {
 	}
 	if !strings.Contains(plain, "❮ Second Stream Check") {
 		t.Fatalf("expected assistant prefix in streaming live region, got %q", plain)
+	}
+}
+
+func TestNativeStreamingLinesKeepAssistantMarkdownPlain(t *testing.T) {
+	m := newProjectedStaticUIModel(
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "try again"}}),
+	)
+	m.termWidth = 100
+	m.termHeight = 24
+	m.windowSizeKnown = true
+	m.busy = true
+	m.sawAssistantDelta = true
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, Ongoing: "**hello**\n`world`"})
+	m.syncViewport()
+
+	raw := m.View()
+	plain := stripANSIPreserve(raw)
+	if !strings.Contains(plain, "**hello**") || !strings.Contains(plain, "`world`") {
+		t.Fatalf("expected markdown markers preserved in live region while streaming, got %q", plain)
+	}
+	if !strings.Contains(plain, "❮ **hello**") {
+		t.Fatalf("expected plain assistant text in live region, got %q", plain)
+	}
+	if strings.Contains(raw, "\x1b[") && !strings.Contains(raw, "\x1b[?25l") {
+		t.Fatalf("expected live region to avoid rich markdown styling escapes, got raw=%q", raw)
 	}
 }
 
