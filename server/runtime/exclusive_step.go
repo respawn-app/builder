@@ -1,0 +1,224 @@
+package runtime
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"time"
+
+	"builder/server/llm"
+	"builder/server/session"
+	"github.com/google/uuid"
+)
+
+var errExclusiveStepBusy = errors.New("agent is busy")
+
+type defaultExclusiveStepLifecycle struct {
+	engine     *Engine
+	background backgroundNoticeScheduler
+
+	mu        sync.Mutex
+	busy      bool
+	cancel    context.CancelFunc
+	activeRun uint64
+	runSeq    uint64
+	runID     string
+	stepID    string
+	startedAt time.Time
+}
+
+func (s *defaultExclusiveStepLifecycle) Run(ctx context.Context, options exclusiveStepOptions, fn func(stepCtx context.Context, stepID string) error) (err error) {
+	stepCtx, stepID, err := s.begin(ctx)
+	if err != nil {
+		return err
+	}
+	if options.EmitRunState {
+		if snapshot := s.Snapshot(); snapshot != nil {
+			if options.PersistRunLifecycle {
+				if _, persistErr := s.engine.store.AppendRunStarted(session.RunRecord{
+					RunID:     snapshot.RunID,
+					StepID:    snapshot.StepID,
+					Status:    session.RunStatusRunning,
+					StartedAt: snapshot.StartedAt,
+				}); persistErr != nil {
+					s.end()
+					if clearErr := s.engine.store.MarkInFlight(false); clearErr != nil {
+						persistErr = errors.Join(persistErr, fmt.Errorf("mark in-flight false: %w", clearErr))
+					}
+					return persistErr
+				}
+			}
+			s.engine.emit(Event{Kind: EventRunStateChanged, StepID: stepID, RunState: &RunState{
+				Busy:      true,
+				RunID:     snapshot.RunID,
+				Status:    snapshot.Status,
+				StartedAt: snapshot.StartedAt,
+			}})
+		}
+	}
+	defer func() {
+		panicValue := recover()
+		finishedAt := time.Now().UTC()
+		status := statusFromRunError(err)
+		if panicValue != nil {
+			status = RunStatusFailed
+		}
+		snapshot := s.snapshotWithFinishedAt(finishedAt, status)
+		s.end()
+		if options.EmitRunState {
+			state := &RunState{Busy: false}
+			if snapshot != nil {
+				state.RunID = snapshot.RunID
+				state.Status = snapshot.Status
+				state.StartedAt = snapshot.StartedAt
+				state.FinishedAt = snapshot.FinishedAt
+			}
+			s.engine.emit(Event{Kind: EventRunStateChanged, StepID: stepID, RunState: state})
+		}
+		if options.PersistRunLifecycle && snapshot != nil {
+			if _, persistErr := s.engine.store.AppendRunFinished(session.RunRecord{
+				RunID:      snapshot.RunID,
+				StepID:     snapshot.StepID,
+				Status:     session.RunStatus(snapshot.Status),
+				StartedAt:  snapshot.StartedAt,
+				FinishedAt: snapshot.FinishedAt,
+			}); persistErr != nil {
+				err = errors.Join(err, fmt.Errorf("append run finished: %w", persistErr))
+			}
+		}
+		if clearErr := s.engine.store.MarkInFlight(false); clearErr != nil {
+			wrapped := fmt.Errorf("mark in-flight false: %w", clearErr)
+			s.engine.emit(Event{Kind: EventInFlightClearFailed, StepID: stepID, Error: wrapped.Error()})
+			err = errors.Join(err, wrapped)
+		} else {
+			if s.background != nil {
+				s.background.ScheduleIfIdle()
+			}
+		}
+		if panicValue != nil {
+			panic(panicValue)
+		}
+	}()
+	return fn(stepCtx, stepID)
+}
+
+func (s *defaultExclusiveStepLifecycle) Interrupt() error {
+	s.mu.Lock()
+	busy := s.busy
+	cancel := s.cancel
+	runID := s.activeRun
+	s.mu.Unlock()
+
+	if !busy || cancel == nil {
+		return nil
+	}
+	cancel()
+	s.mu.Lock()
+	if !s.busy || s.activeRun != runID {
+		s.mu.Unlock()
+		return nil
+	}
+	s.mu.Unlock()
+	if err := s.engine.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeInterruption, Content: interruptMessage}); err != nil {
+		return err
+	}
+	if err := s.engine.store.MarkInFlight(false); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *defaultExclusiveStepLifecycle) IsBusy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.busy
+}
+
+func (s *defaultExclusiveStepLifecycle) Snapshot() *RunSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return cloneRunSnapshot(s.snapshotLocked())
+}
+
+func (s *defaultExclusiveStepLifecycle) begin(ctx context.Context) (context.Context, string, error) {
+	s.mu.Lock()
+	if s.busy {
+		s.mu.Unlock()
+		return nil, "", errExclusiveStepBusy
+	}
+	stepCtx, cancel := context.WithCancel(ctx)
+	s.runSeq++
+	runID := uuid.NewString()
+	stepID := uuid.NewString()
+	startedAt := time.Now().UTC()
+	s.busy = true
+	s.cancel = cancel
+	s.activeRun = s.runSeq
+	s.runID = runID
+	s.stepID = stepID
+	s.startedAt = startedAt
+	s.mu.Unlock()
+
+	if err := s.engine.store.MarkInFlight(true); err != nil {
+		s.end()
+		return nil, "", err
+	}
+	return stepCtx, stepID, nil
+}
+
+func (s *defaultExclusiveStepLifecycle) end() {
+	s.mu.Lock()
+	s.busy = false
+	s.cancel = nil
+	s.activeRun = 0
+	s.runID = ""
+	s.stepID = ""
+	s.startedAt = time.Time{}
+	s.mu.Unlock()
+}
+
+func (s *defaultExclusiveStepLifecycle) snapshotLocked() *RunSnapshot {
+	if !s.busy || s.runID == "" {
+		return nil
+	}
+	return &RunSnapshot{
+		RunID:     s.runID,
+		StepID:    s.stepID,
+		Status:    RunStatusRunning,
+		StartedAt: s.startedAt,
+	}
+}
+
+func (s *defaultExclusiveStepLifecycle) snapshotWithFinishedAt(finishedAt time.Time, status RunStatus) *RunSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.busy || s.runID == "" {
+		return nil
+	}
+	return &RunSnapshot{
+		RunID:      s.runID,
+		StepID:     s.stepID,
+		Status:     status,
+		StartedAt:  s.startedAt,
+		FinishedAt: finishedAt,
+	}
+}
+
+func cloneRunSnapshot(snapshot *RunSnapshot) *RunSnapshot {
+	if snapshot == nil {
+		return nil
+	}
+	cloned := *snapshot
+	return &cloned
+}
+
+func statusFromRunError(err error) RunStatus {
+	if err == nil {
+		return RunStatusCompleted
+	}
+	if errors.Is(err, context.Canceled) {
+		return RunStatusInterrupted
+	}
+	return RunStatusFailed
+}

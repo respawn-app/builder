@@ -1,0 +1,163 @@
+package config
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"builder/shared/theme"
+	"github.com/BurntSushi/toml"
+)
+
+func resolveSettingsFilePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home dir: %w", err)
+	}
+	return filepath.Join(home, ".builder", "config.toml"), nil
+}
+
+func settingsFileExists(path string) (bool, error) {
+	if _, err := os.Stat(path); err == nil {
+		return true, nil
+	} else if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else {
+		return false, fmt.Errorf("stat settings file: %w", err)
+	}
+}
+
+func ensureSettingsDir(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create settings dir: %w", err)
+	}
+	return nil
+}
+
+func writeSettingsFile(path string, contents string) error {
+	if err := ensureSettingsDir(path); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".config.toml.*")
+	if err != nil {
+		return fmt.Errorf("create temporary settings file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		_ = tmp.Close()
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.WriteString(contents); err != nil {
+		return fmt.Errorf("write temporary settings file: %w", err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		return fmt.Errorf("chmod temporary settings file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temporary settings file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("replace settings file: %w", err)
+	}
+	cleanup = false
+	return nil
+}
+
+func writeSettingsFileIfMissing(path string, contents string) (bool, error) {
+	if err := ensureSettingsDir(path); err != nil {
+		return false, err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("create settings file: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+	if _, err := file.WriteString(contents); err != nil {
+		return false, fmt.Errorf("write settings file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return false, fmt.Errorf("close settings file: %w", err)
+	}
+	return true, nil
+}
+
+func WriteDefaultSettingsFile() (path string, created bool, err error) {
+	path, err = resolveSettingsFilePath()
+	if err != nil {
+		return "", false, err
+	}
+	exists, err := settingsFileExists(path)
+	if err != nil {
+		return "", false, err
+	}
+	if exists {
+		return path, false, nil
+	}
+	created, err = writeSettingsFileIfMissing(path, defaultSettingsTOML())
+	if err != nil {
+		return "", false, fmt.Errorf("write default settings file: %w", err)
+	}
+	return path, created, nil
+}
+
+func WriteDefaultSettingsFileWithTheme(selectedTheme string) (path string, created bool, err error) {
+	path, err = resolveSettingsFilePath()
+	if err != nil {
+		return "", false, err
+	}
+	exists, err := settingsFileExists(path)
+	if err != nil {
+		return "", false, err
+	}
+	if exists {
+		return path, false, nil
+	}
+	created, err = writeSettingsFileIfMissing(path, onboardingDefaultSettingsTOML(theme.Normalize(selectedTheme)))
+	if err != nil {
+		return "", false, fmt.Errorf("write default settings file: %w", err)
+	}
+	return path, created, nil
+}
+
+func WriteSettingsFileForOnboarding(settings Settings) (string, error) {
+	path, err := resolveSettingsFilePath()
+	if err != nil {
+		return "", err
+	}
+	normalized, err := NormalizeSettingsForPersistence(settings)
+	if err != nil {
+		return "", err
+	}
+	created, err := writeSettingsFileIfMissing(path, settingsTOMLForOnboarding(normalized))
+	if err != nil {
+		return "", err
+	}
+	if !created {
+		return path, fmt.Errorf("settings file already exists: %s", path)
+	}
+	return path, nil
+}
+
+func readSettingsFile(path string) (settingsFile, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read settings file %s: %w", path, err)
+	}
+	if strings.TrimSpace(string(data)) == "" {
+		return settingsFile{}, nil
+	}
+	var raw settingsFile
+	if _, err := toml.NewDecoder(bytes.NewReader(data)).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("parse settings file %s: %w", path, err)
+	}
+	return raw, nil
+}

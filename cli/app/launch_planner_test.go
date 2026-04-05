@@ -1,0 +1,402 @@
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"builder/server/session"
+	"builder/server/tools"
+	"builder/shared/config"
+)
+
+type plannerOwnershipServer struct {
+	*testEmbeddedServer
+	owns bool
+}
+
+func (s *plannerOwnershipServer) OwnsServer() bool {
+	return s != nil && s.owns
+}
+
+func TestSessionLaunchPlannerHeadlessCreatesNewSessionAndAppliesContinuationContext(t *testing.T) {
+	root := t.TempDir()
+	containerDir := filepath.Join(root, "sessions", "workspace-a")
+	planner := newSessionLaunchPlanner(&testEmbeddedServer{
+		cfg: config.App{
+			WorkspaceRoot:   "/tmp/workspace-a",
+			PersistenceRoot: root,
+			Settings: config.Settings{
+				OpenAIBaseURL: "http://headless.local/v1",
+			},
+		},
+		containerDir: containerDir,
+	})
+
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeHeadless})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	opened, err := session.OpenByID(root, plan.SessionID)
+	if err != nil {
+		t.Fatalf("open planned session: %v", err)
+	}
+	meta := opened.Meta()
+	if meta.SessionID == "" {
+		t.Fatal("expected session id")
+	}
+	if !strings.HasSuffix(meta.Name, " "+subagentSessionSuffix) {
+		t.Fatalf("expected subagent session name, got %q", meta.Name)
+	}
+	if meta.Continuation == nil || meta.Continuation.OpenAIBaseURL != "http://headless.local/v1" {
+		t.Fatalf("expected continuation base url applied, got %+v", meta.Continuation)
+	}
+	if plan.SessionName != meta.Name {
+		t.Fatalf("expected plan session name %q, got %q", meta.Name, plan.SessionName)
+	}
+	if plan.WorkspaceRoot != "/tmp/workspace-a" {
+		t.Fatalf("expected workspace root passthrough, got %q", plan.WorkspaceRoot)
+	}
+}
+
+func TestSessionLaunchPlannerInteractiveUsesPickerSelection(t *testing.T) {
+	root := t.TempDir()
+	containerDir := filepath.Join(root, "sessions", "workspace-a")
+	first, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
+	if err != nil {
+		t.Fatalf("create first session: %v", err)
+	}
+	if err := first.SetName("first"); err != nil {
+		t.Fatalf("persist first session meta: %v", err)
+	}
+	second, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
+	if err != nil {
+		t.Fatalf("create second session: %v", err)
+	}
+	if err := second.SetName("second"); err != nil {
+		t.Fatalf("persist second session meta: %v", err)
+	}
+	planner := &launchPlanner{
+		server: &testEmbeddedServer{
+			cfg: config.App{
+				WorkspaceRoot:   "/tmp/workspace-a",
+				PersistenceRoot: root,
+				Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
+			},
+			containerDir: containerDir,
+		},
+		pickSession: func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
+			if len(summaries) != 2 {
+				t.Fatalf("expected two summaries, got %d", len(summaries))
+			}
+			for _, summary := range summaries {
+				if summary.SessionID == second.Meta().SessionID {
+					picked := summary
+					return sessionPickerResult{Session: &picked}, nil
+				}
+			}
+			t.Fatalf("expected picker summaries to include %q", second.Meta().SessionID)
+			return sessionPickerResult{}, nil
+		},
+	}
+
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	if plan.SessionID != second.Meta().SessionID {
+		t.Fatalf("expected selected session %q, got %q", second.Meta().SessionID, plan.SessionID)
+	}
+	if plan.SessionID == first.Meta().SessionID {
+		t.Fatalf("did not expect first session %q", first.Meta().SessionID)
+	}
+}
+
+func TestSessionLaunchPlannerInteractiveUsesLegacyWorkspaceContainerMapping(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	legacyContainer := "workspace-a-legacy"
+	indexPath := filepath.Join(cfg.PersistenceRoot, "workspaces.json")
+	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
+		t.Fatalf("mkdir workspace index dir: %v", err)
+	}
+	indexData, err := json.Marshal(map[string]any{"entries": map[string]string{cfg.WorkspaceRoot: legacyContainer}})
+	if err != nil {
+		t.Fatalf("marshal workspace index: %v", err)
+	}
+	if err := os.WriteFile(indexPath, indexData, 0o644); err != nil {
+		t.Fatalf("write workspace index: %v", err)
+	}
+
+	legacyContainerDir, err := filepath.Abs(filepath.Join(cfg.PersistenceRoot, "sessions", legacyContainer))
+	if err != nil {
+		t.Fatalf("abs legacy container dir: %v", err)
+	}
+	legacySession, err := session.Create(legacyContainerDir, legacyContainer, cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("create legacy session: %v", err)
+	}
+	if err := legacySession.SetName("legacy session"); err != nil {
+		t.Fatalf("persist legacy session meta: %v", err)
+	}
+
+	containerName, containerDir, err := config.ResolveWorkspaceContainer(cfg)
+	if err != nil {
+		t.Fatalf("resolve workspace container: %v", err)
+	}
+	if containerName != legacyContainer {
+		t.Fatalf("expected legacy container %q, got %q", legacyContainer, containerName)
+	}
+
+	planner := &launchPlanner{
+		server: &testEmbeddedServer{
+			cfg: config.App{
+				WorkspaceRoot:   cfg.WorkspaceRoot,
+				PersistenceRoot: cfg.PersistenceRoot,
+				Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
+			},
+			containerDir: containerDir,
+		},
+		pickSession: func(summaries []session.Summary, theme string, alternateScreenPolicy config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
+			if len(summaries) != 1 {
+				t.Fatalf("expected one legacy summary, got %d", len(summaries))
+			}
+			if summaries[0].SessionID != legacySession.Meta().SessionID {
+				t.Fatalf("expected legacy session %q, got %q", legacySession.Meta().SessionID, summaries[0].SessionID)
+			}
+			picked := summaries[0]
+			return sessionPickerResult{Session: &picked}, nil
+		},
+	}
+
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	if plan.SessionID != legacySession.Meta().SessionID {
+		t.Fatalf("expected legacy session %q, got %q", legacySession.Meta().SessionID, plan.SessionID)
+	}
+}
+
+func TestSessionLaunchPlannerPropagatesServerOwnershipToStatusConfig(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		owns bool
+	}{
+		{name: "owned", owns: true},
+		{name: "attached", owns: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			containerDir := filepath.Join(root, "sessions", "workspace-a")
+			planner := newSessionLaunchPlanner(&plannerOwnershipServer{
+				testEmbeddedServer: &testEmbeddedServer{
+					cfg: config.App{
+						WorkspaceRoot:   "/tmp/workspace-a",
+						PersistenceRoot: root,
+						Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
+					},
+					containerDir: containerDir,
+				},
+				owns: tt.owns,
+			})
+
+			plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeHeadless})
+			if err != nil {
+				t.Fatalf("plan session: %v", err)
+			}
+			if plan.StatusConfig.OwnsServer != tt.owns {
+				t.Fatalf("status config owns server = %t, want %t", plan.StatusConfig.OwnsServer, tt.owns)
+			}
+		})
+	}
+}
+
+func TestSessionLaunchPlannerSelectedSessionIDBypassesPicker(t *testing.T) {
+	root := t.TempDir()
+	containerDir := filepath.Join(root, "sessions")
+	store, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := store.SetName("selected"); err != nil {
+		t.Fatalf("persist selected session meta: %v", err)
+	}
+	if err := store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: "http://session.local/v1"}); err != nil {
+		t.Fatalf("persist continuation context: %v", err)
+	}
+	planner := &launchPlanner{
+		server: &testEmbeddedServer{
+			cfg: config.App{
+				WorkspaceRoot:   "/tmp/workspace-a",
+				PersistenceRoot: root,
+				Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto, OpenAIBaseURL: "http://config.local/v1"},
+			},
+			containerDir: containerDir,
+		},
+		pickSession: func([]session.Summary, string, config.TUIAlternateScreenPolicy) (sessionPickerResult, error) {
+			t.Fatal("did not expect picker for explicit session id")
+			return sessionPickerResult{}, nil
+		},
+	}
+
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, SelectedSessionID: store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	if plan.SessionID != store.Meta().SessionID {
+		t.Fatalf("expected explicit session %q, got %q", store.Meta().SessionID, plan.SessionID)
+	}
+	if plan.ActiveSettings.OpenAIBaseURL != "http://session.local/v1" {
+		t.Fatalf("expected session continuation base url, got %q", plan.ActiveSettings.OpenAIBaseURL)
+	}
+	reopened, err := session.OpenByID(root, plan.SessionID)
+	if err != nil {
+		t.Fatalf("open selected session by id: %v", err)
+	}
+	if got := reopened.Meta().Continuation; got == nil || got.OpenAIBaseURL != "http://session.local/v1" {
+		t.Fatalf("expected continuation base url preserved, got %+v", got)
+	}
+}
+
+func TestApplyCLIOverridesToSessionPlanIgnoresNonCLISources(t *testing.T) {
+	plan := sessionLaunchPlan{
+		ActiveSettings: config.Settings{
+			Model:         "server-model",
+			ThinkingLevel: "low",
+			EnabledTools:  map[tools.ID]bool{tools.ToolShell: true},
+			Timeouts:      config.Timeouts{ModelRequestSeconds: 20, ShellDefaultSeconds: 30},
+		},
+		EnabledTools:        []tools.ID{tools.ToolShell},
+		ConfiguredModelName: "server-model",
+		Source:              config.SourceReport{Sources: map[string]string{"model": "file"}},
+		StatusConfig:        uiStatusConfig{},
+	}
+	cfg := config.App{Settings: config.Settings{
+		Model:         "local-model",
+		ThinkingLevel: "high",
+		EnabledTools:  map[tools.ID]bool{tools.ToolPatch: true},
+		Timeouts:      config.Timeouts{ModelRequestSeconds: 99, ShellDefaultSeconds: 77},
+	}, Source: config.SourceReport{Sources: map[string]string{
+		"model":                          "env",
+		"thinking_level":                 "env",
+		"tools.shell":                    "env",
+		"tools.patch":                    "env",
+		"timeouts.model_request_seconds": "env",
+	}}}
+
+	updated := applyCLIOverridesToSessionPlan(plan, cfg)
+	if updated.ActiveSettings.Model != "server-model" || updated.ConfiguredModelName != "server-model" {
+		t.Fatalf("expected server model preserved, got %+v", updated.ActiveSettings)
+	}
+	if updated.ActiveSettings.ThinkingLevel != "low" {
+		t.Fatalf("expected server thinking level preserved, got %q", updated.ActiveSettings.ThinkingLevel)
+	}
+	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != tools.ToolShell {
+		t.Fatalf("expected server tools preserved, got %+v", updated.EnabledTools)
+	}
+	if updated.ActiveSettings.Timeouts.ModelRequestSeconds != 20 {
+		t.Fatalf("expected server timeout preserved, got %+v", updated.ActiveSettings.Timeouts)
+	}
+	if updated.Source.Sources["model"] != "file" {
+		t.Fatalf("expected source metadata preserved, got %+v", updated.Source.Sources)
+	}
+}
+
+func TestApplyCLIOverridesToSessionPlanRespectsLockedModelContract(t *testing.T) {
+	plan := sessionLaunchPlan{
+		ActiveSettings: config.Settings{
+			Model:         "locked-model",
+			ThinkingLevel: "medium",
+			EnabledTools:  map[tools.ID]bool{tools.ToolShell: true},
+		},
+		EnabledTools:        []tools.ID{tools.ToolShell},
+		ConfiguredModelName: "locked-model",
+		ModelContractLocked: true,
+		StatusConfig:        uiStatusConfig{},
+	}
+	cfg := config.App{Settings: config.Settings{
+		Model:        "cli-model",
+		EnabledTools: map[tools.ID]bool{tools.ToolPatch: true},
+	}, Source: config.SourceReport{Sources: map[string]string{
+		"model":       "cli",
+		"tools.shell": "cli",
+		"tools.patch": "cli",
+	}}}
+
+	updated := applyCLIOverridesToSessionPlan(plan, cfg)
+	if updated.ActiveSettings.Model != "locked-model" || updated.ConfiguredModelName != "locked-model" {
+		t.Fatalf("expected locked model preserved, got %+v", updated.ActiveSettings)
+	}
+	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != tools.ToolShell {
+		t.Fatalf("expected locked tools preserved, got %+v", updated.EnabledTools)
+	}
+}
+
+func TestApplyCLIOverridesToSessionPlanRecomputesEnabledToolsForCLIModelOverride(t *testing.T) {
+	plan := sessionLaunchPlan{
+		ActiveSettings: config.Settings{
+			Model:        "gpt-5.4",
+			EnabledTools: map[tools.ID]bool{tools.ToolShell: true},
+		},
+		EnabledTools:        []tools.ID{tools.ToolShell},
+		ConfiguredModelName: "gpt-5.4",
+		Source:              config.SourceReport{Sources: map[string]string{"model": "file", "tools.shell": "default", "tools.multi_tool_use_parallel": "default"}},
+		StatusConfig:        uiStatusConfig{},
+	}
+	cfg := config.App{Settings: config.Settings{
+		Model:        "gpt-5.3-codex",
+		EnabledTools: map[tools.ID]bool{tools.ToolShell: true},
+	}, Source: config.SourceReport{Sources: map[string]string{
+		"model":                         "cli",
+		"tools.shell":                   "default",
+		"tools.multi_tool_use_parallel": "default",
+	}}}
+
+	updated := applyCLIOverridesToSessionPlan(plan, cfg)
+	if updated.ActiveSettings.Model != "gpt-5.3-codex" {
+		t.Fatalf("expected cli model override, got %q", updated.ActiveSettings.Model)
+	}
+	if len(updated.EnabledTools) != 2 || updated.EnabledTools[0] != tools.ToolMultiToolUseParallel || updated.EnabledTools[1] != tools.ToolShell {
+		t.Fatalf("expected recomputed tools for overridden model, got %+v", updated.EnabledTools)
+	}
+}
+
+func TestApplyCLIOverridesToSessionPlanKeepsExplicitCLIToolsWhenModelAlsoOverrides(t *testing.T) {
+	plan := sessionLaunchPlan{
+		ActiveSettings: config.Settings{
+			Model:        "gpt-5.4",
+			EnabledTools: map[tools.ID]bool{tools.ToolShell: true},
+		},
+		EnabledTools:        []tools.ID{tools.ToolShell},
+		ConfiguredModelName: "gpt-5.4",
+		Source:              config.SourceReport{Sources: map[string]string{"model": "file", "tools.shell": "default", "tools.multi_tool_use_parallel": "default"}},
+		StatusConfig:        uiStatusConfig{},
+	}
+	cfg := config.App{Settings: config.Settings{
+		Model:        "gpt-5.3-codex",
+		EnabledTools: map[tools.ID]bool{tools.ToolShell: true},
+	}, Source: config.SourceReport{Sources: map[string]string{
+		"model":                         "cli",
+		"tools.shell":                   "cli",
+		"tools.multi_tool_use_parallel": "cli",
+	}}}
+
+	updated := applyCLIOverridesToSessionPlan(plan, cfg)
+	if updated.ActiveSettings.Model != "gpt-5.3-codex" {
+		t.Fatalf("expected cli model override, got %q", updated.ActiveSettings.Model)
+	}
+	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != tools.ToolShell {
+		t.Fatalf("expected explicit cli tools to suppress model defaults, got %+v", updated.EnabledTools)
+	}
+}

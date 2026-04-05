@@ -10,6 +10,7 @@
 - `config.toml` supports a file-only `[skills]` boolean table for per-skill new-session enable/disable toggles; disabled skills remain visible in `/status` and only affect future skills-message injection.
 - Full-access execution in v1 (no sandbox).
 - Architecture must remain pluggable/composable with low-friction extension points.
+- Source layout is a single Go module organized under top-level `cli/`, `server/`, and `shared/` roots: CLI/frontend-owned packages live under `cli/`, authoritative runtime/persistence/tool/auth packages live under `server/`, and boundary-safe shared contracts/helpers live under `shared/`.
 - Working name is `builder` and must stay easy to rename.
 
 ## Core Runtime And Tools
@@ -198,8 +199,9 @@
 ## Context Management And Compaction
 
 - Auto-compaction is enabled near context limits.
-- Builder may compact before sending the next user prompt when current context usage is already within a configurable lead band of the normal compaction threshold; in that case the prompt is queued, compaction runs first, and the queued prompt is submitted immediately after compaction completes.
-- Pre-submit compaction lead uses `threshold - min(model_context_window - threshold, pre_submit_compaction_lead_tokens)`, with `pre_submit_compaction_lead_tokens` defaulting to `15000`.
+- Builder may compact before sending the next user prompt when current context usage is already within a configurable runway reserve of the normal compaction threshold; in that case the prompt is queued, compaction runs first, and the queued prompt is submitted immediately after compaction completes.
+- Pre-submit compaction uses `context_compaction_threshold_tokens - pre_submit_compaction_lead_tokens`, with `pre_submit_compaction_lead_tokens` repurposed as fixed runway reserve and defaulting to `35000`.
+- Startup rejects compaction settings that would begin either normal compaction or the effective pre-submit compaction band below `50%` of `model_context_window`.
 - Auto-compaction failure aborts the current turn.
 - `compaction_mode=none` disables manual and automatic compaction.
 - Manual compaction is available via `/compact` while idle; optional arguments are appended as compaction guidance.
@@ -211,7 +213,7 @@
 - Native compaction eligibility is capability-driven and user-configurable.
 - `type=compaction` items and encrypted reasoning/compaction payloads are treated as opaque and replayed unchanged.
 - Compaction lifecycle emits and persists started/completed/failed events.
-- Local compaction summaries persist internally as `message_type=compaction_summary`; any model-facing summary prefix is added only at the provider input boundary.
+- Local compaction instructions are sent as `developer` messages, and local compaction summaries/checkpoints persist internally as `developer` messages with `message_type=compaction_summary`; any model-facing summary prefix is added only at the provider input boundary. Native/remote compaction has no transcript-message prompt equivalent because it uses provider `Instructions` plus opaque provider output, which Builder replays unchanged.
 - UI shows one compacted notice line per successful compaction; ongoing suppresses detailed summary content; detail shows full local summary when available.
 
 ## Model Defaults
@@ -235,8 +237,40 @@
 - Formatter config owns syntax backgrounds and formatter base foreground.
 - Transcript rendering owns role styling, subdued shell preview styling, and diff semantics.
 - Layout owns prefixes, indentation, and wrapping only.
-- Semantic color tokens are centralized in `internal/theme`; TUI and app surfaces resolve colors from that palette instead of hardcoding inline hex values in renderers.
+- Semantic color tokens are centralized in `shared/theme`; TUI and app surfaces resolve colors from that palette instead of hardcoding inline hex values in renderers.
 - Rendering/style invariants:
+
+## Transcript Visibility
+
+- Transcript visibility is defined by one product matrix, not by ad hoc projector or renderer filters.
+- Visibility semantics:
+- `O`: visible in ongoing mode with full text and visible in detail mode.
+- `OC`: visible in ongoing mode in collapsed/shortened form and visible in detail mode with full text.
+- `D`: hidden in ongoing mode and visible in detail mode.
+- `X`: hidden in both transcript modes.
+- Locked message-type visibility:
+- `agents.md`: `D`
+- `skills`: `D`
+- `environment`: `D`
+- `compaction_notice`: `O`
+- `compaction_summary`: `D`
+- `interruption`: `O`
+- `error_feedback`: `O`
+- `compaction_soon_reminder`: `D`
+- `reviewer_feedback`: represented in transcript by reviewer transcript roles, not by rendering the raw developer reviewer prompt directly. Effective visibility is `OC` or `O` depending on reviewer verbosity config.
+- `background_notice`: `OC`
+- `manual_compaction_carryover`: `D`
+- `headless_mode`: `D`
+- `headless_mode_exit`: `D`
+- Locked non-message transcript role visibility:
+- user turns: `O`
+- assistant turns: `O`
+- tool calls: `OC`
+- reviewer suggestions/status: `OC` or `O` depending on reviewer verbosity config.
+- Visibility ownership is split by boundary but must follow the same contract:
+- runtime projection decides whether a persisted/runtime message becomes a transcript entry and which transcript role it uses.
+- TUI rendering decides how that transcript role behaves in ongoing vs detail mode.
+- When a concept already has a dedicated transcript role, do not also render its raw developer/request artifact. Example: reviewer feedback is shown through `reviewer_suggestions` / `reviewer_status`, not by duplicating the underlying `reviewer_feedback` developer message.
 - Detail shell commands are full syntax color.
 - Ongoing shell commands are syntax-highlighted but subdued.
 - Formatted text uses the app foreground as its base text color.
@@ -305,7 +339,7 @@
 - `/autocompaction` controls runtime auto-compaction invocation for the current session only.
 - `/autocompaction` toggles when called without args; `/autocompaction on|off` sets explicitly.
 - `/autocompaction` emits user-visible confirmation in transcript + status line and does not persist to config.
-- `/status` opens a read-only detail overlay with account/subscription status, workdir, session ids, compact git summary, context usage, model/config state, skills (including config-disabled markers), `AGENTS.md` paths, and compaction count.
+- `/status` opens a read-only detail overlay with account/subscription status, workdir, session ids, compact git summary, context usage, model/config state, skills (including config-disabled markers), `AGENTS.md` paths, compaction count, and a session-section ownership row only when the current CLI instance owns the server.
 - `/status` refreshes progressively on open: the base snapshot renders immediately, then account, git, and environment sections fill in asynchronously. It uses the same detail-surface alt-screen policy and native text-selection behavior as other detail overlays.
 - Built-in prompt commands use embedded markdown templates.
 - Slash commands support file-backed prompts from:
@@ -318,7 +352,8 @@
 
 - Ring terminal bell when a new `ask_question` is shown.
 - Ring on turn end only if the turn executed at least two tool calls.
-- Turn-end ringing is keyed by runtime step id and `tool_call_started`/`assistant_message` events.
+- UI turn-queue lifecycle exposes a reusable queue-drained hook; terminal bell notifications are one consumer of that hook.
+- Turn-end ringing is keyed by runtime step id and projected `tool_call_started`/`assistant_message` events, but the actual notification is deferred until the queued prompt drain is fully idle.
 - Turn-end notification text includes assistant response preview when available, else `<session title>: turn complete` with `builder` as the fallback title.
 - Ask notifications include the ask text as `<session title>: Question: <question>` or `<session title>: Action required: <question>`.
 - `auto` notification method prefers OSC 9 on supported terminals and falls back to BEL.
@@ -344,7 +379,7 @@
 
 ## Release Engineering
 
-- Official release binaries are built through `scripts/build.sh`; the release profile is `CGO_ENABLED=0`, `-trimpath`, `-buildvcs=false`, and `-ldflags "-s -w -X builder/internal/buildinfo.Version=..."`.
+- Official release binaries are built through `scripts/build.sh`; the release profile is `CGO_ENABLED=0`, `-trimpath`, `-buildvcs=false`, and `-ldflags "-s -w -X builder/shared/buildinfo.Version=..."`.
 - Release archive packaging and verification live in `scripts/release-artifacts.sh`; workflow YAML should stay orchestration-focused.
 - Supported release targets are `darwin/arm64`, `linux/amd64`, `linux/arm64`, `windows/amd64`, and `windows/arm64`; macOS Intel is unsupported and must not be added back.
 - Workflow runner labels should use `*-latest` aliases where GitHub provides them. ARM smoke-test jobs currently stay on `ubuntu-24.04-arm` and `windows-11-arm` because GitHub does not publish `-latest` aliases for those hosted runners.

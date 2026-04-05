@@ -1,0 +1,322 @@
+package client
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"builder/shared/clientui"
+	"builder/shared/protocol"
+	"builder/shared/serverapi"
+	"golang.org/x/net/websocket"
+)
+
+func TestRemoteRunPromptPublishesProgressNotifications(t *testing.T) {
+	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
+		defer func() { _ = ws.Close() }()
+		var req protocol.Request
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			t.Fatalf("receive handshake: %v", err)
+		}
+		if req.Method != protocol.MethodHandshake {
+			t.Fatalf("handshake method = %q", req.Method)
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1", ProjectID: "project-1"}})); err != nil {
+			t.Fatalf("send handshake response: %v", err)
+		}
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			t.Fatalf("receive run prompt: %v", err)
+		}
+		if req.Method != protocol.MethodRunPrompt {
+			t.Fatalf("run prompt method = %q", req.Method)
+		}
+		if err := websocket.JSON.Send(ws, protocol.Request{JSONRPC: protocol.JSONRPCVersion, Method: protocol.MethodRunPromptProgress, Params: mustJSON(t, serverapi.RunPromptProgress{Kind: serverapi.RunPromptProgressKindStatus, Message: "Running tool"})}); err != nil {
+			t.Fatalf("send progress: %v", err)
+		}
+		if err := websocket.JSON.Send(ws, protocol.Request{JSONRPC: protocol.JSONRPCVersion, Method: protocol.MethodRunPromptProgress, Params: mustJSON(t, serverapi.RunPromptProgress{Kind: serverapi.RunPromptProgressKindStatus, Message: "Tool finished"})}); err != nil {
+			t.Fatalf("send progress: %v", err)
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.RunPromptResponse{SessionID: "session-1", SessionName: "Session 1", Result: "done"})); err != nil {
+			t.Fatalf("send response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	remote, err := DialRemote(context.Background(), protocol.DiscoveryRecord{RPCURL: "ws" + server.URL[len("http"):], Identity: protocol.ServerIdentity{ProjectID: "project-1"}})
+	if err != nil {
+		t.Fatalf("DialRemote: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	var updates []serverapi.RunPromptProgress
+	resp, err := remote.RunPrompt(context.Background(), serverapi.RunPromptRequest{ClientRequestID: "req-1", Prompt: "hello"}, serverapi.RunPromptProgressFunc(func(progress serverapi.RunPromptProgress) {
+		updates = append(updates, progress)
+	}))
+	if err != nil {
+		t.Fatalf("RunPrompt: %v", err)
+	}
+	if resp.SessionID != "session-1" || resp.Result != "done" {
+		t.Fatalf("unexpected run prompt response: %+v", resp)
+	}
+	if len(updates) != 2 || updates[0].Message != "Running tool" || updates[1].Message != "Tool finished" {
+		t.Fatalf("unexpected progress updates: %+v", updates)
+	}
+}
+
+func TestRemoteSessionActivitySubscriptionNextHonorsCanceledContext(t *testing.T) {
+	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
+		defer func() { _ = ws.Close() }()
+		var req protocol.Request
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1", ProjectID: "project-1"}})); err != nil {
+			return
+		}
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.AttachResponse{Kind: "session", SessionID: "session-1"})); err != nil {
+			return
+		}
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.SubscribeResponse{})); err != nil {
+			return
+		}
+		<-time.After(2 * time.Second)
+	}))
+	defer server.Close()
+
+	remote, err := DialRemote(context.Background(), protocol.DiscoveryRecord{RPCURL: "ws" + server.URL[len("http"):], Identity: protocol.ServerIdentity{ProjectID: "project-1"}})
+	if err != nil {
+		t.Fatalf("DialRemote: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	sub, err := remote.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := sub.Next(ctx)
+		errCh <- err
+	}()
+
+	<-time.After(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Next error = %v, want context canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Next to honor cancellation")
+	}
+}
+
+func TestRemoteSessionActivitySubscriptionPreservesTranscriptEntries(t *testing.T) {
+	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
+		defer func() { _ = ws.Close() }()
+		var req protocol.Request
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1", ProjectID: "project-1"}})); err != nil {
+			return
+		}
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.AttachResponse{Kind: "session", SessionID: "session-1"})); err != nil {
+			return
+		}
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.SubscribeResponse{})); err != nil {
+			return
+		}
+		evt := protocol.SessionActivityEventParams{Event: clientui.Event{
+			Kind: clientui.EventToolCallStarted,
+			TranscriptEntries: []clientui.ChatEntry{{
+				Role:       "tool_call",
+				Text:       "pwd",
+				ToolCallID: "call-1",
+			}},
+		}}
+		_ = websocket.JSON.Send(ws, protocol.Request{JSONRPC: protocol.JSONRPCVersion, Method: protocol.MethodSessionActivityEvent, Params: mustJSON(t, evt)})
+	}))
+	defer server.Close()
+
+	remote, err := DialRemote(context.Background(), protocol.DiscoveryRecord{RPCURL: "ws" + server.URL[len("http"):], Identity: protocol.ServerIdentity{ProjectID: "project-1"}})
+	if err != nil {
+		t.Fatalf("DialRemote: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	sub, err := remote.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	evt, err := sub.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	if evt.Kind != clientui.EventToolCallStarted {
+		t.Fatalf("event kind = %q, want %q", evt.Kind, clientui.EventToolCallStarted)
+	}
+	if len(evt.TranscriptEntries) != 1 {
+		t.Fatalf("transcript entries len = %d, want 1", len(evt.TranscriptEntries))
+	}
+	if evt.TranscriptEntries[0].Role != "tool_call" || evt.TranscriptEntries[0].Text != "pwd" {
+		t.Fatalf("unexpected transcript entry: %+v", evt.TranscriptEntries[0])
+	}
+}
+
+func TestRemoteSessionActivitySubscriptionPreservesTranscriptCriticalOrderingWithAssistantDeltaProgress(t *testing.T) {
+	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
+		defer func() { _ = ws.Close() }()
+		var req protocol.Request
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1", ProjectID: "project-1"}})); err != nil {
+			return
+		}
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.AttachResponse{Kind: "session", SessionID: "session-1"})); err != nil {
+			return
+		}
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.SubscribeResponse{})); err != nil {
+			return
+		}
+
+		frames := []protocol.Request{
+			{JSONRPC: protocol.JSONRPCVersion, Method: protocol.MethodSessionActivityEvent, Params: mustJSON(t, protocol.SessionActivityEventParams{Event: clientui.Event{
+				Kind:              clientui.EventUserMessageFlushed,
+				TranscriptEntries: []clientui.ChatEntry{{Role: "user", Text: "run tools"}},
+			}})},
+			{JSONRPC: protocol.JSONRPCVersion, Method: protocol.MethodSessionActivityEvent, Params: mustJSON(t, protocol.SessionActivityEventParams{Event: clientui.Event{
+				Kind:           clientui.EventAssistantDelta,
+				AssistantDelta: "inspecting",
+			}})},
+			{JSONRPC: protocol.JSONRPCVersion, Method: protocol.MethodSessionActivityEvent, Params: mustJSON(t, protocol.SessionActivityEventParams{Event: clientui.Event{
+				Kind:              clientui.EventToolCallStarted,
+				TranscriptEntries: []clientui.ChatEntry{{Role: "tool_call", Text: "pwd", ToolCallID: "call-1"}},
+			}})},
+			{JSONRPC: protocol.JSONRPCVersion, Method: protocol.MethodSessionActivityEvent, Params: mustJSON(t, protocol.SessionActivityEventParams{Event: clientui.Event{
+				Kind:              clientui.EventToolCallCompleted,
+				TranscriptEntries: []clientui.ChatEntry{{Role: "tool_result_ok", Text: "ok", ToolCallID: "call-1"}},
+			}})},
+			{JSONRPC: protocol.JSONRPCVersion, Method: protocol.MethodSessionActivityEvent, Params: mustJSON(t, protocol.SessionActivityEventParams{Event: clientui.Event{
+				Kind:              clientui.EventAssistantMessage,
+				TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "done", Phase: "final_answer"}},
+			}})},
+		}
+		for _, frame := range frames {
+			if err := websocket.JSON.Send(ws, frame); err != nil {
+				return
+			}
+		}
+		_ = websocket.JSON.Send(ws, protocol.Request{JSONRPC: protocol.JSONRPCVersion, Method: protocol.MethodSessionActivityComplete, Params: mustJSON(t, protocol.StreamCompleteParams{})})
+	}))
+	defer server.Close()
+
+	remote, err := DialRemote(context.Background(), protocol.DiscoveryRecord{RPCURL: "ws" + server.URL[len("http"):], Identity: protocol.ServerIdentity{ProjectID: "project-1"}})
+	if err != nil {
+		t.Fatalf("DialRemote: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	sub, err := remote.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	// Commentary transcript entries are not currently expressible on the remote
+	// session-activity stream, so assistant_delta is the strongest live-progress
+	// signal the migrated path can preserve alongside transcript-bearing events.
+	sequence := make([]string, 0, 5)
+	for len(sequence) < 5 {
+		evt, err := sub.Next(context.Background())
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		switch evt.Kind {
+		case clientui.EventUserMessageFlushed:
+			if len(evt.TranscriptEntries) != 1 || evt.TranscriptEntries[0].Role != "user" || evt.TranscriptEntries[0].Text != "run tools" {
+				t.Fatalf("unexpected user event: %+v", evt)
+			}
+			sequence = append(sequence, "user")
+		case clientui.EventAssistantDelta:
+			if evt.AssistantDelta != "inspecting" {
+				t.Fatalf("assistant delta = %q, want inspecting", evt.AssistantDelta)
+			}
+			sequence = append(sequence, "assistant_progress")
+		case clientui.EventToolCallStarted:
+			if len(evt.TranscriptEntries) != 1 || evt.TranscriptEntries[0].Role != "tool_call" || evt.TranscriptEntries[0].Text != "pwd" {
+				t.Fatalf("unexpected tool call event: %+v", evt)
+			}
+			sequence = append(sequence, "tool_call")
+		case clientui.EventToolCallCompleted:
+			if len(evt.TranscriptEntries) != 1 || evt.TranscriptEntries[0].Role != "tool_result_ok" || evt.TranscriptEntries[0].ToolCallID != "call-1" {
+				t.Fatalf("unexpected tool result event: %+v", evt)
+			}
+			sequence = append(sequence, "tool_result")
+		case clientui.EventAssistantMessage:
+			if len(evt.TranscriptEntries) != 1 || evt.TranscriptEntries[0].Role != "assistant" || evt.TranscriptEntries[0].Text != "done" || evt.TranscriptEntries[0].Phase != "final_answer" {
+				t.Fatalf("unexpected assistant event: %+v", evt)
+			}
+			sequence = append(sequence, "final")
+		}
+	}
+	want := []string{"user", "assistant_progress", "tool_call", "tool_result", "final"}
+	for i := range want {
+		if sequence[i] != want[i] {
+			t.Fatalf("sequence[%d] = %q, want %q (full=%v)", i, sequence[i], want[i], sequence)
+		}
+	}
+}
+
+func TestProtocolErrorMapsPromptTerminalCodes(t *testing.T) {
+	if err := protocolError(&protocol.ResponseError{Code: protocol.ErrCodePromptNotFound, Message: "missing"}); !errors.Is(err, serverapi.ErrPromptNotFound) {
+		t.Fatalf("expected prompt not found, got %v", err)
+	}
+	if err := protocolError(&protocol.ResponseError{Code: protocol.ErrCodePromptResolved, Message: "resolved"}); !errors.Is(err, serverapi.ErrPromptAlreadyResolved) {
+		t.Fatalf("expected prompt already resolved, got %v", err)
+	}
+	if err := protocolError(&protocol.ResponseError{Code: protocol.ErrCodePromptUnsupported, Message: "unsupported"}); !errors.Is(err, serverapi.ErrPromptUnsupported) {
+		t.Fatalf("expected prompt unsupported, got %v", err)
+	}
+}
+
+func mustJSON(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return data
+}

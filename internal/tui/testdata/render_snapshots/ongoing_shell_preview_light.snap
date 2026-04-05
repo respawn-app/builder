@@ -1,4 +1,0 @@
-$ <ESC>[38;2;92;99;112;2m<ESC>[38;5;237;2m./gradlew -p apps/respawn
-  <ESC>[38;2;92;99;112;2;2mdetektFormat > docs/tmp/build-<ESC>[0;38;2;92;99;112;2m
-  <ESC>[38;2;92;99;112;2;2mtriage-2026-03-15/detektFormat.log<ESC>[0;38;2;92;99;112;2m
-  2><ESC>[0;38;2;92;99;112;2m<ESC>[38;5;235;2m&<ESC>[0;38;2;92;99;112;2m<ESC>[38;5;25;2m1<ESC>[0;38;2;92;99;112;2m<ESC>[0m
