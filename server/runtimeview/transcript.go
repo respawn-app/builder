@@ -1,0 +1,188 @@
+package runtimeview
+
+import (
+	"builder/server/runtime"
+	"builder/shared/clientui"
+)
+
+const OngoingTailEntryLimit = 500
+
+func TranscriptPageFromRuntime(engine *runtime.Engine, req clientui.TranscriptPageRequest) clientui.TranscriptPage {
+	if engine == nil {
+		return clientui.TranscriptPage{}
+	}
+	req = NormalizeDefaultTranscriptRequest(req)
+	if req.Window == clientui.TranscriptWindowOngoingTail {
+		return TranscriptPageFromWindow(
+			engine.SessionID(),
+			engine.SessionName(),
+			ConversationFreshnessFromSession(engine.ConversationFreshness()),
+			engine.TranscriptRevision(),
+			engine.OngoingTailTranscriptWindow(OngoingTailEntryLimit),
+		)
+	}
+	offset, limit := transcriptOffsetAndLimit(req)
+	page := engine.TranscriptPageSnapshot(offset, limit)
+	return TranscriptPageFromCollectedChat(
+		engine.SessionID(),
+		engine.SessionName(),
+		ConversationFreshnessFromSession(engine.ConversationFreshness()),
+		engine.TranscriptRevision(),
+		ChatSnapshotFromRuntime(page.Snapshot),
+		page.TotalEntries,
+		page.Offset,
+		clientui.TranscriptPageRequest{Offset: page.Offset, Limit: limit},
+	)
+}
+
+func NormalizeDefaultTranscriptRequest(req clientui.TranscriptPageRequest) clientui.TranscriptPageRequest {
+	if req == (clientui.TranscriptPageRequest{}) {
+		return clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}
+	}
+	return req
+}
+
+func transcriptOffsetAndLimit(req clientui.TranscriptPageRequest) (int, int) {
+	if req.PageSize > 0 {
+		offset := req.Page * req.PageSize
+		if offset < 0 {
+			offset = 0
+		}
+		return offset, req.PageSize
+	}
+	offset := req.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	limit := req.Limit
+	if limit < 0 {
+		limit = 0
+	}
+	return offset, limit
+}
+
+func TranscriptPageFromWindow(sessionID, sessionName string, freshness clientui.ConversationFreshness, revision int64, window runtime.TranscriptWindowSnapshot) clientui.TranscriptPage {
+	return TranscriptPageFromCollectedChat(
+		sessionID,
+		sessionName,
+		freshness,
+		revision,
+		ChatSnapshotFromRuntime(window.Snapshot),
+		window.TotalEntries,
+		window.Offset,
+		clientui.TranscriptPageRequest{Offset: window.Offset, Limit: window.TotalEntries - window.Offset},
+	)
+}
+
+func TranscriptPageFromCollectedChat(sessionID, sessionName string, freshness clientui.ConversationFreshness, revision int64, snapshot clientui.ChatSnapshot, totalEntries, baseOffset int, req clientui.TranscriptPageRequest) clientui.TranscriptPage {
+	page := transcriptPageFromNormalizedRequest(
+		sessionID,
+		sessionName,
+		freshness,
+		revision,
+		snapshot,
+		totalEntries,
+		baseOffset,
+		req,
+	)
+	page.Ongoing = snapshot.Ongoing
+	page.OngoingError = snapshot.OngoingError
+	return page
+}
+
+func TranscriptPageFromChat(sessionID, sessionName string, freshness clientui.ConversationFreshness, revision int64, snapshot clientui.ChatSnapshot, req clientui.TranscriptPageRequest) clientui.TranscriptPage {
+	total := len(snapshot.Entries)
+	return transcriptPageFromNormalizedRequest(sessionID, sessionName, freshness, revision, snapshot, total, 0, req)
+}
+
+func transcriptPageFromNormalizedRequest(sessionID, sessionName string, freshness clientui.ConversationFreshness, revision int64, snapshot clientui.ChatSnapshot, totalEntries, baseOffset int, req clientui.TranscriptPageRequest) clientui.TranscriptPage {
+	offset, limit := normalizeTranscriptPageRequest(req, totalEntries, baseOffset)
+	total := len(snapshot.Entries)
+	start := offset - baseOffset
+	if start < 0 {
+		start = 0
+	}
+	if start > total {
+		start = total
+	}
+	end := total
+	if limit > 0 && start+limit < end {
+		end = start + limit
+	}
+	entries := cloneChatEntries(snapshot.Entries[start:end])
+	nextOffset := 0
+	hasMore := offset+(end-start) < totalEntries
+	if hasMore {
+		nextOffset = offset + (end - start)
+	}
+	return clientui.TranscriptPage{
+		SessionID:             sessionID,
+		SessionName:           sessionName,
+		ConversationFreshness: freshness,
+		Revision:              revision,
+		TotalEntries:          totalEntries,
+		Offset:                offset,
+		NextOffset:            nextOffset,
+		HasMore:               hasMore,
+		Entries:               entries,
+		Ongoing:               snapshot.Ongoing,
+		OngoingError:          snapshot.OngoingError,
+	}
+}
+
+func normalizeTranscriptPageRequest(req clientui.TranscriptPageRequest, totalEntries, baseOffset int) (offset, limit int) {
+	if req.PageSize > 0 {
+		limit = req.PageSize
+		offset = req.Page * req.PageSize
+	} else {
+		offset = req.Offset
+		limit = req.Limit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset < baseOffset {
+		offset = baseOffset
+	}
+	if totalEntries < 0 {
+		totalEntries = 0
+	}
+	if offset > totalEntries {
+		offset = totalEntries
+	}
+	if limit < 0 {
+		limit = 0
+	}
+	return offset, limit
+}
+
+func cloneChatEntries(entries []clientui.ChatEntry) []clientui.ChatEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	cloned := make([]clientui.ChatEntry, 0, len(entries))
+	for _, entry := range entries {
+		copyEntry := entry
+		copyEntry.ToolCall = cloneClientToolCallMeta(entry.ToolCall)
+		cloned = append(cloned, copyEntry)
+	}
+	return cloned
+}
+
+func cloneClientToolCallMeta(meta *clientui.ToolCallMeta) *clientui.ToolCallMeta {
+	if meta == nil {
+		return nil
+	}
+	copyMeta := *meta
+	if len(meta.Suggestions) > 0 {
+		copyMeta.Suggestions = append([]string(nil), meta.Suggestions...)
+	}
+	if meta.RenderHint != nil {
+		renderHint := *meta.RenderHint
+		copyMeta.RenderHint = &renderHint
+	}
+	if meta.PatchRender != nil {
+		copyMeta.PatchRender = cloneRenderedPatch(meta.PatchRender)
+	}
+	return &copyMeta
+}

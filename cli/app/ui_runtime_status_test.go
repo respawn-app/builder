@@ -1,0 +1,111 @@
+package app
+
+import (
+	"testing"
+
+	"builder/server/llm"
+	"builder/server/runtime"
+	"builder/server/session"
+	"builder/server/tools"
+	"builder/shared/clientui"
+)
+
+func TestRuntimeStatusUsesLocalFallbackWhenRuntimeClientMissing(t *testing.T) {
+	m := newProjectedStaticUIModel(
+		WithUIThinkingLevel("high"),
+		WithUIFastModeAvailable(true),
+		WithUIFastModeEnabled(true),
+		WithUIConversationFreshness(session.ConversationFreshnessEstablished),
+	)
+	m.reviewerMode = "edits"
+	m.reviewerEnabled = true
+	m.autoCompactionEnabled = true
+
+	status := m.runtimeStatus()
+	if status.ReviewerFrequency != "edits" {
+		t.Fatalf("reviewer frequency = %q, want edits", status.ReviewerFrequency)
+	}
+	if !status.ReviewerEnabled {
+		t.Fatal("expected reviewer enabled in local fallback status")
+	}
+	if !status.AutoCompactionEnabled {
+		t.Fatal("expected auto-compaction enabled in local fallback status")
+	}
+	if !status.FastModeAvailable || !status.FastModeEnabled {
+		t.Fatalf("expected fast mode flags in local fallback status, got available=%v enabled=%v", status.FastModeAvailable, status.FastModeEnabled)
+	}
+	if status.ConversationFreshness != clientui.ConversationFreshnessEstablished {
+		t.Fatalf("conversation freshness = %v, want established", status.ConversationFreshness)
+	}
+	if status.ThinkingLevel != "high" {
+		t.Fatalf("thinking level = %q, want high", status.ThinkingLevel)
+	}
+	if status.ParentSessionID != "" || status.LastCommittedAssistantFinalAnswer != "" {
+		t.Fatalf("expected empty runtime-backed fields in local fallback status, got %+v", status)
+	}
+}
+
+func TestRuntimeStatusUsesLoopbackRuntimeSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.SetParentSessionID("parent-123"); err != nil {
+		t.Fatalf("set parent session id: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "hello"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: "final answer", Phase: llm.MessagePhaseFinal}); err != nil {
+		t.Fatalf("append assistant message: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFastClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.SetThinkingLevel("high"); err != nil {
+		t.Fatalf("set thinking level: %v", err)
+	}
+	if changed, err := eng.SetFastModeEnabled(true); err != nil {
+		t.Fatalf("enable fast mode: %v", err)
+	} else if !changed {
+		t.Fatal("expected fast mode enable to report changed=true")
+	}
+	if changed, enabled := eng.SetAutoCompactionEnabled(false); !changed || enabled {
+		t.Fatalf("expected auto-compaction disabled, changed=%v enabled=%v", changed, enabled)
+	}
+
+	m := newProjectedEngineUIModel(eng)
+	status := m.runtimeStatus()
+	if status.ReviewerFrequency != "off" || status.ReviewerEnabled {
+		t.Fatalf("unexpected reviewer status: %+v", status)
+	}
+	if status.AutoCompactionEnabled {
+		t.Fatal("expected auto-compaction disabled in runtime status")
+	}
+	if !status.FastModeAvailable || !status.FastModeEnabled {
+		t.Fatalf("expected fast mode enabled in runtime status, got available=%v enabled=%v", status.FastModeAvailable, status.FastModeEnabled)
+	}
+	if status.ConversationFreshness != clientui.ConversationFreshnessEstablished {
+		t.Fatalf("conversation freshness = %v, want established", status.ConversationFreshness)
+	}
+	if status.ParentSessionID != "parent-123" {
+		t.Fatalf("parent session id = %q, want parent-123", status.ParentSessionID)
+	}
+	if status.LastCommittedAssistantFinalAnswer != "final answer" {
+		t.Fatalf("last committed assistant answer = %q, want final answer", status.LastCommittedAssistantFinalAnswer)
+	}
+	if status.ThinkingLevel != "high" {
+		t.Fatalf("thinking level = %q, want high", status.ThinkingLevel)
+	}
+	if status.CompactionMode != "native" {
+		t.Fatalf("compaction mode = %q, want native", status.CompactionMode)
+	}
+	if status.ContextUsage.WindowTokens != 400_000 {
+		t.Fatalf("context window tokens = %d, want 400000", status.ContextUsage.WindowTokens)
+	}
+	if status.CompactionCount != 0 {
+		t.Fatalf("compaction count = %d, want 0", status.CompactionCount)
+	}
+}

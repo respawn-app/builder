@@ -9,33 +9,49 @@ The scope is intentionally narrow and quality-oriented.
 
 ## Repository Layout
 
-- `cmd/builder/main.go`
+- `cli/builder/main.go`
   - CLI entrypoint for launching the Bubble Tea app.
 - `VERSION`
   - Source of truth for release version/tag used by the release workflow and versioned builds.
-- `internal/app`
+- `cli/app`
   - Startup orchestration, auth gating, session selection, and top-level UI composition.
-- `internal/runtime`
+- `server/runtime`
   - Agent step loop, retries, transcript assembly, tool orchestration, lock handling, interrupts.
-- `internal/session`
+- `server/bootstrap`
+  - Server-owned embedded bootstrap composition for config/container resolution, auth-manager creation, and runtime-support setup shared by CLI flows.
+- `server/embedded`
+  - Explicit in-process app-server composition root used by the CLI in embedded mode; owns startup orchestration across bootstrap/auth/onboarding hooks and exposes server capabilities to frontends.
+- `server/authflow`
+  - Server-owned auth readiness loop and env-backed auth-store policy used by CLI auth UX.
+- `server/lifecycle`
+  - Server-owned interactive lifecycle mutations such as draft persistence, rollback fork creation, and logout-state clearing.
+- `server/runtimeview`
+  - Server-owned projection from runtime-native events and chat snapshots into client-facing UI DTOs.
+- `server/launch`
+  - Server-owned bootstrap continuation resolution and session open/create/hydration planning shared by interactive and headless flows.
+- `server/runtimewire`
+  - Server-owned runtime preparation, local tool registry construction, background-event routing, outside-workspace approvals, and runtime event bridging.
+- `server/session`
   - Session persistence (`session.json`, `events.jsonl`) and resume/list primitives.
-- `internal/tools`
+- `server/tools`
   - Tool contracts and concrete tools (`shell`, `patch`, `ask_question`).
-- `internal/llm`
+- `server/llm`
   - Model-facing contracts and OpenAI transport/client adapters.
-- `internal/auth`
+- `server/auth`
   - Global auth state, method switching policy, startup gate, OAuth refresh plumbing.
-- `internal/tui`
+- `cli/tui`
   - Mode-specific UI behavior (`ongoing`/`detail`) and rendering helpers.
-- `internal/config`
+- `shared/config`
   - Persistence root/workspace container resolution and app-level paths.
-- `internal/actions`
+- `shared/clientui`
+  - Client-facing UI event and snapshot DTOs used by frontend adapters instead of runtime-native structs.
+- `cli/actions`
   - Typed action registry scaffold for `ask_question` post-answer hooks.
 - `docs`
   - Public Astro/Starlight documentation site. Internal product/engineering docs stay under `docs/dev`, and scratch/internal working notes stay under `docs/tmp`. Keep docs up-to-date on your own and proactively.
 - `prompts`
   - Embedded prompt source files.
-- `internal/tools/definitions.go`
+- `server/tools/definitions.go`
   - Centralized compile-time tool interface declarations (name, descriptions, JSON schemas).
 - `~/.builder/config.toml`
   - Home settings file (auto-created on first run) for model, thinking level, tool toggles, timeouts, and theme.
@@ -83,11 +99,14 @@ If user asks you to fix a github issue and you commit the fix, use 'closes #xx' 
 ## Important rules:
 
 - All business logic covered by tests. Production code is written to be unit-testable.
+- Use red/green TDD when developing new features.
 - Before handing off to the user after code changes, rebuild the binary to `./bin/builder` and make sure tests are written and green. Don't ask for confirmation to write tests and run checks.
 - Run Go tests via `./scripts/test.sh` passing normal go test arguments.
+- Do not run interactive/manual TUI QA unless the user explicitly asks for it. Prefer non-interactive tests, targeted automation, and build verification by default.
 - Releases are driven by `VERSION` and `.github/workflows/release.yml`; keep Homebrew release plumbing in sync with `scripts/update-brew-tap.sh` and the tap formula. Tap formula lives in a separate repo.
 - `docs/dev/decisions.md` is the source of truth for locked product and architecture decisions, keep it up to date if user makes a new decision.
 - Ongoing mode must not use `?1007`.
 - Ongoing normal-buffer transcript history is append-only after startup. Once a line is emitted into scrollback, it is immutable: never retroactively restyle it, rewrite it, clear-and-replay it, or re-emit the full buffer to reflect later tool state.
 - Proactively keep documentation up-to-date on your own when you make UX or other user-facing changes. Example areas that warrant a docs check include setup, startup, config, env variables, slash commands, model providers, etc.
 - Keep this AGENTS.md file up-to-date and comprehensive. Avoid adding info that can become outdated, otherwise keep this as project guidelines, rules, and learnings for future team members. Persist info that should be preserved here.
+- Full transcript history is unbounded & weighs gigabytes, thus no code must ever attempt to load `events.jsonl` fully into memory.

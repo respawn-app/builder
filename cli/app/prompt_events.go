@@ -1,0 +1,283 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"sync"
+	"time"
+
+	askquestion "builder/server/tools/askquestion"
+	"builder/shared/client"
+	"builder/shared/clientui"
+	"builder/shared/serverapi"
+	"github.com/google/uuid"
+)
+
+const promptActivityResubscribeDelay = 250 * time.Millisecond
+
+type promptActivitySubscriber func(context.Context) (serverapi.PromptActivitySubscription, error)
+type pendingPromptSnapshotProvider func(context.Context) (map[string]struct{}, error)
+
+type promptEventEmitter struct {
+	mu     sync.RWMutex
+	closed bool
+	out    chan askEvent
+}
+
+func newPromptEventEmitter(size int) *promptEventEmitter {
+	return &promptEventEmitter{out: make(chan askEvent, size)}
+}
+
+func (e *promptEventEmitter) channel() <-chan askEvent {
+	if e == nil {
+		return nil
+	}
+	return e.out
+}
+
+func (e *promptEventEmitter) emit(ctx context.Context, evt askEvent) bool {
+	if e == nil {
+		return false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.closed {
+		return false
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case e.out <- evt:
+		return true
+	}
+}
+
+func (e *promptEventEmitter) close() {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return
+	}
+	e.closed = true
+	close(e.out)
+}
+
+func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivitySubscription, subscribe promptActivitySubscriber, snapshot pendingPromptSnapshotProvider, control client.PromptControlClient) (<-chan askEvent, func()) {
+	emitter := newPromptEventEmitter(16)
+	out := emitter.channel()
+	if sub == nil || subscribe == nil || control == nil {
+		emitter.close()
+		return out, func() {}
+	}
+	pollCtx, cancel := context.WithCancel(ctx)
+	var pendingMu sync.Mutex
+	pendingPromptIDs := make(map[string]struct{})
+	isPromptPending := func(promptID string) bool {
+		pendingMu.Lock()
+		defer pendingMu.Unlock()
+		_, exists := pendingPromptIDs[promptID]
+		return exists
+	}
+	var requeue func(clientui.PendingPromptEvent)
+	requeue = func(item clientui.PendingPromptEvent) {
+		if !isPromptPending(item.PromptID) {
+			return
+		}
+		_ = emitter.emit(pollCtx, pendingPromptEvent(pollCtx, item, control, requeue))
+	}
+	go func() {
+		defer emitter.close()
+		current := sub
+		for {
+			evt, err := current.Next(pollCtx)
+			if err != nil {
+				_ = current.Close()
+				if errors.Is(err, context.Canceled) {
+					return
+				}
+				for {
+					nextSub, err := resubscribePromptActivity(pollCtx, subscribe)
+					if err != nil {
+						return
+					}
+					if err := reconcilePendingPromptSnapshot(pollCtx, snapshot, &pendingMu, pendingPromptIDs, emitter); err != nil {
+						if errors.Is(err, context.Canceled) {
+							_ = nextSub.Close()
+							return
+						}
+						_ = nextSub.Close()
+						continue
+					}
+					current = nextSub
+					break
+				}
+				continue
+			}
+			if strings.TrimSpace(evt.PromptID) == "" {
+				continue
+			}
+			switch evt.Type {
+			case clientui.PendingPromptEventResolved:
+				pendingMu.Lock()
+				delete(pendingPromptIDs, evt.PromptID)
+				pendingMu.Unlock()
+				if !emitter.emit(pollCtx, resolvedPromptEvent(evt.PromptID)) {
+					_ = current.Close()
+					return
+				}
+				continue
+			case clientui.PendingPromptEventPending:
+				pendingMu.Lock()
+				if _, exists := pendingPromptIDs[evt.PromptID]; exists {
+					pendingMu.Unlock()
+					continue
+				}
+				pendingPromptIDs[evt.PromptID] = struct{}{}
+				pendingMu.Unlock()
+			default:
+				continue
+			}
+			if !emitter.emit(pollCtx, pendingPromptEvent(pollCtx, evt, control, requeue)) {
+				_ = current.Close()
+				return
+			}
+		}
+	}()
+	return out, cancel
+}
+
+func reconcilePendingPromptSnapshot(ctx context.Context, snapshot pendingPromptSnapshotProvider, pendingMu *sync.Mutex, pendingPromptIDs map[string]struct{}, emitter *promptEventEmitter) error {
+	if snapshot == nil {
+		return nil
+	}
+	currentPending, err := snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	resolved := make([]string, 0)
+	pendingMu.Lock()
+	for promptID := range pendingPromptIDs {
+		if _, ok := currentPending[promptID]; ok {
+			continue
+		}
+		delete(pendingPromptIDs, promptID)
+		resolved = append(resolved, promptID)
+	}
+	pendingMu.Unlock()
+	for _, promptID := range resolved {
+		if !emitter.emit(ctx, resolvedPromptEvent(promptID)) {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return context.Canceled
+		}
+	}
+	return nil
+}
+
+func resubscribePromptActivity(ctx context.Context, subscribe promptActivitySubscriber) (serverapi.PromptActivitySubscription, error) {
+	for {
+		if !waitPromptActivityRetry(ctx) {
+			return nil, ctx.Err()
+		}
+		sub, err := subscribe(ctx)
+		if err == nil {
+			return sub, nil
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+	}
+}
+
+func waitPromptActivityRetry(ctx context.Context) bool {
+	timer := time.NewTimer(promptActivityResubscribeDelay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func pendingPromptEvent(ctx context.Context, item clientui.PendingPromptEvent, control client.PromptControlClient, retry func(clientui.PendingPromptEvent)) askEvent {
+	req := askquestion.Request{
+		ID:                     item.PromptID,
+		Question:               item.Question,
+		Suggestions:            append([]string(nil), item.Suggestions...),
+		RecommendedOptionIndex: item.RecommendedOptionIndex,
+		Approval:               item.Approval,
+	}
+	if len(item.ApprovalOptions) > 0 {
+		req.ApprovalOptions = make([]askquestion.ApprovalOption, 0, len(item.ApprovalOptions))
+		for _, option := range item.ApprovalOptions {
+			req.ApprovalOptions = append(req.ApprovalOptions, askquestion.ApprovalOption{Decision: askquestion.ApprovalDecision(option.Decision), Label: option.Label})
+		}
+	}
+	reply := make(chan askReply, 1)
+	promptCtx, cancelPrompt := context.WithCancel(ctx)
+	go func() {
+		var (
+			result askReply
+			ok     bool
+		)
+		select {
+		case <-promptCtx.Done():
+			return
+		case result, ok = <-reply:
+			if !ok {
+				return
+			}
+		}
+		if item.Approval {
+			answerReq := serverapi.ApprovalAnswerRequest{ClientRequestID: uuid.NewString(), SessionID: item.SessionID, ApprovalID: item.PromptID}
+			if result.err != nil {
+				answerReq.ErrorMessage = result.err.Error()
+			} else if result.response.Approval != nil {
+				answerReq.Decision = clientui.ApprovalDecision(result.response.Approval.Decision)
+				answerReq.Commentary = result.response.Approval.Commentary
+			} else {
+				answerReq.ErrorMessage = errors.New("approval response is required").Error()
+			}
+			if err := control.AnswerApproval(promptCtx, answerReq); err != nil {
+				if retry != nil && shouldRetryPromptAnswerError(err) {
+					retry(item)
+				}
+			}
+			return
+		}
+		answerReq := serverapi.AskAnswerRequest{ClientRequestID: uuid.NewString(), SessionID: item.SessionID, AskID: item.PromptID}
+		if result.err != nil {
+			answerReq.ErrorMessage = result.err.Error()
+		} else {
+			answerReq.Answer = result.response.Answer
+			answerReq.SelectedOptionNumber = result.response.SelectedOptionNumber
+			answerReq.FreeformAnswer = result.response.FreeformAnswer
+		}
+		if err := control.AnswerAsk(promptCtx, answerReq); err != nil {
+			if retry != nil && shouldRetryPromptAnswerError(err) {
+				retry(item)
+			}
+		}
+	}()
+	return askEvent{req: req, reply: reply, cancel: cancelPrompt}
+}
+
+func resolvedPromptEvent(promptID string) askEvent {
+	return askEvent{resolvedPromptID: strings.TrimSpace(promptID)}
+}
+
+func shouldRetryPromptAnswerError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, serverapi.ErrPromptNotFound) || errors.Is(err, serverapi.ErrPromptAlreadyResolved) || errors.Is(err, serverapi.ErrPromptUnsupported) {
+		return false
+	}
+	return true
+}

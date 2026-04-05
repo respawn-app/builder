@@ -1,0 +1,250 @@
+package runtimeview
+
+import (
+	"builder/server/llm"
+	"builder/server/runtime"
+	"builder/server/session"
+	patchformat "builder/server/tools/patch/format"
+	"builder/shared/clientui"
+	"builder/shared/transcript"
+)
+
+func MainViewFromRuntime(engine *runtime.Engine) clientui.RuntimeMainView {
+	if engine == nil {
+		return clientui.RuntimeMainView{}
+	}
+	sessionView := SessionViewFromRuntime(engine)
+	return clientui.RuntimeMainView{
+		Status:    StatusFromRuntime(engine),
+		Session:   sessionView,
+		ActiveRun: RunViewFromRuntime(sessionView.SessionID, engine.ActiveRun()),
+	}
+}
+
+func StatusFromRuntime(engine *runtime.Engine) clientui.RuntimeStatus {
+	if engine == nil {
+		return clientui.RuntimeStatus{}
+	}
+	usage := engine.ContextUsage()
+	return clientui.RuntimeStatus{
+		ReviewerFrequency:                 engine.ReviewerFrequency(),
+		ReviewerEnabled:                   engine.ReviewerEnabled(),
+		AutoCompactionEnabled:             engine.AutoCompactionEnabled(),
+		FastModeAvailable:                 engine.FastModeAvailable(),
+		FastModeEnabled:                   engine.FastModeEnabled(),
+		ConversationFreshness:             ConversationFreshnessFromSession(engine.ConversationFreshness()),
+		ParentSessionID:                   engine.ParentSessionID(),
+		LastCommittedAssistantFinalAnswer: engine.LastCommittedAssistantFinalAnswer(),
+		ThinkingLevel:                     engine.ThinkingLevel(),
+		CompactionMode:                    engine.CompactionMode(),
+		ContextUsage: clientui.RuntimeContextUsage{
+			UsedTokens:            usage.UsedTokens,
+			WindowTokens:          usage.WindowTokens,
+			CacheHitPercent:       usage.CacheHitPercent,
+			HasCacheHitPercentage: usage.HasCacheHitPercentage,
+		},
+		CompactionCount: engine.CompactionCount(),
+	}
+}
+
+func SessionViewFromRuntime(engine *runtime.Engine) clientui.RuntimeSessionView {
+	if engine == nil {
+		return clientui.RuntimeSessionView{}
+	}
+	return clientui.RuntimeSessionView{
+		SessionID:             engine.SessionID(),
+		SessionName:           engine.SessionName(),
+		ConversationFreshness: ConversationFreshnessFromSession(engine.ConversationFreshness()),
+		Transcript: clientui.TranscriptMetadata{
+			Revision:            engine.TranscriptRevision(),
+			CommittedEntryCount: engine.CommittedTranscriptEntryCount(),
+		},
+	}
+}
+
+func ConversationFreshnessFromSession(freshness session.ConversationFreshness) clientui.ConversationFreshness {
+	if freshness.IsFresh() {
+		return clientui.ConversationFreshnessFresh
+	}
+	return clientui.ConversationFreshnessEstablished
+}
+
+func EventFromRuntime(evt runtime.Event) clientui.Event {
+	view := clientui.Event{
+		Kind:                clientui.EventKind(evt.Kind),
+		StepID:              evt.StepID,
+		TranscriptRevision:  evt.TranscriptRevision,
+		CommittedEntryCount: evt.CommittedEntryCount,
+		Error:               evt.Error,
+		AssistantDelta:      evt.AssistantDelta,
+		UserMessage:         evt.UserMessage,
+		UserMessageBatch:    append([]string(nil), evt.UserMessageBatch...),
+		TranscriptEntries:   chatEntriesFromRuntime(runtime.TranscriptEntriesFromEvent(evt)),
+	}
+	if evt.ReasoningDelta != nil {
+		view.ReasoningDelta = &clientui.ReasoningDelta{
+			Key:  evt.ReasoningDelta.Key,
+			Role: evt.ReasoningDelta.Role,
+			Text: evt.ReasoningDelta.Text,
+		}
+	}
+	if evt.RunState != nil {
+		view.RunState = &clientui.RunState{
+			Busy:       evt.RunState.Busy,
+			RunID:      evt.RunState.RunID,
+			Status:     clientui.RunStatus(evt.RunState.Status),
+			StartedAt:  evt.RunState.StartedAt,
+			FinishedAt: evt.RunState.FinishedAt,
+		}
+	}
+	if evt.Background != nil {
+		view.Background = &clientui.BackgroundShellEvent{
+			Type:              evt.Background.Type,
+			ID:                evt.Background.ID,
+			State:             evt.Background.State,
+			Command:           evt.Background.Command,
+			Workdir:           evt.Background.Workdir,
+			LogPath:           evt.Background.LogPath,
+			NoticeText:        evt.Background.NoticeText,
+			CompactText:       evt.Background.CompactText,
+			Preview:           evt.Background.Preview,
+			Removed:           evt.Background.Removed,
+			UserRequestedKill: evt.Background.UserRequestedKill,
+			NoticeSuppressed:  evt.Background.NoticeSuppressed,
+		}
+		if evt.Background.ExitCode != nil {
+			exitCode := *evt.Background.ExitCode
+			view.Background.ExitCode = &exitCode
+		}
+	}
+	return view
+}
+
+func chatEntriesFromRuntime(entries []runtime.ChatEntry) []clientui.ChatEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]clientui.ChatEntry, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, clientui.ChatEntry{
+			Role:        entry.Role,
+			Text:        entry.Text,
+			OngoingText: entry.OngoingText,
+			Phase:       string(entry.Phase),
+			ToolCallID:  entry.ToolCallID,
+			ToolCall:    cloneToolCallMeta(entry.ToolCall),
+		})
+	}
+	return out
+}
+
+func RunViewFromRuntime(sessionID string, snapshot *runtime.RunSnapshot) *clientui.RunView {
+	if snapshot == nil {
+		return nil
+	}
+	return &clientui.RunView{
+		RunID:      snapshot.RunID,
+		SessionID:  sessionID,
+		StepID:     snapshot.StepID,
+		Status:     clientui.RunStatus(snapshot.Status),
+		StartedAt:  snapshot.StartedAt,
+		FinishedAt: snapshot.FinishedAt,
+	}
+}
+
+func RunViewFromSessionRecord(sessionID string, record *session.RunRecord) *clientui.RunView {
+	if record == nil {
+		return nil
+	}
+	return &clientui.RunView{
+		RunID:      record.RunID,
+		SessionID:  sessionID,
+		StepID:     record.StepID,
+		Status:     clientui.RunStatus(record.Status),
+		StartedAt:  record.StartedAt,
+		FinishedAt: record.FinishedAt,
+	}
+}
+
+func ChatSnapshotFromRuntime(snapshot runtime.ChatSnapshot) clientui.ChatSnapshot {
+	entries := make([]clientui.ChatEntry, 0, len(snapshot.Entries))
+	for _, entry := range snapshot.Entries {
+		entries = append(entries, clientui.ChatEntry{
+			Role:        entry.Role,
+			Text:        entry.Text,
+			OngoingText: entry.OngoingText,
+			Phase:       string(entry.Phase),
+			ToolCallID:  entry.ToolCallID,
+			ToolCall:    cloneToolCallMeta(entry.ToolCall),
+		})
+	}
+	return clientui.ChatSnapshot{
+		Entries:      entries,
+		Ongoing:      snapshot.Ongoing,
+		OngoingError: snapshot.OngoingError,
+	}
+}
+
+func cloneToolCallMeta(meta *transcript.ToolCallMeta) *clientui.ToolCallMeta {
+	if meta == nil {
+		return nil
+	}
+	copyMeta := &clientui.ToolCallMeta{
+		ToolName:               meta.ToolName,
+		Presentation:           clientui.ToolPresentationKind(meta.Presentation),
+		RenderBehavior:         clientui.ToolCallRenderBehavior(meta.RenderBehavior),
+		IsShell:                meta.IsShell,
+		UserInitiated:          meta.UserInitiated,
+		Command:                meta.Command,
+		CompactText:            meta.CompactText,
+		InlineMeta:             meta.InlineMeta,
+		TimeoutLabel:           meta.TimeoutLabel,
+		PatchSummary:           meta.PatchSummary,
+		PatchDetail:            meta.PatchDetail,
+		Question:               meta.Question,
+		RecommendedOptionIndex: meta.RecommendedOptionIndex,
+		OmitSuccessfulResult:   meta.OmitSuccessfulResult,
+	}
+	if len(meta.Suggestions) > 0 {
+		copyMeta.Suggestions = append([]string(nil), meta.Suggestions...)
+	}
+	if meta.RenderHint != nil {
+		copyMeta.RenderHint = &clientui.ToolRenderHint{
+			Kind:       clientui.ToolRenderKind(meta.RenderHint.Kind),
+			Path:       meta.RenderHint.Path,
+			ResultOnly: meta.RenderHint.ResultOnly,
+		}
+	}
+	if meta.PatchRender != nil {
+		copyMeta.PatchRender = cloneRenderedPatch(meta.PatchRender)
+	}
+	return copyMeta
+}
+
+func cloneRenderedPatch(in *patchformat.RenderedPatch) *patchformat.RenderedPatch {
+	if in == nil {
+		return nil
+	}
+	out := &patchformat.RenderedPatch{}
+	if len(in.Files) > 0 {
+		out.Files = make([]patchformat.RenderedFile, 0, len(in.Files))
+		for _, file := range in.Files {
+			copyFile := file
+			if len(file.Diff) > 0 {
+				copyFile.Diff = append([]string(nil), file.Diff...)
+			}
+			out.Files = append(out.Files, copyFile)
+		}
+	}
+	if len(in.SummaryLines) > 0 {
+		out.SummaryLines = append([]patchformat.RenderedLine(nil), in.SummaryLines...)
+	}
+	if len(in.DetailLines) > 0 {
+		out.DetailLines = append([]patchformat.RenderedLine(nil), in.DetailLines...)
+	}
+	return out
+}
+
+func MessagePhase(raw string) llm.MessagePhase {
+	return llm.MessagePhase(raw)
+}

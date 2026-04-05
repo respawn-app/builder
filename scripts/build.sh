@@ -8,14 +8,14 @@ cd "$repo_root"
 
 usage() {
 	cat <<'USAGE'
-Usage: scripts/build.sh --output /path/to/builder [--version vX.Y.Z|X.Y.Z] [--package ./cmd/builder]
+Usage: scripts/build.sh --output /path/to/builder [--version vX.Y.Z|X.Y.Z] [--package ./cli/builder]
 
 Builds a release-profile Builder binary using a static Go toolchain configuration.
 
 Options:
   --output   Output path for the compiled binary.
   --version  Override the embedded Builder version. Defaults to BUILDER_VERSION or VERSION.
-  --package  Main package to build. Defaults to ./cmd/builder.
+  --package  Main package to build. Defaults to ./cli/builder.
 USAGE
 }
 
@@ -28,7 +28,7 @@ read_version() {
 }
 
 output=""
-package_path="./cmd/builder"
+package_path="./cli/builder"
 version=""
 
 while [[ $# -gt 0 ]]; do
@@ -72,7 +72,7 @@ mkdir -p "$(dirname -- "$output")"
 
 ldflags=(-s -w)
 if [ -n "$version" ]; then
-	ldflags+=(-X "builder/internal/buildinfo.Version=${version}")
+	ldflags+=(-X "builder/shared/buildinfo.Version=${version}")
 fi
 
 env CGO_ENABLED="${CGO_ENABLED:-0}" \

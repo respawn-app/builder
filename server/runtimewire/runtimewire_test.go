@@ -1,0 +1,284 @@
+package runtimewire
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"builder/server/auth"
+	"builder/server/llm"
+	"builder/server/runtime"
+	"builder/server/session"
+	"builder/server/tools"
+	"builder/server/tools/askquestion"
+	patchtool "builder/server/tools/patch"
+	shelltool "builder/server/tools/shell"
+	"builder/shared/config"
+)
+
+func TestBuildToolRegistryAllowsHostedWebSearchWithoutLocalRuntimeBuilder(t *testing.T) {
+	workspace := t.TempDir()
+
+	registry, _, _, err := BuildToolRegistry(
+		workspace,
+		"",
+		[]tools.ID{tools.ToolShell, tools.ToolWebSearch},
+		5*time.Second,
+		15*time.Second,
+		16_000,
+		false,
+		true,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("build tool registry: %v", err)
+	}
+
+	defs := registry.Definitions()
+	if len(defs) != 1 {
+		t.Fatalf("expected only local runtime tools in registry, got %d", len(defs))
+	}
+	if defs[0].ID != tools.ToolShell {
+		t.Fatalf("expected shell runtime tool definition, got %+v", defs[0])
+	}
+}
+
+func TestBuildToolRegistryViewImageApprovedOutsidePathIsLogged(t *testing.T) {
+	workspace := t.TempDir()
+	outsideFile := filepath.Join(outsideNonTempDir(t), "doc.pdf")
+	pdfBytes := []byte("%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n")
+	if err := os.WriteFile(outsideFile, pdfBytes, 0o644); err != nil {
+		t.Fatalf("write outside pdf: %v", err)
+	}
+
+	logger := &testLogger{}
+	registry, broker, _, err := BuildToolRegistry(
+		workspace,
+		"",
+		[]tools.ID{tools.ToolViewImage},
+		5*time.Second,
+		15*time.Second,
+		16_000,
+		false,
+		true,
+		logger,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("build tool registry: %v", err)
+	}
+	broker.SetAskHandler(func(req askquestion.Request) (askquestion.Response, error) {
+		if !strings.Contains(req.Question, "Allow reading") {
+			t.Fatalf("expected read-focused approval question, got %q", req.Question)
+		}
+		return askquestion.Response{Approval: &askquestion.ApprovalPayload{Decision: askquestion.ApprovalDecisionAllowOnce}}, nil
+	})
+
+	viewImageHandler, ok := registry.Get(tools.ToolViewImage)
+	if !ok {
+		t.Fatal("expected view_image handler")
+	}
+	input, err := json.Marshal(map[string]any{"path": outsideFile})
+	if err != nil {
+		t.Fatalf("marshal view_image input: %v", err)
+	}
+	result, err := viewImageHandler.Call(context.Background(), tools.Call{ID: "call-1", Name: tools.ToolViewImage, Input: input})
+	if err != nil {
+		t.Fatalf("view_image call: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success result, got %s", string(result.Output))
+	}
+	if !strings.Contains(logger.String(), "tool.view_image.outside_workspace.approved") {
+		t.Fatalf("expected outside-workspace approval audit line, got %q", logger.String())
+	}
+	if !strings.Contains(logger.String(), "reason=allow_once") {
+		t.Fatalf("expected allow_once reason in audit line, got %q", logger.String())
+	}
+}
+
+func TestBackgroundEventRouterSkipsDeveloperNoticeForOrphanedShells(t *testing.T) {
+	root := t.TempDir()
+	storeA, err := session.Create(root, "ws-a", root)
+	if err != nil {
+		t.Fatalf("create store A: %v", err)
+	}
+	storeB, err := session.Create(root, "ws-b", root)
+	if err != nil {
+		t.Fatalf("create store B: %v", err)
+	}
+	clientA := &busyToggleFakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "a", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200_000}}}}
+	clientB := &busyToggleFakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "b", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200_000}}}}
+	var mu sync.Mutex
+	backgroundUpdates := 0
+	_, err = runtime.New(storeA, clientA, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine A: %v", err)
+	}
+	engB, err := runtime.New(storeB, clientB, tools.NewRegistry(), runtime.Config{Model: "gpt-5", OnEvent: func(evt runtime.Event) {
+		if evt.Kind == runtime.EventBackgroundUpdated {
+			mu.Lock()
+			backgroundUpdates++
+			mu.Unlock()
+		}
+	}})
+	if err != nil {
+		t.Fatalf("new engine B: %v", err)
+	}
+
+	router := &BackgroundEventRouter{}
+	router.SetActiveSession(storeB.Meta().SessionID, engB)
+	router.Handle(shelltool.Event{Snapshot: shelltool.Snapshot{ID: "1000", OwnerSessionID: storeA.Meta().SessionID, State: "completed", Command: "builder run", Workdir: root, LogPath: filepath.Join(root, "1000.log")}, Type: shelltool.EventCompleted, Preview: "done"})
+
+	time.Sleep(150 * time.Millisecond)
+	if got := clientB.CallCount(); got != 0 {
+		t.Fatalf("expected orphaned completion to skip model notice for active session, got %d client calls", got)
+	}
+	mu.Lock()
+	updates := backgroundUpdates
+	mu.Unlock()
+	if updates != 1 {
+		t.Fatalf("expected orphaned completion to still emit one background update event, got %d", updates)
+	}
+	if got := clientA.CallCount(); got != 0 {
+		t.Fatalf("did not expect inactive owner engine to be called, got %d", got)
+	}
+}
+
+func TestBackgroundEventRouterQueuesNoticeForActiveOwnerSession(t *testing.T) {
+	root := t.TempDir()
+	store, err := session.Create(root, "ws", root)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &busyToggleFakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "notice handled", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200_000}}}}
+	eng, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	router := &BackgroundEventRouter{}
+	router.SetActiveSession(store.Meta().SessionID, eng)
+	router.Handle(shelltool.Event{Snapshot: shelltool.Snapshot{ID: "1001", OwnerSessionID: store.Meta().SessionID, State: "completed", Command: "builder run", Workdir: root, LogPath: filepath.Join(root, "1001.log")}, Type: shelltool.EventCompleted, Preview: "done"})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for client.CallCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := client.CallCount(); got == 0 {
+		t.Fatal("expected active owner completion to queue a model notice")
+	}
+}
+
+func TestNewRuntimeWiringRejectsEmptyModelAfterBypassingConfigDefaults(t *testing.T) {
+	root := t.TempDir()
+	store, err := session.Create(root, "ws", root)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	_, err = NewRuntimeWiringWithBackground(
+		store,
+		config.Settings{
+			Model:              "",
+			ProviderOverride:   "openai",
+			OpenAIBaseURL:      "http://example.test/v1",
+			ModelContextWindow: 272_000,
+			Timeouts: config.Timeouts{
+				ModelRequestSeconds: 1,
+				ShellDefaultSeconds: 1,
+			},
+		},
+		[]tools.ID{tools.ToolShell},
+		root,
+		auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, nil),
+		nil,
+		nil,
+		RuntimeWiringOptions{},
+	)
+	if err == nil {
+		t.Fatal("expected runtime wiring to reject empty model")
+	}
+	if !strings.Contains(err.Error(), "model is required") {
+		t.Fatalf("expected model-required error, got %v", err)
+	}
+}
+
+type testLogger struct {
+	lines []string
+}
+
+func (l *testLogger) Logf(format string, args ...any) {
+	l.lines = append(l.lines, fmt.Sprintf(format, args...))
+}
+
+func (l *testLogger) String() string {
+	return strings.Join(l.lines, "\n")
+}
+
+func outsideNonTempDir(t *testing.T) string {
+	t.Helper()
+	bases := make([]string, 0, 2)
+	if wd, err := os.Getwd(); err == nil {
+		bases = append(bases, wd)
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		bases = append(bases, home)
+	}
+	for _, base := range bases {
+		dir, err := os.MkdirTemp(base, "builder-runtimewire-outside-*")
+		if err != nil {
+			continue
+		}
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			_ = os.RemoveAll(dir)
+			continue
+		}
+		if patchtool.IsPathInTemporaryDir(abs) {
+			_ = os.RemoveAll(dir)
+			continue
+		}
+		t.Cleanup(func() {
+			_ = os.RemoveAll(dir)
+		})
+		return abs
+	}
+	t.Skip("unable to create non-temporary outside directory for test")
+	return ""
+}
+
+type busyToggleFakeClient struct {
+	mu        sync.Mutex
+	responses []llm.Response
+	calls     int
+}
+
+func (f *busyToggleFakeClient) Generate(ctx context.Context, _ llm.Request) (llm.Response, error) {
+	if err := ctx.Err(); err != nil {
+		return llm.Response{}, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	if len(f.responses) == 0 {
+		return llm.Response{}, errors.New("no fake response configured")
+	}
+	resp := f.responses[0]
+	f.responses = f.responses[1:]
+	return resp, nil
+}
+
+func (f *busyToggleFakeClient) CallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}

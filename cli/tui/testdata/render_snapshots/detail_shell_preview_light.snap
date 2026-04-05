@@ -1,0 +1,4 @@
+<ESC>[38;2;64;120;242m$<ESC>[0m <ESC>[38;2;56;58;66m<ESC>[38;2;56;58;66m<ESC>[38;5;237m./gradlew -p apps/respawn
+  <ESC>[38;2;56;58;66mdetektFormat > docs/tmp/build-<ESC>[0m
+  <ESC>[38;2;56;58;66mtriage-2026-03-15/detektFormat.log<ESC>[0m
+  2><ESC>[0;38;2;56;58;66m<ESC>[38;5;235m&<ESC>[0;38;2;56;58;66m<ESC>[38;5;25m1<ESC>[0;38;2;56;58;66m<ESC>[0;38;2;56;58;66m<ESC>[0m
