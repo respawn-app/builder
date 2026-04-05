@@ -156,11 +156,22 @@ func (c uiInputController) finishBusyActivity(compacting bool) {
 	}
 }
 
+func (c uiInputController) notifyTurnQueueDrainedIfIdle() {
+	m := c.model
+	if m.turnQueueHook == nil || m.busy || len(m.queued) > 0 || m.ask.hasCurrent() {
+		return
+	}
+	m.turnQueueHook.OnTurnQueueDrained()
+}
+
 func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.Cmd) {
 	m := c.model
 	c.finishBusyActivity(false)
 	m.pendingPreSubmitText = ""
 	if msg.err != nil {
+		if m.turnQueueHook != nil {
+			m.turnQueueHook.OnTurnQueueAborted()
+		}
 		c.unlockInputAfterSubmissionError()
 		c.restorePendingInjectedIntoInput()
 		if errors.Is(msg.err, errSubmissionInterrupted) {
@@ -196,8 +207,10 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 	}
 	if len(m.queued) > 0 {
 		next, drainCmd := c.flushQueuedInputs(queueDrainAuto)
+		c.notifyTurnQueueDrainedIfIdle()
 		return next, tea.Batch(transcriptSyncCmd, drainCmd)
 	}
+	c.notifyTurnQueueDrainedIfIdle()
 	m.syncViewport()
 	return m, transcriptSyncCmd
 }

@@ -24,6 +24,7 @@ type runtimeWiring struct {
 	askBroker       *askquestion.Broker
 	askBridge       *askBridge
 	eventBridge     *runtimeEventBridge
+	turnQueueHook   turnQueueHook
 	runtimeEvents   <-chan clientui.Event
 	askEvents       <-chan askEvent
 	background      *shelltool.Manager
@@ -107,7 +108,6 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		FastMode: opts.FastMode,
 		OnEvent: func(evt runtime.Event) {
 			logger.Logf("%s", formatRuntimeEvent(evt))
-			bells.OnRuntimeEvent(evt)
 			if opts.OnEvent != nil {
 				opts.OnEvent(evt)
 			}
@@ -139,6 +139,7 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		askBroker:     wiring.AskBroker,
 		askBridge:     askBridge,
 		eventBridge:   wiring.EventBridge,
+		turnQueueHook: bells,
 		background:    wiring.Background,
 		promptHistory: append([]string(nil), wiring.PromptHistory...),
 	}, nil

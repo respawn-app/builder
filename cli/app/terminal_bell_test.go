@@ -6,9 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"builder/server/llm"
-	"builder/server/runtime"
 	"builder/server/tools/askquestion"
+	"builder/shared/clientui"
 )
 
 type countRinger struct {
@@ -124,25 +123,29 @@ func TestBellHooksRingOnToolHeavyTurnEnd(t *testing.T) {
 	ringer := &countRinger{}
 	hooks := newBellHooks(ringer, nil)
 
-	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1"})
-	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-1"})
 	if got := ringer.Count(); got != 0 {
 		t.Fatalf("ring count = %d after single tool call turn, want 0", got)
 	}
 
-	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-2"})
-	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-2"})
-	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, StepID: "step-2"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-2"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-2"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-2"})
+	if got := ringer.Count(); got != 0 {
+		t.Fatalf("ring count = %d before queue drain, want 0", got)
+	}
+	hooks.OnTurnQueueDrained()
 	if got := ringer.Count(); got != 1 {
-		t.Fatalf("ring count = %d after two tool call turn, want 1", got)
+		t.Fatalf("ring count = %d after queue drain, want 1", got)
 	}
 	if got := ringer.Last(); got != "builder: turn complete" {
 		t.Fatalf("last message = %q, want %q", got, "builder: turn complete")
 	}
 
-	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, StepID: "step-2"})
+	hooks.OnTurnQueueDrained()
 	if got := ringer.Count(); got != 1 {
-		t.Fatalf("ring count = %d after duplicate assistant event, want 1", got)
+		t.Fatalf("ring count = %d after duplicate queue drain, want 1", got)
 	}
 }
 
@@ -150,9 +153,10 @@ func TestBellHooksIncludeAssistantPreviewInTurnCompleteNotification(t *testing.T
 	ringer := &countRinger{}
 	hooks := newBellHooks(ringer, nil)
 
-	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1"})
-	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1"})
-	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, StepID: "step-1", Message: llm.Message{Content: "  First line\n\nSecond line with details  "}})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "  First line\n\nSecond line with details  "}}})
+	hooks.OnTurnQueueDrained()
 
 	if got := ringer.Last(); got != "builder: First line Second line with details" {
 		t.Fatalf("last message = %q, want %q", got, "builder: First line Second line with details")
@@ -163,9 +167,10 @@ func TestBellHooksFallbackToTurnCompleteForWhitespacePreview(t *testing.T) {
 	ringer := &countRinger{}
 	hooks := newBellHooks(ringer, nil)
 
-	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1"})
-	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1"})
-	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, StepID: "step-1", Message: llm.Message{Content: "\n\t  "}})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "\n\t  "}}})
+	hooks.OnTurnQueueDrained()
 
 	if got := ringer.Last(); got != "builder: turn complete" {
 		t.Fatalf("last message = %q, want %q", got, "builder: turn complete")
@@ -200,11 +205,50 @@ func TestBellHooksIgnoresMismatchedTurnEndStep(t *testing.T) {
 	ringer := &countRinger{}
 	hooks := newBellHooks(ringer, nil)
 
-	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1"})
-	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1"})
-	hooks.OnRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, StepID: "step-2"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-2"})
+	hooks.OnTurnQueueDrained()
 
 	if got := ringer.Count(); got != 0 {
 		t.Fatalf("ring count = %d, want 0", got)
+	}
+}
+
+func TestBellHooksRingOnceAfterQueuedTurnsDrain(t *testing.T) {
+	ringer := &countRinger{}
+	hooks := newBellHooks(ringer, nil)
+
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "first"}}})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-2"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-2"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-2", TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "second"}}})
+
+	if got := ringer.Count(); got != 0 {
+		t.Fatalf("ring count = %d before queue drain, want 0", got)
+	}
+	hooks.OnTurnQueueDrained()
+	if got := ringer.Count(); got != 1 {
+		t.Fatalf("ring count = %d after queue drain, want 1", got)
+	}
+	if got := ringer.Last(); got != "builder: second" {
+		t.Fatalf("last message = %q, want %q", got, "builder: second")
+	}
+}
+
+func TestBellHooksClearPendingTurnCompletionAfterAbort(t *testing.T) {
+	ringer := &countRinger{}
+	hooks := newBellHooks(ringer, nil)
+
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"})
+	hooks.OnProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "first"}}})
+	hooks.OnTurnQueueAborted()
+	hooks.OnTurnQueueDrained()
+
+	if got := ringer.Count(); got != 0 {
+		t.Fatalf("ring count = %d after aborted queue, want 0", got)
 	}
 }

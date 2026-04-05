@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"builder/server/runtime"
 	"builder/server/tools/askquestion"
+	"builder/shared/clientui"
 )
 
 const terminalBell = "\a"
@@ -141,11 +141,13 @@ func (r *osc9TerminalNotifier) Notify(message string) {
 }
 
 type bellHooks struct {
-	mu          sync.Mutex
-	notifier    terminalNotifier
-	title       func() string
-	currentStep string
-	toolCalls   int
+	mu                    sync.Mutex
+	notifier              terminalNotifier
+	title                 func() string
+	currentStep           string
+	toolCalls             int
+	pendingTurnCompletion bool
+	lastCompletionMessage string
 }
 
 func newBellHooks(notifier terminalNotifier, title func() string) *bellHooks {
@@ -174,12 +176,12 @@ func (h *bellHooks) OnAsk(req askquestion.Request) {
 	h.notifier.Notify(h.formatMessage(label + ": " + question))
 }
 
-func (h *bellHooks) OnRuntimeEvent(evt runtime.Event) {
+func (h *bellHooks) OnProjectedRuntimeEvent(evt clientui.Event) {
 	switch evt.Kind {
-	case runtime.EventToolCallStarted:
+	case clientui.EventToolCallStarted:
 		h.recordToolCall(evt.StepID)
-	case runtime.EventAssistantMessage:
-		h.ringIfToolHeavyTurnEnd(evt.StepID, evt.Message.Content)
+	case clientui.EventAssistantMessage:
+		h.recordTurnCompletion(evt.StepID, projectedAssistantMessageContent(evt.TranscriptEntries))
 	}
 }
 
@@ -197,26 +199,65 @@ func (h *bellHooks) recordToolCall(stepID string) {
 	h.toolCalls++
 }
 
-func (h *bellHooks) ringIfToolHeavyTurnEnd(stepID, assistantContent string) {
+func (h *bellHooks) recordTurnCompletion(stepID, assistantContent string) {
 	stepID = strings.TrimSpace(stepID)
-	if stepID == "" {
+	message := turnCompletionNotificationMessage(assistantContent)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.lastCompletionMessage = message
+	if stepID == "" || h.currentStep != stepID {
 		return
 	}
-	shouldRing := false
+	if h.toolCalls >= 2 {
+		h.pendingTurnCompletion = true
+	}
+	h.currentStep = ""
+	h.toolCalls = 0
+}
+
+func (h *bellHooks) OnTurnQueueDrained() {
+	if h == nil {
+		return
+	}
 	h.mu.Lock()
-	if h.currentStep == stepID {
-		shouldRing = h.toolCalls >= 2
-		h.currentStep = ""
-		h.toolCalls = 0
+	if !h.pendingTurnCompletion {
+		h.mu.Unlock()
+		return
 	}
+	message := h.lastCompletionMessage
+	h.pendingTurnCompletion = false
+	h.lastCompletionMessage = ""
 	h.mu.Unlock()
-	if shouldRing {
-		message := "turn complete"
-		if preview := formatAssistantPreview(assistantContent, terminalNotificationPreviewLimit); preview != "" {
-			message = preview
-		}
-		h.notifier.Notify(h.formatMessage(message))
+	h.notifier.Notify(h.formatMessage(message))
+}
+
+func (h *bellHooks) OnTurnQueueAborted() {
+	if h == nil {
+		return
 	}
+	h.mu.Lock()
+	h.currentStep = ""
+	h.toolCalls = 0
+	h.pendingTurnCompletion = false
+	h.lastCompletionMessage = ""
+	h.mu.Unlock()
+}
+
+func turnCompletionNotificationMessage(assistantContent string) string {
+	if preview := formatAssistantPreview(assistantContent, terminalNotificationPreviewLimit); preview != "" {
+		return preview
+	}
+	return "turn complete"
+}
+
+func projectedAssistantMessageContent(entries []clientui.ChatEntry) string {
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].Role != "assistant" {
+			continue
+		}
+		return entries[i].Text
+	}
+	return ""
 }
 
 func (h *bellHooks) formatMessage(message string) string {

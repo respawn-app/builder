@@ -319,6 +319,12 @@ func WithUIProcessClient(client clientui.ProcessClient) UIOption {
 	}
 }
 
+func WithUITurnQueueHook(hook turnQueueHook) UIOption {
+	return func(m *uiModel) {
+		m.turnQueueHook = hook
+	}
+}
+
 func WithUIPromptHistory(history []string) UIOption {
 	return func(m *uiModel) {
 		m.loadPromptHistory(history)
@@ -422,6 +428,7 @@ type uiModel struct {
 	processList              uiProcessListState
 	helpVisible              bool
 	reasoningStatusHeader    string
+	turnQueueHook            turnQueueHook
 	statusConfig             uiStatusConfig
 	statusCollector          uiStatusCollector
 	statusRepository         uiStatusRepository
