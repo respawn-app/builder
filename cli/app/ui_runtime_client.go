@@ -22,6 +22,7 @@ const uiRuntimeControlTimeout = 3 * time.Second
 const uiRuntimeReadTimeout = 300 * time.Millisecond
 const uiRuntimeHydrationReadTimeout = 10 * time.Second
 const uiRuntimeMainViewRefreshInterval = 250 * time.Millisecond
+const uiRuntimeTranscriptPageCacheMaxEntries = 16
 
 type sessionRuntimeClient struct {
 	reads     client.SessionViewClient
@@ -37,6 +38,7 @@ type sessionRuntimeClient struct {
 	hasTranscript             bool
 	lastTranscriptAt          time.Time
 	transcriptPages           map[string]cachedTranscriptPage
+	transcriptPagesClock      uint64
 	refreshInFlight           bool
 	transcriptRefreshInFlight bool
 }
@@ -45,6 +47,7 @@ type cachedTranscriptPage struct {
 	page       clientui.TranscriptPage
 	loadedAt   time.Time
 	hasContent bool
+	lastUsed   uint64
 }
 
 func newRuntimeClient(sessionID string, reads client.SessionViewClient, controls client.RuntimeControlClient) clientui.RuntimeClient {
@@ -167,12 +170,16 @@ func (c *sessionRuntimeClient) cachedMainView() (clientui.RuntimeMainView, bool,
 func (c *sessionRuntimeClient) cachedTranscript(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, bool, bool) {
 	req = normalizeRuntimeTranscriptRequest(req)
 	key := transcriptRequestCacheKey(req)
-	c.mu.RLock()
+	c.mu.Lock()
 	entry, hasEntry := c.transcriptPages[key]
+	if hasEntry && entry.hasContent {
+		entry.lastUsed = c.nextTranscriptPageCacheStampLocked()
+		c.transcriptPages[key] = entry
+	}
 	page := c.transcript
 	hasPage := c.hasTranscript
 	lastTranscriptAt := c.lastTranscriptAt
-	c.mu.RUnlock()
+	c.mu.Unlock()
 	if hasEntry && entry.hasContent {
 		return entry.page, true, time.Since(entry.loadedAt) >= uiRuntimeMainViewRefreshInterval
 	}
@@ -185,9 +192,13 @@ func (c *sessionRuntimeClient) cachedTranscript(req clientui.TranscriptPageReque
 func (c *sessionRuntimeClient) cachedTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, bool, bool) {
 	req = normalizeRuntimeTranscriptRequest(req)
 	key := transcriptRequestCacheKey(req)
-	c.mu.RLock()
+	c.mu.Lock()
 	entry, hasEntry := c.transcriptPages[key]
-	c.mu.RUnlock()
+	if hasEntry && entry.hasContent {
+		entry.lastUsed = c.nextTranscriptPageCacheStampLocked()
+		c.transcriptPages[key] = entry
+	}
+	c.mu.Unlock()
 	if !hasEntry || !entry.hasContent {
 		return clientui.TranscriptPage{SessionID: c.sessionID}, false, true
 	}
@@ -342,6 +353,40 @@ func transcriptRequestCacheKey(req clientui.TranscriptPageRequest) string {
 	}, ":")
 }
 
+func (c *sessionRuntimeClient) nextTranscriptPageCacheStampLocked() uint64 {
+	c.transcriptPagesClock++
+	return c.transcriptPagesClock
+}
+
+func (c *sessionRuntimeClient) evictTranscriptPageCacheLocked() {
+	if c == nil || len(c.transcriptPages) <= uiRuntimeTranscriptPageCacheMaxEntries {
+		return
+	}
+	oldestKey := ""
+	oldestStamp := uint64(0)
+	for key, entry := range c.transcriptPages {
+		if oldestKey == "" || entry.lastUsed < oldestStamp {
+			oldestKey = key
+			oldestStamp = entry.lastUsed
+		}
+	}
+	if oldestKey != "" {
+		delete(c.transcriptPages, oldestKey)
+	}
+	defaultKey := transcriptRequestCacheKey(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail})
+	if len(c.transcriptPages) > uiRuntimeTranscriptPageCacheMaxEntries {
+		for key := range c.transcriptPages {
+			if key == defaultKey {
+				continue
+			}
+			delete(c.transcriptPages, key)
+			if len(c.transcriptPages) <= uiRuntimeTranscriptPageCacheMaxEntries {
+				break
+			}
+		}
+	}
+}
+
 func (c *sessionRuntimeClient) refreshTranscriptAsync() {
 	c.mu.Lock()
 	if c.transcriptRefreshInFlight {
@@ -377,7 +422,8 @@ func storeTranscriptLocked(c *sessionRuntimeClient, req clientui.TranscriptPageR
 		c.transcriptPages = make(map[string]cachedTranscriptPage)
 	}
 	now := time.Now()
-	c.transcriptPages[transcriptRequestCacheKey(req)] = cachedTranscriptPage{page: page, loadedAt: now, hasContent: true}
+	c.transcriptPages[transcriptRequestCacheKey(req)] = cachedTranscriptPage{page: page, loadedAt: now, hasContent: true, lastUsed: c.nextTranscriptPageCacheStampLocked()}
+	c.evictTranscriptPageCacheLocked()
 	c.transcript = page
 	c.hasTranscript = true
 	c.lastTranscriptAt = now
