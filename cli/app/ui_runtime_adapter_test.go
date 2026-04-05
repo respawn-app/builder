@@ -1085,6 +1085,47 @@ func TestApplyRuntimeTranscriptPageAcceptsNewerRevisionTailReplacementThatClears
 	}
 }
 
+func TestProjectedAssistantMessageAdvancesTranscriptRevisionForReplayDedupe(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "seed"}}
+	m.transcriptBaseOffset = 0
+	m.transcriptTotalEntries = 1
+	m.transcriptRevision = 10
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	evt := clientui.Event{
+		Kind:                clientui.EventAssistantMessage,
+		TranscriptRevision:  11,
+		CommittedEntryCount: 2,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:  "assistant",
+			Text:  "live append",
+			Phase: string(llm.MessagePhaseFinal),
+		}},
+	}
+	if cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(evt); cmd == nil {
+		t.Fatal("expected native replay command for projected assistant message")
+	}
+	if got := m.transcriptRevision; got != 11 {
+		t.Fatalf("transcript revision after live append = %d, want 11", got)
+	}
+	if got := len(m.transcriptEntries); got != 2 {
+		t.Fatalf("transcript entry count after live append = %d, want 2", got)
+	}
+
+	if cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(evt); cmd != nil {
+		if msg := cmd(); msg != nil {
+			t.Fatalf("expected replayed assistant message to be skipped, got %T", msg)
+		}
+	}
+	if got := len(m.transcriptEntries); got != 2 {
+		t.Fatalf("expected replayed assistant message to stay deduped, got %d entries", got)
+	}
+}
+
 func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenRuntimeOnlyEntryChanged(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.termWidth = 100
