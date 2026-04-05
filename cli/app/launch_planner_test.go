@@ -13,6 +13,15 @@ import (
 	"builder/shared/config"
 )
 
+type plannerOwnershipServer struct {
+	*testEmbeddedServer
+	owns bool
+}
+
+func (s *plannerOwnershipServer) OwnsServer() bool {
+	return s != nil && s.owns
+}
+
 func TestSessionLaunchPlannerHeadlessCreatesNewSessionAndAppliesContinuationContext(t *testing.T) {
 	root := t.TempDir()
 	containerDir := filepath.Join(root, "sessions", "workspace-a")
@@ -176,6 +185,40 @@ func TestSessionLaunchPlannerInteractiveUsesLegacyWorkspaceContainerMapping(t *t
 	}
 	if plan.SessionID != legacySession.Meta().SessionID {
 		t.Fatalf("expected legacy session %q, got %q", legacySession.Meta().SessionID, plan.SessionID)
+	}
+}
+
+func TestSessionLaunchPlannerPropagatesServerOwnershipToStatusConfig(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		owns bool
+	}{
+		{name: "owned", owns: true},
+		{name: "attached", owns: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			containerDir := filepath.Join(root, "sessions", "workspace-a")
+			planner := newSessionLaunchPlanner(&plannerOwnershipServer{
+				testEmbeddedServer: &testEmbeddedServer{
+					cfg: config.App{
+						WorkspaceRoot:   "/tmp/workspace-a",
+						PersistenceRoot: root,
+						Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
+					},
+					containerDir: containerDir,
+				},
+				owns: tt.owns,
+			})
+
+			plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeHeadless})
+			if err != nil {
+				t.Fatalf("plan session: %v", err)
+			}
+			if plan.StatusConfig.OwnsServer != tt.owns {
+				t.Fatalf("status config owns server = %t, want %t", plan.StatusConfig.OwnsServer, tt.owns)
+			}
+		})
 	}
 }
 

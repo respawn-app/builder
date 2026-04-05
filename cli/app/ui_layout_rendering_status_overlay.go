@@ -100,6 +100,9 @@ func (l uiViewLayout) statusOverlayContentLines(width int) []string {
 	}
 
 	appendSectionTitle("Session")
+	if snapshot.OwnsServer {
+		appendWrapped("Server: owned by this CLI", lipgloss.Style{})
+	}
 	appendWrapped("CWD: "+statusValueOrFallback(snapshot.Workdir, "<unknown>"), boldStyle)
 	appendANSI(l.renderStatusModelLine(width, snapshot.Model.Summary))
 	if sessionName := strings.TrimSpace(snapshot.SessionName); sessionName != "" {

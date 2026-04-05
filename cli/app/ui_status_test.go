@@ -75,6 +75,7 @@ func TestStatusCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 		SessionID:         "session-123",
 		ParentSessionID:   "parent-456",
 		ParentSessionName: "incident-root",
+		OwnsServer:        true,
 		Git:               uiStatusGitInfo{Visible: true, Branch: "master", Dirty: true, Ahead: 2, Behind: 1},
 		Auth: uiStatusAuthInfo{
 			Summary: "user@example.com",
@@ -139,7 +140,7 @@ func TestStatusCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 	next, _ = updated.Update(statusRefreshDoneMsg{token: updated.status.refreshToken, snapshot: collector.snapshot})
 	updated = next.(*uiModel)
 	plain := stripANSIAndTrimRight(updated.View())
-	for _, want := range []string{"Pro subscription", "CWD: /tmp/workdir", "Model: gpt-5 high fast", "incident", "Parent session: incident-root <parent-456>", "session-123", "master", "dirty | ahead 2 | behind 1"} {
+	for _, want := range []string{"Pro subscription", "Server: owned by this CLI", "CWD: /tmp/workdir", "Model: gpt-5 high fast", "incident", "Parent session: incident-root <parent-456>", "session-123", "master", "dirty | ahead 2 | behind 1"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected status overlay to contain %q, got %q", want, plain)
 		}
@@ -172,6 +173,33 @@ func TestStatusCommandOpensDetailOverlayInNativeMode(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("expected /status close to emit a screen transition command")
+	}
+}
+
+func TestStatusCommandOmitsServerOwnershipRowWhenInstanceDoesNotOwnServer(t *testing.T) {
+	collector := &stubStatusCollector{snapshot: uiStatusSnapshot{
+		CollectedAt: time.Date(2026, time.March, 24, 21, 15, 0, 0, time.UTC),
+		Workdir:     "/tmp/workdir",
+		SessionName: "incident",
+		SessionID:   "session-123",
+		Model:       uiStatusModelInfo{Summary: "gpt-5 high fast"},
+	}}
+
+	m := newProjectedStaticUIModel(
+		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir"}),
+		WithUIStatusCollector(collector),
+	)
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.input = "/status"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(statusRefreshDoneMsg{token: updated.status.refreshToken, snapshot: collector.snapshot})
+	plain := stripANSIAndTrimRight(next.(*uiModel).View())
+	if strings.Contains(plain, "Server: owned by this CLI") {
+		t.Fatalf("did not expect server ownership row, got %q", plain)
 	}
 }
 

@@ -306,7 +306,7 @@
 - `/autocompaction` controls runtime auto-compaction invocation for the current session only.
 - `/autocompaction` toggles when called without args; `/autocompaction on|off` sets explicitly.
 - `/autocompaction` emits user-visible confirmation in transcript + status line and does not persist to config.
-- `/status` opens a read-only detail overlay with account/subscription status, workdir, session ids, compact git summary, context usage, model/config state, skills (including config-disabled markers), `AGENTS.md` paths, and compaction count.
+- `/status` opens a read-only detail overlay with account/subscription status, workdir, session ids, compact git summary, context usage, model/config state, skills (including config-disabled markers), `AGENTS.md` paths, compaction count, and a session-section ownership row only when the current CLI instance owns the server.
 - `/status` refreshes progressively on open: the base snapshot renders immediately, then account, git, and environment sections fill in asynchronously. It uses the same detail-surface alt-screen policy and native text-selection behavior as other detail overlays.
 - Built-in prompt commands use embedded markdown templates.
 - Slash commands support file-backed prompts from:

@@ -138,6 +138,7 @@ func (p *launchPlanner) PlanSession(ctx context.Context, req sessionLaunchReques
 			Source:          resp.Plan.Source,
 			AuthManager:     p.server.AuthManager(),
 			AuthStatePath:   config.GlobalAuthConfigPath(cfg),
+			OwnsServer:      p.server.OwnsServer(),
 		},
 		WorkspaceRoot: resp.Plan.WorkspaceRoot,
 		Source:        resp.Plan.Source,
