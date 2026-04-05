@@ -7,6 +7,7 @@ import (
 
 	"builder/server/runtime"
 	"builder/server/runtimecontrol"
+	"builder/server/runtimeview"
 	"builder/server/sessionview"
 	"builder/shared/client"
 	"builder/shared/clientui"
@@ -45,7 +46,10 @@ func newUIRuntimeClientFromEngine(engine *runtime.Engine) clientui.RuntimeClient
 	resolver := sessionview.NewStaticRuntimeResolver(engine)
 	reads := client.NewLoopbackSessionViewClient(sessionview.NewService(nil, resolver))
 	controls := client.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(resolver, nil))
-	return newUIRuntimeClientWithReads(engine.SessionID(), reads, controls)
+	runtimeClient := newUIRuntimeClientWithReads(engine.SessionID(), reads, controls).(*sessionRuntimeClient)
+	runtimeClient.storeMainView(runtimeview.MainViewFromRuntime(engine))
+	runtimeClient.storeTranscript(runtimeview.TranscriptPageFromRuntime(engine, clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}))
+	return runtimeClient
 }
 
 func newUIRuntimeClient(engine *runtime.Engine) clientui.RuntimeClient {
@@ -88,10 +92,6 @@ func (c *sessionRuntimeClient) RefreshMainView() (clientui.RuntimeMainView, erro
 func (c *sessionRuntimeClient) Transcript() clientui.TranscriptPage {
 	page, hasPage, stale := c.cachedTranscript()
 	if !hasPage {
-		refreshed, err := c.refreshTranscriptSync(uiRuntimeReadTimeout)
-		if err == nil {
-			return refreshed
-		}
 		c.refreshTranscriptAsync()
 		return page
 	}
@@ -218,10 +218,11 @@ func (c *sessionRuntimeClient) refreshMainViewAsync() {
 }
 
 func (c *sessionRuntimeClient) refreshTranscriptSync(timeout time.Duration) (clientui.TranscriptPage, error) {
-	return c.refreshTranscriptPageSync(clientui.TranscriptPageRequest{}, timeout)
+	return c.refreshTranscriptPageSync(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, timeout)
 }
 
 func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.TranscriptPageRequest, timeout time.Duration) (clientui.TranscriptPage, error) {
+	req = normalizeRuntimeTranscriptRequest(req)
 	ctx, cancel := c.readContext(timeout)
 	defer cancel()
 	resp, err := c.reads.GetSessionTranscriptPage(ctx, serverapi.SessionTranscriptPageRequest{
@@ -243,6 +244,13 @@ func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.Transcript
 		return page, err
 	}
 	return c.storeTranscript(resp.Transcript), nil
+}
+
+func normalizeRuntimeTranscriptRequest(req clientui.TranscriptPageRequest) clientui.TranscriptPageRequest {
+	if req == (clientui.TranscriptPageRequest{}) {
+		return clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}
+	}
+	return req
 }
 
 func (c *sessionRuntimeClient) refreshTranscriptAsync() {

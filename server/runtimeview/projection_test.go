@@ -255,6 +255,37 @@ func TestTranscriptPageFromRuntimeUsesOngoingTailWindow(t *testing.T) {
 	}
 }
 
+func TestTranscriptPageFromRuntimeUsesOngoingTailWindowByDefault(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	for i := 0; i < 600; i++ {
+		if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: "reply", Phase: llm.MessagePhaseFinal}); err != nil {
+			t.Fatalf("append message %d: %v", i, err)
+		}
+	}
+	eng, err := runtime.New(store, projectionFastClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	page := TranscriptPageFromRuntime(eng, clientui.TranscriptPageRequest{})
+	if page.TotalEntries != 600 {
+		t.Fatalf("total entries = %d, want 600", page.TotalEntries)
+	}
+	if page.Offset != 100 {
+		t.Fatalf("offset = %d, want 100", page.Offset)
+	}
+	if page.HasMore {
+		t.Fatalf("expected default transcript request to return ongoing tail, got %+v", page)
+	}
+	if len(page.Entries) != 500 {
+		t.Fatalf("entries = %d, want 500", len(page.Entries))
+	}
+}
+
 func TestTranscriptPageFromRuntimeUsesPagedSnapshotForOffsetLimit(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
