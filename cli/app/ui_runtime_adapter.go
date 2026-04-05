@@ -363,6 +363,7 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPage
 		}
 	} else {
 		if m.view.Mode() == tui.ModeDetail && m.detailTranscript.matchesPage(page) {
+			m.transcriptRevision = max(m.transcriptRevision, page.Revision)
 			if previousWindowTitle != m.windowTitle() {
 				return tea.SetWindowTitle(m.windowTitle())
 			}

@@ -623,8 +623,8 @@ func (m *Model) rebuildOngoingSnapshot() {
 	plain = append(plain, m.ongoingBaseLines...)
 	kinds = append(kinds, m.ongoingBaseLineKinds...)
 	if m.ongoingStreamingDivider {
-			plain = append(plain, detailDivider())
-			kinds = append(kinds, VisibleLineDivider)
+		plain = append(plain, detailDivider())
+		kinds = append(kinds, VisibleLineDivider)
 	}
 	plain = append(plain, m.ongoingStreamingLines...)
 	kinds = append(kinds, m.ongoingStreamingKinds...)
