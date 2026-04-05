@@ -166,6 +166,19 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 	m := a.model
 	entries := cloneChatEntries(evt.TranscriptEntries)
 	incomingCount := len(entries)
+	if shouldSkipProjectedToolCallStart(m, evt) {
+		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.append_entries", map[string]string{
+			"session_id":            strings.TrimSpace(m.sessionID),
+			"mode":                  m.transcriptModeLabel(),
+			"path":                  "live_event",
+			"incoming_count":        strconv.Itoa(incomingCount),
+			"reason":                "duplicate_tool_call_start",
+			"applied_count":         "0",
+			"event_revision":        strconv.FormatInt(evt.TranscriptRevision, 10),
+			"event_committed_count": strconv.Itoa(evt.CommittedEntryCount),
+		}))
+		return nil, false
+	}
 	if shouldSkipProjectedTranscriptEntries(m, evt) {
 		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.append_entries", map[string]string{
 			"session_id":            strings.TrimSpace(m.sessionID),
@@ -535,6 +548,40 @@ func shouldSkipProjectedTranscriptEntries(m *uiModel, evt clientui.Event) bool {
 		return false
 	}
 	return evt.CommittedEntryCount <= currentCommittedCount
+}
+
+func shouldSkipProjectedToolCallStart(m *uiModel, evt clientui.Event) bool {
+	if m == nil || evt.Kind != clientui.EventToolCallStarted || len(evt.TranscriptEntries) == 0 {
+		return false
+	}
+	matched := false
+	for _, entry := range evt.TranscriptEntries {
+		if entry.Role != "tool_call" {
+			return false
+		}
+		toolCallID := strings.TrimSpace(entry.ToolCallID)
+		if toolCallID == "" {
+			return false
+		}
+		if !transcriptContainsToolCallID(m.transcriptEntries, toolCallID) {
+			return false
+		}
+		matched = true
+	}
+	return matched
+}
+
+func transcriptContainsToolCallID(entries []tui.TranscriptEntry, toolCallID string) bool {
+	trimmed := strings.TrimSpace(toolCallID)
+	if trimmed == "" {
+		return false
+	}
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.ToolCallID) == trimmed {
+			return true
+		}
+	}
+	return false
 }
 
 func eventTranscriptEntriesReconcileWithCommittedTail(kind clientui.EventKind) bool {

@@ -443,6 +443,69 @@ func TestHandleProjectedRuntimeEventDoesNotSuppressPendingToolCallStart(t *testi
 	}
 }
 
+func TestHandleProjectedRuntimeEventSkipsReplayedToolCallStartWithSameToolCallID(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "assistant", Text: "seed", Phase: llm.MessagePhaseCommentary},
+		{Role: "tool_call", Text: "pwd", ToolCallID: "call-1", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"}},
+	}
+	m.transcriptBaseOffset = 0
+	m.transcriptTotalEntries = len(m.transcriptEntries)
+	m.transcriptRevision = 10
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                clientui.EventToolCallStarted,
+		StepID:              "step-1",
+		TranscriptRevision:  10,
+		CommittedEntryCount: 1,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:       "tool_call",
+			Text:       "pwd",
+			ToolCallID: "call-1",
+			ToolCall:   &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"},
+		}},
+	})
+
+	if got := len(m.transcriptEntries); got != 2 {
+		t.Fatalf("expected replayed tool call start skipped, got %+v", m.transcriptEntries)
+	}
+	if cmd != nil {
+		if _, ok := cmd().(nativeHistoryFlushMsg); ok {
+			t.Fatal("expected no native replay for replayed tool call start")
+		}
+	}
+}
+
+func TestHandleProjectedRuntimeEventAppendsDistinctToolCallStartByToolCallID(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "tool_call", Text: "pwd", ToolCallID: "call-1", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"}}}
+	m.transcriptBaseOffset = 0
+	m.transcriptTotalEntries = 1
+	m.transcriptRevision = 10
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                clientui.EventToolCallStarted,
+		StepID:              "step-1",
+		TranscriptRevision:  10,
+		CommittedEntryCount: 1,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:       "tool_call",
+			Text:       "pwd",
+			ToolCallID: "call-2",
+			ToolCall:   &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"},
+		}},
+	})
+
+	if got := len(m.transcriptEntries); got != 2 {
+		t.Fatalf("expected distinct tool call id to append, got %+v", m.transcriptEntries)
+	}
+	if got := m.transcriptEntries[1].ToolCallID; got != "call-2" {
+		t.Fatalf("second tool call id = %q, want call-2", got)
+	}
+}
+
 func TestHandleProjectedRuntimeEventDoesNotSuppressReviewerStatusEntry(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "seed", Phase: llm.MessagePhaseCommentary}}
