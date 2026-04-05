@@ -31,6 +31,10 @@ func (c *recordingTranscriptRuntimeClient) LoadTranscriptPage(req clientui.Trans
 	return c.Transcript(), nil
 }
 
+func (c *recordingTranscriptRuntimeClient) RefreshTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	return c.LoadTranscriptPage(req)
+}
+
 func TestScenarioDetailWhileAgentWorksReturnsToLatestOngoingTail(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.termWidth = 100

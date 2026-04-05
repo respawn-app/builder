@@ -238,6 +238,37 @@
 - Layout owns prefixes, indentation, and wrapping only.
 - Semantic color tokens are centralized in `shared/theme`; TUI and app surfaces resolve colors from that palette instead of hardcoding inline hex values in renderers.
 - Rendering/style invariants:
+
+## Transcript Visibility
+
+- Transcript visibility is defined by one product matrix, not by ad hoc projector or renderer filters.
+- Visibility semantics:
+- `O`: visible in ongoing mode with full text and visible in detail mode.
+- `OC`: visible in ongoing mode in collapsed/shortened form and visible in detail mode with full text.
+- `D`: hidden in ongoing mode and visible in detail mode.
+- `X`: hidden in both transcript modes.
+- Locked message-type visibility:
+- `agents.md`: `D`
+- `skills`: `D`
+- `environment`: `D`
+- `compaction_summary`: `OC`
+- `interruption`: `O`
+- `error_feedback`: `O`
+- `compaction_soon_reminder`: `D`
+- `reviewer_feedback`: represented in transcript by reviewer transcript roles, not by rendering the raw developer reviewer prompt directly. Effective visibility is `OC` or `O` depending on reviewer verbosity config.
+- `background_notice`: `OC`
+- `manual_compaction_carryover`: `D`
+- `headless_mode`: `D`
+- `headless_mode_exit`: `D`
+- Locked non-message transcript role visibility:
+- user turns: `O`
+- assistant turns: `O`
+- tool calls: `OC`
+- reviewer suggestions/status: `OC` or `O` depending on reviewer verbosity config.
+- Visibility ownership is split by boundary but must follow the same contract:
+- runtime projection decides whether a persisted/runtime message becomes a transcript entry and which transcript role it uses.
+- TUI rendering decides how that transcript role behaves in ongoing vs detail mode.
+- When a concept already has a dedicated transcript role, do not also render its raw developer/request artifact. Example: reviewer feedback is shown through `reviewer_suggestions` / `reviewer_status`, not by duplicating the underlying `reviewer_feedback` developer message.
 - Detail shell commands are full syntax color.
 - Ongoing shell commands are syntax-highlighted but subdued.
 - Formatted text uses the app foreground as its base text color.

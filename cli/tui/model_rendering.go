@@ -514,6 +514,9 @@ func (m Model) ongoingEntryText(entry TranscriptEntry) string {
 	if strings.TrimSpace(entry.OngoingText) != "" {
 		return entry.OngoingText
 	}
+	if transcript.NormalizeEntryRole(entry.Role) == roleCompactionSummary {
+		return compactCompactionSummaryForOngoing(entry.Text)
+	}
 	return entry.Text
 }
 

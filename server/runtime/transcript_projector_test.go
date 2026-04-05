@@ -46,6 +46,30 @@ func TestTranscriptProjectorReconstructsPersistedTranscript(t *testing.T) {
 	}
 }
 
+func TestTranscriptProjectorSurfacesPersistedCompactionSummaries(t *testing.T) {
+	projector := NewTranscriptProjector()
+	events := []session.Event{
+		mustPersistedEvent(t, "message", llm.Message{Role: llm.RoleUser, MessageType: llm.MessageTypeCompactionSummary, Content: "user summary"}),
+		mustPersistedEvent(t, "message", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSummary, Content: "developer handoff"}),
+	}
+	for _, evt := range events {
+		if err := projector.ApplyPersistedEvent(evt); err != nil {
+			t.Fatalf("ApplyPersistedEvent(%q): %v", evt.Kind, err)
+		}
+	}
+
+	snapshot := projector.ChatSnapshot()
+	if len(snapshot.Entries) != 2 {
+		t.Fatalf("entry count = %d, want 2", len(snapshot.Entries))
+	}
+	if got := snapshot.Entries[0]; got.Role != "compaction_summary" || got.Text != "user summary" {
+		t.Fatalf("entry[0] = %+v, want user compaction summary", got)
+	}
+	if got := snapshot.Entries[1]; got.Role != "compaction_summary" || got.Text != "developer handoff" {
+		t.Fatalf("entry[1] = %+v, want developer compaction summary", got)
+	}
+}
+
 func mustPersistedEvent(t *testing.T, kind string, payload any) session.Event {
 	t.Helper()
 	body, err := json.Marshal(payload)

@@ -573,21 +573,24 @@ func TestFormatToolResultWebSearchUsesCompactJSON(t *testing.T) {
 	}
 }
 
-func TestChatStoreHidesSyntheticCompactionSummaryMessage(t *testing.T) {
+func TestChatStoreShowsCompactionSummaryMessage(t *testing.T) {
 	s := newChatStore()
 	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSummary, Content: "summary"})
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "real user input"})
 
 	snap := s.snapshot()
-	if len(snap.Entries) != 1 {
-		t.Fatalf("expected 1 visible entry, got %d (%+v)", len(snap.Entries), snap.Entries)
+	if len(snap.Entries) != 2 {
+		t.Fatalf("expected 2 visible entries, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
-	if snap.Entries[0].Role != "user" || snap.Entries[0].Text != "real user input" {
-		t.Fatalf("unexpected visible entry: %+v", snap.Entries[0])
+	if snap.Entries[0].Role != string(transcript.EntryRoleCompactionSummary) || snap.Entries[0].Text != "summary" || snap.Entries[0].OngoingText != "summary" {
+		t.Fatalf("unexpected compaction summary entry: %+v", snap.Entries[0])
+	}
+	if snap.Entries[1].Role != "user" || snap.Entries[1].Text != "real user input" {
+		t.Fatalf("unexpected visible entry: %+v", snap.Entries[1])
 	}
 }
 
-func TestChatStoreSnapshotIncludesDeveloperErrorFeedbackAsErrorRole(t *testing.T) {
+func TestChatStoreSnapshotIncludesDeveloperErrorFeedbackAsOngoingVisibleRole(t *testing.T) {
 	s := newChatStore()
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "task"})
 	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: "phase mismatch warning"})
@@ -597,8 +600,38 @@ func TestChatStoreSnapshotIncludesDeveloperErrorFeedbackAsErrorRole(t *testing.T
 	if len(snap.Entries) != 3 {
 		t.Fatalf("expected 3 entries, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
-	if snap.Entries[1].Role != "error" || snap.Entries[1].Text != "phase mismatch warning" {
-		t.Fatalf("expected developer error feedback mapped to error role, got %+v", snap.Entries[1])
+	if snap.Entries[1].Role != string(transcript.EntryRoleDeveloperFeedback) || snap.Entries[1].Text != "phase mismatch warning" {
+		t.Fatalf("expected developer error feedback mapped to ongoing-visible role, got %+v", snap.Entries[1])
+	}
+}
+
+func TestChatStoreSnapshotIncludesDeveloperContextAsDetailOnlyRole(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeAgentsMD, Content: "AGENTS context"})
+	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeEnvironment, Content: "Environment context"})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if snap.Entries[0].Role != string(transcript.EntryRoleDeveloperContext) || snap.Entries[0].Text != "AGENTS context" {
+		t.Fatalf("unexpected developer context entry: %+v", snap.Entries[0])
+	}
+	if snap.Entries[1].Role != string(transcript.EntryRoleDeveloperContext) || snap.Entries[1].Text != "Environment context" {
+		t.Fatalf("unexpected environment context entry: %+v", snap.Entries[1])
+	}
+}
+
+func TestChatStoreSnapshotIncludesInterruptionAsOngoingVisibleRole(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeInterruption, Content: "Interrupted by user."})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if snap.Entries[0].Role != string(transcript.EntryRoleInterruption) || snap.Entries[0].Text != "Interrupted by user." {
+		t.Fatalf("unexpected interruption entry: %+v", snap.Entries[0])
 	}
 }
 
@@ -614,6 +647,44 @@ func TestChatStoreSnapshotIncludesDeveloperCompactionSoonReminderAsWarningRole(t
 	}
 	if snap.Entries[1].Role != "warning" || snap.Entries[1].Text != "heads up" {
 		t.Fatalf("expected compaction reminder mapped to warning role, got %+v", snap.Entries[1])
+	}
+}
+
+func TestChatStoreSnapshotIncludesHeadlessModeVariantsAsDeveloperContext(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessMode, Content: "headless mode instructions"})
+	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHeadlessModeExit, Content: "interactive mode instructions"})
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	if snap.Entries[0].Role != string(transcript.EntryRoleDeveloperContext) || snap.Entries[0].Text != "headless mode instructions" {
+		t.Fatalf("unexpected headless mode context entry: %+v", snap.Entries[0])
+	}
+	if snap.Entries[1].Role != string(transcript.EntryRoleDeveloperContext) || snap.Entries[1].Text != "interactive mode instructions" {
+		t.Fatalf("unexpected headless mode exit context entry: %+v", snap.Entries[1])
+	}
+}
+
+func TestChatStoreSnapshotOmitsRawReviewerFeedbackDeveloperMessages(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "task"})
+	s.appendMessage(llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeReviewerFeedback, Content: "reviewer internal prompt"})
+	s.appendLocalEntryWithOngoingText("reviewer_suggestions", "Supervisor suggested:\n1. First", "Supervisor made 1 suggestion.")
+	s.appendLocalEntry("reviewer_status", "Supervisor ran: 1 suggestion, applied.")
+
+	snap := s.snapshot()
+	if len(snap.Entries) != 3 {
+		t.Fatalf("expected 3 visible transcript entries, got %d (%+v)", len(snap.Entries), snap.Entries)
+	}
+	for _, entry := range snap.Entries {
+		if entry.Text == "reviewer internal prompt" || entry.Role == string(transcript.EntryRoleDeveloperFeedback) {
+			t.Fatalf("expected raw reviewer feedback developer message to stay hidden, got %+v", snap.Entries)
+		}
+	}
+	if snap.Entries[1].Role != "reviewer_suggestions" || snap.Entries[2].Role != "reviewer_status" {
+		t.Fatalf("expected reviewer transcript roles to represent reviewer feedback, got %+v", snap.Entries)
 	}
 }
 
@@ -678,7 +749,7 @@ func TestChatStoreSnapshotKeepsLocalEntryOrderingWithDeveloperErrorFeedback(t *t
 	if snap.Entries[1].Role != "system" || snap.Entries[1].Text != "local-between" {
 		t.Fatalf("unexpected entry[1]: %+v", snap.Entries[1])
 	}
-	if snap.Entries[2].Role != "error" || snap.Entries[2].Text != "warn" {
+	if snap.Entries[2].Role != string(transcript.EntryRoleDeveloperFeedback) || snap.Entries[2].Text != "warn" {
 		t.Fatalf("unexpected entry[2]: %+v", snap.Entries[2])
 	}
 	if snap.Entries[3].Role != "assistant" || snap.Entries[3].Text != "done" {

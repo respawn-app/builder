@@ -31,6 +31,9 @@ func (c *gatedRuntimeClient) Transcript() clientui.TranscriptPage { return c.inn
 func (c *gatedRuntimeClient) RefreshTranscript() (clientui.TranscriptPage, error) {
 	return c.inner.RefreshTranscript()
 }
+func (c *gatedRuntimeClient) RefreshTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	return c.inner.RefreshTranscriptPage(req)
+}
 func (c *gatedRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
 	return c.inner.LoadTranscriptPage(req)
 }

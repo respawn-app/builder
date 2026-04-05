@@ -130,6 +130,10 @@ func (c *sessionRuntimeClient) RefreshTranscript() (clientui.TranscriptPage, err
 	return c.refreshTranscriptPageSync(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, uiRuntimeHydrationReadTimeout)
 }
 
+func (c *sessionRuntimeClient) RefreshTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	return c.refreshTranscriptPageSync(req, uiRuntimeHydrationReadTimeout)
+}
+
 func (c *sessionRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
 	req = normalizeRuntimeTranscriptRequest(req)
 	if page, hasPage, stale := c.cachedTranscriptPage(req); hasPage && !stale {

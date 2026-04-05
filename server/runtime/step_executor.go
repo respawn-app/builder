@@ -86,6 +86,9 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 			if err := e.appendAssistantMessage(stepID, assistantMsg); err != nil {
 				return llm.Message{}, executedToolCall, false, err
 			}
+			if liveAssistant, ok := liveCommittedAssistantEventMessage(assistantMsg); ok && options.EmitAssistantEvent {
+				e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: liveAssistant})
+			}
 			if err := e.appendReasoningEntries(stepID, resp.Reasoning); err != nil {
 				return llm.Message{}, executedToolCall, false, err
 			}
@@ -239,4 +242,18 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 			return llm.Message{}, executedToolCall, false, err
 		}
 	}
+}
+
+func liveCommittedAssistantEventMessage(msg llm.Message) (llm.Message, bool) {
+	if msg.Phase == llm.MessagePhaseFinal {
+		return llm.Message{}, false
+	}
+	if strings.TrimSpace(msg.Content) == "" {
+		return llm.Message{}, false
+	}
+	return llm.Message{
+		Role:    llm.RoleAssistant,
+		Content: msg.Content,
+		Phase:   msg.Phase,
+	}, true
 }

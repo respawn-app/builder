@@ -465,9 +465,8 @@ func (s *chatStore) snapshotWithMetadata() materializedChatSnapshot {
 		}
 		switch msg.Role {
 		case llm.RoleUser:
-			content := strings.TrimSpace(msg.Content)
-			if content != "" && msg.MessageType != llm.MessageTypeCompactionSummary {
-				entries = append(entries, ChatEntry{Role: "user", Text: msg.Content})
+			if entry, ok := visibleUserTranscriptEntry(msg); ok {
+				entries = append(entries, entry)
 			}
 		case llm.RoleAssistant:
 			if strings.TrimSpace(msg.Content) != "" {
@@ -545,25 +544,6 @@ func (s *chatStore) synthesizedToolResult(call llm.ToolCall, materialized map[st
 	}
 	return ChatEntry{Role: role, Text: formatToolResult(completion), ToolCallID: callID}, true
 }
-
-func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
-	if strings.TrimSpace(msg.Content) == "" {
-		return ChatEntry{}, false
-	}
-	switch msg.MessageType {
-	case llm.MessageTypeErrorFeedback:
-		return ChatEntry{Role: "error", Text: msg.Content}, true
-	case llm.MessageTypeCompactionSoonReminder:
-		return ChatEntry{Role: "warning", Text: msg.Content}, true
-	case llm.MessageTypeBackgroundNotice:
-		return ChatEntry{Role: "system", Text: msg.Content, OngoingText: msg.CompactContent}, true
-	case llm.MessageTypeManualCompactionCarryover:
-		return ChatEntry{Role: string(transcript.EntryRoleManualCompactionCarryover), Text: msg.Content}, true
-	default:
-		return ChatEntry{}, false
-	}
-}
-
 func (s *chatStore) formatToolCall(call llm.ToolCall) ChatEntry {
 	meta := decodeToolCallMeta(call)
 	text := "tool call"
