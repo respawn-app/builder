@@ -19,7 +19,7 @@ func isCompactionRole(role string) bool {
 
 func isDetailOnlyRole(role string) bool {
 	switch transcript.NormalizeEntryRole(role) {
-	case "thinking", "thinking_trace", "reasoning", roleDeveloperContext, roleManualCompactionCarryover, "error", "warning":
+	case "thinking", "thinking_trace", "reasoning", roleCompactionSummary, roleDeveloperContext, roleManualCompactionCarryover, "error", "warning":
 		return true
 	default:
 		return false

@@ -582,7 +582,7 @@ func TestChatStoreShowsCompactionSummaryMessage(t *testing.T) {
 	if len(snap.Entries) != 2 {
 		t.Fatalf("expected 2 visible entries, got %d (%+v)", len(snap.Entries), snap.Entries)
 	}
-	if snap.Entries[0].Role != string(transcript.EntryRoleCompactionSummary) || snap.Entries[0].Text != "summary" || snap.Entries[0].OngoingText != "summary" {
+	if snap.Entries[0].Role != string(transcript.EntryRoleCompactionSummary) || snap.Entries[0].Text != "summary" || snap.Entries[0].OngoingText != "" {
 		t.Fatalf("unexpected compaction summary entry: %+v", snap.Entries[0])
 	}
 	if snap.Entries[1].Role != "user" || snap.Entries[1].Text != "real user input" {

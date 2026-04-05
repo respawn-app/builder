@@ -1,8 +1,9 @@
 package tui
 
 import (
-	"builder/shared/transcript"
 	"strings"
+
+	"builder/shared/transcript"
 )
 
 func (m Model) renderFlatDetailTranscript() string {
@@ -513,9 +514,6 @@ func (m Model) trailingThinkingTextBeforeEntry(entries []TranscriptEntry, idx in
 func (m Model) ongoingEntryText(entry TranscriptEntry) string {
 	if strings.TrimSpace(entry.OngoingText) != "" {
 		return entry.OngoingText
-	}
-	if transcript.NormalizeEntryRole(entry.Role) == roleCompactionSummary {
-		return compactCompactionSummaryForOngoing(entry.Text)
 	}
 	return entry.Text
 }

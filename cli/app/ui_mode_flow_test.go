@@ -600,6 +600,66 @@ func TestAlwaysAltScreenPolicyStartsInAltScreen(t *testing.T) {
 	}
 }
 
+func TestStartupHydrationKeepsCompactionSummaryDetailOnly(t *testing.T) {
+	client := &startupTranscriptRuntimeClient{
+		view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1", SessionName: "incident triage"}},
+		page: clientui.TranscriptPage{
+			SessionID:    "session-1",
+			Offset:       0,
+			TotalEntries: 2,
+			Entries: []clientui.ChatEntry{
+				{Role: "compaction_notice", Text: "context compacted for the 1st time"},
+				{Role: "compaction_summary", Text: "summary line one\nsummary line two"},
+			},
+		},
+	}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+
+	next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	updated := next.(*uiModel)
+	if startupCmd == nil {
+		t.Fatal("expected startup native history replay command")
+	}
+	seededOngoing := stripANSIAndTrimRight(updated.view.OngoingSnapshot())
+	if !strings.Contains(seededOngoing, "context compacted for the 1st time") {
+		t.Fatalf("expected compaction notice visible in ongoing startup seed, got %q", seededOngoing)
+	}
+	if strings.Contains(seededOngoing, "summary line one") || strings.Contains(seededOngoing, "summary line two") {
+		t.Fatalf("expected compaction summary hidden in ongoing startup seed, got %q", seededOngoing)
+	}
+	if len(updated.startupCmds) != 1 || updated.startupCmds[0] == nil {
+		t.Fatalf("expected queued startup hydration command, got %d command(s)", len(updated.startupCmds))
+	}
+
+	hydrationMsg, ok := updated.startupCmds[0]().(runtimeTranscriptRefreshedMsg)
+	if !ok {
+		t.Fatalf("expected runtimeTranscriptRefreshedMsg from startup hydration, got %T", updated.startupCmds[0]())
+	}
+	hydrated := updateUIModel(t, updated, hydrationMsg)
+	hydratedOngoing := stripANSIAndTrimRight(hydrated.view.OngoingSnapshot())
+	if !strings.Contains(hydratedOngoing, "context compacted for the 1st time") {
+		t.Fatalf("expected compaction notice visible after hydration, got %q", hydratedOngoing)
+	}
+	if strings.Contains(hydratedOngoing, "summary line one") || strings.Contains(hydratedOngoing, "summary line two") {
+		t.Fatalf("expected compaction summary hidden after hydration, got %q", hydratedOngoing)
+	}
+
+	detail := updateUIModel(t, hydrated, tea.KeyMsg{Type: tea.KeyCtrlT})
+	if detail.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected detail mode after toggle, got %q", detail.view.Mode())
+	}
+	detailView := stripANSIAndTrimRight(detail.view.View())
+	if !containsInOrder(detailView, "context compacted for the 1st time", "summary line one", "summary line two") {
+		t.Fatalf("expected compaction notice plus full summary in detail after hydration, got %q", detailView)
+	}
+	if got, want := len(client.loadRequests), 1; got != want {
+		t.Fatalf("load request count = %d, want %d", got, want)
+	}
+	if client.loadRequests[0].Window != clientui.TranscriptWindowOngoingTail {
+		t.Fatalf("startup hydration window = %q, want ongoing_tail", client.loadRequests[0].Window)
+	}
+}
+
 func appendTranscriptMessage(t *testing.T, store *session.Store, role llm.Role, text string) {
 	t.Helper()
 	if _, err := store.AppendEvent("s1", "message", llm.Message{Role: role, Content: text}); err != nil {

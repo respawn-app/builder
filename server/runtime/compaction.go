@@ -493,7 +493,7 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 	}
 	if strings.TrimSpace(result.summary) != "" {
 		summary := strings.TrimSpace(result.summary)
-		if err := e.appendPersistedLocalEntryWithOngoingText(stepID, "compaction_summary", summary, compactCompactionSummaryText(summary)); err != nil {
+		if err := e.appendPersistedLocalEntry(stepID, "compaction_summary", summary); err != nil {
 			_ = e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
 			return compactionResult{}, err
 		}

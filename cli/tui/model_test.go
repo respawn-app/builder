@@ -919,14 +919,14 @@ func TestDetailRefreshesForLiveStreamingReasoning(t *testing.T) {
 func TestCompactionNoticeAndSummaryRenderingByMode(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "compaction_notice", Text: "context compacted for the 1st time"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "compaction_summary", Text: "line one\nline two", OngoingText: "line one\n…"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "compaction_summary", Text: "line one\nline two"})
 
 	ongoing := plainTranscript(m.View())
 	if !containsInOrder(ongoing, "@", "context compacted for the 1st time") {
 		t.Fatalf("expected compaction notice in ongoing view, got %q", ongoing)
 	}
-	if !strings.Contains(ongoing, "line one") || !strings.Contains(ongoing, "…") || strings.Contains(ongoing, "line two") {
-		t.Fatalf("expected collapsed compaction summary in ongoing view, got %q", ongoing)
+	if strings.Contains(ongoing, "line one") || strings.Contains(ongoing, "line two") {
+		t.Fatalf("expected compaction summary hidden in ongoing view, got %q", ongoing)
 	}
 
 	m = updateModel(t, m, ToggleModeMsg{})
@@ -2061,7 +2061,7 @@ func TestMuteANSIOutputSupportsColonTrueColorSGRInRenderingPipeline(t *testing.T
 	}
 }
 
-func TestOngoingWrappedShellPreviewKeepsMutedHighlightAcrossVisualLines(t *testing.T) {
+func TestOngoingWrappedShellPreviewCollapsesAfterFirstVisualLine(t *testing.T) {
 	m := NewModel(WithTheme("dark"))
 	m.viewportWidth = 28
 	meta := &transcript.ToolCallMeta{
@@ -2070,28 +2070,29 @@ func TestOngoingWrappedShellPreviewKeepsMutedHighlightAcrossVisualLines(t *testi
 	command := "./gradlew -p apps/respawn detektFormat > docs/tmp/build-triage-2026-03-15/detektFormat.log 2>&1"
 
 	lines := m.flattenEntryWithMeta("tool_shell_success", command, true, meta)
-	if len(lines) < 3 {
-		t.Fatalf("expected wrapped ongoing shell preview to span multiple visual lines, got %d (%q)", len(lines), lines)
+	if len(lines) != 1 {
+		t.Fatalf("expected wrapped ongoing shell preview to collapse to one truncated line, got %d (%q)", len(lines), lines)
 	}
-	joined := strings.Join(lines, "\n")
 	if expectedPrefix := m.roleSymbol("tool_shell_success") + " "; !strings.HasPrefix(lines[0], expectedPrefix) {
 		t.Fatalf("expected wrapped shell preview to preserve the full-color shell prefix, got %q want prefix %q", lines[0], expectedPrefix)
 	}
+	joined := strings.Join(lines, "\n")
+	if !strings.HasSuffix(strings.TrimSpace(ansi.Strip(lines[0])), "…") {
+		t.Fatalf("expected wrapped shell preview first line to end with ellipsis, got %q", lines[0])
+	}
 	if !strings.Contains(joined, ";2m") {
-		t.Fatalf("expected wrapped shell preview to remain faint across visual lines, got %q", joined)
+		t.Fatalf("expected wrapped shell preview to remain faint after truncation, got %q", joined)
 	}
 	colors := extractForegroundTrueColors(joined)
 	if !containsColor(colors, m.palette().previewColor) || !containsNonPreviewColor(colors, m.palette().previewColor) {
 		t.Fatalf("expected wrapped shell preview to keep preview base plus syntax colors, got %q", joined)
 	}
-	plain := strings.Join(strings.Fields(ansi.Strip(joined)), "")
-	expected := strings.Join(strings.Fields("$ "+command), "")
-	if plain != expected {
-		t.Fatalf("expected wrapped shell preview text preserved, got %q want %q", plain, expected)
+	if strings.Contains(ansi.Strip(joined), "detektFormat.log") {
+		t.Fatalf("expected wrapped shell preview to omit wrapped tail after collapsing, got %q", ansi.Strip(joined))
 	}
 }
 
-func TestWrappedMutedShellPreviewDoesNotApplySecondPerLineMutePass(t *testing.T) {
+func TestWrappedMutedShellPreviewUsesEllipsisContinuation(t *testing.T) {
 	m := NewModel(WithTheme("dark"))
 	m.viewportWidth = 92
 	meta := &transcript.ToolCallMeta{
@@ -2100,26 +2101,18 @@ func TestWrappedMutedShellPreviewDoesNotApplySecondPerLineMutePass(t *testing.T)
 	command := "go test ./cli/tui -run 'Test(MuteANSIOutput|FlattenEntryWithMetaKeepsMutedShellHighlightWhenMuted|OngoingWrappedShellPreviewKeepsMutedHighlightAcrossVisualLines|ViewWrappedShellPreviewUsesMutedOngoingAndFullColorDetail|ViewSourceHintShellPreviewUsesMutedOngoing|OngoingSourceHintShellPreviewFallsBackToMutedShellHighlight)'"
 
 	lines := m.flattenEntryWithMeta("tool_shell_success", command, true, meta)
-	if len(lines) < 2 {
-		t.Fatalf("expected wrapped muted shell preview to span multiple visual lines, got %d (%q)", len(lines), lines)
+	if len(lines) != 1 {
+		t.Fatalf("expected wrapped muted shell preview to collapse to one truncated line, got %d (%q)", len(lines), lines)
 	}
-
-	base := m.palette().previewColor
-	previewPrefix := "  " + styleEscape(ansiStyleTransform{
-		DefaultForeground: &base,
-		ForceFaint:        true,
-	}, false)
+	if !strings.HasSuffix(strings.TrimSpace(ansi.Strip(lines[0])), "…") {
+		t.Fatalf("expected wrapped muted shell preview first line to end with ellipsis, got %q", lines[0])
+	}
 	lineStartStates := mutedShellStyleStateAtLineStarts(strings.Join(lines, "\n"))
 	if len(lineStartStates) != len(lines) {
-		t.Fatalf("expected line-start style state for every wrapped line, got %d want %d", len(lineStartStates), len(lines))
+		t.Fatalf("expected line-start style state for collapsed line, got %d want %d", len(lineStartStates), len(lines))
 	}
-	for idx, line := range lines[1:] {
-		if strings.HasPrefix(line, previewPrefix) {
-			t.Fatalf("expected wrapped muted shell continuation line %d to avoid second per-line mute pass, got %q", idx+1, line)
-		}
-		if !lineStartStates[idx+1].faint || !lineStartStates[idx+1].hasForeground {
-			t.Fatalf("expected wrapped muted shell continuation line %d to start under active muted shell styling, got state=%+v line=%q", idx+1, lineStartStates[idx+1], line)
-		}
+	if !strings.Contains(lines[0], ";2m") || !containsColor(extractForegroundTrueColors(lines[0]), m.palette().previewColor) {
+		t.Fatalf("expected truncated muted shell line to remain faint and preview-owned, got state=%+v line=%q", lineStartStates[0], lines[0])
 	}
 }
 
@@ -2254,8 +2247,9 @@ func TestViewWrappedShellPreviewUsesMutedOngoingAndFullColorDetail(t *testing.T)
 	if !containsNonPreviewColor(ongoingColors, m.palette().previewColor) {
 		t.Fatalf("expected ongoing view to preserve some syntax colors while fainting them, got %q", ongoing)
 	}
-	if strings.Count(plainTranscript(ongoing), "detektFormat") == 0 {
-		t.Fatalf("expected ongoing view to show wrapped shell command text, got %q", plainTranscript(ongoing))
+	plainOngoing := plainTranscript(ongoing)
+	if !strings.Contains(plainOngoing, "$ ./gradlew -p apps/respaw") || !strings.Contains(plainOngoing, "…") || strings.Contains(plainOngoing, "\n  …") {
+		t.Fatalf("expected ongoing view to truncate wrapped shell preview on the first visual line, got %q", plainOngoing)
 	}
 
 	m = updateModel(t, m, ToggleModeMsg{})
@@ -2399,6 +2393,73 @@ func TestDetailShellUserInitiatedCallUsesUserRanLabel(t *testing.T) {
 	}
 }
 
+func TestSuccessfulWrappedShellBlockUsesSuccessPrefixInOngoingAndDetail(t *testing.T) {
+	command := `git add cli/app/ui_mode_flow_test.go cli/app/ui_native_scrollback_integration_test.go cli/app/ui_runtime_adapter_test.go cli/app/ui_runtime_client.go cli/app/ui_runtime_control_test.go cli/app/ui_runtime_sync.go cli/tui/model_reducer.go cli/tui/model_rendering.go cli/tui/model_rendering_style.go cli/tui/model_rendering_tools.go cli/tui/model_test.go cli/tui/roles.go docs/dev/decisions.md server/primaryrun/runtime_client.go server/primaryrun/runtime_client_test.go server/runtime/chat_store.go server/runtime/chat_store_test.go server/runtime/compaction.go server/runtime/engine_test.go server/runtime/step_executor.go server/runtime/transcript_event_entries.go server/runtime/transcript_projector_test.go server/runtime/transcript_scan.go server/runtime/transcript_message_visibility.go shared/clientui/runtime.go shared/transcript/roles.go && git commit -m "fix: align transcript visibility and refresh behavior"`
+	m := NewModel(WithTheme("dark"), WithPreviewLines(20))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 120})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "tool_call",
+		Text:       command,
+		ToolCallID: "call_1",
+		ToolCall: &transcript.ToolCallMeta{
+			ToolName:   "shell",
+			IsShell:    true,
+			Command:    command,
+			RenderHint: &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindShell},
+		},
+	})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "tool_result_ok", Text: "ok", ToolCallID: "call_1"})
+
+	blocks := m.buildOngoingBlocks(true)
+	var shellBlock ongoingBlock
+	found := false
+	for _, block := range blocks {
+		if block.role == "tool_shell_success" {
+			shellBlock = block
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected merged ongoing shell success block, got %#v", blocks)
+	}
+	if len(shellBlock.lines) != 1 {
+		t.Fatalf("expected wrapped ongoing shell success block to collapse to one truncated line, got %d (%q)", len(shellBlock.lines), shellBlock.lines)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(ansi.Strip(shellBlock.lines[0])), "…") {
+		t.Fatalf("expected wrapped ongoing shell success block first line to end with ellipsis, got %q", shellBlock.lines[0])
+	}
+	if !strings.HasPrefix(shellBlock.lines[0], m.roleSymbol("tool_shell_success")+" ") {
+		t.Fatalf("expected ongoing shell success line to use success prefix, got %q", shellBlock.lines[0])
+	}
+	ongoingLine := shellBlock.lines[0]
+	if !strings.Contains(ongoingLine, ";2m") {
+		t.Fatalf("expected ongoing shell success line to stay faint, got %q", ongoingLine)
+	}
+	if !containsColor(extractForegroundTrueColors(ongoingLine), m.palette().successColor) {
+		t.Fatalf("expected ongoing shell success line to contain success color for prefix, got %q", ongoingLine)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detail := m.View()
+	detailLine := lineContaining(detail, "git add cli/app/ui_mode_flow_test.go")
+	if detailLine == "" {
+		t.Fatalf("expected detail view to contain successful shell command, got %q", plainTranscript(detail))
+	}
+	if !strings.HasPrefix(detailLine, m.roleSymbol("tool_shell_success")+" ") {
+		t.Fatalf("expected detail shell success line to use success prefix, got %q", detailLine)
+	}
+	if strings.Contains(detailLine, ";2m") {
+		t.Fatalf("expected detail shell success line to avoid faint styling, got %q", detailLine)
+	}
+	if !containsColor(extractForegroundTrueColors(detailLine), m.palette().successColor) {
+		t.Fatalf("expected detail shell success line to contain success color for prefix, got %q", detailLine)
+	}
+	if !containsColor(extractForegroundTrueColors(detailLine), m.palette().foregroundColor) {
+		t.Fatalf("expected detail shell success line to restore app foreground across resets, got %q", detailLine)
+	}
+}
+
 func TestOngoingShellMultilineCommandPreviewIsCollapsedToTwoLines(t *testing.T) {
 	command := strings.Join([]string{
 		"cat > /tmp/demo.txt <<'EOF'",
@@ -2428,16 +2489,16 @@ func TestOngoingShellMultilineCommandPreviewIsCollapsedToTwoLines(t *testing.T) 
 			break
 		}
 	}
-	if len(shellBlockLines) != 2 {
-		t.Fatalf("expected ongoing shell preview to be capped at 2 lines, got %d (%q)", len(shellBlockLines), shellBlockLines)
+	if len(shellBlockLines) != 1 {
+		t.Fatalf("expected ongoing shell preview to collapse to one truncated line, got %d (%q)", len(shellBlockLines), shellBlockLines)
 	}
-	if got := strings.TrimSpace(ansi.Strip(shellBlockLines[1])); got != "…" {
-		t.Fatalf("expected ongoing shell preview second line to be ellipsis, got %q", shellBlockLines[1])
+	if !strings.HasSuffix(strings.TrimSpace(ansi.Strip(shellBlockLines[0])), "…") {
+		t.Fatalf("expected ongoing shell preview first line to end with ellipsis, got %q", shellBlockLines[0])
 	}
 
 	ongoing := plainTranscript(m.OngoingSnapshot())
-	if !strings.Contains(ongoing, "\n  …") {
-		t.Fatalf("expected ongoing shell preview to include ellipsis line, got %q", ongoing)
+	if !strings.Contains(ongoing, "…") || strings.Contains(ongoing, "\n  …") {
+		t.Fatalf("expected ongoing shell preview to inline ellipsis on the first line, got %q", ongoing)
 	}
 	if strings.Contains(ongoing, "second line") || strings.Contains(ongoing, "third line") || strings.Contains(ongoing, "\n  EOF") {
 		t.Fatalf("expected ongoing shell preview to omit heredoc tail, got %q", ongoing)
@@ -2449,7 +2510,7 @@ func TestOngoingShellMultilineCommandPreviewIsCollapsedToTwoLines(t *testing.T) 
 	}
 }
 
-func TestOngoingShellSingleLineCommandIsNotCollapsed(t *testing.T) {
+func TestOngoingShellSingleLineCommandCollapsesAfterFirstVisualLine(t *testing.T) {
 	command := "printf '%s' " + strings.Repeat("very-long-token-", 10)
 
 	m := NewModel(WithPreviewLines(30))
@@ -2472,11 +2533,11 @@ func TestOngoingShellSingleLineCommandIsNotCollapsed(t *testing.T) {
 			break
 		}
 	}
-	if len(shellBlockLines) <= 2 {
-		t.Fatalf("expected long single-line shell command to wrap naturally without collapse, got %d lines (%q)", len(shellBlockLines), shellBlockLines)
+	if len(shellBlockLines) != 1 {
+		t.Fatalf("expected long single-line shell command to collapse to one truncated line, got %d lines (%q)", len(shellBlockLines), shellBlockLines)
 	}
-	if strings.TrimSpace(ansi.Strip(shellBlockLines[len(shellBlockLines)-1])) == "…" {
-		t.Fatalf("did not expect ellipsis collapse marker for single-line shell command, got %q", shellBlockLines)
+	if !strings.HasSuffix(strings.TrimSpace(ansi.Strip(shellBlockLines[0])), "…") {
+		t.Fatalf("expected inline ellipsis collapse marker for single-line shell command, got %q", shellBlockLines)
 	}
 }
 
@@ -2507,11 +2568,11 @@ func TestOngoingShellMultilinePreviewStaysTwoLinesWhenHeaderWraps(t *testing.T) 
 			break
 		}
 	}
-	if len(shellBlockLines) != 2 {
-		t.Fatalf("expected wrapped multiline shell preview to remain capped at 2 lines, got %d (%q)", len(shellBlockLines), shellBlockLines)
+	if len(shellBlockLines) != 1 {
+		t.Fatalf("expected wrapped multiline shell preview to collapse to one truncated line, got %d (%q)", len(shellBlockLines), shellBlockLines)
 	}
-	if got := strings.TrimSpace(ansi.Strip(shellBlockLines[1])); got != "…" {
-		t.Fatalf("expected wrapped multiline shell preview second line to be ellipsis, got %q", shellBlockLines[1])
+	if !strings.HasSuffix(strings.TrimSpace(ansi.Strip(shellBlockLines[0])), "…") {
+		t.Fatalf("expected wrapped multiline shell preview first line to end with ellipsis, got %q", shellBlockLines[0])
 	}
 }
 
