@@ -362,15 +362,15 @@ func TestGatewayRemoteSessionActivityPreservesActiveSubmitOrderingUsingAssistant
 		submitDone <- submitErr
 	}()
 
-	// Remote session activity currently exposes live assistant progress via assistant_delta,
-	// but it does not surface the persisted commentary transcript entry for the first
-	// assistant/tool-call turn. This locks the strongest migrated-path guarantee today:
-	// user submit -> assistant-visible progress -> tool call -> tool result -> final assistant.
+	// Remote session activity exposes both assistant_delta progress and the persisted
+	// commentary assistant transcript entry for the first assistant/tool-call turn.
+	// The commentary assistant event must stay distinct from the tool call event and
+	// must not carry duplicated tool calls.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	sequence := make([]string, 0, 5)
+	sequence := make([]string, 0, 6)
 	commentaryTranscriptSeen := false
-	for len(sequence) < 5 {
+	for len(sequence) < 6 {
 		evt, err := sub.Next(ctx)
 		if err != nil {
 			t.Fatalf("Next: %v", err)
@@ -391,6 +391,22 @@ func TestGatewayRemoteSessionActivityPreservesActiveSubmitOrderingUsingAssistant
 				continue
 			}
 			sequence = append(sequence, "assistant_progress")
+		case clientui.EventAssistantMessage:
+			if len(evt.TranscriptEntries) != 1 {
+				t.Fatalf("assistant transcript entries len = %d, want 1", len(evt.TranscriptEntries))
+			}
+			entry := evt.TranscriptEntries[0]
+			if entry.Phase == string(llm.MessagePhaseCommentary) {
+				if entry.Role != "assistant" || entry.Text != "Inspecting now" {
+					t.Fatalf("unexpected commentary assistant transcript entry: %+v", entry)
+				}
+				sequence = append(sequence, "commentary")
+				continue
+			}
+			if entry.Role != "assistant" || entry.Text != "done" || entry.Phase != string(llm.MessagePhaseFinal) {
+				t.Fatalf("unexpected final assistant transcript entry: %+v", entry)
+			}
+			sequence = append(sequence, "final")
 		case clientui.EventToolCallStarted:
 			if len(evt.TranscriptEntries) != 1 || evt.TranscriptEntries[0].Role != "tool_call" || evt.TranscriptEntries[0].Text != "pwd" {
 				t.Fatalf("unexpected tool call transcript entries: %+v", evt.TranscriptEntries)
@@ -401,21 +417,12 @@ func TestGatewayRemoteSessionActivityPreservesActiveSubmitOrderingUsingAssistant
 				t.Fatalf("unexpected tool result transcript entries: %+v", evt.TranscriptEntries)
 			}
 			sequence = append(sequence, "tool_result")
-		case clientui.EventAssistantMessage:
-			if len(evt.TranscriptEntries) != 1 {
-				t.Fatalf("assistant transcript entries len = %d, want 1", len(evt.TranscriptEntries))
-			}
-			entry := evt.TranscriptEntries[0]
-			if entry.Role != "assistant" || entry.Text != "done" || entry.Phase != string(llm.MessagePhaseFinal) {
-				t.Fatalf("unexpected final assistant transcript entry: %+v", entry)
-			}
-			sequence = append(sequence, "final")
 		}
 	}
-	if commentaryTranscriptSeen {
-		t.Fatalf("expected remote session activity to omit commentary transcript entries for the tool-call turn, got sequence=%v", sequence)
+	if !commentaryTranscriptSeen {
+		t.Fatalf("expected remote session activity to include commentary transcript entry for the tool-call turn, got sequence=%v", sequence)
 	}
-	want := []string{"user", "assistant_progress", "tool_call", "tool_result", "final"}
+	want := []string{"user", "assistant_progress", "commentary", "tool_call", "tool_result", "final"}
 	if len(sequence) != len(want) {
 		t.Fatalf("sequence len = %d, want %d (%v)", len(sequence), len(want), sequence)
 	}
