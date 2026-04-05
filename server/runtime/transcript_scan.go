@@ -23,19 +23,20 @@ type inMemoryTranscriptScanRequest struct {
 }
 
 type inMemoryTranscriptScan struct {
-	request     inMemoryTranscriptScanRequest
+	request      inMemoryTranscriptScanRequest
 	totalEntries int
-	pageEntries []ChatEntry
+	pageEntries  []ChatEntry
 
 	tailEntries             []ChatEntry
 	tailStart               int
 	compactionEntryStart    int
 	hasCompactionCheckpoint bool
 
-	toolCompletions map[string]tools.Result
+	toolCompletions       map[string]tools.Result
+	materializedToolCalls map[string]struct{}
 }
 
-func newInMemoryTranscriptScan(req inMemoryTranscriptScanRequest, completions map[string]tools.Result) *inMemoryTranscriptScan {
+func newInMemoryTranscriptScan(req inMemoryTranscriptScanRequest, completions map[string]tools.Result, materializedToolCalls map[string]struct{}) *inMemoryTranscriptScan {
 	if req.Offset < 0 {
 		req.Offset = 0
 	}
@@ -46,9 +47,10 @@ func newInMemoryTranscriptScan(req inMemoryTranscriptScanRequest, completions ma
 		req.TailLimit = 0
 	}
 	return &inMemoryTranscriptScan{
-		request:         req,
-		compactionEntryStart: -1,
-		toolCompletions: completions,
+		request:               req,
+		compactionEntryStart:  -1,
+		toolCompletions:       completions,
+		materializedToolCalls: materializedToolCalls,
 	}
 }
 
@@ -115,6 +117,9 @@ func (s *inMemoryTranscriptScan) visibleEntriesFromMessage(msg llm.Message) []Ch
 		}
 		for _, call := range msg.ToolCalls {
 			entries = append(entries, formatPersistedToolCall(call))
+			if synthesized, ok := s.synthesizedToolResult(call); ok {
+				entries = append(entries, synthesized)
+			}
 		}
 	case llm.RoleTool:
 		callID := strings.TrimSpace(msg.ToolCallID)
@@ -142,6 +147,24 @@ func (s *inMemoryTranscriptScan) visibleEntriesFromMessage(msg llm.Message) []Ch
 		}
 	}
 	return entries
+}
+
+func (s *inMemoryTranscriptScan) synthesizedToolResult(call llm.ToolCall) (ChatEntry, bool) {
+	if s == nil {
+		return ChatEntry{}, false
+	}
+	callID := strings.TrimSpace(call.ID)
+	if callID == "" {
+		return ChatEntry{}, false
+	}
+	if _, ok := s.materializedToolCalls[callID]; ok {
+		return ChatEntry{}, false
+	}
+	completion, ok := s.toolCompletions[callID]
+	if !ok {
+		return ChatEntry{}, false
+	}
+	return toolResultChatEntry(completion), true
 }
 
 func (s *inMemoryTranscriptScan) appendEntry(entry ChatEntry) {
@@ -294,4 +317,23 @@ func normalizeRuntimeToolInput(arguments string) json.RawMessage {
 	}
 	quoted, _ := json.Marshal(arguments)
 	return quoted
+}
+
+func collectMaterializedToolCalls(items []llm.ResponseItem) map[string]struct{} {
+	out := make(map[string]struct{})
+	walker := newResponseItemMessageWalker(func(msg llm.Message) {
+		if msg.Role != llm.RoleTool {
+			return
+		}
+		callID := strings.TrimSpace(msg.ToolCallID)
+		if callID == "" {
+			return
+		}
+		out[callID] = struct{}{}
+	})
+	for _, item := range items {
+		walker.Apply(item)
+	}
+	walker.Flush()
+	return out
 }

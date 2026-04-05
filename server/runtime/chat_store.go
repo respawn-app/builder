@@ -348,11 +348,12 @@ func (s *chatStore) ongoingTailSnapshot(maxEntries int) TranscriptWindowSnapshot
 	if s.compact != nil {
 		cutoff = s.compact.CutoffItemCount
 	}
+	materializedToolResults := collectMaterializedToolCalls(s.items)
 	scan := newInMemoryTranscriptScan(inMemoryTranscriptScanRequest{
 		TrackOngoingTail:     true,
 		TailLimit:            maxEntries,
 		CompactionItemCutoff: cutoff,
-	}, s.toolCompletions)
+	}, s.toolCompletions, materializedToolResults)
 	localIndex := 0
 	processedMessages := 0
 	appendLocalEntries := func(messageCount int) {
@@ -389,7 +390,8 @@ func (s *chatStore) transcriptPageSnapshot(offset, limit int) transcriptPageSnap
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	scan := newInMemoryTranscriptScan(inMemoryTranscriptScanRequest{Offset: offset, Limit: limit}, s.toolCompletions)
+	materializedToolResults := collectMaterializedToolCalls(s.items)
+	scan := newInMemoryTranscriptScan(inMemoryTranscriptScanRequest{Offset: offset, Limit: limit}, s.toolCompletions, materializedToolResults)
 	localIndex := 0
 	processedMessages := 0
 	appendLocalEntries := func(messageCount int) {

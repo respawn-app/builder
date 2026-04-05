@@ -61,6 +61,20 @@ func (p *TranscriptProjector) ChatSnapshot() ChatSnapshot {
 	return p.chat.snapshot()
 }
 
+func (p *TranscriptProjector) TranscriptPageSnapshot(offset, limit int) transcriptPageSnapshot {
+	if p == nil || p.chat == nil {
+		return transcriptPageSnapshot{}
+	}
+	return p.chat.transcriptPageSnapshot(offset, limit)
+}
+
+func (p *TranscriptProjector) CommittedEntryCount() int {
+	if p == nil || p.chat == nil {
+		return 0
+	}
+	return p.chat.committedEntryCount()
+}
+
 func (p *TranscriptProjector) OngoingTailSnapshot(maxEntries int) TranscriptWindowSnapshot {
 	if p == nil || p.chat == nil {
 		return TranscriptWindowSnapshot{}
