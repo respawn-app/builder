@@ -340,8 +340,12 @@ func TestCtrlTDeferredDetailLoadDoesNotMutateNativeHistoryState(t *testing.T) {
 	next, enterCmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
 	detail := next.(*uiModel)
 	_ = collectCmdMessages(t, enterCmd)
+	detail.transcriptLiveDirty = true
 	next, refreshCmd := detail.Update(detailTranscriptLoadMsg{})
 	detail = next.(*uiModel)
+	if refreshCmd == nil {
+		t.Fatal("expected deferred detail load to refresh when transcript is dirty")
+	}
 	refreshed, ok := refreshCmd().(runtimeTranscriptRefreshedMsg)
 	if !ok {
 		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", refreshCmd())

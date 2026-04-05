@@ -2576,6 +2576,14 @@ func updateModel(t *testing.T, m Model, msg tea.Msg) Model {
 	return updated
 }
 
+func transcriptEntriesRange(start, end int) []TranscriptEntry {
+	entries := make([]TranscriptEntry, 0, max(0, end-start))
+	for i := start; i < end; i++ {
+		entries = append(entries, TranscriptEntry{Role: "assistant", Text: fmt.Sprintf("line %d", i)})
+	}
+	return entries
+}
+
 func plainTranscript(view string) string {
 	stripped := ansi.Strip(view)
 	lines := strings.Split(stripped, "\n")
