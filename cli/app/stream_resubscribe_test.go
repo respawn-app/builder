@@ -27,7 +27,7 @@ func TestStartSessionActivityEventsResubscribesAfterStreamGap(t *testing.T) {
 		next := remaining[0]
 		remaining = remaining[1:]
 		return next, nil
-	})
+	}, nil)
 	defer stop()
 
 	first := waitSessionActivityEvent(t, events)
@@ -43,6 +43,55 @@ func TestStartSessionActivityEventsResubscribesAfterStreamGap(t *testing.T) {
 	second := waitSessionActivityEvent(t, events)
 	if second.Kind != clientui.EventRunStateChanged || second.RunState == nil || !second.RunState.Busy {
 		t.Fatalf("unexpected resubscribed event: %+v", second)
+	}
+}
+
+func TestStartSessionActivityEventsResubscribeStaysIsolatedAcrossStreams(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	initialA := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{evt: clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "a-first"}}, {err: serverapi.ErrStreamGap}}}
+	resubA := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{evt: clientui.Event{Kind: clientui.EventRunStateChanged, StepID: "step-a", RunState: &clientui.RunState{Busy: true}}}}}
+	remainingA := []serverapi.SessionActivitySubscription{resubA}
+
+	initialB := &stubSessionActivitySubscription{steps: []stubSessionActivityStep{{evt: clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "b-first"}}}}
+
+	eventsA, stopA := startSessionActivityEvents(ctx, initialA, func(context.Context) (serverapi.SessionActivitySubscription, error) {
+		if len(remainingA) == 0 {
+			return nil, context.Canceled
+		}
+		next := remainingA[0]
+		remainingA = remainingA[1:]
+		return next, nil
+	}, nil)
+	defer stopA()
+	eventsB, stopB := startSessionActivityEvents(ctx, initialB, func(context.Context) (serverapi.SessionActivitySubscription, error) {
+		return nil, context.Canceled
+	}, nil)
+	defer stopB()
+
+	firstA := waitSessionActivityEvent(t, eventsA)
+	if firstA.AssistantDelta != "a-first" {
+		t.Fatalf("unexpected initial event for stream A: %+v", firstA)
+	}
+	firstB := waitSessionActivityEvent(t, eventsB)
+	if firstB.AssistantDelta != "b-first" {
+		t.Fatalf("unexpected initial event for stream B: %+v", firstB)
+	}
+
+	rehydrateA := waitSessionActivityEvent(t, eventsA)
+	if rehydrateA.Kind != clientui.EventConversationUpdated {
+		t.Fatalf("expected synthetic refresh only on stream A, got %+v", rehydrateA)
+	}
+	secondA := waitSessionActivityEvent(t, eventsA)
+	if secondA.Kind != clientui.EventRunStateChanged || secondA.StepID != "step-a" {
+		t.Fatalf("unexpected post-resubscribe event for stream A: %+v", secondA)
+	}
+
+	select {
+	case evt := <-eventsB:
+		t.Fatalf("unexpected cross-stream event on stream B: %+v", evt)
+	case <-time.After(150 * time.Millisecond):
 	}
 }
 

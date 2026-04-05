@@ -235,17 +235,19 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 		releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID)
 		return nil, err
 	}
+	logger := &runLogger{}
+	_ = diagnosticWriter
+	logger.Logf("%s", startLogLine)
 	runtimeEvents, stopRuntimeEvents := startSessionActivityEvents(ctx, sub, func(ctx context.Context) (serverapi.SessionActivitySubscription, error) {
 		return server.SessionActivityClient().SubscribeSessionActivity(ctx, serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID})
+	}, func(line string) {
+		logger.Logf("%s", line)
 	})
 	askEvents, stopAskEvents := startPendingPromptEvents(ctx, promptSub, func(ctx context.Context) (serverapi.PromptActivitySubscription, error) {
 		return server.PromptActivityClient().SubscribePromptActivity(ctx, serverapi.PromptActivitySubscribeRequest{SessionID: plan.SessionID})
 	}, func(ctx context.Context) (map[string]struct{}, error) {
 		return listPendingPromptIDs(ctx, plan.SessionID, server.AskViewClient(), server.ApprovalViewClient())
 	}, server.PromptControlClient())
-	logger := &runLogger{}
-	_ = diagnosticWriter
-	logger.Logf("%s", startLogLine)
 	wiring := &runtimeWiring{
 		runtimeEvents:   runtimeEvents,
 		askEvents:       askEvents,

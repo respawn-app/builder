@@ -15,7 +15,7 @@ const sessionActivityResubscribeDelay = 250 * time.Millisecond
 
 type sessionActivitySubscriber func(context.Context) (serverapi.SessionActivitySubscription, error)
 
-func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivitySubscription, subscribe sessionActivitySubscriber) (<-chan clientui.Event, func()) {
+func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivitySubscription, subscribe sessionActivitySubscriber, logDiag func(string)) (<-chan clientui.Event, func()) {
 	out := make(chan clientui.Event, 64)
 	if sub == nil || subscribe == nil {
 		close(out)
@@ -28,8 +28,8 @@ func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivi
 		for {
 			evt, err := current.Next(pollCtx)
 			if err != nil {
-				if transcriptdiag.EnabledFromEnv(os.Getenv) {
-					sessionActivityTranscriptDiagLogf("%s", transcriptdiag.FormatLine("transcript.diag.client.activity_gap", map[string]string{
+				if transcriptdiag.EnabledFromEnv(os.Getenv) && logDiag != nil {
+					logDiag(transcriptdiag.FormatLine("transcript.diag.client.activity_gap", map[string]string{
 						"path": "recovery",
 						"err":  err.Error(),
 					}))
@@ -47,8 +47,8 @@ func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivi
 					_ = current.Close()
 					return
 				case out <- clientui.Event{Kind: clientui.EventConversationUpdated}:
-					if transcriptdiag.EnabledFromEnv(os.Getenv) {
-						sessionActivityTranscriptDiagLogf("%s", transcriptdiag.FormatLine("transcript.diag.client.synthetic_conversation_updated", map[string]string{
+					if transcriptdiag.EnabledFromEnv(os.Getenv) && logDiag != nil {
+						logDiag(transcriptdiag.FormatLine("transcript.diag.client.synthetic_conversation_updated", map[string]string{
 							"path":  "recovery",
 							"kind":  string(clientui.EventConversationUpdated),
 							"cause": "stream_gap",
@@ -57,7 +57,7 @@ func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivi
 				}
 				continue
 			}
-			if transcriptdiag.EnabledFromEnv(os.Getenv) {
+			if transcriptdiag.EnabledFromEnv(os.Getenv) && logDiag != nil {
 				fields := map[string]string{
 					"path":         "live_event",
 					"kind":         string(evt.Kind),
@@ -65,7 +65,7 @@ func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivi
 					"event_digest": transcriptdiag.EventDigest(evt),
 				}
 				fields = transcriptdiag.AddEntriesFields(fields, evt.TranscriptEntries)
-				sessionActivityTranscriptDiagLogf("%s", transcriptdiag.FormatLine("transcript.diag.client.recv_activity", fields))
+				logDiag(transcriptdiag.FormatLine("transcript.diag.client.recv_activity", fields))
 			}
 			select {
 			case <-pollCtx.Done():
@@ -77,8 +77,6 @@ func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivi
 	}()
 	return out, cancel
 }
-
-var sessionActivityTranscriptDiagLogf = func(format string, args ...any) {}
 
 func resubscribeSessionActivity(ctx context.Context, subscribe sessionActivitySubscriber) (serverapi.SessionActivitySubscription, error) {
 	for {
