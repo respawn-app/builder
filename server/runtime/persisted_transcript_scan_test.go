@@ -43,7 +43,7 @@ func TestPersistedTranscriptScanTracksDormantOngoingTailWindow(t *testing.T) {
 			t.Fatalf("ApplyPersistedEvent before %d: %v", i, err)
 		}
 	}
-	if err := scan.ApplyPersistedEvent(session.Event{Kind: "history_replaced"}); err != nil {
+	if err := scan.ApplyPersistedEvent(mustPersistedScanEvent(t, "history_replaced", historyReplacementPayload{Items: llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "summary"}})})); err != nil {
 		t.Fatalf("ApplyPersistedEvent(history_replaced): %v", err)
 	}
 	for i := 0; i < 2; i++ {
@@ -64,6 +64,31 @@ func TestPersistedTranscriptScanTracksDormantOngoingTailWindow(t *testing.T) {
 	}
 	if window.Snapshot.Entries[0].Text != "before-4" || window.Snapshot.Entries[1].Text != "after-0" || window.Snapshot.Entries[2].Text != "after-1" {
 		t.Fatalf("unexpected tail entries: %+v", window.Snapshot.Entries)
+	}
+}
+
+func TestPersistedTranscriptScanWithoutLimitCollectsEntireDormantTranscript(t *testing.T) {
+	scan := NewPersistedTranscriptScan(PersistedTranscriptScanRequest{})
+	events := []session.Event{
+		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleUser, Content: "u1"}),
+		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleAssistant, Content: "a1", Phase: llm.MessagePhaseFinal}),
+		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleUser, Content: "u2"}),
+	}
+	for _, evt := range events {
+		if err := scan.ApplyPersistedEvent(evt); err != nil {
+			t.Fatalf("ApplyPersistedEvent(%q): %v", evt.Kind, err)
+		}
+	}
+
+	page := scan.CollectedPageSnapshot()
+	if scan.TotalEntries() != 3 {
+		t.Fatalf("TotalEntries() = %d, want 3", scan.TotalEntries())
+	}
+	if len(page.Entries) != 3 {
+		t.Fatalf("len(page.Entries) = %d, want 3", len(page.Entries))
+	}
+	if page.Entries[0].Text != "u1" || page.Entries[1].Text != "a1" || page.Entries[2].Text != "u2" {
+		t.Fatalf("unexpected unbounded page entries: %+v", page.Entries)
 	}
 }
 
@@ -93,6 +118,56 @@ func TestPersistedTranscriptScanEnrichesToolResultFromCompletion(t *testing.T) {
 	}
 	if page.Entries[1].Text == "" {
 		t.Fatalf("expected enriched tool result text, got empty entry: %+v", page.Entries[1])
+	}
+}
+
+func TestPersistedTranscriptScanSynthesizesCompletedToolResultWithoutToolMessage(t *testing.T) {
+	scan := NewPersistedTranscriptScan(PersistedTranscriptScanRequest{Offset: 0, Limit: 10})
+	events := []session.Event{
+		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleAssistant, Content: "working", ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}}}),
+		mustPersistedScanEvent(t, "tool_completed", map[string]any{"call_id": "call-1", "name": string(tools.ToolShell), "is_error": false, "output": json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`)}),
+	}
+	for _, evt := range events {
+		if err := scan.ApplyPersistedEvent(evt); err != nil {
+			t.Fatalf("ApplyPersistedEvent(%q): %v", evt.Kind, err)
+		}
+	}
+
+	page := scan.CollectedPageSnapshot()
+	if len(page.Entries) != 3 {
+		t.Fatalf("len(page.Entries) = %d, want 3", len(page.Entries))
+	}
+	if page.Entries[2].Role != "tool_result_ok" || page.Entries[2].ToolCallID != "call-1" {
+		t.Fatalf("expected synthesized tool result, got %+v", page.Entries[2])
+	}
+	if page.Entries[2].Text == "" {
+		t.Fatalf("expected synthesized tool result text, got empty entry: %+v", page.Entries[2])
+	}
+}
+
+func TestPersistedTranscriptScanKeepsCompactionSummaryAndCarryoverInDetailTranscript(t *testing.T) {
+	scan := NewPersistedTranscriptScan(PersistedTranscriptScanRequest{})
+	events := []session.Event{
+		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleUser, Content: "before compaction"}),
+		mustPersistedScanEvent(t, "history_replaced", historyReplacementPayload{Items: llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "condensed provider summary", MessageType: llm.MessageTypeCompactionSummary}})}),
+		mustPersistedScanEvent(t, "local_entry", storedLocalEntry{Role: "compaction_summary", Text: "condensed summary"}),
+		mustPersistedScanEvent(t, "message", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeManualCompactionCarryover, Content: "Last user message before handoff\n\ncarry this forward"}),
+	}
+	for _, evt := range events {
+		if err := scan.ApplyPersistedEvent(evt); err != nil {
+			t.Fatalf("ApplyPersistedEvent(%q): %v", evt.Kind, err)
+		}
+	}
+
+	page := scan.CollectedPageSnapshot()
+	if len(page.Entries) != 3 {
+		t.Fatalf("len(page.Entries) = %d, want 3 (%+v)", len(page.Entries), page.Entries)
+	}
+	if page.Entries[1].Role != "compaction_summary" || page.Entries[1].Text != "condensed summary" {
+		t.Fatalf("expected persisted compaction summary entry, got %+v", page.Entries[1])
+	}
+	if page.Entries[2].Role != "manual_compaction_carryover" {
+		t.Fatalf("expected manual compaction carryover entry, got %+v", page.Entries[2])
 	}
 }
 

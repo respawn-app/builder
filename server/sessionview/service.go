@@ -304,6 +304,9 @@ func dormantTranscriptPageFromStore(ctx context.Context, store *session.Store, r
 	if err != nil {
 		return clientui.TranscriptPage{}, err
 	}
+	if offset > scan.TotalEntries() {
+		offset = scan.TotalEntries()
+	}
 	return runtimeview.TranscriptPageFromCollectedChat(
 		meta.SessionID,
 		meta.Name,
@@ -312,7 +315,7 @@ func dormantTranscriptPageFromStore(ctx context.Context, store *session.Store, r
 		runtimeview.ChatSnapshotFromRuntime(scan.CollectedPageSnapshot()),
 		scan.TotalEntries(),
 		offset,
-		req,
+		clientui.TranscriptPageRequest{Offset: offset, Limit: limit},
 	), nil
 }
 
