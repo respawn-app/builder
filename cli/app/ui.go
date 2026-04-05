@@ -742,7 +742,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncViewport()
 		return m, cmd
 	case detailTranscriptLoadMsg:
-		cmd := m.requestRuntimeTranscriptSync()
+		cmd := m.requestRuntimeTranscriptPage(m.transcriptRequestForCurrentMode())
 		m.syncViewport()
 		return m, cmd
 	case renderDiagnosticMsg:

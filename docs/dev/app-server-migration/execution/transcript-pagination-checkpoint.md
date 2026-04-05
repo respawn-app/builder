@@ -15,7 +15,9 @@ The main goal of this slice was to keep pushing the transcript-performance work 
 Committed in:
 
 - `679d515` `fix: cache dormant transcript reads`
-- follow-up runtime-client cache slice pending commit in current worktree
+- `5dc5e10` `fix: cache transcript pages by request`
+- `4f5071b` `fix: bound transcript page cache`
+- follow-up UI request-dedupe + pager-invariant slice pending commit in current worktree
 
 ### 1. Dormant transcript read cache in `server/sessionview`
 
@@ -160,20 +162,26 @@ The read-only audit completed and confirmed that detail-mode pagination is not m
 ### Still missing for a true bounded detail cache
 
 - frontend still keeps one contiguous merged detail window, not a real multi-page cache
-- `sessionRuntimeClient` still caches only one last transcript page globally, not keyed by request/window
-- request dedupe is not wired even though `lastRequest` / `pageRequestEqual` already exist
-- no explicit viewport-anchor compensation was verified when `trimAround(...)` drops older loaded entries
-- pager invariants are tested mostly indirectly, not with direct unit coverage for trim/merge/request generation
+- no explicit viewport-anchor compensation was verified when `trimAround(...)` drops older loaded entries during user-visible scrolling
 
 ### Safest next CLI-side cut
 
-Start with request dedupe / request-keyed transcript caching in the cleaner files:
+The cleaner-file pagination hardening is now in place:
 
 - `cli/app/ui_runtime_client.go`
 - `cli/app/ui_runtime_client_test.go`
 - `cli/app/ui_transcript_mode.go`
 - `cli/app/ui_runtime_sync.go`
 - `cli/app/ui_mode_flow_test.go`
+- `cli/app/ui_transcript_pager_test.go`
+
+Landed in the current worktree during this checkpoint session:
+
+- request-keyed transcript-page cache reuse in `sessionRuntimeClient`
+- bounded transcript-page cache eviction (`16` entries)
+- shared `requestRuntimeTranscriptPage(...)` path used by deferred detail load, generic transcript hydration, and detail edge paging
+- duplicate-request suppression when detail mode already holds the exact requested page and no transcript/reasoning dirtiness requires a refresh
+- direct `uiDetailTranscriptWindow` unit coverage for merge/trim/request generation/reset invariants
 
 Avoid broad edits first in the more collision-prone in-flight files:
 
@@ -200,17 +208,16 @@ Validation already run:
 
 - `./scripts/test.sh ./cli/app -run 'TestRuntimeClientLoadTranscriptPageDefaultsToOngoingTail|TestRuntimeClientLoadTranscriptPageReusesFreshCachedPageForSameRequest|TestRuntimeClientLoadTranscriptPageCachesByRequestKey|TestRuntimeClientRefreshTranscriptBypassesFreshCachedPage'`
 - `./scripts/test.sh ./cli/app -run 'TestRuntimeClientLoadTranscriptPageEvictsLeastRecentlyUsedRequests'`
-- `./scripts/test.sh ./cli/app -run 'TestCtrlTDeferredDetailLoadUsesBoundedTranscriptPageRequest|TestDetailEdgePagingWaitsForFirstNavigationToResolveMetrics|TestCtrlTDeferredDetailLoadSkipsDuplicateDetailRebuildEndToEnd'`
+- `./scripts/test.sh ./cli/app -run 'TestCtrlTDeferredDetailLoadSkipsDuplicateSeededPageRequest|TestCtrlTDeferredDetailLoadSkippedDoesNotRebuildDetailEndToEnd|TestDeferredDetailLoadRefreshesWhenTranscriptDirty|TestDetailEdgePagingWaitsForFirstNavigationToResolveMetrics|TestDetailTranscriptWindowMergeExpandsOverlappingPages|TestDetailTranscriptWindowTrimAroundKeepsAnchorRegionBounded|TestDetailTranscriptWindowPageRequests|TestDetailTranscriptWindowResetClearsState'`
 - `./scripts/build.sh --output ./bin/builder`
 
 ## Recommended Next Step
 
 Do this next:
 
-1. implement request dedupe / request-keyed caching for transcript page loads in `sessionRuntimeClient`
-2. thread that through the existing deferred detail-load / edge-paging flow
-3. add focused tests in `ui_runtime_client_test.go` and `ui_mode_flow_test.go`
-4. only then consider deeper pager-window ownership changes in the dirtier files
+1. decide whether the next win is backend-side dormant older-page indexing or frontend-side true multi-page detail cache ownership
+2. if staying in CLI, take the bigger pager/window slice only in `ui_transcript_pager.go` + `ui_runtime_adapter.go` with the new pager tests already protecting the invariants
+3. if staying in backend perf, avoid a second full replay path and design an older-page dormant scan/index strategy that preserves the existing transcript DTO contract
 
 ## Important Caution
 
