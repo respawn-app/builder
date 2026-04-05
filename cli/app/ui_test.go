@@ -780,6 +780,51 @@ func TestDoubleEscEntersRollbackSelectionAndEnterStartsEditing(t *testing.T) {
 	if updated.input != "u2" {
 		t.Fatalf("expected selected message loaded into input, got %q", updated.input)
 	}
+	rawDetail := updated.view.DetailProjection(true, true).Render(tui.TranscriptDivider)
+	selectedLine := lineContaining(rawDetail, "u2")
+	if selectedLine == "" {
+		t.Fatalf("expected rollback edit state to retain selected detail entry, got %q", stripANSIPreserve(rawDetail))
+	}
+	if !strings.Contains(selectedLine, themeSelectionBackgroundEscape(updated.theme)) {
+		t.Fatalf("expected rollback edit state to keep selection background, got %q", selectedLine)
+	}
+}
+
+func TestRollbackSelectionHighlightsSelectedMessageFullWidth(t *testing.T) {
+	m := newProjectedStaticUIModel(WithUIInitialTranscript([]UITranscriptEntry{
+		{Role: "user", Text: "first user"},
+		{Role: "assistant", Text: "first answer"},
+		{Role: "user", Text: "selected user"},
+		{Role: "assistant", Text: "latest answer"},
+	}))
+	m.termWidth = 80
+	m.termHeight = 16
+	m.windowSizeKnown = true
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+
+	if !testRollbackSelecting(updated) {
+		t.Fatal("expected rollback selection mode after double esc")
+	}
+	if updated.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected rollback selection in detail overlay, got mode %q", updated.view.Mode())
+	}
+
+	raw := updated.View()
+	selectedLine := lineContaining(raw, "selected user")
+	if selectedLine == "" {
+		t.Fatalf("expected rollback selection view to contain selected message, got %q", stripANSIPreserve(raw))
+	}
+	if got := lipgloss.Width(selectedLine); got != updated.termWidth {
+		t.Fatalf("expected selected rollback line to span viewport width %d, got %d in %q", updated.termWidth, got, selectedLine)
+	}
+	if !strings.Contains(selectedLine, themeSelectionBackgroundEscape(updated.theme)) {
+		t.Fatalf("expected rollback selection line to use selection background, got %q", selectedLine)
+	}
 }
 
 func TestRollbackEditingEscRequiresEmptyInput(t *testing.T) {
@@ -6852,4 +6897,22 @@ func containsInOrder(text string, parts ...string) bool {
 		offset += idx + len(part)
 	}
 	return true
+}
+
+func lineContaining(text, substring string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(ansi.Strip(line), substring) {
+			return line
+		}
+	}
+	return ""
+}
+
+func themeSelectionBackgroundEscape(themeName string) string {
+	hex := strings.TrimPrefix(theme.ResolvePalette(themeName).Transcript.SelectionBackground.TrueColor, "#")
+	var r, g, b int
+	if _, err := fmt.Sscanf(hex, "%02x%02x%02x", &r, &g, &b); err != nil {
+		return ""
+	}
+	return fmt.Sprintf("48;2;%d;%d;%d", r, g, b)
 }

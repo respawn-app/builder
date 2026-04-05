@@ -7,6 +7,47 @@ import (
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
+func TestApplySelectionColorsReappliesSelectionStyleAfterReset(t *testing.T) {
+	foreground := rgbColor{r: 214, g: 231, b: 245}
+	background := rgbColor{r: 39, g: 74, b: 99}
+	out := applySelectionColors("echo \x1b[38;5;81mselected\x1b[0m tail", foreground, background)
+
+	prefix := "\x1b[" + strings.Join(styleParams(ansiStyleTransform{DefaultForeground: &foreground, DefaultBackground: &background}, false), ";") + "m"
+	if !strings.HasPrefix(out, prefix) {
+		t.Fatalf("expected selection output to start with foreground+background style, got %q", out)
+	}
+	reset := "\x1b[" + strings.Join(styleParams(ansiStyleTransform{DefaultForeground: &foreground, DefaultBackground: &background}, true), ";") + "m"
+	if !strings.Contains(out, reset+" tail") {
+		t.Fatalf("expected reset to restore selection style, got %q", out)
+	}
+	if !containsBackgroundSGR(out) {
+		t.Fatalf("expected selection output to contain background SGR, got %q", out)
+	}
+	if got := xansi.Strip(out); got != "echo selected tail" {
+		t.Fatalf("expected text preserved after selection style transform, got %q", got)
+	}
+}
+
+func TestApplySelectionColorsOverridesNestedBackgroundAndRestoresAfter49(t *testing.T) {
+	foreground := rgbColor{r: 214, g: 231, b: 245}
+	background := rgbColor{r: 39, g: 74, b: 99}
+	out := applySelectionColors("pre \x1b[48;5;196mhot\x1b[49m post", foreground, background)
+
+	if strings.Contains(out, "\x1b[48;5;196m") {
+		t.Fatalf("expected nested background to be replaced by selection background, got %q", out)
+	}
+	selectionBackground := "\x1b[" + strings.Join(backgroundParams(background), ";") + "m"
+	if !strings.Contains(out, selectionBackground+"hot") {
+		t.Fatalf("expected nested background segment to use selection background, got %q", out)
+	}
+	if !strings.Contains(out, selectionBackground+" post") {
+		t.Fatalf("expected 49 reset to restore selection background, got %q", out)
+	}
+	if got := xansi.Strip(out); got != "pre hot post" {
+		t.Fatalf("expected text preserved after nested background rewrite, got %q", got)
+	}
+}
+
 func TestMuteANSIOutputPrefixesPreviewForegroundAndFaint(t *testing.T) {
 	m := NewModel(WithTheme("dark"))
 	base := m.palette().previewColor
