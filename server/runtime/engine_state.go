@@ -399,6 +399,8 @@ func (e *Engine) cacheHitSnapshot() (int, bool) {
 }
 
 func (e *Engine) emit(evt Event) {
+	evt.TranscriptRevision = e.TranscriptRevision()
+	evt.CommittedEntryCount = e.CommittedTranscriptEntryCount()
 	if e.cfg.OnEvent != nil {
 		e.cfg.OnEvent(evt)
 	}

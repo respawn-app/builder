@@ -392,11 +392,16 @@ func immediateCmdMsg(cmd tea.Cmd, timeout time.Duration) (tea.Msg, bool) {
 func TestHandleProjectedRuntimeEventSkipsAlreadyHydratedAssistantEntry(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "same", Phase: llm.MessagePhaseFinal}}
+	m.transcriptBaseOffset = 0
+	m.transcriptTotalEntries = 1
+	m.transcriptRevision = 10
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
-		Kind:   runtime.EventAssistantMessage,
-		StepID: "step-1",
+		Kind:                runtime.EventAssistantMessage,
+		StepID:              "step-1",
+		TranscriptRevision:  10,
+		CommittedEntryCount: 1,
 		Message: llm.Message{
 			Role:    llm.RoleAssistant,
 			Content: "same",
@@ -787,7 +792,7 @@ func TestApplyRuntimeTranscriptPageRejectsEqualRevisionTailReplacementAfterLiveA
 		t.Fatalf("transcript revision = %d, want 10", got)
 	}
 
-	if cmd, mutated := m.runtimeAdapter().applyProjectedTranscriptEntries([]clientui.ChatEntry{{Role: "assistant", Text: "live append"}}, false); cmd != nil || !mutated {
+	if cmd, mutated := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{Kind: clientui.EventAssistantMessage, TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "live append"}}}, false); cmd != nil || !mutated {
 		t.Fatalf("expected live append without extra command, mutated=%t cmd=%v", mutated, cmd)
 	}
 	if !m.transcriptLiveDirty {
@@ -994,12 +999,12 @@ func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenAuthor
 		_ = collectCmdMessages(t, cmd)
 	}
 
-	if cmd, mutated := m.runtimeAdapter().applyProjectedTranscriptEntries([]clientui.ChatEntry{{
+	if cmd, mutated := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{Kind: clientui.EventToolCallStarted, TranscriptEntries: []clientui.ChatEntry{{
 		Role:       "tool_call",
 		Text:       "pwd",
 		ToolCallID: "stale-call",
 		ToolCall:   &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"},
-	}}, false); cmd != nil || !mutated {
+	}}}, false); cmd != nil || !mutated {
 		t.Fatalf("expected live append without extra command, mutated=%t cmd=%v", mutated, cmd)
 	}
 	if !m.transcriptLiveDirty {
@@ -1185,7 +1190,7 @@ func TestApplyRuntimeTranscriptPageAcceptsNewerRevisionTailReplacementAfterLiveA
 	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
-	if cmd, mutated := m.runtimeAdapter().applyProjectedTranscriptEntries([]clientui.ChatEntry{{Role: "assistant", Text: "live append"}}, false); cmd != nil || !mutated {
+	if cmd, mutated := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{Kind: clientui.EventAssistantMessage, TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "live append"}}}, false); cmd != nil || !mutated {
 		t.Fatalf("expected live append without extra command, mutated=%t cmd=%v", mutated, cmd)
 	}
 
@@ -1247,7 +1252,7 @@ func TestApplyProjectedTranscriptEntriesUsesTailOffsetWhileViewingOlderDetailPag
 	}
 
 	appended := []clientui.ChatEntry{{Role: "assistant", Text: "tail 500"}, {Role: "assistant", Text: "tail 501"}}
-	if cmd, mutated := m.runtimeAdapter().applyProjectedTranscriptEntries(appended, false); cmd != nil || !mutated {
+	if cmd, mutated := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{Kind: clientui.EventAssistantMessage, TranscriptEntries: appended}, false); cmd != nil || !mutated {
 		t.Fatalf("expected projected append to mutate without extra command, mutated=%t cmd=%v", mutated, cmd)
 	}
 
@@ -1636,22 +1641,66 @@ func TestUserMessageFlushedSyncsConversationForNativeReplay(t *testing.T) {
 	}
 }
 
-func TestUserMessageFlushedAfterConversationUpdatedDoesNotDuplicateNativeReplay(t *testing.T) {
+func TestUserMessageFlushedAlreadyCoveredByAuthoritativeTailDoesNotDuplicateNativeReplay(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.termWidth = 100
 	m.termHeight = 20
 	m.windowSizeKnown = true
 	m.transcriptEntries = []tui.TranscriptEntry{{Role: "user", Text: "steered message"}}
+	m.transcriptBaseOffset = 0
+	m.transcriptTotalEntries = 1
+	m.transcriptRevision = 10
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
-	cmd := m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, UserMessage: "steered message"})
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                clientui.EventUserMessageFlushed,
+		UserMessage:         "steered message",
+		TranscriptRevision:  10,
+		CommittedEntryCount: 1,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "user",
+			Text: "steered message",
+		}},
+	})
 	if len(m.transcriptEntries) != 1 {
-		t.Fatalf("expected duplicate flushed user message to be skipped, got %+v", m.transcriptEntries)
+		t.Fatalf("expected stale flushed user message to be skipped, got %+v", m.transcriptEntries)
 	}
 	if cmd != nil {
 		if _, ok := cmd().(nativeHistoryFlushMsg); ok {
-			t.Fatal("expected no duplicate native replay after already-visible user message")
+			t.Fatal("expected no duplicate native replay after authoritative tail already covered the user message")
 		}
+	}
+}
+
+func TestProjectedUserMessageFlushedWithSameTextAndNewCommittedCountAppendsDistinctEntry(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "user", Text: "steered message"}}
+	m.transcriptBaseOffset = 0
+	m.transcriptTotalEntries = 1
+	m.transcriptRevision = 10
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                clientui.EventUserMessageFlushed,
+		UserMessage:         "steered message",
+		TranscriptRevision:  11,
+		CommittedEntryCount: 2,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "user",
+			Text: "steered message",
+		}},
+	})
+	if len(m.transcriptEntries) != 2 {
+		t.Fatalf("expected repeated same-text user message to append distinctly, got %+v", m.transcriptEntries)
+	}
+	if cmd == nil {
+		t.Fatal("expected native replay command for new committed user message")
+	}
+	if _, ok := cmd().(nativeHistoryFlushMsg); !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
 	}
 }
 

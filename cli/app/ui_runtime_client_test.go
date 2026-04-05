@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -61,6 +60,25 @@ func (blockingSessionViewClient) GetSessionTranscriptPage(ctx context.Context, _
 }
 
 func (blockingSessionViewClient) GetRun(context.Context, serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {
+	return serverapi.RunGetResponse{}, nil
+}
+
+type blockingCountingSessionViewClient struct {
+	count atomic.Int32
+}
+
+func (c *blockingCountingSessionViewClient) GetSessionMainView(ctx context.Context, _ serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
+	c.count.Add(1)
+	<-ctx.Done()
+	return serverapi.SessionMainViewResponse{}, ctx.Err()
+}
+
+func (c *blockingCountingSessionViewClient) GetSessionTranscriptPage(ctx context.Context, _ serverapi.SessionTranscriptPageRequest) (serverapi.SessionTranscriptPageResponse, error) {
+	<-ctx.Done()
+	return serverapi.SessionTranscriptPageResponse{}, ctx.Err()
+}
+
+func (*blockingCountingSessionViewClient) GetRun(context.Context, serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {
 	return serverapi.RunGetResponse{}, nil
 }
 
@@ -552,11 +570,8 @@ func TestRuntimeClientMainViewFailsFastWhenReadStalls(t *testing.T) {
 	}
 }
 
-func TestRuntimeClientMainViewRetriesAfterInitialReadError(t *testing.T) {
-	reads := &flakySessionViewClient{
-		responses: []serverapi.SessionMainViewResponse{{}, {MainView: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1", SessionName: "synced"}}}},
-		errs:      []error{errors.New("temporary read failure"), nil},
-	}
+func TestRuntimeClientMainViewCachesFallbackAfterReadError(t *testing.T) {
+	reads := &blockingCountingSessionViewClient{}
 	runtimeClient := newUIRuntimeClientWithReads(
 		"session-1",
 		reads,
@@ -568,8 +583,11 @@ func TestRuntimeClientMainViewRetriesAfterInitialReadError(t *testing.T) {
 		t.Fatalf("fallback session id = %q, want session-1", first.Session.SessionID)
 	}
 	second := runtimeClient.MainView()
-	if second.Session.SessionName != "synced" {
-		t.Fatalf("expected second read to retry and hydrate cache, got %+v", second)
+	if second.Session.SessionID != "session-1" {
+		t.Fatalf("expected cached fallback session id preserved, got %+v", second)
+	}
+	if got := reads.count.Load(); got != 1 {
+		t.Fatalf("main view read count after cached fallback = %d, want 1", got)
 	}
 }
 

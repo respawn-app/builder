@@ -64,7 +64,7 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 	cmds := make([]tea.Cmd, 0, 4)
 	transcriptMutated := false
 	if len(evt.TranscriptEntries) > 0 {
-		cmd, mutated := a.applyProjectedTranscriptEntries(evt.TranscriptEntries, flushNativeHistory)
+		cmd, mutated := a.applyProjectedTranscriptEntries(evt, flushNativeHistory)
 		cmds = append(cmds, cmd)
 		transcriptMutated = transcriptMutated || mutated
 	}
@@ -162,19 +162,20 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 	return m.requestRuntimeTranscriptSync()
 }
 
-func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(entries []clientui.ChatEntry, flushNativeHistory bool) (tea.Cmd, bool) {
+func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, flushNativeHistory bool) (tea.Cmd, bool) {
 	m := a.model
+	entries := cloneChatEntries(evt.TranscriptEntries)
 	incomingCount := len(entries)
-	entries = trimProjectedTranscriptOverlap(m.transcriptEntries, entries)
-	trimmedOverlap := incomingCount - len(entries)
-	if len(entries) == 0 {
+	if shouldSkipProjectedTranscriptEntries(m, evt) {
 		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.append_entries", map[string]string{
 			"session_id":            strings.TrimSpace(m.sessionID),
 			"mode":                  m.transcriptModeLabel(),
 			"path":                  "live_event",
 			"incoming_count":        strconv.Itoa(incomingCount),
-			"trimmed_overlap_count": strconv.Itoa(trimmedOverlap),
+			"reason":                "already_hydrated",
 			"applied_count":         "0",
+			"event_revision":        strconv.FormatInt(evt.TranscriptRevision, 10),
+			"event_committed_count": strconv.Itoa(evt.CommittedEntryCount),
 		}))
 		return nil, false
 	}
@@ -213,10 +214,11 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(entries []clientui.Cha
 			"mode":                  m.transcriptModeLabel(),
 			"path":                  "live_event",
 			"incoming_count":        strconv.Itoa(incomingCount),
-			"trimmed_overlap_count": strconv.Itoa(trimmedOverlap),
 			"applied_count":         strconv.Itoa(len(entries)),
 			"start_offset":          strconv.Itoa(startOffset),
 			"entries_digest":        transcriptdiag.EntriesDigest(entries),
+			"event_revision":        strconv.FormatInt(evt.TranscriptRevision, 10),
+			"event_committed_count": strconv.Itoa(evt.CommittedEntryCount),
 			"transcript_revision":   strconv.FormatInt(m.transcriptRevision, 10),
 			"transcript_total":      strconv.Itoa(m.transcriptTotalEntries),
 		}))
@@ -227,10 +229,11 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(entries []clientui.Cha
 		"mode":                  m.transcriptModeLabel(),
 		"path":                  "live_event",
 		"incoming_count":        strconv.Itoa(incomingCount),
-		"trimmed_overlap_count": strconv.Itoa(trimmedOverlap),
 		"applied_count":         strconv.Itoa(len(entries)),
 		"start_offset":          strconv.Itoa(startOffset),
 		"entries_digest":        transcriptdiag.EntriesDigest(entries),
+		"event_revision":        strconv.FormatInt(evt.TranscriptRevision, 10),
+		"event_committed_count": strconv.Itoa(evt.CommittedEntryCount),
 		"transcript_revision":   strconv.FormatInt(m.transcriptRevision, 10),
 		"transcript_total":      strconv.Itoa(m.transcriptTotalEntries),
 		"native_history_sync":   "true",
@@ -517,29 +520,36 @@ func cloneChatEntries(entries []clientui.ChatEntry) []clientui.ChatEntry {
 	return cloned
 }
 
-func trimProjectedTranscriptOverlap(existing []tui.TranscriptEntry, incoming []clientui.ChatEntry) []clientui.ChatEntry {
-	if len(existing) == 0 || len(incoming) == 0 {
-		return incoming
-	}
-	maxOverlap := min(len(existing), len(incoming))
-	for overlap := maxOverlap; overlap > 0; overlap-- {
-		if transcriptSuffixMatchesEntries(existing[len(existing)-overlap:], incoming[:overlap]) {
-			return cloneChatEntries(incoming[overlap:])
-		}
-	}
-	return incoming
-}
-
-func transcriptSuffixMatchesEntries(existing []tui.TranscriptEntry, incoming []clientui.ChatEntry) bool {
-	if len(existing) != len(incoming) {
+func shouldSkipProjectedTranscriptEntries(m *uiModel, evt clientui.Event) bool {
+	if m == nil || len(evt.TranscriptEntries) == 0 {
 		return false
 	}
-	for i := range existing {
-		if !transcriptEntryMatchesChatEntry(existing[i], incoming[i]) {
-			return false
-		}
+	if !eventTranscriptEntriesReconcileWithCommittedTail(evt.Kind) {
+		return false
 	}
-	return true
+	if evt.CommittedEntryCount <= 0 && evt.TranscriptRevision <= 0 {
+		return false
+	}
+	currentCommittedCount := m.transcriptBaseOffset + len(m.transcriptEntries)
+	if evt.TranscriptRevision > m.transcriptRevision {
+		return false
+	}
+	return evt.CommittedEntryCount <= currentCommittedCount
+}
+
+func eventTranscriptEntriesReconcileWithCommittedTail(kind clientui.EventKind) bool {
+	switch kind {
+	case clientui.EventUserMessageFlushed,
+		clientui.EventAssistantMessage,
+		clientui.EventToolCallStarted,
+		clientui.EventToolCallCompleted,
+		clientui.EventReviewerCompleted,
+		clientui.EventCompactionCompleted,
+		clientui.EventCompactionFailed:
+		return true
+	default:
+		return false
+	}
 }
 
 func transcriptEntryMatchesChatEntry(existing tui.TranscriptEntry, incoming clientui.ChatEntry) bool {

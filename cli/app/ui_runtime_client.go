@@ -252,13 +252,15 @@ func (c *sessionRuntimeClient) refreshMainViewSync(timeout time.Duration) (clien
 	defer cancel()
 	resp, err := c.reads.GetSessionMainView(ctx, serverapi.SessionMainViewRequest{SessionID: c.sessionID})
 	if err != nil {
-		c.mu.RLock()
+		c.mu.Lock()
 		view := c.mainView
-		hasView := c.hasMainView
-		c.mu.RUnlock()
-		if !hasView && view.Session.SessionID == "" {
+		if view.Session.SessionID == "" {
 			view.Session.SessionID = c.sessionID
 		}
+		c.mainView = view
+		c.hasMainView = true
+		c.lastMainViewAt = time.Now()
+		c.mu.Unlock()
 		return view, err
 	}
 	return c.storeMainView(resp.MainView), nil
