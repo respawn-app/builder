@@ -1,6 +1,6 @@
 # Transcript Freshness Rules
 
-Status: active stabilization work
+Status: implemented stabilization contract
 
 Last updated: 2026-04-05
 
@@ -75,17 +75,21 @@ If cached data is used, it must still obey the same overwrite rules as a fresh h
 
 ## Immediate Consequences For Execution
 
-- [ ] stop treating every transcript read as a safe full replacement
-- [ ] separate "dirty, needs hydrate" from "safe to overwrite current visible state"
-- [ ] make `conversation_updated` a hydrate trigger, not a blanket permission to reset the view
-- [ ] ensure recovery tests cover stale-read vs newer-live-state cases explicitly
-- [ ] ensure remote and loopback paths obey the same overwrite rules
+- [x] stop treating every transcript read as a safe full replacement
+- [x] separate "dirty, needs hydrate" from "safe to overwrite current visible state"
+- [x] make `conversation_updated` a hydrate trigger, not a blanket permission to reset the view
+- [x] ensure recovery tests cover stale-read vs newer-live-state cases explicitly
+- [x] ensure remote and loopback paths obey the same overwrite rules
+
+The remaining remote raw-stream commentary-entry gap does not change these overwrite rules. It is a separate event-shape defer.
+
+This document does not claim full raw event parity between loopback and remote paths. It only defines the overwrite/freshness contract that both paths must obey once transcript-visible state reaches the frontend.
 
 ## Exit Condition
 
 These rules are implemented well enough when all of the following are true:
 
-- [ ] a stale transcript read cannot erase newer live-visible activity
-- [ ] recovery/hydration restores committed transcript without blanking active sessions
-- [ ] loopback and remote paths obey the same replacement rules
-- [ ] rendered ongoing-mode tests prove the main overwrite races are closed
+- [x] a stale transcript read cannot erase newer live-visible activity
+- [x] recovery/hydration restores committed transcript without blanking active sessions
+- [x] loopback and remote paths obey the same replacement rules
+- [x] rendered ongoing-mode tests prove the main overwrite races are closed

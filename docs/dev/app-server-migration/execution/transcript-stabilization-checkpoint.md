@@ -9,6 +9,7 @@ Last updated: 2026-04-05
 - `b495f2c` `fix: add transcript diagnostics`
 - `0707e0d` `fix: scope transcript diagnostics per runtime`
 - `acd72bb` `docs: audit transcript overlap paths`
+- `63576b3` `docs: add transcript stabilization checkpoint`
 
 ## What Landed
 
@@ -29,9 +30,9 @@ Only these remain meaningfully open in the stabilization plan.
 
 ### 2. Cleanup/process bullet
 
-- `Close quick symptom patches that do not fit the stabilized model`
+This was closed by `analysis/transcript-cleanup-audit.md`.
 
-This is not a hidden architecture blocker. It is cleanup debt and should be handled opportunistically and narrowly.
+It is no longer a remaining implementation item.
 
 ### 3. Release-gate confidence items
 

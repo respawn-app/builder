@@ -27,7 +27,7 @@ Out of scope for this plan:
 
 Until this plan is complete, transcript-affecting work must be treated as stabilization work, not normal feature work.
 
-- [ ] Do not stack unrelated migration changes on top of transcript/runtime UX changes.
+- Do not stack unrelated migration changes on top of transcript/runtime UX changes.
 - [x] Require rendered-path proof for any change that affects ongoing or detail transcript behavior.
 - [x] Treat loopback and remote behavior as equally important acceptance surfaces.
 
@@ -109,7 +109,7 @@ Exit criteria:
 
 - [x] Inventory all currently known transcript-related regressions on `app-server-integration`.
 - [x] Group them by root cause rather than by symptom.
-- [ ] Close quick symptom patches that do not fit the stabilized model.
+- [x] Close quick symptom patches that do not fit the stabilized model.
 - [x] Re-test previously fixed regressions after each structural transcript change.
 - [x] Keep a running checklist of transcript-critical user workflows and their current status.
 
@@ -139,9 +139,9 @@ Parallelizable work:
 
 Must stay serialized:
 
-- [ ] changing transcript state ownership rules
-- [ ] changing hydration overwrite rules
-- [ ] changing ordering/freshness semantics
+- changing transcript state ownership rules
+- changing hydration overwrite rules
+- changing ordering/freshness semantics
 
 ## Completion Criteria
 
@@ -179,6 +179,10 @@ Deferred decision for this slice:
 - [x] Defer raw remote commentary-entry parity for assistant/tool-call turns until a later runtime-event contract change.
 - [x] Treat the current requirement as convergence via hydrate, not event-for-event parity on the raw session-activity stream.
 
+Cleanup proof for the checked regression-triage item lives in:
+
+- `docs/dev/app-server-migration/analysis/transcript-cleanup-audit.md`
+
 ## Current Workflow Status
 
 This is the running workflow checklist for stabilization triage. It is intentionally narrower than the release gate.
@@ -200,13 +204,16 @@ Authoritative proof for the checked items lives in:
 
 ## Remaining Execution Slices
 
-The plan is no longer blocked on broad ownership/freshness design. The remaining work is now narrower and should be executed as bounded slices.
+The plan is no longer blocked on broad ownership/freshness design or cleanup implementation work.
 
-Serialized slices:
+No further mandatory code slices remain inside this stabilization execution plan.
 
-1. Keep the remote commentary gap explicitly deferred until we choose to change the runtime-event/projection contract.
+What remains is explicit and non-hidden:
 
-Parallelizable slices:
+- the remote commentary gap stays deferred until we deliberately change the runtime-event/projection contract
+- release-gate confidence remains a product decision rather than an implementation checklist item
+
+Ongoing maintenance while the branch evolves:
 
 1. Re-run the transcript-critical workflow matrix after each structural change and keep this checklist current.
 

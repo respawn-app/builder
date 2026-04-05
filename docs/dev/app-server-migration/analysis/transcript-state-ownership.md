@@ -1,6 +1,6 @@
 # Transcript State Ownership
 
-Status: active stabilization work
+Status: implemented stabilization contract
 
 Last updated: 2026-04-05
 
@@ -232,11 +232,15 @@ These are the working rules for the stabilization phase.
 
 ## Immediate Stabilization Priorities
 
-- [ ] shrink the number of places that can replace `uiModel.transcriptEntries`
-- [ ] stop recovery-triggered transcript reads from wiping newer visible live state
-- [ ] document when `conversation_updated` should trigger hydrate and when it should not
-- [ ] make loopback and remote transcript-critical flows obey the same ownership rules
-- [ ] add rendered-path tests around each remaining high-risk overlap
+- [x] shrink the number of places that can replace `uiModel.transcriptEntries`
+- [x] stop recovery-triggered transcript reads from wiping newer visible live state
+- [x] document when `conversation_updated` should trigger hydrate and when it should not
+- [x] make loopback and remote transcript-critical flows obey the same ownership rules
+- [x] add rendered-path tests around each remaining local high-risk overlap
+
+The remaining remote raw-stream commentary-entry gap is an explicit runtime-event contract defer, not an ownership-rule violation.
+
+This document does not claim event-for-event raw stream parity between loopback and remote paths. It only claims that both paths now obey the same frontend ownership rules for committed transcript hydrate vs live transient state.
 
 ## Exit Condition For This Workstream
 
