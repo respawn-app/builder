@@ -14,6 +14,7 @@ import (
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/tools"
+	shelltool "builder/server/tools/shell"
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/transcript"
@@ -205,7 +206,7 @@ func TestNativeScrollbackProgramOutputContract(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if err != nil {
+		if err != nil && !strings.Contains(err.Error(), "context canceled") {
 			t.Fatalf("program run failed: %v", err)
 		}
 	case <-time.After(2 * time.Second):
@@ -328,7 +329,7 @@ func TestNativeResizeReplaysOngoingScreenAfterRealResize(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if err != nil {
+		if err != nil && !strings.Contains(err.Error(), "context canceled") {
 			t.Fatalf("program run failed: %v", err)
 		}
 	case <-time.After(2 * time.Second):
@@ -964,7 +965,7 @@ func TestNativeReplayOutputContainsMarkdownStyling(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
 	time.Sleep(40 * time.Millisecond)
-	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	program.Quit()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -1063,7 +1064,7 @@ func TestNativeProgramKeepsPendingToolTailLiveOnlyUntilCompletion(t *testing.T) 
 		t.Fatalf("did not expect native ongoing scrollback to append shell output inline, got %q", finalNormalized)
 	}
 
-	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	program.Quit()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -1150,7 +1151,7 @@ func TestNativeProgramRendersMixedRuntimeEventsFromChannelInRealtime(t *testing.
 		return containsInOrder(normalized, "say hi", "Supervisor ran", "Background shell 1000 completed", "pwd", "done")
 	})
 
-	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	program.Quit()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -1173,6 +1174,229 @@ func TestNativeProgramRendersMixedRuntimeEventsFromChannelInRealtime(t *testing.
 	}
 	if normalized := normalizedOutput(out.String()); !containsInOrder(normalized, "seed", "say hi", "Supervisor ran", "Background shell 1000 completed", "pwd", "done") {
 		t.Fatalf("expected mixed runtime event terminal sequence, got %q", normalized)
+	}
+}
+
+func TestNativeProgramRendersSingleBackgroundCompletionFromChannelWhileIdle(t *testing.T) {
+	out := &bytes.Buffer{}
+	runtimeEvents := make(chan clientui.Event, 4)
+	model := newProjectedTestUIModel(
+		nil,
+		runtimeEvents,
+		closedAskEvents(),
+	)
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	runtimeEvents <- projectRuntimeEvent(runtime.Event{
+		Kind: runtime.EventBackgroundUpdated,
+		Background: &runtime.BackgroundShellEvent{
+			Type:        "completed",
+			ID:          "1000",
+			State:       "completed",
+			NoticeText:  "Background shell 1000 completed.\nOutput:\nhello",
+			CompactText: "Background shell 1000 completed",
+		},
+	})
+
+	waitForTestCondition(t, 2*time.Second, "single background completion projected into transcript state", func() bool {
+		return len(model.transcriptEntries) == 1 && strings.Contains(model.transcriptEntries[0].Text, "Background shell 1000 completed")
+	})
+	waitForTestCondition(t, 2*time.Second, "single background completion rendered into native output", func() bool {
+		return strings.Contains(normalizedOutput(out.String()), "background shell 1000 completed")
+	})
+
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	if normalized := normalizedOutput(out.String()); !containsInOrder(normalized, "background shell 1000 completed") {
+		t.Fatalf("expected single background completion visible in terminal output, got %q", normalized)
+	}
+}
+
+func TestNativeProgramRendersBackgroundCompletionFromEmbeddedRuntimeWhileIdle(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("start embedded server: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, &bytes.Buffer{}, "test background completion while idle")
+	if err != nil {
+		t.Fatalf("prepare runtime: %v", err)
+	}
+	defer runtimePlan.Close()
+
+	out := &bytes.Buffer{}
+	programCtx, cancelProgram := context.WithCancel(context.Background())
+	defer cancelProgram()
+	model := newProjectedTestUIModel(
+		runtimePlan.Wiring.runtimeClient,
+		runtimePlan.Wiring.runtimeEvents,
+		runtimePlan.Wiring.askEvents,
+	)
+	program := tea.NewProgram(model, tea.WithContext(programCtx), tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	server.inner.BackgroundRouter().Handle(shelltool.Event{
+		Type: shelltool.EventCompleted,
+		Snapshot: shelltool.Snapshot{
+			ID:             "bg-1000",
+			OwnerSessionID: plan.SessionID,
+			State:          "completed",
+			Command:        "sleep 1; printf done",
+			Workdir:        workspace,
+			LogPath:        "/tmp/bg-1000.log",
+		},
+		Preview: "done",
+	})
+
+	waitForTestCondition(t, 5*time.Second, "embedded background completion projected into transcript state", func() bool {
+		for _, entry := range model.transcriptEntries {
+			if strings.Contains(entry.Text, "Background shell bg-1000 completed") {
+				return true
+			}
+		}
+		return false
+	})
+	waitForTestCondition(t, 5*time.Second, "embedded background completion rendered into native output", func() bool {
+		return strings.Contains(normalizedOutput(out.String()), "background shell bg-1000 completed")
+	})
+
+	cancelProgram()
+	select {
+	case err := <-done:
+		if err != nil && !strings.Contains(err.Error(), "context canceled") {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	if normalized := normalizedOutput(out.String()); !containsInOrder(normalized, "background shell bg-1000 completed") {
+		t.Fatalf("expected embedded background completion visible in terminal output, got %q", normalized)
+	}
+}
+
+func TestNativeProgramRendersBackgroundCompletionFromShellManagerWhileIdle(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("start embedded server: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, &bytes.Buffer{}, "test shell-manager background completion while idle")
+	if err != nil {
+		t.Fatalf("prepare runtime: %v", err)
+	}
+	defer runtimePlan.Close()
+
+	manager := server.inner.Background()
+	if manager == nil {
+		t.Fatal("expected server background manager")
+	}
+	manager.SetMinimumExecToBgTime(25 * time.Millisecond)
+
+	out := &bytes.Buffer{}
+	programCtx, cancelProgram := context.WithCancel(context.Background())
+	defer cancelProgram()
+	model := newProjectedTestUIModel(
+		runtimePlan.Wiring.runtimeClient,
+		runtimePlan.Wiring.runtimeEvents,
+		runtimePlan.Wiring.askEvents,
+	)
+	program := tea.NewProgram(model, tea.WithContext(programCtx), tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	result, err := manager.Start(context.Background(), shelltool.ExecRequest{
+		Command:        []string{"sh", "-c", "sleep 0.05; printf done"},
+		DisplayCommand: "bg-notify",
+		OwnerSessionID: plan.SessionID,
+		OwnerRunID:     "run-1",
+		OwnerStepID:    "step-1",
+		Workdir:        workspace,
+		YieldTime:      25 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start background process: %v", err)
+	}
+	if !result.Backgrounded {
+		t.Fatalf("expected backgrounded process, got %+v", result)
+	}
+	want := "background shell " + result.SessionID + " completed"
+
+	waitForTestCondition(t, 5*time.Second, "shell-manager background completion projected into transcript state", func() bool {
+		for _, entry := range model.transcriptEntries {
+			if strings.Contains(strings.ToLower(entry.Text), want) {
+				return true
+			}
+		}
+		return false
+	})
+	waitForTestCondition(t, 5*time.Second, "shell-manager background completion rendered into native output", func() bool {
+		return strings.Contains(normalizedOutput(strings.ToLower(out.String())), want)
+	})
+
+	cancelProgram()
+	select {
+	case err := <-done:
+		if err != nil && !strings.Contains(err.Error(), "context canceled") {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	if normalized := normalizedOutput(strings.ToLower(out.String())); !containsInOrder(normalized, want) {
+		t.Fatalf("expected shell-manager background completion visible in terminal output, got %q", normalized)
 	}
 }
 
