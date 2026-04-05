@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,8 +13,11 @@ import (
 	"builder/server/core"
 	"builder/server/llm"
 	"builder/server/runtime"
+	"builder/server/session"
+	"builder/server/tools"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
+	remoteclient "builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
@@ -190,6 +194,9 @@ func TestGatewaySessionActivitySubscriptionStreamsEventsAndCompletion(t *testing
 	if event.Event.TranscriptEntries[0].Role != "tool_call" {
 		t.Fatalf("tool transcript role = %q, want tool_call", event.Event.TranscriptEntries[0].Role)
 	}
+	if event.Event.TranscriptEntries[0].Text != "tool call" {
+		t.Fatalf("expected raw gateway passthrough to preserve unformatted tool call text, got %+v", event.Event.TranscriptEntries[0])
+	}
 
 	appCore.UnregisterRuntime("session-1", engine)
 	if err := websocket.JSON.Receive(conn, &notif); err != nil {
@@ -205,6 +212,283 @@ func TestGatewaySessionActivitySubscriptionStreamsEventsAndCompletion(t *testing
 	if complete.Code != 0 || complete.Message != "" {
 		t.Fatalf("unexpected completion params: %+v", complete)
 	}
+}
+
+func TestGatewayRemoteSessionActivityRecoversToolCallTextWithoutPresentation(t *testing.T) {
+	appCore, server := newGatewayTestServer(t)
+	defer server.Close()
+
+	engine := &runtime.Engine{}
+	appCore.RegisterRuntime("session-1", engine)
+	defer appCore.UnregisterRuntime("session-1", engine)
+
+	remote, err := remoteclient.DialRemote(context.Background(), protocol.DiscoveryRecord{
+		RPCURL:   "ws" + server.URL[len("http"):],
+		Identity: protocol.ServerIdentity{ProjectID: appCore.ProjectID()},
+	})
+	if err != nil {
+		t.Fatalf("DialRemote: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	sub, err := remote.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	appCore.PublishRuntimeEvent("session-1", runtime.Event{
+		Kind:     runtime.EventToolCallStarted,
+		ToolCall: &llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+	})
+
+	evt, err := sub.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	if evt.Kind != clientui.EventToolCallStarted {
+		t.Fatalf("event kind = %q, want %q", evt.Kind, clientui.EventToolCallStarted)
+	}
+	if len(evt.TranscriptEntries) != 1 {
+		t.Fatalf("transcript entries len = %d, want 1", len(evt.TranscriptEntries))
+	}
+	entry := evt.TranscriptEntries[0]
+	if entry.Role != "tool_call" || entry.Text != "pwd" {
+		t.Fatalf("unexpected remote transcript entry: %+v", entry)
+	}
+	if entry.ToolCall == nil || !entry.ToolCall.IsShell || entry.ToolCall.Command != "pwd" {
+		t.Fatalf("expected recovered shell metadata, got %+v", entry.ToolCall)
+	}
+}
+
+func TestGatewayRemoteSessionActivityStreamsDirectSubmittedUserMessage(t *testing.T) {
+	appCore, server := newGatewayTestServer(t)
+	defer server.Close()
+
+	store, err := session.Create(t.TempDir(), "ws", t.TempDir())
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, gatewayTestLLMClient{response: llm.Response{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"}, Usage: llm.Usage{WindowTokens: 200000}}}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", OnEvent: func(evt runtime.Event) {
+		appCore.PublishRuntimeEvent(store.Meta().SessionID, evt)
+	}})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	appCore.RegisterSessionStore(store)
+	appCore.RegisterRuntime(store.Meta().SessionID, eng)
+	defer appCore.UnregisterRuntime(store.Meta().SessionID, eng)
+
+	remote, err := remoteclient.DialRemote(context.Background(), protocol.DiscoveryRecord{
+		RPCURL:   "ws" + server.URL[len("http"):],
+		Identity: protocol.ServerIdentity{ProjectID: appCore.ProjectID()},
+	})
+	if err != nil {
+		t.Fatalf("DialRemote: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	sub, err := remote.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	if _, err := remote.SubmitUserMessage(context.Background(), serverapi.RuntimeSubmitUserMessageRequest{SessionID: store.Meta().SessionID, Text: "say hi"}); err != nil {
+		t.Fatalf("SubmitUserMessage: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var evt clientui.Event
+	for {
+		next, err := sub.Next(ctx)
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		if next.Kind != clientui.EventUserMessageFlushed {
+			continue
+		}
+		evt = next
+		break
+	}
+	if evt.UserMessage != "say hi" {
+		t.Fatalf("user message = %q, want say hi", evt.UserMessage)
+	}
+	if len(evt.TranscriptEntries) != 1 {
+		t.Fatalf("transcript entries len = %d, want 1", len(evt.TranscriptEntries))
+	}
+	if evt.TranscriptEntries[0].Role != "user" || evt.TranscriptEntries[0].Text != "say hi" {
+		t.Fatalf("unexpected transcript entry: %+v", evt.TranscriptEntries[0])
+	}
+}
+
+func TestGatewayRemoteSessionActivityPreservesActiveSubmitOrderingUsingAssistantDeltaProgress(t *testing.T) {
+	appCore, server := newGatewayTestServer(t)
+	defer server.Close()
+
+	store, err := session.Create(t.TempDir(), "ws", t.TempDir())
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, &gatewayTestStreamingClient{}, tools.NewRegistry(gatewayTestShellTool{}), runtime.Config{Model: "gpt-5", OnEvent: func(evt runtime.Event) {
+		appCore.PublishRuntimeEvent(store.Meta().SessionID, evt)
+	}})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	appCore.RegisterSessionStore(store)
+	appCore.RegisterRuntime(store.Meta().SessionID, eng)
+	defer appCore.UnregisterRuntime(store.Meta().SessionID, eng)
+
+	remote, err := remoteclient.DialRemote(context.Background(), protocol.DiscoveryRecord{
+		RPCURL:   "ws" + server.URL[len("http"):],
+		Identity: protocol.ServerIdentity{ProjectID: appCore.ProjectID()},
+	})
+	if err != nil {
+		t.Fatalf("DialRemote: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	sub, err := remote.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: store.Meta().SessionID})
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	submitDone := make(chan error, 1)
+	go func() {
+		_, submitErr := remote.SubmitUserMessage(context.Background(), serverapi.RuntimeSubmitUserMessageRequest{SessionID: store.Meta().SessionID, Text: "run tools"})
+		submitDone <- submitErr
+	}()
+
+	// Remote session activity currently exposes live assistant progress via assistant_delta,
+	// but it does not surface the persisted commentary transcript entry for the first
+	// assistant/tool-call turn. This locks the strongest migrated-path guarantee today:
+	// user submit -> assistant-visible progress -> tool call -> tool result -> final assistant.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sequence := make([]string, 0, 5)
+	commentaryTranscriptSeen := false
+	for len(sequence) < 5 {
+		evt, err := sub.Next(ctx)
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		for _, entry := range evt.TranscriptEntries {
+			if entry.Role == "assistant" && entry.Phase == string(llm.MessagePhaseCommentary) {
+				commentaryTranscriptSeen = true
+			}
+		}
+		switch evt.Kind {
+		case clientui.EventUserMessageFlushed:
+			if len(evt.TranscriptEntries) != 1 || evt.TranscriptEntries[0].Role != "user" || evt.TranscriptEntries[0].Text != "run tools" {
+				t.Fatalf("unexpected flushed user transcript entries: %+v", evt.TranscriptEntries)
+			}
+			sequence = append(sequence, "user")
+		case clientui.EventAssistantDelta:
+			if evt.AssistantDelta == "" {
+				continue
+			}
+			sequence = append(sequence, "assistant_progress")
+		case clientui.EventToolCallStarted:
+			if len(evt.TranscriptEntries) != 1 || evt.TranscriptEntries[0].Role != "tool_call" || evt.TranscriptEntries[0].Text != "pwd" {
+				t.Fatalf("unexpected tool call transcript entries: %+v", evt.TranscriptEntries)
+			}
+			sequence = append(sequence, "tool_call")
+		case clientui.EventToolCallCompleted:
+			if len(evt.TranscriptEntries) != 1 || evt.TranscriptEntries[0].Role != "tool_result_ok" || evt.TranscriptEntries[0].ToolCallID != "call-1" {
+				t.Fatalf("unexpected tool result transcript entries: %+v", evt.TranscriptEntries)
+			}
+			sequence = append(sequence, "tool_result")
+		case clientui.EventAssistantMessage:
+			if len(evt.TranscriptEntries) != 1 {
+				t.Fatalf("assistant transcript entries len = %d, want 1", len(evt.TranscriptEntries))
+			}
+			entry := evt.TranscriptEntries[0]
+			if entry.Role != "assistant" || entry.Text != "done" || entry.Phase != string(llm.MessagePhaseFinal) {
+				t.Fatalf("unexpected final assistant transcript entry: %+v", entry)
+			}
+			sequence = append(sequence, "final")
+		}
+	}
+	if commentaryTranscriptSeen {
+		t.Fatalf("expected remote session activity to omit commentary transcript entries for the tool-call turn, got sequence=%v", sequence)
+	}
+	want := []string{"user", "assistant_progress", "tool_call", "tool_result", "final"}
+	if len(sequence) != len(want) {
+		t.Fatalf("sequence len = %d, want %d (%v)", len(sequence), len(want), sequence)
+	}
+	for i := range want {
+		if sequence[i] != want[i] {
+			t.Fatalf("sequence[%d] = %q, want %q (full=%v)", i, sequence[i], want[i], sequence)
+		}
+	}
+	select {
+	case err := <-submitDone:
+		if err != nil {
+			t.Fatalf("SubmitUserMessage: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for submit to complete")
+	}
+}
+
+type gatewayTestLLMClient struct {
+	response llm.Response
+}
+
+func (c gatewayTestLLMClient) Generate(context.Context, llm.Request) (llm.Response, error) {
+	return c.response, nil
+}
+
+type gatewayTestStreamingClient struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (c *gatewayTestStreamingClient) Generate(context.Context, llm.Request) (llm.Response, error) {
+	return llm.Response{}, nil
+}
+
+func (c *gatewayTestStreamingClient) GenerateStreamWithEvents(_ context.Context, _ llm.Request, callbacks llm.StreamCallbacks) (llm.Response, error) {
+	c.mu.Lock()
+	call := c.calls
+	c.calls++
+	c.mu.Unlock()
+	if call == 0 {
+		if callbacks.OnAssistantDelta != nil {
+			callbacks.OnAssistantDelta("inspecting")
+		}
+		return llm.Response{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "Inspecting now", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		}, nil
+	}
+	return llm.Response{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}, nil
+}
+
+func (c *gatewayTestStreamingClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	return llm.ProviderCapabilities{
+		ProviderID:                    "openai",
+		SupportsResponsesAPI:          true,
+		SupportsResponsesCompact:      true,
+		SupportsReasoningEncrypted:    true,
+		SupportsServerSideContextEdit: true,
+		IsOpenAIFirstParty:            true,
+	}, nil
+}
+
+type gatewayTestShellTool struct{}
+
+func (gatewayTestShellTool) Name() tools.ID { return tools.ToolShell }
+
+func (gatewayTestShellTool) Call(_ context.Context, call tools.Call) (tools.Result, error) {
+	return tools.Result{CallID: call.ID, Name: call.Name, Output: json.RawMessage(`{"output":"/tmp\n"}`)}, nil
 }
 
 func TestGatewayProcessOutputSubscriptionStreamsOutputAndCompletion(t *testing.T) {
