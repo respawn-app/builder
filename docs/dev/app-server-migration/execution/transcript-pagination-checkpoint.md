@@ -192,12 +192,14 @@ What it adds:
 
 - request-keyed transcript-page cache on top of the existing default-tail cache
 - exact-request reuse for `LoadTranscriptPage(req)`
+- bounded cache with LRU-style eviction (`16` entries)
 - preserved authoritative behavior for `RefreshTranscript()`
 - no broad edits to the dirtier pager/adapter files
 
 Validation already run:
 
 - `./scripts/test.sh ./cli/app -run 'TestRuntimeClientLoadTranscriptPageDefaultsToOngoingTail|TestRuntimeClientLoadTranscriptPageReusesFreshCachedPageForSameRequest|TestRuntimeClientLoadTranscriptPageCachesByRequestKey|TestRuntimeClientRefreshTranscriptBypassesFreshCachedPage'`
+- `./scripts/test.sh ./cli/app -run 'TestRuntimeClientLoadTranscriptPageEvictsLeastRecentlyUsedRequests'`
 - `./scripts/test.sh ./cli/app -run 'TestCtrlTDeferredDetailLoadUsesBoundedTranscriptPageRequest|TestDetailEdgePagingWaitsForFirstNavigationToResolveMetrics|TestCtrlTDeferredDetailLoadSkipsDuplicateDetailRebuildEndToEnd'`
 - `./scripts/build.sh --output ./bin/builder`
 

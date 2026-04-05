@@ -226,6 +226,24 @@ func TestRuntimeClientRefreshTranscriptBypassesFreshCachedPage(t *testing.T) {
 	}
 }
 
+func TestRuntimeClientLoadTranscriptPageEvictsLeastRecentlyUsedRequests(t *testing.T) {
+	reads := &countingSessionViewClient{page: clientui.TranscriptPage{SessionID: "session-1", TotalEntries: 5000}}
+	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil))
+	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, controls)
+
+	for i := 0; i <= uiRuntimeTranscriptPageCacheMaxEntries; i++ {
+		if _, err := runtimeClient.LoadTranscriptPage(clientui.TranscriptPageRequest{Offset: i * 10, Limit: 10}); err != nil {
+			t.Fatalf("load transcript page %d: %v", i, err)
+		}
+	}
+	if _, err := runtimeClient.LoadTranscriptPage(clientui.TranscriptPageRequest{Offset: 0, Limit: 10}); err != nil {
+		t.Fatalf("reload evicted transcript page: %v", err)
+	}
+	if got, want := reads.count.Load(), int32(uiRuntimeTranscriptPageCacheMaxEntries+2); got != want {
+		t.Fatalf("session view call count = %d, want %d", got, want)
+	}
+}
+
 func TestRuntimeClientFromEngineSeedsCachedTranscriptTail(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
