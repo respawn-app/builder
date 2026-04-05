@@ -541,11 +541,7 @@ func eventTranscriptEntriesReconcileWithCommittedTail(kind clientui.EventKind) b
 	switch kind {
 	case clientui.EventUserMessageFlushed,
 		clientui.EventAssistantMessage,
-		clientui.EventToolCallStarted,
-		clientui.EventToolCallCompleted,
-		clientui.EventReviewerCompleted,
-		clientui.EventCompactionCompleted,
-		clientui.EventCompactionFailed:
+		clientui.EventToolCallCompleted:
 		return true
 	default:
 		return false

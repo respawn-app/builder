@@ -414,6 +414,89 @@ func TestHandleProjectedRuntimeEventSkipsAlreadyHydratedAssistantEntry(t *testin
 	}
 }
 
+func TestHandleProjectedRuntimeEventDoesNotSuppressPendingToolCallStart(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "seed", Phase: llm.MessagePhaseCommentary}}
+	m.transcriptBaseOffset = 0
+	m.transcriptTotalEntries = 1
+	m.transcriptRevision = 10
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                clientui.EventToolCallStarted,
+		StepID:              "step-1",
+		TranscriptRevision:  10,
+		CommittedEntryCount: 1,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:       "tool_call",
+			Text:       "pwd",
+			ToolCallID: "call-1",
+			ToolCall:   &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"},
+		}},
+	})
+
+	if got := len(m.transcriptEntries); got != 2 {
+		t.Fatalf("expected pending tool call appended immediately, got %+v", m.transcriptEntries)
+	}
+	if got := m.transcriptEntries[1].Role; got != "tool_call" {
+		t.Fatalf("second transcript role = %q, want tool_call", got)
+	}
+}
+
+func TestHandleProjectedRuntimeEventDoesNotSuppressReviewerStatusEntry(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "seed", Phase: llm.MessagePhaseCommentary}}
+	m.transcriptBaseOffset = 0
+	m.transcriptTotalEntries = 1
+	m.transcriptRevision = 10
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                clientui.EventReviewerCompleted,
+		StepID:              "step-1",
+		TranscriptRevision:  10,
+		CommittedEntryCount: 1,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "reviewer_status",
+			Text: "Supervisor ran and applied 2 suggestions.",
+		}},
+	})
+
+	if got := len(m.transcriptEntries); got != 2 {
+		t.Fatalf("expected reviewer status appended immediately, got %+v", m.transcriptEntries)
+	}
+	if got := m.transcriptEntries[1].Role; got != "reviewer_status" {
+		t.Fatalf("second transcript role = %q, want reviewer_status", got)
+	}
+}
+
+func TestHandleProjectedRuntimeEventDoesNotSuppressCompactionNoticeEntry(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "seed", Phase: llm.MessagePhaseCommentary}}
+	m.transcriptBaseOffset = 0
+	m.transcriptTotalEntries = 1
+	m.transcriptRevision = 10
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                clientui.EventCompactionCompleted,
+		StepID:              "step-1",
+		TranscriptRevision:  10,
+		CommittedEntryCount: 1,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "compaction_notice",
+			Text: "context compacted for the 1st time",
+		}},
+	})
+
+	if got := len(m.transcriptEntries); got != 2 {
+		t.Fatalf("expected compaction notice appended immediately, got %+v", m.transcriptEntries)
+	}
+	if got := m.transcriptEntries[1].Role; got != "compaction_notice" {
+		t.Fatalf("second transcript role = %q, want compaction_notice", got)
+	}
+}
+
 func TestHandleProjectedRuntimeEventAppendsCompactionCleanupAndBackgroundEntriesImmediately(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
