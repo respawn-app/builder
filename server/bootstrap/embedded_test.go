@@ -66,12 +66,22 @@ func TestResolveConfigUsesWorkspaceContainer(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 
+	loaded, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
 	plan, err := ResolveConfig(Request{WorkspaceRoot: workspace})
 	if err != nil {
 		t.Fatalf("resolve config: %v", err)
 	}
 	if plan.Config.WorkspaceRoot == "" {
 		t.Fatal("expected workspace root")
+	}
+	if plan.Config.Settings.Model == "" {
+		t.Fatal("expected resolved config to carry a non-empty model")
+	}
+	if plan.Config.Settings.Model != loaded.Settings.Model {
+		t.Fatalf("resolved config model = %q, want %q", plan.Config.Settings.Model, loaded.Settings.Model)
 	}
 	if plan.ContainerDir == "" {
 		t.Fatal("expected container dir")

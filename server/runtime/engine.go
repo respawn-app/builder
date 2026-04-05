@@ -159,9 +159,10 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 	if store == nil || client == nil || registry == nil {
 		return nil, errors.New("store, llm client, and tool registry are required")
 	}
-	if cfg.Model == "" {
-		cfg.Model = "gpt-5"
+	if strings.TrimSpace(cfg.Model) == "" {
+		return nil, errors.New("model is required")
 	}
+	cfg.Model = strings.TrimSpace(cfg.Model)
 	if cfg.Temperature == 0 {
 		cfg.Temperature = 1
 	}

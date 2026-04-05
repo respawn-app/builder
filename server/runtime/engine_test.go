@@ -5740,7 +5740,7 @@ func TestInjectsGlobalAndWorkspaceAgentsAfterExistingMessagesAndBeforeFirstUserM
 		t.Fatalf("expected environment message type, got %+v", envMsg)
 	}
 	for _, required := range []string{
-		"\ngpt-5\n",
+		"\nYour model: gpt-5\n",
 		"OS: ",
 		"Current TZ: ",
 		"Date/time: ",
@@ -5809,8 +5809,8 @@ func TestInjectsEnvironmentInfoWithoutAnyAgentsFiles(t *testing.T) {
 	if requestMessages(req)[0].Role != llm.RoleDeveloper || !strings.Contains(requestMessages(req)[0].Content, environmentInjectedHeader) {
 		t.Fatalf("expected first message to be environment injection, got %+v", requestMessages(req)[0])
 	}
-	if !strings.Contains(requestMessages(req)[0].Content, "\ngpt-5\n") {
-		t.Fatalf("expected environment injection to include model label, got %+v", requestMessages(req)[0])
+	if !strings.Contains(requestMessages(req)[0].Content, "\nYour model: gpt-5\n") {
+		t.Fatalf("expected environment injection to include labeled model identifier, got %+v", requestMessages(req)[0])
 	}
 	if requestMessages(req)[1].Role != llm.RoleUser || requestMessages(req)[1].Content != "first" {
 		t.Fatalf("expected user message after environment injection, got %+v", requestMessages(req)[1])
@@ -6005,15 +6005,47 @@ func TestBrokenSymlinkedSkillsAreSkippedAndWarnedInTranscript(t *testing.T) {
 	}
 }
 
-func TestEnvironmentContextMessageIncludesStatusLineModelLabel(t *testing.T) {
+func TestEnvironmentContextMessageIncludesLabeledModelIdentifier(t *testing.T) {
 	workspace := t.TempDir()
-	msg := environmentContextMessage(workspace, "gpt-5.3-codex", "high", time.Unix(0, 0).UTC())
-	if !strings.Contains(msg, "\ngpt-5.3-codex high\n") {
-		t.Fatalf("expected environment message to include status-line model label, got %q", msg)
+	msg, err := environmentContextMessage(workspace, "gpt-5.3-codex", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatalf("environmentContextMessage: %v", err)
+	}
+	if !strings.Contains(msg, "\nYour model: gpt-5.3-codex\n") {
+		t.Fatalf("expected environment message to include labeled model identifier, got %q", msg)
+	}
+	if strings.Contains(msg, "Your model: gpt-5.3-codex high") {
+		t.Fatalf("expected environment message to exclude thinking level from model identifier, got %q", msg)
 	}
 }
 
-func TestSubmitInjectsEnvironmentLineWithStatusModelLabel(t *testing.T) {
+func TestEnvironmentContextMessageRejectsEmptyModel(t *testing.T) {
+	workspace := t.TempDir()
+	if _, err := environmentContextMessage(workspace, "", time.Unix(0, 0).UTC()); err == nil {
+		t.Fatal("expected environmentContextMessage to reject empty model")
+	} else if !strings.Contains(err.Error(), "requires a model") {
+		t.Fatalf("expected empty-model error, got %v", err)
+	}
+}
+
+func TestNewRejectsEmptyModel(t *testing.T) {
+	storeRoot := t.TempDir()
+	workspace := t.TempDir()
+	store, err := session.Create(storeRoot, "ws", workspace)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	_, err = New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{})
+	if err == nil {
+		t.Fatal("expected New to reject empty model")
+	}
+	if !strings.Contains(err.Error(), "model is required") {
+		t.Fatalf("expected model-required error, got %v", err)
+	}
+}
+
+func TestSubmitInjectsEnvironmentLineWithLabeledModelIdentifier(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -6059,8 +6091,11 @@ func TestSubmitInjectsEnvironmentLineWithStatusModelLabel(t *testing.T) {
 	if envMsg.Role != llm.RoleDeveloper || envMsg.MessageType != llm.MessageTypeEnvironment {
 		t.Fatalf("expected first request message to be environment context, got %+v", envMsg)
 	}
-	if !strings.Contains(envMsg.Content, "\ngpt-5.3-codex high\n") {
-		t.Fatalf("expected environment context to contain status model label line, got %q", envMsg.Content)
+	if !strings.Contains(envMsg.Content, "\nYour model: gpt-5.3-codex\n") {
+		t.Fatalf("expected environment context to contain labeled model identifier, got %q", envMsg.Content)
+	}
+	if strings.Contains(envMsg.Content, "Your model: gpt-5.3-codex high") {
+		t.Fatalf("expected environment context to exclude thinking level from model identifier, got %q", envMsg.Content)
 	}
 }
 

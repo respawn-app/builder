@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"builder/server/auth"
 	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/server/session"
@@ -19,6 +20,7 @@ import (
 	"builder/server/tools/askquestion"
 	patchtool "builder/server/tools/patch"
 	shelltool "builder/server/tools/shell"
+	"builder/shared/config"
 )
 
 func TestBuildToolRegistryAllowsHostedWebSearchWithoutLocalRuntimeBuilder(t *testing.T) {
@@ -173,6 +175,40 @@ func TestBackgroundEventRouterQueuesNoticeForActiveOwnerSession(t *testing.T) {
 	}
 	if got := client.CallCount(); got == 0 {
 		t.Fatal("expected active owner completion to queue a model notice")
+	}
+}
+
+func TestNewRuntimeWiringRejectsEmptyModelAfterBypassingConfigDefaults(t *testing.T) {
+	root := t.TempDir()
+	store, err := session.Create(root, "ws", root)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	_, err = NewRuntimeWiringWithBackground(
+		store,
+		config.Settings{
+			Model:              "",
+			ProviderOverride:   "openai",
+			OpenAIBaseURL:      "http://example.test/v1",
+			ModelContextWindow: 272_000,
+			Timeouts: config.Timeouts{
+				ModelRequestSeconds: 1,
+				ShellDefaultSeconds: 1,
+			},
+		},
+		[]tools.ID{tools.ToolShell},
+		root,
+		auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, nil),
+		nil,
+		nil,
+		RuntimeWiringOptions{},
+	)
+	if err == nil {
+		t.Fatal("expected runtime wiring to reject empty model")
+	}
+	if !strings.Contains(err.Error(), "model is required") {
+		t.Fatalf("expected model-required error, got %v", err)
 	}
 }
 
