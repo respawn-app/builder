@@ -71,9 +71,11 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 		m.forwardToView(tui.ClearOngoingAssistantMsg{})
 	}
 	if update.ReasoningDelta != nil {
+		m.reasoningLiveDirty = true
 		m.forwardToView(tui.UpsertStreamingReasoningMsg{Key: update.ReasoningDelta.Key, Role: update.ReasoningDelta.Role, Text: update.ReasoningDelta.Text})
 	}
 	if update.ClearReasoningStream {
+		m.reasoningLiveDirty = false
 		m.forwardToView(tui.ClearStreamingReasoningMsg{})
 	}
 	if update.BackgroundNotice != nil {
@@ -83,12 +85,11 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 		}
 		cmds = append(cmds, m.setTransientStatusWithKind(update.BackgroundNotice.Message, kind))
 	}
+	if update.RecordPromptHistory && strings.TrimSpace(evt.UserMessage) != "" {
+		cmds = append(cmds, m.recordPromptHistory(evt.UserMessage))
+	}
 	if update.SyncSessionView {
-		if update.RecordPromptHistory {
-			cmds = append(cmds, sequenceCmds(a.syncConversationFromEngine(), m.recordPromptHistory(evt.UserMessage)))
-		} else {
-			cmds = append(cmds, a.syncConversationFromEngine())
-		}
+		cmds = append(cmds, a.syncConversationFromEngine())
 	}
 	return runtimeEventApplyResult{cmd: batchCmds(cmds...), transcriptMutated: transcriptMutated}
 }
@@ -157,6 +158,7 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(entries []clientui.Cha
 	if len(entries) == 0 {
 		return nil, false
 	}
+	m.transcriptLiveDirty = true
 	startOffset := m.transcriptBaseOffset + len(m.transcriptEntries)
 	for _, entry := range entries {
 		transcriptEntry := transcriptEntryFromChatEntry(entry)
@@ -214,9 +216,18 @@ func (a uiRuntimeAdapter) applyProjectedSessionMetadata(view clientui.RuntimeSes
 		m.startupCmds = nil
 	}
 	previousWindowTitle := m.windowTitle()
+	if transcriptPageSessionChanged(m.sessionID, view.SessionID) {
+		m.detailTranscript.reset()
+		m.transcriptRevision = 0
+		m.transcriptLiveDirty = false
+		m.reasoningLiveDirty = false
+	}
 	m.sessionID = strings.TrimSpace(view.SessionID)
 	m.sessionName = strings.TrimSpace(view.SessionName)
 	m.conversationFreshness = view.ConversationFreshness
+	if view.Transcript.Revision > m.transcriptRevision {
+		m.transcriptRevision = view.Transcript.Revision
+	}
 	if previousWindowTitle != m.windowTitle() {
 		return tea.SetWindowTitle(m.windowTitle())
 	}
@@ -237,6 +248,12 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPage
 		m.nativeRenderedSnapshot = ""
 	}
 	previousWindowTitle := m.windowTitle()
+	if transcriptPageSessionChanged(m.sessionID, page.SessionID) {
+		m.detailTranscript.reset()
+		m.transcriptRevision = 0
+		m.transcriptLiveDirty = false
+		m.reasoningLiveDirty = false
+	}
 	m.sessionID = strings.TrimSpace(page.SessionID)
 	if strings.TrimSpace(page.SessionName) != "" {
 		m.sessionName = strings.TrimSpace(page.SessionName)
@@ -246,17 +263,31 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPage
 	if pageReq.Window == clientui.TranscriptWindowDefault && transcriptPageLooksLikeOngoingTail(page) && m.view.Mode() == tui.ModeOngoing {
 		pageReq.Window = clientui.TranscriptWindowOngoingTail
 	}
+	if shouldRejectTranscriptPageReplacement(m, pageReq, page) {
+		if previousWindowTitle != m.windowTitle() {
+			return tea.SetWindowTitle(m.windowTitle())
+		}
+		return nil
+	}
 	shouldSyncNativeHistory := pageReq.Window == clientui.TranscriptWindowOngoingTail || pageReq == (clientui.TranscriptPageRequest{})
+	preserveLiveReasoning := shouldPreserveLiveReasoning(m, page)
 	if pageReq.Window == clientui.TranscriptWindowOngoingTail || (pageReq == (clientui.TranscriptPageRequest{}) && m.view.Mode() != tui.ModeDetail) {
 		entries := transcriptEntriesFromPage(page)
 		m.transcriptBaseOffset = page.Offset
 		m.transcriptEntries = append(m.transcriptEntries[:0], entries...)
 		m.transcriptTotalEntries = max(page.TotalEntries, page.Offset+len(entries))
+		m.transcriptRevision = max(m.transcriptRevision, page.Revision)
+		m.transcriptLiveDirty = false
+		if !preserveLiveReasoning {
+			m.reasoningLiveDirty = false
+		}
 		m.seedPromptHistoryFromTranscriptEntries(m.transcriptEntries)
 		m.refreshRollbackCandidates()
 		m.detailTranscript.syncTail(page)
 		if m.view.Mode() != tui.ModeDetail {
-			m.forwardToView(tui.ClearStreamingReasoningMsg{})
+			if !preserveLiveReasoning {
+				m.forwardToView(tui.ClearStreamingReasoningMsg{})
+			}
 			m.forwardToView(tui.SetConversationMsg{
 				BaseOffset:   page.Offset,
 				TotalEntries: page.TotalEntries,
@@ -273,13 +304,19 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPage
 			return nil
 		}
 		m.detailTranscript.apply(page)
+		m.transcriptRevision = max(m.transcriptRevision, page.Revision)
+		if !preserveLiveReasoning {
+			m.reasoningLiveDirty = false
+		}
 		detailPage := m.detailTranscript.page()
 		detailPage.SessionID = page.SessionID
 		detailPage.SessionName = page.SessionName
 		detailPage.ConversationFreshness = page.ConversationFreshness
 		detailPage.Revision = page.Revision
 		if m.view.Mode() == tui.ModeDetail {
-			m.forwardToView(tui.ClearStreamingReasoningMsg{})
+			if !preserveLiveReasoning {
+				m.forwardToView(tui.ClearStreamingReasoningMsg{})
+			}
 			m.forwardToView(tui.SetConversationMsg{
 				BaseOffset:   detailPage.Offset,
 				TotalEntries: detailPage.TotalEntries,
@@ -303,6 +340,39 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPage
 		cmds = append(cmds, tea.SetWindowTitle(m.windowTitle()))
 	}
 	return sequenceCmds(cmds...)
+}
+
+func shouldRejectTranscriptPageReplacement(m *uiModel, req clientui.TranscriptPageRequest, page clientui.TranscriptPage) bool {
+	if m == nil || page.Revision <= 0 {
+		return false
+	}
+	if page.Revision < m.transcriptRevision {
+		return true
+	}
+	replacesOngoingTail := req.Window == clientui.TranscriptWindowOngoingTail || (req == (clientui.TranscriptPageRequest{}) && m.view.Mode() != tui.ModeDetail)
+	if !replacesOngoingTail {
+		return false
+	}
+	if m.transcriptLiveDirty && page.Revision <= m.transcriptRevision {
+		return true
+	}
+	if page.Revision == m.transcriptRevision && strings.TrimSpace(m.view.OngoingStreamingText()) != "" && strings.TrimSpace(page.Ongoing) == "" {
+		return true
+	}
+	return false
+}
+
+func shouldPreserveLiveReasoning(m *uiModel, page clientui.TranscriptPage) bool {
+	if m == nil {
+		return false
+	}
+	if !m.reasoningLiveDirty {
+		return false
+	}
+	if page.Revision <= 0 {
+		return true
+	}
+	return page.Revision <= m.transcriptRevision
 }
 
 func transcriptEntriesFromPage(page clientui.TranscriptPage) []tui.TranscriptEntry {
