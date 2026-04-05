@@ -118,6 +118,7 @@ func discoveredRemoteSupportsRunPrompt(flags protocol.CapabilityFlags) bool {
 func discoveredRemoteSupportsInteractiveSession(flags protocol.CapabilityFlags) bool {
 	return flags.SessionPlan &&
 		flags.SessionLifecycle &&
+		flags.SessionTranscriptPaging &&
 		flags.SessionRuntime &&
 		flags.RuntimeControl &&
 		flags.PromptControl &&
