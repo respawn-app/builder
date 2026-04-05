@@ -4,6 +4,7 @@ import (
 	"builder/cli/tui"
 	"builder/shared/config"
 	"os"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -52,6 +53,9 @@ func (m *uiModel) transitionTranscriptMode(target tui.Mode, skipDetailWarmup boo
 	prevMode := m.view.Mode()
 	m.forwardToView(tui.SetModeMsg{Mode: target, SkipDetailWarmup: skipDetailWarmup})
 	nextMode := m.view.Mode()
+	if prevMode != nextMode && nextMode == tui.ModeDetail {
+		m.primeDetailTranscriptFromCurrentTail()
+	}
 	if nextMode != tui.ModeOngoing {
 		m.helpVisible = false
 	} else if prevMode != nextMode && m.inputMode() == uiInputModeMain {
@@ -60,12 +64,37 @@ func (m *uiModel) transitionTranscriptMode(target tui.Mode, skipDetailWarmup boo
 	if prevMode != nextMode {
 		m.invalidateNativeResizeReplay()
 	}
+	clearCmd := m.clearCmdForModeTransition(prevMode, nextMode)
 	transitionCmd := m.altScreenCmdForModeTransition(prevMode, nextMode)
 	nativeReplayCmd := m.nativeReplayCmdForModeTransition(prevMode, nextMode, emitNativeReplay)
-	if transitionCmd == nil && nativeReplayCmd == nil {
+	detailLoadCmd := m.detailLoadCmdForModeTransition(prevMode, nextMode)
+	if clearCmd == nil && transitionCmd == nil && nativeReplayCmd == nil && detailLoadCmd == nil {
 		return tea.ClearScreen
 	}
-	return sequenceCmds(transitionCmd, nativeReplayCmd)
+	return sequenceCmds(clearCmd, transitionCmd, nativeReplayCmd, detailLoadCmd)
+}
+
+func (m *uiModel) clearCmdForModeTransition(prev, next tui.Mode) tea.Cmd {
+	if prev == next {
+		return nil
+	}
+	if next != tui.ModeDetail {
+		return nil
+	}
+	if shouldUseDetailAltScreen(m.tuiAlternateScreen) {
+		return nil
+	}
+	return tea.ClearScreen
+}
+
+func (m *uiModel) detailLoadCmdForModeTransition(prev, next tui.Mode) tea.Cmd {
+	if prev == next || next != tui.ModeDetail {
+		return nil
+	}
+	m.detailTranscript.totalEntries = max(m.detailTranscript.totalEntries, m.view.TranscriptTotalEntries())
+	return tea.Tick(time.Millisecond, func(time.Time) tea.Msg {
+		return detailTranscriptLoadMsg{}
+	})
 }
 
 func (m *uiModel) nativeReplayCmdForModeTransition(prev, next tui.Mode, enabled bool) tea.Cmd {

@@ -119,8 +119,8 @@ func TestToggleToDetailStartsAtBottom(t *testing.T) {
 
 	m = updateModel(t, m, ToggleModeMsg{})
 
-	if got, want := m.detailScroll, m.maxDetailScroll(); got != want {
-		t.Fatalf("detail scroll after toggle = %d, want bottom %d", got, want)
+	if m.DetailMetricsResolved() {
+		t.Fatal("expected detail entry to remain lazily bottom-anchored until the first navigation action")
 	}
 	view := plainTranscript(m.View())
 	if !strings.Contains(view, "a4") {
@@ -408,48 +408,29 @@ func TestMouseWheelScrollsDetailView(t *testing.T) {
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "a3"})
 	m = updateModel(t, m, ToggleModeMsg{})
 	ongoingStart := m.ongoingScroll
-	maxDetail := m.maxDetailScroll()
-	start := m.detailScroll
-	if start == 0 {
-		t.Fatalf("expected detail mode to start at bottom, got detailScroll=%d", start)
+	if m.DetailMetricsResolved() {
+		t.Fatal("expected detail mode to defer global scroll metric resolution until navigation")
 	}
-	if start != maxDetail {
-		t.Fatalf("expected detail mode to start at max scroll, got %d want %d", start, maxDetail)
-	}
+	initial := plainTranscript(m.View())
 
 	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
-	afterUp := m.detailScroll
-	if afterUp >= start {
-		t.Fatalf("expected wheel up to scroll detail view up, got %d from %d", afterUp, start)
+	if m.DetailMetricsResolved() {
+		t.Fatal("expected first detail navigation to stay lazy")
+	}
+	afterUp := m.DetailScroll()
+	if afterUp <= 0 {
+		t.Fatalf("expected wheel up to advance lazy detail offset, got %d", afterUp)
+	}
+	if plainTranscript(m.View()) == initial {
+		t.Fatal("expected detail wheel up to change the visible viewport")
 	}
 	if got := m.ongoingScroll; got != ongoingStart {
 		t.Fatalf("expected detail wheel scroll to leave ongoing scroll untouched, got %d want %d", got, ongoingStart)
 	}
 
-	for m.detailScroll > 0 {
-		m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
-	}
-	if got := m.detailScroll; got != 0 {
-		t.Fatalf("expected repeated wheel up to clamp detail scroll at top, got %d", got)
-	}
-	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelUp, Type: tea.MouseWheelUp})
-	if got := m.detailScroll; got != 0 {
-		t.Fatalf("expected wheel up at top to remain clamped at 0, got %d", got)
-	}
-
 	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
-	if got := m.detailScroll; got != 1 {
-		t.Fatalf("expected wheel down from top to advance detail scroll, got %d want %d", got, 1)
-	}
-	for m.detailScroll < maxDetail {
-		m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
-	}
-	if got := m.detailScroll; got != maxDetail {
-		t.Fatalf("expected repeated wheel down to clamp detail scroll at bottom, got %d want %d", got, maxDetail)
-	}
-	m = updateModel(t, m, tea.MouseMsg{Button: tea.MouseButtonWheelDown, Type: tea.MouseWheelDown})
-	if got := m.detailScroll; got != maxDetail {
-		t.Fatalf("expected wheel down at bottom to remain clamped, got %d want %d", got, maxDetail)
+	if got := m.DetailScroll(); got != 0 {
+		t.Fatalf("expected wheel down to return lazy detail offset to bottom, got %d", got)
 	}
 	if got := m.ongoingScroll; got != ongoingStart {
 		t.Fatalf("expected detail wheel scroll to keep ongoing scroll unchanged, got %d want %d", got, ongoingStart)
@@ -552,6 +533,51 @@ func TestFocusTranscriptEntryCentersInDetailMode(t *testing.T) {
 	visibleMid := m.detailScroll + m.viewportLines/2
 	if diff := absInt(midpoint - visibleMid); diff > 2 {
 		t.Fatalf("expected focused entry near viewport center, midpoint=%d visibleMid=%d", midpoint, visibleMid)
+	}
+}
+
+func TestFocusTranscriptEntryCentersInDetailModeFromLazyEntry(t *testing.T) {
+	m := NewModel(WithPreviewLines(4))
+	for i := 0; i < 20; i++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("line %d", i)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+	if m.DetailMetricsResolved() {
+		t.Fatal("expected detail entry to remain lazy before focus")
+	}
+
+	m = updateModel(t, m, FocusTranscriptEntryMsg{EntryIndex: 10, Center: true})
+	if !m.DetailMetricsResolved() {
+		t.Fatal("expected focus to resolve detail metrics on the authoritative model")
+	}
+	if m.detailScroll <= 0 {
+		t.Fatalf("expected lazy detail focus to scroll into transcript, got %d", m.detailScroll)
+	}
+	if plain := plainTranscript(m.View()); !strings.Contains(plain, "line 10") {
+		t.Fatalf("expected focused entry visible after lazy detail focus, got %q", plain)
+	}
+}
+
+func TestFocusTranscriptEntryCentersFromLazyDetailEntry(t *testing.T) {
+	m := NewModel(WithPreviewLines(4))
+	for i := 0; i < 20; i++ {
+		m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: fmt.Sprintf("line %d", i)})
+	}
+	m = updateModel(t, m, ToggleModeMsg{})
+	if m.DetailMetricsResolved() {
+		t.Fatal("expected detail entry to start lazy before focus")
+	}
+
+	m = updateModel(t, m, FocusTranscriptEntryMsg{EntryIndex: 10, Center: true})
+	if !m.DetailMetricsResolved() {
+		t.Fatal("expected focus to resolve detail metrics on the authoritative model")
+	}
+	if m.detailScroll <= 0 {
+		t.Fatalf("expected focus from lazy detail entry to scroll into transcript, got %d", m.detailScroll)
+	}
+	plain := plainTranscript(m.View())
+	if !strings.Contains(plain, "line 10") {
+		t.Fatalf("expected focused entry visible after lazy detail focus, got %q", plain)
 	}
 }
 

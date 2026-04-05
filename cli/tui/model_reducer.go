@@ -11,6 +11,7 @@ type modelUpdateResult struct {
 	ongoingBaseChanged bool
 	ongoingChanged     bool
 	detailChanged      bool
+	detailStale        bool
 	forceDetailRefresh bool
 	autoFollowOngoing  bool
 }
@@ -198,10 +199,15 @@ func (m *Model) reduceAppendTranscriptMsg(msg AppendTranscriptMsg, result *model
 		ToolCallID:  strings.TrimSpace(msg.ToolCallID),
 		ToolCall:    cloneToolCallMeta(msg.ToolCall),
 	})
+	m.transcriptTotalEntries = max(m.transcriptTotalEntries, m.transcriptBaseOffset+len(m.transcript))
 	result.autoFollowOngoing = true
 	result.ongoingBaseChanged = true
 	result.ongoingChanged = true
-	result.detailChanged = true
+	if m.mode == ModeDetail {
+		result.detailStale = true
+	} else {
+		result.detailChanged = true
+	}
 }
 
 func (m *Model) reduceSetConversationMsg(msg SetConversationMsg, result *modelUpdateResult) {
@@ -212,9 +218,18 @@ func (m *Model) reduceSetConversationMsg(msg SetConversationMsg, result *modelUp
 		entries[i].ToolCall = cloneToolCallMeta(entries[i].ToolCall)
 	}
 	m.transcript = entries
+	if msg.BaseOffset < 0 {
+		msg.BaseOffset = 0
+	}
+	m.transcriptBaseOffset = msg.BaseOffset
+	totalEntries := msg.TotalEntries
+	if totalEntries < m.transcriptBaseOffset+len(entries) {
+		totalEntries = m.transcriptBaseOffset + len(entries)
+	}
+	m.transcriptTotalEntries = totalEntries
 	m.ongoing = msg.Ongoing
 	m.ongoingError = strings.TrimSpace(msg.OngoingError)
-	if m.selectedTranscriptEntry < 0 || m.selectedTranscriptEntry >= len(m.transcript) {
+	if _, ok := m.localTranscriptIndex(m.selectedTranscriptEntry); !ok {
 		m.selectedTranscriptActive = false
 	}
 	result.autoFollowOngoing = true
@@ -244,7 +259,13 @@ func (m *Model) reduceFocusTranscriptEntryMsg(msg FocusTranscriptEntryMsg) {
 			m.rebuildDetailSnapshot()
 		}
 		if start, end, ok := m.detailLineRangeForEntry(msg.EntryIndex); ok {
+			if m.detailBottomAnchor || !m.detailMetricsResolved {
+				m.ensureDetailMetricsResolved()
+			}
 			m.detailScroll = clamp(focusedScrollTarget(start, end, m.viewportLines, msg), 0, m.maxDetailScroll())
+			m.detailBottomAnchor = false
+			m.detailBottomOffset = 0
+			m.refreshDetailViewport()
 		}
 	}
 }
@@ -257,14 +278,22 @@ func (m *Model) reduceStreamAssistantMsg(msg StreamAssistantMsg, result *modelUp
 	m.ongoing += msg.Delta
 	result.autoFollowOngoing = true
 	result.ongoingChanged = true
-	result.detailChanged = !m.detailDirty
+	if m.mode == ModeDetail {
+		result.detailStale = true
+	} else if !m.detailDirty {
+		result.detailChanged = true
+	}
 }
 
 func (m *Model) reduceClearOngoingAssistantMsg(result *modelUpdateResult) {
 	m.ongoing = ""
 	m.ongoingScroll = 0
 	result.ongoingChanged = true
-	result.detailChanged = !m.detailDirty
+	if m.mode == ModeDetail {
+		result.detailStale = true
+	} else {
+		result.detailChanged = true
+	}
 }
 
 func (m *Model) reduceUpsertStreamingReasoningMsg(msg UpsertStreamingReasoningMsg, result *modelUpdateResult) {
@@ -320,7 +349,11 @@ func (m *Model) reduceCommitAssistantMsg(result *modelUpdateResult) {
 	result.autoFollowOngoing = true
 	result.ongoingBaseChanged = true
 	result.ongoingChanged = true
-	result.detailChanged = true
+	if m.mode == ModeDetail {
+		result.detailStale = true
+	} else {
+		result.detailChanged = true
+	}
 }
 
 func (m *Model) applyUpdateResult(result modelUpdateResult, wasAtOngoingBottom bool) {
@@ -332,8 +365,12 @@ func (m *Model) applyUpdateResult(result modelUpdateResult, wasAtOngoingBottom b
 	if result.detailChanged {
 		m.invalidateDetailSnapshot()
 	}
-	if result.forceDetailRefresh {
+	if result.detailStale {
+		m.detailStale = true
+	}
+	if result.forceDetailRefresh || (m.mode == ModeDetail && result.detailChanged) {
 		m.rebuildDetailSnapshot()
+		m.detailStale = false
 	}
 	if m.ongoingDirty && m.mode == ModeOngoing {
 		m.rebuildOngoingSnapshot()
@@ -351,8 +388,13 @@ func (m *Model) applyUpdateResult(result modelUpdateResult, wasAtOngoingBottom b
 		}
 	}
 
-	if m.mode == ModeDetail || result.viewportChanged {
-		m.detailScroll = clamp(m.detailScroll, 0, m.maxDetailScroll())
+	if m.mode == ModeDetail {
+		if !m.detailDirty && !m.detailBottomAnchor {
+			m.detailScroll = clamp(m.detailScroll, 0, m.maxDetailScroll())
+		}
+		if !m.detailDirty {
+			m.refreshDetailViewport()
+		}
 	}
 }
 

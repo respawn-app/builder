@@ -31,6 +31,20 @@ func TestReduceAppendTranscriptMsgReportsMutationFlagsAndNormalizesEntry(t *test
 	}
 }
 
+func TestReduceAppendTranscriptMsgAdvancesTotalEntriesFromTailWindow(t *testing.T) {
+	m := NewModel()
+	m.transcriptBaseOffset = 250
+	m.transcriptTotalEntries = 252
+	m.transcript = []TranscriptEntry{{Role: "assistant", Text: "existing"}, {Role: "assistant", Text: "tail"}}
+	var result modelUpdateResult
+
+	m.reduceAppendTranscriptMsg(AppendTranscriptMsg{Role: "assistant", Text: "new tail"}, &result)
+
+	if got, want := m.transcriptTotalEntries, 253; got != want {
+		t.Fatalf("transcriptTotalEntries = %d, want %d", got, want)
+	}
+}
+
 func TestReduceSetConversationMsgNormalizesEntriesAndClearsInvalidSelection(t *testing.T) {
 	m := NewModel()
 	m.selectedTranscriptEntry = 5

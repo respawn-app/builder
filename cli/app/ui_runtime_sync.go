@@ -35,10 +35,11 @@ func (m *uiModel) requestRuntimeTranscriptSync() tea.Cmd {
 	m.runtimeTranscriptToken++
 	token := m.runtimeTranscriptToken
 	client := m.runtimeClient()
+	req := m.transcriptRequestForCurrentMode()
 	m.logf("ui.runtime.transcript.start token=%d", token)
 	return func() tea.Msg {
-		transcript, err := client.RefreshTranscript()
-		return runtimeTranscriptRefreshedMsg{token: token, transcript: transcript, err: err}
+		transcript, err := client.LoadTranscriptPage(req)
+		return runtimeTranscriptRefreshedMsg{token: token, req: req, transcript: transcript, err: err}
 	}
 }
 
@@ -81,7 +82,7 @@ func (m *uiModel) handleRuntimeTranscriptRefreshed(msg runtimeTranscriptRefreshe
 	if recovered {
 		m.logf("ui.runtime.transcript.recovered token=%d", msg.token)
 	}
-	applyCmd := m.runtimeAdapter().applyProjectedTranscriptPage(msg.transcript)
+	applyCmd := m.runtimeAdapter().applyRuntimeTranscriptPage(msg.req, msg.transcript)
 	if !m.runtimeTranscriptDirty {
 		return applyCmd
 	}

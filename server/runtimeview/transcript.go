@@ -20,18 +20,41 @@ func TranscriptPageFromRuntime(engine *runtime.Engine, req clientui.TranscriptPa
 			engine.OngoingTailTranscriptWindow(OngoingTailEntryLimit),
 		)
 	}
-	return TranscriptPageFromChat(
+	offset, limit := transcriptOffsetAndLimit(req)
+	page := engine.TranscriptPageSnapshot(offset, limit)
+	return TranscriptPageFromCollectedChat(
 		engine.SessionID(),
 		engine.SessionName(),
 		ConversationFreshnessFromSession(engine.ConversationFreshness()),
 		engine.TranscriptRevision(),
-		ChatSnapshotFromRuntime(engine.ChatSnapshot()),
-		req,
+		ChatSnapshotFromRuntime(page.Snapshot),
+		page.TotalEntries,
+		page.Offset,
+		clientui.TranscriptPageRequest{Offset: page.Offset, Limit: limit},
 	)
 }
 
+func transcriptOffsetAndLimit(req clientui.TranscriptPageRequest) (int, int) {
+	if req.PageSize > 0 {
+		offset := req.Page * req.PageSize
+		if offset < 0 {
+			offset = 0
+		}
+		return offset, req.PageSize
+	}
+	offset := req.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	limit := req.Limit
+	if limit < 0 {
+		limit = 0
+	}
+	return offset, limit
+}
+
 func TranscriptPageFromWindow(sessionID, sessionName string, freshness clientui.ConversationFreshness, revision int64, window runtime.TranscriptWindowSnapshot) clientui.TranscriptPage {
-	page := transcriptPageFromNormalizedRequest(
+	return TranscriptPageFromCollectedChat(
 		sessionID,
 		sessionName,
 		freshness,
@@ -41,8 +64,21 @@ func TranscriptPageFromWindow(sessionID, sessionName string, freshness clientui.
 		window.Offset,
 		clientui.TranscriptPageRequest{Offset: window.Offset, Limit: window.TotalEntries - window.Offset},
 	)
-	page.Ongoing = window.Snapshot.Ongoing
-	page.OngoingError = window.Snapshot.OngoingError
+}
+
+func TranscriptPageFromCollectedChat(sessionID, sessionName string, freshness clientui.ConversationFreshness, revision int64, snapshot clientui.ChatSnapshot, totalEntries, baseOffset int, req clientui.TranscriptPageRequest) clientui.TranscriptPage {
+	page := transcriptPageFromNormalizedRequest(
+		sessionID,
+		sessionName,
+		freshness,
+		revision,
+		snapshot,
+		totalEntries,
+		baseOffset,
+		req,
+	)
+	page.Ongoing = snapshot.Ongoing
+	page.OngoingError = snapshot.OngoingError
 	return page
 }
 

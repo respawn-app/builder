@@ -19,7 +19,30 @@ type uiRuntimeAdapter struct {
 	model *uiModel
 }
 
+type runtimeEventApplyResult struct {
+	cmd               tea.Cmd
+	transcriptMutated bool
+}
+
 func (a uiRuntimeAdapter) handleProjectedRuntimeEvent(evt clientui.Event) tea.Cmd {
+	return a.applyProjectedRuntimeEvent(evt, true).cmd
+}
+
+func (a uiRuntimeAdapter) handleProjectedRuntimeEventsBatch(events []clientui.Event) tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(events)+1)
+	transcriptMutated := false
+	for _, evt := range events {
+		result := a.applyProjectedRuntimeEvent(evt, false)
+		cmds = append(cmds, result.cmd)
+		transcriptMutated = transcriptMutated || result.transcriptMutated
+	}
+	if transcriptMutated {
+		cmds = append(cmds, a.model.syncNativeHistoryFromTranscript())
+	}
+	return batchCmds(cmds...)
+}
+
+func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNativeHistory bool) runtimeEventApplyResult {
 	m := a.model
 	update := clientui.ReduceRuntimeEvent(
 		a.runtimeEventState(),
@@ -28,12 +51,20 @@ func (a uiRuntimeAdapter) handleProjectedRuntimeEvent(evt clientui.Event) tea.Cm
 		evt,
 	)
 	a.applyRuntimeEventUpdate(update)
+	cmds := make([]tea.Cmd, 0, 4)
+	transcriptMutated := false
+	if len(evt.TranscriptEntries) > 0 {
+		cmd, mutated := a.applyProjectedTranscriptEntries(evt.TranscriptEntries, flushNativeHistory)
+		cmds = append(cmds, cmd)
+		transcriptMutated = transcriptMutated || mutated
+	}
 	if update.AssistantDelta != "" {
 		if strings.TrimSpace(update.AssistantDelta) == uiNoopFinalToken {
-			return nil
+			update.AssistantDelta = ""
+		} else {
+			m.sawAssistantDelta = true
+			m.forwardToView(tui.StreamAssistantMsg{Delta: update.AssistantDelta})
 		}
-		m.sawAssistantDelta = true
-		m.forwardToView(tui.StreamAssistantMsg{Delta: update.AssistantDelta})
 	}
 	if update.ClearAssistantStream {
 		m.sawAssistantDelta = false
@@ -50,15 +81,16 @@ func (a uiRuntimeAdapter) handleProjectedRuntimeEvent(evt clientui.Event) tea.Cm
 		if update.BackgroundNotice.Kind == clientui.BackgroundNoticeError {
 			kind = uiStatusNoticeError
 		}
-		return m.setTransientStatusWithKind(update.BackgroundNotice.Message, kind)
+		cmds = append(cmds, m.setTransientStatusWithKind(update.BackgroundNotice.Message, kind))
 	}
 	if update.SyncSessionView {
 		if update.RecordPromptHistory {
-			return sequenceCmds(a.syncConversationFromEngine(), m.recordPromptHistory(evt.UserMessage))
+			cmds = append(cmds, sequenceCmds(a.syncConversationFromEngine(), m.recordPromptHistory(evt.UserMessage)))
+		} else {
+			cmds = append(cmds, a.syncConversationFromEngine())
 		}
-		return a.syncConversationFromEngine()
 	}
-	return nil
+	return runtimeEventApplyResult{cmd: batchCmds(cmds...), transcriptMutated: transcriptMutated}
 }
 
 func (a uiRuntimeAdapter) runtimeEventState() clientui.RuntimeEventState {
@@ -119,6 +151,45 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 	return m.requestRuntimeTranscriptSync()
 }
 
+func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(entries []clientui.ChatEntry, flushNativeHistory bool) (tea.Cmd, bool) {
+	m := a.model
+	entries = trimProjectedTranscriptOverlap(m.transcriptEntries, entries)
+	if len(entries) == 0 {
+		return nil, false
+	}
+	startOffset := m.view.TranscriptBaseOffset() + len(m.transcriptEntries)
+	for _, entry := range entries {
+		transcriptEntry := transcriptEntryFromChatEntry(entry)
+		m.transcriptEntries = append(m.transcriptEntries, transcriptEntry)
+		m.forwardToView(tui.AppendTranscriptMsg{
+			Role:        transcriptEntry.Role,
+			Text:        transcriptEntry.Text,
+			OngoingText: transcriptEntry.OngoingText,
+			Phase:       transcriptEntry.Phase,
+			ToolCallID:  transcriptEntry.ToolCallID,
+			ToolCall:    transcriptEntry.ToolCall,
+		})
+	}
+	m.refreshRollbackCandidates()
+	if m.detailTranscript.loaded {
+		page := clientui.TranscriptPage{
+			Offset:       startOffset,
+			TotalEntries: max(m.view.TranscriptTotalEntries(), startOffset+len(entries)),
+			Entries:      cloneChatEntries(entries),
+			Ongoing:      m.view.OngoingStreamingText(),
+			OngoingError: m.view.OngoingErrorText(),
+		}
+		m.detailTranscript.apply(page)
+	}
+	if m.view.Mode() == tui.ModeOngoing {
+		m.forwardToView(tui.SetOngoingScrollMsg{Scroll: m.view.OngoingScroll()})
+	}
+	if !flushNativeHistory {
+		return nil, true
+	}
+	return m.syncNativeHistoryFromTranscript(), true
+}
+
 func (a uiRuntimeAdapter) applyProjectedChatSnapshot(snapshot clientui.ChatSnapshot) tea.Cmd {
 	page := a.model.runtimeTranscript()
 	page.Entries = cloneTranscriptEntries(snapshot.Entries)
@@ -128,12 +199,12 @@ func (a uiRuntimeAdapter) applyProjectedChatSnapshot(snapshot clientui.ChatSnaps
 	page.HasMore = false
 	page.Ongoing = snapshot.Ongoing
 	page.OngoingError = snapshot.OngoingError
-	return a.applyProjectedTranscriptPage(page)
+	return a.applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, page)
 }
 
 func (a uiRuntimeAdapter) applyProjectedSessionView(view clientui.RuntimeSessionView) tea.Cmd {
 	transcript := transcriptPageFromSessionView(view)
-	return sequenceCmds(a.applyProjectedSessionMetadata(view), a.applyProjectedTranscriptPage(transcript))
+	return sequenceCmds(a.applyProjectedSessionMetadata(view), a.applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, transcript))
 }
 
 func (a uiRuntimeAdapter) applyProjectedSessionMetadata(view clientui.RuntimeSessionView) tea.Cmd {
@@ -152,6 +223,10 @@ func (a uiRuntimeAdapter) applyProjectedSessionMetadata(view clientui.RuntimeSes
 }
 
 func (a uiRuntimeAdapter) applyProjectedTranscriptPage(page clientui.TranscriptPage) tea.Cmd {
+	return a.applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, page)
+}
+
+func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPageRequest, page clientui.TranscriptPage) tea.Cmd {
 	m := a.model
 	if len(m.startupCmds) > 0 {
 		m.startupCmds = nil
@@ -166,86 +241,131 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptPage(page clientui.TranscriptP
 		m.sessionName = strings.TrimSpace(page.SessionName)
 	}
 	m.conversationFreshness = page.ConversationFreshness
-	entries := mergeTranscriptPageEntries(m.transcriptEntries, page)
-	m.transcriptEntries = append(m.transcriptEntries[:0], entries...)
-	m.seedPromptHistoryFromTranscriptEntries(m.transcriptEntries)
-	m.refreshRollbackCandidates()
-	m.forwardToView(tui.ClearStreamingReasoningMsg{})
-	m.forwardToView(tui.SetConversationMsg{
-		Entries:      entries,
-		Ongoing:      page.Ongoing,
-		OngoingError: page.OngoingError,
-	})
+	pageReq := req
+	if pageReq.Window == clientui.TranscriptWindowDefault && transcriptPageLooksLikeOngoingTail(page) && m.view.Mode() == tui.ModeOngoing {
+		pageReq.Window = clientui.TranscriptWindowOngoingTail
+	}
+	shouldSyncNativeHistory := pageReq.Window == clientui.TranscriptWindowOngoingTail || pageReq == (clientui.TranscriptPageRequest{})
+	if pageReq.Window == clientui.TranscriptWindowOngoingTail || (pageReq == (clientui.TranscriptPageRequest{}) && m.view.Mode() != tui.ModeDetail) {
+		entries := transcriptEntriesFromPage(page)
+		m.transcriptEntries = append(m.transcriptEntries[:0], entries...)
+		m.seedPromptHistoryFromTranscriptEntries(m.transcriptEntries)
+		m.refreshRollbackCandidates()
+		m.detailTranscript.syncTail(page)
+		if m.view.Mode() != tui.ModeDetail {
+			m.forwardToView(tui.ClearStreamingReasoningMsg{})
+			m.forwardToView(tui.SetConversationMsg{
+				BaseOffset:   page.Offset,
+				TotalEntries: page.TotalEntries,
+				Entries:      entries,
+				Ongoing:      page.Ongoing,
+				OngoingError: page.OngoingError,
+			})
+		}
+	} else {
+		if m.view.Mode() == tui.ModeDetail && m.detailTranscript.matchesPage(page) {
+			if previousWindowTitle != m.windowTitle() {
+				return tea.SetWindowTitle(m.windowTitle())
+			}
+			return nil
+		}
+		m.detailTranscript.apply(page)
+		detailPage := m.detailTranscript.page()
+		detailPage.SessionID = page.SessionID
+		detailPage.SessionName = page.SessionName
+		detailPage.ConversationFreshness = page.ConversationFreshness
+		detailPage.Revision = page.Revision
+		if m.view.Mode() == tui.ModeDetail {
+			m.forwardToView(tui.ClearStreamingReasoningMsg{})
+			m.forwardToView(tui.SetConversationMsg{
+				BaseOffset:   detailPage.Offset,
+				TotalEntries: detailPage.TotalEntries,
+				Entries:      transcriptEntriesFromPage(detailPage),
+				Ongoing:      detailPage.Ongoing,
+				OngoingError: detailPage.OngoingError,
+			})
+		}
+	}
 	if m.view.Mode() == tui.ModeOngoing {
 		m.forwardToView(tui.SetOngoingScrollMsg{Scroll: m.view.OngoingScroll()})
 	}
 	if strings.TrimSpace(page.Ongoing) == "" {
 		m.sawAssistantDelta = false
 	}
-	cmds := []tea.Cmd{m.syncNativeHistoryFromTranscript()}
+	cmds := make([]tea.Cmd, 0, 2)
+	if shouldSyncNativeHistory {
+		cmds = append(cmds, m.syncNativeHistoryFromTranscript())
+	}
 	if previousWindowTitle != m.windowTitle() {
 		cmds = append(cmds, tea.SetWindowTitle(m.windowTitle()))
 	}
 	return sequenceCmds(cmds...)
 }
 
-func mergeTranscriptPageEntries(existing []tui.TranscriptEntry, page clientui.TranscriptPage) []tui.TranscriptEntry {
-	incoming := transcriptEntriesFromPage(page)
-	if transcriptPageIsComplete(page) {
-		return incoming
-	}
-	if len(existing) == 0 {
-		return incoming
-	}
-	if page.Offset < 0 || page.Offset > len(existing) {
-		return incoming
-	}
-	merged := append([]tui.TranscriptEntry(nil), existing...)
-	requiredLen := page.Offset + len(incoming)
-	if page.TotalEntries > 0 && page.TotalEntries < len(merged) {
-		merged = merged[:page.TotalEntries]
-	}
-	if requiredLen > len(merged) {
-		merged = append(merged, make([]tui.TranscriptEntry, requiredLen-len(merged))...)
-	}
-	copy(merged[page.Offset:], incoming)
-	if page.TotalEntries > 0 {
-		if page.TotalEntries < len(merged) {
-			merged = merged[:page.TotalEntries]
-		}
-		if page.TotalEntries > len(merged) {
-			return incoming
-		}
-	}
-	return merged
-}
-
-func transcriptPageIsComplete(page clientui.TranscriptPage) bool {
-	if page.Offset != 0 {
-		return false
-	}
-	if page.HasMore {
-		return false
-	}
-	if page.TotalEntries == 0 {
-		return true
-	}
-	return len(page.Entries) >= page.TotalEntries
-}
-
 func transcriptEntriesFromPage(page clientui.TranscriptPage) []tui.TranscriptEntry {
 	entries := make([]tui.TranscriptEntry, 0, len(page.Entries))
 	for _, entry := range page.Entries {
-		entries = append(entries, tui.TranscriptEntry{
-			Role:        entry.Role,
-			Text:        entry.Text,
-			OngoingText: entry.OngoingText,
-			Phase:       llm.MessagePhase(entry.Phase),
-			ToolCallID:  entry.ToolCallID,
-			ToolCall:    transcriptToolCallMeta(entry.ToolCall),
-		})
+		entries = append(entries, transcriptEntryFromChatEntry(entry))
 	}
 	return entries
+}
+
+func transcriptEntryFromChatEntry(entry clientui.ChatEntry) tui.TranscriptEntry {
+	return tui.TranscriptEntry{
+		Role:        entry.Role,
+		Text:        entry.Text,
+		OngoingText: entry.OngoingText,
+		Phase:       llm.MessagePhase(entry.Phase),
+		ToolCallID:  entry.ToolCallID,
+		ToolCall:    transcriptToolCallMeta(entry.ToolCall),
+	}
+}
+
+func cloneChatEntries(entries []clientui.ChatEntry) []clientui.ChatEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	cloned := make([]clientui.ChatEntry, 0, len(entries))
+	for _, entry := range entries {
+		copyEntry := entry
+		copyEntry.ToolCallID = strings.TrimSpace(copyEntry.ToolCallID)
+		copyEntry.ToolCall = transcriptToolCallMetaClient(transcriptToolCallMeta(entry.ToolCall))
+		cloned = append(cloned, copyEntry)
+	}
+	return cloned
+}
+
+func trimProjectedTranscriptOverlap(existing []tui.TranscriptEntry, incoming []clientui.ChatEntry) []clientui.ChatEntry {
+	if len(existing) == 0 || len(incoming) == 0 {
+		return incoming
+	}
+	maxOverlap := min(len(existing), len(incoming))
+	for overlap := maxOverlap; overlap > 0; overlap-- {
+		if transcriptSuffixMatchesEntries(existing[len(existing)-overlap:], incoming[:overlap]) {
+			return cloneChatEntries(incoming[overlap:])
+		}
+	}
+	return incoming
+}
+
+func transcriptSuffixMatchesEntries(existing []tui.TranscriptEntry, incoming []clientui.ChatEntry) bool {
+	if len(existing) != len(incoming) {
+		return false
+	}
+	for i := range existing {
+		if !transcriptEntryMatchesChatEntry(existing[i], incoming[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func transcriptEntryMatchesChatEntry(existing tui.TranscriptEntry, incoming clientui.ChatEntry) bool {
+	return existing.Role == incoming.Role &&
+		existing.Text == incoming.Text &&
+		existing.OngoingText == incoming.OngoingText &&
+		existing.Phase == llm.MessagePhase(incoming.Phase) &&
+		strings.TrimSpace(existing.ToolCallID) == strings.TrimSpace(incoming.ToolCallID)
 }
 
 func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {
@@ -262,7 +382,19 @@ func waitRuntimeEvent(ch <-chan clientui.Event) tea.Cmd {
 		if !ok {
 			return nil
 		}
-		return runtimeEventMsg{event: evt}
+		events := []clientui.Event{evt}
+		for len(events) < 64 {
+			select {
+			case next, ok := <-ch:
+				if !ok {
+					return runtimeEventBatchMsg{events: events}
+				}
+				events = append(events, next)
+			default:
+				return runtimeEventBatchMsg{events: events}
+			}
+		}
+		return runtimeEventBatchMsg{events: events}
 	}
 }
 
@@ -310,6 +442,42 @@ func transcriptToolCallMeta(meta *clientui.ToolCallMeta) *transcript.ToolCallMet
 	if meta.RenderHint != nil {
 		out.RenderHint = &transcript.ToolRenderHint{
 			Kind:       transcript.ToolRenderKind(meta.RenderHint.Kind),
+			Path:       meta.RenderHint.Path,
+			ResultOnly: meta.RenderHint.ResultOnly,
+		}
+	}
+	if meta.PatchRender != nil {
+		out.PatchRender = cloneRenderedPatch(meta.PatchRender)
+	}
+	return out
+}
+
+func transcriptToolCallMetaClient(meta *transcript.ToolCallMeta) *clientui.ToolCallMeta {
+	if meta == nil {
+		return nil
+	}
+	out := &clientui.ToolCallMeta{
+		ToolName:               meta.ToolName,
+		Presentation:           clientui.ToolPresentationKind(meta.Presentation),
+		RenderBehavior:         clientui.ToolCallRenderBehavior(meta.RenderBehavior),
+		IsShell:                meta.IsShell,
+		UserInitiated:          meta.UserInitiated,
+		Command:                meta.Command,
+		CompactText:            meta.CompactText,
+		InlineMeta:             meta.InlineMeta,
+		TimeoutLabel:           meta.TimeoutLabel,
+		PatchSummary:           meta.PatchSummary,
+		PatchDetail:            meta.PatchDetail,
+		Question:               meta.Question,
+		RecommendedOptionIndex: meta.RecommendedOptionIndex,
+		OmitSuccessfulResult:   meta.OmitSuccessfulResult,
+	}
+	if len(meta.Suggestions) > 0 {
+		out.Suggestions = append([]string(nil), meta.Suggestions...)
+	}
+	if meta.RenderHint != nil {
+		out.RenderHint = &clientui.ToolRenderHint{
+			Kind:       clientui.ToolRenderKind(meta.RenderHint.Kind),
 			Path:       meta.RenderHint.Path,
 			ResultOnly: meta.RenderHint.ResultOnly,
 		}

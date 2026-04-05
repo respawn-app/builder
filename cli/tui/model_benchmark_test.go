@@ -44,6 +44,26 @@ func BenchmarkToggleModeReopenDetailSnapshot(b *testing.B) {
 	}
 }
 
+func BenchmarkDetailFirstScrollFromLazyEntry(b *testing.B) {
+	entries := benchmarkDetailEntries(600)
+	model := NewModel(WithTheme("dark"))
+	next, _ := model.Update(SetViewportSizeMsg{Lines: 40, Width: 120})
+	model = next.(Model)
+	next, _ = model.Update(SetConversationMsg{Entries: entries})
+	model = next.(Model)
+	next, _ = model.Update(ToggleModeMsg{})
+	model = next.(Model)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		local := model
+		next, _ := local.Update(tea.KeyMsg{Type: tea.KeyUp})
+		local = next.(Model)
+		_ = local.View()
+	}
+}
+
 func BenchmarkDetailScrollStep(b *testing.B) {
 	entries := benchmarkDetailEntries(600)
 	model := NewModel(WithTheme("dark"))
