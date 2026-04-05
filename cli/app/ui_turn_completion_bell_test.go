@@ -1,9 +1,15 @@
 package app
 
 import (
+	"errors"
 	"testing"
 
+	"builder/server/runtime"
+	"builder/server/session"
+	"builder/server/tools"
 	"builder/shared/clientui"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestSubmitDoneDefersTurnCompletionBellUntilQueuedTurnsFinish(t *testing.T) {
@@ -49,5 +55,47 @@ func TestSubmitDoneDefersTurnCompletionBellUntilQueuedTurnsFinish(t *testing.T) 
 	}
 	if updated.busy {
 		t.Fatal("expected UI idle after queued turns drain")
+	}
+}
+
+func TestPreSubmitCheckErrorAbortsPendingTurnCompletionBell(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, &runtimeAdapterFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	ringer := &countRinger{}
+	bells := newBellHooks(ringer, nil)
+	m := newProjectedEngineUIModel(eng, WithUITurnQueueHook(bells))
+
+	next, _ := m.Update(runtimeEventMsg{event: clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"}})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(runtimeEventMsg{event: clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1"}})
+	updated = next.(*uiModel)
+	next, _ = updated.Update(runtimeEventMsg{event: clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "first"}}}})
+	updated = next.(*uiModel)
+
+	updated.input = "continue"
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+
+	next, _ = updated.Update(preSubmitCompactionCheckDoneMsg{
+		token: updated.preSubmitCheckToken,
+		text:  "continue",
+		err:   errors.New("pre-submit failed"),
+	})
+	updated = next.(*uiModel)
+	if updated.activity != uiActivityError {
+		t.Fatalf("expected error activity after pre-submit check failure, got %v", updated.activity)
+	}
+
+	bells.OnTurnQueueDrained()
+	if got := ringer.Count(); got != 0 {
+		t.Fatalf("ring count = %d after pre-submit check abort, want 0", got)
 	}
 }
