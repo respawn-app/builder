@@ -89,7 +89,9 @@ func (b *defaultBackgroundNoticeScheduler) QueueDeveloperNotice(msg llm.Message)
 	}
 	b.mu.Unlock()
 	if shouldSchedule {
-		go b.processQueuedNotices(context.Background())
+		if !b.engine.launchLifecycleTask(b.processQueuedNotices) {
+			b.clearScheduled()
+		}
 	}
 }
 
@@ -148,7 +150,9 @@ func (b *defaultBackgroundNoticeScheduler) ScheduleIfIdle() {
 	}
 	b.mu.Unlock()
 	if shouldSchedule {
-		go b.processQueuedNotices(context.Background())
+		if !b.engine.launchLifecycleTask(b.processQueuedNotices) {
+			b.clearScheduled()
+		}
 	}
 }
 
@@ -174,6 +178,9 @@ func harvestedBackgroundCompletionSessionID(res tools.Result) (string, bool) {
 
 func (b *defaultBackgroundNoticeScheduler) processQueuedNotices(ctx context.Context) {
 	if _, err := b.runQueuedNotices(ctx); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return
+		}
 		b.engine.AppendLocalEntry("error", fmt.Sprintf("background continuation failed: %v", err))
 	}
 }

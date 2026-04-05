@@ -140,6 +140,7 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 			if s.backgroundRouter != nil {
 				s.backgroundRouter.ClearActiveSession(sessionID)
 			}
+			_ = wiring.Close()
 			_ = logger.Close()
 		},
 	}

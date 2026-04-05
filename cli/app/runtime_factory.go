@@ -146,7 +146,10 @@ func newRuntimeWiringWithBackground(store *session.Store, active config.Settings
 }
 
 func (w *runtimeWiring) Close() error {
-	return nil
+	if w == nil || w.engine == nil {
+		return nil
+	}
+	return w.engine.Close()
 }
 
 func configSourceLines(src config.SourceReport) []string {

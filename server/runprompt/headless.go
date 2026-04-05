@@ -159,6 +159,7 @@ func (l *headlessPromptLauncher) prepareRuntime(plan launch.SessionPlan, progres
 			if l.boot.BackgroundRouter != nil {
 				l.boot.BackgroundRouter.ClearActiveSession(plan.Store.Meta().SessionID)
 			}
+			_ = wiring.Close()
 			_ = logger.Close()
 		},
 	}, nil

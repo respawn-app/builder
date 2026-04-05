@@ -23,6 +23,13 @@ type RuntimeWiring struct {
 	PromptHistory []string
 }
 
+func (w *RuntimeWiring) Close() error {
+	if w == nil || w.Engine == nil {
+		return nil
+	}
+	return w.Engine.Close()
+}
+
 type RuntimeWiringOptions struct {
 	OnEvent  func(evt runtime.Event)
 	Headless bool
