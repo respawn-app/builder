@@ -22,7 +22,6 @@ type PersistedTranscriptScan struct {
 	projector *TranscriptProjector
 
 	materialized             bool
-	fullSnapshot             ChatSnapshot
 	collectedPage            ChatSnapshot
 	totalEntries             int
 	ongoingTail              TranscriptWindowSnapshot
@@ -96,10 +95,9 @@ func (s *PersistedTranscriptScan) materialize() {
 	if s == nil || s.materialized {
 		return
 	}
-	full := s.projector.ChatSnapshot()
-	s.fullSnapshot = ChatSnapshot{Entries: clonePersistedChatEntries(full.Entries)}
-	s.totalEntries = len(s.fullSnapshot.Entries)
-	s.collectedPage = ChatSnapshot{Entries: persistedTranscriptPageEntries(s.fullSnapshot.Entries, s.request.Offset, s.request.Limit)}
+	page := s.projector.TranscriptPageSnapshot(s.request.Offset, s.request.Limit)
+	s.totalEntries = s.projector.CommittedEntryCount()
+	s.collectedPage = ChatSnapshot{Entries: clonePersistedChatEntries(page.Snapshot.Entries)}
 	s.lastCommittedFinalAnswer = s.projector.LastCommittedAssistantFinalAnswer()
 	if s.request.TrackOngoingTail && s.request.TailLimit > 0 {
 		tail := s.projector.OngoingTailSnapshot(s.request.TailLimit)
@@ -112,20 +110,6 @@ func (s *PersistedTranscriptScan) materialize() {
 		s.ongoingTail = TranscriptWindowSnapshot{}
 	}
 	s.materialized = true
-}
-
-func persistedTranscriptPageEntries(entries []ChatEntry, offset, limit int) []ChatEntry {
-	if offset < 0 {
-		offset = 0
-	}
-	if offset >= len(entries) {
-		return nil
-	}
-	end := len(entries)
-	if limit > 0 && offset+limit < end {
-		end = offset + limit
-	}
-	return clonePersistedChatEntries(entries[offset:end])
 }
 
 func clonePersistedChatEntries(entries []ChatEntry) []ChatEntry {

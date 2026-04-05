@@ -201,6 +201,33 @@ func TestChatStoreTranscriptPageSnapshotCollectsRequestedWindow(t *testing.T) {
 	}
 }
 
+func TestChatStoreTranscriptPageSnapshotSynthesizesCompletedToolResultBeforeToolMessage(t *testing.T) {
+	s := newChatStore()
+	s.appendMessage(llm.Message{
+		Role:    llm.RoleAssistant,
+		Content: "working",
+		ToolCalls: []llm.ToolCall{
+			{ID: "call_b", Name: "shell", Input: json.RawMessage(`{"command":"pwd"}`)},
+		},
+	})
+	s.recordToolCompletion(tools.Result{
+		CallID: "call_b",
+		Name:   tools.ToolShell,
+		Output: json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`),
+	})
+
+	page := s.transcriptPageSnapshot(0, 0)
+	if page.TotalEntries != 3 {
+		t.Fatalf("total entries = %d, want 3", page.TotalEntries)
+	}
+	if len(page.Snapshot.Entries) != 3 {
+		t.Fatalf("entries = %d, want 3 (%+v)", len(page.Snapshot.Entries), page.Snapshot.Entries)
+	}
+	if page.Snapshot.Entries[2].Role != "tool_result_ok" || page.Snapshot.Entries[2].ToolCallID != "call_b" || strings.TrimSpace(page.Snapshot.Entries[2].Text) != "/tmp" {
+		t.Fatalf("expected synthesized completed tool result for call_b, got %+v", page.Snapshot.Entries[2])
+	}
+}
+
 func TestFormatToolOutputPreservesNumberedPrefixes(t *testing.T) {
 	out := tools.FormatGenericOutput(json.RawMessage(`{"output":"  1\talpha\n  2\tbeta\n  3\tgamma","exit_code":0}`))
 	if !strings.Contains(out, "1\talpha") || !strings.Contains(out, "2\tbeta") || !strings.Contains(out, "3\tgamma") {
