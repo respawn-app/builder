@@ -1977,6 +1977,145 @@ func TestSubmitUserMessageCommentaryWithoutToolsNonOpenAIRemainsTerminal(t *test
 	}
 }
 
+func TestSubmitUserMessageCommentaryWithoutToolsEmitsRealtimeAssistantEvent(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "progress update",
+				Phase:   llm.MessagePhaseCommentary,
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "done",
+				Phase:   llm.MessagePhaseFinal,
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	var (
+		mu     sync.Mutex
+		events []Event
+	)
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			defer mu.Unlock()
+			events = append(events, evt)
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do the task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if len(client.calls) != 2 {
+		t.Fatalf("expected 2 model calls, got %d", len(client.calls))
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	assistantContents := make([]string, 0, 2)
+	for _, evt := range events {
+		if evt.Kind != EventAssistantMessage {
+			continue
+		}
+		assistantContents = append(assistantContents, evt.Message.Content)
+	}
+	if len(assistantContents) != 2 || assistantContents[0] != "progress update" || assistantContents[1] != "done" {
+		t.Fatalf("assistant realtime events = %+v, want [progress update done]", assistantContents)
+	}
+}
+
+func TestSubmitUserMessageCommentaryWithToolCallsEmitsRealtimeAssistantEventWithoutDuplicateToolCalls(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "working",
+				Phase:   llm.MessagePhaseCommentary,
+			},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "done",
+				Phase:   llm.MessagePhaseFinal,
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	var (
+		mu     sync.Mutex
+		events []Event
+	)
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			defer mu.Unlock()
+			events = append(events, evt)
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do the task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	assistantContents := make([]string, 0, 2)
+	commentaryToolCalls := -1
+	for _, evt := range events {
+		if evt.Kind != EventAssistantMessage {
+			continue
+		}
+		assistantContents = append(assistantContents, evt.Message.Content)
+		if evt.Message.Content == "working" {
+			commentaryToolCalls = len(evt.Message.ToolCalls)
+		}
+	}
+	if len(assistantContents) != 2 || assistantContents[0] != "working" || assistantContents[1] != "done" {
+		t.Fatalf("assistant realtime events = %+v, want [working done]", assistantContents)
+	}
+	if commentaryToolCalls != 0 {
+		t.Fatalf("expected commentary assistant event to omit tool calls, got %d", commentaryToolCalls)
+	}
+}
+
 func TestSubmitUserMessageLegacyGarbageTokenRemainsTerminal(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -3929,18 +4068,15 @@ func TestDeferredFinalWithBackgroundNoticeStillRunsReviewerAndEmitsAssistantEven
 
 	mu.Lock()
 	defer mu.Unlock()
-	assistantMessages := 0
+	assistantContents := make([]string, 0, 2)
 	for _, evt := range events {
 		if evt.Kind != EventAssistantMessage {
 			continue
 		}
-		assistantMessages++
-		if evt.Message.Content != "foreground done" {
-			t.Fatalf("assistant message content = %q, want foreground done", evt.Message.Content)
-		}
+		assistantContents = append(assistantContents, evt.Message.Content)
 	}
-	if assistantMessages != 1 {
-		t.Fatalf("expected one assistant_message event for deferred final, got %d events=%+v", assistantMessages, events)
+	if len(assistantContents) != 2 || assistantContents[0] != "working" || assistantContents[1] != "foreground done" {
+		t.Fatalf("assistant message contents = %+v, want [working foreground done] events=%+v", assistantContents, events)
 	}
 }
 
@@ -4219,14 +4355,14 @@ func TestBackgroundShellNoticeSameTurnNoopAddsNoAssistantMessage(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	assistantEvents := 0
+	assistantContents := make([]string, 0, 1)
 	for _, evt := range events {
 		if evt.Kind == EventAssistantMessage {
-			assistantEvents++
+			assistantContents = append(assistantContents, evt.Message.Content)
 		}
 	}
-	if assistantEvents != 0 {
-		t.Fatalf("expected no assistant_message events for same-turn noop background notice, got %d events=%+v", assistantEvents, events)
+	if len(assistantContents) != 1 || assistantContents[0] != "working" {
+		t.Fatalf("assistant message contents = %+v, want [working] events=%+v", assistantContents, events)
 	}
 }
 
@@ -5856,7 +5992,7 @@ func TestBrokenSymlinkedSkillsAreSkippedAndWarnedInTranscript(t *testing.T) {
 	snapshot := eng.ChatSnapshot()
 	foundWarning := false
 	for _, entry := range snapshot.Entries {
-		if entry.Role != "error" {
+		if entry.Role != string(transcript.EntryRoleDeveloperFeedback) {
 			continue
 		}
 		if strings.Contains(entry.Text, "Skipped skill \"broken-skill\"") && strings.Contains(entry.Text, filepath.ToSlash(brokenLinkPath)) {

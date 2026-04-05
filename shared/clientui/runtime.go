@@ -80,6 +80,7 @@ type RuntimeClient interface {
 	RefreshMainView() (RuntimeMainView, error)
 	Transcript() TranscriptPage
 	RefreshTranscript() (TranscriptPage, error)
+	RefreshTranscriptPage(req TranscriptPageRequest) (TranscriptPage, error)
 	LoadTranscriptPage(req TranscriptPageRequest) (TranscriptPage, error)
 	Status() RuntimeStatus
 	SessionView() RuntimeSessionView

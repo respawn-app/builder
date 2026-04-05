@@ -211,6 +211,7 @@ func (m *Model) reduceAppendTranscriptMsg(msg AppendTranscriptMsg, result *model
 }
 
 func (m *Model) reduceSetConversationMsg(msg SetConversationMsg, result *modelUpdateResult) {
+	anchorEntry, anchorOffset, preserveAnchor := m.detailViewportAnchor()
 	entries := make([]TranscriptEntry, len(msg.Entries))
 	copy(entries, msg.Entries)
 	for i := range entries {
@@ -235,7 +236,40 @@ func (m *Model) reduceSetConversationMsg(msg SetConversationMsg, result *modelUp
 	result.autoFollowOngoing = true
 	result.ongoingBaseChanged = true
 	result.ongoingChanged = true
-	result.detailChanged = true
+	if m.mode != ModeDetail {
+		result.detailChanged = true
+		return
+	}
+	m.invalidateDetailSnapshot()
+	m.rebuildDetailSnapshot()
+	if preserveAnchor {
+		if start, _, ok := m.detailLineRangeForEntry(anchorEntry); ok {
+			m.detailScroll = clamp(start+anchorOffset, 0, m.maxDetailScroll())
+			m.detailBottomAnchor = false
+			m.detailBottomOffset = 0
+			m.refreshDetailViewport()
+		}
+	}
+}
+
+func (m *Model) detailViewportAnchor() (int, int, bool) {
+	if m == nil || m.mode != ModeDetail || m.detailBottomAnchor {
+		return 0, 0, false
+	}
+	if m.detailDirty {
+		m.rebuildDetailSnapshot()
+	}
+	for _, entryIndex := range m.detailLineEntryIndices {
+		if entryIndex < 0 {
+			continue
+		}
+		start, _, ok := m.detailLineRangeForEntry(entryIndex)
+		if !ok {
+			return 0, 0, false
+		}
+		return entryIndex, max(0, m.detailScroll-start), true
+	}
+	return 0, 0, false
 }
 
 func (m *Model) reduceSetSelectedTranscriptEntryMsg(msg SetSelectedTranscriptEntryMsg, result *modelUpdateResult) {

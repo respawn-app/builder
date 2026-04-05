@@ -22,6 +22,9 @@ func (s *stubRuntimeClient) Transcript() clientui.TranscriptPage { return client
 func (s *stubRuntimeClient) RefreshTranscript() (clientui.TranscriptPage, error) {
 	return clientui.TranscriptPage{}, nil
 }
+func (s *stubRuntimeClient) RefreshTranscriptPage(clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	return clientui.TranscriptPage{}, nil
+}
 func (s *stubRuntimeClient) LoadTranscriptPage(clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
 	return clientui.TranscriptPage{}, nil
 }

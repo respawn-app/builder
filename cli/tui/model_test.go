@@ -919,20 +919,95 @@ func TestDetailRefreshesForLiveStreamingReasoning(t *testing.T) {
 func TestCompactionNoticeAndSummaryRenderingByMode(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "compaction_notice", Text: "context compacted for the 1st time"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: "compaction_summary", Text: "line one\nline two"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "compaction_summary", Text: "line one\nline two", OngoingText: "line one\n…"})
 
 	ongoing := plainTranscript(m.View())
 	if !containsInOrder(ongoing, "@", "context compacted for the 1st time") {
 		t.Fatalf("expected compaction notice in ongoing view, got %q", ongoing)
 	}
-	if strings.Contains(ongoing, "line one") || strings.Contains(ongoing, "line two") {
-		t.Fatalf("expected compaction summary hidden in ongoing view, got %q", ongoing)
+	if !strings.Contains(ongoing, "line one") || !strings.Contains(ongoing, "…") || strings.Contains(ongoing, "line two") {
+		t.Fatalf("expected collapsed compaction summary in ongoing view, got %q", ongoing)
 	}
 
 	m = updateModel(t, m, ToggleModeMsg{})
 	detail := plainTranscript(m.View())
 	if !containsInOrder(detail, "@", "context compacted for the 1st time", "@", "line one", "line two") {
 		t.Fatalf("expected compaction notice and full summary in detail view, got %q", detail)
+	}
+}
+
+func TestDeveloperContextRendersDetailOnly(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: roleDeveloperContext, Text: "AGENTS context block"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "done"})
+
+	ongoing := plainTranscript(m.View())
+	if strings.Contains(ongoing, "AGENTS context block") {
+		t.Fatalf("expected developer context hidden in ongoing view, got %q", ongoing)
+	}
+	if !strings.Contains(ongoing, "done") {
+		t.Fatalf("expected assistant visible in ongoing view, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detail := plainTranscript(m.View())
+	if !containsInOrder(detail, "AGENTS context block", "❮", "done") {
+		t.Fatalf("expected developer context visible in detail view, got %q", detail)
+	}
+}
+
+func TestDeveloperFeedbackAndInterruptionRenderInOngoing(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: roleDeveloperFeedback, Text: "phase mismatch warning"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: roleInterruption, Text: "Interrupted by user."})
+
+	ongoing := plainTranscript(m.View())
+	if !containsInOrder(ongoing, "phase mismatch warning", "Interrupted by user.") {
+		t.Fatalf("expected ongoing-visible developer feedback and interruption, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detail := plainTranscript(m.View())
+	if !containsInOrder(detail, "phase mismatch warning", "Interrupted by user.") {
+		t.Fatalf("expected developer feedback and interruption visible in detail view, got %q", detail)
+	}
+}
+
+func TestCompactionSoonReminderRendersDetailOnly(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "warning", Text: "Compaction soon: 92% of context window used."})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "done"})
+
+	ongoing := plainTranscript(m.View())
+	if strings.Contains(ongoing, "Compaction soon") {
+		t.Fatalf("expected compaction soon reminder hidden in ongoing view, got %q", ongoing)
+	}
+	if !strings.Contains(ongoing, "done") {
+		t.Fatalf("expected assistant visible in ongoing view, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detail := plainTranscript(m.View())
+	if !containsInOrder(detail, "Compaction soon: 92% of context window used.", "❮", "done") {
+		t.Fatalf("expected compaction soon reminder visible in detail view, got %q", detail)
+	}
+}
+
+func TestHeadlessModeContextVariantsRenderDetailOnly(t *testing.T) {
+	m := NewModel(WithPreviewLines(30))
+	m = updateModel(t, m, AppendTranscriptMsg{Role: roleDeveloperContext, Text: "headless mode instructions"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: roleDeveloperContext, Text: "interactive mode instructions"})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "done"})
+
+	ongoing := plainTranscript(m.View())
+	if strings.Contains(ongoing, "headless mode instructions") || strings.Contains(ongoing, "interactive mode instructions") {
+		t.Fatalf("expected headless context variants hidden in ongoing view, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detail := plainTranscript(m.View())
+	if !containsInOrder(detail, "headless mode instructions", "interactive mode instructions", "❮", "done") {
+		t.Fatalf("expected headless context variants visible in detail view, got %q", detail)
 	}
 }
 

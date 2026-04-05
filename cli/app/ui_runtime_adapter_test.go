@@ -65,6 +65,10 @@ func (c *startupTranscriptRuntimeClient) LoadTranscriptPage(req clientui.Transcr
 	return c.page, nil
 }
 
+func (c *startupTranscriptRuntimeClient) RefreshTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	return c.LoadTranscriptPage(req)
+}
+
 func (f *refreshingRuntimeClient) MainView() clientui.RuntimeMainView {
 	if f.calls == 0 {
 		return clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1"}}
@@ -122,6 +126,10 @@ func (f *refreshingRuntimeClient) RefreshTranscript() (clientui.TranscriptPage, 
 func (f *refreshingRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
 	_ = req
 	return f.RefreshTranscript()
+}
+
+func (f *refreshingRuntimeClient) RefreshTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	return f.LoadTranscriptPage(req)
 }
 
 func (f *runtimeAdapterFakeClient) Generate(context.Context, llm.Request) (llm.Response, error) {

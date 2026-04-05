@@ -67,6 +67,38 @@ func compactReviewerSuggestionsForOngoing(text string) string {
 	return strings.TrimSpace(text)
 }
 
+func compactCompactionSummaryForOngoing(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return ""
+	}
+	normalized := strings.ReplaceAll(trimmed, "\r\n", "\n")
+	lines := strings.Split(normalized, "\n")
+	first := ""
+	remaining := false
+	for idx, line := range lines {
+		candidate := strings.TrimSpace(line)
+		if candidate == "" {
+			continue
+		}
+		first = candidate
+		for _, tail := range lines[idx+1:] {
+			if strings.TrimSpace(tail) != "" {
+				remaining = true
+				break
+			}
+		}
+		break
+	}
+	if first == "" {
+		return ""
+	}
+	if remaining {
+		return first + "\n…"
+	}
+	return first
+}
+
 func askQuestionDisplay(meta *transcript.ToolCallMeta, text string) (string, []string, int) {
 	_ = text
 	question := ""

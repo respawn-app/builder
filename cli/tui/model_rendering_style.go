@@ -119,7 +119,7 @@ func (m Model) roleSymbol(role string) string {
 	switch role {
 	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error", "tool_question", "tool_question_error", "tool_web_search", "tool_web_search_success", "tool_web_search_error":
 		return styleForRole(role, m.palette()).Render(prefix)
-	case "error", "warning":
+	case "error", "warning", roleDeveloperFeedback, roleInterruption:
 		return styleForRole(role, m.palette()).Render(prefix)
 	case "reviewer_status", "reviewer_suggestions":
 		return styleForRole(role, m.palette()).Render(prefix)
@@ -154,6 +154,10 @@ func rolePrefix(role string) string {
 		return "!"
 	case "warning":
 		return "⚠"
+	case roleDeveloperFeedback:
+		return "!"
+	case roleInterruption:
+		return "!"
 	default:
 		return ""
 	}
@@ -203,6 +207,12 @@ func styleForRole(role string, p palette) lipgloss.Style {
 		return p.toolError
 	case "system":
 		return p.system
+	case roleDeveloperContext:
+		return p.preview
+	case roleDeveloperFeedback:
+		return p.warning
+	case roleInterruption:
+		return p.warning
 	case "reasoning", "thinking_trace":
 		return p.system
 	case "error":

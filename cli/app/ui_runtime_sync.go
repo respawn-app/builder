@@ -52,6 +52,10 @@ func (m *uiModel) startRuntimeTranscriptPageRequest(request clientui.TranscriptP
 	m.runtimeTranscriptToken++
 	token := m.runtimeTranscriptToken
 	client := m.runtimeClient()
+	if client == nil {
+		m.runtimeTranscriptBusy = false
+		return nil
+	}
 	m.logf("ui.runtime.transcript.start token=%d", token)
 	fields := map[string]string{
 		"session_id":            m.sessionID,
@@ -67,7 +71,15 @@ func (m *uiModel) startRuntimeTranscriptPageRequest(request clientui.TranscriptP
 	}
 	m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.hydrate_start", fields))
 	return func() tea.Msg {
-		transcript, err := client.LoadTranscriptPage(request)
+		var (
+			transcript clientui.TranscriptPage
+			err        error
+		)
+		if allowDuplicateSkip {
+			transcript, err = client.LoadTranscriptPage(request)
+		} else {
+			transcript, err = client.RefreshTranscriptPage(request)
+		}
 		return runtimeTranscriptRefreshedMsg{token: token, req: request, transcript: transcript, err: err}
 	}
 }

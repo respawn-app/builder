@@ -106,6 +106,10 @@ func (c *staleTranscriptRuntimeClient) LoadTranscriptPage(req clientui.Transcrip
 	return page, nil
 }
 
+func (c *staleTranscriptRuntimeClient) RefreshTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	return c.LoadTranscriptPage(req)
+}
+
 func (c singleChunkStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
 	return llm.Response{}, errors.New("not implemented")
 }
@@ -1124,7 +1128,7 @@ func TestNativeProgramRendersMixedRuntimeEventsFromChannelInRealtime(t *testing.
 			continue
 		}
 		lastNormalized = normalizedOutput(out.String())
-		if strings.Contains(lastNormalized, "pwd") && strings.Contains(lastNormalized, "background shell 1000 completed") {
+		if strings.Contains(lastNormalized, "pwd") && strings.Contains(strings.ToLower(lastNormalized), "background shell 1000 completed") {
 			firstBatchReady = true
 			break
 		}
@@ -1210,7 +1214,7 @@ func TestNativeProgramRendersSingleBackgroundCompletionFromChannelWhileIdle(t *t
 		return len(model.transcriptEntries) == 1 && strings.Contains(model.transcriptEntries[0].Text, "Background shell 1000 completed")
 	})
 	waitForTestCondition(t, 2*time.Second, "single background completion rendered into native output", func() bool {
-		return strings.Contains(normalizedOutput(out.String()), "background shell 1000 completed")
+		return strings.Contains(strings.ToLower(normalizedOutput(out.String())), "background shell 1000 completed")
 	})
 
 	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
@@ -1223,7 +1227,7 @@ func TestNativeProgramRendersSingleBackgroundCompletionFromChannelWhileIdle(t *t
 		t.Fatal("program did not terminate")
 	}
 
-	if normalized := normalizedOutput(out.String()); !containsInOrder(normalized, "background shell 1000 completed") {
+	if normalized := normalizedOutput(out.String()); !containsInOrder(strings.ToLower(normalized), "background shell 1000 completed") {
 		t.Fatalf("expected single background completion visible in terminal output, got %q", normalized)
 	}
 }
@@ -1291,7 +1295,7 @@ func TestNativeProgramRendersBackgroundCompletionFromEmbeddedRuntimeWhileIdle(t 
 		return false
 	})
 	waitForTestCondition(t, 5*time.Second, "embedded background completion rendered into native output", func() bool {
-		return strings.Contains(normalizedOutput(out.String()), "background shell bg-1000 completed")
+		return strings.Contains(strings.ToLower(normalizedOutput(out.String())), "background shell bg-1000 completed")
 	})
 
 	cancelProgram()
@@ -1304,7 +1308,7 @@ func TestNativeProgramRendersBackgroundCompletionFromEmbeddedRuntimeWhileIdle(t 
 		t.Fatal("program did not terminate")
 	}
 
-	if normalized := normalizedOutput(out.String()); !containsInOrder(normalized, "background shell bg-1000 completed") {
+	if normalized := normalizedOutput(out.String()); !containsInOrder(strings.ToLower(normalized), "background shell bg-1000 completed") {
 		t.Fatalf("expected embedded background completion visible in terminal output, got %q", normalized)
 	}
 }

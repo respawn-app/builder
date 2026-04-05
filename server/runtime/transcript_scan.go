@@ -107,9 +107,8 @@ func (s *inMemoryTranscriptScan) visibleEntriesFromMessage(msg llm.Message) []Ch
 	entries := make([]ChatEntry, 0, 1+len(msg.ToolCalls))
 	switch msg.Role {
 	case llm.RoleUser:
-		content := strings.TrimSpace(msg.Content)
-		if content != "" && msg.MessageType != llm.MessageTypeCompactionSummary {
-			entries = append(entries, ChatEntry{Role: "user", Text: msg.Content})
+		if entry, ok := visibleUserTranscriptEntry(msg); ok {
+			entries = append(entries, entry)
 		}
 	case llm.RoleAssistant:
 		if strings.TrimSpace(msg.Content) != "" {
