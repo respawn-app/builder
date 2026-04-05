@@ -99,6 +99,7 @@ If user asks you to fix a github issue and you commit the fix, use 'closes #xx' 
 ## Important rules:
 
 - All business logic covered by tests. Production code is written to be unit-testable.
+- Use red/green TDD when developing new features.
 - Before handing off to the user after code changes, rebuild the binary to `./bin/builder` and make sure tests are written and green. Don't ask for confirmation to write tests and run checks.
 - Run Go tests via `./scripts/test.sh` passing normal go test arguments.
 - Do not run interactive/manual TUI QA unless the user explicitly asks for it. Prefer non-interactive tests, targeted automation, and build verification by default.
@@ -108,3 +109,4 @@ If user asks you to fix a github issue and you commit the fix, use 'closes #xx' 
 - Ongoing normal-buffer transcript history is append-only after startup. Once a line is emitted into scrollback, it is immutable: never retroactively restyle it, rewrite it, clear-and-replay it, or re-emit the full buffer to reflect later tool state.
 - Proactively keep documentation up-to-date on your own when you make UX or other user-facing changes. Example areas that warrant a docs check include setup, startup, config, env variables, slash commands, model providers, etc.
 - Keep this AGENTS.md file up-to-date and comprehensive. Avoid adding info that can become outdated, otherwise keep this as project guidelines, rules, and learnings for future team members. Persist info that should be preserved here.
+- Full transcript history is unbounded & weighs gigabytes, thus no code must ever attempt to load `events.jsonl` fully into memory.
