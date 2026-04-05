@@ -353,6 +353,14 @@ func transcriptRequestCacheKey(req clientui.TranscriptPageRequest) string {
 	}, ":")
 }
 
+func ongoingTailTranscriptRequest() clientui.TranscriptPageRequest {
+	return clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}
+}
+
+func ongoingTailTranscriptCacheKey() string {
+	return transcriptRequestCacheKey(ongoingTailTranscriptRequest())
+}
+
 func (c *sessionRuntimeClient) nextTranscriptPageCacheStampLocked() uint64 {
 	c.transcriptPagesClock++
 	return c.transcriptPagesClock
@@ -362,18 +370,29 @@ func (c *sessionRuntimeClient) evictTranscriptPageCacheLocked() {
 	if c == nil || len(c.transcriptPages) <= uiRuntimeTranscriptPageCacheMaxEntries {
 		return
 	}
+	defaultKey := ongoingTailTranscriptCacheKey()
 	oldestKey := ""
 	oldestStamp := uint64(0)
 	for key, entry := range c.transcriptPages {
+		if key == defaultKey {
+			continue
+		}
 		if oldestKey == "" || entry.lastUsed < oldestStamp {
 			oldestKey = key
 			oldestStamp = entry.lastUsed
 		}
 	}
+	if oldestKey == "" {
+		for key, entry := range c.transcriptPages {
+			if oldestKey == "" || entry.lastUsed < oldestStamp {
+				oldestKey = key
+				oldestStamp = entry.lastUsed
+			}
+		}
+	}
 	if oldestKey != "" {
 		delete(c.transcriptPages, oldestKey)
 	}
-	defaultKey := transcriptRequestCacheKey(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail})
 	if len(c.transcriptPages) > uiRuntimeTranscriptPageCacheMaxEntries {
 		for key := range c.transcriptPages {
 			if key == defaultKey {
@@ -410,7 +429,7 @@ func storeTranscriptFromSessionViewLocked(c *sessionRuntimeClient, view clientui
 	if page.SessionID == "" || (len(page.Entries) == 0 && view.Transcript.CommittedEntryCount > 0) {
 		return
 	}
-	storeTranscriptLocked(c, clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, page)
+	storeTranscriptLocked(c, ongoingTailTranscriptRequest(), page)
 }
 
 func storeTranscriptLocked(c *sessionRuntimeClient, req clientui.TranscriptPageRequest, page clientui.TranscriptPage) {
@@ -424,13 +443,16 @@ func storeTranscriptLocked(c *sessionRuntimeClient, req clientui.TranscriptPageR
 	now := time.Now()
 	c.transcriptPages[transcriptRequestCacheKey(req)] = cachedTranscriptPage{page: page, loadedAt: now, hasContent: true, lastUsed: c.nextTranscriptPageCacheStampLocked()}
 	c.evictTranscriptPageCacheLocked()
-	c.transcript = page
-	c.hasTranscript = true
-	c.lastTranscriptAt = now
 	c.mainView.Session.Transcript = clientui.TranscriptMetadata{
 		Revision:            page.Revision,
 		CommittedEntryCount: page.TotalEntries,
 	}
+	if req.Window != clientui.TranscriptWindowOngoingTail {
+		return
+	}
+	c.transcript = page
+	c.hasTranscript = true
+	c.lastTranscriptAt = now
 	if page.Offset == 0 && !page.HasMore {
 		c.mainView.Session.Chat = clientui.ChatSnapshot{
 			Entries:      cloneTranscriptEntries(page.Entries),

@@ -24,6 +24,7 @@ import (
 type countingSessionViewClient struct {
 	view              clientui.RuntimeMainView
 	page              clientui.TranscriptPage
+	pageForRequest    func(serverapi.SessionTranscriptPageRequest) clientui.TranscriptPage
 	count             atomic.Int32
 	lastTranscriptReq serverapi.SessionTranscriptPageRequest
 }
@@ -37,6 +38,9 @@ func (c *countingSessionViewClient) GetSessionTranscriptPage(ctx context.Context
 	_ = ctx
 	c.lastTranscriptReq = req
 	c.count.Add(1)
+	if c.pageForRequest != nil {
+		return serverapi.SessionTranscriptPageResponse{Transcript: c.pageForRequest(req)}, nil
+	}
 	return serverapi.SessionTranscriptPageResponse{Transcript: c.page}, nil
 }
 
@@ -226,6 +230,46 @@ func TestRuntimeClientRefreshTranscriptBypassesFreshCachedPage(t *testing.T) {
 	}
 }
 
+func TestRuntimeClientLoadTranscriptPageDoesNotReplaceCachedTailTranscript(t *testing.T) {
+	reads := &countingSessionViewClient{
+		pageForRequest: func(req serverapi.SessionTranscriptPageRequest) clientui.TranscriptPage {
+			if req.Window == clientui.TranscriptWindowOngoingTail {
+				return clientui.TranscriptPage{
+					SessionID:    "session-1",
+					Offset:       0,
+					TotalEntries: 500,
+					Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "tail"}},
+				}
+			}
+			return clientui.TranscriptPage{
+				SessionID:    "session-1",
+				Offset:       req.Offset,
+				TotalEntries: 500,
+				Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "paged"}},
+			}
+		},
+	}
+	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil))
+	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, controls)
+
+	if _, err := runtimeClient.RefreshTranscript(); err != nil {
+		t.Fatalf("refresh transcript: %v", err)
+	}
+	if _, err := runtimeClient.LoadTranscriptPage(clientui.TranscriptPageRequest{Offset: 300, Limit: 100}); err != nil {
+		t.Fatalf("load transcript page: %v", err)
+	}
+	page := runtimeClient.Transcript()
+	if page.Offset != 0 {
+		t.Fatalf("tail transcript offset = %d, want 0", page.Offset)
+	}
+	if len(page.Entries) != 1 || page.Entries[0].Text != "tail" {
+		t.Fatalf("tail transcript entries = %+v", page.Entries)
+	}
+	if got := reads.count.Load(); got != 2 {
+		t.Fatalf("session view call count = %d, want 2", got)
+	}
+}
+
 func TestRuntimeClientLoadTranscriptPageEvictsLeastRecentlyUsedRequests(t *testing.T) {
 	reads := &countingSessionViewClient{page: clientui.TranscriptPage{SessionID: "session-1", TotalEntries: 5000}}
 	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil))
@@ -238,6 +282,65 @@ func TestRuntimeClientLoadTranscriptPageEvictsLeastRecentlyUsedRequests(t *testi
 	}
 	if _, err := runtimeClient.LoadTranscriptPage(clientui.TranscriptPageRequest{Offset: 0, Limit: 10}); err != nil {
 		t.Fatalf("reload evicted transcript page: %v", err)
+	}
+	if got, want := reads.count.Load(), int32(uiRuntimeTranscriptPageCacheMaxEntries+2); got != want {
+		t.Fatalf("session view call count = %d, want %d", got, want)
+	}
+}
+
+func TestRuntimeClientLoadTranscriptPageRetainsCachedTailEntryUnderEvictionPressure(t *testing.T) {
+	reads := &countingSessionViewClient{
+		pageForRequest: func(req serverapi.SessionTranscriptPageRequest) clientui.TranscriptPage {
+			if req.Window == clientui.TranscriptWindowOngoingTail {
+				return clientui.TranscriptPage{
+					SessionID:    "session-1",
+					Offset:       490,
+					TotalEntries: 500,
+					Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "tail"}},
+				}
+			}
+			return clientui.TranscriptPage{
+				SessionID:    "session-1",
+				Offset:       req.Offset,
+				TotalEntries: 500,
+				Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "paged"}},
+			}
+		},
+	}
+	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil))
+	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, controls)
+
+	if _, err := runtimeClient.RefreshTranscript(); err != nil {
+		t.Fatalf("refresh transcript: %v", err)
+	}
+	for i := 0; i <= uiRuntimeTranscriptPageCacheMaxEntries; i++ {
+		if _, err := runtimeClient.LoadTranscriptPage(clientui.TranscriptPageRequest{Offset: i * 10, Limit: 10}); err != nil {
+			t.Fatalf("load transcript page %d: %v", i, err)
+		}
+	}
+
+	concrete, ok := runtimeClient.(*sessionRuntimeClient)
+	if !ok {
+		t.Fatalf("runtime client type = %T, want *sessionRuntimeClient", runtimeClient)
+	}
+	tailKey := ongoingTailTranscriptCacheKey()
+	concrete.mu.RLock()
+	_, hasTailKey := concrete.transcriptPages[tailKey]
+	cacheSize := len(concrete.transcriptPages)
+	concrete.mu.RUnlock()
+	if !hasTailKey {
+		t.Fatal("expected ongoing-tail cache entry to survive eviction pressure")
+	}
+	if cacheSize > uiRuntimeTranscriptPageCacheMaxEntries {
+		t.Fatalf("cache size = %d, want <= %d", cacheSize, uiRuntimeTranscriptPageCacheMaxEntries)
+	}
+
+	page := runtimeClient.Transcript()
+	if page.Offset != 490 {
+		t.Fatalf("tail transcript offset = %d, want 490", page.Offset)
+	}
+	if len(page.Entries) != 1 || page.Entries[0].Text != "tail" {
+		t.Fatalf("tail transcript entries = %+v", page.Entries)
 	}
 	if got, want := reads.count.Load(), int32(uiRuntimeTranscriptPageCacheMaxEntries+2); got != want {
 		t.Fatalf("session view call count = %d, want %d", got, want)
