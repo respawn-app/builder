@@ -63,6 +63,7 @@ type Settings struct {
 	TUIAlternateScreen               TUIAlternateScreenPolicy
 	NotificationMethod               string
 	ToolPreambles                    bool
+	CacheInvalidationWarning         bool
 	PriorityRequestMode              bool
 	WebSearch                        string
 	ProviderOverride                 string

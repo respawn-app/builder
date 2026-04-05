@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"builder/server/llm"
+	"builder/shared/cachewarn"
 )
 
 const (
@@ -34,6 +35,12 @@ func (e *Engine) providerCapabilities(ctx context.Context) (llm.ProviderCapabili
 }
 
 func (e *Engine) replaceHistory(stepID, engine string, mode compactionMode, items []llm.ResponseItem) error {
+	reason := cachewarn.ReasonHistoryRewrite
+	if strings.TrimSpace(engine) == "reviewer_rollback" {
+		reason = cachewarn.ReasonReviewerRollback
+	} else if mode == compactionModeAuto || mode == compactionModeManual {
+		reason = cachewarn.ReasonContextCompaction
+	}
 	payload := historyReplacementPayload{
 		Engine: strings.TrimSpace(engine),
 		Mode:   string(mode),
@@ -46,6 +53,9 @@ func (e *Engine) replaceHistory(stepID, engine string, mode compactionMode, item
 	}
 	_, err := e.store.AppendEvent(stepID, "history_replaced", payload)
 	if err == nil {
+		if invalidateErr := e.noteCacheInvalidation(stepID, reason); invalidateErr != nil {
+			return invalidateErr
+		}
 		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
 	}
 	return err

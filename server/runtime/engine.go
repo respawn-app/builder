@@ -95,6 +95,7 @@ type Config struct {
 	Reviewer                      ReviewerConfig
 	HeadlessMode                  bool
 	ToolPreambles                 bool
+	CacheInvalidationWarning      *bool
 	OnEvent                       func(Event)
 }
 
@@ -136,6 +137,7 @@ type Engine struct {
 	pendingInjected []string
 
 	lastUsage llm.Usage
+	cache     *cacheStateTracker
 
 	phaseProtocolResolved bool
 	phaseProtocolEnabled  bool
@@ -195,6 +197,10 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 		enabled := true
 		cfg.AutoCompactionEnabled = &enabled
 	}
+	if cfg.CacheInvalidationWarning == nil {
+		enabled := true
+		cfg.CacheInvalidationWarning = &enabled
+	}
 	if cfg.ContextWindowTokens <= 0 {
 		if meta, ok := llm.LookupModelMetadata(cfg.Model); ok && meta.ContextWindowTokens > 0 {
 			cfg.ContextWindowTokens = meta.ContextWindowTokens
@@ -225,6 +231,7 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 		registry: registry,
 		cfg:      cfg,
 		chat:     newChatStore(),
+		cache:    newCacheStateTracker(),
 	}
 	eng.ensureLifecycle()
 	eng.ensureOrchestrationCollaborators()

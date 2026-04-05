@@ -150,7 +150,6 @@ func (e *Engine) appendMessageWithoutConversationUpdate(stepID string, msg llm.M
 func (e *Engine) clearStreamingAssistantState(stepID string) {
 	e.chat.clearOngoing()
 	e.chat.clearOngoingError()
-	e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
 	e.emit(Event{Kind: EventAssistantDeltaReset, StepID: stepID})
 	e.emit(Event{Kind: EventReasoningDeltaReset, StepID: stepID})
 }

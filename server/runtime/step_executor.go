@@ -6,6 +6,7 @@ import (
 
 	"builder/server/llm"
 	"builder/server/tools"
+	"builder/shared/cachewarn"
 )
 
 type defaultStepExecutor struct {
@@ -36,7 +37,9 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 			ctx,
 			req,
 			func(delta string) {
-				e.chat.appendOngoingDelta(delta)
+				if !isNoopAssistantText(delta) {
+					e.chat.appendOngoingDelta(delta)
+				}
 				e.emit(Event{Kind: EventAssistantDelta, StepID: stepID, AssistantDelta: delta})
 			},
 			func(delta llm.ReasoningSummaryDelta) {
@@ -44,7 +47,6 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 			},
 			func() {
 				e.chat.clearOngoing()
-				e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
 				e.emit(Event{Kind: EventAssistantDeltaReset, StepID: stepID})
 				e.emit(Event{Kind: EventReasoningDeltaReset, StepID: stepID})
 			},
@@ -53,6 +55,9 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 			return llm.Message{}, executedToolCall, false, err
 		}
 		e.setLastUsage(resp.Usage)
+		if err := e.recordCacheState(stepID, cachewarn.ScopePrimary, req, resp.Usage); err != nil {
+			return llm.Message{}, executedToolCall, false, err
+		}
 
 		localToolCalls := append([]llm.ToolCall(nil), resp.ToolCalls...)
 		hostedToolExecutions := hostedToolExecutionsFromOutputItems(resp.OutputItems, tools.DefinitionsFor(e.cfg.EnabledTools))
@@ -83,6 +88,7 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 		}
 
 		if !noopFinalAnswer {
+			e.clearStreamingAssistantState(stepID)
 			if err := e.appendAssistantMessage(stepID, assistantMsg); err != nil {
 				return llm.Message{}, executedToolCall, false, err
 			}

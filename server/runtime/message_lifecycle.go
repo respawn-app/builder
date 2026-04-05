@@ -46,6 +46,10 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 				e.chat.replaceHistory(payload.Items)
 				e.compactionCount++
 			}
+		case cacheStateEventKind, cacheInvalidationEventKind:
+			if err := e.restoreCacheState(evt.Kind, evt.Payload); err != nil {
+				return err
+			}
 		}
 		return nil
 	}); err != nil {

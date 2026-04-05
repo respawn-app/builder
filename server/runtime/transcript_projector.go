@@ -7,16 +7,18 @@ import (
 
 	"builder/server/llm"
 	"builder/server/session"
+	"builder/shared/cachewarn"
 )
 
 // TranscriptProjector reconstructs transcript-visible state from persisted events
 // without needing a full runtime instance.
 type TranscriptProjector struct {
-	chat *chatStore
+	chat  *chatStore
+	cache *cacheStateTracker
 }
 
 func NewTranscriptProjector() *TranscriptProjector {
-	return &TranscriptProjector{chat: newChatStore()}
+	return &TranscriptProjector{chat: newChatStore(), cache: newCacheStateTracker()}
 }
 
 func (p *TranscriptProjector) ApplyPersistedEvent(evt session.Event) error {
@@ -49,6 +51,21 @@ func (p *TranscriptProjector) ApplyPersistedEvent(evt session.Event) error {
 			p.chat.restoreHistoryItems(payload.Items)
 		} else {
 			p.chat.replaceHistory(payload.Items)
+		}
+	case cacheStateEventKind:
+		var state cachewarn.StateEvent
+		if err := json.Unmarshal(evt.Payload, &state); err != nil {
+			return fmt.Errorf("decode cache_state event: %w", err)
+		}
+		p.cache.applyState(state)
+	case cacheInvalidationEventKind:
+		var invalidation cachewarn.InvalidationEvent
+		if err := json.Unmarshal(evt.Payload, &invalidation); err != nil {
+			return fmt.Errorf("decode cache_invalidation event: %w", err)
+		}
+		warningText, ok := p.cache.consumeWarningText(invalidation)
+		if ok {
+			p.chat.appendLocalEntry(roleCacheWarning, warningText)
 		}
 	}
 	return nil

@@ -252,6 +252,15 @@ func (e *Engine) AutoCompactionEnabled() bool {
 	return *e.cfg.AutoCompactionEnabled
 }
 
+func (e *Engine) CacheInvalidationWarningEnabled() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.cfg.CacheInvalidationWarning == nil {
+		return true
+	}
+	return *e.cfg.CacheInvalidationWarning
+}
+
 func (e *Engine) CompactionMode() string {
 	e.mu.Lock()
 	defer e.mu.Unlock()

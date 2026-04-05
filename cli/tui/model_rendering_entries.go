@@ -463,6 +463,8 @@ func (m Model) defaultEntryStyleIntents(role string, muteText bool) StyleIntent 
 	switch role {
 	case "reviewer_status", "reviewer_suggestions":
 		return SuccessForeground
+	case roleCacheWarning:
+		return ErrorForeground
 	case "warning":
 		return WarningForeground
 	case "error":

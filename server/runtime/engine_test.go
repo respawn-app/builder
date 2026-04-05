@@ -5479,13 +5479,18 @@ func TestStreamingNoopFinalClearsLiveAssistantDelta(t *testing.T) {
 	}
 
 	var (
-		mu     sync.Mutex
-		events []Event
+		mu              sync.Mutex
+		events          []Event
+		deltaOngoingLog []string
 	)
-	eng, err := New(store, fakeNoopStreamClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+	var eng *Engine
+	eng, err = New(store, fakeNoopStreamClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
 			mu.Lock()
+			if evt.Kind == EventAssistantDelta && eng != nil {
+				deltaOngoingLog = append(deltaOngoingLog, strings.TrimSpace(eng.ChatSnapshot().Ongoing))
+			}
 			events = append(events, evt)
 			mu.Unlock()
 		},
@@ -5527,6 +5532,11 @@ func TestStreamingNoopFinalClearsLiveAssistantDelta(t *testing.T) {
 	}
 	if !hasDelta {
 		t.Fatalf("expected streamed noop delta event, got %+v", events)
+	}
+	for _, ongoing := range deltaOngoingLog {
+		if ongoing != "" {
+			t.Fatalf("expected noop delta to stay out of chat snapshot ongoing buffer, got %q", ongoing)
+		}
 	}
 	if !hasReset {
 		t.Fatalf("expected assistant delta reset for noop final, got %+v", events)
@@ -5581,6 +5591,67 @@ func TestStreamingDeltasDoNotEmitConversationSnapshotEvents(t *testing.T) {
 	defer mu.Unlock()
 	if conversationWithLive != 0 {
 		t.Fatalf("expected no conversation_updated events carrying live ongoing snapshot, got %d events: %+v", conversationWithLive, events)
+	}
+}
+
+func TestStreamingSuccessfulCommitResetsAssistantDeltaBeforeCommittedAssistantEvent(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	var (
+		mu                 sync.Mutex
+		eventKinds         []EventKind
+		ongoingAtAssistant []string
+	)
+	var eng *Engine
+	eng, err = New(store, fakeSimpleStreamClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			mu.Lock()
+			defer mu.Unlock()
+			eventKinds = append(eventKinds, evt.Kind)
+			if evt.Kind == EventAssistantMessage && eng != nil {
+				ongoingAtAssistant = append(ongoingAtAssistant, strings.TrimSpace(eng.ChatSnapshot().Ongoing))
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	_, err = eng.SubmitUserMessage(context.Background(), "stream")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	resetIndex := -1
+	assistantMessageIndex := -1
+	for i, kind := range eventKinds {
+		if kind == EventAssistantDeltaReset && resetIndex == -1 {
+			resetIndex = i
+		}
+		if kind == EventAssistantMessage && assistantMessageIndex == -1 {
+			assistantMessageIndex = i
+		}
+	}
+	if resetIndex == -1 {
+		t.Fatal("expected assistant delta reset on successful streaming commit")
+	}
+	if assistantMessageIndex == -1 {
+		t.Fatal("expected assistant message event on successful streaming commit")
+	}
+	if resetIndex >= assistantMessageIndex {
+		t.Fatalf("expected assistant delta reset before assistant message, reset=%d assistant=%d", resetIndex, assistantMessageIndex)
+	}
+	for _, ongoing := range ongoingAtAssistant {
+		if ongoing != "" {
+			t.Fatalf("expected ongoing cleared before assistant_message event, got %q", ongoing)
+		}
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 
 	"builder/prompts"
 	"builder/server/llm"
+	"builder/shared/cachewarn"
 )
 
 type defaultReviewerPipeline struct {
@@ -166,6 +167,9 @@ func (r *defaultReviewerPipeline) RunSuggestions(ctx context.Context, reviewerCl
 	}
 	resp, err := e.generateWithRetryClient(ctx, reviewerClient, req, nil, nil, nil)
 	if err != nil {
+		return reviewerSuggestionsResult{}, err
+	}
+	if err := e.recordCacheState("", cachewarn.ScopeReviewer, req, resp.Usage); err != nil {
 		return reviewerSuggestionsResult{}, err
 	}
 	cachePct, hasCachePct := resp.Usage.CacheHitPercent()

@@ -1,10 +1,13 @@
 package session
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"builder/shared/cachewarn"
 )
 
 var errForkReplayBoundary = errors.New("fork replay boundary reached")
@@ -20,11 +23,18 @@ func ForkAtUserMessage(parent *Store, userMessageIndex int, forkName string) (*S
 	parentMeta := parent.Meta()
 	replay := make([]ReplayEvent, 0)
 	visibleUserCount := 0
+	reviewerCacheStateSeen := false
 	err := parent.WalkEvents(func(evt Event) error {
 		if hasVisibleUserMessageEvent(evt.Kind, evt.Payload) {
 			visibleUserCount++
 			if visibleUserCount == userMessageIndex {
 				return errForkReplayBoundary
+			}
+		}
+		if evt.Kind == "cache_state" {
+			var state cachewarn.StateEvent
+			if err := json.Unmarshal(evt.Payload, &state); err == nil && state.Scope == cachewarn.ScopeReviewer {
+				reviewerCacheStateSeen = true
 			}
 		}
 		replay = append(replay, ReplayEvent{StepID: evt.StepID, Kind: evt.Kind, Payload: append([]byte(nil), evt.Payload...)})
@@ -54,6 +64,14 @@ func ForkAtUserMessage(parent *Store, userMessageIndex int, forkName string) (*S
 
 	if _, err := child.AppendReplayEvents(replay); err != nil {
 		return nil, fmt.Errorf("append fork replay events: %w", err)
+	}
+	if _, err := child.AppendEvent("", "cache_invalidation", cachewarn.InvalidationEvent{Scope: cachewarn.ScopePrimary, Reason: cachewarn.ReasonFork}); err != nil {
+		return nil, fmt.Errorf("append fork cache invalidation event: %w", err)
+	}
+	if reviewerCacheStateSeen {
+		if _, err := child.AppendEvent("", "cache_invalidation", cachewarn.InvalidationEvent{Scope: cachewarn.ScopeReviewer, Reason: cachewarn.ReasonFork}); err != nil {
+			return nil, fmt.Errorf("append fork reviewer cache invalidation event: %w", err)
+		}
 	}
 	return child, nil
 }

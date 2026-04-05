@@ -1832,6 +1832,21 @@ func TestRenderEntryTextUsesSemanticForegroundForWarningByTheme(t *testing.T) {
 	}
 }
 
+func TestRenderEntryTextUsesSemanticForegroundForCacheWarningByTheme(t *testing.T) {
+	for _, theme := range []string{"dark", "light"} {
+		t.Run(theme, func(t *testing.T) {
+			m := NewModel(WithTheme(theme))
+			out := m.renderEntryText(roleCacheWarning, "Cache invalidated", 80, nil, false)
+			if !strings.HasPrefix(out, foregroundEscape(themeErrorColor(theme))) {
+				t.Fatalf("expected cache warning text to start with error foreground for %s theme, got %q", theme, out)
+			}
+			if got := ansi.Strip(out); got != "Cache invalidated" {
+				t.Fatalf("expected cache warning text preserved, got %q", got)
+			}
+		})
+	}
+}
+
 func TestReviewerAndWarningViewUseSemanticForegroundInLightTheme(t *testing.T) {
 	m := NewModel(WithTheme("light"), WithPreviewLines(20))
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
@@ -1862,6 +1877,32 @@ func TestReviewerAndWarningViewUseSemanticForegroundInLightTheme(t *testing.T) {
 	}
 	if !strings.Contains(warningLine, foregroundEscape(themeWarningColor("light"))) {
 		t.Fatalf("expected detail warning to use warning foreground, got %q", warningLine)
+	}
+}
+
+func TestCacheWarningViewUsesErrorForegroundInBothModes(t *testing.T) {
+	m := NewModel(WithTheme("light"), WithPreviewLines(20))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: roleCacheWarning, Text: "Cache invalidated by fork."})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "assistant", Text: "done"})
+
+	rawOngoing := m.View()
+	cacheWarningLine := lineContaining(rawOngoing, "Cache invalidated by fork.")
+	if cacheWarningLine == "" {
+		t.Fatalf("expected ongoing view to contain cache warning, got %q", plainTranscript(rawOngoing))
+	}
+	if !strings.Contains(cacheWarningLine, foregroundEscape(themeErrorColor("light"))) {
+		t.Fatalf("expected ongoing cache warning to use error foreground, got %q", cacheWarningLine)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	rawDetail := m.View()
+	cacheWarningLine = lineContaining(rawDetail, "Cache invalidated by fork.")
+	if cacheWarningLine == "" {
+		t.Fatalf("expected detail view to contain cache warning, got %q", plainTranscript(rawDetail))
+	}
+	if !strings.Contains(cacheWarningLine, foregroundEscape(themeErrorColor("light"))) {
+		t.Fatalf("expected detail cache warning to use error foreground, got %q", cacheWarningLine)
 	}
 }
 

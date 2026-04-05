@@ -429,10 +429,13 @@ func TestForkRollbackNativeStartupReplayUsesForkedHistory(t *testing.T) {
 	if !strings.Contains(plain, "u1") || !strings.Contains(plain, "a1") {
 		t.Fatalf("expected startup replay to include fork base history, got %q", plain)
 	}
+	if !strings.Contains(plain, "Cache invalidated by fork.") {
+		t.Fatalf("expected startup replay to include fork cache warning, got %q", plain)
+	}
 	if strings.Contains(plain, "u2") || strings.Contains(plain, "a2") {
 		t.Fatalf("expected startup replay to exclude trimmed history after fork point, got %q", plain)
 	}
-	if len(updated.transcriptEntries) != 2 {
-		t.Fatalf("expected forked transcript to include only two committed entries, got %d", len(updated.transcriptEntries))
+	if len(updated.transcriptEntries) != 3 {
+		t.Fatalf("expected forked transcript to include base history plus cache warning, got %d", len(updated.transcriptEntries))
 	}
 }

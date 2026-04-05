@@ -7,6 +7,7 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/cachewarn"
 )
 
 func TestTranscriptProjectorReconstructsPersistedTranscript(t *testing.T) {
@@ -67,6 +68,40 @@ func TestTranscriptProjectorSurfacesPersistedCompactionSummaries(t *testing.T) {
 	}
 	if got := snapshot.Entries[1]; got.Role != "compaction_summary" || got.Text != "developer handoff" {
 		t.Fatalf("entry[1] = %+v, want developer compaction summary", got)
+	}
+}
+
+func TestTranscriptProjectorReconstructsPersistedCacheWarnings(t *testing.T) {
+	projector := NewTranscriptProjector()
+	events := []session.Event{
+		mustPersistedEvent(t, cacheStateEventKind, cachewarn.StateEvent{Scope: cachewarn.ScopePrimary, RequestDigest: "primary-digest", InputTokens: 200_000, CachedInputTokens: 128_000, HasCachedInput: true}),
+		mustPersistedEvent(t, cacheStateEventKind, cachewarn.StateEvent{Scope: cachewarn.ScopeReviewer, RequestDigest: "reviewer-digest", InputTokens: 100_000, CachedInputTokens: 64_000, HasCachedInput: true}),
+		mustPersistedEvent(t, cacheInvalidationEventKind, cachewarn.InvalidationEvent{Scope: cachewarn.ScopePrimary, Reason: cachewarn.ReasonFork}),
+		mustPersistedEvent(t, cacheInvalidationEventKind, cachewarn.InvalidationEvent{Scope: cachewarn.ScopeReviewer, Reason: cachewarn.ReasonFork}),
+		mustPersistedEvent(t, cacheInvalidationEventKind, cachewarn.InvalidationEvent{Scope: cachewarn.ScopePrimary, Reason: cachewarn.ReasonContextCompaction}),
+		mustPersistedEvent(t, cacheInvalidationEventKind, cachewarn.InvalidationEvent{Scope: cachewarn.ScopeReviewer, Reason: cachewarn.ReasonContextCompaction}),
+	}
+	for _, evt := range events {
+		if err := projector.ApplyPersistedEvent(evt); err != nil {
+			t.Fatalf("ApplyPersistedEvent(%q): %v", evt.Kind, err)
+		}
+	}
+
+	snapshot := projector.ChatSnapshot()
+	if len(snapshot.Entries) != 4 {
+		t.Fatalf("entry count = %d, want 4 (%+v)", len(snapshot.Entries), snapshot.Entries)
+	}
+	if got := snapshot.Entries[0]; got.Role != roleCacheWarning || got.Text != "Cache invalidated by fork. Previous cached tokens: 128k." {
+		t.Fatalf("entry[0] = %+v", got)
+	}
+	if got := snapshot.Entries[1]; got.Role != roleCacheWarning || got.Text != "Supervisor cache invalidated by fork. Previous cached tokens: 64k." {
+		t.Fatalf("entry[1] = %+v", got)
+	}
+	if got := snapshot.Entries[2]; got.Role != roleCacheWarning || got.Text != "Cache invalidated by context compaction." {
+		t.Fatalf("entry[2] = %+v", got)
+	}
+	if got := snapshot.Entries[3]; got.Role != roleCacheWarning || got.Text != "Supervisor cache invalidated by context compaction." {
+		t.Fatalf("entry[3] = %+v", got)
 	}
 }
 

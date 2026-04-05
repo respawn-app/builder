@@ -41,6 +41,7 @@ model_verbosity = "medium" # or "low"
 theme = "auto" # or light / dark
 web_search = "native"
 compaction_mode = "local" # or "native" (if supported)
+cache_invalidation_warning = true
 
 [timeouts]
 model_request_seconds = 400
@@ -90,6 +91,7 @@ These flags overlay settings at startup.
 | `tui_alternate_screen` | string | `auto` | `BUILDER_TUI_ALTERNATE_SCREEN` |  | Alternate-screen policy. Allowed: `auto`, `always`, `never`. |
 | `notification_method` | string | `auto` | `BUILDER_NOTIFICATION_METHOD` |  | Terminal notification style for asks and tool-heavy turn completion after the queued prompt drain finishes. Ask notifications include the question text and use the session title when set. Allowed: `auto`, `osc9`, `bel`. `auto` chooses `osc9` on supported terminals and falls back to `bel`. |
 | `tool_preambles` | bool | `true` | `BUILDER_TOOL_PREAMBLES` |  | Includes tool-usage preambles in the main system prompt for interactive runs. Headless `builder run` still suppresses them. |
+| `cache_invalidation_warning` | bool | `true` | `BUILDER_CACHE_INVALIDATION_WARNING` |  | Shows red transcript warnings when Builder performs non-append-only history mutations that invalidate the provider prompt cache, such as compactions, rollbacks, and forks. |
 | `priority_request_mode` | bool | `false` |  |  | Enables fast-mode requests where the provider supports them. File-only. |
 | `web_search` | string | `native` | `BUILDER_WEB_SEARCH` |  | Native web search mode. Allowed: `off`, `native`. `custom` is recognized but rejected as not implemented. This is separate from the `tools.web_search` toggle. |
 | `provider_override` | string | `""` | `BUILDER_PROVIDER_OVERRIDE` | `--provider-override` | Forces provider family for custom or alias model names. Allowed: `openai`, `anthropic`. Requires an explicit `model` override. |

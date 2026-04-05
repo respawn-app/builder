@@ -49,6 +49,9 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if !cfg.Settings.ToolPreambles {
 		t.Fatalf("expected default tool_preambles=true")
 	}
+	if !cfg.Settings.CacheInvalidationWarning {
+		t.Fatalf("expected default cache_invalidation_warning=true")
+	}
 	if cfg.Settings.PriorityRequestMode {
 		t.Fatalf("expected default priority_request_mode=false")
 	}
@@ -130,6 +133,9 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	}
 	if !strings.Contains(string(settingsBytes), "verbose_output = false") {
 		t.Fatalf("expected default config to expose reviewer.verbose_output, got %q", string(settingsBytes))
+	}
+	if !strings.Contains(string(settingsBytes), "cache_invalidation_warning = true") {
+		t.Fatalf("expected default config to expose cache_invalidation_warning, got %q", string(settingsBytes))
 	}
 	if !strings.Contains(string(settingsBytes), "# [skills]") {
 		t.Fatalf("expected default config to mention skills toggles, got %q", string(settingsBytes))
@@ -1108,6 +1114,48 @@ func TestLoadToolPreamblesPrecedence(t *testing.T) {
 	t.Setenv("BUILDER_TOOL_PREAMBLES", "broken")
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
 		t.Fatal("expected invalid BUILDER_TOOL_PREAMBLES error")
+	}
+}
+
+func TestLoadCacheInvalidationWarningPrecedence(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("cache_invalidation_warning = false\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.CacheInvalidationWarning {
+		t.Fatalf("expected file cache_invalidation_warning=false")
+	}
+	if got := cfg.Source.Sources["cache_invalidation_warning"]; got != "file" {
+		t.Fatalf("expected cache_invalidation_warning source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_CACHE_INVALIDATION_WARNING", "true")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if !cfg.Settings.CacheInvalidationWarning {
+		t.Fatalf("expected env cache_invalidation_warning=true")
+	}
+	if got := cfg.Source.Sources["cache_invalidation_warning"]; got != "env" {
+		t.Fatalf("expected cache_invalidation_warning source env, got %q", got)
+	}
+
+	t.Setenv("BUILDER_CACHE_INVALIDATION_WARNING", "broken")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid BUILDER_CACHE_INVALIDATION_WARNING error")
 	}
 }
 

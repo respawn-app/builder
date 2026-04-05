@@ -531,8 +531,8 @@ func TestForkAtUserMessageCopiesPrefixBeforeSelectedMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fork events: %v", err)
 	}
-	if len(forkEvents) != 2 {
-		t.Fatalf("expected two replayed events, got %d", len(forkEvents))
+	if len(forkEvents) != 3 {
+		t.Fatalf("expected two replayed events plus fork cache invalidation, got %d", len(forkEvents))
 	}
 	var first struct {
 		Role    string `json:"role"`
@@ -543,6 +543,9 @@ func TestForkAtUserMessageCopiesPrefixBeforeSelectedMessage(t *testing.T) {
 	}
 	if first.Role != "user" || first.Content != "u1" {
 		t.Fatalf("unexpected first message in fork: %+v", first)
+	}
+	if forkEvents[2].Kind != "cache_invalidation" {
+		t.Fatalf("expected fork cache invalidation event, got %+v", forkEvents[2])
 	}
 	meta := forked.Meta()
 	if meta.ParentSessionID != parent.Meta().SessionID {

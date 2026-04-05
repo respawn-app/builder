@@ -8,6 +8,7 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/cachewarn"
 )
 
 func TestPersistedTranscriptScanCollectsRequestedPageOnly(t *testing.T) {
@@ -188,6 +189,27 @@ func TestPersistedTranscriptScanKeepsCompactionSummaryAndCarryoverInDetailTransc
 	}
 	if page.Entries[2].Role != "manual_compaction_carryover" {
 		t.Fatalf("expected manual compaction carryover entry, got %+v", page.Entries[2])
+	}
+}
+
+func TestPersistedTranscriptScanReconstructsCacheWarningsFromPersistedEvents(t *testing.T) {
+	scan := NewPersistedTranscriptScan(PersistedTranscriptScanRequest{})
+	events := []session.Event{
+		mustPersistedScanEvent(t, cacheStateEventKind, cachewarn.StateEvent{Scope: cachewarn.ScopePrimary, RequestDigest: "primary-digest", InputTokens: 200_000, CachedInputTokens: 128_000, HasCachedInput: true}),
+		mustPersistedScanEvent(t, cacheInvalidationEventKind, cachewarn.InvalidationEvent{Scope: cachewarn.ScopePrimary, Reason: cachewarn.ReasonFork}),
+	}
+	for _, evt := range events {
+		if err := scan.ApplyPersistedEvent(evt); err != nil {
+			t.Fatalf("ApplyPersistedEvent(%q): %v", evt.Kind, err)
+		}
+	}
+
+	page := scan.CollectedPageSnapshot()
+	if len(page.Entries) != 1 {
+		t.Fatalf("len(page.Entries) = %d, want 1 (%+v)", len(page.Entries), page.Entries)
+	}
+	if got := page.Entries[0]; got.Role != roleCacheWarning || got.Text != "Cache invalidated by fork. Previous cached tokens: 128k." {
+		t.Fatalf("unexpected dormant cache warning entry: %+v", got)
 	}
 }
 

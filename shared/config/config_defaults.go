@@ -27,6 +27,7 @@ const (
 	defaultReviewerTimeoutSec            = 60
 	defaultTUIAlternateScreen            = "auto"
 	defaultCompactionMode                = "local"
+	defaultCacheInvalidationWarning      = true
 )
 
 func defaultSettings() Settings {
