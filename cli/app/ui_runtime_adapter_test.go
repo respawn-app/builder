@@ -682,6 +682,73 @@ func TestApplyRuntimeTranscriptPageInDetailModeDoesNotRebuildNativeHistoryState(
 	}
 }
 
+func TestApplyProjectedTranscriptEntriesUsesTailOffsetWhileViewingOlderDetailPage(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	ongoingTail := clientui.TranscriptPage{SessionID: "session-1", Offset: 300, TotalEntries: 500}
+	for i := 0; i < 200; i++ {
+		ongoingTail.Entries = append(ongoingTail.Entries, clientui.ChatEntry{Role: "assistant", Text: fmt.Sprintf("tail %03d", 300+i)})
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, ongoingTail); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	m.forwardToView(tui.SetModeMsg{Mode: tui.ModeDetail, SkipDetailWarmup: true})
+	olderDetailPage := clientui.TranscriptPage{SessionID: "session-1", Offset: 0, TotalEntries: 500}
+	for i := 0; i < 250; i++ {
+		olderDetailPage.Entries = append(olderDetailPage.Entries, clientui.ChatEntry{Role: "assistant", Text: fmt.Sprintf("history %03d", i)})
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Offset: 0, Limit: 250}, olderDetailPage); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	if m.view.TranscriptBaseOffset() != 0 {
+		t.Fatalf("expected detail view to remain on older page, got base=%d", m.view.TranscriptBaseOffset())
+	}
+	if got := m.transcriptBaseOffset; got != ongoingTail.Offset {
+		t.Fatalf("live tail base offset = %d, want %d", got, ongoingTail.Offset)
+	}
+
+	appended := []clientui.ChatEntry{{Role: "assistant", Text: "tail 500"}, {Role: "assistant", Text: "tail 501"}}
+	if cmd, mutated := m.runtimeAdapter().applyProjectedTranscriptEntries(appended, false); cmd != nil || !mutated {
+		t.Fatalf("expected projected append to mutate without extra command, mutated=%t cmd=%v", mutated, cmd)
+	}
+
+	if got, want := len(m.transcriptEntries), 202; got != want {
+		t.Fatalf("live tail entry count = %d, want %d", got, want)
+	}
+	if got := m.transcriptEntries[len(m.transcriptEntries)-2].Text; got != "tail 500" {
+		t.Fatalf("expected first appended tail entry at live tail end, got %q", got)
+	}
+	if got := m.transcriptEntries[len(m.transcriptEntries)-1].Text; got != "tail 501" {
+		t.Fatalf("expected second appended tail entry at live tail end, got %q", got)
+	}
+	if got, want := m.transcriptTotalEntries, 502; got != want {
+		t.Fatalf("live tail total entries = %d, want %d", got, want)
+	}
+	if got, want := m.detailTranscript.totalEntries, 502; got != want {
+		t.Fatalf("detail transcript total entries = %d, want %d", got, want)
+	}
+	if got, want := m.detailTranscript.offset, 500; got != want {
+		t.Fatalf("detail transcript offset = %d, want %d", got, want)
+	}
+	if got, want := len(m.detailTranscript.entries), 2; got != want {
+		t.Fatalf("detail transcript entry count = %d, want %d", got, want)
+	}
+	if got := m.detailTranscript.entries[0].Text; got != "tail 500" {
+		t.Fatalf("expected first appended detail transcript entry at live tail offset, got %q", got)
+	}
+	if got := m.detailTranscript.entries[1].Text; got != "tail 501" {
+		t.Fatalf("expected second appended detail transcript entry at live tail offset, got %q", got)
+	}
+	if got := m.view.TranscriptBaseOffset(); got != 0 {
+		t.Fatalf("view base offset changed unexpectedly after live append: %d", got)
+	}
+}
+
 func TestAssistantDeltaAppendsStreamingText(t *testing.T) {
 	m := newProjectedStaticUIModel()
 

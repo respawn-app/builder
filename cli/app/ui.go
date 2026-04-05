@@ -421,6 +421,8 @@ type uiModel struct {
 	debugKeys            bool
 
 	transcriptEntries        []tui.TranscriptEntry
+	transcriptBaseOffset     int
+	transcriptTotalEntries   int
 	detailTranscript         uiDetailTranscriptWindow
 	runtimeMainViewToken     uint64
 	runtimeTranscriptToken   uint64
@@ -521,6 +523,8 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 			m.transcriptEntries = append(m.transcriptEntries, tui.TranscriptEntry{Role: entry.Role, Text: entry.Text})
 			m.forwardToView(tui.AppendTranscriptMsg{Role: entry.Role, Text: entry.Text})
 		}
+		m.transcriptBaseOffset = 0
+		m.transcriptTotalEntries = len(m.transcriptEntries)
 		m.seedPromptHistoryFromTranscriptEntries(m.transcriptEntries)
 		m.refreshRollbackCandidates()
 		startupNativeHistoryCmd = m.syncNativeHistoryFromTranscript()
