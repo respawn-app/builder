@@ -157,7 +157,7 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(entries []clientui.Cha
 	if len(entries) == 0 {
 		return nil, false
 	}
-	startOffset := m.view.TranscriptBaseOffset() + len(m.transcriptEntries)
+	startOffset := m.transcriptBaseOffset + len(m.transcriptEntries)
 	for _, entry := range entries {
 		transcriptEntry := transcriptEntryFromChatEntry(entry)
 		m.transcriptEntries = append(m.transcriptEntries, transcriptEntry)
@@ -170,11 +170,12 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(entries []clientui.Cha
 			ToolCall:    transcriptEntry.ToolCall,
 		})
 	}
+	m.transcriptTotalEntries = max(m.transcriptTotalEntries, startOffset+len(entries))
 	m.refreshRollbackCandidates()
 	if m.detailTranscript.loaded {
 		page := clientui.TranscriptPage{
 			Offset:       startOffset,
-			TotalEntries: max(m.view.TranscriptTotalEntries(), startOffset+len(entries)),
+			TotalEntries: m.transcriptTotalEntries,
 			Entries:      cloneChatEntries(entries),
 			Ongoing:      m.view.OngoingStreamingText(),
 			OngoingError: m.view.OngoingErrorText(),
@@ -248,7 +249,9 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPage
 	shouldSyncNativeHistory := pageReq.Window == clientui.TranscriptWindowOngoingTail || pageReq == (clientui.TranscriptPageRequest{})
 	if pageReq.Window == clientui.TranscriptWindowOngoingTail || (pageReq == (clientui.TranscriptPageRequest{}) && m.view.Mode() != tui.ModeDetail) {
 		entries := transcriptEntriesFromPage(page)
+		m.transcriptBaseOffset = page.Offset
 		m.transcriptEntries = append(m.transcriptEntries[:0], entries...)
+		m.transcriptTotalEntries = max(page.TotalEntries, page.Offset+len(entries))
 		m.seedPromptHistoryFromTranscriptEntries(m.transcriptEntries)
 		m.refreshRollbackCandidates()
 		m.detailTranscript.syncTail(page)

@@ -79,13 +79,17 @@ func (m *uiModel) localRuntimeTranscript() clientui.TranscriptPage {
 			ToolCallID:  entry.ToolCallID,
 		})
 	}
+	totalEntries := m.transcriptTotalEntries
+	if totalEntries < m.transcriptBaseOffset+len(entries) {
+		totalEntries = m.transcriptBaseOffset + len(entries)
+	}
 	return clientui.TranscriptPage{
 		SessionID:             m.sessionID,
 		SessionName:           m.sessionName,
 		ConversationFreshness: m.conversationFreshness,
 		Revision:              0,
-		TotalEntries:          len(entries),
-		Offset:                0,
+		TotalEntries:          totalEntries,
+		Offset:                m.transcriptBaseOffset,
 		Entries:               entries,
 		Ongoing:               m.view.OngoingStreamingText(),
 	}
