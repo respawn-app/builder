@@ -164,6 +164,53 @@ func TestRuntimeClientRefreshTranscriptRequestsOngoingTail(t *testing.T) {
 	}
 }
 
+func TestRuntimeClientLoadTranscriptPageDefaultsToOngoingTail(t *testing.T) {
+	reads := &countingSessionViewClient{page: clientui.TranscriptPage{SessionID: "session-1"}}
+	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil))
+	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, controls)
+
+	if _, err := runtimeClient.LoadTranscriptPage(clientui.TranscriptPageRequest{}); err != nil {
+		t.Fatalf("load transcript page: %v", err)
+	}
+	if reads.lastTranscriptReq.Window != clientui.TranscriptWindowOngoingTail {
+		t.Fatalf("window = %q, want ongoing tail", reads.lastTranscriptReq.Window)
+	}
+}
+
+func TestRuntimeClientFromEngineSeedsCachedTranscriptTail(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "u1"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: "a1", Phase: llm.MessagePhaseFinal}); err != nil {
+		t.Fatalf("append assistant message: %v", err)
+	}
+	eng, err := runtime.New(store, &runtimeClientFakeLLM{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	runtimeClient := newUIRuntimeClientFromEngine(eng)
+	page := runtimeClient.Transcript()
+
+	if got, want := page.TotalEntries, 2; got != want {
+		t.Fatalf("total entries = %d, want %d", got, want)
+	}
+	if got, want := page.Offset, 0; got != want {
+		t.Fatalf("offset = %d, want %d", got, want)
+	}
+	if got, want := len(page.Entries), 2; got != want {
+		t.Fatalf("entry count = %d, want %d", got, want)
+	}
+	if page.Entries[1].Text != "a1" {
+		t.Fatalf("expected cached transcript tail entry, got %+v", page.Entries)
+	}
+}
+
 func TestRuntimeClientMainViewIncludesActiveRunFromRealEngine(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

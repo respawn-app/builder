@@ -3,6 +3,7 @@ package sessionview
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -226,18 +227,14 @@ func TestServiceGetSessionTranscriptPageSupportsPagination(t *testing.T) {
 	}
 }
 
-func TestServiceGetSessionTranscriptPageReturnsFullDormantTranscriptByDefault(t *testing.T) {
+func TestServiceGetSessionTranscriptPageUsesDormantOngoingTailByDefault(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	entries := []llm.Message{
-		{Role: llm.RoleUser, Content: "u1"},
-		{Role: llm.RoleAssistant, Content: "a1", Phase: llm.MessagePhaseFinal},
-		{Role: llm.RoleUser, Content: "u2"},
-	}
-	for i, entry := range entries {
+	for i := 0; i < runtimeview.OngoingTailEntryLimit+20; i++ {
+		entry := llm.Message{Role: llm.RoleUser, Content: "u" + strconv.Itoa(i)}
 		if _, err := store.AppendEvent("step-1", "message", entry); err != nil {
 			t.Fatalf("append message %d: %v", i, err)
 		}
@@ -248,17 +245,23 @@ func TestServiceGetSessionTranscriptPageReturnsFullDormantTranscriptByDefault(t 
 	if err != nil {
 		t.Fatalf("get session transcript page: %v", err)
 	}
-	if resp.Transcript.TotalEntries != 3 {
-		t.Fatalf("total entries = %d, want 3", resp.Transcript.TotalEntries)
+	if resp.Transcript.TotalEntries != runtimeview.OngoingTailEntryLimit+20 {
+		t.Fatalf("total entries = %d, want %d", resp.Transcript.TotalEntries, runtimeview.OngoingTailEntryLimit+20)
+	}
+	if resp.Transcript.Offset != 20 {
+		t.Fatalf("offset = %d, want 20", resp.Transcript.Offset)
+	}
+	if len(resp.Transcript.Entries) != runtimeview.OngoingTailEntryLimit {
+		t.Fatalf("entries = %d, want %d", len(resp.Transcript.Entries), runtimeview.OngoingTailEntryLimit)
 	}
 	if resp.Transcript.HasMore || resp.Transcript.NextOffset != 0 {
 		t.Fatalf("unexpected pagination metadata: %+v", resp.Transcript)
 	}
-	if len(resp.Transcript.Entries) != 3 {
-		t.Fatalf("entries = %d, want 3", len(resp.Transcript.Entries))
+	if first := resp.Transcript.Entries[0].Text; first != "u20" {
+		t.Fatalf("first dormant tail entry = %q, want u20", first)
 	}
-	if resp.Transcript.Entries[0].Text != "u1" || resp.Transcript.Entries[1].Text != "a1" || resp.Transcript.Entries[2].Text != "u2" {
-		t.Fatalf("unexpected dormant transcript entries: %+v", resp.Transcript.Entries)
+	if last := resp.Transcript.Entries[len(resp.Transcript.Entries)-1].Text; last != fmt.Sprintf("u%d", runtimeview.OngoingTailEntryLimit+19) {
+		t.Fatalf("last dormant tail entry = %q", last)
 	}
 }
 

@@ -34,6 +34,37 @@ type refreshingRuntimeClient struct {
 	calls       int
 }
 
+type startupTranscriptRuntimeClient struct {
+	runtimeControlFakeClient
+	transcriptCalls int
+	loadRequests    []clientui.TranscriptPageRequest
+	view            clientui.RuntimeMainView
+	page            clientui.TranscriptPage
+}
+
+func (c *startupTranscriptRuntimeClient) MainView() clientui.RuntimeMainView {
+	if c.view.Session.SessionID == "" {
+		c.view.Session.SessionID = "session-1"
+	}
+	return c.view
+}
+
+func (c *startupTranscriptRuntimeClient) Transcript() clientui.TranscriptPage {
+	c.transcriptCalls++
+	if c.page.SessionID == "" {
+		c.page.SessionID = "session-1"
+	}
+	return c.page
+}
+
+func (c *startupTranscriptRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	c.loadRequests = append(c.loadRequests, req)
+	if c.page.SessionID == "" {
+		c.page.SessionID = "session-1"
+	}
+	return c.page, nil
+}
+
 func (f *refreshingRuntimeClient) MainView() clientui.RuntimeMainView {
 	if f.calls == 0 {
 		return clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1"}}
@@ -746,6 +777,55 @@ func TestApplyProjectedTranscriptEntriesUsesTailOffsetWhileViewingOlderDetailPag
 	}
 	if got := m.view.TranscriptBaseOffset(); got != 0 {
 		t.Fatalf("view base offset changed unexpectedly after live append: %d", got)
+	}
+}
+
+func TestStartupSeedsCachedTranscriptBeforeBoundedSync(t *testing.T) {
+	client := &startupTranscriptRuntimeClient{
+		view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1", SessionName: "incident triage"}},
+		page: clientui.TranscriptPage{SessionID: "session-1", Offset: 10, TotalEntries: 15, Entries: []clientui.ChatEntry{{Role: "assistant", Text: "cached tail"}}},
+	}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+
+	next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	updated := next.(*uiModel)
+	if startupCmd == nil {
+		t.Fatal("expected startup transcript hydration command")
+	}
+	if client.transcriptCalls != 1 {
+		t.Fatalf("expected startup to seed from cached RuntimeClient.Transcript(), got %d calls", client.transcriptCalls)
+	}
+	if got := stripANSIAndTrimRight(updated.view.OngoingSnapshot()); !strings.Contains(got, "cached tail") {
+		t.Fatalf("expected cached transcript tail visible before bounded sync, got %q", got)
+	}
+	if updated.sessionName != "incident triage" {
+		t.Fatalf("session name = %q, want incident triage", updated.sessionName)
+	}
+	if got := len(client.loadRequests); got != 0 {
+		t.Fatalf("expected no bounded transcript load before startup cmd executes, got %d", got)
+	}
+	flushMsg, ok := startupCmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected startup window-size update to replay native history, got %T", startupCmd())
+	}
+	if !strings.Contains(stripANSIAndTrimRight(flushMsg.Text), "cached tail") {
+		t.Fatalf("expected startup native replay to include cached tail, got %q", stripANSIAndTrimRight(flushMsg.Text))
+	}
+	if len(updated.startupCmds) != 1 || updated.startupCmds[0] == nil {
+		t.Fatalf("expected queued bounded transcript sync command, got %d command(s)", len(updated.startupCmds))
+	}
+	refreshed, ok := updated.startupCmds[0]().(runtimeTranscriptRefreshedMsg)
+	if !ok {
+		t.Fatalf("expected queued startup sync to return runtimeTranscriptRefreshedMsg, got %T", updated.startupCmds[0]())
+	}
+	if refreshed.req.Window != clientui.TranscriptWindowOngoingTail {
+		t.Fatalf("startup transcript request window = %q, want ongoing_tail", refreshed.req.Window)
+	}
+	if got, want := len(client.loadRequests), 1; got != want {
+		t.Fatalf("load request count = %d, want %d", got, want)
+	}
+	if client.loadRequests[0].Window != clientui.TranscriptWindowOngoingTail {
+		t.Fatalf("startup load request window = %q, want ongoing_tail", client.loadRequests[0].Window)
 	}
 }
 

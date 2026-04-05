@@ -11,6 +11,7 @@ func TranscriptPageFromRuntime(engine *runtime.Engine, req clientui.TranscriptPa
 	if engine == nil {
 		return clientui.TranscriptPage{}
 	}
+	req = NormalizeDefaultTranscriptRequest(req)
 	if req.Window == clientui.TranscriptWindowOngoingTail {
 		return TranscriptPageFromWindow(
 			engine.SessionID(),
@@ -32,6 +33,13 @@ func TranscriptPageFromRuntime(engine *runtime.Engine, req clientui.TranscriptPa
 		page.Offset,
 		clientui.TranscriptPageRequest{Offset: page.Offset, Limit: limit},
 	)
+}
+
+func NormalizeDefaultTranscriptRequest(req clientui.TranscriptPageRequest) clientui.TranscriptPageRequest {
+	if req == (clientui.TranscriptPageRequest{}) {
+		return clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}
+	}
+	return req
 }
 
 func transcriptOffsetAndLimit(req clientui.TranscriptPageRequest) (int, int) {

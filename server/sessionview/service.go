@@ -123,6 +123,7 @@ func (s *Service) GetSessionTranscriptPage(ctx context.Context, req serverapi.Se
 		return serverapi.SessionTranscriptPageResponse{}, err
 	}
 	pageReq := clientui.TranscriptPageRequest{Offset: req.Offset, Limit: req.Limit, Page: req.Page, PageSize: req.PageSize, Window: req.Window}
+	pageReq = runtimeview.NormalizeDefaultTranscriptRequest(pageReq)
 	if runtimeEngine, err := s.resolveRuntime(ctx, req.SessionID); err != nil {
 		return serverapi.SessionTranscriptPageResponse{}, err
 	} else if runtimeEngine != nil {
@@ -279,6 +280,7 @@ func dormantTranscriptPageFromStore(ctx context.Context, store *session.Store, r
 	if store == nil {
 		return clientui.TranscriptPage{}, errors.New("session store is required")
 	}
+	req = runtimeview.NormalizeDefaultTranscriptRequest(req)
 	meta := store.Meta()
 	freshness := runtimeview.ConversationFreshnessFromSession(store.ConversationFreshness())
 	if req.Window == clientui.TranscriptWindowOngoingTail {
