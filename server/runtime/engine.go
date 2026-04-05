@@ -12,6 +12,7 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/compaction"
 	"github.com/google/uuid"
 )
 
@@ -173,7 +174,7 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 		cfg.EffectiveContextWindowPercent = 95
 	}
 	if cfg.PreSubmitCompactionLeadTokens <= 0 {
-		cfg.PreSubmitCompactionLeadTokens = 15_000
+		cfg.PreSubmitCompactionLeadTokens = compaction.DefaultPreSubmitRunwayTokens
 	}
 	if cfg.LocalCompactionCarryoverLimit <= 0 {
 		cfg.LocalCompactionCarryoverLimit = 20_000

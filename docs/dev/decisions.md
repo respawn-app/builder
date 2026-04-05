@@ -199,8 +199,9 @@
 ## Context Management And Compaction
 
 - Auto-compaction is enabled near context limits.
-- Builder may compact before sending the next user prompt when current context usage is already within a configurable lead band of the normal compaction threshold; in that case the prompt is queued, compaction runs first, and the queued prompt is submitted immediately after compaction completes.
-- Pre-submit compaction lead uses `threshold - min(model_context_window - threshold, pre_submit_compaction_lead_tokens)`, with `pre_submit_compaction_lead_tokens` defaulting to `15000`.
+- Builder may compact before sending the next user prompt when current context usage is already within a configurable runway reserve of the normal compaction threshold; in that case the prompt is queued, compaction runs first, and the queued prompt is submitted immediately after compaction completes.
+- Pre-submit compaction uses `context_compaction_threshold_tokens - pre_submit_compaction_lead_tokens`, with `pre_submit_compaction_lead_tokens` repurposed as fixed runway reserve and defaulting to `35000`.
+- Startup rejects compaction settings that would begin either normal compaction or the effective pre-submit compaction band below `50%` of `model_context_window`.
 - Auto-compaction failure aborts the current turn.
 - `compaction_mode=none` disables manual and automatic compaction.
 - Manual compaction is available via `/compact` while idle; optional arguments are appended as compaction guidance.

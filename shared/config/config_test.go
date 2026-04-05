@@ -76,6 +76,9 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.ContextCompactionThresholdTokens != defaultCompactionThreshold {
 		t.Fatalf("default compaction threshold mismatch: %d", cfg.Settings.ContextCompactionThresholdTokens)
 	}
+	if cfg.Settings.PreSubmitCompactionLeadTokens != 35_000 {
+		t.Fatalf("default pre-submit runway mismatch: %d", cfg.Settings.PreSubmitCompactionLeadTokens)
+	}
 	if cfg.Settings.MinimumExecToBgSeconds != defaultMinimumExecToBgSec {
 		t.Fatalf("default minimum_exec_to_bg_seconds mismatch: %d", cfg.Settings.MinimumExecToBgSeconds)
 	}
@@ -115,6 +118,9 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	settingsBytes := []byte(defaultSettingsTOML())
 	if !strings.Contains(string(settingsBytes), "model_verbosity = \"medium\"") {
 		t.Fatalf("expected default config to expose model_verbosity option, got %q", string(settingsBytes))
+	}
+	if !strings.Contains(string(settingsBytes), "pre_submit_compaction_lead_tokens = 35000") {
+		t.Fatalf("expected default config to expose pre-submit runway default, got %q", string(settingsBytes))
 	}
 	if strings.Contains(string(settingsBytes), "thinking_level = \"low\"") {
 		t.Fatalf("expected default config not to hardcode reviewer thinking inheritance, got %q", string(settingsBytes))
@@ -1759,5 +1765,45 @@ func TestLoadRejectsCompactionThresholdNotBelowContextWindow(t *testing.T) {
 
 	if _, err := Load(workspace, LoadOptions{}); err == nil {
 		t.Fatal("expected threshold/window validation error")
+	}
+}
+
+func TestLoadRejectsCompactionThresholdBelowHalfWindow(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model_context_window = 300000\ncontext_compaction_threshold_tokens = 149999\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected threshold minimum-window-percent validation error")
+	} else if !strings.Contains(err.Error(), "context_compaction_threshold_tokens must be >= 150000") {
+		t.Fatalf("expected threshold minimum-window-percent validation detail, got %v", err)
+	}
+}
+
+func TestLoadRejectsPreSubmitLeadBandBelowHalfWindow(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model_context_window = 300000\ncontext_compaction_threshold_tokens = 200000\npre_submit_compaction_lead_tokens = 100000\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected pre-submit effective threshold validation error")
+	} else if !strings.Contains(err.Error(), "effective pre-submit threshold 100000, below 150000") {
+		t.Fatalf("expected pre-submit effective threshold validation detail, got %v", err)
 	}
 }

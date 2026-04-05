@@ -7014,27 +7014,24 @@ func TestShouldAutoCompactUsesPreciseRequestInputTokenCountWhenAvailable(t *test
 	}
 }
 
-func TestPreSubmitCompactionTokenLimitUsesSmallerOfWindowHeadroomAndLeadCap(t *testing.T) {
+func TestPreSubmitCompactionTokenLimitUsesFixedRunwayReserve(t *testing.T) {
 	tests := []struct {
 		name     string
-		window   int
 		limit    int
-		leadCap  int
+		runway   int
 		expected int
 	}{
 		{
-			name:     "window headroom smaller than lead cap",
-			window:   200_000,
+			name:     "subtracts fixed runway from auto threshold",
 			limit:    190_000,
-			leadCap:  15_000,
-			expected: 180_000,
+			runway:   35_000,
+			expected: 155_000,
 		},
 		{
-			name:     "lead cap smaller than window headroom",
-			window:   400_000,
-			limit:    380_000,
-			leadCap:  15_000,
-			expected: 365_000,
+			name:     "large windows still use same fixed runway",
+			limit:    950_000,
+			runway:   35_000,
+			expected: 915_000,
 		},
 	}
 
@@ -7049,8 +7046,8 @@ func TestPreSubmitCompactionTokenLimitUsesSmallerOfWindowHeadroomAndLeadCap(t *t
 			eng, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{
 				Model:                         "gpt-5",
 				AutoCompactTokenLimit:         tt.limit,
-				ContextWindowTokens:           tt.window,
-				PreSubmitCompactionLeadTokens: tt.leadCap,
+				ContextWindowTokens:           1_000_000,
+				PreSubmitCompactionLeadTokens: tt.runway,
 			})
 			if err != nil {
 				t.Fatalf("new engine: %v", err)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"builder/shared/compaction"
 	"builder/shared/theme"
 )
 
@@ -151,6 +152,28 @@ func validateContextWindow(state settingsState, _ map[string]string) error {
 	}
 	if state.Settings.PreSubmitCompactionLeadTokens <= 0 {
 		return fmt.Errorf("pre_submit_compaction_lead_tokens must be > 0")
+	}
+	minimumThreshold := compaction.MinimumThresholdTokens(state.Settings.ModelContextWindow)
+	if state.Settings.ContextCompactionThresholdTokens < minimumThreshold {
+		return fmt.Errorf(
+			"context_compaction_threshold_tokens must be >= %d (%d%% of model_context_window=%d)",
+			minimumThreshold,
+			compaction.MinimumWindowPercent,
+			state.Settings.ModelContextWindow,
+		)
+	}
+	effectivePreSubmitThreshold := compaction.EffectivePreSubmitThresholdTokens(
+		state.Settings.ContextCompactionThresholdTokens,
+		state.Settings.PreSubmitCompactionLeadTokens,
+	)
+	if effectivePreSubmitThreshold < minimumThreshold {
+		return fmt.Errorf(
+			"pre_submit_compaction_lead_tokens makes the effective pre-submit threshold %d, below %d (%d%% of model_context_window=%d)",
+			effectivePreSubmitThreshold,
+			minimumThreshold,
+			compaction.MinimumWindowPercent,
+			state.Settings.ModelContextWindow,
+		)
 	}
 	return nil
 }

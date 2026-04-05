@@ -10,6 +10,7 @@ import (
 
 	"builder/prompts"
 	"builder/server/llm"
+	"builder/shared/compaction"
 )
 
 type compactionMode string
@@ -18,12 +19,11 @@ const (
 	compactionModeAuto   compactionMode = "auto"
 	compactionModeManual compactionMode = "manual"
 
-	defaultContextWindowTokens           = 200_000
-	compactOverflowRetries               = 2
-	autoCompactNearLimitMargin           = 8_000
-	compactionSoonReminderPercent        = 85
-	defaultPreSubmitCompactionLeadTokens = 15_000
-	manualCompactionCarryoverMaxChars    = 4_000
+	defaultContextWindowTokens        = 200_000
+	compactOverflowRetries            = 2
+	autoCompactNearLimitMargin        = 8_000
+	compactionSoonReminderPercent     = 85
+	manualCompactionCarryoverMaxChars = 4_000
 
 	additionalCompactionInstructionsHeader = "# Additional user instructions or commentary for this task:"
 	manualCompactionCarryoverHeader        = "# Last user message before compaction (work may have been done after it was sent):"
@@ -123,13 +123,13 @@ func (e *Engine) autoCompactTokenLimit(ctx context.Context) int {
 	return limit
 }
 
-func (e *Engine) preSubmitCompactionLeadTokens() int {
+func (e *Engine) preSubmitCompactionRunwayTokens() int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.cfg.PreSubmitCompactionLeadTokens > 0 {
 		return e.cfg.PreSubmitCompactionLeadTokens
 	}
-	return defaultPreSubmitCompactionLeadTokens
+	return compaction.DefaultPreSubmitRunwayTokens
 }
 
 func (e *Engine) preSubmitCompactionTokenLimit(ctx context.Context) int {
@@ -137,23 +137,7 @@ func (e *Engine) preSubmitCompactionTokenLimit(ctx context.Context) int {
 	if limit <= 0 {
 		return 0
 	}
-	window := e.resolveContextWindowTokens(ctx)
-	if window <= 0 {
-		return limit
-	}
-	lead := window - limit
-	if lead < 0 {
-		lead = 0
-	}
-	leadCap := e.preSubmitCompactionLeadTokens()
-	if lead > leadCap {
-		lead = leadCap
-	}
-	threshold := limit - lead
-	if threshold < 1 {
-		return 1
-	}
-	return threshold
+	return compaction.EffectivePreSubmitThresholdTokens(limit, e.preSubmitCompactionRunwayTokens())
 }
 
 func (e *Engine) ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error) {
