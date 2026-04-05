@@ -28,8 +28,8 @@ Out of scope for this plan:
 Until this plan is complete, transcript-affecting work must be treated as stabilization work, not normal feature work.
 
 - [ ] Do not stack unrelated migration changes on top of transcript/runtime UX changes.
-- [ ] Require rendered-path proof for any change that affects ongoing or detail transcript behavior.
-- [ ] Treat loopback and remote behavior as equally important acceptance surfaces.
+- [x] Require rendered-path proof for any change that affects ongoing or detail transcript behavior.
+- [x] Treat loopback and remote behavior as equally important acceptance surfaces.
 
 ## Workstream 1: State Ownership
 
@@ -37,68 +37,68 @@ Until this plan is complete, transcript-affecting work must be treated as stabil
 - [x] Define and document the role of hydration reads as recovery/repair rather than primary live UX.
 - [x] Audit the CLI for every place that can mutate transcript-visible state.
 - [ ] Remove or consolidate overlapping state update paths that can overwrite each other.
-- [ ] Establish a clear rule for when transcript reads may replace current UI state and when they must not.
+- [x] Establish a clear rule for when transcript reads may replace current UI state and when they must not.
 
 Exit criteria:
 
-- [ ] There is a single documented answer to "what updates ongoing mode live?"
-- [ ] There is a single documented answer to "what can replace already-visible transcript state?"
+- [x] There is a single documented answer to "what updates ongoing mode live?"
+- [x] There is a single documented answer to "what can replace already-visible transcript state?"
 
 ## Workstream 2: Live vs Committed State Separation
 
-- [ ] Separate stabilization work around committed transcript state from ephemeral live state.
-- [ ] Audit which visible elements are durable and which are transient.
+- [x] Separate stabilization work around committed transcript state from ephemeral live state.
+- [x] Audit which visible elements are durable and which are transient.
 - [ ] Eliminate cases where recovery/hydration logic clears or rewrites transient live state incorrectly.
 - [ ] Eliminate cases where transient state is being treated as if it were committed durable transcript state.
 
 Exit criteria:
 
-- [ ] Committed transcript recovery works without depending on transient live state.
+- [x] Committed transcript recovery works without depending on transient live state.
 - [ ] Live commentary/tool preview behavior works without depending on transcript rehydrate.
 
 ## Workstream 3: Ordering and Freshness
 
-- [ ] Introduce an explicit ordering/freshness contract between live events and transcript reads.
-- [ ] Ensure the client can distinguish newer live state from older hydration state.
-- [ ] Ensure reconnect and reload behavior can converge safely without clearing newer visible activity.
-- [ ] Ensure dormant-session hydration and active-session hydration follow the same correctness rules.
+- [x] Introduce an explicit ordering/freshness contract between live events and transcript reads.
+- [x] Ensure the client can distinguish newer live state from older hydration state.
+- [x] Ensure reconnect and reload behavior can converge safely without clearing newer visible activity.
+- [x] Ensure dormant-session hydration and active-session hydration follow the same correctness rules.
 
 Exit criteria:
 
-- [ ] A stale read cannot erase newer live transcript state.
-- [ ] Reconnect behavior is predictable and documented.
+- [x] A stale read cannot erase newer live transcript state.
+- [x] Reconnect behavior is predictable and documented.
 
 ## Workstream 4: Test Coverage That Matches The Product
 
 - [x] Add rendered TUI regression tests for the full active-session flow.
 - [x] Add real migrated-boundary tests for remote/session-activity delivery.
-- [ ] Cover ordering of mixed event classes, not just isolated events.
+- [x] Cover ordering of mixed event classes, not just isolated events.
 - [x] Cover stale-read vs live-stream race scenarios.
 - [x] Cover reconnect/hydrate correctness for active sessions.
 - [x] Cover dormant transcript reopen correctness for committed history.
 
 Minimum required scenarios:
 
-- [ ] user message appears immediately in ongoing mode
-- [ ] assistant commentary appears live
-- [ ] tool call appears live in order
-- [ ] tool result appears in order
-- [ ] final answer appears in order
-- [ ] reconnect rehydrates committed transcript without blanking the session
-- [ ] stale transcript reads cannot wipe newer live state
+- [x] user message appears immediately in ongoing mode
+- [x] assistant commentary appears live
+- [x] tool call appears live in order
+- [x] tool result appears in order
+- [x] final answer appears in order
+- [x] reconnect rehydrates committed transcript without blanking the session
+- [x] stale transcript reads cannot wipe newer live state
 - [ ] loopback and remote paths behave equivalently for transcript-critical flows
 
 Exit criteria:
 
-- [ ] The user-reported failure modes are covered by automated tests.
-- [ ] Transcript-affecting fixes are blocked on rendered-path proof, not only unit tests.
+- [x] The user-reported failure modes are covered by automated tests.
+- [x] Transcript-affecting fixes are blocked on rendered-path proof, not only unit tests.
 
 ## Workstream 5: Observability And Debugging
 
 - [ ] Add enough diagnostics to explain why visible transcript state changed.
 - [ ] Make it easy to tell whether a visible change came from a live event, a transcript read, or a recovery path.
 - [ ] Make it easy to identify ordering/freshness mismatches during debugging.
-- [ ] Add targeted debugging guidance for future transcript regressions.
+- [x] Add targeted debugging guidance for future transcript regressions.
 
 Exit criteria:
 
@@ -111,7 +111,7 @@ Exit criteria:
 - [x] Group them by root cause rather than by symptom.
 - [ ] Close quick symptom patches that do not fit the stabilized model.
 - [ ] Re-test previously fixed regressions after each structural transcript change.
-- [ ] Keep a running checklist of transcript-critical user workflows and their current status.
+- [x] Keep a running checklist of transcript-critical user workflows and their current status.
 
 Exit criteria:
 
@@ -132,7 +132,7 @@ Recommended execution order:
 Parallelizable work:
 
 - [x] rendered TUI regression tests
-- [ ] remote/session-activity regression tests
+- [x] remote/session-activity regression tests
 - [x] transcript mutation-path inventory
 - [x] regression backlog inventory
 - [ ] observability/debugging additions
@@ -167,9 +167,55 @@ The current highest-value remaining gaps from the parallel audit are:
 
 - [x] remote/session-activity proof for `user -> commentary/progress -> tool call -> tool result -> final answer`
 - [x] active-session reconnect/hydration rendered proof on the migrated path
-- [ ] explicit freshness/overwrite rule for live events vs transcript reads
+- [x] explicit freshness/overwrite rule for live events vs transcript reads
 - [x] focused dormant-session reopen proof for committed transcript in both modes
 
 Known remaining caveat:
 
 - [ ] remote session-activity still preserves live assistant progress via `assistant_delta`, but does not yet surface the persisted commentary transcript entry for the assistant/tool-call turn
+
+Deferred decision for this slice:
+
+- [x] Defer raw remote commentary-entry parity for assistant/tool-call turns until a later runtime-event contract change.
+- [x] Treat the current requirement as convergence via hydrate, not event-for-event parity on the raw session-activity stream.
+
+## Current Workflow Status
+
+This is the running workflow checklist for stabilization triage. It is intentionally narrower than the release gate.
+
+- [x] ordinary user submit shows in ongoing mode immediately
+- [x] assistant commentary stays visible after user flush instead of being dropped by hydrate
+- [x] loopback ongoing-mode mixed event flow renders in order
+- [x] transcript hydrate after `conversation_updated` restores committed transcript without replay duplication
+- [x] stale/same-revision hydrate cannot wipe newer live assistant output
+- [x] stale/same-revision hydrate cannot wipe newer live reasoning output
+- [x] dormant-session reopen preserves committed transcript
+- [ ] remote path carries the same assistant commentary transcript entry shape as loopback
+
+Authoritative proof for the checked items lives in:
+
+- `docs/dev/app-server-migration/analysis/transcript-workflow-proof.md`
+- `docs/dev/app-server-migration/analysis/transcript-observability-plan.md`
+
+## Remaining Execution Slices
+
+The plan is no longer blocked on broad ownership/freshness design. The remaining work is now narrower and should be executed as bounded slices.
+
+Serialized slices:
+
+1. Close or deliberately defer the remaining overlap paths that can still overwrite live state during repair.
+2. Keep the remote commentary gap explicitly deferred until we choose to change the runtime-event/projection contract.
+
+Parallelizable slices:
+
+1. Add transcript-source diagnostics so a visible change can be attributed to live event, hydrate, or recovery.
+2. Re-run the transcript-critical workflow matrix after each structural change and keep this checklist current.
+3. Clean up symptom-level patches that no longer fit the stabilized overwrite model.
+
+## Orchestrator Notes
+
+These items are intentionally not treated as open design questions anymore.
+
+- The workflow-proof mapping is complete enough to support the current checklist. Update it whenever a checklist item changes.
+- The observability slice is now concretely scoped; future implementation should follow `analysis/transcript-observability-plan.md` instead of inventing ad hoc logging.
+- The remote commentary gap is an intentional defer, not a forgotten bug. It should only be reopened alongside a deliberate runtime-event contract change.
