@@ -45,15 +45,12 @@ type SessionViewService interface {
 }
 
 func (r SessionMainViewRequest) Validate() error {
-	if strings.TrimSpace(r.SessionID) == "" {
-		return errors.New("session_id is required")
-	}
-	return nil
+	return validateRequiredSessionID(r.SessionID)
 }
 
 func (r RunGetRequest) Validate() error {
-	if strings.TrimSpace(r.SessionID) == "" {
-		return errors.New("session_id is required")
+	if err := validateRequiredSessionID(r.SessionID); err != nil {
+		return err
 	}
 	if strings.TrimSpace(r.RunID) == "" {
 		return errors.New("run_id is required")
@@ -62,8 +59,8 @@ func (r RunGetRequest) Validate() error {
 }
 
 func (r SessionTranscriptPageRequest) Validate() error {
-	if strings.TrimSpace(r.SessionID) == "" {
-		return errors.New("session_id is required")
+	if err := validateRequiredSessionID(r.SessionID); err != nil {
+		return err
 	}
 	if r.Offset < 0 {
 		return errors.New("offset must be >= 0")

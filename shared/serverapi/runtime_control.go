@@ -1,10 +1,6 @@
 package serverapi
 
-import (
-	"context"
-	"errors"
-	"strings"
-)
+import "context"
 
 type RuntimeSetSessionNameRequest struct {
 	SessionID string `json:"session_id"`
@@ -143,10 +139,7 @@ type RuntimeControlService interface {
 }
 
 func validateRuntimeSessionID(sessionID string) error {
-	if strings.TrimSpace(sessionID) == "" {
-		return errors.New("session_id is required")
-	}
-	return nil
+	return validateRequiredSessionID(sessionID)
 }
 
 func (r RuntimeSetSessionNameRequest) Validate() error { return validateRuntimeSessionID(r.SessionID) }

@@ -3,7 +3,6 @@ package serverapi
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 )
 
@@ -77,18 +76,5 @@ func (r SessionResolveTransitionRequest) Validate() error {
 }
 
 func validateLifecycleSessionID(sessionID string) error {
-	trimmed := strings.TrimSpace(sessionID)
-	if trimmed == "" {
-		return errors.New("session_id is required")
-	}
-	if filepath.IsAbs(trimmed) || trimmed == "." || trimmed == ".." {
-		return errors.New("session_id must be a single session id")
-	}
-	if strings.Contains(trimmed, "/") || strings.Contains(trimmed, "\\") {
-		return errors.New("session_id must be a single session id")
-	}
-	if filepath.Clean(trimmed) != trimmed {
-		return errors.New("session_id must be a single session id")
-	}
-	return nil
+	return validateScopedSessionID(sessionID)
 }

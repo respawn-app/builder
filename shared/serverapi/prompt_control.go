@@ -36,8 +36,8 @@ func (r AskAnswerRequest) Validate() error {
 	if strings.TrimSpace(r.ClientRequestID) == "" {
 		return errors.New("client_request_id is required")
 	}
-	if strings.TrimSpace(r.SessionID) == "" {
-		return errors.New("session_id is required")
+	if err := validateRequiredSessionID(r.SessionID); err != nil {
+		return err
 	}
 	if strings.TrimSpace(r.AskID) == "" {
 		return errors.New("ask_id is required")
@@ -49,8 +49,8 @@ func (r ApprovalAnswerRequest) Validate() error {
 	if strings.TrimSpace(r.ClientRequestID) == "" {
 		return errors.New("client_request_id is required")
 	}
-	if strings.TrimSpace(r.SessionID) == "" {
-		return errors.New("session_id is required")
+	if err := validateRequiredSessionID(r.SessionID); err != nil {
+		return err
 	}
 	if strings.TrimSpace(r.ApprovalID) == "" {
 		return errors.New("approval_id is required")

@@ -3,7 +3,6 @@ package serverapi
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 
 	"builder/shared/config"
@@ -32,7 +31,7 @@ func (r SessionRuntimeActivateRequest) Validate() error {
 	if strings.TrimSpace(r.ClientRequestID) == "" {
 		return errors.New("client_request_id is required")
 	}
-	if err := validateSessionRuntimeSessionID(r.SessionID); err != nil {
+	if err := validateScopedSessionID(r.SessionID); err != nil {
 		return err
 	}
 	if strings.TrimSpace(r.WorkspaceRoot) == "" {
@@ -45,22 +44,5 @@ func (r SessionRuntimeReleaseRequest) Validate() error {
 	if strings.TrimSpace(r.ClientRequestID) == "" {
 		return errors.New("client_request_id is required")
 	}
-	return validateSessionRuntimeSessionID(r.SessionID)
-}
-
-func validateSessionRuntimeSessionID(sessionID string) error {
-	trimmed := strings.TrimSpace(sessionID)
-	if trimmed == "" {
-		return errors.New("session_id is required")
-	}
-	if filepath.IsAbs(trimmed) || trimmed == "." || trimmed == ".." {
-		return errors.New("session_id must be a single session id")
-	}
-	if strings.Contains(trimmed, "/") || strings.Contains(trimmed, "\\") {
-		return errors.New("session_id must be a single session id")
-	}
-	if filepath.Clean(trimmed) != trimmed {
-		return errors.New("session_id must be a single session id")
-	}
-	return nil
+	return validateScopedSessionID(r.SessionID)
 }
