@@ -137,7 +137,13 @@ func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wri
 		OpenAIBaseURLExplicit: flags.OpenAIBaseURLExplicit,
 	}
 
-	if err := runInteractiveApp(context.Background(), opts); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := runInteractiveApp(ctx, opts); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return 130
+		}
 		fmt.Fprintln(stderr, err)
 		return 1
 	}

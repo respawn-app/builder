@@ -165,6 +165,25 @@ func TestRootCommandMapsCommonFlagsToInteractiveApp(t *testing.T) {
 	}
 }
 
+func TestRootCommandInteractiveInterruptReturns130(t *testing.T) {
+	original := runInteractiveApp
+	t.Cleanup(func() {
+		runInteractiveApp = original
+	})
+	runInteractiveApp = func(ctx context.Context, opts app.Options) error {
+		return context.Canceled
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := rootCommand([]string{"--force-interactive"}, strings.NewReader(""), &stdout, &stderr); code != 130 {
+		t.Fatalf("exit code = %d, want 130", code)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
 func TestRootCommandServeUsesStandaloneServerPath(t *testing.T) {
 	originalStart := startServeServer
 	originalHandlers := newServeStartupHandlers
