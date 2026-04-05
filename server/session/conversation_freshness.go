@@ -14,12 +14,24 @@ func (f ConversationFreshness) IsFresh() bool {
 }
 
 func conversationFreshnessFromEvents(events []Event) ConversationFreshness {
+	freshness := ConversationFreshnessFresh
 	for _, evt := range events {
-		if hasVisibleUserMessageEvent(evt.Kind, evt.Payload) {
-			return ConversationFreshnessEstablished
+		freshness = advanceConversationFreshness(freshness, evt)
+		if freshness == ConversationFreshnessEstablished {
+			return freshness
 		}
 	}
-	return ConversationFreshnessFresh
+	return freshness
+}
+
+func advanceConversationFreshness(current ConversationFreshness, evt Event) ConversationFreshness {
+	if current == ConversationFreshnessEstablished {
+		return current
+	}
+	if hasVisibleUserMessageEvent(evt.Kind, evt.Payload) {
+		return ConversationFreshnessEstablished
+	}
+	return current
 }
 
 func hasVisibleUserMessageEvent(kind string, payload json.RawMessage) bool {

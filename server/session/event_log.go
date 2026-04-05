@@ -25,7 +25,11 @@ func (s *Store) bootstrapEventLogStateLocked() error {
 	if !s.persisted {
 		return nil
 	}
-	parsed, err := readEventsFile(s.eventsFP)
+	freshness := ConversationFreshnessFresh
+	parsed, err := walkEventsFile(s.eventsFP, func(evt Event) error {
+		freshness = advanceConversationFreshness(freshness, evt)
+		return nil
+	})
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if writeErr := os.WriteFile(s.eventsFP, nil, 0o644); writeErr != nil {
@@ -49,7 +53,7 @@ func (s *Store) bootstrapEventLogStateLocked() error {
 	s.eventsFileSizeBytes = parsed.totalBytes
 	s.pendingFsyncWrites = 0
 	s.writesSinceCompaction = 0
-	s.conversationFreshness = conversationFreshnessFromEvents(parsed.events)
+	s.conversationFreshness = freshness
 	if parsed.lastSequence != s.meta.LastSequence {
 		s.meta.LastSequence = parsed.lastSequence
 		s.meta.UpdatedAt = time.Now().UTC()

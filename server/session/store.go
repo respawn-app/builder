@@ -492,8 +492,8 @@ func (s *Store) advanceConversationFreshnessLocked(events []Event) {
 		return
 	}
 	for _, evt := range events {
-		if hasVisibleUserMessageEvent(evt.Kind, evt.Payload) {
-			s.conversationFreshness = ConversationFreshnessEstablished
+		s.conversationFreshness = advanceConversationFreshness(s.conversationFreshness, evt)
+		if s.conversationFreshness == ConversationFreshnessEstablished {
 			return
 		}
 	}
