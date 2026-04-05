@@ -206,10 +206,12 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 			ToolCall:    transcriptEntry.ToolCall,
 		})
 	}
+	m.transcriptRevision = max(m.transcriptRevision, evt.TranscriptRevision)
 	m.transcriptTotalEntries = max(m.transcriptTotalEntries, startOffset+len(entries))
 	m.refreshRollbackCandidates()
 	if m.detailTranscript.loaded {
 		page := clientui.TranscriptPage{
+			Revision:     m.transcriptRevision,
 			Offset:       startOffset,
 			TotalEntries: m.transcriptTotalEntries,
 			Entries:      cloneChatEntries(entries),
