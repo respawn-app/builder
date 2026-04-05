@@ -117,6 +117,13 @@ type ContextUsage struct {
 type Engine struct {
 	mu sync.Mutex
 
+	lifecycleMu     sync.Mutex
+	lifecycleOnce   sync.Once
+	lifecycleCtx    context.Context
+	lifecycleCancel context.CancelFunc
+	lifecycleWG     sync.WaitGroup
+	lifecycleClosed bool
+
 	store    *session.Store
 	llm      llm.Client
 	reviewer llm.Client
@@ -219,6 +226,7 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 		cfg:      cfg,
 		chat:     newChatStore(),
 	}
+	eng.ensureLifecycle()
 	eng.ensureOrchestrationCollaborators()
 
 	reviewerFrequency, ok := NormalizeReviewerFrequency(eng.cfg.Reviewer.Frequency)
@@ -255,6 +263,55 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 	}
 
 	return eng, nil
+}
+
+func (e *Engine) Close() error {
+	if e == nil {
+		return nil
+	}
+	e.ensureLifecycle()
+	e.lifecycleMu.Lock()
+	if e.lifecycleClosed {
+		e.lifecycleMu.Unlock()
+		return nil
+	}
+	e.lifecycleClosed = true
+	cancel := e.lifecycleCancel
+	e.lifecycleMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	e.lifecycleWG.Wait()
+	return nil
+}
+
+func (e *Engine) ensureLifecycle() {
+	if e == nil {
+		return
+	}
+	e.lifecycleOnce.Do(func() {
+		e.lifecycleCtx, e.lifecycleCancel = context.WithCancel(context.Background())
+	})
+}
+
+func (e *Engine) launchLifecycleTask(task func(context.Context)) bool {
+	if e == nil || task == nil {
+		return false
+	}
+	e.ensureLifecycle()
+	e.lifecycleMu.Lock()
+	if e.lifecycleClosed {
+		e.lifecycleMu.Unlock()
+		return false
+	}
+	e.lifecycleWG.Add(1)
+	ctx := e.lifecycleCtx
+	e.lifecycleMu.Unlock()
+	go func(ctx context.Context) {
+		defer e.lifecycleWG.Done()
+		task(ctx)
+	}(ctx)
+	return true
 }
 
 func (e *Engine) QueueUserMessage(text string) {
