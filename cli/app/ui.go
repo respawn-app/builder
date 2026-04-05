@@ -423,6 +423,9 @@ type uiModel struct {
 	transcriptEntries        []tui.TranscriptEntry
 	transcriptBaseOffset     int
 	transcriptTotalEntries   int
+	transcriptRevision       int64
+	transcriptLiveDirty      bool
+	reasoningLiveDirty       bool
 	detailTranscript         uiDetailTranscriptWindow
 	runtimeMainViewToken     uint64
 	runtimeTranscriptToken   uint64
