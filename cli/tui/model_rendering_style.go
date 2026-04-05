@@ -116,19 +116,54 @@ func (m Model) roleSymbol(role string) string {
 	if prefix == "" {
 		return ""
 	}
+	p := m.palette()
 	switch role {
 	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error", "tool_question", "tool_question_error", "tool_web_search", "tool_web_search_success", "tool_web_search_error":
-		return styleForRole(role, m.palette()).Render(prefix)
+		return renderRoleSymbol(prefix, roleSymbolStyle(role, p))
 	case "error", "warning", roleDeveloperFeedback, roleInterruption:
-		return styleForRole(role, m.palette()).Render(prefix)
+		return renderRoleSymbol(prefix, roleSymbolStyle(role, p))
 	case "reviewer_status", "reviewer_suggestions":
-		return styleForRole(role, m.palette()).Render(prefix)
+		return renderRoleSymbol(prefix, roleSymbolStyle(role, p))
 	default:
 		if isCompactionRole(role) {
-			return styleForRole(role, m.palette()).Render(prefix)
+			return renderRoleSymbol(prefix, roleSymbolStyle(role, p))
 		}
 		return prefix
 	}
+}
+
+type roleSymbolColorStyle struct {
+	color rgbColor
+	faint bool
+}
+
+func roleSymbolStyle(role string, p palette) roleSymbolColorStyle {
+	if isCompactionRole(role) {
+		return roleSymbolColorStyle{color: p.compactionColor}
+	}
+	switch role {
+	case "tool_success", "tool_shell_success", "tool_web_search_success":
+		return roleSymbolColorStyle{color: p.toolSuccessColor}
+	case "reviewer_status", "reviewer_suggestions":
+		return roleSymbolColorStyle{color: p.successColor}
+	case "tool_error", "tool_shell_error", "tool_web_search_error":
+		return roleSymbolColorStyle{color: p.toolErrorColor}
+	case "tool_question":
+		return roleSymbolColorStyle{color: p.userColor}
+	case "tool_question_error", "error", roleDeveloperFeedback, roleInterruption:
+		return roleSymbolColorStyle{color: p.errorColor}
+	case "warning":
+		return roleSymbolColorStyle{color: p.warningColor}
+	case "tool", "tool_shell", "tool_web_search":
+		return roleSymbolColorStyle{color: p.toolColor}
+	default:
+		return roleSymbolColorStyle{color: p.foregroundColor}
+	}
+}
+
+func renderRoleSymbol(prefix string, style roleSymbolColorStyle) string {
+	transform := ansiStyleTransform{DefaultForeground: &style.color, ForceFaint: style.faint}
+	return styleEscape(transform, false) + prefix + "\x1b[0m"
 }
 
 func rolePrefix(role string) string {
@@ -235,23 +270,29 @@ func (m Model) entryRole(entry TranscriptEntry) string {
 }
 
 type palette struct {
-	foregroundColor rgbColor
-	preview         lipgloss.Style
-	previewColor    rgbColor
-	successColor    rgbColor
-	warningColor    rgbColor
-	errorColor      rgbColor
-	user            lipgloss.Style
-	model           lipgloss.Style
-	tool            lipgloss.Style
-	toolSuccess     lipgloss.Style
-	toolError       lipgloss.Style
-	system          lipgloss.Style
-	error           lipgloss.Style
-	warning         lipgloss.Style
-	success         lipgloss.Style
-	compaction      lipgloss.Style
-	selection       lipgloss.Style
+	foregroundColor  rgbColor
+	preview          lipgloss.Style
+	previewColor     rgbColor
+	userColor        rgbColor
+	modelColor       rgbColor
+	toolColor        rgbColor
+	toolSuccessColor rgbColor
+	toolErrorColor   rgbColor
+	successColor     rgbColor
+	warningColor     rgbColor
+	errorColor       rgbColor
+	compactionColor  rgbColor
+	user             lipgloss.Style
+	model            lipgloss.Style
+	tool             lipgloss.Style
+	toolSuccess      lipgloss.Style
+	toolError        lipgloss.Style
+	system           lipgloss.Style
+	error            lipgloss.Style
+	warning          lipgloss.Style
+	success          lipgloss.Style
+	compaction       lipgloss.Style
+	selection        lipgloss.Style
 
 	diffAddBackground    string
 	diffRemoveBackground string
@@ -260,22 +301,28 @@ type palette struct {
 func (m Model) palette() palette {
 	tokens := theme.ResolvePalette(m.theme)
 	return palette{
-		foregroundColor: rgbColorFromHex(tokens.Transcript.Foreground.TrueColor),
-		preview:         lipgloss.NewStyle().Foreground(tokens.Transcript.Subdued.Lipgloss()),
-		previewColor:    rgbColorFromHex(tokens.Transcript.Subdued.TrueColor),
-		successColor:    rgbColorFromHex(tokens.Transcript.Success.TrueColor),
-		warningColor:    rgbColorFromHex(tokens.Transcript.Warning.TrueColor),
-		errorColor:      rgbColorFromHex(tokens.Transcript.Error.TrueColor),
-		user:            lipgloss.NewStyle().Foreground(tokens.Transcript.User.Lipgloss()),
-		model:           lipgloss.NewStyle().Foreground(tokens.Transcript.Assistant.Lipgloss()),
-		tool:            lipgloss.NewStyle().Foreground(tokens.Transcript.Tool.Lipgloss()),
-		toolSuccess:     lipgloss.NewStyle().Foreground(tokens.Transcript.ToolSuccess.Lipgloss()),
-		toolError:       lipgloss.NewStyle().Foreground(tokens.Transcript.ToolError.Lipgloss()),
-		system:          lipgloss.NewStyle().Foreground(tokens.Transcript.System.Lipgloss()).Faint(true),
-		error:           lipgloss.NewStyle().Foreground(tokens.Transcript.Error.Lipgloss()),
-		warning:         lipgloss.NewStyle().Foreground(tokens.Transcript.Warning.Lipgloss()),
-		success:         lipgloss.NewStyle().Foreground(tokens.Transcript.Success.Lipgloss()),
-		compaction:      lipgloss.NewStyle().Foreground(tokens.Transcript.Compaction.Lipgloss()),
+		foregroundColor:  rgbColorFromHex(tokens.Transcript.Foreground.TrueColor),
+		preview:          lipgloss.NewStyle().Foreground(tokens.Transcript.Subdued.Lipgloss()),
+		previewColor:     rgbColorFromHex(tokens.Transcript.Subdued.TrueColor),
+		userColor:        rgbColorFromHex(tokens.Transcript.User.TrueColor),
+		modelColor:       rgbColorFromHex(tokens.Transcript.Assistant.TrueColor),
+		toolColor:        rgbColorFromHex(tokens.Transcript.Tool.TrueColor),
+		toolSuccessColor: rgbColorFromHex(tokens.Transcript.ToolSuccess.TrueColor),
+		toolErrorColor:   rgbColorFromHex(tokens.Transcript.ToolError.TrueColor),
+		successColor:     rgbColorFromHex(tokens.Transcript.Success.TrueColor),
+		warningColor:     rgbColorFromHex(tokens.Transcript.Warning.TrueColor),
+		errorColor:       rgbColorFromHex(tokens.Transcript.Error.TrueColor),
+		compactionColor:  rgbColorFromHex(tokens.Transcript.Compaction.TrueColor),
+		user:             lipgloss.NewStyle().Foreground(tokens.Transcript.User.Lipgloss()),
+		model:            lipgloss.NewStyle().Foreground(tokens.Transcript.Assistant.Lipgloss()),
+		tool:             lipgloss.NewStyle().Foreground(tokens.Transcript.Tool.Lipgloss()),
+		toolSuccess:      lipgloss.NewStyle().Foreground(tokens.Transcript.ToolSuccess.Lipgloss()),
+		toolError:        lipgloss.NewStyle().Foreground(tokens.Transcript.ToolError.Lipgloss()),
+		system:           lipgloss.NewStyle().Foreground(tokens.Transcript.System.Lipgloss()).Faint(true),
+		error:            lipgloss.NewStyle().Foreground(tokens.Transcript.Error.Lipgloss()),
+		warning:          lipgloss.NewStyle().Foreground(tokens.Transcript.Warning.Lipgloss()),
+		success:          lipgloss.NewStyle().Foreground(tokens.Transcript.Success.Lipgloss()),
+		compaction:       lipgloss.NewStyle().Foreground(tokens.Transcript.Compaction.Lipgloss()),
 		selection: lipgloss.NewStyle().
 			Background(tokens.Transcript.SelectionBackground.Lipgloss()).
 			Foreground(tokens.Transcript.SelectionForeground.Lipgloss()),

@@ -72,6 +72,36 @@ func testCodeRendererOverridesBaseTextColorWithAppForeground(t *testing.T, theme
 	}
 }
 
+func TestCodeRendererShellHighlightOwnsDefaultForegroundDark(t *testing.T) {
+	testCodeRendererShellHighlightOwnsDefaultForeground(t, "dark")
+}
+
+func TestCodeRendererShellHighlightOwnsDefaultForegroundLight(t *testing.T) {
+	testCodeRendererShellHighlightOwnsDefaultForeground(t, "light")
+}
+
+func testCodeRendererShellHighlightOwnsDefaultForeground(t *testing.T, theme string) {
+	t.Helper()
+	r := newCodeRenderer(theme)
+	hint := &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindShell}
+	command := `git add cli/app/ui_mode_flow_test.go cli/app/ui_native_scrollback_integration_test.go cli/app/ui_runtime_adapter_test.go cli/app/ui_runtime_client.go cli/app/ui_runtime_control_test.go cli/app/ui_runtime_sync.go cli/tui/model_reducer.go cli/tui/model_rendering.go cli/tui/model_rendering_style.go cli/tui/model_rendering_tools.go cli/tui/model_test.go cli/tui/roles.go docs/dev/decisions.md server/primaryrun/runtime_client.go server/primaryrun/runtime_client_test.go server/runtime/chat_store.go server/runtime/chat_store_test.go server/runtime/compaction.go server/runtime/engine_test.go server/runtime/step_executor.go server/runtime/transcript_event_entries.go server/runtime/transcript_projector_test.go server/runtime/transcript_scan.go server/runtime/transcript_message_visibility.go shared/clientui/runtime.go shared/transcript/roles.go && git commit -m "fix: align transcript visibility and refresh behavior"`
+
+	out, ok := r.render(hint, command)
+	if !ok {
+		t.Fatal("expected shell highlight to render")
+	}
+	assertHasForegroundOwnership(t, out, r.baseForeground)
+	assertRestoresForegroundAfterReset(t, out, r.baseForeground)
+	for _, unwanted := range oldFormatterBaseForegroundEscapes(theme) {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("expected shell highlight to avoid formatter-owned base foreground %q for %s theme, got %q", unwanted, theme, out)
+		}
+	}
+	if got := ansi.Strip(out); got != command {
+		t.Fatalf("expected shell highlight text preserved, got %q", got)
+	}
+}
+
 func TestCodeRendererRendersDiffWhenDiffHintIsProvided(t *testing.T) {
 	r := newCodeRenderer("dark")
 	hint := &transcript.ToolRenderHint{Kind: transcript.ToolRenderKindDiff}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
@@ -30,6 +31,9 @@ func (m Model) flattenEntryWithMetaAndSymbol(role, text string, muteText bool, t
 	}
 	content := m.renderEntryContentStage(role, text, renderWidth, toolMeta, muteText)
 	content = m.applyEntrySemanticTransformStage(content)
+	if muteText && isShellPreviewRole(role) {
+		return m.flattenSingleLineShellPreview(role, content, renderWidth, symbolOverride)
+	}
 	content = m.wrapEntryContentStage(content, renderWidth)
 	plainLines := make([]string, 0, len(content.Lines))
 	for _, line := range content.Lines {
@@ -39,15 +43,96 @@ func (m Model) flattenEntryWithMetaAndSymbol(role, text string, muteText bool, t
 	laidOut := m.layoutEntryContentStage(role, content)
 	decorated := m.decorateEntryLayoutBodyStage(role, laidOut, renderWidth, muteText, isEditedBlock)
 	decorated = m.applyDeferredDecoratedLayoutTransformStage(decorated)
+	return m.attachRoleSymbolStage(role, decorated, symbolOverride)
+}
+
+func (m Model) flattenSingleLineShellPreview(role string, content transcriptRenderContent, renderWidth int, symbolOverride string) []string {
+	first, forceEllipsis := firstShellPreviewRenderLine(content)
+	plainLines := []string{first.Text}
+	isEditedBlock := isEditedToolBlock(plainLines)
+	laidOut := m.layoutEntryContentStage(role, transcriptRenderContent{WrapMode: transcriptRenderWrapModePreserved, Lines: []transcriptRenderLine{first}})
+	decorated := m.decorateEntryLayoutBodyStage(role, laidOut, renderWidth, true, isEditedBlock)
+	decorated = m.applyDeferredDecoratedLayoutTransformStage(decorated)
 	out := m.attachRoleSymbolStage(role, decorated, symbolOverride)
-	if muteText && isShellPreviewRole(role) && shellPreviewShouldCollapse(text) {
-		ellipsis := "  " + m.palette().preview.Faint(true).Render("…")
-		if len(out) == 0 {
-			return []string{"", ellipsis}
-		}
-		return []string{out[0], ellipsis}
+	if len(out) == 0 {
+		return []string{truncateRenderedLineToWidthWithEllipsis("", max(1, m.viewportWidth), true)}
 	}
-	return out
+	targetWidth := m.viewportWidth
+	if targetWidth < 1 {
+		targetWidth = 1
+	}
+	return []string{truncateRenderedLineToWidthWithEllipsis(out[0], targetWidth, forceEllipsis)}
+}
+
+func firstShellPreviewRenderLine(content transcriptRenderContent) (transcriptRenderLine, bool) {
+	if len(content.Lines) == 0 {
+		return transcriptRenderLine{}, true
+	}
+	first := content.Lines[0]
+	parts := splitLines(first.Text)
+	if len(parts) == 0 {
+		return first, len(content.Lines) > 1
+	}
+	first.Text = parts[0]
+	return first, len(parts) > 1 || len(content.Lines) > 1
+}
+
+func truncateRenderedLineToWidthWithEllipsis(line string, width int, forceEllipsis bool) string {
+	if width < 1 {
+		width = 1
+	}
+	if line == "" {
+		if forceEllipsis {
+			return "…"
+		}
+		return ""
+	}
+	if !forceEllipsis && lipgloss.Width(line) <= width {
+		return line
+	}
+	if width == 1 {
+		return "…"
+	}
+	parser := xansi.GetParser()
+	defer xansi.PutParser(parser)
+
+	visibleWidth := lipgloss.Width(line)
+	visibleLimit := width - 1
+	if forceEllipsis && visibleWidth < width {
+		visibleLimit = visibleWidth
+	}
+	if visibleLimit < 0 {
+		visibleLimit = 0
+	}
+
+	var out strings.Builder
+	hasANSI := strings.Contains(line, "\x1b[")
+	state := byte(0)
+	input := line
+	consumedWidth := 0
+	for len(input) > 0 {
+		seq, seqWidth, n, newState := xansi.GraphemeWidth.DecodeSequenceInString(input, state, parser)
+		if n <= 0 {
+			break
+		}
+		state = newState
+		if seqWidth == 0 {
+			out.WriteString(seq)
+			input = input[n:]
+			continue
+		}
+		if consumedWidth+seqWidth > visibleLimit {
+			break
+		}
+		out.WriteString(seq)
+		consumedWidth += seqWidth
+		input = input[n:]
+	}
+	out.WriteString("…")
+	if hasANSI {
+		out.WriteString("\x1b[0m")
+	}
+	return out.String()
 }
 
 func (m Model) renderEntryContentStage(role, text string, width int, toolMeta *transcript.ToolCallMeta, muteText bool) transcriptRenderContent {

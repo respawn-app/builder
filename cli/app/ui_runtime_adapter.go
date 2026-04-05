@@ -409,19 +409,19 @@ func transcriptPageReplacementRejectReason(m *uiModel, req clientui.TranscriptPa
 	if !replacesOngoingTail {
 		return ""
 	}
-	if m.transcriptLiveDirty && page.Revision == m.transcriptRevision && transcriptTailSurfaceDiffers(m, page) {
+	if page.Revision == m.transcriptRevision && strings.TrimSpace(m.view.OngoingStreamingText()) != "" && strings.TrimSpace(page.Ongoing) == "" {
+		return "same_revision_would_clear_ongoing"
+	}
+	if m.transcriptLiveDirty && page.Revision == m.transcriptRevision && shouldAcceptEqualRevisionTailReplacement(m, page) {
 		return ""
 	}
 	if m.transcriptLiveDirty && page.Revision <= m.transcriptRevision {
 		return "live_dirty_same_or_older_revision"
 	}
-	if page.Revision == m.transcriptRevision && strings.TrimSpace(m.view.OngoingStreamingText()) != "" && strings.TrimSpace(page.Ongoing) == "" {
-		return "same_revision_would_clear_ongoing"
-	}
 	return ""
 }
 
-func transcriptTailSurfaceDiffers(m *uiModel, page clientui.TranscriptPage) bool {
+func shouldAcceptEqualRevisionTailReplacement(m *uiModel, page clientui.TranscriptPage) bool {
 	if m == nil {
 		return false
 	}
@@ -429,14 +429,25 @@ func transcriptTailSurfaceDiffers(m *uiModel, page clientui.TranscriptPage) bool
 	currentEnd := currentStart + len(m.transcriptEntries)
 	pageStart := page.Offset
 	pageEnd := page.Offset + len(page.Entries)
+	if pageStart > currentStart || pageEnd < currentEnd {
+		return false
+	}
 	overlapStart := max(currentStart, pageStart)
 	overlapEnd := min(currentEnd, pageEnd)
+	if overlapStart >= overlapEnd {
+		return pageEnd > currentEnd || m.view.OngoingStreamingText() != page.Ongoing || m.view.OngoingErrorText() != page.OngoingError
+	}
+	hasOverlapDiff := false
 	for absolute := overlapStart; absolute < overlapEnd; absolute++ {
 		currentIndex := absolute - currentStart
 		pageIndex := absolute - pageStart
 		if !transcriptEntryMatchesChatEntry(m.transcriptEntries[currentIndex], page.Entries[pageIndex]) {
-			return false
+			hasOverlapDiff = true
+			break
 		}
+	}
+	if hasOverlapDiff {
+		return true
 	}
 	if pageEnd > currentEnd {
 		return true

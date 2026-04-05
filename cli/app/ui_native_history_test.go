@@ -732,18 +732,18 @@ func TestNativePendingMultilineShellPreviewStaysTwoLines(t *testing.T) {
 	}
 
 	rendered := strings.Split(renderNativePendingToolSnapshot(entries, "dark", 80, 0), "\n")
-	if len(rendered) != 2 {
-		t.Fatalf("expected multiline pending shell preview capped to 2 lines, got %d (%q)", len(rendered), rendered)
+	if len(rendered) != 1 {
+		t.Fatalf("expected multiline pending shell preview collapsed to one truncated line, got %d (%q)", len(rendered), rendered)
 	}
 	plain := make([]string, 0, len(rendered))
 	for _, line := range rendered {
 		plain = append(plain, strings.TrimSpace(stripANSIPreserve(line)))
 	}
-	if plain[0] != pendingSpinnerFrame(0)+" cat > /tmp/demo.txt <<'EOF'" {
+	if !strings.HasPrefix(plain[0], pendingSpinnerFrame(0)+" cat > /tmp/demo.txt <<'EOF") {
 		t.Fatalf("unexpected first collapsed line: %q", plain[0])
 	}
-	if plain[1] != "…" {
-		t.Fatalf("expected ellipsis second line, got %q", plain[1])
+	if !strings.HasSuffix(plain[0], "…") {
+		t.Fatalf("expected inline ellipsis on truncated pending shell preview, got %q", plain[0])
 	}
 }
 
@@ -761,14 +761,14 @@ func TestNativePendingMultilineShellPreviewStaysTwoLinesWhenHeaderWraps(t *testi
 	}}
 
 	rendered := strings.Split(renderNativePendingToolSnapshot(entries, "dark", 28, 0), "\n")
-	if len(rendered) != 2 {
-		t.Fatalf("expected wrapped multiline pending shell preview capped to 2 lines, got %d (%q)", len(rendered), rendered)
+	if len(rendered) != 1 {
+		t.Fatalf("expected wrapped multiline pending shell preview collapsed to one truncated line, got %d (%q)", len(rendered), rendered)
 	}
 	if got := strings.TrimSpace(stripANSIPreserve(rendered[0])); !strings.HasPrefix(got, pendingSpinnerFrame(0)+" ") {
 		t.Fatalf("expected wrapped multiline pending shell preview to use spinner icon, got %q", rendered[0])
 	}
-	if got := strings.TrimSpace(stripANSIPreserve(rendered[1])); got != "…" {
-		t.Fatalf("expected wrapped multiline pending shell preview second line to be ellipsis, got %q", rendered[1])
+	if got := strings.TrimSpace(stripANSIPreserve(rendered[0])); !strings.HasSuffix(got, "…") {
+		t.Fatalf("expected wrapped multiline pending shell preview first line to end with ellipsis, got %q", rendered[0])
 	}
 }
 
@@ -818,7 +818,7 @@ func TestNativePendingCompletedMultilineShellPreviewStaysTwoLinesWithoutWaitingA
 		plain = append(plain, strings.TrimSpace(stripANSIPreserve(line)))
 	}
 	joined := strings.Join(plain, "\n")
-	if !strings.Contains(joined, "$ cat > /tmp/demo.txt <<'EOF'") {
+	if !strings.Contains(joined, "$ cat > /tmp/demo.txt <<'EOF") {
 		t.Fatalf("expected completed multiline pending shell preview header, got %q", plain)
 	}
 	if !strings.Contains(joined, "…") {

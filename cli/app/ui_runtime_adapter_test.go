@@ -977,6 +977,70 @@ func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenRuntim
 	}
 }
 
+func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenAuthoritativePageCorrectsOverlap(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "user", Text: "prompt"}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	if cmd, mutated := m.runtimeAdapter().applyProjectedTranscriptEntries([]clientui.ChatEntry{{
+		Role:       "tool_call",
+		Text:       "pwd",
+		ToolCallID: "stale-call",
+		ToolCall:   &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"},
+	}}, false); cmd != nil || !mutated {
+		t.Fatalf("expected live append without extra command, mutated=%t cmd=%v", mutated, cmd)
+	}
+	if !m.transcriptLiveDirty {
+		t.Fatal("expected live append to mark transcript live-dirty")
+	}
+
+	corrected := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 3,
+		Entries: []clientui.ChatEntry{
+			{Role: "user", Text: "prompt"},
+			{Role: "tool_call", Text: "pwd", ToolCallID: "call-1", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"}},
+			{Role: "tool_result_ok", Text: "/tmp", ToolCallID: "call-1"},
+		},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, corrected); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	if got, want := len(m.transcriptEntries), 3; got != want {
+		t.Fatalf("transcript entry count = %d, want %d", got, want)
+	}
+	if got := m.transcriptEntries[1].ToolCallID; got != "call-1" {
+		t.Fatalf("corrected tool call id = %q, want call-1", got)
+	}
+	if got := m.transcriptEntries[2].ToolCallID; got != "call-1" {
+		t.Fatalf("corrected tool result id = %q, want call-1", got)
+	}
+	if m.transcriptLiveDirty {
+		t.Fatal("expected corrective equal-revision refresh to clear transcriptLiveDirty")
+	}
+	rawCommitted := renderStyledNativeProjection(m.nativeProjection, m.theme, m.termWidth)
+	if plain := stripANSIPreserve(rawCommitted); !strings.Contains(plain, "$ pwd") {
+		t.Fatalf("expected corrected shell row in committed native projection, got %q", plain)
+	}
+	assertContainsColoredShellSymbol(t, rawCommitted, "dark success", transcriptToolSuccessColorHex("dark"))
+	assertNoColoredShellSymbol(t, rawCommitted, "dark pending", transcriptToolPendingColorHex("dark"))
+}
+
 func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenOngoingErrorChanged(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.termWidth = 100
@@ -1529,6 +1593,7 @@ func TestApplyChatSnapshotShowsMixedParallelPendingStatesInLiveView(t *testing.T
 	}
 	m.syncViewport()
 
+	rawView := m.View()
 	view := stripANSIPreserve(m.View())
 	if !strings.Contains(view, pendingSpinnerFrame(0)+" echo a") {
 		t.Fatalf("expected unresolved tool to keep spinner in live view, got %q", view)
@@ -1542,6 +1607,8 @@ func TestApplyChatSnapshotShowsMixedParallelPendingStatesInLiveView(t *testing.T
 	if strings.Contains(view, "waiting") {
 		t.Fatalf("did not expect waiting annotation in live view, got %q", view)
 	}
+	assertContainsColoredShellSymbol(t, rawView, "dark success", transcriptToolSuccessColorHex("dark"))
+	assertNoColoredShellSymbol(t, rawView, "dark pending", transcriptToolPendingColorHex("dark"))
 }
 
 func TestUserMessageFlushedSyncsConversationForNativeReplay(t *testing.T) {
