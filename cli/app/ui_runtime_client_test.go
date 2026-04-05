@@ -177,6 +177,55 @@ func TestRuntimeClientLoadTranscriptPageDefaultsToOngoingTail(t *testing.T) {
 	}
 }
 
+func TestRuntimeClientLoadTranscriptPageReusesFreshCachedPageForSameRequest(t *testing.T) {
+	reads := &countingSessionViewClient{page: clientui.TranscriptPage{SessionID: "session-1", Offset: 300, TotalEntries: 500}}
+	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil))
+	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, controls)
+	req := clientui.TranscriptPageRequest{Offset: 300, Limit: 200}
+
+	if _, err := runtimeClient.LoadTranscriptPage(req); err != nil {
+		t.Fatalf("first load transcript page: %v", err)
+	}
+	if _, err := runtimeClient.LoadTranscriptPage(req); err != nil {
+		t.Fatalf("second load transcript page: %v", err)
+	}
+	if got := reads.count.Load(); got != 1 {
+		t.Fatalf("session view call count = %d, want 1", got)
+	}
+}
+
+func TestRuntimeClientLoadTranscriptPageCachesByRequestKey(t *testing.T) {
+	reads := &countingSessionViewClient{page: clientui.TranscriptPage{SessionID: "session-1", TotalEntries: 500}}
+	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil))
+	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, controls)
+
+	if _, err := runtimeClient.LoadTranscriptPage(clientui.TranscriptPageRequest{Offset: 300, Limit: 200}); err != nil {
+		t.Fatalf("first load transcript page: %v", err)
+	}
+	if _, err := runtimeClient.LoadTranscriptPage(clientui.TranscriptPageRequest{Offset: 0, Limit: 250}); err != nil {
+		t.Fatalf("second load transcript page: %v", err)
+	}
+	if got := reads.count.Load(); got != 2 {
+		t.Fatalf("session view call count = %d, want 2", got)
+	}
+}
+
+func TestRuntimeClientRefreshTranscriptBypassesFreshCachedPage(t *testing.T) {
+	reads := &countingSessionViewClient{page: clientui.TranscriptPage{SessionID: "session-1"}}
+	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(nil, nil))
+	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, controls)
+
+	if _, err := runtimeClient.LoadTranscriptPage(clientui.TranscriptPageRequest{}); err != nil {
+		t.Fatalf("load transcript page: %v", err)
+	}
+	if _, err := runtimeClient.RefreshTranscript(); err != nil {
+		t.Fatalf("refresh transcript: %v", err)
+	}
+	if got := reads.count.Load(); got != 2 {
+		t.Fatalf("session view call count = %d, want 2", got)
+	}
+}
+
 func TestRuntimeClientFromEngineSeedsCachedTranscriptTail(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

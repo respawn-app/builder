@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,8 +36,15 @@ type sessionRuntimeClient struct {
 	transcript                clientui.TranscriptPage
 	hasTranscript             bool
 	lastTranscriptAt          time.Time
+	transcriptPages           map[string]cachedTranscriptPage
 	refreshInFlight           bool
 	transcriptRefreshInFlight bool
+}
+
+type cachedTranscriptPage struct {
+	page       clientui.TranscriptPage
+	loadedAt   time.Time
+	hasContent bool
 }
 
 func newRuntimeClient(sessionID string, reads client.SessionViewClient, controls client.RuntimeControlClient) clientui.RuntimeClient {
@@ -65,11 +73,12 @@ func newUIRuntimeClientWithReads(sessionID string, reads client.SessionViewClien
 		return nil
 	}
 	return &sessionRuntimeClient{
-		sessionID:  sessionID,
-		reads:      reads,
-		controls:   controls,
-		mainView:   clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: sessionID}},
-		transcript: clientui.TranscriptPage{SessionID: sessionID},
+		sessionID:       sessionID,
+		reads:           reads,
+		controls:        controls,
+		mainView:        clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: sessionID}},
+		transcript:      clientui.TranscriptPage{SessionID: sessionID},
+		transcriptPages: make(map[string]cachedTranscriptPage),
 	}
 }
 
@@ -103,7 +112,7 @@ func (c *sessionRuntimeClient) RefreshMainView() (clientui.RuntimeMainView, erro
 }
 
 func (c *sessionRuntimeClient) Transcript() clientui.TranscriptPage {
-	page, hasPage, stale := c.cachedTranscript()
+	page, hasPage, stale := c.cachedTranscript(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail})
 	if !hasPage {
 		c.refreshTranscriptAsync()
 		return page
@@ -115,10 +124,14 @@ func (c *sessionRuntimeClient) Transcript() clientui.TranscriptPage {
 }
 
 func (c *sessionRuntimeClient) RefreshTranscript() (clientui.TranscriptPage, error) {
-	return c.LoadTranscriptPage(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail})
+	return c.refreshTranscriptPageSync(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, uiRuntimeHydrationReadTimeout)
 }
 
 func (c *sessionRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	req = normalizeRuntimeTranscriptRequest(req)
+	if page, hasPage, stale := c.cachedTranscriptPage(req); hasPage && !stale {
+		return page, nil
+	}
 	return c.refreshTranscriptPageSync(req, uiRuntimeHydrationReadTimeout)
 }
 
@@ -151,14 +164,34 @@ func (c *sessionRuntimeClient) cachedMainView() (clientui.RuntimeMainView, bool,
 	return view, true, time.Since(c.lastMainViewAt) >= uiRuntimeMainViewRefreshInterval
 }
 
-func (c *sessionRuntimeClient) cachedTranscript() (clientui.TranscriptPage, bool, bool) {
+func (c *sessionRuntimeClient) cachedTranscript(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, bool, bool) {
+	req = normalizeRuntimeTranscriptRequest(req)
+	key := transcriptRequestCacheKey(req)
 	c.mu.RLock()
-	defer c.mu.RUnlock()
+	entry, hasEntry := c.transcriptPages[key]
 	page := c.transcript
-	if !c.hasTranscript {
+	hasPage := c.hasTranscript
+	lastTranscriptAt := c.lastTranscriptAt
+	c.mu.RUnlock()
+	if hasEntry && entry.hasContent {
+		return entry.page, true, time.Since(entry.loadedAt) >= uiRuntimeMainViewRefreshInterval
+	}
+	if !hasPage {
 		return page, false, true
 	}
-	return page, true, time.Since(c.lastTranscriptAt) >= uiRuntimeMainViewRefreshInterval
+	return page, hasPage, time.Since(lastTranscriptAt) >= uiRuntimeMainViewRefreshInterval
+}
+
+func (c *sessionRuntimeClient) cachedTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, bool, bool) {
+	req = normalizeRuntimeTranscriptRequest(req)
+	key := transcriptRequestCacheKey(req)
+	c.mu.RLock()
+	entry, hasEntry := c.transcriptPages[key]
+	c.mu.RUnlock()
+	if !hasEntry || !entry.hasContent {
+		return clientui.TranscriptPage{SessionID: c.sessionID}, false, true
+	}
+	return entry.page, true, time.Since(entry.loadedAt) >= uiRuntimeMainViewRefreshInterval
 }
 
 func (c *sessionRuntimeClient) storeMainView(view clientui.RuntimeMainView) clientui.RuntimeMainView {
@@ -175,11 +208,15 @@ func (c *sessionRuntimeClient) storeMainView(view clientui.RuntimeMainView) clie
 }
 
 func (c *sessionRuntimeClient) storeTranscript(page clientui.TranscriptPage) clientui.TranscriptPage {
+	return c.storeTranscriptForRequest(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, page)
+}
+
+func (c *sessionRuntimeClient) storeTranscriptForRequest(req clientui.TranscriptPageRequest, page clientui.TranscriptPage) clientui.TranscriptPage {
 	if page.SessionID == "" {
 		page.SessionID = c.sessionID
 	}
 	c.mu.Lock()
-	storeTranscriptLocked(c, page)
+	storeTranscriptLocked(c, req, page)
 	c.mu.Unlock()
 	return page
 }
@@ -259,6 +296,9 @@ func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.Transcript
 		}
 	}
 	if err != nil {
+		if page, hasPage, _ := c.cachedTranscriptPage(req); hasPage {
+			return page, err
+		}
 		c.mu.RLock()
 		page := c.transcript
 		hasPage := c.hasTranscript
@@ -268,7 +308,7 @@ func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.Transcript
 		}
 		return page, err
 	}
-	return c.storeTranscript(resp.Transcript), nil
+	return c.storeTranscriptForRequest(req, resp.Transcript), nil
 }
 
 func (c *sessionRuntimeClient) logTranscriptDiag(line string) {
@@ -289,6 +329,17 @@ func normalizeRuntimeTranscriptRequest(req clientui.TranscriptPageRequest) clien
 		return clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}
 	}
 	return req
+}
+
+func transcriptRequestCacheKey(req clientui.TranscriptPageRequest) string {
+	req = normalizeRuntimeTranscriptRequest(req)
+	return strings.Join([]string{
+		strconv.Itoa(req.Offset),
+		strconv.Itoa(req.Limit),
+		strconv.Itoa(req.Page),
+		strconv.Itoa(req.PageSize),
+		string(req.Window),
+	}, ":")
 }
 
 func (c *sessionRuntimeClient) refreshTranscriptAsync() {
@@ -314,16 +365,22 @@ func storeTranscriptFromSessionViewLocked(c *sessionRuntimeClient, view clientui
 	if page.SessionID == "" || (len(page.Entries) == 0 && view.Transcript.CommittedEntryCount > 0) {
 		return
 	}
-	storeTranscriptLocked(c, page)
+	storeTranscriptLocked(c, clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, page)
 }
 
-func storeTranscriptLocked(c *sessionRuntimeClient, page clientui.TranscriptPage) {
+func storeTranscriptLocked(c *sessionRuntimeClient, req clientui.TranscriptPageRequest, page clientui.TranscriptPage) {
 	if page.SessionID == "" {
 		page.SessionID = c.sessionID
 	}
+	req = normalizeRuntimeTranscriptRequest(req)
+	if c.transcriptPages == nil {
+		c.transcriptPages = make(map[string]cachedTranscriptPage)
+	}
+	now := time.Now()
+	c.transcriptPages[transcriptRequestCacheKey(req)] = cachedTranscriptPage{page: page, loadedAt: now, hasContent: true}
 	c.transcript = page
 	c.hasTranscript = true
-	c.lastTranscriptAt = time.Now()
+	c.lastTranscriptAt = now
 	c.mainView.Session.Transcript = clientui.TranscriptMetadata{
 		Revision:            page.Revision,
 		CommittedEntryCount: page.TotalEntries,

@@ -15,6 +15,7 @@ The main goal of this slice was to keep pushing the transcript-performance work 
 Committed in:
 
 - `679d515` `fix: cache dormant transcript reads`
+- follow-up runtime-client cache slice pending commit in current worktree
 
 ### 1. Dormant transcript read cache in `server/sessionview`
 
@@ -179,6 +180,26 @@ Avoid broad edits first in the more collision-prone in-flight files:
 - `cli/app/ui_transcript_pager.go`
 - `cli/app/ui_runtime_adapter.go`
 - `cli/app/ui_runtime_adapter_test.go`
+
+### 3. Runtime-client request-keyed caching follow-up
+
+Landed in the current worktree during this checkpoint session:
+
+- `cli/app/ui_runtime_client.go`
+- `cli/app/ui_runtime_client_test.go`
+
+What it adds:
+
+- request-keyed transcript-page cache on top of the existing default-tail cache
+- exact-request reuse for `LoadTranscriptPage(req)`
+- preserved authoritative behavior for `RefreshTranscript()`
+- no broad edits to the dirtier pager/adapter files
+
+Validation already run:
+
+- `./scripts/test.sh ./cli/app -run 'TestRuntimeClientLoadTranscriptPageDefaultsToOngoingTail|TestRuntimeClientLoadTranscriptPageReusesFreshCachedPageForSameRequest|TestRuntimeClientLoadTranscriptPageCachesByRequestKey|TestRuntimeClientRefreshTranscriptBypassesFreshCachedPage'`
+- `./scripts/test.sh ./cli/app -run 'TestCtrlTDeferredDetailLoadUsesBoundedTranscriptPageRequest|TestDetailEdgePagingWaitsForFirstNavigationToResolveMetrics|TestCtrlTDeferredDetailLoadSkipsDuplicateDetailRebuildEndToEnd'`
+- `./scripts/build.sh --output ./bin/builder`
 
 ## Recommended Next Step
 
