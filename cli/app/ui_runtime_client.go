@@ -26,6 +26,7 @@ type sessionRuntimeClient struct {
 	reads     client.SessionViewClient
 	controls  client.RuntimeControlClient
 	sessionID string
+	diagLogf  func(string)
 
 	mu                        sync.RWMutex
 	mainView                  clientui.RuntimeMainView
@@ -70,6 +71,15 @@ func newUIRuntimeClientWithReads(sessionID string, reads client.SessionViewClien
 		mainView:   clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: sessionID}},
 		transcript: clientui.TranscriptPage{SessionID: sessionID},
 	}
+}
+
+func (c *sessionRuntimeClient) SetTranscriptDiagnosticLogger(logf func(string)) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.diagLogf = logf
 }
 
 func (c *sessionRuntimeClient) MainView() clientui.RuntimeMainView {
@@ -243,9 +253,9 @@ func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.Transcript
 		}
 		if err != nil {
 			fields["err"] = err.Error()
-			logRuntimeClientTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.hydrate_fetch", fields))
+			c.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.hydrate_fetch", fields))
 		} else {
-			logRuntimeClientTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.hydrate_fetch", transcriptdiag.AddPageFields(fields, resp.Transcript)))
+			c.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.hydrate_fetch", transcriptdiag.AddPageFields(fields, resp.Transcript)))
 		}
 	}
 	if err != nil {
@@ -261,10 +271,17 @@ func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.Transcript
 	return c.storeTranscript(resp.Transcript), nil
 }
 
-var runtimeClientTranscriptDiagLogf = func(format string, args ...any) {}
-
-func logRuntimeClientTranscriptDiag(line string) {
-	runtimeClientTranscriptDiagLogf("%s", strings.TrimSpace(line))
+func (c *sessionRuntimeClient) logTranscriptDiag(line string) {
+	if c == nil {
+		return
+	}
+	c.mu.RLock()
+	logf := c.diagLogf
+	c.mu.RUnlock()
+	if logf == nil {
+		return
+	}
+	logf(strings.TrimSpace(line))
 }
 
 func normalizeRuntimeTranscriptRequest(req clientui.TranscriptPageRequest) clientui.TranscriptPageRequest {

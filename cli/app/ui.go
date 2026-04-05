@@ -188,8 +188,11 @@ func WithUILogger(logger uiLogger) UIOption {
 	return func(m *uiModel) {
 		m.logger = logger
 		if logger != nil {
-			runtimeClientTranscriptDiagLogf = logger.Logf
-			sessionActivityTranscriptDiagLogf = logger.Logf
+			if configurable, ok := m.engine.(interface{ SetTranscriptDiagnosticLogger(func(string)) }); ok {
+				configurable.SetTranscriptDiagnosticLogger(func(line string) {
+					logger.Logf("%s", strings.TrimSpace(line))
+				})
+			}
 		}
 	}
 }

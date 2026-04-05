@@ -36,7 +36,7 @@ Until this plan is complete, transcript-affecting work must be treated as stabil
 - [x] Define and document one authoritative path for live active-session transcript updates.
 - [x] Define and document the role of hydration reads as recovery/repair rather than primary live UX.
 - [x] Audit the CLI for every place that can mutate transcript-visible state.
-- [x] Remove or consolidate overlapping state update paths that can overwrite each other.
+- [ ] Remove or consolidate overlapping state update paths that can overwrite each other.
 - [x] Establish a clear rule for when transcript reads may replace current UI state and when they must not.
 
 Exit criteria:
@@ -48,13 +48,13 @@ Exit criteria:
 
 - [x] Separate stabilization work around committed transcript state from ephemeral live state.
 - [x] Audit which visible elements are durable and which are transient.
-- [x] Eliminate cases where recovery/hydration logic clears or rewrites transient live state incorrectly.
-- [x] Eliminate cases where transient state is being treated as if it were committed durable transcript state.
+- [ ] Eliminate cases where recovery/hydration logic clears or rewrites transient live state incorrectly.
+- [ ] Eliminate cases where transient state is being treated as if it were committed durable transcript state.
 
 Exit criteria:
 
 - [x] Committed transcript recovery works without depending on transient live state.
-- [x] Live commentary/tool preview behavior works without depending on transcript rehydrate.
+- [ ] Live commentary/tool preview behavior works without depending on transcript rehydrate.
 
 ## Workstream 3: Ordering and Freshness
 
@@ -109,7 +109,7 @@ Exit criteria:
 
 - [x] Inventory all currently known transcript-related regressions on `app-server-integration`.
 - [x] Group them by root cause rather than by symptom.
-- [x] Close quick symptom patches that do not fit the stabilized model.
+- [ ] Close quick symptom patches that do not fit the stabilized model.
 - [x] Re-test previously fixed regressions after each structural transcript change.
 - [x] Keep a running checklist of transcript-critical user workflows and their current status.
 
