@@ -41,6 +41,7 @@ type uiStatusConfig struct {
 	Source          config.SourceReport
 	AuthManager     *auth.Manager
 	AuthStatePath   string
+	OwnsServer      bool
 }
 
 type uiStatusCollector interface {
@@ -81,6 +82,7 @@ type uiStatusRequest struct {
 	ReviewerEnabled       bool
 	ReviewerMode          string
 	AutoCompactionEnabled bool
+	OwnsServer            bool
 	CurrentTime           time.Time
 }
 
@@ -91,6 +93,7 @@ type uiStatusSnapshot struct {
 	SessionID         string
 	ParentSessionID   string
 	ParentSessionName string
+	OwnsServer        bool
 	Git               uiStatusGitInfo
 	Auth              uiStatusAuthInfo
 	Context           uiStatusContextInfo
@@ -266,6 +269,7 @@ func (m *uiModel) newStatusRequest(now time.Time) uiStatusRequest {
 		ReviewerEnabled:       m.reviewerEnabled,
 		ReviewerMode:          strings.TrimSpace(m.reviewerMode),
 		AutoCompactionEnabled: m.autoCompactionEnabled,
+		OwnsServer:            m.statusConfig.OwnsServer,
 		CurrentTime:           now,
 	}
 }
@@ -326,6 +330,7 @@ func (defaultUIStatusCollector) CollectBase(req uiStatusRequest) uiStatusSnapsho
 		SessionID:         strings.TrimSpace(req.SessionID),
 		ParentSessionID:   parentSessionID,
 		ParentSessionName: parentSessionName,
+		OwnsServer:        req.OwnsServer,
 		Context:           contextInfo,
 		Model:             uiStatusModelInfo{Summary: statusModelSummary(req)},
 		Config: uiStatusConfigInfo{

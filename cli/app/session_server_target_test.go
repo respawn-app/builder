@@ -5,7 +5,11 @@ import (
 	"errors"
 	"io"
 	"net/http/httptest"
+	"os"
+	"os/signal"
+	goruntime "runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -24,6 +28,37 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/net/websocket"
 )
+
+func TestStartSessionServerHelperDaemonProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_DAEMON") != "1" {
+		return
+	}
+	workspace := strings.TrimSpace(os.Getenv("GO_HELPER_WORKSPACE_ROOT"))
+	if workspace == "" {
+		t.Fatal("GO_HELPER_WORKSPACE_ROOT is required")
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	srv, err := serve.Start(context.Background(), serverstartup.Request{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+	}, memoryAuthHandler{state: auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "test-key"},
+		},
+		UpdatedAt: time.Now().UTC(),
+	}}, autoOnboarding{})
+	if err != nil {
+		t.Fatalf("serve.Start: %v", err)
+	}
+	defer func() { _ = srv.Close() }()
+	if err := srv.Serve(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("Serve: %v", err)
+	}
+}
 
 func TestStartSessionServerUsesDiscoveredDaemonForInteractiveFlow(t *testing.T) {
 	home := t.TempDir()
@@ -241,6 +276,194 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutProcessOutputCapability
 	if hits.Load() != 1 {
 		t.Fatalf("expected embedded fallback llm call once, got %d", hits.Load())
 	}
+}
+
+func TestRemoteSessionStatusUsesLocalOAuthAuthState(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srv, err := serve.Start(context.Background(), serverstartup.Request{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+	}, memoryAuthHandler{state: auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "test-key"},
+		},
+		UpdatedAt: time.Now().UTC(),
+	}}, autoOnboarding{})
+	if err != nil {
+		t.Fatalf("serve.Start: %v", err)
+	}
+	defer func() { _ = srv.Close() }()
+
+	serveCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Serve(serveCtx)
+	}()
+	defer func() {
+		cancel()
+		if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
+			t.Fatalf("Serve error = %v, want context canceled", serveErr)
+		}
+	}()
+	waitForDiscoveryRecord(t, workspace)
+
+	loadCfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store := auth.NewFileStore(config.GlobalAuthConfigPath(loadCfg))
+	if err := store.Save(context.Background(), auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type: auth.MethodOAuth,
+			OAuth: &auth.OAuthMethod{
+				AccessToken: "access-token",
+				AccountID:   "acct-123",
+				Email:       "user@example.com",
+			},
+		},
+		UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("save auth state: %v", err)
+	}
+
+	originalFetcher := statusUsagePayloadFetcher
+	defer func() { statusUsagePayloadFetcher = originalFetcher }()
+	statusUsagePayloadFetcher = func(_ context.Context, baseURL string, state auth.State) (statusUsagePayload, error) {
+		if baseURL != statusUsageBaseURL {
+			t.Fatalf("base URL = %q", baseURL)
+		}
+		if state.Method.OAuth == nil || state.Method.OAuth.Email != "user@example.com" || state.Method.OAuth.AccountID != "acct-123" {
+			t.Fatalf("unexpected auth state: %+v", state.Method.OAuth)
+		}
+		return statusUsagePayload{PlanType: "pro"}, nil
+	}
+
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("startSessionServer: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+	if _, ok := server.(*remoteAppServer); !ok {
+		t.Fatalf("expected remote app server, got %T", server)
+	}
+
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
+	if err != nil {
+		t.Fatalf("PlanSession: %v", err)
+	}
+	if plan.StatusConfig.AuthManager == nil {
+		t.Fatal("expected status auth manager for remote session")
+	}
+
+	collector := defaultUIStatusCollector{}
+	snapshot, err := collector.Collect(context.Background(), uiStatusRequest{
+		WorkspaceRoot:   plan.StatusConfig.WorkspaceRoot,
+		PersistenceRoot: plan.StatusConfig.PersistenceRoot,
+		Settings:        plan.StatusConfig.Settings,
+		Source:          plan.StatusConfig.Source,
+		AuthManager:     plan.StatusConfig.AuthManager,
+		AuthStatePath:   plan.StatusConfig.AuthStatePath,
+		OwnsServer:      plan.StatusConfig.OwnsServer,
+	})
+	if err != nil {
+		t.Fatalf("collect status: %v", err)
+	}
+	if got := snapshot.Auth.Summary; got != "user@example.com" {
+		t.Fatalf("auth summary = %q", got)
+	}
+	if got := snapshot.Subscription.Summary; got != "Pro subscription" {
+		t.Fatalf("subscription summary = %q", got)
+	}
+}
+
+func TestStartSessionServerOwnsLaunchedDaemonCloser(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	called := false
+	originalLaunch := launchSessionServerDaemon
+	t.Cleanup(func() { launchSessionServerDaemon = originalLaunch })
+	launchSessionServerDaemon = func(context.Context, Options) (*client.Remote, func() error, bool, error) {
+		return &client.Remote{}, func() error {
+			called = true
+			return nil
+		}, true, nil
+	}
+
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("startSessionServer: %v", err)
+	}
+	if _, ok := server.(*remoteAppServer); !ok {
+		t.Fatalf("expected remote app server, got %T", server)
+	}
+	if err := server.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if !called {
+		t.Fatal("expected launched daemon closer to be invoked")
+	}
+}
+
+func TestStartSessionServerLaunchedDaemonCloseStopsProcess(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("helper daemon process signal probe is unix-only")
+	}
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GO_WANT_HELPER_DAEMON", "1")
+	t.Setenv("GO_HELPER_WORKSPACE_ROOT", workspace)
+
+	originalExecPath := resolveDaemonExecutablePath
+	originalServeArgs := buildServeArgsFunc
+	t.Cleanup(func() {
+		resolveDaemonExecutablePath = originalExecPath
+		buildServeArgsFunc = originalServeArgs
+	})
+	resolveDaemonExecutablePath = func() (string, bool) {
+		path, err := os.Executable()
+		if err != nil {
+			t.Fatalf("os.Executable: %v", err)
+		}
+		return path, true
+	}
+	buildServeArgsFunc = func(string, Options) []string {
+		return []string{"-test.run=^TestStartSessionServerHelperDaemonProcess$"}
+	}
+
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("startSessionServer: %v", err)
+	}
+	remote, ok := server.(*remoteAppServer)
+	if !ok {
+		t.Fatalf("expected remote app server, got %T", server)
+	}
+	discoveryPath := discoveryPathForWorkspace(t, workspace)
+	record := waitForDiscoveryRecordAtPath(t, discoveryPath)
+	if remote.identity.PID == 0 {
+		t.Fatal("expected launched daemon pid")
+	}
+	if record.Identity.PID != remote.identity.PID {
+		t.Fatalf("discovery pid = %d, remote pid = %d", record.Identity.PID, remote.identity.PID)
+	}
+
+	if err := server.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	waitForDiscoveryRemoval(t, discoveryPath)
+	waitForPIDExit(t, remote.identity.PID)
 }
 
 func TestStartSessionServerUsesInvocationOverridesWhenAttachingToDiscoveredDaemon(t *testing.T) {
@@ -860,7 +1083,7 @@ func TestInteractiveSessionServerWorkflowParity(t *testing.T) {
 	})
 }
 
-func waitForDiscoveryRecord(t *testing.T, workspace string) {
+func discoveryPathForWorkspace(t *testing.T, workspace string) string {
 	t.Helper()
 	loadCfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {
@@ -874,13 +1097,53 @@ func waitForDiscoveryRecord(t *testing.T, workspace string) {
 	if err != nil {
 		t.Fatalf("PathForContainer: %v", err)
 	}
+	return discoveryPath
+}
+
+func waitForDiscoveryRecord(t *testing.T, workspace string) {
+	t.Helper()
+	_ = waitForDiscoveryRecordAtPath(t, discoveryPathForWorkspace(t, workspace))
+}
+
+func waitForDiscoveryRecordAtPath(t *testing.T, discoveryPath string) protocol.DiscoveryRecord {
+	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if _, err := discovery.Read(discoveryPath); err == nil {
-			return
+		record, err := discovery.Read(discoveryPath)
+		if err == nil {
+			return record
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("discovery record did not appear at %s", discoveryPath)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitForDiscoveryRemoval(t *testing.T, discoveryPath string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := discovery.Read(discoveryPath); err != nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("discovery record still present at %s", discoveryPath)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitForPIDExit(t *testing.T, pid int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err := syscall.Kill(pid, 0)
+		if err != nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pid %d still running", pid)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

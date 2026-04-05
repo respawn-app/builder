@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"builder/server/auth"
+	"builder/server/authflow"
 	serverbootstrap "builder/server/bootstrap"
 	"builder/shared/client"
 	"builder/shared/config"
@@ -15,31 +18,78 @@ import (
 )
 
 type remoteAppServer struct {
-	remote   *client.Remote
-	identity protocol.ServerIdentity
-	cfg      config.App
+	remote    *client.Remote
+	identity  protocol.ServerIdentity
+	cfg       config.App
+	closeFn   func() error
+	owns      bool
+	lookupEnv func(string) string
+	wrapStore func(auth.Store) auth.Store
+	authOnce  sync.Once
+	authMgr   *auth.Manager
 }
 
 func newRemoteAppServer(remote *client.Remote, cfg config.App) *remoteAppServer {
+	return newRemoteAppServerWithAuth(remote, cfg, nil, nil, nil)
+}
+
+func newRemoteAppServerWithClose(remote *client.Remote, cfg config.App, closeFn func() error) *remoteAppServer {
+	return newRemoteAppServerWithAuth(remote, cfg, closeFn, nil, nil)
+}
+
+func newRemoteAppServerWithAuth(remote *client.Remote, cfg config.App, closeFn func() error, lookupEnv func(string) string, wrapStore func(auth.Store) auth.Store) *remoteAppServer {
 	if remote == nil {
 		return nil
 	}
-	return &remoteAppServer{remote: remote, identity: remote.Identity(), cfg: cfg}
+	// A custom closer is only provided when this CLI launched the daemon itself.
+	// Attached/discovered remotes fall back to remote.Close() and are not owners.
+	ownsServer := closeFn != nil
+	if closeFn == nil {
+		closeFn = remote.Close
+	}
+	if lookupEnv == nil {
+		lookupEnv = os.Getenv
+	}
+	return &remoteAppServer{remote: remote, identity: remote.Identity(), cfg: cfg, closeFn: closeFn, owns: ownsServer, lookupEnv: lookupEnv, wrapStore: wrapStore}
 }
 
 func (s *remoteAppServer) Close() error {
-	if s == nil || s.remote == nil {
+	if s == nil {
+		return nil
+	}
+	if s.closeFn != nil {
+		return s.closeFn()
+	}
+	if s.remote == nil {
 		return nil
 	}
 	return s.remote.Close()
 }
+
+func (s *remoteAppServer) OwnsServer() bool {
+	return s != nil && s.owns
+}
+
 func (s *remoteAppServer) Config() config.App {
 	if s == nil {
 		return config.App{}
 	}
 	return s.cfg
 }
-func (s *remoteAppServer) AuthManager() *auth.Manager { return nil }
+
+func (s *remoteAppServer) AuthManager() *auth.Manager {
+	if s == nil {
+		return nil
+	}
+	s.authOnce.Do(func() {
+		authSupport, err := buildRemoteAuthSupport(s.cfg, s.lookupEnv, s.wrapStore)
+		if err == nil {
+			s.authMgr = authSupport.AuthManager
+		}
+	})
+	return s.authMgr
+}
+
 func (s *remoteAppServer) ProjectID() string {
 	if s == nil {
 		return ""
@@ -150,13 +200,19 @@ func (s *remoteAppServer) Reauthenticate(ctx context.Context, interactor authInt
 	if interactor == nil {
 		return errors.New("auth interactor is required")
 	}
-	authSupport, err := serverbootstrap.BuildAuthSupport(
-		interactor.WrapStore(auth.NewFileStore(config.GlobalAuthConfigPath(s.cfg))),
-		interactor.LookupEnv,
-		time.Now,
-	)
+	authSupport, err := buildRemoteAuthSupport(s.cfg, interactor.LookupEnv, interactor.WrapStore)
 	if err != nil {
 		return err
 	}
 	return ensureAuthReady(ctx, authSupport.AuthManager, authSupport.OAuthOptions, s.cfg.Settings.Theme, s.cfg.Settings.TUIAlternateScreen, interactor)
+}
+
+func buildRemoteAuthSupport(cfg config.App, lookupEnv func(string) string, wrapStore func(auth.Store) auth.Store) (serverbootstrap.AuthSupport, error) {
+	store := auth.Store(auth.NewFileStore(config.GlobalAuthConfigPath(cfg)))
+	if wrapStore != nil {
+		store = wrapStore(store)
+	} else {
+		store = authflow.WrapStoreWithEnvAPIKeyOverride(store, lookupEnv)
+	}
+	return serverbootstrap.BuildAuthSupport(store, lookupEnv, time.Now)
 }

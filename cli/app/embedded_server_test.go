@@ -120,6 +120,7 @@ type stubEmbeddedProcessControlClient struct {
 }
 
 func (s *testEmbeddedServer) Close() error       { return nil }
+func (s *testEmbeddedServer) OwnsServer() bool   { return true }
 func (s *testEmbeddedServer) Config() config.App { return s.cfg }
 func (s *testEmbeddedServer) ProjectID() string {
 	if strings.TrimSpace(s.projectID) != "" {
@@ -499,6 +500,261 @@ func TestEmbeddedAppServerPrepareRuntimeWiresSessionActivityForSharedClients(t *
 	last := page.Transcript.Entries[len(page.Transcript.Entries)-1]
 	if last.Text != "hello from client one" {
 		t.Fatalf("unexpected hydrated entry: %+v", last)
+	}
+}
+
+func TestEmbeddedAppServerPrepareRuntimeIsolatesSessionActivityBetweenSessions(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("start embedded server: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	planner := newSessionLaunchPlanner(server)
+	planA, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session A: %v", err)
+	}
+	runtimePlanA, err := planner.PrepareRuntime(context.Background(), planA, io.Discard, "test prepare runtime session activity A")
+	if err != nil {
+		t.Fatalf("prepare runtime A: %v", err)
+	}
+	defer runtimePlanA.Close()
+
+	planB, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session B: %v", err)
+	}
+	runtimePlanB, err := planner.PrepareRuntime(context.Background(), planB, io.Discard, "test prepare runtime session activity B")
+	if err != nil {
+		t.Fatalf("prepare runtime B: %v", err)
+	}
+	defer runtimePlanB.Close()
+
+	activity := server.inner.SessionActivityClient()
+	if activity == nil {
+		t.Fatal("expected session activity client")
+	}
+	subA, err := activity.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: planA.SessionID})
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity A: %v", err)
+	}
+	defer func() { _ = subA.Close() }()
+	subB, err := activity.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: planB.SessionID})
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity B: %v", err)
+	}
+	defer func() { _ = subB.Close() }()
+
+	runtimePlanA.Wiring.runtimeClient.AppendLocalEntry("user", "session-a-only")
+
+	ctxA, cancelA := context.WithTimeout(context.Background(), time.Second)
+	defer cancelA()
+	evtA, err := subA.Next(ctxA)
+	if err != nil {
+		t.Fatalf("subA.Next: %v", err)
+	}
+	if evtA.Kind != clientui.EventConversationUpdated {
+		t.Fatalf("unexpected session A event: %+v", evtA)
+	}
+
+	ctxB, cancelB := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancelB()
+	if evtB, err := subB.Next(ctxB); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected session B stream to stay idle, got evt=%+v err=%v", evtB, err)
+	}
+
+	reads := server.SessionViewClient()
+	if reads == nil {
+		t.Fatal("expected session view client")
+	}
+	pageA, err := reads.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: planA.SessionID})
+	if err != nil {
+		t.Fatalf("GetSessionTranscriptPage A: %v", err)
+	}
+	if !transcriptPageContainsText(pageA.Transcript, "session-a-only") {
+		t.Fatalf("expected session A transcript to contain appended entry, got %+v", pageA.Transcript)
+	}
+	pageB, err := reads.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: planB.SessionID})
+	if err != nil {
+		t.Fatalf("GetSessionTranscriptPage B: %v", err)
+	}
+	if transcriptPageContainsText(pageB.Transcript, "session-a-only") {
+		t.Fatalf("session B transcript leaked session A entry: %+v", pageB.Transcript)
+	}
+
+	runtimePlanB.Wiring.runtimeClient.AppendLocalEntry("assistant", "session-b-only")
+
+	ctxB2, cancelB2 := context.WithTimeout(context.Background(), time.Second)
+	defer cancelB2()
+	evtB, err := subB.Next(ctxB2)
+	if err != nil {
+		t.Fatalf("subB.Next after session B append: %v", err)
+	}
+	if evtB.Kind != clientui.EventConversationUpdated {
+		t.Fatalf("unexpected session B event: %+v", evtB)
+	}
+
+	ctxA2, cancelA2 := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancelA2()
+	if evtA2, err := subA.Next(ctxA2); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected session A stream to stay idle after session B append, got evt=%+v err=%v", evtA2, err)
+	}
+
+	pageB, err = reads.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: planB.SessionID})
+	if err != nil {
+		t.Fatalf("GetSessionTranscriptPage B after append: %v", err)
+	}
+	if !transcriptPageContainsText(pageB.Transcript, "session-b-only") {
+		t.Fatalf("expected session B transcript to contain appended entry, got %+v", pageB.Transcript)
+	}
+	pageA, err = reads.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: planA.SessionID})
+	if err != nil {
+		t.Fatalf("GetSessionTranscriptPage A after session B append: %v", err)
+	}
+	if transcriptPageContainsText(pageA.Transcript, "session-b-only") {
+		t.Fatalf("session A transcript leaked session B entry: %+v", pageA.Transcript)
+	}
+}
+
+func transcriptPageContainsText(page clientui.TranscriptPage, want string) bool {
+	for _, entry := range page.Entries {
+		if entry.Text == want {
+			return true
+		}
+	}
+	return false
+}
+
+func waitForSessionActivityEvent(t *testing.T, sub serverapi.SessionActivitySubscription, timeout time.Duration, match func(clientui.Event) bool) clientui.Event {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Until(deadline))
+		evt, err := sub.Next(ctx)
+		cancel()
+		if err != nil {
+			t.Fatalf("session activity Next: %v", err)
+		}
+		if match == nil || match(evt) {
+			return evt
+		}
+	}
+	t.Fatal("timed out waiting for matching session activity event")
+	return clientui.Event{}
+}
+
+func TestEmbeddedAppServerDeliversBackgroundCompletionWhileIdle(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("start embedded server: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test background completion while idle")
+	if err != nil {
+		t.Fatalf("prepare runtime: %v", err)
+	}
+	defer runtimePlan.Close()
+
+	activity := server.inner.SessionActivityClient()
+	if activity == nil {
+		t.Fatal("expected session activity client")
+	}
+	sub, err := activity.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID})
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	processID := "bg-1000"
+	server.inner.BackgroundRouter().Handle(shelltool.Event{
+		Type:             shelltool.EventCompleted,
+		NoticeSuppressed: true,
+		Snapshot: shelltool.Snapshot{
+			ID:             processID,
+			OwnerSessionID: plan.SessionID,
+			State:          "completed",
+			Command:        "sleep 1; printf done",
+			Workdir:        workspace,
+			LogPath:        "/tmp/bg-1000.log",
+		},
+		Preview: "done",
+	})
+
+	evt := waitForSessionActivityEvent(t, sub, 5*time.Second, func(evt clientui.Event) bool {
+		return evt.Kind == clientui.EventBackgroundUpdated && evt.Background != nil && evt.Background.ID == processID && evt.Background.Type == "completed"
+	})
+	if evt.Background.State != "completed" {
+		t.Fatalf("background state = %q, want completed", evt.Background.State)
+	}
+	if !evt.Background.NoticeSuppressed {
+		t.Fatal("expected delivery-only test event to stay suppressed")
+	}
+}
+
+func TestPrepareRuntimeForwardsBackgroundCompletionIntoProjectedRuntimeEvents(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("start embedded server: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	planner := newSessionLaunchPlanner(server)
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session: %v", err)
+	}
+	runtimePlan, err := planner.PrepareRuntime(context.Background(), plan, io.Discard, "test projected background completion while idle")
+	if err != nil {
+		t.Fatalf("prepare runtime: %v", err)
+	}
+	defer runtimePlan.Close()
+
+	processID := "bg-1001"
+	server.inner.BackgroundRouter().Handle(shelltool.Event{
+		Type:             shelltool.EventCompleted,
+		NoticeSuppressed: true,
+		Snapshot: shelltool.Snapshot{
+			ID:             processID,
+			OwnerSessionID: plan.SessionID,
+			State:          "completed",
+			Command:        "sleep 1; printf done",
+			Workdir:        workspace,
+			LogPath:        "/tmp/bg-1001.log",
+		},
+		Preview: "done",
+	})
+
+	select {
+	case evt := <-runtimePlan.Wiring.runtimeEvents:
+		if evt.Kind != clientui.EventBackgroundUpdated {
+			t.Fatalf("projected event kind = %q, want %q", evt.Kind, clientui.EventBackgroundUpdated)
+		}
+		if evt.Background == nil || evt.Background.ID != processID || evt.Background.Type != "completed" {
+			t.Fatalf("unexpected projected background event: %+v", evt.Background)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for projected background completion event")
 	}
 }
 

@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	goruntime "runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -292,8 +294,8 @@ func TestStartRunPromptClientFallsBackToEmbeddedWhenDaemonLaunchFails(t *testing
 
 	originalLaunch := launchRunPromptDaemon
 	t.Cleanup(func() { launchRunPromptDaemon = originalLaunch })
-	launchRunPromptDaemon = func(context.Context, Options) (*client.Remote, bool, error) {
-		return nil, false, errors.New("daemon launch failed")
+	launchRunPromptDaemon = func(context.Context, Options) (*client.Remote, func() error, bool, error) {
+		return nil, nil, false, errors.New("daemon launch failed")
 	}
 
 	runClient, closeFn, err := startRunPromptClient(context.Background(), Options{
@@ -321,6 +323,44 @@ func TestStartRunPromptClientFallsBackToEmbeddedWhenDaemonLaunchFails(t *testing
 	}
 	if response.Result != "embedded fallback" {
 		t.Fatalf("result = %q, want embedded fallback", response.Result)
+	}
+}
+
+func TestOwnedDaemonCloseFallsBackToKillWhenInterruptFails(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("sleep helper is unix-only")
+	}
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- cmd.Wait()
+	}()
+	originalTerminate := terminateOwnedDaemonProcess
+	originalKill := forceKillOwnedDaemonProcess
+	t.Cleanup(func() {
+		terminateOwnedDaemonProcess = originalTerminate
+		forceKillOwnedDaemonProcess = originalKill
+	})
+	killed := false
+	terminateOwnedDaemonProcess = func(process *os.Process) error {
+		return errors.New("interrupt unsupported")
+	}
+	forceKillOwnedDaemonProcess = func(process *os.Process) error {
+		killed = true
+		if process == nil {
+			return nil
+		}
+		return process.Kill()
+	}
+	closeFn := newOwnedDaemonClose(nil, cmd, errCh)
+	if err := closeFn(); err != nil {
+		t.Fatalf("closeFn: %v", err)
+	}
+	if !killed {
+		t.Fatal("expected owned daemon close to fall back to kill")
 	}
 }
 

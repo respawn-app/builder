@@ -7,8 +7,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"builder/shared/client"
@@ -19,16 +21,35 @@ import (
 
 var launchRunPromptDaemon = startLocalRunPromptDaemon
 var dialDiscoveredRemote = client.DialRemote
+var resolveDaemonExecutablePath = daemonExecutablePath
+var buildServeArgsFunc = buildServeArgs
+var terminateOwnedDaemonProcess = func(process *os.Process) error {
+	if process == nil {
+		return nil
+	}
+	if goruntime.GOOS == "windows" {
+		return process.Kill()
+	}
+	return process.Signal(os.Interrupt)
+}
+var forceKillOwnedDaemonProcess = func(process *os.Process) error {
+	if process == nil {
+		return nil
+	}
+	return process.Kill()
+}
+
+const launchedDaemonShutdownTimeout = 5 * time.Second
 
 func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptClient, func() error, error) {
 	if remote, ok := tryDialDiscoveredRemote(ctx, opts, discoveredRemoteSupportsRunPrompt); ok {
 		return remote, remote.Close, nil
 	}
 	launchErr := error(nil)
-	if remote, ok, err := launchRunPromptDaemon(ctx, opts); err != nil {
+	if remote, closeFn, ok, err := launchRunPromptDaemon(ctx, opts); err != nil {
 		launchErr = err
 	} else if ok {
-		return remote, remote.Close, nil
+		return remote, closeFn, nil
 	}
 	server, err := startEmbeddedServer(ctx, opts, newHeadlessAuthInteractor())
 	if err != nil {
@@ -117,50 +138,88 @@ func resolveCLIWorkspaceRoot(opts Options) (string, error) {
 	return filepath.Abs(trimmed)
 }
 
-func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remote, bool, error) {
-	execPath, ok := daemonExecutablePath()
+func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remote, func() error, bool, error) {
+	execPath, ok := resolveDaemonExecutablePath()
 	if !ok {
-		return nil, false, nil
+		return nil, nil, false, nil
 	}
 	workspaceRoot, err := resolveCLIWorkspaceRoot(opts)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
-	args := append([]string{execPath}, buildServeArgs(workspaceRoot, opts)...)
+	args := append([]string{execPath}, buildServeArgsFunc(workspaceRoot, opts)...)
 	cmd := exec.CommandContext(context.Background(), args[0], args[1:]...)
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	cmd.Env = os.Environ()
 	if err := cmd.Start(); err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- cmd.Wait()
 	}()
+	failureClose := newOwnedDaemonClose(nil, cmd, errCh)
 	childPID := cmd.Process.Pid
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		if remote, ok := tryDialMatchingDiscoveredRemote(ctx, opts, discoveredRemoteSupportsRunPrompt, func(record protocol.DiscoveryRecord) bool {
 			return record.Identity.PID == childPID
 		}); ok {
-			return remote, true, nil
+			return remote, newOwnedDaemonClose(remote, cmd, errCh), true, nil
 		}
 		select {
 		case <-ctx.Done():
-			_ = cmd.Process.Kill()
-			return nil, false, ctx.Err()
+			_ = failureClose()
+			return nil, nil, false, ctx.Err()
 		case err := <-errCh:
-			return nil, false, err
+			return nil, nil, false, err
 		default:
 		}
 		if time.Now().After(deadline) {
-			_ = cmd.Process.Kill()
-			<-errCh
-			return nil, false, context.DeadlineExceeded
+			_ = failureClose()
+			return nil, nil, false, context.DeadlineExceeded
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func newOwnedDaemonClose(remote *client.Remote, cmd *exec.Cmd, errCh <-chan error) func() error {
+	var once sync.Once
+	return func() error {
+		var closeErr error
+		once.Do(func() {
+			if remote != nil {
+				closeErr = errors.Join(closeErr, remote.Close())
+			}
+			if cmd == nil || cmd.Process == nil || errCh == nil {
+				return
+			}
+			select {
+			case <-errCh:
+				return
+			default:
+			}
+			if err := terminateOwnedDaemonProcess(cmd.Process); err != nil && !errors.Is(err, os.ErrProcessDone) {
+				if killErr := forceKillOwnedDaemonProcess(cmd.Process); killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
+					closeErr = errors.Join(closeErr, killErr)
+				}
+				<-errCh
+				return
+			}
+			timer := time.NewTimer(launchedDaemonShutdownTimeout)
+			defer timer.Stop()
+			select {
+			case <-errCh:
+			case <-timer.C:
+				if err := forceKillOwnedDaemonProcess(cmd.Process); err != nil && !errors.Is(err, os.ErrProcessDone) {
+					closeErr = errors.Join(closeErr, err)
+				}
+				<-errCh
+			}
+		})
+		return closeErr
 	}
 }
 

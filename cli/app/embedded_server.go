@@ -18,6 +18,7 @@ const runtimeReleaseTimeout = 3 * time.Second
 
 type embeddedServer interface {
 	Close() error
+	OwnsServer() bool
 	Config() config.App
 	AuthManager() *auth.Manager
 	ProjectID() string
@@ -56,6 +57,10 @@ func (s *embeddedAppServer) Close() error {
 		return nil
 	}
 	return s.inner.Close()
+}
+
+func (s *embeddedAppServer) OwnsServer() bool {
+	return s != nil && s.inner != nil
 }
 
 func (s *embeddedAppServer) Config() config.App {
