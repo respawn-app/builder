@@ -124,10 +124,14 @@ func (b metaContextBuilder) Build(opts metaContextBuildOptions) (metaContextBuil
 	}
 
 	if opts.IncludeEnvironment {
+		environmentMessage, err := environmentContextMessage(b.workspaceRoot, b.model, b.timestamp())
+		if err != nil {
+			return metaContextBuildResult{}, err
+		}
 		collector.addMessages([]llm.Message{{
 			Role:        llm.RoleDeveloper,
 			MessageType: llm.MessageTypeEnvironment,
-			Content:     environmentContextMessage(b.workspaceRoot, b.model, b.thinkingLevel, b.timestamp()),
+			Content:     environmentMessage,
 		}})
 	}
 

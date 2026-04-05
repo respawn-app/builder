@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -199,7 +200,7 @@ func agentsInjectionPaths(workspaceRoot string) ([]string, error) {
 	return paths, nil
 }
 
-func environmentContextMessage(workspaceRoot string, model string, thinkingLevel string, now time.Time) string {
+func environmentContextMessage(workspaceRoot string, model string, now time.Time) (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil || strings.TrimSpace(cwd) == "" {
 		cwd = strings.TrimSpace(workspaceRoot)
@@ -232,16 +233,29 @@ func environmentContextMessage(workspaceRoot string, model string, thinkingLevel
 		tzName = "unknown"
 	}
 
+	modelLine, err := environmentModelContextLine(model)
+	if err != nil {
+		return "", err
+	}
+
 	return strings.Join([]string{
 		environmentInjectedHeader,
-		llm.ModelDisplayLabel(model, thinkingLevel),
+		modelLine,
 		fmt.Sprintf("OS: %s", osName),
 		fmt.Sprintf("Current TZ: %s (UTC%s)", tzName, formatUTCOffset(tzOffset)),
 		fmt.Sprintf("Date/time: %s", now.Format(time.RFC3339)),
 		fmt.Sprintf("Shell: %s", shell),
 		fmt.Sprintf("CWD: %s", cwd),
 		fmt.Sprintf("CPU arch: %s", cpuArch),
-	}, "\n")
+	}, "\n"), nil
+}
+
+func environmentModelContextLine(model string) (string, error) {
+	normalized := strings.TrimSpace(model)
+	if normalized == "" {
+		return "", errors.New("environment context requires a model")
+	}
+	return fmt.Sprintf("Your model: %s", normalized), nil
 }
 
 func shellEnvironmentName() string {
