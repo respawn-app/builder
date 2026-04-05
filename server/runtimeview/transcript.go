@@ -181,5 +181,8 @@ func cloneClientToolCallMeta(meta *clientui.ToolCallMeta) *clientui.ToolCallMeta
 		renderHint := *meta.RenderHint
 		copyMeta.RenderHint = &renderHint
 	}
+	if meta.PatchRender != nil {
+		copyMeta.PatchRender = cloneRenderedPatch(meta.PatchRender)
+	}
 	return &copyMeta
 }

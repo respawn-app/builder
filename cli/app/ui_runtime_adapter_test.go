@@ -926,6 +926,177 @@ func TestApplyRuntimeTranscriptPageAcceptsNewerRevisionTailReplacementThatClears
 	}
 }
 
+func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenRuntimeOnlyEntryChanged(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	m.transcriptLiveDirty = true
+
+	runtimeOnly := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 2,
+		Entries: []clientui.ChatEntry{
+			{Role: "assistant", Text: "seed"},
+			{Role: "error", Text: "background continuation failed: boom"},
+		},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, runtimeOnly); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	if got := len(m.transcriptEntries); got != 2 {
+		t.Fatalf("transcript entry count = %d, want 2", got)
+	}
+	if got := m.transcriptEntries[1].Text; got != "background continuation failed: boom" {
+		t.Fatalf("runtime-only entry text = %q, want background continuation failed: boom", got)
+	}
+	if m.transcriptLiveDirty {
+		t.Fatal("expected accepted equal-revision tail refresh to clear transcriptLiveDirty")
+	}
+}
+
+func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenOngoingErrorChanged(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	m.transcriptLiveDirty = true
+
+	runtimeOnly := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+		OngoingError: "background continuation failed",
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, runtimeOnly); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	if got := m.view.OngoingErrorText(); got != "background continuation failed" {
+		t.Fatalf("ongoing error text = %q, want background continuation failed", got)
+	}
+	if m.transcriptLiveDirty {
+		t.Fatal("expected accepted equal-revision ongoing-error refresh to clear transcriptLiveDirty")
+	}
+}
+
+func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenOngoingErrorCleared(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+		OngoingError: "background continuation failed",
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	m.transcriptLiveDirty = true
+
+	cleared := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+		OngoingError: "",
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, cleared); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	if got := m.view.OngoingErrorText(); got != "" {
+		t.Fatalf("ongoing error text = %q, want empty", got)
+	}
+	if m.transcriptLiveDirty {
+		t.Fatal("expected accepted equal-revision ongoing-error clear to clear transcriptLiveDirty")
+	}
+	if got := len(m.transcriptEntries); got != 1 {
+		t.Fatalf("transcript entry count = %d, want 1", got)
+	}
+}
+
+func TestApplyRuntimeTranscriptPageRejectsEqualRevisionShiftedTailReplacement(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 2,
+		Entries: []clientui.ChatEntry{
+			{Role: "assistant", Text: "seed-0"},
+			{Role: "assistant", Text: "seed-1"},
+		},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	m.transcriptLiveDirty = true
+
+	shifted := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       1,
+		TotalEntries: 2,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed-1"}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, shifted); cmd != nil {
+		if msg := cmd(); msg != nil {
+			t.Fatalf("expected shifted equal-revision page to be ignored, got %T", msg)
+		}
+	}
+
+	if got := m.transcriptBaseOffset; got != 0 {
+		t.Fatalf("transcript base offset = %d, want 0", got)
+	}
+	if got := len(m.transcriptEntries); got != 2 {
+		t.Fatalf("transcript entry count = %d, want 2", got)
+	}
+	if got := m.transcriptEntries[0].Text; got != "seed-0" {
+		t.Fatalf("first transcript entry = %q, want seed-0", got)
+	}
+	if !m.transcriptLiveDirty {
+		t.Fatal("expected rejected shifted equal-revision page to preserve transcriptLiveDirty")
+	}
+}
+
 func TestApplyRuntimeTranscriptPageAcceptsNewerRevisionTailReplacementAfterLiveAppend(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.termWidth = 100

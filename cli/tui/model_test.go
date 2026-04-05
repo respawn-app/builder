@@ -149,6 +149,40 @@ func TestToggleToDetailCanSkipWarmup(t *testing.T) {
 	}
 }
 
+func TestDetailSetConversationPreservesFocusedAbsoluteEntryAcrossBaseOffsetShift(t *testing.T) {
+	m := NewModel(WithPreviewLines(8))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 8, Width: 80})
+	m = updateModel(t, m, SetConversationMsg{
+		BaseOffset:   0,
+		TotalEntries: 1000,
+		Entries:      transcriptEntriesRange(0, 1000),
+	})
+	m = updateModel(t, m, SetModeMsg{Mode: ModeDetail})
+	m = updateModel(t, m, FocusTranscriptEntryMsg{EntryIndex: 500, Center: true})
+
+	beforeStart, beforeEnd, ok := m.DetailVisibleEntryRange()
+	if !ok {
+		t.Fatal("expected visible range before base offset shift")
+	}
+	if beforeStart > 500 || beforeEnd < 500 {
+		t.Fatalf("expected entry 500 visible before base offset shift, got range %d..%d", beforeStart, beforeEnd)
+	}
+
+	m = updateModel(t, m, SetConversationMsg{
+		BaseOffset:   200,
+		TotalEntries: 1200,
+		Entries:      transcriptEntriesRange(200, 1200),
+	})
+
+	afterStart, afterEnd, ok := m.DetailVisibleEntryRange()
+	if !ok {
+		t.Fatal("expected visible range after base offset shift")
+	}
+	if afterStart > 500 || afterEnd < 500 {
+		t.Fatalf("expected entry 500 to remain visible after base offset shift, got range %d..%d", afterStart, afterEnd)
+	}
+}
+
 func TestOngoingShowsFullConversationContext(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: "user", Text: "first question"})

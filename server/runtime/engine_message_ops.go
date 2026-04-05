@@ -154,6 +154,19 @@ func (e *Engine) clearStreamingAssistantState(stepID string) {
 	e.emit(Event{Kind: EventReasoningDeltaReset, StepID: stepID})
 }
 
+func flushedUserMessageEvent(msg llm.Message, stepID string) *Event {
+	if msg.Role != llm.RoleUser {
+		return nil
+	}
+	if msg.MessageType == llm.MessageTypeCompactionSummary {
+		return nil
+	}
+	if strings.TrimSpace(msg.Content) == "" {
+		return nil
+	}
+	return &Event{Kind: EventUserMessageFlushed, StepID: stepID, UserMessage: msg.Content, UserMessageBatch: []string{msg.Content}}
+}
+
 func (e *Engine) flushPendingUserInjections(stepID string) (int, error) {
 	e.ensureOrchestrationCollaborators()
 	return e.messageFlow.FlushPendingUserInjections(stepID)

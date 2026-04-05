@@ -21,19 +21,31 @@ func normalizeToolCallsForTranscript(calls []llm.ToolCall, workingDir string) []
 		return nil
 	}
 	out := make([]llm.ToolCall, 0, len(calls))
-	ctx := tools.ToolCallContext{
-		WorkingDir:                 workingDir,
-		DefaultShellTimeoutSeconds: defaultShellTimeoutSecond,
-	}
 	for _, call := range calls {
-		normalized := call
-		if len(normalized.Presentation) == 0 {
-			meta := tools.BuildCallTranscriptMeta(normalized.Name, ctx, normalized.Input)
-			normalized.Presentation = toolcodec.EncodeToolCallMeta(meta)
-		}
-		out = append(out, normalized)
+		out = append(out, normalizeToolCallForTranscript(call, workingDir))
 	}
 	return out
+}
+
+func normalizeToolCallForTranscript(call llm.ToolCall, workingDir string) llm.ToolCall {
+	normalized := call
+	meta := transcriptToolCallMeta(call, workingDir)
+	if meta == nil {
+		return normalized
+	}
+	normalized.Presentation = toolcodec.EncodeToolCallMeta(*meta)
+	return normalized
+}
+
+func transcriptToolCallMeta(call llm.ToolCall, workingDir string) *transcript.ToolCallMeta {
+	if meta := decodeToolCallMeta(call); meta != nil {
+		return meta
+	}
+	built := tools.BuildCallTranscriptMeta(call.Name, tools.ToolCallContext{
+		WorkingDir:                 workingDir,
+		DefaultShellTimeoutSeconds: defaultShellTimeoutSecond,
+	}, call.Input)
+	return &built
 }
 
 func decodeToolCallMeta(call llm.ToolCall) *transcript.ToolCallMeta {

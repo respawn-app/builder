@@ -56,6 +56,13 @@ func (m *uiModel) refreshProcessEntries() {
 	}
 }
 
+func (m *uiModel) refreshProcessEntriesIfOpen() {
+	if m == nil || !m.processList.isOpen() {
+		return
+	}
+	m.refreshProcessEntries()
+}
+
 func (m *uiModel) openProcessList() {
 	m.processList.open = true
 	m.setInputMode(uiInputModeProcessList)

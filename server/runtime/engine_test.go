@@ -6336,6 +6336,62 @@ func TestQueuedUserMessageFlushedEventPrecedesConversationUpdateForInjectedMessa
 	}
 }
 
+func TestDirectUserMessageFlushedEventPrecedesConversationUpdate(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	var (
+		eng                   *Engine
+		eventIndex            int
+		flushIndex            = -1
+		userConversationIndex = -1
+	)
+	eng, err = New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			eventIndex++
+			if evt.Kind == EventUserMessageFlushed && evt.UserMessage == "say hi" && flushIndex < 0 {
+				flushIndex = eventIndex
+			}
+			if evt.Kind != EventConversationUpdated || eng == nil || userConversationIndex >= 0 {
+				return
+			}
+			snapshot := eng.ChatSnapshot()
+			if len(snapshot.Entries) == 0 {
+				return
+			}
+			last := snapshot.Entries[len(snapshot.Entries)-1]
+			if last.Role == string(llm.RoleUser) && last.Text == "say hi" {
+				userConversationIndex = eventIndex
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "say hi"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if flushIndex < 0 {
+		t.Fatal("expected direct user_message_flushed event")
+	}
+	if userConversationIndex < 0 {
+		t.Fatal("expected conversation_updated event for direct user message")
+	}
+	if flushIndex >= userConversationIndex {
+		t.Fatalf("expected flushed event before conversation update, got flush=%d conversation=%d", flushIndex, userConversationIndex)
+	}
+}
+
 func TestQueuedUserMessagesCoalesceIntoSingleFlush(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

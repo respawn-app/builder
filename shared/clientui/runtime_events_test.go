@@ -15,8 +15,8 @@ func TestReduceRuntimeEvent_UserMessageFlushedConsumesInjectedInputAndUnlocksSub
 		Event{Kind: EventUserMessageFlushed, UserMessage: "steered message"},
 	)
 
-	if !update.SyncSessionView {
-		t.Fatal("expected flushed user message to request session sync")
+	if update.SyncSessionView {
+		t.Fatal("did not expect flushed user message to request session sync")
 	}
 	if !update.RecordPromptHistory {
 		t.Fatal("expected consumed injected text to be recorded in prompt history")
@@ -87,7 +87,7 @@ func TestReduceRuntimeEvent_BackgroundCompletionProducesNotice(t *testing.T) {
 		RuntimeEventState{},
 		PendingInputState{},
 		false,
-		Event{Kind: EventBackgroundUpdated, Background: &BackgroundShellEvent{Type: "completed", ID: "1000", State: "completed"}},
+		Event{Kind: EventBackgroundUpdated, Background: &BackgroundShellEvent{Type: "completed", ID: "1000", State: "completed", CompactText: "Background shell 1000 completed (exit 0)"}},
 	)
 
 	if !update.RefreshProcesses {
@@ -98,6 +98,22 @@ func TestReduceRuntimeEvent_BackgroundCompletionProducesNotice(t *testing.T) {
 	}
 	if update.BackgroundNotice.Kind != BackgroundNoticeSuccess {
 		t.Fatalf("notice kind = %v, want success", update.BackgroundNotice.Kind)
+	}
+	if update.BackgroundNotice.Message != "Background shell 1000 completed (exit 0)" {
+		t.Fatalf("notice message = %q", update.BackgroundNotice.Message)
+	}
+}
+
+func TestReduceRuntimeEvent_BackgroundCompletionFallsBackWithoutCompactText(t *testing.T) {
+	update := ReduceRuntimeEvent(
+		RuntimeEventState{},
+		PendingInputState{},
+		false,
+		Event{Kind: EventBackgroundUpdated, Background: &BackgroundShellEvent{Type: "completed", ID: "1000", State: "completed"}},
+	)
+
+	if update.BackgroundNotice == nil {
+		t.Fatal("expected completion notice")
 	}
 	if update.BackgroundNotice.Message != "background shell 1000 completed" {
 		t.Fatalf("notice message = %q", update.BackgroundNotice.Message)

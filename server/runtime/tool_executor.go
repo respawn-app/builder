@@ -27,7 +27,7 @@ func (t *defaultToolExecutor) ExecuteToolCalls(ctx context.Context, stepID strin
 		if call.ID == "" {
 			call.ID = uuid.NewString()
 		}
-		e.emit(Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: copiedToolCall(call)})
+		e.emit(Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: copiedToolCall(normalizeToolCallForTranscript(call, e.store.Meta().WorkspaceRoot))})
 		idx := i
 		wg.Add(1)
 		go func(tc llm.ToolCall) {

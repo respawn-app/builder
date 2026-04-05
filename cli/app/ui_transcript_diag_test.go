@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"builder/cli/tui"
 	"builder/shared/clientui"
 )
 
@@ -46,6 +47,9 @@ func TestRuntimeTranscriptPageLogsRejectReason(t *testing.T) {
 	)
 	m.transcriptRevision = 10
 	m.transcriptLiveDirty = true
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "seed"}}
+	m.transcriptTotalEntries = 1
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
 	_ = m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail}, clientui.TranscriptPage{
 		SessionID:    "session-1",

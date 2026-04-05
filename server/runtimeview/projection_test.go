@@ -11,6 +11,7 @@ import (
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/tools"
+	patchformat "builder/server/tools/patch/format"
 	"builder/shared/clientui"
 	"builder/shared/transcript"
 )
@@ -197,6 +198,26 @@ func TestChatSnapshotFromRuntimeCopiesEntries(t *testing.T) {
 	}
 	if snapshot.Ongoing != "ongoing" || snapshot.OngoingError != "warn" {
 		t.Fatalf("unexpected snapshot projection: %+v", snapshot)
+	}
+}
+
+func TestTranscriptPageFromChatClonesPatchRender(t *testing.T) {
+	snapshot := clientui.ChatSnapshot{Entries: []clientui.ChatEntry{{
+		Role: "tool_call",
+		ToolCall: &clientui.ToolCallMeta{
+			PatchRender: &patchformat.RenderedPatch{
+				SummaryLines: []patchformat.RenderedLine{{Text: "before"}},
+			},
+		},
+	}}}
+
+	page := TranscriptPageFromChat("session-1", "session", clientui.ConversationFreshnessEstablished, 1, snapshot, clientui.TranscriptPageRequest{})
+	if len(page.Entries) != 1 || page.Entries[0].ToolCall == nil || page.Entries[0].ToolCall.PatchRender == nil {
+		t.Fatalf("expected patch render copied into transcript page, got %+v", page.Entries)
+	}
+	snapshot.Entries[0].ToolCall.PatchRender.SummaryLines[0].Text = "after"
+	if page.Entries[0].ToolCall.PatchRender.SummaryLines[0].Text != "before" {
+		t.Fatalf("expected transcript page to deep copy patch render, got %+v", page.Entries[0].ToolCall.PatchRender.SummaryLines)
 	}
 }
 
