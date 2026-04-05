@@ -222,6 +222,9 @@ func (c uiInputController) handlePreSubmitCompactionCheckDone(msg preSubmitCompa
 	}
 	if msg.err != nil {
 		c.finishBusyActivity(false)
+		if m.turnQueueHook != nil {
+			m.turnQueueHook.OnTurnQueueAborted()
+		}
 		c.releaseLockedInjectedInput(true)
 		m.discardQueuedText(msg.text)
 		c.restorePendingInjectedIntoInput()
