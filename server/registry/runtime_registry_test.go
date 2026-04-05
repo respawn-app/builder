@@ -51,6 +51,45 @@ func TestRuntimeRegistryBroadcastsSessionActivityToMultipleSubscribers(t *testin
 	}
 }
 
+func TestRuntimeRegistryIsolatesSessionActivityBetweenSessions(t *testing.T) {
+	registry := NewRuntimeRegistry()
+	engineA := &runtime.Engine{}
+	engineB := &runtime.Engine{}
+	registry.Register("session-a", engineA)
+	registry.Register("session-b", engineB)
+	t.Cleanup(func() {
+		registry.Unregister("session-a", engineA)
+		registry.Unregister("session-b", engineB)
+	})
+
+	subA, err := registry.SubscribeSessionActivity(context.Background(), "session-a")
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity(session-a): %v", err)
+	}
+	defer func() { _ = subA.Close() }()
+	subB, err := registry.SubscribeSessionActivity(context.Background(), "session-b")
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity(session-b): %v", err)
+	}
+	defer func() { _ = subB.Close() }()
+
+	registry.PublishRuntimeEvent("session-a", runtime.Event{Kind: runtime.EventConversationUpdated, StepID: "step-a"})
+
+	evtA, err := subA.Next(context.Background())
+	if err != nil {
+		t.Fatalf("subA.Next: %v", err)
+	}
+	if evtA.Kind != clientui.EventConversationUpdated || evtA.StepID != "step-a" {
+		t.Fatalf("unexpected event for session-a: %+v", evtA)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := subB.Next(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected session-b subscriber to stay idle, got %v", err)
+	}
+}
+
 func TestRuntimeRegistryClosesLaggedSubscriberWithGapError(t *testing.T) {
 	registry := NewRuntimeRegistry()
 	engine := &runtime.Engine{}

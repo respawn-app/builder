@@ -294,13 +294,24 @@ func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (assistant 
 
 	e.ensureOrchestrationCollaborators()
 	err = e.stepLifecycle.Run(ctx, exclusiveStepOptions{EmitRunState: true, PersistRunLifecycle: true}, func(stepCtx context.Context, stepID string) error {
+		e.mu.Lock()
+		hasQueuedInjected := len(e.pendingInjected) > 0
+		e.mu.Unlock()
 		if err := e.injectAgentsIfNeeded(stepID); err != nil {
 			return err
 		}
 		if err := e.injectHeadlessModeTransitionPromptIfNeeded(stepID); err != nil {
 			return err
 		}
-		if err := e.appendUserMessage(stepID, text); err != nil {
+		if !hasQueuedInjected {
+			if err := e.appendUserMessageWithoutConversationUpdate(stepID, text); err != nil {
+				return err
+			}
+			if flushed := flushedUserMessageEvent(llm.Message{Role: llm.RoleUser, Content: text}, stepID); flushed != nil {
+				e.emit(*flushed)
+			}
+			e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
+		} else if err := e.appendUserMessage(stepID, text); err != nil {
 			return err
 		}
 		msg, runErr := e.runStepLoop(stepCtx, stepID)
@@ -337,7 +348,7 @@ func (e *Engine) SubmitUserShellCommand(ctx context.Context, command string) (re
 			return err
 		}
 		if _, ok := e.registry.Get(tools.ToolShell); !ok {
-			e.emit(Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: copiedToolCall(call)})
+			e.emit(Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: copiedToolCall(normalizeToolCallForTranscript(call, e.store.Meta().WorkspaceRoot))})
 			result = tools.Result{CallID: call.ID, Name: tools.ToolShell, IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
 			if err := e.persistToolCompletion(stepID, result); err != nil {
 				return fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", call.ID, result.Name, err)

@@ -94,7 +94,6 @@ func ReduceRuntimeEvent(state RuntimeEventState, input PendingInputState, activi
 		update.RefreshProcesses = true
 		update.BackgroundNotice = backgroundNoticeFromEvent(evt.Background)
 	case EventUserMessageFlushed:
-		update.SyncSessionView = true
 		update.State.ConversationFreshness = ConversationFreshnessEstablished
 		batch := append([]string(nil), evt.UserMessageBatch...)
 		if len(batch) == 0 && strings.TrimSpace(evt.UserMessage) != "" {
@@ -168,8 +167,12 @@ func backgroundNoticeFromEvent(evt *BackgroundShellEvent) *BackgroundNotice {
 	if evt.Type != "completed" && evt.Type != "killed" {
 		return nil
 	}
+	message := strings.TrimSpace(evt.CompactText)
+	if message == "" {
+		message = "background shell " + evt.ID + " " + evt.State
+	}
 	notice := &BackgroundNotice{
-		Message: "background shell " + evt.ID + " " + evt.State,
+		Message: message,
 		Kind:    BackgroundNoticeSuccess,
 	}
 	if evt.Type == "killed" && !evt.UserRequestedKill {

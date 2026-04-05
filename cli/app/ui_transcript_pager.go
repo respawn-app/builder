@@ -13,6 +13,7 @@ const (
 )
 
 type uiDetailTranscriptWindow struct {
+	sessionID    string
 	offset       int
 	totalEntries int
 	entries      []tui.TranscriptEntry
@@ -35,6 +36,7 @@ func (w uiDetailTranscriptWindow) page() clientui.TranscriptPage {
 		})
 	}
 	return clientui.TranscriptPage{
+		SessionID:    w.sessionID,
 		TotalEntries: w.totalEntries,
 		Offset:       w.offset,
 		Entries:      entries,
@@ -52,6 +54,10 @@ func (w *uiDetailTranscriptWindow) reset() {
 
 func (w *uiDetailTranscriptWindow) syncTail(page clientui.TranscriptPage) {
 	if w == nil {
+		return
+	}
+	if w.loaded && transcriptPageSessionChanged(w.sessionID, page.SessionID) {
+		w.replace(page)
 		return
 	}
 	if !w.loaded {
@@ -76,6 +82,10 @@ func (w *uiDetailTranscriptWindow) apply(page clientui.TranscriptPage) {
 	if w == nil {
 		return
 	}
+	if w.loaded && transcriptPageSessionChanged(w.sessionID, page.SessionID) {
+		w.replace(page)
+		return
+	}
 	if !w.loaded {
 		w.replace(page)
 		return
@@ -85,6 +95,9 @@ func (w *uiDetailTranscriptWindow) apply(page clientui.TranscriptPage) {
 
 func (w uiDetailTranscriptWindow) matchesPage(page clientui.TranscriptPage) bool {
 	if !w.loaded {
+		return false
+	}
+	if transcriptPageSessionChanged(w.sessionID, page.SessionID) {
 		return false
 	}
 	totalEntries := max(page.TotalEntries, page.Offset+len(page.Entries))
@@ -109,6 +122,7 @@ func (w *uiDetailTranscriptWindow) replace(page clientui.TranscriptPage) {
 	if w == nil {
 		return
 	}
+	w.sessionID = strings.TrimSpace(page.SessionID)
 	w.offset = page.Offset
 	w.totalEntries = max(page.TotalEntries, page.Offset+len(page.Entries))
 	w.entries = transcriptEntriesFromPage(page)
@@ -121,6 +135,10 @@ func (w *uiDetailTranscriptWindow) replace(page clientui.TranscriptPage) {
 
 func (w *uiDetailTranscriptWindow) merge(page clientui.TranscriptPage) {
 	if w == nil {
+		return
+	}
+	if transcriptPageSessionChanged(w.sessionID, page.SessionID) {
+		w.replace(page)
 		return
 	}
 	if len(page.Entries) == 0 {
@@ -240,6 +258,15 @@ func transcriptPageLooksLikeOngoingTail(page clientui.TranscriptPage) bool {
 
 func pageRequestEqual(a, b clientui.TranscriptPageRequest) bool {
 	return a.Offset == b.Offset && a.Limit == b.Limit && a.Page == b.Page && a.PageSize == b.PageSize && a.Window == b.Window
+}
+
+func transcriptPageSessionChanged(currentSessionID, nextSessionID string) bool {
+	trimmedCurrent := strings.TrimSpace(currentSessionID)
+	trimmedNext := strings.TrimSpace(nextSessionID)
+	if trimmedCurrent == "" || trimmedNext == "" {
+		return false
+	}
+	return trimmedCurrent != trimmedNext
 }
 
 func isUserTranscriptEntry(entry tui.TranscriptEntry) bool {

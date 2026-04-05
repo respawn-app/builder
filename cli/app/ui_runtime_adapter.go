@@ -117,7 +117,7 @@ func (a uiRuntimeAdapter) pendingInputState() clientui.PendingInputState {
 	m := a.model
 	return clientui.PendingInputState{
 		Input:             m.input,
-		PendingInjected:   append([]string(nil), m.pendingInjected...),
+		PendingInjected:   m.pendingInjected,
 		LockedInjectText:  m.lockedInjectText,
 		InputSubmitLocked: m.inputSubmitLocked,
 	}
@@ -409,6 +409,9 @@ func transcriptPageReplacementRejectReason(m *uiModel, req clientui.TranscriptPa
 	if !replacesOngoingTail {
 		return ""
 	}
+	if m.transcriptLiveDirty && page.Revision == m.transcriptRevision && transcriptTailSurfaceDiffers(m, page) {
+		return ""
+	}
 	if m.transcriptLiveDirty && page.Revision <= m.transcriptRevision {
 		return "live_dirty_same_or_older_revision"
 	}
@@ -416,6 +419,35 @@ func transcriptPageReplacementRejectReason(m *uiModel, req clientui.TranscriptPa
 		return "same_revision_would_clear_ongoing"
 	}
 	return ""
+}
+
+func transcriptTailSurfaceDiffers(m *uiModel, page clientui.TranscriptPage) bool {
+	if m == nil {
+		return false
+	}
+	currentStart := m.transcriptBaseOffset
+	currentEnd := currentStart + len(m.transcriptEntries)
+	pageStart := page.Offset
+	pageEnd := page.Offset + len(page.Entries)
+	overlapStart := max(currentStart, pageStart)
+	overlapEnd := min(currentEnd, pageEnd)
+	for absolute := overlapStart; absolute < overlapEnd; absolute++ {
+		currentIndex := absolute - currentStart
+		pageIndex := absolute - pageStart
+		if !transcriptEntryMatchesChatEntry(m.transcriptEntries[currentIndex], page.Entries[pageIndex]) {
+			return false
+		}
+	}
+	if pageEnd > currentEnd {
+		return true
+	}
+	if m.view.OngoingStreamingText() != page.Ongoing {
+		return true
+	}
+	if m.view.OngoingErrorText() != page.OngoingError {
+		return true
+	}
+	return false
 }
 
 func transcriptPageApplyBranch(req clientui.TranscriptPageRequest, m *uiModel) string {

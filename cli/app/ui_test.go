@@ -2067,6 +2067,58 @@ func TestPreSubmitCompactionQueuesPromptUntilCompactionCompletes(t *testing.T) {
 	}
 }
 
+func TestRuntimeClientSubmitShowsUserMessageInTranscriptWhenFlushedEventArrives(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.input = "say hi"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if updated.pendingPreSubmitText != "say hi" {
+		t.Fatalf("expected pending pre-submit text preserved, got %q", updated.pendingPreSubmitText)
+	}
+
+	next, _ = updated.Update(preSubmitCompactionCheckDoneMsg{
+		token:         updated.preSubmitCheckToken,
+		text:          "say hi",
+		shouldCompact: false,
+	})
+	updated = next.(*uiModel)
+
+	cmd := updated.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
+		Kind:        runtime.EventUserMessageFlushed,
+		StepID:      "step-1",
+		UserMessage: "say hi",
+	}))
+	if cmd == nil {
+		t.Fatal("expected native replay command for flushed user message")
+	}
+	if got := len(updated.transcriptEntries); got != 1 {
+		t.Fatalf("expected one transcript entry after flushed user message, got %d", got)
+	}
+	if updated.transcriptEntries[0].Role != "user" || updated.transcriptEntries[0].Text != "say hi" {
+		t.Fatalf("unexpected transcript entry: %+v", updated.transcriptEntries[0])
+	}
+	msgs := collectCmdMessages(t, cmd)
+	flushFound := false
+	for _, msg := range msgs {
+		flushMsg, ok := msg.(nativeHistoryFlushMsg)
+		if !ok {
+			continue
+		}
+		if strings.Contains(stripANSIPreserve(flushMsg.Text), "say hi") {
+			flushFound = true
+			break
+		}
+	}
+	if !flushFound {
+		t.Fatalf("expected flushed replay text to include user message, got %+v", msgs)
+	}
+}
+
 func TestPreSubmitCompactionKeepsDuplicateQueuedPromptsInOrder(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
