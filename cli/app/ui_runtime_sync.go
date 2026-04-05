@@ -1,8 +1,10 @@
 package app
 
 import (
+	"strconv"
 	"time"
 
+	"builder/shared/transcriptdiag"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -37,6 +39,19 @@ func (m *uiModel) requestRuntimeTranscriptSync() tea.Cmd {
 	client := m.runtimeClient()
 	req := m.transcriptRequestForCurrentMode()
 	m.logf("ui.runtime.transcript.start token=%d", token)
+	fields := map[string]string{
+		"session_id":            m.sessionID,
+		"mode":                  string(m.view.Mode()),
+		"path":                  "hydrate",
+		"token":                 strconv.FormatUint(token, 10),
+		"current_revision":      strconv.FormatInt(m.transcriptRevision, 10),
+		"transcript_live_dirty": strconv.FormatBool(m.transcriptLiveDirty),
+		"reasoning_live_dirty":  strconv.FormatBool(m.reasoningLiveDirty),
+	}
+	for key, value := range transcriptdiag.RequestFields(req) {
+		fields[key] = value
+	}
+	m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.hydrate_start", fields))
 	return func() tea.Msg {
 		transcript, err := client.LoadTranscriptPage(req)
 		return runtimeTranscriptRefreshedMsg{token: token, req: req, transcript: transcript, err: err}
@@ -73,8 +88,19 @@ func (m *uiModel) handleRuntimeTranscriptRefreshed(msg runtimeTranscriptRefreshe
 	m.runtimeTranscriptBusy = false
 	if msg.err != nil {
 		m.logf("ui.runtime.transcript err=%q", msg.err.Error())
+		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.hydrate_response", map[string]string{
+			"session_id": m.sessionID,
+			"mode":       string(m.view.Mode()),
+			"path":       "hydrate",
+			"token":      strconv.FormatUint(msg.token, 10),
+			"err":        msg.err.Error(),
+		}))
 		return m.scheduleRuntimeTranscriptRetry()
 	}
+	m.logTranscriptPageDiag("transcript.diag.client.hydrate_response", msg.req, msg.transcript, map[string]string{
+		"path":  "hydrate",
+		"token": strconv.FormatUint(msg.token, 10),
+	})
 	recovered := m.runtimeTranscriptRetry != 0
 	if m.runtimeTranscriptRetry != 0 {
 		m.runtimeTranscriptRetry++

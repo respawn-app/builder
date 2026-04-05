@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,12 +14,14 @@ import (
 	"builder/server/launch"
 	"builder/server/primaryrun"
 	"builder/server/runtime"
+	"builder/server/runtimeview"
 	"builder/server/runtimewire"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/transcriptdiag"
 )
 
 type HeadlessBootstrap struct {
@@ -121,6 +124,11 @@ func (l *headlessPromptLauncher) prepareRuntime(plan launch.SessionPlan, progres
 		FastMode: l.boot.FastModeState,
 		OnEvent: func(evt runtime.Event) {
 			logger.Logf("%s", FormatRuntimeEvent(evt))
+			if transcriptdiag.EnabledFromEnv(os.Getenv) {
+				projected := runtimeview.EventFromRuntime(evt)
+				logger.Logf("%s", FormatTranscriptProjectionDiagnostic(plan.Store.Meta().SessionID, projected))
+				logger.Logf("%s", FormatTranscriptPublishDiagnostic(plan.Store.Meta().SessionID, projected))
+			}
 			if l.boot.RuntimeRegistry != nil {
 				l.boot.RuntimeRegistry.PublishRuntimeEvent(plan.Store.Meta().SessionID, evt)
 			}

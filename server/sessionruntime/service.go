@@ -3,6 +3,7 @@ package sessionruntime
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"builder/server/registry"
 	"builder/server/runprompt"
 	"builder/server/runtime"
+	"builder/server/runtimeview"
 	"builder/server/runtimewire"
 	"builder/server/session"
 	"builder/server/sessionpath"
@@ -20,6 +22,7 @@ import (
 	shelltool "builder/server/tools/shell"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/transcriptdiag"
 	"github.com/google/uuid"
 )
 
@@ -106,6 +109,11 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 		FastMode: s.fastModeState,
 		OnEvent: func(evt runtime.Event) {
 			logger.Logf("%s", runprompt.FormatRuntimeEvent(evt))
+			if transcriptdiag.EnabledFromEnv(os.Getenv) {
+				projected := runtimeview.EventFromRuntime(evt)
+				logger.Logf("%s", runprompt.FormatTranscriptProjectionDiagnostic(sessionID, projected))
+				logger.Logf("%s", runprompt.FormatTranscriptPublishDiagnostic(sessionID, projected))
+			}
 			if s.runtimes != nil {
 				s.runtimes.PublishRuntimeEvent(sessionID, evt)
 			}

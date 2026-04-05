@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"builder/server/runtime"
+	"builder/shared/clientui"
+	"builder/shared/transcriptdiag"
 )
 
 const RunLogFileName = "steps.log"
@@ -99,6 +101,35 @@ func FormatRunLoggerDiagnostic(diag RunLoggerDiagnostic) string {
 		parts = append(parts, fmt.Sprintf("err=%q", diag.Err.Error()))
 	}
 	return strings.Join(parts, " ")
+}
+
+func FormatTranscriptProjectionDiagnostic(sessionID string, evt clientui.Event) string {
+	fields := map[string]string{
+		"session_id":            strings.TrimSpace(sessionID),
+		"path":                  "live_event",
+		"kind":                  string(evt.Kind),
+		"step_id":               strings.TrimSpace(evt.StepID),
+		"event_digest":          transcriptdiag.EventDigest(evt),
+		"assistant_delta_chars": fmt.Sprintf("%d", len(evt.AssistantDelta)),
+	}
+	fields = transcriptdiag.AddEntriesFields(fields, evt.TranscriptEntries)
+	if evt.ReasoningDelta != nil {
+		fields["reasoning_key"] = strings.TrimSpace(evt.ReasoningDelta.Key)
+		fields["reasoning_chars"] = fmt.Sprintf("%d", len(evt.ReasoningDelta.Text))
+	}
+	return transcriptdiag.FormatLine("transcript.diag.server.project_event", fields)
+}
+
+func FormatTranscriptPublishDiagnostic(sessionID string, evt clientui.Event) string {
+	fields := map[string]string{
+		"session_id":   strings.TrimSpace(sessionID),
+		"path":         "live_event",
+		"kind":         string(evt.Kind),
+		"step_id":      strings.TrimSpace(evt.StepID),
+		"event_digest": transcriptdiag.EventDigest(evt),
+	}
+	fields = transcriptdiag.AddEntriesFields(fields, evt.TranscriptEntries)
+	return transcriptdiag.FormatLine("transcript.diag.server.publish_activity", fields)
 }
 
 func FormatRuntimeEvent(evt runtime.Event) string {
