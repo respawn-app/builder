@@ -13,11 +13,7 @@ func visibleUserTranscriptEntry(msg llm.Message) (ChatEntry, bool) {
 		return ChatEntry{}, false
 	}
 	if msg.MessageType == llm.MessageTypeCompactionSummary {
-		return ChatEntry{
-			Role:        string(transcript.EntryRoleCompactionSummary),
-			Text:        msg.Content,
-			OngoingText: compactCompactionSummaryText(msg.Content),
-		}, true
+		return ChatEntry{Role: string(transcript.EntryRoleCompactionSummary), Text: msg.Content}, true
 	}
 	return ChatEntry{Role: "user", Text: msg.Content}, true
 }
@@ -34,11 +30,7 @@ func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
 		llm.MessageTypeHeadlessModeExit:
 		return ChatEntry{Role: string(transcript.EntryRoleDeveloperContext), Text: msg.Content}, true
 	case llm.MessageTypeCompactionSummary:
-		return ChatEntry{
-			Role:        string(transcript.EntryRoleCompactionSummary),
-			Text:        msg.Content,
-			OngoingText: compactCompactionSummaryText(msg.Content),
-		}, true
+		return ChatEntry{Role: string(transcript.EntryRoleCompactionSummary), Text: msg.Content}, true
 	case llm.MessageTypeInterruption:
 		return ChatEntry{Role: string(transcript.EntryRoleInterruption), Text: msg.Content}, true
 	case llm.MessageTypeErrorFeedback:
@@ -52,38 +44,4 @@ func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
 	default:
 		return ChatEntry{}, false
 	}
-}
-
-func compactCompactionSummaryText(text string) string {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
-		return ""
-	}
-	normalized := strings.ReplaceAll(trimmed, "\r\n", "\n")
-	lines := strings.Split(normalized, "\n")
-	first := ""
-	remaining := false
-	for idx, line := range lines {
-		candidate := strings.TrimSpace(line)
-		if candidate == "" {
-			continue
-		}
-		if first == "" {
-			first = candidate
-			for _, tail := range lines[idx+1:] {
-				if strings.TrimSpace(tail) != "" {
-					remaining = true
-					break
-				}
-			}
-			break
-		}
-	}
-	if first == "" {
-		return ""
-	}
-	if remaining {
-		return first + "\n…"
-	}
-	return first
 }

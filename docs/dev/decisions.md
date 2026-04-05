@@ -251,7 +251,8 @@
 - `agents.md`: `D`
 - `skills`: `D`
 - `environment`: `D`
-- `compaction_summary`: `OC`
+- `compaction_notice`: `O`
+- `compaction_summary`: `D`
 - `interruption`: `O`
 - `error_feedback`: `O`
 - `compaction_soon_reminder`: `D`
