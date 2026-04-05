@@ -44,11 +44,6 @@ Rendered/native proof:
   - `TestNativeProgramRendersMixedRuntimeEventsFromChannelInRealtime`
   - `TestNativeProgramUserFlushDoesNotTriggerTranscriptSyncThatDropsCommentary`
 
-Supporting apply-order proof:
-
-- `cli/app/ui_runtime_adapter_test.go`
-  - `TestProjectedRuntimeEventsAppendTranscriptEntriesInOrder`
-
 ### 4. Transcript hydrate after `conversation_updated` restores committed transcript without replay duplication
 
 Primary proof:
@@ -83,7 +78,7 @@ Primary proof:
 
 Supporting startup visibility proof:
 
-- `cli/app/ui_test.go`
+- `cli/app/ui_runtime_adapter_test.go`
   - `TestStartupSeedsCachedTranscriptBeforeBoundedSync`
 
 ### 8. Remote session-activity preserves transcript-critical ordering
