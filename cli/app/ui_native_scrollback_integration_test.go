@@ -78,6 +78,33 @@ type gatedStreamClient struct {
 	lastReq llm.Request
 }
 
+type staleTranscriptRuntimeClient struct {
+	runtimeControlFakeClient
+	loadCalls int
+	page      clientui.TranscriptPage
+}
+
+func (c *staleTranscriptRuntimeClient) MainView() clientui.RuntimeMainView {
+	if c.sessionView.SessionID == "" {
+		c.sessionView.SessionID = "session-1"
+	}
+	return clientui.RuntimeMainView{Session: c.sessionView}
+}
+
+func (c *staleTranscriptRuntimeClient) RefreshMainView() (clientui.RuntimeMainView, error) {
+	return c.MainView(), nil
+}
+
+func (c *staleTranscriptRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	_ = req
+	c.loadCalls++
+	page := c.page
+	if page.SessionID == "" {
+		page.SessionID = "session-1"
+	}
+	return page, nil
+}
+
 func (c singleChunkStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
 	return llm.Response{}, errors.New("not implemented")
 }
@@ -1146,6 +1173,152 @@ func TestNativeProgramRendersMixedRuntimeEventsFromChannelInRealtime(t *testing.
 	}
 	if normalized := normalizedOutput(out.String()); !containsInOrder(normalized, "seed", "say hi", "Supervisor ran", "Background shell 1000 completed", "pwd", "done") {
 		t.Fatalf("expected mixed runtime event terminal sequence, got %q", normalized)
+	}
+}
+
+func TestNativeProgramUserFlushDoesNotTriggerTranscriptSyncThatDropsCommentary(t *testing.T) {
+	out := &bytes.Buffer{}
+	runtimeEvents := make(chan clientui.Event, 16)
+	client := &staleTranscriptRuntimeClient{
+		page: clientui.TranscriptPage{
+			SessionID: "session-1",
+			Entries:   []clientui.ChatEntry{{Role: "assistant", Text: "seed", Phase: string(llm.MessagePhaseFinal)}},
+		},
+	}
+	model := newProjectedTestUIModel(
+		client,
+		runtimeEvents,
+		closedAskEvents(),
+	)
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	waitForTestCondition(t, 2*time.Second, "startup replay", func() bool {
+		return strings.Contains(normalizedOutput(out.String()), "seed")
+	})
+	baselineLoadCalls := client.loadCalls
+
+	callMeta := transcript.ToolCallMeta{ToolName: "shell", Command: "pwd", CompactText: "pwd", IsShell: true}
+	runtimeEvents <- clientui.Event{
+		Kind:              clientui.EventUserMessageFlushed,
+		StepID:            "step-1",
+		UserMessage:       "say hi",
+		TranscriptEntries: []clientui.ChatEntry{{Role: "user", Text: "say hi"}},
+	}
+	runtimeEvents <- clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "working"}
+
+	waitForTestCondition(t, 2*time.Second, "live commentary after user flush", func() bool {
+		normalized := normalizedOutput(out.String())
+		return containsInOrder(normalized, "seed", "say hi", "working")
+	})
+	if client.loadCalls != baselineLoadCalls {
+		t.Fatalf("expected flushed user message to avoid extra transcript syncs before commentary, baseline=%d current=%d", baselineLoadCalls, client.loadCalls)
+	}
+
+	runtimeEvents <- clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "tool_call", Text: "pwd", ToolCallID: "call_1", ToolCall: transcriptToolCallMetaClient(&callMeta)}}}
+	runtimeEvents <- clientui.Event{Kind: clientui.EventToolCallCompleted, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "tool_result_ok", Text: "$ pwd\n/tmp", ToolCallID: "call_1"}}}
+	runtimeEvents <- clientui.Event{Kind: clientui.EventAssistantMessage, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "done", Phase: string(llm.MessagePhaseFinal)}}}
+
+	waitForTestCondition(t, 2*time.Second, "tool and final after user flush", func() bool {
+		normalized := normalizedOutput(out.String())
+		return containsInOrder(normalized, "seed", "say hi", "pwd", "done")
+	})
+	if client.loadCalls != baselineLoadCalls {
+		t.Fatalf("expected flushed user message to avoid extra transcript syncs, baseline=%d current=%d", baselineLoadCalls, client.loadCalls)
+	}
+
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+	if normalized := normalizedOutput(out.String()); !containsInOrder(normalized, "seed", "say hi", "pwd", "done") {
+		t.Fatalf("expected realtime terminal sequence after user flush, got %q", normalized)
+	}
+}
+
+func TestNativeProgramConversationRefreshHydratesCommittedTranscriptWithoutReplayDuplication(t *testing.T) {
+	out := &bytes.Buffer{}
+	runtimeEvents := make(chan clientui.Event, 8)
+	client := &startupTranscriptRuntimeClient{
+		view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1", SessionName: "incident triage"}},
+		page: clientui.TranscriptPage{
+			SessionID:    "session-1",
+			SessionName:  "incident triage",
+			TotalEntries: 1,
+			Entries: []clientui.ChatEntry{{
+				Role:  "assistant",
+				Text:  "already visible",
+				Phase: string(llm.MessagePhaseFinal),
+			}},
+		},
+	}
+	model := newProjectedTestUIModel(client, runtimeEvents, closedAskEvents())
+	model.startupCmds = nil
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	waitForTestCondition(t, 2*time.Second, "startup committed transcript", func() bool {
+		return strings.Contains(normalizedOutput(out.String()), "already visible")
+	})
+	baselineLen := out.Len()
+	client.page = clientui.TranscriptPage{
+		SessionID:    "session-1",
+		SessionName:  "incident triage",
+		TotalEntries: 2,
+		Entries: []clientui.ChatEntry{
+			{Role: "assistant", Text: "already visible", Phase: string(llm.MessagePhaseFinal)},
+			{Role: "assistant", Text: "restored after reconnect", Phase: string(llm.MessagePhaseFinal)},
+		},
+	}
+
+	runtimeEvents <- clientui.Event{Kind: clientui.EventConversationUpdated}
+	waitForTestCondition(t, 2*time.Second, "recovered committed transcript", func() bool {
+		return strings.Contains(normalizedOutput(out.String()), "restored after reconnect")
+	})
+
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	raw := out.String()
+	if strings.Contains(raw[baselineLen:], "\x1b[2J") {
+		t.Fatalf("expected reconnect hydration to avoid clearing the session, got %q", raw[baselineLen:])
+	}
+	normalized := normalizedOutput(raw)
+	if strings.Count(normalized, "already visible") != 1 {
+		t.Fatalf("expected previously visible committed entry exactly once after hydration, got %d in %q", strings.Count(normalized, "already visible"), normalized)
+	}
+	if strings.Count(normalized, "restored after reconnect") != 1 {
+		t.Fatalf("expected recovered committed entry exactly once, got %d in %q", strings.Count(normalized, "restored after reconnect"), normalized)
+	}
+	if model.sessionName != "incident triage" {
+		t.Fatalf("expected session name preserved across hydration, got %q", model.sessionName)
+	}
+	if len(client.loadRequests) != 1 {
+		t.Fatalf("transcript load calls = %d, want 1", len(client.loadRequests))
 	}
 }
 
