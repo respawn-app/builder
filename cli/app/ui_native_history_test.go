@@ -12,10 +12,12 @@ import (
 	"builder/server/runtime"
 	"builder/server/tools"
 	"builder/shared/clientui"
+	sharedtheme "builder/shared/theme"
 	"builder/shared/transcript"
 	"builder/shared/transcript/toolcodec"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
@@ -65,6 +67,38 @@ func TestNativeScrollbackStartupReplayIncludesFullTranscript(t *testing.T) {
 	plain := stripANSIText(msg.Text)
 	if !strings.Contains(plain, "first message") || !strings.Contains(plain, "last message") {
 		t.Fatalf("expected startup native replay to include full transcript, got %q", msg.Text)
+	}
+}
+
+func TestNativeScrollbackStartupReplayRendersInterruptionAsUserFacingError(t *testing.T) {
+	m := newProjectedStaticUIModel(
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: string(transcript.EntryRoleInterruption), Text: "User interrupted you"}}),
+	)
+
+	next, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	updated, ok := next.(*uiModel)
+	if !ok {
+		t.Fatalf("unexpected model type %T", next)
+	}
+	m = updated
+	if cmd == nil {
+		t.Fatal("expected native replay command after first window size")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg after first window size, got %T", cmd())
+	}
+	plain := stripANSIText(msg.Text)
+	if strings.Contains(plain, "User interrupted you") {
+		t.Fatalf("expected native replay to hide model-facing interruption wording, got %q", msg.Text)
+	}
+	if !strings.Contains(plain, "You interrupted") {
+		t.Fatalf("expected native replay to show user-facing interruption wording, got %q", msg.Text)
+	}
+	tokens := sharedtheme.ResolvePalette(m.theme)
+	expectedErrorText := lipgloss.NewStyle().Foreground(tokens.Transcript.Error.Lipgloss()).Render("You interrupted")
+	if !strings.Contains(msg.Text, expectedErrorText) {
+		t.Fatalf("expected native replay to use transcript error styling, got %q", msg.Text)
 	}
 }
 

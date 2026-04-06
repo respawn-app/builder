@@ -22,6 +22,7 @@ func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *
 }
 
 func (m Model) flattenEntryWithMetaAndSymbol(role, text string, muteText bool, toolMeta *transcript.ToolCallMeta, symbolOverride string) []string {
+	text = transcriptDisplayText(role, text)
 	renderWidth := m.viewportWidth
 	if rolePrefix(role) != "" {
 		renderWidth -= 2
@@ -363,6 +364,7 @@ func (m Model) renderDiffToolLines(text string, width int, toolMeta *transcript.
 }
 
 func (m Model) flattenEntryPlain(role, text string) []string {
+	text = transcriptDisplayText(role, text)
 	renderWidth := m.viewportWidth
 	if rolePrefix(role) != "" {
 		renderWidth -= 2
@@ -392,21 +394,53 @@ func (m Model) flattenEntryPlain(role, text string) []string {
 }
 
 func (m Model) maybeSelectedUserBlock(entryIndex int, role string, lines []string) []string {
-	if !m.selectedTranscriptActive {
-		return lines
-	}
-	if entryIndex != m.selectedTranscriptEntry {
-		return lines
-	}
 	if strings.TrimSpace(role) != "user" {
 		return lines
 	}
-	style := m.palette().selection
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {
-		out = append(out, style.Render(line))
+		out = append(out, m.maybeHighlightSelectedTranscriptLine(line, entryIndex))
 	}
 	return out
+}
+
+func (m Model) selectedUserTranscriptEntry() (int, bool) {
+	if !m.selectedTranscriptActive {
+		return -1, false
+	}
+	localIndex, ok := m.localTranscriptIndex(m.selectedTranscriptEntry)
+	if !ok {
+		return -1, false
+	}
+	if strings.TrimSpace(m.transcript[localIndex].Role) != "user" {
+		return -1, false
+	}
+	return m.selectedTranscriptEntry, true
+}
+
+func (m Model) maybeHighlightSelectedTranscriptLine(line string, entryIndex int) string {
+	selectedEntry, ok := m.selectedUserTranscriptEntry()
+	if !ok || entryIndex != selectedEntry {
+		return line
+	}
+	return m.renderSelectedTranscriptLine(line)
+}
+
+func (m Model) renderSelectedTranscriptLine(line string) string {
+	palette := m.palette()
+	padded := padRenderedLineToWidth(line, m.viewportWidth)
+	return applySelectionColors(padded, palette.selectionForegroundColor, palette.selectionBackgroundColor)
+}
+
+func padRenderedLineToWidth(line string, width int) string {
+	if width <= 0 {
+		return line
+	}
+	current := lipgloss.Width(line)
+	if current >= width {
+		return line
+	}
+	return line + strings.Repeat(" ", width-current)
 }
 
 func (m Model) renderEntryText(role, text string, width int, toolMeta *transcript.ToolCallMeta, muteText bool) string {
@@ -465,9 +499,9 @@ func (m Model) defaultEntryStyleIntents(role string, muteText bool) StyleIntent 
 		return SuccessForeground
 	case "cache_warning":
 		return ErrorForeground
-	case "warning":
+	case roleDeveloperFeedback, "warning":
 		return WarningForeground
-	case "error":
+	case roleInterruption, "error":
 		return ErrorForeground
 	default:
 		if isCompactionRole(role) {

@@ -19,97 +19,126 @@ func (m *uiModel) hasRuntimeClient() bool {
 
 func (m *uiModel) setRuntimeSessionName(name string) error {
 	if client := m.runtimeClient(); client != nil {
-		return client.SetSessionName(name)
+		err := client.SetSessionName(name)
+		m.observeRuntimeRequestResult(err)
+		return err
 	}
 	return nil
 }
 
 func (m *uiModel) setRuntimeThinkingLevel(level string) error {
 	if client := m.runtimeClient(); client != nil {
-		return client.SetThinkingLevel(level)
+		err := client.SetThinkingLevel(level)
+		m.observeRuntimeRequestResult(err)
+		return err
 	}
 	return nil
 }
 
 func (m *uiModel) setRuntimeFastModeEnabled(enabled bool) (bool, error) {
 	if client := m.runtimeClient(); client != nil {
-		return client.SetFastModeEnabled(enabled)
+		changed, err := client.SetFastModeEnabled(enabled)
+		m.observeRuntimeRequestResult(err)
+		return changed, err
 	}
 	return false, nil
 }
 
 func (m *uiModel) setRuntimeReviewerEnabled(enabled bool) (bool, string, error) {
 	if client := m.runtimeClient(); client != nil {
-		return client.SetReviewerEnabled(enabled)
+		changed, mode, err := client.SetReviewerEnabled(enabled)
+		m.observeRuntimeRequestResult(err)
+		return changed, mode, err
 	}
 	return false, "", nil
 }
 
 func (m *uiModel) setRuntimeAutoCompactionEnabled(enabled bool) (bool, bool, error) {
 	if client := m.runtimeClient(); client != nil {
-		return client.SetAutoCompactionEnabled(enabled)
+		changed, nextEnabled, err := client.SetAutoCompactionEnabled(enabled)
+		m.observeRuntimeRequestResult(err)
+		return changed, nextEnabled, err
 	}
 	return false, false, nil
 }
 
-func (m *uiModel) appendRuntimeLocalEntry(role, text string) {
+func (m *uiModel) appendRuntimeLocalEntry(role, text string) error {
 	if client := m.runtimeClient(); client != nil {
-		client.AppendLocalEntry(role, text)
+		err := client.AppendLocalEntry(role, text)
+		m.observeRuntimeRequestResult(err)
+		return err
 	}
+	return nil
 }
 
 func (m *uiModel) runtimeShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error) {
 	if client := m.runtimeClient(); client != nil {
-		return client.ShouldCompactBeforeUserMessage(ctx, text)
+		shouldCompact, err := client.ShouldCompactBeforeUserMessage(ctx, text)
+		m.observeRuntimeRequestResult(err)
+		return shouldCompact, err
 	}
 	return false, nil
 }
 
 func (m *uiModel) submitRuntimeUserMessage(ctx context.Context, text string) (string, error) {
 	if client := m.runtimeClient(); client != nil {
-		return client.SubmitUserMessage(ctx, text)
+		message, err := client.SubmitUserMessage(ctx, text)
+		m.observeRuntimeRequestResult(err)
+		return message, err
 	}
 	return "", nil
 }
 
 func (m *uiModel) submitRuntimeUserShellCommand(ctx context.Context, command string) error {
 	if client := m.runtimeClient(); client != nil {
-		return client.SubmitUserShellCommand(ctx, command)
+		err := client.SubmitUserShellCommand(ctx, command)
+		m.observeRuntimeRequestResult(err)
+		return err
 	}
 	return nil
 }
 
 func (m *uiModel) compactRuntimeContext(ctx context.Context, args string) error {
 	if client := m.runtimeClient(); client != nil {
-		return client.CompactContext(ctx, args)
+		err := client.CompactContext(ctx, args)
+		m.observeRuntimeRequestResult(err)
+		return err
 	}
 	return nil
 }
 
 func (m *uiModel) compactRuntimeContextForPreSubmit(ctx context.Context) error {
 	if client := m.runtimeClient(); client != nil {
-		return client.CompactContextForPreSubmit(ctx)
+		err := client.CompactContextForPreSubmit(ctx)
+		m.observeRuntimeRequestResult(err)
+		return err
 	}
 	return nil
 }
 
 func (m *uiModel) hasQueuedRuntimeUserWork() (bool, error) {
 	if client := m.runtimeClient(); client != nil {
-		return client.HasQueuedUserWork()
+		hasWork, err := client.HasQueuedUserWork()
+		m.observeRuntimeRequestResult(err)
+		return hasWork, err
 	}
 	return false, nil
 }
 
 func (m *uiModel) submitQueuedRuntimeUserMessages(ctx context.Context) (string, error) {
 	if client := m.runtimeClient(); client != nil {
-		return client.SubmitQueuedUserMessages(ctx)
+		message, err := client.SubmitQueuedUserMessages(ctx)
+		m.observeRuntimeRequestResult(err)
+		return message, err
 	}
 	return "", nil
 }
 
 func (m *uiModel) interruptRuntime() error {
 	if client := m.runtimeClient(); client != nil {
-		return client.Interrupt()
+		err := client.Interrupt()
+		m.observeRuntimeRequestResult(err)
+		return err
 	}
 	return nil
 }
@@ -129,7 +158,9 @@ func (m *uiModel) discardQueuedRuntimeUserMessagesMatching(text string) int {
 
 func (m *uiModel) recordRuntimePromptHistory(text string) error {
 	if client := m.runtimeClient(); client != nil {
-		return client.RecordPromptHistory(text)
+		err := client.RecordPromptHistory(text)
+		m.observeRuntimeRequestResult(err)
+		return err
 	}
 	return nil
 }

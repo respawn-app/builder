@@ -10,6 +10,38 @@ import (
 
 func TestRenderStyleContractsByTheme(t *testing.T) {
 	for _, theme := range []string{"dark", "light"} {
+		t.Run(theme+"/interruption_matches_error_palette", func(t *testing.T) {
+			for _, detail := range []bool{false, true} {
+				name := "ongoing"
+				if detail {
+					name = "detail"
+				}
+				t.Run(name, func(t *testing.T) {
+					m := NewModel(WithTheme(theme), WithPreviewLines(20))
+					m = updateModel(t, m, AppendTranscriptMsg{Role: roleInterruption, Text: "User interrupted you"})
+					if detail {
+						m = updateModel(t, m, ToggleModeMsg{})
+					}
+
+					out := m.View()
+					plain := plainTranscript(out)
+					if strings.Contains(plain, "User interrupted you") {
+						t.Fatalf("expected model-facing interruption wording hidden from user, got %q", plain)
+					}
+					if !strings.Contains(plain, interruptionUserVisibleText) {
+						t.Fatalf("expected user-facing interruption wording, got %q", plain)
+					}
+
+					if !strings.Contains(out, m.roleSymbol("error")+" ") {
+						t.Fatalf("expected interruption symbol to use standard error rendering, got %q", out)
+					}
+					if !strings.Contains(out, m.palette().error.Render(interruptionUserVisibleText)) {
+						t.Fatalf("expected interruption body to use standard error rendering, got %q", out)
+					}
+				})
+			}
+		})
+
 		t.Run(theme+"/ongoing_shell_preview", func(t *testing.T) {
 			m := newShellPreviewModel(t, theme, false)
 			out := m.View()

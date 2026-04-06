@@ -103,7 +103,7 @@ func (m *uiModel) appendLocalEntry(role, text string) {
 		return
 	}
 	if m.hasRuntimeClient() {
-		m.appendRuntimeLocalEntry(role, text)
+		_ = m.appendRuntimeLocalEntry(role, text)
 		return
 	}
 	m.forwardToView(tui.AppendTranscriptMsg{Role: role, Text: text})

@@ -784,6 +784,12 @@ func TestNativeFinalizeSuppressesLateAsyncDeltaArtifacts(t *testing.T) {
 	}()
 	time.Sleep(260 * time.Millisecond)
 	waitForSubmitResult(t, 2*time.Second, submitDone)
+	waitForTestCondition(t, 2*time.Second, "final commit to clear ongoing state", func() bool {
+		if strings.TrimSpace(model.view.OngoingStreamingText()) != "" {
+			return false
+		}
+		return !model.sawAssistantDelta
+	})
 	program.Quit()
 
 	select {

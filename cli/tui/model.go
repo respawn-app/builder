@@ -719,19 +719,11 @@ func (m Model) renderDetailSnapshot() string {
 		lines = []string{""}
 	}
 
-	selectedEntry := -1
-	if m.selectedTranscriptActive {
-		if localIndex, ok := m.localTranscriptIndex(m.selectedTranscriptEntry); ok {
-			if strings.TrimSpace(m.transcript[localIndex].Role) == "user" {
-				selectedEntry = m.selectedTranscriptEntry
-			}
-		}
-	}
-	selectedStyle := m.palette().selection
+	selectedEntry, highlightSelected := m.selectedUserTranscriptEntry()
 	out := make([]string, 0, m.viewportLines)
 	for i, line := range lines {
-		if selectedEntry >= 0 && i < len(m.detailLineEntryIndices) && m.detailLineEntryIndices[i] == selectedEntry {
-			line = selectedStyle.Render(line)
+		if highlightSelected && i < len(m.detailLineEntryIndices) && m.detailLineEntryIndices[i] == selectedEntry {
+			line = m.renderSelectedTranscriptLine(line)
 		}
 		out = append(out, line)
 	}

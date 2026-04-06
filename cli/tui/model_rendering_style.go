@@ -249,7 +249,7 @@ func styleForRole(role string, p palette) lipgloss.Style {
 	case roleDeveloperFeedback:
 		return p.warning
 	case roleInterruption:
-		return p.warning
+		return p.error
 	case "reasoning", "thinking_trace":
 		return p.system
 	case "error":
@@ -274,29 +274,31 @@ func (m Model) entryRole(entry TranscriptEntry) string {
 }
 
 type palette struct {
-	foregroundColor  rgbColor
-	preview          lipgloss.Style
-	previewColor     rgbColor
-	userColor        rgbColor
-	modelColor       rgbColor
-	toolColor        rgbColor
-	toolSuccessColor rgbColor
-	toolErrorColor   rgbColor
-	successColor     rgbColor
-	warningColor     rgbColor
-	errorColor       rgbColor
-	compactionColor  rgbColor
-	user             lipgloss.Style
-	model            lipgloss.Style
-	tool             lipgloss.Style
-	toolSuccess      lipgloss.Style
-	toolError        lipgloss.Style
-	system           lipgloss.Style
-	error            lipgloss.Style
-	warning          lipgloss.Style
-	success          lipgloss.Style
-	compaction       lipgloss.Style
-	selection        lipgloss.Style
+	foregroundColor          rgbColor
+	selectionForegroundColor rgbColor
+	selectionBackgroundColor rgbColor
+	preview                  lipgloss.Style
+	previewColor             rgbColor
+	userColor                rgbColor
+	modelColor               rgbColor
+	toolColor                rgbColor
+	toolSuccessColor         rgbColor
+	toolErrorColor           rgbColor
+	successColor             rgbColor
+	warningColor             rgbColor
+	errorColor               rgbColor
+	compactionColor          rgbColor
+	user                     lipgloss.Style
+	model                    lipgloss.Style
+	tool                     lipgloss.Style
+	toolSuccess              lipgloss.Style
+	toolError                lipgloss.Style
+	system                   lipgloss.Style
+	error                    lipgloss.Style
+	warning                  lipgloss.Style
+	success                  lipgloss.Style
+	compaction               lipgloss.Style
+	selection                lipgloss.Style
 
 	diffAddBackground    string
 	diffRemoveBackground string
@@ -305,28 +307,30 @@ type palette struct {
 func (m Model) palette() palette {
 	tokens := theme.ResolvePalette(m.theme)
 	return palette{
-		foregroundColor:  rgbColorFromHex(tokens.Transcript.Foreground.TrueColor),
-		preview:          lipgloss.NewStyle().Foreground(tokens.Transcript.Subdued.Lipgloss()),
-		previewColor:     rgbColorFromHex(tokens.Transcript.Subdued.TrueColor),
-		userColor:        rgbColorFromHex(tokens.Transcript.User.TrueColor),
-		modelColor:       rgbColorFromHex(tokens.Transcript.Assistant.TrueColor),
-		toolColor:        rgbColorFromHex(tokens.Transcript.Tool.TrueColor),
-		toolSuccessColor: rgbColorFromHex(tokens.Transcript.ToolSuccess.TrueColor),
-		toolErrorColor:   rgbColorFromHex(tokens.Transcript.ToolError.TrueColor),
-		successColor:     rgbColorFromHex(tokens.Transcript.Success.TrueColor),
-		warningColor:     rgbColorFromHex(tokens.Transcript.Warning.TrueColor),
-		errorColor:       rgbColorFromHex(tokens.Transcript.Error.TrueColor),
-		compactionColor:  rgbColorFromHex(tokens.Transcript.Compaction.TrueColor),
-		user:             lipgloss.NewStyle().Foreground(tokens.Transcript.User.Lipgloss()),
-		model:            lipgloss.NewStyle().Foreground(tokens.Transcript.Assistant.Lipgloss()),
-		tool:             lipgloss.NewStyle().Foreground(tokens.Transcript.Tool.Lipgloss()),
-		toolSuccess:      lipgloss.NewStyle().Foreground(tokens.Transcript.ToolSuccess.Lipgloss()),
-		toolError:        lipgloss.NewStyle().Foreground(tokens.Transcript.ToolError.Lipgloss()),
-		system:           lipgloss.NewStyle().Foreground(tokens.Transcript.System.Lipgloss()).Faint(true),
-		error:            lipgloss.NewStyle().Foreground(tokens.Transcript.Error.Lipgloss()),
-		warning:          lipgloss.NewStyle().Foreground(tokens.Transcript.Warning.Lipgloss()),
-		success:          lipgloss.NewStyle().Foreground(tokens.Transcript.Success.Lipgloss()),
-		compaction:       lipgloss.NewStyle().Foreground(tokens.Transcript.Compaction.Lipgloss()),
+		foregroundColor:          rgbColorFromHex(tokens.Transcript.Foreground.TrueColor),
+		selectionForegroundColor: rgbColorFromHex(tokens.Transcript.SelectionForeground.TrueColor),
+		selectionBackgroundColor: rgbColorFromHex(tokens.Transcript.SelectionBackground.TrueColor),
+		preview:                  lipgloss.NewStyle().Foreground(tokens.Transcript.Subdued.Lipgloss()),
+		previewColor:             rgbColorFromHex(tokens.Transcript.Subdued.TrueColor),
+		userColor:                rgbColorFromHex(tokens.Transcript.User.TrueColor),
+		modelColor:               rgbColorFromHex(tokens.Transcript.Assistant.TrueColor),
+		toolColor:                rgbColorFromHex(tokens.Transcript.Tool.TrueColor),
+		toolSuccessColor:         rgbColorFromHex(tokens.Transcript.ToolSuccess.TrueColor),
+		toolErrorColor:           rgbColorFromHex(tokens.Transcript.ToolError.TrueColor),
+		successColor:             rgbColorFromHex(tokens.Transcript.Success.TrueColor),
+		warningColor:             rgbColorFromHex(tokens.Transcript.Warning.TrueColor),
+		errorColor:               rgbColorFromHex(tokens.Transcript.Error.TrueColor),
+		compactionColor:          rgbColorFromHex(tokens.Transcript.Compaction.TrueColor),
+		user:                     lipgloss.NewStyle().Foreground(tokens.Transcript.User.Lipgloss()),
+		model:                    lipgloss.NewStyle().Foreground(tokens.Transcript.Assistant.Lipgloss()),
+		tool:                     lipgloss.NewStyle().Foreground(tokens.Transcript.Tool.Lipgloss()),
+		toolSuccess:              lipgloss.NewStyle().Foreground(tokens.Transcript.ToolSuccess.Lipgloss()),
+		toolError:                lipgloss.NewStyle().Foreground(tokens.Transcript.ToolError.Lipgloss()),
+		system:                   lipgloss.NewStyle().Foreground(tokens.Transcript.System.Lipgloss()).Faint(true),
+		error:                    lipgloss.NewStyle().Foreground(tokens.Transcript.Error.Lipgloss()),
+		warning:                  lipgloss.NewStyle().Foreground(tokens.Transcript.Warning.Lipgloss()),
+		success:                  lipgloss.NewStyle().Foreground(tokens.Transcript.Success.Lipgloss()),
+		compaction:               lipgloss.NewStyle().Foreground(tokens.Transcript.Compaction.Lipgloss()),
 		selection: lipgloss.NewStyle().
 			Background(tokens.Transcript.SelectionBackground.Lipgloss()).
 			Foreground(tokens.Transcript.SelectionForeground.Lipgloss()),

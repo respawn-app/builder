@@ -19,8 +19,9 @@ import (
 )
 
 type submitDoneMsg struct {
-	message string
-	err     error
+	message       string
+	submittedText string
+	err           error
 }
 
 type preSubmitCompactionCheckDoneMsg struct {
@@ -67,6 +68,10 @@ type runtimeEventMsg struct {
 
 type runtimeEventBatchMsg struct {
 	events []clientui.Event
+}
+
+type runtimeConnectionStateChangedMsg struct {
+	err error
 }
 
 type runtimeMainViewRefreshedMsg struct {
@@ -359,8 +364,9 @@ type uiModel struct {
 	processClient         clientui.ProcessClient
 	processClientExplicit bool
 
-	runtimeEvents <-chan clientui.Event
-	askEvents     <-chan askEvent
+	runtimeEvents           <-chan clientui.Event
+	askEvents               <-chan askEvent
+	runtimeConnectionEvents <-chan runtimeConnectionStateChangedMsg
 
 	input                    string
 	inputCursor              int // rune index; -1 means "track tail"
@@ -445,6 +451,7 @@ type uiModel struct {
 	transcriptBaseOffset     int
 	transcriptTotalEntries   int
 	transcriptRevision       int64
+	runtimeDisconnected      bool
 	transcriptLiveDirty      bool
 	reasoningLiveDirty       bool
 	detailTranscript         uiDetailTranscriptWindow
@@ -521,6 +528,13 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 	}
 	for _, opt := range opts {
 		opt(m)
+	}
+	if configurable, ok := m.engine.(interface{ SetConnectionStateObserver(func(error)) }); ok {
+		runtimeConnectionEvents := make(chan runtimeConnectionStateChangedMsg, 1)
+		m.runtimeConnectionEvents = runtimeConnectionEvents
+		configurable.SetConnectionStateObserver(func(err error) {
+			enqueueRuntimeConnectionStateChange(runtimeConnectionEvents, err)
+		})
 	}
 	status := m.runtimeStatus()
 	m.reviewerMode = status.ReviewerFrequency
@@ -620,6 +634,9 @@ func (m *uiModel) Init() tea.Cmd {
 		waitAskEvent(m.askEvents),
 		tea.SetWindowTitle(m.windowTitle()),
 		tea.WindowSize(),
+	}
+	if m.runtimeConnectionEvents != nil {
+		cmds = append(cmds, waitRuntimeConnectionStateChange(m.runtimeConnectionEvents))
 	}
 	cmds = append([]tea.Cmd{tea.ClearScreen}, cmds...)
 	if startupText := strings.TrimSpace(m.startupSubmit); startupText != "" {
@@ -732,6 +749,10 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleRuntimeEventBatch([]clientui.Event{msg.event})
 	case runtimeEventBatchMsg:
 		return m.handleRuntimeEventBatch(msg.events)
+	case runtimeConnectionStateChangedMsg:
+		m.observeRuntimeRequestResult(msg.err)
+		m.syncViewport()
+		return m, waitRuntimeConnectionStateChange(m.runtimeConnectionEvents)
 	case runtimeMainViewRefreshedMsg:
 		cmd := m.handleRuntimeMainViewRefreshed(msg)
 		m.syncViewport()
