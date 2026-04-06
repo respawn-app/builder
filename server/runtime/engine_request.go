@@ -11,6 +11,7 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/cachewarn"
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
@@ -43,6 +44,10 @@ func (e *Engine) buildRequestWithExtraItems(ctx context.Context, extra []llm.Res
 	}
 	req.ReasoningEffort = e.ThinkingLevel()
 	req.FastMode = e.FastModeEnabled()
+	if e.supportsPromptCacheKey(ctx) {
+		req.PromptCacheKey = e.store.Meta().SessionID
+		req.PromptCacheScope = cachewarn.ScopeConversation
+	}
 	if allowTools {
 		nativeWebSearch, nativeErr := e.enableNativeWebSearch(ctx)
 		if nativeErr != nil {
@@ -52,6 +57,29 @@ func (e *Engine) buildRequestWithExtraItems(ctx context.Context, extra []llm.Res
 	}
 	req.SessionID = e.store.Meta().SessionID
 	return req, nil
+}
+
+func (e *Engine) supportsPromptCacheKey(ctx context.Context) bool {
+	caps, err := e.providerCapabilities(ctx)
+	if err != nil {
+		return false
+	}
+	return llm.SupportsPromptCacheKeyProvider(caps)
+}
+
+func supportsPromptCacheKeyForClient(ctx context.Context, client llm.Client) bool {
+	if client == nil {
+		return false
+	}
+	provider, ok := client.(llm.ProviderCapabilitiesClient)
+	if !ok {
+		return false
+	}
+	caps, err := provider.ProviderCapabilities(ctx)
+	if err != nil {
+		return false
+	}
+	return llm.SupportsPromptCacheKeyProvider(caps)
 }
 
 func (e *Engine) enableNativeWebSearch(ctx context.Context) (bool, error) {

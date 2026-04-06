@@ -166,6 +166,7 @@ func TestSettingsTOMLRoundTripsCapabilityOverrides(t *testing.T) {
 	settings.ProviderCapabilities = ProviderCapabilitiesOverride{
 		ProviderID:                    "openai-compatible",
 		SupportsResponsesAPI:          true,
+		SupportsPromptCacheKey:        true,
 		SupportsServerSideContextEdit: true,
 	}
 	toml := settingsTOML(settings)
@@ -175,6 +176,7 @@ func TestSettingsTOMLRoundTripsCapabilityOverrides(t *testing.T) {
 		"[provider_capabilities]",
 		"provider_id = \"openai-compatible\"",
 		"supports_responses_api = true",
+		"supports_prompt_cache_key = true",
 		"supports_server_side_context_edit = true",
 	} {
 		if !strings.Contains(toml, want) {
@@ -384,6 +386,7 @@ supports_vision_inputs = true
 provider_id = "custom-provider"
 supports_responses_api = true
 supports_responses_compact = false
+supports_prompt_cache_key = true
 supports_native_web_search = true
 supports_reasoning_encrypted = false
 supports_server_side_context_edit = false
@@ -399,7 +402,7 @@ is_openai_first_party = false
 	if !cfg.Settings.ModelCapabilities.SupportsReasoningEffort || !cfg.Settings.ModelCapabilities.SupportsVisionInputs {
 		t.Fatalf("expected model capability overrides from file, got %+v", cfg.Settings.ModelCapabilities)
 	}
-	if cfg.Settings.ProviderCapabilities.ProviderID != "custom-provider" || !cfg.Settings.ProviderCapabilities.SupportsResponsesAPI || !cfg.Settings.ProviderCapabilities.SupportsNativeWebSearch {
+	if cfg.Settings.ProviderCapabilities.ProviderID != "custom-provider" || !cfg.Settings.ProviderCapabilities.SupportsResponsesAPI || !cfg.Settings.ProviderCapabilities.SupportsPromptCacheKey || !cfg.Settings.ProviderCapabilities.SupportsNativeWebSearch {
 		t.Fatalf("expected provider capability overrides from file, got %+v", cfg.Settings.ProviderCapabilities)
 	}
 	if got := cfg.Source.Sources["model_capabilities.supports_reasoning_effort"]; got != "file" {
@@ -419,6 +422,7 @@ func TestLoadCapabilityOverridesFromEnv(t *testing.T) {
 	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_PROVIDER_ID", "custom-provider")
 	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_RESPONSES_API", "true")
 	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_RESPONSES_COMPACT", "false")
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_PROMPT_CACHE_KEY", "true")
 	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_NATIVE_WEB_SEARCH", "true")
 	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_REASONING_ENCRYPTED", "false")
 	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_SERVER_SIDE_CONTEXT_EDIT", "false")
@@ -431,7 +435,7 @@ func TestLoadCapabilityOverridesFromEnv(t *testing.T) {
 	if !cfg.Settings.ModelCapabilities.SupportsReasoningEffort || !cfg.Settings.ModelCapabilities.SupportsVisionInputs {
 		t.Fatalf("expected model capability overrides from env, got %+v", cfg.Settings.ModelCapabilities)
 	}
-	if cfg.Settings.ProviderCapabilities.ProviderID != "custom-provider" || !cfg.Settings.ProviderCapabilities.SupportsResponsesAPI || !cfg.Settings.ProviderCapabilities.SupportsNativeWebSearch {
+	if cfg.Settings.ProviderCapabilities.ProviderID != "custom-provider" || !cfg.Settings.ProviderCapabilities.SupportsResponsesAPI || !cfg.Settings.ProviderCapabilities.SupportsPromptCacheKey || !cfg.Settings.ProviderCapabilities.SupportsNativeWebSearch {
 		t.Fatalf("expected provider capability overrides from env, got %+v", cfg.Settings.ProviderCapabilities)
 	}
 	if got := cfg.Source.Sources["model_capabilities.supports_reasoning_effort"]; got != "env" {

@@ -131,6 +131,7 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		EffectiveContextWindowPercent: 95,
 		LocalCompactionCarryoverLimit: 20_000,
 		CompactionMode:                string(active.CompactionMode),
+		CacheWarningMode:              active.CacheWarningMode,
 		AutoCompactionEnabled:         boolRef(true),
 		HeadlessMode:                  opts.Headless,
 		ToolPreambles:                 active.ToolPreambles,

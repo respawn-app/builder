@@ -14,6 +14,7 @@ type OpenAIRequest struct {
 	FastMode                bool
 	EnableNativeWebSearch   bool
 	SystemPrompt            string
+	PromptCacheKey          string
 	SessionID               string
 	Items                   []ResponseItem
 	Tools                   []Tool
@@ -93,6 +94,7 @@ func (c *OpenAIClient) Generate(ctx context.Context, request Request) (Response,
 		FastMode:                request.FastMode,
 		EnableNativeWebSearch:   request.EnableNativeWebSearch,
 		SystemPrompt:            request.SystemPrompt,
+		PromptCacheKey:          request.PromptCacheKey,
 		SessionID:               request.SessionID,
 		Items:                   CloneResponseItems(request.Items),
 		Tools:                   append([]Tool(nil), request.Tools...),
@@ -141,6 +143,7 @@ func (c *OpenAIClient) GenerateStreamWithEvents(ctx context.Context, request Req
 		FastMode:                request.FastMode,
 		EnableNativeWebSearch:   request.EnableNativeWebSearch,
 		SystemPrompt:            request.SystemPrompt,
+		PromptCacheKey:          request.PromptCacheKey,
 		SessionID:               request.SessionID,
 		Items:                   CloneResponseItems(request.Items),
 		Tools:                   append([]Tool(nil), request.Tools...),
@@ -254,6 +257,7 @@ func (c *OpenAIClient) CountRequestInputTokens(ctx context.Context, request Requ
 		SupportsReasoningEffort: request.SupportsReasoningEffort,
 		EnableNativeWebSearch:   request.EnableNativeWebSearch,
 		SystemPrompt:            request.SystemPrompt,
+		PromptCacheKey:          request.PromptCacheKey,
 		SessionID:               request.SessionID,
 		Items:                   CloneResponseItems(request.Items),
 		Tools:                   append([]Tool(nil), request.Tools...),

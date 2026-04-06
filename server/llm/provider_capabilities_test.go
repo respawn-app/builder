@@ -13,6 +13,9 @@ func TestInferProviderCapabilities_UsesRegistryContracts(t *testing.T) {
 	if !openai.SupportsResponsesCompact || !openai.IsOpenAIFirstParty || !openai.SupportsNativeWebSearch {
 		t.Fatalf("expected first-party openai compact support, got %+v", openai)
 	}
+	if !openai.SupportsPromptCacheKey {
+		t.Fatalf("expected openai prompt cache key support, got %+v", openai)
+	}
 
 	oauth, err := InferProviderCapabilities("chatgpt-codex")
 	if err != nil {
@@ -20,6 +23,9 @@ func TestInferProviderCapabilities_UsesRegistryContracts(t *testing.T) {
 	}
 	if oauth.ProviderID != "chatgpt-codex" || !oauth.SupportsResponsesCompact || !oauth.IsOpenAIFirstParty || !oauth.SupportsNativeWebSearch {
 		t.Fatalf("unexpected oauth capabilities: %+v", oauth)
+	}
+	if !oauth.SupportsPromptCacheKey {
+		t.Fatalf("expected chatgpt-codex prompt cache key support, got %+v", oauth)
 	}
 }
 
@@ -60,6 +66,9 @@ func TestKnownNonFirstPartyProviderContractsRemainLocalCompactionOnly(t *testing
 		if caps.IsOpenAIFirstParty {
 			t.Fatalf("expected third-party classification for %s, got %+v", providerID, caps)
 		}
+		if caps.SupportsPromptCacheKey {
+			t.Fatalf("expected prompt cache key unsupported for %s, got %+v", providerID, caps)
+		}
 		if caps.SupportsNativeWebSearch {
 			t.Fatalf("expected native web search unsupported for %s, got %+v", providerID, caps)
 		}
@@ -75,5 +84,14 @@ func TestSupportsFastModeProvider(t *testing.T) {
 	}
 	if SupportsFastModeProvider(ProviderCapabilities{ProviderID: "azure-openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: false}) {
 		t.Fatal("did not expect non-first-party provider to support fast mode")
+	}
+}
+
+func TestSupportsPromptCacheKeyProvider(t *testing.T) {
+	if !SupportsPromptCacheKeyProvider(ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true, SupportsPromptCacheKey: true}) {
+		t.Fatal("expected explicit prompt cache capability to enable support")
+	}
+	if SupportsPromptCacheKeyProvider(ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true, SupportsPromptCacheKey: false}) {
+		t.Fatal("did not expect prompt cache support without explicit capability")
 	}
 }

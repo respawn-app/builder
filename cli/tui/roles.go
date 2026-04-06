@@ -28,5 +28,5 @@ func isDetailOnlyRole(role string) bool {
 
 func isStyledMetaRole(role string) bool {
 	trimmed := transcript.NormalizeEntryRole(role)
-	return isCompactionRole(trimmed) || trimmed == "reviewer_status" || trimmed == "reviewer_suggestions" || trimmed == "error" || trimmed == "warning" || trimmed == roleDeveloperContext || trimmed == roleDeveloperFeedback || trimmed == roleInterruption
+	return isCompactionRole(trimmed) || trimmed == "reviewer_status" || trimmed == "reviewer_suggestions" || trimmed == "error" || trimmed == "warning" || trimmed == "cache_warning" || trimmed == roleDeveloperContext || trimmed == roleDeveloperFeedback || trimmed == roleInterruption
 }

@@ -43,6 +43,9 @@ func (b openAIRequestPayloadBuilder) BuildResponse(request OpenAIRequest, mode o
 	}
 
 	out := responses.ResponseNewParams{Model: request.Model, Store: openai.Bool(b.store)}
+	if cacheKey := strings.TrimSpace(request.PromptCacheKey); cacheKey != "" && SupportsPromptCacheKeyProvider(b.capabilities) {
+		out.PromptCacheKey = openai.String(cacheKey)
+	}
 	if len(input) > 0 {
 		out.Input = responses.ResponseNewParamsInputUnion{OfInputItemList: input}
 	}
