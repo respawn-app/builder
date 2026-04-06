@@ -25,6 +25,7 @@ type LockedProviderCapabilities struct {
 	ProviderID                    string `json:"provider_id,omitempty"`
 	SupportsResponsesAPI          bool   `json:"supports_responses_api,omitempty"`
 	SupportsResponsesCompact      bool   `json:"supports_responses_compact,omitempty"`
+	SupportsPromptCacheKey        bool   `json:"supports_prompt_cache_key,omitempty"`
 	SupportsNativeWebSearch       bool   `json:"supports_native_web_search,omitempty"`
 	SupportsReasoningEncrypted    bool   `json:"supports_reasoning_encrypted,omitempty"`
 	SupportsServerSideContextEdit bool   `json:"supports_server_side_context_edit,omitempty"`

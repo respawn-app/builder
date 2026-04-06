@@ -19,5 +19,5 @@ func SupportsFastModeProvider(caps ProviderCapabilities) bool {
 }
 
 func SupportsPromptCacheKeyProvider(caps ProviderCapabilities) bool {
-	return caps.SupportsResponsesAPI && caps.IsOpenAIFirstParty
+	return caps.SupportsResponsesAPI && caps.SupportsPromptCacheKey
 }

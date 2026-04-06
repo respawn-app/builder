@@ -152,6 +152,29 @@ func TestBuildRequest_SkipsPromptCacheKeyForUnsupportedProvider(t *testing.T) {
 	}
 }
 
+func TestBuildRequest_SetsPromptCacheKeyWhenProviderCapabilityEnabled(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true, SupportsPromptCacheKey: true}}
+	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	req, err := eng.buildRequestWithExtraItems(context.Background(), []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "hello"}}, true)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	if req.PromptCacheKey != store.Meta().SessionID {
+		t.Fatalf("PromptCacheKey = %q, want %q", req.PromptCacheKey, store.Meta().SessionID)
+	}
+	if req.PromptCacheScope != cachewarn.ScopeConversation {
+		t.Fatalf("PromptCacheScope = %q, want %q", req.PromptCacheScope, cachewarn.ScopeConversation)
+	}
+}
+
 func TestReviewerSuggestions_SkipsPromptCacheKeyForUnsupportedProvider(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

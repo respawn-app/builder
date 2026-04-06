@@ -152,6 +152,7 @@ func LockedProviderCapabilitiesFromContract(contract ProviderCapabilities) sessi
 		ProviderID:                    strings.TrimSpace(contract.ProviderID),
 		SupportsResponsesAPI:          contract.SupportsResponsesAPI,
 		SupportsResponsesCompact:      contract.SupportsResponsesCompact,
+		SupportsPromptCacheKey:        contract.SupportsPromptCacheKey,
 		SupportsNativeWebSearch:       contract.SupportsNativeWebSearch,
 		SupportsReasoningEncrypted:    contract.SupportsReasoningEncrypted,
 		SupportsServerSideContextEdit: contract.SupportsServerSideContextEdit,
@@ -168,6 +169,7 @@ func ProviderCapabilitiesFromOverride(override config.ProviderCapabilitiesOverri
 		ProviderID:                    providerID,
 		SupportsResponsesAPI:          override.SupportsResponsesAPI,
 		SupportsResponsesCompact:      override.SupportsResponsesCompact,
+		SupportsPromptCacheKey:        override.SupportsPromptCacheKey,
 		SupportsNativeWebSearch:       override.SupportsNativeWebSearch,
 		SupportsReasoningEncrypted:    override.SupportsReasoningEncrypted,
 		SupportsServerSideContextEdit: override.SupportsServerSideContextEdit,
@@ -183,10 +185,18 @@ func ProviderCapabilitiesFromLocked(locked *session.LockedContract) (ProviderCap
 	if providerID == "" {
 		return ProviderCapabilities{}, false
 	}
+	supportsPromptCacheKey := locked.ProviderContract.SupportsPromptCacheKey
+	if !supportsPromptCacheKey {
+		switch strings.TrimSpace(locked.ProviderContract.ProviderID) {
+		case "openai", "chatgpt-codex":
+			supportsPromptCacheKey = locked.ProviderContract.SupportsResponsesAPI
+		}
+	}
 	return ProviderCapabilities{
 		ProviderID:                    providerID,
 		SupportsResponsesAPI:          locked.ProviderContract.SupportsResponsesAPI,
 		SupportsResponsesCompact:      locked.ProviderContract.SupportsResponsesCompact,
+		SupportsPromptCacheKey:        supportsPromptCacheKey,
 		SupportsNativeWebSearch:       locked.ProviderContract.SupportsNativeWebSearch,
 		SupportsReasoningEncrypted:    locked.ProviderContract.SupportsReasoningEncrypted,
 		SupportsServerSideContextEdit: locked.ProviderContract.SupportsServerSideContextEdit,
