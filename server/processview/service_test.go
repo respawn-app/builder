@@ -44,6 +44,17 @@ func TestServiceListProcessesIncludesRunOwnership(t *testing.T) {
 	}
 
 	svc := NewService(manager)
+	waitForProcessSnapshot(t, 2*time.Second, func() (shelltool.Snapshot, bool) {
+		entries := manager.List()
+		if len(entries) != 1 {
+			return shelltool.Snapshot{}, false
+		}
+		process := entries[0]
+		if !process.OutputAvailable || process.OutputRetainedFromBytes != 0 || process.OutputRetainedToBytes <= 0 {
+			return shelltool.Snapshot{}, false
+		}
+		return process, true
+	})
 	resp, err := svc.ListProcesses(context.Background(), serverapi.ProcessListRequest{OwnerSessionID: "session-1", OwnerRunID: "run-1"})
 	if err != nil {
 		t.Fatalf("ListProcesses: %v", err)
@@ -133,6 +144,11 @@ func TestServiceGetInlineOutputReturnsManagerPreview(t *testing.T) {
 	}
 
 	svc := NewService(manager)
+	waitForInlineOutput(t, 2*time.Second, func() (serverapi.ProcessInlineOutputResponse, error) {
+		return svc.GetInlineOutput(context.Background(), serverapi.ProcessInlineOutputRequest{ProcessID: "1000", MaxChars: 12_000})
+	}, func(resp serverapi.ProcessInlineOutputResponse) bool {
+		return resp.LogPath != "" && strings.Contains(resp.Output, "inline-preview")
+	})
 	resp, err := svc.GetInlineOutput(context.Background(), serverapi.ProcessInlineOutputRequest{ProcessID: "1000", MaxChars: 12_000})
 	if err != nil {
 		t.Fatalf("GetInlineOutput: %v", err)
@@ -298,4 +314,31 @@ func waitForProcessKilled(t *testing.T, manager *shelltool.Manager, id string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for process %s to be kill-requested", id)
+}
+
+func waitForProcessSnapshot(t *testing.T, timeout time.Duration, check func() (shelltool.Snapshot, bool)) shelltool.Snapshot {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if snapshot, ok := check(); ok {
+			return snapshot
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for process snapshot condition")
+	return shelltool.Snapshot{}
+}
+
+func waitForInlineOutput(t *testing.T, timeout time.Duration, call func() (serverapi.ProcessInlineOutputResponse, error), match func(serverapi.ProcessInlineOutputResponse) bool) serverapi.ProcessInlineOutputResponse {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		resp, err := call()
+		if err == nil && match(resp) {
+			return resp
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for inline output")
+	return serverapi.ProcessInlineOutputResponse{}
 }
