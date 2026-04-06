@@ -362,10 +362,11 @@ func TestBackgroundEventRouterSkipsDeveloperNoticeForOrphanedShells(t *testing.T
 	clientB := &busyToggleFakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "b", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200_000}}}}
 	var mu sync.Mutex
 	backgroundUpdates := 0
-	_, err = runtime.New(storeA, clientA, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	engA, err := runtime.New(storeA, clientA, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine A: %v", err)
 	}
+	t.Cleanup(func() { _ = engA.Close() })
 	engB, err := runtime.New(storeB, clientB, tools.NewRegistry(), runtime.Config{Model: "gpt-5", OnEvent: func(evt runtime.Event) {
 		if evt.Kind == runtime.EventBackgroundUpdated {
 			mu.Lock()
@@ -376,6 +377,7 @@ func TestBackgroundEventRouterSkipsDeveloperNoticeForOrphanedShells(t *testing.T
 	if err != nil {
 		t.Fatalf("new engine B: %v", err)
 	}
+	t.Cleanup(func() { _ = engB.Close() })
 
 	router := &backgroundEventRouter{}
 	router.SetActiveSession(storeB.Meta().SessionID, engB)
@@ -388,11 +390,52 @@ func TestBackgroundEventRouterSkipsDeveloperNoticeForOrphanedShells(t *testing.T
 	mu.Lock()
 	updates := backgroundUpdates
 	mu.Unlock()
-	if updates != 1 {
-		t.Fatalf("expected orphaned completion to still emit one background update event, got %d", updates)
+	if updates != 0 {
+		t.Fatalf("expected orphaned completion to stay isolated from foreign active sessions, got %d background updates", updates)
 	}
 	if got := clientA.CallCount(); got != 0 {
 		t.Fatalf("did not expect inactive owner engine to be called, got %d", got)
+	}
+}
+
+func TestBackgroundEventRouterRoutesCompletionToMatchingActiveOwnerSession(t *testing.T) {
+	root := t.TempDir()
+	storeA, err := session.Create(root, "ws-a", root)
+	if err != nil {
+		t.Fatalf("create store A: %v", err)
+	}
+	storeB, err := session.Create(root, "ws-b", root)
+	if err != nil {
+		t.Fatalf("create store B: %v", err)
+	}
+
+	clientA := &busyToggleFakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "a", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200_000}}}}
+	clientB := &busyToggleFakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "b", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200_000}}}}
+	engA, err := runtime.New(storeA, clientA, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine A: %v", err)
+	}
+	t.Cleanup(func() { _ = engA.Close() })
+	engB, err := runtime.New(storeB, clientB, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine B: %v", err)
+	}
+	t.Cleanup(func() { _ = engB.Close() })
+
+	router := &backgroundEventRouter{}
+	router.SetActiveSession(storeA.Meta().SessionID, engA)
+	router.SetActiveSession(storeB.Meta().SessionID, engB)
+	router.handle(shelltool.Event{Snapshot: shelltool.Snapshot{ID: "1002", OwnerSessionID: storeA.Meta().SessionID, State: "completed", Command: "builder run", Workdir: root, LogPath: filepath.Join(root, "1002.log")}, Type: shelltool.EventCompleted, Preview: "done"})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for clientA.CallCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := clientA.CallCount(); got == 0 {
+		t.Fatal("expected owner session completion to route to its active engine even when another session is also active")
+	}
+	if got := clientB.CallCount(); got != 0 {
+		t.Fatalf("did not expect foreign active session to receive routed completion, got %d", got)
 	}
 }
 
@@ -407,6 +450,7 @@ func TestBackgroundEventRouterQueuesNoticeForActiveOwnerSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
+	t.Cleanup(func() { _ = eng.Close() })
 
 	router := &backgroundEventRouter{}
 	router.SetActiveSession(store.Meta().SessionID, eng)
@@ -509,6 +553,7 @@ func TestBackgroundEventRouterShapesBackgroundNoticeByOutputMode(t *testing.T) {
 			if err != nil {
 				t.Fatalf("new engine: %v", err)
 			}
+			t.Cleanup(func() { _ = eng.Close() })
 
 			logPath := filepath.Join(root, "1000.log")
 			if err := os.WriteFile(logPath, []byte(tt.content), 0o644); err != nil {
@@ -518,10 +563,11 @@ func TestBackgroundEventRouterShapesBackgroundNoticeByOutputMode(t *testing.T) {
 			router := newBackgroundEventRouter(nil, tt.maxChars, tt.mode)
 			router.SetActiveSession(store.Meta().SessionID, eng)
 			router.handle(shelltool.Event{
-				Type: shelltool.EventCompleted,
+				Type:             shelltool.EventCompleted,
+				NoticeSuppressed: true,
 				Snapshot: shelltool.Snapshot{
 					ID:             "1000",
-					OwnerSessionID: "other-session",
+					OwnerSessionID: store.Meta().SessionID,
 					State:          "completed",
 					LogPath:        logPath,
 					ExitCode:       &tt.exitCode,
@@ -569,15 +615,17 @@ func TestBackgroundEventRouterWhitespacePreviewUsesNoOutputLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
+	t.Cleanup(func() { _ = eng.Close() })
 
 	router := newBackgroundEventRouter(nil, 80, shelltool.BackgroundOutputDefault)
 	router.SetActiveSession(store.Meta().SessionID, eng)
 	exitCode := 0
 	router.handle(shelltool.Event{
-		Type: shelltool.EventCompleted,
+		Type:             shelltool.EventCompleted,
+		NoticeSuppressed: true,
 		Snapshot: shelltool.Snapshot{
 			ID:             "1000",
-			OwnerSessionID: "other-session",
+			OwnerSessionID: store.Meta().SessionID,
 			State:          "completed",
 			ExitCode:       &exitCode,
 		},
@@ -685,6 +733,7 @@ func TestBackgroundEventRouterDoesNotRetroactivelyQueueNoticeAfterOwnerSessionRe
 	if !res.Backgrounded {
 		t.Fatal("expected process to background")
 	}
+	router.ClearActiveSession(storeA.Meta().SessionID)
 	router.SetActiveSession(storeB.Meta().SessionID, engB)
 
 	deadline := time.Now().Add(2 * time.Second)
