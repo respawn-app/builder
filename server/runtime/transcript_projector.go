@@ -40,6 +40,10 @@ func (p *TranscriptProjector) ApplyPersistedEvent(evt session.Event) error {
 			return fmt.Errorf("decode local_entry event: %w", err)
 		}
 		p.chat.appendLocalEntryWithOngoingText(entry.Role, entry.Text, entry.OngoingText)
+	case sessionEventCacheWarning:
+		if err := applyPersistedCacheWarningToChat(p.chat, evt.Payload); err != nil {
+			return err
+		}
 	case "history_replaced":
 		var payload historyReplacementPayload
 		if err := json.Unmarshal(evt.Payload, &payload); err != nil {

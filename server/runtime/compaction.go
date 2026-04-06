@@ -660,7 +660,7 @@ func (e *Engine) localCompactionSummary(ctx context.Context, input []llm.Respons
 	req.FastMode = e.FastModeEnabled()
 	req.SessionID = e.store.Meta().SessionID
 
-	resp, err := e.generateWithRetry(ctx, req, nil, nil, nil)
+	resp, err := e.generateWithRetry(ctx, "", req, nil, nil, nil)
 	if err != nil {
 		return "", err
 	}

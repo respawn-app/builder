@@ -7,6 +7,7 @@ import (
 
 	"builder/prompts"
 	"builder/server/llm"
+	"builder/shared/cachewarn"
 )
 
 type defaultReviewerPipeline struct {
@@ -34,7 +35,7 @@ func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string
 	e := r.engine
 	baselineItems := e.snapshotItems()
 	e.emit(Event{Kind: EventReviewerStarted, StepID: stepID})
-	reviewerResult, err := r.RunSuggestions(ctx, reviewerClient)
+	reviewerResult, err := r.RunSuggestions(ctx, stepID, reviewerClient)
 	if err != nil {
 		status := ReviewerStatus{
 			Outcome: "failed",
@@ -118,7 +119,7 @@ func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string
 	return followUp, nil
 }
 
-func (r *defaultReviewerPipeline) RunSuggestions(ctx context.Context, reviewerClient llm.Client) (reviewerSuggestionsResult, error) {
+func (r *defaultReviewerPipeline) RunSuggestions(ctx context.Context, stepID string, reviewerClient llm.Client) (reviewerSuggestionsResult, error) {
 	e := r.engine
 	if reviewerClient == nil {
 		return reviewerSuggestionsResult{}, nil
@@ -146,15 +147,17 @@ func (r *defaultReviewerPipeline) RunSuggestions(ctx context.Context, reviewerCl
 	}
 	reviewerItems := sanitizeItemsForLLM(llm.ItemsFromMessages(reviewerMessages))
 	req := llm.Request{
-		Model:           reviewerCfg.Model,
-		Temperature:     1,
-		MaxTokens:       0,
-		FastMode:        e.FastModeEnabled(),
-		ReasoningEffort: reviewerCfg.ThinkingLevel,
-		SystemPrompt:    prompts.ReviewerSystemPrompt,
-		SessionID:       reviewerSessionID(e.store.Meta().SessionID),
-		Items:           reviewerItems,
-		Tools:           []llm.Tool{},
+		Model:            reviewerCfg.Model,
+		Temperature:      1,
+		MaxTokens:        0,
+		FastMode:         e.FastModeEnabled(),
+		ReasoningEffort:  reviewerCfg.ThinkingLevel,
+		SystemPrompt:     prompts.ReviewerSystemPrompt,
+		PromptCacheKey:   reviewerSessionID(e.store.Meta().SessionID),
+		PromptCacheScope: cachewarn.ScopeReviewer,
+		SessionID:        reviewerSessionID(e.store.Meta().SessionID),
+		Items:            reviewerItems,
+		Tools:            []llm.Tool{},
 		StructuredOutput: &llm.StructuredOutput{
 			Name:   "reviewer_suggestions",
 			Schema: schema,
@@ -164,7 +167,7 @@ func (r *defaultReviewerPipeline) RunSuggestions(ctx context.Context, reviewerCl
 	if err := req.Validate(); err != nil {
 		return reviewerSuggestionsResult{}, err
 	}
-	resp, err := e.generateWithRetryClient(ctx, reviewerClient, req, nil, nil, nil)
+	resp, err := e.generateWithRetryClient(ctx, stepID, reviewerClient, req, nil, nil, nil)
 	if err != nil {
 		return reviewerSuggestionsResult{}, err
 	}

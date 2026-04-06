@@ -21,6 +21,7 @@ const (
 	defaultMinimumExecToBgSec            = 15
 	defaultShellOutputMaxChars           = 16_000
 	defaultBGShellsOutput                = "default"
+	defaultCacheWarningMode              = CacheWarningModeDefault
 	defaultCompactionThreshold           = defaultModelContextWindow * 95 / 100
 	defaultPreSubmitCompactionLeadTokens = compaction.DefaultPreSubmitRunwayTokens
 	defaultReviewerFrequency             = "edits"
@@ -88,6 +89,11 @@ func settingsTOMLWithPreservedDefaults(settings Settings, includeToolSection boo
 	out.WriteString("# bg_shells_output applies directly to exit code 0 background shells.\n")
 	out.WriteString("# Non-zero exits use verbose only when bg_shells_output=verbose; otherwise\n")
 	out.WriteString("# they fall back to default truncation.\n\n")
+	out.WriteString("# cache_warning_mode options:\n")
+	out.WriteString("# - off: suppress prompt cache warnings\n")
+	out.WriteString("# - default: warn only when Builder proves a same-key request was non-postfix\n")
+	out.WriteString("# - verbose: also warn when provider-reported cache reuse disappears for a\n")
+	out.WriteString("#   postfix-compatible request and the cause is unknown\n\n")
 	out.WriteString("# exec_command yield_time_ms values below minimum_exec_to_bg_seconds are\n")
 	out.WriteString("# clamped up silently before command execution continues.\n\n")
 	writeDefaultLines(&out, rootLines)
