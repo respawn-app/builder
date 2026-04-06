@@ -129,6 +129,55 @@ func TestGenerateWithRetryClient_DoesNotWarnAcrossDistinctCacheKeys(t *testing.T
 	}
 }
 
+func TestBuildRequest_SkipsPromptCacheKeyForUnsupportedProvider(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true}}
+	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	req, err := eng.buildRequestWithExtraItems(context.Background(), []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "hello"}}, true)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	if req.PromptCacheKey != "" {
+		t.Fatalf("PromptCacheKey = %q, want empty", req.PromptCacheKey)
+	}
+	if req.PromptCacheScope != "" {
+		t.Fatalf("PromptCacheScope = %q, want empty", req.PromptCacheScope)
+	}
+}
+
+func TestReviewerSuggestions_SkipsPromptCacheKeyForUnsupportedProvider(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	engineClient := &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true}}
+	reviewerClient := &fakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`}}}}
+	eng, err := New(store, engineClient, tools.NewRegistry(), Config{Model: "gpt-5", Reviewer: ReviewerConfig{Model: "gpt-5"}})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.runReviewerSuggestions(context.Background(), "step-1", reviewerClient); err != nil {
+		t.Fatalf("run reviewer suggestions: %v", err)
+	}
+	if len(reviewerClient.calls) != 1 {
+		t.Fatalf("reviewer client calls = %d, want 1", len(reviewerClient.calls))
+	}
+	if reviewerClient.calls[0].PromptCacheKey != "" {
+		t.Fatalf("reviewer PromptCacheKey = %q, want empty", reviewerClient.calls[0].PromptCacheKey)
+	}
+	if reviewerClient.calls[0].PromptCacheScope != "" {
+		t.Fatalf("reviewer PromptCacheScope = %q, want empty", reviewerClient.calls[0].PromptCacheScope)
+	}
+}
+
 func TestGenerateWithRetryClient_KeepsReviewerLineageIndependent(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

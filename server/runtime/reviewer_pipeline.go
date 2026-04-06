@@ -147,22 +147,24 @@ func (r *defaultReviewerPipeline) RunSuggestions(ctx context.Context, stepID str
 	}
 	reviewerItems := sanitizeItemsForLLM(llm.ItemsFromMessages(reviewerMessages))
 	req := llm.Request{
-		Model:            reviewerCfg.Model,
-		Temperature:      1,
-		MaxTokens:        0,
-		FastMode:         e.FastModeEnabled(),
-		ReasoningEffort:  reviewerCfg.ThinkingLevel,
-		SystemPrompt:     prompts.ReviewerSystemPrompt,
-		PromptCacheKey:   reviewerSessionID(e.store.Meta().SessionID),
-		PromptCacheScope: cachewarn.ScopeReviewer,
-		SessionID:        reviewerSessionID(e.store.Meta().SessionID),
-		Items:            reviewerItems,
-		Tools:            []llm.Tool{},
+		Model:           reviewerCfg.Model,
+		Temperature:     1,
+		MaxTokens:       0,
+		FastMode:        e.FastModeEnabled(),
+		ReasoningEffort: reviewerCfg.ThinkingLevel,
+		SystemPrompt:    prompts.ReviewerSystemPrompt,
+		SessionID:       reviewerSessionID(e.store.Meta().SessionID),
+		Items:           reviewerItems,
+		Tools:           []llm.Tool{},
 		StructuredOutput: &llm.StructuredOutput{
 			Name:   "reviewer_suggestions",
 			Schema: schema,
 			Strict: true,
 		},
+	}
+	if e.supportsPromptCacheKey(ctx) {
+		req.PromptCacheKey = reviewerSessionID(e.store.Meta().SessionID)
+		req.PromptCacheScope = cachewarn.ScopeReviewer
 	}
 	if err := req.Validate(); err != nil {
 		return reviewerSuggestionsResult{}, err
