@@ -176,6 +176,13 @@ func newSettingsRegistry() settingsRegistry {
 			func(state settingsState) bool { return state.Settings.ProviderCapabilities.SupportsResponsesCompact },
 			"BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_RESPONSES_COMPACT",
 			settingDocOptions{commented: true}),
+		newBoolSetting("provider_capabilities.supports_prompt_cache_key", false,
+			func(state *settingsState, value bool) {
+				state.Settings.ProviderCapabilities.SupportsPromptCacheKey = value
+			},
+			func(state settingsState) bool { return state.Settings.ProviderCapabilities.SupportsPromptCacheKey },
+			"BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_PROMPT_CACHE_KEY",
+			settingDocOptions{commented: true}),
 		newBoolSetting("provider_capabilities.supports_native_web_search", false,
 			func(state *settingsState, value bool) {
 				state.Settings.ProviderCapabilities.SupportsNativeWebSearch = value

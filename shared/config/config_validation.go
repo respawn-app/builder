@@ -49,7 +49,7 @@ func validateProviderCapabilitiesProviderID(state settingsState, _ map[string]st
 	if strings.TrimSpace(capabilities.ProviderID) != "" {
 		return nil
 	}
-	if capabilities.SupportsResponsesAPI || capabilities.SupportsResponsesCompact || capabilities.SupportsNativeWebSearch || capabilities.SupportsReasoningEncrypted || capabilities.SupportsServerSideContextEdit || capabilities.IsOpenAIFirstParty {
+	if capabilities.SupportsResponsesAPI || capabilities.SupportsResponsesCompact || capabilities.SupportsPromptCacheKey || capabilities.SupportsNativeWebSearch || capabilities.SupportsReasoningEncrypted || capabilities.SupportsServerSideContextEdit || capabilities.IsOpenAIFirstParty {
 		return fmt.Errorf("provider_capabilities.provider_id must not be empty when provider capability overrides are set")
 	}
 	return nil
