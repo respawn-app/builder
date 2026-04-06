@@ -106,7 +106,10 @@ func (t *requestCacheTracker) RecordInvalidation(cacheKey string, reason cachewa
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	state := t.lineage[cacheKey]
+	state, ok := t.lineage[cacheKey]
+	if !ok {
+		return
+	}
 	state.pendingCause = reason
 	t.lineage[cacheKey] = state
 }
