@@ -11,6 +11,7 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/cachewarn"
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
@@ -43,6 +44,8 @@ func (e *Engine) buildRequestWithExtraItems(ctx context.Context, extra []llm.Res
 	}
 	req.ReasoningEffort = e.ThinkingLevel()
 	req.FastMode = e.FastModeEnabled()
+	req.PromptCacheKey = e.store.Meta().SessionID
+	req.PromptCacheScope = cachewarn.ScopeConversation
 	if allowTools {
 		nativeWebSearch, nativeErr := e.enableNativeWebSearch(ctx)
 		if nativeErr != nil {

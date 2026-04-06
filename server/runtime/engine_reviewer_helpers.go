@@ -25,7 +25,7 @@ type reviewerRequestConfig struct {
 
 func (e *Engine) runReviewerSuggestions(ctx context.Context, reviewerClient llm.Client) (reviewerSuggestionsResult, error) {
 	e.ensureOrchestrationCollaborators()
-	return e.reviewerFlow.RunSuggestions(ctx, reviewerClient)
+	return e.reviewerFlow.RunSuggestions(ctx, "", reviewerClient)
 }
 
 func parseReviewerSuggestionsObject(content string) []string {

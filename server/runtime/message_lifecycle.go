@@ -35,6 +35,18 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 				return fmt.Errorf("decode local_entry event: %w", err)
 			}
 			e.chat.appendLocalEntryWithOngoingText(entry.Role, entry.Text, entry.OngoingText)
+		case sessionEventCacheWarning:
+			if err := applyPersistedCacheWarningToChat(e.chat, evt.Payload); err != nil {
+				return err
+			}
+		case sessionEventCacheRequestObserved:
+			if err := e.restorePromptCacheRequest(evt.Payload); err != nil {
+				return err
+			}
+		case sessionEventCacheResponseObserved:
+			if err := e.restorePromptCacheResponse(evt.Payload); err != nil {
+				return err
+			}
 		case "history_replaced":
 			var payload historyReplacementPayload
 			if err := json.Unmarshal(evt.Payload, &payload); err != nil {

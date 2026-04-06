@@ -13,6 +13,7 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	"builder/shared/compaction"
+	"builder/shared/config"
 	"github.com/google/uuid"
 )
 
@@ -91,6 +92,7 @@ type Config struct {
 	EffectiveContextWindowPercent int
 	LocalCompactionCarryoverLimit int
 	CompactionMode                string
+	CacheWarningMode              config.CacheWarningMode
 	AutoCompactionEnabled         *bool
 	Reviewer                      ReviewerConfig
 	HeadlessMode                  bool
@@ -152,6 +154,7 @@ type Engine struct {
 	compactionTokenCountCacheKey   string
 	compactionTokenCountCacheValue int
 	collaboratorsOnce              sync.Once
+	requestCache                   *requestCacheTracker
 
 	phaseProtocol  phaseProtocolEnforcer
 	stepLifecycle  exclusiveStepLifecycle
@@ -191,6 +194,9 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 	} else {
 		cfg.CompactionMode = "native"
 	}
+	if cfg.CacheWarningMode == "" {
+		cfg.CacheWarningMode = config.CacheWarningModeDefault
+	}
 	if cfg.AutoCompactionEnabled == nil {
 		enabled := true
 		cfg.AutoCompactionEnabled = &enabled
@@ -219,12 +225,13 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 	}
 
 	eng := &Engine{
-		store:    store,
-		llm:      client,
-		reviewer: cfg.Reviewer.Client,
-		registry: registry,
-		cfg:      cfg,
-		chat:     newChatStore(),
+		store:        store,
+		llm:          client,
+		reviewer:     cfg.Reviewer.Client,
+		registry:     registry,
+		cfg:          cfg,
+		chat:         newChatStore(),
+		requestCache: newRequestCacheTracker(),
 	}
 	eng.ensureLifecycle()
 	eng.ensureOrchestrationCollaborators()
@@ -512,17 +519,24 @@ func (e *Engine) ensureLocked() (session.LockedContract, error) {
 	return lock, nil
 }
 
-func (e *Engine) generateWithRetry(ctx context.Context, req llm.Request, onDelta func(string), onReasoningDelta func(llm.ReasoningSummaryDelta), onAttemptReset func()) (llm.Response, error) {
-	return e.generateWithRetryClient(ctx, e.llm, req, onDelta, onReasoningDelta, onAttemptReset)
+func (e *Engine) generateWithRetry(ctx context.Context, stepID string, req llm.Request, onDelta func(string), onReasoningDelta func(llm.ReasoningSummaryDelta), onAttemptReset func()) (llm.Response, error) {
+	return e.generateWithRetryClient(ctx, stepID, e.llm, req, onDelta, onReasoningDelta, onAttemptReset)
 }
 
-func (e *Engine) generateWithRetryClient(ctx context.Context, client llm.Client, req llm.Request, onDelta func(string), onReasoningDelta func(llm.ReasoningSummaryDelta), onAttemptReset func()) (llm.Response, error) {
+func (e *Engine) generateWithRetryClient(ctx context.Context, stepID string, client llm.Client, req llm.Request, onDelta func(string), onReasoningDelta func(llm.ReasoningSummaryDelta), onAttemptReset func()) (llm.Response, error) {
+	prepared, err := e.requestCache.Prepare(req)
+	if err != nil {
+		return llm.Response{}, err
+	}
+	if err := e.observePromptCacheRequest(stepID, prepared); err != nil {
+		return llm.Response{}, err
+	}
 	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second}
 	var lastErr error
 	for i := 0; i <= len(delays); i++ {
 		var (
 			resp                    llm.Response
-			err                     error
+			attemptErr              error
 			attemptEmitted          bool
 			reasoningEmitted        bool
 			attemptOnDelta          func(string)
@@ -554,29 +568,32 @@ func (e *Engine) generateWithRetryClient(ctx context.Context, client llm.Client,
 			}
 		}
 		if streamingClient, ok := client.(llm.StreamEventsClient); ok {
-			resp, err = streamingClient.GenerateStreamWithEvents(ctx, req, llm.StreamCallbacks{
+			resp, attemptErr = streamingClient.GenerateStreamWithEvents(ctx, req, llm.StreamCallbacks{
 				OnAssistantDelta:        attemptOnDelta,
 				OnReasoningSummaryDelta: attemptOnReasoningDelta,
 			})
 		} else if streamingClient, ok := client.(llm.StreamClient); ok {
-			resp, err = streamingClient.GenerateStream(ctx, req, attemptOnDelta)
+			resp, attemptErr = streamingClient.GenerateStream(ctx, req, attemptOnDelta)
 		} else {
-			resp, err = client.Generate(ctx, req)
-			if err == nil && attemptOnDelta != nil && resp.Assistant.Content != "" {
+			resp, attemptErr = client.Generate(ctx, req)
+			if attemptErr == nil && attemptOnDelta != nil && resp.Assistant.Content != "" {
 				attemptOnDelta(resp.Assistant.Content)
 			}
 		}
 		attemptDone.Store(true)
-		if err == nil {
+		if attemptErr == nil {
+			if err := e.observePromptCacheResponse(stepID, prepared, resp.Usage); err != nil {
+				return llm.Response{}, err
+			}
 			return resp, nil
 		}
-		if llm.IsNonRetriableModelError(err) {
-			return llm.Response{}, err
+		if llm.IsNonRetriableModelError(attemptErr) {
+			return llm.Response{}, attemptErr
 		}
 		if (attemptEmitted || reasoningEmitted) && onAttemptReset != nil {
 			onAttemptReset()
 		}
-		lastErr = err
+		lastErr = attemptErr
 		if i == len(delays) {
 			break
 		}

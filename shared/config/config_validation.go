@@ -140,6 +140,15 @@ func validateBGShellsOutput(state settingsState, _ map[string]string) error {
 	}
 }
 
+func validateCacheWarningMode(state settingsState, _ map[string]string) error {
+	switch strings.ToLower(strings.TrimSpace(string(state.Settings.CacheWarningMode))) {
+	case "off", "default", "verbose":
+		return nil
+	default:
+		return fmt.Errorf("invalid cache_warning_mode %q (expected off|default|verbose)", state.Settings.CacheWarningMode)
+	}
+}
+
 func validateContextWindow(state settingsState, _ map[string]string) error {
 	if state.Settings.ContextCompactionThresholdTokens <= 0 {
 		return fmt.Errorf("context_compaction_threshold_tokens must be > 0")
@@ -226,6 +235,19 @@ func normalizeCompactionMode(raw string) CompactionMode {
 		return CompactionModeNone
 	default:
 		return CompactionMode(strings.TrimSpace(raw))
+	}
+}
+
+func normalizeCacheWarningMode(raw string) CacheWarningMode {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "off":
+		return CacheWarningModeOff
+	case "default":
+		return CacheWarningModeDefault
+	case "verbose":
+		return CacheWarningModeVerbose
+	default:
+		return CacheWarningMode(strings.TrimSpace(raw))
 	}
 }
 
