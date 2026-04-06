@@ -1,8 +1,8 @@
-Builder is a highly opinionated terminal coding agent for professional Agentic Engineers, focusing on output quality. 
+<p align="center">
+  <img src="./docs/public/builder-social-preview.png" alt="Builder" width="900">
+</p>
 
-Current state: Alpha:
-- Supports OpenAI/codex models w/subscription
-- macOS / Linux / WSL only
+Builder is a highly opinionated terminal coding agent for professional Agentic Engineers, focusing on output quality. 
 
 ## Get started 
 
