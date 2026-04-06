@@ -44,6 +44,7 @@ type requestCacheLineage struct {
 	request              persistedCacheRequestObserved
 	lastResponseHadReuse bool
 	hasResponse          bool
+	pendingCause         cachewarn.Reason
 }
 
 type preparedCacheRequestObservation struct {
@@ -88,10 +89,26 @@ func (t *requestCacheTracker) Prepare(req llm.Request) (preparedCacheRequestObse
 	observation.previousHadReuse = previous.lastResponseHadReuse
 	observation.hasPreviousResponse = previous.hasResponse
 	if !shape.HasPrefix(previous.request.ChunkCount, previous.request.TerminalHash) {
-		warning := cachewarn.Warning{Scope: request.Scope, Reason: cachewarn.ReasonNonPostfix, CacheKey: cacheKey}
+		reason := cachewarn.ReasonNonPostfix
+		if strings.TrimSpace(string(previous.pendingCause)) != "" {
+			reason = previous.pendingCause
+		}
+		warning := cachewarn.Warning{Scope: request.Scope, Reason: reason, CacheKey: cacheKey}
 		observation.exactWarning = &warning
 	}
 	return observation, nil
+}
+
+func (t *requestCacheTracker) RecordInvalidation(cacheKey string, reason cachewarn.Reason) {
+	cacheKey = strings.TrimSpace(cacheKey)
+	if cacheKey == "" || strings.TrimSpace(string(reason)) == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	state := t.lineage[cacheKey]
+	state.pendingCause = reason
+	t.lineage[cacheKey] = state
 }
 
 func (t *requestCacheTracker) RecordRequest(request persistedCacheRequestObserved) {
@@ -105,6 +122,7 @@ func (t *requestCacheTracker) RecordRequest(request persistedCacheRequestObserve
 	state.request = request
 	state.lastResponseHadReuse = false
 	state.hasResponse = false
+	state.pendingCause = ""
 	t.lineage[cacheKey] = state
 }
 
@@ -134,7 +152,7 @@ func (e *Engine) observePromptCacheRequest(stepID string, prepared preparedCache
 	}
 	events := make([]session.EventInput, 0, 2)
 	var warning *cachewarn.Warning
-	if prepared.exactWarning != nil && e.cfg.CacheWarningMode != config.CacheWarningModeOff {
+	if prepared.exactWarning != nil && shouldWarnOnExactBreak(e.cfg.CacheWarningMode) {
 		warning = prepared.exactWarning
 		events = append(events, session.EventInput{Kind: sessionEventCacheWarning, Payload: warning})
 	}
@@ -149,6 +167,10 @@ func (e *Engine) observePromptCacheRequest(stepID string, prepared preparedCache
 	}
 	e.requestCache.RecordRequest(prepared.request)
 	return nil
+}
+
+func shouldWarnOnExactBreak(mode config.CacheWarningMode) bool {
+	return mode == config.CacheWarningModeVerbose
 }
 
 func (e *Engine) observePromptCacheResponse(stepID string, prepared preparedCacheRequestObservation, usage llm.Usage) error {
@@ -212,6 +234,13 @@ func (e *Engine) restorePromptCacheResponse(payload []byte) error {
 		e.requestCache.RecordResponse(response)
 	}
 	return nil
+}
+
+func (e *Engine) notePromptCacheInvalidation(cacheKey string, reason cachewarn.Reason) {
+	if e == nil || e.requestCache == nil {
+		return
+	}
+	e.requestCache.RecordInvalidation(cacheKey, reason)
 }
 
 func applyPersistedCacheWarningToChat(chat *chatStore, payload []byte) error {

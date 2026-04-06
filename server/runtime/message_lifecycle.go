@@ -8,6 +8,7 @@ import (
 
 	"builder/server/llm"
 	"builder/server/session"
+	"builder/shared/cachewarn"
 )
 
 type defaultMessageLifecycle struct {
@@ -17,6 +18,7 @@ type defaultMessageLifecycle struct {
 
 func (m *defaultMessageLifecycle) RestoreMessages() error {
 	e := m.engine
+	sessionID := e.store.Meta().SessionID
 	if err := e.store.WalkEvents(func(evt session.Event) error {
 		switch evt.Kind {
 		case "message":
@@ -56,6 +58,7 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 				e.chat.restoreHistoryItems(payload.Items)
 			} else {
 				e.chat.replaceHistory(payload.Items)
+				e.notePromptCacheInvalidation(sessionID, cachewarn.ReasonCompaction)
 				e.compactionCount++
 			}
 		}
