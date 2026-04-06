@@ -497,15 +497,9 @@ func (m Model) defaultEntryStyleIntents(role string, muteText bool) StyleIntent 
 	switch role {
 	case "reviewer_status", "reviewer_suggestions":
 		return SuccessForeground
-<<<<<<< HEAD
 	case "cache_warning":
 		return ErrorForeground
-	case "warning":
-||||||| parent of 93e7daf (fix: harden disconnect recovery in tui)
-	case "warning":
-=======
 	case roleDeveloperFeedback, "warning":
->>>>>>> 93e7daf (fix: harden disconnect recovery in tui)
 		return WarningForeground
 	case roleInterruption, "error":
 		return ErrorForeground
