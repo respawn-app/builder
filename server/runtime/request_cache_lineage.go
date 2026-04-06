@@ -130,22 +130,6 @@ func (t *requestCacheTracker) Clear(cacheKey string) {
 	delete(t.lineage, cacheKey)
 }
 
-func (t *requestCacheTracker) RecordRequest(request persistedCacheRequestObserved) {
-	cacheKey := strings.TrimSpace(request.CacheKey)
-	if cacheKey == "" {
-		return
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	request.DigestVersion = normalizeRequestCacheDigestVersion(request.DigestVersion)
-	state := t.lineage[cacheKey]
-	state.request = request
-	state.lastResponseHadReuse = false
-	state.hasResponse = false
-	state.pendingCause = ""
-	t.lineage[cacheKey] = state
-}
-
 func (t *requestCacheTracker) RecordResponse(response persistedCacheResponseObserved) {
 	cacheKey := strings.TrimSpace(response.CacheKey)
 	if cacheKey == "" {
@@ -165,6 +149,7 @@ func (t *requestCacheTracker) RecordResponse(response persistedCacheResponseObse
 	}
 	state.lastResponseHadReuse = hadReuse
 	state.hasResponse = true
+	state.pendingCause = ""
 	t.lineage[cacheKey] = state
 }
 
@@ -172,22 +157,11 @@ func (e *Engine) observePromptCacheRequest(stepID string, prepared preparedCache
 	if e == nil || e.requestCache == nil || strings.TrimSpace(prepared.request.CacheKey) == "" {
 		return nil
 	}
-	events := make([]session.EventInput, 0, 2)
-	var warning *cachewarn.Warning
-	if prepared.exactWarning != nil && shouldWarnOnExactBreak(e.cfg.CacheWarningMode) {
-		warning = prepared.exactWarning
-		events = append(events, session.EventInput{Kind: sessionEventCacheWarning, Payload: warning})
-	}
+	events := make([]session.EventInput, 0, 1)
 	events = append(events, session.EventInput{Kind: sessionEventCacheRequestObserved, Payload: prepared.request})
 	if _, err := e.store.AppendTurnAtomic(stepID, events); err != nil {
 		return err
 	}
-	if warning != nil {
-		e.applyPersistedCacheWarning(*warning)
-		e.emit(Event{Kind: EventCacheWarning, StepID: stepID, CacheWarning: copyCacheWarning(warning)})
-		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
-	}
-	e.requestCache.RecordRequest(prepared.request)
 	return nil
 }
 
@@ -208,9 +182,12 @@ func (e *Engine) observePromptCacheResponse(stepID string, prepared preparedCach
 		HasCachedInputTokens: usage.HasCachedInputTokens,
 		CachedInputTokens:    usage.CachedInputTokens,
 	}
-	events := make([]session.EventInput, 0, 2)
+	events := make([]session.EventInput, 0, 3)
 	var warning *cachewarn.Warning
-	if shouldWarnOnCacheReuseDrop(e.cfg.CacheWarningMode, prepared, usage) {
+	if prepared.exactWarning != nil && shouldWarnOnExactBreak(e.cfg.CacheWarningMode) {
+		warning = prepared.exactWarning
+		events = append(events, session.EventInput{Kind: sessionEventCacheWarning, Payload: warning})
+	} else if shouldWarnOnCacheReuseDrop(e.cfg.CacheWarningMode, prepared, usage) {
 		warning = &cachewarn.Warning{Scope: prepared.request.Scope, Reason: cachewarn.ReasonReuseDropped, CacheKey: prepared.request.CacheKey}
 		events = append(events, session.EventInput{Kind: sessionEventCacheWarning, Payload: warning})
 	}
@@ -248,9 +225,6 @@ func (e *Engine) restorePromptCacheRequest(payload []byte) error {
 	var request persistedCacheRequestObserved
 	if err := json.Unmarshal(payload, &request); err != nil {
 		return fmt.Errorf("decode %s event: %w", sessionEventCacheRequestObserved, err)
-	}
-	if e.requestCache != nil {
-		e.requestCache.RecordRequest(request)
 	}
 	return nil
 }

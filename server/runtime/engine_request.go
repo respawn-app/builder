@@ -44,7 +44,7 @@ func (e *Engine) buildRequestWithExtraItems(ctx context.Context, extra []llm.Res
 	}
 	req.ReasoningEffort = e.ThinkingLevel()
 	req.FastMode = e.FastModeEnabled()
-	if e.supportsPromptCacheKeyForClient(ctx, e.llm) {
+	if e.supportsPromptCacheKey(ctx) {
 		req.PromptCacheKey = e.store.Meta().SessionID
 		req.PromptCacheScope = cachewarn.ScopeConversation
 	}
@@ -59,21 +59,23 @@ func (e *Engine) buildRequestWithExtraItems(ctx context.Context, extra []llm.Res
 	return req, nil
 }
 
-func (e *Engine) supportsPromptCacheKeyForClient(ctx context.Context, client llm.Client) bool {
-	if e == nil || client == nil {
+func (e *Engine) supportsPromptCacheKey(ctx context.Context) bool {
+	caps, err := e.providerCapabilities(ctx)
+	if err != nil {
 		return false
 	}
-	var (
-		caps llm.ProviderCapabilities
-		err  error
-	)
-	if client == e.llm {
-		caps, err = e.providerCapabilities(ctx)
-	} else if provider, ok := client.(llm.ProviderCapabilitiesClient); ok {
-		caps, err = provider.ProviderCapabilities(ctx)
-	} else {
+	return llm.SupportsPromptCacheKeyProvider(caps)
+}
+
+func supportsPromptCacheKeyForClient(ctx context.Context, client llm.Client) bool {
+	if client == nil {
 		return false
 	}
+	provider, ok := client.(llm.ProviderCapabilitiesClient)
+	if !ok {
+		return false
+	}
+	caps, err := provider.ProviderCapabilities(ctx)
 	if err != nil {
 		return false
 	}
