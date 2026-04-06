@@ -16,7 +16,7 @@ func (m Model) buildDetailBlocks(includeStreaming bool, applySelection bool) []o
 	for _, spec := range specs {
 		lines := spec.render(m)
 		if applySelection {
-			lines = m.maybeSelectedUserBlock(spec.entryIndex-m.transcriptBaseOffset, spec.role, lines)
+			lines = m.maybeSelectedUserBlock(spec.entryIndex, spec.role, lines)
 		}
 		blocks = append(blocks, ongoingBlock{role: spec.role, lines: lines, entryIndex: spec.entryIndex, entryEnd: spec.entryEnd})
 	}
@@ -327,10 +327,10 @@ func (m Model) standardEntryBlock(entryIndex int, entry TranscriptEntry, role st
 		}
 	}
 	lines := m.flattenEntry(role, text)
-	if opts.applySelection {
-		lines = m.maybeSelectedUserBlock(entryIndex, role, lines)
-	}
 	absoluteIndex := m.absoluteTranscriptIndex(entryIndex)
+	if opts.applySelection {
+		lines = m.maybeSelectedUserBlock(absoluteIndex, role, lines)
+	}
 	return ongoingBlock{role: role, lines: lines, entryIndex: absoluteIndex, entryEnd: absoluteIndex}
 }
 

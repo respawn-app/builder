@@ -89,7 +89,7 @@ type RuntimeClient interface {
 	SetFastModeEnabled(enabled bool) (bool, error)
 	SetReviewerEnabled(enabled bool) (bool, string, error)
 	SetAutoCompactionEnabled(enabled bool) (bool, bool, error)
-	AppendLocalEntry(role, text string)
+	AppendLocalEntry(role, text string) error
 	ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error)
 	SubmitUserMessage(ctx context.Context, text string) (string, error)
 	SubmitUserShellCommand(ctx context.Context, command string) error

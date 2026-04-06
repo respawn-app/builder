@@ -16,6 +16,7 @@ const REPO_RAW_ROOT_URL = `https://raw.githubusercontent.com/respawn-app/builder
 const DOCSEARCH_APP_ID = 'YFIMJHUME7';
 const DOCSEARCH_API_KEY = '87f58a573c52b1bb4aa289030dbb9ed9';
 const DOCSEARCH_INDEX_NAME = 'builder';
+const SOCIAL_PREVIEW_PATH = '/builder-social-preview.png';
 
 function firstNonEmpty(value) {
   if (typeof value !== 'string') {
@@ -108,6 +109,7 @@ export function resolveDocsConfig(env = process.env) {
     repoEditRootUrl: REPO_EDIT_ROOT_URL,
     repoBlobRootUrl: REPO_BLOB_ROOT_URL,
     repoRawRootUrl: REPO_RAW_ROOT_URL,
+    socialPreviewPath: SOCIAL_PREVIEW_PATH,
     docSearch,
     getPublicUrl(pathname = '/') {
       const publicPath = joinPath(basePath, pathname);

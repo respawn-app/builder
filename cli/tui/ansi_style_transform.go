@@ -16,6 +16,7 @@ type rgbColor struct {
 
 type ansiStyleTransform struct {
 	DefaultForeground   *rgbColor
+	DefaultBackground   *rgbColor
 	TransformForeground func(rgbColor) rgbColor
 	ForceFaint          bool
 }
@@ -28,6 +29,10 @@ func applyDefaultForeground(text string, target rgbColor) string {
 	return applyANSIStyleIntents(text, ansiIntentPalette{ThemeForeground: target}, ThemeForeground)
 }
 
+func applySelectionColors(text string, foreground, background rgbColor) string {
+	return applyANSIStyleTransform(text, ansiStyleTransform{DefaultForeground: &foreground, DefaultBackground: &background})
+}
+
 func ApplyThemeDefaultForeground(text, theme string) string {
 	return ApplyThemeStyleIntents(text, theme, ThemeForeground)
 }
@@ -36,7 +41,7 @@ func applyANSIStyleTransform(text string, transform ansiStyleTransform) string {
 	if text == "" {
 		return text
 	}
-	if transform.DefaultForeground == nil && transform.TransformForeground == nil && !transform.ForceFaint {
+	if transform.DefaultForeground == nil && transform.DefaultBackground == nil && transform.TransformForeground == nil && !transform.ForceFaint {
 		return text
 	}
 
@@ -80,8 +85,9 @@ func rewriteTransformedSGR(params xansi.Params, transform ansiStyleTransform) st
 		return styleEscape(transform, true)
 	}
 
-	rewritten := make([]string, 0, len(params)+6)
+	rewritten := make([]string, 0, len(params)+9)
 	needsDefaultForeground := false
+	needsDefaultBackground := false
 
 	for idx := 0; idx < len(params); {
 		param, _, ok := params.Param(idx, 0)
@@ -92,12 +98,20 @@ func rewriteTransformedSGR(params xansi.Params, transform ansiStyleTransform) st
 		case param == 0:
 			rewritten = append(rewritten, "0")
 			needsDefaultForeground = transform.DefaultForeground != nil
+			needsDefaultBackground = transform.DefaultBackground != nil
 			idx++
 		case param == 39:
 			if transform.DefaultForeground == nil {
 				rewritten = append(rewritten, "39")
 			} else {
 				needsDefaultForeground = true
+			}
+			idx++
+		case param == 49:
+			if transform.DefaultBackground == nil {
+				rewritten = append(rewritten, "49")
+			} else {
+				needsDefaultBackground = true
 			}
 			idx++
 		case 30 <= param && param <= 37:
@@ -138,6 +152,43 @@ func rewriteTransformedSGR(params xansi.Params, transform ansiStyleTransform) st
 			rewritten = append(rewritten, transformedForegroundParams(color, transform)...)
 			needsDefaultForeground = false
 			idx += consumed
+		case 40 <= param && param <= 47:
+			if transform.DefaultBackground == nil {
+				rewritten = append(rewritten, strconv.Itoa(param))
+				needsDefaultBackground = false
+			} else {
+				needsDefaultBackground = true
+			}
+			idx++
+		case 100 <= param && param <= 107:
+			if transform.DefaultBackground == nil {
+				rewritten = append(rewritten, strconv.Itoa(param))
+				needsDefaultBackground = false
+			} else {
+				needsDefaultBackground = true
+			}
+			idx++
+		case param == 48:
+			if transform.DefaultBackground == nil {
+				copied, consumed, ok := copyANSIBackgroundParams(params, idx)
+				if !ok {
+					rewritten = append(rewritten, strconv.Itoa(param))
+					idx++
+					continue
+				}
+				rewritten = append(rewritten, copied...)
+				needsDefaultBackground = false
+				idx += consumed
+				continue
+			}
+			_, consumed, ok := parseANSIBackgroundColor(params, idx)
+			if !ok {
+				rewritten = append(rewritten, strconv.Itoa(param))
+				idx++
+				continue
+			}
+			needsDefaultBackground = true
+			idx += consumed
 		default:
 			rewritten = append(rewritten, strconv.Itoa(param))
 			idx++
@@ -146,6 +197,9 @@ func rewriteTransformedSGR(params xansi.Params, transform ansiStyleTransform) st
 
 	if needsDefaultForeground {
 		rewritten = append(rewritten, foregroundParams(*transform.DefaultForeground)...)
+	}
+	if needsDefaultBackground {
+		rewritten = append(rewritten, backgroundParams(*transform.DefaultBackground)...)
 	}
 	if transform.ForceFaint {
 		rewritten = append(rewritten, "2")
@@ -185,6 +239,28 @@ func copyANSIForegroundParams(params xansi.Params, start int) ([]string, int, bo
 	return foregroundParams(color), consumed + 2, true
 }
 
+func copyANSIBackgroundParams(params xansi.Params, start int) ([]string, int, bool) {
+	mode, _, ok := params.Param(start+1, -1)
+	if !ok || mode < 0 {
+		return nil, 0, false
+	}
+	if mode == 5 {
+		index, _, ok := params.Param(start+2, -1)
+		if !ok || index < 0 {
+			return nil, 0, false
+		}
+		return []string{"48", "5", strconv.Itoa(index)}, 3, true
+	}
+	if mode != 2 {
+		return nil, 0, false
+	}
+	color, consumed, ok := parseTrueColor(params, start+2)
+	if !ok {
+		return nil, 0, false
+	}
+	return backgroundParams(color), consumed + 2, true
+}
+
 func styleEscape(transform ansiStyleTransform, includeReset bool) string {
 	params := styleParams(transform, includeReset)
 	if len(params) == 0 {
@@ -201,6 +277,9 @@ func styleParams(transform ansiStyleTransform, includeReset bool) []string {
 	if transform.DefaultForeground != nil {
 		params = append(params, foregroundParams(*transform.DefaultForeground)...)
 	}
+	if transform.DefaultBackground != nil {
+		params = append(params, backgroundParams(*transform.DefaultBackground)...)
+	}
 	if transform.ForceFaint {
 		params = append(params, "2")
 	}
@@ -208,6 +287,27 @@ func styleParams(transform ansiStyleTransform, includeReset bool) []string {
 }
 
 func parseANSIForegroundColor(params xansi.Params, start int) (rgbColor, int, bool) {
+	mode, _, ok := params.Param(start+1, -1)
+	if !ok || mode < 0 {
+		return rgbColor{}, 0, false
+	}
+	if mode == 5 {
+		index, _, ok := params.Param(start+2, -1)
+		if !ok || index < 0 {
+			return rgbColor{}, 0, false
+		}
+		return ansi256Color(index), 3, true
+	}
+	if mode != 2 {
+		return rgbColor{}, 0, false
+	}
+	if color, consumed, ok := parseTrueColor(params, start+2); ok {
+		return color, consumed + 2, true
+	}
+	return rgbColor{}, 0, false
+}
+
+func parseANSIBackgroundColor(params xansi.Params, start int) (rgbColor, int, bool) {
 	mode, _, ok := params.Param(start+1, -1)
 	if !ok || mode < 0 {
 		return rgbColor{}, 0, false
@@ -246,6 +346,10 @@ func parseTrueColor(params xansi.Params, start int) (rgbColor, int, bool) {
 
 func foregroundParams(color rgbColor) []string {
 	return []string{"38", "2", strconv.Itoa(color.r), strconv.Itoa(color.g), strconv.Itoa(color.b)}
+}
+
+func backgroundParams(color rgbColor) []string {
+	return []string{"48", "2", strconv.Itoa(color.r), strconv.Itoa(color.g), strconv.Itoa(color.b)}
 }
 
 func foregroundEscape(color rgbColor) string {

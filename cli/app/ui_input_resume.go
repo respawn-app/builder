@@ -9,8 +9,12 @@ import (
 
 func (c uiInputController) startQueuedInjectionSubmission() tea.Cmd {
 	m := c.model
+	if c.blockDisconnectedSubmission(true, "") {
+		return nil
+	}
 	queuedRuntimeWork, err := m.hasQueuedRuntimeUserWork()
 	if err != nil {
+		c.restorePendingInjectedIntoInput()
 		detailErr := formatSubmissionError(err)
 		m.activity = uiActivityError
 		m.appendLocalEntry("error", detailErr)

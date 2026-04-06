@@ -44,6 +44,9 @@ func (c uiInputController) queueOrStartSubmission(text string) (tea.Model, tea.C
 	if m.isInputLocked() {
 		return m, nil
 	}
+	if c.blockDisconnectedSubmission(false, "") {
+		return m, nil
+	}
 	draftText, draftCursor, restoreDraft := m.capturePromptHistoryDraftForReuse()
 	m.queueInput(text)
 	m.restoreCapturedPromptHistoryDraft(draftText, draftCursor, restoreDraft)
@@ -51,6 +54,21 @@ func (c uiInputController) queueOrStartSubmission(text string) (tea.Model, tea.C
 		return m, nil
 	}
 	return c.flushQueuedInputs(queueDrainOne)
+}
+
+func (c uiInputController) blockDisconnectedSubmission(restoreHidden bool, submittedText string) bool {
+	m := c.model
+	if !m.runtimeDisconnectStatusVisible() {
+		return false
+	}
+	if restoreHidden {
+		c.restorePendingInjectedIntoInput()
+		c.restoreSubmittedTextIntoInput(submittedText)
+		c.restoreQueuedMessagesIntoInput()
+	}
+	m.activity = uiActivityError
+	m.syncViewport()
+	return true
 }
 
 func (c uiInputController) restoreQueuedMessagesIntoInput() {
@@ -81,6 +99,19 @@ func (c uiInputController) restorePendingPreSubmitTextIntoInput() {
 		newInput = pending
 	} else {
 		newInput = strings.TrimRight(m.input, "\n") + "\n\n" + pending
+	}
+	m.replaceMainInput(newInput, -1)
+}
+
+func (c uiInputController) restoreSubmittedTextIntoInput(text string) {
+	m := c.model
+	submitted := strings.TrimSpace(text)
+	if submitted == "" {
+		return
+	}
+	newInput := submitted
+	if strings.TrimSpace(m.input) != "" {
+		newInput = strings.TrimRight(m.input, "\n") + "\n\n" + submitted
 	}
 	m.replaceMainInput(newInput, -1)
 }
@@ -136,6 +167,9 @@ func (c uiInputController) releaseLockedInjectedInput(discardEngineQueue bool) {
 
 func (c uiInputController) flushQueuedInputs(mode queueDrainMode) (tea.Model, tea.Cmd) {
 	m := c.model
+	if c.blockDisconnectedSubmission(true, "") {
+		return m, nil
+	}
 	if len(m.queued) == 0 {
 		return m, nil
 	}

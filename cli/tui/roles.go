@@ -8,6 +8,8 @@ const roleDeveloperContext = string(transcript.EntryRoleDeveloperContext)
 const roleDeveloperFeedback = string(transcript.EntryRoleDeveloperFeedback)
 const roleInterruption = string(transcript.EntryRoleInterruption)
 
+const interruptionUserVisibleText = "You interrupted"
+
 func isCompactionRole(role string) bool {
 	switch transcript.NormalizeEntryRole(role) {
 	case "compaction_notice", roleCompactionSummary, roleManualCompactionCarryover:
@@ -29,4 +31,13 @@ func isDetailOnlyRole(role string) bool {
 func isStyledMetaRole(role string) bool {
 	trimmed := transcript.NormalizeEntryRole(role)
 	return isCompactionRole(trimmed) || trimmed == "reviewer_status" || trimmed == "reviewer_suggestions" || trimmed == "error" || trimmed == "warning" || trimmed == "cache_warning" || trimmed == roleDeveloperContext || trimmed == roleDeveloperFeedback || trimmed == roleInterruption
+}
+
+func transcriptDisplayText(role, text string) string {
+	switch transcript.NormalizeEntryRole(role) {
+	case roleInterruption:
+		return interruptionUserVisibleText
+	default:
+		return text
+	}
 }

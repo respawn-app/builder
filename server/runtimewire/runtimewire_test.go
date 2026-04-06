@@ -119,10 +119,15 @@ func TestBackgroundEventRouterSkipsDeveloperNoticeForOrphanedShells(t *testing.T
 	clientB := &busyToggleFakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "b", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200_000}}}}
 	var mu sync.Mutex
 	backgroundUpdates := 0
-	_, err = runtime.New(storeA, clientA, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	engA, err := runtime.New(storeA, clientA, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine A: %v", err)
 	}
+	t.Cleanup(func() {
+		if closeErr := engA.Close(); closeErr != nil {
+			t.Fatalf("close engine A: %v", closeErr)
+		}
+	})
 	engB, err := runtime.New(storeB, clientB, tools.NewRegistry(), runtime.Config{Model: "gpt-5", OnEvent: func(evt runtime.Event) {
 		if evt.Kind == runtime.EventBackgroundUpdated {
 			mu.Lock()
@@ -133,6 +138,11 @@ func TestBackgroundEventRouterSkipsDeveloperNoticeForOrphanedShells(t *testing.T
 	if err != nil {
 		t.Fatalf("new engine B: %v", err)
 	}
+	t.Cleanup(func() {
+		if closeErr := engB.Close(); closeErr != nil {
+			t.Fatalf("close engine B: %v", closeErr)
+		}
+	})
 
 	router := &BackgroundEventRouter{}
 	router.SetActiveSession(storeB.Meta().SessionID, engB)
@@ -164,6 +174,11 @@ func TestBackgroundEventRouterQueuesNoticeForActiveOwnerSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
+	t.Cleanup(func() {
+		if closeErr := eng.Close(); closeErr != nil {
+			t.Fatalf("close engine: %v", closeErr)
+		}
+	})
 
 	router := &BackgroundEventRouter{}
 	router.SetActiveSession(store.Meta().SessionID, eng)

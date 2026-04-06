@@ -132,7 +132,7 @@ func (m *uiModel) beginRollbackEditing() (int, bool) {
 	m.rollback.phase = uiRollbackPhaseEditing
 	m.setInputMode(uiInputModeRollbackEdit)
 	m.replaceMainInput(selected.Text, -1)
-	m.clearRollbackSelectionHighlight()
+	m.forwardToView(tui.SetSelectedTranscriptEntryMsg{Active: true, EntryIndex: selected.TranscriptIndex, RefreshDetailSnapshot: false})
 	return selected.TranscriptIndex, true
 }
 

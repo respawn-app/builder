@@ -959,17 +959,31 @@ func TestDeveloperContextRendersDetailOnly(t *testing.T) {
 func TestDeveloperFeedbackAndInterruptionRenderInOngoing(t *testing.T) {
 	m := NewModel(WithPreviewLines(20))
 	m = updateModel(t, m, AppendTranscriptMsg{Role: roleDeveloperFeedback, Text: "phase mismatch warning"})
-	m = updateModel(t, m, AppendTranscriptMsg{Role: roleInterruption, Text: "Interrupted by user."})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: roleInterruption, Text: "User interrupted you"})
 
-	ongoing := plainTranscript(m.View())
-	if !containsInOrder(ongoing, "phase mismatch warning", "Interrupted by user.") {
+	ongoingRendered := m.View()
+	ongoing := plainTranscript(ongoingRendered)
+	if !containsInOrder(ongoing, "phase mismatch warning", interruptionUserVisibleText) {
 		t.Fatalf("expected ongoing-visible developer feedback and interruption, got %q", ongoing)
+	}
+	if strings.Contains(ongoing, "User interrupted you") {
+		t.Fatalf("expected ongoing interruption to hide model-facing wording, got %q", ongoing)
+	}
+	if !strings.Contains(ongoingRendered, m.palette().error.Render(interruptionUserVisibleText)) {
+		t.Fatalf("expected ongoing interruption to use error style, got %q", ongoingRendered)
 	}
 
 	m = updateModel(t, m, ToggleModeMsg{})
-	detail := plainTranscript(m.View())
-	if !containsInOrder(detail, "phase mismatch warning", "Interrupted by user.") {
+	detailRendered := m.View()
+	detail := plainTranscript(detailRendered)
+	if !containsInOrder(detail, "phase mismatch warning", interruptionUserVisibleText) {
 		t.Fatalf("expected developer feedback and interruption visible in detail view, got %q", detail)
+	}
+	if strings.Contains(detail, "User interrupted you") {
+		t.Fatalf("expected detail interruption to hide model-facing wording, got %q", detail)
+	}
+	if !strings.Contains(detailRendered, m.palette().error.Render(interruptionUserVisibleText)) {
+		t.Fatalf("expected detail interruption to use error style, got %q", detailRendered)
 	}
 }
 
@@ -1884,6 +1898,9 @@ func TestSelectedUserLineUsesCentralThemeSelectionTokens(t *testing.T) {
 	selectedLine := lineContaining(raw, "selected user prompt")
 	if selectedLine == "" {
 		t.Fatalf("expected detail view to contain selected user line, got %q", plainTranscript(raw))
+	}
+	if got := lipgloss.Width(selectedLine); got != 80 {
+		t.Fatalf("expected selected line to span viewport width 80, got %d in %q", got, selectedLine)
 	}
 	tokens := theme.ResolvePalette("light").Transcript
 	selectionBackground := rgbColorFromHex(tokens.SelectionBackground.TrueColor)
