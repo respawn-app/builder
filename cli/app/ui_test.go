@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -6140,6 +6141,32 @@ func TestDisconnectedCommandSubmitRestoresGeneratedPromptAlongsideHiddenSteering
 	}
 	if len(updated.pendingInjected) != 0 {
 		t.Fatalf("expected pending injected drafts restored and cleared, got %+v", updated.pendingInjected)
+	}
+}
+
+func TestEnqueueRuntimeConnectionStateChangeDropsStaleWithoutBlocking(t *testing.T) {
+	ch := make(chan runtimeConnectionStateChangedMsg, 1)
+	enqueueRuntimeConnectionStateChange(ch, errors.New("stale"))
+
+	done := make(chan struct{})
+	go func() {
+		enqueueRuntimeConnectionStateChange(ch, io.EOF)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for non-blocking connection-state enqueue")
+	}
+
+	select {
+	case msg := <-ch:
+		if !errors.Is(msg.err, io.EOF) {
+			t.Fatalf("expected latest connection-state error preserved, got %v", msg.err)
+		}
+	default:
+		t.Fatal("expected queued connection-state message")
 	}
 }
 

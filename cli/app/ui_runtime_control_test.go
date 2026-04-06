@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
+	"net/url"
 	"testing"
 
 	"builder/server/llm"
@@ -47,6 +49,12 @@ type runtimeControlFakeClient struct {
 	interruptErr           error
 	recordPromptHistoryErr error
 }
+
+type timeoutNetError struct{}
+
+func (timeoutNetError) Error() string   { return "timeout" }
+func (timeoutNetError) Timeout() bool   { return true }
+func (timeoutNetError) Temporary() bool { return false }
 
 func (f *runtimeControlFakeClient) MainView() clientui.RuntimeMainView {
 	if f.mainView.Session.SessionID != "" || f.mainView.Status.ThinkingLevel != "" || f.mainView.ActiveRun != nil {
@@ -414,5 +422,29 @@ func TestRuntimeControlTimeoutDoesNotClearExistingDisconnect(t *testing.T) {
 	}
 	if !m.runtimeDisconnectStatusVisible() {
 		t.Fatal("expected timeout not to clear existing disconnect notice")
+	}
+}
+
+func TestRuntimeControlURLTimeoutDoesNotMarkDisconnect(t *testing.T) {
+	client := &runtimeControlFakeClient{submitErr: &url.Error{Op: "Get", URL: "http://example.test", Err: timeoutNetError{}}}
+	m := newProjectedTestUIModel(client, nil, nil)
+
+	if _, err := m.submitRuntimeUserMessage(context.Background(), "prompt"); err == nil {
+		t.Fatal("expected submit runtime user message error")
+	}
+	if m.runtimeDisconnectStatusVisible() {
+		t.Fatal("did not expect URL timeout to mark disconnect")
+	}
+}
+
+func TestRuntimeControlOpTimeoutDoesNotMarkDisconnect(t *testing.T) {
+	client := &runtimeControlFakeClient{submitErr: &net.OpError{Op: "read", Net: "tcp", Err: timeoutNetError{}}}
+	m := newProjectedTestUIModel(client, nil, nil)
+
+	if _, err := m.submitRuntimeUserMessage(context.Background(), "prompt"); err == nil {
+		t.Fatal("expected submit runtime user message error")
+	}
+	if m.runtimeDisconnectStatusVisible() {
+		t.Fatal("did not expect op timeout to mark disconnect")
 	}
 }
