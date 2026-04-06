@@ -12,14 +12,14 @@ import (
 	"builder/shared/config"
 )
 
-func TestGenerateWithRetryClient_PersistsExactNonPostfixCacheWarningInVerboseMode(t *testing.T) {
+func TestGenerateWithRetryClient_PersistsExactNonPostfixCacheWarningInDefaultMode(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
 	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 10}}, {Usage: llm.Usage{InputTokens: 12}}}}
-	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeVerbose})
+	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeDefault})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -40,14 +40,14 @@ func TestGenerateWithRetryClient_PersistsExactNonPostfixCacheWarningInVerboseMod
 	}
 }
 
-func TestGenerateWithRetryClient_DefaultModeSuppressesExactNonPostfixWarning(t *testing.T) {
+func TestGenerateWithRetryClient_OffModeSuppressesExactNonPostfixWarning(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
 	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 10}}, {Usage: llm.Usage{InputTokens: 12}}}}
-	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeDefault})
+	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeOff})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestGenerateWithRetryClient_KeepsReviewerLineageIndependent(t *testing.T) {
 	}
 }
 
-func TestGenerateWithRetryClient_UsesCompactionWarningForNextExactBreak(t *testing.T) {
+func TestGenerateWithRetryClient_DefaultModeUsesCompactionWarningForNextExactBreak(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {

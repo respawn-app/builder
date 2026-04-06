@@ -173,7 +173,7 @@ func (e *Engine) observePromptCacheRequest(stepID string, prepared preparedCache
 }
 
 func shouldWarnOnExactBreak(mode config.CacheWarningMode) bool {
-	return mode == config.CacheWarningModeVerbose
+	return mode != config.CacheWarningModeOff
 }
 
 func (e *Engine) observePromptCacheResponse(stepID string, prepared preparedCacheRequestObservation, usage llm.Usage) error {

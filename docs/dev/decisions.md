@@ -109,7 +109,7 @@
 - Retry attempts for one logical model request are treated as one request for cache-warning purposes.
 - Timeout/TTL-based cache-warning suppression is forbidden unless authoritative provider metadata is present on the actual transport.
 - Prompt-cache warnings are persisted as structured server-side facts and replay identically for live runtimes, restored runtimes, and dormant session transcript views.
-- `cache_warning_mode` is a three-state config: `off` disables cache warnings, `default` is reserved for conservative provider-/runtime-authoritative warnings, and `verbose` additionally surfaces exact same-key non-postfix rewrites, compaction-caused invalidations, and provider-reported cache reuse drops for postfix-compatible requests when the provider does not expose the cause.
+- `cache_warning_mode` is a three-state config: `off` disables cache warnings, `default` catches unwanted invalidations and also shows the dedicated compaction warning, and `verbose` includes everything from `default` plus broader invalidation diagnostics such as provider-reported cache reuse drops for postfix-compatible requests when the provider does not expose the cause.
 - Tool-call identity prefers provider-native ids; UUID fallback when missing.
 - Retry collisions on tool-call ids overwrite prior-attempt ids.
 - Event identity uses monotonic sequence id + wall timestamp.
