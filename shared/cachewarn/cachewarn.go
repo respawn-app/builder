@@ -9,6 +9,7 @@ const (
 	ScopeConversation Scope = "conversation"
 	ScopeReviewer     Scope = "reviewer"
 
+	ReasonCompaction   Reason = "compaction"
 	ReasonNonPostfix   Reason = "non_postfix"
 	ReasonReuseDropped Reason = "reuse_dropped"
 )
@@ -21,6 +22,11 @@ type Warning struct {
 
 func Text(w Warning) string {
 	switch w.Reason {
+	case ReasonCompaction:
+		if w.Scope == ScopeReviewer {
+			return "Cache invalidated for reviewer requests: compaction."
+		}
+		return "Cache invalidated: compaction."
 	case ReasonNonPostfix:
 		if w.Scope == ScopeReviewer {
 			return "Prompt cache continuity broke for reviewer requests: this request was not a postfix of the previous request for the same cache key."
