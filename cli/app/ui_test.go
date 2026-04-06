@@ -2802,8 +2802,8 @@ func TestSubmitErrorRestoresQueuedSteeringInput(t *testing.T) {
 	if updated.inputSubmitLocked {
 		t.Fatal("did not expect submit lock after submission error")
 	}
-	if updated.input != "please continue with tests" {
-		t.Fatalf("expected queued steering restored into input, got %q", updated.input)
+	if updated.input != "please continue with tests\n\nfollow-up" {
+		t.Fatalf("expected queued steering and queued drafts restored into input, got %q", updated.input)
 	}
 	if len(updated.pendingInjected) != 0 {
 		t.Fatalf("expected pending injection queue cleared after restore, got %d", len(updated.pendingInjected))
@@ -3062,6 +3062,75 @@ func TestInterruptedSubmitDoneRestoresQueueIntoInputAndDoesNotAutoDrain(t *testi
 	plain := stripANSIAndTrimRight(updated.View())
 	if strings.Contains(strings.ToLower(plain), "interrupted") {
 		t.Fatalf("did not expect interruption to be rendered as error transcript, got %q", plain)
+	}
+}
+
+func TestSubmitErrorRestoresPendingInjectedSubmittedAndQueuedInput(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.pendingInjected = []string{"steer"}
+	m.queued = []string{"queued"}
+
+	next, cmd := m.Update(submitDoneMsg{submittedText: "sent", err: errors.New("transport down")})
+	updated := next.(*uiModel)
+
+	if cmd != nil {
+		t.Fatal("did not expect follow-up command after failed submit")
+	}
+	if updated.busy {
+		t.Fatal("expected busy=false after failed submit")
+	}
+	if updated.input != "steer\n\nsent\n\nqueued" {
+		t.Fatalf("expected full rollback into input, got %q", updated.input)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected pending injected cleared after rollback, got %+v", updated.pendingInjected)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued drafts restored into input, got %+v", updated.queued)
+	}
+	if updated.activity != uiActivityError {
+		t.Fatalf("expected error activity, got %v", updated.activity)
+	}
+}
+
+func TestPreSubmitCheckErrorRestoresQueuedDraftsIntoInput(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.preSubmitCheckToken = 1
+	m.pendingPreSubmitText = "submitted"
+	m.queued = []string{"submitted", "queued later"}
+
+	next, _ := m.Update(preSubmitCompactionCheckDoneMsg{
+		token: 1,
+		text:  "submitted",
+		err:   errors.New("pre-submit failed"),
+	})
+	updated := next.(*uiModel)
+
+	if updated.input != "submitted\n\nqueued later" {
+		t.Fatalf("expected pre-submit rollback to restore current and queued drafts, got %q", updated.input)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued drafts restored into input, got %+v", updated.queued)
+	}
+}
+
+func TestCompactFailureRestoresQueuedDraftsIntoInput(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.compacting = true
+	m.pendingPreSubmitText = "submitted"
+	m.queued = []string{"submitted", "queued later"}
+
+	next, _ := m.Update(compactDoneMsg{err: errors.New("compact failed")})
+	updated := next.(*uiModel)
+
+	if updated.input != "submitted\n\nqueued later" {
+		t.Fatalf("expected compaction rollback to restore current and queued drafts, got %q", updated.input)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued drafts restored into input, got %+v", updated.queued)
 	}
 }
 
@@ -5914,6 +5983,163 @@ func TestStatusLineShowsContextUsageWhenAvailable(t *testing.T) {
 	}
 	if !strings.Contains(line, "▯▯▯▯▯▯▯▯▯▯") {
 		t.Fatalf("expected progress bar in status line, got %q", line)
+	}
+}
+
+func TestStatusLineShowsServerOwnershipAfterCacheSectionWhenCLIStartsServer(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := newProjectedEngineUIModel(eng, WithUIStatusConfig(uiStatusConfig{OwnsServer: true}))
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !containsInOrder(line, "cache --", "server owned") {
+		t.Fatalf("expected server ownership marker immediately after cache section, got %q", line)
+	}
+	if !containsInOrder(line, "server owned", "0%") {
+		t.Fatalf("expected server ownership marker to stay left of context usage, got %q", line)
+	}
+}
+
+func TestStatusLineHidesServerOwnershipWhenCLIDoesNotOwnServer(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, statusLineFakeClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	m := newProjectedEngineUIModel(eng, WithUIStatusConfig(uiStatusConfig{OwnsServer: false}))
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if strings.Contains(line, "server owned") {
+		t.Fatalf("did not expect server ownership marker when CLI does not own server, got %q", line)
+	}
+}
+
+func TestStatusLineShowsStickyServerDisconnectedNotice(t *testing.T) {
+	m := newProjectedTestUIModel(&runtimeControlFakeClient{}, nil, nil)
+	m.setRuntimeDisconnected(true)
+	m.transientStatus = "background shell 1000 completed"
+	m.transientStatusKind = uiStatusNoticeSuccess
+
+	line := stripANSIAndTrimRight(m.renderStatusLine(120, uiThemeStyles("dark")))
+	if !strings.Contains(line, runtimeDisconnectedStatusMessage) {
+		t.Fatalf("expected sticky disconnect notice in status line, got %q", line)
+	}
+	if strings.Contains(line, "background shell 1000 completed") {
+		t.Fatalf("expected sticky disconnect notice to take precedence over transient status, got %q", line)
+	}
+}
+
+func TestDisconnectedEnterKeepsInputAndDoesNotStartSubmission(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, nil, nil)
+	m.setRuntimeDisconnected(true)
+	m.input = "continue with tests"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+
+	if cmd != nil {
+		t.Fatal("did not expect submission command while disconnected")
+	}
+	if updated.busy {
+		t.Fatal("did not expect busy state while disconnected")
+	}
+	if updated.input != "continue with tests" {
+		t.Fatalf("expected input preserved while disconnected, got %q", updated.input)
+	}
+	if client.submitText != "" {
+		t.Fatalf("did not expect runtime submit attempt, got %q", client.submitText)
+	}
+	if updated.activity != uiActivityError {
+		t.Fatalf("expected error activity while disconnected, got %v", updated.activity)
+	}
+}
+
+func TestDisconnectedQueuedFlushRestoresHiddenQueuedDrafts(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, nil, nil)
+	m.setRuntimeDisconnected(true)
+	m.queued = []string{"first queued", "second queued"}
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+
+	if cmd != nil {
+		t.Fatal("did not expect queued flush command while disconnected")
+	}
+	if updated.input != "first queued\n\nsecond queued" {
+		t.Fatalf("expected hidden queued drafts restored into input, got %q", updated.input)
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued drafts restored and cleared, got %+v", updated.queued)
+	}
+}
+
+func TestDisconnectedQueuedInjectionSubmissionRestoresHiddenInjectedDrafts(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, nil, nil)
+	m.setRuntimeDisconnected(true)
+	m.pendingInjected = []string{"hidden steering"}
+
+	cmd := m.inputController().startQueuedInjectionSubmission()
+	if cmd != nil {
+		t.Fatal("did not expect queued injection submission command while disconnected")
+	}
+	if m.input != "hidden steering" {
+		t.Fatalf("expected hidden injected draft restored into input, got %q", m.input)
+	}
+	if len(m.pendingInjected) != 0 {
+		t.Fatalf("expected pending injected drafts restored and cleared, got %+v", m.pendingInjected)
+	}
+}
+
+func TestDisconnectedCommandSubmitRestoresGeneratedPrompt(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, nil, nil)
+	m.setRuntimeDisconnected(true)
+
+	next, cmd := m.inputController().applyCommandResult(commands.Result{Handled: true, SubmitUser: true, User: "generated prompt"})
+	updated := next.(*uiModel)
+
+	if cmd != nil {
+		t.Fatal("did not expect command submission while disconnected")
+	}
+	if updated.input != "generated prompt" {
+		t.Fatalf("expected generated prompt restored into input, got %q", updated.input)
+	}
+	if updated.busy {
+		t.Fatal("did not expect busy state while disconnected")
+	}
+}
+
+func TestDisconnectedCommandSubmitRestoresGeneratedPromptAlongsideHiddenSteering(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, nil, nil)
+	m.setRuntimeDisconnected(true)
+	m.pendingInjected = []string{"hidden steering"}
+
+	next, cmd := m.inputController().applyCommandResult(commands.Result{Handled: true, SubmitUser: true, User: "generated prompt"})
+	updated := next.(*uiModel)
+
+	if cmd != nil {
+		t.Fatal("did not expect command submission while disconnected")
+	}
+	if updated.input != "hidden steering\n\ngenerated prompt" {
+		t.Fatalf("expected generated prompt restored after hidden steering, got %q", updated.input)
+	}
+	if len(updated.pendingInjected) != 0 {
+		t.Fatalf("expected pending injected drafts restored and cleared, got %+v", updated.pendingInjected)
 	}
 }
 

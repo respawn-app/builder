@@ -16,8 +16,10 @@ func (m *uiModel) refreshRuntimeMainView() clientui.RuntimeMainView {
 	if client := m.runtimeClient(); client != nil {
 		view, err := client.RefreshMainView()
 		if err == nil {
+			m.observeRuntimeRequestResult(nil)
 			return view
 		}
+		m.observeRuntimeRequestResult(err)
 		return client.MainView()
 	}
 	return clientui.RuntimeMainView{
@@ -49,8 +51,10 @@ func (m *uiModel) refreshRuntimeTranscript() clientui.TranscriptPage {
 	if client := m.runtimeClient(); client != nil {
 		page, err := client.RefreshTranscript()
 		if err == nil {
+			m.observeRuntimeRequestResult(nil)
 			return page
 		}
+		m.observeRuntimeRequestResult(err)
 		return client.Transcript()
 	}
 	return m.localRuntimeTranscript()

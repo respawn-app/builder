@@ -151,6 +151,9 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if handled, next, cmd := c.handleEnteredSlashCommandInput(text); handled {
 			return next, cmd
 		}
+		if c.blockDisconnectedSubmission(false, "") {
+			return m, nil
+		}
 		_, isUserShell := parseUserShellCommand(text)
 		draftText, draftCursor, restoreDraft := m.capturePromptHistoryDraftForReuse()
 		if m.busy {

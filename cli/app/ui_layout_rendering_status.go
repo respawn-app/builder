@@ -31,6 +31,9 @@ func (l uiViewLayout) renderStatusLine(width int, style uiStyles) string {
 	if cacheSection := l.renderCacheHitSection(style); cacheSection != "" {
 		segments = append(segments, cacheSection)
 	}
+	if serverOwnershipSection := l.renderServerOwnershipSection(style); serverOwnershipSection != "" {
+		segments = append(segments, serverOwnershipSection)
+	}
 	separator := style.meta.Render(" | ")
 	left := strings.Join(segments, separator)
 	right := l.renderStatusLineRight(width, left, style)
@@ -98,12 +101,20 @@ func (l uiViewLayout) renderStatusLineRight(width int, left string, style uiStyl
 
 func (l uiViewLayout) renderStatusNotice(available int) string {
 	m := l.model
-	text := strings.TrimSpace(m.transientStatus)
-	if text == "" || available <= 0 {
+	if available <= 0 {
+		return ""
+	}
+	text := strings.TrimSpace(m.runtimeDisconnectStatusText())
+	kind := uiStatusNoticeError
+	if text == "" {
+		text = strings.TrimSpace(m.transientStatus)
+		kind = m.transientStatusKind
+	}
+	if text == "" {
 		return ""
 	}
 	text = truncateQueuedMessageLine(text, available)
-	return statusNoticeStyle(m.theme, m.transientStatusKind).Render(text)
+	return statusNoticeStyle(m.theme, kind).Render(text)
 }
 
 func (l uiViewLayout) renderActivityStatus(available int, style uiStyles) string {
@@ -113,6 +124,9 @@ func (l uiViewLayout) renderActivityStatus(available int, style uiStyles) string
 	if text := strings.TrimSpace(l.model.reasoningStatusHeader); text != "" {
 		text = truncateQueuedMessageLine(text, available)
 		return statusNoticeStyle(l.model.theme, uiStatusNoticeNeutral).Render(text)
+	}
+	if l.model.runtimeDisconnectStatusVisible() {
+		return ""
 	}
 	if strings.TrimSpace(l.model.transientStatus) != "" {
 		return ""
@@ -174,6 +188,13 @@ func (l uiViewLayout) renderCacheHitSection(style uiStyles) string {
 		return style.meta.Render("cache --")
 	}
 	return style.meta.Render(fmt.Sprintf("cache %d%%", usage.CacheHitPercent))
+}
+
+func (l uiViewLayout) renderServerOwnershipSection(style uiStyles) string {
+	if !l.model.statusConfig.OwnsServer {
+		return ""
+	}
+	return style.meta.Render("server owned")
 }
 
 func (l uiViewLayout) renderContextUsage(style uiStyles) string {

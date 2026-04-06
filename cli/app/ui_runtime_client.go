@@ -25,10 +25,11 @@ const uiRuntimeMainViewRefreshInterval = 250 * time.Millisecond
 const uiRuntimeTranscriptPageCacheMaxEntries = 16
 
 type sessionRuntimeClient struct {
-	reads     client.SessionViewClient
-	controls  client.RuntimeControlClient
-	sessionID string
-	diagLogf  func(string)
+	reads                   client.SessionViewClient
+	controls                client.RuntimeControlClient
+	sessionID               string
+	diagLogf                func(string)
+	connectionStateObserver func(error)
 
 	mu                        sync.RWMutex
 	mainView                  clientui.RuntimeMainView
@@ -92,6 +93,15 @@ func (c *sessionRuntimeClient) SetTranscriptDiagnosticLogger(logf func(string)) 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.diagLogf = logf
+}
+
+func (c *sessionRuntimeClient) SetConnectionStateObserver(observer func(error)) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.connectionStateObserver = observer
 }
 
 func (c *sessionRuntimeClient) MainView() clientui.RuntimeMainView {
@@ -251,6 +261,7 @@ func (c *sessionRuntimeClient) refreshMainViewSync(timeout time.Duration) (clien
 	ctx, cancel := c.readContext(timeout)
 	defer cancel()
 	resp, err := c.reads.GetSessionMainView(ctx, serverapi.SessionMainViewRequest{SessionID: c.sessionID})
+	c.notifyConnectionState(err)
 	if err != nil {
 		c.mu.Lock()
 		view := c.mainView
@@ -300,6 +311,7 @@ func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.Transcript
 		PageSize:  req.PageSize,
 		Window:    req.Window,
 	})
+	c.notifyConnectionState(err)
 	if transcriptdiag.EnabledFromEnv(os.Getenv) {
 		fields := map[string]string{"session_id": c.sessionID, "path": "hydrate"}
 		for key, value := range transcriptdiag.RequestFields(req) {
@@ -326,6 +338,19 @@ func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.Transcript
 		return page, err
 	}
 	return c.storeTranscriptForRequest(req, resp.Transcript), nil
+}
+
+func (c *sessionRuntimeClient) notifyConnectionState(err error) {
+	if c == nil {
+		return
+	}
+	c.mu.RLock()
+	observer := c.connectionStateObserver
+	c.mu.RUnlock()
+	if observer == nil {
+		return
+	}
+	observer(err)
 }
 
 func (c *sessionRuntimeClient) logTranscriptDiag(line string) {
@@ -573,10 +598,10 @@ func (c *sessionRuntimeClient) SetAutoCompactionEnabled(enabled bool) (bool, boo
 	})
 	return resp.Changed, resp.Enabled, nil
 }
-func (c *sessionRuntimeClient) AppendLocalEntry(role, text string) {
+func (c *sessionRuntimeClient) AppendLocalEntry(role, text string) error {
 	ctx, cancel := c.controlContext()
 	defer cancel()
-	_ = c.controls.AppendLocalEntry(ctx, serverapi.RuntimeAppendLocalEntryRequest{SessionID: c.sessionID, Role: role, Text: text})
+	return c.controls.AppendLocalEntry(ctx, serverapi.RuntimeAppendLocalEntryRequest{SessionID: c.sessionID, Role: role, Text: text})
 }
 func (c *sessionRuntimeClient) ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error) {
 	resp, err := c.controls.ShouldCompactBeforeUserMessage(ctx, serverapi.RuntimeShouldCompactBeforeUserMessageRequest{SessionID: c.sessionID, Text: text})

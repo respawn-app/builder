@@ -591,6 +591,31 @@ func TestRuntimeClientMainViewCachesFallbackAfterReadError(t *testing.T) {
 	}
 }
 
+func TestRuntimeClientAsyncMainViewRefreshNotifiesConnectionObserverOnRecovery(t *testing.T) {
+	reads := &countingSessionViewClient{view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1"}}}
+	controls := sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(registry.NewRuntimeRegistry(), nil))
+	runtimeClient := newUIRuntimeClientWithReads("session-1", reads, controls).(*sessionRuntimeClient)
+	runtimeClient.storeMainView(clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1"}})
+	runtimeClient.mu.Lock()
+	runtimeClient.lastMainViewAt = time.Now().Add(-2 * uiRuntimeMainViewRefreshInterval)
+	runtimeClient.mu.Unlock()
+	notified := make(chan error, 1)
+	runtimeClient.SetConnectionStateObserver(func(err error) {
+		notified <- err
+	})
+
+	_ = runtimeClient.MainView()
+
+	select {
+	case err := <-notified:
+		if err != nil {
+			t.Fatalf("expected recovery observer notification without error, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for async refresh observer notification")
+	}
+}
+
 func TestRuntimeClientSetFastModeEnabledUpdatesCachedMainView(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

@@ -114,9 +114,11 @@ func (m *uiModel) handleRuntimeMainViewRefreshed(msg runtimeMainViewRefreshedMsg
 		return nil
 	}
 	if msg.err != nil {
+		m.observeRuntimeRequestResult(msg.err)
 		m.logf("ui.runtime.main_view err=%q", msg.err.Error())
 		return nil
 	}
+	m.observeRuntimeRequestResult(nil)
 	return m.runtimeAdapter().applyProjectedSessionMetadata(msg.view.Session)
 }
 
@@ -126,6 +128,7 @@ func (m *uiModel) handleRuntimeTranscriptRefreshed(msg runtimeTranscriptRefreshe
 	}
 	m.runtimeTranscriptBusy = false
 	if msg.err != nil {
+		m.observeRuntimeRequestResult(msg.err)
 		m.logf("ui.runtime.transcript err=%q", msg.err.Error())
 		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.hydrate_response", map[string]string{
 			"session_id": m.sessionID,
@@ -136,6 +139,7 @@ func (m *uiModel) handleRuntimeTranscriptRefreshed(msg runtimeTranscriptRefreshe
 		}))
 		return m.scheduleRuntimeTranscriptRetry()
 	}
+	m.observeRuntimeRequestResult(nil)
 	m.logTranscriptPageDiag("transcript.diag.client.hydrate_response", msg.req, msg.transcript, map[string]string{
 		"path":  "hydrate",
 		"token": strconv.FormatUint(msg.token, 10),

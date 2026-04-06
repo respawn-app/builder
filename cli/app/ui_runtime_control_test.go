@@ -3,38 +3,49 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
 	"testing"
 
+	"builder/server/llm"
 	"builder/server/primaryrun"
 	"builder/shared/clientui"
 )
 
 type runtimeControlFakeClient struct {
-	status                clientui.RuntimeStatus
-	sessionView           clientui.RuntimeSessionView
-	mainView              clientui.RuntimeMainView
-	transcript            clientui.TranscriptPage
-	setSessionNameArg     string
-	setThinkingLevelArg   string
-	setFastModeArg        bool
-	setReviewerArg        bool
-	setAutoCompactArg     bool
-	appendedRole          string
-	appendedText          string
-	shouldCompactText     string
-	shouldCompactResult   bool
-	submitText            string
-	submitResult          string
-	submitShellCommand    string
-	compactArgs           string
-	hasQueuedUserWork     bool
-	submitQueuedResult    string
-	interruptCalls        int
-	queuedText            string
-	discardQueuedText     string
-	discardQueuedCount    int
-	recordedPromptHistory string
-	err                   error
+	status                 clientui.RuntimeStatus
+	sessionView            clientui.RuntimeSessionView
+	mainView               clientui.RuntimeMainView
+	transcript             clientui.TranscriptPage
+	setSessionNameArg      string
+	setThinkingLevelArg    string
+	setFastModeArg         bool
+	setReviewerArg         bool
+	setAutoCompactArg      bool
+	appendedRole           string
+	appendedText           string
+	shouldCompactText      string
+	shouldCompactResult    bool
+	submitText             string
+	submitResult           string
+	submitShellCommand     string
+	compactArgs            string
+	hasQueuedUserWork      bool
+	submitQueuedResult     string
+	interruptCalls         int
+	queuedText             string
+	discardQueuedText      string
+	discardQueuedCount     int
+	recordedPromptHistory  string
+	err                    error
+	appendErr              error
+	shouldCompactErr       error
+	submitErr              error
+	submitShellErr         error
+	compactErr             error
+	hasQueuedUserWorkErr   error
+	submitQueuedErr        error
+	interruptErr           error
+	recordPromptHistoryErr error
 }
 
 func (f *runtimeControlFakeClient) MainView() clientui.RuntimeMainView {
@@ -87,38 +98,66 @@ func (f *runtimeControlFakeClient) SetAutoCompactionEnabled(enabled bool) (bool,
 	f.setAutoCompactArg = enabled
 	return true, enabled, f.err
 }
-func (f *runtimeControlFakeClient) AppendLocalEntry(role, text string) {
+func (f *runtimeControlFakeClient) AppendLocalEntry(role, text string) error {
 	f.appendedRole = role
 	f.appendedText = text
+	if f.appendErr != nil {
+		return f.appendErr
+	}
+	return f.err
 }
 func (f *runtimeControlFakeClient) ShouldCompactBeforeUserMessage(_ context.Context, text string) (bool, error) {
 	f.shouldCompactText = text
+	if f.shouldCompactErr != nil {
+		return f.shouldCompactResult, f.shouldCompactErr
+	}
 	return f.shouldCompactResult, f.err
 }
 func (f *runtimeControlFakeClient) SubmitUserMessage(_ context.Context, text string) (string, error) {
 	f.submitText = text
+	if f.submitErr != nil {
+		return f.submitResult, f.submitErr
+	}
 	return f.submitResult, f.err
 }
 func (f *runtimeControlFakeClient) SubmitUserShellCommand(_ context.Context, command string) error {
 	f.submitShellCommand = command
+	if f.submitShellErr != nil {
+		return f.submitShellErr
+	}
 	return f.err
 }
 func (f *runtimeControlFakeClient) CompactContext(_ context.Context, args string) error {
 	f.compactArgs = args
+	if f.compactErr != nil {
+		return f.compactErr
+	}
 	return f.err
 }
 func (f *runtimeControlFakeClient) CompactContextForPreSubmit(context.Context) error {
 	f.compactArgs = "__pre_submit__"
+	if f.compactErr != nil {
+		return f.compactErr
+	}
 	return f.err
 }
 func (f *runtimeControlFakeClient) HasQueuedUserWork() (bool, error) {
+	if f.hasQueuedUserWorkErr != nil {
+		return f.hasQueuedUserWork, f.hasQueuedUserWorkErr
+	}
 	return f.hasQueuedUserWork, f.err
 }
 func (f *runtimeControlFakeClient) SubmitQueuedUserMessages(context.Context) (string, error) {
+	if f.submitQueuedErr != nil {
+		return f.submitQueuedResult, f.submitQueuedErr
+	}
 	return f.submitQueuedResult, f.err
 }
 func (f *runtimeControlFakeClient) Interrupt() error {
 	f.interruptCalls++
+	if f.interruptErr != nil {
+		return f.interruptErr
+	}
 	return f.err
 }
 func (f *runtimeControlFakeClient) QueueUserMessage(text string) { f.queuedText = text }
@@ -128,6 +167,9 @@ func (f *runtimeControlFakeClient) DiscardQueuedUserMessagesMatching(text string
 }
 func (f *runtimeControlFakeClient) RecordPromptHistory(text string) error {
 	f.recordedPromptHistory = text
+	if f.recordPromptHistoryErr != nil {
+		return f.recordPromptHistoryErr
+	}
 	return f.err
 }
 
@@ -322,5 +364,55 @@ func TestRuntimeControlHelpersPropagateRuntimeErrors(t *testing.T) {
 	}
 	if err := m.recordRuntimePromptHistory("prompt history"); !errors.Is(err, boom) {
 		t.Fatalf("record runtime prompt history error = %v, want boom", err)
+	}
+}
+
+func TestRuntimeControlMarksDisconnectOnTransportError(t *testing.T) {
+	client := &runtimeControlFakeClient{submitErr: io.EOF}
+	m := newProjectedTestUIModel(client, nil, nil)
+
+	if _, err := m.submitRuntimeUserMessage(context.Background(), "prompt"); !errors.Is(err, io.EOF) {
+		t.Fatalf("submit runtime user message err = %v, want EOF", err)
+	}
+	if !m.runtimeDisconnectStatusVisible() {
+		t.Fatal("expected runtime disconnect notice after transport error")
+	}
+}
+
+func TestRuntimeControlClearsDisconnectOnReachableServerError(t *testing.T) {
+	client := &runtimeControlFakeClient{submitErr: &llm.APIStatusError{StatusCode: 429, Body: "rate limit"}}
+	m := newProjectedTestUIModel(client, nil, nil)
+	m.setRuntimeDisconnected(true)
+
+	if _, err := m.submitRuntimeUserMessage(context.Background(), "prompt"); err == nil {
+		t.Fatal("expected submit runtime user message error")
+	}
+	if m.runtimeDisconnectStatusVisible() {
+		t.Fatal("expected reachable server error to clear disconnect notice")
+	}
+}
+
+func TestRuntimeControlTimeoutDoesNotMarkDisconnect(t *testing.T) {
+	client := &runtimeControlFakeClient{submitErr: context.DeadlineExceeded}
+	m := newProjectedTestUIModel(client, nil, nil)
+
+	if _, err := m.submitRuntimeUserMessage(context.Background(), "prompt"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("submit runtime user message err = %v, want deadline exceeded", err)
+	}
+	if m.runtimeDisconnectStatusVisible() {
+		t.Fatal("did not expect timeout to mark disconnect")
+	}
+}
+
+func TestRuntimeControlTimeoutDoesNotClearExistingDisconnect(t *testing.T) {
+	client := &runtimeControlFakeClient{submitErr: context.DeadlineExceeded}
+	m := newProjectedTestUIModel(client, nil, nil)
+	m.setRuntimeDisconnected(true)
+
+	if _, err := m.submitRuntimeUserMessage(context.Background(), "prompt"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("submit runtime user message err = %v, want deadline exceeded", err)
+	}
+	if !m.runtimeDisconnectStatusVisible() {
+		t.Fatal("expected timeout not to clear existing disconnect notice")
 	}
 }

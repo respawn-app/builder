@@ -22,6 +22,7 @@ func (m Model) flattenEntryWithMeta(role, text string, muteText bool, toolMeta *
 }
 
 func (m Model) flattenEntryWithMetaAndSymbol(role, text string, muteText bool, toolMeta *transcript.ToolCallMeta, symbolOverride string) []string {
+	text = transcriptDisplayText(role, text)
 	renderWidth := m.viewportWidth
 	if rolePrefix(role) != "" {
 		renderWidth -= 2
@@ -363,6 +364,7 @@ func (m Model) renderDiffToolLines(text string, width int, toolMeta *transcript.
 }
 
 func (m Model) flattenEntryPlain(role, text string) []string {
+	text = transcriptDisplayText(role, text)
 	renderWidth := m.viewportWidth
 	if rolePrefix(role) != "" {
 		renderWidth -= 2
@@ -495,11 +497,17 @@ func (m Model) defaultEntryStyleIntents(role string, muteText bool) StyleIntent 
 	switch role {
 	case "reviewer_status", "reviewer_suggestions":
 		return SuccessForeground
+<<<<<<< HEAD
 	case "cache_warning":
 		return ErrorForeground
 	case "warning":
+||||||| parent of 93e7daf (fix: harden disconnect recovery in tui)
+	case "warning":
+=======
+	case roleDeveloperFeedback, "warning":
+>>>>>>> 93e7daf (fix: harden disconnect recovery in tui)
 		return WarningForeground
-	case "error":
+	case roleInterruption, "error":
 		return ErrorForeground
 	default:
 		if isCompactionRole(role) {

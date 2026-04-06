@@ -52,8 +52,8 @@ func (c *gatedRuntimeClient) SetReviewerEnabled(enabled bool) (bool, string, err
 func (c *gatedRuntimeClient) SetAutoCompactionEnabled(enabled bool) (bool, bool, error) {
 	return c.inner.SetAutoCompactionEnabled(enabled)
 }
-func (c *gatedRuntimeClient) AppendLocalEntry(role, text string) {
-	c.inner.AppendLocalEntry(role, text)
+func (c *gatedRuntimeClient) AppendLocalEntry(role, text string) error {
+	return c.inner.AppendLocalEntry(role, text)
 }
 func (c *gatedRuntimeClient) ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error) {
 	return c.inner.ShouldCompactBeforeUserMessage(ctx, text)

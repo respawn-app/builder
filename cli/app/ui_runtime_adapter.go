@@ -662,6 +662,19 @@ func waitAskEvent(ch <-chan askEvent) tea.Cmd {
 	}
 }
 
+func waitRuntimeConnectionStateChange(ch <-chan runtimeConnectionStateChangedMsg) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return msg
+	}
+}
+
 func (m *uiModel) handleRuntimeEvent(evt clientui.Event) {
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(evt)
 }
