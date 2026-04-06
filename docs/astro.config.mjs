@@ -7,6 +7,7 @@ import remarkGfm from 'remark-gfm';
 import { resolveDocsConfig } from './scripts/site-config.mjs';
 
 const docsConfig = resolveDocsConfig();
+const socialPreviewUrl = docsConfig.getPublicUrl(docsConfig.socialPreviewPath);
 
 export default defineConfig({
   output: 'static',
@@ -123,6 +124,48 @@ export default defineConfig({
           attrs: {
             name: 'googlebot',
             content: 'index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1',
+          },
+        },
+        {
+          tag: 'meta',
+          attrs: {
+            property: 'og:image',
+            content: socialPreviewUrl,
+          },
+        },
+        {
+          tag: 'meta',
+          attrs: {
+            property: 'og:image:alt',
+            content: 'Builder social preview',
+          },
+        },
+        {
+          tag: 'meta',
+          attrs: {
+            property: 'og:image:width',
+            content: '1200',
+          },
+        },
+        {
+          tag: 'meta',
+          attrs: {
+            property: 'og:image:height',
+            content: '630',
+          },
+        },
+        {
+          tag: 'meta',
+          attrs: {
+            name: 'twitter:card',
+            content: 'summary_large_image',
+          },
+        },
+        {
+          tag: 'meta',
+          attrs: {
+            name: 'twitter:image',
+            content: socialPreviewUrl,
           },
         },
       ],
