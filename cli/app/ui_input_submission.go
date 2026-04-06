@@ -13,6 +13,9 @@ import (
 
 func (c uiInputController) startSubmission(text string) tea.Cmd {
 	m := c.model
+	if c.blockDisconnectedSubmission(true, text) {
+		return nil
+	}
 	c.startBusyActivity(false)
 	command, isUserShell := parseUserShellCommand(text)
 	if isUserShell {
@@ -30,7 +33,7 @@ func (c uiInputController) startSubmission(text string) tea.Cmd {
 	}
 	m.syncViewport()
 	if isUserShell {
-		return tea.Batch(c.submitUserShellCmd(command), m.ensureSpinnerTicking())
+		return tea.Batch(c.submitUserShellCmd(text, command), m.ensureSpinnerTicking())
 	}
 	if m.hasRuntimeClient() {
 		m.preSubmitCheckToken++
@@ -44,6 +47,9 @@ func (c uiInputController) startSubmission(text string) tea.Cmd {
 
 func (c uiInputController) startSubmissionWithPromptHistory(text string) tea.Cmd {
 	m := c.model
+	if c.blockDisconnectedSubmission(true, text) {
+		return nil
+	}
 	_, isUserShell := parseUserShellCommand(text)
 	if m.hasRuntimeClient() && !isUserShell {
 		return c.startSubmission(text)
@@ -66,33 +72,33 @@ func (c uiInputController) submitCmd(text string) tea.Cmd {
 	m := c.model
 	return func() tea.Msg {
 		if !m.hasRuntimeClient() {
-			return submitDoneMsg{err: errors.New("runtime engine is not configured")}
+			return submitDoneMsg{submittedText: text, err: errors.New("runtime engine is not configured")}
 		}
 		message, err := m.submitRuntimeUserMessage(context.Background(), text)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				return submitDoneMsg{err: errSubmissionInterrupted}
+				return submitDoneMsg{submittedText: text, err: errSubmissionInterrupted}
 			}
-			return submitDoneMsg{err: err}
+			return submitDoneMsg{submittedText: text, err: err}
 		}
-		return submitDoneMsg{message: message}
+		return submitDoneMsg{message: message, submittedText: text}
 	}
 }
 
-func (c uiInputController) submitUserShellCmd(command string) tea.Cmd {
+func (c uiInputController) submitUserShellCmd(originalText, command string) tea.Cmd {
 	m := c.model
 	return func() tea.Msg {
 		if !m.hasRuntimeClient() {
-			return submitDoneMsg{err: errors.New("runtime engine is not configured")}
+			return submitDoneMsg{submittedText: originalText, err: errors.New("runtime engine is not configured")}
 		}
 		err := m.submitRuntimeUserShellCommand(context.Background(), command)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				return submitDoneMsg{err: errSubmissionInterrupted}
+				return submitDoneMsg{submittedText: originalText, err: errSubmissionInterrupted}
 			}
-			return submitDoneMsg{err: err}
+			return submitDoneMsg{submittedText: originalText, err: err}
 		}
-		return submitDoneMsg{}
+		return submitDoneMsg{submittedText: originalText}
 	}
 }
 
@@ -174,8 +180,9 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 		}
 		c.unlockInputAfterSubmissionError()
 		c.restorePendingInjectedIntoInput()
+		c.restoreSubmittedTextIntoInput(msg.submittedText)
+		c.restoreQueuedMessagesIntoInput()
 		if errors.Is(msg.err, errSubmissionInterrupted) {
-			c.restoreQueuedMessagesIntoInput()
 			m.activity = uiActivityInterrupted
 			m.logf("step.interrupted")
 			m.syncViewport()
@@ -185,9 +192,6 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 		m.activity = uiActivityError
 		m.appendLocalEntry("error", detailErr)
 		m.logf("step.error err=%q", detailErr)
-		if len(m.queued) > 0 && strings.TrimSpace(m.input) == "" {
-			return c.flushQueuedInputs(queueDrainAuto)
-		}
 		m.syncViewport()
 		return m, nil
 	}
@@ -229,6 +233,7 @@ func (c uiInputController) handlePreSubmitCompactionCheckDone(msg preSubmitCompa
 		m.discardQueuedText(msg.text)
 		c.restorePendingInjectedIntoInput()
 		c.restorePendingPreSubmitTextIntoInput()
+		c.restoreQueuedMessagesIntoInput()
 		detailErr := formatSubmissionError(msg.err)
 		m.activity = uiActivityError
 		m.appendLocalEntry("error", detailErr)
@@ -271,6 +276,7 @@ func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea
 		m.discardQueuedText(m.pendingPreSubmitText)
 		c.restorePendingInjectedIntoInput()
 		c.restorePendingPreSubmitTextIntoInput()
+		c.restoreQueuedMessagesIntoInput()
 		detailErr := formatSubmissionError(msg.err)
 		m.activity = uiActivityError
 		m.appendLocalEntry("error", detailErr)
@@ -286,6 +292,7 @@ func (c uiInputController) handleCompactDone(msg compactDoneMsg) (tea.Model, tea
 	}
 	queuedRuntimeWork, err := m.hasQueuedRuntimeUserWork()
 	if err != nil {
+		c.restorePendingInjectedIntoInput()
 		detailErr := formatSubmissionError(err)
 		m.activity = uiActivityError
 		m.appendLocalEntry("error", detailErr)

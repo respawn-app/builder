@@ -13,6 +13,9 @@ import (
 
 func (c uiInputController) applyCommandResult(commandResult commands.Result) (tea.Model, tea.Cmd) {
 	m := c.model
+	if commandResult.SubmitUser && c.blockDisconnectedSubmission(true, commandResult.User) {
+		return m, nil
+	}
 	if commandResult.SubmitUser && commandResult.FreshConversation && m.currentConversationFreshness() != clientui.ConversationFreshnessFresh {
 		m.nextSessionInitialPrompt = commandResult.User
 		m.nextParentSessionID = m.sessionID

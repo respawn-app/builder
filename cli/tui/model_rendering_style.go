@@ -249,7 +249,7 @@ func styleForRole(role string, p palette) lipgloss.Style {
 	case roleDeveloperFeedback:
 		return p.warning
 	case roleInterruption:
-		return p.warning
+		return p.error
 	case "reasoning", "thinking_trace":
 		return p.system
 	case "error":
