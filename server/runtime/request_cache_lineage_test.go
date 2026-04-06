@@ -181,7 +181,7 @@ func TestReviewerSuggestions_SkipsPromptCacheKeyForUnsupportedProvider(t *testin
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	engineClient := &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true}}
+	engineClient := &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, SupportsPromptCacheKey: true, IsOpenAIFirstParty: true}}
 	reviewerClient := &fakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`}}}}
 	eng, err := New(store, engineClient, tools.NewRegistry(), Config{Model: "gpt-5", Reviewer: ReviewerConfig{Model: "gpt-5"}})
 	if err != nil {
@@ -198,6 +198,35 @@ func TestReviewerSuggestions_SkipsPromptCacheKeyForUnsupportedProvider(t *testin
 	}
 	if reviewerClient.calls[0].PromptCacheScope != "" {
 		t.Fatalf("reviewer PromptCacheScope = %q, want empty", reviewerClient.calls[0].PromptCacheScope)
+	}
+}
+
+func TestReviewerSuggestions_UsesReviewerClientPromptCacheCapability(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	engineClient := &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true}}
+	reviewerClient := &fakeClient{
+		caps:      llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true, SupportsPromptCacheKey: true},
+		responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`}}},
+	}
+	eng, err := New(store, engineClient, tools.NewRegistry(), Config{Model: "gpt-5", Reviewer: ReviewerConfig{Model: "gpt-5"}})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.runReviewerSuggestions(context.Background(), "step-1", reviewerClient); err != nil {
+		t.Fatalf("run reviewer suggestions: %v", err)
+	}
+	if len(reviewerClient.calls) != 1 {
+		t.Fatalf("reviewer client calls = %d, want 1", len(reviewerClient.calls))
+	}
+	if reviewerClient.calls[0].PromptCacheKey != reviewerSessionID(store.Meta().SessionID) {
+		t.Fatalf("reviewer PromptCacheKey = %q, want %q", reviewerClient.calls[0].PromptCacheKey, reviewerSessionID(store.Meta().SessionID))
+	}
+	if reviewerClient.calls[0].PromptCacheScope != cachewarn.ScopeReviewer {
+		t.Fatalf("reviewer PromptCacheScope = %q, want %q", reviewerClient.calls[0].PromptCacheScope, cachewarn.ScopeReviewer)
 	}
 }
 
