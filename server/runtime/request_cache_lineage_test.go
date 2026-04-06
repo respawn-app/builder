@@ -40,6 +40,17 @@ func TestGenerateWithRetryClient_PersistsExactNonPostfixCacheWarningInDefaultMod
 	}
 }
 
+func TestNew_RejectsInvalidCacheWarningMode(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningMode("bogus")}); err == nil {
+		t.Fatal("expected invalid cache_warning_mode to fail")
+	}
+}
+
 func TestGenerateWithRetryClient_OffModeSuppressesExactNonPostfixWarning(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -231,6 +242,86 @@ func TestGenerateWithRetryClient_RestoresCompactionInvalidationAcrossEngineReope
 	}
 	if warnings[0].Reason != cachewarn.ReasonCompaction {
 		t.Fatalf("warning reason = %q, want %q", warnings[0].Reason, cachewarn.ReasonCompaction)
+	}
+}
+
+func TestGenerateWithRetryClient_ReviewerRollbackClearsConversationLineage(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 10}}, {Usage: llm.Usage{InputTokens: 12}}, {Usage: llm.Usage{InputTokens: 14}}}}
+	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeDefault})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest(store.Meta().SessionID, "alpha"), nil, nil, nil); err != nil {
+		t.Fatalf("first generate: %v", err)
+	}
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-2", client, testPromptCacheRequest(store.Meta().SessionID, "alpha", "reviewer-feedback"), nil, nil, nil); err != nil {
+		t.Fatalf("reviewer follow-up generate: %v", err)
+	}
+	if err := eng.replaceHistory("step-rollback", "reviewer_rollback", compactionModeManual, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "alpha"}})); err != nil {
+		t.Fatalf("reviewer rollback replace history: %v", err)
+	}
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-3", client, testPromptCacheRequest(store.Meta().SessionID, "alpha", "omega"), nil, nil, nil); err != nil {
+		t.Fatalf("post-rollback generate: %v", err)
+	}
+
+	warnings := persistedCacheWarnings(t, store)
+	if len(warnings) != 0 {
+		t.Fatalf("warning count = %d, want 0", len(warnings))
+	}
+}
+
+func TestGenerateWithRetryClient_RestoreSkipsDigestVersionMismatch(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	legacyRequest := persistedCacheRequestObserved{
+		DigestVersion: 999,
+		CacheKey:      "cache-key-1",
+		Scope:         cachewarn.ScopeConversation,
+		ChunkCount:    1,
+		TerminalHash:  "legacy-hash",
+	}
+	legacyResponse := persistedCacheResponseObserved{
+		DigestVersion:        999,
+		CacheKey:             "cache-key-1",
+		Scope:                cachewarn.ScopeConversation,
+		ChunkCount:           1,
+		TerminalHash:         "legacy-hash",
+		HasCachedInputTokens: true,
+		CachedInputTokens:    42,
+	}
+	if _, err := store.AppendEvent("legacy-request", sessionEventCacheRequestObserved, legacyRequest); err != nil {
+		t.Fatalf("append legacy request: %v", err)
+	}
+	if _, err := store.AppendEvent("legacy-response", sessionEventCacheResponseObserved, legacyResponse); err != nil {
+		t.Fatalf("append legacy response: %v", err)
+	}
+
+	reopened, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 12}}}}
+	eng, err := New(reopened, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeDefault})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest("cache-key-1", "beta"), nil, nil, nil); err != nil {
+		t.Fatalf("generate after reopen: %v", err)
+	}
+
+	warnings := persistedCacheWarnings(t, reopened)
+	if len(warnings) != 0 {
+		t.Fatalf("warning count = %d, want 0", len(warnings))
 	}
 }
 

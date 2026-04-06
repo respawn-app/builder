@@ -42,6 +42,7 @@ func (e *Engine) replaceHistory(stepID, engine string, mode compactionMode, item
 	}
 	if payload.Engine == "reviewer_rollback" {
 		e.chat.restoreHistoryItems(payload.Items)
+		e.clearPromptCacheLineage(e.store.Meta().SessionID)
 	} else {
 		e.chat.replaceHistory(payload.Items)
 		e.notePromptCacheInvalidation(e.store.Meta().SessionID, cachewarn.ReasonCompaction)

@@ -71,7 +71,7 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 	}
 	if evt.CacheWarning != nil {
 		cmd, mutated := a.applyProjectedTranscriptEntries(clientui.Event{
-			Kind:                evt.Kind,
+			Kind:                clientui.EventCacheWarning,
 			StepID:              evt.StepID,
 			TranscriptRevision:  evt.TranscriptRevision,
 			CommittedEntryCount: evt.CommittedEntryCount,

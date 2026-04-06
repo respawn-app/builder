@@ -590,6 +590,26 @@ func TestBuildPayload_SetsPromptCacheKey(t *testing.T) {
 	}
 }
 
+func TestBuildPayload_DoesNotSetPromptCacheKeyForOpenAICompatibleProvider(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	payload, err := transport.buildPayload(OpenAIRequest{
+		Model:          "gpt-5",
+		PromptCacheKey: "cache-key-1",
+	}, openAIAuthMode{}, ProviderCapabilities{
+		ProviderID:           "openai-compatible",
+		SupportsResponsesAPI: true,
+		IsOpenAIFirstParty:   false,
+	})
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+
+	jsonPayload := mustMarshalObject(t, payload)
+	if _, ok := jsonPayload["prompt_cache_key"]; ok {
+		t.Fatalf("expected prompt_cache_key omitted for openai-compatible provider, got %#v", jsonPayload["prompt_cache_key"])
+	}
+}
+
 func TestBuildPayload_AppliesStructuredOutputJSONSchema(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	payload, err := transport.buildPayload(OpenAIRequest{

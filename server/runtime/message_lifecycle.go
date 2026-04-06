@@ -56,6 +56,7 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 			}
 			if strings.TrimSpace(payload.Engine) == "reviewer_rollback" {
 				e.chat.restoreHistoryItems(payload.Items)
+				e.clearPromptCacheLineage(sessionID)
 			} else {
 				e.chat.replaceHistory(payload.Items)
 				e.notePromptCacheInvalidation(sessionID, cachewarn.ReasonCompaction)

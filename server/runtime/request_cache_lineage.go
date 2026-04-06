@@ -25,13 +25,15 @@ const (
 )
 
 type persistedCacheRequestObserved struct {
-	CacheKey     string          `json:"cache_key"`
-	Scope        cachewarn.Scope `json:"scope,omitempty"`
-	ChunkCount   int             `json:"chunk_count"`
-	TerminalHash string          `json:"terminal_hash"`
+	DigestVersion int             `json:"digest_version,omitempty"`
+	CacheKey      string          `json:"cache_key"`
+	Scope         cachewarn.Scope `json:"scope,omitempty"`
+	ChunkCount    int             `json:"chunk_count"`
+	TerminalHash  string          `json:"terminal_hash"`
 }
 
 type persistedCacheResponseObserved struct {
+	DigestVersion        int             `json:"digest_version,omitempty"`
 	CacheKey             string          `json:"cache_key"`
 	Scope                cachewarn.Scope `json:"scope,omitempty"`
 	ChunkCount           int             `json:"chunk_count"`
@@ -73,10 +75,11 @@ func (t *requestCacheTracker) Prepare(req llm.Request) (preparedCacheRequestObse
 		return preparedCacheRequestObservation{}, err
 	}
 	request := persistedCacheRequestObserved{
-		CacheKey:     cacheKey,
-		Scope:        req.PromptCacheScope,
-		ChunkCount:   shape.chunkCount,
-		TerminalHash: shape.terminalHash,
+		DigestVersion: requestCacheDigestVersion,
+		CacheKey:      cacheKey,
+		Scope:         req.PromptCacheScope,
+		ChunkCount:    shape.chunkCount,
+		TerminalHash:  shape.terminalHash,
 	}
 	observation := preparedCacheRequestObservation{request: request}
 
@@ -84,6 +87,9 @@ func (t *requestCacheTracker) Prepare(req llm.Request) (preparedCacheRequestObse
 	defer t.mu.Unlock()
 	previous, ok := t.lineage[cacheKey]
 	if !ok {
+		return observation, nil
+	}
+	if normalizeRequestCacheDigestVersion(previous.request.DigestVersion) != requestCacheDigestVersion {
 		return observation, nil
 	}
 	observation.previousHadReuse = previous.lastResponseHadReuse
@@ -114,6 +120,16 @@ func (t *requestCacheTracker) RecordInvalidation(cacheKey string, reason cachewa
 	t.lineage[cacheKey] = state
 }
 
+func (t *requestCacheTracker) Clear(cacheKey string) {
+	cacheKey = strings.TrimSpace(cacheKey)
+	if cacheKey == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.lineage, cacheKey)
+}
+
 func (t *requestCacheTracker) RecordRequest(request persistedCacheRequestObserved) {
 	cacheKey := strings.TrimSpace(request.CacheKey)
 	if cacheKey == "" {
@@ -121,6 +137,7 @@ func (t *requestCacheTracker) RecordRequest(request persistedCacheRequestObserve
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	request.DigestVersion = normalizeRequestCacheDigestVersion(request.DigestVersion)
 	state := t.lineage[cacheKey]
 	state.request = request
 	state.lastResponseHadReuse = false
@@ -137,12 +154,14 @@ func (t *requestCacheTracker) RecordResponse(response persistedCacheResponseObse
 	hadReuse := response.HasCachedInputTokens && response.CachedInputTokens > 0
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	response.DigestVersion = normalizeRequestCacheDigestVersion(response.DigestVersion)
 	state := t.lineage[cacheKey]
 	state.request = persistedCacheRequestObserved{
-		CacheKey:     response.CacheKey,
-		Scope:        response.Scope,
-		ChunkCount:   response.ChunkCount,
-		TerminalHash: response.TerminalHash,
+		DigestVersion: response.DigestVersion,
+		CacheKey:      response.CacheKey,
+		Scope:         response.Scope,
+		ChunkCount:    response.ChunkCount,
+		TerminalHash:  response.TerminalHash,
 	}
 	state.lastResponseHadReuse = hadReuse
 	state.hasResponse = true
@@ -181,6 +200,7 @@ func (e *Engine) observePromptCacheResponse(stepID string, prepared preparedCach
 		return nil
 	}
 	response := persistedCacheResponseObserved{
+		DigestVersion:        prepared.request.DigestVersion,
 		CacheKey:             prepared.request.CacheKey,
 		Scope:                prepared.request.Scope,
 		ChunkCount:           prepared.request.ChunkCount,
@@ -205,6 +225,13 @@ func (e *Engine) observePromptCacheResponse(stepID string, prepared preparedCach
 	}
 	e.requestCache.RecordResponse(response)
 	return nil
+}
+
+func normalizeRequestCacheDigestVersion(version int) int {
+	if version <= 0 {
+		return requestCacheDigestVersion
+	}
+	return version
 }
 
 func shouldWarnOnCacheReuseDrop(mode config.CacheWarningMode, prepared preparedCacheRequestObservation, usage llm.Usage) bool {
@@ -244,6 +271,13 @@ func (e *Engine) notePromptCacheInvalidation(cacheKey string, reason cachewarn.R
 		return
 	}
 	e.requestCache.RecordInvalidation(cacheKey, reason)
+}
+
+func (e *Engine) clearPromptCacheLineage(cacheKey string) {
+	if e == nil || e.requestCache == nil {
+		return
+	}
+	e.requestCache.Clear(cacheKey)
 }
 
 func applyPersistedCacheWarningToChat(chat *chatStore, payload []byte) error {
