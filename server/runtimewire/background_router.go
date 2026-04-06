@@ -10,16 +10,19 @@ import (
 )
 
 type BackgroundEventRouter struct {
-	mu              sync.RWMutex
-	activeSessionID string
-	activeSince     time.Time
-	activeEngine    *runtime.Engine
-	outputLimit     int
-	outputMode      shelltool.BackgroundOutputMode
+	mu          sync.RWMutex
+	active      map[string]activeRuntime
+	outputLimit int
+	outputMode  shelltool.BackgroundOutputMode
+}
+
+type activeRuntime struct {
+	engine      *runtime.Engine
+	activatedAt time.Time
 }
 
 func NewBackgroundEventRouter(background *shelltool.Manager, outputLimit int, outputMode shelltool.BackgroundOutputMode) *BackgroundEventRouter {
-	router := &BackgroundEventRouter{outputLimit: outputLimit, outputMode: outputMode}
+	router := &BackgroundEventRouter{active: make(map[string]activeRuntime), outputLimit: outputLimit, outputMode: outputMode}
 	if background != nil {
 		background.SetEventHandler(router.handle)
 	}
@@ -27,33 +30,42 @@ func NewBackgroundEventRouter(background *shelltool.Manager, outputLimit int, ou
 }
 
 func (r *BackgroundEventRouter) SetActiveSession(sessionID string, engine *runtime.Engine) {
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	if trimmedSessionID == "" || engine == nil {
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.activeSessionID = strings.TrimSpace(sessionID)
-	r.activeSince = time.Now().UTC()
-	r.activeEngine = engine
+	if r.active == nil {
+		r.active = make(map[string]activeRuntime)
+	}
+	r.active[trimmedSessionID] = activeRuntime{engine: engine, activatedAt: time.Now().UTC()}
 }
 
 func (r *BackgroundEventRouter) ClearActiveSession(sessionID string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if strings.TrimSpace(sessionID) != "" && r.activeSessionID != strings.TrimSpace(sessionID) {
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	if trimmedSessionID == "" {
 		return
 	}
-	r.activeSessionID = ""
-	r.activeSince = time.Time{}
-	r.activeEngine = nil
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.active) == 0 {
+		return
+	}
+	delete(r.active, trimmedSessionID)
 }
 
 func (r *BackgroundEventRouter) handle(evt shelltool.Event) {
+	ownerSessionID := strings.TrimSpace(evt.Snapshot.OwnerSessionID)
+	if ownerSessionID == "" {
+		return
+	}
 	r.mu.RLock()
-	activeSessionID := r.activeSessionID
-	activeSince := r.activeSince
-	activeEngine := r.activeEngine
+	activeRuntime, ok := r.active[ownerSessionID]
 	outputLimit := r.outputLimit
 	outputMode := r.outputMode
 	r.mu.RUnlock()
-	if activeEngine == nil {
+	if !ok || activeRuntime.engine == nil {
 		return
 	}
 	summary := shelltool.BackgroundNoticeSummary{}
@@ -63,12 +75,11 @@ func (r *BackgroundEventRouter) handle(evt shelltool.Event) {
 			SuccessOutputMode: outputMode,
 		})
 	}
-	ownerSessionID := strings.TrimSpace(evt.Snapshot.OwnerSessionID)
-	shouldNotify := ownerSessionID != "" && ownerSessionID == activeSessionID && !evt.NoticeSuppressed
-	if shouldNotify && !evt.Snapshot.FinishedAt.IsZero() && evt.Snapshot.FinishedAt.Before(activeSince) {
+	shouldNotify := !evt.NoticeSuppressed
+	if shouldNotify && !evt.Snapshot.FinishedAt.IsZero() && evt.Snapshot.FinishedAt.Before(activeRuntime.activatedAt) {
 		shouldNotify = false
 	}
-	activeEngine.HandleBackgroundShellUpdate(runtime.BackgroundShellEvent{
+	activeRuntime.engine.HandleBackgroundShellUpdate(runtime.BackgroundShellEvent{
 		Type:              string(evt.Type),
 		ID:                evt.Snapshot.ID,
 		State:             evt.Snapshot.State,
