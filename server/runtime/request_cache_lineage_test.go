@@ -27,6 +27,9 @@ func TestGenerateWithRetryClient_PersistsExactNonPostfixCacheWarningInDefaultMod
 	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest("cache-key-1", "alpha"), nil, nil, nil); err != nil {
 		t.Fatalf("first generate: %v", err)
 	}
+	if warnings := persistedCacheWarnings(t, store); len(warnings) != 0 {
+		t.Fatalf("warning count after baseline success = %d, want 0", len(warnings))
+	}
 	if _, err := eng.generateWithRetryClient(context.Background(), "step-2", client, testPromptCacheRequest("cache-key-1", "beta"), nil, nil, nil); err != nil {
 		t.Fatalf("second generate: %v", err)
 	}
