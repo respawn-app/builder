@@ -162,7 +162,7 @@ func (r *defaultReviewerPipeline) RunSuggestions(ctx context.Context, stepID str
 			Strict: true,
 		},
 	}
-	if e.supportsPromptCacheKeyForClient(ctx, reviewerClient) {
+	if supportsPromptCacheKeyForClient(ctx, reviewerClient) {
 		req.PromptCacheKey = reviewerSessionID(e.store.Meta().SessionID)
 		req.PromptCacheScope = cachewarn.ScopeReviewer
 	}

@@ -76,6 +76,33 @@ func TestGenerateWithRetryClient_OffModeSuppressesExactNonPostfixWarning(t *test
 	}
 }
 
+func TestGenerateWithRetryClient_FailedRequestDoesNotAdvanceLineage(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 10}}, {Usage: llm.Usage{InputTokens: 12}}}}
+	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeDefault})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest("cache-key-1", "alpha"), nil, nil, nil); err != nil {
+		t.Fatalf("first generate: %v", err)
+	}
+	failingClient := failingCacheClient{caps: llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, SupportsPromptCacheKey: true, IsOpenAIFirstParty: true}}
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-2", &failingClient, testPromptCacheRequest("cache-key-1", "beta"), nil, nil, nil); err == nil {
+		t.Fatal("expected failed generate")
+	}
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-3", client, testPromptCacheRequest("cache-key-1", "alpha", "omega"), nil, nil, nil); err != nil {
+		t.Fatalf("third generate: %v", err)
+	}
+	warnings := persistedCacheWarnings(t, store)
+	if len(warnings) != 0 {
+		t.Fatalf("warning count = %d, want 0", len(warnings))
+	}
+}
+
 func TestGenerateWithRetryClient_PersistsVerboseReuseDropWarning(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -274,7 +301,7 @@ func TestGenerateWithRetryClient_DefaultModeUsesCompactionWarningForNextExactBre
 		t.Fatalf("create store: %v", err)
 	}
 	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 10}}, {Usage: llm.Usage{InputTokens: 12}}}}
-	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeVerbose})
+	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeDefault})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -299,6 +326,51 @@ func TestGenerateWithRetryClient_DefaultModeUsesCompactionWarningForNextExactBre
 	if warnings[0].Reason != cachewarn.ReasonCompaction {
 		t.Fatalf("warning reason = %q, want %q", warnings[0].Reason, cachewarn.ReasonCompaction)
 	}
+}
+
+func TestGenerateWithRetryClient_RestoreIgnoresRequestObservationWithoutResponse(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("legacy-request", sessionEventCacheRequestObserved, persistedCacheRequestObserved{
+		DigestVersion: requestCacheDigestVersion,
+		CacheKey:      "cache-key-1",
+		Scope:         cachewarn.ScopeConversation,
+		ChunkCount:    1,
+		TerminalHash:  "failed-only-hash",
+	}); err != nil {
+		t.Fatalf("append request event: %v", err)
+	}
+	reopened, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 12}}}}
+	eng, err := New(reopened, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeDefault})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest("cache-key-1", "alpha", "omega"), nil, nil, nil); err != nil {
+		t.Fatalf("generate after reopen: %v", err)
+	}
+	warnings := persistedCacheWarnings(t, reopened)
+	if len(warnings) != 0 {
+		t.Fatalf("warning count = %d, want 0", len(warnings))
+	}
+}
+
+type failingCacheClient struct {
+	caps llm.ProviderCapabilities
+}
+
+func (f *failingCacheClient) Generate(context.Context, llm.Request) (llm.Response, error) {
+	return llm.Response{}, context.DeadlineExceeded
+}
+
+func (f *failingCacheClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	return f.caps, nil
 }
 
 func TestGenerateWithRetryClient_RestoresCompactionInvalidationAcrossEngineReopen(t *testing.T) {
