@@ -533,16 +533,7 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 		runtimeConnectionEvents := make(chan runtimeConnectionStateChangedMsg, 1)
 		m.runtimeConnectionEvents = runtimeConnectionEvents
 		configurable.SetConnectionStateObserver(func(err error) {
-			msg := runtimeConnectionStateChangedMsg{err: err}
-			select {
-			case runtimeConnectionEvents <- msg:
-			default:
-				select {
-				case <-runtimeConnectionEvents:
-				default:
-				}
-				runtimeConnectionEvents <- msg
-			}
+			enqueueRuntimeConnectionStateChange(runtimeConnectionEvents, err)
 		})
 	}
 	status := m.runtimeStatus()
