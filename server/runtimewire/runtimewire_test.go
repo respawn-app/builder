@@ -155,11 +155,113 @@ func TestBackgroundEventRouterSkipsDeveloperNoticeForOrphanedShells(t *testing.T
 	mu.Lock()
 	updates := backgroundUpdates
 	mu.Unlock()
-	if updates != 1 {
-		t.Fatalf("expected orphaned completion to still emit one background update event, got %d", updates)
+	if updates != 0 {
+		t.Fatalf("expected orphaned completion to stay isolated from foreign active sessions, got %d background updates", updates)
 	}
 	if got := clientA.CallCount(); got != 0 {
 		t.Fatalf("did not expect inactive owner engine to be called, got %d", got)
+	}
+}
+
+func TestBackgroundEventRouterRoutesCompletionToMatchingActiveOwnerSession(t *testing.T) {
+	root := t.TempDir()
+	storeA, err := session.Create(root, "ws-a", root)
+	if err != nil {
+		t.Fatalf("create store A: %v", err)
+	}
+	storeB, err := session.Create(root, "ws-b", root)
+	if err != nil {
+		t.Fatalf("create store B: %v", err)
+	}
+	clientA := &busyToggleFakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "a", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200_000}}}}
+	clientB := &busyToggleFakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "b", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200_000}}}}
+	engA, err := runtime.New(storeA, clientA, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine A: %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := engA.Close(); closeErr != nil {
+			t.Fatalf("close engine A: %v", closeErr)
+		}
+	})
+	engB, err := runtime.New(storeB, clientB, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine B: %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := engB.Close(); closeErr != nil {
+			t.Fatalf("close engine B: %v", closeErr)
+		}
+	})
+
+	router := &BackgroundEventRouter{}
+	router.SetActiveSession(storeA.Meta().SessionID, engA)
+	router.SetActiveSession(storeB.Meta().SessionID, engB)
+	router.Handle(shelltool.Event{Snapshot: shelltool.Snapshot{ID: "1002", OwnerSessionID: storeA.Meta().SessionID, State: "completed", Command: "builder run", Workdir: root, LogPath: filepath.Join(root, "1002.log")}, Type: shelltool.EventCompleted, Preview: "done"})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for clientA.CallCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := clientA.CallCount(); got == 0 {
+		t.Fatal("expected owner session completion to route to its active engine even when another session is also active")
+	}
+	if got := clientB.CallCount(); got != 0 {
+		t.Fatalf("did not expect foreign active session to receive routed completion, got %d", got)
+	}
+}
+
+func TestBackgroundEventRouterClearActiveSessionDropsOnlyThatOwner(t *testing.T) {
+	root := t.TempDir()
+	storeA, err := session.Create(root, "ws-a", root)
+	if err != nil {
+		t.Fatalf("create store A: %v", err)
+	}
+	storeB, err := session.Create(root, "ws-b", root)
+	if err != nil {
+		t.Fatalf("create store B: %v", err)
+	}
+	clientA := &busyToggleFakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "a", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200_000}}}}
+	clientB := &busyToggleFakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "b", Phase: llm.MessagePhaseFinal}, Usage: llm.Usage{WindowTokens: 200_000}}}}
+	engA, err := runtime.New(storeA, clientA, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine A: %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := engA.Close(); closeErr != nil {
+			t.Fatalf("close engine A: %v", closeErr)
+		}
+	})
+	engB, err := runtime.New(storeB, clientB, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine B: %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := engB.Close(); closeErr != nil {
+			t.Fatalf("close engine B: %v", closeErr)
+		}
+	})
+
+	router := &BackgroundEventRouter{}
+	router.SetActiveSession(storeA.Meta().SessionID, engA)
+	router.SetActiveSession(storeB.Meta().SessionID, engB)
+	router.ClearActiveSession(storeA.Meta().SessionID)
+	router.Handle(shelltool.Event{Snapshot: shelltool.Snapshot{ID: "1003", OwnerSessionID: storeA.Meta().SessionID, State: "completed", Command: "builder run", Workdir: root, LogPath: filepath.Join(root, "1003.log")}, Type: shelltool.EventCompleted, Preview: "done"})
+	time.Sleep(150 * time.Millisecond)
+	if got := clientA.CallCount(); got != 0 {
+		t.Fatalf("expected cleared owner session to drop completions, got %d", got)
+	}
+	if got := clientB.CallCount(); got != 0 {
+		t.Fatalf("did not expect foreign active session to receive cleared-owner completion, got %d", got)
+	}
+
+	router.Handle(shelltool.Event{Snapshot: shelltool.Snapshot{ID: "1004", OwnerSessionID: storeB.Meta().SessionID, State: "completed", Command: "builder run", Workdir: root, LogPath: filepath.Join(root, "1004.log")}, Type: shelltool.EventCompleted, Preview: "done"})
+	deadline := time.Now().Add(2 * time.Second)
+	for clientB.CallCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := clientB.CallCount(); got == 0 {
+		t.Fatal("expected other active sessions to keep receiving their own completions after clearing a different owner")
 	}
 }
 

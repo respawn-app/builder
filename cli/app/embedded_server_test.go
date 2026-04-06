@@ -622,6 +622,83 @@ func TestEmbeddedAppServerPrepareRuntimeIsolatesSessionActivityBetweenSessions(t
 	}
 }
 
+func TestEmbeddedAppServerRoutesBackgroundCompletionToOwningSessionOnly(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("start embedded server: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	planner := newSessionLaunchPlanner(server)
+	planA, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session A: %v", err)
+	}
+	runtimePlanA, err := planner.PrepareRuntime(context.Background(), planA, io.Discard, "test background completion isolation A")
+	if err != nil {
+		t.Fatalf("prepare runtime A: %v", err)
+	}
+	defer runtimePlanA.Close()
+
+	planB, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("plan session B: %v", err)
+	}
+	runtimePlanB, err := planner.PrepareRuntime(context.Background(), planB, io.Discard, "test background completion isolation B")
+	if err != nil {
+		t.Fatalf("prepare runtime B: %v", err)
+	}
+	defer runtimePlanB.Close()
+
+	activity := server.inner.SessionActivityClient()
+	if activity == nil {
+		t.Fatal("expected session activity client")
+	}
+	subA, err := activity.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: planA.SessionID})
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity A: %v", err)
+	}
+	defer func() { _ = subA.Close() }()
+	subB, err := activity.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: planB.SessionID})
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity B: %v", err)
+	}
+	defer func() { _ = subB.Close() }()
+
+	processID := "bg-owned-a"
+	server.inner.BackgroundRouter().Handle(shelltool.Event{
+		Type:             shelltool.EventCompleted,
+		NoticeSuppressed: true,
+		Snapshot: shelltool.Snapshot{
+			ID:             processID,
+			OwnerSessionID: planA.SessionID,
+			State:          "completed",
+			Command:        "sleep 1; printf done",
+			Workdir:        workspace,
+			LogPath:        "/tmp/bg-owned-a.log",
+		},
+		Preview: "done",
+	})
+
+	evtA := waitForSessionActivityEvent(t, subA, 5*time.Second, func(evt clientui.Event) bool {
+		return evt.Kind == clientui.EventBackgroundUpdated && evt.Background != nil && evt.Background.ID == processID && evt.Background.Type == "completed"
+	})
+	if evtA.Background == nil || evtA.Background.ID != processID {
+		t.Fatalf("unexpected session A background event: %+v", evtA.Background)
+	}
+
+	ctxB, cancelB := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancelB()
+	if evtB, err := subB.Next(ctxB); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected session B stream to stay idle for session A background completion, got evt=%+v err=%v", evtB, err)
+	}
+}
+
 func transcriptPageContainsText(page clientui.TranscriptPage, want string) bool {
 	for _, entry := range page.Entries {
 		if entry.Text == want {
