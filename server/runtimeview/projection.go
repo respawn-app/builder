@@ -5,6 +5,7 @@ import (
 	"builder/server/runtime"
 	"builder/server/session"
 	patchformat "builder/server/tools/patch/format"
+	"builder/shared/cachewarn"
 	"builder/shared/clientui"
 	"builder/shared/transcript"
 )
@@ -88,6 +89,9 @@ func EventFromRuntime(evt runtime.Event) clientui.Event {
 			Text: evt.ReasoningDelta.Text,
 		}
 	}
+	if evt.CacheWarning != nil {
+		view.CacheWarning = copyCacheWarningView(evt.CacheWarning)
+	}
 	if evt.RunState != nil {
 		view.RunState = &clientui.RunState{
 			Busy:       evt.RunState.Busy,
@@ -118,6 +122,14 @@ func EventFromRuntime(evt runtime.Event) clientui.Event {
 		}
 	}
 	return view
+}
+
+func copyCacheWarningView(in *cachewarn.Warning) *cachewarn.Warning {
+	if in == nil {
+		return nil
+	}
+	copyWarning := *in
+	return &copyWarning
 }
 
 func chatEntriesFromRuntime(entries []runtime.ChatEntry) []clientui.ChatEntry {

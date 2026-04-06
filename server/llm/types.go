@@ -2,6 +2,7 @@ package llm
 
 import (
 	"builder/server/session"
+	"builder/shared/cachewarn"
 	"context"
 	"encoding/json"
 	"errors"
@@ -326,6 +327,8 @@ type Request struct {
 	FastMode                bool              `json:"fast_mode,omitempty"`
 	EnableNativeWebSearch   bool              `json:"enable_native_web_search,omitempty"`
 	SystemPrompt            string            `json:"system_prompt"`
+	PromptCacheKey          string            `json:"prompt_cache_key,omitempty"`
+	PromptCacheScope        cachewarn.Scope   `json:"prompt_cache_scope,omitempty"`
 	SessionID               string            `json:"session_id,omitempty"`
 	Items                   []ResponseItem    `json:"items,omitempty"`
 	Tools                   []Tool            `json:"tools,omitempty"`
@@ -378,6 +381,8 @@ func RequestFromLockedContract(locked session.LockedContract, systemPrompt strin
 		SupportsReasoningEffort: LockedContractSupportsReasoningEffort(&locked, locked.Model),
 		EnableNativeWebSearch:   false,
 		SystemPrompt:            systemPrompt,
+		PromptCacheKey:          "",
+		PromptCacheScope:        "",
 		SessionID:               "",
 		Items:                   CloneResponseItems(items),
 		Tools:                   append([]Tool(nil), tools...),
@@ -475,6 +480,7 @@ type ProviderCapabilities struct {
 	ProviderID                    string
 	SupportsResponsesAPI          bool
 	SupportsResponsesCompact      bool
+	SupportsPromptCacheKey        bool
 	SupportsNativeWebSearch       bool
 	SupportsReasoningEncrypted    bool
 	SupportsServerSideContextEdit bool

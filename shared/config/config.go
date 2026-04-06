@@ -18,6 +18,7 @@ type TUIAlternateScreenPolicy string
 
 type CompactionMode string
 type BGShellsOutputMode string
+type CacheWarningMode string
 type ModelVerbosity string
 
 const (
@@ -32,6 +33,10 @@ const (
 	BGShellsOutputDefault BGShellsOutputMode = "default"
 	BGShellsOutputVerbose BGShellsOutputMode = "verbose"
 	BGShellsOutputConcise BGShellsOutputMode = "concise"
+
+	CacheWarningModeOff     CacheWarningMode = "off"
+	CacheWarningModeDefault CacheWarningMode = "default"
+	CacheWarningModeVerbose CacheWarningMode = "verbose"
 
 	ModelVerbosityLow    ModelVerbosity = "low"
 	ModelVerbosityMedium ModelVerbosity = "medium"
@@ -80,6 +85,7 @@ type Settings struct {
 	Timeouts                         Timeouts
 	ShellOutputMaxChars              int
 	BGShellsOutput                   BGShellsOutputMode
+	CacheWarningMode                 CacheWarningMode
 	Reviewer                         ReviewerSettings
 }
 
@@ -92,6 +98,7 @@ type ProviderCapabilitiesOverride struct {
 	ProviderID                    string
 	SupportsResponsesAPI          bool
 	SupportsResponsesCompact      bool
+	SupportsPromptCacheKey        bool
 	SupportsNativeWebSearch       bool
 	SupportsReasoningEncrypted    bool
 	SupportsServerSideContextEdit bool

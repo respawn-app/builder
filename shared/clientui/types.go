@@ -1,7 +1,10 @@
 package clientui
 
-import patchformat "builder/server/tools/patch/format"
-import "time"
+import (
+	patchformat "builder/server/tools/patch/format"
+	"builder/shared/cachewarn"
+	"time"
+)
 
 type EventKind string
 
@@ -22,6 +25,7 @@ const (
 	EventCompactionStarted   EventKind = "context_compaction_started"
 	EventCompactionCompleted EventKind = "context_compaction_completed"
 	EventCompactionFailed    EventKind = "context_compaction_failed"
+	EventCacheWarning        EventKind = "cache_warning"
 	EventRunStateChanged     EventKind = "run_state_changed"
 	EventBackgroundUpdated   EventKind = "background_updated"
 )
@@ -37,6 +41,7 @@ type Event struct {
 	UserMessage         string
 	UserMessageBatch    []string
 	TranscriptEntries   []ChatEntry
+	CacheWarning        *cachewarn.Warning
 	RunState            *RunState
 	Background          *BackgroundShellEvent
 }

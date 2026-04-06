@@ -8,6 +8,7 @@ import (
 
 	"builder/server/llm"
 	"builder/server/session"
+	"builder/shared/cachewarn"
 )
 
 type defaultMessageLifecycle struct {
@@ -17,6 +18,7 @@ type defaultMessageLifecycle struct {
 
 func (m *defaultMessageLifecycle) RestoreMessages() error {
 	e := m.engine
+	sessionID := e.store.Meta().SessionID
 	if err := e.store.WalkEvents(func(evt session.Event) error {
 		switch evt.Kind {
 		case "message":
@@ -35,6 +37,18 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 				return fmt.Errorf("decode local_entry event: %w", err)
 			}
 			e.chat.appendLocalEntryWithOngoingText(entry.Role, entry.Text, entry.OngoingText)
+		case sessionEventCacheWarning:
+			if err := applyPersistedCacheWarningToChat(e.chat, evt.Payload); err != nil {
+				return err
+			}
+		case sessionEventCacheRequestObserved:
+			if err := e.restorePromptCacheRequest(evt.Payload); err != nil {
+				return err
+			}
+		case sessionEventCacheResponseObserved:
+			if err := e.restorePromptCacheResponse(evt.Payload); err != nil {
+				return err
+			}
 		case "history_replaced":
 			var payload historyReplacementPayload
 			if err := json.Unmarshal(evt.Payload, &payload); err != nil {
@@ -42,8 +56,10 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 			}
 			if strings.TrimSpace(payload.Engine) == "reviewer_rollback" {
 				e.chat.restoreHistoryItems(payload.Items)
+				e.clearPromptCacheLineage(sessionID)
 			} else {
 				e.chat.replaceHistory(payload.Items)
+				e.notePromptCacheInvalidation(sessionID, cachewarn.ReasonCompaction)
 				e.compactionCount++
 			}
 		}

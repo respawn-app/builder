@@ -3,6 +3,7 @@ package runtime
 import (
 	"builder/server/llm"
 	"builder/server/tools"
+	"builder/shared/cachewarn"
 	"time"
 )
 
@@ -25,6 +26,7 @@ const (
 	EventCompactionStarted   EventKind = "context_compaction_started"
 	EventCompactionCompleted EventKind = "context_compaction_completed"
 	EventCompactionFailed    EventKind = "context_compaction_failed"
+	EventCacheWarning        EventKind = "cache_warning"
 	EventRunStateChanged     EventKind = "run_state_changed"
 	EventBackgroundUpdated   EventKind = "background_updated"
 )
@@ -45,6 +47,7 @@ type Event struct {
 	ToolResult          *tools.Result
 	Reviewer            *ReviewerStatus
 	Compaction          *CompactionStatus
+	CacheWarning        *cachewarn.Warning
 	RunState            *RunState
 	Background          *BackgroundShellEvent
 }

@@ -7,6 +7,7 @@ import (
 
 	"builder/prompts"
 	"builder/server/llm"
+	"builder/shared/cachewarn"
 )
 
 type defaultReviewerPipeline struct {
@@ -34,7 +35,7 @@ func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string
 	e := r.engine
 	baselineItems := e.snapshotItems()
 	e.emit(Event{Kind: EventReviewerStarted, StepID: stepID})
-	reviewerResult, err := r.RunSuggestions(ctx, reviewerClient)
+	reviewerResult, err := r.RunSuggestions(ctx, stepID, reviewerClient)
 	if err != nil {
 		status := ReviewerStatus{
 			Outcome: "failed",
@@ -118,7 +119,7 @@ func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string
 	return followUp, nil
 }
 
-func (r *defaultReviewerPipeline) RunSuggestions(ctx context.Context, reviewerClient llm.Client) (reviewerSuggestionsResult, error) {
+func (r *defaultReviewerPipeline) RunSuggestions(ctx context.Context, stepID string, reviewerClient llm.Client) (reviewerSuggestionsResult, error) {
 	e := r.engine
 	if reviewerClient == nil {
 		return reviewerSuggestionsResult{}, nil
@@ -161,10 +162,14 @@ func (r *defaultReviewerPipeline) RunSuggestions(ctx context.Context, reviewerCl
 			Strict: true,
 		},
 	}
+	if supportsPromptCacheKeyForClient(ctx, reviewerClient) {
+		req.PromptCacheKey = reviewerSessionID(e.store.Meta().SessionID)
+		req.PromptCacheScope = cachewarn.ScopeReviewer
+	}
 	if err := req.Validate(); err != nil {
 		return reviewerSuggestionsResult{}, err
 	}
-	resp, err := e.generateWithRetryClient(ctx, reviewerClient, req, nil, nil, nil)
+	resp, err := e.generateWithRetryClient(ctx, stepID, reviewerClient, req, nil, nil, nil)
 	if err != nil {
 		return reviewerSuggestionsResult{}, err
 	}

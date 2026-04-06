@@ -14,6 +14,7 @@ import (
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/cachewarn"
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/transcript"
@@ -283,6 +284,36 @@ func TestHandleProjectedRuntimeEventAppendsTranscriptEntriesImmediately(t *testi
 	}
 	if loaded := m.view.LoadedTranscriptEntries(); len(loaded) != 4 {
 		t.Fatalf("view loaded transcript length = %d, want 4", len(loaded))
+	}
+}
+
+func TestHandleProjectedRuntimeEventAppendsCompactionCacheWarningTranscriptEntry(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
+		Kind:   runtime.EventCacheWarning,
+		StepID: "step-1",
+		CacheWarning: &cachewarn.Warning{
+			Scope:  cachewarn.ScopeConversation,
+			Reason: cachewarn.ReasonCompaction,
+		},
+	}))
+
+	if len(m.transcriptEntries) != 1 {
+		t.Fatalf("expected one transcript entry, got %d", len(m.transcriptEntries))
+	}
+	entry := m.transcriptEntries[0]
+	if entry.Role != "cache_warning" {
+		t.Fatalf("entry.Role = %q, want cache_warning", entry.Role)
+	}
+	if entry.Text != "Cache invalidated: compaction." {
+		t.Fatalf("entry.Text = %q, want compaction cache warning", entry.Text)
+	}
+	if loaded := m.view.LoadedTranscriptEntries(); len(loaded) != 1 {
+		t.Fatalf("view loaded transcript length = %d, want 1", len(loaded))
+	} else if loaded[0].Role != "cache_warning" || loaded[0].Text != "Cache invalidated: compaction." {
+		t.Fatalf("loaded[0] = %+v, want live compaction cache warning", loaded[0])
 	}
 }
 

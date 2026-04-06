@@ -34,6 +34,7 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 
 		resp, err := e.generateWithRetry(
 			ctx,
+			stepID,
 			req,
 			func(delta string) {
 				e.chat.appendOngoingDelta(delta)

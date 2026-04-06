@@ -574,6 +574,63 @@ func TestBuildPayload_DoesNotAddNativeWebSearchToolWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestBuildPayload_SetsPromptCacheKey(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	payload, err := transport.buildPayload(OpenAIRequest{
+		Model:          "gpt-5",
+		PromptCacheKey: "cache-key-1",
+	}, openAIAuthMode{}, requireProviderCapabilities(t, transport, openAIAuthMode{}))
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+
+	jsonPayload := mustMarshalObject(t, payload)
+	if got := jsonPayload["prompt_cache_key"]; got != "cache-key-1" {
+		t.Fatalf("expected prompt_cache_key=cache-key-1, got %#v", got)
+	}
+}
+
+func TestBuildPayload_DoesNotSetPromptCacheKeyForOpenAICompatibleProvider(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	payload, err := transport.buildPayload(OpenAIRequest{
+		Model:          "gpt-5",
+		PromptCacheKey: "cache-key-1",
+	}, openAIAuthMode{}, ProviderCapabilities{
+		ProviderID:           "openai-compatible",
+		SupportsResponsesAPI: true,
+		IsOpenAIFirstParty:   false,
+	})
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+
+	jsonPayload := mustMarshalObject(t, payload)
+	if _, ok := jsonPayload["prompt_cache_key"]; ok {
+		t.Fatalf("expected prompt_cache_key omitted for openai-compatible provider, got %#v", jsonPayload["prompt_cache_key"])
+	}
+}
+
+func TestBuildPayload_SetsPromptCacheKeyWhenExplicitCapabilityIsEnabled(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	payload, err := transport.buildPayload(OpenAIRequest{
+		Model:          "gpt-5",
+		PromptCacheKey: "cache-key-1",
+	}, openAIAuthMode{}, ProviderCapabilities{
+		ProviderID:             "openai-compatible",
+		SupportsResponsesAPI:   true,
+		SupportsPromptCacheKey: true,
+		IsOpenAIFirstParty:     false,
+	})
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+
+	jsonPayload := mustMarshalObject(t, payload)
+	if got := jsonPayload["prompt_cache_key"]; got != "cache-key-1" {
+		t.Fatalf("expected prompt_cache_key=cache-key-1, got %#v", got)
+	}
+}
+
 func TestBuildPayload_AppliesStructuredOutputJSONSchema(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	payload, err := transport.buildPayload(OpenAIRequest{

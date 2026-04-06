@@ -8,6 +8,7 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/cachewarn"
 )
 
 func TestPersistedTranscriptScanCollectsRequestedPageOnly(t *testing.T) {
@@ -188,6 +189,24 @@ func TestPersistedTranscriptScanKeepsCompactionSummaryAndCarryoverInDetailTransc
 	}
 	if page.Entries[2].Role != "manual_compaction_carryover" {
 		t.Fatalf("expected manual compaction carryover entry, got %+v", page.Entries[2])
+	}
+}
+
+func TestPersistedTranscriptScanReplaysCacheWarnings(t *testing.T) {
+	scan := NewPersistedTranscriptScan(PersistedTranscriptScanRequest{})
+	if err := scan.ApplyPersistedEvent(mustPersistedScanEvent(t, sessionEventCacheWarning, cachewarn.Warning{Scope: cachewarn.ScopeConversation, Reason: cachewarn.ReasonNonPostfix})); err != nil {
+		t.Fatalf("ApplyPersistedEvent(cache_warning): %v", err)
+	}
+
+	page := scan.CollectedPageSnapshot()
+	if len(page.Entries) != 1 {
+		t.Fatalf("len(page.Entries) = %d, want 1", len(page.Entries))
+	}
+	if page.Entries[0].Role != cacheWarningTranscriptRole {
+		t.Fatalf("entry role = %q, want %q", page.Entries[0].Role, cacheWarningTranscriptRole)
+	}
+	if page.Entries[0].Text != cachewarn.Text(cachewarn.Warning{Scope: cachewarn.ScopeConversation, Reason: cachewarn.ReasonNonPostfix}) {
+		t.Fatalf("unexpected cache warning text: %+v", page.Entries[0])
 	}
 }
 

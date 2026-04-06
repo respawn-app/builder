@@ -8,6 +8,7 @@ import (
 	"builder/server/llm"
 	"builder/server/runtime"
 	patchformat "builder/server/tools/patch/format"
+	"builder/shared/cachewarn"
 	"builder/shared/clientui"
 	"builder/shared/transcript"
 	"builder/shared/transcriptdiag"
@@ -65,6 +66,20 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 	transcriptMutated := false
 	if len(evt.TranscriptEntries) > 0 {
 		cmd, mutated := a.applyProjectedTranscriptEntries(evt, flushNativeHistory)
+		cmds = append(cmds, cmd)
+		transcriptMutated = transcriptMutated || mutated
+	}
+	if evt.CacheWarning != nil {
+		cmd, mutated := a.applyProjectedTranscriptEntries(clientui.Event{
+			Kind:                clientui.EventCacheWarning,
+			StepID:              evt.StepID,
+			TranscriptRevision:  evt.TranscriptRevision,
+			CommittedEntryCount: evt.CommittedEntryCount,
+			TranscriptEntries: []clientui.ChatEntry{{
+				Role: "cache_warning",
+				Text: cachewarn.Text(*evt.CacheWarning),
+			}},
+		}, flushNativeHistory)
 		cmds = append(cmds, cmd)
 		transcriptMutated = transcriptMutated || mutated
 	}
@@ -591,7 +606,8 @@ func eventTranscriptEntriesReconcileWithCommittedTail(kind clientui.EventKind) b
 	switch kind {
 	case clientui.EventUserMessageFlushed,
 		clientui.EventAssistantMessage,
-		clientui.EventToolCallCompleted:
+		clientui.EventToolCallCompleted,
+		clientui.EventCacheWarning:
 		return true
 	default:
 		return false

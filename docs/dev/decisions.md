@@ -103,6 +103,13 @@
 - Lock covers model + core generation params, enabled tools, tool schema/description snapshot, and system prompt snapshot; thinking level is mutable mid-session.
 - Transcript message order is immutable for cache stability.
 - Canonical model context/history is stored as Responses API input items; message-only chat is UI projection.
+- Prompt-cache continuity warnings are computed at the request layer from actual cache-keyed model requests, not from compaction/fork/edit heuristics.
+- Exact warning condition: for the same `prompt_cache_key`, warn when the new request prompt shape is not a postfix extension of the previous request prompt shape for that key.
+- Forks or any other operation that switches to a new cache key do not produce cache-continuity warnings; a new key is a new lineage, not an invalidation.
+- Retry attempts for one logical model request are treated as one request for cache-warning purposes.
+- Timeout/TTL-based cache-warning suppression is forbidden unless authoritative provider metadata is present on the actual transport.
+- Prompt-cache warnings are persisted as structured server-side facts and replay identically for live runtimes, restored runtimes, and dormant session transcript views.
+- `cache_warning_mode` is a three-state config: `off` disables cache warnings, `default` catches unwanted invalidations and also shows the dedicated compaction warning, and `verbose` includes everything from `default` plus broader invalidation diagnostics such as provider-reported cache reuse drops for postfix-compatible requests when the provider does not expose the cause.
 - Tool-call identity prefers provider-native ids; UUID fallback when missing.
 - Retry collisions on tool-call ids overwrite prior-attempt ids.
 - Event identity uses monotonic sequence id + wall timestamp.
