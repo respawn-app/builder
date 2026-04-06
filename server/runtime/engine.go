@@ -74,6 +74,21 @@ func NormalizeCompactionMode(mode string) (string, bool) {
 	}
 }
 
+func normalizeCacheWarningMode(mode config.CacheWarningMode) (config.CacheWarningMode, bool) {
+	switch strings.ToLower(strings.TrimSpace(string(mode))) {
+	case "":
+		return config.CacheWarningModeDefault, true
+	case string(config.CacheWarningModeOff):
+		return config.CacheWarningModeOff, true
+	case string(config.CacheWarningModeDefault):
+		return config.CacheWarningModeDefault, true
+	case string(config.CacheWarningModeVerbose):
+		return config.CacheWarningModeVerbose, true
+	default:
+		return "", false
+	}
+}
+
 type Config struct {
 	Model                         string
 	Temperature                   float64
@@ -194,8 +209,10 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 	} else {
 		cfg.CompactionMode = "native"
 	}
-	if cfg.CacheWarningMode == "" {
-		cfg.CacheWarningMode = config.CacheWarningModeDefault
+	if normalized, ok := normalizeCacheWarningMode(cfg.CacheWarningMode); ok {
+		cfg.CacheWarningMode = normalized
+	} else {
+		return nil, fmt.Errorf("invalid cache_warning_mode %q", cfg.CacheWarningMode)
 	}
 	if cfg.AutoCompactionEnabled == nil {
 		enabled := true
