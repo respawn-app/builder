@@ -72,6 +72,8 @@ func (m *uiModel) resetNativeHistoryState() {
 	m.nativeProjection = tui.TranscriptProjection{}
 	m.nativeRenderedProjection = tui.TranscriptProjection{}
 	m.nativeRenderedSnapshot = ""
+	m.waitRuntimeEventAfterNativeFlush = false
+	m.discardPendingNativeHistoryFlushes()
 }
 
 func (m *uiModel) rebaseNativeProjection(projection tui.TranscriptProjection, committedCount int) {
@@ -95,7 +97,7 @@ func (m *uiModel) emitEmptyNativeScrollbackSpacer(forceFull bool) tea.Cmd {
 		}
 		return nil
 	}
-	flush := emitNativeHistoryFlush(spacer, true)
+	flush := m.emitNativeHistoryFlush(spacer, true)
 	if !forceFull {
 		return flush
 	}
@@ -214,7 +216,7 @@ func nativePendingEntries(entries []tui.TranscriptEntry) []tui.TranscriptEntry {
 
 func (m *uiModel) emitNativeRenderedText(rendered string) tea.Cmd {
 	if len(rendered) <= 64*1024 {
-		return emitNativeHistoryFlush(rendered, false)
+		return m.emitNativeHistoryFlush(rendered, false)
 	}
 	chunks := splitNativeScrollbackChunks(rendered, 64*1024)
 	if len(chunks) == 0 {
@@ -222,7 +224,7 @@ func (m *uiModel) emitNativeRenderedText(rendered string) tea.Cmd {
 	}
 	cmds := make([]tea.Cmd, 0, len(chunks))
 	for _, chunk := range chunks {
-		if cmd := emitNativeHistoryFlush(chunk, false); cmd != nil {
+		if cmd := m.emitNativeHistoryFlush(chunk, false); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	}
@@ -235,16 +237,73 @@ func (m *uiModel) emitNativeRenderedText(rendered string) tea.Cmd {
 	return tea.Sequence(cmds...)
 }
 
-func emitNativeHistoryFlush(text string, allowBlank bool) tea.Cmd {
+func (m *uiModel) emitNativeHistoryFlush(text string, allowBlank bool) tea.Cmd {
 	if text == "" {
 		return nil
 	}
 	if !allowBlank && strings.TrimSpace(text) == "" {
 		return nil
 	}
+	m.nativeFlushSequence++
+	msg := nativeHistoryFlushMsg{Text: text, AllowBlank: allowBlank, Sequence: m.nativeFlushSequence}
 	return func() tea.Msg {
-		return nativeHistoryFlushMsg{Text: text, AllowBlank: allowBlank}
+		return msg
 	}
+}
+
+func (m *uiModel) discardPendingNativeHistoryFlushes() {
+	m.nativeFlushedSequence = m.nativeFlushSequence
+	if len(m.nativePendingFlushes) == 0 {
+		return
+	}
+	clear(m.nativePendingFlushes)
+}
+
+func (m *uiModel) handleNativeHistoryFlush(msg nativeHistoryFlushMsg) tea.Cmd {
+	if msg.Sequence == 0 {
+		if !msg.AllowBlank && strings.TrimSpace(msg.Text) == "" {
+			if m.waitRuntimeEventAfterNativeFlush {
+				m.waitRuntimeEventAfterNativeFlush = false
+				return m.waitRuntimeEventCmd()
+			}
+			return nil
+		}
+		cmds := []tea.Cmd{tea.Printf("%s", msg.Text)}
+		if m.waitRuntimeEventAfterNativeFlush {
+			m.waitRuntimeEventAfterNativeFlush = false
+			cmds = append(cmds, m.waitRuntimeEventCmd())
+		}
+		return sequenceCmds(cmds...)
+	}
+	if msg.Sequence <= m.nativeFlushedSequence {
+		return nil
+	}
+	if msg.Sequence > m.nativeFlushedSequence+1 {
+		if m.nativePendingFlushes == nil {
+			m.nativePendingFlushes = make(map[uint64]nativeHistoryFlushMsg)
+		}
+		m.nativePendingFlushes[msg.Sequence] = msg
+		return nil
+	}
+	cmds := make([]tea.Cmd, 0, 1)
+	current := msg
+	for {
+		m.nativeFlushedSequence = current.Sequence
+		if current.AllowBlank || strings.TrimSpace(current.Text) != "" {
+			cmds = append(cmds, tea.Printf("%s", current.Text))
+		}
+		next, ok := m.nativePendingFlushes[m.nativeFlushedSequence+1]
+		if !ok {
+			break
+		}
+		delete(m.nativePendingFlushes, next.Sequence)
+		current = next
+	}
+	if m.waitRuntimeEventAfterNativeFlush {
+		m.waitRuntimeEventAfterNativeFlush = false
+		cmds = append(cmds, m.waitRuntimeEventCmd())
+	}
+	return sequenceCmds(cmds...)
 }
 
 func splitNativeScrollbackChunks(rendered string, maxBytes int) []string {

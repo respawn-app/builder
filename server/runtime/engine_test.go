@@ -4196,7 +4196,8 @@ func TestDeferredFinalWithQueuedUserInjectionStillRunsReviewerAndEmitsAssistantE
 	defer mu.Unlock()
 	assistantMessages := 0
 	flushedQueuedUser := false
-	for _, evt := range events {
+	for i, evt := range events {
+		_ = i
 		if evt.Kind == EventAssistantMessage {
 			assistantMessages++
 			if evt.Message.Content != "foreground done" {

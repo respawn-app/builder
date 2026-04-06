@@ -380,16 +380,9 @@ func TestRuntimeEventBatchDoesNotSequenceNativeFlushBehindTransientStatusTimer(t
 	if cmd == nil {
 		t.Fatal("expected runtime event batch command")
 	}
-	batch, ok := cmd().(tea.BatchMsg)
-	if !ok {
-		t.Fatalf("expected runtime event batch to compose with tea.Batch, got %T", cmd())
-	}
+	msgs := collectCmdMessages(t, cmd)
 	flushFound := false
-	for _, child := range batch {
-		msg, immediate := immediateCmdMsg(child, 20*time.Millisecond)
-		if !immediate {
-			continue
-		}
+	for _, msg := range msgs {
 		flush, ok := msg.(nativeHistoryFlushMsg)
 		if !ok {
 			continue
@@ -2058,6 +2051,88 @@ func TestProjectedUserMessageFlushedDoesNotClobberLaterAssistantDelta(t *testing
 	}
 	if !strings.Contains(stripANSIPreserve(m.View()), "working") {
 		t.Fatalf("expected assistant delta visible in view, got %q", stripANSIPreserve(m.View()))
+	}
+}
+
+func TestProjectedUserMessageFlushedDefersOptimisticAppendWhileAssistantStreamIsLive(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.busy = true
+	m.pendingInjected = []string{"steered message"}
+	m.input = "steered message"
+	m.lockedInjectText = "steered message"
+	m.inputSubmitLocked = true
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "foreground done"})
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:        clientui.EventUserMessageFlushed,
+		UserMessage: "steered message",
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "user",
+			Text: "steered message",
+		}},
+	})
+	msgs := collectCmdMessages(t, cmd)
+	for _, msg := range msgs {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect transcript refresh after deferred flushed user message, got %+v", msgs)
+		}
+	}
+	if len(m.transcriptEntries) != 0 {
+		t.Fatalf("expected optimistic user append deferred until assistant catch-up, got %+v", m.transcriptEntries)
+	}
+	if got := m.view.OngoingStreamingText(); got != "foreground done" {
+		t.Fatalf("expected live assistant stream preserved while deferring user flush append, got %q", got)
+	}
+	if client.recordedPromptHistory != "steered message" {
+		t.Fatalf("expected prompt history still recorded, got %q", client.recordedPromptHistory)
+	}
+	if len(m.pendingInjected) != 0 {
+		t.Fatalf("expected pending injected queue consumed even while append is deferred, got %+v", m.pendingInjected)
+	}
+	if m.inputSubmitLocked {
+		t.Fatal("expected input submit lock cleared")
+	}
+	if m.input != "" {
+		t.Fatalf("expected cleared input after deferred flushed user message, got %q", m.input)
+	}
+	if !m.sawAssistantDelta {
+		t.Fatal("expected live assistant delta flag preserved while deferring user flush append")
+	}
+}
+
+func TestProjectedUserMessageFlushedDoesNotDeferWhenUIIsIdleDespiteStaleLiveAssistantState(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.busy = false
+	m.sawAssistantDelta = true
+	m.forwardToView(tui.SetConversationMsg{Ongoing: "stale assistant"})
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:        clientui.EventUserMessageFlushed,
+		UserMessage: "steered message",
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "user",
+			Text: "steered message",
+		}},
+	})
+	msgs := collectCmdMessages(t, cmd)
+	for _, msg := range msgs {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect transcript refresh after idle flushed user message, got %+v", msgs)
+		}
+	}
+	if got := len(m.transcriptEntries); got != 1 {
+		t.Fatalf("expected idle flushed user message to append immediately, got %d entries", got)
+	}
+	if got := m.transcriptEntries[0].Text; got != "steered message" {
+		t.Fatalf("transcript entry text = %q, want steered message", got)
 	}
 }
 
