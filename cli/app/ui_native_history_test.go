@@ -1184,6 +1184,47 @@ func TestProjectedRuntimeBatchesPreserveImmediateLiveEventsAndLaterCommittedAppe
 	}
 }
 
+func TestProjectedRuntimeBatchPreservesQueuedUserFlushBetweenToolCompletionAndAssistantFinal(t *testing.T) {
+	m := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), nil,
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
+	)
+	next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	m = next.(*uiModel)
+	_ = collectCmdMessages(t, startupCmd)
+
+	callMeta := transcript.ToolCallMeta{ToolName: "shell", Command: "pwd", CompactText: "pwd", IsShell: true}
+	firstBatch := []clientui.Event{
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, StepID: "step-1", UserMessage: "say hi"}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1", ToolCall: &llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Presentation: toolcodec.EncodeToolCallMeta(callMeta)}}),
+	}
+	next, cmd := m.Update(runtimeEventBatchMsg{events: firstBatch})
+	m = next.(*uiModel)
+	_ = collectCmdMessages(t, cmd)
+
+	secondBatch := []clientui.Event{
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallCompleted, StepID: "step-1", ToolResult: &tools.Result{CallID: "call-1", Name: tools.ToolShell, Output: []byte("/tmp")}}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, StepID: "step-1", UserMessage: "steer now"}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, StepID: "step-1", Message: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal}}),
+	}
+	next, cmd = m.Update(runtimeEventBatchMsg{events: secondBatch})
+	m = next.(*uiModel)
+	msgs := collectCmdMessages(t, cmd)
+	flushText := strings.Builder{}
+	for _, msg := range msgs {
+		if flush, ok := msg.(nativeHistoryFlushMsg); ok {
+			flushText.WriteString(stripANSIPreserve(flush.Text))
+			flushText.WriteString("\n")
+		}
+	}
+	if !containsInOrder(flushText.String(), "pwd", "steer now", "done") {
+		t.Fatalf("expected queued user flush preserved between tool completion and assistant final, got %q", flushText.String())
+	}
+	view := stripANSIPreserve(m.View())
+	if strings.Contains(view, "pwd") {
+		t.Fatalf("expected pending tool preview cleared after completion, got %q", view)
+	}
+}
+
 func TestUIInitClearsScreen(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	cmd := m.Init()

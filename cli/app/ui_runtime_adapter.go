@@ -39,10 +39,12 @@ func (a uiRuntimeAdapter) handleProjectedRuntimeEventsBatch(events []clientui.Ev
 		cmds = append(cmds, result.cmd)
 		transcriptMutated = transcriptMutated || result.transcriptMutated
 	}
-	if transcriptMutated {
-		cmds = append(cmds, a.model.syncNativeHistoryFromTranscript())
+	batchedCmd := batchCmds(cmds...)
+	if !transcriptMutated {
+		return batchedCmd
 	}
-	return batchCmds(cmds...)
+	nativeCmd := a.model.syncNativeHistoryFromTranscript()
+	return sequenceCmds(nativeCmd, batchedCmd)
 }
 
 func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNativeHistory bool) runtimeEventApplyResult {
@@ -188,6 +190,19 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 			"path":                  "live_event",
 			"incoming_count":        strconv.Itoa(incomingCount),
 			"reason":                "duplicate_tool_call_start",
+			"applied_count":         "0",
+			"event_revision":        strconv.FormatInt(evt.TranscriptRevision, 10),
+			"event_committed_count": strconv.Itoa(evt.CommittedEntryCount),
+		}))
+		return nil, false
+	}
+	if shouldDeferProjectedUserMessageFlushAppend(m, evt) {
+		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.append_entries", map[string]string{
+			"session_id":            strings.TrimSpace(m.sessionID),
+			"mode":                  m.transcriptModeLabel(),
+			"path":                  "live_event",
+			"incoming_count":        strconv.Itoa(incomingCount),
+			"reason":                "defer_user_flush_until_assistant_catch_up",
 			"applied_count":         "0",
 			"event_revision":        strconv.FormatInt(evt.TranscriptRevision, 10),
 			"event_committed_count": strconv.Itoa(evt.CommittedEntryCount),
@@ -589,6 +604,24 @@ func shouldSkipProjectedToolCallStart(m *uiModel, evt clientui.Event) bool {
 	return matched
 }
 
+func shouldDeferProjectedUserMessageFlushAppend(m *uiModel, evt clientui.Event) bool {
+	if m == nil || evt.Kind != clientui.EventUserMessageFlushed || len(evt.TranscriptEntries) == 0 {
+		return false
+	}
+	if !m.busy {
+		return false
+	}
+	if strings.TrimSpace(m.view.OngoingStreamingText()) == "" && !m.sawAssistantDelta {
+		return false
+	}
+	for _, entry := range evt.TranscriptEntries {
+		if entry.Role != "user" {
+			return false
+		}
+	}
+	return true
+}
+
 func transcriptContainsToolCallID(entries []tui.TranscriptEntry, toolCallID string) bool {
 	trimmed := strings.TrimSpace(toolCallID)
 	if trimmed == "" {
@@ -637,11 +670,18 @@ func waitRuntimeEvent(ch <-chan clientui.Event) tea.Cmd {
 			return nil
 		}
 		events := []clientui.Event{evt}
+		if runtimeEventBatchFence(evt) {
+			return runtimeEventBatchMsg{events: events}
+		}
 		for len(events) < 64 {
 			select {
 			case next, ok := <-ch:
 				if !ok {
 					return runtimeEventBatchMsg{events: events}
+				}
+				if runtimeEventBatchFence(next) {
+					carry := next
+					return runtimeEventBatchMsg{events: events, carry: &carry}
 				}
 				events = append(events, next)
 			default:
@@ -649,6 +689,20 @@ func waitRuntimeEvent(ch <-chan clientui.Event) tea.Cmd {
 			}
 		}
 		return runtimeEventBatchMsg{events: events}
+	}
+}
+
+func runtimeEventBatchFence(evt clientui.Event) bool {
+	if len(evt.TranscriptEntries) > 0 {
+		return true
+	}
+	switch evt.Kind {
+	case clientui.EventConversationUpdated,
+		clientui.EventAssistantDeltaReset,
+		clientui.EventReasoningDeltaReset:
+		return true
+	default:
+		return false
 	}
 }
 

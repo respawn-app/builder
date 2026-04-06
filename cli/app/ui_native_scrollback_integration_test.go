@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -79,10 +80,37 @@ type gatedStreamClient struct {
 	lastReq llm.Request
 }
 
+type deferredFinalQueuedInjectionStreamClient struct {
+	mu    sync.Mutex
+	calls int
+	delay time.Duration
+}
+
+type queuedSteerDuringBlockingToolClient struct {
+	mu    sync.Mutex
+	calls int
+}
+
+type blockingShellTool struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+type reviewerNoSuggestionsClient struct{}
+
 type staleTranscriptRuntimeClient struct {
 	runtimeControlFakeClient
 	loadCalls int
 	page      clientui.TranscriptPage
+}
+
+type gatedRefreshRuntimeClient struct {
+	runtimeControlFakeClient
+	page           clientui.TranscriptPage
+	refreshStarted chan struct{}
+	releaseRefresh chan struct{}
+	refreshOnce    sync.Once
 }
 
 func (c *staleTranscriptRuntimeClient) MainView() clientui.RuntimeMainView {
@@ -107,6 +135,23 @@ func (c *staleTranscriptRuntimeClient) LoadTranscriptPage(req clientui.Transcrip
 }
 
 func (c *staleTranscriptRuntimeClient) RefreshTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	return c.LoadTranscriptPage(req)
+}
+
+func (c *gatedRefreshRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	_ = req
+	page := c.page
+	if page.SessionID == "" {
+		page.SessionID = "session-1"
+	}
+	return page, nil
+}
+
+func (c *gatedRefreshRuntimeClient) RefreshTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
+	c.refreshOnce.Do(func() {
+		close(c.refreshStarted)
+	})
+	<-c.releaseRefresh
 	return c.LoadTranscriptPage(req)
 }
 
@@ -173,6 +218,98 @@ func (c *gatedStreamClient) GenerateStream(_ context.Context, req llm.Request, o
 	}
 	return llm.Response{
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "assistant"},
+		Usage:     llm.Usage{WindowTokens: 200_000},
+	}, nil
+}
+
+func (c *deferredFinalQueuedInjectionStreamClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
+	return llm.Response{}, errors.New("not implemented")
+}
+
+func (c *queuedSteerDuringBlockingToolClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
+	return llm.Response{}, errors.New("not implemented")
+}
+
+func (c *deferredFinalQueuedInjectionStreamClient) GenerateStream(_ context.Context, _ llm.Request, onDelta func(string)) (llm.Response, error) {
+	c.mu.Lock()
+	call := c.calls
+	c.calls++
+	delay := c.delay
+	c.mu.Unlock()
+	if call == 0 {
+		if onDelta != nil {
+			onDelta("foreground done")
+		}
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		return llm.Response{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "foreground done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200_000},
+		}, nil
+	}
+	if onDelta != nil {
+		onDelta("NO_OP")
+	}
+	return llm.Response{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "NO_OP", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200_000},
+	}, nil
+}
+
+func (c *queuedSteerDuringBlockingToolClient) GenerateStream(_ context.Context, _ llm.Request, onDelta func(string)) (llm.Response, error) {
+	c.mu.Lock()
+	call := c.calls
+	c.calls++
+	c.mu.Unlock()
+	if call == 0 {
+		if onDelta != nil {
+			onDelta("working")
+		}
+		return llm.Response{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{
+				ID:    "call-1",
+				Name:  string(tools.ToolShell),
+				Input: json.RawMessage(`{"command":"sleep 1"}`),
+				Presentation: toolcodec.EncodeToolCallMeta(transcript.ToolCallMeta{
+					ToolName:    "shell",
+					IsShell:     true,
+					Command:     "sleep 1",
+					CompactText: "sleep 1",
+				}),
+			}},
+			Usage: llm.Usage{WindowTokens: 200_000},
+		}, nil
+	}
+	if onDelta != nil {
+		onDelta("after steer")
+	}
+	return llm.Response{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "after steer", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200_000},
+	}, nil
+}
+
+func (t *blockingShellTool) Name() tools.ID {
+	return tools.ToolShell
+}
+
+func (t *blockingShellTool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
+	t.once.Do(func() {
+		close(t.started)
+	})
+	select {
+	case <-t.release:
+	case <-ctx.Done():
+		return tools.Result{CallID: c.ID, Name: tools.ToolShell, IsError: true, Output: []byte(`{"error":"context canceled"}`)}, ctx.Err()
+	}
+	return tools.Result{CallID: c.ID, Name: tools.ToolShell, Output: []byte(`"/tmp"`)}, nil
+}
+
+func (reviewerNoSuggestionsClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
+	return llm.Response{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`},
 		Usage:     llm.Usage{WindowTokens: 200_000},
 	}, nil
 }
@@ -813,6 +950,184 @@ func TestNativeFinalizeSuppressesLateAsyncDeltaArtifacts(t *testing.T) {
 	}
 	if model.sawAssistantDelta {
 		t.Fatal("expected sawAssistantDelta cleared after finalize commit")
+	}
+}
+
+func TestNativeDeferredFinalWithQueuedInjectionKeepsAssistantBeforeQueuedUserInScrollback(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	runtimeEvents := make(chan runtime.Event, 256)
+	eng, err := runtime.New(
+		store,
+		&deferredFinalQueuedInjectionStreamClient{delay: 120 * time.Millisecond},
+		tools.NewRegistry(),
+		runtime.Config{
+			Model: "gpt-5",
+			Reviewer: runtime.ReviewerConfig{
+				Frequency:     "all",
+				Model:         "gpt-5",
+				ThinkingLevel: "low",
+				Client:        reviewerNoSuggestionsClient{},
+			},
+			OnEvent: func(evt runtime.Event) {
+				runtimeEvents <- evt
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.QueueUserMessage("steer now")
+
+	out := &bytes.Buffer{}
+	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil), closedAskEvents())
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := program.Run()
+		done <- runErr
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	submitDone := make(chan error, 1)
+	go func() {
+		_, err := eng.SubmitUserMessage(context.Background(), "run task")
+		submitDone <- err
+	}()
+
+	waitForTestCondition(t, 2*time.Second, "live deferred final delta visible", func() bool {
+		return strings.Contains(model.view.OngoingStreamingText(), "foreground done")
+	})
+
+	waitForSubmitResult(t, 2*time.Second, submitDone)
+	waitForTestCondition(t, 2*time.Second, "deferred final committed before queued user flush in output", func() bool {
+		if strings.TrimSpace(model.view.OngoingStreamingText()) != "" || model.sawAssistantDelta {
+			return false
+		}
+		return containsInOrder(normalizedOutput(out.String()), "run task", "foreground done", "steer now")
+	})
+
+	program.Quit()
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("program run failed: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	normalized := normalizedOutput(out.String())
+	if !containsInOrder(normalized, "run task", "foreground done", "steer now") {
+		t.Fatalf("expected deferred final before queued injected user in ongoing scrollback, got %q", normalized)
+	}
+	if strings.TrimSpace(model.view.OngoingStreamingText()) != "" {
+		t.Fatalf("expected live streaming buffer cleared after deferred final commit, got %q", model.view.OngoingStreamingText())
+	}
+	if model.sawAssistantDelta {
+		t.Fatal("expected sawAssistantDelta cleared after deferred final commit")
+	}
+}
+
+func TestNativeQueuedSteerDuringBlockingToolAppearsInScrollback(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	runtimeEvents := make(chan runtime.Event, 256)
+	blockingTool := &blockingShellTool{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	eng, err := runtime.New(
+		store,
+		&queuedSteerDuringBlockingToolClient{},
+		tools.NewRegistry(blockingTool),
+		runtime.Config{
+			Model: "gpt-5",
+			OnEvent: func(evt runtime.Event) {
+				runtimeEvents <- evt
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	out := &bytes.Buffer{}
+	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil), closedAskEvents())
+
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(strings.NewReader("")),
+		tea.WithOutput(out),
+		tea.WithoutSignals(),
+	)
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := program.Run()
+		done <- runErr
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 32})
+	submitDone := make(chan error, 1)
+	go func() {
+		_, err := eng.SubmitUserMessage(context.Background(), "run task")
+		submitDone <- err
+	}()
+
+	select {
+	case <-blockingTool.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for blocking tool to start")
+	}
+	eng.QueueUserMessage("steer now")
+	close(blockingTool.release)
+
+	waitForSubmitResult(t, 2*time.Second, submitDone)
+	waitForTestCondition(t, 2*time.Second, "follow-up assistant resolves after blocking tool", func() bool {
+		return containsInOrder(normalizedOutput(out.String()), "run task", "after steer")
+	})
+
+	snapshot := eng.ChatSnapshot()
+	hasQueuedUser := false
+	for _, entry := range snapshot.Entries {
+		if entry.Role == string(llm.RoleUser) && entry.Text == "steer now" {
+			hasQueuedUser = true
+			break
+		}
+	}
+	if !hasQueuedUser {
+		t.Fatalf("expected runtime transcript to contain queued steer, got %+v", snapshot.Entries)
+	}
+	if normalized := normalizedOutput(out.String()); !containsInOrder(normalized, "run task", "steer now", "after steer") {
+		t.Fatalf("expected queued steer visible in ongoing scrollback, got run=%d steer=%d after=%d flush_seq=%d flushed_seq=%d pending_flushes=%d output=%q runtime_transcript=%+v ui_transcript=%+v native_snapshot=%q ongoing=%q", strings.Index(normalized, "run task"), strings.Index(normalized, "steer now"), strings.Index(normalized, "after steer"), model.nativeFlushSequence, model.nativeFlushedSequence, len(model.nativePendingFlushes), normalized, snapshot.Entries, model.transcriptEntries, model.nativeRenderedSnapshot, stripANSIAndTrimRight(model.view.OngoingSnapshot()))
+	}
+
+	program.Quit()
+	select {
+	case runErr := <-done:
+		if runErr != nil {
+			t.Fatalf("program run failed: %v", runErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	if normalized := normalizedOutput(out.String()); !containsInOrder(normalized, "run task", "steer now", "after steer") {
+		t.Fatalf("expected queued steer visible in ongoing scrollback, got %q", normalized)
 	}
 }
 
@@ -1606,6 +1921,150 @@ func TestNativeStreamingInterleavedWithStatusRedrawStaysCoherent(t *testing.T) {
 		if strings.Count(line, "ongoing | ") > 1 {
 			t.Fatalf("expected no duplicated status segment in a single rendered line, got %q", line)
 		}
+	}
+}
+
+func TestQueuedFollowUpWaitsForFinalTranscriptCatchUpBeforeNativeScrollbackAppend(t *testing.T) {
+	out := &bytes.Buffer{}
+	client := &gatedRefreshRuntimeClient{
+		runtimeControlFakeClient: runtimeControlFakeClient{
+			sessionView: clientui.RuntimeSessionView{SessionID: "session-1"},
+		},
+		page: clientui.TranscriptPage{
+			SessionID:    "session-1",
+			TotalEntries: 1,
+			Entries: []clientui.ChatEntry{{
+				Role:  "assistant",
+				Text:  "final answer",
+				Phase: string(llm.MessagePhaseFinal),
+			}},
+		},
+		refreshStarted: make(chan struct{}),
+		releaseRefresh: make(chan struct{}),
+	}
+	model := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	model.startupCmds = nil
+	model.busy = true
+	model.activity = uiActivityRunning
+	model.queued = []string{"follow up"}
+	model.sawAssistantDelta = true
+	model.forwardToView(tui.SetConversationMsg{Ongoing: "working"})
+
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	waitForTestCondition(t, 2*time.Second, "live assistant streaming visible", func() bool {
+		return strings.Contains(normalizedOutput(out.String()), "working")
+	})
+
+	program.Send(submitDoneMsg{message: "ignored by runtime-backed flow"})
+	select {
+	case <-client.refreshStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for transcript catch-up refresh to start")
+	}
+	time.Sleep(80 * time.Millisecond)
+	if client.shouldCompactText != "" || client.submitText != "" {
+		t.Fatalf("expected queued follow-up to wait for transcript catch-up, compact=%q submit=%q", client.shouldCompactText, client.submitText)
+	}
+
+	close(client.releaseRefresh)
+	waitForTestCondition(t, 2*time.Second, "final answer committed before queued follow-up starts", func() bool {
+		normalized := normalizedOutput(out.String())
+		return strings.Contains(normalized, "final answer") && client.shouldCompactText == "follow up"
+	})
+	if strings.TrimSpace(model.view.OngoingStreamingText()) != "" {
+		t.Fatalf("expected live streaming buffer cleared after final catch-up, got %q", model.view.OngoingStreamingText())
+	}
+
+	program.Send(runtimeEventMsg{event: clientui.Event{
+		Kind:        clientui.EventUserMessageFlushed,
+		StepID:      "step-2",
+		UserMessage: "follow up",
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "user",
+			Text: "follow up",
+		}},
+	}})
+	waitForTestCondition(t, 2*time.Second, "queued follow-up appended after final answer", func() bool {
+		return containsInOrder(normalizedOutput(out.String()), "final answer", "follow up")
+	})
+
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	normalized := normalizedOutput(out.String())
+	if !containsInOrder(normalized, "final answer", "follow up") {
+		t.Fatalf("expected final answer before queued follow-up in scrollback, got %q", normalized)
+	}
+	if strings.Count(normalized, "final answer") != 1 {
+		t.Fatalf("expected final answer appended exactly once, got %d in %q", strings.Count(normalized, "final answer"), normalized)
+	}
+}
+
+func TestNativeHistoryFlushesPreserveScheduledOrderWhenDeliveredOutOfOrder(t *testing.T) {
+	out := &bytes.Buffer{}
+	model := newProjectedStaticUIModel()
+	firstCmd := model.emitNativeRenderedText("assistant final\n")
+	secondCmd := model.emitNativeRenderedText("queued user\n")
+	if firstCmd == nil || secondCmd == nil {
+		t.Fatal("expected native history flush commands")
+	}
+	firstMsg, ok := firstCmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected first nativeHistoryFlushMsg, got %T", firstCmd())
+	}
+	secondMsg, ok := secondCmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected second nativeHistoryFlushMsg, got %T", secondCmd())
+	}
+	if secondMsg.Sequence != firstMsg.Sequence+1 {
+		t.Fatalf("expected consecutive native flush sequence numbers, first=%d second=%d", firstMsg.Sequence, secondMsg.Sequence)
+	}
+
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	program.Send(secondMsg)
+	time.Sleep(30 * time.Millisecond)
+	if strings.Contains(normalizedOutput(out.String()), "queued user") {
+		t.Fatalf("expected later native flush buffered until earlier flush arrives, got %q", normalizedOutput(out.String()))
+	}
+	program.Send(firstMsg)
+	waitForTestCondition(t, 2*time.Second, "ordered native flush replay", func() bool {
+		return containsInOrder(normalizedOutput(out.String()), "assistant final", "queued user")
+	})
+
+	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	if normalized := normalizedOutput(out.String()); !containsInOrder(normalized, "assistant final", "queued user") {
+		t.Fatalf("expected native history flushes to preserve scheduled order, got %q", normalized)
 	}
 }
 

@@ -153,9 +153,23 @@ func (m *uiModel) handleRuntimeTranscriptRefreshed(msg runtimeTranscriptRefreshe
 	}
 	applyCmd := m.runtimeAdapter().applyRuntimeTranscriptPage(msg.req, msg.transcript)
 	if !m.runtimeTranscriptDirty {
-		return applyCmd
+		return sequenceCmds(applyCmd, m.flushQueuedInputsAfterHydration())
 	}
 	m.runtimeTranscriptDirty = false
 	m.logf("ui.runtime.transcript.repeat_after_dirty token=%d", msg.token)
 	return sequenceCmds(applyCmd, m.requestRuntimeTranscriptSync())
+}
+
+func (m *uiModel) flushQueuedInputsAfterHydration() tea.Cmd {
+	if m == nil || !m.pendingQueuedDrainAfterHydration {
+		return nil
+	}
+	m.pendingQueuedDrainAfterHydration = false
+	if len(m.queued) == 0 {
+		m.inputController().notifyTurnQueueDrainedIfIdle()
+		return nil
+	}
+	_, cmd := m.inputController().flushQueuedInputs(queueDrainAuto)
+	m.inputController().notifyTurnQueueDrainedIfIdle()
+	return cmd
 }

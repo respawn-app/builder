@@ -210,13 +210,42 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 		transcriptSyncCmd = m.requestRuntimeTranscriptSync()
 	}
 	if len(m.queued) > 0 {
+		if m.hasRuntimeClient() && c.queuedDrainRequiresHydration() {
+			m.pendingQueuedDrainAfterHydration = true
+			m.syncViewport()
+			return m, transcriptSyncCmd
+		}
 		next, drainCmd := c.flushQueuedInputs(queueDrainAuto)
 		c.notifyTurnQueueDrainedIfIdle()
-		return next, tea.Batch(transcriptSyncCmd, drainCmd)
+		return next, drainCmd
 	}
 	c.notifyTurnQueueDrainedIfIdle()
 	m.syncViewport()
 	return m, transcriptSyncCmd
+}
+
+func (c uiInputController) queuedDrainRequiresHydration() bool {
+	m := c.model
+	if m == nil || !m.hasRuntimeClient() {
+		return false
+	}
+	if len(m.queued) == 0 {
+		return false
+	}
+	if m.commandRegistry == nil {
+		return true
+	}
+	for _, text := range m.queued {
+		trimmed := strings.TrimSpace(text)
+		if trimmed == "" {
+			continue
+		}
+		if _, knownCommand := m.commandRegistry.Command(trimmed); knownCommand {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func (c uiInputController) handlePreSubmitCompactionCheckDone(msg preSubmitCompactionCheckDoneMsg) (tea.Model, tea.Cmd) {
