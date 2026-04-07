@@ -491,7 +491,7 @@ func (e *Engine) shouldRunReviewerTurnForFrequency(frequency string, reviewerCli
 	return e.reviewerFlow.ShouldRunTurn(frequency, reviewerClient, patchEditsApplied)
 }
 
-func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, original llm.Message, reviewerClient llm.Client) (llm.Message, error) {
+func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, original llm.Message, reviewerClient llm.Client) (reviewerFollowUpResult, error) {
 	e.ensureOrchestrationCollaborators()
 	return e.reviewerFlow.RunFollowUp(ctx, stepID, original, reviewerClient)
 }

@@ -1846,6 +1846,21 @@ func TestRenderEntryTextUsesSemanticForegroundForWarningByTheme(t *testing.T) {
 	}
 }
 
+func TestRenderEntryTextUsesSemanticForegroundForCacheWarningByTheme(t *testing.T) {
+	for _, theme := range []string{"dark", "light"} {
+		t.Run(theme, func(t *testing.T) {
+			m := NewModel(WithTheme(theme))
+			out := m.renderEntryText("cache_warning", "Cache miss", 80, nil, false)
+			if !strings.HasPrefix(out, foregroundEscape(themeWarningColor(theme))) {
+				t.Fatalf("expected cache warning text to start with warning foreground for %s theme, got %q", theme, out)
+			}
+			if got := ansi.Strip(out); got != "Cache miss" {
+				t.Fatalf("expected cache warning text preserved, got %q", got)
+			}
+		})
+	}
+}
+
 func TestReviewerAndWarningViewUseSemanticForegroundInLightTheme(t *testing.T) {
 	m := NewModel(WithTheme("light"), WithPreviewLines(20))
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
@@ -1876,6 +1891,30 @@ func TestReviewerAndWarningViewUseSemanticForegroundInLightTheme(t *testing.T) {
 	}
 	if !strings.Contains(warningLine, foregroundEscape(themeWarningColor("light"))) {
 		t.Fatalf("expected detail warning to use warning foreground, got %q", warningLine)
+	}
+}
+
+func TestCacheWarningViewUsesGenericWarningPresentationInLightTheme(t *testing.T) {
+	m := NewModel(WithTheme("light"), WithPreviewLines(20))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{Role: "cache_warning", Text: "Cache miss"})
+
+	rawOngoing := m.View()
+	if strings.Contains(plainTranscript(rawOngoing), "Cache miss") {
+		t.Fatalf("expected cache warning hidden in ongoing view, got %q", plainTranscript(rawOngoing))
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	rawDetail := m.View()
+	cacheWarningLine := lineContaining(rawDetail, "Cache miss")
+	if cacheWarningLine == "" {
+		t.Fatalf("expected detail view to contain cache warning, got %q", plainTranscript(rawDetail))
+	}
+	if !strings.Contains(cacheWarningLine, foregroundEscape(themeWarningColor("light"))) {
+		t.Fatalf("expected detail cache warning to use warning foreground, got %q", cacheWarningLine)
+	}
+	if got := ansi.Strip(cacheWarningLine); !strings.HasPrefix(got, "⚠ Cache miss") {
+		t.Fatalf("expected detail cache warning to use warning symbol, got %q", got)
 	}
 }
 

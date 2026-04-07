@@ -189,6 +189,12 @@ Deliverables:
 - reconnect with hydration-first recovery
 - transcript paging/compression strategy for large-session rehydrate
 - unified committed-transcript sync path so live session activity can gap without leaving detail/ongoing transcript state stale; baseline repair now uses `session.getTranscriptPage`, and the remaining work is revision-aware paging plus incremental fetch strategy; see `../analysis/transcript-sync-reliability.md`
+- finalize the authoritative server-owned state model by proving committed transcript state, ephemeral live state, and projection-only render state stay explicitly separated across frontend and server boundaries
+- one frontend committed-transcript cache per attached session, with ongoing mode, detail mode, and native ongoing scrollback reduced to derived projection state rather than parallel authorities
+- one frontend live-transient state path for assistant deltas, reasoning deltas, transient busy state, and similar progressive UX concerns, kept separate from committed transcript hydration
+- transcript-affecting live activity evolved toward commit notifications or equivalent revision-advance signals so clients do not depend on raw live-event replay for transcript correctness
+- dedicated transcript hydration remains distinct from metadata/status hydration so `session.getMainView` does not regress into a second transcript transport
+- loopback and remote active-session paths proven to obey the same transcript commit, hydrate, and freshness semantics rather than merely converging eventually by different rules
 - explicit stream-drop handling that forces rehydrate plus resubscribe
 - process-control race coverage
 - slow-client handling and bounded buffering
@@ -220,6 +226,7 @@ Deliverables:
 - at least one minimal non-CLI reference or test client
 - CI boundary enforcement active
 - acceptance suite able to run against external-daemon mode only
+- final state-management proof that no frontend projection, pagination window, native transcript flush queue, or transport cache is treated as durable transcript truth
 - protocol/documentation cleanup for deferred transport-surface follow-ups that were intentionally held out of Phase 3 review fixes, including any remaining JSON-RPC envelope tightening that v1 frontends actually need rather than speculative spec-width expansion
 
 Primary risks:
@@ -260,5 +267,5 @@ Can be parallelized once phase 1 exists:
 - Phase 1 exit gate: at minimum the `builder run` flow and migrated launch/run flows no longer depend on privileged runtime access, and the frontend reaches them only through the client boundary.
 - Phase 2 foundation exit gate: second client can hydrate and observe one session in tests. Status: satisfied.
 - Phase 3 exit gate: CLI works against embedded and external server through the same client boundary.
-- Phase 4 exit gate: reconnect, approval races, and slow-subscriber failure modes are covered.
+- Phase 4 exit gate: reconnect, approval races, slow-subscriber failure modes, and the single-authority committed-transcript model are covered.
 - Phase 5 exit gate: existing data adoption works and a non-CLI client can complete the baseline workflow set.

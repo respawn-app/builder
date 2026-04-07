@@ -12,6 +12,7 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	patchformat "builder/server/tools/patch/format"
+	"builder/shared/cachewarn"
 	"builder/shared/clientui"
 	"builder/shared/transcript"
 )
@@ -162,6 +163,27 @@ func TestSessionViewFromRuntimeUsesCommittedEntryMetadata(t *testing.T) {
 	view := SessionViewFromRuntime(eng)
 	if view.Transcript.CommittedEntryCount != eng.CommittedTranscriptEntryCount() {
 		t.Fatalf("projected committed entry count = %d, engine committed entry count = %d", view.Transcript.CommittedEntryCount, eng.CommittedTranscriptEntryCount())
+	}
+}
+
+func TestEventFromRuntimeCopiesCacheWarningLostInputTokens(t *testing.T) {
+	event := EventFromRuntime(runtime.Event{
+		Kind: runtime.EventCacheWarning,
+		CacheWarning: &cachewarn.Warning{
+			Scope:           cachewarn.ScopeReviewer,
+			Reason:          cachewarn.ReasonNonPostfix,
+			CacheKey:        "reviewer-cache-key",
+			LostInputTokens: 12_000,
+		},
+	})
+	if event.CacheWarning == nil {
+		t.Fatal("expected projected cache warning")
+	}
+	if event.CacheWarning.LostInputTokens != 12_000 {
+		t.Fatalf("cache warning lost input tokens = %d, want 12000", event.CacheWarning.LostInputTokens)
+	}
+	if event.CacheWarning.Scope != cachewarn.ScopeReviewer {
+		t.Fatalf("cache warning scope = %q, want %q", event.CacheWarning.Scope, cachewarn.ScopeReviewer)
 	}
 }
 

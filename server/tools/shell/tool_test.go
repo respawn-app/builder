@@ -38,6 +38,31 @@ func waitForManagerCount(t *testing.T, manager *Manager, want int, timeout time.
 	t.Fatalf("manager count = %d, want %d", manager.Count(), want)
 }
 
+func assertBackgroundTransitionMessage(t *testing.T, text, sessionID string) {
+	t.Helper()
+	want := "Process moved to background with ID " + sessionID + "."
+	if !strings.Contains(text, want) {
+		t.Fatalf("expected compact background transition message %q, got %q", want, text)
+	}
+	if strings.Contains(text, "Process running with session ID "+sessionID) {
+		t.Fatalf("did not expect legacy session-id line after background transition, got %q", text)
+	}
+}
+
+func assertBackgroundTransitionMessageWithOutput(t *testing.T, text, sessionID string) {
+	t.Helper()
+	want := "Process moved to background with ID " + sessionID + ". Output:"
+	if !strings.Contains(text, want) {
+		t.Fatalf("expected inline background transition output header %q, got %q", want, text)
+	}
+	if strings.Contains(text, "Process moved to background with ID "+sessionID+".\n") {
+		t.Fatalf("did not expect output header split across lines, got %q", text)
+	}
+	if strings.Contains(text, "Process running with session ID "+sessionID) {
+		t.Fatalf("did not expect legacy session-id line after background transition, got %q", text)
+	}
+}
+
 func newBackgroundTestManager(t *testing.T) *Manager {
 	t.Helper()
 	manager, err := NewManager(WithMinimumExecToBgTime(250 * time.Millisecond))
@@ -392,12 +417,7 @@ func TestExecCommandMovesToBackgroundAndPollsToCompletion(t *testing.T) {
 		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
 	}
 	text := decodeStringToolOutput(t, result)
-	if !strings.Contains(text, "Process moved to background.") {
-		t.Fatalf("expected background message, got %q", text)
-	}
-	if !strings.Contains(text, "session ID 1000") {
-		t.Fatalf("expected numeric session id, got %q", text)
-	}
+	assertBackgroundTransitionMessage(t, text, "1000")
 	if strings.Contains(text, "Wall time:") {
 		t.Fatalf("did not expect wall time for still-running background shell, got %q", text)
 	}
@@ -627,12 +647,7 @@ func TestExecCommandUsesBackgroundTruncationBannerWhenPreviewIsCut(t *testing.T)
 		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
 	}
 	text := decodeStringToolOutput(t, result)
-	if !strings.Contains(text, "Process moved to background.") {
-		t.Fatalf("expected background message, got %q", text)
-	}
-	if !strings.Contains(text, "session ID 1000") {
-		t.Fatalf("expected numeric session id, got %q", text)
-	}
+	assertBackgroundTransitionMessageWithOutput(t, text, "1000")
 	if !strings.Contains(text, "Omitted ") {
 		t.Fatalf("expected background truncation banner, got %q", text)
 	}
@@ -681,9 +696,7 @@ func TestWriteStdinSendsInputToInteractiveProcess(t *testing.T) {
 		t.Fatalf("unexpected exec_command error: %s", string(result.Output))
 	}
 	text := decodeStringToolOutput(t, result)
-	if !strings.Contains(text, "Process moved to background.") {
-		t.Fatalf("expected background message, got %q", text)
-	}
+	assertBackgroundTransitionMessage(t, text, "1000")
 	if strings.Contains(text, "Wall time:") {
 		t.Fatalf("did not expect wall time for still-running interactive shell, got %q", text)
 	}

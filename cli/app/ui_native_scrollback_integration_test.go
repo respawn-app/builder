@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -101,7 +102,7 @@ type reviewerNoSuggestionsClient struct{}
 
 type staleTranscriptRuntimeClient struct {
 	runtimeControlFakeClient
-	loadCalls int
+	loadCalls atomic.Int32
 	page      clientui.TranscriptPage
 }
 
@@ -126,7 +127,7 @@ func (c *staleTranscriptRuntimeClient) RefreshMainView() (clientui.RuntimeMainVi
 
 func (c *staleTranscriptRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
 	_ = req
-	c.loadCalls++
+	c.loadCalls.Add(1)
 	page := c.page
 	if page.SessionID == "" {
 		page.SessionID = "session-1"
@@ -136,6 +137,13 @@ func (c *staleTranscriptRuntimeClient) LoadTranscriptPage(req clientui.Transcrip
 
 func (c *staleTranscriptRuntimeClient) RefreshTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
 	return c.LoadTranscriptPage(req)
+}
+
+func (c *staleTranscriptRuntimeClient) LoadCalls() int {
+	if c == nil {
+		return 0
+	}
+	return int(c.loadCalls.Load())
 }
 
 func (c *gatedRefreshRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
@@ -1518,6 +1526,106 @@ func TestNativeProgramRendersMixedRuntimeEventsFromChannelInRealtime(t *testing.
 	}
 }
 
+func TestNativeProgramDoesNotDuplicateSupervisorFollowUpAfterHydration(t *testing.T) {
+	out := &bytes.Buffer{}
+	runtimeEvents := make(chan clientui.Event, 8)
+	client := &staleTranscriptRuntimeClient{}
+	client.sessionView = clientui.RuntimeSessionView{SessionID: "session-1"}
+	client.transcript = clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     1,
+		TotalEntries: 1,
+		Entries: []clientui.ChatEntry{{
+			Role:  "assistant",
+			Text:  "seed",
+			Phase: string(llm.MessagePhaseFinal),
+		}},
+	}
+	client.page = clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     3,
+		TotalEntries: 3,
+		Entries: []clientui.ChatEntry{
+			{Role: "assistant", Text: "seed", Phase: string(llm.MessagePhaseFinal)},
+			{Role: "assistant", Text: "follow-up final unique", Phase: string(llm.MessagePhaseFinal)},
+			{Role: "reviewer_status", Text: "Supervisor ran: 2 suggestions, applied."},
+		},
+	}
+	model := newProjectedTestUIModel(client, runtimeEvents, closedAskEvents())
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	waitForTestCondition(t, 2*time.Second, "startup replay", func() bool {
+		return strings.Contains(normalizedOutput(out.String()), "seed")
+	})
+	baselineLoadCalls := client.LoadCalls()
+
+	runtimeEvents <- clientui.Event{
+		Kind:                clientui.EventAssistantMessage,
+		StepID:              "step-1",
+		TranscriptRevision:  2,
+		CommittedEntryCount: 2,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:  "assistant",
+			Text:  "follow-up final unique",
+			Phase: string(llm.MessagePhaseFinal),
+		}},
+	}
+	runtimeEvents <- clientui.Event{
+		Kind:                clientui.EventReviewerCompleted,
+		StepID:              "step-1",
+		TranscriptRevision:  3,
+		CommittedEntryCount: 3,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "reviewer_status",
+			Text: "Supervisor ran: 2 suggestions, applied.",
+		}},
+	}
+	runtimeEvents <- clientui.Event{
+		Kind:                clientui.EventConversationUpdated,
+		StepID:              "step-1",
+		TranscriptRevision:  3,
+		CommittedEntryCount: 3,
+	}
+
+	waitForTestCondition(t, 2*time.Second, "hydrated supervisor follow-up remains single and ordered", func() bool {
+		normalized := normalizedOutput(out.String())
+		return client.LoadCalls() > baselineLoadCalls &&
+			containsInOrder(normalized, "seed", "follow-up final unique", "Supervisor ran: 2 suggestions, applied.") &&
+			strings.Count(normalized, "follow-up final unique") == 1 &&
+			strings.Count(normalized, "Supervisor ran: 2 suggestions, applied.") == 1
+	})
+
+	program.Quit()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	if got := len(model.transcriptEntries); got != 3 {
+		t.Fatalf("expected authoritative transcript tail without duplication, got %+v", model.transcriptEntries)
+	}
+	if got := model.transcriptEntries[1].Text; got != "follow-up final unique" {
+		t.Fatalf("expected follow-up assistant before reviewer status, got %+v", model.transcriptEntries)
+	}
+	if got := model.transcriptEntries[2].Text; got != "Supervisor ran: 2 suggestions, applied." {
+		t.Fatalf("expected reviewer status at transcript tail, got %+v", model.transcriptEntries)
+	}
+	if normalized := normalizedOutput(out.String()); strings.Count(normalized, "follow-up final unique") != 1 || strings.Count(normalized, "Supervisor ran: 2 suggestions, applied.") != 1 {
+		t.Fatalf("expected follow-up assistant and reviewer status exactly once in terminal output, got %q", normalized)
+	}
+}
+
 func TestNativeProgramRendersSingleBackgroundCompletionFromChannelWhileIdle(t *testing.T) {
 	out := &bytes.Buffer{}
 	runtimeEvents := make(chan clientui.Event, 4)
@@ -1767,7 +1875,7 @@ func TestNativeProgramUserFlushDoesNotTriggerTranscriptSyncThatDropsCommentary(t
 	waitForTestCondition(t, 2*time.Second, "startup replay", func() bool {
 		return strings.Contains(normalizedOutput(out.String()), "seed")
 	})
-	baselineLoadCalls := client.loadCalls
+	baselineLoadCalls := client.LoadCalls()
 
 	callMeta := transcript.ToolCallMeta{ToolName: "shell", Command: "pwd", CompactText: "pwd", IsShell: true}
 	runtimeEvents <- clientui.Event{
@@ -1782,8 +1890,8 @@ func TestNativeProgramUserFlushDoesNotTriggerTranscriptSyncThatDropsCommentary(t
 		normalized := normalizedOutput(out.String())
 		return containsInOrder(normalized, "seed", "say hi", "working")
 	})
-	if client.loadCalls != baselineLoadCalls {
-		t.Fatalf("expected flushed user message to avoid extra transcript syncs before commentary, baseline=%d current=%d", baselineLoadCalls, client.loadCalls)
+	if currentLoadCalls := client.LoadCalls(); currentLoadCalls != baselineLoadCalls {
+		t.Fatalf("expected flushed user message to avoid extra transcript syncs before commentary, baseline=%d current=%d", baselineLoadCalls, currentLoadCalls)
 	}
 
 	runtimeEvents <- clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "tool_call", Text: "pwd", ToolCallID: "call_1", ToolCall: transcriptToolCallMetaClient(&callMeta)}}}
@@ -1794,8 +1902,8 @@ func TestNativeProgramUserFlushDoesNotTriggerTranscriptSyncThatDropsCommentary(t
 		normalized := normalizedOutput(out.String())
 		return containsInOrder(normalized, "seed", "say hi", "pwd", "done")
 	})
-	if client.loadCalls != baselineLoadCalls {
-		t.Fatalf("expected flushed user message to avoid extra transcript syncs, baseline=%d current=%d", baselineLoadCalls, client.loadCalls)
+	if currentLoadCalls := client.LoadCalls(); currentLoadCalls != baselineLoadCalls {
+		t.Fatalf("expected flushed user message to avoid extra transcript syncs, baseline=%d current=%d", baselineLoadCalls, currentLoadCalls)
 	}
 
 	program.Quit()

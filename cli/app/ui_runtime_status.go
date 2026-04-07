@@ -1,6 +1,13 @@
 package app
 
-import "builder/shared/clientui"
+import (
+	"strings"
+
+	"builder/cli/tui"
+	"builder/server/llm"
+	"builder/shared/clientui"
+	"builder/shared/transcript"
+)
 
 func (m *uiModel) runtimeMainView() clientui.RuntimeMainView {
 	if client := m.runtimeClient(); client != nil {
@@ -62,13 +69,38 @@ func (m *uiModel) refreshRuntimeTranscript() clientui.TranscriptPage {
 
 func (m *uiModel) localRuntimeStatus() clientui.RuntimeStatus {
 	return clientui.RuntimeStatus{
-		ReviewerFrequency:     m.reviewerMode,
-		ReviewerEnabled:       m.reviewerEnabled,
-		AutoCompactionEnabled: m.autoCompactionEnabled,
-		FastModeAvailable:     m.fastModeAvailable,
-		FastModeEnabled:       m.fastModeEnabled,
-		ConversationFreshness: m.conversationFreshness,
-		ThinkingLevel:         m.thinkingLevel,
+		ReviewerFrequency:                 m.reviewerMode,
+		ReviewerEnabled:                   m.reviewerEnabled,
+		AutoCompactionEnabled:             m.autoCompactionEnabled,
+		FastModeAvailable:                 m.fastModeAvailable,
+		FastModeEnabled:                   m.fastModeEnabled,
+		ConversationFreshness:             m.conversationFreshness,
+		LastCommittedAssistantFinalAnswer: localLastCommittedAssistantFinalAnswer(m.transcriptEntries),
+		ThinkingLevel:                     m.thinkingLevel,
+	}
+}
+
+func localLastCommittedAssistantFinalAnswer(entries []tui.TranscriptEntry) string {
+	answer := ""
+	for _, entry := range entries {
+		if !transcriptEntryAffectsCommittedAssistantFinalAnswer(entry) {
+			continue
+		}
+		if strings.TrimSpace(entry.Role) == "assistant" && entry.Phase == llm.MessagePhaseFinal && strings.TrimSpace(entry.Text) != "" {
+			answer = entry.Text
+			continue
+		}
+		answer = ""
+	}
+	return answer
+}
+
+func transcriptEntryAffectsCommittedAssistantFinalAnswer(entry tui.TranscriptEntry) bool {
+	switch transcript.NormalizeEntryRole(entry.Role) {
+	case "", "system", "error", "warning", "cache_warning", "reviewer_status", "reviewer_suggestions", "compaction_notice", "tool_question_error", string(transcript.EntryRoleDeveloperFeedback):
+		return false
+	default:
+		return true
 	}
 }
 

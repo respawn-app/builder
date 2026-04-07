@@ -25,6 +25,9 @@ func TestExecuteBuiltins(t *testing.T) {
 	if command, ok := r.Command("/status"); !ok || !command.RunWhileBusy {
 		t.Fatalf("expected /status command to be runnable while busy, got %+v, ok=%v", command, ok)
 	}
+	if command, ok := r.Command("/copy"); !ok || !command.RunWhileBusy {
+		t.Fatalf("expected /copy command to be runnable while busy, got %+v, ok=%v", command, ok)
+	}
 	if command, ok := r.Command("/compact"); !ok || command.RunWhileBusy {
 		t.Fatalf("expected /compact command to require idle, got %+v, ok=%v", command, ok)
 	}
@@ -90,6 +93,9 @@ func TestExecuteBuiltins(t *testing.T) {
 	}
 	if got := r.Execute("/status"); got.Action != ActionStatus {
 		t.Fatalf("expected ActionStatus, got %+v", got)
+	}
+	if got := r.Execute("/copy"); got.Action != ActionCopy {
+		t.Fatalf("expected ActionCopy, got %+v", got)
 	}
 	if got := r.Execute("/back"); got.Action != ActionBack {
 		t.Fatalf("expected ActionBack, got %+v", got)
@@ -167,7 +173,7 @@ func TestMatchReturnsBestSubstringFirst(t *testing.T) {
 	if len(matches) < 2 {
 		t.Fatalf("expected multiple matches, got %d", len(matches))
 	}
-	if matches[0].Name != "logout" {
+	if matches[0].Name != "copy" {
 		t.Fatalf("expected best match first, got %q", matches[0].Name)
 	}
 }

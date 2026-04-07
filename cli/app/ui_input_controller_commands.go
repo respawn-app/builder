@@ -70,6 +70,8 @@ func (c uiInputController) applyCommandResult(commandResult commands.Result) (te
 			id = strings.TrimSpace(args[1])
 		}
 		return c.runProcessAction(action, id)
+	case commands.ActionCopy:
+		return c.handleCopyCommand()
 	}
 	return m, nil
 }
@@ -88,7 +90,24 @@ func (c uiInputController) handleBackCommand() (tea.Model, tea.Cmd) {
 }
 
 func (m *uiModel) backTeleportInput() string {
+	return m.latestAssistantFinalAnswer()
+}
+
+func (m *uiModel) latestAssistantFinalAnswer() string {
 	return m.runtimeStatus().LastCommittedAssistantFinalAnswer
+}
+
+func (m *uiModel) hasAssistantFinalAnswerToCopy() bool {
+	return strings.TrimSpace(m.latestAssistantFinalAnswer()) != ""
+}
+
+func (c uiInputController) handleCopyCommand() (tea.Model, tea.Cmd) {
+	m := c.model
+	text := m.latestAssistantFinalAnswer()
+	if strings.TrimSpace(text) == "" {
+		return m, c.showErrorStatus("No final answer available to copy")
+	}
+	return m, m.copyClipboardTextCmd(text)
 }
 
 func (c uiInputController) handleSessionNameCommand(sessionName string) (tea.Model, tea.Cmd) {

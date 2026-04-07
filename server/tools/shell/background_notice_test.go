@@ -231,3 +231,37 @@ func TestFormatExecResponseBlankOutputUsesNoOutput(t *testing.T) {
 		t.Fatalf("did not expect output header for blank output, got %q", text)
 	}
 }
+
+func TestFormatExecResponseBackgroundTransitionUsesCompactSingleLineHeader(t *testing.T) {
+	text := formatExecResponse(ExecResult{
+		SessionID:         "1003",
+		Running:           true,
+		Backgrounded:      true,
+		MovedToBackground: true,
+		Output:            "hello",
+	})
+
+	if !strings.Contains(text, "Process moved to background with ID 1003. Output:\nhello") {
+		t.Fatalf("expected compact background transition header, got %q", text)
+	}
+	if strings.Contains(text, "Process running with session ID 1003") {
+		t.Fatalf("did not expect separate session-id line, got %q", text)
+	}
+}
+
+func TestFormatExecResponseBackgroundTransitionWithoutOutputPreservesNoOutput(t *testing.T) {
+	text := formatExecResponse(ExecResult{
+		SessionID:         "1003",
+		Running:           true,
+		Backgrounded:      true,
+		MovedToBackground: true,
+		Output:            " \n\t ",
+	})
+
+	if !strings.Contains(text, "Process moved to background with ID 1003.\nNo output") {
+		t.Fatalf("expected compact background transition followed by No output, got %q", text)
+	}
+	if strings.Contains(text, "Output:") {
+		t.Fatalf("did not expect output header for blank background output, got %q", text)
+	}
+}

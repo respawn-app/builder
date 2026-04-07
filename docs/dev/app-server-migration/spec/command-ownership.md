@@ -33,6 +33,7 @@ Built-in commands currently registered there:
 - `/autocompaction`
 - `/status`
 - `/ps`
+- `/copy`
 - `/back`
 - `/review`
 - `/init`
@@ -84,7 +85,7 @@ Current file-backed prompt-command discovery behavior:
 Current busy behavior is split across layers and should not be flattened accidentally during migration:
 
 - Registry-owned: parsing, command presence, descriptions, and the `RunWhileBusy` bit.
-- Picker-owned: visibility filtering for `/fast` availability and `/back` parent-session availability.
+- Picker-owned: visibility filtering for `/fast` availability, `/copy` final-answer availability, and `/back` parent-session availability.
 - Immediate `Enter` path-owned: busy rejection for known commands with `RunWhileBusy=false`, with the current `cannot run /<name> while model is working` error text.
 - Deferred queue path-owned: exact known commands can still be queued while busy even when they are blocked on `Enter`, except for the explicit deferred guards for `/back`, unavailable `/fast`, and `/ps <action>` without a background manager.
 - Queue-drain-owned: later execution order and stop conditions, including the current behavior where input-mutating queued actions such as `/ps inline <id>` stop auto-drain and leave later queued prompts pending.

@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"builder/cli/tui"
+	"builder/server/llm"
 	"builder/server/tools/askquestion"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,9 +17,21 @@ type stubClipboardImagePaster struct {
 	calls int
 }
 
+type stubClipboardTextCopier struct {
+	text  string
+	err   error
+	calls int
+}
+
 func (s *stubClipboardImagePaster) PasteImage(context.Context) (string, error) {
 	s.calls++
 	return s.path, s.err
+}
+
+func (s *stubClipboardTextCopier) CopyText(_ context.Context, text string) error {
+	s.calls++
+	s.text = text
+	return s.err
 }
 
 func TestIsClipboardImagePasteKeyRecognizesConfiguredBindings(t *testing.T) {
@@ -41,6 +55,59 @@ func TestBracketedTextPasteStillInsertsText(t *testing.T) {
 	updated := next.(*uiModel)
 	if updated.input != "hello" {
 		t.Fatalf("expected bracketed paste to insert text, got %q", updated.input)
+	}
+}
+
+func TestCopySlashCommandCopiesLatestAssistantFinalAnswer(t *testing.T) {
+	copier := &stubClipboardTextCopier{}
+	m := newProjectedStaticUIModel(
+		WithUIClipboardTextCopier(copier),
+	)
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "line one\nline two", Phase: llm.MessagePhaseFinal}}
+	m.input = "/copy"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected clipboard copy command")
+	}
+	if updated.input != "" {
+		t.Fatalf("expected input cleared after /copy, got %q", updated.input)
+	}
+
+	next, followCmd := updated.Update(cmd())
+	updated = next.(*uiModel)
+	if copier.calls != 1 {
+		t.Fatalf("expected one clipboard copy, got %d", copier.calls)
+	}
+	if copier.text != "line one\nline two" {
+		t.Fatalf("copied text = %q, want %q", copier.text, "line one\nline two")
+	}
+	if updated.transientStatus != "Copied final answer to clipboard" {
+		t.Fatalf("unexpected transient status %q", updated.transientStatus)
+	}
+	if updated.transientStatusKind != uiStatusNoticeSuccess {
+		t.Fatalf("expected success status kind, got %d", updated.transientStatusKind)
+	}
+	if followCmd == nil {
+		t.Fatal("expected transient-status clear command after successful copy")
+	}
+}
+
+func TestCopySlashCommandWithoutFinalAnswerShowsError(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.input = "/copy"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected transient-status clear command for empty /copy")
+	}
+	if updated.transientStatus != "No final answer available to copy" {
+		t.Fatalf("unexpected transient status %q", updated.transientStatus)
+	}
+	if updated.transientStatusKind != uiStatusNoticeError {
+		t.Fatalf("expected error status kind, got %d", updated.transientStatusKind)
 	}
 }
 
