@@ -44,10 +44,12 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 	previousBlockCount := len(previousProjection.Blocks)
 	delta, ok := projection.RenderAppendDeltaFrom(previousProjection, tui.TranscriptDivider)
 	m.rebaseNativeProjection(projection, committedCount)
-	if !ok || !m.shouldEmitNativeHistory() {
+	if !m.shouldEmitNativeHistory() {
 		return nil
 	}
-	delta = strings.TrimPrefix(delta, "\n")
+	if !ok {
+		return m.emitAppendOnlyNativeProjectionRecovery(projection, previousProjection)
+	}
 	if strings.TrimSpace(delta) == "" {
 		return nil
 	}
@@ -148,7 +150,7 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool) tea.Cmd {
 			return nil
 		}
 		if rewriteRenderedHistory {
-			return nil
+			return m.emitAppendOnlyNativeProjectionRecovery(m.nativeProjection, m.nativeRenderedProjection)
 		}
 		forceFull = true
 	}
@@ -175,6 +177,23 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool) tea.Cmd {
 	if forceFull {
 		return tea.Sequence(tea.ClearScreen, m.emitNativeRenderedText(styled))
 	}
+	return m.emitNativeRenderedText(styled)
+}
+
+func (m *uiModel) emitAppendOnlyNativeProjectionRecovery(current tui.TranscriptProjection, rendered tui.TranscriptProjection) tea.Cmd {
+	if current.Empty() {
+		return nil
+	}
+	recoveryStart := current.SharedPrefixBlockCount(rendered)
+	styled := renderStyledNativeProjectionLines(current.LinesFromBlock(recoveryStart, tui.TranscriptDivider), m.theme, m.nativeReplayRenderWidth())
+	m.nativeRenderedProjection = current
+	m.nativeRenderedSnapshot = current.Render(tui.TranscriptDivider)
+	if strings.TrimSpace(styled) == "" {
+		return nil
+	}
+	// Ongoing normal-buffer history must stay append-only. When hydration or a
+	// mode transition rewrites already-rendered committed blocks, append the
+	// authoritative suffix from the first divergent block so later turns resume.
 	return m.emitNativeRenderedText(styled)
 }
 

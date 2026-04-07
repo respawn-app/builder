@@ -69,6 +69,16 @@ func (p TranscriptProjection) RenderAppendDeltaFrom(previous TranscriptProjectio
 	return p.renderFromBlock(len(previous.Blocks), divider), true
 }
 
+func (p TranscriptProjection) SharedPrefixBlockCount(other TranscriptProjection) int {
+	limit := min(len(p.Blocks), len(other.Blocks))
+	for idx := 0; idx < limit; idx++ {
+		if !p.Blocks[idx].equal(other.Blocks[idx]) {
+			return idx
+		}
+	}
+	return limit
+}
+
 func (p TranscriptProjection) LinesFromBlock(start int, dividerText string) []TranscriptProjectionLine {
 	if start < 0 {
 		start = 0
