@@ -70,10 +70,10 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 		cmd, mutated := a.applyProjectedTranscriptEntries(evt, flushNativeHistory)
 		cmds = append(cmds, cmd)
 		transcriptMutated = transcriptMutated || mutated
-	}
-	if shouldClearAssistantStreamForCommittedAssistantEvent(evt) {
-		m.sawAssistantDelta = false
-		m.forwardToView(tui.ClearOngoingAssistantMsg{})
+		if mutated && shouldClearAssistantStreamForCommittedAssistantEvent(evt) {
+			m.sawAssistantDelta = false
+			m.forwardToView(tui.ClearOngoingAssistantMsg{})
+		}
 	}
 	if evt.CacheWarning != nil {
 		cmd, mutated := a.applyProjectedTranscriptEntries(clientui.Event{
