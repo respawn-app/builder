@@ -185,6 +185,14 @@ func (m *uiModel) emitAppendOnlyNativeProjectionRecovery(current tui.TranscriptP
 		return nil
 	}
 	recoveryStart := current.SharedPrefixBlockCount(rendered)
+	if recoveryStart == 0 && !rendered.Empty() {
+		m.nativeRenderedProjection = current
+		m.nativeRenderedSnapshot = current.Render(tui.TranscriptDivider)
+		// With no shared committed prefix, append-only recovery would duplicate the
+		// entire transcript in normal scrollback. Rebase silently here and rely on
+		// future true appends or explicit full-replay entrypoints to refresh.
+		return nil
+	}
 	styled := renderStyledNativeProjectionLines(current.LinesFromBlock(recoveryStart, tui.TranscriptDivider), m.theme, m.nativeReplayRenderWidth())
 	m.nativeRenderedProjection = current
 	m.nativeRenderedSnapshot = current.Render(tui.TranscriptDivider)
