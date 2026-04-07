@@ -29,6 +29,14 @@ type fakeClient struct {
 	capsErr   error
 }
 
+type hookClient struct {
+	mu           sync.Mutex
+	response     llm.Response
+	calls        []llm.Request
+	caps         llm.ProviderCapabilities
+	beforeReturn func() error
+}
+
 func requestMessages(req llm.Request) []llm.Message {
 	return llm.MessagesFromItems(req.Items)
 }
@@ -53,6 +61,36 @@ func (f *fakeClient) ProviderCapabilities(context.Context) (llm.ProviderCapabili
 	}
 	if strings.TrimSpace(f.caps.ProviderID) != "" {
 		return f.caps, nil
+	}
+	return llm.ProviderCapabilities{
+		ProviderID:                    "openai",
+		SupportsResponsesAPI:          true,
+		SupportsResponsesCompact:      true,
+		SupportsReasoningEncrypted:    true,
+		SupportsServerSideContextEdit: true,
+		IsOpenAIFirstParty:            true,
+	}, nil
+}
+
+func (c *hookClient) Generate(_ context.Context, req llm.Request) (llm.Response, error) {
+	c.mu.Lock()
+	c.calls = append(c.calls, req)
+	beforeReturn := c.beforeReturn
+	response := c.response
+	c.mu.Unlock()
+	if beforeReturn != nil {
+		if err := beforeReturn(); err != nil {
+			return llm.Response{}, err
+		}
+	}
+	return response, nil
+}
+
+func (c *hookClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if strings.TrimSpace(c.caps.ProviderID) != "" {
+		return c.caps, nil
 	}
 	return llm.ProviderCapabilities{
 		ProviderID:                    "openai",
@@ -3324,6 +3362,110 @@ func TestRunReviewerFollowUpReturnsCompletionWhenReviewerInstructionAppendFails(
 	}
 	if strings.TrimSpace(result.Completion.Error) == "" {
 		t.Fatal("expected reviewer completion to include append failure error")
+	}
+}
+
+func TestRunStepLoopEmitsReviewerCompletionWhenReviewerInstructionAppendFails(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eventsPath := filepath.Join(store.Dir(), "events.jsonl")
+	info, err := os.Stat(eventsPath)
+	if err != nil {
+		t.Fatalf("stat events log: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(eventsPath, info.Mode()) })
+
+	mainClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "original final", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+	reviewerClient := &hookClient{
+		caps: llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true},
+		response: llm.Response{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["Add final verification notes."]}`},
+			Usage:     llm.Usage{InputTokens: 10, WindowTokens: 200000},
+		},
+		beforeReturn: func() error {
+			return os.Chmod(eventsPath, 0o400)
+		},
+	}
+
+	var (
+		eventsMu sync.Mutex
+		events   []Event
+	)
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		AutoCompactTokenLimit: 1_000_000,
+		OnEvent: func(evt Event) {
+			eventsMu.Lock()
+			defer eventsMu.Unlock()
+			events = append(events, evt)
+		},
+		Reviewer: ReviewerConfig{
+			Frequency: "all",
+			Model:     "gpt-5",
+			Client:    reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "do task"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+
+	msg, err := eng.runStepLoop(context.Background(), "step-1")
+	if err != nil {
+		t.Fatalf("runStepLoop: %v", err)
+	}
+	if msg.Content != "original final" {
+		t.Fatalf("assistant content = %q, want original final", msg.Content)
+	}
+
+	eventsMu.Lock()
+	deferredEvents := append([]Event(nil), events...)
+	eventsMu.Unlock()
+	assistantEventIdx := -1
+	reviewerEventIdx := -1
+	for idx, evt := range deferredEvents {
+		if evt.Kind == EventAssistantMessage && evt.Message.Content == "original final" {
+			assistantEventIdx = idx
+		}
+		if evt.Kind == EventReviewerCompleted && evt.Reviewer != nil {
+			reviewerEventIdx = idx
+			if evt.Reviewer.Outcome != "followup_failed" {
+				t.Fatalf("reviewer completion outcome = %q, want followup_failed", evt.Reviewer.Outcome)
+			}
+			if evt.Reviewer.SuggestionsCount != 1 {
+				t.Fatalf("reviewer completion suggestions = %d, want 1", evt.Reviewer.SuggestionsCount)
+			}
+			if strings.TrimSpace(evt.Reviewer.Error) == "" {
+				t.Fatal("expected reviewer completion error details")
+			}
+		}
+	}
+	if assistantEventIdx < 0 {
+		t.Fatalf("expected assistant message event, got %+v", deferredEvents)
+	}
+	if reviewerEventIdx < 0 {
+		t.Fatalf("expected reviewer completed event, got %+v", deferredEvents)
+	}
+	if assistantEventIdx > reviewerEventIdx {
+		t.Fatalf("expected assistant event before reviewer completion, got %+v", deferredEvents)
+	}
+
+	snapshot := eng.ChatSnapshot()
+	if len(snapshot.Entries) < 3 {
+		t.Fatalf("expected in-memory transcript entries including reviewer status, got %+v", snapshot.Entries)
+	}
+	statusEntry := snapshot.Entries[len(snapshot.Entries)-1]
+	if statusEntry.Role != "reviewer_status" || !strings.Contains(statusEntry.Text, "follow-up failed") {
+		t.Fatalf("expected in-memory reviewer status after append failure, got %+v", statusEntry)
 	}
 }
 
