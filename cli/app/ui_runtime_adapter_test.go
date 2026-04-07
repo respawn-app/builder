@@ -566,7 +566,7 @@ func TestHandleProjectedRuntimeEventDoesNotSuppressReviewerStatusEntry(t *testin
 		Kind:                clientui.EventReviewerCompleted,
 		StepID:              "step-1",
 		TranscriptRevision:  10,
-		CommittedEntryCount: 1,
+		CommittedEntryCount: 2,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "reviewer_status",
 			Text: "Supervisor ran and applied 2 suggestions.",
@@ -578,6 +578,33 @@ func TestHandleProjectedRuntimeEventDoesNotSuppressReviewerStatusEntry(t *testin
 	}
 	if got := m.transcriptEntries[1].Role; got != "reviewer_status" {
 		t.Fatalf("second transcript role = %q, want reviewer_status", got)
+	}
+}
+
+func TestHandleProjectedRuntimeEventSkipsHydratedReviewerStatusEntry(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "assistant", Text: "seed", Phase: llm.MessagePhaseCommentary},
+		{Role: "reviewer_status", Text: "Supervisor ran and applied 2 suggestions."},
+	}
+	m.transcriptBaseOffset = 0
+	m.transcriptTotalEntries = 2
+	m.transcriptRevision = 10
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                clientui.EventReviewerCompleted,
+		StepID:              "step-1",
+		TranscriptRevision:  10,
+		CommittedEntryCount: 2,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "reviewer_status",
+			Text: "Supervisor ran and applied 2 suggestions.",
+		}},
+	})
+
+	if got := len(m.transcriptEntries); got != 2 {
+		t.Fatalf("expected hydrated reviewer status to be skipped, got %+v", m.transcriptEntries)
 	}
 }
 
@@ -593,7 +620,7 @@ func TestHandleProjectedRuntimeEventDoesNotSuppressCompactionNoticeEntry(t *test
 		Kind:                clientui.EventCompactionCompleted,
 		StepID:              "step-1",
 		TranscriptRevision:  10,
-		CommittedEntryCount: 1,
+		CommittedEntryCount: 2,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "compaction_notice",
 			Text: "context compacted for the 1st time",
@@ -605,6 +632,33 @@ func TestHandleProjectedRuntimeEventDoesNotSuppressCompactionNoticeEntry(t *test
 	}
 	if got := m.transcriptEntries[1].Role; got != "compaction_notice" {
 		t.Fatalf("second transcript role = %q, want compaction_notice", got)
+	}
+}
+
+func TestHandleProjectedRuntimeEventSkipsHydratedCompactionNoticeEntry(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "assistant", Text: "seed", Phase: llm.MessagePhaseCommentary},
+		{Role: "compaction_notice", Text: "context compacted for the 1st time"},
+	}
+	m.transcriptBaseOffset = 0
+	m.transcriptTotalEntries = 2
+	m.transcriptRevision = 10
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                clientui.EventCompactionCompleted,
+		StepID:              "step-1",
+		TranscriptRevision:  10,
+		CommittedEntryCount: 2,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "compaction_notice",
+			Text: "context compacted for the 1st time",
+		}},
+	})
+
+	if got := len(m.transcriptEntries); got != 2 {
+		t.Fatalf("expected hydrated compaction notice to be skipped, got %+v", m.transcriptEntries)
 	}
 }
 

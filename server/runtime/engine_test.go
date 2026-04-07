@@ -3052,6 +3052,11 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 
+	var (
+		eventsMu sync.Mutex
+		events   []Event
+	)
+
 	mainClient := &fakeClient{responses: []llm.Response{
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
@@ -3077,6 +3082,11 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 
 	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			eventsMu.Lock()
+			defer eventsMu.Unlock()
+			events = append(events, evt)
+		},
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
 			Model:         "gpt-5",
@@ -3132,6 +3142,32 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 		t.Fatalf("expected applied reviewer status entry in snapshot, got %+v", snapshot.Entries)
 	}
 
+	eventsMu.Lock()
+	deferredEvents := append([]Event(nil), events...)
+	eventsMu.Unlock()
+	assistantEventIdx := -1
+	reviewerEventIdx := -1
+	for idx, evt := range deferredEvents {
+		if evt.Kind == EventAssistantMessage && evt.Message.Content == "updated final after review" {
+			assistantEventIdx = idx
+		}
+		if evt.Kind == EventReviewerCompleted && evt.Reviewer != nil && evt.Reviewer.Outcome == "applied" {
+			reviewerEventIdx = idx
+			if got, want := evt.CommittedEntryCount, len(snapshot.Entries); got != want {
+				t.Fatalf("reviewer completed committed count = %d, want %d", got, want)
+			}
+		}
+	}
+	if assistantEventIdx < 0 {
+		t.Fatalf("expected follow-up assistant event, got %+v", deferredEvents)
+	}
+	if reviewerEventIdx < 0 {
+		t.Fatalf("expected reviewer completed event, got %+v", deferredEvents)
+	}
+	if assistantEventIdx > reviewerEventIdx {
+		t.Fatalf("expected follow-up assistant event before reviewer completion event, got %+v", deferredEvents)
+	}
+
 	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("restore engine: %v", err)
@@ -3149,6 +3185,99 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 	}
 	if !foundRestoredSuggestions {
 		t.Fatalf("expected restored reviewer suggestions entry, got %+v", restoredSnapshot.Entries)
+	}
+}
+
+func TestReviewerCompletedEventReflectsPersistedReviewerStatusState(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	mainClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "original final", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "updated final after review", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["Add final verification notes."]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	var (
+		eventsMu                   sync.Mutex
+		reviewerCompletedEvent     *Event
+		snapshotAtReviewerComplete ChatSnapshot
+		eng                        *Engine
+	)
+	eng, err = New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			if evt.Kind != EventReviewerCompleted || evt.Reviewer == nil || evt.Reviewer.Outcome != "applied" {
+				return
+			}
+			eventsMu.Lock()
+			defer eventsMu.Unlock()
+			captured := evt
+			reviewerCompletedEvent = &captured
+			snapshotAtReviewerComplete = eng.ChatSnapshot()
+		},
+		Reviewer: ReviewerConfig{
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			VerboseOutput: true,
+			Client:        reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "do task")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if msg.Content != "updated final after review" {
+		t.Fatalf("assistant content = %q, want updated final after review", msg.Content)
+	}
+
+	eventsMu.Lock()
+	completed := reviewerCompletedEvent
+	snapshotAtCompletion := snapshotAtReviewerComplete
+	eventsMu.Unlock()
+	if completed == nil {
+		t.Fatal("expected reviewer completed event")
+	}
+	if got, want := completed.CommittedEntryCount, len(snapshotAtCompletion.Entries); got != want {
+		t.Fatalf("reviewer completed committed count = %d, want %d", got, want)
+	}
+	if len(snapshotAtCompletion.Entries) < 2 {
+		t.Fatalf("expected follow-up assistant and reviewer status in completion snapshot, got %+v", snapshotAtCompletion.Entries)
+	}
+	assistantEntry := snapshotAtCompletion.Entries[len(snapshotAtCompletion.Entries)-2]
+	if assistantEntry.Role != "assistant" || assistantEntry.Text != "updated final after review" {
+		t.Fatalf("expected completion snapshot penultimate entry to be follow-up assistant, got %+v", assistantEntry)
+	}
+	statusEntry := snapshotAtCompletion.Entries[len(snapshotAtCompletion.Entries)-1]
+	if statusEntry.Role != "reviewer_status" || statusEntry.Text != "Supervisor ran: 1 suggestion, applied." {
+		t.Fatalf("expected completion snapshot to end with reviewer status, got %+v", statusEntry)
+	}
+
+	eng.AppendLocalEntry("warning", "later unrelated note")
+	finalSnapshot := eng.ChatSnapshot()
+	if got, want := len(finalSnapshot.Entries), len(snapshotAtCompletion.Entries)+1; got != want {
+		t.Fatalf("expected later note after reviewer completion snapshot, got %d entries want %d", got, want)
+	}
+	if finalSnapshot.Entries[len(finalSnapshot.Entries)-1].Text != "later unrelated note" {
+		t.Fatalf("expected later unrelated note at transcript tail, got %+v", finalSnapshot.Entries[len(finalSnapshot.Entries)-1])
 	}
 }
 
