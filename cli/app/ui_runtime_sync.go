@@ -2,6 +2,7 @@ package app
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"builder/cli/tui"
@@ -137,7 +138,12 @@ func (m *uiModel) handleRuntimeTranscriptRefreshed(msg runtimeTranscriptRefreshe
 			"token":      strconv.FormatUint(msg.token, 10),
 			"err":        msg.err.Error(),
 		}))
-		return m.scheduleRuntimeTranscriptRetry()
+		resumeCmd := tea.Cmd(nil)
+		if m.waitRuntimeEventAfterHydration {
+			m.waitRuntimeEventAfterHydration = false
+			resumeCmd = m.waitRuntimeEventCmd()
+		}
+		return tea.Batch(m.scheduleRuntimeTranscriptRetry(), resumeCmd)
 	}
 	m.observeRuntimeRequestResult(nil)
 	m.logTranscriptPageDiag("transcript.diag.client.hydrate_response", msg.req, msg.transcript, map[string]string{
@@ -153,9 +159,42 @@ func (m *uiModel) handleRuntimeTranscriptRefreshed(msg runtimeTranscriptRefreshe
 	}
 	applyCmd := m.runtimeAdapter().applyRuntimeTranscriptPage(msg.req, msg.transcript)
 	if !m.runtimeTranscriptDirty {
-		return applyCmd
+		if m.pendingQueuedDrainAfterHydration {
+			m.queuedDrainReadyAfterHydration = true
+		}
+		resumeCmd := tea.Cmd(nil)
+		if m.waitRuntimeEventAfterHydration {
+			m.waitRuntimeEventAfterHydration = false
+			resumeCmd = m.waitRuntimeEventCmd()
+		}
+		return sequenceCmds(applyCmd, m.flushQueuedInputsAfterHydration(), resumeCmd)
 	}
 	m.runtimeTranscriptDirty = false
 	m.logf("ui.runtime.transcript.repeat_after_dirty token=%d", msg.token)
 	return sequenceCmds(applyCmd, m.requestRuntimeTranscriptSync())
+}
+
+func (m *uiModel) flushQueuedInputsAfterHydration() tea.Cmd {
+	if m == nil || !m.pendingQueuedDrainAfterHydration {
+		return nil
+	}
+	if !m.queuedDrainReadyAfterHydration {
+		return nil
+	}
+	if m.busy || m.isInputLocked() {
+		if len(m.queued) == 0 || strings.TrimSpace(m.pendingPreSubmitText) != "" {
+			m.pendingQueuedDrainAfterHydration = false
+			m.queuedDrainReadyAfterHydration = false
+		}
+		return nil
+	}
+	m.pendingQueuedDrainAfterHydration = false
+	m.queuedDrainReadyAfterHydration = false
+	if len(m.queued) == 0 {
+		m.inputController().notifyTurnQueueDrainedIfIdle()
+		return nil
+	}
+	_, cmd := m.inputController().flushQueuedInputs(queueDrainAuto)
+	m.inputController().notifyTurnQueueDrainedIfIdle()
+	return cmd
 }

@@ -56,6 +56,76 @@ func TestCommittedOngoingProjectionCommitFrontierWaitsForToolResult(t *testing.T
 	}
 }
 
+func TestRenderAppendDeltaFromIgnoresHiddenSourceIndexShifts(t *testing.T) {
+	previous := TranscriptProjection{Blocks: []TranscriptProjectionBlock{{
+		Role:         "user",
+		DividerGroup: "user",
+		EntryIndex:   0,
+		EntryEnd:     0,
+		Lines:        []string{"❯ trigger"},
+	}}}
+	current := TranscriptProjection{Blocks: []TranscriptProjectionBlock{
+		{
+			Role:         "user",
+			DividerGroup: "user",
+			EntryIndex:   3,
+			EntryEnd:     3,
+			Lines:        []string{"❯ trigger"},
+		},
+		{
+			Role:         "assistant",
+			DividerGroup: "assistant",
+			EntryIndex:   4,
+			EntryEnd:     4,
+			Lines:        []string{"❮ FINAL-CONTENT"},
+		},
+	}}
+
+	delta, ok := current.RenderAppendDeltaFrom(previous, TranscriptDivider)
+	if !ok {
+		t.Fatal("expected append delta to survive hidden source index shifts")
+	}
+	if !strings.Contains(delta, "FINAL-CONTENT") {
+		t.Fatalf("expected delta to include appended assistant content, got %q", delta)
+	}
+	if strings.Contains(delta, "trigger") {
+		t.Fatalf("expected delta to exclude already rendered user content, got %q", delta)
+	}
+}
+
+func TestTranscriptProjectionSharedPrefixBlockCountStopsAtFirstDivergence(t *testing.T) {
+	previous := TranscriptProjection{Blocks: []TranscriptProjectionBlock{
+		{Role: "user", DividerGroup: "user", Lines: []string{"❯ prompt"}},
+		{Role: "assistant", DividerGroup: "assistant", Lines: []string{"❮ before"}},
+		{Role: "user", DividerGroup: "user", Lines: []string{"❯ later"}},
+	}}
+	current := TranscriptProjection{Blocks: []TranscriptProjectionBlock{
+		{Role: "user", DividerGroup: "user", Lines: []string{"❯ prompt"}},
+		{Role: "assistant", DividerGroup: "assistant", Lines: []string{"❮ after"}},
+		{Role: "user", DividerGroup: "user", Lines: []string{"❯ later"}},
+	}}
+
+	if got := current.SharedPrefixBlockCount(previous); got != 1 {
+		t.Fatalf("expected shared prefix to stop before divergent assistant block, got %d", got)
+	}
+}
+
+func TestTranscriptProjectionSharedPrefixBlockCountUsesShorterProjectionLength(t *testing.T) {
+	previous := TranscriptProjection{Blocks: []TranscriptProjectionBlock{
+		{Role: "assistant", DividerGroup: "assistant", Lines: []string{"❮ one"}},
+		{Role: "assistant", DividerGroup: "assistant", Lines: []string{"❮ two"}},
+	}}
+	current := TranscriptProjection{Blocks: []TranscriptProjectionBlock{
+		{Role: "assistant", DividerGroup: "assistant", Lines: []string{"❮ one"}},
+		{Role: "assistant", DividerGroup: "assistant", Lines: []string{"❮ two"}},
+		{Role: "assistant", DividerGroup: "assistant", Lines: []string{"❮ three"}},
+	}}
+
+	if got := current.SharedPrefixBlockCount(previous); got != 2 {
+		t.Fatalf("expected shared prefix to include all shorter matching blocks, got %d", got)
+	}
+}
+
 func TestCommittedOngoingEntriesDoNotTruncateAfterEmptyToolResult(t *testing.T) {
 	entries := []TranscriptEntry{
 		{Role: "user", Text: "prompt"},

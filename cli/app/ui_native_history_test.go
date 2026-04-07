@@ -12,6 +12,7 @@ import (
 	"builder/server/runtime"
 	"builder/server/tools"
 	"builder/shared/clientui"
+	"builder/shared/config"
 	sharedtheme "builder/shared/theme"
 	"builder/shared/transcript"
 	"builder/shared/transcript/toolcodec"
@@ -194,7 +195,35 @@ func TestNativeScrollbackEmitsOnlyNewTranscriptLines(t *testing.T) {
 	}
 }
 
-func TestNativeScrollbackRebasesFormatterSilentlyOnNonAppendMutation(t *testing.T) {
+func TestNativeScrollbackRecoversFromNonAppendMutation(t *testing.T) {
+	m := newProjectedStaticUIModel(
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "prompt"}, {Role: "assistant", Text: "old line"}, {Role: "assistant", Text: "tail line"}}),
+	)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+
+	m.transcriptEntries[1].Text = "mutated line"
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+	cmd := m.syncNativeHistoryFromTranscript()
+	if cmd == nil {
+		t.Fatal("expected append-only recovery flush for non-append mutation")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	plain := stripANSIText(msg.Text)
+	if !strings.Contains(plain, "mutated line") {
+		t.Fatalf("expected recovery flush to include mutated content, got %q", plain)
+	}
+	if strings.Contains(plain, "old line") {
+		t.Fatalf("expected recovery flush to start at the divergent block, got %q", plain)
+	}
+}
+
+func TestNativeScrollbackSilentRebaseWhenNoSharedPrefixExists(t *testing.T) {
 	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "old line"}, {Role: "assistant", Text: "tail line"}}),
 	)
@@ -203,11 +232,32 @@ func TestNativeScrollbackRebasesFormatterSilentlyOnNonAppendMutation(t *testing.
 		t.Fatal("expected startup replay command")
 	}
 
-	m.transcriptEntries[0].Text = "mutated line"
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "user", Text: "fresh root"}, {Role: "assistant", Text: "rewritten tail"}}
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 	cmd := m.syncNativeHistoryFromTranscript()
 	if cmd != nil {
-		t.Fatalf("expected no native replay emission for non-append mutation, got %T", cmd())
+		t.Fatalf("expected zero-prefix rewrite to rebase silently instead of appending the full transcript, got %T", cmd())
+	}
+	if got := m.nativeRenderedSnapshot; got != m.nativeProjection.Render(tui.TranscriptDivider) {
+		t.Fatalf("expected zero-prefix rewrite to update rendered snapshot baseline, got %q", got)
+	}
+
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "next answer"})
+	m.transcriptEntries = append(m.transcriptEntries, tui.TranscriptEntry{Role: "assistant", Text: "next answer"})
+	appendCmd := m.syncNativeHistoryFromTranscript()
+	if appendCmd == nil {
+		t.Fatal("expected future append to resume after silent zero-prefix rebase")
+	}
+	appendMsg, ok := appendCmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", appendCmd())
+	}
+	appendPlain := stripANSIText(appendMsg.Text)
+	if !strings.Contains(appendPlain, "next answer") {
+		t.Fatalf("expected resumed append to include new assistant turn, got %q", appendPlain)
+	}
+	if strings.Contains(appendPlain, "fresh root") || strings.Contains(appendPlain, "rewritten tail") {
+		t.Fatalf("expected resumed append to exclude silently rebased transcript root, got %q", appendPlain)
 	}
 }
 
@@ -1184,6 +1234,47 @@ func TestProjectedRuntimeBatchesPreserveImmediateLiveEventsAndLaterCommittedAppe
 	}
 }
 
+func TestProjectedRuntimeBatchPreservesQueuedUserFlushBetweenToolCompletionAndAssistantFinal(t *testing.T) {
+	m := newProjectedTestUIModel(nil, closedProjectedRuntimeEvents(), nil,
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
+	)
+	next, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	m = next.(*uiModel)
+	_ = collectCmdMessages(t, startupCmd)
+
+	callMeta := transcript.ToolCallMeta{ToolName: "shell", Command: "pwd", CompactText: "pwd", IsShell: true}
+	firstBatch := []clientui.Event{
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, StepID: "step-1", UserMessage: "say hi"}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1", ToolCall: &llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Presentation: toolcodec.EncodeToolCallMeta(callMeta)}}),
+	}
+	next, cmd := m.Update(runtimeEventBatchMsg{events: firstBatch})
+	m = next.(*uiModel)
+	_ = collectCmdMessages(t, cmd)
+
+	secondBatch := []clientui.Event{
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallCompleted, StepID: "step-1", ToolResult: &tools.Result{CallID: "call-1", Name: tools.ToolShell, Output: []byte("/tmp")}}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, StepID: "step-1", UserMessage: "steer now"}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, StepID: "step-1", Message: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal}}),
+	}
+	next, cmd = m.Update(runtimeEventBatchMsg{events: secondBatch})
+	m = next.(*uiModel)
+	msgs := collectCmdMessages(t, cmd)
+	flushText := strings.Builder{}
+	for _, msg := range msgs {
+		if flush, ok := msg.(nativeHistoryFlushMsg); ok {
+			flushText.WriteString(stripANSIPreserve(flush.Text))
+			flushText.WriteString("\n")
+		}
+	}
+	if !containsInOrder(flushText.String(), "pwd", "steer now", "done") {
+		t.Fatalf("expected queued user flush preserved between tool completion and assistant final, got %q", flushText.String())
+	}
+	view := stripANSIPreserve(m.View())
+	if strings.Contains(view, "pwd") {
+		t.Fatalf("expected pending tool preview cleared after completion, got %q", view)
+	}
+}
+
 func TestUIInitClearsScreen(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	cmd := m.Init()
@@ -1462,6 +1553,28 @@ func TestNativeStreamingLinesKeepAssistantMarkdownPlain(t *testing.T) {
 	}
 }
 
+func TestNativeStreamingLinesPrefixOnlyFirstWrappedChunk(t *testing.T) {
+	rendered := renderNativeStreamingAssistantLines(
+		"This streaming line is intentionally long enough to wrap in the ongoing live region.",
+		"dark",
+		20,
+	)
+	if len(rendered) < 2 {
+		t.Fatalf("expected wrapped streaming output, got %q", rendered)
+	}
+	if !strings.HasPrefix(rendered[0], "❮ ") {
+		t.Fatalf("expected first wrapped chunk to keep assistant prefix, got %q", rendered[0])
+	}
+	for idx := 1; idx < len(rendered); idx++ {
+		if !strings.HasPrefix(rendered[idx], "  ") {
+			t.Fatalf("expected wrapped continuation to stay indented, got %q", rendered[idx])
+		}
+		if strings.HasPrefix(rendered[idx], "❮ ") {
+			t.Fatalf("expected assistant prefix only on first wrapped chunk, got %q", rendered[idx])
+		}
+	}
+}
+
 func TestNativeDeltaFlushDoesNotInsertBlankBeforeDivider(t *testing.T) {
 	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "try again"}}),
@@ -1556,6 +1669,55 @@ func TestNativeStreamingDividerPersistsInTightViewport(t *testing.T) {
 	}
 }
 
+func TestNativeHistoryFlushWaitsForTargetSequenceBeforeRearmingRuntimeEvents(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.pendingRuntimeEvents = []clientui.Event{{Kind: clientui.EventConversationUpdated}}
+	m.waitRuntimeEventAfterFlushSequence = 2
+
+	firstCmd := m.handleNativeHistoryFlush(nativeHistoryFlushMsg{Text: "first", Sequence: 1})
+	if m.waitRuntimeEventAfterFlushSequence != 2 {
+		t.Fatalf("expected runtime-event wait to remain armed for sequence 2, got %d", m.waitRuntimeEventAfterFlushSequence)
+	}
+	if got := len(m.pendingRuntimeEvents); got != 1 {
+		t.Fatalf("expected pending runtime events preserved before target flush, got %d", got)
+	}
+	for _, msg := range collectCmdMessages(t, firstCmd) {
+		if _, ok := msg.(runtimeEventBatchMsg); ok {
+			t.Fatalf("did not expect runtime rearm before target flush, got %T", msg)
+		}
+	}
+
+	secondCmd := m.handleNativeHistoryFlush(nativeHistoryFlushMsg{Text: "second", Sequence: 2})
+	if secondCmd == nil {
+		t.Fatal("expected target flush to rearm runtime events")
+	}
+	var rearmed runtimeEventBatchMsg
+	foundRearm := false
+	for _, msg := range collectCmdMessages(t, secondCmd) {
+		batch, ok := msg.(runtimeEventBatchMsg)
+		if !ok {
+			continue
+		}
+		rearmed = batch
+		foundRearm = true
+	}
+	if !foundRearm {
+		t.Fatal("expected runtime event batch after target flush")
+	}
+	if got := len(rearmed.events); got != 1 {
+		t.Fatalf("expected exactly one rearmed pending runtime event, got %d", got)
+	}
+	if got := rearmed.events[0].Kind; got != clientui.EventConversationUpdated {
+		t.Fatalf("rearmed event kind = %q, want %q", got, clientui.EventConversationUpdated)
+	}
+	if m.waitRuntimeEventAfterFlushSequence != 0 {
+		t.Fatalf("expected runtime-event wait cleared after target flush, got %d", m.waitRuntimeEventAfterFlushSequence)
+	}
+	if got := len(m.pendingRuntimeEvents); got != 0 {
+		t.Fatalf("expected pending runtime events drained after target flush, got %d", got)
+	}
+}
+
 func TestNativeHistoryReplayDefersWhileDetailAndFlushesOnReturn(t *testing.T) {
 	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
@@ -1605,22 +1767,140 @@ func TestNativeHistoryReplayDefersWhileDetailAndFlushesOnReturn(t *testing.T) {
 	}
 }
 
-func TestNativeHistorySnapshotSkipsNonAppendRewriteInOngoingMode(t *testing.T) {
+func TestNativeHistorySnapshotRecoversFromNonAppendRewriteInOngoingMode(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.windowSizeKnown = true
-	initial := tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{{Role: "assistant", Lines: []string{"before"}}}}
+	initial := tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{
+		{Role: "user", DividerGroup: "user", Lines: []string{"❯ commit/push"}},
+		{Role: "assistant", DividerGroup: "assistant", Lines: []string{"❮ before"}},
+	}}
 	m.nativeProjection = initial
 	m.nativeRenderedProjection = initial
 	m.nativeRenderedSnapshot = initial.Render(tui.TranscriptDivider)
-	m.nativeProjection = tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{{Role: "assistant", Lines: []string{"after"}}}}
+	m.nativeProjection = tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{
+		{Role: "user", DividerGroup: "user", Lines: []string{"❯ commit/push"}},
+		{Role: "assistant", DividerGroup: "assistant", Lines: []string{"❮ after"}},
+	}}
 
 	cmd := m.emitCurrentNativeHistorySnapshot(false)
-	if cmd != nil {
-		t.Fatalf("expected non-append native replay to be skipped in ongoing mode, got %T", cmd)
+	if cmd == nil {
+		t.Fatal("expected append-only recovery flush for non-append rewrite")
 	}
-	if got := m.nativeRenderedSnapshot; got != initial.Render(tui.TranscriptDivider) {
-		t.Fatalf("expected rendered snapshot to remain unchanged, got %q", got)
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", cmd())
+	}
+	plain := stripANSIPreserve(msg.Text)
+	if strings.Contains(plain, "commit/push") {
+		t.Fatalf("expected recovery flush to start at divergent assistant block, got %q", plain)
+	}
+	if !strings.Contains(plain, "after") {
+		t.Fatalf("expected recovery flush to include updated assistant block, got %q", plain)
+	}
+	if got := m.nativeRenderedSnapshot; got != m.nativeProjection.Render(tui.TranscriptDivider) {
+		t.Fatalf("expected rendered snapshot updated after append-only recovery, got %q", got)
+	}
+}
+
+func TestNativeScrollbackResumesAssistantFlushesAfterNonAppendRecovery(t *testing.T) {
+	m := newProjectedStaticUIModel(
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "user", Text: "commit/push"}, {Role: "assistant", Text: "before"}}),
+	)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+
+	m.transcriptEntries[1].Text = "after"
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+	recoveryCmd := m.syncNativeHistoryFromTranscript()
+	if recoveryCmd == nil {
+		t.Fatal("expected append-only recovery flush after authoritative rewrite")
+	}
+	recoveryMsg, ok := recoveryCmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", recoveryCmd())
+	}
+	if plain := stripANSIText(recoveryMsg.Text); !strings.Contains(plain, "after") {
+		t.Fatalf("expected recovery flush to include updated assistant text, got %q", plain)
+	}
+
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "next answer"})
+	m.transcriptEntries = append(m.transcriptEntries, tui.TranscriptEntry{Role: "assistant", Text: "next answer"})
+	appendCmd := m.syncNativeHistoryFromTranscript()
+	if appendCmd == nil {
+		t.Fatal("expected native history append to resume after recovery")
+	}
+	appendMsg, ok := appendCmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", appendCmd())
+	}
+	appendPlain := stripANSIText(appendMsg.Text)
+	if !strings.Contains(appendPlain, "next answer") {
+		t.Fatalf("expected resumed append to include new assistant turn, got %q", appendPlain)
+	}
+	if strings.Contains(appendPlain, "commit/push") || strings.Contains(appendPlain, "after") {
+		t.Fatalf("expected resumed append to exclude already recovered history, got %q", appendPlain)
+	}
+}
+
+func TestNativeDetailExitDoesNotAppendWholeTranscriptWhenCommittedRootDiverged(t *testing.T) {
+	m := newProjectedStaticUIModel(
+		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
+	)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	_ = collectCmdMessages(t, startupCmd)
+
+	enterCmd := m.toggleTranscriptModeWithNativeReplay(false)
+	if m.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected detail mode, got %q", m.view.Mode())
+	}
+	_ = collectCmdMessages(t, enterCmd)
+
+	cmd := m.runtimeAdapter().applyChatSnapshot(runtime.ChatSnapshot{
+		Entries: []runtime.ChatEntry{{Role: "user", Text: "fresh root"}, {Role: "assistant", Text: "rewritten tail"}},
+	})
+	if cmd != nil {
+		t.Fatalf("expected replay to stay deferred while detail is active, got %T", cmd())
+	}
+
+	leaveCmd := m.toggleTranscriptModeWithNativeReplay(true)
+	if m.view.Mode() != tui.ModeOngoing {
+		t.Fatalf("expected ongoing mode, got %q", m.view.Mode())
+	}
+	msgs := collectCmdMessages(t, leaveCmd)
+	for _, msg := range msgs {
+		flush, ok := msg.(nativeHistoryFlushMsg)
+		if !ok {
+			continue
+		}
+		plain := stripANSIText(flush.Text)
+		if strings.Contains(plain, "fresh root") || strings.Contains(plain, "rewritten tail") {
+			t.Fatalf("expected detail exit not to append the entire divergent transcript, got %q", plain)
+		}
+	}
+
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "next answer"})
+	m.transcriptEntries = append(m.transcriptEntries, tui.TranscriptEntry{Role: "assistant", Text: "next answer"})
+	appendCmd := m.syncNativeHistoryFromTranscript()
+	if appendCmd == nil {
+		t.Fatal("expected future append to resume after zero-prefix detail exit rebase")
+	}
+	appendMsg, ok := appendCmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", appendCmd())
+	}
+	appendPlain := stripANSIText(appendMsg.Text)
+	if !strings.Contains(appendPlain, "next answer") {
+		t.Fatalf("expected resumed append after detail exit, got %q", appendPlain)
+	}
+	if strings.Contains(appendPlain, "fresh root") || strings.Contains(appendPlain, "rewritten tail") {
+		t.Fatalf("expected resumed append to exclude divergent transcript root, got %q", appendPlain)
 	}
 }
 

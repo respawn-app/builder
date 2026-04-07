@@ -25,6 +25,7 @@ type uiRuntimeAdapter struct {
 type runtimeEventApplyResult struct {
 	cmd               tea.Cmd
 	transcriptMutated bool
+	awaitsHydration   bool
 }
 
 func (a uiRuntimeAdapter) handleProjectedRuntimeEvent(evt clientui.Event) tea.Cmd {
@@ -32,17 +33,25 @@ func (a uiRuntimeAdapter) handleProjectedRuntimeEvent(evt clientui.Event) tea.Cm
 }
 
 func (a uiRuntimeAdapter) handleProjectedRuntimeEventsBatch(events []clientui.Event) tea.Cmd {
+	return a.applyProjectedRuntimeEventsBatch(events).cmd
+}
+
+func (a uiRuntimeAdapter) applyProjectedRuntimeEventsBatch(events []clientui.Event) runtimeEventApplyResult {
 	cmds := make([]tea.Cmd, 0, len(events)+1)
 	transcriptMutated := false
+	awaitsHydration := false
 	for _, evt := range events {
 		result := a.applyProjectedRuntimeEvent(evt, false)
 		cmds = append(cmds, result.cmd)
 		transcriptMutated = transcriptMutated || result.transcriptMutated
+		awaitsHydration = awaitsHydration || result.awaitsHydration
 	}
-	if transcriptMutated {
-		cmds = append(cmds, a.model.syncNativeHistoryFromTranscript())
+	batchedCmd := batchCmds(cmds...)
+	if !transcriptMutated {
+		return runtimeEventApplyResult{cmd: batchedCmd, awaitsHydration: awaitsHydration}
 	}
-	return batchCmds(cmds...)
+	nativeCmd := a.model.syncNativeHistoryFromTranscript()
+	return runtimeEventApplyResult{cmd: sequenceCmds(nativeCmd, batchedCmd), transcriptMutated: true, awaitsHydration: awaitsHydration}
 }
 
 func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNativeHistory bool) runtimeEventApplyResult {
@@ -64,13 +73,22 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 	a.applyRuntimeEventUpdate(update)
 	cmds := make([]tea.Cmd, 0, 4)
 	transcriptMutated := false
+	awaitsHydration := false
 	if len(evt.TranscriptEntries) > 0 {
-		cmd, mutated := a.applyProjectedTranscriptEntries(evt, flushNativeHistory)
+		cmd, mutated, needsHydration := a.applyProjectedTranscriptEntries(evt, flushNativeHistory)
 		cmds = append(cmds, cmd)
 		transcriptMutated = transcriptMutated || mutated
+		awaitsHydration = awaitsHydration || needsHydration
+		if shouldClearAssistantStreamForCommittedAssistantEvent(evt) && (mutated || skippedAssistantCommitMatchesActiveLiveStream(m, evt)) {
+			if stepID := strings.TrimSpace(evt.StepID); stepID != "" {
+				m.lastCommittedAssistantStepID = stepID
+			}
+			m.sawAssistantDelta = false
+			m.forwardToView(tui.ClearOngoingAssistantMsg{})
+		}
 	}
 	if evt.CacheWarning != nil {
-		cmd, mutated := a.applyProjectedTranscriptEntries(clientui.Event{
+		cmd, mutated, needsHydration := a.applyProjectedTranscriptEntries(clientui.Event{
 			Kind:                clientui.EventCacheWarning,
 			StepID:              evt.StepID,
 			TranscriptRevision:  evt.TranscriptRevision,
@@ -82,9 +100,12 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 		}, flushNativeHistory)
 		cmds = append(cmds, cmd)
 		transcriptMutated = transcriptMutated || mutated
+		awaitsHydration = awaitsHydration || needsHydration
 	}
 	if update.AssistantDelta != "" {
-		if strings.TrimSpace(update.AssistantDelta) == uiNoopFinalToken {
+		if shouldIgnoreStaleAssistantDelta(m, evt, update.AssistantDelta) {
+			update.AssistantDelta = ""
+		} else if strings.TrimSpace(update.AssistantDelta) == uiNoopFinalToken {
 			update.AssistantDelta = ""
 		} else {
 			m.sawAssistantDelta = true
@@ -92,6 +113,11 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 		}
 	}
 	if update.ClearAssistantStream {
+		if evt.Kind == clientui.EventAssistantDeltaReset {
+			if stepID := strings.TrimSpace(evt.StepID); stepID != "" {
+				m.lastCommittedAssistantStepID = stepID
+			}
+		}
 		m.sawAssistantDelta = false
 		m.forwardToView(tui.ClearOngoingAssistantMsg{})
 	}
@@ -115,8 +141,9 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 	}
 	if update.SyncSessionView {
 		cmds = append(cmds, a.syncConversationFromEngine())
+		awaitsHydration = awaitsHydration || shouldPauseRuntimeEventsForHydration(m)
 	}
-	return runtimeEventApplyResult{cmd: batchCmds(cmds...), transcriptMutated: transcriptMutated}
+	return runtimeEventApplyResult{cmd: batchCmds(cmds...), transcriptMutated: transcriptMutated, awaitsHydration: awaitsHydration}
 }
 
 func (a uiRuntimeAdapter) runtimeEventState() clientui.RuntimeEventState {
@@ -177,7 +204,7 @@ func (a uiRuntimeAdapter) syncConversationFromEngine() tea.Cmd {
 	return m.requestRuntimeTranscriptSync()
 }
 
-func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, flushNativeHistory bool) (tea.Cmd, bool) {
+func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, flushNativeHistory bool) (tea.Cmd, bool, bool) {
 	m := a.model
 	entries := cloneChatEntries(evt.TranscriptEntries)
 	incomingCount := len(entries)
@@ -192,7 +219,23 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 			"event_revision":        strconv.FormatInt(evt.TranscriptRevision, 10),
 			"event_committed_count": strconv.Itoa(evt.CommittedEntryCount),
 		}))
-		return nil, false
+		return nil, false, false
+	}
+	if shouldDeferProjectedUserMessageFlushAppend(m, evt) {
+		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.append_entries", map[string]string{
+			"session_id":            strings.TrimSpace(m.sessionID),
+			"mode":                  m.transcriptModeLabel(),
+			"path":                  "live_event",
+			"incoming_count":        strconv.Itoa(incomingCount),
+			"reason":                "defer_user_flush_until_assistant_catch_up",
+			"applied_count":         "0",
+			"event_revision":        strconv.FormatInt(evt.TranscriptRevision, 10),
+			"event_committed_count": strconv.Itoa(evt.CommittedEntryCount),
+		}))
+		if m.hasRuntimeClient() {
+			return m.requestRuntimeTranscriptSync(), false, true
+		}
+		return nil, false, false
 	}
 	if shouldSkipProjectedTranscriptEntries(m, evt) {
 		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.append_entries", map[string]string{
@@ -205,7 +248,7 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 			"event_revision":        strconv.FormatInt(evt.TranscriptRevision, 10),
 			"event_committed_count": strconv.Itoa(evt.CommittedEntryCount),
 		}))
-		return nil, false
+		return nil, false, false
 	}
 	m.transcriptLiveDirty = true
 	startOffset := m.transcriptBaseOffset + len(m.transcriptEntries)
@@ -252,7 +295,7 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 			"transcript_revision":   strconv.FormatInt(m.transcriptRevision, 10),
 			"transcript_total":      strconv.Itoa(m.transcriptTotalEntries),
 		}))
-		return nil, true
+		return nil, true, false
 	}
 	m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.append_entries", map[string]string{
 		"session_id":            strings.TrimSpace(m.sessionID),
@@ -268,7 +311,7 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 		"transcript_total":      strconv.Itoa(m.transcriptTotalEntries),
 		"native_history_sync":   "true",
 	}))
-	return m.syncNativeHistoryFromTranscript(), true
+	return m.syncNativeHistoryFromTranscript(), true, false
 }
 
 func (a uiRuntimeAdapter) applyProjectedChatSnapshot(snapshot clientui.ChatSnapshot) tea.Cmd {
@@ -342,6 +385,11 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPage
 	if pageReq.Window == clientui.TranscriptWindowDefault && transcriptPageLooksLikeOngoingTail(page) && m.view.Mode() == tui.ModeOngoing {
 		pageReq.Window = clientui.TranscriptWindowOngoingTail
 	}
+	entries := transcriptEntriesFromPage(page)
+	if authoritativePageDuplicatesCommittedAssistantOngoing(entries, page.Ongoing, m.view.OngoingStreamingText()) {
+		page.Ongoing = ""
+		page.OngoingError = ""
+	}
 	if reason := transcriptPageReplacementRejectReason(m, pageReq, page); reason != "" {
 		m.logTranscriptPageDiag("transcript.diag.client.apply_page_reject", pageReq, page, map[string]string{"path": "hydrate", "reason": reason})
 		if previousWindowTitle != m.windowTitle() {
@@ -351,18 +399,10 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPage
 	}
 	shouldSyncNativeHistory := pageReq.Window == clientui.TranscriptWindowOngoingTail || pageReq == (clientui.TranscriptPageRequest{})
 	preserveLiveReasoning := shouldPreserveLiveReasoning(m, page)
+	if shouldSyncNativeHistory {
+		a.applyAuthoritativeOngoingTailPage(page, entries, preserveLiveReasoning)
+	}
 	if pageReq.Window == clientui.TranscriptWindowOngoingTail || (pageReq == (clientui.TranscriptPageRequest{}) && m.view.Mode() != tui.ModeDetail) {
-		entries := transcriptEntriesFromPage(page)
-		m.transcriptBaseOffset = page.Offset
-		m.transcriptEntries = append(m.transcriptEntries[:0], entries...)
-		m.transcriptTotalEntries = max(page.TotalEntries, page.Offset+len(entries))
-		m.transcriptRevision = max(m.transcriptRevision, page.Revision)
-		m.transcriptLiveDirty = false
-		if !preserveLiveReasoning {
-			m.reasoningLiveDirty = false
-		}
-		m.seedPromptHistoryFromTranscriptEntries(m.transcriptEntries)
-		m.refreshRollbackCandidates()
 		m.detailTranscript.syncTail(page)
 		if m.view.Mode() != tui.ModeDetail {
 			if !preserveLiveReasoning {
@@ -431,6 +471,42 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPage
 	return sequenceCmds(cmds...)
 }
 
+func (a uiRuntimeAdapter) applyAuthoritativeOngoingTailPage(page clientui.TranscriptPage, entries []tui.TranscriptEntry, preserveLiveReasoning bool) {
+	m := a.model
+	if m == nil {
+		return
+	}
+	m.transcriptBaseOffset = page.Offset
+	m.transcriptEntries = append(m.transcriptEntries[:0], entries...)
+	m.transcriptTotalEntries = max(page.TotalEntries, page.Offset+len(entries))
+	m.transcriptRevision = max(m.transcriptRevision, page.Revision)
+	m.transcriptLiveDirty = false
+	if !preserveLiveReasoning {
+		m.reasoningLiveDirty = false
+	}
+	m.seedPromptHistoryFromTranscriptEntries(m.transcriptEntries)
+	m.refreshRollbackCandidates()
+}
+
+func authoritativePageDuplicatesCommittedAssistantOngoing(entries []tui.TranscriptEntry, pageOngoing string, liveOngoing string) bool {
+	trimmedPageOngoing := strings.TrimSpace(pageOngoing)
+	trimmedLiveOngoing := strings.TrimSpace(liveOngoing)
+	if trimmedPageOngoing != "" || trimmedLiveOngoing == "" {
+		return false
+	}
+	for idx := len(entries) - 1; idx >= 0; idx-- {
+		entry := entries[idx]
+		if strings.TrimSpace(entry.Text) == "" && strings.TrimSpace(entry.OngoingText) == "" {
+			continue
+		}
+		if strings.TrimSpace(entry.Role) != "assistant" {
+			return false
+		}
+		return strings.TrimSpace(entry.Text) == trimmedLiveOngoing
+	}
+	return false
+}
+
 func shouldRejectTranscriptPageReplacement(m *uiModel, req clientui.TranscriptPageRequest, page clientui.TranscriptPage) bool {
 	return transcriptPageReplacementRejectReason(m, req, page) != ""
 }
@@ -447,6 +523,9 @@ func transcriptPageReplacementRejectReason(m *uiModel, req clientui.TranscriptPa
 		return ""
 	}
 	if page.Revision == m.transcriptRevision && strings.TrimSpace(m.view.OngoingStreamingText()) != "" && strings.TrimSpace(page.Ongoing) == "" {
+		if authoritativePageDuplicatesCommittedAssistantOngoing(transcriptEntriesFromPage(page), page.Ongoing, m.view.OngoingStreamingText()) {
+			return ""
+		}
 		return "same_revision_would_clear_ongoing"
 	}
 	if m.transcriptLiveDirty && page.Revision == m.transcriptRevision && shouldAcceptEqualRevisionTailReplacement(m, page) {
@@ -589,6 +668,105 @@ func shouldSkipProjectedToolCallStart(m *uiModel, evt clientui.Event) bool {
 	return matched
 }
 
+func shouldDeferProjectedUserMessageFlushAppend(m *uiModel, evt clientui.Event) bool {
+	if m == nil || evt.Kind != clientui.EventUserMessageFlushed || len(evt.TranscriptEntries) == 0 {
+		return false
+	}
+	if !m.busy {
+		return false
+	}
+	if strings.TrimSpace(m.view.OngoingStreamingText()) == "" && !m.sawAssistantDelta {
+		return false
+	}
+	for _, entry := range evt.TranscriptEntries {
+		if entry.Role != "user" {
+			return false
+		}
+	}
+	committed := tui.CommittedOngoingEntries(m.transcriptEntries)
+	if len(committed) == 0 {
+		return true
+	}
+	lastCommittedRole := strings.TrimSpace(committed[len(committed)-1].Role)
+	return lastCommittedRole == "user"
+}
+
+func shouldClearAssistantStreamForCommittedAssistantEvent(evt clientui.Event) bool {
+	if evt.Kind != clientui.EventAssistantMessage {
+		return false
+	}
+	for _, entry := range evt.TranscriptEntries {
+		if strings.TrimSpace(entry.Role) == "assistant" {
+			return true
+		}
+	}
+	return false
+}
+
+func skippedAssistantCommitMatchesActiveLiveStream(m *uiModel, evt clientui.Event) bool {
+	if m == nil || strings.TrimSpace(m.view.OngoingStreamingText()) == "" {
+		return false
+	}
+	if evt.TranscriptRevision != m.transcriptRevision {
+		return false
+	}
+	if evt.CommittedEntryCount != m.transcriptBaseOffset+len(m.transcriptEntries) {
+		return false
+	}
+	assistantText := ""
+	for _, entry := range evt.TranscriptEntries {
+		if strings.TrimSpace(entry.Role) != "assistant" {
+			continue
+		}
+		assistantText = strings.TrimSpace(entry.Text)
+		break
+	}
+	if assistantText == "" || assistantText != strings.TrimSpace(m.view.OngoingStreamingText()) {
+		return false
+	}
+	for idx := len(m.transcriptEntries) - 1; idx >= 0; idx-- {
+		entry := m.transcriptEntries[idx]
+		if strings.TrimSpace(entry.Role) != "assistant" {
+			continue
+		}
+		return strings.TrimSpace(entry.Text) == assistantText
+	}
+	return false
+}
+
+func shouldIgnoreStaleAssistantDelta(m *uiModel, evt clientui.Event, delta string) bool {
+	if m == nil || evt.Kind != clientui.EventAssistantDelta {
+		return false
+	}
+	if strings.TrimSpace(delta) == "" {
+		return false
+	}
+	if m.busy || m.compacting || m.reviewerRunning {
+		return false
+	}
+	if strings.TrimSpace(m.view.OngoingStreamingText()) != "" || m.sawAssistantDelta {
+		return false
+	}
+	if stepID := strings.TrimSpace(evt.StepID); stepID != "" && stepID != strings.TrimSpace(m.lastCommittedAssistantStepID) {
+		return false
+	}
+	for idx := len(m.transcriptEntries) - 1; idx >= 0; idx-- {
+		entry := m.transcriptEntries[idx]
+		if strings.TrimSpace(entry.Role) != "assistant" {
+			continue
+		}
+		return strings.TrimSpace(entry.Text) == strings.TrimSpace(delta)
+	}
+	return false
+}
+
+func shouldPauseRuntimeEventsForHydration(m *uiModel) bool {
+	if m == nil {
+		return false
+	}
+	return strings.TrimSpace(m.view.OngoingStreamingText()) == "" && !m.sawAssistantDelta
+}
+
 func transcriptContainsToolCallID(entries []tui.TranscriptEntry, toolCallID string) bool {
 	trimmed := strings.TrimSpace(toolCallID)
 	if trimmed == "" {
@@ -637,11 +815,18 @@ func waitRuntimeEvent(ch <-chan clientui.Event) tea.Cmd {
 			return nil
 		}
 		events := []clientui.Event{evt}
+		if runtimeEventBatchFence(evt) {
+			return runtimeEventBatchMsg{events: events}
+		}
 		for len(events) < 64 {
 			select {
 			case next, ok := <-ch:
 				if !ok {
 					return runtimeEventBatchMsg{events: events}
+				}
+				if runtimeEventBatchFence(next) {
+					carry := next
+					return runtimeEventBatchMsg{events: events, carry: &carry}
 				}
 				events = append(events, next)
 			default:
@@ -649,6 +834,20 @@ func waitRuntimeEvent(ch <-chan clientui.Event) tea.Cmd {
 			}
 		}
 		return runtimeEventBatchMsg{events: events}
+	}
+}
+
+func runtimeEventBatchFence(evt clientui.Event) bool {
+	if len(evt.TranscriptEntries) > 0 {
+		return true
+	}
+	switch evt.Kind {
+	case clientui.EventConversationUpdated,
+		clientui.EventAssistantDeltaReset,
+		clientui.EventReasoningDeltaReset:
+		return true
+	default:
+		return false
 	}
 }
 
