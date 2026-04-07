@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -427,10 +429,22 @@ func (p *systemClipboardTextCopier) copyWindows(ctx context.Context, text string
 	if err != nil {
 		return &uiClipboardCopyError{Kind: uiClipboardCopyErrorMissingTool, Message: "Clipboard copy on Windows requires `clip`", Err: err}
 	}
-	if err := p.runner.RunInput(ctx, []byte(text), clip); err != nil {
+	if err := p.runner.RunInput(ctx, utf16LEClipboardText(text), clip); err != nil {
 		return &uiClipboardCopyError{Kind: uiClipboardCopyErrorFailed, Message: "Clipboard copy failed", Err: err}
 	}
 	return nil
+}
+
+func utf16LEClipboardText(text string) []byte {
+	encoded := utf16.Encode([]rune(text))
+	if len(encoded) == 0 {
+		return nil
+	}
+	buf := make([]byte, len(encoded)*2)
+	for idx, unit := range encoded {
+		binary.LittleEndian.PutUint16(buf[idx*2:], unit)
+	}
+	return buf
 }
 
 func (p *systemClipboardTextCopier) requireTool(name, message string) error {

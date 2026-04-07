@@ -1,7 +1,9 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"io/fs"
 	"os"
@@ -9,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf16"
 )
 
 type stubClipboardCommandRunner struct {
@@ -451,18 +454,26 @@ func TestSystemClipboardTextCopierLinuxUnsupportedEnvironment(t *testing.T) {
 	}
 }
 
-func TestSystemClipboardTextCopierWindowsUsesClip(t *testing.T) {
+func TestSystemClipboardTextCopierWindowsUsesClipWithUTF16LE(t *testing.T) {
 	copier, runner := newTestSystemClipboardTextCopier("windows")
 	copier.lookPath = stubLookPath("clip")
+	text := "final ✓"
 
-	if err := copier.CopyText(context.Background(), "final answer"); err != nil {
+	if err := copier.CopyText(context.Background(), text); err != nil {
 		t.Fatalf("copy text: %v", err)
 	}
 	key := clipboardCommandKey("clip")
 	if len(runner.commands) != 1 || runner.commands[0] != key {
 		t.Fatalf("unexpected commands: %#v", runner.commands)
 	}
-	if got := string(runner.runInputs[key]); got != "final answer" {
-		t.Fatalf("copied text = %q, want %q", got, "final answer")
+	wantUnits := utf16.Encode([]rune(text))
+	want := make([]byte, len(wantUnits)*2)
+	for idx, unit := range wantUnits {
+		binary.LittleEndian.PutUint16(want[idx*2:], unit)
+	}
+	if got := runner.runInputs[key]; string(got) == text || len(got)%2 != 0 {
+		t.Fatalf("expected UTF-16LE clipboard payload, got %#v", got)
+	} else if !bytes.Equal(got, want) {
+		t.Fatalf("clipboard bytes = %#v, want %#v", got, want)
 	}
 }

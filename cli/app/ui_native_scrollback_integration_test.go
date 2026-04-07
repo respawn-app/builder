@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -101,7 +102,7 @@ type reviewerNoSuggestionsClient struct{}
 
 type staleTranscriptRuntimeClient struct {
 	runtimeControlFakeClient
-	loadCalls int
+	loadCalls atomic.Int32
 	page      clientui.TranscriptPage
 }
 
@@ -126,7 +127,7 @@ func (c *staleTranscriptRuntimeClient) RefreshMainView() (clientui.RuntimeMainVi
 
 func (c *staleTranscriptRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
 	_ = req
-	c.loadCalls++
+	c.loadCalls.Add(1)
 	page := c.page
 	if page.SessionID == "" {
 		page.SessionID = "session-1"
@@ -136,6 +137,13 @@ func (c *staleTranscriptRuntimeClient) LoadTranscriptPage(req clientui.Transcrip
 
 func (c *staleTranscriptRuntimeClient) RefreshTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
 	return c.LoadTranscriptPage(req)
+}
+
+func (c *staleTranscriptRuntimeClient) LoadCalls() int {
+	if c == nil {
+		return 0
+	}
+	return int(c.loadCalls.Load())
 }
 
 func (c *gatedRefreshRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
@@ -1587,7 +1595,7 @@ func TestNativeProgramDoesNotDuplicateSupervisorFollowUpAfterHydration(t *testin
 
 	waitForTestCondition(t, 2*time.Second, "hydrated supervisor follow-up remains single and ordered", func() bool {
 		normalized := normalizedOutput(out.String())
-		return client.loadCalls > 0 &&
+		return client.LoadCalls() > 0 &&
 			containsInOrder(normalized, "seed", "follow-up final unique", "Supervisor ran: 2 suggestions, applied.") &&
 			strings.Count(normalized, "follow-up final unique") == 1 &&
 			strings.Count(normalized, "Supervisor ran: 2 suggestions, applied.") == 1
@@ -1866,7 +1874,7 @@ func TestNativeProgramUserFlushDoesNotTriggerTranscriptSyncThatDropsCommentary(t
 	waitForTestCondition(t, 2*time.Second, "startup replay", func() bool {
 		return strings.Contains(normalizedOutput(out.String()), "seed")
 	})
-	baselineLoadCalls := client.loadCalls
+	baselineLoadCalls := client.LoadCalls()
 
 	callMeta := transcript.ToolCallMeta{ToolName: "shell", Command: "pwd", CompactText: "pwd", IsShell: true}
 	runtimeEvents <- clientui.Event{
@@ -1881,8 +1889,8 @@ func TestNativeProgramUserFlushDoesNotTriggerTranscriptSyncThatDropsCommentary(t
 		normalized := normalizedOutput(out.String())
 		return containsInOrder(normalized, "seed", "say hi", "working")
 	})
-	if client.loadCalls != baselineLoadCalls {
-		t.Fatalf("expected flushed user message to avoid extra transcript syncs before commentary, baseline=%d current=%d", baselineLoadCalls, client.loadCalls)
+	if currentLoadCalls := client.LoadCalls(); currentLoadCalls != baselineLoadCalls {
+		t.Fatalf("expected flushed user message to avoid extra transcript syncs before commentary, baseline=%d current=%d", baselineLoadCalls, currentLoadCalls)
 	}
 
 	runtimeEvents <- clientui.Event{Kind: clientui.EventToolCallStarted, StepID: "step-1", TranscriptEntries: []clientui.ChatEntry{{Role: "tool_call", Text: "pwd", ToolCallID: "call_1", ToolCall: transcriptToolCallMetaClient(&callMeta)}}}
@@ -1893,8 +1901,8 @@ func TestNativeProgramUserFlushDoesNotTriggerTranscriptSyncThatDropsCommentary(t
 		normalized := normalizedOutput(out.String())
 		return containsInOrder(normalized, "seed", "say hi", "pwd", "done")
 	})
-	if client.loadCalls != baselineLoadCalls {
-		t.Fatalf("expected flushed user message to avoid extra transcript syncs, baseline=%d current=%d", baselineLoadCalls, client.loadCalls)
+	if currentLoadCalls := client.LoadCalls(); currentLoadCalls != baselineLoadCalls {
+		t.Fatalf("expected flushed user message to avoid extra transcript syncs, baseline=%d current=%d", baselineLoadCalls, currentLoadCalls)
 	}
 
 	program.Quit()

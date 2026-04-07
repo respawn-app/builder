@@ -3274,6 +3274,59 @@ func TestReviewerCompletedEventReflectsPersistedReviewerStatusState(t *testing.T
 	}
 }
 
+func TestRunReviewerFollowUpReturnsCompletionWhenReviewerInstructionAppendFails(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:    "gpt-5",
+		Reviewer: ReviewerConfig{Model: "gpt-5"},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendUserMessage("prep-1", "first request"); err != nil {
+		t.Fatalf("append first message: %v", err)
+	}
+
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["Add final verification notes."]}`},
+		Usage:     llm.Usage{InputTokens: 10},
+	}}}
+
+	eventsPath := filepath.Join(store.Dir(), "events.jsonl")
+	info, err := os.Stat(eventsPath)
+	if err != nil {
+		t.Fatalf("stat events log: %v", err)
+	}
+	if err := os.Chmod(eventsPath, 0o400); err != nil {
+		t.Fatalf("chmod events log readonly: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(eventsPath, info.Mode()) })
+
+	result, err := eng.runReviewerFollowUp(context.Background(), "step-1", llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "original final"}, reviewerClient)
+	if err != nil {
+		t.Fatalf("run reviewer follow-up: %v", err)
+	}
+	if result.Message.Content != "original final" {
+		t.Fatalf("follow-up result message = %q, want original final", result.Message.Content)
+	}
+	if result.Completion == nil {
+		t.Fatal("expected reviewer completion after follow-up append failure")
+	}
+	if result.Completion.Outcome != "followup_failed" {
+		t.Fatalf("reviewer completion outcome = %q, want followup_failed", result.Completion.Outcome)
+	}
+	if result.Completion.SuggestionsCount != 1 {
+		t.Fatalf("reviewer completion suggestions = %d, want 1", result.Completion.SuggestionsCount)
+	}
+	if strings.TrimSpace(result.Completion.Error) == "" {
+		t.Fatal("expected reviewer completion to include append failure error")
+	}
+}
+
 func TestRestoreMessagesKeepsStoredReviewerEntriesVerbatim(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

@@ -59,7 +59,15 @@ func (r *defaultReviewerPipeline) RunFollowUp(ctx context.Context, stepID string
 
 	instruction := formatReviewerDeveloperInstruction(suggestions)
 	if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeReviewerFeedback, Content: instruction}); err != nil {
-		return reviewerFollowUpResult{Message: original}, err
+		status := ReviewerStatus{
+			Outcome:               "followup_failed",
+			SuggestionsCount:      len(suggestions),
+			CacheHitPercent:       reviewerResult.CacheHitPercent,
+			HasCacheHitPercentage: reviewerResult.HasCacheHitPercentage,
+			Error:                 strings.TrimSpace(err.Error()),
+		}
+		_ = e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
+		return reviewerFollowUpResult{Message: original, Completion: &status}, nil
 	}
 	if r.stepRunner == nil {
 		status := ReviewerStatus{

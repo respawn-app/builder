@@ -103,11 +103,15 @@ func TestReviewerSuggestions_ReopenKeepsPromptCachePrefixStable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
+	t.Cleanup(func() { _ = eng.Close() })
 	if err := eng.appendUserMessage("prep-1", "first request"); err != nil {
 		t.Fatalf("append first message: %v", err)
 	}
 	if _, err := eng.runReviewerSuggestions(context.Background(), "step-1", reviewerClient); err != nil {
 		t.Fatalf("first reviewer suggestions: %v", err)
+	}
+	if err := eng.Close(); err != nil {
+		t.Fatalf("close original engine: %v", err)
 	}
 
 	reopened, err := session.Open(store.Dir())
@@ -118,6 +122,7 @@ func TestReviewerSuggestions_ReopenKeepsPromptCachePrefixStable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new reopened engine: %v", err)
 	}
+	t.Cleanup(func() { _ = reopenedEng.Close() })
 	time.Sleep(1100 * time.Millisecond)
 	if err := reopenedEng.appendUserMessage("prep-2", "second request"); err != nil {
 		t.Fatalf("append second message: %v", err)
