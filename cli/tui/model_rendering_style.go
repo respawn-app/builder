@@ -117,12 +117,13 @@ func (m Model) roleSymbol(role string) string {
 		return ""
 	}
 	p := m.palette()
+	if style := transcriptMessageStyleForRole(role); style != transcriptMessageStyleNone {
+		return renderRoleSymbol(prefix, roleSymbolStyle(role, p))
+	}
 	switch role {
 	case "tool", "tool_success", "tool_error", "tool_shell", "tool_shell_success", "tool_shell_error", "tool_question", "tool_question_error", "tool_web_search", "tool_web_search_success", "tool_web_search_error":
 		return renderRoleSymbol(prefix, roleSymbolStyle(role, p))
-	case "error", "warning", "cache_warning", roleDeveloperFeedback, roleInterruption:
-		return renderRoleSymbol(prefix, roleSymbolStyle(role, p))
-	case "reviewer_status", "reviewer_suggestions":
+	case roleDeveloperFeedback, roleInterruption:
 		return renderRoleSymbol(prefix, roleSymbolStyle(role, p))
 	default:
 		if isCompactionRole(role) {
@@ -141,19 +142,23 @@ func roleSymbolStyle(role string, p palette) roleSymbolColorStyle {
 	if isCompactionRole(role) {
 		return roleSymbolColorStyle{color: p.compactionColor}
 	}
+	switch transcriptMessageStyleForRole(role) {
+	case transcriptMessageStyleSuccess:
+		return roleSymbolColorStyle{color: p.successColor}
+	case transcriptMessageStyleWarning:
+		return roleSymbolColorStyle{color: p.warningColor}
+	case transcriptMessageStyleError:
+		return roleSymbolColorStyle{color: p.errorColor}
+	}
 	switch role {
 	case "tool_success", "tool_shell_success", "tool_web_search_success":
 		return roleSymbolColorStyle{color: p.toolSuccessColor}
-	case "reviewer_status", "reviewer_suggestions":
-		return roleSymbolColorStyle{color: p.successColor}
 	case "tool_error", "tool_shell_error", "tool_web_search_error":
 		return roleSymbolColorStyle{color: p.toolErrorColor}
 	case "tool_question":
 		return roleSymbolColorStyle{color: p.userColor}
-	case "tool_question_error", "error", "cache_warning", roleDeveloperFeedback, roleInterruption:
+	case "tool_question_error", roleDeveloperFeedback, roleInterruption:
 		return roleSymbolColorStyle{color: p.errorColor}
-	case "warning":
-		return roleSymbolColorStyle{color: p.warningColor}
 	case "tool", "tool_shell", "tool_web_search":
 		return roleSymbolColorStyle{color: p.toolColor}
 	default:
@@ -170,6 +175,9 @@ func rolePrefix(role string) string {
 	if isCompactionRole(role) {
 		return "@"
 	}
+	if symbol := transcriptMessageStyleSymbol(transcriptMessageStyleForRole(role)); symbol != "" {
+		return symbol
+	}
 	switch role {
 	case "user":
 		return "❯"
@@ -183,14 +191,6 @@ func rolePrefix(role string) string {
 		return "$"
 	case "tool_question", "tool_question_error":
 		return "?"
-	case "reviewer_status", "reviewer_suggestions":
-		return "§"
-	case "error":
-		return "!"
-	case "warning":
-		return "⚠"
-	case "cache_warning":
-		return "⚠"
 	case roleDeveloperFeedback:
 		return "!"
 	case roleInterruption:
@@ -212,6 +212,14 @@ func isThinkingRole(role string) bool {
 func styleForRole(role string, p palette) lipgloss.Style {
 	if isCompactionRole(role) {
 		return p.compaction
+	}
+	switch transcriptMessageStyleForRole(role) {
+	case transcriptMessageStyleSuccess:
+		return p.success
+	case transcriptMessageStyleWarning:
+		return p.warning
+	case transcriptMessageStyleError:
+		return p.error
 	}
 	switch role {
 	case "user":
@@ -252,14 +260,6 @@ func styleForRole(role string, p palette) lipgloss.Style {
 		return p.error
 	case "reasoning", "thinking_trace":
 		return p.system
-	case "error":
-		return p.error
-	case "cache_warning":
-		return p.error
-	case "warning":
-		return p.warning
-	case "reviewer_status", "reviewer_suggestions":
-		return p.success
 	default:
 		return p.preview
 	}

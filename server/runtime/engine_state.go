@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"builder/server/llm"
 	"builder/server/session"
@@ -237,6 +238,16 @@ func (e *Engine) ReviewerFrequency() string {
 		return "off"
 	}
 	return normalized
+}
+
+func (e *Engine) reviewerMetaTimestamp() time.Time {
+	if e == nil || e.store == nil {
+		return time.Now().UTC()
+	}
+	if createdAt := e.store.Meta().CreatedAt; !createdAt.IsZero() {
+		return createdAt.UTC()
+	}
+	return time.Now().UTC()
 }
 
 func (e *Engine) ReviewerEnabled() bool {

@@ -2805,9 +2805,8 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 		t.Fatalf("expected skills metadata between AGENTS and environment when present, skills=%d env=%d", skillsMetaIdx, environmentIdx)
 	}
 	foundAgentLabel := false
-	foundToolCallJSON := false
-	foundToolOutputField := false
-	foundSeparateToolOutput := false
+	foundToolCallEntry := false
+	foundToolResultEntry := false
 	for _, message := range requestMessages(reviewerReq)[boundaryIdx+1:] {
 		if message.Role != llm.RoleUser {
 			t.Fatalf("expected reviewer transcript entries after metadata to be user role messages, got %q", message.Role)
@@ -2815,27 +2814,21 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 		if strings.Contains(message.Content, "Agent:") {
 			foundAgentLabel = true
 		}
-		if strings.Contains(message.Content, "Tool calls:") && strings.Contains(message.Content, "Input:") && strings.Contains(message.Content, "pwd") {
-			foundToolCallJSON = true
+		if strings.Contains(message.Content, "Tool call:") && strings.Contains(message.Content, "pwd") {
+			foundToolCallEntry = true
 		}
-		if strings.Contains(message.Content, "Output:") && strings.Contains(message.Content, "{\"tool\":\"shell\"}") {
-			foundToolOutputField = true
-		}
-		if strings.Contains(message.Content, "Tool output:") {
-			foundSeparateToolOutput = true
+		if strings.Contains(message.Content, "Tool result:") && strings.Contains(message.Content, "{\"tool\":\"shell\"}") {
+			foundToolResultEntry = true
 		}
 	}
 	if !foundAgentLabel {
 		t.Fatalf("expected reviewer request to include agent labels, messages=%+v", requestMessages(reviewerReq))
 	}
-	if !foundToolCallJSON {
-		t.Fatalf("expected reviewer request to include tool call json args, messages=%+v", requestMessages(reviewerReq))
+	if !foundToolCallEntry {
+		t.Fatalf("expected reviewer request to include tool call transcript entries, messages=%+v", requestMessages(reviewerReq))
 	}
-	if !foundToolOutputField {
-		t.Fatalf("expected reviewer request to include tool output in tool call payload, messages=%+v", requestMessages(reviewerReq))
-	}
-	if foundSeparateToolOutput {
-		t.Fatalf("did not expect separate tool output entries when output is paired, messages=%+v", requestMessages(reviewerReq))
+	if !foundToolResultEntry {
+		t.Fatalf("expected reviewer request to include tool result transcript entries, messages=%+v", requestMessages(reviewerReq))
 	}
 	if len(reviewerReq.Items) == 0 {
 		t.Fatalf("expected reviewer request items to carry canonical transcript history")
@@ -3606,8 +3599,8 @@ func TestBuildReviewerTranscriptMessagesIncludesConversationAndToolCalls(t *test
 	}
 
 	reviewerMessages := buildReviewerTranscriptMessages(messages)
-	if len(reviewerMessages) != 4 {
-		t.Fatalf("expected 4 reviewer transcript messages after filtering, got %d", len(reviewerMessages))
+	if len(reviewerMessages) != 6 {
+		t.Fatalf("expected 6 reviewer transcript messages after filtering, got %d", len(reviewerMessages))
 	}
 	if reviewerMessages[0].Role != llm.RoleUser {
 		t.Fatalf("expected reviewer transcript messages to use user role, got %q", reviewerMessages[0].Role)
@@ -3618,20 +3611,17 @@ func TestBuildReviewerTranscriptMessagesIncludesConversationAndToolCalls(t *test
 	if !strings.Contains(reviewerMessages[2].Content, "Running command now.") {
 		t.Fatalf("expected short commentary preamble text to be preserved when tool calls exist, message=%q", reviewerMessages[2].Content)
 	}
-	if !strings.Contains(reviewerMessages[2].Content, "Tool calls:") || !strings.Contains(reviewerMessages[2].Content, "Input:") || !strings.Contains(reviewerMessages[2].Content, "pwd") {
-		t.Fatalf("expected tool call arguments in typed format, message=%q", reviewerMessages[2].Content)
+	if !strings.Contains(reviewerMessages[3].Content, "Tool call:") || !strings.Contains(reviewerMessages[3].Content, "pwd") {
+		t.Fatalf("expected separate tool call transcript entry, message=%q", reviewerMessages[3].Content)
 	}
-	if strings.Contains(reviewerMessages[2].Content, "(id=") {
-		t.Fatalf("did not expect tool call id in reviewer transcript, message=%q", reviewerMessages[2].Content)
+	if strings.Contains(reviewerMessages[3].Content, "(id=") {
+		t.Fatalf("did not expect tool call id in reviewer transcript, message=%q", reviewerMessages[3].Content)
 	}
-	if !strings.Contains(reviewerMessages[2].Content, "Output:") || !strings.Contains(reviewerMessages[2].Content, "\"ok\"") {
-		t.Fatalf("expected paired tool output section in tool call payload, message=%q", reviewerMessages[2].Content)
+	if !strings.Contains(reviewerMessages[4].Content, "Agent:") {
+		t.Fatalf("expected assistant final answer entry to use agent label, message=%q", reviewerMessages[4].Content)
 	}
-	if !strings.Contains(reviewerMessages[3].Content, "Agent:") {
-		t.Fatalf("expected assistant final answer entry to use agent label, message=%q", reviewerMessages[3].Content)
-	}
-	if strings.Contains(reviewerMessages[3].Content, "Tool output:") {
-		t.Fatalf("did not expect separate tool output entry when paired output exists, message=%q", reviewerMessages[3].Content)
+	if !strings.Contains(reviewerMessages[5].Content, "Tool result:") || !strings.Contains(reviewerMessages[5].Content, "ok") {
+		t.Fatalf("expected separate tool result transcript entry, message=%q", reviewerMessages[5].Content)
 	}
 }
 
@@ -3644,7 +3634,7 @@ func TestBuildReviewerTranscriptMessagesKeepsOrphanToolOutputEntry(t *testing.T)
 	if len(reviewerMessages) != 1 {
 		t.Fatalf("expected one reviewer message for orphan tool output, got %d", len(reviewerMessages))
 	}
-	if !strings.Contains(reviewerMessages[0].Content, "Tool:") || !strings.Contains(reviewerMessages[0].Content, "Tool output:") {
+	if !strings.Contains(reviewerMessages[0].Content, "Tool result:") || !strings.Contains(reviewerMessages[0].Content, "orphan") {
 		t.Fatalf("expected orphan tool output to remain as tool entry, message=%q", reviewerMessages[0].Content)
 	}
 }

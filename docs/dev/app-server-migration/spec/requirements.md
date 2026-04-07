@@ -2,7 +2,7 @@
 
 Status: draft requirements
 
-Last updated: 2026-03-27
+Last updated: 2026-04-07
 
 ## Purpose
 
@@ -56,6 +56,8 @@ The resulting frontends should:
 - `project_id`, `session_id`, `run_id`, `process_id`, `approval_id`, and `ask_id` are opaque server-assigned IDs. Filesystem paths are never protocol identity.
 - v1 supports at most one active primary run per session.
 - Typed queries and hydration views are the source of truth for initial render and reconnect.
+- Server-authored typed read models are authoritative for durable state. Frontend caches, projections, and render-model state are derived state only.
+- Committed transcript state and ephemeral live activity are separate consistency domains and must not share an implicit source of truth.
 - Reconnect and hydration are snapshot/page based. The protocol does not require a stream-history or cursor recovery contract for correctness.
 - The protocol must distinguish durable state changes from high-rate live feeds.
 - Existing persisted sessions must remain loadable, either directly or through lazy server migration/adoption.
@@ -194,6 +196,22 @@ Requirements:
 - process output retention is defined independently from process state retention.
 
 The protocol must make it obvious which feeds are durable, which are ephemeral, and that falling behind is recovered by rehydrating authoritative reads.
+
+## State Management And Read-Model Requirements
+
+The migration must finish with a state-management model that minimizes duplicate sources of truth across the frontend/server boundary.
+
+Requirements:
+
+- each attached frontend keeps at most one authoritative committed-transcript cache per session,
+- ongoing mode, detail mode, and any append-only terminal or native scrollback projection derive committed transcript from that same cache,
+- frontend render-model state may optimize layout, pagination windows, and append-only terminal flushing, but it must not become a second durable transcript authority,
+- `session.getMainView` remains a metadata and status hydration surface; committed transcript content is hydrated through dedicated transcript reads,
+- transcript hydration responses must carry freshness metadata sufficient for clients to reject stale overwrite of newer visible committed state,
+- transcript-affecting live activity must either carry committed transcript entries explicitly or carry enough revision metadata to trigger authoritative transcript rehydrate,
+- live activity streams may improve progressive UX, but committed transcript correctness must not depend on lossless live-stream delivery,
+- loopback, embedded, and remote clients must obey the same committed-state versus live-state ownership rules,
+- failed reads, stream gaps, and retry paths must preserve the distinction between authoritative committed state, ephemeral live state, and frontend projection state.
 
 ## Project Model
 
