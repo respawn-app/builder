@@ -6,6 +6,7 @@ import (
 	"builder/cli/tui"
 	"builder/server/llm"
 	"builder/shared/clientui"
+	"builder/shared/transcript"
 )
 
 func (m *uiModel) runtimeMainView() clientui.RuntimeMainView {
@@ -95,8 +96,8 @@ func localLastCommittedAssistantFinalAnswer(entries []tui.TranscriptEntry) strin
 }
 
 func transcriptEntryAffectsCommittedAssistantFinalAnswer(entry tui.TranscriptEntry) bool {
-	switch strings.TrimSpace(entry.Role) {
-	case "", "system", "error", "warning", "cache_warning", "reviewer_status", "reviewer_suggestions", "compaction_notice", "tool_question_error":
+	switch transcript.NormalizeEntryRole(entry.Role) {
+	case "", "system", "error", "warning", "cache_warning", "reviewer_status", "reviewer_suggestions", "compaction_notice", "tool_question_error", string(transcript.EntryRoleDeveloperFeedback):
 		return false
 	default:
 		return true
