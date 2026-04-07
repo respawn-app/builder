@@ -26,6 +26,7 @@ type runtimeControlFakeClient struct {
 	appendedRole           string
 	appendedText           string
 	shouldCompactText      string
+	shouldCompactCalls     int
 	shouldCompactResult    bool
 	submitText             string
 	submitResult           string
@@ -116,6 +117,7 @@ func (f *runtimeControlFakeClient) AppendLocalEntry(role, text string) error {
 }
 func (f *runtimeControlFakeClient) ShouldCompactBeforeUserMessage(_ context.Context, text string) (bool, error) {
 	f.shouldCompactText = text
+	f.shouldCompactCalls++
 	if f.shouldCompactErr != nil {
 		return f.shouldCompactResult, f.shouldCompactErr
 	}

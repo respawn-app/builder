@@ -60,6 +60,7 @@ type nativeResizeReplayMsg struct {
 type nativeHistoryFlushMsg struct {
 	Text       string
 	AllowBlank bool
+	Sequence   uint64
 }
 
 type runtimeEventMsg struct {
@@ -68,6 +69,7 @@ type runtimeEventMsg struct {
 
 type runtimeEventBatchMsg struct {
 	events []clientui.Event
+	carry  *clientui.Event
 }
 
 type runtimeConnectionStateChangedMsg struct {
@@ -365,6 +367,7 @@ type uiModel struct {
 	processClientExplicit bool
 
 	runtimeEvents           <-chan clientui.Event
+	pendingRuntimeEvents    []clientui.Event
 	askEvents               <-chan askEvent
 	runtimeConnectionEvents <-chan runtimeConnectionStateChangedMsg
 
@@ -411,8 +414,9 @@ type uiModel struct {
 	tuiAlternateScreen    config.TUIAlternateScreenPolicy
 	altScreenActive       bool
 
-	sawAssistantDelta bool
-	logger            uiLogger
+	sawAssistantDelta            bool
+	lastCommittedAssistantStepID string
+	logger                       uiLogger
 
 	interaction uiInteractionState
 	ask         uiAskState
@@ -447,32 +451,39 @@ type uiModel struct {
 	debugKeys             bool
 	transcriptDiagnostics bool
 
-	transcriptEntries        []tui.TranscriptEntry
-	transcriptBaseOffset     int
-	transcriptTotalEntries   int
-	transcriptRevision       int64
-	runtimeDisconnected      bool
-	transcriptLiveDirty      bool
-	reasoningLiveDirty       bool
-	detailTranscript         uiDetailTranscriptWindow
-	runtimeMainViewToken     uint64
-	runtimeTranscriptToken   uint64
-	runtimeTranscriptRetry   uint64
-	runtimeTranscriptBusy    bool
-	runtimeTranscriptDirty   bool
-	nativeFlushedEntryCount  int
-	nativeHistoryReplayed    bool
-	nativeReplayWidth        int
-	nativeFormatterWidth     int
-	nativeProjection         tui.TranscriptProjection
-	nativeRenderedProjection tui.TranscriptProjection
-	nativeRenderedSnapshot   string
-	startupCmds              []tea.Cmd
-	nativeLiveRegionLines    int
-	nativeLiveRegionPad      int
-	nativeStreamingActive    bool
-	nativeResizeReplayToken  uint64
-	nativeResizeReplayAt     time.Time
+	transcriptEntries                  []tui.TranscriptEntry
+	transcriptBaseOffset               int
+	transcriptTotalEntries             int
+	transcriptRevision                 int64
+	runtimeDisconnected                bool
+	transcriptLiveDirty                bool
+	reasoningLiveDirty                 bool
+	detailTranscript                   uiDetailTranscriptWindow
+	runtimeMainViewToken               uint64
+	runtimeTranscriptToken             uint64
+	runtimeTranscriptRetry             uint64
+	runtimeTranscriptBusy              bool
+	runtimeTranscriptDirty             bool
+	pendingQueuedDrainAfterHydration   bool
+	queuedDrainReadyAfterHydration     bool
+	waitRuntimeEventAfterHydration     bool
+	nativeFlushedEntryCount            int
+	nativeHistoryReplayed              bool
+	nativeReplayWidth                  int
+	nativeFormatterWidth               int
+	nativeProjection                   tui.TranscriptProjection
+	nativeRenderedProjection           tui.TranscriptProjection
+	nativeRenderedSnapshot             string
+	nativeFlushSequence                uint64
+	nativeFlushedSequence              uint64
+	nativePendingFlushes               map[uint64]nativeHistoryFlushMsg
+	waitRuntimeEventAfterFlushSequence uint64
+	startupCmds                        []tea.Cmd
+	nativeLiveRegionLines              int
+	nativeLiveRegionPad                int
+	nativeStreamingActive              bool
+	nativeResizeReplayToken            uint64
+	nativeResizeReplayAt               time.Time
 
 	lastEscAt              time.Time
 	pendingCSIShiftEnterAt time.Time
@@ -623,14 +634,46 @@ func (m *uiModel) applyRunLoggerDiagnostic(diag runLoggerDiagnostic) tea.Cmd {
 }
 
 func (m *uiModel) handleRuntimeEventBatch(events []clientui.Event) (*uiModel, tea.Cmd) {
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEventsBatch(events)
+	flushSequenceBefore := m.nativeFlushSequence
+	result := m.runtimeAdapter().applyProjectedRuntimeEventsBatch(events)
+	cmd := result.cmd
+	if !result.awaitsHydration {
+		cmd = sequenceCmds(cmd, m.flushQueuedInputsAfterHydration())
+	}
 	m.syncViewport()
-	return m, tea.Batch(waitRuntimeEvent(m.runtimeEvents), cmd)
+	if result.awaitsHydration {
+		m.waitRuntimeEventAfterHydration = true
+	}
+	if m.nativeFlushSequence != flushSequenceBefore {
+		m.waitRuntimeEventAfterFlushSequence = m.nativeFlushSequence
+		return m, cmd
+	}
+	if result.awaitsHydration {
+		return m, cmd
+	}
+	return m, tea.Batch(m.waitRuntimeEventCmd(), cmd)
+}
+
+func (m *uiModel) waitRuntimeEventCmd() tea.Cmd {
+	if m == nil {
+		return nil
+	}
+	if m.waitRuntimeEventAfterFlushSequence != 0 || m.waitRuntimeEventAfterHydration {
+		return nil
+	}
+	if len(m.pendingRuntimeEvents) == 0 {
+		return waitRuntimeEvent(m.runtimeEvents)
+	}
+	evt := m.pendingRuntimeEvents[0]
+	m.pendingRuntimeEvents = append([]clientui.Event(nil), m.pendingRuntimeEvents[1:]...)
+	return func() tea.Msg {
+		return runtimeEventBatchMsg{events: []clientui.Event{evt}}
+	}
 }
 
 func (m *uiModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{
-		waitRuntimeEvent(m.runtimeEvents),
+		m.waitRuntimeEventCmd(),
 		waitAskEvent(m.askEvents),
 		tea.SetWindowTitle(m.windowTitle()),
 		tea.WindowSize(),
@@ -748,6 +791,9 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case runtimeEventMsg:
 		return m.handleRuntimeEventBatch([]clientui.Event{msg.event})
 	case runtimeEventBatchMsg:
+		if msg.carry != nil {
+			m.pendingRuntimeEvents = append([]clientui.Event{*msg.carry}, m.pendingRuntimeEvents...)
+		}
 		return m.handleRuntimeEventBatch(msg.events)
 	case runtimeConnectionStateChangedMsg:
 		m.observeRuntimeRequestResult(msg.err)
@@ -793,10 +839,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncViewport()
 		return m, nil
 	case nativeHistoryFlushMsg:
-		if !msg.AllowBlank && strings.TrimSpace(msg.Text) == "" {
-			return m, nil
-		}
-		return m, tea.Printf("%s", msg.Text)
+		return m, m.handleNativeHistoryFlush(msg)
 	case promptHistoryPersistErrMsg:
 		if msg.err == nil {
 			return m, nil

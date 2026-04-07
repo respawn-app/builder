@@ -1,7 +1,9 @@
 package llm
 
 import (
+	"cmp"
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"builder/shared/textutil"
@@ -50,16 +52,17 @@ func parseOutputItems(items []responses.ResponseOutputItemUnion) ([]ResponseItem
 	reasoning := make([]ReasoningEntry, 0, len(items))
 	reasoningItems := make([]ReasoningItem, 0, len(items))
 
-	for _, item := range items {
+	for outputIndex, item := range items {
 		parsed, ok := parsers.byType[item.Type]
 		if !ok {
 			raw := json.RawMessage(item.RawJSON())
 			if len(raw) > 0 && json.Valid(raw) {
-				canonical = append(canonical, ResponseItem{Type: ResponseItemTypeOther, Raw: raw})
+				canonical = append(canonical, ResponseItem{Type: ResponseItemTypeOther, OutputIndex: int64(outputIndex), Raw: raw})
 			}
 			continue
 		}
 		contribution := parsed.Parse(item)
+		stampParsedOutputIndex(&contribution, int64(outputIndex))
 		canonical = append(canonical, contribution.CanonicalItems...)
 		assistantSegments = append(assistantSegments, contribution.AssistantSegments...)
 		toolCalls = append(toolCalls, contribution.ToolCalls...)
@@ -67,8 +70,20 @@ func parseOutputItems(items []responses.ResponseOutputItemUnion) ([]ResponseItem
 		reasoningItems = append(reasoningItems, contribution.ReasoningItems...)
 	}
 
-	assistantText, assistantPhase := resolveAssistantOutput(assistantSegments)
+	assistantText, assistantPhase, _, _ := resolveAssistantOutput(assistantSegments)
 	return canonical, assistantText, assistantPhase, toolCalls, reasoning, reasoningItems
+}
+
+func stampParsedOutputIndex(parsed *parsedResponseOutputItem, outputIndex int64) {
+	if parsed == nil {
+		return
+	}
+	for idx := range parsed.CanonicalItems {
+		parsed.CanonicalItems[idx].OutputIndex = outputIndex
+	}
+	for idx := range parsed.AssistantSegments {
+		parsed.AssistantSegments[idx].OutputIndex = outputIndex
+	}
 }
 
 type messageOutputItemParser struct{}
@@ -188,29 +203,34 @@ func (compactionOutputItemParser) Parse(item responses.ResponseOutputItemUnion) 
 }
 
 type assistantOutputSegment struct {
-	Text  string
-	Phase MessagePhase
+	Text        string
+	Phase       MessagePhase
+	OutputIndex int64
 }
 
-func resolveAssistantOutput(segments []assistantOutputSegment) (string, MessagePhase) {
+func resolveAssistantOutput(segments []assistantOutputSegment) (string, MessagePhase, int64, bool) {
 	if len(segments) == 0 {
-		return "", ""
+		return "", "", 0, false
 	}
-	last := len(segments) - 1
-	if segments[last].Phase == "" {
-		return segments[last].Text, ""
+	sorted := append([]assistantOutputSegment(nil), segments...)
+	slices.SortFunc(sorted, func(a, b assistantOutputSegment) int {
+		return cmp.Compare(a.OutputIndex, b.OutputIndex)
+	})
+	last := len(sorted) - 1
+	if sorted[last].Phase == "" {
+		return sorted[last].Text, "", sorted[last].OutputIndex, true
 	}
-	phase := segments[last].Phase
+	phase := sorted[last].Phase
 	start := last
 	for start > 0 {
-		if segments[start-1].Phase != phase {
+		if sorted[start-1].Phase != phase {
 			break
 		}
 		start--
 	}
 	textParts := make([]string, 0, last-start+1)
 	for i := start; i <= last; i++ {
-		textParts = append(textParts, segments[i].Text)
+		textParts = append(textParts, sorted[i].Text)
 	}
-	return strings.Join(textParts, ""), phase
+	return strings.Join(textParts, ""), phase, sorted[start].OutputIndex, true
 }

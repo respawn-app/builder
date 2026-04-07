@@ -86,6 +86,7 @@ const (
 
 type ResponseItem struct {
 	Type             ResponseItemType `json:"type"`
+	OutputIndex      int64            `json:"output_index,omitempty"`
 	Role             Role             `json:"role,omitempty"`
 	MessageType      MessageType      `json:"message_type,omitempty"`
 	SourcePath       string           `json:"source_path,omitempty"`

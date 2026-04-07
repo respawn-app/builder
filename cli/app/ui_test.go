@@ -4834,6 +4834,227 @@ func TestSubmitDoneWithRuntimeClientRequestsTranscriptCatchUp(t *testing.T) {
 	}
 }
 
+func TestSubmitDoneWithQueuedWorkWaitsForInFlightTranscriptCatchUp(t *testing.T) {
+	client := &refreshingRuntimeClient{
+		transcripts: []clientui.TranscriptPage{{
+			SessionID:    "session-1",
+			TotalEntries: 1,
+			Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "final answer"}},
+		}},
+	}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.startupCmds = nil
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.queued = []string{"follow up"}
+	m.runtimeTranscriptBusy = true
+	m.runtimeTranscriptToken = 7
+
+	next, cmd := m.Update(submitDoneMsg{message: "ignored by runtime-backed flow"})
+	updated := next.(*uiModel)
+	if cmd != nil {
+		t.Fatalf("expected no new transcript sync command while refresh is already in flight, got %T", cmd())
+	}
+	if !updated.pendingQueuedDrainAfterHydration {
+		t.Fatal("expected queued drain deferred until hydration completes")
+	}
+	if updated.busy {
+		t.Fatal("expected submit completion to leave runtime-backed UI idle while waiting for hydration")
+	}
+	if client.shouldCompactText != "" {
+		t.Fatalf("did not expect queued follow-up to start before hydration settles, got %q", client.shouldCompactText)
+	}
+	if len(updated.queued) != 1 || updated.queued[0] != "follow up" {
+		t.Fatalf("expected queued follow-up preserved until hydration finishes, got %+v", updated.queued)
+	}
+
+	next, applyCmd := updated.Update(runtimeTranscriptRefreshedMsg{token: 7, transcript: client.transcripts[0]})
+	updated = next.(*uiModel)
+	if !updated.runtimeTranscriptBusy {
+		t.Fatal("expected dirty transcript sync to schedule a follow-up hydration before queued drain")
+	}
+	if updated.busy {
+		t.Fatal("did not expect queued follow-up submission before authoritative hydration settles")
+	}
+	if updated.pendingQueuedDrainAfterHydration == false {
+		t.Fatal("expected deferred queued drain to remain armed until follow-up hydration completes")
+	}
+	if client.shouldCompactText != "" {
+		t.Fatalf("did not expect queued follow-up pre-submit check before final hydration settles, got %q", client.shouldCompactText)
+	}
+	if applyCmd == nil {
+		t.Fatal("expected follow-up hydration command after dirty in-flight refresh completes")
+	}
+	refreshAgain, ok := applyCmd().(runtimeTranscriptRefreshedMsg)
+	if !ok {
+		t.Fatalf("expected runtimeTranscriptRefreshedMsg from follow-up hydration command, got %T", applyCmd())
+	}
+
+	next, finalCmd := updated.Update(refreshAgain)
+	updated = next.(*uiModel)
+	if !updated.busy {
+		t.Fatal("expected queued follow-up submission to begin after hydration completes")
+	}
+	if updated.pendingQueuedDrainAfterHydration {
+		t.Fatal("expected deferred queued drain flag cleared after hydration completion")
+	}
+	if updated.pendingPreSubmitText != "follow up" {
+		t.Fatalf("expected queued follow-up to enter runtime pre-submit flow after hydration, got %q", updated.pendingPreSubmitText)
+	}
+	if got := stripANSIAndTrimRight(updated.view.OngoingSnapshot()); !strings.Contains(got, "final answer") {
+		t.Fatalf("expected hydration to commit final answer before queued drain, got %q", got)
+	}
+	if finalCmd == nil {
+		t.Fatal("expected follow-up command sequence after hydration")
+	}
+}
+
+func TestHydrationCompletionDoesNotRedrainQueuedTurnAfterManualDrainStarts(t *testing.T) {
+	client := &refreshingRuntimeClient{
+		transcripts: []clientui.TranscriptPage{{
+			SessionID:    "session-1",
+			TotalEntries: 1,
+			Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "final answer"}},
+		}},
+	}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.startupCmds = nil
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.queued = []string{"follow up"}
+	m.runtimeTranscriptBusy = true
+	m.runtimeTranscriptToken = 7
+
+	next, _ := m.Update(submitDoneMsg{message: "ignored by runtime-backed flow"})
+	updated := next.(*uiModel)
+	if !updated.pendingQueuedDrainAfterHydration {
+		t.Fatal("expected queued drain deferred until hydration completes")
+	}
+
+	next, drainCmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if !updated.busy {
+		t.Fatal("expected manual queued drain to start submission while hydration is still pending")
+	}
+	if updated.pendingPreSubmitText != "follow up" {
+		t.Fatalf("expected manual drain to own queued follow-up, got %q", updated.pendingPreSubmitText)
+	}
+	if drainCmd == nil {
+		t.Fatal("expected pre-submit check command from manual queued drain")
+	}
+	_ = collectCmdMessages(t, drainCmd)
+	if client.shouldCompactCalls != 1 {
+		t.Fatalf("expected exactly one pre-submit check after manual drain starts, got %d", client.shouldCompactCalls)
+	}
+
+	next, refreshCmd := updated.Update(runtimeTranscriptRefreshedMsg{token: 7, transcript: client.transcripts[0]})
+	updated = next.(*uiModel)
+	if !updated.pendingQueuedDrainAfterHydration {
+		t.Fatal("expected deferred drain to remain armed until dirty follow-up hydration completes")
+	}
+	if refreshCmd == nil {
+		t.Fatal("expected dirty follow-up hydration after in-flight refresh completes")
+	}
+	followRefresh, ok := refreshCmd().(runtimeTranscriptRefreshedMsg)
+	if !ok {
+		t.Fatalf("expected follow-up hydration message, got %T", refreshCmd())
+	}
+
+	next, finalCmd := updated.Update(followRefresh)
+	updated = next.(*uiModel)
+	if updated.pendingQueuedDrainAfterHydration {
+		t.Fatal("expected final hydration completion to drop stale deferred drain once manual drain owns the queued turn")
+	}
+	msgs := collectCmdMessages(t, finalCmd)
+	for _, msg := range msgs {
+		if _, ok := msg.(preSubmitCompactionCheckDoneMsg); ok {
+			t.Fatalf("did not expect hydration completion to restart pre-submit checks, got %+v", msgs)
+		}
+	}
+	if client.shouldCompactCalls != 1 {
+		t.Fatalf("expected hydration completion to avoid a second pre-submit check, got %d", client.shouldCompactCalls)
+	}
+}
+
+func TestHydrationCompletionKeepsDeferredQueuedDrainArmedUntilUnrelatedBusyStateClears(t *testing.T) {
+	client := &refreshingRuntimeClient{
+		transcripts: []clientui.TranscriptPage{{
+			SessionID:    "session-1",
+			TotalEntries: 1,
+			Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "final answer"}},
+		}},
+	}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.startupCmds = nil
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.queued = []string{"follow up"}
+	m.runtimeTranscriptBusy = true
+	m.runtimeTranscriptToken = 7
+
+	next, _ := m.Update(submitDoneMsg{message: "ignored by runtime-backed flow"})
+	updated := next.(*uiModel)
+	if !updated.pendingQueuedDrainAfterHydration {
+		t.Fatal("expected queued drain deferred until hydration completes")
+	}
+
+	next, _ = updated.Update(runtimeEventMsg{event: clientui.Event{Kind: clientui.EventRunStateChanged, RunState: &clientui.RunState{Busy: true}}})
+	updated = next.(*uiModel)
+	if !updated.busy {
+		t.Fatal("expected unrelated runtime activity to mark UI busy before hydration completes")
+	}
+
+	next, refreshCmd := updated.Update(runtimeTranscriptRefreshedMsg{token: 7, transcript: client.transcripts[0]})
+	updated = next.(*uiModel)
+	if !updated.pendingQueuedDrainAfterHydration {
+		t.Fatal("expected queued drain to remain armed while dirty follow-up hydration is still required")
+	}
+	if updated.queuedDrainReadyAfterHydration {
+		t.Fatal("did not expect queued drain marked ready before the final hydration completes")
+	}
+	if refreshCmd == nil {
+		t.Fatal("expected dirty follow-up hydration after in-flight refresh completes")
+	}
+	followRefresh, ok := refreshCmd().(runtimeTranscriptRefreshedMsg)
+	if !ok {
+		t.Fatalf("expected follow-up hydration message, got %T", refreshCmd())
+	}
+
+	next, _ = updated.Update(followRefresh)
+	updated = next.(*uiModel)
+	if !updated.pendingQueuedDrainAfterHydration {
+		t.Fatal("expected queued drain to remain armed when hydration completes during unrelated busy state")
+	}
+	if updated.queuedDrainReadyAfterHydration == false {
+		t.Fatal("expected hydration completion to mark queued drain ready even when unrelated busy state blocks auto-drain")
+	}
+	if len(updated.queued) != 1 || updated.queued[0] != "follow up" {
+		t.Fatalf("expected queued follow-up preserved while unrelated busy state blocks auto-drain, got %+v", updated.queued)
+	}
+
+	next, idleCmd := updated.Update(runtimeEventMsg{event: clientui.Event{Kind: clientui.EventRunStateChanged, RunState: &clientui.RunState{Busy: false}}})
+	updated = next.(*uiModel)
+	if !updated.busy {
+		t.Fatal("expected queued follow-up to start once unrelated busy state clears")
+	}
+	if updated.pendingQueuedDrainAfterHydration {
+		t.Fatal("expected deferred queued drain cleared once unrelated busy state clears and auto-drain starts")
+	}
+	if updated.pendingPreSubmitText != "follow up" {
+		t.Fatalf("expected queued follow-up to enter runtime pre-submit flow after unrelated busy state clears, got %q", updated.pendingPreSubmitText)
+	}
+	if len(updated.queued) != 1 || updated.queued[0] != "follow up" {
+		t.Fatalf("expected runtime pre-submit flow to own the queued follow-up after unrelated busy state clears, got %+v", updated.queued)
+	}
+	if idleCmd == nil {
+		t.Fatal("expected queued follow-up command sequence after unrelated busy state clears")
+	}
+	_ = collectCmdMessages(t, idleCmd)
+	if client.shouldCompactCalls != 1 {
+		t.Fatalf("expected exactly one pre-submit check after unrelated busy state clears, got %d", client.shouldCompactCalls)
+	}
+}
+
 func TestBusyQueuedUnknownSlashDrainsAsPromptSubmission(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.busy = true
@@ -4952,6 +5173,79 @@ func TestBusyQueuedReviewSlashCommandStartsFreshSessionAfterTurn(t *testing.T) {
 	}
 }
 
+func TestBusyQueuedReviewSlashCommandWaitsForHydrationBeforePromptSubmission(t *testing.T) {
+	client := &refreshingRuntimeClient{
+		transcripts: []clientui.TranscriptPage{{
+			SessionID:    "session-1",
+			TotalEntries: 1,
+			Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "final answer"}},
+		}},
+	}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.startupCmds = nil
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "/review cli/app"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated := next.(*uiModel)
+	if len(updated.queued) != 1 || updated.queued[0] != "/review cli/app" {
+		t.Fatalf("expected queued /review command, got %+v", updated.queued)
+	}
+
+	next, cmd := updated.Update(submitDoneMsg{message: "done"})
+	updated = next.(*uiModel)
+	if !updated.pendingQueuedDrainAfterHydration {
+		t.Fatal("expected queued /review drain deferred until transcript hydration completes")
+	}
+	if updated.busy {
+		t.Fatal("did not expect queued /review prompt submission before hydration settles")
+	}
+	if updated.pendingPreSubmitText != "" {
+		t.Fatalf("did not expect queued /review to enter pre-submit before hydration, got %q", updated.pendingPreSubmitText)
+	}
+	if client.shouldCompactCalls != 0 {
+		t.Fatalf("did not expect queued /review pre-submit checks before hydration, calls=%d", client.shouldCompactCalls)
+	}
+	msgs := collectCmdMessages(t, cmd)
+	var refresh runtimeTranscriptRefreshedMsg
+	refreshFound := false
+	for _, msg := range msgs {
+		if typed, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			refresh = typed
+			refreshFound = true
+		}
+	}
+	if !refreshFound {
+		t.Fatalf("expected runtime transcript refresh before queued /review drains, got %+v", msgs)
+	}
+
+	next, drainCmd := updated.Update(refresh)
+	updated = next.(*uiModel)
+	if !updated.busy {
+		t.Fatal("expected queued /review to start prompt submission after hydration completes")
+	}
+	if updated.pendingQueuedDrainAfterHydration {
+		t.Fatal("expected queued /review hydration deferral cleared once drained")
+	}
+	if updated.pendingPreSubmitText == "" {
+		t.Fatal("expected queued /review generated prompt to enter runtime pre-submit flow")
+	}
+	if strings.Contains(updated.pendingPreSubmitText, "/review cli/app") {
+		t.Fatalf("expected queued /review to submit generated prompt content, got %q", updated.pendingPreSubmitText)
+	}
+	if got := stripANSIAndTrimRight(updated.view.OngoingSnapshot()); !strings.Contains(got, "final answer") {
+		t.Fatalf("expected hydration to commit final answer before queued /review drains, got %q", got)
+	}
+	if drainCmd == nil {
+		t.Fatal("expected queued /review pre-submit command after hydration")
+	}
+	_ = collectCmdMessages(t, drainCmd)
+	if client.shouldCompactCalls != 1 {
+		t.Fatalf("expected exactly one queued /review pre-submit check after hydration, got %d", client.shouldCompactCalls)
+	}
+}
+
 func TestQueuedReviewUsesEngineConversationFreshnessWhenUIDidNotReceiveRuntimeUpdateYet(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -4986,7 +5280,28 @@ func TestQueuedReviewUsesEngineConversationFreshnessWhenUIDidNotReceiveRuntimeUp
 	next, cmd := updated.Update(submitDoneMsg{message: "done"})
 	updated = next.(*uiModel)
 	if cmd == nil {
-		t.Fatal("expected quit cmd for queued /review handoff")
+		t.Fatal("expected hydration command for queued /review handoff")
+	}
+	if !updated.pendingQueuedDrainAfterHydration {
+		t.Fatal("expected queued /review handoff deferred until hydration completes")
+	}
+	msgs := collectCmdMessages(t, cmd)
+	var refresh runtimeTranscriptRefreshedMsg
+	refreshFound := false
+	for _, msg := range msgs {
+		if typed, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			refresh = typed
+			refreshFound = true
+		}
+	}
+	if !refreshFound {
+		t.Fatalf("expected transcript refresh before queued /review handoff, got %+v", msgs)
+	}
+
+	next, followCmd := updated.Update(refresh)
+	updated = next.(*uiModel)
+	if followCmd == nil {
+		t.Fatal("expected queued /review drain after hydration")
 	}
 	if updated.Action() != UIActionNewSession {
 		t.Fatalf("expected UIActionNewSession, got %q", updated.Action())
