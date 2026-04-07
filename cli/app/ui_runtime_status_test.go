@@ -50,6 +50,19 @@ func TestRuntimeStatusUsesLocalFallbackWhenRuntimeClientMissing(t *testing.T) {
 	}
 }
 
+func TestRuntimeStatusLocalFallbackSkipsTrailingDeveloperFeedback(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "assistant", Text: "done", Phase: llm.MessagePhaseFinal},
+		{Role: "developer_feedback", Text: "phase mismatch"},
+	}
+
+	status := m.runtimeStatus()
+	if status.LastCommittedAssistantFinalAnswer != "done" {
+		t.Fatalf("last committed assistant answer = %q, want done", status.LastCommittedAssistantFinalAnswer)
+	}
+}
+
 func TestRuntimeStatusUsesLoopbackRuntimeSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
