@@ -70,7 +70,7 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 		cmd, mutated := a.applyProjectedTranscriptEntries(evt, flushNativeHistory)
 		cmds = append(cmds, cmd)
 		transcriptMutated = transcriptMutated || mutated
-		if mutated && shouldClearAssistantStreamForCommittedAssistantEvent(evt) {
+		if shouldClearAssistantStreamForCommittedAssistantEvent(evt) && (mutated || skippedAssistantCommitMatchesActiveLiveStream(m, evt)) {
 			m.sawAssistantDelta = false
 			m.forwardToView(tui.ClearOngoingAssistantMsg{})
 		}
@@ -649,6 +649,37 @@ func shouldClearAssistantStreamForCommittedAssistantEvent(evt clientui.Event) bo
 		if strings.TrimSpace(entry.Role) == "assistant" {
 			return true
 		}
+	}
+	return false
+}
+
+func skippedAssistantCommitMatchesActiveLiveStream(m *uiModel, evt clientui.Event) bool {
+	if m == nil || strings.TrimSpace(m.view.OngoingStreamingText()) == "" {
+		return false
+	}
+	if evt.TranscriptRevision != m.transcriptRevision {
+		return false
+	}
+	if evt.CommittedEntryCount != m.transcriptBaseOffset+len(m.transcriptEntries) {
+		return false
+	}
+	assistantText := ""
+	for _, entry := range evt.TranscriptEntries {
+		if strings.TrimSpace(entry.Role) != "assistant" {
+			continue
+		}
+		assistantText = strings.TrimSpace(entry.Text)
+		break
+	}
+	if assistantText == "" || assistantText != strings.TrimSpace(m.view.OngoingStreamingText()) {
+		return false
+	}
+	for idx := len(m.transcriptEntries) - 1; idx >= 0; idx-- {
+		entry := m.transcriptEntries[idx]
+		if strings.TrimSpace(entry.Role) != "assistant" {
+			continue
+		}
+		return strings.TrimSpace(entry.Text) == assistantText
 	}
 	return false
 }
