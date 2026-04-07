@@ -106,7 +106,7 @@ func (p TranscriptProjection) renderFromBlock(start int, divider string) string 
 }
 
 func (b TranscriptProjectionBlock) equal(other TranscriptProjectionBlock) bool {
-	if b.Role != other.Role || b.DividerGroup != other.DividerGroup || b.EntryIndex != other.EntryIndex || b.EntryEnd != other.EntryEnd || len(b.Lines) != len(other.Lines) {
+	if b.Role != other.Role || b.DividerGroup != other.DividerGroup || len(b.Lines) != len(other.Lines) {
 		return false
 	}
 	for idx := range b.Lines {
@@ -122,7 +122,14 @@ func (m Model) OngoingProjection(includeStreaming bool) TranscriptProjection {
 }
 
 func (m Model) CommittedOngoingProjection() TranscriptProjection {
+	return m.CommittedOngoingProjectionForEntries(m.transcript)
+}
+
+func (m Model) CommittedOngoingProjectionForEntries(entries []TranscriptEntry) TranscriptProjection {
 	committed := CommittedOngoingEntries(m.transcript)
+	if len(entries) > 0 {
+		committed = CommittedOngoingEntries(entries)
+	}
 	if len(committed) == 0 {
 		return TranscriptProjection{}
 	}

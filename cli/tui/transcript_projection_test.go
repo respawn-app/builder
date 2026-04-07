@@ -56,6 +56,43 @@ func TestCommittedOngoingProjectionCommitFrontierWaitsForToolResult(t *testing.T
 	}
 }
 
+func TestRenderAppendDeltaFromIgnoresHiddenSourceIndexShifts(t *testing.T) {
+	previous := TranscriptProjection{Blocks: []TranscriptProjectionBlock{{
+		Role:         "user",
+		DividerGroup: "user",
+		EntryIndex:   0,
+		EntryEnd:     0,
+		Lines:        []string{"❯ trigger"},
+	}}}
+	current := TranscriptProjection{Blocks: []TranscriptProjectionBlock{
+		{
+			Role:         "user",
+			DividerGroup: "user",
+			EntryIndex:   3,
+			EntryEnd:     3,
+			Lines:        []string{"❯ trigger"},
+		},
+		{
+			Role:         "assistant",
+			DividerGroup: "assistant",
+			EntryIndex:   4,
+			EntryEnd:     4,
+			Lines:        []string{"❮ FINAL-CONTENT"},
+		},
+	}}
+
+	delta, ok := current.RenderAppendDeltaFrom(previous, TranscriptDivider)
+	if !ok {
+		t.Fatal("expected append delta to survive hidden source index shifts")
+	}
+	if !strings.Contains(delta, "FINAL-CONTENT") {
+		t.Fatalf("expected delta to include appended assistant content, got %q", delta)
+	}
+	if strings.Contains(delta, "trigger") {
+		t.Fatalf("expected delta to exclude already rendered user content, got %q", delta)
+	}
+}
+
 func TestCommittedOngoingEntriesDoNotTruncateAfterEmptyToolResult(t *testing.T) {
 	entries := []TranscriptEntry{
 		{Role: "user", Text: "prompt"},

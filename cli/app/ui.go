@@ -450,37 +450,37 @@ type uiModel struct {
 	debugKeys             bool
 	transcriptDiagnostics bool
 
-	transcriptEntries                []tui.TranscriptEntry
-	transcriptBaseOffset             int
-	transcriptTotalEntries           int
-	transcriptRevision               int64
-	runtimeDisconnected              bool
-	transcriptLiveDirty              bool
-	reasoningLiveDirty               bool
-	detailTranscript                 uiDetailTranscriptWindow
-	runtimeMainViewToken             uint64
-	runtimeTranscriptToken           uint64
-	runtimeTranscriptRetry           uint64
-	runtimeTranscriptBusy            bool
-	runtimeTranscriptDirty           bool
-	pendingQueuedDrainAfterHydration bool
-	nativeFlushedEntryCount          int
-	nativeHistoryReplayed            bool
-	nativeReplayWidth                int
-	nativeFormatterWidth             int
-	nativeProjection                 tui.TranscriptProjection
-	nativeRenderedProjection         tui.TranscriptProjection
-	nativeRenderedSnapshot           string
-	nativeFlushSequence              uint64
-	nativeFlushedSequence            uint64
-	nativePendingFlushes             map[uint64]nativeHistoryFlushMsg
-	waitRuntimeEventAfterNativeFlush bool
-	startupCmds                      []tea.Cmd
-	nativeLiveRegionLines            int
-	nativeLiveRegionPad              int
-	nativeStreamingActive            bool
-	nativeResizeReplayToken          uint64
-	nativeResizeReplayAt             time.Time
+	transcriptEntries                  []tui.TranscriptEntry
+	transcriptBaseOffset               int
+	transcriptTotalEntries             int
+	transcriptRevision                 int64
+	runtimeDisconnected                bool
+	transcriptLiveDirty                bool
+	reasoningLiveDirty                 bool
+	detailTranscript                   uiDetailTranscriptWindow
+	runtimeMainViewToken               uint64
+	runtimeTranscriptToken             uint64
+	runtimeTranscriptRetry             uint64
+	runtimeTranscriptBusy              bool
+	runtimeTranscriptDirty             bool
+	pendingQueuedDrainAfterHydration   bool
+	nativeFlushedEntryCount            int
+	nativeHistoryReplayed              bool
+	nativeReplayWidth                  int
+	nativeFormatterWidth               int
+	nativeProjection                   tui.TranscriptProjection
+	nativeRenderedProjection           tui.TranscriptProjection
+	nativeRenderedSnapshot             string
+	nativeFlushSequence                uint64
+	nativeFlushedSequence              uint64
+	nativePendingFlushes               map[uint64]nativeHistoryFlushMsg
+	waitRuntimeEventAfterFlushSequence uint64
+	startupCmds                        []tea.Cmd
+	nativeLiveRegionLines              int
+	nativeLiveRegionPad                int
+	nativeStreamingActive              bool
+	nativeResizeReplayToken            uint64
+	nativeResizeReplayAt               time.Time
 
 	lastEscAt              time.Time
 	pendingCSIShiftEnterAt time.Time
@@ -635,7 +635,7 @@ func (m *uiModel) handleRuntimeEventBatch(events []clientui.Event) (*uiModel, te
 	cmd := m.runtimeAdapter().handleProjectedRuntimeEventsBatch(events)
 	m.syncViewport()
 	if m.nativeFlushSequence != flushSequenceBefore {
-		m.waitRuntimeEventAfterNativeFlush = true
+		m.waitRuntimeEventAfterFlushSequence = m.nativeFlushSequence
 		return m, cmd
 	}
 	return m, tea.Batch(m.waitRuntimeEventCmd(), cmd)
