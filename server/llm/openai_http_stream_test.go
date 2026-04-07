@@ -122,3 +122,81 @@ func TestGenerateStream_PreservesBoldReasoningTextWithoutInferringStatus(t *test
 		t.Fatalf("unexpected final reasoning summary entries: %+v", resp.Reasoning)
 	}
 }
+
+func TestGenerateStream_PreservesStreamedAssistantTextWhenCompletedMessageIsEmpty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"commentary\",\"content\":[]}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hel\"}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"lo\"}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"name\":\"shell\",\"call_id\":\"call_1\",\"arguments\":\"{\\\"command\\\":\\\"pwd\\\"}\"}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":3,\"output_tokens\":4,\"total_tokens\":7},\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[]},{\"type\":\"function_call\",\"id\":\"fc_1\",\"name\":\"shell\",\"call_id\":\"call_1\",\"arguments\":\"{\\\"command\\\":\\\"pwd\\\"}\"}]}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	transport := NewHTTPTransport(staticAuthHeader{})
+	transport.BaseURL = server.URL
+	transport.Client = server.Client()
+
+	resp, err := transport.GenerateStreamWithEvents(context.Background(), OpenAIRequest{Model: "gpt-5"}, StreamCallbacks{})
+	if err != nil {
+		t.Fatalf("GenerateStream failed: %v", err)
+	}
+
+	if resp.AssistantText != "Hello" {
+		t.Fatalf("assistant text = %q, want Hello", resp.AssistantText)
+	}
+	if resp.AssistantPhase != MessagePhaseCommentary {
+		t.Fatalf("assistant phase = %q, want %q", resp.AssistantPhase, MessagePhaseCommentary)
+	}
+	if len(resp.OutputItems) != 2 {
+		t.Fatalf("expected 2 output items, got %+v", resp.OutputItems)
+	}
+	if resp.OutputItems[0].Type != ResponseItemTypeMessage || resp.OutputItems[0].Content != "Hello" {
+		t.Fatalf("unexpected assistant output item: %+v", resp.OutputItems[0])
+	}
+	if resp.OutputItems[0].Phase != MessagePhaseCommentary {
+		t.Fatalf("assistant output phase = %q, want %q", resp.OutputItems[0].Phase, MessagePhaseCommentary)
+	}
+}
+
+func TestGenerateStream_PreservesAssistantOutputItemPhaseWhenCompletedPhaseIsMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"Done\"}]}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":2,\"output_tokens\":2,\"total_tokens\":4},\"output\":[{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Done\"}]}]}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	transport := NewHTTPTransport(staticAuthHeader{})
+	transport.BaseURL = server.URL
+	transport.Client = server.Client()
+
+	resp, err := transport.GenerateStreamWithEvents(context.Background(), OpenAIRequest{Model: "gpt-5"}, StreamCallbacks{})
+	if err != nil {
+		t.Fatalf("GenerateStream failed: %v", err)
+	}
+
+	if resp.AssistantText != "Done" {
+		t.Fatalf("assistant text = %q, want Done", resp.AssistantText)
+	}
+	if resp.AssistantPhase != MessagePhaseFinal {
+		t.Fatalf("assistant phase = %q, want %q", resp.AssistantPhase, MessagePhaseFinal)
+	}
+	if len(resp.OutputItems) != 1 {
+		t.Fatalf("expected 1 output item, got %+v", resp.OutputItems)
+	}
+	if resp.OutputItems[0].Phase != MessagePhaseFinal {
+		t.Fatalf("assistant output phase = %q, want %q", resp.OutputItems[0].Phase, MessagePhaseFinal)
+	}
+}

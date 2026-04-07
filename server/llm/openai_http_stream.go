@@ -9,20 +9,22 @@ import (
 )
 
 type responseStreamAccumulator struct {
-	callbacks     StreamCallbacks
-	windowTokens  int
-	assistantText strings.Builder
-	toolCalls     *toolCallAccumulator
-	reasoning     *reasoningAccumulator
-	completed     *responses.Response
+	callbacks         StreamCallbacks
+	windowTokens      int
+	assistantText     strings.Builder
+	assistantMessages *assistantMessageAccumulator
+	toolCalls         *toolCallAccumulator
+	reasoning         *reasoningAccumulator
+	completed         *responses.Response
 }
 
 func newResponseStreamAccumulator(callbacks StreamCallbacks, windowTokens int) *responseStreamAccumulator {
 	return &responseStreamAccumulator{
-		callbacks:    callbacks,
-		windowTokens: windowTokens,
-		toolCalls:    newToolCallAccumulator(),
-		reasoning:    newReasoningAccumulator(),
+		callbacks:         callbacks,
+		windowTokens:      windowTokens,
+		assistantMessages: newAssistantMessageAccumulator(),
+		toolCalls:         newToolCallAccumulator(),
+		reasoning:         newReasoningAccumulator(),
 	}
 }
 
@@ -37,6 +39,7 @@ func (a *responseStreamAccumulator) Consume(evt responses.ResponseStreamEventUni
 			a.callbacks.OnAssistantDelta(evt.Delta)
 		}
 	case "response.output_item.added", "response.output_item.done":
+		a.assistantMessages.Upsert(evt.Item, evt.OutputIndex)
 		a.toolCalls.UpsertFromOutput(evt.Item)
 		a.reasoning.UpsertReasoningItem(evt.Item)
 	case "response.function_call_arguments.delta":
@@ -73,16 +76,18 @@ func (a *responseStreamAccumulator) emitReasoningSummaryDelta(key string) {
 
 func (a *responseStreamAccumulator) Response() OpenAIResponse {
 	usage := Usage{WindowTokens: a.windowTokens}
-	finalText := a.assistantText.String()
+	streamText, streamPhase := a.assistantMessages.Resolve()
+	finalText := preferAssistantText(a.assistantText.String(), streamText)
+	finalPhase := streamPhase
 	finalCalls := a.toolCalls.ToToolCalls()
 	finalReasoning := a.reasoning.Entries()
 	finalReasoningItems := a.reasoning.Items()
-	finalOutputItems := buildOutputItemsFromStream(finalText, finalCalls, finalReasoning, finalReasoningItems)
+	finalOutputItems := buildOutputItemsFromStream(finalText, finalPhase, finalCalls, finalReasoning, finalReasoningItems)
 
 	if a.completed == nil {
 		return OpenAIResponse{
 			AssistantText:  finalText,
-			AssistantPhase: "",
+			AssistantPhase: finalPhase,
 			ToolCalls:      finalCalls,
 			Reasoning:      normalizeReasoningEntries(finalReasoning),
 			ReasoningItems: finalReasoningItems,
@@ -95,8 +100,9 @@ func (a *responseStreamAccumulator) Response() OpenAIResponse {
 		usage = usageFromSDK(a.completed.Usage, a.windowTokens)
 	}
 	parsedItems, parsedText, parsedPhase, parsedCalls, parsedReasoning, parsedReasoningItems := parseOutputItems(a.completed.Output)
-	finalText = parsedText
-	finalPhase := MessagePhase("")
+	if strings.TrimSpace(parsedText) != "" {
+		finalText = parsedText
+	}
 	if parsedPhase != "" {
 		finalPhase = parsedPhase
 	}
@@ -105,7 +111,7 @@ func (a *responseStreamAccumulator) Response() OpenAIResponse {
 	finalReasoning = normalizeReasoningEntries(mergeReasoningEntries(parsedReasoning, finalReasoning))
 	finalReasoningItems = mergeReasoningItems(parsedReasoningItems, finalReasoningItems)
 	if len(parsedItems) > 0 {
-		finalOutputItems = parsedItems
+		finalOutputItems = repairAssistantOutputItems(parsedItems, finalText, finalPhase)
 	}
 
 	return OpenAIResponse{
@@ -117,6 +123,45 @@ func (a *responseStreamAccumulator) Response() OpenAIResponse {
 		OutputItems:    finalOutputItems,
 		Usage:          usage,
 	}
+}
+
+func preferAssistantText(primary, fallback string) string {
+	if strings.TrimSpace(primary) != "" {
+		return primary
+	}
+	return fallback
+}
+
+func repairAssistantOutputItems(items []ResponseItem, text string, phase MessagePhase) []ResponseItem {
+	if len(items) == 0 {
+		return nil
+	}
+	repaired := CloneResponseItems(items)
+	lastAssistantIdx := -1
+	for idx := len(repaired) - 1; idx >= 0; idx-- {
+		if repaired[idx].Type == ResponseItemTypeMessage && repaired[idx].Role == RoleAssistant {
+			lastAssistantIdx = idx
+			break
+		}
+	}
+	if lastAssistantIdx < 0 {
+		if strings.TrimSpace(text) == "" {
+			return repaired
+		}
+		return append([]ResponseItem{{
+			Type:    ResponseItemTypeMessage,
+			Role:    RoleAssistant,
+			Phase:   phase,
+			Content: text,
+		}}, repaired...)
+	}
+	if strings.TrimSpace(repaired[lastAssistantIdx].Content) == "" && strings.TrimSpace(text) != "" {
+		repaired[lastAssistantIdx].Content = text
+	}
+	if repaired[lastAssistantIdx].Phase == "" && phase != "" {
+		repaired[lastAssistantIdx].Phase = phase
+	}
+	return repaired
 }
 
 func mergeReasoningEntries(primary, secondary []ReasoningEntry) []ReasoningEntry {
@@ -177,6 +222,51 @@ type reasoningAccumulator struct {
 	items         map[string]*ReasoningEntry
 	reasoningIDs  []string
 	reasoningByID map[string]ReasoningItem
+}
+
+type assistantMessageAccumulator struct {
+	byIndex map[int64]ResponseItem
+	order   []int64
+}
+
+func newAssistantMessageAccumulator() *assistantMessageAccumulator {
+	return &assistantMessageAccumulator{
+		byIndex: make(map[int64]ResponseItem),
+		order:   make([]int64, 0, 4),
+	}
+}
+
+func (a *assistantMessageAccumulator) Upsert(item responses.ResponseOutputItemUnion, outputIndex int64) {
+	if a == nil || item.Type != "message" {
+		return
+	}
+	parsedItems, _, _, _, _, _ := parseOutputItems([]responses.ResponseOutputItemUnion{item})
+	if len(parsedItems) == 0 {
+		return
+	}
+	assistant := parsedItems[0]
+	if assistant.Type != ResponseItemTypeMessage || assistant.Role != RoleAssistant {
+		return
+	}
+	if _, exists := a.byIndex[outputIndex]; !exists {
+		a.order = append(a.order, outputIndex)
+	}
+	a.byIndex[outputIndex] = assistant
+}
+
+func (a *assistantMessageAccumulator) Resolve() (string, MessagePhase) {
+	if a == nil {
+		return "", ""
+	}
+	segments := make([]assistantOutputSegment, 0, len(a.order))
+	for _, outputIndex := range a.order {
+		item, ok := a.byIndex[outputIndex]
+		if !ok || item.Type != ResponseItemTypeMessage || item.Role != RoleAssistant {
+			continue
+		}
+		segments = append(segments, assistantOutputSegment{Text: item.Content, Phase: item.Phase})
+	}
+	return resolveAssistantOutput(segments)
 }
 
 func newReasoningAccumulator() *reasoningAccumulator {
@@ -414,10 +504,10 @@ func (a *toolCallAccumulator) ToToolCalls() []ToolCall {
 	return out
 }
 
-func buildOutputItemsFromStream(text string, toolCalls []ToolCall, reasoning []ReasoningEntry, reasoningItems []ReasoningItem) []ResponseItem {
+func buildOutputItemsFromStream(text string, phase MessagePhase, toolCalls []ToolCall, reasoning []ReasoningEntry, reasoningItems []ReasoningItem) []ResponseItem {
 	items := make([]ResponseItem, 0, 1+len(toolCalls)+len(reasoningItems))
 	if strings.TrimSpace(text) != "" {
-		items = append(items, ResponseItem{Type: ResponseItemTypeMessage, Role: RoleAssistant, Content: text})
+		items = append(items, ResponseItem{Type: ResponseItemTypeMessage, Role: RoleAssistant, Phase: phase, Content: text})
 	}
 	for _, call := range toolCalls {
 		callID := textutil.FirstNonEmpty(strings.TrimSpace(call.ID), strings.TrimSpace(call.Name))
