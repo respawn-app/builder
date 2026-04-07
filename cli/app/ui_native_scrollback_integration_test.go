@@ -1554,7 +1554,7 @@ func TestNativeProgramRendersSingleBackgroundCompletionFromChannelWhileIdle(t *t
 		return strings.Contains(strings.ToLower(normalizedOutput(out.String())), "background shell 1000 completed")
 	})
 
-	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	program.Quit()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -1798,7 +1798,7 @@ func TestNativeProgramUserFlushDoesNotTriggerTranscriptSyncThatDropsCommentary(t
 		t.Fatalf("expected flushed user message to avoid extra transcript syncs, baseline=%d current=%d", baselineLoadCalls, client.loadCalls)
 	}
 
-	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	program.Quit()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -1858,7 +1858,7 @@ func TestNativeProgramConversationRefreshHydratesCommittedTranscriptWithoutRepla
 		return strings.Contains(normalizedOutput(out.String()), "restored after reconnect")
 	})
 
-	program.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	program.Quit()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -2026,6 +2026,122 @@ func TestQueuedFollowUpWaitsForFinalTranscriptCatchUpBeforeNativeScrollbackAppen
 	}
 	if strings.Count(normalized, "final answer") != 1 {
 		t.Fatalf("expected final answer appended exactly once, got %d in %q", strings.Count(normalized, "final answer"), normalized)
+	}
+}
+
+func TestRuntimeHydrationRewriteRecoversOngoingScrollbackAndLaterAssistantAppend(t *testing.T) {
+	out := &bytes.Buffer{}
+	runtimeEvents := make(chan clientui.Event, 16)
+	client := &runtimeControlFakeClient{
+		sessionView: clientui.RuntimeSessionView{SessionID: "session-1"},
+		transcript: clientui.TranscriptPage{
+			SessionID:    "session-1",
+			Revision:     1,
+			TotalEntries: 2,
+			Entries: []clientui.ChatEntry{
+				{Role: "user", Text: "commit/push"},
+				{Role: "assistant", Text: "before"},
+			},
+		},
+	}
+	model := newProjectedTestUIModel(
+		client,
+		runtimeEvents,
+		closedAskEvents(),
+	)
+	model.startupCmds = nil
+	model.runtimeTranscriptBusy = true
+	model.runtimeTranscriptToken = 1
+	model.busy = true
+	model.activity = uiActivityRunning
+	model.sawAssistantDelta = true
+	model.forwardToView(tui.SetConversationMsg{Entries: model.transcriptEntries, Ongoing: "working"})
+
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	waitForTestCondition(t, 2*time.Second, "initial ongoing output visible", func() bool {
+		normalized := normalizedOutput(out.String())
+		return strings.Contains(normalized, "before") && strings.Contains(normalized, "working")
+	})
+
+	program.Send(runtimeTranscriptRefreshedMsg{token: 1, transcript: clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     2,
+		TotalEntries: 2,
+		Entries: []clientui.ChatEntry{
+			{Role: "user", Text: "commit/push"},
+			{Role: "assistant", Text: "after"},
+		},
+	}})
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(normalizedOutput(out.String()), "after") {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for authoritative rewrite appended to ongoing scrollback output=%q transcript=%+v native_projection=%+v native_rendered_projection=%+v native_snapshot=%q busy=%t runtime_busy=%t token=%d ongoing=%q", normalizedOutput(out.String()), model.transcriptEntries, model.nativeProjection, model.nativeRenderedProjection, model.nativeRenderedSnapshot, model.busy, model.runtimeTranscriptBusy, model.runtimeTranscriptToken, stripANSIAndTrimRight(model.view.OngoingSnapshot()))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := len(model.transcriptEntries); got != 2 {
+		t.Fatalf("expected hydration rewrite to replace transcript tail, got %d entries", got)
+	}
+	if got := model.transcriptEntries[1].Text; got != "after" {
+		t.Fatalf("expected authoritative assistant rewrite after hydration, got %q", got)
+	}
+	if strings.TrimSpace(model.view.OngoingStreamingText()) != "" {
+		t.Fatalf("expected hydration rewrite to clear stale streaming text, got %q", model.view.OngoingStreamingText())
+	}
+
+	program.Send(runtimeEventMsg{event: clientui.Event{
+		Kind:                clientui.EventConversationUpdated,
+		StepID:              "step-2",
+		TranscriptRevision:  3,
+		CommittedEntryCount: 3,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:  "assistant",
+			Text:  "next answer",
+			Phase: string(llm.MessagePhaseFinal),
+		}},
+	}})
+	waitForTestCondition(t, 2*time.Second, "later assistant append resumes after hydration rewrite", func() bool {
+		return containsInOrder(normalizedOutput(out.String()), "after", "next answer")
+	})
+
+	program.Quit()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	normalized := normalizedOutput(out.String())
+	if !containsInOrder(normalized, "before", "after", "next answer") {
+		t.Fatalf("expected ongoing scrollback to show initial stale tail, recovered authoritative tail, then later assistant append, got %q", normalized)
+	}
+	if strings.Count(normalized, "next answer") != 1 {
+		t.Fatalf("expected later assistant append exactly once, got %d in %q", strings.Count(normalized, "next answer"), normalized)
+	}
+
+	next, detailCmd := model.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	model = next.(*uiModel)
+	_ = collectCmdMessages(t, detailCmd)
+	if model.view.Mode() != tui.ModeDetail {
+		t.Fatalf("expected detail mode after toggle, got %q", model.view.Mode())
+	}
+	detail := stripANSIAndTrimRight(model.View())
+	if !strings.Contains(detail, "after") || !strings.Contains(detail, "next answer") {
+		t.Fatalf("expected detail mode to reflect authoritative transcript tail, got %q", detail)
+	}
+	if strings.Contains(detail, "before") {
+		t.Fatalf("expected detail mode to exclude stale assistant tail after hydration rewrite, got %q", detail)
 	}
 }
 
