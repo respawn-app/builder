@@ -464,6 +464,8 @@ type uiModel struct {
 	runtimeTranscriptBusy              bool
 	runtimeTranscriptDirty             bool
 	pendingQueuedDrainAfterHydration   bool
+	queuedDrainReadyAfterHydration     bool
+	waitRuntimeEventAfterHydration     bool
 	nativeFlushedEntryCount            int
 	nativeHistoryReplayed              bool
 	nativeReplayWidth                  int
@@ -632,10 +634,20 @@ func (m *uiModel) applyRunLoggerDiagnostic(diag runLoggerDiagnostic) tea.Cmd {
 
 func (m *uiModel) handleRuntimeEventBatch(events []clientui.Event) (*uiModel, tea.Cmd) {
 	flushSequenceBefore := m.nativeFlushSequence
-	cmd := m.runtimeAdapter().handleProjectedRuntimeEventsBatch(events)
+	result := m.runtimeAdapter().applyProjectedRuntimeEventsBatch(events)
+	cmd := result.cmd
+	if !result.awaitsHydration {
+		cmd = sequenceCmds(cmd, m.flushQueuedInputsAfterHydration())
+	}
 	m.syncViewport()
+	if result.awaitsHydration {
+		m.waitRuntimeEventAfterHydration = true
+	}
 	if m.nativeFlushSequence != flushSequenceBefore {
 		m.waitRuntimeEventAfterFlushSequence = m.nativeFlushSequence
+		return m, cmd
+	}
+	if result.awaitsHydration {
 		return m, cmd
 	}
 	return m, tea.Batch(m.waitRuntimeEventCmd(), cmd)
@@ -643,6 +655,9 @@ func (m *uiModel) handleRuntimeEventBatch(events []clientui.Event) (*uiModel, te
 
 func (m *uiModel) waitRuntimeEventCmd() tea.Cmd {
 	if m == nil {
+		return nil
+	}
+	if m.waitRuntimeEventAfterFlushSequence != 0 || m.waitRuntimeEventAfterHydration {
 		return nil
 	}
 	if len(m.pendingRuntimeEvents) == 0 {

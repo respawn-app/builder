@@ -380,20 +380,44 @@ func TestRuntimeEventBatchDoesNotSequenceNativeFlushBehindTransientStatusTimer(t
 	if cmd == nil {
 		t.Fatal("expected runtime event batch command")
 	}
-	msgs := collectCmdMessages(t, cmd)
+	top := cmd()
+	value := reflect.ValueOf(top)
+	if !value.IsValid() || value.Kind() != reflect.Slice || value.Len() < 2 {
+		t.Fatalf("expected top-level ordered command sequence, got %T", top)
+	}
+	first, ok := value.Index(0).Interface().(tea.Cmd)
+	if !ok {
+		t.Fatalf("expected first sequence item to be tea.Cmd, got %T", value.Index(0).Interface())
+	}
+	second, ok := value.Index(1).Interface().(tea.Cmd)
+	if !ok {
+		t.Fatalf("expected second sequence item to be tea.Cmd, got %T", value.Index(1).Interface())
+	}
 	flushFound := false
-	for _, msg := range msgs {
-		flush, ok := msg.(nativeHistoryFlushMsg)
-		if !ok {
-			continue
+	switch msg := first().(type) {
+	case nativeHistoryFlushMsg:
+		flushFound = strings.Contains(stripANSIPreserve(msg.Text), "Background shell 1000 completed")
+	case tea.BatchMsg:
+		for _, child := range msg {
+			flush, ok := child().(nativeHistoryFlushMsg)
+			if ok && strings.Contains(stripANSIPreserve(flush.Text), "Background shell 1000 completed") {
+				flushFound = true
+				break
+			}
 		}
-		if strings.Contains(stripANSIPreserve(flush.Text), "Background shell 1000 completed") {
-			flushFound = true
+	}
+	timerFound := false
+	for _, msg := range collectCmdMessages(t, second) {
+		if _, ok := msg.(clearTransientStatusMsg); ok {
+			timerFound = true
 			break
 		}
 	}
 	if !flushFound {
-		t.Fatal("expected immediate native history flush to be present alongside delayed transient-status timer")
+		t.Fatal("expected first sequence item to flush native history immediately")
+	}
+	if !timerFound {
+		t.Fatal("expected second sequence item to keep the transient-status timer batched after native history flush")
 	}
 }
 
@@ -997,8 +1021,8 @@ func TestApplyRuntimeTranscriptPageRejectsEqualRevisionTailReplacementAfterLiveA
 		t.Fatalf("transcript revision = %d, want 10", got)
 	}
 
-	if cmd, mutated := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{Kind: clientui.EventAssistantMessage, TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "live append"}}}, false); cmd != nil || !mutated {
-		t.Fatalf("expected live append without extra command, mutated=%t cmd=%v", mutated, cmd)
+	if cmd, mutated, needsHydration := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{Kind: clientui.EventAssistantMessage, TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "live append"}}}, false); cmd != nil || !mutated || needsHydration {
+		t.Fatalf("expected live append without extra command, mutated=%t needsHydration=%t cmd=%v", mutated, needsHydration, cmd)
 	}
 	if !m.transcriptLiveDirty {
 		t.Fatal("expected live append to mark transcript live-dirty")
@@ -1245,13 +1269,13 @@ func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenAuthor
 		_ = collectCmdMessages(t, cmd)
 	}
 
-	if cmd, mutated := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{Kind: clientui.EventToolCallStarted, TranscriptEntries: []clientui.ChatEntry{{
+	if cmd, mutated, needsHydration := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{Kind: clientui.EventToolCallStarted, TranscriptEntries: []clientui.ChatEntry{{
 		Role:       "tool_call",
 		Text:       "pwd",
 		ToolCallID: "stale-call",
 		ToolCall:   &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"},
-	}}}, false); cmd != nil || !mutated {
-		t.Fatalf("expected live append without extra command, mutated=%t cmd=%v", mutated, cmd)
+	}}}, false); cmd != nil || !mutated || needsHydration {
+		t.Fatalf("expected live append without extra command, mutated=%t needsHydration=%t cmd=%v", mutated, needsHydration, cmd)
 	}
 	if !m.transcriptLiveDirty {
 		t.Fatal("expected live append to mark transcript live-dirty")
@@ -1436,8 +1460,8 @@ func TestApplyRuntimeTranscriptPageAcceptsNewerRevisionTailReplacementAfterLiveA
 	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
-	if cmd, mutated := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{Kind: clientui.EventAssistantMessage, TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "live append"}}}, false); cmd != nil || !mutated {
-		t.Fatalf("expected live append without extra command, mutated=%t cmd=%v", mutated, cmd)
+	if cmd, mutated, needsHydration := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{Kind: clientui.EventAssistantMessage, TranscriptEntries: []clientui.ChatEntry{{Role: "assistant", Text: "live append"}}}, false); cmd != nil || !mutated || needsHydration {
+		t.Fatalf("expected live append without extra command, mutated=%t needsHydration=%t cmd=%v", mutated, needsHydration, cmd)
 	}
 
 	fresh := clientui.TranscriptPage{
@@ -1498,8 +1522,8 @@ func TestApplyProjectedTranscriptEntriesUsesTailOffsetWhileViewingOlderDetailPag
 	}
 
 	appended := []clientui.ChatEntry{{Role: "assistant", Text: "tail 500"}, {Role: "assistant", Text: "tail 501"}}
-	if cmd, mutated := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{Kind: clientui.EventAssistantMessage, TranscriptEntries: appended}, false); cmd != nil || !mutated {
-		t.Fatalf("expected projected append to mutate without extra command, mutated=%t cmd=%v", mutated, cmd)
+	if cmd, mutated, needsHydration := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{Kind: clientui.EventAssistantMessage, TranscriptEntries: appended}, false); cmd != nil || !mutated || needsHydration {
+		t.Fatalf("expected projected append to mutate without extra command, mutated=%t needsHydration=%t cmd=%v", mutated, needsHydration, cmd)
 	}
 
 	if got, want := len(m.transcriptEntries), 202; got != want {
@@ -1691,6 +1715,106 @@ func TestProjectedAssistantMessageClearsStreamingTextWhenSkippedCommitMatchesLiv
 	}
 	if m.sawAssistantDelta {
 		t.Fatal("expected skipped matching assistant commit to clear assistant delta flag")
+	}
+}
+
+func TestApplyRuntimeTranscriptPageClearsDuplicateCommittedAssistantOngoing(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	page := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     3,
+		TotalEntries: 1,
+		Entries: []clientui.ChatEntry{{
+			Role:  "assistant",
+			Text:  "final",
+			Phase: string(llm.MessagePhaseFinal),
+		}},
+		Ongoing: "final",
+	}
+
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, page); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	if got := m.view.OngoingStreamingText(); got != "" {
+		t.Fatalf("expected duplicate ongoing cleared by authoritative page, got %q", got)
+	}
+	if m.sawAssistantDelta {
+		t.Fatal("expected duplicate ongoing normalization to clear assistant delta flag")
+	}
+	if got := len(m.transcriptEntries); got != 1 || m.transcriptEntries[0].Text != "final" {
+		t.Fatalf("expected committed assistant entry preserved after duplicate ongoing normalization, got %+v", m.transcriptEntries)
+	}
+}
+
+func TestApplyRuntimeTranscriptPageAllowsEqualRevisionToClearDuplicateCommittedAssistantOngoing(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.transcriptRevision = 3
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "final", Phase: llm.MessagePhaseFinal}}
+	m.transcriptTotalEntries = len(m.transcriptEntries)
+	m.sawAssistantDelta = true
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, Ongoing: "final"})
+
+	page := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     3,
+		TotalEntries: 1,
+		Entries: []clientui.ChatEntry{{
+			Role:  "assistant",
+			Text:  "final",
+			Phase: string(llm.MessagePhaseFinal),
+		}},
+		Ongoing: "",
+	}
+
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, page); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	if got := m.view.OngoingStreamingText(); got != "" {
+		t.Fatalf("expected equal-revision authoritative page to clear duplicate ongoing, got %q", got)
+	}
+	if m.sawAssistantDelta {
+		t.Fatal("expected equal-revision duplicate ongoing clear to reset assistant delta flag")
+	}
+}
+
+func TestApplyRuntimeTranscriptPagePreservesAuthoritativeNonEmptyOngoingOverStaleLiveDuplicate(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.transcriptRevision = 3
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "final", Phase: llm.MessagePhaseFinal}}
+	m.transcriptTotalEntries = len(m.transcriptEntries)
+	m.sawAssistantDelta = true
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, Ongoing: "final"})
+
+	page := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     4,
+		TotalEntries: 1,
+		Entries: []clientui.ChatEntry{{
+			Role:  "assistant",
+			Text:  "final",
+			Phase: string(llm.MessagePhaseFinal),
+		}},
+		Ongoing: "final continuation",
+	}
+
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, page); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	if got := m.view.OngoingStreamingText(); got != "final continuation" {
+		t.Fatalf("expected authoritative non-empty ongoing preserved, got %q", got)
+	}
+	if !m.sawAssistantDelta {
+		t.Fatal("expected authoritative non-empty ongoing to preserve assistant delta flag")
 	}
 }
 
@@ -2141,6 +2265,15 @@ func TestProjectedUserMessageFlushedDefersOptimisticAppendWhileAssistantStreamIs
 	m.input = "steered message"
 	m.lockedInjectText = "steered message"
 	m.inputSubmitLocked = true
+	client.transcript = clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     7,
+		TotalEntries: 2,
+		Entries: []clientui.ChatEntry{
+			{Role: "assistant", Text: "foreground done"},
+			{Role: "user", Text: "steered message"},
+		},
+	}
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "foreground done"})
 
 	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
@@ -2152,10 +2285,16 @@ func TestProjectedUserMessageFlushedDefersOptimisticAppendWhileAssistantStreamIs
 		}},
 	})
 	msgs := collectCmdMessages(t, cmd)
+	var refresh runtimeTranscriptRefreshedMsg
+	refreshFound := false
 	for _, msg := range msgs {
-		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
-			t.Fatalf("did not expect transcript refresh after deferred flushed user message, got %+v", msgs)
+		if typed, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			refresh = typed
+			refreshFound = true
 		}
+	}
+	if !refreshFound {
+		t.Fatalf("expected authoritative transcript refresh after deferred flushed user message, got %+v", msgs)
 	}
 	if len(m.transcriptEntries) != 0 {
 		t.Fatalf("expected optimistic user append deferred until assistant catch-up, got %+v", m.transcriptEntries)
@@ -2177,6 +2316,21 @@ func TestProjectedUserMessageFlushedDefersOptimisticAppendWhileAssistantStreamIs
 	}
 	if !m.sawAssistantDelta {
 		t.Fatal("expected live assistant delta flag preserved while deferring user flush append")
+	}
+
+	next, followCmd := m.Update(refresh)
+	m = next.(*uiModel)
+	if got := len(m.transcriptEntries); got != 2 {
+		t.Fatalf("expected authoritative hydration to release deferred user append, got %d entries", got)
+	}
+	if got := m.transcriptEntries[1].Text; got != "steered message" {
+		t.Fatalf("expected deferred user message appended after hydration, got %q", got)
+	}
+	if got := m.view.OngoingStreamingText(); got != "" {
+		t.Fatalf("expected authoritative hydration to clear stale live assistant stream, got %q", got)
+	}
+	if followCmd == nil {
+		t.Fatal("expected native replay after authoritative hydration")
 	}
 }
 

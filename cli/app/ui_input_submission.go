@@ -212,6 +212,7 @@ func (c uiInputController) handleSubmitDone(msg submitDoneMsg) (tea.Model, tea.C
 	if len(m.queued) > 0 {
 		if m.hasRuntimeClient() && c.queuedDrainRequiresHydration() {
 			m.pendingQueuedDrainAfterHydration = true
+			m.queuedDrainReadyAfterHydration = false
 			m.syncViewport()
 			return m, transcriptSyncCmd
 		}
@@ -240,7 +241,8 @@ func (c uiInputController) queuedDrainRequiresHydration() bool {
 		if trimmed == "" {
 			continue
 		}
-		if _, knownCommand := m.commandRegistry.Command(trimmed); knownCommand {
+		commandResult := m.commandRegistry.Execute(trimmed)
+		if commandResult.Handled && !commandResult.SubmitUser {
 			continue
 		}
 		return true
