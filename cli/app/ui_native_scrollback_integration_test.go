@@ -1564,6 +1564,7 @@ func TestNativeProgramDoesNotDuplicateSupervisorFollowUpAfterHydration(t *testin
 	waitForTestCondition(t, 2*time.Second, "startup replay", func() bool {
 		return strings.Contains(normalizedOutput(out.String()), "seed")
 	})
+	baselineLoadCalls := client.LoadCalls()
 
 	runtimeEvents <- clientui.Event{
 		Kind:                clientui.EventAssistantMessage,
@@ -1595,7 +1596,7 @@ func TestNativeProgramDoesNotDuplicateSupervisorFollowUpAfterHydration(t *testin
 
 	waitForTestCondition(t, 2*time.Second, "hydrated supervisor follow-up remains single and ordered", func() bool {
 		normalized := normalizedOutput(out.String())
-		return client.LoadCalls() > 0 &&
+		return client.LoadCalls() > baselineLoadCalls &&
 			containsInOrder(normalized, "seed", "follow-up final unique", "Supervisor ran: 2 suggestions, applied.") &&
 			strings.Count(normalized, "follow-up final unique") == 1 &&
 			strings.Count(normalized, "Supervisor ran: 2 suggestions, applied.") == 1
