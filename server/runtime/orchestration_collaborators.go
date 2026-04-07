@@ -62,8 +62,13 @@ type messageLifecycle interface {
 
 type reviewerPipeline interface {
 	ShouldRunTurn(frequency string, reviewerClient llm.Client, patchEditsApplied bool) bool
-	RunFollowUp(ctx context.Context, stepID string, original llm.Message, reviewerClient llm.Client) (llm.Message, error)
+	RunFollowUp(ctx context.Context, stepID string, original llm.Message, reviewerClient llm.Client) (reviewerFollowUpResult, error)
 	RunSuggestions(ctx context.Context, stepID string, reviewerClient llm.Client) (reviewerSuggestionsResult, error)
+}
+
+type reviewerFollowUpResult struct {
+	Message    llm.Message
+	Completion *ReviewerStatus
 }
 
 type phaseProtocolTurn struct {

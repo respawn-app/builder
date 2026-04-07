@@ -785,6 +785,9 @@ func eventTranscriptEntriesReconcileWithCommittedTail(kind clientui.EventKind) b
 	case clientui.EventUserMessageFlushed,
 		clientui.EventAssistantMessage,
 		clientui.EventToolCallCompleted,
+		clientui.EventReviewerCompleted,
+		clientui.EventCompactionCompleted,
+		clientui.EventCompactionFailed,
 		clientui.EventCacheWarning:
 		return true
 	default:

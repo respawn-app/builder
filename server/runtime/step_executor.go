@@ -185,6 +185,7 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 			}
 			resolved := assistantMsg
 			resolvedNoopFinalAnswer := noopFinalAnswer
+			var reviewerCompletion *ReviewerStatus
 			if hasDeferredFinal {
 				resolved = deferredFinal
 				resolvedNoopFinalAnswer = isNoopFinalAnswer(resolved)
@@ -201,7 +202,8 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 			if s.reviewer.ShouldRunTurn(effectiveReviewerFrequency, effectiveReviewerClient, patchEditsApplied) {
 				reviewed, err := s.reviewer.RunFollowUp(ctx, stepID, resolved, effectiveReviewerClient)
 				if err == nil {
-					resolved = reviewed
+					resolved = reviewed.Message
+					reviewerCompletion = reviewed.Completion
 				}
 			}
 			if err := e.maybeAppendCompactionSoonReminder(ctx, stepID); err != nil {
@@ -209,6 +211,9 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 			}
 			if options.EmitAssistantEvent {
 				e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: resolved})
+			}
+			if reviewerCompletion != nil {
+				e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: reviewerCompletion})
 			}
 			return resolved, executedToolCall, false, nil
 		}
