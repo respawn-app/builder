@@ -334,10 +334,11 @@
 - `Enter` runs the currently selected slash command, including the default first match for partial input.
 - `Tab` on a partial selected slash command autocompletes it and inserts a trailing space for arguments.
 - Unknown slash commands are sent to model as normal user prompts.
-- Built-in commands: `/logout`, `/exit`, `/new`, `/resume`, `/compact`, `/name`, `/thinking`, `/fast`, `/review`, `/init`, `/supervisor`, `/autocompaction`, `/status`, `/ps`, `/back`.
+- Built-in commands: `/logout`, `/exit`, `/new`, `/resume`, `/compact`, `/name`, `/thinking`, `/fast`, `/review`, `/init`, `/supervisor`, `/autocompaction`, `/status`, `/ps`, `/copy`, `/back`.
 - Exact known slash commands use the normal queued-input drain path when queued, including conditionally fresh-session commands like `/review` and `/init`; they are never sent to the model as plain user prompts.
 - Run-safe commands execute immediately while busy.
 - Non-run-safe known commands while busy are rejected with transient status-line error.
+- `/copy` copies the latest committed assistant `final_answer` to the system clipboard and stays hidden from the picker until that value is available.
 - `/review` auto-submits the embedded review rubric prompt; it stays in-place for empty sessions and forks a fresh child session once the current session already has a visible user prompt. Optional args are appended as review scope.
 - `/back` reopens the parent session when available; the parent draft becomes the child session's last committed assistant `final_answer` only when that message is also the last committed message, unless the parent already has its own saved draft.
 - `/supervisor` controls runtime reviewer invocation for the current session only.

@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"builder/cli/app/commands"
+	"builder/cli/tui"
+	"builder/server/llm"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -113,6 +115,27 @@ func TestBusyTabBackWithoutParentShowsLocalErrorAndDoesNotQueue(t *testing.T) {
 	status := stripANSIAndTrimRight(updated.renderStatusLine(120, uiThemeStyles("dark")))
 	if !strings.Contains(status, "No parent session available") {
 		t.Fatalf("expected queued /back error in status line, got %q", status)
+	}
+}
+
+func TestSlashCommandPickerShowsCopyOnlyWhenFinalAnswerIsAvailable(t *testing.T) {
+	hidden := newProjectedStaticUIModel()
+	hidden.input = "/co"
+	hidden.refreshSlashCommandFilterFromInput()
+	if state := hidden.slashCommandPicker(); slashPickerContainsCommand(state, "copy") {
+		t.Fatalf("did not expect /copy without a final answer, got %+v", slashPickerCommandNames(state))
+	}
+
+	visible := newProjectedStaticUIModel()
+	visible.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "done", Phase: llm.MessagePhaseFinal}}
+	visible.input = "/co"
+	visible.refreshSlashCommandFilterFromInput()
+	state := visible.slashCommandPicker()
+	if !state.visible {
+		t.Fatal("expected slash picker visible")
+	}
+	if !slashPickerContainsCommand(state, "copy") {
+		t.Fatalf("expected /copy in slash picker, got %+v", slashPickerCommandNames(state))
 	}
 }
 

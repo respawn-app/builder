@@ -43,17 +43,19 @@ type persistedCacheResponseObserved struct {
 }
 
 type requestCacheLineage struct {
-	request              persistedCacheRequestObserved
-	lastResponseHadReuse bool
-	hasResponse          bool
-	pendingCause         cachewarn.Reason
+	request               persistedCacheRequestObserved
+	lastResponseHadReuse  bool
+	lastCachedInputTokens int
+	hasResponse           bool
+	pendingCause          cachewarn.Reason
 }
 
 type preparedCacheRequestObservation struct {
-	request             persistedCacheRequestObserved
-	exactWarning        *cachewarn.Warning
-	previousHadReuse    bool
-	hasPreviousResponse bool
+	request                   persistedCacheRequestObserved
+	exactWarning              *cachewarn.Warning
+	previousHadReuse          bool
+	previousCachedInputTokens int
+	hasPreviousResponse       bool
 }
 
 type requestCacheTracker struct {
@@ -93,6 +95,7 @@ func (t *requestCacheTracker) Prepare(req llm.Request) (preparedCacheRequestObse
 		return observation, nil
 	}
 	observation.previousHadReuse = previous.lastResponseHadReuse
+	observation.previousCachedInputTokens = previous.lastCachedInputTokens
 	observation.hasPreviousResponse = previous.hasResponse
 	if !shape.HasPrefix(previous.request.ChunkCount, previous.request.TerminalHash) {
 		reason := cachewarn.ReasonNonPostfix
@@ -136,6 +139,10 @@ func (t *requestCacheTracker) RecordResponse(response persistedCacheResponseObse
 		return
 	}
 	hadReuse := response.HasCachedInputTokens && response.CachedInputTokens > 0
+	cachedInputTokens := 0
+	if response.HasCachedInputTokens && response.CachedInputTokens > 0 {
+		cachedInputTokens = response.CachedInputTokens
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	response.DigestVersion = normalizeRequestCacheDigestVersion(response.DigestVersion)
@@ -148,6 +155,7 @@ func (t *requestCacheTracker) RecordResponse(response persistedCacheResponseObse
 		TerminalHash:  response.TerminalHash,
 	}
 	state.lastResponseHadReuse = hadReuse
+	state.lastCachedInputTokens = cachedInputTokens
 	state.hasResponse = true
 	state.pendingCause = ""
 	t.lineage[cacheKey] = state
@@ -186,9 +194,10 @@ func (e *Engine) observePromptCacheResponse(stepID string, prepared preparedCach
 	var warning *cachewarn.Warning
 	if prepared.exactWarning != nil && shouldWarnOnExactBreak(e.cfg.CacheWarningMode) {
 		warning = prepared.exactWarning
+		warning.LostInputTokens = lostCachedInputTokens(prepared, usage)
 		events = append(events, session.EventInput{Kind: sessionEventCacheWarning, Payload: warning})
 	} else if shouldWarnOnCacheReuseDrop(e.cfg.CacheWarningMode, prepared, usage) {
-		warning = &cachewarn.Warning{Scope: prepared.request.Scope, Reason: cachewarn.ReasonReuseDropped, CacheKey: prepared.request.CacheKey}
+		warning = &cachewarn.Warning{Scope: prepared.request.Scope, Reason: cachewarn.ReasonReuseDropped, CacheKey: prepared.request.CacheKey, LostInputTokens: lostCachedInputTokens(prepared, usage)}
 		events = append(events, session.EventInput{Kind: sessionEventCacheWarning, Payload: warning})
 	}
 	events = append(events, session.EventInput{Kind: sessionEventCacheResponseObserved, Payload: response})
@@ -219,6 +228,21 @@ func shouldWarnOnCacheReuseDrop(mode config.CacheWarningMode, prepared preparedC
 		return false
 	}
 	return usage.HasCachedInputTokens && usage.CachedInputTokens <= 0
+}
+
+func lostCachedInputTokens(prepared preparedCacheRequestObservation, usage llm.Usage) int {
+	previous := prepared.previousCachedInputTokens
+	if previous < 0 {
+		previous = 0
+	}
+	current := 0
+	if usage.HasCachedInputTokens && usage.CachedInputTokens > 0 {
+		current = usage.CachedInputTokens
+	}
+	if previous <= current {
+		return 0
+	}
+	return previous - current
 }
 
 func (e *Engine) restorePromptCacheRequest(payload []byte) error {

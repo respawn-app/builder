@@ -44,8 +44,12 @@ func parseReviewerSuggestionsObject(content string) []string {
 }
 
 func buildReviewerRequestMessages(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool, disabledSkills map[string]bool) ([]llm.Message, error) {
+	return buildReviewerRequestMessagesWithNow(messages, workspaceRoot, model, thinkingLevel, headless, disabledSkills, time.Now())
+}
+
+func buildReviewerRequestMessagesWithNow(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool, disabledSkills map[string]bool, now time.Time) ([]llm.Message, error) {
 	metaMessages, transcriptSource := splitMetaContextMessages(messages)
-	builder := newMetaContextBuilder(workspaceRoot, model, thinkingLevel, disabledSkills, time.Now())
+	builder := newMetaContextBuilder(workspaceRoot, model, thinkingLevel, disabledSkills, now)
 	metaResult, err := builder.Build(metaContextBuildOptions{
 		ExistingMessages:          metaMessages,
 		IncludeAgents:             true,
@@ -66,23 +70,9 @@ func buildReviewerRequestMessages(messages []llm.Message, workspaceRoot string, 
 }
 
 func buildReviewerTranscriptMessages(messages []llm.Message) []llm.Message {
-	toolOutputsByCallID := collectReviewerToolOutputs(messages)
-	toolCallIDs := collectReviewerToolCallIDs(messages)
 	out := make([]llm.Message, 0, len(messages)+1)
 	for _, message := range messages {
-		if message.Role == llm.RoleTool {
-			callID := strings.TrimSpace(message.ToolCallID)
-			if callID != "" && toolCallIDs[callID] {
-				continue
-			}
-		}
-		if message.Role == llm.RoleTool && strings.TrimSpace(message.ToolCallID) == "" {
-			continue
-		}
-		if !shouldIncludeReviewerMessage(message) {
-			continue
-		}
-		out = append(out, llm.Message{Role: llm.RoleUser, Content: formatReviewerTranscriptEntry(message, toolOutputsByCallID)})
+		out = append(out, reviewerTranscriptMessagesFromMessage(message)...)
 	}
 	if len(out) == 0 {
 		out = append(out, llm.Message{Role: llm.RoleUser, Content: "No reviewable transcript entries were available for this turn."})
@@ -90,113 +80,98 @@ func buildReviewerTranscriptMessages(messages []llm.Message) []llm.Message {
 	return out
 }
 
-func collectReviewerToolOutputs(messages []llm.Message) map[string]string {
-	out := make(map[string]string)
-	for _, message := range messages {
-		if message.Role != llm.RoleTool {
-			continue
-		}
-		callID := strings.TrimSpace(message.ToolCallID)
-		if callID == "" {
-			continue
-		}
-		if _, exists := out[callID]; exists {
-			continue
-		}
-		out[callID] = compactReviewerToolOutput(message.Content)
-	}
-	return out
-}
-
-func collectReviewerToolCallIDs(messages []llm.Message) map[string]bool {
-	out := make(map[string]bool)
-	for _, message := range messages {
-		if message.Role != llm.RoleAssistant || len(message.ToolCalls) == 0 {
-			continue
-		}
-		for _, call := range message.ToolCalls {
-			callID := strings.TrimSpace(call.ID)
-			if callID == "" {
-				continue
-			}
-			out[callID] = true
-		}
-	}
-	return out
-}
-
-func shouldIncludeReviewerMessage(message llm.Message) bool {
+func reviewerTranscriptMessagesFromMessage(message llm.Message) []llm.Message {
 	if message.Role == llm.RoleDeveloper {
 		content := strings.TrimSpace(message.Content)
 		if content == "" {
-			return false
+			return nil
 		}
 		if _, ok := classifyMetaContextMessage(message); ok {
-			return false
+			return nil
 		}
 		if message.MessageType == llm.MessageTypeErrorFeedback || message.MessageType == llm.MessageTypeInterruption {
-			return false
+			return nil
 		}
+		visibleEntries := VisibleChatEntriesFromMessage(message)
+		if len(visibleEntries) == 0 {
+			return []llm.Message{{Role: llm.RoleUser, Content: formatReviewerHiddenDeveloperMessage(message)}}
+		}
+		return reviewerMessagesFromChatEntries(visibleEntries)
+	}
+	if message.Role == llm.RoleTool && strings.TrimSpace(message.ToolCallID) == "" {
+		return nil
 	}
 	if strings.TrimSpace(message.Content) == "" && len(message.ToolCalls) == 0 {
-		return false
+		return nil
 	}
-	return true
+	return reviewerMessagesFromChatEntries(VisibleChatEntriesFromMessage(message))
 }
 
-func formatReviewerTranscriptEntry(message llm.Message, toolOutputsByCallID map[string]string) string {
-	b := strings.Builder{}
-	b.WriteString(reviewerMessageLabel(message))
-	content := reviewerTranscriptContent(message)
-	if content != "" {
-		b.WriteString("\n")
-		if message.Role == llm.RoleTool {
-			b.WriteString("Tool output:\n")
-			b.WriteString(compactReviewerToolOutput(content))
-		} else {
-			b.WriteString(content)
+func reviewerMessagesFromChatEntries(entries []ChatEntry) []llm.Message {
+	out := make([]llm.Message, 0, len(entries))
+	for _, entry := range entries {
+		formatted := formatReviewerChatEntry(entry)
+		if strings.TrimSpace(formatted) == "" {
+			continue
 		}
-		b.WriteString("\n")
+		out = append(out, llm.Message{Role: llm.RoleUser, Content: formatted})
 	}
-	if len(message.ToolCalls) > 0 {
-		b.WriteString("\nTool calls:\n")
-		for i, call := range message.ToolCalls {
-			b.WriteString(strconv.Itoa(i + 1))
-			b.WriteString(". ")
-			b.WriteString(strings.TrimSpace(call.Name))
-			b.WriteString("\n")
-			output := ""
-			if callID := strings.TrimSpace(call.ID); callID != "" {
-				output = strings.TrimSpace(toolOutputsByCallID[callID])
-			}
-			b.WriteString(formatReviewerToolCallPayload(call, output))
-			b.WriteString("\n")
-		}
-	}
-	return strings.TrimSpace(b.String())
+	return out
 }
 
-func formatReviewerToolCallPayload(call llm.ToolCall, output string) string {
-	sections := make([]string, 0, 2)
-	if input := reviewerToolInputText(call); strings.TrimSpace(input) != "" {
-		sections = append(sections, "Input:\n"+indentReviewerBlock(input))
+func formatReviewerHiddenDeveloperMessage(message llm.Message) string {
+	content := strings.TrimSpace(message.Content)
+	if content == "" {
+		return ""
 	}
-	if output = strings.TrimSpace(output); output != "" {
-		sections = append(sections, "Output:\n"+indentReviewerBlock(output))
-	}
-	if len(sections) == 0 {
-		return "{}"
-	}
-	return strings.Join(sections, "\n")
+	return "Developer:\n" + content
 }
 
-func reviewerToolInputText(call llm.ToolCall) string {
-	if meta := decodeToolCallMeta(call); meta != nil {
-		if text := reviewerToolPresentationText(meta); text != "" {
+func formatReviewerChatEntry(entry ChatEntry) string {
+	label := reviewerChatEntryLabel(entry)
+	text := strings.TrimSpace(reviewerChatEntryText(entry))
+	if text == "" {
+		return strings.TrimSpace(label)
+	}
+	return strings.TrimSpace(label) + "\n" + text
+}
+
+func reviewerChatEntryText(entry ChatEntry) string {
+	if entry.Role == "tool_call" {
+		if text := reviewerToolPresentationText(entry.ToolCall); text != "" {
 			return text
 		}
 	}
-	return compactReviewerRawJSON(call.Input)
+	return strings.TrimSpace(entry.Text)
+}
+
+func reviewerChatEntryLabel(entry ChatEntry) string {
+	switch entry.Role {
+	case "assistant":
+		return "Agent:"
+	case "user":
+		return "User:"
+	case "tool_call":
+		return "Tool call:"
+	case "tool_result_ok":
+		return "Tool result:"
+	case "tool_result_error":
+		return "Tool result error:"
+	case string(transcript.EntryRoleCompactionSummary):
+		return "Compaction:"
+	case string(transcript.EntryRoleManualCompactionCarryover):
+		return "Carryover:"
+	case "warning":
+		return "Warning:"
+	case "system":
+		return "System:"
+	default:
+		role := strings.ReplaceAll(strings.TrimSpace(entry.Role), "_", " ")
+		if role == "" {
+			return "Unknown:"
+		}
+		return fmt.Sprintf("%s:", titleCaseASCII(role))
+	}
 }
 
 func reviewerToolPresentationText(meta *transcript.ToolCallMeta) string {
@@ -238,39 +213,6 @@ func reviewerToolPresentationText(meta *transcript.ToolCallMeta) string {
 	return strings.Join(lines, "\n")
 }
 
-func indentReviewerBlock(text string) string {
-	lines := strings.Split(strings.TrimSpace(text), "\n")
-	for i := range lines {
-		lines[i] = "  " + lines[i]
-	}
-	return strings.Join(lines, "\n")
-}
-
-func reviewerTranscriptContent(message llm.Message) string {
-	return strings.TrimSpace(message.Content)
-}
-
-func reviewerMessageLabel(message llm.Message) string {
-	switch message.Role {
-	case llm.RoleAssistant:
-		return "Agent:"
-	case llm.RoleUser:
-		return "User:"
-	case llm.RoleTool:
-		return "Tool:"
-	case llm.RoleDeveloper:
-		return "Developer:"
-	case llm.RoleSystem:
-		return "System:"
-	default:
-		role := strings.TrimSpace(string(message.Role))
-		if role == "" {
-			role = "unknown"
-		}
-		return fmt.Sprintf("%s:", titleCaseASCII(role))
-	}
-}
-
 func titleCaseASCII(input string) string {
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" {
@@ -281,44 +223,6 @@ func titleCaseASCII(input string) string {
 		return strings.ToUpper(trimmed)
 	}
 	return strings.ToUpper(string(runes[0])) + string(runes[1:])
-}
-
-func compactReviewerToolOutput(content string) string {
-	trimmed := strings.TrimSpace(content)
-	if trimmed == "" {
-		return "{}"
-	}
-	if !json.Valid([]byte(trimmed)) {
-		return trimmed
-	}
-	var payload any
-	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
-		return trimmed
-	}
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return trimmed
-	}
-	return string(encoded)
-}
-
-func compactReviewerRawJSON(raw json.RawMessage) string {
-	trimmed := strings.TrimSpace(string(raw))
-	if trimmed == "" {
-		return "{}"
-	}
-	if !json.Valid([]byte(trimmed)) {
-		return trimmed
-	}
-	var payload any
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return trimmed
-	}
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return trimmed
-	}
-	return string(encoded)
 }
 
 func formatReviewerDeveloperInstruction(suggestions []string) string {

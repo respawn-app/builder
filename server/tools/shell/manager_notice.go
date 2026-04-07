@@ -324,15 +324,16 @@ func utf8EncodeRune(dst []byte, r rune) int {
 
 func formatExecResponse(result ExecResult) string {
 	sections := make([]string, 0, 6)
+	output := strings.TrimSpace(result.Output)
 	if strings.TrimSpace(result.Warning) != "" {
 		sections = append(sections, result.Warning)
 	}
 	if result.MovedToBackground {
-		sections = append(sections, "Process moved to background.")
+		sections = append(sections, formatBackgroundTransitionLine(result.SessionID, output != ""))
 	}
 	if result.ExitCode != nil {
 		sections = append(sections, fmt.Sprintf("Process exited with code %d", *result.ExitCode))
-	} else if strings.TrimSpace(result.SessionID) != "" {
+	} else if strings.TrimSpace(result.SessionID) != "" && !result.MovedToBackground {
 		sections = append(sections, fmt.Sprintf("Process running with session ID %s", result.SessionID))
 	}
 	if result.Backgrounded && result.ExitCode != nil {
@@ -344,11 +345,24 @@ func formatExecResponse(result ExecResult) string {
 	if result.Truncated {
 		sections = append(sections, fmt.Sprintf("Original token count: %d", approxTokenCount(result.OriginalChars)))
 	}
-	output := strings.TrimSpace(result.Output)
 	if output == "" {
 		sections = append(sections, noOutputText)
 	} else {
 		sections = append(sections, output)
 	}
 	return strings.Join(sections, "\n")
+}
+
+func formatBackgroundTransitionLine(sessionID string, hasOutput bool) string {
+	sessionID = strings.TrimSpace(sessionID)
+	switch {
+	case sessionID != "" && hasOutput:
+		return fmt.Sprintf("Process moved to background with ID %s. Output:", sessionID)
+	case sessionID != "":
+		return fmt.Sprintf("Process moved to background with ID %s.", sessionID)
+	case hasOutput:
+		return "Process moved to background. Output:"
+	default:
+		return "Process moved to background."
+	}
 }

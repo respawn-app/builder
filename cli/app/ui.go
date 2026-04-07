@@ -111,6 +111,10 @@ type clipboardImagePasteDoneMsg struct {
 	Err            error
 }
 
+type clipboardTextCopyDoneMsg struct {
+	Err error
+}
+
 type askEvent struct {
 	req              askquestion.Request
 	reply            chan askReply
@@ -344,6 +348,12 @@ func WithUIClipboardImagePaster(paster uiClipboardImagePaster) UIOption {
 	}
 }
 
+func WithUIClipboardTextCopier(copier uiClipboardTextCopier) UIOption {
+	return func(m *uiModel) {
+		m.clipboardTextCopier = copier
+	}
+}
+
 func newAskBridge() *askBridge {
 	return &askBridge{ch: make(chan askEvent, 64)}
 }
@@ -444,6 +454,7 @@ type uiModel struct {
 	statusRepository         uiStatusRepository
 	status                   uiStatusOverlayState
 	clipboardImagePaster     uiClipboardImagePaster
+	clipboardTextCopier      uiClipboardTextCopier
 
 	transientStatus       string
 	transientStatusKind   uiStatusNoticeKind
@@ -536,6 +547,7 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 		rollback:                 uiRollbackState{phase: uiRollbackPhaseInactive},
 		statusRepository:         newMemoryUIStatusRepository(),
 		clipboardImagePaster:     newSystemClipboardImagePaster(),
+		clipboardTextCopier:      newSystemClipboardTextCopier(),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -964,6 +976,10 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case clipboardImagePasteDoneMsg:
 		cmd := m.handleClipboardImagePasteDone(msg)
+		m.syncViewport()
+		return m, cmd
+	case clipboardTextCopyDoneMsg:
+		cmd := m.handleClipboardTextCopyDone(msg)
 		m.syncViewport()
 		return m, cmd
 	}

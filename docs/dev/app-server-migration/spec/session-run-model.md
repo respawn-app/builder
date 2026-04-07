@@ -141,6 +141,8 @@ The protocol must be explicit about whether a rejected operation failed because 
 - Transcript hydration and reconnect use typed reads and transcript pages.
 - Live session activity is not the authoritative transcript transport; it is optional progressive state for an already-attached frontend.
 - If a frontend misses part of a live stream, recovery is rehydrate plus resubscribe.
+- Each frontend should maintain one committed-transcript authority per session; detail windows, ongoing-mode buffers, and native transcript projections are derived render state only.
+- `session.getMainView` and similar status hydrators are not a substitute transcript transport; committed transcript content belongs to dedicated transcript reads.
 
 ## Attachment Model
 

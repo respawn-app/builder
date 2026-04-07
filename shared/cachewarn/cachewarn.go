@@ -1,6 +1,9 @@
 package cachewarn
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 type Scope string
 type Reason string
@@ -15,32 +18,49 @@ const (
 )
 
 type Warning struct {
-	Scope    Scope  `json:"scope,omitempty"`
-	Reason   Reason `json:"reason"`
-	CacheKey string `json:"cache_key,omitempty"`
+	Scope           Scope  `json:"scope,omitempty"`
+	Reason          Reason `json:"reason"`
+	CacheKey        string `json:"cache_key,omitempty"`
+	LostInputTokens int    `json:"lost_input_tokens,omitempty"`
 }
 
 func Text(w Warning) string {
+	return fmt.Sprintf("Cache miss: %s, -%s tokens", reasonText(w), formatTokenDeltaThousands(w.LostInputTokens))
+}
+
+func reasonText(w Warning) string {
 	switch w.Reason {
 	case ReasonCompaction:
-		if w.Scope == ScopeReviewer {
-			return "Cache invalidated for reviewer requests: compaction."
-		}
-		return "Cache invalidated: compaction."
+		return "compaction"
 	case ReasonNonPostfix:
 		if w.Scope == ScopeReviewer {
-			return "Prompt cache continuity broke for reviewer requests: this request was not a postfix of the previous request for the same cache key."
+			return "supervisor request was not a postfix of the previous request for the same cache key"
 		}
-		return "Prompt cache continuity broke: this request was not a postfix of the previous request for the same cache key."
+		return "request was not a postfix of the previous request for the same cache key"
 	case ReasonReuseDropped:
 		if w.Scope == ScopeReviewer {
-			return "Prompt cache reuse disappeared for a postfix-compatible reviewer request. The provider did not expose the cause."
+			return "postfix-compatible supervisor cache reuse disappeared"
 		}
-		return "Prompt cache reuse disappeared for a postfix-compatible request. The provider did not expose the cause."
+		return "postfix-compatible cache reuse disappeared"
 	default:
-		if strings.TrimSpace(string(w.Reason)) == "" {
-			return "Prompt cache warning."
+		trimmed := strings.TrimSpace(string(w.Reason))
+		if trimmed == "" {
+			return "unknown reason"
 		}
-		return "Prompt cache warning: " + strings.TrimSpace(string(w.Reason))
+		return trimmed
 	}
+}
+
+func formatTokenDeltaThousands(tokens int) string {
+	if tokens < 0 {
+		tokens = 0
+	}
+	if tokens < 10_000 {
+		thousands := float64(tokens) / 1000.0
+		formatted := fmt.Sprintf("%.1f", thousands)
+		formatted = strings.TrimSuffix(formatted, ".0")
+		return formatted + "k"
+	}
+	rounded := (tokens + 500) / 1000
+	return fmt.Sprintf("%dk", rounded)
 }
