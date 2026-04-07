@@ -52,6 +52,53 @@ func TestUpdateBrewTapReportsNotInsideGitRepo(t *testing.T) {
 	}
 }
 
+func TestUpdateDepsDryRunPlansSupportedEcosystems(t *testing.T) {
+	root := repoRoot(t)
+	script := filepath.Join(root, "scripts", "update-deps.sh")
+	cmd := exec.Command("bash", script, "--dry-run")
+	cmd.Dir = root
+	cmd.Env = sanitizedScriptTestEnv(os.Environ())
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected dry run to succeed: %v (%s)", err, output)
+	}
+	text := string(output)
+	for _, needle := range []string{
+		"==> Updating Go module dependencies",
+		"[dry-run] go get -u -t ./...",
+		"[dry-run] go mod tidy",
+		"==> Updating docs pnpm dependencies",
+		"[dry-run] pnpm --dir",
+		"up --latest",
+	} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("expected %q in output, got %q", needle, text)
+		}
+	}
+	if strings.Contains(text, "github-actions") {
+		t.Fatalf("expected dry run to exclude GitHub Actions, got %q", text)
+	}
+}
+
+func TestUpdateDepsUnknownArgument(t *testing.T) {
+	root := repoRoot(t)
+	script := filepath.Join(root, "scripts", "update-deps.sh")
+	cmd := exec.Command("bash", script, "--wat")
+	cmd.Dir = root
+	cmd.Env = sanitizedScriptTestEnv(os.Environ())
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("expected unknown argument failure")
+	}
+	text := string(output)
+	if !strings.Contains(text, "Unknown argument: --wat") {
+		t.Fatalf("expected explicit unknown arg error, got %q", text)
+	}
+	if !strings.Contains(text, "Usage: scripts/update-deps.sh") {
+		t.Fatalf("expected usage output, got %q", text)
+	}
+}
+
 func gitHookEnv(t *testing.T, root string) []string {
 	t.Helper()
 	gitDir := gitOutput(t, root, "rev-parse", "--git-dir")
