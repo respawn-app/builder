@@ -246,11 +246,13 @@ func renderNativeStreamingAssistantLines(streamText, theme string, width int) []
 		rawLines = rawLines[:len(rawLines)-1]
 	}
 	lines := make([]string, 0, len(rawLines))
-	for lineIndex, line := range rawLines {
+	firstChunk := true
+	for _, line := range rawLines {
 		for _, wrapped := range wrapLine(line, width) {
 			prefix := "  "
-			if lineIndex == 0 {
+			if firstChunk {
 				prefix = "❮ "
+				firstChunk = false
 			}
 			lines = append(lines, prefix+wrapped)
 		}
