@@ -1642,6 +1642,32 @@ func TestProjectedAssistantMessageClearsStreamingTextOnCommit(t *testing.T) {
 	}
 }
 
+func TestProjectedAssistantMessageDoesNotClearStreamingTextWhenCommitIsSkipped(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "older"}}
+	m.transcriptRevision = 5
+	m.transcriptTotalEntries = len(m.transcriptEntries)
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "newer live"})
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                clientui.EventAssistantMessage,
+		TranscriptRevision:  5,
+		CommittedEntryCount: 1,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "assistant",
+			Text: "older",
+		}},
+	})
+
+	if got := m.view.OngoingStreamingText(); got != "newer live" {
+		t.Fatalf("expected skipped assistant commit to preserve live stream, got %q", got)
+	}
+	if !m.sawAssistantDelta {
+		t.Fatal("expected skipped assistant commit to preserve assistant delta flag")
+	}
+}
+
 func TestReasoningDeltaUpdatesDetailTranscriptLive(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
