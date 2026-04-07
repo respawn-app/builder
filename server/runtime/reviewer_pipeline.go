@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"builder/prompts"
 	"builder/server/llm"
-	"builder/shared/cachewarn"
 )
 
 type defaultReviewerPipeline struct {
@@ -124,50 +122,9 @@ func (r *defaultReviewerPipeline) RunSuggestions(ctx context.Context, stepID str
 	if reviewerClient == nil {
 		return reviewerSuggestionsResult{}, nil
 	}
-	reviewerCfg := e.reviewerRequestConfigSnapshot()
-
-	schema := mustJSON(map[string]any{
-		"type":                 "object",
-		"additionalProperties": false,
-		"properties": map[string]any{
-			"suggestions": map[string]any{
-				"type": "array",
-				"items": map[string]any{
-					"type": "string",
-				},
-			},
-		},
-		"required": []string{"suggestions"},
-	})
-
-	messages := llm.MessagesFromItems(sanitizeItemsForLLM(e.snapshotItems()))
-	reviewerMessages, err := buildReviewerRequestMessages(messages, e.store.Meta().WorkspaceRoot, e.cfg.Model, e.ThinkingLevel(), e.cfg.HeadlessMode, e.cfg.DisabledSkills)
+	req, err := e.buildReviewerRequest(ctx, reviewerClient)
 	if err != nil {
-		return reviewerSuggestionsResult{}, fmt.Errorf("build reviewer request messages: %w", err)
-	}
-	reviewerItems := sanitizeItemsForLLM(llm.ItemsFromMessages(reviewerMessages))
-	req := llm.Request{
-		Model:           reviewerCfg.Model,
-		Temperature:     1,
-		MaxTokens:       0,
-		FastMode:        e.FastModeEnabled(),
-		ReasoningEffort: reviewerCfg.ThinkingLevel,
-		SystemPrompt:    prompts.ReviewerSystemPrompt,
-		SessionID:       reviewerSessionID(e.store.Meta().SessionID),
-		Items:           reviewerItems,
-		Tools:           []llm.Tool{},
-		StructuredOutput: &llm.StructuredOutput{
-			Name:   "reviewer_suggestions",
-			Schema: schema,
-			Strict: true,
-		},
-	}
-	if supportsPromptCacheKeyForClient(ctx, reviewerClient) {
-		req.PromptCacheKey = reviewerSessionID(e.store.Meta().SessionID)
-		req.PromptCacheScope = cachewarn.ScopeReviewer
-	}
-	if err := req.Validate(); err != nil {
-		return reviewerSuggestionsResult{}, err
+		return reviewerSuggestionsResult{}, fmt.Errorf("build reviewer request: %w", err)
 	}
 	resp, err := e.generateWithRetryClient(ctx, stepID, reviewerClient, req, nil, nil, nil)
 	if err != nil {
