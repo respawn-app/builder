@@ -99,17 +99,17 @@ From the current registry, UI controller flow, and tests, the migration must pre
 
 | Concern | Current Owner | Current Behavior |
 | --- | --- | --- |
-| Busy-safe registry bit | `cli/app/commands/commands.go` | `RunWhileBusy=true` only for `/name`, `/thinking`, `/supervisor`, `/autocompaction`, `/status`, and `/ps`. Everything else defaults to not-run-safe. |
+| Busy-safe registry bit | `cli/app/commands/commands.go` | `RunWhileBusy=true` only for `/name`, `/thinking`, `/supervisor`, `/autocompaction`, `/status`, `/ps`, and `/copy`. Everything else defaults to not-run-safe. |
 | Busy `Enter` path | `cli/app/ui_input_slash_commands.go` | Exact known commands with `RunWhileBusy=false` clear the input and show `cannot run /<name> while model is working`. They do not queue. |
-| Busy immediate execution | `cli/app/ui_input_controller_commands.go` | `/name`, `/thinking`, `/supervisor`, `/autocompaction`, `/status`, and `/ps` execute immediately while the run stays busy. `/supervisor` changes can affect in-flight run completion. |
+| Busy immediate execution | `cli/app/ui_input_controller_commands.go` | `/name`, `/thinking`, `/supervisor`, `/autocompaction`, `/status`, `/ps`, and `/copy` execute immediately while the run stays busy. `/supervisor` changes can affect in-flight run completion. |
 | Busy queue-submit path | `cli/app/ui_input_slash_commands.go` + `cli/app/ui_input_queue.go` | Queue-submit keys can still queue exact known slash commands for post-turn drain even if `RunWhileBusy=false`. Drain later re-dispatches them as commands, not plain prompts. |
 | Deferred queue rejection | `cli/app/ui_input_slash_commands.go` | Queueing is rejected early for `/back` without a parent session, unavailable `/fast`, and `/ps <action>` when no background manager exists. |
-| Picker visibility vs execution | `cli/app/ui_slash_command_picker.go` | The picker hides `/fast` when unavailable and `/back` when there is no parent session, but exact typed commands still parse and execute or fail through the normal path. |
+| Picker visibility vs execution | `cli/app/ui_slash_command_picker.go` | The picker hides `/fast` when unavailable, `/copy` when there is no committed final answer to copy, and `/back` when there is no parent session, but exact typed commands still parse and execute or fail through the normal path. |
 | Queue auto-drain stop conditions | `cli/app/ui_input_queue.go` | Auto-drain stops when a queued action starts a run, exits, opens a non-main input mode, shows an ask, or leaves non-empty input. `/ps inline <id>` is a current example: it pastes output into input and leaves later queued prompts pending. |
 
 Operational baseline implied by that split:
 
-- Busy-safe on `Enter`: `/status`, `/ps`, `/name`, `/thinking`, `/supervisor`, `/autocompaction`.
+- Busy-safe on `Enter`: `/status`, `/ps`, `/name`, `/thinking`, `/supervisor`, `/autocompaction`, `/copy`.
 - Busy-blocked on `Enter`: `/fast`, `/compact`, `/new`, `/resume`, `/logout`, `/exit`, `/back`, `/review`, `/init`, file-backed `/prompt:<name>` commands, and starting another primary run.
 - Busy-queueable through queue-submit keys: exact known slash commands, including commands that are blocked on `Enter`, unless rejected by the deferred queue checks above.
 

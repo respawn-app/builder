@@ -109,6 +109,9 @@ func (m *uiModel) filterSlashCommandMatches(matches []commands.Command) []comman
 		if command.Name == "fast" && !m.fastModeAvailable {
 			continue
 		}
+		if command.Name == "copy" && !m.hasAssistantFinalAnswerToCopy() {
+			continue
+		}
 		filtered = append(filtered, command)
 	}
 	return filtered

@@ -3,6 +3,7 @@ package app
 import (
 	"testing"
 
+	"builder/cli/tui"
 	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/server/session"
@@ -20,6 +21,7 @@ func TestRuntimeStatusUsesLocalFallbackWhenRuntimeClientMissing(t *testing.T) {
 	m.reviewerMode = "edits"
 	m.reviewerEnabled = true
 	m.autoCompactionEnabled = true
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "done", Phase: llm.MessagePhaseFinal}}
 
 	status := m.runtimeStatus()
 	if status.ReviewerFrequency != "edits" {
@@ -40,8 +42,11 @@ func TestRuntimeStatusUsesLocalFallbackWhenRuntimeClientMissing(t *testing.T) {
 	if status.ThinkingLevel != "high" {
 		t.Fatalf("thinking level = %q, want high", status.ThinkingLevel)
 	}
-	if status.ParentSessionID != "" || status.LastCommittedAssistantFinalAnswer != "" {
-		t.Fatalf("expected empty runtime-backed fields in local fallback status, got %+v", status)
+	if status.ParentSessionID != "" {
+		t.Fatalf("expected empty parent session id in local fallback status, got %+v", status)
+	}
+	if status.LastCommittedAssistantFinalAnswer != "done" {
+		t.Fatalf("last committed assistant answer = %q, want done", status.LastCommittedAssistantFinalAnswer)
 	}
 }
 

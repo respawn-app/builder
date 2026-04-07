@@ -23,6 +23,7 @@ const (
 	ActionSetAutoCompaction Action = "set_auto_compaction"
 	ActionStatus            Action = "status"
 	ActionProcesses         Action = "processes"
+	ActionCopy              Action = "copy"
 	ActionBack              Action = "back"
 	ActionUnhandled         Action = "unhandled"
 )
@@ -100,6 +101,9 @@ func NewDefaultRegistry() *Registry {
 	})
 	r.RegisterWithOptions("ps", "List background processes or manage one (usage: /ps [kill|inline|logs] <id>)", RegisterOptions{RunWhileBusy: true}, func(args string) Result {
 		return Result{Handled: true, Action: ActionProcesses, Args: strings.TrimSpace(args)}
+	})
+	r.RegisterWithOptions("copy", "Copy the last model final answer to the system clipboard", RegisterOptions{RunWhileBusy: true}, func(string) Result {
+		return Result{Handled: true, Action: ActionCopy}
 	})
 	r.Register("back", "Jump to parent session if current session was spawned from another", func(string) Result {
 		return Result{Handled: true, Action: ActionBack}

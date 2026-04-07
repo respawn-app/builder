@@ -12,12 +12,15 @@ import (
 )
 
 type stubClipboardCommandRunner struct {
-	outputs  map[string][]byte
-	outErrs  map[string]error
-	runErrs  map[string]error
-	commands []string
-	outFn    func(name string, args ...string) ([]byte, error)
-	runFn    func(name string, args ...string) error
+	outputs      map[string][]byte
+	outErrs      map[string]error
+	runErrs      map[string]error
+	runInputErrs map[string]error
+	runInputs    map[string][]byte
+	commands     []string
+	outFn        func(name string, args ...string) ([]byte, error)
+	runFn        func(name string, args ...string) error
+	runInputFn   func(input []byte, name string, args ...string) error
 }
 
 type stubExitCodeError struct {
@@ -59,6 +62,22 @@ func (r *stubClipboardCommandRunner) Run(_ context.Context, name string, args ..
 	return nil
 }
 
+func (r *stubClipboardCommandRunner) RunInput(_ context.Context, input []byte, name string, args ...string) error {
+	key := clipboardCommandKey(name, args...)
+	r.commands = append(r.commands, key)
+	if r.runInputs == nil {
+		r.runInputs = make(map[string][]byte)
+	}
+	r.runInputs[key] = append([]byte(nil), input...)
+	if r.runInputFn != nil {
+		return r.runInputFn(input, name, args...)
+	}
+	if err, ok := r.runInputErrs[key]; ok {
+		return err
+	}
+	return nil
+}
+
 func clipboardCommandKey(name string, args ...string) string {
 	key := name
 	for _, arg := range args {
@@ -84,9 +103,11 @@ func newTestSystemClipboardImagePaster(t *testing.T, goos string) (*systemClipbo
 	t.Helper()
 	dir := t.TempDir()
 	runner := &stubClipboardCommandRunner{
-		outputs: make(map[string][]byte),
-		outErrs: make(map[string]error),
-		runErrs: make(map[string]error),
+		outputs:      make(map[string][]byte),
+		outErrs:      make(map[string]error),
+		runErrs:      make(map[string]error),
+		runInputErrs: make(map[string]error),
+		runInputs:    make(map[string][]byte),
 	}
 	return &systemClipboardImagePaster{
 		goos:             goos,
@@ -99,6 +120,22 @@ func newTestSystemClipboardImagePaster(t *testing.T, goos string) (*systemClipbo
 		stat:             os.Stat,
 		preferredTempDir: func() string { return dir },
 	}, runner, dir
+}
+
+func newTestSystemClipboardTextCopier(goos string) (*systemClipboardTextCopier, *stubClipboardCommandRunner) {
+	runner := &stubClipboardCommandRunner{
+		outputs:      make(map[string][]byte),
+		outErrs:      make(map[string]error),
+		runErrs:      make(map[string]error),
+		runInputErrs: make(map[string]error),
+		runInputs:    make(map[string][]byte),
+	}
+	return &systemClipboardTextCopier{
+		goos:     goos,
+		getenv:   func(string) string { return "" },
+		lookPath: stubLookPath(),
+		runner:   runner,
+	}, runner
 }
 
 func TestSystemClipboardImagePasterLinuxWaylandUsesWLPaste(t *testing.T) {
@@ -341,5 +378,91 @@ func TestSystemClipboardImagePasterWindowsCommandFailure(t *testing.T) {
 	}
 	if pasteErr.Message != "Clipboard image paste failed" {
 		t.Fatalf("unexpected error message %q", pasteErr.Message)
+	}
+}
+
+func TestSystemClipboardTextCopierDarwinUsesPbcopy(t *testing.T) {
+	copier, runner := newTestSystemClipboardTextCopier("darwin")
+	copier.lookPath = stubLookPath("pbcopy")
+
+	if err := copier.CopyText(context.Background(), "final answer"); err != nil {
+		t.Fatalf("copy text: %v", err)
+	}
+	key := clipboardCommandKey("pbcopy")
+	if len(runner.commands) != 1 || runner.commands[0] != key {
+		t.Fatalf("unexpected commands: %#v", runner.commands)
+	}
+	if got := string(runner.runInputs[key]); got != "final answer" {
+		t.Fatalf("copied text = %q, want %q", got, "final answer")
+	}
+}
+
+func TestSystemClipboardTextCopierDarwinMissingTool(t *testing.T) {
+	copier, _ := newTestSystemClipboardTextCopier("darwin")
+
+	err := copier.CopyText(context.Background(), "final answer")
+	var copyErr *uiClipboardCopyError
+	if !errors.As(err, &copyErr) {
+		t.Fatalf("expected uiClipboardCopyError, got %T", err)
+	}
+	if copyErr.Kind != uiClipboardCopyErrorMissingTool {
+		t.Fatalf("expected missing-tool error, got %d", copyErr.Kind)
+	}
+	if copyErr.Message != "Clipboard copy on macOS requires `pbcopy`" {
+		t.Fatalf("unexpected error message %q", copyErr.Message)
+	}
+}
+
+func TestSystemClipboardTextCopierLinuxWaylandUsesWLCopy(t *testing.T) {
+	copier, runner := newTestSystemClipboardTextCopier("linux")
+	copier.getenv = func(name string) string {
+		if name == "WAYLAND_DISPLAY" {
+			return "wayland-0"
+		}
+		return ""
+	}
+	copier.lookPath = stubLookPath("wl-copy")
+
+	if err := copier.CopyText(context.Background(), "copied value"); err != nil {
+		t.Fatalf("copy text: %v", err)
+	}
+	key := clipboardCommandKey("wl-copy", "--type", "text/plain;charset=utf-8")
+	if len(runner.commands) != 1 || runner.commands[0] != key {
+		t.Fatalf("unexpected commands: %#v", runner.commands)
+	}
+	if got := string(runner.runInputs[key]); got != "copied value" {
+		t.Fatalf("copied text = %q, want %q", got, "copied value")
+	}
+}
+
+func TestSystemClipboardTextCopierLinuxUnsupportedEnvironment(t *testing.T) {
+	copier, _ := newTestSystemClipboardTextCopier("linux")
+
+	err := copier.CopyText(context.Background(), "final answer")
+	var copyErr *uiClipboardCopyError
+	if !errors.As(err, &copyErr) {
+		t.Fatalf("expected uiClipboardCopyError, got %T", err)
+	}
+	if copyErr.Kind != uiClipboardCopyErrorUnsupported {
+		t.Fatalf("expected unsupported error, got %d", copyErr.Kind)
+	}
+	if copyErr.Message != "Clipboard copy requires Wayland (`wl-copy`) or X11 (`xclip`)" {
+		t.Fatalf("unexpected error message %q", copyErr.Message)
+	}
+}
+
+func TestSystemClipboardTextCopierWindowsUsesClip(t *testing.T) {
+	copier, runner := newTestSystemClipboardTextCopier("windows")
+	copier.lookPath = stubLookPath("clip")
+
+	if err := copier.CopyText(context.Background(), "final answer"); err != nil {
+		t.Fatalf("copy text: %v", err)
+	}
+	key := clipboardCommandKey("clip")
+	if len(runner.commands) != 1 || runner.commands[0] != key {
+		t.Fatalf("unexpected commands: %#v", runner.commands)
+	}
+	if got := string(runner.runInputs[key]); got != "final answer" {
+		t.Fatalf("copied text = %q, want %q", got, "final answer")
 	}
 }
