@@ -1642,6 +1642,36 @@ func TestAssistantDeltaResetClearsStreamingText(t *testing.T) {
 	}
 }
 
+func TestAssistantDeltaDoesNotSuppressNewStepThatMatchesPreviousAssistantText(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "Done", Phase: llm.MessagePhaseFinal}}
+	m.lastCommittedAssistantStepID = "step-1"
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-2", AssistantDelta: "Done"})
+
+	if got := m.view.OngoingStreamingText(); got != "Done" {
+		t.Fatalf("expected matching assistant delta from a new step to stream, got %q", got)
+	}
+	if !m.sawAssistantDelta {
+		t.Fatal("expected matching assistant delta from a new step to preserve assistant delta flag")
+	}
+}
+
+func TestAssistantDeltaSuppressesLateMatchingDeltaFromCommittedStep(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "Done", Phase: llm.MessagePhaseFinal}}
+	m.lastCommittedAssistantStepID = "step-1"
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "Done"})
+
+	if got := m.view.OngoingStreamingText(); got != "" {
+		t.Fatalf("expected matching assistant delta from the committed step to stay suppressed, got %q", got)
+	}
+	if m.sawAssistantDelta {
+		t.Fatal("expected matching assistant delta from the committed step to keep assistant delta flag cleared")
+	}
+}
+
 func TestProjectedAssistantMessageClearsStreamingTextOnCommit(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.busy = true
@@ -1718,11 +1748,13 @@ func TestProjectedAssistantMessageClearsStreamingTextWhenSkippedCommitMatchesLiv
 	}
 }
 
-func TestApplyRuntimeTranscriptPageClearsDuplicateCommittedAssistantOngoing(t *testing.T) {
+func TestApplyRuntimeTranscriptPagePreservesNonEmptyAuthoritativeOngoingEvenWhenTextMatchesCommittedAssistant(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.termWidth = 100
 	m.termHeight = 20
 	m.windowSizeKnown = true
+	m.sawAssistantDelta = true
+	m.forwardToView(tui.SetConversationMsg{Ongoing: "final"})
 
 	page := clientui.TranscriptPage{
 		SessionID:    "session-1",
@@ -1739,14 +1771,14 @@ func TestApplyRuntimeTranscriptPageClearsDuplicateCommittedAssistantOngoing(t *t
 	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, page); cmd != nil {
 		_ = collectCmdMessages(t, cmd)
 	}
-	if got := m.view.OngoingStreamingText(); got != "" {
-		t.Fatalf("expected duplicate ongoing cleared by authoritative page, got %q", got)
+	if got := m.view.OngoingStreamingText(); got != "final" {
+		t.Fatalf("expected authoritative non-empty ongoing preserved, got %q", got)
 	}
-	if m.sawAssistantDelta {
-		t.Fatal("expected duplicate ongoing normalization to clear assistant delta flag")
+	if !m.sawAssistantDelta {
+		t.Fatal("expected authoritative non-empty ongoing to preserve assistant delta flag")
 	}
 	if got := len(m.transcriptEntries); got != 1 || m.transcriptEntries[0].Text != "final" {
-		t.Fatalf("expected committed assistant entry preserved after duplicate ongoing normalization, got %+v", m.transcriptEntries)
+		t.Fatalf("expected committed assistant entry preserved after authoritative ongoing apply, got %+v", m.transcriptEntries)
 	}
 }
 

@@ -76,8 +76,8 @@ func (a *responseStreamAccumulator) emitReasoningSummaryDelta(key string) {
 
 func (a *responseStreamAccumulator) Response() OpenAIResponse {
 	usage := Usage{WindowTokens: a.windowTokens}
-	streamText, streamPhase := a.assistantMessages.Resolve()
-	finalText := preferAssistantText(a.assistantText.String(), streamText)
+	streamText, streamPhase, streamOutputIndex, hasResolvedStream := a.assistantMessages.Resolve()
+	finalText := preferAssistantText(streamText, a.assistantText.String())
 	finalPhase := streamPhase
 	finalCalls := a.toolCalls.ToToolCalls()
 	finalReasoning := a.reasoning.Entries()
@@ -111,7 +111,7 @@ func (a *responseStreamAccumulator) Response() OpenAIResponse {
 	finalReasoning = normalizeReasoningEntries(mergeReasoningEntries(parsedReasoning, finalReasoning))
 	finalReasoningItems = mergeReasoningItems(parsedReasoningItems, finalReasoningItems)
 	if len(parsedItems) > 0 {
-		finalOutputItems = repairAssistantOutputItems(parsedItems, finalText, finalPhase)
+		finalOutputItems = repairAssistantOutputItems(parsedItems, finalText, finalPhase, streamOutputIndex, hasResolvedStream)
 	}
 
 	return OpenAIResponse{
@@ -132,7 +132,7 @@ func preferAssistantText(primary, fallback string) string {
 	return fallback
 }
 
-func repairAssistantOutputItems(items []ResponseItem, text string, phase MessagePhase) []ResponseItem {
+func repairAssistantOutputItems(items []ResponseItem, text string, phase MessagePhase, outputIndex int64, hasResolvedStream bool) []ResponseItem {
 	if len(items) == 0 {
 		return nil
 	}
@@ -148,12 +148,27 @@ func repairAssistantOutputItems(items []ResponseItem, text string, phase Message
 		if strings.TrimSpace(text) == "" {
 			return repaired
 		}
-		return append([]ResponseItem{{
-			Type:    ResponseItemTypeMessage,
-			Role:    RoleAssistant,
-			Phase:   phase,
-			Content: text,
-		}}, repaired...)
+		assistant := ResponseItem{
+			Type:        ResponseItemTypeMessage,
+			OutputIndex: outputIndex,
+			Role:        RoleAssistant,
+			Phase:       phase,
+			Content:     text,
+		}
+		if !hasResolvedStream {
+			return append([]ResponseItem{assistant}, repaired...)
+		}
+		insertAt := len(repaired)
+		for idx, item := range repaired {
+			if item.OutputIndex > outputIndex {
+				insertAt = idx
+				break
+			}
+		}
+		repaired = append(repaired, ResponseItem{})
+		copy(repaired[insertAt+1:], repaired[insertAt:])
+		repaired[insertAt] = assistant
+		return repaired
 	}
 	if strings.TrimSpace(repaired[lastAssistantIdx].Content) == "" && strings.TrimSpace(text) != "" {
 		repaired[lastAssistantIdx].Content = text
@@ -254,9 +269,9 @@ func (a *assistantMessageAccumulator) Upsert(item responses.ResponseOutputItemUn
 	a.byIndex[outputIndex] = assistant
 }
 
-func (a *assistantMessageAccumulator) Resolve() (string, MessagePhase) {
+func (a *assistantMessageAccumulator) Resolve() (string, MessagePhase, int64, bool) {
 	if a == nil {
-		return "", ""
+		return "", "", 0, false
 	}
 	segments := make([]assistantOutputSegment, 0, len(a.order))
 	for _, outputIndex := range a.order {
@@ -264,7 +279,7 @@ func (a *assistantMessageAccumulator) Resolve() (string, MessagePhase) {
 		if !ok || item.Type != ResponseItemTypeMessage || item.Role != RoleAssistant {
 			continue
 		}
-		segments = append(segments, assistantOutputSegment{Text: item.Content, Phase: item.Phase})
+		segments = append(segments, assistantOutputSegment{Text: item.Content, Phase: item.Phase, OutputIndex: outputIndex})
 	}
 	return resolveAssistantOutput(segments)
 }

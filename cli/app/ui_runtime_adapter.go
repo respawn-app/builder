@@ -80,6 +80,9 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 		transcriptMutated = transcriptMutated || mutated
 		awaitsHydration = awaitsHydration || needsHydration
 		if shouldClearAssistantStreamForCommittedAssistantEvent(evt) && (mutated || skippedAssistantCommitMatchesActiveLiveStream(m, evt)) {
+			if stepID := strings.TrimSpace(evt.StepID); stepID != "" {
+				m.lastCommittedAssistantStepID = stepID
+			}
 			m.sawAssistantDelta = false
 			m.forwardToView(tui.ClearOngoingAssistantMsg{})
 		}
@@ -110,6 +113,11 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 		}
 	}
 	if update.ClearAssistantStream {
+		if evt.Kind == clientui.EventAssistantDeltaReset {
+			if stepID := strings.TrimSpace(evt.StepID); stepID != "" {
+				m.lastCommittedAssistantStepID = stepID
+			}
+		}
 		m.sawAssistantDelta = false
 		m.forwardToView(tui.ClearOngoingAssistantMsg{})
 	}
@@ -483,22 +491,18 @@ func (a uiRuntimeAdapter) applyAuthoritativeOngoingTailPage(page clientui.Transc
 func authoritativePageDuplicatesCommittedAssistantOngoing(entries []tui.TranscriptEntry, pageOngoing string, liveOngoing string) bool {
 	trimmedPageOngoing := strings.TrimSpace(pageOngoing)
 	trimmedLiveOngoing := strings.TrimSpace(liveOngoing)
-	if trimmedPageOngoing == "" && trimmedLiveOngoing == "" {
+	if trimmedPageOngoing != "" || trimmedLiveOngoing == "" {
 		return false
 	}
 	for idx := len(entries) - 1; idx >= 0; idx-- {
 		entry := entries[idx]
-		if strings.TrimSpace(entry.Role) != "assistant" {
+		if strings.TrimSpace(entry.Text) == "" && strings.TrimSpace(entry.OngoingText) == "" {
 			continue
 		}
-		trimmedText := strings.TrimSpace(entry.Text)
-		if trimmedPageOngoing != "" && trimmedText == trimmedPageOngoing {
-			return true
-		}
-		if trimmedPageOngoing != "" {
+		if strings.TrimSpace(entry.Role) != "assistant" {
 			return false
 		}
-		return trimmedLiveOngoing != "" && trimmedText == trimmedLiveOngoing
+		return strings.TrimSpace(entry.Text) == trimmedLiveOngoing
 	}
 	return false
 }
@@ -741,6 +745,9 @@ func shouldIgnoreStaleAssistantDelta(m *uiModel, evt clientui.Event, delta strin
 		return false
 	}
 	if strings.TrimSpace(m.view.OngoingStreamingText()) != "" || m.sawAssistantDelta {
+		return false
+	}
+	if stepID := strings.TrimSpace(evt.StepID); stepID != "" && stepID != strings.TrimSpace(m.lastCommittedAssistantStepID) {
 		return false
 	}
 	for idx := len(m.transcriptEntries) - 1; idx >= 0; idx-- {
