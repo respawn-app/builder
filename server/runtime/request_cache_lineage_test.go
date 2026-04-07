@@ -18,7 +18,7 @@ func TestGenerateWithRetryClient_PersistsExactNonPostfixCacheWarningInDefaultMod
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 10}}, {Usage: llm.Usage{InputTokens: 12}}}}
+	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 10, HasCachedInputTokens: true, CachedInputTokens: 7}}, {Usage: llm.Usage{InputTokens: 12, HasCachedInputTokens: true, CachedInputTokens: 0}}}}
 	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeDefault})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -40,6 +40,9 @@ func TestGenerateWithRetryClient_PersistsExactNonPostfixCacheWarningInDefaultMod
 	}
 	if warnings[0].Reason != cachewarn.ReasonNonPostfix {
 		t.Fatalf("warning reason = %q, want %q", warnings[0].Reason, cachewarn.ReasonNonPostfix)
+	}
+	if warnings[0].LostInputTokens != 7 {
+		t.Fatalf("warning lost input tokens = %d, want 7", warnings[0].LostInputTokens)
 	}
 }
 
@@ -131,6 +134,9 @@ func TestGenerateWithRetryClient_PersistsVerboseReuseDropWarning(t *testing.T) {
 	}
 	if warnings[0].Reason != cachewarn.ReasonReuseDropped {
 		t.Fatalf("warning reason = %q, want %q", warnings[0].Reason, cachewarn.ReasonReuseDropped)
+	}
+	if warnings[0].LostInputTokens != 4 {
+		t.Fatalf("warning lost input tokens = %d, want 4", warnings[0].LostInputTokens)
 	}
 }
 

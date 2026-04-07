@@ -20,17 +20,18 @@ func isCompactionRole(role string) bool {
 }
 
 func isDetailOnlyRole(role string) bool {
-	switch transcript.NormalizeEntryRole(role) {
+	normalized := transcript.NormalizeEntryRole(role)
+	switch normalized {
 	case "thinking", "thinking_trace", "reasoning", roleCompactionSummary, roleDeveloperContext, roleManualCompactionCarryover, "error", "warning":
 		return true
 	default:
-		return false
+		return transcriptMessageStyleForRole(normalized) == transcriptMessageStyleWarning
 	}
 }
 
 func isStyledMetaRole(role string) bool {
 	trimmed := transcript.NormalizeEntryRole(role)
-	return isCompactionRole(trimmed) || trimmed == "reviewer_status" || trimmed == "reviewer_suggestions" || trimmed == "error" || trimmed == "warning" || trimmed == "cache_warning" || trimmed == roleDeveloperContext || trimmed == roleDeveloperFeedback || trimmed == roleInterruption
+	return isCompactionRole(trimmed) || transcriptMessageStyleForRole(trimmed) != transcriptMessageStyleNone || trimmed == roleDeveloperContext || trimmed == roleDeveloperFeedback || trimmed == roleInterruption
 }
 
 func transcriptDisplayText(role, text string) string {

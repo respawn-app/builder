@@ -307,12 +307,13 @@ func TestHandleProjectedRuntimeEventAppendsCompactionCacheWarningTranscriptEntry
 	if entry.Role != "cache_warning" {
 		t.Fatalf("entry.Role = %q, want cache_warning", entry.Role)
 	}
-	if entry.Text != "Cache invalidated: compaction." {
+	expectedText := cachewarn.Text(cachewarn.Warning{Scope: cachewarn.ScopeConversation, Reason: cachewarn.ReasonCompaction})
+	if entry.Text != expectedText {
 		t.Fatalf("entry.Text = %q, want compaction cache warning", entry.Text)
 	}
 	if loaded := m.view.LoadedTranscriptEntries(); len(loaded) != 1 {
 		t.Fatalf("view loaded transcript length = %d, want 1", len(loaded))
-	} else if loaded[0].Role != "cache_warning" || loaded[0].Text != "Cache invalidated: compaction." {
+	} else if loaded[0].Role != "cache_warning" || loaded[0].Text != expectedText {
 		t.Fatalf("loaded[0] = %+v, want live compaction cache warning", loaded[0])
 	}
 }
