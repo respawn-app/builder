@@ -23,7 +23,7 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 		return m.emitCurrentNativeScrollbackState(false)
 	}
 
-	projection := m.view.CommittedOngoingProjection()
+	projection := m.view.CommittedOngoingProjectionForEntries(m.transcriptEntries)
 	committedCount := len(committedEntries)
 	if m.nativeFlushedEntryCount < 0 || m.nativeFlushedEntryCount > committedCount {
 		m.rebaseNativeProjection(projection, committedCount)
@@ -37,8 +37,12 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 		return m.emitCurrentNativeScrollbackState(false)
 	}
 
-	previousBlockCount := len(m.nativeProjection.Blocks)
-	delta, ok := projection.RenderAppendDeltaFrom(m.nativeProjection, tui.TranscriptDivider)
+	previousProjection := m.nativeRenderedProjection
+	if previousProjection.Empty() {
+		previousProjection = m.nativeProjection
+	}
+	previousBlockCount := len(previousProjection.Blocks)
+	delta, ok := projection.RenderAppendDeltaFrom(previousProjection, tui.TranscriptDivider)
 	m.rebaseNativeProjection(projection, committedCount)
 	if !ok || !m.shouldEmitNativeHistory() {
 		return nil
@@ -72,7 +76,7 @@ func (m *uiModel) resetNativeHistoryState() {
 	m.nativeProjection = tui.TranscriptProjection{}
 	m.nativeRenderedProjection = tui.TranscriptProjection{}
 	m.nativeRenderedSnapshot = ""
-	m.waitRuntimeEventAfterNativeFlush = false
+	m.waitRuntimeEventAfterFlushSequence = 0
 	m.discardPendingNativeHistoryFlushes()
 }
 
@@ -262,15 +266,15 @@ func (m *uiModel) discardPendingNativeHistoryFlushes() {
 func (m *uiModel) handleNativeHistoryFlush(msg nativeHistoryFlushMsg) tea.Cmd {
 	if msg.Sequence == 0 {
 		if !msg.AllowBlank && strings.TrimSpace(msg.Text) == "" {
-			if m.waitRuntimeEventAfterNativeFlush {
-				m.waitRuntimeEventAfterNativeFlush = false
+			if m.waitRuntimeEventAfterFlushSequence != 0 && m.nativeFlushedSequence >= m.waitRuntimeEventAfterFlushSequence {
+				m.waitRuntimeEventAfterFlushSequence = 0
 				return m.waitRuntimeEventCmd()
 			}
 			return nil
 		}
 		cmds := []tea.Cmd{tea.Printf("%s", msg.Text)}
-		if m.waitRuntimeEventAfterNativeFlush {
-			m.waitRuntimeEventAfterNativeFlush = false
+		if m.waitRuntimeEventAfterFlushSequence != 0 && m.nativeFlushedSequence >= m.waitRuntimeEventAfterFlushSequence {
+			m.waitRuntimeEventAfterFlushSequence = 0
 			cmds = append(cmds, m.waitRuntimeEventCmd())
 		}
 		return sequenceCmds(cmds...)
@@ -299,8 +303,8 @@ func (m *uiModel) handleNativeHistoryFlush(msg nativeHistoryFlushMsg) tea.Cmd {
 		delete(m.nativePendingFlushes, next.Sequence)
 		current = next
 	}
-	if m.waitRuntimeEventAfterNativeFlush {
-		m.waitRuntimeEventAfterNativeFlush = false
+	if m.waitRuntimeEventAfterFlushSequence != 0 && m.nativeFlushedSequence >= m.waitRuntimeEventAfterFlushSequence {
+		m.waitRuntimeEventAfterFlushSequence = 0
 		cmds = append(cmds, m.waitRuntimeEventCmd())
 	}
 	return sequenceCmds(cmds...)

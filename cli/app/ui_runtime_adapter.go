@@ -71,6 +71,10 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 		cmds = append(cmds, cmd)
 		transcriptMutated = transcriptMutated || mutated
 	}
+	if shouldClearAssistantStreamForCommittedAssistantEvent(evt) {
+		m.sawAssistantDelta = false
+		m.forwardToView(tui.ClearOngoingAssistantMsg{})
+	}
 	if evt.CacheWarning != nil {
 		cmd, mutated := a.applyProjectedTranscriptEntries(clientui.Event{
 			Kind:                clientui.EventCacheWarning,
@@ -366,18 +370,11 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPage
 	}
 	shouldSyncNativeHistory := pageReq.Window == clientui.TranscriptWindowOngoingTail || pageReq == (clientui.TranscriptPageRequest{})
 	preserveLiveReasoning := shouldPreserveLiveReasoning(m, page)
+	entries := transcriptEntriesFromPage(page)
+	if shouldSyncNativeHistory {
+		a.applyAuthoritativeOngoingTailPage(page, entries, preserveLiveReasoning)
+	}
 	if pageReq.Window == clientui.TranscriptWindowOngoingTail || (pageReq == (clientui.TranscriptPageRequest{}) && m.view.Mode() != tui.ModeDetail) {
-		entries := transcriptEntriesFromPage(page)
-		m.transcriptBaseOffset = page.Offset
-		m.transcriptEntries = append(m.transcriptEntries[:0], entries...)
-		m.transcriptTotalEntries = max(page.TotalEntries, page.Offset+len(entries))
-		m.transcriptRevision = max(m.transcriptRevision, page.Revision)
-		m.transcriptLiveDirty = false
-		if !preserveLiveReasoning {
-			m.reasoningLiveDirty = false
-		}
-		m.seedPromptHistoryFromTranscriptEntries(m.transcriptEntries)
-		m.refreshRollbackCandidates()
 		m.detailTranscript.syncTail(page)
 		if m.view.Mode() != tui.ModeDetail {
 			if !preserveLiveReasoning {
@@ -444,6 +441,23 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPage
 		cmds = append(cmds, tea.SetWindowTitle(m.windowTitle()))
 	}
 	return sequenceCmds(cmds...)
+}
+
+func (a uiRuntimeAdapter) applyAuthoritativeOngoingTailPage(page clientui.TranscriptPage, entries []tui.TranscriptEntry, preserveLiveReasoning bool) {
+	m := a.model
+	if m == nil {
+		return
+	}
+	m.transcriptBaseOffset = page.Offset
+	m.transcriptEntries = append(m.transcriptEntries[:0], entries...)
+	m.transcriptTotalEntries = max(page.TotalEntries, page.Offset+len(entries))
+	m.transcriptRevision = max(m.transcriptRevision, page.Revision)
+	m.transcriptLiveDirty = false
+	if !preserveLiveReasoning {
+		m.reasoningLiveDirty = false
+	}
+	m.seedPromptHistoryFromTranscriptEntries(m.transcriptEntries)
+	m.refreshRollbackCandidates()
 }
 
 func shouldRejectTranscriptPageReplacement(m *uiModel, req clientui.TranscriptPageRequest, page clientui.TranscriptPage) bool {
@@ -619,7 +633,24 @@ func shouldDeferProjectedUserMessageFlushAppend(m *uiModel, evt clientui.Event) 
 			return false
 		}
 	}
-	return true
+	committed := tui.CommittedOngoingEntries(m.transcriptEntries)
+	if len(committed) == 0 {
+		return true
+	}
+	lastCommittedRole := strings.TrimSpace(committed[len(committed)-1].Role)
+	return lastCommittedRole == "user"
+}
+
+func shouldClearAssistantStreamForCommittedAssistantEvent(evt clientui.Event) bool {
+	if evt.Kind != clientui.EventAssistantMessage {
+		return false
+	}
+	for _, entry := range evt.TranscriptEntries {
+		if strings.TrimSpace(entry.Role) == "assistant" {
+			return true
+		}
+	}
+	return false
 }
 
 func transcriptContainsToolCallID(entries []tui.TranscriptEntry, toolCallID string) bool {

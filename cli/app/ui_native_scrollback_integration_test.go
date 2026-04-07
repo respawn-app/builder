@@ -921,12 +921,17 @@ func TestNativeFinalizeSuppressesLateAsyncDeltaArtifacts(t *testing.T) {
 	}()
 	time.Sleep(260 * time.Millisecond)
 	waitForSubmitResult(t, 2*time.Second, submitDone)
-	waitForTestCondition(t, 2*time.Second, "final commit to clear ongoing state", func() bool {
-		if strings.TrimSpace(model.view.OngoingStreamingText()) != "" {
-			return false
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if strings.TrimSpace(model.view.OngoingStreamingText()) == "" && !model.sawAssistantDelta {
+			break
 		}
-		return !model.sawAssistantDelta
-	})
+		if time.Now().After(deadline) {
+			snapshot := eng.ChatSnapshot()
+			t.Fatalf("timed out waiting for final commit to clear ongoing state output=%q flush_seq=%d flushed_seq=%d pending_flushes=%d runtime_transcript=%+v ui_transcript=%+v native_projection=%+v native_rendered_projection=%+v native_snapshot=%q ongoing=%q", normalizedOutput(out.String()), model.nativeFlushSequence, model.nativeFlushedSequence, len(model.nativePendingFlushes), snapshot.Entries, model.transcriptEntries, model.nativeProjection, model.nativeRenderedProjection, model.nativeRenderedSnapshot, stripANSIAndTrimRight(model.view.OngoingSnapshot()))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	program.Quit()
 
 	select {
@@ -940,7 +945,8 @@ func TestNativeFinalizeSuppressesLateAsyncDeltaArtifacts(t *testing.T) {
 
 	normalized := normalizedOutput(out.String())
 	if !strings.Contains(normalized, "FINAL-CONTENT") {
-		t.Fatalf("expected final content in output, got %q", normalized)
+		snapshot := eng.ChatSnapshot()
+		t.Fatalf("expected final content in output, got output=%q flush_seq=%d flushed_seq=%d pending_flushes=%d runtime_transcript=%+v ui_transcript=%+v native_projection=%+v native_rendered_projection=%+v native_snapshot=%q ongoing=%q", normalized, model.nativeFlushSequence, model.nativeFlushedSequence, len(model.nativePendingFlushes), snapshot.Entries, model.transcriptEntries, model.nativeProjection, model.nativeRenderedProjection, model.nativeRenderedSnapshot, stripANSIAndTrimRight(model.view.OngoingSnapshot()))
 	}
 	if strings.Contains(normalized, "LATE-BLINK") {
 		t.Fatalf("expected late async delta to be suppressed after finalize, got %q", normalized)
@@ -1097,9 +1103,17 @@ func TestNativeQueuedSteerDuringBlockingToolAppearsInScrollback(t *testing.T) {
 	close(blockingTool.release)
 
 	waitForSubmitResult(t, 2*time.Second, submitDone)
-	waitForTestCondition(t, 2*time.Second, "follow-up assistant resolves after blocking tool", func() bool {
-		return containsInOrder(normalizedOutput(out.String()), "run task", "after steer")
-	})
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if containsInOrder(normalizedOutput(out.String()), "run task", "after steer") {
+			break
+		}
+		if time.Now().After(deadline) {
+			snapshot := eng.ChatSnapshot()
+			t.Fatalf("timed out waiting for follow-up assistant resolves after blocking tool output=%q flush_seq=%d flushed_seq=%d pending_flushes=%d runtime_transcript=%+v ui_transcript=%+v native_projection=%+v native_rendered_projection=%+v native_snapshot=%q ongoing=%q", normalizedOutput(out.String()), model.nativeFlushSequence, model.nativeFlushedSequence, len(model.nativePendingFlushes), snapshot.Entries, model.transcriptEntries, model.nativeProjection, model.nativeRenderedProjection, model.nativeRenderedSnapshot, stripANSIAndTrimRight(model.view.OngoingSnapshot()))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	snapshot := eng.ChatSnapshot()
 	hasQueuedUser := false

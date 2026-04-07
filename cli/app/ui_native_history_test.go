@@ -1597,6 +1597,55 @@ func TestNativeStreamingDividerPersistsInTightViewport(t *testing.T) {
 	}
 }
 
+func TestNativeHistoryFlushWaitsForTargetSequenceBeforeRearmingRuntimeEvents(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.pendingRuntimeEvents = []clientui.Event{{Kind: clientui.EventConversationUpdated}}
+	m.waitRuntimeEventAfterFlushSequence = 2
+
+	firstCmd := m.handleNativeHistoryFlush(nativeHistoryFlushMsg{Text: "first", Sequence: 1})
+	if m.waitRuntimeEventAfterFlushSequence != 2 {
+		t.Fatalf("expected runtime-event wait to remain armed for sequence 2, got %d", m.waitRuntimeEventAfterFlushSequence)
+	}
+	if got := len(m.pendingRuntimeEvents); got != 1 {
+		t.Fatalf("expected pending runtime events preserved before target flush, got %d", got)
+	}
+	for _, msg := range collectCmdMessages(t, firstCmd) {
+		if _, ok := msg.(runtimeEventBatchMsg); ok {
+			t.Fatalf("did not expect runtime rearm before target flush, got %T", msg)
+		}
+	}
+
+	secondCmd := m.handleNativeHistoryFlush(nativeHistoryFlushMsg{Text: "second", Sequence: 2})
+	if secondCmd == nil {
+		t.Fatal("expected target flush to rearm runtime events")
+	}
+	var rearmed runtimeEventBatchMsg
+	foundRearm := false
+	for _, msg := range collectCmdMessages(t, secondCmd) {
+		batch, ok := msg.(runtimeEventBatchMsg)
+		if !ok {
+			continue
+		}
+		rearmed = batch
+		foundRearm = true
+	}
+	if !foundRearm {
+		t.Fatal("expected runtime event batch after target flush")
+	}
+	if got := len(rearmed.events); got != 1 {
+		t.Fatalf("expected exactly one rearmed pending runtime event, got %d", got)
+	}
+	if got := rearmed.events[0].Kind; got != clientui.EventConversationUpdated {
+		t.Fatalf("rearmed event kind = %q, want %q", got, clientui.EventConversationUpdated)
+	}
+	if m.waitRuntimeEventAfterFlushSequence != 0 {
+		t.Fatalf("expected runtime-event wait cleared after target flush, got %d", m.waitRuntimeEventAfterFlushSequence)
+	}
+	if got := len(m.pendingRuntimeEvents); got != 0 {
+		t.Fatalf("expected pending runtime events drained after target flush, got %d", got)
+	}
+}
+
 func TestNativeHistoryReplayDefersWhileDetailAndFlushesOnReturn(t *testing.T) {
 	m := newProjectedStaticUIModel(
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),

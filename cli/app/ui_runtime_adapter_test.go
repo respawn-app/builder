@@ -1618,6 +1618,30 @@ func TestAssistantDeltaResetClearsStreamingText(t *testing.T) {
 	}
 }
 
+func TestProjectedAssistantMessageClearsStreamingTextOnCommit(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.busy = true
+	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "partial"})
+	if got := m.view.OngoingStreamingText(); got != "partial" {
+		t.Fatalf("expected assistant delta in live stream, got %q", got)
+	}
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind: clientui.EventAssistantMessage,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "assistant",
+			Text: "partial",
+		}},
+	})
+
+	if got := m.view.OngoingStreamingText(); got != "" {
+		t.Fatalf("expected committed assistant message to clear live stream, got %q", got)
+	}
+	if m.sawAssistantDelta {
+		t.Fatal("expected committed assistant message to clear assistant delta flag")
+	}
+}
+
 func TestReasoningDeltaUpdatesDetailTranscriptLive(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
@@ -2104,6 +2128,44 @@ func TestProjectedUserMessageFlushedDefersOptimisticAppendWhileAssistantStreamIs
 	}
 }
 
+func TestProjectedUserMessageFlushedDoesNotDeferAfterCommittedAssistantToolProgress(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.busy = true
+	m.sawAssistantDelta = true
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "user", Text: "run task"},
+		{Role: "assistant", Text: "working"},
+		{Role: "tool_call", Text: "sleep 1", ToolCallID: "call-1", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "sleep 1"}},
+		{Role: "tool_result_ok", Text: "/tmp", ToolCallID: "call-1"},
+	}
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, Ongoing: "working"})
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:        clientui.EventUserMessageFlushed,
+		UserMessage: "steered message",
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "user",
+			Text: "steered message",
+		}},
+	})
+	msgs := collectCmdMessages(t, cmd)
+	for _, msg := range msgs {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect transcript refresh after flushed user message, got %+v", msgs)
+		}
+	}
+	if got := len(m.transcriptEntries); got != 5 {
+		t.Fatalf("expected queued user flush to append immediately after committed tool progress, got %d entries", got)
+	}
+	if got := m.transcriptEntries[4].Text; got != "steered message" {
+		t.Fatalf("transcript entry text = %q, want steered message", got)
+	}
+}
+
 func TestProjectedUserMessageFlushedDoesNotDeferWhenUIIsIdleDespiteStaleLiveAssistantState(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
@@ -2188,7 +2250,7 @@ func TestDeferredNativeReplayFlushesAutomaticallyOnDetailExit(t *testing.T) {
 				}
 			}
 			if flushCount == 0 {
-				t.Fatalf("expected native replay flush on detail exit, got messages=%v", msgs)
+				t.Fatalf("expected native replay flush on detail exit, got messages=%v native_projection=%+v native_rendered_projection=%+v native_snapshot=%q transcript=%+v", msgs, m.nativeProjection, m.nativeRenderedProjection, m.nativeRenderedSnapshot, m.transcriptEntries)
 			}
 			if !foundLater {
 				t.Fatalf("expected exit replay to include deferred transcript update, got messages=%v", msgs)
@@ -2327,7 +2389,7 @@ func TestDeferredNativeReplayFlushesBackgroundNoticeOnDetailExit(t *testing.T) {
 				}
 			}
 			if flushCount == 0 {
-				t.Fatalf("expected native replay flush on detail exit, got messages=%v", msgs)
+				t.Fatalf("expected native replay flush on detail exit, got messages=%v native_projection=%+v native_rendered_projection=%+v native_snapshot=%q transcript=%+v", msgs, m.nativeProjection, m.nativeRenderedProjection, m.nativeRenderedSnapshot, m.transcriptEntries)
 			}
 			if !foundNotice {
 				t.Fatalf("expected exit replay to include deferred background notice, got messages=%v", msgs)
