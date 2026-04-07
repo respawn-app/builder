@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 )
 
 var clipboardImagePasteTimeout = 2 * time.Second
+var clipboardTextCopyTimeout = 2 * time.Second
 
 type uiClipboardPasteTarget uint8
 
@@ -27,6 +29,10 @@ const (
 
 type uiClipboardImagePaster interface {
 	PasteImage(context.Context) (string, error)
+}
+
+type uiClipboardTextCopier interface {
+	CopyText(context.Context, string) error
 }
 
 type uiClipboardPasteErrorKind uint8
@@ -40,6 +46,20 @@ const (
 
 type uiClipboardPasteError struct {
 	Kind    uiClipboardPasteErrorKind
+	Message string
+	Err     error
+}
+
+type uiClipboardCopyErrorKind uint8
+
+const (
+	uiClipboardCopyErrorMissingTool uiClipboardCopyErrorKind = iota
+	uiClipboardCopyErrorUnsupported
+	uiClipboardCopyErrorFailed
+)
+
+type uiClipboardCopyError struct {
+	Kind    uiClipboardCopyErrorKind
 	Message string
 	Err     error
 }
@@ -58,9 +78,24 @@ func (e *uiClipboardPasteError) Unwrap() error {
 	return e.Err
 }
 
+func (e *uiClipboardCopyError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
+}
+
+func (e *uiClipboardCopyError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
 type uiClipboardCommandRunner interface {
 	Output(ctx context.Context, name string, args ...string) ([]byte, error)
 	Run(ctx context.Context, name string, args ...string) error
+	RunInput(ctx context.Context, input []byte, name string, args ...string) error
 }
 
 type execClipboardCommandRunner struct{}
@@ -71,6 +106,12 @@ func (execClipboardCommandRunner) Output(ctx context.Context, name string, args 
 
 func (execClipboardCommandRunner) Run(ctx context.Context, name string, args ...string) error {
 	return exec.CommandContext(ctx, name, args...).Run()
+}
+
+func (execClipboardCommandRunner) RunInput(ctx context.Context, input []byte, name string, args ...string) error {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdin = bytes.NewReader(input)
+	return cmd.Run()
 }
 
 type systemClipboardImagePaster struct {
@@ -85,6 +126,13 @@ type systemClipboardImagePaster struct {
 	preferredTempDir func() string
 }
 
+type systemClipboardTextCopier struct {
+	goos     string
+	getenv   func(string) string
+	lookPath func(string) (string, error)
+	runner   uiClipboardCommandRunner
+}
+
 func newSystemClipboardImagePaster() uiClipboardImagePaster {
 	return &systemClipboardImagePaster{
 		goos:             runtime.GOOS,
@@ -96,6 +144,15 @@ func newSystemClipboardImagePaster() uiClipboardImagePaster {
 		remove:           os.Remove,
 		stat:             os.Stat,
 		preferredTempDir: defaultClipboardTempDir,
+	}
+}
+
+func newSystemClipboardTextCopier() uiClipboardTextCopier {
+	return &systemClipboardTextCopier{
+		goos:     runtime.GOOS,
+		getenv:   os.Getenv,
+		lookPath: exec.LookPath,
+		runner:   execClipboardCommandRunner{},
 	}
 }
 
@@ -314,6 +371,87 @@ func (p *systemClipboardImagePaster) savePNG(data []byte) (string, error) {
 	return path, nil
 }
 
+func (p *systemClipboardTextCopier) CopyText(ctx context.Context, text string) error {
+	switch p.goos {
+	case "darwin":
+		return p.copyDarwin(ctx, text)
+	case "linux":
+		return p.copyLinux(ctx, text)
+	case "windows":
+		return p.copyWindows(ctx, text)
+	default:
+		return &uiClipboardCopyError{Kind: uiClipboardCopyErrorUnsupported, Message: fmt.Sprintf("Clipboard copy is unsupported on %s", p.goos)}
+	}
+}
+
+func (p *systemClipboardTextCopier) copyDarwin(ctx context.Context, text string) error {
+	if err := p.requireTool("pbcopy", "Clipboard copy on macOS requires `pbcopy`"); err != nil {
+		return err
+	}
+	if err := p.runner.RunInput(ctx, []byte(text), "pbcopy"); err != nil {
+		return &uiClipboardCopyError{Kind: uiClipboardCopyErrorFailed, Message: "Clipboard copy failed", Err: err}
+	}
+	return nil
+}
+
+func (p *systemClipboardTextCopier) copyLinux(ctx context.Context, text string) error {
+	wayland := strings.TrimSpace(p.getenv("WAYLAND_DISPLAY")) != ""
+	x11 := strings.TrimSpace(p.getenv("DISPLAY")) != ""
+	if wayland {
+		if _, err := p.lookPath("wl-copy"); err == nil {
+			if err := p.runner.RunInput(ctx, []byte(text), "wl-copy", "--type", "text/plain;charset=utf-8"); err != nil {
+				return &uiClipboardCopyError{Kind: uiClipboardCopyErrorFailed, Message: "Clipboard copy failed", Err: err}
+			}
+			return nil
+		}
+	}
+	if x11 {
+		if _, err := p.lookPath("xclip"); err == nil {
+			if err := p.runner.RunInput(ctx, []byte(text), "xclip", "-selection", "clipboard"); err != nil {
+				return &uiClipboardCopyError{Kind: uiClipboardCopyErrorFailed, Message: "Clipboard copy failed", Err: err}
+			}
+			return nil
+		}
+	}
+	if wayland {
+		return &uiClipboardCopyError{Kind: uiClipboardCopyErrorMissingTool, Message: "Clipboard copy on Wayland requires `wl-copy`"}
+	}
+	if x11 {
+		return &uiClipboardCopyError{Kind: uiClipboardCopyErrorMissingTool, Message: "Clipboard copy on X11 requires `xclip`"}
+	}
+	return &uiClipboardCopyError{Kind: uiClipboardCopyErrorUnsupported, Message: "Clipboard copy requires Wayland (`wl-copy`) or X11 (`xclip`)"}
+}
+
+func (p *systemClipboardTextCopier) copyWindows(ctx context.Context, text string) error {
+	clip, err := p.findFirstTool("clip", "clip.exe")
+	if err != nil {
+		return &uiClipboardCopyError{Kind: uiClipboardCopyErrorMissingTool, Message: "Clipboard copy on Windows requires `clip`", Err: err}
+	}
+	if err := p.runner.RunInput(ctx, []byte(text), clip); err != nil {
+		return &uiClipboardCopyError{Kind: uiClipboardCopyErrorFailed, Message: "Clipboard copy failed", Err: err}
+	}
+	return nil
+}
+
+func (p *systemClipboardTextCopier) requireTool(name, message string) error {
+	if _, err := p.lookPath(name); err != nil {
+		return &uiClipboardCopyError{Kind: uiClipboardCopyErrorMissingTool, Message: message, Err: err}
+	}
+	return nil
+}
+
+func (p *systemClipboardTextCopier) findFirstTool(names ...string) (string, error) {
+	var errs []error
+	for _, name := range names {
+		if _, err := p.lookPath(name); err == nil {
+			return name, nil
+		} else {
+			errs = append(errs, err)
+		}
+	}
+	return "", errors.Join(errs...)
+}
+
 func escapePowerShellSingleQuoted(path string) string {
 	return strings.ReplaceAll(path, "'", "''")
 }
@@ -375,6 +513,27 @@ func (m *uiModel) handleClipboardImagePasteDone(msg clipboardImagePasteDoneMsg) 
 	return nil
 }
 
+func (m *uiModel) copyClipboardTextCmd(text string) tea.Cmd {
+	copier := m.clipboardTextCopier
+	copyText := text
+	return func() tea.Msg {
+		if copier == nil {
+			return clipboardTextCopyDoneMsg{Err: &uiClipboardCopyError{Kind: uiClipboardCopyErrorUnsupported, Message: "Clipboard copy is unavailable"}}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), clipboardTextCopyTimeout)
+		defer cancel()
+		return clipboardTextCopyDoneMsg{Err: copier.CopyText(ctx, copyText)}
+	}
+}
+
+func (m *uiModel) handleClipboardTextCopyDone(msg clipboardTextCopyDoneMsg) tea.Cmd {
+	if msg.Err != nil {
+		message, kind := clipboardTextCopyStatus(msg.Err)
+		return m.setTransientStatusWithKind(message, kind)
+	}
+	return m.setTransientStatusWithKind("Copied final answer to clipboard", uiStatusNoticeSuccess)
+}
+
 func clipboardImagePasteStatus(err error) (string, uiStatusNoticeKind) {
 	var pasteErr *uiClipboardPasteError
 	if errors.As(err, &pasteErr) {
@@ -387,4 +546,15 @@ func clipboardImagePasteStatus(err error) (string, uiStatusNoticeKind) {
 		return "", uiStatusNoticeNeutral
 	}
 	return "Clipboard image paste failed", uiStatusNoticeError
+}
+
+func clipboardTextCopyStatus(err error) (string, uiStatusNoticeKind) {
+	var copyErr *uiClipboardCopyError
+	if errors.As(err, &copyErr) {
+		return copyErr.Message, uiStatusNoticeError
+	}
+	if err == nil {
+		return "", uiStatusNoticeNeutral
+	}
+	return "Clipboard copy failed", uiStatusNoticeError
 }

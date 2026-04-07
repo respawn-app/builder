@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"builder/cli/app/commands"
+	"builder/cli/tui"
+	"builder/server/llm"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -24,6 +26,7 @@ func TestDefaultRegistryBusyContract(t *testing.T) {
 		"autocompaction": true,
 		"status":         true,
 		"ps":             true,
+		"copy":           true,
 		"back":           false,
 		"review":         false,
 		"init":           false,
@@ -271,5 +274,50 @@ func TestBusyQueuedCompactStartsCompactionAfterTurnDrains(t *testing.T) {
 	}
 	if len(updated.queued) != 0 {
 		t.Fatalf("expected queued compact drained, got %+v", updated.queued)
+	}
+}
+
+func TestBusyQueuedCopyCopiesFinalAnswerAfterTurnDrains(t *testing.T) {
+	copier := &stubClipboardTextCopier{}
+	m := newProjectedStaticUIModel(WithUIClipboardTextCopier(copier))
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "copied from queue", Phase: llm.MessagePhaseFinal}}
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.input = "/copy"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated := next.(*uiModel)
+	if cmd != nil {
+		t.Fatal("did not expect immediate execution for queued /copy")
+	}
+	if len(updated.queued) != 1 || updated.queued[0] != "/copy" {
+		t.Fatalf("expected queued /copy command, got %+v", updated.queued)
+	}
+
+	next, cmd = updated.Update(submitDoneMsg{message: "done"})
+	updated = next.(*uiModel)
+	if cmd == nil {
+		t.Fatal("expected clipboard copy command after queued /copy drains")
+	}
+	if len(updated.queued) != 0 {
+		t.Fatalf("expected queued /copy drained, got %+v", updated.queued)
+	}
+
+	next, followCmd := updated.Update(cmd())
+	updated = next.(*uiModel)
+	if copier.calls != 1 {
+		t.Fatalf("expected one clipboard copy, got %d", copier.calls)
+	}
+	if copier.text != "copied from queue" {
+		t.Fatalf("copied text = %q, want %q", copier.text, "copied from queue")
+	}
+	if updated.transientStatus != "Copied final answer to clipboard" {
+		t.Fatalf("unexpected transient status %q", updated.transientStatus)
+	}
+	if updated.transientStatusKind != uiStatusNoticeSuccess {
+		t.Fatalf("expected success status kind, got %d", updated.transientStatusKind)
+	}
+	if followCmd == nil {
+		t.Fatal("expected transient-status clear command after queued /copy success")
 	}
 }
