@@ -414,8 +414,9 @@ type uiModel struct {
 	tuiAlternateScreen    config.TUIAlternateScreenPolicy
 	altScreenActive       bool
 
-	sawAssistantDelta bool
-	logger            uiLogger
+	sawAssistantDelta            bool
+	lastCommittedAssistantStepID string
+	logger                       uiLogger
 
 	interaction uiInteractionState
 	ask         uiAskState
