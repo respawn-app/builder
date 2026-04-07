@@ -19,7 +19,7 @@ type uiInputController struct {
 
 var pendingToolSpinner = bubblespinner.Dot
 var spinnerTickInterval = pendingToolSpinner.FPS
-var transientStatusDuration = 2200 * time.Millisecond
+var transientStatusDuration = 8 * time.Second
 var processListRefreshInterval = 1500 * time.Millisecond
 var errSubmissionInterrupted = errors.New("interrupted")
 var rollbackDoubleEscWindow = 500 * time.Millisecond
