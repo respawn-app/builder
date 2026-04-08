@@ -12,6 +12,9 @@ const (
 	ScopeConversation Scope = "conversation"
 	ScopeReviewer     Scope = "reviewer"
 
+	// ReasonCompaction is retained for persisted legacy warnings only.
+	// Active runtime cache-lineage logic should rotate cache keys instead of
+	// emitting a synthetic compaction invalidation warning.
 	ReasonCompaction   Reason = "compaction"
 	ReasonNonPostfix   Reason = "non_postfix"
 	ReasonReuseDropped Reason = "reuse_dropped"

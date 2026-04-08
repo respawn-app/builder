@@ -327,18 +327,30 @@ func (e *Engine) SessionID() string {
 	return strings.TrimSpace(e.store.Meta().SessionID)
 }
 
-func (e *Engine) requestSessionID() string {
-	base := e.SessionID()
-	if base == "" {
+func (e *Engine) compactionCountSnapshot() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.compactionCount
+}
+
+func (e *Engine) conversationSessionID() string {
+	return e.SessionID()
+
+}
+
+func conversationPromptCacheKey(sessionID string, compactionCount int) string {
+	trimmed := strings.TrimSpace(sessionID)
+	if trimmed == "" {
 		return ""
 	}
-	e.mu.Lock()
-	compactionCount := e.compactionCount
-	e.mu.Unlock()
 	if compactionCount <= 0 {
-		return base
+		return trimmed
 	}
-	return fmt.Sprintf("%s/compact-%d", base, compactionCount)
+	return fmt.Sprintf("%s/compact-%d", trimmed, compactionCount)
+}
+
+func (e *Engine) conversationPromptCacheKey() string {
+	return conversationPromptCacheKey(e.conversationSessionID(), e.compactionCountSnapshot())
 }
 
 func (e *Engine) ParentSessionID() string {
