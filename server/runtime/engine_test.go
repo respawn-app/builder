@@ -7777,7 +7777,7 @@ func TestReopenedSessionRestoresCompactionSoonReminderIssuedState(t *testing.T) 
 	}
 }
 
-func TestForkedSessionPreservesCompactionSoonReminderIssuedState(t *testing.T) {
+func TestForkedSessionBeforeReminderDoesNotCopyReminderIssuedState(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -7804,8 +7804,8 @@ func TestForkedSessionPreservesCompactionSoonReminderIssuedState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fork session: %v", err)
 	}
-	if !forkedStore.Meta().CompactionSoonReminderIssued {
-		t.Fatal("expected fork metadata to preserve reminder-issued state")
+	if forkedStore.Meta().CompactionSoonReminderIssued {
+		t.Fatal("expected fork before reminder to clear reminder-issued state")
 	}
 	forked, err := New(forkedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model:                 "gpt-5",
@@ -7817,14 +7817,52 @@ func TestForkedSessionPreservesCompactionSoonReminderIssuedState(t *testing.T) {
 		t.Fatalf("restore forked engine: %v", err)
 	}
 	forked.setLastUsage(llm.Usage{InputTokens: 890, WindowTokens: 2_000})
-	if !forked.compactionSoonReminderIssued {
-		t.Fatal("expected forked session to restore reminder-issued state")
+	if forked.compactionSoonReminderIssued {
+		t.Fatal("expected forked session before reminder to start with cleared reminder-issued state")
 	}
 	if err := forked.maybeAppendCompactionSoonReminder(context.Background(), "step-fork"); err != nil {
 		t.Fatalf("reminder after fork: %v", err)
 	}
-	if reminders := countCompactionSoonReminderWarnings(forked.ChatSnapshot()); reminders != 0 {
-		t.Fatalf("expected forked session to suppress duplicate reminder, got %d entries=%+v", reminders, forked.ChatSnapshot().Entries)
+	if reminders := countCompactionSoonReminderWarnings(forked.ChatSnapshot()); reminders != 1 {
+		t.Fatalf("expected fork before reminder to allow a fresh reminder, got %d entries=%+v", reminders, forked.ChatSnapshot().Entries)
+	}
+}
+
+func TestForkedSessionAfterReminderPreservesCompactionSoonReminderIssuedState(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   2_000,
+		AutoCompactTokenLimit: 1_000,
+		CompactionMode:        "local",
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	if err := eng.persistCompactionSoonReminderIssued(true); err != nil {
+		t.Fatalf("persist reminder-issued state: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSoonReminder, Content: "compact soon"}); err != nil {
+		t.Fatalf("append reminder message: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "after reminder"}); err != nil {
+		t.Fatalf("append second user message: %v", err)
+	}
+
+	forkedStore, err := session.ForkAtUserMessage(store, 2, "Parent -> edit")
+	if err != nil {
+		t.Fatalf("fork session: %v", err)
+	}
+	if !forkedStore.Meta().CompactionSoonReminderIssued {
+		t.Fatal("expected fork after reminder to preserve reminder-issued state")
 	}
 }
 

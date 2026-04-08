@@ -101,6 +101,9 @@ func (c *defaultContextCompactor) compactContext(ctx context.Context, mode compa
 			return err
 		}
 		_, err := e.compactNow(stepCtx, stepID, mode, args, includeManualCarryover)
+		if err == nil {
+			e.clearPendingHandoffRequest()
+		}
 		return err
 	})
 }
@@ -116,6 +119,9 @@ func (c *defaultContextCompactor) AutoCompactIfNeeded(ctx context.Context, stepI
 		return nil
 	}
 	_, err := e.compactNow(ctx, stepID, mode, "", false)
+	if err == nil {
+		e.clearPendingHandoffRequest()
+	}
 	if err != nil && mode == compactionModeAuto {
 		return fmt.Errorf("auto compaction failed: %w", err)
 	}
@@ -494,7 +500,6 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 		_ = e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
 		return compactionResult{}, err
 	}
-	e.clearPendingHandoffRequest()
 	if strings.TrimSpace(result.summary) != "" {
 		summary := strings.TrimSpace(result.summary)
 		if err := e.appendPersistedLocalEntry(stepID, "compaction_summary", summary); err != nil {
@@ -832,6 +837,7 @@ func (e *Engine) applyPendingHandoffIfNeeded(ctx context.Context, stepID string)
 	if _, err := e.compactNow(ctx, stepID, compactionModeHandoff, req.summarizerPrompt, false); err != nil {
 		return err
 	}
+	e.clearPendingHandoffRequest()
 	if futureMessage := strings.TrimSpace(req.futureAgentMessage); futureMessage != "" {
 		e.queuePendingHandoffFutureMessage(futureMessage)
 		if msg := handoffFutureAgentMessage(futureMessage); strings.TrimSpace(msg.Content) != "" {
@@ -841,7 +847,6 @@ func (e *Engine) applyPendingHandoffIfNeeded(ctx context.Context, stepID string)
 		}
 		e.clearPendingHandoffFutureMessage()
 	}
-	e.clearPendingHandoffRequest()
 	return nil
 }
 

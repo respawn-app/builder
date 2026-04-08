@@ -414,7 +414,7 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				switch choiceID {
 				case "disable":
 					state.settings.Reviewer.ThinkingLevel = ""
-					state.reviewerCustomThinking = strings.TrimSpace(state.settings.ThinkingLevel) != ""
+					state.reviewerCustomThinking = false
 				case "custom":
 					state.reviewerCustomThinking = true
 				default:

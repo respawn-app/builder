@@ -376,6 +376,16 @@ func TestExecuteCommandImportValidatesSourceDirectory(t *testing.T) {
 	}
 }
 
+func TestExecuteOnboardingImportsTreatsZeroValueModesAsNone(t *testing.T) {
+	rollback, err := executeOnboardingImports(t.TempDir(), onboardingFlowState{})
+	if err != nil {
+		t.Fatalf("execute onboarding imports: %v", err)
+	}
+	if rollback == nil {
+		t.Fatal("expected rollback func")
+	}
+}
+
 func TestOnboardingModelBackspaceTogglesMultiSelect(t *testing.T) {
 	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
 	model.currentScreen = onboardingScreen{
@@ -922,6 +932,22 @@ func TestMainThinkingChoicePreservesCustomReviewerThinking(t *testing.T) {
 	}
 	if state.settings.Reviewer.ThinkingLevel != "low" {
 		t.Fatalf("expected custom reviewer thinking to be preserved, got %q", state.settings.Reviewer.ThinkingLevel)
+	}
+}
+
+func TestReviewerThinkingDisableDoesNotForceCustomInput(t *testing.T) {
+	state := &onboardingFlowState{settings: config.Settings{Model: "gpt-5.4", ThinkingLevel: "high", Reviewer: config.ReviewerSettings{Frequency: "edits", Model: "gpt-5.4", ThinkingLevel: "high"}}}
+	if err := findWorkflowStep(t, state, "reviewer_thinking").ApplyChoice(state, "disable"); err != nil {
+		t.Fatalf("apply reviewer disable choice: %v", err)
+	}
+	if state.settings.Reviewer.ThinkingLevel != "" {
+		t.Fatalf("expected reviewer thinking to be disabled, got %q", state.settings.Reviewer.ThinkingLevel)
+	}
+	if state.reviewerCustomThinking {
+		t.Fatal("expected disable choice not to force custom reviewer thinking input")
+	}
+	if workflowIncludesStep(newOnboardingWorkflow(state).visibleSteps(state), "reviewer_thinking_custom") {
+		t.Fatal("expected custom reviewer thinking step to stay hidden after disable choice")
 	}
 }
 
