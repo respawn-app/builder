@@ -504,6 +504,8 @@ func (m *onboardingModel) toggleAllSelections() tea.Cmd {
 }
 
 func (m *onboardingModel) refreshToggleAllOption() {
+	allEnabled := allSelectableOptionsEnabled(m.currentScreen.Options, m.selection)
+	m.selection[onboardingToggleAllOptionID] = allEnabled
 	for index, option := range m.currentScreen.Options {
 		if option.ID != onboardingToggleAllOptionID {
 			continue

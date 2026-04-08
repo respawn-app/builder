@@ -82,6 +82,9 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 	if err := e.store.SetCompactionSoonReminderIssued(reminderIssued); err != nil {
 		return err
 	}
+	if futureMessage := recoveredHandoff.PendingFutureMessage(); futureMessage != "" {
+		e.queuePendingHandoffFutureMessage(futureMessage)
+	}
 	if req, ok := recoveredHandoff.PendingRequest(); ok {
 		e.queueHandoffRequest(req.summarizerPrompt, req.futureAgentMessage)
 	}
@@ -102,8 +105,9 @@ func itemsContainCompactionSoonReminder(items []llm.ResponseItem) bool {
 }
 
 type persistedHandoffRecovery struct {
-	toolCalls map[string]llm.ToolCall
-	pending   *handoffRequest
+	toolCalls            map[string]llm.ToolCall
+	pending              *handoffRequest
+	pendingFutureMessage string
 }
 
 func newPersistedHandoffRecovery() *persistedHandoffRecovery {
@@ -111,7 +115,13 @@ func newPersistedHandoffRecovery() *persistedHandoffRecovery {
 }
 
 func (r *persistedHandoffRecovery) ApplyMessage(msg llm.Message) {
-	if r == nil || msg.Role != llm.RoleAssistant {
+	if r == nil {
+		return
+	}
+	if msg.MessageType == llm.MessageTypeHandoffFutureMessage && strings.TrimSpace(msg.Content) != "" {
+		r.pendingFutureMessage = ""
+	}
+	if msg.Role != llm.RoleAssistant {
 		return
 	}
 	for _, call := range msg.ToolCalls {
@@ -163,8 +173,20 @@ func (r *persistedHandoffRecovery) ClearSatisfiedByCompaction() {
 	if r == nil {
 		return
 	}
+	if r.pending != nil {
+		if futureMessage := strings.TrimSpace(r.pending.futureAgentMessage); futureMessage != "" {
+			r.pendingFutureMessage = futureMessage
+		}
+	}
 	r.pending = nil
 	r.toolCalls = make(map[string]llm.ToolCall)
+}
+
+func (r *persistedHandoffRecovery) PendingFutureMessage() string {
+	if r == nil {
+		return ""
+	}
+	return strings.TrimSpace(r.pendingFutureMessage)
 }
 
 func (r *persistedHandoffRecovery) PendingRequest() (*handoffRequest, bool) {

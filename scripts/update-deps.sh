@@ -65,6 +65,9 @@ run_cmd() {
 
 require_cmd() {
 	local cmd="$1"
+	if [[ "$dry_run" == "true" ]]; then
+		return
+	fi
 	if command -v "$cmd" >/dev/null 2>&1; then
 		return
 	fi

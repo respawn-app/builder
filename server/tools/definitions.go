@@ -228,7 +228,7 @@ var catalogEntries = []CatalogEntry{
 	{
 		ID:             ToolTriggerHandoff,
 		Aliases:        nil,
-		Description:    "Trigger a proactive handoff to another agent. Using this tool is allowed only after a developer message appears in transcript that enables this tool. Do not use this tool before that reminder. This tool is private to the next agent, you can use 'analysis' channel content in its parameters.",
+		Description:    "Trigger a proactive handoff to another agent. Using this tool is allowed only after a developer message appears in transcript that enables this tool. Do not use this tool before that reminder. Its arguments are persisted and shown to the user in detail mode, so only include concise user-safe instructions or notes, never private reasoning or chain-of-thought.",
 		DefaultEnabled: false,
 		Contract: localContract(
 			LocalRuntimeBuilderTriggerHandoff,
@@ -245,11 +245,11 @@ var catalogEntries = []CatalogEntry{
   "properties": {
     "summarizer_prompt": {
       "type": "string",
-      "description": "Optional *extra* instructions for the handoff summarizer. The summarizer already receives detailed generic guidance on preserving the workspace state and full conversation transcript. Only use this to add something specific to your current thoughts or state of work."
+      "description": "Optional extra instructions for the handoff summarizer. The summarizer already receives generic guidance on preserving workspace state and transcript context. Only include concise, user-safe task guidance here; never include private reasoning or chain-of-thought."
     },
     "future_agent_message": {
       "type": "string",
-      "description": "Optional message to forward verbatim to the next agent *in addition* to the detailed summary of current work. Only include here specific concise information to preserve from the analysis block or the next immediate step, not generic guidance or converstaion summary."
+      "description": "Optional user-safe message to forward verbatim to the next agent in addition to the detailed summary of current work. Only include specific concise facts or the next immediate step, not generic guidance, conversation summary, or private reasoning."
     }
   }
 }`),
