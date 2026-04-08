@@ -95,7 +95,7 @@ var catalogEntries = []CatalogEntry{
     },
     "max_output_tokens": {
       "type": "integer",
-      "description": "Maximum amount of output to return to the model. Excess output will be truncated, and the full clean log remains available on disk. Omit this unless you want an override."
+      "description": "Maximum amount of output to return. Excess output will be truncated, and the full clean log remains available on disk. Omit this unless you want an override."
     }
   }
 }`),
@@ -133,7 +133,7 @@ var catalogEntries = []CatalogEntry{
     },
     "max_output_tokens": {
       "type": "integer",
-      "description": "Maximum amount of output to return to the model. Excess output will be truncated."
+      "description": "Optional maximum amount of output to return back. Excess output will be truncated."
     }
   }
 }`),
@@ -221,6 +221,35 @@ var catalogEntries = []CatalogEntry{
     "recommended_option_index": {
       "type": "integer",
       "description": "Optional 1-based index of the recommended suggestion."
+    }
+  }
+}`),
+	},
+	{
+		ID:             ToolTriggerHandoff,
+		Aliases:        nil,
+		Description:    "Trigger a proactive handoff to another agent. Using this tool is allowed only after a developer message appears in transcript that enables this tool. Do not use this tool before that reminder. This tool is private to the next agent, you can use 'analysis' channel content in its parameters.",
+		DefaultEnabled: false,
+		Contract: localContract(
+			LocalRuntimeBuilderTriggerHandoff,
+			RequestExposure{Enabled: true},
+			transcript.ToolPresentationDefault,
+			transcript.ToolCallRenderBehaviorDefault,
+			false,
+			triggerHandoffToolCallMeta(ToolTriggerHandoff),
+			formatTriggerHandoffToolResult,
+		),
+		Schema: json.RawMessage(`{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "summarizer_prompt": {
+      "type": "string",
+      "description": "Optional *extra* instructions for the handoff summarizer. The summarizer already receives detailed generic guidance on preserving the workspace state and full conversation transcript. Only use this to add something specific to your current thoughts or state of work."
+    },
+    "future_agent_message": {
+      "type": "string",
+      "description": "Optional message to forward verbatim to the next agent *in addition* to the detailed summary of current work. Only include here specific concise information to preserve from the analysis block or the next immediate step, not generic guidance or converstaion summary."
     }
   }
 }`),

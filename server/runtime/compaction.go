@@ -10,14 +10,16 @@ import (
 
 	"builder/prompts"
 	"builder/server/llm"
+	"builder/server/tools"
 	"builder/shared/compaction"
 )
 
 type compactionMode string
 
 const (
-	compactionModeAuto   compactionMode = "auto"
-	compactionModeManual compactionMode = "manual"
+	compactionModeAuto    compactionMode = "auto"
+	compactionModeHandoff compactionMode = "handoff"
+	compactionModeManual  compactionMode = "manual"
 
 	defaultContextWindowTokens        = 200_000
 	compactOverflowRetries            = 2
@@ -27,6 +29,8 @@ const (
 
 	additionalCompactionInstructionsHeader = "# Additional user instructions or commentary for this task:"
 	manualCompactionCarryoverHeader        = "# Last user message before compaction (work may have been done after it was sent):"
+	handoffDisabledByUserMessage           = "User disabled the handoff manually for now. They do not want you to hand off at this time, so please keep working or retry this tool later"
+	handoffTooEarlyMessage                 = "trigger_handoff is not enabled yet. Keep working until you receive the reminder that this tool is now enabled, then retry it."
 )
 
 var errRemoteCompactionMissingCheckpoint = errors.New("remote compaction output missing checkpoint item")
@@ -55,12 +59,38 @@ func (e *Engine) CompactContextForPreSubmit(ctx context.Context) error {
 	return e.compactionFlow.CompactContextForPreSubmit(ctx)
 }
 
+func (e *Engine) TriggerHandoff(ctx context.Context, stepID string, activeCall llm.ToolCall, summarizerPrompt string, futureAgentMessage string) (string, bool, error) {
+	e.ensureOrchestrationCollaborators()
+	return e.compactionFlow.TriggerHandoff(ctx, stepID, activeCall, summarizerPrompt, futureAgentMessage)
+}
+
 func (c *defaultContextCompactor) CompactContext(ctx context.Context, args string) error {
 	return c.compactContext(ctx, compactionModeManual, args, true)
 }
 
 func (c *defaultContextCompactor) CompactContextForPreSubmit(ctx context.Context) error {
 	return c.compactContext(ctx, compactionModeManual, "", false)
+}
+
+func (c *defaultContextCompactor) TriggerHandoff(ctx context.Context, stepID string, activeCall llm.ToolCall, summarizerPrompt string, futureAgentMessage string) (string, bool, error) {
+	e := c.engine
+	_ = activeCall
+	if strings.TrimSpace(stepID) == "" {
+		return "", false, errors.New("trigger_handoff requires an active step")
+	}
+	if !e.AutoCompactionEnabled() {
+		return "", false, errors.New(handoffDisabledByUserMessage)
+	}
+	if e.compactionMode() == "none" {
+		return "", false, errors.New("User explicitly disabled compaction in configuration.")
+	}
+	if !e.handoffToolEnabled() {
+		return "", false, errors.New(handoffTooEarlyMessage)
+	}
+	e.queueHandoffRequest(summarizerPrompt, futureAgentMessage)
+	summary := "Handoff scheduled to run now."
+	appended := strings.TrimSpace(futureAgentMessage) != ""
+	return summary, appended, nil
 }
 
 func (c *defaultContextCompactor) compactContext(ctx context.Context, mode compactionMode, args string, includeManualCarryover bool) error {
@@ -280,25 +310,16 @@ func (e *Engine) compactionSoonReminderLimit(ctx context.Context) int {
 
 func (e *Engine) maybeAppendCompactionSoonReminder(ctx context.Context, stepID string) error {
 	if !e.AutoCompactionEnabled() || e.compactionMode() == "none" {
-		e.mu.Lock()
-		e.compactionSoonReminderIssued = false
-		e.mu.Unlock()
 		return nil
 	}
 	limit := e.compactionSoonReminderLimit(ctx)
 	if limit <= 0 {
-		e.mu.Lock()
-		e.compactionSoonReminderIssued = false
-		e.mu.Unlock()
 		return nil
 	}
 	if !e.usageAtOrAboveLimit(ctx, limit) {
-		e.mu.Lock()
-		e.compactionSoonReminderIssued = false
-		e.mu.Unlock()
 		return nil
 	}
-	content := strings.TrimSpace(prompts.CompactionSoonReminderPrompt)
+	content := prompts.RenderCompactionSoonReminderPrompt(e.triggerHandoffConfigured())
 	if content == "" {
 		return nil
 	}
@@ -318,10 +339,7 @@ func (e *Engine) maybeAppendCompactionSoonReminder(ctx context.Context, stepID s
 	}); err != nil {
 		return err
 	}
-	e.mu.Lock()
-	e.compactionSoonReminderIssued = true
-	e.mu.Unlock()
-	return nil
+	return e.persistCompactionSoonReminderIssued(true)
 }
 
 func (e *Engine) currentInputTokensPrecisely(ctx context.Context) (int, bool) {
@@ -735,6 +753,90 @@ func manualCompactionCarryoverMessage(text string) llm.Message {
 	}
 }
 
+func handoffFutureAgentMessage(text string) llm.Message {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return llm.Message{}
+	}
+	return llm.Message{
+		Role:        llm.RoleDeveloper,
+		MessageType: llm.MessageTypeHandoffFutureMessage,
+		Content:     trimmed,
+	}
+}
+
+func (e *Engine) queueHandoffRequest(summarizerPrompt string, futureAgentMessage string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.pendingHandoffRequest = &handoffRequest{
+		summarizerPrompt:   strings.TrimSpace(summarizerPrompt),
+		futureAgentMessage: strings.TrimSpace(futureAgentMessage),
+	}
+}
+
+func (e *Engine) clearPendingHandoffRequest() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.pendingHandoffRequest = nil
+}
+
+func (e *Engine) queuePendingHandoffFutureMessage(message string) {
+	trimmed := strings.TrimSpace(message)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.pendingHandoffFutureMessage = trimmed
+}
+
+func (e *Engine) clearPendingHandoffFutureMessage() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.pendingHandoffFutureMessage = ""
+}
+
+func (e *Engine) pendingHandoffRequestSnapshot() *handoffRequest {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.pendingHandoffRequest == nil {
+		return nil
+	}
+	req := *e.pendingHandoffRequest
+	return &req
+}
+
+func (e *Engine) pendingHandoffFutureMessageSnapshot() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return strings.TrimSpace(e.pendingHandoffFutureMessage)
+}
+
+func (e *Engine) applyPendingHandoffIfNeeded(ctx context.Context, stepID string) error {
+	if futureMessage := e.pendingHandoffFutureMessageSnapshot(); futureMessage != "" {
+		if err := e.appendMessage(stepID, handoffFutureAgentMessage(futureMessage)); err != nil {
+			return err
+		}
+		e.clearPendingHandoffFutureMessage()
+		return nil
+	}
+	req := e.pendingHandoffRequestSnapshot()
+	if req == nil {
+		return nil
+	}
+	if _, err := e.compactNow(ctx, stepID, compactionModeHandoff, req.summarizerPrompt, false); err != nil {
+		return err
+	}
+	if futureMessage := strings.TrimSpace(req.futureAgentMessage); futureMessage != "" {
+		e.queuePendingHandoffFutureMessage(futureMessage)
+		if msg := handoffFutureAgentMessage(futureMessage); strings.TrimSpace(msg.Content) != "" {
+			if err := e.appendMessage(stepID, msg); err != nil {
+				return err
+			}
+		}
+		e.clearPendingHandoffFutureMessage()
+	}
+	e.clearPendingHandoffRequest()
+	return nil
+}
+
 func trimCompactionCarryoverText(text string, maxChars int) string {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" || maxChars <= 0 {
@@ -748,6 +850,46 @@ func trimCompactionCarryoverText(text string, maxChars int) string {
 		return string(runes[:maxChars])
 	}
 	return string(runes[:maxChars-4]) + "\n..."
+}
+
+func (e *Engine) handoffToolEnabled() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.compactionSoonReminderIssued
+}
+
+func (e *Engine) setCompactionSoonReminderIssued(issued bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.compactionSoonReminderIssued = issued
+}
+
+func (e *Engine) persistCompactionSoonReminderIssued(issued bool) error {
+	e.setCompactionSoonReminderIssued(issued)
+	return e.store.SetCompactionSoonReminderIssued(issued)
+}
+
+func (e *Engine) syncCompactionSoonReminderIssuedFromMessages(messages []llm.Message) {
+	issued := false
+	for _, message := range messages {
+		if message.Role == llm.RoleDeveloper && message.MessageType == llm.MessageTypeCompactionSoonReminder && strings.TrimSpace(message.Content) != "" {
+			issued = true
+		}
+	}
+	e.setCompactionSoonReminderIssued(issued)
+}
+
+func (e *Engine) syncCompactionSoonReminderIssuedFromItems(items []llm.ResponseItem) {
+	e.syncCompactionSoonReminderIssuedFromMessages(llm.MessagesFromItems(items))
+}
+
+func (e *Engine) triggerHandoffConfigured() bool {
+	for _, id := range e.cfg.EnabledTools {
+		if id == tools.ToolTriggerHandoff {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Engine) compactionMode() string {

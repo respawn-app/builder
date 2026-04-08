@@ -123,6 +123,27 @@ func webSearchToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) tra
 	}
 }
 
+func triggerHandoffToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
+	return func(ctx ToolCallContext, raw json.RawMessage) transcript.ToolCallMeta {
+		summarizerPrompt, futureAgentMessage, ok := parseTriggerHandoffToolCall(raw)
+		if !ok {
+			return defaultToolCallMeta(toolID)(ctx, raw)
+		}
+		lines := []string{"Model requested compaction."}
+		if summarizerPrompt != "" {
+			lines = append(lines, "Instructions:", summarizerPrompt)
+		}
+		if futureAgentMessage != "" {
+			lines = append(lines, "Future message:", futureAgentMessage)
+		}
+		return transcript.ToolCallMeta{
+			ToolName:    string(toolID),
+			Command:     strings.Join(lines, "\n"),
+			CompactText: "Model requested compaction.",
+		}
+	}
+}
+
 func patchToolCallMeta(toolID ID) func(ToolCallContext, json.RawMessage) transcript.ToolCallMeta {
 	return func(ctx ToolCallContext, raw json.RawMessage) transcript.ToolCallMeta {
 		detail, compact, rendered, ok := parsePatchToolCall(raw, ctx.WorkingDir)
@@ -232,6 +253,25 @@ func formatWebSearchToolResult(result Result) string {
 	return formatGenericToolResult(result)
 }
 
+func formatTriggerHandoffToolResult(result Result) string {
+	if result.IsError {
+		return formatGenericToolResult(result)
+	}
+	var text string
+	if err := json.Unmarshal(result.Output, &text); err == nil {
+		return strings.TrimSpace(text)
+	}
+	var payload struct {
+		Summary string `json:"summary"`
+	}
+	if err := json.Unmarshal(result.Output, &payload); err == nil {
+		if summary := strings.TrimSpace(payload.Summary); summary != "" {
+			return summary
+		}
+	}
+	return ""
+}
+
 func parseShellToolCallUserInitiated(raw json.RawMessage) bool {
 	var in struct {
 		UserInitiated bool `json:"user_initiated"`
@@ -287,6 +327,17 @@ func parseWebSearchToolCall(raw json.RawMessage) (string, bool) {
 		return "", false
 	}
 	return in.Query, true
+}
+
+func parseTriggerHandoffToolCall(raw json.RawMessage) (string, string, bool) {
+	var in struct {
+		SummarizerPrompt   string `json:"summarizer_prompt,omitempty"`
+		FutureAgentMessage string `json:"future_agent_message,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return "", "", false
+	}
+	return strings.TrimSpace(in.SummarizerPrompt), strings.TrimSpace(in.FutureAgentMessage), true
 }
 
 func parsePatchToolCall(raw json.RawMessage, cwd string) (detail string, compact string, rendered *patchformat.RenderedPatch, ok bool) {
@@ -593,6 +644,24 @@ func formatToolInput(toolID ID, raw json.RawMessage, shellTimeoutSeconds int) (s
 		if question, ok := asString(obj["question"]); ok {
 			return question, ""
 		}
+	}
+	if toolID == ToolTriggerHandoff {
+		summarizerPrompt, futureAgentMessage, ok := parseTriggerHandoffToolCall(raw)
+		if !ok {
+			return "trigger_handoff()", ""
+		}
+		command := "trigger_handoff()"
+		var notes []string
+		if summarizerPrompt != "" {
+			notes = append(notes, "custom summarizer prompt")
+		}
+		if futureAgentMessage != "" {
+			notes = append(notes, "future-agent message")
+		}
+		if len(notes) == 0 {
+			return command, ""
+		}
+		return command + " with " + strings.Join(notes, ", "), ""
 	}
 	return renderPlain(payload), ""
 }

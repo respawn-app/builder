@@ -67,8 +67,14 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.EnabledTools[tools.ToolMultiToolUseParallel] {
 		t.Fatalf("expected %s disabled in static defaults; it should be derived from model capability", tools.ToolMultiToolUseParallel)
 	}
+	if cfg.Settings.EnabledTools[tools.ToolTriggerHandoff] {
+		t.Fatalf("expected %s disabled in static defaults", tools.ToolTriggerHandoff)
+	}
 	if got := cfg.Source.Sources["tools.multi_tool_use_parallel"]; got != "default" {
 		t.Fatalf("expected untouched %s source to remain default, got %q", tools.ToolMultiToolUseParallel, got)
+	}
+	if got := cfg.Source.Sources["tools.trigger_handoff"]; got != "default" {
+		t.Fatalf("expected untouched %s source to remain default, got %q", tools.ToolTriggerHandoff, got)
 	}
 	if !cfg.Settings.EnabledTools[tools.ToolWebSearch] {
 		t.Fatalf("expected web_search tool enabled by default: %+v", cfg.Settings.EnabledTools)
@@ -953,6 +959,31 @@ func TestLoadWebSearchNativeRespectsExplicitToolToggle(t *testing.T) {
 	}
 	if got := cfg.Source.Sources["tools.web_search"]; got != "file" {
 		t.Fatalf("expected tools.web_search source file, got %q", got)
+	}
+}
+
+func TestLoadTriggerHandoffToolToggleFromFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("[tools]\ntrigger_handoff = true\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Settings.EnabledTools[tools.ToolTriggerHandoff] {
+		t.Fatalf("expected explicit tools.trigger_handoff=true to enable the tool")
+	}
+	if got := cfg.Source.Sources["tools.trigger_handoff"]; got != "file" {
+		t.Fatalf("expected tools.trigger_handoff source file, got %q", got)
 	}
 }
 

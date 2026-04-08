@@ -17,6 +17,7 @@ import (
 	"builder/server/session"
 	"builder/server/tools"
 	shelltool "builder/server/tools/shell"
+	triggerhandofftool "builder/server/tools/triggerhandoff"
 	"builder/shared/transcript"
 	"builder/shared/transcript/toolcodec"
 )
@@ -336,6 +337,29 @@ func TestLastCommittedAssistantFinalAnswerSkipsTrailingErrorFeedback(t *testing.
 	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: "phase mismatch"}); err != nil {
 		t.Fatalf("append warning: %v", err)
+	}
+
+	if got := eng.LastCommittedAssistantFinalAnswer(); got != "final handoff" {
+		t.Fatalf("LastCommittedAssistantFinalAnswer() = %q, want %q", got, "final handoff")
+	}
+}
+
+func TestLastCommittedAssistantFinalAnswerSkipsTrailingHandoffFutureMessage(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "final handoff"}); err != nil {
+		t.Fatalf("append assistant final: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeHandoffFutureMessage, Content: "resume with tests"}); err != nil {
+		t.Fatalf("append handoff future message: %v", err)
 	}
 
 	if got := eng.LastCommittedAssistantFinalAnswer(); got != "final handoff" {
@@ -7610,7 +7634,7 @@ func TestShouldAutoCompactMemoizesPreciseCountForUnchangedRequest(t *testing.T) 
 	}
 }
 
-func TestCompactionSoonReminderCanBeIssuedAfterReEnablingAutoCompactionAboveReminderBand(t *testing.T) {
+func TestCompactionSoonReminderStaysSingleShotAfterReEnablingAutoCompactionAboveReminderBand(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -7658,7 +7682,7 @@ func TestCompactionSoonReminderCanBeIssuedAfterReEnablingAutoCompactionAboveRemi
 	snap = eng.ChatSnapshot()
 	reminders := 0
 	for _, entry := range snap.Entries {
-		if entry.Role == "warning" && entry.Text == strings.TrimSpace(prompts.CompactionSoonReminderPrompt) {
+		if entry.Role == "warning" && entry.Text == prompts.RenderCompactionSoonReminderPrompt(false) {
 			reminders++
 		}
 	}
@@ -7678,12 +7702,193 @@ func TestCompactionSoonReminderCanBeIssuedAfterReEnablingAutoCompactionAboveRemi
 	snap = eng.ChatSnapshot()
 	reminders = 0
 	for _, entry := range snap.Entries {
-		if entry.Role == "warning" && entry.Text == strings.TrimSpace(prompts.CompactionSoonReminderPrompt) {
+		if entry.Role == "warning" && entry.Text == prompts.RenderCompactionSoonReminderPrompt(false) {
 			reminders++
 		}
 	}
-	if reminders != 2 {
-		t.Fatalf("expected reminder to re-arm after falling below threshold, got %d entries=%+v", reminders, snap.Entries)
+	if reminders != 1 {
+		t.Fatalf("expected reminder to remain single-shot after falling below threshold, got %d entries=%+v", reminders, snap.Entries)
+	}
+}
+
+func TestReopenedSessionRestoresCompactionSoonReminderIssuedState(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   2_000,
+		AutoCompactTokenLimit: 1_000,
+		CompactionMode:        "local",
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	if err := eng.appendMessage("step-1", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSoonReminder, Content: prompts.RenderCompactionSoonReminderPrompt(false)}); err != nil {
+		t.Fatalf("append reminder: %v", err)
+	}
+
+	reopenedStore, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("re-open store: %v", err)
+	}
+	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   2_000,
+		AutoCompactTokenLimit: 1_000,
+		CompactionMode:        "local",
+	})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	restored.setLastUsage(llm.Usage{InputTokens: 890, WindowTokens: 2_000})
+	if !restored.compactionSoonReminderIssued {
+		t.Fatal("expected reopened session to restore reminder-issued state")
+	}
+	if !reopenedStore.Meta().CompactionSoonReminderIssued {
+		t.Fatal("expected reopened session meta to persist reminder-issued state")
+	}
+	if err := restored.maybeAppendCompactionSoonReminder(context.Background(), "step-restore"); err != nil {
+		t.Fatalf("reminder after reopen: %v", err)
+	}
+	if reminders := countCompactionSoonReminderWarnings(restored.ChatSnapshot()); reminders != 1 {
+		t.Fatalf("expected reopened session to avoid duplicate reminder, got %d entries=%+v", reminders, restored.ChatSnapshot().Entries)
+	}
+}
+
+func TestForkedSessionPreservesCompactionSoonReminderIssuedState(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   2_000,
+		AutoCompactTokenLimit: 1_000,
+		CompactionMode:        "local",
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	if err := eng.persistCompactionSoonReminderIssued(true); err != nil {
+		t.Fatalf("persist reminder-issued state: %v", err)
+	}
+
+	forkedStore, err := session.ForkAtUserMessage(store, 1, "Parent -> edit")
+	if err != nil {
+		t.Fatalf("fork session: %v", err)
+	}
+	if !forkedStore.Meta().CompactionSoonReminderIssued {
+		t.Fatal("expected fork metadata to preserve reminder-issued state")
+	}
+	forked, err := New(forkedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   2_000,
+		AutoCompactTokenLimit: 1_000,
+		CompactionMode:        "local",
+	})
+	if err != nil {
+		t.Fatalf("restore forked engine: %v", err)
+	}
+	forked.setLastUsage(llm.Usage{InputTokens: 890, WindowTokens: 2_000})
+	if !forked.compactionSoonReminderIssued {
+		t.Fatal("expected forked session to restore reminder-issued state")
+	}
+	if err := forked.maybeAppendCompactionSoonReminder(context.Background(), "step-fork"); err != nil {
+		t.Fatalf("reminder after fork: %v", err)
+	}
+	if reminders := countCompactionSoonReminderWarnings(forked.ChatSnapshot()); reminders != 0 {
+		t.Fatalf("expected forked session to suppress duplicate reminder, got %d entries=%+v", reminders, forked.ChatSnapshot().Entries)
+	}
+}
+
+func TestRealCompactionClearsPersistedCompactionSoonReminderStateAcrossReopenAndFork(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+		Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   2_000,
+		AutoCompactTokenLimit: 1_000,
+		CompactionMode:        "local",
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.setLastUsage(llm.Usage{InputTokens: 890, WindowTokens: 2_000})
+	if err := eng.maybeAppendCompactionSoonReminder(context.Background(), "step-warning"); err != nil {
+		t.Fatalf("append reminder: %v", err)
+	}
+	if !store.Meta().CompactionSoonReminderIssued {
+		t.Fatal("expected reminder-issued state persisted before compaction")
+	}
+
+	if err := eng.CompactContext(context.Background(), "compact now"); err != nil {
+		t.Fatalf("compact context: %v", err)
+	}
+	if store.Meta().CompactionSoonReminderIssued {
+		t.Fatal("expected real compaction to clear reminder-issued state in session meta")
+	}
+
+	reopenedStore, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("re-open store: %v", err)
+	}
+	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   2_000,
+		AutoCompactTokenLimit: 1_000,
+		CompactionMode:        "local",
+	})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	if restored.compactionSoonReminderIssued {
+		t.Fatal("expected reopened compacted session to start with cleared reminder-issued state")
+	}
+	if reopenedStore.Meta().CompactionSoonReminderIssued {
+		t.Fatal("expected reopened compacted session metadata to remain cleared")
+	}
+
+	forkedStore, err := session.ForkAtUserMessage(reopenedStore, 1, "Parent -> edit")
+	if err != nil {
+		t.Fatalf("fork compacted session: %v", err)
+	}
+	if forkedStore.Meta().CompactionSoonReminderIssued {
+		t.Fatal("expected fork of compacted session to inherit cleared reminder-issued state")
+	}
+	forked, err := New(forkedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   2_000,
+		AutoCompactTokenLimit: 1_000,
+		CompactionMode:        "local",
+	})
+	if err != nil {
+		t.Fatalf("restore forked engine: %v", err)
+	}
+	if forked.compactionSoonReminderIssued {
+		t.Fatal("expected forked compacted session to start with cleared reminder-issued state")
 	}
 }
 
@@ -7742,8 +7947,8 @@ func TestCompactionSoonReminderSkipsPreciseCountingWhenSuppressed(t *testing.T) 
 			eng.mu.Lock()
 			issued := eng.compactionSoonReminderIssued
 			eng.mu.Unlock()
-			if issued {
-				t.Fatal("expected suppressed reminder path to reset issued state")
+			if !issued {
+				t.Fatal("expected suppressed reminder path to preserve issued state")
 			}
 		})
 	}
@@ -7800,13 +8005,13 @@ func TestRunStepLoopSkipsCompactionSoonReminderWhenImmediateAutoCompactionRuns(t
 
 	snap := eng.ChatSnapshot()
 	for _, entry := range snap.Entries {
-		if entry.Role == "warning" && entry.Text == strings.TrimSpace(prompts.CompactionSoonReminderPrompt) {
+		if entry.Role == "warning" && entry.Text == prompts.RenderCompactionSoonReminderPrompt(false) {
 			t.Fatalf("did not expect reminder in transcript after immediate auto-compaction, entries=%+v", snap.Entries)
 		}
 	}
 }
 
-func TestRunStepLoopAppendsCompactionSoonReminderImmediatelyAfterFinalAnswerBoundary(t *testing.T) {
+func TestRunStepLoopInjectsCompactionSoonReminderBeforeFinalAnswerRequest(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -7832,6 +8037,7 @@ func TestRunStepLoopAppendsCompactionSoonReminderImmediatelyAfterFinalAnswerBoun
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}
+	eng.setLastUsage(llm.Usage{InputTokens: 890, WindowTokens: 2_000})
 
 	msg, err := eng.runStepLoop(context.Background(), "step-1")
 	if err != nil {
@@ -7843,10 +8049,14 @@ func TestRunStepLoopAppendsCompactionSoonReminderImmediatelyAfterFinalAnswerBoun
 	if len(client.calls) != 1 {
 		t.Fatalf("expected exactly one model request, got %d", len(client.calls))
 	}
+	remindersInRequest := 0
 	for _, reqMsg := range requestMessages(client.calls[0]) {
 		if reqMsg.Role == llm.RoleDeveloper && reqMsg.MessageType == llm.MessageTypeCompactionSoonReminder {
-			t.Fatalf("did not expect reminder in the request that produced the final answer, messages=%+v", requestMessages(client.calls[0]))
+			remindersInRequest++
 		}
+	}
+	if remindersInRequest != 1 {
+		t.Fatalf("expected exactly one reminder in the request that produced the final answer, got %d messages=%+v", remindersInRequest, requestMessages(client.calls[0]))
 	}
 
 	snap := eng.ChatSnapshot()
@@ -7857,7 +8067,7 @@ func TestRunStepLoopAppendsCompactionSoonReminderImmediatelyAfterFinalAnswerBoun
 		if entry.Role == "assistant" && entry.Text == "done" {
 			assistantIdx = idx
 		}
-		if entry.Role == "warning" && entry.Text == strings.TrimSpace(prompts.CompactionSoonReminderPrompt) {
+		if entry.Role == "warning" && entry.Text == prompts.RenderCompactionSoonReminderPrompt(false) {
 			reminders++
 			reminderIdx = idx
 		}
@@ -7865,8 +8075,8 @@ func TestRunStepLoopAppendsCompactionSoonReminderImmediatelyAfterFinalAnswerBoun
 	if reminders != 1 {
 		t.Fatalf("expected exactly one reminder entry, got %d entries=%+v", reminders, snap.Entries)
 	}
-	if assistantIdx < 0 || reminderIdx != assistantIdx+1 {
-		t.Fatalf("expected reminder immediately after final assistant entry, assistantIdx=%d reminderIdx=%d entries=%+v", assistantIdx, reminderIdx, snap.Entries)
+	if assistantIdx < 0 || reminderIdx != assistantIdx-1 {
+		t.Fatalf("expected reminder immediately before final assistant entry, assistantIdx=%d reminderIdx=%d entries=%+v", assistantIdx, reminderIdx, snap.Entries)
 	}
 }
 
@@ -7945,7 +8155,7 @@ func TestRunStepLoopAppendsCompactionSoonReminderImmediatelyAfterToolOutputBound
 		if strings.HasPrefix(entry.Role, "tool_result") {
 			toolIdx = idx
 		}
-		if entry.Role == "warning" && entry.Text == strings.TrimSpace(prompts.CompactionSoonReminderPrompt) {
+		if entry.Role == "warning" && entry.Text == prompts.RenderCompactionSoonReminderPrompt(false) {
 			reminders++
 			reminderIdx = idx
 		}
@@ -8052,11 +8262,973 @@ func TestRunStepLoopDoesNotDuplicateCompactionSoonReminderAfterAutoCompactionIsD
 func countCompactionSoonReminderWarnings(snapshot ChatSnapshot) int {
 	count := 0
 	for _, entry := range snapshot.Entries {
-		if entry.Role == "warning" && entry.Text == strings.TrimSpace(prompts.CompactionSoonReminderPrompt) {
+		if entry.Role == "warning" && entry.Text == prompts.RenderCompactionSoonReminderPrompt(false) {
 			count++
 		}
 	}
 	return count
+}
+
+func TestCompactionSoonReminderIncludesTriggerHandoffAdditionWhenConfigured(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   2_000,
+		AutoCompactTokenLimit: 1_000,
+		CompactionMode:        "local",
+		EnabledTools:          []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.setLastUsage(llm.Usage{InputTokens: 890, WindowTokens: 2_000})
+
+	if err := eng.maybeAppendCompactionSoonReminder(context.Background(), "step-1"); err != nil {
+		t.Fatalf("append reminder: %v", err)
+	}
+
+	reminderText := prompts.RenderCompactionSoonReminderPrompt(true)
+	reminders := 0
+	for _, entry := range eng.ChatSnapshot().Entries {
+		if entry.Role == "warning" && entry.Text == reminderText {
+			reminders++
+		}
+	}
+	if reminders != 1 {
+		t.Fatalf("expected enabled reminder text once, got %d entries=%+v", reminders, eng.ChatSnapshot().Entries)
+	}
+}
+
+func TestTriggerHandoffFailsBeforeReminder(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	_, _, err = eng.TriggerHandoff(context.Background(), "step-1", llm.ToolCall{ID: "call-handoff-1", Name: string(tools.ToolTriggerHandoff)}, "", "")
+	if err == nil {
+		t.Fatal("expected trigger_handoff to fail before reminder")
+	}
+	if err.Error() != handoffTooEarlyMessage {
+		t.Fatalf("unexpected early handoff error: %v", err)
+	}
+}
+
+func TestTriggerHandoffFailsWhenAutoCompactionDisabled(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.mu.Lock()
+	eng.compactionSoonReminderIssued = true
+	eng.mu.Unlock()
+	changed, enabled := eng.SetAutoCompactionEnabled(false)
+	if !changed || enabled {
+		t.Fatalf("expected auto compaction toggle off, changed=%v enabled=%v", changed, enabled)
+	}
+
+	_, _, err = eng.TriggerHandoff(context.Background(), "step-1", llm.ToolCall{ID: "call-handoff-1", Name: string(tools.ToolTriggerHandoff)}, "", "")
+	if err == nil {
+		t.Fatal("expected trigger_handoff to fail while auto compaction is disabled")
+	}
+	if err.Error() != handoffDisabledByUserMessage {
+		t.Fatalf("unexpected disabled handoff error: %v", err)
+	}
+}
+
+func TestTriggerHandoffSchedulesCompactionAndAppendsFutureMessageWithoutManualCarryover(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{
+		responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "summary"}}},
+	}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.mu.Lock()
+	eng.compactionSoonReminderIssued = true
+	eng.mu.Unlock()
+	activeCall := llm.ToolCall{ID: "call-handoff-1", Name: string(tools.ToolTriggerHandoff), Input: json.RawMessage(`{"summarizer_prompt":"keep API details","future_agent_message":"resume with tests"}`)}
+
+	summary, futureAdded, err := eng.TriggerHandoff(context.Background(), "step-1", activeCall, "keep API details", "resume with tests")
+	if err != nil {
+		t.Fatalf("trigger handoff: %v", err)
+	}
+	if summary == "" || !futureAdded {
+		t.Fatalf("unexpected trigger handoff result: summary=%q futureAdded=%v", summary, futureAdded)
+	}
+	if len(client.calls) != 0 {
+		t.Fatalf("expected handoff scheduling to avoid immediate compaction model call, got %d", len(client.calls))
+	}
+	if err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err != nil {
+		t.Fatalf("apply pending handoff: %v", err)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected one local-summary model call, got %d", len(client.calls))
+	}
+
+	foundPrompt := false
+	for _, item := range client.calls[0].Items {
+		if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleDeveloper && item.Content == compactionInstructions("keep API details") {
+			foundPrompt = true
+			break
+		}
+	}
+	if !foundPrompt {
+		t.Fatalf("expected handoff to reuse compaction instructions, got %+v", client.calls[0].Items)
+	}
+
+	messages := eng.snapshotMessages()
+	foundFutureMessage := false
+	foundManualCarryover := false
+	for _, message := range messages {
+		if message.MessageType == llm.MessageTypeHandoffFutureMessage && message.Content == "resume with tests" {
+			foundFutureMessage = true
+		}
+		if message.MessageType == llm.MessageTypeManualCompactionCarryover {
+			foundManualCarryover = true
+		}
+	}
+	if !foundFutureMessage {
+		t.Fatalf("expected future-agent message in history, got %+v", messages)
+	}
+	if foundManualCarryover {
+		t.Fatalf("did not expect manual compaction carryover for trigger_handoff, got %+v", messages)
+	}
+
+	entries := eng.ChatSnapshot().Entries
+	foundDeveloperContext := false
+	for _, entry := range entries {
+		if entry.Role == string(transcript.EntryRoleDeveloperContext) && entry.Text == "resume with tests" {
+			foundDeveloperContext = true
+		}
+		if entry.Role == string(transcript.EntryRoleManualCompactionCarryover) {
+			t.Fatalf("did not expect manual carryover transcript entry for trigger_handoff, got %+v", entries)
+		}
+	}
+	if !foundDeveloperContext {
+		t.Fatalf("expected future-agent message to be detail-only developer context, got %+v", entries)
+	}
+}
+
+func TestPendingTriggerHandoffRetriesAfterCompactionFailure(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+			Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
+		},
+	}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.mu.Lock()
+	eng.compactionSoonReminderIssued = true
+	eng.mu.Unlock()
+
+	_, _, err = eng.TriggerHandoff(context.Background(), "step-1", llm.ToolCall{ID: "call_handoff_retry", Name: string(tools.ToolTriggerHandoff)}, "keep API details", "resume with tests")
+	if err != nil {
+		t.Fatalf("trigger handoff: %v", err)
+	}
+	if eng.pendingHandoffRequest == nil {
+		t.Fatal("expected queued handoff before compaction attempt")
+	}
+
+	client.responses = nil
+	if err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err == nil {
+		t.Fatal("expected first pending handoff attempt to fail when compaction summary response is missing")
+	}
+	if eng.pendingHandoffRequest == nil {
+		t.Fatal("expected failed handoff compaction to leave pending request queued for retry")
+	}
+	if got, want := eng.pendingHandoffRequest.summarizerPrompt, "keep API details"; got != want {
+		t.Fatalf("pending summarizer_prompt after failure = %q, want %q", got, want)
+	}
+	if got, want := eng.pendingHandoffRequest.futureAgentMessage, "resume with tests"; got != want {
+		t.Fatalf("pending future_agent_message after failure = %q, want %q", got, want)
+	}
+
+	client.responses = []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+		Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
+	}}
+	if err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err != nil {
+		t.Fatalf("retry pending handoff: %v", err)
+	}
+	if eng.pendingHandoffRequest != nil {
+		t.Fatalf("expected successful retry to clear pending handoff, got %+v", eng.pendingHandoffRequest)
+	}
+
+	messages := eng.snapshotMessages()
+	foundFutureMessage := false
+	for _, message := range messages {
+		if message.MessageType == llm.MessageTypeHandoffFutureMessage && message.Content == "resume with tests" {
+			foundFutureMessage = true
+			break
+		}
+	}
+	if !foundFutureMessage {
+		t.Fatalf("expected successful retry to append future-agent message, got %+v", messages)
+	}
+}
+
+func TestPendingTriggerHandoffRetriesFutureMessageAfterAppendFailureWithoutRecompaction(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+		Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.mu.Lock()
+	eng.compactionSoonReminderIssued = true
+	eng.mu.Unlock()
+
+	_, _, err = eng.TriggerHandoff(context.Background(), "step-1", llm.ToolCall{ID: "call_handoff_append_retry", Name: string(tools.ToolTriggerHandoff)}, "keep API details", "resume with tests")
+	if err != nil {
+		t.Fatalf("trigger handoff: %v", err)
+	}
+
+	appendFailures := 0
+	eng.beforePersistMessage = func(msg llm.Message) error {
+		if msg.MessageType != llm.MessageTypeHandoffFutureMessage || appendFailures > 0 {
+			return nil
+		}
+		appendFailures++
+		return errors.New("synthetic future-message append failure")
+	}
+	if err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err == nil {
+		t.Fatal("expected first pending handoff attempt to fail while appending future-agent message")
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected exactly one compaction summary call after append failure, got %d", len(client.calls))
+	}
+	if eng.pendingHandoffRequest != nil {
+		t.Fatalf("expected compaction-success path to consume original handoff request, got %+v", eng.pendingHandoffRequest)
+	}
+	if got, want := eng.pendingHandoffFutureMessage, "resume with tests"; got != want {
+		t.Fatalf("pending future-agent message after append failure = %q, want %q", got, want)
+	}
+
+	eng.beforePersistMessage = nil
+	if err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err != nil {
+		t.Fatalf("retry pending future-agent message append: %v", err)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected retry after future-message append failure not to re-run compaction, got %d compaction calls", len(client.calls))
+	}
+	if got := eng.pendingHandoffFutureMessage; got != "" {
+		t.Fatalf("expected successful retry to clear pending future-agent message, got %q", got)
+	}
+
+	messages := eng.snapshotMessages()
+	foundFutureMessage := false
+	for _, message := range messages {
+		if message.MessageType == llm.MessageTypeHandoffFutureMessage && message.Content == "resume with tests" {
+			foundFutureMessage = true
+			break
+		}
+	}
+	if !foundFutureMessage {
+		t.Fatalf("expected successful retry to append future-agent message after append failure, got %+v", messages)
+	}
+}
+
+func TestRunStepLoopTriggerHandoffOmitsCallAndOutputFromFollowUpRequestAndKeepsFutureMessage(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{
+		responses: []llm.Response{
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "handing off", Phase: llm.MessagePhaseCommentary},
+				ToolCalls: []llm.ToolCall{{
+					ID:    "call_handoff_1",
+					Name:  string(tools.ToolTriggerHandoff),
+					Input: json.RawMessage(`{"summarizer_prompt":"keep API details","future_agent_message":"resume with tests"}`),
+				}},
+				Usage: llm.Usage{InputTokens: 100, WindowTokens: 2_000},
+			},
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+				Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
+			},
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+				Usage:     llm.Usage{InputTokens: 300, WindowTokens: 2_000},
+			},
+		},
+	}
+
+	var eng *Engine
+	registry := tools.NewRegistry(
+		fakeTool{name: tools.ToolShell},
+		triggerhandofftool.New(func() triggerhandofftool.Controller { return eng }),
+	)
+	eng, err = New(store, client, registry, Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.mu.Lock()
+	eng.compactionSoonReminderIssued = true
+	eng.mu.Unlock()
+
+	msg, err := eng.runStepLoop(context.Background(), "step-1")
+	if err != nil {
+		t.Fatalf("runStepLoop: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("unexpected final assistant message: %+v", msg)
+	}
+	if len(client.calls) != 3 {
+		t.Fatalf("expected tool call, local compaction summary, and follow-up requests, got %d", len(client.calls))
+	}
+	if got, want := client.calls[2].SessionID, eng.requestSessionID(); got != want {
+		t.Fatalf("expected follow-up request session id to rotate after handoff compaction, got %q want %q", got, want)
+	}
+
+	followUp := client.calls[2]
+	foundCall := false
+	foundOutput := false
+	futureIdx := -1
+	for idx, item := range followUp.Items {
+		switch {
+		case item.Type == llm.ResponseItemTypeFunctionCall && item.CallID == "call_handoff_1":
+			foundCall = true
+		case item.Type == llm.ResponseItemTypeFunctionCallOutput && item.CallID == "call_handoff_1":
+			foundOutput = true
+		case item.Type == llm.ResponseItemTypeMessage && item.MessageType == llm.MessageTypeHandoffFutureMessage && item.Content == "resume with tests":
+			futureIdx = idx
+		}
+	}
+	if foundCall || foundOutput {
+		t.Fatalf("expected follow-up request to omit trigger_handoff call/output items entirely, foundCall=%v foundOutput=%v items=%+v", foundCall, foundOutput, followUp.Items)
+	}
+	if futureIdx < 0 {
+		t.Fatalf("expected future-agent message in follow-up request, items=%+v", followUp.Items)
+	}
+}
+
+func TestRunStepLoopInjectsReminderBeforeTriggerHandoffAndOmitsCallOutputFromFollowUp(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{
+		responses: []llm.Response{
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "handing off", Phase: llm.MessagePhaseCommentary},
+				ToolCalls: []llm.ToolCall{{
+					ID:    "call_handoff_2",
+					Name:  string(tools.ToolTriggerHandoff),
+					Input: json.RawMessage(`{"future_agent_message":"resume with tests"}`),
+				}},
+				Usage: llm.Usage{InputTokens: 100, WindowTokens: 2_000},
+			},
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+				Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
+			},
+			{
+				Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+				Usage:     llm.Usage{InputTokens: 300, WindowTokens: 2_000},
+			},
+		},
+	}
+
+	var eng *Engine
+	registry := tools.NewRegistry(
+		fakeTool{name: tools.ToolShell},
+		triggerhandofftool.New(func() triggerhandofftool.Controller { return eng }),
+	)
+	eng, err = New(store, client, registry, Config{
+		Model:                 "gpt-5",
+		CompactionMode:        "local",
+		ContextWindowTokens:   2_000,
+		AutoCompactTokenLimit: 1_000,
+		EnabledTools:          []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.setLastUsage(llm.Usage{InputTokens: 890, WindowTokens: 2_000})
+
+	msg, err := eng.runStepLoop(context.Background(), "step-1")
+	if err != nil {
+		t.Fatalf("runStepLoop: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("unexpected final assistant message: %+v", msg)
+	}
+	if len(client.calls) != 3 {
+		t.Fatalf("expected trigger request, local compaction summary, and follow-up requests, got %d", len(client.calls))
+	}
+	if got, want := client.calls[2].SessionID, eng.requestSessionID(); got != want {
+		t.Fatalf("expected follow-up request session id to rotate after handoff compaction, got %q want %q", got, want)
+	}
+
+	remindersInFirstRequest := 0
+	for _, reqMsg := range requestMessages(client.calls[0]) {
+		if reqMsg.Role == llm.RoleDeveloper && reqMsg.MessageType == llm.MessageTypeCompactionSoonReminder {
+			remindersInFirstRequest++
+		}
+	}
+	if remindersInFirstRequest != 1 {
+		t.Fatalf("expected exactly one pre-request reminder before trigger_handoff, got %d messages=%+v", remindersInFirstRequest, requestMessages(client.calls[0]))
+	}
+
+	followUp := client.calls[2]
+	foundCall := false
+	foundOutput := false
+	futureIdx := -1
+	for idx, item := range followUp.Items {
+		switch {
+		case item.Type == llm.ResponseItemTypeFunctionCall && item.CallID == "call_handoff_2":
+			foundCall = true
+		case item.Type == llm.ResponseItemTypeFunctionCallOutput && item.CallID == "call_handoff_2":
+			foundOutput = true
+		case item.Type == llm.ResponseItemTypeMessage && item.MessageType == llm.MessageTypeHandoffFutureMessage && item.Content == "resume with tests":
+			futureIdx = idx
+		}
+	}
+	if foundCall || foundOutput {
+		t.Fatalf("expected follow-up request to omit trigger_handoff call/output items entirely, foundCall=%v foundOutput=%v items=%+v", foundCall, foundOutput, followUp.Items)
+	}
+	if futureIdx < 0 {
+		t.Fatalf("expected future-agent message in follow-up request, items=%+v", followUp.Items)
+	}
+}
+
+func TestReopenedSessionAfterTriggerHandoffUsesRotatedRequestSessionAndOmitsLingeringCallOutput(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	firstClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "handing off", Phase: llm.MessagePhaseCommentary},
+			ToolCalls: []llm.ToolCall{{
+				ID:    "call_handoff_restart",
+				Name:  string(tools.ToolTriggerHandoff),
+				Input: json.RawMessage(`{"future_agent_message":"resume after restart"}`),
+			}},
+			Usage: llm.Usage{InputTokens: 100, WindowTokens: 2_000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+			Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{InputTokens: 300, WindowTokens: 2_000},
+		},
+	}}
+
+	var eng *Engine
+	registry := tools.NewRegistry(
+		fakeTool{name: tools.ToolShell},
+		triggerhandofftool.New(func() triggerhandofftool.Controller { return eng }),
+	)
+	eng, err = New(store, firstClient, registry, Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.mu.Lock()
+	eng.compactionSoonReminderIssued = true
+	eng.mu.Unlock()
+
+	if _, err := eng.runStepLoop(context.Background(), "step-1"); err != nil {
+		t.Fatalf("runStepLoop: %v", err)
+	}
+
+	reopenedStore, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("re-open store: %v", err)
+	}
+	resumedClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "resumed", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{WindowTokens: 2_000},
+	}}}
+	restored, err := New(reopenedStore, resumedClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+
+	msg, err := restored.SubmitUserMessage(context.Background(), "continue")
+	if err != nil {
+		t.Fatalf("submit after reopen: %v", err)
+	}
+	if msg.Content != "resumed" {
+		t.Fatalf("assistant content = %q, want resumed", msg.Content)
+	}
+	if len(resumedClient.calls) != 1 {
+		t.Fatalf("expected one resumed model call, got %d", len(resumedClient.calls))
+	}
+	if got, want := resumedClient.calls[0].SessionID, restored.requestSessionID(); got != want {
+		t.Fatalf("expected resumed request session id to stay rotated after restore, got %q want %q", got, want)
+	}
+	for _, item := range resumedClient.calls[0].Items {
+		switch {
+		case item.Type == llm.ResponseItemTypeFunctionCall && item.CallID == "call_handoff_restart":
+			t.Fatalf("did not expect reopened request to include lingering trigger_handoff call item, items=%+v", resumedClient.calls[0].Items)
+		case item.Type == llm.ResponseItemTypeFunctionCallOutput && item.CallID == "call_handoff_restart":
+			t.Fatalf("did not expect reopened request to include lingering trigger_handoff output item, items=%+v", resumedClient.calls[0].Items)
+		}
+	}
+}
+
+func TestReopenedSessionAfterSuccessfulTriggerHandoffRequeuesPendingHandoff(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	handoffCall := llm.ToolCall{
+		ID:    "call_handoff_pending_restore",
+		Name:  string(tools.ToolTriggerHandoff),
+		Input: mustJSON(map[string]any{"summarizer_prompt": "keep API details", "future_agent_message": "resume after restart"}),
+	}
+	if err := eng.appendMessage("step-1", llm.Message{Role: llm.RoleAssistant, Content: "handing off", Phase: llm.MessagePhaseCommentary, ToolCalls: []llm.ToolCall{handoffCall}}); err != nil {
+		t.Fatalf("append assistant tool call: %v", err)
+	}
+	resultOutput := mustJSON(triggerhandofftool.ResultPayload{
+		Summary:                 "Handoff scheduled. Context will be compacted before the next model turn and future-agent guidance was saved.",
+		FutureAgentMessageAdded: true,
+	})
+	if err := eng.persistToolCompletion("step-1", tools.Result{CallID: handoffCall.ID, Name: tools.ToolTriggerHandoff, Output: resultOutput}); err != nil {
+		t.Fatalf("persist tool completion: %v", err)
+	}
+	if err := eng.appendMessage("step-1", llm.Message{Role: llm.RoleTool, ToolCallID: handoffCall.ID, Name: string(tools.ToolTriggerHandoff), Content: string(resultOutput)}); err != nil {
+		t.Fatalf("append tool result: %v", err)
+	}
+
+	reopenedStore, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("re-open store: %v", err)
+	}
+	resumedClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+			Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "resumed", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{InputTokens: 300, WindowTokens: 2_000},
+		},
+	}}
+	restored, err := New(reopenedStore, resumedClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	if restored.pendingHandoffRequest == nil {
+		t.Fatal("expected restore to recover pending handoff request")
+	}
+	if got, want := restored.pendingHandoffRequest.summarizerPrompt, "keep API details"; got != want {
+		t.Fatalf("pending summarizer_prompt = %q, want %q", got, want)
+	}
+	if got, want := restored.pendingHandoffRequest.futureAgentMessage, "resume after restart"; got != want {
+		t.Fatalf("pending future_agent_message = %q, want %q", got, want)
+	}
+
+	msg, err := restored.SubmitUserMessage(context.Background(), "continue")
+	if err != nil {
+		t.Fatalf("submit after reopen: %v", err)
+	}
+	if msg.Content != "resumed" {
+		t.Fatalf("assistant content = %q, want resumed", msg.Content)
+	}
+	if len(resumedClient.calls) != 2 {
+		t.Fatalf("expected recovered handoff compaction plus follow-up request, got %d", len(resumedClient.calls))
+	}
+	first := resumedClient.calls[0]
+	foundInstructions := false
+	for _, item := range first.Items {
+		if item.Type == llm.ResponseItemTypeMessage && item.Role == llm.RoleDeveloper && item.Content == compactionInstructions("keep API details") {
+			foundInstructions = true
+			break
+		}
+	}
+	if !foundInstructions {
+		t.Fatalf("expected restored handoff compaction request to include summarizer prompt, items=%+v", first.Items)
+	}
+	followUp := resumedClient.calls[1]
+	if got, want := followUp.SessionID, restored.requestSessionID(); got != want {
+		t.Fatalf("expected follow-up request session id to rotate after restored handoff compaction, got %q want %q", got, want)
+	}
+	foundCall := false
+	foundOutput := false
+	foundFuture := false
+	for _, item := range followUp.Items {
+		switch {
+		case item.Type == llm.ResponseItemTypeFunctionCall && item.CallID == handoffCall.ID:
+			foundCall = true
+		case item.Type == llm.ResponseItemTypeFunctionCallOutput && item.CallID == handoffCall.ID:
+			foundOutput = true
+		case item.Type == llm.ResponseItemTypeMessage && item.MessageType == llm.MessageTypeHandoffFutureMessage && item.Content == "resume after restart":
+			foundFuture = true
+		}
+	}
+	if foundCall || foundOutput {
+		t.Fatalf("expected recovered follow-up request to omit lingering trigger_handoff items, foundCall=%v foundOutput=%v items=%+v", foundCall, foundOutput, followUp.Items)
+	}
+	if !foundFuture {
+		t.Fatalf("expected recovered follow-up request to include future-agent message, items=%+v", followUp.Items)
+	}
+}
+
+func TestReopenedSessionAfterTriggerHandoffDoesNotRequeueWhenAnyCompactionAlreadyHappened(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	handoffCall := llm.ToolCall{
+		ID:    "call_handoff_satisfied_restore",
+		Name:  string(tools.ToolTriggerHandoff),
+		Input: mustJSON(map[string]any{"future_agent_message": "resume after manual compact"}),
+	}
+	if err := eng.appendMessage("step-1", llm.Message{Role: llm.RoleAssistant, Content: "handing off", Phase: llm.MessagePhaseCommentary, ToolCalls: []llm.ToolCall{handoffCall}}); err != nil {
+		t.Fatalf("append assistant tool call: %v", err)
+	}
+	resultOutput := mustJSON(triggerhandofftool.ResultPayload{
+		Summary:                 "Handoff scheduled. Context will be compacted before the next model turn and future-agent guidance was saved.",
+		FutureAgentMessageAdded: true,
+	})
+	if err := eng.persistToolCompletion("step-1", tools.Result{CallID: handoffCall.ID, Name: tools.ToolTriggerHandoff, Output: resultOutput}); err != nil {
+		t.Fatalf("persist tool completion: %v", err)
+	}
+	if err := eng.replaceHistory("step-1", "local", compactionModeManual, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeCompactionSummary, Content: "summary"}})); err != nil {
+		t.Fatalf("replace history: %v", err)
+	}
+
+	reopenedStore, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("re-open store: %v", err)
+	}
+	resumedClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "resumed", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{InputTokens: 300, WindowTokens: 2_000},
+	}}}
+	restored, err := New(reopenedStore, resumedClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	if restored.pendingHandoffRequest != nil {
+		t.Fatalf("did not expect restore to requeue handoff after later compaction, got %+v", restored.pendingHandoffRequest)
+	}
+
+	msg, err := restored.SubmitUserMessage(context.Background(), "continue")
+	if err != nil {
+		t.Fatalf("submit after reopen: %v", err)
+	}
+	if msg.Content != "resumed" {
+		t.Fatalf("assistant content = %q, want resumed", msg.Content)
+	}
+	if len(resumedClient.calls) != 1 {
+		t.Fatalf("expected compaction-satisfied session to resume with a single request, got %d", len(resumedClient.calls))
+	}
+	if got, want := resumedClient.calls[0].SessionID, restored.requestSessionID(); got != want {
+		t.Fatalf("expected resumed request session id to stay rotated after restored compaction, got %q want %q", got, want)
+	}
+	for _, item := range resumedClient.calls[0].Items {
+		switch {
+		case item.Type == llm.ResponseItemTypeFunctionCall && item.CallID == handoffCall.ID:
+			t.Fatalf("did not expect reopened request to include lingering trigger_handoff call item, items=%+v", resumedClient.calls[0].Items)
+		case item.Type == llm.ResponseItemTypeFunctionCallOutput && item.CallID == handoffCall.ID:
+			t.Fatalf("did not expect reopened request to include lingering trigger_handoff output item, items=%+v", resumedClient.calls[0].Items)
+		}
+	}
+}
+
+func TestReopenedSessionAfterFailedTriggerHandoffDoesNotRequeuePendingHandoff(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	handoffCall := llm.ToolCall{
+		ID:    "call_handoff_failed_restore",
+		Name:  string(tools.ToolTriggerHandoff),
+		Input: mustJSON(map[string]any{"future_agent_message": "should not resume"}),
+	}
+	if err := eng.appendMessage("step-1", llm.Message{Role: llm.RoleAssistant, Content: "attempting handoff", Phase: llm.MessagePhaseCommentary, ToolCalls: []llm.ToolCall{handoffCall}}); err != nil {
+		t.Fatalf("append assistant tool call: %v", err)
+	}
+	failedOutput := mustJSON(map[string]any{"error": handoffDisabledByUserMessage})
+	if err := eng.persistToolCompletion("step-1", tools.Result{CallID: handoffCall.ID, Name: tools.ToolTriggerHandoff, IsError: true, Output: failedOutput}); err != nil {
+		t.Fatalf("persist failed tool completion: %v", err)
+	}
+
+	reopenedStore, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("re-open store: %v", err)
+	}
+	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	if restored.pendingHandoffRequest != nil {
+		t.Fatalf("did not expect failed trigger_handoff completion to requeue handoff, got %+v", restored.pendingHandoffRequest)
+	}
+}
+
+func TestReopenedSessionAfterReviewerRollbackStillRequeuesPendingTriggerHandoff(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	handoffCall := llm.ToolCall{
+		ID:    "call_handoff_rollback_restore",
+		Name:  string(tools.ToolTriggerHandoff),
+		Input: mustJSON(map[string]any{"future_agent_message": "resume after rollback"}),
+	}
+	if err := eng.appendMessage("step-1", llm.Message{Role: llm.RoleAssistant, Content: "handing off", Phase: llm.MessagePhaseCommentary, ToolCalls: []llm.ToolCall{handoffCall}}); err != nil {
+		t.Fatalf("append assistant tool call: %v", err)
+	}
+	resultOutput := mustJSON(triggerhandofftool.ResultPayload{
+		Summary:                 "Handoff scheduled. Context will be compacted before the next model turn and future-agent guidance was saved.",
+		FutureAgentMessageAdded: true,
+	})
+	if err := eng.persistToolCompletion("step-1", tools.Result{CallID: handoffCall.ID, Name: tools.ToolTriggerHandoff, Output: resultOutput}); err != nil {
+		t.Fatalf("persist tool completion: %v", err)
+	}
+	if err := eng.replaceHistory("step-1", "reviewer_rollback", compactionModeManual, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "rolled back"}})); err != nil {
+		t.Fatalf("append reviewer rollback history replacement: %v", err)
+	}
+
+	reopenedStore, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("re-open store: %v", err)
+	}
+	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	if restored.pendingHandoffRequest == nil {
+		t.Fatal("expected reviewer rollback to preserve pending handoff recovery")
+	}
+	if got, want := restored.pendingHandoffRequest.futureAgentMessage, "resume after rollback"; got != want {
+		t.Fatalf("pending future_agent_message = %q, want %q", got, want)
+	}
+}
+
+func TestManualCompactionClearsQueuedTriggerHandoff(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+			Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{InputTokens: 300, WindowTokens: 2_000},
+		},
+	}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.mu.Lock()
+	eng.compactionSoonReminderIssued = true
+	eng.mu.Unlock()
+
+	_, _, err = eng.TriggerHandoff(context.Background(), "step-1", llm.ToolCall{ID: "call_handoff_manual_clear", Name: string(tools.ToolTriggerHandoff)}, "", "resume after manual compact")
+	if err != nil {
+		t.Fatalf("trigger handoff: %v", err)
+	}
+	if eng.pendingHandoffRequest == nil {
+		t.Fatal("expected queued handoff before manual compaction")
+	}
+	if err := eng.CompactContext(context.Background(), "manual compact now"); err != nil {
+		t.Fatalf("manual compact: %v", err)
+	}
+	if eng.pendingHandoffRequest != nil {
+		t.Fatalf("expected manual compaction to clear queued handoff, got %+v", eng.pendingHandoffRequest)
+	}
+
+	msg, err := eng.SubmitUserMessage(context.Background(), "continue")
+	if err != nil {
+		t.Fatalf("submit after manual compaction: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if len(client.calls) != 2 {
+		t.Fatalf("expected manual compaction plus a single follow-up request, got %d", len(client.calls))
+	}
 }
 
 func TestManualCompactionRemotePassesSlashCommandArgumentsAsInstructions(t *testing.T) {

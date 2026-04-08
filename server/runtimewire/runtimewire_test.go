@@ -37,6 +37,7 @@ func TestBuildToolRegistryAllowsHostedWebSearchWithoutLocalRuntimeBuilder(t *tes
 		true,
 		nil,
 		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("build tool registry: %v", err)
@@ -70,6 +71,7 @@ func TestBuildToolRegistryViewImageApprovedOutsidePathIsLogged(t *testing.T) {
 		false,
 		true,
 		logger,
+		nil,
 		nil,
 	)
 	if err != nil {
