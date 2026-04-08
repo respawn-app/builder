@@ -70,21 +70,22 @@ type onboardingImportSelection struct {
 }
 
 type onboardingFlowState struct {
-	settings                 config.Settings
-	baselineSettings         config.Settings
-	theme                    string
-	alternateScreen          config.TUIAlternateScreenPolicy
-	authState                auth.State
-	providerCapabilities     llm.ProviderCapabilities
-	pendingAction            onboardingPendingAction
-	customThinking           bool
-	reviewerCustomModel      bool
-	reviewerCustomThinking   bool
-	reviewerThinkingDisabled bool
-	skillImport              onboardingImportSelection
-	commandImport            onboardingImportSelection
-	skillSelection           map[string]bool
-	imports                  onboardingImportDiscovery
+	settings                    config.Settings
+	baselineSettings            config.Settings
+	theme                       string
+	alternateScreen             config.TUIAlternateScreenPolicy
+	authState                   auth.State
+	providerCapabilities        llm.ProviderCapabilities
+	pendingAction               onboardingPendingAction
+	customThinking              bool
+	reviewerCustomModel         bool
+	reviewerCustomThinking      bool
+	reviewerCustomThinkingInput bool
+	reviewerThinkingDisabled    bool
+	skillImport                 onboardingImportSelection
+	commandImport               onboardingImportSelection
+	skillSelection              map[string]bool
+	imports                     onboardingImportDiscovery
 }
 
 type onboardingResult struct {
@@ -417,13 +418,16 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 					state.reviewerThinkingDisabled = true
 					state.settings.Reviewer.ThinkingLevel = ""
 					state.reviewerCustomThinking = false
+					state.reviewerCustomThinkingInput = false
 				case "custom":
 					state.reviewerThinkingDisabled = false
 					state.reviewerCustomThinking = true
+					state.reviewerCustomThinkingInput = true
 				default:
 					state.reviewerThinkingDisabled = false
 					state.settings.Reviewer.ThinkingLevel = choiceID
 					state.reviewerCustomThinking = choiceID != strings.TrimSpace(state.settings.ThinkingLevel)
+					state.reviewerCustomThinkingInput = false
 				}
 				return nil
 			},
@@ -431,11 +435,11 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 		onboardingInputStep{
 			id: "reviewer_thinking_custom",
 			visible: func(state *onboardingFlowState) bool {
-				return reviewerEnabled(state) && llm.SupportsReasoningEffortModel(state.settings.Reviewer.Model) && (state.reviewerCustomThinking || (strings.TrimSpace(state.settings.Reviewer.ThinkingLevel) != "" && !isKnownThinkingLevel(state.settings.Reviewer.ThinkingLevel)))
+				return reviewerEnabled(state) && llm.SupportsReasoningEffortModel(state.settings.Reviewer.Model) && (state.reviewerCustomThinkingInput || (strings.TrimSpace(state.settings.Reviewer.ThinkingLevel) != "" && !isKnownThinkingLevel(state.settings.Reviewer.ThinkingLevel)))
 			},
 			build: func(state *onboardingFlowState) onboardingScreen {
 				value := state.settings.Reviewer.ThinkingLevel
-				if state.reviewerCustomThinking && isKnownThinkingLevel(value) {
+				if state.reviewerCustomThinkingInput && isKnownThinkingLevel(value) {
 					value = ""
 				}
 				return onboardingScreen{ID: "reviewer_thinking_custom", Kind: onboardingScreenInput, Title: "Enter a custom Supervisor thinking level", Helper: "Press Enter to continue.", InputValue: value}
@@ -448,6 +452,7 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				state.reviewerThinkingDisabled = false
 				state.settings.Reviewer.ThinkingLevel = trimmed
 				state.reviewerCustomThinking = trimmed != strings.TrimSpace(state.settings.ThinkingLevel)
+				state.reviewerCustomThinkingInput = !isKnownThinkingLevel(trimmed)
 				return nil
 			},
 		},
@@ -559,11 +564,13 @@ func syncReviewerDefaultsFromPrimary(state *onboardingFlowState) {
 func syncReviewerThinkingToPrimary(state *onboardingFlowState) {
 	if !llm.SupportsReasoningEffortModel(state.settings.Reviewer.Model) {
 		state.reviewerCustomThinking = false
+		state.reviewerCustomThinkingInput = false
 		state.settings.Reviewer.ThinkingLevel = ""
 		return
 	}
 	if state.reviewerThinkingDisabled {
 		state.reviewerCustomThinking = false
+		state.reviewerCustomThinkingInput = false
 		state.settings.Reviewer.ThinkingLevel = ""
 		return
 	}
