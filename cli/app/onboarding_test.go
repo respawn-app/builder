@@ -14,70 +14,24 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-func TestMergeSkillImportsPrefersNewestAndAnnotatesDuplicate(t *testing.T) {
-	older := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	newer := older.Add(time.Hour)
-	merged := mergeSkillImports(map[onboardingImportProviderID][]onboardingSkillImportItem{
-		onboardingImportProviderClaudeCode: {{ID: "claude:skill", Provider: onboardingImportProviderClaudeCode, ProviderLabel: "Claude Code", TargetDirName: "skill-creator", SkillName: "skill-creator", ModifiedAt: older}},
-		onboardingImportProviderCodex:      {{ID: "codex:skill", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetDirName: "skill-creator", SkillName: "skill-creator", ModifiedAt: newer}},
-	})
-	if len(merged) != 1 {
-		t.Fatalf("expected one merged skill, got %d", len(merged))
-	}
-	if merged[0].Provider != onboardingImportProviderCodex {
-		t.Fatalf("expected newer Codex skill to win, got %+v", merged[0])
-	}
-	if merged[0].DuplicateSourceNote != "Claude Code" {
-		t.Fatalf("expected duplicate note for losing provider, got %q", merged[0].DuplicateSourceNote)
-	}
-}
-
 func TestSkillSelectionCandidatesAnnotateOpponentSource(t *testing.T) {
-	older := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	newer := older.Add(time.Hour)
 	state := &onboardingFlowState{
-		imports: onboardingImportDiscovery{skills: map[onboardingImportProviderID][]onboardingSkillImportItem{
-			onboardingImportProviderClaudeCode: {{ID: "claude:skill", Provider: onboardingImportProviderClaudeCode, ProviderLabel: "Claude Code", TargetDirName: "skill-creator", SkillName: "skill-creator", SourceDir: "/tmp/claude/skill-creator", ModifiedAt: older}},
-			onboardingImportProviderCodex:      {{ID: "codex:skill", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetDirName: "skill-creator", SkillName: "skill-creator", SourceDir: "/tmp/codex/skill-creator", ModifiedAt: newer}},
+		imports: onboardingImportDiscovery{skillSymlinkItems: map[onboardingImportProviderID][]onboardingSkillImportItem{
+			onboardingImportProviderCodex: {
+				{ID: "codex:skill", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetDirName: "skill-creator", SkillName: "skill-creator", SourceDir: "/tmp/codex/skill-creator", ModifiedAt: time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)},
+				{ID: "codex:skill-copy", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetDirName: "skill-creator", SkillName: "skill-creator", SourceDir: "/tmp/codex/skill-creator-copy", ModifiedAt: time.Date(2026, 1, 1, 2, 0, 0, 0, time.UTC)},
+			},
 		}},
-		skillImport: onboardingImportSelection{Mode: onboardingImportModeMergeCopy},
+		skillImport: onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderCodex},
 	}
 	items := skillSelectionCandidates(state)
 	if len(items) != 2 {
-		t.Fatalf("expected both duplicate candidates to remain visible, got %d", len(items))
+		t.Fatalf("expected both duplicate symlink candidates to remain visible, got %d", len(items))
 	}
 	for _, item := range items {
-		if item.Provider == onboardingImportProviderCodex && item.DuplicateSourceNote != "Claude Code" {
-			t.Fatalf("expected Codex duplicate note to mention Claude Code, got %q", item.DuplicateSourceNote)
+		if item.DuplicateSourceNote != "skill-creator-copy" && item.DuplicateSourceNote != "skill-creator" {
+			t.Fatalf("expected duplicate note to mention the sibling source, got %q", item.DuplicateSourceNote)
 		}
-		if item.Provider == onboardingImportProviderClaudeCode && item.DuplicateSourceNote != "Codex" {
-			t.Fatalf("expected Claude Code duplicate note to mention Codex, got %q", item.DuplicateSourceNote)
-		}
-	}
-}
-
-func TestPlannedSkillImportsForSelectionPrefersNewestSelectedWinner(t *testing.T) {
-	older := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	newer := older.Add(time.Hour)
-	discovery := onboardingImportDiscovery{skills: map[onboardingImportProviderID][]onboardingSkillImportItem{
-		onboardingImportProviderClaudeCode: {
-			{ID: "claude:skill", Provider: onboardingImportProviderClaudeCode, ProviderLabel: "Claude Code", TargetDirName: "skill-creator", SkillName: "skill-creator", ModifiedAt: older},
-		},
-		onboardingImportProviderCodex: {
-			{ID: "codex:skill", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetDirName: "skill-creator", SkillName: "skill-creator", ModifiedAt: newer},
-			{ID: "codex:other", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetDirName: "openai-docs", SkillName: "openai-docs", ModifiedAt: older},
-		},
-	}}
-	planned := plannedSkillImportsForSelection(discovery, onboardingImportSelection{Mode: onboardingImportModeMergeCopy}, map[string]bool{
-		"claude:skill": true,
-		"codex:skill":  true,
-		"codex:other":  false,
-	})
-	if len(planned) != 1 {
-		t.Fatalf("expected only the selected duplicate winner to be copied, got %+v", planned)
-	}
-	if planned[0].Provider != onboardingImportProviderCodex {
-		t.Fatalf("expected newest selected winner to be Codex, got %+v", planned[0])
 	}
 }
 
@@ -103,34 +57,6 @@ func TestDiscoverOnboardingImportsSkipsExistingTargets(t *testing.T) {
 	}
 	if !discovery.skipCommands {
 		t.Fatal("expected command import flow to be skipped when commands root already exists")
-	}
-}
-
-func TestDiscoverProviderCommandsPrefersPromptsOverCommandsDuplicate(t *testing.T) {
-	base := t.TempDir()
-	promptsDir := filepath.Join(base, "prompts")
-	commandsDir := filepath.Join(base, "commands")
-	if err := os.MkdirAll(promptsDir, 0o755); err != nil {
-		t.Fatalf("mkdir prompts: %v", err)
-	}
-	if err := os.MkdirAll(commandsDir, 0o755); err != nil {
-		t.Fatalf("mkdir commands: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(commandsDir, "review.md"), []byte("commands"), 0o644); err != nil {
-		t.Fatalf("write commands file: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(promptsDir, "review.md"), []byte("prompts"), 0o644); err != nil {
-		t.Fatalf("write prompts file: %v", err)
-	}
-	items, err := discoverProviderCommands(onboardingImportProvider{ID: onboardingImportProviderCodex, Label: "Codex"}, base)
-	if err != nil {
-		t.Fatalf("discover provider commands: %v", err)
-	}
-	if len(items) != 1 {
-		t.Fatalf("expected duplicate provider layout to collapse to one command, got %+v", items)
-	}
-	if got := filepath.Base(filepath.Dir(items[0].SourceFile)); got != "prompts" {
-		t.Fatalf("expected prompts entry to win duplicate precedence, got %q from %q", got, items[0].SourceFile)
 	}
 }
 
@@ -196,50 +122,6 @@ func TestDiscoverProviderCommandSymlinkItemsFallBackToPromptsWhenCommandsHasNoDi
 	}
 }
 
-func TestDiscoverProviderSkillsDedupesSameProviderTarget(t *testing.T) {
-	base := t.TempDir()
-	olderDir := filepath.Join(base, "plugins", "one", "skills", "configure")
-	newerDir := filepath.Join(base, "plugins", "two", "skills", "configure")
-	for _, dir := range []string{olderDir, newerDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("mkdir skill dir: %v", err)
-		}
-	}
-	contents := strings.Join([]string{
-		"---",
-		"name: configure",
-		"description: test skill",
-		"---",
-		"",
-	}, "\n")
-	olderFile := filepath.Join(olderDir, "SKILL.md")
-	newerFile := filepath.Join(newerDir, "SKILL.md")
-	if err := os.WriteFile(olderFile, []byte(contents), 0o644); err != nil {
-		t.Fatalf("write older skill: %v", err)
-	}
-	if err := os.WriteFile(newerFile, []byte(contents), 0o644); err != nil {
-		t.Fatalf("write newer skill: %v", err)
-	}
-	olderTime := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
-	newerTime := olderTime.Add(time.Hour)
-	if err := os.Chtimes(olderFile, olderTime, olderTime); err != nil {
-		t.Fatalf("chtimes older skill: %v", err)
-	}
-	if err := os.Chtimes(newerFile, newerTime, newerTime); err != nil {
-		t.Fatalf("chtimes newer skill: %v", err)
-	}
-	items, err := discoverProviderSkills(onboardingImportProvider{ID: onboardingImportProviderClaudeCode, Label: "Claude Code"}, base)
-	if err != nil {
-		t.Fatalf("discover provider skills: %v", err)
-	}
-	if len(items) != 1 {
-		t.Fatalf("expected duplicate provider targets to collapse to one skill, got %+v", items)
-	}
-	if items[0].SourceDir != newerDir {
-		t.Fatalf("expected newest same-provider skill to win, got %q", items[0].SourceDir)
-	}
-}
-
 func TestExecuteSkillImportSymlinksRootDirectory(t *testing.T) {
 	home := t.TempDir()
 	globalRoot := t.TempDir()
@@ -248,7 +130,7 @@ func TestExecuteSkillImportSymlinksRootDirectory(t *testing.T) {
 	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
 		t.Fatalf("mkdir source: %v", err)
 	}
-	if _, err := executeSkillImport(globalRoot, onboardingImportDiscovery{}, onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderCodex}, nil); err != nil {
+	if _, err := executeSkillImport(globalRoot, onboardingImportDiscovery{}, onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderCodex}); err != nil {
 		t.Fatalf("execute skill import: %v", err)
 	}
 	targetPath := filepath.Join(globalRoot, "skills")
@@ -304,12 +186,6 @@ func TestProviderSkillSymlinkSourceErrorsWithoutSkillsRoot(t *testing.T) {
 
 func TestBuildSkillImportScreenSymlinkCountsUseActualSymlinkRoot(t *testing.T) {
 	state := &onboardingFlowState{imports: onboardingImportDiscovery{
-		skills: map[onboardingImportProviderID][]onboardingSkillImportItem{
-			onboardingImportProviderCodex: {
-				{ID: "codex:local", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetDirName: "local-skill"},
-				{ID: "codex:system", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetDirName: "system-skill"},
-			},
-		},
 		skillSymlinkItems: map[onboardingImportProviderID][]onboardingSkillImportItem{
 			onboardingImportProviderCodex: {
 				{ID: "codex:local", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetDirName: "local-skill"},
@@ -355,6 +231,27 @@ func TestBuildSkillImportScreenIncludesSymlinkOnlySkillCandidates(t *testing.T) 
 	}
 }
 
+func TestBuildSkillImportScreenOffersOnlySymlinkOptionsAndPrefersLargestProvider(t *testing.T) {
+	state := &onboardingFlowState{imports: onboardingImportDiscovery{
+		skillSymlinkItems: map[onboardingImportProviderID][]onboardingSkillImportItem{
+			onboardingImportProviderClaudeCode: {
+				{ID: "claude:one", Provider: onboardingImportProviderClaudeCode, ProviderLabel: "Claude Code", TargetDirName: "one"},
+			},
+			onboardingImportProviderCodex: {
+				{ID: "codex:one", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetDirName: "one"},
+				{ID: "codex:two", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetDirName: "two"},
+			},
+		},
+	}}
+	screen := buildSkillImportScreen(state)
+	if containsOnboardingOption(screen.Options, "copy:claude_code") || containsOnboardingOption(screen.Options, "merge") {
+		t.Fatalf("expected copy-based skill import options to be removed, got %+v", screen.Options)
+	}
+	if screen.DefaultOptionID != "symlink:codex" {
+		t.Fatalf("expected Codex symlink to be recommended, got %q", screen.DefaultOptionID)
+	}
+}
+
 func TestBuildCommandImportScreenIncludesSymlinkOnlyCommandCandidates(t *testing.T) {
 	state := &onboardingFlowState{imports: onboardingImportDiscovery{
 		commandSymlinkItems: map[onboardingImportProviderID][]onboardingCommandImportItem{
@@ -378,6 +275,37 @@ func TestBuildCommandImportScreenIncludesSymlinkOnlyCommandCandidates(t *testing
 	}
 }
 
+func TestBuildCommandImportScreenOffersOnlySymlinkOptionsAndPrefersLargestProvider(t *testing.T) {
+	state := &onboardingFlowState{imports: onboardingImportDiscovery{
+		commandSymlinkItems: map[onboardingImportProviderID][]onboardingCommandImportItem{
+			onboardingImportProviderClaudeCode: {
+				{ID: "claude:review", Provider: onboardingImportProviderClaudeCode, ProviderLabel: "Claude Code", TargetFileName: "review.md", DisplayName: "review"},
+			},
+			onboardingImportProviderCodex: {
+				{ID: "codex:review", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetFileName: "review.md", DisplayName: "review"},
+				{ID: "codex:fix", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetFileName: "fix.md", DisplayName: "fix"},
+			},
+		},
+	}}
+	screen := buildCommandImportScreen(state)
+	if containsOnboardingOption(screen.Options, "copy:claude_code") || containsOnboardingOption(screen.Options, "merge") {
+		t.Fatalf("expected copy-based command import options to be removed, got %+v", screen.Options)
+	}
+	if screen.DefaultOptionID != "symlink:codex" {
+		t.Fatalf("expected Codex command symlink to be recommended, got %q", screen.DefaultOptionID)
+	}
+}
+
+func TestApplyImportChoiceRejectsRemovedCopyModes(t *testing.T) {
+	selection := onboardingImportSelection{}
+	if err := applyImportChoice(&selection, "copy:claude_code"); err == nil {
+		t.Fatal("expected removed copy mode to be rejected")
+	}
+	if err := applyImportChoice(&selection, "merge"); err == nil {
+		t.Fatal("expected removed merge mode to be rejected")
+	}
+}
+
 func TestExecuteCommandImportSymlinksRootDirectory(t *testing.T) {
 	home := t.TempDir()
 	globalRoot := t.TempDir()
@@ -389,7 +317,7 @@ func TestExecuteCommandImportSymlinksRootDirectory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sourceDir, "review.md"), []byte("review"), 0o644); err != nil {
 		t.Fatalf("write source command: %v", err)
 	}
-	if _, err := executeCommandImport(globalRoot, onboardingImportDiscovery{}, onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderClaudeCode}, []onboardingCommandImportItem{{TargetFileName: "review.md"}}); err != nil {
+	if _, err := executeCommandImport(globalRoot, onboardingImportDiscovery{}, onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderClaudeCode}); err != nil {
 		t.Fatalf("execute command import: %v", err)
 	}
 	targetPath := filepath.Join(globalRoot, "prompts")
@@ -406,45 +334,6 @@ func TestExecuteCommandImportSymlinksRootDirectory(t *testing.T) {
 	}
 	if resolved != sourceDir {
 		t.Fatalf("expected prompts root symlink to point to %q, got %q", sourceDir, resolved)
-	}
-}
-
-func TestCopyPathRewritesRelativeSymlinksForNewLocation(t *testing.T) {
-	srcRoot := t.TempDir()
-	dstRoot := t.TempDir()
-	targetDir := filepath.Join(srcRoot, "targets")
-	linkDir := filepath.Join(srcRoot, "links")
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		t.Fatalf("mkdir target dir: %v", err)
-	}
-	if err := os.MkdirAll(linkDir, 0o755); err != nil {
-		t.Fatalf("mkdir link dir: %v", err)
-	}
-	targetFile := filepath.Join(targetDir, "demo.txt")
-	if err := os.WriteFile(targetFile, []byte("demo"), 0o644); err != nil {
-		t.Fatalf("write target file: %v", err)
-	}
-	srcLink := filepath.Join(linkDir, "demo-link")
-	if err := os.Symlink("../targets/demo.txt", srcLink); err != nil {
-		t.Fatalf("create source symlink: %v", err)
-	}
-	dstLink := filepath.Join(dstRoot, "copied", "demo-link")
-	if err := os.MkdirAll(filepath.Dir(dstLink), 0o755); err != nil {
-		t.Fatalf("mkdir destination dir: %v", err)
-	}
-	if err := copyPath(srcLink, dstLink); err != nil {
-		t.Fatalf("copy symlink: %v", err)
-	}
-	resolved, err := os.Readlink(dstLink)
-	if err != nil {
-		t.Fatalf("read copied symlink: %v", err)
-	}
-	resolvedPath := resolved
-	if !filepath.IsAbs(resolvedPath) {
-		resolvedPath = filepath.Clean(filepath.Join(filepath.Dir(dstLink), resolvedPath))
-	}
-	if resolvedPath != targetFile {
-		t.Fatalf("expected copied symlink to resolve to %q, got %q via %q", targetFile, resolvedPath, resolved)
 	}
 }
 
@@ -481,6 +370,66 @@ func TestOnboardingModelCtrlHTogglesMultiSelect(t *testing.T) {
 	updated := next.(*onboardingModel)
 	if updated.selection["one"] {
 		t.Fatal("expected ctrl+h to toggle the current multi-select option off")
+	}
+}
+
+func TestBuildSkillSelectionScreenAddsToggleAllOptionWhenThereAreMoreThanTwoItems(t *testing.T) {
+	state := &onboardingFlowState{
+		imports: onboardingImportDiscovery{skillSymlinkItems: map[onboardingImportProviderID][]onboardingSkillImportItem{
+			onboardingImportProviderCodex: {
+				{ID: "codex:one", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetDirName: "one", SkillName: "one"},
+				{ID: "codex:two", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetDirName: "two", SkillName: "two"},
+				{ID: "codex:three", Provider: onboardingImportProviderCodex, ProviderLabel: "Codex", TargetDirName: "three", SkillName: "three"},
+			},
+		}},
+		skillImport: onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderCodex},
+	}
+	screen := buildSkillSelectionScreen(state)
+	if len(screen.Options) == 0 || screen.Options[0].ID != onboardingToggleAllOptionID {
+		t.Fatalf("expected first option to be toggle-all action, got %+v", screen.Options)
+	}
+	if screen.Options[0].Title != "Disable all" {
+		t.Fatalf("expected initial toggle-all label to disable all, got %q", screen.Options[0].Title)
+	}
+}
+
+func TestOnboardingModelToggleAllHotkeyTogglesMultiSelection(t *testing.T) {
+	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
+	model.currentScreen = onboardingScreen{
+		ID:      "skills_enabled",
+		Kind:    onboardingScreenMulti,
+		Title:   "Choose enabled skills",
+		Options: []onboardingOption{{ID: onboardingToggleAllOptionID, Title: "Disable all"}, {ID: "one", Title: "One"}, {ID: "two", Title: "Two"}, {ID: "three", Title: "Three"}},
+	}
+	model.selection = map[string]bool{"one": true, "two": true, "three": true}
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	updated := next.(*onboardingModel)
+	for _, id := range []string{"one", "two", "three"} {
+		if updated.selection[id] {
+			t.Fatalf("expected %q to be toggled off", id)
+		}
+	}
+	if updated.currentScreen.Options[0].Title != "Enable all" {
+		t.Fatalf("expected toggle-all label to update after hotkey, got %q", updated.currentScreen.Options[0].Title)
+	}
+}
+
+func TestOnboardingModelToggleAllMenuItemTogglesMultiSelection(t *testing.T) {
+	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
+	model.currentScreen = onboardingScreen{
+		ID:      "skills_enabled",
+		Kind:    onboardingScreenMulti,
+		Title:   "Choose enabled skills",
+		Options: []onboardingOption{{ID: onboardingToggleAllOptionID, Title: "Disable all"}, {ID: "one", Title: "One"}, {ID: "two", Title: "Two"}, {ID: "three", Title: "Three"}},
+	}
+	model.selection = map[string]bool{"one": true, "two": true, "three": true}
+	model.cursor = 0
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeySpace})
+	updated := next.(*onboardingModel)
+	for _, id := range []string{"one", "two", "three"} {
+		if updated.selection[id] {
+			t.Fatalf("expected %q to be toggled off", id)
+		}
 	}
 }
 
@@ -658,7 +607,7 @@ func TestOnboardingImportDiscoveryKeepsTypedInput(t *testing.T) {
 	model.stepIndex = modelStepIndex
 	model.syncScreen(true)
 	model.input.SetValue("draft-model-alias")
-	next, _ := model.Update(onboardingImportDiscoveryDoneMsg{discovery: onboardingImportDiscovery{skills: map[onboardingImportProviderID][]onboardingSkillImportItem{}, commands: map[onboardingImportProviderID][]onboardingCommandImportItem{}}})
+	next, _ := model.Update(onboardingImportDiscoveryDoneMsg{discovery: onboardingImportDiscovery{skillSymlinkItems: map[onboardingImportProviderID][]onboardingSkillImportItem{}, commandSymlinkItems: map[onboardingImportProviderID][]onboardingCommandImportItem{}}})
 	updated := next.(*onboardingModel)
 	if updated.currentScreen.ID != "model" {
 		t.Fatalf("expected to stay on model input screen, got %q", updated.currentScreen.ID)
@@ -709,11 +658,11 @@ func TestOnboardingCustomPathRollsBackImportsWhenSettingsWriteFails(t *testing.T
 	if err != nil {
 		t.Fatalf("load defaults: %v", err)
 	}
-	sourceDir := filepath.Join(t.TempDir(), "skill-source")
-	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+	sourceDir := filepath.Join(home, ".claude", "skills")
+	if err := os.MkdirAll(filepath.Join(sourceDir, "demo-skill"), 0o755); err != nil {
 		t.Fatalf("mkdir skill source: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(sourceDir, "SKILL.md"), []byte("---\nname: demo\ndescription: demo\n---\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(sourceDir, "demo-skill", "SKILL.md"), []byte("---\nname: demo\ndescription: demo\n---\n"), 0o644); err != nil {
 		t.Fatalf("write skill source: %v", err)
 	}
 	configPath := filepath.Join(home, ".builder", "config.toml")
@@ -725,17 +674,10 @@ func TestOnboardingCustomPathRollsBackImportsWhenSettingsWriteFails(t *testing.T
 	}
 	state := onboardingFlowState{
 		settings: cfg.Settings,
-		imports: onboardingImportDiscovery{skills: map[onboardingImportProviderID][]onboardingSkillImportItem{
-			onboardingImportProviderClaudeCode: {{
-				ID:            "claude:demo",
-				Provider:      onboardingImportProviderClaudeCode,
-				ProviderLabel: "Claude Code",
-				SourceDir:     sourceDir,
-				TargetDirName: "demo-skill",
-				SkillName:     "demo",
-			}},
+		imports: onboardingImportDiscovery{skillSymlinkRoots: map[onboardingImportProviderID]string{
+			onboardingImportProviderClaudeCode: sourceDir,
 		}},
-		skillImport:   onboardingImportSelection{Mode: onboardingImportModeCopyProvider, Provider: onboardingImportProviderClaudeCode},
+		skillImport:   onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderClaudeCode},
 		commandImport: onboardingImportSelection{Mode: onboardingImportModeNone},
 	}
 	model := newOnboardingModel(globalRoot, state)
@@ -747,23 +689,27 @@ func TestOnboardingCustomPathRollsBackImportsWhenSettingsWriteFails(t *testing.T
 	if done.err == nil {
 		t.Fatal("expected settings write failure when config file already exists")
 	}
-	if _, err := os.Stat(filepath.Join(globalRoot, "skills", "demo-skill")); !os.IsNotExist(err) {
-		t.Fatalf("expected imported skill to be rolled back, got err=%v", err)
+	if _, err := os.Lstat(filepath.Join(globalRoot, "skills")); !os.IsNotExist(err) {
+		t.Fatalf("expected symlinked skills root to be rolled back, got err=%v", err)
 	}
 }
 
 func TestExecuteOnboardingImportsRollsBackSkillsWhenCommandImportFails(t *testing.T) {
 	globalRoot := t.TempDir()
-	skillSourceDir := filepath.Join(t.TempDir(), "skill-source")
-	if err := os.MkdirAll(skillSourceDir, 0o755); err != nil {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	skillSourceDir := filepath.Join(home, ".claude", "skills")
+	if err := os.MkdirAll(filepath.Join(skillSourceDir, "demo-skill"), 0o755); err != nil {
 		t.Fatalf("mkdir skill source: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(skillSourceDir, "SKILL.md"), []byte("---\nname: demo\ndescription: demo\n---\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(skillSourceDir, "demo-skill", "SKILL.md"), []byte("---\nname: demo\ndescription: demo\n---\n"), 0o644); err != nil {
 		t.Fatalf("write skill source: %v", err)
 	}
-	commandSourceDir := t.TempDir()
-	commandSourceFile := filepath.Join(commandSourceDir, "review.md")
-	if err := os.WriteFile(commandSourceFile, []byte("review"), 0o644); err != nil {
+	commandSourceDir := filepath.Join(home, ".claude", "commands")
+	if err := os.MkdirAll(commandSourceDir, 0o755); err != nil {
+		t.Fatalf("mkdir command source: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(commandSourceDir, "review.md"), []byte("review"), 0o644); err != nil {
 		t.Fatalf("write command source: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(globalRoot, "prompts"), 0o755); err != nil {
@@ -774,35 +720,21 @@ func TestExecuteOnboardingImportsRollsBackSkillsWhenCommandImportFails(t *testin
 	}
 	_, err := executeOnboardingImports(globalRoot, onboardingFlowState{
 		imports: onboardingImportDiscovery{
-			skills: map[onboardingImportProviderID][]onboardingSkillImportItem{
-				onboardingImportProviderClaudeCode: {{
-					ID:            "claude:demo",
-					Provider:      onboardingImportProviderClaudeCode,
-					ProviderLabel: "Claude Code",
-					SourceDir:     skillSourceDir,
-					TargetDirName: "demo-skill",
-					SkillName:     "demo",
-				}},
+			skillSymlinkRoots: map[onboardingImportProviderID]string{
+				onboardingImportProviderClaudeCode: skillSourceDir,
 			},
-			commands: map[onboardingImportProviderID][]onboardingCommandImportItem{
-				onboardingImportProviderClaudeCode: {{
-					ID:             "claude:review",
-					Provider:       onboardingImportProviderClaudeCode,
-					ProviderLabel:  "Claude Code",
-					SourceFile:     commandSourceFile,
-					TargetFileName: "review.md",
-					DisplayName:    "review",
-				}},
+			commandSymlinkRoots: map[onboardingImportProviderID]string{
+				onboardingImportProviderClaudeCode: commandSourceDir,
 			},
 		},
-		skillImport:   onboardingImportSelection{Mode: onboardingImportModeCopyProvider, Provider: onboardingImportProviderClaudeCode},
-		commandImport: onboardingImportSelection{Mode: onboardingImportModeCopyProvider, Provider: onboardingImportProviderClaudeCode},
+		skillImport:   onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderClaudeCode},
+		commandImport: onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderClaudeCode},
 	})
 	if err == nil {
 		t.Fatal("expected command import failure")
 	}
-	if _, err := os.Stat(filepath.Join(globalRoot, "skills", "demo-skill")); !os.IsNotExist(err) {
-		t.Fatalf("expected imported skill to be rolled back after command import failure, got err=%v", err)
+	if _, err := os.Lstat(filepath.Join(globalRoot, "skills")); !os.IsNotExist(err) {
+		t.Fatalf("expected symlinked skills root to be rolled back after command import failure, got err=%v", err)
 	}
 }
 
@@ -844,6 +776,9 @@ func TestApplyOnboardingModelUpdatesKnownContextWindow(t *testing.T) {
 	if state.settings.Reviewer.Model != "gpt-5.4" {
 		t.Fatalf("expected reviewer model to follow main model, got %q", state.settings.Reviewer.Model)
 	}
+	if state.settings.Reviewer.ThinkingLevel != "medium" {
+		t.Fatalf("expected reviewer thinking to follow main thinking, got %q", state.settings.Reviewer.ThinkingLevel)
+	}
 }
 
 func TestApplyOnboardingModelResetsUnknownModelContextWindowToBaseline(t *testing.T) {
@@ -869,4 +804,109 @@ func TestApplyOnboardingModelResetsUnknownModelContextWindowToBaseline(t *testin
 	if state.settings.ContextCompactionThresholdTokens != 272_000*95/100 {
 		t.Fatalf("expected unknown model compaction threshold to reset to onboarding baseline, got %d", state.settings.ContextCompactionThresholdTokens)
 	}
+}
+
+func TestReviewerWorkflowShowsModelAndThinkingOnlyWhenEnabled(t *testing.T) {
+	enabledState := &onboardingFlowState{settings: config.Settings{Model: "gpt-5.4", ThinkingLevel: "high", Reviewer: config.ReviewerSettings{Frequency: "edits", Model: "gpt-5.4", ThinkingLevel: "high"}}}
+	enabledSteps := newOnboardingWorkflow(enabledState).visibleSteps(enabledState)
+	if !workflowIncludesStep(enabledSteps, "reviewer_model") || !workflowIncludesStep(enabledSteps, "reviewer_thinking") {
+		t.Fatalf("expected reviewer configuration steps to appear when supervisor is enabled, got %+v", workflowStepIDs(enabledSteps))
+	}
+
+	disabledState := &onboardingFlowState{settings: config.Settings{Model: "gpt-5.4", ThinkingLevel: "high", Reviewer: config.ReviewerSettings{Frequency: "off", Model: "gpt-5.4", ThinkingLevel: "high"}}}
+	disabledSteps := newOnboardingWorkflow(disabledState).visibleSteps(disabledState)
+	if workflowIncludesStep(disabledSteps, "reviewer_model") || workflowIncludesStep(disabledSteps, "reviewer_thinking") {
+		t.Fatalf("expected reviewer configuration steps to stay hidden when supervisor is off, got %+v", workflowStepIDs(disabledSteps))
+	}
+}
+
+func TestReviewerModelStepDefaultsToMainModel(t *testing.T) {
+	state := &onboardingFlowState{settings: config.Settings{Model: "gpt-5.4", Reviewer: config.ReviewerSettings{Frequency: "edits", Model: "gpt-5.4"}}}
+	screen := findWorkflowStep(t, state, "reviewer_model").Build(state)
+	if screen.InputValue != "gpt-5.4" {
+		t.Fatalf("expected reviewer model default to follow main model, got %q", screen.InputValue)
+	}
+}
+
+func TestReviewerThinkingStepDefaultsToMainThinking(t *testing.T) {
+	state := &onboardingFlowState{settings: config.Settings{Model: "gpt-5.4", ThinkingLevel: "high", Reviewer: config.ReviewerSettings{Frequency: "edits", Model: "gpt-5.4", ThinkingLevel: "high"}}}
+	screen := findWorkflowStep(t, state, "reviewer_thinking").Build(state)
+	if screen.DefaultOptionID != "high" {
+		t.Fatalf("expected reviewer thinking default to follow main thinking, got %q", screen.DefaultOptionID)
+	}
+}
+
+func TestMainThinkingChoiceSynchronizesReviewerThinking(t *testing.T) {
+	state := &onboardingFlowState{settings: config.Settings{Model: "gpt-5.4", ThinkingLevel: "medium", Reviewer: config.ReviewerSettings{Frequency: "edits", Model: "gpt-5.4", ThinkingLevel: "medium"}}}
+	if err := findWorkflowStep(t, state, "thinking").ApplyChoice(state, "high"); err != nil {
+		t.Fatalf("apply thinking choice: %v", err)
+	}
+	if state.settings.Reviewer.ThinkingLevel != "high" {
+		t.Fatalf("expected reviewer thinking to track updated main thinking, got %q", state.settings.Reviewer.ThinkingLevel)
+	}
+}
+
+func TestMainThinkingChoicePreservesCustomReviewerThinking(t *testing.T) {
+	state := &onboardingFlowState{
+		settings:               config.Settings{Model: "gpt-5.4", ThinkingLevel: "medium", Reviewer: config.ReviewerSettings{Frequency: "edits", Model: "gpt-5.4", ThinkingLevel: "low"}},
+		reviewerCustomThinking: true,
+	}
+	if err := findWorkflowStep(t, state, "thinking").ApplyChoice(state, "high"); err != nil {
+		t.Fatalf("apply thinking choice: %v", err)
+	}
+	if state.settings.Reviewer.ThinkingLevel != "low" {
+		t.Fatalf("expected custom reviewer thinking to be preserved, got %q", state.settings.Reviewer.ThinkingLevel)
+	}
+}
+
+func TestApplyOnboardingModelPreservesCustomReviewerOverrides(t *testing.T) {
+	state := &onboardingFlowState{
+		settings: config.Settings{
+			Model:                            "gpt-5.4",
+			ThinkingLevel:                    "medium",
+			ModelContextWindow:               272_000,
+			ContextCompactionThresholdTokens: 272_000 * 95 / 100,
+			Reviewer:                         config.ReviewerSettings{Frequency: "edits", Model: "gpt-4.1", ThinkingLevel: "low"},
+		},
+		baselineSettings:       config.Settings{ModelContextWindow: 272_000, ContextCompactionThresholdTokens: 272_000 * 95 / 100},
+		reviewerCustomModel:    true,
+		reviewerCustomThinking: true,
+	}
+	if err := applyOnboardingModel(state, "gpt-5.3-codex"); err != nil {
+		t.Fatalf("apply onboarding model: %v", err)
+	}
+	if state.settings.Reviewer.Model != "gpt-4.1" {
+		t.Fatalf("expected custom reviewer model to be preserved, got %q", state.settings.Reviewer.Model)
+	}
+	if state.settings.Reviewer.ThinkingLevel != "low" {
+		t.Fatalf("expected custom reviewer thinking to be preserved, got %q", state.settings.Reviewer.ThinkingLevel)
+	}
+}
+
+func findWorkflowStep(t *testing.T, state *onboardingFlowState, id string) onboardingStepDefinition {
+	t.Helper()
+	for _, step := range newOnboardingWorkflow(state).visibleSteps(state) {
+		if step.ID() == id {
+			return step
+		}
+	}
+	t.Fatalf("expected workflow step %q", id)
+	return nil
+}
+
+func workflowIncludesStep(steps []onboardingStepDefinition, id string) bool {
+	for _, step := range steps {
+		if step.ID() == id {
+			return true
+		}
+	}
+	return false
+}
+
+func workflowStepIDs(steps []onboardingStepDefinition) []string {
+	ids := make([]string, 0, len(steps))
+	for _, step := range steps {
+		ids = append(ids, step.ID())
+	}
+	return ids
 }

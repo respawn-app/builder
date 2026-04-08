@@ -21,6 +21,8 @@ type onboardingFinalizeDoneMsg struct {
 	err    error
 }
 
+const onboardingToggleAllOptionID = "__toggle_all__"
+
 type onboardingStyles struct {
 	title          lipgloss.Style
 	body           lipgloss.Style
@@ -227,6 +229,9 @@ func (m *onboardingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyRunes:
 			filtered, _ := stripMouseSGRRunes(typed.Runes)
 			if len(filtered) == 1 {
+				if (filtered[0] == 'a' || filtered[0] == 'A') && m.currentScreen.Kind == onboardingScreenMulti && screenHasToggleAllOption(m.currentScreen) {
+					return m, m.toggleAllSelections()
+				}
 				if filtered[0] == 'j' && m.currentScreen.Kind != onboardingScreenInput {
 					if cmd := m.moveCursor(1); cmd != nil {
 						return m, m.scrollContent(1)
@@ -377,6 +382,7 @@ func (m *onboardingModel) syncScreen(resetViewport bool) {
 		if m.selection == nil {
 			m.selection = map[string]bool{}
 		}
+		m.refreshToggleAllOption()
 	}
 	m.cursor = 0
 	if screen.Kind == onboardingScreenChoice {
@@ -474,8 +480,37 @@ func (m *onboardingModel) toggleCurrentSelection() tea.Cmd {
 		return onboardingBellCmd()
 	}
 	id := m.currentScreen.Options[m.cursor].ID
+	if id == onboardingToggleAllOptionID {
+		return m.toggleAllSelections()
+	}
 	m.selection[id] = !m.selection[id]
+	m.refreshToggleAllOption()
 	return nil
+}
+
+func (m *onboardingModel) toggleAllSelections() tea.Cmd {
+	if !screenHasToggleAllOption(m.currentScreen) {
+		return onboardingBellCmd()
+	}
+	setEnabled := !allSelectableOptionsEnabled(m.currentScreen.Options, m.selection)
+	for _, option := range m.currentScreen.Options {
+		if option.ID == onboardingToggleAllOptionID {
+			continue
+		}
+		m.selection[option.ID] = setEnabled
+	}
+	m.refreshToggleAllOption()
+	return nil
+}
+
+func (m *onboardingModel) refreshToggleAllOption() {
+	for index, option := range m.currentScreen.Options {
+		if option.ID != onboardingToggleAllOptionID {
+			continue
+		}
+		m.currentScreen.Options[index].Title = toggleAllOptionTitle(m.currentScreen.Options, m.selection)
+		return
+	}
 }
 
 func (m *onboardingModel) ensureCursorVisible() {
@@ -654,8 +689,40 @@ func (m *onboardingModel) renderFooterLines(width int) []string {
 	help := "↑/↓ pick or scroll | <-/-> back or forward | enter confirm | space toggle | esc cancel"
 	if m.currentScreen.Kind == onboardingScreenInput {
 		help = "↑/↓ scroll | <-/-> back or forward | enter confirm | esc cancel"
+	} else if m.currentScreen.Kind == onboardingScreenMulti && screenHasToggleAllOption(m.currentScreen) {
+		help = "↑/↓ pick or scroll | <-/-> back or forward | enter confirm | space toggle | a toggle all | esc cancel"
 	}
 	return wrapStyledParagraphs(help, width, m.styles.footer)
+}
+
+func screenHasToggleAllOption(screen onboardingScreen) bool {
+	for _, option := range screen.Options {
+		if option.ID == onboardingToggleAllOptionID {
+			return true
+		}
+	}
+	return false
+}
+
+func toggleAllOptionTitle(options []onboardingOption, selection map[string]bool) string {
+	if allSelectableOptionsEnabled(options, selection) {
+		return "Disable all"
+	}
+	return "Enable all"
+}
+
+func allSelectableOptionsEnabled(options []onboardingOption, selection map[string]bool) bool {
+	hasSelectable := false
+	for _, option := range options {
+		if option.ID == onboardingToggleAllOptionID {
+			continue
+		}
+		hasSelectable = true
+		if !selection[option.ID] {
+			return false
+		}
+	}
+	return hasSelectable
 }
 
 type onboardingThemePreviewStyles struct {
@@ -734,6 +801,16 @@ func (m *onboardingModel) renderReviewSummary(width int) []string {
 		reviewerStyle = m.styles.valueOff
 	}
 	appendRow("Supervisor", reviewer, reviewerStyle)
+	if reviewerEnabled(&m.state) {
+		appendRow("Supervisor model", m.state.settings.Reviewer.Model, m.styles.valueNeutral)
+		reviewerThinking := strings.TrimSpace(m.state.settings.Reviewer.ThinkingLevel)
+		reviewerThinkingStyle := m.styles.valueNeutral
+		if reviewerThinking == "" {
+			reviewerThinking = "off"
+			reviewerThinkingStyle = m.styles.valueOff
+		}
+		appendRow("Supervisor thinking", reviewerThinking, reviewerThinkingStyle)
+	}
 	compactionStyle := m.styles.valueNeutral
 	if m.state.settings.CompactionMode == config.CompactionModeNone {
 		compactionStyle = m.styles.valueOff
