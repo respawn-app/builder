@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"builder/server/llm"
@@ -87,7 +88,22 @@ func TestToolCallReturnsControllerErrorsAsToolErrors(t *testing.T) {
 	if !result.IsError {
 		t.Fatalf("expected tool error result, got %s", string(result.Output))
 	}
-	if string(result.Output) == "" {
-		t.Fatal("expected non-empty error output")
+	if got := string(result.Output); got == "" || !strings.Contains(got, "trigger_handoff failed: too early") || !strings.Contains(got, "Retry only after the developer compaction reminder is present") {
+		t.Fatalf("unexpected error output: %q", got)
+	}
+}
+
+func TestToolCallReturnsGuidanceForInvalidInput(t *testing.T) {
+	tool := New(func() Controller { return &controllerStub{} })
+
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-1", Name: tools.ToolTriggerHandoff, Input: json.RawMessage(`{"summarizer_prompt":123}`), StepID: "step-4"})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected tool error result, got %s", string(result.Output))
+	}
+	if got := string(result.Output); !strings.Contains(got, "invalid trigger_handoff input") || !strings.Contains(got, "future_agent_message") {
+		t.Fatalf("unexpected invalid-input output: %q", got)
 	}
 }

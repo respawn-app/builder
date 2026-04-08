@@ -48,7 +48,7 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 	var in input
 	if len(c.Input) > 0 {
 		if err := json.Unmarshal(c.Input, &in); err != nil {
-			return tools.ErrorResult(c, fmt.Sprintf("invalid input: %v", err)), nil
+			return tools.ErrorResult(c, fmt.Sprintf("invalid trigger_handoff input: %v. Provide an object with optional string fields `summarizer_prompt` and `future_agent_message`.", err)), nil
 		}
 	}
 
@@ -60,7 +60,13 @@ func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
 		strings.TrimSpace(in.FutureAgentMessage),
 	)
 	if err != nil {
-		return tools.ErrorResult(c, err.Error()), nil
+		message := strings.TrimSpace(err.Error())
+		if message == "" {
+			message = "trigger_handoff failed"
+		} else {
+			message = "trigger_handoff failed: " + message
+		}
+		return tools.ErrorResult(c, message+". Retry only after the developer compaction reminder is present, or keep working if the user disabled handoff."), nil
 	}
 	payload := ResultPayload{Summary: summary, FutureAgentMessageAdded: futureAgentMessageAdded}
 	if strings.TrimSpace(payload.Summary) == "" {

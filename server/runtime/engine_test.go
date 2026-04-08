@@ -8616,6 +8616,115 @@ func TestPendingTriggerHandoffRetriesFutureMessageAfterAppendFailureWithoutRecom
 	}
 }
 
+func TestReopenedSessionAfterTriggerHandoffFutureMessageAppendFailureRetriesWithoutRecompaction(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "condensed summary"},
+		Usage:     llm.Usage{InputTokens: 200, WindowTokens: 2_000},
+	}}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	handoffCall := llm.ToolCall{
+		ID:    "call_handoff_reopen_future_retry",
+		Name:  string(tools.ToolTriggerHandoff),
+		Input: mustJSON(map[string]any{"summarizer_prompt": "keep API details", "future_agent_message": "resume after restart"}),
+	}
+	if err := eng.appendMessage("step-1", llm.Message{Role: llm.RoleAssistant, Content: "handing off", Phase: llm.MessagePhaseCommentary, ToolCalls: []llm.ToolCall{handoffCall}}); err != nil {
+		t.Fatalf("append assistant tool call: %v", err)
+	}
+	resultOutput := mustJSON(triggerhandofftool.ResultPayload{
+		Summary:                 "Handoff scheduled. Context will be compacted before the next model turn and future-agent guidance was saved.",
+		FutureAgentMessageAdded: true,
+	})
+	if err := eng.persistToolCompletion("step-1", tools.Result{CallID: handoffCall.ID, Name: tools.ToolTriggerHandoff, Output: resultOutput}); err != nil {
+		t.Fatalf("persist tool completion: %v", err)
+	}
+	if err := eng.appendMessage("step-1", llm.Message{Role: llm.RoleTool, ToolCallID: handoffCall.ID, Name: string(tools.ToolTriggerHandoff), Content: string(resultOutput)}); err != nil {
+		t.Fatalf("append tool result: %v", err)
+	}
+	eng.queueHandoffRequest("keep API details", "resume after restart")
+
+	eng.beforePersistMessage = func(msg llm.Message) error {
+		if msg.MessageType == llm.MessageTypeHandoffFutureMessage {
+			return errors.New("synthetic future-message append failure")
+		}
+		return nil
+	}
+	if err := eng.applyPendingHandoffIfNeeded(context.Background(), "step-1"); err == nil {
+		t.Fatal("expected handoff future-message append to fail")
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("expected exactly one compaction summary call before reopen, got %d", len(client.calls))
+	}
+	if eng.pendingHandoffRequest != nil {
+		t.Fatalf("expected successful compaction to consume queued handoff request before reopen, got %+v", eng.pendingHandoffRequest)
+	}
+
+	reopenedStore, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("re-open store: %v", err)
+	}
+	resumedClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "resumed", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{InputTokens: 300, WindowTokens: 2_000},
+	}}}
+	restored, err := New(reopenedStore, resumedClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	if restored.pendingHandoffRequest != nil {
+		t.Fatalf("did not expect restore to requeue handoff after successful compaction, got %+v", restored.pendingHandoffRequest)
+	}
+	if got, want := restored.pendingHandoffFutureMessage, "resume after restart"; got != want {
+		t.Fatalf("pending future-agent message after reopen = %q, want %q", got, want)
+	}
+
+	msg, err := restored.SubmitUserMessage(context.Background(), "continue")
+	if err != nil {
+		t.Fatalf("submit after reopen: %v", err)
+	}
+	if msg.Content != "resumed" {
+		t.Fatalf("assistant content = %q, want resumed", msg.Content)
+	}
+	if len(resumedClient.calls) != 1 {
+		t.Fatalf("expected reopened retry to append future-agent message without re-running compaction, got %d requests", len(resumedClient.calls))
+	}
+	if got, want := resumedClient.calls[0].SessionID, restored.conversationSessionID(); got != want {
+		t.Fatalf("expected reopened request session id to stay on the main conversation after restored handoff compaction, got %q want %q", got, want)
+	}
+	if got, want := resumedClient.calls[0].PromptCacheKey, restored.conversationPromptCacheKey(); got != want {
+		t.Fatalf("expected reopened request prompt cache key to stay rotated after restored handoff compaction, got %q want %q", got, want)
+	}
+	foundFuture := false
+	for _, item := range resumedClient.calls[0].Items {
+		if item.Type == llm.ResponseItemTypeMessage && item.MessageType == llm.MessageTypeHandoffFutureMessage && item.Content == "resume after restart" {
+			foundFuture = true
+			break
+		}
+	}
+	if !foundFuture {
+		t.Fatalf("expected reopened request to include retried future-agent message, items=%+v", resumedClient.calls[0].Items)
+	}
+}
+
 func TestRunStepLoopTriggerHandoffOmitsCallAndOutputFromFollowUpRequestAndKeepsFutureMessage(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -9011,6 +9120,66 @@ func TestReopenedSessionAfterSuccessfulTriggerHandoffRequeuesPendingHandoff(t *t
 	}
 	if !foundFuture {
 		t.Fatalf("expected recovered follow-up request to include future-agent message, items=%+v", followUp.Items)
+	}
+}
+
+func TestForkedSessionAfterTriggerHandoffRequeuesPendingHandoff(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	handoffCall := llm.ToolCall{
+		ID:    "call_handoff_fork_restore",
+		Name:  string(tools.ToolTriggerHandoff),
+		Input: mustJSON(map[string]any{"future_agent_message": "resume after fork"}),
+	}
+	if err := eng.appendMessage("step-1", llm.Message{Role: llm.RoleAssistant, Content: "handing off", Phase: llm.MessagePhaseCommentary, ToolCalls: []llm.ToolCall{handoffCall}}); err != nil {
+		t.Fatalf("append assistant tool call: %v", err)
+	}
+	resultOutput := mustJSON(triggerhandofftool.ResultPayload{
+		Summary:                 "Handoff scheduled. Context will be compacted before the next model turn and future-agent guidance was saved.",
+		FutureAgentMessageAdded: true,
+	})
+	if err := eng.persistToolCompletion("step-1", tools.Result{CallID: handoffCall.ID, Name: tools.ToolTriggerHandoff, Output: resultOutput}); err != nil {
+		t.Fatalf("persist tool completion: %v", err)
+	}
+	if err := eng.appendMessage("step-1", llm.Message{Role: llm.RoleTool, ToolCallID: handoffCall.ID, Name: string(tools.ToolTriggerHandoff), Content: string(resultOutput)}); err != nil {
+		t.Fatalf("append tool result: %v", err)
+	}
+	if err := eng.appendMessage("step-2", llm.Message{Role: llm.RoleUser, Content: "edit anchor"}); err != nil {
+		t.Fatalf("append second user message: %v", err)
+	}
+
+	forkedStore, err := session.ForkAtUserMessage(store, 2, "Parent -> edit")
+	if err != nil {
+		t.Fatalf("fork session: %v", err)
+	}
+	forked, err := New(forkedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:          "gpt-5",
+		CompactionMode: "local",
+		EnabledTools:   []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("restore forked engine: %v", err)
+	}
+	if forked.pendingHandoffRequest == nil {
+		t.Fatal("expected forked session to recover pending handoff request")
+	}
+	if got, want := forked.pendingHandoffRequest.futureAgentMessage, "resume after fork"; got != want {
+		t.Fatalf("forked pending future_agent_message = %q, want %q", got, want)
 	}
 }
 

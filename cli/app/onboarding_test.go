@@ -150,6 +150,31 @@ func TestExecuteSkillImportSymlinksRootDirectory(t *testing.T) {
 	}
 }
 
+func TestExecuteSkillImportReplacesEmptyTargetDirectory(t *testing.T) {
+	home := t.TempDir()
+	globalRoot := t.TempDir()
+	t.Setenv("HOME", home)
+	sourceDir := filepath.Join(home, ".codex", "skills", "local")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatalf("mkdir source: %v", err)
+	}
+	targetPath := filepath.Join(globalRoot, "skills")
+	if err := os.MkdirAll(targetPath, 0o755); err != nil {
+		t.Fatalf("mkdir empty target: %v", err)
+	}
+
+	if _, err := executeSkillImport(globalRoot, onboardingImportDiscovery{}, onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderCodex}); err != nil {
+		t.Fatalf("execute skill import with empty target: %v", err)
+	}
+	info, err := os.Lstat(targetPath)
+	if err != nil {
+		t.Fatalf("lstat target: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("expected %s to be replaced with a symlink", targetPath)
+	}
+}
+
 func TestProviderSkillSymlinkSourcePrefersCodexLocalSkills(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -337,6 +362,20 @@ func TestExecuteCommandImportSymlinksRootDirectory(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandImportValidatesSourceDirectory(t *testing.T) {
+	globalRoot := t.TempDir()
+	missingSource := filepath.Join(t.TempDir(), "missing-prompts")
+	_, err := executeCommandImport(globalRoot, onboardingImportDiscovery{
+		commandSymlinkRoots: map[onboardingImportProviderID]string{onboardingImportProviderClaudeCode: missingSource},
+	}, onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderClaudeCode})
+	if err == nil {
+		t.Fatal("expected missing command source to fail")
+	}
+	if !strings.Contains(err.Error(), "inspect slash command source Claude Code") {
+		t.Fatalf("expected source validation error, got %v", err)
+	}
+}
+
 func TestOnboardingModelBackspaceTogglesMultiSelect(t *testing.T) {
 	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
 	model.currentScreen = onboardingScreen{
@@ -430,6 +469,33 @@ func TestOnboardingModelToggleAllMenuItemTogglesMultiSelection(t *testing.T) {
 		if updated.selection[id] {
 			t.Fatalf("expected %q to be toggled off", id)
 		}
+	}
+}
+
+func TestOnboardingModelRefreshToggleAllTracksCheckedState(t *testing.T) {
+	model := newOnboardingModel(t.TempDir(), onboardingFlowState{theme: "dark"})
+	model.currentScreen = onboardingScreen{
+		ID:      "skills_enabled",
+		Kind:    onboardingScreenMulti,
+		Title:   "Choose enabled skills",
+		Options: []onboardingOption{{ID: onboardingToggleAllOptionID, Title: "Disable all"}, {ID: "one", Title: "One"}, {ID: "two", Title: "Two"}},
+	}
+	model.selection = map[string]bool{"one": true, "two": true}
+	model.refreshToggleAllOption()
+	if !model.selection[onboardingToggleAllOptionID] {
+		t.Fatal("expected toggle-all action to render checked when all options are enabled")
+	}
+	if got := model.currentScreen.Options[0].Title; got != "Disable all" {
+		t.Fatalf("expected toggle-all title to stay on Disable all, got %q", got)
+	}
+
+	model.selection["two"] = false
+	model.refreshToggleAllOption()
+	if model.selection[onboardingToggleAllOptionID] {
+		t.Fatal("expected toggle-all action to render unchecked when not all options are enabled")
+	}
+	if got := model.currentScreen.Options[0].Title; got != "Enable all" {
+		t.Fatalf("expected toggle-all title to switch to Enable all, got %q", got)
 	}
 }
 

@@ -523,12 +523,8 @@ func executeSkillImport(globalRoot string, discovery onboardingImportDiscovery, 
 		return nil, fmt.Errorf("unsupported skills import mode %q", selection.Mode)
 	}
 	targetRoot := filepath.Join(globalRoot, "skills")
-	exists, err := pathExists(targetRoot)
-	if err != nil {
+	if err := prepareEmptyDirectorySymlinkTarget(targetRoot, "skills"); err != nil {
 		return nil, err
-	}
-	if exists {
-		return nil, fmt.Errorf("skills symlink target already exists: %s", targetRoot)
 	}
 	sourcePath := strings.TrimSpace(discovery.skillSymlinkRoots[selection.Provider])
 	if sourcePath == "" {
@@ -537,6 +533,9 @@ func executeSkillImport(globalRoot string, discovery onboardingImportDiscovery, 
 			return nil, fallbackErr
 		}
 		sourcePath = fallbackPath
+	}
+	if err := requireSymlinkSourceDirectory(sourcePath, fmt.Sprintf("skills source %s", providerLabel(selection.Provider))); err != nil {
+		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Dir(targetRoot), 0o755); err != nil {
 		return nil, fmt.Errorf("create skills parent root: %w", err)
@@ -561,12 +560,8 @@ func executeCommandImport(globalRoot string, discovery onboardingImportDiscovery
 		return nil, fmt.Errorf("unsupported slash command import mode %q", selection.Mode)
 	}
 	targetRoot := filepath.Join(globalRoot, "prompts")
-	exists, err := pathExists(targetRoot)
-	if err != nil {
+	if err := prepareEmptyDirectorySymlinkTarget(targetRoot, "slash command"); err != nil {
 		return nil, err
-	}
-	if exists {
-		return nil, fmt.Errorf("slash command symlink target already exists: %s", targetRoot)
 	}
 	sourcePath := strings.TrimSpace(discovery.commandSymlinkRoots[selection.Provider])
 	if sourcePath == "" {
@@ -575,6 +570,9 @@ func executeCommandImport(globalRoot string, discovery onboardingImportDiscovery
 			return nil, fallbackErr
 		}
 		sourcePath = fallbackPath
+	}
+	if err := requireSymlinkSourceDirectory(sourcePath, fmt.Sprintf("slash command source %s", providerLabel(selection.Provider))); err != nil {
+		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Dir(targetRoot), 0o755); err != nil {
 		return nil, fmt.Errorf("create prompts parent root: %w", err)
@@ -701,6 +699,41 @@ func shouldSkipCommandImport(globalRoot string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func prepareEmptyDirectorySymlinkTarget(path string, kind string) error {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect %s symlink target %s: %w", kind, path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("%s symlink target already exists: %s", kind, path)
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return fmt.Errorf("read %s symlink target %s: %w", kind, path, err)
+	}
+	if len(entries) > 0 {
+		return fmt.Errorf("%s symlink target already exists: %s", kind, path)
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("remove empty %s symlink target %s: %w", kind, path, err)
+	}
+	return nil
+}
+
+func requireSymlinkSourceDirectory(path string, label string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("inspect %s: %w", label, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory: %s", label, path)
+	}
+	return nil
 }
 
 func pathExists(path string) (bool, error) {
