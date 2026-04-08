@@ -175,6 +175,28 @@ func TestExecuteSkillImportReplacesEmptyTargetDirectory(t *testing.T) {
 	}
 }
 
+func TestExecuteSkillImportDoesNotDeleteEmptyTargetWhenSourceValidationFails(t *testing.T) {
+	globalRoot := t.TempDir()
+	targetPath := filepath.Join(globalRoot, "skills")
+	if err := os.MkdirAll(targetPath, 0o755); err != nil {
+		t.Fatalf("mkdir empty target: %v", err)
+	}
+
+	_, err := executeSkillImport(globalRoot, onboardingImportDiscovery{
+		skillSymlinkRoots: map[onboardingImportProviderID]string{onboardingImportProviderCodex: filepath.Join(t.TempDir(), "missing-skills")},
+	}, onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderCodex})
+	if err == nil {
+		t.Fatal("expected missing skill source to fail")
+	}
+	info, statErr := os.Lstat(targetPath)
+	if statErr != nil {
+		t.Fatalf("expected empty target directory to remain after source validation failure: %v", statErr)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("expected %s to remain a plain directory, got mode %v", targetPath, info.Mode())
+	}
+}
+
 func TestProviderSkillSymlinkSourcePrefersCodexLocalSkills(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -373,6 +395,60 @@ func TestExecuteCommandImportValidatesSourceDirectory(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "inspect slash command source Claude Code") {
 		t.Fatalf("expected source validation error, got %v", err)
+	}
+}
+
+func TestExecuteCommandImportDoesNotDeleteEmptyTargetWhenSourceValidationFails(t *testing.T) {
+	globalRoot := t.TempDir()
+	targetPath := filepath.Join(globalRoot, "prompts")
+	if err := os.MkdirAll(targetPath, 0o755); err != nil {
+		t.Fatalf("mkdir empty target: %v", err)
+	}
+
+	_, err := executeCommandImport(globalRoot, onboardingImportDiscovery{
+		commandSymlinkRoots: map[onboardingImportProviderID]string{onboardingImportProviderClaudeCode: filepath.Join(t.TempDir(), "missing-prompts")},
+	}, onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderClaudeCode})
+	if err == nil {
+		t.Fatal("expected missing command source to fail")
+	}
+	info, statErr := os.Lstat(targetPath)
+	if statErr != nil {
+		t.Fatalf("expected empty target directory to remain after source validation failure: %v", statErr)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("expected %s to remain a plain directory, got mode %v", targetPath, info.Mode())
+	}
+}
+
+func TestExecuteCommandImportFallsBackToPromptsWhenCommandsHasNoDirectMarkdown(t *testing.T) {
+	home := t.TempDir()
+	globalRoot := t.TempDir()
+	t.Setenv("HOME", home)
+	commandsDir := filepath.Join(home, ".claude", "commands")
+	promptsDir := filepath.Join(home, ".claude", "prompts")
+	if err := os.MkdirAll(filepath.Join(commandsDir, "nested"), 0o755); err != nil {
+		t.Fatalf("mkdir nested commands: %v", err)
+	}
+	if err := os.MkdirAll(promptsDir, 0o755); err != nil {
+		t.Fatalf("mkdir prompts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(commandsDir, "nested", "ignored.md"), []byte("ignored"), 0o644); err != nil {
+		t.Fatalf("write nested command: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(promptsDir, "review.md"), []byte("prompts"), 0o644); err != nil {
+		t.Fatalf("write prompt command: %v", err)
+	}
+
+	if _, err := executeCommandImport(globalRoot, onboardingImportDiscovery{}, onboardingImportSelection{Mode: onboardingImportModeSymlinkSource, Provider: onboardingImportProviderClaudeCode}); err != nil {
+		t.Fatalf("execute command import: %v", err)
+	}
+	targetPath := filepath.Join(globalRoot, "prompts")
+	resolved, err := os.Readlink(targetPath)
+	if err != nil {
+		t.Fatalf("readlink target: %v", err)
+	}
+	if resolved != promptsDir {
+		t.Fatalf("expected prompts root symlink to point to %q, got %q", promptsDir, resolved)
 	}
 }
 
