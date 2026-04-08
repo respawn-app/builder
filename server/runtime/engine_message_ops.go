@@ -132,6 +132,11 @@ func (e *Engine) appendPersistedLocalEntryWithOngoingText(stepID, role, text, on
 
 func (e *Engine) appendMessage(stepID string, msg llm.Message) error {
 	msg = normalizeMessageForTranscript(msg, e.store.Meta().WorkspaceRoot)
+	if e.beforePersistMessage != nil {
+		if err := e.beforePersistMessage(msg); err != nil {
+			return err
+		}
+	}
 	e.chat.appendMessage(msg)
 	_, err := e.store.AppendEvent(stepID, "message", msg)
 	if err == nil {
@@ -142,6 +147,11 @@ func (e *Engine) appendMessage(stepID string, msg llm.Message) error {
 
 func (e *Engine) appendMessageWithoutConversationUpdate(stepID string, msg llm.Message) error {
 	msg = normalizeMessageForTranscript(msg, e.store.Meta().WorkspaceRoot)
+	if e.beforePersistMessage != nil {
+		if err := e.beforePersistMessage(msg); err != nil {
+			return err
+		}
+	}
 	e.chat.appendMessage(msg)
 	_, err := e.store.AppendEvent(stepID, "message", msg)
 	return err

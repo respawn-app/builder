@@ -234,6 +234,18 @@ func (s *Store) SetInputDraft(inputDraft string) error {
 	return s.persistMetaLocked()
 }
 
+func (s *Store) SetCompactionSoonReminderIssued(issued bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.meta.CompactionSoonReminderIssued == issued && (!s.persisted || hasSessionMeta(s.sessionDir)) {
+		return nil
+	}
+	s.meta.CompactionSoonReminderIssued = issued
+	s.meta.UpdatedAt = time.Now().UTC()
+	return s.persistMetaLocked()
+}
+
 func (s *Store) SetContinuationContext(ctx ContinuationContext) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

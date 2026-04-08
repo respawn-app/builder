@@ -55,7 +55,7 @@ func (e *Engine) buildRequestWithExtraItems(ctx context.Context, extra []llm.Res
 		}
 		req.EnableNativeWebSearch = nativeWebSearch
 	}
-	req.SessionID = e.store.Meta().SessionID
+	req.SessionID = e.requestSessionID()
 	return req, nil
 }
 

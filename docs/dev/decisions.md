@@ -16,6 +16,7 @@
 ## Core Runtime And Tools
 
 - Core tools: `shell`, `view_image`, `patch`, `ask_question`.
+- Experimental agent-only tool `trigger_handoff` is config-gated under `[tools]`, defaults to `false`, and is always declared to the model for a session when enabled rather than being shown/hidden dynamically by context usage.
 - Compatibility wrapper tool `multi_tool_use_parallel` is supported (Codex-style schema), executes referenced `functions.*` tools concurrently while returning results in declared order, and defaults on only when the configured model capability contract explicitly supports it; explicit tool config overrides take precedence.
 - One app instance runs one active conversation.
 - Tool execution concurrency inside a model step is unbounded.
@@ -212,7 +213,10 @@
 - Auto-compaction failure aborts the current turn.
 - `compaction_mode=none` disables manual and automatic compaction.
 - Manual compaction is available via `/compact` while idle; optional arguments are appended as compaction guidance.
+- Human-facing UX uses `compact` terminology, while agent-facing prompt/tool language uses `handoff`; do not mix these narratives across those surfaces without an explicit product decision.
 - Successful manual `/compact` appends a hidden developer carryover message containing the last visible user prompt so the post-compaction model context still knows what the user most recently asked for.
+- The compaction-soon reminder is single-shot per session once issued. When `tools.trigger_handoff=true`, that same reminder template injects agent-facing text that `trigger_handoff()` is now allowed; the tool must fail before the reminder fires and must also fail while `/autocompaction` is off.
+- Agent-triggered handoff uses its own internal compaction mode and may append a detail-only future-agent developer message; it must not reuse manual `/compact` carryover semantics.
 - Local compaction instructions are injected as final `developer` message.
 - Local compaction summary generation reads full provider history from latest compaction checkpoint onward (or from start if none).
 - Local compaction summary generation keeps tool declarations for request shape/cache stability but runtime rejects any returned tool calls.

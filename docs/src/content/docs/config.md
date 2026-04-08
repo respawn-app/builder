@@ -52,6 +52,7 @@ shell = true
 patch = true
 view_image = true
 web_search = true
+trigger_handoff = false
 
 [skills]
 apiresult = false
@@ -163,6 +164,7 @@ Builder's generated `config.toml` omits `[tools]` entirely until you want explic
 | `tools.exec_command` | `true` | The primary shell tool |
 | `tools.multi_tool_use_parallel` | `model-derived` | Parallel tool-use compatibility layer for Codex models. Parallelism is already supported natively without this tool. |
 | `tools.patch` | `true` | The edit tool |
+| `tools.trigger_handoff` | `false` | Experimental tool the agents can use to proactively compact their own context. |
 | `tools.view_image` | `true` | Ability to view images and PDFs (if supported) |
 | `tools.web_search` | `true` | Tool to search the web |
 | `tools.write_stdin` | `true` | Interaction with background shells. |

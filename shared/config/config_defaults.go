@@ -114,6 +114,7 @@ func settingsTOMLWithPreservedDefaults(settings Settings, includeToolSection boo
 	writeOptionalSection(&out, "provider_capabilities", providerCapabilityLines, hasNonDefaultConfigSection(providerCapabilityLines, filterDefaultLines(defaultLines, "provider_capabilities")))
 	if includeToolSection {
 		out.WriteString("\n# Optional tool toggles. Omitted tools keep Builder defaults.\n")
+		out.WriteString("# Human-facing UX uses `compact`; agent-facing experimental tooling uses `handoff`.\n")
 		writeExplicitToolOverrides(&out, state.Settings.EnabledTools)
 	}
 	out.WriteString("\n# Optional per-skill toggles for new sessions only. Disabled skills still\n")
@@ -193,6 +194,7 @@ func writeExplicitToolOverrides(builder *strings.Builder, enabledTools map[tools
 	if len(overrides) == 0 {
 		builder.WriteString("# [tools]\n")
 		builder.WriteString("# ask_question = false\n")
+		builder.WriteString("# trigger_handoff = true\n")
 		return
 	}
 	builder.WriteString("[tools]\n")

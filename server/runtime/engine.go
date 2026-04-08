@@ -165,6 +165,8 @@ type Engine struct {
 	compactionCount int
 
 	compactionSoonReminderIssued bool
+	pendingHandoffRequest        *handoffRequest
+	pendingHandoffFutureMessage  string
 
 	compactionTokenCountCacheKey   string
 	compactionTokenCountCacheValue int
@@ -179,6 +181,13 @@ type Engine struct {
 	messageFlow    messageLifecycle
 	stepFlow       stepExecutor
 	toolFlow       toolExecutor
+
+	beforePersistMessage func(llm.Message) error
+}
+
+type handoffRequest struct {
+	summarizerPrompt   string
+	futureAgentMessage string
 }
 
 func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg Config) (*Engine, error) {

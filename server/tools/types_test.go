@@ -33,6 +33,7 @@ func TestParseID(t *testing.T) {
 		{in: "read_image", want: ToolViewImage, ok: true},
 		{in: "patch", want: ToolPatch, ok: true},
 		{in: "ask_question", want: ToolAskQuestion, ok: true},
+		{in: "trigger_handoff", want: ToolTriggerHandoff, ok: true},
 		{in: "web_search", want: ToolWebSearch, ok: true},
 		{in: "multi_tool_use_parallel", want: ToolMultiToolUseParallel, ok: true},
 		{in: "parallel", want: ToolMultiToolUseParallel, ok: true},
@@ -99,6 +100,9 @@ func TestDefaultEnabledToolIDsIncludesWebSearchAndViewImage(t *testing.T) {
 	if !enabled[ToolViewImage] {
 		t.Fatalf("expected %s to be default-enabled", ToolViewImage)
 	}
+	if enabled[ToolTriggerHandoff] {
+		t.Fatalf("expected %s to remain default-disabled", ToolTriggerHandoff)
+	}
 }
 
 func TestDefinitionContractsDriveRuntimeAndRequestExposure(t *testing.T) {
@@ -139,6 +143,20 @@ func TestDefinitionContractsDriveRuntimeAndRequestExposure(t *testing.T) {
 	}
 	if !parallel.ExposedToModelRequest(RequestExposureContext{}) {
 		t.Fatalf("expected %s to be request-exposed when enabled", ToolMultiToolUseParallel)
+	}
+
+	triggerHandoff, ok := DefinitionFor(ToolTriggerHandoff)
+	if !ok {
+		t.Fatalf("expected %s definition", ToolTriggerHandoff)
+	}
+	if !triggerHandoff.AvailableInLocalRuntime() {
+		t.Fatalf("expected %s to be available in local runtime", ToolTriggerHandoff)
+	}
+	if triggerHandoff.LocalRuntimeBuilder() != LocalRuntimeBuilderTriggerHandoff {
+		t.Fatalf("expected %s local runtime builder, got %q", ToolTriggerHandoff, triggerHandoff.LocalRuntimeBuilder())
+	}
+	if !triggerHandoff.ExposedToModelRequest(RequestExposureContext{}) {
+		t.Fatalf("expected %s to be request-exposed when enabled", ToolTriggerHandoff)
 	}
 
 	webSearch, ok := DefinitionFor(ToolWebSearch)
@@ -206,6 +224,18 @@ func TestDefinitionContractsBuildTranscriptMetadata(t *testing.T) {
 	}
 	if askMeta.RecommendedOptionIndex != 1 {
 		t.Fatalf("unexpected ask_question recommended option index: %+v", askMeta)
+	}
+
+	triggerHandoff, _ := DefinitionFor(ToolTriggerHandoff)
+	handoffMeta := triggerHandoff.BuildToolCallMeta(ToolCallContext{}, json.RawMessage(`{"summarizer_prompt":"keep API details","future_agent_message":"resume with tests"}`))
+	if got, want := handoffMeta.CompactText, "Model requested compaction."; got != want {
+		t.Fatalf("trigger_handoff compact text = %q, want %q", got, want)
+	}
+	if !strings.Contains(handoffMeta.Command, "Instructions:\nkeep API details") {
+		t.Fatalf("expected trigger_handoff detail command to include instructions, got %+v", handoffMeta)
+	}
+	if !strings.Contains(handoffMeta.Command, "Future message:\nresume with tests") {
+		t.Fatalf("expected trigger_handoff detail command to include future message, got %+v", handoffMeta)
 	}
 }
 

@@ -100,7 +100,7 @@ If user asks you to fix a github issue and you commit the fix, use 'closes #xx' 
 
 - All business logic covered by tests. Production code is written to be unit-testable.
 - Use red/green TDD when developing new features.
-- Before handing off to the user after code changes, rebuild the binary to `./bin/builder` and make sure tests are written and green. Don't ask for confirmation to write tests and run checks.
+- Before handing off to the user after code changes, rebuild via `./scripts/build.sh --output ./bin/builder` so the canonical binary output at `./bin/builder` is refreshed, and make sure tests are written and green. Don't ask for confirmation to write tests and run checks.
 - Run Go tests via `./scripts/test.sh` passing normal go test arguments.
 - Do not run interactive/manual TUI QA unless the user explicitly asks for it. Prefer non-interactive tests, targeted automation, and build verification by default.
 - Releases are driven by `VERSION` and `.github/workflows/release.yml`; keep Homebrew release plumbing in sync with `scripts/update-brew-tap.sh` and the tap formula. Tap formula lives in a separate repo.

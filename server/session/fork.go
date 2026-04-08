@@ -47,6 +47,7 @@ func ForkAtUserMessage(parent *Store, userMessageIndex int, forkName string) (*S
 	child.mu.Lock()
 	child.meta.Locked = cloneLockedContract(parentMeta.Locked)
 	child.meta.AgentsInjected = parentMeta.AgentsInjected
+	child.meta.CompactionSoonReminderIssued = parentMeta.CompactionSoonReminderIssued
 	child.meta.ParentSessionID = parentMeta.SessionID
 	child.meta.Name = strings.TrimSpace(forkName)
 	child.meta.Continuation = cloneContinuationContext(parentMeta.Continuation)
