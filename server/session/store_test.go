@@ -556,6 +556,41 @@ func TestForkAtUserMessageCopiesPrefixBeforeSelectedMessage(t *testing.T) {
 	}
 }
 
+func TestForkAtUserMessageDerivesReminderIssuedFromReplayedHistory(t *testing.T) {
+	parent, err := Create(t.TempDir(), "ws", t.TempDir())
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	if _, err := parent.AppendEvent("s1", "message", map[string]any{"role": "user", "content": "u1"}); err != nil {
+		t.Fatalf("append first user: %v", err)
+	}
+	if _, err := parent.AppendEvent("s1", "message", map[string]any{"role": "developer", "message_type": "compaction_soon_reminder", "content": "compact soon"}); err != nil {
+		t.Fatalf("append reminder: %v", err)
+	}
+	if err := parent.SetCompactionSoonReminderIssued(true); err != nil {
+		t.Fatalf("persist reminder state: %v", err)
+	}
+	if _, err := parent.AppendEvent("s2", "message", map[string]any{"role": "user", "content": "u2"}); err != nil {
+		t.Fatalf("append second user: %v", err)
+	}
+
+	beforeReminder, err := ForkAtUserMessage(parent, 1, "before reminder")
+	if err != nil {
+		t.Fatalf("fork before reminder: %v", err)
+	}
+	if beforeReminder.Meta().CompactionSoonReminderIssued {
+		t.Fatal("expected fork before reminder to clear reminder-issued state")
+	}
+
+	afterReminder, err := ForkAtUserMessage(parent, 2, "after reminder")
+	if err != nil {
+		t.Fatalf("fork after reminder: %v", err)
+	}
+	if !afterReminder.Meta().CompactionSoonReminderIssued {
+		t.Fatal("expected fork after reminder to preserve reminder-issued state")
+	}
+}
+
 func TestSetParentSessionIDPersists(t *testing.T) {
 	root := t.TempDir()
 	store, err := Create(root, "workspace-x", "/tmp/work")

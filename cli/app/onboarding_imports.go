@@ -509,7 +509,15 @@ func executeOnboardingImports(globalRoot string, state onboardingFlowState) (fun
 	}, nil
 }
 
+func normalizeOnboardingImportSelection(selection onboardingImportSelection) onboardingImportSelection {
+	if strings.TrimSpace(string(selection.Mode)) == "" {
+		selection.Mode = onboardingImportModeNone
+	}
+	return selection
+}
+
 func executeSkillImport(globalRoot string, discovery onboardingImportDiscovery, selection onboardingImportSelection) ([]string, error) {
+	selection = normalizeOnboardingImportSelection(selection)
 	if discovery.skipSkills {
 		if selection.Mode != onboardingImportModeNone {
 			return nil, fmt.Errorf("skills import should have been skipped because existing content was found")
@@ -547,6 +555,7 @@ func executeSkillImport(globalRoot string, discovery onboardingImportDiscovery, 
 }
 
 func executeCommandImport(globalRoot string, discovery onboardingImportDiscovery, selection onboardingImportSelection) ([]string, error) {
+	selection = normalizeOnboardingImportSelection(selection)
 	if discovery.skipCommands {
 		if selection.Mode != onboardingImportModeNone {
 			return nil, fmt.Errorf("slash command import should have been skipped because existing content was found")

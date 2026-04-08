@@ -215,7 +215,7 @@
 - Manual compaction is available via `/compact` while idle; optional arguments are appended as compaction guidance.
 - Human-facing UX uses `compact` terminology, while agent-facing prompt/tool language uses `handoff`; do not mix these narratives across those surfaces without an explicit product decision.
 - Successful manual `/compact` appends a hidden developer carryover message containing the last visible user prompt so the post-compaction model context still knows what the user most recently asked for.
-- The compaction-soon reminder is single-shot per session once issued. When `tools.trigger_handoff=true`, that same reminder template injects agent-facing text that `trigger_handoff()` is now allowed; the tool must fail before the reminder fires and must also fail while `/autocompaction` is off.
+- The compaction-soon reminder is single-shot until the next real compaction replaces history. Restores and forks derive the issued state from replayed transcript/history-replacement events instead of blindly copying stale metadata. When `tools.trigger_handoff=true`, the reminder template injects agent-facing text that `trigger_handoff()` is now allowed; the tool must fail before the reminder fires and must also fail while `/autocompaction` is off.
 - Agent-triggered handoff uses its own internal compaction mode and may append a detail-only future-agent developer message; it must not reuse manual `/compact` carryover semantics.
 - Main-agent OpenAI `session_id` stays on the persisted Builder session id for the entire conversation lifetime.
 - Main-agent prompt cache lineage is keyed separately from `session_id` and rotates by compaction generation: the base key is `<session_id>` before first compaction, then `<session_id>/compact-N` for generation `N`.
@@ -274,6 +274,7 @@
 - `compaction_soon_reminder`: `D`
 - `reviewer_feedback`: represented in transcript by reviewer transcript roles, not by rendering the raw developer reviewer prompt directly. Effective visibility is `OC` or `O` depending on reviewer verbosity config.
 - `background_notice`: `OC`
+- `handoff_future_message`: `D`
 - `manual_compaction_carryover`: `D`
 - `headless_mode`: `D`
 - `headless_mode_exit`: `D`
