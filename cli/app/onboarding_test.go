@@ -1027,6 +1027,25 @@ func TestReviewerThinkingDisableDoesNotForceCustomInput(t *testing.T) {
 	}
 }
 
+func TestReviewerThinkingPresetChoiceDoesNotForceCustomInput(t *testing.T) {
+	state := &onboardingFlowState{settings: config.Settings{Model: "gpt-5.4", ThinkingLevel: "medium", Reviewer: config.ReviewerSettings{Frequency: "edits", Model: "gpt-5.4", ThinkingLevel: "medium"}}}
+	if err := findWorkflowStep(t, state, "reviewer_thinking").ApplyChoice(state, "low"); err != nil {
+		t.Fatalf("apply reviewer preset choice: %v", err)
+	}
+	if state.settings.Reviewer.ThinkingLevel != "low" {
+		t.Fatalf("expected reviewer thinking preset to be preserved, got %q", state.settings.Reviewer.ThinkingLevel)
+	}
+	if !state.reviewerCustomThinking {
+		t.Fatal("expected non-primary reviewer preset to remain an override")
+	}
+	if state.reviewerCustomThinkingInput {
+		t.Fatal("expected preset reviewer thinking choice not to open custom input")
+	}
+	if workflowIncludesStep(newOnboardingWorkflow(state).visibleSteps(state), "reviewer_thinking_custom") {
+		t.Fatal("expected custom reviewer thinking step to stay hidden after preset choice")
+	}
+}
+
 func TestMainThinkingChoicePreservesDisabledReviewerThinking(t *testing.T) {
 	state := &onboardingFlowState{settings: config.Settings{Model: "gpt-5.4", ThinkingLevel: "medium", Reviewer: config.ReviewerSettings{Frequency: "edits", Model: "gpt-5.4", ThinkingLevel: "medium"}}}
 	if err := findWorkflowStep(t, state, "reviewer_thinking").ApplyChoice(state, "disable"); err != nil {
