@@ -219,7 +219,7 @@
 - Agent-triggered handoff uses its own internal compaction mode and may append a detail-only future-agent developer message; it must not reuse manual `/compact` carryover semantics.
 - Main-agent OpenAI `session_id` stays on the persisted Builder session id for the entire conversation lifetime.
 - Main-agent prompt cache lineage is keyed separately from `session_id` and rotates by compaction generation: the base key is `<session_id>` before first compaction, then `<session_id>/compact-N` for generation `N`.
-- Supervisor/reviewer OpenAI `session_id` stays on `<session_id>/supervisor`; its prompt cache lineage uses the base key `<session_id>/supervisor` before first compaction, then rotates independently as `<session_id>/supervisor/compact-N`.
+- Supervisor/reviewer OpenAI `session_id` stays on `<session_id>/supervisor`; its prompt cache lineage uses the distinct base key `<session_id>/supervisor` before first compaction, then applies `/compact-N` with the same shared compaction generation counter as the main agent.
 - Local compaction instructions are injected as final `developer` message.
 - Local compaction summary generation reads full provider history from latest compaction checkpoint onward (or from start if none).
 - Local compaction summary generation keeps tool declarations for request shape/cache stability but runtime rejects any returned tool calls.

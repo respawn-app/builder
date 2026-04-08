@@ -169,6 +169,10 @@ func discoverDirectProviderSkills(provider onboardingImportProvider, root string
 }
 
 func discoverProviderCommandSymlinkItems(provider onboardingImportProvider, base string) (string, []onboardingCommandImportItem, error) {
+	return providerCommandSymlinkSourceAtBase(provider, base)
+}
+
+func providerCommandSymlinkSourceAtBase(provider onboardingImportProvider, base string) (string, []onboardingCommandImportItem, error) {
 	for _, root := range []string{filepath.Join(base, "commands"), filepath.Join(base, "prompts")} {
 		exists, err := pathExists(root)
 		if err != nil {
@@ -329,7 +333,7 @@ func importCommandsBody(discovery onboardingImportDiscovery) string {
 	for _, provider := range sortedImportProviders(discovery.commandSymlinkItems) {
 		providers = append(providers, providerLabel(provider))
 	}
-	return "Builder found importable slash commands from " + strings.Join(providers, ", ") + "Would you like to symlink to provider directories?"
+	return "Builder found importable slash commands from " + strings.Join(providers, ", ") + ". Would you like to symlink to provider directories?"
 }
 
 func recommendedSymlinkImportChoiceID[T any](byProvider map[onboardingImportProviderID][]T) string {
@@ -531,9 +535,6 @@ func executeSkillImport(globalRoot string, discovery onboardingImportDiscovery, 
 		return nil, fmt.Errorf("unsupported skills import mode %q", selection.Mode)
 	}
 	targetRoot := filepath.Join(globalRoot, "skills")
-	if err := prepareEmptyDirectorySymlinkTarget(targetRoot, "skills"); err != nil {
-		return nil, err
-	}
 	sourcePath := strings.TrimSpace(discovery.skillSymlinkRoots[selection.Provider])
 	if sourcePath == "" {
 		fallbackPath, fallbackErr := providerSkillSymlinkSource(selection.Provider)
@@ -543,6 +544,9 @@ func executeSkillImport(globalRoot string, discovery onboardingImportDiscovery, 
 		sourcePath = fallbackPath
 	}
 	if err := requireSymlinkSourceDirectory(sourcePath, fmt.Sprintf("skills source %s", providerLabel(selection.Provider))); err != nil {
+		return nil, err
+	}
+	if err := prepareEmptyDirectorySymlinkTarget(targetRoot, "skills"); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Dir(targetRoot), 0o755); err != nil {
@@ -569,9 +573,6 @@ func executeCommandImport(globalRoot string, discovery onboardingImportDiscovery
 		return nil, fmt.Errorf("unsupported slash command import mode %q", selection.Mode)
 	}
 	targetRoot := filepath.Join(globalRoot, "prompts")
-	if err := prepareEmptyDirectorySymlinkTarget(targetRoot, "slash command"); err != nil {
-		return nil, err
-	}
 	sourcePath := strings.TrimSpace(discovery.commandSymlinkRoots[selection.Provider])
 	if sourcePath == "" {
 		fallbackPath, fallbackErr := providerCommandSymlinkSource(selection.Provider)
@@ -581,6 +582,9 @@ func executeCommandImport(globalRoot string, discovery onboardingImportDiscovery
 		sourcePath = fallbackPath
 	}
 	if err := requireSymlinkSourceDirectory(sourcePath, fmt.Sprintf("slash command source %s", providerLabel(selection.Provider))); err != nil {
+		return nil, err
+	}
+	if err := prepareEmptyDirectorySymlinkTarget(targetRoot, "slash command"); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Dir(targetRoot), 0o755); err != nil {
@@ -662,14 +666,12 @@ func providerCommandSymlinkSource(providerID onboardingImportProviderID) (string
 			continue
 		}
 		base := filepath.Join(home, provider.HomeEntry)
-		for _, candidate := range []string{filepath.Join(base, "commands"), filepath.Join(base, "prompts")} {
-			ok, candidateErr := pathExists(candidate)
-			if candidateErr != nil {
-				return "", candidateErr
-			}
-			if ok {
-				return candidate, nil
-			}
+		root, items, candidateErr := providerCommandSymlinkSourceAtBase(provider, base)
+		if candidateErr != nil {
+			return "", candidateErr
+		}
+		if strings.TrimSpace(root) != "" && len(items) > 0 {
+			return root, nil
 		}
 		return "", fmt.Errorf("no slash command directory found for %s", provider.Label)
 	}
