@@ -1027,6 +1027,22 @@ func TestReviewerThinkingDisableDoesNotForceCustomInput(t *testing.T) {
 	}
 }
 
+func TestMainThinkingChoicePreservesDisabledReviewerThinking(t *testing.T) {
+	state := &onboardingFlowState{settings: config.Settings{Model: "gpt-5.4", ThinkingLevel: "medium", Reviewer: config.ReviewerSettings{Frequency: "edits", Model: "gpt-5.4", ThinkingLevel: "medium"}}}
+	if err := findWorkflowStep(t, state, "reviewer_thinking").ApplyChoice(state, "disable"); err != nil {
+		t.Fatalf("apply reviewer disable choice: %v", err)
+	}
+	if err := findWorkflowStep(t, state, "thinking").ApplyChoice(state, "high"); err != nil {
+		t.Fatalf("apply main thinking choice: %v", err)
+	}
+	if state.settings.Reviewer.ThinkingLevel != "" {
+		t.Fatalf("expected reviewer thinking to remain disabled after main thinking change, got %q", state.settings.Reviewer.ThinkingLevel)
+	}
+	if !state.reviewerThinkingDisabled {
+		t.Fatal("expected explicit reviewer disable choice to remain sticky")
+	}
+}
+
 func TestApplyOnboardingModelPreservesCustomReviewerOverrides(t *testing.T) {
 	state := &onboardingFlowState{
 		settings: config.Settings{

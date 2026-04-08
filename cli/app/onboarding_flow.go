@@ -70,20 +70,21 @@ type onboardingImportSelection struct {
 }
 
 type onboardingFlowState struct {
-	settings               config.Settings
-	baselineSettings       config.Settings
-	theme                  string
-	alternateScreen        config.TUIAlternateScreenPolicy
-	authState              auth.State
-	providerCapabilities   llm.ProviderCapabilities
-	pendingAction          onboardingPendingAction
-	customThinking         bool
-	reviewerCustomModel    bool
-	reviewerCustomThinking bool
-	skillImport            onboardingImportSelection
-	commandImport          onboardingImportSelection
-	skillSelection         map[string]bool
-	imports                onboardingImportDiscovery
+	settings                 config.Settings
+	baselineSettings         config.Settings
+	theme                    string
+	alternateScreen          config.TUIAlternateScreenPolicy
+	authState                auth.State
+	providerCapabilities     llm.ProviderCapabilities
+	pendingAction            onboardingPendingAction
+	customThinking           bool
+	reviewerCustomModel      bool
+	reviewerCustomThinking   bool
+	reviewerThinkingDisabled bool
+	skillImport              onboardingImportSelection
+	commandImport            onboardingImportSelection
+	skillSelection           map[string]bool
+	imports                  onboardingImportDiscovery
 }
 
 type onboardingResult struct {
@@ -413,11 +414,14 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 			apply: func(state *onboardingFlowState, choiceID string) error {
 				switch choiceID {
 				case "disable":
+					state.reviewerThinkingDisabled = true
 					state.settings.Reviewer.ThinkingLevel = ""
 					state.reviewerCustomThinking = false
 				case "custom":
+					state.reviewerThinkingDisabled = false
 					state.reviewerCustomThinking = true
 				default:
+					state.reviewerThinkingDisabled = false
 					state.settings.Reviewer.ThinkingLevel = choiceID
 					state.reviewerCustomThinking = choiceID != strings.TrimSpace(state.settings.ThinkingLevel)
 				}
@@ -441,6 +445,7 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				if trimmed == "" {
 					return fmt.Errorf("supervisor thinking value must not be empty")
 				}
+				state.reviewerThinkingDisabled = false
 				state.settings.Reviewer.ThinkingLevel = trimmed
 				state.reviewerCustomThinking = trimmed != strings.TrimSpace(state.settings.ThinkingLevel)
 				return nil
@@ -553,6 +558,11 @@ func syncReviewerDefaultsFromPrimary(state *onboardingFlowState) {
 
 func syncReviewerThinkingToPrimary(state *onboardingFlowState) {
 	if !llm.SupportsReasoningEffortModel(state.settings.Reviewer.Model) {
+		state.reviewerCustomThinking = false
+		state.settings.Reviewer.ThinkingLevel = ""
+		return
+	}
+	if state.reviewerThinkingDisabled {
 		state.reviewerCustomThinking = false
 		state.settings.Reviewer.ThinkingLevel = ""
 		return
