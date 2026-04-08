@@ -11,6 +11,7 @@ import (
 	"builder/prompts"
 	"builder/server/llm"
 	"builder/server/tools"
+	"builder/shared/cachewarn"
 	"builder/shared/compaction"
 )
 
@@ -670,13 +671,19 @@ func (e *Engine) localCompactionSummary(ctx context.Context, input []llm.Respons
 	})
 	items = sanitizeItemsForLLM(items)
 
-	req, err := llm.RequestFromLockedContract(locked, prompts.BaseSystemPrompt(), items, e.requestTools())
+	req, err := llm.RequestFromLockedContract(locked, e.systemPrompt(locked), items, e.requestTools())
 	if err != nil {
 		return "", err
 	}
 	req.ReasoningEffort = e.ThinkingLevel()
 	req.FastMode = e.FastModeEnabled()
-	req.SessionID = e.store.Meta().SessionID
+	req.SessionID = e.conversationSessionID()
+	if e.supportsPromptCacheKey(ctx) {
+		if cacheKey := e.conversationPromptCacheKey(); cacheKey != "" {
+			req.PromptCacheKey = cacheKey
+			req.PromptCacheScope = cachewarn.ScopeConversation
+		}
+	}
 
 	resp, err := e.generateWithRetry(ctx, "", req, nil, nil, nil)
 	if err != nil {

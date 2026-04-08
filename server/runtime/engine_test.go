@@ -2830,7 +2830,7 @@ func TestReviewerSuggestionsTriggerFollowUpAndNoopKeepsOriginalAnswer(t *testing
 	if reviewerReq.SystemPrompt != prompts.ReviewerSystemPrompt {
 		t.Fatalf("unexpected reviewer prompt")
 	}
-	if reviewerReq.SessionID != store.Meta().SessionID+"-review" {
+	if reviewerReq.SessionID != reviewerSessionID(store.Meta().SessionID) {
 		t.Fatalf("expected reviewer session id suffix, got %q", reviewerReq.SessionID)
 	}
 	if len(requestMessages(reviewerReq)) == 0 {
@@ -3610,9 +3610,24 @@ func TestRestoreMessagesReplaysLegacyReviewerRollbackHistoryReplacement(t *testi
 		t.Fatalf("append history replacement: %v", err)
 	}
 
-	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
-	if err != nil {
-		t.Fatalf("restore engine: %v", err)
+	type restoreResult struct {
+		engine *Engine
+		err    error
+	}
+	resultCh := make(chan restoreResult, 1)
+	go func() {
+		restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+		resultCh <- restoreResult{engine: restored, err: err}
+	}()
+	var restored *Engine
+	select {
+	case result := <-resultCh:
+		restored = result.engine
+		if result.err != nil {
+			t.Fatalf("restore engine: %v", result.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("restore engine timed out; possible store-lock deadlock while replaying reviewer_rollback history replacement")
 	}
 	items := restored.snapshotItems()
 	if len(items) != len(legacyItems) {
@@ -8660,8 +8675,11 @@ func TestRunStepLoopTriggerHandoffOmitsCallAndOutputFromFollowUpRequestAndKeepsF
 	if len(client.calls) != 3 {
 		t.Fatalf("expected tool call, local compaction summary, and follow-up requests, got %d", len(client.calls))
 	}
-	if got, want := client.calls[2].SessionID, eng.requestSessionID(); got != want {
-		t.Fatalf("expected follow-up request session id to rotate after handoff compaction, got %q want %q", got, want)
+	if got, want := client.calls[2].SessionID, eng.conversationSessionID(); got != want {
+		t.Fatalf("expected follow-up request session id to stay on the main conversation after handoff compaction, got %q want %q", got, want)
+	}
+	if got, want := client.calls[2].PromptCacheKey, eng.conversationPromptCacheKey(); got != want {
+		t.Fatalf("expected follow-up request prompt cache key to rotate after handoff compaction, got %q want %q", got, want)
 	}
 
 	followUp := client.calls[2]
@@ -8745,8 +8763,11 @@ func TestRunStepLoopInjectsReminderBeforeTriggerHandoffAndOmitsCallOutputFromFol
 	if len(client.calls) != 3 {
 		t.Fatalf("expected trigger request, local compaction summary, and follow-up requests, got %d", len(client.calls))
 	}
-	if got, want := client.calls[2].SessionID, eng.requestSessionID(); got != want {
-		t.Fatalf("expected follow-up request session id to rotate after handoff compaction, got %q want %q", got, want)
+	if got, want := client.calls[2].SessionID, eng.conversationSessionID(); got != want {
+		t.Fatalf("expected follow-up request session id to stay on the main conversation after handoff compaction, got %q want %q", got, want)
+	}
+	if got, want := client.calls[2].PromptCacheKey, eng.conversationPromptCacheKey(); got != want {
+		t.Fatalf("expected follow-up request prompt cache key to rotate after handoff compaction, got %q want %q", got, want)
 	}
 
 	remindersInFirstRequest := 0
@@ -8859,8 +8880,11 @@ func TestReopenedSessionAfterTriggerHandoffUsesRotatedRequestSessionAndOmitsLing
 	if len(resumedClient.calls) != 1 {
 		t.Fatalf("expected one resumed model call, got %d", len(resumedClient.calls))
 	}
-	if got, want := resumedClient.calls[0].SessionID, restored.requestSessionID(); got != want {
-		t.Fatalf("expected resumed request session id to stay rotated after restore, got %q want %q", got, want)
+	if got, want := resumedClient.calls[0].SessionID, restored.conversationSessionID(); got != want {
+		t.Fatalf("expected resumed request session id to stay on the main conversation after restore, got %q want %q", got, want)
+	}
+	if got, want := resumedClient.calls[0].PromptCacheKey, restored.conversationPromptCacheKey(); got != want {
+		t.Fatalf("expected resumed request prompt cache key to stay rotated after restore, got %q want %q", got, want)
 	}
 	for _, item := range resumedClient.calls[0].Items {
 		switch {
@@ -8963,8 +8987,11 @@ func TestReopenedSessionAfterSuccessfulTriggerHandoffRequeuesPendingHandoff(t *t
 		t.Fatalf("expected restored handoff compaction request to include summarizer prompt, items=%+v", first.Items)
 	}
 	followUp := resumedClient.calls[1]
-	if got, want := followUp.SessionID, restored.requestSessionID(); got != want {
-		t.Fatalf("expected follow-up request session id to rotate after restored handoff compaction, got %q want %q", got, want)
+	if got, want := followUp.SessionID, restored.conversationSessionID(); got != want {
+		t.Fatalf("expected follow-up request session id to stay on the main conversation after restored handoff compaction, got %q want %q", got, want)
+	}
+	if got, want := followUp.PromptCacheKey, restored.conversationPromptCacheKey(); got != want {
+		t.Fatalf("expected follow-up request prompt cache key to rotate after restored handoff compaction, got %q want %q", got, want)
 	}
 	foundCall := false
 	foundOutput := false
@@ -9054,8 +9081,11 @@ func TestReopenedSessionAfterTriggerHandoffDoesNotRequeueWhenAnyCompactionAlread
 	if len(resumedClient.calls) != 1 {
 		t.Fatalf("expected compaction-satisfied session to resume with a single request, got %d", len(resumedClient.calls))
 	}
-	if got, want := resumedClient.calls[0].SessionID, restored.requestSessionID(); got != want {
-		t.Fatalf("expected resumed request session id to stay rotated after restored compaction, got %q want %q", got, want)
+	if got, want := resumedClient.calls[0].SessionID, restored.conversationSessionID(); got != want {
+		t.Fatalf("expected resumed request session id to stay on the main conversation after restored compaction, got %q want %q", got, want)
+	}
+	if got, want := resumedClient.calls[0].PromptCacheKey, restored.conversationPromptCacheKey(); got != want {
+		t.Fatalf("expected resumed request prompt cache key to stay rotated after restored compaction, got %q want %q", got, want)
 	}
 	for _, item := range resumedClient.calls[0].Items {
 		switch {

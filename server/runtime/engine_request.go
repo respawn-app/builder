@@ -44,9 +44,12 @@ func (e *Engine) buildRequestWithExtraItems(ctx context.Context, extra []llm.Res
 	}
 	req.ReasoningEffort = e.ThinkingLevel()
 	req.FastMode = e.FastModeEnabled()
+	req.SessionID = e.conversationSessionID()
 	if e.supportsPromptCacheKey(ctx) {
-		req.PromptCacheKey = e.store.Meta().SessionID
-		req.PromptCacheScope = cachewarn.ScopeConversation
+		if cacheKey := e.conversationPromptCacheKey(); cacheKey != "" {
+			req.PromptCacheKey = cacheKey
+			req.PromptCacheScope = cachewarn.ScopeConversation
+		}
 	}
 	if allowTools {
 		nativeWebSearch, nativeErr := e.enableNativeWebSearch(ctx)
@@ -55,7 +58,6 @@ func (e *Engine) buildRequestWithExtraItems(ctx context.Context, extra []llm.Res
 		}
 		req.EnableNativeWebSearch = nativeWebSearch
 	}
-	req.SessionID = e.requestSessionID()
 	return req, nil
 }
 

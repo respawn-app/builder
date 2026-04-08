@@ -9,7 +9,6 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
-	"builder/shared/cachewarn"
 )
 
 type defaultMessageLifecycle struct {
@@ -20,7 +19,6 @@ type defaultMessageLifecycle struct {
 func (m *defaultMessageLifecycle) RestoreMessages() error {
 	e := m.engine
 	meta := e.store.Meta()
-	sessionID := meta.SessionID
 	recoveredHandoff := newPersistedHandoffRecovery()
 	reminderIssued := meta.CompactionSoonReminderIssued
 	if err := e.store.WalkEvents(func(evt session.Event) error {
@@ -67,11 +65,10 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 			}
 			if strings.TrimSpace(payload.Engine) == "reviewer_rollback" {
 				e.chat.restoreHistoryItems(payload.Items)
-				e.clearPromptCacheLineage(sessionID)
+				e.clearPromptCacheLineages(meta.SessionID, e.compactionCountSnapshot())
 				reminderIssued = itemsContainCompactionSoonReminder(payload.Items)
 			} else {
 				e.chat.replaceHistory(payload.Items)
-				e.notePromptCacheInvalidation(sessionID, cachewarn.ReasonCompaction)
 				e.compactionCount++
 				recoveredHandoff.ClearSatisfiedByCompaction()
 				reminderIssued = false
