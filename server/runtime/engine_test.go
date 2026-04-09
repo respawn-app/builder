@@ -3636,6 +3636,30 @@ func TestAppendPersistedLocalEntryRecordDoesNotMutateChatOnAppendFailure(t *test
 	}
 }
 
+func TestAppendLocalEntryWithOngoingTextSkipsBlankEntries(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	var events []Event
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:   "gpt-5",
+		OnEvent: func(evt Event) { events = append(events, evt) },
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	eng.AppendLocalEntryWithOngoingText("user", "   ", "ignored")
+	if len(events) != 0 {
+		t.Fatalf("expected blank local entry to emit no events, got %+v", events)
+	}
+	if snapshot := eng.ChatSnapshot(); len(snapshot.Entries) != 0 {
+		t.Fatalf("expected blank local entry to skip chat append, got %+v", snapshot.Entries)
+	}
+}
+
 func TestRestoreMessagesKeepsStoredToolCallPresentationPayload(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

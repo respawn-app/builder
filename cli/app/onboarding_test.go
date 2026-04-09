@@ -959,6 +959,13 @@ func TestOnboardingProviderCapabilitiesFromAuthMode(t *testing.T) {
 	if defaultOpenAICaps.ProviderID != "openai" || !defaultOpenAICaps.SupportsResponsesCompact {
 		t.Fatalf("expected explicit default OpenAI base url to preserve openai capabilities, got %+v", defaultOpenAICaps)
 	}
+	oauthCustomBaseCaps, err := onboardingProviderCapabilities(auth.State{Method: auth.Method{Type: auth.MethodOAuth}}, config.Settings{OpenAIBaseURL: "https://example.test/v1"})
+	if err != nil {
+		t.Fatalf("oauth custom base url capabilities: %v", err)
+	}
+	if oauthCustomBaseCaps.ProviderID != "chatgpt-codex" || !oauthCustomBaseCaps.SupportsResponsesCompact {
+		t.Fatalf("expected oauth auth mode to keep chatgpt-codex capabilities over custom base url, got %+v", oauthCustomBaseCaps)
+	}
 	noAuthCompatibleCaps, err := onboardingProviderCapabilities(auth.EmptyState(), config.Settings{OpenAIBaseURL: "https://example.test/v1"})
 	if err != nil {
 		t.Fatalf("no-auth openai-compatible provider capabilities: %v", err)

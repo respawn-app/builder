@@ -86,6 +86,9 @@ func TestKnownNonFirstPartyProviderContractsRemainLocalCompactionOnly(t *testing
 		if caps.SupportsPromptCacheKey {
 			t.Fatalf("expected prompt cache key unsupported for %s, got %+v", providerID, caps)
 		}
+		if caps.SupportsRequestInputTokenCount {
+			t.Fatalf("expected exact input-token counting unsupported for %s, got %+v", providerID, caps)
+		}
 		if caps.SupportsNativeWebSearch {
 			t.Fatalf("expected native web search unsupported for %s, got %+v", providerID, caps)
 		}

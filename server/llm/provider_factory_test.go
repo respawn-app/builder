@@ -213,6 +213,28 @@ func TestNewProviderClient_RemoteOpenAICompatibleBaseURLAllowsAnonymousCapabilit
 	}
 }
 
+func TestNewProviderClient_DefaultOpenAIBaseURLDoesNotStayExplicit(t *testing.T) {
+	client, err := NewProviderClient(ProviderClientOptions{
+		Model:         "gpt-5",
+		Auth:          providerTestMissingAuth{},
+		OpenAIBaseURL: "https://api.openai.com",
+	})
+	if err != nil {
+		t.Fatalf("new provider client: %v", err)
+	}
+	openAIClient, ok := client.(*OpenAIClient)
+	if !ok {
+		t.Fatalf("expected *OpenAIClient, got %T", client)
+	}
+	transport, ok := openAIClient.transport.(*HTTPTransport)
+	if !ok {
+		t.Fatalf("expected *HTTPTransport, got %T", openAIClient.transport)
+	}
+	if transport.BaseURLExplicit {
+		t.Fatal("expected canonical default OpenAI URL to avoid explicit anonymous-mode transport")
+	}
+}
+
 func TestProviderErrorReducerForUnknownIDFailsFast(t *testing.T) {
 	_, err := providerErrorReducerForID("custom-provider-id")
 	if err == nil {
