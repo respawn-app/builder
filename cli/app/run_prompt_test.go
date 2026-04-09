@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"builder/internal/testopenai"
 	"builder/server/auth"
 	"builder/server/authflow"
 	"builder/server/llm"
@@ -280,15 +280,13 @@ func TestStartRunPromptClientFallsBackToEmbeddedWhenDaemonLaunchFails(t *testing
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if testopenai.HandleInputTokenCount(w, r, 1) {
+			return
+		}
 		if r.URL.Path != "/responses" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final\",\"content\":[{\"type\":\"output_text\",\"text\":\"embedded fallback\"}]}]}}\n\n")
-		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
-		}
+		testopenai.WriteCompletedResponseStream(w, "embedded fallback", 1, 1)
 	}))
 	defer server.Close()
 
@@ -502,18 +500,16 @@ func TestRunPromptCreatesSessionAndPersistsDurableTranscript(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if testopenai.HandleInputTokenCount(w, r, 11) {
+			return
+		}
 		if r.URL.Path != "/responses" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
 		if got := strings.TrimSpace(r.Header.Get("Authorization")); got == "" {
 			t.Fatal("expected authorization header")
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello from fake\"}]}]}}\n\n")
-		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
-		}
+		testopenai.WriteCompletedResponseStream(w, "hello from fake", 11, 7)
 	}))
 	defer server.Close()
 
@@ -721,6 +717,9 @@ func TestHeadlessRunPromptClientDeduplicatesDuplicateClientRequestID(t *testing.
 	secondRelease := make(chan struct{})
 	var hits atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if testopenai.HandleInputTokenCount(w, r, 11) {
+			return
+		}
 		if r.URL.Path != "/responses" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
@@ -736,12 +735,7 @@ func TestHeadlessRunPromptClientDeduplicatesDuplicateClientRequestID(t *testing.
 			t.Fatalf("unexpected response request index %d", index)
 		}
 		reply := []string{"created", "deduped"}[index]
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final\",\"content\":[{\"type\":\"output_text\",\"text\":%q}]}]}}\n\n", reply)
-		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
-		}
+		testopenai.WriteCompletedResponseStream(w, reply, 11, 7)
 	}))
 	defer server.Close()
 
@@ -844,6 +838,9 @@ func newFakeResponsesServer(t *testing.T, assistantReplies []string) (*httptest.
 	t.Helper()
 	var hits atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if testopenai.HandleInputTokenCount(w, r, 11) {
+			return
+		}
 		if r.URL.Path != "/responses" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
@@ -854,12 +851,7 @@ func newFakeResponsesServer(t *testing.T, assistantReplies []string) (*httptest.
 		if index >= len(assistantReplies) {
 			t.Fatalf("unexpected response request index %d", index)
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final\",\"content\":[{\"type\":\"output_text\",\"text\":%q}]}]}}\n\n", assistantReplies[index])
-		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
-		}
+		testopenai.WriteCompletedResponseStream(w, assistantReplies[index], 11, 7)
 	}))
 	return server, &hits
 }
