@@ -19,7 +19,6 @@ func MainViewFromRuntime(engine *runtime.Engine) clientui.RuntimeMainView {
 		return clientui.RuntimeMainView{}
 	}
 	sessionView := SessionViewFromRuntime(engine)
-	sessionView.Chat = ChatSnapshotFromRuntime(engine.ChatSnapshot())
 	return clientui.RuntimeMainView{
 		Status:    StatusFromRuntime(engine),
 		Session:   sessionView,

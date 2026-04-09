@@ -10,8 +10,11 @@ func TestNormalizeEntryVisibility(t *testing.T) {
 	}{
 		{name: "blank defaults to auto", visibility: "", want: EntryVisibilityAuto},
 		{name: "auto normalizes to auto", visibility: "auto", want: EntryVisibilityAuto},
+		{name: "auto is case-insensitive", visibility: " AUTO ", want: EntryVisibilityAuto},
 		{name: "all preserved", visibility: "all", want: EntryVisibilityAll},
+		{name: "all is case-insensitive", visibility: "ALL", want: EntryVisibilityAll},
 		{name: "detail only preserved", visibility: "detail_only", want: EntryVisibilityDetailOnly},
+		{name: "detail only is case-insensitive", visibility: " Detail_Only ", want: EntryVisibilityDetailOnly},
 		{name: "unknown trimmed", visibility: "  custom  ", want: EntryVisibility("custom")},
 	}
 

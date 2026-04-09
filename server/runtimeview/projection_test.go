@@ -194,11 +194,8 @@ func TestMainViewFromRuntimeBundlesStatusAndSession(t *testing.T) {
 	if view.Session.SessionID != store.Meta().SessionID || view.Session.SessionName != "Session Name" {
 		t.Fatalf("unexpected session hydration: %+v", view.Session)
 	}
-	if got := len(view.Session.Chat.Entries); got != 1 {
-		t.Fatalf("main view chat entry count = %d, want 1", got)
-	}
-	if got := view.Session.Chat.Entries[0].Text; got != "final answer" {
-		t.Fatalf("main view chat entry text = %q, want final answer", got)
+	if got := len(view.Session.Chat.Entries); got != 0 {
+		t.Fatalf("expected main view to omit transcript payload, got %d entries", got)
 	}
 	if view.Status.ParentSessionID != "parent-123" || view.Status.LastCommittedAssistantFinalAnswer != "final answer" {
 		t.Fatalf("unexpected status hydration: %+v", view.Status)

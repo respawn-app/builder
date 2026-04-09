@@ -591,13 +591,16 @@ func TestResolveAuth_AllowsAnonymousWhenBaseURLExplicitAndAuthNotConfigured(t *t
 }
 
 func TestGenerate_ExplicitBaseURLAllowsAnonymousRequests(t *testing.T) {
+	authHeaderErrs := make(chan error, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/responses" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		if got := strings.TrimSpace(r.Header.Get("Authorization")); got != "" {
-			t.Fatalf("expected anonymous request without Authorization header, got %q", got)
+			authHeaderErrs <- fmt.Errorf("expected anonymous request without Authorization header, got %q", got)
+			w.WriteHeader(http.StatusBadRequest)
+			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
@@ -645,6 +648,11 @@ func TestGenerate_ExplicitBaseURLAllowsAnonymousRequests(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("generate: %v", err)
+	}
+	select {
+	case err := <-authHeaderErrs:
+		t.Fatal(err)
+	default:
 	}
 	if resp.AssistantText != "hello from anonymous compatible server" {
 		t.Fatalf("assistant text = %q", resp.AssistantText)
