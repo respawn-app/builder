@@ -80,13 +80,14 @@ func providerContracts() []ProviderContract {
 				{
 					ProviderID: "anthropic",
 					Capabilities: ProviderCapabilities{
-						ProviderID:                    "anthropic",
-						SupportsResponsesAPI:          false,
-						SupportsResponsesCompact:      false,
-						SupportsNativeWebSearch:       false,
-						SupportsReasoningEncrypted:    false,
-						SupportsServerSideContextEdit: false,
-						IsOpenAIFirstParty:            false,
+						ProviderID:                     "anthropic",
+						SupportsResponsesAPI:           false,
+						SupportsResponsesCompact:       false,
+						SupportsRequestInputTokenCount: false,
+						SupportsNativeWebSearch:        false,
+						SupportsReasoningEncrypted:     false,
+						SupportsServerSideContextEdit:  false,
+						IsOpenAIFirstParty:             false,
 					},
 					NewErrorReducer: newOpaqueProviderErrorReducer,
 				},
@@ -101,42 +102,45 @@ func providerContracts() []ProviderContract {
 				{
 					ProviderID: "openai",
 					Capabilities: ProviderCapabilities{
-						ProviderID:                    "openai",
-						SupportsResponsesAPI:          true,
-						SupportsResponsesCompact:      true,
-						SupportsPromptCacheKey:        true,
-						SupportsNativeWebSearch:       true,
-						SupportsReasoningEncrypted:    true,
-						SupportsServerSideContextEdit: true,
-						IsOpenAIFirstParty:            true,
+						ProviderID:                     "openai",
+						SupportsResponsesAPI:           true,
+						SupportsResponsesCompact:       true,
+						SupportsRequestInputTokenCount: true,
+						SupportsPromptCacheKey:         true,
+						SupportsNativeWebSearch:        true,
+						SupportsReasoningEncrypted:     true,
+						SupportsServerSideContextEdit:  true,
+						IsOpenAIFirstParty:             true,
 					},
 					NewErrorReducer: newOpenAICompatibleErrorReducer,
 				},
 				{
 					ProviderID: "openai-compatible",
 					Capabilities: ProviderCapabilities{
-						ProviderID:                    "openai-compatible",
-						SupportsResponsesAPI:          true,
-						SupportsResponsesCompact:      false,
-						SupportsPromptCacheKey:        false,
-						SupportsNativeWebSearch:       false,
-						SupportsReasoningEncrypted:    false,
-						SupportsServerSideContextEdit: false,
-						IsOpenAIFirstParty:            false,
+						ProviderID:                     "openai-compatible",
+						SupportsResponsesAPI:           true,
+						SupportsResponsesCompact:       false,
+						SupportsRequestInputTokenCount: false,
+						SupportsPromptCacheKey:         false,
+						SupportsNativeWebSearch:        false,
+						SupportsReasoningEncrypted:     false,
+						SupportsServerSideContextEdit:  false,
+						IsOpenAIFirstParty:             false,
 					},
 					NewErrorReducer: newOpenAICompatibleErrorReducer,
 				},
 				{
 					ProviderID: "chatgpt-codex",
 					Capabilities: ProviderCapabilities{
-						ProviderID:                    "chatgpt-codex",
-						SupportsResponsesAPI:          true,
-						SupportsResponsesCompact:      true,
-						SupportsPromptCacheKey:        true,
-						SupportsNativeWebSearch:       true,
-						SupportsReasoningEncrypted:    true,
-						SupportsServerSideContextEdit: true,
-						IsOpenAIFirstParty:            true,
+						ProviderID:                     "chatgpt-codex",
+						SupportsResponsesAPI:           true,
+						SupportsResponsesCompact:       true,
+						SupportsRequestInputTokenCount: false,
+						SupportsPromptCacheKey:         true,
+						SupportsNativeWebSearch:        true,
+						SupportsReasoningEncrypted:     true,
+						SupportsServerSideContextEdit:  true,
+						IsOpenAIFirstParty:             true,
 					},
 					NewErrorReducer: newOpenAICompatibleErrorReducer,
 				},
@@ -239,7 +243,9 @@ func newOpenAIProviderClient(opts ProviderClientOptions) (Client, error) {
 		transport.Client = opts.HTTPClient
 	}
 	if v := strings.TrimSpace(opts.OpenAIBaseURL); v != "" {
-		transport.BaseURL = v
+		normalizedBaseURL := normalizeOpenAIBaseURL(v)
+		transport.BaseURL = normalizedBaseURL
+		transport.BaseURLExplicit = !IsOpenAIFirstPartyBaseURL(normalizedBaseURL)
 	}
 	transport.ModelVerbosity = strings.ToLower(strings.TrimSpace(opts.ModelVerbosity))
 	if opts.ContextWindowTokens > 0 {
@@ -257,7 +263,7 @@ func NewProviderClient(opts ProviderClientOptions) (Client, error) {
 		} else {
 			inferredProvider, err := InferProviderFromModel(opts.Model)
 			if err != nil {
-				return nil, fmt.Errorf("%w; set provider_override explicitly for custom/alias models", err)
+				return nil, &ProviderSelectionError{Model: strings.TrimSpace(opts.Model), Err: err}
 			}
 			provider = inferredProvider
 		}

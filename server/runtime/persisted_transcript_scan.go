@@ -6,6 +6,7 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/config"
 	"builder/shared/transcript"
 	"builder/shared/transcript/toolcodec"
 )
@@ -16,6 +17,7 @@ type PersistedTranscriptScanRequest struct {
 
 	TrackOngoingTail bool
 	TailLimit        int
+	CacheWarningMode config.CacheWarningMode
 }
 
 type PersistedTranscriptScan struct {
@@ -42,7 +44,7 @@ func NewPersistedTranscriptScan(req PersistedTranscriptScanRequest) *PersistedTr
 	}
 	return &PersistedTranscriptScan{
 		request:   req,
-		projector: NewTranscriptProjector(),
+		projector: NewTranscriptProjectorWithCacheWarningMode(req.CacheWarningMode),
 	}
 }
 

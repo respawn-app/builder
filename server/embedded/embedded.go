@@ -6,6 +6,7 @@ import (
 
 	"builder/server/auth"
 	"builder/server/authflow"
+	"builder/server/authpolicy"
 	serverbootstrap "builder/server/bootstrap"
 	"builder/server/core"
 	"builder/server/runtime"
@@ -17,7 +18,7 @@ type Request = serverbootstrap.Request
 type AuthHandler interface {
 	WrapStore(base auth.Store) auth.Store
 	NeedsInteraction(req authflow.InteractionRequest) bool
-	Interact(ctx context.Context, req authflow.InteractionRequest) error
+	Interact(ctx context.Context, req authflow.InteractionRequest) (authflow.InteractionOutcome, error)
 }
 
 type OnboardingHandler interface {
@@ -58,7 +59,7 @@ func Start(ctx context.Context, req Request, hooks StartHooks) (*Server, error) 
 	if err != nil {
 		return nil, err
 	}
-	if err := authflow.EnsureReady(ctx, authSupport.AuthManager, authSupport.OAuthOptions, cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen, req.LookupEnv, hooks.Auth); err != nil {
+	if err := authflow.EnsureReady(ctx, authSupport.AuthManager, authSupport.OAuthOptions, cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen, req.LookupEnv, authpolicy.RequiresStartupAuth(cfg.Settings), false, hooks.Auth); err != nil {
 		return nil, err
 	}
 	if hooks.Onboarding != nil {

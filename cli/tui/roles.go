@@ -20,12 +20,35 @@ func isCompactionRole(role string) bool {
 }
 
 func isDetailOnlyRole(role string) bool {
+	return defaultEntryVisibilityForRole(role) == transcript.EntryVisibilityDetailOnly
+}
+
+func isVisibleInOngoing(entry TranscriptEntry) bool {
+	switch entryVisibility(entry) {
+	case transcript.EntryVisibilityDetailOnly:
+		return false
+	default:
+		return true
+	}
+}
+
+func entryVisibility(entry TranscriptEntry) transcript.EntryVisibility {
+	if explicit := transcript.NormalizeEntryVisibility(entry.Visibility); explicit != transcript.EntryVisibilityAuto {
+		return explicit
+	}
+	return defaultEntryVisibilityForRole(entry.Role)
+}
+
+func defaultEntryVisibilityForRole(role string) transcript.EntryVisibility {
 	normalized := transcript.NormalizeEntryRole(role)
 	switch normalized {
 	case "thinking", "thinking_trace", "reasoning", roleCompactionSummary, roleDeveloperContext, roleManualCompactionCarryover, "error", "warning":
-		return true
+		return transcript.EntryVisibilityDetailOnly
 	default:
-		return transcriptMessageStyleForRole(normalized) == transcriptMessageStyleWarning
+		if transcriptMessageStyleForRole(normalized) == transcriptMessageStyleWarning {
+			return transcript.EntryVisibilityDetailOnly
+		}
+		return transcript.EntryVisibilityAll
 	}
 }
 

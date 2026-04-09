@@ -22,11 +22,13 @@ const (
 	compactionModeHandoff compactionMode = "handoff"
 	compactionModeManual  compactionMode = "manual"
 
-	defaultContextWindowTokens        = 200_000
-	compactOverflowRetries            = 2
-	autoCompactNearLimitMargin        = 8_000
-	compactionSoonReminderPercent     = 85
-	manualCompactionCarryoverMaxChars = 4_000
+	defaultContextWindowTokens         = 200_000
+	compactOverflowRetries             = 2
+	autoCompactNearLimitMargin         = 8_000
+	compactionSoonReminderPercent      = 85
+	manualCompactionCarryoverMaxChars  = 4_000
+	preciseTokenCountSupportDiagnostic = "precise_token_count_support_failure"
+	preciseTokenCountFailureDiagnostic = "precise_token_count_failure"
 
 	additionalCompactionInstructionsHeader = "# Additional user instructions or commentary for this task:"
 	manualCompactionCarryoverHeader        = "# Last user message before compaction (work may have been done after it was sent):"
@@ -196,6 +198,9 @@ func (c *defaultContextCompactor) ShouldCompactBeforeUserMessage(ctx context.Con
 	}
 	reservedOutput := e.reservedOutputTokens()
 	preSubmitLimit := e.preSubmitCompactionTokenLimit(ctx)
+	if preSubmitLimit > 0 {
+		_, _ = e.currentInputTokensPreciselyIfCritical(ctx, preSubmitLimit)
+	}
 	estimatedCurrentTotal := e.currentTokenUsage() + reservedOutput
 	if preSubmitLimit > 0 && estimatedCurrentTotal >= preSubmitLimit {
 		if preciseInput, ok := e.currentInputTokensPrecisely(ctx); ok {
@@ -290,6 +295,9 @@ func (e *Engine) usageAtOrAboveLimit(ctx context.Context, limit int) bool {
 		return false
 	}
 	reservedOutput := e.reservedOutputTokens()
+	if preciseInput, ok := e.currentInputTokensPreciselyIfCritical(ctx, limit); ok {
+		return preciseInput+reservedOutput >= limit
+	}
 	estimatedInput := e.currentTokenUsage()
 	estimatedTotal := estimatedInput + reservedOutput
 	margin := autoCompactPrecisionMarginForLimit(limit)
@@ -354,28 +362,128 @@ func (e *Engine) currentInputTokensPrecisely(ctx context.Context) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
-	return e.requestInputTokensPrecisely(ctx, req)
+	return e.requestInputTokensPreciselyTracked(ctx, req, true)
+}
+
+func (e *Engine) currentInputTokensPreciselyIfDue(ctx context.Context, limit int) (int, bool) {
+	return e.currentInputTokensPreciselyIfDueWithPriority(ctx, limit, false)
+}
+
+func (e *Engine) currentInputTokensPreciselyIfCritical(ctx context.Context, limit int) (int, bool) {
+	return e.currentInputTokensPreciselyIfDueWithPriority(ctx, limit, true)
+}
+
+func (e *Engine) currentInputTokensPreciselyIfDueWithPriority(ctx context.Context, limit int, critical bool) (int, bool) {
+	if precise, ok := e.lookupCurrentPreciseInputTokens(); ok {
+		if !e.shouldRefreshCurrentPreciseInputTokens(limit, critical) {
+			return precise, true
+		}
+	}
+	if !e.shouldRefreshCurrentPreciseInputTokens(limit, critical) {
+		return 0, false
+	}
+	req, err := e.buildRequest(ctx, "", true)
+	if err != nil {
+		return 0, false
+	}
+	return e.requestInputTokensPreciselyTracked(ctx, req, true)
 }
 
 func (e *Engine) requestInputTokensPrecisely(ctx context.Context, req llm.Request) (int, bool) {
+	return e.requestInputTokensPreciselyTracked(ctx, req, false)
+}
+
+func (e *Engine) requestInputTokensPreciselyTracked(ctx context.Context, req llm.Request, current bool) (int, bool) {
 	counter, ok := e.llm.(llm.RequestInputTokenCountClient)
 	if !ok {
 		return 0, false
 	}
+	if !e.preciseInputTokenCountSupported(ctx) {
+		return 0, false
+	}
 	cacheKey := requestTokenCountCacheKey(req)
 	if cacheKey != "" {
-		if cached, ok := e.lookupCompactionTokenCountCache(cacheKey); ok {
+		if cached, ok := e.lookupPreciseTokenCount(cacheKey, current); ok {
+			if current {
+				e.storePreciseTokenCount(cacheKey, cached, true)
+			}
 			return cached, true
 		}
 	}
+	if e.hasPersistedDiagnostic(preciseTokenCountFailureDiagnostic) {
+		return 0, false
+	}
 	count, err := counter.CountRequestInputTokens(ctx, req)
-	if err != nil || count <= 0 {
+	if err != nil {
+		e.reportPreciseTokenCountFailure(err)
+		return 0, false
+	}
+	if count <= 0 {
 		return 0, false
 	}
 	if cacheKey != "" {
-		e.storeCompactionTokenCountCache(cacheKey, count)
+		e.storePreciseTokenCount(cacheKey, count, current)
 	}
 	return count, true
+}
+
+func (e *Engine) preciseInputTokenCountSupported(ctx context.Context) bool {
+	caps, err := e.providerCapabilities(ctx)
+	if err != nil {
+		e.reportPreciseTokenCountSupportFailure(err)
+		return false
+	}
+	if !caps.SupportsRequestInputTokenCount {
+		return false
+	}
+	support, ok := e.llm.(llm.RequestInputTokenCountSupportClient)
+	if !ok {
+		return true
+	}
+	supported, err := support.SupportsRequestInputTokenCount(ctx)
+	if err != nil {
+		e.reportPreciseTokenCountSupportFailure(err)
+		return false
+	}
+	return supported
+}
+
+func (e *Engine) reportPreciseTokenCountSupportFailure(err error) {
+	if err == nil {
+		return
+	}
+	message := strings.TrimSpace(err.Error())
+	if message == "" {
+		message = "unknown exact token counting support failure"
+	}
+	entryText := fmt.Sprintf("Exact token counting availability check failed: %s. Falling back to a local token estimate.", message)
+	if persistErr := e.appendPersistedDiagnosticEntry(
+		"",
+		preciseTokenCountSupportDiagnostic,
+		"error",
+		entryText,
+	); persistErr != nil {
+		e.AppendLocalEntry("error", fmt.Sprintf("%s Diagnostic persistence failed: %v", entryText, persistErr))
+	}
+}
+
+func (e *Engine) reportPreciseTokenCountFailure(err error) {
+	if err == nil {
+		return
+	}
+	message := strings.TrimSpace(err.Error())
+	if message == "" {
+		message = "unknown exact token counting failure"
+	}
+	entryText := fmt.Sprintf("Exact token counting failed: %s. Falling back to a local token estimate.", message)
+	if persistErr := e.appendPersistedDiagnosticEntry(
+		"",
+		preciseTokenCountFailureDiagnostic,
+		"error",
+		entryText,
+	); persistErr != nil {
+		e.AppendLocalEntry("error", fmt.Sprintf("%s Diagnostic persistence failed: %v", entryText, persistErr))
+	}
 }
 
 func requestTokenCountCacheKey(req llm.Request) string {
@@ -386,29 +494,64 @@ func requestTokenCountCacheKey(req llm.Request) string {
 	return string(payload)
 }
 
-func (e *Engine) lookupCompactionTokenCountCache(cacheKey string) (int, bool) {
-	if strings.TrimSpace(cacheKey) == "" {
+func (e *Engine) lookupPreciseTokenCount(cacheKey string, current bool) (int, bool) {
+	if strings.TrimSpace(cacheKey) == "" || e.tokenUsage == nil {
 		return 0, false
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.compactionTokenCountCacheKey != cacheKey {
-		return 0, false
+	if current {
+		if cached, ok := e.tokenUsage.lookupCurrent(cacheKey); ok {
+			return cached, true
+		}
 	}
-	if e.compactionTokenCountCacheValue <= 0 {
-		return 0, false
-	}
-	return e.compactionTokenCountCacheValue, true
+	return e.tokenUsage.lookup(cacheKey)
 }
 
-func (e *Engine) storeCompactionTokenCountCache(cacheKey string, count int) {
-	if strings.TrimSpace(cacheKey) == "" || count <= 0 {
+func (e *Engine) storePreciseTokenCount(cacheKey string, count int, current bool) {
+	if strings.TrimSpace(cacheKey) == "" || count <= 0 || e.tokenUsage == nil {
 		return
 	}
-	e.mu.Lock()
-	e.compactionTokenCountCacheKey = cacheKey
-	e.compactionTokenCountCacheValue = count
-	e.mu.Unlock()
+	e.tokenUsage.store(cacheKey, count, current)
+}
+
+func (e *Engine) lookupCurrentPreciseInputTokens() (int, bool) {
+	if e.tokenUsage == nil {
+		return 0, false
+	}
+	return e.tokenUsage.lookupCurrent("")
+}
+
+// markCurrentRequestShapeDirty invalidates the current-context exact token count
+// whenever the next provider request may differ from the previously counted one.
+func (e *Engine) markCurrentRequestShapeDirty() {
+	if e.tokenUsage == nil {
+		return
+	}
+	e.tokenUsage.invalidateCurrent(tokenUsageMutationPlain)
+}
+
+func (e *Engine) markCurrentRequestShapeDirtyForSignificantMutation() {
+	if e.tokenUsage == nil {
+		return
+	}
+	e.tokenUsage.invalidateCurrent(tokenUsageMutationSignificant)
+}
+
+func (e *Engine) resetCurrentPreciseInputTracking() {
+	if e.tokenUsage == nil {
+		return
+	}
+	e.tokenUsage.invalidateCurrent(tokenUsageMutationHardReset)
+}
+
+func (e *Engine) invalidateCurrentPreciseInputTokens() {
+	e.markCurrentRequestShapeDirty()
+}
+
+func (e *Engine) shouldRefreshCurrentPreciseInputTokens(limit int, critical bool) bool {
+	if limit <= 0 || e.tokenUsage == nil {
+		return false
+	}
+	return e.tokenUsage.currentCheckpointDue(e.estimatedCurrentTokenUsage(), limit, critical)
 }
 
 func (e *Engine) contextWindowTokens() int {
@@ -430,17 +573,31 @@ func (e *Engine) effectiveContextTokenLimit() int {
 	return (e.contextWindowTokens() * percent) / 100
 }
 
-func (e *Engine) currentTokenUsage() int {
-	usage := e.lastUsageSnapshot()
-	usageTotal := 0
-	if usage.InputTokens > 0 || usage.OutputTokens > 0 {
-		usageTotal = usage.InputTokens + usage.OutputTokens
+func (e *Engine) estimatedCurrentTokenUsage() int {
+	estimated := 0
+	if e.chat != nil {
+		estimated = e.chat.estimatedProviderTokens()
 	}
-	estimated := e.chat.estimatedProviderTokens()
-	if estimated > usageTotal {
+	if e.tokenUsage != nil {
+		if baseline, ok := e.tokenUsage.estimateCurrentInputTokens(estimated); ok {
+			return baseline
+		}
+	}
+	if estimated > 0 {
 		return estimated
 	}
-	return usageTotal
+	usage := e.lastUsageSnapshot()
+	if usage.InputTokens > 0 {
+		return usage.InputTokens
+	}
+	return 0
+}
+
+func (e *Engine) currentTokenUsage() int {
+	if precise, ok := e.lookupCurrentPreciseInputTokens(); ok {
+		return precise
+	}
+	return e.estimatedCurrentTokenUsage()
 }
 
 func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionMode, args string, includeManualCarryover bool) (compactionResult, error) {
@@ -478,7 +635,7 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 	}
 	var result compactionResult
 	if e.compactionMode() == "native" && caps.SupportsResponsesCompact {
-		result, err = e.compactRemote(ctx, input, providerID, instructions)
+		result, err = e.compactRemote(ctx, stepID, input, providerID, instructions)
 		if err != nil && errors.Is(err, errRemoteCompactionMissingCheckpoint) {
 			result, err = e.compactLocal(ctx, input, providerID, instructions)
 		}
@@ -524,11 +681,13 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 	if preciseInput, ok := e.currentInputTokensPrecisely(ctx); ok {
 		inputTokens = preciseInput
 	}
-	e.setLastUsage(llm.Usage{
+	if err := e.recordLastUsage(llm.Usage{
 		InputTokens:  inputTokens,
 		OutputTokens: 0,
 		WindowTokens: windowTokens,
-	})
+	}); err != nil {
+		return compactionResult{}, err
+	}
 
 	if err := e.emitCompactionStatus(stepID, EventCompactionCompleted, mode, result.engine, providerID, result.trimmedItemsCount, compactionNumber, ""); err != nil {
 		return compactionResult{}, err
@@ -536,7 +695,7 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 	return result, nil
 }
 
-func (e *Engine) compactRemote(ctx context.Context, input []llm.ResponseItem, providerID string, instructions string) (compactionResult, error) {
+func (e *Engine) compactRemote(ctx context.Context, stepID string, input []llm.ResponseItem, providerID string, instructions string) (compactionResult, error) {
 	compactor, ok := e.llm.(llm.CompactionClient)
 	if !ok {
 		return compactionResult{}, errors.New("llm client does not support remote compaction")
@@ -547,19 +706,18 @@ func (e *Engine) compactRemote(ctx context.Context, input []llm.ResponseItem, pr
 	}
 	contextLimit := e.effectiveContextTokenLimit()
 	canonicalContext := extractCanonicalContext(input)
-	trimmedInput, trimmedCount := e.trimCompactionInputToLimit(ctx, locked.Model, instructions, input, contextLimit)
+	requestItems := compactionConversationReplicaItems(input)
 	baseRequest := llm.CompactionRequest{
 		Model:        locked.Model,
 		Instructions: instructions,
 		SessionID:    e.store.Meta().SessionID,
-		InputItems:   trimmedInput,
+		InputItems:   requestItems,
 	}
 
-	resp, _, extraTrimmed, err := e.compactWithContextTrimRetry(ctx, compactor, baseRequest, contextLimit)
+	resp, _, extraTrimmed, err := e.compactWithContextTrimRetry(ctx, stepID, compactor, baseRequest, contextLimit)
 	if err != nil {
 		return compactionResult{}, err
 	}
-	trimmedCount += extraTrimmed
 
 	sanitized, err := sanitizeRemoteCompactionOutput(resp.OutputItems)
 	if err != nil {
@@ -572,13 +730,27 @@ func (e *Engine) compactRemote(ctx context.Context, input []llm.ResponseItem, pr
 		engine:            "remote",
 		items:             replacement,
 		usage:             resp.Usage,
-		trimmedItemsCount: trimmedCount + resp.TrimmedItemsCount,
+		trimmedItemsCount: extraTrimmed + resp.TrimmedItemsCount,
 		provider:          providerID,
 	}, nil
 }
 
+func compactionConversationReplicaItems(items []llm.ResponseItem) []llm.ResponseItem {
+	return llm.CloneResponseItems(items)
+}
+
+func compactionConversationWithPromptItems(items []llm.ResponseItem, instructions string) []llm.ResponseItem {
+	conversation := compactionConversationReplicaItems(items)
+	prompt := strings.TrimSpace(instructions)
+	if prompt == "" {
+		return conversation
+	}
+	return append(conversation, llm.ResponseItem{Type: llm.ResponseItemTypeMessage, Role: llm.RoleDeveloper, Content: prompt})
+}
+
 func (e *Engine) compactWithContextTrimRetry(
 	ctx context.Context,
+	stepID string,
 	client llm.CompactionClient,
 	request llm.CompactionRequest,
 	limit int,
@@ -590,7 +762,7 @@ func (e *Engine) compactWithContextTrimRetry(
 		req := request
 		req.InputItems = llm.CloneResponseItems(currentInput)
 
-		resp, err := e.compactWithRetry(ctx, client, req)
+		resp, err := e.compactWithRetry(ctx, stepID, client, req)
 		if err == nil {
 			return resp, currentInput, additionalTrimmed, nil
 		}
@@ -612,12 +784,23 @@ func (e *Engine) compactWithContextTrimRetry(
 	return llm.CompactionResponse{}, nil, additionalTrimmed, errors.New("compaction context trim retry exhausted")
 }
 
-func (e *Engine) compactWithRetry(ctx context.Context, client llm.CompactionClient, request llm.CompactionRequest) (llm.CompactionResponse, error) {
+func (e *Engine) compactWithRetry(ctx context.Context, stepID string, client llm.CompactionClient, request llm.CompactionRequest) (llm.CompactionResponse, error) {
+	prepared, err := e.prepareCompactionCacheObservation(ctx, request)
+	if err != nil {
+		return llm.CompactionResponse{}, err
+	}
+	if err := e.observePromptCacheRequest(stepID, prepared); err != nil {
+		return llm.CompactionResponse{}, err
+	}
+
 	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second}
 	var lastErr error
 	for i := 0; i <= len(delays); i++ {
 		resp, err := client.Compact(ctx, request)
 		if err == nil {
+			if err := e.observePromptCacheResponse(stepID, prepared, resp.Usage); err != nil {
+				return llm.CompactionResponse{}, err
+			}
 			return resp, nil
 		}
 		if llm.IsNonRetriableModelError(err) || llm.IsContextLengthOverflowError(err) {
@@ -634,6 +817,42 @@ func (e *Engine) compactWithRetry(ctx context.Context, client llm.CompactionClie
 		}
 	}
 	return llm.CompactionResponse{}, fmt.Errorf("compaction request failed after retries: %w", lastErr)
+}
+
+func (e *Engine) prepareCompactionCacheObservation(ctx context.Context, request llm.CompactionRequest) (preparedCacheRequestObservation, error) {
+	if e == nil || e.requestCache == nil || !e.supportsPromptCacheKey(ctx) {
+		return preparedCacheRequestObservation{}, nil
+	}
+	lineageRequest, ok, err := e.compactionCacheObservationRequest(request)
+	if err != nil || !ok {
+		return preparedCacheRequestObservation{}, err
+	}
+	return e.requestCache.Prepare(lineageRequest)
+}
+
+func (e *Engine) compactionCacheObservationRequest(request llm.CompactionRequest) (llm.Request, bool, error) {
+	if e == nil {
+		return llm.Request{}, false, nil
+	}
+	cacheKey := e.conversationPromptCacheKey()
+	if cacheKey == "" {
+		return llm.Request{}, false, nil
+	}
+	locked, err := e.ensureLocked()
+	if err != nil {
+		return llm.Request{}, false, err
+	}
+	items := compactionConversationWithPromptItems(request.InputItems, request.Instructions)
+	req, err := llm.RequestFromLockedContract(locked, e.systemPrompt(locked), sanitizeItemsForLLM(items), e.requestTools())
+	if err != nil {
+		return llm.Request{}, false, err
+	}
+	req.ReasoningEffort = e.ThinkingLevel()
+	req.FastMode = e.FastModeEnabled()
+	req.SessionID = e.conversationSessionID()
+	req.PromptCacheKey = cacheKey
+	req.PromptCacheScope = cachewarn.ScopeConversation
+	return req, true, nil
 }
 
 func isCompactionContextOverflow(err error) bool {

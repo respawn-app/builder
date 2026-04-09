@@ -30,8 +30,9 @@ Supported auth options:
 
 - OpenAI/Codex subscription OAuth via the startup sign-in picker.
 - OpenAI API-key auth via `OPENAI_API_KEY`. If you prefer API-key auth, export `OPENAI_API_KEY` before launch and builder will use it with your permission.
+- Continue without Builder auth. This is intended for custom or local OpenAI-compatible setups configured via `openai_base_url`.
 
-You can switch later with `/logout`.
+You can switch later with `/login` or `/logout`.
 
 ## Main Workflows
 
@@ -51,7 +52,7 @@ For the full command reference, see [Slash Commands](/slash-commands/).
 
 ## Configuration
 
-Builder reads settings from `~/.builder/config.toml` and will auto-create it through a UI flow on first start. The full reference is on the [Configuration](/config/) page.
+Builder reads settings from `~/.builder/config.toml` and will auto-create it through a UI flow on first start. The full reference is on the [Configuration](../config/) page.
 
 ## Skills And Custom Commands
 
@@ -83,5 +84,5 @@ Changes will take effect when you start a new sesssion.
 
 - Use `/supervisor` to toggle supervisor invocation for the current session. Initial value is config's `reviewer.frequency`, and default is on. Supervisor is a feature that will automatically review the edits made by the model. It increases costs by ~20% but improves results.
 
-By default supervisor uses the same model as the main one. That may be too much / too slow for you. [Configuration](/config/) page contains instructions on how to change supervisor model. 
+By default supervisor uses the same model as the main one. That may be too much / too slow for you. [Configuration](../config/) page contains instructions on how to change supervisor model.
 Running OSS models or smaller models like `gpt5.4-mini` seems to give good results while keeping costs low.

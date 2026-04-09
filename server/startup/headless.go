@@ -25,11 +25,11 @@ func (h headlessAuthHandler) WrapStore(base auth.Store) auth.Store {
 }
 
 func (h headlessAuthHandler) NeedsInteraction(req authflow.InteractionRequest) bool {
-	return !req.Gate.Ready
+	return req.AuthRequired && !req.Gate.Ready
 }
 
-func (h headlessAuthHandler) Interact(context.Context, authflow.InteractionRequest) error {
-	return auth.ErrAuthNotConfigured
+func (h headlessAuthHandler) Interact(context.Context, authflow.InteractionRequest) (authflow.InteractionOutcome, error) {
+	return authflow.InteractionOutcome{}, auth.ErrAuthNotConfigured
 }
 
 func (h headlessAuthHandler) LookupEnv(key string) string {

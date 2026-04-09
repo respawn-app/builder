@@ -1,6 +1,8 @@
 package runtimeview
 
 import (
+	"strings"
+
 	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/server/session"
@@ -9,6 +11,8 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/transcript"
 )
+
+const runtimeNoopFinalToken = "NO_OP"
 
 func MainViewFromRuntime(engine *runtime.Engine) clientui.RuntimeMainView {
 	if engine == nil {
@@ -92,6 +96,7 @@ func EventFromRuntime(evt runtime.Event) clientui.Event {
 	if evt.CacheWarning != nil {
 		view.CacheWarning = copyCacheWarningView(evt.CacheWarning)
 	}
+	view.CacheWarningVisibility = clientui.EntryVisibility(evt.CacheWarningVisibility)
 	if evt.RunState != nil {
 		view.RunState = &clientui.RunState{
 			Busy:       evt.RunState.Busy,
@@ -139,6 +144,7 @@ func chatEntriesFromRuntime(entries []runtime.ChatEntry) []clientui.ChatEntry {
 	out := make([]clientui.ChatEntry, 0, len(entries))
 	for _, entry := range entries {
 		out = append(out, clientui.ChatEntry{
+			Visibility:  clientui.EntryVisibility(entry.Visibility),
 			Role:        entry.Role,
 			Text:        entry.Text,
 			OngoingText: entry.OngoingText,
@@ -181,7 +187,11 @@ func RunViewFromSessionRecord(sessionID string, record *session.RunRecord) *clie
 func ChatSnapshotFromRuntime(snapshot runtime.ChatSnapshot) clientui.ChatSnapshot {
 	entries := make([]clientui.ChatEntry, 0, len(snapshot.Entries))
 	for _, entry := range snapshot.Entries {
+		if isSuppressedNoopAssistantEntry(entry) {
+			continue
+		}
 		entries = append(entries, clientui.ChatEntry{
+			Visibility:  clientui.EntryVisibility(entry.Visibility),
 			Role:        entry.Role,
 			Text:        entry.Text,
 			OngoingText: entry.OngoingText,
@@ -190,11 +200,19 @@ func ChatSnapshotFromRuntime(snapshot runtime.ChatSnapshot) clientui.ChatSnapsho
 			ToolCall:    cloneToolCallMeta(entry.ToolCall),
 		})
 	}
+	ongoing := snapshot.Ongoing
+	if strings.TrimSpace(ongoing) == runtimeNoopFinalToken {
+		ongoing = ""
+	}
 	return clientui.ChatSnapshot{
 		Entries:      entries,
-		Ongoing:      snapshot.Ongoing,
+		Ongoing:      ongoing,
 		OngoingError: snapshot.OngoingError,
 	}
+}
+
+func isSuppressedNoopAssistantEntry(entry runtime.ChatEntry) bool {
+	return strings.TrimSpace(entry.Role) == "assistant" && entry.Phase == llm.MessagePhaseFinal && strings.TrimSpace(entry.Text) == runtimeNoopFinalToken
 }
 
 func cloneToolCallMeta(meta *transcript.ToolCallMeta) *clientui.ToolCallMeta {

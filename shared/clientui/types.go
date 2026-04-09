@@ -26,24 +26,26 @@ const (
 	EventCompactionCompleted EventKind = "context_compaction_completed"
 	EventCompactionFailed    EventKind = "context_compaction_failed"
 	EventCacheWarning        EventKind = "cache_warning"
+	EventLocalEntryAdded     EventKind = "local_entry_added"
 	EventRunStateChanged     EventKind = "run_state_changed"
 	EventBackgroundUpdated   EventKind = "background_updated"
 )
 
 type Event struct {
-	Kind                EventKind
-	StepID              string
-	TranscriptRevision  int64
-	CommittedEntryCount int
-	Error               string
-	AssistantDelta      string
-	ReasoningDelta      *ReasoningDelta
-	UserMessage         string
-	UserMessageBatch    []string
-	TranscriptEntries   []ChatEntry
-	CacheWarning        *cachewarn.Warning
-	RunState            *RunState
-	Background          *BackgroundShellEvent
+	Kind                   EventKind
+	StepID                 string
+	TranscriptRevision     int64
+	CommittedEntryCount    int
+	Error                  string
+	AssistantDelta         string
+	ReasoningDelta         *ReasoningDelta
+	UserMessage            string
+	UserMessageBatch       []string
+	TranscriptEntries      []ChatEntry
+	CacheWarning           *cachewarn.Warning
+	CacheWarningVisibility EntryVisibility
+	RunState               *RunState
+	Background             *BackgroundShellEvent
 }
 
 type ReasoningDelta struct {
@@ -77,6 +79,7 @@ type BackgroundShellEvent struct {
 }
 
 type ChatEntry struct {
+	Visibility  EntryVisibility
 	Role        string
 	Text        string
 	OngoingText string

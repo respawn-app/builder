@@ -73,9 +73,13 @@ func onboardingProviderCapabilities(authState auth.State, settings config.Settin
 		switch authState.Method.Type {
 		case auth.MethodOAuth:
 			providerID = "chatgpt-codex"
-		case auth.MethodAPIKey:
+		case auth.MethodAPIKey, auth.MethodNone:
 			if strings.TrimSpace(settings.OpenAIBaseURL) != "" {
-				providerID = "openai-compatible"
+				if llm.IsOpenAIFirstPartyBaseURL(settings.OpenAIBaseURL) {
+					providerID = "openai"
+				} else {
+					providerID = "openai-compatible"
+				}
 			} else {
 				providerID = "openai"
 			}

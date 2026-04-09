@@ -3,6 +3,8 @@ package llm
 import (
 	"errors"
 	"testing"
+
+	"builder/server/session"
 )
 
 func TestInferProviderCapabilities_UsesRegistryContracts(t *testing.T) {
@@ -43,6 +45,9 @@ func TestResolveOpenAITransportProviderVariant_DefaultLoopbackAndRemoteCompatibl
 	if got, err := resolveOpenAITransportProviderVariant("https://api.openai.com/v1/", openAIAuthMode{}); err != nil || got != "openai" {
 		t.Fatalf("expected normalized default base url to resolve openai variant, got variant=%q err=%v", got, err)
 	}
+	if got, err := resolveOpenAITransportProviderVariant("https://api.openai.com", openAIAuthMode{}); err != nil || got != "openai" {
+		t.Fatalf("expected bare api.openai.com base url to resolve openai variant, got variant=%q err=%v", got, err)
+	}
 	if got, err := resolveOpenAITransportProviderVariant("http://127.0.0.1:8080/v1", openAIAuthMode{}); err != nil || got != "openai" {
 		t.Fatalf("expected loopback base url to resolve openai variant, got variant=%q err=%v", got, err)
 	}
@@ -51,6 +56,18 @@ func TestResolveOpenAITransportProviderVariant_DefaultLoopbackAndRemoteCompatibl
 	}
 	if got, err := resolveOpenAITransportProviderVariant("https://ignored.example/v1", openAIAuthMode{IsOAuth: true}); err != nil || got != "chatgpt-codex" {
 		t.Fatalf("expected oauth mode to resolve chatgpt-codex variant, got variant=%q err=%v", got, err)
+	}
+}
+
+func TestIsOpenAIFirstPartyBaseURL(t *testing.T) {
+	if !IsOpenAIFirstPartyBaseURL("https://api.openai.com") {
+		t.Fatal("expected bare api.openai.com to be treated as first-party OpenAI")
+	}
+	if !IsOpenAIFirstPartyBaseURL("https://api.openai.com/v1") {
+		t.Fatal("expected default OpenAI /v1 endpoint to be treated as first-party OpenAI")
+	}
+	if IsOpenAIFirstPartyBaseURL("https://example.test/v1") {
+		t.Fatal("did not expect non-OpenAI endpoint to be treated as first-party OpenAI")
 	}
 }
 
@@ -68,6 +85,9 @@ func TestKnownNonFirstPartyProviderContractsRemainLocalCompactionOnly(t *testing
 		}
 		if caps.SupportsPromptCacheKey {
 			t.Fatalf("expected prompt cache key unsupported for %s, got %+v", providerID, caps)
+		}
+		if caps.SupportsRequestInputTokenCount {
+			t.Fatalf("expected exact input-token counting unsupported for %s, got %+v", providerID, caps)
 		}
 		if caps.SupportsNativeWebSearch {
 			t.Fatalf("expected native web search unsupported for %s, got %+v", providerID, caps)
@@ -93,5 +113,74 @@ func TestSupportsPromptCacheKeyProvider(t *testing.T) {
 	}
 	if SupportsPromptCacheKeyProvider(ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true, SupportsPromptCacheKey: false}) {
 		t.Fatal("did not expect prompt cache support without explicit capability")
+	}
+}
+
+func TestProviderCapabilitiesFromLockedPreservesExplicitRequestInputTokenCountDisable(t *testing.T) {
+	locked := &session.LockedContract{
+		ProviderContract: session.LockedProviderCapabilities{
+			ProviderID:                        "openai-compatible",
+			SupportsResponsesAPI:              true,
+			SupportsRequestInputTokenCount:    false,
+			HasSupportsRequestInputTokenCount: true,
+		},
+	}
+	caps, ok := ProviderCapabilitiesFromLocked(locked)
+	if !ok {
+		t.Fatal("expected locked provider capabilities")
+	}
+	if caps.SupportsRequestInputTokenCount {
+		t.Fatalf("expected explicit locked false to be preserved, got %+v", caps)
+	}
+}
+
+func TestProviderCapabilitiesFromLockedBackfillsLegacyRequestInputTokenCountCapability(t *testing.T) {
+	locked := &session.LockedContract{
+		ProviderContract: session.LockedProviderCapabilities{
+			ProviderID:                     "openai-compatible",
+			SupportsResponsesAPI:           true,
+			SupportsRequestInputTokenCount: false,
+		},
+	}
+	caps, ok := ProviderCapabilitiesFromLocked(locked)
+	if !ok {
+		t.Fatal("expected locked provider capabilities")
+	}
+	if caps.SupportsRequestInputTokenCount {
+		t.Fatalf("expected legacy locked session to inherit conservative openai-compatible default, got %+v", caps)
+	}
+}
+
+func TestProviderCapabilitiesFromLockedPreservesExplicitPromptCacheKeyDisable(t *testing.T) {
+	locked := &session.LockedContract{
+		ProviderContract: session.LockedProviderCapabilities{
+			ProviderID:                "openai",
+			SupportsResponsesAPI:      true,
+			SupportsPromptCacheKey:    false,
+			HasSupportsPromptCacheKey: true,
+		},
+	}
+	caps, ok := ProviderCapabilitiesFromLocked(locked)
+	if !ok {
+		t.Fatal("expected locked provider capabilities")
+	}
+	if caps.SupportsPromptCacheKey {
+		t.Fatalf("expected explicit locked prompt-cache false to be preserved, got %+v", caps)
+	}
+}
+
+func TestProviderCapabilitiesFromLockedBackfillsLegacyPromptCacheKeyCapability(t *testing.T) {
+	locked := &session.LockedContract{
+		ProviderContract: session.LockedProviderCapabilities{
+			ProviderID:           "openai",
+			SupportsResponsesAPI: true,
+		},
+	}
+	caps, ok := ProviderCapabilitiesFromLocked(locked)
+	if !ok {
+		t.Fatal("expected locked provider capabilities")
+	}
+	if !caps.SupportsPromptCacheKey {
+		t.Fatalf("expected legacy locked session to inherit prompt-cache support, got %+v", caps)
 	}
 }

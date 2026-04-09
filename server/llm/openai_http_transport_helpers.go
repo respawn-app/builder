@@ -32,9 +32,11 @@ func (t *HTTPTransport) serviceBaseURL(mode openAIAuthMode) string {
 
 func (t *HTTPTransport) buildRequestOptions(authHeader string, mode openAIAuthMode, sessionID string) []option.RequestOption {
 	opts := []option.RequestOption{
-		option.WithHeader("Authorization", authHeader),
 		option.WithHeader("originator", defaultOriginator),
 		option.WithHeader("User-Agent", defaultUserAgent),
+	}
+	if strings.TrimSpace(authHeader) != "" {
+		opts = append([]option.RequestOption{option.WithHeader("Authorization", authHeader)}, opts...)
 	}
 	if strings.TrimSpace(sessionID) != "" {
 		opts = append(opts, option.WithHeader("session_id", sessionID))

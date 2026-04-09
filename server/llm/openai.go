@@ -53,6 +53,10 @@ type OpenAIInputTokenCountTransport interface {
 	CountRequestInputTokens(ctx context.Context, request OpenAIRequest) (int, error)
 }
 
+type OpenAIInputTokenCountSupportTransport interface {
+	SupportsRequestInputTokenCount(ctx context.Context) (bool, error)
+}
+
 type OpenAIModelContextWindowTransport interface {
 	ResolveModelContextWindow(ctx context.Context, model string) (int, error)
 }
@@ -272,6 +276,18 @@ func (c *OpenAIClient) CountRequestInputTokens(ctx context.Context, request Requ
 		return 0, nil
 	}
 	return count, nil
+}
+
+func (c *OpenAIClient) SupportsRequestInputTokenCount(ctx context.Context) (bool, error) {
+	if c == nil || c.transport == nil {
+		return false, ErrMissingTransport
+	}
+	support, ok := c.transport.(OpenAIInputTokenCountSupportTransport)
+	if !ok {
+		_, counterSupported := c.transport.(OpenAIInputTokenCountTransport)
+		return counterSupported, nil
+	}
+	return support.SupportsRequestInputTokenCount(ctx)
 }
 
 func (c *OpenAIClient) ResolveModelContextWindow(ctx context.Context, model string) (int, error) {

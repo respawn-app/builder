@@ -42,17 +42,24 @@ func (e *Engine) replaceHistory(stepID, engine string, mode compactionMode, item
 	}
 	reminderIssued := false
 	if payload.Engine == "reviewer_rollback" {
+		e.resetCurrentPreciseInputTracking()
+		e.resetLocalDiagnostics()
 		e.chat.restoreHistoryItems(payload.Items)
 		e.syncCompactionSoonReminderIssuedFromItems(payload.Items)
 		e.clearActivePromptCacheLineages()
 		reminderIssued = e.handoffToolEnabled()
 	} else {
+		e.resetCurrentPreciseInputTracking()
+		e.resetLocalDiagnostics()
 		e.chat.replaceHistory(payload.Items)
 		e.setCompactionSoonReminderIssued(false)
 	}
 	_, err := e.store.AppendEvent(stepID, "history_replaced", payload)
 	if err == nil {
 		if persistErr := e.store.SetCompactionSoonReminderIssued(reminderIssued); persistErr != nil {
+			return persistErr
+		}
+		if persistErr := e.store.SetUsageState(nil); persistErr != nil {
 			return persistErr
 		}
 		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
@@ -239,27 +246,18 @@ func trimCompactionInputEstimated(items []llm.ResponseItem, limit int) ([]llm.Re
 }
 
 func countCompactionEligibleItems(items []llm.ResponseItem) int {
-	total := 0
-	for _, item := range items {
-		if isCompactionTrimEligible(item) {
-			total++
-		}
-	}
-	return total
+	return len(compactionTrimUnits(items))
 }
 
 func compactionTrimStep(items []llm.ResponseItem, overflowTokens int) int {
 	if overflowTokens <= 0 {
 		return 1
 	}
-	eligibleCount := 0
+	units := compactionTrimUnits(items)
+	eligibleCount := len(units)
 	eligibleEstimatedTokens := 0
-	for _, item := range items {
-		if !isCompactionTrimEligible(item) {
-			continue
-		}
-		eligibleCount++
-		eligibleEstimatedTokens += estimateItemsTokens([]llm.ResponseItem{item})
+	for _, unit := range units {
+		eligibleEstimatedTokens += estimateItemsTokens(unit.items(items))
 	}
 	if eligibleCount <= 0 {
 		return 1
@@ -295,27 +293,96 @@ func buildTokenCountRequestForItems(model string, instructions string, items []l
 	return req, true
 }
 
+type compactionTrimUnit struct {
+	indexes []int
+}
+
+func (u compactionTrimUnit) items(source []llm.ResponseItem) []llm.ResponseItem {
+	if len(u.indexes) == 0 || len(source) == 0 {
+		return nil
+	}
+	items := make([]llm.ResponseItem, 0, len(u.indexes))
+	for _, idx := range u.indexes {
+		if idx < 0 || idx >= len(source) {
+			continue
+		}
+		items = append(items, source[idx])
+	}
+	return items
+}
+
+func compactionTrimUnits(items []llm.ResponseItem) []compactionTrimUnit {
+	if len(items) == 0 {
+		return nil
+	}
+	units := make([]compactionTrimUnit, 0, len(items))
+	callUnits := make(map[string]int, len(items))
+	for idx, item := range items {
+		switch item.Type {
+		case llm.ResponseItemTypeFunctionCall:
+			if !isCompactionTrimEligible(item) {
+				continue
+			}
+			units = append(units, compactionTrimUnit{indexes: []int{idx}})
+			if callID := compactionTrimCallID(item); callID != "" {
+				callUnits[callID] = len(units) - 1
+			}
+		case llm.ResponseItemTypeFunctionCallOutput:
+			callID := compactionTrimCallID(item)
+			if unitIdx, ok := callUnits[callID]; ok {
+				units[unitIdx].indexes = append(units[unitIdx].indexes, idx)
+				continue
+			}
+			if !isCompactionTrimEligible(item) {
+				continue
+			}
+			units = append(units, compactionTrimUnit{indexes: []int{idx}})
+		default:
+			if !isCompactionTrimEligible(item) {
+				continue
+			}
+			units = append(units, compactionTrimUnit{indexes: []int{idx}})
+		}
+	}
+	return units
+}
+
+func compactionTrimCallID(item llm.ResponseItem) string {
+	callID := strings.TrimSpace(item.CallID)
+	if callID != "" {
+		return callID
+	}
+	return strings.TrimSpace(item.ID)
+}
+
 func trimOldestEligibleItems(items []llm.ResponseItem, count int) ([]llm.ResponseItem, int) {
 	out := llm.CloneResponseItems(items)
 	if count <= 0 {
 		return out, 0
 	}
-	trimmed := 0
-	for trimmed < count {
-		trimmedIdx := -1
-		for i, item := range out {
-			if isCompactionTrimEligible(item) {
-				trimmedIdx = i
-				break
-			}
-		}
-		if trimmedIdx < 0 {
-			break
-		}
-		out = append(out[:trimmedIdx], out[trimmedIdx+1:]...)
-		trimmed++
+	units := compactionTrimUnits(out)
+	if len(units) == 0 {
+		return out, 0
 	}
-	return out, trimmed
+	if count > len(units) {
+		count = len(units)
+	}
+	trimmedIndexes := make(map[int]struct{}, count)
+	for _, unit := range units[:count] {
+		for _, idx := range unit.indexes {
+			trimmedIndexes[idx] = struct{}{}
+		}
+	}
+	trimmed := 0
+	filtered := make([]llm.ResponseItem, 0, len(out)-len(trimmedIndexes))
+	for idx, item := range out {
+		if _, ok := trimmedIndexes[idx]; ok {
+			trimmed++
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered, trimmed
 }
 
 func isCompactionTrimEligible(item llm.ResponseItem) bool {
@@ -466,6 +533,9 @@ func (e *Engine) selectLocalCarryoverMessages(
 	}
 	fallback := selectLocalCarryoverMessagesEstimated(userMessages, carryoverLimit)
 	if _, ok := e.llm.(llm.RequestInputTokenCountClient); !ok {
+		return fallback
+	}
+	if !e.preciseInputTokenCountSupported(ctx) {
 		return fallback
 	}
 

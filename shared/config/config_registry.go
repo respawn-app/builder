@@ -176,6 +176,15 @@ func newSettingsRegistry() settingsRegistry {
 			func(state settingsState) bool { return state.Settings.ProviderCapabilities.SupportsResponsesCompact },
 			"BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_RESPONSES_COMPACT",
 			settingDocOptions{commented: true}),
+		newBoolSetting("provider_capabilities.supports_request_input_token_count", false,
+			func(state *settingsState, value bool) {
+				state.Settings.ProviderCapabilities.SupportsRequestInputTokenCount = value
+			},
+			func(state settingsState) bool {
+				return state.Settings.ProviderCapabilities.SupportsRequestInputTokenCount
+			},
+			"BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_REQUEST_INPUT_TOKEN_COUNT",
+			settingDocOptions{commented: true}),
 		newBoolSetting("provider_capabilities.supports_prompt_cache_key", false,
 			func(state *settingsState, value bool) {
 				state.Settings.ProviderCapabilities.SupportsPromptCacheKey = value

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"builder/shared/transcript"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -192,6 +193,7 @@ func (m *Model) reduceAppendTranscriptMsg(msg AppendTranscriptMsg, result *model
 		role = "unknown"
 	}
 	m.transcript = append(m.transcript, TranscriptEntry{
+		Visibility:  transcript.NormalizeEntryVisibility(msg.Visibility),
 		Role:        role,
 		Text:        msg.Text,
 		OngoingText: msg.OngoingText,
@@ -215,6 +217,7 @@ func (m *Model) reduceSetConversationMsg(msg SetConversationMsg, result *modelUp
 	entries := make([]TranscriptEntry, len(msg.Entries))
 	copy(entries, msg.Entries)
 	for i := range entries {
+		entries[i].Visibility = transcript.NormalizeEntryVisibility(entries[i].Visibility)
 		entries[i].ToolCallID = strings.TrimSpace(entries[i].ToolCallID)
 		entries[i].ToolCall = cloneToolCallMeta(entries[i].ToolCall)
 	}

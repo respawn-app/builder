@@ -23,7 +23,7 @@ type authInteraction = authflow.InteractionRequest
 type authInteractor interface {
 	WrapStore(base auth.Store) auth.Store
 	NeedsInteraction(req authInteraction) bool
-	Interact(ctx context.Context, req authInteraction) error
+	Interact(ctx context.Context, req authInteraction) (authflow.InteractionOutcome, error)
 	LookupEnv(key string) string
 	Interactive() bool
 }
@@ -86,15 +86,12 @@ func (s authReadyState) Config() config.App                    { return s.cfg }
 func (s authReadyState) OAuthOptions() auth.OpenAIOAuthOptions { return s.oauthOpts }
 func (s authReadyState) AuthManager() *auth.Manager            { return s.mgr }
 
-func ensureAuthReady(ctx context.Context, mgr *auth.Manager, oauthOpts auth.OpenAIOAuthOptions, theme string, alternateScreen config.TUIAlternateScreenPolicy, interactor authInteractor) error {
+func ensureAuthReady(ctx context.Context, mgr *auth.Manager, oauthOpts auth.OpenAIOAuthOptions, settings config.Settings, interactor authInteractor) error {
 	if interactor == nil {
 		return errors.New("auth interactor is required")
 	}
 	return serverstartup.EnsureReady(ctx, authReadyState{
-		cfg: config.App{Settings: config.Settings{
-			Theme:              theme,
-			TUIAlternateScreen: alternateScreen,
-		}},
+		cfg:       config.App{Settings: settings},
 		oauthOpts: oauthOpts,
 		mgr:       mgr,
 	}, interactor)
@@ -119,46 +116,57 @@ func (i *headlessAuthInteractor) LookupEnv(key string) string {
 func (i *headlessAuthInteractor) Interactive() bool { return false }
 
 func (i *headlessAuthInteractor) NeedsInteraction(req authInteraction) bool {
-	return !req.Gate.Ready
+	return req.AuthRequired && !req.Gate.Ready
 }
 
 func (i *interactiveAuthInteractor) NeedsInteraction(req authInteraction) bool {
+	if !req.AuthRequired && !req.PromptOptional {
+		return interactiveNeedsEnvConflictResolution(req)
+	}
 	return interactiveNeedsAuthMethodSelection(req) || interactiveNeedsEnvConflictResolution(req)
 }
 
-func (i *headlessAuthInteractor) Interact(ctx context.Context, req authInteraction) error {
+func (i *headlessAuthInteractor) Interact(ctx context.Context, req authInteraction) (authflow.InteractionOutcome, error) {
 	if req.StartupErr != nil {
-		return req.StartupErr
+		return authflow.InteractionOutcome{}, req.StartupErr
 	}
-	return auth.EnsureStartupReady(auth.EmptyState())
+	return authflow.InteractionOutcome{}, auth.EnsureStartupReady(auth.EmptyState())
 }
 
-func (i *interactiveAuthInteractor) Interact(ctx context.Context, req authInteraction) error {
+func (i *interactiveAuthInteractor) Interact(ctx context.Context, req authInteraction) (authflow.InteractionOutcome, error) {
 	if interactiveNeedsEnvConflictResolution(req) {
-		return i.resolveEnvAPIKeyConflict(ctx, req)
+		return authflow.InteractionOutcome{}, i.resolveEnvAPIKeyConflict(ctx, req)
 	}
 
 	for {
 		choice, err := i.chooseMethod(req)
 		if err != nil {
-			return err
+			return authflow.InteractionOutcome{}, err
 		}
 		req.FlowErr = nil
 
 		var method auth.Method
 		switch choice {
+		case authMethodChoiceSkip:
+			if req.AuthRequired {
+				return authflow.InteractionOutcome{}, errors.New("builder auth is required for this configuration")
+			}
+			if err := persistSkipAuthSelection(ctx, req); err != nil {
+				return authflow.InteractionOutcome{}, err
+			}
+			return authflow.InteractionOutcome{ProceedWithoutAuth: true}, nil
 		case authMethodChoiceEnvAPIKey:
 			if !req.HasEnvAPIKey {
-				return errors.New("OPENAI_API_KEY is not available")
+				return authflow.InteractionOutcome{}, errors.New("OPENAI_API_KEY is not available")
 			}
 			_, err = req.Manager.SetEnvAPIKeyPreference(ctx, auth.EnvAPIKeyPreferencePreferEnv, true)
 			if err != nil {
-				return fmt.Errorf("save env api key preference: %w", err)
+				return authflow.InteractionOutcome{}, fmt.Errorf("save env api key preference: %w", err)
 			}
 			if err := i.showAuthSuccess(ctx, req); err != nil {
-				return err
+				return authflow.InteractionOutcome{}, err
 			}
-			return nil
+			return authflow.InteractionOutcome{}, nil
 		case authMethodChoiceBrowserAuto:
 			method, err = i.runOAuthBrowserAuto(ctx, req.OAuthOptions, req.Theme)
 		case authMethodChoiceBrowserPaste:
@@ -172,7 +180,7 @@ func (i *interactiveAuthInteractor) Interact(ctx context.Context, req authIntera
 				})
 			})
 		default:
-			return fmt.Errorf("unknown auth method %q", choice)
+			return authflow.InteractionOutcome{}, fmt.Errorf("unknown auth method %q", choice)
 		}
 		if err != nil {
 			req.FlowErr = err
@@ -185,13 +193,41 @@ func (i *interactiveAuthInteractor) Interact(ctx context.Context, req authIntera
 			setPreference = true
 		}
 		if _, err := req.Manager.SwitchMethodAndSetEnvAPIKeyPreference(ctx, method, preference, setPreference, true); err != nil {
-			return fmt.Errorf("save auth method: %w", err)
+			return authflow.InteractionOutcome{}, fmt.Errorf("save auth method: %w", err)
 		}
 		if err := i.showAuthSuccess(ctx, req); err != nil {
-			return err
+			return authflow.InteractionOutcome{}, err
+		}
+		return authflow.InteractionOutcome{}, nil
+	}
+}
+
+func persistSkipAuthSelection(ctx context.Context, req authInteraction) error {
+	if req.HasEnvAPIKey {
+		if _, err := req.Manager.SwitchMethodAndSetEnvAPIKeyPreference(
+			ctx,
+			auth.Method{Type: auth.MethodNone},
+			auth.EnvAPIKeyPreferencePreferSaved,
+			true,
+			true,
+		); err != nil {
+			return fmt.Errorf("save skip-auth preference: %w", err)
 		}
 		return nil
 	}
+	if shouldClearAuthOnSkip(req) {
+		if _, err := req.Manager.ClearMethod(ctx, true); err != nil {
+			return fmt.Errorf("clear auth method: %w", err)
+		}
+	}
+	return nil
+}
+
+func shouldClearAuthOnSkip(req authInteraction) bool {
+	if req.StoredState.IsConfigured() {
+		return true
+	}
+	return req.StoredState.EnvAPIKeyPreference != auth.EnvAPIKeyPreferenceUnspecified
 }
 
 func interactiveNeedsAuthMethodSelection(req authInteraction) bool {

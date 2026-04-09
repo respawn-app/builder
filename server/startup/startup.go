@@ -7,6 +7,7 @@ import (
 
 	"builder/server/auth"
 	"builder/server/authflow"
+	"builder/server/authpolicy"
 	serverbootstrap "builder/server/bootstrap"
 	"builder/server/core"
 	"builder/server/embedded"
@@ -31,7 +32,7 @@ type Request struct {
 type AuthHandler interface {
 	WrapStore(base auth.Store) auth.Store
 	NeedsInteraction(req authflow.InteractionRequest) bool
-	Interact(ctx context.Context, req authflow.InteractionRequest) error
+	Interact(ctx context.Context, req authflow.InteractionRequest) (authflow.InteractionOutcome, error)
 	LookupEnv(key string) string
 }
 
@@ -74,7 +75,7 @@ func StartCore(ctx context.Context, req Request, authHandler AuthHandler, onboar
 	if err != nil {
 		return nil, err
 	}
-	if err := authflow.EnsureReady(ctx, authSupport.AuthManager, authSupport.OAuthOptions, cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen, bootstrapReq.LookupEnv, authHandler); err != nil {
+	if err := authflow.EnsureReady(ctx, authSupport.AuthManager, authSupport.OAuthOptions, cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen, bootstrapReq.LookupEnv, authpolicy.RequiresStartupAuth(cfg.Settings), false, authHandler); err != nil {
 		return nil, err
 	}
 	if onboardingHandler != nil {
@@ -123,6 +124,8 @@ func EnsureReady(ctx context.Context, state AuthState, authHandler AuthHandler) 
 		cfg.Settings.Theme,
 		cfg.Settings.TUIAlternateScreen,
 		lookupEnv(authHandler),
+		authpolicy.RequiresStartupAuth(cfg.Settings),
+		true,
 		authHandler,
 	)
 }

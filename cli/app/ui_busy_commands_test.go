@@ -15,6 +15,7 @@ func TestDefaultRegistryBusyContract(t *testing.T) {
 	r := commands.NewDefaultRegistry()
 	want := map[string]bool{
 		"exit":           false,
+		"login":          false,
 		"new":            false,
 		"resume":         false,
 		"logout":         false,

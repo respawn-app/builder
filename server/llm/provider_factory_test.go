@@ -7,12 +7,20 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"builder/server/auth"
 )
 
 type providerTestAuth struct{}
 
 func (providerTestAuth) AuthorizationHeader(context.Context) (string, error) {
 	return "Bearer test", nil
+}
+
+type providerTestMissingAuth struct{}
+
+func (providerTestMissingAuth) AuthorizationHeader(context.Context) (string, error) {
+	return "", auth.ErrAuthNotConfigured
 }
 
 func TestInferProviderFromModel(t *testing.T) {
@@ -127,8 +135,12 @@ func TestNewProviderClient_CustomModelInferenceErrorMentionsProviderOverride(t *
 	if !errors.Is(err, ErrUnsupportedProvider) {
 		t.Fatalf("expected unsupported provider error, got %v", err)
 	}
-	if err == nil || !strings.Contains(err.Error(), "provider_override") {
-		t.Fatalf("expected inference failure to mention provider_override, got %v", err)
+	var providerSelectionErr *ProviderSelectionError
+	if !errors.As(err, &providerSelectionErr) {
+		t.Fatalf("expected provider selection error, got %T", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "provider_override") || !strings.Contains(err.Error(), "openai_base_url") {
+		t.Fatalf("expected inference failure to mention provider_override and openai_base_url, got %v", err)
 	}
 }
 
@@ -171,6 +183,55 @@ func TestNewProviderClient_RemoteOpenAICompatibleBaseURLAllowsCustomModelFamily(
 	}
 	if providerCaps.SupportsResponsesCompact || providerCaps.SupportsNativeWebSearch || providerCaps.IsOpenAIFirstParty {
 		t.Fatalf("expected conservative remote provider capabilities, got %+v", providerCaps)
+	}
+	if providerCaps.SupportsRequestInputTokenCount {
+		t.Fatalf("expected generic openai-compatible provider to disable exact input-token counting, got %+v", providerCaps)
+	}
+}
+
+func TestNewProviderClient_RemoteOpenAICompatibleBaseURLAllowsAnonymousCapabilitiesResolution(t *testing.T) {
+	client, err := NewProviderClient(ProviderClientOptions{
+		Model:         "vendor-custom-model",
+		Auth:          providerTestMissingAuth{},
+		OpenAIBaseURL: "https://example.openrouter.ai/api/v1",
+	})
+	if err != nil {
+		t.Fatalf("new provider client: %v", err)
+	}
+
+	openAIClient, ok := client.(*OpenAIClient)
+	if !ok {
+		t.Fatalf("expected *OpenAIClient, got %T", client)
+	}
+
+	providerCaps, err := openAIClient.ProviderCapabilities(context.Background())
+	if err != nil {
+		t.Fatalf("provider capabilities: %v", err)
+	}
+	if providerCaps.ProviderID != "openai-compatible" {
+		t.Fatalf("expected remote base url to resolve openai-compatible provider id, got %+v", providerCaps)
+	}
+}
+
+func TestNewProviderClient_DefaultOpenAIBaseURLDoesNotStayExplicit(t *testing.T) {
+	client, err := NewProviderClient(ProviderClientOptions{
+		Model:         "gpt-5",
+		Auth:          providerTestMissingAuth{},
+		OpenAIBaseURL: "https://api.openai.com",
+	})
+	if err != nil {
+		t.Fatalf("new provider client: %v", err)
+	}
+	openAIClient, ok := client.(*OpenAIClient)
+	if !ok {
+		t.Fatalf("expected *OpenAIClient, got %T", client)
+	}
+	transport, ok := openAIClient.transport.(*HTTPTransport)
+	if !ok {
+		t.Fatalf("expected *HTTPTransport, got %T", openAIClient.transport)
+	}
+	if transport.BaseURLExplicit {
+		t.Fatal("expected canonical default OpenAI URL to avoid explicit anonymous-mode transport")
 	}
 }
 
