@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,6 +22,7 @@ type uiPathReferenceSearch interface {
 	Events() <-chan uiPathReferenceSearchEvent
 	StartPrewarm(workspaceRoot string)
 	Search(req uiPathReferenceSearchRequest)
+	Stop()
 }
 
 type uiPathReferenceCommandRunner interface {
@@ -91,6 +93,9 @@ type uiPathReferenceSearchService struct {
 	matcher      uiPathReferenceMatcher
 	buildTimeout time.Duration
 	loadingDelay time.Duration
+	stop         chan struct{}
+	stopped      chan struct{}
+	stopOnce     sync.Once
 }
 
 type uiPathReferenceBuildDone struct {
@@ -133,6 +138,8 @@ func newUIPathReferenceSearch() uiPathReferenceSearch {
 		matcher:      fuzzyUIPathReferenceMatcher{},
 		buildTimeout: uiPathReferenceBuildTimeout,
 		loadingDelay: uiPathReferenceLoadingDelay,
+		stop:         make(chan struct{}),
+		stopped:      make(chan struct{}),
 	}
 	go service.run()
 	return service
@@ -149,6 +156,11 @@ func (s *uiPathReferenceSearchService) StartPrewarm(workspaceRoot string) {
 	if s == nil {
 		return
 	}
+	select {
+	case <-s.stop:
+		return
+	default:
+	}
 	s.requests <- uiPathReferencePrewarmRequest{workspaceRoot: strings.TrimSpace(workspaceRoot)}
 }
 
@@ -157,16 +169,34 @@ func (s *uiPathReferenceSearchService) Search(req uiPathReferenceSearchRequest) 
 		return
 	}
 	req.WorkspaceRoot = strings.TrimSpace(req.WorkspaceRoot)
+	select {
+	case <-s.stop:
+		return
+	default:
+	}
 	s.requests <- req
 }
 
+func (s *uiPathReferenceSearchService) Stop() {
+	if s == nil {
+		return
+	}
+	s.stopOnce.Do(func() {
+		close(s.stop)
+		<-s.stopped
+	})
+}
+
 func (s *uiPathReferenceSearchService) run() {
+	defer close(s.stopped)
 	buildDone := make(chan uiPathReferenceBuildDone, 8)
 	matchDone := make(chan uiPathReferenceMatchDone, 8)
 	loadingDone := make(chan uiPathReferenceLoadingElapsed, 16)
 	state := uiPathReferenceSearchState{}
 	for {
 		select {
+		case <-s.stop:
+			return
 		case raw := <-s.requests:
 			if raw == nil {
 				continue
@@ -238,8 +268,16 @@ func (s *uiPathReferenceSearchService) armLoadingDelay(search uiPathReferencePen
 	}
 	timer := time.NewTimer(s.loadingDelay)
 	defer timer.Stop()
-	<-timer.C
-	done <- uiPathReferenceLoadingElapsed{search: search}
+	select {
+	case <-s.stop:
+		return
+	case <-timer.C:
+	}
+	select {
+	case <-s.stop:
+		return
+	case done <- uiPathReferenceLoadingElapsed{search: search}:
+	}
 }
 
 func (s *uiPathReferenceSearchService) ensureCorpus(state *uiPathReferenceSearchState, buildDone chan<- uiPathReferenceBuildDone) uint64 {
@@ -269,7 +307,11 @@ func (s *uiPathReferenceSearchService) buildCorpus(workspaceRoot string, generat
 		defer cancel()
 	}
 	snapshot, err := s.loadCorpusSnapshot(ctx, workspaceRoot)
-	done <- uiPathReferenceBuildDone{workspaceRoot: workspaceRoot, generation: generation, snapshot: snapshot, err: err}
+	select {
+	case <-s.stop:
+		return
+	case done <- uiPathReferenceBuildDone{workspaceRoot: workspaceRoot, generation: generation, snapshot: snapshot, err: err}:
+	}
 }
 
 func (s *uiPathReferenceSearchService) loadCorpusSnapshot(ctx context.Context, workspaceRoot string) (uiPathReferenceCorpusSnapshot, error) {
@@ -340,7 +382,11 @@ func (s *uiPathReferenceSearchService) startPendingSearch(state *uiPathReference
 	state.runningSearch = &search
 	go func(snapshot uiPathReferenceCorpusSnapshot, pending uiPathReferencePendingSearch) {
 		matches := s.matcher.Match(pending.req.NormalizedQuery, snapshot.Candidates, slashCommandPickerLines)
-		done <- uiPathReferenceMatchDone{search: pending, matches: matches}
+		select {
+		case <-s.stop:
+			return
+		case done <- uiPathReferenceMatchDone{search: pending, matches: matches}:
+		}
 	}(*state.snapshot, search)
 }
 

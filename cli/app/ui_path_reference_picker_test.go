@@ -291,3 +291,5 @@ func (s *stubUIPathReferenceSearch) StartPrewarm(workspaceRoot string) {
 func (s *stubUIPathReferenceSearch) Search(req uiPathReferenceSearchRequest) {
 	s.requests = append(s.requests, req)
 }
+
+func (s *stubUIPathReferenceSearch) Stop() {}

@@ -54,6 +54,9 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if !m.isInputLocked() {
 		switch msg.Type {
 		case tea.KeyTab, tea.KeyEnter:
+			if m.shouldBlockPathReferenceAcceptanceKey() {
+				return m, nil
+			}
 			if m.acceptPathReferenceSelection() {
 				return m, nil
 			}

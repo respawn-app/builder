@@ -1063,6 +1063,15 @@ func (m *uiModel) Action() UIAction {
 	return m.exitAction
 }
 
+func (m *uiModel) Close() {
+	if m == nil || m.pathReferenceSearch == nil {
+		return
+	}
+	m.pathReferenceSearch.Stop()
+	m.pathReferenceSearch = nil
+	m.pathReferenceEvents = nil
+}
+
 func (m *uiModel) Transition() UITransition {
 	return UITransition{
 		Action:               m.exitAction,
