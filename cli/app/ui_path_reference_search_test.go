@@ -126,6 +126,20 @@ func TestPathReferenceSearchServiceRetriesAfterCorpusBuildFailure(t *testing.T) 
 	}
 }
 
+func TestPathReferenceSearchServiceStopUnblocksAndPreventsFurtherRequests(t *testing.T) {
+	service := newTestUIPathReferenceSearchService(&stubUIPathReferenceCommandRunner{output: []byte("cli/app/ui.go\n")}, fuzzyUIPathReferenceMatcher{})
+	service.Stop()
+
+	service.StartPrewarm("/tmp/workspace")
+	service.Search(uiPathReferenceSearchRequest{WorkspaceRoot: "/tmp/workspace", DraftToken: 1, QueryToken: 1, NormalizedQuery: "ab"})
+
+	select {
+	case msg := <-service.Events():
+		t.Fatalf("did not expect events after stop, got %T", msg)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 func TestLoadPathReferenceCorpusSnapshotHonorsIgnorePolicyAndExcludesEmptyDirs(t *testing.T) {
 	root := t.TempDir()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -273,6 +287,8 @@ func newTestUIPathReferenceSearchService(runner uiPathReferenceCommandRunner, ma
 		matcher:      matcher,
 		buildTimeout: 0,
 		loadingDelay: 0,
+		stop:         make(chan struct{}),
+		stopped:      make(chan struct{}),
 	}
 	go service.run()
 	return service

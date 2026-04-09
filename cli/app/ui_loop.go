@@ -36,7 +36,7 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 		sessionID = runtimeClient.MainView().Session.SessionID
 	}
 
-	program := tea.NewProgram(NewProjectedUIModel(
+	model := NewProjectedUIModel(
 		runtimeClient,
 		runtimeEvents,
 		askEvents,
@@ -57,7 +57,11 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 		WithUISessionName(sessionName),
 		WithUISessionID(sessionID),
 		WithUIStatusConfig(statusConfig),
-	), options...)
+	)
+	if closable, ok := model.(interface{ Close() }); ok {
+		defer closable.Close()
+	}
+	program := tea.NewProgram(model, options...)
 
 	finalModel, runErr := program.Run()
 	if wiring.eventBridge != nil {

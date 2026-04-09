@@ -108,6 +108,23 @@ func TestPathReferenceTabFallsThroughWhenNoMatches(t *testing.T) {
 	}
 }
 
+func TestPathReferenceEnterDoesNotSubmitWhileQueryIsPending(t *testing.T) {
+	search := newStubUIPathReferenceSearch()
+	m := newProjectedStaticUIModel(WithUIPathReferenceSearch(search), WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workspace"}))
+	m.replaceMainInput("echo @ab", -1)
+	m.pathReference.matches = []uiPathReferenceCandidate{{Path: "stale.go"}}
+	m.pathReference.pending = true
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	if updated.busy {
+		t.Fatal("did not expect enter to submit while path-reference query is still pending")
+	}
+	if updated.input != "echo @ab" {
+		t.Fatalf("input = %q, want unchanged draft", updated.input)
+	}
+}
+
 func TestPathReferencePickerSharedAcrossFramesAndViewport(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.theme = "dark"

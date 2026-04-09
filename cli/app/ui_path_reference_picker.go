@@ -7,10 +7,15 @@ import (
 
 func WithUIPathReferenceSearch(search uiPathReferenceSearch) UIOption {
 	return func(m *uiModel) {
+		if m.pathReferenceSearch != nil && m.pathReferenceSearch != search {
+			m.pathReferenceSearch.Stop()
+		}
 		m.pathReferenceSearch = search
 		if search != nil {
 			m.pathReferenceEvents = search.Events()
+			return
 		}
+		m.pathReferenceEvents = nil
 	}
 }
 
@@ -211,7 +216,7 @@ func (m *uiModel) navigatePathReferencePicker(delta int) bool {
 
 func (m *uiModel) acceptPathReferenceSelection() bool {
 	state := m.pathReferencePicker()
-	if !state.visible || len(m.pathReference.matches) == 0 || m.pathReference.loading {
+	if !state.visible || len(m.pathReference.matches) == 0 || m.pathReference.loading || m.pathReference.pending {
 		return false
 	}
 	selection := clampSlashPickerIndex(m.pathReference.selection, 0, len(m.pathReference.matches)-1)
@@ -228,6 +233,14 @@ func (m *uiModel) activePickerPresentation() uiPickerPresentation {
 		return state
 	}
 	return m.pathReferencePicker()
+}
+
+func (m *uiModel) shouldBlockPathReferenceAcceptanceKey() bool {
+	state := m.pathReferencePicker()
+	if !state.visible {
+		return false
+	}
+	return m.pathReference.pending || m.pathReference.loading
 }
 
 func (m *uiModel) slashCommandPresentation() uiPickerPresentation {
