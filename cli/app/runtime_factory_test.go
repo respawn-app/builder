@@ -18,8 +18,15 @@ import (
 	"builder/server/tools/askquestion"
 	patchtool "builder/server/tools/patch"
 	shelltool "builder/server/tools/shell"
+	triggerhandofftool "builder/server/tools/triggerhandoff"
 	"builder/shared/config"
 )
+
+type stubTriggerHandoffController struct{}
+
+func (stubTriggerHandoffController) TriggerHandoff(_ context.Context, _ string, _ llm.ToolCall, _ string, _ string) (string, bool, error) {
+	return "", false, nil
+}
 
 func TestBuildToolRegistry_AllowsHostedWebSearchWithoutLocalRuntimeBuilder(t *testing.T) {
 	workspace := t.TempDir()
@@ -65,6 +72,9 @@ func TestBuildLocalRuntimeHandler_CoversAllLocalToolContracts(t *testing.T) {
 		registryProvider:       func() *tools.Registry { return tools.NewRegistry() },
 		askQuestionBroker:      askquestion.NewBroker(),
 		backgroundShellManager: background,
+		triggerHandoffController: func() triggerhandofftool.Controller {
+			return stubTriggerHandoffController{}
+		},
 		outsideWorkspaceEditApprover: func(context.Context, patchtool.OutsideWorkspaceRequest) (patchtool.OutsideWorkspaceApproval, error) {
 			return patchtool.OutsideWorkspaceApproval{Decision: patchtool.OutsideWorkspaceDecisionDeny}, nil
 		},

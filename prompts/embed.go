@@ -24,6 +24,9 @@ var CompactionSummaryPrefix string
 //go:embed compaction_soon_reminder.md
 var CompactionSoonReminderPrompt string
 
+//go:embed compaction_soon_reminder_trigger_handoff.md
+var CompactionSoonReminderTriggerHandoffPrompt string
+
 //go:embed review_prompt.md
 var ReviewPrompt string
 
@@ -59,6 +62,13 @@ func MainSystemPrompt(includeToolPreambles bool) string {
 
 func BaseSystemPrompt() string {
 	return renderRunCommand(strings.TrimSpace(SystemPrompt))
+}
+
+func RenderCompactionSoonReminderPrompt(triggerHandoffEnabled bool) string {
+	if triggerHandoffEnabled {
+		return strings.TrimSpace(CompactionSoonReminderTriggerHandoffPrompt)
+	}
+	return strings.TrimSpace(CompactionSoonReminderPrompt)
 }
 
 func renderRunCommand(text string) string {

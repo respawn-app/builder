@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"builder/server/llm"
+	"builder/server/runtime"
 	"builder/server/tools"
 	patchformat "builder/server/tools/patch/format"
+	triggerhandofftool "builder/server/tools/triggerhandoff"
 	"builder/shared/theme"
 	"builder/shared/transcript"
 	"encoding/json"
@@ -1430,6 +1433,109 @@ func TestSetConversationTypedToolMetadataRendersWithoutLegacyInlineParsing(t *te
 	}
 	if !containsInOrder(detailView, "$", "pwd", "timeout: 5m", "/tmp") {
 		t.Fatalf("expected shell command, timeout and output from typed metadata in detail view, got %q", detailView)
+	}
+}
+
+func TestTriggerHandoffTypedToolMetadataUsesCompactOngoingAndDetailedView(t *testing.T) {
+	m := NewModel(WithPreviewLines(20))
+	m = updateModel(t, m, SetConversationMsg{Entries: []TranscriptEntry{
+		{
+			Role:       "tool_call",
+			Text:       "trigger_handoff()",
+			ToolCallID: "call_handoff_1",
+			ToolCall: &transcript.ToolCallMeta{
+				ToolName:    "trigger_handoff",
+				CompactText: "Model requested compaction.",
+				Command:     "Model requested compaction.\nInstructions:\nkeep API details\nFuture message:\nresume with tests",
+			},
+		},
+		{
+			Role:       "tool_result_ok",
+			Text:       "Handoff scheduled. Context will be compacted before the next model turn and future-agent guidance was saved.",
+			ToolCallID: "call_handoff_1",
+		},
+	}})
+
+	ongoing := plainTranscript(m.View())
+	if !strings.Contains(ongoing, "Model requested compaction.") {
+		t.Fatalf("expected ongoing view to include concise compaction request, got %q", ongoing)
+	}
+	if strings.Contains(ongoing, "keep API details") || strings.Contains(ongoing, "resume with tests") {
+		t.Fatalf("did not expect ongoing view to include detailed trigger_handoff parameters, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detailView := plainTranscript(m.View())
+	if !strings.Contains(detailView, "Model requested compaction.") {
+		t.Fatalf("expected detail view to include compaction request heading, got %q", detailView)
+	}
+	if !strings.Contains(detailView, "Instructions:") || !strings.Contains(detailView, "keep API details") {
+		t.Fatalf("expected detail view to include trigger_handoff instructions, got %q", detailView)
+	}
+	if !strings.Contains(detailView, "Future message:") || !strings.Contains(detailView, "resume with tests") {
+		t.Fatalf("expected detail view to include trigger_handoff future message, got %q", detailView)
+	}
+}
+
+func TestTriggerHandoffRuntimeProjectedMetadataUsesCompactOngoingAndDetailedView(t *testing.T) {
+	callEntries := runtime.TranscriptEntriesFromEvent(runtime.Event{
+		Kind: runtime.EventToolCallStarted,
+		ToolCall: &llm.ToolCall{
+			ID:    "call_handoff_runtime_1",
+			Name:  string(tools.ToolTriggerHandoff),
+			Input: json.RawMessage(`{"summarizer_prompt":"keep API details","future_agent_message":"resume with tests"}`),
+		},
+	})
+	if len(callEntries) != 1 {
+		t.Fatalf("expected one runtime-projected tool call entry, got %+v", callEntries)
+	}
+	resultBody, err := json.Marshal(triggerhandofftool.ResultPayload{
+		Summary:                 "Handoff scheduled. Context will be compacted before the next model turn and future-agent guidance was saved.",
+		FutureAgentMessageAdded: true,
+	})
+	if err != nil {
+		t.Fatalf("marshal trigger_handoff tool result: %v", err)
+	}
+	resultEntries := runtime.TranscriptEntriesFromEvent(runtime.Event{
+		Kind: runtime.EventToolCallCompleted,
+		ToolResult: &tools.Result{
+			CallID: "call_handoff_runtime_1",
+			Name:   tools.ToolTriggerHandoff,
+			Output: resultBody,
+		},
+	})
+	if len(resultEntries) != 1 {
+		t.Fatalf("expected one runtime-projected tool result entry, got %+v", resultEntries)
+	}
+
+	m := NewModel(WithPreviewLines(20))
+	for _, entry := range append(callEntries, resultEntries...) {
+		m = updateModel(t, m, AppendTranscriptMsg{
+			Role:       entry.Role,
+			Text:       entry.Text,
+			ToolCallID: entry.ToolCallID,
+			ToolCall:   entry.ToolCall,
+		})
+	}
+
+	ongoing := plainTranscript(m.View())
+	if !strings.Contains(ongoing, "Model requested compaction.") {
+		t.Fatalf("expected ongoing view to include concise runtime-projected compaction request, got %q", ongoing)
+	}
+	if strings.Contains(ongoing, "keep API details") || strings.Contains(ongoing, "resume with tests") {
+		t.Fatalf("did not expect ongoing view to include detailed runtime-projected trigger_handoff parameters, got %q", ongoing)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	detailView := plainTranscript(m.View())
+	if !strings.Contains(detailView, "Model requested compaction.") {
+		t.Fatalf("expected detail view to include runtime-projected compaction request heading, got %q", detailView)
+	}
+	if !strings.Contains(detailView, "Instructions:") || !strings.Contains(detailView, "keep API details") {
+		t.Fatalf("expected detail view to include runtime-projected trigger_handoff instructions, got %q", detailView)
+	}
+	if !strings.Contains(detailView, "Future message:") || !strings.Contains(detailView, "resume with tests") {
+		t.Fatalf("expected detail view to include runtime-projected trigger_handoff future message, got %q", detailView)
 	}
 }
 

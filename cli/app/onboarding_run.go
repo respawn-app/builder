@@ -44,7 +44,7 @@ func runOnboardingFlow(cfg config.App, authState auth.State) (onboardingResult, 
 		alternateScreen:      cfg.Settings.TUIAlternateScreen,
 		authState:            authState,
 		providerCapabilities: providerCaps,
-		skillImport:          onboardingImportSelection{Mode: onboardingImportModeMergeCopy},
+		skillImport:          onboardingImportSelection{Mode: onboardingImportModeNone},
 		commandImport:        onboardingImportSelection{Mode: onboardingImportModeNone},
 	}
 	model := newOnboardingModel(cfg.PersistenceRoot, state)

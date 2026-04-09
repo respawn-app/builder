@@ -16,6 +16,7 @@
 ## Core Runtime And Tools
 
 - Core tools: `shell`, `view_image`, `patch`, `ask_question`.
+- Experimental agent-only tool `trigger_handoff` is config-gated under `[tools]`, defaults to `false`, and is always declared to the model for a session when enabled rather than being shown/hidden dynamically by context usage.
 - Compatibility wrapper tool `multi_tool_use_parallel` is supported (Codex-style schema), executes referenced `functions.*` tools concurrently while returning results in declared order, and defaults on only when the configured model capability contract explicitly supports it; explicit tool config overrides take precedence.
 - One app instance runs one active conversation.
 - Tool execution concurrency inside a model step is unbounded.
@@ -109,7 +110,7 @@
 - Retry attempts for one logical model request are treated as one request for cache-warning purposes.
 - Timeout/TTL-based cache-warning suppression is forbidden unless authoritative provider metadata is present on the actual transport.
 - Prompt-cache warnings are persisted as structured server-side facts and replay identically for live runtimes, restored runtimes, and dormant session transcript views.
-- `cache_warning_mode` is a three-state config: `off` disables cache warnings, `default` catches unwanted invalidations and also shows the dedicated compaction warning, and `verbose` includes everything from `default` plus broader invalidation diagnostics such as provider-reported cache reuse drops for postfix-compatible requests when the provider does not expose the cause.
+- `cache_warning_mode` is a three-state config: `off` disables cache warnings, `default` catches unwanted invalidations, and `verbose` includes everything from `default` plus broader invalidation diagnostics such as provider-reported cache reuse drops for postfix-compatible requests when the provider does not expose the cause.
 - Tool-call identity prefers provider-native ids; UUID fallback when missing.
 - Retry collisions on tool-call ids overwrite prior-attempt ids.
 - Event identity uses monotonic sequence id + wall timestamp.
@@ -212,10 +213,17 @@
 - Auto-compaction failure aborts the current turn.
 - `compaction_mode=none` disables manual and automatic compaction.
 - Manual compaction is available via `/compact` while idle; optional arguments are appended as compaction guidance.
+- Human-facing UX uses `compact` terminology, while agent-facing prompt/tool language uses `handoff`; do not mix these narratives across those surfaces without an explicit product decision.
 - Successful manual `/compact` appends a hidden developer carryover message containing the last visible user prompt so the post-compaction model context still knows what the user most recently asked for.
+- The compaction-soon reminder is single-shot until the next real compaction replaces history. Restores and forks derive the issued state from replayed transcript/history-replacement events instead of blindly copying stale metadata. When `tools.trigger_handoff=true`, the reminder template injects agent-facing text that `trigger_handoff()` is now allowed; the tool must fail before the reminder fires and must also fail while `/autocompaction` is off.
+- Agent-triggered handoff uses its own internal compaction mode and may append a detail-only future-agent developer message; it must not reuse manual `/compact` carryover semantics.
+- Main-agent OpenAI `session_id` stays on the persisted Builder session id for the entire conversation lifetime.
+- Main-agent prompt cache lineage is keyed separately from `session_id` and rotates by compaction generation: the base key is `<session_id>` before first compaction, then `<session_id>/compact-N` for generation `N`.
+- Supervisor/reviewer OpenAI `session_id` stays on `<session_id>/supervisor`; its prompt cache lineage uses the distinct base key `<session_id>/supervisor` before first compaction, then applies `/compact-N` with the same shared compaction generation counter as the main agent.
 - Local compaction instructions are injected as final `developer` message.
 - Local compaction summary generation reads full provider history from latest compaction checkpoint onward (or from start if none).
 - Local compaction summary generation keeps tool declarations for request shape/cache stability but runtime rejects any returned tool calls.
+- Local compaction summary generation must reuse the normal main-agent request envelope: same session identity, same assembled main-agent system prompt, same tool declarations, same fast/reasoning flags; only the request items differ by appending compaction instructions.
 - Manual compaction failures are surfaced to UI without terminating session.
 - Native compaction eligibility is capability-driven and user-configurable.
 - `type=compaction` items and encrypted reasoning/compaction payloads are treated as opaque and replayed unchanged.
@@ -266,6 +274,7 @@
 - `compaction_soon_reminder`: `D`
 - `reviewer_feedback`: represented in transcript by reviewer transcript roles, not by rendering the raw developer reviewer prompt directly. Effective visibility is `OC` or `O` depending on reviewer verbosity config.
 - `background_notice`: `OC`
+- `handoff_future_message`: `D`
 - `manual_compaction_carryover`: `D`
 - `headless_mode`: `D`
 - `headless_mode_exit`: `D`

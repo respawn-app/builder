@@ -14,6 +14,7 @@ import (
 	patchtool "builder/server/tools/patch"
 	readimagetool "builder/server/tools/readimage"
 	shelltool "builder/server/tools/shell"
+	triggerhandofftool "builder/server/tools/triggerhandoff"
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
@@ -175,6 +176,7 @@ type localToolRuntimeContext struct {
 	registryProvider                func() *tools.Registry
 	askQuestionBroker               *askquestion.Broker
 	backgroundShellManager          *shelltool.Manager
+	triggerHandoffController        func() triggerhandofftool.Controller
 	outsideWorkspaceEditApprover    patchtool.OutsideWorkspaceApprover
 	outsideWorkspaceReadApprover    patchtool.OutsideWorkspaceApprover
 	viewImageOutsideWorkspaceLogger readimagetool.OutsideWorkspaceAuditLogger
@@ -191,6 +193,7 @@ func buildLocalRuntimeHandler(def tools.Definition, ctx localToolRuntimeContext)
 		RegistryProvider:                ctx.registryProvider,
 		AskQuestionBroker:               ctx.askQuestionBroker,
 		BackgroundShellManager:          ctx.backgroundShellManager,
+		TriggerHandoffController:        ctx.triggerHandoffController,
 		OutsideWorkspaceEditApprover:    ctx.outsideWorkspaceEditApprover,
 		OutsideWorkspaceReadApprover:    ctx.outsideWorkspaceReadApprover,
 		ViewImageOutsideWorkspaceLogger: ctx.viewImageOutsideWorkspaceLogger,
@@ -209,5 +212,6 @@ func buildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []to
 		supportsVision,
 		logger,
 		background,
+		nil,
 	)
 }

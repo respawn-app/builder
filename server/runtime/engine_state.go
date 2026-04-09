@@ -72,7 +72,7 @@ func shouldSkipTrailingAssistantHandoffMessage(message llm.Message) bool {
 		return false
 	}
 	switch message.MessageType {
-	case llm.MessageTypeCompactionSoonReminder, llm.MessageTypeErrorFeedback:
+	case llm.MessageTypeCompactionSoonReminder, llm.MessageTypeErrorFeedback, llm.MessageTypeHandoffFutureMessage:
 		return true
 	default:
 		return false
@@ -325,6 +325,32 @@ func (e *Engine) SessionName() string {
 
 func (e *Engine) SessionID() string {
 	return strings.TrimSpace(e.store.Meta().SessionID)
+}
+
+func (e *Engine) compactionCountSnapshot() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.compactionCount
+}
+
+func (e *Engine) conversationSessionID() string {
+	return e.SessionID()
+
+}
+
+func conversationPromptCacheKey(sessionID string, compactionCount int) string {
+	trimmed := strings.TrimSpace(sessionID)
+	if trimmed == "" {
+		return ""
+	}
+	if compactionCount <= 0 {
+		return trimmed
+	}
+	return fmt.Sprintf("%s/compact-%d", trimmed, compactionCount)
+}
+
+func (e *Engine) conversationPromptCacheKey() string {
+	return conversationPromptCacheKey(e.conversationSessionID(), e.compactionCountSnapshot())
 }
 
 func (e *Engine) ParentSessionID() string {

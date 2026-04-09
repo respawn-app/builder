@@ -61,8 +61,6 @@ type onboardingImportMode string
 
 const (
 	onboardingImportModeNone          onboardingImportMode = "none"
-	onboardingImportModeCopyProvider  onboardingImportMode = "copy_provider"
-	onboardingImportModeMergeCopy     onboardingImportMode = "merge_copy"
 	onboardingImportModeSymlinkSource onboardingImportMode = "symlink_source"
 )
 
@@ -72,18 +70,22 @@ type onboardingImportSelection struct {
 }
 
 type onboardingFlowState struct {
-	settings             config.Settings
-	baselineSettings     config.Settings
-	theme                string
-	alternateScreen      config.TUIAlternateScreenPolicy
-	authState            auth.State
-	providerCapabilities llm.ProviderCapabilities
-	pendingAction        onboardingPendingAction
-	customThinking       bool
-	skillImport          onboardingImportSelection
-	commandImport        onboardingImportSelection
-	skillSelection       map[string]bool
-	imports              onboardingImportDiscovery
+	settings                    config.Settings
+	baselineSettings            config.Settings
+	theme                       string
+	alternateScreen             config.TUIAlternateScreenPolicy
+	authState                   auth.State
+	providerCapabilities        llm.ProviderCapabilities
+	pendingAction               onboardingPendingAction
+	customThinking              bool
+	reviewerCustomModel         bool
+	reviewerCustomThinking      bool
+	reviewerCustomThinkingInput bool
+	reviewerThinkingDisabled    bool
+	skillImport                 onboardingImportSelection
+	commandImport               onboardingImportSelection
+	skillSelection              map[string]bool
+	imports                     onboardingImportDiscovery
 }
 
 type onboardingResult struct {
@@ -290,6 +292,7 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 					state.customThinking = false
 					state.settings.ThinkingLevel = choiceID
 				}
+				syncReviewerThinkingToPrimary(state)
 				return nil
 			},
 		},
@@ -312,6 +315,7 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 				}
 				state.customThinking = true
 				state.settings.ThinkingLevel = trimmed
+				syncReviewerThinkingToPrimary(state)
 				return nil
 			},
 		},
@@ -352,6 +356,103 @@ func newOnboardingWorkflow(state *onboardingFlowState) onboardingWorkflow {
 			},
 			apply: func(state *onboardingFlowState, choiceID string) error {
 				state.settings.Reviewer.Frequency = choiceID
+				syncReviewerDefaultsFromPrimary(state)
+				return nil
+			},
+		},
+		onboardingInputStep{
+			id: "reviewer_model",
+			visible: func(state *onboardingFlowState) bool {
+				return reviewerEnabled(state)
+			},
+			build: func(state *onboardingFlowState) onboardingScreen {
+				return onboardingScreen{
+					ID:         "reviewer_model",
+					Kind:       onboardingScreenInput,
+					Title:      "Choose a Supervisor model",
+					Body:       "By default, Supervisor uses the same model you chose above. Enter a different model only if you want a separate reviewer pass.",
+					Helper:     "Press Enter to continue.",
+					InputValue: valueOrFallback(strings.TrimSpace(state.settings.Reviewer.Model), state.settings.Model),
+				}
+			},
+			apply: func(state *onboardingFlowState, value string) error {
+				trimmed := strings.TrimSpace(value)
+				if trimmed == "" {
+					return fmt.Errorf("supervisor model must not be empty")
+				}
+				state.settings.Reviewer.Model = trimmed
+				state.reviewerCustomModel = trimmed != strings.TrimSpace(state.settings.Model)
+				if !llm.SupportsReasoningEffortModel(trimmed) {
+					state.reviewerCustomThinking = false
+					state.settings.Reviewer.ThinkingLevel = ""
+					return nil
+				}
+				syncReviewerThinkingToPrimary(state)
+				return nil
+			},
+		},
+		onboardingChoiceStep{
+			id: "reviewer_thinking",
+			visible: func(state *onboardingFlowState) bool {
+				return reviewerEnabled(state) && llm.SupportsReasoningEffortModel(state.settings.Reviewer.Model)
+			},
+			build: func(state *onboardingFlowState) onboardingScreen {
+				levels := llm.SupportedThinkingLevelsModel(state.settings.Reviewer.Model)
+				options := []onboardingOption{{ID: "disable", Title: "Disable", Description: thinkingLevelEstimate("disable")}}
+				for _, level := range levels {
+					options = append(options, onboardingOption{ID: level, Title: titleCaseThinking(level)})
+				}
+				options = append(options, onboardingOption{ID: "custom", Title: "Enter a custom value"})
+				defaultOption := strings.TrimSpace(state.settings.Reviewer.ThinkingLevel)
+				if defaultOption == "" {
+					defaultOption = "disable"
+				}
+				if !containsOnboardingOption(options, defaultOption) {
+					defaultOption = "custom"
+				}
+				return onboardingScreen{ID: "reviewer_thinking", Kind: onboardingScreenChoice, Title: "Choose a Supervisor thinking level", Body: "By default, Supervisor uses the same thinking level as the main model. Higher thinking levels usually improve results, but they also cost more, use more context, and respond more slowly.", Options: options, DefaultOptionID: defaultOption}
+			},
+			apply: func(state *onboardingFlowState, choiceID string) error {
+				switch choiceID {
+				case "disable":
+					state.reviewerThinkingDisabled = true
+					state.settings.Reviewer.ThinkingLevel = ""
+					state.reviewerCustomThinking = false
+					state.reviewerCustomThinkingInput = false
+				case "custom":
+					state.reviewerThinkingDisabled = false
+					state.reviewerCustomThinking = true
+					state.reviewerCustomThinkingInput = true
+				default:
+					state.reviewerThinkingDisabled = false
+					state.settings.Reviewer.ThinkingLevel = choiceID
+					state.reviewerCustomThinking = choiceID != strings.TrimSpace(state.settings.ThinkingLevel)
+					state.reviewerCustomThinkingInput = false
+				}
+				return nil
+			},
+		},
+		onboardingInputStep{
+			id: "reviewer_thinking_custom",
+			visible: func(state *onboardingFlowState) bool {
+				return reviewerEnabled(state) && llm.SupportsReasoningEffortModel(state.settings.Reviewer.Model) && (state.reviewerCustomThinkingInput || (strings.TrimSpace(state.settings.Reviewer.ThinkingLevel) != "" && !isKnownThinkingLevel(state.settings.Reviewer.ThinkingLevel)))
+			},
+			build: func(state *onboardingFlowState) onboardingScreen {
+				value := state.settings.Reviewer.ThinkingLevel
+				if state.reviewerCustomThinkingInput && isKnownThinkingLevel(value) {
+					value = ""
+				}
+				return onboardingScreen{ID: "reviewer_thinking_custom", Kind: onboardingScreenInput, Title: "Enter a custom Supervisor thinking level", Helper: "Press Enter to continue.", InputValue: value}
+			},
+			apply: func(state *onboardingFlowState, value string) error {
+				trimmed := strings.TrimSpace(value)
+				if trimmed == "" {
+					return fmt.Errorf("supervisor thinking value must not be empty")
+				}
+				state.reviewerThinkingDisabled = false
+				state.settings.Reviewer.ThinkingLevel = trimmed
+				state.reviewerCustomThinking = trimmed != strings.TrimSpace(state.settings.ThinkingLevel)
+				state.reviewerCustomThinkingInput = !isKnownThinkingLevel(trimmed)
 				return nil
 			},
 		},
@@ -434,8 +535,6 @@ func applyOnboardingModel(state *onboardingFlowState, value string) error {
 		state.settings.ModelContextWindow = state.baselineSettings.ModelContextWindow
 		state.settings.ContextCompactionThresholdTokens = state.baselineSettings.ContextCompactionThresholdTokens
 	}
-	state.settings.Reviewer.Model = model
-	state.settings.Reviewer.ThinkingLevel = state.settings.ThinkingLevel
 	if !llm.SupportsVerbosityModel(model) {
 		state.settings.ModelVerbosity = config.ModelVerbosity("")
 	} else if strings.TrimSpace(string(state.settings.ModelVerbosity)) == "" {
@@ -444,10 +543,40 @@ func applyOnboardingModel(state *onboardingFlowState, value string) error {
 	if !llm.SupportsReasoningEffortModel(model) {
 		state.customThinking = false
 		state.settings.ThinkingLevel = ""
-		state.settings.Reviewer.ThinkingLevel = ""
 	}
 	applyContextWindowChoice(state, "default")
+	syncReviewerDefaultsFromPrimary(state)
 	return nil
+}
+
+func reviewerEnabled(state *onboardingFlowState) bool {
+	mode := strings.TrimSpace(state.settings.Reviewer.Frequency)
+	return mode != "" && mode != "off"
+}
+
+func syncReviewerDefaultsFromPrimary(state *onboardingFlowState) {
+	if !state.reviewerCustomModel {
+		state.settings.Reviewer.Model = state.settings.Model
+	}
+	syncReviewerThinkingToPrimary(state)
+}
+
+func syncReviewerThinkingToPrimary(state *onboardingFlowState) {
+	if !llm.SupportsReasoningEffortModel(state.settings.Reviewer.Model) {
+		state.reviewerCustomThinking = false
+		state.reviewerCustomThinkingInput = false
+		state.settings.Reviewer.ThinkingLevel = ""
+		return
+	}
+	if state.reviewerThinkingDisabled {
+		state.reviewerCustomThinking = false
+		state.reviewerCustomThinkingInput = false
+		state.settings.Reviewer.ThinkingLevel = ""
+		return
+	}
+	if !state.reviewerCustomThinking {
+		state.settings.Reviewer.ThinkingLevel = state.settings.ThinkingLevel
+	}
 }
 
 func applyOnboardingThemeChoice(state *onboardingFlowState, choiceID string) {
@@ -499,6 +628,16 @@ func reviewSummaryLines(state *onboardingFlowState) []string {
 		"- Supervisor: `"+valueOrFallback(state.settings.Reviewer.Frequency, "off")+"`",
 		"- Compaction: `"+string(state.settings.CompactionMode)+"`",
 	)
+	if reviewerEnabled(state) {
+		reviewerThinking := strings.TrimSpace(state.settings.Reviewer.ThinkingLevel)
+		if reviewerThinking == "" {
+			reviewerThinking = "off"
+		}
+		lines = append(lines,
+			"- Supervisor model: `"+state.settings.Reviewer.Model+"`",
+			"- Supervisor thinking: `"+reviewerThinking+"`",
+		)
+	}
 	if summary := skillImportSummary(state); summary != "" {
 		lines = append(lines, "- Skills import: `"+summary+"`")
 		if enabled, disabled := selectedSkillCounts(state); enabled > 0 || disabled > 0 {
@@ -614,7 +753,7 @@ func selectedSkillCounts(state *onboardingFlowState) (int, int) {
 		return 0, 0
 	}
 	if state.skillImport.Mode != onboardingImportModeSymlinkSource {
-		return len(plannedSkillImports(state)), 0
+		return 0, 0
 	}
 	selected := effectiveSkillSelection(state)
 	enabled := 0

@@ -3,6 +3,9 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"builder/server/llm"
@@ -11,6 +14,12 @@ import (
 	"builder/shared/cachewarn"
 	"builder/shared/config"
 )
+
+type transportStaticAuth struct{}
+
+func (transportStaticAuth) AuthorizationHeader(context.Context) (string, error) {
+	return "Bearer token", nil
+}
 
 func TestGenerateWithRetryClient_PersistsExactNonPostfixCacheWarningInDefaultMode(t *testing.T) {
 	dir := t.TempDir()
@@ -188,7 +197,7 @@ func TestBuildRequest_SkipsPromptCacheKeyForUnsupportedProvider(t *testing.T) {
 	}
 }
 
-func TestBuildRequest_SetsPromptCacheKeyWhenProviderCapabilityEnabled(t *testing.T) {
+func TestBuildRequest_UsesBasePromptCacheKeyBeforeFirstCompactionWhenProviderSupportsIt(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -203,11 +212,347 @@ func TestBuildRequest_SetsPromptCacheKeyWhenProviderCapabilityEnabled(t *testing
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
-	if req.PromptCacheKey != store.Meta().SessionID {
-		t.Fatalf("PromptCacheKey = %q, want %q", req.PromptCacheKey, store.Meta().SessionID)
+	if got, want := req.SessionID, eng.conversationSessionID(); got != want {
+		t.Fatalf("SessionID = %q, want %q", got, want)
+	}
+	if got, want := req.PromptCacheKey, eng.conversationPromptCacheKey(); got != want {
+		t.Fatalf("PromptCacheKey = %q, want %q", got, want)
 	}
 	if req.PromptCacheScope != cachewarn.ScopeConversation {
 		t.Fatalf("PromptCacheScope = %q, want %q", req.PromptCacheScope, cachewarn.ScopeConversation)
+	}
+}
+
+func TestBuildRequest_RotatesPromptCacheKeyWithRequestSessionIDAfterCompaction(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true, SupportsPromptCacheKey: true}}
+	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.compactionCount = 1
+	req, err := eng.buildRequestWithExtraItems(context.Background(), []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "hello"}}, true)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	if got, want := req.SessionID, eng.conversationSessionID(); got != want {
+		t.Fatalf("SessionID = %q, want %q", got, want)
+	}
+	if got, want := req.PromptCacheKey, eng.conversationPromptCacheKey(); got != want {
+		t.Fatalf("PromptCacheKey = %q, want %q", got, want)
+	}
+}
+
+func TestBuildRequest_RotatesPromptCacheKeyFromPersistedCompactionOnReopen(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("legacy-compact", "history_replaced", historyReplacementPayload{
+		Engine: "local",
+		Mode:   string(compactionModeManual),
+		Items:  llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleAssistant, MessageType: llm.MessageTypeCompactionSummary, Content: "summary"}}),
+	}); err != nil {
+		t.Fatalf("append history_replaced: %v", err)
+	}
+
+	reopened, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	client := &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true, SupportsPromptCacheKey: true}}
+	eng, err := New(reopened, client, tools.NewRegistry(), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	req, err := eng.buildRequestWithExtraItems(context.Background(), []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "hello"}}, true)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	if got, want := req.SessionID, eng.conversationSessionID(); got != want {
+		t.Fatalf("SessionID = %q, want %q", got, want)
+	}
+	if got, want := req.PromptCacheKey, eng.conversationPromptCacheKey(); got != want {
+		t.Fatalf("PromptCacheKey = %q, want %q", got, want)
+	}
+}
+
+func TestLocalCompactionSummary_UsesMainConversationRequestIdentityAndPrompt(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{
+		caps:      llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true, SupportsPromptCacheKey: true},
+		responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "summary"}}},
+	}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", EnabledTools: []tools.ID{tools.ToolShell}})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.compactionCount = 1
+	input := llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "alpha"}, {Role: llm.RoleAssistant, Content: "beta"}})
+	if _, err := eng.localCompactionSummary(context.Background(), input, compactionInstructions("keep API details")); err != nil {
+		t.Fatalf("local compaction summary: %v", err)
+	}
+	if len(client.calls) != 1 {
+		t.Fatalf("model calls = %d, want 1", len(client.calls))
+	}
+	req := client.calls[0]
+	locked, err := eng.ensureLocked()
+	if err != nil {
+		t.Fatalf("ensure locked: %v", err)
+	}
+	if got, want := req.SessionID, eng.conversationSessionID(); got != want {
+		t.Fatalf("SessionID = %q, want %q", got, want)
+	}
+	if got, want := req.PromptCacheKey, eng.conversationPromptCacheKey(); got != want {
+		t.Fatalf("PromptCacheKey = %q, want %q", got, want)
+	}
+	if got, want := req.PromptCacheScope, cachewarn.ScopeConversation; got != want {
+		t.Fatalf("PromptCacheScope = %q, want %q", got, want)
+	}
+	if got, want := req.SystemPrompt, eng.systemPrompt(locked); got != want {
+		t.Fatalf("SystemPrompt mismatch\ngot: %q\nwant: %q", got, want)
+	}
+	if got, want := req.ReasoningEffort, eng.ThinkingLevel(); got != want {
+		t.Fatalf("ReasoningEffort = %q, want %q", got, want)
+	}
+	if got, want := req.FastMode, eng.FastModeEnabled(); got != want {
+		t.Fatalf("FastMode = %v, want %v", got, want)
+	}
+	if len(req.Tools) != 1 || req.Tools[0].Name != string(tools.ToolShell) {
+		t.Fatalf("Tools = %+v, want shell tool contract", req.Tools)
+	}
+}
+
+func TestOpenAIResponsesPayload_UsesExpectedCacheKeyShapesAcrossConversationSupervisorAndReopen(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, SupportsPromptCacheKey: true, IsOpenAIFirstParty: true}}
+	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", Reviewer: ReviewerConfig{Model: "gpt-5"}})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	payloadOptions := llm.OpenAIResponsesPayloadOptions{Capabilities: client.caps}
+
+	beforeReq, err := eng.buildRequestWithExtraItems(context.Background(), []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "before"}}, true)
+	if err != nil {
+		t.Fatalf("build before request: %v", err)
+	}
+	beforePayload := mustDecodeJSONMap(t, mustMarshalOpenAIResponsesPayloadForLineage(t, beforeReq, payloadOptions))
+	if got, want := stringValue(beforePayload["prompt_cache_key"]), conversationPromptCacheKey(store.Meta().SessionID, 0); got != want {
+		t.Fatalf("before prompt_cache_key = %q, want %q payload=%s", got, want, mustMarshalCanonicalJSONForLineage(t, beforePayload))
+	}
+
+	eng.compactionCount = 1
+	conversationReq, err := eng.buildRequestWithExtraItems(context.Background(), []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "payload-probe"}}, true)
+	if err != nil {
+		t.Fatalf("build conversation request: %v", err)
+	}
+	conversationPayload := mustDecodeJSONMap(t, mustMarshalOpenAIResponsesPayloadForLineage(t, conversationReq, payloadOptions))
+	if got, want := conversationReq.SessionID, store.Meta().SessionID; got != want {
+		t.Fatalf("conversation SessionID = %q, want %q", got, want)
+	}
+	if got, want := stringValue(conversationPayload["prompt_cache_key"]), conversationPromptCacheKey(store.Meta().SessionID, 1); got != want {
+		t.Fatalf("conversation prompt_cache_key = %q, want %q", got, want)
+	}
+
+	reviewerReq, err := eng.buildReviewerRequest(context.Background(), client)
+	if err != nil {
+		t.Fatalf("build reviewer request: %v", err)
+	}
+	reviewerPayload := mustDecodeJSONMap(t, mustMarshalOpenAIResponsesPayloadForLineage(t, reviewerReq, payloadOptions))
+	if got, want := reviewerReq.SessionID, reviewerSessionID(store.Meta().SessionID); got != want {
+		t.Fatalf("reviewer SessionID = %q, want %q", got, want)
+	}
+	if got, want := stringValue(reviewerPayload["prompt_cache_key"]), reviewerPromptCacheKey(store.Meta().SessionID, 1); got != want {
+		t.Fatalf("reviewer prompt_cache_key = %q, want %q", got, want)
+	}
+
+	if _, err := store.AppendEvent("legacy-compact", "history_replaced", historyReplacementPayload{
+		Engine: "local",
+		Mode:   string(compactionModeManual),
+		Items:  llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleAssistant, MessageType: llm.MessageTypeCompactionSummary, Content: "summary"}}),
+	}); err != nil {
+		t.Fatalf("append history_replaced: %v", err)
+	}
+	reopened, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	reopenedEng, err := New(reopened, client, tools.NewRegistry(), Config{Model: "gpt-5", Reviewer: ReviewerConfig{Model: "gpt-5"}})
+	if err != nil {
+		t.Fatalf("new reopened engine: %v", err)
+	}
+	reopenedReq, err := reopenedEng.buildRequestWithExtraItems(context.Background(), []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "payload-probe"}}, true)
+	if err != nil {
+		t.Fatalf("build reopened request: %v", err)
+	}
+	reopenedPayload := mustDecodeJSONMap(t, mustMarshalOpenAIResponsesPayloadForLineage(t, reopenedReq, payloadOptions))
+	if got, want := reopenedReq.SessionID, reopened.Meta().SessionID; got != want {
+		t.Fatalf("reopened SessionID = %q, want %q", got, want)
+	}
+	if got, want := stringValue(reopenedPayload["prompt_cache_key"]), conversationPromptCacheKey(reopened.Meta().SessionID, reopenedEng.compactionCountSnapshot()); got != want {
+		t.Fatalf("reopened prompt_cache_key = %q, want %q", got, want)
+	}
+	if got, want := stringValue(reopenedPayload["instructions"]), stringValue(conversationPayload["instructions"]); got != want {
+		t.Fatalf("reopened instructions = %q, want %q", got, want)
+	}
+}
+
+func TestOpenAITransport_UsesExpectedSessionHeadersAndPromptCacheKeysAcrossConversationSupervisorAndReopen(t *testing.T) {
+	type capturedRequest struct {
+		path      string
+		sessionID string
+		payload   map[string]any
+	}
+	var capturedRequests []capturedRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("decode request payload: %v", err)
+		}
+		captured := capturedRequest{
+			path:      r.URL.Path,
+			sessionID: r.Header.Get("session_id"),
+			payload:   payload,
+		}
+		capturedRequests = append(capturedRequests, captured)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	transport := llm.NewHTTPTransport(transportStaticAuth{})
+	transport.BaseURL = server.URL + "/v1"
+	transport.Client = server.Client()
+	openAIClient := llm.NewOpenAIClient(transport)
+
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	engineClient := &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, SupportsPromptCacheKey: true, IsOpenAIFirstParty: true}}
+	eng, err := New(store, engineClient, tools.NewRegistry(), Config{Model: "gpt-5", Reviewer: ReviewerConfig{Model: "gpt-5"}})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	send := func(req llm.Request) capturedRequest {
+		t.Helper()
+		before := len(capturedRequests)
+		if _, err := openAIClient.Generate(context.Background(), req); err != nil {
+			t.Fatalf("transport generate: %v", err)
+		}
+		if len(capturedRequests) != before+1 {
+			t.Fatalf("captured requests = %d, want %d", len(capturedRequests), before+1)
+		}
+		return capturedRequests[len(capturedRequests)-1]
+	}
+
+	mainBeforeReq, err := eng.buildRequestWithExtraItems(context.Background(), []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "before"}}, true)
+	if err != nil {
+		t.Fatalf("build main before request: %v", err)
+	}
+	mainBefore := send(mainBeforeReq)
+	if got, want := mainBefore.path, "/v1/responses"; got != want {
+		t.Fatalf("main before path = %q, want %q", got, want)
+	}
+	if got, want := mainBefore.sessionID, store.Meta().SessionID; got != want {
+		t.Fatalf("main before session_id header = %q, want %q", got, want)
+	}
+	if got, want := stringValue(mainBefore.payload["prompt_cache_key"]), store.Meta().SessionID; got != want {
+		t.Fatalf("main before prompt_cache_key = %q, want %q", got, want)
+	}
+
+	reviewerBeforeReq, err := eng.buildReviewerRequest(context.Background(), engineClient)
+	if err != nil {
+		t.Fatalf("build reviewer before request: %v", err)
+	}
+	reviewerBefore := send(reviewerBeforeReq)
+	if got, want := reviewerBefore.sessionID, reviewerSessionID(store.Meta().SessionID); got != want {
+		t.Fatalf("reviewer before session_id header = %q, want %q", got, want)
+	}
+	if got, want := stringValue(reviewerBefore.payload["prompt_cache_key"]), reviewerPromptCacheKey(store.Meta().SessionID, 0); got != want {
+		t.Fatalf("reviewer before prompt_cache_key = %q, want %q", got, want)
+	}
+
+	eng.compactionCount = 1
+	mainAfterReq, err := eng.buildRequestWithExtraItems(context.Background(), []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "after"}}, true)
+	if err != nil {
+		t.Fatalf("build main after request: %v", err)
+	}
+	mainAfter := send(mainAfterReq)
+	if got, want := mainAfter.sessionID, store.Meta().SessionID; got != want {
+		t.Fatalf("main after session_id header = %q, want %q", got, want)
+	}
+	if got, want := stringValue(mainAfter.payload["prompt_cache_key"]), conversationPromptCacheKey(store.Meta().SessionID, 1); got != want {
+		t.Fatalf("main after prompt_cache_key = %q, want %q", got, want)
+	}
+
+	reviewerAfterReq, err := eng.buildReviewerRequest(context.Background(), engineClient)
+	if err != nil {
+		t.Fatalf("build reviewer after request: %v", err)
+	}
+	reviewerAfter := send(reviewerAfterReq)
+	if got, want := reviewerAfter.sessionID, reviewerSessionID(store.Meta().SessionID); got != want {
+		t.Fatalf("reviewer after session_id header = %q, want %q", got, want)
+	}
+	if got, want := stringValue(reviewerAfter.payload["prompt_cache_key"]), reviewerPromptCacheKey(store.Meta().SessionID, 1); got != want {
+		t.Fatalf("reviewer after prompt_cache_key = %q, want %q", got, want)
+	}
+
+	if _, err := store.AppendEvent("legacy-compact", "history_replaced", historyReplacementPayload{
+		Engine: "local",
+		Mode:   string(compactionModeManual),
+		Items:  llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleAssistant, MessageType: llm.MessageTypeCompactionSummary, Content: "summary"}}),
+	}); err != nil {
+		t.Fatalf("append history_replaced: %v", err)
+	}
+	reopened, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	reopenedEng, err := New(reopened, engineClient, tools.NewRegistry(), Config{Model: "gpt-5", Reviewer: ReviewerConfig{Model: "gpt-5"}})
+	if err != nil {
+		t.Fatalf("new reopened engine: %v", err)
+	}
+	reopenedMainReq, err := reopenedEng.buildRequestWithExtraItems(context.Background(), []llm.ResponseItem{{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "reopened"}}, true)
+	if err != nil {
+		t.Fatalf("build reopened main request: %v", err)
+	}
+	reopenedMain := send(reopenedMainReq)
+	if got, want := reopenedMain.sessionID, reopened.Meta().SessionID; got != want {
+		t.Fatalf("reopened main session_id header = %q, want %q", got, want)
+	}
+	if got, want := stringValue(reopenedMain.payload["prompt_cache_key"]), conversationPromptCacheKey(reopened.Meta().SessionID, reopenedEng.compactionCountSnapshot()); got != want {
+		t.Fatalf("reopened main prompt_cache_key = %q, want %q", got, want)
+	}
+
+	reopenedReviewerReq, err := reopenedEng.buildReviewerRequest(context.Background(), engineClient)
+	if err != nil {
+		t.Fatalf("build reopened reviewer request: %v", err)
+	}
+	reopenedReviewer := send(reopenedReviewerReq)
+	if got, want := reopenedReviewer.sessionID, reviewerSessionID(reopened.Meta().SessionID); got != want {
+		t.Fatalf("reopened reviewer session_id header = %q, want %q", got, want)
+	}
+	if got, want := stringValue(reopenedReviewer.payload["prompt_cache_key"]), reviewerPromptCacheKey(reopened.Meta().SessionID, reopenedEng.compactionCountSnapshot()); got != want {
+		t.Fatalf("reopened reviewer prompt_cache_key = %q, want %q", got, want)
 	}
 }
 
@@ -228,6 +573,9 @@ func TestReviewerSuggestions_SkipsPromptCacheKeyForUnsupportedProvider(t *testin
 	}
 	if len(reviewerClient.calls) != 1 {
 		t.Fatalf("reviewer client calls = %d, want 1", len(reviewerClient.calls))
+	}
+	if got, want := reviewerClient.calls[0].SessionID, reviewerSessionID(store.Meta().SessionID); got != want {
+		t.Fatalf("reviewer SessionID = %q, want %q", got, want)
 	}
 	if reviewerClient.calls[0].PromptCacheKey != "" {
 		t.Fatalf("reviewer PromptCacheKey = %q, want empty", reviewerClient.calls[0].PromptCacheKey)
@@ -252,17 +600,62 @@ func TestReviewerSuggestions_UsesReviewerClientPromptCacheCapability(t *testing.
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
+	eng.compactionCount = 1
 	if _, err := eng.runReviewerSuggestions(context.Background(), "step-1", reviewerClient); err != nil {
 		t.Fatalf("run reviewer suggestions: %v", err)
 	}
 	if len(reviewerClient.calls) != 1 {
 		t.Fatalf("reviewer client calls = %d, want 1", len(reviewerClient.calls))
 	}
-	if reviewerClient.calls[0].PromptCacheKey != reviewerSessionID(store.Meta().SessionID) {
-		t.Fatalf("reviewer PromptCacheKey = %q, want %q", reviewerClient.calls[0].PromptCacheKey, reviewerSessionID(store.Meta().SessionID))
+	if got, want := reviewerClient.calls[0].SessionID, reviewerSessionID(store.Meta().SessionID); got != want {
+		t.Fatalf("reviewer SessionID = %q, want %q", got, want)
+	}
+	if got, want := reviewerClient.calls[0].PromptCacheKey, reviewerPromptCacheKey(store.Meta().SessionID, eng.compactionCountSnapshot()); got != want {
+		t.Fatalf("reviewer PromptCacheKey = %q, want %q", got, want)
 	}
 	if reviewerClient.calls[0].PromptCacheScope != cachewarn.ScopeReviewer {
 		t.Fatalf("reviewer PromptCacheScope = %q, want %q", reviewerClient.calls[0].PromptCacheScope, cachewarn.ScopeReviewer)
+	}
+}
+
+func TestReviewerSuggestions_PromptCacheKeyStaysOnReviewerSessionAfterConversationCompaction(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("legacy-compact", "history_replaced", historyReplacementPayload{
+		Engine: "local",
+		Mode:   string(compactionModeManual),
+		Items:  llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleAssistant, MessageType: llm.MessageTypeCompactionSummary, Content: "summary"}}),
+	}); err != nil {
+		t.Fatalf("append history_replaced: %v", err)
+	}
+
+	reopened, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	engineClient := &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true, SupportsPromptCacheKey: true}}
+	reviewerClient := &fakeClient{
+		caps:      llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true, SupportsPromptCacheKey: true},
+		responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`}}},
+	}
+	eng, err := New(reopened, engineClient, tools.NewRegistry(), Config{Model: "gpt-5", Reviewer: ReviewerConfig{Model: "gpt-5"}})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.runReviewerSuggestions(context.Background(), "step-1", reviewerClient); err != nil {
+		t.Fatalf("run reviewer suggestions: %v", err)
+	}
+	if len(reviewerClient.calls) != 1 {
+		t.Fatalf("reviewer client calls = %d, want 1", len(reviewerClient.calls))
+	}
+	if got, want := reviewerClient.calls[0].SessionID, reviewerSessionID(reopened.Meta().SessionID); got != want {
+		t.Fatalf("reviewer SessionID = %q, want %q", got, want)
+	}
+	if got, want := reviewerClient.calls[0].PromptCacheKey, reviewerPromptCacheKey(reopened.Meta().SessionID, eng.compactionCountSnapshot()); got != want {
+		t.Fatalf("reviewer PromptCacheKey = %q, want %q", got, want)
 	}
 }
 
@@ -281,13 +674,13 @@ func TestGenerateWithRetryClient_KeepsReviewerLineageIndependent(t *testing.T) {
 	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest("cache-key-1", "alpha"), nil, nil, nil); err != nil {
 		t.Fatalf("conversation first generate: %v", err)
 	}
-	if _, err := eng.generateWithRetryClient(context.Background(), "step-2", client, testReviewerPromptCacheRequest("cache-key-1-review", "beta"), nil, nil, nil); err != nil {
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-2", client, testReviewerPromptCacheRequest("cache-key-1/supervisor", "beta"), nil, nil, nil); err != nil {
 		t.Fatalf("reviewer first generate: %v", err)
 	}
 	if _, err := eng.generateWithRetryClient(context.Background(), "step-3", client, testPromptCacheRequest("cache-key-1", "alpha", "omega"), nil, nil, nil); err != nil {
 		t.Fatalf("conversation postfix generate: %v", err)
 	}
-	if _, err := eng.generateWithRetryClient(context.Background(), "step-4", client, testReviewerPromptCacheRequest("cache-key-1-review", "gamma"), nil, nil, nil); err != nil {
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-4", client, testReviewerPromptCacheRequest("cache-key-1/supervisor", "gamma"), nil, nil, nil); err != nil {
 		t.Fatalf("reviewer non-postfix generate: %v", err)
 	}
 
@@ -303,7 +696,7 @@ func TestGenerateWithRetryClient_KeepsReviewerLineageIndependent(t *testing.T) {
 	}
 }
 
-func TestGenerateWithRetryClient_DefaultModeUsesCompactionWarningForNextExactBreak(t *testing.T) {
+func TestGenerateWithRetryClient_CompactionRotatesConversationCacheKeyWithoutWarning(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -315,25 +708,22 @@ func TestGenerateWithRetryClient_DefaultModeUsesCompactionWarningForNextExactBre
 		t.Fatalf("new engine: %v", err)
 	}
 
-	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest(store.Meta().SessionID, "alpha"), nil, nil, nil); err != nil {
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest("cache-key-1", "alpha"), nil, nil, nil); err != nil {
 		t.Fatalf("first generate: %v", err)
 	}
 	if err := eng.replaceHistory("step-compact", "local", compactionModeManual, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleAssistant, MessageType: llm.MessageTypeCompactionSummary, Content: "summary"}})); err != nil {
 		t.Fatalf("replace history: %v", err)
 	}
 	if len(persistedCacheWarnings(t, store)) != 0 {
-		t.Fatal("expected compaction to defer cache warning until next same-key exact break")
+		t.Fatal("expected compaction to avoid warnings before the next rotated-key request")
 	}
-	if _, err := eng.generateWithRetryClient(context.Background(), "step-2", client, testPromptCacheRequest(store.Meta().SessionID, "beta"), nil, nil, nil); err != nil {
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-2", client, testPromptCacheRequest("cache-key-1/compact-1", "beta"), nil, nil, nil); err != nil {
 		t.Fatalf("second generate: %v", err)
 	}
 
 	warnings := persistedCacheWarnings(t, store)
-	if len(warnings) != 1 {
-		t.Fatalf("warning count = %d, want 1", len(warnings))
-	}
-	if warnings[0].Reason != cachewarn.ReasonCompaction {
-		t.Fatalf("warning reason = %q, want %q", warnings[0].Reason, cachewarn.ReasonCompaction)
+	if len(warnings) != 0 {
+		t.Fatalf("warning count = %d, want 0", len(warnings))
 	}
 }
 
@@ -382,7 +772,7 @@ func (f *failingCacheClient) ProviderCapabilities(context.Context) (llm.Provider
 	return f.caps, nil
 }
 
-func TestGenerateWithRetryClient_RestoresCompactionInvalidationAcrossEngineReopen(t *testing.T) {
+func TestGenerateWithRetryClient_RestorePreservesRotatedCompactionKeyWithoutWarning(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -394,7 +784,7 @@ func TestGenerateWithRetryClient_RestoresCompactionInvalidationAcrossEngineReope
 		t.Fatalf("new engine: %v", err)
 	}
 
-	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest(store.Meta().SessionID, "alpha"), nil, nil, nil); err != nil {
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest("cache-key-1", "alpha"), nil, nil, nil); err != nil {
 		t.Fatalf("first generate: %v", err)
 	}
 	if err := eng.replaceHistory("step-compact", "local", compactionModeManual, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleAssistant, MessageType: llm.MessageTypeCompactionSummary, Content: "summary"}})); err != nil {
@@ -414,42 +804,45 @@ func TestGenerateWithRetryClient_RestoresCompactionInvalidationAcrossEngineReope
 		t.Fatalf("new reopened engine: %v", err)
 	}
 
-	if _, err := reopenedEng.generateWithRetryClient(context.Background(), "step-2", reopenedClient, testPromptCacheRequest(reopened.Meta().SessionID, "beta"), nil, nil, nil); err != nil {
+	if _, err := reopenedEng.generateWithRetryClient(context.Background(), "step-2", reopenedClient, testPromptCacheRequest("cache-key-1/compact-1", "beta"), nil, nil, nil); err != nil {
 		t.Fatalf("generate after reopen: %v", err)
 	}
 
 	warnings := persistedCacheWarnings(t, reopened)
-	if len(warnings) != 1 {
-		t.Fatalf("warning count = %d, want 1", len(warnings))
-	}
-	if warnings[0].Reason != cachewarn.ReasonCompaction {
-		t.Fatalf("warning reason = %q, want %q", warnings[0].Reason, cachewarn.ReasonCompaction)
+	if len(warnings) != 0 {
+		t.Fatalf("warning count = %d, want 0", len(warnings))
 	}
 }
 
-func TestGenerateWithRetryClient_ReviewerRollbackClearsConversationLineage(t *testing.T) {
+func TestGenerateWithRetryClient_ReviewerRollbackClearsConversationAndReviewerLineage(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 10}}, {Usage: llm.Usage{InputTokens: 12}}, {Usage: llm.Usage{InputTokens: 14}}}}
+	client := &fakeClient{responses: []llm.Response{{Usage: llm.Usage{InputTokens: 10}}, {Usage: llm.Usage{InputTokens: 12}}, {Usage: llm.Usage{InputTokens: 14}}, {Usage: llm.Usage{InputTokens: 16}}}}
 	eng, err := New(store, client, tools.NewRegistry(), Config{Model: "gpt-5", CacheWarningMode: config.CacheWarningModeDefault})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
+	eng.compactionCount = 1
+	conversationKey := conversationPromptCacheKey(store.Meta().SessionID, eng.compactionCountSnapshot())
+	reviewerKey := reviewerPromptCacheKey(store.Meta().SessionID, eng.compactionCountSnapshot())
 
-	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest(store.Meta().SessionID, "alpha"), nil, nil, nil); err != nil {
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-1", client, testPromptCacheRequest(conversationKey, "alpha"), nil, nil, nil); err != nil {
 		t.Fatalf("first generate: %v", err)
 	}
-	if _, err := eng.generateWithRetryClient(context.Background(), "step-2", client, testPromptCacheRequest(store.Meta().SessionID, "alpha", "reviewer-feedback"), nil, nil, nil); err != nil {
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-2", client, testReviewerPromptCacheRequest(reviewerKey, "alpha", "reviewer-feedback"), nil, nil, nil); err != nil {
 		t.Fatalf("reviewer follow-up generate: %v", err)
 	}
 	if err := eng.replaceHistory("step-rollback", "reviewer_rollback", compactionModeManual, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "alpha"}})); err != nil {
 		t.Fatalf("reviewer rollback replace history: %v", err)
 	}
-	if _, err := eng.generateWithRetryClient(context.Background(), "step-3", client, testPromptCacheRequest(store.Meta().SessionID, "alpha", "omega"), nil, nil, nil); err != nil {
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-3", client, testPromptCacheRequest(conversationKey, "alpha", "omega"), nil, nil, nil); err != nil {
 		t.Fatalf("post-rollback generate: %v", err)
+	}
+	if _, err := eng.generateWithRetryClient(context.Background(), "step-4", client, testReviewerPromptCacheRequest(reviewerKey, "alpha", "post-rollback reviewer"), nil, nil, nil); err != nil {
+		t.Fatalf("post-rollback reviewer generate: %v", err)
 	}
 
 	warnings := persistedCacheWarnings(t, store)
@@ -559,6 +952,40 @@ func testReviewerPromptCacheRequest(cacheKey string, messages ...string) llm.Req
 	request := testPromptCacheRequest(cacheKey, messages...)
 	request.PromptCacheScope = cachewarn.ScopeReviewer
 	return request
+}
+
+func mustMarshalOpenAIResponsesPayloadForLineage(t *testing.T, request llm.Request, options llm.OpenAIResponsesPayloadOptions) []byte {
+	t.Helper()
+	data, err := llm.MarshalOpenAIResponsesRequestJSON(request, options)
+	if err != nil {
+		t.Fatalf("marshal openai responses payload: %v", err)
+	}
+	return data
+}
+
+func mustDecodeJSONMap(t *testing.T, data []byte) map[string]any {
+	t.Helper()
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("decode json map: %v", err)
+	}
+	return decoded
+}
+
+func mustMarshalCanonicalJSONForLineage(t *testing.T, value any) []byte {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal canonical json: %v", err)
+	}
+	return data
+}
+
+func stringValue(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return ""
 }
 
 func persistedCacheWarnings(t *testing.T, store *session.Store) []cachewarn.Warning {

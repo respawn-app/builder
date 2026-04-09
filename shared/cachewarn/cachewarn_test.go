@@ -16,7 +16,7 @@ func TestTextFormatsSupervisorCacheMiss(t *testing.T) {
 	}
 }
 
-func TestTextFormatsCompactionCacheMiss(t *testing.T) {
+func TestTextFormatsLegacyCompactionCacheMiss(t *testing.T) {
 	warning := Warning{Scope: ScopeConversation, Reason: ReasonCompaction, LostInputTokens: 0}
 	if got := Text(warning); got != "Cache miss: compaction, -0k tokens" {
 		t.Fatalf("Text() = %q", got)

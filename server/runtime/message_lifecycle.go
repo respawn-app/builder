@@ -8,7 +8,7 @@ import (
 
 	"builder/server/llm"
 	"builder/server/session"
-	"builder/shared/cachewarn"
+	"builder/server/tools"
 )
 
 type defaultMessageLifecycle struct {
@@ -18,7 +18,9 @@ type defaultMessageLifecycle struct {
 
 func (m *defaultMessageLifecycle) RestoreMessages() error {
 	e := m.engine
-	sessionID := e.store.Meta().SessionID
+	meta := e.store.Meta()
+	recoveredHandoff := newPersistedHandoffRecovery()
+	reminderIssued := meta.CompactionSoonReminderIssued
 	if err := e.store.WalkEvents(func(evt session.Event) error {
 		switch evt.Kind {
 		case "message":
@@ -27,8 +29,15 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 				return fmt.Errorf("decode message event: %w", err)
 			}
 			e.chat.appendMessage(msg)
+			recoveredHandoff.ApplyMessage(msg)
+			if isCompactionSoonReminderMessage(msg) {
+				reminderIssued = true
+			}
 		case "tool_completed":
 			if err := e.chat.restoreToolCompletionPayload(evt.Payload); err != nil {
+				return err
+			}
+			if err := recoveredHandoff.ApplyToolCompletion(evt.Payload); err != nil {
 				return err
 			}
 		case "local_entry":
@@ -56,19 +65,157 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 			}
 			if strings.TrimSpace(payload.Engine) == "reviewer_rollback" {
 				e.chat.restoreHistoryItems(payload.Items)
-				e.clearPromptCacheLineage(sessionID)
+				e.clearPromptCacheLineages(meta.SessionID, e.compactionCountSnapshot())
+				reminderIssued = itemsContainCompactionSoonReminder(payload.Items)
 			} else {
 				e.chat.replaceHistory(payload.Items)
-				e.notePromptCacheInvalidation(sessionID, cachewarn.ReasonCompaction)
 				e.compactionCount++
+				recoveredHandoff.ClearSatisfiedByCompaction()
+				reminderIssued = false
 			}
 		}
 		return nil
 	}); err != nil {
 		return err
 	}
+	e.setCompactionSoonReminderIssued(reminderIssued)
+	if err := e.store.SetCompactionSoonReminderIssued(reminderIssued); err != nil {
+		return err
+	}
+	if futureMessage := recoveredHandoff.PendingFutureMessage(); futureMessage != "" {
+		e.queuePendingHandoffFutureMessage(futureMessage)
+	}
+	if req, ok := recoveredHandoff.PendingRequest(); ok {
+		e.queueHandoffRequest(req.summarizerPrompt, req.futureAgentMessage)
+	}
 	return nil
 }
+
+func isCompactionSoonReminderMessage(msg llm.Message) bool {
+	return msg.Role == llm.RoleDeveloper && msg.MessageType == llm.MessageTypeCompactionSoonReminder && strings.TrimSpace(msg.Content) != ""
+}
+
+func itemsContainCompactionSoonReminder(items []llm.ResponseItem) bool {
+	for _, msg := range llm.MessagesFromItems(items) {
+		if isCompactionSoonReminderMessage(msg) {
+			return true
+		}
+	}
+	return false
+}
+
+type persistedHandoffRecovery struct {
+	toolCalls            map[string]llm.ToolCall
+	pending              *handoffRequest
+	pendingFutureMessage string
+}
+
+func newPersistedHandoffRecovery() *persistedHandoffRecovery {
+	return &persistedHandoffRecovery{toolCalls: make(map[string]llm.ToolCall)}
+}
+
+func (r *persistedHandoffRecovery) ApplyMessage(msg llm.Message) {
+	if r == nil {
+		return
+	}
+	if msg.MessageType == llm.MessageTypeHandoffFutureMessage && strings.TrimSpace(msg.Content) != "" {
+		r.pendingFutureMessage = ""
+	}
+	if msg.Role != llm.RoleAssistant {
+		return
+	}
+	for _, call := range msg.ToolCalls {
+		if tools.ID(strings.TrimSpace(call.Name)) != tools.ToolTriggerHandoff {
+			continue
+		}
+		callID := strings.TrimSpace(call.ID)
+		if callID == "" {
+			continue
+		}
+		r.toolCalls[callID] = llm.ToolCall{
+			ID:    callID,
+			Name:  string(tools.ToolTriggerHandoff),
+			Input: append(json.RawMessage(nil), call.Input...),
+		}
+	}
+}
+
+func (r *persistedHandoffRecovery) ApplyToolCompletion(payload []byte) error {
+	if r == nil {
+		return nil
+	}
+	var completion storedToolCompletion
+	if err := json.Unmarshal(payload, &completion); err != nil {
+		return fmt.Errorf("decode tool_completed event: %w", err)
+	}
+	if tools.ID(strings.TrimSpace(completion.Name)) != tools.ToolTriggerHandoff || completion.IsError {
+		delete(r.toolCalls, strings.TrimSpace(completion.CallID))
+		return nil
+	}
+	callID := strings.TrimSpace(completion.CallID)
+	if callID == "" {
+		return nil
+	}
+	call, ok := r.toolCalls[callID]
+	if !ok {
+		return nil
+	}
+	delete(r.toolCalls, callID)
+	req, ok := handoffRequestFromToolCall(call)
+	if !ok {
+		return nil
+	}
+	r.pending = req
+	return nil
+}
+
+func (r *persistedHandoffRecovery) ClearSatisfiedByCompaction() {
+	if r == nil {
+		return
+	}
+	if r.pending != nil {
+		if futureMessage := strings.TrimSpace(r.pending.futureAgentMessage); futureMessage != "" {
+			r.pendingFutureMessage = futureMessage
+		}
+	}
+	r.pending = nil
+	r.toolCalls = make(map[string]llm.ToolCall)
+}
+
+func (r *persistedHandoffRecovery) PendingFutureMessage() string {
+	if r == nil {
+		return ""
+	}
+	return strings.TrimSpace(r.pendingFutureMessage)
+}
+
+func (r *persistedHandoffRecovery) PendingRequest() (*handoffRequest, bool) {
+	if r == nil || r.pending == nil {
+		return nil, false
+	}
+	req := *r.pending
+	return &req, true
+}
+
+func handoffRequestFromToolCall(call llm.ToolCall) (*handoffRequest, bool) {
+	if tools.ID(strings.TrimSpace(call.Name)) != tools.ToolTriggerHandoff {
+		return nil, false
+	}
+	var input struct {
+		SummarizerPrompt   string `json:"summarizer_prompt,omitempty"`
+		FutureAgentMessage string `json:"future_agent_message,omitempty"`
+	}
+	if len(call.Input) > 0 {
+		if err := json.Unmarshal(call.Input, &input); err != nil {
+			return nil, false
+		}
+	}
+	return &handoffRequest{
+		summarizerPrompt:   strings.TrimSpace(input.SummarizerPrompt),
+		futureAgentMessage: strings.TrimSpace(input.FutureAgentMessage),
+	}, true
+}
+
 func normalizeQueuedUserMessages(messages []string) []string {
 	out := make([]string, 0, len(messages))
 	for _, message := range messages {

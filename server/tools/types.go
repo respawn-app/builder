@@ -15,6 +15,7 @@ const (
 	ToolViewImage            ID = "view_image"
 	ToolPatch                ID = "patch"
 	ToolAskQuestion          ID = "ask_question"
+	ToolTriggerHandoff       ID = "trigger_handoff"
 	ToolWebSearch            ID = "web_search"
 	ToolMultiToolUseParallel ID = "multi_tool_use_parallel"
 )

@@ -52,6 +52,7 @@ shell = true
 patch = true
 view_image = true
 web_search = true
+trigger_handoff = false
 
 [skills]
 apiresult = false
@@ -102,7 +103,7 @@ These flags overlay settings at startup.
 | `pre_submit_compaction_lead_tokens` | int | `35000` | `BUILDER_PRE_SUBMIT_COMPACTION_LEAD_TOKENS` |  | Fixed pre-submit runway reserve before auto-compaction. Builder compacts before sending the next user prompt when current usage is within `pre_submit_compaction_lead_tokens` of `context_compaction_threshold_tokens`. Must be `> 0`, and the resulting effective pre-submit threshold must stay at or above `50%` of `model_context_window`. Large prompts can still trigger pre-submit compaction even below this runway reserve. |
 | `minimum_exec_to_bg_seconds` | int | `15` | `BUILDER_MINIMUM_EXEC_TO_BG_SECONDS` |  | Minimum `exec_command` yield time before Builder backgrounds the command. Lower values are clamped up. |
 | `compaction_mode` | string | `local` | `BUILDER_COMPACTION_MODE` |  | Allowed: `native`, `local`, `none`. `native` prefers provider-native compaction and falls back to local compaction. `local` always uses local summary compaction. `none` disables auto-compaction and makes manual compaction fail. |
-| `cache_warning_mode` | string | `default` | `BUILDER_CACHE_WARNING_MODE` |  | Prompt-cache warning policy. Allowed: `off`, `default`, `verbose`. `default` catches unwanted invalidations and also shows the dedicated compaction warning. `verbose` includes everything from `default` and additionally surfaces broader invalidation diagnostics such as provider-reported cache reuse drops for postfix-compatible requests when the provider does not expose the cause. |
+| `cache_warning_mode` | string | `default` | `BUILDER_CACHE_WARNING_MODE` |  | Prompt-cache warning policy. Allowed: `off`, `default`, `verbose`. `default` catches unwanted invalidations. `verbose` includes everything from `default` and additionally surfaces broader invalidation diagnostics such as provider-reported cache reuse drops for postfix-compatible requests when the provider does not expose the cause. |
 | `shell_output_max_chars` | int | `16000` | `BUILDER_SHELL_OUTPUT_MAX_CHARS` |  | Output budget for shell tools and background-shell notices before they are truncated. Must be `> 0`. |
 | `bg_shells_output` | string | `default` | `BUILDER_BG_SHELLS_OUTPUT` |  | Background-shell output mode (injection of outputs into model context). Allowed: `default`, `verbose`, `concise`. Verbose dumps all output into the main agent's model. Concise forces it to read output files. Default outputs truncated previews + gives a file path. |
 | `persistence_root` | string | `~/.builder` | `BUILDER_PERSISTENCE_ROOT` |  | Root for auth, session, and workspace index storage. Supports `~` expansion. Does not change the location of `~/.builder/config.toml`. |
@@ -163,6 +164,7 @@ Builder's generated `config.toml` omits `[tools]` entirely until you want explic
 | `tools.exec_command` | `true` | The primary shell tool |
 | `tools.multi_tool_use_parallel` | `model-derived` | Parallel tool-use compatibility layer for Codex models. Parallelism is already supported natively without this tool. |
 | `tools.patch` | `true` | The edit tool |
+| `tools.trigger_handoff` | `false` | Experimental tool the agents can use to proactively compact their own context. |
 | `tools.view_image` | `true` | Ability to view images and PDFs (if supported) |
 | `tools.web_search` | `true` | Tool to search the web |
 | `tools.write_stdin` | `true` | Interaction with background shells. |

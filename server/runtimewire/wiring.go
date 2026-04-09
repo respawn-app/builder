@@ -12,6 +12,7 @@ import (
 	"builder/server/tools"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
+	triggerhandofftool "builder/server/tools/triggerhandoff"
 	"builder/shared/config"
 )
 
@@ -46,6 +47,7 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		return nil, err
 	}
 
+	var eng *runtime.Engine
 	toolRegistry, askBroker, background, err := BuildToolRegistry(
 		workspaceRoot,
 		store.Meta().SessionID,
@@ -57,6 +59,7 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		llm.LockedContractSupportsVisionInputs(store.Meta().Locked, active.Model),
 		logger,
 		background,
+		func() triggerhandofftool.Controller { return eng },
 	)
 	if err != nil {
 		return nil, err
@@ -108,7 +111,7 @@ func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings
 		}
 	})
 	providerCapsOverride, hasProviderCapsOverride := llm.ProviderCapabilitiesFromOverride(active.ProviderCapabilities)
-	eng, err := runtime.New(store, client, toolRegistry, runtime.Config{
+	eng, err = runtime.New(store, client, toolRegistry, runtime.Config{
 		Model:             active.Model,
 		Temperature:       1,
 		MaxTokens:         0,

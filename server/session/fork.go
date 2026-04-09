@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -47,6 +48,7 @@ func ForkAtUserMessage(parent *Store, userMessageIndex int, forkName string) (*S
 	child.mu.Lock()
 	child.meta.Locked = cloneLockedContract(parentMeta.Locked)
 	child.meta.AgentsInjected = parentMeta.AgentsInjected
+	child.meta.CompactionSoonReminderIssued = reminderIssuedFromReplayEvents(replay)
 	child.meta.ParentSessionID = parentMeta.SessionID
 	child.meta.Name = strings.TrimSpace(forkName)
 	child.meta.Continuation = cloneContinuationContext(parentMeta.Continuation)
@@ -75,4 +77,76 @@ func cloneContinuationContext(in *ContinuationContext) *ContinuationContext {
 	}
 	copyContext := *in
 	return &copyContext
+}
+
+func reminderIssuedFromReplayEvents(events []ReplayEvent) bool {
+	issued := false
+	for _, evt := range events {
+		switch evt.Kind {
+		case "message":
+			var msg reminderEventMessage
+			if err := json.Unmarshal(evt.Payload, &msg); err != nil {
+				continue
+			}
+			if isCompactionSoonReminderMessage(msg) {
+				issued = true
+			}
+		case "history_replaced":
+			var payload struct {
+				Engine string            `json:"engine"`
+				Items  []json.RawMessage `json:"items"`
+			}
+			if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+				continue
+			}
+			if strings.TrimSpace(payload.Engine) == "reviewer_rollback" {
+				issued = itemsContainCompactionSoonReminder(payload.Items)
+				continue
+			}
+			issued = false
+		}
+	}
+	return issued
+}
+
+type reminderMessageLike interface {
+	GetRole() string
+	GetMessageType() string
+	GetContent() string
+}
+
+func isCompactionSoonReminderMessage(msg reminderMessageLike) bool {
+	return strings.TrimSpace(msg.GetRole()) == "developer" && strings.TrimSpace(msg.GetMessageType()) == "compaction_soon_reminder" && strings.TrimSpace(msg.GetContent()) != ""
+}
+
+type reminderEventMessage struct {
+	Role        string `json:"role"`
+	MessageType string `json:"message_type"`
+	Content     string `json:"content"`
+}
+
+func (m reminderEventMessage) GetRole() string        { return m.Role }
+func (m reminderEventMessage) GetMessageType() string { return m.MessageType }
+func (m reminderEventMessage) GetContent() string     { return m.Content }
+
+func itemsContainCompactionSoonReminder(items []json.RawMessage) bool {
+	for _, raw := range items {
+		var item struct {
+			Type        string `json:"type"`
+			Role        string `json:"role"`
+			MessageType string `json:"message_type"`
+			Content     string `json:"content"`
+		}
+		if err := json.Unmarshal(raw, &item); err != nil {
+			continue
+		}
+		if strings.TrimSpace(item.Type) != "message" {
+			continue
+		}
+		msg := reminderEventMessage{Role: item.Role, MessageType: item.MessageType, Content: item.Content}
+		if isCompactionSoonReminderMessage(msg) {
+			return true
+		}
+	}
+	return false
 }

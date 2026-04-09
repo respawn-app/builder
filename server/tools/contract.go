@@ -78,6 +78,7 @@ const (
 	LocalRuntimeBuilderViewImage            LocalRuntimeBuilder = "view_image"
 	LocalRuntimeBuilderPatch                LocalRuntimeBuilder = "patch"
 	LocalRuntimeBuilderAskQuestion          LocalRuntimeBuilder = "ask_question"
+	LocalRuntimeBuilderTriggerHandoff       LocalRuntimeBuilder = "trigger_handoff"
 	LocalRuntimeBuilderMultiToolUseParallel LocalRuntimeBuilder = "multi_tool_use_parallel"
 )
 

@@ -7,6 +7,7 @@ import (
 	patchtool "builder/server/tools/patch"
 	readimagetool "builder/server/tools/readimage"
 	shelltool "builder/server/tools/shell"
+	triggerhandofftool "builder/server/tools/triggerhandoff"
 	"fmt"
 	"time"
 )
@@ -25,6 +26,7 @@ type LocalToolRuntimeContext struct {
 	RegistryProvider                func() *tools.Registry
 	AskQuestionBroker               *askquestion.Broker
 	BackgroundShellManager          *shelltool.Manager
+	TriggerHandoffController        func() triggerhandofftool.Controller
 	OutsideWorkspaceEditApprover    patchtool.OutsideWorkspaceApprover
 	OutsideWorkspaceReadApprover    patchtool.OutsideWorkspaceApprover
 	ViewImageOutsideWorkspaceLogger readimagetool.OutsideWorkspaceAuditLogger
@@ -59,6 +61,11 @@ func BuildLocalRuntimeHandler(def tools.Definition, ctx LocalToolRuntimeContext)
 			return nil, fmt.Errorf("ask_question broker is unavailable")
 		}
 		return askquestion.NewTool(ctx.AskQuestionBroker), nil
+	case tools.LocalRuntimeBuilderTriggerHandoff:
+		if ctx.TriggerHandoffController == nil {
+			return nil, fmt.Errorf("trigger_handoff controller is unavailable")
+		}
+		return triggerhandofftool.New(ctx.TriggerHandoffController), nil
 	case tools.LocalRuntimeBuilderViewImage:
 		if ctx.OutsideWorkspaceReadApprover == nil {
 			return nil, fmt.Errorf("view_image outside-workspace approver is unavailable")
@@ -81,7 +88,7 @@ func BuildLocalRuntimeHandler(def tools.Definition, ctx LocalToolRuntimeContext)
 	}
 }
 
-func BuildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []tools.ID, shellDefaultTimeout time.Duration, minimumExecToBgTime time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsVision bool, logger Logger, background *shelltool.Manager) (*tools.Registry, *askquestion.Broker, *shelltool.Manager, error) {
+func BuildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []tools.ID, shellDefaultTimeout time.Duration, minimumExecToBgTime time.Duration, shellOutputMaxChars int, allowNonCwdEdits bool, supportsVision bool, logger Logger, background *shelltool.Manager, triggerHandoffController func() triggerhandofftool.Controller) (*tools.Registry, *askquestion.Broker, *shelltool.Manager, error) {
 	broker := askquestion.NewBroker()
 	if background == nil {
 		var err error
@@ -102,6 +109,7 @@ func BuildToolRegistry(workspaceRoot string, ownerSessionID string, enabled []to
 		SupportsVision:               supportsVision,
 		AskQuestionBroker:            broker,
 		BackgroundShellManager:       background,
+		TriggerHandoffController:     triggerHandoffController,
 		OutsideWorkspaceEditApprover: patchtool.OutsideWorkspaceApprover(patchOutsideWorkspaceApprover.Approve),
 		OutsideWorkspaceReadApprover: patchtool.OutsideWorkspaceApprover(readOutsideWorkspaceApprover.Approve),
 		ViewImageOutsideWorkspaceLogger: readimagetool.OutsideWorkspaceAuditLogger(func(entry readimagetool.OutsideWorkspaceAudit) {

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	"builder/server/llm"
-	"builder/shared/cachewarn"
 )
 
 const (
@@ -40,15 +40,21 @@ func (e *Engine) replaceHistory(stepID, engine string, mode compactionMode, item
 		Mode:   string(mode),
 		Items:  llm.CloneResponseItems(items),
 	}
+	reminderIssued := false
 	if payload.Engine == "reviewer_rollback" {
 		e.chat.restoreHistoryItems(payload.Items)
-		e.clearPromptCacheLineage(e.store.Meta().SessionID)
+		e.syncCompactionSoonReminderIssuedFromItems(payload.Items)
+		e.clearActivePromptCacheLineages()
+		reminderIssued = e.handoffToolEnabled()
 	} else {
 		e.chat.replaceHistory(payload.Items)
-		e.notePromptCacheInvalidation(e.store.Meta().SessionID, cachewarn.ReasonCompaction)
+		e.setCompactionSoonReminderIssued(false)
 	}
 	_, err := e.store.AppendEvent(stepID, "history_replaced", payload)
 	if err == nil {
+		if persistErr := e.store.SetCompactionSoonReminderIssued(reminderIssued); persistErr != nil {
+			return persistErr
+		}
 		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
 	}
 	return err
@@ -599,4 +605,163 @@ func estimateTextTokens(value string) int {
 		return 0
 	}
 	return (len(value) + 3) / 4
+}
+
+// estimateTextTokensPOC keeps the more sophisticated local heuristic around for
+// future calibration work, but the runtime currently uses estimateTextTokens.
+func estimateTextTokensPOC(value string) int {
+	if value == "" {
+		return 0
+	}
+	total := 0
+	currentKind := estimatedWordKindNone
+	currentLen := 0
+	prevWasLower := false
+	prevWasDigit := false
+
+	flushWord := func() {
+		if currentLen <= 0 {
+			currentKind = estimatedWordKindNone
+			prevWasLower = false
+			prevWasDigit = false
+			return
+		}
+		total += estimateWordPieceTokensPOC(currentLen, currentKind)
+		currentKind = estimatedWordKindNone
+		currentLen = 0
+		prevWasLower = false
+		prevWasDigit = false
+	}
+
+	for _, r := range value {
+		switch {
+		case unicode.IsSpace(r):
+			flushWord()
+		case isCJKRunePOC(r):
+			flushWord()
+			total++
+		case isEstimatedWordRunePOC(r):
+			nextKind := classifyEstimatedWordRunePOC(r)
+			nextIsLower := unicode.IsLower(r)
+			nextIsDigit := unicode.IsDigit(r)
+			if currentLen > 0 && shouldSplitEstimatedWordPiecePOC(currentKind, nextKind, prevWasLower, nextIsLower, prevWasDigit, nextIsDigit) {
+				flushWord()
+			}
+			if currentLen == 0 {
+				currentKind = nextKind
+			} else if currentKind != nextKind {
+				currentKind = estimatedWordKindMixed
+			}
+			currentLen++
+			prevWasLower = nextIsLower
+			prevWasDigit = nextIsDigit
+		default:
+			flushWord()
+			total += estimatePunctuationTokensPOC(r)
+		}
+	}
+	flushWord()
+	return total
+}
+
+type estimatedWordKind uint8
+
+const (
+	estimatedWordKindNone estimatedWordKind = iota
+	estimatedWordKindLower
+	estimatedWordKindUpper
+	estimatedWordKindDigit
+	estimatedWordKindOtherLetter
+	estimatedWordKindMixed
+)
+
+func isEstimatedWordRunePOC(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
+func classifyEstimatedWordRunePOC(r rune) estimatedWordKind {
+	switch {
+	case unicode.IsDigit(r):
+		return estimatedWordKindDigit
+	case r <= unicode.MaxASCII && unicode.IsLower(r):
+		return estimatedWordKindLower
+	case r <= unicode.MaxASCII && unicode.IsUpper(r):
+		return estimatedWordKindUpper
+	default:
+		return estimatedWordKindOtherLetter
+	}
+}
+
+func shouldSplitEstimatedWordPiecePOC(currentKind, nextKind estimatedWordKind, prevWasLower, nextIsLower, prevWasDigit, nextIsDigit bool) bool {
+	if currentKind == estimatedWordKindNone {
+		return false
+	}
+	if prevWasDigit != nextIsDigit {
+		return true
+	}
+	if prevWasLower && nextKind == estimatedWordKindUpper {
+		return true
+	}
+	if currentKind == estimatedWordKindOtherLetter || nextKind == estimatedWordKindOtherLetter {
+		return false
+	}
+	if currentKind == estimatedWordKindUpper && nextIsLower {
+		return false
+	}
+	return false
+}
+
+func estimateWordPieceTokensPOC(length int, kind estimatedWordKind) int {
+	if length <= 0 {
+		return 0
+	}
+	estimate := 1
+	switch kind {
+	case estimatedWordKindDigit:
+		estimate = estimatePiecewiseWordTokensPOC(length, 3, 16, 3)
+	case estimatedWordKindUpper:
+		estimate = estimatePiecewiseWordTokensPOC(length, 4, 16, 4)
+	case estimatedWordKindLower:
+		estimate = estimatePiecewiseWordTokensPOC(length, 7, 16, 4)
+	case estimatedWordKindOtherLetter:
+		estimate = estimatePiecewiseWordTokensPOC(length, 5, 16, 4)
+	case estimatedWordKindMixed:
+		estimate = estimatePiecewiseWordTokensPOC(length, 5, 16, 4)
+	default:
+		return estimate
+	}
+	if length >= 128 {
+		denseFallback := (length + 3) / 4
+		if denseFallback > estimate {
+			estimate = denseFallback
+		}
+	}
+	return estimate
+}
+
+func estimatePiecewiseWordTokensPOC(length int, shortDivisor int, tailStart int, tailDivisor int) int {
+	if length <= 0 {
+		return 0
+	}
+	if length <= tailStart {
+		return 1 + (length-1)/shortDivisor
+	}
+	head := 1 + (tailStart-1)/shortDivisor
+	return head + (length-tailStart)/tailDivisor
+}
+
+func estimatePunctuationTokensPOC(r rune) int {
+	if unicode.IsPunct(r) || unicode.IsSymbol(r) {
+		return 1
+	}
+	return 1
+}
+
+func isCJKRunePOC(r rune) bool {
+	return unicode.In(r,
+		unicode.Han,
+		unicode.Hiragana,
+		unicode.Katakana,
+		unicode.Hangul,
+	)
 }

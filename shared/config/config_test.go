@@ -67,8 +67,14 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.EnabledTools[tools.ToolMultiToolUseParallel] {
 		t.Fatalf("expected %s disabled in static defaults; it should be derived from model capability", tools.ToolMultiToolUseParallel)
 	}
+	if cfg.Settings.EnabledTools[tools.ToolTriggerHandoff] {
+		t.Fatalf("expected %s disabled in static defaults", tools.ToolTriggerHandoff)
+	}
 	if got := cfg.Source.Sources["tools.multi_tool_use_parallel"]; got != "default" {
 		t.Fatalf("expected untouched %s source to remain default, got %q", tools.ToolMultiToolUseParallel, got)
+	}
+	if got := cfg.Source.Sources["tools.trigger_handoff"]; got != "default" {
+		t.Fatalf("expected untouched %s source to remain default, got %q", tools.ToolTriggerHandoff, got)
 	}
 	if !cfg.Settings.EnabledTools[tools.ToolWebSearch] {
 		t.Fatalf("expected web_search tool enabled by default: %+v", cfg.Settings.EnabledTools)
@@ -116,10 +122,13 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 		t.Fatalf("expected default reviewer verbose_output=false")
 	}
 	settingsBytes := []byte(defaultSettingsTOML())
-	if !strings.Contains(string(settingsBytes), "model_verbosity = \"medium\"") {
+	if !strings.Contains(string(settingsBytes), "# Config reference: https://opensource.respawn.pro/builder/config/") {
+		t.Fatalf("expected default config to include config reference header, got %q", string(settingsBytes))
+	}
+	if !strings.Contains(string(settingsBytes), "# model_verbosity = \"medium\"") {
 		t.Fatalf("expected default config to expose model_verbosity option, got %q", string(settingsBytes))
 	}
-	if !strings.Contains(string(settingsBytes), "pre_submit_compaction_lead_tokens = 35000") {
+	if !strings.Contains(string(settingsBytes), "# pre_submit_compaction_lead_tokens = 35000") {
 		t.Fatalf("expected default config to expose pre-submit runway default, got %q", string(settingsBytes))
 	}
 	if strings.Contains(string(settingsBytes), "thinking_level = \"low\"") {
@@ -131,32 +140,87 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if !strings.Contains(string(settingsBytes), "verbose_output = false") {
 		t.Fatalf("expected default config to expose reviewer.verbose_output, got %q", string(settingsBytes))
 	}
-	if !strings.Contains(string(settingsBytes), "# [skills]") {
-		t.Fatalf("expected default config to mention skills toggles, got %q", string(settingsBytes))
+	if !strings.Contains(string(settingsBytes), "# model = \"gpt-5.4\" # inherited from main model unless overridden") {
+		t.Fatalf("expected default config to show inherited reviewer model line, got %q", string(settingsBytes))
 	}
-	if strings.Contains(string(settingsBytes), "[tools]") {
-		t.Fatalf("expected default config to omit [tools] section entirely, got %q", string(settingsBytes))
+	if !strings.Contains(string(settingsBytes), "[tools]") {
+		t.Fatalf("expected default config to include tools section, got %q", string(settingsBytes))
+	}
+	if !strings.Contains(string(settingsBytes), "# ask_question = true") {
+		t.Fatalf("expected default config to include commented default tool values, got %q", string(settingsBytes))
+	}
+	if strings.Contains(string(settingsBytes), "[model_capabilities]") || strings.Contains(string(settingsBytes), "[provider_capabilities]") {
+		t.Fatalf("expected default config to omit capability sections without overrides, got %q", string(settingsBytes))
 	}
 	if strings.Contains(string(settingsBytes), "This JSON block mirrors") {
 		t.Fatalf("expected default config to omit mirrored JSON block, got %q", string(settingsBytes))
 	}
 }
 
-func TestSettingsTOMLOmitsDefaultAssignmentsForOnboarding(t *testing.T) {
+func TestSettingsTOMLCommentsDefaultAssignmentsForOnboarding(t *testing.T) {
 	toml := settingsTOML(defaultSettings())
-	if strings.Contains(toml, "theme =") {
-		t.Fatalf("expected onboarding config to omit auto theme default, got %q", toml)
+	if !strings.Contains(toml, "# theme = \"auto\"") {
+		t.Fatalf("expected onboarding config to comment auto theme default, got %q", toml)
 	}
-	for _, forbidden := range []string{
-		"provider_override = \"\"",
-		"openai_base_url = \"\"",
-		"This JSON block mirrors",
+	for _, want := range []string{
+		"# provider_override = \"\"",
+		"# openai_base_url = \"\"",
 		"[reviewer]",
 		"[timeouts]",
+		"[tools]",
 	} {
-		if strings.Contains(toml, forbidden) {
-			t.Fatalf("expected onboarding config to omit %q, got %q", forbidden, toml)
+		if !strings.Contains(toml, want) {
+			t.Fatalf("expected onboarding config to include %q, got %q", want, toml)
 		}
+	}
+	if strings.Contains(toml, "This JSON block mirrors") {
+		t.Fatalf("expected onboarding config to omit mirrored JSON block, got %q", toml)
+	}
+}
+
+func TestSettingsTOMLForOnboardingMatchesRequestedShape(t *testing.T) {
+	settings := defaultSettings()
+	settings.Model = "Custom_selected_during_onboarding_hence_uncommented"
+	settings.Theme = "auto"
+	settings.ModelVerbosity = ModelVerbosityLow
+	settings.Reviewer.Model = "gpt-5.4-mini"
+	settings.Reviewer.ThinkingLevel = "high"
+
+	toml := settingsTOMLForOnboarding(settings, map[string]bool{
+		"model":                   true,
+		"theme":                   true,
+		"reviewer.model":          true,
+		"reviewer.thinking_level": true,
+	})
+
+	for _, want := range []string{
+		"# Edit and restart to apply changes.",
+		"# Config reference: https://opensource.respawn.pro/builder/config/",
+		"# model changes are applied only when creating a new session",
+		"model = \"Custom_selected_during_onboarding_hence_uncommented\"",
+		"# thinking_level = \"medium\"",
+		"theme = \"auto\"",
+		"model_verbosity = \"low\"",
+		"[tools]",
+		"[reviewer]",
+		"model = \"gpt-5.4-mini\"",
+		"thinking_level = \"high\"",
+		"# frequency = \"edits\"",
+		"# timeout_seconds = 60",
+		"# verbose_output = false",
+	} {
+		if !strings.Contains(toml, want) {
+			t.Fatalf("expected onboarding config to contain %q, got %q", want, toml)
+		}
+	}
+	if strings.Contains(toml, "[model_capabilities]") || strings.Contains(toml, "[provider_capabilities]") {
+		t.Fatalf("expected onboarding config to omit capability sections without overrides, got %q", toml)
+	}
+	if strings.Index(toml, "model = \"Custom_selected_during_onboarding_hence_uncommented\"") > strings.Index(toml, "[tools]") {
+		t.Fatalf("expected model section before tools, got %q", toml)
+	}
+	if strings.Index(toml, "[tools]") > strings.Index(toml, "[reviewer]") {
+		t.Fatalf("expected tools section before reviewer section, got %q", toml)
 	}
 }
 
@@ -293,6 +357,37 @@ func TestWriteSettingsFileForOnboardingPreservesModelWhenProviderOverrideIsSet(t
 	}
 	if _, err := Load(workspace, LoadOptions{}); err != nil {
 		t.Fatalf("expected persisted provider_override config to load successfully, got %v", err)
+	}
+}
+
+func TestWriteSettingsFileForOnboardingWithOptionsPreservesExplicitReviewerOverrides(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	settings := defaultSettings()
+	settings.Reviewer.Model = "gpt-5.4-mini"
+	settings.Reviewer.ThinkingLevel = "high"
+
+	path, err := WriteSettingsFileForOnboardingWithOptions(settings, OnboardingWriteOptions{
+		PreservedDefaults: map[string]bool{
+			"reviewer.model":          true,
+			"reviewer.thinking_level": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("write onboarding settings: %v", err)
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read settings file: %v", err)
+	}
+	if !strings.Contains(string(contents), "[reviewer]") {
+		t.Fatalf("expected reviewer section to be persisted, got %q", string(contents))
+	}
+	if !strings.Contains(string(contents), "model = \"gpt-5.4-mini\"") {
+		t.Fatalf("expected reviewer model override to be persisted, got %q", string(contents))
+	}
+	if !strings.Contains(string(contents), "thinking_level = \"high\"") {
+		t.Fatalf("expected reviewer thinking override to be persisted, got %q", string(contents))
 	}
 }
 
@@ -953,6 +1048,31 @@ func TestLoadWebSearchNativeRespectsExplicitToolToggle(t *testing.T) {
 	}
 	if got := cfg.Source.Sources["tools.web_search"]; got != "file" {
 		t.Fatalf("expected tools.web_search source file, got %q", got)
+	}
+}
+
+func TestLoadTriggerHandoffToolToggleFromFile(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("[tools]\ntrigger_handoff = true\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Settings.EnabledTools[tools.ToolTriggerHandoff] {
+		t.Fatalf("expected explicit tools.trigger_handoff=true to enable the tool")
+	}
+	if got := cfg.Source.Sources["tools.trigger_handoff"]; got != "file" {
+		t.Fatalf("expected tools.trigger_handoff source file, got %q", got)
 	}
 }
 

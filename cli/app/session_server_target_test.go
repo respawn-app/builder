@@ -162,6 +162,86 @@ func TestStartSessionServerUsesDiscoveredDaemonForInteractiveFlow(t *testing.T) 
 	}
 }
 
+func TestShouldBypassRemoteStartupForInteractiveOnboardingOnFirstRun(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	bypass, err := shouldBypassRemoteStartupForInteractiveOnboarding(Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, &stubAuthInteractor{})
+	if err != nil {
+		t.Fatalf("shouldBypassRemoteStartupForInteractiveOnboarding: %v", err)
+	}
+	if !bypass {
+		t.Fatal("expected first-run interactive startup to bypass remote onboarding paths")
+	}
+}
+
+func TestShouldBypassRemoteStartupForInteractiveOnboardingSkipsWhenConfigExists(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	if _, _, err := config.WriteDefaultSettingsFile(); err != nil {
+		t.Fatalf("WriteDefaultSettingsFile: %v", err)
+	}
+
+	bypass, err := shouldBypassRemoteStartupForInteractiveOnboarding(Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, &stubAuthInteractor{})
+	if err != nil {
+		t.Fatalf("shouldBypassRemoteStartupForInteractiveOnboarding: %v", err)
+	}
+	if bypass {
+		t.Fatal("expected configured interactive startup to keep remote onboarding paths enabled")
+	}
+}
+
+func TestStartSessionServerBypassesRemoteAndDaemonOnFirstInteractiveRun(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	originalDial := dialInteractiveRemoteSessionServer
+	originalLaunch := launchSessionServerDaemon
+	originalEmbedded := startInteractiveEmbeddedSessionServer
+	defer func() {
+		dialInteractiveRemoteSessionServer = originalDial
+		launchSessionServerDaemon = originalLaunch
+		startInteractiveEmbeddedSessionServer = originalEmbedded
+	}()
+
+	remoteCalled := false
+	daemonCalled := false
+	embeddedCalled := false
+	startInteractiveEmbeddedSessionServer = func(_ context.Context, _ Options, _ authInteractor) (*embeddedAppServer, error) {
+		embeddedCalled = true
+		return &embeddedAppServer{}, nil
+	}
+	dialInteractiveRemoteSessionServer = func(context.Context, Options, authInteractor) (*remoteAppServer, bool, error) {
+		remoteCalled = true
+		return nil, false, nil
+	}
+	launchSessionServerDaemon = func(context.Context, Options) (*client.Remote, func() error, bool, error) {
+		daemonCalled = true
+		return nil, nil, false, nil
+	}
+
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, &stubAuthInteractor{})
+	if err != nil {
+		t.Fatalf("startSessionServer: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+	if !embeddedCalled {
+		t.Fatal("expected embedded startup path to be used")
+	}
+	if remoteCalled {
+		t.Fatal("expected remote startup path to be skipped on first interactive run")
+	}
+	if daemonCalled {
+		t.Fatal("expected daemon launch path to be skipped on first interactive run")
+	}
+	if _, ok := server.(*embeddedAppServer); !ok {
+		t.Fatalf("expected embedded app server, got %T", server)
+	}
+}
+
 func TestStartSessionServerRejectsIncompatibleDiscoveredDaemonAndFallsBack(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
