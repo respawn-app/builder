@@ -238,6 +238,7 @@ func (m *uiModel) navigateSlashCommandPicker(delta int) bool {
 	m.invalidateMainInputDraftToken()
 	m.input = "/" + state.matches[nextSelection].Name
 	m.inputCursor = -1
+	m.refreshPathReferenceFromInput()
 	return true
 }
 

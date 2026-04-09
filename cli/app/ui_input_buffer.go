@@ -27,7 +27,7 @@ func (m *uiModel) replaceMainInput(text string, cursor int) {
 	m.input = text
 	m.inputCursor = cursor
 	m.syncPromptHistorySelectionToInput()
-	m.refreshSlashCommandFilterFromInput()
+	m.refreshAutocompleteFromInput()
 }
 
 func (m *uiModel) clearInput() {
@@ -43,7 +43,7 @@ func (m *uiModel) insertInputRunes(chars []rune) {
 	m.input = updated
 	m.inputCursor = nextCursor
 	m.syncPromptHistorySelectionToInput()
-	m.refreshSlashCommandFilterFromInput()
+	m.refreshAutocompleteFromInput()
 }
 
 func (m *uiModel) backspaceInput() bool {
@@ -54,43 +54,51 @@ func (m *uiModel) backspaceInput() bool {
 	m.input = updated
 	m.inputCursor = nextCursor
 	m.syncPromptHistorySelectionToInput()
-	m.refreshSlashCommandFilterFromInput()
+	m.refreshAutocompleteFromInput()
 	return true
 }
 
 func (m *uiModel) moveCursorLeft() {
 	m.inputCursor = moveBufferCursorLeft(m.input, m.inputCursor)
+	m.refreshAutocompleteFromInput()
 }
 
 func (m *uiModel) moveCursorRight() {
 	m.inputCursor = moveBufferCursorRight(m.input, m.inputCursor)
+	m.refreshAutocompleteFromInput()
 }
 
 func (m *uiModel) moveCursorStart() {
 	m.inputCursor = moveBufferCursorStart()
+	m.refreshAutocompleteFromInput()
 }
 
 func (m *uiModel) moveCursorEnd() {
 	m.inputCursor = moveBufferCursorEnd()
+	m.refreshAutocompleteFromInput()
 }
 
 func (m *uiModel) moveCursorWordLeft() {
 	m.inputCursor = moveBufferCursorWordLeft(m.input, m.inputCursor)
+	m.refreshAutocompleteFromInput()
 }
 
 func (m *uiModel) moveCursorWordRight() {
 	m.inputCursor = moveBufferCursorWordRight(m.input, m.inputCursor)
+	m.refreshAutocompleteFromInput()
 }
 
 func (m *uiModel) moveCursorUpLine() bool {
 	nextCursor, moved := moveBufferCursorUpLine(m.input, m.inputCursor)
 	m.inputCursor = nextCursor
+	m.refreshAutocompleteFromInput()
 	return moved
 }
 
 func (m *uiModel) moveCursorDownLine() bool {
 	nextCursor, moved := moveBufferCursorDownLine(m.input, m.inputCursor)
 	m.inputCursor = nextCursor
+	m.refreshAutocompleteFromInput()
 	return moved
 }
 
@@ -102,7 +110,7 @@ func (m *uiModel) deleteCurrentInputLine() bool {
 	m.input = updated
 	m.inputCursor = nextCursor
 	m.syncPromptHistorySelectionToInput()
-	m.refreshSlashCommandFilterFromInput()
+	m.refreshAutocompleteFromInput()
 	return true
 }
 

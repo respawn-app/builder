@@ -81,32 +81,46 @@ func (l uiViewLayout) renderChatContentLines(rawLines []string, lineKinds []tui.
 	return out
 }
 
-func (l uiViewLayout) renderSlashCommandPicker(width int) []string {
+func (l uiViewLayout) renderActivePicker(width int) []string {
 	m := l.model
-	state := m.slashCommandPicker()
-	if !state.visible || width < 1 {
+	state := m.activePickerPresentation()
+	if !state.visible || width < 1 || state.lineCount <= 0 {
 		return nil
 	}
 	palette := uiPalette(m.theme)
-	selectedCommandStyle := lipgloss.NewStyle().Foreground(palette.primary).Bold(true)
-	unselectedCommandStyle := lipgloss.NewStyle().Bold(true)
+	selectedStyle := lipgloss.NewStyle().Foreground(palette.primary)
+	selectedBoldStyle := selectedStyle.Bold(true)
+	unselectedStyle := lipgloss.NewStyle()
+	unselectedBoldStyle := lipgloss.NewStyle().Bold(true)
 	descriptionStyle := lipgloss.NewStyle().Foreground(palette.muted).Faint(true)
-	out := make([]string, 0, slashCommandPickerLines)
-	for row := 0; row < slashCommandPickerLines; row++ {
+	out := make([]string, 0, state.lineCount)
+	for row := 0; row < state.lineCount; row++ {
 		idx := state.start + row
 		line := ""
-		if idx < len(state.matches) {
-			commandStyle := unselectedCommandStyle
-			if idx == state.selection {
-				commandStyle = selectedCommandStyle
+		if idx < len(state.rows) {
+			item := state.rows[idx]
+			if item.muted && !item.selectable {
+				line = descriptionStyle.Render(truncateQueuedMessageLine(item.primary, width))
+			} else {
+				rowStyle := unselectedStyle
+				if item.boldPrimary {
+					rowStyle = unselectedBoldStyle
+				}
+				if item.selectable && idx == state.selection {
+					rowStyle = selectedStyle
+					if item.boldPrimary {
+						rowStyle = selectedBoldStyle
+					}
+				}
+				primary := item.primary
+				if item.secondary == "" {
+					primary = truncateQueuedMessageLine(primary, width)
+				}
+				line = rowStyle.Render(primary)
+				if item.secondary != "" {
+					line += " - " + descriptionStyle.Render(item.secondary)
+				}
 			}
-			line = commandStyle.Render("/" + state.matches[idx].Name)
-			description := strings.TrimSpace(state.matches[idx].Description)
-			if description != "" {
-				line += " - " + descriptionStyle.Render(description)
-			}
-		} else if len(state.matches) == 0 && row == 0 {
-			line = descriptionStyle.Render("No matching commands")
 		}
 		out = append(out, padANSIRight(line, width))
 	}
