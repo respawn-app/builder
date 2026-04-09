@@ -30,8 +30,9 @@ Supported auth options:
 
 - OpenAI/Codex subscription OAuth via the startup sign-in picker.
 - OpenAI API-key auth via `OPENAI_API_KEY`. If you prefer API-key auth, export `OPENAI_API_KEY` before launch and builder will use it with your permission.
+- Continue without Builder auth. This is intended for custom or local OpenAI-compatible setups configured via `openai_base_url`.
 
-You can switch later with `/logout`.
+You can switch later with `/login` or `/logout`.
 
 ## Main Workflows
 

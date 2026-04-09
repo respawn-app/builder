@@ -240,6 +240,7 @@ func newOpenAIProviderClient(opts ProviderClientOptions) (Client, error) {
 	}
 	if v := strings.TrimSpace(opts.OpenAIBaseURL); v != "" {
 		transport.BaseURL = v
+		transport.BaseURLExplicit = true
 	}
 	transport.ModelVerbosity = strings.ToLower(strings.TrimSpace(opts.ModelVerbosity))
 	if opts.ContextWindowTokens > 0 {
@@ -257,7 +258,7 @@ func NewProviderClient(opts ProviderClientOptions) (Client, error) {
 		} else {
 			inferredProvider, err := InferProviderFromModel(opts.Model)
 			if err != nil {
-				return nil, fmt.Errorf("%w; set provider_override explicitly for custom/alias models", err)
+				return nil, &ProviderSelectionError{Model: strings.TrimSpace(opts.Model), Err: err}
 			}
 			provider = inferredProvider
 		}

@@ -29,8 +29,8 @@ func (envAuthHandler) NeedsInteraction(req authflow.InteractionRequest) bool {
 	return !req.Gate.Ready
 }
 
-func (envAuthHandler) Interact(context.Context, authflow.InteractionRequest) error {
-	return auth.ErrAuthNotConfigured
+func (envAuthHandler) Interact(context.Context, authflow.InteractionRequest) (authflow.InteractionOutcome, error) {
+	return authflow.InteractionOutcome{}, auth.ErrAuthNotConfigured
 }
 
 func (envAuthHandler) LookupEnv(key string) string {

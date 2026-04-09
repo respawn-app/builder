@@ -38,9 +38,9 @@ func (h *testAuthHandler) NeedsInteraction(req authflow.InteractionRequest) bool
 	return !req.Gate.Ready
 }
 
-func (h *testAuthHandler) Interact(context.Context, authflow.InteractionRequest) error {
+func (h *testAuthHandler) Interact(context.Context, authflow.InteractionRequest) (authflow.InteractionOutcome, error) {
 	h.interactCalled = true
-	return auth.ErrAuthNotConfigured
+	return authflow.InteractionOutcome{}, auth.ErrAuthNotConfigured
 }
 
 type testOnboardingHandler struct {

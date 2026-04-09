@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"builder/server/auth"
+	"builder/server/authflow"
 	"builder/shared/client"
 	"builder/shared/config"
 )
@@ -22,13 +23,13 @@ func (i *remoteReauthInteractor) NeedsInteraction(req authInteraction) bool {
 	return !req.Gate.Ready
 }
 
-func (i *remoteReauthInteractor) Interact(ctx context.Context, req authInteraction) error {
+func (i *remoteReauthInteractor) Interact(ctx context.Context, req authInteraction) (authflow.InteractionOutcome, error) {
 	i.configured = true
 	_, err := req.Manager.SwitchMethod(ctx, auth.Method{
 		Type:   auth.MethodAPIKey,
 		APIKey: &auth.APIKeyMethod{Key: "reauthed-key"},
 	}, true)
-	return err
+	return authflow.InteractionOutcome{}, err
 }
 
 func TestRemoteAppServerReauthenticateUsesLocalAuthStore(t *testing.T) {

@@ -12,7 +12,7 @@ import (
 
 type stubHandler struct {
 	needs    func(InteractionRequest) bool
-	interact func(context.Context, InteractionRequest) error
+	interact func(context.Context, InteractionRequest) (InteractionOutcome, error)
 }
 
 func (h stubHandler) NeedsInteraction(req InteractionRequest) bool {
@@ -22,16 +22,16 @@ func (h stubHandler) NeedsInteraction(req InteractionRequest) bool {
 	return h.needs(req)
 }
 
-func (h stubHandler) Interact(ctx context.Context, req InteractionRequest) error {
+func (h stubHandler) Interact(ctx context.Context, req InteractionRequest) (InteractionOutcome, error) {
 	if h.interact == nil {
-		return nil
+		return InteractionOutcome{}, nil
 	}
 	return h.interact(ctx, req)
 }
 
 func TestEnsureReadyReturnsStartupErrorWithoutInteractiveHandler(t *testing.T) {
 	mgr := auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now)
-	err := EnsureReady(context.Background(), mgr, auth.OpenAIOAuthOptions{}, "dark", config.TUIAlternateScreenAuto, func(string) string { return "" }, stubHandler{
+	err := EnsureReady(context.Background(), mgr, auth.OpenAIOAuthOptions{}, "dark", config.TUIAlternateScreenAuto, func(string) string { return "" }, true, false, stubHandler{
 		needs: func(InteractionRequest) bool { return false },
 	})
 	if !errors.Is(err, auth.ErrAuthNotConfigured) {
@@ -47,9 +47,9 @@ func TestEnsureReadyLoopsAfterInteractionUntilAuthConfigured(t *testing.T) {
 			return "sk-env"
 		}
 		return ""
-	}, stubHandler{
+	}, true, false, stubHandler{
 		needs: func(req InteractionRequest) bool { return !req.Gate.Ready },
-		interact: func(ctx context.Context, req InteractionRequest) error {
+		interact: func(ctx context.Context, req InteractionRequest) (InteractionOutcome, error) {
 			callCount++
 			if !req.HasEnvAPIKey {
 				t.Fatal("expected env api key to be visible in interaction request")
@@ -58,7 +58,7 @@ func TestEnsureReadyLoopsAfterInteractionUntilAuthConfigured(t *testing.T) {
 				Type:   auth.MethodAPIKey,
 				APIKey: &auth.APIKeyMethod{Key: "sk-after"},
 			}, true)
-			return err
+			return InteractionOutcome{}, err
 		},
 	})
 	if err != nil {
@@ -73,5 +73,23 @@ func TestEnsureReadyLoopsAfterInteractionUntilAuthConfigured(t *testing.T) {
 	}
 	if state.Method.APIKey == nil || state.Method.APIKey.Key != "sk-after" {
 		t.Fatalf("expected configured auth state, got %+v", state.Method.APIKey)
+	}
+}
+
+func TestEnsureReadyAllowsOptionalStartupWithoutConfiguredAuth(t *testing.T) {
+	mgr := auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now)
+	interacted := false
+	err := EnsureReady(context.Background(), mgr, auth.OpenAIOAuthOptions{}, "dark", config.TUIAlternateScreenAuto, func(string) string { return "" }, false, false, stubHandler{
+		needs: func(InteractionRequest) bool { return false },
+		interact: func(context.Context, InteractionRequest) (InteractionOutcome, error) {
+			interacted = true
+			return InteractionOutcome{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("ensure ready: %v", err)
+	}
+	if interacted {
+		t.Fatal("did not expect optional startup to prompt for auth")
 	}
 }

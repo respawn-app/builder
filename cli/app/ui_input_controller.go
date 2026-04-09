@@ -75,6 +75,9 @@ func formatSubmissionError(err error) string {
 	if err == nil {
 		return ""
 	}
+	if formatted := llm.UserFacingError(err); strings.TrimSpace(formatted) != "" {
+		return formatted
+	}
 	var statusErr *llm.APIStatusError
 	if errors.As(err, &statusErr) {
 		body := statusErr.Body

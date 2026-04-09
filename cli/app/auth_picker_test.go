@@ -306,6 +306,7 @@ func TestAuthSuccessScreenTitleFallsBackWithoutEmail(t *testing.T) {
 func TestInteractiveAuthInteractorNeedsInteractionForEnvConflict(t *testing.T) {
 	interactor := &interactiveAuthInteractor{}
 	if !interactor.NeedsInteraction(authInteraction{
+		AuthRequired: true,
 		Gate:         auth.StartupGate{Ready: true},
 		State:        auth.State{Scope: auth.ScopeGlobal, Method: auth.Method{Type: auth.MethodAPIKey, APIKey: &auth.APIKeyMethod{Key: "sk-env"}}},
 		StoredState:  auth.EmptyState(),
@@ -351,7 +352,7 @@ func TestInteractiveAuthInteractorOffersEnvAPIKeyChoiceWhenAvailable(t *testing.
 		},
 	}
 
-	err := interactor.Interact(ctx, authInteraction{
+	_, err := interactor.Interact(ctx, authInteraction{
 		Manager:         mgr,
 		State:           auth.EmptyState(),
 		Gate:            auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},
@@ -384,7 +385,7 @@ func TestInteractiveAuthInteractorRejectsEnvAPIKeyChoiceWithoutAvailableKey(t *t
 		},
 	}
 
-	err := interactor.Interact(context.Background(), authInteraction{
+	_, err := interactor.Interact(context.Background(), authInteraction{
 		Manager:         auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now),
 		State:           auth.EmptyState(),
 		Gate:            auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},
@@ -404,7 +405,7 @@ func TestInteractiveAuthInteractorRejectsUnknownAuthMethodChoice(t *testing.T) {
 		},
 	}
 
-	err := interactor.Interact(context.Background(), authInteraction{
+	_, err := interactor.Interact(context.Background(), authInteraction{
 		Manager:         auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now),
 		State:           auth.EmptyState(),
 		Gate:            auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},
@@ -446,7 +447,7 @@ func TestInteractiveAuthInteractorResolvesEnvConflictAndRemembersPreference(t *t
 		return authConflictPickerResult{Choice: authConflictChoiceEnvAPIKey}, nil
 	}
 
-	err := interactor.Interact(ctx, authInteraction{
+	_, err := interactor.Interact(ctx, authInteraction{
 		Manager:         mgr,
 		State:           auth.State{Scope: auth.ScopeGlobal, Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "oauth-token"}}},
 		StoredState:     auth.State{Scope: auth.ScopeGlobal, Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "oauth-token"}}},
@@ -499,7 +500,7 @@ func TestInteractiveAuthInteractorChoosingOAuthWithEnvRemembersSavedPreference(t
 		},
 	}
 
-	err := interactor.Interact(ctx, authInteraction{
+	_, err := interactor.Interact(ctx, authInteraction{
 		Manager:         mgr,
 		State:           auth.EmptyState(),
 		Gate:            auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},
@@ -572,7 +573,7 @@ func TestInteractiveAuthInteractorRetriesWithFlowErrorAndClearsOnSuccess(t *test
 		},
 	}
 
-	err := interactor.Interact(ctx, authInteraction{
+	_, err := interactor.Interact(ctx, authInteraction{
 		Manager:         mgr,
 		State:           auth.EmptyState(),
 		Gate:            auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},

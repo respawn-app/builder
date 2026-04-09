@@ -78,6 +78,9 @@ func NewDefaultRegistry() *Registry {
 	r.Register("logout", "Log out and re-authenticate", func(string) Result {
 		return Result{Handled: true, Action: ActionLogout}
 	})
+	r.Register("login", "Re-authenticate or continue without Builder auth", func(string) Result {
+		return Result{Handled: true, Action: ActionLogout}
+	})
 	r.Register("compact", "Compact the current context (optional: /compact <instructions>)", func(args string) Result {
 		return Result{Handled: true, Action: ActionCompact, Args: strings.TrimSpace(args)}
 	})
