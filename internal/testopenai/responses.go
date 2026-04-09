@@ -11,6 +11,7 @@ func HandleInputTokenCount(w http.ResponseWriter, r *http.Request, inputTokens i
 		return false
 	}
 	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return true
 	}

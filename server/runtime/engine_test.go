@@ -172,11 +172,15 @@ func (c *preciseCompactionClient) ResolveModelContextWindow(_ context.Context, _
 }
 
 func (c *preciseCompactionClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	supportsExactCount := true
+	if c.countSupported != nil {
+		supportsExactCount = *c.countSupported
+	}
 	return llm.ProviderCapabilities{
 		ProviderID:                     "openai",
 		SupportsResponsesAPI:           true,
 		SupportsResponsesCompact:       true,
-		SupportsRequestInputTokenCount: true,
+		SupportsRequestInputTokenCount: supportsExactCount,
 		SupportsPromptCacheKey:         true,
 		SupportsNativeWebSearch:        true,
 		SupportsReasoningEncrypted:     true,

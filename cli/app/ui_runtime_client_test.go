@@ -501,7 +501,7 @@ func TestRuntimeClientMainViewFallsBackToLocalRuntimeProjectionOnReadError(t *te
 	}
 }
 
-func TestRuntimeClientMainViewSeedsTranscriptCacheFromLiveRuntimeMainView(t *testing.T) {
+func TestRuntimeClientMainViewLeavesTranscriptHydrationToTranscriptEndpoint(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -523,8 +523,15 @@ func TestRuntimeClientMainViewSeedsTranscriptCacheFromLiveRuntimeMainView(t *tes
 		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(runtimeRegistry, runtimeRegistry)),
 	)
 	view := runtimeClient.MainView()
-	if got := len(view.Session.Chat.Entries); got != 1 {
-		t.Fatalf("main view chat entry count = %d, want 1", got)
+	if got := len(view.Session.Chat.Entries); got != 0 {
+		t.Fatalf("main view chat entry count = %d, want 0", got)
+	}
+	if page := runtimeClient.Transcript(); len(page.Entries) != 0 {
+		t.Fatalf("expected transcript() to return uncached page before async hydration, got %+v", page)
+	}
+
+	if _, err := runtimeClient.RefreshTranscript(); err != nil {
+		t.Fatalf("refresh transcript: %v", err)
 	}
 	page := runtimeClient.Transcript()
 	if got := len(page.Entries); got != 1 {

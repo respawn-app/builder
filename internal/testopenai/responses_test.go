@@ -51,6 +51,22 @@ func TestHandleInputTokenCountIgnoresOtherPaths(t *testing.T) {
 	}
 }
 
+func TestHandleInputTokenCountSetsAllowHeaderForWrongMethod(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/responses/input_tokens", nil)
+
+	handled := HandleInputTokenCount(recorder, req, 123)
+	if !handled {
+		t.Fatal("expected wrong-method request to be handled")
+	}
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusMethodNotAllowed)
+	}
+	if got := recorder.Header().Get("Allow"); got != http.MethodPost {
+		t.Fatalf("Allow header = %q, want %q", got, http.MethodPost)
+	}
+}
+
 func TestWriteCompletedResponseStreamWritesExpectedEvent(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
