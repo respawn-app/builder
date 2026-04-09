@@ -135,15 +135,63 @@ func TestCommittedOngoingEntriesDoNotTruncateAfterEmptyToolResult(t *testing.T) 
 	}
 
 	committed := CommittedOngoingEntries(entries)
-	if len(committed) != 3 {
-		t.Fatalf("expected empty tool result to resolve committed frontier without rendering itself, got %#v", committed)
+	if len(committed) != 4 {
+		t.Fatalf("expected empty tool result marker preserved through committed frontier, got %#v", committed)
 	}
-	if committed[2].Role != "assistant" || committed[2].Text != "continued after empty result" {
+	if committed[2].Role != "tool_result_ok" || committed[2].ToolCallID != "call_patch" {
+		t.Fatalf("expected committed entries to keep empty tool result as structural status marker, got %#v", committed)
+	}
+	if committed[3].Role != "assistant" || committed[3].Text != "continued after empty result" {
 		t.Fatalf("expected committed entries to include content after empty tool result, got %#v", committed)
 	}
 
 	pending := PendingOngoingEntries(entries)
 	if len(pending) != 0 {
 		t.Fatalf("expected no pending entries after empty tool result resolution, got %#v", pending)
+	}
+}
+
+func TestCommittedOngoingProjectionPreservesSuccessStateForEmptyToolResult(t *testing.T) {
+	m := NewModel(WithTheme("dark"), WithPreviewLines(20))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	entries := []TranscriptEntry{
+		{Role: "user", Text: "prompt"},
+		{Role: "tool_call", Text: "apply patch", ToolCallID: "call_patch", ToolCall: &transcript.ToolCallMeta{ToolName: "patch", Command: "apply patch"}},
+		{Role: "tool_result_ok", Text: "", ToolCallID: "call_patch"},
+		{Role: "assistant", Text: "continued after empty result"},
+	}
+
+	projection := m.CommittedOngoingProjectionForEntries(entries)
+	if len(projection.Blocks) < 3 {
+		t.Fatalf("expected patch success block plus assistant tail, got %#v", projection.Blocks)
+	}
+	if got := projection.Blocks[1].Role; got != "tool_success" {
+		t.Fatalf("expected patch block to resolve to tool_success after empty result, got %q (%#v)", got, projection.Blocks)
+	}
+	if !strings.Contains(strings.Join(projection.Blocks[1].Lines, "\n"), "apply patch") {
+		t.Fatalf("expected patch success block to retain tool call text, got %#v", projection.Blocks[1])
+	}
+	if got := projection.Blocks[2].Role; got != "assistant" {
+		t.Fatalf("expected assistant tail after patch success block, got %#v", projection.Blocks)
+	}
+}
+
+func TestCommittedOngoingProjectionPreservesWebSearchSuccessState(t *testing.T) {
+	m := NewModel(WithTheme("dark"), WithPreviewLines(20))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	entries := []TranscriptEntry{
+		{Role: "tool_call", Text: `web search: "latest golang release"`, ToolCallID: "call_web", ToolCall: &transcript.ToolCallMeta{ToolName: "web_search", Command: `web search: "latest golang release"`, CompactText: `web search: "latest golang release"`}},
+		{Role: "tool_result_ok", Text: `{"type":"web_search_call","status":"completed"}`, ToolCallID: "call_web"},
+	}
+
+	projection := m.CommittedOngoingProjectionForEntries(entries)
+	if len(projection.Blocks) != 1 {
+		t.Fatalf("expected a single merged web search success block, got %#v", projection.Blocks)
+	}
+	if got := projection.Blocks[0].Role; got != "tool_web_search_success" {
+		t.Fatalf("expected web search block to resolve to tool_web_search_success, got %q (%#v)", got, projection.Blocks)
+	}
+	if !strings.Contains(strings.Join(projection.Blocks[0].Lines, "\n"), `web search: "latest golang release"`) {
+		t.Fatalf("expected web search success block to retain tool call text, got %#v", projection.Blocks[0])
 	}
 }
