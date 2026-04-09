@@ -138,6 +138,7 @@ func (e *Engine) SetThinkingLevel(level string) error {
 	e.mu.Lock()
 	e.cfg.ThinkingLevel = normalized
 	e.mu.Unlock()
+	e.markCurrentRequestShapeDirty()
 	return nil
 }
 
@@ -148,12 +149,17 @@ func (e *Engine) SetFastModeEnabled(enabled bool) (bool, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.cfg.FastModeState != nil {
-		return e.cfg.FastModeState.SetEnabled(enabled), nil
+		changed := e.cfg.FastModeState.SetEnabled(enabled)
+		if changed {
+			e.markCurrentRequestShapeDirty()
+		}
+		return changed, nil
 	}
 	if e.cfg.FastModeEnabled == enabled {
 		return false, nil
 	}
 	e.cfg.FastModeEnabled = enabled
+	e.markCurrentRequestShapeDirty()
 	return true, nil
 }
 

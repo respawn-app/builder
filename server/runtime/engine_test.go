@@ -5675,6 +5675,185 @@ func TestExecuteToolCallsRejectsWhitespaceWebSearchQuery(t *testing.T) {
 	}
 }
 
+func TestCriticalExactRecountsAfterToolCompletionBeforeToolMessageAppend(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{inputTokenCountFn: func(req llm.Request) int {
+		for _, item := range req.Items {
+			if item.Type == llm.ResponseItemTypeFunctionCallOutput && item.CallID == "call-1" {
+				return 200
+			}
+		}
+		return 100
+	}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	call := llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}
+	if err := eng.appendAssistantMessage("step", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call}}); err != nil {
+		t.Fatalf("append assistant tool call: %v", err)
+	}
+	if precise, ok := eng.currentInputTokensPrecisely(context.Background()); !ok || precise != 100 {
+		t.Fatalf("initial exact count = (%d, %v), want (100, true)", precise, ok)
+	}
+	if client.countInputTokenCalls != 1 {
+		t.Fatalf("count calls=%d, want 1", client.countInputTokenCalls)
+	}
+	results, err := eng.executeToolCalls(context.Background(), "step", []llm.ToolCall{call})
+	if err != nil {
+		t.Fatalf("execute tool calls: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected one tool result, got %d", len(results))
+	}
+	req, err := eng.buildRequest(context.Background(), "", true)
+	if err != nil {
+		t.Fatalf("build request after tool completion: %v", err)
+	}
+	foundOutput := false
+	for _, item := range req.Items {
+		if item.Type == llm.ResponseItemTypeFunctionCallOutput && item.CallID == call.ID {
+			foundOutput = true
+			break
+		}
+	}
+	if !foundOutput {
+		t.Fatalf("expected synthesized function_call_output before tool message append, items=%+v", req.Items)
+	}
+	if precise, ok := eng.currentInputTokensPreciselyIfCritical(context.Background(), 1_000); !ok || precise != 200 {
+		t.Fatalf("critical exact recount = (%d, %v), want (200, true)", precise, ok)
+	}
+	if client.countInputTokenCalls != 2 {
+		t.Fatalf("expected critical recount after tool completion, got %d count calls", client.countInputTokenCalls)
+	}
+}
+
+func TestRestoreMessagesPreservesRecoveredMultiToolProviderOrder(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	call1 := llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}
+	call2 := llm.ToolCall{ID: "call-2", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)}
+	if _, err := store.AppendEvent("step", "message", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}}); err != nil {
+		t.Fatalf("append assistant tool calls: %v", err)
+	}
+	if _, err := store.AppendEvent("step", "tool_completed", map[string]any{"call_id": call1.ID, "name": string(tools.ToolShell), "is_error": false, "output": json.RawMessage(`{"output":"/tmp"}`)}); err != nil {
+		t.Fatalf("append first tool completion: %v", err)
+	}
+	if _, err := store.AppendEvent("step", "tool_completed", map[string]any{"call_id": call2.ID, "name": string(tools.ToolShell), "is_error": false, "output": json.RawMessage(`{"output":"a.txt"}`)}); err != nil {
+		t.Fatalf("append second tool completion: %v", err)
+	}
+	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	items := restored.snapshotItems()
+	if len(items) != 4 {
+		t.Fatalf("expected 4 restored items, got %d (%+v)", len(items), items)
+	}
+	if items[0].Type != llm.ResponseItemTypeFunctionCall || items[0].CallID != call1.ID {
+		t.Fatalf("unexpected restored item[0]: %+v", items[0])
+	}
+	if items[1].Type != llm.ResponseItemTypeFunctionCall || items[1].CallID != call2.ID {
+		t.Fatalf("unexpected restored item[1]: %+v", items[1])
+	}
+	if items[2].Type != llm.ResponseItemTypeFunctionCallOutput || items[2].CallID != call1.ID {
+		t.Fatalf("unexpected restored item[2]: %+v", items[2])
+	}
+	if items[3].Type != llm.ResponseItemTypeFunctionCallOutput || items[3].CallID != call2.ID {
+		t.Fatalf("unexpected restored item[3]: %+v", items[3])
+	}
+}
+
+func TestRestoreMessagesPreservesRecoveredMultiToolExactTokenParity(t *testing.T) {
+	dir := t.TempDir()
+	liveStore, err := session.Create(filepath.Join(dir, "live"), "ws", dir)
+	if err != nil {
+		t.Fatalf("create live store: %v", err)
+	}
+	restoredStore, err := session.Create(filepath.Join(dir, "restored"), "ws", dir)
+	if err != nil {
+		t.Fatalf("create restored store: %v", err)
+	}
+	countForRequest := func(req llm.Request) int {
+		count := 0
+		for i, item := range req.Items {
+			switch item.Type {
+			case llm.ResponseItemTypeFunctionCall:
+				count += 100 + (i * 7)
+			case llm.ResponseItemTypeFunctionCallOutput:
+				count += 1_000 + (i * 11)
+			default:
+				count += 10 + i
+			}
+		}
+		return count
+	}
+	client := &fakeCompactionClient{inputTokenCountFn: countForRequest}
+	live, err := New(liveStore, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new live engine: %v", err)
+	}
+	call1 := llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}
+	call2 := llm.ToolCall{ID: "call-2", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)}
+	if err := live.appendAssistantMessage("step", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}}); err != nil {
+		t.Fatalf("append live assistant tool calls: %v", err)
+	}
+	if _, err := live.executeToolCalls(context.Background(), "step", []llm.ToolCall{call1, call2}); err != nil {
+		t.Fatalf("execute live tool calls: %v", err)
+	}
+	liveReq, err := live.buildRequest(context.Background(), "", true)
+	if err != nil {
+		t.Fatalf("build live request: %v", err)
+	}
+	liveCount, ok := live.requestInputTokensPrecisely(context.Background(), liveReq)
+	if !ok {
+		t.Fatal("expected live precise token count")
+	}
+	if _, err := restoredStore.AppendEvent("step", "message", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}}); err != nil {
+		t.Fatalf("append restored assistant tool calls: %v", err)
+	}
+	if _, err := restoredStore.AppendEvent("step", "tool_completed", map[string]any{"call_id": call1.ID, "name": string(tools.ToolShell), "is_error": false, "output": json.RawMessage(`{"tool":"shell"}`)}); err != nil {
+		t.Fatalf("append restored tool completion 1: %v", err)
+	}
+	if _, err := restoredStore.AppendEvent("step", "tool_completed", map[string]any{"call_id": call2.ID, "name": string(tools.ToolShell), "is_error": false, "output": json.RawMessage(`{"tool":"shell"}`)}); err != nil {
+		t.Fatalf("append restored tool completion 2: %v", err)
+	}
+	restored, err := New(restoredStore, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new restored engine: %v", err)
+	}
+	restoredReq, err := restored.buildRequest(context.Background(), "", true)
+	if err != nil {
+		t.Fatalf("build restored request: %v", err)
+	}
+	restoredCount, ok := restored.requestInputTokensPrecisely(context.Background(), restoredReq)
+	if !ok {
+		t.Fatal("expected restored precise token count")
+	}
+	liveItemsJSON, err := json.Marshal(liveReq.Items)
+	if err != nil {
+		t.Fatalf("marshal live request items: %v", err)
+	}
+	restoredItemsJSON, err := json.Marshal(restoredReq.Items)
+	if err != nil {
+		t.Fatalf("marshal restored request items: %v", err)
+	}
+	if string(liveItemsJSON) != string(restoredItemsJSON) {
+		t.Fatalf("request items mismatch\nlive=%s\nrestored=%s", liveItemsJSON, restoredItemsJSON)
+	}
+	if liveCount != restoredCount {
+		t.Fatalf("precise token count mismatch: live=%d restored=%d", liveCount, restoredCount)
+	}
+}
+
 func TestStreamingRetryResetsAttemptDeltas(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -8357,6 +8536,65 @@ func TestCompactionSoonReminderIncludesTriggerHandoffAdditionWhenConfigured(t *t
 	}
 	if reminders != 1 {
 		t.Fatalf("expected enabled reminder text once, got %d entries=%+v", reminders, eng.ChatSnapshot().Entries)
+	}
+}
+
+func TestCompactionSoonReminderRechecksPreciselyAfterTranscriptMutation(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &preciseCompactionClient{inputTokenCount: 840, contextWindow: 2_000}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   2_000,
+		AutoCompactTokenLimit: 1_000,
+		CompactionMode:        "local",
+		EnabledTools:          []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.setLastUsage(llm.Usage{InputTokens: 860, WindowTokens: 2_000})
+
+	if err := eng.maybeAppendCompactionSoonReminder(context.Background(), "step-1"); err != nil {
+		t.Fatalf("reminder below exact threshold: %v", err)
+	}
+	if client.countCalls != 1 {
+		t.Fatalf("expected first reminder probe to count precisely once, got %d", client.countCalls)
+	}
+	if eng.handoffToolEnabled() {
+		t.Fatal("did not expect handoff tool to become enabled below the exact reminder threshold")
+	}
+
+	client.inputTokenCount = 860
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, Content: "mutation"}); err != nil {
+		t.Fatalf("append mutation: %v", err)
+	}
+	eng.setLastUsage(llm.Usage{InputTokens: 860, WindowTokens: 2_000})
+	if err := eng.maybeAppendCompactionSoonReminder(context.Background(), "step-2"); err != nil {
+		t.Fatalf("reminder above exact threshold after mutation: %v", err)
+	}
+	if client.countCalls != 2 {
+		t.Fatalf("expected transcript mutation to force a fresh precise reminder check, got %d calls", client.countCalls)
+	}
+	if !eng.handoffToolEnabled() {
+		t.Fatal("expected reminder to enable trigger_handoff after exact recount")
+	}
+	reminderText := prompts.RenderCompactionSoonReminderPrompt(true)
+	reminders := 0
+	for _, entry := range eng.ChatSnapshot().Entries {
+		if entry.Role == "warning" && entry.Text == reminderText {
+			reminders++
+		}
+	}
+	if reminders != 1 {
+		t.Fatalf("expected one reminder after exact recount, got %d entries=%+v", reminders, eng.ChatSnapshot().Entries)
 	}
 }
 

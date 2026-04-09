@@ -168,10 +168,9 @@ type Engine struct {
 	pendingHandoffRequest        *handoffRequest
 	pendingHandoffFutureMessage  string
 
-	compactionTokenCountCacheKey   string
-	compactionTokenCountCacheValue int
-	collaboratorsOnce              sync.Once
-	requestCache                   *requestCacheTracker
+	tokenUsage        *tokenUsageTracker
+	collaboratorsOnce sync.Once
+	requestCache      *requestCacheTracker
 
 	phaseProtocol  phaseProtocolEnforcer
 	stepLifecycle  exclusiveStepLifecycle
@@ -257,6 +256,7 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 		registry:     registry,
 		cfg:          cfg,
 		chat:         newChatStore(),
+		tokenUsage:   newTokenUsageTracker(),
 		requestCache: newRequestCacheTracker(),
 	}
 	eng.ensureLifecycle()

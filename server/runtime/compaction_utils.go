@@ -42,11 +42,13 @@ func (e *Engine) replaceHistory(stepID, engine string, mode compactionMode, item
 	}
 	reminderIssued := false
 	if payload.Engine == "reviewer_rollback" {
+		e.resetCurrentPreciseInputTracking()
 		e.chat.restoreHistoryItems(payload.Items)
 		e.syncCompactionSoonReminderIssuedFromItems(payload.Items)
 		e.clearActivePromptCacheLineages()
 		reminderIssued = e.handoffToolEnabled()
 	} else {
+		e.resetCurrentPreciseInputTracking()
 		e.chat.replaceHistory(payload.Items)
 		e.setCompactionSoonReminderIssued(false)
 	}

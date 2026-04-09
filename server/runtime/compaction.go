@@ -196,6 +196,9 @@ func (c *defaultContextCompactor) ShouldCompactBeforeUserMessage(ctx context.Con
 	}
 	reservedOutput := e.reservedOutputTokens()
 	preSubmitLimit := e.preSubmitCompactionTokenLimit(ctx)
+	if preSubmitLimit > 0 {
+		_, _ = e.currentInputTokensPreciselyIfCritical(ctx, preSubmitLimit)
+	}
 	estimatedCurrentTotal := e.currentTokenUsage() + reservedOutput
 	if preSubmitLimit > 0 && estimatedCurrentTotal >= preSubmitLimit {
 		if preciseInput, ok := e.currentInputTokensPrecisely(ctx); ok {
@@ -290,6 +293,9 @@ func (e *Engine) usageAtOrAboveLimit(ctx context.Context, limit int) bool {
 		return false
 	}
 	reservedOutput := e.reservedOutputTokens()
+	if preciseInput, ok := e.currentInputTokensPreciselyIfCritical(ctx, limit); ok {
+		return preciseInput+reservedOutput >= limit
+	}
 	estimatedInput := e.currentTokenUsage()
 	estimatedTotal := estimatedInput + reservedOutput
 	margin := autoCompactPrecisionMarginForLimit(limit)
@@ -354,17 +360,48 @@ func (e *Engine) currentInputTokensPrecisely(ctx context.Context) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
-	return e.requestInputTokensPrecisely(ctx, req)
+	return e.requestInputTokensPreciselyTracked(ctx, req, true)
+}
+
+func (e *Engine) currentInputTokensPreciselyIfDue(ctx context.Context, limit int) (int, bool) {
+	return e.currentInputTokensPreciselyIfDueWithPriority(ctx, limit, false)
+}
+
+func (e *Engine) currentInputTokensPreciselyIfCritical(ctx context.Context, limit int) (int, bool) {
+	return e.currentInputTokensPreciselyIfDueWithPriority(ctx, limit, true)
+}
+
+func (e *Engine) currentInputTokensPreciselyIfDueWithPriority(ctx context.Context, limit int, critical bool) (int, bool) {
+	if precise, ok := e.lookupCurrentPreciseInputTokens(); ok {
+		if !e.shouldRefreshCurrentPreciseInputTokens(limit, critical) {
+			return precise, true
+		}
+	}
+	if !e.shouldRefreshCurrentPreciseInputTokens(limit, critical) {
+		return 0, false
+	}
+	req, err := e.buildRequest(ctx, "", true)
+	if err != nil {
+		return 0, false
+	}
+	return e.requestInputTokensPreciselyTracked(ctx, req, true)
 }
 
 func (e *Engine) requestInputTokensPrecisely(ctx context.Context, req llm.Request) (int, bool) {
+	return e.requestInputTokensPreciselyTracked(ctx, req, false)
+}
+
+func (e *Engine) requestInputTokensPreciselyTracked(ctx context.Context, req llm.Request, current bool) (int, bool) {
 	counter, ok := e.llm.(llm.RequestInputTokenCountClient)
 	if !ok {
 		return 0, false
 	}
 	cacheKey := requestTokenCountCacheKey(req)
 	if cacheKey != "" {
-		if cached, ok := e.lookupCompactionTokenCountCache(cacheKey); ok {
+		if cached, ok := e.lookupPreciseTokenCount(cacheKey, current); ok {
+			if current {
+				e.storePreciseTokenCount(cacheKey, cached, true)
+			}
 			return cached, true
 		}
 	}
@@ -373,7 +410,7 @@ func (e *Engine) requestInputTokensPrecisely(ctx context.Context, req llm.Reques
 		return 0, false
 	}
 	if cacheKey != "" {
-		e.storeCompactionTokenCountCache(cacheKey, count)
+		e.storePreciseTokenCount(cacheKey, count, current)
 	}
 	return count, true
 }
@@ -386,29 +423,64 @@ func requestTokenCountCacheKey(req llm.Request) string {
 	return string(payload)
 }
 
-func (e *Engine) lookupCompactionTokenCountCache(cacheKey string) (int, bool) {
-	if strings.TrimSpace(cacheKey) == "" {
+func (e *Engine) lookupPreciseTokenCount(cacheKey string, current bool) (int, bool) {
+	if strings.TrimSpace(cacheKey) == "" || e.tokenUsage == nil {
 		return 0, false
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.compactionTokenCountCacheKey != cacheKey {
-		return 0, false
+	if current {
+		if cached, ok := e.tokenUsage.lookupCurrent(cacheKey); ok {
+			return cached, true
+		}
 	}
-	if e.compactionTokenCountCacheValue <= 0 {
-		return 0, false
-	}
-	return e.compactionTokenCountCacheValue, true
+	return e.tokenUsage.lookup(cacheKey)
 }
 
-func (e *Engine) storeCompactionTokenCountCache(cacheKey string, count int) {
-	if strings.TrimSpace(cacheKey) == "" || count <= 0 {
+func (e *Engine) storePreciseTokenCount(cacheKey string, count int, current bool) {
+	if strings.TrimSpace(cacheKey) == "" || count <= 0 || e.tokenUsage == nil {
 		return
 	}
-	e.mu.Lock()
-	e.compactionTokenCountCacheKey = cacheKey
-	e.compactionTokenCountCacheValue = count
-	e.mu.Unlock()
+	e.tokenUsage.store(cacheKey, count, current)
+}
+
+func (e *Engine) lookupCurrentPreciseInputTokens() (int, bool) {
+	if e.tokenUsage == nil {
+		return 0, false
+	}
+	return e.tokenUsage.lookupCurrent("")
+}
+
+// markCurrentRequestShapeDirty invalidates the current-context exact token count
+// whenever the next provider request may differ from the previously counted one.
+func (e *Engine) markCurrentRequestShapeDirty() {
+	if e.tokenUsage == nil {
+		return
+	}
+	e.tokenUsage.invalidateCurrent(tokenUsageMutationPlain)
+}
+
+func (e *Engine) markCurrentRequestShapeDirtyForSignificantMutation() {
+	if e.tokenUsage == nil {
+		return
+	}
+	e.tokenUsage.invalidateCurrent(tokenUsageMutationSignificant)
+}
+
+func (e *Engine) resetCurrentPreciseInputTracking() {
+	if e.tokenUsage == nil {
+		return
+	}
+	e.tokenUsage.invalidateCurrent(tokenUsageMutationHardReset)
+}
+
+func (e *Engine) invalidateCurrentPreciseInputTokens() {
+	e.markCurrentRequestShapeDirty()
+}
+
+func (e *Engine) shouldRefreshCurrentPreciseInputTokens(limit int, critical bool) bool {
+	if limit <= 0 || e.tokenUsage == nil {
+		return false
+	}
+	return e.tokenUsage.currentCheckpointDue(e.estimatedCurrentTokenUsage(), limit, critical)
 }
 
 func (e *Engine) contextWindowTokens() int {
@@ -430,7 +502,7 @@ func (e *Engine) effectiveContextTokenLimit() int {
 	return (e.contextWindowTokens() * percent) / 100
 }
 
-func (e *Engine) currentTokenUsage() int {
+func (e *Engine) estimatedCurrentTokenUsage() int {
 	usage := e.lastUsageSnapshot()
 	usageTotal := 0
 	if usage.InputTokens > 0 || usage.OutputTokens > 0 {
@@ -441,6 +513,13 @@ func (e *Engine) currentTokenUsage() int {
 		return estimated
 	}
 	return usageTotal
+}
+
+func (e *Engine) currentTokenUsage() int {
+	if precise, ok := e.lookupCurrentPreciseInputTokens(); ok {
+		return precise
+	}
+	return e.estimatedCurrentTokenUsage()
 }
 
 func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionMode, args string, includeManualCarryover bool) (compactionResult, error) {
