@@ -88,7 +88,7 @@ func resolveOpenAITransportProviderVariant(baseURL string, mode openAIAuthMode) 
 		return "chatgpt-codex", nil
 	}
 	normalizedBaseURL := normalizeOpenAIBaseURL(baseURL)
-	if normalizedBaseURL == normalizeOpenAIBaseURL(defaultOpenAIBaseURL) || isLoopbackOpenAIBaseURL(normalizedBaseURL) {
+	if normalizedBaseURL == normalizeOpenAIBaseURL(defaultOpenAIBaseURL) || IsOpenAIFirstPartyBaseURL(normalizedBaseURL) || isLoopbackOpenAIBaseURL(normalizedBaseURL) {
 		return "openai", nil
 	}
 	if strings.TrimSpace(baseURL) != "" {
@@ -103,7 +103,18 @@ func normalizeOpenAIBaseURL(baseURL string) string {
 	if trimmed == "" {
 		return strings.TrimSuffix(defaultOpenAIBaseURL, "/")
 	}
+	if IsOpenAIFirstPartyBaseURL(trimmed) {
+		return strings.TrimSuffix(defaultOpenAIBaseURL, "/")
+	}
 	return trimmed
+}
+
+func IsOpenAIFirstPartyBaseURL(baseURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(parsed.Hostname()), "api.openai.com")
 }
 
 func isLoopbackOpenAIBaseURL(baseURL string) bool {

@@ -952,6 +952,13 @@ func TestOnboardingProviderCapabilitiesFromAuthMode(t *testing.T) {
 	if compatibleCaps.ProviderID != "openai-compatible" || compatibleCaps.SupportsResponsesCompact {
 		t.Fatalf("unexpected openai-compatible provider capabilities: %+v", compatibleCaps)
 	}
+	defaultOpenAICaps, err := onboardingProviderCapabilities(auth.State{Method: auth.Method{Type: auth.MethodAPIKey}}, config.Settings{OpenAIBaseURL: "https://api.openai.com"})
+	if err != nil {
+		t.Fatalf("default openai base url provider capabilities: %v", err)
+	}
+	if defaultOpenAICaps.ProviderID != "openai" || !defaultOpenAICaps.SupportsResponsesCompact {
+		t.Fatalf("expected explicit default OpenAI base url to preserve openai capabilities, got %+v", defaultOpenAICaps)
+	}
 	noAuthCompatibleCaps, err := onboardingProviderCapabilities(auth.EmptyState(), config.Settings{OpenAIBaseURL: "https://example.test/v1"})
 	if err != nil {
 		t.Fatalf("no-auth openai-compatible provider capabilities: %v", err)

@@ -1,7 +1,6 @@
 package authpolicy
 
 import (
-	"net/url"
 	"strings"
 
 	"builder/server/llm"
@@ -26,13 +25,5 @@ func RequiresStartupAuth(settings config.Settings) bool {
 }
 
 func explicitBaseURLRequiresStartupAuth(baseURL string) bool {
-	parsed, err := url.Parse(strings.TrimSpace(baseURL))
-	if err != nil {
-		return false
-	}
-	if !strings.EqualFold(strings.TrimSpace(parsed.Hostname()), "api.openai.com") {
-		return false
-	}
-	path := strings.TrimSuffix(strings.TrimSpace(parsed.EscapedPath()), "/")
-	return path == "/v1"
+	return llm.IsOpenAIFirstPartyBaseURL(baseURL)
 }

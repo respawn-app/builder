@@ -28,6 +28,11 @@ func TestRequiresStartupAuth(t *testing.T) {
 			want:     true,
 		},
 		{
+			name:     "explicit bare openai host still requires auth",
+			settings: config.Settings{Model: "gpt-5", OpenAIBaseURL: "https://api.openai.com"},
+			want:     true,
+		},
+		{
 			name:     "explicit anthropic override disables startup auth gate",
 			settings: config.Settings{ProviderOverride: "anthropic", Model: "claude-3-7-sonnet"},
 			want:     false,
