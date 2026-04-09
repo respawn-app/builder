@@ -317,6 +317,9 @@ func (s *uiPathReferenceSearchService) buildCorpus(workspaceRoot string, generat
 func (s *uiPathReferenceSearchService) loadCorpusSnapshot(ctx context.Context, workspaceRoot string) (uiPathReferenceCorpusSnapshot, error) {
 	output, err := s.runner.Output(ctx, workspaceRoot, "rg", "--files", "--hidden", "-g", "!.git")
 	if err != nil {
+		if isEmptyRipgrepFilesResult(err, output) {
+			return uiPathReferenceCorpusSnapshot{}, nil
+		}
 		return uiPathReferenceCorpusSnapshot{}, err
 	}
 	lines := strings.Split(string(output), "\n")
@@ -345,6 +348,20 @@ func (s *uiPathReferenceSearchService) loadCorpusSnapshot(ctx context.Context, w
 		return candidates[i].Path < candidates[j].Path
 	})
 	return uiPathReferenceCorpusSnapshot{Candidates: candidates}, nil
+}
+
+func isEmptyRipgrepFilesResult(err error, output []byte) bool {
+	if err == nil || strings.TrimSpace(string(output)) != "" {
+		return false
+	}
+	type exitCoder interface {
+		ExitCode() int
+	}
+	var coded exitCoder
+	if errors.As(err, &coded) {
+		return coded.ExitCode() == 1
+	}
+	return false
 }
 
 func normalizePathReferenceCandidate(raw string) string {
