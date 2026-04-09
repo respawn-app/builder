@@ -568,6 +568,9 @@ func TestBuildRequestOptions_OmitsAuthorizationHeaderWhenAuthHeaderEmpty(t *test
 	if len(transport.buildRequestOptions("", openAIAuthMode{}, "")) != 2 {
 		t.Fatal("expected empty auth header to omit Authorization request option")
 	}
+	if len(transport.buildRequestOptions("   ", openAIAuthMode{}, "")) != 2 {
+		t.Fatal("expected whitespace auth header to omit Authorization request option")
+	}
 	if len(transport.buildRequestOptions("", openAIAuthMode{}, "session-1")) != 3 {
 		t.Fatal("expected session header to remain when Authorization is omitted")
 	}
