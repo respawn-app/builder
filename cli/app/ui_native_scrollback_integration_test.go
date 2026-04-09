@@ -830,7 +830,7 @@ func TestNativeFinalizeDoesNotBlinkDuplicateTailTokens(t *testing.T) {
 	}
 
 	out := &bytes.Buffer{}
-	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil), closedAskEvents())
+	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil, nil), closedAskEvents())
 
 	program := tea.NewProgram(
 		model,
@@ -906,7 +906,7 @@ func TestNativeFinalizeSuppressesLateAsyncDeltaArtifacts(t *testing.T) {
 	}
 
 	out := &bytes.Buffer{}
-	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil), closedAskEvents())
+	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil, nil), closedAskEvents())
 
 	program := tea.NewProgram(
 		model,
@@ -997,7 +997,7 @@ func TestNativeDeferredFinalWithQueuedInjectionKeepsAssistantBeforeQueuedUserInS
 	eng.QueueUserMessage("steer now")
 
 	out := &bytes.Buffer{}
-	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil), closedAskEvents())
+	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil, nil), closedAskEvents())
 
 	program := tea.NewProgram(
 		model,
@@ -1080,7 +1080,7 @@ func TestNativeQueuedSteerDuringBlockingToolAppearsInScrollback(t *testing.T) {
 	}
 
 	out := &bytes.Buffer{}
-	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil), closedAskEvents())
+	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil, nil), closedAskEvents())
 
 	program := tea.NewProgram(
 		model,
@@ -1176,7 +1176,7 @@ func TestNativeNoopFinalNeverAppearsOnScreen(t *testing.T) {
 	}
 
 	out := &bytes.Buffer{}
-	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil), closedAskEvents())
+	model := newProjectedTestUIModel(newUIRuntimeClient(eng), projectRuntimeEventChannel(runtimeEvents, nil, nil), closedAskEvents())
 
 	program := tea.NewProgram(
 		model,
