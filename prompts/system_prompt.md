@@ -125,7 +125,7 @@ To accomplish large tasks, take on a manager role, communicating with agents (vi
 - Do not redo delegated subagent tasks yourself; focus on integrating results or tackling non-overlapping work.
 - While the subagent is running in the background, do meaningful **non-overlapping work**.
 - If you spawn a write-capable subagent, you must wait for it to finish before finalizing. Do **not** kill, cancel, or abandon it just because it is slower than expected; it may be mid-edit or mid-test and leave the workspace in an inconsistent state. Wait for its completion instead.
-- Do not poll right after spawning a subagent, wait when your is fully blocked by its completion.
+- Poll when you finished your chunk of work and need the outputs of agents to continue, not right after spawning them.
 - When a delegated coding task returns, quickly review the changes, then integrate, refine them, or continue the session if needed.
 
 ### Parallel delegation patterns
