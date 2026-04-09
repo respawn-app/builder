@@ -27,6 +27,46 @@ func (projectionFastClient) ProviderCapabilities(context.Context) (llm.ProviderC
 	return llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}, nil
 }
 
+type projectionPreciseClient struct {
+	inputTokens int
+}
+
+func (c projectionPreciseClient) Generate(context.Context, llm.Request) (llm.Response, error) {
+	return llm.Response{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{InputTokens: 900, OutputTokens: 100, WindowTokens: 400_000},
+	}, nil
+}
+
+func (c projectionPreciseClient) CountRequestInputTokens(context.Context, llm.Request) (int, error) {
+	return c.inputTokens, nil
+}
+
+func (c projectionPreciseClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	return llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}, nil
+}
+
+type projectionCountingPreciseClient struct {
+	inputTokens int
+	countCalls  int
+}
+
+func (c *projectionCountingPreciseClient) Generate(context.Context, llm.Request) (llm.Response, error) {
+	return llm.Response{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{InputTokens: 900, OutputTokens: 100, WindowTokens: 400_000},
+	}, nil
+}
+
+func (c *projectionCountingPreciseClient) CountRequestInputTokens(context.Context, llm.Request) (int, error) {
+	c.countCalls++
+	return c.inputTokens, nil
+}
+
+func (c *projectionCountingPreciseClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	return llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}, nil
+}
+
 func TestEventFromRuntimeProjectsReasoningAndBackground(t *testing.T) {
 	exitCode := 17
 	view := EventFromRuntime(runtime.Event{
@@ -163,6 +203,230 @@ func TestSessionViewFromRuntimeUsesCommittedEntryMetadata(t *testing.T) {
 	view := SessionViewFromRuntime(eng)
 	if view.Transcript.CommittedEntryCount != eng.CommittedTranscriptEntryCount() {
 		t.Fatalf("projected committed entry count = %d, engine committed entry count = %d", view.Transcript.CommittedEntryCount, eng.CommittedTranscriptEntryCount())
+	}
+}
+
+/*
+func TestStatusFromRuntimeUsesFreshPreciseCurrentTokens(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, projectionPreciseClient{inputTokens: 180}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.SetOngoingError("")
+	if err := eng.AppendLocalEntry("info", "noop"); err != nil {
+		t.Fatalf("append local entry: %v", err)
+	}
+	if err := eng.RecordPromptHistory(""); err != nil {
+		t.Fatalf("record prompt history: %v", err)
+	}
+	if err := eng.AppendLocalEntry("info", ""); err != nil {
+		t.Fatalf("append empty local entry: %v", err)
+	}
+	if err := eng.CompactContextForPreSubmit(context.Background()); err == nil {
+		// no-op path is fine if engine chooses to compact nothing; ignore the result.
+	}
+	if err := eng.AppendLocalEntry("info", "still noop"); err != nil {
+		t.Fatalf("append local entry 2: %v", err)
+	}
+	if err := eng.AppendLocalEntry("info", "still noop 2"); err != nil {
+		t.Fatalf("append local entry 3: %v", err)
+	}
+	if err := eng.AppendLocalEntry("info", "still noop 3"); err != nil {
+		t.Fatalf("append local entry 4: %v", err)
+	}
+	if err := eng.AppendLocalEntry("info", "still noop 4"); err != nil {
+		t.Fatalf("append local entry 5: %v", err)
+	}
+	if err := eng.AppendLocalEntry("info", "still noop 5"); err != nil {
+		t.Fatalf("append local entry 6: %v", err)
+	}
+	if err := eng.AppendLocalEntry("info", "still noop 6"); err != nil {
+		t.Fatalf("append local entry 7: %v", err)
+	}
+	if err := eng.AppendLocalEntry("info", "still noop 7"); err != nil {
+		t.Fatalf("append local entry 8: %v", err)
+	}
+	if err := eng.AppendLocalEntry("info", "still noop 8"); err != nil {
+		t.Fatalf("append local entry 9: %v", err)
+	}
+	if err := eng.AppendLocalEntry("info", "still noop 9"); err != nil {
+		t.Fatalf("append local entry 10: %v", err)
+	}
+	if err := eng.CompactContext(context.Background(), ""); err == nil {
+		// ignore; context is empty and not relevant to projection.
+	}
+	if err := eng.AppendLocalEntry("info", "still noop 10"); err != nil {
+		t.Fatalf("append local entry 11: %v", err)
+	}
+	if err := eng.AppendLocalEntry("info", "still noop 11"); err != nil {
+		t.Fatalf("append local entry 12: %v", err)
+	}
+	if err := eng.AppendLocalEntry("info", "still noop 12"); err != nil {
+		t.Fatalf("append local entry 13: %v", err)
+	}
+	if err := eng.AppendLocalEntry("info", "still noop 13"); err != nil {
+		t.Fatalf("append local entry 14: %v", err)
+	}
+	if err := eng.AppendLocalEntry("info", "still noop 14"); err != nil {
+		t.Fatalf("append local entry 15: %v", err)
+	}
+	if err := eng.AppendLocalEntry("info", "still noop 15"); err != nil {
+		t.Fatalf("append local entry 16: %v", err)
+	}
+	if err := eng.AppendLocalEntry("info", "still noop 16"); err != nil {
+		t.Fatalf("append local entry 17: %v", err)
+	}
+	if err := eng.AppendLocalEntry("info", "still noop 17"); err != nil {
+		t.Fatalf("append local entry 18: %v", err)
+	}
+	if err := eng.AppendLocalEntry("info", "still noop 18"); err != nil {
+		t.Fatalf("append local entry 19: %v", err)
+	}
+	if err := eng.AppendLocalEntry("info", "still noop 19"); err != nil {
+		t.Fatalf("append local entry 20: %v", err)
+	}
+	if err := eng.AppendLocalEntry("info", "still noop 20"); err != nil {
+		t.Fatalf("append local entry 21: %v", err)
+	}
+	if err := eng.appendUserMessage("", "prompt"); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.SetOngoingError("")
+	eng.ClearOngoingError()
+	eng.setLastUsage(llm.Usage{InputTokens: 900, OutputTokens: 100, WindowTokens: 400_000})
+	if _, ok := eng.ShouldCompactBeforeUserMessage(context.Background(), "follow-up"); ok != nil {
+	}
+	view := StatusFromRuntime(eng)
+	if view.ContextUsage.UsedTokens != 180 {
+		t.Fatalf("projected used tokens=%d, want exact 180", view.ContextUsage.UsedTokens)
+	}
+}
+
+func TestStatusFromRuntimeDoesNotCountTokensWithoutExactSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &projectionCountingPreciseClient{inputTokens: 180}
+	eng, err := runtime.New(store, client, tools.NewRegistry(), runtime.Config{
+		Model:               "gpt-5",
+		ContextWindowTokens: 400_000,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "prompt"); err != nil {
+		t.Fatalf("submit user message: %v", err)
+	}
+	view := StatusFromRuntime(eng)
+	if client.countCalls != 0 {
+		t.Fatalf("expected status projection to avoid exact token counting, got %d calls", client.countCalls)
+	}
+	if view.ContextUsage.UsedTokens != 1_000 {
+		t.Fatalf("projected used tokens=%d, want estimator-backed 1000", view.ContextUsage.UsedTokens)
+	}
+}
+
+*/
+
+func TestStatusFromRuntimeUsesFreshPreciseCurrentTokens(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, projectionPreciseClient{inputTokens: 180}, tools.NewRegistry(), runtime.Config{
+		Model:                         "gpt-5",
+		ContextWindowTokens:           400_000,
+		AutoCompactTokenLimit:         1_000,
+		PreSubmitCompactionLeadTokens: 100,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "prompt"); err != nil {
+		t.Fatalf("submit user message: %v", err)
+	}
+	if _, err := eng.ShouldCompactBeforeUserMessage(context.Background(), "follow-up"); err != nil {
+		t.Fatalf("warm exact count: %v", err)
+	}
+	view := StatusFromRuntime(eng)
+	if view.ContextUsage.UsedTokens != 180 {
+		t.Fatalf("projected used tokens=%d, want exact 180", view.ContextUsage.UsedTokens)
 	}
 }
 

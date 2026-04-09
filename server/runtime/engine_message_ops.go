@@ -27,6 +27,7 @@ func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
 		"output":   json.RawMessage(r.Output),
 	})
 	if err == nil {
+		e.markCurrentRequestShapeDirtyForSignificantMutation()
 		e.chat.recordToolCompletion(r)
 		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
 	}
@@ -139,6 +140,11 @@ func (e *Engine) appendMessage(stepID string, msg llm.Message) error {
 			return err
 		}
 	}
+	if mutation := tokenUsageMutationForMessage(msg); mutation == tokenUsageMutationSignificant {
+		e.markCurrentRequestShapeDirtyForSignificantMutation()
+	} else {
+		e.markCurrentRequestShapeDirty()
+	}
 	e.chat.appendMessage(msg)
 	_, err := e.store.AppendEvent(stepID, "message", msg)
 	if err == nil {
@@ -153,6 +159,11 @@ func (e *Engine) appendMessageWithoutConversationUpdate(stepID string, msg llm.M
 		if err := e.beforePersistMessage(msg); err != nil {
 			return err
 		}
+	}
+	if mutation := tokenUsageMutationForMessage(msg); mutation == tokenUsageMutationSignificant {
+		e.markCurrentRequestShapeDirtyForSignificantMutation()
+	} else {
+		e.markCurrentRequestShapeDirty()
 	}
 	e.chat.appendMessage(msg)
 	_, err := e.store.AppendEvent(stepID, "message", msg)

@@ -5,6 +5,7 @@ import (
 	"builder/server/tools"
 	"builder/shared/transcript"
 	"encoding/json"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -876,6 +877,77 @@ func TestChatStoreProviderHistoryUsesMostRecentCompactionCheckpoint(t *testing.T
 	}
 	if items[0].Content != "summary-2" || items[1].Content != "after" {
 		t.Fatalf("expected latest replacement + tail, got %+v", items)
+	}
+}
+
+func TestChatStoreSnapshotItemsPreservesMultiToolOutputOrdering(t *testing.T) {
+	s := newChatStore()
+	call1 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)})
+	call2 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-2", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)})
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}})
+	s.recordToolCompletion(tools.Result{CallID: "call-1", Name: tools.ToolShell, Output: json.RawMessage(`{"output":"/tmp"}`)})
+	s.recordToolCompletion(tools.Result{CallID: "call-2", Name: tools.ToolShell, Output: json.RawMessage(`{"output":"a.txt"}`)})
+
+	items := s.snapshotItems()
+	if len(items) != 4 {
+		t.Fatalf("expected 4 provider items, got %d (%+v)", len(items), items)
+	}
+	if items[0].Type != llm.ResponseItemTypeFunctionCall || items[0].CallID != "call-1" {
+		t.Fatalf("unexpected first item: %+v", items[0])
+	}
+	if items[1].Type != llm.ResponseItemTypeFunctionCall || items[1].CallID != "call-2" {
+		t.Fatalf("unexpected second item: %+v", items[1])
+	}
+	if items[2].Type != llm.ResponseItemTypeFunctionCallOutput || items[2].CallID != "call-1" {
+		t.Fatalf("unexpected third item: %+v", items[2])
+	}
+	if items[3].Type != llm.ResponseItemTypeFunctionCallOutput || items[3].CallID != "call-2" {
+		t.Fatalf("unexpected fourth item: %+v", items[3])
+	}
+}
+
+func TestChatStoreSnapshotItemsPreservesMixedMaterializedAndPendingToolOutputs(t *testing.T) {
+	s := newChatStore()
+	call1 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)})
+	call2 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-2", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)})
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}})
+	s.recordToolCompletion(tools.Result{CallID: "call-1", Name: tools.ToolShell, Output: json.RawMessage(`{"output":"/tmp"}`)})
+	s.recordToolCompletion(tools.Result{CallID: "call-2", Name: tools.ToolShell, Output: json.RawMessage(`{"output":"a.txt"}`)})
+	s.appendMessage(llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(tools.ToolShell), Content: `{"output":"/tmp"}`})
+
+	items := s.snapshotItems()
+	if len(items) != 4 {
+		t.Fatalf("expected 4 provider items, got %d (%+v)", len(items), items)
+	}
+	if items[0].Type != llm.ResponseItemTypeFunctionCall || items[0].CallID != "call-1" {
+		t.Fatalf("unexpected item[0]: %+v", items[0])
+	}
+	if items[1].Type != llm.ResponseItemTypeFunctionCall || items[1].CallID != "call-2" {
+		t.Fatalf("unexpected item[1]: %+v", items[1])
+	}
+	if items[2].Type != llm.ResponseItemTypeFunctionCallOutput || items[2].CallID != "call-1" {
+		t.Fatalf("unexpected item[2]: %+v", items[2])
+	}
+	if items[3].Type != llm.ResponseItemTypeFunctionCallOutput || items[3].CallID != "call-2" {
+		t.Fatalf("unexpected item[3]: %+v", items[3])
+	}
+}
+
+func TestChatStoreSnapshotItemsMatchesItemsFromMessagesWhenFullyMaterialized(t *testing.T) {
+	s := newChatStore()
+	call1 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)})
+	call2 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-2", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)})
+	messages := []llm.Message{
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}},
+		{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(tools.ToolShell), Content: `{"output":"/tmp"}`},
+		{Role: llm.RoleTool, ToolCallID: "call-2", Name: string(tools.ToolShell), Content: `{"output":"a.txt"}`},
+	}
+	for _, msg := range messages {
+		s.appendMessage(msg)
+	}
+	want := llm.ItemsFromMessages(messages)
+	if got := s.snapshotItems(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("snapshotItems mismatch\n got: %+v\nwant: %+v", got, want)
 	}
 }
 
