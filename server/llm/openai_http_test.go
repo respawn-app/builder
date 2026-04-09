@@ -26,6 +26,16 @@ func (staticAuth) AuthorizationHeader(context.Context) (string, error) {
 	return "Bearer token", nil
 }
 
+type oauthStaticAuth struct{}
+
+func (oauthStaticAuth) AuthorizationHeader(context.Context) (string, error) {
+	return "Bearer token", nil
+}
+
+func (oauthStaticAuth) OpenAIAuthMetadata(context.Context) (string, string, error) {
+	return "oauth", "acc-1", nil
+}
+
 type missingAuth struct{}
 
 func (missingAuth) AuthorizationHeader(context.Context) (string, error) {
@@ -526,6 +536,30 @@ func TestBuildRequestOptions_OAuthAddsCodexHeaders(t *testing.T) {
 	}
 	if len(transport.buildRequestOptions("Bearer x", openAIAuthMode{}, "")) != 3 {
 		t.Fatal("expected non-oauth options to include auth/caching headers")
+	}
+}
+
+func TestSupportsRequestInputTokenCount_DisablesCodexOAuth(t *testing.T) {
+	transport := NewHTTPTransport(oauthStaticAuth{})
+
+	supported, err := transport.SupportsRequestInputTokenCount(context.Background())
+	if err != nil {
+		t.Fatalf("SupportsRequestInputTokenCount: %v", err)
+	}
+	if supported {
+		t.Fatal("expected chatgpt-codex oauth input token counting to be unsupported")
+	}
+}
+
+func TestSupportsRequestInputTokenCount_AllowsStandardOpenAI(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+
+	supported, err := transport.SupportsRequestInputTokenCount(context.Background())
+	if err != nil {
+		t.Fatalf("SupportsRequestInputTokenCount: %v", err)
+	}
+	if !supported {
+		t.Fatal("expected standard openai input token counting to remain supported")
 	}
 }
 

@@ -103,7 +103,9 @@ func (e *Engine) AppendLocalEntry(role, text string) {
 }
 
 func (e *Engine) AppendLocalEntryWithOngoingText(role, text, ongoingText string) {
-	e.chat.appendLocalEntryWithOngoingText(role, text, ongoingText)
+	entry := storedLocalEntry{Role: role, Text: text, OngoingText: ongoingText}
+	e.chat.appendLocalEntryWithOngoingText(entry.Role, entry.Text, entry.OngoingText)
+	e.emit(Event{Kind: EventLocalEntryAdded, LocalEntry: localEntryChatEntry(entry)})
 	e.emit(Event{Kind: EventConversationUpdated, StepID: ""})
 }
 
@@ -374,10 +376,11 @@ func mustJSON(v any) json.RawMessage {
 }
 
 type storedLocalEntry struct {
-	Visibility  transcript.EntryVisibility `json:"visibility,omitempty"`
-	Role        string                     `json:"role"`
-	Text        string                     `json:"text"`
-	OngoingText string                     `json:"ongoing_text,omitempty"`
+	Visibility    transcript.EntryVisibility `json:"visibility,omitempty"`
+	Role          string                     `json:"role"`
+	Text          string                     `json:"text"`
+	OngoingText   string                     `json:"ongoing_text,omitempty"`
+	DiagnosticKey string                     `json:"diagnostic_key,omitempty"`
 }
 
 type historyReplacementPayload struct {
@@ -404,20 +407,146 @@ func (e *Engine) lastUsageSnapshot() llm.Usage {
 }
 
 func (e *Engine) setLastUsage(usage llm.Usage) {
+	baselineEstimate := 0
+	if e != nil && e.chat != nil {
+		baselineEstimate = e.chat.estimatedProviderTokens()
+	}
+	normalizedUsage, totalInputTokens, totalCachedInputTokens := e.nextUsageTrackingState(usage)
+	e.applyUsageTrackingState(normalizedUsage, baselineEstimate, totalInputTokens, totalCachedInputTokens)
+}
+
+func (e *Engine) recordLastUsage(usage llm.Usage) error {
+	baselineEstimate := 0
+	if e != nil && e.chat != nil {
+		baselineEstimate = e.chat.estimatedProviderTokens()
+	}
+	normalizedUsage, totalInputTokens, totalCachedInputTokens := e.nextUsageTrackingState(usage)
+	if e != nil && e.store != nil {
+		if err := e.store.SetUsageState(&session.UsageState{
+			InputTokens:             normalizedUsage.InputTokens,
+			OutputTokens:            normalizedUsage.OutputTokens,
+			WindowTokens:            normalizedUsage.WindowTokens,
+			CachedInputTokens:       normalizedUsage.CachedInputTokens,
+			HasCachedInputTokens:    normalizedUsage.HasCachedInputTokens,
+			EstimatedProviderTokens: baselineEstimate,
+			TotalInputTokens:        totalInputTokens,
+			TotalCachedInputTokens:  totalCachedInputTokens,
+		}); err != nil {
+			return err
+		}
+	}
+	e.applyUsageTrackingState(normalizedUsage, baselineEstimate, totalInputTokens, totalCachedInputTokens)
+	return nil
+}
+
+func (e *Engine) restorePersistedUsageState(state *session.UsageState) {
+	if e == nil || state == nil {
+		return
+	}
+	normalized := normalizePersistedUsageState(*state)
+	e.applyUsageTrackingState(
+		llm.Usage{
+			InputTokens:          normalized.InputTokens,
+			OutputTokens:         normalized.OutputTokens,
+			WindowTokens:         normalized.WindowTokens,
+			CachedInputTokens:    normalized.CachedInputTokens,
+			HasCachedInputTokens: normalized.HasCachedInputTokens,
+		},
+		normalized.EstimatedProviderTokens,
+		normalized.TotalInputTokens,
+		normalized.TotalCachedInputTokens,
+	)
+}
+
+func normalizeUsageForTracking(usage llm.Usage) llm.Usage {
+	if usage.InputTokens < 0 {
+		usage.InputTokens = 0
+	}
+	if usage.OutputTokens < 0 {
+		usage.OutputTokens = 0
+	}
+	if usage.WindowTokens < 0 {
+		usage.WindowTokens = 0
+	}
+	if usage.CachedInputTokens < 0 {
+		usage.CachedInputTokens = 0
+	}
+	if usage.CachedInputTokens > usage.InputTokens {
+		usage.CachedInputTokens = usage.InputTokens
+	}
+	return usage
+}
+
+func normalizePersistedUsageState(state session.UsageState) session.UsageState {
+	if state.InputTokens < 0 {
+		state.InputTokens = 0
+	}
+	if state.OutputTokens < 0 {
+		state.OutputTokens = 0
+	}
+	if state.WindowTokens < 0 {
+		state.WindowTokens = 0
+	}
+	if state.CachedInputTokens < 0 {
+		state.CachedInputTokens = 0
+	}
+	if state.CachedInputTokens > state.InputTokens {
+		state.CachedInputTokens = state.InputTokens
+	}
+	if state.EstimatedProviderTokens < 0 {
+		state.EstimatedProviderTokens = 0
+	}
+	if state.TotalInputTokens < 0 {
+		state.TotalInputTokens = 0
+	}
+	if state.TotalCachedInputTokens < 0 {
+		state.TotalCachedInputTokens = 0
+	}
+	if state.TotalCachedInputTokens > state.TotalInputTokens {
+		state.TotalCachedInputTokens = state.TotalInputTokens
+	}
+	return state
+}
+
+func nextUsageTotals(totalInputTokens, totalCachedInputTokens int, usage llm.Usage) (int, int) {
+	if totalInputTokens < 0 {
+		totalInputTokens = 0
+	}
+	if totalCachedInputTokens < 0 {
+		totalCachedInputTokens = 0
+	}
+	if usage.HasCachedInputTokens && usage.InputTokens > 0 {
+		totalInputTokens += usage.InputTokens
+		totalCachedInputTokens += usage.CachedInputTokens
+		if totalCachedInputTokens > totalInputTokens {
+			totalCachedInputTokens = totalInputTokens
+		}
+	}
+	return totalInputTokens, totalCachedInputTokens
+}
+
+func (e *Engine) nextUsageTrackingState(usage llm.Usage) (llm.Usage, int, int) {
+	normalizedUsage := normalizeUsageForTracking(usage)
+	e.mu.Lock()
+	totalInputTokens := e.totalInputTokens
+	totalCachedInputTokens := e.totalCachedInputTokens
+	e.mu.Unlock()
+	totalInputTokens, totalCachedInputTokens = nextUsageTotals(totalInputTokens, totalCachedInputTokens, normalizedUsage)
+	return normalizedUsage, totalInputTokens, totalCachedInputTokens
+}
+
+func (e *Engine) applyUsageTrackingState(usage llm.Usage, baselineEstimate, totalInputTokens, totalCachedInputTokens int) {
+	if baselineEstimate < 0 {
+		baselineEstimate = 0
+	}
 	e.mu.Lock()
 	e.lastUsage = usage
-	if usage.HasCachedInputTokens && usage.InputTokens > 0 {
-		cachedTokens := usage.CachedInputTokens
-		if cachedTokens < 0 {
-			cachedTokens = 0
-		}
-		if cachedTokens > usage.InputTokens {
-			cachedTokens = usage.InputTokens
-		}
-		e.totalInputTokens += usage.InputTokens
-		e.totalCachedInputTokens += cachedTokens
-	}
+	e.totalInputTokens = totalInputTokens
+	e.totalCachedInputTokens = totalCachedInputTokens
 	e.mu.Unlock()
+	if e.tokenUsage != nil {
+		e.tokenUsage.storeUsageBaseline(usage.InputTokens, baselineEstimate)
+	}
 }
 
 func (e *Engine) cacheHitSnapshot() (int, bool) {

@@ -70,6 +70,21 @@ func TestTranscriptProjectorSurfacesPersistedCompactionSummaries(t *testing.T) {
 	}
 }
 
+func TestTranscriptProjectorPreservesErrorLocalEntries(t *testing.T) {
+	projector := NewTranscriptProjector()
+	if err := projector.ApplyPersistedEvent(mustPersistedEvent(t, "local_entry", storedLocalEntry{Role: "error", Text: "Exact token counting failed"})); err != nil {
+		t.Fatalf("ApplyPersistedEvent(local_entry error): %v", err)
+	}
+
+	snapshot := projector.ChatSnapshot()
+	if len(snapshot.Entries) != 1 {
+		t.Fatalf("entry count = %d, want 1", len(snapshot.Entries))
+	}
+	if got := snapshot.Entries[0]; got.Role != "error" || got.Text != "Exact token counting failed" {
+		t.Fatalf("entry[0] = %+v, want persisted error entry", got)
+	}
+}
+
 func mustPersistedEvent(t *testing.T, kind string, payload any) session.Event {
 	t.Helper()
 	body, err := json.Marshal(payload)

@@ -1,6 +1,8 @@
 package runtimeview
 
 import (
+	"strings"
+
 	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/server/session"
@@ -10,11 +12,14 @@ import (
 	"builder/shared/transcript"
 )
 
+const runtimeNoopFinalToken = "NO_OP"
+
 func MainViewFromRuntime(engine *runtime.Engine) clientui.RuntimeMainView {
 	if engine == nil {
 		return clientui.RuntimeMainView{}
 	}
 	sessionView := SessionViewFromRuntime(engine)
+	sessionView.Chat = ChatSnapshotFromRuntime(engine.ChatSnapshot())
 	return clientui.RuntimeMainView{
 		Status:    StatusFromRuntime(engine),
 		Session:   sessionView,
@@ -183,6 +188,9 @@ func RunViewFromSessionRecord(sessionID string, record *session.RunRecord) *clie
 func ChatSnapshotFromRuntime(snapshot runtime.ChatSnapshot) clientui.ChatSnapshot {
 	entries := make([]clientui.ChatEntry, 0, len(snapshot.Entries))
 	for _, entry := range snapshot.Entries {
+		if isSuppressedNoopAssistantEntry(entry) {
+			continue
+		}
 		entries = append(entries, clientui.ChatEntry{
 			Visibility:  clientui.EntryVisibility(entry.Visibility),
 			Role:        entry.Role,
@@ -193,11 +201,19 @@ func ChatSnapshotFromRuntime(snapshot runtime.ChatSnapshot) clientui.ChatSnapsho
 			ToolCall:    cloneToolCallMeta(entry.ToolCall),
 		})
 	}
+	ongoing := snapshot.Ongoing
+	if strings.TrimSpace(ongoing) == runtimeNoopFinalToken {
+		ongoing = ""
+	}
 	return clientui.ChatSnapshot{
 		Entries:      entries,
-		Ongoing:      snapshot.Ongoing,
+		Ongoing:      ongoing,
 		OngoingError: snapshot.OngoingError,
 	}
+}
+
+func isSuppressedNoopAssistantEntry(entry runtime.ChatEntry) bool {
+	return strings.TrimSpace(entry.Role) == "assistant" && entry.Phase == llm.MessagePhaseFinal && strings.TrimSpace(entry.Text) == runtimeNoopFinalToken
 }
 
 func cloneToolCallMeta(meta *transcript.ToolCallMeta) *clientui.ToolCallMeta {

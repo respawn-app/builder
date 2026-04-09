@@ -45,6 +45,7 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 			if err := json.Unmarshal(evt.Payload, &entry); err != nil {
 				return fmt.Errorf("decode local_entry event: %w", err)
 			}
+			e.restoreLocalDiagnostic(entry.DiagnosticKey)
 			e.chat.appendLocalEntryWithOngoingTextAndVisibility(entry.Role, entry.Text, entry.OngoingText, entry.Visibility)
 		case sessionEventCacheWarning:
 			if err := applyPersistedCacheWarningToChat(e.chat, evt.Payload, e.cfg.CacheWarningMode); err != nil {
@@ -63,6 +64,7 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 			if err := json.Unmarshal(evt.Payload, &payload); err != nil {
 				return fmt.Errorf("decode history_replaced event: %w", err)
 			}
+			e.resetLocalDiagnostics()
 			if strings.TrimSpace(payload.Engine) == "reviewer_rollback" {
 				e.chat.restoreHistoryItems(payload.Items)
 				e.clearPromptCacheLineages(meta.SessionID, e.compactionCountSnapshot())

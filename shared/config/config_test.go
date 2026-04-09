@@ -228,10 +228,11 @@ func TestSettingsTOMLRoundTripsCapabilityOverrides(t *testing.T) {
 	settings := defaultSettings()
 	settings.ModelCapabilities.SupportsReasoningEffort = true
 	settings.ProviderCapabilities = ProviderCapabilitiesOverride{
-		ProviderID:                    "openai-compatible",
-		SupportsResponsesAPI:          true,
-		SupportsPromptCacheKey:        true,
-		SupportsServerSideContextEdit: true,
+		ProviderID:                     "openai-compatible",
+		SupportsResponsesAPI:           true,
+		SupportsRequestInputTokenCount: true,
+		SupportsPromptCacheKey:         true,
+		SupportsServerSideContextEdit:  true,
 	}
 	toml := settingsTOML(settings)
 	for _, want := range []string{
@@ -240,6 +241,7 @@ func TestSettingsTOMLRoundTripsCapabilityOverrides(t *testing.T) {
 		"[provider_capabilities]",
 		"provider_id = \"openai-compatible\"",
 		"supports_responses_api = true",
+		"supports_request_input_token_count = true",
 		"supports_prompt_cache_key = true",
 		"supports_server_side_context_edit = true",
 	} {
@@ -275,6 +277,9 @@ func TestSettingsTOMLRoundTripsCapabilityOverrides(t *testing.T) {
 	}
 	if !state.Settings.ProviderCapabilities.SupportsResponsesAPI {
 		t.Fatal("expected supports_responses_api to round-trip")
+	}
+	if !state.Settings.ProviderCapabilities.SupportsRequestInputTokenCount {
+		t.Fatal("expected supports_request_input_token_count to round-trip")
 	}
 	if !state.Settings.ProviderCapabilities.SupportsServerSideContextEdit {
 		t.Fatal("expected supports_server_side_context_edit to round-trip")
@@ -481,6 +486,7 @@ supports_vision_inputs = true
 provider_id = "custom-provider"
 supports_responses_api = true
 supports_responses_compact = false
+supports_request_input_token_count = false
 supports_prompt_cache_key = true
 supports_native_web_search = true
 supports_reasoning_encrypted = false
@@ -500,11 +506,17 @@ is_openai_first_party = false
 	if cfg.Settings.ProviderCapabilities.ProviderID != "custom-provider" || !cfg.Settings.ProviderCapabilities.SupportsResponsesAPI || !cfg.Settings.ProviderCapabilities.SupportsPromptCacheKey || !cfg.Settings.ProviderCapabilities.SupportsNativeWebSearch {
 		t.Fatalf("expected provider capability overrides from file, got %+v", cfg.Settings.ProviderCapabilities)
 	}
+	if cfg.Settings.ProviderCapabilities.SupportsRequestInputTokenCount {
+		t.Fatalf("expected supports_request_input_token_count override from file, got %+v", cfg.Settings.ProviderCapabilities)
+	}
 	if got := cfg.Source.Sources["model_capabilities.supports_reasoning_effort"]; got != "file" {
 		t.Fatalf("expected model_capabilities.supports_reasoning_effort source file, got %q", got)
 	}
 	if got := cfg.Source.Sources["provider_capabilities.provider_id"]; got != "file" {
 		t.Fatalf("expected provider_capabilities.provider_id source file, got %q", got)
+	}
+	if got := cfg.Source.Sources["provider_capabilities.supports_request_input_token_count"]; got != "file" {
+		t.Fatalf("expected provider_capabilities.supports_request_input_token_count source file, got %q", got)
 	}
 }
 
@@ -517,6 +529,7 @@ func TestLoadCapabilityOverridesFromEnv(t *testing.T) {
 	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_PROVIDER_ID", "custom-provider")
 	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_RESPONSES_API", "true")
 	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_RESPONSES_COMPACT", "false")
+	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_REQUEST_INPUT_TOKEN_COUNT", "false")
 	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_PROMPT_CACHE_KEY", "true")
 	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_NATIVE_WEB_SEARCH", "true")
 	t.Setenv("BUILDER_PROVIDER_CAPABILITIES_SUPPORTS_REASONING_ENCRYPTED", "false")
@@ -533,11 +546,17 @@ func TestLoadCapabilityOverridesFromEnv(t *testing.T) {
 	if cfg.Settings.ProviderCapabilities.ProviderID != "custom-provider" || !cfg.Settings.ProviderCapabilities.SupportsResponsesAPI || !cfg.Settings.ProviderCapabilities.SupportsPromptCacheKey || !cfg.Settings.ProviderCapabilities.SupportsNativeWebSearch {
 		t.Fatalf("expected provider capability overrides from env, got %+v", cfg.Settings.ProviderCapabilities)
 	}
+	if cfg.Settings.ProviderCapabilities.SupportsRequestInputTokenCount {
+		t.Fatalf("expected supports_request_input_token_count override from env, got %+v", cfg.Settings.ProviderCapabilities)
+	}
 	if got := cfg.Source.Sources["model_capabilities.supports_reasoning_effort"]; got != "env" {
 		t.Fatalf("expected model_capabilities.supports_reasoning_effort source env, got %q", got)
 	}
 	if got := cfg.Source.Sources["provider_capabilities.provider_id"]; got != "env" {
 		t.Fatalf("expected provider_capabilities.provider_id source env, got %q", got)
+	}
+	if got := cfg.Source.Sources["provider_capabilities.supports_request_input_token_count"]; got != "env" {
+		t.Fatalf("expected provider_capabilities.supports_request_input_token_count source env, got %q", got)
 	}
 }
 

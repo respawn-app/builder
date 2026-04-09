@@ -256,6 +256,18 @@ func (t *HTTPTransport) CountRequestInputTokens(ctx context.Context, request Ope
 	return int(decoded.InputTokens), nil
 }
 
+func (t *HTTPTransport) SupportsRequestInputTokenCount(ctx context.Context) (bool, error) {
+	_, mode, err := t.resolveAuth(ctx)
+	if err != nil {
+		return false, err
+	}
+	providerCaps, err := t.providerCapabilitiesForMode(mode)
+	if err != nil {
+		return false, err
+	}
+	return providerCaps.SupportsRequestInputTokenCount, nil
+}
+
 func (t *HTTPTransport) ResolveModelContextWindow(ctx context.Context, model string) (int, error) {
 	if t.Client == nil {
 		t.Client = &http.Client{Timeout: 120 * time.Second}

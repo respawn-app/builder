@@ -26,6 +26,7 @@ const (
 	EventCompactionCompleted EventKind = "context_compaction_completed"
 	EventCompactionFailed    EventKind = "context_compaction_failed"
 	EventCacheWarning        EventKind = "cache_warning"
+	EventLocalEntryAdded     EventKind = "local_entry_added"
 	EventRunStateChanged     EventKind = "run_state_changed"
 	EventBackgroundUpdated   EventKind = "background_updated"
 )

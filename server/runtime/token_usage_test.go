@@ -2,6 +2,9 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
 	"builder/server/llm"
@@ -99,6 +102,7 @@ func TestTokenUsageTrackerForcesCriticalRefreshAfterSignificantMutation(t *testi
 
 func TestTokenUsageTrackerHardResetClearsAdaptiveGrowth(t *testing.T) {
 	tracker := newTokenUsageTracker()
+	tracker.storeUsageBaseline(120, 100)
 	tracker.store("req-1", 150, true)
 	tracker.invalidateCurrent(tokenUsageMutationSignificant)
 	tracker.store("req-2", 168, true)
@@ -111,6 +115,21 @@ func TestTokenUsageTrackerHardResetClearsAdaptiveGrowth(t *testing.T) {
 	}
 	if len(tracker.recentSignificantGrowth) != 0 {
 		t.Fatalf("recent significant growth=%v, want cleared history", tracker.recentSignificantGrowth)
+	}
+	if estimated, ok := tracker.estimateCurrentInputTokens(140); !ok || estimated != 140 {
+		t.Fatalf("expected hard reset to fall back to fresh estimate, got (%d, %v)", estimated, ok)
+	}
+}
+
+func TestTokenUsageTrackerEstimatesCurrentInputTokensFromUsageBaselineDelta(t *testing.T) {
+	tracker := newTokenUsageTracker()
+	tracker.storeUsageBaseline(900, 180)
+
+	if estimated, ok := tracker.estimateCurrentInputTokens(150); !ok || estimated != 900 {
+		t.Fatalf("estimate below checkpoint = (%d, %v), want (900, true)", estimated, ok)
+	}
+	if estimated, ok := tracker.estimateCurrentInputTokens(240); !ok || estimated != 960 {
+		t.Fatalf("estimate above checkpoint = (%d, %v), want (960, true)", estimated, ok)
 	}
 }
 
@@ -275,5 +294,168 @@ func TestCurrentInputTokensPreciselyIfCriticalForcesRefreshAfterSignificantMutat
 	}
 	if client.countCalls != 2 {
 		t.Fatalf("expected significant provider-visible mutation to force a critical recount, got %d calls", client.countCalls)
+	}
+}
+
+func TestCurrentInputTokensPreciselyPersistsTranscriptErrorOnceOnCountFailure(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &preciseCompactionClient{countErr: errors.New("chatgpt-codex status 404"), contextWindow: 400000}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "hello"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if precise, ok := eng.currentInputTokensPrecisely(context.Background()); ok || precise != 0 {
+		t.Fatalf("currentInputTokensPrecisely = (%d, %v), want no precise count", precise, ok)
+	}
+	if precise, ok := eng.currentInputTokensPrecisely(context.Background()); ok || precise != 0 {
+		t.Fatalf("second currentInputTokensPrecisely = (%d, %v), want no precise count", precise, ok)
+	}
+	if client.countCalls != 2 {
+		t.Fatalf("count calls=%d, want 2 repeated backend attempts", client.countCalls)
+	}
+
+	reopenedStore, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	reopened, err := New(reopenedStore, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("reopen engine: %v", err)
+	}
+	if precise, ok := reopened.currentInputTokensPrecisely(context.Background()); ok || precise != 0 {
+		t.Fatalf("reopened currentInputTokensPrecisely = (%d, %v), want no precise count", precise, ok)
+	}
+
+	events, err := reopenedStore.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	diagnosticEntries := 0
+	for _, evt := range events {
+		if evt.Kind != "local_entry" {
+			continue
+		}
+		var entry storedLocalEntry
+		if err := json.Unmarshal(evt.Payload, &entry); err != nil {
+			t.Fatalf("decode local_entry: %v", err)
+		}
+		if entry.DiagnosticKey != preciseTokenCountFailureDiagnostic {
+			continue
+		}
+		diagnosticEntries++
+		if entry.Role != "error" {
+			t.Fatalf("diagnostic role = %q, want error", entry.Role)
+		}
+		if !strings.Contains(entry.Text, "Exact token counting failed:") {
+			t.Fatalf("expected exact count failure text, got %q", entry.Text)
+		}
+		if !strings.Contains(entry.Text, "Falling back to a local token estimate.") {
+			t.Fatalf("expected fallback note, got %q", entry.Text)
+		}
+		if !strings.Contains(entry.Text, "chatgpt-codex status 404") {
+			t.Fatalf("expected backend error details, got %q", entry.Text)
+		}
+	}
+	if diagnosticEntries != 1 {
+		t.Fatalf("diagnostic local_entry count = %d, want 1", diagnosticEntries)
+	}
+}
+
+func TestCurrentInputTokensPreciselySkipsUnsupportedCountClient(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	supported := false
+	client := &preciseCompactionClient{inputTokenCount: 123, contextWindow: 400000, countSupported: &supported}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "hello"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+
+	if precise, ok := eng.currentInputTokensPrecisely(context.Background()); ok || precise != 0 {
+		t.Fatalf("currentInputTokensPrecisely = (%d, %v), want no precise count", precise, ok)
+	}
+	if client.countCalls != 0 {
+		t.Fatalf("count calls=%d, want 0 for unsupported exact counting", client.countCalls)
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	for _, evt := range events {
+		if evt.Kind != "local_entry" {
+			continue
+		}
+		var entry storedLocalEntry
+		if err := json.Unmarshal(evt.Payload, &entry); err != nil {
+			t.Fatalf("decode local_entry: %v", err)
+		}
+		if entry.DiagnosticKey == preciseTokenCountFailureDiagnostic {
+			t.Fatalf("did not expect precise-token diagnostic for unsupported provider: %+v", entry)
+		}
+	}
+}
+
+func TestCurrentInputTokensPreciselyPersistsTranscriptErrorOnSupportProbeFailure(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &preciseCompactionClient{inputTokenCount: 123, contextWindow: 400000, supportErr: errors.New("oauth metadata unavailable")}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "hello"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+
+	if precise, ok := eng.currentInputTokensPrecisely(context.Background()); ok || precise != 0 {
+		t.Fatalf("currentInputTokensPrecisely = (%d, %v), want no precise count", precise, ok)
+	}
+	if client.countCalls != 0 {
+		t.Fatalf("count calls=%d, want 0 when support probe fails closed", client.countCalls)
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	entries := 0
+	for _, evt := range events {
+		if evt.Kind != "local_entry" {
+			continue
+		}
+		var entry storedLocalEntry
+		if err := json.Unmarshal(evt.Payload, &entry); err != nil {
+			t.Fatalf("decode local_entry: %v", err)
+		}
+		if entry.DiagnosticKey != preciseTokenCountSupportDiagnostic {
+			continue
+		}
+		entries++
+		if !strings.Contains(entry.Text, "Exact token counting availability check failed:") {
+			t.Fatalf("unexpected diagnostic text: %q", entry.Text)
+		}
+	}
+	if entries != 1 {
+		t.Fatalf("support diagnostic count=%d, want 1", entries)
 	}
 }

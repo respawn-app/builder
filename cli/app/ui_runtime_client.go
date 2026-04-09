@@ -456,6 +456,12 @@ func (c *sessionRuntimeClient) refreshTranscriptAsync() {
 }
 
 func storeTranscriptFromSessionViewLocked(c *sessionRuntimeClient, view clientui.RuntimeSessionView) {
+	if c == nil || c.hasTranscript {
+		// SessionView.Chat is a bootstrap snapshot. Once the ongoing-tail cache has
+		// been populated from a real transcript page, never let main-view refreshes
+		// downgrade it back to the weaker summary snapshot.
+		return
+	}
 	page := transcriptPageFromSessionView(view)
 	if page.SessionID == "" || (len(page.Entries) == 0 && view.Transcript.CommittedEntryCount > 0) {
 		return
@@ -513,8 +519,6 @@ func transcriptPageFromSessionView(view clientui.RuntimeSessionView) clientui.Tr
 		NextOffset:            nextOffset,
 		HasMore:               hasMore,
 		Entries:               cloneTranscriptEntries(view.Chat.Entries),
-		Ongoing:               view.Chat.Ongoing,
-		OngoingError:          view.Chat.OngoingError,
 	}
 }
 
