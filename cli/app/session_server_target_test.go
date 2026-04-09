@@ -162,6 +162,37 @@ func TestStartSessionServerUsesDiscoveredDaemonForInteractiveFlow(t *testing.T) 
 	}
 }
 
+func TestShouldBypassRemoteStartupForInteractiveOnboardingOnFirstRun(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	bypass, err := shouldBypassRemoteStartupForInteractiveOnboarding(Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, &stubAuthInteractor{})
+	if err != nil {
+		t.Fatalf("shouldBypassRemoteStartupForInteractiveOnboarding: %v", err)
+	}
+	if !bypass {
+		t.Fatal("expected first-run interactive startup to bypass remote onboarding paths")
+	}
+}
+
+func TestShouldBypassRemoteStartupForInteractiveOnboardingSkipsWhenConfigExists(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	if _, _, err := config.WriteDefaultSettingsFile(); err != nil {
+		t.Fatalf("WriteDefaultSettingsFile: %v", err)
+	}
+
+	bypass, err := shouldBypassRemoteStartupForInteractiveOnboarding(Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, &stubAuthInteractor{})
+	if err != nil {
+		t.Fatalf("shouldBypassRemoteStartupForInteractiveOnboarding: %v", err)
+	}
+	if bypass {
+		t.Fatal("expected configured interactive startup to keep remote onboarding paths enabled")
+	}
+}
+
 func TestStartSessionServerRejectsIncompatibleDiscoveredDaemonAndFallsBack(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
