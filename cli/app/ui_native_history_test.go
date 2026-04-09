@@ -131,6 +131,33 @@ func TestNativeScrollbackStartupReplayContinuesPastEmptyToolResult(t *testing.T)
 	}
 }
 
+func TestNativeScrollbackStartupReplayKeepsPatchSuccessStateAfterEmptyToolResult(t *testing.T) {
+	m := newProjectedStaticUIModel(WithUITheme("dark"))
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "tool_call", Text: "apply patch", ToolCallID: "call_patch", ToolCall: &transcript.ToolCallMeta{ToolName: "patch", Command: "apply patch"}},
+		{Role: "tool_result_ok", Text: "", ToolCallID: "call_patch"},
+	}
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	_, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if cmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg after first window size, got %T", cmd())
+	}
+	plain := stripANSIPreserve(msg.Text)
+	if !strings.Contains(plain, "• apply patch") {
+		t.Fatalf("expected patch replay to show tool call text, got %q", plain)
+	}
+	tokens := sharedtheme.ResolvePalette(m.theme)
+	expectedSuccessBullet := lipgloss.NewStyle().Foreground(tokens.Transcript.ToolSuccess.Lipgloss()).Render("•")
+	if !strings.Contains(msg.Text, expectedSuccessBullet) {
+		t.Fatalf("expected patch replay to use success-colored bullet after empty result, got %q", msg.Text)
+	}
+}
+
 func TestNativeScrollbackStartupEmptyConversationEmitsBlankScreenSpacer(t *testing.T) {
 	m := newProjectedStaticUIModel()
 
@@ -993,6 +1020,11 @@ func TestNativeScrollbackCommittedWebSearchUsesAtPrefixAndVerboseQuery(t *testin
 	plain := stripANSIPreserve(msg.Text)
 	if !strings.Contains(plain, `@ web search: "latest golang release"`) {
 		t.Fatalf("expected committed web search replay to use @ prefix and verbose query, got %q", plain)
+	}
+	tokens := sharedtheme.ResolvePalette(m.theme)
+	expectedSuccessPrefix := lipgloss.NewStyle().Foreground(tokens.Transcript.ToolSuccess.Lipgloss()).Render("@")
+	if !strings.Contains(msg.Text, expectedSuccessPrefix) {
+		t.Fatalf("expected committed web search replay to use success-colored prefix, got %q", msg.Text)
 	}
 }
 
