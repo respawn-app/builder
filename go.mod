@@ -14,6 +14,7 @@ require (
 	github.com/mattn/go-runewidth v0.0.22
 	github.com/muesli/termenv v0.16.0
 	github.com/openai/openai-go/v3 v3.30.0
+	github.com/sahilm/fuzzy v0.1.1
 	golang.org/x/net v0.52.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sys v0.42.0
