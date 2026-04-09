@@ -83,7 +83,7 @@ func providerContracts() []ProviderContract {
 						ProviderID:                     "anthropic",
 						SupportsResponsesAPI:           false,
 						SupportsResponsesCompact:       false,
-						SupportsRequestInputTokenCount: true,
+						SupportsRequestInputTokenCount: false,
 						SupportsNativeWebSearch:        false,
 						SupportsReasoningEncrypted:     false,
 						SupportsServerSideContextEdit:  false,
@@ -243,8 +243,9 @@ func newOpenAIProviderClient(opts ProviderClientOptions) (Client, error) {
 		transport.Client = opts.HTTPClient
 	}
 	if v := strings.TrimSpace(opts.OpenAIBaseURL); v != "" {
-		transport.BaseURL = normalizeOpenAIBaseURL(v)
-		transport.BaseURLExplicit = true
+		normalizedBaseURL := normalizeOpenAIBaseURL(v)
+		transport.BaseURL = normalizedBaseURL
+		transport.BaseURLExplicit = !IsOpenAIFirstPartyBaseURL(normalizedBaseURL)
 	}
 	transport.ModelVerbosity = strings.ToLower(strings.TrimSpace(opts.ModelVerbosity))
 	if opts.ContextWindowTokens > 0 {

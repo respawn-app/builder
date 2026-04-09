@@ -70,19 +70,21 @@ func runOnboardingFlow(cfg config.App, authState auth.State) (onboardingResult, 
 func onboardingProviderCapabilities(authState auth.State, settings config.Settings) (llm.ProviderCapabilities, error) {
 	providerID := strings.TrimSpace(settings.ProviderOverride)
 	if providerID == "" {
-		if strings.TrimSpace(settings.OpenAIBaseURL) != "" {
-			if llm.IsOpenAIFirstPartyBaseURL(settings.OpenAIBaseURL) {
-				providerID = "openai"
+		switch authState.Method.Type {
+		case auth.MethodOAuth:
+			providerID = "chatgpt-codex"
+		case auth.MethodAPIKey, auth.MethodNone:
+			if strings.TrimSpace(settings.OpenAIBaseURL) != "" {
+				if llm.IsOpenAIFirstPartyBaseURL(settings.OpenAIBaseURL) {
+					providerID = "openai"
+				} else {
+					providerID = "openai-compatible"
+				}
 			} else {
-				providerID = "openai-compatible"
-			}
-		} else {
-			switch authState.Method.Type {
-			case auth.MethodOAuth:
-				providerID = "chatgpt-codex"
-			default:
 				providerID = "openai"
 			}
+		default:
+			providerID = "openai"
 		}
 	}
 	return llm.InferProviderCapabilities(providerID)
