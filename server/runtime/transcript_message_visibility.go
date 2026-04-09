@@ -39,6 +39,8 @@ func visibleDeveloperChatEntry(msg llm.Message) (ChatEntry, bool) {
 		return ChatEntry{Role: "warning", Text: msg.Content}, true
 	case llm.MessageTypeBackgroundNotice:
 		return ChatEntry{Role: "system", Text: msg.Content, OngoingText: msg.CompactContent}, true
+	case llm.MessageTypeHandoffFutureMessage:
+		return ChatEntry{Role: string(transcript.EntryRoleDeveloperContext), Text: msg.Content}, true
 	case llm.MessageTypeManualCompactionCarryover:
 		return ChatEntry{Role: string(transcript.EntryRoleManualCompactionCarryover), Text: msg.Content}, true
 	default:

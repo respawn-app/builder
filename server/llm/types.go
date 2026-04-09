@@ -53,6 +53,7 @@ const (
 	MessageTypeInterruption              MessageType = "interruption"
 	MessageTypeErrorFeedback             MessageType = "error_feedback"
 	MessageTypeCompactionSoonReminder    MessageType = "compaction_soon_reminder"
+	MessageTypeHandoffFutureMessage      MessageType = "handoff_future_message"
 	MessageTypeReviewerFeedback          MessageType = "reviewer_feedback"
 	MessageTypeBackgroundNotice          MessageType = "background_notice"
 	MessageTypeManualCompactionCarryover MessageType = "manual_compaction_carryover"

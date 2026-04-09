@@ -23,7 +23,7 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 	deferredFinal := llm.Message{}
 	hasDeferredFinal := false
 	for {
-		if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
+		if err := s.prepareModelTurn(ctx, stepID); err != nil {
 			return llm.Message{}, executedToolCall, false, err
 		}
 
@@ -125,12 +125,6 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 				if _, err := s.messages.FlushPendingUserInjections(stepID); err != nil {
 					return llm.Message{}, executedToolCall, false, err
 				}
-				if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
-					return llm.Message{}, executedToolCall, false, err
-				}
-				if err := e.maybeAppendCompactionSoonReminder(ctx, stepID); err != nil {
-					return llm.Message{}, executedToolCall, false, err
-				}
 				continue
 			}
 			if phaseTurn.EnforcePhaseProtocol && assistantMsg.Phase != llm.MessagePhaseFinal {
@@ -140,12 +134,6 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 				if _, err := s.messages.FlushPendingUserInjections(stepID); err != nil {
 					return llm.Message{}, executedToolCall, false, err
 				}
-				if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
-					return llm.Message{}, executedToolCall, false, err
-				}
-				if err := e.maybeAppendCompactionSoonReminder(ctx, stepID); err != nil {
-					return llm.Message{}, executedToolCall, false, err
-				}
 				continue
 			}
 			if phaseTurn.EnforcePhaseProtocol && assistantMsg.Phase == llm.MessagePhaseFinal && strings.TrimSpace(assistantMsg.Content) == "" && !noopFinalAnswer {
@@ -153,12 +141,6 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 					return llm.Message{}, executedToolCall, false, err
 				}
 				if _, err := s.messages.FlushPendingUserInjections(stepID); err != nil {
-					return llm.Message{}, executedToolCall, false, err
-				}
-				if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
-					return llm.Message{}, executedToolCall, false, err
-				}
-				if err := e.maybeAppendCompactionSoonReminder(ctx, stepID); err != nil {
 					return llm.Message{}, executedToolCall, false, err
 				}
 				continue
@@ -172,15 +154,9 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 					deferredFinal = assistantMsg
 					hasDeferredFinal = true
 				}
-				if err := e.maybeAppendCompactionSoonReminder(ctx, stepID); err != nil {
-					return llm.Message{}, executedToolCall, false, err
-				}
 				continue
 			}
 			if len(hostedToolExecutions) > 0 {
-				if err := e.maybeAppendCompactionSoonReminder(ctx, stepID); err != nil {
-					return llm.Message{}, executedToolCall, false, err
-				}
 				continue
 			}
 			resolved := assistantMsg
@@ -205,9 +181,6 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 					resolved = reviewed.Message
 					reviewerCompletion = reviewed.Completion
 				}
-			}
-			if err := e.maybeAppendCompactionSoonReminder(ctx, stepID); err != nil {
-				return llm.Message{}, executedToolCall, false, err
 			}
 			if options.EmitAssistantEvent {
 				e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: resolved})
@@ -241,13 +214,18 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 		if _, err := s.messages.FlushPendingUserInjections(stepID); err != nil {
 			return llm.Message{}, executedToolCall, false, err
 		}
-		if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
-			return llm.Message{}, executedToolCall, false, err
-		}
-		if err := e.maybeAppendCompactionSoonReminder(ctx, stepID); err != nil {
-			return llm.Message{}, executedToolCall, false, err
-		}
 	}
+}
+
+func (s *defaultStepExecutor) prepareModelTurn(ctx context.Context, stepID string) error {
+	e := s.engine
+	if err := e.applyPendingHandoffIfNeeded(ctx, stepID); err != nil {
+		return err
+	}
+	if err := e.autoCompactIfNeeded(ctx, stepID, compactionModeAuto); err != nil {
+		return err
+	}
+	return e.maybeAppendCompactionSoonReminder(ctx, stepID)
 }
 
 func liveCommittedAssistantEventMessage(msg llm.Message) (llm.Message, bool) {

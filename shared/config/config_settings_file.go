@@ -129,6 +129,14 @@ func WriteDefaultSettingsFileWithTheme(selectedTheme string) (path string, creat
 }
 
 func WriteSettingsFileForOnboarding(settings Settings) (string, error) {
+	return WriteSettingsFileForOnboardingWithOptions(settings, OnboardingWriteOptions{})
+}
+
+type OnboardingWriteOptions struct {
+	PreservedDefaults map[string]bool
+}
+
+func WriteSettingsFileForOnboardingWithOptions(settings Settings, options OnboardingWriteOptions) (string, error) {
 	path, err := resolveSettingsFilePath()
 	if err != nil {
 		return "", err
@@ -137,7 +145,7 @@ func WriteSettingsFileForOnboarding(settings Settings) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	created, err := writeSettingsFileIfMissing(path, settingsTOMLForOnboarding(normalized))
+	created, err := writeSettingsFileIfMissing(path, settingsTOMLForOnboarding(normalized, options.PreservedDefaults))
 	if err != nil {
 		return "", err
 	}

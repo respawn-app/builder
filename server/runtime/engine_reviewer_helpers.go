@@ -299,7 +299,11 @@ func reviewerSessionID(sessionID string) string {
 	if trimmed == "" {
 		return ""
 	}
-	return trimmed + "-review"
+	return trimmed + "/supervisor"
+}
+
+func reviewerPromptCacheKey(sessionID string, compactionCount int) string {
+	return conversationPromptCacheKey(reviewerSessionID(sessionID), compactionCount)
 }
 
 func appendMissingReviewerMetaContext(messages []llm.Message, workspaceRoot string, model string, thinkingLevel string, headless bool, disabledSkills map[string]bool) ([]llm.Message, error) {

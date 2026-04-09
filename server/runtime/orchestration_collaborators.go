@@ -31,6 +31,7 @@ type backgroundNoticeScheduler interface {
 type contextCompactor interface {
 	CompactContext(ctx context.Context, args string) error
 	CompactContextForPreSubmit(ctx context.Context) error
+	TriggerHandoff(ctx context.Context, stepID string, activeCall llm.ToolCall, summarizerPrompt string, futureAgentMessage string) (string, bool, error)
 	AutoCompactIfNeeded(ctx context.Context, stepID string, mode compactionMode) error
 	ShouldCompactBeforeUserMessage(ctx context.Context, text string) (bool, error)
 }

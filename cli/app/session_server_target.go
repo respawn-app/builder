@@ -8,6 +8,8 @@ import (
 )
 
 var launchSessionServerDaemon = startLocalRunPromptDaemon
+var startInteractiveEmbeddedSessionServer = startEmbeddedServer
+var dialInteractiveRemoteSessionServer = tryDialDiscoveredRemoteServer
 
 func remoteAuthHooks(interactor authInteractor) (func(string) string, func(auth.Store) auth.Store) {
 	if interactor == nil {
@@ -17,7 +19,14 @@ func remoteAuthHooks(interactor authInteractor) (func(string) string, func(auth.
 }
 
 func startSessionServer(ctx context.Context, opts Options, interactor authInteractor) (embeddedServer, error) {
-	if remote, ok, err := tryDialDiscoveredRemoteServer(ctx, opts, interactor); err != nil {
+	bypassRemote, err := shouldBypassRemoteStartupForInteractiveOnboarding(opts, interactor)
+	if err != nil {
+		return nil, err
+	}
+	if bypassRemote {
+		return startInteractiveEmbeddedSessionServer(ctx, opts, interactor)
+	}
+	if remote, ok, err := dialInteractiveRemoteSessionServer(ctx, opts, interactor); err != nil {
 		return nil, err
 	} else if ok {
 		return remote, nil
@@ -35,7 +44,18 @@ func startSessionServer(ctx context.Context, opts Options, interactor authIntera
 		}
 		return newRemoteAppServerWithAuth(remote, cfg, closeFn, lookupEnv, wrapStore), nil
 	}
-	return startEmbeddedServer(ctx, opts, interactor)
+	return startInteractiveEmbeddedSessionServer(ctx, opts, interactor)
+}
+
+func shouldBypassRemoteStartupForInteractiveOnboarding(opts Options, interactor authInteractor) (bool, error) {
+	if interactor == nil || !interactor.Interactive() {
+		return false, nil
+	}
+	cfg, err := loadSessionServerConfig(opts)
+	if err != nil {
+		return false, err
+	}
+	return !cfg.Source.SettingsFileExists, nil
 }
 
 func tryDialDiscoveredRemoteServer(ctx context.Context, opts Options, interactor authInteractor) (*remoteAppServer, bool, error) {

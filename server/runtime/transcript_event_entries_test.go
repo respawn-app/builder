@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"builder/server/llm"
+	"builder/server/tools"
 	"encoding/json"
 	"testing"
 )
@@ -49,5 +50,48 @@ func TestNormalizeToolCallForTranscriptRepairsMalformedPresentation(t *testing.T
 	}
 	if meta.Command != "pwd" {
 		t.Fatalf("rebuilt command = %q, want pwd", meta.Command)
+	}
+}
+
+func TestTranscriptEntriesFromEventEmitsVisibleToolCompletionEntriesForOrdinaryAndTriggerHandoffTools(t *testing.T) {
+	testCases := []struct {
+		name   string
+		result tools.Result
+	}{
+		{
+			name: "ordinary shell result",
+			result: tools.Result{
+				CallID: "call-shell-1",
+				Name:   tools.ToolShell,
+				Output: json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`),
+			},
+		},
+		{
+			name: "trigger handoff synthetic success result",
+			result: tools.Result{
+				CallID: "call-handoff-1",
+				Name:   tools.ToolTriggerHandoff,
+				Output: json.RawMessage(`""`),
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			entries := TranscriptEntriesFromEvent(Event{
+				Kind:       EventToolCallCompleted,
+				ToolResult: &tc.result,
+			})
+			if len(entries) != 1 {
+				t.Fatalf("expected one visible transcript entry, got %+v", entries)
+			}
+			entry := entries[0]
+			if entry.Role != "tool_result_ok" {
+				t.Fatalf("entry role = %q, want tool_result_ok", entry.Role)
+			}
+			if entry.ToolCallID != tc.result.CallID {
+				t.Fatalf("entry tool call id = %q, want %q", entry.ToolCallID, tc.result.CallID)
+			}
+		})
 	}
 }

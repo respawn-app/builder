@@ -499,11 +499,7 @@ func (s *chatStore) snapshotWithMetadata() materializedChatSnapshot {
 			if result.Name == "" {
 				result.Name = tools.ID("tool")
 			}
-			role := "tool_result_ok"
-			if result.IsError {
-				role = "tool_result_error"
-			}
-			entries = append(entries, ChatEntry{Role: role, Text: formatToolResult(result), ToolCallID: callID})
+			entries = append(entries, toolResultChatEntry(result))
 		case llm.RoleDeveloper:
 			if entry, ok := visibleDeveloperChatEntry(msg); ok {
 				entries = append(entries, entry)
@@ -538,11 +534,7 @@ func (s *chatStore) synthesizedToolResult(call llm.ToolCall, materialized map[st
 	if !ok {
 		return ChatEntry{}, false
 	}
-	role := "tool_result_ok"
-	if completion.IsError {
-		role = "tool_result_error"
-	}
-	return ChatEntry{Role: role, Text: formatToolResult(completion), ToolCallID: callID}, true
+	return toolResultChatEntry(completion), true
 }
 func (s *chatStore) formatToolCall(call llm.ToolCall) ChatEntry {
 	meta := decodeToolCallMeta(call)
