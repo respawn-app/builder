@@ -71,7 +71,11 @@ func onboardingProviderCapabilities(authState auth.State, settings config.Settin
 	providerID := strings.TrimSpace(settings.ProviderOverride)
 	if providerID == "" {
 		if strings.TrimSpace(settings.OpenAIBaseURL) != "" {
-			providerID = "openai-compatible"
+			if llm.IsOpenAIFirstPartyBaseURL(settings.OpenAIBaseURL) {
+				providerID = "openai"
+			} else {
+				providerID = "openai-compatible"
+			}
 		} else {
 			switch authState.Method.Type {
 			case auth.MethodOAuth:

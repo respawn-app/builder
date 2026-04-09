@@ -521,6 +521,24 @@ func TestServiceBaseURL_UsesCodexEndpointBaseForOAuth(t *testing.T) {
 	}
 }
 
+func TestNewOpenAIProviderClientCanonicalizesBareDefaultOpenAIBaseURL(t *testing.T) {
+	client, err := newOpenAIProviderClient(ProviderClientOptions{Auth: staticAuth{}, OpenAIBaseURL: "https://api.openai.com"})
+	if err != nil {
+		t.Fatalf("new openai provider client: %v", err)
+	}
+	openAIClient, ok := client.(*OpenAIClient)
+	if !ok {
+		t.Fatalf("expected *OpenAIClient, got %T", client)
+	}
+	transport, ok := openAIClient.transport.(*HTTPTransport)
+	if !ok {
+		t.Fatalf("expected *HTTPTransport, got %T", openAIClient.transport)
+	}
+	if got := transport.serviceBaseURL(openAIAuthMode{}); got != defaultOpenAIBaseURL {
+		t.Fatalf("service base url = %q, want %q", got, defaultOpenAIBaseURL)
+	}
+}
+
 func TestBuildRequestOptions_OAuthAddsCodexHeaders(t *testing.T) {
 	transport := NewHTTPTransport(staticAuth{})
 	opts := transport.buildRequestOptions("Bearer x", openAIAuthMode{

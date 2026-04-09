@@ -243,7 +243,7 @@ func newOpenAIProviderClient(opts ProviderClientOptions) (Client, error) {
 		transport.Client = opts.HTTPClient
 	}
 	if v := strings.TrimSpace(opts.OpenAIBaseURL); v != "" {
-		transport.BaseURL = v
+		transport.BaseURL = normalizeOpenAIBaseURL(v)
 		transport.BaseURLExplicit = true
 	}
 	transport.ModelVerbosity = strings.ToLower(strings.TrimSpace(opts.ModelVerbosity))
