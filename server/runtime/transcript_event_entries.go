@@ -6,6 +6,7 @@ import (
 
 	"builder/server/llm"
 	"builder/server/tools"
+	"builder/shared/cachewarn"
 )
 
 func VisibleChatEntriesFromMessage(msg llm.Message) []ChatEntry {
@@ -85,6 +86,11 @@ func TranscriptEntriesFromEvent(evt Event) []ChatEntry {
 			return nil
 		}
 		return []ChatEntry{{Role: "error", Text: fmt.Sprintf("Run cleanup warning: %s", evt.Error)}}
+	case EventCacheWarning:
+		if evt.CacheWarning == nil {
+			return nil
+		}
+		return []ChatEntry{{Role: cacheWarningTranscriptRole, Text: cachewarn.Text(*evt.CacheWarning), Visibility: evt.CacheWarningVisibility}}
 	case EventBackgroundUpdated:
 		if evt.Background == nil {
 			return nil

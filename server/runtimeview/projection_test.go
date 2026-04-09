@@ -168,7 +168,8 @@ func TestSessionViewFromRuntimeUsesCommittedEntryMetadata(t *testing.T) {
 
 func TestEventFromRuntimeCopiesCacheWarningLostInputTokens(t *testing.T) {
 	event := EventFromRuntime(runtime.Event{
-		Kind: runtime.EventCacheWarning,
+		Kind:                   runtime.EventCacheWarning,
+		CacheWarningVisibility: transcript.EntryVisibilityAll,
 		CacheWarning: &cachewarn.Warning{
 			Scope:           cachewarn.ScopeReviewer,
 			Reason:          cachewarn.ReasonNonPostfix,
@@ -185,6 +186,15 @@ func TestEventFromRuntimeCopiesCacheWarningLostInputTokens(t *testing.T) {
 	if event.CacheWarning.Scope != cachewarn.ScopeReviewer {
 		t.Fatalf("cache warning scope = %q, want %q", event.CacheWarning.Scope, cachewarn.ScopeReviewer)
 	}
+	if event.CacheWarningVisibility != clientui.EntryVisibilityAll {
+		t.Fatalf("cache warning visibility = %q, want %q", event.CacheWarningVisibility, clientui.EntryVisibilityAll)
+	}
+	if len(event.TranscriptEntries) != 1 {
+		t.Fatalf("expected one projected transcript entry, got %d", len(event.TranscriptEntries))
+	}
+	if entry := event.TranscriptEntries[0]; entry.Role != "cache_warning" || entry.Visibility != clientui.EntryVisibilityAll {
+		t.Fatalf("unexpected projected cache warning entry: %+v", entry)
+	}
 }
 
 func TestChatSnapshotFromRuntimeCopiesEntries(t *testing.T) {
@@ -194,6 +204,7 @@ func TestChatSnapshotFromRuntimeCopiesEntries(t *testing.T) {
 	}
 	snapshot := ChatSnapshotFromRuntime(runtime.ChatSnapshot{
 		Entries: []runtime.ChatEntry{{
+			Visibility:  transcript.EntryVisibilityDetailOnly,
 			Role:        "assistant",
 			Text:        "hello",
 			OngoingText: "hel",
@@ -210,6 +221,9 @@ func TestChatSnapshotFromRuntimeCopiesEntries(t *testing.T) {
 	entry := snapshot.Entries[0]
 	if entry.Phase != string(llm.MessagePhaseFinal) || entry.ToolCall == nil || entry.ToolCall.ToolName != "shell" {
 		t.Fatalf("unexpected projected entry: %+v", entry)
+	}
+	if entry.Visibility != clientui.EntryVisibilityDetailOnly {
+		t.Fatalf("entry visibility = %q, want %q", entry.Visibility, clientui.EntryVisibilityDetailOnly)
 	}
 	if len(entry.ToolCall.Suggestions) != 2 {
 		t.Fatalf("expected copied suggestions, got %+v", entry.ToolCall.Suggestions)

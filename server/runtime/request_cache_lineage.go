@@ -14,6 +14,7 @@ import (
 	"builder/server/session"
 	"builder/shared/cachewarn"
 	"builder/shared/config"
+	"builder/shared/transcript"
 )
 
 const (
@@ -177,6 +178,13 @@ func shouldWarnOnExactBreak(mode config.CacheWarningMode) bool {
 	return mode != config.CacheWarningModeOff
 }
 
+func cacheWarningEntryVisibility(mode config.CacheWarningMode) transcript.EntryVisibility {
+	if normalized, ok := normalizeCacheWarningMode(mode); ok && normalized == config.CacheWarningModeVerbose {
+		return transcript.EntryVisibilityAll
+	}
+	return transcript.EntryVisibilityDetailOnly
+}
+
 func (e *Engine) observePromptCacheResponse(stepID string, prepared preparedCacheRequestObservation, usage llm.Usage) error {
 	if e == nil || e.requestCache == nil || strings.TrimSpace(prepared.request.CacheKey) == "" {
 		return nil
@@ -206,7 +214,7 @@ func (e *Engine) observePromptCacheResponse(stepID string, prepared preparedCach
 	}
 	if warning != nil {
 		e.applyPersistedCacheWarning(*warning)
-		e.emit(Event{Kind: EventCacheWarning, StepID: stepID, CacheWarning: copyCacheWarning(warning)})
+		e.emit(Event{Kind: EventCacheWarning, StepID: stepID, CacheWarning: copyCacheWarning(warning), CacheWarningVisibility: cacheWarningEntryVisibility(e.cfg.CacheWarningMode)})
 		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
 	}
 	e.requestCache.RecordResponse(response)
@@ -294,13 +302,13 @@ func (e *Engine) clearActivePromptCacheLineages() {
 	e.clearPromptCacheLineages(e.SessionID(), e.compactionCountSnapshot())
 }
 
-func applyPersistedCacheWarningToChat(chat *chatStore, payload []byte) error {
+func applyPersistedCacheWarningToChat(chat *chatStore, payload []byte, mode config.CacheWarningMode) error {
 	var warning cachewarn.Warning
 	if err := json.Unmarshal(payload, &warning); err != nil {
 		return fmt.Errorf("decode %s event: %w", sessionEventCacheWarning, err)
 	}
 	if chat != nil {
-		chat.appendLocalEntry(cacheWarningTranscriptRole, cachewarn.Text(warning))
+		chat.appendLocalEntryWithVisibility(cacheWarningTranscriptRole, cachewarn.Text(warning), cacheWarningEntryVisibility(mode))
 	}
 	return nil
 }
@@ -309,7 +317,7 @@ func (e *Engine) applyPersistedCacheWarning(warning cachewarn.Warning) {
 	if e == nil || e.chat == nil {
 		return
 	}
-	e.chat.appendLocalEntry(cacheWarningTranscriptRole, cachewarn.Text(warning))
+	e.chat.appendLocalEntryWithVisibility(cacheWarningTranscriptRole, cachewarn.Text(warning), cacheWarningEntryVisibility(e.cfg.CacheWarningMode))
 }
 
 func copyCacheWarning(in *cachewarn.Warning) *cachewarn.Warning {

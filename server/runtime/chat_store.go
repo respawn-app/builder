@@ -16,6 +16,7 @@ const (
 )
 
 type ChatEntry struct {
+	Visibility  transcript.EntryVisibility
 	Role        string
 	Text        string
 	OngoingText string
@@ -211,10 +212,18 @@ func (s *chatStore) clearOngoingError() {
 }
 
 func (s *chatStore) appendLocalEntry(role, text string) {
-	s.appendLocalEntryWithOngoingText(role, text, "")
+	s.appendLocalEntryWithOngoingTextAndVisibility(role, text, "", transcript.EntryVisibilityAuto)
 }
 
 func (s *chatStore) appendLocalEntryWithOngoingText(role, text, ongoingText string) {
+	s.appendLocalEntryWithOngoingTextAndVisibility(role, text, ongoingText, transcript.EntryVisibilityAuto)
+}
+
+func (s *chatStore) appendLocalEntryWithVisibility(role, text string, visibility transcript.EntryVisibility) {
+	s.appendLocalEntryWithOngoingTextAndVisibility(role, text, "", visibility)
+}
+
+func (s *chatStore) appendLocalEntryWithOngoingTextAndVisibility(role, text, ongoingText string, visibility transcript.EntryVisibility) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
@@ -222,7 +231,7 @@ func (s *chatStore) appendLocalEntryWithOngoingText(role, text, ongoingText stri
 	defer s.mu.Unlock()
 	messageCount := s.messageCount
 	s.local = append(s.local, localChatEntry{
-		Entry:             ChatEntry{Role: role, Text: text, OngoingText: strings.TrimSpace(ongoingText)},
+		Entry:             ChatEntry{Visibility: transcript.NormalizeEntryVisibility(visibility), Role: role, Text: text, OngoingText: strings.TrimSpace(ongoingText)},
 		AfterMessageCount: messageCount,
 	})
 	s.transcriptEntryCount++

@@ -4,6 +4,7 @@ import (
 	"builder/server/llm"
 	"builder/server/tools"
 	"builder/shared/cachewarn"
+	"builder/shared/transcript"
 	"time"
 )
 
@@ -32,24 +33,25 @@ const (
 )
 
 type Event struct {
-	Kind                EventKind
-	StepID              string
-	TranscriptRevision  int64
-	CommittedEntryCount int
-	Error               string
-	AssistantDelta      string
-	ReasoningDelta      *llm.ReasoningSummaryDelta
-	UserMessage         string
-	UserMessageBatch    []string
-	Message             llm.Message
-	ModelResponse       *ModelResponseTrace
-	ToolCall            *llm.ToolCall
-	ToolResult          *tools.Result
-	Reviewer            *ReviewerStatus
-	Compaction          *CompactionStatus
-	CacheWarning        *cachewarn.Warning
-	RunState            *RunState
-	Background          *BackgroundShellEvent
+	Kind                   EventKind
+	StepID                 string
+	TranscriptRevision     int64
+	CommittedEntryCount    int
+	Error                  string
+	AssistantDelta         string
+	ReasoningDelta         *llm.ReasoningSummaryDelta
+	UserMessage            string
+	UserMessageBatch       []string
+	Message                llm.Message
+	ModelResponse          *ModelResponseTrace
+	ToolCall               *llm.ToolCall
+	ToolResult             *tools.Result
+	Reviewer               *ReviewerStatus
+	Compaction             *CompactionStatus
+	CacheWarning           *cachewarn.Warning
+	CacheWarningVisibility transcript.EntryVisibility
+	RunState               *RunState
+	Background             *BackgroundShellEvent
 }
 
 type RunState struct {

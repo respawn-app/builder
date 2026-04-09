@@ -92,6 +92,7 @@ func EventFromRuntime(evt runtime.Event) clientui.Event {
 	if evt.CacheWarning != nil {
 		view.CacheWarning = copyCacheWarningView(evt.CacheWarning)
 	}
+	view.CacheWarningVisibility = clientui.EntryVisibility(evt.CacheWarningVisibility)
 	if evt.RunState != nil {
 		view.RunState = &clientui.RunState{
 			Busy:       evt.RunState.Busy,
@@ -139,6 +140,7 @@ func chatEntriesFromRuntime(entries []runtime.ChatEntry) []clientui.ChatEntry {
 	out := make([]clientui.ChatEntry, 0, len(entries))
 	for _, entry := range entries {
 		out = append(out, clientui.ChatEntry{
+			Visibility:  clientui.EntryVisibility(entry.Visibility),
 			Role:        entry.Role,
 			Text:        entry.Text,
 			OngoingText: entry.OngoingText,
@@ -182,6 +184,7 @@ func ChatSnapshotFromRuntime(snapshot runtime.ChatSnapshot) clientui.ChatSnapsho
 	entries := make([]clientui.ChatEntry, 0, len(snapshot.Entries))
 	for _, entry := range snapshot.Entries {
 		entries = append(entries, clientui.ChatEntry{
+			Visibility:  clientui.EntryVisibility(entry.Visibility),
 			Role:        entry.Role,
 			Text:        entry.Text,
 			OngoingText: entry.OngoingText,
