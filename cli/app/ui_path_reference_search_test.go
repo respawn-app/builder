@@ -131,6 +131,9 @@ func TestLoadPathReferenceCorpusSnapshotHonorsIgnorePolicyAndExcludesEmptyDirs(t
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("rg not available")
+	}
 	cmd := exec.Command("git", "init", "-q")
 	cmd.Dir = root
 	if err := cmd.Run(); err != nil {
