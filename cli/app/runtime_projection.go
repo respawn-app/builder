@@ -18,7 +18,7 @@ func projectedRuntimeEventMsg(evt runtime.Event) runtimeEventMsg {
 	return runtimeEventMsg{event: projectRuntimeEvent(evt)}
 }
 
-func projectRuntimeEventChannel(src <-chan runtime.Event, stop <-chan struct{}) <-chan clientui.Event {
+func projectRuntimeEventChannel(src <-chan runtime.Event, gaps <-chan struct{}, stop <-chan struct{}) <-chan clientui.Event {
 	if src == nil {
 		return nil
 	}
@@ -29,18 +29,32 @@ func projectRuntimeEventChannel(src <-chan runtime.Event, stop <-chan struct{}) 
 			select {
 			case <-stop:
 				return
+			case _, ok := <-gaps:
+				if !ok && gaps != nil {
+					gaps = nil
+					continue
+				}
+				if !publishProjectedRuntimeEvent(stop, out, clientui.Event{Kind: clientui.EventConversationUpdated}) {
+					return
+				}
 			case evt, ok := <-src:
 				if !ok {
 					return
 				}
-				projected := projectRuntimeEvent(evt)
-				select {
-				case <-stop:
+				if !publishProjectedRuntimeEvent(stop, out, projectRuntimeEvent(evt)) {
 					return
-				case out <- projected:
 				}
 			}
 		}
 	}()
 	return out
+}
+
+func publishProjectedRuntimeEvent(stop <-chan struct{}, out chan<- clientui.Event, evt clientui.Event) bool {
+	select {
+	case <-stop:
+		return false
+	case out <- evt:
+		return true
+	}
 }

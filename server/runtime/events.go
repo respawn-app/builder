@@ -4,6 +4,7 @@ import (
 	"builder/server/llm"
 	"builder/server/tools"
 	"builder/shared/cachewarn"
+	"builder/shared/transcript"
 	"time"
 )
 
@@ -27,29 +28,32 @@ const (
 	EventCompactionCompleted EventKind = "context_compaction_completed"
 	EventCompactionFailed    EventKind = "context_compaction_failed"
 	EventCacheWarning        EventKind = "cache_warning"
+	EventLocalEntryAdded     EventKind = "local_entry_added"
 	EventRunStateChanged     EventKind = "run_state_changed"
 	EventBackgroundUpdated   EventKind = "background_updated"
 )
 
 type Event struct {
-	Kind                EventKind
-	StepID              string
-	TranscriptRevision  int64
-	CommittedEntryCount int
-	Error               string
-	AssistantDelta      string
-	ReasoningDelta      *llm.ReasoningSummaryDelta
-	UserMessage         string
-	UserMessageBatch    []string
-	Message             llm.Message
-	ModelResponse       *ModelResponseTrace
-	ToolCall            *llm.ToolCall
-	ToolResult          *tools.Result
-	Reviewer            *ReviewerStatus
-	Compaction          *CompactionStatus
-	CacheWarning        *cachewarn.Warning
-	RunState            *RunState
-	Background          *BackgroundShellEvent
+	Kind                   EventKind
+	StepID                 string
+	TranscriptRevision     int64
+	CommittedEntryCount    int
+	Error                  string
+	AssistantDelta         string
+	ReasoningDelta         *llm.ReasoningSummaryDelta
+	UserMessage            string
+	UserMessageBatch       []string
+	Message                llm.Message
+	ModelResponse          *ModelResponseTrace
+	ToolCall               *llm.ToolCall
+	ToolResult             *tools.Result
+	Reviewer               *ReviewerStatus
+	Compaction             *CompactionStatus
+	CacheWarning           *cachewarn.Warning
+	CacheWarningVisibility transcript.EntryVisibility
+	LocalEntry             *ChatEntry
+	RunState               *RunState
+	Background             *BackgroundShellEvent
 }
 
 type RunState struct {

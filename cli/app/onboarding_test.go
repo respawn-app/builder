@@ -952,6 +952,34 @@ func TestOnboardingProviderCapabilitiesFromAuthMode(t *testing.T) {
 	if compatibleCaps.ProviderID != "openai-compatible" || compatibleCaps.SupportsResponsesCompact {
 		t.Fatalf("unexpected openai-compatible provider capabilities: %+v", compatibleCaps)
 	}
+	defaultOpenAICaps, err := onboardingProviderCapabilities(auth.State{Method: auth.Method{Type: auth.MethodAPIKey}}, config.Settings{OpenAIBaseURL: "https://api.openai.com"})
+	if err != nil {
+		t.Fatalf("default openai base url provider capabilities: %v", err)
+	}
+	if defaultOpenAICaps.ProviderID != "openai" || !defaultOpenAICaps.SupportsResponsesCompact {
+		t.Fatalf("expected explicit default OpenAI base url to preserve openai capabilities, got %+v", defaultOpenAICaps)
+	}
+	oauthCustomBaseCaps, err := onboardingProviderCapabilities(auth.State{Method: auth.Method{Type: auth.MethodOAuth}}, config.Settings{OpenAIBaseURL: "https://example.test/v1"})
+	if err != nil {
+		t.Fatalf("oauth custom base url capabilities: %v", err)
+	}
+	if oauthCustomBaseCaps.ProviderID != "chatgpt-codex" || !oauthCustomBaseCaps.SupportsResponsesCompact {
+		t.Fatalf("expected oauth auth mode to keep chatgpt-codex capabilities over custom base url, got %+v", oauthCustomBaseCaps)
+	}
+	noAuthCompatibleCaps, err := onboardingProviderCapabilities(auth.EmptyState(), config.Settings{OpenAIBaseURL: "https://example.test/v1"})
+	if err != nil {
+		t.Fatalf("no-auth openai-compatible provider capabilities: %v", err)
+	}
+	if noAuthCompatibleCaps.ProviderID != "openai-compatible" || noAuthCompatibleCaps.SupportsResponsesCompact {
+		t.Fatalf("unexpected no-auth openai-compatible provider capabilities: %+v", noAuthCompatibleCaps)
+	}
+	providerOverrideCaps, err := onboardingProviderCapabilities(auth.EmptyState(), config.Settings{ProviderOverride: "openai", OpenAIBaseURL: "https://example.test/v1"})
+	if err != nil {
+		t.Fatalf("provider override capabilities: %v", err)
+	}
+	if providerOverrideCaps.ProviderID != "openai" || !providerOverrideCaps.SupportsResponsesCompact {
+		t.Fatalf("expected explicit provider override to win over base url, got %+v", providerOverrideCaps)
+	}
 }
 
 func TestApplyOnboardingModelUpdatesKnownContextWindow(t *testing.T) {

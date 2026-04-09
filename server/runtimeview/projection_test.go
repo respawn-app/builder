@@ -27,6 +27,25 @@ func (projectionFastClient) ProviderCapabilities(context.Context) (llm.ProviderC
 	return llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, IsOpenAIFirstParty: true}, nil
 }
 
+type projectionPreciseClient struct {
+	inputTokens int
+}
+
+func (c projectionPreciseClient) Generate(context.Context, llm.Request) (llm.Response, error) {
+	return llm.Response{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+		Usage:     llm.Usage{InputTokens: 900, OutputTokens: 100, WindowTokens: 400_000},
+	}, nil
+}
+
+func (c projectionPreciseClient) CountRequestInputTokens(context.Context, llm.Request) (int, error) {
+	return c.inputTokens, nil
+}
+
+func (c projectionPreciseClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	return llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, SupportsRequestInputTokenCount: true, IsOpenAIFirstParty: true}, nil
+}
+
 func TestEventFromRuntimeProjectsReasoningAndBackground(t *testing.T) {
 	exitCode := 17
 	view := EventFromRuntime(runtime.Event{
@@ -68,6 +87,33 @@ func TestEventFromRuntimeProjectsReasoningAndBackground(t *testing.T) {
 	}
 	if view.Background.ExitCode == nil || *view.Background.ExitCode != 17 {
 		t.Fatalf("expected copied exit code, got %+v", view.Background.ExitCode)
+	}
+}
+
+func TestEventFromRuntimeProjectsLocalEntry(t *testing.T) {
+	view := EventFromRuntime(runtime.Event{
+		Kind:   runtime.EventLocalEntryAdded,
+		StepID: "step-1",
+		LocalEntry: &runtime.ChatEntry{
+			Visibility:  transcript.EntryVisibilityAll,
+			Role:        "reviewer_suggestions",
+			Text:        "Supervisor suggested:\n1. Add verification notes.",
+			OngoingText: "Supervisor made 1 suggestion.",
+		},
+	})
+
+	if view.Kind != clientui.EventLocalEntryAdded || view.StepID != "step-1" {
+		t.Fatalf("unexpected projected local entry event: %+v", view)
+	}
+	if len(view.TranscriptEntries) != 1 {
+		t.Fatalf("expected one projected local entry, got %+v", view.TranscriptEntries)
+	}
+	entry := view.TranscriptEntries[0]
+	if entry.Role != "reviewer_suggestions" || entry.Text != "Supervisor suggested:\n1. Add verification notes." || entry.OngoingText != "Supervisor made 1 suggestion." {
+		t.Fatalf("unexpected projected local entry transcript: %+v", entry)
+	}
+	if entry.Visibility != clientui.EntryVisibilityAll {
+		t.Fatalf("local entry visibility = %q, want all", entry.Visibility)
 	}
 }
 
@@ -127,6 +173,9 @@ func TestMainViewFromRuntimeBundlesStatusAndSession(t *testing.T) {
 	if view.Session.SessionID != store.Meta().SessionID || view.Session.SessionName != "Session Name" {
 		t.Fatalf("unexpected session hydration: %+v", view.Session)
 	}
+	if got := len(view.Session.Chat.Entries); got != 0 {
+		t.Fatalf("expected main view to omit transcript payload, got %d entries", got)
+	}
 	if view.Status.ParentSessionID != "parent-123" || view.Status.LastCommittedAssistantFinalAnswer != "final answer" {
 		t.Fatalf("unexpected status hydration: %+v", view.Status)
 	}
@@ -164,11 +213,42 @@ func TestSessionViewFromRuntimeUsesCommittedEntryMetadata(t *testing.T) {
 	if view.Transcript.CommittedEntryCount != eng.CommittedTranscriptEntryCount() {
 		t.Fatalf("projected committed entry count = %d, engine committed entry count = %d", view.Transcript.CommittedEntryCount, eng.CommittedTranscriptEntryCount())
 	}
+	if got := len(view.Chat.Entries); got != 0 {
+		t.Fatalf("session view chat entry count = %d, want 0", got)
+	}
+}
+
+func TestStatusFromRuntimeUsesFreshPreciseCurrentTokens(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := runtime.New(store, projectionPreciseClient{inputTokens: 180}, tools.NewRegistry(), runtime.Config{
+		Model:                         "gpt-5",
+		ContextWindowTokens:           400_000,
+		AutoCompactTokenLimit:         1_000,
+		PreSubmitCompactionLeadTokens: 100,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if _, err := eng.SubmitUserMessage(context.Background(), "prompt"); err != nil {
+		t.Fatalf("submit user message: %v", err)
+	}
+	if _, err := eng.ShouldCompactBeforeUserMessage(context.Background(), "follow-up"); err != nil {
+		t.Fatalf("warm exact count: %v", err)
+	}
+	view := StatusFromRuntime(eng)
+	if view.ContextUsage.UsedTokens != 180 {
+		t.Fatalf("projected used tokens=%d, want exact 180", view.ContextUsage.UsedTokens)
+	}
 }
 
 func TestEventFromRuntimeCopiesCacheWarningLostInputTokens(t *testing.T) {
 	event := EventFromRuntime(runtime.Event{
-		Kind: runtime.EventCacheWarning,
+		Kind:                   runtime.EventCacheWarning,
+		CacheWarningVisibility: transcript.EntryVisibilityAll,
 		CacheWarning: &cachewarn.Warning{
 			Scope:           cachewarn.ScopeReviewer,
 			Reason:          cachewarn.ReasonNonPostfix,
@@ -185,6 +265,15 @@ func TestEventFromRuntimeCopiesCacheWarningLostInputTokens(t *testing.T) {
 	if event.CacheWarning.Scope != cachewarn.ScopeReviewer {
 		t.Fatalf("cache warning scope = %q, want %q", event.CacheWarning.Scope, cachewarn.ScopeReviewer)
 	}
+	if event.CacheWarningVisibility != clientui.EntryVisibilityAll {
+		t.Fatalf("cache warning visibility = %q, want %q", event.CacheWarningVisibility, clientui.EntryVisibilityAll)
+	}
+	if len(event.TranscriptEntries) != 1 {
+		t.Fatalf("expected one projected transcript entry, got %d", len(event.TranscriptEntries))
+	}
+	if entry := event.TranscriptEntries[0]; entry.Role != "cache_warning" || entry.Visibility != clientui.EntryVisibilityAll {
+		t.Fatalf("unexpected projected cache warning entry: %+v", entry)
+	}
 }
 
 func TestChatSnapshotFromRuntimeCopiesEntries(t *testing.T) {
@@ -194,6 +283,7 @@ func TestChatSnapshotFromRuntimeCopiesEntries(t *testing.T) {
 	}
 	snapshot := ChatSnapshotFromRuntime(runtime.ChatSnapshot{
 		Entries: []runtime.ChatEntry{{
+			Visibility:  transcript.EntryVisibilityDetailOnly,
 			Role:        "assistant",
 			Text:        "hello",
 			OngoingText: "hel",
@@ -211,6 +301,9 @@ func TestChatSnapshotFromRuntimeCopiesEntries(t *testing.T) {
 	if entry.Phase != string(llm.MessagePhaseFinal) || entry.ToolCall == nil || entry.ToolCall.ToolName != "shell" {
 		t.Fatalf("unexpected projected entry: %+v", entry)
 	}
+	if entry.Visibility != clientui.EntryVisibilityDetailOnly {
+		t.Fatalf("entry visibility = %q, want %q", entry.Visibility, clientui.EntryVisibilityDetailOnly)
+	}
 	if len(entry.ToolCall.Suggestions) != 2 {
 		t.Fatalf("expected copied suggestions, got %+v", entry.ToolCall.Suggestions)
 	}
@@ -220,6 +313,27 @@ func TestChatSnapshotFromRuntimeCopiesEntries(t *testing.T) {
 	}
 	if snapshot.Ongoing != "ongoing" || snapshot.OngoingError != "warn" {
 		t.Fatalf("unexpected snapshot projection: %+v", snapshot)
+	}
+}
+
+func TestChatSnapshotFromRuntimeSuppressesNoopFinalAssistantState(t *testing.T) {
+	snapshot := ChatSnapshotFromRuntime(runtime.ChatSnapshot{
+		Entries: []runtime.ChatEntry{{
+			Role:  "assistant",
+			Text:  "NO_OP",
+			Phase: llm.MessagePhaseFinal,
+		}},
+		Ongoing:      "NO_OP",
+		OngoingError: "warn",
+	})
+	if got := len(snapshot.Entries); got != 0 {
+		t.Fatalf("noop final entry count = %d, want 0", got)
+	}
+	if got := snapshot.Ongoing; got != "" {
+		t.Fatalf("noop ongoing text = %q, want empty", got)
+	}
+	if got := snapshot.OngoingError; got != "warn" {
+		t.Fatalf("ongoing error = %q, want warn", got)
 	}
 }
 

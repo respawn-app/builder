@@ -15,6 +15,8 @@ type InteractionRequest struct {
 	State           auth.State
 	StoredState     auth.State
 	Gate            auth.StartupGate
+	AuthRequired    bool
+	PromptOptional  bool
 	StartupErr      error
 	FlowErr         error
 	OAuthOptions    auth.OpenAIOAuthOptions
@@ -23,9 +25,13 @@ type InteractionRequest struct {
 	HasEnvAPIKey    bool
 }
 
+type InteractionOutcome struct {
+	ProceedWithoutAuth bool
+}
+
 type Handler interface {
 	NeedsInteraction(req InteractionRequest) bool
-	Interact(ctx context.Context, req InteractionRequest) error
+	Interact(ctx context.Context, req InteractionRequest) (InteractionOutcome, error)
 }
 
 func WrapStoreWithEnvAPIKeyOverride(base auth.Store, lookupEnv func(string) string) auth.Store {
@@ -38,7 +44,7 @@ func WrapStoreWithEnvAPIKeyOverride(base auth.Store, lookupEnv func(string) stri
 	})
 }
 
-func EnsureReady(ctx context.Context, mgr *auth.Manager, oauthOpts auth.OpenAIOAuthOptions, theme string, alternateScreen config.TUIAlternateScreenPolicy, lookupEnv func(string) string, handler Handler) error {
+func EnsureReady(ctx context.Context, mgr *auth.Manager, oauthOpts auth.OpenAIOAuthOptions, theme string, alternateScreen config.TUIAlternateScreenPolicy, lookupEnv func(string) string, authRequired bool, promptOptional bool, handler Handler) error {
 	if mgr == nil {
 		return errors.New("auth manager is required")
 	}
@@ -59,7 +65,7 @@ func EnsureReady(ctx context.Context, mgr *auth.Manager, oauthOpts auth.OpenAIOA
 		}
 		gate := auth.EvaluateStartupGate(state)
 		var startupErr error
-		if !gate.Ready {
+		if authRequired && !gate.Ready {
 			startupErr = auth.EnsureStartupReady(state)
 		}
 		req := InteractionRequest{
@@ -67,6 +73,8 @@ func EnsureReady(ctx context.Context, mgr *auth.Manager, oauthOpts auth.OpenAIOA
 			State:           state,
 			StoredState:     storedState,
 			Gate:            gate,
+			AuthRequired:    authRequired,
+			PromptOptional:  promptOptional,
 			StartupErr:      startupErr,
 			OAuthOptions:    oauthOpts,
 			Theme:           theme,
@@ -79,8 +87,12 @@ func EnsureReady(ctx context.Context, mgr *auth.Manager, oauthOpts auth.OpenAIOA
 			}
 			return nil
 		}
-		if err := handler.Interact(ctx, req); err != nil {
+		outcome, err := handler.Interact(ctx, req)
+		if err != nil {
 			return err
+		}
+		if outcome.ProceedWithoutAuth {
+			return nil
 		}
 	}
 }

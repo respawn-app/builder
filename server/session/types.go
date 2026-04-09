@@ -22,18 +22,32 @@ type LockedModelCapabilities struct {
 }
 
 type LockedProviderCapabilities struct {
-	ProviderID                    string `json:"provider_id,omitempty"`
-	SupportsResponsesAPI          bool   `json:"supports_responses_api,omitempty"`
-	SupportsResponsesCompact      bool   `json:"supports_responses_compact,omitempty"`
-	SupportsPromptCacheKey        bool   `json:"supports_prompt_cache_key,omitempty"`
-	SupportsNativeWebSearch       bool   `json:"supports_native_web_search,omitempty"`
-	SupportsReasoningEncrypted    bool   `json:"supports_reasoning_encrypted,omitempty"`
-	SupportsServerSideContextEdit bool   `json:"supports_server_side_context_edit,omitempty"`
-	IsOpenAIFirstParty            bool   `json:"is_openai_first_party,omitempty"`
+	ProviderID                        string `json:"provider_id,omitempty"`
+	SupportsResponsesAPI              bool   `json:"supports_responses_api,omitempty"`
+	SupportsResponsesCompact          bool   `json:"supports_responses_compact,omitempty"`
+	SupportsRequestInputTokenCount    bool   `json:"supports_request_input_token_count,omitempty"`
+	HasSupportsRequestInputTokenCount bool   `json:"has_supports_request_input_token_count,omitempty"`
+	SupportsPromptCacheKey            bool   `json:"supports_prompt_cache_key,omitempty"`
+	HasSupportsPromptCacheKey         bool   `json:"has_supports_prompt_cache_key,omitempty"`
+	SupportsNativeWebSearch           bool   `json:"supports_native_web_search,omitempty"`
+	SupportsReasoningEncrypted        bool   `json:"supports_reasoning_encrypted,omitempty"`
+	SupportsServerSideContextEdit     bool   `json:"supports_server_side_context_edit,omitempty"`
+	IsOpenAIFirstParty                bool   `json:"is_openai_first_party,omitempty"`
 }
 
 type ContinuationContext struct {
 	OpenAIBaseURL string `json:"openai_base_url,omitempty"`
+}
+
+type UsageState struct {
+	InputTokens             int  `json:"input_tokens,omitempty"`
+	OutputTokens            int  `json:"output_tokens,omitempty"`
+	WindowTokens            int  `json:"window_tokens,omitempty"`
+	CachedInputTokens       int  `json:"cached_input_tokens,omitempty"`
+	HasCachedInputTokens    bool `json:"has_cached_input_tokens,omitempty"`
+	EstimatedProviderTokens int  `json:"estimated_provider_tokens,omitempty"`
+	TotalInputTokens        int  `json:"total_input_tokens,omitempty"`
+	TotalCachedInputTokens  int  `json:"total_cached_input_tokens,omitempty"`
 }
 
 type Meta struct {
@@ -52,6 +66,7 @@ type Meta struct {
 	InFlightStep                 bool                 `json:"in_flight_step"`
 	AgentsInjected               bool                 `json:"agents_injected"`
 	CompactionSoonReminderIssued bool                 `json:"compaction_soon_reminder_issued,omitempty"`
+	UsageState                   *UsageState          `json:"usage_state,omitempty"`
 	Locked                       *LockedContract      `json:"locked,omitempty"`
 }
 

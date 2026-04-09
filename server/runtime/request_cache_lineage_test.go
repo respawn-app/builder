@@ -13,7 +13,32 @@ import (
 	"builder/server/tools"
 	"builder/shared/cachewarn"
 	"builder/shared/config"
+	"builder/shared/transcript"
 )
+
+func TestApplyPersistedCacheWarningUsesCacheWarningModeVisibility(t *testing.T) {
+	tests := []struct {
+		name string
+		mode config.CacheWarningMode
+		want transcript.EntryVisibility
+	}{
+		{name: "default", mode: config.CacheWarningModeDefault, want: transcript.EntryVisibilityDetailOnly},
+		{name: "verbose", mode: config.CacheWarningModeVerbose, want: transcript.EntryVisibilityAll},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eng := &Engine{cfg: Config{CacheWarningMode: tt.mode}, chat: newChatStore()}
+			eng.applyPersistedCacheWarning(cachewarn.Warning{Scope: cachewarn.ScopeConversation, Reason: cachewarn.ReasonReuseDropped})
+			snapshot := eng.ChatSnapshot()
+			if len(snapshot.Entries) != 1 {
+				t.Fatalf("expected one cache warning entry, got %d", len(snapshot.Entries))
+			}
+			if got := snapshot.Entries[0].Visibility; got != tt.want {
+				t.Fatalf("cache warning visibility = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
 
 type transportStaticAuth struct{}
 
@@ -563,7 +588,7 @@ func TestReviewerSuggestions_SkipsPromptCacheKeyForUnsupportedProvider(t *testin
 		t.Fatalf("create store: %v", err)
 	}
 	engineClient := &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, SupportsPromptCacheKey: true, IsOpenAIFirstParty: true}}
-	reviewerClient := &fakeClient{responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`}}}}
+	reviewerClient := &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true}, responses: []llm.Response{{Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":[]}`}}}}
 	eng, err := New(store, engineClient, tools.NewRegistry(), Config{Model: "gpt-5", Reviewer: ReviewerConfig{Model: "gpt-5"}})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)

@@ -53,7 +53,9 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 		if err != nil {
 			return llm.Message{}, executedToolCall, false, err
 		}
-		e.setLastUsage(resp.Usage)
+		if err := e.recordLastUsage(resp.Usage); err != nil {
+			return llm.Message{}, executedToolCall, false, err
+		}
 
 		localToolCalls := append([]llm.ToolCall(nil), resp.ToolCalls...)
 		hostedToolExecutions := hostedToolExecutionsFromOutputItems(resp.OutputItems, tools.DefinitionsFor(e.cfg.EnabledTools))

@@ -1602,7 +1602,7 @@ func TestSubmitErrorShowsFullMessageInDetailMode(t *testing.T) {
 func TestSubmitErrorShowsFullAPIStatusBodyWhenWrapped(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	body := strings.Repeat("AUTH_ERR_", 64)
-	root := &llm.APIStatusError{StatusCode: 403, Body: body}
+	root := &llm.APIStatusError{StatusCode: 429, Body: body}
 	wrapped := fmt.Errorf("model generation failed after retries: %w", root)
 
 	next, _ := m.Update(submitDoneMsg{err: wrapped})
@@ -1611,12 +1611,31 @@ func TestSubmitErrorShowsFullAPIStatusBodyWhenWrapped(t *testing.T) {
 	updated = next.(*uiModel)
 
 	view := updated.View()
-	if !strings.Contains(view, "openai status 403") {
+	if !strings.Contains(view, "openai status 429") {
 		t.Fatalf("expected status line, got: %q", view)
 	}
 	joined := strings.ReplaceAll(view, "\n", "")
 	if strings.Count(joined, "AUTH_ERR_") < 64 {
 		t.Fatalf("expected full API body in detail mode, got: %q", view)
+	}
+}
+
+func TestFormatSubmissionErrorUsesFriendlyAuthWarningFor401(t *testing.T) {
+	err := fmt.Errorf("request failed: %w", &llm.ProviderAPIError{ProviderID: "openai-compatible", StatusCode: 401, Code: llm.UnifiedErrorCodeAuthentication})
+	formatted := formatSubmissionError(err)
+	if !strings.Contains(formatted, "Authentication failed") || !strings.Contains(formatted, "/login") {
+		t.Fatalf("expected friendly auth warning, got %q", formatted)
+	}
+	if strings.Contains(formatted, "openai status 401") {
+		t.Fatalf("expected friendly auth warning instead of raw status text, got %q", formatted)
+	}
+}
+
+func TestFormatSubmissionErrorUsesProviderSelectionWarning(t *testing.T) {
+	err := &llm.ProviderSelectionError{Model: "my-local-model", Err: llm.ErrUnsupportedProvider}
+	formatted := formatSubmissionError(err)
+	if !strings.Contains(formatted, "provider/auth path") || !strings.Contains(formatted, "provider_override") || !strings.Contains(formatted, "openai_base_url") {
+		t.Fatalf("expected provider selection warning, got %q", formatted)
 	}
 }
 

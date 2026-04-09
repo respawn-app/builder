@@ -16,6 +16,7 @@ const (
 )
 
 type ChatEntry struct {
+	Visibility  transcript.EntryVisibility
 	Role        string
 	Text        string
 	OngoingText string
@@ -124,19 +125,7 @@ func (s *chatStore) estimatedProviderTokens() int {
 	if !s.providerTokenEstimateDirty {
 		return s.providerTokenEstimate
 	}
-	total := 0
-	if s.compact == nil {
-		total = estimateItemsTokens(s.items)
-	} else {
-		total = estimateItemsTokens(s.compact.Items)
-		tailStart := s.compact.CutoffItemCount
-		if tailStart < 0 {
-			tailStart = 0
-		}
-		if tailStart < len(s.items) {
-			total += estimateItemsTokens(s.items[tailStart:])
-		}
-	}
+	total := estimateItemsTokens(s.snapshotProviderItemsLocked())
 	if total < 0 {
 		total = 0
 	}
@@ -173,6 +162,7 @@ func (s *chatStore) recordToolCompletion(res tools.Result) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.toolCompletions[callID] = res
+	s.providerTokenEstimateDirty = true
 	if _, ok := s.assistantToolCalls[callID]; ok {
 		if _, materialized := s.materializedToolResults[callID]; !materialized {
 			if _, synthesized := s.synthesizedToolResults[callID]; !synthesized {
@@ -211,10 +201,18 @@ func (s *chatStore) clearOngoingError() {
 }
 
 func (s *chatStore) appendLocalEntry(role, text string) {
-	s.appendLocalEntryWithOngoingText(role, text, "")
+	s.appendLocalEntryWithOngoingTextAndVisibility(role, text, "", transcript.EntryVisibilityAuto)
 }
 
 func (s *chatStore) appendLocalEntryWithOngoingText(role, text, ongoingText string) {
+	s.appendLocalEntryWithOngoingTextAndVisibility(role, text, ongoingText, transcript.EntryVisibilityAuto)
+}
+
+func (s *chatStore) appendLocalEntryWithVisibility(role, text string, visibility transcript.EntryVisibility) {
+	s.appendLocalEntryWithOngoingTextAndVisibility(role, text, "", visibility)
+}
+
+func (s *chatStore) appendLocalEntryWithOngoingTextAndVisibility(role, text, ongoingText string, visibility transcript.EntryVisibility) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
@@ -222,7 +220,7 @@ func (s *chatStore) appendLocalEntryWithOngoingText(role, text, ongoingText stri
 	defer s.mu.Unlock()
 	messageCount := s.messageCount
 	s.local = append(s.local, localChatEntry{
-		Entry:             ChatEntry{Role: role, Text: text, OngoingText: strings.TrimSpace(ongoingText)},
+		Entry:             ChatEntry{Visibility: transcript.NormalizeEntryVisibility(visibility), Role: role, Text: text, OngoingText: strings.TrimSpace(ongoingText)},
 		AfterMessageCount: messageCount,
 	})
 	s.transcriptEntryCount++
@@ -251,6 +249,60 @@ func (s *chatStore) snapshotMessagesLocked() []llm.Message {
 }
 
 func (s *chatStore) snapshotProviderItemsLocked() []llm.ResponseItem {
+	items := s.providerItemsSourceLocked()
+	materializedToolResults := collectMaterializedToolCalls(items)
+	out := make([]llm.ResponseItem, 0, len(items)+len(s.toolCompletions))
+	pendingOutputs := make([]llm.ResponseItem, 0, len(s.toolCompletions))
+	inFunctionOutputRun := false
+	flushPendingOutputs := func() {
+		if len(pendingOutputs) == 0 {
+			return
+		}
+		out = append(out, pendingOutputs...)
+		pendingOutputs = pendingOutputs[:0]
+	}
+	for _, item := range items {
+		if item.Type != llm.ResponseItemTypeFunctionCallOutput {
+			if inFunctionOutputRun {
+				flushPendingOutputs()
+				inFunctionOutputRun = false
+			} else if item.Type != llm.ResponseItemTypeFunctionCall {
+				flushPendingOutputs()
+			}
+		}
+		out = append(out, item)
+		if item.Type != llm.ResponseItemTypeFunctionCall {
+			if item.Type == llm.ResponseItemTypeFunctionCallOutput {
+				inFunctionOutputRun = true
+			}
+			continue
+		}
+		callID := strings.TrimSpace(item.CallID)
+		if callID == "" {
+			callID = strings.TrimSpace(item.ID)
+		}
+		if callID == "" {
+			continue
+		}
+		if _, ok := materializedToolResults[callID]; ok {
+			continue
+		}
+		completion, ok := s.toolCompletions[callID]
+		if !ok {
+			continue
+		}
+		pendingOutputs = append(pendingOutputs, llm.ResponseItem{
+			Type:   llm.ResponseItemTypeFunctionCallOutput,
+			CallID: callID,
+			Name:   firstNonEmpty(strings.TrimSpace(string(completion.Name)), strings.TrimSpace(item.Name)),
+			Output: append(json.RawMessage(nil), completion.Output...),
+		})
+	}
+	flushPendingOutputs()
+	return out
+}
+
+func (s *chatStore) providerItemsSourceLocked() []llm.ResponseItem {
 	if s.compact == nil {
 		return llm.CloneResponseItems(s.items)
 	}
@@ -267,6 +319,15 @@ func (s *chatStore) snapshotProviderItemsLocked() []llm.ResponseItem {
 	out = append(out, base...)
 	out = append(out, tail...)
 	return out
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (s *chatStore) rebuildTranscriptStatsLocked() {

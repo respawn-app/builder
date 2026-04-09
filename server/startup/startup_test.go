@@ -31,11 +31,11 @@ func (h stubAuthHandler) NeedsInteraction(req authflow.InteractionRequest) bool 
 	return h.needs(req)
 }
 
-func (h stubAuthHandler) Interact(ctx context.Context, req authflow.InteractionRequest) error {
+func (h stubAuthHandler) Interact(ctx context.Context, req authflow.InteractionRequest) (authflow.InteractionOutcome, error) {
 	if h.interact == nil {
-		return nil
+		return authflow.InteractionOutcome{}, nil
 	}
-	return h.interact(ctx, req)
+	return authflow.InteractionOutcome{}, h.interact(ctx, req)
 }
 
 func (h stubAuthHandler) LookupEnv(key string) string {
@@ -94,6 +94,33 @@ func TestEnsureReadyUsesAuthHandlerLookupEnv(t *testing.T) {
 	}
 	if !sawInteraction {
 		t.Fatal("expected ensure ready to invoke auth interaction")
+	}
+}
+
+func TestEnsureReadyPromptsDuringExplicitReauthWhenStartupAuthIsOptional(t *testing.T) {
+	mgr := auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now)
+	called := false
+	err := EnsureReady(context.Background(), stubAuthState{
+		cfg: config.App{Settings: config.Settings{
+			Theme:              "dark",
+			TUIAlternateScreen: config.TUIAlternateScreenAuto,
+			OpenAIBaseURL:      "http://127.0.0.1:8080/v1",
+		}},
+		mgr: mgr,
+	}, stubAuthHandler{
+		needs: func(req authflow.InteractionRequest) bool {
+			return !called && req.PromptOptional && !req.Gate.Ready
+		},
+		interact: func(context.Context, authflow.InteractionRequest) error {
+			called = true
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("ensure ready: %v", err)
+	}
+	if !called {
+		t.Fatal("expected explicit reauth to prompt even when startup auth is optional")
 	}
 }
 
@@ -165,11 +192,11 @@ func (startupEnvAuthHandler) WrapStore(base auth.Store) auth.Store {
 }
 
 func (startupEnvAuthHandler) NeedsInteraction(req authflow.InteractionRequest) bool {
-	return !req.Gate.Ready
+	return req.AuthRequired && !req.Gate.Ready
 }
 
-func (startupEnvAuthHandler) Interact(context.Context, authflow.InteractionRequest) error {
-	return auth.ErrAuthNotConfigured
+func (startupEnvAuthHandler) Interact(context.Context, authflow.InteractionRequest) (authflow.InteractionOutcome, error) {
+	return authflow.InteractionOutcome{}, auth.ErrAuthNotConfigured
 }
 
 func (startupEnvAuthHandler) LookupEnv(key string) string {
@@ -290,5 +317,28 @@ func TestHeadlessHandlersFailFastWithoutCredentials(t *testing.T) {
 	_, err := StartCore(context.Background(), Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, authHandler, onboardingHandler)
 	if !errors.Is(err, auth.ErrAuthNotConfigured) {
 		t.Fatalf("expected auth not configured, got %v", err)
+	}
+}
+
+func TestHeadlessHandlersAllowExplicitOpenAIBaseURLWithoutCredentials(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "")
+
+	authHandler, onboardingHandler := NewHeadlessHandlers(nil)
+	appCore, err := StartCore(context.Background(), Request{
+		WorkspaceRoot:         workspace,
+		WorkspaceRootExplicit: true,
+		OpenAIBaseURL:         "http://127.0.0.1:8080/v1",
+		OpenAIBaseURLExplicit: true,
+	}, authHandler, onboardingHandler)
+	if err != nil {
+		t.Fatalf("StartCore: %v", err)
+	}
+	defer func() { _ = appCore.Close() }()
+
+	if appCore.Config().Settings.OpenAIBaseURL != "http://127.0.0.1:8080/v1" {
+		t.Fatalf("openai base url = %q", appCore.Config().Settings.OpenAIBaseURL)
 	}
 }

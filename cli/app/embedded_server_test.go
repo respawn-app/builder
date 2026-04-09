@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"builder/internal/testopenai"
 	"builder/server/auth"
 	serverembedded "builder/server/embedded"
 	"builder/server/launch"
@@ -220,7 +220,7 @@ func (s *testEmbeddedServer) Reauthenticate(ctx context.Context, interactor auth
 	if s.reauthenticate != nil {
 		return s.reauthenticate(ctx, interactor)
 	}
-	return ensureAuthReady(ctx, s.authManager, s.oauthOpts, s.cfg.Settings.Theme, s.cfg.Settings.TUIAlternateScreen, interactor)
+	return ensureAuthReady(ctx, s.authManager, s.oauthOpts, s.cfg.Settings, interactor)
 }
 
 func (s *stubEmbeddedProcessViewClient) ListProcesses(context.Context, serverapi.ProcessListRequest) (serverapi.ProcessListResponse, error) {
@@ -483,8 +483,25 @@ func TestEmbeddedAppServerPrepareRuntimeWiresSessionActivityForSharedClients(t *
 	if err != nil {
 		t.Fatalf("second.Next: %v", err)
 	}
-	if firstEvt.Kind != clientui.EventConversationUpdated || secondEvt.Kind != clientui.EventConversationUpdated {
+	if firstEvt.Kind != clientui.EventLocalEntryAdded || secondEvt.Kind != clientui.EventLocalEntryAdded {
 		t.Fatalf("unexpected activity events: first=%+v second=%+v", firstEvt, secondEvt)
+	}
+	if len(firstEvt.TranscriptEntries) != 1 || firstEvt.TranscriptEntries[0].Text != "hello from client one" {
+		t.Fatalf("unexpected first local entry event: %+v", firstEvt)
+	}
+	if len(secondEvt.TranscriptEntries) != 1 || secondEvt.TranscriptEntries[0].Text != "hello from client one" {
+		t.Fatalf("unexpected second local entry event: %+v", secondEvt)
+	}
+	firstUpdate, err := first.Next(ctx)
+	if err != nil {
+		t.Fatalf("first.Next conversation update: %v", err)
+	}
+	secondUpdate, err := second.Next(ctx)
+	if err != nil {
+		t.Fatalf("second.Next conversation update: %v", err)
+	}
+	if firstUpdate.Kind != clientui.EventConversationUpdated || secondUpdate.Kind != clientui.EventConversationUpdated {
+		t.Fatalf("unexpected follow-up activity events: first=%+v second=%+v", firstUpdate, secondUpdate)
 	}
 
 	if _, err := reads.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: plan.SessionID}); err != nil {
@@ -559,8 +576,18 @@ func TestEmbeddedAppServerPrepareRuntimeIsolatesSessionActivityBetweenSessions(t
 	if err != nil {
 		t.Fatalf("subA.Next: %v", err)
 	}
-	if evtA.Kind != clientui.EventConversationUpdated {
+	if evtA.Kind != clientui.EventLocalEntryAdded {
 		t.Fatalf("unexpected session A event: %+v", evtA)
+	}
+	if len(evtA.TranscriptEntries) != 1 || evtA.TranscriptEntries[0].Text != "session-a-only" {
+		t.Fatalf("unexpected session A local entry payload: %+v", evtA)
+	}
+	evtAUpdate, err := subA.Next(ctxA)
+	if err != nil {
+		t.Fatalf("subA.Next conversation update: %v", err)
+	}
+	if evtAUpdate.Kind != clientui.EventConversationUpdated {
+		t.Fatalf("unexpected session A conversation update: %+v", evtAUpdate)
 	}
 
 	ctxB, cancelB := context.WithTimeout(context.Background(), 150*time.Millisecond)
@@ -596,8 +623,18 @@ func TestEmbeddedAppServerPrepareRuntimeIsolatesSessionActivityBetweenSessions(t
 	if err != nil {
 		t.Fatalf("subB.Next after session B append: %v", err)
 	}
-	if evtB.Kind != clientui.EventConversationUpdated {
+	if evtB.Kind != clientui.EventLocalEntryAdded {
 		t.Fatalf("unexpected session B event: %+v", evtB)
+	}
+	if len(evtB.TranscriptEntries) != 1 || evtB.TranscriptEntries[0].Text != "session-b-only" {
+		t.Fatalf("unexpected session B local entry payload: %+v", evtB)
+	}
+	evtBUpdate, err := subB.Next(ctxB2)
+	if err != nil {
+		t.Fatalf("subB.Next conversation update: %v", err)
+	}
+	if evtBUpdate.Kind != clientui.EventConversationUpdated {
+		t.Fatalf("unexpected session B conversation update: %+v", evtBUpdate)
 	}
 
 	ctxA2, cancelA2 := context.WithTimeout(context.Background(), 150*time.Millisecond)
@@ -953,6 +990,9 @@ func TestEmbeddedAppServerPrepareRuntimeRejectsConcurrentPrimarySubmitWhileRunIn
 	firstRelease := make(chan struct{})
 	var requests atomic.Int32
 	responseServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if testopenai.HandleInputTokenCount(w, r, 11) {
+			return
+		}
 		if r.URL.Path != "/responses" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
@@ -969,12 +1009,7 @@ func TestEmbeddedAppServerPrepareRuntimeRejectsConcurrentPrimarySubmitWhileRunIn
 			t.Fatalf("unexpected responses request index %d", index)
 		}
 		reply := map[int]string{1: "first reply", 2: "second reply"}[index]
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final\",\"content\":[{\"type\":\"output_text\",\"text\":%q}]}]}}\n\n", reply)
-		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
-		}
+		testopenai.WriteCompletedResponseStream(w, reply, 11, 7)
 	}))
 	defer responseServer.Close()
 

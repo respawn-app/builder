@@ -12,6 +12,7 @@ import (
 
 	"builder/server/llm"
 	"builder/server/tools"
+	"builder/shared/transcript"
 )
 
 func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
@@ -26,6 +27,7 @@ func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
 		"output":   json.RawMessage(r.Output),
 	})
 	if err == nil {
+		e.markCurrentRequestShapeDirtyForSignificantMutation()
 		e.chat.recordToolCompletion(r)
 		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
 	}
@@ -114,20 +116,127 @@ func (e *Engine) appendPersistedLocalEntry(stepID, role, text string) error {
 }
 
 func (e *Engine) appendPersistedLocalEntryWithOngoingText(stepID, role, text, ongoingText string) error {
-	role = strings.TrimSpace(role)
-	if role == "" || strings.TrimSpace(text) == "" {
-		return nil
-	}
-	e.chat.appendLocalEntryWithOngoingText(role, text, ongoingText)
-	_, err := e.store.AppendEvent(stepID, "local_entry", storedLocalEntry{
+	return e.appendPersistedLocalEntryRecord(stepID, storedLocalEntry{
+		Visibility:  transcript.EntryVisibilityAuto,
 		Role:        role,
 		Text:        text,
 		OngoingText: strings.TrimSpace(ongoingText),
 	})
+}
+
+func (e *Engine) appendPersistedDiagnosticEntry(stepID, diagnosticKey, role, text string) error {
+	diagnosticKey = strings.TrimSpace(diagnosticKey)
+	if diagnosticKey == "" {
+		return e.appendPersistedLocalEntry(stepID, role, text)
+	}
+	if !e.beginLocalDiagnostic(diagnosticKey) {
+		return nil
+	}
+	entry := storedLocalEntry{
+		Visibility:    transcript.EntryVisibilityAuto,
+		Role:          role,
+		Text:          text,
+		DiagnosticKey: diagnosticKey,
+	}
+	entry.Role = strings.TrimSpace(entry.Role)
+	entry.Text = strings.TrimSpace(entry.Text)
+	entry.DiagnosticKey = strings.TrimSpace(entry.DiagnosticKey)
+	if entry.Role == "" || entry.Text == "" {
+		e.clearLocalDiagnostic(diagnosticKey)
+		return nil
+	}
+	_, err := e.store.AppendEvent(stepID, "local_entry", entry)
+	if err != nil {
+		e.clearLocalDiagnostic(diagnosticKey)
+		return err
+	}
+	e.chat.appendLocalEntryWithOngoingText(entry.Role, entry.Text, entry.OngoingText)
+	e.emit(Event{Kind: EventLocalEntryAdded, StepID: stepID, LocalEntry: localEntryChatEntry(entry)})
+	e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
+	return nil
+}
+
+func (e *Engine) appendPersistedLocalEntryRecord(stepID string, entry storedLocalEntry) error {
+	entry.Role = strings.TrimSpace(entry.Role)
+	entry.Text = strings.TrimSpace(entry.Text)
+	entry.OngoingText = strings.TrimSpace(entry.OngoingText)
+	entry.DiagnosticKey = strings.TrimSpace(entry.DiagnosticKey)
+	if entry.Role == "" || entry.Text == "" {
+		return nil
+	}
+	_, err := e.store.AppendEvent(stepID, "local_entry", entry)
 	if err == nil {
+		e.chat.appendLocalEntryWithOngoingTextAndVisibility(entry.Role, entry.Text, entry.OngoingText, entry.Visibility)
+		e.emit(Event{Kind: EventLocalEntryAdded, StepID: stepID, LocalEntry: localEntryChatEntry(entry)})
 		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
 	}
 	return err
+}
+
+func localEntryChatEntry(entry storedLocalEntry) *ChatEntry {
+	return &ChatEntry{
+		Visibility:  entry.Visibility,
+		Role:        strings.TrimSpace(entry.Role),
+		Text:        strings.TrimSpace(entry.Text),
+		OngoingText: strings.TrimSpace(entry.OngoingText),
+	}
+}
+
+func (e *Engine) beginLocalDiagnostic(key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return true
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, exists := e.localDiagnosticKeys[key]; exists {
+		return false
+	}
+	e.localDiagnosticKeys[key] = struct{}{}
+	return true
+}
+
+func (e *Engine) clearLocalDiagnostic(key string) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.localDiagnosticKeys, key)
+	delete(e.persistedDiagnostics, key)
+}
+
+func (e *Engine) restoreLocalDiagnostic(key string) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.localDiagnosticKeys[key] = struct{}{}
+	e.persistedDiagnostics[key] = struct{}{}
+}
+
+func (e *Engine) hasPersistedDiagnostic(key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_, exists := e.persistedDiagnostics[key]
+	return exists
+}
+
+func (e *Engine) resetLocalDiagnostics() {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.localDiagnosticKeys = make(map[string]struct{})
+	e.persistedDiagnostics = make(map[string]struct{})
 }
 
 func (e *Engine) appendMessage(stepID string, msg llm.Message) error {
@@ -136,6 +245,11 @@ func (e *Engine) appendMessage(stepID string, msg llm.Message) error {
 		if err := e.beforePersistMessage(msg); err != nil {
 			return err
 		}
+	}
+	if mutation := tokenUsageMutationForMessage(msg); mutation == tokenUsageMutationSignificant {
+		e.markCurrentRequestShapeDirtyForSignificantMutation()
+	} else {
+		e.markCurrentRequestShapeDirty()
 	}
 	e.chat.appendMessage(msg)
 	_, err := e.store.AppendEvent(stepID, "message", msg)
@@ -151,6 +265,11 @@ func (e *Engine) appendMessageWithoutConversationUpdate(stepID string, msg llm.M
 		if err := e.beforePersistMessage(msg); err != nil {
 			return err
 		}
+	}
+	if mutation := tokenUsageMutationForMessage(msg); mutation == tokenUsageMutationSignificant {
+		e.markCurrentRequestShapeDirtyForSignificantMutation()
+	} else {
+		e.markCurrentRequestShapeDirty()
 	}
 	e.chat.appendMessage(msg)
 	_, err := e.store.AppendEvent(stepID, "message", msg)

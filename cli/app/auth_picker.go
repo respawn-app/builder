@@ -335,6 +335,7 @@ func runStartupPicker(model *startupPickerModel, alternateScreen config.TUIAlter
 type authMethodChoice string
 
 const (
+	authMethodChoiceSkip         authMethodChoice = "skip"
 	authMethodChoiceEnvAPIKey    authMethodChoice = "env_api_key"
 	authMethodChoiceBrowserAuto  authMethodChoice = "oauth_browser"
 	authMethodChoiceBrowserPaste authMethodChoice = "oauth_browser_paste"
@@ -346,8 +347,8 @@ type authMethodPickerResult struct {
 	Canceled bool
 }
 
-func authMethodOptions(includeEnvAPIKey bool) []startupPickerOption {
-	items := make([]startupPickerOption, 0, 4)
+func authMethodOptions(includeEnvAPIKey bool, allowSkip bool) []startupPickerOption {
+	items := make([]startupPickerOption, 0, 5)
 	if includeEnvAPIKey {
 		items = append(items, startupPickerOption{
 			ID:    string(authMethodChoiceEnvAPIKey),
@@ -368,11 +369,17 @@ func authMethodOptions(includeEnvAPIKey bool) []startupPickerOption {
 			Title: "Use a device code in any browser",
 		},
 	)
+	if allowSkip {
+		items = append(items, startupPickerOption{
+			ID:    string(authMethodChoiceSkip),
+			Title: "Continue without Builder auth",
+		})
+	}
 	return items
 }
 
-func newAuthMethodPickerModel(theme string, notice startupPickerNotice, includeEnvAPIKey bool) *startupPickerModel {
-	return newStartupPickerModel(authPickerHeaderMarkdown, "Sign in to Builder", theme, notice, authMethodOptions(includeEnvAPIKey))
+func newAuthMethodPickerModel(theme string, notice startupPickerNotice, includeEnvAPIKey bool, allowSkip bool) *startupPickerModel {
+	return newStartupPickerModel(authPickerHeaderMarkdown, "Sign in to Builder", theme, notice, authMethodOptions(includeEnvAPIKey, allowSkip))
 }
 
 func authMethodPickerNoticeForRequest(req authInteraction) startupPickerNotice {
@@ -389,13 +396,13 @@ func authMethodPickerNoticeForRequest(req authInteraction) startupPickerNotice {
 		return startupPickerNotice{Text: "Saved sign-in needs attention: " + req.Gate.Reason, Kind: startupPickerNoticeError}
 	}
 	if req.HasEnvAPIKey {
-		return startupPickerNotice{Text: "Choose how Builder should sign in. OPENAI_API_KEY is also available as a remembered auth source.", Kind: startupPickerNoticeNeutral}
+		return startupPickerNotice{Text: "Choose how Builder should sign in. OPENAI_API_KEY is available for this launch.", Kind: startupPickerNoticeNeutral}
 	}
-	return startupPickerNotice{Text: "Choose how Builder should complete OpenAI sign-in.", Kind: startupPickerNoticeNeutral}
+	return startupPickerNotice{Text: "Choose how to authenticate.", Kind: startupPickerNoticeNeutral}
 }
 
 func authMethodDisplayTitle(choice authMethodChoice) string {
-	for _, item := range authMethodOptions(true) {
+	for _, item := range authMethodOptions(true, true) {
 		if item.ID == string(choice) {
 			return item.Title
 		}
@@ -404,7 +411,7 @@ func authMethodDisplayTitle(choice authMethodChoice) string {
 }
 
 func runAuthMethodPicker(req authInteraction) (authMethodPickerResult, error) {
-	model := newAuthMethodPickerModel(req.Theme, authMethodPickerNoticeForRequest(req), req.HasEnvAPIKey)
+	model := newAuthMethodPickerModel(req.Theme, authMethodPickerNoticeForRequest(req), req.HasEnvAPIKey, !req.AuthRequired)
 	picked, err := runStartupPicker(model, req.AlternateScreen)
 	if err != nil {
 		return authMethodPickerResult{}, err

@@ -246,6 +246,19 @@ func (s *Store) SetCompactionSoonReminderIssued(issued bool) error {
 	return s.persistMetaLocked()
 }
 
+func (s *Store) SetUsageState(state *UsageState) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	normalized := normalizeUsageState(state)
+	if usageStatesEqual(s.meta.UsageState, normalized) && (!s.persisted || hasSessionMeta(s.sessionDir)) {
+		return nil
+	}
+	s.meta.UsageState = normalized
+	s.meta.UpdatedAt = time.Now().UTC()
+	return s.persistMetaLocked()
+}
+
 func (s *Store) SetContinuationContext(ctx ContinuationContext) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -485,6 +498,53 @@ func normalizeContinuationContext(ctx ContinuationContext) *ContinuationContext 
 		return nil
 	}
 	return &ContinuationContext{OpenAIBaseURL: openAIBaseURL}
+}
+
+func normalizeUsageState(state *UsageState) *UsageState {
+	if state == nil {
+		return nil
+	}
+	normalized := *state
+	if normalized.InputTokens < 0 {
+		normalized.InputTokens = 0
+	}
+	if normalized.OutputTokens < 0 {
+		normalized.OutputTokens = 0
+	}
+	if normalized.WindowTokens < 0 {
+		normalized.WindowTokens = 0
+	}
+	if normalized.CachedInputTokens < 0 {
+		normalized.CachedInputTokens = 0
+	}
+	if normalized.CachedInputTokens > normalized.InputTokens {
+		normalized.CachedInputTokens = normalized.InputTokens
+	}
+	if normalized.EstimatedProviderTokens < 0 {
+		normalized.EstimatedProviderTokens = 0
+	}
+	if normalized.TotalInputTokens < 0 {
+		normalized.TotalInputTokens = 0
+	}
+	if normalized.TotalCachedInputTokens < 0 {
+		normalized.TotalCachedInputTokens = 0
+	}
+	if normalized.TotalCachedInputTokens > normalized.TotalInputTokens {
+		normalized.TotalCachedInputTokens = normalized.TotalInputTokens
+	}
+	if normalized.InputTokens == 0 && normalized.OutputTokens == 0 && normalized.WindowTokens == 0 && normalized.CachedInputTokens == 0 && !normalized.HasCachedInputTokens && normalized.EstimatedProviderTokens == 0 && normalized.TotalInputTokens == 0 && normalized.TotalCachedInputTokens == 0 {
+		return nil
+	}
+	return &normalized
+}
+
+func usageStatesEqual(left, right *UsageState) bool {
+	left = normalizeUsageState(left)
+	right = normalizeUsageState(right)
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 func (s *Store) captureFirstPromptPreviewLocked(events []Event) {

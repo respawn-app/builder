@@ -327,7 +327,7 @@ func (s *embeddedAppServer) Reauthenticate(ctx context.Context, interactor authI
 		return errors.New("embedded server is required")
 	}
 	cfg := s.inner.Config()
-	return ensureAuthReady(ctx, s.inner.AuthManager(), s.inner.OAuthOptions(), cfg.Settings.Theme, cfg.Settings.TUIAlternateScreen, interactor)
+	return ensureAuthReady(ctx, s.inner.AuthManager(), s.inner.OAuthOptions(), cfg.Settings, interactor)
 }
 
 var _ embeddedServer = (*embeddedAppServer)(nil)

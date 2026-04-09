@@ -263,6 +263,15 @@ func RenderCommittedOngoingSnapshot(entries []TranscriptEntry, theme string, wid
 func nonEmptyTranscriptEntries(entries []TranscriptEntry) []TranscriptEntry {
 	filtered := make([]TranscriptEntry, 0, len(entries))
 	for _, entry := range entries {
+		if isToolResultRole(strings.TrimSpace(entry.Role)) &&
+			strings.TrimSpace(entry.Text) == "" &&
+			strings.TrimSpace(entry.OngoingText) == "" {
+			// Successful patch/edit calls intentionally emit an empty tool_result
+			// body. Preserve the entry as a structural status marker so merged
+			// tool blocks can still resolve to their final success/error role.
+			filtered = append(filtered, entry)
+			continue
+		}
 		if strings.TrimSpace(entry.Text) == "" && strings.TrimSpace(entry.OngoingText) == "" {
 			continue
 		}

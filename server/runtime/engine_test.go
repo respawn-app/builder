@@ -64,12 +64,15 @@ func (f *fakeClient) ProviderCapabilities(context.Context) (llm.ProviderCapabili
 		return f.caps, nil
 	}
 	return llm.ProviderCapabilities{
-		ProviderID:                    "openai",
-		SupportsResponsesAPI:          true,
-		SupportsResponsesCompact:      true,
-		SupportsReasoningEncrypted:    true,
-		SupportsServerSideContextEdit: true,
-		IsOpenAIFirstParty:            true,
+		ProviderID:                     "openai",
+		SupportsResponsesAPI:           true,
+		SupportsResponsesCompact:       true,
+		SupportsRequestInputTokenCount: true,
+		SupportsPromptCacheKey:         true,
+		SupportsNativeWebSearch:        true,
+		SupportsReasoningEncrypted:     true,
+		SupportsServerSideContextEdit:  true,
+		IsOpenAIFirstParty:             true,
 	}, nil
 }
 
@@ -94,12 +97,15 @@ func (c *hookClient) ProviderCapabilities(context.Context) (llm.ProviderCapabili
 		return c.caps, nil
 	}
 	return llm.ProviderCapabilities{
-		ProviderID:                    "openai",
-		SupportsResponsesAPI:          true,
-		SupportsResponsesCompact:      true,
-		SupportsReasoningEncrypted:    true,
-		SupportsServerSideContextEdit: true,
-		IsOpenAIFirstParty:            true,
+		ProviderID:                     "openai",
+		SupportsResponsesAPI:           true,
+		SupportsResponsesCompact:       true,
+		SupportsRequestInputTokenCount: true,
+		SupportsPromptCacheKey:         true,
+		SupportsNativeWebSearch:        true,
+		SupportsReasoningEncrypted:     true,
+		SupportsServerSideContextEdit:  true,
+		IsOpenAIFirstParty:             true,
 	}, nil
 }
 
@@ -124,6 +130,9 @@ type fakeCompactionClient struct {
 type preciseCompactionClient struct {
 	inputTokenCount int
 	contextWindow   int
+	countErr        error
+	countSupported  *bool
+	supportErr      error
 
 	countCalls   int
 	resolveCalls int
@@ -135,10 +144,23 @@ func (c *preciseCompactionClient) Generate(_ context.Context, _ llm.Request) (ll
 
 func (c *preciseCompactionClient) CountRequestInputTokens(_ context.Context, _ llm.Request) (int, error) {
 	c.countCalls++
+	if c.countErr != nil {
+		return 0, c.countErr
+	}
 	if c.inputTokenCount < 0 {
 		return 0, nil
 	}
 	return c.inputTokenCount, nil
+}
+
+func (c *preciseCompactionClient) SupportsRequestInputTokenCount(_ context.Context) (bool, error) {
+	if c.supportErr != nil {
+		return false, c.supportErr
+	}
+	if c.countSupported != nil {
+		return *c.countSupported, nil
+	}
+	return true, nil
 }
 
 func (c *preciseCompactionClient) ResolveModelContextWindow(_ context.Context, _ string) (int, error) {
@@ -150,13 +172,20 @@ func (c *preciseCompactionClient) ResolveModelContextWindow(_ context.Context, _
 }
 
 func (c *preciseCompactionClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
+	supportsExactCount := true
+	if c.countSupported != nil {
+		supportsExactCount = *c.countSupported
+	}
 	return llm.ProviderCapabilities{
-		ProviderID:                    "openai",
-		SupportsResponsesAPI:          true,
-		SupportsResponsesCompact:      true,
-		SupportsReasoningEncrypted:    true,
-		SupportsServerSideContextEdit: true,
-		IsOpenAIFirstParty:            true,
+		ProviderID:                     "openai",
+		SupportsResponsesAPI:           true,
+		SupportsResponsesCompact:       true,
+		SupportsRequestInputTokenCount: supportsExactCount,
+		SupportsPromptCacheKey:         true,
+		SupportsNativeWebSearch:        true,
+		SupportsReasoningEncrypted:     true,
+		SupportsServerSideContextEdit:  true,
+		IsOpenAIFirstParty:             true,
 	}, nil
 }
 
@@ -214,12 +243,15 @@ func (f *fakeCompactionClient) Compact(_ context.Context, req llm.CompactionRequ
 func (f *fakeCompactionClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
 	if strings.TrimSpace(f.caps.ProviderID) == "" {
 		return llm.ProviderCapabilities{
-			ProviderID:                    "openai",
-			SupportsResponsesAPI:          true,
-			SupportsResponsesCompact:      true,
-			SupportsReasoningEncrypted:    true,
-			SupportsServerSideContextEdit: true,
-			IsOpenAIFirstParty:            true,
+			ProviderID:                     "openai",
+			SupportsResponsesAPI:           true,
+			SupportsResponsesCompact:       true,
+			SupportsRequestInputTokenCount: true,
+			SupportsPromptCacheKey:         true,
+			SupportsNativeWebSearch:        true,
+			SupportsReasoningEncrypted:     true,
+			SupportsServerSideContextEdit:  true,
+			IsOpenAIFirstParty:             true,
 		}, nil
 	}
 	return f.caps, nil
@@ -3336,6 +3368,46 @@ func TestReviewerCompletedEventReflectsPersistedReviewerStatusState(t *testing.T
 	}
 }
 
+func TestAppendPersistedLocalEntryEmitsRealtimeLocalEntryEvent(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	var events []Event
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			events = append(events, evt)
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if err := eng.appendPersistedLocalEntryWithOngoingText("step-1", "reviewer_suggestions", "Supervisor suggested:\n1. Add verification notes.", "Supervisor made 1 suggestion."); err != nil {
+		t.Fatalf("append persisted local entry: %v", err)
+	}
+	if got := len(events); got != 2 {
+		t.Fatalf("event count = %d, want 2", got)
+	}
+	if got := events[0].Kind; got != EventLocalEntryAdded {
+		t.Fatalf("first event kind = %q, want %q", got, EventLocalEntryAdded)
+	}
+	if events[0].LocalEntry == nil {
+		t.Fatal("expected local entry payload on realtime local entry event")
+	}
+	if got := events[0].LocalEntry.Role; got != "reviewer_suggestions" {
+		t.Fatalf("local entry role = %q, want reviewer_suggestions", got)
+	}
+	if got := events[0].LocalEntry.OngoingText; got != "Supervisor made 1 suggestion." {
+		t.Fatalf("local entry ongoing text = %q, want supervisor summary", got)
+	}
+	if got := events[1].Kind; got != EventConversationUpdated {
+		t.Fatalf("second event kind = %q, want %q", got, EventConversationUpdated)
+	}
+}
+
 func TestRunReviewerFollowUpReturnsCompletionWhenReviewerInstructionAppendFails(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -3353,7 +3425,7 @@ func TestRunReviewerFollowUpReturnsCompletionWhenReviewerInstructionAppendFails(
 		t.Fatalf("append first message: %v", err)
 	}
 
-	reviewerClient := &fakeClient{responses: []llm.Response{{
+	reviewerClient := &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true}, responses: []llm.Response{{
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["Add final verification notes."]}`},
 		Usage:     llm.Usage{InputTokens: 10},
 	}}}
@@ -3484,12 +3556,13 @@ func TestRunStepLoopEmitsReviewerCompletionWhenReviewerInstructionAppendFails(t 
 	}
 
 	snapshot := eng.ChatSnapshot()
-	if len(snapshot.Entries) < 3 {
-		t.Fatalf("expected in-memory transcript entries including reviewer status, got %+v", snapshot.Entries)
+	if len(snapshot.Entries) != 2 {
+		t.Fatalf("expected append failure to leave transcript at persisted assistant entries only, got %+v", snapshot.Entries)
 	}
-	statusEntry := snapshot.Entries[len(snapshot.Entries)-1]
-	if statusEntry.Role != "reviewer_status" || !strings.Contains(statusEntry.Text, "follow-up failed") {
-		t.Fatalf("expected in-memory reviewer status after append failure, got %+v", statusEntry)
+	for _, entry := range snapshot.Entries {
+		if entry.Role == "reviewer_status" {
+			t.Fatalf("did not expect in-memory reviewer status after append failure, got %+v", snapshot.Entries)
+		}
 	}
 }
 
@@ -3526,6 +3599,64 @@ func TestRestoreMessagesKeepsStoredReviewerEntriesVerbatim(t *testing.T) {
 	}
 	if snapshot.Entries[1].Role != "reviewer_status" || snapshot.Entries[1].Text != "Supervisor ran, applied 1 suggestion:\n1. Add final verification notes." {
 		t.Fatalf("expected stored reviewer_status entry, got %+v", snapshot.Entries[1])
+	}
+}
+
+func TestAppendPersistedLocalEntryRecordDoesNotMutateChatOnAppendFailure(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	eventsPath := filepath.Join(store.Dir(), "events.jsonl")
+	info, err := os.Stat(eventsPath)
+	if err != nil {
+		t.Fatalf("stat events log: %v", err)
+	}
+	if err := os.Chmod(eventsPath, 0o400); err != nil {
+		t.Fatalf("chmod events log readonly: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(eventsPath, info.Mode()) })
+
+	err = eng.appendPersistedLocalEntryRecord("step-1", storedLocalEntry{
+		Visibility: transcript.EntryVisibilityAll,
+		Role:       "reviewer_status",
+		Text:       "Supervisor ran, applied 1 suggestion.",
+	})
+	if err == nil {
+		t.Fatal("expected appendPersistedLocalEntryRecord to fail when events log is read-only")
+	}
+	if snapshot := eng.ChatSnapshot(); len(snapshot.Entries) != 0 {
+		t.Fatalf("expected no in-memory local entries after append failure, got %+v", snapshot.Entries)
+	}
+}
+
+func TestAppendLocalEntryWithOngoingTextSkipsBlankEntries(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	var events []Event
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:   "gpt-5",
+		OnEvent: func(evt Event) { events = append(events, evt) },
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	eng.AppendLocalEntryWithOngoingText("user", "   ", "ignored")
+	if len(events) != 0 {
+		t.Fatalf("expected blank local entry to emit no events, got %+v", events)
+	}
+	if snapshot := eng.ChatSnapshot(); len(snapshot.Entries) != 0 {
+		t.Fatalf("expected blank local entry to skip chat append, got %+v", snapshot.Entries)
 	}
 }
 
@@ -5675,6 +5806,185 @@ func TestExecuteToolCallsRejectsWhitespaceWebSearchQuery(t *testing.T) {
 	}
 }
 
+func TestCriticalExactRecountsAfterToolCompletionBeforeToolMessageAppend(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{inputTokenCountFn: func(req llm.Request) int {
+		for _, item := range req.Items {
+			if item.Type == llm.ResponseItemTypeFunctionCallOutput && item.CallID == "call-1" {
+				return 200
+			}
+		}
+		return 100
+	}}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	call := llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}
+	if err := eng.appendAssistantMessage("step", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call}}); err != nil {
+		t.Fatalf("append assistant tool call: %v", err)
+	}
+	if precise, ok := eng.currentInputTokensPrecisely(context.Background()); !ok || precise != 100 {
+		t.Fatalf("initial exact count = (%d, %v), want (100, true)", precise, ok)
+	}
+	if client.countInputTokenCalls != 1 {
+		t.Fatalf("count calls=%d, want 1", client.countInputTokenCalls)
+	}
+	results, err := eng.executeToolCalls(context.Background(), "step", []llm.ToolCall{call})
+	if err != nil {
+		t.Fatalf("execute tool calls: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected one tool result, got %d", len(results))
+	}
+	req, err := eng.buildRequest(context.Background(), "", true)
+	if err != nil {
+		t.Fatalf("build request after tool completion: %v", err)
+	}
+	foundOutput := false
+	for _, item := range req.Items {
+		if item.Type == llm.ResponseItemTypeFunctionCallOutput && item.CallID == call.ID {
+			foundOutput = true
+			break
+		}
+	}
+	if !foundOutput {
+		t.Fatalf("expected synthesized function_call_output before tool message append, items=%+v", req.Items)
+	}
+	if precise, ok := eng.currentInputTokensPreciselyIfCritical(context.Background(), 1_000); !ok || precise != 200 {
+		t.Fatalf("critical exact recount = (%d, %v), want (200, true)", precise, ok)
+	}
+	if client.countInputTokenCalls != 2 {
+		t.Fatalf("expected critical recount after tool completion, got %d count calls", client.countInputTokenCalls)
+	}
+}
+
+func TestRestoreMessagesPreservesRecoveredMultiToolProviderOrder(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	call1 := llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}
+	call2 := llm.ToolCall{ID: "call-2", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)}
+	if _, err := store.AppendEvent("step", "message", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}}); err != nil {
+		t.Fatalf("append assistant tool calls: %v", err)
+	}
+	if _, err := store.AppendEvent("step", "tool_completed", map[string]any{"call_id": call1.ID, "name": string(tools.ToolShell), "is_error": false, "output": json.RawMessage(`{"output":"/tmp"}`)}); err != nil {
+		t.Fatalf("append first tool completion: %v", err)
+	}
+	if _, err := store.AppendEvent("step", "tool_completed", map[string]any{"call_id": call2.ID, "name": string(tools.ToolShell), "is_error": false, "output": json.RawMessage(`{"output":"a.txt"}`)}); err != nil {
+		t.Fatalf("append second tool completion: %v", err)
+	}
+	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	items := restored.snapshotItems()
+	if len(items) != 4 {
+		t.Fatalf("expected 4 restored items, got %d (%+v)", len(items), items)
+	}
+	if items[0].Type != llm.ResponseItemTypeFunctionCall || items[0].CallID != call1.ID {
+		t.Fatalf("unexpected restored item[0]: %+v", items[0])
+	}
+	if items[1].Type != llm.ResponseItemTypeFunctionCall || items[1].CallID != call2.ID {
+		t.Fatalf("unexpected restored item[1]: %+v", items[1])
+	}
+	if items[2].Type != llm.ResponseItemTypeFunctionCallOutput || items[2].CallID != call1.ID {
+		t.Fatalf("unexpected restored item[2]: %+v", items[2])
+	}
+	if items[3].Type != llm.ResponseItemTypeFunctionCallOutput || items[3].CallID != call2.ID {
+		t.Fatalf("unexpected restored item[3]: %+v", items[3])
+	}
+}
+
+func TestRestoreMessagesPreservesRecoveredMultiToolExactTokenParity(t *testing.T) {
+	dir := t.TempDir()
+	liveStore, err := session.Create(filepath.Join(dir, "live"), "ws", dir)
+	if err != nil {
+		t.Fatalf("create live store: %v", err)
+	}
+	restoredStore, err := session.Create(filepath.Join(dir, "restored"), "ws", dir)
+	if err != nil {
+		t.Fatalf("create restored store: %v", err)
+	}
+	countForRequest := func(req llm.Request) int {
+		count := 0
+		for i, item := range req.Items {
+			switch item.Type {
+			case llm.ResponseItemTypeFunctionCall:
+				count += 100 + (i * 7)
+			case llm.ResponseItemTypeFunctionCallOutput:
+				count += 1_000 + (i * 11)
+			default:
+				count += 10 + i
+			}
+		}
+		return count
+	}
+	client := &fakeCompactionClient{inputTokenCountFn: countForRequest}
+	live, err := New(liveStore, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new live engine: %v", err)
+	}
+	call1 := llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}
+	call2 := llm.ToolCall{ID: "call-2", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)}
+	if err := live.appendAssistantMessage("step", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}}); err != nil {
+		t.Fatalf("append live assistant tool calls: %v", err)
+	}
+	if _, err := live.executeToolCalls(context.Background(), "step", []llm.ToolCall{call1, call2}); err != nil {
+		t.Fatalf("execute live tool calls: %v", err)
+	}
+	liveReq, err := live.buildRequest(context.Background(), "", true)
+	if err != nil {
+		t.Fatalf("build live request: %v", err)
+	}
+	liveCount, ok := live.requestInputTokensPrecisely(context.Background(), liveReq)
+	if !ok {
+		t.Fatal("expected live precise token count")
+	}
+	if _, err := restoredStore.AppendEvent("step", "message", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}}); err != nil {
+		t.Fatalf("append restored assistant tool calls: %v", err)
+	}
+	if _, err := restoredStore.AppendEvent("step", "tool_completed", map[string]any{"call_id": call1.ID, "name": string(tools.ToolShell), "is_error": false, "output": json.RawMessage(`{"tool":"shell"}`)}); err != nil {
+		t.Fatalf("append restored tool completion 1: %v", err)
+	}
+	if _, err := restoredStore.AppendEvent("step", "tool_completed", map[string]any{"call_id": call2.ID, "name": string(tools.ToolShell), "is_error": false, "output": json.RawMessage(`{"tool":"shell"}`)}); err != nil {
+		t.Fatalf("append restored tool completion 2: %v", err)
+	}
+	restored, err := New(restoredStore, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	if err != nil {
+		t.Fatalf("new restored engine: %v", err)
+	}
+	restoredReq, err := restored.buildRequest(context.Background(), "", true)
+	if err != nil {
+		t.Fatalf("build restored request: %v", err)
+	}
+	restoredCount, ok := restored.requestInputTokensPrecisely(context.Background(), restoredReq)
+	if !ok {
+		t.Fatal("expected restored precise token count")
+	}
+	liveItemsJSON, err := json.Marshal(liveReq.Items)
+	if err != nil {
+		t.Fatalf("marshal live request items: %v", err)
+	}
+	restoredItemsJSON, err := json.Marshal(restoredReq.Items)
+	if err != nil {
+		t.Fatalf("marshal restored request items: %v", err)
+	}
+	if string(liveItemsJSON) != string(restoredItemsJSON) {
+		t.Fatalf("request items mismatch\nlive=%s\nrestored=%s", liveItemsJSON, restoredItemsJSON)
+	}
+	if liveCount != restoredCount {
+		t.Fatalf("precise token count mismatch: live=%d restored=%d", liveCount, restoredCount)
+	}
+}
+
 func TestStreamingRetryResetsAttemptDeltas(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -7234,8 +7544,8 @@ func TestContextUsageUsesLastUsageWhenAvailable(t *testing.T) {
 	eng.setLastUsage(llm.Usage{InputTokens: 1234, OutputTokens: 66, WindowTokens: 399_000})
 
 	usage := eng.ContextUsage()
-	if usage.UsedTokens != 1300 {
-		t.Fatalf("used tokens=%d, want 1300", usage.UsedTokens)
+	if usage.UsedTokens != 1234 {
+		t.Fatalf("used tokens=%d, want 1234", usage.UsedTokens)
 	}
 	if usage.WindowTokens != 400_000 {
 		t.Fatalf("window tokens=%d, want 400000", usage.WindowTokens)
@@ -7317,8 +7627,181 @@ func TestContextUsageUsesEstimatedTokensWhenLastUsageIsStale(t *testing.T) {
 	}
 
 	usage := eng.ContextUsage()
-	if usage.UsedTokens != estimated {
-		t.Fatalf("used tokens=%d, want estimated %d", usage.UsedTokens, estimated)
+	want := 100 + estimated
+	if usage.UsedTokens != want {
+		t.Fatalf("used tokens=%d, want baseline+delta %d", usage.UsedTokens, want)
+	}
+}
+
+func TestContextUsageAddsOnlyPostCheckpointEstimateDelta(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: strings.Repeat("seed-", 100)}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	checkpointEstimate := estimateItemsTokens(eng.snapshotItems())
+	eng.setLastUsage(llm.Usage{InputTokens: 900, OutputTokens: 120, WindowTokens: 410_000})
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: strings.Repeat("delta-", 40)}); err != nil {
+		t.Fatalf("append delta message: %v", err)
+	}
+
+	currentEstimate := estimateItemsTokens(eng.snapshotItems())
+	deltaEstimate := currentEstimate - checkpointEstimate
+	if deltaEstimate <= 0 {
+		t.Fatalf("expected positive estimated delta, got checkpoint=%d current=%d", checkpointEstimate, currentEstimate)
+	}
+
+	usage := eng.ContextUsage()
+	want := 900 + deltaEstimate
+	if usage.UsedTokens != want {
+		t.Fatalf("used tokens=%d, want baseline+delta %d", usage.UsedTokens, want)
+	}
+}
+
+func TestReopenedSessionRestoresUsageCheckpointDeltaAccounting(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: strings.Repeat("seed-", 100)}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	checkpointEstimate := estimateItemsTokens(eng.snapshotItems())
+	if err := eng.recordLastUsage(llm.Usage{InputTokens: 900, OutputTokens: 120, WindowTokens: 410_000, CachedInputTokens: 45, HasCachedInputTokens: true}); err != nil {
+		t.Fatalf("record last usage: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: strings.Repeat("delta-", 40)}); err != nil {
+		t.Fatalf("append delta message: %v", err)
+	}
+
+	reopenedStore, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("re-open store: %v", err)
+	}
+	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+
+	currentEstimate := estimateItemsTokens(restored.snapshotItems())
+	deltaEstimate := currentEstimate - checkpointEstimate
+	if deltaEstimate <= 0 {
+		t.Fatalf("expected positive estimated delta after reopen, got checkpoint=%d current=%d", checkpointEstimate, currentEstimate)
+	}
+	usage := restored.ContextUsage()
+	want := 900 + deltaEstimate
+	if usage.UsedTokens != want {
+		t.Fatalf("used tokens after reopen=%d, want baseline+delta %d", usage.UsedTokens, want)
+	}
+	if !usage.HasCacheHitPercentage || usage.CacheHitPercent != 5 {
+		t.Fatalf("cache hit metadata after reopen=%+v, want 5%%", usage)
+	}
+}
+
+func TestHistoryReplacementResetsDiagnosticDedupe(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendPersistedDiagnosticEntry("step-1", preciseTokenCountFailureDiagnostic, "error", "first fallback"); err != nil {
+		t.Fatalf("append first diagnostic: %v", err)
+	}
+	if err := eng.replaceHistory("step-compact", "local", compactionModeManual, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleAssistant, Content: "summary"}})); err != nil {
+		t.Fatalf("replace history: %v", err)
+	}
+	if err := eng.appendPersistedDiagnosticEntry("step-2", preciseTokenCountFailureDiagnostic, "error", "second fallback"); err != nil {
+		t.Fatalf("append second diagnostic: %v", err)
+	}
+
+	events, err := store.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	count := 0
+	for _, evt := range events {
+		if evt.Kind != "local_entry" {
+			continue
+		}
+		var entry storedLocalEntry
+		if err := json.Unmarshal(evt.Payload, &entry); err != nil {
+			t.Fatalf("decode local entry: %v", err)
+		}
+		if entry.DiagnosticKey == preciseTokenCountFailureDiagnostic {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Fatalf("diagnostic entry count=%d, want 2", count)
+	}
+}
+
+func TestReopenedSessionHistoryReplacementResetsDiagnosticDedupe(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendPersistedDiagnosticEntry("step-1", preciseTokenCountFailureDiagnostic, "error", "first fallback"); err != nil {
+		t.Fatalf("append first diagnostic: %v", err)
+	}
+	if err := eng.replaceHistory("step-compact", "local", compactionModeManual, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleAssistant, Content: "summary"}})); err != nil {
+		t.Fatalf("replace history: %v", err)
+	}
+
+	reopenedStore, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("re-open store: %v", err)
+	}
+	restored, err := New(reopenedStore, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	if err != nil {
+		t.Fatalf("restore engine: %v", err)
+	}
+	if err := restored.appendPersistedDiagnosticEntry("step-2", preciseTokenCountFailureDiagnostic, "error", "second fallback"); err != nil {
+		t.Fatalf("append second diagnostic after reopen: %v", err)
+	}
+
+	events, err := reopenedStore.ReadEvents()
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	count := 0
+	for _, evt := range events {
+		if evt.Kind != "local_entry" {
+			continue
+		}
+		var entry storedLocalEntry
+		if err := json.Unmarshal(evt.Payload, &entry); err != nil {
+			t.Fatalf("decode local entry: %v", err)
+		}
+		if entry.DiagnosticKey == preciseTokenCountFailureDiagnostic {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Fatalf("diagnostic entry count after reopen=%d, want 2", count)
 	}
 }
 
@@ -7497,6 +7980,127 @@ func TestShouldCompactBeforeUserMessageUsesPromptGrowthBelowPreSubmitBand(t *tes
 	}
 	if client.countCalls == 0 {
 		t.Fatal("expected precise request token count to be used for prompt-growth check")
+	}
+}
+
+func TestShouldCompactBeforeUserMessageFallsBackWhenExactCountUnsupported(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	supported := false
+	client := &preciseCompactionClient{inputTokenCount: 960, contextWindow: 1000, countSupported: &supported}
+	eng, err := New(store, client, tools.NewRegistry(), Config{
+		Model:                         "gpt-5",
+		AutoCompactTokenLimit:         950,
+		ContextWindowTokens:           1000,
+		PreSubmitCompactionLeadTokens: 50,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: strings.Repeat("a", 3400)}); err != nil {
+		t.Fatalf("append message: %v", err)
+	}
+
+	shouldCompact, err := eng.ShouldCompactBeforeUserMessage(context.Background(), strings.Repeat("b", 400))
+	if err != nil {
+		t.Fatalf("ShouldCompactBeforeUserMessage: %v", err)
+	}
+	if !shouldCompact {
+		t.Fatal("expected fallback estimator to trigger pre-submit compaction when exact counting is unsupported")
+	}
+	if client.countCalls != 0 {
+		t.Fatalf("count calls=%d, want 0 when exact counting is unsupported", client.countCalls)
+	}
+}
+
+func TestShouldCompactBeforeUserMessageSkipsExactCountWhenProviderOverrideDisablesIt(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &preciseCompactionClient{inputTokenCount: 960, contextWindow: 1000}
+	eng, err := New(store, client, tools.NewRegistry(), Config{
+		Model:                 "gpt-5",
+		AutoCompactTokenLimit: 950,
+		ContextWindowTokens:   1000,
+		ProviderCapabilitiesOverride: &llm.ProviderCapabilities{
+			ProviderID:                     "openai",
+			SupportsResponsesAPI:           true,
+			SupportsResponsesCompact:       true,
+			SupportsRequestInputTokenCount: false,
+			SupportsPromptCacheKey:         true,
+			SupportsNativeWebSearch:        true,
+			SupportsReasoningEncrypted:     true,
+			SupportsServerSideContextEdit:  true,
+			IsOpenAIFirstParty:             true,
+		},
+		PreSubmitCompactionLeadTokens: 50,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: strings.Repeat("a", 3400)}); err != nil {
+		t.Fatalf("append message: %v", err)
+	}
+
+	shouldCompact, err := eng.ShouldCompactBeforeUserMessage(context.Background(), strings.Repeat("b", 400))
+	if err != nil {
+		t.Fatalf("ShouldCompactBeforeUserMessage: %v", err)
+	}
+	if !shouldCompact {
+		t.Fatal("expected fallback estimator to trigger pre-submit compaction when provider override disables exact counting")
+	}
+	if client.countCalls != 0 {
+		t.Fatalf("count calls=%d, want 0 when provider override disables exact counting", client.countCalls)
+	}
+}
+
+func TestShouldCompactBeforeUserMessageSkipsExactCountWhenLockedContractDisablesIt(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if err := store.MarkModelDispatchLocked(session.LockedContract{
+		Model: "gpt-5",
+		ProviderContract: session.LockedProviderCapabilities{
+			ProviderID:                        "openai",
+			SupportsRequestInputTokenCount:    false,
+			HasSupportsRequestInputTokenCount: true,
+		},
+	}); err != nil {
+		t.Fatalf("MarkModelDispatchLocked: %v", err)
+	}
+
+	client := &preciseCompactionClient{inputTokenCount: 960, contextWindow: 1000}
+	eng, err := New(store, client, tools.NewRegistry(), Config{
+		Model:                         "gpt-5",
+		AutoCompactTokenLimit:         950,
+		ContextWindowTokens:           1000,
+		PreSubmitCompactionLeadTokens: 50,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: strings.Repeat("a", 3400)}); err != nil {
+		t.Fatalf("append message: %v", err)
+	}
+
+	shouldCompact, err := eng.ShouldCompactBeforeUserMessage(context.Background(), strings.Repeat("b", 400))
+	if err != nil {
+		t.Fatalf("ShouldCompactBeforeUserMessage: %v", err)
+	}
+	if !shouldCompact {
+		t.Fatal("expected fallback estimator to trigger pre-submit compaction when locked contract disables exact counting")
+	}
+	if client.countCalls != 0 {
+		t.Fatalf("count calls=%d, want 0 when locked contract disables exact counting", client.countCalls)
 	}
 }
 
@@ -7828,6 +8432,36 @@ func TestForkedSessionBeforeReminderDoesNotCopyReminderIssuedState(t *testing.T)
 	}
 }
 
+func TestForkedSessionDoesNotCopyPersistedUsageState(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	if err := eng.recordLastUsage(llm.Usage{InputTokens: 900, WindowTokens: 410_000}); err != nil {
+		t.Fatalf("record last usage: %v", err)
+	}
+	if store.Meta().UsageState == nil {
+		t.Fatal("expected parent session to persist usage state")
+	}
+
+	forkedStore, err := session.ForkAtUserMessage(store, 1, "Parent -> edit")
+	if err != nil {
+		t.Fatalf("fork session: %v", err)
+	}
+	if forkedStore.Meta().UsageState != nil {
+		t.Fatalf("expected forked session usage state cleared, got %+v", forkedStore.Meta().UsageState)
+	}
+}
+
 func TestForkedSessionAfterReminderPreservesCompactionSoonReminderIssuedState(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
@@ -7942,6 +8576,42 @@ func TestRealCompactionClearsPersistedCompactionSoonReminderStateAcrossReopenAnd
 	}
 	if forked.compactionSoonReminderIssued {
 		t.Fatal("expected forked compacted session to start with cleared reminder-issued state")
+	}
+}
+
+func TestReviewerRollbackClearsPersistedUsageStateAcrossReopen(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 410_000})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	if err := eng.recordLastUsage(llm.Usage{InputTokens: 900, WindowTokens: 410_000}); err != nil {
+		t.Fatalf("record last usage: %v", err)
+	}
+	if store.Meta().UsageState == nil {
+		t.Fatal("expected usage state persisted before rollback")
+	}
+	if err := eng.replaceHistory("step-rollback", "reviewer_rollback", compactionModeManual, llm.ItemsFromMessages([]llm.Message{{Role: llm.RoleUser, Content: "rolled back"}})); err != nil {
+		t.Fatalf("replace history: %v", err)
+	}
+	if store.Meta().UsageState != nil {
+		t.Fatalf("expected reviewer rollback to clear persisted usage state, got %+v", store.Meta().UsageState)
+	}
+
+	reopenedStore, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("re-open store: %v", err)
+	}
+	if reopenedStore.Meta().UsageState != nil {
+		t.Fatalf("expected reopened session to keep usage state cleared, got %+v", reopenedStore.Meta().UsageState)
 	}
 }
 
@@ -8357,6 +9027,64 @@ func TestCompactionSoonReminderIncludesTriggerHandoffAdditionWhenConfigured(t *t
 	}
 	if reminders != 1 {
 		t.Fatalf("expected enabled reminder text once, got %d entries=%+v", reminders, eng.ChatSnapshot().Entries)
+	}
+}
+
+func TestCompactionSoonReminderRechecksPreciselyAfterTranscriptMutation(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &preciseCompactionClient{inputTokenCount: 840, contextWindow: 2_000}
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:                 "gpt-5",
+		ContextWindowTokens:   2_000,
+		AutoCompactTokenLimit: 1_000,
+		CompactionMode:        "local",
+		EnabledTools:          []tools.ID{tools.ToolShell, tools.ToolTriggerHandoff},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.setLastUsage(llm.Usage{InputTokens: 860, WindowTokens: 2_000})
+
+	if err := eng.maybeAppendCompactionSoonReminder(context.Background(), "step-1"); err != nil {
+		t.Fatalf("reminder below exact threshold: %v", err)
+	}
+	if client.countCalls != 1 {
+		t.Fatalf("expected first reminder probe to count precisely once, got %d", client.countCalls)
+	}
+	if eng.handoffToolEnabled() {
+		t.Fatal("did not expect handoff tool to become enabled below the exact reminder threshold")
+	}
+
+	client.inputTokenCount = 860
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, Content: "mutation"}); err != nil {
+		t.Fatalf("append mutation: %v", err)
+	}
+	if err := eng.maybeAppendCompactionSoonReminder(context.Background(), "step-2"); err != nil {
+		t.Fatalf("reminder above exact threshold after mutation: %v", err)
+	}
+	if client.countCalls != 2 {
+		t.Fatalf("expected transcript mutation to force a fresh precise reminder check, got %d calls", client.countCalls)
+	}
+	if !eng.handoffToolEnabled() {
+		t.Fatal("expected reminder to enable trigger_handoff after exact recount")
+	}
+	reminderText := prompts.RenderCompactionSoonReminderPrompt(true)
+	reminders := 0
+	for _, entry := range eng.ChatSnapshot().Entries {
+		if entry.Role == "warning" && entry.Text == reminderText {
+			reminders++
+		}
+	}
+	if reminders != 1 {
+		t.Fatalf("expected one reminder after exact recount, got %d entries=%+v", reminders, eng.ChatSnapshot().Entries)
 	}
 }
 
@@ -9990,7 +10718,7 @@ func TestAutoCompactionRecomputesUsageFromReplacementHistory(t *testing.T) {
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}
-	eng.lastUsage = llm.Usage{InputTokens: 190000, OutputTokens: 0, WindowTokens: 200000}
+	eng.setLastUsage(llm.Usage{InputTokens: 190000, OutputTokens: 0, WindowTokens: 200000})
 
 	if err := eng.autoCompactIfNeeded(context.Background(), "step-1", compactionModeAuto); err != nil {
 		t.Fatalf("auto compact failed: %v", err)
@@ -10026,7 +10754,7 @@ func TestCompactionPersistsSingleNoticeEntry(t *testing.T) {
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}
-	eng.lastUsage = llm.Usage{InputTokens: 190000, OutputTokens: 0, WindowTokens: 200000}
+	eng.setLastUsage(llm.Usage{InputTokens: 190000, OutputTokens: 0, WindowTokens: 200000})
 
 	if err := eng.autoCompactIfNeeded(context.Background(), "step-1", compactionModeAuto); err != nil {
 		t.Fatalf("auto compact failed: %v", err)

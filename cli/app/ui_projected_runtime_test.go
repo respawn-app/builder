@@ -276,7 +276,7 @@ func TestProjectedRuntimeEventUpdateStreamsAssistantDelta(t *testing.T) {
 func TestProjectRuntimeEventChannelStopsWhenRequested(t *testing.T) {
 	src := make(chan runtime.Event, 1)
 	stop := make(chan struct{})
-	out := projectRuntimeEventChannel(src, stop)
+	out := projectRuntimeEventChannel(src, nil, stop)
 
 	src <- runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "first"}
 
@@ -320,5 +320,116 @@ func TestProjectRuntimeEventChannelStopsWhenRequested(t *testing.T) {
 		case <-deadline:
 			t.Fatal("timed out waiting for projected runtime channel to stop")
 		}
+	}
+}
+
+func TestProjectRuntimeEventChannelPublishesSyntheticConversationUpdateAfterBridgeGap(t *testing.T) {
+	bridge := newRuntimeEventBridge(1, nil)
+	bridge.Publish(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "first"})
+	bridge.Publish(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1"})
+
+	stop := make(chan struct{})
+	out := projectRuntimeEventChannel(bridge.Channel(), bridge.GapChannel(), stop)
+	t.Cleanup(func() { close(stop) })
+
+	deadline := time.After(2 * time.Second)
+	events := make([]clientui.Event, 0, 2)
+	for len(events) < 2 {
+		select {
+		case evt, ok := <-out:
+			if !ok {
+				t.Fatalf("projected runtime channel closed early after %d events", len(events))
+			}
+			events = append(events, evt)
+		case <-deadline:
+			t.Fatalf("timed out waiting for projected runtime events, got %+v", events)
+		}
+	}
+
+	sawAssistantDelta := false
+	sawRecovery := false
+	for _, evt := range events {
+		if evt.AssistantDelta == "first" {
+			sawAssistantDelta = true
+		}
+		if evt.Kind == clientui.EventConversationUpdated {
+			sawRecovery = true
+		}
+	}
+	if !sawAssistantDelta || !sawRecovery {
+		t.Fatalf("expected projected runtime channel to emit surviving event and recovery signal, got %+v", events)
+	}
+}
+
+func TestBridgeGapHydratesTranscriptStateInProjectedUI(t *testing.T) {
+	client := &refreshingRuntimeClient{
+		transcripts: []clientui.TranscriptPage{{
+			SessionID:    "session-1",
+			Revision:     7,
+			TotalEntries: 2,
+			Entries: []clientui.ChatEntry{
+				{Role: "tool_call", Text: "pwd", ToolCallID: "call-1", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"}},
+				{Role: "tool_result_ok", Text: "/tmp", ToolCallID: "call-1"},
+			},
+		}},
+	}
+	bridge := newRuntimeEventBridge(1, nil)
+	// Overflow the bridge before starting the projector so recovery is deterministic.
+	bridge.Publish(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "partial"})
+	bridge.Publish(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1"})
+
+	stop := make(chan struct{})
+	runtimeEvents := projectRuntimeEventChannel(bridge.Channel(), bridge.GapChannel(), stop)
+	t.Cleanup(func() { close(stop) })
+
+	events := make([]clientui.Event, 0, 2)
+	deadline := time.After(2 * time.Second)
+	for len(events) < 2 {
+		select {
+		case evt, ok := <-runtimeEvents:
+			if !ok {
+				t.Fatalf("projected runtime channel closed early after %d events", len(events))
+			}
+			events = append(events, evt)
+		case <-deadline:
+			t.Fatalf("timed out waiting for projected runtime events, got %+v", events)
+		}
+	}
+
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), nil)
+	m.startupCmds = nil
+	for _, evt := range events {
+		next, cmd := m.Update(runtimeEventMsg{event: evt})
+		m = next.(*uiModel)
+		msgs := collectCmdMessages(t, cmd)
+		for _, msg := range msgs {
+			refresh, ok := msg.(runtimeTranscriptRefreshedMsg)
+			if !ok {
+				continue
+			}
+			next, follow := m.Update(refresh)
+			m = next.(*uiModel)
+			_ = collectCmdMessages(t, follow)
+		}
+	}
+
+	if got := client.calls; got != 1 {
+		t.Fatalf("transcript refresh calls = %d, want 1", got)
+	}
+	if got := len(m.transcriptEntries); got != 2 {
+		t.Fatalf("transcript entry count after recovery hydrate = %d, want 2", got)
+	}
+	if got := m.transcriptEntries[0].Role; got != "tool_call" {
+		t.Fatalf("first transcript role after recovery hydrate = %q, want tool_call", got)
+	}
+	if got := m.transcriptEntries[0].ToolCallID; got != "call-1" {
+		t.Fatalf("first transcript tool call id after recovery hydrate = %q, want call-1", got)
+	}
+	if got := m.transcriptEntries[1].Role; got != "tool_result_ok" {
+		t.Fatalf("second transcript role after recovery hydrate = %q, want tool_result_ok", got)
+	}
+	loaded := m.view.LoadedTranscriptEntries()
+	if len(loaded) != 2 || loaded[0].Role != "tool_call" || loaded[1].Role != "tool_result_ok" {
+		t.Fatalf("expected hydrated tool transcript visible in view, got %+v", loaded)
 	}
 }

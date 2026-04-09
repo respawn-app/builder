@@ -70,7 +70,7 @@ func TestAuthMethodPickerViewUsesFriendlyTitlesAndDescriptions(t *testing.T) {
 	m := newAuthMethodPickerModel("dark", startupPickerNotice{
 		Text: "Choose how Builder should complete OpenAI sign-in.",
 		Kind: startupPickerNoticeNeutral,
-	}, false)
+	}, false, true)
 	out := ansi.Strip(m.View())
 	if !strings.Contains(out, "Sign in to Builder") {
 		t.Fatalf("expected auth picker title, got %q", out)
@@ -99,15 +99,23 @@ func TestAuthMethodPickerViewUsesFriendlyTitlesAndDescriptions(t *testing.T) {
 }
 
 func TestAuthMethodPickerIncludesEnvAPIKeyOptionWhenAvailable(t *testing.T) {
-	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, true)
+	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, true, true)
 	out := ansi.Strip(m.View())
 	if !strings.Contains(out, "Use existing OPENAI_API_KEY from now on") {
 		t.Fatalf("expected env api key option, got %q", out)
 	}
 }
 
+func TestAuthMethodPickerOmitsSkipWhenAuthIsRequired(t *testing.T) {
+	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false, false)
+	out := ansi.Strip(m.View())
+	if strings.Contains(out, "Continue without Builder auth") {
+		t.Fatalf("did not expect skip option when auth is required, got %q", out)
+	}
+}
+
 func TestAuthMethodPickerHeaderUsesAppForeground(t *testing.T) {
-	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false)
+	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false, true)
 	header := m.renderHeader()
 	expectedPrefix := strings.TrimSuffix(tui.ApplyThemeDefaultForeground("x", "dark"), "x\x1b[0m")
 	if !strings.HasPrefix(header, expectedPrefix) {
@@ -119,7 +127,7 @@ func TestAuthMethodPickerHeaderUsesAppForeground(t *testing.T) {
 }
 
 func TestAuthMethodPickerSelectsSecondOption(t *testing.T) {
-	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false)
+	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false, true)
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = next.(*startupPickerModel)
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -142,7 +150,7 @@ func TestStartupPickerEnterDoesNothingWhenThereAreNoItems(t *testing.T) {
 }
 
 func TestAuthMethodPickerCancel(t *testing.T) {
-	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false)
+	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false, true)
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 	m = next.(*startupPickerModel)
 	if !m.result.Canceled {
@@ -151,7 +159,7 @@ func TestAuthMethodPickerCancel(t *testing.T) {
 }
 
 func TestAuthMethodPickerScrollsToKeepSelectedRowVisible(t *testing.T) {
-	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false)
+	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false, true)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 6})
 	m = next.(*startupPickerModel)
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -168,7 +176,7 @@ func TestAuthMethodPickerScrollsToKeepSelectedRowVisible(t *testing.T) {
 }
 
 func TestAuthMethodPickerDropsSelectedNoteWhenHeightIsTight(t *testing.T) {
-	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false)
+	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false, true)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 5})
 	m = next.(*startupPickerModel)
 	out := ansi.Strip(m.View())
@@ -184,7 +192,7 @@ func TestAuthMethodPickerSubtitleSeparatedFromHeaderByBlankLine(t *testing.T) {
 	m := newAuthMethodPickerModel("dark", startupPickerNotice{
 		Text: "Choose how Builder should complete OpenAI sign-in.",
 		Kind: startupPickerNoticeNeutral,
-	}, false)
+	}, false, true)
 	lines := strings.Split(ansi.Strip(m.View()), "\n")
 	titleLine := -1
 	for i, line := range lines {
@@ -285,6 +293,16 @@ func TestAuthMethodPickerNoticeUsesStartupError(t *testing.T) {
 	}
 }
 
+func TestAuthMethodPickerNoticeAcknowledgesAvailableEnvAPIKey(t *testing.T) {
+	notice := authMethodPickerNoticeForRequest(authInteraction{HasEnvAPIKey: true})
+	if notice.Kind != startupPickerNoticeNeutral {
+		t.Fatalf("expected neutral notice kind, got %q", notice.Kind)
+	}
+	if !strings.Contains(notice.Text, "OPENAI_API_KEY is available for this launch") {
+		t.Fatalf("unexpected notice text %q", notice.Text)
+	}
+}
+
 func TestAuthSuccessScreenTitleUsesEmailWhenAvailable(t *testing.T) {
 	got := authSuccessScreenTitle(auth.Method{
 		Type: auth.MethodOAuth,
@@ -306,6 +324,7 @@ func TestAuthSuccessScreenTitleFallsBackWithoutEmail(t *testing.T) {
 func TestInteractiveAuthInteractorNeedsInteractionForEnvConflict(t *testing.T) {
 	interactor := &interactiveAuthInteractor{}
 	if !interactor.NeedsInteraction(authInteraction{
+		AuthRequired: true,
 		Gate:         auth.StartupGate{Ready: true},
 		State:        auth.State{Scope: auth.ScopeGlobal, Method: auth.Method{Type: auth.MethodAPIKey, APIKey: &auth.APIKeyMethod{Key: "sk-env"}}},
 		StoredState:  auth.EmptyState(),
@@ -351,7 +370,7 @@ func TestInteractiveAuthInteractorOffersEnvAPIKeyChoiceWhenAvailable(t *testing.
 		},
 	}
 
-	err := interactor.Interact(ctx, authInteraction{
+	_, err := interactor.Interact(ctx, authInteraction{
 		Manager:         mgr,
 		State:           auth.EmptyState(),
 		Gate:            auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},
@@ -384,7 +403,7 @@ func TestInteractiveAuthInteractorRejectsEnvAPIKeyChoiceWithoutAvailableKey(t *t
 		},
 	}
 
-	err := interactor.Interact(context.Background(), authInteraction{
+	_, err := interactor.Interact(context.Background(), authInteraction{
 		Manager:         auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now),
 		State:           auth.EmptyState(),
 		Gate:            auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},
@@ -404,7 +423,7 @@ func TestInteractiveAuthInteractorRejectsUnknownAuthMethodChoice(t *testing.T) {
 		},
 	}
 
-	err := interactor.Interact(context.Background(), authInteraction{
+	_, err := interactor.Interact(context.Background(), authInteraction{
 		Manager:         auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now),
 		State:           auth.EmptyState(),
 		Gate:            auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},
@@ -446,7 +465,7 @@ func TestInteractiveAuthInteractorResolvesEnvConflictAndRemembersPreference(t *t
 		return authConflictPickerResult{Choice: authConflictChoiceEnvAPIKey}, nil
 	}
 
-	err := interactor.Interact(ctx, authInteraction{
+	_, err := interactor.Interact(ctx, authInteraction{
 		Manager:         mgr,
 		State:           auth.State{Scope: auth.ScopeGlobal, Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "oauth-token"}}},
 		StoredState:     auth.State{Scope: auth.ScopeGlobal, Method: auth.Method{Type: auth.MethodOAuth, OAuth: &auth.OAuthMethod{AccessToken: "oauth-token"}}},
@@ -499,7 +518,7 @@ func TestInteractiveAuthInteractorChoosingOAuthWithEnvRemembersSavedPreference(t
 		},
 	}
 
-	err := interactor.Interact(ctx, authInteraction{
+	_, err := interactor.Interact(ctx, authInteraction{
 		Manager:         mgr,
 		State:           auth.EmptyState(),
 		Gate:            auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},
@@ -572,7 +591,7 @@ func TestInteractiveAuthInteractorRetriesWithFlowErrorAndClearsOnSuccess(t *test
 		},
 	}
 
-	err := interactor.Interact(ctx, authInteraction{
+	_, err := interactor.Interact(ctx, authInteraction{
 		Manager:         mgr,
 		State:           auth.EmptyState(),
 		Gate:            auth.StartupGate{Reason: auth.ErrAuthNotConfigured.Error()},

@@ -167,11 +167,10 @@
 
 - OpenAI auth supports API key and subscription OAuth.
 - Auth is global app-level (not per-session).
-- Valid auth is required before startup completes.
-- Startup auth failure uses blocking error screen with retry.
+- Startup only blocks on auth when the resolved provider path requires Builder-managed OpenAI auth; explicit OpenAI-compatible base URLs and other non-OpenAI provider paths may continue without auth.
+- Startup auth failures and 401s are surfaced as normal UX with actionable messaging rather than raw transport noise.
 - Startup auth selection uses the same themed startup picker style as session selection.
-- Startup auth picker exposes exactly three OAuth methods:
-- `oauth_browser`, `oauth_browser_paste`, `oauth_device`.
+- Startup auth picker always exposes the OAuth methods `oauth_browser`, `oauth_browser_paste`, and `oauth_device`, may expose `Use existing OPENAI_API_KEY from now on` when available, and always exposes `Continue without Builder auth`.
 - OAuth issuer routing is not configurable in production. Builder hardcodes the official provider issuer per provider, and `BUILDER_OAUTH_ISSUER` is intentionally unsupported to prevent credential routing to overridden domains.
 - `/status` subscription quota fetch uses a fixed ChatGPT usage endpoint. Custom `openai_base_url` values suppress quota fetch, but explicitly configured official ChatGPT hosts (`chatgpt.com`, `chat.openai.com`, with optional `/backend-api`) still allow it.
 - Startup auth picker uses friendly titles with one-line explanations and does not show raw method ids in the rows.
@@ -180,7 +179,8 @@
 - When saved subscription auth and `OPENAI_API_KEY` are both present with no remembered preference, startup shows a picker to choose which source should win from now on.
 - When `OPENAI_API_KEY` is present and no saved subscription auth is configured, startup auth adds `Use existing OPENAI_API_KEY from now on` as a first-class picker option.
 - Choosing the env-key path remembers `prefer env api key when available`; choosing OAuth while an env key is available remembers `prefer saved/subscription auth`.
-- `/logout` clears both the active auth method and the remembered env-vs-saved-auth preference so re-auth starts from a clean choice.
+- `/login` reopens auth selection; skipping there behaves like logout by clearing stored auth state when one exists.
+- `/logout` is retained as an alias and clears both the active auth method and the remembered env-vs-saved-auth preference so re-auth starts from a clean choice.
 - After an interactive auth success or first-time env-key adoption, startup shows a centered success screen before session selection continues. Conflict-only auth-source preference resolution does not. The title is `Auth success for: <email>` when OAuth token claims provide an email; otherwise it is `Auth success`.
 - OAuth failure does not auto-fallback to API key.
 - OAuth tokens auto-refresh silently; only refresh failures are surfaced.

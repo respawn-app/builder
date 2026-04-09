@@ -25,7 +25,7 @@ func runUILoopWithInitialPrompt(wiring *runtimeWiring, active config.Settings, l
 	defer close(runtimeEventStop)
 	runtimeEvents := wiring.runtimeEvents
 	if runtimeEvents == nil && wiring.eventBridge != nil {
-		runtimeEvents = projectRuntimeEventChannel(wiring.eventBridge.Channel(), runtimeEventStop)
+		runtimeEvents = projectRuntimeEventChannel(wiring.eventBridge.Channel(), wiring.eventBridge.GapChannel(), runtimeEventStop)
 	}
 	askEvents := wiring.askEvents
 	if askEvents == nil && wiring.askBridge != nil {
