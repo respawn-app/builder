@@ -138,6 +138,9 @@ func TestWriteCompletedResponseStreamEscapesAssistantTextAsJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(first), &payload); err != nil {
 		t.Fatalf("unmarshal control-character event: %v\npayload=%q", err, first)
 	}
+	if len(payload.Response.Output) != 1 || len(payload.Response.Output[0].Content) != 1 {
+		t.Fatalf("unexpected output payload: %+v", payload.Response.Output)
+	}
 	if got := payload.Response.Output[0].Content[0].Text; got != "line\x01break" {
 		t.Fatalf("assistant text = %q, want %q", got, "line\x01break")
 	}

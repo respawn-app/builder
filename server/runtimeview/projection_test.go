@@ -46,27 +46,6 @@ func (c projectionPreciseClient) ProviderCapabilities(context.Context) (llm.Prov
 	return llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, SupportsRequestInputTokenCount: true, IsOpenAIFirstParty: true}, nil
 }
 
-type projectionCountingPreciseClient struct {
-	inputTokens int
-	countCalls  int
-}
-
-func (c *projectionCountingPreciseClient) Generate(context.Context, llm.Request) (llm.Response, error) {
-	return llm.Response{
-		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
-		Usage:     llm.Usage{InputTokens: 900, OutputTokens: 100, WindowTokens: 400_000},
-	}, nil
-}
-
-func (c *projectionCountingPreciseClient) CountRequestInputTokens(context.Context, llm.Request) (int, error) {
-	c.countCalls++
-	return c.inputTokens, nil
-}
-
-func (c *projectionCountingPreciseClient) ProviderCapabilities(context.Context) (llm.ProviderCapabilities, error) {
-	return llm.ProviderCapabilities{ProviderID: "openai", SupportsResponsesAPI: true, SupportsRequestInputTokenCount: true, IsOpenAIFirstParty: true}, nil
-}
-
 func TestEventFromRuntimeProjectsReasoningAndBackground(t *testing.T) {
 	exitCode := 17
 	view := EventFromRuntime(runtime.Event{
