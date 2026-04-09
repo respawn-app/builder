@@ -40,6 +40,9 @@ func TestExecuteBuiltins(t *testing.T) {
 	if got := r.Execute("/logout"); got.Action != ActionLogout {
 		t.Fatalf("expected ActionLogout, got %+v", got)
 	}
+	if got := r.Execute("/login"); got.Action != ActionLogout {
+		t.Fatalf("expected /login alias to map to ActionLogout, got %+v", got)
+	}
 	if got := r.Execute("/exit"); got.Action != ActionExit {
 		t.Fatalf("expected ActionExit, got %+v", got)
 	}

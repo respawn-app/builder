@@ -952,6 +952,20 @@ func TestOnboardingProviderCapabilitiesFromAuthMode(t *testing.T) {
 	if compatibleCaps.ProviderID != "openai-compatible" || compatibleCaps.SupportsResponsesCompact {
 		t.Fatalf("unexpected openai-compatible provider capabilities: %+v", compatibleCaps)
 	}
+	noAuthCompatibleCaps, err := onboardingProviderCapabilities(auth.EmptyState(), config.Settings{OpenAIBaseURL: "https://example.test/v1"})
+	if err != nil {
+		t.Fatalf("no-auth openai-compatible provider capabilities: %v", err)
+	}
+	if noAuthCompatibleCaps.ProviderID != "openai-compatible" || noAuthCompatibleCaps.SupportsResponsesCompact {
+		t.Fatalf("unexpected no-auth openai-compatible provider capabilities: %+v", noAuthCompatibleCaps)
+	}
+	providerOverrideCaps, err := onboardingProviderCapabilities(auth.EmptyState(), config.Settings{ProviderOverride: "openai", OpenAIBaseURL: "https://example.test/v1"})
+	if err != nil {
+		t.Fatalf("provider override capabilities: %v", err)
+	}
+	if providerOverrideCaps.ProviderID != "openai" || !providerOverrideCaps.SupportsResponsesCompact {
+		t.Fatalf("expected explicit provider override to win over base url, got %+v", providerOverrideCaps)
+	}
 }
 
 func TestApplyOnboardingModelUpdatesKnownContextWindow(t *testing.T) {

@@ -220,7 +220,7 @@ func (s *testEmbeddedServer) Reauthenticate(ctx context.Context, interactor auth
 	if s.reauthenticate != nil {
 		return s.reauthenticate(ctx, interactor)
 	}
-	return ensureAuthReady(ctx, s.authManager, s.oauthOpts, s.cfg.Settings.Theme, s.cfg.Settings.TUIAlternateScreen, interactor)
+	return ensureAuthReady(ctx, s.authManager, s.oauthOpts, s.cfg.Settings, interactor)
 }
 
 func (s *stubEmbeddedProcessViewClient) ListProcesses(context.Context, serverapi.ProcessListRequest) (serverapi.ProcessListResponse, error) {

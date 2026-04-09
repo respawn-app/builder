@@ -8,10 +8,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
 
+	"builder/server/auth"
 	"builder/server/tools"
 
 	openai "github.com/openai/openai-go/v3"
@@ -22,6 +24,12 @@ type staticAuth struct{}
 
 func (staticAuth) AuthorizationHeader(context.Context) (string, error) {
 	return "Bearer token", nil
+}
+
+type missingAuth struct{}
+
+func (missingAuth) AuthorizationHeader(context.Context) (string, error) {
+	return "", auth.ErrAuthNotConfigured
 }
 
 func requireProviderCapabilities(t *testing.T, transport *HTTPTransport, mode openAIAuthMode) ProviderCapabilities {
@@ -519,6 +527,100 @@ func TestBuildRequestOptions_OAuthAddsCodexHeaders(t *testing.T) {
 	if len(transport.buildRequestOptions("Bearer x", openAIAuthMode{}, "")) != 3 {
 		t.Fatal("expected non-oauth options to include auth/caching headers")
 	}
+}
+
+func TestBuildRequestOptions_OmitsAuthorizationHeaderWhenAuthHeaderEmpty(t *testing.T) {
+	transport := NewHTTPTransport(staticAuth{})
+	if len(transport.buildRequestOptions("", openAIAuthMode{}, "")) != 2 {
+		t.Fatal("expected empty auth header to omit Authorization request option")
+	}
+	if len(transport.buildRequestOptions("", openAIAuthMode{}, "session-1")) != 3 {
+		t.Fatal("expected session header to remain when Authorization is omitted")
+	}
+}
+
+func TestResolveAuth_AllowsAnonymousWhenBaseURLExplicitAndAuthNotConfigured(t *testing.T) {
+	transport := NewHTTPTransport(missingAuth{})
+	transport.BaseURL = "http://127.0.0.1:8080/v1"
+	transport.BaseURLExplicit = true
+
+	authHeader, mode, err := transport.resolveAuth(context.Background())
+	if err != nil {
+		t.Fatalf("resolveAuth: %v", err)
+	}
+	if authHeader != "" {
+		t.Fatalf("expected empty auth header, got %q", authHeader)
+	}
+	if mode.IsOAuth || mode.AccountID != "" {
+		t.Fatalf("expected anonymous non-oauth mode, got %+v", mode)
+	}
+}
+
+func TestGenerate_ExplicitBaseURLAllowsAnonymousRequests(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if got := strings.TrimSpace(r.Header.Get("Authorization")); got != "" {
+			t.Fatalf("expected anonymous request without Authorization header, got %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"resp_anon_1",
+			"object":"response",
+			"output":[
+				{
+					"type":"message",
+					"id":"msg_anon_1",
+					"role":"assistant",
+					"status":"completed",
+					"content":[{"type":"output_text","text":"hello from anonymous compatible server"}]
+				}
+			],
+			"usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18}
+		}`))
+	}))
+	defer server.Close()
+	targetURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+
+	transport := NewHTTPTransport(nil)
+	transport.BaseURL = "https://example.openrouter.ai/v1"
+	transport.BaseURLExplicit = true
+	transport.Client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		cloned := req.Clone(req.Context())
+		cloned.URL.Scheme = targetURL.Scheme
+		cloned.URL.Host = targetURL.Host
+		return server.Client().Transport.RoundTrip(cloned)
+	})}
+
+	providerCaps, err := transport.ProviderCapabilities(context.Background())
+	if err != nil {
+		t.Fatalf("provider capabilities: %v", err)
+	}
+	if providerCaps.ProviderID != "openai-compatible" {
+		t.Fatalf("expected openai-compatible provider capabilities, got %+v", providerCaps)
+	}
+
+	resp, err := transport.Generate(context.Background(), OpenAIRequest{
+		Model: "vendor-custom-model",
+		Items: []ResponseItem{{Type: ResponseItemTypeMessage, Role: RoleUser, Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if resp.AssistantText != "hello from anonymous compatible server" {
+		t.Fatalf("assistant text = %q", resp.AssistantText)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func TestBuildPayload_UsesTransportStoreSetting(t *testing.T) {

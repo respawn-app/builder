@@ -9,13 +9,17 @@ import (
 	"time"
 
 	"builder/server/auth"
+	"builder/server/authflow"
 	"builder/server/session"
 	"builder/shared/config"
 )
 
 type stubAuthInteractor struct {
-	callCount int
-	interact  func(context.Context, authInteraction) error
+	callCount      int
+	interactive    bool
+	interactiveSet bool
+	needs          func(authInteraction) bool
+	interact       func(context.Context, authInteraction) (authflow.InteractionOutcome, error)
 }
 
 func (s *stubAuthInteractor) WrapStore(base auth.Store) auth.Store {
@@ -23,13 +27,16 @@ func (s *stubAuthInteractor) WrapStore(base auth.Store) auth.Store {
 }
 
 func (s *stubAuthInteractor) NeedsInteraction(req authInteraction) bool {
+	if s.needs != nil {
+		return s.needs(req)
+	}
 	return !req.Gate.Ready
 }
 
-func (s *stubAuthInteractor) Interact(ctx context.Context, req authInteraction) error {
+func (s *stubAuthInteractor) Interact(ctx context.Context, req authInteraction) (authflow.InteractionOutcome, error) {
 	s.callCount++
 	if s.interact == nil {
-		return nil
+		return authflow.InteractionOutcome{}, nil
 	}
 	return s.interact(ctx, req)
 }
@@ -39,13 +46,16 @@ func (s *stubAuthInteractor) LookupEnv(string) string {
 }
 
 func (s *stubAuthInteractor) Interactive() bool {
-	return true
+	if !s.interactiveSet {
+		return true
+	}
+	return s.interactive
 }
 
 func TestEnsureAuthReadyHeadlessReturnsStartupErrorWithoutCredentials(t *testing.T) {
 	mgr := auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now)
 
-	err := ensureAuthReady(context.Background(), mgr, auth.OpenAIOAuthOptions{}, "dark", config.TUIAlternateScreenAuto, &headlessAuthInteractor{
+	err := ensureAuthReady(context.Background(), mgr, auth.OpenAIOAuthOptions{}, config.Settings{Model: "gpt-5", Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto}, &headlessAuthInteractor{
 		lookupEnv: func(string) string { return "" },
 	})
 	if !errors.Is(err, auth.ErrAuthNotConfigured) {
@@ -95,7 +105,7 @@ func TestResolveSessionActionLogoutUsesBootstrapAuthInteractor(t *testing.T) {
 		},
 	}), nil, time.Now)
 	interactor := &stubAuthInteractor{}
-	interactor.interact = func(ctx context.Context, req authInteraction) error {
+	interactor.interact = func(ctx context.Context, req authInteraction) (authflow.InteractionOutcome, error) {
 		if req.Manager != mgr {
 			t.Fatal("expected resolveSessionAction logout to reuse bootstrap auth manager")
 		}
@@ -109,7 +119,7 @@ func TestResolveSessionActionLogoutUsesBootstrapAuthInteractor(t *testing.T) {
 			Type:   auth.MethodAPIKey,
 			APIKey: &auth.APIKeyMethod{Key: "sk-after"},
 		}, true)
-		return err
+		return authflow.InteractionOutcome{}, err
 	}
 
 	root := t.TempDir()
@@ -120,7 +130,7 @@ func TestResolveSessionActionLogoutUsesBootstrapAuthInteractor(t *testing.T) {
 
 	resolved, err := resolveSessionAction(
 		ctx,
-		&testEmbeddedServer{cfg: config.App{PersistenceRoot: root}, authManager: mgr},
+		&testEmbeddedServer{cfg: config.App{PersistenceRoot: root, Settings: config.Settings{Model: "gpt-5"}}, authManager: mgr},
 		interactor,
 		store.Meta().SessionID,
 		UITransition{Action: UIActionLogout},
@@ -160,12 +170,12 @@ func TestResolveSessionActionLogoutAllowsNilStore(t *testing.T) {
 		},
 	}), nil, time.Now)
 	interactor := &stubAuthInteractor{}
-	interactor.interact = func(ctx context.Context, req authInteraction) error {
+	interactor.interact = func(ctx context.Context, req authInteraction) (authflow.InteractionOutcome, error) {
 		_, err := req.Manager.SwitchMethod(ctx, auth.Method{
 			Type:   auth.MethodAPIKey,
 			APIKey: &auth.APIKeyMethod{Key: "sk-after"},
 		}, true)
-		return err
+		return authflow.InteractionOutcome{}, err
 	}
 
 	resolved, err := resolveSessionAction(
@@ -186,5 +196,130 @@ func TestResolveSessionActionLogoutAllowsNilStore(t *testing.T) {
 	}
 	if resolved.NextSessionID != "" {
 		t.Fatalf("expected no next session id without a current store, got %q", resolved.NextSessionID)
+	}
+}
+
+func TestBootstrapAppSkipAuthDoesNotPersistAuthState(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "")
+
+	interactor := &stubAuthInteractor{
+		interactive:    false,
+		interactiveSet: true,
+		interact: func(context.Context, authInteraction) (authflow.InteractionOutcome, error) {
+			return authflow.InteractionOutcome{ProceedWithoutAuth: true}, nil
+		},
+	}
+	boot, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace, Model: "gpt-5"}, interactor)
+	if err != nil {
+		t.Fatalf("bootstrap app: %v", err)
+	}
+	defer func() { _ = boot.Close() }()
+	if interactor.callCount != 1 {
+		t.Fatalf("expected skip-auth interactor to be called once, got %d", interactor.callCount)
+	}
+
+	authPath := config.GlobalAuthConfigPath(boot.Config())
+	if _, err := os.Stat(authPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected no persisted auth state at %q, got err=%v", authPath, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".builder", "config.toml")); err != nil {
+		t.Fatalf("expected onboarding config bootstrap artifacts to exist: %v", err)
+	}
+}
+
+func TestInteractiveAuthSkipClearsStoredAuthState(t *testing.T) {
+	mgr := auth.NewManager(auth.NewMemoryStore(auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "sk-before"},
+		},
+		EnvAPIKeyPreference: auth.EnvAPIKeyPreferencePreferSaved,
+	}), nil, time.Now)
+	storedState, err := mgr.StoredState(context.Background())
+	if err != nil {
+		t.Fatalf("load stored state: %v", err)
+	}
+
+	interactor := &interactiveAuthInteractor{
+		pickMethod: func(authInteraction) (authMethodPickerResult, error) {
+			return authMethodPickerResult{Choice: authMethodChoiceSkip}, nil
+		},
+	}
+	outcome, err := interactor.Interact(context.Background(), authInteraction{
+		Manager:     mgr,
+		StoredState: storedState,
+	})
+	if err != nil {
+		t.Fatalf("interactive skip: %v", err)
+	}
+	if !outcome.ProceedWithoutAuth {
+		t.Fatal("expected skip to proceed without auth")
+	}
+
+	state, err := mgr.StoredState(context.Background())
+	if err != nil {
+		t.Fatalf("load cleared state: %v", err)
+	}
+	if state.Method.Type != auth.MethodNone {
+		t.Fatalf("expected stored auth method to be cleared, got %+v", state.Method)
+	}
+	if state.EnvAPIKeyPreference != auth.EnvAPIKeyPreferenceUnspecified {
+		t.Fatalf("expected env api key preference to be cleared, got %q", state.EnvAPIKeyPreference)
+	}
+}
+
+func TestResolveSessionActionLoginSkipClearsStoredAuthOnOptionalAuthSetup(t *testing.T) {
+	ctx := context.Background()
+	mgr := auth.NewManager(auth.NewMemoryStore(auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "sk-before"},
+		},
+		EnvAPIKeyPreference: auth.EnvAPIKeyPreferencePreferSaved,
+	}), nil, time.Now)
+
+	interactor := &interactiveAuthInteractor{
+		pickMethod: func(req authInteraction) (authMethodPickerResult, error) {
+			if req.AuthRequired {
+				t.Fatal("expected explicit openai base url setup to make auth optional")
+			}
+			if !req.PromptOptional {
+				t.Fatal("expected explicit /login flow to prompt even when auth is optional")
+			}
+			if req.StartupErr != nil {
+				t.Fatalf("expected optional auth login flow to avoid startup error, got %v", req.StartupErr)
+			}
+			return authMethodPickerResult{Choice: authMethodChoiceSkip}, nil
+		},
+	}
+
+	resolved, err := resolveSessionAction(
+		ctx,
+		&testEmbeddedServer{cfg: config.App{Settings: config.Settings{Model: "gpt-5", OpenAIBaseURL: "http://127.0.0.1:8080/v1"}}, authManager: mgr},
+		interactor,
+		"",
+		UITransition{Action: UIActionLogout},
+	)
+	if err != nil {
+		t.Fatalf("resolve session action: %v", err)
+	}
+	if !resolved.ShouldContinue {
+		t.Fatal("expected login skip flow to continue")
+	}
+
+	state, err := mgr.StoredState(ctx)
+	if err != nil {
+		t.Fatalf("load stored state: %v", err)
+	}
+	if state.Method.Type != auth.MethodNone {
+		t.Fatalf("expected stored auth method to be cleared, got %+v", state.Method)
+	}
+	if state.EnvAPIKeyPreference != auth.EnvAPIKeyPreferenceUnspecified {
+		t.Fatalf("expected env api key preference to be cleared, got %q", state.EnvAPIKeyPreference)
 	}
 }

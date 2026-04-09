@@ -204,7 +204,7 @@ func (s *remoteAppServer) Reauthenticate(ctx context.Context, interactor authInt
 	if err != nil {
 		return err
 	}
-	return ensureAuthReady(ctx, authSupport.AuthManager, authSupport.OAuthOptions, s.cfg.Settings.Theme, s.cfg.Settings.TUIAlternateScreen, interactor)
+	return ensureAuthReady(ctx, authSupport.AuthManager, authSupport.OAuthOptions, s.cfg.Settings, interactor)
 }
 
 func buildRemoteAuthSupport(cfg config.App, lookupEnv func(string) string, wrapStore func(auth.Store) auth.Store) (serverbootstrap.AuthSupport, error) {

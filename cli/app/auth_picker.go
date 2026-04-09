@@ -335,6 +335,7 @@ func runStartupPicker(model *startupPickerModel, alternateScreen config.TUIAlter
 type authMethodChoice string
 
 const (
+	authMethodChoiceSkip         authMethodChoice = "skip"
 	authMethodChoiceEnvAPIKey    authMethodChoice = "env_api_key"
 	authMethodChoiceBrowserAuto  authMethodChoice = "oauth_browser"
 	authMethodChoiceBrowserPaste authMethodChoice = "oauth_browser_paste"
@@ -347,7 +348,7 @@ type authMethodPickerResult struct {
 }
 
 func authMethodOptions(includeEnvAPIKey bool) []startupPickerOption {
-	items := make([]startupPickerOption, 0, 4)
+	items := make([]startupPickerOption, 0, 5)
 	if includeEnvAPIKey {
 		items = append(items, startupPickerOption{
 			ID:    string(authMethodChoiceEnvAPIKey),
@@ -366,6 +367,10 @@ func authMethodOptions(includeEnvAPIKey bool) []startupPickerOption {
 		startupPickerOption{
 			ID:    string(authMethodChoiceDevice),
 			Title: "Use a device code in any browser",
+		},
+		startupPickerOption{
+			ID:    string(authMethodChoiceSkip),
+			Title: "Continue without Builder auth",
 		},
 	)
 	return items
@@ -389,9 +394,9 @@ func authMethodPickerNoticeForRequest(req authInteraction) startupPickerNotice {
 		return startupPickerNotice{Text: "Saved sign-in needs attention: " + req.Gate.Reason, Kind: startupPickerNoticeError}
 	}
 	if req.HasEnvAPIKey {
-		return startupPickerNotice{Text: "Choose how Builder should sign in. OPENAI_API_KEY is also available as a remembered auth source.", Kind: startupPickerNoticeNeutral}
+		return startupPickerNotice{Text: "Choose how Builder should sign in. OPENAI_API_KEY is also available as a remembered auth source, or you can continue without Builder auth.", Kind: startupPickerNoticeNeutral}
 	}
-	return startupPickerNotice{Text: "Choose how Builder should complete OpenAI sign-in.", Kind: startupPickerNoticeNeutral}
+	return startupPickerNotice{Text: "Choose how Builder should complete OpenAI sign-in, or continue without Builder auth.", Kind: startupPickerNoticeNeutral}
 }
 
 func authMethodDisplayTitle(choice authMethodChoice) string {

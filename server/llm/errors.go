@@ -3,6 +3,9 @@ package llm
 import (
 	"errors"
 	"fmt"
+	"strings"
+
+	"builder/server/auth"
 )
 
 type APIStatusError struct {
@@ -71,6 +74,29 @@ type AuthError struct {
 	Err error
 }
 
+type ProviderSelectionError struct {
+	Model string
+	Err   error
+}
+
+func (e *ProviderSelectionError) Error() string {
+	if e == nil {
+		return "provider selection error"
+	}
+	model := strings.TrimSpace(e.Model)
+	if model == "" {
+		return "could not determine which provider/auth path to use; set provider_override or openai_base_url"
+	}
+	return fmt.Sprintf("could not determine which provider/auth path to use for model %q; set provider_override or openai_base_url", model)
+}
+
+func (e *ProviderSelectionError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
 func (e *AuthError) Error() string {
 	if e == nil || e.Err == nil {
 		return "authentication error"
@@ -117,6 +143,10 @@ func IsNonRetriableModelError(err error) bool {
 	if err == nil {
 		return false
 	}
+	var providerSelectionErr *ProviderSelectionError
+	if errors.As(err, &providerSelectionErr) {
+		return true
+	}
 	if IsAuthenticationError(err) {
 		return true
 	}
@@ -149,4 +179,54 @@ func IsContextLengthOverflowError(err error) bool {
 		return false
 	}
 	return providerErr.Code == UnifiedErrorCodeContextLengthOverflow
+}
+
+func UserFacingError(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	var providerSelectionErr *ProviderSelectionError
+	if errors.As(err, &providerSelectionErr) {
+		return providerSelectionErr.Error()
+	}
+
+	var authErr *AuthError
+	if errors.As(err, &authErr) && errors.Is(authErr.Err, auth.ErrAuthNotConfigured) {
+		return unauthenticatedWarning()
+	}
+	if errors.Is(err, auth.ErrAuthNotConfigured) {
+		return unauthenticatedWarning()
+	}
+
+	var providerErr *ProviderAPIError
+	if errors.As(err, &providerErr) {
+		if providerErr.Code == UnifiedErrorCodeAuthentication || providerErr.StatusCode == 401 || providerErr.StatusCode == 403 {
+			return authenticationFailedWarning(providerErr.ProviderID, providerErr.StatusCode)
+		}
+	}
+
+	var statusErr *APIStatusError
+	if errors.As(err, &statusErr) {
+		if statusErr.StatusCode == 401 || statusErr.StatusCode == 403 {
+			return authenticationFailedWarning("OpenAI-compatible API", statusErr.StatusCode)
+		}
+	}
+
+	return ""
+}
+
+func unauthenticatedWarning() string {
+	return "Authentication is not configured. Run /login or set OPENAI_API_KEY. If you're using a custom or local OpenAI-compatible server that needs no auth, set openai_base_url and continue without Builder auth."
+}
+
+func authenticationFailedWarning(provider string, statusCode int) string {
+	label := strings.TrimSpace(provider)
+	if label == "" {
+		label = "API"
+	}
+	if statusCode > 0 {
+		return fmt.Sprintf("Authentication failed with %s (HTTP %d). Run /login or check OPENAI_API_KEY. If you're using a custom or local OpenAI-compatible server that needs no auth, set openai_base_url and continue without Builder auth.", label, statusCode)
+	}
+	return fmt.Sprintf("Authentication failed with %s. Run /login or check OPENAI_API_KEY. If you're using a custom or local OpenAI-compatible server that needs no auth, set openai_base_url and continue without Builder auth.", label)
 }

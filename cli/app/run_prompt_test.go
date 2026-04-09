@@ -43,8 +43,8 @@ func (memoryAuthHandler) NeedsInteraction(req authflow.InteractionRequest) bool 
 	return !req.Gate.Ready
 }
 
-func (memoryAuthHandler) Interact(context.Context, authflow.InteractionRequest) error {
-	return auth.ErrAuthNotConfigured
+func (memoryAuthHandler) Interact(context.Context, authflow.InteractionRequest) (authflow.InteractionOutcome, error) {
+	return authflow.InteractionOutcome{}, auth.ErrAuthNotConfigured
 }
 
 func (memoryAuthHandler) LookupEnv(string) string {

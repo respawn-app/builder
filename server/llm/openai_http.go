@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"builder/server/auth"
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
@@ -40,6 +42,7 @@ type openAIAuthMode struct {
 
 type HTTPTransport struct {
 	BaseURL             string
+	BaseURLExplicit     bool
 	Client              *http.Client
 	Auth                AuthHeaderProvider
 	Provider            Provider
@@ -318,8 +321,17 @@ func (t *HTTPTransport) ProviderCapabilities(ctx context.Context) (ProviderCapab
 }
 
 func (t *HTTPTransport) resolveAuth(ctx context.Context) (string, openAIAuthMode, error) {
+	if t.Auth == nil {
+		if t.BaseURLExplicit {
+			return "", openAIAuthMode{}, nil
+		}
+		return "", openAIAuthMode{}, &AuthError{Err: auth.ErrAuthNotConfigured}
+	}
 	authHeader, err := t.Auth.AuthorizationHeader(ctx)
 	if err != nil {
+		if t.BaseURLExplicit && errors.Is(err, auth.ErrAuthNotConfigured) {
+			return "", openAIAuthMode{}, nil
+		}
 		return "", openAIAuthMode{}, &AuthError{Err: err}
 	}
 
