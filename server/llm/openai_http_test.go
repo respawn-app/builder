@@ -1008,7 +1008,7 @@ func TestBuildPayload_SkipsFastModeForRemoteOpenAICompatibleProvider(t *testing.
 	if err != nil {
 		t.Fatalf("resolve provider capabilities: %v", err)
 	}
-	if providerCaps.ProviderID != "openai-compatible" || providerCaps.IsOpenAIFirstParty || providerCaps.SupportsResponsesCompact || providerCaps.SupportsNativeWebSearch {
+	if providerCaps.ProviderID != "openai-compatible" || providerCaps.IsOpenAIFirstParty || providerCaps.SupportsResponsesCompact || providerCaps.SupportsNativeWebSearch || providerCaps.SupportsRequestInputTokenCount {
 		t.Fatalf("expected conservative remote openai-compatible capabilities, got %+v", providerCaps)
 	}
 }

@@ -272,6 +272,74 @@ func TestInteractiveAuthSkipClearsStoredAuthState(t *testing.T) {
 	}
 }
 
+func TestInteractiveAuthSkipDisablesEnvAPIKeyFallback(t *testing.T) {
+	ctx := context.Background()
+	store := authflow.WrapStoreWithEnvAPIKeyOverride(auth.NewMemoryStore(auth.EmptyState()), func(key string) string {
+		if key == "OPENAI_API_KEY" {
+			return "sk-env"
+		}
+		return ""
+	})
+	mgr := auth.NewManager(store, nil, time.Now)
+	storedState, err := mgr.StoredState(ctx)
+	if err != nil {
+		t.Fatalf("load stored state: %v", err)
+	}
+
+	interactor := &interactiveAuthInteractor{
+		pickMethod: func(authInteraction) (authMethodPickerResult, error) {
+			return authMethodPickerResult{Choice: authMethodChoiceSkip}, nil
+		},
+	}
+	outcome, err := interactor.Interact(ctx, authInteraction{
+		Manager:      mgr,
+		StoredState:  storedState,
+		HasEnvAPIKey: true,
+	})
+	if err != nil {
+		t.Fatalf("interactive skip: %v", err)
+	}
+	if !outcome.ProceedWithoutAuth {
+		t.Fatal("expected skip to proceed without auth")
+	}
+
+	state, err := mgr.Load(ctx)
+	if err != nil {
+		t.Fatalf("load auth state: %v", err)
+	}
+	if state.Method.Type != auth.MethodNone {
+		t.Fatalf("expected env auth override to stay disabled after skip, got %+v", state.Method)
+	}
+	if state.EnvAPIKeyPreference != auth.EnvAPIKeyPreferencePreferSaved {
+		t.Fatalf("expected skip to persist saved-auth preference, got %q", state.EnvAPIKeyPreference)
+	}
+	stored, err := mgr.StoredState(ctx)
+	if err != nil {
+		t.Fatalf("load stored auth state: %v", err)
+	}
+	if stored.EnvAPIKeyPreference != auth.EnvAPIKeyPreferencePreferSaved {
+		t.Fatalf("expected stored preference to disable env fallback, got %q", stored.EnvAPIKeyPreference)
+	}
+}
+
+func TestInteractiveAuthSkipRejectsRequiredAuth(t *testing.T) {
+	interactor := &interactiveAuthInteractor{
+		pickMethod: func(authInteraction) (authMethodPickerResult, error) {
+			return authMethodPickerResult{Choice: authMethodChoiceSkip}, nil
+		},
+	}
+	_, err := interactor.Interact(context.Background(), authInteraction{
+		Manager:      auth.NewManager(auth.NewMemoryStore(auth.EmptyState()), nil, time.Now),
+		AuthRequired: true,
+	})
+	if err == nil {
+		t.Fatal("expected required-auth skip to be rejected")
+	}
+	if err.Error() != "builder auth is required for this configuration" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestResolveSessionActionLoginSkipClearsStoredAuthOnOptionalAuthSetup(t *testing.T) {
 	ctx := context.Background()
 	mgr := auth.NewManager(auth.NewMemoryStore(auth.State{

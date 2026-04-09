@@ -70,7 +70,7 @@ func TestAuthMethodPickerViewUsesFriendlyTitlesAndDescriptions(t *testing.T) {
 	m := newAuthMethodPickerModel("dark", startupPickerNotice{
 		Text: "Choose how Builder should complete OpenAI sign-in.",
 		Kind: startupPickerNoticeNeutral,
-	}, false)
+	}, false, true)
 	out := ansi.Strip(m.View())
 	if !strings.Contains(out, "Sign in to Builder") {
 		t.Fatalf("expected auth picker title, got %q", out)
@@ -99,15 +99,23 @@ func TestAuthMethodPickerViewUsesFriendlyTitlesAndDescriptions(t *testing.T) {
 }
 
 func TestAuthMethodPickerIncludesEnvAPIKeyOptionWhenAvailable(t *testing.T) {
-	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, true)
+	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, true, true)
 	out := ansi.Strip(m.View())
 	if !strings.Contains(out, "Use existing OPENAI_API_KEY from now on") {
 		t.Fatalf("expected env api key option, got %q", out)
 	}
 }
 
+func TestAuthMethodPickerOmitsSkipWhenAuthIsRequired(t *testing.T) {
+	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false, false)
+	out := ansi.Strip(m.View())
+	if strings.Contains(out, "Continue without Builder auth") {
+		t.Fatalf("did not expect skip option when auth is required, got %q", out)
+	}
+}
+
 func TestAuthMethodPickerHeaderUsesAppForeground(t *testing.T) {
-	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false)
+	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false, true)
 	header := m.renderHeader()
 	expectedPrefix := strings.TrimSuffix(tui.ApplyThemeDefaultForeground("x", "dark"), "x\x1b[0m")
 	if !strings.HasPrefix(header, expectedPrefix) {
@@ -119,7 +127,7 @@ func TestAuthMethodPickerHeaderUsesAppForeground(t *testing.T) {
 }
 
 func TestAuthMethodPickerSelectsSecondOption(t *testing.T) {
-	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false)
+	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false, true)
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = next.(*startupPickerModel)
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -142,7 +150,7 @@ func TestStartupPickerEnterDoesNothingWhenThereAreNoItems(t *testing.T) {
 }
 
 func TestAuthMethodPickerCancel(t *testing.T) {
-	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false)
+	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false, true)
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 	m = next.(*startupPickerModel)
 	if !m.result.Canceled {
@@ -151,7 +159,7 @@ func TestAuthMethodPickerCancel(t *testing.T) {
 }
 
 func TestAuthMethodPickerScrollsToKeepSelectedRowVisible(t *testing.T) {
-	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false)
+	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false, true)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 6})
 	m = next.(*startupPickerModel)
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -168,7 +176,7 @@ func TestAuthMethodPickerScrollsToKeepSelectedRowVisible(t *testing.T) {
 }
 
 func TestAuthMethodPickerDropsSelectedNoteWhenHeightIsTight(t *testing.T) {
-	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false)
+	m := newAuthMethodPickerModel("dark", startupPickerNotice{}, false, true)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 5})
 	m = next.(*startupPickerModel)
 	out := ansi.Strip(m.View())
@@ -184,7 +192,7 @@ func TestAuthMethodPickerSubtitleSeparatedFromHeaderByBlankLine(t *testing.T) {
 	m := newAuthMethodPickerModel("dark", startupPickerNotice{
 		Text: "Choose how Builder should complete OpenAI sign-in.",
 		Kind: startupPickerNoticeNeutral,
-	}, false)
+	}, false, true)
 	lines := strings.Split(ansi.Strip(m.View()), "\n")
 	titleLine := -1
 	for i, line := range lines {

@@ -164,9 +164,9 @@ func (e *Engine) appendPersistedLocalEntryRecord(stepID string, entry storedLoca
 	if entry.Role == "" || entry.Text == "" {
 		return nil
 	}
-	e.chat.appendLocalEntryWithOngoingText(entry.Role, entry.Text, entry.OngoingText)
 	_, err := e.store.AppendEvent(stepID, "local_entry", entry)
 	if err == nil {
+		e.chat.appendLocalEntryWithOngoingTextAndVisibility(entry.Role, entry.Text, entry.OngoingText, entry.Visibility)
 		e.emit(Event{Kind: EventLocalEntryAdded, StepID: stepID, LocalEntry: localEntryChatEntry(entry)})
 		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
 	}
@@ -204,6 +204,7 @@ func (e *Engine) clearLocalDiagnostic(key string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	delete(e.localDiagnosticKeys, key)
+	delete(e.persistedDiagnostics, key)
 }
 
 func (e *Engine) restoreLocalDiagnostic(key string) {
@@ -214,6 +215,18 @@ func (e *Engine) restoreLocalDiagnostic(key string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.localDiagnosticKeys[key] = struct{}{}
+	e.persistedDiagnostics[key] = struct{}{}
+}
+
+func (e *Engine) hasPersistedDiagnostic(key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_, exists := e.persistedDiagnostics[key]
+	return exists
 }
 
 func (e *Engine) resetLocalDiagnostics() {
@@ -223,6 +236,7 @@ func (e *Engine) resetLocalDiagnostics() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.localDiagnosticKeys = make(map[string]struct{})
+	e.persistedDiagnostics = make(map[string]struct{})
 }
 
 func (e *Engine) appendMessage(stepID string, msg llm.Message) error {

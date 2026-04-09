@@ -333,6 +333,9 @@ func TestCurrentInputTokensPreciselyPersistsTranscriptErrorOnceOnCountFailure(t 
 	if precise, ok := reopened.currentInputTokensPrecisely(context.Background()); ok || precise != 0 {
 		t.Fatalf("reopened currentInputTokensPrecisely = (%d, %v), want no precise count", precise, ok)
 	}
+	if client.countCalls != 2 {
+		t.Fatalf("expected reopened engine to reuse persisted failure marker without retrying backend, got %d count attempts", client.countCalls)
+	}
 
 	events, err := reopenedStore.ReadEvents()
 	if err != nil {
