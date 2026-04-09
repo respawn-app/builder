@@ -35,15 +35,20 @@ func defaultSettings() Settings {
 }
 
 func defaultSettingsTOML() string {
-	return settingsTOMLWithOptions(defaultSettings(), false)
+	return settingsTOMLWithOptions(defaultSettings(), true)
 }
 
 func settingsTOML(settings Settings) string {
 	return settingsTOMLWithOptions(settings, true)
 }
 
-func settingsTOMLForOnboarding(settings Settings) string {
+func settingsTOMLForOnboarding(settings Settings, preservedDefaults map[string]bool) string {
 	preserved := map[string]bool{"theme": true}
+	for key, preserve := range preservedDefaults {
+		if preserve {
+			preserved[key] = true
+		}
+	}
 	if strings.TrimSpace(settings.ProviderOverride) != "" {
 		// provider_override must round-trip with an explicit model line.
 		preserved["model"] = true
@@ -56,11 +61,25 @@ func onboardingDefaultSettingsTOML(selectedTheme string) string {
 	if normalized := theme.Normalize(selectedTheme); normalized != "" {
 		settings.Theme = normalized
 	}
-	return settingsTOMLWithOptions(settings, false)
+	return settingsTOMLWithOptions(settings, true)
 }
 
 func settingsTOMLWithOptions(settings Settings, includeToolSection bool) string {
 	return settingsTOMLWithPreservedDefaults(settings, includeToolSection, nil)
+}
+
+func appendPreservedReviewerLines(lines []defaultConfigLine, settings Settings, preservedDefaults map[string]bool) []defaultConfigLine {
+	if len(preservedDefaults) == 0 {
+		return lines
+	}
+	withPreserved := append([]defaultConfigLine{}, lines...)
+	if preservedDefaults["reviewer.model"] {
+		withPreserved = append(withPreserved, defaultConfigLine{Path: []string{"reviewer", "model"}, Value: settings.Reviewer.Model})
+	}
+	if preservedDefaults["reviewer.thinking_level"] {
+		withPreserved = append(withPreserved, defaultConfigLine{Path: []string{"reviewer", "thinking_level"}, Value: settings.Reviewer.ThinkingLevel})
+	}
+	return withPreserved
 }
 
 func settingsTOMLWithPreservedDefaults(settings Settings, includeToolSection bool, preservedDefaults map[string]bool) string {
@@ -69,166 +88,129 @@ func settingsTOMLWithPreservedDefaults(settings Settings, includeToolSection boo
 	inheritReviewerDefaults(&state.Settings)
 	lines := configRegistry.defaultLines(state)
 	defaultLines := configRegistry.defaultLines(configRegistry.defaultState())
-	rootLines := filterDefaultLines(lines, "")
-	timeoutLines := filterDefaultLines(lines, "timeouts")
-	reviewerLines := filterDefaultLines(lines, "reviewer")
-	if includeToolSection {
-		rootLines = omitDefaultAssignments(rootLines, filterDefaultLines(defaultLines, ""), preservedDefaults)
-		timeoutLines = omitDefaultAssignments(timeoutLines, filterDefaultLines(defaultLines, "timeouts"))
-		reviewerLines = omitDefaultAssignments(reviewerLines, filterDefaultLines(defaultLines, "reviewer"))
-	}
+	rootLines := annotateRenderedLines(filterDefaultLines(lines, ""), filterDefaultLines(defaultLines, ""), preservedDefaults)
+	timeoutLines := annotateRenderedLines(filterDefaultLines(lines, "timeouts"), filterDefaultLines(defaultLines, "timeouts"), nil)
+	reviewerLines := annotateRenderedLines(filterDefaultLines(lines, "reviewer"), filterDefaultLines(defaultLines, "reviewer"), nil)
 
 	var out strings.Builder
-	out.WriteString("# builder settings\n")
-	out.WriteString("# edit and restart builder to apply changes\n\n")
-	out.WriteString("# Unknown keys are rejected to keep config changes explicit and safe.\n\n")
-	out.WriteString("# compaction_mode options:\n")
-	out.WriteString("# - native: provider-native compaction when available\n")
-	out.WriteString("# - local: force local summary compaction\n")
-	out.WriteString("# - none: disable both automatic and manual compaction\n\n")
-	out.WriteString("# bg_shells_output applies directly to exit code 0 background shells.\n")
-	out.WriteString("# Non-zero exits use verbose only when bg_shells_output=verbose; otherwise\n")
-	out.WriteString("# they fall back to default truncation.\n\n")
-	out.WriteString("# cache_warning_mode options:\n")
-	out.WriteString("# - off: suppress prompt cache warnings\n")
-	out.WriteString("# - default: catch unwanted invalidations\n")
-	out.WriteString("# - verbose: include default warnings plus broader invalidation\n")
-	out.WriteString("#   diagnostics when the provider does not expose the exact cause\n\n")
-	out.WriteString("# exec_command yield_time_ms values below minimum_exec_to_bg_seconds are\n")
-	out.WriteString("# clamped up silently before command execution continues.\n\n")
-	writeDefaultLines(&out, rootLines)
-	out.WriteString("\n")
-	out.WriteString("# Optional explicit capability overrides for custom/alias models. Uncomment only\n")
-	out.WriteString("# when the reviewed registry does not cover your configured model.\n")
-	modelCapabilityLines := filterDefaultLines(lines, "model_capabilities")
-	writeOptionalSection(&out, "model_capabilities", modelCapabilityLines, hasNonDefaultConfigSection(modelCapabilityLines, filterDefaultLines(defaultLines, "model_capabilities")))
-	out.WriteString("\n")
-	out.WriteString("# Optional explicit provider selection for custom/alias model names when\n")
-	out.WriteString("# provider inference from model family is insufficient. Set together with\n")
-	out.WriteString("# an explicit `model` override. Example: provider_override = \"openai\"\n")
-	out.WriteString("# Optional explicit provider capability overrides. These are only needed for\n")
-	out.WriteString("# custom providers or stale built-in contracts. Keep them conservative to\n")
-	out.WriteString("# avoid unsupported provider-native features.\n")
-	providerCapabilityLines := filterDefaultLines(lines, "provider_capabilities")
-	writeOptionalSection(&out, "provider_capabilities", providerCapabilityLines, hasNonDefaultConfigSection(providerCapabilityLines, filterDefaultLines(defaultLines, "provider_capabilities")))
-	if includeToolSection {
-		out.WriteString("\n# Optional tool toggles. Omitted tools keep Builder defaults.\n")
-		out.WriteString("# Human-facing UX uses `compact`; agent-facing experimental tooling uses `handoff`.\n")
-		writeExplicitToolOverrides(&out, state.Settings.EnabledTools)
+	out.WriteString("# Edit and restart to apply changes.\n")
+	out.WriteString("# Config reference: https://opensource.respawn.pro/builder/config/\n\n")
+	writeRootConfigLines(&out, rootLines)
+	modelCapabilityLines := activeOptionalSectionLines(filterDefaultLines(lines, "model_capabilities"), filterDefaultLines(defaultLines, "model_capabilities"))
+	if len(modelCapabilityLines) > 0 {
+		out.WriteString("\n[model_capabilities]\n")
+		writeDefaultLines(&out, modelCapabilityLines)
 	}
-	out.WriteString("\n# Optional per-skill toggles for new sessions only. Disabled skills still\n")
-	out.WriteString("# appear in /status as disabled. Keys are matched against discovered skill\n")
-	out.WriteString("# names case-insensitively.\n")
-	writeSkillTogglesSection(&out, state.Settings.SkillToggles)
+	providerCapabilityLines := activeOptionalSectionLines(filterDefaultLines(lines, "provider_capabilities"), filterDefaultLines(defaultLines, "provider_capabilities"))
+	if len(providerCapabilityLines) > 0 {
+		out.WriteString("\n[provider_capabilities]\n")
+		writeDefaultLines(&out, providerCapabilityLines)
+	}
+	if includeToolSection {
+		out.WriteString("\n[tools]\n")
+		writeToolLines(&out, state.Settings.EnabledTools)
+	}
 	if len(timeoutLines) > 0 {
 		out.WriteString("\n[timeouts]\n")
 		writeDefaultLines(&out, timeoutLines)
 	}
-	if len(reviewerLines) > 0 {
+	if len(reviewerLines) > 0 || shouldRenderReviewerModel(settings, preservedDefaults) || shouldRenderReviewerThinking(settings, preservedDefaults) {
 		out.WriteString("\n[reviewer]\n")
-		out.WriteString("# model defaults to `model` when unset\n")
-		out.WriteString("# thinking_level defaults to `thinking_level` when unset\n")
+		writeReviewerInheritanceLines(&out, settings, state.Settings, preservedDefaults)
 		for _, line := range reviewerLines {
 			writeDefaultLines(&out, []defaultConfigLine{line})
 		}
 	}
+	writeSkillTogglesSection(&out, state.Settings.SkillToggles)
 	return out.String()
 }
 
-func omitDefaultAssignments(lines []defaultConfigLine, defaults []defaultConfigLine, preserved ...map[string]bool) []defaultConfigLine {
+func annotateRenderedLines(lines []defaultConfigLine, defaults []defaultConfigLine, preserved map[string]bool) []defaultConfigLine {
 	if len(lines) == 0 {
 		return nil
-	}
-	preservedKeys := map[string]bool{}
-	if len(preserved) > 0 && preserved[0] != nil {
-		preservedKeys = preserved[0]
 	}
 	defaultValues := make(map[string]string, len(defaults))
 	for _, line := range defaults {
 		defaultValues[strings.Join(line.Path, ".")] = renderTOMLValue(line.Value)
 	}
-	filtered := make([]defaultConfigLine, 0, len(lines))
+	annotated := make([]defaultConfigLine, 0, len(lines))
 	for _, line := range lines {
 		key := strings.Join(line.Path, ".")
-		if preservedKeys[key] {
-			filtered = append(filtered, line)
-			continue
+		commented := false
+		if preserved == nil || !preserved[key] {
+			if defaultValue, ok := defaultValues[key]; ok && defaultValue == renderTOMLValue(line.Value) {
+				commented = true
+			}
 		}
-		if defaultValue, ok := defaultValues[key]; ok && defaultValue == renderTOMLValue(line.Value) {
-			continue
+		annotated = append(annotated, defaultConfigLine{Path: line.Path, Value: line.Value, Commented: commented})
+	}
+	return annotated
+}
+
+func activeOptionalSectionLines(lines []defaultConfigLine, defaults []defaultConfigLine) []defaultConfigLine {
+	annotated := annotateRenderedLines(lines, defaults, nil)
+	active := make([]defaultConfigLine, 0, len(annotated))
+	for _, line := range annotated {
+		if !line.Commented {
+			active = append(active, defaultConfigLine{Path: line.Path, Value: line.Value})
 		}
-		filtered = append(filtered, line)
 	}
-	return filtered
+	return active
 }
 
-func hasNonDefaultConfigSection(lines []defaultConfigLine, defaults []defaultConfigLine) bool {
-	return len(omitDefaultAssignments(lines, defaults)) > 0
-}
-
-func writeOptionalSection(builder *strings.Builder, section string, lines []defaultConfigLine, enabled bool) {
-	if enabled {
-		builder.WriteString("[")
-		builder.WriteString(section)
-		builder.WriteString("]\n")
-		writeDefaultLines(builder, uncommentDefaultLines(lines))
-		return
-	}
-	builder.WriteString("# [")
-	builder.WriteString(section)
-	builder.WriteString("]\n")
-	writeDefaultLines(builder, lines)
-}
-
-func uncommentDefaultLines(lines []defaultConfigLine) []defaultConfigLine {
-	out := make([]defaultConfigLine, 0, len(lines))
+func writeRootConfigLines(builder *strings.Builder, lines []defaultConfigLine) {
 	for _, line := range lines {
-		out = append(out, defaultConfigLine{Path: line.Path, Value: line.Value, Commented: false})
+		if len(line.Path) > 0 && line.Path[0] == "model" {
+			builder.WriteString("# model changes are applied only when creating a new session\n")
+		}
+		writeDefaultLines(builder, []defaultConfigLine{line})
 	}
-	return out
 }
 
-func writeExplicitToolOverrides(builder *strings.Builder, enabledTools map[tools.ID]bool) {
-	overrides := explicitToolOverrides(enabledTools)
-	if len(overrides) == 0 {
-		builder.WriteString("# [tools]\n")
-		builder.WriteString("# ask_question = false\n")
-		builder.WriteString("# trigger_handoff = true\n")
-		return
-	}
-	builder.WriteString("[tools]\n")
-	ids := make([]tools.ID, 0, len(overrides))
-	for id := range overrides {
-		ids = append(ids, id)
-	}
+func writeToolLines(builder *strings.Builder, enabledTools map[tools.ID]bool) {
+	defaults := defaultEnabledToolMap()
+	ids := tools.CatalogIDs()
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	for _, id := range ids {
-		builder.WriteString(string(id))
-		builder.WriteString(" = ")
-		builder.WriteString(renderTOMLValue(overrides[id]))
-		builder.WriteByte('\n')
-	}
-}
-
-func explicitToolOverrides(enabledTools map[tools.ID]bool) map[tools.ID]bool {
-	defaults := defaultEnabledToolMap()
-	overrides := map[tools.ID]bool{}
-	for _, id := range tools.CatalogIDs() {
 		configured, ok := enabledTools[id]
 		if !ok {
 			configured = defaults[id]
 		}
-		if configured != defaults[id] {
-			overrides[id] = configured
-		}
+		writeDefaultLines(builder, []defaultConfigLine{{Path: []string{"tools", string(id)}, Value: configured, Commented: configured == defaults[id]}})
 	}
-	return overrides
+}
+
+func shouldRenderReviewerModel(settings Settings, preserved map[string]bool) bool {
+	return (preserved != nil && preserved["reviewer.model"]) || strings.TrimSpace(settings.Reviewer.Model) != ""
+}
+
+func shouldRenderReviewerThinking(settings Settings, preserved map[string]bool) bool {
+	return (preserved != nil && preserved["reviewer.thinking_level"]) || strings.TrimSpace(settings.Reviewer.ThinkingLevel) != ""
+}
+
+func writeReviewerInheritanceLines(builder *strings.Builder, raw Settings, effective Settings, preserved map[string]bool) {
+	modelCommented := !(preserved != nil && preserved["reviewer.model"]) && strings.TrimSpace(raw.Reviewer.Model) == ""
+	writeCommentedAssignment(builder, "model", effective.Reviewer.Model, modelCommented, "# inherited from main model unless overridden")
+	thinkingCommented := !(preserved != nil && preserved["reviewer.thinking_level"]) && strings.TrimSpace(raw.Reviewer.ThinkingLevel) == ""
+	writeCommentedAssignment(builder, "thinking_level", effective.Reviewer.ThinkingLevel, thinkingCommented, "# inherited from main thinking_level unless overridden")
+}
+
+func writeCommentedAssignment(builder *strings.Builder, key string, value any, commented bool, trailingComment string) {
+	if commented {
+		builder.WriteString("# ")
+	}
+	builder.WriteString(key)
+	builder.WriteString(" = ")
+	builder.WriteString(renderTOMLValue(value))
+	if strings.TrimSpace(trailingComment) != "" {
+		builder.WriteByte(' ')
+		builder.WriteString(trailingComment)
+	}
+	builder.WriteByte('\n')
 }
 
 func writeSkillTogglesSection(builder *strings.Builder, skillToggles map[string]bool) {
 	if len(skillToggles) == 0 {
-		builder.WriteString("# [skills]\n")
-		builder.WriteString("# apiresult = false\n")
 		return
 	}
 	keys := make([]string, 0, len(skillToggles))

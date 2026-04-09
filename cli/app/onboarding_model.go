@@ -327,7 +327,9 @@ func (m *onboardingModel) finalizeCmd(writeDefaults bool) tea.Cmd {
 		if err != nil {
 			return onboardingFinalizeDoneMsg{err: err}
 		}
-		path, err := config.WriteSettingsFileForOnboarding(state.settings)
+		path, err := config.WriteSettingsFileForOnboardingWithOptions(state.settings, config.OnboardingWriteOptions{
+			PreservedDefaults: onboardingPreservedDefaults(state),
+		})
 		if err != nil {
 			if rollbackErr := rollback(); rollbackErr != nil {
 				err = errors.Join(err, rollbackErr)
@@ -335,6 +337,20 @@ func (m *onboardingModel) finalizeCmd(writeDefaults bool) tea.Cmd {
 		}
 		return onboardingFinalizeDoneMsg{result: onboardingResult{Completed: err == nil, SettingsPath: path}, err: err}
 	}
+}
+
+func onboardingPreservedDefaults(state onboardingFlowState) map[string]bool {
+	preserved := map[string]bool{}
+	if state.reviewerCustomModel {
+		preserved["reviewer.model"] = true
+	}
+	if state.reviewerCustomThinking {
+		preserved["reviewer.thinking_level"] = true
+	}
+	if len(preserved) == 0 {
+		return nil
+	}
+	return preserved
 }
 
 func (m *onboardingModel) currentStep() onboardingStepDefinition {
