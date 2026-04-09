@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"builder/internal/testopenai"
 	"builder/server/auth"
 	"builder/server/authflow"
 	"builder/server/llm"
@@ -121,18 +121,16 @@ func TestRunPromptClientRunsLoopbackThroughEmbeddedServer(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	responseServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if testopenai.HandleInputTokenCount(w, r, 11) {
+			return
+		}
 		if r.URL.Path != "/responses" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
 		if got := strings.TrimSpace(r.Header.Get("Authorization")); got == "" {
 			t.Fatal("expected authorization header")
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello from embedded\"}]}]}}\n\n")
-		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
-		}
+		testopenai.WriteCompletedResponseStream(w, "hello from embedded", 11, 7)
 	}))
 	defer responseServer.Close()
 
@@ -226,6 +224,9 @@ func TestRunPromptClientPublishesHeadlessSessionActivity(t *testing.T) {
 
 	releaseResponse := make(chan struct{})
 	responseServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if testopenai.HandleInputTokenCount(w, r, 11) {
+			return
+		}
 		if r.URL.Path != "/responses" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
@@ -236,12 +237,7 @@ func TestRunPromptClientPublishesHeadlessSessionActivity(t *testing.T) {
 		case <-ctx.Done():
 			return
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello from headless activity\"}]}]}}\n\n")
-		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
-		}
+		testopenai.WriteCompletedResponseStream(w, "hello from headless activity", 11, 7)
 	}))
 	defer responseServer.Close()
 

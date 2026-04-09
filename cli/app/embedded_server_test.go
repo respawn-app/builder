@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"builder/internal/testopenai"
 	"builder/server/auth"
 	serverembedded "builder/server/embedded"
 	"builder/server/launch"
@@ -953,6 +953,9 @@ func TestEmbeddedAppServerPrepareRuntimeRejectsConcurrentPrimarySubmitWhileRunIn
 	firstRelease := make(chan struct{})
 	var requests atomic.Int32
 	responseServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if testopenai.HandleInputTokenCount(w, r, 11) {
+			return
+		}
 		if r.URL.Path != "/responses" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
 		}
@@ -969,12 +972,7 @@ func TestEmbeddedAppServerPrepareRuntimeRejectsConcurrentPrimarySubmitWhileRunIn
 			t.Fatalf("unexpected responses request index %d", index)
 		}
 		reply := map[int]string{1: "first reply", 2: "second reply"}[index]
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final\",\"content\":[{\"type\":\"output_text\",\"text\":%q}]}]}}\n\n", reply)
-		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
-		}
+		testopenai.WriteCompletedResponseStream(w, reply, 11, 7)
 	}))
 	defer responseServer.Close()
 
