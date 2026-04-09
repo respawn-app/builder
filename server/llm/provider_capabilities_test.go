@@ -128,8 +128,8 @@ func TestProviderCapabilitiesFromLockedBackfillsLegacyRequestInputTokenCountCapa
 	if !ok {
 		t.Fatal("expected locked provider capabilities")
 	}
-	if !caps.SupportsRequestInputTokenCount {
-		t.Fatalf("expected legacy locked session to inherit contract default, got %+v", caps)
+	if caps.SupportsRequestInputTokenCount {
+		t.Fatalf("expected legacy locked session to inherit conservative openai-compatible default, got %+v", caps)
 	}
 }
 

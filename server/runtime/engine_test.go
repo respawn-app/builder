@@ -3552,12 +3552,13 @@ func TestRunStepLoopEmitsReviewerCompletionWhenReviewerInstructionAppendFails(t 
 	}
 
 	snapshot := eng.ChatSnapshot()
-	if len(snapshot.Entries) < 3 {
-		t.Fatalf("expected in-memory transcript entries including reviewer status, got %+v", snapshot.Entries)
+	if len(snapshot.Entries) != 2 {
+		t.Fatalf("expected append failure to leave transcript at persisted assistant entries only, got %+v", snapshot.Entries)
 	}
-	statusEntry := snapshot.Entries[len(snapshot.Entries)-1]
-	if statusEntry.Role != "reviewer_status" || !strings.Contains(statusEntry.Text, "follow-up failed") {
-		t.Fatalf("expected in-memory reviewer status after append failure, got %+v", statusEntry)
+	for _, entry := range snapshot.Entries {
+		if entry.Role == "reviewer_status" {
+			t.Fatalf("did not expect in-memory reviewer status after append failure, got %+v", snapshot.Entries)
+		}
 	}
 }
 
@@ -3594,6 +3595,40 @@ func TestRestoreMessagesKeepsStoredReviewerEntriesVerbatim(t *testing.T) {
 	}
 	if snapshot.Entries[1].Role != "reviewer_status" || snapshot.Entries[1].Text != "Supervisor ran, applied 1 suggestion:\n1. Add final verification notes." {
 		t.Fatalf("expected stored reviewer_status entry, got %+v", snapshot.Entries[1])
+	}
+}
+
+func TestAppendPersistedLocalEntryRecordDoesNotMutateChatOnAppendFailure(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	eventsPath := filepath.Join(store.Dir(), "events.jsonl")
+	info, err := os.Stat(eventsPath)
+	if err != nil {
+		t.Fatalf("stat events log: %v", err)
+	}
+	if err := os.Chmod(eventsPath, 0o400); err != nil {
+		t.Fatalf("chmod events log readonly: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(eventsPath, info.Mode()) })
+
+	err = eng.appendPersistedLocalEntryRecord("step-1", storedLocalEntry{
+		Visibility: transcript.EntryVisibilityAll,
+		Role:       "reviewer_status",
+		Text:       "Supervisor ran, applied 1 suggestion.",
+	})
+	if err == nil {
+		t.Fatal("expected appendPersistedLocalEntryRecord to fail when events log is read-only")
+	}
+	if snapshot := eng.ChatSnapshot(); len(snapshot.Entries) != 0 {
+		t.Fatalf("expected no in-memory local entries after append failure, got %+v", snapshot.Entries)
 	}
 }
 
@@ -9004,7 +9039,6 @@ func TestCompactionSoonReminderRechecksPreciselyAfterTranscriptMutation(t *testi
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, Content: "mutation"}); err != nil {
 		t.Fatalf("append mutation: %v", err)
 	}
-	eng.setLastUsage(llm.Usage{InputTokens: 860, WindowTokens: 2_000})
 	if err := eng.maybeAppendCompactionSoonReminder(context.Background(), "step-2"); err != nil {
 		t.Fatalf("reminder above exact threshold after mutation: %v", err)
 	}

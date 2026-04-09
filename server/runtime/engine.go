@@ -147,9 +147,10 @@ type Engine struct {
 	registry *tools.Registry
 	cfg      Config
 
-	chat                *chatStore
-	locked              *session.LockedContract
-	localDiagnosticKeys map[string]struct{}
+	chat                 *chatStore
+	locked               *session.LockedContract
+	localDiagnosticKeys  map[string]struct{}
+	persistedDiagnostics map[string]struct{}
 
 	pendingInjected []string
 
@@ -251,15 +252,16 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 	}
 
 	eng := &Engine{
-		store:               store,
-		llm:                 client,
-		reviewer:            cfg.Reviewer.Client,
-		registry:            registry,
-		cfg:                 cfg,
-		chat:                newChatStore(),
-		localDiagnosticKeys: make(map[string]struct{}),
-		tokenUsage:          newTokenUsageTracker(),
-		requestCache:        newRequestCacheTracker(),
+		store:                store,
+		llm:                  client,
+		reviewer:             cfg.Reviewer.Client,
+		registry:             registry,
+		cfg:                  cfg,
+		chat:                 newChatStore(),
+		localDiagnosticKeys:  make(map[string]struct{}),
+		persistedDiagnostics: make(map[string]struct{}),
+		tokenUsage:           newTokenUsageTracker(),
+		requestCache:         newRequestCacheTracker(),
 	}
 	eng.ensureLifecycle()
 	eng.ensureOrchestrationCollaborators()

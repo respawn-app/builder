@@ -410,6 +410,9 @@ func (e *Engine) requestInputTokensPreciselyTracked(ctx context.Context, req llm
 			return cached, true
 		}
 	}
+	if e.hasPersistedDiagnostic(preciseTokenCountFailureDiagnostic) {
+		return 0, false
+	}
 	count, err := counter.CountRequestInputTokens(ctx, req)
 	if err != nil {
 		e.reportPreciseTokenCountFailure(err)

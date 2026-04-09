@@ -103,8 +103,8 @@ func (e *Engine) AppendLocalEntry(role, text string) {
 }
 
 func (e *Engine) AppendLocalEntryWithOngoingText(role, text, ongoingText string) {
-	entry := storedLocalEntry{Role: role, Text: text, OngoingText: ongoingText}
-	e.chat.appendLocalEntryWithOngoingText(entry.Role, entry.Text, entry.OngoingText)
+	entry := storedLocalEntry{Visibility: transcript.EntryVisibilityAuto, Role: role, Text: text, OngoingText: ongoingText}
+	e.chat.appendLocalEntryWithOngoingTextAndVisibility(entry.Role, entry.Text, entry.OngoingText, entry.Visibility)
 	e.emit(Event{Kind: EventLocalEntryAdded, LocalEntry: localEntryChatEntry(entry)})
 	e.emit(Event{Kind: EventConversationUpdated, StepID: ""})
 }
