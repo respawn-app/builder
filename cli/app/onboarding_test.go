@@ -801,6 +801,46 @@ func TestOnboardingCustomPathPreservesAutoWhenUsingDetectedDefault(t *testing.T)
 	}
 }
 
+func TestOnboardingCustomPathPersistsExplicitReviewerOverrides(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("load defaults: %v", err)
+	}
+	state := onboardingFlowState{
+		settings:               cfg.Settings,
+		baselineSettings:       cfg.Settings,
+		theme:                  theme.Auto,
+		skillImport:            onboardingImportSelection{Mode: onboardingImportModeNone},
+		commandImport:          onboardingImportSelection{Mode: onboardingImportModeNone},
+		reviewerCustomModel:    true,
+		reviewerCustomThinking: true,
+	}
+	state.settings.Reviewer.Model = "gpt-5.4-mini"
+	state.settings.Reviewer.ThinkingLevel = "high"
+	model := newOnboardingModel(t.TempDir(), state)
+	msg := model.finalizeCmd(false)()
+	done, ok := msg.(onboardingFinalizeDoneMsg)
+	if !ok {
+		t.Fatalf("expected onboarding finalize message, got %T", msg)
+	}
+	if done.err != nil {
+		t.Fatalf("finalize custom path: %v", done.err)
+	}
+	contents, err := os.ReadFile(done.result.SettingsPath)
+	if err != nil {
+		t.Fatalf("read written settings: %v", err)
+	}
+	if !strings.Contains(string(contents), "model = \"gpt-5.4-mini\"") {
+		t.Fatalf("expected reviewer model override to be persisted, got %q", string(contents))
+	}
+	if !strings.Contains(string(contents), "thinking_level = \"high\"") {
+		t.Fatalf("expected reviewer thinking override to be persisted, got %q", string(contents))
+	}
+}
+
 func TestOnboardingCustomPathRollsBackImportsWhenSettingsWriteFails(t *testing.T) {
 	home := t.TempDir()
 	globalRoot := t.TempDir()
