@@ -1,0 +1,290 @@
+package runtime
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"testing"
+
+	"builder/server/llm"
+	"builder/server/session"
+	"builder/server/tools"
+	"builder/shared/cachewarn"
+)
+
+func TestTrimOldestEligibleItemsRemovesFunctionCallWithOutputsAtomically(t *testing.T) {
+	items := []llm.ResponseItem{
+		{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "seed"},
+		{Type: llm.ResponseItemTypeFunctionCall, ID: "call-1", CallID: "call-1", Name: "shell"},
+		{Type: llm.ResponseItemTypeFunctionCallOutput, CallID: "call-1", Name: "shell", Output: json.RawMessage(`{"ok":true}`)},
+		{Type: llm.ResponseItemTypeMessage, Role: llm.RoleAssistant, Content: "later"},
+	}
+
+	trimmed, removed := trimOldestEligibleItems(items, 1)
+	if removed != 2 {
+		t.Fatalf("removed=%d, want 2", removed)
+	}
+	if len(trimmed) != 2 {
+		t.Fatalf("trimmed item count=%d, want 2 (%+v)", len(trimmed), trimmed)
+	}
+	for _, item := range trimmed {
+		if item.Type == llm.ResponseItemTypeFunctionCall || item.Type == llm.ResponseItemTypeFunctionCallOutput {
+			t.Fatalf("expected function call pair to be removed atomically, got %+v", trimmed)
+		}
+	}
+}
+
+func TestCompactionCacheObservationRequestAppendsPromptToConversationReplica(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.injectAgentsIfNeeded("seed-step"); err != nil {
+		t.Fatalf("inject agents: %v", err)
+	}
+
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}}}); err != nil {
+		t.Fatalf("append assistant tool call: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(tools.ToolShell), Content: `{"output":"/tmp"}`}); err != nil {
+		t.Fatalf("append tool output message: %v", err)
+	}
+
+	args := "keep API details"
+	request, ok, err := eng.compactionCacheObservationRequest(llm.CompactionRequest{
+		Model:        "gpt-5",
+		Instructions: compactionInstructions(args),
+		InputItems:   eng.snapshotItems(),
+	})
+	if err != nil {
+		t.Fatalf("build compaction cache observation request: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected compaction cache observation request")
+	}
+
+	wantItems := append(llm.CloneResponseItems(eng.snapshotItems()), llm.ResponseItem{
+		Type:    llm.ResponseItemTypeMessage,
+		Role:    llm.RoleDeveloper,
+		Content: compactionInstructions(args),
+	})
+	wantItems = sanitizeItemsForLLM(wantItems)
+
+	gotJSON, err := json.Marshal(request.Items)
+	if err != nil {
+		t.Fatalf("marshal observed items: %v", err)
+	}
+	wantJSON, err := json.Marshal(wantItems)
+	if err != nil {
+		t.Fatalf("marshal expected items: %v", err)
+	}
+	if string(gotJSON) != string(wantJSON) {
+		t.Fatalf("observed compaction cache request mismatch\nwant=%s\n got=%s", wantJSON, gotJSON)
+	}
+	if got, want := request.PromptCacheKey, eng.conversationPromptCacheKey(); got != want {
+		t.Fatalf("PromptCacheKey = %q, want %q", got, want)
+	}
+	if got, want := request.PromptCacheScope, cachewarn.ScopeConversation; got != want {
+		t.Fatalf("PromptCacheScope = %q, want %q", got, want)
+	}
+}
+
+func TestRemoteCompactionOnlyTrimsAfterOverflowAndWarnsOnCacheBreak(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		inputTokenCountFn: func(req llm.Request) int {
+			total := 0
+			for _, item := range req.Items {
+				switch item.Type {
+				case llm.ResponseItemTypeMessage:
+					total += 1000
+				case llm.ResponseItemTypeFunctionCall:
+					total += 3000
+				case llm.ResponseItemTypeFunctionCallOutput:
+					total += 1000
+				default:
+					total += 500
+				}
+			}
+			return total
+		},
+		compactionErrors: []error{
+			&llm.ProviderAPIError{ProviderID: "openai", StatusCode: 400, Code: llm.UnifiedErrorCodeContextLengthOverflow, ProviderCode: "context_length_exceeded", Message: "prompt exceeded"},
+			nil,
+		},
+		compactionResponses: []llm.CompactionResponse{{
+			OutputItems: []llm.ResponseItem{
+				{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "seed"},
+				{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+			},
+			Usage: llm.Usage{InputTokens: 1000, OutputTokens: 10, WindowTokens: 2500},
+		}},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:               "gpt-5",
+		ContextWindowTokens: 2500,
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.injectAgentsIfNeeded("seed-step"); err != nil {
+		t.Fatalf("inject agents: %v", err)
+	}
+
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}}}); err != nil {
+		t.Fatalf("append assistant tool call: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(tools.ToolShell), Content: `{"output":"/tmp"}`}); err != nil {
+		t.Fatalf("append tool output message: %v", err)
+	}
+
+	initialSnapshot := eng.snapshotItems()
+	initialJSON, err := json.Marshal(initialSnapshot)
+	if err != nil {
+		t.Fatalf("marshal initial snapshot: %v", err)
+	}
+	seedRequest, err := eng.buildRequest(context.Background(), "", true)
+	if err != nil {
+		t.Fatalf("build seed request: %v", err)
+	}
+	seedClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "seeded"},
+		Usage: llm.Usage{
+			HasCachedInputTokens: true,
+			CachedInputTokens:    512,
+		},
+	}}}
+	if _, err := eng.generateWithRetryClient(context.Background(), "seed-cache", seedClient, seedRequest, nil, nil, nil); err != nil {
+		t.Fatalf("seed cache lineage: %v", err)
+	}
+
+	if err := eng.CompactContext(context.Background(), ""); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	if len(client.compactionCalls) != 2 {
+		t.Fatalf("expected overflow retry to issue two compact calls, got %d", len(client.compactionCalls))
+	}
+
+	firstJSON, err := json.Marshal(client.compactionCalls[0].InputItems)
+	if err != nil {
+		t.Fatalf("marshal first compact call input: %v", err)
+	}
+	if string(firstJSON) != string(initialJSON) {
+		t.Fatalf("expected first compaction attempt to use an exact conversation replica\nwant=%s\n got=%s", initialJSON, firstJSON)
+	}
+	if got, want := client.compactionCalls[0].Instructions, compactionInstructions(""); got != want {
+		t.Fatalf("first compaction instructions mismatch\nwant=%q\n got=%q", want, got)
+	}
+
+	secondInput := client.compactionCalls[1].InputItems
+	hasCall := false
+	hasOutput := false
+	for _, item := range secondInput {
+		switch item.Type {
+		case llm.ResponseItemTypeFunctionCall:
+			if item.CallID == "call-1" || item.ID == "call-1" {
+				hasCall = true
+			}
+		case llm.ResponseItemTypeFunctionCallOutput:
+			if item.CallID == "call-1" {
+				hasOutput = true
+			}
+		}
+	}
+	if hasOutput && !hasCall {
+		t.Fatalf("expected retry trim to keep function_call/function_call_output linked, got %+v", secondInput)
+	}
+	if hasCall || hasOutput {
+		t.Fatalf("expected retry trim to remove oversized function call pair, got %+v", secondInput)
+	}
+
+	warnings := persistedCacheWarnings(t, store)
+	if len(warnings) != 1 {
+		t.Fatalf("expected one cache warning for trimmed overflow retry, got %+v", warnings)
+	}
+	if got, want := warnings[0].Reason, cachewarn.ReasonNonPostfix; got != want {
+		t.Fatalf("warning reason = %q, want %q", got, want)
+	}
+	if got, want := warnings[0].CacheKey, conversationPromptCacheKey(store.Meta().SessionID, 0); got != want {
+		t.Fatalf("warning cache key = %q, want %q", got, want)
+	}
+}
+
+func TestCompactionTransientRetryObservesCacheLineageOnce(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		compactionErrors: []error{errors.New("temporary upstream failure"), nil},
+		compactionResponses: []llm.CompactionResponse{{
+			OutputItems: []llm.ResponseItem{
+				{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "seed"},
+				{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+			},
+			Usage: llm.Usage{HasCachedInputTokens: true, CachedInputTokens: 123, InputTokens: 1000, WindowTokens: 200000},
+		}},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.injectAgentsIfNeeded("seed-step"); err != nil {
+		t.Fatalf("inject agents: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+
+	if err := eng.CompactContext(context.Background(), ""); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	if len(client.compactionCalls) != 2 {
+		t.Fatalf("expected one transient retry, got %d compaction calls", len(client.compactionCalls))
+	}
+
+	requestObserved := 0
+	responseObserved := 0
+	if err := store.WalkEvents(func(evt session.Event) error {
+		switch evt.Kind {
+		case sessionEventCacheRequestObserved:
+			requestObserved++
+		case sessionEventCacheResponseObserved:
+			responseObserved++
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk events: %v", err)
+	}
+	if requestObserved != 1 {
+		t.Fatalf("cache_request_observed count = %d, want 1", requestObserved)
+	}
+	if responseObserved != 1 {
+		t.Fatalf("cache_response_observed count = %d, want 1", responseObserved)
+	}
+}

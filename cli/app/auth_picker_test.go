@@ -285,6 +285,16 @@ func TestAuthMethodPickerNoticeUsesStartupError(t *testing.T) {
 	}
 }
 
+func TestAuthMethodPickerNoticeAcknowledgesAvailableEnvAPIKey(t *testing.T) {
+	notice := authMethodPickerNoticeForRequest(authInteraction{HasEnvAPIKey: true})
+	if notice.Kind != startupPickerNoticeNeutral {
+		t.Fatalf("expected neutral notice kind, got %q", notice.Kind)
+	}
+	if !strings.Contains(notice.Text, "OPENAI_API_KEY is available for this launch") {
+		t.Fatalf("unexpected notice text %q", notice.Text)
+	}
+}
+
 func TestAuthSuccessScreenTitleUsesEmailWhenAvailable(t *testing.T) {
 	got := authSuccessScreenTitle(auth.Method{
 		Type: auth.MethodOAuth,

@@ -463,6 +463,78 @@ func TestHandleProjectedRuntimeEventSkipsAlreadyHydratedAssistantEntry(t *testin
 	}
 }
 
+func TestHandleProjectedRuntimeEventRepairsCoveredAssistantEntryInsteadOfSkipping(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "assistant", Text: "seed", Phase: llm.MessagePhaseCommentary},
+		{Role: "assistant", Text: "stale", Phase: llm.MessagePhaseFinal},
+	}
+	m.transcriptBaseOffset = 0
+	m.transcriptTotalEntries = 2
+	m.transcriptRevision = 10
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                clientui.EventAssistantMessage,
+		StepID:              "step-1",
+		TranscriptRevision:  10,
+		CommittedEntryCount: 2,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:  "assistant",
+			Text:  "fresh",
+			Phase: string(llm.MessagePhaseFinal),
+		}},
+	})
+
+	if got := len(m.transcriptEntries); got != 2 {
+		t.Fatalf("expected repaired assistant entry without duplication, got %+v", m.transcriptEntries)
+	}
+	if got := m.transcriptEntries[1].Text; got != "fresh" {
+		t.Fatalf("assistant entry text = %q, want fresh", got)
+	}
+	loaded := m.view.LoadedTranscriptEntries()
+	if len(loaded) != 2 || loaded[1].Text != "fresh" {
+		t.Fatalf("expected repaired assistant visible in view, got %+v", loaded)
+	}
+}
+
+func TestHandleProjectedRuntimeEventRepairsCoveredAssistantEntryAndAppendsTrailingToolCall(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "user", Text: "prompt"},
+		{Role: "assistant", Text: "stale", Phase: llm.MessagePhaseFinal},
+	}
+	m.transcriptBaseOffset = 0
+	m.transcriptTotalEntries = 2
+	m.transcriptRevision = 10
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                clientui.EventAssistantMessage,
+		StepID:              "step-1",
+		TranscriptRevision:  10,
+		CommittedEntryCount: 3,
+		TranscriptEntries: []clientui.ChatEntry{
+			{Role: "assistant", Text: "fresh", Phase: string(llm.MessagePhaseFinal)},
+			{Role: "tool_call", Text: "pwd", ToolCallID: "call-1", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"}},
+		},
+	})
+
+	if got := len(m.transcriptEntries); got != 3 {
+		t.Fatalf("expected repaired assistant plus appended tool call, got %+v", m.transcriptEntries)
+	}
+	if got := m.transcriptEntries[1].Text; got != "fresh" {
+		t.Fatalf("assistant entry text = %q, want fresh", got)
+	}
+	if got := m.transcriptEntries[2].ToolCallID; got != "call-1" {
+		t.Fatalf("tool call id = %q, want call-1", got)
+	}
+	loaded := m.view.LoadedTranscriptEntries()
+	if len(loaded) != 3 || loaded[1].Text != "fresh" || loaded[2].ToolCallID != "call-1" {
+		t.Fatalf("expected repaired assistant and tool call visible in view, got %+v", loaded)
+	}
+}
+
 func TestHandleProjectedRuntimeEventDoesNotSuppressPendingToolCallStart(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "seed", Phase: llm.MessagePhaseCommentary}}
@@ -633,6 +705,99 @@ func TestHandleProjectedRuntimeEventDoesNotSuppressCompactionNoticeEntry(t *test
 	}
 	if got := m.transcriptEntries[1].Role; got != "compaction_notice" {
 		t.Fatalf("second transcript role = %q, want compaction_notice", got)
+	}
+}
+
+func TestHandleProjectedRuntimeEventAppendsLocalEntryImmediately(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.transcriptRevision = 10
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                clientui.EventLocalEntryAdded,
+		StepID:              "step-1",
+		TranscriptRevision:  10,
+		CommittedEntryCount: 1,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:        "reviewer_suggestions",
+			Text:        "Supervisor suggested:\n1. Add verification notes.",
+			OngoingText: "Supervisor made 1 suggestion.",
+		}},
+	})
+
+	if got := len(m.transcriptEntries); got != 1 {
+		t.Fatalf("expected local entry appended immediately, got %+v", m.transcriptEntries)
+	}
+	if got := m.transcriptEntries[0].Role; got != "reviewer_suggestions" {
+		t.Fatalf("local entry role = %q, want reviewer_suggestions", got)
+	}
+	loaded := m.view.LoadedTranscriptEntries()
+	if len(loaded) != 1 || loaded[0].Role != "reviewer_suggestions" {
+		t.Fatalf("expected local entry visible in view, got %+v", loaded)
+	}
+}
+
+func TestLocalEntryAddedRemainsVisibleAfterHydrationSync(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed", Phase: string(llm.MessagePhaseFinal)}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                clientui.EventLocalEntryAdded,
+		StepID:              "step-1",
+		TranscriptRevision:  10,
+		CommittedEntryCount: 2,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:        "reviewer_suggestions",
+			Text:        "Supervisor suggested:\n1. Add verification notes.",
+			OngoingText: "Supervisor made 1 suggestion.",
+		}},
+	})
+
+	hydrated := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 2,
+		Entries: []clientui.ChatEntry{
+			{Role: "assistant", Text: "seed", Phase: string(llm.MessagePhaseFinal)},
+			{Role: "reviewer_suggestions", Text: "Supervisor suggested:\n1. Add verification notes.", OngoingText: "Supervisor made 1 suggestion."},
+		},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, hydrated); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	if got := len(m.transcriptEntries); got != 2 {
+		t.Fatalf("expected hydrated transcript without duplication, got %+v", m.transcriptEntries)
+	}
+	if got := m.transcriptEntries[1].Role; got != "reviewer_suggestions" {
+		t.Fatalf("local entry role after hydration = %q, want reviewer_suggestions", got)
+	}
+	loaded := m.view.LoadedTranscriptEntries()
+	if len(loaded) != 2 {
+		t.Fatalf("expected hydrated loaded transcript length 2, got %+v", loaded)
+	}
+	count := 0
+	for _, entry := range loaded {
+		if entry.Role == "reviewer_suggestions" && entry.Text == "Supervisor suggested:\n1. Add verification notes." {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected reviewer_suggestions exactly once after hydration, got %+v", loaded)
 	}
 }
 

@@ -147,8 +147,9 @@ type Engine struct {
 	registry *tools.Registry
 	cfg      Config
 
-	chat   *chatStore
-	locked *session.LockedContract
+	chat                *chatStore
+	locked              *session.LockedContract
+	localDiagnosticKeys map[string]struct{}
 
 	pendingInjected []string
 
@@ -250,14 +251,15 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 	}
 
 	eng := &Engine{
-		store:        store,
-		llm:          client,
-		reviewer:     cfg.Reviewer.Client,
-		registry:     registry,
-		cfg:          cfg,
-		chat:         newChatStore(),
-		tokenUsage:   newTokenUsageTracker(),
-		requestCache: newRequestCacheTracker(),
+		store:               store,
+		llm:                 client,
+		reviewer:            cfg.Reviewer.Client,
+		registry:            registry,
+		cfg:                 cfg,
+		chat:                newChatStore(),
+		localDiagnosticKeys: make(map[string]struct{}),
+		tokenUsage:          newTokenUsageTracker(),
+		requestCache:        newRequestCacheTracker(),
 	}
 	eng.ensureLifecycle()
 	eng.ensureOrchestrationCollaborators()
@@ -286,6 +288,7 @@ func New(store *session.Store, client llm.Client, registry *tools.Registry, cfg 
 	if err := eng.restoreMessages(); err != nil {
 		return nil, err
 	}
+	eng.restorePersistedUsageState(meta.UsageState)
 	if meta.InFlightStep {
 		if err := eng.appendMessage("", llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeInterruption, Content: interruptMessage}); err != nil {
 			return nil, err

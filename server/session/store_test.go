@@ -227,6 +227,36 @@ func TestSetInputDraftClearsPersistedValue(t *testing.T) {
 	}
 }
 
+func TestSetUsageStatePersistsAcrossReopen(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewLazy(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("new lazy store: %v", err)
+	}
+	if err := store.SetUsageState(&UsageState{
+		InputTokens:             900,
+		OutputTokens:            120,
+		WindowTokens:            400_000,
+		CachedInputTokens:       50,
+		HasCachedInputTokens:    true,
+		EstimatedProviderTokens: 180,
+		TotalInputTokens:        1_200,
+		TotalCachedInputTokens:  60,
+	}); err != nil {
+		t.Fatalf("set usage state: %v", err)
+	}
+	reopened, err := Open(store.Dir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if reopened.Meta().UsageState == nil {
+		t.Fatal("expected persisted usage state")
+	}
+	if got := reopened.Meta().UsageState; got.InputTokens != 900 || got.EstimatedProviderTokens != 180 || got.TotalInputTokens != 1_200 {
+		t.Fatalf("unexpected usage state after reopen: %+v", got)
+	}
+}
+
 func TestListSessionsSortedByUpdatedAt(t *testing.T) {
 	root := t.TempDir()
 	s1, err := Create(root, "workspace-x", "/tmp/work")

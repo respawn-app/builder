@@ -42,10 +42,16 @@ type preciseTokenSnapshot struct {
 	inputTokens int
 }
 
+type usageEstimateBaseline struct {
+	inputTokens             int
+	estimatedProviderTokens int
+}
+
 type tokenUsageTracker struct {
 	mu sync.Mutex
 
 	current                  preciseTokenSnapshot
+	usageBaseline            usageEstimateBaseline
 	lastPreciseInputTokens   int
 	forceCurrentPreciseCheck bool
 	pendingSignificantGrowth bool
@@ -72,6 +78,7 @@ func (t *tokenUsageTracker) invalidateCurrent(mutation tokenUsageMutation) {
 		t.forceCurrentPreciseCheck = true
 		t.pendingSignificantGrowth = true
 	case tokenUsageMutationHardReset:
+		t.usageBaseline = usageEstimateBaseline{}
 		t.lastPreciseInputTokens = 0
 		t.forceCurrentPreciseCheck = false
 		t.pendingSignificantGrowth = false
@@ -96,6 +103,47 @@ func (t *tokenUsageTracker) store(requestKey string, inputTokens int, current bo
 	t.lastPreciseInputTokens = inputTokens
 	t.forceCurrentPreciseCheck = false
 	t.pendingSignificantGrowth = false
+}
+
+func (t *tokenUsageTracker) storeUsageBaseline(inputTokens, estimatedProviderTokens int) {
+	if t == nil {
+		return
+	}
+	if inputTokens < 0 {
+		inputTokens = 0
+	}
+	if estimatedProviderTokens < 0 {
+		estimatedProviderTokens = 0
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.usageBaseline = usageEstimateBaseline{
+		inputTokens:             inputTokens,
+		estimatedProviderTokens: estimatedProviderTokens,
+	}
+}
+
+func (t *tokenUsageTracker) estimateCurrentInputTokens(currentEstimatedProviderTokens int) (int, bool) {
+	if t == nil {
+		return 0, false
+	}
+	if currentEstimatedProviderTokens < 0 {
+		currentEstimatedProviderTokens = 0
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	baseline := t.usageBaseline
+	if baseline.inputTokens <= 0 {
+		if currentEstimatedProviderTokens <= 0 {
+			return 0, false
+		}
+		return currentEstimatedProviderTokens, true
+	}
+	delta := currentEstimatedProviderTokens - baseline.estimatedProviderTokens
+	if delta <= 0 {
+		return baseline.inputTokens, true
+	}
+	return baseline.inputTokens + delta, true
 }
 
 func (t *tokenUsageTracker) lookup(requestKey string) (int, bool) {

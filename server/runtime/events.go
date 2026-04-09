@@ -28,6 +28,7 @@ const (
 	EventCompactionCompleted EventKind = "context_compaction_completed"
 	EventCompactionFailed    EventKind = "context_compaction_failed"
 	EventCacheWarning        EventKind = "cache_warning"
+	EventLocalEntryAdded     EventKind = "local_entry_added"
 	EventRunStateChanged     EventKind = "run_state_changed"
 	EventBackgroundUpdated   EventKind = "background_updated"
 )
@@ -50,6 +51,7 @@ type Event struct {
 	Compaction             *CompactionStatus
 	CacheWarning           *cachewarn.Warning
 	CacheWarningVisibility transcript.EntryVisibility
+	LocalEntry             *ChatEntry
 	RunState               *RunState
 	Background             *BackgroundShellEvent
 }

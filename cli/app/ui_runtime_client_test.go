@@ -501,6 +501,40 @@ func TestRuntimeClientMainViewFallsBackToLocalRuntimeProjectionOnReadError(t *te
 	}
 }
 
+func TestRuntimeClientMainViewSeedsTranscriptCacheFromLiveRuntimeMainView(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: "seeded from main view", Phase: llm.MessagePhaseFinal}); err != nil {
+		t.Fatalf("append assistant message: %v", err)
+	}
+	eng, err := runtime.New(store, &runtimeClientFakeLLM{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	runtimeRegistry := registry.NewRuntimeRegistry()
+	runtimeRegistry.Register(store.Meta().SessionID, eng)
+
+	runtimeClient := newUIRuntimeClientWithReads(
+		store.Meta().SessionID,
+		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry)),
+		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(runtimeRegistry, runtimeRegistry)),
+	)
+	view := runtimeClient.MainView()
+	if got := len(view.Session.Chat.Entries); got != 1 {
+		t.Fatalf("main view chat entry count = %d, want 1", got)
+	}
+	page := runtimeClient.Transcript()
+	if got := len(page.Entries); got != 1 {
+		t.Fatalf("transcript entry count = %d, want 1", got)
+	}
+	if got := page.Entries[0].Text; got != "seeded from main view" {
+		t.Fatalf("transcript entry text = %q, want seeded from main view", got)
+	}
+}
+
 func TestRuntimeClientWithoutClientsIsNil(t *testing.T) {
 	if client := newUIRuntimeClientWithReads("session-1", nil, nil); client != nil {
 		t.Fatalf("expected nil runtime client, got %#v", client)
@@ -550,6 +584,137 @@ func TestRuntimeClientRefreshMainViewBypassesCache(t *testing.T) {
 	}
 	if got := reads.count.Load(); got != 2 {
 		t.Fatalf("refresh main view read count = %d, want 2", got)
+	}
+}
+
+func TestRuntimeClientMainViewSeedsTranscriptCacheBeforeTranscriptFetch(t *testing.T) {
+	reads := &countingSessionViewClient{view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{
+		SessionID: "session-1",
+		Transcript: clientui.TranscriptMetadata{
+			Revision:            3,
+			CommittedEntryCount: 1,
+		},
+		Chat: clientui.ChatSnapshot{
+			Entries: []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+		},
+	}}}
+	runtimeClient := newUIRuntimeClientWithReads(
+		"session-1",
+		reads,
+		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(registry.NewRuntimeRegistry(), nil)),
+	)
+
+	view := runtimeClient.MainView()
+	if view.Session.SessionID != "session-1" {
+		t.Fatalf("session id = %q, want session-1", view.Session.SessionID)
+	}
+	page := runtimeClient.Transcript()
+	if got := len(page.Entries); got != 1 {
+		t.Fatalf("transcript entry count = %d, want 1", got)
+	}
+	if got := page.Entries[0].Text; got != "seed" {
+		t.Fatalf("transcript entry text = %q, want seed", got)
+	}
+	if got := reads.count.Load(); got != 1 {
+		t.Fatalf("session view call count = %d, want 1", got)
+	}
+}
+
+func TestRuntimeClientMainViewBootstrapDoesNotSeedStreamingOngoingState(t *testing.T) {
+	reads := &countingSessionViewClient{view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{
+		SessionID: "session-1",
+		Transcript: clientui.TranscriptMetadata{
+			Revision:            3,
+			CommittedEntryCount: 1,
+		},
+		Chat: clientui.ChatSnapshot{
+			Entries: []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+			Ongoing: "NO_OP",
+		},
+	}}}
+	runtimeClient := newUIRuntimeClientWithReads(
+		"session-1",
+		reads,
+		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(registry.NewRuntimeRegistry(), nil)),
+	)
+
+	_ = runtimeClient.MainView()
+	page := runtimeClient.Transcript()
+	if got := page.Ongoing; got != "" {
+		t.Fatalf("bootstrap ongoing text = %q, want empty", got)
+	}
+}
+
+func TestRuntimeClientRefreshMainViewDoesNotDowngradeCachedTranscriptTail(t *testing.T) {
+	reads := &countingSessionViewClient{
+		view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{
+			SessionID: "session-1",
+			Transcript: clientui.TranscriptMetadata{
+				Revision:            3,
+				CommittedEntryCount: 2,
+			},
+			Chat: clientui.ChatSnapshot{
+				Entries: []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+			},
+		}},
+		page: clientui.TranscriptPage{
+			SessionID:    "session-1",
+			Revision:     3,
+			TotalEntries: 2,
+			Entries: []clientui.ChatEntry{
+				{Role: "assistant", Text: "seed"},
+				{Role: "reviewer_status", Text: "Supervisor ran and applied 2 suggestions."},
+			},
+		},
+	}
+	runtimeClient := newUIRuntimeClientWithReads(
+		"session-1",
+		reads,
+		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(registry.NewRuntimeRegistry(), nil)),
+	)
+	concrete, ok := runtimeClient.(*sessionRuntimeClient)
+	if !ok {
+		t.Fatalf("runtime client type = %T, want *sessionRuntimeClient", runtimeClient)
+	}
+
+	if _, err := runtimeClient.RefreshTranscript(); err != nil {
+		t.Fatalf("RefreshTranscript: %v", err)
+	}
+	tailKey := ongoingTailTranscriptCacheKey()
+	concrete.mu.RLock()
+	seededTail, hasSeededTail := concrete.transcriptPages[tailKey]
+	concrete.mu.RUnlock()
+	if !hasSeededTail {
+		t.Fatal("expected ongoing-tail cache entry after transcript refresh")
+	}
+	if _, err := runtimeClient.RefreshMainView(); err != nil {
+		t.Fatalf("RefreshMainView: %v", err)
+	}
+	concrete.mu.RLock()
+	refreshedTail, hasRefreshedTail := concrete.transcriptPages[tailKey]
+	concrete.mu.RUnlock()
+	if !hasRefreshedTail {
+		t.Fatal("expected ongoing-tail cache entry retained after main-view refresh")
+	}
+	if len(refreshedTail.page.Entries) != len(seededTail.page.Entries) {
+		t.Fatalf("cached ongoing-tail entry count = %d, want %d", len(refreshedTail.page.Entries), len(seededTail.page.Entries))
+	}
+	if refreshedTail.page.Entries[1].Role != seededTail.page.Entries[1].Role || refreshedTail.page.Entries[1].Text != seededTail.page.Entries[1].Text {
+		t.Fatalf("cached ongoing-tail page downgraded after main-view refresh: before=%+v after=%+v", seededTail.page.Entries, refreshedTail.page.Entries)
+	}
+
+	page := runtimeClient.Transcript()
+	if got := len(page.Entries); got != 2 {
+		t.Fatalf("transcript entry count = %d, want 2", got)
+	}
+	if got := page.Entries[1].Role; got != "reviewer_status" {
+		t.Fatalf("second transcript role = %q, want reviewer_status", got)
+	}
+	if got := page.Entries[1].Text; got != "Supervisor ran and applied 2 suggestions." {
+		t.Fatalf("second transcript text = %q", got)
+	}
+	if got := reads.count.Load(); got != 2 {
+		t.Fatalf("session view call count = %d, want 2", got)
 	}
 }
 
