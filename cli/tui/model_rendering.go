@@ -114,7 +114,7 @@ func (m Model) buildTranscriptBlocks(opts transcriptBlockOptions) []ongoingBlock
 		}
 		entry := m.transcript[idx]
 		role := m.entryRole(entry)
-		if opts.mode == transcriptBlockModeOngoing && skipInOngoing(role) {
+		if opts.mode == transcriptBlockModeOngoing && skipInOngoing(entry) {
 			continue
 		}
 		block, ok := m.entryBlock(idx, entry, role, consumedResults, resultIndex, opts)

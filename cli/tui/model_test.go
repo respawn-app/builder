@@ -2024,6 +2024,33 @@ func TestCacheWarningViewUsesGenericWarningPresentationInLightTheme(t *testing.T
 	}
 }
 
+func TestCacheWarningVisibilityOverrideShowsInOngoingMode(t *testing.T) {
+	m := NewModel(WithTheme("light"), WithPreviewLines(20))
+	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})
+	m = updateModel(t, m, AppendTranscriptMsg{
+		Role:       "cache_warning",
+		Text:       "Cache reuse disappeared for unknown reasons",
+		Visibility: transcript.EntryVisibilityAll,
+	})
+
+	rawOngoing := m.View()
+	cacheWarningLine := lineContaining(rawOngoing, "Cache reuse disappeared for unknown reasons")
+	if cacheWarningLine == "" {
+		t.Fatalf("expected cache warning visible in ongoing view, got %q", plainTranscript(rawOngoing))
+	}
+	if !strings.Contains(cacheWarningLine, foregroundEscape(themeWarningColor("light"))) {
+		t.Fatalf("expected ongoing cache warning to use warning foreground, got %q", cacheWarningLine)
+	}
+	if got := ansi.Strip(cacheWarningLine); !strings.HasPrefix(got, "⚠ Cache reuse disappeared for unknown reasons") {
+		t.Fatalf("expected ongoing cache warning to use warning symbol, got %q", got)
+	}
+
+	m = updateModel(t, m, ToggleModeMsg{})
+	if lineContaining(m.View(), "Cache reuse disappeared for unknown reasons") == "" {
+		t.Fatalf("expected detail view to retain cache warning, got %q", plainTranscript(m.View()))
+	}
+}
+
 func TestSelectedUserLineUsesCentralThemeSelectionTokens(t *testing.T) {
 	previousProfile := lipgloss.ColorProfile()
 	previousBackground := lipgloss.HasDarkBackground()

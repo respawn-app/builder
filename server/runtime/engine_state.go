@@ -11,6 +11,7 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/transcript"
 )
 
 func (e *Engine) snapshotMessages() []llm.Message {
@@ -367,9 +368,10 @@ func mustJSON(v any) json.RawMessage {
 }
 
 type storedLocalEntry struct {
-	Role        string `json:"role"`
-	Text        string `json:"text"`
-	OngoingText string `json:"ongoing_text,omitempty"`
+	Visibility  transcript.EntryVisibility `json:"visibility,omitempty"`
+	Role        string                     `json:"role"`
+	Text        string                     `json:"text"`
+	OngoingText string                     `json:"ongoing_text,omitempty"`
 }
 
 type historyReplacementPayload struct {

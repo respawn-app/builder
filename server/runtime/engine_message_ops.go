@@ -12,6 +12,7 @@ import (
 
 	"builder/server/llm"
 	"builder/server/tools"
+	"builder/shared/transcript"
 )
 
 func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
@@ -120,6 +121,7 @@ func (e *Engine) appendPersistedLocalEntryWithOngoingText(stepID, role, text, on
 	}
 	e.chat.appendLocalEntryWithOngoingText(role, text, ongoingText)
 	_, err := e.store.AppendEvent(stepID, "local_entry", storedLocalEntry{
+		Visibility:  transcript.EntryVisibilityAuto,
 		Role:        role,
 		Text:        text,
 		OngoingText: strings.TrimSpace(ongoingText),

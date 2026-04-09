@@ -8,7 +8,6 @@ import (
 	"builder/server/llm"
 	"builder/server/runtime"
 	patchformat "builder/server/tools/patch/format"
-	"builder/shared/cachewarn"
 	"builder/shared/clientui"
 	"builder/shared/transcript"
 	"builder/shared/transcriptdiag"
@@ -86,21 +85,6 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 			m.sawAssistantDelta = false
 			m.forwardToView(tui.ClearOngoingAssistantMsg{})
 		}
-	}
-	if evt.CacheWarning != nil {
-		cmd, mutated, needsHydration := a.applyProjectedTranscriptEntries(clientui.Event{
-			Kind:                clientui.EventCacheWarning,
-			StepID:              evt.StepID,
-			TranscriptRevision:  evt.TranscriptRevision,
-			CommittedEntryCount: evt.CommittedEntryCount,
-			TranscriptEntries: []clientui.ChatEntry{{
-				Role: "cache_warning",
-				Text: cachewarn.Text(*evt.CacheWarning),
-			}},
-		}, flushNativeHistory)
-		cmds = append(cmds, cmd)
-		transcriptMutated = transcriptMutated || mutated
-		awaitsHydration = awaitsHydration || needsHydration
 	}
 	if update.AssistantDelta != "" {
 		if shouldIgnoreStaleAssistantDelta(m, evt, update.AssistantDelta) {
@@ -256,6 +240,7 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 		transcriptEntry := transcriptEntryFromChatEntry(entry)
 		m.transcriptEntries = append(m.transcriptEntries, transcriptEntry)
 		m.forwardToView(tui.AppendTranscriptMsg{
+			Visibility:  transcriptEntry.Visibility,
 			Role:        transcriptEntry.Role,
 			Text:        transcriptEntry.Text,
 			OngoingText: transcriptEntry.OngoingText,
@@ -607,6 +592,7 @@ func transcriptEntriesFromPage(page clientui.TranscriptPage) []tui.TranscriptEnt
 
 func transcriptEntryFromChatEntry(entry clientui.ChatEntry) tui.TranscriptEntry {
 	return tui.TranscriptEntry{
+		Visibility:  entry.Visibility,
 		Role:        entry.Role,
 		Text:        entry.Text,
 		OngoingText: entry.OngoingText,
@@ -794,7 +780,8 @@ func eventTranscriptEntriesReconcileWithCommittedTail(kind clientui.EventKind) b
 }
 
 func transcriptEntryMatchesChatEntry(existing tui.TranscriptEntry, incoming clientui.ChatEntry) bool {
-	return existing.Role == incoming.Role &&
+	return existing.Visibility == incoming.Visibility &&
+		existing.Role == incoming.Role &&
 		existing.Text == incoming.Text &&
 		existing.OngoingText == incoming.OngoingText &&
 		existing.Phase == llm.MessagePhase(incoming.Phase) &&

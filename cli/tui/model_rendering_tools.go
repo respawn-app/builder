@@ -22,8 +22,8 @@ func ongoingDividerGroup(role string) string {
 	return strings.ToLower(trimmed)
 }
 
-func skipInOngoing(role string) bool {
-	return isDetailOnlyRole(role)
+func skipInOngoing(entry TranscriptEntry) bool {
+	return !isVisibleInOngoing(entry)
 }
 
 func compactToolCallText(meta *transcript.ToolCallMeta, text string) string {

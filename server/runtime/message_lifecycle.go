@@ -45,9 +45,9 @@ func (m *defaultMessageLifecycle) RestoreMessages() error {
 			if err := json.Unmarshal(evt.Payload, &entry); err != nil {
 				return fmt.Errorf("decode local_entry event: %w", err)
 			}
-			e.chat.appendLocalEntryWithOngoingText(entry.Role, entry.Text, entry.OngoingText)
+			e.chat.appendLocalEntryWithOngoingTextAndVisibility(entry.Role, entry.Text, entry.OngoingText, entry.Visibility)
 		case sessionEventCacheWarning:
-			if err := applyPersistedCacheWarningToChat(e.chat, evt.Payload); err != nil {
+			if err := applyPersistedCacheWarningToChat(e.chat, evt.Payload, e.cfg.CacheWarningMode); err != nil {
 				return err
 			}
 		case sessionEventCacheRequestObserved:
