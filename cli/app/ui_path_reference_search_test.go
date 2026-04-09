@@ -336,3 +336,27 @@ func TestLoadCorpusSnapshotPropagatesRunnerError(t *testing.T) {
 		t.Fatalf("expected runner error, got %v", err)
 	}
 }
+
+func TestLoadCorpusSnapshotTreatsEmptyRipgrepResultAsReadyEmptyCorpus(t *testing.T) {
+	runner := &stubUIPathReferenceCommandRunner{err: stubUIPathReferenceExitError{code: 1}}
+	service := &uiPathReferenceSearchService{runner: runner}
+	snapshot, err := service.loadCorpusSnapshot(context.Background(), "/tmp/workspace")
+	if err != nil {
+		t.Fatalf("loadCorpusSnapshot() error = %v", err)
+	}
+	if len(snapshot.Candidates) != 0 {
+		t.Fatalf("expected empty candidate set, got %+v", snapshot.Candidates)
+	}
+}
+
+type stubUIPathReferenceExitError struct {
+	code int
+}
+
+func (e stubUIPathReferenceExitError) Error() string {
+	return "exit"
+}
+
+func (e stubUIPathReferenceExitError) ExitCode() int {
+	return e.code
+}
