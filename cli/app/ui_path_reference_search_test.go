@@ -7,13 +7,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
 func TestLoadCorpusSnapshotIncludesDerivedDirectoriesAndExcludesGit(t *testing.T) {
-	runner := &stubUIPathReferenceCommandRunner{output: []byte("cli/app/ui.go\n.github/workflows/release.yml\n.git/config\n")}
+	runner := &stubUIPathReferenceCommandRunner{output: nulJoinPathReferenceOutput("cli/app/ui.go", ".github/workflows/release.yml", ".git/config")}
 	service := &uiPathReferenceSearchService{runner: runner}
 
 	snapshot, err := service.loadCorpusSnapshot(context.Background(), "/tmp/workspace")
@@ -38,14 +39,28 @@ func TestLoadCorpusSnapshotIncludesDerivedDirectoriesAndExcludesGit(t *testing.T
 	if runner.dir != "/tmp/workspace" {
 		t.Fatalf("runner dir = %q, want /tmp/workspace", runner.dir)
 	}
-	if !reflect.DeepEqual(runner.args, []string{"--files", "--hidden", "-g", "!.git"}) {
+	if !reflect.DeepEqual(runner.args, []string{"--files", "-0", "--hidden", "-g", "!.git"}) {
 		t.Fatalf("runner args = %+v", runner.args)
+	}
+}
+
+func TestLoadCorpusSnapshotPreservesFilenameNewlinesWithNullSeparatedOutput(t *testing.T) {
+	runner := &stubUIPathReferenceCommandRunner{output: nulJoinPathReferenceOutput("dir/line\nbreak.txt")}
+	service := &uiPathReferenceSearchService{runner: runner}
+
+	snapshot, err := service.loadCorpusSnapshot(context.Background(), "/tmp/workspace")
+	if err != nil {
+		t.Fatalf("loadCorpusSnapshot() error = %v", err)
+	}
+	want := []uiPathReferenceCandidate{{Path: "dir", Directory: true}, {Path: "dir/line\nbreak.txt"}}
+	if !reflect.DeepEqual(snapshot.Candidates, want) {
+		t.Fatalf("snapshot candidates = %+v, want %+v", snapshot.Candidates, want)
 	}
 }
 
 func TestPathReferenceSearchServiceRunsOnlyOneMatcherAtATime(t *testing.T) {
 	matcher := newBlockingUIPathReferenceMatcher()
-	service := newTestUIPathReferenceSearchService(&stubUIPathReferenceCommandRunner{output: []byte("cli/app/ui.go\n")}, matcher)
+	service := newTestUIPathReferenceSearchService(&stubUIPathReferenceCommandRunner{output: nulJoinPathReferenceOutput("cli/app/ui.go")}, matcher)
 
 	service.Search(uiPathReferenceSearchRequest{WorkspaceRoot: "/tmp/workspace", DraftToken: 1, QueryToken: 1, NormalizedQuery: "ab"})
 	waitForPathReferenceEventType[uiPathReferenceCorpusReadyMsg](t, service.Events())
@@ -76,7 +91,7 @@ func TestPathReferenceSearchServiceRunsOnlyOneMatcherAtATime(t *testing.T) {
 
 func TestPathReferenceSearchServiceEmitsLoadingDelayForPendingQuery(t *testing.T) {
 	matcher := newBlockingUIPathReferenceMatcher()
-	service := newTestUIPathReferenceSearchService(&stubUIPathReferenceCommandRunner{output: []byte("cli/app/ui.go\n")}, matcher)
+	service := newTestUIPathReferenceSearchService(&stubUIPathReferenceCommandRunner{output: nulJoinPathReferenceOutput("cli/app/ui.go")}, matcher)
 	service.loadingDelay = 10 * time.Millisecond
 
 	service.Search(uiPathReferenceSearchRequest{WorkspaceRoot: "/tmp/workspace", DraftToken: 7, QueryToken: 9, NormalizedQuery: "abc"})
@@ -96,7 +111,7 @@ func TestPathReferenceSearchServiceRetriesAfterCorpusBuildFailure(t *testing.T) 
 	runner := &sequenceUIPathReferenceCommandRunner{
 		results: []sequenceUIPathReferenceCommandResult{
 			{err: errors.New("boom")},
-			{output: []byte("cli/app/ui.go\n")},
+			{output: nulJoinPathReferenceOutput("cli/app/ui.go")},
 		},
 	}
 	matcher := newBlockingUIPathReferenceMatcher()
@@ -127,7 +142,7 @@ func TestPathReferenceSearchServiceRetriesAfterCorpusBuildFailure(t *testing.T) 
 }
 
 func TestPathReferenceSearchServiceStopUnblocksAndPreventsFurtherRequests(t *testing.T) {
-	service := newTestUIPathReferenceSearchService(&stubUIPathReferenceCommandRunner{output: []byte("cli/app/ui.go\n")}, fuzzyUIPathReferenceMatcher{})
+	service := newTestUIPathReferenceSearchService(&stubUIPathReferenceCommandRunner{output: nulJoinPathReferenceOutput("cli/app/ui.go")}, fuzzyUIPathReferenceMatcher{})
 	service.Stop()
 
 	service.StartPrewarm("/tmp/workspace")
@@ -318,6 +333,13 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func nulJoinPathReferenceOutput(paths ...string) []byte {
+	if len(paths) == 0 {
+		return nil
+	}
+	return []byte(strings.Join(paths, "\x00") + "\x00")
 }
 
 func TestNormalizePathReferenceCandidateRejectsGitPaths(t *testing.T) {

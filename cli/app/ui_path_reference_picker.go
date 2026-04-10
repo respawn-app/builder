@@ -189,7 +189,7 @@ func (m *uiModel) pathReferencePicker() uiPickerPresentation {
 	}
 	rows := make([]uiPickerRow, 0, len(m.pathReference.matches))
 	for _, match := range m.pathReference.matches {
-		rows = append(rows, uiPickerRow{primary: match.Path, selectable: true})
+		rows = append(rows, uiPickerRow{primary: sanitizePathReferenceDisplayText(match.Path), selectable: true})
 	}
 	lineCount := len(m.pathReference.matches)
 	if lineCount > slashCommandPickerLines {
@@ -241,6 +241,53 @@ func (m *uiModel) shouldBlockPathReferenceAcceptanceKey() bool {
 		return false
 	}
 	return m.pathReference.pending || m.pathReference.loading
+}
+
+func sanitizePathReferenceDisplayText(path string) string {
+	if path == "" {
+		return ""
+	}
+	runes := []rune(path)
+	filtered := make([]rune, 0, len(runes))
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if r == 0x1b {
+			i = skipTerminalEscapeSequence(runes, i)
+			continue
+		}
+		if unicode.IsControl(r) {
+			continue
+		}
+		filtered = append(filtered, r)
+	}
+	return string(filtered)
+}
+
+func skipTerminalEscapeSequence(runes []rune, start int) int {
+	if start+1 >= len(runes) {
+		return start
+	}
+	switch runes[start+1] {
+	case '[':
+		for i := start + 2; i < len(runes); i++ {
+			if runes[i] >= 0x40 && runes[i] <= 0x7e {
+				return i
+			}
+		}
+		return len(runes) - 1
+	case ']':
+		for i := start + 2; i < len(runes); i++ {
+			if runes[i] == 0x07 {
+				return i
+			}
+			if runes[i] == 0x1b && i+1 < len(runes) && runes[i+1] == '\\' {
+				return i + 1
+			}
+		}
+		return len(runes) - 1
+	default:
+		return start + 1
+	}
 }
 
 func (m *uiModel) slashCommandPresentation() uiPickerPresentation {

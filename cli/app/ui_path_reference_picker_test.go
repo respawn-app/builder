@@ -248,6 +248,23 @@ func TestPathReferenceUpDownNavigatesSelectionWithoutRewritingInput(t *testing.T
 	}
 }
 
+func TestPathReferencePickerSanitizesControlCharactersForDisplay(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.pathReference.tracked = uiPathReferenceQuery{Active: true, Start: 0, End: 3, RawQuery: "ab", NormalizedQuery: "ab"}
+	m.pathReference.matches = []uiPathReferenceCandidate{{Path: "safe/]52;evilname.txt"}}
+
+	state := m.pathReferencePicker()
+	if !state.visible || len(state.rows) != 1 {
+		t.Fatalf("unexpected picker state: %+v", state)
+	}
+	if state.rows[0].primary != "safe/name.txt" {
+		t.Fatalf("display path = %q", state.rows[0].primary)
+	}
+	if m.pathReference.matches[0].Path != "safe/]52;evilname.txt" {
+		t.Fatalf("expected underlying candidate path preserved, got %q", m.pathReference.matches[0].Path)
+	}
+}
+
 func testPathReferenceFixture(fixture string) (string, int) {
 	runes := []rune(fixture)
 	idx := -1
