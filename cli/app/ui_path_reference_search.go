@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -315,19 +316,19 @@ func (s *uiPathReferenceSearchService) buildCorpus(workspaceRoot string, generat
 }
 
 func (s *uiPathReferenceSearchService) loadCorpusSnapshot(ctx context.Context, workspaceRoot string) (uiPathReferenceCorpusSnapshot, error) {
-	output, err := s.runner.Output(ctx, workspaceRoot, "rg", "--files", "--hidden", "-g", "!.git")
+	output, err := s.runner.Output(ctx, workspaceRoot, "rg", "--files", "-0", "--hidden", "-g", "!.git")
 	if err != nil {
 		if isEmptyRipgrepFilesResult(err, output) {
 			return uiPathReferenceCorpusSnapshot{}, nil
 		}
 		return uiPathReferenceCorpusSnapshot{}, err
 	}
-	lines := strings.Split(string(output), "\n")
+	lines := bytes.Split(output, []byte{0})
 	fileSeen := make(map[string]struct{}, len(lines))
 	dirSeen := make(map[string]struct{}, len(lines))
 	candidates := make([]uiPathReferenceCandidate, 0, len(lines))
 	for _, raw := range lines {
-		candidate := normalizePathReferenceCandidate(raw)
+		candidate := normalizePathReferenceCandidate(string(raw))
 		if candidate == "" {
 			continue
 		}
@@ -365,11 +366,10 @@ func isEmptyRipgrepFilesResult(err error, output []byte) bool {
 }
 
 func normalizePathReferenceCandidate(raw string) string {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
+	if raw == "" {
 		return ""
 	}
-	normalized := filepath.ToSlash(trimmed)
+	normalized := filepath.ToSlash(raw)
 	normalized = strings.TrimPrefix(normalized, "./")
 	normalized = path.Clean(normalized)
 	if normalized == "." || normalized == "" || normalized == ".git" || strings.HasPrefix(normalized, ".git/") {
