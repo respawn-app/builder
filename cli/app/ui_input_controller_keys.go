@@ -44,6 +44,24 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
+	if isDeleteCurrentLineKey(msg) {
+		if m.isInputLocked() {
+			return m, nil
+		}
+		m.deleteCurrentInputLine()
+		return m, nil
+	}
+	if !m.isInputLocked() {
+		switch msg.Type {
+		case tea.KeyTab, tea.KeyEnter:
+			if m.shouldBlockPathReferenceAcceptanceKey() {
+				return m, nil
+			}
+			if m.acceptPathReferenceSelection() {
+				return m, nil
+			}
+		}
+	}
 	if isQueueSubmissionKey(msg) {
 		text := strings.TrimSpace(m.input)
 		if text == "" {
@@ -60,32 +78,33 @@ func (c uiInputController) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return c.queueOrStartSubmission(text)
 	}
-	if isDeleteCurrentLineKey(msg) {
-		if m.isInputLocked() {
-			return m, nil
-		}
-		m.deleteCurrentInputLine()
-		return m, nil
-	}
 	if !m.isInputLocked() && !msg.Alt {
 		switch msg.Type {
 		case tea.KeyUp:
+			if m.navigateSlashCommandPicker(-1) {
+				return m, nil
+			}
+			if m.navigatePathReferencePicker(-1) {
+				return m, nil
+			}
 			if handled, cmd := c.handlePromptHistoryKey(-1); handled {
 				return m, cmd
 			}
 		case tea.KeyDown:
+			if m.navigateSlashCommandPicker(1) {
+				return m, nil
+			}
+			if m.navigatePathReferencePicker(1) {
+				return m, nil
+			}
 			if handled, cmd := c.handlePromptHistoryKey(1); handled {
 				return m, cmd
 			}
-		}
-	}
-	if !m.isInputLocked() && !msg.Alt {
-		switch msg.Type {
-		case tea.KeyUp, tea.KeyLeft:
+		case tea.KeyLeft:
 			if m.navigateSlashCommandPicker(-1) {
 				return m, nil
 			}
-		case tea.KeyDown, tea.KeyRight:
+		case tea.KeyRight:
 			if m.navigateSlashCommandPicker(1) {
 				return m, nil
 			}

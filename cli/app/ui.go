@@ -379,6 +379,7 @@ type uiModel struct {
 	runtimeEvents           <-chan clientui.Event
 	pendingRuntimeEvents    []clientui.Event
 	askEvents               <-chan askEvent
+	pathReferenceEvents     <-chan uiPathReferenceSearchEvent
 	runtimeConnectionEvents <-chan runtimeConnectionStateChangedMsg
 
 	input                    string
@@ -419,6 +420,8 @@ type uiModel struct {
 	slashCommandFilter    string
 	slashCommandFilterSet bool
 	slashCommandSelection int
+	pathReferenceSearch   uiPathReferenceSearch
+	pathReference         uiPathReferenceState
 	exitAction            UIAction
 	theme                 string
 	tuiAlternateScreen    config.TUIAlternateScreenPolicy
@@ -552,6 +555,11 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 	for _, opt := range opts {
 		opt(m)
 	}
+	if m.pathReferenceSearch == nil {
+		m.pathReferenceSearch = newUIPathReferenceSearch()
+		m.pathReferenceEvents = m.pathReferenceSearch.Events()
+	}
+	m.refreshAutocompleteFromInput()
 	if configurable, ok := m.engine.(interface{ SetConnectionStateObserver(func(error)) }); ok {
 		runtimeConnectionEvents := make(chan runtimeConnectionStateChangedMsg, 1)
 		m.runtimeConnectionEvents = runtimeConnectionEvents
@@ -593,6 +601,12 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 	}
 	if startupNativeHistoryCmd != nil {
 		m.startupCmds = append(m.startupCmds, startupNativeHistoryCmd)
+	}
+	if m.pathReferenceSearch != nil && strings.TrimSpace(m.statusConfig.WorkspaceRoot) != "" {
+		m.startupCmds = append(m.startupCmds, func() tea.Msg {
+			m.pathReferenceSearch.StartPrewarm(strings.TrimSpace(m.statusConfig.WorkspaceRoot))
+			return nil
+		})
 	}
 	m.syncViewport()
 	return m
@@ -687,6 +701,7 @@ func (m *uiModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		m.waitRuntimeEventCmd(),
 		waitAskEvent(m.askEvents),
+		waitPathReferenceSearchEvent(m.pathReferenceEvents),
 		tea.SetWindowTitle(m.windowTitle()),
 		tea.WindowSize(),
 	}
@@ -843,6 +858,22 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.askController().acceptEvent(msg.event)
 		m.syncViewport()
 		return m, waitAskEvent(m.askEvents)
+	case uiPathReferenceCorpusReadyMsg:
+		m.handlePathReferenceCorpusReady(msg)
+		m.syncViewport()
+		return m, waitPathReferenceSearchEvent(m.pathReferenceEvents)
+	case uiPathReferenceCorpusFailedMsg:
+		m.handlePathReferenceCorpusFailed(msg)
+		m.syncViewport()
+		return m, waitPathReferenceSearchEvent(m.pathReferenceEvents)
+	case uiPathReferenceMatchResultMsg:
+		m.handlePathReferenceMatchResult(msg)
+		m.syncViewport()
+		return m, waitPathReferenceSearchEvent(m.pathReferenceEvents)
+	case uiPathReferenceLoadingDelayMsg:
+		m.handlePathReferenceLoadingDelay(msg)
+		m.syncViewport()
+		return m, waitPathReferenceSearchEvent(m.pathReferenceEvents)
 	case clearTransientStatusMsg:
 		if msg.token == m.transientStatusToken {
 			m.transientStatus = ""
@@ -1030,6 +1061,15 @@ func (m *uiModel) forwardToView(msg tea.Msg) {
 
 func (m *uiModel) Action() UIAction {
 	return m.exitAction
+}
+
+func (m *uiModel) Close() {
+	if m == nil || m.pathReferenceSearch == nil {
+		return
+	}
+	m.pathReferenceSearch.Stop()
+	m.pathReferenceSearch = nil
+	m.pathReferenceEvents = nil
 }
 
 func (m *uiModel) Transition() UITransition {
