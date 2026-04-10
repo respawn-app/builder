@@ -37,19 +37,26 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 ## Project, Session, And Run Model
 
 - `project` is the primary top-level server resource.
-- Each project is a durable server-local registration that permanently maps 1:1 to exactly one repository, one canonical workspace root, and one durable project or session container.
-- Repository identity is part of the canonical project record, but protocol identity remains the opaque `project_id` rather than repo metadata.
-- Project persistence remains partitioned per project through that single durable project container, even though clients must not treat storage layout as protocol identity.
-- Reopening the same canonical root attaches to the same canonical project rather than creating a duplicate.
-- Equivalent paths or symlink/path-spelling variants should canonicalize and deduplicate to the same project.
-- Canonical project metadata includes at least: stable `project_id`, display name, canonical root path, availability state, repository metadata when available, and session summary metadata.
+- A project is a durable server-owned work container and may span multiple workspaces; it is not defined by one path.
+- `workspace` is a child resource of `project`.
+- Each workspace is a durable server-local registration that maps 1:1 to exactly one canonical execution root.
+- `worktree` is optional child metadata of a git-backed workspace, not of project directly.
+- Worktrees must not become the thing that defines project identity.
+- Protocol identity remains opaque server ids such as `project_id`, `workspace_id`, and `worktree_id`; filesystem paths and git metadata are never protocol identity.
+- Equivalent paths or symlink/path-spelling variants should canonicalize and deduplicate to the same workspace/worktree record rather than creating duplicates.
+- Canonical project metadata includes at least: stable `project_id`, display name, availability state, workspace summary metadata, and session summary metadata.
+- Canonical workspace metadata includes at least: stable `workspace_id`, canonical root path, availability state, optional git metadata when available, and worktree summary metadata.
 - Projects have server-stored display names decoupled from filesystem folder names.
 - A single server process may host multiple projects.
 - Project discovery and registration are first-class server capabilities.
-- Project registration requires the root path to exist and be accessible at registration time.
 - Registering a new project is an explicit step; opening or attaching to an unseen path must not implicitly create a project.
-- Project root is immutable after registration.
+- Registering the first workspace in a project requires the root path to exist and be accessible at registration time.
+- Workspace root is immutable after registration unless the user explicitly rebinds the workspace after relocation.
+- Git remains the source of truth for existing worktrees. Builder may store additive metadata and links, but it does not own a mirrored authoritative worktree registry in v1.
 - Sessions are partitioned by project.
+- A session belongs to a project and carries a current execution target like `(workspace_id, worktree_id?, cwd_relpath)` as shared server-owned state.
+- Session lists and pickers are project-wide; current workspace/worktree context is surfaced as session metadata rather than treated as session identity.
+- The initial user-facing CLI UX may stay workspace-first even though the server model is project-aware.
 - A session is the durable conversational and work container.
 - A session may contain multiple runs over time.
 - A run is a single execution attempt or span within a session.
@@ -64,9 +71,20 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 
 - Preserving existing product functionality is mandatory.
 - Exact CLI interaction parity is not mandatory; UX flows, protocol shape, and presentation may change where the new architecture benefits from it.
-- Existing persisted sessions must remain loadable, either directly or through lazy migration or adoption.
+- Existing persisted sessions must remain loadable through the one-time staged migration.
 - v1 remains single-user, but the protocol and storage boundaries must not block future authn/authz or multi-user expansion.
 - Project removal and archive feature work are out of scope for this migration.
+
+## Persistence
+
+- Builder adopts hybrid persistence rather than remaining filesystem-only.
+- SQLite is authoritative for structured metadata and server-owned resources.
+- Large append-only session artifacts such as `events.jsonl` and `steps.log` remain file-backed for now.
+- `session.json` is removed after successful migration; session metadata authority moves to SQLite.
+- Interactive session creation remains lazily durable.
+- The one-time storage migration is blocking at startup, stages metadata before cutover, and preserves the old tree as a timestamped backup after success.
+- Workspace relocation is not auto-rebound; rebinding is explicit user action.
+- SQL is hand-written and explicit; typed DB access should be generated via `sqlc` rather than delegated to a heavy ORM.
 
 ## Auth And Execution
 
@@ -124,13 +142,18 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 - Subscriptions are live-only; initial state should come from separate explicit queries or hydration views rather than being bundled into subscribe.
 - The server must expose typed hydration views sufficient for startup, session main view, process inspection, and pending asks or approvals.
 - Broad filesystem or runtime inspection APIs are not mandated up front; that surface should expand only when implementation proves a real need.
+- Runtime leases are explicit server-side identities, but reconnect does not reclaim an old lease id. Clients rehydrate, reattach, and acquire a fresh lease; active runs remain server-owned and continue independently.
 
 ## Startup And Composition
 
-- CLI local server discovery should use a well-known local control endpoint or socket with compatibility handshake.
+- CLI local server discovery should use an app-global well-known local control endpoint or socket with compatibility handshake; discovery must not remain workspace-scoped after the temporary Phase 3 bridge is removed.
 - Compatibility should be established through a dedicated initial handshake method before attach or query calls.
 - Session attachment and event subscription should be separate explicit protocol steps.
 - `attach` should acknowledge plus return minimal attached-resource metadata such as ids and kinds, but not snapshots.
 - Project attachment establishes context only; project and session index snapshots remain explicit queries.
+- Server handshake identity should describe the server process and capabilities, not imply that the server is scoped to one project or workspace.
+- When CLI startup cwd does not resolve to any registered project/workspace/worktree, the user should see a project picker with explicit registration choices. Creating a new project may attach the current workspace as the first workspace and remember the current root as the main worktree when appropriate.
+- Selecting an existing project from that flow should ask whether to attach the current workspace to that project or exit; registration remains explicit.
+- CLI UX may remain workspace-first outside that startup or registration flow. Projects need not become a broad first-class navigation surface in the TUI yet.
 - If the CLI started an embedded local server, CLI exit should prompt every time for the intended server lifecycle rather than assuming a shutdown policy.
 - That exit prompt should present neutral choices without a recommended default.

@@ -96,7 +96,16 @@
 - Sessions support stop/resume.
 - Persistence root is configurable; default `~/.builder`.
 - Storage layout is workspace-scoped containers (`<workspace-folder-name>-<random-uuid>`) with UUID session directories.
-- Session persistence format: split `session.json` + `events.jsonl`.
+- The server-driven migration target uses hybrid persistence: SQLite is authoritative for structured metadata and server-owned resources; large append-only session artifacts stay file-backed.
+- The durable domain model is `project > workspace > worktree`; legacy workspace-scoped containers are migration input, not future protocol identity.
+- Sessions remain project-scoped durable objects and carry a mutable current execution target `(workspace_id, worktree_id?, cwd_relpath)`.
+- For the migration's runtime-residency model, lease identity is explicit and distinct from `client_request_id`; reconnect rehydrates, reattaches, and acquires a fresh lease rather than reclaiming an abandoned one.
+- Post-migration, `session.json` is removed. Session metadata authority moves to SQLite. `events.jsonl` and `steps.log` remain file-backed for now.
+- Interactive session creation remains lazily durable; creating a new interactive session does not immediately force durable metadata writes.
+- The one-time storage migration is blocking at startup, stages the new database/layout before cutover, and keeps the old tree as a timestamped backup after success.
+- Workspace path rebinding after relocation is always explicit user action; Builder must not auto-rebind inferred matches.
+- Database access for the migration architecture is SQL-first and explicit. Prefer typed code generation from hand-written SQL (`sqlc`) plus SQL migrations over ORM-owned schema/runtime state.
+- Session persistence format today is split `session.json` + `events.jsonl`.
 - `events.jsonl` is append-only on normal writes; periodic compaction rewrites canonical JSONL to control long-session growth.
 - Session directory names are UUID-only.
 - Session start/setup becomes immutable at first model request dispatch.
@@ -335,6 +344,7 @@
 - Startup shows recent sessions with pick-or-new flow.
 - Startup session list is scrollable with no cap.
 - If no sessions exist, startup goes directly to new-session setup.
+- In the server-driven migration target, when CLI startup cwd does not resolve to a registered project/workspace/worktree, startup enters a project-picker/registration flow rather than auto-registering. That flow may create a new project and attach the current workspace as its first workspace/main worktree, or add the current workspace to an existing project after explicit confirmation. Outside that flow, the CLI remains workspace-first.
 
 ## Slash Commands
 

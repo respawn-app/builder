@@ -8,8 +8,8 @@ If an item appears under `Blockers Before Implementation`, the migration plan sh
 
 ### Data Adoption Strategy
 
-- Exact lazy migration or adoption mechanics for existing persisted session data.
-- Minimum metadata additions required for project registry, run metadata, approval state, and process metadata without forcing destructive storage rewrite.
+- Exact cutover verification and recovery procedure if the final staged migration step fails after the old tree has already been moved into backup space.
+- Exact legacy-to-new mapping for edge cases such as malformed `session.json`, missing `events.jsonl`, or partially durable lazy sessions discovered during migration.
 
 ### Boundary Enforcement
 
@@ -23,8 +23,22 @@ If an item appears under `Blockers Before Implementation`, the migration plan sh
 
 ### Local Discovery And Startup UX
 
-- Exact local discovery mechanism for the well-known local control endpoint or socket across supported operating systems.
+- Exact app-global local discovery mechanism for the well-known local control endpoint or socket across supported operating systems once workspace-scoped discovery is removed.
 - Exact attach-or-start CLI UX when a compatible or incompatible local server is already present.
+- Exact startup flow when the user's current cwd resolves to a known project but unknown worktree.
+
+### Phase 4 Project Scope
+
+- Exact availability aggregation rules from workspace/worktree state to project state.
+
+### Hybrid Storage Details
+
+- Exact SQLite table boundaries for session metadata versus auxiliary JSON columns.
+- Exact repair rules for SQLite summary drift after transcript-file append succeeds but metadata transaction fails.
+
+### Runtime Lease Contract
+
+- Exact disconnect cleanup policy and timeout model for abandoned leases.
 
 ## Later Schema Questions
 
@@ -53,3 +67,9 @@ These are intentionally no longer open:
 - Runtime tuning operations such as `/thinking` and `/fast` are session-scoped live settings rather than per-run-only settings.
 - Current ask/approval restart behavior is transcript-driven rather than broker-queue-driven: interrupted tool-call attempts remain in conversation state, reopen appends the interruption marker, and the next model turn re-evaluates what to do.
 - Pending asks and approvals are delivered live through a dedicated prompt activity stream; `ask.listPendingBySession` and `approval.listPendingBySession` remain hydration reads rather than the primary live-delivery path.
+
+Resolved storage and migration policy now lives in:
+
+- `spec/persistence-model.md`
+- `spec/locked-decisions.md`
+- `docs/dev/decisions.md`

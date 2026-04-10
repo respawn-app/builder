@@ -1,12 +1,10 @@
 # App Server Migration Plan
 
-Status: draft phased plan
-
 This is the current implementation-planning baseline derived from the migration requirements and external architecture review.
 
 The plan is intentionally incremental. It keeps the product working throughout and avoids wrapping the current monolith in transport before the real boundaries exist.
 
-## Phase 0: Freeze Behavior And Define Proof Obligations
+## Phase 0: Freeze Behavior And Define Proof Obligations - DONE
 
 Deliverables:
 
@@ -36,7 +34,7 @@ Parallelizable work:
 - storage audit
 - acceptance-harness design
 
-## Phase 1: Create A Transport-Neutral Server API In Process
+## Phase 1: Create A Transport-Neutral Server API In Process - DONE
 
 Goal:
 
@@ -103,7 +101,7 @@ Rollback point:
 
 - thin adapters may temporarily route selected flows through old internals while extraction completes, but only if the client-facing requests/responses/events remain transport-neutral and do not leak server-native types
 
-## Phase 2: Stabilize Resource Model, Hydration Views, And Event Hub
+## Phase 2: Stabilize Resource Model, Hydration Views, And Event Hub - DONE
 
 Goal:
 
@@ -143,7 +141,7 @@ Parallelizable work after the boundary exists:
 - approval and ask surface
 - CLI command remapping onto the new client interface
 
-## Phase 3: Add Real Transport And Local Daemon Mode
+## Phase 3: Add Real Transport And Local Daemon Mode - DONE PARTIAL
 
 Goal:
 
@@ -176,15 +174,125 @@ Rollback point:
 
 - keep the in-process transport adapter for tests and fallback while the network transport hardens
 
-## Phase 4: Multi-Client Correctness And Reconnect Hardening
+Phase 3 temporarily scoped servers to workspaces.
+
+## Phase 4: Storage Model Lock And Metadata Foundation
 
 Goal:
 
-Make the boundary reliable under the conditions that actually matter for future non-CLI clients.
+Lock the hybrid persistence architecture and introduce the new metadata authority without mixing it with reconnect hardening or broad multi-client proof work.
+
+This phase establishes the new durable model, the SQLite metadata store, and the server-global discovery identity that later phases depend on.
 
 Deliverables:
 
-- two real clients attached to one session in tests
+- hybrid persistence spec and source-of-truth split locked
+- SQLite selected as authoritative store for structured metadata/resources
+- SQL-first storage tooling direction locked (`sqlc` + explicit SQL migrations)
+- server identity/discovery no longer implies one workspace/project scope
+- top-level durable model finalized as `project > workspace > worktree`
+- workspace-first CLI startup and registration flow locked as the initial UX
+- session execution target model finalized as `(workspace_id, worktree_id?, cwd_relpath)`
+- explicit runtime lease model remains in scope, but implementation may follow the metadata cutover work
+
+Primary risks:
+
+- designing the new storage split too vaguely and re-opening it during implementation
+- keeping `session.json` alive as a shadow authority
+- dragging transcript-file redesign into the metadata migration
+
+Rollback point:
+
+- storage design artifacts can still be revised before live migration code lands
+
+## Phase 4A: SQLite Metadata Introduction
+
+Goal:
+
+Introduce the SQLite metadata plane and workspace/project catalog without migrating old data yet.
+
+Deliverables:
+
+- app-global server identity and discovery
+- SQLite schema for projects, workspaces, worktrees, sessions, runs, processes, asks/approvals, leases, and request deduplication
+- storage layer based on explicit SQL plus `sqlc`
+- session metadata authority moved behind the new storage layer even if legacy reads still exist during this subphase
+- workspace/path-resolution queries and registration mutations
+- CLI startup flow for unknown cwd specified against the new query/mutation surfaces
+
+Primary risks:
+
+- leaking old workspace-container assumptions into the new schema
+- over-modeling unstable nested metadata into wide tables instead of JSON columns
+
+Rollback point:
+
+- keep SQLite-backed metadata behind the storage boundary until migration/cutover is ready
+
+## Phase 4B: Staged Storage Migration And Session Metadata Cutover
+
+Goal:
+
+Perform the one-time storage migration from legacy workspace-container sessions into the hybrid model and remove `session.json` authority.
+
+Deliverables:
+
+- blocking startup migrator
+- staged metadata build and validation before cutover
+- final cutover into the new project/session artifact layout
+- timestamped backup of the old tree after success
+- `session.json` removed from migrated session directories
+- lazy interactive session creation preserved under the new metadata authority
+- workspace relocation surfaced as explicit rebind UX only
+
+Primary risks:
+
+- migration failure after partial cutover
+- losing legacy session metadata that currently lives only in `session.json`
+- startup regressions caused by lazy-session semantics changing accidentally
+
+Rollback point:
+
+- keep the timestamped backup tree and require successful verification before normal startup resumes
+
+## Phase 4C: Execution Target And Lease Cutover
+
+Goal:
+
+Finish the new execution-target and runtime-lease model on top of the migrated storage foundation.
+
+Deliverables:
+
+- session execution target stored as shared server-owned metadata
+- session hydration/status surfaces expose workspace/worktree context from SQLite metadata
+- runtime activation/release redesigned around explicit `lease_id`
+- duplicate-safe activate/release semantics
+- reconnect reacquires a fresh lease after hydrate/attach
+- process/runtime/session mutations route through the new metadata authority cleanly
+
+Primary risks:
+
+- runtime lease leaks
+- hidden frontend-local workspace assumptions in runtime/tool preparation
+
+Rollback point:
+
+- keep transcript correctness recoverable through hydrate-plus-resubscribe even if execution-target UX is still incomplete
+
+Storage migration scope ends at Phase 4C.
+
+The remaining phases are post-storage hardening and proof work.
+
+## Phase 5: Multi-Client Correctness And Reconnect Hardening
+
+Goal:
+
+With the storage migration complete, harden the actual multi-client and reconnect behavior.
+
+Deliverables:
+
+- two real clients from different workspaces attached to one server in tests
+- two real clients attached to the same session on the same server
 - deterministic approval and ask race handling
 - reconnect with hydration-first recovery
 - transcript paging/compression strategy for large-session rehydrate
@@ -204,15 +312,14 @@ Deliverables:
 
 Primary risks:
 
-- duplicate submissions after reconnect or retry
-- slow-client memory growth
-- ambiguous queue semantics during active runs
+- runtime lease leaks or premature runtime release during disconnect/reconnect churn
+- stale transcript or live-state divergence after the metadata cutover
 
 Rollback point:
 
-- if any live stream proves too fragile under load, drop the stream and keep reconnect strictly snapshot/page based until a stronger read model exists
+- keep live-stream correctness recoverable through hydrate-plus-resubscribe even if progressive stream behavior remains incomplete
 
-## Phase 5: Data Adoption, Standalone Polish, And Boundary Proof
+## Phase 6: Standalone Polish And Boundary Proof
 
 Goal:
 
@@ -220,13 +327,11 @@ Finish the migration by proving the CLI is now just one frontend.
 
 Deliverables:
 
-- lazy adoption or migration of existing session data
 - project missing and inaccessible states handled cleanly
-- server identity surfaced in the frontend
-- at least one minimal non-CLI reference or test client
 - CI boundary enforcement active
 - acceptance suite able to run against external-daemon mode only
 - final state-management proof that no frontend projection, pagination window, native transcript flush queue, or transport cache is treated as durable transcript truth
+- non-CLI boundary proof against the migrated storage model
 - protocol/documentation cleanup for deferred transport-surface follow-ups that were intentionally held out of Phase 3 review fixes, including any remaining JSON-RPC envelope tightening that v1 frontends actually need rather than speculative spec-width expansion
 
 Primary risks:
@@ -247,7 +352,10 @@ Must remain sequential at the high level:
 2. transport-neutral service boundary
 3. resource and hydration model
 4. real transport
-5. multi-client hardening and data adoption
+5. storage design and metadata foundation
+6. staged migration and execution-target cutover
+7. multi-client hardening
+8. standalone proof
 
 Reason:
 
@@ -267,5 +375,9 @@ Can be parallelized once phase 1 exists:
 - Phase 1 exit gate: at minimum the `builder run` flow and migrated launch/run flows no longer depend on privileged runtime access, and the frontend reaches them only through the client boundary.
 - Phase 2 foundation exit gate: second client can hydrate and observe one session in tests. Status: satisfied.
 - Phase 3 exit gate: CLI works against embedded and external server through the same client boundary.
-- Phase 4 exit gate: reconnect, approval races, slow-subscriber failure modes, and the single-authority committed-transcript model are covered.
-- Phase 5 exit gate: existing data adoption works and a non-CLI client can complete the baseline workflow set.
+- Phase 4 exit gate: hybrid persistence, durable model, and startup/registration/storage-tooling direction are fully locked.
+- Phase 4A exit gate: SQLite metadata plane exists behind the storage boundary and the server-global workspace/project model is queryable.
+- Phase 4B exit gate: one-time staged migration succeeds and `session.json` no longer exists in migrated sessions.
+- Phase 4C exit gate: session execution targets and runtime leases use the new metadata authority correctly.
+- Phase 5 exit gate: reconnect, approval races, slow-subscriber failure modes, and the single-authority committed-transcript model are covered.
+- Phase 6 exit gate: the migrated storage model is proven under external-daemon mode and a non-CLI client can complete the baseline workflow set.

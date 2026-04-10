@@ -86,6 +86,8 @@ If short-name resolution is stale on a machine, use the fully qualified formula 
 brew install respawn-app/tap/builder-cli
 ```
 
+6. Cleanup the brew and direct installs after yourself so that developers' symlink to the built executable starts working (check with `which builder`)
+
 ## Notes
 
 - Installed binary name stays `builder`. Formula name is `builder-cli`.

@@ -2,6 +2,12 @@
 
 Status: complete
 
+Historical note:
+
+- This file is a closed Phase 3 ledger.
+- Its single-workspace daemon scope is intentionally historical.
+- Phase 4 is responsible for the later app-global server transition and project/workspace/worktree model.
+
 Purpose:
 
 - preserve the final Phase 3 checklist state after the transport/daemon migration landed
