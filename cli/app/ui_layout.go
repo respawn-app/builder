@@ -63,7 +63,7 @@ func (l uiViewLayout) composeStandardFrame(style uiStyles) (uiRenderFrame, bool)
 	if m.view.Mode() != tui.ModeDetail {
 		frame.inputPane = l.renderInputLines(width, style)
 		frame.queuePane = l.renderQueuedMessagesPane(width)
-		frame.pickerPane = l.renderSlashCommandPicker(width)
+		frame.pickerPane = l.renderActivePicker(width)
 	}
 	frame.helpPane = l.renderHelpPane(width, helpPaneMaxLines(height, len(frame.inputPane), len(frame.queuePane), len(frame.pickerPane)), style)
 	chatLines := height - len(frame.inputPane) - len(frame.queuePane) - len(frame.pickerPane) - len(frame.helpPane) - 1
@@ -136,7 +136,7 @@ func (l uiViewLayout) composeNativeSizedFrame(style uiStyles) (uiRenderFrame, na
 	frame := uiRenderFrame{
 		width:       width,
 		height:      height,
-		pickerPane:  l.renderSlashCommandPicker(width),
+		pickerPane:  l.renderActivePicker(width),
 		queuePane:   l.renderQueuedMessagesPane(width),
 		inputPane:   l.renderInputLines(width, style),
 		statusLine:  l.renderStatusLine(width, style),
@@ -168,15 +168,15 @@ func (l uiViewLayout) nativeOngoingLineCount() int {
 	}
 	inputLines := l.renderInputLines(width, style)
 	queuedLines := l.renderQueuedMessagesPane(width)
-	pickerLines := l.renderSlashCommandPicker(width)
+	pickerLines := l.model.activePickerPresentation().lineCount
 	height := l.effectiveHeight()
-	helpLines := l.renderHelpPane(width, helpPaneMaxLines(height, len(inputLines), len(queuedLines), len(pickerLines)), style)
-	availableStreamingLines := height - len(pickerLines) - len(queuedLines) - len(inputLines) - len(helpLines) - 1
+	helpLines := l.renderHelpPane(width, helpPaneMaxLines(height, len(inputLines), len(queuedLines), pickerLines), style)
+	availableStreamingLines := height - pickerLines - len(queuedLines) - len(inputLines) - len(helpLines) - 1
 	if availableStreamingLines < 0 {
 		availableStreamingLines = 0
 	}
 	streamingLines := l.renderNativeStreamingLines(width, availableStreamingLines, style)
-	return len(inputLines) + len(queuedLines) + len(pickerLines) + len(helpLines) + len(streamingLines) + 1
+	return len(inputLines) + len(queuedLines) + pickerLines + len(helpLines) + len(streamingLines) + 1
 }
 
 func (l uiViewLayout) renderNativeStreamingLines(width, maxLines int, style uiStyles) []string {

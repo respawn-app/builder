@@ -21,7 +21,7 @@ func (m *uiModel) renderInputLines(width int, style uiStyles) []string {
 }
 
 func (m *uiModel) renderSlashCommandPicker(width int) []string {
-	return m.layout().renderSlashCommandPicker(width)
+	return m.layout().renderActivePicker(width)
 }
 
 func (m *uiModel) renderQueuedMessagesPane(width int) []string {
