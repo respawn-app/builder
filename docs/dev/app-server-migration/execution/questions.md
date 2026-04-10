@@ -1,5 +1,11 @@
 # Questions And Assumptions
 
+Historical note:
+
+- This file records Phase 3 execution answers.
+- Workspace-scoped discovery, handshake identity, and single-workspace daemon assumptions here are historical Phase 3 constraints, not current migration targets.
+- Phase 4 planning and spec files supersede those assumptions.
+
 Purpose:
 
 - record questions that cannot block execution while the user is away
@@ -32,6 +38,14 @@ The user requested that work continue through automated continue prompts until P
 
 7. What should default CLI mode selection do once external daemon mode exists?
    - Answer: prefer attaching to a compatible running daemon for the workspace; if none exists, attempt local daemon startup; embedded mode remains the fallback path using the same shared boundary.
+
+## Superseded By Phase 4
+
+- The long-term discovery model is app-global rather than workspace-scoped.
+- Server handshake identity should describe the server process and capabilities rather than imply one workspace/project scope.
+- The durable domain model is now `project > workspace > worktree`, with sessions carrying mutable execution targets.
+- CLI startup for unknown cwd should enter an explicit project-picker/registration flow rather than auto-creating anything.
+- Runtime leases are explicit server-side identities; reconnect rehydrates, reattaches, and acquires a fresh lease.
 
 ## Open Questions (Do Not Block Execution)
 

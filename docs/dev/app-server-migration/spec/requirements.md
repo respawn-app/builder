@@ -60,7 +60,7 @@ The resulting frontends should:
 - Committed transcript state and ephemeral live activity are separate consistency domains and must not share an implicit source of truth.
 - Reconnect and hydration are snapshot/page based. The protocol does not require a stream-history or cursor recovery contract for correctness.
 - The protocol must distinguish durable state changes from high-rate live feeds.
-- Existing persisted sessions must remain loadable, either directly or through lazy server migration/adoption.
+- Existing persisted sessions must remain loadable through the one-time startup migration.
 - The server binds locally by default. Remote listeners require explicit opt-in.
 - The persistence layout remains a server implementation detail, not part of the frontend contract.
 
@@ -220,19 +220,25 @@ The server must support multiple projects within one running process.
 Requirements:
 
 - `project` is the primary top-level server resource,
-- each project is a durable server-local registration that permanently maps 1:1 to exactly one repository, one canonical workspace root, and one durable project or session container,
-- repository identity is expected and part of the canonical project record, but protocol identity remains the opaque `project_id` rather than repo metadata,
-- project persistence remains partitioned per project through that single durable project container, even though clients must not treat storage layout as protocol identity,
-- reopening the same canonical root resolves to the same project rather than creating a duplicate,
-- equivalent paths or symlink/path-spelling variants must canonicalize and deduplicate to the same project registration,
-- canonical project metadata includes at least stable `project_id`, display name, canonical root path, availability state, repository metadata when available, and session summary metadata,
-- project availability states must cover at least `available`, `missing`, and `inaccessible`,
+- a project is a durable server-owned work container and may span one or more workspaces,
+- `workspace` is a first-class child resource of `project`,
+- each workspace is a durable server-local registration that maps 1:1 to exactly one canonical execution root,
+- `worktree` is optional workspace-scoped execution-target metadata rather than a project identity primitive,
+- workspace and worktree identity may inform canonical records, but protocol identity remains opaque server ids such as `project_id`, `workspace_id`, and `worktree_id`,
+- project persistence remains partitioned per project through one durable project container, even though clients must not treat storage layout as protocol identity,
+- reopening the same canonical workspace root resolves to the same workspace registration rather than creating a duplicate,
+- equivalent paths or symlink/path-spelling variants must canonicalize and deduplicate to the same workspace or worktree registration,
+- canonical project metadata includes at least stable `project_id`, display name, availability state, workspace summary metadata, and session summary metadata,
+- canonical workspace metadata includes at least stable `workspace_id`, canonical root path, availability state, optional git metadata when available, and worktree summary metadata,
+- project and workspace availability states must cover at least `available`, `missing`, and `inaccessible`,
 - projects have server-stored display names decoupled from filesystem folder names,
 - the server can discover or register projects at runtime through first-class capabilities,
-- project registration requires the root path to exist and be accessible at registration time,
 - registering a new project is an explicit step; opening or attaching to an unseen path must not implicitly create a project,
-- project root is immutable after registration,
-- sessions are associated with a project.
+- registering the first workspace in a project requires the root path to exist and be accessible at registration time,
+- workspace root is immutable after registration unless explicitly rebound after relocation,
+- git remains the source of truth for existing worktrees; Builder stores only the additive metadata and links required for its own product behavior,
+- the initial CLI UX may stay workspace-first so long as the server model and query surface already admit multiple workspaces per project,
+- sessions are associated with a project and carry a current execution target inside that project.
 
 ## Session, Run, And Process Model
 
@@ -242,6 +248,8 @@ Requirements:
 
 - a session is the durable conversational and work container,
 - a session may accumulate multiple runs over time,
+- a session carries a mutable current execution target that identifies the workspace, optional worktree, and subdirectory the server should execute against,
+- execution target is shared server-owned session state, not a client-local preference,
 - a run is a single execution attempt or span inside a session,
 - v1 permits at most one active primary run per session,
 - runtime tuning operations such as `/thinking` and `/fast` are session-scoped live settings rather than per-run-only settings,
@@ -257,6 +265,8 @@ Requirements:
 
 - mutating operations are serialized through authoritative per-session ordering,
 - every mutating request is idempotent through `client_request_id` within a documented server-side retention window,
+- runtime activation and release must use an explicit lease identity distinct from `client_request_id`,
+- reconnect acquires a fresh runtime lease after hydrate/attach rather than reclaiming an abandoned lease id,
 - duplicate retries must not create duplicate prompt submissions, duplicate approvals, or duplicate process-control actions,
 - the server must define which operations are rejected while a primary run is already active,
 - reads remain available regardless of active-run state,
@@ -273,6 +283,23 @@ Requirements:
 - tool results, approvals, and process control are authoritative on the server,
 - remote attachment must not change the execution target,
 - any future execution-target abstraction would require a deliberate product decision and must not be assumed by this migration.
+
+## Persistence Requirements
+
+The storage migration must converge on a hybrid persistence model.
+
+Requirements:
+
+- SQLite is authoritative for structured metadata and server-owned resources,
+- large append-only session artifacts remain file-backed for now,
+- `events.jsonl` remains the authority for committed transcript payloads during the hybrid phase,
+- `session.json` is removed after successful migration and must not remain a second metadata authority,
+- the schema should stay intentionally narrow, using JSON columns for unstable nested metadata instead of mirroring the full transcript/runtime payload model into wide relational tables,
+- the migration uses explicit SQL plus typed generated accessors rather than framework-owned ORM persistence,
+- the one-time migration is blocking at startup and stages metadata before cutover,
+- successful migration preserves the old tree as a timestamped backup,
+- interactive session creation remains lazily durable,
+- workspace relocation requires explicit user rebind rather than silent automatic reassignment.
 
 ## Approval And Ask Flows
 
@@ -331,13 +358,17 @@ The CLI frontend must remain a first-class frontend, not a privileged special ca
 Requirements:
 
 - it discovers local servers through a well-known local control endpoint or socket plus compatibility handshake,
+- local discovery is app-global rather than workspace-scoped once the temporary Phase 3 bridge is removed,
 - it can attach to an existing compatible server,
 - it can start or embed a local server when needed,
+- if startup cwd does not resolve to any registered project/workspace/worktree, the CLI shows an explicit project-picker or registration flow rather than implicitly creating a project,
+- that startup flow may create a new project and attach the current workspace as its first workspace, or add the current workspace to an existing project after explicit confirmation,
 - if it started an embedded local server, exit flow prompts for the intended server lifecycle instead of assuming shutdown behavior,
 - that exit flow presents neutral choices without a recommended default,
 - it uses the same client boundary that future frontends will use,
 - it preserves all existing product functionality at the product level,
-- it is allowed to redesign UX where appropriate for the new architecture.
+- it is allowed to redesign UX where appropriate for the new architecture,
+- CLI UX may stay workspace-first outside startup or registration flows even though the server model is project-aware.
 
 The CLI should remain able to cover the existing product surface, including session selection, session resume, prompts, asks, approvals, process visibility and control, and current core workflows.
 
@@ -351,7 +382,7 @@ Requirements:
 - frontends authenticate to the builder server rather than directly to upstream providers,
 - the default listener is local-only and non-routable,
 - remote bind or remote-safe auth is explicit and off by default,
-- the handshake must expose enough server identity and capability information for the frontend to show which execution host it is attached to,
+- the handshake must expose enough server identity and capability information for the frontend to show which execution host it is attached to, without implying that the server itself is scoped to one project or workspace,
 - the protocol boundary and storage model must admit future frontend authn/authz without breaking the architecture.
 
 Remote-safe authn/authz is not required to be implemented in this migration.
@@ -391,9 +422,11 @@ Compatibility may be delivered through new protocol operations, compatibility ad
 The migration is only acceptable when all of the following are true:
 
 - A single running server can host multiple sessions across multiple projects.
+- Sessions can switch execution target within a project without changing session identity.
 - A CLI frontend can attach to that server and perform the current product workflows end to end.
 - A second frontend can attach to the same session, receive authoritative state and live activity, and issue control requests.
 - Reconnect works through authoritative hydration views and transcript pages.
+- Reconnect reacquires fresh runtime residency/leases without depending on reclaiming prior lease ids.
 - A CLI crash or disconnect does not stop an active run unless explicitly requested.
 - Duplicate retries do not create duplicate submissions, approvals, or process actions.
 - A slow subscriber receives an explicit gap or backpressure failure.

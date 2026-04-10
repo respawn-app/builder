@@ -10,19 +10,55 @@ Without this model, queue semantics, reconnect behavior, approval races, interru
 
 ## Project
 
-A `project` is a durable server-local registration that permanently maps 1:1 to exactly one repository, one canonical workspace root, and one durable project or session container.
+A `project` is a durable server-owned work container.
+
+It is the top-level grouping boundary for sessions, workspaces, and future workspace-management features.
+
+It may span one or more workspaces and is not defined by one path or one worktree path.
 
 Minimum fields:
 
 - `project_id`
-- repository identity
-- canonical root path
 - display name
 - availability state
-- repository metadata when available
+- workspace summary metadata
 - session summary metadata
 
 Protocol identity is always `project_id`, not a filesystem path.
+
+## Workspace
+
+A `workspace` is a durable child resource of `project` that maps 1:1 to exactly one canonical execution root.
+
+Minimum fields:
+
+- `workspace_id`
+- `project_id`
+- canonical workspace root path
+- availability state
+- optional git metadata when available
+- worktree summary metadata
+
+Protocol identity is `workspace_id`, not path spelling or git metadata.
+
+## Worktree
+
+A `worktree` is optional child metadata of a git-backed workspace and a candidate session execution target.
+
+Worktrees belong to workspaces, not projects directly.
+
+Git remains the source of truth for existing worktrees. Builder may store additive metadata and links, but it does not replace git as the authoritative worktree registry in v1.
+
+Minimum fields:
+
+- `worktree_id`
+- `workspace_id`
+- canonical worktree path
+- availability state
+- branch metadata when available
+- whether it is the primary workspace root worktree
+
+Protocol identity is `worktree_id`, not a path.
 
 ## Session
 
@@ -32,12 +68,15 @@ Minimum fields:
 
 - `session_id`
 - `project_id`
+- current execution target `(workspace_id, worktree_id?, cwd_relpath)`
 - durable transcript state
 - durable session metadata and config
 - lineage metadata
 - zero or more historical runs
 
 The session is the durable object a user resumes later.
+
+Changing workspace or worktree does not create a new session by itself; it updates shared session state.
 
 ## Run
 
@@ -102,6 +141,7 @@ This keeps session lineage meaningful and prevents the session inventory from be
 - v1 allows at most one active primary run per session.
 - Starting a new primary run while one is already active returns an explicit busy error.
 - Frontends may keep local queued-input or draft UX, but the server does not provide a cross-client queued primary-run facility in v1.
+- Session execution target is shared across attached frontends and must not be modeled as a client-local override.
 - Reads and hydration queries remain available regardless of active-run state.
 - Approval responses, ask responses, process control, and run interrupt remain available while a run is active.
 - Runtime tuning settings such as `/thinking` and `/fast` are session-scoped live settings. When a busy-state rule permits the update during an active run, the active run observes the new value and future runs inherit it until changed again.
@@ -131,6 +171,8 @@ If the migration changes any of these semantics, the change must be deliberate a
 - Mutating operations serialize per session.
 - Ordering is authoritative on the server, not inferred by clients.
 - Idempotency is keyed by `client_request_id` within explicit server-defined scope and retention window.
+- Runtime lease acquisition and release use a separate explicit lease identity rather than overloading request-id idempotency keys.
+- Reconnect does not resume or reclaim a previous lease id; the client rehydrates, reattaches, and acquires a fresh lease if it still needs runtime residency.
 - A duplicated mutating request must not create duplicated prompt submission, approval outcome, or process-control effect.
 
 The protocol must be explicit about whether a rejected operation failed because the session was busy, because a resource was already resolved, or because the caller sent a duplicate request.
@@ -149,6 +191,13 @@ The protocol must be explicit about whether a rejected operation failed because 
 - Attachment does not imply snapshot delivery.
 - A frontend attaches to a project or session context, then explicitly hydrates via typed reads, then subscribes to the streams it needs.
 - Frontends may attach to the same session concurrently.
+- Runtime residency or ownership must not rely on attach request ids; if the server keeps session runtime leases, those leases need explicit identity and disconnect cleanup semantics.
+
+## Phase 4 Scope Guardrail
+
+The storage migration should land the full `project > workspace > worktree` server model.
+
+However, the initial CLI UX may remain workspace-first as long as the server-side model, ids, and query surfaces do not hard-code that simplification.
 
 ## Note On Busy-State Interaction
 

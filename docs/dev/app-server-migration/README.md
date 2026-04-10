@@ -28,6 +28,12 @@ The doc set now distinguishes between:
 
 Planning can begin from this file group, but not by ignoring the blockers. Several questions that were previously framed as later protocol details are now explicitly treated as implementation-planning blockers.
 
+Historical note:
+
+- `execution/questions.md` and `execution/phase-3-todo.md` are now historical Phase 3 records.
+- Their workspace-scoped discovery and handshake assumptions are not current migration targets anymore.
+- Phase 4+ planning is authoritative for the global-server transition, `project > workspace > worktree`, workspace-first CLI startup flow, hybrid SQLite-plus-files persistence, staged startup migration, and explicit runtime-lease semantics.
+
 Implementation note:
 
 - Phase 3 transport work established live prompt delivery as a dedicated prompt activity stream alongside session activity and process output; the spec docs in this folder should treat that as part of the boundary rather than as a client-side polling convention.
@@ -39,6 +45,7 @@ Files:
 - `spec/requirements.md`: full product requirements spec for the migration.
 - `spec/locked-decisions.md`: decisions already locked for this feature.
 - `spec/session-run-model.md`: minimum project/session/run/process model and queue semantics baseline.
+- `spec/persistence-model.md`: hybrid SQLite-plus-files storage model, source-of-truth split, and staged migration design.
 - `spec/behavior-preservation.md`: compatibility inventory and proof obligations for preserving current behavior.
 - `spec/command-ownership.md`: command-surface inventory and ownership/mapping across the frontend-server boundary.
 - `spec/open-questions.md`: split between planning blockers and later schema questions.
@@ -46,6 +53,7 @@ Files:
 `planning/`
 
 - `planning/plan.md`: phased migration plan derived from the current requirements set.
+- `planning/phase-4-backlog.md`: concrete Phase 4 storage implementation backlog for project/workspace/worktree, cwd resolution, runtime leases, and migration steps.
 - `planning/phase-0-checkpoint.md`: executable pre-refactor checklist for Phase 0.
 - `planning/boundary-map.md`: initial repo-grounded frontend/server cut analysis.
 - `planning/phase-0-workstreams.md`: agent-ready parallel work packets for the current Phase 0 step.
