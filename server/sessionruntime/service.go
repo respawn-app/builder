@@ -92,7 +92,7 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 			handle, actualLeaseID, ok, ownsClaim := s.claimExistingHandleLease(sessionID, requestID, lease.LeaseID)
 			if !ok {
 				_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
-				continue
+				break
 			}
 			if actualLeaseID != lease.LeaseID {
 				_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
@@ -189,6 +189,7 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 	}
 	current, installed, actualLeaseID, ownsClaim := s.installHandle(sessionID, requestID, lease.LeaseID, handle)
 	if !installed {
+		_ = wiring.Close()
 		_ = logger.Close()
 		if actualLeaseID != lease.LeaseID {
 			_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
@@ -217,18 +218,19 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	leaseID := strings.TrimSpace(req.LeaseID)
+	leaseErr := error(nil)
 	if _, err := s.releaseRuntimeLease(ctx, sessionID, leaseID); err != nil {
-		return serverapi.SessionRuntimeReleaseResponse{}, err
+		leaseErr = err
 	}
 	s.mu.Lock()
 	handle := s.handles[sessionID]
 	if handle == nil {
 		s.mu.Unlock()
-		return serverapi.SessionRuntimeReleaseResponse{}, nil
+		return serverapi.SessionRuntimeReleaseResponse{}, leaseErr
 	}
 	if _, ok := handle.activeLeases[leaseID]; !ok {
 		s.mu.Unlock()
-		return serverapi.SessionRuntimeReleaseResponse{}, nil
+		return serverapi.SessionRuntimeReleaseResponse{}, leaseErr
 	}
 	delete(handle.activeLeases, leaseID)
 	for requestID, claimedLeaseID := range handle.activationRequests {
@@ -241,7 +243,7 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 	}
 	if handle.refs > 0 {
 		s.mu.Unlock()
-		return serverapi.SessionRuntimeReleaseResponse{}, nil
+		return serverapi.SessionRuntimeReleaseResponse{}, leaseErr
 	}
 	delete(s.handles, sessionID)
 	ready := handle.ready
@@ -253,7 +255,7 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 	if closeFn != nil {
 		closeFn()
 	}
-	return serverapi.SessionRuntimeReleaseResponse{}, nil
+	return serverapi.SessionRuntimeReleaseResponse{}, leaseErr
 }
 
 func (s *Service) resolveStore(ctx context.Context, sessionID string) (*session.Store, error) {
