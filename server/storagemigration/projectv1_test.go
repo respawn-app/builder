@@ -211,3 +211,27 @@ func TestEnsureProjectV1RejectsLegacySessionIDPathTraversal(t *testing.T) {
 		t.Fatalf("expected invalid session id rejection, got %v", err)
 	}
 }
+
+func TestCopySmallFileRejectsLargePayloadButCopyFileAllowsIt(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source.json")
+	target := filepath.Join(root, "target.json")
+	body := strings.Repeat("x", maxSmallCopyBytes+1)
+	if err := os.WriteFile(source, []byte(body), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	err := copySmallFile(source, target)
+	if err == nil || !strings.Contains(err.Error(), "small-file limit") {
+		t.Fatalf("expected small-file limit error, got %v", err)
+	}
+	if err := copyFile(source, target); err != nil {
+		t.Fatalf("copyFile: %v", err)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if len(data) != len(body) {
+		t.Fatalf("target size = %d, want %d", len(data), len(body))
+	}
+}
