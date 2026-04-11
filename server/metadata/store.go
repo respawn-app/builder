@@ -17,6 +17,8 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"github.com/google/uuid"
+	modernsqlite "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 var ErrWorkspaceNotRegistered = errors.New("workspace is not registered")
@@ -178,6 +180,10 @@ func (s *Store) RegisterWorkspaceBinding(ctx context.Context, workspaceRoot stri
 	projectID := "project-" + uuid.NewString()
 	workspaceID := "workspace-" + uuid.NewString()
 	displayName := filepath.Base(canonicalRoot)
+	return s.insertWorkspaceBinding(ctx, canonicalRoot, displayName, projectID, workspaceID, now)
+}
+
+func (s *Store) insertWorkspaceBinding(ctx context.Context, canonicalRoot string, displayName string, projectID string, workspaceID string, now time.Time) (Binding, error) {
 	if err := s.queries.UpsertProject(ctx, sqlitegen.UpsertProjectParams{
 		ID:              projectID,
 		DisplayName:     displayName,
@@ -198,6 +204,9 @@ func (s *Store) RegisterWorkspaceBinding(ctx context.Context, workspaceRoot stri
 		CreatedAtUnixMs:   now.UnixMilli(),
 		UpdatedAtUnixMs:   now.UnixMilli(),
 	}); err != nil {
+		if binding, recovered := s.recoverWorkspaceBindingAfterConstraint(ctx, canonicalRoot, projectID, err); recovered {
+			return binding, nil
+		}
 		return Binding{}, fmt.Errorf("upsert workspace: %w", err)
 	}
 	return Binding{
@@ -208,6 +217,33 @@ func (s *Store) RegisterWorkspaceBinding(ctx context.Context, workspaceRoot stri
 		WorkspaceName:   displayName,
 		WorkspaceStatus: availabilityForPath(canonicalRoot),
 	}, nil
+}
+
+func (s *Store) recoverWorkspaceBindingAfterConstraint(ctx context.Context, canonicalRoot string, projectID string, err error) (Binding, bool) {
+	if !isWorkspaceBindingConstraintError(err) {
+		return Binding{}, false
+	}
+	binding, lookupErr := s.lookupWorkspaceBinding(ctx, canonicalRoot)
+	if lookupErr != nil {
+		return Binding{}, false
+	}
+	_, _ = s.queries.DeleteProjectIfOrphaned(context.Background(), projectID)
+	return binding, true
+}
+
+func isWorkspaceBindingConstraintError(err error) bool {
+	var sqliteErr *modernsqlite.Error
+	if !errors.As(err, &sqliteErr) {
+		return false
+	}
+	switch sqliteErr.Code() {
+	case sqlite3.SQLITE_CONSTRAINT,
+		sqlite3.SQLITE_CONSTRAINT_UNIQUE,
+		sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Store) SyncLegacyContainer(ctx context.Context, containerDir string) error {

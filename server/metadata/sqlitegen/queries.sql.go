@@ -10,6 +10,24 @@ import (
 	"database/sql"
 )
 
+const deleteProjectIfOrphaned = `-- name: DeleteProjectIfOrphaned :execrows
+DELETE FROM projects
+WHERE id = ?1
+  AND NOT EXISTS (
+    SELECT 1
+    FROM workspaces
+    WHERE workspaces.project_id = projects.id
+  )
+`
+
+func (q *Queries) DeleteProjectIfOrphaned(ctx context.Context, projectID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteProjectIfOrphaned, projectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getProjectSummary = `-- name: GetProjectSummary :one
 SELECT
     p.id,

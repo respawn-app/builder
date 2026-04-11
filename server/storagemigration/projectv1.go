@@ -143,7 +143,7 @@ func buildStage(ctx context.Context, persistenceRoot string, ts time.Time) (stag
 			sessionDir := filepath.Join(containerDir, sessionEntry.Name())
 			meta, err := session.ReadMetaFromDir(sessionDir)
 			if err != nil {
-				continue
+				return stageResult{}, fmt.Errorf("read legacy session %s: %w", sessionDir, err)
 			}
 			sessionID := strings.TrimSpace(meta.SessionID)
 			if sessionID == "" {
