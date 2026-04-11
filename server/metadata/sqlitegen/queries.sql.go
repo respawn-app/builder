@@ -290,6 +290,61 @@ func (q *Queries) InsertRuntimeLease(ctx context.Context, arg InsertRuntimeLease
 	return err
 }
 
+const insertWorkspaceBinding = `-- name: InsertWorkspaceBinding :execrows
+INSERT INTO workspaces (
+    id,
+    project_id,
+    canonical_root_path,
+    display_name,
+    availability,
+    is_primary,
+    git_metadata_json,
+    created_at_unix_ms,
+    updated_at_unix_ms
+) VALUES (
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    ?5,
+    ?6,
+    ?7,
+    ?8,
+    ?9
+)
+ON CONFLICT(canonical_root_path) DO NOTHING
+`
+
+type InsertWorkspaceBindingParams struct {
+	ID                string
+	ProjectID         string
+	CanonicalRootPath string
+	DisplayName       string
+	Availability      string
+	IsPrimary         int64
+	GitMetadataJson   string
+	CreatedAtUnixMs   int64
+	UpdatedAtUnixMs   int64
+}
+
+func (q *Queries) InsertWorkspaceBinding(ctx context.Context, arg InsertWorkspaceBindingParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, insertWorkspaceBinding,
+		arg.ID,
+		arg.ProjectID,
+		arg.CanonicalRootPath,
+		arg.DisplayName,
+		arg.Availability,
+		arg.IsPrimary,
+		arg.GitMetadataJson,
+		arg.CreatedAtUnixMs,
+		arg.UpdatedAtUnixMs,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const listProjects = `-- name: ListProjects :many
 SELECT
     p.id,
