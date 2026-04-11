@@ -32,6 +32,7 @@ type Planner struct {
 	ProjectID    string
 	ProjectViews client.ProjectViewClient
 	PickSession  SessionPicker
+	StoreOptions []session.StoreOption
 }
 
 type SessionPicker func([]session.Summary) (SessionSelection, error)
@@ -222,7 +223,7 @@ func (p Planner) openScopedSession(sessionID string) (*session.Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return session.Open(realSessionDir)
+	return session.Open(realSessionDir, p.StoreOptions...)
 }
 
 func sessionSummariesFromProjectView(items []clientui.SessionSummary) []session.Summary {
@@ -240,7 +241,7 @@ func sessionSummariesFromProjectView(items []clientui.SessionSummary) []session.
 
 func (p Planner) createSession(parentSessionID string) (*session.Store, error) {
 	containerName := filepath.Base(p.ContainerDir)
-	created, err := session.NewLazy(p.ContainerDir, containerName, p.Config.WorkspaceRoot)
+	created, err := session.NewLazy(p.ContainerDir, containerName, p.Config.WorkspaceRoot, p.StoreOptions...)
 	if err != nil {
 		return nil, err
 	}

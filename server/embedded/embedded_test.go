@@ -17,6 +17,7 @@ import (
 	"builder/server/auth"
 	"builder/server/authflow"
 	"builder/server/llm"
+	"builder/server/metadata"
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/tools"
@@ -56,6 +57,17 @@ func (h *testOnboardingHandler) EnsureOnboardingReady(ctx context.Context, req O
 	return req.Config, nil
 }
 
+func registerEmbeddedWorkspace(t *testing.T, workspace string) {
+	t.Helper()
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if _, err := metadata.RegisterBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot); err != nil {
+		t.Fatalf("RegisterBinding: %v", err)
+	}
+}
+
 func TestStartBuildsEmbeddedServerAndRunsOnboarding(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("OPENAI_API_KEY", "sk-test")
@@ -63,6 +75,7 @@ func TestStartBuildsEmbeddedServerAndRunsOnboarding(t *testing.T) {
 	t.Setenv("BUILDER_OAUTH_CLIENT_ID", "client-test")
 
 	workspace := t.TempDir()
+	registerEmbeddedWorkspace(t, workspace)
 	authHandler := &testAuthHandler{lookupEnv: os.Getenv}
 	onboarding := &testOnboardingHandler{
 		ensure: func(_ context.Context, req OnboardingRequest) (config.App, error) {
@@ -118,6 +131,7 @@ func TestRunPromptClientRunsLoopbackThroughEmbeddedServer(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerEmbeddedWorkspace(t, workspace)
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	responseServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -218,6 +232,7 @@ func TestRunPromptClientPublishesHeadlessSessionActivity(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerEmbeddedWorkspace(t, workspace)
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -344,6 +359,7 @@ func TestRunPromptClientPublishesHeadlessSessionActivity(t *testing.T) {
 func TestStartPropagatesAuthFailureBeforeOnboarding(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	workspace := t.TempDir()
+	registerEmbeddedWorkspace(t, workspace)
 	authHandler := &testAuthHandler{lookupEnv: os.Getenv}
 	onboarding := &testOnboardingHandler{}
 
@@ -363,6 +379,7 @@ func TestSessionViewClientReadsDormantSessionByIDWithoutMutatingFiles(t *testing
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerEmbeddedWorkspace(t, workspace)
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server, err := Start(context.Background(), Request{
@@ -445,6 +462,7 @@ func TestSessionViewClientUsesRegisteredRuntimeByID(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerEmbeddedWorkspace(t, workspace)
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server, err := Start(context.Background(), Request{
@@ -506,6 +524,7 @@ func TestProjectViewClientListsCurrentProjectAndSessions(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerEmbeddedWorkspace(t, workspace)
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server, err := Start(context.Background(), Request{
@@ -580,6 +599,7 @@ func TestProcessViewClientListsBackgroundProcessesWithRunOwnership(t *testing.T)
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerEmbeddedWorkspace(t, workspace)
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server, err := Start(context.Background(), Request{
@@ -642,6 +662,7 @@ func TestProcessOutputClientStreamsBackgroundProcessOutput(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerEmbeddedWorkspace(t, workspace)
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server, err := Start(context.Background(), Request{

@@ -84,7 +84,7 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 - Interactive session creation remains lazily durable.
 - The one-time storage migration is blocking at startup, stages metadata before cutover, and preserves the old tree as a timestamped backup after success.
 - Workspace relocation is not auto-rebound; rebinding is explicit user action.
-- SQL is hand-written and explicit; typed DB access should be generated via `sqlc` rather than delegated to a heavy ORM.
+- SQL is hand-written and explicit; typed DB access should be generated via `sqlc`, and SQL schema migration execution should run through Goose rather than an ORM-owned migrator.
 
 ## Auth And Execution
 

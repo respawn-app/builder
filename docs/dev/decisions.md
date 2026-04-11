@@ -104,7 +104,7 @@
 - Interactive session creation remains lazily durable; creating a new interactive session does not immediately force durable metadata writes.
 - The one-time storage migration is blocking at startup, stages the new database/layout before cutover, and keeps the old tree as a timestamped backup after success.
 - Workspace path rebinding after relocation is always explicit user action; Builder must not auto-rebind inferred matches.
-- Database access for the migration architecture is SQL-first and explicit. Prefer typed code generation from hand-written SQL (`sqlc`) plus SQL migrations over ORM-owned schema/runtime state.
+- Database access for the migration architecture is SQL-first and explicit. Prefer typed code generation from hand-written SQL (`sqlc`) plus Goose-managed SQL migrations over ORM-owned schema/runtime state.
 - Session persistence format today is split `session.json` + `events.jsonl`.
 - `events.jsonl` is append-only on normal writes; periodic compaction rewrites canonical JSONL to control long-session growth.
 - Session directory names are UUID-only.

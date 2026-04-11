@@ -12,6 +12,7 @@ import (
 	serverbootstrap "builder/server/bootstrap"
 	"builder/server/core"
 	"builder/server/llm"
+	"builder/server/metadata"
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/tools"
@@ -24,6 +25,17 @@ import (
 	"golang.org/x/net/websocket"
 )
 
+func registerGatewayWorkspace(t *testing.T, workspace string) {
+	t.Helper()
+	resolved, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspace})
+	if err != nil {
+		t.Fatalf("ResolveConfig: %v", err)
+	}
+	if _, err := metadata.RegisterBinding(context.Background(), resolved.Config.PersistenceRoot, resolved.Config.WorkspaceRoot); err != nil {
+		t.Fatalf("RegisterBinding: %v", err)
+	}
+}
+
 func TestGatewayHandshakeAndProjectList(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -32,6 +44,9 @@ func TestGatewayHandshakeAndProjectList(t *testing.T) {
 	resolved, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspace})
 	if err != nil {
 		t.Fatalf("ResolveConfig: %v", err)
+	}
+	if _, err := metadata.RegisterBinding(context.Background(), resolved.Config.PersistenceRoot, resolved.Config.WorkspaceRoot); err != nil {
+		t.Fatalf("RegisterBinding: %v", err)
 	}
 	authSupport, err := serverbootstrap.BuildAuthSupport(auth.NewMemoryStore(auth.EmptyState()), nil, nil)
 	if err != nil {
@@ -105,6 +120,9 @@ func TestGatewayRejectsMethodsBeforeHandshake(t *testing.T) {
 	resolved, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspace})
 	if err != nil {
 		t.Fatalf("ResolveConfig: %v", err)
+	}
+	if _, err := metadata.RegisterBinding(context.Background(), resolved.Config.PersistenceRoot, resolved.Config.WorkspaceRoot); err != nil {
+		t.Fatalf("RegisterBinding: %v", err)
 	}
 	authSupport, err := serverbootstrap.BuildAuthSupport(auth.NewMemoryStore(auth.EmptyState()), nil, nil)
 	if err != nil {
@@ -614,6 +632,7 @@ func newGatewayTestServer(t *testing.T) (*core.Core, *httptest.Server) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerGatewayWorkspace(t, workspace)
 
 	resolved, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspace})
 	if err != nil {

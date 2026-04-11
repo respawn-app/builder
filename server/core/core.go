@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"builder/server/approvalview"
@@ -9,6 +10,7 @@ import (
 	"builder/server/auth"
 	serverbootstrap "builder/server/bootstrap"
 	"builder/server/launch"
+	"builder/server/metadata"
 	"builder/server/primaryrun"
 	"builder/server/processoutput"
 	"builder/server/processview"
@@ -39,6 +41,7 @@ type Core struct {
 	fastModeState    *runtime.FastModeState
 	background       *shelltool.Manager
 	backgroundRouter *runtimewire.BackgroundEventRouter
+	metadataStore    *metadata.Store
 	runtimeRegistry  *registry.RuntimeRegistry
 	sessionStores    *registry.SessionStoreRegistry
 	projectID        string
@@ -64,20 +67,33 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	if err != nil {
 		return nil, err
 	}
-	projectID, err := config.ProjectIDForWorkspaceRoot(cfg.WorkspaceRoot)
+	metadataStore, err := metadata.Open(cfg.PersistenceRoot)
 	if err != nil {
 		return nil, err
 	}
 	if authSupport.AuthManager == nil {
+		_ = metadataStore.Close()
 		return nil, fmt.Errorf("auth manager is required")
 	}
 	if runtimeSupport.Background == nil {
+		_ = metadataStore.Close()
 		return nil, fmt.Errorf("background manager is required")
 	}
+	binding, err := metadataStore.EnsureWorkspaceBinding(context.Background(), cfg.WorkspaceRoot)
+	if err != nil {
+		_ = metadataStore.Close()
+		return nil, err
+	}
+	if err := metadataStore.SyncLegacyContainer(context.Background(), containerDir); err != nil {
+		_ = metadataStore.Close()
+		return nil, err
+	}
+	storeOptions := metadataStore.SessionStoreOptions()
 	runtimeRegistry := registry.NewRuntimeRegistry()
 	sessionStoreRegistry := registry.NewSessionStoreRegistry()
-	projectService, err := projectview.NewService(projectID, cfg.WorkspaceRoot, containerDir)
+	projectService, err := projectview.NewMetadataService(metadataStore, binding.ProjectID, containerDir)
 	if err != nil {
+		_ = metadataStore.Close()
 		return nil, err
 	}
 	askService := askview.NewService(runtimeRegistry)
@@ -87,13 +103,14 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	promptControlService := promptcontrol.NewService(runtimeRegistry)
 	promptActivityService := promptactivity.NewService(runtimeRegistry)
 	runtimeControlService := runtimecontrol.NewService(runtimeRegistry, runtimeRegistry)
-	sessionViewService := sessionview.NewService(registry.NewPersistenceSessionResolver(containerDir), runtimeRegistry)
+	projectViews := client.NewLoopbackProjectViewClient(projectService)
+	sessionViewService := sessionview.NewService(registry.NewPersistenceSessionResolver(containerDir, storeOptions...), runtimeRegistry)
 	sessionLaunchService := sessionlaunch.NewDeduplicatingService(
 		sessionlaunch.ScopeID(cfg, containerDir),
-		sessionlaunch.NewService(launch.Planner{Config: cfg, ContainerDir: containerDir}, sessionStoreRegistry),
+		sessionlaunch.NewService(launch.Planner{Config: cfg, ContainerDir: containerDir, ProjectID: binding.ProjectID, ProjectViews: projectViews, StoreOptions: storeOptions}, sessionStoreRegistry),
 	)
-	sessionLifecycleService := sessionlifecycle.NewService(containerDir, sessionStoreRegistry, authSupport.AuthManager)
-	sessionRuntimeService := sessionruntime.NewService(containerDir, authSupport.AuthManager, runtimeSupport.FastModeState, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, sessionStoreRegistry)
+	sessionLifecycleService := sessionlifecycle.NewService(containerDir, sessionStoreRegistry, authSupport.AuthManager, storeOptions...)
+	sessionRuntimeService := sessionruntime.NewService(containerDir, authSupport.AuthManager, runtimeSupport.FastModeState, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, sessionStoreRegistry, storeOptions...)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
 	core := &Core{
 		cfg:              cfg,
@@ -102,10 +119,11 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		fastModeState:    runtimeSupport.FastModeState,
 		background:       runtimeSupport.Background,
 		backgroundRouter: runtimeSupport.BackgroundRouter,
+		metadataStore:    metadataStore,
 		runtimeRegistry:  runtimeRegistry,
 		sessionStores:    sessionStoreRegistry,
 		projectID:        projectService.ProjectID(),
-		projectViews:     client.NewLoopbackProjectViewClient(projectService),
+		projectViews:     projectViews,
 		askViews:         client.NewLoopbackAskViewClient(askService),
 		approvalViews:    client.NewLoopbackApprovalViewClient(approvalService),
 		processControls:  client.NewLoopbackProcessControlClient(processService),
@@ -123,6 +141,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	core.runPrompt = runprompt.NewLoopbackRunPromptClient(runprompt.HeadlessBootstrap{
 		Config:           cfg,
 		ContainerDir:     containerDir,
+		StoreOptions:     storeOptions,
 		AuthManager:      authSupport.AuthManager,
 		FastModeState:    runtimeSupport.FastModeState,
 		Background:       runtimeSupport.Background,
@@ -133,10 +152,17 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 }
 
 func (s *Core) Close() error {
-	if s == nil || s.background == nil {
+	if s == nil {
 		return nil
 	}
-	return s.background.Close()
+	var err error
+	if s.background != nil {
+		err = s.background.Close()
+	}
+	if s.metadataStore != nil {
+		err = errors.Join(err, s.metadataStore.Close())
+	}
+	return err
 }
 
 func (s *Core) Config() config.App {

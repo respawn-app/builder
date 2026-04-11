@@ -12,6 +12,7 @@ import (
 
 	"builder/server/auth"
 	"builder/server/authflow"
+	"builder/server/metadata"
 	"builder/server/startup"
 	"builder/shared/config"
 	"builder/shared/discovery"
@@ -54,6 +55,17 @@ func (noopOnboarding) EnsureOnboardingReady(_ context.Context, req startup.Onboa
 	return reloaded, nil
 }
 
+func registerServeWorkspace(t *testing.T, workspace string) {
+	t.Helper()
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if _, err := metadata.RegisterBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot); err != nil {
+		t.Fatalf("RegisterBinding: %v", err)
+	}
+}
+
 func TestStartBuildsStandaloneServerFromCoreStartup(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -63,6 +75,7 @@ func TestStartBuildsStandaloneServerFromCoreStartup(t *testing.T) {
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := envAuthHandler{}
 	onboarding := noopOnboarding{}
+	registerServeWorkspace(t, workspace)
 
 	appCore, err := startup.StartCore(context.Background(), request, authHandler, onboarding)
 	if err != nil {
@@ -126,6 +139,7 @@ func TestServePublishesDiscoveryAndHealthEndpoints(t *testing.T) {
 	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := envAuthHandler{}
 	onboarding := noopOnboarding{}
+	registerServeWorkspace(t, workspace)
 
 	server, err := Start(context.Background(), request, authHandler, onboarding)
 	if err != nil {

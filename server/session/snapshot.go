@@ -39,7 +39,7 @@ func SnapshotByID(persistenceRoot, sessionID string) (Snapshot, error) {
 }
 
 func SnapshotFromDir(sessionDir string) (Snapshot, error) {
-	meta, err := readMetaFile(filepath.Join(sessionDir, sessionFile))
+	meta, err := ReadMetaFromDir(sessionDir)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -56,6 +56,10 @@ func SnapshotFromDir(sessionDir string) (Snapshot, error) {
 		Runs:                  runsFromEvents(parsed.events),
 		ConversationFreshness: conversationFreshnessFromEvents(parsed.events),
 	}, nil
+}
+
+func ReadMetaFromDir(sessionDir string) (Meta, error) {
+	return readMetaFile(filepath.Join(sessionDir, sessionFile))
 }
 
 func readMetaFile(path string) (Meta, error) {

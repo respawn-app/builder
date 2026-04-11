@@ -63,16 +63,28 @@ func TestSessionLaunchPlannerHeadlessCreatesNewSessionAndAppliesContinuationCont
 }
 
 func TestSessionLaunchPlannerInteractiveUsesPickerSelection(t *testing.T) {
-	root := t.TempDir()
-	containerDir := filepath.Join(root, "sessions", "workspace-a")
-	first, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	_, containerDir, err := config.ResolveWorkspaceContainer(cfg)
+	if err != nil {
+		t.Fatalf("resolve workspace container: %v", err)
+	}
+
+	first, err := session.Create(containerDir, filepath.Base(containerDir), cfg.WorkspaceRoot)
 	if err != nil {
 		t.Fatalf("create first session: %v", err)
 	}
 	if err := first.SetName("first"); err != nil {
 		t.Fatalf("persist first session meta: %v", err)
 	}
-	second, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
+	second, err := session.Create(containerDir, filepath.Base(containerDir), cfg.WorkspaceRoot)
 	if err != nil {
 		t.Fatalf("create second session: %v", err)
 	}
@@ -82,8 +94,8 @@ func TestSessionLaunchPlannerInteractiveUsesPickerSelection(t *testing.T) {
 	planner := &launchPlanner{
 		server: &testEmbeddedServer{
 			cfg: config.App{
-				WorkspaceRoot:   "/tmp/workspace-a",
-				PersistenceRoot: root,
+				WorkspaceRoot:   cfg.WorkspaceRoot,
+				PersistenceRoot: cfg.PersistenceRoot,
 				Settings:        config.Settings{Theme: "dark", TUIAlternateScreen: config.TUIAlternateScreenAuto},
 			},
 			containerDir: containerDir,
@@ -119,6 +131,7 @@ func TestSessionLaunchPlannerInteractiveUsesLegacyWorkspaceContainerMapping(t *t
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 
 	cfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {

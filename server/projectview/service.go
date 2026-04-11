@@ -7,18 +7,23 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	"builder/server/metadata"
 	"builder/server/session"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
 )
 
 type Service struct {
+	metadata     *metadata.Store
 	projectID    string
 	displayName  string
 	rootPath     string
 	containerDir string
+	syncOnce     sync.Once
+	syncErr      error
 }
 
 func NewService(projectID, rootPath, containerDir string) (*Service, error) {
@@ -42,6 +47,17 @@ func NewService(projectID, rootPath, containerDir string) (*Service, error) {
 	}, nil
 }
 
+func NewMetadataService(metadataStore *metadata.Store, projectID string, containerDir string) (*Service, error) {
+	trimmedProjectID := strings.TrimSpace(projectID)
+	if metadataStore == nil {
+		return nil, errors.New("metadata store is required")
+	}
+	if trimmedProjectID == "" {
+		return nil, errors.New("project id is required")
+	}
+	return &Service{metadata: metadataStore, projectID: trimmedProjectID, containerDir: strings.TrimSpace(containerDir)}, nil
+}
+
 func (s *Service) ProjectID() string {
 	if s == nil {
 		return ""
@@ -49,7 +65,20 @@ func (s *Service) ProjectID() string {
 	return s.projectID
 }
 
-func (s *Service) ListProjects(_ context.Context, _ serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
+func (s *Service) ListProjects(ctx context.Context, _ serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
+	if s == nil {
+		return serverapi.ProjectListResponse{}, errors.New("project service is required")
+	}
+	if s.metadata != nil {
+		if err := s.syncMetadata(ctx); err != nil {
+			return serverapi.ProjectListResponse{}, err
+		}
+		overview, err := s.metadata.GetProjectOverview(ctx, s.projectID)
+		if err != nil {
+			return serverapi.ProjectListResponse{}, err
+		}
+		return serverapi.ProjectListResponse{Projects: []clientui.ProjectSummary{overview.Project}}, nil
+	}
 	project, err := s.projectSummary()
 	if err != nil {
 		return serverapi.ProjectListResponse{}, err
@@ -64,6 +93,16 @@ func (s *Service) GetProjectOverview(ctx context.Context, req serverapi.ProjectG
 	if err := s.requireProjectID(req.ProjectID); err != nil {
 		return serverapi.ProjectGetOverviewResponse{}, err
 	}
+	if s.metadata != nil {
+		if err := s.syncMetadata(ctx); err != nil {
+			return serverapi.ProjectGetOverviewResponse{}, err
+		}
+		overview, err := s.metadata.GetProjectOverview(ctx, req.ProjectID)
+		if err != nil {
+			return serverapi.ProjectGetOverviewResponse{}, err
+		}
+		return serverapi.ProjectGetOverviewResponse{Overview: overview}, nil
+	}
 	project, err := s.projectSummary()
 	if err != nil {
 		return serverapi.ProjectGetOverviewResponse{}, err
@@ -77,12 +116,22 @@ func (s *Service) GetProjectOverview(ctx context.Context, req serverapi.ProjectG
 	return serverapi.ProjectGetOverviewResponse{Overview: clientui.ProjectOverview{Project: project, Sessions: sessionsResp.Sessions}}, nil
 }
 
-func (s *Service) ListSessionsByProject(_ context.Context, req serverapi.SessionListByProjectRequest) (serverapi.SessionListByProjectResponse, error) {
+func (s *Service) ListSessionsByProject(ctx context.Context, req serverapi.SessionListByProjectRequest) (serverapi.SessionListByProjectResponse, error) {
 	if err := req.Validate(); err != nil {
 		return serverapi.SessionListByProjectResponse{}, err
 	}
 	if err := s.requireProjectID(req.ProjectID); err != nil {
 		return serverapi.SessionListByProjectResponse{}, err
+	}
+	if s.metadata != nil {
+		if err := s.syncMetadata(ctx); err != nil {
+			return serverapi.SessionListByProjectResponse{}, err
+		}
+		sessions, err := s.metadata.ListSessionsByProject(ctx, req.ProjectID)
+		if err != nil {
+			return serverapi.SessionListByProjectResponse{}, err
+		}
+		return serverapi.SessionListByProjectResponse{Sessions: sessions}, nil
 	}
 	summaries, err := session.ListSessions(s.containerDir)
 	if err != nil {
@@ -152,6 +201,16 @@ func latestUpdatedAt(summaries []clientui.SessionSummary) (latest time.Time) {
 		}
 	}
 	return latest
+}
+
+func (s *Service) syncMetadata(ctx context.Context) error {
+	if s == nil || s.metadata == nil || strings.TrimSpace(s.containerDir) == "" {
+		return nil
+	}
+	s.syncOnce.Do(func() {
+		s.syncErr = s.metadata.SyncLegacyContainer(ctx, s.containerDir)
+	})
+	return s.syncErr
 }
 
 var _ serverapi.ProjectViewService = (*Service)(nil)

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"builder/server/metadata"
 	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/discovery"
@@ -86,11 +87,11 @@ func tryDialMatchingDiscoveredRemote(ctx context.Context, opts Options, supports
 	if err != nil {
 		return nil, false
 	}
-	expectedProjectID, err := config.ProjectIDForWorkspaceRoot(cfg.WorkspaceRoot)
+	binding, err := metadata.ResolveBinding(ctx, cfg.PersistenceRoot, cfg.WorkspaceRoot)
 	if err != nil {
 		return nil, false
 	}
-	if record.Identity.ProjectID != expectedProjectID {
+	if record.Identity.ProjectID != binding.ProjectID {
 		return nil, false
 	}
 	if accept != nil && !accept(record) {
@@ -100,7 +101,7 @@ func tryDialMatchingDiscoveredRemote(ctx context.Context, opts Options, supports
 	if err != nil {
 		return nil, false
 	}
-	if remote.Identity().ProjectID != expectedProjectID {
+	if remote.Identity().ProjectID != binding.ProjectID {
 		_ = remote.Close()
 		return nil, false
 	}
