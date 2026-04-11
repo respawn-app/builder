@@ -146,6 +146,22 @@ func SessionsRoot(cfg App) string {
 	return filepath.Join(cfg.PersistenceRoot, sessionsDirName)
 }
 
+func ProjectsRoot(cfg App) string {
+	return filepath.Join(cfg.PersistenceRoot, "projects")
+}
+
+func ProjectRoot(cfg App, projectID string) string {
+	return filepath.Join(ProjectsRoot(cfg), projectID)
+}
+
+func ProjectSessionsRoot(cfg App, projectID string) string {
+	return filepath.Join(ProjectRoot(cfg, projectID), sessionsDirName)
+}
+
+func ProjectSessionDir(cfg App, projectID string, sessionID string) string {
+	return filepath.Join(ProjectSessionsRoot(cfg, projectID), sessionID)
+}
+
 func DatabaseRoot(cfg App) string {
 	return filepath.Join(cfg.PersistenceRoot, databaseDirName)
 }
@@ -156,4 +172,12 @@ func MainDatabasePath(cfg App) string {
 
 func GlobalAuthConfigPath(cfg App) string {
 	return filepath.Join(cfg.PersistenceRoot, globalAuthConfigName)
+}
+
+func MigrationBackupsRoot(cfg App) string {
+	return filepath.Join(cfg.PersistenceRoot, "migration-backups")
+}
+
+func MigrationsRoot(cfg App) string {
+	return filepath.Join(cfg.PersistenceRoot, "migrations")
 }

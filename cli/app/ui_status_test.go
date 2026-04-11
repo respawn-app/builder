@@ -885,11 +885,7 @@ func TestStatusUsageWindowsByLabelDisambiguatesDuplicateExtraBucketsWithoutUniqu
 
 func TestStatusParentSessionNameResolvesFromPersistenceRoot(t *testing.T) {
 	persistenceRoot := t.TempDir()
-	containerDir := filepath.Join(persistenceRoot, "sessions", "workspace-a")
-	parentStore, err := session.Create(containerDir, "workspace-a", "/tmp/work-a")
-	if err != nil {
-		t.Fatalf("create parent store: %v", err)
-	}
+	parentStore := createAuthoritativeAppSession(t, persistenceRoot, "/tmp/work-a")
 	if err := parentStore.SetName("incident-root"); err != nil {
 		t.Fatalf("set parent name: %v", err)
 	}

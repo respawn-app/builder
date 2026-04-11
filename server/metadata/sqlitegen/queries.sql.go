@@ -46,6 +46,76 @@ func (q *Queries) GetProjectSummary(ctx context.Context, projectID string) (GetP
 	return i, err
 }
 
+const getSessionRecordByID = `-- name: GetSessionRecordByID :one
+SELECT
+    s.id,
+    s.artifact_relpath,
+    s.name,
+    s.first_prompt_preview,
+    s.input_draft,
+    s.parent_session_id,
+    s.created_at_unix_ms,
+    s.updated_at_unix_ms,
+    s.last_sequence,
+    s.model_request_count,
+    s.in_flight_step,
+    s.agents_injected,
+    s.continuation_json,
+    s.locked_json,
+    s.usage_state_json,
+    s.metadata_json,
+    w.canonical_root_path AS workspace_root
+FROM sessions s
+JOIN workspaces w ON w.id = s.workspace_id
+WHERE s.id = ?1
+LIMIT 1
+`
+
+type GetSessionRecordByIDRow struct {
+	ID                 string
+	ArtifactRelpath    string
+	Name               string
+	FirstPromptPreview string
+	InputDraft         string
+	ParentSessionID    string
+	CreatedAtUnixMs    int64
+	UpdatedAtUnixMs    int64
+	LastSequence       int64
+	ModelRequestCount  int64
+	InFlightStep       int64
+	AgentsInjected     int64
+	ContinuationJson   string
+	LockedJson         string
+	UsageStateJson     string
+	MetadataJson       string
+	WorkspaceRoot      string
+}
+
+func (q *Queries) GetSessionRecordByID(ctx context.Context, sessionID string) (GetSessionRecordByIDRow, error) {
+	row := q.db.QueryRowContext(ctx, getSessionRecordByID, sessionID)
+	var i GetSessionRecordByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.ArtifactRelpath,
+		&i.Name,
+		&i.FirstPromptPreview,
+		&i.InputDraft,
+		&i.ParentSessionID,
+		&i.CreatedAtUnixMs,
+		&i.UpdatedAtUnixMs,
+		&i.LastSequence,
+		&i.ModelRequestCount,
+		&i.InFlightStep,
+		&i.AgentsInjected,
+		&i.ContinuationJson,
+		&i.LockedJson,
+		&i.UsageStateJson,
+		&i.MetadataJson,
+		&i.WorkspaceRoot,
+	)
+	return i, err
+}
+
 const getWorkspaceBindingByCanonicalRoot = `-- name: GetWorkspaceBindingByCanonicalRoot :one
 SELECT
     p.id AS project_id,

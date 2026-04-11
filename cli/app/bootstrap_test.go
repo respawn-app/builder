@@ -12,11 +12,7 @@ import (
 
 func TestResolveContinuationLoadParamsUsesSessionWorkspaceAndPersistedBaseURL(t *testing.T) {
 	persistenceRoot := t.TempDir()
-	containerDir := filepath.Join(persistenceRoot, "sessions", "workspace-a")
-	store, err := session.Create(containerDir, "workspace-a", "/tmp/original-workspace")
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
+	store := createAuthoritativeAppSession(t, persistenceRoot, "/tmp/original-workspace")
 	if err := store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: "http://persisted.local/v1"}); err != nil {
 		t.Fatalf("set continuation context: %v", err)
 	}
@@ -41,11 +37,7 @@ func TestResolveContinuationLoadParamsUsesSessionWorkspaceAndPersistedBaseURL(t 
 
 func TestResolveContinuationLoadParamsRespectsExplicitOverrides(t *testing.T) {
 	persistenceRoot := t.TempDir()
-	containerDir := filepath.Join(persistenceRoot, "sessions", "workspace-a")
-	store, err := session.Create(containerDir, "workspace-a", "/tmp/original-workspace")
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
+	store := createAuthoritativeAppSession(t, persistenceRoot, "/tmp/original-workspace")
 	if err := store.SetContinuationContext(session.ContinuationContext{OpenAIBaseURL: "http://persisted.local/v1"}); err != nil {
 		t.Fatalf("set continuation context: %v", err)
 	}

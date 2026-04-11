@@ -28,6 +28,7 @@ import (
 	"builder/server/sessionlifecycle"
 	"builder/server/sessionruntime"
 	"builder/server/sessionview"
+	"builder/server/storagemigration"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
@@ -63,6 +64,9 @@ type Core struct {
 }
 
 func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport serverbootstrap.RuntimeSupport) (*Core, error) {
+	if err := storagemigration.EnsureProjectV1(context.Background(), cfg.PersistenceRoot, nil); err != nil {
+		return nil, err
+	}
 	_, containerDir, err := config.ResolveWorkspaceContainer(cfg)
 	if err != nil {
 		return nil, err
@@ -84,11 +88,8 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		_ = metadataStore.Close()
 		return nil, err
 	}
-	if err := metadataStore.SyncLegacyContainer(context.Background(), containerDir); err != nil {
-		_ = metadataStore.Close()
-		return nil, err
-	}
-	storeOptions := metadataStore.SessionStoreOptions()
+	projectSessionDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
+	storeOptions := metadataStore.AuthoritativeSessionStoreOptions()
 	runtimeRegistry := registry.NewRuntimeRegistry()
 	sessionStoreRegistry := registry.NewSessionStoreRegistry()
 	projectService, err := projectview.NewMetadataService(metadataStore, binding.ProjectID, containerDir)
@@ -104,13 +105,13 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	promptActivityService := promptactivity.NewService(runtimeRegistry)
 	runtimeControlService := runtimecontrol.NewService(runtimeRegistry, runtimeRegistry)
 	projectViews := client.NewLoopbackProjectViewClient(projectService)
-	sessionViewService := sessionview.NewService(registry.NewPersistenceSessionResolver(containerDir, storeOptions...), runtimeRegistry)
+	sessionViewService := sessionview.NewService(registry.NewPersistenceSessionResolver(projectSessionDir, storeOptions...), runtimeRegistry)
 	sessionLaunchService := sessionlaunch.NewDeduplicatingService(
-		sessionlaunch.ScopeID(cfg, containerDir),
-		sessionlaunch.NewService(launch.Planner{Config: cfg, ContainerDir: containerDir, ProjectID: binding.ProjectID, ProjectViews: projectViews, StoreOptions: storeOptions}, sessionStoreRegistry),
+		sessionlaunch.ScopeID(cfg, projectSessionDir),
+		sessionlaunch.NewService(launch.Planner{Config: cfg, ContainerDir: projectSessionDir, ProjectID: binding.ProjectID, ProjectViews: projectViews, StoreOptions: storeOptions}, sessionStoreRegistry),
 	)
-	sessionLifecycleService := sessionlifecycle.NewService(containerDir, sessionStoreRegistry, authSupport.AuthManager, storeOptions...)
-	sessionRuntimeService := sessionruntime.NewService(containerDir, authSupport.AuthManager, runtimeSupport.FastModeState, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, sessionStoreRegistry, storeOptions...)
+	sessionLifecycleService := sessionlifecycle.NewService(projectSessionDir, sessionStoreRegistry, authSupport.AuthManager, storeOptions...)
+	sessionRuntimeService := sessionruntime.NewService(projectSessionDir, authSupport.AuthManager, runtimeSupport.FastModeState, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, sessionStoreRegistry, storeOptions...)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
 	core := &Core{
 		cfg:              cfg,
@@ -140,7 +141,7 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	}
 	core.runPrompt = runprompt.NewLoopbackRunPromptClient(runprompt.HeadlessBootstrap{
 		Config:           cfg,
-		ContainerDir:     containerDir,
+		ContainerDir:     projectSessionDir,
 		StoreOptions:     storeOptions,
 		AuthManager:      authSupport.AuthManager,
 		FastModeState:    runtimeSupport.FastModeState,

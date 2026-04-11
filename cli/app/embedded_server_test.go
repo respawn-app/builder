@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -55,6 +56,10 @@ type testEmbeddedServer struct {
 	sessionRuntime       client.SessionRuntimeClient
 	sessionViewClient    client.SessionViewClient
 	sessionStores        *registry.SessionStoreRegistry
+	metadataOnce         sync.Once
+	metadataStore        *metadata.Store
+	metadataBindingData  metadata.Binding
+	metadataBindingOK    bool
 	prepareRuntime       func(ctx context.Context, plan sessionLaunchPlan, diagnosticWriter io.Writer, startLogLine string) (*runtimeLaunchPlan, error)
 	reauthenticate       func(ctx context.Context, interactor authInteractor) error
 }
@@ -120,7 +125,14 @@ type stubEmbeddedProcessControlClient struct {
 	killed     []string
 }
 
-func (s *testEmbeddedServer) Close() error       { return nil }
+func (s *testEmbeddedServer) Close() error {
+	if s == nil || s.metadataStore == nil {
+		return nil
+	}
+	err := s.metadataStore.Close()
+	s.metadataStore = nil
+	return err
+}
 func (s *testEmbeddedServer) OwnsServer() bool   { return true }
 func (s *testEmbeddedServer) Config() config.App { return s.cfg }
 func (s *testEmbeddedServer) ProjectID() string {
@@ -133,9 +145,40 @@ func (s *testEmbeddedServer) ProjectID() string {
 	}
 	return binding.ProjectID
 }
+
+func (s *testEmbeddedServer) metadataBinding() (*metadata.Store, metadata.Binding, bool) {
+	if strings.TrimSpace(s.cfg.PersistenceRoot) == "" || strings.TrimSpace(s.cfg.WorkspaceRoot) == "" {
+		return nil, metadata.Binding{}, false
+	}
+	s.metadataOnce.Do(func() {
+		store, err := metadata.Open(s.cfg.PersistenceRoot)
+		if err != nil {
+			return
+		}
+		binding, err := store.EnsureWorkspaceBinding(context.Background(), s.cfg.WorkspaceRoot)
+		if err != nil {
+			_ = store.Close()
+			return
+		}
+		s.metadataStore = store
+		s.metadataBindingData = binding
+		s.metadataBindingOK = true
+	})
+	if !s.metadataBindingOK || s.metadataStore == nil {
+		return nil, metadata.Binding{}, false
+	}
+	return s.metadataStore, s.metadataBindingData, true
+}
+
 func (s *testEmbeddedServer) ProjectViewClient() client.ProjectViewClient {
 	if s.projectViewClient != nil {
 		return s.projectViewClient
+	}
+	if metadataStore, binding, ok := s.metadataBinding(); ok {
+		service, err := projectview.NewMetadataService(metadataStore, binding.ProjectID, s.containerDir)
+		if err == nil {
+			return client.NewLoopbackProjectViewClient(service)
+		}
 	}
 	service, err := projectview.NewService(s.ProjectID(), s.cfg.WorkspaceRoot, s.containerDir)
 	if err != nil {
@@ -188,6 +231,15 @@ func (s *testEmbeddedServer) SessionLaunchClient() client.SessionLaunchClient {
 	if s.sessionLaunch != nil {
 		return s.sessionLaunch
 	}
+	if metadataStore, binding, ok := s.metadataBinding(); ok {
+		service := sessionlaunch.NewService(launch.Planner{
+			Config:       s.cfg,
+			ContainerDir: config.ProjectSessionsRoot(s.cfg, binding.ProjectID),
+			ProjectID:    binding.ProjectID,
+			StoreOptions: metadataStore.AuthoritativeSessionStoreOptions(),
+		}, s.sessionStoreRegistry())
+		return client.NewLoopbackSessionLaunchClient(service)
+	}
 	service := sessionlaunch.NewService(launch.Planner{Config: s.cfg, ContainerDir: s.containerDir}, s.sessionStoreRegistry())
 	return client.NewLoopbackSessionLaunchClient(service)
 }
@@ -197,6 +249,14 @@ func (s *testEmbeddedServer) SessionActivityClient() client.SessionActivityClien
 func (s *testEmbeddedServer) SessionLifecycleClient() client.SessionLifecycleClient {
 	if s.sessionLifecycle != nil {
 		return s.sessionLifecycle
+	}
+	if metadataStore, binding, ok := s.metadataBinding(); ok {
+		return client.NewLoopbackSessionLifecycleClient(sessionlifecycle.NewService(
+			config.ProjectSessionsRoot(s.cfg, binding.ProjectID),
+			s.sessionStoreRegistry(),
+			s.authManager,
+			metadataStore.AuthoritativeSessionStoreOptions()...,
+		))
 	}
 	containerDir := strings.TrimSpace(s.containerDir)
 	if containerDir == "" {

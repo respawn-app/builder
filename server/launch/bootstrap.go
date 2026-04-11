@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 
+	"builder/server/metadata"
 	"builder/server/session"
 )
 
@@ -37,6 +38,13 @@ func ResolveBootstrapPlan(persistenceRoot string, req BootstrapRequest) (Bootstr
 		return BootstrapPlan{}, errors.New("launch planner persistence root is required")
 	}
 	store, err := session.OpenByID(persistenceRoot, req.SessionID)
+	if err != nil {
+		metadataStore, metadataErr := metadata.Open(persistenceRoot)
+		if metadataErr == nil {
+			defer func() { _ = metadataStore.Close() }()
+			store, err = session.OpenByID(persistenceRoot, req.SessionID, metadataStore.AuthoritativeSessionStoreOptions()...)
+		}
+	}
 	if err != nil {
 		return BootstrapPlan{}, err
 	}
