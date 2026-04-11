@@ -2,6 +2,7 @@ package storagemigration
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -157,5 +158,56 @@ func TestEnsureProjectV1FailsWhenLegacySessionMetadataIsUnreadable(t *testing.T)
 	}
 	if _, err := os.Stat(filepath.Join(root, "migrations", projectV1Version, "staging", now.Format("20060102T150405Z"))); !os.IsNotExist(err) {
 		t.Fatalf("expected staging dir cleanup after failure, got %v", err)
+	}
+}
+
+func TestEnsureProjectV1MigratesDirectLegacySessionDirectories(t *testing.T) {
+	root := t.TempDir()
+	legacySessionsRoot := filepath.Join(root, "sessions")
+	store, err := session.Create(legacySessionsRoot, "workspace-flat", "/tmp/workspace-flat")
+	if err != nil {
+		t.Fatalf("create direct legacy session: %v", err)
+	}
+	if err := store.SetName("flat layout session"); err != nil {
+		t.Fatalf("SetName: %v", err)
+	}
+	now := time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC)
+	if err := EnsureProjectV1(context.Background(), root, func() time.Time { return now }); err != nil {
+		t.Fatalf("EnsureProjectV1: %v", err)
+	}
+	metadataStore, err := metadata.Open(root)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	defer func() { _ = metadataStore.Close() }()
+	record, err := metadataStore.ResolvePersistedSession(context.Background(), store.Meta().SessionID)
+	if err != nil {
+		t.Fatalf("ResolvePersistedSession: %v", err)
+	}
+	if record.Meta == nil || record.Meta.Name != "flat layout session" {
+		t.Fatalf("expected migrated flat legacy session metadata, got %+v", record.Meta)
+	}
+}
+
+func TestEnsureProjectV1RejectsLegacySessionIDPathTraversal(t *testing.T) {
+	root := t.TempDir()
+	legacyContainer := filepath.Join(root, "sessions", "workspace-a")
+	store, err := session.Create(legacyContainer, "workspace-a", "/tmp/workspace-a")
+	if err != nil {
+		t.Fatalf("create legacy session: %v", err)
+	}
+	meta := store.Meta()
+	meta.SessionID = "../escape"
+	updated, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("marshal invalid session meta: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(store.Dir(), "session.json"), updated, 0o644); err != nil {
+		t.Fatalf("write invalid session meta: %v", err)
+	}
+	now := time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC)
+	err = EnsureProjectV1(context.Background(), root, func() time.Time { return now })
+	if err == nil || !strings.Contains(err.Error(), "invalid session id") {
+		t.Fatalf("expected invalid session id rejection, got %v", err)
 	}
 }

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -61,6 +60,7 @@ type Store struct {
 }
 
 var registerWorkspaceBindingAfterLookupMissHook func()
+var insertWorkspaceBindingAfterProjectUpsertHook func()
 
 func Open(persistenceRoot string) (*Store, error) {
 	trimmedRoot := strings.TrimSpace(persistenceRoot)
@@ -189,7 +189,13 @@ func (s *Store) RegisterWorkspaceBinding(ctx context.Context, workspaceRoot stri
 }
 
 func (s *Store) insertWorkspaceBinding(ctx context.Context, canonicalRoot string, displayName string, projectID string, workspaceID string, now time.Time) (Binding, error) {
-	if err := s.queries.UpsertProject(ctx, sqlitegen.UpsertProjectParams{
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Binding{}, fmt.Errorf("begin workspace binding tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	q := s.queries.WithTx(tx)
+	if err := q.UpsertProject(ctx, sqlitegen.UpsertProjectParams{
 		ID:              projectID,
 		DisplayName:     displayName,
 		CreatedAtUnixMs: now.UnixMilli(),
@@ -198,7 +204,10 @@ func (s *Store) insertWorkspaceBinding(ctx context.Context, canonicalRoot string
 	}); err != nil {
 		return Binding{}, fmt.Errorf("upsert project: %w", err)
 	}
-	if err := s.queries.UpsertWorkspace(ctx, sqlitegen.UpsertWorkspaceParams{
+	if insertWorkspaceBindingAfterProjectUpsertHook != nil {
+		insertWorkspaceBindingAfterProjectUpsertHook()
+	}
+	if err := q.UpsertWorkspace(ctx, sqlitegen.UpsertWorkspaceParams{
 		ID:                workspaceID,
 		ProjectID:         projectID,
 		CanonicalRootPath: canonicalRoot,
@@ -209,10 +218,16 @@ func (s *Store) insertWorkspaceBinding(ctx context.Context, canonicalRoot string
 		CreatedAtUnixMs:   now.UnixMilli(),
 		UpdatedAtUnixMs:   now.UnixMilli(),
 	}); err != nil {
-		if binding, recovered := s.recoverWorkspaceBindingAfterConflict(ctx, canonicalRoot, projectID, workspaceID, err); recovered {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			return Binding{}, fmt.Errorf("rollback workspace binding tx: %w", rollbackErr)
+		}
+		if binding, recovered := s.recoverWorkspaceBindingAfterConflict(ctx, canonicalRoot, workspaceID, err); recovered {
 			return binding, nil
 		}
 		return Binding{}, fmt.Errorf("upsert workspace: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return Binding{}, fmt.Errorf("commit workspace binding tx: %w", err)
 	}
 	return Binding{
 		ProjectID:       projectID,
@@ -224,7 +239,7 @@ func (s *Store) insertWorkspaceBinding(ctx context.Context, canonicalRoot string
 	}, nil
 }
 
-func (s *Store) recoverWorkspaceBindingAfterConflict(ctx context.Context, canonicalRoot string, projectID string, workspaceID string, err error) (Binding, bool) {
+func (s *Store) recoverWorkspaceBindingAfterConflict(ctx context.Context, canonicalRoot string, workspaceID string, err error) (Binding, bool) {
 	if !isCanonicalRootConflictError(err) {
 		return Binding{}, false
 	}
@@ -235,7 +250,6 @@ func (s *Store) recoverWorkspaceBindingAfterConflict(ctx context.Context, canoni
 	if strings.TrimSpace(binding.WorkspaceID) == strings.TrimSpace(workspaceID) {
 		return Binding{}, false
 	}
-	_, _ = s.queries.DeleteProjectIfOrphaned(context.Background(), projectID)
 	return binding, true
 }
 
@@ -338,9 +352,6 @@ func (s *Store) ListSessionsByProject(ctx context.Context, projectID string) ([]
 			UpdatedAt:          timeFromStoredTimestamp(row.UpdatedAtUnixMs),
 		})
 	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].UpdatedAt.After(out[j].UpdatedAt)
-	})
 	return out, nil
 }
 
@@ -447,8 +458,12 @@ func (s *Store) ResolvePersistedSession(ctx context.Context, sessionID string) (
 	if err != nil {
 		return session.PersistedSessionRecord{}, err
 	}
+	sessionDir, err := sessionArtifactPathWithinRoot(s.persistenceRoot, row.ArtifactRelpath)
+	if err != nil {
+		return session.PersistedSessionRecord{}, err
+	}
 	return session.PersistedSessionRecord{
-		SessionDir: filepath.Join(s.persistenceRoot, filepath.FromSlash(row.ArtifactRelpath)),
+		SessionDir: sessionDir,
 		Meta:       &meta,
 	}, nil
 }
@@ -465,9 +480,9 @@ func (s *Store) upsertSessionSnapshot(ctx context.Context, snapshot session.Pers
 	if err != nil {
 		return err
 	}
-	relpath, err := filepath.Rel(s.persistenceRoot, snapshot.SessionDir)
+	relpath, err := relativePathWithinRoot(s.persistenceRoot, snapshot.SessionDir)
 	if err != nil {
-		return fmt.Errorf("compute session artifact relpath: %w", err)
+		return err
 	}
 	continuationJSON, err := marshalJSON(snapshot.Meta.Continuation)
 	if err != nil {
@@ -494,7 +509,7 @@ func (s *Store) upsertSessionSnapshot(ctx context.Context, snapshot session.Pers
 		ProjectID:          binding.ProjectID,
 		WorkspaceID:        binding.WorkspaceID,
 		WorktreeID:         sql.NullString{},
-		ArtifactRelpath:    filepath.ToSlash(relpath),
+		ArtifactRelpath:    relpath,
 		Name:               snapshot.Meta.Name,
 		FirstPromptPreview: snapshot.Meta.FirstPromptPreview,
 		InputDraft:         snapshot.Meta.InputDraft,
@@ -660,10 +675,7 @@ func sessionExecutionTargetFromRow(row sqlitegen.GetSessionExecutionTargetByIDRo
 		baseRoot = strings.TrimSpace(row.WorktreeRoot)
 	}
 	cwdRelpath := normalizeSessionCwdRelpath(row.CwdRelpath)
-	effectiveWorkdir := baseRoot
-	if cwdRelpath != "." && baseRoot != "" {
-		effectiveWorkdir = filepath.Clean(filepath.Join(baseRoot, filepath.FromSlash(cwdRelpath)))
-	}
+	effectiveWorkdir := effectiveWorkdirWithinRoot(baseRoot, cwdRelpath)
 	return clientui.SessionExecutionTarget{
 		WorkspaceID:           row.WorkspaceID,
 		WorkspaceName:         row.WorkspaceName,
@@ -702,7 +714,91 @@ func normalizeSessionCwdRelpath(value string) string {
 	if cleaned == "" || cleaned == "/" {
 		return "."
 	}
+	if filepath.IsAbs(filepath.FromSlash(cleaned)) || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "."
+	}
 	return cleaned
+}
+
+func effectiveWorkdirWithinRoot(baseRoot string, cwdRelpath string) string {
+	trimmedBase := strings.TrimSpace(baseRoot)
+	if trimmedBase == "" {
+		return ""
+	}
+	normalizedRelpath := normalizeSessionCwdRelpath(cwdRelpath)
+	if normalizedRelpath == "." {
+		return trimmedBase
+	}
+	candidate := filepath.Clean(filepath.Join(trimmedBase, filepath.FromSlash(normalizedRelpath)))
+	rel, err := filepath.Rel(trimmedBase, candidate)
+	if err != nil {
+		return trimmedBase
+	}
+	cleanedRel := filepath.Clean(rel)
+	if cleanedRel == ".." || strings.HasPrefix(cleanedRel, ".."+string(filepath.Separator)) {
+		return trimmedBase
+	}
+	return candidate
+}
+
+func relativePathWithinRoot(root string, target string) (string, error) {
+	canonicalRoot, err := canonicalFilesystemPath(root)
+	if err != nil {
+		return "", fmt.Errorf("canonicalize persistence root: %w", err)
+	}
+	canonicalTarget, err := canonicalFilesystemPath(target)
+	if err != nil {
+		return "", fmt.Errorf("canonicalize session dir: %w", err)
+	}
+	relpath, err := filepath.Rel(canonicalRoot, canonicalTarget)
+	if err != nil {
+		return "", fmt.Errorf("compute session artifact relpath: %w", err)
+	}
+	cleaned := filepath.ToSlash(filepath.Clean(relpath))
+	if cleaned == "." || filepath.IsAbs(filepath.FromSlash(cleaned)) || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", fmt.Errorf("session dir %q is outside persistence root %q", target, root)
+	}
+	return cleaned, nil
+}
+
+func canonicalFilesystemPath(path string) (string, error) {
+	absolute, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return "", err
+	}
+	canonical, err := filepath.EvalSymlinks(absolute)
+	if err == nil {
+		return canonical, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	parent := absolute
+	suffix := make([]string, 0, 4)
+	for {
+		next := filepath.Dir(parent)
+		if next == parent {
+			return absolute, nil
+		}
+		suffix = append([]string{filepath.Base(parent)}, suffix...)
+		parent = next
+		canonicalParent, parentErr := filepath.EvalSymlinks(parent)
+		if parentErr == nil {
+			parts := append([]string{canonicalParent}, suffix...)
+			return filepath.Join(parts...), nil
+		}
+		if !errors.Is(parentErr, os.ErrNotExist) {
+			return "", parentErr
+		}
+	}
+}
+
+func sessionArtifactPathWithinRoot(root string, artifactRelpath string) (string, error) {
+	cleaned := filepath.ToSlash(filepath.Clean(filepath.FromSlash(strings.TrimSpace(artifactRelpath))))
+	if cleaned == "" || cleaned == "." || filepath.IsAbs(filepath.FromSlash(cleaned)) || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", fmt.Errorf("session artifact relpath %q escapes persistence root %q", artifactRelpath, root)
+	}
+	return filepath.Join(root, filepath.FromSlash(cleaned)), nil
 }
 
 func timeFromStoredTimestamp(value int64) time.Time {

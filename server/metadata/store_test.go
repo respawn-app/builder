@@ -2,13 +2,16 @@ package metadata
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"builder/server/metadata/sqlitegen"
 	"builder/server/session"
 	"builder/shared/clientui"
 	"builder/shared/config"
@@ -105,19 +108,11 @@ func TestInsertWorkspaceBindingRecoversFromCanonicalRootConflict(t *testing.T) {
 	if _, err := store.EnsureWorkspaceBinding(ctx, cfg.WorkspaceRoot); err != nil {
 		t.Fatalf("EnsureWorkspaceBinding after conflict recovery: %v", err)
 	}
-	if _, err := store.queries.DeleteProjectIfOrphaned(ctx, winner.ProjectID); err != nil {
-		t.Fatalf("DeleteProjectIfOrphaned winner project: %v", err)
-	}
 	if err := store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM projects WHERE id = ?", winner.ProjectID).Scan(&projectCount); err != nil {
 		t.Fatalf("count winner project: %v", err)
 	}
 	if projectCount != 1 {
 		t.Fatalf("winner project unexpectedly deleted")
-	}
-	if rows, err := store.queries.DeleteProjectIfOrphaned(ctx, "project-missing"); err != nil {
-		t.Fatalf("DeleteProjectIfOrphaned missing project: %v", err)
-	} else if rows != 0 {
-		t.Fatalf("DeleteProjectIfOrphaned missing project rows = %d, want 0", rows)
 	}
 	if _, err := store.lookupWorkspaceBinding(ctx, canonicalRoot); err != nil {
 		t.Fatalf("lookupWorkspaceBinding: %v", err)
@@ -204,6 +199,127 @@ func TestRegisterWorkspaceBindingConvergesUnderConcurrentFirstRegistration(t *te
 	}
 	if workspaceCount != 1 {
 		t.Fatalf("workspace count = %d, want 1", workspaceCount)
+	}
+}
+
+func TestInsertWorkspaceBindingRollsBackProjectOnWorkspaceFailure(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	canonicalRoot, err := config.CanonicalWorkspaceRoot(cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot: %v", err)
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	insertWorkspaceBindingAfterProjectUpsertHook = cancel
+	t.Cleanup(func() { insertWorkspaceBindingAfterProjectUpsertHook = nil })
+	_, err = store.insertWorkspaceBinding(ctx, canonicalRoot, filepath.Base(canonicalRoot), "project-cancelled", "workspace-cancelled", time.Now().UTC())
+	if err == nil {
+		t.Fatal("expected insertWorkspaceBinding to fail after context cancellation")
+	}
+	var projectCount int
+	if err := store.db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM projects WHERE id = ?", "project-cancelled").Scan(&projectCount); err != nil {
+		t.Fatalf("count cancelled project: %v", err)
+	}
+	if projectCount != 0 {
+		t.Fatalf("expected cancelled project insert to roll back, got %d rows", projectCount)
+	}
+}
+
+func TestImportSessionSnapshotRejectsSessionDirOutsidePersistenceRoot(t *testing.T) {
+	ctx := context.Background()
+	store, cfg, _ := newMetadataTestStore(t)
+	outsideDir := t.TempDir()
+	err := store.ImportSessionSnapshot(ctx, session.PersistedStoreSnapshot{
+		SessionDir: outsideDir,
+		Meta: session.Meta{
+			SessionID:          "session-outside",
+			WorkspaceRoot:      cfg.WorkspaceRoot,
+			WorkspaceContainer: filepath.Base(cfg.WorkspaceRoot),
+			CreatedAt:          time.Now().UTC(),
+			UpdatedAt:          time.Now().UTC(),
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "outside persistence root") {
+		t.Fatalf("expected outside-persistence-root error, got %v", err)
+	}
+}
+
+func TestResolvePersistedSessionRejectsEscapingArtifactRelpath(t *testing.T) {
+	ctx := context.Background()
+	store, _, binding := newMetadataTestStore(t)
+	now := time.Now().UTC().UnixMilli()
+	if err := store.queries.UpsertSession(ctx, sqlitegen.UpsertSessionParams{
+		ID:                 "session-escape",
+		ProjectID:          binding.ProjectID,
+		WorkspaceID:        binding.WorkspaceID,
+		WorktreeID:         sql.NullString{},
+		ArtifactRelpath:    "../escape",
+		Name:               "",
+		FirstPromptPreview: "",
+		InputDraft:         "",
+		ParentSessionID:    "",
+		CreatedAtUnixMs:    now,
+		UpdatedAtUnixMs:    now,
+		LastSequence:       0,
+		ModelRequestCount:  0,
+		InFlightStep:       0,
+		AgentsInjected:     0,
+		LaunchVisible:      0,
+		CwdRelpath:         ".",
+		ContinuationJson:   "{}",
+		LockedJson:         "{}",
+		UsageStateJson:     "{}",
+		MetadataJson:       "{}",
+	}); err != nil {
+		t.Fatalf("UpsertSession: %v", err)
+	}
+	_, err := store.ResolvePersistedSession(ctx, "session-escape")
+	if err == nil || !strings.Contains(err.Error(), "escapes persistence root") {
+		t.Fatalf("expected escaping artifact relpath error, got %v", err)
+	}
+}
+
+func TestSessionExecutionTargetClampsEscapingCwdRelpath(t *testing.T) {
+	target := sessionExecutionTargetFromRow(sqlitegen.GetSessionExecutionTargetByIDRow{
+		WorkspaceID:           "workspace-1",
+		WorkspaceName:         "workspace",
+		WorkspaceRoot:         "/tmp/workspace",
+		WorkspaceAvailability: "available",
+		WorktreeRoot:          "",
+		CwdRelpath:            "../../other-project",
+	})
+	if target.CwdRelpath != "." {
+		t.Fatalf("cwd relpath = %q, want .", target.CwdRelpath)
+	}
+	if target.EffectiveWorkdir != "/tmp/workspace" {
+		t.Fatalf("effective workdir = %q, want /tmp/workspace", target.EffectiveWorkdir)
+	}
+
+	target = sessionExecutionTargetFromRow(sqlitegen.GetSessionExecutionTargetByIDRow{
+		WorkspaceID:           "workspace-1",
+		WorkspaceName:         "workspace",
+		WorkspaceRoot:         "/tmp/workspace",
+		WorkspaceAvailability: "available",
+		WorktreeRoot:          "/tmp/workspace/worktree-a",
+		CwdRelpath:            "/tmp/absolute",
+	})
+	if target.CwdRelpath != "." {
+		t.Fatalf("absolute cwd relpath = %q, want .", target.CwdRelpath)
+	}
+	if target.EffectiveWorkdir != "/tmp/workspace/worktree-a" {
+		t.Fatalf("absolute effective workdir = %q, want /tmp/workspace/worktree-a", target.EffectiveWorkdir)
 	}
 }
 

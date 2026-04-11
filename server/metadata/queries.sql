@@ -28,15 +28,6 @@ ON CONFLICT(id) DO UPDATE SET
     updated_at_unix_ms = excluded.updated_at_unix_ms,
     metadata_json = excluded.metadata_json;
 
--- name: DeleteProjectIfOrphaned :execrows
-DELETE FROM projects
-WHERE id = sqlc.arg(project_id)
-  AND NOT EXISTS (
-    SELECT 1
-    FROM workspaces
-    WHERE workspaces.project_id = projects.id
-  );
-
 -- name: UpsertWorkspace :exec
 INSERT INTO workspaces (
     id,
