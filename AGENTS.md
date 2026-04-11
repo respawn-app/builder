@@ -1,4 +1,4 @@
-This repository contains a minimal terminal coding agent focused on output quality, speed, and professional workflows.
+This repository contains a terminal coding agent focused on output quality, built for professional engineeers.
 
 The product philosophy is:
 - minimal restrictions on model behavior: enabling the model to do its work unhindered.
@@ -65,7 +65,7 @@ The scope is intentionally narrow and quality-oriented.
 - Design for composability.
   - New tools and handlers should require minimal boilerplate and minimal cross-cutting edits.
 - Maximize API cache hits, avoid mutation of past conversation history.
-- Keep TUI fast, avoid flicker, stable scroll, follow best practices, avoid affecting scrollback buffer in ongoing mode or re-emitting full history.
+- Keep TUI fast, avoid flicker, stable scroll, avoid affecting scrollback buffer in ongoing mode or re-emitting full history.
 - Never use regex-based matching, parsing, replace hacks. Never use substring-based lookup to determine information presence. Avoid brittle and fragile text/string-based logic, and develop type-safe data structures, store structured data or metadata that can reliably be extracted instead.
 -  Breaking changes are allowed, but the UX of migration should be straightforward, e.g. a migration note for config entries or a clear error message. Ask user what migration strat they want.
 
@@ -100,7 +100,7 @@ If user asks you to fix a github issue and you commit the fix, use 'closes #xx' 
 
 - All business logic covered by tests. Production code is written to be unit-testable.
 - Use red/green TDD when developing new features.
-- Before handing off to the user after code changes, rebuild via `./scripts/build.sh --output ./bin/builder` so the canonical binary output at `./bin/builder` is refreshed, and make sure tests are written and green. Don't ask for confirmation to write tests and run checks.
+- Before handing off to the user after code changes, rebuild via `./scripts/build.sh --output ./bin/builder`. Don't ask for confirmation to run/write tests and run checks.
 - Run Go tests via `./scripts/test.sh` passing normal go test arguments.
 - Do not run interactive/manual TUI QA unless the user explicitly asks for it. Prefer non-interactive tests, targeted automation, and build verification by default.
 - Releases are driven by `VERSION` and `.github/workflows/release.yml`; keep Homebrew release plumbing in sync with `scripts/update-brew-tap.sh` and the tap formula. Tap formula lives in a separate repo.
@@ -108,5 +108,5 @@ If user asks you to fix a github issue and you commit the fix, use 'closes #xx' 
 - Ongoing mode must not use `?1007`.
 - Ongoing normal-buffer transcript history is append-only after startup. Once a line is emitted into scrollback, it is immutable: never retroactively restyle it, rewrite it, clear-and-replay it, or re-emit the full buffer to reflect later tool state.
 - Proactively keep documentation up-to-date on your own when you make UX or other user-facing changes. Example areas that warrant a docs check include setup, startup, config, env variables, slash commands, model providers, etc.
-- Keep this AGENTS.md file up-to-date and comprehensive. Avoid adding info that can become outdated, otherwise keep this as project guidelines, rules, and learnings for future team members. Persist info that should be preserved here.
 - Full transcript history is unbounded & weighs gigabytes, thus no code must ever attempt to load `events.jsonl` fully into memory.
+- Keep this AGENTS.md file up-to-date and comprehensive. Avoid adding info that can become outdated, otherwise keep this as project guidelines, rules, and learnings for future team members. Persist info that should be preserved here.
