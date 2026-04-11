@@ -17,6 +17,7 @@ import (
 	"builder/cli/tui"
 	"builder/server/auth"
 	"builder/server/llm"
+	"builder/server/metadata"
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/shared/clientui"
@@ -350,6 +351,13 @@ func statusParentSessionName(persistenceRoot, parentSessionID string) string {
 		return ""
 	}
 	store, err := session.OpenByID(root, parentID)
+	if err != nil {
+		metadataStore, metadataErr := metadata.Open(root)
+		if metadataErr == nil {
+			defer func() { _ = metadataStore.Close() }()
+			store, err = session.OpenByID(root, parentID, metadataStore.AuthoritativeSessionStoreOptions()...)
+		}
+	}
 	if err != nil {
 		return ""
 	}

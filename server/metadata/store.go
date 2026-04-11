@@ -41,7 +41,19 @@ func Open(persistenceRoot string) (*Store, error) {
 	if trimmedRoot == "" {
 		return nil, errors.New("persistence root is required")
 	}
-	db, err := openDatabase(trimmedRoot)
+	return OpenAtPath(trimmedRoot, filepath.Join(trimmedRoot, "db", "main.sqlite3"))
+}
+
+func OpenAtPath(persistenceRoot string, databasePath string) (*Store, error) {
+	trimmedRoot := strings.TrimSpace(persistenceRoot)
+	trimmedDatabasePath := strings.TrimSpace(databasePath)
+	if trimmedRoot == "" {
+		return nil, errors.New("persistence root is required")
+	}
+	if trimmedDatabasePath == "" {
+		return nil, errors.New("database path is required")
+	}
+	db, err := openDatabaseAtPath(trimmedRoot, trimmedDatabasePath)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +93,17 @@ func (s *Store) SessionStoreOptions() []session.StoreOption {
 	if s == nil {
 		return nil
 	}
-	return []session.StoreOption{session.WithPersistenceObserver(sessionObserver{store: s})}
+	return []session.StoreOption{
+		session.WithPersistenceObserver(sessionObserver{store: s}),
+		session.WithPersistedSessionResolver(s),
+	}
+}
+
+func (s *Store) AuthoritativeSessionStoreOptions() []session.StoreOption {
+	if s == nil {
+		return nil
+	}
+	return append(s.SessionStoreOptions(), session.WithFilelessMetadataPersistence())
 }
 
 func (s *Store) EnsureWorkspaceBinding(ctx context.Context, workspaceRoot string) (Binding, error) {
@@ -257,6 +279,28 @@ func (s *Store) ListSessionsByProject(ctx context.Context, projectID string) ([]
 	return out, nil
 }
 
+func (s *Store) ResolvePersistedSession(ctx context.Context, sessionID string) (session.PersistedSessionRecord, error) {
+	if s == nil || s.queries == nil {
+		return session.PersistedSessionRecord{}, errors.New("metadata store is required")
+	}
+	row, err := s.queries.GetSessionRecordByID(ctx, strings.TrimSpace(sessionID))
+	if err != nil {
+		return session.PersistedSessionRecord{}, fmt.Errorf("get session record: %w", err)
+	}
+	meta, err := sessionMetaFromRecordRow(row)
+	if err != nil {
+		return session.PersistedSessionRecord{}, err
+	}
+	return session.PersistedSessionRecord{
+		SessionDir: filepath.Join(s.persistenceRoot, filepath.FromSlash(row.ArtifactRelpath)),
+		Meta:       &meta,
+	}, nil
+}
+
+func (s *Store) ImportSessionSnapshot(ctx context.Context, snapshot session.PersistedStoreSnapshot) error {
+	return s.upsertSessionSnapshot(ctx, snapshot)
+}
+
 func (s *Store) upsertSessionSnapshot(ctx context.Context, snapshot session.PersistedStoreSnapshot) error {
 	if s == nil || s.queries == nil {
 		return errors.New("metadata store is required")
@@ -281,9 +325,10 @@ func (s *Store) upsertSessionSnapshot(ctx context.Context, snapshot session.Pers
 	if err != nil {
 		return err
 	}
-	metadataJSON, err := marshalJSON(map[string]string{
-		"workspace_root":      snapshot.Meta.WorkspaceRoot,
-		"workspace_container": snapshot.Meta.WorkspaceContainer,
+	metadataJSON, err := marshalJSON(map[string]any{
+		"workspace_root":                  snapshot.Meta.WorkspaceRoot,
+		"workspace_container":             snapshot.Meta.WorkspaceContainer,
+		"compaction_soon_reminder_issued": snapshot.Meta.CompactionSoonReminderIssued,
 	})
 	if err != nil {
 		return err
@@ -341,6 +386,73 @@ func marshalJSON(v any) (string, error) {
 		return "{}", nil
 	}
 	return string(body), nil
+}
+
+func sessionMetaFromRecordRow(row sqlitegen.GetSessionRecordByIDRow) (session.Meta, error) {
+	metadataPayload := struct {
+		WorkspaceRoot                string `json:"workspace_root"`
+		WorkspaceContainer           string `json:"workspace_container"`
+		CompactionSoonReminderIssued bool   `json:"compaction_soon_reminder_issued"`
+	}{}
+	if err := unmarshalStoredJSON(row.MetadataJson, &metadataPayload); err != nil {
+		return session.Meta{}, fmt.Errorf("decode session metadata json: %w", err)
+	}
+	continuation := &session.ContinuationContext{}
+	if err := unmarshalStoredJSON(row.ContinuationJson, continuation); err != nil {
+		return session.Meta{}, fmt.Errorf("decode continuation json: %w", err)
+	}
+	if strings.TrimSpace(continuation.OpenAIBaseURL) == "" {
+		continuation = nil
+	}
+	locked := &session.LockedContract{}
+	if err := unmarshalStoredJSON(row.LockedJson, locked); err != nil {
+		return session.Meta{}, fmt.Errorf("decode locked json: %w", err)
+	}
+	if locked.LockedAt.IsZero() && strings.TrimSpace(locked.Model) == "" && len(locked.EnabledTools) == 0 && locked.ProviderContract.ProviderID == "" {
+		locked = nil
+	}
+	usageState := &session.UsageState{}
+	if err := unmarshalStoredJSON(row.UsageStateJson, usageState); err != nil {
+		return session.Meta{}, fmt.Errorf("decode usage state json: %w", err)
+	}
+	if *usageState == (session.UsageState{}) {
+		usageState = nil
+	}
+	workspaceRoot := row.WorkspaceRoot
+	if strings.TrimSpace(metadataPayload.WorkspaceRoot) != "" {
+		workspaceRoot = metadataPayload.WorkspaceRoot
+	}
+	workspaceContainer := strings.TrimSpace(metadataPayload.WorkspaceContainer)
+	if workspaceContainer == "" {
+		workspaceContainer = filepath.Base(filepath.Clean(workspaceRoot))
+	}
+	return session.Meta{
+		SessionID:                    row.ID,
+		Name:                         row.Name,
+		FirstPromptPreview:           row.FirstPromptPreview,
+		InputDraft:                   row.InputDraft,
+		ParentSessionID:              row.ParentSessionID,
+		WorkspaceRoot:                workspaceRoot,
+		WorkspaceContainer:           workspaceContainer,
+		Continuation:                 continuation,
+		CreatedAt:                    timeFromStoredTimestamp(row.CreatedAtUnixMs),
+		UpdatedAt:                    timeFromStoredTimestamp(row.UpdatedAtUnixMs),
+		LastSequence:                 row.LastSequence,
+		ModelRequestCount:            row.ModelRequestCount,
+		InFlightStep:                 row.InFlightStep != 0,
+		AgentsInjected:               row.AgentsInjected != 0,
+		CompactionSoonReminderIssued: metadataPayload.CompactionSoonReminderIssued,
+		UsageState:                   usageState,
+		Locked:                       locked,
+	}, nil
+}
+
+func unmarshalStoredJSON(body string, target any) error {
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" || trimmed == "null" || trimmed == "{}" {
+		return nil
+	}
+	return json.Unmarshal([]byte(trimmed), target)
 }
 
 func projectSummaryFromRow(projectID string, displayName string, rootPath string, sessionCount int64, latestActivityUnixMs int64) clientui.ProjectSummary {

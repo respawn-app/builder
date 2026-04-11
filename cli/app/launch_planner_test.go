@@ -7,8 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"builder/server/metadata"
 	"builder/server/session"
+	"builder/server/storagemigration"
 	"builder/server/tools"
 	"builder/shared/config"
 )
@@ -24,10 +27,12 @@ func (s *plannerOwnershipServer) OwnsServer() bool {
 
 func TestSessionLaunchPlannerHeadlessCreatesNewSessionAndAppliesContinuationContext(t *testing.T) {
 	root := t.TempDir()
-	containerDir := filepath.Join(root, "sessions", "workspace-a")
+	workspaceRoot := "/tmp/workspace-a"
+	binding := mustRegisterAppBinding(t, root, workspaceRoot)
+	containerDir := config.ProjectSessionsRoot(config.App{PersistenceRoot: root}, binding.ProjectID)
 	planner := newSessionLaunchPlanner(&testEmbeddedServer{
 		cfg: config.App{
-			WorkspaceRoot:   "/tmp/workspace-a",
+			WorkspaceRoot:   workspaceRoot,
 			PersistenceRoot: root,
 			Settings: config.Settings{
 				OpenAIBaseURL: "http://headless.local/v1",
@@ -40,10 +45,7 @@ func TestSessionLaunchPlannerHeadlessCreatesNewSessionAndAppliesContinuationCont
 	if err != nil {
 		t.Fatalf("plan session: %v", err)
 	}
-	opened, err := session.OpenByID(root, plan.SessionID)
-	if err != nil {
-		t.Fatalf("open planned session: %v", err)
-	}
+	opened := openAuthoritativeAppSession(t, root, plan.SessionID)
 	meta := opened.Meta()
 	if meta.SessionID == "" {
 		t.Fatal("expected session id")
@@ -72,22 +74,14 @@ func TestSessionLaunchPlannerInteractiveUsesPickerSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	_, containerDir, err := config.ResolveWorkspaceContainer(cfg)
-	if err != nil {
-		t.Fatalf("resolve workspace container: %v", err)
-	}
+	binding := mustRegisterAppBinding(t, cfg.PersistenceRoot, cfg.WorkspaceRoot)
+	containerDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
 
-	first, err := session.Create(containerDir, filepath.Base(containerDir), cfg.WorkspaceRoot)
-	if err != nil {
-		t.Fatalf("create first session: %v", err)
-	}
+	first := createAuthoritativeAppSession(t, cfg.PersistenceRoot, cfg.WorkspaceRoot)
 	if err := first.SetName("first"); err != nil {
 		t.Fatalf("persist first session meta: %v", err)
 	}
-	second, err := session.Create(containerDir, filepath.Base(containerDir), cfg.WorkspaceRoot)
-	if err != nil {
-		t.Fatalf("create second session: %v", err)
-	}
+	second := createAuthoritativeAppSession(t, cfg.PersistenceRoot, cfg.WorkspaceRoot)
 	if err := second.SetName("second"); err != nil {
 		t.Fatalf("persist second session meta: %v", err)
 	}
@@ -127,11 +121,10 @@ func TestSessionLaunchPlannerInteractiveUsesPickerSelection(t *testing.T) {
 	}
 }
 
-func TestSessionLaunchPlannerInteractiveUsesLegacyWorkspaceContainerMapping(t *testing.T) {
+func TestSessionLaunchPlannerInteractiveUsesMigratedLegacySession(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
-	registerAppWorkspace(t, workspace)
 
 	cfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {
@@ -163,13 +156,16 @@ func TestSessionLaunchPlannerInteractiveUsesLegacyWorkspaceContainerMapping(t *t
 		t.Fatalf("persist legacy session meta: %v", err)
 	}
 
-	containerName, containerDir, err := config.ResolveWorkspaceContainer(cfg)
+	if err := storagemigration.EnsureProjectV1(context.Background(), cfg.PersistenceRoot, func() time.Time {
+		return time.Date(2026, 4, 11, 12, 0, 0, 0, time.UTC)
+	}); err != nil {
+		t.Fatalf("EnsureProjectV1: %v", err)
+	}
+	binding, err := metadata.ResolveBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot)
 	if err != nil {
-		t.Fatalf("resolve workspace container: %v", err)
+		t.Fatalf("ResolveBinding: %v", err)
 	}
-	if containerName != legacyContainer {
-		t.Fatalf("expected legacy container %q, got %q", legacyContainer, containerName)
-	}
+	containerDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
 
 	planner := &launchPlanner{
 		server: &testEmbeddedServer{
@@ -237,11 +233,10 @@ func TestSessionLaunchPlannerPropagatesServerOwnershipToStatusConfig(t *testing.
 
 func TestSessionLaunchPlannerSelectedSessionIDBypassesPicker(t *testing.T) {
 	root := t.TempDir()
-	containerDir := filepath.Join(root, "sessions")
-	store, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
+	workspaceRoot := "/tmp/workspace-a"
+	binding := mustRegisterAppBinding(t, root, workspaceRoot)
+	containerDir := config.ProjectSessionsRoot(config.App{PersistenceRoot: root}, binding.ProjectID)
+	store := createAuthoritativeAppSession(t, root, workspaceRoot)
 	if err := store.SetName("selected"); err != nil {
 		t.Fatalf("persist selected session meta: %v", err)
 	}
@@ -273,10 +268,7 @@ func TestSessionLaunchPlannerSelectedSessionIDBypassesPicker(t *testing.T) {
 	if plan.ActiveSettings.OpenAIBaseURL != "http://session.local/v1" {
 		t.Fatalf("expected session continuation base url, got %q", plan.ActiveSettings.OpenAIBaseURL)
 	}
-	reopened, err := session.OpenByID(root, plan.SessionID)
-	if err != nil {
-		t.Fatalf("open selected session by id: %v", err)
-	}
+	reopened := openAuthoritativeAppSession(t, root, plan.SessionID)
 	if got := reopened.Meta().Continuation; got == nil || got.OpenAIBaseURL != "http://session.local/v1" {
 		t.Fatalf("expected continuation base url preserved, got %+v", got)
 	}

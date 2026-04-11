@@ -73,6 +73,19 @@ func NewLazy(workspaceContainerDir, workspaceContainerName, workspaceRoot string
 
 func Open(sessionDir string, options ...StoreOption) (*Store, error) {
 	storeOpts := normalizeStoreOptions(options...)
+	return openPersistedSession(sessionDir, nil, storeOpts)
+}
+
+func OpenByID(persistenceRoot, sessionID string, options ...StoreOption) (*Store, error) {
+	storeOpts := normalizeStoreOptions(options...)
+	record, err := resolvePersistedSessionRecord(persistenceRoot, sessionID, storeOpts)
+	if err != nil {
+		return nil, err
+	}
+	return openPersistedSession(record.SessionDir, record.Meta, storeOpts)
+}
+
+func openPersistedSession(sessionDir string, resolvedMeta *Meta, storeOpts storeOptions) (*Store, error) {
 	s := &Store{
 		sessionDir: sessionDir,
 		sessionFP:  filepath.Join(sessionDir, sessionFile),
@@ -80,7 +93,9 @@ func Open(sessionDir string, options ...StoreOption) (*Store, error) {
 		persisted:  true,
 		options:    storeOpts,
 	}
-	if err := s.loadMetaLocked(); err != nil {
+	if resolvedMeta != nil {
+		s.meta = *resolvedMeta
+	} else if err := s.loadMetaLocked(); err != nil {
 		return nil, err
 	}
 	if err := s.bootstrapEventLogStateLocked(); err != nil {
@@ -92,12 +107,21 @@ func Open(sessionDir string, options ...StoreOption) (*Store, error) {
 	return s, nil
 }
 
-func OpenByID(persistenceRoot, sessionID string, options ...StoreOption) (*Store, error) {
-	sessionDir, err := FindSessionDir(persistenceRoot, sessionID)
-	if err != nil {
-		return nil, err
+func resolvePersistedSessionRecord(persistenceRoot, sessionID string, storeOpts storeOptions) (PersistedSessionRecord, error) {
+	root := strings.TrimSpace(persistenceRoot)
+	id := strings.TrimSpace(sessionID)
+	if root == "" {
+		return PersistedSessionRecord{}, errors.New("persistence root is required")
 	}
-	return Open(sessionDir, options...)
+	if id == "" {
+		return PersistedSessionRecord{}, errors.New("session id is required")
+	}
+	if sessionDir, err := FindSessionDir(root, id); err == nil {
+		return PersistedSessionRecord{SessionDir: sessionDir}, nil
+	} else if storeOpts.resolver == nil {
+		return PersistedSessionRecord{}, err
+	}
+	return storeOpts.resolver.ResolvePersistedSession(context.Background(), id)
 }
 
 func FindSessionDir(persistenceRoot, sessionID string) (string, error) {
@@ -227,7 +251,7 @@ func (s *Store) SetInputDraft(inputDraft string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.meta.InputDraft == inputDraft && (!s.persisted || hasSessionMeta(s.sessionDir)) {
+	if s.meta.InputDraft == inputDraft && (!s.persisted || s.hasDurableMetadataLocked()) {
 		return nil
 	}
 	s.meta.InputDraft = inputDraft
@@ -242,7 +266,7 @@ func (s *Store) SetCompactionSoonReminderIssued(issued bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.meta.CompactionSoonReminderIssued == issued && (!s.persisted || hasSessionMeta(s.sessionDir)) {
+	if s.meta.CompactionSoonReminderIssued == issued && (!s.persisted || s.hasDurableMetadataLocked()) {
 		return nil
 	}
 	s.meta.CompactionSoonReminderIssued = issued
@@ -255,7 +279,7 @@ func (s *Store) SetUsageState(state *UsageState) error {
 	defer s.mu.Unlock()
 
 	normalized := normalizeUsageState(state)
-	if usageStatesEqual(s.meta.UsageState, normalized) && (!s.persisted || hasSessionMeta(s.sessionDir)) {
+	if usageStatesEqual(s.meta.UsageState, normalized) && (!s.persisted || s.hasDurableMetadataLocked()) {
 		return nil
 	}
 	s.meta.UsageState = normalized
@@ -432,10 +456,21 @@ func (s *Store) WalkEvents(visit func(Event) error) error {
 
 func (s *Store) loadMetaLocked() error {
 	m, err := readMetaFile(s.sessionFP)
-	if err != nil {
+	if err == nil {
+		s.meta = m
+		return nil
+	}
+	if s.options.resolver == nil {
 		return err
 	}
-	s.meta = m
+	record, resolveErr := s.options.resolver.ResolvePersistedSession(context.Background(), filepath.Base(s.sessionDir))
+	if resolveErr != nil {
+		return err
+	}
+	if record.Meta == nil {
+		return err
+	}
+	s.meta = *record.Meta
 	return nil
 }
 
@@ -443,21 +478,36 @@ func (s *Store) persistMetaLocked() error {
 	if err := s.ensurePersistedLocked(); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(s.meta, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal session meta: %w", err)
-	}
-	tmp := s.sessionFP + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return fmt.Errorf("write session meta tmp: %w", err)
-	}
-	if err := os.Rename(tmp, s.sessionFP); err != nil {
-		return fmt.Errorf("replace session meta: %w", err)
+	if !s.options.filelessMeta {
+		data, err := json.MarshalIndent(s.meta, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal session meta: %w", err)
+		}
+		tmp := s.sessionFP + ".tmp"
+		if err := os.WriteFile(tmp, data, 0o644); err != nil {
+			return fmt.Errorf("write session meta tmp: %w", err)
+		}
+		if err := os.Rename(tmp, s.sessionFP); err != nil {
+			return fmt.Errorf("replace session meta: %w", err)
+		}
 	}
 	if err := s.observePersistenceLocked(); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (s *Store) hasDurableMetadataLocked() bool {
+	if s == nil || !s.persisted {
+		return false
+	}
+	if hasSessionMeta(s.sessionDir) {
+		return true
+	}
+	if !s.options.filelessMeta {
+		return false
+	}
+	return s.options.resolver != nil || s.options.observer != nil
 }
 
 func (s *Store) appendEventsAtomicLocked(events []Event) error {

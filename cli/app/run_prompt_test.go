@@ -545,10 +545,7 @@ func TestRunPromptCreatesSessionAndPersistsDurableTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	store, err := session.OpenByID(cfg.PersistenceRoot, result.SessionID)
-	if err != nil {
-		t.Fatalf("open session by id: %v", err)
-	}
+	store := openAuthoritativeAppSession(t, cfg.PersistenceRoot, result.SessionID)
 	meta := store.Meta()
 	if meta.WorkspaceRoot != cfg.WorkspaceRoot {
 		t.Fatalf("workspace root = %q, want %q", meta.WorkspaceRoot, cfg.WorkspaceRoot)
@@ -644,10 +641,7 @@ func TestHeadlessRunPromptClientResumesExistingSessionByID(t *testing.T) {
 		t.Fatalf("fake response server hit count = %d, want 2", got)
 	}
 
-	store, err := openWorkspaceSessionStore(workspace, server.URL, created.SessionID)
-	if err != nil {
-		t.Fatalf("open workspace session store: %v", err)
-	}
+	store := openAuthoritativeWorkspaceSessionStore(t, workspace, server.URL, created.SessionID)
 	messages, err := readStoredMessages(store)
 	if err != nil {
 		t.Fatalf("read stored messages: %v", err)
@@ -709,10 +703,7 @@ func TestHeadlessRunPromptClientRestoresContinuationContextFromSelectedSession(t
 		t.Fatalf("fake response server hit count = %d, want 2", got)
 	}
 
-	store, err := openWorkspaceSessionStore(workspace, server.URL, created.SessionID)
-	if err != nil {
-		t.Fatalf("open workspace session store: %v", err)
-	}
+	store := openAuthoritativeWorkspaceSessionStore(t, workspace, server.URL, created.SessionID)
 	if store.Meta().Continuation == nil || store.Meta().Continuation.OpenAIBaseURL != server.URL {
 		t.Fatalf("unexpected continuation context: %+v", store.Meta().Continuation)
 	}
@@ -817,10 +808,7 @@ func TestHeadlessRunPromptClientDeduplicatesDuplicateClientRequestID(t *testing.
 		t.Fatalf("fake response server hit count = %d, want 2 total requests", got)
 	}
 
-	store, err := openWorkspaceSessionStore(workspace, server.URL, created.SessionID)
-	if err != nil {
-		t.Fatalf("open workspace session store: %v", err)
-	}
+	store := openAuthoritativeWorkspaceSessionStore(t, workspace, server.URL, created.SessionID)
 	messages, err := readStoredMessages(store)
 	if err != nil {
 		t.Fatalf("read stored messages: %v", err)
@@ -867,16 +855,17 @@ func newFakeResponsesServer(t *testing.T, assistantReplies []string) (*httptest.
 	return server, &hits
 }
 
-func openWorkspaceSessionStore(workspaceRoot, openAIBaseURL, sessionID string) (*session.Store, error) {
+func openAuthoritativeWorkspaceSessionStore(t *testing.T, workspaceRoot, openAIBaseURL, sessionID string) *session.Store {
+	t.Helper()
 	loadOpts := config.LoadOptions{}
 	if strings.TrimSpace(openAIBaseURL) != "" {
 		loadOpts.OpenAIBaseURL = openAIBaseURL
 	}
 	cfg, err := config.Load(workspaceRoot, loadOpts)
 	if err != nil {
-		return nil, err
+		t.Fatalf("config.Load: %v", err)
 	}
-	return session.OpenByID(cfg.PersistenceRoot, sessionID)
+	return openAuthoritativeAppSession(t, cfg.PersistenceRoot, sessionID)
 }
 
 func readStoredMessages(store *session.Store) ([]llm.Message, error) {

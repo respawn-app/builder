@@ -68,6 +68,44 @@ func registerEmbeddedWorkspace(t *testing.T, workspace string) {
 	}
 }
 
+func embeddedProjectSessionsRoot(server *Server) string {
+	return config.ProjectSessionsRoot(server.Config(), server.ProjectID())
+}
+
+func createEmbeddedProjectSession(t *testing.T, server *Server, workspace string) *session.Store {
+	t.Helper()
+	metadataStore, err := metadata.Open(server.Config().PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	// Keep the metadata store alive for the lifetime of the session store so
+	// persistence observer writes continue to succeed during the test.
+	store, err := session.Create(
+		embeddedProjectSessionsRoot(server),
+		filepath.Base(filepath.Clean(workspace)),
+		workspace,
+		metadataStore.AuthoritativeSessionStoreOptions()...,
+	)
+	if err != nil {
+		t.Fatalf("create project session: %v", err)
+	}
+	return store
+}
+
+func openEmbeddedSessionByID(t *testing.T, server *Server, sessionID string) *session.Store {
+	t.Helper()
+	metadataStore, err := metadata.Open(server.Config().PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	defer func() { _ = metadataStore.Close() }()
+	store, err := session.OpenByID(server.Config().PersistenceRoot, sessionID, metadataStore.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("open session by id: %v", err)
+	}
+	return store
+}
+
 func TestStartBuildsEmbeddedServerAndRunsOnboarding(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("OPENAI_API_KEY", "sk-test")
@@ -195,10 +233,7 @@ func TestRunPromptClientRunsLoopbackThroughEmbeddedServer(t *testing.T) {
 		t.Fatalf("response result = %q", response.Result)
 	}
 
-	store, err := session.OpenByID(server.Config().PersistenceRoot, response.SessionID)
-	if err != nil {
-		t.Fatalf("open session by id: %v", err)
-	}
+	store := openEmbeddedSessionByID(t, server, response.SessionID)
 	if store.Meta().Continuation == nil || store.Meta().Continuation.OpenAIBaseURL != responseServer.URL {
 		t.Fatalf("unexpected continuation context: %+v", store.Meta().Continuation)
 	}
@@ -289,16 +324,11 @@ func TestRunPromptClientPublishesHeadlessSessionActivity(t *testing.T) {
 	}
 	defer func() { _ = server.Close() }()
 
-	store, err := session.Create(server.ContainerDir(), "workspace-x", workspace)
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
+	store := createEmbeddedProjectSession(t, server, workspace)
 	if err := store.SetName("headless activity"); err != nil {
 		t.Fatalf("set session name: %v", err)
 	}
-	if _, err := session.OpenByID(server.Config().PersistenceRoot, store.Meta().SessionID); err != nil {
-		t.Fatalf("preflight OpenByID failed: %v (persistence_root=%q container_dir=%q session_id=%q)", err, server.Config().PersistenceRoot, server.ContainerDir(), store.Meta().SessionID)
-	}
+	_ = openEmbeddedSessionByID(t, server, store.Meta().SessionID)
 
 	responseCh := make(chan serverapi.RunPromptResponse, 1)
 	errCh := make(chan error, 1)
@@ -409,10 +439,7 @@ func TestSessionViewClientReadsDormantSessionByIDWithoutMutatingFiles(t *testing
 	}
 	defer func() { _ = server.Close() }()
 
-	store, err := session.Create(server.ContainerDir(), "workspace-x", workspace)
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
+	store := createEmbeddedProjectSession(t, server, workspace)
 	if err := store.SetName("incident triage"); err != nil {
 		t.Fatalf("set name: %v", err)
 	}
@@ -425,9 +452,8 @@ func TestSessionViewClientReadsDormantSessionByIDWithoutMutatingFiles(t *testing
 
 	sessionPath := filepath.Join(store.Dir(), "session.json")
 	eventsPath := filepath.Join(store.Dir(), "events.jsonl")
-	beforeSession, err := os.ReadFile(sessionPath)
-	if err != nil {
-		t.Fatalf("read session file before: %v", err)
+	if _, err := os.Stat(sessionPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected session metadata file to be absent after 4B cutover, got err=%v", err)
 	}
 	beforeEvents, err := os.ReadFile(eventsPath)
 	if err != nil {
@@ -442,16 +468,12 @@ func TestSessionViewClientReadsDormantSessionByIDWithoutMutatingFiles(t *testing
 		t.Fatalf("unexpected main view: %+v", resp.MainView)
 	}
 
-	afterSession, err := os.ReadFile(sessionPath)
-	if err != nil {
-		t.Fatalf("read session file after: %v", err)
+	if _, err := os.Stat(sessionPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected session metadata file to remain absent after dormant read, got err=%v", err)
 	}
 	afterEvents, err := os.ReadFile(eventsPath)
 	if err != nil {
 		t.Fatalf("read events file after: %v", err)
-	}
-	if string(beforeSession) != string(afterSession) {
-		t.Fatalf("session file mutated during dormant read")
 	}
 	if string(beforeEvents) != string(afterEvents) {
 		t.Fatalf("events file mutated during dormant read")
@@ -492,10 +514,7 @@ func TestSessionViewClientUsesRegisteredRuntimeByID(t *testing.T) {
 	}
 	defer func() { _ = server.Close() }()
 
-	store, err := session.Create(server.ContainerDir(), "workspace-x", workspace)
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
+	store := createEmbeddedProjectSession(t, server, workspace)
 	eng, err := runtime.New(store, &fakeEmbeddedClient{}, tools.NewRegistry(), runtime.Config{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
@@ -554,17 +573,11 @@ func TestProjectViewClientListsCurrentProjectAndSessions(t *testing.T) {
 	}
 	defer func() { _ = server.Close() }()
 
-	first, err := session.Create(server.ContainerDir(), "workspace-x", workspace)
-	if err != nil {
-		t.Fatalf("create first session: %v", err)
-	}
+	first := createEmbeddedProjectSession(t, server, workspace)
 	if err := first.SetName("first"); err != nil {
 		t.Fatalf("persist first session meta: %v", err)
 	}
-	second, err := session.Create(server.ContainerDir(), "workspace-x", workspace)
-	if err != nil {
-		t.Fatalf("create second session: %v", err)
-	}
+	second := createEmbeddedProjectSession(t, server, workspace)
 	if err := second.SetName("second"); err != nil {
 		t.Fatalf("persist second session meta: %v", err)
 	}

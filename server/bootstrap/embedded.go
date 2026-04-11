@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"context"
 	"errors"
 	"os"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"builder/server/launch"
 	"builder/server/runtime"
 	"builder/server/runtimewire"
+	"builder/server/storagemigration"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/config"
 	"builder/shared/textutil"
@@ -50,6 +52,9 @@ func ResolveConfig(req Request) (ConfigPlan, error) {
 	}
 	cfg, err := loadConfig(req.LoadOptions, bootstrapPlan.WorkspaceRoot, bootstrapPlan.OpenAIBaseURL, bootstrapPlan.UseOpenAIBaseURL)
 	if err != nil {
+		return ConfigPlan{}, err
+	}
+	if err := storagemigration.EnsureProjectV1(context.Background(), cfg.PersistenceRoot, req.Now); err != nil {
 		return ConfigPlan{}, err
 	}
 	bootstrapPlan, err = launch.ResolveBootstrapPlan(cfg.PersistenceRoot, launch.BootstrapRequest{

@@ -26,6 +26,8 @@ type StoreOption func(*storeOptions)
 type storeOptions struct {
 	eventLog        eventLogOptions
 	observer        PersistenceObserver
+	resolver        PersistedSessionResolver
+	filelessMeta    bool
 	observerTimeout time.Duration
 }
 
@@ -64,6 +66,18 @@ func WithPersistenceObserver(observer PersistenceObserver) StoreOption {
 func WithPersistenceObserverTimeout(timeout time.Duration) StoreOption {
 	return func(options *storeOptions) {
 		options.observerTimeout = timeout
+	}
+}
+
+func WithPersistedSessionResolver(resolver PersistedSessionResolver) StoreOption {
+	return func(options *storeOptions) {
+		options.resolver = resolver
+	}
+}
+
+func WithFilelessMetadataPersistence() StoreOption {
+	return func(options *storeOptions) {
+		options.filelessMeta = true
 	}
 }
 

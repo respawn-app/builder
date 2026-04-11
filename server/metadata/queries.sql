@@ -159,3 +159,27 @@ SELECT
 FROM sessions
 WHERE project_id = sqlc.arg(project_id)
 ORDER BY updated_at_unix_ms DESC, rowid DESC;
+
+-- name: GetSessionRecordByID :one
+SELECT
+    s.id,
+    s.artifact_relpath,
+    s.name,
+    s.first_prompt_preview,
+    s.input_draft,
+    s.parent_session_id,
+    s.created_at_unix_ms,
+    s.updated_at_unix_ms,
+    s.last_sequence,
+    s.model_request_count,
+    s.in_flight_step,
+    s.agents_injected,
+    s.continuation_json,
+    s.locked_json,
+    s.usage_state_json,
+    s.metadata_json,
+    w.canonical_root_path AS workspace_root
+FROM sessions s
+JOIN workspaces w ON w.id = s.workspace_id
+WHERE s.id = sqlc.arg(session_id)
+LIMIT 1;

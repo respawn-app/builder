@@ -17,10 +17,16 @@ var migrationsFS embed.FS
 
 func openDatabase(persistenceRoot string) (*sql.DB, error) {
 	trimmedRoot := filepath.Clean(persistenceRoot)
-	if err := os.MkdirAll(filepath.Join(trimmedRoot, "db"), 0o755); err != nil {
+	return openDatabaseAtPath(trimmedRoot, filepath.Join(trimmedRoot, "db", "main.sqlite3"))
+}
+
+func openDatabaseAtPath(persistenceRoot string, databasePath string) (*sql.DB, error) {
+	_ = filepath.Clean(persistenceRoot)
+	trimmedDatabasePath := filepath.Clean(databasePath)
+	if err := os.MkdirAll(filepath.Dir(trimmedDatabasePath), 0o755); err != nil {
 		return nil, fmt.Errorf("create metadata db dir: %w", err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(trimmedRoot, "db", "main.sqlite3"))
+	db, err := sql.Open("sqlite", trimmedDatabasePath)
 	if err != nil {
 		return nil, fmt.Errorf("open metadata db: %w", err)
 	}
