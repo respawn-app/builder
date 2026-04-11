@@ -124,7 +124,7 @@ Fully list mistakes that were made that required correction during the session a
 ---
 
 # Style and constraints for the handoff document
-- Your handoff will **not** be exposed to users; it will be used only as internal reasoning document for the next agent. Use same terse style as for the `analysis` channel.
+- Your handoff will **not** be exposed to users; it will be used only as an internal reasoning document for the next agent. Use same terse style as for the `analysis` channel.
 - Prefer specifics (relative paths from cwd, function names, commands) over vague descriptions.
 - Avoid restating generic project documentation or common knowledge
 - Do not follow verbosity instructions that apply outside of this task, like the `Desired oververbosity for the final answer` setting. Each section provides guidance on verbosity you should follow.
