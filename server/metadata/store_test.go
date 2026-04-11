@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"builder/server/session"
 	"builder/shared/clientui"
@@ -51,6 +52,73 @@ func TestEnsureWorkspaceBindingDoesNotRegisterUnknownWorkspace(t *testing.T) {
 	}
 	if resolved.ProjectID != binding.ProjectID || resolved.WorkspaceID != binding.WorkspaceID {
 		t.Fatalf("resolved binding mismatch: got %+v want %+v", resolved, binding)
+	}
+}
+
+func TestInsertWorkspaceBindingRecoversFromCanonicalRootConflict(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	canonicalRoot, err := config.CanonicalWorkspaceRoot(cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot: %v", err)
+	}
+	now := time.Now().UTC()
+	winner, err := store.insertWorkspaceBinding(ctx, canonicalRoot, filepath.Base(canonicalRoot), "project-winner", "workspace-winner", now)
+	if err != nil {
+		t.Fatalf("insertWorkspaceBinding winner: %v", err)
+	}
+	loser, err := store.insertWorkspaceBinding(ctx, canonicalRoot, filepath.Base(canonicalRoot), "project-loser", "workspace-loser", now)
+	if err != nil {
+		t.Fatalf("insertWorkspaceBinding loser: %v", err)
+	}
+	if loser.ProjectID != winner.ProjectID || loser.WorkspaceID != winner.WorkspaceID {
+		t.Fatalf("conflict recovery mismatch: got %+v want %+v", loser, winner)
+	}
+	var projectCount int
+	if err := store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM projects").Scan(&projectCount); err != nil {
+		t.Fatalf("count projects: %v", err)
+	}
+	if projectCount != 1 {
+		t.Fatalf("project count = %d, want 1", projectCount)
+	}
+	var workspaceCount int
+	if err := store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM workspaces").Scan(&workspaceCount); err != nil {
+		t.Fatalf("count workspaces: %v", err)
+	}
+	if workspaceCount != 1 {
+		t.Fatalf("workspace count = %d, want 1", workspaceCount)
+	}
+	if _, err := store.EnsureWorkspaceBinding(ctx, cfg.WorkspaceRoot); err != nil {
+		t.Fatalf("EnsureWorkspaceBinding after conflict recovery: %v", err)
+	}
+	if _, err := store.queries.DeleteProjectIfOrphaned(ctx, winner.ProjectID); err != nil {
+		t.Fatalf("DeleteProjectIfOrphaned winner project: %v", err)
+	}
+	if err := store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM projects WHERE id = ?", winner.ProjectID).Scan(&projectCount); err != nil {
+		t.Fatalf("count winner project: %v", err)
+	}
+	if projectCount != 1 {
+		t.Fatalf("winner project unexpectedly deleted")
+	}
+	if rows, err := store.queries.DeleteProjectIfOrphaned(ctx, "project-missing"); err != nil {
+		t.Fatalf("DeleteProjectIfOrphaned missing project: %v", err)
+	} else if rows != 0 {
+		t.Fatalf("DeleteProjectIfOrphaned missing project rows = %d, want 0", rows)
+	}
+	if _, err := store.lookupWorkspaceBinding(ctx, canonicalRoot); err != nil {
+		t.Fatalf("lookupWorkspaceBinding: %v", err)
 	}
 }
 

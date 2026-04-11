@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -127,5 +128,31 @@ func TestEnsureProjectV1IgnoresDiscoveryOnlyLegacyContainersAndPreservesBindings
 	}
 	if resolved.ProjectID != binding.ProjectID || resolved.WorkspaceID != binding.WorkspaceID {
 		t.Fatalf("resolved binding mismatch: got %+v want %+v", resolved, binding)
+	}
+}
+
+func TestEnsureProjectV1FailsWhenLegacySessionMetadataIsUnreadable(t *testing.T) {
+	root := t.TempDir()
+	sessionDir := filepath.Join(root, "sessions", "workspace-a", "session-broken")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir broken legacy session: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, "session.json"), []byte("{broken"), 0o644); err != nil {
+		t.Fatalf("write broken session meta: %v", err)
+	}
+	now := time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC)
+	err := EnsureProjectV1(context.Background(), root, func() time.Time { return now })
+	if err == nil {
+		t.Fatal("expected EnsureProjectV1 to fail on unreadable legacy session metadata")
+	}
+	if !strings.Contains(err.Error(), "read legacy session") {
+		t.Fatalf("expected explicit legacy session read failure, got %v", err)
+	}
+	state, stateErr := LoadState(root)
+	if stateErr != nil {
+		t.Fatalf("LoadState: %v", stateErr)
+	}
+	if strings.TrimSpace(state.Status) != "" {
+		t.Fatalf("expected no migration state to be committed after staging failure, got %+v", state)
 	}
 }
