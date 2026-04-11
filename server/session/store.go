@@ -471,10 +471,10 @@ func (s *Store) loadMetaLocked() error {
 	}
 	record, resolveErr := s.options.resolver.ResolvePersistedSession(context.Background(), filepath.Base(s.sessionDir))
 	if resolveErr != nil {
-		return err
+		return fmt.Errorf("%w (resolver fallback failed: %v)", err, resolveErr)
 	}
 	if record.Meta == nil {
-		return err
+		return fmt.Errorf("%w (resolver fallback returned nil metadata)", err)
 	}
 	s.meta = *record.Meta
 	return nil

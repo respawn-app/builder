@@ -78,6 +78,7 @@ func createEmbeddedProjectSession(t *testing.T, server *Server, workspace string
 	if err != nil {
 		t.Fatalf("metadata.Open: %v", err)
 	}
+	t.Cleanup(func() { _ = metadataStore.Close() })
 	// Keep the metadata store alive for the lifetime of the session store so
 	// persistence observer writes continue to succeed during the test.
 	store, err := session.Create(
@@ -104,7 +105,7 @@ func openEmbeddedSessionByID(t *testing.T, server *Server, sessionID string) *se
 	if err != nil {
 		t.Fatalf("metadata.Open: %v", err)
 	}
-	defer func() { _ = metadataStore.Close() }()
+	t.Cleanup(func() { _ = metadataStore.Close() })
 	store, err := session.OpenByID(server.Config().PersistenceRoot, sessionID, metadataStore.AuthoritativeSessionStoreOptions()...)
 	if err != nil {
 		t.Fatalf("open session by id: %v", err)

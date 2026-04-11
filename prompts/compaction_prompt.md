@@ -51,7 +51,7 @@ Describe what the next agent should do in **small, executable steps**, in the or
   - The main files/classes/functions to touch.
   - Any preconditions (e.g., “Do step 2 only after step 1 tests pass”).
 - Keep steps concrete (things that can be done in one short focus session), not vague tasks like “refactor code”.
-- Don't make up plans or instructions, base this secton on what you were **already** doing (per user) when this handoff was requested. If the action plan was written elsewhere (in docs etc.), point the next agent to the file.
+- Don't make up plans or instructions, base this section on what you were **already** doing (per user) when this handoff was requested. If the action plan was written elsewhere (in docs etc.), point the next agent to the file.
 
 Examples:
 1. Implement X in `<file>` by doing Y.
@@ -118,7 +118,7 @@ Example:
 
 > "Maintain a separate store for audio recording functionality; reason: user requested this after we established that AudioRecorder API is synchronous and imperative, limiting integration ability."
 
-## 14. Mistakes made and how they can be/were solved/prevented 
+## 13. Mistakes made and how they can be/were solved/prevented 
 Fully list mistakes that were made that required correction during the session and explain why the user or you (the agent) labeled them as such, how they were corrected, or if they weren't how they can be corrected, and then how they should be prevented by the next agent. Examples: failed tool calls, user getting angry/correcting you, reverts of code, pivots in implementation. Maintain imperative tone, e.g. "User strongly asserted that no backward compatibility is preserved: do not add fallbacks and deprecation notices."
 
 ---

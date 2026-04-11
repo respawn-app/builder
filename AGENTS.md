@@ -1,4 +1,4 @@
-This repository contains a terminal coding agent focused on output quality, built for professional engineeers.
+This repository contains a terminal coding agent focused on output quality, built for professional engineers.
 
 The product philosophy is:
 - minimal restrictions on model behavior: enabling the model to do its work unhindered.
@@ -65,7 +65,7 @@ The scope is intentionally narrow and quality-oriented.
 - Design for composability.
   - New tools and handlers should require minimal boilerplate and minimal cross-cutting edits.
 - Maximize API cache hits, avoid mutation of past conversation history.
-- Keep TUI fast, avoid flicker, stable scroll, avoid affecting scrollback buffer in ongoing mode or re-emitting full history.
+- Keep TUI fast, avoid flicker, stable scroll, follow best practices, avoid affecting scrollback buffer in ongoing mode or re-emitting full history.
 - Never use regex-based matching, parsing, replace hacks. Never use substring-based lookup to determine information presence. Avoid brittle and fragile text/string-based logic, and develop type-safe data structures, store structured data or metadata that can reliably be extracted instead.
 -  Breaking changes are allowed, but the UX of migration should be straightforward, e.g. a migration note for config entries or a clear error message. Ask user what migration strat they want.
 

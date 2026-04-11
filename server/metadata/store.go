@@ -181,8 +181,8 @@ func (s *Store) RegisterWorkspaceBinding(ctx context.Context, workspaceRoot stri
 	if err := s.queries.UpsertProject(ctx, sqlitegen.UpsertProjectParams{
 		ID:              projectID,
 		DisplayName:     displayName,
-		CreatedAtUnixMs: now.UnixNano(),
-		UpdatedAtUnixMs: now.UnixNano(),
+		CreatedAtUnixMs: now.UnixMilli(),
+		UpdatedAtUnixMs: now.UnixMilli(),
 		MetadataJson:    "{}",
 	}); err != nil {
 		return Binding{}, fmt.Errorf("upsert project: %w", err)
@@ -195,8 +195,8 @@ func (s *Store) RegisterWorkspaceBinding(ctx context.Context, workspaceRoot stri
 		Availability:      availabilityForPath(canonicalRoot),
 		IsPrimary:         1,
 		GitMetadataJson:   "{}",
-		CreatedAtUnixMs:   now.UnixNano(),
-		UpdatedAtUnixMs:   now.UnixNano(),
+		CreatedAtUnixMs:   now.UnixMilli(),
+		UpdatedAtUnixMs:   now.UnixMilli(),
 	}); err != nil {
 		return Binding{}, fmt.Errorf("upsert workspace: %w", err)
 	}
@@ -338,8 +338,8 @@ func (s *Store) CreateRuntimeLease(ctx context.Context, sessionID string, reques
 		ClientID:         record.ClientID,
 		RequestID:        record.RequestID,
 		State:            record.State,
-		CreatedAtUnixMs:  record.CreatedAt.UnixNano(),
-		AcquiredAtUnixMs: record.AcquiredAt.UnixNano(),
+		CreatedAtUnixMs:  record.CreatedAt.UnixMilli(),
+		AcquiredAtUnixMs: record.AcquiredAt.UnixMilli(),
 		ReleasedAtUnixMs: 0,
 		ExpiresAtUnixMs:  0,
 		MetadataJson:     "{}",
@@ -365,7 +365,7 @@ func (s *Store) ReleaseRuntimeLease(ctx context.Context, sessionID string, lease
 		if _, err := s.queries.ReleaseRuntimeLeaseByID(ctx, sqlitegen.ReleaseRuntimeLeaseByIDParams{
 			LeaseID:          record.LeaseID,
 			SessionID:        record.SessionID,
-			ReleasedAtUnixMs: releasedAt.UnixNano(),
+			ReleasedAtUnixMs: releasedAt.UnixMilli(),
 		}); err != nil {
 			return RuntimeLeaseRecord{}, fmt.Errorf("release runtime lease: %w", err)
 		}
@@ -385,7 +385,7 @@ func (s *Store) ReleaseActiveRuntimeLeasesBySession(ctx context.Context, session
 	}
 	if err := s.queries.ReleaseActiveRuntimeLeasesBySession(ctx, sqlitegen.ReleaseActiveRuntimeLeasesBySessionParams{
 		SessionID:        trimmedSessionID,
-		ReleasedAtUnixMs: time.Now().UTC().UnixNano(),
+		ReleasedAtUnixMs: time.Now().UTC().UnixMilli(),
 	}); err != nil {
 		return fmt.Errorf("release active runtime leases: %w", err)
 	}
@@ -456,8 +456,8 @@ func (s *Store) upsertSessionSnapshot(ctx context.Context, snapshot session.Pers
 		FirstPromptPreview: snapshot.Meta.FirstPromptPreview,
 		InputDraft:         snapshot.Meta.InputDraft,
 		ParentSessionID:    snapshot.Meta.ParentSessionID,
-		CreatedAtUnixMs:    snapshot.Meta.CreatedAt.UTC().UnixNano(),
-		UpdatedAtUnixMs:    snapshot.Meta.UpdatedAt.UTC().UnixNano(),
+		CreatedAtUnixMs:    snapshot.Meta.CreatedAt.UTC().UnixMilli(),
+		UpdatedAtUnixMs:    snapshot.Meta.UpdatedAt.UTC().UnixMilli(),
 		LastSequence:       snapshot.Meta.LastSequence,
 		ModelRequestCount:  snapshot.Meta.ModelRequestCount,
 		InFlightStep:       boolToInt64(snapshot.Meta.InFlightStep),

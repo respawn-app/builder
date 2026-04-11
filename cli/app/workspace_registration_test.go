@@ -44,8 +44,10 @@ func createAuthoritativeAppSession(t *testing.T, persistenceRoot string, workspa
 		metadataStore.AuthoritativeSessionStoreOptions()...,
 	)
 	if err != nil {
+		_ = metadataStore.Close()
 		t.Fatalf("session.Create: %v", err)
 	}
+	t.Cleanup(func() { _ = metadataStore.Close() })
 	return store
 }
 
@@ -55,10 +57,11 @@ func openAuthoritativeAppSession(t *testing.T, persistenceRoot string, sessionID
 	if err != nil {
 		t.Fatalf("metadata.Open: %v", err)
 	}
-	defer func() { _ = metadataStore.Close() }()
 	store, err := session.OpenByID(persistenceRoot, sessionID, metadataStore.AuthoritativeSessionStoreOptions()...)
 	if err != nil {
+		_ = metadataStore.Close()
 		t.Fatalf("session.OpenByID: %v", err)
 	}
+	t.Cleanup(func() { _ = metadataStore.Close() })
 	return store
 }
