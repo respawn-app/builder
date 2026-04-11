@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"builder/server/session"
+	"builder/shared/clientui"
 	"builder/shared/config"
 )
 
@@ -180,6 +181,87 @@ func TestHiddenDurableSessionStaysOutOfProjectListingsUntilVisible(t *testing.T)
 	if sessions[0].Name != "incident triage" {
 		t.Fatalf("session name = %q, want incident triage", sessions[0].Name)
 	}
+}
+
+func TestSessionLaunchVisibilityTransitions(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*testing.T, *session.Store)
+	}{
+		{
+			name: "input draft makes session launch-visible",
+			mutate: func(t *testing.T, sess *session.Store) {
+				t.Helper()
+				if err := sess.SetInputDraft("draft prompt"); err != nil {
+					t.Fatalf("SetInputDraft: %v", err)
+				}
+			},
+		},
+		{
+			name: "parent linkage makes session launch-visible",
+			mutate: func(t *testing.T, sess *session.Store) {
+				t.Helper()
+				if err := sess.SetParentSessionID("session-parent"); err != nil {
+					t.Fatalf("SetParentSessionID: %v", err)
+				}
+			},
+		},
+		{
+			name: "first user prompt makes session launch-visible",
+			mutate: func(t *testing.T, sess *session.Store) {
+				t.Helper()
+				if _, err := sess.AppendEvent("step-1", "message", map[string]any{"role": "user", "content": "Investigate broken startup flow\nmore detail"}); err != nil {
+					t.Fatalf("AppendEvent: %v", err)
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, cfg, binding := newMetadataTestStore(t)
+			projectSessionsDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
+			sess, err := session.Create(projectSessionsDir, filepath.Base(projectSessionsDir), cfg.WorkspaceRoot, store.AuthoritativeSessionStoreOptions()...)
+			if err != nil {
+				t.Fatalf("session.Create: %v", err)
+			}
+			if err := sess.EnsureDurable(); err != nil {
+				t.Fatalf("EnsureDurable: %v", err)
+			}
+
+			assertProjectSessionListingCount(t, ctx, store, binding.ProjectID, 0)
+
+			tc.mutate(t, sess)
+
+			listed := assertProjectSessionListingCount(t, ctx, store, binding.ProjectID, 1)
+			if listed[0].SessionID != sess.Meta().SessionID {
+				t.Fatalf("listed session id = %q, want %q", listed[0].SessionID, sess.Meta().SessionID)
+			}
+		})
+	}
+}
+
+func assertProjectSessionListingCount(t *testing.T, ctx context.Context, store *Store, projectID string, want int) []clientui.SessionSummary {
+	t.Helper()
+	projects, err := store.ListProjects(ctx)
+	if err != nil {
+		t.Fatalf("ListProjects: %v", err)
+	}
+	if len(projects) != 1 {
+		t.Fatalf("expected one project, got %+v", projects)
+	}
+	if projects[0].SessionCount != want {
+		t.Fatalf("project session count = %d, want %d", projects[0].SessionCount, want)
+	}
+	sessions, err := store.ListSessionsByProject(ctx, projectID)
+	if err != nil {
+		t.Fatalf("ListSessionsByProject: %v", err)
+	}
+	if len(sessions) != want {
+		t.Fatalf("listed session count = %d, want %d, sessions=%+v", len(sessions), want, sessions)
+	}
+	return sessions
 }
 
 func newMetadataTestStore(t *testing.T) (*Store, config.App, Binding) {

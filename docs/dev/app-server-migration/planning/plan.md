@@ -269,11 +269,13 @@ Deliverables:
 - duplicate-safe activate/release semantics
 - reconnect reacquires a fresh lease after hydrate/attach
 - process/runtime/session mutations route through the new metadata authority cleanly
+- runtime-durable blank sessions remain launch-invisible until they gain user-meaningful state, so Phase 4C does not regress session pickers/startup resume by exposing freshly prepared empty sessions
 
 Primary risks:
 
 - runtime lease leaks
 - hidden frontend-local workspace assumptions in runtime/tool preparation
+- treating durable session-row existence as equivalent to user-visible resumable session state
 
 Rollback point:
 

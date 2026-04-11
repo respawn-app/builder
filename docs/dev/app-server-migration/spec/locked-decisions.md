@@ -82,6 +82,7 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 - Large append-only session artifacts such as `events.jsonl` and `steps.log` remain file-backed for now.
 - `session.json` is removed after successful migration; session metadata authority moves to SQLite.
 - Interactive session creation remains lazily durable.
+- Session durability and launch visibility are distinct thresholds. A freshly prepared blank interactive session may be persisted early for runtime leases and metadata-backed execution-target resolution while still remaining hidden from session pickers, project session counts, and startup resume flows until it gains user-meaningful identity such as a name, draft, lineage, or first prompt/history.
 - The one-time storage migration is blocking at startup, stages metadata before cutover, and preserves the old tree as a timestamped backup after success.
 - Workspace relocation is not auto-rebound; rebinding is explicit user action.
 - SQL is hand-written and explicit; typed DB access should be generated via `sqlc`, and SQL schema migration execution should run through Goose rather than an ORM-owned migrator.
@@ -143,6 +144,7 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 - The server must expose typed hydration views sufficient for startup, session main view, process inspection, and pending asks or approvals.
 - Broad filesystem or runtime inspection APIs are not mandated up front; that surface should expand only when implementation proves a real need.
 - Runtime leases are explicit server-side identities, but reconnect does not reclaim an old lease id. Clients rehydrate, reattach, and acquire a fresh lease; active runs remain server-owned and continue independently.
+- Session browsing and launch surfaces must use server-owned launch-visibility rules rather than raw session-row existence. Runtime-only durable sessions must not leak into pickers or project/session listings.
 
 ## Startup And Composition
 
