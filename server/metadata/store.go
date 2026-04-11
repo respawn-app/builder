@@ -60,6 +60,8 @@ type Store struct {
 	queries         *sqlitegen.Queries
 }
 
+var registerWorkspaceBindingAfterLookupMissHook func()
+
 func Open(persistenceRoot string) (*Store, error) {
 	trimmedRoot := strings.TrimSpace(persistenceRoot)
 	if trimmedRoot == "" {
@@ -176,6 +178,9 @@ func (s *Store) RegisterWorkspaceBinding(ctx context.Context, workspaceRoot stri
 	if err != nil {
 		return Binding{}, err
 	}
+	if registerWorkspaceBindingAfterLookupMissHook != nil {
+		registerWorkspaceBindingAfterLookupMissHook()
+	}
 	now := time.Now().UTC()
 	projectID := "project-" + uuid.NewString()
 	workspaceID := "workspace-" + uuid.NewString()
@@ -204,7 +209,7 @@ func (s *Store) insertWorkspaceBinding(ctx context.Context, canonicalRoot string
 		CreatedAtUnixMs:   now.UnixMilli(),
 		UpdatedAtUnixMs:   now.UnixMilli(),
 	}); err != nil {
-		if binding, recovered := s.recoverWorkspaceBindingAfterConstraint(ctx, canonicalRoot, projectID, err); recovered {
+		if binding, recovered := s.recoverWorkspaceBindingAfterConflict(ctx, canonicalRoot, projectID, workspaceID, err); recovered {
 			return binding, nil
 		}
 		return Binding{}, fmt.Errorf("upsert workspace: %w", err)
@@ -219,27 +224,29 @@ func (s *Store) insertWorkspaceBinding(ctx context.Context, canonicalRoot string
 	}, nil
 }
 
-func (s *Store) recoverWorkspaceBindingAfterConstraint(ctx context.Context, canonicalRoot string, projectID string, err error) (Binding, bool) {
-	if !isWorkspaceBindingConstraintError(err) {
+func (s *Store) recoverWorkspaceBindingAfterConflict(ctx context.Context, canonicalRoot string, projectID string, workspaceID string, err error) (Binding, bool) {
+	if !isCanonicalRootConflictError(err) {
 		return Binding{}, false
 	}
 	binding, lookupErr := s.lookupWorkspaceBinding(ctx, canonicalRoot)
 	if lookupErr != nil {
 		return Binding{}, false
 	}
+	if strings.TrimSpace(binding.WorkspaceID) == strings.TrimSpace(workspaceID) {
+		return Binding{}, false
+	}
 	_, _ = s.queries.DeleteProjectIfOrphaned(context.Background(), projectID)
 	return binding, true
 }
 
-func isWorkspaceBindingConstraintError(err error) bool {
+func isCanonicalRootConflictError(err error) bool {
 	var sqliteErr *modernsqlite.Error
 	if !errors.As(err, &sqliteErr) {
 		return false
 	}
 	switch sqliteErr.Code() {
 	case sqlite3.SQLITE_CONSTRAINT,
-		sqlite3.SQLITE_CONSTRAINT_UNIQUE,
-		sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY:
+		sqlite3.SQLITE_CONSTRAINT_UNIQUE:
 		return true
 	default:
 		return false

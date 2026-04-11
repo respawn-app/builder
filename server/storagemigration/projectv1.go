@@ -112,6 +112,12 @@ func buildStage(ctx context.Context, persistenceRoot string, ts time.Time) (stag
 	if err := os.MkdirAll(stageDir, 0o755); err != nil {
 		return stageResult{}, fmt.Errorf("create stage dir: %w", err)
 	}
+	cleanupStageDir := true
+	defer func() {
+		if cleanupStageDir {
+			_ = os.RemoveAll(stageDir)
+		}
+	}()
 	stageDBPath := filepath.Join(stageDir, "main.sqlite3")
 	store, err := metadata.OpenAtPath(persistenceRoot, stageDBPath)
 	if err != nil {
@@ -185,6 +191,7 @@ func buildStage(ctx context.Context, persistenceRoot string, ts time.Time) (stag
 	if err := writeJSON(manifestPath, manifest); err != nil {
 		return stageResult{}, err
 	}
+	cleanupStageDir = false
 	return stageResult{
 		stageDir:     stageDir,
 		stageRelpath: stageRelpath,

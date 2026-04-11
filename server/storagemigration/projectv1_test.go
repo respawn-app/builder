@@ -155,4 +155,7 @@ func TestEnsureProjectV1FailsWhenLegacySessionMetadataIsUnreadable(t *testing.T)
 	if strings.TrimSpace(state.Status) != "" {
 		t.Fatalf("expected no migration state to be committed after staging failure, got %+v", state)
 	}
+	if _, err := os.Stat(filepath.Join(root, "migrations", projectV1Version, "staging", now.Format("20060102T150405Z"))); !os.IsNotExist(err) {
+		t.Fatalf("expected staging dir cleanup after failure, got %v", err)
+	}
 }
