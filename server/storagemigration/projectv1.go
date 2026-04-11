@@ -23,6 +23,7 @@ const (
 	migrationLockName         = "migration.lock"
 	manifestName              = "manifest.json"
 	stateName                 = "state.json"
+	maxSmallCopyBytes         = 1 << 20
 )
 
 type State struct {
@@ -245,7 +246,7 @@ func executeCutover(persistenceRoot string, stage stageResult, completedAt time.
 		}
 	}
 	manifestPath := filepath.Join(persistenceRoot, "migrations", projectV1Version, manifestName)
-	if err := copyFile(stage.manifestPath, manifestPath); err != nil {
+	if err := copySmallFile(stage.manifestPath, manifestPath); err != nil {
 		return err
 	}
 	return writeState(persistenceRoot, State{
@@ -265,7 +266,7 @@ func legacyCutoverRequired(persistenceRoot string) (bool, error) {
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() {
-			return true, nil
+			continue
 		}
 		containerDir := filepath.Join(legacySessionsRoot(persistenceRoot), entry.Name())
 		containerEntries, err := os.ReadDir(containerDir)
@@ -303,7 +304,7 @@ func acquireMigrationLock(persistenceRoot string) (func(), error) {
 	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
-			return nil, errors.New("storage migration already in progress")
+			return nil, fmt.Errorf("storage migration lock already exists at %s for %s/%s; process may have crashed, remove %s to retry", lockPath, projectV1Version, migrationLockName, lockPath)
 		}
 		return nil, fmt.Errorf("create migration lock: %w", err)
 	}
@@ -351,7 +352,14 @@ func movePathIfExists(source string, target string) error {
 	return nil
 }
 
-func copyFile(source string, target string) error {
+func copySmallFile(source string, target string) error {
+	info, err := os.Stat(source)
+	if err != nil {
+		return fmt.Errorf("stat file %s: %w", source, err)
+	}
+	if info.Size() > maxSmallCopyBytes {
+		return fmt.Errorf("refusing to copy %s: size %d exceeds %d-byte small-file limit", source, info.Size(), maxSmallCopyBytes)
+	}
 	body, err := os.ReadFile(source)
 	if err != nil {
 		return fmt.Errorf("read file %s: %w", source, err)

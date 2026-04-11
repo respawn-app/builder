@@ -45,6 +45,10 @@ type RuntimeSupport struct {
 }
 
 func ResolveConfig(req Request) (ConfigPlan, error) {
+	now := req.Now
+	if now == nil {
+		now = time.Now
+	}
 	bootstrapPlan := launch.BootstrapPlan{
 		WorkspaceRoot:    requestedWorkspaceRoot(req.WorkspaceRoot),
 		OpenAIBaseURL:    strings.TrimSpace(req.OpenAIBaseURL),
@@ -54,7 +58,7 @@ func ResolveConfig(req Request) (ConfigPlan, error) {
 	if err != nil {
 		return ConfigPlan{}, err
 	}
-	if err := storagemigration.EnsureProjectV1(context.Background(), cfg.PersistenceRoot, req.Now); err != nil {
+	if err := storagemigration.EnsureProjectV1(context.Background(), cfg.PersistenceRoot, now); err != nil {
 		return ConfigPlan{}, err
 	}
 	bootstrapPlan, err = launch.ResolveBootstrapPlan(cfg.PersistenceRoot, launch.BootstrapRequest{

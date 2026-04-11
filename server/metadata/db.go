@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"builder/shared/config"
 	"github.com/pressly/goose/v3"
@@ -21,8 +22,21 @@ func openDatabase(persistenceRoot string) (*sql.DB, error) {
 }
 
 func openDatabaseAtPath(persistenceRoot string, databasePath string) (*sql.DB, error) {
-	_ = filepath.Clean(persistenceRoot)
-	trimmedDatabasePath := filepath.Clean(databasePath)
+	trimmedRoot, err := filepath.Abs(filepath.Clean(persistenceRoot))
+	if err != nil {
+		return nil, fmt.Errorf("resolve persistence root: %w", err)
+	}
+	trimmedDatabasePath, err := filepath.Abs(filepath.Clean(databasePath))
+	if err != nil {
+		return nil, fmt.Errorf("resolve metadata db path: %w", err)
+	}
+	rel, err := filepath.Rel(trimmedRoot, trimmedDatabasePath)
+	if err != nil {
+		return nil, fmt.Errorf("validate metadata db path: %w", err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("metadata db path %q escapes persistence root %q", trimmedDatabasePath, trimmedRoot)
+	}
 	if err := os.MkdirAll(filepath.Dir(trimmedDatabasePath), 0o755); err != nil {
 		return nil, fmt.Errorf("create metadata db dir: %w", err)
 	}

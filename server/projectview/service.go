@@ -208,7 +208,7 @@ func (s *Service) syncMetadata(ctx context.Context) error {
 		return nil
 	}
 	s.syncOnce.Do(func() {
-		s.syncErr = s.metadata.SyncLegacyContainer(ctx, s.containerDir)
+		s.syncErr = s.metadata.SyncLegacyContainer(context.WithoutCancel(ctx), s.containerDir)
 	})
 	return s.syncErr
 }
