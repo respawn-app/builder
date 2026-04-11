@@ -89,7 +89,7 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 			if err != nil {
 				return serverapi.SessionRuntimeActivateResponse{}, err
 			}
-			handle, actualLeaseID, ok := s.claimExistingHandleLease(sessionID, requestID, lease.LeaseID)
+			handle, actualLeaseID, ok, ownsClaim := s.claimExistingHandleLease(sessionID, requestID, lease.LeaseID)
 			if !ok {
 				_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
 				continue
@@ -99,7 +99,7 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 				lease.LeaseID = actualLeaseID
 			}
 			if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
-				s.rollbackActivationClaim(sessionID, requestID, lease.LeaseID, handle)
+				s.rollbackActivationClaim(sessionID, requestID, lease.LeaseID, handle, ownsClaim)
 				_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
 				return serverapi.SessionRuntimeActivateResponse{}, err
 			}
@@ -187,7 +187,7 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 			_ = logger.Close()
 		},
 	}
-	current, installed, actualLeaseID := s.installHandle(sessionID, requestID, lease.LeaseID, handle)
+	current, installed, actualLeaseID, ownsClaim := s.installHandle(sessionID, requestID, lease.LeaseID, handle)
 	if !installed {
 		_ = logger.Close()
 		if actualLeaseID != lease.LeaseID {
@@ -195,7 +195,7 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 			lease.LeaseID = actualLeaseID
 		}
 		if err := waitForRuntimeHandleReady(ctx, current); err != nil {
-			s.rollbackActivationClaim(sessionID, requestID, lease.LeaseID, current)
+			s.rollbackActivationClaim(sessionID, requestID, lease.LeaseID, current, ownsClaim)
 			_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
 			return serverapi.SessionRuntimeActivateResponse{}, err
 		}
@@ -282,23 +282,23 @@ func (s *Service) resolveStore(ctx context.Context, sessionID string) (*session.
 	return store, nil
 }
 
-func (s *Service) installHandle(sessionID string, requestID string, leaseID string, handle *runtimeHandle) (*runtimeHandle, bool, string) {
+func (s *Service) installHandle(sessionID string, requestID string, leaseID string, handle *runtimeHandle) (*runtimeHandle, bool, string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if current := s.handles[sessionID]; current != nil {
 		if currentLeaseID, exists := current.activationRequests[requestID]; exists {
-			return current, false, currentLeaseID
+			return current, false, currentLeaseID, false
 		}
 		current.activationRequests[requestID] = leaseID
 		current.activeLeases[leaseID] = struct{}{}
 		current.refs++
-		return current, false, leaseID
+		return current, false, leaseID, true
 	}
 	s.handles[sessionID] = handle
-	return handle, true, leaseID
+	return handle, true, leaseID, true
 }
 
-func (s *Service) claimExistingHandleLease(sessionID string, requestID string, leaseID string) (*runtimeHandle, string, bool) {
+func (s *Service) claimExistingHandleLease(sessionID string, requestID string, leaseID string) (*runtimeHandle, string, bool, bool) {
 	sessionID = strings.TrimSpace(sessionID)
 	requestID = strings.TrimSpace(requestID)
 	leaseID = strings.TrimSpace(leaseID)
@@ -306,19 +306,19 @@ func (s *Service) claimExistingHandleLease(sessionID string, requestID string, l
 	defer s.mu.Unlock()
 	handle := s.handles[sessionID]
 	if handle == nil {
-		return nil, "", false
+		return nil, "", false, false
 	}
 	if currentLeaseID, exists := handle.activationRequests[requestID]; exists {
-		return handle, currentLeaseID, true
+		return handle, currentLeaseID, true, false
 	}
 	handle.activationRequests[requestID] = leaseID
 	handle.activeLeases[leaseID] = struct{}{}
 	handle.refs++
-	return handle, leaseID, true
+	return handle, leaseID, true, true
 }
 
-func (s *Service) rollbackActivationClaim(sessionID string, requestID string, leaseID string, handle *runtimeHandle) {
-	if handle == nil {
+func (s *Service) rollbackActivationClaim(sessionID string, requestID string, leaseID string, handle *runtimeHandle, ownsClaim bool) {
+	if handle == nil || !ownsClaim {
 		return
 	}
 	s.mu.Lock()
