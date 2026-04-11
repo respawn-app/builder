@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"builder/server/metadata"
@@ -268,6 +269,55 @@ func TestActivateSessionRuntimeHonorsCanceledContextBeforeInstallingHandle(t *te
 	}
 	if len(fixture.service.handles) != 0 {
 		t.Fatalf("expected no installed handles after canceled activation, got %+v", fixture.service.handles)
+	}
+}
+
+func TestClaimExistingHandleLeaseReturnsNotFoundWhenHandleDisappears(t *testing.T) {
+	svc := &Service{handles: make(map[string]*runtimeHandle)}
+	handle := &runtimeHandle{
+		refs:               1,
+		activationRequests: map[string]string{"req-old": "lease-old"},
+		activeLeases:       map[string]struct{}{"lease-old": {}},
+		ready:              make(chan struct{}),
+	}
+	svc.handles["session-1"] = handle
+	delete(svc.handles, "session-1")
+	claimedHandle, leaseID, ok, ownsClaim := svc.claimExistingHandleLease("session-1", "req-new", "lease-new")
+	if ok {
+		t.Fatal("expected claimExistingHandleLease to report missing handle")
+	}
+	if claimedHandle != nil || leaseID != "" || ownsClaim {
+		t.Fatalf("unexpected claim result: handle=%v leaseID=%q ownsClaim=%t", claimedHandle, leaseID, ownsClaim)
+	}
+}
+
+func TestReleaseSessionRuntimeStillClosesHandleWhenLeaseReleaseFails(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	closed := atomic.Int32{}
+	handle := &runtimeHandle{
+		refs:               1,
+		activationRequests: map[string]string{"req-1": "lease-missing"},
+		activeLeases:       map[string]struct{}{"lease-missing": {}},
+		ready:              make(chan struct{}),
+		close: func() {
+			closed.Add(1)
+		},
+	}
+	close(handle.ready)
+	fixture.service.handles[fixture.store.Meta().SessionID] = handle
+	_, err := fixture.service.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
+		ClientRequestID: "rel-1",
+		SessionID:       fixture.store.Meta().SessionID,
+		LeaseID:         "lease-missing",
+	})
+	if err == nil {
+		t.Fatal("expected releaseRuntimeLease error for missing lease record")
+	}
+	if closed.Load() != 1 {
+		t.Fatalf("expected closeFn to run exactly once, got %d", closed.Load())
+	}
+	if _, ok := fixture.service.handles[fixture.store.Meta().SessionID]; ok {
+		t.Fatal("expected runtime handle to be removed even when lease release fails")
 	}
 }
 
