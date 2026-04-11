@@ -235,3 +235,28 @@ func TestCopySmallFileRejectsLargePayloadButCopyFileAllowsIt(t *testing.T) {
 		t.Fatalf("target size = %d, want %d", len(data), len(body))
 	}
 }
+
+func TestEnsureProjectV1FailsBeforeStagingWhenMigrationLockExists(t *testing.T) {
+	root := t.TempDir()
+	legacyContainer := filepath.Join(root, "sessions", "workspace-a")
+	store, err := session.Create(legacyContainer, "workspace-a", "/tmp/workspace-a")
+	if err != nil {
+		t.Fatalf("create legacy session: %v", err)
+	}
+	if err := store.SetName("locked migration session"); err != nil {
+		t.Fatalf("SetName: %v", err)
+	}
+	release, err := acquireMigrationLock(root)
+	if err != nil {
+		t.Fatalf("acquireMigrationLock: %v", err)
+	}
+	defer release()
+	now := time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC)
+	err = EnsureProjectV1(context.Background(), root, func() time.Time { return now })
+	if err == nil || !strings.Contains(err.Error(), "storage migration lock already exists") {
+		t.Fatalf("expected lock acquisition failure, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "migrations", projectV1Version, "staging", now.Format("20060102T150405Z"))); !os.IsNotExist(statErr) {
+		t.Fatalf("expected no staging dir while lock is held, got %v", statErr)
+	}
+}
