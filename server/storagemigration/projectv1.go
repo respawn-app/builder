@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -135,8 +136,15 @@ func buildStage(ctx context.Context, persistenceRoot string, ts time.Time) (stag
 		if !entry.IsDir() {
 			continue
 		}
+		entryPath := filepath.Join(legacySessionsRoot(persistenceRoot), entry.Name())
+		if hasLegacySessionMeta(entryPath) {
+			if err := stageLegacySession(ctx, store, persistenceRoot, entryPath, filepath.ToSlash(filepath.Join("sessions", entry.Name())), seenSessions, &manifest); err != nil {
+				return stageResult{}, err
+			}
+			continue
+		}
 		containerName := entry.Name()
-		containerDir := filepath.Join(legacySessionsRoot(persistenceRoot), containerName)
+		containerDir := entryPath
 		workspaceRoots := map[string]struct{}{}
 		sessionEntries, err := os.ReadDir(containerDir)
 		if err != nil {
@@ -147,38 +155,10 @@ func buildStage(ctx context.Context, persistenceRoot string, ts time.Time) (stag
 				continue
 			}
 			sessionDir := filepath.Join(containerDir, sessionEntry.Name())
-			meta, err := session.ReadMetaFromDir(sessionDir)
-			if err != nil {
-				return stageResult{}, fmt.Errorf("read legacy session %s: %w", sessionDir, err)
-			}
-			sessionID := strings.TrimSpace(meta.SessionID)
-			if sessionID == "" {
-				return stageResult{}, fmt.Errorf("legacy session %s missing session id", sessionDir)
-			}
-			if existing, exists := seenSessions[sessionID]; exists {
-				return stageResult{}, fmt.Errorf("duplicate session id %q in %s and %s", sessionID, existing, sessionDir)
-			}
-			seenSessions[sessionID] = sessionDir
-			workspaceRoot := strings.TrimSpace(meta.WorkspaceRoot)
-			if workspaceRoot == "" {
-				return stageResult{}, fmt.Errorf("legacy session %s missing workspace root", sessionDir)
-			}
-			workspaceRoots[workspaceRoot] = struct{}{}
-			binding, err := store.RegisterWorkspaceBinding(ctx, workspaceRoot)
-			if err != nil {
+			if err := stageLegacySession(ctx, store, persistenceRoot, sessionDir, filepath.ToSlash(filepath.Join("sessions", containerName, sessionEntry.Name())), seenSessions, &manifest); err != nil {
 				return stageResult{}, err
 			}
-			targetRelpath := filepath.ToSlash(filepath.Join("projects", binding.ProjectID, "sessions", sessionID))
-			if err := store.ImportSessionSnapshot(ctx, session.PersistedStoreSnapshot{SessionDir: filepath.Join(persistenceRoot, filepath.FromSlash(targetRelpath)), Meta: meta}); err != nil {
-				return stageResult{}, err
-			}
-			manifest.Sessions = append(manifest.Sessions, ManifestSession{
-				SessionID:     sessionID,
-				ProjectID:     binding.ProjectID,
-				WorkspaceRoot: workspaceRoot,
-				SourceRelpath: filepath.ToSlash(filepath.Join("sessions", containerName, sessionEntry.Name())),
-				TargetRelpath: targetRelpath,
-			})
+			workspaceRoots[strings.TrimSpace(manifest.Sessions[len(manifest.Sessions)-1].WorkspaceRoot)] = struct{}{}
 		}
 		if len(workspaceRoots) > 1 {
 			return stageResult{}, fmt.Errorf("legacy container %s maps to multiple workspace roots", containerName)
@@ -200,6 +180,57 @@ func buildStage(ctx context.Context, persistenceRoot string, ts time.Time) (stag
 		manifestPath: manifestPath,
 		timestamp:    timestamp,
 	}, nil
+}
+
+func stageLegacySession(ctx context.Context, store *metadata.Store, persistenceRoot string, sessionDir string, sourceRelpath string, seenSessions map[string]string, manifest *Manifest) error {
+	meta, err := session.ReadMetaFromDir(sessionDir)
+	if err != nil {
+		return fmt.Errorf("read legacy session %s: %w", sessionDir, err)
+	}
+	sessionID, err := validateLegacySessionID(meta.SessionID)
+	if err != nil {
+		return fmt.Errorf("legacy session %s: %w", sessionDir, err)
+	}
+	if existing, exists := seenSessions[sessionID]; exists {
+		return fmt.Errorf("duplicate session id %q in %s and %s", sessionID, existing, sessionDir)
+	}
+	seenSessions[sessionID] = sessionDir
+	workspaceRoot := strings.TrimSpace(meta.WorkspaceRoot)
+	if workspaceRoot == "" {
+		return fmt.Errorf("legacy session %s missing workspace root", sessionDir)
+	}
+	binding, err := store.RegisterWorkspaceBinding(ctx, workspaceRoot)
+	if err != nil {
+		return err
+	}
+	targetRelpath := filepath.ToSlash(filepath.Join("projects", binding.ProjectID, "sessions", sessionID))
+	if err := store.ImportSessionSnapshot(ctx, session.PersistedStoreSnapshot{SessionDir: filepath.Join(persistenceRoot, filepath.FromSlash(targetRelpath)), Meta: meta}); err != nil {
+		return err
+	}
+	manifest.Sessions = append(manifest.Sessions, ManifestSession{
+		SessionID:     sessionID,
+		ProjectID:     binding.ProjectID,
+		WorkspaceRoot: workspaceRoot,
+		SourceRelpath: sourceRelpath,
+		TargetRelpath: targetRelpath,
+	})
+	return nil
+}
+
+func hasLegacySessionMeta(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, "session.json"))
+	return err == nil
+}
+
+func validateLegacySessionID(value string) (string, error) {
+	normalized := path.Clean(filepath.ToSlash(strings.TrimSpace(value)))
+	if normalized == "" || normalized == "." {
+		return "", errors.New("missing session id")
+	}
+	if path.IsAbs(normalized) || path.Base(normalized) != normalized || normalized == ".." {
+		return "", fmt.Errorf("invalid session id %q", value)
+	}
+	return normalized, nil
 }
 
 func executeCutover(persistenceRoot string, stage stageResult, completedAt time.Time) error {
