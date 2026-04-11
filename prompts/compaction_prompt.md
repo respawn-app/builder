@@ -61,7 +61,7 @@ Examples:
 If no pending work is present, replace this section with "No pending work to execute right now"
 
 ## 7. Current test and runtime status (optional, if tests are involved in the task)
-- Concisely list/summarize existing tests failures before this handoff.
+- Concisely list/summarize existing test failures before this handoff.
 - Note any manual testing flows you did or that will be relevant, and any failures detected during them that are not yet addressed.
 
 ## 8. Known issues, limitations, and edge cases

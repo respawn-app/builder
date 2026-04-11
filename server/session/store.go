@@ -121,7 +121,17 @@ func resolvePersistedSessionRecord(persistenceRoot, sessionID string, storeOpts 
 	} else if storeOpts.resolver == nil {
 		return PersistedSessionRecord{}, err
 	}
-	return storeOpts.resolver.ResolvePersistedSession(context.Background(), id)
+	record, err := storeOpts.resolver.ResolvePersistedSession(context.Background(), id)
+	if err != nil {
+		return PersistedSessionRecord{}, err
+	}
+	if strings.TrimSpace(record.SessionDir) == "" {
+		return PersistedSessionRecord{}, fmt.Errorf("resolver returned invalid persisted session record for %q: missing session dir", id)
+	}
+	if record.Meta == nil {
+		return PersistedSessionRecord{}, fmt.Errorf("resolver returned invalid persisted session record for %q: missing metadata", id)
+	}
+	return record, nil
 }
 
 func FindSessionDir(persistenceRoot, sessionID string) (string, error) {

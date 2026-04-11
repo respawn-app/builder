@@ -25,9 +25,12 @@ func TestInstallHandleDoesNotDoubleCountDuplicateActivationRequest(t *testing.T)
 	}}
 	close(svc.handles["session-1"].ready)
 
-	handle, installed, leaseID := svc.installHandle("session-1", "req-1", "lease-2", &runtimeHandle{})
+	handle, installed, leaseID, ownsClaim := svc.installHandle("session-1", "req-1", "lease-2", &runtimeHandle{})
 	if installed {
 		t.Fatal("expected duplicate activation to reuse existing handle")
+	}
+	if ownsClaim {
+		t.Fatal("expected duplicate activation request to keep existing claim ownership")
 	}
 	if handle != svc.handles["session-1"] {
 		t.Fatal("expected duplicate activation to return existing handle")
@@ -54,9 +57,12 @@ func TestInstallHandleCountsDistinctActivationRequestOnExistingHandle(t *testing
 	}}
 	close(svc.handles["session-1"].ready)
 
-	handle, installed, leaseID := svc.installHandle("session-1", "req-2", "lease-2", &runtimeHandle{})
+	handle, installed, leaseID, ownsClaim := svc.installHandle("session-1", "req-2", "lease-2", &runtimeHandle{})
 	if installed {
 		t.Fatal("expected existing handle to remain authoritative")
+	}
+	if !ownsClaim {
+		t.Fatal("expected distinct activation request to own the newly added claim")
 	}
 	if handle != svc.handles["session-1"] {
 		t.Fatal("expected distinct activation to return existing handle")
@@ -69,6 +75,59 @@ func TestInstallHandleCountsDistinctActivationRequestOnExistingHandle(t *testing
 	}
 	if _, ok := svc.handles["session-1"].activeLeases["lease-2"]; !ok {
 		t.Fatal("expected distinct lease to be tracked")
+	}
+}
+
+func TestClaimExistingHandleLeaseKeepsExistingClaimOwnershipForDuplicateRequest(t *testing.T) {
+	svc := &Service{handles: map[string]*runtimeHandle{
+		"session-1": {
+			refs:               1,
+			activationRequests: map[string]string{"req-1": "lease-1"},
+			activeLeases:       map[string]struct{}{"lease-1": {}},
+			ready:              make(chan struct{}),
+		},
+	}}
+
+	handle, leaseID, ok, ownsClaim := svc.claimExistingHandleLease("session-1", "req-1", "lease-2")
+	if !ok {
+		t.Fatal("expected existing handle lease claim to succeed")
+	}
+	if ownsClaim {
+		t.Fatal("expected duplicate activation request to keep existing claim ownership")
+	}
+	if handle != svc.handles["session-1"] {
+		t.Fatal("expected duplicate request to return existing handle")
+	}
+	if leaseID != "lease-1" {
+		t.Fatalf("lease id = %q, want lease-1", leaseID)
+	}
+}
+
+func TestClaimExistingHandleLeaseOwnsDistinctRequest(t *testing.T) {
+	svc := &Service{handles: map[string]*runtimeHandle{
+		"session-1": {
+			refs:               1,
+			activationRequests: map[string]string{"req-1": "lease-1"},
+			activeLeases:       map[string]struct{}{"lease-1": {}},
+			ready:              make(chan struct{}),
+		},
+	}}
+
+	handle, leaseID, ok, ownsClaim := svc.claimExistingHandleLease("session-1", "req-2", "lease-2")
+	if !ok {
+		t.Fatal("expected existing handle lease claim to succeed")
+	}
+	if !ownsClaim {
+		t.Fatal("expected distinct activation request to own the newly added claim")
+	}
+	if handle != svc.handles["session-1"] {
+		t.Fatal("expected distinct request to return existing handle")
+	}
+	if leaseID != "lease-2" {
+		t.Fatalf("lease id = %q, want lease-2", leaseID)
+	}
+	if got := handle.refs; got != 2 {
+		t.Fatalf("refs = %d, want 2", got)
 	}
 }
 
@@ -130,6 +189,30 @@ func TestActivateSessionRuntimeRollsBackClaimWhenWaitIsCanceled(t *testing.T) {
 	}
 	if _, ok := fixture.service.handles[fixture.store.Meta().SessionID].activationRequests["req-2"]; ok {
 		t.Fatal("expected canceled activation request to be rolled back")
+	}
+}
+
+func TestRollbackActivationClaimPreservesExistingClaimWhenNotOwned(t *testing.T) {
+	svc := &Service{handles: map[string]*runtimeHandle{
+		"session-1": {
+			refs:               1,
+			activationRequests: map[string]string{"req-1": "lease-1"},
+			activeLeases:       map[string]struct{}{"lease-1": {}},
+			ready:              make(chan struct{}),
+		},
+	}}
+	handle := svc.handles["session-1"]
+
+	svc.rollbackActivationClaim("session-1", "req-1", "lease-1", handle, false)
+
+	if got := handle.refs; got != 1 {
+		t.Fatalf("refs = %d, want 1", got)
+	}
+	if got := handle.activationRequests["req-1"]; got != "lease-1" {
+		t.Fatalf("activation request lease = %q, want lease-1", got)
+	}
+	if _, ok := handle.activeLeases["lease-1"]; !ok {
+		t.Fatal("expected original lease to remain active")
 	}
 }
 

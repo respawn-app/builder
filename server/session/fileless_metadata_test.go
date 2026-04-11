@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -106,5 +107,25 @@ func TestFilelessMetadataPersistenceSkipsSessionFileAndPublishesObserver(t *test
 	}
 	if observer.snapshot.Meta.Name != "incident triage" {
 		t.Fatalf("observer name = %q", observer.snapshot.Meta.Name)
+	}
+}
+
+func TestOpenByIDRejectsResolverRecordWithoutMetadata(t *testing.T) {
+	root := t.TempDir()
+	sessionDir := filepath.Join(root, "projects", "project-1", "sessions", "session-1")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, eventsFile), nil, 0o644); err != nil {
+		t.Fatalf("write events file: %v", err)
+	}
+	_, err := OpenByID(
+		root,
+		"session-1",
+		WithPersistedSessionResolver(stubPersistedSessionResolver{record: PersistedSessionRecord{SessionDir: sessionDir}}),
+		WithFilelessMetadataPersistence(),
+	)
+	if err == nil || !strings.Contains(err.Error(), "missing metadata") {
+		t.Fatalf("expected missing metadata validation error, got %v", err)
 	}
 }
