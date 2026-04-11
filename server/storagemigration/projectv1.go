@@ -284,7 +284,7 @@ func executeCutover(persistenceRoot string, stage stageResult, completedAt time.
 		}
 	}
 	manifestPath := filepath.Join(persistenceRoot, "migrations", projectV1Version, manifestName)
-	if err := copySmallFile(stage.manifestPath, manifestPath); err != nil {
+	if err := copyFile(stage.manifestPath, manifestPath); err != nil {
 		return err
 	}
 	return writeState(persistenceRoot, State{
@@ -398,6 +398,10 @@ func copySmallFile(source string, target string) error {
 	if info.Size() > maxSmallCopyBytes {
 		return fmt.Errorf("refusing to copy %s: size %d exceeds %d-byte small-file limit", source, info.Size(), maxSmallCopyBytes)
 	}
+	return copyFile(source, target)
+}
+
+func copyFile(source string, target string) error {
 	body, err := os.ReadFile(source)
 	if err != nil {
 		return fmt.Errorf("read file %s: %w", source, err)
