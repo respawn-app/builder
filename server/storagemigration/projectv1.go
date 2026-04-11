@@ -84,6 +84,11 @@ func EnsureProjectV1(ctx context.Context, persistenceRoot string, now func() tim
 	if !needsCutover {
 		return writeState(root, State{Version: projectV1Version, Status: stateStatusComplete, CompletedAt: now().UTC()})
 	}
+	release, err := acquireMigrationLock(root)
+	if err != nil {
+		return err
+	}
+	defer release()
 	stage, err := buildStage(ctx, root, now().UTC())
 	if err != nil {
 		return err
@@ -234,12 +239,6 @@ func validateLegacySessionID(value string) (string, error) {
 }
 
 func executeCutover(persistenceRoot string, stage stageResult, completedAt time.Time) error {
-	release, err := acquireMigrationLock(persistenceRoot)
-	if err != nil {
-		return err
-	}
-	defer release()
-
 	backupRelpath := filepath.ToSlash(filepath.Join("migration-backups", "pre-project-v1-"+stage.timestamp))
 	if err := writeState(persistenceRoot, State{
 		Version:       projectV1Version,
