@@ -59,6 +59,30 @@ ON CONFLICT(id) DO UPDATE SET
     git_metadata_json = excluded.git_metadata_json,
     updated_at_unix_ms = excluded.updated_at_unix_ms;
 
+-- name: InsertWorkspaceBinding :execrows
+INSERT INTO workspaces (
+    id,
+    project_id,
+    canonical_root_path,
+    display_name,
+    availability,
+    is_primary,
+    git_metadata_json,
+    created_at_unix_ms,
+    updated_at_unix_ms
+) VALUES (
+    sqlc.arg(id),
+    sqlc.arg(project_id),
+    sqlc.arg(canonical_root_path),
+    sqlc.arg(display_name),
+    sqlc.arg(availability),
+    sqlc.arg(is_primary),
+    sqlc.arg(git_metadata_json),
+    sqlc.arg(created_at_unix_ms),
+    sqlc.arg(updated_at_unix_ms)
+)
+ON CONFLICT(canonical_root_path) DO NOTHING;
+
 -- name: UpsertSession :exec
 INSERT INTO sessions (
     id,

@@ -16,8 +16,6 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"github.com/google/uuid"
-	modernsqlite "modernc.org/sqlite"
-	sqlite3 "modernc.org/sqlite/lib"
 )
 
 var ErrWorkspaceNotRegistered = errors.New("workspace is not registered")
@@ -207,7 +205,7 @@ func (s *Store) insertWorkspaceBinding(ctx context.Context, canonicalRoot string
 	if insertWorkspaceBindingAfterProjectUpsertHook != nil {
 		insertWorkspaceBindingAfterProjectUpsertHook()
 	}
-	if err := q.UpsertWorkspace(ctx, sqlitegen.UpsertWorkspaceParams{
+	rows, err := q.InsertWorkspaceBinding(ctx, sqlitegen.InsertWorkspaceBindingParams{
 		ID:                workspaceID,
 		ProjectID:         projectID,
 		CanonicalRootPath: canonicalRoot,
@@ -217,14 +215,21 @@ func (s *Store) insertWorkspaceBinding(ctx context.Context, canonicalRoot string
 		GitMetadataJson:   "{}",
 		CreatedAtUnixMs:   now.UnixMilli(),
 		UpdatedAtUnixMs:   now.UnixMilli(),
-	}); err != nil {
+	})
+	if err != nil {
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
 			return Binding{}, fmt.Errorf("rollback workspace binding tx: %w", rollbackErr)
 		}
-		if binding, recovered := s.recoverWorkspaceBindingAfterConflict(ctx, canonicalRoot, workspaceID, err); recovered {
+		return Binding{}, fmt.Errorf("insert workspace binding: %w", err)
+	}
+	if rows == 0 {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			return Binding{}, fmt.Errorf("rollback workspace binding tx: %w", rollbackErr)
+		}
+		if binding, recovered := s.recoverWorkspaceBindingAfterCanonicalRootConflict(ctx, canonicalRoot, workspaceID); recovered {
 			return binding, nil
 		}
-		return Binding{}, fmt.Errorf("upsert workspace: %w", err)
+		return Binding{}, fmt.Errorf("insert workspace binding: canonical root %q conflict was not recoverable", canonicalRoot)
 	}
 	if err := tx.Commit(); err != nil {
 		return Binding{}, fmt.Errorf("commit workspace binding tx: %w", err)
@@ -239,10 +244,7 @@ func (s *Store) insertWorkspaceBinding(ctx context.Context, canonicalRoot string
 	}, nil
 }
 
-func (s *Store) recoverWorkspaceBindingAfterConflict(ctx context.Context, canonicalRoot string, workspaceID string, err error) (Binding, bool) {
-	if !isCanonicalRootConflictError(err) {
-		return Binding{}, false
-	}
+func (s *Store) recoverWorkspaceBindingAfterCanonicalRootConflict(ctx context.Context, canonicalRoot string, workspaceID string) (Binding, bool) {
 	binding, lookupErr := s.lookupWorkspaceBinding(ctx, canonicalRoot)
 	if lookupErr != nil {
 		return Binding{}, false
@@ -251,20 +253,6 @@ func (s *Store) recoverWorkspaceBindingAfterConflict(ctx context.Context, canoni
 		return Binding{}, false
 	}
 	return binding, true
-}
-
-func isCanonicalRootConflictError(err error) bool {
-	var sqliteErr *modernsqlite.Error
-	if !errors.As(err, &sqliteErr) {
-		return false
-	}
-	switch sqliteErr.Code() {
-	case sqlite3.SQLITE_CONSTRAINT,
-		sqlite3.SQLITE_CONSTRAINT_UNIQUE:
-		return true
-	default:
-		return false
-	}
 }
 
 func (s *Store) SyncLegacyContainer(ctx context.Context, containerDir string) error {
