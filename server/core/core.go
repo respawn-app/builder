@@ -105,13 +105,13 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	promptActivityService := promptactivity.NewService(runtimeRegistry)
 	runtimeControlService := runtimecontrol.NewService(runtimeRegistry, runtimeRegistry)
 	projectViews := client.NewLoopbackProjectViewClient(projectService)
-	sessionViewService := sessionview.NewService(registry.NewPersistenceSessionResolver(projectSessionDir, storeOptions...), runtimeRegistry)
+	sessionViewService := sessionview.NewService(registry.NewPersistenceSessionResolver(projectSessionDir, storeOptions...), runtimeRegistry, metadataStore)
 	sessionLaunchService := sessionlaunch.NewDeduplicatingService(
 		sessionlaunch.ScopeID(cfg, projectSessionDir),
 		sessionlaunch.NewService(launch.Planner{Config: cfg, ContainerDir: projectSessionDir, ProjectID: binding.ProjectID, ProjectViews: projectViews, StoreOptions: storeOptions}, sessionStoreRegistry),
 	)
 	sessionLifecycleService := sessionlifecycle.NewService(projectSessionDir, sessionStoreRegistry, authSupport.AuthManager, storeOptions...)
-	sessionRuntimeService := sessionruntime.NewService(projectSessionDir, authSupport.AuthManager, runtimeSupport.FastModeState, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, sessionStoreRegistry, storeOptions...)
+	sessionRuntimeService := sessionruntime.NewService(cfg.PersistenceRoot, metadataStore, authSupport.AuthManager, runtimeSupport.FastModeState, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, sessionStoreRegistry, storeOptions...)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
 	core := &Core{
 		cfg:              cfg,

@@ -4,22 +4,22 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 
 	"builder/server/auth"
+	"builder/server/metadata"
 	"builder/server/registry"
 	"builder/server/runprompt"
 	"builder/server/runtime"
 	"builder/server/runtimeview"
 	"builder/server/runtimewire"
 	"builder/server/session"
-	"builder/server/sessionpath"
 	"builder/server/tools"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
+	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
 	"builder/shared/transcriptdiag"
@@ -27,7 +27,8 @@ import (
 )
 
 type Service struct {
-	containerDir     string
+	persistenceRoot  string
+	metadataStore    *metadata.Store
 	authManager      *auth.Manager
 	fastModeState    *runtime.FastModeState
 	background       *shelltool.Manager
@@ -42,15 +43,16 @@ type Service struct {
 
 type runtimeHandle struct {
 	refs               int
-	activationRequests map[string]struct{}
-	releaseRequests    map[string]struct{}
+	activationRequests map[string]string
+	activeLeases       map[string]struct{}
 	ready              chan struct{}
 	close              func()
 }
 
-func NewService(containerDir string, authManager *auth.Manager, fastModeState *runtime.FastModeState, background *shelltool.Manager, backgroundRouter *runtimewire.BackgroundEventRouter, runtimes *registry.RuntimeRegistry, sessionStores *registry.SessionStoreRegistry, storeOptions ...session.StoreOption) *Service {
+func NewService(persistenceRoot string, metadataStore *metadata.Store, authManager *auth.Manager, fastModeState *runtime.FastModeState, background *shelltool.Manager, backgroundRouter *runtimewire.BackgroundEventRouter, runtimes *registry.RuntimeRegistry, sessionStores *registry.SessionStoreRegistry, storeOptions ...session.StoreOption) *Service {
 	return &Service{
-		containerDir:     strings.TrimSpace(containerDir),
+		persistenceRoot:  strings.TrimSpace(persistenceRoot),
+		metadataStore:    metadataStore,
 		authManager:      authManager,
 		fastModeState:    fastModeState,
 		background:       background,
@@ -62,42 +64,74 @@ func NewService(containerDir string, authManager *auth.Manager, fastModeState *r
 	}
 }
 
-func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeActivateRequest) error {
+func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeActivateRequest) (serverapi.SessionRuntimeActivateResponse, error) {
 	if err := req.Validate(); err != nil {
-		return err
+		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	requestID := strings.TrimSpace(req.ClientRequestID)
 
 	s.mu.Lock()
 	if handle := s.handles[sessionID]; handle != nil {
-		if _, ok := handle.activationRequests[requestID]; ok {
+		if leaseID, ok := handle.activationRequests[requestID]; ok {
 			s.mu.Unlock()
-			return waitForRuntimeHandleReady(ctx, handle)
+			if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
+				return serverapi.SessionRuntimeActivateResponse{}, err
+			}
+			return serverapi.SessionRuntimeActivateResponse{LeaseID: leaseID}, nil
 		}
-		handle.activationRequests[requestID] = struct{}{}
-		handle.refs++
 		s.mu.Unlock()
-		if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
-			s.rollbackActivationClaim(sessionID, requestID, handle)
-			return err
+
+		lease, err := s.createRuntimeLease(ctx, sessionID, requestID)
+		if err != nil {
+			return serverapi.SessionRuntimeActivateResponse{}, err
 		}
-		return nil
+		handle, actualLeaseID, ok := s.claimExistingHandleLease(sessionID, requestID, lease.LeaseID)
+		if !ok {
+			_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
+			return s.ActivateSessionRuntime(ctx, req)
+		}
+		if actualLeaseID != lease.LeaseID {
+			_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
+			lease.LeaseID = actualLeaseID
+		}
+		if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
+			s.rollbackActivationClaim(sessionID, requestID, lease.LeaseID, handle)
+			_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
+			return serverapi.SessionRuntimeActivateResponse{}, err
+		}
+		return serverapi.SessionRuntimeActivateResponse{LeaseID: lease.LeaseID}, nil
 	}
 	s.mu.Unlock()
-
 	store, err := s.resolveStore(ctx, sessionID)
 	if err != nil {
-		return err
+		return serverapi.SessionRuntimeActivateResponse{}, err
+	}
+	if err := store.EnsureDurable(); err != nil {
+		return serverapi.SessionRuntimeActivateResponse{}, err
+	}
+	if err := s.releaseStaleRuntimeLeases(ctx, sessionID); err != nil {
+		return serverapi.SessionRuntimeActivateResponse{}, err
+	}
+	lease, err := s.createRuntimeLease(ctx, sessionID, requestID)
+	if err != nil {
+		return serverapi.SessionRuntimeActivateResponse{}, err
+	}
+	target, err := s.resolveExecutionTarget(ctx, sessionID)
+	if err != nil {
+		_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
+		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
+		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
 	logger, err := runprompt.NewRunLogger(store.Dir(), nil)
 	if err != nil {
-		return err
+		_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
+		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
-	logger.Logf("app.interactive.start session_id=%s workspace=%s model=%s", sessionID, req.WorkspaceRoot, req.ActiveSettings.Model)
+	logger.Logf("app.interactive.start session_id=%s workspace=%s workdir=%s model=%s", sessionID, target.WorkspaceRoot, target.EffectiveWorkdir, req.ActiveSettings.Model)
 	logger.Logf("config.settings path=%s created=%t", req.Source.SettingsPath, req.Source.CreatedDefaultConfig)
 	for _, line := range configSourceLines(req.Source.Sources) {
 		logger.Logf("config.source %s", line)
@@ -105,9 +139,10 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 	enabledTools, err := parseToolIDs(req.EnabledToolIDs)
 	if err != nil {
 		_ = logger.Close()
-		return err
+		_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
+		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
-	wiring, err := runtimewire.NewRuntimeWiringWithBackground(store, req.ActiveSettings, enabledTools, req.WorkspaceRoot, s.authManager, logger, s.background, runtimewire.RuntimeWiringOptions{
+	wiring, err := runtimewire.NewRuntimeWiringWithBackground(store, req.ActiveSettings, enabledTools, target.EffectiveWorkdir, s.authManager, logger, s.background, runtimewire.RuntimeWiringOptions{
 		FastMode: s.fastModeState,
 		OnEvent: func(evt runtime.Event) {
 			logger.Logf("%s", runprompt.FormatRuntimeEvent(evt))
@@ -123,7 +158,8 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 	})
 	if err != nil {
 		_ = logger.Close()
-		return err
+		_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
+		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
 	if wiring.AskBroker != nil && s.runtimes != nil {
 		wiring.AskBroker.SetAskHandler(func(req askquestion.Request) (askquestion.Response, error) {
@@ -132,8 +168,8 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 	}
 	handle := &runtimeHandle{
 		refs:               1,
-		activationRequests: map[string]struct{}{requestID: {}},
-		releaseRequests:    make(map[string]struct{}),
+		activationRequests: map[string]string{requestID: lease.LeaseID},
+		activeLeases:       map[string]struct{}{lease.LeaseID: {}},
 		ready:              make(chan struct{}),
 		close: func() {
 			if s.runtimes != nil {
@@ -146,14 +182,19 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 			_ = logger.Close()
 		},
 	}
-	current, installed := s.installHandle(sessionID, requestID, handle)
+	current, installed, actualLeaseID := s.installHandle(sessionID, requestID, lease.LeaseID, handle)
 	if !installed {
 		_ = logger.Close()
-		if err := waitForRuntimeHandleReady(ctx, current); err != nil {
-			s.rollbackActivationClaim(sessionID, requestID, current)
-			return err
+		if actualLeaseID != lease.LeaseID {
+			_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
+			lease.LeaseID = actualLeaseID
 		}
-		return nil
+		if err := waitForRuntimeHandleReady(ctx, current); err != nil {
+			s.rollbackActivationClaim(sessionID, requestID, lease.LeaseID, current)
+			_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
+			return serverapi.SessionRuntimeActivateResponse{}, err
+		}
+		return serverapi.SessionRuntimeActivateResponse{LeaseID: lease.LeaseID}, nil
 	}
 	defer close(handle.ready)
 	if s.runtimes != nil {
@@ -162,32 +203,40 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 	if s.backgroundRouter != nil {
 		s.backgroundRouter.SetActiveSession(sessionID, wiring.Engine)
 	}
-	return nil
+	return serverapi.SessionRuntimeActivateResponse{LeaseID: lease.LeaseID}, nil
 }
 
-func (s *Service) ReleaseSessionRuntime(_ context.Context, req serverapi.SessionRuntimeReleaseRequest) error {
+func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeReleaseRequest) (serverapi.SessionRuntimeReleaseResponse, error) {
 	if err := req.Validate(); err != nil {
-		return err
+		return serverapi.SessionRuntimeReleaseResponse{}, err
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
-	requestID := strings.TrimSpace(req.ClientRequestID)
+	leaseID := strings.TrimSpace(req.LeaseID)
+	if _, err := s.releaseRuntimeLease(ctx, sessionID, leaseID); err != nil {
+		return serverapi.SessionRuntimeReleaseResponse{}, err
+	}
 	s.mu.Lock()
 	handle := s.handles[sessionID]
 	if handle == nil {
 		s.mu.Unlock()
-		return nil
+		return serverapi.SessionRuntimeReleaseResponse{}, nil
 	}
-	if _, ok := handle.releaseRequests[requestID]; ok {
+	if _, ok := handle.activeLeases[leaseID]; !ok {
 		s.mu.Unlock()
-		return nil
+		return serverapi.SessionRuntimeReleaseResponse{}, nil
 	}
-	handle.releaseRequests[requestID] = struct{}{}
+	delete(handle.activeLeases, leaseID)
+	for requestID, claimedLeaseID := range handle.activationRequests {
+		if claimedLeaseID == leaseID {
+			delete(handle.activationRequests, requestID)
+		}
+	}
 	if handle.refs > 0 {
 		handle.refs--
 	}
 	if handle.refs > 0 {
 		s.mu.Unlock()
-		return nil
+		return serverapi.SessionRuntimeReleaseResponse{}, nil
 	}
 	delete(s.handles, sessionID)
 	ready := handle.ready
@@ -199,7 +248,7 @@ func (s *Service) ReleaseSessionRuntime(_ context.Context, req serverapi.Session
 	if closeFn != nil {
 		closeFn()
 	}
-	return nil
+	return serverapi.SessionRuntimeReleaseResponse{}, nil
 }
 
 func (s *Service) resolveStore(ctx context.Context, sessionID string) (*session.Store, error) {
@@ -215,11 +264,7 @@ func (s *Service) resolveStore(ctx context.Context, sessionID string) (*session.
 			return store, nil
 		}
 	}
-	sessionDir, err := sessionpath.ResolveScopedSessionDir(s.containerDir, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	store, err := session.Open(sessionDir, s.storeOptions...)
+	store, err := session.OpenByID(s.persistenceRoot, sessionID, s.storeOptions...)
 	if err != nil {
 		return nil, err
 	}
@@ -232,22 +277,39 @@ func (s *Service) resolveStore(ctx context.Context, sessionID string) (*session.
 	return store, nil
 }
 
-func (s *Service) installHandle(sessionID string, requestID string, handle *runtimeHandle) (*runtimeHandle, bool) {
+func (s *Service) installHandle(sessionID string, requestID string, leaseID string, handle *runtimeHandle) (*runtimeHandle, bool, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if current := s.handles[sessionID]; current != nil {
-		if _, exists := current.activationRequests[requestID]; exists {
-			return current, false
+		if currentLeaseID, exists := current.activationRequests[requestID]; exists {
+			return current, false, currentLeaseID
 		}
-		current.activationRequests[requestID] = struct{}{}
+		current.activationRequests[requestID] = leaseID
+		current.activeLeases[leaseID] = struct{}{}
 		current.refs++
-		return current, false
+		return current, false, leaseID
 	}
 	s.handles[sessionID] = handle
-	return handle, true
+	return handle, true, leaseID
 }
 
-func (s *Service) rollbackActivationClaim(sessionID string, requestID string, handle *runtimeHandle) {
+func (s *Service) claimExistingHandleLease(sessionID string, requestID string, leaseID string) (*runtimeHandle, string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	handle := s.handles[strings.TrimSpace(sessionID)]
+	if handle == nil {
+		return nil, "", false
+	}
+	if currentLeaseID, exists := handle.activationRequests[strings.TrimSpace(requestID)]; exists {
+		return handle, currentLeaseID, true
+	}
+	handle.activationRequests[strings.TrimSpace(requestID)] = strings.TrimSpace(leaseID)
+	handle.activeLeases[strings.TrimSpace(leaseID)] = struct{}{}
+	handle.refs++
+	return handle, strings.TrimSpace(leaseID), true
+}
+
+func (s *Service) rollbackActivationClaim(sessionID string, requestID string, leaseID string, handle *runtimeHandle) {
 	if handle == nil {
 		return
 	}
@@ -257,13 +319,45 @@ func (s *Service) rollbackActivationClaim(sessionID string, requestID string, ha
 	if current == nil || current != handle {
 		return
 	}
-	if _, ok := current.activationRequests[strings.TrimSpace(requestID)]; !ok {
+	claimedLeaseID, ok := current.activationRequests[strings.TrimSpace(requestID)]
+	if !ok {
 		return
 	}
 	delete(current.activationRequests, strings.TrimSpace(requestID))
+	if strings.TrimSpace(claimedLeaseID) == strings.TrimSpace(leaseID) {
+		delete(current.activeLeases, strings.TrimSpace(leaseID))
+	}
 	if current.refs > 0 {
 		current.refs--
 	}
+}
+
+func (s *Service) resolveExecutionTarget(ctx context.Context, sessionID string) (clientui.SessionExecutionTarget, error) {
+	if s == nil || s.metadataStore == nil {
+		return clientui.SessionExecutionTarget{}, fmt.Errorf("metadata store is required")
+	}
+	return s.metadataStore.ResolveSessionExecutionTarget(ctx, sessionID)
+}
+
+func (s *Service) createRuntimeLease(ctx context.Context, sessionID string, requestID string) (metadata.RuntimeLeaseRecord, error) {
+	if s == nil || s.metadataStore == nil {
+		return metadata.RuntimeLeaseRecord{}, fmt.Errorf("metadata store is required")
+	}
+	return s.metadataStore.CreateRuntimeLease(ctx, sessionID, requestID)
+}
+
+func (s *Service) releaseRuntimeLease(ctx context.Context, sessionID string, leaseID string) (metadata.RuntimeLeaseRecord, error) {
+	if s == nil || s.metadataStore == nil {
+		return metadata.RuntimeLeaseRecord{}, fmt.Errorf("metadata store is required")
+	}
+	return s.metadataStore.ReleaseRuntimeLease(ctx, sessionID, leaseID)
+}
+
+func (s *Service) releaseStaleRuntimeLeases(ctx context.Context, sessionID string) error {
+	if s == nil || s.metadataStore == nil {
+		return fmt.Errorf("metadata store is required")
+	}
+	return s.metadataStore.ReleaseActiveRuntimeLeasesBySession(ctx, sessionID)
 }
 
 func waitForRuntimeHandleReady(ctx context.Context, handle *runtimeHandle) error {
@@ -306,7 +400,7 @@ func configSourceLines(src map[string]string) []string {
 	return lines
 }
 
-func NewActivateRequest(clientRequestID string, sessionID string, settings config.Settings, enabledToolIDs []string, workspaceRoot string, source config.SourceReport) serverapi.SessionRuntimeActivateRequest {
+func NewActivateRequest(clientRequestID string, sessionID string, settings config.Settings, enabledToolIDs []string, source config.SourceReport) serverapi.SessionRuntimeActivateRequest {
 	id := strings.TrimSpace(clientRequestID)
 	if id == "" {
 		id = uuid.NewString()
@@ -316,7 +410,6 @@ func NewActivateRequest(clientRequestID string, sessionID string, settings confi
 		SessionID:       strings.TrimSpace(sessionID),
 		ActiveSettings:  settings,
 		EnabledToolIDs:  append([]string(nil), enabledToolIDs...),
-		WorkspaceRoot:   strings.TrimSpace(filepath.Clean(workspaceRoot)),
 		Source:          source,
 	}
 }

@@ -220,6 +220,12 @@ func (s *Store) ConversationFreshness() ConversationFreshness {
 	return s.conversationFreshness
 }
 
+func (s *Store) EnsureDurable() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.persistMetaLocked()
+}
+
 func (s *Store) MarkInFlight(inFlight bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

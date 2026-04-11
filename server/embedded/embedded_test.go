@@ -89,6 +89,12 @@ func createEmbeddedProjectSession(t *testing.T, server *Server, workspace string
 	if err != nil {
 		t.Fatalf("create project session: %v", err)
 	}
+	if err := metadataStore.ImportSessionSnapshot(context.Background(), session.PersistedStoreSnapshot{
+		SessionDir: store.Dir(),
+		Meta:       store.Meta(),
+	}); err != nil {
+		t.Fatalf("import project session snapshot: %v", err)
+	}
 	return store
 }
 

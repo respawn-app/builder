@@ -224,21 +224,22 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 		SessionID:       plan.SessionID,
 		ActiveSettings:  plan.ActiveSettings,
 		EnabledToolIDs:  toolIDs,
-		WorkspaceRoot:   plan.WorkspaceRoot,
 		Source:          plan.Source,
 	}
-	if err := server.SessionRuntimeClient().ActivateSessionRuntime(ctx, activateReq); err != nil {
+	activateResp, err := server.SessionRuntimeClient().ActivateSessionRuntime(ctx, activateReq)
+	if err != nil {
 		return nil, err
 	}
+	leaseID := activateResp.LeaseID
 	sub, err := server.SessionActivityClient().SubscribeSessionActivity(ctx, serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID})
 	if err != nil {
-		releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID)
+		releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID, leaseID)
 		return nil, err
 	}
 	promptSub, err := server.PromptActivityClient().SubscribePromptActivity(ctx, serverapi.PromptActivitySubscribeRequest{SessionID: plan.SessionID})
 	if err != nil {
 		_ = sub.Close()
-		releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID)
+		releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID, leaseID)
 		return nil, err
 	}
 	logger := &runLogger{}
@@ -285,18 +286,21 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 		close: func() {
 			stopAskEvents()
 			stopRuntimeEvents()
-			releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID)
+			releaseSharedRuntime(server.SessionRuntimeClient(), plan.SessionID, leaseID)
 		},
 	}, nil
 }
 
-func releaseSharedRuntime(client serverapi.SessionRuntimeService, sessionID string) {
+func releaseSharedRuntime(client serverapi.SessionRuntimeService, sessionID string, leaseID string) {
 	if client == nil {
+		return
+	}
+	if strings.TrimSpace(leaseID) == "" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), runtimeReleaseTimeout)
 	defer cancel()
-	_ = client.ReleaseSessionRuntime(ctx, serverapi.SessionRuntimeReleaseRequest{ClientRequestID: uuid.NewString(), SessionID: sessionID})
+	_, _ = client.ReleaseSessionRuntime(ctx, serverapi.SessionRuntimeReleaseRequest{ClientRequestID: uuid.NewString(), SessionID: sessionID, LeaseID: leaseID})
 }
 
 func listPendingPromptIDs(ctx context.Context, sessionID string, askViews client.AskViewClient, approvalViews client.ApprovalViewClient) (map[string]struct{}, error) {

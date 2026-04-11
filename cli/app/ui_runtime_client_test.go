@@ -427,7 +427,7 @@ func TestRuntimeClientMainViewIncludesActiveRunFromRealEngine(t *testing.T) {
 
 	runtimeClient := newRuntimeClient(
 		store.Meta().SessionID,
-		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry)),
+		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry, nil)),
 		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(runtimeRegistry, runtimeRegistry)),
 	)
 	result := make(chan error, 1)
@@ -486,7 +486,7 @@ func TestRuntimeClientMainViewFallsBackToLocalRuntimeProjectionOnReadError(t *te
 
 	runtimeClient := newUIRuntimeClientWithReads(
 		store.Meta().SessionID,
-		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry)),
+		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry, nil)),
 		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(runtimeRegistry, runtimeRegistry)),
 	)
 	view := runtimeClient.MainView()
@@ -519,7 +519,7 @@ func TestRuntimeClientMainViewLeavesTranscriptHydrationToTranscriptEndpoint(t *t
 
 	runtimeClient := newUIRuntimeClientWithReads(
 		store.Meta().SessionID,
-		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry)),
+		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry, nil)),
 		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(runtimeRegistry, runtimeRegistry)),
 	)
 	view := runtimeClient.MainView()
@@ -802,7 +802,7 @@ func TestRuntimeClientSetFastModeEnabledUpdatesCachedMainView(t *testing.T) {
 	runtimeRegistry.Register(store.Meta().SessionID, eng)
 	runtimeClient := newRuntimeClient(
 		store.Meta().SessionID,
-		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry)),
+		sharedclient.NewLoopbackSessionViewClient(sessionview.NewService(nil, runtimeRegistry, nil)),
 		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(runtimeRegistry, nil)),
 	)
 	if _, err := runtimeClient.SetFastModeEnabled(true); err != nil {

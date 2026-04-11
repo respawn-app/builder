@@ -30,6 +30,28 @@ type Binding struct {
 	WorkspaceStatus string
 }
 
+const (
+	runtimeLeaseStateActive   = "active"
+	runtimeLeaseStateReleased = "released"
+)
+
+type RuntimeLeaseRecord struct {
+	LeaseID      string
+	SessionID    string
+	RequestID    string
+	State        string
+	CreatedAt    time.Time
+	AcquiredAt   time.Time
+	ReleasedAt   time.Time
+	ExpiresAt    time.Time
+	ClientID     string
+	MetadataJSON string
+}
+
+func (r RuntimeLeaseRecord) Active() bool {
+	return strings.TrimSpace(r.State) == runtimeLeaseStateActive
+}
+
 type Store struct {
 	persistenceRoot string
 	db              *sql.DB
@@ -279,6 +301,97 @@ func (s *Store) ListSessionsByProject(ctx context.Context, projectID string) ([]
 	return out, nil
 }
 
+func (s *Store) ResolveSessionExecutionTarget(ctx context.Context, sessionID string) (clientui.SessionExecutionTarget, error) {
+	if s == nil || s.queries == nil {
+		return clientui.SessionExecutionTarget{}, errors.New("metadata store is required")
+	}
+	row, err := s.queries.GetSessionExecutionTargetByID(ctx, strings.TrimSpace(sessionID))
+	if err != nil {
+		return clientui.SessionExecutionTarget{}, fmt.Errorf("get session execution target: %w", err)
+	}
+	return sessionExecutionTargetFromRow(row), nil
+}
+
+func (s *Store) CreateRuntimeLease(ctx context.Context, sessionID string, requestID string) (RuntimeLeaseRecord, error) {
+	if s == nil || s.queries == nil {
+		return RuntimeLeaseRecord{}, errors.New("metadata store is required")
+	}
+	now := time.Now().UTC()
+	record := RuntimeLeaseRecord{
+		LeaseID:    "lease-" + uuid.NewString(),
+		SessionID:  strings.TrimSpace(sessionID),
+		RequestID:  strings.TrimSpace(requestID),
+		State:      runtimeLeaseStateActive,
+		CreatedAt:  now,
+		AcquiredAt: now,
+		ClientID:   "",
+	}
+	if record.SessionID == "" {
+		return RuntimeLeaseRecord{}, errors.New("session id is required")
+	}
+	if record.RequestID == "" {
+		return RuntimeLeaseRecord{}, errors.New("request id is required")
+	}
+	if err := s.queries.InsertRuntimeLease(ctx, sqlitegen.InsertRuntimeLeaseParams{
+		ID:               record.LeaseID,
+		SessionID:        record.SessionID,
+		ClientID:         record.ClientID,
+		RequestID:        record.RequestID,
+		State:            record.State,
+		CreatedAtUnixMs:  record.CreatedAt.UnixNano(),
+		AcquiredAtUnixMs: record.AcquiredAt.UnixNano(),
+		ReleasedAtUnixMs: 0,
+		ExpiresAtUnixMs:  0,
+		MetadataJson:     "{}",
+	}); err != nil {
+		return RuntimeLeaseRecord{}, fmt.Errorf("insert runtime lease: %w", err)
+	}
+	return record, nil
+}
+
+func (s *Store) ReleaseRuntimeLease(ctx context.Context, sessionID string, leaseID string) (RuntimeLeaseRecord, error) {
+	if s == nil || s.queries == nil {
+		return RuntimeLeaseRecord{}, errors.New("metadata store is required")
+	}
+	record, err := s.getRuntimeLeaseByID(ctx, leaseID)
+	if err != nil {
+		return RuntimeLeaseRecord{}, err
+	}
+	if strings.TrimSpace(record.SessionID) != strings.TrimSpace(sessionID) {
+		return RuntimeLeaseRecord{}, fmt.Errorf("runtime lease %q does not belong to session %q", strings.TrimSpace(leaseID), strings.TrimSpace(sessionID))
+	}
+	if record.Active() {
+		releasedAt := time.Now().UTC()
+		if _, err := s.queries.ReleaseRuntimeLeaseByID(ctx, sqlitegen.ReleaseRuntimeLeaseByIDParams{
+			LeaseID:          record.LeaseID,
+			SessionID:        record.SessionID,
+			ReleasedAtUnixMs: releasedAt.UnixNano(),
+		}); err != nil {
+			return RuntimeLeaseRecord{}, fmt.Errorf("release runtime lease: %w", err)
+		}
+		record.State = runtimeLeaseStateReleased
+		record.ReleasedAt = releasedAt
+	}
+	return record, nil
+}
+
+func (s *Store) ReleaseActiveRuntimeLeasesBySession(ctx context.Context, sessionID string) error {
+	if s == nil || s.queries == nil {
+		return errors.New("metadata store is required")
+	}
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	if trimmedSessionID == "" {
+		return errors.New("session id is required")
+	}
+	if err := s.queries.ReleaseActiveRuntimeLeasesBySession(ctx, sqlitegen.ReleaseActiveRuntimeLeasesBySessionParams{
+		SessionID:        trimmedSessionID,
+		ReleasedAtUnixMs: time.Now().UTC().UnixNano(),
+	}); err != nil {
+		return fmt.Errorf("release active runtime leases: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) ResolvePersistedSession(ctx context.Context, sessionID string) (session.PersistedSessionRecord, error) {
 	if s == nil || s.queries == nil {
 		return session.PersistedSessionRecord{}, errors.New("metadata store is required")
@@ -349,6 +462,7 @@ func (s *Store) upsertSessionSnapshot(ctx context.Context, snapshot session.Pers
 		ModelRequestCount:  snapshot.Meta.ModelRequestCount,
 		InFlightStep:       boolToInt64(snapshot.Meta.InFlightStep),
 		AgentsInjected:     boolToInt64(snapshot.Meta.AgentsInjected),
+		LaunchVisible:      boolToInt64(sessionLaunchVisible(snapshot.Meta)),
 		CwdRelpath:         ".",
 		ContinuationJson:   continuationJSON,
 		LockedJson:         lockedJSON,
@@ -372,6 +486,33 @@ func boolToInt64(v bool) int64 {
 		return 1
 	}
 	return 0
+}
+
+func sessionLaunchVisible(meta session.Meta) bool {
+	if strings.TrimSpace(meta.Name) != "" {
+		return true
+	}
+	if strings.TrimSpace(meta.FirstPromptPreview) != "" {
+		return true
+	}
+	if strings.TrimSpace(meta.InputDraft) != "" {
+		return true
+	}
+	if strings.TrimSpace(meta.ParentSessionID) != "" {
+		return true
+	}
+	if meta.LastSequence > 0 {
+		return true
+	}
+	return meta.ModelRequestCount > 0
+}
+
+func (s *Store) getRuntimeLeaseByID(ctx context.Context, leaseID string) (RuntimeLeaseRecord, error) {
+	row, err := s.queries.GetRuntimeLeaseByID(ctx, strings.TrimSpace(leaseID))
+	if err != nil {
+		return RuntimeLeaseRecord{}, fmt.Errorf("get runtime lease: %w", err)
+	}
+	return runtimeLeaseRecordFromRow(row), nil
 }
 
 func marshalJSON(v any) (string, error) {
@@ -466,7 +607,65 @@ func projectSummaryFromRow(projectID string, displayName string, rootPath string
 	}
 }
 
+func sessionExecutionTargetFromRow(row sqlitegen.GetSessionExecutionTargetByIDRow) clientui.SessionExecutionTarget {
+	worktreeID := ""
+	if row.WorktreeID.Valid {
+		worktreeID = row.WorktreeID.String
+	}
+	baseRoot := strings.TrimSpace(row.WorkspaceRoot)
+	if strings.TrimSpace(row.WorktreeRoot) != "" {
+		baseRoot = strings.TrimSpace(row.WorktreeRoot)
+	}
+	cwdRelpath := normalizeSessionCwdRelpath(row.CwdRelpath)
+	effectiveWorkdir := baseRoot
+	if cwdRelpath != "." && baseRoot != "" {
+		effectiveWorkdir = filepath.Clean(filepath.Join(baseRoot, filepath.FromSlash(cwdRelpath)))
+	}
+	return clientui.SessionExecutionTarget{
+		WorkspaceID:           row.WorkspaceID,
+		WorkspaceName:         row.WorkspaceName,
+		WorkspaceRoot:         row.WorkspaceRoot,
+		WorkspaceAvailability: row.WorkspaceAvailability,
+		WorktreeID:            worktreeID,
+		WorktreeName:          row.WorktreeName,
+		WorktreeRoot:          row.WorktreeRoot,
+		WorktreeAvailability:  row.WorktreeAvailability,
+		CwdRelpath:            cwdRelpath,
+		EffectiveWorkdir:      effectiveWorkdir,
+	}
+}
+
+func runtimeLeaseRecordFromRow(row sqlitegen.RuntimeLease) RuntimeLeaseRecord {
+	return RuntimeLeaseRecord{
+		LeaseID:      row.ID,
+		SessionID:    row.SessionID,
+		RequestID:    row.RequestID,
+		State:        row.State,
+		CreatedAt:    timeFromStoredTimestamp(row.CreatedAtUnixMs),
+		AcquiredAt:   timeFromStoredTimestamp(row.AcquiredAtUnixMs),
+		ReleasedAt:   timeFromStoredTimestamp(row.ReleasedAtUnixMs),
+		ExpiresAt:    timeFromStoredTimestamp(row.ExpiresAtUnixMs),
+		ClientID:     row.ClientID,
+		MetadataJSON: row.MetadataJson,
+	}
+}
+
+func normalizeSessionCwdRelpath(value string) string {
+	trimmed := filepath.ToSlash(strings.TrimSpace(value))
+	if trimmed == "" || trimmed == "/" {
+		return "."
+	}
+	cleaned := filepath.ToSlash(filepath.Clean(filepath.FromSlash(trimmed)))
+	if cleaned == "" || cleaned == "/" {
+		return "."
+	}
+	return cleaned
+}
+
 func timeFromStoredTimestamp(value int64) time.Time {
+	if value <= 0 {
+		return time.Time{}
+	}
 	const unixMillisUpperBound = int64(1_000_000_000_000_000)
 	if value < unixMillisUpperBound {
 		return time.UnixMilli(value).UTC()

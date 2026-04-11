@@ -76,6 +76,7 @@ INSERT INTO sessions (
     model_request_count,
     in_flight_step,
     agents_injected,
+    launch_visible,
     cwd_relpath,
     continuation_json,
     locked_json,
@@ -97,6 +98,7 @@ INSERT INTO sessions (
     sqlc.arg(model_request_count),
     sqlc.arg(in_flight_step),
     sqlc.arg(agents_injected),
+    sqlc.arg(launch_visible),
     sqlc.arg(cwd_relpath),
     sqlc.arg(continuation_json),
     sqlc.arg(locked_json),
@@ -117,6 +119,10 @@ ON CONFLICT(id) DO UPDATE SET
     model_request_count = excluded.model_request_count,
     in_flight_step = excluded.in_flight_step,
     agents_injected = excluded.agents_injected,
+    launch_visible = CASE
+        WHEN sessions.launch_visible <> 0 OR excluded.launch_visible <> 0 THEN 1
+        ELSE 0
+    END,
     cwd_relpath = excluded.cwd_relpath,
     continuation_json = excluded.continuation_json,
     locked_json = excluded.locked_json,
@@ -132,7 +138,7 @@ SELECT
     COALESCE(MAX(s.updated_at_unix_ms), p.updated_at_unix_ms) AS latest_activity_unix_ms
 FROM projects p
 JOIN workspaces w ON w.project_id = p.id AND w.is_primary = 1
-LEFT JOIN sessions s ON s.project_id = p.id
+LEFT JOIN sessions s ON s.project_id = p.id AND s.launch_visible <> 0
 GROUP BY p.id, p.display_name, w.canonical_root_path, p.updated_at_unix_ms
 ORDER BY latest_activity_unix_ms DESC;
 
@@ -145,7 +151,7 @@ SELECT
     COALESCE(MAX(s.updated_at_unix_ms), p.updated_at_unix_ms) AS latest_activity_unix_ms
 FROM projects p
 JOIN workspaces w ON w.project_id = p.id AND w.is_primary = 1
-LEFT JOIN sessions s ON s.project_id = p.id
+LEFT JOIN sessions s ON s.project_id = p.id AND s.launch_visible <> 0
 WHERE p.id = sqlc.arg(project_id)
 GROUP BY p.id, p.display_name, w.canonical_root_path, p.updated_at_unix_ms
 LIMIT 1;
@@ -158,6 +164,7 @@ SELECT
     updated_at_unix_ms
 FROM sessions
 WHERE project_id = sqlc.arg(project_id)
+  AND launch_visible <> 0
 ORDER BY updated_at_unix_ms DESC, rowid DESC;
 
 -- name: GetSessionRecordByID :one
@@ -183,3 +190,80 @@ FROM sessions s
 JOIN workspaces w ON w.id = s.workspace_id
 WHERE s.id = sqlc.arg(session_id)
 LIMIT 1;
+
+-- name: GetSessionExecutionTargetByID :one
+SELECT
+    s.id AS session_id,
+    s.project_id,
+    s.workspace_id,
+    w.display_name AS workspace_name,
+    w.canonical_root_path AS workspace_root,
+    w.availability AS workspace_availability,
+    s.worktree_id,
+    COALESCE(wt.display_name, '') AS worktree_name,
+    COALESCE(wt.canonical_root_path, '') AS worktree_root,
+    COALESCE(wt.availability, '') AS worktree_availability,
+    s.cwd_relpath
+FROM sessions s
+JOIN workspaces w ON w.id = s.workspace_id
+LEFT JOIN worktrees wt ON wt.id = s.worktree_id
+WHERE s.id = sqlc.arg(session_id)
+LIMIT 1;
+
+-- name: InsertRuntimeLease :exec
+INSERT INTO runtime_leases (
+    id,
+    session_id,
+    client_id,
+    request_id,
+    state,
+    created_at_unix_ms,
+    acquired_at_unix_ms,
+    released_at_unix_ms,
+    expires_at_unix_ms,
+    metadata_json
+) VALUES (
+    sqlc.arg(id),
+    sqlc.arg(session_id),
+    sqlc.arg(client_id),
+    sqlc.arg(request_id),
+    sqlc.arg(state),
+    sqlc.arg(created_at_unix_ms),
+    sqlc.arg(acquired_at_unix_ms),
+    sqlc.arg(released_at_unix_ms),
+    sqlc.arg(expires_at_unix_ms),
+    sqlc.arg(metadata_json)
+);
+
+-- name: GetRuntimeLeaseByID :one
+SELECT
+    id,
+    session_id,
+    client_id,
+    request_id,
+    state,
+    created_at_unix_ms,
+    acquired_at_unix_ms,
+    released_at_unix_ms,
+    expires_at_unix_ms,
+    metadata_json
+FROM runtime_leases
+WHERE id = sqlc.arg(lease_id)
+LIMIT 1;
+
+-- name: ReleaseRuntimeLeaseByID :execrows
+UPDATE runtime_leases
+SET
+    state = 'released',
+    released_at_unix_ms = sqlc.arg(released_at_unix_ms)
+WHERE id = sqlc.arg(lease_id)
+  AND session_id = sqlc.arg(session_id)
+  AND state <> 'released';
+
+-- name: ReleaseActiveRuntimeLeasesBySession :exec
+UPDATE runtime_leases
+SET
+    state = 'released',
+    released_at_unix_ms = sqlc.arg(released_at_unix_ms)
+WHERE session_id = sqlc.arg(session_id)
+  AND state = 'active';

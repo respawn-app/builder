@@ -73,22 +73,22 @@ func (noOpSessionActivitySubscription) Next(context.Context) (clientui.Event, er
 func (noOpSessionActivitySubscription) Close() error { return nil }
 
 type recordingSessionRuntimeClient struct {
-	activate func(context.Context, serverapi.SessionRuntimeActivateRequest) error
-	release  func(context.Context, serverapi.SessionRuntimeReleaseRequest) error
+	activate func(context.Context, serverapi.SessionRuntimeActivateRequest) (serverapi.SessionRuntimeActivateResponse, error)
+	release  func(context.Context, serverapi.SessionRuntimeReleaseRequest) (serverapi.SessionRuntimeReleaseResponse, error)
 }
 
-func (c *recordingSessionRuntimeClient) ActivateSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeActivateRequest) error {
+func (c *recordingSessionRuntimeClient) ActivateSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeActivateRequest) (serverapi.SessionRuntimeActivateResponse, error) {
 	if c.activate != nil {
 		return c.activate(ctx, req)
 	}
-	return nil
+	return serverapi.SessionRuntimeActivateResponse{LeaseID: "lease-test"}, nil
 }
 
-func (c *recordingSessionRuntimeClient) ReleaseSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeReleaseRequest) error {
+func (c *recordingSessionRuntimeClient) ReleaseSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeReleaseRequest) (serverapi.SessionRuntimeReleaseResponse, error) {
 	if c.release != nil {
 		return c.release(ctx, req)
 	}
-	return nil
+	return serverapi.SessionRuntimeReleaseResponse{}, nil
 }
 
 type recordingSessionActivityClient struct {
@@ -1166,16 +1166,18 @@ func TestPrepareSharedRuntimeUsesCallerContextForAttachRPCs(t *testing.T) {
 	promptErr := errors.New("prompt subscribe failed")
 	server := &testEmbeddedServer{
 		sessionRuntime: &recordingSessionRuntimeClient{
-			activate: func(ctx context.Context, req serverapi.SessionRuntimeActivateRequest) error {
+			activate: func(ctx context.Context, req serverapi.SessionRuntimeActivateRequest) (serverapi.SessionRuntimeActivateResponse, error) {
 				if got := ctx.Value(ctxKey); got != ctxValue {
 					t.Fatalf("activate context value = %v, want %v", got, ctxValue)
 				}
 				if req.SessionID != "session-1" {
 					t.Fatalf("unexpected activate request: %+v", req)
 				}
-				return nil
+				return serverapi.SessionRuntimeActivateResponse{LeaseID: "lease-1"}, nil
 			},
-			release: func(context.Context, serverapi.SessionRuntimeReleaseRequest) error { return nil },
+			release: func(context.Context, serverapi.SessionRuntimeReleaseRequest) (serverapi.SessionRuntimeReleaseResponse, error) {
+				return serverapi.SessionRuntimeReleaseResponse{}, nil
+			},
 		},
 		sessionActivity: &recordingSessionActivityClient{
 			subscribe: func(ctx context.Context, req serverapi.SessionActivitySubscribeRequest) (serverapi.SessionActivitySubscription, error) {
@@ -1212,13 +1214,18 @@ func TestPrepareSharedRuntimeReleaseUsesBoundedContextOnFailure(t *testing.T) {
 	released := make(chan context.Context, 1)
 	server := &testEmbeddedServer{
 		sessionRuntime: &recordingSessionRuntimeClient{
-			activate: func(context.Context, serverapi.SessionRuntimeActivateRequest) error { return nil },
-			release: func(ctx context.Context, req serverapi.SessionRuntimeReleaseRequest) error {
+			activate: func(context.Context, serverapi.SessionRuntimeActivateRequest) (serverapi.SessionRuntimeActivateResponse, error) {
+				return serverapi.SessionRuntimeActivateResponse{LeaseID: "lease-1"}, nil
+			},
+			release: func(ctx context.Context, req serverapi.SessionRuntimeReleaseRequest) (serverapi.SessionRuntimeReleaseResponse, error) {
 				released <- ctx
 				if req.SessionID != "session-1" {
 					t.Fatalf("unexpected release request: %+v", req)
 				}
-				return nil
+				if req.LeaseID != "lease-1" {
+					t.Fatalf("release lease id = %q, want lease-1", req.LeaseID)
+				}
+				return serverapi.SessionRuntimeReleaseResponse{}, nil
 			},
 		},
 		sessionActivity: &recordingSessionActivityClient{
@@ -1255,8 +1262,12 @@ func TestPrepareSharedRuntimeReleaseUsesBoundedContextOnFailure(t *testing.T) {
 func TestPrepareSharedRuntimeInstallsTurnQueueHook(t *testing.T) {
 	server := &testEmbeddedServer{
 		sessionRuntime: &recordingSessionRuntimeClient{
-			activate: func(context.Context, serverapi.SessionRuntimeActivateRequest) error { return nil },
-			release:  func(context.Context, serverapi.SessionRuntimeReleaseRequest) error { return nil },
+			activate: func(context.Context, serverapi.SessionRuntimeActivateRequest) (serverapi.SessionRuntimeActivateResponse, error) {
+				return serverapi.SessionRuntimeActivateResponse{LeaseID: "lease-1"}, nil
+			},
+			release: func(context.Context, serverapi.SessionRuntimeReleaseRequest) (serverapi.SessionRuntimeReleaseResponse, error) {
+				return serverapi.SessionRuntimeReleaseResponse{}, nil
+			},
 		},
 		sessionActivity: &recordingSessionActivityClient{
 			subscribe: func(context.Context, serverapi.SessionActivitySubscribeRequest) (serverapi.SessionActivitySubscription, error) {

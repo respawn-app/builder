@@ -19,7 +19,7 @@ SELECT
     COALESCE(MAX(s.updated_at_unix_ms), p.updated_at_unix_ms) AS latest_activity_unix_ms
 FROM projects p
 JOIN workspaces w ON w.project_id = p.id AND w.is_primary = 1
-LEFT JOIN sessions s ON s.project_id = p.id
+LEFT JOIN sessions s ON s.project_id = p.id AND s.launch_visible <> 0
 WHERE p.id = ?1
 GROUP BY p.id, p.display_name, w.canonical_root_path, p.updated_at_unix_ms
 LIMIT 1
@@ -42,6 +42,94 @@ func (q *Queries) GetProjectSummary(ctx context.Context, projectID string) (GetP
 		&i.RootPath,
 		&i.SessionCount,
 		&i.LatestActivityUnixMs,
+	)
+	return i, err
+}
+
+const getRuntimeLeaseByID = `-- name: GetRuntimeLeaseByID :one
+SELECT
+    id,
+    session_id,
+    client_id,
+    request_id,
+    state,
+    created_at_unix_ms,
+    acquired_at_unix_ms,
+    released_at_unix_ms,
+    expires_at_unix_ms,
+    metadata_json
+FROM runtime_leases
+WHERE id = ?1
+LIMIT 1
+`
+
+func (q *Queries) GetRuntimeLeaseByID(ctx context.Context, leaseID string) (RuntimeLease, error) {
+	row := q.db.QueryRowContext(ctx, getRuntimeLeaseByID, leaseID)
+	var i RuntimeLease
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.ClientID,
+		&i.RequestID,
+		&i.State,
+		&i.CreatedAtUnixMs,
+		&i.AcquiredAtUnixMs,
+		&i.ReleasedAtUnixMs,
+		&i.ExpiresAtUnixMs,
+		&i.MetadataJson,
+	)
+	return i, err
+}
+
+const getSessionExecutionTargetByID = `-- name: GetSessionExecutionTargetByID :one
+SELECT
+    s.id AS session_id,
+    s.project_id,
+    s.workspace_id,
+    w.display_name AS workspace_name,
+    w.canonical_root_path AS workspace_root,
+    w.availability AS workspace_availability,
+    s.worktree_id,
+    COALESCE(wt.display_name, '') AS worktree_name,
+    COALESCE(wt.canonical_root_path, '') AS worktree_root,
+    COALESCE(wt.availability, '') AS worktree_availability,
+    s.cwd_relpath
+FROM sessions s
+JOIN workspaces w ON w.id = s.workspace_id
+LEFT JOIN worktrees wt ON wt.id = s.worktree_id
+WHERE s.id = ?1
+LIMIT 1
+`
+
+type GetSessionExecutionTargetByIDRow struct {
+	SessionID             string
+	ProjectID             string
+	WorkspaceID           string
+	WorkspaceName         string
+	WorkspaceRoot         string
+	WorkspaceAvailability string
+	WorktreeID            sql.NullString
+	WorktreeName          string
+	WorktreeRoot          string
+	WorktreeAvailability  string
+	CwdRelpath            string
+}
+
+func (q *Queries) GetSessionExecutionTargetByID(ctx context.Context, sessionID string) (GetSessionExecutionTargetByIDRow, error) {
+	row := q.db.QueryRowContext(ctx, getSessionExecutionTargetByID, sessionID)
+	var i GetSessionExecutionTargetByIDRow
+	err := row.Scan(
+		&i.SessionID,
+		&i.ProjectID,
+		&i.WorkspaceID,
+		&i.WorkspaceName,
+		&i.WorkspaceRoot,
+		&i.WorkspaceAvailability,
+		&i.WorktreeID,
+		&i.WorktreeName,
+		&i.WorktreeRoot,
+		&i.WorktreeAvailability,
+		&i.CwdRelpath,
 	)
 	return i, err
 }
@@ -147,6 +235,61 @@ func (q *Queries) GetWorkspaceBindingByCanonicalRoot(ctx context.Context, canoni
 	return i, err
 }
 
+const insertRuntimeLease = `-- name: InsertRuntimeLease :exec
+INSERT INTO runtime_leases (
+    id,
+    session_id,
+    client_id,
+    request_id,
+    state,
+    created_at_unix_ms,
+    acquired_at_unix_ms,
+    released_at_unix_ms,
+    expires_at_unix_ms,
+    metadata_json
+) VALUES (
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    ?5,
+    ?6,
+    ?7,
+    ?8,
+    ?9,
+    ?10
+)
+`
+
+type InsertRuntimeLeaseParams struct {
+	ID               string
+	SessionID        string
+	ClientID         string
+	RequestID        string
+	State            string
+	CreatedAtUnixMs  int64
+	AcquiredAtUnixMs int64
+	ReleasedAtUnixMs int64
+	ExpiresAtUnixMs  int64
+	MetadataJson     string
+}
+
+func (q *Queries) InsertRuntimeLease(ctx context.Context, arg InsertRuntimeLeaseParams) error {
+	_, err := q.db.ExecContext(ctx, insertRuntimeLease,
+		arg.ID,
+		arg.SessionID,
+		arg.ClientID,
+		arg.RequestID,
+		arg.State,
+		arg.CreatedAtUnixMs,
+		arg.AcquiredAtUnixMs,
+		arg.ReleasedAtUnixMs,
+		arg.ExpiresAtUnixMs,
+		arg.MetadataJson,
+	)
+	return err
+}
+
 const listProjects = `-- name: ListProjects :many
 SELECT
     p.id,
@@ -156,7 +299,7 @@ SELECT
     COALESCE(MAX(s.updated_at_unix_ms), p.updated_at_unix_ms) AS latest_activity_unix_ms
 FROM projects p
 JOIN workspaces w ON w.project_id = p.id AND w.is_primary = 1
-LEFT JOIN sessions s ON s.project_id = p.id
+LEFT JOIN sessions s ON s.project_id = p.id AND s.launch_visible <> 0
 GROUP BY p.id, p.display_name, w.canonical_root_path, p.updated_at_unix_ms
 ORDER BY latest_activity_unix_ms DESC
 `
@@ -206,6 +349,7 @@ SELECT
     updated_at_unix_ms
 FROM sessions
 WHERE project_id = ?1
+  AND launch_visible <> 0
 ORDER BY updated_at_unix_ms DESC, rowid DESC
 `
 
@@ -242,6 +386,49 @@ func (q *Queries) ListSessionsByProject(ctx context.Context, projectID string) (
 		return nil, err
 	}
 	return items, nil
+}
+
+const releaseActiveRuntimeLeasesBySession = `-- name: ReleaseActiveRuntimeLeasesBySession :exec
+UPDATE runtime_leases
+SET
+    state = 'released',
+    released_at_unix_ms = ?1
+WHERE session_id = ?2
+  AND state = 'active'
+`
+
+type ReleaseActiveRuntimeLeasesBySessionParams struct {
+	ReleasedAtUnixMs int64
+	SessionID        string
+}
+
+func (q *Queries) ReleaseActiveRuntimeLeasesBySession(ctx context.Context, arg ReleaseActiveRuntimeLeasesBySessionParams) error {
+	_, err := q.db.ExecContext(ctx, releaseActiveRuntimeLeasesBySession, arg.ReleasedAtUnixMs, arg.SessionID)
+	return err
+}
+
+const releaseRuntimeLeaseByID = `-- name: ReleaseRuntimeLeaseByID :execrows
+UPDATE runtime_leases
+SET
+    state = 'released',
+    released_at_unix_ms = ?1
+WHERE id = ?2
+  AND session_id = ?3
+  AND state <> 'released'
+`
+
+type ReleaseRuntimeLeaseByIDParams struct {
+	ReleasedAtUnixMs int64
+	LeaseID          string
+	SessionID        string
+}
+
+func (q *Queries) ReleaseRuntimeLeaseByID(ctx context.Context, arg ReleaseRuntimeLeaseByIDParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, releaseRuntimeLeaseByID, arg.ReleasedAtUnixMs, arg.LeaseID, arg.SessionID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const upsertProject = `-- name: UpsertProject :exec
@@ -300,6 +487,7 @@ INSERT INTO sessions (
     model_request_count,
     in_flight_step,
     agents_injected,
+    launch_visible,
     cwd_relpath,
     continuation_json,
     locked_json,
@@ -325,7 +513,8 @@ INSERT INTO sessions (
     ?17,
     ?18,
     ?19,
-    ?20
+    ?20,
+    ?21
 )
 ON CONFLICT(id) DO UPDATE SET
     project_id = excluded.project_id,
@@ -341,6 +530,10 @@ ON CONFLICT(id) DO UPDATE SET
     model_request_count = excluded.model_request_count,
     in_flight_step = excluded.in_flight_step,
     agents_injected = excluded.agents_injected,
+    launch_visible = CASE
+        WHEN sessions.launch_visible <> 0 OR excluded.launch_visible <> 0 THEN 1
+        ELSE 0
+    END,
     cwd_relpath = excluded.cwd_relpath,
     continuation_json = excluded.continuation_json,
     locked_json = excluded.locked_json,
@@ -364,6 +557,7 @@ type UpsertSessionParams struct {
 	ModelRequestCount  int64
 	InFlightStep       int64
 	AgentsInjected     int64
+	LaunchVisible      int64
 	CwdRelpath         string
 	ContinuationJson   string
 	LockedJson         string
@@ -388,6 +582,7 @@ func (q *Queries) UpsertSession(ctx context.Context, arg UpsertSessionParams) er
 		arg.ModelRequestCount,
 		arg.InFlightStep,
 		arg.AgentsInjected,
+		arg.LaunchVisible,
 		arg.CwdRelpath,
 		arg.ContinuationJson,
 		arg.LockedJson,
