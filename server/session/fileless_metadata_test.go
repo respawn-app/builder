@@ -49,6 +49,16 @@ func (o *flakyPersistenceObserver) ObservePersistedStore(_ context.Context, snap
 	return nil
 }
 
+type reentrantPersistenceObserver struct {
+	store *Store
+	ch    chan Meta
+}
+
+func (o *reentrantPersistenceObserver) ObservePersistedStore(_ context.Context, _ PersistedStoreSnapshot) error {
+	o.ch <- o.store.Meta()
+	return nil
+}
+
 func TestOpenByIDUsesResolverWhenSessionMetaFileIsMissing(t *testing.T) {
 	root := t.TempDir()
 	sessionDir := filepath.Join(root, "projects", "project-1", "sessions", "session-1")
@@ -146,6 +156,67 @@ func TestOpenByIDRejectsResolverRecordWithoutMetadata(t *testing.T) {
 	}
 }
 
+func TestOpenByIDRejectsResolverRecordWithRelativeSessionDir(t *testing.T) {
+	root := t.TempDir()
+	_, err := OpenByID(
+		root,
+		"session-1",
+		WithPersistedSessionResolver(stubPersistedSessionResolver{record: PersistedSessionRecord{
+			SessionDir: "relative/session-1",
+			Meta:       &Meta{SessionID: "session-1"},
+		}}),
+		WithFilelessMetadataPersistence(),
+	)
+	if err == nil || !strings.Contains(err.Error(), "absolute clean path") {
+		t.Fatalf("expected absolute clean path validation error, got %v", err)
+	}
+}
+
+func TestOpenByIDDoesNotFallbackResolverOnSessionLookupError(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, sessionsDirName), []byte("not-a-directory"), 0o644); err != nil {
+		t.Fatalf("write fake sessions root: %v", err)
+	}
+	_, err := OpenByID(
+		root,
+		"session-1",
+		WithPersistedSessionResolver(stubPersistedSessionResolver{record: PersistedSessionRecord{
+			SessionDir: filepath.Join(root, "projects", "project-1", "sessions", "session-1"),
+			Meta:       &Meta{SessionID: "session-1"},
+		}}),
+		WithFilelessMetadataPersistence(),
+	)
+	if err == nil || !strings.Contains(err.Error(), "read session root") {
+		t.Fatalf("expected session root read error, got %v", err)
+	}
+}
+
+func TestOpenByIDDoesNotFallbackResolverOnCorruptSessionMeta(t *testing.T) {
+	root := t.TempDir()
+	sessionDir := filepath.Join(root, sessionsDirName, "session-1")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, sessionFile), []byte("{"), 0o644); err != nil {
+		t.Fatalf("write corrupt session meta: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, eventsFile), nil, 0o644); err != nil {
+		t.Fatalf("write events file: %v", err)
+	}
+	_, err := OpenByID(
+		root,
+		"session-1",
+		WithPersistedSessionResolver(stubPersistedSessionResolver{record: PersistedSessionRecord{
+			SessionDir: sessionDir,
+			Meta:       &Meta{SessionID: "session-1"},
+		}}),
+		WithFilelessMetadataPersistence(),
+	)
+	if err == nil || !strings.Contains(err.Error(), "parse session meta") {
+		t.Fatalf("expected corrupt session meta error, got %v", err)
+	}
+}
+
 func TestFilelessMetadataRetriesSameValueUntilObserverSucceeds(t *testing.T) {
 	root := t.TempDir()
 	store, err := NewLazy(root, "workspace-x", "/tmp/work")
@@ -173,5 +244,41 @@ func TestFilelessMetadataRetriesSameValueUntilObserverSucceeds(t *testing.T) {
 	}
 	if observer.lastSnapshot.Meta.InputDraft != "draft" {
 		t.Fatalf("persisted draft = %q, want draft", observer.lastSnapshot.Meta.InputDraft)
+	}
+}
+
+func TestFilelessPersistenceObserverRunsOutsideStoreLock(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewLazy(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("NewLazy: %v", err)
+	}
+	observer := &reentrantPersistenceObserver{ch: make(chan Meta, 1)}
+	observer.store = store
+	store.options.filelessMeta = true
+	store.options.observer = observer
+	store.options.observerTimeout = time.Second
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- store.SetName("incident triage")
+	}()
+
+	select {
+	case meta := <-observer.ch:
+		if meta.Name != "incident triage" {
+			t.Fatalf("observer reentrant read name = %q, want incident triage", meta.Name)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("observer did not complete; possible store lock reentrancy deadlock")
+	}
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("SetName: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("SetName did not return; possible store lock reentrancy deadlock")
 	}
 }

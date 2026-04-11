@@ -22,6 +22,8 @@ const (
 	sessionsDirName = "sessions"
 )
 
+var ErrSessionNotFound = errors.New("session not found")
+
 type Store struct {
 	mu                    sync.Mutex
 	sessionDir            string
@@ -30,11 +32,17 @@ type Store struct {
 	meta                  Meta
 	conversationFreshness ConversationFreshness
 	persisted             bool
-	metadataPersisted     bool
+	metadataVersion       uint64
+	persistedMetaVersion  uint64
 	options               storeOptions
 	eventsFileSizeBytes   int64
 	pendingFsyncWrites    int
 	writesSinceCompaction int
+}
+
+type persistenceObservation struct {
+	snapshot *PersistedStoreSnapshot
+	version  uint64
 }
 
 func Create(workspaceContainerDir, workspaceContainerName, workspaceRoot string, options ...StoreOption) (*Store, error) {
@@ -88,22 +96,23 @@ func OpenByID(persistenceRoot, sessionID string, options ...StoreOption) (*Store
 
 func openPersistedSession(sessionDir string, resolvedMeta *Meta, storeOpts storeOptions) (*Store, error) {
 	s := &Store{
-		sessionDir:        sessionDir,
-		sessionFP:         filepath.Join(sessionDir, sessionFile),
-		eventsFP:          filepath.Join(sessionDir, eventsFile),
-		persisted:         true,
-		metadataPersisted: resolvedMeta != nil,
-		options:           storeOpts,
+		sessionDir: sessionDir,
+		sessionFP:  filepath.Join(sessionDir, sessionFile),
+		eventsFP:   filepath.Join(sessionDir, eventsFile),
+		persisted:  true,
+		options:    storeOpts,
 	}
 	if resolvedMeta != nil {
 		s.meta = *resolvedMeta
 	} else if err := s.loadMetaLocked(); err != nil {
 		return nil, err
 	}
+	s.metadataVersion = 1
+	s.persistedMetaVersion = 1
 	if err := s.bootstrapEventLogStateLocked(); err != nil {
 		return nil, err
 	}
-	if err := s.observePersistenceLocked(); err != nil {
+	if err := s.observePersistence(&persistenceObservation{snapshot: s.persistenceSnapshotLocked(), version: s.metadataVersion}); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -120,7 +129,7 @@ func resolvePersistedSessionRecord(persistenceRoot, sessionID string, storeOpts 
 	}
 	if sessionDir, err := FindSessionDir(root, id); err == nil {
 		return PersistedSessionRecord{SessionDir: sessionDir}, nil
-	} else if storeOpts.resolver == nil {
+	} else if storeOpts.resolver == nil || !errors.Is(err, ErrSessionNotFound) {
 		return PersistedSessionRecord{}, err
 	}
 	record, err := storeOpts.resolver.ResolvePersistedSession(context.Background(), id)
@@ -129,6 +138,9 @@ func resolvePersistedSessionRecord(persistenceRoot, sessionID string, storeOpts 
 	}
 	if strings.TrimSpace(record.SessionDir) == "" {
 		return PersistedSessionRecord{}, fmt.Errorf("resolver returned invalid persisted session record for %q: missing session dir", id)
+	}
+	if !filepath.IsAbs(record.SessionDir) || filepath.Clean(record.SessionDir) != record.SessionDir {
+		return PersistedSessionRecord{}, fmt.Errorf("resolver returned invalid persisted session record for %q: session dir must be an absolute clean path", id)
 	}
 	if record.Meta == nil {
 		return PersistedSessionRecord{}, fmt.Errorf("resolver returned invalid persisted session record for %q: missing metadata", id)
@@ -153,7 +165,7 @@ func FindSessionDir(persistenceRoot, sessionID string) (string, error) {
 	entries, err := os.ReadDir(searchRoot)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("session %q not found", id)
+			return "", fmt.Errorf("%w: %q", ErrSessionNotFound, id)
 		}
 		return "", fmt.Errorf("read session root: %w", err)
 	}
@@ -166,7 +178,7 @@ func FindSessionDir(persistenceRoot, sessionID string) (string, error) {
 			return candidate, nil
 		}
 	}
-	return "", fmt.Errorf("session %q not found", id)
+	return "", fmt.Errorf("%w: %q", ErrSessionNotFound, id)
 }
 
 func hasSessionMeta(sessionDir string) bool {
@@ -232,119 +244,146 @@ func (s *Store) ConversationFreshness() ConversationFreshness {
 	return s.conversationFreshness
 }
 
-func (s *Store) EnsureDurable() error {
+func (s *Store) mutateAndPersist(mutator func() error) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.persistMetaLocked()
+	if err := mutator(); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	snapshot, err := s.persistMetaLocked()
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return s.observePersistence(snapshot)
+}
+
+func (s *Store) EnsureDurable() error {
+	return s.mutateAndPersist(func() error { return nil })
 }
 
 func (s *Store) MarkInFlight(inFlight bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.meta.InFlightStep = inFlight
-	s.meta.UpdatedAt = time.Now().UTC()
-	return s.persistMetaLocked()
+	return s.mutateAndPersist(func() error {
+		s.meta.InFlightStep = inFlight
+		s.meta.UpdatedAt = time.Now().UTC()
+		return nil
+	})
 }
 
 func (s *Store) SetName(name string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.meta.Name = strings.TrimSpace(name)
-	s.meta.UpdatedAt = time.Now().UTC()
-	return s.persistMetaLocked()
+	return s.mutateAndPersist(func() error {
+		s.meta.Name = strings.TrimSpace(name)
+		s.meta.UpdatedAt = time.Now().UTC()
+		return nil
+	})
 }
 
 func (s *Store) SetParentSessionID(parentSessionID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.meta.ParentSessionID = strings.TrimSpace(parentSessionID)
-	s.meta.UpdatedAt = time.Now().UTC()
-	return s.persistMetaLocked()
+	return s.mutateAndPersist(func() error {
+		s.meta.ParentSessionID = strings.TrimSpace(parentSessionID)
+		s.meta.UpdatedAt = time.Now().UTC()
+		return nil
+	})
 }
 
 func (s *Store) SetInputDraft(inputDraft string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if s.meta.InputDraft == inputDraft && (!s.persisted || s.hasDurableMetadataLocked()) {
+		s.mu.Unlock()
 		return nil
 	}
 	s.meta.InputDraft = inputDraft
 	s.meta.UpdatedAt = time.Now().UTC()
 	if !s.persisted && inputDraft == "" {
+		s.mu.Unlock()
 		return nil
 	}
-	return s.persistMetaLocked()
+	snapshot, err := s.persistMetaLocked()
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return s.observePersistence(snapshot)
 }
 
 func (s *Store) SetCompactionSoonReminderIssued(issued bool) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if s.meta.CompactionSoonReminderIssued == issued && (!s.persisted || s.hasDurableMetadataLocked()) {
+		s.mu.Unlock()
 		return nil
 	}
 	s.meta.CompactionSoonReminderIssued = issued
 	s.meta.UpdatedAt = time.Now().UTC()
-	return s.persistMetaLocked()
+	snapshot, err := s.persistMetaLocked()
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return s.observePersistence(snapshot)
 }
 
 func (s *Store) SetUsageState(state *UsageState) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	normalized := normalizeUsageState(state)
 	if usageStatesEqual(s.meta.UsageState, normalized) && (!s.persisted || s.hasDurableMetadataLocked()) {
+		s.mu.Unlock()
 		return nil
 	}
 	s.meta.UsageState = normalized
 	s.meta.UpdatedAt = time.Now().UTC()
-	return s.persistMetaLocked()
+	snapshot, err := s.persistMetaLocked()
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return s.observePersistence(snapshot)
 }
 
 func (s *Store) SetContinuationContext(ctx ContinuationContext) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	s.meta.Continuation = normalizeContinuationContext(ctx)
 	s.meta.UpdatedAt = time.Now().UTC()
 	if !s.persisted {
+		s.mu.Unlock()
 		return nil
 	}
-	return s.persistMetaLocked()
+	snapshot, err := s.persistMetaLocked()
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return s.observePersistence(snapshot)
 }
 
 func (s *Store) MarkAgentsInjected() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.meta.AgentsInjected = true
-	s.meta.UpdatedAt = time.Now().UTC()
-	return s.persistMetaLocked()
+	return s.mutateAndPersist(func() error {
+		s.meta.AgentsInjected = true
+		s.meta.UpdatedAt = time.Now().UTC()
+		return nil
+	})
 }
 
 func (s *Store) MarkModelDispatchLocked(contract LockedContract) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.meta.ModelRequestCount++
-	if s.meta.Locked == nil {
-		contract.LockedAt = time.Now().UTC()
-		s.meta.Locked = &contract
-	}
-	s.meta.UpdatedAt = time.Now().UTC()
-	return s.persistMetaLocked()
+	return s.mutateAndPersist(func() error {
+		s.meta.ModelRequestCount++
+		if s.meta.Locked == nil {
+			contract.LockedAt = time.Now().UTC()
+			s.meta.Locked = &contract
+		}
+		s.meta.UpdatedAt = time.Now().UTC()
+		return nil
+	})
 }
 
 func (s *Store) AppendEvent(stepID, kind string, payload any) (Event, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	body, err := json.Marshal(payload)
 	if err != nil {
+		s.mu.Unlock()
 		return Event{}, fmt.Errorf("marshal event payload: %w", err)
 	}
 
@@ -358,7 +397,13 @@ func (s *Store) AppendEvent(stepID, kind string, payload any) (Event, error) {
 	s.captureFirstPromptPreviewLocked([]Event{evt})
 	s.advanceConversationFreshnessLocked([]Event{evt})
 
-	if err := s.appendEventsAtomicLocked([]Event{evt}); err != nil {
+	observation, err := s.appendEventsAtomicLocked([]Event{evt})
+	if err != nil {
+		s.mu.Unlock()
+		return Event{}, err
+	}
+	s.mu.Unlock()
+	if err := s.observePersistence(observation); err != nil {
 		return Event{}, err
 	}
 	return evt, nil
@@ -366,9 +411,9 @@ func (s *Store) AppendEvent(stepID, kind string, payload any) (Event, error) {
 
 func (s *Store) AppendTurnAtomic(stepID string, events []EventInput) ([]Event, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if len(events) == 0 {
+		s.mu.Unlock()
 		return nil, nil
 	}
 	built := make([]Event, 0, len(events))
@@ -377,6 +422,7 @@ func (s *Store) AppendTurnAtomic(stepID string, events []EventInput) ([]Event, e
 	for _, in := range events {
 		body, err := json.Marshal(in.Payload)
 		if err != nil {
+			s.mu.Unlock()
 			return nil, fmt.Errorf("marshal event payload: %w", err)
 		}
 		seq++
@@ -391,7 +437,13 @@ func (s *Store) AppendTurnAtomic(stepID string, events []EventInput) ([]Event, e
 	s.captureFirstPromptPreviewLocked(built)
 	s.advanceConversationFreshnessLocked(built)
 
-	if err := s.appendEventsAtomicLocked(built); err != nil {
+	observation, err := s.appendEventsAtomicLocked(built)
+	if err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+	s.mu.Unlock()
+	if err := s.observePersistence(observation); err != nil {
 		return nil, err
 	}
 	return built, nil
@@ -405,9 +457,9 @@ type ReplayEvent struct {
 
 func (s *Store) AppendReplayEvents(events []ReplayEvent) ([]Event, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if len(events) == 0 {
+		s.mu.Unlock()
 		return nil, nil
 	}
 	built := make([]Event, 0, len(events))
@@ -427,7 +479,13 @@ func (s *Store) AppendReplayEvents(events []ReplayEvent) ([]Event, error) {
 	s.captureFirstPromptPreviewLocked(built)
 	s.advanceConversationFreshnessLocked(built)
 
-	if err := s.appendEventsAtomicLocked(built); err != nil {
+	observation, err := s.appendEventsAtomicLocked(built)
+	if err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+	s.mu.Unlock()
+	if err := s.observePersistence(observation); err != nil {
 		return nil, err
 	}
 	return built, nil
@@ -478,7 +536,7 @@ func (s *Store) loadMetaLocked() error {
 		s.meta = m
 		return nil
 	}
-	if s.options.resolver == nil {
+	if s.options.resolver == nil || !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	record, resolveErr := s.options.resolver.ResolvePersistedSession(context.Background(), filepath.Base(s.sessionDir))
@@ -492,31 +550,26 @@ func (s *Store) loadMetaLocked() error {
 	return nil
 }
 
-func (s *Store) persistMetaLocked() error {
+func (s *Store) persistMetaLocked() (*persistenceObservation, error) {
 	if err := s.ensurePersistedLocked(); err != nil {
-		return err
+		return nil, err
 	}
+	s.metadataVersion++
 	if !s.options.filelessMeta {
 		data, err := json.MarshalIndent(s.meta, "", "  ")
 		if err != nil {
-			return fmt.Errorf("marshal session meta: %w", err)
+			return nil, fmt.Errorf("marshal session meta: %w", err)
 		}
 		tmp := s.sessionFP + ".tmp"
 		if err := os.WriteFile(tmp, data, 0o644); err != nil {
-			return fmt.Errorf("write session meta tmp: %w", err)
+			return nil, fmt.Errorf("write session meta tmp: %w", err)
 		}
 		if err := os.Rename(tmp, s.sessionFP); err != nil {
-			return fmt.Errorf("replace session meta: %w", err)
+			return nil, fmt.Errorf("replace session meta: %w", err)
 		}
-		s.metadataPersisted = true
+		s.persistedMetaVersion = s.metadataVersion
 	}
-	if err := s.observePersistenceLocked(); err != nil {
-		return err
-	}
-	if s.options.filelessMeta {
-		s.metadataPersisted = true
-	}
-	return nil
+	return &persistenceObservation{snapshot: s.persistenceSnapshotLocked(), version: s.metadataVersion}, nil
 }
 
 func (s *Store) hasDurableMetadataLocked() bool {
@@ -529,29 +582,30 @@ func (s *Store) hasDurableMetadataLocked() bool {
 	if !s.options.filelessMeta {
 		return false
 	}
-	return s.metadataPersisted
+	return s.metadataVersion != 0 && s.persistedMetaVersion == s.metadataVersion
 }
 
-func (s *Store) appendEventsAtomicLocked(events []Event) error {
+func (s *Store) appendEventsAtomicLocked(events []Event) (*persistenceObservation, error) {
 	if err := s.ensurePersistedLocked(); err != nil {
-		return err
+		return nil, err
 	}
 	if err := s.compactEventsIfNeededLocked(); err != nil {
-		return err
+		return nil, err
 	}
 
 	if _, err := s.appendEventsLogLocked(events); err != nil {
-		return err
+		return nil, err
 	}
 	for _, e := range events {
 		s.meta.LastSequence = e.Seq
 	}
 	s.meta.UpdatedAt = time.Now().UTC()
 	s.writesSinceCompaction++
-	if err := s.persistMetaLocked(); err != nil {
-		return err
+	snapshot, err := s.persistMetaLocked()
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	return snapshot, nil
 }
 
 func (s *Store) ensurePersistedLocked() error {
@@ -571,16 +625,34 @@ func (s *Store) ensurePersistedLocked() error {
 	return nil
 }
 
-func (s *Store) observePersistenceLocked() error {
+func (s *Store) persistenceSnapshotLocked() *PersistedStoreSnapshot {
 	if s == nil || !s.persisted || s.options.observer == nil {
+		return nil
+	}
+	snapshot := PersistedStoreSnapshot{
+		SessionDir: s.sessionDir,
+		Meta:       s.meta,
+	}
+	return &snapshot
+}
+
+func (s *Store) observePersistence(observation *persistenceObservation) error {
+	if s == nil || observation == nil || observation.snapshot == nil || s.options.observer == nil {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), s.options.observerTimeout)
 	defer cancel()
-	return s.options.observer.ObservePersistedStore(ctx, PersistedStoreSnapshot{
-		SessionDir: s.sessionDir,
-		Meta:       s.meta,
-	})
+	if err := s.options.observer.ObservePersistedStore(ctx, *observation.snapshot); err != nil {
+		return err
+	}
+	if s.options.filelessMeta {
+		s.mu.Lock()
+		if observation.version > s.persistedMetaVersion {
+			s.persistedMetaVersion = observation.version
+		}
+		s.mu.Unlock()
+	}
+	return nil
 }
 
 func normalizeContinuationContext(ctx ContinuationContext) *ContinuationContext {

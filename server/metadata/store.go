@@ -547,9 +547,6 @@ func sessionLaunchVisible(meta session.Meta) bool {
 	if strings.TrimSpace(meta.ParentSessionID) != "" {
 		return true
 	}
-	if meta.LastSequence > 0 {
-		return true
-	}
 	return meta.ModelRequestCount > 0
 }
 

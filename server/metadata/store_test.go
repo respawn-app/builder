@@ -454,11 +454,13 @@ func TestHiddenDurableSessionStaysOutOfProjectListingsUntilVisible(t *testing.T)
 
 func TestSessionLaunchVisibilityTransitions(t *testing.T) {
 	tests := []struct {
-		name   string
-		mutate func(*testing.T, *session.Store)
+		name        string
+		mutate      func(*testing.T, *session.Store)
+		wantVisible bool
 	}{
 		{
-			name: "input draft makes session launch-visible",
+			name:        "input draft makes session launch-visible",
+			wantVisible: true,
 			mutate: func(t *testing.T, sess *session.Store) {
 				t.Helper()
 				if err := sess.SetInputDraft("draft prompt"); err != nil {
@@ -467,7 +469,8 @@ func TestSessionLaunchVisibilityTransitions(t *testing.T) {
 			},
 		},
 		{
-			name: "parent linkage makes session launch-visible",
+			name:        "parent linkage makes session launch-visible",
+			wantVisible: true,
 			mutate: func(t *testing.T, sess *session.Store) {
 				t.Helper()
 				if err := sess.SetParentSessionID("session-parent"); err != nil {
@@ -476,10 +479,21 @@ func TestSessionLaunchVisibilityTransitions(t *testing.T) {
 			},
 		},
 		{
-			name: "first user prompt makes session launch-visible",
+			name:        "first user prompt makes session launch-visible",
+			wantVisible: true,
 			mutate: func(t *testing.T, sess *session.Store) {
 				t.Helper()
 				if _, err := sess.AppendEvent("step-1", "message", map[string]any{"role": "user", "content": "Investigate broken startup flow\nmore detail"}); err != nil {
+					t.Fatalf("AppendEvent: %v", err)
+				}
+			},
+		},
+		{
+			name:        "non-user events keep prepared session hidden",
+			wantVisible: false,
+			mutate: func(t *testing.T, sess *session.Store) {
+				t.Helper()
+				if _, err := sess.AppendEvent("step-1", "message", map[string]any{"role": "assistant", "content": "warming up"}); err != nil {
 					t.Fatalf("AppendEvent: %v", err)
 				}
 			},
@@ -503,7 +517,14 @@ func TestSessionLaunchVisibilityTransitions(t *testing.T) {
 
 			tc.mutate(t, sess)
 
-			listed := assertProjectSessionListingCount(t, ctx, store, binding.ProjectID, 1)
+			wantCount := 0
+			if tc.wantVisible {
+				wantCount = 1
+			}
+			listed := assertProjectSessionListingCount(t, ctx, store, binding.ProjectID, wantCount)
+			if !tc.wantVisible {
+				return
+			}
 			if listed[0].SessionID != sess.Meta().SessionID {
 				t.Fatalf("listed session id = %q, want %q", listed[0].SessionID, sess.Meta().SessionID)
 			}
