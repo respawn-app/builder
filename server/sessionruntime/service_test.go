@@ -3,13 +3,14 @@ package sessionruntime
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"builder/server/metadata"
 	"builder/server/registry"
 	"builder/server/session"
+	"builder/shared/config"
 	"builder/shared/serverapi"
 )
 
@@ -17,22 +18,28 @@ func TestInstallHandleDoesNotDoubleCountDuplicateActivationRequest(t *testing.T)
 	svc := &Service{handles: map[string]*runtimeHandle{
 		"session-1": {
 			refs:               1,
-			activationRequests: map[string]struct{}{"req-1": {}},
-			releaseRequests:    make(map[string]struct{}),
+			activationRequests: map[string]string{"req-1": "lease-1"},
+			activeLeases:       map[string]struct{}{"lease-1": {}},
 			ready:              make(chan struct{}),
 		},
 	}}
 	close(svc.handles["session-1"].ready)
 
-	handle, installed := svc.installHandle("session-1", "req-1", &runtimeHandle{})
+	handle, installed, leaseID := svc.installHandle("session-1", "req-1", "lease-2", &runtimeHandle{})
 	if installed {
 		t.Fatal("expected duplicate activation to reuse existing handle")
 	}
 	if handle != svc.handles["session-1"] {
 		t.Fatal("expected duplicate activation to return existing handle")
 	}
+	if leaseID != "lease-1" {
+		t.Fatalf("lease id = %q, want lease-1", leaseID)
+	}
 	if got := svc.handles["session-1"].refs; got != 1 {
 		t.Fatalf("refs = %d, want 1", got)
+	}
+	if got := len(svc.handles["session-1"].activeLeases); got != 1 {
+		t.Fatalf("active leases = %d, want 1", got)
 	}
 }
 
@@ -40,40 +47,47 @@ func TestInstallHandleCountsDistinctActivationRequestOnExistingHandle(t *testing
 	svc := &Service{handles: map[string]*runtimeHandle{
 		"session-1": {
 			refs:               1,
-			activationRequests: map[string]struct{}{"req-1": {}},
-			releaseRequests:    make(map[string]struct{}),
+			activationRequests: map[string]string{"req-1": "lease-1"},
+			activeLeases:       map[string]struct{}{"lease-1": {}},
 			ready:              make(chan struct{}),
 		},
 	}}
 	close(svc.handles["session-1"].ready)
 
-	handle, installed := svc.installHandle("session-1", "req-2", &runtimeHandle{})
+	handle, installed, leaseID := svc.installHandle("session-1", "req-2", "lease-2", &runtimeHandle{})
 	if installed {
 		t.Fatal("expected existing handle to remain authoritative")
 	}
 	if handle != svc.handles["session-1"] {
 		t.Fatal("expected distinct activation to return existing handle")
 	}
+	if leaseID != "lease-2" {
+		t.Fatalf("lease id = %q, want lease-2", leaseID)
+	}
 	if got := svc.handles["session-1"].refs; got != 2 {
 		t.Fatalf("refs = %d, want 2", got)
+	}
+	if _, ok := svc.handles["session-1"].activeLeases["lease-2"]; !ok {
+		t.Fatal("expected distinct lease to be tracked")
 	}
 }
 
 func TestActivateSessionRuntimeWaitsForExistingHandleReady(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
 	handle := &runtimeHandle{
 		refs:               1,
-		activationRequests: map[string]struct{}{"req-1": {}},
-		releaseRequests:    make(map[string]struct{}),
+		activationRequests: map[string]string{"req-1": "lease-1"},
+		activeLeases:       map[string]struct{}{"lease-1": {}},
 		ready:              make(chan struct{}),
 	}
-	svc := &Service{handles: map[string]*runtimeHandle{"session-1": handle}}
+	fixture.service.handles = map[string]*runtimeHandle{fixture.store.Meta().SessionID: handle}
 	done := make(chan error, 1)
 	go func() {
-		done <- svc.ActivateSessionRuntime(context.Background(), serverapi.SessionRuntimeActivateRequest{
+		_, err := fixture.service.ActivateSessionRuntime(context.Background(), serverapi.SessionRuntimeActivateRequest{
 			ClientRequestID: "req-2",
-			SessionID:       "session-1",
-			WorkspaceRoot:   "/tmp/workspace-a",
+			SessionID:       fixture.store.Meta().SessionID,
 		})
+		done <- err
 	}()
 	select {
 	case err := <-done:
@@ -84,58 +98,66 @@ func TestActivateSessionRuntimeWaitsForExistingHandleReady(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("ActivateSessionRuntime: %v", err)
 	}
-	if got := svc.handles["session-1"].refs; got != 2 {
+	if got := fixture.service.handles[fixture.store.Meta().SessionID].refs; got != 2 {
 		t.Fatalf("refs = %d, want 2", got)
 	}
 }
 
 func TestActivateSessionRuntimeRollsBackClaimWhenWaitIsCanceled(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
 	handle := &runtimeHandle{
 		refs:               1,
-		activationRequests: map[string]struct{}{"req-1": {}},
-		releaseRequests:    make(map[string]struct{}),
+		activationRequests: map[string]string{"req-1": "lease-1"},
+		activeLeases:       map[string]struct{}{"lease-1": {}},
 		ready:              make(chan struct{}),
 	}
-	svc := &Service{handles: map[string]*runtimeHandle{"session-1": handle}}
+	fixture.service.handles = map[string]*runtimeHandle{fixture.store.Meta().SessionID: handle}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- svc.ActivateSessionRuntime(ctx, serverapi.SessionRuntimeActivateRequest{
+		_, err := fixture.service.ActivateSessionRuntime(ctx, serverapi.SessionRuntimeActivateRequest{
 			ClientRequestID: "req-2",
-			SessionID:       "session-1",
-			WorkspaceRoot:   "/tmp/workspace-a",
+			SessionID:       fixture.store.Meta().SessionID,
 		})
+		done <- err
 	}()
 	cancel()
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("ActivateSessionRuntime error = %v, want context canceled", err)
 	}
-	if got := svc.handles["session-1"].refs; got != 1 {
+	if got := fixture.service.handles[fixture.store.Meta().SessionID].refs; got != 1 {
 		t.Fatalf("refs = %d, want 1", got)
 	}
-	if _, ok := svc.handles["session-1"].activationRequests["req-2"]; ok {
+	if _, ok := fixture.service.handles[fixture.store.Meta().SessionID].activationRequests["req-2"]; ok {
 		t.Fatal("expected canceled activation request to be rolled back")
 	}
 }
 
 func TestReleaseSessionRuntimeWaitsForHandleReadyBeforeClose(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	lease, err := fixture.metadata.CreateRuntimeLease(context.Background(), fixture.store.Meta().SessionID, "req-1")
+	if err != nil {
+		t.Fatalf("CreateRuntimeLease: %v", err)
+	}
 	closed := make(chan struct{}, 1)
 	handle := &runtimeHandle{
 		refs:               1,
-		activationRequests: map[string]struct{}{"req-1": {}},
-		releaseRequests:    make(map[string]struct{}),
+		activationRequests: map[string]string{"req-1": lease.LeaseID},
+		activeLeases:       map[string]struct{}{lease.LeaseID: {}},
 		ready:              make(chan struct{}),
 		close: func() {
 			closed <- struct{}{}
 		},
 	}
-	svc := &Service{handles: map[string]*runtimeHandle{"session-1": handle}}
+	fixture.service.handles = map[string]*runtimeHandle{fixture.store.Meta().SessionID: handle}
 	done := make(chan error, 1)
 	go func() {
-		done <- svc.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
+		_, err := fixture.service.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
 			ClientRequestID: "rel-1",
-			SessionID:       "session-1",
+			SessionID:       fixture.store.Meta().SessionID,
+			LeaseID:         lease.LeaseID,
 		})
+		done <- err
 	}()
 	select {
 	case <-closed:
@@ -154,86 +176,42 @@ func TestReleaseSessionRuntimeWaitsForHandleReadyBeforeClose(t *testing.T) {
 }
 
 func TestActivateSessionRuntimeHonorsCanceledContextBeforeInstallingHandle(t *testing.T) {
-	root := t.TempDir()
-	containerDir := filepath.Join(root, "sessions", "workspace-a")
-	store, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	svc := &Service{
-		containerDir:  containerDir,
-		handles:       make(map[string]*runtimeHandle),
-		sessionStores: registry.NewSessionStoreRegistry(),
-	}
-	svc.sessionStores.RegisterStore(store)
-
+	fixture := newSessionRuntimeFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err = svc.ActivateSessionRuntime(ctx, serverapi.SessionRuntimeActivateRequest{ClientRequestID: "req-1", SessionID: store.Meta().SessionID, WorkspaceRoot: "/tmp/workspace-a"})
+	_, err := fixture.service.ActivateSessionRuntime(ctx, serverapi.SessionRuntimeActivateRequest{ClientRequestID: "req-1", SessionID: fixture.store.Meta().SessionID})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("ActivateSessionRuntime error = %v, want context canceled", err)
 	}
-	if len(svc.handles) != 0 {
-		t.Fatalf("expected no installed handles after canceled activation, got %+v", svc.handles)
+	if len(fixture.service.handles) != 0 {
+		t.Fatalf("expected no installed handles after canceled activation, got %+v", fixture.service.handles)
 	}
 }
 
-func TestResolveStoreFallsBackWithinContainerOnly(t *testing.T) {
-	root := t.TempDir()
-	containerDir := filepath.Join(root, "sessions", "workspace-a")
-	store, err := session.Create(containerDir, "workspace-a", "/tmp/workspace-a")
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	if err := store.SetName("session-a"); err != nil {
-		t.Fatalf("persist session meta: %v", err)
-	}
-	svc := &Service{
-		containerDir: containerDir,
-		handles:      make(map[string]*runtimeHandle),
-	}
-	resolved, err := svc.resolveStore(context.Background(), store.Meta().SessionID)
+func TestResolveStoreFallsBackThroughMetadataAuthority(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	resolved, err := fixture.service.resolveStore(context.Background(), fixture.store.Meta().SessionID)
 	if err != nil {
 		t.Fatalf("resolveStore: %v", err)
 	}
-	if resolved.Meta().SessionID != store.Meta().SessionID {
-		t.Fatalf("resolved session id = %q, want %q", resolved.Meta().SessionID, store.Meta().SessionID)
+	if resolved.Meta().SessionID != fixture.store.Meta().SessionID {
+		t.Fatalf("resolved session id = %q, want %q", resolved.Meta().SessionID, fixture.store.Meta().SessionID)
 	}
 }
 
-func TestResolveStoreRejectsSessionOutsideContainer(t *testing.T) {
-	root := t.TempDir()
-	containerA := filepath.Join(root, "sessions", "workspace-a")
-	containerB := filepath.Join(root, "sessions", "workspace-b")
-	if err := os.MkdirAll(containerA, 0o755); err != nil {
-		t.Fatalf("mkdir container A: %v", err)
-	}
-	store, err := session.Create(containerB, "workspace-b", "/tmp/workspace-b")
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	if err := store.SetName("session-b"); err != nil {
-		t.Fatalf("persist session meta: %v", err)
-	}
-	svc := &Service{
-		containerDir: containerA,
-		handles:      make(map[string]*runtimeHandle),
-	}
-	_, err = svc.resolveStore(context.Background(), store.Meta().SessionID)
+func TestResolveStoreRejectsUnknownSession(t *testing.T) {
+	fixture := newSessionRuntimeFixture(t)
+	_, err := fixture.service.resolveStore(context.Background(), "session-missing")
 	if err == nil {
-		t.Fatal("expected scoped resolve to reject session outside container")
-	}
-	if !strings.Contains(err.Error(), "not found") && !strings.Contains(err.Error(), "outside workspace container") {
-		t.Fatalf("expected scoped resolve rejection, got %v", err)
+		t.Fatal("expected resolveStore to reject unknown session")
 	}
 }
 
 func TestActivateSessionRuntimeRejectsPathLikeSessionID(t *testing.T) {
 	svc := &Service{handles: make(map[string]*runtimeHandle)}
-	err := svc.ActivateSessionRuntime(context.Background(), serverapi.SessionRuntimeActivateRequest{
+	_, err := svc.ActivateSessionRuntime(context.Background(), serverapi.SessionRuntimeActivateRequest{
 		ClientRequestID: "req-1",
 		SessionID:       "../session-1",
-		WorkspaceRoot:   "/tmp/workspace-a",
 	})
 	if err == nil || !strings.Contains(err.Error(), "single session id") {
 		t.Fatalf("expected path-like session id rejection, got %v", err)
@@ -242,11 +220,49 @@ func TestActivateSessionRuntimeRejectsPathLikeSessionID(t *testing.T) {
 
 func TestReleaseSessionRuntimeRejectsPathLikeSessionID(t *testing.T) {
 	svc := &Service{handles: make(map[string]*runtimeHandle)}
-	err := svc.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
+	_, err := svc.ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
 		ClientRequestID: "req-1",
 		SessionID:       "sessions/workspace-a/session-1",
+		LeaseID:         "lease-1",
 	})
 	if err == nil || !strings.Contains(err.Error(), "single session id") {
 		t.Fatalf("expected path-like session id rejection, got %v", err)
 	}
+}
+
+type sessionRuntimeFixture struct {
+	config   config.App
+	metadata *metadata.Store
+	store    *session.Store
+	service  *Service
+}
+
+func newSessionRuntimeFixture(t *testing.T) sessionRuntimeFixture {
+	t.Helper()
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	appCfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	metadataStore, err := metadata.Open(appCfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = metadataStore.Close() })
+	binding, err := metadataStore.RegisterWorkspaceBinding(context.Background(), appCfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterWorkspaceBinding: %v", err)
+	}
+	projectSessionsDir := config.ProjectSessionsRoot(appCfg, binding.ProjectID)
+	store, err := session.Create(projectSessionsDir, filepath.Base(projectSessionsDir), appCfg.WorkspaceRoot, metadataStore.AuthoritativeSessionStoreOptions()...)
+	if err != nil {
+		t.Fatalf("session.Create: %v", err)
+	}
+	if err := store.SetName("session-a"); err != nil {
+		t.Fatalf("SetName: %v", err)
+	}
+	service := NewService(appCfg.PersistenceRoot, metadataStore, nil, nil, nil, nil, nil, registry.NewSessionStoreRegistry(), metadataStore.AuthoritativeSessionStoreOptions()...)
+	return sessionRuntimeFixture{config: appCfg, metadata: metadataStore, store: store, service: service}
 }

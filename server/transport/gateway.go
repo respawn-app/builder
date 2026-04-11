@@ -175,12 +175,12 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 			return g.core.SessionLifecycleClient().ResolveTransition(ctx, params)
 		})
 	case protocol.MethodSessionRuntimeActivate:
-		return decodeAndHandle(req, func(params serverapi.SessionRuntimeActivateRequest) (struct{}, error) {
-			return struct{}{}, g.core.SessionRuntimeClient().ActivateSessionRuntime(ctx, params)
+		return decodeAndHandle(req, func(params serverapi.SessionRuntimeActivateRequest) (serverapi.SessionRuntimeActivateResponse, error) {
+			return g.core.SessionRuntimeClient().ActivateSessionRuntime(ctx, params)
 		})
 	case protocol.MethodSessionRuntimeRelease:
-		return decodeAndHandle(req, func(params serverapi.SessionRuntimeReleaseRequest) (struct{}, error) {
-			return struct{}{}, g.core.SessionRuntimeClient().ReleaseSessionRuntime(ctx, params)
+		return decodeAndHandle(req, func(params serverapi.SessionRuntimeReleaseRequest) (serverapi.SessionRuntimeReleaseResponse, error) {
+			return g.core.SessionRuntimeClient().ReleaseSessionRuntime(ctx, params)
 		})
 	case protocol.MethodRunGet:
 		return decodeAndHandle(req, func(params serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {

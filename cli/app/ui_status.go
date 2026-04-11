@@ -306,7 +306,8 @@ func (defaultUIStatusCollector) CollectBase(req uiStatusRequest) uiStatusSnapsho
 	if collectedAt.IsZero() {
 		collectedAt = time.Now()
 	}
-	workdir := statusWorkdir(req.WorkspaceRoot)
+	target := statusExecutionTarget(req)
+	workdir := statusWorkdir(req.WorkspaceRoot, target)
 	contextInfo := uiStatusContextInfo{ThresholdTokens: req.Settings.ContextCompactionThresholdTokens}
 	parentSessionID := ""
 	parentSessionName := ""
@@ -398,14 +399,15 @@ func (defaultUIStatusCollector) CollectGit(ctx context.Context, _ uiStatusReques
 func (defaultUIStatusCollector) CollectEnvironment(_ context.Context, req uiStatusRequest, _ uiStatusSnapshot) uiStatusEnvironmentStageResult {
 	result := uiStatusEnvironmentStageResult{}
 	warnings := make([]string, 0, 2)
-	skills, skillsErr := runtime.InspectSkills(req.WorkspaceRoot, config.DisabledSkillToggles(req.Settings))
+	workspaceRoot := statusEnvironmentRoot(req.WorkspaceRoot, statusExecutionTarget(req))
+	skills, skillsErr := runtime.InspectSkills(workspaceRoot, config.DisabledSkillToggles(req.Settings))
 	if skillsErr != nil {
 		warnings = append(warnings, "skills: "+skillsErr.Error())
 	} else {
 		result.Skills = skills
 		result.SkillTokenCounts = statusEstimateSkillTokens(skills)
 	}
-	agentsPaths, agentsErr := runtime.InstalledAgentsPaths(req.WorkspaceRoot)
+	agentsPaths, agentsErr := runtime.InstalledAgentsPaths(workspaceRoot)
 	if agentsErr != nil {
 		warnings = append(warnings, "agents: "+agentsErr.Error())
 	} else {
@@ -416,7 +418,27 @@ func (defaultUIStatusCollector) CollectEnvironment(_ context.Context, req uiStat
 	return result
 }
 
-func statusWorkdir(workspaceRoot string) string {
+func statusExecutionTarget(req uiStatusRequest) clientui.SessionExecutionTarget {
+	if req.Runtime == nil {
+		return clientui.SessionExecutionTarget{}
+	}
+	return req.Runtime.SessionView().ExecutionTarget
+}
+
+func statusEnvironmentRoot(workspaceRoot string, target clientui.SessionExecutionTarget) string {
+	if worktreeRoot := strings.TrimSpace(target.WorktreeRoot); worktreeRoot != "" {
+		return worktreeRoot
+	}
+	if registeredWorkspaceRoot := strings.TrimSpace(target.WorkspaceRoot); registeredWorkspaceRoot != "" {
+		return registeredWorkspaceRoot
+	}
+	return strings.TrimSpace(workspaceRoot)
+}
+
+func statusWorkdir(workspaceRoot string, target clientui.SessionExecutionTarget) string {
+	if workdir := strings.TrimSpace(target.EffectiveWorkdir); workdir != "" {
+		return workdir
+	}
 	workdir := strings.TrimSpace(workspaceRoot)
 	if workdir != "" {
 		return workdir

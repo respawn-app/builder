@@ -107,12 +107,14 @@ func (c *Remote) GetRun(ctx context.Context, req serverapi.RunGetRequest) (serve
 	return resp, c.call(ctx, protocol.MethodRunGet, req, &resp)
 }
 
-func (c *Remote) ActivateSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeActivateRequest) error {
-	return c.call(ctx, protocol.MethodSessionRuntimeActivate, req, nil)
+func (c *Remote) ActivateSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeActivateRequest) (serverapi.SessionRuntimeActivateResponse, error) {
+	var resp serverapi.SessionRuntimeActivateResponse
+	return resp, c.call(ctx, protocol.MethodSessionRuntimeActivate, req, &resp)
 }
 
-func (c *Remote) ReleaseSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeReleaseRequest) error {
-	return c.call(ctx, protocol.MethodSessionRuntimeRelease, req, nil)
+func (c *Remote) ReleaseSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeReleaseRequest) (serverapi.SessionRuntimeReleaseResponse, error) {
+	var resp serverapi.SessionRuntimeReleaseResponse
+	return resp, c.call(ctx, protocol.MethodSessionRuntimeRelease, req, &resp)
 }
 
 func (c *Remote) SetSessionName(ctx context.Context, req serverapi.RuntimeSetSessionNameRequest) error {

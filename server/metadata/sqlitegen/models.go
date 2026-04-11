@@ -50,6 +50,7 @@ type Session struct {
 	LockedJson         string
 	UsageStateJson     string
 	MetadataJson       string
+	LaunchVisible      int64
 }
 
 type Workspace struct {
