@@ -30,6 +30,7 @@ type Store struct {
 	meta                  Meta
 	conversationFreshness ConversationFreshness
 	persisted             bool
+	metadataPersisted     bool
 	options               storeOptions
 	eventsFileSizeBytes   int64
 	pendingFsyncWrites    int
@@ -87,11 +88,12 @@ func OpenByID(persistenceRoot, sessionID string, options ...StoreOption) (*Store
 
 func openPersistedSession(sessionDir string, resolvedMeta *Meta, storeOpts storeOptions) (*Store, error) {
 	s := &Store{
-		sessionDir: sessionDir,
-		sessionFP:  filepath.Join(sessionDir, sessionFile),
-		eventsFP:   filepath.Join(sessionDir, eventsFile),
-		persisted:  true,
-		options:    storeOpts,
+		sessionDir:        sessionDir,
+		sessionFP:         filepath.Join(sessionDir, sessionFile),
+		eventsFP:          filepath.Join(sessionDir, eventsFile),
+		persisted:         true,
+		metadataPersisted: resolvedMeta != nil,
+		options:           storeOpts,
 	}
 	if resolvedMeta != nil {
 		s.meta = *resolvedMeta
@@ -506,9 +508,13 @@ func (s *Store) persistMetaLocked() error {
 		if err := os.Rename(tmp, s.sessionFP); err != nil {
 			return fmt.Errorf("replace session meta: %w", err)
 		}
+		s.metadataPersisted = true
 	}
 	if err := s.observePersistenceLocked(); err != nil {
 		return err
+	}
+	if s.options.filelessMeta {
+		s.metadataPersisted = true
 	}
 	return nil
 }
@@ -523,7 +529,7 @@ func (s *Store) hasDurableMetadataLocked() bool {
 	if !s.options.filelessMeta {
 		return false
 	}
-	return s.options.resolver != nil || s.options.observer != nil
+	return s.metadataPersisted
 }
 
 func (s *Store) appendEventsAtomicLocked(events []Event) error {
