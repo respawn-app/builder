@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -119,6 +121,89 @@ func TestInsertWorkspaceBindingRecoversFromCanonicalRootConflict(t *testing.T) {
 	}
 	if _, err := store.lookupWorkspaceBinding(ctx, canonicalRoot); err != nil {
 		t.Fatalf("lookupWorkspaceBinding: %v", err)
+	}
+}
+
+func TestRegisterWorkspaceBindingConvergesUnderConcurrentFirstRegistration(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	storeA, err := Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("Open storeA: %v", err)
+	}
+	t.Cleanup(func() { _ = storeA.Close() })
+	storeB, err := Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("Open storeB: %v", err)
+	}
+	t.Cleanup(func() { _ = storeB.Close() })
+
+	barrier := make(chan struct{})
+	var once sync.Once
+	var reached atomic.Int32
+	registerWorkspaceBindingAfterLookupMissHook = func() {
+		if reached.Add(1) == 2 {
+			once.Do(func() { close(barrier) })
+		}
+		<-barrier
+	}
+	t.Cleanup(func() {
+		registerWorkspaceBindingAfterLookupMissHook = nil
+		once.Do(func() { close(barrier) })
+	})
+
+	results := make(chan Binding, 2)
+	errs := make(chan error, 2)
+	run := func(store *Store) {
+		binding, err := store.RegisterWorkspaceBinding(ctx, cfg.WorkspaceRoot)
+		if err != nil {
+			errs <- err
+			return
+		}
+		results <- binding
+	}
+	go run(storeA)
+	go run(storeB)
+
+	bindings := make([]Binding, 0, 2)
+	for len(bindings) < 2 {
+		select {
+		case err := <-errs:
+			t.Fatalf("RegisterWorkspaceBinding concurrent call: %v", err)
+		case binding := <-results:
+			bindings = append(bindings, binding)
+		}
+	}
+	if bindings[0].ProjectID != bindings[1].ProjectID || bindings[0].WorkspaceID != bindings[1].WorkspaceID {
+		t.Fatalf("concurrent bindings diverged: %+v vs %+v", bindings[0], bindings[1])
+	}
+	resolved, err := storeA.EnsureWorkspaceBinding(ctx, cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("EnsureWorkspaceBinding after concurrent registration: %v", err)
+	}
+	if resolved.ProjectID != bindings[0].ProjectID || resolved.WorkspaceID != bindings[0].WorkspaceID {
+		t.Fatalf("resolved binding mismatch: got %+v want %+v", resolved, bindings[0])
+	}
+	var projectCount int
+	if err := storeA.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM projects").Scan(&projectCount); err != nil {
+		t.Fatalf("count projects: %v", err)
+	}
+	if projectCount != 1 {
+		t.Fatalf("project count = %d, want 1", projectCount)
+	}
+	var workspaceCount int
+	if err := storeA.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM workspaces").Scan(&workspaceCount); err != nil {
+		t.Fatalf("count workspaces: %v", err)
+	}
+	if workspaceCount != 1 {
+		t.Fatalf("workspace count = %d, want 1", workspaceCount)
 	}
 }
 
