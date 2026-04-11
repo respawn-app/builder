@@ -33,6 +33,22 @@ func (r *recordingPersistenceObserver) ObservePersistedStore(_ context.Context, 
 	return r.err
 }
 
+type flakyPersistenceObserver struct {
+	failuresRemaining int
+	callCount         int
+	lastSnapshot      PersistedStoreSnapshot
+}
+
+func (o *flakyPersistenceObserver) ObservePersistedStore(_ context.Context, snapshot PersistedStoreSnapshot) error {
+	o.callCount++
+	o.lastSnapshot = snapshot
+	if o.failuresRemaining > 0 {
+		o.failuresRemaining--
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
 func TestOpenByIDUsesResolverWhenSessionMetaFileIsMissing(t *testing.T) {
 	root := t.TempDir()
 	sessionDir := filepath.Join(root, "projects", "project-1", "sessions", "session-1")
@@ -127,5 +143,35 @@ func TestOpenByIDRejectsResolverRecordWithoutMetadata(t *testing.T) {
 	)
 	if err == nil || !strings.Contains(err.Error(), "missing metadata") {
 		t.Fatalf("expected missing metadata validation error, got %v", err)
+	}
+}
+
+func TestFilelessMetadataRetriesSameValueUntilObserverSucceeds(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewLazy(root, "workspace-x", "/tmp/work")
+	if err != nil {
+		t.Fatalf("NewLazy: %v", err)
+	}
+	observer := &flakyPersistenceObserver{failuresRemaining: 1}
+	store.options.filelessMeta = true
+	store.options.observer = observer
+	store.options.observerTimeout = time.Second
+
+	err = store.SetInputDraft("draft")
+	if err == nil {
+		t.Fatal("expected first SetInputDraft call to surface observer failure")
+	}
+	if observer.callCount != 1 {
+		t.Fatalf("observer call count after failure = %d, want 1", observer.callCount)
+	}
+	err = store.SetInputDraft("draft")
+	if err != nil {
+		t.Fatalf("second SetInputDraft should retry same value successfully: %v", err)
+	}
+	if observer.callCount != 2 {
+		t.Fatalf("observer call count after retry = %d, want 2", observer.callCount)
+	}
+	if observer.lastSnapshot.Meta.InputDraft != "draft" {
+		t.Fatalf("persisted draft = %q, want draft", observer.lastSnapshot.Meta.InputDraft)
 	}
 }
