@@ -34,6 +34,7 @@ type Service struct {
 	backgroundRouter *runtimewire.BackgroundEventRouter
 	runtimes         *registry.RuntimeRegistry
 	sessionStores    *registry.SessionStoreRegistry
+	storeOptions     []session.StoreOption
 
 	mu      sync.Mutex
 	handles map[string]*runtimeHandle
@@ -47,7 +48,7 @@ type runtimeHandle struct {
 	close              func()
 }
 
-func NewService(containerDir string, authManager *auth.Manager, fastModeState *runtime.FastModeState, background *shelltool.Manager, backgroundRouter *runtimewire.BackgroundEventRouter, runtimes *registry.RuntimeRegistry, sessionStores *registry.SessionStoreRegistry) *Service {
+func NewService(containerDir string, authManager *auth.Manager, fastModeState *runtime.FastModeState, background *shelltool.Manager, backgroundRouter *runtimewire.BackgroundEventRouter, runtimes *registry.RuntimeRegistry, sessionStores *registry.SessionStoreRegistry, storeOptions ...session.StoreOption) *Service {
 	return &Service{
 		containerDir:     strings.TrimSpace(containerDir),
 		authManager:      authManager,
@@ -56,6 +57,7 @@ func NewService(containerDir string, authManager *auth.Manager, fastModeState *r
 		backgroundRouter: backgroundRouter,
 		runtimes:         runtimes,
 		sessionStores:    sessionStores,
+		storeOptions:     append([]session.StoreOption(nil), storeOptions...),
 		handles:          make(map[string]*runtimeHandle),
 	}
 }
@@ -217,7 +219,7 @@ func (s *Service) resolveStore(ctx context.Context, sessionID string) (*session.
 	if err != nil {
 		return nil, err
 	}
-	store, err := session.Open(sessionDir)
+	store, err := session.Open(sessionDir, s.storeOptions...)
 	if err != nil {
 		return nil, err
 	}

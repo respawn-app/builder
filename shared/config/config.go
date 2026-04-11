@@ -10,6 +10,7 @@ const (
 	DefaultAppName       = "builder"
 	DefaultPersistence   = "~/.builder"
 	sessionsDirName      = "sessions"
+	databaseDirName      = "db"
 	workspaceIndexName   = "workspaces.json"
 	globalAuthConfigName = "auth.json"
 )
@@ -143,6 +144,14 @@ func EnabledToolIDs(v Settings) []tools.ID {
 
 func SessionsRoot(cfg App) string {
 	return filepath.Join(cfg.PersistenceRoot, sessionsDirName)
+}
+
+func DatabaseRoot(cfg App) string {
+	return filepath.Join(cfg.PersistenceRoot, databaseDirName)
+}
+
+func MainDatabasePath(cfg App) string {
+	return filepath.Join(DatabaseRoot(cfg), "main.sqlite3")
 }
 
 func GlobalAuthConfigPath(cfg App) string {

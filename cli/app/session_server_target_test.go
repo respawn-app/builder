@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"builder/server/auth"
+	"builder/server/metadata"
 	"builder/server/serve"
 	serverstartup "builder/server/startup"
 	"builder/server/tools"
@@ -64,6 +65,7 @@ func TestStartSessionServerUsesDiscoveredDaemonForInteractiveFlow(t *testing.T) 
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"interactive daemon reply"})
 	defer fakeResponses.Close()
@@ -166,6 +168,7 @@ func TestShouldBypassRemoteStartupForInteractiveOnboardingOnFirstRun(t *testing.
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 
 	bypass, err := shouldBypassRemoteStartupForInteractiveOnboarding(Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, &stubAuthInteractor{})
 	if err != nil {
@@ -180,6 +183,7 @@ func TestShouldBypassRemoteStartupForInteractiveOnboardingSkipsWhenConfigExists(
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 	if _, _, err := config.WriteDefaultSettingsFile(); err != nil {
 		t.Fatalf("WriteDefaultSettingsFile: %v", err)
 	}
@@ -197,6 +201,7 @@ func TestStartSessionServerBypassesRemoteAndDaemonOnFirstInteractiveRun(t *testi
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 
 	originalDial := dialInteractiveRemoteSessionServer
 	originalLaunch := launchSessionServerDaemon
@@ -246,6 +251,7 @@ func TestStartSessionServerRejectsIncompatibleDiscoveredDaemonAndFallsBack(t *te
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
 	defer fakeResponses.Close()
@@ -302,6 +308,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutProcessOutputCapability
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
 	defer fakeResponses.Close()
@@ -362,6 +369,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutTranscriptPagingCapabil
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
 	defer fakeResponses.Close()
@@ -423,6 +431,7 @@ func TestRemoteSessionStatusUsesLocalOAuthAuthState(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 
 	srv, err := serve.Start(context.Background(), serverstartup.Request{
 		WorkspaceRoot:         workspace,
@@ -530,6 +539,7 @@ func TestStartSessionServerOwnsLaunchedDaemonCloser(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 
 	called := false
 	originalLaunch := launchSessionServerDaemon
@@ -563,6 +573,7 @@ func TestStartSessionServerLaunchedDaemonCloseStopsProcess(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 	t.Setenv("GO_WANT_HELPER_DAEMON", "1")
 	t.Setenv("GO_HELPER_WORKSPACE_ROOT", workspace)
 
@@ -611,6 +622,7 @@ func TestStartSessionServerUsesInvocationOverridesWhenAttachingToDiscoveredDaemo
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 
 	defaultResponses, defaultHits := newFakeResponsesServer(t, []string{"interactive daemon default"})
 	defer defaultResponses.Close()
@@ -691,6 +703,7 @@ func TestStartSessionServerPreservesExplicitCLIToolsWithCLIModelOverride(t *test
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 
 	srv, err := serve.Start(context.Background(), serverstartup.Request{
 		WorkspaceRoot:         workspace,
@@ -750,6 +763,7 @@ func TestStartSessionServerUsesDiscoveredDaemonForPromptRoundTrip(t *testing.T) 
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 
 	srv, err := serve.Start(context.Background(), serverstartup.Request{
 		WorkspaceRoot:         workspace,
@@ -873,6 +887,7 @@ func TestStartSessionServerUsesDiscoveredDaemonForSessionLifecycleDraftPersisten
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 
 	srv, err := serve.Start(context.Background(), serverstartup.Request{
 		WorkspaceRoot:         workspace,
@@ -941,6 +956,7 @@ func TestStartSessionServerListsPendingPromptSnapshotOverRemoteReads(t *testing.
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 
 	srv, err := serve.Start(context.Background(), serverstartup.Request{
 		WorkspaceRoot:         workspace,
@@ -1064,6 +1080,7 @@ func TestStartSessionServerUsesDiscoveredDaemonForProcessFlows(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 
 	srv, err := serve.Start(context.Background(), serverstartup.Request{
 		WorkspaceRoot:         workspace,
@@ -1163,6 +1180,7 @@ func TestInteractiveSessionServerWorkflowParity(t *testing.T) {
 		home := t.TempDir()
 		workspace := t.TempDir()
 		t.Setenv("HOME", home)
+		registerAppWorkspace(t, workspace)
 		fakeResponses, _ := newFakeResponsesServer(t, []string{"parity reply"})
 		defer fakeResponses.Close()
 		server, err := startEmbeddedServer(context.Background(), Options{
@@ -1183,6 +1201,7 @@ func TestInteractiveSessionServerWorkflowParity(t *testing.T) {
 		home := t.TempDir()
 		workspace := t.TempDir()
 		t.Setenv("HOME", home)
+		registerAppWorkspace(t, workspace)
 		fakeResponses, _ := newFakeResponsesServer(t, []string{"parity reply"})
 		defer fakeResponses.Close()
 
@@ -1420,14 +1439,14 @@ func publishDiscoveredRemoteForWorkspace(t *testing.T, workspace string, caps pr
 	if err != nil {
 		t.Fatalf("PathForContainer: %v", err)
 	}
-	expectedProjectID, err := config.ProjectIDForWorkspaceRoot(loadCfg.WorkspaceRoot)
+	binding, err := metadata.ResolveBinding(context.Background(), loadCfg.PersistenceRoot, loadCfg.WorkspaceRoot)
 	if err != nil {
-		t.Fatalf("ProjectIDForWorkspaceRoot: %v", err)
+		t.Fatalf("ResolveBinding: %v", err)
 	}
 	identity := protocol.ServerIdentity{
 		ProtocolVersion: protocol.Version,
 		ServerID:        "stale-daemon",
-		ProjectID:       expectedProjectID,
+		ProjectID:       binding.ProjectID,
 		WorkspaceRoot:   loadCfg.WorkspaceRoot,
 		Capabilities:    caps,
 	}

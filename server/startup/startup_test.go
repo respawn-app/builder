@@ -10,9 +10,21 @@ import (
 	"builder/server/auth"
 	"builder/server/authflow"
 	"builder/server/embedded"
+	"builder/server/metadata"
 	"builder/shared/config"
 	"builder/shared/serverapi"
 )
+
+func registerStartupWorkspace(t *testing.T, workspace string) {
+	t.Helper()
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if _, err := metadata.RegisterBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot); err != nil {
+		t.Fatalf("RegisterBinding: %v", err)
+	}
+}
 
 type stubAuthHandler struct {
 	lookupEnv func(string) string
@@ -229,6 +241,7 @@ func TestStartWrapsCoreWithSameClientAssembly(t *testing.T) {
 	request := Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
 	authHandler := startupEnvAuthHandler{}
 	onboarding := startupNoopOnboarding{}
+	registerStartupWorkspace(t, workspace)
 
 	appCore, err := StartCore(context.Background(), request, authHandler, onboarding)
 	if err != nil {
@@ -287,6 +300,7 @@ func TestHeadlessHandlersStartCoreWithoutCLIFrontendDependencies(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	authHandler, onboardingHandler := NewHeadlessHandlers(nil)
+	registerStartupWorkspace(t, workspace)
 	appCore, err := StartCore(context.Background(), Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, authHandler, onboardingHandler)
 	if err != nil {
 		t.Fatalf("StartCore: %v", err)
@@ -327,6 +341,7 @@ func TestHeadlessHandlersAllowExplicitOpenAIBaseURLWithoutCredentials(t *testing
 	t.Setenv("OPENAI_API_KEY", "")
 
 	authHandler, onboardingHandler := NewHeadlessHandlers(nil)
+	registerStartupWorkspace(t, workspace)
 	appCore, err := StartCore(context.Background(), Request{
 		WorkspaceRoot:         workspace,
 		WorkspaceRootExplicit: true,

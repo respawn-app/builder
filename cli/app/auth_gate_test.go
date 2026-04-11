@@ -68,6 +68,7 @@ func TestBootstrapAppHeadlessUsesEnvAPIKeyWithoutPersistingAuthState(t *testing.
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("OPENAI_API_KEY", "sk-env")
+	registerAppWorkspace(t, workspace)
 
 	boot, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
 	if err != nil {
@@ -204,6 +205,7 @@ func TestBootstrapAppSkipAuthDoesNotPersistAuthState(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("OPENAI_API_KEY", "")
+	registerAppWorkspace(t, workspace)
 
 	interactor := &stubAuthInteractor{
 		interactive:    false,

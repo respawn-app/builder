@@ -1682,6 +1682,7 @@ func TestNativeProgramRendersBackgroundCompletionFromEmbeddedRuntimeWhileIdle(t 
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("OPENAI_API_KEY", "sk-test")
+	registerAppWorkspace(t, workspace)
 
 	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
 	if err != nil {
@@ -1763,6 +1764,7 @@ func TestNativeProgramRendersBackgroundCompletionFromShellManagerWhileIdle(t *te
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("OPENAI_API_KEY", "sk-test")
+	registerAppWorkspace(t, workspace)
 
 	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
 	if err != nil {

@@ -2,6 +2,7 @@ package session
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -83,6 +84,9 @@ func Open(sessionDir string, options ...StoreOption) (*Store, error) {
 		return nil, err
 	}
 	if err := s.bootstrapEventLogStateLocked(); err != nil {
+		return nil, err
+	}
+	if err := s.observePersistenceLocked(); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -450,6 +454,9 @@ func (s *Store) persistMetaLocked() error {
 	if err := os.Rename(tmp, s.sessionFP); err != nil {
 		return fmt.Errorf("replace session meta: %w", err)
 	}
+	if err := s.observePersistenceLocked(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -490,6 +497,18 @@ func (s *Store) ensurePersistedLocked() error {
 	s.writesSinceCompaction = 0
 	s.persisted = true
 	return nil
+}
+
+func (s *Store) observePersistenceLocked() error {
+	if s == nil || !s.persisted || s.options.observer == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.options.observerTimeout)
+	defer cancel()
+	return s.options.observer.ObservePersistedStore(ctx, PersistedStoreSnapshot{
+		SessionDir: s.sessionDir,
+		Meta:       s.meta,
+	})
 }
 
 func normalizeContinuationContext(ctx ContinuationContext) *ContinuationContext {

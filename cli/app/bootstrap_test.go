@@ -77,6 +77,7 @@ func TestBootstrapAppIgnoresOAuthIssuerOverrideEnv(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-test")
 	t.Setenv("HOME", t.TempDir())
 	workspace := t.TempDir()
+	registerAppWorkspace(t, workspace)
 
 	boot, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace}, newHeadlessAuthInteractor())
 	if err != nil {

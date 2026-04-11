@@ -19,6 +19,7 @@ import (
 	"builder/server/auth"
 	"builder/server/authflow"
 	"builder/server/llm"
+	"builder/server/metadata"
 	"builder/server/runtime"
 	"builder/server/serve"
 	"builder/server/session"
@@ -138,6 +139,7 @@ func TestRunPromptWithoutAuthReturnsErrAuthNotConfiguredWithoutReadingStdin(t *t
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 	t.Setenv("OPENAI_API_KEY", "")
 
 	originalStdin := os.Stdin
@@ -162,6 +164,7 @@ func TestRunPromptUsesDiscoveredDaemonWithoutLocalAuth(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"daemon reply"})
 	defer fakeResponses.Close()
@@ -236,6 +239,7 @@ func TestRunPromptRejectsIncompatibleDiscoveredDaemonAndFallsBackToEmbedded(t *t
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
@@ -277,6 +281,7 @@ func TestStartRunPromptClientFallsBackToEmbeddedWhenDaemonLaunchFails(t *testing
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -366,6 +371,7 @@ func TestRunPromptUsesInvocationOverridesWhenAttachingToDiscoveredDaemon(t *test
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 
 	defaultResponses, defaultHits := newFakeResponsesServer(t, []string{"daemon default"})
 	defer defaultResponses.Close()
@@ -451,6 +457,7 @@ func TestTryDialMatchingDiscoveredRemoteSkipsRecordThatDoesNotMatchSpawnedPID(t 
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 
 	cfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {
@@ -464,12 +471,12 @@ func TestTryDialMatchingDiscoveredRemoteSkipsRecordThatDoesNotMatchSpawnedPID(t 
 	if err != nil {
 		t.Fatalf("PathForContainer: %v", err)
 	}
-	projectID, err := config.ProjectIDForWorkspaceRoot(cfg.WorkspaceRoot)
+	binding, err := metadata.ResolveBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot)
 	if err != nil {
-		t.Fatalf("ProjectIDForWorkspaceRoot: %v", err)
+		t.Fatalf("ResolveBinding: %v", err)
 	}
 	if err := discovery.Write(discoveryPath, protocol.DiscoveryRecord{
-		Identity: protocol.ServerIdentity{ProjectID: projectID, PID: 111, Capabilities: protocol.CapabilityFlags{RunPrompt: true}},
+		Identity: protocol.ServerIdentity{ProjectID: binding.ProjectID, PID: 111, Capabilities: protocol.CapabilityFlags{RunPrompt: true}},
 		RPCURL:   "ws://127.0.0.1:1/rpc",
 	}); err != nil {
 		t.Fatalf("discovery.Write: %v", err)
@@ -497,6 +504,7 @@ func TestRunPromptCreatesSessionAndPersistsDurableTranscript(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -587,6 +595,7 @@ func TestHeadlessRunPromptClientResumesExistingSessionByID(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server, hits := newFakeResponsesServer(t, []string{"first response", "second response"})
@@ -656,6 +665,7 @@ func TestHeadlessRunPromptClientRestoresContinuationContextFromSelectedSession(t
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	server, hits := newFakeResponsesServer(t, []string{"created via explicit base url", "resumed via continuation"})
@@ -712,6 +722,7 @@ func TestHeadlessRunPromptClientDeduplicatesDuplicateClientRequestID(t *testing.
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	registerAppWorkspace(t, workspace)
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	secondRelease := make(chan struct{})

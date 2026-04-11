@@ -47,11 +47,15 @@ func ResolveWorkspaceContainer(cfg App) (string, string, error) {
 }
 
 func ProjectIDForWorkspaceRoot(workspaceRoot string) (string, error) {
-	canonicalRoot, err := canonicalWorkspaceRoot(workspaceRoot)
+	canonicalRoot, err := CanonicalWorkspaceRoot(workspaceRoot)
 	if err != nil {
 		return "", err
 	}
 	return deterministicProjectID(canonicalRoot), nil
+}
+
+func CanonicalWorkspaceRoot(workspaceRoot string) (string, error) {
+	return canonicalWorkspaceRoot(workspaceRoot)
 }
 
 func canonicalWorkspaceRoot(workspaceRoot string) (string, error) {

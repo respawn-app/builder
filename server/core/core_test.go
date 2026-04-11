@@ -6,6 +6,7 @@ import (
 
 	"builder/server/auth"
 	serverbootstrap "builder/server/bootstrap"
+	"builder/server/metadata"
 	"builder/shared/serverapi"
 )
 
@@ -17,6 +18,9 @@ func TestNewBuildsReusableServerCore(t *testing.T) {
 	resolved, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspace})
 	if err != nil {
 		t.Fatalf("ResolveConfig: %v", err)
+	}
+	if _, err := metadata.RegisterBinding(context.Background(), resolved.Config.PersistenceRoot, resolved.Config.WorkspaceRoot); err != nil {
+		t.Fatalf("RegisterBinding: %v", err)
 	}
 	authSupport, err := serverbootstrap.BuildAuthSupport(auth.NewMemoryStore(auth.EmptyState()), nil, nil)
 	if err != nil {

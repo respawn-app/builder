@@ -16,6 +16,7 @@ import (
 	"builder/server/runtime"
 	"builder/server/runtimeview"
 	"builder/server/runtimewire"
+	"builder/server/session"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
@@ -27,6 +28,7 @@ import (
 type HeadlessBootstrap struct {
 	Config          config.App
 	ContainerDir    string
+	StoreOptions    []session.StoreOption
 	AuthManager     *auth.Manager
 	FastModeState   *runtime.FastModeState
 	Background      *shelltool.Manager
@@ -75,7 +77,7 @@ type headlessPromptLauncher struct {
 }
 
 func (l *headlessPromptLauncher) PrepareHeadlessPrompt(_ context.Context, req serverapi.RunPromptRequest, progress serverapi.RunPromptProgressSink) (serverapi.PromptSessionRuntime, error) {
-	planner := launch.Planner{Config: l.boot.Config, ContainerDir: l.boot.ContainerDir}
+	planner := launch.Planner{Config: l.boot.Config, ContainerDir: l.boot.ContainerDir, StoreOptions: l.boot.StoreOptions}
 	plan, err := planner.PlanSession(launch.SessionRequest{Mode: launch.ModeHeadless, SelectedSessionID: req.SelectedSessionID})
 	if err != nil {
 		return nil, err

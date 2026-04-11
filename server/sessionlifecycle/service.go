@@ -16,14 +16,15 @@ type Service struct {
 	containerDir string
 	stores       sessionStoreResolver
 	authManager  *auth.Manager
+	storeOptions []session.StoreOption
 }
 
 type sessionStoreResolver interface {
 	ResolveStore(ctx context.Context, sessionID string) (*session.Store, error)
 }
 
-func NewService(containerDir string, stores sessionStoreResolver, authManager *auth.Manager) *Service {
-	return &Service{containerDir: strings.TrimSpace(containerDir), stores: stores, authManager: authManager}
+func NewService(containerDir string, stores sessionStoreResolver, authManager *auth.Manager, storeOptions ...session.StoreOption) *Service {
+	return &Service{containerDir: strings.TrimSpace(containerDir), stores: stores, authManager: authManager, storeOptions: append([]session.StoreOption(nil), storeOptions...)}
 }
 
 func (s *Service) GetInitialInput(_ context.Context, req serverapi.SessionInitialInputRequest) (serverapi.SessionInitialInputResponse, error) {
@@ -125,5 +126,5 @@ func (s *Service) openStore(sessionID string) (*session.Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return session.Open(sessionDir)
+	return session.Open(sessionDir, s.storeOptions...)
 }
