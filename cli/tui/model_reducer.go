@@ -219,7 +219,6 @@ func (m *Model) reduceSetConversationMsg(msg SetConversationMsg, result *modelUp
 	copy(entries, msg.Entries)
 	for i := range entries {
 		entries[i].Visibility = transcript.NormalizeEntryVisibility(entries[i].Visibility)
-		entries[i].Transient = entries[i].Transient
 		entries[i].ToolCallID = strings.TrimSpace(entries[i].ToolCallID)
 		entries[i].ToolCall = cloneToolCallMeta(entries[i].ToolCall)
 	}
