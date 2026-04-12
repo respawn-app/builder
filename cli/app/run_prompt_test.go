@@ -459,6 +459,39 @@ func TestTryDialMatchingConfiguredRemoteSkipsUnregisteredWorkspace(t *testing.T)
 	}
 }
 
+func TestStartLocalRunPromptDaemonSkipsUnregisteredWorkspaceWithoutSpawning(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configureAppTestServerPort(t)
+
+	originalResolve := resolveDaemonExecutablePath
+	t.Cleanup(func() { resolveDaemonExecutablePath = originalResolve })
+
+	lookupCalls := 0
+	resolveDaemonExecutablePath = func() (string, bool) {
+		lookupCalls++
+		return "/bin/false", true
+	}
+
+	remote, closeFn, ok, err := startLocalRunPromptDaemon(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true})
+	if err != nil {
+		t.Fatalf("startLocalRunPromptDaemon: %v", err)
+	}
+	if ok {
+		t.Fatal("expected no daemon launch for unregistered workspace")
+	}
+	if remote != nil {
+		t.Fatalf("expected no remote client, got %v", remote)
+	}
+	if closeFn != nil {
+		t.Fatal("expected no close function when launch is skipped")
+	}
+	if lookupCalls != 0 {
+		t.Fatalf("expected daemon executable lookup to be skipped, got %d calls", lookupCalls)
+	}
+}
+
 func TestRunPromptCreatesSessionAndPersistsDurableTranscript(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
