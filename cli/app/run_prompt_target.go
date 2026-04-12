@@ -121,6 +121,13 @@ func resolveCLIWorkspaceRoot(opts Options) (string, error) {
 }
 
 func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remote, func() error, bool, error) {
+	_, projectID, err := loadRemoteAttachConfig(ctx, opts)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if strings.TrimSpace(projectID) == "" {
+		return nil, nil, false, nil
+	}
 	execPath, ok := resolveDaemonExecutablePath()
 	if !ok {
 		return nil, nil, false, nil
