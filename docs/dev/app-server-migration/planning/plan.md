@@ -182,14 +182,14 @@ Goal:
 
 Lock the hybrid persistence architecture and introduce the new metadata authority without mixing it with reconnect hardening or broad multi-client proof work.
 
-This phase establishes the new durable model, the SQLite metadata store, and the server-global discovery identity that later phases depend on.
+This phase establishes the new durable model, the SQLite metadata store, and the app-global daemon topology that later phases depend on.
 
 Deliverables:
 
 - hybrid persistence spec and source-of-truth split locked
 - SQLite selected as authoritative store for structured metadata/resources
 - SQL-first storage tooling direction locked (`sqlc` + explicit SQL migrations)
-- server identity/discovery no longer implies one workspace/project scope
+- server identity and direct attach topology no longer imply one workspace/project scope
 - top-level durable model finalized as `project > workspace > worktree`
 - workspace-first CLI startup and registration flow locked as the initial UX
 - session execution target model finalized as `(workspace_id, worktree_id?, cwd_relpath)`
@@ -208,7 +208,7 @@ Rollback point:
 Status:
 
 - Phase 4A-4C storage/model work is largely landed in the current branch.
-- The remaining unfinished Phase 4 work is topology/discovery cutover: the daemon is still workspace-scoped in discovery, handshake identity, and attach/startup resolution paths.
+- The remaining unfinished Phase 4 work is topology/attach cutover: the daemon is still workspace-scoped in handshake identity and attach/startup resolution paths, and the old discovery-file direction has now been rejected.
 - That remaining slice is now tracked explicitly as Phase 4D and should execute before Phase 6.
 
 ## Phase 4A: SQLite Metadata Introduction
@@ -287,11 +287,11 @@ Rollback point:
 
 - keep transcript correctness recoverable through hydrate-plus-resubscribe even if execution-target UX is still incomplete
 
-## Phase 4D: App-Global Discovery And Multi-Project Daemon Cutover
+## Phase 4D: App-Global Direct Attach And Multi-Project Daemon Cutover
 
 Goal:
 
-Finish the topology cutover that Phase 4 always intended: one compatible local daemon is discovered app-globally first, then project/workspace context is resolved over server-owned queries and attachments.
+Finish the topology cutover that Phase 4 always intended: client and daemon connect over the explicitly configured server address first, then project/workspace context is resolved over server-owned queries and attachments.
 
 This phase does not redesign persistence again. It closes the remaining workspace-scoped daemon assumptions above the already-landed metadata model.
 
@@ -299,13 +299,14 @@ Detailed implementation planning for this slice lives in `phase-4d-plan.md`.
 
 Deliverables:
 
-- discovery record becomes app-global rather than workspace-container scoped
+- persisted daemon-discovery artifacts are removed from the target architecture; client attach uses configured `server_host` + `server_port` directly
 - `protocol.ServerIdentity` stops implying one hosted `project_id` / `workspace_root`; it describes the server process and capabilities only
 - server core composition stops binding itself to a single workspace/project during startup
 - one daemon can host multiple registered projects and accept `project.attach` for any hosted project
-- CLI attach-or-start discovers one compatible daemon first, then resolves cwd/project/workspace context over server-owned path-resolution and registration queries
-- unknown-cwd startup and registration flow work against the remote/loopback server boundary rather than local workspace-bound discovery heuristics
-- serve/transport/startup tests prove one daemon can be discovered and used from multiple workspace roots
+- CLI attach-or-start dials the configured daemon address first, then resolves cwd/project/workspace context over server-owned path-resolution and registration queries
+- unknown-cwd startup and registration flow work against the remote/loopback server boundary rather than local workspace-bound heuristics or persisted discovery files
+- serve/transport/startup tests prove one configured daemon can be used from multiple workspace roots under one persistence root
+- topology cutover is hard: no migration script or bridge mode for the old workspace-scoped discovery-file model
 
 Primary risks:
 
@@ -315,9 +316,9 @@ Primary risks:
 
 Rollback point:
 
-- keep the already-landed Phase 4A-4C metadata model intact while replacing daemon discovery/attach paths incrementally
+- keep the already-landed Phase 4A-4C metadata model intact while replacing daemon attach/startup paths incrementally
 
-Storage migration scope ends at Phase 4C; topology/discovery cutover completes in Phase 4D.
+Storage migration scope ends at Phase 4C; topology/direct-attach cutover completes in Phase 4D.
 
 The remaining phases are post-storage hardening and proof work.
 
@@ -506,7 +507,7 @@ Must remain sequential at the high level:
 4. real transport
 5. storage design and metadata foundation
 6. staged migration and execution-target cutover
-7. app-global discovery and multi-project daemon cutover
+7. app-global direct attach and multi-project daemon cutover
 8. transcript semantics alignment
 9. transcript root-cause elimination
 10. standalone proof
@@ -533,7 +534,7 @@ Can be parallelized once phase 1 exists:
 - Phase 4A exit gate: SQLite metadata plane exists behind the storage boundary and the server-global workspace/project model is queryable.
 - Phase 4B exit gate: one-time staged migration succeeds and `session.json` no longer exists in migrated sessions.
 - Phase 4C exit gate: session execution targets and runtime leases use the new metadata authority correctly.
-- Phase 4D exit gate: daemon discovery and handshake identity are app-global; one daemon can host multiple projects; CLI startup discovers the daemon first and resolves cwd/project context over server-owned queries instead of workspace-scoped discovery heuristics.
+- Phase 4D exit gate: direct attach uses configured `server_host` + `server_port`; handshake identity is process-scoped; one daemon can host multiple projects; CLI startup dials the configured daemon first and resolves cwd/project context over server-owned queries instead of workspace-scoped discovery heuristics or persisted discovery files.
 - Phase 5A exit gate: ongoing/detail/reconnect share one committed-transcript authority model; ongoing scrollback is committed-only; stream drops invalidate transient live state and recover via committed hydration plus resubscribe; transcript-affecting failures are not swallowed. Status: satisfied.
 - Phase 5B exit gate: reconnect, approval races, slow-subscriber failure modes, and the single-authority committed-transcript model are covered under realtime multi-client attachment. Status: satisfied.
 - Phase 6A exit gate: code/docs/tests no longer describe compaction as same-session transcript rewrite or rollback/fork as same-session mutation; external continuity-loss recovery is the only accepted TUI re-issue path.

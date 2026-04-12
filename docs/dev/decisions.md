@@ -99,7 +99,9 @@
 - The server-driven migration target uses hybrid persistence: SQLite is authoritative for structured metadata and server-owned resources; large append-only session artifacts stay file-backed.
 - The durable domain model is `project > workspace > worktree`; legacy workspace-scoped containers are migration input, not future protocol identity.
 - Sessions remain project-scoped durable objects and carry a mutable current execution target `(workspace_id, worktree_id?, cwd_relpath)`.
-- The Phase 4 topology target is one app-global daemon per persistence root. Discovery is app-global, handshake identity is process-scoped rather than project/workspace-scoped, and one daemon may host multiple projects under that persistence root.
+- The Phase 4 topology target is one app-global daemon per persistence root. Clients and daemon converge on the same configured `server_host` and `server_port`, connect directly to that address, and use handshake only for compatibility. Handshake identity is process-scoped rather than project/workspace-scoped, and one daemon may host multiple projects under that persistence root.
+- The app-global daemon listen configuration is explicit and user-configurable via separate `server_host` and `server_port` settings. Builder uses a fixed built-in default port in the private/dynamic range, binds exactly that configured address, and fails startup if the port is occupied; it must not silently rebind, fall back, or use `:0` ephemeral assignment.
+- The Phase 4 topology cutover is hard. No discovery-file migration, bridge mode, or compatibility script is maintained for the old workspace-scoped daemon-discovery model.
 - For the migration's runtime-residency model, lease identity is explicit and distinct from `client_request_id`; reconnect rehydrates, reattaches, and acquires a fresh lease rather than reclaiming an abandoned one.
 - Post-migration, `session.json` is removed. Session metadata authority moves to SQLite. `events.jsonl` and `steps.log` remain file-backed for now.
 - Interactive session creation remains lazily durable; creating a new interactive session does not immediately force durable metadata writes.

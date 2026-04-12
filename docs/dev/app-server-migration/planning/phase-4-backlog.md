@@ -15,8 +15,8 @@ This file is intentionally narrower than `plan.md`.
 ## Current Status
 
 - Workstreams centered on SQLite metadata, staged migration, session metadata cutover, execution-target metadata, and `lease_id` runtime activation are largely landed.
-- The remaining unfinished Phase 4 work is topology/discovery cutover: the daemon is still discovered and identified as workspace-scoped in key startup, serve, and transport paths.
-- Phase 4D is therefore the next execution slice. It should not redo 4A-4C storage work; it should finish the app-global daemon model on top of the landed metadata authority.
+- The remaining unfinished Phase 4 work is topology/direct-attach cutover: the daemon is still effectively workspace-scoped in key startup, serve, and transport paths, and the old persisted-discovery direction has been rejected.
+- Phase 4D is therefore the next execution slice. It should not redo 4A-4C storage work; it should finish the app-global daemon model on top of the landed metadata authority with direct configured-address attach.
 
 ## Phase 4D Remaining Slice
 
@@ -24,16 +24,17 @@ Detailed implementation planning for this slice lives in `phase-4d-plan.md`.
 
 This is the minimum sequence the next implementation turn should be able to start from directly.
 
-1. Replace workspace-container discovery with one app-global discovery record.
+1. Remove persisted discovery from the target topology and switch attach/bootstrap to direct configured-address dial (`server_host` + `server_port`).
 2. Narrow `shared/protocol.ServerIdentity` so handshake identity describes the server process and capabilities, not one hosted project/workspace.
 3. Refactor server composition so `server/core` is app-global over metadata and can host multiple projects instead of binding startup to one workspace root / one `project_id`.
 4. Remove transport restrictions that only allow `project.attach` for one pre-bound project.
-5. Add or finish server-owned cwd/path-resolution and registration queries for CLI startup against an already-discovered daemon.
+5. Add or finish server-owned cwd/path-resolution and registration queries for CLI startup against the configured daemon address.
 6. Switch CLI attach-or-start logic to:
-   - discover one compatible daemon first
+   - dial the configured daemon first
    - then resolve cwd/project/workspace context over RPC
    - then run explicit registration/attach flow if cwd is unknown
-7. Rework serve/discovery/startup tests to prove one daemon can be discovered and used from multiple workspace roots.
+7. Rework serve/startup tests to prove one configured daemon can be used from multiple workspace roots.
+8. Make the topology cutover hard: no migration script or bridge mode for the old workspace-scoped discovery-file model.
 
 ## Historical 4A-4C Checklist
 
@@ -66,28 +67,26 @@ This checklist is kept for migration history. Most of this work is already lande
 - Runtime leases are explicit server-side identities; reconnect rehydrates, reattaches, and acquires a fresh lease.
 - `session.json` is removed after successful migration; SQLite becomes authoritative for session metadata.
 
-## Workstream 1: Global Server Identity And Discovery
+## Workstream 1: Global Server Identity And Direct Attach
 
 Goal:
 
-Replace workspace-scoped discovery/identity with app-global server identity.
+Replace workspace-scoped discovery/identity with app-global server identity and direct configured-address attach.
 
 First concrete surfaces:
 
 - `shared/protocol.ServerIdentity`
   - stop implying one `project_id` / `workspace_root` per server
   - expose server-process identity and capabilities only
-- discovery record shape
-  - move from workspace-owned discovery assumptions to app-global discovery
 - CLI attach-or-start resolution
-  - discover one compatible local server process first
+  - dial the configured local server address first
   - only after attach should cwd/path resolution decide project or workspace context
 
 Acceptance slice:
 
-- one server can be discovered from two different workspace roots
+- one server can be dialed from two different workspace roots under the same persistence root
 - handshake no longer claims one workspace/project scope
-- existing discovery, handshake, and attach tests are updated to stop asserting one `project_id` / `workspace_root` per server
+- existing handshake and attach tests are updated to stop asserting one `project_id` / `workspace_root` per server or any persisted discovery artifact
 
 ## Workstream 2: Project / Workspace / Worktree Registry
 
@@ -179,7 +178,7 @@ Out of scope for Phase 4 CLI:
 
 4D note:
 
-- this flow must execute against an already-discovered daemon through server-owned queries; local workspace-bound discovery heuristics are the remaining bug here
+- this flow must execute against the configured daemon through server-owned queries; local workspace-bound heuristics are the remaining bug here
 
 ## Workstream 5: SQLite Metadata And Session Cutover
 
@@ -255,16 +254,16 @@ Adoption guardrails:
 
 ## Suggested 4D Build Order
 
-1. App-global discovery record and handshake identity
+1. Direct configured-address attach and handshake identity
 2. App-global core composition and multi-project gateway hosting
 3. Server-owned cwd/path-resolution and registration query/mutation surface cleanup
-4. CLI attach-or-start cutover onto daemon-first discovery
-5. Multi-workspace discovery/attach/startup proof tests
+4. CLI attach-or-start cutover onto daemon-first direct dial
+5. Multi-workspace attach/startup proof tests
 
 ## Exit Criteria
 
 - one local server process can host sessions from multiple workspaces/projects
-- discovery record and handshake identity are app-global rather than workspace-bound
+- direct attach uses configured `server_host` + `server_port`, and handshake identity is process-scoped rather than workspace-bound
 - CLI startup remains workspace-first but uses explicit project registration when cwd is unknown
 - session status and hydration expose current workspace/worktree context
 - SQLite is authoritative for structured metadata
