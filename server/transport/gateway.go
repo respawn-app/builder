@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 
 	"builder/server/core"
+	"builder/shared/clientui"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
 	"golang.org/x/net/websocket"
@@ -132,6 +133,7 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 				return protocol.AttachResponse{}, err
 			}
 			state.attachedProject = params.ProjectID
+			state.attachedSession = ""
 			return protocol.AttachResponse{Kind: "project", ProjectID: params.ProjectID}, nil
 		})
 	case protocol.MethodAttachSession:
@@ -347,18 +349,36 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 					return serverapi.ProcessListResponse{}, err
 				}
 			}
-			return g.core.ProcessViewClient().ListProcesses(ctx, params)
+			resp, err := g.core.ProcessViewClient().ListProcesses(ctx, params)
+			if err != nil {
+				return serverapi.ProcessListResponse{}, err
+			}
+			if strings.TrimSpace(params.OwnerSessionID) != "" {
+				return resp, nil
+			}
+			filtered, err := g.filterProcessesForActiveProject(ctx, state, resp.Processes)
+			if err != nil {
+				return serverapi.ProcessListResponse{}, err
+			}
+			resp.Processes = filtered
+			return resp, nil
 		})
 	case protocol.MethodProcessGet:
 		return decodeAndHandle(req, func(params serverapi.ProcessGetRequest) (serverapi.ProcessGetResponse, error) {
-			return g.core.ProcessViewClient().GetProcess(ctx, params)
+			return g.processInActiveProject(ctx, state, params.ProcessID)
 		})
 	case protocol.MethodProcessKill:
 		return decodeAndHandle(req, func(params serverapi.ProcessKillRequest) (serverapi.ProcessKillResponse, error) {
+			if _, err := g.processInActiveProject(ctx, state, params.ProcessID); err != nil {
+				return serverapi.ProcessKillResponse{}, err
+			}
 			return g.core.ProcessControlClient().KillProcess(ctx, params)
 		})
 	case protocol.MethodProcessInlineOutput:
 		return decodeAndHandle(req, func(params serverapi.ProcessInlineOutputRequest) (serverapi.ProcessInlineOutputResponse, error) {
+			if _, err := g.processInActiveProject(ctx, state, params.ProcessID); err != nil {
+				return serverapi.ProcessInlineOutputResponse{}, err
+			}
 			return g.core.ProcessControlClient().GetInlineOutput(ctx, params)
 		})
 	case protocol.MethodAskListPending:
@@ -448,6 +468,39 @@ func (g *Gateway) requireSessionInActiveProject(ctx context.Context, state *conn
 	return g.core.SessionBelongsToProject(ctx, sessionID, projectID)
 }
 
+func (g *Gateway) processInActiveProject(ctx context.Context, state *connectionState, processID string) (serverapi.ProcessGetResponse, error) {
+	resp, err := g.core.ProcessViewClient().GetProcess(ctx, serverapi.ProcessGetRequest{ProcessID: processID})
+	if err != nil {
+		return serverapi.ProcessGetResponse{}, err
+	}
+	if resp.Process == nil {
+		return serverapi.ProcessGetResponse{}, fmt.Errorf("process %q not available", strings.TrimSpace(processID))
+	}
+	ownerSessionID := strings.TrimSpace(resp.Process.OwnerSessionID)
+	if ownerSessionID == "" {
+		return serverapi.ProcessGetResponse{}, fmt.Errorf("process %q not available", strings.TrimSpace(processID))
+	}
+	if err := g.requireSessionInActiveProject(ctx, state, ownerSessionID); err != nil {
+		return serverapi.ProcessGetResponse{}, err
+	}
+	return resp, nil
+}
+
+func (g *Gateway) filterProcessesForActiveProject(ctx context.Context, state *connectionState, processes []clientui.BackgroundProcess) ([]clientui.BackgroundProcess, error) {
+	filtered := make([]clientui.BackgroundProcess, 0, len(processes))
+	for _, process := range processes {
+		ownerSessionID := strings.TrimSpace(process.OwnerSessionID)
+		if ownerSessionID == "" {
+			continue
+		}
+		if err := g.requireSessionInActiveProject(ctx, state, ownerSessionID); err != nil {
+			continue
+		}
+		filtered = append(filtered, process)
+	}
+	return filtered, nil
+}
+
 func (g *Gateway) serveSubscription(ws *websocket.Conn, ctx context.Context, state *connectionState, req protocol.Request) {
 	if err := req.Validate(); err != nil {
 		_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidRequest, err.Error()))
@@ -499,6 +552,10 @@ func (g *Gateway) serveSubscription(ws *websocket.Conn, ctx context.Context, sta
 		}
 		if err := params.Validate(); err != nil {
 			_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, err.Error()))
+			return
+		}
+		if _, err := g.processInActiveProject(ctx, state, params.ProcessID); err != nil {
+			_ = websocket.JSON.Send(ws, responseForError(req.ID, err))
 			return
 		}
 		sub, err := g.core.ProcessOutputClient().SubscribeProcessOutput(ctx, params)
