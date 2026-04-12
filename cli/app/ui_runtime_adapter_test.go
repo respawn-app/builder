@@ -2479,6 +2479,140 @@ func TestProjectedUserMessageFlushedDoesNotClobberLaterAssistantDelta(t *testing
 	}
 }
 
+func TestProjectedTransientToolAndFinalEventsDoNotScheduleTranscriptRefresh(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "seed"}}
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	callMeta := transcript.ToolCallMeta{ToolName: "shell", Command: "pwd", CompactText: "pwd", IsShell: true}
+	events := []clientui.Event{
+		{
+			Kind:        clientui.EventUserMessageFlushed,
+			StepID:      "step-1",
+			UserMessage: "say hi",
+			TranscriptEntries: []clientui.ChatEntry{{
+				Role: "user",
+				Text: "say hi",
+			}},
+		},
+		{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "working"},
+		{
+			Kind:   clientui.EventToolCallStarted,
+			StepID: "step-1",
+			TranscriptEntries: []clientui.ChatEntry{{
+				Role:       "tool_call",
+				Text:       "pwd",
+				ToolCallID: "call-1",
+				ToolCall:   transcriptToolCallMetaClient(&callMeta),
+			}},
+		},
+		{
+			Kind:   clientui.EventToolCallCompleted,
+			StepID: "step-1",
+			TranscriptEntries: []clientui.ChatEntry{{
+				Role:       "tool_result_ok",
+				Text:       "$ pwd\n/tmp",
+				ToolCallID: "call-1",
+			}},
+		},
+		{
+			Kind:   clientui.EventAssistantMessage,
+			StepID: "step-1",
+			TranscriptEntries: []clientui.ChatEntry{{
+				Role:  "assistant",
+				Text:  "done",
+				Phase: string(llm.MessagePhaseFinal),
+			}},
+		},
+	}
+
+	for _, evt := range events {
+		msgs := collectCmdMessages(t, m.runtimeAdapter().handleProjectedRuntimeEvent(evt))
+		for _, msg := range msgs {
+			if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+				t.Fatalf("did not expect transient runtime event to trigger transcript hydration, event=%s msgs=%+v", evt.Kind, msgs)
+			}
+		}
+	}
+
+	view := stripANSIPreserve(m.View())
+	if !containsInOrder(view, "say hi", "pwd", "done") {
+		t.Fatalf("expected transient tail to remain visible in ongoing view, got %q", view)
+	}
+}
+
+func TestProjectedConversationUpdatedEntriesAdvanceCommittedTranscriptAndDetailView(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries: []clientui.ChatEntry{{
+			Role: "assistant",
+			Text: "seed",
+		}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	m.forwardToView(tui.SetModeMsg{Mode: tui.ModeDetail, SkipDetailWarmup: true})
+	m.syncViewport()
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                clientui.EventConversationUpdated,
+		StepID:              "step-1",
+		TranscriptRevision:  11,
+		CommittedEntryCount: 2,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:  "assistant",
+			Text:  "committed after",
+			Phase: string(llm.MessagePhaseFinal),
+		}},
+	})
+	msgs := collectCmdMessages(t, cmd)
+	for _, msg := range msgs {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect conversation_updated committed delta to trigger transcript hydration, got %+v", msgs)
+		}
+	}
+
+	if got, want := len(m.transcriptEntries), 2; got != want {
+		t.Fatalf("transcript entry count = %d, want %d", got, want)
+	}
+	if m.transcriptEntries[1].Transient {
+		t.Fatalf("expected conversation_updated entry to be committed, got %+v", m.transcriptEntries[1])
+	}
+	if got := m.transcriptEntries[1].Text; got != "committed after" {
+		t.Fatalf("second transcript entry = %q, want committed after", got)
+	}
+	if got := m.transcriptRevision; got != 11 {
+		t.Fatalf("transcript revision = %d, want 11", got)
+	}
+	if got := m.detailTranscript.totalEntries; got != 2 {
+		t.Fatalf("detail transcript total entries = %d, want 2", got)
+	}
+	if got, want := len(m.detailTranscript.entries), 2; got != want {
+		t.Fatalf("detail transcript entry count = %d, want %d", got, want)
+	}
+	if got := m.detailTranscript.entries[1].Text; got != "committed after" {
+		t.Fatalf("detail transcript tail = %q, want committed after", got)
+	}
+	view := stripANSIAndTrimRight(m.View())
+	if !containsInOrder(view, "seed", "committed after") {
+		t.Fatalf("expected detail view to reflect committed conversation_updated delta, got %q", view)
+	}
+}
+
 func TestProjectedUserMessageFlushedDefersOptimisticAppendWhileAssistantStreamIsLive(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())

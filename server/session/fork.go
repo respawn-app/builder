@@ -40,7 +40,7 @@ func ForkAtUserMessage(parent *Store, userMessageIndex int, forkName string) (*S
 	}
 
 	containerDir := filepath.Dir(parent.Dir())
-	child, err := NewLazy(containerDir, parentMeta.WorkspaceContainer, parentMeta.WorkspaceRoot)
+	child, err := newLazyWithStoreOptions(containerDir, parentMeta.WorkspaceContainer, parentMeta.WorkspaceRoot, parent.options)
 	if err != nil {
 		return nil, err
 	}
@@ -55,6 +55,12 @@ func ForkAtUserMessage(parent *Store, userMessageIndex int, forkName string) (*S
 	child.meta.Continuation = cloneContinuationContext(parentMeta.Continuation)
 	child.mu.Unlock()
 
+	if len(replay) == 0 {
+		if err := child.EnsureDurable(); err != nil {
+			return nil, fmt.Errorf("persist empty fork replay: %w", err)
+		}
+		return child, nil
+	}
 	if _, err := child.AppendReplayEvents(replay); err != nil {
 		return nil, fmt.Errorf("append fork replay events: %w", err)
 	}

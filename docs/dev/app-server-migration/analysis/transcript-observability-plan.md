@@ -20,10 +20,11 @@ Suggested log family:
 
 - `transcript.diag.*`
 
-These diagnostics should be gated behind an explicit debug flag or debug logger path so normal UX is unaffected.
+These diagnostics should be gated behind global debug mode or a dedicated transcript-diagnostics toggle so normal UX is unaffected.
 
 Current enablement:
 
+- `BUILDER_DEBUG=1` or `debug = true` for strict developer-oriented behavior
 - `BUILDER_TRANSCRIPT_DIAGNOSTICS=1`
 - UI tests may also enable it with `WithUITranscriptDiagnostics(true)`
 
@@ -112,10 +113,14 @@ Emit:
 - `transcript.diag.client.hydrate_start`
 - `transcript.diag.client.hydrate_fetch`
 - `transcript.diag.client.hydrate_response`
+- `transcript.diag.client.rebuild_required`
+- `transcript.diag.client.rebuild_start`
+- `transcript.diag.client.rebuild_succeeded`
 
 Purpose:
 
 - distinguish bad read-model data from bad frontend-apply decisions
+- distinguish committed suffix-append recovery from full committed rebuild recovery
 
 ### 4. Frontend apply logic
 
@@ -135,10 +140,13 @@ Emit:
 - `transcript.diag.client.apply_page_start`
 - `transcript.diag.client.apply_page_reject`
 - `transcript.diag.client.apply_page_commit`
+- `transcript.diag.client.append_committed_suffix`
+- `transcript.diag.client.commit_rebuild`
 
 Purpose:
 
 - explain whether visible transcript state changed because of live append, hydrate commit, or hydrate rejection
+- make full rebuild decisions obvious in logs instead of looking like ordinary suffix repair
 
 ## Required Reject Reasons
 

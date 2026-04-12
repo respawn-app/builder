@@ -52,6 +52,9 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if cfg.Settings.PriorityRequestMode {
 		t.Fatalf("expected default priority_request_mode=false")
 	}
+	if cfg.Settings.Debug {
+		t.Fatalf("expected default debug=false")
+	}
 	if cfg.Settings.TUIAlternateScreen != TUIAlternateScreenAuto {
 		t.Fatalf("default tui_alternate_screen mismatch: %q", cfg.Settings.TUIAlternateScreen)
 	}
@@ -128,6 +131,9 @@ func TestLoadUsesDefaultsWithoutCreatingConfigOnFirstUse(t *testing.T) {
 	if !strings.Contains(string(settingsBytes), "# model_verbosity = \"medium\"") {
 		t.Fatalf("expected default config to expose model_verbosity option, got %q", string(settingsBytes))
 	}
+	if !strings.Contains(string(settingsBytes), "# debug = false") {
+		t.Fatalf("expected default config to expose global debug option, got %q", string(settingsBytes))
+	}
 	if !strings.Contains(string(settingsBytes), "# pre_submit_compaction_lead_tokens = 35000") {
 		t.Fatalf("expected default config to expose pre-submit runway default, got %q", string(settingsBytes))
 	}
@@ -161,6 +167,9 @@ func TestSettingsTOMLCommentsDefaultAssignmentsForOnboarding(t *testing.T) {
 	toml := settingsTOML(defaultSettings())
 	if !strings.Contains(toml, "# theme = \"auto\"") {
 		t.Fatalf("expected onboarding config to comment auto theme default, got %q", toml)
+	}
+	if !strings.Contains(toml, "# debug = false") {
+		t.Fatalf("expected onboarding config to comment global debug default, got %q", toml)
 	}
 	for _, want := range []string{
 		"# provider_override = \"\"",
@@ -221,6 +230,16 @@ func TestSettingsTOMLForOnboardingMatchesRequestedShape(t *testing.T) {
 	}
 	if strings.Index(toml, "[tools]") > strings.Index(toml, "[reviewer]") {
 		t.Fatalf("expected tools section before reviewer section, got %q", toml)
+	}
+	if strings.Contains(toml, "debug =") {
+		t.Fatalf("expected onboarding config to omit debug setting, got %q", toml)
+	}
+}
+
+func TestOnboardingDefaultSettingsTOMLOmitsDebugSetting(t *testing.T) {
+	toml := onboardingDefaultSettingsTOML("dark")
+	if strings.Contains(toml, "debug =") {
+		t.Fatalf("expected onboarding default config to omit debug setting, got %q", toml)
 	}
 }
 
@@ -1745,6 +1764,48 @@ func TestLoadAllowNonCwdEditsPrecedence(t *testing.T) {
 	}
 	if got := cfg.Source.Sources["allow_non_cwd_edits"]; got != "env" {
 		t.Fatalf("expected allow_non_cwd_edits source env, got %q", got)
+	}
+}
+
+func TestLoadDebugPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("debug = true\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Settings.Debug {
+		t.Fatalf("expected file debug=true")
+	}
+	if got := cfg.Source.Sources["debug"]; got != "file" {
+		t.Fatalf("expected debug source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_DEBUG", "false")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.Debug {
+		t.Fatalf("expected env debug=false")
+	}
+	if got := cfg.Source.Sources["debug"]; got != "env" {
+		t.Fatalf("expected debug source env, got %q", got)
+	}
+
+	t.Setenv("BUILDER_DEBUG", "broken")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid BUILDER_DEBUG error")
 	}
 }
 

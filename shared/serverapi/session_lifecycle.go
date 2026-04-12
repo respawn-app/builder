@@ -32,8 +32,9 @@ type SessionPersistInputDraftRequest struct {
 type SessionPersistInputDraftResponse struct{}
 
 type SessionResolveTransitionRequest struct {
-	SessionID  string            `json:"session_id,omitempty"`
-	Transition SessionTransition `json:"transition"`
+	ClientRequestID string            `json:"client_request_id"`
+	SessionID       string            `json:"session_id,omitempty"`
+	Transition      SessionTransition `json:"transition"`
 }
 
 type SessionResolveTransitionResponse struct {
@@ -64,6 +65,9 @@ func (r SessionInitialInputRequest) Validate() error {
 }
 
 func (r SessionResolveTransitionRequest) Validate() error {
+	if strings.TrimSpace(r.ClientRequestID) == "" {
+		return errors.New("client_request_id is required")
+	}
 	if strings.TrimSpace(r.SessionID) != "" {
 		if err := validateLifecycleSessionID(r.SessionID); err != nil {
 			return err

@@ -10,6 +10,7 @@ import (
 	serverlifecycle "builder/server/lifecycle"
 	"builder/server/session"
 	"builder/shared/serverapi"
+	"github.com/google/uuid"
 )
 
 func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor authInteractor, initialSessionID string) error {
@@ -139,7 +140,8 @@ func resolveSessionAction(ctx context.Context, server embeddedServer, interactor
 		return resolvedSessionAction{}, errors.New("session lifecycle client is required")
 	}
 	resolved, err := server.SessionLifecycleClient().ResolveTransition(ctx, serverapi.SessionResolveTransitionRequest{
-		SessionID: strings.TrimSpace(sessionID),
+		ClientRequestID: uuid.NewString(),
+		SessionID:       strings.TrimSpace(sessionID),
 		Transition: serverapi.SessionTransition{
 			Action:               string(transition.Action),
 			InitialPrompt:        transition.InitialPrompt,

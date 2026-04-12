@@ -284,6 +284,9 @@ func committedOngoingPrefixEnd(entries []TranscriptEntry) int {
 	consumedResults := make(map[int]struct{})
 	resultIndex := buildToolResultIndex(entries)
 	for idx, entry := range entries {
+		if entry.Transient {
+			return idx
+		}
 		if strings.TrimSpace(entry.Role) != "tool_call" {
 			continue
 		}

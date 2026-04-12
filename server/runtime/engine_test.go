@@ -9720,6 +9720,14 @@ func TestReopenedSessionAfterTriggerHandoffUsesRotatedRequestSessionAndOmitsLing
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append seed message: %v", err)
 	}
+	// Match real startup semantics: the initial runtime session has already injected
+	// AGENTS/environment context before any reopen-and-resume path is exercised.
+	// Without this seed, the first post-reopen SubmitUserMessage legitimately performs
+	// that one-time injection and can trigger an extra compaction turn under this
+	// tiny test window, which makes the test fail for the wrong reason.
+	if err := eng.injectAgentsIfNeeded("seed-meta"); err != nil {
+		t.Fatalf("inject agents: %v", err)
+	}
 	eng.mu.Lock()
 	eng.compactionSoonReminderIssued = true
 	eng.mu.Unlock()

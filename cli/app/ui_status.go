@@ -139,6 +139,7 @@ type uiStatusConfigInfo struct {
 	OverrideSources []string
 	Supervisor      string
 	AutoCompaction  bool
+	Debug           bool
 }
 
 type uiStatusSubscriptionInfo struct {
@@ -229,6 +230,9 @@ type defaultUIStatusCollector struct{}
 func WithUIStatusConfig(statusConfig uiStatusConfig) UIOption {
 	return func(m *uiModel) {
 		m.statusConfig = statusConfig
+		if statusConfig.Settings.Debug {
+			m.debugMode = true
+		}
 		if m.statusCollector == nil {
 			m.statusCollector = defaultUIStatusCollector{}
 		}
@@ -340,6 +344,7 @@ func (defaultUIStatusCollector) CollectBase(req uiStatusRequest) uiStatusSnapsho
 			OverrideSources: statusConfigOverrideSources(req.Source),
 			Supervisor:      statusSupervisorLabel(req.ReviewerEnabled, strings.TrimSpace(req.ReviewerMode)),
 			AutoCompaction:  req.AutoCompactionEnabled,
+			Debug:           req.Settings.Debug,
 		},
 		CompactionCount: compactionCount,
 	}

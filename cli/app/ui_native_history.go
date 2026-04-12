@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 
 	"builder/cli/tui"
@@ -14,10 +15,11 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 	}
 	committedEntries := tui.CommittedOngoingEntries(m.transcriptEntries)
 	if len(committedEntries) == 0 {
+		hasPendingTransientTail := len(tui.PendingOngoingEntries(m.transcriptEntries)) > 0
 		alreadyReplayed := m.nativeHistoryReplayed
 		m.resetNativeHistoryState()
 		m.nativeHistoryReplayed = true
-		if alreadyReplayed || !m.shouldEmitNativeHistory() {
+		if hasPendingTransientTail || alreadyReplayed || !m.shouldEmitNativeHistory() {
 			return nil
 		}
 		return m.emitCurrentNativeScrollbackState(false)
@@ -48,7 +50,7 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 		return nil
 	}
 	if !ok {
-		return m.emitAppendOnlyNativeProjectionRecovery(projection, previousProjection)
+		return m.emitNonContiguousNativeProjectionRecovery(projection, previousProjection)
 	}
 	if strings.TrimSpace(delta) == "" {
 		return nil
@@ -150,7 +152,7 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool) tea.Cmd {
 			return nil
 		}
 		if rewriteRenderedHistory {
-			return m.emitAppendOnlyNativeProjectionRecovery(m.nativeProjection, m.nativeRenderedProjection)
+			return m.emitNonContiguousNativeProjectionRecovery(m.nativeProjection, m.nativeRenderedProjection)
 		}
 		forceFull = true
 	}
@@ -180,29 +182,29 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool) tea.Cmd {
 	return m.emitNativeRenderedText(styled)
 }
 
-func (m *uiModel) emitAppendOnlyNativeProjectionRecovery(current tui.TranscriptProjection, rendered tui.TranscriptProjection) tea.Cmd {
+func (m *uiModel) emitNonContiguousNativeProjectionRecovery(current tui.TranscriptProjection, rendered tui.TranscriptProjection) tea.Cmd {
 	if current.Empty() {
 		return nil
 	}
-	recoveryStart := current.SharedPrefixBlockCount(rendered)
-	if recoveryStart == 0 && !rendered.Empty() {
-		m.nativeRenderedProjection = current
-		m.nativeRenderedSnapshot = current.Render(tui.TranscriptDivider)
-		// With no shared committed prefix, append-only recovery would duplicate the
-		// entire transcript in normal scrollback. Rebase silently here and rely on
-		// future true appends or explicit full-replay entrypoints to refresh.
-		return nil
+	if m.debugMode {
+		panic(fmt.Sprintf("non-contiguous committed transcript recovery requires rebuild: rendered_blocks=%d current_blocks=%d", len(rendered.Blocks), len(current.Blocks)))
 	}
-	styled := renderStyledNativeProjectionLines(current.LinesFromBlock(recoveryStart, tui.TranscriptDivider), m.theme, m.nativeReplayRenderWidth())
-	m.nativeRenderedProjection = current
-	m.nativeRenderedSnapshot = current.Render(tui.TranscriptDivider)
+	m.logf("ui.native_history.rebuild_required rendered_blocks=%d current_blocks=%d", len(rendered.Blocks), len(current.Blocks))
+	return m.emitForcedNativeProjectionReplay(current)
+}
+
+func (m *uiModel) emitForcedNativeProjectionReplay(projection tui.TranscriptProjection) tea.Cmd {
+	rawSnapshot := projection.Render(tui.TranscriptDivider)
+	m.nativeRenderedProjection = projection
+	m.nativeRenderedSnapshot = rawSnapshot
+	if strings.TrimSpace(rawSnapshot) == "" {
+		return tea.ClearScreen
+	}
+	styled := renderStyledNativeProjection(projection, m.theme, m.nativeReplayRenderWidth())
 	if strings.TrimSpace(styled) == "" {
-		return nil
+		return tea.ClearScreen
 	}
-	// Ongoing normal-buffer history must stay append-only. When hydration or a
-	// mode transition rewrites already-rendered committed blocks, append the
-	// authoritative suffix from the first divergent block so later turns resume.
-	return m.emitNativeRenderedText(styled)
+	return tea.Sequence(tea.ClearScreen, m.emitNativeRenderedText(styled))
 }
 
 func nativeRenderedDelta(previous, current string) (string, bool) {

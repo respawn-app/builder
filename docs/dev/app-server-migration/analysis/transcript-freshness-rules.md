@@ -46,6 +46,12 @@ It means the frontend may need an authoritative transcript hydrate.
 
 It does not mean the frontend may clear or replace newer visible live activity first.
 
+If a `conversation_updated` event already carries transcript entries, those entries are part of the committed transcript delta and may advance committed frontend state directly.
+
+Corollary:
+
+- ordinary runtime transcript-bearing events stay transient until a later `conversation_updated` or hydrate establishes committed authority
+
 ## Rule 5: Recovery must invalidate transient live state deliberately, not accidentally
 
 If reconnect or stream-gap recovery requires transient live state to be discarded, that must happen as an explicit recovery decision.

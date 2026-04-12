@@ -164,6 +164,617 @@ func TestStartSessionServerUsesDiscoveredDaemonForInteractiveFlow(t *testing.T) 
 	}
 }
 
+func TestRemoteInteractiveRuntimeTwoClientsConvergeOnSameSessionAcrossWorkspaces(t *testing.T) {
+	fakeResponses, hits := newFakeResponsesServer(t, []string{"shared daemon reply"})
+	defer fakeResponses.Close()
+	fixture := startRemoteMultiClientRuntimeFixture(t, fakeResponses.URL)
+
+	message, err := fixture.runtimePlanA.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "hello from client A")
+	if err != nil {
+		t.Fatalf("SubmitUserMessage A: %v", err)
+	}
+	if message != "shared daemon reply" {
+		t.Fatalf("assistant message = %q, want %q", message, "shared daemon reply")
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("expected one daemon-backed llm call, got %d", hits.Load())
+	}
+
+	assistantEvt := waitForRemoteRuntimeEvent(t, fixture.runtimePlanB.Wiring.runtimeEvents, "assistant message on second client", func(evt clientui.Event) bool {
+		if evt.Kind != clientui.EventAssistantMessage {
+			return false
+		}
+		for _, entry := range evt.TranscriptEntries {
+			if entry.Role == "assistant" && entry.Text == "shared daemon reply" {
+				return true
+			}
+		}
+		return false
+	})
+	if assistantEvt.StepID == "" {
+		t.Fatalf("expected assistant event step id on second client, got %+v", assistantEvt)
+	}
+
+	pageA := waitForRemoteTranscriptPage(t, fixture.serverA.SessionViewClient(), fixture.planA.SessionID, func(page clientui.TranscriptPage) bool {
+		return transcriptPageContainsAssistantText(page, "shared daemon reply")
+	})
+	pageB := waitForRemoteTranscriptPage(t, fixture.serverB.SessionViewClient(), fixture.planA.SessionID, func(page clientui.TranscriptPage) bool {
+		return transcriptPageContainsAssistantText(page, "shared daemon reply")
+	})
+
+	if pageA.Revision != pageB.Revision {
+		t.Fatalf("expected clients to converge on same transcript revision, a=%d b=%d", pageA.Revision, pageB.Revision)
+	}
+	if pageA.TotalEntries != pageB.TotalEntries {
+		t.Fatalf("expected clients to converge on same transcript size, a=%d b=%d", pageA.TotalEntries, pageB.TotalEntries)
+	}
+	if !transcriptPageContainsAssistantText(pageA, "shared daemon reply") || !transcriptPageContainsAssistantText(pageB, "shared daemon reply") {
+		t.Fatalf("expected both clients to hydrate assistant reply, pageA=%+v pageB=%+v", pageA, pageB)
+	}
+}
+
+func TestRemoteInteractiveRuntimeReconnectHydratesCommittedTranscriptAcrossWorkspaces(t *testing.T) {
+	fakeResponses, hits := newFakeResponsesServer(t, []string{"reply while client B disconnected", "reply after client B reconnects"})
+	defer fakeResponses.Close()
+	fixture := startRemoteMultiClientRuntimeFixture(t, fakeResponses.URL)
+
+	fixture.runtimePlanB.Close()
+	fixture.runtimePlanB = nil
+
+	firstMessage, err := fixture.runtimePlanA.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "message while client B is disconnected")
+	if err != nil {
+		t.Fatalf("SubmitUserMessage before reconnect: %v", err)
+	}
+	if firstMessage != "reply while client B disconnected" {
+		t.Fatalf("assistant message before reconnect = %q, want %q", firstMessage, "reply while client B disconnected")
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("expected one daemon-backed llm call before reconnect, got %d", hits.Load())
+	}
+	pageA1 := waitForRemoteTranscriptPage(t, fixture.serverA.SessionViewClient(), fixture.planA.SessionID, func(page clientui.TranscriptPage) bool {
+		return transcriptPageContainsAssistantText(page, "reply while client B disconnected")
+	})
+
+	plannerB := newSessionLaunchPlanner(fixture.serverB)
+	reconnectPlan, err := plannerB.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, SelectedSessionID: fixture.planA.SessionID})
+	if err != nil {
+		t.Fatalf("PlanSession reconnect B: %v", err)
+	}
+	if reconnectPlan.SessionID != fixture.planA.SessionID {
+		t.Fatalf("expected reconnect to attach original session, got %q want %q", reconnectPlan.SessionID, fixture.planA.SessionID)
+	}
+	fixture.runtimePlanB, err = plannerB.PrepareRuntime(context.Background(), reconnectPlan, io.Discard, "test remote multi-client runtime B reconnect")
+	if err != nil {
+		t.Fatalf("PrepareRuntime reconnect B: %v", err)
+	}
+
+	hydratedB, err := fixture.runtimePlanB.Wiring.runtimeClient.RefreshTranscript()
+	if err != nil {
+		t.Fatalf("RefreshTranscript reconnect B: %v", err)
+	}
+	if !transcriptPageContainsAssistantText(hydratedB, "reply while client B disconnected") {
+		t.Fatalf("expected reconnecting client to hydrate missed committed reply, got %+v", hydratedB)
+	}
+	if hydratedB.Revision != pageA1.Revision || hydratedB.TotalEntries != pageA1.TotalEntries {
+		t.Fatalf("expected reconnect hydrate to match authoritative transcript head, hydrated=%+v pageA=%+v", hydratedB, pageA1)
+	}
+
+	secondMessage, err := fixture.runtimePlanA.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "message after client B reconnects")
+	if err != nil {
+		t.Fatalf("SubmitUserMessage after reconnect: %v", err)
+	}
+	if secondMessage != "reply after client B reconnects" {
+		t.Fatalf("assistant message after reconnect = %q, want %q", secondMessage, "reply after client B reconnects")
+	}
+	if hits.Load() != 2 {
+		t.Fatalf("expected two daemon-backed llm calls after reconnect flow, got %d", hits.Load())
+	}
+
+	assistantEvt := waitForRemoteRuntimeEvent(t, fixture.runtimePlanB.Wiring.runtimeEvents, "assistant message after reconnect", func(evt clientui.Event) bool {
+		if evt.Kind != clientui.EventAssistantMessage {
+			return false
+		}
+		for _, entry := range evt.TranscriptEntries {
+			if entry.Role == "assistant" && entry.Text == "reply after client B reconnects" {
+				return true
+			}
+		}
+		return false
+	})
+	if assistantEvt.StepID == "" {
+		t.Fatalf("expected assistant event step id on reconnected client, got %+v", assistantEvt)
+	}
+
+	pageA2 := waitForRemoteTranscriptPage(t, fixture.serverA.SessionViewClient(), fixture.planA.SessionID, func(page clientui.TranscriptPage) bool {
+		return transcriptPageContainsAssistantText(page, "reply after client B reconnects")
+	})
+	pageB2 := waitForRemoteTranscriptPage(t, fixture.serverB.SessionViewClient(), fixture.planA.SessionID, func(page clientui.TranscriptPage) bool {
+		return transcriptPageContainsAssistantText(page, "reply after client B reconnects")
+	})
+	if pageA2.Revision != pageB2.Revision || pageA2.TotalEntries != pageB2.TotalEntries {
+		t.Fatalf("expected both clients to converge after reconnect, a=%+v b=%+v", pageA2, pageB2)
+	}
+}
+
+func TestRemoteInteractiveRuntimeAskRaceFirstWinsAcrossWorkspaces(t *testing.T) {
+	fixture := startRemoteMultiClientRuntimeFixture(t, "")
+
+	askDone := make(chan struct {
+		resp askquestion.Response
+		err  error
+	}, 1)
+	go func() {
+		resp, err := fixture.daemon.AwaitPromptResponse(context.Background(), fixture.planA.SessionID, askquestion.Request{
+			ID:       "ask-race-1",
+			Question: "Who answers first?",
+		})
+		askDone <- struct {
+			resp askquestion.Response
+			err  error
+		}{resp: resp, err: err}
+	}()
+
+	askEvtA := waitForRemoteAskEvent(t, fixture.runtimePlanA.Wiring.askEvents)
+	askEvtB := waitForRemoteAskEvent(t, fixture.runtimePlanB.Wiring.askEvents)
+	for _, evt := range []askEvent{askEvtA, askEvtB} {
+		if evt.req.ID != "ask-race-1" || evt.req.Question != "Who answers first?" || evt.req.Approval {
+			t.Fatalf("unexpected ask event: %+v", evt.req)
+		}
+	}
+
+	results := make(chan promptAnswerResult, 2)
+	go func() {
+		results <- promptAnswerResult{client: "A", err: fixture.serverA.PromptControlClient().AnswerAsk(context.Background(), serverapi.AskAnswerRequest{
+			ClientRequestID: uuid.NewString(),
+			SessionID:       fixture.planA.SessionID,
+			AskID:           "ask-race-1",
+			Answer:          "answer from client A",
+		})}
+	}()
+	go func() {
+		results <- promptAnswerResult{client: "B", err: fixture.serverB.PromptControlClient().AnswerAsk(context.Background(), serverapi.AskAnswerRequest{
+			ClientRequestID: uuid.NewString(),
+			SessionID:       fixture.planA.SessionID,
+			AskID:           "ask-race-1",
+			Answer:          "answer from client B",
+		})}
+	}()
+
+	first := waitForPromptAnswerResult(t, results)
+	second := waitForPromptAnswerResult(t, results)
+	winner, loser := requireExactlyOnePromptWinner(t, first, second)
+
+	select {
+	case result := <-askDone:
+		if result.err != nil {
+			t.Fatalf("AwaitPromptResponse ask race: %v", result.err)
+		}
+		wantAnswer := "answer from client A"
+		if winner.client == "B" {
+			wantAnswer = "answer from client B"
+		}
+		if result.resp.RequestID != "ask-race-1" || result.resp.Answer != wantAnswer {
+			t.Fatalf("unexpected winning ask response: winner=%s resp=%+v", winner.client, result.resp)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for ask race winner")
+	}
+	if !isTerminalPromptAnswerError(loser.err) {
+		t.Fatalf("expected loser to get terminal prompt error, got %v", loser.err)
+	}
+	waitForPendingAskResources(t, fixture.serverA.AskViewClient(), fixture.planA.SessionID, 0)
+	waitForPendingAskResources(t, fixture.serverB.AskViewClient(), fixture.planA.SessionID, 0)
+}
+
+func TestRemoteInteractiveRuntimeApprovalRaceFirstWinsAcrossWorkspaces(t *testing.T) {
+	fixture := startRemoteMultiClientRuntimeFixture(t, "")
+
+	approvalDone := make(chan struct {
+		resp askquestion.Response
+		err  error
+	}, 1)
+	go func() {
+		resp, err := fixture.daemon.AwaitPromptResponse(context.Background(), fixture.planA.SessionID, askquestion.Request{
+			ID:              "approval-race-1",
+			Question:        "Allow the command?",
+			Approval:        true,
+			ApprovalOptions: []askquestion.ApprovalOption{{Decision: askquestion.ApprovalDecisionAllowOnce, Label: "Allow once"}, {Decision: askquestion.ApprovalDecisionDeny, Label: "Deny"}},
+		})
+		approvalDone <- struct {
+			resp askquestion.Response
+			err  error
+		}{resp: resp, err: err}
+	}()
+
+	approvalEvtA := waitForRemoteAskEvent(t, fixture.runtimePlanA.Wiring.askEvents)
+	approvalEvtB := waitForRemoteAskEvent(t, fixture.runtimePlanB.Wiring.askEvents)
+	for _, evt := range []askEvent{approvalEvtA, approvalEvtB} {
+		if evt.req.ID != "approval-race-1" || evt.req.Question != "Allow the command?" || !evt.req.Approval {
+			t.Fatalf("unexpected approval event: %+v", evt.req)
+		}
+	}
+
+	results := make(chan promptAnswerResult, 2)
+	go func() {
+		results <- promptAnswerResult{client: "A", err: fixture.serverA.PromptControlClient().AnswerApproval(context.Background(), serverapi.ApprovalAnswerRequest{
+			ClientRequestID: uuid.NewString(),
+			SessionID:       fixture.planA.SessionID,
+			ApprovalID:      "approval-race-1",
+			Decision:        clientui.ApprovalDecisionAllowOnce,
+			Commentary:      "approved by client A",
+		})}
+	}()
+	go func() {
+		results <- promptAnswerResult{client: "B", err: fixture.serverB.PromptControlClient().AnswerApproval(context.Background(), serverapi.ApprovalAnswerRequest{
+			ClientRequestID: uuid.NewString(),
+			SessionID:       fixture.planA.SessionID,
+			ApprovalID:      "approval-race-1",
+			Decision:        clientui.ApprovalDecisionDeny,
+			Commentary:      "denied by client B",
+		})}
+	}()
+
+	first := waitForPromptAnswerResult(t, results)
+	second := waitForPromptAnswerResult(t, results)
+	winner, loser := requireExactlyOnePromptWinner(t, first, second)
+
+	select {
+	case result := <-approvalDone:
+		if result.err != nil {
+			t.Fatalf("AwaitPromptResponse approval race: %v", result.err)
+		}
+		if result.resp.RequestID != "approval-race-1" || result.resp.Approval == nil {
+			t.Fatalf("unexpected approval race response: %+v", result.resp)
+		}
+		wantDecision := askquestion.ApprovalDecisionAllowOnce
+		wantCommentary := "approved by client A"
+		if winner.client == "B" {
+			wantDecision = askquestion.ApprovalDecisionDeny
+			wantCommentary = "denied by client B"
+		}
+		if result.resp.Approval.Decision != wantDecision || result.resp.Approval.Commentary != wantCommentary {
+			t.Fatalf("unexpected winning approval response: winner=%s resp=%+v", winner.client, result.resp)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for approval race winner")
+	}
+	if !isTerminalPromptAnswerError(loser.err) {
+		t.Fatalf("expected loser to get terminal prompt error, got %v", loser.err)
+	}
+	waitForPendingApprovalResources(t, fixture.serverA.ApprovalViewClient(), fixture.planA.SessionID, 0)
+	waitForPendingApprovalResources(t, fixture.serverB.ApprovalViewClient(), fixture.planA.SessionID, 0)
+}
+
+func TestRemoteInteractiveRuntimeResolveTransitionForkRollbackDeduplicatesAcrossWorkspaces(t *testing.T) {
+	fakeResponses, hits := newFakeResponsesServer(t, []string{"reply before rollback fork"})
+	defer fakeResponses.Close()
+	fixture := startRemoteMultiClientRuntimeFixture(t, fakeResponses.URL)
+
+	projectID := fixture.serverA.ProjectID()
+
+	message, err := fixture.runtimePlanA.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "message before rollback fork")
+	if err != nil {
+		t.Fatalf("SubmitUserMessage: %v", err)
+	}
+	if message != "reply before rollback fork" {
+		t.Fatalf("assistant message = %q, want %q", message, "reply before rollback fork")
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("expected one daemon-backed llm call before rollback fork, got %d", hits.Load())
+	}
+	waitForRemoteTranscriptPage(t, fixture.serverB.SessionViewClient(), fixture.planA.SessionID, func(page clientui.TranscriptPage) bool {
+		return transcriptPageContainsAssistantText(page, "reply before rollback fork")
+	})
+	visibleBeforeA := waitForRemoteProjectSessions(t, fixture.serverA.ProjectViewClient(), projectID, func(sessions []clientui.SessionSummary) bool {
+		return len(sessions) == 1 && sessionSummariesContainID(sessions, fixture.planA.SessionID)
+	})
+	visibleBeforeB := waitForRemoteProjectSessions(t, fixture.serverB.ProjectViewClient(), projectID, func(sessions []clientui.SessionSummary) bool {
+		return len(sessions) == 1 && sessionSummariesContainID(sessions, fixture.planA.SessionID)
+	})
+	if len(visibleBeforeA) != 1 || len(visibleBeforeB) != 1 {
+		t.Fatalf("expected both clients to converge on one visible parent session before fork, a=%+v b=%+v", visibleBeforeA, visibleBeforeB)
+	}
+
+	req := serverapi.SessionResolveTransitionRequest{
+		ClientRequestID: "dedupe-fork-rollback-1",
+		SessionID:       fixture.planA.SessionID,
+		Transition: serverapi.SessionTransition{
+			Action:               "fork_rollback",
+			ForkUserMessageIndex: 1,
+			InitialPrompt:        "edited prompt after rollback",
+		},
+	}
+	first, err := fixture.serverB.SessionLifecycleClient().ResolveTransition(context.Background(), req)
+	if err != nil {
+		t.Fatalf("ResolveTransition first: %v", err)
+	}
+	second, err := fixture.serverB.SessionLifecycleClient().ResolveTransition(context.Background(), req)
+	if err != nil {
+		t.Fatalf("ResolveTransition second: %v", err)
+	}
+	if first != second {
+		t.Fatalf("expected duplicate resolve transition to replay identical response, first=%+v second=%+v", first, second)
+	}
+	if first.NextSessionID == "" || first.NextSessionID == fixture.planA.SessionID {
+		t.Fatalf("expected rollback fork to create a distinct child session, got %+v", first)
+	}
+	if !first.ShouldContinue || first.InitialPrompt != "edited prompt after rollback" {
+		t.Fatalf("unexpected rollback fork response: %+v", first)
+	}
+
+	afterA := waitForRemoteProjectSessions(t, fixture.serverA.ProjectViewClient(), projectID, func(sessions []clientui.SessionSummary) bool {
+		return len(sessions) == 2 && sessionSummariesContainID(sessions, fixture.planA.SessionID) && sessionSummariesContainID(sessions, first.NextSessionID)
+	})
+	afterB := waitForRemoteProjectSessions(t, fixture.serverB.ProjectViewClient(), projectID, func(sessions []clientui.SessionSummary) bool {
+		return len(sessions) == 2 && sessionSummariesContainID(sessions, fixture.planA.SessionID) && sessionSummariesContainID(sessions, first.NextSessionID)
+	})
+	if len(afterA) != 2 || len(afterB) != 2 {
+		t.Fatalf("expected both clients to converge on exactly two sessions after deduped fork, a=%+v b=%+v", afterA, afterB)
+	}
+
+	childViewA, err := fixture.serverA.SessionViewClient().GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: first.NextSessionID})
+	if err != nil {
+		t.Fatalf("GetSessionMainView child A: %v", err)
+	}
+	childViewB, err := fixture.serverB.SessionViewClient().GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: first.NextSessionID})
+	if err != nil {
+		t.Fatalf("GetSessionMainView child B: %v", err)
+	}
+	if childViewA.MainView.Session.SessionID != first.NextSessionID || childViewB.MainView.Session.SessionID != first.NextSessionID {
+		t.Fatalf("expected both clients to open the deduped fork session, childA=%+v childB=%+v", childViewA.MainView.Session, childViewB.MainView.Session)
+	}
+}
+
+func TestRemoteSessionActivitySlowSubscriberGapHydratesAndResubscribesAcrossWorkspaces(t *testing.T) {
+	// One prompt does not emit enough session-activity events to deterministically overflow the
+	// server-side subscription buffer plus the client-side relay buffer. Keep this flood size above
+	// that combined capacity so the test proves a real remote ErrStreamGap instead of timing luck.
+	const floodPromptCount = 320
+	replies := make([]string, 0, floodPromptCount+1)
+	for i := 0; i < floodPromptCount; i++ {
+		replies = append(replies, "flood reply")
+	}
+	replies = append(replies, "reply after gap recovery")
+
+	fakeResponses, hits := newFakeResponsesServer(t, replies)
+	defer fakeResponses.Close()
+	fixture := startRemoteMultiClientRuntimeFixture(t, fakeResponses.URL)
+
+	laggingSub, err := fixture.serverB.SessionActivityClient().SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: fixture.planA.SessionID})
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity lagging client: %v", err)
+	}
+	defer func() { _ = laggingSub.Close() }()
+
+	for i := 0; i < floodPromptCount; i++ {
+		message, err := fixture.runtimePlanA.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "flood the lagging subscriber")
+		if err != nil {
+			t.Fatalf("SubmitUserMessage flood %d: %v", i, err)
+		}
+		if message != "flood reply" {
+			t.Fatalf("assistant message flood %d = %q, want %q", i, message, "flood reply")
+		}
+	}
+	if hits.Load() != floodPromptCount {
+		t.Fatalf("expected %d daemon-backed llm calls during flood, got %d", floodPromptCount, hits.Load())
+	}
+
+	gapErr := waitForSessionActivityGap(t, laggingSub)
+	if !errors.Is(gapErr, serverapi.ErrStreamGap) {
+		t.Fatalf("expected remote slow subscriber to fail with stream gap, got %v", gapErr)
+	}
+
+	pageA := waitForRemoteTranscriptPage(t, fixture.serverA.SessionViewClient(), fixture.planA.SessionID, func(page clientui.TranscriptPage) bool {
+		return page.TotalEntries >= floodPromptCount*2
+	})
+	pageB := waitForRemoteTranscriptPage(t, fixture.serverB.SessionViewClient(), fixture.planA.SessionID, func(page clientui.TranscriptPage) bool {
+		return page.Revision == pageA.Revision && page.TotalEntries == pageA.TotalEntries
+	})
+	if pageA.Revision != pageB.Revision || pageA.TotalEntries != pageB.TotalEntries {
+		t.Fatalf("expected authoritative transcript hydrate to converge after stream gap, a=%+v b=%+v", pageA, pageB)
+	}
+
+	recoveredSub, err := fixture.serverB.SessionActivityClient().SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: fixture.planA.SessionID})
+	if err != nil {
+		t.Fatalf("SubscribeSessionActivity recovered client: %v", err)
+	}
+	defer func() { _ = recoveredSub.Close() }()
+
+	message, err := fixture.runtimePlanA.Wiring.runtimeClient.SubmitUserMessage(context.Background(), "message after lagging subscriber recovers")
+	if err != nil {
+		t.Fatalf("SubmitUserMessage after gap recovery: %v", err)
+	}
+	if message != "reply after gap recovery" {
+		t.Fatalf("assistant message after gap recovery = %q, want %q", message, "reply after gap recovery")
+	}
+	if hits.Load() != floodPromptCount+1 {
+		t.Fatalf("expected %d daemon-backed llm calls after recovery message, got %d", floodPromptCount+1, hits.Load())
+	}
+
+	assistantEvt := waitForSessionActivitySubscriptionEvent(t, recoveredSub, "assistant message after gap recovery", func(evt clientui.Event) bool {
+		if evt.Kind != clientui.EventAssistantMessage {
+			return false
+		}
+		for _, entry := range evt.TranscriptEntries {
+			if entry.Role == "assistant" && entry.Text == "reply after gap recovery" {
+				return true
+			}
+		}
+		return false
+	})
+	if assistantEvt.StepID == "" {
+		t.Fatalf("expected assistant event step id after gap recovery, got %+v", assistantEvt)
+	}
+
+	pageA2 := waitForRemoteTranscriptPage(t, fixture.serverA.SessionViewClient(), fixture.planA.SessionID, func(page clientui.TranscriptPage) bool {
+		return transcriptPageContainsAssistantText(page, "reply after gap recovery")
+	})
+	pageB2 := waitForRemoteTranscriptPage(t, fixture.serverB.SessionViewClient(), fixture.planA.SessionID, func(page clientui.TranscriptPage) bool {
+		return transcriptPageContainsAssistantText(page, "reply after gap recovery")
+	})
+	if pageA2.Revision != pageB2.Revision || pageA2.TotalEntries != pageB2.TotalEntries {
+		t.Fatalf("expected both clients to converge after gap recovery, a=%+v b=%+v", pageA2, pageB2)
+	}
+}
+
+type remoteMultiClientRuntimeFixture struct {
+	daemon       *serve.Server
+	workspaceA   string
+	workspaceB   string
+	serverA      embeddedServer
+	serverB      embeddedServer
+	planA        sessionLaunchPlan
+	planB        sessionLaunchPlan
+	runtimePlanA *runtimeLaunchPlan
+	runtimePlanB *runtimeLaunchPlan
+}
+
+type promptAnswerResult struct {
+	client string
+	err    error
+}
+
+func startRemoteMultiClientRuntimeFixture(t *testing.T, openAIBaseURL string) *remoteMultiClientRuntimeFixture {
+	t.Helper()
+
+	fixture := &remoteMultiClientRuntimeFixture{
+		workspaceA: t.TempDir(),
+		workspaceB: t.TempDir(),
+	}
+	t.Setenv("HOME", t.TempDir())
+	registerAppWorkspace(t, fixture.workspaceA)
+	registerAppWorkspace(t, fixture.workspaceB)
+
+	req := serverstartup.Request{
+		WorkspaceRoot:         fixture.workspaceA,
+		WorkspaceRootExplicit: true,
+		Model:                 "gpt-5",
+	}
+	if strings.TrimSpace(openAIBaseURL) != "" {
+		req.OpenAIBaseURL = openAIBaseURL
+		req.OpenAIBaseURLExplicit = true
+	}
+
+	srv, err := serve.Start(context.Background(), req, memoryAuthHandler{state: auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "test-key"},
+		},
+		UpdatedAt: time.Now().UTC(),
+	}}, autoOnboarding{})
+	if err != nil {
+		t.Fatalf("serve.Start: %v", err)
+	}
+	fixture.daemon = srv
+
+	serveCtx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Serve(serveCtx)
+	}()
+
+	t.Cleanup(func() {
+		if fixture.runtimePlanB != nil {
+			fixture.runtimePlanB.Close()
+		}
+		if fixture.runtimePlanA != nil {
+			fixture.runtimePlanA.Close()
+		}
+		if fixture.serverB != nil {
+			_ = fixture.serverB.Close()
+		}
+		if fixture.serverA != nil {
+			_ = fixture.serverA.Close()
+		}
+		cancel()
+		if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) && serveErr != nil {
+			t.Errorf("Serve error = %v, want context canceled", serveErr)
+		}
+		_ = srv.Close()
+	})
+
+	record := waitForDiscoveryRecordAtPath(t, discoveryPathForWorkspace(t, fixture.workspaceA))
+
+	serverA, err := startSessionServer(context.Background(), Options{WorkspaceRoot: fixture.workspaceA, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("startSessionServer workspace A: %v", err)
+	}
+	fixture.serverA = serverA
+	if _, ok := fixture.serverA.(*remoteAppServer); !ok {
+		t.Fatalf("expected remote app server for workspace A, got %T", fixture.serverA)
+	}
+
+	remoteB, err := client.DialRemote(context.Background(), record)
+	if err != nil {
+		t.Fatalf("DialRemote workspace B: %v", err)
+	}
+	cfgB, err := loadSessionServerConfig(Options{WorkspaceRoot: fixture.workspaceB, WorkspaceRootExplicit: true})
+	if err != nil {
+		t.Fatalf("loadSessionServerConfig workspace B: %v", err)
+	}
+	fixture.serverB = newRemoteAppServer(remoteB, cfgB)
+
+	if got, want := fixture.serverA.ProjectID(), fixture.serverB.ProjectID(); got != want {
+		t.Fatalf("project id mismatch across clients: a=%q b=%q", got, want)
+	}
+	if fixture.serverA.Config().WorkspaceRoot == fixture.serverB.Config().WorkspaceRoot {
+		t.Fatalf("expected distinct workspace roots across clients, both=%q", fixture.serverA.Config().WorkspaceRoot)
+	}
+
+	plannerA := newSessionLaunchPlanner(fixture.serverA)
+	fixture.planA, err = plannerA.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, ForceNewSession: true})
+	if err != nil {
+		t.Fatalf("PlanSession A: %v", err)
+	}
+	fixture.runtimePlanA, err = plannerA.PrepareRuntime(context.Background(), fixture.planA, io.Discard, "test remote multi-client runtime A")
+	if err != nil {
+		t.Fatalf("PrepareRuntime A: %v", err)
+	}
+
+	plannerB := newSessionLaunchPlanner(fixture.serverB)
+	fixture.planB, err = plannerB.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive, SelectedSessionID: fixture.planA.SessionID})
+	if err != nil {
+		t.Fatalf("PlanSession B: %v", err)
+	}
+	if fixture.planB.SessionID != fixture.planA.SessionID {
+		t.Fatalf("expected second client to attach same session, a=%q b=%q", fixture.planA.SessionID, fixture.planB.SessionID)
+	}
+	fixture.runtimePlanB, err = plannerB.PrepareRuntime(context.Background(), fixture.planB, io.Discard, "test remote multi-client runtime B")
+	if err != nil {
+		t.Fatalf("PrepareRuntime B: %v", err)
+	}
+
+	return fixture
+}
+
+func waitForPromptAnswerResult(t *testing.T, results <-chan promptAnswerResult) promptAnswerResult {
+	t.Helper()
+	select {
+	case result := <-results:
+		return result
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for prompt answer result")
+		return promptAnswerResult{}
+	}
+}
+
+func requireExactlyOnePromptWinner(t *testing.T, first promptAnswerResult, second promptAnswerResult) (promptAnswerResult, promptAnswerResult) {
+	t.Helper()
+	if first.err == nil && second.err != nil {
+		return first, second
+	}
+	if second.err == nil && first.err != nil {
+		return second, first
+	}
+	t.Fatalf("expected exactly one prompt answer winner, got first=%+v second=%+v", first, second)
+	return promptAnswerResult{}, promptAnswerResult{}
+}
+
+func isTerminalPromptAnswerError(err error) bool {
+	return errors.Is(err, serverapi.ErrPromptNotFound) || errors.Is(err, serverapi.ErrPromptAlreadyResolved)
+}
+
 func TestShouldBypassRemoteStartupForInteractiveOnboardingOnFirstRun(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -932,7 +1543,8 @@ func TestStartSessionServerUsesDiscoveredDaemonForSessionLifecycleDraftPersisten
 		t.Fatalf("sessionLaunchInitialInputFromServer = %q, want saved draft", got)
 	}
 	resolved, err := server.SessionLifecycleClient().ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
-		SessionID: plan.SessionID,
+		ClientRequestID: uuid.NewString(),
+		SessionID:       plan.SessionID,
 		Transition: serverapi.SessionTransition{
 			Action:          "open_session",
 			TargetSessionID: plan.SessionID,
@@ -1327,6 +1939,112 @@ func waitForRemoteAskEvent(t *testing.T, events <-chan askEvent) askEvent {
 			return askEvent{}
 		}
 	}
+}
+
+func waitForRemoteRuntimeEvent(t *testing.T, events <-chan clientui.Event, description string, predicate func(clientui.Event) bool) clientui.Event {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case evt, ok := <-events:
+			if !ok {
+				t.Fatalf("runtime event channel closed while waiting for %s", description)
+			}
+			if predicate == nil || predicate(evt) {
+				return evt
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for %s", description)
+			return clientui.Event{}
+		}
+	}
+}
+
+func waitForSessionActivitySubscriptionEvent(t *testing.T, sub serverapi.SessionActivitySubscription, description string, predicate func(clientui.Event) bool) clientui.Event {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for {
+		evt, err := sub.Next(ctx)
+		if err != nil {
+			t.Fatalf("session activity subscription failed while waiting for %s: %v", description, err)
+		}
+		if predicate == nil || predicate(evt) {
+			return evt
+		}
+	}
+}
+
+func waitForSessionActivityGap(t *testing.T, sub serverapi.SessionActivitySubscription) error {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for {
+		_, err := sub.Next(ctx)
+		if err != nil {
+			return err
+		}
+	}
+}
+
+func waitForRemoteTranscriptPage(t *testing.T, views client.SessionViewClient, sessionID string, predicate func(clientui.TranscriptPage) bool) clientui.TranscriptPage {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := views.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: sessionID})
+		if err != nil {
+			t.Fatalf("GetSessionTranscriptPage: %v", err)
+		}
+		if predicate == nil || predicate(resp.Transcript) {
+			return resp.Transcript
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	resp, err := views.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{SessionID: sessionID})
+	if err != nil {
+		t.Fatalf("GetSessionTranscriptPage final: %v", err)
+	}
+	t.Fatalf("timed out waiting for transcript page match for session %s: %+v", sessionID, resp.Transcript)
+	return clientui.TranscriptPage{}
+}
+
+func waitForRemoteProjectSessions(t *testing.T, views client.ProjectViewClient, projectID string, predicate func([]clientui.SessionSummary) bool) []clientui.SessionSummary {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := views.ListSessionsByProject(context.Background(), serverapi.SessionListByProjectRequest{ProjectID: projectID})
+		if err != nil {
+			t.Fatalf("ListSessionsByProject: %v", err)
+		}
+		if predicate == nil || predicate(resp.Sessions) {
+			return resp.Sessions
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	resp, err := views.ListSessionsByProject(context.Background(), serverapi.SessionListByProjectRequest{ProjectID: projectID})
+	if err != nil {
+		t.Fatalf("ListSessionsByProject final: %v", err)
+	}
+	t.Fatalf("timed out waiting for project session list match for project %s: %+v", projectID, resp.Sessions)
+	return nil
+}
+
+func transcriptPageContainsAssistantText(page clientui.TranscriptPage, want string) bool {
+	for _, entry := range page.Entries {
+		if entry.Role == "assistant" && entry.Text == want {
+			return true
+		}
+	}
+	return false
+}
+
+func sessionSummariesContainID(summaries []clientui.SessionSummary, sessionID string) bool {
+	for _, summary := range summaries {
+		if summary.SessionID == sessionID {
+			return true
+		}
+	}
+	return false
 }
 
 func waitForRemoteProcess(t *testing.T, views client.ProcessViewClient, sessionID string, processID string) clientui.BackgroundProcess {
