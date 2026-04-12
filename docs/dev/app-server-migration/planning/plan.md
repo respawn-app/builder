@@ -320,6 +320,8 @@ Rollback point:
 
 Storage migration scope ends at Phase 4C; topology/direct-attach cutover completes in Phase 4D.
 
+Status: Phase 4D exit gate is satisfied on the current branch.
+
 The remaining phases are post-storage hardening and proof work.
 
 ## Phase 5: Multi-Client Correctness And Reconnect Hardening
@@ -330,7 +332,7 @@ With the storage migration complete, harden transcript correctness, reconnect be
 
 This phase is intentionally split. The first subphase locks the frontend/server transcript architecture and failure semantics so ongoing mode cannot keep regressing under reconnect or stream gaps. The second subphase proves that architecture under true multi-client realtime operation.
 
-Status: both Phase 5A and Phase 5B exit gates are satisfied in the current branch. Phase 4D remains the next migration step before Phase 6 implementation.
+Status: Phase 4D, Phase 5A, and Phase 5B exit gates are satisfied in the current branch. Phase 6 is the next implementation phase.
 
 ## Phase 5A: Transcript Authority, Recovery, And Failure Semantics
 

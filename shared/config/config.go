@@ -1,9 +1,11 @@
 package config
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"builder/server/tools"
+	"builder/shared/protocol"
 )
 
 const (
@@ -71,6 +73,8 @@ type Settings struct {
 	ToolPreambles                    bool
 	PriorityRequestMode              bool
 	Debug                            bool
+	ServerHost                       string
+	ServerPort                       int
 	WebSearch                        string
 	ProviderOverride                 string
 	OpenAIBaseURL                    string
@@ -181,4 +185,16 @@ func MigrationBackupsRoot(cfg App) string {
 
 func MigrationsRoot(cfg App) string {
 	return filepath.Join(cfg.PersistenceRoot, "migrations")
+}
+
+func ServerListenAddress(cfg App) string {
+	return fmt.Sprintf("%s:%d", cfg.Settings.ServerHost, cfg.Settings.ServerPort)
+}
+
+func ServerRPCURL(cfg App) string {
+	return "ws://" + ServerListenAddress(cfg) + protocol.RPCPath
+}
+
+func ServerHTTPBaseURL(cfg App) string {
+	return "http://" + ServerListenAddress(cfg)
 }

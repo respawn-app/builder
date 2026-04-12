@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"builder/server/approvalview"
 	"builder/server/askview"
@@ -83,16 +84,10 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		_ = metadataStore.Close()
 		return nil, fmt.Errorf("background manager is required")
 	}
-	binding, err := metadataStore.EnsureWorkspaceBinding(context.Background(), cfg.WorkspaceRoot)
-	if err != nil {
-		_ = metadataStore.Close()
-		return nil, err
-	}
-	projectSessionDir := config.ProjectSessionsRoot(cfg, binding.ProjectID)
 	storeOptions := metadataStore.AuthoritativeSessionStoreOptions()
 	runtimeRegistry := registry.NewRuntimeRegistry()
 	sessionStoreRegistry := registry.NewSessionStoreRegistry()
-	projectService, err := projectview.NewMetadataService(metadataStore, binding.ProjectID, containerDir)
+	projectService, err := projectview.NewMetadataService(metadataStore, "", "")
 	if err != nil {
 		_ = metadataStore.Close()
 		return nil, err
@@ -105,12 +100,8 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	promptActivityService := promptactivity.NewService(runtimeRegistry)
 	runtimeControlService := runtimecontrol.NewService(runtimeRegistry, runtimeRegistry)
 	projectViews := client.NewLoopbackProjectViewClient(projectService)
-	sessionViewService := sessionview.NewService(registry.NewPersistenceSessionResolver(projectSessionDir, storeOptions...), runtimeRegistry, metadataStore)
-	sessionLaunchService := sessionlaunch.NewDeduplicatingService(
-		sessionlaunch.ScopeID(cfg, projectSessionDir),
-		sessionlaunch.NewService(launch.Planner{Config: cfg, ContainerDir: projectSessionDir, ProjectID: binding.ProjectID, ProjectViews: projectViews, StoreOptions: storeOptions}, sessionStoreRegistry),
-	)
-	sessionLifecycleService := sessionlifecycle.NewService(projectSessionDir, sessionStoreRegistry, authSupport.AuthManager, storeOptions...)
+	sessionViewService := sessionview.NewService(registry.NewGlobalPersistenceSessionResolver(cfg.PersistenceRoot, storeOptions...), runtimeRegistry, metadataStore)
+	sessionLifecycleService := sessionlifecycle.NewGlobalService(cfg.PersistenceRoot, sessionStoreRegistry, authSupport.AuthManager, storeOptions...)
 	sessionRuntimeService := sessionruntime.NewService(cfg.PersistenceRoot, metadataStore, authSupport.AuthManager, runtimeSupport.FastModeState, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, sessionStoreRegistry, storeOptions...)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
 	core := &Core{
@@ -123,7 +114,6 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		metadataStore:    metadataStore,
 		runtimeRegistry:  runtimeRegistry,
 		sessionStores:    sessionStoreRegistry,
-		projectID:        projectService.ProjectID(),
 		projectViews:     projectViews,
 		askViews:         client.NewLoopbackAskViewClient(askService),
 		approvalViews:    client.NewLoopbackApprovalViewClient(approvalService),
@@ -133,23 +123,99 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		promptControl:    client.NewLoopbackPromptControlClient(promptControlService),
 		promptActivity:   client.NewLoopbackPromptActivityClient(promptActivityService),
 		runtimeControls:  client.NewLoopbackRuntimeControlClient(runtimeControlService),
-		sessionLaunch:    client.NewLoopbackSessionLaunchClient(sessionLaunchService),
 		sessionRuntime:   client.NewLoopbackSessionRuntimeClient(sessionRuntimeService),
 		sessionViews:     client.NewLoopbackSessionViewClient(sessionViewService),
 		sessionLifecycle: client.NewLoopbackSessionLifecycleClient(sessionLifecycleService),
 		sessionActivity:  client.NewLoopbackSessionActivityClient(sessionActivityService),
 	}
-	core.runPrompt = runprompt.NewLoopbackRunPromptClient(runprompt.HeadlessBootstrap{
-		Config:           cfg,
-		ContainerDir:     projectSessionDir,
-		StoreOptions:     storeOptions,
-		AuthManager:      authSupport.AuthManager,
-		FastModeState:    runtimeSupport.FastModeState,
-		Background:       runtimeSupport.Background,
-		RuntimeRegistry:  runtimeRegistry,
-		BackgroundRouter: runtimeSupport.BackgroundRouter,
-	})
+	binding, err := metadataStore.EnsureWorkspaceBinding(context.Background(), cfg.WorkspaceRoot)
+	if err != nil && !errors.Is(err, metadata.ErrWorkspaceNotRegistered) {
+		_ = metadataStore.Close()
+		return nil, err
+	}
+	if err == nil {
+		core.projectID = binding.ProjectID
+		core.sessionLaunch, err = core.SessionLaunchClientForProject(context.Background(), binding.ProjectID)
+		if err != nil {
+			_ = metadataStore.Close()
+			return nil, err
+		}
+		core.runPrompt, err = core.RunPromptClientForProject(context.Background(), binding.ProjectID)
+		if err != nil {
+			_ = metadataStore.Close()
+			return nil, err
+		}
+	}
 	return core, nil
+}
+
+type projectContext struct {
+	config         config.App
+	projectID      string
+	projectRoot    string
+	projectSession string
+}
+
+func (s *Core) ProjectExists(ctx context.Context, projectID string) error {
+	if s == nil || s.metadataStore == nil {
+		return errors.New("metadata store is required")
+	}
+	_, err := s.metadataStore.GetProjectOverview(ctx, strings.TrimSpace(projectID))
+	return err
+}
+
+func (s *Core) SessionLaunchClientForProject(ctx context.Context, projectID string) (client.SessionLaunchClient, error) {
+	projectCtx, err := s.resolveProjectContext(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	service := sessionlaunch.NewDeduplicatingService(
+		sessionlaunch.ScopeID(projectCtx.config, projectCtx.projectSession),
+		sessionlaunch.NewService(launch.Planner{Config: projectCtx.config, ContainerDir: projectCtx.projectSession, ProjectID: projectCtx.projectID, ProjectViews: s.projectViews, StoreOptions: s.metadataStore.AuthoritativeSessionStoreOptions()}, s.sessionStores),
+	)
+	return client.NewLoopbackSessionLaunchClient(service), nil
+}
+
+func (s *Core) RunPromptClientForProject(ctx context.Context, projectID string) (client.RunPromptClient, error) {
+	projectCtx, err := s.resolveProjectContext(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return runprompt.NewLoopbackRunPromptClient(runprompt.HeadlessBootstrap{
+		Config:           projectCtx.config,
+		ContainerDir:     projectCtx.projectSession,
+		StoreOptions:     s.metadataStore.AuthoritativeSessionStoreOptions(),
+		AuthManager:      s.oauthOpts.AuthManager,
+		FastModeState:    s.fastModeState,
+		Background:       s.background,
+		RuntimeRegistry:  s.runtimeRegistry,
+		BackgroundRouter: s.backgroundRouter,
+	}), nil
+}
+
+func (s *Core) resolveProjectContext(ctx context.Context, projectID string) (projectContext, error) {
+	if s == nil || s.metadataStore == nil {
+		return projectContext{}, errors.New("metadata store is required")
+	}
+	trimmedProjectID := strings.TrimSpace(projectID)
+	if trimmedProjectID == "" {
+		return projectContext{}, errors.New("project id is required")
+	}
+	overview, err := s.metadataStore.GetProjectOverview(ctx, trimmedProjectID)
+	if err != nil {
+		return projectContext{}, err
+	}
+	if strings.TrimSpace(overview.Project.RootPath) == "" {
+		return projectContext{}, fmt.Errorf("project %q has no root path", trimmedProjectID)
+	}
+	projectCfg := s.cfg
+	projectCfg.WorkspaceRoot = overview.Project.RootPath
+	return projectContext{
+		config:         projectCfg,
+		projectID:      trimmedProjectID,
+		projectRoot:    overview.Project.RootPath,
+		projectSession: config.ProjectSessionsRoot(projectCfg, trimmedProjectID),
+	}, nil
 }
 
 func (s *Core) Close() error {

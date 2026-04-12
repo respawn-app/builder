@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http/httptest"
 	"os"
 	"os/signal"
@@ -14,7 +15,6 @@ import (
 	"time"
 
 	"builder/server/auth"
-	"builder/server/metadata"
 	"builder/server/serve"
 	serverstartup "builder/server/startup"
 	"builder/server/tools"
@@ -23,7 +23,6 @@ import (
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
-	"builder/shared/discovery"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
 	"github.com/google/uuid"
@@ -61,7 +60,7 @@ func TestStartSessionServerHelperDaemonProcess(t *testing.T) {
 	}
 }
 
-func TestStartSessionServerUsesDiscoveredDaemonForInteractiveFlow(t *testing.T) {
+func TestStartSessionServerUsesConfiguredDaemonForInteractiveFlow(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -95,29 +94,7 @@ func TestStartSessionServerUsesDiscoveredDaemonForInteractiveFlow(t *testing.T) 
 	go func() {
 		errCh <- srv.Serve(serveCtx)
 	}()
-
-	loadCfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	_, containerDir, err := config.ResolveWorkspaceContainer(loadCfg)
-	if err != nil {
-		t.Fatalf("ResolveWorkspaceContainer: %v", err)
-	}
-	discoveryPath, err := discovery.PathForContainer(containerDir)
-	if err != nil {
-		t.Fatalf("PathForContainer: %v", err)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if _, err := discovery.Read(discoveryPath); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("discovery record did not appear at %s", discoveryPath)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitForConfiguredRemoteIdentity(t, workspace)
 
 	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
 	if err != nil {
@@ -694,8 +671,6 @@ func startRemoteMultiClientRuntimeFixture(t *testing.T, openAIBaseURL string) *r
 		_ = srv.Close()
 	})
 
-	record := waitForDiscoveryRecordAtPath(t, discoveryPathForWorkspace(t, fixture.workspaceA))
-
 	serverA, err := startSessionServer(context.Background(), Options{WorkspaceRoot: fixture.workspaceA, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
 	if err != nil {
 		t.Fatalf("startSessionServer workspace A: %v", err)
@@ -705,13 +680,13 @@ func startRemoteMultiClientRuntimeFixture(t *testing.T, openAIBaseURL string) *r
 		t.Fatalf("expected remote app server for workspace A, got %T", fixture.serverA)
 	}
 
-	remoteB, err := client.DialRemote(context.Background(), record)
-	if err != nil {
-		t.Fatalf("DialRemote workspace B: %v", err)
-	}
 	cfgB, err := loadSessionServerConfig(Options{WorkspaceRoot: fixture.workspaceB, WorkspaceRootExplicit: true})
 	if err != nil {
 		t.Fatalf("loadSessionServerConfig workspace B: %v", err)
+	}
+	remoteB, err := client.DialRemoteURLForProject(context.Background(), config.ServerRPCURL(cfgB), fixture.serverA.ProjectID())
+	if err != nil {
+		t.Fatalf("DialRemote workspace B: %v", err)
 	}
 	fixture.serverB = newRemoteAppServer(remoteB, cfgB)
 
@@ -867,7 +842,7 @@ func TestStartSessionServerRejectsIncompatibleDiscoveredDaemonAndFallsBack(t *te
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
 	defer fakeResponses.Close()
 
-	cleanup := publishDiscoveredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{
+	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{
 		JSONRPCWebSocket: true,
 		ProjectAttach:    true,
 		SessionAttach:    true,
@@ -889,7 +864,7 @@ func TestStartSessionServerRejectsIncompatibleDiscoveredDaemonAndFallsBack(t *te
 	}
 	defer func() { _ = server.Close() }()
 	if _, ok := server.(*remoteAppServer); ok {
-		t.Fatal("expected incompatible discovered daemon to be rejected")
+		t.Fatal("expected incompatible configured daemon to be rejected")
 	}
 
 	planner := newSessionLaunchPlanner(server)
@@ -924,7 +899,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutProcessOutputCapability
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
 	defer fakeResponses.Close()
 
-	cleanup := publishDiscoveredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{
+	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{
 		JSONRPCWebSocket: true,
 		ProjectAttach:    true,
 		SessionAttach:    true,
@@ -950,7 +925,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutProcessOutputCapability
 	}
 	defer func() { _ = server.Close() }()
 	if _, ok := server.(*remoteAppServer); ok {
-		t.Fatal("expected discovered daemon without process capability to be rejected")
+		t.Fatal("expected configured daemon without process capability to be rejected")
 	}
 
 	planner := newSessionLaunchPlanner(server)
@@ -985,7 +960,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutTranscriptPagingCapabil
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
 	defer fakeResponses.Close()
 
-	cleanup := publishDiscoveredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{
+	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{
 		JSONRPCWebSocket: true,
 		ProjectAttach:    true,
 		SessionAttach:    true,
@@ -1012,7 +987,7 @@ func TestStartSessionServerRejectsDiscoveredDaemonWithoutTranscriptPagingCapabil
 	}
 	defer func() { _ = server.Close() }()
 	if _, ok := server.(*remoteAppServer); ok {
-		t.Fatal("expected discovered daemon without transcript paging capability to be rejected")
+		t.Fatal("expected configured daemon without transcript paging capability to be rejected")
 	}
 
 	planner := newSessionLaunchPlanner(server)
@@ -1073,7 +1048,7 @@ func TestRemoteSessionStatusUsesLocalOAuthAuthState(t *testing.T) {
 			t.Fatalf("Serve error = %v, want context canceled", serveErr)
 		}
 	}()
-	waitForDiscoveryRecord(t, workspace)
+	waitForConfiguredRemoteIdentity(t, workspace)
 
 	loadCfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {
@@ -1213,19 +1188,17 @@ func TestStartSessionServerLaunchedDaemonCloseStopsProcess(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected remote app server, got %T", server)
 	}
-	discoveryPath := discoveryPathForWorkspace(t, workspace)
-	record := waitForDiscoveryRecordAtPath(t, discoveryPath)
 	if remote.identity.PID == 0 {
 		t.Fatal("expected launched daemon pid")
 	}
-	if record.Identity.PID != remote.identity.PID {
-		t.Fatalf("discovery pid = %d, remote pid = %d", record.Identity.PID, remote.identity.PID)
+	identity := waitForConfiguredRemoteIdentity(t, workspace)
+	if identity.PID != remote.identity.PID {
+		t.Fatalf("connected pid = %d, remote pid = %d", identity.PID, remote.identity.PID)
 	}
 
 	if err := server.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	waitForDiscoveryRemoval(t, discoveryPath)
 	waitForPIDExit(t, remote.identity.PID)
 }
 
@@ -1265,7 +1238,7 @@ func TestStartSessionServerUsesInvocationOverridesWhenAttachingToDiscoveredDaemo
 	go func() {
 		errCh <- srv.Serve(serveCtx)
 	}()
-	waitForDiscoveryRecord(t, workspace)
+	waitForConfiguredRemoteIdentity(t, workspace)
 
 	server, err := startSessionServer(context.Background(), Options{
 		WorkspaceRoot:         workspace,
@@ -1339,7 +1312,7 @@ func TestStartSessionServerPreservesExplicitCLIToolsWithCLIModelOverride(t *test
 	go func() {
 		errCh <- srv.Serve(serveCtx)
 	}()
-	waitForDiscoveryRecord(t, workspace)
+	waitForConfiguredRemoteIdentity(t, workspace)
 
 	server, err := startSessionServer(context.Background(), Options{
 		WorkspaceRoot:         workspace,
@@ -1370,7 +1343,7 @@ func TestStartSessionServerPreservesExplicitCLIToolsWithCLIModelOverride(t *test
 	}
 }
 
-func TestStartSessionServerUsesDiscoveredDaemonForPromptRoundTrip(t *testing.T) {
+func TestStartSessionServerUsesConfiguredDaemonForPromptRoundTrip(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -1399,7 +1372,7 @@ func TestStartSessionServerUsesDiscoveredDaemonForPromptRoundTrip(t *testing.T) 
 	go func() {
 		errCh <- srv.Serve(serveCtx)
 	}()
-	waitForDiscoveryRecord(t, workspace)
+	waitForConfiguredRemoteIdentity(t, workspace)
 
 	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
 	if err != nil {
@@ -1494,7 +1467,7 @@ func TestStartSessionServerUsesDiscoveredDaemonForPromptRoundTrip(t *testing.T) 
 	}
 }
 
-func TestStartSessionServerUsesDiscoveredDaemonForSessionLifecycleDraftPersistence(t *testing.T) {
+func TestStartSessionServerUsesConfiguredDaemonForSessionLifecycleDraftPersistence(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -1523,7 +1496,7 @@ func TestStartSessionServerUsesDiscoveredDaemonForSessionLifecycleDraftPersisten
 	go func() {
 		errCh <- srv.Serve(serveCtx)
 	}()
-	waitForDiscoveryRecord(t, workspace)
+	waitForConfiguredRemoteIdentity(t, workspace)
 
 	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
 	if err != nil {
@@ -1593,7 +1566,7 @@ func TestStartSessionServerListsPendingPromptSnapshotOverRemoteReads(t *testing.
 	go func() {
 		errCh <- srv.Serve(serveCtx)
 	}()
-	waitForDiscoveryRecord(t, workspace)
+	waitForConfiguredRemoteIdentity(t, workspace)
 
 	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
 	if err != nil {
@@ -1688,7 +1661,7 @@ func TestStartSessionServerListsPendingPromptSnapshotOverRemoteReads(t *testing.
 	}
 }
 
-func TestStartSessionServerUsesDiscoveredDaemonForProcessFlows(t *testing.T) {
+func TestStartSessionServerUsesConfiguredDaemonForProcessFlows(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -1718,7 +1691,7 @@ func TestStartSessionServerUsesDiscoveredDaemonForProcessFlows(t *testing.T) {
 	go func() {
 		errCh <- srv.Serve(serveCtx)
 	}()
-	waitForDiscoveryRecord(t, workspace)
+	waitForConfiguredRemoteIdentity(t, workspace)
 
 	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
 	if err != nil {
@@ -1839,7 +1812,7 @@ func TestInteractiveSessionServerWorkflowParity(t *testing.T) {
 		go func() {
 			errCh <- srv.Serve(serveCtx)
 		}()
-		waitForDiscoveryRecord(t, workspace)
+		waitForConfiguredRemoteIdentity(t, workspace)
 
 		server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
 		if err != nil {
@@ -1855,55 +1828,21 @@ func TestInteractiveSessionServerWorkflowParity(t *testing.T) {
 	})
 }
 
-func discoveryPathForWorkspace(t *testing.T, workspace string) string {
-	t.Helper()
-	loadCfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	_, containerDir, err := config.ResolveWorkspaceContainer(loadCfg)
-	if err != nil {
-		t.Fatalf("ResolveWorkspaceContainer: %v", err)
-	}
-	discoveryPath, err := discovery.PathForContainer(containerDir)
-	if err != nil {
-		t.Fatalf("PathForContainer: %v", err)
-	}
-	return discoveryPath
-}
-
-func waitForDiscoveryRecord(t *testing.T, workspace string) {
-	t.Helper()
-	_ = waitForDiscoveryRecordAtPath(t, discoveryPathForWorkspace(t, workspace))
-}
-
-func waitForDiscoveryRecordAtPath(t *testing.T, discoveryPath string) protocol.DiscoveryRecord {
+func waitForConfiguredRemoteIdentity(t *testing.T, workspace string) protocol.ServerIdentity {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
-	for {
-		record, err := discovery.Read(discoveryPath)
-		if err == nil {
-			return record
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("discovery record did not appear at %s", discoveryPath)
+	opts := Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
+	for time.Now().Before(deadline) {
+		remote, ok := tryDialConfiguredRemote(context.Background(), opts, nil)
+		if ok {
+			identity := remote.Identity()
+			_ = remote.Close()
+			return identity
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-}
-
-func waitForDiscoveryRemoval(t *testing.T, discoveryPath string) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if _, err := discovery.Read(discoveryPath); err != nil {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("discovery record still present at %s", discoveryPath)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	t.Fatalf("configured daemon did not become reachable for workspace %s", workspace)
+	return protocol.ServerIdentity{}
 }
 
 func waitForPIDExit(t *testing.T, pid int) {
@@ -2143,29 +2082,12 @@ func newHeadlessAuthInteractorWithEnvKey(key string) authInteractor {
 	}}
 }
 
-func publishDiscoveredRemoteForWorkspace(t *testing.T, workspace string, caps protocol.CapabilityFlags) func() {
+func publishConfiguredRemoteForWorkspace(t *testing.T, workspace string, caps protocol.CapabilityFlags) func() {
 	t.Helper()
-	loadCfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	_, containerDir, err := config.ResolveWorkspaceContainer(loadCfg)
-	if err != nil {
-		t.Fatalf("ResolveWorkspaceContainer: %v", err)
-	}
-	discoveryPath, err := discovery.PathForContainer(containerDir)
-	if err != nil {
-		t.Fatalf("PathForContainer: %v", err)
-	}
-	binding, err := metadata.ResolveBinding(context.Background(), loadCfg.PersistenceRoot, loadCfg.WorkspaceRoot)
-	if err != nil {
-		t.Fatalf("ResolveBinding: %v", err)
-	}
 	identity := protocol.ServerIdentity{
 		ProtocolVersion: protocol.Version,
 		ServerID:        "stale-daemon",
-		ProjectID:       binding.ProjectID,
-		WorkspaceRoot:   loadCfg.WorkspaceRoot,
+		PID:             222,
 		Capabilities:    caps,
 	}
 	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
@@ -2188,18 +2110,14 @@ func publishDiscoveredRemoteForWorkspace(t *testing.T, workspace string, caps pr
 			_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeMethodNotFound, "method not found"))
 		}
 	}))
-	rpcURL := "ws" + strings.TrimPrefix(server.URL, "http")
-	record := protocol.DiscoveryRecord{
-		Identity: identity,
-		RPCURL:   rpcURL,
-		HTTPURL:  server.URL,
-	}
-	if err := discovery.Write(discoveryPath, record); err != nil {
+	host, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
 		server.Close()
-		t.Fatalf("discovery.Write: %v", err)
+		t.Fatalf("SplitHostPort: %v", err)
 	}
+	t.Setenv("BUILDER_SERVER_HOST", host)
+	t.Setenv("BUILDER_SERVER_PORT", port)
 	return func() {
 		server.Close()
-		_ = discovery.Remove(discoveryPath)
 	}
 }

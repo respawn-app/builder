@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"os"
-	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -15,7 +16,6 @@ import (
 	"builder/server/metadata"
 	"builder/server/startup"
 	"builder/shared/config"
-	"builder/shared/discovery"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
 )
@@ -57,6 +57,7 @@ func (noopOnboarding) EnsureOnboardingReady(_ context.Context, req startup.Onboa
 
 func registerServeWorkspace(t *testing.T, workspace string) {
 	t.Helper()
+	configureServeTestServerPort(t)
 	cfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
@@ -64,6 +65,18 @@ func registerServeWorkspace(t *testing.T, workspace string) {
 	if _, err := metadata.RegisterBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot); err != nil {
 		t.Fatalf("RegisterBinding: %v", err)
 	}
+}
+
+func configureServeTestServerPort(t *testing.T) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve server port: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	_ = listener.Close()
+	t.Setenv("BUILDER_SERVER_HOST", "127.0.0.1")
+	t.Setenv("BUILDER_SERVER_PORT", strconv.Itoa(port))
 }
 
 func TestStartBuildsStandaloneServerFromCoreStartup(t *testing.T) {
@@ -130,7 +143,7 @@ func TestServeRequiresContext(t *testing.T) {
 	}
 }
 
-func TestServePublishesDiscoveryAndHealthEndpoints(t *testing.T) {
+func TestServeExposesConfiguredHealthEndpoints(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -153,36 +166,23 @@ func TestServePublishesDiscoveryAndHealthEndpoints(t *testing.T) {
 		errCh <- server.Serve(ctx)
 	}()
 
-	discoveryPath, err := discovery.PathForContainer(server.ContainerDir())
+	loadCfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {
-		t.Fatalf("PathForContainer: %v", err)
+		t.Fatalf("config.Load: %v", err)
 	}
-	var record protocol.DiscoveryRecord
+	healthURL := config.ServerHTTPBaseURL(loadCfg) + protocol.HealthPath
+	readyURL := config.ServerHTTPBaseURL(loadCfg) + protocol.ReadinessPath
 	deadline := time.Now().Add(5 * time.Second)
+	var healthResp *http.Response
 	for {
-		record, err = discovery.Read(discoveryPath)
+		healthResp, err = http.Get(healthURL)
 		if err == nil {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("read discovery record: %v", err)
+			t.Fatalf("GET health: %v", err)
 		}
 		time.Sleep(10 * time.Millisecond)
-	}
-
-	if record.Identity.ProjectID != server.ProjectID() {
-		t.Fatalf("project id = %q, want %q", record.Identity.ProjectID, server.ProjectID())
-	}
-	if record.Identity.WorkspaceRoot != workspace {
-		t.Fatalf("workspace root = %q, want %q", record.Identity.WorkspaceRoot, workspace)
-	}
-	if !record.Identity.Capabilities.JSONRPCWebSocket {
-		t.Fatal("expected websocket capability in discovery record")
-	}
-
-	healthResp, err := http.Get(record.HealthURL)
-	if err != nil {
-		t.Fatalf("GET health: %v", err)
 	}
 	defer func() { _ = healthResp.Body.Close() }()
 	if healthResp.StatusCode != http.StatusOK {
@@ -196,7 +196,7 @@ func TestServePublishesDiscoveryAndHealthEndpoints(t *testing.T) {
 		t.Fatalf("unexpected health body: %+v", healthBody)
 	}
 
-	readyResp, err := http.Get(record.ReadyURL)
+	readyResp, err := http.Get(readyURL)
 	if err != nil {
 		t.Fatalf("GET ready: %v", err)
 	}
@@ -209,35 +209,32 @@ func TestServePublishesDiscoveryAndHealthEndpoints(t *testing.T) {
 	if serveErr := <-errCh; !errors.Is(serveErr, context.Canceled) {
 		t.Fatalf("Serve error = %v, want context canceled", serveErr)
 	}
-	if _, err := os.Stat(discoveryPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("expected discovery record removed after shutdown, got err=%v", err)
-	}
 }
 
-func TestCleanupDiscoveryRecordLeavesReplacementDaemonRecord(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "discovery.json")
-	first := protocol.DiscoveryRecord{Identity: protocol.ServerIdentity{ServerID: "server-a"}, StartedAt: time.Unix(1, 0).UTC()}
-	second := protocol.DiscoveryRecord{Identity: protocol.ServerIdentity{ServerID: "server-b"}, StartedAt: time.Unix(2, 0).UTC()}
-	if err := discovery.Write(path, first); err != nil {
-		t.Fatalf("write first discovery record: %v", err)
-	}
-	if err := discovery.Write(path, second); err != nil {
-		t.Fatalf("write second discovery record: %v", err)
-	}
-	if err := cleanupDiscoveryRecord(path, first); err != nil {
-		t.Fatalf("cleanupDiscoveryRecord first: %v", err)
-	}
-	current, err := discovery.Read(path)
+func TestServeFailsWhenConfiguredPortIsOccupied(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	registerServeWorkspace(t, workspace)
+	request := startup.Request{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}
+	authHandler := envAuthHandler{}
+	onboarding := noopOnboarding{}
+	server, err := Start(context.Background(), request, authHandler, onboarding)
 	if err != nil {
-		t.Fatalf("read replacement discovery record: %v", err)
+		t.Fatalf("Start: %v", err)
 	}
-	if current.Identity.ServerID != second.Identity.ServerID {
-		t.Fatalf("server id = %q, want %q", current.Identity.ServerID, second.Identity.ServerID)
+	defer func() { _ = server.Close() }()
+	loadCfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
 	}
-	if err := cleanupDiscoveryRecord(path, second); err != nil {
-		t.Fatalf("cleanupDiscoveryRecord second: %v", err)
+	listener, err := net.Listen("tcp", config.ServerListenAddress(loadCfg))
+	if err != nil {
+		t.Fatalf("occupy configured port: %v", err)
 	}
-	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("expected cleanup to remove owned discovery record, got err=%v", err)
+	defer func() { _ = listener.Close() }()
+	if err := server.Serve(context.Background()); err == nil {
+		t.Fatal("expected serve to fail when configured port is occupied")
 	}
 }

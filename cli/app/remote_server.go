@@ -20,6 +20,7 @@ import (
 type remoteAppServer struct {
 	remote    *client.Remote
 	identity  protocol.ServerIdentity
+	projectID string
 	cfg       config.App
 	closeFn   func() error
 	owns      bool
@@ -42,7 +43,7 @@ func newRemoteAppServerWithAuth(remote *client.Remote, cfg config.App, closeFn f
 		return nil
 	}
 	// A custom closer is only provided when this CLI launched the daemon itself.
-	// Attached/discovered remotes fall back to remote.Close() and are not owners.
+	// Directly attached configured remotes fall back to remote.Close() and are not owners.
 	ownsServer := closeFn != nil
 	if closeFn == nil {
 		closeFn = remote.Close
@@ -50,7 +51,7 @@ func newRemoteAppServerWithAuth(remote *client.Remote, cfg config.App, closeFn f
 	if lookupEnv == nil {
 		lookupEnv = os.Getenv
 	}
-	return &remoteAppServer{remote: remote, identity: remote.Identity(), cfg: cfg, closeFn: closeFn, owns: ownsServer, lookupEnv: lookupEnv, wrapStore: wrapStore}
+	return &remoteAppServer{remote: remote, identity: remote.Identity(), projectID: remote.ProjectID(), cfg: cfg, closeFn: closeFn, owns: ownsServer, lookupEnv: lookupEnv, wrapStore: wrapStore}
 }
 
 func (s *remoteAppServer) Close() error {
@@ -94,7 +95,7 @@ func (s *remoteAppServer) ProjectID() string {
 	if s == nil {
 		return ""
 	}
-	return strings.TrimSpace(s.identity.ProjectID)
+	return strings.TrimSpace(s.projectID)
 }
 func (s *remoteAppServer) AskViewClient() client.AskViewClient {
 	if s == nil {

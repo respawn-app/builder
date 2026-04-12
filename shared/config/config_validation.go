@@ -96,6 +96,20 @@ func validateNotificationMethod(state settingsState, _ map[string]string) error 
 	}
 }
 
+func validateServerHost(state settingsState, _ map[string]string) error {
+	if strings.TrimSpace(state.Settings.ServerHost) == "" {
+		return fmt.Errorf("server_host must not be empty")
+	}
+	return nil
+}
+
+func validateServerPort(state settingsState, _ map[string]string) error {
+	if state.Settings.ServerPort <= 0 || state.Settings.ServerPort > 65535 {
+		return fmt.Errorf("server_port must be between 1 and 65535")
+	}
+	return nil
+}
+
 func validateWebSearch(state settingsState, _ map[string]string) error {
 	switch strings.ToLower(strings.TrimSpace(state.Settings.WebSearch)) {
 	case "off", "native":

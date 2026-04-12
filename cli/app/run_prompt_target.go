@@ -16,12 +16,11 @@ import (
 	"builder/server/metadata"
 	"builder/shared/client"
 	"builder/shared/config"
-	"builder/shared/discovery"
 	"builder/shared/protocol"
 )
 
 var launchRunPromptDaemon = startLocalRunPromptDaemon
-var dialDiscoveredRemote = client.DialRemote
+var dialConfiguredRemote = client.DialRemoteURLForProject
 var resolveDaemonExecutablePath = daemonExecutablePath
 var buildServeArgsFunc = buildServeArgs
 var terminateOwnedDaemonProcess = func(process *os.Process) error {
@@ -43,7 +42,7 @@ var forceKillOwnedDaemonProcess = func(process *os.Process) error {
 const launchedDaemonShutdownTimeout = 5 * time.Second
 
 func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptClient, func() error, error) {
-	if remote, ok := tryDialDiscoveredRemote(ctx, opts, discoveredRemoteSupportsRunPrompt); ok {
+	if remote, ok := tryDialConfiguredRemote(ctx, opts, configuredRemoteSupportsRunPrompt); ok {
 		return remote, remote.Close, nil
 	}
 	launchErr := error(nil)
@@ -62,46 +61,20 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 	return server.RunPromptClient(), server.Close, nil
 }
 
-func tryDialDiscoveredRemote(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool) (*client.Remote, bool) {
-	return tryDialMatchingDiscoveredRemote(ctx, opts, supports, nil)
+func tryDialConfiguredRemote(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool) (*client.Remote, bool) {
+	return tryDialMatchingConfiguredRemote(ctx, opts, supports, nil)
 }
 
-func tryDialMatchingDiscoveredRemote(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool, accept func(protocol.DiscoveryRecord) bool) (*client.Remote, bool) {
-	workspaceRoot, err := resolveCLIWorkspaceRoot(opts)
+func tryDialMatchingConfiguredRemote(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool, accept func(protocol.ServerIdentity) bool) (*client.Remote, bool) {
+	cfg, projectID, err := loadRemoteAttachConfig(ctx, opts)
 	if err != nil {
 		return nil, false
 	}
-	cfg, err := config.Load(workspaceRoot, config.LoadOptions{})
+	remote, err := dialConfiguredRemote(ctx, config.ServerRPCURL(cfg), projectID)
 	if err != nil {
 		return nil, false
 	}
-	_, containerDir, err := config.ResolveWorkspaceContainer(cfg)
-	if err != nil {
-		return nil, false
-	}
-	discoveryPath, err := discovery.PathForContainer(containerDir)
-	if err != nil {
-		return nil, false
-	}
-	record, err := discovery.Read(discoveryPath)
-	if err != nil {
-		return nil, false
-	}
-	binding, err := metadata.ResolveBinding(ctx, cfg.PersistenceRoot, cfg.WorkspaceRoot)
-	if err != nil {
-		return nil, false
-	}
-	if record.Identity.ProjectID != binding.ProjectID {
-		return nil, false
-	}
-	if accept != nil && !accept(record) {
-		return nil, false
-	}
-	remote, err := dialDiscoveredRemote(ctx, record)
-	if err != nil {
-		return nil, false
-	}
-	if remote.Identity().ProjectID != binding.ProjectID {
+	if accept != nil && !accept(remote.Identity()) {
 		_ = remote.Close()
 		return nil, false
 	}
@@ -112,11 +85,11 @@ func tryDialMatchingDiscoveredRemote(ctx context.Context, opts Options, supports
 	return remote, true
 }
 
-func discoveredRemoteSupportsRunPrompt(flags protocol.CapabilityFlags) bool {
+func configuredRemoteSupportsRunPrompt(flags protocol.CapabilityFlags) bool {
 	return flags.RunPrompt
 }
 
-func discoveredRemoteSupportsInteractiveSession(flags protocol.CapabilityFlags) bool {
+func configuredRemoteSupportsInteractiveSession(flags protocol.CapabilityFlags) bool {
 	return flags.SessionPlan &&
 		flags.SessionLifecycle &&
 		flags.SessionTranscriptPaging &&
@@ -166,8 +139,8 @@ func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remot
 	childPID := cmd.Process.Pid
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if remote, ok := tryDialMatchingDiscoveredRemote(ctx, opts, discoveredRemoteSupportsRunPrompt, func(record protocol.DiscoveryRecord) bool {
-			return record.Identity.PID == childPID
+		if remote, ok := tryDialMatchingConfiguredRemote(ctx, opts, configuredRemoteSupportsRunPrompt, func(identity protocol.ServerIdentity) bool {
+			return identity.PID == childPID
 		}); ok {
 			return remote, newOwnedDaemonClose(remote, cmd, errCh), true, nil
 		}
@@ -185,6 +158,25 @@ func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remot
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+func loadRemoteAttachConfig(ctx context.Context, opts Options) (config.App, string, error) {
+	workspaceRoot, err := resolveCLIWorkspaceRoot(opts)
+	if err != nil {
+		return config.App{}, "", err
+	}
+	cfg, err := config.Load(workspaceRoot, config.LoadOptions{})
+	if err != nil {
+		return config.App{}, "", err
+	}
+	binding, err := metadata.ResolveBinding(ctx, cfg.PersistenceRoot, cfg.WorkspaceRoot)
+	if err == nil {
+		return cfg, binding.ProjectID, nil
+	}
+	if errors.Is(err, metadata.ErrWorkspaceNotRegistered) {
+		return cfg, "", nil
+	}
+	return config.App{}, "", err
 }
 
 func newOwnedDaemonClose(remote *client.Remote, cmd *exec.Cmd, errCh <-chan error) func() error {

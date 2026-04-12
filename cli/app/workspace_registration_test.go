@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"net"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"builder/server/metadata"
@@ -12,11 +14,24 @@ import (
 
 func registerAppWorkspace(t *testing.T, workspace string) {
 	t.Helper()
+	configureAppTestServerPort(t)
 	cfg, err := config.Load(workspace, config.LoadOptions{})
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
 	_ = mustRegisterAppBinding(t, cfg.PersistenceRoot, cfg.WorkspaceRoot)
+}
+
+func configureAppTestServerPort(t *testing.T) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve server port: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	_ = listener.Close()
+	t.Setenv("BUILDER_SERVER_HOST", "127.0.0.1")
+	t.Setenv("BUILDER_SERVER_PORT", strconv.Itoa(port))
 }
 
 func mustRegisterAppBinding(t *testing.T, persistenceRoot string, workspaceRoot string) metadata.Binding {

@@ -16,22 +16,23 @@ import (
 )
 
 type Service struct {
-	containerDir string
-	stores       sessionStoreResolver
-	authManager  *auth.Manager
-	storeOptions []session.StoreOption
-	resolveMu    sync.Mutex
-	resolves     map[string]*resolveTransitionEntry
+	persistenceRoot string
+	containerDir    string
+	stores          sessionStoreResolver
+	authManager     *auth.Manager
+	storeOptions    []session.StoreOption
+	resolveMu       sync.Mutex
+	resolves        map[string]*resolveTransitionEntry
 }
 
 type resolveTransitionFingerprint struct {
-	sessionID             string
-	action                string
-	initialPrompt         string
-	initialInput          string
-	targetSessionID       string
-	forkUserMessageIndex  int
-	parentSessionID       string
+	sessionID            string
+	action               string
+	initialPrompt        string
+	initialInput         string
+	targetSessionID      string
+	forkUserMessageIndex int
+	parentSessionID      string
 }
 
 type resolveTransitionEntry struct {
@@ -54,6 +55,10 @@ type sessionStoreResolver interface {
 
 func NewService(containerDir string, stores sessionStoreResolver, authManager *auth.Manager, storeOptions ...session.StoreOption) *Service {
 	return &Service{containerDir: strings.TrimSpace(containerDir), stores: stores, authManager: authManager, storeOptions: append([]session.StoreOption(nil), storeOptions...), resolves: map[string]*resolveTransitionEntry{}}
+}
+
+func NewGlobalService(persistenceRoot string, stores sessionStoreResolver, authManager *auth.Manager, storeOptions ...session.StoreOption) *Service {
+	return &Service{persistenceRoot: strings.TrimSpace(persistenceRoot), stores: stores, authManager: authManager, storeOptions: append([]session.StoreOption(nil), storeOptions...), resolves: map[string]*resolveTransitionEntry{}}
 }
 
 func (s *Service) sweepExpiredResolveEntriesLocked(now time.Time) {
@@ -223,7 +228,10 @@ func (s *Service) openStore(sessionID string) (*session.Store, error) {
 		}
 	}
 	if strings.TrimSpace(s.containerDir) == "" {
-		return nil, nil
+		if strings.TrimSpace(s.persistenceRoot) == "" {
+			return nil, nil
+		}
+		return session.OpenByID(s.persistenceRoot, trimmed, s.storeOptions...)
 	}
 	sessionDir, err := sessionpath.ResolveScopedSessionDir(s.containerDir, trimmed)
 	if err != nil {

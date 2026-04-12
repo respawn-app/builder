@@ -1,6 +1,6 @@
 # Phase 4D Plan: App-Global Direct Attach And Multi-Project Daemon Cutover
 
-Status: planned next slice
+Status: implemented on the current branch
 
 ## Purpose
 
@@ -10,7 +10,7 @@ Phase 4A-4C already landed the metadata authority, session layout cutover, execu
 
 This document narrows that remaining work into an implementation-ready slice.
 
-## Current Mismatch
+## Original Mismatch
 
 The metadata layer is project-aware and app-global enough to support multiple projects, but several runtime/startup surfaces still act like "one daemon per workspace":
 
@@ -20,7 +20,21 @@ The metadata layer is project-aware and app-global enough to support multiple pr
 - `server/transport/gateway.go` only accepts `project.attach` for one pre-bound project
 - CLI remote attach/startup logic still discovers a daemon by current workspace, then rejects remotes whose `project_id` does not match the local binding
 
-Those assumptions must be removed to call Phase 4 complete.
+Those assumptions were the remaining blockers for calling Phase 4 complete.
+
+## Landed Outcome
+
+Phase 4D is now implemented on this branch.
+
+Landed behavior:
+
+- CLI attach and daemon bootstrap dial the configured `server_host` + `server_port` directly
+- `server/serve` binds exactly the configured listen address and fails if that port is occupied
+- persisted daemon-discovery artifacts are no longer part of active startup or attach semantics
+- `protocol.ServerIdentity` is process-scoped and capability-scoped only
+- `server/core` and transport routing are app-global over the metadata authority rather than pre-bound to one workspace identity
+- project-scoped operations attach explicit project context, while session-scoped reads and runtime paths resolve globally by `session_id`
+- serve, transport, run-prompt, and interactive startup tests now prove configured direct attach rather than discovery-file publication
 
 ## Goal
 

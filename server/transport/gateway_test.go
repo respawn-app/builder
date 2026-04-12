@@ -3,7 +3,9 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -27,6 +29,7 @@ import (
 
 func registerGatewayWorkspace(t *testing.T, workspace string) {
 	t.Helper()
+	configureGatewayTestServerPort(t)
 	resolved, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspace})
 	if err != nil {
 		t.Fatalf("ResolveConfig: %v", err)
@@ -34,6 +37,18 @@ func registerGatewayWorkspace(t *testing.T, workspace string) {
 	if _, err := metadata.RegisterBinding(context.Background(), resolved.Config.PersistenceRoot, resolved.Config.WorkspaceRoot); err != nil {
 		t.Fatalf("RegisterBinding: %v", err)
 	}
+}
+
+func configureGatewayTestServerPort(t *testing.T) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve server port: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	_ = listener.Close()
+	t.Setenv("BUILDER_SERVER_HOST", "127.0.0.1")
+	t.Setenv("BUILDER_SERVER_PORT", strconv.Itoa(port))
 }
 
 func TestGatewayHandshakeAndProjectList(t *testing.T) {
@@ -59,7 +74,7 @@ func TestGatewayHandshakeAndProjectList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("core.New: %v", err)
 	}
-	gateway, err := NewGateway(appCore, protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1", ProjectID: appCore.ProjectID(), WorkspaceRoot: workspace})
+	gateway, err := NewGateway(appCore, protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"})
 	if err != nil {
 		t.Fatalf("NewGateway: %v", err)
 	}
@@ -87,7 +102,7 @@ func TestGatewayHandshakeAndProjectList(t *testing.T) {
 	if err := json.Unmarshal(handshakeResp.Result, &handshake); err != nil {
 		t.Fatalf("decode handshake result: %v", err)
 	}
-	if handshake.Identity.ProjectID != appCore.ProjectID() || handshake.Identity.WorkspaceRoot != workspace {
+	if handshake.Identity.ProtocolVersion != protocol.Version || handshake.Identity.ServerID != "server-1" {
 		t.Fatalf("unexpected handshake: %+v", handshake.Identity)
 	}
 
@@ -135,7 +150,7 @@ func TestGatewayRejectsMethodsBeforeHandshake(t *testing.T) {
 	if err != nil {
 		t.Fatalf("core.New: %v", err)
 	}
-	gateway, err := NewGateway(appCore, protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1", ProjectID: appCore.ProjectID(), WorkspaceRoot: workspace})
+	gateway, err := NewGateway(appCore, protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"})
 	if err != nil {
 		t.Fatalf("NewGateway: %v", err)
 	}
@@ -238,10 +253,7 @@ func TestGatewayRemoteSessionActivityRecoversToolCallTextWithoutPresentation(t *
 	appCore.RegisterRuntime("session-1", engine)
 	defer appCore.UnregisterRuntime("session-1", engine)
 
-	remote, err := remoteclient.DialRemote(context.Background(), protocol.DiscoveryRecord{
-		RPCURL:   "ws" + server.URL[len("http"):],
-		Identity: protocol.ServerIdentity{ProjectID: appCore.ProjectID()},
-	})
+	remote, err := remoteclient.DialRemoteURLForProject(context.Background(), "ws"+server.URL[len("http"):], appCore.ProjectID())
 	if err != nil {
 		t.Fatalf("DialRemote: %v", err)
 	}
@@ -295,10 +307,7 @@ func TestGatewayRemoteSessionActivityStreamsDirectSubmittedUserMessage(t *testin
 	appCore.RegisterRuntime(store.Meta().SessionID, eng)
 	defer appCore.UnregisterRuntime(store.Meta().SessionID, eng)
 
-	remote, err := remoteclient.DialRemote(context.Background(), protocol.DiscoveryRecord{
-		RPCURL:   "ws" + server.URL[len("http"):],
-		Identity: protocol.ServerIdentity{ProjectID: appCore.ProjectID()},
-	})
+	remote, err := remoteclient.DialRemoteURLForProject(context.Background(), "ws"+server.URL[len("http"):], appCore.ProjectID())
 	if err != nil {
 		t.Fatalf("DialRemote: %v", err)
 	}
@@ -357,10 +366,7 @@ func TestGatewayRemoteSessionActivityPreservesActiveSubmitOrderingUsingAssistant
 	appCore.RegisterRuntime(store.Meta().SessionID, eng)
 	defer appCore.UnregisterRuntime(store.Meta().SessionID, eng)
 
-	remote, err := remoteclient.DialRemote(context.Background(), protocol.DiscoveryRecord{
-		RPCURL:   "ws" + server.URL[len("http"):],
-		Identity: protocol.ServerIdentity{ProjectID: appCore.ProjectID()},
-	})
+	remote, err := remoteclient.DialRemoteURLForProject(context.Background(), "ws"+server.URL[len("http"):], appCore.ProjectID())
 	if err != nil {
 		t.Fatalf("DialRemote: %v", err)
 	}
@@ -649,7 +655,7 @@ func newGatewayTestServer(t *testing.T) (*core.Core, *httptest.Server) {
 	if err != nil {
 		t.Fatalf("core.New: %v", err)
 	}
-	gateway, err := NewGateway(appCore, protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1", ProjectID: appCore.ProjectID(), WorkspaceRoot: workspace})
+	gateway, err := NewGateway(appCore, protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"})
 	if err != nil {
 		t.Fatalf("NewGateway: %v", err)
 	}

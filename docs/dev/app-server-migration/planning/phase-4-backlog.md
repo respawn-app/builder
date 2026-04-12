@@ -1,6 +1,6 @@
 # Phase 4 Storage Backlog
 
-Status: planning baseline with 4A-4C largely landed; 4D remains open
+Status: planning baseline with Phase 4 now fully landed on the current branch
 
 Purpose:
 
@@ -15,8 +15,8 @@ This file is intentionally narrower than `plan.md`.
 ## Current Status
 
 - Workstreams centered on SQLite metadata, staged migration, session metadata cutover, execution-target metadata, and `lease_id` runtime activation are largely landed.
-- The remaining unfinished Phase 4 work is topology/direct-attach cutover: the daemon is still effectively workspace-scoped in key startup, serve, and transport paths, and the old persisted-discovery direction has been rejected.
-- Phase 4D is therefore the next execution slice. It should not redo 4A-4C storage work; it should finish the app-global daemon model on top of the landed metadata authority with direct configured-address attach.
+- Phase 4D is now implemented: topology/direct-attach cutover is complete, the daemon is app-global per persistence root, and active startup no longer depends on persisted discovery artifacts.
+- This document remains as historical planning context for how the final Phase 4 slice was decomposed.
 
 ## Phase 4D Remaining Slice
 

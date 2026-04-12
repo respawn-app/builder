@@ -19,7 +19,6 @@ import (
 	"builder/server/auth"
 	"builder/server/authflow"
 	"builder/server/llm"
-	"builder/server/metadata"
 	"builder/server/runtime"
 	"builder/server/serve"
 	"builder/server/session"
@@ -27,7 +26,6 @@ import (
 	"builder/server/tools/askquestion"
 	"builder/shared/client"
 	"builder/shared/config"
-	"builder/shared/discovery"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
 )
@@ -67,6 +65,29 @@ func (autoOnboarding) EnsureOnboardingReady(_ context.Context, req serverstartup
 	reloaded.Source.SettingsPath = path
 	reloaded.Source.SettingsFileExists = true
 	return reloaded, nil
+}
+
+func waitForConfiguredRunPromptDaemon(t *testing.T, workspace string) {
+	t.Helper()
+	loadCfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	healthURL := config.ServerHTTPBaseURL(loadCfg) + protocol.HealthPath
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		resp, err := http.Get(healthURL)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("configured daemon did not become healthy at %s", healthURL)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func TestEnsureSubagentSessionNameSetsDefault(t *testing.T) {
@@ -160,7 +181,7 @@ func TestRunPromptWithoutAuthReturnsErrAuthNotConfiguredWithoutReadingStdin(t *t
 	}
 }
 
-func TestRunPromptUsesDiscoveredDaemonWithoutLocalAuth(t *testing.T) {
+func TestRunPromptUsesConfiguredDaemonWithoutLocalAuth(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -195,28 +216,7 @@ func TestRunPromptUsesDiscoveredDaemonWithoutLocalAuth(t *testing.T) {
 		errCh <- srv.Serve(serveCtx)
 	}()
 
-	loadCfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-	_, containerDir, err := config.ResolveWorkspaceContainer(loadCfg)
-	if err != nil {
-		t.Fatalf("ResolveWorkspaceContainer: %v", err)
-	}
-	discoveryPath, err := discovery.PathForContainer(containerDir)
-	if err != nil {
-		t.Fatalf("PathForContainer: %v", err)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if _, err := discovery.Read(discoveryPath); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("discovery record did not appear at %s", discoveryPath)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitForConfiguredRunPromptDaemon(t, workspace)
 
 	result, err := RunPrompt(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, "hello through daemon", 0, nil)
 	if err != nil {
@@ -235,7 +235,7 @@ func TestRunPromptUsesDiscoveredDaemonWithoutLocalAuth(t *testing.T) {
 	}
 }
 
-func TestRunPromptRejectsIncompatibleDiscoveredDaemonAndFallsBackToEmbedded(t *testing.T) {
+func TestRunPromptRejectsIncompatibleConfiguredDaemonAndFallsBackToEmbedded(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -245,7 +245,7 @@ func TestRunPromptRejectsIncompatibleDiscoveredDaemonAndFallsBackToEmbedded(t *t
 	fakeResponses, hits := newFakeResponsesServer(t, []string{"embedded fallback reply"})
 	defer fakeResponses.Close()
 
-	cleanup := publishDiscoveredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{
+	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{
 		JSONRPCWebSocket: true,
 		ProjectAttach:    true,
 		SessionAttach:    true,
@@ -367,7 +367,7 @@ func TestOwnedDaemonCloseFallsBackToKillWhenInterruptFails(t *testing.T) {
 	}
 }
 
-func TestRunPromptUsesInvocationOverridesWhenAttachingToDiscoveredDaemon(t *testing.T) {
+func TestRunPromptUsesInvocationOverridesWhenAttachingToConfiguredDaemon(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -404,28 +404,7 @@ func TestRunPromptUsesInvocationOverridesWhenAttachingToDiscoveredDaemon(t *test
 		errCh <- srv.Serve(serveCtx)
 	}()
 
-	loadCfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-	_, containerDir, err := config.ResolveWorkspaceContainer(loadCfg)
-	if err != nil {
-		t.Fatalf("ResolveWorkspaceContainer: %v", err)
-	}
-	discoveryPath, err := discovery.PathForContainer(containerDir)
-	if err != nil {
-		t.Fatalf("PathForContainer: %v", err)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if _, err := discovery.Read(discoveryPath); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("discovery record did not appear at %s", discoveryPath)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitForConfiguredRunPromptDaemon(t, workspace)
 
 	result, err := RunPrompt(context.Background(), Options{
 		WorkspaceRoot:         workspace,
@@ -453,50 +432,17 @@ func TestRunPromptUsesInvocationOverridesWhenAttachingToDiscoveredDaemon(t *test
 	}
 }
 
-func TestTryDialMatchingDiscoveredRemoteSkipsRecordThatDoesNotMatchSpawnedPID(t *testing.T) {
+func TestTryDialMatchingConfiguredRemoteRejectsServerThatDoesNotMatchSpawnedPID(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
 	registerAppWorkspace(t, workspace)
-
-	cfg, err := config.Load(workspace, config.LoadOptions{})
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	_, containerDir, err := config.ResolveWorkspaceContainer(cfg)
-	if err != nil {
-		t.Fatalf("ResolveWorkspaceContainer: %v", err)
-	}
-	discoveryPath, err := discovery.PathForContainer(containerDir)
-	if err != nil {
-		t.Fatalf("PathForContainer: %v", err)
-	}
-	binding, err := metadata.ResolveBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot)
-	if err != nil {
-		t.Fatalf("ResolveBinding: %v", err)
-	}
-	if err := discovery.Write(discoveryPath, protocol.DiscoveryRecord{
-		Identity: protocol.ServerIdentity{ProjectID: binding.ProjectID, PID: 111, Capabilities: protocol.CapabilityFlags{RunPrompt: true}},
-		RPCURL:   "ws://127.0.0.1:1/rpc",
-	}); err != nil {
-		t.Fatalf("discovery.Write: %v", err)
-	}
-
-	originalDial := dialDiscoveredRemote
-	var dialCalls int
-	t.Cleanup(func() { dialDiscoveredRemote = originalDial })
-	dialDiscoveredRemote = func(context.Context, protocol.DiscoveryRecord) (*client.Remote, error) {
-		dialCalls++
-		return nil, errors.New("unexpected dial")
-	}
-
-	if remote, ok := tryDialMatchingDiscoveredRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, discoveredRemoteSupportsRunPrompt, func(record protocol.DiscoveryRecord) bool {
-		return record.Identity.PID == 222
+	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{RunPrompt: true})
+	defer cleanup()
+	if remote, ok := tryDialMatchingConfiguredRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, configuredRemoteSupportsRunPrompt, func(identity protocol.ServerIdentity) bool {
+		return identity.PID == 111
 	}); ok || remote != nil {
-		t.Fatalf("expected mismatched pid record to be skipped, got remote=%v ok=%t", remote, ok)
-	}
-	if dialCalls != 0 {
-		t.Fatalf("expected mismatched pid record to be rejected before dialing, got %d dial calls", dialCalls)
+		t.Fatalf("expected mismatched pid server to be rejected, got remote=%v ok=%t", remote, ok)
 	}
 }
 
@@ -547,8 +493,12 @@ func TestRunPromptCreatesSessionAndPersistsDurableTranscript(t *testing.T) {
 	}
 	store := openAuthoritativeAppSession(t, cfg.PersistenceRoot, result.SessionID)
 	meta := store.Meta()
-	if meta.WorkspaceRoot != cfg.WorkspaceRoot {
-		t.Fatalf("workspace root = %q, want %q", meta.WorkspaceRoot, cfg.WorkspaceRoot)
+	wantWorkspaceRoot, err := config.CanonicalWorkspaceRoot(cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot: %v", err)
+	}
+	if meta.WorkspaceRoot != wantWorkspaceRoot {
+		t.Fatalf("workspace root = %q, want %q", meta.WorkspaceRoot, wantWorkspaceRoot)
 	}
 	if meta.FirstPromptPreview != "hello from user" {
 		t.Fatalf("first prompt preview = %q, want %q", meta.FirstPromptPreview, "hello from user")

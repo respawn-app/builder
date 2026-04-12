@@ -134,6 +134,6 @@ func TestRemoteAppServerCloseUsesOwnedCloser(t *testing.T) {
 func TestRemoteAppServerDiscoveredRemoteIsNotOwned(t *testing.T) {
 	server := newRemoteAppServer(&client.Remote{}, config.App{})
 	if server.OwnsServer() {
-		t.Fatal("expected discovered remote server to not be owned")
+		t.Fatal("expected configured remote server to not be owned")
 	}
 }
