@@ -25,7 +25,7 @@ func TestRemoteRunPromptPublishesProgressNotifications(t *testing.T) {
 		if req.Method != protocol.MethodHandshake {
 			t.Fatalf("handshake method = %q", req.Method)
 		}
-		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1", ProjectID: "project-1"}})); err != nil {
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}})); err != nil {
 			t.Fatalf("send handshake response: %v", err)
 		}
 		if err := websocket.JSON.Receive(ws, &req); err != nil {
@@ -49,7 +49,7 @@ func TestRemoteRunPromptPublishesProgressNotifications(t *testing.T) {
 	}))
 	defer server.Close()
 
-	remote, err := DialRemote(context.Background(), protocol.DiscoveryRecord{RPCURL: "ws" + server.URL[len("http"):], Identity: protocol.ServerIdentity{ProjectID: "project-1"}})
+	remote, err := DialRemoteURL(context.Background(), "ws"+server.URL[len("http"):])
 	if err != nil {
 		t.Fatalf("DialRemote: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestRemoteSessionActivitySubscriptionNextHonorsCanceledContext(t *testing.T
 		if err := websocket.JSON.Receive(ws, &req); err != nil {
 			return
 		}
-		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1", ProjectID: "project-1"}})); err != nil {
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}})); err != nil {
 			return
 		}
 		if err := websocket.JSON.Receive(ws, &req); err != nil {
@@ -96,7 +96,7 @@ func TestRemoteSessionActivitySubscriptionNextHonorsCanceledContext(t *testing.T
 	}))
 	defer server.Close()
 
-	remote, err := DialRemote(context.Background(), protocol.DiscoveryRecord{RPCURL: "ws" + server.URL[len("http"):], Identity: protocol.ServerIdentity{ProjectID: "project-1"}})
+	remote, err := DialRemoteURL(context.Background(), "ws"+server.URL[len("http"):])
 	if err != nil {
 		t.Fatalf("DialRemote: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestRemoteSessionActivitySubscriptionPreservesTranscriptEntries(t *testing.
 		if err := websocket.JSON.Receive(ws, &req); err != nil {
 			return
 		}
-		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1", ProjectID: "project-1"}})); err != nil {
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}})); err != nil {
 			return
 		}
 		if err := websocket.JSON.Receive(ws, &req); err != nil {
@@ -162,7 +162,7 @@ func TestRemoteSessionActivitySubscriptionPreservesTranscriptEntries(t *testing.
 	}))
 	defer server.Close()
 
-	remote, err := DialRemote(context.Background(), protocol.DiscoveryRecord{RPCURL: "ws" + server.URL[len("http"):], Identity: protocol.ServerIdentity{ProjectID: "project-1"}})
+	remote, err := DialRemoteURL(context.Background(), "ws"+server.URL[len("http"):])
 	if err != nil {
 		t.Fatalf("DialRemote: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestRemoteSessionActivitySubscriptionPreservesTranscriptCriticalOrderingWit
 		if err := websocket.JSON.Receive(ws, &req); err != nil {
 			return
 		}
-		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1", ProjectID: "project-1"}})); err != nil {
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}})); err != nil {
 			return
 		}
 		if err := websocket.JSON.Receive(ws, &req); err != nil {
@@ -243,7 +243,7 @@ func TestRemoteSessionActivitySubscriptionPreservesTranscriptCriticalOrderingWit
 	}))
 	defer server.Close()
 
-	remote, err := DialRemote(context.Background(), protocol.DiscoveryRecord{RPCURL: "ws" + server.URL[len("http"):], Identity: protocol.ServerIdentity{ProjectID: "project-1"}})
+	remote, err := DialRemoteURL(context.Background(), "ws"+server.URL[len("http"):])
 	if err != nil {
 		t.Fatalf("DialRemote: %v", err)
 	}

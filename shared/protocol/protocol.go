@@ -31,8 +31,6 @@ type CapabilityFlags struct {
 type ServerIdentity struct {
 	ProtocolVersion string          `json:"protocol_version"`
 	ServerID        string          `json:"server_id"`
-	ProjectID       string          `json:"project_id"`
-	WorkspaceRoot   string          `json:"workspace_root"`
 	PID             int             `json:"pid"`
 	Capabilities    CapabilityFlags `json:"capabilities"`
 }

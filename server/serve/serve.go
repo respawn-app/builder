@@ -14,7 +14,7 @@ import (
 	"builder/server/core"
 	"builder/server/startup"
 	"builder/server/transport"
-	"builder/shared/discovery"
+	"builder/shared/config"
 	"builder/shared/protocol"
 )
 
@@ -50,18 +50,15 @@ func (s *Server) Serve(ctx context.Context) error {
 	if s == nil || s.Core == nil {
 		return errors.New("server core is required")
 	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen("tcp", config.ServerListenAddress(s.Config()))
 	if err != nil {
 		return fmt.Errorf("listen local control endpoint: %w", err)
 	}
 	defer func() { _ = listener.Close() }()
 
-	baseURL := "http://" + listener.Addr().String()
 	identity := protocol.ServerIdentity{
 		ProtocolVersion: protocol.Version,
-		ServerID:        fmt.Sprintf("%s:%d", s.ProjectID(), os.Getpid()),
-		ProjectID:       s.ProjectID(),
-		WorkspaceRoot:   s.Config().WorkspaceRoot,
+		ServerID:        fmt.Sprintf("builder:%d", os.Getpid()),
 		PID:             os.Getpid(),
 		Capabilities: protocol.CapabilityFlags{
 			JSONRPCWebSocket:        true,
@@ -85,30 +82,13 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	record := protocol.DiscoveryRecord{
-		Identity:  identity,
-		HTTPURL:   baseURL,
-		RPCURL:    "ws://" + listener.Addr().String() + protocol.RPCPath,
-		HealthURL: baseURL + protocol.HealthPath,
-		ReadyURL:  baseURL + protocol.ReadinessPath,
-		StartedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
-	}
-	discoveryPath, err := discovery.PathForContainer(s.ContainerDir())
-	if err != nil {
-		return err
-	}
-	if err := discovery.Write(discoveryPath, record); err != nil {
-		return err
-	}
-	defer func() { _ = cleanupDiscoveryRecord(discoveryPath, record) }()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(protocol.HealthPath, func(w http.ResponseWriter, _ *http.Request) {
 		writeStatusJSON(w, http.StatusOK, map[string]any{
-			"status":         "ok",
-			"project_id":     s.ProjectID(),
-			"workspace_root": s.Config().WorkspaceRoot,
+			"status":    "ok",
+			"server_id": identity.ServerID,
+			"pid":       identity.PID,
 		})
 	})
 	s.ready.Store(true)
@@ -118,9 +98,9 @@ func (s *Server) Serve(ctx context.Context) error {
 		if s.ready.Load() {
 			status = http.StatusOK
 			body = map[string]any{
-				"ready":          true,
-				"project_id":     s.ProjectID(),
-				"workspace_root": s.Config().WorkspaceRoot,
+				"ready":     true,
+				"server_id": identity.ServerID,
+				"pid":       identity.PID,
 			}
 		}
 		writeStatusJSON(w, status, body)
@@ -148,17 +128,6 @@ func (s *Server) Serve(ctx context.Context) error {
 	case serveErr := <-errCh:
 		return serveErr
 	}
-}
-
-func cleanupDiscoveryRecord(path string, record protocol.DiscoveryRecord) error {
-	current, err := discovery.Read(path)
-	if err != nil {
-		return nil
-	}
-	if current.Identity.ServerID != record.Identity.ServerID || current.StartedAt != record.StartedAt {
-		return nil
-	}
-	return discovery.Remove(path)
 }
 
 func writeStatusJSON(w http.ResponseWriter, status int, body map[string]any) {

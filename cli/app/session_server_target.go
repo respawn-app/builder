@@ -9,7 +9,7 @@ import (
 
 var launchSessionServerDaemon = startLocalRunPromptDaemon
 var startInteractiveEmbeddedSessionServer = startEmbeddedServer
-var dialInteractiveRemoteSessionServer = tryDialDiscoveredRemoteServer
+var dialInteractiveRemoteSessionServer = tryDialConfiguredRemoteServer
 
 func remoteAuthHooks(interactor authInteractor) (func(string) string, func(auth.Store) auth.Store) {
 	if interactor == nil {
@@ -58,8 +58,8 @@ func shouldBypassRemoteStartupForInteractiveOnboarding(opts Options, interactor 
 	return !cfg.Source.SettingsFileExists, nil
 }
 
-func tryDialDiscoveredRemoteServer(ctx context.Context, opts Options, interactor authInteractor) (*remoteAppServer, bool, error) {
-	remote, ok := tryDialDiscoveredRemote(ctx, opts, discoveredRemoteSupportsInteractiveSession)
+func tryDialConfiguredRemoteServer(ctx context.Context, opts Options, interactor authInteractor) (*remoteAppServer, bool, error) {
+	remote, ok := tryDialConfiguredRemote(ctx, opts, configuredRemoteSupportsInteractiveSession)
 	if !ok {
 		return nil, false, nil
 	}

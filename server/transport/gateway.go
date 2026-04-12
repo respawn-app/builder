@@ -91,7 +91,11 @@ func (g *Gateway) serveRunPrompt(ws *websocket.Conn, ctx context.Context, state 
 			}
 		}
 	})
-	resp, err := g.core.RunPromptClient().RunPrompt(runCtx, params, progress)
+	runClient, err := g.runPromptClientForState(runCtx, state)
+	if err != nil {
+		return sendResponse(ws, responseForError(req.ID, err))
+	}
+	resp, err := runClient.RunPrompt(runCtx, params, progress)
 	if err != nil {
 		return sendResponse(ws, responseForError(req.ID, err))
 	}
@@ -124,8 +128,8 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 			if err := params.Validate(); err != nil {
 				return protocol.AttachResponse{}, err
 			}
-			if params.ProjectID != g.identity.ProjectID {
-				return protocol.AttachResponse{}, fmt.Errorf("project %q is not hosted by this server", params.ProjectID)
+			if err := g.core.ProjectExists(ctx, params.ProjectID); err != nil {
+				return protocol.AttachResponse{}, err
 			}
 			state.attachedProject = params.ProjectID
 			return protocol.AttachResponse{Kind: "project", ProjectID: params.ProjectID}, nil
@@ -152,7 +156,11 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 		})
 	case protocol.MethodSessionPlan:
 		return decodeAndHandle(req, func(params serverapi.SessionPlanRequest) (serverapi.SessionPlanResponse, error) {
-			return g.core.SessionLaunchClient().PlanSession(ctx, params)
+			launchClient, err := g.sessionLaunchClientForState(ctx, state)
+			if err != nil {
+				return serverapi.SessionPlanResponse{}, err
+			}
+			return launchClient.PlanSession(ctx, params)
 		})
 	case protocol.MethodSessionGetMainView:
 		return decodeAndHandle(req, func(params serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
@@ -289,6 +297,52 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 	default:
 		return protocol.NewErrorResponse(req.ID, protocol.ErrCodeMethodNotFound, fmt.Sprintf("method %q not found", req.Method))
 	}
+}
+
+func (g *Gateway) sessionLaunchClientForState(ctx context.Context, state *connectionState) (client serverapi.SessionLaunchService, _ error) {
+	projectID, err := g.activeProjectID(ctx, state)
+	if err != nil {
+		return nil, err
+	}
+	launchClient, err := g.core.SessionLaunchClientForProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	loopback, ok := launchClient.(interface {
+		PlanSession(context.Context, serverapi.SessionPlanRequest) (serverapi.SessionPlanResponse, error)
+	})
+	if !ok {
+		return nil, errors.New("session launch client does not implement service contract")
+	}
+	return loopback, nil
+}
+
+func (g *Gateway) runPromptClientForState(ctx context.Context, state *connectionState) (serverapi.RunPromptService, error) {
+	projectID, err := g.activeProjectID(ctx, state)
+	if err != nil {
+		return nil, err
+	}
+	runClient, err := g.core.RunPromptClientForProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	service, ok := runClient.(interface {
+		RunPrompt(context.Context, serverapi.RunPromptRequest, serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error)
+	})
+	if !ok {
+		return nil, errors.New("run prompt client does not implement service contract")
+	}
+	return service, nil
+}
+
+func (g *Gateway) activeProjectID(ctx context.Context, state *connectionState) (string, error) {
+	if trimmed := strings.TrimSpace(state.attachedProject); trimmed != "" {
+		return trimmed, nil
+	}
+	if trimmed := strings.TrimSpace(g.core.ProjectID()); trimmed != "" {
+		return trimmed, nil
+	}
+	return "", fmt.Errorf("project attachment is required")
 }
 
 func (g *Gateway) serveSubscription(ws *websocket.Conn, ctx context.Context, state *connectionState, req protocol.Request) {

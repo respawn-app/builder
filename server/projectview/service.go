@@ -48,14 +48,10 @@ func NewService(projectID, rootPath, containerDir string) (*Service, error) {
 }
 
 func NewMetadataService(metadataStore *metadata.Store, projectID string, containerDir string) (*Service, error) {
-	trimmedProjectID := strings.TrimSpace(projectID)
 	if metadataStore == nil {
 		return nil, errors.New("metadata store is required")
 	}
-	if trimmedProjectID == "" {
-		return nil, errors.New("project id is required")
-	}
-	return &Service{metadata: metadataStore, projectID: trimmedProjectID, containerDir: strings.TrimSpace(containerDir)}, nil
+	return &Service{metadata: metadataStore, projectID: strings.TrimSpace(projectID), containerDir: strings.TrimSpace(containerDir)}, nil
 }
 
 func (s *Service) ProjectID() string {
@@ -73,11 +69,21 @@ func (s *Service) ListProjects(ctx context.Context, _ serverapi.ProjectListReque
 		if err := s.syncMetadata(ctx); err != nil {
 			return serverapi.ProjectListResponse{}, err
 		}
-		overview, err := s.metadata.GetProjectOverview(ctx, s.projectID)
+		projects, err := s.metadata.ListProjects(ctx)
 		if err != nil {
 			return serverapi.ProjectListResponse{}, err
 		}
-		return serverapi.ProjectListResponse{Projects: []clientui.ProjectSummary{overview.Project}}, nil
+		if trimmedProjectID := strings.TrimSpace(s.projectID); trimmedProjectID != "" {
+			filtered := make([]clientui.ProjectSummary, 0, 1)
+			for _, project := range projects {
+				if strings.TrimSpace(project.ProjectID) == trimmedProjectID {
+					filtered = append(filtered, project)
+					break
+				}
+			}
+			return serverapi.ProjectListResponse{Projects: filtered}, nil
+		}
+		return serverapi.ProjectListResponse{Projects: projects}, nil
 	}
 	project, err := s.projectSummary()
 	if err != nil {
@@ -90,11 +96,11 @@ func (s *Service) GetProjectOverview(ctx context.Context, req serverapi.ProjectG
 	if err := req.Validate(); err != nil {
 		return serverapi.ProjectGetOverviewResponse{}, err
 	}
-	if err := s.requireProjectID(req.ProjectID); err != nil {
-		return serverapi.ProjectGetOverviewResponse{}, err
-	}
 	if s.metadata != nil {
 		if err := s.syncMetadata(ctx); err != nil {
+			return serverapi.ProjectGetOverviewResponse{}, err
+		}
+		if err := s.requireProjectID(req.ProjectID); err != nil {
 			return serverapi.ProjectGetOverviewResponse{}, err
 		}
 		overview, err := s.metadata.GetProjectOverview(ctx, req.ProjectID)
@@ -102,6 +108,9 @@ func (s *Service) GetProjectOverview(ctx context.Context, req serverapi.ProjectG
 			return serverapi.ProjectGetOverviewResponse{}, err
 		}
 		return serverapi.ProjectGetOverviewResponse{Overview: overview}, nil
+	}
+	if err := s.requireProjectID(req.ProjectID); err != nil {
+		return serverapi.ProjectGetOverviewResponse{}, err
 	}
 	project, err := s.projectSummary()
 	if err != nil {
@@ -120,11 +129,11 @@ func (s *Service) ListSessionsByProject(ctx context.Context, req serverapi.Sessi
 	if err := req.Validate(); err != nil {
 		return serverapi.SessionListByProjectResponse{}, err
 	}
-	if err := s.requireProjectID(req.ProjectID); err != nil {
-		return serverapi.SessionListByProjectResponse{}, err
-	}
 	if s.metadata != nil {
 		if err := s.syncMetadata(ctx); err != nil {
+			return serverapi.SessionListByProjectResponse{}, err
+		}
+		if err := s.requireProjectID(req.ProjectID); err != nil {
 			return serverapi.SessionListByProjectResponse{}, err
 		}
 		sessions, err := s.metadata.ListSessionsByProject(ctx, req.ProjectID)
@@ -132,6 +141,9 @@ func (s *Service) ListSessionsByProject(ctx context.Context, req serverapi.Sessi
 			return serverapi.SessionListByProjectResponse{}, err
 		}
 		return serverapi.SessionListByProjectResponse{Sessions: sessions}, nil
+	}
+	if err := s.requireProjectID(req.ProjectID); err != nil {
+		return serverapi.SessionListByProjectResponse{}, err
 	}
 	summaries, err := session.ListSessions(s.containerDir)
 	if err != nil {
@@ -153,7 +165,7 @@ func (s *Service) requireProjectID(projectID string) error {
 	if s == nil {
 		return errors.New("project service is required")
 	}
-	if strings.TrimSpace(projectID) != s.projectID {
+	if trimmedProjectID := strings.TrimSpace(s.projectID); trimmedProjectID != "" && strings.TrimSpace(projectID) != trimmedProjectID {
 		return fmt.Errorf("project %q not available", strings.TrimSpace(projectID))
 	}
 	return nil
