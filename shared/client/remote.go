@@ -43,6 +43,7 @@ func dialRemoteURL(ctx context.Context, rpcURL string, projectID string) (*Remot
 	if rpcURL == "" {
 		return nil, errors.New("rpc_url is required")
 	}
+	trimmedProjectID := strings.TrimSpace(projectID)
 	conn, cleanup, err := dialRPC(ctx, rpcURL)
 	if err != nil {
 		return nil, err
@@ -52,7 +53,10 @@ func dialRemoteURL(ctx context.Context, rpcURL string, projectID string) (*Remot
 	if err != nil {
 		return nil, err
 	}
-	return &Remote{rpcURL: rpcURL, identity: identity, projectID: strings.TrimSpace(projectID)}, nil
+	if err := attachProjectRPC(ctx, conn, trimmedProjectID); err != nil {
+		return nil, err
+	}
+	return &Remote{rpcURL: rpcURL, identity: identity, projectID: trimmedProjectID}, nil
 }
 
 func (c *Remote) Close() error {

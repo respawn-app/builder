@@ -34,6 +34,7 @@ import (
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
 	"builder/shared/config"
+	"builder/shared/serverapi"
 )
 
 type Core struct {
@@ -62,6 +63,18 @@ type Core struct {
 	sessionLifecycle client.SessionLifecycleClient
 	sessionActivity  client.SessionActivityClient
 	runPrompt        client.RunPromptClient
+}
+
+type unregisteredSessionLaunchClient struct{}
+
+func (unregisteredSessionLaunchClient) PlanSession(context.Context, serverapi.SessionPlanRequest) (serverapi.SessionPlanResponse, error) {
+	return serverapi.SessionPlanResponse{}, metadata.ErrWorkspaceNotRegistered
+}
+
+type unregisteredRunPromptClient struct{}
+
+func (unregisteredRunPromptClient) RunPrompt(context.Context, serverapi.RunPromptRequest, serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
+	return serverapi.RunPromptResponse{}, metadata.ErrWorkspaceNotRegistered
 }
 
 func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport serverbootstrap.RuntimeSupport) (*Core, error) {
@@ -123,10 +136,12 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		promptControl:    client.NewLoopbackPromptControlClient(promptControlService),
 		promptActivity:   client.NewLoopbackPromptActivityClient(promptActivityService),
 		runtimeControls:  client.NewLoopbackRuntimeControlClient(runtimeControlService),
+		sessionLaunch:    unregisteredSessionLaunchClient{},
 		sessionRuntime:   client.NewLoopbackSessionRuntimeClient(sessionRuntimeService),
 		sessionViews:     client.NewLoopbackSessionViewClient(sessionViewService),
 		sessionLifecycle: client.NewLoopbackSessionLifecycleClient(sessionLifecycleService),
 		sessionActivity:  client.NewLoopbackSessionActivityClient(sessionActivityService),
+		runPrompt:        unregisteredRunPromptClient{},
 	}
 	binding, err := metadataStore.EnsureWorkspaceBinding(context.Background(), cfg.WorkspaceRoot)
 	if err != nil && !errors.Is(err, metadata.ErrWorkspaceNotRegistered) {
