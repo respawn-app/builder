@@ -352,6 +352,38 @@ func TestRemoteProcessOutputSubscriptionAttachesProjectBeforeSubscribe(t *testin
 	defer func() { _ = sub.Close() }()
 }
 
+func TestDialRemoteURLForProjectValidatesAttachProject(t *testing.T) {
+	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
+		defer func() { _ = ws.Close() }()
+		var req protocol.Request
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}})); err != nil {
+			return
+		}
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if req.Method != protocol.MethodAttachProject {
+			t.Fatalf("expected attach-project during dial, got %q", req.Method)
+		}
+		_ = websocket.JSON.Send(ws, protocol.NewErrorResponse(req.ID, protocol.ErrCodeInvalidParams, "project not available"))
+	}))
+	defer server.Close()
+
+	remote, err := DialRemoteURLForProject(context.Background(), "ws"+server.URL[len("http"):], "project-missing")
+	if err == nil {
+		if remote != nil {
+			_ = remote.Close()
+		}
+		t.Fatal("expected dial to fail when project attach is rejected")
+	}
+	if remote != nil {
+		t.Fatalf("expected nil remote on attach failure, got %v", remote)
+	}
+}
+
 func TestProtocolErrorMapsPromptTerminalCodes(t *testing.T) {
 	if err := protocolError(&protocol.ResponseError{Code: protocol.ErrCodePromptNotFound, Message: "missing"}); !errors.Is(err, serverapi.ErrPromptNotFound) {
 		t.Fatalf("expected prompt not found, got %v", err)
