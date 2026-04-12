@@ -96,6 +96,7 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 - Pending ask and approval delivery is a first-class server-driven prompt activity stream; attach and reconnect still use explicit pending-resource reads for hydration.
 - Restart recovery should preserve the current transcript-driven behavior: interrupted tool-call attempts remain durable in conversation state, reopen appends the interruption marker, and the next model turn re-evaluates what to do. This is distinct from persisting broker queue state as a first-class durable object.
 - The server binds locally by default. Remote listeners require explicit opt-in.
+- Server listen configuration is explicit via separate host and port settings. The daemon binds exactly the configured address, uses a fixed built-in default port in the private/dynamic range, and fails startup if that port is occupied; it must not silently rebind, fall back, or auto-pick an ephemeral port.
 - The frontend must be able to show which server or execution host it is attached to.
 
 ## Workflow Ownership
@@ -158,12 +159,13 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 
 ## Startup And Composition
 
-- CLI local server discovery should use an app-global well-known local control endpoint or socket with compatibility handshake; discovery must not remain workspace-scoped after the temporary Phase 3 bridge is removed.
+- CLI local server attach should use the explicitly configured `server_host` and `server_port` with compatibility handshake; persisted discovery artifacts are not part of the target architecture.
 - Compatibility should be established through a dedicated initial handshake method before attach or query calls.
 - Session attachment and event subscription should be separate explicit protocol steps.
 - `attach` should acknowledge plus return minimal attached-resource metadata such as ids and kinds, but not snapshots.
 - Project attachment establishes context only; project and session index snapshots remain explicit queries.
 - Server handshake identity should describe the server process and capabilities, not imply that the server is scoped to one project or workspace.
+- The topology cutover away from workspace-scoped daemon discovery is hard. No migration script, bridge mode, or long-lived compatibility layer is maintained for old discovery artifacts.
 - When CLI startup cwd does not resolve to any registered project/workspace/worktree, the user should see a project picker with explicit registration choices. Creating a new project may attach the current workspace as the first workspace and remember the current root as the main worktree when appropriate.
 - Selecting an existing project from that flow should ask whether to attach the current workspace to that project or exit; registration remains explicit.
 - CLI UX may remain workspace-first outside that startup or registration flow. Projects need not become a broad first-class navigation surface in the TUI yet.
