@@ -70,6 +70,9 @@ func tryDialMatchingConfiguredRemote(ctx context.Context, opts Options, supports
 	if err != nil {
 		return nil, false
 	}
+	if strings.TrimSpace(projectID) == "" {
+		return nil, false
+	}
 	remote, err := dialConfiguredRemote(ctx, config.ServerRPCURL(cfg), projectID)
 	if err != nil {
 		return nil, false

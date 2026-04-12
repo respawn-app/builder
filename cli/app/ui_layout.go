@@ -264,8 +264,7 @@ func (l uiViewLayout) renderNativePendingLines(width int) []string {
 	rendered := renderNativePendingToolSnapshot(l.model.transcriptEntries, l.model.theme, width, l.model.spinnerFrame)
 	pendingEntries := nativePendingEntries(l.model.transcriptEntries)
 	for _, entry := range pendingEntries {
-		role := strings.TrimSpace(entry.Role)
-		if role == "tool_call" || strings.HasPrefix(role, "tool_result") {
+		if isNativePendingToolRole(entry.Role) {
 			continue
 		}
 		rendered = renderNativePendingOngoingSnapshot(pendingEntries, l.model.theme, width, l.model.spinnerFrame)
@@ -275,6 +274,15 @@ func (l uiViewLayout) renderNativePendingLines(width int) []string {
 		return nil
 	}
 	return strings.Split(rendered, "\n")
+}
+
+func isNativePendingToolRole(role string) bool {
+	switch strings.TrimSpace(role) {
+	case "tool_call", "tool_result", "tool_result_ok", "tool_result_error":
+		return true
+	default:
+		return false
+	}
 }
 
 func (l uiViewLayout) syncNativeLiveRegionState() {

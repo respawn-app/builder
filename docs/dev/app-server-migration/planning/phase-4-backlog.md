@@ -18,11 +18,11 @@ This file is intentionally narrower than `plan.md`.
 - Phase 4D is now implemented: topology/direct-attach cutover is complete, the daemon is app-global per persistence root, and active startup no longer depends on persisted discovery artifacts.
 - This document remains as historical planning context for how the final Phase 4 slice was decomposed.
 
-## Phase 4D Remaining Slice
+## Historical Phase 4D Slice
 
-Detailed implementation planning for this slice lives in `phase-4d-plan.md`.
+Detailed implementation planning for this completed slice lives in `phase-4d-plan.md`.
 
-This is the minimum sequence the next implementation turn should be able to start from directly.
+This is the historical execution sequence that closed Phase 4D.
 
 1. Remove persisted discovery from the target topology and switch attach/bootstrap to direct configured-address dial (`server_host` + `server_port`).
 2. Narrow `shared/protocol.ServerIdentity` so handshake identity describes the server process and capabilities, not one hosted project/workspace.
