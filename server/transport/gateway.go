@@ -183,7 +183,7 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 		})
 	case protocol.MethodSessionGetInitialInput:
 		return decodeAndHandle(req, func(params serverapi.SessionInitialInputRequest) (serverapi.SessionInitialInputResponse, error) {
-			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+			if err := g.requireSessionInActiveProjectIfPresent(ctx, state, params.SessionID); err != nil {
 				return serverapi.SessionInitialInputResponse{}, err
 			}
 			return g.core.SessionLifecycleClient().GetInitialInput(ctx, params)
@@ -197,7 +197,7 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 		})
 	case protocol.MethodSessionResolveTransition:
 		return decodeAndHandle(req, func(params serverapi.SessionResolveTransitionRequest) (serverapi.SessionResolveTransitionResponse, error) {
-			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+			if err := g.requireSessionInActiveProjectIfPresent(ctx, state, params.SessionID); err != nil {
 				return serverapi.SessionResolveTransitionResponse{}, err
 			}
 			return g.core.SessionLifecycleClient().ResolveTransition(ctx, params)
@@ -466,6 +466,13 @@ func (g *Gateway) requireSessionInActiveProject(ctx context.Context, state *conn
 		return err
 	}
 	return g.core.SessionBelongsToProject(ctx, sessionID, projectID)
+}
+
+func (g *Gateway) requireSessionInActiveProjectIfPresent(ctx context.Context, state *connectionState, sessionID string) error {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil
+	}
+	return g.requireSessionInActiveProject(ctx, state, sessionID)
 }
 
 func (g *Gateway) processInActiveProject(ctx context.Context, state *connectionState, processID string) (serverapi.ProcessGetResponse, error) {

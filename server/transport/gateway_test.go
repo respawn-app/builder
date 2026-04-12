@@ -249,6 +249,73 @@ func TestGatewayRejectsSessionAccessOutsideAttachedProject(t *testing.T) {
 	}
 }
 
+func TestGatewayAllowsOptionalSessionLifecycleRequestsWithoutSessionID(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	registerGatewayWorkspace(t, workspace)
+
+	resolved, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspace})
+	if err != nil {
+		t.Fatalf("ResolveConfig: %v", err)
+	}
+	binding, err := metadata.ResolveBinding(context.Background(), resolved.Config.PersistenceRoot, resolved.Config.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("ResolveBinding: %v", err)
+	}
+	authSupport, err := serverbootstrap.BuildAuthSupport(auth.NewMemoryStore(auth.EmptyState()), nil, nil)
+	if err != nil {
+		t.Fatalf("BuildAuthSupport: %v", err)
+	}
+	runtimeSupport, err := serverbootstrap.BuildRuntimeSupport(resolved.Config)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSupport: %v", err)
+	}
+	defer func() { _ = runtimeSupport.Background.Close() }()
+	appCore, err := core.New(resolved.Config, authSupport, runtimeSupport)
+	if err != nil {
+		t.Fatalf("core.New: %v", err)
+	}
+	defer func() { _ = appCore.Close() }()
+	gateway, err := NewGateway(appCore, protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"})
+	if err != nil {
+		t.Fatalf("NewGateway: %v", err)
+	}
+	server := httptest.NewServer(gateway.Handler())
+	defer server.Close()
+
+	remote, err := remoteclient.DialRemoteURLForProject(context.Background(), "ws"+server.URL[len("http"):], binding.ProjectID)
+	if err != nil {
+		t.Fatalf("DialRemoteURLForProject: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	initialInput, err := remote.GetInitialInput(context.Background(), serverapi.SessionInitialInputRequest{TransitionInput: "draft text"})
+	if err != nil {
+		t.Fatalf("GetInitialInput: %v", err)
+	}
+	if initialInput.Input != "draft text" {
+		t.Fatalf("initial input = %q, want draft text", initialInput.Input)
+	}
+
+	resolvedTransition, err := remote.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
+		ClientRequestID: "new-session-no-current-session",
+		Transition: serverapi.SessionTransition{
+			Action:        "new_session",
+			InitialPrompt: "hello",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveTransition: %v", err)
+	}
+	if !resolvedTransition.ShouldContinue || !resolvedTransition.ForceNewSession {
+		t.Fatalf("unexpected transition response: %+v", resolvedTransition)
+	}
+	if resolvedTransition.InitialPrompt != "hello" {
+		t.Fatalf("initial prompt = %q, want hello", resolvedTransition.InitialPrompt)
+	}
+}
+
 func TestGatewayProjectReattachClearsStaleSessionAttachment(t *testing.T) {
 	home := t.TempDir()
 	workspaceA := t.TempDir()
