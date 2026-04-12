@@ -3,10 +3,11 @@ package transport
 import (
 	"context"
 	"encoding/json"
-	"net"
 	"net/http/httptest"
+	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	shelltool "builder/server/tools/shell"
 	remoteclient "builder/shared/client"
 	"builder/shared/clientui"
+	"builder/shared/config"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
 	"golang.org/x/net/websocket"
@@ -41,15 +43,12 @@ func registerGatewayWorkspace(t *testing.T, workspace string) {
 
 func configureGatewayTestServerPort(t *testing.T) {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("reserve server port: %v", err)
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	_ = listener.Close()
+	port := 56000 + int(gatewayTestPortCounter.Add(1))
 	t.Setenv("BUILDER_SERVER_HOST", "127.0.0.1")
 	t.Setenv("BUILDER_SERVER_PORT", strconv.Itoa(port))
 }
+
+var gatewayTestPortCounter atomic.Uint32
 
 func TestGatewayHandshakeAndProjectList(t *testing.T) {
 	home := t.TempDir()
@@ -174,21 +173,99 @@ func TestGatewayRejectsMethodsBeforeHandshake(t *testing.T) {
 	}
 }
 
+func TestGatewayRejectsSessionAccessOutsideAttachedProject(t *testing.T) {
+	home := t.TempDir()
+	workspaceA := t.TempDir()
+	workspaceB := t.TempDir()
+	t.Setenv("HOME", home)
+	configureGatewayTestServerPort(t)
+
+	resolvedA, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspaceA})
+	if err != nil {
+		t.Fatalf("ResolveConfig A: %v", err)
+	}
+	bindingA, err := metadata.RegisterBinding(context.Background(), resolvedA.Config.PersistenceRoot, resolvedA.Config.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterBinding A: %v", err)
+	}
+	resolvedB, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspaceB})
+	if err != nil {
+		t.Fatalf("ResolveConfig B: %v", err)
+	}
+	bindingB, err := metadata.RegisterBinding(context.Background(), resolvedB.Config.PersistenceRoot, resolvedB.Config.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterBinding B: %v", err)
+	}
+	metadataStore, err := metadata.Open(resolvedA.Config.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	defer func() { _ = metadataStore.Close() }()
+	foreignSession, err := session.Create(
+		config.ProjectSessionsRoot(resolvedB.Config, bindingB.ProjectID),
+		"workspace-b",
+		resolvedB.Config.WorkspaceRoot,
+		metadataStore.AuthoritativeSessionStoreOptions()...,
+	)
+	if err != nil {
+		t.Fatalf("session.Create foreign: %v", err)
+	}
+
+	authSupport, err := serverbootstrap.BuildAuthSupport(auth.NewMemoryStore(auth.EmptyState()), nil, nil)
+	if err != nil {
+		t.Fatalf("BuildAuthSupport: %v", err)
+	}
+	runtimeSupport, err := serverbootstrap.BuildRuntimeSupport(resolvedA.Config)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSupport: %v", err)
+	}
+	defer func() { _ = runtimeSupport.Background.Close() }()
+	appCore, err := core.New(resolvedA.Config, authSupport, runtimeSupport)
+	if err != nil {
+		t.Fatalf("core.New: %v", err)
+	}
+	defer func() { _ = appCore.Close() }()
+	gateway, err := NewGateway(appCore, protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"})
+	if err != nil {
+		t.Fatalf("NewGateway: %v", err)
+	}
+	server := httptest.NewServer(gateway.Handler())
+	defer server.Close()
+
+	remote, err := remoteclient.DialRemoteURLForProject(context.Background(), "ws"+server.URL[len("http"):], bindingA.ProjectID)
+	if err != nil {
+		t.Fatalf("DialRemoteURLForProject: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	if _, err := remote.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: foreignSession.Meta().SessionID}); err == nil {
+		t.Fatal("expected foreign-project session view access to be rejected")
+	}
+	if _, err := remote.PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{SessionID: foreignSession.Meta().SessionID, Input: "should fail"}); err == nil {
+		t.Fatal("expected foreign-project session mutation to be rejected")
+	}
+	if bindingA.ProjectID == bindingB.ProjectID {
+		t.Fatalf("expected distinct project ids, both=%q", bindingA.ProjectID)
+	}
+}
+
 func TestGatewaySessionActivitySubscriptionStreamsEventsAndCompletion(t *testing.T) {
 	appCore, server := newGatewayTestServer(t)
 	defer server.Close()
+	store := createGatewayAuthoritativeSession(t, appCore)
+	appCore.RegisterSessionStore(store)
 
 	engine := &runtime.Engine{}
-	appCore.RegisterRuntime("session-1", engine)
-	defer appCore.UnregisterRuntime("session-1", engine)
+	appCore.RegisterRuntime(store.Meta().SessionID, engine)
+	defer appCore.UnregisterRuntime(store.Meta().SessionID, engine)
 
 	conn := dialGateway(t, server)
 	defer func() { _ = conn.Close() }()
 	handshakeGateway(t, conn)
-	callGateway(t, conn, "attach", protocol.MethodAttachSession, protocol.AttachSessionRequest{SessionID: "session-1"}, nil)
-	callGateway(t, conn, "subscribe", protocol.MethodSessionSubscribeActivity, serverapi.SessionActivitySubscribeRequest{SessionID: "session-1"}, nil)
+	callGateway(t, conn, "attach", protocol.MethodAttachSession, protocol.AttachSessionRequest{SessionID: store.Meta().SessionID}, nil)
+	callGateway(t, conn, "subscribe", protocol.MethodSessionSubscribeActivity, serverapi.SessionActivitySubscribeRequest{SessionID: store.Meta().SessionID}, nil)
 
-	appCore.PublishRuntimeEvent("session-1", runtime.Event{Kind: runtime.EventConversationUpdated, StepID: "step-1"})
+	appCore.PublishRuntimeEvent(store.Meta().SessionID, runtime.Event{Kind: runtime.EventConversationUpdated, StepID: "step-1"})
 	var notif protocol.Request
 	if err := websocket.JSON.Receive(conn, &notif); err != nil {
 		t.Fatalf("receive notification: %v", err)
@@ -204,7 +281,7 @@ func TestGatewaySessionActivitySubscriptionStreamsEventsAndCompletion(t *testing
 		t.Fatalf("unexpected event: %+v", event.Event)
 	}
 
-	appCore.PublishRuntimeEvent("session-1", runtime.Event{
+	appCore.PublishRuntimeEvent(store.Meta().SessionID, runtime.Event{
 		Kind:     runtime.EventToolCallStarted,
 		ToolCall: &llm.ToolCall{ID: "call-1", Name: "shell"},
 	})
@@ -227,7 +304,7 @@ func TestGatewaySessionActivitySubscriptionStreamsEventsAndCompletion(t *testing
 		t.Fatalf("expected raw gateway passthrough to preserve unformatted tool call text, got %+v", event.Event.TranscriptEntries[0])
 	}
 
-	appCore.UnregisterRuntime("session-1", engine)
+	appCore.UnregisterRuntime(store.Meta().SessionID, engine)
 	if err := websocket.JSON.Receive(conn, &notif); err != nil {
 		t.Fatalf("receive completion: %v", err)
 	}
@@ -246,10 +323,12 @@ func TestGatewaySessionActivitySubscriptionStreamsEventsAndCompletion(t *testing
 func TestGatewayRemoteSessionActivityRecoversToolCallTextWithoutPresentation(t *testing.T) {
 	appCore, server := newGatewayTestServer(t)
 	defer server.Close()
+	store := createGatewayAuthoritativeSession(t, appCore)
+	appCore.RegisterSessionStore(store)
 
 	engine := &runtime.Engine{}
-	appCore.RegisterRuntime("session-1", engine)
-	defer appCore.UnregisterRuntime("session-1", engine)
+	appCore.RegisterRuntime(store.Meta().SessionID, engine)
+	defer appCore.UnregisterRuntime(store.Meta().SessionID, engine)
 
 	remote, err := remoteclient.DialRemoteURLForProject(context.Background(), "ws"+server.URL[len("http"):], appCore.ProjectID())
 	if err != nil {
@@ -257,13 +336,13 @@ func TestGatewayRemoteSessionActivityRecoversToolCallTextWithoutPresentation(t *
 	}
 	defer func() { _ = remote.Close() }()
 
-	sub, err := remote.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: "session-1"})
+	sub, err := remote.SubscribeSessionActivity(context.Background(), serverapi.SessionActivitySubscribeRequest{SessionID: store.Meta().SessionID})
 	if err != nil {
 		t.Fatalf("SubscribeSessionActivity: %v", err)
 	}
 	defer func() { _ = sub.Close() }()
 
-	appCore.PublishRuntimeEvent("session-1", runtime.Event{
+	appCore.PublishRuntimeEvent(store.Meta().SessionID, runtime.Event{
 		Kind:     runtime.EventToolCallStarted,
 		ToolCall: &llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
 	})
@@ -291,10 +370,7 @@ func TestGatewayRemoteSessionActivityStreamsDirectSubmittedUserMessage(t *testin
 	appCore, server := newGatewayTestServer(t)
 	defer server.Close()
 
-	store, err := session.Create(t.TempDir(), "ws", t.TempDir())
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
+	store := createGatewayAuthoritativeSession(t, appCore)
 	eng, err := runtime.New(store, gatewayTestLLMClient{response: llm.Response{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"}, Usage: llm.Usage{WindowTokens: 200000}}}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", OnEvent: func(evt runtime.Event) {
 		appCore.PublishRuntimeEvent(store.Meta().SessionID, evt)
 	}})
@@ -350,10 +426,7 @@ func TestGatewayRemoteSessionActivityPreservesActiveSubmitOrderingUsingAssistant
 	appCore, server := newGatewayTestServer(t)
 	defer server.Close()
 
-	store, err := session.Create(t.TempDir(), "ws", t.TempDir())
-	if err != nil {
-		t.Fatalf("create store: %v", err)
-	}
+	store := createGatewayAuthoritativeSession(t, appCore)
 	eng, err := runtime.New(store, &gatewayTestStreamingClient{}, tools.NewRegistry(gatewayTestShellTool{}), runtime.Config{Model: "gpt-5", OnEvent: func(evt runtime.Event) {
 		appCore.PublishRuntimeEvent(store.Meta().SessionID, evt)
 	}})
@@ -571,17 +644,19 @@ func TestGatewayProcessOutputSubscriptionStreamsOutputAndCompletion(t *testing.T
 func TestGatewayPromptActivitySubscriptionStreamsPendingResolvedAndCompletion(t *testing.T) {
 	appCore, server := newGatewayTestServer(t)
 	defer server.Close()
+	store := createGatewayAuthoritativeSession(t, appCore)
+	appCore.RegisterSessionStore(store)
 
 	engine := &runtime.Engine{}
-	appCore.RegisterRuntime("session-1", engine)
-	defer appCore.UnregisterRuntime("session-1", engine)
-	appCore.BeginPendingPrompt("session-1", askquestion.Request{ID: "ask-1", Question: "Proceed?", Suggestions: []string{"Yes", "No"}})
+	appCore.RegisterRuntime(store.Meta().SessionID, engine)
+	defer appCore.UnregisterRuntime(store.Meta().SessionID, engine)
+	appCore.BeginPendingPrompt(store.Meta().SessionID, askquestion.Request{ID: "ask-1", Question: "Proceed?", Suggestions: []string{"Yes", "No"}})
 
 	conn := dialGateway(t, server)
 	defer func() { _ = conn.Close() }()
 	handshakeGateway(t, conn)
-	callGateway(t, conn, "attach", protocol.MethodAttachSession, protocol.AttachSessionRequest{SessionID: "session-1"}, nil)
-	callGateway(t, conn, "subscribe", protocol.MethodPromptSubscribeActivity, serverapi.PromptActivitySubscribeRequest{SessionID: "session-1"}, nil)
+	callGateway(t, conn, "attach", protocol.MethodAttachSession, protocol.AttachSessionRequest{SessionID: store.Meta().SessionID}, nil)
+	callGateway(t, conn, "subscribe", protocol.MethodPromptSubscribeActivity, serverapi.PromptActivitySubscribeRequest{SessionID: store.Meta().SessionID}, nil)
 
 	var notif protocol.Request
 	if err := websocket.JSON.Receive(conn, &notif); err != nil {
@@ -598,7 +673,7 @@ func TestGatewayPromptActivitySubscriptionStreamsPendingResolvedAndCompletion(t 
 		t.Fatalf("unexpected pending prompt event: %+v", pending.Event)
 	}
 
-	appCore.CompletePendingPrompt("session-1", "ask-1")
+	appCore.CompletePendingPrompt(store.Meta().SessionID, "ask-1")
 	if err := websocket.JSON.Receive(conn, &notif); err != nil {
 		t.Fatalf("receive prompt resolved: %v", err)
 	}
@@ -613,7 +688,7 @@ func TestGatewayPromptActivitySubscriptionStreamsPendingResolvedAndCompletion(t 
 		t.Fatalf("unexpected resolved prompt event: %+v", resolved.Event)
 	}
 
-	appCore.UnregisterRuntime("session-1", engine)
+	appCore.UnregisterRuntime(store.Meta().SessionID, engine)
 	if err := websocket.JSON.Receive(conn, &notif); err != nil {
 		t.Fatalf("receive prompt completion: %v", err)
 	}
@@ -658,6 +733,28 @@ func newGatewayTestServer(t *testing.T) (*core.Core, *httptest.Server) {
 		t.Fatalf("NewGateway: %v", err)
 	}
 	return appCore, httptest.NewServer(gateway.Handler())
+}
+
+func createGatewayAuthoritativeSession(t *testing.T, appCore *core.Core) *session.Store {
+	t.Helper()
+	metadataStore, err := metadata.Open(appCore.Config().PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = metadataStore.Close() })
+	store, err := session.Create(
+		config.ProjectSessionsRoot(appCore.Config(), appCore.ProjectID()),
+		filepath.Base(appCore.Config().WorkspaceRoot),
+		appCore.Config().WorkspaceRoot,
+		metadataStore.AuthoritativeSessionStoreOptions()...,
+	)
+	if err != nil {
+		t.Fatalf("session.Create: %v", err)
+	}
+	if err := store.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable: %v", err)
+	}
+	return store
 }
 
 func dialGateway(t *testing.T, server *httptest.Server) *websocket.Conn {

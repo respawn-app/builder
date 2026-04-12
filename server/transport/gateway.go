@@ -139,6 +139,9 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 			if err := params.Validate(); err != nil {
 				return protocol.AttachResponse{}, err
 			}
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return protocol.AttachResponse{}, err
+			}
 			state.attachedSession = params.SessionID
 			return protocol.AttachResponse{Kind: "session", SessionID: params.SessionID}, nil
 		})
@@ -164,106 +167,186 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 		})
 	case protocol.MethodSessionGetMainView:
 		return decodeAndHandle(req, func(params serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.SessionMainViewResponse{}, err
+			}
 			return g.core.SessionViewClient().GetSessionMainView(ctx, params)
 		})
 	case protocol.MethodSessionGetTranscriptPage:
 		return decodeAndHandle(req, func(params serverapi.SessionTranscriptPageRequest) (serverapi.SessionTranscriptPageResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.SessionTranscriptPageResponse{}, err
+			}
 			return g.core.SessionViewClient().GetSessionTranscriptPage(ctx, params)
 		})
 	case protocol.MethodSessionGetInitialInput:
 		return decodeAndHandle(req, func(params serverapi.SessionInitialInputRequest) (serverapi.SessionInitialInputResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.SessionInitialInputResponse{}, err
+			}
 			return g.core.SessionLifecycleClient().GetInitialInput(ctx, params)
 		})
 	case protocol.MethodSessionPersistInputDraft:
 		return decodeAndHandle(req, func(params serverapi.SessionPersistInputDraftRequest) (serverapi.SessionPersistInputDraftResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.SessionPersistInputDraftResponse{}, err
+			}
 			return g.core.SessionLifecycleClient().PersistInputDraft(ctx, params)
 		})
 	case protocol.MethodSessionResolveTransition:
 		return decodeAndHandle(req, func(params serverapi.SessionResolveTransitionRequest) (serverapi.SessionResolveTransitionResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.SessionResolveTransitionResponse{}, err
+			}
 			return g.core.SessionLifecycleClient().ResolveTransition(ctx, params)
 		})
 	case protocol.MethodSessionRuntimeActivate:
 		return decodeAndHandle(req, func(params serverapi.SessionRuntimeActivateRequest) (serverapi.SessionRuntimeActivateResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.SessionRuntimeActivateResponse{}, err
+			}
 			return g.core.SessionRuntimeClient().ActivateSessionRuntime(ctx, params)
 		})
 	case protocol.MethodSessionRuntimeRelease:
 		return decodeAndHandle(req, func(params serverapi.SessionRuntimeReleaseRequest) (serverapi.SessionRuntimeReleaseResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.SessionRuntimeReleaseResponse{}, err
+			}
 			return g.core.SessionRuntimeClient().ReleaseSessionRuntime(ctx, params)
 		})
 	case protocol.MethodRunGet:
 		return decodeAndHandle(req, func(params serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.RunGetResponse{}, err
+			}
 			return g.core.SessionViewClient().GetRun(ctx, params)
 		})
 	case protocol.MethodRuntimeSetSessionName:
 		return decodeAndHandle(req, func(params serverapi.RuntimeSetSessionNameRequest) (struct{}, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return struct{}{}, err
+			}
 			return struct{}{}, g.core.RuntimeControlClient().SetSessionName(ctx, params)
 		})
 	case protocol.MethodRuntimeSetThinkingLevel:
 		return decodeAndHandle(req, func(params serverapi.RuntimeSetThinkingLevelRequest) (struct{}, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return struct{}{}, err
+			}
 			return struct{}{}, g.core.RuntimeControlClient().SetThinkingLevel(ctx, params)
 		})
 	case protocol.MethodRuntimeSetFastModeEnabled:
 		return decodeAndHandle(req, func(params serverapi.RuntimeSetFastModeEnabledRequest) (serverapi.RuntimeSetFastModeEnabledResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.RuntimeSetFastModeEnabledResponse{}, err
+			}
 			return g.core.RuntimeControlClient().SetFastModeEnabled(ctx, params)
 		})
 	case protocol.MethodRuntimeSetReviewerEnabled:
 		return decodeAndHandle(req, func(params serverapi.RuntimeSetReviewerEnabledRequest) (serverapi.RuntimeSetReviewerEnabledResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.RuntimeSetReviewerEnabledResponse{}, err
+			}
 			return g.core.RuntimeControlClient().SetReviewerEnabled(ctx, params)
 		})
 	case protocol.MethodRuntimeSetAutoCompactionEnabled:
 		return decodeAndHandle(req, func(params serverapi.RuntimeSetAutoCompactionEnabledRequest) (serverapi.RuntimeSetAutoCompactionEnabledResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.RuntimeSetAutoCompactionEnabledResponse{}, err
+			}
 			return g.core.RuntimeControlClient().SetAutoCompactionEnabled(ctx, params)
 		})
 	case protocol.MethodRuntimeAppendLocalEntry:
 		return decodeAndHandle(req, func(params serverapi.RuntimeAppendLocalEntryRequest) (struct{}, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return struct{}{}, err
+			}
 			return struct{}{}, g.core.RuntimeControlClient().AppendLocalEntry(ctx, params)
 		})
 	case protocol.MethodRuntimeShouldCompactBeforeUserMessage:
 		return decodeAndHandle(req, func(params serverapi.RuntimeShouldCompactBeforeUserMessageRequest) (serverapi.RuntimeShouldCompactBeforeUserMessageResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.RuntimeShouldCompactBeforeUserMessageResponse{}, err
+			}
 			return g.core.RuntimeControlClient().ShouldCompactBeforeUserMessage(ctx, params)
 		})
 	case protocol.MethodRuntimeSubmitUserMessage:
 		return decodeAndHandle(req, func(params serverapi.RuntimeSubmitUserMessageRequest) (serverapi.RuntimeSubmitUserMessageResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.RuntimeSubmitUserMessageResponse{}, err
+			}
 			return g.core.RuntimeControlClient().SubmitUserMessage(ctx, params)
 		})
 	case protocol.MethodRuntimeSubmitUserShellCommand:
 		return decodeAndHandle(req, func(params serverapi.RuntimeSubmitUserShellCommandRequest) (struct{}, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return struct{}{}, err
+			}
 			return struct{}{}, g.core.RuntimeControlClient().SubmitUserShellCommand(ctx, params)
 		})
 	case protocol.MethodRuntimeCompactContext:
 		return decodeAndHandle(req, func(params serverapi.RuntimeCompactContextRequest) (struct{}, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return struct{}{}, err
+			}
 			return struct{}{}, g.core.RuntimeControlClient().CompactContext(ctx, params)
 		})
 	case protocol.MethodRuntimeCompactContextForPreSubmit:
 		return decodeAndHandle(req, func(params serverapi.RuntimeCompactContextForPreSubmitRequest) (struct{}, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return struct{}{}, err
+			}
 			return struct{}{}, g.core.RuntimeControlClient().CompactContextForPreSubmit(ctx, params)
 		})
 	case protocol.MethodRuntimeHasQueuedUserWork:
 		return decodeAndHandle(req, func(params serverapi.RuntimeHasQueuedUserWorkRequest) (serverapi.RuntimeHasQueuedUserWorkResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.RuntimeHasQueuedUserWorkResponse{}, err
+			}
 			return g.core.RuntimeControlClient().HasQueuedUserWork(ctx, params)
 		})
 	case protocol.MethodRuntimeSubmitQueuedUserMessages:
 		return decodeAndHandle(req, func(params serverapi.RuntimeSubmitQueuedUserMessagesRequest) (serverapi.RuntimeSubmitQueuedUserMessagesResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.RuntimeSubmitQueuedUserMessagesResponse{}, err
+			}
 			return g.core.RuntimeControlClient().SubmitQueuedUserMessages(ctx, params)
 		})
 	case protocol.MethodRuntimeInterrupt:
 		return decodeAndHandle(req, func(params serverapi.RuntimeInterruptRequest) (struct{}, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return struct{}{}, err
+			}
 			return struct{}{}, g.core.RuntimeControlClient().Interrupt(ctx, params)
 		})
 	case protocol.MethodRuntimeQueueUserMessage:
 		return decodeAndHandle(req, func(params serverapi.RuntimeQueueUserMessageRequest) (struct{}, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return struct{}{}, err
+			}
 			return struct{}{}, g.core.RuntimeControlClient().QueueUserMessage(ctx, params)
 		})
 	case protocol.MethodRuntimeDiscardQueuedUserMessagesMatching:
 		return decodeAndHandle(req, func(params serverapi.RuntimeDiscardQueuedUserMessagesMatchingRequest) (serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse{}, err
+			}
 			return g.core.RuntimeControlClient().DiscardQueuedUserMessagesMatching(ctx, params)
 		})
 	case protocol.MethodRuntimeRecordPromptHistory:
 		return decodeAndHandle(req, func(params serverapi.RuntimeRecordPromptHistoryRequest) (struct{}, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return struct{}{}, err
+			}
 			return struct{}{}, g.core.RuntimeControlClient().RecordPromptHistory(ctx, params)
 		})
 	case protocol.MethodProcessList:
 		return decodeAndHandle(req, func(params serverapi.ProcessListRequest) (serverapi.ProcessListResponse, error) {
+			if strings.TrimSpace(params.OwnerSessionID) != "" {
+				if err := g.requireSessionInActiveProject(ctx, state, params.OwnerSessionID); err != nil {
+					return serverapi.ProcessListResponse{}, err
+				}
+			}
 			return g.core.ProcessViewClient().ListProcesses(ctx, params)
 		})
 	case protocol.MethodProcessGet:
@@ -280,18 +363,30 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 		})
 	case protocol.MethodAskListPending:
 		return decodeAndHandle(req, func(params serverapi.AskListPendingBySessionRequest) (serverapi.AskListPendingBySessionResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.AskListPendingBySessionResponse{}, err
+			}
 			return g.core.AskViewClient().ListPendingAsksBySession(ctx, params)
 		})
 	case protocol.MethodAskAnswer:
 		return decodeAndHandle(req, func(params serverapi.AskAnswerRequest) (struct{}, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return struct{}{}, err
+			}
 			return struct{}{}, g.core.PromptControlClient().AnswerAsk(ctx, params)
 		})
 	case protocol.MethodApprovalListPending:
 		return decodeAndHandle(req, func(params serverapi.ApprovalListPendingBySessionRequest) (serverapi.ApprovalListPendingBySessionResponse, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return serverapi.ApprovalListPendingBySessionResponse{}, err
+			}
 			return g.core.ApprovalViewClient().ListPendingApprovalsBySession(ctx, params)
 		})
 	case protocol.MethodApprovalAnswer:
 		return decodeAndHandle(req, func(params serverapi.ApprovalAnswerRequest) (struct{}, error) {
+			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
+				return struct{}{}, err
+			}
 			return struct{}{}, g.core.PromptControlClient().AnswerApproval(ctx, params)
 		})
 	default:
@@ -343,6 +438,14 @@ func (g *Gateway) activeProjectID(ctx context.Context, state *connectionState) (
 		return trimmed, nil
 	}
 	return "", fmt.Errorf("project attachment is required")
+}
+
+func (g *Gateway) requireSessionInActiveProject(ctx context.Context, state *connectionState, sessionID string) error {
+	projectID, err := g.activeProjectID(ctx, state)
+	if err != nil {
+		return err
+	}
+	return g.core.SessionBelongsToProject(ctx, sessionID, projectID)
 }
 
 func (g *Gateway) serveSubscription(ws *websocket.Conn, ctx context.Context, state *connectionState, req protocol.Request) {

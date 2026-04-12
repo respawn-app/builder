@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"builder/server/metadata"
+	"builder/server/serve"
 	"builder/server/session"
 	"builder/shared/config"
 )
@@ -29,7 +30,8 @@ func configureAppTestServerPort(t *testing.T) {
 		t.Fatalf("reserve server port: %v", err)
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
-	_ = listener.Close()
+	serve.ReserveTestListenReservation(listener)
+	t.Cleanup(func() { serve.ReleaseTestListenReservation(listener.Addr().String()) })
 	t.Setenv("BUILDER_SERVER_HOST", "127.0.0.1")
 	t.Setenv("BUILDER_SERVER_PORT", strconv.Itoa(port))
 }
@@ -61,6 +63,10 @@ func createAuthoritativeAppSession(t *testing.T, persistenceRoot string, workspa
 	if err != nil {
 		_ = metadataStore.Close()
 		t.Fatalf("session.Create: %v", err)
+	}
+	if err := store.EnsureDurable(); err != nil {
+		_ = metadataStore.Close()
+		t.Fatalf("EnsureDurable: %v", err)
 	}
 	t.Cleanup(func() { _ = metadataStore.Close() })
 	return store

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -760,6 +761,43 @@ func TestRuntimeClientMainViewCachesFallbackAfterReadError(t *testing.T) {
 	}
 	if got := reads.count.Load(); got != 1 {
 		t.Fatalf("main view read count after cached fallback = %d, want 1", got)
+	}
+}
+
+func TestRuntimeClientRefreshTranscriptPagePreservesLastKnownPageOnReadError(t *testing.T) {
+	reads := &countingSessionViewClient{}
+	runtimeClient := newUIRuntimeClientWithReads(
+		"session-1",
+		reads,
+		sharedclient.NewLoopbackRuntimeControlClient(runtimecontrol.NewService(registry.NewRuntimeRegistry(), nil)),
+	)
+	concrete, ok := runtimeClient.(*sessionRuntimeClient)
+	if !ok {
+		t.Fatalf("runtime client type = %T, want *sessionRuntimeClient", runtimeClient)
+	}
+	seedReq := clientui.TranscriptPageRequest{Page: 2, PageSize: 25}
+	seedPage := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     7,
+		Offset:       25,
+		TotalEntries: 40,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "cached page"}},
+	}
+	concrete.storeTranscriptForRequest(seedReq, seedPage)
+
+	var observedErr error
+	concrete.SetConnectionStateObserver(func(err error) { observedErr = err })
+	concrete.reads = &flakySessionViewClient{errs: []error{context.DeadlineExceeded}}
+
+	page, err := concrete.refreshTranscriptPageSync(seedReq, time.Millisecond)
+	if err != context.DeadlineExceeded {
+		t.Fatalf("refresh transcript page error = %v, want %v", err, context.DeadlineExceeded)
+	}
+	if observedErr != context.DeadlineExceeded {
+		t.Fatalf("observed connection state error = %v, want %v", observedErr, context.DeadlineExceeded)
+	}
+	if !reflect.DeepEqual(page, seedPage) {
+		t.Fatalf("refresh transcript page fallback = %+v, want %+v", page, seedPage)
 	}
 }
 
