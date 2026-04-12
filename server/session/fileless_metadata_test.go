@@ -136,6 +136,39 @@ func TestFilelessMetadataPersistenceSkipsSessionFileAndPublishesObserver(t *test
 	}
 }
 
+func TestForkAtUserMessagePreservesPersistenceOptions(t *testing.T) {
+	root := t.TempDir()
+	observer := &recordingPersistenceObserver{}
+	parent, err := Create(
+		root,
+		"workspace-x",
+		"/tmp/work",
+		WithPersistenceObserver(observer),
+		WithFilelessMetadataPersistence(),
+	)
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	if _, err := parent.AppendEvent("s1", "message", map[string]any{"role": "user", "content": "u1"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	observer.called = false
+
+	forked, err := ForkAtUserMessage(parent, 1, "Parent -> edit u1")
+	if err != nil {
+		t.Fatalf("fork at user message: %v", err)
+	}
+	if !observer.called {
+		t.Fatal("expected forked child persistence to publish observer snapshot")
+	}
+	if observer.snapshot.Meta.SessionID != forked.Meta().SessionID {
+		t.Fatalf("observer session id = %q, want %q", observer.snapshot.Meta.SessionID, forked.Meta().SessionID)
+	}
+	if _, err := os.Stat(filepath.Join(forked.Dir(), sessionFile)); !os.IsNotExist(err) {
+		t.Fatalf("expected forked child to preserve fileless metadata persistence, stat err=%v", err)
+	}
+}
+
 func TestOpenByIDRejectsResolverRecordWithoutMetadata(t *testing.T) {
 	root := t.TempDir()
 	sessionDir := filepath.Join(root, "projects", "project-1", "sessions", "session-1")

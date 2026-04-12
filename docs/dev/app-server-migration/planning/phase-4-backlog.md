@@ -1,6 +1,6 @@
 # Phase 4 Storage Backlog
 
-Status: planning baseline
+Status: planning baseline with 4A-4C largely landed; 4D remains open
 
 Purpose:
 
@@ -12,9 +12,32 @@ This file is intentionally narrower than `plan.md`.
 
 `plan.md` explains the phase. This file names the concrete first slices to build.
 
-## First Implementation Checklist
+## Current Status
+
+- Workstreams centered on SQLite metadata, staged migration, session metadata cutover, execution-target metadata, and `lease_id` runtime activation are largely landed.
+- The remaining unfinished Phase 4 work is topology/discovery cutover: the daemon is still discovered and identified as workspace-scoped in key startup, serve, and transport paths.
+- Phase 4D is therefore the next execution slice. It should not redo 4A-4C storage work; it should finish the app-global daemon model on top of the landed metadata authority.
+
+## Phase 4D Remaining Slice
+
+Detailed implementation planning for this slice lives in `phase-4d-plan.md`.
 
 This is the minimum sequence the next implementation turn should be able to start from directly.
+
+1. Replace workspace-container discovery with one app-global discovery record.
+2. Narrow `shared/protocol.ServerIdentity` so handshake identity describes the server process and capabilities, not one hosted project/workspace.
+3. Refactor server composition so `server/core` is app-global over metadata and can host multiple projects instead of binding startup to one workspace root / one `project_id`.
+4. Remove transport restrictions that only allow `project.attach` for one pre-bound project.
+5. Add or finish server-owned cwd/path-resolution and registration queries for CLI startup against an already-discovered daemon.
+6. Switch CLI attach-or-start logic to:
+   - discover one compatible daemon first
+   - then resolve cwd/project/workspace context over RPC
+   - then run explicit registration/attach flow if cwd is unknown
+7. Rework serve/discovery/startup tests to prove one daemon can be discovered and used from multiple workspace roots.
+
+## Historical 4A-4C Checklist
+
+This checklist is kept for migration history. Most of this work is already landed and should not be re-opened while executing 4D.
 
 1. Define the first SQLite schema and migration set for:
    - `projects`
@@ -64,6 +87,7 @@ Acceptance slice:
 
 - one server can be discovered from two different workspace roots
 - handshake no longer claims one workspace/project scope
+- existing discovery, handshake, and attach tests are updated to stop asserting one `project_id` / `workspace_root` per server
 
 ## Workstream 2: Project / Workspace / Worktree Registry
 
@@ -153,6 +177,10 @@ Out of scope for Phase 4 CLI:
 - broad project navigation mode
 - full multi-workspace management UI
 
+4D note:
+
+- this flow must execute against an already-discovered daemon through server-owned queries; local workspace-bound discovery heuristics are the remaining bug here
+
 ## Workstream 5: SQLite Metadata And Session Cutover
 
 Goal:
@@ -225,20 +253,18 @@ Adoption guardrails:
 - if staging fails, the old live tree remains untouched
 - workspace relocation is handled later via explicit rebind, not inferred auto-migration
 
-## Suggested Build Order
+## Suggested 4D Build Order
 
-1. Server identity and app-global discovery
-2. Registry/data model plus cwd-resolution query
-3. SQLite metadata schema and typed access layer
-4. Startup registration flow over the new query/mutation surface
-5. Staged one-time migration and session metadata cutover
-6. Session execution-target metadata and hydration adoption
-7. Runtime lease redesign
-8. Multi-client race/reconnect/backpressure hardening over the new model
+1. App-global discovery record and handshake identity
+2. App-global core composition and multi-project gateway hosting
+3. Server-owned cwd/path-resolution and registration query/mutation surface cleanup
+4. CLI attach-or-start cutover onto daemon-first discovery
+5. Multi-workspace discovery/attach/startup proof tests
 
 ## Exit Criteria
 
 - one local server process can host sessions from multiple workspaces/projects
+- discovery record and handshake identity are app-global rather than workspace-bound
 - CLI startup remains workspace-first but uses explicit project registration when cwd is unknown
 - session status and hydration expose current workspace/worktree context
 - SQLite is authoritative for structured metadata

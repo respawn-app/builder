@@ -70,6 +70,7 @@ type Settings struct {
 	NotificationMethod               string
 	ToolPreambles                    bool
 	PriorityRequestMode              bool
+	Debug                            bool
 	WebSearch                        string
 	ProviderOverride                 string
 	OpenAIBaseURL                    string

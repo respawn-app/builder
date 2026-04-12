@@ -129,6 +129,7 @@ func (m *uiModel) handleRuntimeTranscriptRefreshed(msg runtimeTranscriptRefreshe
 	}
 	m.runtimeTranscriptBusy = false
 	if msg.err != nil {
+		m.invalidateTransientTranscriptState()
 		m.observeRuntimeRequestResult(msg.err)
 		m.logf("ui.runtime.transcript err=%q", msg.err.Error())
 		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.hydrate_response", map[string]string{

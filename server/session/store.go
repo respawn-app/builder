@@ -59,10 +59,14 @@ func Create(workspaceContainerDir, workspaceContainerName, workspaceRoot string,
 }
 
 func NewLazy(workspaceContainerDir, workspaceContainerName, workspaceRoot string, options ...StoreOption) (*Store, error) {
+	storeOpts := normalizeStoreOptions(options...)
+	return newLazyWithStoreOptions(workspaceContainerDir, workspaceContainerName, workspaceRoot, storeOpts)
+}
+
+func newLazyWithStoreOptions(workspaceContainerDir, workspaceContainerName, workspaceRoot string, storeOpts storeOptions) (*Store, error) {
 	sid := uuid.NewString()
 	sessionDir := filepath.Join(workspaceContainerDir, sid)
 	now := time.Now().UTC()
-	storeOpts := normalizeStoreOptions(options...)
 	return &Store{
 		sessionDir: sessionDir,
 		sessionFP:  filepath.Join(sessionDir, sessionFile),

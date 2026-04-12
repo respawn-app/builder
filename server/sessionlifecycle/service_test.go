@@ -104,7 +104,8 @@ func TestServicePersistInputDraftRejectsPathLikeSessionID(t *testing.T) {
 func TestServiceResolveTransitionRejectsPathLikeSessionID(t *testing.T) {
 	service := NewService(t.TempDir(), nil, nil)
 	_, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
-		SessionID: "../session-1",
+		ClientRequestID: "req-1",
+		SessionID:       "../session-1",
 		Transition: serverapi.SessionTransition{
 			Action: "continue",
 		},
@@ -131,7 +132,8 @@ func TestServiceResolveTransitionForkRollbackCreatesFork(t *testing.T) {
 
 	service := NewService(containerDir, nil, nil)
 	resp, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
-		SessionID: store.Meta().SessionID,
+		ClientRequestID: "req-1",
+		SessionID:       store.Meta().SessionID,
 		Transition: serverapi.SessionTransition{
 			Action:               "fork_rollback",
 			InitialPrompt:        "edited prompt",
@@ -219,7 +221,8 @@ func TestServiceResolveTransitionLogoutUsesSessionIDWithoutStoreLookup(t *testin
 	service := NewService(t.TempDir(), nil, mgr)
 
 	resp, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
-		SessionID: "session-42",
+		ClientRequestID: "req-1",
+		SessionID:       "session-42",
 		Transition: serverapi.SessionTransition{
 			Action: "logout",
 		},
@@ -239,5 +242,61 @@ func TestServiceResolveTransitionLogoutUsesSessionIDWithoutStoreLookup(t *testin
 	}
 	if state.Method.Type != "" || state.Method.APIKey != nil {
 		t.Fatalf("expected auth method to be cleared, got %+v", state.Method)
+	}
+}
+
+func TestServiceResolveTransitionRequiresClientRequestID(t *testing.T) {
+	service := NewService(t.TempDir(), nil, nil)
+	_, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
+		Transition: serverapi.SessionTransition{Action: "continue"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "client_request_id is required") {
+		t.Fatalf("expected missing client_request_id error, got %v", err)
+	}
+}
+
+func TestServiceResolveTransitionDeduplicatesLogoutByClientRequestID(t *testing.T) {
+	mgr := auth.NewManager(auth.NewMemoryStore(auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "sk-before"},
+		},
+	}), nil, time.Now)
+	service := NewService(t.TempDir(), nil, mgr)
+	req := serverapi.SessionResolveTransitionRequest{
+		ClientRequestID: "dup-1",
+		SessionID:       "session-42",
+		Transition:      serverapi.SessionTransition{Action: "logout"},
+	}
+
+	first, err := service.ResolveTransition(context.Background(), req)
+	if err != nil {
+		t.Fatalf("ResolveTransition first: %v", err)
+	}
+	second, err := service.ResolveTransition(context.Background(), req)
+	if err != nil {
+		t.Fatalf("ResolveTransition second: %v", err)
+	}
+	if first != second {
+		t.Fatalf("expected duplicate logout response replay, first=%+v second=%+v", first, second)
+	}
+}
+
+func TestServiceResolveTransitionRejectsClientRequestIDReuseWithDifferentPayload(t *testing.T) {
+	service := NewService(t.TempDir(), nil, nil)
+	first := serverapi.SessionResolveTransitionRequest{
+		ClientRequestID: "dup-1",
+		SessionID:       "session-42",
+		Transition:      serverapi.SessionTransition{Action: "continue"},
+	}
+	second := first
+	second.Transition.Action = "logout"
+
+	if _, err := service.ResolveTransition(context.Background(), first); err != nil {
+		t.Fatalf("ResolveTransition first: %v", err)
+	}
+	if _, err := service.ResolveTransition(context.Background(), second); err == nil || err.Error() != "client_request_id \"dup-1\" reused with different payload" {
+		t.Fatalf("expected payload reuse rejection, got %v", err)
 	}
 }

@@ -262,6 +262,15 @@ func renderNativeStreamingAssistantLines(streamText, theme string, width int) []
 
 func (l uiViewLayout) renderNativePendingLines(width int) []string {
 	rendered := renderNativePendingToolSnapshot(l.model.transcriptEntries, l.model.theme, width, l.model.spinnerFrame)
+	pendingEntries := nativePendingEntries(l.model.transcriptEntries)
+	for _, entry := range pendingEntries {
+		role := strings.TrimSpace(entry.Role)
+		if role == "tool_call" || strings.HasPrefix(role, "tool_result") {
+			continue
+		}
+		rendered = renderNativePendingOngoingSnapshot(pendingEntries, l.model.theme, width, l.model.spinnerFrame)
+		break
+	}
 	if strings.TrimSpace(rendered) == "" {
 		return nil
 	}

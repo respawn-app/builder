@@ -99,6 +99,7 @@
 - The server-driven migration target uses hybrid persistence: SQLite is authoritative for structured metadata and server-owned resources; large append-only session artifacts stay file-backed.
 - The durable domain model is `project > workspace > worktree`; legacy workspace-scoped containers are migration input, not future protocol identity.
 - Sessions remain project-scoped durable objects and carry a mutable current execution target `(workspace_id, worktree_id?, cwd_relpath)`.
+- The Phase 4 topology target is one app-global daemon per persistence root. Discovery is app-global, handshake identity is process-scoped rather than project/workspace-scoped, and one daemon may host multiple projects under that persistence root.
 - For the migration's runtime-residency model, lease identity is explicit and distinct from `client_request_id`; reconnect rehydrates, reattaches, and acquires a fresh lease rather than reclaiming an abandoned one.
 - Post-migration, `session.json` is removed. Session metadata authority moves to SQLite. `events.jsonl` and `steps.log` remain file-backed for now.
 - Interactive session creation remains lazily durable; creating a new interactive session does not immediately force durable metadata writes.
@@ -203,6 +204,7 @@
 - `theme=light` and `theme=dark` select Builder's own fixed palettes. `theme=auto` or an omitted theme falls back to terminal background detection.
 - Unknown `config.toml` keys are rejected as configuration errors.
 - Configuration precedence: `CLI overrides > environment > settings file > built-in defaults`.
+- Global debug mode is configurable via `debug = true` in `config.toml` or `BUILDER_DEBUG=1` in the environment. Debug mode enables developer-oriented strictness such as hard-failing invariants that production mode recovers from.
 - Thinking level passes configured values through unchanged and applies only to OpenAI model families.
 - Context window is explicit setting: `model_context_window` (default `272000`).
 - Validation requires `context_compaction_threshold_tokens < model_context_window`.
@@ -315,9 +317,15 @@
 - Ongoing mode uses native terminal scrollback by replaying committed transcript history into the normal buffer and appending only new committed transcript deltas.
 - Main UI startup stays in the normal buffer even when `tui_alternate_screen=always`, because ongoing-mode replay must remain visible in terminal scrollback.
 - Main UI startup clears the visible terminal viewport once before rendering (including `native` mode), so each session (including `/new`) starts from a clean visible slate.
-- After startup, ongoing-mode normal-buffer history is append-only. Once a transcript line is emitted into scrollback, it is immutable: no retroactive restyling, no in-place rewrites, no clear-and-replay, and no full-buffer re-emission to reflect later state.
-- Non-append transcript mutations (compaction/rollback-style rewrites) rebase the internal formatter state without re-emitting prior history, to avoid duplicate scrollback output.
+- During continuous attachment, ongoing-mode normal-buffer history is append-only. Once a transcript line is emitted into scrollback, it is immutable: no retroactive restyling, no in-place rewrites, no clear-and-replay, and no full-buffer re-emission to paper over same-session logical divergence.
+- For frontend transcript-sync semantics, compaction is same-session committed transcript progression, not a same-session transcript rewrite.
+- Rollback/fork is navigation or attachment to a different session target, not a same-session transcript mutation.
 - Assistant streaming is rendered in the ongoing live viewport and is not appended to normal-buffer scrollback until commit.
+- Ongoing-mode normal-buffer scrollback is committed-transcript only. Tool-progress, assistant deltas, reasoning deltas, and any other provisional live activity are transient viewport state only and must never become immutable scrollback authority.
+- If connectivity or subscription continuity is lost, the transient ongoing live viewport is discarded immediately. Recovery happens by hydrating authoritative committed transcript state and resubscribing.
+- Transcript-affecting transport failures must not be swallowed or converted into fake empty/idle UI state. Correctness wins over continuity: the affected live view may stop, but it must not continue from stale transcript data.
+- For external continuity-loss recovery only, re-issuing the TUI ongoing buffer from authoritative committed state is acceptable.
+- Client-side transcript divergence caused by deduplication, ordering, overlap, or pagination bugs is not an acceptable redraw case; it must be fixed at the root cause. Global debug mode may hard-fail instead.
 - Pending tool-call activity in ongoing mode lives only in the volatile live region, not in committed normal-buffer scrollback.
 - Ongoing-mode glyphs reserve `@` for web search tool calls; reviewer status/suggestion entries use `§`.
 - Pending tool-call previews in the live region use the same rendering/layout as normal committed `tool_call` previews, with no pending-only labels, keywords, or extra markers.

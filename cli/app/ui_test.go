@@ -2158,29 +2158,25 @@ func TestRuntimeClientSubmitShowsUserMessageInTranscriptWhenFlushedEventArrives(
 		StepID:      "step-1",
 		UserMessage: "say hi",
 	}))
-	if cmd == nil {
-		t.Fatal("expected native replay command for flushed user message")
-	}
 	if got := len(updated.transcriptEntries); got != 1 {
 		t.Fatalf("expected one transcript entry after flushed user message, got %d", got)
 	}
 	if updated.transcriptEntries[0].Role != "user" || updated.transcriptEntries[0].Text != "say hi" {
 		t.Fatalf("unexpected transcript entry: %+v", updated.transcriptEntries[0])
 	}
+	if updated.transcriptEntries[0].Transient != true {
+		t.Fatalf("expected runtime-backed flushed user message to stay transient until hydrate, got %+v", updated.transcriptEntries[0])
+	}
 	msgs := collectCmdMessages(t, cmd)
-	flushFound := false
+	refreshFound := false
 	for _, msg := range msgs {
-		flushMsg, ok := msg.(nativeHistoryFlushMsg)
-		if !ok {
-			continue
-		}
-		if strings.Contains(stripANSIPreserve(flushMsg.Text), "say hi") {
-			flushFound = true
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			refreshFound = true
 			break
 		}
 	}
-	if !flushFound {
-		t.Fatalf("expected flushed replay text to include user message, got %+v", msgs)
+	if refreshFound {
+		t.Fatalf("did not expect flushed runtime user message to trigger transcript hydration, got %+v", msgs)
 	}
 }
 

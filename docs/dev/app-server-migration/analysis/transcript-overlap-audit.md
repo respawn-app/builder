@@ -88,6 +88,7 @@ Proof:
 Meaning:
 
 - user flush no longer schedules the transcript hydrate that previously raced with live assistant commentary
+- transient tool/final runtime events also stay live-only until an explicit `conversation_updated` or recovery hydrate establishes committed authority
 
 ### 6. Stream-gap recovery rehydrate across multiple streams
 

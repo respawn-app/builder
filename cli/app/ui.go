@@ -214,6 +214,12 @@ func WithUITranscriptDiagnostics(enabled bool) UIOption {
 	}
 }
 
+func WithUIDebug(enabled bool) UIOption {
+	return func(m *uiModel) {
+		m.debugMode = enabled
+	}
+}
+
 func WithUIModelName(model string) UIOption {
 	return func(m *uiModel) {
 		m.modelName = strings.TrimSpace(model)
@@ -463,6 +469,7 @@ type uiModel struct {
 	transientStatusKind   uiStatusNoticeKind
 	transientStatusToken  uint64
 	debugKeys             bool
+	debugMode             bool
 	transcriptDiagnostics bool
 
 	transcriptEntries                  []tui.TranscriptEntry
@@ -541,6 +548,7 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 		theme:                    theme.Auto,
 		tuiAlternateScreen:       config.TUIAlternateScreenAuto,
 		debugKeys:                envFlagEnabled("BUILDER_DEBUG_KEYS"),
+		debugMode:                envFlagEnabled("BUILDER_DEBUG"),
 		transcriptDiagnostics:    envFlagEnabled("BUILDER_TRANSCRIPT_DIAGNOSTICS"),
 		reviewerMode:             "off",
 		autoCompactionEnabled:    true,
@@ -1054,8 +1062,19 @@ func (m *uiModel) forwardToView(msg tea.Msg) {
 	if ok {
 		m.view = casted
 	}
-	if prevMode != m.view.Mode() && m.view.Mode() == tui.ModeDetail {
+	if prevMode != m.view.Mode() && m.view.Mode() == tui.ModeDetail && m.hasRuntimeClient() {
 		m.primeDetailTranscriptFromCurrentTail()
+		page := m.detailTranscript.page()
+		nextDetail, _ := m.view.Update(tui.SetConversationMsg{
+			BaseOffset:   page.Offset,
+			TotalEntries: page.TotalEntries,
+			Entries:      transcriptEntriesFromPage(page),
+			Ongoing:      page.Ongoing,
+			OngoingError: page.OngoingError,
+		})
+		if castedDetail, ok := nextDetail.(tui.Model); ok {
+			m.view = castedDetail
+		}
 	}
 }
 

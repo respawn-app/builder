@@ -13,6 +13,13 @@ func renderNativePendingToolSnapshot(entries []tui.TranscriptEntry, theme string
 	if len(pending) == 0 {
 		return ""
 	}
+	return renderNativePendingOngoingSnapshot(pending, theme, width, spinnerFrame)
+}
+
+func renderNativePendingOngoingSnapshot(entries []tui.TranscriptEntry, theme string, width int, spinnerFrame int) string {
+	if len(entries) == 0 {
+		return ""
+	}
 	frame := ""
 	if len(pendingToolSpinner.Frames) > 0 {
 		index := spinnerFrame % len(pendingToolSpinner.Frames)
@@ -21,5 +28,5 @@ func renderNativePendingToolSnapshot(entries []tui.TranscriptEntry, theme string
 		}
 		frame = pendingToolSpinner.Frames[index]
 	}
-	return renderStyledNativeProjectionLines(tui.RenderPendingToolSnapshotLines(pending, theme, width, frame), theme, width)
+	return renderStyledNativeProjectionLines(tui.RenderPendingOngoingSnapshotLines(entries, theme, width, frame), theme, width)
 }

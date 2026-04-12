@@ -103,6 +103,7 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 - Durable or stateful workflows should be server-owned where they materially affect system state.
 - Forking is server-owned.
 - Compaction is primarily server-owned.
+- For frontend transcript-sync semantics, compaction is same-session committed transcript progression, not a same-session transcript rewrite that justifies non-append recovery behavior.
 - Process control, including background shell and subprocess execution, is purely server-owned.
 - Asks and approvals should be first-class API resources or method families rather than only event shapes.
 - Approvals are split: the server blocks and enforces policy; the frontend exposes controls and sends responses.
@@ -110,6 +111,7 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 - `review` is a frontend-owned built-in workflow composed from generic server capabilities rather than a dedicated server review feature.
 - Child-session parent linkage should be set atomically at session creation time.
 - Low-level composable operations must exist. Convenience atomic workflows are allowed where they improve correctness, idempotency, and UX.
+- Rollback or fork flows navigate or attach to a different session target; they are not same-session transcript mutation.
 
 ## Command Ownership
 
@@ -135,8 +137,16 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 - Reconnect is snapshot/page based. A stream-history or cursor recovery contract is not part of the required architecture.
 - Large-session reconnect should prefer transcript pagination and, where useful, compression over any stream-history reconstruction design.
 - If a live stream drops or a subscriber falls behind, the recovery path is rehydrate plus resubscribe.
+- Any transport failure, stream gap, or subscription loss that risks transcript correctness must invalidate the affected live projection immediately; the client must recover from committed hydration after connectivity returns rather than continuing with stale or guessed transcript state.
+- Transport-crossing read or mutation failures must not be swallowed, downgraded to empty/idle success states, or masked by stale frontend transcript data.
 - The protocol must distinguish durable lower-volume state transitions from high-rate live feeds.
 - Transcript truth comes from typed hydration reads such as `session.getMainView` and transcript-page reads.
+- Ongoing-mode normal-buffer scrollback is committed-transcript only. The frontend may replay committed history at startup and append only new committed transcript suffixes afterward; provisional live activity must never become immutable scrollback authority.
+- Live assistant deltas, reasoning deltas, busy state, tool-progress hints, and similar progressive UX concerns are transient projection state only. They may improve live UX, but they are disposable and must not be treated as transcript truth.
+- During continuous attachment, ongoing normal-buffer history is append-only. Same-session logical divergence must not be normalized by clear-and-replay or full-buffer re-emission.
+- If external continuity is broken (for example disconnect, stream gap, client restart, daemon restart, or subscription invalidation), recovery is authoritative rehydrate plus resubscribe rather than stale/live replay.
+- For that external continuity-loss recovery class only, TUI ongoing may re-issue its ongoing buffer from authoritative committed state. This is acceptable recovery behavior for a new recovered surface instance.
+- Client-side transcript divergence caused by reconciliation, deduplication, ordering, overlap, or pagination bugs is not an acceptable redraw case; those bugs must be fixed at the root cause. Global debug mode (`debug = true` or `BUILDER_DEBUG=1`) may hard-fail invariant violations during development.
 - Prompt activity is a distinct live stream class, separate from both session activity and list-style pending prompt reads.
 - Process output is a separate stream class from process state.
 - Subscriptions should target explicit resource-scoped streams rather than a single multiplexed server-wide feed.

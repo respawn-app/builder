@@ -21,7 +21,7 @@ Out of scope for this plan:
 - new product features
 - protocol redesign beyond what is needed for transcript correctness
 - unrelated performance work outside transcript/state handling
-- phase 4 and phase 5 feature execution
+- broader phase 4 work and phase 5B multi-client proof work
 
 ## Stabilization Rule
 
@@ -158,7 +158,7 @@ This plan is complete only when all of the following are true:
 
 Do not treat transcript stabilization as done just because individual bugs were fixed.
 
-- [ ] Keep phase-4/5 feature work blocked if transcript correctness is still drifting.
+- [ ] Keep broader phase-4 work and phase-5B multi-client proof work blocked if transcript correctness is still drifting.
 - [ ] Only resume broader migration execution once the completion criteria above are satisfied.
 
 ## Current Gaps
@@ -211,7 +211,7 @@ No further mandatory code slices remain inside this stabilization execution plan
 What remains is explicit and non-hidden:
 
 - the remote commentary gap stays deferred until we deliberately change the runtime-event/projection contract
-- release-gate confidence remains a product decision rather than an implementation checklist item
+- release-gate confidence for entering phase 5A implementation remains a product decision rather than an implementation checklist item
 
 Ongoing maintenance while the branch evolves:
 

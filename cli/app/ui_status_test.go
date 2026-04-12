@@ -288,6 +288,38 @@ func TestStatusCommandPersistsPromptHistoryWithoutBlockingOpen(t *testing.T) {
 	}
 }
 
+func TestStatusCommandRendersGlobalDebugMode(t *testing.T) {
+	collector := &stubStatusCollector{snapshot: uiStatusSnapshot{
+		Workdir: "/tmp/workdir",
+		Model:   uiStatusModelInfo{Summary: "gpt-5 high"},
+		Context: uiStatusContextInfo{WindowTokens: 400000, UsedTokens: 1000, AvailableTokens: 399000, ThresholdTokens: 300000},
+		Config:  uiStatusConfigInfo{AutoCompaction: true, Debug: true},
+	}}
+
+	m := newProjectedStaticUIModel(
+		WithUIStatusConfig(uiStatusConfig{WorkspaceRoot: "/tmp/workdir"}),
+		WithUIStatusCollector(collector),
+	)
+	m.termWidth = 100
+	m.termHeight = 40
+	m.windowSizeKnown = true
+	m.input = "/status"
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(*uiModel)
+	for _, msg := range collectCmdMessages(t, cmd) {
+		if msg == nil {
+			continue
+		}
+		next, _ = updated.Update(msg)
+		updated = next.(*uiModel)
+	}
+	plain := stripANSIAndTrimRight(updated.View())
+	if !strings.Contains(plain, "debug on") {
+		t.Fatalf("expected /status to show global debug mode, got %q", plain)
+	}
+}
+
 func TestStatusGroupSkillsByDirectoryKeepsBrokenSkillUnderSkillsRoot(t *testing.T) {
 	groups := statusGroupSkillsByDirectory([]runtime.SkillInspection{
 		{Name: "apiresult", Path: "/Users/test/.builder/skills/apiresult/SKILL.md", Loaded: true},
