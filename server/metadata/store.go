@@ -354,6 +354,17 @@ func (s *Store) ResolveSessionExecutionTarget(ctx context.Context, sessionID str
 	return sessionExecutionTargetFromRow(row), nil
 }
 
+func (s *Store) SessionBelongsToProject(ctx context.Context, sessionID string, projectID string) (bool, error) {
+	if s == nil || s.queries == nil {
+		return false, errors.New("metadata store is required")
+	}
+	row, err := s.queries.GetSessionExecutionTargetByID(ctx, strings.TrimSpace(sessionID))
+	if err != nil {
+		return false, fmt.Errorf("get session execution target: %w", err)
+	}
+	return strings.TrimSpace(row.ProjectID) == strings.TrimSpace(projectID), nil
+}
+
 func (s *Store) CreateRuntimeLease(ctx context.Context, sessionID string, requestID string) (RuntimeLeaseRecord, error) {
 	if s == nil || s.queries == nil {
 		return RuntimeLeaseRecord{}, errors.New("metadata store is required")

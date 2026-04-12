@@ -325,7 +325,11 @@ func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.Transcript
 		}
 	}
 	if err != nil {
-		return clientui.TranscriptPage{SessionID: c.sessionID}, err
+		page, hasPage, _ := c.cachedTranscript(req)
+		if !hasPage && page.SessionID == "" {
+			page.SessionID = c.sessionID
+		}
+		return page, err
 	}
 	return c.storeTranscriptForRequest(req, resp.Transcript), nil
 }

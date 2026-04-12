@@ -74,7 +74,8 @@ func configureServeTestServerPort(t *testing.T) {
 		t.Fatalf("reserve server port: %v", err)
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
-	_ = listener.Close()
+	ReserveTestListenReservation(listener)
+	t.Cleanup(func() { ReleaseTestListenReservation(listener.Addr().String()) })
 	t.Setenv("BUILDER_SERVER_HOST", "127.0.0.1")
 	t.Setenv("BUILDER_SERVER_PORT", strconv.Itoa(port))
 }
@@ -229,6 +230,7 @@ func TestServeFailsWhenConfiguredPortIsOccupied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
+	ReleaseTestListenReservation(config.ServerListenAddress(loadCfg))
 	listener, err := net.Listen("tcp", config.ServerListenAddress(loadCfg))
 	if err != nil {
 		t.Fatalf("occupy configured port: %v", err)

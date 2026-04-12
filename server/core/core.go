@@ -164,6 +164,28 @@ func (s *Core) ProjectExists(ctx context.Context, projectID string) error {
 	return err
 }
 
+func (s *Core) SessionBelongsToProject(ctx context.Context, sessionID string, projectID string) error {
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	if trimmedSessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+	trimmedProjectID := strings.TrimSpace(projectID)
+	if trimmedProjectID == "" {
+		return fmt.Errorf("project id is required")
+	}
+	if s == nil || s.metadataStore == nil {
+		return errors.New("metadata store is required")
+	}
+	belongs, err := s.metadataStore.SessionBelongsToProject(ctx, trimmedSessionID, trimmedProjectID)
+	if err != nil {
+		return err
+	}
+	if !belongs {
+		return fmt.Errorf("session %q not available", trimmedSessionID)
+	}
+	return nil
+}
+
 func (s *Core) SessionLaunchClientForProject(ctx context.Context, projectID string) (client.SessionLaunchClient, error) {
 	projectCtx, err := s.resolveProjectContext(ctx, projectID)
 	if err != nil {

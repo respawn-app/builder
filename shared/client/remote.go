@@ -548,11 +548,14 @@ func (s *remoteProcessOutputSubscription) Close() error {
 }
 
 func dialRPC(ctx context.Context, rpcURL string) (*websocket.Conn, func(), error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	config, err := websocket.NewConfig(strings.TrimSpace(rpcURL), websocketOrigin(rpcURL))
 	if err != nil {
 		return nil, nil, err
 	}
-	conn, err := websocket.DialConfig(config)
+	conn, err := config.DialContext(ctx)
 	if err != nil {
 		return nil, nil, err
 	}

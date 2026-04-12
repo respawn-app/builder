@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"builder/server/metadata"
+	"builder/server/serve"
 	"builder/shared/client"
 	"builder/shared/config"
 	"builder/shared/protocol"
@@ -40,6 +41,7 @@ var forceKillOwnedDaemonProcess = func(process *os.Process) error {
 }
 
 const launchedDaemonShutdownTimeout = 5 * time.Second
+const configuredRemoteAttachTimeout = 500 * time.Millisecond
 
 func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptClient, func() error, error) {
 	if remote, ok := tryDialConfiguredRemote(ctx, opts, configuredRemoteSupportsRunPrompt); ok {
@@ -73,7 +75,9 @@ func tryDialMatchingConfiguredRemote(ctx context.Context, opts Options, supports
 	if strings.TrimSpace(projectID) == "" {
 		return nil, false
 	}
-	remote, err := dialConfiguredRemote(ctx, config.ServerRPCURL(cfg), projectID)
+	attachCtx, cancel := context.WithTimeout(ctx, configuredRemoteAttachTimeout)
+	defer cancel()
+	remote, err := dialConfiguredRemote(attachCtx, config.ServerRPCURL(cfg), projectID)
 	if err != nil {
 		return nil, false
 	}
@@ -124,6 +128,9 @@ func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remot
 	workspaceRoot, err := resolveCLIWorkspaceRoot(opts)
 	if err != nil {
 		return nil, nil, false, err
+	}
+	if cfg, cfgErr := loadSessionServerConfig(opts); cfgErr == nil {
+		serve.ReleaseTestListenReservation(config.ServerListenAddress(cfg))
 	}
 	args := append([]string{execPath}, buildServeArgsFunc(workspaceRoot, opts)...)
 	cmd := exec.CommandContext(context.Background(), args[0], args[1:]...)

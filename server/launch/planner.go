@@ -249,6 +249,10 @@ func (p Planner) createSession(parentSessionID string) (*session.Store, error) {
 		if err := created.SetParentSessionID(parentSessionID); err != nil {
 			return nil, err
 		}
+	} else {
+		if err := created.EnsureDurable(); err != nil {
+			return nil, err
+		}
 	}
 	return created, nil
 }

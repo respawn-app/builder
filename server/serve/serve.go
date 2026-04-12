@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -21,6 +23,44 @@ import (
 type Server struct {
 	*core.Core
 	ready atomic.Bool
+}
+
+var (
+	testListenReservationsMu sync.Mutex
+	testListenReservations   = map[string]net.Listener{}
+)
+
+// ReserveTestListenReservation keeps a test-owned listener alive until the
+// configured daemon bind path is ready to claim the same address.
+func ReserveTestListenReservation(listener net.Listener) {
+	if listener == nil {
+		return
+	}
+	addr := strings.TrimSpace(listener.Addr().String())
+	if addr == "" {
+		_ = listener.Close()
+		return
+	}
+	testListenReservationsMu.Lock()
+	if existing := testListenReservations[addr]; existing != nil {
+		_ = existing.Close()
+	}
+	testListenReservations[addr] = listener
+	testListenReservationsMu.Unlock()
+}
+
+func ReleaseTestListenReservation(addr string) {
+	trimmed := strings.TrimSpace(addr)
+	if trimmed == "" {
+		return
+	}
+	testListenReservationsMu.Lock()
+	listener := testListenReservations[trimmed]
+	delete(testListenReservations, trimmed)
+	testListenReservationsMu.Unlock()
+	if listener != nil {
+		_ = listener.Close()
+	}
 }
 
 func Start(ctx context.Context, req startup.Request, authHandler startup.AuthHandler, onboardingHandler startup.OnboardingHandler) (*Server, error) {
@@ -50,7 +90,9 @@ func (s *Server) Serve(ctx context.Context) error {
 	if s == nil || s.Core == nil {
 		return errors.New("server core is required")
 	}
-	listener, err := net.Listen("tcp", config.ServerListenAddress(s.Config()))
+	listenAddress := config.ServerListenAddress(s.Config())
+	ReleaseTestListenReservation(listenAddress)
+	listener, err := net.Listen("tcp", listenAddress)
 	if err != nil {
 		return fmt.Errorf("listen local control endpoint: %w", err)
 	}
