@@ -373,6 +373,10 @@ func (c *Remote) SubscribeProcessOutput(ctx context.Context, req serverapi.Proce
 		cleanup()
 		return nil, err
 	}
+	if err := attachProjectRPC(ctx, conn, c.projectID); err != nil {
+		cleanup()
+		return nil, err
+	}
 	var ack protocol.SubscribeResponse
 	if err := callRPC(ctx, conn, "subscribe-process-output", protocol.MethodProcessSubscribeOutput, req, &ack); err != nil {
 		cleanup()

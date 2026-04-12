@@ -1809,6 +1809,64 @@ func TestLoadDebugPrecedenceAndValidation(t *testing.T) {
 	}
 }
 
+func TestLoadServerHostPortPrecedenceAndValidation(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, ".builder", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("server_host = \"127.0.0.2\"\nserver_port = 54321\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Settings.ServerHost != "127.0.0.2" || cfg.Settings.ServerPort != 54321 {
+		t.Fatalf("unexpected server settings from file: host=%q port=%d", cfg.Settings.ServerHost, cfg.Settings.ServerPort)
+	}
+	if got := cfg.Source.Sources["server_host"]; got != "file" {
+		t.Fatalf("expected server_host source file, got %q", got)
+	}
+	if got := cfg.Source.Sources["server_port"]; got != "file" {
+		t.Fatalf("expected server_port source file, got %q", got)
+	}
+
+	t.Setenv("BUILDER_SERVER_HOST", "::1")
+	t.Setenv("BUILDER_SERVER_PORT", "65432")
+	cfg, err = Load(workspace, LoadOptions{})
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Settings.ServerHost != "::1" || cfg.Settings.ServerPort != 65432 {
+		t.Fatalf("unexpected server settings from env: host=%q port=%d", cfg.Settings.ServerHost, cfg.Settings.ServerPort)
+	}
+	if got := cfg.Source.Sources["server_host"]; got != "env" {
+		t.Fatalf("expected server_host source env, got %q", got)
+	}
+	if got := cfg.Source.Sources["server_port"]; got != "env" {
+		t.Fatalf("expected server_port source env, got %q", got)
+	}
+	if got := ServerListenAddress(cfg); got != "[::1]:65432" {
+		t.Fatalf("ServerListenAddress = %q, want [::1]:65432", got)
+	}
+	if got := ServerHTTPBaseURL(cfg); got != "http://[::1]:65432" {
+		t.Fatalf("ServerHTTPBaseURL = %q, want http://[::1]:65432", got)
+	}
+	if got := ServerRPCURL(cfg); got != "ws://[::1]:65432/rpc" {
+		t.Fatalf("ServerRPCURL = %q, want ws://[::1]:65432/rpc", got)
+	}
+
+	t.Setenv("BUILDER_SERVER_PORT", "broken")
+	if _, err := Load(workspace, LoadOptions{}); err == nil {
+		t.Fatal("expected invalid BUILDER_SERVER_PORT error")
+	}
+}
+
 func TestLoadContextCompactionThresholdPrecedence(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()

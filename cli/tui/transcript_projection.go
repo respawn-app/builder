@@ -285,7 +285,7 @@ func committedOngoingPrefixEnd(entries []TranscriptEntry) int {
 	resultIndex := buildToolResultIndex(entries)
 	for idx, entry := range entries {
 		if entry.Transient {
-			return idx
+			return committedOngoingPrefixEndBefore(entries, idx, resultIndex, consumedResults)
 		}
 		if strings.TrimSpace(entry.Role) != "tool_call" {
 			continue
@@ -294,12 +294,29 @@ func committedOngoingPrefixEnd(entries []TranscriptEntry) int {
 			continue
 		}
 		resultIdx := resultIndex.findMatchingToolResultIndex(entries, idx, consumedResults)
-		if resultIdx < 0 {
+		if resultIdx < 0 || entries[resultIdx].Transient {
 			return idx
 		}
 		consumedResults[resultIdx] = struct{}{}
 	}
 	return len(entries)
+}
+
+func committedOngoingPrefixEndBefore(entries []TranscriptEntry, boundary int, resultIndex toolResultIndex, consumedResults map[int]struct{}) int {
+	for idx := boundary - 1; idx >= 0; idx-- {
+		entry := entries[idx]
+		if strings.TrimSpace(entry.Role) != "tool_call" {
+			continue
+		}
+		if strings.TrimSpace(ongoingTranscriptText(entry)) == "" {
+			continue
+		}
+		resultIdx := resultIndex.findMatchingToolResultIndex(entries, idx, consumedResults)
+		if resultIdx < 0 || resultIdx >= boundary || entries[resultIdx].Transient {
+			return idx
+		}
+	}
+	return boundary
 }
 
 func ongoingTranscriptText(entry TranscriptEntry) string {

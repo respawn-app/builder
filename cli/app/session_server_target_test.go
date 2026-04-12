@@ -650,6 +650,7 @@ func startRemoteMultiClientRuntimeFixture(t *testing.T, openAIBaseURL string) *r
 	go func() {
 		errCh <- srv.Serve(serveCtx)
 	}()
+	waitForConfiguredRemoteIdentity(t, fixture.workspaceA)
 
 	t.Cleanup(func() {
 		if fixture.runtimePlanB != nil {

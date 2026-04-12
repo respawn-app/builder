@@ -250,7 +250,7 @@ func TestServiceResolveTransitionRequiresClientRequestID(t *testing.T) {
 	_, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
 		Transition: serverapi.SessionTransition{Action: "continue"},
 	})
-	if err == nil || !strings.Contains(err.Error(), "client_request_id is required") {
+	if err == nil || err.Error() != "client_request_id is required" {
 		t.Fatalf("expected missing client_request_id error, got %v", err)
 	}
 }

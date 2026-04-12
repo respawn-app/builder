@@ -176,6 +176,22 @@ func TestCommittedOngoingProjectionPreservesSuccessStateForEmptyToolResult(t *te
 	}
 }
 
+func TestCommittedOngoingPrefixEndExcludesToolCallWhenMatchingResultIsTransient(t *testing.T) {
+	entries := []TranscriptEntry{
+		{Role: "user", Text: "prompt"},
+		{Role: "tool_call", Text: "pwd", ToolCallID: "call_1", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"}},
+		{Role: "tool_result_ok", Text: "/tmp", ToolCallID: "call_1", Transient: true},
+	}
+
+	if got := committedOngoingPrefixEnd(entries); got != 1 {
+		t.Fatalf("committedOngoingPrefixEnd = %d, want 1", got)
+	}
+	committed := CommittedOngoingEntries(entries)
+	if len(committed) != 1 || committed[0].Role != "user" {
+		t.Fatalf("expected committed entries to exclude unresolved tool pair, got %#v", committed)
+	}
+}
+
 func TestCommittedOngoingProjectionPreservesWebSearchSuccessState(t *testing.T) {
 	m := NewModel(WithTheme("dark"), WithPreviewLines(20))
 	m = updateModel(t, m, SetViewportSizeMsg{Lines: 20, Width: 80})

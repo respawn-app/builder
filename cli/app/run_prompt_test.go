@@ -75,8 +75,9 @@ func waitForConfiguredRunPromptDaemon(t *testing.T, workspace string) {
 	}
 	healthURL := config.ServerHTTPBaseURL(loadCfg) + protocol.HealthPath
 	deadline := time.Now().Add(5 * time.Second)
+	client := &http.Client{Timeout: 250 * time.Millisecond}
 	for {
-		resp, err := http.Get(healthURL)
+		resp, err := client.Get(healthURL)
 		if err == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
@@ -443,6 +444,18 @@ func TestTryDialMatchingConfiguredRemoteRejectsServerThatDoesNotMatchSpawnedPID(
 		return identity.PID == 111
 	}); ok || remote != nil {
 		t.Fatalf("expected mismatched pid server to be rejected, got remote=%v ok=%t", remote, ok)
+	}
+}
+
+func TestTryDialMatchingConfiguredRemoteSkipsUnregisteredWorkspace(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	configureAppTestServerPort(t)
+	cleanup := publishConfiguredRemoteForWorkspace(t, workspace, protocol.CapabilityFlags{RunPrompt: true})
+	defer cleanup()
+	if remote, ok := tryDialMatchingConfiguredRemote(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, configuredRemoteSupportsRunPrompt, nil); ok || remote != nil {
+		t.Fatalf("expected unregistered workspace to skip configured remote attach, got remote=%v ok=%t", remote, ok)
 	}
 }
 

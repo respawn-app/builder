@@ -300,6 +300,58 @@ func TestRemoteSessionActivitySubscriptionPreservesTranscriptCriticalOrderingWit
 	}
 }
 
+func TestRemoteProcessOutputSubscriptionAttachesProjectBeforeSubscribe(t *testing.T) {
+	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
+		defer func() { _ = ws.Close() }()
+		var req protocol.Request
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}})); err != nil {
+			return
+		}
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if req.Method != protocol.MethodAttachProject {
+			t.Fatalf("expected attach-project before process output subscribe, got %q", req.Method)
+		}
+		var attach protocol.AttachProjectRequest
+		if err := json.Unmarshal(req.Params, &attach); err != nil {
+			t.Fatalf("decode attach-project: %v", err)
+		}
+		if attach.ProjectID != "project-1" {
+			t.Fatalf("attach project id = %q, want project-1", attach.ProjectID)
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.AttachResponse{Kind: "project", ProjectID: attach.ProjectID})); err != nil {
+			return
+		}
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if req.Method != protocol.MethodProcessSubscribeOutput {
+			t.Fatalf("expected process output subscribe after attach-project, got %q", req.Method)
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.SubscribeResponse{})); err != nil {
+			return
+		}
+		_ = websocket.JSON.Send(ws, protocol.Request{JSONRPC: protocol.JSONRPCVersion, Method: protocol.MethodProcessOutputComplete, Params: mustJSON(t, protocol.StreamCompleteParams{})})
+	}))
+	defer server.Close()
+
+	remote, err := DialRemoteURLForProject(context.Background(), "ws"+server.URL[len("http"):], "project-1")
+	if err != nil {
+		t.Fatalf("DialRemoteURLForProject: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+
+	sub, err := remote.SubscribeProcessOutput(context.Background(), serverapi.ProcessOutputSubscribeRequest{ProcessID: "proc-1"})
+	if err != nil {
+		t.Fatalf("SubscribeProcessOutput: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+}
+
 func TestProtocolErrorMapsPromptTerminalCodes(t *testing.T) {
 	if err := protocolError(&protocol.ResponseError{Code: protocol.ErrCodePromptNotFound, Message: "missing"}); !errors.Is(err, serverapi.ErrPromptNotFound) {
 		t.Fatalf("expected prompt not found, got %v", err)

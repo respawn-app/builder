@@ -315,7 +315,14 @@ func TestStatusCommandRendersGlobalDebugMode(t *testing.T) {
 		updated = next.(*uiModel)
 	}
 	plain := stripANSIAndTrimRight(updated.View())
-	if !strings.Contains(plain, "debug on") {
+	found := false
+	for _, line := range strings.Split(plain, "\n") {
+		if strings.TrimSpace(line) == "debug on" {
+			found = true
+			break
+		}
+	}
+	if !found {
 		t.Fatalf("expected /status to show global debug mode, got %q", plain)
 	}
 }

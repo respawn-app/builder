@@ -1,8 +1,9 @@
 package config
 
 import (
-	"fmt"
+	"net"
 	"path/filepath"
+	"strconv"
 
 	"builder/server/tools"
 	"builder/shared/protocol"
@@ -188,7 +189,7 @@ func MigrationsRoot(cfg App) string {
 }
 
 func ServerListenAddress(cfg App) string {
-	return fmt.Sprintf("%s:%d", cfg.Settings.ServerHost, cfg.Settings.ServerPort)
+	return net.JoinHostPort(cfg.Settings.ServerHost, strconv.Itoa(cfg.Settings.ServerPort))
 }
 
 func ServerRPCURL(cfg App) string {
