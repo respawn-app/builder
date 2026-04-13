@@ -8,6 +8,8 @@ import (
 
 type EventKind string
 
+type TranscriptRecoveryCause string
+
 const (
 	EventConversationUpdated EventKind = "conversation_updated"
 	EventAssistantDelta      EventKind = "assistant_delta"
@@ -29,11 +31,16 @@ const (
 	EventLocalEntryAdded     EventKind = "local_entry_added"
 	EventRunStateChanged     EventKind = "run_state_changed"
 	EventBackgroundUpdated   EventKind = "background_updated"
+
+	TranscriptRecoveryCauseNone         TranscriptRecoveryCause = ""
+	TranscriptRecoveryCauseStreamGap    TranscriptRecoveryCause = "stream_gap"
+	TranscriptRecoveryCauseHydrateRetry TranscriptRecoveryCause = "hydrate_retry"
 )
 
 type Event struct {
 	Kind                   EventKind
 	StepID                 string
+	RecoveryCause          TranscriptRecoveryCause
 	TranscriptRevision     int64
 	CommittedEntryCount    int
 	Error                  string

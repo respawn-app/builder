@@ -30,14 +30,21 @@ func (m *uiModel) requestRuntimeTranscriptSync() tea.Cmd {
 	if !m.hasRuntimeClient() {
 		return nil
 	}
-	return m.startRuntimeTranscriptPageRequest(m.transcriptRequestForCurrentMode(), false)
+	return m.startRuntimeTranscriptPageRequest(m.transcriptRequestForCurrentMode(), false, clientui.TranscriptRecoveryCauseNone)
+}
+
+func (m *uiModel) requestRuntimeTranscriptSyncForContinuityLoss(cause clientui.TranscriptRecoveryCause) tea.Cmd {
+	if !m.hasRuntimeClient() {
+		return nil
+	}
+	return m.startRuntimeTranscriptPageRequest(m.transcriptRequestForCurrentMode(), false, cause)
 }
 
 func (m *uiModel) requestRuntimeTranscriptPage(request clientui.TranscriptPageRequest) tea.Cmd {
-	return m.startRuntimeTranscriptPageRequest(request, true)
+	return m.startRuntimeTranscriptPageRequest(request, true, clientui.TranscriptRecoveryCauseNone)
 }
 
-func (m *uiModel) startRuntimeTranscriptPageRequest(request clientui.TranscriptPageRequest, allowDuplicateSkip bool) tea.Cmd {
+func (m *uiModel) startRuntimeTranscriptPageRequest(request clientui.TranscriptPageRequest, allowDuplicateSkip bool, recoveryCause clientui.TranscriptRecoveryCause) tea.Cmd {
 	request = normalizeRuntimeTranscriptRequest(request)
 	if m.runtimeTranscriptBusy {
 		m.runtimeTranscriptDirty = true
@@ -63,6 +70,7 @@ func (m *uiModel) startRuntimeTranscriptPageRequest(request clientui.TranscriptP
 		"mode":                  string(m.view.Mode()),
 		"path":                  "hydrate",
 		"token":                 strconv.FormatUint(token, 10),
+		"recovery_cause":        string(recoveryCause),
 		"current_revision":      strconv.FormatInt(m.transcriptRevision, 10),
 		"transcript_live_dirty": strconv.FormatBool(m.transcriptLiveDirty),
 		"reasoning_live_dirty":  strconv.FormatBool(m.reasoningLiveDirty),
@@ -81,7 +89,7 @@ func (m *uiModel) startRuntimeTranscriptPageRequest(request clientui.TranscriptP
 		} else {
 			transcript, err = client.RefreshTranscriptPage(request)
 		}
-		return runtimeTranscriptRefreshedMsg{token: token, req: request, transcript: transcript, err: err}
+		return runtimeTranscriptRefreshedMsg{token: token, req: request, transcript: transcript, recoveryCause: recoveryCause, err: err}
 	}
 }
 
@@ -98,16 +106,23 @@ func (m *uiModel) shouldSkipTranscriptPageRequest(req clientui.TranscriptPageReq
 	return pageRequestEqual(m.detailTranscript.lastRequest, req)
 }
 
-func (m *uiModel) scheduleRuntimeTranscriptRetry() tea.Cmd {
+func (m *uiModel) scheduleRuntimeTranscriptRetry(cause clientui.TranscriptRecoveryCause) tea.Cmd {
 	if !m.hasRuntimeClient() {
 		return nil
 	}
 	m.runtimeTranscriptRetry++
 	token := m.runtimeTranscriptRetry
-	m.logf("ui.runtime.transcript.retry_scheduled token=%d delay=%s", token, uiRuntimeHydrationRetryDelay)
+	m.logf("ui.runtime.transcript.retry_scheduled token=%d cause=%s delay=%s", token, cause, uiRuntimeHydrationRetryDelay)
 	return tea.Tick(uiRuntimeHydrationRetryDelay, func(time.Time) tea.Msg {
-		return runtimeTranscriptRetryMsg{token: token}
+		return runtimeTranscriptRetryMsg{token: token, recoveryCause: cause}
 	})
+}
+
+func continuityRecoveryCauseFromHydrateFailure(cause clientui.TranscriptRecoveryCause) clientui.TranscriptRecoveryCause {
+	if cause != clientui.TranscriptRecoveryCauseNone {
+		return cause
+	}
+	return clientui.TranscriptRecoveryCauseHydrateRetry
 }
 
 func (m *uiModel) handleRuntimeMainViewRefreshed(msg runtimeMainViewRefreshedMsg) tea.Cmd {
@@ -133,23 +148,25 @@ func (m *uiModel) handleRuntimeTranscriptRefreshed(msg runtimeTranscriptRefreshe
 		m.observeRuntimeRequestResult(msg.err)
 		m.logf("ui.runtime.transcript err=%q", msg.err.Error())
 		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.hydrate_response", map[string]string{
-			"session_id": m.sessionID,
-			"mode":       string(m.view.Mode()),
-			"path":       "hydrate",
-			"token":      strconv.FormatUint(msg.token, 10),
-			"err":        msg.err.Error(),
+			"session_id":     m.sessionID,
+			"mode":           string(m.view.Mode()),
+			"path":           "hydrate",
+			"token":          strconv.FormatUint(msg.token, 10),
+			"recovery_cause": string(msg.recoveryCause),
+			"err":            msg.err.Error(),
 		}))
 		resumeCmd := tea.Cmd(nil)
 		if m.waitRuntimeEventAfterHydration {
 			m.waitRuntimeEventAfterHydration = false
 			resumeCmd = m.waitRuntimeEventCmd()
 		}
-		return tea.Batch(m.scheduleRuntimeTranscriptRetry(), resumeCmd)
+		return tea.Batch(m.scheduleRuntimeTranscriptRetry(continuityRecoveryCauseFromHydrateFailure(msg.recoveryCause)), resumeCmd)
 	}
 	m.observeRuntimeRequestResult(nil)
 	m.logTranscriptPageDiag("transcript.diag.client.hydrate_response", msg.req, msg.transcript, map[string]string{
-		"path":  "hydrate",
-		"token": strconv.FormatUint(msg.token, 10),
+		"path":           "hydrate",
+		"token":          strconv.FormatUint(msg.token, 10),
+		"recovery_cause": string(msg.recoveryCause),
 	})
 	recovered := m.runtimeTranscriptRetry != 0
 	if m.runtimeTranscriptRetry != 0 {
@@ -158,7 +175,7 @@ func (m *uiModel) handleRuntimeTranscriptRefreshed(msg runtimeTranscriptRefreshe
 	if recovered {
 		m.logf("ui.runtime.transcript.recovered token=%d", msg.token)
 	}
-	applyCmd := m.runtimeAdapter().applyRuntimeTranscriptPage(msg.req, msg.transcript)
+	applyCmd := m.runtimeAdapter().applyRuntimeTranscriptPageWithRecovery(msg.req, msg.transcript, msg.recoveryCause)
 	if !m.runtimeTranscriptDirty {
 		if m.pendingQueuedDrainAfterHydration {
 			m.queuedDrainReadyAfterHydration = true

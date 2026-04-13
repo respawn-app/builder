@@ -4,6 +4,16 @@ This is the current implementation-planning baseline derived from the migration 
 
 The plan is intentionally incremental. It keeps the product working throughout and avoids wrapping the current monolith in transport before the real boundaries exist.
 
+## Still Open
+
+The migration is not fully complete yet. The highest-signal unresolved gaps across Phases 1-6A are:
+
+- Phase 2: full project / ask / approval resource surfaces, complete event-hub stream model, and broader idempotent mutation coverage
+- Phase 4: unknown-cwd startup registration flow, create-project / attach-workspace flow, and explicit workspace rebind UX after relocation
+- Phase 5A: transcript commit-notification / revision-advance contract and revision-aware incremental transcript fetch strategy
+- Phase 5B: transcript paging/compression strategy for large-session rehydrate
+- Phase 6B: root-cause elimination for the remaining transcript divergence bugs
+
 ## Phase 0: Freeze Behavior And Define Proof Obligations - DONE
 
 Deliverables:
@@ -34,18 +44,24 @@ Parallelizable work:
 - storage audit
 - acceptance-harness design
 
-## Phase 1: Create A Transport-Neutral Server API In Process - DONE
+## Phase 1: Create A Transport-Neutral Server API In Process
 
 Goal:
 
 Create the real application-service boundary before any network transport work starts.
 
+Requirements:
+
+- frontend code must reach server-owned behavior only through transport-neutral client interfaces
+- boundary contracts must not leak runtime-native server types into CLI/TUI packages
+- loopback/in-process wiring must exercise the same boundary shape future remote clients will use
+
 Deliverables:
 
-- transport-neutral service layer for project, session, run, process, approval, and ask operations, with the first mandatory extracted slice being session launch/run for `builder run`
-- loopback or in-process client adapter that talks through that service layer
-- CLI switched onto the client-style boundary instead of direct runtime access, starting with `cli/builder/main.go:runSubcommand`
-- boundary enforcement preventing TUI or CLI packages from importing server internals directly
+- [x] transport-neutral service layer for project, session, run, process, approval, and ask operations, with the first mandatory extracted slice being session launch/run for `builder run`
+- [x] loopback or in-process client adapter that talks through that service layer
+- [x] CLI switched onto the client-style boundary instead of direct runtime access, starting with `cli/builder/main.go:runSubcommand`
+- [x] boundary enforcement preventing TUI or CLI packages from importing server internals directly
 
 Expected cut lines from the current repo:
 
@@ -83,7 +99,7 @@ Repo-grounded implementation order:
 4. Only after the headless seam is real, widen the boundary to interactive session/open flows and richer read models.
    Progress: `shared/clientui.RuntimeStatus` now exists as the first bundled interactive read model, and the TUI status/back/freshness/status-collector paths now consume that snapshot instead of fanning out across loopback getter methods. `shared/clientui.ProcessClient` plus `BackgroundProcess` now also cover process-list hydration, status-line process counts, and process log-path reads without treating `shelltool.Snapshot` as the UI read model. `shared/clientui.RuntimeSessionView` now bundles session metadata, conversation freshness, and transcript hydration for runtime conversation re-sync. The remaining interactive runtime control paths in `cli/app` now also route through model-level helpers over `shared/clientui.RuntimeClient` instead of scattering direct loopback runtime calls across command/submission/queue controller files, and runtime-event state transitions now reduce through `shared/clientui.ReduceRuntimeEvent(...)` rather than frontend-local Bubble Tea orchestration.
 5. Keep `cli/app/ui_runtime_adapter.go`, `cli/app/ui_status*.go`, `cli/app/ui_processes.go`, `cli/app/auth_gate.go`, and onboarding/import UX as deferred knots until client DTOs and hydration views exist.
-   Status: Phase 1 exit gate is now satisfied. Bubble Tea onboarding/auth screens, terminal bells, and direct process-control affordances remain frontend-owned UX adapters by design; the next concrete cut line is Phase 2 resource identity, hydration views, and stream semantics.
+   Bubble Tea onboarding/auth screens, terminal bells, and direct process-control affordances remain frontend-owned UX adapters by design; the next concrete cut line is Phase 2 resource identity, hydration views, and stream semantics.
 
 Intermediate state:
 
@@ -101,27 +117,37 @@ Rollback point:
 
 - thin adapters may temporarily route selected flows through old internals while extraction completes, but only if the client-facing requests/responses/events remain transport-neutral and do not leak server-native types
 
-## Phase 2: Stabilize Resource Model, Hydration Views, And Event Hub - DONE
+## Phase 2: Stabilize Resource Model, Hydration Views, And Event Hub
 
 Goal:
 
 Introduce the minimum server-owned resource model and read models needed for real multi-client behavior.
 
+Requirements:
+
+- resource identity must be explicit for the server-owned entities the frontend and transport operate on
+- hydration reads must be typed, bounded, and separate from transient live streams
+- live event delivery must have explicit gap semantics instead of silent loss
+- durable transcript state and live/progressive state must remain separate consistency domains
+
 Deliverables:
 
-- project registry
-- session, run, process, approval, and ask resource identities
-- one-active-primary-run invariant enforcement
-- idempotency support through `client_request_id`
-- typed hydration views for startup and session main view
-- event hub with explicit stream classes and gap semantics
-- process output buffering and retention policy
+- [x] session, run, and process resource identities are established on the shared client/server boundary
+- [x] one-active-primary-run invariant enforcement exists in the server-owned runtime model
+- [x] typed hydration views exist for startup and session main view
+- [x] the first event-hub slice exists with explicit session-activity gap semantics
+- [x] process output buffering and retention policy exist for the current local-runtime surface
+- [ ] project registry and project-facing typed reads are complete across startup, picker, and session flows
+- [ ] ask resource identities and read surfaces are complete and transport-neutral
+- [ ] approval resource identities and read surfaces are complete and transport-neutral
+- [ ] event hub stream classes and retention semantics are complete, including process-output streaming on the real protocol boundary
+- [ ] `client_request_id` idempotency support is consistent across the mutating resource surface rather than targeted endpoints only
 
 Progress:
 
 - The Phase 2 foundation slice is now complete, but broader Phase 2 remains open. The live runtime now exposes explicit active-run identity/status, `shared/clientui.RuntimeMainView` now bundles active-session hydration, `server/runtimeview` now owns the runtime-to-main-view projection plus the first server-owned active-session read service, the CLI consumes that bundled view through the client boundary, focused coverage now proves run-state payload semantics for completed and interrupted runs, the session log now persists minimal durable run lifecycle history for later `run.get`-style reads, `shared/serverapi` plus `server/sessionview` now provide the first transport-neutral `session.getMainView` / `run.get`-style application read service, dormant session reads now resolve through read-only `server/session.Snapshot` loading rather than mutating reopen paths, `server/registry` now owns reusable runtime and persistence resolution rather than keeping those registries trapped in `server/embedded`, live background processes now carry explicit owning session/run/step identity at creation time, and `shared/serverapi` plus `server/processview` now provide the first transport-neutral process read and control service subset that the CLI uses for `/ps` hydration plus kill/inline actions instead of projecting manager snapshots and control entirely inside `cli/app`. `process.kill` now carries `client_request_id` as a mutating contract; `process.inlineOutput` is on-boundary but remains read-like rather than mutating. `shared/serverapi` plus `server/sessionactivity` now also provide the first live session-activity subscription seam, backed by server-owned runtime registries and explicit lag failure rather than silent event loss across both interactive and headless active runtimes. Focused integration coverage now proves two shared clients can hydrate the same active session and observe the same runtime-originated update through the embedded server boundary. `shared/serverapi.SessionTranscriptPageRequest/Response`, `session.getTranscriptPage`, and `shared/clientui.TranscriptPage` are now also landed as the first dedicated committed-transcript read surface, with revision metadata sourced from persisted session sequence and used by the CLI as the authoritative transcript repair path instead of `session.getMainView`. Process ownership/read state remains live-only and in-memory rather than restart-durable.
 
-- Remaining broader Phase 2 work from the migration requirements is still open: project registry and project-facing typed reads, ask and approval resource/read surfaces, fuller event/live-feed split including process-output streams, and the stricter event-hub/retention model required by the protocol spec.
+- Remaining broader Phase 2 work from the migration requirements is still open and is tracked explicitly in the unchecked deliverables above.
 
 Intermediate state:
 
@@ -141,20 +167,28 @@ Parallelizable work after the boundary exists:
 - approval and ask surface
 - CLI command remapping onto the new client interface
 
-## Phase 3: Add Real Transport And Local Daemon Mode - DONE PARTIAL
+## Phase 3: Add Real Transport And Local Daemon Mode
 
 Goal:
 
 Expose the already-existing server boundary over the real protocol.
 
+Requirements:
+
+- the real transport must expose the same server boundary used in loopback/embedded mode
+- embedded mode must not regain privileged object access as a shortcut
+- transport identity and attach lifecycle must be explicit and testable
+- server startup/attach behavior must be deterministic and not rely on hidden local-only heuristics
+
 Deliverables:
 
-- JSON-RPC-over-WebSocket gateway
-- handshake, capability exchange, and attachment lifecycle
-- health and readiness endpoint
-- local discovery on well-known control endpoint or socket
-- `builder serve`
-- CLI attach-or-start logic against the real transport
+- [x] JSON-RPC-over-WebSocket gateway
+- [x] handshake, capability exchange, and attachment lifecycle
+- [x] health and readiness endpoint
+- [x] `builder serve`
+- [x] CLI attach-or-start logic against the real transport
+- [x] ~local discovery on a well-known control endpoint or socket~
+  Superseded by the locked direct-configured attach topology; do not implement this old deliverable.
 
 Critical rule:
 
@@ -184,16 +218,23 @@ Lock the hybrid persistence architecture and introduce the new metadata authorit
 
 This phase establishes the new durable model, the SQLite metadata store, and the app-global daemon topology that later phases depend on.
 
+Requirements:
+
+- structured metadata must have one authoritative durable store
+- session transcript/log bulk files must remain file-backed in this phase
+- project/workspace/worktree identity and execution-target semantics must be explicit and durable
+- startup/registration flows must operate through the server-owned metadata authority rather than hidden local shortcuts
+
 Deliverables:
 
-- hybrid persistence spec and source-of-truth split locked
-- SQLite selected as authoritative store for structured metadata/resources
-- SQL-first storage tooling direction locked (`sqlc` + explicit SQL migrations)
-- server identity and direct attach topology no longer imply one workspace/project scope
-- top-level durable model finalized as `project > workspace > worktree`
-- workspace-first CLI startup and registration flow locked as the initial UX
-- session execution target model finalized as `(workspace_id, worktree_id?, cwd_relpath)`
-- explicit runtime lease model remains in scope, but implementation may follow the metadata cutover work
+- [x] hybrid persistence spec and source-of-truth split are locked
+- [x] SQLite is selected as the authoritative store for structured metadata/resources
+- [x] SQL-first storage tooling direction is locked (`sqlc` + explicit SQL migrations)
+- [x] server identity and direct attach topology no longer imply one workspace/project scope
+- [x] top-level durable model is finalized as `project > workspace > worktree`
+- [x] session execution target model is finalized as `(workspace_id, worktree_id?, cwd_relpath)`
+- [x] explicit runtime lease model is implemented on the metadata-backed runtime path
+- [ ] workspace-first CLI startup and registration flow is implemented end-to-end, including unknown-cwd project picker / create-project / attach-workspace flows
 
 Primary risks:
 
@@ -208,8 +249,8 @@ Rollback point:
 Status:
 
 - Phase 4A-4C storage/model work is largely landed in the current branch.
-- The remaining unfinished Phase 4 work is topology/attach cutover: the daemon is still workspace-scoped in handshake identity and attach/startup resolution paths, and the old discovery-file direction has now been rejected.
-- That remaining slice is now tracked explicitly as Phase 4D and should execute before Phase 6.
+- Phase 4D topology/direct-attach work is largely landed.
+- The remaining Phase 4 gap is the real unknown-cwd startup and registration flow over the server boundary; until that lands, Phase 4 is not actually complete.
 
 ## Phase 4A: SQLite Metadata Introduction
 
@@ -217,14 +258,21 @@ Goal:
 
 Introduce the SQLite metadata plane and workspace/project catalog without migrating old data yet.
 
+Requirements:
+
+- metadata schema must represent the locked durable model without preserving legacy workspace-container assumptions as authority
+- storage access must be SQL-first and type-generated rather than reflection/ORM driven
+- registration/path-resolution capabilities must be available behind the metadata boundary before cutover
+
 Deliverables:
 
-- app-global server identity and discovery
-- SQLite schema for projects, workspaces, worktrees, sessions, runs, processes, asks/approvals, leases, and request deduplication
-- storage layer based on explicit SQL plus `sqlc`
-- session metadata authority moved behind the new storage layer even if legacy reads still exist during this subphase
-- workspace/path-resolution queries and registration mutations
-- CLI startup flow for unknown cwd specified against the new query/mutation surfaces
+- [x] app-global server identity foundation exists
+- [x] SQLite schema exists for projects, workspaces, worktrees, sessions, runs, processes, asks/approvals, leases, and request deduplication
+- [x] storage layer is based on explicit SQL plus `sqlc`
+- [x] session metadata authority moved behind the new storage layer
+- [x] workspace registration mutation exists in the metadata authority
+- [ ] workspace/path-resolution queries are exposed end-to-end through the startup boundary
+- [ ] CLI startup flow for unknown cwd is implemented against those query/mutation surfaces
 
 Primary risks:
 
@@ -241,15 +289,22 @@ Goal:
 
 Perform the one-time storage migration from legacy workspace-container sessions into the hybrid model and remove `session.json` authority.
 
+Requirements:
+
+- migration must be blocking, verified, and non-silent
+- migrated sessions must no longer depend on `session.json` as authority
+- post-migration session creation and startup semantics must preserve the intended lazy visibility behavior
+- relocation must remain explicit user action rather than automatic rebinding
+
 Deliverables:
 
-- blocking startup migrator
-- staged metadata build and validation before cutover
-- final cutover into the new project/session artifact layout
-- timestamped backup of the old tree after success
-- `session.json` removed from migrated session directories
-- lazy interactive session creation preserved under the new metadata authority
-- workspace relocation surfaced as explicit rebind UX only
+- [x] blocking startup migrator
+- [x] staged metadata build and validation before cutover
+- [x] final cutover into the new project/session artifact layout
+- [x] timestamped backup of the old tree after success
+- [x] `session.json` removed from migrated session directories
+- [x] lazy interactive session creation preserved under the new metadata authority
+- [ ] workspace relocation is surfaced as explicit rebind UX only
 
 Primary risks:
 
@@ -267,15 +322,21 @@ Goal:
 
 Finish the new execution-target and runtime-lease model on top of the migrated storage foundation.
 
+Requirements:
+
+- session execution target must be stored as server-owned metadata rather than frontend-local state
+- runtime activation/release must be explicit, duplicate-safe, and reconnect-safe
+- durable blank sessions must not leak into launch/session-picking UX before they become user-meaningful
+
 Deliverables:
 
-- session execution target stored as shared server-owned metadata
-- session hydration/status surfaces expose workspace/worktree context from SQLite metadata
-- runtime activation/release redesigned around explicit `lease_id`
-- duplicate-safe activate/release semantics
-- reconnect reacquires a fresh lease after hydrate/attach
-- process/runtime/session mutations route through the new metadata authority cleanly
-- runtime-durable blank sessions remain launch-invisible until they gain user-meaningful state, so Phase 4C does not regress session pickers/startup resume by exposing freshly prepared empty sessions
+- [x] session execution target stored as shared server-owned metadata
+- [x] session hydration/status surfaces expose workspace/worktree context from SQLite metadata
+- [x] runtime activation/release redesigned around explicit `lease_id`
+- [x] duplicate-safe activate/release semantics
+- [x] reconnect reacquires a fresh lease after hydrate/attach
+- [x] process/runtime/session mutations route through the new metadata authority cleanly
+- [x] runtime-durable blank sessions remain launch-invisible until they gain user-meaningful state
 
 Primary risks:
 
@@ -297,16 +358,24 @@ This phase does not redesign persistence again. It closes the remaining workspac
 
 Detailed implementation planning for this slice lives in `phase-4d-plan.md`.
 
+Requirements:
+
+- the daemon must be app-global per persistence root rather than workspace-scoped
+- attach must use configured host/port directly with no discovery artifact, no fallback port, and no silent rebinding
+- project/workspace context resolution must happen over server-owned queries and attachments after transport attach
+- unknown-cwd startup must enter explicit registration/project-selection flow rather than crashing or auto-registering
+
 Deliverables:
 
-- persisted daemon-discovery artifacts are removed from the target architecture; client attach uses configured `server_host` + `server_port` directly
-- `protocol.ServerIdentity` stops implying one hosted `project_id` / `workspace_root`; it describes the server process and capabilities only
-- server core composition stops binding itself to a single workspace/project during startup
-- one daemon can host multiple registered projects and accept `project.attach` for any hosted project
-- CLI attach-or-start dials the configured daemon address first, then resolves cwd/project/workspace context over server-owned path-resolution and registration queries
-- unknown-cwd startup and registration flow work against the remote/loopback server boundary rather than local workspace-bound heuristics or persisted discovery files
-- serve/transport/startup tests prove one configured daemon can be used from multiple workspace roots under one persistence root
-- topology cutover is hard: no migration script or bridge mode for the old workspace-scoped discovery-file model
+- [x] persisted daemon-discovery artifacts are removed from the target architecture; client attach uses configured `server_host` + `server_port` directly
+- [x] `protocol.ServerIdentity` stops implying one hosted `project_id` / `workspace_root`; it describes the server process and capabilities only
+- [x] server core composition stops binding itself to a single workspace/project during startup
+- [x] one daemon can host multiple registered projects and accept `project.attach` for any hosted project
+- [x] CLI attach-or-start dials the configured daemon address first for already-registered workspaces
+- [x] serve/transport/startup tests prove one configured daemon can be used from multiple workspace roots under one persistence root
+- [x] topology cutover is hard: no migration script or bridge mode for the old workspace-scoped discovery-file model
+- [ ] cwd/project/workspace resolution over server-owned path-resolution and registration queries is complete for unknown workspaces, not only already-registered ones
+- [ ] unknown-cwd startup and registration flow works end-to-end over the remote/loopback boundary without `project id is required` crash paths
 
 Primary risks:
 
@@ -320,7 +389,7 @@ Rollback point:
 
 Storage migration scope ends at Phase 4C; topology/direct-attach cutover completes in Phase 4D.
 
-Status: Phase 4D exit gate is satisfied on the current branch.
+Status: direct attach and multi-project hosting are landed, but the unknown-cwd registration/startup deliverables above keep Phase 4D open.
 
 The remaining phases are post-storage hardening and proof work.
 
@@ -332,30 +401,44 @@ With the storage migration complete, harden transcript correctness, reconnect be
 
 This phase is intentionally split. The first subphase locks the frontend/server transcript architecture and failure semantics so ongoing mode cannot keep regressing under reconnect or stream gaps. The second subphase proves that architecture under true multi-client realtime operation.
 
-Status: Phase 4D, Phase 5A, and Phase 5B exit gates are satisfied in the current branch. Phase 6 is the next implementation phase.
+Requirements:
+
+- committed transcript correctness must not depend on lossless live stream delivery
+- reconnect and stream-gap recovery must be authoritative rather than heuristic
+- multi-client proof must validate that different clients observe the same committed truth under churn and races
+
+Status: the transcript architecture and proof slices are largely landed, but the unchecked deliverables below keep Phase 5 open.
 
 ## Phase 5A: Transcript Authority, Recovery, And Failure Semantics
 
-Status: exit gate satisfied in the current branch.
+Status: most of the subphase is landed, but the unchecked deliverables below keep Phase 5A open.
 
 Goal:
 
 Lock the committed-transcript architecture and failure semantics so ongoing mode, detail mode, and reconnect paths share one transcript truth model.
 
+Requirements:
+
+- committed transcript state must have one authoritative hydrate-and-project path in the frontend
+- live streams may accelerate UX but must never be required for committed transcript correctness
+- external continuity loss must rehydrate from authority; same-session divergence must remain a bug to eliminate
+- transcript-affecting failures must be surfaced and must not degrade into fake empty/idle state
+
 Deliverables:
 
-- unified committed-transcript sync path so live session activity can gap without leaving detail/ongoing transcript state stale; baseline repair now uses `session.getTranscriptPage`, and the remaining work is revision-aware paging plus incremental fetch strategy; see `../analysis/transcript-sync-reliability.md`
-- finalize the authoritative server-owned state model by proving committed transcript state, ephemeral live state, and projection-only render state stay explicitly separated across frontend and server boundaries
-- one frontend committed-transcript cache per attached session, with ongoing mode, detail mode, and native ongoing scrollback reduced to derived projection state rather than parallel authorities
-- one frontend live-transient state path for assistant deltas, reasoning deltas, transient busy state, and similar progressive UX concerns, kept separate from committed transcript hydration
-- ongoing-mode normal-buffer scrollback committed-only by contract: replay committed history at startup, append only new committed transcript suffixes afterward, and never emit provisional live activity into immutable scrollback
-- transcript-affecting live activity evolved toward commit notifications or equivalent revision-advance signals so clients do not depend on raw live-event replay for transcript correctness
-- dedicated transcript hydration remains distinct from metadata/status hydration so `session.getMainView` does not regress into a second transcript transport
-- explicit stream-drop handling that invalidates live transient state immediately and forces rehydrate plus resubscribe before live UX resumes
-- transport-crossing runtime reads and mutations stop swallowing failures or degrading into fake empty/idle state; transcript-affecting failures must stop the affected view and recover from committed transcript once connectivity returns
-- external-continuity-loss recovery locked: if transport continuity is externally broken (disconnect, stream gap, client/server restart, subscription invalidation), recovery happens from fresh committed hydrate; for this category only, TUI ongoing may re-issue its scrollback surface from authoritative state. Same-session logical divergence remains a product bug to eliminate, not an acceptable redraw path
-- process-control race coverage
-- slow-client handling and bounded buffering
+- [x] unified committed-transcript sync path exists so live session activity gaps no longer leave detail/ongoing transcript state permanently stale; baseline repair now uses `session.getTranscriptPage`
+- [x] committed transcript state, ephemeral live state, and projection-only render state are explicitly separated across frontend and server boundaries
+- [x] one frontend committed-transcript cache per attached session exists, with ongoing mode, detail mode, and native ongoing scrollback reduced to derived projection state rather than parallel authorities
+- [x] one frontend live-transient state path exists for assistant deltas, reasoning deltas, transient busy state, and similar progressive UX concerns, kept separate from committed transcript hydration
+- [x] ongoing-mode normal-buffer scrollback is committed-only by contract
+- [x] dedicated transcript hydration remains distinct from metadata/status hydration so `session.getMainView` does not regress into a second transcript transport
+- [x] explicit stream-drop handling invalidates live transient state immediately and forces rehydrate plus resubscribe before live UX resumes
+- [x] transport-crossing runtime reads and mutations stop swallowing failures or degrading into fake empty/idle state; transcript-affecting failures stop the affected view and recover from committed transcript once connectivity returns
+- [x] external-continuity-loss recovery is locked: same-session logical divergence is not normalized into redraw behavior
+- [x] process-control race coverage exists
+- [x] slow-client handling and bounded buffering exist
+- [ ] transcript-affecting live activity has evolved all the way to explicit commit notifications or equivalent revision-advance signals so clients do not depend on generic live-event inference for transcript correctness
+- [ ] revision-aware paging plus incremental fetch strategy beyond the current baseline tail hydration is implemented
 
 Acceptance checklist before implementation of later 5A slices continues:
 
@@ -378,21 +461,27 @@ Rollback point:
 
 ## Phase 5B: Realtime Multi-Client Proof
 
-Status: exit gate satisfied in the current branch.
+Status: most of the proof matrix is landed, but the unchecked deliverables below keep Phase 5B open.
 
 Goal:
 
 Prove the Phase 5A transcript/reconnect architecture under real multi-client attachment and concurrent operator behavior.
 
+Requirements:
+
+- proof must cover true remote multi-client attachment, not only loopback equivalence
+- concurrent ask/approval/lifecycle operations must be deterministic and retry-safe
+- large-session recovery must remain bounded and practical rather than relying on replaying entire live histories
+
 Deliverables:
 
-- two real clients from different workspaces attached to one server in tests
-- two real clients attached to the same session on the same server
-- deterministic approval and ask race handling
-- reconnect with hydration-first recovery
-- transcript paging/compression strategy for large-session rehydrate
-- loopback and remote active-session paths proven to obey the same transcript commit, hydrate, and freshness semantics rather than merely converging eventually by different rules
-- idempotent session lifecycle transitions end-to-end. Scope: add `client_request_id` to `shared/serverapi.SessionResolveTransitionRequest`, thread it through `cli/app/session_lifecycle.go`, and implement duplicate suppression in the server lifecycle path so retry-safe `fork_rollback`, `logout`, and future transition actions cannot be applied twice after disconnect/retry.
+- [x] two real clients from different workspaces attached to one server in tests
+- [x] two real clients attached to the same session on the same server
+- [x] deterministic approval and ask race handling
+- [x] reconnect with hydration-first recovery
+- [x] loopback and remote active-session paths are proven to obey the same transcript commit, hydrate, and freshness semantics rather than merely converging eventually by different rules
+- [x] idempotent session lifecycle transitions exist end-to-end via `client_request_id`
+- [ ] transcript paging/compression strategy for large-session rehydrate is implemented and proven
 
 Current proof surface:
 
@@ -426,20 +515,34 @@ Remove the remaining incorrect transcript assumptions before final standalone pr
 
 This phase is intentionally split. Phase 6A aligns code/docs with the product contract for compaction, rollback, and external continuity loss. Phase 6B removes the actual client-side divergence bugs that are currently causing missed user messages, tool lifecycle entries, and other committed transcript holes.
 
+Requirements:
+
+- product semantics must be reflected directly in code/docs/tests rather than inferred from old implementation behavior
+- same-session correctness bugs must be fixed at root cause rather than normalized via redraw/recovery behavior
+- any continuity-loss redraw allowance must stay narrowly scoped to the approved external-failure class
+
 ## Phase 6A: Align Transcript Semantics With Product Contract
+
+Status: semantics alignment is landed.
 
 Goal:
 
 Fix any remaining code, tests, and documentation that still model compaction or rollback/fork as same-session transcript mutation.
 
+Requirements:
+
+- compaction must be treated as ordinary same-session committed progression for frontend sync semantics
+- rollback/fork must be treated as navigation to a different session target, not same-session mutation
+- only external continuity loss may authorize ongoing-buffer re-issue in TUI
+
 Deliverables:
 
-- compaction explicitly modeled as ordinary same-session committed transcript progression for frontend sync purposes, not as a same-session transcript rewrite requiring non-append recovery
-- rollback/fork explicitly modeled as navigation or attachment to a different session target, not as same-session transcript mutation
-- ongoing recovery semantics narrowed so only external continuity-loss causes permit authoritative re-issue of the TUI ongoing buffer
-- `cli/app/ui_native_history.go` recovery path (`emitNonContiguousNativeProjectionRecovery` / `emitForcedNativeProjectionReplay`) redesigned or removed so same-session logical divergence no longer maps to redraw/replay semantics
-- diagnostics, tests, and design docs updated to stop describing compaction/rollback as same-session non-append transcript rewrites
-- gap/reconnect recovery documentation updated to distinguish external continuity loss from client-side logical divergence
+- [x] compaction is explicitly modeled as ordinary same-session committed transcript progression for frontend sync purposes, not as a same-session transcript rewrite requiring non-append recovery
+- [x] rollback/fork is explicitly modeled as navigation or attachment to a different session target, not as same-session transcript mutation
+- [x] ongoing recovery semantics are narrowed so only external continuity-loss causes permit authoritative re-issue of the TUI ongoing buffer
+- [x] `cli/app/ui_native_history.go` recovery path no longer maps same-session logical divergence to redraw/replay semantics
+- [x] diagnostics, tests, and design docs have been updated to stop describing compaction/rollback as same-session non-append transcript rewrites
+- [x] gap/reconnect recovery documentation distinguishes external continuity loss from client-side logical divergence
 
 Primary risks:
 
@@ -530,15 +633,15 @@ Can be parallelized once phase 1 exists:
 
 - Phase 0 exit gate: compatibility inventory and characterization plan are accepted.
 - Phase 1 exit gate: at minimum the `builder run` flow and migrated launch/run flows no longer depend on privileged runtime access, and the frontend reaches them only through the client boundary.
-- Phase 2 foundation exit gate: second client can hydrate and observe one session in tests. Status: satisfied.
+- Phase 2 foundation checkpoint: second client can hydrate and observe one session in tests.
 - Phase 3 exit gate: CLI works against embedded and external server through the same client boundary.
 - Phase 4 exit gate: hybrid persistence, durable model, and startup/registration/storage-tooling direction are fully locked.
 - Phase 4A exit gate: SQLite metadata plane exists behind the storage boundary and the server-global workspace/project model is queryable.
 - Phase 4B exit gate: one-time staged migration succeeds and `session.json` no longer exists in migrated sessions.
 - Phase 4C exit gate: session execution targets and runtime leases use the new metadata authority correctly.
 - Phase 4D exit gate: direct attach uses configured `server_host` + `server_port`; handshake identity is process-scoped; one daemon can host multiple projects; CLI startup dials the configured daemon first and resolves cwd/project context over server-owned queries instead of workspace-scoped discovery heuristics or persisted discovery files.
-- Phase 5A exit gate: ongoing/detail/reconnect share one committed-transcript authority model; ongoing scrollback is committed-only; stream drops invalidate transient live state and recover via committed hydration plus resubscribe; transcript-affecting failures are not swallowed. Status: satisfied.
-- Phase 5B exit gate: reconnect, approval races, slow-subscriber failure modes, and the single-authority committed-transcript model are covered under realtime multi-client attachment. Status: satisfied.
+- Phase 5A exit gate: ongoing/detail/reconnect share one committed-transcript authority model; ongoing scrollback is committed-only; stream drops invalidate transient live state and recover via committed hydration plus resubscribe; transcript-affecting failures are not swallowed.
+- Phase 5B exit gate: reconnect, approval races, slow-subscriber failure modes, and the single-authority committed-transcript model are covered under realtime multi-client attachment.
 - Phase 6A exit gate: code/docs/tests no longer describe compaction as same-session transcript rewrite or rollback/fork as same-session mutation; external continuity-loss recovery is the only accepted TUI re-issue path.
 - Phase 6B exit gate: the known transcript divergence bug class is root-caused rather than normalized by redraw, and the focused reproduction matrix for user/tool/assistant committed visibility is green.
 - Phase 7 exit gate: the migrated storage model is proven under external-daemon mode and a non-CLI client can complete the baseline workflow set.

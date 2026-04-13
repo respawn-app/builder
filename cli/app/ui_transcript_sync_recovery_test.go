@@ -53,6 +53,9 @@ func TestSessionActivityGapRecoveryEventuallyHydratesCommittedTranscriptInBothMo
 	if evt.Kind != clientui.EventConversationUpdated {
 		t.Fatalf("expected synthetic conversation_updated after gap, got %+v", evt)
 	}
+	if evt.RecoveryCause != clientui.TranscriptRecoveryCauseStreamGap {
+		t.Fatalf("expected stream-gap recovery cause, got %+v", evt)
+	}
 
 	firstCmd := m.runtimeAdapter().handleProjectedRuntimeEvent(evt)
 	if firstCmd == nil {
@@ -69,6 +72,9 @@ func TestSessionActivityGapRecoveryEventuallyHydratesCommittedTranscriptInBothMo
 	retryMsg, ok := retryCmd().(runtimeTranscriptRetryMsg)
 	if !ok {
 		t.Fatalf("expected runtimeTranscriptRetryMsg, got %T", retryCmd())
+	}
+	if retryMsg.recoveryCause != clientui.TranscriptRecoveryCauseStreamGap {
+		t.Fatalf("expected retry to preserve stream-gap recovery cause, got %+v", retryMsg)
 	}
 
 	next, secondCmd := next.(*uiModel).Update(retryMsg)
