@@ -14,6 +14,11 @@ import (
 )
 
 func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor authInteractor, initialSessionID string) error {
+	boundServer, err := ensureInteractiveProjectBinding(ctx, server)
+	if err != nil {
+		return err
+	}
+	server = boundServer
 	planner := newSessionLaunchPlanner(server)
 	currentSessionID := strings.TrimSpace(initialSessionID)
 	nextSessionInitialPrompt := ""

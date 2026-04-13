@@ -362,7 +362,7 @@ Requirements:
 - it can attach to an existing compatible server,
 - it can start or embed a local server when needed,
 - if startup cwd does not resolve to any registered project/workspace/worktree, the CLI shows an explicit project-picker or registration flow rather than implicitly creating a project,
-- that startup flow may create a new project and attach the current workspace as its first workspace, or add the current workspace to an existing project after explicit confirmation,
+- that startup flow may create a new project and attach the current workspace as its first workspace, or explicitly attach the current workspace to an existing project,
 - if it started an embedded local server, exit flow prompts for the intended server lifecycle instead of assuming shutdown behavior,
 - that exit flow presents neutral choices without a recommended default,
 - it uses the same client boundary that future frontends will use,

@@ -59,8 +59,9 @@ func TestRootCommandHelpReturnsZero(t *testing.T) {
 	if code := rootCommand([]string{"--help"}, strings.NewReader(""), &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stderr.String(), "Usage of builder:") {
-		t.Fatalf("stderr = %q, want usage", stderr.String())
+	got := stderr.String()
+	if !strings.Contains(got, "Usage of builder:") || !strings.Contains(got, "builder project [path]") || !strings.Contains(got, "builder attach --project <project-id> [path]") {
+		t.Fatalf("stderr = %q, want root usage with binding commands", got)
 	}
 }
 

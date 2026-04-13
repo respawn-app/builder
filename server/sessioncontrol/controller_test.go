@@ -100,6 +100,18 @@ func (s *stubControllerProjectViewService) ListProjects(_ context.Context, _ ser
 	return serverapi.ProjectListResponse{}, nil
 }
 
+func (s *stubControllerProjectViewService) ResolveProjectPath(_ context.Context, _ serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+	return serverapi.ProjectResolvePathResponse{}, errors.New("ResolveProjectPath should not be called in controller tests")
+}
+
+func (s *stubControllerProjectViewService) CreateProject(_ context.Context, _ serverapi.ProjectCreateRequest) (serverapi.ProjectCreateResponse, error) {
+	return serverapi.ProjectCreateResponse{}, errors.New("CreateProject should not be called in controller tests")
+}
+
+func (s *stubControllerProjectViewService) AttachWorkspaceToProject(_ context.Context, _ serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error) {
+	return serverapi.ProjectAttachWorkspaceResponse{}, errors.New("AttachWorkspaceToProject should not be called in controller tests")
+}
+
 func (s *stubControllerProjectViewService) GetProjectOverview(_ context.Context, _ serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
 	return s.overview, nil
 }

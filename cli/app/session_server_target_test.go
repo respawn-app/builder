@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/signal"
+	"path/filepath"
 	goruntime "runtime"
 	"strings"
 	"syscall"
@@ -15,7 +16,6 @@ import (
 	"time"
 
 	"builder/server/auth"
-	"builder/server/metadata"
 	"builder/server/serve"
 	serverstartup "builder/server/startup"
 	"builder/server/tools"
@@ -835,10 +835,11 @@ func TestStartSessionServerBypassesRemoteAndDaemonOnFirstInteractiveRun(t *testi
 	}
 }
 
-func TestStartSessionServerUnregisteredWorkspaceReturnsRegistrationErrorForSessionPlanning(t *testing.T) {
+func TestStartSessionServerUnregisteredWorkspaceStartsRegistrationCapableServer(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
+	configureAppTestServerPort(t)
 
 	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractorWithEnvKey("test-key"))
 	if err != nil {
@@ -846,12 +847,93 @@ func TestStartSessionServerUnregisteredWorkspaceReturnsRegistrationErrorForSessi
 	}
 	defer func() { _ = server.Close() }()
 
-	if server.SessionLaunchClient() == nil {
-		t.Fatal("expected session launch client")
+	if got := server.ProjectID(); got != "" {
+		t.Fatalf("project id = %q, want empty for unregistered workspace", got)
 	}
-	_, err = server.SessionLaunchClient().PlanSession(context.Background(), serverapi.SessionPlanRequest{Mode: serverapi.SessionLaunchModeInteractive})
-	if !errors.Is(err, metadata.ErrWorkspaceNotRegistered) {
-		t.Fatalf("PlanSession error = %v, want ErrWorkspaceNotRegistered", err)
+	resolved, err := server.ProjectViewClient().ResolveProjectPath(context.Background(), serverapi.ProjectResolvePathRequest{Path: workspace})
+	if err != nil {
+		t.Fatalf("ResolveProjectPath: %v", err)
+	}
+	if resolved.Binding != nil {
+		t.Fatalf("expected unknown workspace resolution, got %+v", resolved.Binding)
+	}
+}
+
+func TestStartEmbeddedServerUnknownWorkspaceCreateProjectFlowCanPlanSession(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store := auth.NewFileStore(config.GlobalAuthConfigPath(cfg))
+	if err := store.Save(context.Background(), auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "test-key"},
+		},
+		UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("save auth state: %v", err)
+	}
+
+	originalPicker := runProjectBindingPickerFlow
+	originalPrompt := runProjectNamePromptFlow
+	t.Cleanup(func() {
+		runProjectBindingPickerFlow = originalPicker
+		runProjectNamePromptFlow = originalPrompt
+	})
+	runProjectBindingPickerFlow = func(projects []clientui.ProjectSummary, theme string, policy config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+		if len(projects) != 0 {
+			t.Fatalf("expected no existing projects, got %+v", projects)
+		}
+		return projectBindingPickerResult{CreateNew: true}, nil
+	}
+	runProjectNamePromptFlow = func(defaultName string, theme string, policy config.TUIAlternateScreenPolicy) (string, error) {
+		if want := filepath.Base(workspace); defaultName != want {
+			t.Fatalf("default project name = %q, want %q", defaultName, want)
+		}
+		return "Created From Startup", nil
+	}
+
+	t.Log("starting embedded server")
+	server, err := startEmbeddedServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractor())
+	if err != nil {
+		t.Fatalf("startEmbeddedServer: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	t.Log("binding unknown workspace")
+	bound, err := ensureInteractiveProjectBinding(context.Background(), server)
+	if err != nil {
+		t.Fatalf("ensureInteractiveProjectBinding: %v", err)
+	}
+	if got := bound.ProjectID(); got == "" {
+		t.Fatal("expected bound project id after create-project flow")
+	}
+
+	t.Log("planning interactive session")
+	planner := newSessionLaunchPlanner(bound)
+	plan, err := planner.PlanSession(context.Background(), sessionLaunchRequest{Mode: launchModeInteractive})
+	if err != nil {
+		t.Fatalf("PlanSession: %v", err)
+	}
+	canonicalWorkspace, err := filepath.EvalSymlinks(workspace)
+	if err != nil {
+		t.Fatalf("EvalSymlinks workspace: %v", err)
+	}
+	if plan.WorkspaceRoot != canonicalWorkspace {
+		t.Fatalf("plan workspace root = %q, want %q", plan.WorkspaceRoot, canonicalWorkspace)
+	}
+	resolved, err := bound.ProjectViewClient().ResolveProjectPath(context.Background(), serverapi.ProjectResolvePathRequest{Path: workspace})
+	if err != nil {
+		t.Fatalf("ResolveProjectPath: %v", err)
+	}
+	t.Log("resolved created binding")
+	if resolved.Binding == nil || resolved.Binding.ProjectName != "Created From Startup" {
+		t.Fatalf("expected created binding metadata, got %+v", resolved.Binding)
 	}
 }
 

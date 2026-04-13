@@ -92,6 +92,65 @@ func (s *Service) ListProjects(ctx context.Context, _ serverapi.ProjectListReque
 	return serverapi.ProjectListResponse{Projects: []clientui.ProjectSummary{project}}, nil
 }
 
+func (s *Service) ResolveProjectPath(ctx context.Context, req serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.ProjectResolvePathResponse{}, err
+	}
+	if s == nil {
+		return serverapi.ProjectResolvePathResponse{}, errors.New("project service is required")
+	}
+	if s.metadata == nil {
+		return serverapi.ProjectResolvePathResponse{}, errors.New("project path resolution requires metadata service")
+	}
+	canonicalRoot, binding, err := s.metadata.ResolveWorkspacePath(ctx, req.Path)
+	if err != nil {
+		return serverapi.ProjectResolvePathResponse{}, err
+	}
+	resp := serverapi.ProjectResolvePathResponse{CanonicalRoot: canonicalRoot}
+	if binding != nil {
+		mapped := projectBindingFromMetadata(*binding)
+		resp.Binding = &mapped
+	}
+	return resp, nil
+}
+
+func (s *Service) CreateProject(ctx context.Context, req serverapi.ProjectCreateRequest) (serverapi.ProjectCreateResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.ProjectCreateResponse{}, err
+	}
+	if s == nil {
+		return serverapi.ProjectCreateResponse{}, errors.New("project service is required")
+	}
+	if s.metadata == nil {
+		return serverapi.ProjectCreateResponse{}, errors.New("project creation requires metadata service")
+	}
+	binding, err := s.metadata.CreateProjectForWorkspace(ctx, req.WorkspaceRoot, req.DisplayName)
+	if err != nil {
+		return serverapi.ProjectCreateResponse{}, err
+	}
+	return serverapi.ProjectCreateResponse{Binding: projectBindingFromMetadata(binding)}, nil
+}
+
+func (s *Service) AttachWorkspaceToProject(ctx context.Context, req serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.ProjectAttachWorkspaceResponse{}, err
+	}
+	if s == nil {
+		return serverapi.ProjectAttachWorkspaceResponse{}, errors.New("project service is required")
+	}
+	if s.metadata == nil {
+		return serverapi.ProjectAttachWorkspaceResponse{}, errors.New("workspace attachment requires metadata service")
+	}
+	if err := s.requireProjectID(req.ProjectID); err != nil {
+		return serverapi.ProjectAttachWorkspaceResponse{}, err
+	}
+	binding, err := s.metadata.AttachWorkspaceToProject(ctx, req.ProjectID, req.WorkspaceRoot)
+	if err != nil {
+		return serverapi.ProjectAttachWorkspaceResponse{}, err
+	}
+	return serverapi.ProjectAttachWorkspaceResponse{Binding: projectBindingFromMetadata(binding)}, nil
+}
+
 func (s *Service) GetProjectOverview(ctx context.Context, req serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
 	if err := req.Validate(); err != nil {
 		return serverapi.ProjectGetOverviewResponse{}, err
@@ -213,6 +272,17 @@ func latestUpdatedAt(summaries []clientui.SessionSummary) (latest time.Time) {
 		}
 	}
 	return latest
+}
+
+func projectBindingFromMetadata(binding metadata.Binding) serverapi.ProjectBinding {
+	return serverapi.ProjectBinding{
+		ProjectID:       binding.ProjectID,
+		ProjectName:     binding.ProjectName,
+		WorkspaceID:     binding.WorkspaceID,
+		CanonicalRoot:   binding.CanonicalRoot,
+		WorkspaceName:   binding.WorkspaceName,
+		WorkspaceStatus: binding.WorkspaceStatus,
+	}
 }
 
 func (s *Service) syncMetadata(ctx context.Context) error {

@@ -135,6 +135,14 @@ func (s *testEmbeddedServer) Close() error {
 }
 func (s *testEmbeddedServer) OwnsServer() bool   { return true }
 func (s *testEmbeddedServer) Config() config.App { return s.cfg }
+func (s *testEmbeddedServer) BindProject(_ context.Context, projectID string) (embeddedServer, error) {
+	if s == nil {
+		return nil, errors.New("test embedded server is required")
+	}
+	clone := *s
+	clone.projectID = strings.TrimSpace(projectID)
+	return &clone, nil
+}
 func (s *testEmbeddedServer) ProjectID() string {
 	if strings.TrimSpace(s.projectID) != "" {
 		return s.projectID
