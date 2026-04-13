@@ -131,7 +131,7 @@ func (s *Store) AuthoritativeSessionStoreOptions() []session.StoreOption {
 }
 
 func (s *Store) EnsureWorkspaceBinding(ctx context.Context, workspaceRoot string) (Binding, error) {
-	binding, err := s.lookupWorkspaceBinding(ctx, workspaceRoot)
+	binding, err := s.resolveWorkspaceBindingForPath(ctx, workspaceRoot)
 	if err == nil {
 		return binding, nil
 	}
@@ -149,7 +149,7 @@ func (s *Store) ResolveWorkspacePath(ctx context.Context, workspaceRoot string) 
 	if err != nil {
 		return "", nil, err
 	}
-	binding, err := s.lookupWorkspaceBinding(ctx, canonicalRoot)
+	binding, err := s.lookupWorkspaceBindingByAncestorPath(ctx, canonicalRoot)
 	if err == nil {
 		return canonicalRoot, &binding, nil
 	}
@@ -167,6 +167,13 @@ func (s *Store) lookupWorkspaceBinding(ctx context.Context, workspaceRoot string
 	if err != nil {
 		return Binding{}, err
 	}
+	return s.lookupWorkspaceBindingByCanonicalRoot(ctx, canonicalRoot)
+}
+
+func (s *Store) lookupWorkspaceBindingByCanonicalRoot(ctx context.Context, canonicalRoot string) (Binding, error) {
+	if s == nil || s.queries == nil {
+		return Binding{}, errors.New("metadata store is required")
+	}
 	row, err := s.queries.GetWorkspaceBindingByCanonicalRoot(ctx, canonicalRoot)
 	if err == nil {
 		return Binding{
@@ -181,6 +188,35 @@ func (s *Store) lookupWorkspaceBinding(ctx context.Context, workspaceRoot string
 	return Binding{}, fmt.Errorf("lookup workspace binding: %w", err)
 }
 
+func (s *Store) resolveWorkspaceBindingForPath(ctx context.Context, workspaceRoot string) (Binding, error) {
+	canonicalRoot, err := config.CanonicalWorkspaceRoot(workspaceRoot)
+	if err != nil {
+		return Binding{}, err
+	}
+	return s.lookupWorkspaceBindingByAncestorPath(ctx, canonicalRoot)
+}
+
+func (s *Store) lookupWorkspaceBindingByAncestorPath(ctx context.Context, canonicalRoot string) (Binding, error) {
+	trimmedRoot := strings.TrimSpace(canonicalRoot)
+	if trimmedRoot == "" {
+		return Binding{}, fmt.Errorf("lookup workspace binding: %w", sql.ErrNoRows)
+	}
+	for current := trimmedRoot; ; current = filepath.Dir(current) {
+		binding, err := s.lookupWorkspaceBindingByCanonicalRoot(ctx, current)
+		if err == nil {
+			return binding, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return Binding{}, err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+	}
+	return Binding{}, fmt.Errorf("lookup workspace binding: %w", sql.ErrNoRows)
+}
+
 func (s *Store) CreateProjectForWorkspace(ctx context.Context, workspaceRoot string, projectName string) (Binding, error) {
 	if s == nil || s.queries == nil {
 		return Binding{}, errors.New("metadata store is required")
@@ -189,13 +225,16 @@ func (s *Store) CreateProjectForWorkspace(ctx context.Context, workspaceRoot str
 	if trimmedProjectName == "" {
 		return Binding{}, errors.New("project name is required")
 	}
-	if binding, err := s.lookupWorkspaceBinding(ctx, workspaceRoot); err == nil {
-		return Binding{}, fmt.Errorf("workspace %q is already bound to project %q", binding.CanonicalRoot, binding.ProjectID)
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return Binding{}, err
-	}
 	canonicalRoot, err := config.CanonicalWorkspaceRoot(workspaceRoot)
 	if err != nil {
+		return Binding{}, err
+	}
+	if binding, err := s.lookupWorkspaceBindingByAncestorPath(ctx, canonicalRoot); err == nil {
+		if binding.CanonicalRoot == canonicalRoot {
+			return Binding{}, fmt.Errorf("workspace %q is already bound to project %q", binding.CanonicalRoot, binding.ProjectID)
+		}
+		return Binding{}, fmt.Errorf("path %q is inside attached workspace %q for project %q", canonicalRoot, binding.CanonicalRoot, binding.ProjectID)
+	} else if !errors.Is(err, sql.ErrNoRows) {
 		return Binding{}, err
 	}
 	now := time.Now().UTC()
@@ -213,16 +252,19 @@ func (s *Store) AttachWorkspaceToProject(ctx context.Context, projectID string, 
 	if trimmedProjectID == "" {
 		return Binding{}, errors.New("project id is required")
 	}
-	if binding, err := s.lookupWorkspaceBinding(ctx, workspaceRoot); err == nil {
+	canonicalRoot, err := config.CanonicalWorkspaceRoot(workspaceRoot)
+	if err != nil {
+		return Binding{}, err
+	}
+	if binding, err := s.lookupWorkspaceBindingByAncestorPath(ctx, canonicalRoot); err == nil {
 		if strings.TrimSpace(binding.ProjectID) == trimmedProjectID {
 			return binding, nil
 		}
-		return Binding{}, fmt.Errorf("workspace %q is already bound to project %q", binding.CanonicalRoot, binding.ProjectID)
+		if binding.CanonicalRoot == canonicalRoot {
+			return Binding{}, fmt.Errorf("workspace %q is already bound to project %q", binding.CanonicalRoot, binding.ProjectID)
+		}
+		return Binding{}, fmt.Errorf("path %q is inside attached workspace %q for project %q", canonicalRoot, binding.CanonicalRoot, binding.ProjectID)
 	} else if !errors.Is(err, sql.ErrNoRows) {
-		return Binding{}, err
-	}
-	canonicalRoot, err := config.CanonicalWorkspaceRoot(workspaceRoot)
-	if err != nil {
 		return Binding{}, err
 	}
 	projectName, err := s.queries.GetProjectDisplayName(ctx, trimmedProjectID)
@@ -252,7 +294,7 @@ func (s *Store) RegisterWorkspaceBinding(ctx context.Context, workspaceRoot stri
 	if s == nil || s.queries == nil {
 		return Binding{}, errors.New("metadata store is required")
 	}
-	if binding, err := s.lookupWorkspaceBinding(ctx, workspaceRoot); err == nil {
+	if binding, err := s.resolveWorkspaceBindingForPath(ctx, workspaceRoot); err == nil {
 		return binding, nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return Binding{}, err
@@ -263,6 +305,11 @@ func (s *Store) RegisterWorkspaceBinding(ctx context.Context, workspaceRoot stri
 	}
 	if registerWorkspaceBindingAfterLookupMissHook != nil {
 		registerWorkspaceBindingAfterLookupMissHook()
+	}
+	if binding, err := s.lookupWorkspaceBindingByCanonicalRoot(ctx, canonicalRoot); err == nil {
+		return binding, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return Binding{}, err
 	}
 	displayName := filepath.Base(canonicalRoot)
 	return s.CreateProjectForWorkspace(ctx, canonicalRoot, displayName)

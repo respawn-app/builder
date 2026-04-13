@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -53,6 +54,67 @@ func TestEnsureInteractiveProjectBindingBindsRegisteredWorkspaceWithoutPrompt(t 
 	server := &testEmbeddedServer{
 		cfg:               cfg,
 		containerDir:      config.ProjectSessionsRoot(cfg, binding.ProjectID),
+		projectViewClient: client.NewLoopbackProjectViewClient(service),
+	}
+
+	bound, err := ensureInteractiveProjectBinding(context.Background(), server)
+	if err != nil {
+		t.Fatalf("ensureInteractiveProjectBinding: %v", err)
+	}
+	if got := bound.ProjectID(); got != binding.ProjectID {
+		t.Fatalf("bound project id = %q, want %q", got, binding.ProjectID)
+	}
+}
+
+func TestEnsureInteractiveProjectBindingTreatsNestedDirectoryAsAncestorWorkspace(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	nested := filepath.Join(workspace, "subdir")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("MkdirAll nested: %v", err)
+	}
+	t.Setenv("HOME", home)
+
+	baseCfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load workspace: %v", err)
+	}
+	nestedCfg, err := config.Load(nested, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load nested: %v", err)
+	}
+	binding, err := metadata.RegisterBinding(context.Background(), baseCfg.PersistenceRoot, baseCfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterBinding: %v", err)
+	}
+	store, err := metadata.Open(baseCfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service, err := projectview.NewMetadataService(store, "", "")
+	if err != nil {
+		t.Fatalf("NewMetadataService: %v", err)
+	}
+
+	originalPicker := runProjectBindingPickerFlow
+	originalPrompt := runProjectNamePromptFlow
+	t.Cleanup(func() {
+		runProjectBindingPickerFlow = originalPicker
+		runProjectNamePromptFlow = originalPrompt
+	})
+	runProjectBindingPickerFlow = func([]clientui.ProjectSummary, string, config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+		t.Fatal("did not expect binding picker for nested directory inside registered workspace")
+		return projectBindingPickerResult{}, nil
+	}
+	runProjectNamePromptFlow = func(string, string, config.TUIAlternateScreenPolicy) (string, error) {
+		t.Fatal("did not expect project name prompt for nested directory inside registered workspace")
+		return "", nil
+	}
+
+	server := &testEmbeddedServer{
+		cfg:               nestedCfg,
+		containerDir:      config.ProjectSessionsRoot(nestedCfg, binding.ProjectID),
 		projectViewClient: client.NewLoopbackProjectViewClient(service),
 	}
 

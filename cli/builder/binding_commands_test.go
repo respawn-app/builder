@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"builder/server/metadata"
@@ -27,6 +28,34 @@ func TestProjectSubcommandPrintsBoundProjectID(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	if code := projectSubcommand([]string{workspace}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, want 0 stderr=%q", code, stderr.String())
+	}
+	if got := stdout.String(); got != binding.ProjectID+"\n" {
+		t.Fatalf("stdout = %q, want %q", got, binding.ProjectID+"\n")
+	}
+}
+
+func TestProjectSubcommandTreatsNestedDirectoryAsAttachedWorkspace(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	nested := filepath.Join(workspace, "subdir")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("MkdirAll nested: %v", err)
+	}
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	binding, err := metadata.RegisterBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterBinding: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := projectSubcommand([]string{nested}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code = %d, want 0 stderr=%q", code, stderr.String())
 	}
 	if got := stdout.String(); got != binding.ProjectID+"\n" {
