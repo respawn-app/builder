@@ -237,7 +237,7 @@ jobs:
           path: dist
 
       - name: Create or update release
-        uses: softprops/action-gh-release@v2.6.1
+        uses: softprops/action-gh-release@v3.0.0
         with:
           tag_name: ${{ needs.prepare_release.outputs.tag }}
           name: ${{ needs.prepare_release.outputs.tag }}
