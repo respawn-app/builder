@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"builder/server/metadata"
@@ -256,5 +257,45 @@ func TestEnsureInteractiveProjectBindingAttachesUnknownWorkspaceToExistingProjec
 	}
 	if resolved.ProjectID != bindingA.ProjectID {
 		t.Fatalf("workspace B project id = %q, want %q", resolved.ProjectID, bindingA.ProjectID)
+	}
+}
+
+func TestProjectBindingHeadersTrimMarkdownInset(t *testing.T) {
+	picker := newProjectBindingPickerModel(nil, "dark")
+	if got := picker.renderHeader(); strings.HasPrefix(got, "  ") {
+		t.Fatalf("picker header has unexpected left padding: %q", got)
+	}
+
+	prompt := newProjectNamePromptModel("demo", "dark")
+	if got := prompt.renderHeader(); strings.HasPrefix(got, "  ") {
+		t.Fatalf("project name header has unexpected left padding: %q", got)
+	}
+}
+
+func TestProjectNamePromptViewUsesFramedEditableInput(t *testing.T) {
+	model := newProjectNamePromptModel("demo", "dark")
+	model.width = 40
+	model.height = 10
+	view := model.View()
+	if !strings.Contains(view, "────────────────") {
+		t.Fatalf("expected framed input border in prompt view, got %q", view)
+	}
+	if strings.Contains(view, "Unknown directory opened") {
+		t.Fatalf("unexpected picker subtitle leaked into prompt view: %q", view)
+	}
+}
+
+func TestProjectNamePromptViewTracksLongInputCursor(t *testing.T) {
+	model := newProjectNamePromptModel("", "dark")
+	model.width = 18
+	model.height = 4
+	model.input.SetValue("project-name-with-long-tail")
+	model.input.SetCursor(len([]rune(model.input.Value())))
+	view := model.View()
+	if strings.Contains(view, "project-name") {
+		t.Fatalf("expected long input view to follow cursor near tail, got %q", view)
+	}
+	if !strings.Contains(view, "long-tail") {
+		t.Fatalf("expected long input tail to remain visible, got %q", view)
 	}
 }
