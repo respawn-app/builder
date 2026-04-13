@@ -507,7 +507,9 @@ type uiModel struct {
 	nativeReplayWidth                  int
 	nativeFormatterWidth               int
 	nativeProjection                   tui.TranscriptProjection
+	nativeProjectionBaseOffset         int
 	nativeRenderedProjection           tui.TranscriptProjection
+	nativeRenderedBaseOffset           int
 	nativeRenderedSnapshot             string
 	nativeHistoryReplayPermit          nativeHistoryReplayPermit
 	nativeFlushSequence                uint64
@@ -796,7 +798,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.resetNativeHistoryState()
 				m.nativeHistoryReplayed = true
 			} else {
-				m.rebaseNativeProjection(committedTranscriptProjectionForApp(m.view, m.transcriptEntries), len(committedEntries))
+				m.rebaseNativeProjection(committedTranscriptProjectionForApp(m.view, m.transcriptEntries), m.transcriptBaseOffset, len(committedEntries))
 			}
 		}
 		if !m.nativeHistoryReplayed {

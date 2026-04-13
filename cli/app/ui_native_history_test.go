@@ -2081,6 +2081,43 @@ func TestNativeHistorySnapshotAuthoritativeHydrateRepairDoesNotPanicInDebugMode(
 	}
 }
 
+func TestNativeHistorySnapshotAppendsAcrossSlidingTailWindowWithoutReplay(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.windowSizeKnown = true
+	m.nativeProjectionBaseOffset = 101
+	m.nativeProjection = tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{
+		{Role: "cache_warning", DividerGroup: "warning", Lines: []string{"⚠ Cache miss: postfix-compatible supervisor cache reuse disappeared, -79k tokens"}},
+		{Role: "reviewer_suggestions", DividerGroup: "reviewer", Lines: []string{"§ Supervisor suggested:", "1. Add verification notes."}},
+		{Role: "assistant", DividerGroup: "assistant", Lines: []string{"❮ previous answer"}},
+		{Role: "user", DividerGroup: "user", Lines: []string{"❯ did you fix the actual transcript bugs, or only reporting/observability?"}},
+	}}
+	m.nativeRenderedBaseOffset = 100
+	m.nativeRenderedProjection = tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{
+		{Role: "system", DividerGroup: "user", Lines: []string{"❯ earlier question"}},
+		{Role: "cache_warning", DividerGroup: "warning", Lines: []string{"⚠ Cache miss: postfix-compatible supervisor cache reuse disappeared, -79k tokens"}},
+		{Role: "reviewer_suggestions", DividerGroup: "reviewer", Lines: []string{"§ Supervisor suggested:", "1. Add verification notes."}},
+		{Role: "assistant", DividerGroup: "assistant", Lines: []string{"❮ previous answer"}},
+	}}
+	m.nativeRenderedSnapshot = m.nativeRenderedProjection.Render(tui.TranscriptDivider)
+
+	cmd := m.emitCurrentNativeHistorySnapshot(false, nativeHistoryReplayPermitNone)
+	if cmd == nil {
+		t.Fatal("expected sliding tail window to append only the new suffix")
+	}
+	msg, ok := cmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg for sliding tail append, got %T", cmd())
+	}
+	plain := stripANSIPreserve(msg.Text)
+	if !strings.Contains(plain, "did you fix the actual transcript bugs") {
+		t.Fatalf("expected sliding tail append to emit newest visible block, got %q", plain)
+	}
+	if strings.Contains(plain, "Cache miss") || strings.Contains(plain, "Supervisor suggested") {
+		t.Fatalf("expected sliding tail append to avoid re-emitting overlapped committed rows, got %q", plain)
+	}
+}
+
 func TestModeRestoreReplayPermitOverridesEarlierAuthoritativeHydratePermit(t *testing.T) {
 	m := newProjectedStaticUIModel(
 		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
