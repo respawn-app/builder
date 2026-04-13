@@ -14,7 +14,7 @@
     "@astrojs/sitemap": "^3.7.2",
     "@astrojs/starlight": "^0.38.3",
     "@astrojs/starlight-docsearch": "^0.7.0",
-    "astro": "^6.1.4",
+    "astro": "^6.1.5",
     "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",
     "remark-stringify": "^11.0.0",
