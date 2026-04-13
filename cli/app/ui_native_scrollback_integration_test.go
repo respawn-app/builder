@@ -1626,6 +1626,75 @@ func TestNativeProgramDoesNotDuplicateSupervisorFollowUpAfterHydration(t *testin
 	}
 }
 
+func TestNativeProgramDoesNotReemitOverlappedTailRowsWhenAuthoritativeTailSlides(t *testing.T) {
+	out := &bytes.Buffer{}
+	model := newProjectedStaticUIModel()
+	model.startupCmds = nil
+	model.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "assistant", Text: "seed"},
+		{Role: "cache_warning", Visibility: transcript.EntryVisibilityAll, Text: "Cache miss: postfix-compatible supervisor cache reuse disappeared, -79k tokens"},
+		{Role: "reviewer_suggestions", Text: "Supervisor suggested:\n1. Add verification notes.", OngoingText: "Supervisor suggested:\n1. Add verification notes."},
+		{Role: "assistant", Text: "previous answer"},
+	}
+	model.forwardToView(tui.SetConversationMsg{Entries: model.transcriptEntries})
+	model.runtimeTranscriptBusy = true
+	model.runtimeTranscriptToken = 1
+	model.transcriptRevision = 1
+	model.transcriptBaseOffset = 0
+	model.transcriptTotalEntries = 4
+
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	waitForTestCondition(t, 2*time.Second, "startup replay", func() bool {
+		return strings.Contains(normalizedOutput(out.String()), "previous answer")
+	})
+
+	program.Send(runtimeTranscriptRefreshedMsg{token: 1, transcript: clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     2,
+		Offset:       1,
+		TotalEntries: 5,
+		Entries: []clientui.ChatEntry{
+			{Role: "cache_warning", Visibility: clientui.EntryVisibilityAll, Text: "Cache miss: postfix-compatible supervisor cache reuse disappeared, -79k tokens"},
+			{Role: "reviewer_suggestions", Text: "Supervisor suggested:\n1. Add verification notes.", OngoingText: "Supervisor suggested:\n1. Add verification notes."},
+			{Role: "assistant", Text: "previous answer"},
+			{Role: "user", Text: "did you fix the actual transcript bugs, or only reporting/observability?"},
+		},
+	}})
+	waitForTestCondition(t, 2*time.Second, "sliding authoritative tail appends only newest suffix", func() bool {
+		normalized := normalizedOutput(out.String())
+		return containsInOrder(normalized, "previous answer", "did you fix the actual transcript bugs, or only reporting/observability?")
+	})
+
+	program.Quit()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	normalized := normalizedOutput(out.String())
+	if strings.Count(normalized, "Cache miss: postfix-compatible supervisor cache reuse disappeared, -79k tokens") != 1 {
+		t.Fatalf("expected overlapped cache warning exactly once after sliding tail hydrate, got %q", normalized)
+	}
+	if strings.Count(normalized, "Supervisor suggested:") != 1 {
+		t.Fatalf("expected overlapped reviewer suggestions exactly once after sliding tail hydrate, got %q", normalized)
+	}
+	if strings.Count(normalized, "did you fix the actual transcript bugs, or only reporting/observability?") != 1 {
+		t.Fatalf("expected newest suffix exactly once after sliding tail hydrate, got %q", normalized)
+	}
+}
+
 func TestNativeProgramRendersSingleBackgroundCompletionFromChannelWhileIdle(t *testing.T) {
 	out := &bytes.Buffer{}
 	runtimeEvents := make(chan clientui.Event, 4)
