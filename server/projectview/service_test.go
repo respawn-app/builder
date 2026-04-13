@@ -143,7 +143,7 @@ func TestMetadataServiceSupportsWildcardAndScopedProjectListing(t *testing.T) {
 	}
 }
 
-func TestMetadataServiceResolveProjectPathUsesAncestorWorkspaceBinding(t *testing.T) {
+func TestMetadataServiceResolveProjectPathLeavesNestedDirectoryUnbound(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	nested := filepath.Join(workspace, "nested", "deeper")
@@ -161,7 +161,7 @@ func TestMetadataServiceResolveProjectPathUsesAncestorWorkspaceBinding(t *testin
 		t.Fatalf("metadata.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	binding, err := store.RegisterWorkspaceBinding(context.Background(), cfg.WorkspaceRoot)
+	_, err = store.RegisterWorkspaceBinding(context.Background(), cfg.WorkspaceRoot)
 	if err != nil {
 		t.Fatalf("RegisterWorkspaceBinding: %v", err)
 	}
@@ -175,13 +175,7 @@ func TestMetadataServiceResolveProjectPathUsesAncestorWorkspaceBinding(t *testin
 	if err != nil {
 		t.Fatalf("ResolveProjectPath: %v", err)
 	}
-	if resolved.Binding == nil {
-		t.Fatal("expected nested path to resolve ancestor workspace binding")
-	}
-	if resolved.Binding.ProjectID != binding.ProjectID || resolved.Binding.CanonicalRoot != binding.CanonicalRoot {
-		t.Fatalf("resolved binding = %+v, want project %q root %q", resolved.Binding, binding.ProjectID, binding.CanonicalRoot)
-	}
-	if resolved.CanonicalRoot == binding.CanonicalRoot {
-		t.Fatalf("expected response canonical root to remain nested path, got %q", resolved.CanonicalRoot)
+	if resolved.Binding != nil {
+		t.Fatalf("expected nested path to remain unbound, got %+v", resolved.Binding)
 	}
 }

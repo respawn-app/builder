@@ -223,7 +223,7 @@ Requirements:
 - structured metadata must have one authoritative durable store
 - session transcript/log bulk files must remain file-backed in this phase
 - project/workspace/worktree identity and execution-target semantics must be explicit and durable
-- any nested path inside an attached workspace must resolve to that workspace binding instead of creating a second workspace registration implicitly
+- workspace resolution is exact-match on canonical workspace roots; nested subdirectories remain unknown until explicitly attached
 - startup/registration flows must operate through the server-owned metadata authority rather than hidden local shortcuts
 - unknown-cwd interactive startup must branch into an explicit binding flow with create-project and attach-to-existing-project choices
 - headless startup in an unregistered workspace must fail fast and point users/agents at explicit recovery commands rather than inventing hidden project/workspace state
