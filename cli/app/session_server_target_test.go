@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"builder/server/auth"
+	"builder/server/metadata"
 	"builder/server/serve"
 	serverstartup "builder/server/startup"
 	"builder/server/tools"
@@ -831,6 +832,26 @@ func TestStartSessionServerBypassesRemoteAndDaemonOnFirstInteractiveRun(t *testi
 	}
 	if _, ok := server.(*embeddedAppServer); !ok {
 		t.Fatalf("expected embedded app server, got %T", server)
+	}
+}
+
+func TestStartSessionServerUnregisteredWorkspaceReturnsRegistrationErrorForSessionPlanning(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	server, err := startSessionServer(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true}, newHeadlessAuthInteractorWithEnvKey("test-key"))
+	if err != nil {
+		t.Fatalf("startSessionServer: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	if server.SessionLaunchClient() == nil {
+		t.Fatal("expected session launch client")
+	}
+	_, err = server.SessionLaunchClient().PlanSession(context.Background(), serverapi.SessionPlanRequest{Mode: serverapi.SessionLaunchModeInteractive})
+	if !errors.Is(err, metadata.ErrWorkspaceNotRegistered) {
+		t.Fatalf("PlanSession error = %v, want ErrWorkspaceNotRegistered", err)
 	}
 }
 
