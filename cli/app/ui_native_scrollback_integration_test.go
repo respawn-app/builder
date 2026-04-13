@@ -2139,7 +2139,7 @@ func TestQueuedFollowUpWaitsForFinalTranscriptCatchUpBeforeNativeScrollbackAppen
 	}
 }
 
-func TestRuntimeHydrationRewriteRecoversOngoingScrollbackAndLaterAssistantAppend(t *testing.T) {
+func TestRuntimeContinuityRecoveryReplaysOngoingScrollbackAndLaterAssistantAppend(t *testing.T) {
 	out := &bytes.Buffer{}
 	runtimeEvents := make(chan clientui.Event, 16)
 	client := &runtimeControlFakeClient{
@@ -2181,7 +2181,7 @@ func TestRuntimeHydrationRewriteRecoversOngoingScrollbackAndLaterAssistantAppend
 		return strings.Contains(normalized, "before") && strings.Contains(normalized, "working")
 	})
 
-	program.Send(runtimeTranscriptRefreshedMsg{token: 1, transcript: clientui.TranscriptPage{
+	program.Send(runtimeTranscriptRefreshedMsg{token: 1, recoveryCause: clientui.TranscriptRecoveryCauseStreamGap, transcript: clientui.TranscriptPage{
 		SessionID:    "session-1",
 		Revision:     2,
 		TotalEntries: 2,
@@ -2193,18 +2193,18 @@ func TestRuntimeHydrationRewriteRecoversOngoingScrollbackAndLaterAssistantAppend
 	deadline := time.Now().Add(2 * time.Second)
 	for !strings.Contains(normalizedOutput(out.String()), "after") {
 		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for authoritative rewrite appended to ongoing scrollback output=%q transcript=%+v native_projection=%+v native_rendered_projection=%+v native_snapshot=%q busy=%t runtime_busy=%t token=%d ongoing=%q", normalizedOutput(out.String()), model.transcriptEntries, model.nativeProjection, model.nativeRenderedProjection, model.nativeRenderedSnapshot, model.busy, model.runtimeTranscriptBusy, model.runtimeTranscriptToken, stripANSIAndTrimRight(model.view.OngoingSnapshot()))
+			t.Fatalf("timed out waiting for continuity recovery replay appended to ongoing scrollback output=%q transcript=%+v native_projection=%+v native_rendered_projection=%+v native_snapshot=%q busy=%t runtime_busy=%t token=%d ongoing=%q", normalizedOutput(out.String()), model.transcriptEntries, model.nativeProjection, model.nativeRenderedProjection, model.nativeRenderedSnapshot, model.busy, model.runtimeTranscriptBusy, model.runtimeTranscriptToken, stripANSIAndTrimRight(model.view.OngoingSnapshot()))
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	if got := len(model.transcriptEntries); got != 2 {
-		t.Fatalf("expected hydration rewrite to replace transcript tail, got %d entries", got)
+		t.Fatalf("expected continuity recovery hydrate to replace transcript tail, got %d entries", got)
 	}
 	if got := model.transcriptEntries[1].Text; got != "after" {
-		t.Fatalf("expected authoritative assistant rewrite after hydration, got %q", got)
+		t.Fatalf("expected authoritative assistant tail after continuity recovery, got %q", got)
 	}
 	if strings.TrimSpace(model.view.OngoingStreamingText()) != "" {
-		t.Fatalf("expected hydration rewrite to clear stale streaming text, got %q", model.view.OngoingStreamingText())
+		t.Fatalf("expected continuity recovery hydrate to clear stale streaming text, got %q", model.view.OngoingStreamingText())
 	}
 
 	program.Send(runtimeEventMsg{event: clientui.Event{
@@ -2218,7 +2218,7 @@ func TestRuntimeHydrationRewriteRecoversOngoingScrollbackAndLaterAssistantAppend
 			Phase: string(llm.MessagePhaseFinal),
 		}},
 	}})
-	waitForTestCondition(t, 2*time.Second, "later assistant append resumes after hydration rewrite", func() bool {
+	waitForTestCondition(t, 2*time.Second, "later assistant append resumes after continuity recovery", func() bool {
 		return containsInOrder(normalizedOutput(out.String()), "after", "next answer")
 	})
 
@@ -2251,7 +2251,77 @@ func TestRuntimeHydrationRewriteRecoversOngoingScrollbackAndLaterAssistantAppend
 		t.Fatalf("expected detail mode to reflect authoritative transcript tail, got %q", detail)
 	}
 	if strings.Contains(detail, "before") {
-		t.Fatalf("expected detail mode to exclude stale assistant tail after hydration rewrite, got %q", detail)
+		t.Fatalf("expected detail mode to exclude stale assistant tail after continuity recovery, got %q", detail)
+	}
+}
+
+func TestRuntimeAuthoritativeHydrateRepairsOngoingScrollbackWithoutContinuityLoss(t *testing.T) {
+	out := &bytes.Buffer{}
+	runtimeEvents := make(chan clientui.Event, 16)
+	client := &runtimeControlFakeClient{
+		sessionView: clientui.RuntimeSessionView{SessionID: "session-1"},
+		transcript: clientui.TranscriptPage{
+			SessionID:    "session-1",
+			Revision:     1,
+			TotalEntries: 2,
+			Entries: []clientui.ChatEntry{
+				{Role: "user", Text: "commit/push"},
+				{Role: "assistant", Text: "before"},
+			},
+		},
+	}
+	model := newProjectedTestUIModel(client, runtimeEvents, closedAskEvents())
+	model.startupCmds = nil
+	model.runtimeTranscriptBusy = true
+	model.runtimeTranscriptToken = 1
+	model.busy = true
+	model.activity = uiActivityRunning
+	model.sawAssistantDelta = true
+	model.forwardToView(tui.SetConversationMsg{Entries: model.transcriptEntries, Ongoing: "working"})
+
+	program := tea.NewProgram(model, tea.WithInput(strings.NewReader("")), tea.WithOutput(out), tea.WithoutSignals())
+	done := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		done <- err
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	program.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
+	waitForTestCondition(t, 2*time.Second, "initial ongoing output visible", func() bool {
+		normalized := normalizedOutput(out.String())
+		return strings.Contains(normalized, "before") && strings.Contains(normalized, "working")
+	})
+
+	program.Send(runtimeTranscriptRefreshedMsg{token: 1, transcript: clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     2,
+		TotalEntries: 2,
+		Entries: []clientui.ChatEntry{
+			{Role: "user", Text: "commit/push"},
+			{Role: "assistant", Text: "after"},
+		},
+	}})
+	waitForTestCondition(t, 2*time.Second, "authoritative hydrate replay visible", func() bool {
+		return strings.Contains(normalizedOutput(out.String()), "after")
+	})
+
+	program.Quit()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("program run failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("program did not terminate")
+	}
+
+	normalized := normalizedOutput(out.String())
+	if !containsInOrder(normalized, "before", "after") {
+		t.Fatalf("expected authoritative hydrate to repair ongoing scrollback, got %q", normalized)
+	}
+	if !strings.Contains(stripANSIAndTrimRight(model.View()), nativeHistoryDivergenceStatusMessage) {
+		t.Fatalf("expected authoritative hydrate repair to surface divergence status, got %q", stripANSIAndTrimRight(model.View()))
 	}
 }
 

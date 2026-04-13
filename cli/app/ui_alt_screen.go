@@ -104,8 +104,9 @@ func (m *uiModel) nativeReplayCmdForModeTransition(prev, next tui.Mode, enabled 
 	if prev != tui.ModeDetail || next != tui.ModeOngoing {
 		return nil
 	}
-	// Detail -> ongoing replay must stay append-only; callers must not request a
-	// force-full replay into ongoing mode.
+	// Detail-mode transcript changes must restore the committed normal-buffer view
+	// when we return to ongoing, but only via the dedicated mode-restore path.
+	m.armNativeHistoryReplayPermit(nativeHistoryReplayPermitModeRestore)
 	return m.emitCurrentNativeScrollbackState(false)
 }
 

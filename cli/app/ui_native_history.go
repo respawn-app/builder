@@ -9,6 +9,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+const nativeHistoryDivergenceStatusMessage = "Transcript sync bug: ongoing scrollback may be stale until reconnect"
+
 func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 	if !m.windowSizeKnown {
 		return nil
@@ -38,7 +40,6 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 		}
 		return m.emitCurrentNativeScrollbackState(false)
 	}
-
 	previousProjection := m.nativeRenderedProjection
 	if previousProjection.Empty() {
 		previousProjection = m.nativeProjection
@@ -49,8 +50,19 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 	if !m.shouldEmitNativeHistory() {
 		return nil
 	}
+	replayPermit := m.consumeNativeHistoryReplayPermit()
 	if !ok {
-		return m.emitNonContiguousNativeProjectionRecovery(projection, previousProjection)
+		if replayPermit == nativeHistoryReplayPermitContinuityRecovery || replayPermit == nativeHistoryReplayPermitModeRestore {
+			return m.emitNonContiguousNativeProjectionRecovery(projection, previousProjection)
+		}
+		if replayPermit == nativeHistoryReplayPermitAuthoritativeHydrate {
+			return batchCmds(
+				m.setTransientStatusWithKind(nativeHistoryDivergenceStatusMessage, uiStatusNoticeError),
+				m.emitNonContiguousNativeProjectionRecovery(projection, previousProjection),
+			)
+		}
+		m.acceptNativeProjectionWithoutReplay(projection)
+		return m.reportNativeProjectionDivergence(projection, previousProjection)
 	}
 	if strings.TrimSpace(delta) == "" {
 		return nil
@@ -80,8 +92,52 @@ func (m *uiModel) resetNativeHistoryState() {
 	m.nativeProjection = tui.TranscriptProjection{}
 	m.nativeRenderedProjection = tui.TranscriptProjection{}
 	m.nativeRenderedSnapshot = ""
+	m.nativeHistoryReplayPermit = nativeHistoryReplayPermitNone
 	m.waitRuntimeEventAfterFlushSequence = 0
 	m.discardPendingNativeHistoryFlushes()
+}
+
+func (m *uiModel) armNativeHistoryReplayPermit(permit nativeHistoryReplayPermit) {
+	if m == nil || permit == nativeHistoryReplayPermitNone {
+		return
+	}
+	if permit == nativeHistoryReplayPermitContinuityRecovery {
+		m.nativeHistoryReplayPermit = permit
+		return
+	}
+	if m.nativeHistoryReplayPermit == nativeHistoryReplayPermitContinuityRecovery {
+		return
+	}
+	if permit == nativeHistoryReplayPermitModeRestore {
+		m.nativeHistoryReplayPermit = permit
+		return
+	}
+	if m.nativeHistoryReplayPermit == nativeHistoryReplayPermitModeRestore {
+		return
+	}
+	m.nativeHistoryReplayPermit = permit
+}
+
+func (m *uiModel) consumeNativeHistoryReplayPermit() nativeHistoryReplayPermit {
+	if m == nil {
+		return nativeHistoryReplayPermitNone
+	}
+	permit := m.nativeHistoryReplayPermit
+	m.nativeHistoryReplayPermit = nativeHistoryReplayPermitNone
+	return permit
+}
+
+func (m *uiModel) acceptNativeProjectionWithoutReplay(projection tui.TranscriptProjection) {
+	m.nativeRenderedProjection = projection
+	m.nativeRenderedSnapshot = projection.Render(tui.TranscriptDivider)
+}
+
+func (m *uiModel) reportNativeProjectionDivergence(current tui.TranscriptProjection, rendered tui.TranscriptProjection) tea.Cmd {
+	if m.debugMode {
+		panic(fmt.Sprintf("same-session committed transcript divergence requires root-cause fix: rendered_blocks=%d current_blocks=%d", len(rendered.Blocks), len(current.Blocks)))
+	}
+	m.logf("ui.native_history.divergence_detected rendered_blocks=%d current_blocks=%d", len(rendered.Blocks), len(current.Blocks))
+	return m.setTransientStatusWithKind(nativeHistoryDivergenceStatusMessage, uiStatusNoticeError)
 }
 
 func (m *uiModel) rebaseNativeProjection(projection tui.TranscriptProjection, committedCount int) {
@@ -91,8 +147,9 @@ func (m *uiModel) rebaseNativeProjection(projection tui.TranscriptProjection, co
 }
 
 func (m *uiModel) emitCurrentNativeScrollbackState(forceFull bool) tea.Cmd {
+	replayPermit := m.consumeNativeHistoryReplayPermit()
 	if !m.nativeProjection.Empty() {
-		return m.emitCurrentNativeHistorySnapshot(forceFull)
+		return m.emitCurrentNativeHistorySnapshot(forceFull, replayPermit)
 	}
 	return m.emitEmptyNativeScrollbackSpacer(forceFull)
 }
@@ -119,7 +176,7 @@ func (m *uiModel) nativeEmptyScrollbackSpacerText() string {
 	return strings.Repeat("\n", m.termHeight)
 }
 
-func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool) tea.Cmd {
+func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool, replayPermit nativeHistoryReplayPermit) tea.Cmd {
 	rawSnapshot := m.nativeProjection.Render(tui.TranscriptDivider)
 	if strings.TrimSpace(rawSnapshot) == "" {
 		return nil
@@ -152,7 +209,17 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool) tea.Cmd {
 			return nil
 		}
 		if rewriteRenderedHistory {
-			return m.emitNonContiguousNativeProjectionRecovery(m.nativeProjection, m.nativeRenderedProjection)
+			if replayPermit == nativeHistoryReplayPermitContinuityRecovery || replayPermit == nativeHistoryReplayPermitModeRestore {
+				return m.emitNonContiguousNativeProjectionRecovery(m.nativeProjection, m.nativeRenderedProjection)
+			}
+			if replayPermit == nativeHistoryReplayPermitAuthoritativeHydrate {
+				return batchCmds(
+					m.setTransientStatusWithKind(nativeHistoryDivergenceStatusMessage, uiStatusNoticeError),
+					m.emitNonContiguousNativeProjectionRecovery(m.nativeProjection, m.nativeRenderedProjection),
+				)
+			}
+			m.acceptNativeProjectionWithoutReplay(m.nativeProjection)
+			return m.reportNativeProjectionDivergence(m.nativeProjection, m.nativeRenderedProjection)
 		}
 		forceFull = true
 	}

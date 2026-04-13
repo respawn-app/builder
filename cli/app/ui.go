@@ -83,14 +83,16 @@ type runtimeMainViewRefreshedMsg struct {
 }
 
 type runtimeTranscriptRefreshedMsg struct {
-	token      uint64
-	req        clientui.TranscriptPageRequest
-	transcript clientui.TranscriptPage
-	err        error
+	token         uint64
+	req           clientui.TranscriptPageRequest
+	transcript    clientui.TranscriptPage
+	recoveryCause clientui.TranscriptRecoveryCause
+	err           error
 }
 
 type runtimeTranscriptRetryMsg struct {
-	token uint64
+	token         uint64
+	recoveryCause clientui.TranscriptRecoveryCause
 }
 
 type detailTranscriptLoadMsg struct{}
@@ -98,6 +100,15 @@ type detailTranscriptLoadMsg struct{}
 type renderDiagnosticMsg struct {
 	diagnostic tui.RenderDiagnostic
 }
+
+type nativeHistoryReplayPermit uint8
+
+const (
+	nativeHistoryReplayPermitNone nativeHistoryReplayPermit = iota
+	nativeHistoryReplayPermitContinuityRecovery
+	nativeHistoryReplayPermitAuthoritativeHydrate
+	nativeHistoryReplayPermitModeRestore
+)
 
 type runLoggerDiagnosticMsg struct {
 	diagnostic runLoggerDiagnostic
@@ -495,6 +506,7 @@ type uiModel struct {
 	nativeProjection                   tui.TranscriptProjection
 	nativeRenderedProjection           tui.TranscriptProjection
 	nativeRenderedSnapshot             string
+	nativeHistoryReplayPermit          nativeHistoryReplayPermit
 	nativeFlushSequence                uint64
 	nativeFlushedSequence              uint64
 	nativePendingFlushes               map[uint64]nativeHistoryFlushMsg
@@ -847,7 +859,12 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncViewport()
 			return m, nil
 		}
-		cmd := m.requestRuntimeTranscriptSync()
+		var cmd tea.Cmd
+		if msg.recoveryCause != clientui.TranscriptRecoveryCauseNone {
+			cmd = m.requestRuntimeTranscriptSyncForContinuityLoss(msg.recoveryCause)
+		} else {
+			cmd = m.requestRuntimeTranscriptSync()
+		}
 		m.syncViewport()
 		return m, cmd
 	case detailTranscriptLoadMsg:

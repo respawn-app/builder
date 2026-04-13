@@ -86,6 +86,7 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 	}
 	m.logTranscriptEventDiag("transcript.diag.client.apply_event", evt, map[string]string{
 		"path":                  "live_event",
+		"recovery_cause":        string(evt.RecoveryCause),
 		"sync_session_view":     strconv.FormatBool(effectiveSyncSessionView),
 		"record_prompt_history": strconv.FormatBool(update.RecordPromptHistory),
 	})
@@ -147,7 +148,11 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 		cmds = append(cmds, m.recordPromptHistory(evt.UserMessage))
 	}
 	if effectiveSyncSessionView {
-		cmds = append(cmds, a.syncConversationFromEngine())
+		if evt.RecoveryCause != clientui.TranscriptRecoveryCauseNone {
+			cmds = append(cmds, m.requestRuntimeTranscriptSyncForContinuityLoss(evt.RecoveryCause))
+		} else {
+			cmds = append(cmds, a.syncConversationFromEngine())
+		}
 		awaitsHydration = awaitsHydration || shouldPauseRuntimeEventsForHydration(m)
 	}
 	return runtimeEventApplyResult{cmd: batchCmds(cmds...), transcriptMutated: transcriptMutated, awaitsHydration: awaitsHydration}
@@ -384,12 +389,12 @@ func (a uiRuntimeAdapter) applyProjectedChatSnapshot(snapshot clientui.ChatSnaps
 	page.HasMore = false
 	page.Ongoing = snapshot.Ongoing
 	page.OngoingError = snapshot.OngoingError
-	return a.applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, page)
+	return a.applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, page, clientui.TranscriptRecoveryCauseNone)
 }
 
 func (a uiRuntimeAdapter) applyProjectedSessionView(view clientui.RuntimeSessionView) tea.Cmd {
 	transcript := transcriptPageFromSessionView(view)
-	return sequenceCmds(a.applyProjectedSessionMetadata(view), a.applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, transcript))
+	return sequenceCmds(a.applyProjectedSessionMetadata(view), a.applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, transcript, clientui.TranscriptRecoveryCauseNone))
 }
 
 func (a uiRuntimeAdapter) applyProjectedSessionMetadata(view clientui.RuntimeSessionView) tea.Cmd {
@@ -403,6 +408,7 @@ func (a uiRuntimeAdapter) applyProjectedSessionMetadata(view clientui.RuntimeSes
 		m.transcriptRevision = 0
 		m.transcriptLiveDirty = false
 		m.reasoningLiveDirty = false
+		m.nativeHistoryReplayPermit = nativeHistoryReplayPermitNone
 	}
 	m.sessionID = strings.TrimSpace(view.SessionID)
 	m.sessionName = strings.TrimSpace(view.SessionName)
@@ -417,18 +423,23 @@ func (a uiRuntimeAdapter) applyProjectedSessionMetadata(view clientui.RuntimeSes
 }
 
 func (a uiRuntimeAdapter) applyProjectedTranscriptPage(page clientui.TranscriptPage) tea.Cmd {
-	return a.applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, page)
+	return a.applyRuntimeTranscriptPageWithRecovery(clientui.TranscriptPageRequest{}, page, clientui.TranscriptRecoveryCauseNone)
 }
 
 func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPageRequest, page clientui.TranscriptPage) tea.Cmd {
+	return a.applyRuntimeTranscriptPageWithRecovery(req, page, clientui.TranscriptRecoveryCauseNone)
+}
+
+func (a uiRuntimeAdapter) applyRuntimeTranscriptPageWithRecovery(req clientui.TranscriptPageRequest, page clientui.TranscriptPage, recoveryCause clientui.TranscriptRecoveryCause) tea.Cmd {
 	m := a.model
-	m.logTranscriptPageDiag("transcript.diag.client.apply_page_start", req, page, map[string]string{"path": "hydrate"})
+	m.logTranscriptPageDiag("transcript.diag.client.apply_page_start", req, page, map[string]string{"path": "hydrate", "recovery_cause": string(recoveryCause)})
 	if len(m.startupCmds) > 0 {
 		m.startupCmds = nil
 		m.nativeProjection = tui.TranscriptProjection{}
 		m.nativeRenderedProjection = tui.TranscriptProjection{}
 		m.nativeFlushedEntryCount = 0
 		m.nativeRenderedSnapshot = ""
+		m.nativeHistoryReplayPermit = nativeHistoryReplayPermitNone
 	}
 	previousWindowTitle := m.windowTitle()
 	if transcriptPageSessionChanged(m.sessionID, page.SessionID) {
@@ -436,6 +447,7 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPage
 		m.transcriptRevision = 0
 		m.transcriptLiveDirty = false
 		m.reasoningLiveDirty = false
+		m.nativeHistoryReplayPermit = nativeHistoryReplayPermitNone
 	}
 	m.sessionID = strings.TrimSpace(page.SessionID)
 	if strings.TrimSpace(page.SessionName) != "" {
@@ -452,7 +464,7 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPage
 		page.OngoingError = ""
 	}
 	if reason := transcriptPageReplacementRejectReason(m, pageReq, page); reason != "" {
-		m.logTranscriptPageDiag("transcript.diag.client.apply_page_reject", pageReq, page, map[string]string{"path": "hydrate", "reason": reason})
+		m.logTranscriptPageDiag("transcript.diag.client.apply_page_reject", pageReq, page, map[string]string{"path": "hydrate", "reason": reason, "recovery_cause": string(recoveryCause)})
 		if previousWindowTitle != m.windowTitle() {
 			return tea.SetWindowTitle(m.windowTitle())
 		}
@@ -461,6 +473,11 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPage
 	shouldSyncNativeHistory := pageReq.Window == clientui.TranscriptWindowOngoingTail || pageReq == (clientui.TranscriptPageRequest{})
 	preserveLiveReasoning := shouldPreserveLiveReasoning(m, page)
 	if shouldSyncNativeHistory {
+		permit := nativeHistoryReplayPermitAuthoritativeHydrate
+		if recoveryCause != clientui.TranscriptRecoveryCauseNone {
+			permit = nativeHistoryReplayPermitContinuityRecovery
+		}
+		m.armNativeHistoryReplayPermit(permit)
 		a.applyAuthoritativeOngoingTailPage(page, entries, preserveLiveReasoning)
 	}
 	if pageReq.Window == clientui.TranscriptWindowOngoingTail || (pageReq == (clientui.TranscriptPageRequest{}) && m.view.Mode() != tui.ModeDetail) {
@@ -520,6 +537,7 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPage(req clientui.TranscriptPage
 	}
 	m.logTranscriptPageDiag("transcript.diag.client.apply_page_commit", pageReq, page, map[string]string{
 		"path":                      "hydrate",
+		"recovery_cause":            string(recoveryCause),
 		"branch":                    transcriptPageApplyBranch(pageReq, m),
 		"preserve_live_reasoning":   strconv.FormatBool(preserveLiveReasoning),
 		"transcript_revision_after": strconv.FormatInt(m.transcriptRevision, 10),

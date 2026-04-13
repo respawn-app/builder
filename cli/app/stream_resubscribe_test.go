@@ -39,6 +39,9 @@ func TestStartSessionActivityEventsResubscribesAfterStreamGap(t *testing.T) {
 	if rehydrate.Kind != clientui.EventConversationUpdated {
 		t.Fatalf("expected synthetic conversation update after resubscribe, got %+v", rehydrate)
 	}
+	if rehydrate.RecoveryCause != clientui.TranscriptRecoveryCauseStreamGap {
+		t.Fatalf("expected stream-gap recovery cause on synthetic refresh, got %+v", rehydrate)
+	}
 
 	second := waitSessionActivityEvent(t, events)
 	if second.Kind != clientui.EventRunStateChanged || second.RunState == nil || !second.RunState.Busy {
@@ -82,6 +85,9 @@ func TestStartSessionActivityEventsResubscribeStaysIsolatedAcrossStreams(t *test
 	rehydrateA := waitSessionActivityEvent(t, eventsA)
 	if rehydrateA.Kind != clientui.EventConversationUpdated {
 		t.Fatalf("expected synthetic refresh only on stream A, got %+v", rehydrateA)
+	}
+	if rehydrateA.RecoveryCause != clientui.TranscriptRecoveryCauseStreamGap {
+		t.Fatalf("expected stream-gap recovery cause only on stream A, got %+v", rehydrateA)
 	}
 	secondA := waitSessionActivityEvent(t, eventsA)
 	if secondA.Kind != clientui.EventRunStateChanged || secondA.StepID != "step-a" {
