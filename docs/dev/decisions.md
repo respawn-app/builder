@@ -211,6 +211,7 @@
 - Unknown `config.toml` keys are rejected as configuration errors.
 - Configuration precedence: `CLI overrides > environment > settings file > built-in defaults`.
 - Global debug mode is configurable via `debug = true` in `config.toml` or `BUILDER_DEBUG=1` in the environment. Debug mode enables developer-oriented strictness such as hard-failing invariants that production mode recovers from.
+- Ongoing native-history recovery must distinguish true same-session divergence from sliding authoritative tail windows. When an authoritative ongoing-tail hydrate advances the page offset but overlaps the already-emitted tail, Builder appends only the new suffix and must not full-replay or re-emit overlapped committed rows.
 - Thinking level passes configured values through unchanged and applies only to OpenAI model families.
 - Context window is explicit setting: `model_context_window` (default `272000`).
 - Validation requires `context_compaction_threshold_tokens < model_context_window`.
