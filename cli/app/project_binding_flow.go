@@ -124,7 +124,7 @@ func (m *projectBindingPickerModel) View() string {
 	var out strings.Builder
 	out.WriteString(m.renderHeader())
 	out.WriteString("\n\n")
-	out.WriteString(m.styles.preview.Render(truncateQueuedMessageLine(projectBindingPickerNoticeText, m.width)))
+	out.WriteString(tui.ApplyThemeDefaultForeground(truncateQueuedMessageLine(projectBindingPickerNoticeText, m.width), m.theme))
 	out.WriteString("\n\n")
 	visible := m.visibleRowsFromOffset(m.offset)
 	groupRendered := false
@@ -244,7 +244,7 @@ func (m *projectBindingPickerModel) renderHeader() string {
 	if m.headerMD != nil {
 		rendered, err := m.headerMD.Render(projectBindingPickerHeaderMarkdown)
 		if err == nil {
-			return tui.ApplyThemeDefaultForeground(strings.TrimRight(rendered, "\n"), m.theme)
+			return tui.ApplyThemeDefaultForeground(trimRenderedHeaderInset(rendered), m.theme)
 		}
 	}
 	return m.styles.headerFallback.Render(projectBindingPickerHeaderFallback)
@@ -414,7 +414,12 @@ func (m *projectNamePromptModel) View() string {
 	out.WriteString("\n\n")
 	out.WriteString(tui.ApplyThemeDefaultForeground("Enter a project name. Press Enter to create the project.", m.theme))
 	out.WriteString("\n\n")
-	out.WriteString(m.input.View())
+	out.WriteString(renderStartupEditableInput(m.width, m.height, m.theme, uiEditableInputRenderSpec{
+		Prefix:       "› ",
+		Text:         m.input.Value(),
+		CursorIndex:  m.input.Position(),
+		RenderCursor: true,
+	}))
 	if trimmed := strings.TrimSpace(m.error); trimmed != "" {
 		out.WriteString("\n\n")
 		out.WriteString(lipgloss.NewStyle().Foreground(statusRedColor()).Bold(true).Render(truncateQueuedMessageLine(trimmed, m.width)))
@@ -426,7 +431,7 @@ func (m *projectNamePromptModel) renderHeader() string {
 	if m.headerMD != nil {
 		rendered, err := m.headerMD.Render(projectNamePromptHeaderMarkdown)
 		if err == nil {
-			return tui.ApplyThemeDefaultForeground(strings.TrimRight(rendered, "\n"), m.theme)
+			return tui.ApplyThemeDefaultForeground(trimRenderedHeaderInset(rendered), m.theme)
 		}
 	}
 	return lipgloss.NewStyle().Foreground(uiPalette(m.theme).primary).Bold(true).Render(projectNamePromptHeaderFallback)
@@ -517,4 +522,29 @@ func headerInsetFromRenderedHeader(rendered string) string {
 		return line[:len(line)-len(trimmed)]
 	}
 	return ""
+}
+
+func trimRenderedHeaderInset(rendered string) string {
+	trimmed := strings.TrimRight(rendered, "\n")
+	inset := headerInsetFromRenderedHeader(trimmed)
+	if inset == "" {
+		return trimmed
+	}
+	lines := strings.Split(trimmed, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, inset) {
+			lines[i] = strings.TrimPrefix(line, inset)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func renderStartupEditableInput(width int, height int, theme string, spec uiEditableInputRenderSpec) string {
+	contentWidth := width
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
+	lineStyle := lipgloss.NewStyle().Foreground(uiPalette(theme).foreground)
+	borderStyle := lipgloss.NewStyle().Foreground(uiPalette(theme).primary)
+	return strings.Join(renderFramedEditableInputLines(contentWidth, inputContentLineLimit(height), spec, lineStyle, borderStyle), "\n")
 }
