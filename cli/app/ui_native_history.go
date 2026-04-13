@@ -30,28 +30,33 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 	projection := committedTranscriptProjectionForApp(m.view, m.transcriptEntries)
 	committedCount := len(committedEntries)
 	if m.nativeFlushedEntryCount < 0 || m.nativeFlushedEntryCount > committedCount {
-		m.rebaseNativeProjection(projection, committedCount)
+		m.rebaseNativeProjection(projection, m.transcriptBaseOffset, committedCount)
 		return nil
 	}
 	if !m.nativeHistoryReplayed || m.nativeProjection.Empty() {
-		m.rebaseNativeProjection(projection, committedCount)
+		m.rebaseNativeProjection(projection, m.transcriptBaseOffset, committedCount)
 		if !m.shouldEmitNativeHistory() {
 			return nil
 		}
 		return m.emitCurrentNativeScrollbackState(false)
 	}
 	previousProjection := m.nativeRenderedProjection
+	previousBaseOffset := m.nativeRenderedBaseOffset
 	if previousProjection.Empty() {
 		previousProjection = m.nativeProjection
+		previousBaseOffset = m.nativeProjectionBaseOffset
 	}
 	previousBlockCount := len(previousProjection.Blocks)
 	delta, ok := projection.RenderAppendDeltaFrom(previousProjection, tui.TranscriptDivider)
-	m.rebaseNativeProjection(projection, committedCount)
+	m.rebaseNativeProjection(projection, m.transcriptBaseOffset, committedCount)
 	if !m.shouldEmitNativeHistory() {
 		return nil
 	}
 	replayPermit := m.consumeNativeHistoryReplayPermit()
 	if !ok {
+		if appendCmd, appended := m.emitNativeSlidingWindowAppend(projection, previousProjection, m.transcriptBaseOffset, previousBaseOffset); appended {
+			return appendCmd
+		}
 		if replayPermit == nativeHistoryReplayPermitContinuityRecovery || replayPermit == nativeHistoryReplayPermitModeRestore {
 			return m.emitNonContiguousNativeProjectionRecovery(projection, previousProjection)
 		}
@@ -90,7 +95,9 @@ func (m *uiModel) resetNativeHistoryState() {
 	m.nativeFlushedEntryCount = 0
 	m.nativeHistoryReplayed = false
 	m.nativeProjection = tui.TranscriptProjection{}
+	m.nativeProjectionBaseOffset = 0
 	m.nativeRenderedProjection = tui.TranscriptProjection{}
+	m.nativeRenderedBaseOffset = 0
 	m.nativeRenderedSnapshot = ""
 	m.nativeHistoryReplayPermit = nativeHistoryReplayPermitNone
 	m.waitRuntimeEventAfterFlushSequence = 0
@@ -129,6 +136,7 @@ func (m *uiModel) consumeNativeHistoryReplayPermit() nativeHistoryReplayPermit {
 
 func (m *uiModel) acceptNativeProjectionWithoutReplay(projection tui.TranscriptProjection) {
 	m.nativeRenderedProjection = projection
+	m.nativeRenderedBaseOffset = m.nativeProjectionBaseOffset
 	m.nativeRenderedSnapshot = projection.Render(tui.TranscriptDivider)
 }
 
@@ -140,8 +148,9 @@ func (m *uiModel) reportNativeProjectionDivergence(current tui.TranscriptProject
 	return m.setTransientStatusWithKind(nativeHistoryDivergenceStatusMessage, uiStatusNoticeError)
 }
 
-func (m *uiModel) rebaseNativeProjection(projection tui.TranscriptProjection, committedCount int) {
+func (m *uiModel) rebaseNativeProjection(projection tui.TranscriptProjection, baseOffset int, committedCount int) {
 	m.nativeProjection = projection
+	m.nativeProjectionBaseOffset = baseOffset
 	m.nativeFlushedEntryCount = committedCount
 	m.nativeHistoryReplayed = true
 }
@@ -205,8 +214,12 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool, replayPermit 
 		}
 		if ok && strings.TrimSpace(delta) == "" {
 			m.nativeRenderedProjection = m.nativeProjection
+			m.nativeRenderedBaseOffset = m.nativeProjectionBaseOffset
 			m.nativeRenderedSnapshot = rawSnapshot
 			return nil
+		}
+		if appendCmd, appended := m.emitNativeSlidingWindowAppend(m.nativeProjection, m.nativeRenderedProjection, m.nativeProjectionBaseOffset, m.nativeRenderedBaseOffset); appended {
+			return appendCmd
 		}
 		if rewriteRenderedHistory {
 			if replayPermit == nativeHistoryReplayPermitContinuityRecovery || replayPermit == nativeHistoryReplayPermitModeRestore {
@@ -227,6 +240,7 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool, replayPermit 
 		if deltaRaw, ok := nativeRenderedDelta(m.nativeRenderedSnapshot, rawSnapshot); ok {
 			styledDelta := styleNativeReplayDividers(deltaRaw, m.theme, m.nativeReplayRenderWidth())
 			m.nativeRenderedProjection = m.nativeProjection
+			m.nativeRenderedBaseOffset = m.nativeProjectionBaseOffset
 			m.nativeRenderedSnapshot = rawSnapshot
 			if strings.TrimSpace(styledDelta) == "" {
 				return nil
@@ -242,11 +256,36 @@ func (m *uiModel) emitCurrentNativeHistorySnapshot(forceFull bool, replayPermit 
 		return nil
 	}
 	m.nativeRenderedProjection = m.nativeProjection
+	m.nativeRenderedBaseOffset = m.nativeProjectionBaseOffset
 	m.nativeRenderedSnapshot = rawSnapshot
 	if forceFull {
 		return tea.Sequence(tea.ClearScreen, m.emitNativeRenderedText(styled))
 	}
 	return m.emitNativeRenderedText(styled)
+}
+
+func (m *uiModel) emitNativeSlidingWindowAppend(current tui.TranscriptProjection, rendered tui.TranscriptProjection, currentBaseOffset int, renderedBaseOffset int) (tea.Cmd, bool) {
+	if current.Empty() || rendered.Empty() {
+		return nil, false
+	}
+	if currentBaseOffset <= renderedBaseOffset {
+		return nil, false
+	}
+	overlapBlocks := current.SharedSuffixPrefixBlockCount(rendered)
+	if overlapBlocks <= 0 {
+		return nil, false
+	}
+	m.nativeRenderedProjection = current
+	m.nativeRenderedBaseOffset = currentBaseOffset
+	m.nativeRenderedSnapshot = current.Render(tui.TranscriptDivider)
+	if overlapBlocks >= len(current.Blocks) {
+		return nil, true
+	}
+	styledDelta := renderStyledNativeProjectionLines(current.LinesFromBlock(overlapBlocks, tui.TranscriptDivider), m.theme, m.nativeReplayRenderWidth())
+	if strings.TrimSpace(styledDelta) == "" {
+		return nil, true
+	}
+	return m.emitNativeRenderedText(styledDelta), true
 }
 
 func (m *uiModel) emitNonContiguousNativeProjectionRecovery(current tui.TranscriptProjection, rendered tui.TranscriptProjection) tea.Cmd {
@@ -260,6 +299,7 @@ func (m *uiModel) emitNonContiguousNativeProjectionRecovery(current tui.Transcri
 func (m *uiModel) emitForcedNativeProjectionReplay(projection tui.TranscriptProjection) tea.Cmd {
 	rawSnapshot := projection.Render(tui.TranscriptDivider)
 	m.nativeRenderedProjection = projection
+	m.nativeRenderedBaseOffset = m.nativeProjectionBaseOffset
 	m.nativeRenderedSnapshot = rawSnapshot
 	if strings.TrimSpace(rawSnapshot) == "" {
 		return tea.ClearScreen

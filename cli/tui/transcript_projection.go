@@ -79,6 +79,24 @@ func (p TranscriptProjection) SharedPrefixBlockCount(other TranscriptProjection)
 	return limit
 }
 
+func (p TranscriptProjection) SharedSuffixPrefixBlockCount(previous TranscriptProjection) int {
+	limit := min(len(p.Blocks), len(previous.Blocks))
+	for overlap := limit; overlap > 0; overlap-- {
+		start := len(previous.Blocks) - overlap
+		matches := true
+		for idx := 0; idx < overlap; idx++ {
+			if !p.Blocks[idx].equal(previous.Blocks[start+idx]) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return overlap
+		}
+	}
+	return 0
+}
+
 func (p TranscriptProjection) LinesFromBlock(start int, dividerText string) []TranscriptProjectionLine {
 	if start < 0 {
 		start = 0
