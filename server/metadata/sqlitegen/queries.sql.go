@@ -262,6 +262,39 @@ func (q *Queries) GetWorkspaceBindingByCanonicalRoot(ctx context.Context, canoni
 	return i, err
 }
 
+const getWorkspaceByCanonicalRoot = `-- name: GetWorkspaceByCanonicalRoot :one
+SELECT
+    id,
+    project_id,
+    canonical_root_path,
+    display_name,
+    availability,
+    is_primary,
+    git_metadata_json,
+    created_at_unix_ms,
+    updated_at_unix_ms
+FROM workspaces
+WHERE canonical_root_path = ?1
+LIMIT 1
+`
+
+func (q *Queries) GetWorkspaceByCanonicalRoot(ctx context.Context, canonicalRootPath string) (Workspace, error) {
+	row := q.db.QueryRowContext(ctx, getWorkspaceByCanonicalRoot, canonicalRootPath)
+	var i Workspace
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.CanonicalRootPath,
+		&i.DisplayName,
+		&i.Availability,
+		&i.IsPrimary,
+		&i.GitMetadataJson,
+		&i.CreatedAtUnixMs,
+		&i.UpdatedAtUnixMs,
+	)
+	return i, err
+}
+
 const insertRuntimeLease = `-- name: InsertRuntimeLease :exec
 INSERT INTO runtime_leases (
     id,
@@ -470,6 +503,55 @@ func (q *Queries) ListSessionsByProject(ctx context.Context, projectID string) (
 	return items, nil
 }
 
+const listWorktreesByWorkspaceID = `-- name: ListWorktreesByWorkspaceID :many
+SELECT
+    id,
+    workspace_id,
+    canonical_root_path,
+    display_name,
+    availability,
+    is_main,
+    git_metadata_json,
+    created_at_unix_ms,
+    updated_at_unix_ms
+FROM worktrees
+WHERE workspace_id = ?1
+ORDER BY created_at_unix_ms ASC, rowid ASC
+`
+
+func (q *Queries) ListWorktreesByWorkspaceID(ctx context.Context, workspaceID string) ([]Worktree, error) {
+	rows, err := q.db.QueryContext(ctx, listWorktreesByWorkspaceID, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Worktree
+	for rows.Next() {
+		var i Worktree
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.CanonicalRootPath,
+			&i.DisplayName,
+			&i.Availability,
+			&i.IsMain,
+			&i.GitMetadataJson,
+			&i.CreatedAtUnixMs,
+			&i.UpdatedAtUnixMs,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const releaseActiveRuntimeLeasesBySession = `-- name: ReleaseActiveRuntimeLeasesBySession :exec
 UPDATE runtime_leases
 SET
@@ -507,6 +589,70 @@ type ReleaseRuntimeLeaseByIDParams struct {
 
 func (q *Queries) ReleaseRuntimeLeaseByID(ctx context.Context, arg ReleaseRuntimeLeaseByIDParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, releaseRuntimeLeaseByID, arg.ReleasedAtUnixMs, arg.LeaseID, arg.SessionID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const updateWorkspaceBindingCanonicalRoot = `-- name: UpdateWorkspaceBindingCanonicalRoot :execrows
+UPDATE workspaces
+SET
+    canonical_root_path = ?1,
+    display_name = ?2,
+    availability = ?3,
+    updated_at_unix_ms = ?4
+WHERE id = ?5
+`
+
+type UpdateWorkspaceBindingCanonicalRootParams struct {
+	CanonicalRootPath string
+	DisplayName       string
+	Availability      string
+	UpdatedAtUnixMs   int64
+	ID                string
+}
+
+func (q *Queries) UpdateWorkspaceBindingCanonicalRoot(ctx context.Context, arg UpdateWorkspaceBindingCanonicalRootParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateWorkspaceBindingCanonicalRoot,
+		arg.CanonicalRootPath,
+		arg.DisplayName,
+		arg.Availability,
+		arg.UpdatedAtUnixMs,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const updateWorktreeCanonicalRoot = `-- name: UpdateWorktreeCanonicalRoot :execrows
+UPDATE worktrees
+SET
+    canonical_root_path = ?1,
+    display_name = ?2,
+    availability = ?3,
+    updated_at_unix_ms = ?4
+WHERE id = ?5
+`
+
+type UpdateWorktreeCanonicalRootParams struct {
+	CanonicalRootPath string
+	DisplayName       string
+	Availability      string
+	UpdatedAtUnixMs   int64
+	ID                string
+}
+
+func (q *Queries) UpdateWorktreeCanonicalRoot(ctx context.Context, arg UpdateWorktreeCanonicalRootParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateWorktreeCanonicalRoot,
+		arg.CanonicalRootPath,
+		arg.DisplayName,
+		arg.Availability,
+		arg.UpdatedAtUnixMs,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}

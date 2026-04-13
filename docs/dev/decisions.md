@@ -105,6 +105,7 @@
 - Interactive startup remains workspace-first. When startup cwd is unregistered, Builder enters an explicit post-auth binding flow with a create-new-project action first and a clearly separated existing-project picker below it.
 - Headless startup in an unregistered workspace fails fast; it must not auto-create hidden project/workspace state.
 - To support agent recovery in that fail-fast model, Builder will expose explicit workspace-binding CLI commands: `builder project [path]` to inspect the project bound to a path, `builder attach [path]` to bind a workspace to the project already bound to `cwd`, and `builder attach --project <project-id> [path]` as the explicit project-id override. All forms default `path` to `cwd`.
+- Explicit relocation recovery is `builder rebind <old-path> <new-path>`, which preserves the existing `workspace_id` while retargeting the canonical workspace root. Unknown-cwd startup does not infer relocation; it stays on the normal bind/create flow.
 - For the migration's runtime-residency model, lease identity is explicit and distinct from `client_request_id`; reconnect rehydrates, reattaches, and acquires a fresh lease rather than reclaiming an abandoned one.
 - Post-migration, `session.json` is removed. Session metadata authority moves to SQLite. `events.jsonl` and `steps.log` remain file-backed for now.
 - Interactive session creation remains lazily durable; creating a new interactive session does not immediately force durable metadata writes.

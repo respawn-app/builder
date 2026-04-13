@@ -9,7 +9,6 @@ The plan is intentionally incremental. It keeps the product working throughout a
 The migration is not fully complete yet. The highest-signal unresolved gaps across Phases 1-6A are:
 
 - Phase 2: full project / ask / approval resource surfaces, complete event-hub stream model, and broader idempotent mutation coverage
-- Phase 4: unknown-cwd startup registration flow, create-project / attach-workspace flow, and explicit workspace rebind UX after relocation
 - Phase 5A: transcript commit-notification / revision-advance contract and revision-aware incremental transcript fetch strategy
 - Phase 5B: transcript paging/compression strategy for large-session rehydrate
 - Phase 6B: root-cause elimination for the remaining transcript divergence bugs
@@ -237,8 +236,8 @@ Deliverables:
 - [x] top-level durable model is finalized as `project > workspace > worktree`
 - [x] session execution target model is finalized as `(workspace_id, worktree_id?, cwd_relpath)`
 - [x] explicit runtime lease model is implemented on the metadata-backed runtime path
-- [ ] workspace-first CLI startup and registration flow is implemented end-to-end, including unknown-cwd project picker / create-project / attach-workspace flows
-- [ ] headless unknown-workspace failure path is implemented with short recovery guidance using `builder project [path]`, `builder attach [path]`, and `builder attach --project <project-id> [path]`
+- [x] workspace-first CLI startup and registration flow is implemented end-to-end, including unknown-cwd project picker / create-project / attach-workspace flows
+- [x] headless unknown-workspace failure path is implemented with short recovery guidance using `builder project [path]`, `builder attach [path]`, and `builder attach --project <project-id> [path]`
 
 Primary risks:
 
@@ -252,9 +251,7 @@ Rollback point:
 
 Status:
 
-- Phase 4A-4C storage/model work is largely landed in the current branch.
-- Phase 4D topology/direct-attach work is largely landed.
-- The remaining Phase 4 gap is the real unknown-cwd startup and registration flow over the server boundary; until that lands, Phase 4 is not actually complete.
+- Phase 4 is complete on this branch, including startup/binding cutover and explicit relocation handling.
 
 ## Phase 4A: SQLite Metadata Introduction
 
@@ -275,8 +272,8 @@ Deliverables:
 - [x] storage layer is based on explicit SQL plus `sqlc`
 - [x] session metadata authority moved behind the new storage layer
 - [x] workspace registration mutation exists in the metadata authority
-- [ ] workspace/path-resolution queries are exposed end-to-end through the startup boundary
-- [ ] CLI startup flow for unknown cwd is implemented against those query/mutation surfaces
+- [x] workspace/path-resolution queries are exposed end-to-end through the startup boundary
+- [x] CLI startup flow for unknown cwd is implemented against those query/mutation surfaces
 
 Primary risks:
 
@@ -299,6 +296,7 @@ Requirements:
 - migrated sessions must no longer depend on `session.json` as authority
 - post-migration session creation and startup semantics must preserve the intended lazy visibility behavior
 - relocation must remain explicit user action rather than automatic rebinding
+- unknown-cwd startup must stay on the normal bind/create flow; it must not guess that an unbound path is a moved workspace
 
 Deliverables:
 
@@ -308,7 +306,14 @@ Deliverables:
 - [x] timestamped backup of the old tree after success
 - [x] `session.json` removed from migrated session directories
 - [x] lazy interactive session creation preserved under the new metadata authority
-- [ ] workspace relocation is surfaced as explicit rebind UX only
+- [x] explicit `builder rebind <old-path> <new-path>` flow preserves workspace identity after relocation, while unknown-cwd startup continues to use the normal bind/create flow
+
+Acceptance proof for relocation/rebind:
+
+- [x] `builder rebind <old-path> <new-path>` preserves the existing `workspace_id` instead of creating a second workspace row
+- [x] rebind updates the canonical workspace root atomically, and sessions already targeting that workspace continue resolving through the preserved workspace identity
+- [x] rebind rejects invalid inputs cleanly, including unknown `old-path`, already-bound `new-path`, and non-existent `new-path`
+- [x] unknown-cwd startup remains on the normal bind/create flow even when the cwd matches a likely moved workspace path
 
 Primary risks:
 
@@ -379,9 +384,9 @@ Deliverables:
 - [x] CLI attach-or-start dials the configured daemon address first for already-registered workspaces
 - [x] serve/transport/startup tests prove one configured daemon can be used from multiple workspace roots under one persistence root
 - [x] topology cutover is hard: no migration script or bridge mode for the old workspace-scoped discovery-file model
-- [ ] cwd/project/workspace resolution over server-owned path-resolution and registration queries is complete for unknown workspaces, not only already-registered ones
-- [ ] unknown-cwd startup and registration flow works end-to-end over the remote/loopback boundary without `project id is required` crash paths
-- [ ] headless unregistered-workspace failures mention the explicit recovery path via `builder project [path]`, `builder attach [path]`, and `builder attach --project <project-id> [path]`
+- [x] cwd/project/workspace resolution over server-owned path-resolution and registration queries is complete for unknown workspaces, not only already-registered ones
+- [x] unknown-cwd startup and registration flow works end-to-end over the remote/loopback boundary without `project id is required` crash paths
+- [x] headless unregistered-workspace failures mention the explicit recovery path via `builder project [path]`, `builder attach [path]`, and `builder attach --project <project-id> [path]`
 
 ### Phase 4D.a: Workspace Binding UX And Headless Recovery
 
@@ -399,19 +404,19 @@ Requirements:
 
 Deliverables:
 
-- [ ] post-auth `binding` flow exists for interactive unknown-cwd startup
-- [ ] create-project path pre-fills the editable project name from the cwd directory name and continues into a new session after binding
-- [ ] existing-project picker rows use project preview paths derived from the main/earliest workspace root
-- [ ] existing-project selection can explicitly bind the current workspace to that project and continue startup
-- [ ] `builder project [path]` resolves the project bound to a path, defaulting to `cwd`
-- [ ] `builder attach [path]` binds a workspace to the project already bound to `cwd`, while `builder attach --project <project-id> [path]` provides an explicit project-id override
-- [ ] headless unregistered-workspace errors mention the recovery commands in a short guide
+- [x] post-auth `binding` flow exists for interactive unknown-cwd startup
+- [x] create-project path pre-fills the editable project name from the cwd directory name and continues into a new session after binding
+- [x] existing-project picker rows use project preview paths derived from the main/earliest workspace root
+- [x] existing-project selection can explicitly bind the current workspace to that project and continue startup
+- [x] `builder project [path]` resolves the project bound to a path, defaulting to `cwd`
+- [x] `builder attach [path]` binds a workspace to the project already bound to `cwd`, while `builder attach --project <project-id> [path]` provides an explicit project-id override
+- [x] headless unregistered-workspace errors mention the recovery commands in a short guide
 
 Acceptance proof:
 
-- [ ] interactive startup tests cover the chosen existing-project attach branch for unknown cwd (`immediate attach+continue` or `confirm then attach+continue`)
-- [ ] headless unregistered-workspace tests assert the fail-fast error text includes the recovery commands and does not auto-create bindings
-- [ ] CLI command tests cover `builder project [path]`, path-first `builder attach [path]`, and explicit `builder attach --project <project-id> [path]` flows, including default-`cwd` behavior
+- [x] interactive startup tests cover the chosen existing-project attach branch for unknown cwd (`immediate attach+continue` or `confirm then attach+continue`)
+- [x] headless unregistered-workspace tests assert the fail-fast error text includes the recovery commands and does not auto-create bindings
+- [x] CLI command tests cover `builder project [path]`, path-first `builder attach [path]`, and explicit `builder attach --project <project-id> [path]` flows, including default-`cwd` behavior
 
 Primary risks:
 
@@ -425,7 +430,7 @@ Rollback point:
 
 Storage migration scope ends at Phase 4C; topology/direct-attach cutover completes in Phase 4D.
 
-Status: direct attach and multi-project hosting are landed, but the unknown-cwd registration/startup deliverables above keep Phase 4D open.
+Status: Phase 4D is landed, and with explicit relocation/rebind handling in Phase 4B, Phase 4 is complete on this branch.
 
 The remaining phases are post-storage hardening and proof work.
 
