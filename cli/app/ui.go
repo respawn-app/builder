@@ -222,12 +222,14 @@ func WithUILogger(logger uiLogger) UIOption {
 func WithUITranscriptDiagnostics(enabled bool) UIOption {
 	return func(m *uiModel) {
 		m.transcriptDiagnostics = enabled
+		m.updateTranscriptDiagnosticsMode()
 	}
 }
 
 func WithUIDebug(enabled bool) UIOption {
 	return func(m *uiModel) {
 		m.debugMode = enabled
+		m.updateTranscriptDiagnosticsMode()
 	}
 }
 
@@ -579,6 +581,7 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 		m.pathReferenceSearch = newUIPathReferenceSearch()
 		m.pathReferenceEvents = m.pathReferenceSearch.Events()
 	}
+	m.updateTranscriptDiagnosticsMode()
 	m.refreshAutocompleteFromInput()
 	if configurable, ok := m.engine.(interface{ SetConnectionStateObserver(func(error)) }); ok {
 		runtimeConnectionEvents := make(chan runtimeConnectionStateChangedMsg, 1)
@@ -1130,10 +1133,26 @@ func (m *uiModel) logf(format string, args ...any) {
 }
 
 func (m *uiModel) logTranscriptDiag(line string) {
-	if m == nil || !m.transcriptDiagnostics {
+	if m == nil || !m.transcriptDiagnosticsEnabled() {
 		return
 	}
 	m.logf("%s", strings.TrimSpace(line))
+}
+
+func (m *uiModel) transcriptDiagnosticsEnabled() bool {
+	if m == nil {
+		return false
+	}
+	return m.transcriptDiagnostics || m.debugMode
+}
+
+func (m *uiModel) updateTranscriptDiagnosticsMode() {
+	if m == nil {
+		return
+	}
+	if configurable, ok := m.engine.(interface{ SetTranscriptDiagnosticsEnabled(bool) }); ok {
+		configurable.SetTranscriptDiagnosticsEnabled(m.transcriptDiagnosticsEnabled())
+	}
 }
 
 func (m *uiModel) inputController() uiInputController {
