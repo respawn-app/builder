@@ -29,6 +29,7 @@ type sessionRuntimeClient struct {
 	controls                client.RuntimeControlClient
 	sessionID               string
 	diagLogf                func(string)
+	transcriptDiagnostics   bool
 	connectionStateObserver func(error)
 
 	mu                        sync.RWMutex
@@ -93,6 +94,18 @@ func (c *sessionRuntimeClient) SetTranscriptDiagnosticLogger(logf func(string)) 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.diagLogf = logf
+}
+
+func (c *sessionRuntimeClient) SetTranscriptDiagnosticsEnabled(enabled bool) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.transcriptDiagnostics = enabled
+	if enabled {
+		return
+	}
 }
 
 func (c *sessionRuntimeClient) SetConnectionStateObserver(observer func(error)) {
@@ -312,7 +325,7 @@ func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.Transcript
 		Window:    req.Window,
 	})
 	c.notifyConnectionState(err)
-	if transcriptdiag.EnabledFromEnv(os.Getenv) {
+	if c.transcriptDiagnosticsEnabled() {
 		fields := map[string]string{"session_id": c.sessionID, "path": "hydrate"}
 		for key, value := range transcriptdiag.RequestFields(req) {
 			fields[key] = value
@@ -332,6 +345,15 @@ func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.Transcript
 		return page, err
 	}
 	return c.storeTranscriptForRequest(req, resp.Transcript), nil
+}
+
+func (c *sessionRuntimeClient) transcriptDiagnosticsEnabled() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.transcriptDiagnostics || transcriptdiag.EnabledFromEnv(os.Getenv)
 }
 
 func (c *sessionRuntimeClient) notifyConnectionState(err error) {

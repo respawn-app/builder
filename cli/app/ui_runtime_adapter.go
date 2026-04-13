@@ -221,59 +221,44 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 	entries := cloneChatEntries(evt.TranscriptEntries)
 	incomingCount := len(entries)
 	if shouldSkipProjectedToolCallStart(m, evt) {
-		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.append_entries", map[string]string{
-			"session_id":            strings.TrimSpace(m.sessionID),
-			"mode":                  m.transcriptModeLabel(),
-			"path":                  "live_event",
-			"incoming_count":        strconv.Itoa(incomingCount),
-			"reason":                "duplicate_tool_call_start",
-			"applied_count":         "0",
-			"event_revision":        strconv.FormatInt(evt.TranscriptRevision, 10),
-			"event_committed_count": strconv.Itoa(evt.CommittedEntryCount),
-		}))
+		m.logTranscriptEventDiag("transcript.diag.client.append_entries", evt, map[string]string{
+			"path":           "live_event",
+			"incoming_count": strconv.Itoa(incomingCount),
+			"reason":         "duplicate_tool_call_start",
+			"applied_count":  "0",
+		})
 		return nil, false, false
 	}
 	if shouldDeferProjectedUserMessageFlushAppend(m, evt) {
-		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.append_entries", map[string]string{
-			"session_id":            strings.TrimSpace(m.sessionID),
-			"mode":                  m.transcriptModeLabel(),
-			"path":                  "live_event",
-			"incoming_count":        strconv.Itoa(incomingCount),
-			"reason":                "defer_user_flush_until_assistant_catch_up",
-			"applied_count":         "0",
-			"event_revision":        strconv.FormatInt(evt.TranscriptRevision, 10),
-			"event_committed_count": strconv.Itoa(evt.CommittedEntryCount),
-		}))
+		m.logTranscriptEventDiag("transcript.diag.client.append_entries", evt, map[string]string{
+			"path":           "live_event",
+			"incoming_count": strconv.Itoa(incomingCount),
+			"reason":         "defer_user_flush_until_assistant_catch_up",
+			"applied_count":  "0",
+		})
 		if m.hasRuntimeClient() {
 			return m.requestRuntimeTranscriptSync(), false, true
 		}
 		return nil, false, false
 	}
 	plan := planProjectedTranscriptEntries(m, evt)
+	m.logProjectedTranscriptPlanDiag(evt, plan, incomingCount)
 	switch plan.mode {
 	case projectedTranscriptEntryPlanSkip:
-		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.append_entries", map[string]string{
-			"session_id":            strings.TrimSpace(m.sessionID),
-			"mode":                  m.transcriptModeLabel(),
-			"path":                  "live_event",
-			"incoming_count":        strconv.Itoa(incomingCount),
-			"reason":                "already_hydrated",
-			"applied_count":         "0",
-			"event_revision":        strconv.FormatInt(evt.TranscriptRevision, 10),
-			"event_committed_count": strconv.Itoa(evt.CommittedEntryCount),
-		}))
+		m.logTranscriptEventDiag("transcript.diag.client.append_entries", evt, map[string]string{
+			"path":           "live_event",
+			"incoming_count": strconv.Itoa(incomingCount),
+			"reason":         "already_hydrated",
+			"applied_count":  "0",
+		})
 		return nil, false, false
 	case projectedTranscriptEntryPlanHydrate:
-		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.append_entries", map[string]string{
-			"session_id":            strings.TrimSpace(m.sessionID),
-			"mode":                  m.transcriptModeLabel(),
-			"path":                  "live_event",
-			"incoming_count":        strconv.Itoa(incomingCount),
-			"reason":                "requires_hydration",
-			"applied_count":         "0",
-			"event_revision":        strconv.FormatInt(evt.TranscriptRevision, 10),
-			"event_committed_count": strconv.Itoa(evt.CommittedEntryCount),
-		}))
+		m.logTranscriptEventDiag("transcript.diag.client.append_entries", evt, map[string]string{
+			"path":           "live_event",
+			"incoming_count": strconv.Itoa(incomingCount),
+			"reason":         "requires_hydration",
+			"applied_count":  "0",
+		})
 		if m.hasRuntimeClient() {
 			return m.requestRuntimeTranscriptSync(), false, true
 		}
@@ -464,7 +449,13 @@ func (a uiRuntimeAdapter) applyRuntimeTranscriptPageWithRecovery(req clientui.Tr
 		page.OngoingError = ""
 	}
 	if reason := transcriptPageReplacementRejectReason(m, pageReq, page); reason != "" {
-		m.logTranscriptPageDiag("transcript.diag.client.apply_page_reject", pageReq, page, map[string]string{"path": "hydrate", "reason": reason, "recovery_cause": string(recoveryCause)})
+		m.logTranscriptPageDiag("transcript.diag.client.apply_page_reject", pageReq, page, map[string]string{
+			"path":                    "hydrate",
+			"reason":                  reason,
+			"recovery_cause":          string(recoveryCause),
+			"replacement_branch":      transcriptPageApplyBranch(pageReq, m),
+			"preserve_live_reasoning": strconv.FormatBool(shouldPreserveLiveReasoning(m, page)),
+		})
 		if previousWindowTitle != m.windowTitle() {
 			return tea.SetWindowTitle(m.windowTitle())
 		}
