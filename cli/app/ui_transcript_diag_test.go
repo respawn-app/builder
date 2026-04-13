@@ -1,12 +1,86 @@
 package app
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"builder/cli/tui"
+	"builder/shared/client"
 	"builder/shared/clientui"
+	"builder/shared/serverapi"
 )
+
+type transcriptDiagTestSessionViewClient struct{}
+
+func (transcriptDiagTestSessionViewClient) GetSessionMainView(context.Context, serverapi.SessionMainViewRequest) (serverapi.SessionMainViewResponse, error) {
+	return serverapi.SessionMainViewResponse{}, nil
+}
+
+func (transcriptDiagTestSessionViewClient) GetSessionTranscriptPage(context.Context, serverapi.SessionTranscriptPageRequest) (serverapi.SessionTranscriptPageResponse, error) {
+	return serverapi.SessionTranscriptPageResponse{}, nil
+}
+
+func (transcriptDiagTestSessionViewClient) GetRun(context.Context, serverapi.RunGetRequest) (serverapi.RunGetResponse, error) {
+	return serverapi.RunGetResponse{}, nil
+}
+
+type transcriptDiagTestRuntimeControlClient struct{}
+
+func (transcriptDiagTestRuntimeControlClient) SetSessionName(context.Context, serverapi.RuntimeSetSessionNameRequest) error {
+	return nil
+}
+func (transcriptDiagTestRuntimeControlClient) SetThinkingLevel(context.Context, serverapi.RuntimeSetThinkingLevelRequest) error {
+	return nil
+}
+func (transcriptDiagTestRuntimeControlClient) SetFastModeEnabled(context.Context, serverapi.RuntimeSetFastModeEnabledRequest) (serverapi.RuntimeSetFastModeEnabledResponse, error) {
+	return serverapi.RuntimeSetFastModeEnabledResponse{}, nil
+}
+func (transcriptDiagTestRuntimeControlClient) SetReviewerEnabled(context.Context, serverapi.RuntimeSetReviewerEnabledRequest) (serverapi.RuntimeSetReviewerEnabledResponse, error) {
+	return serverapi.RuntimeSetReviewerEnabledResponse{}, nil
+}
+func (transcriptDiagTestRuntimeControlClient) SetAutoCompactionEnabled(context.Context, serverapi.RuntimeSetAutoCompactionEnabledRequest) (serverapi.RuntimeSetAutoCompactionEnabledResponse, error) {
+	return serverapi.RuntimeSetAutoCompactionEnabledResponse{}, nil
+}
+func (transcriptDiagTestRuntimeControlClient) AppendLocalEntry(context.Context, serverapi.RuntimeAppendLocalEntryRequest) error {
+	return nil
+}
+func (transcriptDiagTestRuntimeControlClient) ShouldCompactBeforeUserMessage(context.Context, serverapi.RuntimeShouldCompactBeforeUserMessageRequest) (serverapi.RuntimeShouldCompactBeforeUserMessageResponse, error) {
+	return serverapi.RuntimeShouldCompactBeforeUserMessageResponse{}, nil
+}
+func (transcriptDiagTestRuntimeControlClient) SubmitUserMessage(context.Context, serverapi.RuntimeSubmitUserMessageRequest) (serverapi.RuntimeSubmitUserMessageResponse, error) {
+	return serverapi.RuntimeSubmitUserMessageResponse{}, nil
+}
+func (transcriptDiagTestRuntimeControlClient) SubmitUserShellCommand(context.Context, serverapi.RuntimeSubmitUserShellCommandRequest) error {
+	return nil
+}
+func (transcriptDiagTestRuntimeControlClient) CompactContext(context.Context, serverapi.RuntimeCompactContextRequest) error {
+	return nil
+}
+func (transcriptDiagTestRuntimeControlClient) CompactContextForPreSubmit(context.Context, serverapi.RuntimeCompactContextForPreSubmitRequest) error {
+	return nil
+}
+func (transcriptDiagTestRuntimeControlClient) HasQueuedUserWork(context.Context, serverapi.RuntimeHasQueuedUserWorkRequest) (serverapi.RuntimeHasQueuedUserWorkResponse, error) {
+	return serverapi.RuntimeHasQueuedUserWorkResponse{}, nil
+}
+func (transcriptDiagTestRuntimeControlClient) SubmitQueuedUserMessages(context.Context, serverapi.RuntimeSubmitQueuedUserMessagesRequest) (serverapi.RuntimeSubmitQueuedUserMessagesResponse, error) {
+	return serverapi.RuntimeSubmitQueuedUserMessagesResponse{}, nil
+}
+func (transcriptDiagTestRuntimeControlClient) Interrupt(context.Context, serverapi.RuntimeInterruptRequest) error {
+	return nil
+}
+func (transcriptDiagTestRuntimeControlClient) QueueUserMessage(context.Context, serverapi.RuntimeQueueUserMessageRequest) error {
+	return nil
+}
+func (transcriptDiagTestRuntimeControlClient) DiscardQueuedUserMessagesMatching(context.Context, serverapi.RuntimeDiscardQueuedUserMessagesMatchingRequest) (serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse, error) {
+	return serverapi.RuntimeDiscardQueuedUserMessagesMatchingResponse{}, nil
+}
+func (transcriptDiagTestRuntimeControlClient) RecordPromptHistory(context.Context, serverapi.RuntimeRecordPromptHistoryRequest) error {
+	return nil
+}
+
+var _ client.SessionViewClient = transcriptDiagTestSessionViewClient{}
+var _ client.RuntimeControlClient = transcriptDiagTestRuntimeControlClient{}
 
 func TestProjectedRuntimeEventLogsTranscriptDiagnostics(t *testing.T) {
 	logger := &testUILogger{}
@@ -38,6 +112,35 @@ func TestProjectedRuntimeEventLogsTranscriptDiagnostics(t *testing.T) {
 	}
 }
 
+func TestProjectedRuntimeEventLogsTranscriptDiagnosticsInDebugMode(t *testing.T) {
+	logger := &testUILogger{}
+	m := newProjectedStaticUIModel(
+		WithUILogger(logger),
+		WithUIDebug(true),
+		WithUISessionID("session-1"),
+	)
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                clientui.EventToolCallStarted,
+		StepID:              "step-1",
+		TranscriptRevision:  7,
+		CommittedEntryCount: 3,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:       "tool_call",
+			ToolCallID: "call-1",
+			Text:       "shell",
+		}},
+	})
+
+	joined := strings.Join(logger.lines, "\n")
+	if !strings.Contains(joined, "transcript.diag.client.projected_plan") {
+		t.Fatalf("expected projected plan diagnostics in debug mode, got %q", joined)
+	}
+	if !strings.Contains(joined, "event_revision=7") {
+		t.Fatalf("expected revision field in debug diagnostics, got %q", joined)
+	}
+}
+
 func TestRuntimeTranscriptPageLogsRejectReason(t *testing.T) {
 	logger := &testUILogger{}
 	m := newProjectedStaticUIModel(
@@ -64,5 +167,25 @@ func TestRuntimeTranscriptPageLogsRejectReason(t *testing.T) {
 	}
 	if !strings.Contains(joined, "reason=live_dirty_same_or_older_revision") {
 		t.Fatalf("expected reject reason, got %q", joined)
+	}
+}
+
+func TestRuntimeClientTranscriptDiagnosticsEnablePaths(t *testing.T) {
+	t.Setenv("BUILDER_TRANSCRIPT_DIAGNOSTICS", "")
+	client := newUIRuntimeClientWithReads("session-1", transcriptDiagTestSessionViewClient{}, transcriptDiagTestRuntimeControlClient{}).(*sessionRuntimeClient)
+	if client.transcriptDiagnosticsEnabled() {
+		t.Fatal("expected transcript diagnostics disabled by default")
+	}
+	client.SetTranscriptDiagnosticsEnabled(true)
+	if !client.transcriptDiagnosticsEnabled() {
+		t.Fatal("expected explicit runtime-client diagnostics enable to take effect")
+	}
+	client.SetTranscriptDiagnosticsEnabled(false)
+	if client.transcriptDiagnosticsEnabled() {
+		t.Fatal("expected runtime-client diagnostics disable to take effect when env is unset")
+	}
+	t.Setenv("BUILDER_TRANSCRIPT_DIAGNOSTICS", "1")
+	if !client.transcriptDiagnosticsEnabled() {
+		t.Fatal("expected transcript diagnostics env to enable runtime-client diagnostics")
 	}
 }

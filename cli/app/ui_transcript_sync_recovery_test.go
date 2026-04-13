@@ -31,7 +31,7 @@ func TestSessionActivityGapRecoveryEventuallyHydratesCommittedTranscriptInBothMo
 		next := remaining[0]
 		remaining = remaining[1:]
 		return next, nil
-	}, nil)
+	}, false, nil)
 	defer stop()
 
 	client := &refreshingRuntimeClient{

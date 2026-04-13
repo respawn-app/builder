@@ -1509,6 +1509,171 @@ func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenAuthor
 	assertNoColoredShellSymbol(t, rawCommitted, "dark pending", transcriptToolPendingColorHex("dark"))
 }
 
+func TestProjectedAssistantToolCallEntriesStayTransientButCommittedInRuntimeMode(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "user", Text: "prompt"}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	toolStarted := clientui.Event{
+		Kind:                clientui.EventAssistantMessage,
+		TranscriptRevision:  11,
+		CommittedEntryCount: 2,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:       "tool_call",
+			Text:       "pwd",
+			ToolCallID: "call-1",
+			ToolCall:   &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"},
+		}},
+	}
+	_ = collectCmdMessages(t, m.runtimeAdapter().handleProjectedRuntimeEvent(toolStarted))
+
+	if got, want := len(m.transcriptEntries), 2; got != want {
+		t.Fatalf("transcript entry count = %d, want %d", got, want)
+	}
+	if !m.transcriptEntries[1].Transient || !m.transcriptEntries[1].Committed {
+		t.Fatalf("expected runtime assistant tool call to stay transient but be committed for ordering, got %+v", m.transcriptEntries[1])
+	}
+	if got := m.transcriptRevision; got != 11 {
+		t.Fatalf("transcript revision = %d, want 11", got)
+	}
+}
+
+func TestRuntimeAuthoritativeHydrateDoesNotRepairCommittedToolPathWhenLiveProjectionMatches(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "user", Text: "prompt"}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	_ = collectCmdMessages(t, m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                clientui.EventAssistantMessage,
+		TranscriptRevision:  11,
+		CommittedEntryCount: 2,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:       "tool_call",
+			Text:       "pwd",
+			ToolCallID: "call-1",
+			ToolCall:   &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"},
+		}},
+	}))
+	_ = collectCmdMessages(t, m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                clientui.EventToolCallCompleted,
+		TranscriptRevision:  12,
+		CommittedEntryCount: 3,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:       "tool_result_ok",
+			Text:       "/tmp",
+			ToolCallID: "call-1",
+		}},
+	}))
+
+	cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     12,
+		Offset:       0,
+		TotalEntries: 3,
+		Entries: []clientui.ChatEntry{
+			{Role: "user", Text: "prompt"},
+			{Role: "tool_call", Text: "pwd", ToolCallID: "call-1", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"}},
+			{Role: "tool_result_ok", Text: "/tmp", ToolCallID: "call-1"},
+		},
+	})
+	if cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	if m.transientStatus == nativeHistoryDivergenceStatusMessage {
+		t.Fatalf("did not expect authoritative hydrate warning when live committed tool path already matches, got status=%q", m.transientStatus)
+	}
+	if got, want := len(m.transcriptEntries), 3; got != want {
+		t.Fatalf("transcript entry count = %d, want %d", got, want)
+	}
+	if !m.transcriptEntries[1].Committed || !m.transcriptEntries[2].Committed {
+		t.Fatalf("expected tool path entries to remain committed for ordering after hydrate, got %+v", m.transcriptEntries)
+	}
+}
+
+func TestRuntimeAuthoritativeHydrateDoesNotRepairCommittedReviewerStatusPathWhenLiveProjectionMatches(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	_ = collectCmdMessages(t, m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                clientui.EventReviewerCompleted,
+		TranscriptRevision:  11,
+		CommittedEntryCount: 2,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "reviewer_status",
+			Text: "Supervisor ran and applied 2 suggestions.",
+		}},
+	}))
+
+	if !m.transcriptEntries[1].Transient || !m.transcriptEntries[1].Committed {
+		t.Fatalf("expected reviewer status to stay transient but be committed for ordering, got %+v", m.transcriptEntries[1])
+	}
+
+	cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     11,
+		Offset:       0,
+		TotalEntries: 2,
+		Entries: []clientui.ChatEntry{
+			{Role: "assistant", Text: "seed"},
+			{Role: "reviewer_status", Text: "Supervisor ran and applied 2 suggestions."},
+		},
+	})
+	if cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	if m.transientStatus == nativeHistoryDivergenceStatusMessage {
+		t.Fatalf("did not expect authoritative hydrate warning when reviewer status path already matches, got status=%q", m.transientStatus)
+	}
+	if got, want := len(m.transcriptEntries), 2; got != want {
+		t.Fatalf("transcript entry count = %d, want %d", got, want)
+	}
+	if !m.transcriptEntries[1].Committed {
+		t.Fatalf("expected reviewer status to remain committed for ordering after hydrate, got %+v", m.transcriptEntries[1])
+	}
+}
+
 func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenOngoingErrorChanged(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.termWidth = 100

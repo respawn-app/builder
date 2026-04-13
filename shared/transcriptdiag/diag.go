@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,6 +26,17 @@ func EnabledFromEnv(getenv func(string) string) bool {
 	default:
 		return true
 	}
+}
+
+func Enabled(debug bool, getenv func(string) string) bool {
+	if debug {
+		return true
+	}
+	return EnabledFromEnv(getenv)
+}
+
+func EnabledForProcess(debug bool) bool {
+	return Enabled(debug, os.Getenv)
 }
 
 func EntriesDigest(entries []clientui.ChatEntry) string {

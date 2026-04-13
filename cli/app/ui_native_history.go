@@ -15,7 +15,7 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 	if !m.windowSizeKnown {
 		return nil
 	}
-	committedEntries := tui.CommittedOngoingEntries(m.transcriptEntries)
+	committedEntries := committedTranscriptEntriesForApp(m.transcriptEntries)
 	if len(committedEntries) == 0 {
 		hasPendingTransientTail := len(tui.PendingOngoingEntries(m.transcriptEntries)) > 0
 		alreadyReplayed := m.nativeHistoryReplayed
@@ -27,7 +27,7 @@ func (m *uiModel) syncNativeHistoryFromTranscript() tea.Cmd {
 		return m.emitCurrentNativeScrollbackState(false)
 	}
 
-	projection := m.view.CommittedOngoingProjectionForEntries(m.transcriptEntries)
+	projection := committedTranscriptProjectionForApp(m.view, m.transcriptEntries)
 	committedCount := len(committedEntries)
 	if m.nativeFlushedEntryCount < 0 || m.nativeFlushedEntryCount > committedCount {
 		m.rebaseNativeProjection(projection, committedCount)
@@ -253,9 +253,6 @@ func (m *uiModel) emitNonContiguousNativeProjectionRecovery(current tui.Transcri
 	if current.Empty() {
 		return nil
 	}
-	if m.debugMode {
-		panic(fmt.Sprintf("non-contiguous committed transcript recovery requires rebuild: rendered_blocks=%d current_blocks=%d", len(rendered.Blocks), len(current.Blocks)))
-	}
 	m.logf("ui.native_history.rebuild_required rendered_blocks=%d current_blocks=%d", len(rendered.Blocks), len(current.Blocks))
 	return m.emitForcedNativeProjectionReplay(current)
 }
@@ -307,7 +304,7 @@ func (m *uiModel) replayNativeTranscriptThroughEntry(entryIndex int) tea.Cmd {
 }
 
 func nativeCommittedEntries(entries []tui.TranscriptEntry) []tui.TranscriptEntry {
-	return tui.CommittedOngoingEntries(entries)
+	return committedTranscriptEntriesForApp(entries)
 }
 
 func nativePendingEntries(entries []tui.TranscriptEntry) []tui.TranscriptEntry {

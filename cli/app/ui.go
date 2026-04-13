@@ -14,6 +14,7 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/theme"
+	"builder/shared/transcriptdiag"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -790,12 +791,12 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.windowSizeKnown = true
 		m.syncViewport()
 		if m.nativeHistoryReplayed && previousWidth > 0 && previousWidth != msg.Width {
-			committedEntries := tui.CommittedOngoingEntries(m.transcriptEntries)
+			committedEntries := committedTranscriptEntriesForApp(m.transcriptEntries)
 			if len(committedEntries) == 0 {
 				m.resetNativeHistoryState()
 				m.nativeHistoryReplayed = true
 			} else {
-				m.rebaseNativeProjection(m.view.CommittedOngoingProjection(), len(committedEntries))
+				m.rebaseNativeProjection(committedTranscriptProjectionForApp(m.view, m.transcriptEntries), len(committedEntries))
 			}
 		}
 		if !m.nativeHistoryReplayed {
@@ -1143,7 +1144,7 @@ func (m *uiModel) transcriptDiagnosticsEnabled() bool {
 	if m == nil {
 		return false
 	}
-	return m.transcriptDiagnostics || m.debugMode
+	return m.transcriptDiagnostics || transcriptdiag.EnabledForProcess(m.debugMode)
 }
 
 func (m *uiModel) updateTranscriptDiagnosticsMode() {

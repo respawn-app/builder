@@ -62,7 +62,7 @@ func (m *uiModel) primeDetailTranscriptFromCurrentTail() {
 		Ongoing:      m.view.OngoingStreamingText(),
 		OngoingError: m.view.OngoingErrorText(),
 	}
-	for _, entry := range tui.CommittedOngoingEntries(m.transcriptEntries) {
+	for _, entry := range committedTranscriptEntriesForApp(m.transcriptEntries) {
 		page.Entries = append(page.Entries, clientui.ChatEntry{
 			Visibility:  entry.Visibility,
 			Role:        entry.Role,
