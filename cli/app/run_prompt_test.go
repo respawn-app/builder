@@ -19,6 +19,7 @@ import (
 	"builder/server/auth"
 	"builder/server/authflow"
 	"builder/server/llm"
+	"builder/server/metadata"
 	"builder/server/runtime"
 	"builder/server/serve"
 	"builder/server/session"
@@ -489,6 +490,31 @@ func TestStartLocalRunPromptDaemonSkipsUnregisteredWorkspaceWithoutSpawning(t *t
 	}
 	if lookupCalls != 0 {
 		t.Fatalf("expected daemon executable lookup to be skipped, got %d calls", lookupCalls)
+	}
+}
+
+func TestStartRunPromptClientUnregisteredWorkspaceReturnsRegistrationError(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	runClient, closeFn, err := startRunPromptClient(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true})
+	if err != nil {
+		t.Fatalf("startRunPromptClient: %v", err)
+	}
+	defer func() {
+		if closeFn != nil {
+			_ = closeFn()
+		}
+	}()
+
+	if runClient == nil {
+		t.Fatal("expected run prompt client")
+	}
+	_, err = runClient.RunPrompt(context.Background(), serverapi.RunPromptRequest{ClientRequestID: "unregistered-workspace", Prompt: "hello"}, nil)
+	if !errors.Is(err, metadata.ErrWorkspaceNotRegistered) {
+		t.Fatalf("RunPrompt error = %v, want ErrWorkspaceNotRegistered", err)
 	}
 }
 

@@ -352,6 +352,46 @@ func TestRemoteProcessOutputSubscriptionAttachesProjectBeforeSubscribe(t *testin
 	defer func() { _ = sub.Close() }()
 }
 
+func TestDialRemoteURLForProjectAttachesProjectAndReturnsRemote(t *testing.T) {
+	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
+		defer func() { _ = ws.Close() }()
+		var req protocol.Request
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if err := websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.HandshakeResponse{Identity: protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"}})); err != nil {
+			return
+		}
+		if err := websocket.JSON.Receive(ws, &req); err != nil {
+			return
+		}
+		if req.Method != protocol.MethodAttachProject {
+			t.Fatalf("expected attach-project during dial, got %q", req.Method)
+		}
+		var attach protocol.AttachProjectRequest
+		if err := json.Unmarshal(req.Params, &attach); err != nil {
+			t.Fatalf("decode attach-project: %v", err)
+		}
+		if attach.ProjectID != "project-1" {
+			t.Fatalf("attach project id = %q, want project-1", attach.ProjectID)
+		}
+		_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, protocol.AttachResponse{Kind: "project", ProjectID: attach.ProjectID}))
+	}))
+	defer server.Close()
+
+	remote, err := DialRemoteURLForProject(context.Background(), "ws"+server.URL[len("http"):], "project-1")
+	if err != nil {
+		t.Fatalf("DialRemoteURLForProject: %v", err)
+	}
+	defer func() { _ = remote.Close() }()
+	if got := remote.ProjectID(); got != "project-1" {
+		t.Fatalf("ProjectID = %q, want project-1", got)
+	}
+	if got := remote.Identity().ServerID; got != "server-1" {
+		t.Fatalf("server id = %q, want server-1", got)
+	}
+}
+
 func TestDialRemoteURLForProjectValidatesAttachProject(t *testing.T) {
 	server := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
 		defer func() { _ = ws.Close() }()
