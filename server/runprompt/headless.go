@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -126,7 +125,7 @@ func (l *headlessPromptLauncher) prepareRuntime(plan launch.SessionPlan, progres
 		FastMode: l.boot.FastModeState,
 		OnEvent: func(evt runtime.Event) {
 			logger.Logf("%s", FormatRuntimeEvent(evt))
-			if transcriptdiag.EnabledFromEnv(os.Getenv) {
+			if transcriptdiag.EnabledForProcess(plan.ActiveSettings.Debug) {
 				projected := runtimeview.EventFromRuntime(evt)
 				logger.Logf("%s", FormatTranscriptProjectionDiagnostic(plan.Store.Meta().SessionID, projected))
 				logger.Logf("%s", FormatTranscriptPublishDiagnostic(plan.Store.Meta().SessionID, projected))

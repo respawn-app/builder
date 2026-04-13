@@ -27,7 +27,7 @@ func TestStartSessionActivityEventsResubscribesAfterStreamGap(t *testing.T) {
 		next := remaining[0]
 		remaining = remaining[1:]
 		return next, nil
-	}, nil)
+	}, false, nil)
 	defer stop()
 
 	first := waitSessionActivityEvent(t, events)
@@ -66,11 +66,11 @@ func TestStartSessionActivityEventsResubscribeStaysIsolatedAcrossStreams(t *test
 		next := remainingA[0]
 		remainingA = remainingA[1:]
 		return next, nil
-	}, nil)
+	}, false, nil)
 	defer stopA()
 	eventsB, stopB := startSessionActivityEvents(ctx, initialB, func(context.Context) (serverapi.SessionActivitySubscription, error) {
 		return nil, context.Canceled
-	}, nil)
+	}, false, nil)
 	defer stopB()
 
 	firstA := waitSessionActivityEvent(t, eventsA)

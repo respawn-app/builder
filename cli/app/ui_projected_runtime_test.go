@@ -1,13 +1,32 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
 
 	"builder/server/runtime"
 	"builder/shared/clientui"
+	"builder/shared/serverapi"
 )
+
+type sessionActivityTestSubscription struct {
+	events chan clientui.Event
+}
+
+func (s *sessionActivityTestSubscription) Next(ctx context.Context) (clientui.Event, error) {
+	select {
+	case <-ctx.Done():
+		return clientui.Event{}, ctx.Err()
+	case evt := <-s.events:
+		return evt, nil
+	}
+}
+
+func (s *sessionActivityTestSubscription) Close() error { return nil }
+
+var _ serverapi.SessionActivitySubscription = (*sessionActivityTestSubscription)(nil)
 
 func TestWaitRuntimeEventReturnsProjectedMessage(t *testing.T) {
 	ch := make(chan clientui.Event, 1)
@@ -358,6 +377,33 @@ func TestProjectRuntimeEventChannelPublishesSyntheticConversationUpdateAfterBrid
 	}
 	if !sawAssistantDelta || !sawRecovery {
 		t.Fatalf("expected projected runtime channel to emit surviving event and recovery signal, got %+v", events)
+	}
+}
+
+func TestSessionActivityEventsDoNotLogDiagnosticsWhenDisabled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub := &sessionActivityTestSubscription{events: make(chan clientui.Event, 1)}
+	lines := make([]string, 0, 1)
+	out, stop := startSessionActivityEvents(ctx, sub, func(context.Context) (serverapi.SessionActivitySubscription, error) {
+		return sub, nil
+	}, false, func(line string) {
+		lines = append(lines, line)
+	})
+	defer stop()
+
+	sub.events <- clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "hello"}
+	select {
+	case evt := <-out:
+		if evt.AssistantDelta != "hello" {
+			t.Fatalf("assistant delta = %q, want hello", evt.AssistantDelta)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for session activity event")
+	}
+	stop()
+	if len(lines) != 0 {
+		t.Fatalf("expected no diagnostics when disabled, got %q", lines)
 	}
 }
 

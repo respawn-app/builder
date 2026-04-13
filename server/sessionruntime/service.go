@@ -3,7 +3,6 @@ package sessionruntime
 import (
 	"context"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -151,7 +150,7 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 		FastMode: s.fastModeState,
 		OnEvent: func(evt runtime.Event) {
 			logger.Logf("%s", runprompt.FormatRuntimeEvent(evt))
-			if transcriptdiag.EnabledFromEnv(os.Getenv) {
+			if transcriptdiag.EnabledForProcess(req.ActiveSettings.Debug) {
 				projected := runtimeview.EventFromRuntime(evt)
 				logger.Logf("%s", runprompt.FormatTranscriptProjectionDiagnostic(sessionID, projected))
 				logger.Logf("%s", runprompt.FormatTranscriptPublishDiagnostic(sessionID, projected))

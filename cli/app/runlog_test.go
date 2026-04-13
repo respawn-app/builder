@@ -9,8 +9,10 @@ import (
 	"testing"
 
 	"builder/server/llm"
+	"builder/server/runprompt"
 	"builder/server/runtime"
 	"builder/server/tools"
+	"builder/shared/clientui"
 )
 
 func TestRunLoggerWritesStepsFile(t *testing.T) {
@@ -121,5 +123,22 @@ func TestFormatRuntimeEventIncludesToolMetadata(t *testing.T) {
 	})
 	if !strings.Contains(line, "kind=in_flight_clear_failed") || !strings.Contains(line, `err="mark in-flight false: write failed"`) {
 		t.Fatalf("unexpected in-flight clear failure line: %q", line)
+	}
+}
+
+func TestTranscriptDiagnosticsIncludeRevisionAndCommittedEntryCount(t *testing.T) {
+	projected := clientui.Event{
+		Kind:                clientui.EventToolCallStarted,
+		StepID:              "step-1",
+		TranscriptRevision:  17,
+		CommittedEntryCount: 42,
+	}
+	projectionLine := runprompt.FormatTranscriptProjectionDiagnostic("session-1", projected)
+	if !strings.Contains(projectionLine, "revision=17") || !strings.Contains(projectionLine, "committed_entry_count=42") {
+		t.Fatalf("unexpected projection diagnostic: %q", projectionLine)
+	}
+	publishLine := runprompt.FormatTranscriptPublishDiagnostic("session-1", projected)
+	if !strings.Contains(publishLine, "revision=17") || !strings.Contains(publishLine, "committed_entry_count=42") {
+		t.Fatalf("unexpected publish diagnostic: %q", publishLine)
 	}
 }

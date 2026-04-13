@@ -2044,6 +2044,43 @@ func TestNativeHistorySnapshotReplaysDuringAuthoritativeHydrateRepair(t *testing
 	}
 }
 
+func TestNativeHistorySnapshotAuthoritativeHydrateRepairDoesNotPanicInDebugMode(t *testing.T) {
+	m := newProjectedStaticUIModel(WithUIDebug(true))
+	m.termWidth = 80
+	m.windowSizeKnown = true
+	initial := tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{
+		{Role: "user", DividerGroup: "user", Lines: []string{"❯ commit/push"}},
+		{Role: "assistant", DividerGroup: "assistant", Lines: []string{"❮ before"}},
+	}}
+	m.nativeProjection = initial
+	m.nativeRenderedProjection = initial
+	m.nativeRenderedSnapshot = initial.Render(tui.TranscriptDivider)
+	m.nativeProjection = tui.TranscriptProjection{Blocks: []tui.TranscriptProjectionBlock{
+		{Role: "user", DividerGroup: "user", Lines: []string{"❯ commit/push"}},
+		{Role: "assistant", DividerGroup: "assistant", Lines: []string{"❮ after"}},
+	}}
+
+	cmd := m.emitCurrentNativeHistorySnapshot(false, nativeHistoryReplayPermitAuthoritativeHydrate)
+	if cmd == nil {
+		t.Fatal("expected authoritative hydrate repair replay in debug mode")
+	}
+	msgs := collectCmdMessages(t, cmd)
+	if len(msgs) != 3 {
+		t.Fatalf("expected status plus clear-screen plus native history flush during debug authoritative hydrate repair, got %d message(s)", len(msgs))
+	}
+	if m.transientStatus != nativeHistoryDivergenceStatusMessage || m.transientStatusKind != uiStatusNoticeError {
+		t.Fatalf("expected debug authoritative hydrate repair to surface divergence status, got status=%q kind=%v", m.transientStatus, m.transientStatusKind)
+	}
+	flush, ok := msgs[2].(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg as debug authoritative hydrate replay payload, got %T", msgs[2])
+	}
+	plain := stripANSIPreserve(flush.Text)
+	if !strings.Contains(plain, "commit/push") || !strings.Contains(plain, "after") || strings.Contains(plain, "before") {
+		t.Fatalf("expected debug authoritative hydrate replay to emit corrected transcript, got %q", plain)
+	}
+}
+
 func TestModeRestoreReplayPermitOverridesEarlierAuthoritativeHydratePermit(t *testing.T) {
 	m := newProjectedStaticUIModel(
 		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
