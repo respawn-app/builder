@@ -23,9 +23,10 @@ type Gateway struct {
 }
 
 type connectionState struct {
-	handshakeDone   bool
-	attachedProject string
-	attachedSession string
+	handshakeDone       bool
+	attachedProject     string
+	attachedProjectRoot string
+	attachedSession     string
 }
 
 func NewGateway(appCore *core.Core, identity protocol.ServerIdentity) (*Gateway, error) {
@@ -133,6 +134,7 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 				return protocol.AttachResponse{}, err
 			}
 			state.attachedProject = params.ProjectID
+			state.attachedProjectRoot = strings.TrimSpace(params.WorkspaceRoot)
 			state.attachedSession = ""
 			return protocol.AttachResponse{Kind: "project", ProjectID: params.ProjectID}, nil
 		})
@@ -150,6 +152,18 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 	case protocol.MethodProjectList:
 		return decodeAndHandle(req, func(params serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
 			return g.core.ProjectViewClient().ListProjects(ctx, params)
+		})
+	case protocol.MethodProjectResolvePath:
+		return decodeAndHandle(req, func(params serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+			return g.core.ProjectViewClient().ResolveProjectPath(ctx, params)
+		})
+	case protocol.MethodProjectCreate:
+		return decodeAndHandle(req, func(params serverapi.ProjectCreateRequest) (serverapi.ProjectCreateResponse, error) {
+			return g.core.ProjectViewClient().CreateProject(ctx, params)
+		})
+	case protocol.MethodProjectAttachWorkspace:
+		return decodeAndHandle(req, func(params serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error) {
+			return g.core.ProjectViewClient().AttachWorkspaceToProject(ctx, params)
 		})
 	case protocol.MethodProjectGetOverview:
 		return decodeAndHandle(req, func(params serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
@@ -419,7 +433,7 @@ func (g *Gateway) sessionLaunchClientForState(ctx context.Context, state *connec
 	if err != nil {
 		return nil, err
 	}
-	launchClient, err := g.core.SessionLaunchClientForProject(ctx, projectID)
+	launchClient, err := g.core.SessionLaunchClientForProjectWorkspace(ctx, projectID, state.attachedProjectRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -437,7 +451,7 @@ func (g *Gateway) runPromptClientForState(ctx context.Context, state *connection
 	if err != nil {
 		return nil, err
 	}
-	runClient, err := g.core.RunPromptClientForProject(ctx, projectID)
+	runClient, err := g.core.RunPromptClientForProjectWorkspace(ctx, projectID, state.attachedProjectRoot)
 	if err != nil {
 		return nil, err
 	}

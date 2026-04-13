@@ -14,6 +14,42 @@ type ProjectListResponse struct {
 	Projects []clientui.ProjectSummary
 }
 
+type ProjectBinding struct {
+	ProjectID       string `json:"project_id"`
+	ProjectName     string `json:"project_name"`
+	WorkspaceID     string `json:"workspace_id"`
+	CanonicalRoot   string `json:"canonical_root"`
+	WorkspaceName   string `json:"workspace_name"`
+	WorkspaceStatus string `json:"workspace_status"`
+}
+
+type ProjectResolvePathRequest struct {
+	Path string `json:"path"`
+}
+
+type ProjectResolvePathResponse struct {
+	CanonicalRoot string          `json:"canonical_root"`
+	Binding       *ProjectBinding `json:"binding,omitempty"`
+}
+
+type ProjectCreateRequest struct {
+	DisplayName   string `json:"display_name"`
+	WorkspaceRoot string `json:"workspace_root"`
+}
+
+type ProjectCreateResponse struct {
+	Binding ProjectBinding `json:"binding"`
+}
+
+type ProjectAttachWorkspaceRequest struct {
+	ProjectID     string `json:"project_id"`
+	WorkspaceRoot string `json:"workspace_root"`
+}
+
+type ProjectAttachWorkspaceResponse struct {
+	Binding ProjectBinding `json:"binding"`
+}
+
 type ProjectGetOverviewRequest struct {
 	ProjectID string
 }
@@ -32,8 +68,38 @@ type SessionListByProjectResponse struct {
 
 type ProjectViewService interface {
 	ListProjects(ctx context.Context, req ProjectListRequest) (ProjectListResponse, error)
+	ResolveProjectPath(ctx context.Context, req ProjectResolvePathRequest) (ProjectResolvePathResponse, error)
+	CreateProject(ctx context.Context, req ProjectCreateRequest) (ProjectCreateResponse, error)
+	AttachWorkspaceToProject(ctx context.Context, req ProjectAttachWorkspaceRequest) (ProjectAttachWorkspaceResponse, error)
 	GetProjectOverview(ctx context.Context, req ProjectGetOverviewRequest) (ProjectGetOverviewResponse, error)
 	ListSessionsByProject(ctx context.Context, req SessionListByProjectRequest) (SessionListByProjectResponse, error)
+}
+
+func (r ProjectResolvePathRequest) Validate() error {
+	if strings.TrimSpace(r.Path) == "" {
+		return errors.New("path is required")
+	}
+	return nil
+}
+
+func (r ProjectCreateRequest) Validate() error {
+	if strings.TrimSpace(r.DisplayName) == "" {
+		return errors.New("display_name is required")
+	}
+	if strings.TrimSpace(r.WorkspaceRoot) == "" {
+		return errors.New("workspace_root is required")
+	}
+	return nil
+}
+
+func (r ProjectAttachWorkspaceRequest) Validate() error {
+	if strings.TrimSpace(r.ProjectID) == "" {
+		return errors.New("project_id is required")
+	}
+	if strings.TrimSpace(r.WorkspaceRoot) == "" {
+		return errors.New("workspace_root is required")
+	}
+	return nil
 }
 
 func (r ProjectGetOverviewRequest) Validate() error {

@@ -500,21 +500,17 @@ func TestStartRunPromptClientUnregisteredWorkspaceReturnsRegistrationError(t *te
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	runClient, closeFn, err := startRunPromptClient(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true})
-	if err != nil {
-		t.Fatalf("startRunPromptClient: %v", err)
-	}
-	defer func() {
-		if closeFn != nil {
-			_ = closeFn()
-		}
-	}()
-
-	if runClient == nil {
-		t.Fatal("expected run prompt client")
-	}
-	_, err = runClient.RunPrompt(context.Background(), serverapi.RunPromptRequest{ClientRequestID: "unregistered-workspace", Prompt: "hello"}, nil)
 	if !errors.Is(err, metadata.ErrWorkspaceNotRegistered) {
-		t.Fatalf("RunPrompt error = %v, want ErrWorkspaceNotRegistered", err)
+		t.Fatalf("startRunPromptClient error = %v, want ErrWorkspaceNotRegistered", err)
+	}
+	if runClient != nil {
+		t.Fatalf("expected no run client, got %v", runClient)
+	}
+	if closeFn != nil {
+		t.Fatal("expected no close function when startup fails")
+	}
+	if !strings.Contains(err.Error(), "builder project") || !strings.Contains(err.Error(), "builder attach") {
+		t.Fatalf("expected recovery guidance in error, got %q", err)
 	}
 }
 

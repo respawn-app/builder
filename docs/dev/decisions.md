@@ -102,6 +102,9 @@
 - The Phase 4 topology target is one app-global daemon per persistence root. Clients and daemon converge on the same configured `server_host` and `server_port`, connect directly to that address, and use handshake only for compatibility. Handshake identity is process-scoped rather than project/workspace-scoped, and one daemon may host multiple projects under that persistence root.
 - The app-global daemon listen configuration is explicit and user-configurable via separate `server_host` and `server_port` settings. Builder uses a fixed built-in default port in the private/dynamic range, binds exactly that configured address, and fails startup if the port is occupied; it must not silently rebind, fall back, or use `:0` ephemeral assignment.
 - The Phase 4 topology cutover is hard. No discovery-file migration, bridge mode, or compatibility script is maintained for the old workspace-scoped daemon-discovery model.
+- Interactive startup remains workspace-first. When startup cwd is unregistered, Builder enters an explicit post-auth binding flow with a create-new-project action first and a clearly separated existing-project picker below it.
+- Headless startup in an unregistered workspace fails fast; it must not auto-create hidden project/workspace state.
+- To support agent recovery in that fail-fast model, Builder will expose explicit workspace-binding CLI commands: `builder project [path]` to inspect the project bound to a path, `builder attach [path]` to bind a workspace to the project already bound to `cwd`, and `builder attach --project <project-id> [path]` as the explicit project-id override. All forms default `path` to `cwd`.
 - For the migration's runtime-residency model, lease identity is explicit and distinct from `client_request_id`; reconnect rehydrates, reattaches, and acquires a fresh lease rather than reclaiming an abandoned one.
 - Post-migration, `session.json` is removed. Session metadata authority moves to SQLite. `events.jsonl` and `steps.log` remain file-backed for now.
 - Interactive session creation remains lazily durable; creating a new interactive session does not immediately force durable metadata writes.
@@ -354,7 +357,7 @@
 - Startup shows recent sessions with pick-or-new flow.
 - Startup session list is scrollable with no cap.
 - If no sessions exist, startup goes directly to new-session setup.
-- In the server-driven migration target, when CLI startup cwd does not resolve to a registered project/workspace/worktree, startup enters a project-picker/registration flow rather than auto-registering. That flow may create a new project and attach the current workspace as its first workspace/main worktree, or add the current workspace to an existing project after explicit confirmation. Outside that flow, the CLI remains workspace-first.
+- In the server-driven migration target, when CLI startup cwd does not resolve to a registered project/workspace/worktree, startup enters a project-picker/registration flow rather than auto-registering. That flow may create a new project and attach the current workspace as its first workspace/main worktree, or explicitly attach the current workspace to an existing project. Outside that flow, the CLI remains workspace-first.
 
 ## Slash Commands
 

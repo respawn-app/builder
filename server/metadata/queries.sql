@@ -153,6 +153,17 @@ ON CONFLICT(id) DO UPDATE SET
     usage_state_json = excluded.usage_state_json,
     metadata_json = excluded.metadata_json;
 
+-- name: GetProjectDisplayName :one
+SELECT display_name
+FROM projects
+WHERE id = sqlc.arg(project_id)
+LIMIT 1;
+
+-- name: CountProjectWorkspaces :one
+SELECT CAST(COUNT(*) AS INTEGER) AS workspace_count
+FROM workspaces
+WHERE project_id = sqlc.arg(project_id);
+
 -- name: ListProjects :many
 SELECT
     p.id,

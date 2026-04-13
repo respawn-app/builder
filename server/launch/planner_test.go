@@ -438,6 +438,18 @@ func (s *stubLaunchProjectViewService) ListProjects(_ context.Context, _ servera
 	return serverapi.ProjectListResponse{}, nil
 }
 
+func (s *stubLaunchProjectViewService) ResolveProjectPath(_ context.Context, _ serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
+	return serverapi.ProjectResolvePathResponse{}, errors.New("ResolveProjectPath should not be called in planner tests")
+}
+
+func (s *stubLaunchProjectViewService) CreateProject(_ context.Context, _ serverapi.ProjectCreateRequest) (serverapi.ProjectCreateResponse, error) {
+	return serverapi.ProjectCreateResponse{}, errors.New("CreateProject should not be called in planner tests")
+}
+
+func (s *stubLaunchProjectViewService) AttachWorkspaceToProject(_ context.Context, _ serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error) {
+	return serverapi.ProjectAttachWorkspaceResponse{}, errors.New("AttachWorkspaceToProject should not be called in planner tests")
+}
+
 func (s *stubLaunchProjectViewService) GetProjectOverview(_ context.Context, _ serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
 	s.overviewCalls++
 	return s.overview, nil

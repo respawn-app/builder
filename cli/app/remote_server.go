@@ -78,6 +78,28 @@ func (s *remoteAppServer) Config() config.App {
 	return s.cfg
 }
 
+func (s *remoteAppServer) BindProject(ctx context.Context, projectID string) (embeddedServer, error) {
+	if s == nil || s.remote == nil {
+		return nil, errors.New("remote server is required")
+	}
+	trimmedProjectID := strings.TrimSpace(projectID)
+	if trimmedProjectID == "" {
+		return nil, errors.New("project id is required")
+	}
+	nextRemote, err := client.DialRemoteURLForProjectWorkspace(ctx, config.ServerRPCURL(s.cfg), trimmedProjectID, s.cfg.WorkspaceRoot)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.remote.Close()
+	var closeFn func() error
+	if s.owns && s.closeFn != nil {
+		closeFn = func() error {
+			return errors.Join(nextRemote.Close(), s.closeFn())
+		}
+	}
+	return newRemoteAppServerWithAuth(nextRemote, s.cfg, closeFn, s.lookupEnv, s.wrapStore), nil
+}
+
 func (s *remoteAppServer) AuthManager() *auth.Manager {
 	if s == nil {
 		return nil

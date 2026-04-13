@@ -12,6 +12,9 @@ const (
 	MethodAttachProject                            = "project.attach"
 	MethodAttachSession                            = "session.attach"
 	MethodProjectList                              = "project.list"
+	MethodProjectResolvePath                       = "project.resolvePath"
+	MethodProjectCreate                            = "project.create"
+	MethodProjectAttachWorkspace                   = "project.attachWorkspace"
 	MethodProjectGetOverview                       = "project.getOverview"
 	MethodSessionListByProject                     = "session.listByProject"
 	MethodSessionPlan                              = "session.plan"
@@ -70,7 +73,8 @@ type HandshakeResponse struct {
 }
 
 type AttachProjectRequest struct {
-	ProjectID string `json:"project_id"`
+	ProjectID     string `json:"project_id"`
+	WorkspaceRoot string `json:"workspace_root,omitempty"`
 }
 
 type AttachSessionRequest struct {

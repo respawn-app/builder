@@ -78,6 +78,12 @@ func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wri
 	if len(args) > 0 && args[0] == "run" {
 		return runSubcommand(args[1:])
 	}
+	if len(args) > 0 && args[0] == "project" {
+		return projectSubcommand(args[1:], stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "attach" {
+		return attachSubcommand(args[1:], stdout, stderr)
+	}
 	if len(args) > 0 && args[0] == "serve" {
 		return serveSubcommand(args[1:], stdout, stderr)
 	}
@@ -93,6 +99,7 @@ func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wri
 
 	rootFS := flag.NewFlagSet("builder", flag.ContinueOnError)
 	rootFS.SetOutput(stderr)
+	rootFS.Usage = func() { writeRootUsage(rootFS) }
 	showVersion := rootFS.Bool("version", false, "print version and exit")
 	forceInteractive := rootFS.Bool("force-interactive", false, "run interactive UI even when stdin/stdout are not terminals")
 	flags := registerCommonFlags(rootFS)
@@ -148,6 +155,29 @@ func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wri
 		return 1
 	}
 	return 0
+}
+
+func writeRootUsage(fs *flag.FlagSet) {
+	if fs == nil {
+		return
+	}
+	out := fs.Output()
+	_, _ = fmt.Fprintln(out, "Usage of builder:")
+	_, _ = fmt.Fprintln(out, "  builder [flags]")
+	_, _ = fmt.Fprintln(out, "  builder run [flags] <prompt>")
+	_, _ = fmt.Fprintln(out, "  builder serve [flags]")
+	_, _ = fmt.Fprintln(out, "  builder project [path]")
+	_, _ = fmt.Fprintln(out, "  builder attach [path]")
+	_, _ = fmt.Fprintln(out, "  builder attach --project <project-id> [path]")
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "Commands:")
+	_, _ = fmt.Fprintln(out, "  run      Execute a headless prompt against the current workspace")
+	_, _ = fmt.Fprintln(out, "  serve    Start the configured app server")
+	_, _ = fmt.Fprintln(out, "  project  Print the project id bound to a workspace path")
+	_, _ = fmt.Fprintln(out, "  attach   Attach a workspace path to the current or explicit project")
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "Flags:")
+	fs.PrintDefaults()
 }
 
 func requireInteractiveTerminal(stdin io.Reader, stdout io.Writer, force bool) error {

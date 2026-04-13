@@ -10,6 +10,33 @@ import (
 	"database/sql"
 )
 
+const countProjectWorkspaces = `-- name: CountProjectWorkspaces :one
+SELECT CAST(COUNT(*) AS INTEGER) AS workspace_count
+FROM workspaces
+WHERE project_id = ?1
+`
+
+func (q *Queries) CountProjectWorkspaces(ctx context.Context, projectID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countProjectWorkspaces, projectID)
+	var workspace_count int64
+	err := row.Scan(&workspace_count)
+	return workspace_count, err
+}
+
+const getProjectDisplayName = `-- name: GetProjectDisplayName :one
+SELECT display_name
+FROM projects
+WHERE id = ?1
+LIMIT 1
+`
+
+func (q *Queries) GetProjectDisplayName(ctx context.Context, projectID string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getProjectDisplayName, projectID)
+	var display_name string
+	err := row.Scan(&display_name)
+	return display_name, err
+}
+
 const getProjectSummary = `-- name: GetProjectSummary :one
 SELECT
     p.id,

@@ -150,12 +150,12 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	}
 	if err == nil {
 		core.projectID = binding.ProjectID
-		core.sessionLaunch, err = core.SessionLaunchClientForProject(context.Background(), binding.ProjectID)
+		core.sessionLaunch, err = core.SessionLaunchClientForProjectWorkspace(context.Background(), binding.ProjectID, cfg.WorkspaceRoot)
 		if err != nil {
 			_ = metadataStore.Close()
 			return nil, err
 		}
-		core.runPrompt, err = core.RunPromptClientForProject(context.Background(), binding.ProjectID)
+		core.runPrompt, err = core.RunPromptClientForProjectWorkspace(context.Background(), binding.ProjectID, cfg.WorkspaceRoot)
 		if err != nil {
 			_ = metadataStore.Close()
 			return nil, err
@@ -202,7 +202,11 @@ func (s *Core) SessionBelongsToProject(ctx context.Context, sessionID string, pr
 }
 
 func (s *Core) SessionLaunchClientForProject(ctx context.Context, projectID string) (client.SessionLaunchClient, error) {
-	projectCtx, err := s.resolveProjectContext(ctx, projectID)
+	return s.SessionLaunchClientForProjectWorkspace(ctx, projectID, s.cfg.WorkspaceRoot)
+}
+
+func (s *Core) SessionLaunchClientForProjectWorkspace(ctx context.Context, projectID string, workspaceRoot string) (client.SessionLaunchClient, error) {
+	projectCtx, err := s.resolveProjectContext(ctx, projectID, workspaceRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +218,11 @@ func (s *Core) SessionLaunchClientForProject(ctx context.Context, projectID stri
 }
 
 func (s *Core) RunPromptClientForProject(ctx context.Context, projectID string) (client.RunPromptClient, error) {
-	projectCtx, err := s.resolveProjectContext(ctx, projectID)
+	return s.RunPromptClientForProjectWorkspace(ctx, projectID, s.cfg.WorkspaceRoot)
+}
+
+func (s *Core) RunPromptClientForProjectWorkspace(ctx context.Context, projectID string, workspaceRoot string) (client.RunPromptClient, error) {
+	projectCtx, err := s.resolveProjectContext(ctx, projectID, workspaceRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -230,13 +238,33 @@ func (s *Core) RunPromptClientForProject(ctx context.Context, projectID string) 
 	}), nil
 }
 
-func (s *Core) resolveProjectContext(ctx context.Context, projectID string) (projectContext, error) {
+func (s *Core) resolveProjectContext(ctx context.Context, projectID string, workspaceRoot string) (projectContext, error) {
 	if s == nil || s.metadataStore == nil {
 		return projectContext{}, errors.New("metadata store is required")
 	}
 	trimmedProjectID := strings.TrimSpace(projectID)
 	if trimmedProjectID == "" {
 		return projectContext{}, errors.New("project id is required")
+	}
+	trimmedWorkspaceRoot := strings.TrimSpace(workspaceRoot)
+	if trimmedWorkspaceRoot != "" {
+		binding, err := s.metadataStore.EnsureWorkspaceBinding(ctx, trimmedWorkspaceRoot)
+		if err == nil {
+			if strings.TrimSpace(binding.ProjectID) != trimmedProjectID {
+				return projectContext{}, fmt.Errorf("workspace %q is not bound to project %q", binding.CanonicalRoot, trimmedProjectID)
+			}
+			projectCfg := s.cfg
+			projectCfg.WorkspaceRoot = binding.CanonicalRoot
+			return projectContext{
+				config:         projectCfg,
+				projectID:      trimmedProjectID,
+				projectRoot:    binding.CanonicalRoot,
+				projectSession: config.ProjectSessionsRoot(projectCfg, trimmedProjectID),
+			}, nil
+		}
+		if !errors.Is(err, metadata.ErrWorkspaceNotRegistered) {
+			return projectContext{}, err
+		}
 	}
 	overview, err := s.metadataStore.GetProjectOverview(ctx, trimmedProjectID)
 	if err != nil {

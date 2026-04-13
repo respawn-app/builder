@@ -224,6 +224,8 @@ Requirements:
 - session transcript/log bulk files must remain file-backed in this phase
 - project/workspace/worktree identity and execution-target semantics must be explicit and durable
 - startup/registration flows must operate through the server-owned metadata authority rather than hidden local shortcuts
+- unknown-cwd interactive startup must branch into an explicit binding flow with create-project and attach-to-existing-project choices
+- headless startup in an unregistered workspace must fail fast and point users/agents at explicit recovery commands rather than inventing hidden project/workspace state
 
 Deliverables:
 
@@ -235,6 +237,7 @@ Deliverables:
 - [x] session execution target model is finalized as `(workspace_id, worktree_id?, cwd_relpath)`
 - [x] explicit runtime lease model is implemented on the metadata-backed runtime path
 - [ ] workspace-first CLI startup and registration flow is implemented end-to-end, including unknown-cwd project picker / create-project / attach-workspace flows
+- [ ] headless unknown-workspace failure path is implemented with short recovery guidance using `builder project [path]`, `builder attach [path]`, and `builder attach --project <project-id> [path]`
 
 Primary risks:
 
@@ -364,6 +367,7 @@ Requirements:
 - attach must use configured host/port directly with no discovery artifact, no fallback port, and no silent rebinding
 - project/workspace context resolution must happen over server-owned queries and attachments after transport attach
 - unknown-cwd startup must enter explicit registration/project-selection flow rather than crashing or auto-registering
+- headless unknown-cwd startup must fail fast with explicit operator/agent recovery guidance instead of auto-registering hidden project/workspace state
 
 Deliverables:
 
@@ -376,6 +380,37 @@ Deliverables:
 - [x] topology cutover is hard: no migration script or bridge mode for the old workspace-scoped discovery-file model
 - [ ] cwd/project/workspace resolution over server-owned path-resolution and registration queries is complete for unknown workspaces, not only already-registered ones
 - [ ] unknown-cwd startup and registration flow works end-to-end over the remote/loopback boundary without `project id is required` crash paths
+- [ ] headless unregistered-workspace failures mention the explicit recovery path via `builder project [path]`, `builder attach [path]`, and `builder attach --project <project-id> [path]`
+
+### Phase 4D.a: Workspace Binding UX And Headless Recovery
+
+Goal:
+
+Finish the missing user/agent-facing binding behavior on top of the already-landed app-global daemon and metadata model.
+
+Requirements:
+
+- interactive unknown-cwd startup must enter a post-auth binding flow rather than erroring
+- the binding flow must offer create-new-project first, then a clearly separated attach-to-existing-project section
+- existing-project rows must surface a meaningful preview derived from the project's main workspace path
+- headless unknown-cwd flows must fail fast with explicit, short self-recovery instructions
+- workspace binding inspection and mutation needed for agent recovery must be available as explicit CLI commands rather than implicit background behavior
+
+Deliverables:
+
+- [ ] post-auth `binding` flow exists for interactive unknown-cwd startup
+- [ ] create-project path pre-fills the editable project name from the cwd directory name and continues into a new session after binding
+- [ ] existing-project picker rows use project preview paths derived from the main/earliest workspace root
+- [ ] existing-project selection can explicitly bind the current workspace to that project and continue startup
+- [ ] `builder project [path]` resolves the project bound to a path, defaulting to `cwd`
+- [ ] `builder attach [path]` binds a workspace to the project already bound to `cwd`, while `builder attach --project <project-id> [path]` provides an explicit project-id override
+- [ ] headless unregistered-workspace errors mention the recovery commands in a short guide
+
+Acceptance proof:
+
+- [ ] interactive startup tests cover the chosen existing-project attach branch for unknown cwd (`immediate attach+continue` or `confirm then attach+continue`)
+- [ ] headless unregistered-workspace tests assert the fail-fast error text includes the recovery commands and does not auto-create bindings
+- [ ] CLI command tests cover `builder project [path]`, path-first `builder attach [path]`, and explicit `builder attach --project <project-id> [path]` flows, including default-`cwd` behavior
 
 Primary risks:
 

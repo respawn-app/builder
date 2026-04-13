@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -21,7 +22,7 @@ import (
 )
 
 var launchRunPromptDaemon = startLocalRunPromptDaemon
-var dialConfiguredRemote = client.DialRemoteURLForProject
+var dialConfiguredRemote = client.DialRemoteURLForProjectWorkspace
 var resolveDaemonExecutablePath = daemonExecutablePath
 var buildServeArgsFunc = buildServeArgs
 var terminateOwnedDaemonProcess = func(process *os.Process) error {
@@ -44,6 +45,11 @@ const launchedDaemonShutdownTimeout = 5 * time.Second
 const configuredRemoteAttachTimeout = 500 * time.Millisecond
 
 func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptClient, func() error, error) {
+	if cfg, _, registered, err := loadRemoteAttachState(ctx, opts); err != nil {
+		return nil, nil, err
+	} else if !registered {
+		return nil, nil, headlessWorkspaceRegistrationError(cfg.WorkspaceRoot)
+	}
 	if remote, ok := tryDialConfiguredRemote(ctx, opts, configuredRemoteSupportsRunPrompt); ok {
 		return remote, remote.Close, nil
 	}
@@ -64,20 +70,28 @@ func startRunPromptClient(ctx context.Context, opts Options) (client.RunPromptCl
 }
 
 func tryDialConfiguredRemote(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool) (*client.Remote, bool) {
-	return tryDialMatchingConfiguredRemote(ctx, opts, supports, nil)
+	return tryDialMatchingConfiguredRemoteWithRequirement(ctx, opts, supports, nil, true)
+}
+
+func tryDialMatchingConfiguredRemoteAllowUnregistered(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool, accept func(protocol.ServerIdentity) bool) (*client.Remote, bool) {
+	return tryDialMatchingConfiguredRemoteWithRequirement(ctx, opts, supports, accept, false)
 }
 
 func tryDialMatchingConfiguredRemote(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool, accept func(protocol.ServerIdentity) bool) (*client.Remote, bool) {
-	cfg, projectID, err := loadRemoteAttachConfig(ctx, opts)
+	return tryDialMatchingConfiguredRemoteWithRequirement(ctx, opts, supports, accept, true)
+}
+
+func tryDialMatchingConfiguredRemoteWithRequirement(ctx context.Context, opts Options, supports func(protocol.CapabilityFlags) bool, accept func(protocol.ServerIdentity) bool, requireRegistered bool) (*client.Remote, bool) {
+	cfg, projectID, registered, err := loadRemoteAttachState(ctx, opts)
 	if err != nil {
 		return nil, false
 	}
-	if strings.TrimSpace(projectID) == "" {
+	if requireRegistered && !registered {
 		return nil, false
 	}
 	attachCtx, cancel := context.WithTimeout(ctx, configuredRemoteAttachTimeout)
 	defer cancel()
-	remote, err := dialConfiguredRemote(attachCtx, config.ServerRPCURL(cfg), projectID)
+	remote, err := dialConfiguredRemote(attachCtx, config.ServerRPCURL(cfg), projectID, cfg.WorkspaceRoot)
 	if err != nil {
 		return nil, false
 	}
@@ -121,11 +135,11 @@ func resolveCLIWorkspaceRoot(opts Options) (string, error) {
 }
 
 func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remote, func() error, bool, error) {
-	_, projectID, err := loadRemoteAttachConfig(ctx, opts)
+	cfg, _, registered, err := loadRemoteAttachState(ctx, opts)
 	if err != nil {
 		return nil, nil, false, err
 	}
-	if strings.TrimSpace(projectID) == "" {
+	if !registered {
 		return nil, nil, false, nil
 	}
 	execPath, ok := resolveDaemonExecutablePath()
@@ -136,9 +150,7 @@ func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remot
 	if err != nil {
 		return nil, nil, false, err
 	}
-	if cfg, cfgErr := loadSessionServerConfig(opts); cfgErr == nil {
-		serve.ReleaseTestListenReservation(config.ServerListenAddress(cfg))
-	}
+	serve.ReleaseTestListenReservation(config.ServerListenAddress(cfg))
 	args := append([]string{execPath}, buildServeArgsFunc(workspaceRoot, opts)...)
 	cmd := exec.CommandContext(context.Background(), args[0], args[1:]...)
 	cmd.Stdin = nil
@@ -156,9 +168,9 @@ func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remot
 	childPID := cmd.Process.Pid
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if remote, ok := tryDialMatchingConfiguredRemote(ctx, opts, configuredRemoteSupportsRunPrompt, func(identity protocol.ServerIdentity) bool {
+		if remote, ok := tryDialMatchingConfiguredRemoteWithRequirement(ctx, opts, configuredRemoteSupportsRunPrompt, func(identity protocol.ServerIdentity) bool {
 			return identity.PID == childPID
-		}); ok {
+		}, true); ok {
 			return remote, newOwnedDaemonClose(remote, cmd, errCh), true, nil
 		}
 		select {
@@ -177,23 +189,31 @@ func startLocalRunPromptDaemon(ctx context.Context, opts Options) (*client.Remot
 	}
 }
 
-func loadRemoteAttachConfig(ctx context.Context, opts Options) (config.App, string, error) {
+func loadRemoteAttachState(ctx context.Context, opts Options) (config.App, string, bool, error) {
 	workspaceRoot, err := resolveCLIWorkspaceRoot(opts)
 	if err != nil {
-		return config.App{}, "", err
+		return config.App{}, "", false, err
 	}
 	cfg, err := config.Load(workspaceRoot, config.LoadOptions{})
 	if err != nil {
-		return config.App{}, "", err
+		return config.App{}, "", false, err
 	}
 	binding, err := metadata.ResolveBinding(ctx, cfg.PersistenceRoot, cfg.WorkspaceRoot)
 	if err == nil {
-		return cfg, binding.ProjectID, nil
+		return cfg, binding.ProjectID, true, nil
 	}
 	if errors.Is(err, metadata.ErrWorkspaceNotRegistered) {
-		return cfg, "", nil
+		return cfg, "", false, nil
 	}
-	return config.App{}, "", err
+	return config.App{}, "", false, err
+}
+
+func headlessWorkspaceRegistrationError(workspaceRoot string) error {
+	trimmedRoot := strings.TrimSpace(workspaceRoot)
+	if trimmedRoot == "" {
+		trimmedRoot = "current workspace"
+	}
+	return fmt.Errorf("%w: %s is not attached to a project. Run `builder project` in a workspace that already belongs to the target project, then run `builder attach <path>` from there or `builder attach --project <project-id> <path>`", metadata.ErrWorkspaceNotRegistered, trimmedRoot)
 }
 
 func newOwnedDaemonClose(remote *client.Remote, cmd *exec.Cmd, errCh <-chan error) func() error {
