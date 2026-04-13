@@ -223,7 +223,7 @@ Requirements:
 - a project is a durable server-owned work container and may span one or more workspaces,
 - `workspace` is a first-class child resource of `project`,
 - each workspace is a durable server-local registration that maps 1:1 to exactly one canonical execution root,
-- any path nested under an attached workspace inherits that workspace binding and must not be registerable as a second workspace unless Builder later introduces explicit nested-workspace semantics,
+- only an exact canonical workspace root match resolves an attached workspace; nested subdirectories remain unregistered until explicitly attached,
 - `worktree` is optional workspace-scoped execution-target metadata rather than a project identity primitive,
 - workspace and worktree identity may inform canonical records, but protocol identity remains opaque server ids such as `project_id`, `workspace_id`, and `worktree_id`,
 - project persistence remains partitioned per project through one durable project container, even though clients must not treat storage layout as protocol identity,

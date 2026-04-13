@@ -61,7 +61,7 @@ func TestEnsureWorkspaceBindingDoesNotRegisterUnknownWorkspace(t *testing.T) {
 	}
 }
 
-func TestResolveWorkspacePathResolvesNestedDirectoryToAncestorBinding(t *testing.T) {
+func TestResolveWorkspacePathLeavesNestedDirectoryUnbound(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	nested := filepath.Join(workspace, "subdir", "deeper")
@@ -92,39 +92,35 @@ func TestResolveWorkspacePathResolvesNestedDirectoryToAncestorBinding(t *testing
 	if canonicalNested == binding.CanonicalRoot {
 		t.Fatalf("expected resolved canonical path for nested directory, got workspace root %q", canonicalNested)
 	}
-	if resolved == nil {
-		t.Fatal("expected nested directory to resolve to ancestor binding")
-	}
-	if resolved.ProjectID != binding.ProjectID || resolved.CanonicalRoot != binding.CanonicalRoot {
-		t.Fatalf("resolved nested binding = %+v, want %+v", *resolved, binding)
+	if resolved != nil {
+		t.Fatalf("expected nested directory to remain unbound, got %+v", *resolved)
 	}
 
-	ensured, err := store.EnsureWorkspaceBinding(context.Background(), nested)
-	if err != nil {
-		t.Fatalf("EnsureWorkspaceBinding nested: %v", err)
-	}
-	if ensured.ProjectID != binding.ProjectID || ensured.CanonicalRoot != binding.CanonicalRoot {
-		t.Fatalf("ensured nested binding = %+v, want %+v", ensured, binding)
+	if _, err := store.EnsureWorkspaceBinding(context.Background(), nested); !errors.Is(err, ErrWorkspaceNotRegistered) {
+		t.Fatalf("EnsureWorkspaceBinding nested error = %v, want ErrWorkspaceNotRegistered", err)
 	}
 
 	registered, err := store.RegisterWorkspaceBinding(context.Background(), nested)
 	if err != nil {
 		t.Fatalf("RegisterWorkspaceBinding nested: %v", err)
 	}
-	if registered.ProjectID != binding.ProjectID || registered.CanonicalRoot != binding.CanonicalRoot {
-		t.Fatalf("registered nested binding = %+v, want %+v", registered, binding)
+	if registered.CanonicalRoot == binding.CanonicalRoot {
+		t.Fatalf("expected nested registration to create its own workspace, got %+v", registered)
+	}
+	if registered.CanonicalRoot != canonicalNested {
+		t.Fatalf("registered nested root = %q, want %q", registered.CanonicalRoot, canonicalNested)
 	}
 
 	projects, err := store.ListProjects(context.Background())
 	if err != nil {
 		t.Fatalf("ListProjects: %v", err)
 	}
-	if len(projects) != 1 {
-		t.Fatalf("project count = %d, want 1", len(projects))
+	if len(projects) != 2 {
+		t.Fatalf("project count = %d, want 2", len(projects))
 	}
 }
 
-func TestAttachWorkspaceToProjectRejectsNestedPathInsideExistingWorkspace(t *testing.T) {
+func TestAttachWorkspaceToProjectAllowsNestedPathAsSeparateWorkspace(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	nested := filepath.Join(workspace, "nested")
@@ -159,16 +155,27 @@ func TestAttachWorkspaceToProjectRejectsNestedPathInsideExistingWorkspace(t *tes
 
 	resolved, err := store.AttachWorkspaceToProject(context.Background(), binding.ProjectID, nested)
 	if err != nil {
-		t.Fatalf("AttachWorkspaceToProject same project nested: %v", err)
+		t.Fatalf("AttachWorkspaceToProject nested: %v", err)
 	}
-	if resolved.ProjectID != binding.ProjectID || resolved.CanonicalRoot != binding.CanonicalRoot {
-		t.Fatalf("nested attach result = %+v, want %+v", resolved, binding)
+	if resolved.ProjectID != binding.ProjectID {
+		t.Fatalf("nested attach project id = %q, want %q", resolved.ProjectID, binding.ProjectID)
+	}
+	if resolved.CanonicalRoot == binding.CanonicalRoot {
+		t.Fatalf("expected nested attach to create separate workspace, got %+v", resolved)
+	}
+	canonicalNested, err := config.CanonicalWorkspaceRoot(nested)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot nested: %v", err)
+	}
+	if resolved.CanonicalRoot != canonicalNested {
+		t.Fatalf("nested attach root = %q, want %q", resolved.CanonicalRoot, canonicalNested)
 	}
 
 	_, err = store.AttachWorkspaceToProject(context.Background(), otherBinding.ProjectID, nested)
-	if err == nil || !strings.Contains(err.Error(), "inside attached workspace") {
-		t.Fatalf("expected nested attach rejection, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "already bound") {
+		t.Fatalf("expected exact-root conflict on second nested attach, got %v", err)
 	}
+
 	projects, err := store.ListProjects(context.Background())
 	if err != nil {
 		t.Fatalf("ListProjects: %v", err)

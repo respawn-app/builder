@@ -40,7 +40,7 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 - A project is a durable server-owned work container and may span multiple workspaces; it is not defined by one path.
 - `workspace` is a child resource of `project`.
 - Each workspace is a durable server-local registration that maps 1:1 to exactly one canonical execution root.
-- Any path nested under an attached workspace inherits that workspace binding; nested paths are not separate workspaces unless Builder later introduces explicit nested-workspace support.
+- Workspace resolution is exact-match only on canonical workspace roots. Nested paths remain unregistered unless the user explicitly attaches them as their own workspaces.
 - `worktree` is optional child metadata of a git-backed workspace, not of project directly.
 - Worktrees must not become the thing that defines project identity.
 - Protocol identity remains opaque server ids such as `project_id`, `workspace_id`, and `worktree_id`; filesystem paths and git metadata are never protocol identity.

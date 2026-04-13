@@ -67,7 +67,7 @@ func TestEnsureInteractiveProjectBindingBindsRegisteredWorkspaceWithoutPrompt(t 
 	}
 }
 
-func TestEnsureInteractiveProjectBindingTreatsNestedDirectoryAsAncestorWorkspace(t *testing.T) {
+func TestEnsureInteractiveProjectBindingTreatsNestedDirectoryAsUnknownWorkspace(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	nested := filepath.Join(workspace, "subdir")
@@ -84,7 +84,7 @@ func TestEnsureInteractiveProjectBindingTreatsNestedDirectoryAsAncestorWorkspace
 	if err != nil {
 		t.Fatalf("config.Load nested: %v", err)
 	}
-	binding, err := metadata.RegisterBinding(context.Background(), baseCfg.PersistenceRoot, baseCfg.WorkspaceRoot)
+	_, err = metadata.RegisterBinding(context.Background(), baseCfg.PersistenceRoot, baseCfg.WorkspaceRoot)
 	if err != nil {
 		t.Fatalf("RegisterBinding: %v", err)
 	}
@@ -104,18 +104,22 @@ func TestEnsureInteractiveProjectBindingTreatsNestedDirectoryAsAncestorWorkspace
 		runProjectBindingPickerFlow = originalPicker
 		runProjectNamePromptFlow = originalPrompt
 	})
-	runProjectBindingPickerFlow = func([]clientui.ProjectSummary, string, config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
-		t.Fatal("did not expect binding picker for nested directory inside registered workspace")
-		return projectBindingPickerResult{}, nil
+	runProjectBindingPickerFlow = func(projects []clientui.ProjectSummary, theme string, policy config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+		if len(projects) != 1 {
+			t.Fatalf("expected parent project to appear in picker, got %+v", projects)
+		}
+		return projectBindingPickerResult{CreateNew: true}, nil
 	}
-	runProjectNamePromptFlow = func(string, string, config.TUIAlternateScreenPolicy) (string, error) {
-		t.Fatal("did not expect project name prompt for nested directory inside registered workspace")
-		return "", nil
+	runProjectNamePromptFlow = func(defaultName string, theme string, policy config.TUIAlternateScreenPolicy) (string, error) {
+		if want := filepath.Base(nested); defaultName != want {
+			t.Fatalf("default project name = %q, want %q", defaultName, want)
+		}
+		return "Nested Project", nil
 	}
 
 	server := &testEmbeddedServer{
 		cfg:               nestedCfg,
-		containerDir:      config.ProjectSessionsRoot(nestedCfg, binding.ProjectID),
+		containerDir:      config.ProjectSessionsRoot(nestedCfg, "project-placeholder"),
 		projectViewClient: client.NewLoopbackProjectViewClient(service),
 	}
 
@@ -123,8 +127,19 @@ func TestEnsureInteractiveProjectBindingTreatsNestedDirectoryAsAncestorWorkspace
 	if err != nil {
 		t.Fatalf("ensureInteractiveProjectBinding: %v", err)
 	}
-	if got := bound.ProjectID(); got != binding.ProjectID {
-		t.Fatalf("bound project id = %q, want %q", got, binding.ProjectID)
+	resolved, err := metadata.ResolveBinding(context.Background(), nestedCfg.PersistenceRoot, nestedCfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("ResolveBinding nested: %v", err)
+	}
+	if got := bound.ProjectID(); got != resolved.ProjectID {
+		t.Fatalf("bound project id = %q, want %q", got, resolved.ProjectID)
+	}
+	canonicalNested, err := config.CanonicalWorkspaceRoot(nested)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot nested: %v", err)
+	}
+	if resolved.CanonicalRoot != canonicalNested {
+		t.Fatalf("nested workspace root = %q, want %q", resolved.CanonicalRoot, canonicalNested)
 	}
 }
 
