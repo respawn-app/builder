@@ -84,6 +84,9 @@ func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wri
 	if len(args) > 0 && args[0] == "attach" {
 		return attachSubcommand(args[1:], stdout, stderr)
 	}
+	if len(args) > 0 && args[0] == "rebind" {
+		return rebindSubcommand(args[1:], stdout, stderr)
+	}
 	if len(args) > 0 && args[0] == "serve" {
 		return serveSubcommand(args[1:], stdout, stderr)
 	}
@@ -169,12 +172,14 @@ func writeRootUsage(fs *flag.FlagSet) {
 	_, _ = fmt.Fprintln(out, "  builder project [path]")
 	_, _ = fmt.Fprintln(out, "  builder attach [path]")
 	_, _ = fmt.Fprintln(out, "  builder attach --project <project-id> [path]")
+	_, _ = fmt.Fprintln(out, "  builder rebind <old-path> <new-path>")
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Commands:")
 	_, _ = fmt.Fprintln(out, "  run      Execute a headless prompt against the current workspace")
 	_, _ = fmt.Fprintln(out, "  serve    Start the configured app server")
 	_, _ = fmt.Fprintln(out, "  project  Print the project id bound to a workspace path")
 	_, _ = fmt.Fprintln(out, "  attach   Attach a workspace path to the current or explicit project")
+	_, _ = fmt.Fprintln(out, "  rebind   Move an existing workspace binding to a new path without changing workspace identity")
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Flags:")
 	fs.PrintDefaults()

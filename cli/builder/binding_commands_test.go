@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -172,5 +173,97 @@ func TestAttachSubcommandWithoutProjectGuidanceFailsWhenCurrentWorkspaceUnregist
 	}
 	if got := stderr.String(); got == "" || !bytes.Contains([]byte(got), []byte("builder project")) || !bytes.Contains([]byte(got), []byte("--project <project-id>")) {
 		t.Fatalf("stderr = %q, want recovery guidance", got)
+	}
+}
+
+func TestRebindSubcommandPreservesWorkspaceIdentity(t *testing.T) {
+	home := t.TempDir()
+	oldWorkspace := t.TempDir()
+	newParent := t.TempDir()
+	newWorkspace := filepath.Join(newParent, "workspace-moved")
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(oldWorkspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load oldWorkspace: %v", err)
+	}
+	binding, err := metadata.RegisterBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterBinding oldWorkspace: %v", err)
+	}
+	if err := os.Rename(oldWorkspace, newWorkspace); err != nil {
+		t.Fatalf("Rename workspace: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := rebindSubcommand([]string{oldWorkspace, newWorkspace}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, want 0 stderr=%q", code, stderr.String())
+	}
+	if got := stdout.String(); got != binding.WorkspaceID+"\n" {
+		t.Fatalf("stdout = %q, want %q", got, binding.WorkspaceID+"\n")
+	}
+	newProjectID, err := projectIDForPath(context.Background(), newWorkspace)
+	if err != nil {
+		t.Fatalf("projectIDForPath newWorkspace: %v", err)
+	}
+	if newProjectID != binding.ProjectID {
+		t.Fatalf("new project id = %q, want %q", newProjectID, binding.ProjectID)
+	}
+	if _, err := projectIDForPath(context.Background(), oldWorkspace); !errors.Is(err, metadata.ErrWorkspaceNotRegistered) {
+		t.Fatalf("projectIDForPath oldWorkspace error = %v, want ErrWorkspaceNotRegistered", err)
+	}
+}
+
+func TestRebindSubcommandRejectsInvalidInputs(t *testing.T) {
+	home := t.TempDir()
+	oldWorkspace := t.TempDir()
+	otherWorkspace := t.TempDir()
+	missingWorkspace := filepath.Join(t.TempDir(), "missing")
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(oldWorkspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load oldWorkspace: %v", err)
+	}
+	_, err = metadata.RegisterBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterBinding oldWorkspace: %v", err)
+	}
+	otherCfg, err := config.Load(otherWorkspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load otherWorkspace: %v", err)
+	}
+	_, err = metadata.RegisterBinding(context.Background(), otherCfg.PersistenceRoot, otherCfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterBinding otherWorkspace: %v", err)
+	}
+
+	assertRebindError := func(args []string, want string) {
+		t.Helper()
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		if code := rebindSubcommand(args, &stdout, &stderr); code != 1 {
+			t.Fatalf("exit code = %d, want 1 stderr=%q", code, stderr.String())
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("stdout = %q, want empty", stdout.String())
+		}
+		if got := stderr.String(); !bytes.Contains([]byte(got), []byte(want)) {
+			t.Fatalf("stderr = %q, want %q", got, want)
+		}
+	}
+
+	assertRebindError([]string{filepath.Join(t.TempDir(), "unknown-old"), otherWorkspace}, "workspace is not registered")
+	assertRebindError([]string{oldWorkspace, missingWorkspace}, "does not exist")
+	assertRebindError([]string{oldWorkspace, otherWorkspace}, "already bound")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := rebindSubcommand([]string{oldWorkspace}, &stdout, &stderr); code != 2 {
+		t.Fatalf("exit code = %d, want 2 stderr=%q", code, stderr.String())
+	}
+	if got := stderr.String(); !bytes.Contains([]byte(got), []byte("rebind requires <old-path> and <new-path>")) {
+		t.Fatalf("stderr = %q, want usage guidance", got)
 	}
 }

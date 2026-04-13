@@ -69,6 +69,29 @@ func attachSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	return 0
 }
 
+func rebindSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
+	fs := flag.NewFlagSet("builder rebind", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	remaining := fs.Args()
+	if len(remaining) != 2 {
+		fmt.Fprintln(stderr, "rebind requires <old-path> and <new-path>")
+		return 2
+	}
+	binding, err := rebindWorkspace(context.Background(), remaining[0], remaining[1])
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	_, _ = fmt.Fprintln(stdout, binding.WorkspaceID)
+	return 0
+}
+
 func projectIDForPath(ctx context.Context, path string) (string, error) {
 	trimmedPath := strings.TrimSpace(path)
 	if trimmedPath == "" {
@@ -126,6 +149,26 @@ func attachWorkspace(ctx context.Context, explicitProjectID string, targetPath s
 		return "", err
 	}
 	return strings.TrimSpace(binding.ProjectID), nil
+}
+
+func rebindWorkspace(ctx context.Context, oldPath string, newPath string) (metadata.Binding, error) {
+	oldCfg, err := loadBindingCommandConfig(oldPath)
+	if err != nil {
+		return metadata.Binding{}, err
+	}
+	newCfg, err := loadBindingCommandConfig(newPath)
+	if err != nil {
+		return metadata.Binding{}, err
+	}
+	if oldCfg.PersistenceRoot != newCfg.PersistenceRoot {
+		return metadata.Binding{}, errors.New("rebind requires old and new workspaces to share the same persistence root")
+	}
+	store, err := metadata.Open(newCfg.PersistenceRoot)
+	if err != nil {
+		return metadata.Binding{}, err
+	}
+	defer func() { _ = store.Close() }()
+	return store.RebindWorkspace(ctx, oldCfg.WorkspaceRoot, newCfg.WorkspaceRoot)
 }
 
 func loadBindingCommandConfig(path string) (config.App, error) {
