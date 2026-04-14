@@ -2428,6 +2428,56 @@ func TestAutoCompactionStatusEventDoesNotPublishCommittedEntryStart(t *testing.T
 	}
 }
 
+func TestSubmitUserMessageDoesNotRetainPendingToolStartForHostedExecutions(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "working",
+				Phase:   llm.MessagePhaseCommentary,
+			},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			OutputItems: []llm.ResponseItem{{
+				Type: llm.ResponseItemTypeOther,
+				Raw:  json.RawMessage(`{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"builder cli"}}`),
+			}},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "done",
+				Phase:   llm.MessagePhaseFinal,
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model:        "gpt-5",
+		EnabledTools: []tools.ID{tools.ToolShell, tools.ToolWebSearch},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "do the task"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if got := len(eng.pendingToolCallStarts); got != 0 {
+		t.Fatalf("expected pending tool call starts drained after submit, got %+v", eng.pendingToolCallStarts)
+	}
+	if _, ok := eng.pendingToolCallStarts["ws_1"]; ok {
+		t.Fatalf("did not expect hosted tool call id retained in pending starts: %+v", eng.pendingToolCallStarts)
+	}
+}
+
 func TestSubmitUserMessageLegacyGarbageTokenRemainsTerminal(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
