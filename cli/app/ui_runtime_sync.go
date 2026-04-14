@@ -48,6 +48,9 @@ func (m *uiModel) startRuntimeTranscriptPageRequest(request clientui.TranscriptP
 	request = normalizeRuntimeTranscriptRequest(request)
 	if m.runtimeTranscriptBusy {
 		m.runtimeTranscriptDirty = true
+		if recoveryCause != clientui.TranscriptRecoveryCauseNone {
+			m.runtimeTranscriptDirtyRecoveryCause = recoveryCause
+		}
 		m.logf("ui.runtime.transcript.mark_dirty")
 		return nil
 	}
@@ -57,6 +60,7 @@ func (m *uiModel) startRuntimeTranscriptPageRequest(request clientui.TranscriptP
 	}
 	m.runtimeTranscriptBusy = true
 	m.runtimeTranscriptDirty = false
+	m.runtimeTranscriptDirtyRecoveryCause = clientui.TranscriptRecoveryCauseNone
 	m.runtimeTranscriptToken++
 	token := m.runtimeTranscriptToken
 	client := m.runtimeClient()
@@ -189,6 +193,10 @@ func (m *uiModel) handleRuntimeTranscriptRefreshed(msg runtimeTranscriptRefreshe
 	}
 	m.runtimeTranscriptDirty = false
 	m.logf("ui.runtime.transcript.repeat_after_dirty token=%d", msg.token)
+	followUpRecoveryCause := m.runtimeTranscriptDirtyRecoveryCause
+	if followUpRecoveryCause != clientui.TranscriptRecoveryCauseNone {
+		return sequenceCmds(applyCmd, m.requestRuntimeTranscriptSyncForContinuityLoss(followUpRecoveryCause))
+	}
 	return sequenceCmds(applyCmd, m.requestRuntimeTranscriptSync())
 }
 
