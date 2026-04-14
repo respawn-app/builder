@@ -269,7 +269,7 @@ func committedStartsForPersistedAssistantMessage(e *Engine, msg llm.Message, exe
 	}
 	start := e.CommittedTranscriptEntryCount() - len(entries)
 	if start < 0 {
-		start = 0
+		return -1, nil
 	}
 	toolCallStarts := make(map[string]int)
 	for idx, entry := range entries {

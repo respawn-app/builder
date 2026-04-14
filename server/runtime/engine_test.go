@@ -2290,11 +2290,16 @@ func TestSubmitUserMessageCommentaryWithToolCallsPublishesCommittedEntryStartMet
 		},
 	}}
 
-	var events []Event
+	var (
+		eventsMu sync.Mutex
+		events   []Event
+	)
 	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
+			eventsMu.Lock()
 			events = append(events, evt)
+			eventsMu.Unlock()
 		},
 	})
 	if err != nil {
@@ -2319,9 +2324,12 @@ func TestSubmitUserMessageCommentaryWithToolCallsPublishesCommittedEntryStartMet
 		t.Fatalf("expected authoritative snapshot to contain commentary assistant + tool call, snapshot=%+v", snapshot.Entries)
 	}
 
+	eventsMu.Lock()
+	eventsSnapshot := append([]Event(nil), events...)
+	eventsMu.Unlock()
 	assistantIdx := -1
 	toolStartIdx := -1
-	for idx, evt := range events {
+	for idx, evt := range eventsSnapshot {
 		if evt.Kind == EventAssistantMessage && evt.Message.Content == "working" {
 			assistantIdx = idx
 		}
@@ -2330,19 +2338,19 @@ func TestSubmitUserMessageCommentaryWithToolCallsPublishesCommittedEntryStartMet
 		}
 	}
 	if assistantIdx < 0 {
-		t.Fatalf("expected commentary assistant event, got %+v", events)
+		t.Fatalf("expected commentary assistant event, got %+v", eventsSnapshot)
 	}
 	if toolStartIdx < 0 {
-		t.Fatalf("expected tool_call_started event, got %+v", events)
+		t.Fatalf("expected tool_call_started event, got %+v", eventsSnapshot)
 	}
-	assistantEvt := events[assistantIdx]
+	assistantEvt := eventsSnapshot[assistantIdx]
 	if !assistantEvt.CommittedEntryStartSet {
 		t.Fatalf("expected commentary assistant event committed start set, got %+v", assistantEvt)
 	}
 	if got, want := assistantEvt.CommittedEntryStart, assistantEntryIndex; got != want {
 		t.Fatalf("commentary assistant committed start = %d, want %d", got, want)
 	}
-	toolStartEvt := events[toolStartIdx]
+	toolStartEvt := eventsSnapshot[toolStartIdx]
 	if !toolStartEvt.CommittedEntryStartSet {
 		t.Fatalf("expected tool_call_started committed start set, got %+v", toolStartEvt)
 	}
@@ -2356,7 +2364,7 @@ func TestSubmitUserMessageCommentaryWithToolCallsPublishesCommittedEntryStartMet
 		t.Fatalf("assistant committed count/start inconsistent: %+v", assistantEvt)
 	}
 	if toolStartIdx <= assistantIdx {
-		t.Fatalf("expected tool_call_started after commentary assistant event, assistant_idx=%d tool_idx=%d events=%+v", assistantIdx, toolStartIdx, events)
+		t.Fatalf("expected tool_call_started after commentary assistant event, assistant_idx=%d tool_idx=%d events=%+v", assistantIdx, toolStartIdx, eventsSnapshot)
 	}
 	if assistantEvt.CommittedEntryStart >= toolStartEvt.CommittedEntryStart {
 		t.Fatalf("expected commentary assistant before tool call in committed order, assistant=%+v tool=%+v", assistantEvt, toolStartEvt)
@@ -2380,11 +2388,16 @@ func TestAutoCompactionStatusEventDoesNotPublishCommittedEntryStart(t *testing.T
 		}},
 	}
 
-	var events []Event
+	var (
+		eventsMu sync.Mutex
+		events   []Event
+	)
 	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
+			eventsMu.Lock()
 			events = append(events, evt)
+			eventsMu.Unlock()
 		},
 	})
 	if err != nil {
@@ -2399,9 +2412,12 @@ func TestAutoCompactionStatusEventDoesNotPublishCommittedEntryStart(t *testing.T
 		t.Fatalf("auto compact failed: %v", err)
 	}
 
+	eventsMu.Lock()
+	eventsSnapshot := append([]Event(nil), events...)
+	eventsMu.Unlock()
 	compactionIdx := -1
 	localEntryIdx := -1
-	for idx, evt := range events {
+	for idx, evt := range eventsSnapshot {
 		if evt.Kind == EventCompactionCompleted {
 			compactionIdx = idx
 		}
@@ -2410,21 +2426,21 @@ func TestAutoCompactionStatusEventDoesNotPublishCommittedEntryStart(t *testing.T
 		}
 	}
 	if compactionIdx < 0 {
-		t.Fatalf("expected compaction completed event, got %+v", events)
+		t.Fatalf("expected compaction completed event, got %+v", eventsSnapshot)
 	}
 	if localEntryIdx < 0 {
-		t.Fatalf("expected compaction notice local entry event, got %+v", events)
+		t.Fatalf("expected compaction notice local entry event, got %+v", eventsSnapshot)
 	}
-	compactionEvt := events[compactionIdx]
+	compactionEvt := eventsSnapshot[compactionIdx]
 	if compactionEvt.CommittedEntryStartSet {
 		t.Fatalf("expected compaction status event to stay pre-commit, got %+v", compactionEvt)
 	}
-	localEntryEvt := events[localEntryIdx]
+	localEntryEvt := eventsSnapshot[localEntryIdx]
 	if !localEntryEvt.CommittedEntryStartSet {
 		t.Fatalf("expected persisted local entry to publish committed start, got %+v", localEntryEvt)
 	}
 	if localEntryIdx <= compactionIdx {
-		t.Fatalf("expected persisted local entry after compaction status, compaction_idx=%d local_entry_idx=%d events=%+v", compactionIdx, localEntryIdx, events)
+		t.Fatalf("expected persisted local entry after compaction status, compaction_idx=%d local_entry_idx=%d events=%+v", compactionIdx, localEntryIdx, eventsSnapshot)
 	}
 }
 

@@ -14,7 +14,7 @@ const sessionActivityResubscribeDelay = 250 * time.Millisecond
 
 type sessionActivitySubscriber func(context.Context) (serverapi.SessionActivitySubscription, error)
 
-func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivitySubscription, subscribe sessionActivitySubscriber, diagnosticsEnabled bool, logDiag func(string)) (<-chan clientui.Event, func()) {
+func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivitySubscription, subscribe sessionActivitySubscriber, diagnosticsEnabled func() bool, logDiag func(string)) (<-chan clientui.Event, func()) {
 	out := make(chan clientui.Event, 64)
 	if sub == nil || subscribe == nil {
 		close(out)
@@ -27,7 +27,7 @@ func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivi
 		for {
 			evt, err := current.Next(pollCtx)
 			if err != nil {
-				if diagnosticsEnabled && logDiag != nil {
+				if sessionActivityDiagnosticsEnabled(diagnosticsEnabled) && logDiag != nil {
 					logDiag(transcriptdiag.FormatLine("transcript.diag.client.activity_gap", map[string]string{
 						"path": "recovery",
 						"err":  err.Error(),
@@ -46,7 +46,7 @@ func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivi
 					_ = current.Close()
 					return
 				case out <- clientui.Event{Kind: clientui.EventConversationUpdated, RecoveryCause: clientui.TranscriptRecoveryCauseStreamGap}:
-					if diagnosticsEnabled && logDiag != nil {
+					if sessionActivityDiagnosticsEnabled(diagnosticsEnabled) && logDiag != nil {
 						logDiag(transcriptdiag.FormatLine("transcript.diag.client.synthetic_conversation_updated", map[string]string{
 							"path":  "recovery",
 							"kind":  string(clientui.EventConversationUpdated),
@@ -56,7 +56,7 @@ func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivi
 				}
 				continue
 			}
-			if diagnosticsEnabled && logDiag != nil {
+			if sessionActivityDiagnosticsEnabled(diagnosticsEnabled) && logDiag != nil {
 				fields := map[string]string{
 					"path":         "live_event",
 					"kind":         string(evt.Kind),
@@ -75,6 +75,10 @@ func startSessionActivityEvents(ctx context.Context, sub serverapi.SessionActivi
 		}
 	}()
 	return out, cancel
+}
+
+func sessionActivityDiagnosticsEnabled(enabled func() bool) bool {
+	return enabled != nil && enabled()
 }
 
 func resubscribeSessionActivity(ctx context.Context, subscribe sessionActivitySubscriber) (serverapi.SessionActivitySubscription, error) {

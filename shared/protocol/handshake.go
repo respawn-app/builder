@@ -119,6 +119,9 @@ func (r AttachProjectRequest) Validate() error {
 	if strings.TrimSpace(r.ProjectID) == "" {
 		return errors.New("project_id is required")
 	}
+	if r.WorkspaceRoot != "" && strings.TrimSpace(r.WorkspaceRoot) == "" {
+		return errors.New("workspace_root must not be blank")
+	}
 	return nil
 }
 

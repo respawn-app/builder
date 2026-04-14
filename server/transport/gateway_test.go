@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -379,6 +380,149 @@ func TestGatewayProjectReattachClearsStaleSessionAttachment(t *testing.T) {
 	}
 	if resp.Error == nil || resp.Error.Code != protocol.ErrCodeInvalidRequest {
 		t.Fatalf("expected session-attach-required error after project reattach, got %+v", resp.Error)
+	}
+}
+
+func TestGatewayRejectsAttachProjectWorkspaceOutsideProject(t *testing.T) {
+	home := t.TempDir()
+	workspaceA := t.TempDir()
+	workspaceB := t.TempDir()
+	t.Setenv("HOME", home)
+	configureGatewayTestServerPort(t)
+
+	resolvedA, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspaceA})
+	if err != nil {
+		t.Fatalf("ResolveConfig A: %v", err)
+	}
+	bindingA, err := metadata.RegisterBinding(context.Background(), resolvedA.Config.PersistenceRoot, resolvedA.Config.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterBinding A: %v", err)
+	}
+	resolvedB, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspaceB})
+	if err != nil {
+		t.Fatalf("ResolveConfig B: %v", err)
+	}
+	if _, err := metadata.RegisterBinding(context.Background(), resolvedB.Config.PersistenceRoot, resolvedB.Config.WorkspaceRoot); err != nil {
+		t.Fatalf("RegisterBinding B: %v", err)
+	}
+
+	authSupport, err := serverbootstrap.BuildAuthSupport(auth.NewMemoryStore(auth.EmptyState()), nil, nil)
+	if err != nil {
+		t.Fatalf("BuildAuthSupport: %v", err)
+	}
+	runtimeSupport, err := serverbootstrap.BuildRuntimeSupport(resolvedA.Config)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSupport: %v", err)
+	}
+	defer func() { _ = runtimeSupport.Background.Close() }()
+	appCore, err := core.New(resolvedA.Config, authSupport, runtimeSupport)
+	if err != nil {
+		t.Fatalf("core.New: %v", err)
+	}
+	defer func() { _ = appCore.Close() }()
+	gateway, err := NewGateway(appCore, protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"})
+	if err != nil {
+		t.Fatalf("NewGateway: %v", err)
+	}
+	server := httptest.NewServer(gateway.Handler())
+	defer server.Close()
+
+	conn := dialGateway(t, server)
+	defer func() { _ = conn.Close() }()
+	handshakeGateway(t, conn)
+	if err := websocket.JSON.Send(conn, protocol.Request{JSONRPC: protocol.JSONRPCVersion, ID: "attach-project", Method: protocol.MethodAttachProject, Params: mustJSON(t, protocol.AttachProjectRequest{ProjectID: bindingA.ProjectID, WorkspaceRoot: resolvedB.Config.WorkspaceRoot})}); err != nil {
+		t.Fatalf("send attach-project: %v", err)
+	}
+	var resp protocol.Response
+	if err := websocket.JSON.Receive(conn, &resp); err != nil {
+		t.Fatalf("receive attach-project: %v", err)
+	}
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "not bound to project") {
+		t.Fatalf("expected workspace/project mismatch error, got %+v", resp.Error)
+	}
+}
+
+func TestGatewayAttachSessionClearsWorkspaceOverrideForLaterPlans(t *testing.T) {
+	home := t.TempDir()
+	workspaceA := t.TempDir()
+	workspaceB := t.TempDir()
+	t.Setenv("HOME", home)
+	configureGatewayTestServerPort(t)
+
+	resolvedB, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspaceB})
+	if err != nil {
+		t.Fatalf("ResolveConfig B: %v", err)
+	}
+	bindingB, err := metadata.RegisterBinding(context.Background(), resolvedB.Config.PersistenceRoot, resolvedB.Config.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterBinding B: %v", err)
+	}
+	resolvedA, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspaceA})
+	if err != nil {
+		t.Fatalf("ResolveConfig A: %v", err)
+	}
+	metadataStore, err := metadata.Open(resolvedA.Config.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	defer func() { _ = metadataStore.Close() }()
+	if _, err := metadataStore.AttachWorkspaceToProject(context.Background(), bindingB.ProjectID, resolvedA.Config.WorkspaceRoot); err != nil {
+		t.Fatalf("AttachWorkspaceToProject: %v", err)
+	}
+
+	authSupport, err := serverbootstrap.BuildAuthSupport(auth.NewMemoryStore(auth.EmptyState()), nil, nil)
+	if err != nil {
+		t.Fatalf("BuildAuthSupport: %v", err)
+	}
+	runtimeSupport, err := serverbootstrap.BuildRuntimeSupport(resolvedA.Config)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSupport: %v", err)
+	}
+	defer func() { _ = runtimeSupport.Background.Close() }()
+	appCore, err := core.New(resolvedA.Config, authSupport, runtimeSupport)
+	if err != nil {
+		t.Fatalf("core.New: %v", err)
+	}
+	defer func() { _ = appCore.Close() }()
+
+	storeB, err := session.Create(
+		config.ProjectSessionsRoot(resolvedA.Config, bindingB.ProjectID),
+		"workspace-b",
+		resolvedB.Config.WorkspaceRoot,
+		metadataStore.AuthoritativeSessionStoreOptions()...,
+	)
+	if err != nil {
+		t.Fatalf("session.Create workspace B: %v", err)
+	}
+	if err := storeB.EnsureDurable(); err != nil {
+		t.Fatalf("EnsureDurable workspace B: %v", err)
+	}
+
+	gateway, err := NewGateway(appCore, protocol.ServerIdentity{ProtocolVersion: protocol.Version, ServerID: "server-1"})
+	if err != nil {
+		t.Fatalf("NewGateway: %v", err)
+	}
+	server := httptest.NewServer(gateway.Handler())
+	defer server.Close()
+
+	conn := dialGateway(t, server)
+	defer func() { _ = conn.Close() }()
+	handshakeGateway(t, conn)
+	callGateway(t, conn, "attach-project", protocol.MethodAttachProject, protocol.AttachProjectRequest{ProjectID: bindingB.ProjectID, WorkspaceRoot: resolvedA.Config.WorkspaceRoot}, nil)
+	callGateway(t, conn, "attach-session", protocol.MethodAttachSession, protocol.AttachSessionRequest{SessionID: storeB.Meta().SessionID}, nil)
+
+	var planResp serverapi.SessionPlanResponse
+	callGateway(t, conn, "session-plan", protocol.MethodSessionPlan, serverapi.SessionPlanRequest{
+		ClientRequestID: "new-after-attach-session",
+		Mode:            serverapi.SessionLaunchModeInteractive,
+		ForceNewSession: true,
+	}, &planResp)
+	wantWorkspaceRoot, err := config.CanonicalWorkspaceRoot(resolvedB.Config.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspaceRoot B: %v", err)
+	}
+	if got, want := planResp.Plan.WorkspaceRoot, wantWorkspaceRoot; got != want {
+		t.Fatalf("planned workspace root = %q, want %q", got, want)
 	}
 }
 

@@ -96,32 +96,32 @@ func (c *Remote) WorkspaceRoot() string {
 
 func (c *Remote) ListProjects(ctx context.Context, req serverapi.ProjectListRequest) (serverapi.ProjectListResponse, error) {
 	var resp serverapi.ProjectListResponse
-	return resp, c.call(ctx, protocol.MethodProjectList, req, &resp)
+	return resp, c.callUnscoped(ctx, protocol.MethodProjectList, req, &resp)
 }
 
 func (c *Remote) ResolveProjectPath(ctx context.Context, req serverapi.ProjectResolvePathRequest) (serverapi.ProjectResolvePathResponse, error) {
 	var resp serverapi.ProjectResolvePathResponse
-	return resp, c.call(ctx, protocol.MethodProjectResolvePath, req, &resp)
+	return resp, c.callUnscoped(ctx, protocol.MethodProjectResolvePath, req, &resp)
 }
 
 func (c *Remote) CreateProject(ctx context.Context, req serverapi.ProjectCreateRequest) (serverapi.ProjectCreateResponse, error) {
 	var resp serverapi.ProjectCreateResponse
-	return resp, c.call(ctx, protocol.MethodProjectCreate, req, &resp)
+	return resp, c.callUnscoped(ctx, protocol.MethodProjectCreate, req, &resp)
 }
 
 func (c *Remote) AttachWorkspaceToProject(ctx context.Context, req serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error) {
 	var resp serverapi.ProjectAttachWorkspaceResponse
-	return resp, c.call(ctx, protocol.MethodProjectAttachWorkspace, req, &resp)
+	return resp, c.callUnscoped(ctx, protocol.MethodProjectAttachWorkspace, req, &resp)
 }
 
 func (c *Remote) GetProjectOverview(ctx context.Context, req serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
 	var resp serverapi.ProjectGetOverviewResponse
-	return resp, c.call(ctx, protocol.MethodProjectGetOverview, req, &resp)
+	return resp, c.callUnscoped(ctx, protocol.MethodProjectGetOverview, req, &resp)
 }
 
 func (c *Remote) ListSessionsByProject(ctx context.Context, req serverapi.SessionListByProjectRequest) (serverapi.SessionListByProjectResponse, error) {
 	var resp serverapi.SessionListByProjectResponse
-	return resp, c.call(ctx, protocol.MethodSessionListByProject, req, &resp)
+	return resp, c.callUnscoped(ctx, protocol.MethodSessionListByProject, req, &resp)
 }
 
 func (c *Remote) PlanSession(ctx context.Context, req serverapi.SessionPlanRequest) (serverapi.SessionPlanResponse, error) {
@@ -430,6 +430,21 @@ func (c *Remote) call(ctx context.Context, method string, params any, out any) e
 		return err
 	}
 	if err := attachProjectRPC(ctx, conn, c.projectID, c.workspaceRoot); err != nil {
+		return err
+	}
+	return callRPC(ctx, conn, method, method, params, out)
+}
+
+func (c *Remote) callUnscoped(ctx context.Context, method string, params any, out any) error {
+	if err := c.ensureOpen(); err != nil {
+		return err
+	}
+	conn, cleanup, err := dialRPC(ctx, c.rpcURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	if _, err := handshakeRPC(ctx, conn); err != nil {
 		return err
 	}
 	return callRPC(ctx, conn, method, method, params, out)
