@@ -89,8 +89,16 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 			if err := e.appendAssistantMessage(stepID, assistantMsg); err != nil {
 				return llm.Message{}, executedToolCall, false, err
 			}
+			assistantCommittedStart, toolCallStarts := committedStartsForPersistedAssistantMessage(e, assistantMsg)
+			e.rememberPendingToolCallStarts(toolCallStarts)
 			if liveAssistant, ok := liveCommittedAssistantEventMessage(assistantMsg); ok && options.EmitAssistantEvent {
-				e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: liveAssistant})
+				e.emit(Event{
+					Kind:                   EventAssistantMessage,
+					StepID:                 stepID,
+					Message:                liveAssistant,
+					CommittedEntryStart:    assistantCommittedStart,
+					CommittedEntryStartSet: assistantCommittedStart >= 0,
+				})
 			}
 			if err := e.appendReasoningEntries(stepID, resp.Reasoning); err != nil {
 				return llm.Message{}, executedToolCall, false, err
@@ -242,4 +250,31 @@ func liveCommittedAssistantEventMessage(msg llm.Message) (llm.Message, bool) {
 		Content: msg.Content,
 		Phase:   msg.Phase,
 	}, true
+}
+
+func committedStartsForPersistedAssistantMessage(e *Engine, msg llm.Message) (int, map[string]int) {
+	if e == nil {
+		return -1, nil
+	}
+	persisted := normalizeMessageForTranscript(msg, e.store.Meta().WorkspaceRoot)
+	entries := VisibleChatEntriesFromMessage(persisted)
+	if len(entries) == 0 {
+		return -1, nil
+	}
+	start := e.CommittedTranscriptEntryCount() - len(entries)
+	if start < 0 {
+		start = 0
+	}
+	toolCallStarts := make(map[string]int)
+	for idx, entry := range entries {
+		if strings.TrimSpace(entry.Role) != "tool_call" {
+			continue
+		}
+		callID := strings.TrimSpace(entry.ToolCallID)
+		if callID == "" {
+			continue
+		}
+		toolCallStarts[callID] = start + idx
+	}
+	return start, toolCallStarts
 }

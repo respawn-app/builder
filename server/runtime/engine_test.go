@@ -2263,6 +2263,171 @@ func TestSubmitUserMessageCommentaryWithToolCallsEmitsRealtimeAssistantEventWith
 	}
 }
 
+func TestSubmitUserMessageCommentaryWithToolCallsPublishesCommittedEntryStartMetadata(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "working",
+				Phase:   llm.MessagePhaseCommentary,
+			},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "done",
+				Phase:   llm.MessagePhaseFinal,
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+	}}
+
+	var events []Event
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			events = append(events, evt)
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if _, err := eng.SubmitUserMessage(context.Background(), "do the task"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	snapshot := eng.ChatSnapshot()
+	assistantEntryIndex := -1
+	toolCallEntryIndex := -1
+	for idx, entry := range snapshot.Entries {
+		if assistantEntryIndex < 0 && entry.Role == "assistant" && entry.Text == "working" {
+			assistantEntryIndex = idx
+		}
+		if toolCallEntryIndex < 0 && entry.Role == "tool_call" && entry.ToolCallID == "call_shell_1" {
+			toolCallEntryIndex = idx
+		}
+	}
+	if assistantEntryIndex < 0 || toolCallEntryIndex < 0 {
+		t.Fatalf("expected authoritative snapshot to contain commentary assistant + tool call, snapshot=%+v", snapshot.Entries)
+	}
+
+	assistantIdx := -1
+	toolStartIdx := -1
+	for idx, evt := range events {
+		if evt.Kind == EventAssistantMessage && evt.Message.Content == "working" {
+			assistantIdx = idx
+		}
+		if evt.Kind == EventToolCallStarted && evt.ToolCall != nil && evt.ToolCall.ID == "call_shell_1" {
+			toolStartIdx = idx
+		}
+	}
+	if assistantIdx < 0 {
+		t.Fatalf("expected commentary assistant event, got %+v", events)
+	}
+	if toolStartIdx < 0 {
+		t.Fatalf("expected tool_call_started event, got %+v", events)
+	}
+	assistantEvt := events[assistantIdx]
+	if !assistantEvt.CommittedEntryStartSet {
+		t.Fatalf("expected commentary assistant event committed start set, got %+v", assistantEvt)
+	}
+	if got, want := assistantEvt.CommittedEntryStart, assistantEntryIndex; got != want {
+		t.Fatalf("commentary assistant committed start = %d, want %d", got, want)
+	}
+	toolStartEvt := events[toolStartIdx]
+	if !toolStartEvt.CommittedEntryStartSet {
+		t.Fatalf("expected tool_call_started committed start set, got %+v", toolStartEvt)
+	}
+	if got, want := toolStartEvt.CommittedEntryStart, toolCallEntryIndex; got != want {
+		t.Fatalf("tool_call_started committed start = %d, want %d", got, want)
+	}
+	if toolStartEvt.CommittedEntryCount < toolStartEvt.CommittedEntryStart+1 {
+		t.Fatalf("tool_call_started committed count/start inconsistent: %+v", toolStartEvt)
+	}
+	if assistantEvt.CommittedEntryCount < assistantEvt.CommittedEntryStart+1 {
+		t.Fatalf("assistant committed count/start inconsistent: %+v", assistantEvt)
+	}
+	if toolStartIdx <= assistantIdx {
+		t.Fatalf("expected tool_call_started after commentary assistant event, assistant_idx=%d tool_idx=%d events=%+v", assistantIdx, toolStartIdx, events)
+	}
+	if assistantEvt.CommittedEntryStart >= toolStartEvt.CommittedEntryStart {
+		t.Fatalf("expected commentary assistant before tool call in committed order, assistant=%+v tool=%+v", assistantEvt, toolStartEvt)
+	}
+}
+
+func TestAutoCompactionStatusEventDoesNotPublishCommittedEntryStart(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	client := &fakeCompactionClient{
+		compactionResponses: []llm.CompactionResponse{{
+			OutputItems: []llm.ResponseItem{
+				{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "u1"},
+				{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+			},
+			Usage: llm.Usage{InputTokens: 190000, OutputTokens: 1000, WindowTokens: 200000},
+		}},
+	}
+
+	var events []Event
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			events = append(events, evt)
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.setLastUsage(llm.Usage{InputTokens: 190000, OutputTokens: 0, WindowTokens: 200000})
+
+	if err := eng.autoCompactIfNeeded(context.Background(), "step-1", compactionModeAuto); err != nil {
+		t.Fatalf("auto compact failed: %v", err)
+	}
+
+	compactionIdx := -1
+	localEntryIdx := -1
+	for idx, evt := range events {
+		if evt.Kind == EventCompactionCompleted {
+			compactionIdx = idx
+		}
+		if evt.Kind == EventLocalEntryAdded && evt.LocalEntry != nil && evt.LocalEntry.Role == "compaction_notice" {
+			localEntryIdx = idx
+		}
+	}
+	if compactionIdx < 0 {
+		t.Fatalf("expected compaction completed event, got %+v", events)
+	}
+	if localEntryIdx < 0 {
+		t.Fatalf("expected compaction notice local entry event, got %+v", events)
+	}
+	compactionEvt := events[compactionIdx]
+	if compactionEvt.CommittedEntryStartSet {
+		t.Fatalf("expected compaction status event to stay pre-commit, got %+v", compactionEvt)
+	}
+	localEntryEvt := events[localEntryIdx]
+	if !localEntryEvt.CommittedEntryStartSet {
+		t.Fatalf("expected persisted local entry to publish committed start, got %+v", localEntryEvt)
+	}
+	if localEntryIdx <= compactionIdx {
+		t.Fatalf("expected persisted local entry after compaction status, compaction_idx=%d local_entry_idx=%d events=%+v", compactionIdx, localEntryIdx, events)
+	}
+}
+
 func TestSubmitUserMessageLegacyGarbageTokenRemainsTerminal(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

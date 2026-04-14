@@ -544,10 +544,12 @@ func TestHandleProjectedRuntimeEventDoesNotSuppressPendingToolCallStart(t *testi
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                clientui.EventToolCallStarted,
-		StepID:              "step-1",
-		TranscriptRevision:  10,
-		CommittedEntryCount: 1,
+		Kind:                   clientui.EventToolCallStarted,
+		StepID:                 "step-1",
+		TranscriptRevision:     10,
+		CommittedEntryCount:    2,
+		CommittedEntryStart:    1,
+		CommittedEntryStartSet: true,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role:       "tool_call",
 			Text:       "pwd",
@@ -564,6 +566,86 @@ func TestHandleProjectedRuntimeEventDoesNotSuppressPendingToolCallStart(t *testi
 	}
 }
 
+func TestProjectedAssistantMessageUsesCommittedEntryStartWhenPersistedToolCallsShareCommittedCount(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "user", Text: "prompt"}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	cmd, mutated, needsHydration := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{
+		Kind:                   clientui.EventAssistantMessage,
+		TranscriptRevision:     11,
+		CommittedEntryCount:    4,
+		CommittedEntryStart:    1,
+		CommittedEntryStartSet: true,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:  "assistant",
+			Text:  "working",
+			Phase: string(llm.MessagePhaseCommentary),
+		}},
+	}, false)
+	if cmd != nil || !mutated || needsHydration {
+		t.Fatalf("expected direct live append using explicit committed start, mutated=%t needsHydration=%t cmd=%v", mutated, needsHydration, cmd)
+	}
+	if got, want := len(m.transcriptEntries), 2; got != want {
+		t.Fatalf("transcript entry count = %d, want %d", got, want)
+	}
+	if !m.transcriptEntries[1].Transient || !m.transcriptEntries[1].Committed {
+		t.Fatalf("expected live assistant entry to remain transient but committed for ordering, got %+v", m.transcriptEntries[1])
+	}
+}
+
+func TestProjectedToolCallStartedUsesCommittedEntryStartWithinSharedCommittedCountBatch(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 2,
+		Entries: []clientui.ChatEntry{
+			{Role: "user", Text: "prompt"},
+			{Role: "assistant", Text: "working", Phase: string(llm.MessagePhaseCommentary)},
+		},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	cmd, mutated, needsHydration := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{
+		Kind:                   clientui.EventToolCallStarted,
+		TranscriptRevision:     11,
+		CommittedEntryCount:    4,
+		CommittedEntryStart:    2,
+		CommittedEntryStartSet: true,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:       "tool_call",
+			Text:       "pwd",
+			ToolCallID: "call-1",
+			ToolCall:   &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"},
+		}},
+	}, false)
+	if cmd != nil || !mutated || needsHydration {
+		t.Fatalf("expected direct tool-call append using explicit committed start, mutated=%t needsHydration=%t cmd=%v", mutated, needsHydration, cmd)
+	}
+	if got, want := len(m.transcriptEntries), 3; got != want {
+		t.Fatalf("transcript entry count = %d, want %d", got, want)
+	}
+	if !m.transcriptEntries[2].Transient || !m.transcriptEntries[2].Committed {
+		t.Fatalf("expected live tool call entry to remain transient but be committed for ordering, got %+v", m.transcriptEntries[2])
+	}
+}
+
 func TestHandleProjectedRuntimeEventSkipsReplayedToolCallStartWithSameToolCallID(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.transcriptEntries = []tui.TranscriptEntry{
@@ -576,10 +658,12 @@ func TestHandleProjectedRuntimeEventSkipsReplayedToolCallStartWithSameToolCallID
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
 	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                clientui.EventToolCallStarted,
-		StepID:              "step-1",
-		TranscriptRevision:  10,
-		CommittedEntryCount: 1,
+		Kind:                   clientui.EventToolCallStarted,
+		StepID:                 "step-1",
+		TranscriptRevision:     10,
+		CommittedEntryCount:    2,
+		CommittedEntryStart:    1,
+		CommittedEntryStartSet: true,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role:       "tool_call",
 			Text:       "pwd",
@@ -607,10 +691,12 @@ func TestHandleProjectedRuntimeEventAppendsDistinctToolCallStartByToolCallID(t *
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                clientui.EventToolCallStarted,
-		StepID:              "step-1",
-		TranscriptRevision:  10,
-		CommittedEntryCount: 1,
+		Kind:                   clientui.EventToolCallStarted,
+		StepID:                 "step-1",
+		TranscriptRevision:     10,
+		CommittedEntryCount:    2,
+		CommittedEntryStart:    1,
+		CommittedEntryStartSet: true,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role:       "tool_call",
 			Text:       "pwd",

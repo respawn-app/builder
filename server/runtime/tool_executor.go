@@ -27,11 +27,17 @@ func (t *defaultToolExecutor) ExecuteToolCalls(ctx context.Context, stepID strin
 		if call.ID == "" {
 			call.ID = uuid.NewString()
 		}
-		e.emit(Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: copiedToolCall(normalizeToolCallForTranscript(call, e.store.Meta().WorkspaceRoot))})
+		started := Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: copiedToolCall(normalizeToolCallForTranscript(call, e.store.Meta().WorkspaceRoot))}
+		if start, ok := e.pendingToolCallStart(call.ID); ok {
+			started.CommittedEntryStart = start
+			started.CommittedEntryStartSet = true
+		}
+		e.emit(started)
 		idx := i
 		wg.Add(1)
 		go func(tc llm.ToolCall) {
 			defer wg.Done()
+			defer e.forgetPendingToolCallStart(tc.ID)
 			var callErr error
 
 			toolID, ok := tools.ParseID(tc.Name)
