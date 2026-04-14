@@ -14,9 +14,13 @@ import (
 )
 
 func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor authInteractor, initialSessionID string) error {
+	originalServer := server
 	boundServer, err := ensureInteractiveProjectBinding(ctx, server)
 	if err != nil {
 		return err
+	}
+	if shouldCloseReboundServer(originalServer, boundServer) {
+		defer func() { _ = boundServer.Close() }()
 	}
 	server = boundServer
 	planner := newSessionLaunchPlanner(server)
@@ -85,6 +89,18 @@ func runSessionLifecycle(ctx context.Context, server embeddedServer, interactor 
 		nextSessionParentID = resolved.ParentSessionID
 		forceNewSession = resolved.ForceNewSession
 	}
+}
+
+func shouldCloseReboundServer(original embeddedServer, rebound embeddedServer) bool {
+	if original == nil || rebound == nil || original == rebound {
+		return false
+	}
+	originalEmbedded, originalOK := original.(*embeddedAppServer)
+	reboundEmbedded, reboundOK := rebound.(*embeddedAppServer)
+	if originalOK && reboundOK {
+		return originalEmbedded.inner != reboundEmbedded.inner
+	}
+	return true
 }
 
 func sessionLaunchInitialInput(store *session.Store, transitionInput string) string {

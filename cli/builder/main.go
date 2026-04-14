@@ -75,6 +75,15 @@ func main() {
 }
 
 func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
+	if stdin == nil {
+		stdin = strings.NewReader("")
+	}
+	if stdout == nil {
+		stdout = io.Discard
+	}
+	if stderr == nil {
+		stderr = io.Discard
+	}
 	if len(args) > 0 && args[0] == "run" {
 		return runSubcommand(args[1:])
 	}
@@ -89,15 +98,6 @@ func rootCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Wri
 	}
 	if len(args) > 0 && args[0] == "serve" {
 		return serveSubcommand(args[1:], stdout, stderr)
-	}
-	if stdin == nil {
-		stdin = strings.NewReader("")
-	}
-	if stdout == nil {
-		stdout = io.Discard
-	}
-	if stderr == nil {
-		stderr = io.Discard
 	}
 
 	rootFS := flag.NewFlagSet("builder", flag.ContinueOnError)

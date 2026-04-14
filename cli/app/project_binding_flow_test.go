@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"builder/shared/client"
 	"builder/shared/clientui"
 	"builder/shared/config"
+	xansi "github.com/charmbracelet/x/ansi"
 )
 
 func TestEnsureInteractiveProjectBindingBindsRegisteredWorkspaceWithoutPrompt(t *testing.T) {
@@ -275,14 +277,107 @@ func TestEnsureInteractiveProjectBindingAttachesUnknownWorkspaceToExistingProjec
 	}
 }
 
+func TestEnsureInteractiveProjectBindingReturnsCancelWhenPickerAborts(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := metadata.Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service, err := projectview.NewMetadataService(store, "", "")
+	if err != nil {
+		t.Fatalf("NewMetadataService: %v", err)
+	}
+
+	originalPicker := runProjectBindingPickerFlow
+	originalPrompt := runProjectNamePromptFlow
+	t.Cleanup(func() {
+		runProjectBindingPickerFlow = originalPicker
+		runProjectNamePromptFlow = originalPrompt
+	})
+	runProjectBindingPickerFlow = func([]clientui.ProjectSummary, string, config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+		return projectBindingPickerResult{Canceled: true}, nil
+	}
+	runProjectNamePromptFlow = func(string, string, config.TUIAlternateScreenPolicy) (string, error) {
+		t.Fatal("did not expect project name prompt after picker cancel")
+		return "", nil
+	}
+
+	server := &testEmbeddedServer{
+		cfg:               cfg,
+		containerDir:      config.ProjectSessionsRoot(cfg, "project-placeholder"),
+		projectViewClient: client.NewLoopbackProjectViewClient(service),
+	}
+
+	if _, err := ensureInteractiveProjectBinding(context.Background(), server); err == nil || !strings.Contains(err.Error(), "startup canceled by user") {
+		t.Fatalf("expected startup canceled error, got %v", err)
+	}
+	if _, err := metadata.ResolveBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot); err != metadata.ErrWorkspaceNotRegistered {
+		t.Fatalf("ResolveBinding after picker cancel = %v, want ErrWorkspaceNotRegistered", err)
+	}
+}
+
+func TestEnsureInteractiveProjectBindingReturnsCancelWhenProjectNamingAborts(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := metadata.Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service, err := projectview.NewMetadataService(store, "", "")
+	if err != nil {
+		t.Fatalf("NewMetadataService: %v", err)
+	}
+
+	originalPicker := runProjectBindingPickerFlow
+	originalPrompt := runProjectNamePromptFlow
+	t.Cleanup(func() {
+		runProjectBindingPickerFlow = originalPicker
+		runProjectNamePromptFlow = originalPrompt
+	})
+	runProjectBindingPickerFlow = func([]clientui.ProjectSummary, string, config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+		return projectBindingPickerResult{CreateNew: true}, nil
+	}
+	runProjectNamePromptFlow = func(string, string, config.TUIAlternateScreenPolicy) (string, error) {
+		return "", context.Canceled
+	}
+
+	server := &testEmbeddedServer{
+		cfg:               cfg,
+		containerDir:      config.ProjectSessionsRoot(cfg, "project-placeholder"),
+		projectViewClient: client.NewLoopbackProjectViewClient(service),
+	}
+
+	if _, err := ensureInteractiveProjectBinding(context.Background(), server); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled from project name prompt, got %v", err)
+	}
+	if _, err := metadata.ResolveBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot); err != metadata.ErrWorkspaceNotRegistered {
+		t.Fatalf("ResolveBinding after naming cancel = %v, want ErrWorkspaceNotRegistered", err)
+	}
+}
+
 func TestProjectBindingHeadersTrimMarkdownInset(t *testing.T) {
 	picker := newProjectBindingPickerModel(nil, "dark")
-	if got := picker.renderHeader(); strings.HasPrefix(got, "  ") {
+	if got := xansi.Strip(picker.renderHeader()); strings.HasPrefix(got, "  ") {
 		t.Fatalf("picker header has unexpected left padding: %q", got)
 	}
 
 	prompt := newProjectNamePromptModel("demo", "dark")
-	if got := prompt.renderHeader(); strings.HasPrefix(got, "  ") {
+	if got := xansi.Strip(prompt.renderHeader()); strings.HasPrefix(got, "  ") {
 		t.Fatalf("project name header has unexpected left padding: %q", got)
 	}
 }

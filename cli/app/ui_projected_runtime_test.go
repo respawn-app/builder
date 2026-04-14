@@ -387,7 +387,7 @@ func TestSessionActivityEventsDoNotLogDiagnosticsWhenDisabled(t *testing.T) {
 	lines := make([]string, 0, 1)
 	out, stop := startSessionActivityEvents(ctx, sub, func(context.Context) (serverapi.SessionActivitySubscription, error) {
 		return sub, nil
-	}, false, func(line string) {
+	}, func() bool { return false }, func(line string) {
 		lines = append(lines, line)
 	})
 	defer stop()

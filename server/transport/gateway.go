@@ -133,8 +133,12 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 			if err := g.core.ProjectExists(ctx, params.ProjectID); err != nil {
 				return protocol.AttachResponse{}, err
 			}
+			attachedRoot, err := g.resolveAttachedProjectRoot(ctx, params.ProjectID, params.WorkspaceRoot)
+			if err != nil {
+				return protocol.AttachResponse{}, err
+			}
 			state.attachedProject = params.ProjectID
-			state.attachedProjectRoot = strings.TrimSpace(params.WorkspaceRoot)
+			state.attachedProjectRoot = attachedRoot
 			state.attachedSession = ""
 			return protocol.AttachResponse{Kind: "project", ProjectID: params.ProjectID}, nil
 		})
@@ -146,6 +150,7 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 			if err := g.requireSessionInActiveProject(ctx, state, params.SessionID); err != nil {
 				return protocol.AttachResponse{}, err
 			}
+			state.attachedProjectRoot = ""
 			state.attachedSession = params.SessionID
 			return protocol.AttachResponse{Kind: "session", SessionID: params.SessionID}, nil
 		})
@@ -426,6 +431,24 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 	default:
 		return protocol.NewErrorResponse(req.ID, protocol.ErrCodeMethodNotFound, fmt.Sprintf("method %q not found", req.Method))
 	}
+}
+
+func (g *Gateway) resolveAttachedProjectRoot(ctx context.Context, projectID string, workspaceRoot string) (string, error) {
+	trimmedWorkspaceRoot := strings.TrimSpace(workspaceRoot)
+	if trimmedWorkspaceRoot == "" {
+		return "", nil
+	}
+	resolved, err := g.core.ProjectViewClient().ResolveProjectPath(ctx, serverapi.ProjectResolvePathRequest{Path: trimmedWorkspaceRoot})
+	if err != nil {
+		return "", err
+	}
+	if resolved.Binding == nil {
+		return "", fmt.Errorf("workspace %q is not registered", resolved.CanonicalRoot)
+	}
+	if strings.TrimSpace(resolved.Binding.ProjectID) != strings.TrimSpace(projectID) {
+		return "", fmt.Errorf("workspace %q is not bound to project %q", resolved.Binding.CanonicalRoot, strings.TrimSpace(projectID))
+	}
+	return strings.TrimSpace(resolved.Binding.CanonicalRoot), nil
 }
 
 func (g *Gateway) sessionLaunchClientForState(ctx context.Context, state *connectionState) (client serverapi.SessionLaunchService, _ error) {
