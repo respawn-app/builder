@@ -79,6 +79,10 @@ func (m *uiModel) logProjectedTranscriptPlanDiag(evt clientui.Event, plan projec
 	}
 	eventEnd := evt.CommittedEntryCount
 	eventStart := eventEnd - incomingCount
+	if start, _, ok := projectedTranscriptEventRange(evt, incomingCount); ok {
+		eventStart = start
+		eventEnd = start + incomingCount
+	}
 	fields := map[string]string{
 		"session_id":            strings.TrimSpace(m.sessionID),
 		"mode":                  m.transcriptModeLabel(),

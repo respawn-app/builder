@@ -38,6 +38,8 @@ type Event struct {
 	StepID                 string
 	TranscriptRevision     int64
 	CommittedEntryCount    int
+	CommittedEntryStart    int
+	CommittedEntryStartSet bool
 	Error                  string
 	AssistantDelta         string
 	ReasoningDelta         *llm.ReasoningSummaryDelta

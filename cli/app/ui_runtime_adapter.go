@@ -800,11 +800,10 @@ func planProjectedTranscriptEntries(m *uiModel, evt clientui.Event) projectedTra
 	if len(entries) == 0 || !eventTranscriptEntriesReconcileWithCommittedTail(evt.Kind) {
 		return plan
 	}
-	if evt.CommittedEntryCount <= 0 && evt.TranscriptRevision <= 0 {
+	eventStart, eventEnd, ok := projectedTranscriptEventRange(evt, len(entries))
+	if !ok {
 		return plan
 	}
-	eventEnd := evt.CommittedEntryCount
-	eventStart := eventEnd - len(entries)
 	if eventStart < 0 {
 		return projectedTranscriptEntryPlan{mode: projectedTranscriptEntryPlanHydrate}
 	}
@@ -1035,6 +1034,7 @@ func eventTranscriptEntriesReconcileWithCommittedTail(kind clientui.EventKind) b
 	switch kind {
 	case clientui.EventUserMessageFlushed,
 		clientui.EventAssistantMessage,
+		clientui.EventToolCallStarted,
 		clientui.EventToolCallCompleted,
 		clientui.EventReviewerCompleted,
 		clientui.EventCacheWarning,
@@ -1049,10 +1049,9 @@ func eventTranscriptEntriesAreCommitted(kind clientui.EventKind) bool {
 	switch kind {
 	case clientui.EventUserMessageFlushed,
 		clientui.EventAssistantMessage,
+		clientui.EventToolCallStarted,
 		clientui.EventToolCallCompleted,
 		clientui.EventReviewerCompleted,
-		clientui.EventCompactionCompleted,
-		clientui.EventCompactionFailed,
 		clientui.EventCacheWarning,
 		clientui.EventLocalEntryAdded:
 		return true
@@ -1068,6 +1067,26 @@ func transcriptEntryMatchesChatEntry(existing tui.TranscriptEntry, incoming clie
 		existing.OngoingText == incoming.OngoingText &&
 		existing.Phase == llm.MessagePhase(incoming.Phase) &&
 		strings.TrimSpace(existing.ToolCallID) == strings.TrimSpace(incoming.ToolCallID)
+}
+
+func projectedTranscriptEventRange(evt clientui.Event, entryCount int) (int, int, bool) {
+	if entryCount <= 0 {
+		return 0, 0, false
+	}
+	if evt.CommittedEntryStartSet {
+		if evt.CommittedEntryStart < 0 {
+			return 0, 0, false
+		}
+		return evt.CommittedEntryStart, evt.CommittedEntryStart + entryCount, true
+	}
+	if evt.CommittedEntryCount <= 0 {
+		return 0, 0, false
+	}
+	start := evt.CommittedEntryCount - entryCount
+	if start < 0 {
+		return 0, 0, false
+	}
+	return start, evt.CommittedEntryCount, true
 }
 
 func (a uiRuntimeAdapter) handleRuntimeEvent(evt runtime.Event) tea.Cmd {

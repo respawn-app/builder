@@ -43,6 +43,8 @@ type Event struct {
 	RecoveryCause          TranscriptRecoveryCause
 	TranscriptRevision     int64
 	CommittedEntryCount    int
+	CommittedEntryStart    int
+	CommittedEntryStartSet bool
 	Error                  string
 	AssistantDelta         string
 	ReasoningDelta         *ReasoningDelta
