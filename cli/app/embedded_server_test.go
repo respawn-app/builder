@@ -139,9 +139,38 @@ func (s *testEmbeddedServer) BindProject(_ context.Context, projectID string) (e
 	if s == nil {
 		return nil, errors.New("test embedded server is required")
 	}
-	clone := *s
-	clone.projectID = strings.TrimSpace(projectID)
-	return &clone, nil
+	clone := &testEmbeddedServer{
+		cfg:                  s.cfg,
+		containerDir:         s.containerDir,
+		oauthOpts:            s.oauthOpts,
+		authManager:          s.authManager,
+		fastModeState:        s.fastModeState,
+		background:           s.background,
+		backgroundRouter:     s.backgroundRouter,
+		runPromptClient:      s.runPromptClient,
+		projectID:            strings.TrimSpace(projectID),
+		askViewClient:        s.askViewClient,
+		approvalViewClient:   s.approvalViewClient,
+		promptControlClient:  s.promptControlClient,
+		promptActivityClient: s.promptActivityClient,
+		projectViewClient:    s.projectViewClient,
+		processControlClient: s.processControlClient,
+		processOutputClient:  s.processOutputClient,
+		processViewClient:    s.processViewClient,
+		runtimeControlClient: s.runtimeControlClient,
+		sessionLaunch:        s.sessionLaunch,
+		sessionActivity:      s.sessionActivity,
+		sessionLifecycle:     s.sessionLifecycle,
+		sessionRuntime:       s.sessionRuntime,
+		sessionViewClient:    s.sessionViewClient,
+		sessionStores:        s.sessionStores,
+		metadataStore:        s.metadataStore,
+		metadataBindingData:  s.metadataBindingData,
+		metadataBindingOK:    s.metadataBindingOK,
+		prepareRuntime:       s.prepareRuntime,
+		reauthenticate:       s.reauthenticate,
+	}
+	return clone, nil
 }
 func (s *testEmbeddedServer) ProjectID() string {
 	if strings.TrimSpace(s.projectID) != "" {
