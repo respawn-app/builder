@@ -89,7 +89,13 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 			if err := e.appendAssistantMessage(stepID, assistantMsg); err != nil {
 				return llm.Message{}, executedToolCall, false, err
 			}
-			assistantCommittedStart, toolCallStarts := committedStartsForPersistedAssistantMessage(e, assistantMsg)
+			executableCallIDs := make(map[string]struct{}, len(localToolCalls))
+			for _, call := range localToolCalls {
+				if callID := strings.TrimSpace(call.ID); callID != "" {
+					executableCallIDs[callID] = struct{}{}
+				}
+			}
+			assistantCommittedStart, toolCallStarts := committedStartsForPersistedAssistantMessage(e, assistantMsg, executableCallIDs)
 			e.rememberPendingToolCallStarts(toolCallStarts)
 			if liveAssistant, ok := liveCommittedAssistantEventMessage(assistantMsg); ok && options.EmitAssistantEvent {
 				e.emit(Event{
@@ -252,7 +258,7 @@ func liveCommittedAssistantEventMessage(msg llm.Message) (llm.Message, bool) {
 	}, true
 }
 
-func committedStartsForPersistedAssistantMessage(e *Engine, msg llm.Message) (int, map[string]int) {
+func committedStartsForPersistedAssistantMessage(e *Engine, msg llm.Message, executableCallIDs map[string]struct{}) (int, map[string]int) {
 	if e == nil {
 		return -1, nil
 	}
@@ -272,6 +278,9 @@ func committedStartsForPersistedAssistantMessage(e *Engine, msg llm.Message) (in
 		}
 		callID := strings.TrimSpace(entry.ToolCallID)
 		if callID == "" {
+			continue
+		}
+		if _, ok := executableCallIDs[callID]; !ok {
 			continue
 		}
 		toolCallStarts[callID] = start + idx

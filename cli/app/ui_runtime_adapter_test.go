@@ -646,6 +646,28 @@ func TestProjectedToolCallStartedUsesCommittedEntryStartWithinSharedCommittedCou
 	}
 }
 
+func TestCommittedTranscriptEntriesForAppSkipsPreCommitRowsAndKeepsLaterCommittedEntries(t *testing.T) {
+	entries := []tui.TranscriptEntry{
+		{Role: "assistant", Text: "seed"},
+		{Role: "compaction_notice", Text: "context compacted for the 1st time", Transient: true},
+		{Role: "reviewer_status", Text: "Supervisor ran: 1 suggestion, applied.", Transient: true, Committed: true},
+	}
+
+	committed := committedTranscriptEntriesForApp(entries)
+	if got, want := len(committed), 2; got != want {
+		t.Fatalf("committed entry count = %d, want %d (%+v)", got, want, committed)
+	}
+	if got := committed[0].Role; got != "assistant" {
+		t.Fatalf("committed[0].Role = %q, want assistant", got)
+	}
+	if got := committed[1].Role; got != "reviewer_status" {
+		t.Fatalf("committed[1].Role = %q, want reviewer_status", got)
+	}
+	if committed[1].Transient {
+		t.Fatalf("expected committed reviewer status normalized to non-transient, got %+v", committed[1])
+	}
+}
+
 func TestHandleProjectedRuntimeEventSkipsReplayedToolCallStartWithSameToolCallID(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.transcriptEntries = []tui.TranscriptEntry{

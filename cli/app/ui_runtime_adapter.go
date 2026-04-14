@@ -731,10 +731,11 @@ func committedTranscriptEntriesForApp(entries []tui.TranscriptEntry) []tui.Trans
 	}
 	normalized := make([]tui.TranscriptEntry, 0, len(entries))
 	for _, entry := range entries {
-		copyEntry := entry
-		if transcriptEntryCommittedForApp(copyEntry) {
-			copyEntry.Transient = false
+		if !transcriptEntryCommittedForApp(entry) {
+			continue
 		}
+		copyEntry := entry
+		copyEntry.Transient = false
 		normalized = append(normalized, copyEntry)
 	}
 	return tui.CommittedOngoingEntries(normalized)
