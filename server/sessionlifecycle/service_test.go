@@ -14,6 +14,8 @@ import (
 	"builder/shared/serverapi"
 )
 
+func testIntPtr(v int) *int { return &v }
+
 func createPersistedSession(t *testing.T) (string, string, *session.Store) {
 	t.Helper()
 	persistenceRoot := t.TempDir()
@@ -154,6 +156,95 @@ func TestServiceResolveTransitionForkRollbackCreatesFork(t *testing.T) {
 	}
 	if _, err := session.OpenByID(root, resp.NextSessionID); err != nil {
 		t.Fatalf("open forked session store: %v", err)
+	}
+}
+
+func TestServiceResolveTransitionForkRollbackResolvesTranscriptEntryIndex(t *testing.T) {
+	root, containerDir, store := createPersistedSession(t)
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "u1"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: "a1"}); err != nil {
+		t.Fatalf("append assistant message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-2", "message", llm.Message{Role: llm.RoleUser, Content: "u2"}); err != nil {
+		t.Fatalf("append second user message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-2", "message", llm.Message{Role: llm.RoleAssistant, Content: "a2"}); err != nil {
+		t.Fatalf("append second assistant message: %v", err)
+	}
+
+	service := NewService(containerDir, nil, nil)
+	resp, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
+		ClientRequestID: "req-1",
+		SessionID:       store.Meta().SessionID,
+		Transition: serverapi.SessionTransition{
+			Action:                   "fork_rollback",
+			InitialPrompt:            "edited prompt",
+			ForkTranscriptEntryIndex: testIntPtr(2),
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveTransition: %v", err)
+	}
+	if _, err := session.OpenByID(root, resp.NextSessionID); err != nil {
+		t.Fatalf("open forked session store: %v", err)
+	}
+	if resp.InitialPrompt != "edited prompt" {
+		t.Fatalf("initial prompt = %q, want %q", resp.InitialPrompt, "edited prompt")
+	}
+}
+
+func TestResolveForkUserMessageIndexFromTranscriptEntryStopsBeforeBrokenTail(t *testing.T) {
+	_, _, store := createPersistedSession(t)
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "u1"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: "a1"}); err != nil {
+		t.Fatalf("append assistant message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-2", "message", llm.Message{Role: llm.RoleUser, Content: "u2"}); err != nil {
+		t.Fatalf("append second user message: %v", err)
+	}
+	eventsPath := filepath.Join(store.Dir(), "events.jsonl")
+	fp, err := os.OpenFile(eventsPath, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open events file: %v", err)
+	}
+	defer fp.Close()
+	if _, err := fp.WriteString("{broken json}\n"); err != nil {
+		t.Fatalf("append malformed tail: %v", err)
+	}
+
+	got, err := resolveForkUserMessageIndexFromTranscriptEntry(context.Background(), store, 2)
+	if err != nil {
+		t.Fatalf("resolveForkUserMessageIndexFromTranscriptEntry: %v", err)
+	}
+	if got != 2 {
+		t.Fatalf("user message index = %d, want 2", got)
+	}
+}
+
+func TestServiceResolveTransitionForkRollbackRejectsNonUserTranscriptEntryIndex(t *testing.T) {
+	_, containerDir, store := createPersistedSession(t)
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "u1"}); err != nil {
+		t.Fatalf("append user message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: "a1"}); err != nil {
+		t.Fatalf("append assistant message: %v", err)
+	}
+
+	service := NewService(containerDir, nil, nil)
+	_, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
+		ClientRequestID: "req-1",
+		SessionID:       store.Meta().SessionID,
+		Transition: serverapi.SessionTransition{
+			Action:                   "fork_rollback",
+			ForkTranscriptEntryIndex: testIntPtr(1),
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "is not a user message") {
+		t.Fatalf("expected non-user transcript entry rejection, got %v", err)
 	}
 }
 

@@ -252,7 +252,7 @@ func TestRuntimeCarryQueueLogsAndResumesInOrder(t *testing.T) {
 	)
 	m.waitRuntimeEventAfterHydration = true
 	m.pendingRuntimeEvents = []clientui.Event{{Kind: clientui.EventAssistantDelta, AssistantDelta: "older"}}
-	carry := clientui.Event{Kind: clientui.EventReviewerCompleted, TranscriptEntries: []clientui.ChatEntry{{Role: "reviewer_status", Text: "Supervisor ran: no changes."}}}
+	carry := clientui.Event{Kind: clientui.EventLocalEntryAdded, CommittedTranscriptChanged: true, CommittedEntryStart: 1, CommittedEntryStartSet: true, CommittedEntryCount: 2, TranscriptEntries: []clientui.ChatEntry{{Role: "reviewer_status", Text: "Supervisor ran: no changes."}}}
 
 	next, _ := m.Update(runtimeEventBatchMsg{
 		events: []clientui.Event{{Kind: clientui.EventConversationUpdated}},
@@ -262,7 +262,7 @@ func TestRuntimeCarryQueueLogsAndResumesInOrder(t *testing.T) {
 	if got := len(updated.pendingRuntimeEvents); got != 2 {
 		t.Fatalf("expected carry prepended to pending runtime events, got %d", got)
 	}
-	if updated.pendingRuntimeEvents[0].Kind != clientui.EventReviewerCompleted {
+	if updated.pendingRuntimeEvents[0].Kind != clientui.EventLocalEntryAdded {
 		t.Fatalf("expected carry first in pending runtime events, got %+v", updated.pendingRuntimeEvents)
 	}
 	updated.waitRuntimeEventAfterHydration = false
@@ -275,7 +275,7 @@ func TestRuntimeCarryQueueLogsAndResumesInOrder(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected runtimeEventBatchMsg, got %T", resumeCmd())
 	}
-	if len(batch.events) != 1 || batch.events[0].Kind != clientui.EventReviewerCompleted {
+	if len(batch.events) != 1 || batch.events[0].Kind != clientui.EventLocalEntryAdded {
 		t.Fatalf("expected carry resumed before older pending event, got %+v", batch.events)
 	}
 
@@ -286,7 +286,7 @@ func TestRuntimeCarryQueueLogsAndResumesInOrder(t *testing.T) {
 	if !strings.Contains(joined, "transcript.diag.client.wait_runtime_event_resume_pending") {
 		t.Fatalf("expected resume diagnostics, got %q", joined)
 	}
-	if !strings.Contains(joined, "kind=reviewer_completed") {
+	if !strings.Contains(joined, "kind=local_entry_added") {
 		t.Fatalf("expected resumed carry kind in diagnostics, got %q", joined)
 	}
 }

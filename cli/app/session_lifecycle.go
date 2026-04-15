@@ -160,16 +160,22 @@ func resolveSessionAction(ctx context.Context, server embeddedServer, interactor
 	if server == nil || server.SessionLifecycleClient() == nil {
 		return resolvedSessionAction{}, errors.New("session lifecycle client is required")
 	}
+	var forkTranscriptEntryIndex *int
+	if transition.Action == UIActionForkRollback && transition.ForkUserMessageIndex == 0 && transition.ForkTranscriptEntryIndex >= 0 {
+		value := transition.ForkTranscriptEntryIndex
+		forkTranscriptEntryIndex = &value
+	}
 	resolved, err := server.SessionLifecycleClient().ResolveTransition(ctx, serverapi.SessionResolveTransitionRequest{
 		ClientRequestID: uuid.NewString(),
 		SessionID:       strings.TrimSpace(sessionID),
 		Transition: serverapi.SessionTransition{
-			Action:               string(transition.Action),
-			InitialPrompt:        transition.InitialPrompt,
-			InitialInput:         transition.InitialInput,
-			TargetSessionID:      transition.TargetSessionID,
-			ForkUserMessageIndex: transition.ForkUserMessageIndex,
-			ParentSessionID:      transition.ParentSessionID,
+			Action:                   string(transition.Action),
+			InitialPrompt:            transition.InitialPrompt,
+			InitialInput:             transition.InitialInput,
+			TargetSessionID:          transition.TargetSessionID,
+			ForkUserMessageIndex:     transition.ForkUserMessageIndex,
+			ForkTranscriptEntryIndex: forkTranscriptEntryIndex,
+			ParentSessionID:          transition.ParentSessionID,
 		},
 	})
 	if err != nil {

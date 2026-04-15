@@ -17,8 +17,9 @@ func appendReviewerStatusBestEffort(engine *Engine, stepID string, status Review
 	if engine == nil {
 		return
 	}
-	// The outer step loop emits EventReviewerCompleted from reviewerFollowUpResult,
-	// so live UI observability does not depend on this store append succeeding.
+	// Reviewer terminal status must enter transcript through persisted local entries only.
+	// EventReviewerCompleted stays available for runtime status/UX state, but not as a
+	// second transcript source.
 	_ = engine.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(status, nil))
 }
 

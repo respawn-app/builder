@@ -13,6 +13,7 @@ import (
 	"builder/server/runtime"
 	"builder/server/tools"
 	"builder/shared/clientui"
+	"builder/shared/toolspec"
 )
 
 func TestRunLoggerWritesStepsFile(t *testing.T) {
@@ -106,7 +107,7 @@ func TestFormatRuntimeEventIncludesToolMetadata(t *testing.T) {
 		t.Fatalf("unexpected event line: %q", line)
 	}
 
-	res := tools.Result{CallID: "call-1", Name: tools.ToolShell, IsError: true}
+	res := tools.Result{CallID: "call-1", Name: toolspec.ToolShell, IsError: true}
 	line = formatRuntimeEvent(runtime.Event{
 		Kind:       runtime.EventToolCallCompleted,
 		StepID:     "step-1",

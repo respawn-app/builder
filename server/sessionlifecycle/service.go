@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"time"
 
 	"builder/server/auth"
 	serverlifecycle "builder/server/lifecycle"
+	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/sessionpath"
 	"builder/shared/serverapi"
@@ -26,13 +28,15 @@ type Service struct {
 }
 
 type resolveTransitionFingerprint struct {
-	sessionID            string
-	action               string
-	initialPrompt        string
-	initialInput         string
-	targetSessionID      string
-	forkUserMessageIndex int
-	parentSessionID      string
+	sessionID                string
+	action                   string
+	initialPrompt            string
+	initialInput             string
+	targetSessionID          string
+	forkUserMessageIndex     int
+	forkTranscriptEntryIndex int
+	hasForkTranscriptEntry   bool
+	parentSessionID          string
 }
 
 type resolveTransitionEntry struct {
@@ -104,13 +108,17 @@ func (s *Service) ResolveTransition(ctx context.Context, req serverapi.SessionRe
 	for {
 		key := strings.TrimSpace(req.ClientRequestID)
 		fp := resolveTransitionFingerprint{
-			sessionID:            strings.TrimSpace(req.SessionID),
-			action:               strings.TrimSpace(req.Transition.Action),
-			initialPrompt:        req.Transition.InitialPrompt,
-			initialInput:         req.Transition.InitialInput,
-			targetSessionID:      strings.TrimSpace(req.Transition.TargetSessionID),
-			forkUserMessageIndex: req.Transition.ForkUserMessageIndex,
-			parentSessionID:      strings.TrimSpace(req.Transition.ParentSessionID),
+			sessionID:              strings.TrimSpace(req.SessionID),
+			action:                 strings.TrimSpace(req.Transition.Action),
+			initialPrompt:          req.Transition.InitialPrompt,
+			initialInput:           req.Transition.InitialInput,
+			targetSessionID:        strings.TrimSpace(req.Transition.TargetSessionID),
+			forkUserMessageIndex:   req.Transition.ForkUserMessageIndex,
+			hasForkTranscriptEntry: req.Transition.ForkTranscriptEntryIndex != nil,
+			parentSessionID:        strings.TrimSpace(req.Transition.ParentSessionID),
+		}
+		if req.Transition.ForkTranscriptEntryIndex != nil {
+			fp.forkTranscriptEntryIndex = *req.Transition.ForkTranscriptEntryIndex
 		}
 
 		s.resolveMu.Lock()
@@ -188,6 +196,11 @@ func (s *Service) resolveTransitionOnce(ctx context.Context, req serverapi.Sessi
 		if err != nil {
 			return serverapi.SessionResolveTransitionResponse{}, err
 		}
+		forkUserMessageIndex, resolveErr := s.resolveForkUserMessageIndex(ctx, store, req.Transition)
+		if resolveErr != nil {
+			return serverapi.SessionResolveTransitionResponse{}, resolveErr
+		}
+		req.Transition.ForkUserMessageIndex = forkUserMessageIndex
 	}
 	resolved, err := serverlifecycle.Resolve(ctx, serverlifecycle.ResolveRequest{
 		Store: store,
@@ -213,6 +226,73 @@ func (s *Service) resolveTransitionOnce(ctx context.Context, req serverapi.Sessi
 		ShouldContinue:  resolved.ShouldContinue,
 		RequiresReauth:  resolved.RequiresReauth,
 	}, nil
+}
+
+func (s *Service) resolveForkUserMessageIndex(ctx context.Context, store *session.Store, transition serverapi.SessionTransition) (int, error) {
+	if transition.ForkTranscriptEntryIndex != nil {
+		return resolveForkUserMessageIndexFromTranscriptEntry(ctx, store, *transition.ForkTranscriptEntryIndex)
+	}
+	if transition.ForkUserMessageIndex > 0 {
+		return transition.ForkUserMessageIndex, nil
+	}
+	return 0, errors.New("rollback fork target is required")
+}
+
+func resolveForkUserMessageIndexFromTranscriptEntry(ctx context.Context, store *session.Store, transcriptEntryIndex int) (int, error) {
+	if store == nil {
+		return 0, errors.New("current store is required for rollback fork")
+	}
+	if transcriptEntryIndex < 0 {
+		return 0, errors.New("rollback fork transcript entry index must be >= 0")
+	}
+	type forkTranscriptTargetResolved struct {
+		userIndex int
+	}
+	currentEntryIndex := -1
+	currentUserIndex := 0
+	var resolved *forkTranscriptTargetResolved
+	if err := store.WalkEvents(func(evt session.Event) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		entries, replace, err := runtime.VisibleChatEntriesFromPersistedEvent(evt)
+		if err != nil {
+			return err
+		}
+		if replace {
+			currentEntryIndex = -1
+			currentUserIndex = 0
+		}
+		for _, entry := range entries {
+			currentEntryIndex++
+			if strings.TrimSpace(entry.Role) == "user" {
+				currentUserIndex++
+			}
+			if currentEntryIndex != transcriptEntryIndex {
+				continue
+			}
+			if strings.TrimSpace(entry.Role) != "user" {
+				return fmt.Errorf("rollback fork transcript entry %d is not a user message", transcriptEntryIndex)
+			}
+			resolved = &forkTranscriptTargetResolved{userIndex: currentUserIndex}
+			return io.EOF
+		}
+		return nil
+	}); err != nil {
+		if errors.Is(err, io.EOF) && resolved != nil {
+			return resolved.userIndex, nil
+		}
+		return 0, err
+	}
+	if resolved != nil {
+		return resolved.userIndex, nil
+	}
+	if currentEntryIndex < transcriptEntryIndex {
+		return 0, fmt.Errorf("rollback fork transcript entry index %d is out of range", transcriptEntryIndex)
+	}
+	return 0, fmt.Errorf("rollback fork transcript entry index %d is out of range", transcriptEntryIndex)
 }
 
 func (s *Service) openStore(sessionID string) (*session.Store, error) {

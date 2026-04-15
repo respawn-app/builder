@@ -168,11 +168,13 @@ func TestWaitRuntimeEventDoesNotSuppressCommittedConversationUpdateWhenNextEvent
 		CommittedEntryCount:        3,
 	}
 	ch <- clientui.Event{
-		Kind:                       clientui.EventReviewerCompleted,
+		Kind:                       clientui.EventLocalEntryAdded,
 		StepID:                     "step-1",
 		CommittedTranscriptChanged: true,
 		TranscriptRevision:         11,
 		CommittedEntryCount:        4,
+		CommittedEntryStart:        3,
+		CommittedEntryStartSet:     true,
 		TranscriptEntries:          []clientui.ChatEntry{{Role: "reviewer_status", Text: "Supervisor ran: no changes."}},
 	}
 
@@ -186,7 +188,7 @@ func TestWaitRuntimeEventDoesNotSuppressCommittedConversationUpdateWhenNextEvent
 	if msg.events[0].Kind != clientui.EventConversationUpdated {
 		t.Fatalf("event kind = %q, want conversation_updated", msg.events[0].Kind)
 	}
-	if msg.carry == nil || msg.carry.Kind != clientui.EventReviewerCompleted {
+	if msg.carry == nil || msg.carry.Kind != clientui.EventLocalEntryAdded {
 		t.Fatalf("expected reviewer completion carried behind replacement update, got %+v", msg.carry)
 	}
 }
@@ -574,6 +576,89 @@ func TestRuntimeModelSkipsBareCommittedConversationUpdateWhenRichCommittedEventI
 	}
 }
 
+func TestRuntimeModelHiddenCommittedSkipDoesNotTriggerFollowUpCommittedConversationHydrate(t *testing.T) {
+	client := &runtimeControlFakeClient{transcript: clientui.TranscriptPage{SessionID: "session-1"}}
+	runtimeEvents := make(chan clientui.Event, 2)
+	runtimeEvents <- clientui.Event{
+		Kind:                       clientui.EventLocalEntryAdded,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         13,
+		CommittedEntryCount:        8,
+		CommittedEntryStart:        4,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries:          []clientui.ChatEntry{{Role: "cache_warning", Text: "hidden-prefix-only"}},
+	}
+	runtimeEvents <- clientui.Event{
+		Kind:                       clientui.EventConversationUpdated,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         13,
+		CommittedEntryCount:        8,
+	}
+	close(runtimeEvents)
+
+	m := newProjectedTestUIModel(client, runtimeEvents, nil)
+	m.startupCmds = nil
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "assistant", Text: "visible-a", Phase: llm.MessagePhaseFinal},
+		{Role: "reviewer_status", Text: "visible-b"},
+	}
+	m.transcriptBaseOffset = 5
+	m.transcriptTotalEntries = 7
+	m.transcriptRevision = 12
+	m.forwardToView(tui.SetConversationMsg{BaseOffset: m.transcriptBaseOffset, TotalEntries: m.transcriptTotalEntries, Entries: m.transcriptEntries})
+
+	first := m.waitRuntimeEventCmd()
+	if first == nil {
+		t.Fatal("expected runtime wait command for hidden committed event")
+	}
+	firstMsg, ok := first().(runtimeEventBatchMsg)
+	if !ok {
+		t.Fatalf("expected runtimeEventBatchMsg, got %T", first())
+	}
+	next, cmd := m.Update(firstMsg)
+	updated := next.(*uiModel)
+	followMsgs := collectCmdMessages(t, cmd)
+	var secondMsg runtimeEventBatchMsg
+	secondFound := false
+	for _, follow := range followMsgs {
+		if _, ok := follow.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect hidden committed event to trigger hydration, got %+v", follow)
+		}
+		typed, ok := follow.(runtimeEventBatchMsg)
+		if ok {
+			secondMsg = typed
+			secondFound = true
+		}
+	}
+	if updated.runtimeTranscriptBusy {
+		t.Fatal("did not expect hidden committed event to start transcript hydration")
+	}
+	if !secondFound {
+		t.Fatalf("expected follow-up committed conversation update to resume immediately, got %+v", followMsgs)
+	}
+	next, cmd = updated.Update(secondMsg)
+	updated = next.(*uiModel)
+	for _, follow := range collectCmdMessages(t, cmd) {
+		if _, ok := follow.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect matching committed conversation_updated after hidden skip to trigger hydration, got %+v", follow)
+		}
+	}
+	if updated.runtimeTranscriptBusy {
+		t.Fatal("did not expect follow-up committed conversation_updated to start hydration after hidden skip")
+	}
+	if got := updated.transcriptRevision; got != 13 {
+		t.Fatalf("transcript revision = %d, want 13", got)
+	}
+	if got := updated.transcriptTotalEntries; got != 8 {
+		t.Fatalf("transcript total entries = %d, want 8", got)
+	}
+	if got := len(updated.transcriptEntries); got != 2 {
+		t.Fatalf("visible transcript entry count = %d, want 2", got)
+	}
+}
+
 func TestRuntimeModelHydratesReplacementBeforeSameStepTailEvent(t *testing.T) {
 	client := &runtimeControlFakeClient{transcript: clientui.TranscriptPage{
 		SessionID:    "session-1",
@@ -593,11 +678,13 @@ func TestRuntimeModelHydratesReplacementBeforeSameStepTailEvent(t *testing.T) {
 		CommittedEntryCount:        3,
 	}
 	runtimeEvents <- clientui.Event{
-		Kind:                       clientui.EventReviewerCompleted,
+		Kind:                       clientui.EventLocalEntryAdded,
 		StepID:                     "step-1",
 		CommittedTranscriptChanged: true,
 		TranscriptRevision:         11,
 		CommittedEntryCount:        4,
+		CommittedEntryStart:        3,
+		CommittedEntryStartSet:     true,
 		TranscriptEntries:          []clientui.ChatEntry{{Role: "reviewer_status", Text: "Supervisor ran: no changes."}},
 	}
 	close(runtimeEvents)

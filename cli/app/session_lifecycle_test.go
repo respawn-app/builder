@@ -211,7 +211,7 @@ func TestForkRollbackLifecycleDoesNotPersistEditedPromptAsSourceDraft(t *testing
 	}
 
 	m := newProjectedStaticUIModel()
-	testSetRollbackEditing(m, 0, 1)
+	testSetRollbackEditing(m, 0, 0)
 	m.input = "edited user message"
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
