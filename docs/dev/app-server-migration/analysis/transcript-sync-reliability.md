@@ -1,6 +1,6 @@
 # Transcript Sync Reliability
 
-Status: Phase 6A semantics alignment landed; Phase 6B root-cause elimination remains next
+Status: Phase 6A/6B transcript hardening landed; any further systemic reducer work is later follow-up
 
 Last updated: 2026-04-12
 
@@ -215,7 +215,7 @@ The current checkpoint implements items 1-4 on top of `session.getTranscriptPage
 
 ## Planned Follow-up Work
 
-- Phase 6B: eliminate Category A root-cause bugs in transcript reconciliation instead of normalizing them with redraw/rebuild behavior
+- if further transcript consistency issues appear, treat them as post-Phase-6 follow-up rather than re-opening the shipped 6B scope
 - keep targeted logging for `session_activity` gap, hydrate failure, hydrate retry, successful transcript repair, and committed revision advance
 - keep treating authoritative transcript hydration as the repair primitive for Category C continuity loss
 
