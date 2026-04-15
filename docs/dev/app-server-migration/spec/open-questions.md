@@ -21,9 +21,8 @@ If an item appears under `Blockers Before Implementation`, the migration plan sh
 - The exact acceptance-test harness that proves the CLI now talks through the client boundary instead of privileged runtime access.
 - The minimum reference non-CLI test client scope needed to prove the protocol is real.
 
-### Local Discovery And Startup UX
+### Local Attach And Startup UX
 
-- Exact app-global local discovery mechanism for the well-known local control endpoint or socket across supported operating systems once workspace-scoped discovery is removed.
 - Exact attach-or-start CLI UX when a compatible or incompatible local server is already present.
 - Exact startup flow when the user's current cwd resolves to a known project but unknown worktree.
 
@@ -67,6 +66,7 @@ These are intentionally no longer open:
 - Runtime tuning operations such as `/thinking` and `/fast` are session-scoped live settings rather than per-run-only settings.
 - Current ask/approval restart behavior is transcript-driven rather than broker-queue-driven: interrupted tool-call attempts remain in conversation state, reopen appends the interruption marker, and the next model turn re-evaluates what to do.
 - Pending asks and approvals are delivered live through a dedicated prompt activity stream; `ask.listPendingBySession` and `approval.listPendingBySession` remain hydration reads rather than the primary live-delivery path.
+- Local attach no longer depends on a discovery endpoint or socket lookup. CLI/server attach uses the explicit configured address (`server_host` + `server_port`) plus compatibility handshake.
 
 Resolved storage and migration policy now lives in:
 

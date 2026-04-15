@@ -76,7 +76,7 @@ The following are already locked for this feature and should be treated as requi
 - Bootstrap/ops surface: a minimal dedicated health/readiness endpoint outside the JSON-RPC/WebSocket contract.
 - Server process model: one server process, potentially long-lived, hosting multiple projects and multiple concurrent sessions.
 - Packaging target: one codebase that can run embedded or standalone.
-- CLI default behavior: attach to an already-running compatible server if available, otherwise offer local server startup.
+- CLI default behavior: dial the explicitly configured local server address (`server_host` + `server_port`) with a compatibility handshake; if no compatible server is listening there, offer local server startup.
 - Ownership boundary: the server owns runtime, persistence, tools, provider credentials, background processes, and policy enforcement.
 - Presentation boundary: frontends own all UX and rendering.
 - Control model: multiple frontends may control one session; the server serializes mutating commands per session.
@@ -358,8 +358,7 @@ The CLI frontend must remain a first-class frontend, not a privileged special ca
 
 Requirements:
 
-- it discovers local servers through a well-known local control endpoint or socket plus compatibility handshake,
-- local discovery is app-global rather than workspace-scoped once the temporary Phase 3 bridge is removed,
+- it dials the explicitly configured local server address (`server_host` + `server_port`) plus compatibility handshake,
 - it can attach to an existing compatible server,
 - it can start or embed a local server when needed,
 - if startup cwd does not resolve to any registered project/workspace/worktree, the CLI shows an explicit project-picker or registration flow rather than implicitly creating a project,

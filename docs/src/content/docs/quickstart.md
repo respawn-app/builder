@@ -32,23 +32,23 @@ Supported auth options:
 - OpenAI API-key auth via `OPENAI_API_KEY`. If you prefer API-key auth, export `OPENAI_API_KEY` before launch and builder will use it with your permission.
 - Continue without Builder auth. This is intended for custom or local OpenAI-compatible setups configured via `openai_base_url`.
 
-You can switch later with `/login` or `/logout`.
+You can switch later with `/login`.
 
 ## Main Workflows
 
 - Press `F1` to invoke help with hotkeys.
 - Use `Enter` to steer the model, `Tab` to queue messages.
-- Use `Shift+Tab` to toggle between detailed transcript mode and ongoing mode.
+- Use `Shift+Tab` to toggle between detailed transcript mode and lean ongoing mode.
 - Type `$ <command>` to execute a shell command and show its output to the model.
-- Press `Esc` twice to enter Edit mode, which lets you go back in time, edit a previous message, and fork the session into a new one. File edits stay.
+- Press `Esc` twice to enter Edit mode, which lets you go back in time, edit a previous message, and fork the session into a new one. File edits are not rolled back.
 - Use the `Up`/`Down` arrow keys to select and resend previous prompts.
 - Press `Ctrl+V` or `Ctrl+D` to paste a clipboard screenshot into the prompt as an image file path.
 - Use `/review` to start a code review. In a non-empty session, Builder opens that review in a fresh child session. After the review finishes, you can use `/back` to teleport to the original session.
 - `/name` will set your session name in the picker and terminal title.
-- `/autocompaction` will toggle compaction, and `/compact` will trigger one. If autocompact is off, you can go above 100% context usage if model allows it. **Going above 100% will incur additional costs**.
+- `/autocompaction` will toggle compaction, and `/compact` will trigger one. If autocompact is off, you can go above 100% context usage if model allows it. **Going above 100% will cost more and degrade model performance**.
 - Run `/status` to get detailed info about the session.
 
-For the full command reference, see [Slash Commands](/slash-commands/).
+For the full command reference, see [Slash Commands](../slash-commands/).
 
 ## Configuration
 
@@ -58,10 +58,17 @@ Builder reads settings from `~/.builder/config.toml` and will auto-create it thr
 
 Builder discovers skills from:
 
-- `~/.builder/skills`
 - `<workspace>/.builder/skills`
+- `~/.builder/skills`
 
-You can set up skills during the onboarding flow.
+You can disable individual skills for new sessions in `~/.builder/config.toml`:
+
+```toml
+[skills]
+apiresult = false
+```
+Changes will take effect when you start a new sesssion.
+
 
 Builder discovers custom slash commands from Markdown files in:
 
@@ -71,18 +78,10 @@ Builder discovers custom slash commands from Markdown files in:
 - `~/.builder/commands`
 
 Each top-level `.md` file becomes a `/prompt:<name>` command.
-You can disable individual skills for new sessions in `~/.builder/config.toml`:
-
-```toml
-[skills]
-apiresult = false
-```
-
-Changes will take effect when you start a new sesssion.
 
 ## Supervisor
 
-- Use `/supervisor` to toggle supervisor invocation for the current session. Initial value is config's `reviewer.frequency`, and default is on. Supervisor is a feature that will automatically review the edits made by the model. It increases costs by ~20% but improves results.
+- Use `/supervisor` to toggle its invocation for the current session. Initial value is config's `reviewer.frequency`, and default is after code edits. Supervisor is a feature that will automatically review the edits made by the model. It increases costs by ~20% but improves results.
 
 By default supervisor uses the same model as the main one. That may be too much / too slow for you. [Configuration](../config/) page contains instructions on how to change supervisor model.
-Running OSS models or smaller models like `gpt5.4-mini` seems to give good results while keeping costs low.
+Running OSS models or smaller models like `gpt5.4-mini` seems to give almost the same results while keeping costs low.
