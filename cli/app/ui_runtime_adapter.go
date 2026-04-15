@@ -7,9 +7,9 @@ import (
 	"builder/cli/tui"
 	"builder/server/llm"
 	"builder/server/runtime"
-	patchformat "builder/server/tools/patch/format"
 	"builder/shared/clientui"
 	"builder/shared/transcript"
+	patchformat "builder/shared/transcript/patchformat"
 	"builder/shared/transcriptdiag"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -247,6 +247,10 @@ func (a uiRuntimeAdapter) applyProjectedTranscriptEntries(evt clientui.Event, fl
 	m.logProjectedTranscriptPlanDiag(evt, plan, incomingCount)
 	switch plan.mode {
 	case projectedTranscriptEntryPlanSkip:
+		if evt.CommittedTranscriptChanged {
+			m.transcriptRevision = max(m.transcriptRevision, evt.TranscriptRevision)
+			m.transcriptTotalEntries = max(m.transcriptTotalEntries, evt.CommittedEntryCount)
+		}
 		m.logTranscriptEventDiag("transcript.diag.client.append_entries", evt, map[string]string{
 			"path":           "live_event",
 			"incoming_count": strconv.Itoa(incomingCount),
@@ -858,7 +862,13 @@ func planProjectedTranscriptEntries(m *uiModel, evt clientui.Event) projectedTra
 		return projectedTranscriptEntryPlan{mode: projectedTranscriptEntryPlanSkip}
 	}
 	if eventStart < currentStart {
-		return projectedTranscriptEntryPlan{mode: projectedTranscriptEntryPlanHydrate, divergence: "event_before_window"}
+		trimmedPrefixCount := currentStart - eventStart
+		if trimmedPrefixCount >= len(entries) {
+			return projectedTranscriptEntryPlan{mode: projectedTranscriptEntryPlanSkip}
+		}
+		entries = cloneChatEntries(entries[trimmedPrefixCount:])
+		eventStart = currentStart
+		eventEnd = eventStart + len(entries)
 	}
 	if evt.TranscriptRevision < m.transcriptRevision {
 		if eventEnd > currentEnd {
@@ -1254,7 +1264,7 @@ func committedTranscriptStateIncludingDeferredTail(m *uiModel) (int64, int) {
 			revision = deferred.revision
 		}
 	}
-	return revision, chainEnd
+	return revision, max(m.transcriptTotalEntries, chainEnd)
 }
 
 func eventTranscriptEntriesReconcileWithCommittedTail(evt clientui.Event) bool {

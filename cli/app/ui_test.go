@@ -26,6 +26,8 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/theme"
+	"builder/shared/toolspec"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -867,14 +869,65 @@ func TestRollbackEditingSubmitQuitsIntoForkTransition(t *testing.T) {
 	if updated.exitAction != UIActionForkRollback {
 		t.Fatalf("expected fork rollback action, got %q", updated.exitAction)
 	}
-	if updated.nextForkUserMessageIndex != 3 {
-		t.Fatalf("expected rollback user index, got %d", updated.nextForkUserMessageIndex)
+	if updated.nextForkTranscriptEntryIndex != 3 {
+		t.Fatalf("expected rollback transcript entry index, got %d", updated.nextForkTranscriptEntryIndex)
+	}
+	if updated.nextForkUserMessageIndex != 0 {
+		t.Fatalf("expected user message index translation deferred to server, got %d", updated.nextForkUserMessageIndex)
 	}
 	if updated.nextSessionInitialPrompt != "edited user message" {
 		t.Fatalf("expected startup prompt to match edited input, got %q", updated.nextSessionInitialPrompt)
 	}
 	if updated.input != "" {
 		t.Fatalf("expected rollback edit buffer cleared before quit, got %q", updated.input)
+	}
+}
+
+func TestRollbackSelectionUsesAbsoluteTranscriptEntryIndexWhenPaged(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 14
+	m.windowSizeKnown = true
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "user", Text: "u-100"},
+		{Role: "assistant", Text: "a-100"},
+		{Role: "user", Text: "u-101"},
+	}
+	m.transcriptBaseOffset = 200
+	m.transcriptTotalEntries = 203
+	m.forwardToView(tui.SetConversationMsg{BaseOffset: m.transcriptBaseOffset, TotalEntries: m.transcriptTotalEntries, Entries: m.transcriptEntries})
+	m.syncViewport()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := next.(*uiModel)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(*uiModel)
+
+	if !testRollbackSelecting(updated) {
+		t.Fatal("expected rollback selection mode after double esc")
+	}
+	selectedLine := lineContaining(updated.View(), "u-101")
+	if selectedLine == "" {
+		t.Fatalf("expected selected paged rollback message visible, got %q", stripANSIAndTrimRight(updated.View()))
+	}
+	if !strings.Contains(selectedLine, themeSelectionBackgroundEscape(updated.theme)) {
+		t.Fatalf("expected paged rollback selection highlight, got %q", selectedLine)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if !testRollbackEditing(updated) {
+		t.Fatal("expected rollback editing mode after enter")
+	}
+	if updated.input != "u-101" {
+		t.Fatalf("expected selected paged message loaded into input, got %q", updated.input)
+	}
+
+	updated.input = "edited paged user message"
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(*uiModel)
+	if updated.nextForkTranscriptEntryIndex != 202 {
+		t.Fatalf("expected absolute rollback transcript entry index, got %d", updated.nextForkTranscriptEntryIndex)
 	}
 }
 
@@ -5957,7 +6010,7 @@ func TestBusySlashSupervisorOnAppliesToInFlightRunCompletion(t *testing.T) {
 	mainClient := &busyToggleFakeClient{responses: []llm.Response{
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(tools.ToolPatch), Input: json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call_patch_1", Name: string(toolspec.ToolPatch), Input: json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch"}`)}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 		{
@@ -7120,8 +7173,8 @@ type busyTogglePatchTool struct {
 	delay time.Duration
 }
 
-func (t busyTogglePatchTool) Name() tools.ID {
-	return tools.ToolPatch
+func (t busyTogglePatchTool) Name() toolspec.ID {
+	return toolspec.ToolPatch
 }
 
 func (t busyTogglePatchTool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {

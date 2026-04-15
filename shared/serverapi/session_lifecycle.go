@@ -7,12 +7,13 @@ import (
 )
 
 type SessionTransition struct {
-	Action               string `json:"action"`
-	InitialPrompt        string `json:"initial_prompt,omitempty"`
-	InitialInput         string `json:"initial_input,omitempty"`
-	TargetSessionID      string `json:"target_session_id,omitempty"`
-	ForkUserMessageIndex int    `json:"fork_user_message_index,omitempty"`
-	ParentSessionID      string `json:"parent_session_id,omitempty"`
+	Action                   string `json:"action"`
+	InitialPrompt            string `json:"initial_prompt,omitempty"`
+	InitialInput             string `json:"initial_input,omitempty"`
+	TargetSessionID          string `json:"target_session_id,omitempty"`
+	ForkUserMessageIndex     int    `json:"fork_user_message_index,omitempty"`
+	ForkTranscriptEntryIndex *int   `json:"fork_transcript_entry_index,omitempty"`
+	ParentSessionID          string `json:"parent_session_id,omitempty"`
 }
 
 type SessionInitialInputRequest struct {

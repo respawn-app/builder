@@ -19,6 +19,7 @@ import (
 	shelltool "builder/server/tools/shell"
 	"builder/shared/clientui"
 	"builder/shared/config"
+	"builder/shared/toolspec"
 	"builder/shared/transcript"
 	"builder/shared/transcript/toolcodec"
 
@@ -278,7 +279,7 @@ func (c *queuedSteerDuringBlockingToolClient) GenerateStream(_ context.Context, 
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
 			ToolCalls: []llm.ToolCall{{
 				ID:    "call-1",
-				Name:  string(tools.ToolShell),
+				Name:  string(toolspec.ToolShell),
 				Input: json.RawMessage(`{"command":"sleep 1"}`),
 				Presentation: toolcodec.EncodeToolCallMeta(transcript.ToolCallMeta{
 					ToolName:    "shell",
@@ -299,8 +300,8 @@ func (c *queuedSteerDuringBlockingToolClient) GenerateStream(_ context.Context, 
 	}, nil
 }
 
-func (t *blockingShellTool) Name() tools.ID {
-	return tools.ToolShell
+func (t *blockingShellTool) Name() toolspec.ID {
+	return toolspec.ToolShell
 }
 
 func (t *blockingShellTool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
@@ -310,9 +311,9 @@ func (t *blockingShellTool) Call(ctx context.Context, c tools.Call) (tools.Resul
 	select {
 	case <-t.release:
 	case <-ctx.Done():
-		return tools.Result{CallID: c.ID, Name: tools.ToolShell, IsError: true, Output: []byte(`{"error":"context canceled"}`)}, ctx.Err()
+		return tools.Result{CallID: c.ID, Name: toolspec.ToolShell, IsError: true, Output: []byte(`{"error":"context canceled"}`)}, ctx.Err()
 	}
-	return tools.Result{CallID: c.ID, Name: tools.ToolShell, Output: []byte(`"/tmp"`)}, nil
+	return tools.Result{CallID: c.ID, Name: toolspec.ToolShell, Output: []byte(`"/tmp"`)}, nil
 }
 
 func (reviewerNoSuggestionsClient) Generate(_ context.Context, _ llm.Request) (llm.Response, error) {
@@ -1449,9 +1450,10 @@ func TestNativeProgramRendersMixedRuntimeEventsFromChannelInRealtime(t *testing.
 	callMeta := transcript.ToolCallMeta{ToolName: "shell", Command: "pwd", CompactText: "pwd", IsShell: true}
 	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventRunStateChanged, RunState: &runtime.RunState{Busy: true}})
 	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, StepID: "step-1", UserMessage: "say hi"})
+	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventLocalEntryAdded, StepID: "step-1", CommittedTranscriptChanged: true, CommittedEntryStart: 2, CommittedEntryStartSet: true, CommittedEntryCount: 3, LocalEntry: &runtime.ChatEntry{Role: "reviewer_status", Text: "Supervisor ran: 2 suggestions, applied."}})
 	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventReviewerCompleted, StepID: "step-1", Reviewer: &runtime.ReviewerStatus{Outcome: "applied", SuggestionsCount: 2}})
 	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventBackgroundUpdated, StepID: "step-1", Background: &runtime.BackgroundShellEvent{Type: "completed", ID: "1000", State: "completed", NoticeText: "Background shell 1000 completed.\nOutput:\nhello", CompactText: "Background shell 1000 completed"}})
-	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1", ToolCall: &llm.ToolCall{ID: "call_1", Name: string(tools.ToolShell), Presentation: toolcodec.EncodeToolCallMeta(callMeta)}})
+	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1", ToolCall: &llm.ToolCall{ID: "call_1", Name: string(toolspec.ToolShell), Presentation: toolcodec.EncodeToolCallMeta(callMeta)}})
 
 	lastTranscript := ""
 	lastNormalized := ""
@@ -1491,7 +1493,7 @@ func TestNativeProgramRendersMixedRuntimeEventsFromChannelInRealtime(t *testing.
 		)
 	}
 
-	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallCompleted, StepID: "step-1", ToolResult: &tools.Result{CallID: "call_1", Name: tools.ToolShell, Output: []byte("/tmp")}})
+	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallCompleted, StepID: "step-1", ToolResult: &tools.Result{CallID: "call_1", Name: toolspec.ToolShell, Output: []byte("/tmp")}})
 	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantMessage, StepID: "step-1", Message: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal}})
 	runtimeEvents <- projectRuntimeEvent(runtime.Event{Kind: runtime.EventRunStateChanged, RunState: &runtime.RunState{Busy: false}})
 
@@ -1577,11 +1579,13 @@ func TestNativeProgramDoesNotDuplicateSupervisorFollowUpAfterHydration(t *testin
 		}},
 	}
 	runtimeEvents <- clientui.Event{
-		Kind:                       clientui.EventReviewerCompleted,
+		Kind:                       clientui.EventLocalEntryAdded,
 		CommittedTranscriptChanged: true,
 		StepID:                     "step-1",
 		TranscriptRevision:         3,
 		CommittedEntryCount:        3,
+		CommittedEntryStart:        2,
+		CommittedEntryStartSet:     true,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "reviewer_status",
 			Text: "Supervisor ran: 2 suggestions, applied.",
@@ -2202,11 +2206,13 @@ func TestNativeProgramReviewerTerminalMessageRemainsVisibleWithoutHydration(t *t
 	baselineLoadCalls := client.LoadCalls()
 
 	runtimeEvents <- clientui.Event{
-		Kind:                       clientui.EventReviewerCompleted,
+		Kind:                       clientui.EventLocalEntryAdded,
 		CommittedTranscriptChanged: true,
 		StepID:                     "step-1",
 		TranscriptRevision:         2,
 		CommittedEntryCount:        2,
+		CommittedEntryStart:        1,
+		CommittedEntryStartSet:     true,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "reviewer_status",
 			Text: "Supervisor ran: no changes.",

@@ -3,6 +3,7 @@ package runtime
 import (
 	"builder/server/llm"
 	"builder/server/tools"
+	"builder/shared/toolspec"
 	"encoding/json"
 	"testing"
 )
@@ -62,7 +63,7 @@ func TestTranscriptEntriesFromEventEmitsVisibleToolCompletionEntriesForOrdinaryA
 			name: "ordinary shell result",
 			result: tools.Result{
 				CallID: "call-shell-1",
-				Name:   tools.ToolShell,
+				Name:   toolspec.ToolShell,
 				Output: json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`),
 			},
 		},
@@ -70,7 +71,7 @@ func TestTranscriptEntriesFromEventEmitsVisibleToolCompletionEntriesForOrdinaryA
 			name: "trigger handoff synthetic success result",
 			result: tools.Result{
 				CallID: "call-handoff-1",
-				Name:   tools.ToolTriggerHandoff,
+				Name:   toolspec.ToolTriggerHandoff,
 				Output: json.RawMessage(`""`),
 			},
 		},

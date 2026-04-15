@@ -209,12 +209,13 @@ type UITranscriptEntry struct {
 }
 
 type UITransition struct {
-	Action               UIAction
-	InitialPrompt        string
-	InitialInput         string
-	TargetSessionID      string
-	ForkUserMessageIndex int
-	ParentSessionID      string
+	Action                   UIAction
+	InitialPrompt            string
+	InitialInput             string
+	TargetSessionID          string
+	ForkUserMessageIndex     int
+	ForkTranscriptEntryIndex int
+	ParentSessionID          string
 }
 
 const (
@@ -484,23 +485,24 @@ type uiModel struct {
 	initialTranscript []UITranscriptEntry
 	startupSubmit     string
 
-	nextSessionInitialPrompt string
-	nextSessionInitialInput  string
-	nextSessionID            string
-	nextForkUserMessageIndex int
-	nextParentSessionID      string
-	sessionName              string
-	sessionID                string
-	processList              uiProcessListState
-	helpVisible              bool
-	reasoningStatusHeader    string
-	turnQueueHook            turnQueueHook
-	statusConfig             uiStatusConfig
-	statusCollector          uiStatusCollector
-	statusRepository         uiStatusRepository
-	status                   uiStatusOverlayState
-	clipboardImagePaster     uiClipboardImagePaster
-	clipboardTextCopier      uiClipboardTextCopier
+	nextSessionInitialPrompt     string
+	nextSessionInitialInput      string
+	nextSessionID                string
+	nextForkUserMessageIndex     int
+	nextForkTranscriptEntryIndex int
+	nextParentSessionID          string
+	sessionName                  string
+	sessionID                    string
+	processList                  uiProcessListState
+	helpVisible                  bool
+	reasoningStatusHeader        string
+	turnQueueHook                turnQueueHook
+	statusConfig                 uiStatusConfig
+	statusCollector              uiStatusCollector
+	statusRepository             uiStatusRepository
+	status                       uiStatusOverlayState
+	clipboardImagePaster         uiClipboardImagePaster
+	clipboardTextCopier          uiClipboardTextCopier
 
 	transientStatus       string
 	transientStatusKind   uiStatusNoticeKind
@@ -569,38 +571,38 @@ func (m *uiModel) invalidateNativeResizeReplay() {
 }
 
 type rollbackCandidate struct {
-	TranscriptIndex  int
-	UserMessageIndex int
-	Text             string
+	TranscriptIndex int
+	Text            string
 }
 
 func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-chan clientui.Event, askEvents <-chan askEvent, opts ...UIOption) tea.Model {
 	m := &uiModel{
-		engine:                   runtimeClient,
-		view:                     tui.NewModel(),
-		activity:                 uiActivityIdle,
-		runtimeEvents:            runtimeEvents,
-		askEvents:                askEvents,
-		inputCursor:              -1,
-		mainInputDraftToken:      1,
-		promptHistorySelection:   -1,
-		promptHistoryDraftCursor: -1,
-		commandRegistry:          commands.NewDefaultRegistry(),
-		exitAction:               UIActionNone,
-		theme:                    theme.Auto,
-		tuiAlternateScreen:       config.TUIAlternateScreenAuto,
-		debugKeys:                envFlagEnabled("BUILDER_DEBUG_KEYS"),
-		debugMode:                envFlagEnabled("BUILDER_DEBUG"),
-		transcriptDiagnostics:    envFlagEnabled("BUILDER_TRANSCRIPT_DIAGNOSTICS"),
-		reviewerMode:             "off",
-		autoCompactionEnabled:    true,
-		conversationFreshness:    clientui.ConversationFreshnessFresh,
-		interaction:              uiInteractionState{Mode: uiInputModeMain},
-		ask:                      uiAskState{inputCursor: -1},
-		rollback:                 uiRollbackState{phase: uiRollbackPhaseInactive},
-		statusRepository:         newMemoryUIStatusRepository(),
-		clipboardImagePaster:     newSystemClipboardImagePaster(),
-		clipboardTextCopier:      newSystemClipboardTextCopier(),
+		engine:                       runtimeClient,
+		view:                         tui.NewModel(),
+		activity:                     uiActivityIdle,
+		runtimeEvents:                runtimeEvents,
+		askEvents:                    askEvents,
+		inputCursor:                  -1,
+		mainInputDraftToken:          1,
+		promptHistorySelection:       -1,
+		promptHistoryDraftCursor:     -1,
+		commandRegistry:              commands.NewDefaultRegistry(),
+		exitAction:                   UIActionNone,
+		theme:                        theme.Auto,
+		tuiAlternateScreen:           config.TUIAlternateScreenAuto,
+		debugKeys:                    envFlagEnabled("BUILDER_DEBUG_KEYS"),
+		debugMode:                    envFlagEnabled("BUILDER_DEBUG"),
+		transcriptDiagnostics:        envFlagEnabled("BUILDER_TRANSCRIPT_DIAGNOSTICS"),
+		nextForkTranscriptEntryIndex: -1,
+		reviewerMode:                 "off",
+		autoCompactionEnabled:        true,
+		conversationFreshness:        clientui.ConversationFreshnessFresh,
+		interaction:                  uiInteractionState{Mode: uiInputModeMain},
+		ask:                          uiAskState{inputCursor: -1},
+		rollback:                     uiRollbackState{phase: uiRollbackPhaseInactive, selectedTranscriptEntry: -1},
+		statusRepository:             newMemoryUIStatusRepository(),
+		clipboardImagePaster:         newSystemClipboardImagePaster(),
+		clipboardTextCopier:          newSystemClipboardTextCopier(),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -1175,12 +1177,13 @@ func (m *uiModel) Close() {
 
 func (m *uiModel) Transition() UITransition {
 	return UITransition{
-		Action:               m.exitAction,
-		InitialPrompt:        m.nextSessionInitialPrompt,
-		InitialInput:         m.nextSessionInitialInput,
-		TargetSessionID:      strings.TrimSpace(m.nextSessionID),
-		ForkUserMessageIndex: m.nextForkUserMessageIndex,
-		ParentSessionID:      strings.TrimSpace(m.nextParentSessionID),
+		Action:                   m.exitAction,
+		InitialPrompt:            m.nextSessionInitialPrompt,
+		InitialInput:             m.nextSessionInitialInput,
+		TargetSessionID:          strings.TrimSpace(m.nextSessionID),
+		ForkUserMessageIndex:     m.nextForkUserMessageIndex,
+		ForkTranscriptEntryIndex: m.nextForkTranscriptEntryIndex,
+		ParentSessionID:          strings.TrimSpace(m.nextParentSessionID),
 	}
 }
 

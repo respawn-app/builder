@@ -7,6 +7,7 @@ import (
 	"builder/server/llm"
 	"builder/server/tools"
 	"builder/shared/cachewarn"
+	"builder/shared/toolspec"
 )
 
 func VisibleChatEntriesFromMessage(msg llm.Message) []ChatEntry {
@@ -27,11 +28,11 @@ func VisibleChatEntriesFromMessage(msg llm.Message) []ChatEntry {
 		callID := strings.TrimSpace(msg.ToolCallID)
 		result := tools.Result{
 			CallID: callID,
-			Name:   tools.ID(strings.TrimSpace(msg.Name)),
+			Name:   toolspec.ID(strings.TrimSpace(msg.Name)),
 			Output: []byte(msg.Content),
 		}
 		if result.Name == "" {
-			result.Name = tools.ID("tool")
+			result.Name = toolspec.ID("tool")
 		}
 		entries = append(entries, toolResultChatEntry(result))
 	case llm.RoleDeveloper:
@@ -63,10 +64,10 @@ func TranscriptEntriesFromEvent(evt Event) []ChatEntry {
 		}
 		return []ChatEntry{toolResultChatEntry(*evt.ToolResult)}
 	case EventReviewerCompleted:
-		if evt.Reviewer == nil {
-			return nil
-		}
-		return []ChatEntry{{Role: "reviewer_status", Text: reviewerStatusText(*evt.Reviewer, nil)}}
+		// Reviewer completion remains a runtime-status event only.
+		// Persisted reviewer terminal rows must arrive through local_entry_added
+		// so the client has exactly one committed transcript source.
+		return nil
 	case EventCompactionCompleted:
 		return nil
 	case EventCompactionFailed:

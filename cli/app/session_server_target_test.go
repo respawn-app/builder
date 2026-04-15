@@ -18,7 +18,6 @@ import (
 	"builder/server/auth"
 	"builder/server/serve"
 	serverstartup "builder/server/startup"
-	"builder/server/tools"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
@@ -26,6 +25,8 @@ import (
 	"builder/shared/config"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
+
 	"github.com/google/uuid"
 	"golang.org/x/net/websocket"
 )
@@ -1437,7 +1438,7 @@ func TestStartSessionServerPreservesExplicitCLIToolsWithCLIModelOverride(t *test
 	if plan.ActiveSettings.Model != "gpt-5.3-codex" {
 		t.Fatalf("model = %q, want gpt-5.3-codex", plan.ActiveSettings.Model)
 	}
-	if len(plan.EnabledTools) != 1 || plan.EnabledTools[0] != tools.ToolShell {
+	if len(plan.EnabledTools) != 1 || plan.EnabledTools[0] != toolspec.ToolShell {
 		t.Fatalf("enabled tools = %+v, want only shell", plan.EnabledTools)
 	}
 

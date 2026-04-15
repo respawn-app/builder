@@ -6,6 +6,7 @@ import (
 
 	"builder/server/llm"
 	"builder/server/tools"
+	"builder/shared/toolspec"
 )
 
 type defaultStepExecutor struct {
@@ -207,7 +208,7 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 				e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: resolved, CommittedTranscriptChanged: true, CommittedEntryStart: resolvedCommittedStart, CommittedEntryStartSet: resolvedCommittedStartSet})
 			}
 			if reviewerCompletion != nil {
-				e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: reviewerCompletion, CommittedTranscriptChanged: true})
+				e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: reviewerCompletion})
 			}
 			return stepLoopResult{Message: resolved, ExecutedToolCall: executedToolCall, AssistantCommittedStart: resolvedCommittedStart, AssistantCommittedStartSet: resolvedCommittedStartSet}, nil
 		}
@@ -217,7 +218,7 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 			return stepLoopResult{}, err
 		}
 		for _, result := range results {
-			if result.Name == tools.ToolPatch && !result.IsError {
+			if result.Name == toolspec.ToolPatch && !result.IsError {
 				patchEditsApplied = true
 			}
 			msg := llm.Message{Role: llm.RoleTool, Content: string(result.Output), ToolCallID: result.CallID, Name: string(result.Name)}

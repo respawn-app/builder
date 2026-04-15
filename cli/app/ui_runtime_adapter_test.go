@@ -17,8 +17,10 @@ import (
 	"builder/shared/cachewarn"
 	"builder/shared/clientui"
 	"builder/shared/config"
+	"builder/shared/toolspec"
 	"builder/shared/transcript"
 	"builder/shared/transcript/toolcodec"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -41,6 +43,7 @@ type startupTranscriptRuntimeClient struct {
 	loadRequests    []clientui.TranscriptPageRequest
 	view            clientui.RuntimeMainView
 	page            clientui.TranscriptPage
+	loadPage        clientui.TranscriptPage
 }
 
 func (c *startupTranscriptRuntimeClient) MainView() clientui.RuntimeMainView {
@@ -60,10 +63,14 @@ func (c *startupTranscriptRuntimeClient) Transcript() clientui.TranscriptPage {
 
 func (c *startupTranscriptRuntimeClient) LoadTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
 	c.loadRequests = append(c.loadRequests, req)
-	if c.page.SessionID == "" {
-		c.page.SessionID = "session-1"
+	page := c.page
+	if c.loadPage.SessionID != "" || c.loadPage.TotalEntries > 0 || len(c.loadPage.Entries) > 0 {
+		page = c.loadPage
 	}
-	return c.page, nil
+	if page.SessionID == "" {
+		page.SessionID = "session-1"
+	}
+	return page, nil
 }
 
 func (c *startupTranscriptRuntimeClient) RefreshTranscriptPage(req clientui.TranscriptPageRequest) (clientui.TranscriptPage, error) {
@@ -163,7 +170,7 @@ func TestApplyChatSnapshotSetsOngoingFromSnapshot(t *testing.T) {
 	}
 }
 
-func TestProjectRuntimeEventIncludesReviewerTranscriptEntry(t *testing.T) {
+func TestProjectRuntimeEventKeepsReviewerCompletedAsStatusOnlyEvent(t *testing.T) {
 	evt := projectRuntimeEvent(runtime.Event{
 		Kind: runtime.EventReviewerCompleted,
 		Reviewer: &runtime.ReviewerStatus{
@@ -172,14 +179,8 @@ func TestProjectRuntimeEventIncludesReviewerTranscriptEntry(t *testing.T) {
 		},
 	})
 
-	if len(evt.TranscriptEntries) != 1 {
-		t.Fatalf("expected one transcript entry, got %d", len(evt.TranscriptEntries))
-	}
-	if got := evt.TranscriptEntries[0].Role; got != "reviewer_status" {
-		t.Fatalf("reviewer transcript role = %q, want reviewer_status", got)
-	}
-	if got := evt.TranscriptEntries[0].Text; !strings.Contains(got, "2 suggestions, applied") {
-		t.Fatalf("reviewer transcript text = %q", got)
+	if len(evt.TranscriptEntries) != 0 {
+		t.Fatalf("expected reviewer_completed to avoid transcript entries, got %+v", evt.TranscriptEntries)
 	}
 }
 
@@ -226,7 +227,7 @@ func TestHandleProjectedRuntimeEventAppendsTranscriptEntriesImmediately(t *testi
 		StepID: "step-1",
 		ToolCall: &llm.ToolCall{
 			ID:           "call-1",
-			Name:         string(tools.ToolShell),
+			Name:         string(toolspec.ToolShell),
 			Presentation: toolcodec.EncodeToolCallMeta(callMeta),
 		},
 	}))
@@ -240,7 +241,7 @@ func TestHandleProjectedRuntimeEventAppendsTranscriptEntriesImmediately(t *testi
 		StepID: "step-1",
 		ToolResult: &tools.Result{
 			CallID: "call-1",
-			Name:   tools.ToolShell,
+			Name:   toolspec.ToolShell,
 			Output: []byte("/tmp"),
 		},
 	}))
@@ -329,9 +330,10 @@ func TestRuntimeEventBatchCoalescesCommittedNativeFlushAndPreservesOrder(t *test
 	firstBatch := []clientui.Event{
 		projectRuntimeEvent(runtime.Event{Kind: runtime.EventRunStateChanged, RunState: &runtime.RunState{Busy: true}}),
 		projectRuntimeEvent(runtime.Event{Kind: runtime.EventUserMessageFlushed, StepID: "step-1", UserMessage: "say hi"}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventLocalEntryAdded, StepID: "step-1", CommittedTranscriptChanged: true, CommittedEntryStart: 2, CommittedEntryStartSet: true, CommittedEntryCount: 3, LocalEntry: &runtime.ChatEntry{Role: "reviewer_status", Text: "Supervisor ran: 2 suggestions, applied."}}),
 		projectRuntimeEvent(runtime.Event{Kind: runtime.EventReviewerCompleted, StepID: "step-1", Reviewer: &runtime.ReviewerStatus{Outcome: "applied", SuggestionsCount: 2}}),
 		projectRuntimeEvent(runtime.Event{Kind: runtime.EventBackgroundUpdated, StepID: "step-1", Background: &runtime.BackgroundShellEvent{Type: "completed", ID: "1000", State: "completed", NoticeText: "Background shell 1000 completed.\nOutput:\nhello", CompactText: "Background shell 1000 completed"}}),
-		projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1", ToolCall: &llm.ToolCall{ID: "call_1", Name: string(tools.ToolShell), Presentation: toolcodec.EncodeToolCallMeta(callMeta)}}),
+		projectRuntimeEvent(runtime.Event{Kind: runtime.EventToolCallStarted, StepID: "step-1", ToolCall: &llm.ToolCall{ID: "call_1", Name: string(toolspec.ToolShell), Presentation: toolcodec.EncodeToolCallMeta(callMeta)}}),
 	}
 	updated, cmd := m.Update(runtimeEventBatchMsg{events: firstBatch})
 	m = updated.(*uiModel)
@@ -461,6 +463,181 @@ func TestHandleProjectedRuntimeEventSkipsAlreadyHydratedAssistantEntry(t *testin
 
 	if len(m.transcriptEntries) != 1 {
 		t.Fatalf("expected duplicate hydrated assistant entry to be skipped, got %+v", m.transcriptEntries)
+	}
+}
+
+func TestHandleProjectedRuntimeEventSkipsCommittedOverlapThatStartsBeforeCurrentWindow(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "assistant", Text: "visible-a", Phase: llm.MessagePhaseFinal},
+		{Role: "reviewer_status", Text: "visible-b"},
+	}
+	m.transcriptBaseOffset = 5
+	m.transcriptTotalEntries = 7
+	m.transcriptRevision = 12
+	m.forwardToView(tui.SetConversationMsg{BaseOffset: m.transcriptBaseOffset, TotalEntries: m.transcriptTotalEntries, Entries: m.transcriptEntries})
+
+	cmd, mutated, needsHydration := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{
+		Kind:                       clientui.EventLocalEntryAdded,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		TranscriptRevision:         12,
+		CommittedEntryCount:        7,
+		CommittedEntryStart:        4,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries: []clientui.ChatEntry{
+			{Role: "user", Text: "hidden-prefix"},
+			{Role: "assistant", Text: "visible-a", Phase: string(llm.MessagePhaseFinal)},
+			{Role: "reviewer_status", Text: "visible-b"},
+		},
+	}, false)
+
+	if cmd != nil {
+		t.Fatalf("expected no hydrate/append command, got %v", cmd)
+	}
+	if mutated {
+		t.Fatalf("expected no transcript mutation, got %+v", m.transcriptEntries)
+	}
+	if needsHydration {
+		t.Fatal("expected before-window overlap to avoid hydration when visible overlap already matches")
+	}
+	if got := len(m.transcriptEntries); got != 2 {
+		t.Fatalf("transcript entry count = %d, want 2", got)
+	}
+}
+
+func TestHandleProjectedRuntimeEventAppendsCommittedSuffixWhenOverlapStartsBeforeCurrentWindow(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "assistant", Text: "visible-a", Phase: llm.MessagePhaseFinal},
+		{Role: "reviewer_status", Text: "visible-b"},
+	}
+	m.transcriptBaseOffset = 5
+	m.transcriptTotalEntries = 7
+	m.transcriptRevision = 12
+	m.forwardToView(tui.SetConversationMsg{BaseOffset: m.transcriptBaseOffset, TotalEntries: m.transcriptTotalEntries, Entries: m.transcriptEntries})
+
+	cmd, mutated, needsHydration := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{
+		Kind:                       clientui.EventLocalEntryAdded,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		TranscriptRevision:         12,
+		CommittedEntryCount:        8,
+		CommittedEntryStart:        4,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries: []clientui.ChatEntry{
+			{Role: "user", Text: "hidden-prefix"},
+			{Role: "assistant", Text: "visible-a", Phase: string(llm.MessagePhaseFinal)},
+			{Role: "reviewer_status", Text: "visible-b"},
+			{Role: "cache_warning", Text: "new-visible-suffix"},
+		},
+	}, false)
+
+	if cmd != nil {
+		t.Fatalf("expected direct append without hydrate command, got %v", cmd)
+	}
+	if !mutated {
+		t.Fatalf("expected transcript mutation, got %+v", m.transcriptEntries)
+	}
+	if needsHydration {
+		t.Fatal("expected before-window overlap append to avoid hydration")
+	}
+	if got := len(m.transcriptEntries); got != 3 {
+		t.Fatalf("transcript entry count = %d, want 3", got)
+	}
+	if got := m.transcriptEntries[2].Text; got != "new-visible-suffix" {
+		t.Fatalf("appended suffix text = %q, want new-visible-suffix", got)
+	}
+}
+
+func TestSkippedCommittedEventBeforeCurrentWindowStillAdvancesRevisionAndCount(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "assistant", Text: "visible-a", Phase: llm.MessagePhaseFinal},
+		{Role: "reviewer_status", Text: "visible-b"},
+	}
+	m.transcriptBaseOffset = 5
+	m.transcriptTotalEntries = 7
+	m.transcriptRevision = 12
+	m.forwardToView(tui.SetConversationMsg{BaseOffset: m.transcriptBaseOffset, TotalEntries: m.transcriptTotalEntries, Entries: m.transcriptEntries})
+
+	cmd, mutated, needsHydration := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{
+		Kind:                       clientui.EventLocalEntryAdded,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		TranscriptRevision:         13,
+		CommittedEntryCount:        8,
+		CommittedEntryStart:        4,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "cache_warning",
+			Text: "hidden-prefix-only",
+		}},
+	}, false)
+
+	if cmd != nil {
+		t.Fatalf("expected no hydrate/append command, got %v", cmd)
+	}
+	if mutated {
+		t.Fatalf("expected no transcript mutation, got %+v", m.transcriptEntries)
+	}
+	if needsHydration {
+		t.Fatal("expected hidden committed event to avoid hydration")
+	}
+	if got := m.transcriptRevision; got != 13 {
+		t.Fatalf("transcript revision = %d, want 13", got)
+	}
+	if got := m.transcriptTotalEntries; got != 8 {
+		t.Fatalf("transcript total entries = %d, want 8", got)
+	}
+}
+
+func TestSkippedCommittedEventBeforeCurrentWindowDoesNotTriggerFollowUpConversationHydrate(t *testing.T) {
+	client := &runtimeControlFakeClient{transcript: clientui.TranscriptPage{SessionID: "session-1"}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "assistant", Text: "visible-a", Phase: llm.MessagePhaseFinal},
+		{Role: "reviewer_status", Text: "visible-b"},
+	}
+	m.transcriptBaseOffset = 5
+	m.transcriptTotalEntries = 7
+	m.transcriptRevision = 12
+	m.forwardToView(tui.SetConversationMsg{BaseOffset: m.transcriptBaseOffset, TotalEntries: m.transcriptTotalEntries, Entries: m.transcriptEntries})
+
+	cmd, mutated, needsHydration := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{
+		Kind:                       clientui.EventLocalEntryAdded,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		TranscriptRevision:         13,
+		CommittedEntryCount:        8,
+		CommittedEntryStart:        4,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "cache_warning",
+			Text: "hidden-prefix-only",
+		}},
+	}, false)
+	if cmd != nil || mutated || needsHydration {
+		t.Fatalf("hidden committed skip = (cmd=%v mutated=%t needsHydration=%t), want no-op", cmd, mutated, needsHydration)
+	}
+
+	followUp := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventConversationUpdated,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         13,
+		CommittedEntryCount:        8,
+	})
+	for _, msg := range collectCmdMessages(t, followUp) {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect matching committed conversation_updated after hidden skip to trigger hydration, got %+v", msg)
+		}
+	}
+	if m.runtimeTranscriptBusy {
+		t.Fatal("did not expect runtime transcript sync to start after hidden committed skip")
 	}
 }
 
@@ -733,11 +910,13 @@ func TestProjectedReviewerCompletedUpdatesDetailViewImmediatelyWhenCommitted(t *
 	m.syncViewport()
 
 	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                       clientui.EventReviewerCompleted,
+		Kind:                       clientui.EventLocalEntryAdded,
 		StepID:                     "step-1",
 		CommittedTranscriptChanged: true,
 		TranscriptRevision:         11,
 		CommittedEntryCount:        2,
+		CommittedEntryStart:        1,
+		CommittedEntryStartSet:     true,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "reviewer_status",
 			Text: "Supervisor ran and applied 2 suggestions.",
@@ -912,11 +1091,13 @@ func TestHandleProjectedRuntimeEventDoesNotSuppressReviewerStatusEntry(t *testin
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                       clientui.EventReviewerCompleted,
+		Kind:                       clientui.EventLocalEntryAdded,
 		CommittedTranscriptChanged: true,
 		StepID:                     "step-1",
 		TranscriptRevision:         10,
 		CommittedEntryCount:        2,
+		CommittedEntryStart:        1,
+		CommittedEntryStartSet:     true,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "reviewer_status",
 			Text: "Supervisor ran and applied 2 suggestions.",
@@ -943,11 +1124,13 @@ func TestHandleProjectedRuntimeEventSkipsHydratedReviewerStatusEntry(t *testing.
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                       clientui.EventReviewerCompleted,
+		Kind:                       clientui.EventLocalEntryAdded,
 		CommittedTranscriptChanged: true,
 		StepID:                     "step-1",
 		TranscriptRevision:         10,
 		CommittedEntryCount:        2,
+		CommittedEntryStart:        1,
+		CommittedEntryStartSet:     true,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "reviewer_status",
 			Text: "Supervisor ran and applied 2 suggestions.",
@@ -2081,10 +2264,12 @@ func TestRuntimeAuthoritativeHydrateDoesNotRepairCommittedReviewerStatusPathWhen
 	}
 
 	_ = collectCmdMessages(t, m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                       clientui.EventReviewerCompleted,
+		Kind:                       clientui.EventLocalEntryAdded,
 		CommittedTranscriptChanged: true,
 		TranscriptRevision:         11,
 		CommittedEntryCount:        2,
+		CommittedEntryStart:        1,
+		CommittedEntryStartSet:     true,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "reviewer_status",
 			Text: "Supervisor ran and applied 2 suggestions.",
@@ -2364,8 +2549,9 @@ func TestApplyProjectedTranscriptEntriesUsesTailOffsetWhileViewingOlderDetailPag
 
 func TestStartupSeedsCachedTranscriptBeforeBoundedSync(t *testing.T) {
 	client := &startupTranscriptRuntimeClient{
-		view: clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1", SessionName: "incident triage"}},
-		page: clientui.TranscriptPage{SessionID: "session-1", Offset: 10, TotalEntries: 15, Entries: []clientui.ChatEntry{{Role: "assistant", Text: "cached tail"}}},
+		view:     clientui.RuntimeMainView{Session: clientui.RuntimeSessionView{SessionID: "session-1", SessionName: "incident triage"}},
+		page:     clientui.TranscriptPage{SessionID: "session-1", Offset: 10, TotalEntries: 15, Entries: []clientui.ChatEntry{{Role: "assistant", Text: "cached tail"}}},
+		loadPage: clientui.TranscriptPage{SessionID: "session-1", Offset: 14, TotalEntries: 15, Entries: []clientui.ChatEntry{{Role: "assistant", Text: "authoritative tail"}}},
 	}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
 
@@ -2411,6 +2597,15 @@ func TestStartupSeedsCachedTranscriptBeforeBoundedSync(t *testing.T) {
 	}
 	if client.loadRequests[0].Window != clientui.TranscriptWindowOngoingTail {
 		t.Fatalf("startup load request window = %q, want ongoing_tail", client.loadRequests[0].Window)
+	}
+
+	next, followUp := updated.Update(refreshed)
+	if followUp != nil {
+		_ = collectCmdMessages(t, followUp)
+	}
+	afterHydrate := next.(*uiModel)
+	if got := stripANSIAndTrimRight(afterHydrate.view.OngoingSnapshot()); !strings.Contains(got, "authoritative tail") || strings.Contains(got, "cached tail") {
+		t.Fatalf("expected authoritative startup hydrate to replace cached seed, got %q", got)
 	}
 }
 
