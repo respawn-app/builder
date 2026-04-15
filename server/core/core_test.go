@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"builder/server/auth"
@@ -195,16 +194,9 @@ func TestSessionLaunchClientForProjectWorkspaceRejectsUnavailableProjectRoot(t *
 }
 
 func TestSessionLaunchClientForProjectWorkspaceRejectsInaccessibleProjectRoot(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("permission-based inaccessible path assertion is platform-specific")
-	}
 	home := t.TempDir()
-	lockedParent := filepath.Join(t.TempDir(), "locked-parent")
-	workspaceA := filepath.Join(lockedParent, "workspace-a")
+	workspaceA := t.TempDir()
 	workspaceB := t.TempDir()
-	if err := os.MkdirAll(workspaceA, 0o755); err != nil {
-		t.Fatalf("MkdirAll workspaceA: %v", err)
-	}
 	t.Setenv("HOME", home)
 
 	resolvedA, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspaceA})
@@ -215,10 +207,25 @@ func TestSessionLaunchClientForProjectWorkspaceRejectsInaccessibleProjectRoot(t 
 	if err != nil {
 		t.Fatalf("RegisterBinding: %v", err)
 	}
-	if err := os.Chmod(lockedParent, 0o000); err != nil {
-		t.Fatalf("Chmod lockedParent: %v", err)
+	restoreAvailabilityStat := metadata.SetAvailabilityStatForTest(func(path string) (os.FileInfo, error) {
+		if filepath.Clean(path) == filepath.Clean(binding.CanonicalRoot) {
+			return nil, os.ErrPermission
+		}
+		return os.Stat(path)
+	})
+	t.Cleanup(restoreAvailabilityStat)
+	metadataStore, err := metadata.Open(resolvedA.Config.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(lockedParent, 0o755) })
+	t.Cleanup(func() { _ = metadataStore.Close() })
+	overview, err := metadataStore.GetProjectOverview(context.Background(), binding.ProjectID)
+	if err != nil {
+		t.Fatalf("GetProjectOverview: %v", err)
+	}
+	if overview.Project.RootPath != binding.CanonicalRoot || overview.Project.Availability != clientui.ProjectAvailabilityInaccessible {
+		t.Fatalf("overview = %+v, want inaccessible root %q", overview.Project, binding.CanonicalRoot)
+	}
 
 	resolvedB, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspaceB})
 	if err != nil {
