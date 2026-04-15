@@ -87,6 +87,35 @@ Outcome:
 - rollback/fork modeled as navigation to a different session target
 - TUI ongoing-buffer reissue restricted to external continuity-loss cases only
 
+### Phase 6B: Transcript Divergence Hardening
+
+Completed.
+
+Outcome:
+
+- ordinary successful turns no longer hydrate unless continuity was actually lost
+- committed transcript truth is now derived from authoritative transcript pages plus explicitly committed runtime events
+- current TUI ongoing/transcript stability regressions were hardened at the runtime, hydration, and rendered-surface layers rather than being left as compensating UI behavior
+- the live reproduction matrix for ordinary turns, tool rows, committed user rows, compaction notices, commentary streaming, and assistant-final cleanup is green
+
+Detailed landed slices:
+
+- runtime event intake no longer coalesces `assistant_delta` / `reasoning_delta` before UI application
+- runtime-committed assistant/tool/reviewer rows with explicit transcript coordinates now apply as committed transcript state immediately without waiting for hydrate
+- committed tool-start events now replace matching transient tool rows instead of being treated as already-applied; rendered ongoing/committed surfaces keep the resolved tool block visible without hydrate once the committed result arrives
+- ordinary committed user flushes are now explicitly asserted on the committed ongoing surface without hydrate while later commentary/tool events continue streaming on top
+- deferred committed user flushes are now explicitly proved on the rendered ongoing surface: they stay hidden while the assistant is still live, then merge into the committed transcript without hydrate once the assistant final catches up
+- the committed-path regression matrix now has targeted coverage for queued user flush, tool start, resolved tool path/finalize, assistant final answer, and reviewer terminal message on the projected-runtime surfaces
+- the `conversation_updated` hydration contract is now explicit in tests: plain updates never hydrate, matching committed updates skip hydrate, and only real committed continuity loss takes the committed-conversation sync path
+- bootstrap authoritative refresh is now race-covered: a stale bootstrap page cannot overwrite a later committed runtime event that arrived while the refresh was in flight
+- concurrent-client interleaving is now race-covered: a hydrating client and a live client converge to the same committed snapshot without duplicate rows when the same committed advancement reaches them through refresh vs live-event paths
+- ordinary authoritative hydrates no longer clear/replay the TUI normal-buffer scrollback; only Category C continuity recovery paths are still allowed to rebuild committed ongoing history
+- compaction completed/failed no longer synthesize transcript rows before persistence; the persisted `local_entry_added` event is the sole transcript source for compaction notices/errors
+- bare committed `conversation_updated` suppression is now replacement-safe: it only collapses into a following rich event when both represent the same committed tail count
+- ongoing error refresh no longer relies on broad plain `conversation_updated`; the dedicated `ongoing_error_updated` event now drives authoritative set/clear refresh
+- regression coverage exists for the committed-coordinate runtime row path and the compaction single-authority path
+- rendered committed-ongoing regression coverage exists for the queued-follow-up visibility/order lifecycle before the assistant-final / queued-user slice
+
 ### Phase 7: Standalone Polish And Boundary Proof
 
 Completed.
@@ -104,25 +133,4 @@ Outcome:
 These historical phases still have residual open work tracked in `plan.md`:
 
 - Phase 2: resource surfaces and event hub
-- Phase 6B: transcript divergence hardening
 - Phase 8: shared frontend transcript architecture
-
-## Completed Phase 6B Slices
-
-These landed inside the still-open Phase 6B and are archived here so the active plan can stay focused on unresolved work.
-
-- runtime event intake no longer coalesces `assistant_delta` / `reasoning_delta` before UI application
-- runtime-committed assistant/tool/reviewer rows with explicit transcript coordinates now apply as committed transcript state immediately without waiting for hydrate
-- committed tool-start events now replace matching transient tool rows instead of being treated as already-applied; rendered ongoing/committed surfaces keep the resolved tool block visible without hydrate once the committed result arrives
-- ordinary committed user flushes are now explicitly asserted on the committed ongoing surface without hydrate while later commentary/tool events continue streaming on top
-- deferred committed user flushes are now explicitly proved on the rendered ongoing surface: they stay hidden while the assistant is still live, then merge into the committed transcript without hydrate once the assistant final catches up
-- the committed-path regression matrix now has targeted coverage for queued user flush, tool start, resolved tool path/finalize, assistant final answer, and reviewer terminal message on the projected-runtime surfaces
-- the `conversation_updated` hydration contract is now explicit in tests: plain updates never hydrate, matching committed updates skip hydrate, and only real committed continuity loss takes the committed-conversation sync path
-- bootstrap authoritative refresh is now race-covered: a stale bootstrap page cannot overwrite a later committed runtime event that arrived while the refresh was in flight
-- concurrent-client interleaving is now race-covered: a hydrating client and a live client converge to the same committed snapshot without duplicate rows when the same committed advancement reaches them through refresh vs live-event paths
-- ordinary authoritative hydrates no longer clear/replay the TUI normal-buffer scrollback; only Category C continuity recovery paths are still allowed to rebuild committed ongoing history
-- compaction completed/failed no longer synthesize transcript rows before persistence; the persisted `local_entry_added` event is the sole transcript source for compaction notices/errors
-- bare committed `conversation_updated` suppression is now replacement-safe: it only collapses into a following rich event when both represent the same committed tail count
-- ongoing error refresh no longer relies on broad plain `conversation_updated`; the dedicated `ongoing_error_updated` event now drives authoritative set/clear refresh
-- regression coverage exists for the committed-coordinate runtime row path and the compaction single-authority path
-- rendered committed-ongoing regression coverage exists for the queued-follow-up visibility/order lifecycle before the assistant-final / queued-user slice

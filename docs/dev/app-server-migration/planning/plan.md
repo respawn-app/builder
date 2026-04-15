@@ -10,130 +10,123 @@ Phase numbers are historical labels. They are kept for continuity, not because w
 
 Current shipping path:
 
-1. Phase 6B: finish transcript hardening so current app-server build is shippable
+1. Phase 2 residual: finish the current-TUI server boundary and guardrails
 
 Not on the shipping critical path:
 
-- Phase 2 residual resource-surface work
 - Phase 8 shared frontend transcript architecture refactor
 
 ## Open Work
 
-### Phase 6B: Transcript Divergence Hardening
+### Phase 2 Residual: Resource Surfaces And Event Hub
 
-Goal: remove the currently reproducing transcript failures without blocking shipment on a larger frontend transcript architecture rewrite.
+Goal: finish only the server-owned reads, guardrails, and transport semantics required for the current TUI to run correctly against one device-global server.
+
+Already landed before this residual phase:
+
+- active-session hydration via `session.getMainView` / `run.get`-style reads
+- active run identity and durable run lifecycle metadata
+- transport-neutral process list/get plus `kill` / `inline-output` control
+- active-session live activity seam with explicit lag failure semantics
+- initial `client_request_id` duplicate suppression on the headless prompt-submit path
+
+This section is intentionally only the residual work after `planning/phase-2-checkpoint.md`.
+It must not re-list the already-landed run/process/main-view foundation slice as open implementation work.
+
+Everything not required to ship the current TUI on one device-global server is deferred to `docs/dev/app-server-migration/planning/phase-2-deferred.md`.
 
 Requirements for this phase:
 
-- [x] committed transcript truth is derived only from authoritative transcript pages plus explicitly committed runtime events
-- [ ] ordinary successful turns do not call `requestRuntimeTranscriptSync()` unless continuity was actually lost
-- [x] same-session transcript divergence remains a bug; only Category C continuity-loss paths may reissue committed ongoing scrollback
-- [x] live commentary / streaming UI state is not allowed to mutate committed transcript state implicitly
-- [x] compaction remains ordinary same-session committed progression, not transcript replacement
-
-Implementation workstreams:
+- [ ] current TUI startup, project picker, and session picker can hydrate from typed project/session reads without CLI-local metadata stitching
+- [ ] exactly one app-server process may operate on a persistence root at a time; a second server process fails explicitly instead of racing on the same database or artifact tree
+- [ ] same-session multi-client is temporarily restricted: multiple clients may attach and read, but exactly one client may control or mutate a session at a time
+- [ ] loopback and real transport preserve the same TUI-critical DTOs, run control semantics, and streaming behavior
+- [ ] database and migration boundaries remain clean enough to extend later for GUI frontends without introducing speculative resource systems now
 
 Dependency note:
 
-- land `6B.2` and `6B.3` before `6B.1` and `6B.4`; otherwise frontend cleanup will keep reintroducing compensating logic around a still-ambiguous runtime commit contract and hydrate policy
+- land `2R.1` before `2R.2` so startup/session hydration uses typed reads before we tighten server/control ownership rules
+- land `2R.2` before `2R.3` so single-server and single-controller guardrails are explicit before we call the TUI path shippable
+- land `2R.4` alongside each remaining TUI-relevant mutating action instead of as a cleanup pass afterward
 
-#### 6B.1 Frontend committed-transcript application cleanup
+#### 2R.1 Minimal project/session reads for current TUI startup
 
-Scope: `cli/app/ui_runtime_adapter.go`, `cli/app/ui_runtime_sync.go`, `cli/app/ui.go`
+Scope: `server/projectview/*`, `server/sessionview/*`, `shared/serverapi/*`, `shared/client/*`, startup/picker consumers in `cli/app/*`
 
-- [x] first add failing regression cases in `ui_runtime_adapter_test.go` / `ui_native_scrollback_integration_test.go` for each branch being changed, then change code, then mark the corresponding live-matrix item
-- [x] committed events whose hidden prefix starts before the loaded tail window now trim that off-screen overlap and reconcile only the visible overlap/suffix instead of hydrating immediately
-- [x] committed events skipped because they are fully off-screen still advance local transcript revision / committed-count metadata so later fence events do not look like unexplained continuity loss
-- [x] refactor `shouldRecoverCommittedTranscriptFromConversationUpdate` so it does not infer transcript truth from event kind alone and only escalates on explicit committed continuity loss
-- [x] refactor `deferProjectedCommittedTail` and `mergeDeferredCommittedTailIntoEvent` so deferred rows are created only for known queued-user committed flushes and can merge only once into the next contiguous committed event
-- [x] make `deferredCommittedTail` clearing explicit on hydrate, disconnect, session switch, authoritative invalidation, and committed continuity loss
-- [x] make same-revision authoritative page handling explicit in `applyRuntimeTranscriptPageWithRecovery`: pure append, authoritative empty-ongoing clear, exact committed-tail replacement after continuity loss
+Entry criteria for implementation:
 
-#### 6B.2 Runtime committed-event contract audit
+- the server exposes enough typed reads for startup to answer, without CLI-local metadata stitching: `project.list`, `project.getOverview`, `session.listByProject`, and the current binding or registration state already needed by the existing startup flow
+- those reads include the minimum fields the current TUI actually renders: project id, display name, root path, availability, workspace summary data, session counts, latest activity, and session summary rows
 
-Scope: `server/runtime/*.go`, `server/runtimeview/projection.go`, `shared/clientui/runtime_events.go`
+- [ ] define the minimal project/session hydration surface needed by the current startup and picker UX: `project.list`, `project.getOverview`, `session.listByProject`, workspace summaries, availability, session counts, latest activity, and binding/registration state where already required by the TUI flow
+- [ ] remove remaining startup or picker decisions that still depend on CLI-owned metadata stitching when the same result should come from typed server reads
+- [ ] make project/session picker flows consume the same transport-neutral DTOs in loopback and real-server mode
+- [ ] add regression coverage proving dormant project/session picker hydration does not mutate persistence state and does not require active runtime presence
 
-- [x] direct user flush, queued user flush, persisted local entry, and cache warning paths now emit only their rich committed event and no extra committed `conversation_updated` afterward
-- [x] compaction completed/failed no longer synthesize transcript rows before persistence; the persisted `local_entry_added` event is the only compaction transcript source across runtime, projection, and client layers
-- [x] ongoing error refresh no longer relies on broad plain `conversation_updated`; a dedicated `ongoing_error_updated` event now drives authoritative ongoing-error set/clear refresh
-- [x] generic committed `conversation_updated` emission is now explicitly narrowed: tool-result mirror `llm.RoleTool` messages do not emit it, and the remaining generic committed-advance path is reserved for persisted message rows that do not already have a richer runtime event
+Deliverable for `2R.1`:
 
-- [x] lower-layer regression coverage now exists in `server/runtime/*test.go` and `shared/clientui/runtime_events_test.go` for committed `conversation_updated` narrowing and `ongoing_error_updated` refresh semantics
-- [x] audit `emitConversationUpdated` and `emitCommittedTranscriptAdvanced` callsites and list which ones are allowed to carry `CommittedTranscriptChanged` (plain transient updates are now restricted to `AppendLocalEntry` and `clearStreamingAssistantState`; committed generic advancement is restricted to `appendMessage` visible rows without a richer runtime event plus explicit history-replacement paths)
-- [x] lock `step_executor.go` assistant-final ordering to: persist final assistant row, then emit the rich committed `assistant_message` event with the correct committed range, with no fallback committed hydrate path needed for ordinary success
-- [x] lock `tool_executor.go` tool-start ordering to: persist tool call row, then emit `tool_call_started` with the correct committed range and no same-turn bare committed `conversation_updated`
-- [x] lock `tool_executor.go` tool-complete ordering to: persist tool result row, then emit `tool_call_completed` with the correct committed range and no same-turn bare committed `conversation_updated`
-- [x] lock queued-user flush ordering so `user_message_flushed` remains the only committed advancement signal for that committed row and does not require pre-append hydrate
-- [x] lock reviewer terminal/local-entry paths so persisted `reviewer_status` / related terminal local entries remain the only transcript source and do not force pre-append hydrate through extra committed advancement
-- [x] finish the remaining plain non-committed `conversation_updated` callsite audit by enumerating each surviving emitter (`AppendLocalEntry` and `clearStreamingAssistantState`) and documenting why they stay
+- the current TUI can render startup project selection, workspace binding state, and per-project session inventory from typed reads only
 
-#### 6B.3 Hydration gate tightening
+#### 2R.2 Single-server and single-controller guardrails
 
-Scope: `cli/app/ui_runtime_adapter.go`, `cli/app/ui_runtime_sync.go`, `shared/clientui/runtime_events.go`
+Scope: app-server bootstrap, persistence-root locking, session control or runtime lease ownership, TUI session attach/control paths
 
-- [x] ordinary runtime-backed submit completion no longer requests hydrate unless queued-drain flow explicitly needs authoritative transcript state first
-- [x] deferred committed user-flush tails are now included in the client-side committed baseline when later committed `conversation_updated` events are evaluated for continuity loss
-- [x] all remaining ongoing-tail hydrate requests now use explicit sync causes (`bootstrap`, `queued_drain`, `committed_conversation_updated`, `committed_gap`, `dirty_follow_up`, `continuity_recovery`) instead of the old generic no-arg transcript sync path
-- [x] non-contiguous committed events now record the exact divergence reason in transcript diagnostics before transitioning into authoritative recovery
+- [ ] enforce one app-server process per persistence root with an explicit failure path when another server already owns that root
+- [ ] enforce temporary same-session control exclusivity: many clients may attach or read, but only one client may submit/control/mutate a session at a time
+- [ ] mark that same-session control restriction explicitly as temporary in code comments where the contract is enforced
+- [ ] add coverage proving a second client can still attach or read while a controlling client exists, but receives a deterministic rejection for mutating actions
 
-- [ ] first add failing regression cases in `ui_runtime_adapter_test.go` for each hydrate trigger being removed or retained, then change code, then mark the corresponding live-matrix item
-- [x] enumerate all ongoing-tail hydrate callsites and reduce them to explicit causes only: disconnect/reconnect, `requires_hydration`, startup/session-target bootstrap, or committed continuity loss
-- [x] make contiguous committed events apply locally without hydrate even when a plain `conversation_updated` is nearby in the same turn
-- [x] make non-contiguous committed events log the exact divergence through diagnostics/debug and transition into authoritative recovery instead of silently accepting stale state
-- [x] remove ordinary successful-turn hydrate fallbacks that are currently masking same-session logic bugs
+Deliverable for `2R.2`:
 
-#### 6B.4 Live overlay and ongoing-surface hardening
+- the current TUI has clear single-server and single-controller semantics instead of relying on accidental process or client exclusivity
 
-Scope: `cli/app/ui_runtime_adapter.go`, `cli/app/ui_native_history.go`, `cli/app/ui_runtime_connection.go`
+#### 2R.3 TUI-critical live surfaces only
 
-- [x] first add failing regression cases in `ui_native_scrollback_integration_test.go` / `ui_projected_runtime_test.go`, then change code, then mark the corresponding live-matrix item
-- [x] added a rendered committed-ongoing regression in `ui_native_scrollback_integration_test.go` for the queued-follow-up visibility/order lifecycle before continuing the assistant-final / queued-user slice
-- [x] fix the assistant-final / deferred-user boundary proved by `TestQueuedFollowUpRemainsHiddenUntilFinalCatchUpThenAppendsOnceInRenderedOngoing`: tighten `mergeDeferredCommittedTailIntoEvent` plus `shouldClearAssistantStreamForCommittedAssistantEvent` so the final assistant commit clears the matching live overlay exactly once, merges the deferred queued-user tail exactly once, and never leaves stale or duplicated final text behind
-- [x] fix tool lifecycle row visibility on the rendered ongoing surface so committed tool start/result rows remain visible without hydrate during same-turn assistant replies
-- [x] fix committed queued-user visibility on the rendered ongoing surface so committed user rows remain visible without hydrate after deferred flush merge and after ordinary queued-user commit
-- [x] keep TUI ongoing-buffer rebuilds restricted to Category C recovery paths only in `ui_native_history.go`; same-session bugs must not clear/replay scrollback
+Scope: `server/sessionactivity/*`, process read/control or output paths that the current TUI actually exercises, loopback/transport parity
 
-#### 6B.5 Regression and proof coverage
+- [ ] keep only the live surfaces the current TUI materially needs on the app-server boundary: session activity, process inspection/control, and any process-output access already required by `/ps`
+- [ ] keep asks and approvals transcript-driven for now; do not introduce first-class ask/approval resources or prompt-activity streams in this phase
+- [ ] define gap/backpressure semantics for the TUI-critical live streams we keep, with explicit rehydrate/resubscribe behavior
+- [ ] add black-box loopback plus real-transport tests proving the current TUI-critical live feeds behave the same across transports
 
-Scope: `cli/app/ui_runtime_adapter_test.go`, `cli/app/ui_native_scrollback_integration_test.go`, `cli/app/ui_projected_runtime_test.go`, `server/runtime/*test.go`, `shared/clientui/*test.go`
+Deliverable for `2R.3`:
 
-- [x] complete the committed-path regression matrix with one targeted test each for: queued user flush, tool start, tool result, tool finalize, assistant final answer, reviewer terminal message
-- [x] add lower-layer regression coverage that compaction status events do not project transcript rows before persistence and that persisted `local_entry_added` remains the only committed compaction source
-- [x] add runtime-loop regression coverage for `ongoing_error_updated` set/clear lifecycle through authoritative refresh
-- [x] add tests for startup authoritative refresh racing with local committed events and verify no duplicate or stale committed rows remain
-- [x] add tests for concurrent-client interleaving where one client hydrates while another client is receiving live committed events
-- [x] add tests that plain `conversation_updated` never requests hydrate and committed `conversation_updated` requests hydrate only on actual continuity loss
+- the current TUI uses only the minimal live server surfaces it actually needs, with no extra future-facing stream families added yet
 
-Live reproduction matrix:
+#### 2R.4 `client_request_id` idempotency expansion for TUI-critical mutations
 
-- [x] per-turn `Transcript sync bug` banner no longer appears during ordinary successful turns
-- [x] tool lifecycle rows no longer disappear from ongoing transcript during normal runs
-- [x] committed user messages no longer disappear from ongoing transcript
-- [x] compaction notices remain visible in the committed transcript tail
-- [x] commentary/live area no longer flickers during updates
-- [x] commentary streams incrementally where expected instead of repainting as one full message
-- [x] assistant final commit no longer leaves duplicated or stale live text in the ongoing area
+Scope: mutating APIs the current TUI can retry across loopback/transport boundaries: prompt submission, session lifecycle, process control, project/workspace mutation, and any session-control mutations retained after `2R.2`
 
-Manual/live validation note:
+Named contract to preserve while implementing:
 
-- [x] live reproduction matrix ownership is user-driven validation against rebuilt binaries; engineering work here is to keep tests/diagnostics aligned with each reproduced failure class and update this matrix honestly as fixes land
+- dedup scope is `(method, resource identity, client_request_id)` rather than process-global request ids
+- dedup retention is persisted and time-bounded; the initial residual-phase target is a documented default window shared across mutating APIs, not ad hoc per-handler memory caches
+- exact same payload replays the original outcome, payload mismatch rejects deterministically, and cancellation or timeout does not become a cached success result
 
-Non-goals:
+- [ ] introduce one persisted dedup store or table with explicit scope, payload fingerprinting, retention window, and mismatch rejection semantics
+- [ ] apply that dedup contract to the remaining TUI-relevant mutable operations not already covered, including process mutations and project/session lifecycle mutations
+- [ ] make duplicate-retry outcomes deterministic: same payload replays the original outcome, mismatched payload rejects cleanly, cancellations are not cached as permanent success
+- [ ] add retry/race coverage for the retained TUI-critical mutable operations under the temporary single-controller model
 
-- do not expand this phase into a shared frontend transcript architecture rewrite
-- do not block shipment on desktop/web-oriented transcript reducer work
+Deliverable for `2R.4`:
 
-### Phase 2 Residual: Resource Surfaces And Event Hub
+- transport retries are safe across the current TUI write surface, not only for prompt submission
 
-Goal: finish the transport-neutral resource surfaces that were intentionally deferred while shipping the app-server migration.
+#### 2R.5 Phase proof and rollout
 
-Concrete tasks:
+Scope: focused acceptance coverage plus docs and contract cleanup
 
-- [ ] add complete project read surfaces needed by startup, picker, and session flows
-- [ ] add ask resource identities plus transport-neutral read APIs
-- [ ] add approval resource identities plus transport-neutral read APIs
-- [ ] finish event-hub stream classes and retention semantics, including process-output streaming on the real protocol boundary
-- [ ] extend `client_request_id` idempotency coverage across the remaining mutating APIs
+- [ ] add acceptance coverage proving the current TUI can run end-to-end against one device-global server using only the retained project/session/process/live surfaces
+- [ ] document the final resource or stream taxonomy and retention semantics in the migration spec once code is landed
+- [ ] audit the active plan and move completed residual Phase 2 slices into `plan-completed.md` so the remaining backlog stays readable
+
+Non-goals for this phase:
+
+- do not add broad remote filesystem inspection APIs
+- do not move transcript storage into the database
+- do not add first-class ask/approval resource storage in this phase; asks and approvals remain transcript-driven for the current TUI
+- do not add prompt-activity stream families or other optional routes needed only for future GUI frontends
+- do not start desktop or web-specific rendering work here; this phase is server contract work
 
 ### Phase 8: Shared Frontend Transcript Architecture
 
@@ -147,31 +140,3 @@ Concrete tasks:
 - [ ] replace event-kind-driven transcript handling with explicit transcript ops
 - [ ] formalize one committed transcript model plus one live overlay model for frontend consumers
 - [ ] add deterministic transcript trace replay coverage so field failures can be reproduced against the shared reducer
-
-## Execution Order
-
-Release-critical order:
-
-1. Phase 6B
-2. Phase 2 residual
-3. Phase 8
-
-## Exit Criteria
-
-### Phase 6B exit
-
-- [x] live reproduction matrix is green on current builds
-- [ ] focused regression tests cover every committed-path bug class fixed in this phase
-- [x] ordinary successful turns do not hydrate unless continuity was actually lost
-- [ ] every remaining hydrate callsite is explained by one of the explicit causes listed in `6B.3`
-
-### Phase 2 residual exit
-
-- [ ] project, ask, and approval read surfaces exist on the transport-neutral boundary
-- [ ] process-output streaming semantics are defined and tested on the real protocol boundary
-- [ ] remaining mutating APIs have consistent `client_request_id` idempotency behavior
-
-### Phase 8 exit
-
-- [ ] transcript semantics are shared through one reducer/op model
-- [ ] real transcript failures can be replayed deterministically against that reducer
