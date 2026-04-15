@@ -9,11 +9,11 @@ import (
 	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/server/session"
-	"builder/server/tools"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
 	triggerhandofftool "builder/server/tools/triggerhandoff"
 	"builder/shared/config"
+	"builder/shared/toolspec"
 )
 
 type RuntimeWiring struct {
@@ -37,11 +37,11 @@ type RuntimeWiringOptions struct {
 	FastMode *runtime.FastModeState
 }
 
-func NewRuntimeWiring(store *session.Store, active config.Settings, enabledTools []tools.ID, workspaceRoot string, mgr *auth.Manager, logger Logger, opts RuntimeWiringOptions) (*RuntimeWiring, error) {
+func NewRuntimeWiring(store *session.Store, active config.Settings, enabledTools []toolspec.ID, workspaceRoot string, mgr *auth.Manager, logger Logger, opts RuntimeWiringOptions) (*RuntimeWiring, error) {
 	return NewRuntimeWiringWithBackground(store, active, enabledTools, workspaceRoot, mgr, logger, nil, opts)
 }
 
-func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings, enabledTools []tools.ID, workspaceRoot string, mgr *auth.Manager, logger Logger, background *shelltool.Manager, opts RuntimeWiringOptions) (*RuntimeWiring, error) {
+func NewRuntimeWiringWithBackground(store *session.Store, active config.Settings, enabledTools []toolspec.ID, workspaceRoot string, mgr *auth.Manager, logger Logger, background *shelltool.Manager, opts RuntimeWiringOptions) (*RuntimeWiring, error) {
 	promptHistory, err := store.ReadPromptHistory()
 	if err != nil {
 		return nil, err

@@ -11,6 +11,7 @@ import (
 	"builder/server/tools"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
 )
 
 func TestServiceListProcessesIncludesRunOwnership(t *testing.T) {
@@ -31,7 +32,7 @@ func TestServiceListProcessesIncludesRunOwnership(t *testing.T) {
 	}
 	result, err := tool.Call(context.Background(), tools.Call{
 		ID:     "call-1",
-		Name:   tools.ToolExecCommand,
+		Name:   toolspec.ToolExecCommand,
 		Input:  input,
 		RunID:  "run-1",
 		StepID: "step-1",
@@ -102,7 +103,7 @@ func TestServiceListProcessesFiltersByOwnerRunID(t *testing.T) {
 		if marshalErr != nil {
 			t.Fatalf("marshal input: %v", marshalErr)
 		}
-		if _, err := tool.Call(context.Background(), tools.Call{ID: runID, Name: tools.ToolExecCommand, Input: input, RunID: runID, StepID: runID + "-step"}); err != nil {
+		if _, err := tool.Call(context.Background(), tools.Call{ID: runID, Name: toolspec.ToolExecCommand, Input: input, RunID: runID, StepID: runID + "-step"}); err != nil {
 			t.Fatalf("tool call for %s: %v", runID, err)
 		}
 	}
@@ -135,7 +136,7 @@ func TestServiceGetInlineOutputReturnsManagerPreview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal input: %v", err)
 	}
-	result, err := tool.Call(context.Background(), tools.Call{ID: "call-inline", Name: tools.ToolExecCommand, Input: input, RunID: "run-1", StepID: "step-1"})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-inline", Name: toolspec.ToolExecCommand, Input: input, RunID: "run-1", StepID: "step-1"})
 	if err != nil {
 		t.Fatalf("tool call: %v", err)
 	}
@@ -174,7 +175,7 @@ func TestServiceKillProcessSignalsManagerEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal input: %v", err)
 	}
-	result, err := tool.Call(context.Background(), tools.Call{ID: "call-kill", Name: tools.ToolExecCommand, Input: input, RunID: "run-1", StepID: "step-1"})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "call-kill", Name: toolspec.ToolExecCommand, Input: input, RunID: "run-1", StepID: "step-1"})
 	if err != nil {
 		t.Fatalf("tool call: %v", err)
 	}

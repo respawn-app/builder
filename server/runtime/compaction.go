@@ -10,9 +10,9 @@ import (
 
 	"builder/prompts"
 	"builder/server/llm"
-	"builder/server/tools"
 	"builder/shared/cachewarn"
 	"builder/shared/compaction"
+	"builder/shared/toolspec"
 )
 
 type compactionMode string
@@ -1117,7 +1117,7 @@ func (e *Engine) syncCompactionSoonReminderIssuedFromItems(items []llm.ResponseI
 
 func (e *Engine) triggerHandoffConfigured() bool {
 	for _, id := range e.cfg.EnabledTools {
-		if id == tools.ToolTriggerHandoff {
+		if id == toolspec.ToolTriggerHandoff {
 			return true
 		}
 	}

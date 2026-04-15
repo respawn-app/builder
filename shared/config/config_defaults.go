@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"builder/server/tools"
 	"builder/shared/compaction"
 	"builder/shared/theme"
+	"builder/shared/toolspec"
 )
 
 const (
@@ -190,9 +190,9 @@ func writeRootConfigLines(builder *strings.Builder, lines []defaultConfigLine) {
 	}
 }
 
-func writeToolLines(builder *strings.Builder, enabledTools map[tools.ID]bool) {
+func writeToolLines(builder *strings.Builder, enabledTools map[toolspec.ID]bool) {
 	defaults := defaultEnabledToolMap()
-	ids := tools.CatalogIDs()
+	ids := toolspec.CatalogIDs()
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	for _, id := range ids {
 		configured, ok := enabledTools[id]

@@ -8,8 +8,8 @@ import (
 
 	"builder/server/launch"
 	"builder/server/session"
-	"builder/server/tools"
 	"builder/shared/config"
+	"builder/shared/toolspec"
 )
 
 type Options struct {
@@ -53,10 +53,10 @@ func effectiveSettings(base config.Settings, locked *session.LockedContract) con
 	return launch.EffectiveSettings(base, locked)
 }
 
-func activeToolIDs(settings config.Settings, source config.SourceReport, locked *session.LockedContract) []tools.ID {
+func activeToolIDs(settings config.Settings, source config.SourceReport, locked *session.LockedContract) []toolspec.ID {
 	return launch.ActiveToolIDs(settings, source, locked)
 }
 
-func dedupeSortToolIDs(ids []tools.ID) []tools.ID {
+func dedupeSortToolIDs(ids []toolspec.ID) []toolspec.ID {
 	return launch.DedupeSortToolIDs(ids)
 }

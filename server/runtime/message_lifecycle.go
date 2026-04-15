@@ -8,7 +8,7 @@ import (
 
 	"builder/server/llm"
 	"builder/server/session"
-	"builder/server/tools"
+	"builder/shared/toolspec"
 )
 
 type defaultMessageLifecycle struct {
@@ -127,7 +127,7 @@ func (r *persistedHandoffRecovery) ApplyMessage(msg llm.Message) {
 		return
 	}
 	for _, call := range msg.ToolCalls {
-		if tools.ID(strings.TrimSpace(call.Name)) != tools.ToolTriggerHandoff {
+		if toolspec.ID(strings.TrimSpace(call.Name)) != toolspec.ToolTriggerHandoff {
 			continue
 		}
 		callID := strings.TrimSpace(call.ID)
@@ -136,7 +136,7 @@ func (r *persistedHandoffRecovery) ApplyMessage(msg llm.Message) {
 		}
 		r.toolCalls[callID] = llm.ToolCall{
 			ID:    callID,
-			Name:  string(tools.ToolTriggerHandoff),
+			Name:  string(toolspec.ToolTriggerHandoff),
 			Input: append(json.RawMessage(nil), call.Input...),
 		}
 	}
@@ -150,7 +150,7 @@ func (r *persistedHandoffRecovery) ApplyToolCompletion(payload []byte) error {
 	if err := json.Unmarshal(payload, &completion); err != nil {
 		return fmt.Errorf("decode tool_completed event: %w", err)
 	}
-	if tools.ID(strings.TrimSpace(completion.Name)) != tools.ToolTriggerHandoff || completion.IsError {
+	if toolspec.ID(strings.TrimSpace(completion.Name)) != toolspec.ToolTriggerHandoff || completion.IsError {
 		delete(r.toolCalls, strings.TrimSpace(completion.CallID))
 		return nil
 	}
@@ -200,7 +200,7 @@ func (r *persistedHandoffRecovery) PendingRequest() (*handoffRequest, bool) {
 }
 
 func handoffRequestFromToolCall(call llm.ToolCall) (*handoffRequest, bool) {
-	if tools.ID(strings.TrimSpace(call.Name)) != tools.ToolTriggerHandoff {
+	if toolspec.ID(strings.TrimSpace(call.Name)) != toolspec.ToolTriggerHandoff {
 		return nil, false
 	}
 	var input struct {

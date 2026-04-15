@@ -1,6 +1,10 @@
 package patch
 
-import "regexp"
+import (
+	"regexp"
+
+	patchformat "builder/shared/transcript/patchformat"
+)
 
 const hunkMaxFuzz = 8
 
@@ -8,7 +12,7 @@ var unifiedHunkHeaderPattern = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)
 
 type editHunk struct {
 	header  hunkHeader
-	changes []ChangeLine
+	changes []patchformat.ChangeLine
 }
 
 type hunkHeader struct {

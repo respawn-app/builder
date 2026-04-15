@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"builder/server/session"
-	"builder/server/tools"
 	"builder/shared/config"
+	"builder/shared/toolspec"
 )
 
 func TestEffectiveSettingsKeepsBaseThinkingLevelEvenWhenSessionIsLocked(t *testing.T) {
@@ -19,52 +19,52 @@ func TestEffectiveSettingsKeepsBaseThinkingLevelEvenWhenSessionIsLocked(t *testi
 }
 
 func TestActiveToolIDs_DerivesMultiToolDefaultFromModelCapability(t *testing.T) {
-	settings := config.Settings{Model: "gpt-5.3-codex", EnabledTools: map[tools.ID]bool{tools.ToolShell: true, tools.ToolMultiToolUseParallel: false}}
+	settings := config.Settings{Model: "gpt-5.3-codex", EnabledTools: map[toolspec.ID]bool{toolspec.ToolShell: true, toolspec.ToolMultiToolUseParallel: false}}
 	source := config.SourceReport{Sources: map[string]string{"tools.multi_tool_use_parallel": "default"}}
 
 	ids := activeToolIDs(settings, source, nil)
-	if !containsToolID(ids, tools.ToolMultiToolUseParallel) {
-		t.Fatalf("expected %s to be enabled by default for codex model, got %+v", tools.ToolMultiToolUseParallel, ids)
+	if !containsToolID(ids, toolspec.ToolMultiToolUseParallel) {
+		t.Fatalf("expected %s to be enabled by default for codex model, got %+v", toolspec.ToolMultiToolUseParallel, ids)
 	}
 
 	settings.Model = "gpt-5.4"
 	ids = activeToolIDs(settings, source, nil)
-	if containsToolID(ids, tools.ToolMultiToolUseParallel) {
-		t.Fatalf("did not expect %s default for gpt-5.4, got %+v", tools.ToolMultiToolUseParallel, ids)
+	if containsToolID(ids, toolspec.ToolMultiToolUseParallel) {
+		t.Fatalf("did not expect %s default for gpt-5.4, got %+v", toolspec.ToolMultiToolUseParallel, ids)
 	}
 }
 
 func TestActiveToolIDs_ConfigSourceOverridesDerivedMultiToolDefault(t *testing.T) {
-	settings := config.Settings{Model: "gpt-5.3-codex", EnabledTools: map[tools.ID]bool{tools.ToolShell: true, tools.ToolMultiToolUseParallel: false}}
+	settings := config.Settings{Model: "gpt-5.3-codex", EnabledTools: map[toolspec.ID]bool{toolspec.ToolShell: true, toolspec.ToolMultiToolUseParallel: false}}
 	ids := activeToolIDs(settings, config.SourceReport{Sources: map[string]string{"tools.multi_tool_use_parallel": "file"}}, nil)
-	if containsToolID(ids, tools.ToolMultiToolUseParallel) {
+	if containsToolID(ids, toolspec.ToolMultiToolUseParallel) {
 		t.Fatalf("expected explicit file disable to win, got %+v", ids)
 	}
 
-	settings = config.Settings{Model: "gpt-5.4", EnabledTools: map[tools.ID]bool{tools.ToolShell: true, tools.ToolMultiToolUseParallel: true}}
+	settings = config.Settings{Model: "gpt-5.4", EnabledTools: map[toolspec.ID]bool{toolspec.ToolShell: true, toolspec.ToolMultiToolUseParallel: true}}
 	ids = activeToolIDs(settings, config.SourceReport{Sources: map[string]string{"tools.multi_tool_use_parallel": "file"}}, nil)
-	if !containsToolID(ids, tools.ToolMultiToolUseParallel) {
+	if !containsToolID(ids, toolspec.ToolMultiToolUseParallel) {
 		t.Fatalf("expected explicit file enable to win, got %+v", ids)
 	}
 }
 
 func TestActiveToolIDs_MissingSourceEntryStillUsesDerivedMultiToolDefault(t *testing.T) {
-	settings := config.Settings{Model: "gpt-5.3-codex", EnabledTools: map[tools.ID]bool{tools.ToolShell: true, tools.ToolMultiToolUseParallel: false}}
+	settings := config.Settings{Model: "gpt-5.3-codex", EnabledTools: map[toolspec.ID]bool{toolspec.ToolShell: true, toolspec.ToolMultiToolUseParallel: false}}
 	ids := activeToolIDs(settings, config.SourceReport{}, nil)
-	if !containsToolID(ids, tools.ToolMultiToolUseParallel) {
+	if !containsToolID(ids, toolspec.ToolMultiToolUseParallel) {
 		t.Fatalf("expected missing source entry to behave like default, got %+v", ids)
 	}
 }
 
 func TestActiveToolIDs_UsesLockedEnabledToolsVerbatim(t *testing.T) {
-	locked := &session.LockedContract{EnabledTools: []string{string(tools.ToolShell), string(tools.ToolMultiToolUseParallel)}}
+	locked := &session.LockedContract{EnabledTools: []string{string(toolspec.ToolShell), string(toolspec.ToolMultiToolUseParallel)}}
 	ids := activeToolIDs(config.Settings{Model: "gpt-5.4"}, config.SourceReport{}, locked)
-	if !containsToolID(ids, tools.ToolMultiToolUseParallel) {
+	if !containsToolID(ids, toolspec.ToolMultiToolUseParallel) {
 		t.Fatalf("expected locked enabled tools to be used verbatim, got %+v", ids)
 	}
 }
 
-func containsToolID(ids []tools.ID, want tools.ID) bool {
+func containsToolID(ids []toolspec.ID, want toolspec.ID) bool {
 	for _, id := range ids {
 		if id == want {
 			return true
