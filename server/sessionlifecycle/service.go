@@ -245,51 +245,45 @@ func resolveForkUserMessageIndexFromTranscriptEntry(ctx context.Context, store *
 	if transcriptEntryIndex < 0 {
 		return 0, errors.New("rollback fork transcript entry index must be >= 0")
 	}
-	type forkTranscriptTargetResolved struct {
-		userIndex int
-	}
-	currentEntryIndex := -1
-	currentUserIndex := 0
-	var resolved *forkTranscriptTargetResolved
+	scan := runtime.NewPersistedTranscriptScan(runtime.PersistedTranscriptScanRequest{Offset: 0, Limit: transcriptEntryIndex + 1})
+	resolvedUserIndex := 0
+	resolved := false
 	if err := store.WalkEvents(func(evt session.Event) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-		entries, replace, err := runtime.VisibleChatEntriesFromPersistedEvent(evt)
-		if err != nil {
+		if err := scan.ApplyPersistedEvent(evt); err != nil {
 			return err
 		}
-		if replace {
-			currentEntryIndex = -1
-			currentUserIndex = 0
+		if scan.TotalEntries() <= transcriptEntryIndex {
+			return nil
 		}
-		for _, entry := range entries {
-			currentEntryIndex++
-			if strings.TrimSpace(entry.Role) == "user" {
-				currentUserIndex++
-			}
-			if currentEntryIndex != transcriptEntryIndex {
-				continue
-			}
-			if strings.TrimSpace(entry.Role) != "user" {
-				return fmt.Errorf("rollback fork transcript entry %d is not a user message", transcriptEntryIndex)
-			}
-			resolved = &forkTranscriptTargetResolved{userIndex: currentUserIndex}
-			return io.EOF
+		page := scan.CollectedPageSnapshot()
+		if transcriptEntryIndex >= len(page.Entries) {
+			return fmt.Errorf("rollback fork transcript entry index %d is out of range", transcriptEntryIndex)
 		}
-		return nil
+		if strings.TrimSpace(page.Entries[transcriptEntryIndex].Role) != "user" {
+			return fmt.Errorf("rollback fork transcript entry %d is not a user message", transcriptEntryIndex)
+		}
+		for idx := 0; idx <= transcriptEntryIndex; idx++ {
+			if strings.TrimSpace(page.Entries[idx].Role) == "user" {
+				resolvedUserIndex++
+			}
+		}
+		resolved = true
+		return io.EOF
 	}); err != nil {
-		if errors.Is(err, io.EOF) && resolved != nil {
-			return resolved.userIndex, nil
+		if errors.Is(err, io.EOF) && resolved {
+			return resolvedUserIndex, nil
 		}
 		return 0, err
 	}
-	if resolved != nil {
-		return resolved.userIndex, nil
+	if resolved {
+		return resolvedUserIndex, nil
 	}
-	if currentEntryIndex < transcriptEntryIndex {
+	if scan.TotalEntries() <= transcriptEntryIndex {
 		return 0, fmt.Errorf("rollback fork transcript entry index %d is out of range", transcriptEntryIndex)
 	}
 	return 0, fmt.Errorf("rollback fork transcript entry index %d is out of range", transcriptEntryIndex)

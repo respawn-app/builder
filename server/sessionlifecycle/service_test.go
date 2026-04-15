@@ -2,6 +2,7 @@ package sessionlifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
 )
 
 func testIntPtr(v int) *int { return &v }
@@ -245,6 +247,48 @@ func TestServiceResolveTransitionForkRollbackRejectsNonUserTranscriptEntryIndex(
 	})
 	if err == nil || !strings.Contains(err.Error(), "is not a user message") {
 		t.Fatalf("expected non-user transcript entry rejection, got %v", err)
+	}
+}
+
+func TestResolveForkUserMessageIndexFromTranscriptEntryIgnoresToolCompletedOrdinalDrift(t *testing.T) {
+	_, _, store := createPersistedSession(t)
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleUser, Content: "u1"}); err != nil {
+		t.Fatalf("append first user message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{
+		Role: llm.RoleAssistant,
+		ToolCalls: []llm.ToolCall{{
+			ID:    "call-1",
+			Name:  string(toolspec.ToolShell),
+			Input: json.RawMessage(`{"command":"pwd"}`),
+		}},
+	}); err != nil {
+		t.Fatalf("append assistant tool call: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "tool_completed", map[string]any{
+		"call_id":  "call-1",
+		"name":     string(toolspec.ToolShell),
+		"is_error": false,
+		"output":   json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`),
+	}); err != nil {
+		t.Fatalf("append tool_completed: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(toolspec.ToolShell)}); err != nil {
+		t.Fatalf("append tool message: %v", err)
+	}
+	if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal}); err != nil {
+		t.Fatalf("append assistant final: %v", err)
+	}
+	if _, err := store.AppendEvent("step-2", "message", llm.Message{Role: llm.RoleUser, Content: "u2"}); err != nil {
+		t.Fatalf("append second user message: %v", err)
+	}
+
+	got, err := resolveForkUserMessageIndexFromTranscriptEntry(context.Background(), store, 4)
+	if err != nil {
+		t.Fatalf("resolveForkUserMessageIndexFromTranscriptEntry: %v", err)
+	}
+	if got != 2 {
+		t.Fatalf("user message index = %d, want 2", got)
 	}
 }
 
