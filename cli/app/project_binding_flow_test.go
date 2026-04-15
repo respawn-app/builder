@@ -542,6 +542,47 @@ func TestEnsureInteractiveProjectBindingFormatsUnavailableBoundProjectError(t *t
 	}
 }
 
+func TestEnsureInteractiveProjectBindingFormatsInaccessibleBoundProjectError(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	binding, err := metadata.RegisterBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterBinding: %v", err)
+	}
+	store, err := metadata.Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service, err := projectview.NewMetadataService(store, "", "")
+	if err != nil {
+		t.Fatalf("NewMetadataService: %v", err)
+	}
+
+	server := &failingBindProjectServer{
+		testEmbeddedServer: &testEmbeddedServer{
+			cfg:               cfg,
+			containerDir:      config.ProjectSessionsRoot(cfg, binding.ProjectID),
+			projectViewClient: client.NewLoopbackProjectViewClient(service),
+		},
+		bindErr: metadata.ProjectUnavailableError{ProjectID: binding.ProjectID, RootPath: cfg.WorkspaceRoot, Availability: clientui.ProjectAvailabilityInaccessible},
+	}
+
+	_, err = ensureInteractiveProjectBinding(context.Background(), server)
+	if !errors.Is(err, metadata.ErrProjectUnavailable) {
+		t.Fatalf("ensureInteractiveProjectBinding error = %v, want ErrProjectUnavailable", err)
+	}
+	if got := err.Error(); !strings.Contains(got, "Restore access") || !strings.Contains(got, "inaccessible") || !strings.Contains(got, "builder rebind") {
+		t.Fatalf("error = %q, want inaccessible-root recovery guidance", got)
+	}
+}
+
 type failingBindProjectServer struct {
 	*testEmbeddedServer
 	bindErr error
