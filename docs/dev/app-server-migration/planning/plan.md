@@ -11,7 +11,6 @@ Phase numbers are historical labels. They are kept for continuity, not because w
 Current shipping path:
 
 1. Phase 6B: finish transcript hardening so current app-server build is shippable
-2. Phase 7: finish standalone polish and boundary proof needed for release confidence
 
 Not on the shipping critical path:
 
@@ -124,24 +123,6 @@ Non-goals:
 - do not expand this phase into a shared frontend transcript architecture rewrite
 - do not block shipment on desktop/web-oriented transcript reducer work
 
-### Phase 7: Standalone Polish And Boundary Proof
-
-Goal: finish the release-facing proof that Builder is operating correctly as an app-global server with the CLI/TUI as just one frontend.
-
-Concrete tasks:
-
-- [x] fix rollback selection targeting so `Esc Esc` / fork rollback uses the actually selected user message instead of jumping to an earlier unrelated message
-- [x] fix rollback selection viewport anchoring/highlighting so the selected rollback candidate stays visibly highlighted on screen in the detail overlay / native flow
-- [x] handle missing project, inaccessible project, and invalid attach target states cleanly across startup and attach flows
-- [x] add or enable CI boundary enforcement for client/server architectural cut lines
-- [x] make the acceptance suite runnable against external-daemon mode, covering the release-critical remote scenarios exercised in `cli/app/session_server_target_test.go`
-- [x] add tests that assert frontend projection state, transcript paging windows, native transcript flush queue, and transport caches are not treated as durable transcript truth
-- [x] reconcile deferred transport/protocol docs so the public/config docs and migration spec all describe direct-address attach (`server_host` + `server_port`) and fail-fast workspace binding consistently
-
-Deferred outside this slice:
-
-- real non-CLI client proof remains deferred to desktop/web client development instead of being faked inside Phase 7
-
 ### Phase 2 Residual: Resource Surfaces And Event Hub
 
 Goal: finish the transport-neutral resource surfaces that were intentionally deferred while shipping the app-server migration.
@@ -172,26 +153,17 @@ Concrete tasks:
 Release-critical order:
 
 1. Phase 6B
-2. Phase 7
-
-Then:
-
-3. Phase 2 residual
-4. Phase 8
+2. Phase 2 residual
+3. Phase 8
 
 ## Exit Criteria
 
 ### Phase 6B exit
 
-- [ ] live reproduction matrix is green on current builds
+- [x] live reproduction matrix is green on current builds
 - [ ] focused regression tests cover every committed-path bug class fixed in this phase
-- [ ] ordinary successful turns do not hydrate unless continuity was actually lost
+- [x] ordinary successful turns do not hydrate unless continuity was actually lost
 - [ ] every remaining hydrate callsite is explained by one of the explicit causes listed in `6B.3`
-
-### Phase 7 exit
-
-- [x] external-daemon acceptance suite is green (`cli/app/session_server_target_test.go`)
-- [ ] release-blocking startup/attach failure states are covered by tests
 
 ### Phase 2 residual exit
 

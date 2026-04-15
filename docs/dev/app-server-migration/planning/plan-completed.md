@@ -87,13 +87,24 @@ Outcome:
 - rollback/fork modeled as navigation to a different session target
 - TUI ongoing-buffer reissue restricted to external continuity-loss cases only
 
+### Phase 7: Standalone Polish And Boundary Proof
+
+Completed.
+
+Outcome:
+
+- rollback selection targeting/highlighting is fixed and covered
+- release-blocking startup and attach failure states are covered by tests
+- external-daemon acceptance proof is green
+- frontend caches/projection state are explicitly treated as non-durable transcript views
+- direct-address attach and fail-fast workspace binding docs are reconciled
+
 ## Still Partially Open Elsewhere
 
 These historical phases still have residual open work tracked in `plan.md`:
 
 - Phase 2: resource surfaces and event hub
 - Phase 6B: transcript divergence hardening
-- Phase 7: standalone polish and boundary proof
 - Phase 8: shared frontend transcript architecture
 
 ## Completed Phase 6B Slices
