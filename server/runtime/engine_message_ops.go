@@ -162,6 +162,11 @@ func (e *Engine) appendPersistedLocalEntryRecord(stepID string, entry storedLoca
 	if entry.Role == "" || entry.Text == "" {
 		return nil
 	}
+	if e.beforePersistLocalEntry != nil {
+		if err := e.beforePersistLocalEntry(entry); err != nil {
+			return err
+		}
+	}
 	_, err := e.store.AppendEvent(stepID, "local_entry", entry)
 	if err == nil {
 		e.chat.appendLocalEntryWithOngoingTextAndVisibility(entry.Role, entry.Text, entry.OngoingText, entry.Visibility)

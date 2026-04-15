@@ -76,23 +76,39 @@ func (e *Engine) emitCompactionStatus(stepID string, kind EventKind, mode compac
 		Count:             count,
 		Error:             strings.TrimSpace(errText),
 	}
-	e.emit(Event{
-		Kind:       kind,
-		StepID:     stepID,
-		Compaction: status,
-	})
 
 	switch kind {
 	case EventCompactionStarted:
+		e.emit(Event{
+			Kind:       kind,
+			StepID:     stepID,
+			Compaction: status,
+		})
 		return nil
 	case EventCompactionCompleted:
-		return e.appendPersistedLocalEntry(stepID, "compaction_notice", fmt.Sprintf("context compacted for the %s time", ordinal(status.Count)))
+		if err := e.appendPersistedLocalEntry(stepID, "compaction_notice", fmt.Sprintf("context compacted for the %s time", ordinal(status.Count))); err != nil {
+			return err
+		}
+		e.emit(Event{
+			Kind:       kind,
+			StepID:     stepID,
+			Compaction: status,
+		})
+		return nil
 	case EventCompactionFailed:
 		message := fmt.Sprintf("Context compaction failed (%s): %s", status.Mode, status.Error)
 		if strings.TrimSpace(status.Error) == "" {
 			message = fmt.Sprintf("Context compaction failed (%s).", status.Mode)
 		}
-		return e.appendPersistedLocalEntry(stepID, "error", message)
+		if err := e.appendPersistedLocalEntry(stepID, "error", message); err != nil {
+			return err
+		}
+		e.emit(Event{
+			Kind:       kind,
+			StepID:     stepID,
+			Compaction: status,
+		})
+		return nil
 	default:
 		return nil
 	}
