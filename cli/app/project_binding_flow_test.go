@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -277,6 +278,55 @@ func TestEnsureInteractiveProjectBindingAttachesUnknownWorkspaceToExistingProjec
 	}
 }
 
+func TestEnsureInteractiveProjectBindingFormatsMissingSelectedProjectError(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	store, err := metadata.Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service, err := projectview.NewMetadataService(store, "", "")
+	if err != nil {
+		t.Fatalf("NewMetadataService: %v", err)
+	}
+
+	originalPicker := runProjectBindingPickerFlow
+	originalPrompt := runProjectNamePromptFlow
+	t.Cleanup(func() {
+		runProjectBindingPickerFlow = originalPicker
+		runProjectNamePromptFlow = originalPrompt
+	})
+	runProjectBindingPickerFlow = func([]clientui.ProjectSummary, string, config.TUIAlternateScreenPolicy) (projectBindingPickerResult, error) {
+		picked := clientui.ProjectSummary{ProjectID: "project-missing", DisplayName: "Missing Project"}
+		return projectBindingPickerResult{Project: &picked}, nil
+	}
+	runProjectNamePromptFlow = func(string, string, config.TUIAlternateScreenPolicy) (string, error) {
+		t.Fatal("did not expect project name prompt when attaching to existing project")
+		return "", nil
+	}
+
+	server := &testEmbeddedServer{
+		cfg:               cfg,
+		containerDir:      config.ProjectSessionsRoot(cfg, "project-placeholder"),
+		projectViewClient: client.NewLoopbackProjectViewClient(service),
+	}
+
+	_, err = ensureInteractiveProjectBinding(context.Background(), server)
+	if !errors.Is(err, metadata.ErrProjectNotFound) {
+		t.Fatalf("ensureInteractiveProjectBinding error = %v, want ErrProjectNotFound", err)
+	}
+	if got := err.Error(); !strings.Contains(got, "Restart Builder and choose another project") || !strings.Contains(got, "project-missing") {
+		t.Fatalf("error = %q, want missing project picker guidance", got)
+	}
+}
+
 func TestEnsureInteractiveProjectBindingReturnsCancelWhenPickerAborts(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -408,4 +458,100 @@ func TestProjectNamePromptViewTracksLongInputCursor(t *testing.T) {
 	if !strings.Contains(view, "long-tail") {
 		t.Fatalf("expected long input tail to remain visible, got %q", view)
 	}
+}
+
+func TestEnsureInteractiveProjectBindingFormatsMissingBoundProjectError(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	binding, err := metadata.RegisterBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterBinding: %v", err)
+	}
+	store, err := metadata.Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service, err := projectview.NewMetadataService(store, "", "")
+	if err != nil {
+		t.Fatalf("NewMetadataService: %v", err)
+	}
+
+	server := &failingBindProjectServer{
+		testEmbeddedServer: &testEmbeddedServer{
+			cfg:               cfg,
+			containerDir:      config.ProjectSessionsRoot(cfg, binding.ProjectID),
+			projectViewClient: client.NewLoopbackProjectViewClient(service),
+		},
+		bindErr: fmt.Errorf("bind project: %w", metadata.ErrProjectNotFound),
+	}
+
+	_, err = ensureInteractiveProjectBinding(context.Background(), server)
+	if !errors.Is(err, metadata.ErrProjectNotFound) {
+		t.Fatalf("ensureInteractiveProjectBinding error = %v, want ErrProjectNotFound", err)
+	}
+	if got := err.Error(); !strings.Contains(got, "attached to missing project") || !strings.Contains(got, binding.ProjectID) {
+		t.Fatalf("error = %q, want missing project guidance", got)
+	}
+}
+
+func TestEnsureInteractiveProjectBindingFormatsUnavailableBoundProjectError(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg, err := config.Load(workspace, config.LoadOptions{})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	binding, err := metadata.RegisterBinding(context.Background(), cfg.PersistenceRoot, cfg.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterBinding: %v", err)
+	}
+	store, err := metadata.Open(cfg.PersistenceRoot)
+	if err != nil {
+		t.Fatalf("metadata.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service, err := projectview.NewMetadataService(store, "", "")
+	if err != nil {
+		t.Fatalf("NewMetadataService: %v", err)
+	}
+
+	server := &failingBindProjectServer{
+		testEmbeddedServer: &testEmbeddedServer{
+			cfg:               cfg,
+			containerDir:      config.ProjectSessionsRoot(cfg, binding.ProjectID),
+			projectViewClient: client.NewLoopbackProjectViewClient(service),
+		},
+		bindErr: metadata.ProjectUnavailableError{ProjectID: binding.ProjectID, RootPath: cfg.WorkspaceRoot, Availability: clientui.ProjectAvailabilityMissing},
+	}
+
+	_, err = ensureInteractiveProjectBinding(context.Background(), server)
+	if !errors.Is(err, metadata.ErrProjectUnavailable) {
+		t.Fatalf("ensureInteractiveProjectBinding error = %v, want ErrProjectUnavailable", err)
+	}
+	if got := err.Error(); !strings.Contains(got, "builder rebind") || !strings.Contains(got, "missing") {
+		t.Fatalf("error = %q, want rebind guidance", got)
+	}
+}
+
+type failingBindProjectServer struct {
+	*testEmbeddedServer
+	bindErr error
+}
+
+func (s *failingBindProjectServer) ProjectID() string { return "" }
+
+func (s *failingBindProjectServer) BindProject(context.Context, string) (embeddedServer, error) {
+	if s.bindErr != nil {
+		return nil, s.bindErr
+	}
+	return s.testEmbeddedServer, nil
 }

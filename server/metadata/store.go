@@ -231,7 +231,7 @@ func (s *Store) AttachWorkspaceToProject(ctx context.Context, projectID string, 
 	projectName, err := s.queries.GetProjectDisplayName(ctx, trimmedProjectID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return Binding{}, fmt.Errorf("project %q not found", trimmedProjectID)
+			return Binding{}, fmt.Errorf("%w: %q", ErrProjectNotFound, trimmedProjectID)
 		}
 		return Binding{}, fmt.Errorf("get project display name: %w", err)
 	}
@@ -543,6 +543,9 @@ func (s *Store) GetProjectOverview(ctx context.Context, projectID string) (clien
 	}
 	project, err := s.queries.GetProjectSummary(ctx, strings.TrimSpace(projectID))
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return clientui.ProjectOverview{}, fmt.Errorf("%w: %q", ErrProjectNotFound, strings.TrimSpace(projectID))
+		}
 		return clientui.ProjectOverview{}, fmt.Errorf("get project summary: %w", err)
 	}
 	sessions, err := s.ListSessionsByProject(ctx, projectID)

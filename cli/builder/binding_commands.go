@@ -34,7 +34,7 @@ func projectSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 	projectID, err := projectIDForPath(context.Background(), path)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		fmt.Fprintln(stderr, formatProjectLookupCommandError(path, err))
 		return 1
 	}
 	_, _ = fmt.Fprintln(stdout, projectID)
@@ -62,7 +62,7 @@ func attachSubcommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 	boundProjectID, err := attachWorkspace(context.Background(), *projectID, targetPath)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		fmt.Fprintln(stderr, formatAttachWorkspaceCommandError(targetPath, *projectID, err))
 		return 1
 	}
 	_, _ = fmt.Fprintln(stdout, boundProjectID)

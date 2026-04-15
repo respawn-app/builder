@@ -33,6 +33,7 @@ import (
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/client"
+	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
 )
@@ -272,6 +273,14 @@ func (s *Core) resolveProjectContext(ctx context.Context, projectID string, work
 	}
 	if strings.TrimSpace(overview.Project.RootPath) == "" {
 		return projectContext{}, fmt.Errorf("project %q has no root path", trimmedProjectID)
+	}
+	switch overview.Project.Availability {
+	case clientui.ProjectAvailabilityMissing, clientui.ProjectAvailabilityInaccessible:
+		return projectContext{}, metadata.ProjectUnavailableError{
+			ProjectID:    trimmedProjectID,
+			RootPath:     overview.Project.RootPath,
+			Availability: overview.Project.Availability,
+		}
 	}
 	projectCfg := s.cfg
 	projectCfg.WorkspaceRoot = overview.Project.RootPath
