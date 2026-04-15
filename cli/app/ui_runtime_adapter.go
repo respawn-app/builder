@@ -158,8 +158,20 @@ func (a uiRuntimeAdapter) applyProjectedRuntimeEvent(evt clientui.Event, flushNa
 			cmds = append(cmds, a.syncConversationFromEngine())
 		}
 		awaitsHydration = awaitsHydration || shouldPauseRuntimeEventsForHydration(m)
+	} else if shouldRefreshDeferredCommittedTailOnRunEnd(m, evt) {
+		cmds = append(cmds, m.requestRuntimeCommittedConversationSync())
 	}
 	return runtimeEventApplyResult{cmd: batchCmds(cmds...), transcriptMutated: transcriptMutated, awaitsHydration: awaitsHydration}
+}
+
+func shouldRefreshDeferredCommittedTailOnRunEnd(m *uiModel, evt clientui.Event) bool {
+	if m == nil || !m.hasRuntimeClient() || len(m.deferredCommittedTail) == 0 {
+		return false
+	}
+	if evt.Kind != clientui.EventRunStateChanged || evt.RunState == nil {
+		return false
+	}
+	return !evt.RunState.Busy
 }
 
 func (a uiRuntimeAdapter) runtimeEventState() clientui.RuntimeEventState {
