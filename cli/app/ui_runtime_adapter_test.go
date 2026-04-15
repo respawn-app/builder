@@ -3781,6 +3781,38 @@ func TestProjectedUserMessageFlushedDefersOptimisticAppendWhileAssistantStreamIs
 	}
 }
 
+func TestDeferredCommittedUserFlushRequestsTranscriptRefreshWhenRunEndsWithoutCatchUp(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.deferredCommittedTail = []deferredProjectedTranscriptTail{{
+		rangeStart: 1,
+		rangeEnd:   2,
+		revision:   7,
+		entries:    []clientui.ChatEntry{{Role: "user", Text: "steered message"}},
+	}}
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:     clientui.EventRunStateChanged,
+		RunState: &clientui.RunState{Busy: false},
+	})
+	msgs := collectCmdMessages(t, cmd)
+	refreshFound := false
+	for _, msg := range msgs {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			refreshFound = true
+		}
+	}
+	if !refreshFound {
+		t.Fatalf("expected deferred committed tail to request transcript refresh when run ends without catch-up, got %+v", msgs)
+	}
+	if got := len(m.deferredCommittedTail); got != 1 {
+		t.Fatalf("expected deferred committed tail retained until hydration applies, got %d", got)
+	}
+}
+
 func TestProjectedConversationUpdatedSkipsHydrationWhenDeferredCommittedUserFlushBridgesCount(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
