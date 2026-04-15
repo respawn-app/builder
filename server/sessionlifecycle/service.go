@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"sync"
 	"time"
@@ -245,48 +244,16 @@ func resolveForkUserMessageIndexFromTranscriptEntry(ctx context.Context, store *
 	if transcriptEntryIndex < 0 {
 		return 0, errors.New("rollback fork transcript entry index must be >= 0")
 	}
-	scan := runtime.NewPersistedTranscriptScan(runtime.PersistedTranscriptScanRequest{Offset: 0, Limit: transcriptEntryIndex + 1})
-	resolvedUserIndex := 0
-	resolved := false
-	if err := store.WalkEvents(func(evt session.Event) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		if err := scan.ApplyPersistedEvent(evt); err != nil {
-			return err
-		}
-		if scan.TotalEntries() <= transcriptEntryIndex {
-			return nil
-		}
-		page := scan.CollectedPageSnapshot()
-		if transcriptEntryIndex >= len(page.Entries) {
-			return fmt.Errorf("rollback fork transcript entry index %d is out of range", transcriptEntryIndex)
-		}
-		if strings.TrimSpace(page.Entries[transcriptEntryIndex].Role) != "user" {
-			return fmt.Errorf("rollback fork transcript entry %d is not a user message", transcriptEntryIndex)
-		}
-		for idx := 0; idx <= transcriptEntryIndex; idx++ {
-			if strings.TrimSpace(page.Entries[idx].Role) == "user" {
-				resolvedUserIndex++
+	return runtime.ResolvePersistedUserMessageIndex(func(visit func(session.Event) error) error {
+		return store.WalkEvents(func(evt session.Event) error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
 			}
-		}
-		resolved = true
-		return io.EOF
-	}); err != nil {
-		if errors.Is(err, io.EOF) && resolved {
-			return resolvedUserIndex, nil
-		}
-		return 0, err
-	}
-	if resolved {
-		return resolvedUserIndex, nil
-	}
-	if scan.TotalEntries() <= transcriptEntryIndex {
-		return 0, fmt.Errorf("rollback fork transcript entry index %d is out of range", transcriptEntryIndex)
-	}
-	return 0, fmt.Errorf("rollback fork transcript entry index %d is out of range", transcriptEntryIndex)
+			return visit(evt)
+		})
+	}, transcriptEntryIndex)
 }
 
 func (s *Service) openStore(sessionID string) (*session.Store, error) {
