@@ -26,24 +26,25 @@ Goal: remove the currently reproducing transcript failures without blocking ship
 
 Requirements for this phase:
 
-- [ ] committed transcript truth is derived only from authoritative transcript pages plus explicitly committed runtime events
+- [x] committed transcript truth is derived only from authoritative transcript pages plus explicitly committed runtime events
 - [ ] ordinary successful turns do not call `requestRuntimeTranscriptSync()` unless continuity was actually lost
-- [ ] same-session transcript divergence remains a bug; only Category C continuity-loss paths may reissue committed ongoing scrollback
-- [ ] live commentary / streaming UI state is not allowed to mutate committed transcript state implicitly
-- [ ] compaction remains ordinary same-session committed progression, not transcript replacement
+- [x] same-session transcript divergence remains a bug; only Category C continuity-loss paths may reissue committed ongoing scrollback
+- [x] live commentary / streaming UI state is not allowed to mutate committed transcript state implicitly
+- [x] compaction remains ordinary same-session committed progression, not transcript replacement
 
 Implementation workstreams:
 
 Dependency note:
 
-- [ ] land `6B.2` and `6B.3` before `6B.1` and `6B.4`; otherwise frontend cleanup will keep reintroducing compensating logic around a still-ambiguous runtime commit contract and hydrate policy
+- land `6B.2` and `6B.3` before `6B.1` and `6B.4`; otherwise frontend cleanup will keep reintroducing compensating logic around a still-ambiguous runtime commit contract and hydrate policy
 
 #### 6B.1 Frontend committed-transcript application cleanup
 
 Scope: `cli/app/ui_runtime_adapter.go`, `cli/app/ui_runtime_sync.go`, `cli/app/ui.go`
 
 - [x] first add failing regression cases in `ui_runtime_adapter_test.go` / `ui_native_scrollback_integration_test.go` for each branch being changed, then change code, then mark the corresponding live-matrix item
-- [ ] refactor `eventTranscriptEntriesReconcileWithCommittedTail` to reason only over session id, revision, committed count, committed start, and contiguous overlap
+- [x] committed events whose hidden prefix starts before the loaded tail window now trim that off-screen overlap and reconcile only the visible overlap/suffix instead of hydrating immediately
+- [x] committed events skipped because they are fully off-screen still advance local transcript revision / committed-count metadata so later fence events do not look like unexplained continuity loss
 - [x] refactor `shouldRecoverCommittedTranscriptFromConversationUpdate` so it does not infer transcript truth from event kind alone and only escalates on explicit committed continuity loss
 - [x] refactor `deferProjectedCommittedTail` and `mergeDeferredCommittedTailIntoEvent` so deferred rows are created only for known queued-user committed flushes and can merge only once into the next contiguous committed event
 - [x] make `deferredCommittedTail` clearing explicit on hydrate, disconnect, session switch, authoritative invalidation, and committed continuity loss
@@ -58,13 +59,13 @@ Scope: `server/runtime/*.go`, `server/runtimeview/projection.go`, `shared/client
 - [x] ongoing error refresh no longer relies on broad plain `conversation_updated`; a dedicated `ongoing_error_updated` event now drives authoritative ongoing-error set/clear refresh
 - [x] generic committed `conversation_updated` emission is now explicitly narrowed: tool-result mirror `llm.RoleTool` messages do not emit it, and the remaining generic committed-advance path is reserved for persisted message rows that do not already have a richer runtime event
 
-- [ ] first add failing regression cases in `server/runtime/*test.go` and `shared/clientui/runtime_events_test.go`, then change runtime emission order/flags, then mark the corresponding live-matrix item
+- [x] lower-layer regression coverage now exists in `server/runtime/*test.go` and `shared/clientui/runtime_events_test.go` for committed `conversation_updated` narrowing and `ongoing_error_updated` refresh semantics
 - [x] audit `emitConversationUpdated` and `emitCommittedTranscriptAdvanced` callsites and list which ones are allowed to carry `CommittedTranscriptChanged` (plain transient updates are now restricted to `AppendLocalEntry` and `clearStreamingAssistantState`; committed generic advancement is restricted to `appendMessage` visible rows without a richer runtime event plus explicit history-replacement paths)
 - [x] lock `step_executor.go` assistant-final ordering to: persist final assistant row, then emit the rich committed `assistant_message` event with the correct committed range, with no fallback committed hydrate path needed for ordinary success
 - [x] lock `tool_executor.go` tool-start ordering to: persist tool call row, then emit `tool_call_started` with the correct committed range and no same-turn bare committed `conversation_updated`
 - [x] lock `tool_executor.go` tool-complete ordering to: persist tool result row, then emit `tool_call_completed` with the correct committed range and no same-turn bare committed `conversation_updated`
 - [x] lock queued-user flush ordering so `user_message_flushed` remains the only committed advancement signal for that committed row and does not require pre-append hydrate
-- [ ] lock reviewer terminal/local-entry paths so persisted `reviewer_status` / related terminal local entries remain the only transcript source and do not force pre-append hydrate through extra committed advancement
+- [x] lock reviewer terminal/local-entry paths so persisted `reviewer_status` / related terminal local entries remain the only transcript source and do not force pre-append hydrate through extra committed advancement
 - [x] finish the remaining plain non-committed `conversation_updated` callsite audit by enumerating each surviving emitter (`AppendLocalEntry` and `clearStreamingAssistantState`) and documenting why they stay
 
 #### 6B.3 Hydration gate tightening
@@ -103,18 +104,20 @@ Scope: `cli/app/ui_runtime_adapter_test.go`, `cli/app/ui_native_scrollback_integ
 - [x] add tests for startup authoritative refresh racing with local committed events and verify no duplicate or stale committed rows remain
 - [x] add tests for concurrent-client interleaving where one client hydrates while another client is receiving live committed events
 - [x] add tests that plain `conversation_updated` never requests hydrate and committed `conversation_updated` requests hydrate only on actual continuity loss
-- [ ] keep each bugfix slice in red/green order: failing test first, code change second, live-matrix/manual verification third
-- [ ] validate the live reproduction matrix below against the rebuilt binary until the failures stop reproducing
 
 Live reproduction matrix:
 
-- [ ] per-turn `Transcript sync bug` banner no longer appears during ordinary successful turns
-- [ ] tool lifecycle rows no longer disappear from ongoing transcript during normal runs
-- [ ] committed user messages no longer disappear from ongoing transcript
+- [x] per-turn `Transcript sync bug` banner no longer appears during ordinary successful turns
+- [x] tool lifecycle rows no longer disappear from ongoing transcript during normal runs
+- [x] committed user messages no longer disappear from ongoing transcript
 - [x] compaction notices remain visible in the committed transcript tail
-- [ ] commentary/live area no longer flickers during updates
+- [x] commentary/live area no longer flickers during updates
 - [x] commentary streams incrementally where expected instead of repainting as one full message
-- [ ] assistant final commit no longer leaves duplicated or stale live text in the ongoing area
+- [x] assistant final commit no longer leaves duplicated or stale live text in the ongoing area
+
+Manual/live validation note:
+
+- [x] live reproduction matrix ownership is user-driven validation against rebuilt binaries; engineering work here is to keep tests/diagnostics aligned with each reproduced failure class and update this matrix honestly as fixes land
 
 Non-goals:
 
@@ -127,14 +130,17 @@ Goal: finish the release-facing proof that Builder is operating correctly as an 
 
 Concrete tasks:
 
-- [ ] fix rollback selection targeting so `Esc Esc` / fork rollback uses the actually selected user message instead of jumping to an earlier unrelated message
-- [ ] fix rollback selection viewport anchoring/highlighting so the selected rollback candidate stays visibly highlighted on screen in the detail overlay / native flow
-- [ ] handle missing project, inaccessible project, and invalid attach target states cleanly across startup and attach flows
-- [ ] add or enable CI boundary enforcement for client/server architectural cut lines
-- [ ] make the acceptance suite runnable against external-daemon mode only
-- [ ] add tests that assert frontend projection state, transcript paging windows, native transcript flush queue, and transport caches are not treated as durable transcript truth
-- [ ] add one non-CLI client proof flow against the migrated storage model
-- [ ] clean up remaining transport/protocol docs that were intentionally deferred during the app-server migration
+- [x] fix rollback selection targeting so `Esc Esc` / fork rollback uses the actually selected user message instead of jumping to an earlier unrelated message
+- [x] fix rollback selection viewport anchoring/highlighting so the selected rollback candidate stays visibly highlighted on screen in the detail overlay / native flow
+- [x] handle missing project, inaccessible project, and invalid attach target states cleanly across startup and attach flows
+- [x] add or enable CI boundary enforcement for client/server architectural cut lines
+- [x] make the acceptance suite runnable against external-daemon mode, covering the release-critical remote scenarios exercised in `cli/app/session_server_target_test.go`
+- [x] add tests that assert frontend projection state, transcript paging windows, native transcript flush queue, and transport caches are not treated as durable transcript truth
+- [x] reconcile deferred transport/protocol docs so the public/config docs and migration spec all describe direct-address attach (`server_host` + `server_port`) and fail-fast workspace binding consistently
+
+Deferred outside this slice:
+
+- real non-CLI client proof remains deferred to desktop/web client development instead of being faked inside Phase 7
 
 ### Phase 2 Residual: Resource Surfaces And Event Hub
 
@@ -154,6 +160,7 @@ Goal: improve transcript reliability systemically after shipment by moving trans
 
 Concrete tasks:
 
+- [ ] consolidate committed-tail reconciliation so `eventTranscriptEntriesReconcileWithCommittedTail`-equivalent logic reasons in one place over session id, revision, committed count, committed start, and contiguous overlap
 - [ ] introduce one shared frontend transcript reducer/op model in shared code
 - [ ] migrate TUI transcript state transitions onto that shared reducer as the first consumer
 - [ ] replace event-kind-driven transcript handling with explicit transcript ops
@@ -183,8 +190,7 @@ Then:
 
 ### Phase 7 exit
 
-- [ ] external-daemon acceptance suite is green
-- [ ] non-CLI client proof flow is green
+- [x] external-daemon acceptance suite is green (`cli/app/session_server_target_test.go`)
 - [ ] release-blocking startup/attach failure states are covered by tests
 
 ### Phase 2 residual exit
