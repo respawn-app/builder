@@ -3492,10 +3492,14 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 	deferredEvents := append([]Event(nil), events...)
 	eventsMu.Unlock()
 	assistantEventIdx := -1
+	reviewerStatusIdx := -1
 	reviewerEventIdx := -1
 	for idx, evt := range deferredEvents {
 		if evt.Kind == EventAssistantMessage && evt.Message.Content == "updated final after review" {
 			assistantEventIdx = idx
+		}
+		if evt.Kind == EventLocalEntryAdded && evt.LocalEntry != nil && evt.LocalEntry.Role == "reviewer_status" && strings.Contains(evt.LocalEntry.Text, "applied") {
+			reviewerStatusIdx = idx
 		}
 		if evt.Kind == EventReviewerCompleted && evt.Reviewer != nil && evt.Reviewer.Outcome == "applied" {
 			reviewerEventIdx = idx
@@ -3507,11 +3511,14 @@ func TestReviewerAppliedFollowUpRemainsVisibleInTranscript(t *testing.T) {
 	if assistantEventIdx < 0 {
 		t.Fatalf("expected follow-up assistant event, got %+v", deferredEvents)
 	}
+	if reviewerStatusIdx < 0 {
+		t.Fatalf("expected reviewer status local entry event, got %+v", deferredEvents)
+	}
 	if reviewerEventIdx < 0 {
 		t.Fatalf("expected reviewer completed event, got %+v", deferredEvents)
 	}
-	if assistantEventIdx > reviewerEventIdx {
-		t.Fatalf("expected follow-up assistant event before reviewer completion event, got %+v", deferredEvents)
+	if assistantEventIdx > reviewerStatusIdx || reviewerStatusIdx > reviewerEventIdx {
+		t.Fatalf("expected assistant -> reviewer_status -> reviewer_completed event order, got %+v", deferredEvents)
 	}
 
 	restored, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5"})
@@ -3735,7 +3742,7 @@ func TestRunReviewerFollowUpReturnsCompletionWhenReviewerInstructionAppendFails(
 	}
 }
 
-func TestRunStepLoopEmitsReviewerCompletionWhenReviewerInstructionAppendFails(t *testing.T) {
+func TestRunStepLoopFailsWhenReviewerStatusPersistenceFailsAfterReviewerInstructionAppendFailure(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -3789,44 +3796,28 @@ func TestRunStepLoopEmitsReviewerCompletionWhenReviewerInstructionAppendFails(t 
 		t.Fatalf("append user message: %v", err)
 	}
 
-	msg, err := eng.runStepLoop(context.Background(), "step-1")
-	if err != nil {
-		t.Fatalf("runStepLoop: %v", err)
-	}
-	if msg.Content != "original final" {
-		t.Fatalf("assistant content = %q, want original final", msg.Content)
+	_, err = eng.runStepLoop(context.Background(), "step-1")
+	if err == nil {
+		t.Fatal("expected runStepLoop to fail when reviewer status persistence fails")
 	}
 
 	eventsMu.Lock()
 	deferredEvents := append([]Event(nil), events...)
 	eventsMu.Unlock()
 	assistantEventIdx := -1
-	reviewerEventIdx := -1
 	for idx, evt := range deferredEvents {
 		if evt.Kind == EventAssistantMessage && evt.Message.Content == "original final" {
 			assistantEventIdx = idx
 		}
-		if evt.Kind == EventReviewerCompleted && evt.Reviewer != nil {
-			reviewerEventIdx = idx
-			if evt.Reviewer.Outcome != "followup_failed" {
-				t.Fatalf("reviewer completion outcome = %q, want followup_failed", evt.Reviewer.Outcome)
-			}
-			if evt.Reviewer.SuggestionsCount != 1 {
-				t.Fatalf("reviewer completion suggestions = %d, want 1", evt.Reviewer.SuggestionsCount)
-			}
-			if strings.TrimSpace(evt.Reviewer.Error) == "" {
-				t.Fatal("expected reviewer completion error details")
-			}
+		if evt.Kind == EventReviewerCompleted {
+			t.Fatalf("did not expect reviewer completed event after reviewer status persistence failure, got %+v", deferredEvents)
 		}
 	}
 	if assistantEventIdx < 0 {
 		t.Fatalf("expected assistant message event, got %+v", deferredEvents)
 	}
-	if reviewerEventIdx < 0 {
-		t.Fatalf("expected reviewer completed event, got %+v", deferredEvents)
-	}
-	if assistantEventIdx > reviewerEventIdx {
-		t.Fatalf("expected assistant event before reviewer completion, got %+v", deferredEvents)
+	if !strings.Contains(err.Error(), "permission") && !strings.Contains(strings.ToLower(err.Error()), "read-only") {
+		t.Fatalf("expected permission-style failure, got %v", err)
 	}
 
 	snapshot := eng.ChatSnapshot()
@@ -3837,6 +3828,79 @@ func TestRunStepLoopEmitsReviewerCompletionWhenReviewerInstructionAppendFails(t 
 		if entry.Role == "reviewer_status" {
 			t.Fatalf("did not expect in-memory reviewer status after append failure, got %+v", snapshot.Entries)
 		}
+	}
+}
+
+func TestSubmitUserMessageFailsWhenReviewerStatusPersistenceFailsAfterAssistantEvent(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eventsPath := filepath.Join(store.Dir(), "events.jsonl")
+	info, err := os.Stat(eventsPath)
+	if err != nil {
+		t.Fatalf("stat events log: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(eventsPath, info.Mode()) })
+
+	mainClient := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "original final", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "updated final after review", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	reviewerClient := &fakeClient{responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["Add final verification notes."]}`},
+		Usage:     llm.Usage{WindowTokens: 200000},
+	}}}
+
+	var (
+		eventsMu sync.Mutex
+		events   []Event
+	)
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			eventsMu.Lock()
+			defer eventsMu.Unlock()
+			events = append(events, evt)
+			if evt.Kind == EventAssistantMessage && evt.Message.Content == "updated final after review" {
+				_ = os.Chmod(eventsPath, 0o400)
+			}
+		},
+		Reviewer: ReviewerConfig{
+			Frequency:     "all",
+			Model:         "gpt-5",
+			ThinkingLevel: "low",
+			VerboseOutput: true,
+			Client:        reviewerClient,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	_, err = eng.SubmitUserMessage(context.Background(), "do task")
+	if err == nil {
+		t.Fatal("expected submit to fail when reviewer status persistence fails")
+	}
+
+	eventsMu.Lock()
+	deferredEvents := append([]Event(nil), events...)
+	eventsMu.Unlock()
+	for _, evt := range deferredEvents {
+		if evt.Kind == EventReviewerCompleted {
+			t.Fatalf("did not expect reviewer completed event after reviewer status persistence failure, got %+v", deferredEvents)
+		}
+	}
+	if !strings.Contains(err.Error(), "permission") && !strings.Contains(strings.ToLower(err.Error()), "read-only") {
+		t.Fatalf("expected permission-style failure, got %v", err)
 	}
 }
 
@@ -11061,6 +11125,57 @@ func TestCompactionPersistsSingleNoticeEntry(t *testing.T) {
 	}
 	if notices != 1 {
 		t.Fatalf("expected one compaction notice, got %d entries=%+v", notices, snap.Entries)
+	}
+}
+
+func TestAutoCompactionFailsWhenCompactionNoticePersistenceFails(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	eventsPath := filepath.Join(store.Dir(), "events.jsonl")
+	info, err := os.Stat(eventsPath)
+	if err != nil {
+		t.Fatalf("stat events log: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(eventsPath, info.Mode()) })
+
+	client := &fakeCompactionClient{
+		compactionResponses: []llm.CompactionResponse{
+			{
+				OutputItems: []llm.ResponseItem{
+					{Type: llm.ResponseItemTypeMessage, Role: llm.RoleUser, Content: "u1"},
+					{Type: llm.ResponseItemTypeCompaction, ID: "cmp_1", EncryptedContent: "enc_1"},
+				},
+				Usage: llm.Usage{InputTokens: 190000, OutputTokens: 1000, WindowTokens: 200000},
+			},
+		},
+	}
+
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+		Model: "gpt-5",
+		OnEvent: func(evt Event) {
+			if evt.Kind == EventCompactionCompleted {
+				_ = os.Chmod(eventsPath, 0o400)
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
+		t.Fatalf("append seed message: %v", err)
+	}
+	eng.setLastUsage(llm.Usage{InputTokens: 190000, OutputTokens: 0, WindowTokens: 200000})
+
+	err = eng.autoCompactIfNeeded(context.Background(), "step-1", compactionModeAuto)
+	if err == nil {
+		t.Fatal("expected auto compaction to fail when notice persistence fails")
+	}
+	if !strings.Contains(err.Error(), "permission") && !strings.Contains(strings.ToLower(err.Error()), "read-only") {
+		t.Fatalf("expected permission-style failure, got %v", err)
 	}
 }
 

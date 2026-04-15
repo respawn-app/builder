@@ -208,6 +208,9 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 				e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: resolved, CommittedTranscriptChanged: true, CommittedEntryStart: resolvedCommittedStart, CommittedEntryStartSet: resolvedCommittedStartSet})
 			}
 			if reviewerCompletion != nil {
+				if err := e.appendPersistedLocalEntry(stepID, "reviewer_status", reviewerStatusText(*reviewerCompletion, nil)); err != nil {
+					return stepLoopResult{}, err
+				}
 				e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: reviewerCompletion})
 			}
 			return stepLoopResult{Message: resolved, ExecutedToolCall: executedToolCall, AssistantCommittedStart: resolvedCommittedStart, AssistantCommittedStartSet: resolvedCommittedStartSet}, nil
