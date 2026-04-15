@@ -12,6 +12,7 @@ import (
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
 
 	"github.com/google/uuid"
 )
@@ -40,7 +41,7 @@ type sessionLaunchPlan struct {
 	Mode                launchMode
 	SessionID           string
 	ActiveSettings      config.Settings
-	EnabledTools        []tools.ID
+	EnabledTools        []toolspec.ID
 	ConfiguredModelName string
 	SessionName         string
 	ModelContractLocked bool
@@ -116,9 +117,9 @@ func (p *launchPlanner) PlanSession(ctx context.Context, req sessionLaunchReques
 	if err != nil {
 		return sessionLaunchPlan{}, err
 	}
-	enabledTools := make([]tools.ID, 0, len(resp.Plan.EnabledToolIDs))
+	enabledTools := make([]toolspec.ID, 0, len(resp.Plan.EnabledToolIDs))
 	for _, raw := range resp.Plan.EnabledToolIDs {
-		if id, ok := tools.ParseID(raw); ok {
+		if id, ok := toolspec.ParseID(raw); ok {
 			enabledTools = append(enabledTools, id)
 		}
 	}
@@ -298,11 +299,11 @@ func mergeCLISources(base config.SourceReport, override config.SourceReport) con
 	return merged
 }
 
-func cloneEnabledToolSet(in map[tools.ID]bool) map[tools.ID]bool {
+func cloneEnabledToolSet(in map[toolspec.ID]bool) map[toolspec.ID]bool {
 	if len(in) == 0 {
-		return map[tools.ID]bool{}
+		return map[toolspec.ID]bool{}
 	}
-	out := make(map[tools.ID]bool, len(in))
+	out := make(map[toolspec.ID]bool, len(in))
 	for id, enabled := range in {
 		out[id] = enabled
 	}

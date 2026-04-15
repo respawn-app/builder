@@ -17,6 +17,7 @@ import (
 	"builder/server/tools"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
 )
 
 type serviceFakeLLM struct {
@@ -49,7 +50,7 @@ func (r staticExecutionTargetResolver) ResolveSessionExecutionTarget(context.Con
 	return r.target, nil
 }
 
-func (serviceBlockingTool) Name() tools.ID { return tools.ToolShell }
+func (serviceBlockingTool) Name() toolspec.ID { return toolspec.ToolShell }
 
 func (t serviceBlockingTool) Call(_ context.Context, c tools.Call) (tools.Result, error) {
 	select {
@@ -73,7 +74,7 @@ func TestServiceGetSessionMainViewUsesLiveRuntimeWhenAttached(t *testing.T) {
 	client := &serviceFakeLLM{responses: []llm.Response{
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call_shell_1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 		{

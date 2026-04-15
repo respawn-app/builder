@@ -11,10 +11,10 @@ import (
 	"builder/server/runtime"
 	"builder/server/session"
 	"builder/server/tools"
-	patchformat "builder/server/tools/patch/format"
 	"builder/shared/cachewarn"
 	"builder/shared/clientui"
 	"builder/shared/transcript"
+	patchformat "builder/shared/transcript/patchformat"
 )
 
 type projectionFastClient struct{}
@@ -163,7 +163,7 @@ func TestEventFromRuntimeLeavesCompactionStatusWithoutTranscriptEntriesUntilPers
 		Kind:                       runtime.EventLocalEntryAdded,
 		StepID:                     "step-1",
 		CommittedTranscriptChanged: true,
-		LocalEntry: &runtime.ChatEntry{Role: "compaction_notice", Text: "context compacted for the 1st time"},
+		LocalEntry:                 &runtime.ChatEntry{Role: "compaction_notice", Text: "context compacted for the 1st time"},
 	})
 	if len(local.TranscriptEntries) != 1 {
 		t.Fatalf("expected persisted local entry to remain the transcript source, got %+v", local.TranscriptEntries)

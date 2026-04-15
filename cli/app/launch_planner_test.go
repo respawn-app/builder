@@ -12,8 +12,8 @@ import (
 	"builder/server/metadata"
 	"builder/server/session"
 	"builder/server/storagemigration"
-	"builder/server/tools"
 	"builder/shared/config"
+	"builder/shared/toolspec"
 )
 
 type plannerOwnershipServer struct {
@@ -279,10 +279,10 @@ func TestApplyCLIOverridesToSessionPlanIgnoresNonCLISources(t *testing.T) {
 		ActiveSettings: config.Settings{
 			Model:         "server-model",
 			ThinkingLevel: "low",
-			EnabledTools:  map[tools.ID]bool{tools.ToolShell: true},
+			EnabledTools:  map[toolspec.ID]bool{toolspec.ToolShell: true},
 			Timeouts:      config.Timeouts{ModelRequestSeconds: 20, ShellDefaultSeconds: 30},
 		},
-		EnabledTools:        []tools.ID{tools.ToolShell},
+		EnabledTools:        []toolspec.ID{toolspec.ToolShell},
 		ConfiguredModelName: "server-model",
 		Source:              config.SourceReport{Sources: map[string]string{"model": "file"}},
 		StatusConfig:        uiStatusConfig{},
@@ -290,7 +290,7 @@ func TestApplyCLIOverridesToSessionPlanIgnoresNonCLISources(t *testing.T) {
 	cfg := config.App{Settings: config.Settings{
 		Model:         "local-model",
 		ThinkingLevel: "high",
-		EnabledTools:  map[tools.ID]bool{tools.ToolPatch: true},
+		EnabledTools:  map[toolspec.ID]bool{toolspec.ToolPatch: true},
 		Timeouts:      config.Timeouts{ModelRequestSeconds: 99, ShellDefaultSeconds: 77},
 	}, Source: config.SourceReport{Sources: map[string]string{
 		"model":                          "env",
@@ -307,7 +307,7 @@ func TestApplyCLIOverridesToSessionPlanIgnoresNonCLISources(t *testing.T) {
 	if updated.ActiveSettings.ThinkingLevel != "low" {
 		t.Fatalf("expected server thinking level preserved, got %q", updated.ActiveSettings.ThinkingLevel)
 	}
-	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != tools.ToolShell {
+	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != toolspec.ToolShell {
 		t.Fatalf("expected server tools preserved, got %+v", updated.EnabledTools)
 	}
 	if updated.ActiveSettings.Timeouts.ModelRequestSeconds != 20 {
@@ -323,16 +323,16 @@ func TestApplyCLIOverridesToSessionPlanRespectsLockedModelContract(t *testing.T)
 		ActiveSettings: config.Settings{
 			Model:         "locked-model",
 			ThinkingLevel: "medium",
-			EnabledTools:  map[tools.ID]bool{tools.ToolShell: true},
+			EnabledTools:  map[toolspec.ID]bool{toolspec.ToolShell: true},
 		},
-		EnabledTools:        []tools.ID{tools.ToolShell},
+		EnabledTools:        []toolspec.ID{toolspec.ToolShell},
 		ConfiguredModelName: "locked-model",
 		ModelContractLocked: true,
 		StatusConfig:        uiStatusConfig{},
 	}
 	cfg := config.App{Settings: config.Settings{
 		Model:        "cli-model",
-		EnabledTools: map[tools.ID]bool{tools.ToolPatch: true},
+		EnabledTools: map[toolspec.ID]bool{toolspec.ToolPatch: true},
 	}, Source: config.SourceReport{Sources: map[string]string{
 		"model":       "cli",
 		"tools.shell": "cli",
@@ -343,7 +343,7 @@ func TestApplyCLIOverridesToSessionPlanRespectsLockedModelContract(t *testing.T)
 	if updated.ActiveSettings.Model != "locked-model" || updated.ConfiguredModelName != "locked-model" {
 		t.Fatalf("expected locked model preserved, got %+v", updated.ActiveSettings)
 	}
-	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != tools.ToolShell {
+	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != toolspec.ToolShell {
 		t.Fatalf("expected locked tools preserved, got %+v", updated.EnabledTools)
 	}
 }
@@ -352,16 +352,16 @@ func TestApplyCLIOverridesToSessionPlanRecomputesEnabledToolsForCLIModelOverride
 	plan := sessionLaunchPlan{
 		ActiveSettings: config.Settings{
 			Model:        "gpt-5.4",
-			EnabledTools: map[tools.ID]bool{tools.ToolShell: true},
+			EnabledTools: map[toolspec.ID]bool{toolspec.ToolShell: true},
 		},
-		EnabledTools:        []tools.ID{tools.ToolShell},
+		EnabledTools:        []toolspec.ID{toolspec.ToolShell},
 		ConfiguredModelName: "gpt-5.4",
 		Source:              config.SourceReport{Sources: map[string]string{"model": "file", "tools.shell": "default", "tools.multi_tool_use_parallel": "default"}},
 		StatusConfig:        uiStatusConfig{},
 	}
 	cfg := config.App{Settings: config.Settings{
 		Model:        "gpt-5.3-codex",
-		EnabledTools: map[tools.ID]bool{tools.ToolShell: true},
+		EnabledTools: map[toolspec.ID]bool{toolspec.ToolShell: true},
 	}, Source: config.SourceReport{Sources: map[string]string{
 		"model":                         "cli",
 		"tools.shell":                   "default",
@@ -372,7 +372,7 @@ func TestApplyCLIOverridesToSessionPlanRecomputesEnabledToolsForCLIModelOverride
 	if updated.ActiveSettings.Model != "gpt-5.3-codex" {
 		t.Fatalf("expected cli model override, got %q", updated.ActiveSettings.Model)
 	}
-	if len(updated.EnabledTools) != 2 || updated.EnabledTools[0] != tools.ToolMultiToolUseParallel || updated.EnabledTools[1] != tools.ToolShell {
+	if len(updated.EnabledTools) != 2 || updated.EnabledTools[0] != toolspec.ToolMultiToolUseParallel || updated.EnabledTools[1] != toolspec.ToolShell {
 		t.Fatalf("expected recomputed tools for overridden model, got %+v", updated.EnabledTools)
 	}
 }
@@ -381,16 +381,16 @@ func TestApplyCLIOverridesToSessionPlanKeepsExplicitCLIToolsWhenModelAlsoOverrid
 	plan := sessionLaunchPlan{
 		ActiveSettings: config.Settings{
 			Model:        "gpt-5.4",
-			EnabledTools: map[tools.ID]bool{tools.ToolShell: true},
+			EnabledTools: map[toolspec.ID]bool{toolspec.ToolShell: true},
 		},
-		EnabledTools:        []tools.ID{tools.ToolShell},
+		EnabledTools:        []toolspec.ID{toolspec.ToolShell},
 		ConfiguredModelName: "gpt-5.4",
 		Source:              config.SourceReport{Sources: map[string]string{"model": "file", "tools.shell": "default", "tools.multi_tool_use_parallel": "default"}},
 		StatusConfig:        uiStatusConfig{},
 	}
 	cfg := config.App{Settings: config.Settings{
 		Model:        "gpt-5.3-codex",
-		EnabledTools: map[tools.ID]bool{tools.ToolShell: true},
+		EnabledTools: map[toolspec.ID]bool{toolspec.ToolShell: true},
 	}, Source: config.SourceReport{Sources: map[string]string{
 		"model":                         "cli",
 		"tools.shell":                   "cli",
@@ -401,7 +401,7 @@ func TestApplyCLIOverridesToSessionPlanKeepsExplicitCLIToolsWhenModelAlsoOverrid
 	if updated.ActiveSettings.Model != "gpt-5.3-codex" {
 		t.Fatalf("expected cli model override, got %q", updated.ActiveSettings.Model)
 	}
-	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != tools.ToolShell {
+	if len(updated.EnabledTools) != 1 || updated.EnabledTools[0] != toolspec.ToolShell {
 		t.Fatalf("expected explicit cli tools to suppress model defaults, got %+v", updated.EnabledTools)
 	}
 }

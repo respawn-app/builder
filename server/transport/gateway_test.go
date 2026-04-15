@@ -27,6 +27,8 @@ import (
 	"builder/shared/config"
 	"builder/shared/protocol"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
+
 	"golang.org/x/net/websocket"
 )
 
@@ -742,7 +744,7 @@ func TestGatewayRemoteSessionActivityRecoversToolCallTextWithoutPresentation(t *
 
 	appCore.PublishRuntimeEvent(store.Meta().SessionID, runtime.Event{
 		Kind:     runtime.EventToolCallStarted,
-		ToolCall: &llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
+		ToolCall: &llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)},
 	})
 
 	evt, err := sub.Next(context.Background())
@@ -960,7 +962,7 @@ func (c *gatewayTestStreamingClient) GenerateStreamWithEvents(_ context.Context,
 		}
 		return llm.Response{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "Inspecting now", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		}, nil
 	}
@@ -983,7 +985,7 @@ func (c *gatewayTestStreamingClient) ProviderCapabilities(context.Context) (llm.
 
 type gatewayTestShellTool struct{}
 
-func (gatewayTestShellTool) Name() tools.ID { return tools.ToolShell }
+func (gatewayTestShellTool) Name() toolspec.ID { return toolspec.ToolShell }
 
 func (gatewayTestShellTool) Call(_ context.Context, call tools.Call) (tools.Result, error) {
 	return tools.Result{CallID: call.ID, Name: call.Name, Output: json.RawMessage(`{"output":"/tmp\n"}`)}, nil

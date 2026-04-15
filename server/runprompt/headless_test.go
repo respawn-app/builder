@@ -18,9 +18,9 @@ import (
 	"builder/server/auth"
 	"builder/server/primaryrun"
 	"builder/server/session"
-	"builder/server/tools"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
 )
 
 type stubRunPromptService struct {
@@ -459,7 +459,7 @@ func TestHeadlessRunPromptOverridesRespectLockedModelContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	if err := store.MarkModelDispatchLocked(session.LockedContract{Model: "locked-model", EnabledTools: []string{string(tools.ToolShell)}}); err != nil {
+	if err := store.MarkModelDispatchLocked(session.LockedContract{Model: "locked-model", EnabledTools: []string{string(toolspec.ToolShell)}}); err != nil {
 		t.Fatalf("mark model dispatch locked: %v", err)
 	}
 
@@ -492,7 +492,7 @@ func TestHeadlessRunPromptOverridesRespectLockedModelContract(t *testing.T) {
 			Settings: config.Settings{
 				Model:         "base-model",
 				OpenAIBaseURL: server.URL,
-				EnabledTools:  map[tools.ID]bool{tools.ToolPatch: true},
+				EnabledTools:  map[toolspec.ID]bool{toolspec.ToolPatch: true},
 			},
 		},
 		ContainerDir: containerDir,
@@ -534,7 +534,7 @@ func TestHeadlessRunPromptOverridesRespectLockedModelContract(t *testing.T) {
 		if !ok {
 			t.Fatalf("unexpected tool payload: %#v", toolsPayload[0])
 		}
-		if got := toolPayload["name"]; got != string(tools.ToolShell) {
+		if got := toolPayload["name"]; got != string(toolspec.ToolShell) {
 			t.Fatalf("expected locked shell tool, got %#v", got)
 		}
 	case <-time.After(time.Second):

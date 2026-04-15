@@ -3,6 +3,7 @@ package runtime
 import (
 	"builder/server/llm"
 	"builder/server/tools"
+	"builder/shared/toolspec"
 	"builder/shared/transcript"
 	"encoding/json"
 	"reflect"
@@ -36,14 +37,14 @@ func TestChatStoreSnapshotProjectsConversation(t *testing.T) {
 	})
 	s.recordToolCompletion(tools.Result{
 		CallID:  "call_1",
-		Name:    tools.ToolShell,
+		Name:    toolspec.ToolShell,
 		IsError: false,
 		Output:  json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`),
 	})
 	s.appendMessage(llm.Message{
 		Role:       llm.RoleTool,
 		ToolCallID: "call_1",
-		Name:       string(tools.ToolShell),
+		Name:       string(toolspec.ToolShell),
 		Content:    `{"output":"/tmp","exit_code":0,"truncated":false}`,
 	})
 	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "done"})
@@ -130,7 +131,7 @@ func TestChatStoreSnapshotSynthesizesCompletedToolResultBeforeToolMessage(t *tes
 	})
 	s.recordToolCompletion(tools.Result{
 		CallID: "call_b",
-		Name:   tools.ToolShell,
+		Name:   toolspec.ToolShell,
 		Output: json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`),
 	})
 
@@ -213,7 +214,7 @@ func TestChatStoreTranscriptPageSnapshotSynthesizesCompletedToolResultBeforeTool
 	})
 	s.recordToolCompletion(tools.Result{
 		CallID: "call_b",
-		Name:   tools.ToolShell,
+		Name:   toolspec.ToolShell,
 		Output: json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`),
 	})
 
@@ -246,7 +247,7 @@ func TestPatchToolCallFormattingCapturesSummaryAndDetailMeta(t *testing.T) {
 	patchText := "*** Begin Patch\n*** Update File: dir/a.go\n line1\n-old\n+new\n*** Add File: b.go\n+hello\n*** End Patch\n"
 	call := llm.ToolCall{
 		ID:    "call_patch",
-		Name:  string(tools.ToolPatch),
+		Name:  string(toolspec.ToolPatch),
 		Input: json.RawMessage(`{"patch":` + strconv.Quote(patchText) + `}`),
 	}
 	call = toolCallWithPresentation(t, s, call)
@@ -286,7 +287,7 @@ func TestPatchToolCallFormattingSingleFileUsesInlineEditedHeader(t *testing.T) {
 	patchText := "*** Begin Patch\n*** Update File: dir/a.go\n-old\n+new\n*** End Patch\n"
 	call := llm.ToolCall{
 		ID:    "call_patch_single",
-		Name:  string(tools.ToolPatch),
+		Name:  string(toolspec.ToolPatch),
 		Input: json.RawMessage(`{"patch":` + strconv.Quote(patchText) + `}`),
 	}
 	call = toolCallWithPresentation(t, s, call)
@@ -317,7 +318,7 @@ func TestPatchToolCallFormattingFallsBackToRawPatchWhenFileViewParseFails(t *tes
 	patchText := "not a structured patch payload"
 	call := llm.ToolCall{
 		ID:    "call_patch_raw",
-		Name:  string(tools.ToolPatch),
+		Name:  string(toolspec.ToolPatch),
 		Input: json.RawMessage(`{"patch":` + strconv.Quote(patchText) + `}`),
 	}
 	call = toolCallWithPresentation(t, s, call)
@@ -343,7 +344,7 @@ func TestFormatToolCallShellAddsShellMetadata(t *testing.T) {
 	s := newChatStore()
 	call := llm.ToolCall{
 		ID:    "call_shell",
-		Name:  string(tools.ToolShell),
+		Name:  string(toolspec.ToolShell),
 		Input: json.RawMessage(`{"command":"cat cli/tui/model.go"}`),
 	}
 	call = toolCallWithPresentation(t, s, call)
@@ -376,7 +377,7 @@ func TestFormatToolCallShellCapturesUserInitiatedMarker(t *testing.T) {
 	s := newChatStore()
 	call := llm.ToolCall{
 		ID:    "call_shell_user",
-		Name:  string(tools.ToolShell),
+		Name:  string(toolspec.ToolShell),
 		Input: json.RawMessage(`{"command":"pwd","user_initiated":true}`),
 	}
 	call = toolCallWithPresentation(t, s, call)
@@ -394,7 +395,7 @@ func TestFormatToolCallWriteStdinPollUsesDurationInTranscript(t *testing.T) {
 	s := newChatStore()
 	call := llm.ToolCall{
 		ID:    "call_poll",
-		Name:  string(tools.ToolWriteStdin),
+		Name:  string(toolspec.ToolWriteStdin),
 		Input: json.RawMessage(`{"session_id":1149,"yield_time_ms":2000}`),
 	}
 	call = toolCallWithPresentation(t, s, call)
@@ -427,7 +428,7 @@ func TestFormatToolCallAskQuestionUsesQuestionAndSuggestionsMeta(t *testing.T) {
 	s := newChatStore()
 	call := llm.ToolCall{
 		ID:    "call_ask",
-		Name:  string(tools.ToolAskQuestion),
+		Name:  string(toolspec.ToolAskQuestion),
 		Input: json.RawMessage(`{"question":"Choose scope?","suggestions":["flat scan","Recursive scan"],"recommended_option_index":1}`),
 	}
 	call = toolCallWithPresentation(t, s, call)
@@ -442,7 +443,7 @@ func TestFormatToolCallAskQuestionUsesQuestionAndSuggestionsMeta(t *testing.T) {
 	if rendered.ToolCall == nil {
 		t.Fatalf("expected ask_question metadata, got nil")
 	}
-	if rendered.ToolCall.ToolName != string(tools.ToolAskQuestion) {
+	if rendered.ToolCall.ToolName != string(toolspec.ToolAskQuestion) {
 		t.Fatalf("unexpected ask_question tool name: %+v", rendered.ToolCall)
 	}
 	if rendered.Text != "Choose scope?" {
@@ -474,14 +475,14 @@ func TestChatStoreSnapshotFormatsAskQuestionStructuredAnswer(t *testing.T) {
 		Role: llm.RoleAssistant,
 		ToolCalls: []llm.ToolCall{{
 			ID:    "call_ask",
-			Name:  string(tools.ToolAskQuestion),
+			Name:  string(toolspec.ToolAskQuestion),
 			Input: json.RawMessage(`{"question":"Choose scope?","suggestions":["full","fast"]}`),
 		}},
 	})
 	s.appendMessage(llm.Message{
 		Role:       llm.RoleTool,
 		ToolCallID: "call_ask",
-		Name:       string(tools.ToolAskQuestion),
+		Name:       string(toolspec.ToolAskQuestion),
 		Content:    `"ask result summary"`,
 	})
 
@@ -502,7 +503,7 @@ func TestFormatToolCallAskQuestionRejectsApprovalShapeAtToolLayer(t *testing.T) 
 	s := newChatStore()
 	call := llm.ToolCall{
 		ID:    "call_ask",
-		Name:  string(tools.ToolAskQuestion),
+		Name:  string(toolspec.ToolAskQuestion),
 		Input: json.RawMessage(`{"question":"Approve?","approval":true}`),
 	}
 	call = toolCallWithPresentation(t, s, call)
@@ -520,7 +521,7 @@ func TestFormatToolCallAskQuestionDropsImpossibleRecommendedMetadataAfterNormali
 	s := newChatStore()
 	call := llm.ToolCall{
 		ID:    "call_ask",
-		Name:  string(tools.ToolAskQuestion),
+		Name:  string(toolspec.ToolAskQuestion),
 		Input: json.RawMessage(`{"question":"Choose scope?","suggestions":["", "beta"],"recommended_option_index":2}`),
 	}
 	call = toolCallWithPresentation(t, s, call)
@@ -541,7 +542,7 @@ func TestFormatToolCallWebSearchUsesQueryOnly(t *testing.T) {
 	s := newChatStore()
 	call := llm.ToolCall{
 		ID:    "call_web",
-		Name:  string(tools.ToolWebSearch),
+		Name:  string(toolspec.ToolWebSearch),
 		Input: json.RawMessage(`{"query":"latest golang release"}`),
 	}
 	call = toolCallWithPresentation(t, s, call)
@@ -561,7 +562,7 @@ func TestFormatToolCallWebSearchUsesQueryOnly(t *testing.T) {
 func TestFormatToolResultWebSearchUsesCompactJSON(t *testing.T) {
 	result := tools.Result{
 		CallID: "call_web",
-		Name:   tools.ToolWebSearch,
+		Name:   toolspec.ToolWebSearch,
 		Output: json.RawMessage(`{"type":"web_search_call","status":"completed","action":{"type":"search","query":"builder cli"}}`),
 	}
 
@@ -882,11 +883,11 @@ func TestChatStoreProviderHistoryUsesMostRecentCompactionCheckpoint(t *testing.T
 
 func TestChatStoreSnapshotItemsPreservesMultiToolOutputOrdering(t *testing.T) {
 	s := newChatStore()
-	call1 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)})
-	call2 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-2", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)})
+	call1 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)})
+	call2 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-2", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)})
 	s.appendMessage(llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}})
-	s.recordToolCompletion(tools.Result{CallID: "call-1", Name: tools.ToolShell, Output: json.RawMessage(`{"output":"/tmp"}`)})
-	s.recordToolCompletion(tools.Result{CallID: "call-2", Name: tools.ToolShell, Output: json.RawMessage(`{"output":"a.txt"}`)})
+	s.recordToolCompletion(tools.Result{CallID: "call-1", Name: toolspec.ToolShell, Output: json.RawMessage(`{"output":"/tmp"}`)})
+	s.recordToolCompletion(tools.Result{CallID: "call-2", Name: toolspec.ToolShell, Output: json.RawMessage(`{"output":"a.txt"}`)})
 
 	items := s.snapshotItems()
 	if len(items) != 4 {
@@ -908,12 +909,12 @@ func TestChatStoreSnapshotItemsPreservesMultiToolOutputOrdering(t *testing.T) {
 
 func TestChatStoreSnapshotItemsPreservesMixedMaterializedAndPendingToolOutputs(t *testing.T) {
 	s := newChatStore()
-	call1 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)})
-	call2 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-2", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)})
+	call1 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)})
+	call2 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-2", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)})
 	s.appendMessage(llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}})
-	s.recordToolCompletion(tools.Result{CallID: "call-1", Name: tools.ToolShell, Output: json.RawMessage(`{"output":"/tmp"}`)})
-	s.recordToolCompletion(tools.Result{CallID: "call-2", Name: tools.ToolShell, Output: json.RawMessage(`{"output":"a.txt"}`)})
-	s.appendMessage(llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(tools.ToolShell), Content: `{"output":"/tmp"}`})
+	s.recordToolCompletion(tools.Result{CallID: "call-1", Name: toolspec.ToolShell, Output: json.RawMessage(`{"output":"/tmp"}`)})
+	s.recordToolCompletion(tools.Result{CallID: "call-2", Name: toolspec.ToolShell, Output: json.RawMessage(`{"output":"a.txt"}`)})
+	s.appendMessage(llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(toolspec.ToolShell), Content: `{"output":"/tmp"}`})
 
 	items := s.snapshotItems()
 	if len(items) != 4 {
@@ -935,12 +936,12 @@ func TestChatStoreSnapshotItemsPreservesMixedMaterializedAndPendingToolOutputs(t
 
 func TestChatStoreSnapshotItemsMatchesItemsFromMessagesWhenFullyMaterialized(t *testing.T) {
 	s := newChatStore()
-	call1 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)})
-	call2 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-2", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)})
+	call1 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)})
+	call2 := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-2", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"ls"}`)})
 	messages := []llm.Message{
 		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call1, call2}},
-		{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(tools.ToolShell), Content: `{"output":"/tmp"}`},
-		{Role: llm.RoleTool, ToolCallID: "call-2", Name: string(tools.ToolShell), Content: `{"output":"a.txt"}`},
+		{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(toolspec.ToolShell), Content: `{"output":"/tmp"}`},
+		{Role: llm.RoleTool, ToolCallID: "call-2", Name: string(toolspec.ToolShell), Content: `{"output":"a.txt"}`},
 	}
 	for _, msg := range messages {
 		s.appendMessage(msg)
@@ -962,18 +963,18 @@ func TestChatStoreCommittedEntryCountTracksVisibleTranscript(t *testing.T) {
 		t.Fatalf("after user message committed entry count = %d, want 1", got)
 	}
 
-	call := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)})
+	call := toolCallWithPresentation(t, s, llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)})
 	s.appendMessage(llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call}})
 	if got := s.committedEntryCount(); got != 2 {
 		t.Fatalf("after assistant tool call committed entry count = %d, want 2", got)
 	}
 
-	s.recordToolCompletion(tools.Result{CallID: "call-1", Name: tools.ToolShell, Output: json.RawMessage(`{"output":"/tmp"}`)})
+	s.recordToolCompletion(tools.Result{CallID: "call-1", Name: toolspec.ToolShell, Output: json.RawMessage(`{"output":"/tmp"}`)})
 	if got := s.committedEntryCount(); got != 3 {
 		t.Fatalf("after synthesized tool result committed entry count = %d, want 3", got)
 	}
 
-	s.appendMessage(llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(tools.ToolShell), Content: `{"output":"/tmp"}`})
+	s.appendMessage(llm.Message{Role: llm.RoleTool, ToolCallID: "call-1", Name: string(toolspec.ToolShell), Content: `{"output":"/tmp"}`})
 	if got := s.committedEntryCount(); got != 3 {
 		t.Fatalf("materialized tool result should not double count, got %d want 3", got)
 	}

@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	"builder/server/tools"
+	"builder/shared/toolspec"
 )
 
 func TestDeleteFile(t *testing.T) {
@@ -27,7 +28,7 @@ func TestDeleteFile(t *testing.T) {
 
 	patchText := "*** Begin Patch\n*** Delete File: a.txt\n*** End Patch\n"
 	input, _ := json.Marshal(map[string]any{"patch": patchText})
-	result, err := tool.Call(context.Background(), tools.Call{ID: "1", Name: tools.ToolPatch, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "1", Name: toolspec.ToolPatch, Input: input})
 	if err != nil {
 		t.Fatalf("patch call error: %v", err)
 	}
@@ -58,7 +59,7 @@ func TestDeleteParticipatesInAtomicPatchCommit(t *testing.T) {
 
 	patchText := "*** Begin Patch\n*** Delete File: delete.txt\n*** Add File: added.txt\n+hello\n*** Update File: keep.txt\n-two\n+two\n*** End Patch\n"
 	input, _ := json.Marshal(map[string]any{"patch": patchText})
-	result, err := tool.Call(context.Background(), tools.Call{ID: "atomic-delete", Name: tools.ToolPatch, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "atomic-delete", Name: toolspec.ToolPatch, Input: input})
 	if err != nil {
 		t.Fatalf("patch call error: %v", err)
 	}
@@ -103,7 +104,7 @@ func TestDeleteAddUpdateCommitTogether(t *testing.T) {
 
 	patchText := "*** Begin Patch\n*** Delete File: delete.txt\n*** Add File: added.txt\n+hello\n*** Update File: update.txt\n one\n-two\n+two updated\n*** End Patch\n"
 	input, _ := json.Marshal(map[string]any{"patch": patchText})
-	result, err := tool.Call(context.Background(), tools.Call{ID: "mixed-success", Name: tools.ToolPatch, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "mixed-success", Name: toolspec.ToolPatch, Input: input})
 	if err != nil {
 		t.Fatalf("patch call error: %v", err)
 	}
@@ -148,7 +149,7 @@ func TestDeleteThenMoveToSamePathCommitsReplacement(t *testing.T) {
 
 	patchText := "*** Begin Patch\n*** Delete File: dest.txt\n*** Update File: src.txt\n*** Move to: dest.txt\n line1\n-line2\n+line2 moved\n*** End Patch\n"
 	input, _ := json.Marshal(map[string]any{"patch": patchText})
-	result, err := tool.Call(context.Background(), tools.Call{ID: "replace-move", Name: tools.ToolPatch, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "replace-move", Name: toolspec.ToolPatch, Input: input})
 	if err != nil {
 		t.Fatalf("patch call error: %v", err)
 	}
@@ -182,7 +183,7 @@ func TestDeleteThenAddNestedFileReplacesFileWithDirectory(t *testing.T) {
 
 	patchText := "*** Begin Patch\n*** Delete File: tools\n*** Add File: tools/main.go\n+package main\n+\n+func main() {}\n*** End Patch\n"
 	input, _ := json.Marshal(map[string]any{"patch": patchText})
-	result, err := tool.Call(context.Background(), tools.Call{ID: "replace-file-dir", Name: tools.ToolPatch, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "replace-file-dir", Name: toolspec.ToolPatch, Input: input})
 	if err != nil {
 		t.Fatalf("patch call error: %v", err)
 	}
@@ -220,7 +221,7 @@ func TestAddUpdateMove(t *testing.T) {
 
 	patchText := "*** Begin Patch\n*** Add File: new.txt\n+hello\n*** Update File: one.txt\n*** Move to: moved.txt\n line1\n-line2\n+line2-updated\n*** End Patch\n"
 	input, _ := json.Marshal(map[string]any{"patch": patchText})
-	result, err := tool.Call(context.Background(), tools.Call{ID: "2", Name: tools.ToolPatch, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "2", Name: toolspec.ToolPatch, Input: input})
 	if err != nil {
 		t.Fatalf("patch call error: %v", err)
 	}
@@ -256,7 +257,7 @@ func TestAddFileInNewDirectory(t *testing.T) {
 
 	patchText := "*** Begin Patch\n*** Add File: nested/new/file.txt\n+hello\n*** End Patch\n"
 	input, _ := json.Marshal(map[string]any{"patch": patchText})
-	result, err := tool.Call(context.Background(), tools.Call{ID: "3", Name: tools.ToolPatch, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "3", Name: toolspec.ToolPatch, Input: input})
 	if err != nil {
 		t.Fatalf("patch call error: %v", err)
 	}
@@ -288,7 +289,7 @@ func TestUpdateAnchorsToHeaderInRepeatedBlocks(t *testing.T) {
 
 	patchText := "*** Begin Patch\n*** Update File: repeat.txt\n@@ -6,3 +6,3 @@\n block-start\n-x\n+y\n block-end\n*** End Patch\n"
 	input, _ := json.Marshal(map[string]any{"patch": patchText})
-	result, err := tool.Call(context.Background(), tools.Call{ID: "4", Name: tools.ToolPatch, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "4", Name: toolspec.ToolPatch, Input: input})
 	if err != nil {
 		t.Fatalf("patch call error: %v", err)
 	}
@@ -321,7 +322,7 @@ func TestUpdateAnchoredHeaderAllowsFuzz(t *testing.T) {
 
 	patchText := "*** Begin Patch\n*** Update File: fuzz.txt\n@@ -4,3 +4,3 @@\n b\n-c\n+C\n d\n*** End Patch\n"
 	input, _ := json.Marshal(map[string]any{"patch": patchText})
-	result, err := tool.Call(context.Background(), tools.Call{ID: "5", Name: tools.ToolPatch, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "5", Name: toolspec.ToolPatch, Input: input})
 	if err != nil {
 		t.Fatalf("patch call error: %v", err)
 	}
@@ -354,7 +355,7 @@ func TestUpdateAnchoredHeaderFailsOutsideFuzz(t *testing.T) {
 
 	patchText := "*** Begin Patch\n*** Update File: far.txt\n@@ -30,3 +30,3 @@\n b\n-c\n+C\n d\n*** End Patch\n"
 	input, _ := json.Marshal(map[string]any{"patch": patchText})
-	result, err := tool.Call(context.Background(), tools.Call{ID: "6", Name: tools.ToolPatch, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: "6", Name: toolspec.ToolPatch, Input: input})
 	if err != nil {
 		t.Fatalf("patch call error: %v", err)
 	}
@@ -919,7 +920,7 @@ func toggleFirstLetterCase(value string) string {
 func callPatch(t *testing.T, tool *Tool, id, patchText string) tools.Result {
 	t.Helper()
 	input, _ := json.Marshal(map[string]any{"patch": patchText})
-	result, err := tool.Call(context.Background(), tools.Call{ID: id, Name: tools.ToolPatch, Input: input})
+	result, err := tool.Call(context.Background(), tools.Call{ID: id, Name: toolspec.ToolPatch, Input: input})
 	if err != nil {
 		t.Fatalf("patch call error: %v", err)
 	}

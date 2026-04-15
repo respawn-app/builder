@@ -3,6 +3,7 @@ package runtime
 import (
 	"builder/server/llm"
 	"builder/server/tools"
+	"builder/shared/toolspec"
 	"encoding/json"
 	"strings"
 )
@@ -124,7 +125,7 @@ func (s *inMemoryTranscriptScan) visibleEntriesFromMessage(msg llm.Message) []Ch
 		callID := strings.TrimSpace(msg.ToolCallID)
 		result := tools.Result{
 			CallID: callID,
-			Name:   tools.ID(strings.TrimSpace(msg.Name)),
+			Name:   toolspec.ID(strings.TrimSpace(msg.Name)),
 			Output: json.RawMessage(msg.Content),
 		}
 		if completion, ok := s.toolCompletions[callID]; ok {
@@ -137,7 +138,7 @@ func (s *inMemoryTranscriptScan) visibleEntriesFromMessage(msg llm.Message) []Ch
 			result.IsError = completion.IsError
 		}
 		if result.Name == "" {
-			result.Name = tools.ID("tool")
+			result.Name = toolspec.ID("tool")
 		}
 		entries = append(entries, toolResultChatEntry(result))
 	case llm.RoleDeveloper:

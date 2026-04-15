@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"builder/shared/cachewarn"
+	"builder/shared/toolspec"
 	"context"
 	"encoding/json"
 	"testing"
@@ -18,7 +19,7 @@ func TestCommittedTranscriptChangedMarksOnlyDurableTranscriptMutations(t *testin
 		t.Fatalf("create store: %v", err)
 	}
 	events := make([]Event, 0, 16)
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
 		Model:   "gpt-5",
 		OnEvent: func(evt Event) { events = append(events, evt) },
 	})
@@ -81,7 +82,7 @@ func TestCommittedTranscriptChangedMarksOnlyDurableTranscriptMutations(t *testin
 	start = len(events)
 	if _, err := eng.executeToolCalls(context.Background(), "tool-step", []llm.ToolCall{{
 		ID:    "call-1",
-		Name:  string(tools.ToolShell),
+		Name:  string(toolspec.ToolShell),
 		Input: json.RawMessage(`{"command":"pwd"}`),
 	}}); err != nil {
 		t.Fatalf("execute tool calls: %v", err)
@@ -96,7 +97,7 @@ func TestToolResultMirrorMessageDoesNotEmitGenericCommittedAdvance(t *testing.T)
 		t.Fatalf("create store: %v", err)
 	}
 	events := make([]Event, 0, 16)
-	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
 		Model:   "gpt-5",
 		OnEvent: func(evt Event) { events = append(events, evt) },
 	})
@@ -104,11 +105,11 @@ func TestToolResultMirrorMessageDoesNotEmitGenericCommittedAdvance(t *testing.T)
 		t.Fatalf("new engine: %v", err)
 	}
 
-	call := llm.ToolCall{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}
+	call := llm.ToolCall{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}
 	if err := eng.appendAssistantMessage("step-1", llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call}}); err != nil {
 		t.Fatalf("append assistant message: %v", err)
 	}
-	result := tools.Result{CallID: call.ID, Name: tools.ToolShell, Output: json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`)}
+	result := tools.Result{CallID: call.ID, Name: toolspec.ToolShell, Output: json.RawMessage(`{"output":"/tmp","exit_code":0,"truncated":false}`)}
 	if err := eng.persistToolCompletion("step-1", result); err != nil {
 		t.Fatalf("persist tool completion: %v", err)
 	}

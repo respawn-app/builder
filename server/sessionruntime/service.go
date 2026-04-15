@@ -15,13 +15,14 @@ import (
 	"builder/server/runtimeview"
 	"builder/server/runtimewire"
 	"builder/server/session"
-	"builder/server/tools"
 	askquestion "builder/server/tools/askquestion"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/clientui"
 	"builder/shared/config"
 	"builder/shared/serverapi"
+	"builder/shared/toolspec"
 	"builder/shared/transcriptdiag"
+
 	"github.com/google/uuid"
 )
 
@@ -381,13 +382,13 @@ func waitForRuntimeHandleReady(ctx context.Context, handle *runtimeHandle) error
 	}
 }
 
-func parseToolIDs(raw []string) ([]tools.ID, error) {
+func parseToolIDs(raw []string) ([]toolspec.ID, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}
-	ids := make([]tools.ID, 0, len(raw))
+	ids := make([]toolspec.ID, 0, len(raw))
 	for _, item := range raw {
-		id, ok := tools.ParseID(item)
+		id, ok := toolspec.ParseID(item)
 		if !ok {
 			return nil, fmt.Errorf("unknown tool id %q", item)
 		}

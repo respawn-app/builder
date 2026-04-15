@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"builder/prompts"
-	"builder/server/tools"
 	"builder/shared/textutil"
+	"builder/shared/toolspec"
 
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
@@ -143,7 +143,7 @@ func outputStringFromRaw(raw json.RawMessage) string {
 
 func functionCallOutputInputItems(callID string, toolName string, raw json.RawMessage) []responses.ResponseInputItemUnionParam {
 	if contentItems, ok := functionCallOutputContentItemsFromRaw(raw); ok {
-		if strings.TrimSpace(toolName) == string(tools.ToolViewImage) {
+		if strings.TrimSpace(toolName) == string(toolspec.ToolViewImage) {
 			if promotedInputMessage, promoted := promoteFunctionOutputFilesToInputMessage(contentItems); promoted {
 				return []responses.ResponseInputItemUnionParam{
 					responses.ResponseInputItemParamOfFunctionCallOutput(callID, "attached file content"),

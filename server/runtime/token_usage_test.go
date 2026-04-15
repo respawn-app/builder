@@ -10,6 +10,7 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/toolspec"
 )
 
 func TestPreciseRefreshCheckpointsFollowThresholdBands(t *testing.T) {
@@ -141,7 +142,7 @@ func TestCurrentInputTokensPreciselyRechecksAfterTranscriptMutation(t *testing.T
 	}
 
 	client := &preciseCompactionClient{inputTokenCount: 240, contextWindow: 400000}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -182,7 +183,7 @@ func TestContextUsagePrefersFreshPreciseCurrentTokens(t *testing.T) {
 	}
 
 	client := &preciseCompactionClient{inputTokenCount: 180, contextWindow: 400000}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -208,7 +209,7 @@ func TestCurrentInputTokensPreciselyRechecksAfterFastModeToggle(t *testing.T) {
 	}
 
 	client := &preciseCompactionClient{inputTokenCount: 180, contextWindow: 400000}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -245,7 +246,7 @@ func TestCurrentInputTokensPreciselyIfDueSkipsBackendFarBelowCheckpoint(t *testi
 	}
 
 	client := &preciseCompactionClient{inputTokenCount: 999, contextWindow: 400000}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -269,7 +270,7 @@ func TestCurrentInputTokensPreciselyIfCriticalForcesRefreshAfterSignificantMutat
 	}
 
 	client := &preciseCompactionClient{inputTokenCount: 180, contextWindow: 400000}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -305,7 +306,7 @@ func TestCurrentInputTokensPreciselyPersistsTranscriptErrorOnceOnCountFailure(t 
 	}
 
 	client := &preciseCompactionClient{countErr: errors.New("chatgpt-codex status 404"), contextWindow: 400000}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -326,7 +327,7 @@ func TestCurrentInputTokensPreciselyPersistsTranscriptErrorOnceOnCountFailure(t 
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
 	}
-	reopened, err := New(reopenedStore, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	reopened, err := New(reopenedStore, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err != nil {
 		t.Fatalf("reopen engine: %v", err)
 	}
@@ -381,7 +382,7 @@ func TestCurrentInputTokensPreciselySkipsUnsupportedCountClient(t *testing.T) {
 
 	supported := false
 	client := &preciseCompactionClient{inputTokenCount: 123, contextWindow: 400000, countSupported: &supported}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -422,7 +423,7 @@ func TestCurrentInputTokensPreciselyPersistsTranscriptErrorOnSupportProbeFailure
 	}
 
 	client := &preciseCompactionClient{inputTokenCount: 123, contextWindow: 400000, supportErr: errors.New("oauth metadata unavailable")}
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{Model: "gpt-5", ContextWindowTokens: 400_000})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}

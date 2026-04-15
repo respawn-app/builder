@@ -8,6 +8,7 @@ import (
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/server/tools"
+	"builder/shared/toolspec"
 )
 
 func TestSubmitUserMessageDoesNotEmitCommittedConversationUpdatedAfterFlushedUserTurn(t *testing.T) {
@@ -21,7 +22,7 @@ func TestSubmitUserMessageDoesNotEmitCommittedConversationUpdatedAfterFlushedUse
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 	events := make([]Event, 0, 16)
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
 		Model:   "gpt-5",
 		OnEvent: func(evt Event) { events = append(events, evt) },
 	})
@@ -45,7 +46,7 @@ func TestSubmitUserMessageWithToolCallDoesNotEmitCommittedConversationUpdatedAft
 	client := &fakeClient{responses: []llm.Response{
 		{
 			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "working", Phase: llm.MessagePhaseCommentary},
-			ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(tools.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
+			ToolCalls: []llm.ToolCall{{ID: "call-1", Name: string(toolspec.ToolShell), Input: json.RawMessage(`{"command":"pwd"}`)}},
 			Usage:     llm.Usage{WindowTokens: 200000},
 		},
 		{
@@ -54,7 +55,7 @@ func TestSubmitUserMessageWithToolCallDoesNotEmitCommittedConversationUpdatedAft
 		},
 	}}
 	events := make([]Event, 0, 32)
-	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
 		Model:   "gpt-5",
 		OnEvent: func(evt Event) { events = append(events, evt) },
 	})
@@ -74,7 +75,6 @@ func TestSubmitUserMessageWithToolCallDoesNotEmitCommittedConversationUpdatedAft
 		t.Fatalf("expected assistant_message event, got %+v", events)
 	}
 }
-
 
 func TestReviewerTranscriptPathsUseRichEventsWithoutCommittedConversationUpdatedAfterUserFlush(t *testing.T) {
 	dir := t.TempDir()
@@ -97,7 +97,7 @@ func TestReviewerTranscriptPathsUseRichEventsWithoutCommittedConversationUpdated
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
 	events := make([]Event, 0, 48)
-	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
+	eng, err := New(store, mainClient, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
 		Model: "gpt-5",
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -126,6 +126,17 @@ func TestReviewerTranscriptPathsUseRichEventsWithoutCommittedConversationUpdated
 	if !hasEventKind(events, EventReviewerCompleted) {
 		t.Fatalf("expected reviewer_completed event, got %+v", events)
 	}
+	for _, evt := range events {
+		if evt.Kind != EventReviewerCompleted {
+			continue
+		}
+		if evt.CommittedTranscriptChanged {
+			t.Fatalf("expected reviewer_completed to avoid committed transcript advancement, got %+v", evt)
+		}
+		if got := TranscriptEntriesFromEvent(evt); len(got) != 0 {
+			t.Fatalf("expected reviewer_completed transcript entries to be empty, got %+v", got)
+		}
+	}
 }
 
 func committedConversationUpdatedCountAfterLastUserFlush(events []Event) int {
@@ -152,7 +163,6 @@ func hasEventKind(events []Event, kind EventKind) bool {
 	}
 	return false
 }
-
 
 func hasReviewerLocalEntryRole(events []Event, role string) bool {
 	for _, evt := range events {

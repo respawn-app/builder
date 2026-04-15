@@ -6,10 +6,10 @@ import (
 	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/server/session"
-	patchformat "builder/server/tools/patch/format"
 	"builder/shared/cachewarn"
 	"builder/shared/clientui"
 	"builder/shared/transcript"
+	patchformat "builder/shared/transcript/patchformat"
 )
 
 const runtimeNoopFinalToken = "NO_OP"

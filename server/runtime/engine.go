@@ -14,6 +14,8 @@ import (
 	"builder/server/tools"
 	"builder/shared/compaction"
 	"builder/shared/config"
+	"builder/shared/toolspec"
+
 	"github.com/google/uuid"
 )
 
@@ -99,7 +101,7 @@ type Config struct {
 	FastModeState                 *FastModeState
 	WebSearchMode                 string
 	ProviderCapabilitiesOverride  *llm.ProviderCapabilities
-	EnabledTools                  []tools.ID
+	EnabledTools                  []toolspec.ID
 	DisabledSkills                map[string]bool
 	AutoCompactTokenLimit         int
 	PreSubmitCompactionLeadTokens int
@@ -436,7 +438,7 @@ func (e *Engine) SubmitUserShellCommand(ctx context.Context, command string) (re
 
 		call := llm.ToolCall{
 			ID:   uuid.NewString(),
-			Name: string(tools.ToolShell),
+			Name: string(toolspec.ToolShell),
 			Input: mustJSON(map[string]any{
 				"command":        command,
 				"user_initiated": true,
@@ -445,9 +447,9 @@ func (e *Engine) SubmitUserShellCommand(ctx context.Context, command string) (re
 		if err := e.appendAssistantMessage(stepID, llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call}}); err != nil {
 			return err
 		}
-		if _, ok := e.registry.Get(tools.ToolShell); !ok {
+		if _, ok := e.registry.Get(toolspec.ToolShell); !ok {
 			e.emit(Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: copiedToolCall(normalizeToolCallForTranscript(call, e.store.Meta().WorkspaceRoot)), CommittedTranscriptChanged: true})
-			result = tools.Result{CallID: call.ID, Name: tools.ToolShell, IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
+			result = tools.Result{CallID: call.ID, Name: toolspec.ToolShell, IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
 			if err := e.persistToolCompletion(stepID, result); err != nil {
 				return fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", call.ID, result.Name, err)
 			}

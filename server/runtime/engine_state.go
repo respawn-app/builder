@@ -10,7 +10,7 @@ import (
 
 	"builder/server/llm"
 	"builder/server/session"
-	"builder/server/tools"
+	"builder/shared/toolspec"
 	"builder/shared/transcript"
 )
 
@@ -397,7 +397,7 @@ type historyReplacementPayload struct {
 	Items  []llm.ResponseItem `json:"items"`
 }
 
-func toToolNames(ids []tools.ID) []string {
+func toToolNames(ids []toolspec.ID) []string {
 	out := make([]string, 0, len(ids))
 	for _, id := range ids {
 		if id == "" {

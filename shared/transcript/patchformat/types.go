@@ -1,4 +1,6 @@
-package format
+package patchformat
+
+import "strings"
 
 type Document struct {
 	Hunks []any
@@ -52,4 +54,23 @@ type RenderedPatch struct {
 	Files        []RenderedFile
 	SummaryLines []RenderedLine
 	DetailLines  []RenderedLine
+}
+
+func (r RenderedPatch) SummaryText() string {
+	return joinRenderedLines(r.SummaryLines)
+}
+
+func (r RenderedPatch) DetailText() string {
+	return joinRenderedLines(r.DetailLines)
+}
+
+func joinRenderedLines(lines []RenderedLine) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, line.Text)
+	}
+	return strings.Join(out, "\n")
 }

@@ -3,6 +3,7 @@ package runtime
 import (
 	"builder/server/llm"
 	"builder/server/tools"
+	"builder/shared/toolspec"
 	"builder/shared/transcript"
 	"encoding/json"
 	"fmt"
@@ -147,7 +148,7 @@ func (s *chatStore) restoreToolCompletionPayload(payload []byte) error {
 	}
 	s.recordToolCompletion(tools.Result{
 		CallID:  completion.CallID,
-		Name:    tools.ID(completion.Name),
+		Name:    toolspec.ID(completion.Name),
 		IsError: completion.IsError,
 		Output:  completion.Output,
 	})
@@ -545,7 +546,7 @@ func (s *chatStore) snapshotWithMetadata() materializedChatSnapshot {
 			callID := strings.TrimSpace(msg.ToolCallID)
 			result := tools.Result{
 				CallID: callID,
-				Name:   tools.ID(strings.TrimSpace(msg.Name)),
+				Name:   toolspec.ID(strings.TrimSpace(msg.Name)),
 				Output: json.RawMessage(msg.Content),
 			}
 			if completion, ok := s.toolCompletions[callID]; ok {
@@ -558,7 +559,7 @@ func (s *chatStore) snapshotWithMetadata() materializedChatSnapshot {
 				result.IsError = completion.IsError
 			}
 			if result.Name == "" {
-				result.Name = tools.ID("tool")
+				result.Name = toolspec.ID("tool")
 			}
 			entries = append(entries, toolResultChatEntry(result))
 		case llm.RoleDeveloper:

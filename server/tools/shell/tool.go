@@ -15,6 +15,8 @@ import (
 	"unicode"
 
 	"builder/server/tools"
+	"builder/shared/toolspec"
+
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
@@ -95,8 +97,8 @@ func New(workspaceRoot string, outputLimit int, opts ...Option) *Tool {
 	return t
 }
 
-func (t *Tool) Name() tools.ID {
-	return tools.ToolShell
+func (t *Tool) Name() toolspec.ID {
+	return toolspec.ToolShell
 }
 
 func (t *Tool) Call(ctx context.Context, c tools.Call) (tools.Result, error) {
