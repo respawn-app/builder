@@ -62,7 +62,7 @@ func (e *Engine) replaceHistory(stepID, engine string, mode compactionMode, item
 		if persistErr := e.store.SetUsageState(nil); persistErr != nil {
 			return persistErr
 		}
-		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
+		e.emitCommittedTranscriptAdvanced(stepID)
 	}
 	return err
 }

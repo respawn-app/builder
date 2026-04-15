@@ -447,10 +447,11 @@ func TestHandleProjectedRuntimeEventSkipsAlreadyHydratedAssistantEntry(t *testin
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
-		Kind:                runtime.EventAssistantMessage,
-		StepID:              "step-1",
-		TranscriptRevision:  10,
-		CommittedEntryCount: 1,
+		Kind:                       runtime.EventAssistantMessage,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         10,
+		CommittedEntryCount:        1,
 		Message: llm.Message{
 			Role:    llm.RoleAssistant,
 			Content: "same",
@@ -475,10 +476,11 @@ func TestHandleProjectedRuntimeEventRepairsCoveredAssistantEntryInsteadOfSkippin
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                clientui.EventAssistantMessage,
-		StepID:              "step-1",
-		TranscriptRevision:  10,
-		CommittedEntryCount: 2,
+		Kind:                       clientui.EventAssistantMessage,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		TranscriptRevision:         10,
+		CommittedEntryCount:        2,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role:  "assistant",
 			Text:  "fresh",
@@ -510,10 +512,11 @@ func TestHandleProjectedRuntimeEventRepairsCoveredAssistantEntryAndAppendsTraili
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                clientui.EventAssistantMessage,
-		StepID:              "step-1",
-		TranscriptRevision:  10,
-		CommittedEntryCount: 3,
+		Kind:                       clientui.EventAssistantMessage,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		TranscriptRevision:         10,
+		CommittedEntryCount:        3,
 		TranscriptEntries: []clientui.ChatEntry{
 			{Role: "assistant", Text: "fresh", Phase: string(llm.MessagePhaseFinal)},
 			{Role: "tool_call", Text: "pwd", ToolCallID: "call-1", ToolCall: &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"}},
@@ -544,12 +547,13 @@ func TestHandleProjectedRuntimeEventDoesNotSuppressPendingToolCallStart(t *testi
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                   clientui.EventToolCallStarted,
-		StepID:                 "step-1",
-		TranscriptRevision:     10,
-		CommittedEntryCount:    2,
-		CommittedEntryStart:    1,
-		CommittedEntryStartSet: true,
+		Kind:                       clientui.EventToolCallStarted,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		TranscriptRevision:         10,
+		CommittedEntryCount:        2,
+		CommittedEntryStart:        1,
+		CommittedEntryStartSet:     true,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role:       "tool_call",
 			Text:       "pwd",
@@ -582,11 +586,12 @@ func TestProjectedAssistantMessageUsesCommittedEntryStartWhenPersistedToolCallsS
 	}
 
 	cmd, mutated, needsHydration := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{
-		Kind:                   clientui.EventAssistantMessage,
-		TranscriptRevision:     11,
-		CommittedEntryCount:    4,
-		CommittedEntryStart:    1,
-		CommittedEntryStartSet: true,
+		Kind:                       clientui.EventAssistantMessage,
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         11,
+		CommittedEntryCount:        4,
+		CommittedEntryStart:        1,
+		CommittedEntryStartSet:     true,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role:  "assistant",
 			Text:  "working",
@@ -599,8 +604,8 @@ func TestProjectedAssistantMessageUsesCommittedEntryStartWhenPersistedToolCallsS
 	if got, want := len(m.transcriptEntries), 2; got != want {
 		t.Fatalf("transcript entry count = %d, want %d", got, want)
 	}
-	if !m.transcriptEntries[1].Transient || !m.transcriptEntries[1].Committed {
-		t.Fatalf("expected live assistant entry to remain transient but committed for ordering, got %+v", m.transcriptEntries[1])
+	if m.transcriptEntries[1].Transient || !m.transcriptEntries[1].Committed {
+		t.Fatalf("expected committed assistant entry to apply as committed transcript state, got %+v", m.transcriptEntries[1])
 	}
 }
 
@@ -623,11 +628,12 @@ func TestProjectedToolCallStartedUsesCommittedEntryStartWithinSharedCommittedCou
 	}
 
 	cmd, mutated, needsHydration := m.runtimeAdapter().applyProjectedTranscriptEntries(clientui.Event{
-		Kind:                   clientui.EventToolCallStarted,
-		TranscriptRevision:     11,
-		CommittedEntryCount:    4,
-		CommittedEntryStart:    2,
-		CommittedEntryStartSet: true,
+		Kind:                       clientui.EventToolCallStarted,
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         11,
+		CommittedEntryCount:        4,
+		CommittedEntryStart:        2,
+		CommittedEntryStartSet:     true,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role:       "tool_call",
 			Text:       "pwd",
@@ -641,8 +647,127 @@ func TestProjectedToolCallStartedUsesCommittedEntryStartWithinSharedCommittedCou
 	if got, want := len(m.transcriptEntries), 3; got != want {
 		t.Fatalf("transcript entry count = %d, want %d", got, want)
 	}
-	if !m.transcriptEntries[2].Transient || !m.transcriptEntries[2].Committed {
-		t.Fatalf("expected live tool call entry to remain transient but be committed for ordering, got %+v", m.transcriptEntries[2])
+	if m.transcriptEntries[2].Transient || !m.transcriptEntries[2].Committed {
+		t.Fatalf("expected committed tool call entry to apply as committed transcript state, got %+v", m.transcriptEntries[2])
+	}
+}
+
+func TestProjectedAssistantMessageUpdatesDetailViewImmediatelyWhenCommitted(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	m.forwardToView(tui.SetModeMsg{Mode: tui.ModeDetail, SkipDetailWarmup: true})
+	m.syncViewport()
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventAssistantMessage,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         11,
+		CommittedEntryCount:        2,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:  "assistant",
+			Text:  "committed after",
+			Phase: string(llm.MessagePhaseFinal),
+		}},
+	})
+	msgs := collectCmdMessages(t, cmd)
+	for _, msg := range msgs {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect assistant_message committed delta to trigger transcript hydration, got %+v", msgs)
+		}
+	}
+
+	if got, want := len(m.transcriptEntries), 2; got != want {
+		t.Fatalf("transcript entry count = %d, want %d", got, want)
+	}
+	if m.transcriptEntries[1].Transient || !m.transcriptEntries[1].Committed {
+		t.Fatalf("expected committed assistant entry to apply as committed transcript state, got %+v", m.transcriptEntries[1])
+	}
+	if got := m.detailTranscript.totalEntries; got != 2 {
+		t.Fatalf("detail transcript total entries = %d, want 2", got)
+	}
+	if got, want := len(m.detailTranscript.entries), 2; got != want {
+		t.Fatalf("detail transcript entry count = %d, want %d", got, want)
+	}
+	if got := m.detailTranscript.entries[1].Text; got != "committed after" {
+		t.Fatalf("detail transcript tail = %q, want committed after", got)
+	}
+	view := stripANSIAndTrimRight(m.View())
+	if !containsInOrder(view, "seed", "committed after") {
+		t.Fatalf("expected detail view to reflect committed assistant delta, got %q", view)
+	}
+}
+
+func TestProjectedReviewerCompletedUpdatesDetailViewImmediatelyWhenCommitted(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	m.forwardToView(tui.SetModeMsg{Mode: tui.ModeDetail, SkipDetailWarmup: true})
+	m.syncViewport()
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventReviewerCompleted,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         11,
+		CommittedEntryCount:        2,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role: "reviewer_status",
+			Text: "Supervisor ran and applied 2 suggestions.",
+		}},
+	})
+	msgs := collectCmdMessages(t, cmd)
+	for _, msg := range msgs {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect reviewer committed delta to trigger transcript hydration, got %+v", msgs)
+		}
+	}
+
+	if got, want := len(m.transcriptEntries), 2; got != want {
+		t.Fatalf("transcript entry count = %d, want %d", got, want)
+	}
+	if m.transcriptEntries[1].Transient || !m.transcriptEntries[1].Committed {
+		t.Fatalf("expected committed reviewer status to apply as committed transcript state, got %+v", m.transcriptEntries[1])
+	}
+	if got := m.detailTranscript.totalEntries; got != 2 {
+		t.Fatalf("detail transcript total entries = %d, want 2", got)
+	}
+	if got, want := len(m.detailTranscript.entries), 2; got != want {
+		t.Fatalf("detail transcript entry count = %d, want %d", got, want)
+	}
+	if got := m.detailTranscript.entries[1].Text; got != "Supervisor ran and applied 2 suggestions." {
+		t.Fatalf("detail transcript tail = %q, want reviewer status", got)
+	}
+	view := stripANSIAndTrimRight(m.View())
+	if !containsInOrder(view, "seed", "Supervisor ran and applied 2 suggestions.") {
+		t.Fatalf("expected detail view to reflect committed reviewer delta, got %q", view)
 	}
 }
 
@@ -680,12 +805,13 @@ func TestHandleProjectedRuntimeEventSkipsReplayedToolCallStartWithSameToolCallID
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
 	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                   clientui.EventToolCallStarted,
-		StepID:                 "step-1",
-		TranscriptRevision:     10,
-		CommittedEntryCount:    2,
-		CommittedEntryStart:    1,
-		CommittedEntryStartSet: true,
+		Kind:                       clientui.EventToolCallStarted,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		TranscriptRevision:         10,
+		CommittedEntryCount:        2,
+		CommittedEntryStart:        1,
+		CommittedEntryStartSet:     true,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role:       "tool_call",
 			Text:       "pwd",
@@ -704,6 +830,47 @@ func TestHandleProjectedRuntimeEventSkipsReplayedToolCallStartWithSameToolCallID
 	}
 }
 
+func TestHandleProjectedRuntimeEventCommittedToolCallStartReplacesMatchingTransientToolRow(t *testing.T) {
+	m := newProjectedTestUIModel(&runtimeControlFakeClient{}, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "assistant", Text: "seed", Phase: llm.MessagePhaseFinal, Committed: true},
+		{Role: "tool_call", Text: "pwd", ToolCallID: "call-1", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"}, Transient: true},
+	}
+	m.transcriptBaseOffset = 0
+	m.transcriptTotalEntries = 2
+	m.transcriptRevision = 10
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventToolCallStarted,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		TranscriptRevision:         11,
+		CommittedEntryCount:        2,
+		CommittedEntryStart:        1,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:       "tool_call",
+			Text:       "pwd",
+			ToolCallID: "call-1",
+			ToolCall:   &clientui.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"},
+		}},
+	})
+
+	if cmd == nil {
+		t.Fatal("expected native history sync after committed tool call replaced transient row")
+	}
+	if got := len(m.transcriptEntries); got != 2 {
+		t.Fatalf("transcript entry count = %d, want 2", got)
+	}
+	if got := m.transcriptEntries[1]; got.Transient || !got.Committed {
+		t.Fatalf("expected committed tool row after replacement, got %+v", got)
+	}
+}
+
 func TestHandleProjectedRuntimeEventAppendsDistinctToolCallStartByToolCallID(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.transcriptEntries = []tui.TranscriptEntry{{Role: "tool_call", Text: "pwd", ToolCallID: "call-1", ToolCall: &transcript.ToolCallMeta{ToolName: "shell", IsShell: true, Command: "pwd"}}}
@@ -713,12 +880,13 @@ func TestHandleProjectedRuntimeEventAppendsDistinctToolCallStartByToolCallID(t *
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                   clientui.EventToolCallStarted,
-		StepID:                 "step-1",
-		TranscriptRevision:     10,
-		CommittedEntryCount:    2,
-		CommittedEntryStart:    1,
-		CommittedEntryStartSet: true,
+		Kind:                       clientui.EventToolCallStarted,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		TranscriptRevision:         10,
+		CommittedEntryCount:        2,
+		CommittedEntryStart:        1,
+		CommittedEntryStartSet:     true,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role:       "tool_call",
 			Text:       "pwd",
@@ -744,10 +912,11 @@ func TestHandleProjectedRuntimeEventDoesNotSuppressReviewerStatusEntry(t *testin
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                clientui.EventReviewerCompleted,
-		StepID:              "step-1",
-		TranscriptRevision:  10,
-		CommittedEntryCount: 2,
+		Kind:                       clientui.EventReviewerCompleted,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		TranscriptRevision:         10,
+		CommittedEntryCount:        2,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "reviewer_status",
 			Text: "Supervisor ran and applied 2 suggestions.",
@@ -774,10 +943,11 @@ func TestHandleProjectedRuntimeEventSkipsHydratedReviewerStatusEntry(t *testing.
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                clientui.EventReviewerCompleted,
-		StepID:              "step-1",
-		TranscriptRevision:  10,
-		CommittedEntryCount: 2,
+		Kind:                       clientui.EventReviewerCompleted,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		TranscriptRevision:         10,
+		CommittedEntryCount:        2,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "reviewer_status",
 			Text: "Supervisor ran and applied 2 suggestions.",
@@ -789,7 +959,7 @@ func TestHandleProjectedRuntimeEventSkipsHydratedReviewerStatusEntry(t *testing.
 	}
 }
 
-func TestHandleProjectedRuntimeEventDoesNotSuppressCompactionNoticeEntry(t *testing.T) {
+func TestHandleProjectedRuntimeEventDoesNotAppendPrePersistCompactionStatusEntry(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "seed", Phase: llm.MessagePhaseCommentary}}
 	m.transcriptBaseOffset = 0
@@ -797,22 +967,85 @@ func TestHandleProjectedRuntimeEventDoesNotSuppressCompactionNoticeEntry(t *test
 	m.transcriptRevision = 10
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                clientui.EventCompactionCompleted,
-		StepID:              "step-1",
-		TranscriptRevision:  10,
-		CommittedEntryCount: 1,
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
+		Kind:   runtime.EventCompactionCompleted,
+		StepID: "step-1",
+		Compaction: &runtime.CompactionStatus{
+			Mode:  "auto",
+			Count: 1,
+		},
+	}))
+
+	if got := len(m.transcriptEntries); got != 1 {
+		t.Fatalf("expected pre-persist compaction status to avoid transcript mutation, got %+v", m.transcriptEntries)
+	}
+}
+
+func TestProjectedCompactionStatusUsesPersistedLocalEntryAsTranscriptSource(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	msgs := collectCmdMessages(t, m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
+		Kind:   runtime.EventCompactionCompleted,
+		StepID: "step-1",
+		Compaction: &runtime.CompactionStatus{
+			Mode:  "auto",
+			Count: 1,
+		},
+	})))
+	for _, msg := range msgs {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect pre-persist compaction status to trigger transcript hydration, got %+v", msgs)
+		}
+	}
+	if got, want := len(m.transcriptEntries), 1; got != want {
+		t.Fatalf("transcript entry count after compaction status = %d, want %d", got, want)
+	}
+
+	msgs = collectCmdMessages(t, m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventLocalEntryAdded,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		TranscriptRevision:         11,
+		CommittedEntryCount:        2,
+		CommittedEntryStart:        1,
+		CommittedEntryStartSet:     true,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "compaction_notice",
 			Text: "context compacted for the 1st time",
 		}},
-	})
-
-	if got := len(m.transcriptEntries); got != 2 {
-		t.Fatalf("expected compaction notice appended immediately, got %+v", m.transcriptEntries)
+	}))
+	for _, msg := range msgs {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect persisted compaction notice to trigger transcript hydration, got %+v", msgs)
+		}
 	}
-	if got := m.transcriptEntries[1].Role; got != "compaction_notice" {
-		t.Fatalf("second transcript role = %q, want compaction_notice", got)
+	if got, want := len(m.transcriptEntries), 2; got != want {
+		t.Fatalf("transcript entry count after persisted compaction notice = %d, want %d", got, want)
+	}
+	if m.transcriptEntries[1].Transient || !m.transcriptEntries[1].Committed {
+		t.Fatalf("expected persisted compaction notice to apply as committed transcript state, got %+v", m.transcriptEntries[1])
+	}
+	loaded := m.view.LoadedTranscriptEntries()
+	if got, want := len(loaded), 2; got != want {
+		t.Fatalf("loaded transcript entry count = %d, want %d (%+v)", got, want, loaded)
+	}
+	if got := loaded[1].Role; got != "compaction_notice" {
+		t.Fatalf("loaded compaction role = %q, want compaction_notice", got)
 	}
 }
 
@@ -822,10 +1055,11 @@ func TestHandleProjectedRuntimeEventAppendsLocalEntryImmediately(t *testing.T) {
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                clientui.EventLocalEntryAdded,
-		StepID:              "step-1",
-		TranscriptRevision:  10,
-		CommittedEntryCount: 1,
+		Kind:                       clientui.EventLocalEntryAdded,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		TranscriptRevision:         10,
+		CommittedEntryCount:        1,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role:        "reviewer_suggestions",
 			Text:        "Supervisor suggested:\n1. Add verification notes.",
@@ -863,10 +1097,11 @@ func TestLocalEntryAddedRemainsVisibleAfterHydrationSync(t *testing.T) {
 	}
 
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                clientui.EventLocalEntryAdded,
-		StepID:              "step-1",
-		TranscriptRevision:  10,
-		CommittedEntryCount: 2,
+		Kind:                       clientui.EventLocalEntryAdded,
+		CommittedTranscriptChanged: true,
+		StepID:                     "step-1",
+		TranscriptRevision:         10,
+		CommittedEntryCount:        2,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role:        "reviewer_suggestions",
 			Text:        "Supervisor suggested:\n1. Add verification notes.",
@@ -909,26 +1144,10 @@ func TestLocalEntryAddedRemainsVisibleAfterHydrationSync(t *testing.T) {
 	}
 }
 
-func TestHandleProjectedRuntimeEventAppendsCompactionCleanupAndBackgroundEntriesImmediately(t *testing.T) {
+func TestHandleProjectedRuntimeEventAppendsCleanupAndBackgroundEntriesImmediately(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.forwardToView(tui.SetViewportSizeMsg{Lines: 20, Width: 80})
 
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
-		Kind:   runtime.EventCompactionCompleted,
-		StepID: "step-1",
-		Compaction: &runtime.CompactionStatus{
-			Mode:  "auto",
-			Count: 2,
-		},
-	}))
-	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
-		Kind:   runtime.EventCompactionFailed,
-		StepID: "step-1",
-		Compaction: &runtime.CompactionStatus{
-			Mode:  "manual",
-			Error: "quota exceeded",
-		},
-	}))
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(projectRuntimeEvent(runtime.Event{
 		Kind:   runtime.EventInFlightClearFailed,
 		StepID: "step-1",
@@ -945,22 +1164,16 @@ func TestHandleProjectedRuntimeEventAppendsCompactionCleanupAndBackgroundEntries
 		},
 	}))
 
-	if len(m.transcriptEntries) != 4 {
-		t.Fatalf("expected four immediate transcript entries, got %+v", m.transcriptEntries)
+	if len(m.transcriptEntries) != 2 {
+		t.Fatalf("expected two immediate transcript entries, got %+v", m.transcriptEntries)
 	}
-	if got := m.transcriptEntries[0].Role; got != "compaction_notice" {
-		t.Fatalf("entry[0].Role = %q, want compaction_notice", got)
+	if got := m.transcriptEntries[0].Role; got != "error" {
+		t.Fatalf("entry[0].Role = %q, want error", got)
 	}
-	if got := m.transcriptEntries[1].Role; got != "error" {
-		t.Fatalf("entry[1].Role = %q, want error", got)
+	if got := m.transcriptEntries[1].Role; got != "system" {
+		t.Fatalf("entry[1].Role = %q, want system", got)
 	}
-	if got := m.transcriptEntries[2].Role; got != "error" {
-		t.Fatalf("entry[2].Role = %q, want error", got)
-	}
-	if got := m.transcriptEntries[3].Role; got != "system" {
-		t.Fatalf("entry[3].Role = %q, want system", got)
-	}
-	if got := m.transcriptEntries[3].OngoingText; got != "Background shell 1000 completed" {
+	if got := m.transcriptEntries[1].OngoingText; got != "Background shell 1000 completed" {
 		t.Fatalf("background ongoing text = %q", got)
 	}
 }
@@ -1025,6 +1238,9 @@ func TestSyncConversationFromEngineUsesBundledSessionViewMetadata(t *testing.T) 
 	if !ok {
 		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", cmd())
 	}
+	if msg.syncCause != runtimeTranscriptSyncCauseBootstrap {
+		t.Fatalf("startup sync cause = %q, want %q", msg.syncCause, runtimeTranscriptSyncCauseBootstrap)
+	}
 	next, followUp := m.Update(msg)
 	_ = followUp
 	m = next.(*uiModel)
@@ -1065,6 +1281,9 @@ func TestSyncConversationFromEngineRetriesAfterRefreshError(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", firstCmd())
 	}
+	if firstMsg.syncCause != runtimeTranscriptSyncCauseBootstrap {
+		t.Fatalf("startup sync cause = %q, want %q", firstMsg.syncCause, runtimeTranscriptSyncCauseBootstrap)
+	}
 	next, retryCmd := m.Update(firstMsg)
 	if retryCmd == nil {
 		t.Fatal("expected retry command after refresh error")
@@ -1073,6 +1292,9 @@ func TestSyncConversationFromEngineRetriesAfterRefreshError(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected runtimeTranscriptRetryMsg, got %T", retryCmd())
 	}
+	if retryMsg.syncCause != runtimeTranscriptSyncCauseBootstrap {
+		t.Fatalf("retry sync cause = %q, want %q", retryMsg.syncCause, runtimeTranscriptSyncCauseBootstrap)
+	}
 	next, secondCmd := next.(*uiModel).Update(retryMsg)
 	if secondCmd == nil {
 		t.Fatal("expected second sync command after retry tick")
@@ -1080,6 +1302,9 @@ func TestSyncConversationFromEngineRetriesAfterRefreshError(t *testing.T) {
 	secondMsg, ok := secondCmd().(runtimeTranscriptRefreshedMsg)
 	if !ok {
 		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", secondCmd())
+	}
+	if secondMsg.syncCause != runtimeTranscriptSyncCauseBootstrap {
+		t.Fatalf("second sync cause = %q, want %q", secondMsg.syncCause, runtimeTranscriptSyncCauseBootstrap)
 	}
 	next, followUp := next.(*uiModel).Update(secondMsg)
 	_ = followUp
@@ -1253,6 +1478,114 @@ func TestApplyRuntimeTranscriptPageInDetailModeAdvancesRevisionEvenWhenPageMatch
 	}
 	if got := m.transcriptRevision; got != 11 {
 		t.Fatalf("transcript revision after matching detail refresh = %d, want 11", got)
+	}
+}
+
+func TestApplyRuntimeTranscriptPageAcceptsSameRevisionEmptyOngoingWhenCommittedTranscriptAlreadyMatches(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "done"}}
+	m.transcriptBaseOffset = 0
+	m.transcriptTotalEntries = 1
+	m.transcriptRevision = 10
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, Ongoing: "done"})
+	m.sawAssistantDelta = true
+
+	page := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "done", Phase: string(llm.MessagePhaseFinal)}},
+		Ongoing:      "",
+	}
+	cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, page)
+	if got := m.view.OngoingStreamingText(); got != "" {
+		t.Fatalf("expected same-revision authoritative page to clear stale live ongoing, got %q", got)
+	}
+	if m.sawAssistantDelta {
+		t.Fatal("expected same-revision authoritative page to clear assistant delta flag")
+	}
+	if cmd == nil {
+		t.Fatal("expected native sync command after authoritative page apply")
+	}
+}
+
+func TestInvalidateTransientTranscriptStateClearsDeferredCommittedTail(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.deferredCommittedTail = []deferredProjectedTranscriptTail{{rangeStart: 1, rangeEnd: 2, revision: 7, entries: []clientui.ChatEntry{{Role: "user", Text: "queued"}}}}
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "done", Transient: true, Committed: true}}
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, Ongoing: "done"})
+
+	m.invalidateTransientTranscriptState()
+
+	if got := len(m.deferredCommittedTail); got != 0 {
+		t.Fatalf("expected deferred committed tail cleared during transient state invalidation, got %d", got)
+	}
+}
+
+func TestApplyRuntimeTranscriptPageRejectsStaleAuthoritativePageWhileDeferredCommittedTailExists(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.sessionID = "session-1"
+	m.busy = true
+	m.sawAssistantDelta = true
+	m.forwardToView(tui.SetConversationMsg{BaseOffset: 0, TotalEntries: 0, Entries: nil, Ongoing: "stale assistant"})
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventUserMessageFlushed,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         7,
+		CommittedEntryCount:        1,
+		UserMessage:                "steered message",
+		TranscriptEntries:          []clientui.ChatEntry{{Role: "user", Text: "steered message"}},
+	})
+	if got := len(m.deferredCommittedTail); got != 1 {
+		t.Fatalf("expected deferred committed user tail before stale hydrate, got %d", got)
+	}
+
+	cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     6,
+		Offset:       0,
+		TotalEntries: 0,
+		Entries:      nil,
+	})
+	if cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	if got := len(m.deferredCommittedTail); got != 1 {
+		t.Fatalf("expected stale authoritative page to preserve deferred committed tail, got %d", got)
+	}
+
+	cmd = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventAssistantMessage,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         8,
+		CommittedEntryCount:        2,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:  "assistant",
+			Text:  "done",
+			Phase: string(llm.MessagePhaseFinal),
+		}},
+	})
+	for _, msg := range collectCmdMessages(t, cmd) {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect assistant commit after stale hydrate rejection to require hydration, got %+v", msg)
+		}
+	}
+	if got := len(m.transcriptEntries); got != 2 {
+		t.Fatalf("expected deferred user tail to merge with assistant commit after stale hydrate rejection, got %d entries", got)
+	}
+	if got := m.transcriptEntries[0].Text; got != "steered message" {
+		t.Fatalf("first transcript entry = %q, want steered message", got)
+	}
+	if got := m.transcriptEntries[1].Text; got != "done" {
+		t.Fatalf("second transcript entry = %q, want done", got)
 	}
 }
 
@@ -1481,9 +1814,10 @@ func TestProjectedAssistantMessageAdvancesTranscriptRevisionForReplayDedupe(t *t
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
 	evt := clientui.Event{
-		Kind:                clientui.EventAssistantMessage,
-		TranscriptRevision:  11,
-		CommittedEntryCount: 2,
+		Kind:                       clientui.EventAssistantMessage,
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         11,
+		CommittedEntryCount:        2,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role:  "assistant",
 			Text:  "live append",
@@ -1617,7 +1951,7 @@ func TestApplyRuntimeTranscriptPageAcceptsEqualRevisionTailReplacementWhenAuthor
 	assertNoColoredShellSymbol(t, rawCommitted, "dark pending", transcriptToolPendingColorHex("dark"))
 }
 
-func TestProjectedAssistantToolCallEntriesStayTransientButCommittedInRuntimeMode(t *testing.T) {
+func TestProjectedAssistantToolCallEntriesApplyAsCommittedInRuntimeMode(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
 	m.termWidth = 100
@@ -1636,9 +1970,10 @@ func TestProjectedAssistantToolCallEntriesStayTransientButCommittedInRuntimeMode
 	}
 
 	toolStarted := clientui.Event{
-		Kind:                clientui.EventAssistantMessage,
-		TranscriptRevision:  11,
-		CommittedEntryCount: 2,
+		Kind:                       clientui.EventAssistantMessage,
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         11,
+		CommittedEntryCount:        2,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role:       "tool_call",
 			Text:       "pwd",
@@ -1651,8 +1986,8 @@ func TestProjectedAssistantToolCallEntriesStayTransientButCommittedInRuntimeMode
 	if got, want := len(m.transcriptEntries), 2; got != want {
 		t.Fatalf("transcript entry count = %d, want %d", got, want)
 	}
-	if !m.transcriptEntries[1].Transient || !m.transcriptEntries[1].Committed {
-		t.Fatalf("expected runtime assistant tool call to stay transient but be committed for ordering, got %+v", m.transcriptEntries[1])
+	if m.transcriptEntries[1].Transient || !m.transcriptEntries[1].Committed {
+		t.Fatalf("expected runtime assistant tool call to apply as committed transcript state, got %+v", m.transcriptEntries[1])
 	}
 	if got := m.transcriptRevision; got != 11 {
 		t.Fatalf("transcript revision = %d, want 11", got)
@@ -1678,9 +2013,10 @@ func TestRuntimeAuthoritativeHydrateDoesNotRepairCommittedToolPathWhenLiveProjec
 	}
 
 	_ = collectCmdMessages(t, m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                clientui.EventAssistantMessage,
-		TranscriptRevision:  11,
-		CommittedEntryCount: 2,
+		Kind:                       clientui.EventAssistantMessage,
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         11,
+		CommittedEntryCount:        2,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role:       "tool_call",
 			Text:       "pwd",
@@ -1689,9 +2025,10 @@ func TestRuntimeAuthoritativeHydrateDoesNotRepairCommittedToolPathWhenLiveProjec
 		}},
 	}))
 	_ = collectCmdMessages(t, m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                clientui.EventToolCallCompleted,
-		TranscriptRevision:  12,
-		CommittedEntryCount: 3,
+		Kind:                       clientui.EventToolCallCompleted,
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         12,
+		CommittedEntryCount:        3,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role:       "tool_result_ok",
 			Text:       "/tmp",
@@ -1744,17 +2081,18 @@ func TestRuntimeAuthoritativeHydrateDoesNotRepairCommittedReviewerStatusPathWhen
 	}
 
 	_ = collectCmdMessages(t, m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                clientui.EventReviewerCompleted,
-		TranscriptRevision:  11,
-		CommittedEntryCount: 2,
+		Kind:                       clientui.EventReviewerCompleted,
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         11,
+		CommittedEntryCount:        2,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "reviewer_status",
 			Text: "Supervisor ran and applied 2 suggestions.",
 		}},
 	}))
 
-	if !m.transcriptEntries[1].Transient || !m.transcriptEntries[1].Committed {
-		t.Fatalf("expected reviewer status to stay transient but be committed for ordering, got %+v", m.transcriptEntries[1])
+	if m.transcriptEntries[1].Transient || !m.transcriptEntries[1].Committed {
+		t.Fatalf("expected reviewer status to apply as committed transcript state, got %+v", m.transcriptEntries[1])
 	}
 
 	cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, clientui.TranscriptPage{
@@ -2062,6 +2400,9 @@ func TestStartupSeedsCachedTranscriptBeforeBoundedSync(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected queued startup sync to return runtimeTranscriptRefreshedMsg, got %T", updated.startupCmds[0]())
 	}
+	if refreshed.syncCause != runtimeTranscriptSyncCauseBootstrap {
+		t.Fatalf("startup bounded sync cause = %q, want %q", refreshed.syncCause, runtimeTranscriptSyncCauseBootstrap)
+	}
 	if refreshed.req.Window != clientui.TranscriptWindowOngoingTail {
 		t.Fatalf("startup transcript request window = %q, want ongoing_tail", refreshed.req.Window)
 	}
@@ -2147,7 +2488,8 @@ func TestProjectedAssistantMessageClearsStreamingTextOnCommit(t *testing.T) {
 	}
 
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind: clientui.EventAssistantMessage,
+		Kind:                       clientui.EventAssistantMessage,
+		CommittedTranscriptChanged: true,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "assistant",
 			Text: "partial",
@@ -2171,9 +2513,10 @@ func TestProjectedAssistantMessageDoesNotClearStreamingTextWhenCommitIsSkipped(t
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "newer live"})
 
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                clientui.EventAssistantMessage,
-		TranscriptRevision:  5,
-		CommittedEntryCount: 1,
+		Kind:                       clientui.EventAssistantMessage,
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         5,
+		CommittedEntryCount:        1,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "assistant",
 			Text: "older",
@@ -2197,9 +2540,10 @@ func TestProjectedAssistantMessageClearsStreamingTextWhenSkippedCommitMatchesLiv
 	_ = m.runtimeAdapter().handleRuntimeEvent(runtime.Event{Kind: runtime.EventAssistantDelta, AssistantDelta: "final"})
 
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                clientui.EventAssistantMessage,
-		TranscriptRevision:  5,
-		CommittedEntryCount: 1,
+		Kind:                       clientui.EventAssistantMessage,
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         5,
+		CommittedEntryCount:        1,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "assistant",
 			Text: "final",
@@ -2597,10 +2941,11 @@ func TestUserMessageFlushedAlreadyCoveredByAuthoritativeTailDoesNotDuplicateNati
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
 	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                clientui.EventUserMessageFlushed,
-		UserMessage:         "steered message",
-		TranscriptRevision:  10,
-		CommittedEntryCount: 1,
+		Kind:                       clientui.EventUserMessageFlushed,
+		CommittedTranscriptChanged: true,
+		UserMessage:                "steered message",
+		TranscriptRevision:         10,
+		CommittedEntryCount:        1,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "user",
 			Text: "steered message",
@@ -2628,10 +2973,11 @@ func TestProjectedUserMessageFlushedWithSameTextAndNewCommittedCountAppendsDisti
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
 
 	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                clientui.EventUserMessageFlushed,
-		UserMessage:         "steered message",
-		TranscriptRevision:  11,
-		CommittedEntryCount: 2,
+		Kind:                       clientui.EventUserMessageFlushed,
+		CommittedTranscriptChanged: true,
+		UserMessage:                "steered message",
+		TranscriptRevision:         11,
+		CommittedEntryCount:        2,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "user",
 			Text: "steered message",
@@ -2656,8 +3002,9 @@ func TestProjectedUserMessageFlushedDoesNotScheduleTranscriptRefresh(t *testing.
 	m.windowSizeKnown = true
 
 	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:        clientui.EventUserMessageFlushed,
-		UserMessage: "steered message",
+		Kind:                       clientui.EventUserMessageFlushed,
+		CommittedTranscriptChanged: true,
+		UserMessage:                "steered message",
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "user",
 			Text: "steered message",
@@ -2686,8 +3033,9 @@ func TestProjectedUserMessageFlushedRecordsPromptHistoryWithoutTranscriptRefresh
 	m.inputSubmitLocked = true
 
 	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:        clientui.EventUserMessageFlushed,
-		UserMessage: "steered message",
+		Kind:                       clientui.EventUserMessageFlushed,
+		CommittedTranscriptChanged: true,
+		UserMessage:                "steered message",
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "user",
 			Text: "steered message",
@@ -2729,8 +3077,9 @@ func TestProjectedUserMessageFlushedDoesNotClobberLaterAssistantDelta(t *testing
 	m.windowSizeKnown = true
 
 	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:        clientui.EventUserMessageFlushed,
-		UserMessage: "steered message",
+		Kind:                       clientui.EventUserMessageFlushed,
+		CommittedTranscriptChanged: true,
+		UserMessage:                "steered message",
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "user",
 			Text: "steered message",
@@ -2752,21 +3101,29 @@ func TestProjectedUserMessageFlushedDoesNotClobberLaterAssistantDelta(t *testing
 	}
 }
 
-func TestProjectedTransientToolAndFinalEventsDoNotScheduleTranscriptRefresh(t *testing.T) {
+func TestProjectedCommittedToolAndFinalEventsDoNotScheduleTranscriptRefresh(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
 	m.termWidth = 100
 	m.termHeight = 20
 	m.windowSizeKnown = true
 	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "seed"}}
-	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+	m.transcriptTotalEntries = len(m.transcriptEntries)
+	m.transcriptRevision = 10
+	m.forwardToView(tui.SetConversationMsg{BaseOffset: 0, TotalEntries: len(m.transcriptEntries), Entries: m.transcriptEntries})
+	m.syncViewport()
 
 	callMeta := transcript.ToolCallMeta{ToolName: "shell", Command: "pwd", CompactText: "pwd", IsShell: true}
 	events := []clientui.Event{
 		{
-			Kind:        clientui.EventUserMessageFlushed,
-			StepID:      "step-1",
-			UserMessage: "say hi",
+			Kind:                       clientui.EventUserMessageFlushed,
+			CommittedTranscriptChanged: true,
+			StepID:                     "step-1",
+			TranscriptRevision:         11,
+			CommittedEntryCount:        2,
+			CommittedEntryStart:        1,
+			CommittedEntryStartSet:     true,
+			UserMessage:                "say hi",
 			TranscriptEntries: []clientui.ChatEntry{{
 				Role: "user",
 				Text: "say hi",
@@ -2774,8 +3131,13 @@ func TestProjectedTransientToolAndFinalEventsDoNotScheduleTranscriptRefresh(t *t
 		},
 		{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "working"},
 		{
-			Kind:   clientui.EventToolCallStarted,
-			StepID: "step-1",
+			Kind:                       clientui.EventToolCallStarted,
+			CommittedTranscriptChanged: true,
+			StepID:                     "step-1",
+			TranscriptRevision:         12,
+			CommittedEntryCount:        3,
+			CommittedEntryStart:        2,
+			CommittedEntryStartSet:     true,
 			TranscriptEntries: []clientui.ChatEntry{{
 				Role:       "tool_call",
 				Text:       "pwd",
@@ -2784,8 +3146,13 @@ func TestProjectedTransientToolAndFinalEventsDoNotScheduleTranscriptRefresh(t *t
 			}},
 		},
 		{
-			Kind:   clientui.EventToolCallCompleted,
-			StepID: "step-1",
+			Kind:                       clientui.EventToolCallCompleted,
+			CommittedTranscriptChanged: true,
+			StepID:                     "step-1",
+			TranscriptRevision:         13,
+			CommittedEntryCount:        4,
+			CommittedEntryStart:        3,
+			CommittedEntryStartSet:     true,
 			TranscriptEntries: []clientui.ChatEntry{{
 				Role:       "tool_result_ok",
 				Text:       "$ pwd\n/tmp",
@@ -2793,8 +3160,13 @@ func TestProjectedTransientToolAndFinalEventsDoNotScheduleTranscriptRefresh(t *t
 			}},
 		},
 		{
-			Kind:   clientui.EventAssistantMessage,
-			StepID: "step-1",
+			Kind:                       clientui.EventAssistantMessage,
+			CommittedTranscriptChanged: true,
+			StepID:                     "step-1",
+			TranscriptRevision:         14,
+			CommittedEntryCount:        5,
+			CommittedEntryStart:        4,
+			CommittedEntryStartSet:     true,
 			TranscriptEntries: []clientui.ChatEntry{{
 				Role:  "assistant",
 				Text:  "done",
@@ -2807,14 +3179,25 @@ func TestProjectedTransientToolAndFinalEventsDoNotScheduleTranscriptRefresh(t *t
 		msgs := collectCmdMessages(t, m.runtimeAdapter().handleProjectedRuntimeEvent(evt))
 		for _, msg := range msgs {
 			if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
-				t.Fatalf("did not expect transient runtime event to trigger transcript hydration, event=%s msgs=%+v", evt.Kind, msgs)
+				t.Fatalf("did not expect committed runtime event to trigger transcript hydration, event=%s msgs=%+v", evt.Kind, msgs)
 			}
 		}
 	}
-
-	view := stripANSIPreserve(m.View())
-	if !containsInOrder(view, "say hi", "pwd", "done") {
-		t.Fatalf("expected transient tail to remain visible in ongoing view, got %q", view)
+	loaded := m.view.LoadedTranscriptEntries()
+	if got, want := len(loaded), 5; got != want {
+		t.Fatalf("loaded transcript entry count = %d, want %d (%+v)", got, want, loaded)
+	}
+	if got := loaded[0].Text; got != "seed" {
+		t.Fatalf("loaded[0].Text = %q, want seed", got)
+	}
+	if got := loaded[1].Text; got != "say hi" {
+		t.Fatalf("loaded[1].Text = %q, want say hi", got)
+	}
+	if got := loaded[2].Text; got != "pwd" {
+		t.Fatalf("loaded[2].Text = %q, want pwd", got)
+	}
+	if got := loaded[4].Text; got != "done" {
+		t.Fatalf("loaded[4].Text = %q, want done", got)
 	}
 }
 
@@ -2842,10 +3225,11 @@ func TestProjectedConversationUpdatedEntriesAdvanceCommittedTranscriptAndDetailV
 	m.syncViewport()
 
 	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:                clientui.EventConversationUpdated,
-		StepID:              "step-1",
-		TranscriptRevision:  11,
-		CommittedEntryCount: 2,
+		Kind:                       clientui.EventConversationUpdated,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         11,
+		CommittedEntryCount:        2,
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role:  "assistant",
 			Text:  "committed after",
@@ -2886,6 +3270,250 @@ func TestProjectedConversationUpdatedEntriesAdvanceCommittedTranscriptAndDetailV
 	}
 }
 
+func TestProjectedConversationUpdatedMatchingCommittedStateSkipsHydration(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     11,
+		Offset:       0,
+		TotalEntries: 2,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}, {Role: "assistant", Text: "committed after", Phase: string(llm.MessagePhaseFinal)}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventConversationUpdated,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         11,
+		CommittedEntryCount:        2,
+	})
+	for _, msg := range collectCmdMessages(t, cmd) {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect matching committed conversation_updated to trigger hydration, got %+v", msg)
+		}
+	}
+}
+
+func TestProjectedPlainConversationUpdatedNeverHydrates(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     11,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:   clientui.EventConversationUpdated,
+		StepID: "step-1",
+	})
+	for _, msg := range collectCmdMessages(t, cmd) {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect plain conversation_updated to trigger hydration, got %+v", msg)
+		}
+	}
+	if m.runtimeTranscriptBusy {
+		t.Fatal("did not expect runtime transcript sync to start for plain conversation_updated")
+	}
+}
+
+func TestProjectedCommittedConversationUpdatedRequestsHydrationOnlyOnContinuityLoss(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     11,
+		Offset:       0,
+		TotalEntries: 2,
+		Entries: []clientui.ChatEntry{
+			{Role: "assistant", Text: "seed"},
+			{Role: "assistant", Text: "committed after", Phase: string(llm.MessagePhaseFinal)},
+		},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	client.transcript = clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     11,
+		Offset:       0,
+		TotalEntries: 3,
+		Entries: []clientui.ChatEntry{
+			{Role: "assistant", Text: "seed"},
+			{Role: "assistant", Text: "committed after", Phase: string(llm.MessagePhaseFinal)},
+			{Role: "reviewer_status", Text: "Supervisor ran: no changes."},
+		},
+	}
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventConversationUpdated,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         11,
+		CommittedEntryCount:        3,
+	})
+	msgs := collectCmdMessages(t, cmd)
+	var refresh runtimeTranscriptRefreshedMsg
+	refreshFound := false
+	for _, msg := range msgs {
+		typed, ok := msg.(runtimeTranscriptRefreshedMsg)
+		if !ok {
+			continue
+		}
+		refresh = typed
+		refreshFound = true
+	}
+	if !refreshFound {
+		t.Fatalf("expected committed conversation_updated mismatch to request hydration, got %+v", msgs)
+	}
+	if refresh.syncCause != runtimeTranscriptSyncCauseCommittedConversation {
+		t.Fatalf("committed conversation sync cause = %q, want %q", refresh.syncCause, runtimeTranscriptSyncCauseCommittedConversation)
+	}
+	if refresh.req.Window != clientui.TranscriptWindowOngoingTail {
+		t.Fatalf("committed conversation request window = %q, want ongoing_tail", refresh.req.Window)
+	}
+}
+
+func TestBootstrapRefreshRejectsStaleAuthoritativePageAfterLocalCommittedEvent(t *testing.T) {
+	client := &gatedRefreshRuntimeClient{
+		runtimeControlFakeClient: runtimeControlFakeClient{
+			sessionView: clientui.RuntimeSessionView{SessionID: "session-1"},
+		},
+		page: clientui.TranscriptPage{
+			SessionID:    "session-1",
+			Revision:     10,
+			Offset:       0,
+			TotalEntries: 1,
+			Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+		},
+		refreshStarted: make(chan struct{}),
+		releaseRefresh: make(chan struct{}),
+	}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.startupCmds = nil
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, client.page); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+
+	cmd := m.requestRuntimeBootstrapTranscriptSync()
+	if cmd == nil {
+		t.Fatal("expected bootstrap transcript sync command")
+	}
+	msgCh := make(chan tea.Msg, 1)
+	go func() {
+		msgCh <- cmd()
+	}()
+	<-client.refreshStarted
+
+	commitCmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventAssistantMessage,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         11,
+		CommittedEntryCount:        2,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:  "assistant",
+			Text:  "live commit",
+			Phase: string(llm.MessagePhaseFinal),
+		}},
+	})
+	for _, msg := range collectCmdMessages(t, commitCmd) {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect local committed event during bootstrap refresh to trigger extra hydration, got %+v", msg)
+		}
+	}
+	if got := len(m.transcriptEntries); got != 2 {
+		t.Fatalf("expected local committed event appended during bootstrap refresh, got %d entries", got)
+	}
+
+	close(client.releaseRefresh)
+	refreshMsg := (<-msgCh).(runtimeTranscriptRefreshedMsg)
+	next, followCmd := m.Update(refreshMsg)
+	updated := next.(*uiModel)
+	_ = collectCmdMessages(t, followCmd)
+
+	if got := len(updated.transcriptEntries); got != 2 {
+		t.Fatalf("expected stale bootstrap page rejected after local committed event, got %d entries", got)
+	}
+	if got := updated.transcriptEntries[0].Text; got != "seed" {
+		t.Fatalf("first transcript entry = %q, want seed", got)
+	}
+	if got := updated.transcriptEntries[1].Text; got != "live commit" {
+		t.Fatalf("second transcript entry = %q, want live commit", got)
+	}
+	if strings.Count(stripANSIAndTrimRight(updated.view.OngoingCommittedSnapshot()), "live commit") != 1 {
+		t.Fatalf("expected live commit exactly once after stale bootstrap refresh, got %q", stripANSIAndTrimRight(updated.view.OngoingCommittedSnapshot()))
+	}
+}
+
+func TestProjectedCommittedGapRequestsExplicitCommittedGapHydration(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	baseline := clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     10,
+		Offset:       0,
+		TotalEntries: 1,
+		Entries:      []clientui.ChatEntry{{Role: "assistant", Text: "seed"}},
+	}
+	if cmd := m.runtimeAdapter().applyRuntimeTranscriptPage(clientui.TranscriptPageRequest{}, baseline); cmd != nil {
+		_ = collectCmdMessages(t, cmd)
+	}
+	client.transcript = clientui.TranscriptPage{
+		SessionID:    "session-1",
+		Revision:     11,
+		Offset:       0,
+		TotalEntries: 3,
+		Entries: []clientui.ChatEntry{
+			{Role: "assistant", Text: "seed"},
+			{Role: "user", Text: "missing gap row"},
+			{Role: "assistant", Text: "authoritative tail"},
+		},
+	}
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventAssistantMessage,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         11,
+		CommittedEntryCount:        3,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:  "assistant",
+			Text:  "authoritative tail",
+			Phase: string(llm.MessagePhaseFinal),
+		}},
+	})
+	msgs := collectCmdMessages(t, cmd)
+	var refresh runtimeTranscriptRefreshedMsg
+	refreshFound := false
+	for _, msg := range msgs {
+		typed, ok := msg.(runtimeTranscriptRefreshedMsg)
+		if !ok {
+			continue
+		}
+		refresh = typed
+		refreshFound = true
+	}
+	if !refreshFound {
+		t.Fatalf("expected committed gap to request runtime transcript refresh, got %+v", msgs)
+	}
+	if refresh.syncCause != runtimeTranscriptSyncCauseCommittedGap {
+		t.Fatalf("committed gap sync cause = %q, want %q", refresh.syncCause, runtimeTranscriptSyncCauseCommittedGap)
+	}
+	if refresh.req.Window != clientui.TranscriptWindowOngoingTail {
+		t.Fatalf("committed gap request window = %q, want ongoing_tail", refresh.req.Window)
+	}
+}
+
 func TestProjectedUserMessageFlushedDefersOptimisticAppendWhileAssistantStreamIsLive(t *testing.T) {
 	client := &runtimeControlFakeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
@@ -2909,27 +3537,30 @@ func TestProjectedUserMessageFlushedDefersOptimisticAppendWhileAssistantStreamIs
 	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, AssistantDelta: "foreground done"})
 
 	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:        clientui.EventUserMessageFlushed,
-		UserMessage: "steered message",
+		Kind:                       clientui.EventUserMessageFlushed,
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         7,
+		CommittedEntryCount:        2,
+		UserMessage:                "steered message",
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "user",
 			Text: "steered message",
 		}},
 	})
-	msgs := collectCmdMessages(t, cmd)
-	var refresh runtimeTranscriptRefreshedMsg
-	refreshFound := false
-	for _, msg := range msgs {
-		if typed, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
-			refresh = typed
-			refreshFound = true
-		}
-	}
-	if !refreshFound {
-		t.Fatalf("expected authoritative transcript refresh after deferred flushed user message, got %+v", msgs)
+	if msgs := collectCmdMessages(t, cmd); len(msgs) > 0 {
+		t.Fatalf("did not expect transcript refresh while deferring queued user flush, got %+v", msgs)
 	}
 	if len(m.transcriptEntries) != 0 {
 		t.Fatalf("expected optimistic user append deferred until assistant catch-up, got %+v", m.transcriptEntries)
+	}
+	if got := len(m.deferredCommittedTail); got != 1 {
+		t.Fatalf("expected one deferred committed tail entry, got %d", got)
+	}
+	if got := m.deferredCommittedTail[0].rangeStart; got != 1 {
+		t.Fatalf("deferred range start = %d, want 1", got)
+	}
+	if got := m.deferredCommittedTail[0].rangeEnd; got != 2 {
+		t.Fatalf("deferred range end = %d, want 2", got)
 	}
 	if got := m.view.OngoingStreamingText(); got != "foreground done" {
 		t.Fatalf("expected live assistant stream preserved while deferring user flush append, got %q", got)
@@ -2940,6 +3571,10 @@ func TestProjectedUserMessageFlushedDefersOptimisticAppendWhileAssistantStreamIs
 	if len(m.pendingInjected) != 0 {
 		t.Fatalf("expected pending injected queue consumed even while append is deferred, got %+v", m.pendingInjected)
 	}
+	queuedPane := strings.Split(stripANSIAndTrimRight(strings.Join(m.renderQueuedMessagesPane(80), "\n")), "\n")
+	if len(queuedPane) != 1 || queuedPane[0] != "next: steered message" {
+		t.Fatalf("expected deferred flushed user message to remain visible in queued pane, got %+v", queuedPane)
+	}
 	if m.inputSubmitLocked {
 		t.Fatal("expected input submit lock cleared")
 	}
@@ -2949,20 +3584,210 @@ func TestProjectedUserMessageFlushedDefersOptimisticAppendWhileAssistantStreamIs
 	if !m.sawAssistantDelta {
 		t.Fatal("expected live assistant delta flag preserved while deferring user flush append")
 	}
+}
 
-	next, followCmd := m.Update(refresh)
-	m = next.(*uiModel)
-	if got := len(m.transcriptEntries); got != 2 {
-		t.Fatalf("expected authoritative hydration to release deferred user append, got %d entries", got)
+func TestProjectedConversationUpdatedSkipsHydrationWhenDeferredCommittedUserFlushBridgesCount(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.busy = true
+	m.pendingInjected = []string{"steered message"}
+	m.input = "steered message"
+	m.lockedInjectText = "steered message"
+	m.inputSubmitLocked = true
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "user", Text: "seed"}}
+	m.transcriptRevision = 6
+	m.transcriptTotalEntries = 1
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, Ongoing: "foreground done"})
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "foreground done"})
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventUserMessageFlushed,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         7,
+		CommittedEntryCount:        2,
+		UserMessage:                "steered message",
+		TranscriptEntries:          []clientui.ChatEntry{{Role: "user", Text: "steered message"}},
+	})
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventConversationUpdated,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         7,
+		CommittedEntryCount:        2,
+	})
+	for _, msg := range collectCmdMessages(t, cmd) {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect committed conversation_updated to hydrate while deferred user flush already bridges the committed count, got %+v", msg)
+		}
+	}
+	if got := len(m.deferredCommittedTail); got != 1 {
+		t.Fatalf("expected deferred committed tail preserved until a contiguous committed event arrives, got %d", got)
+	}
+}
+
+func TestProjectedAssistantMessageMergesDeferredCommittedUserFlushWithoutHydration(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.busy = true
+	m.pendingInjected = []string{"steered message"}
+	m.input = "steered message"
+	m.lockedInjectText = "steered message"
+	m.inputSubmitLocked = true
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "seed"}}
+	m.transcriptRevision = 6
+	m.transcriptTotalEntries = 1
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries})
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "foreground done"})
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventUserMessageFlushed,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         7,
+		CommittedEntryCount:        2,
+		UserMessage:                "steered message",
+		TranscriptEntries:          []clientui.ChatEntry{{Role: "user", Text: "steered message"}},
+	})
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventAssistantMessage,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         8,
+		CommittedEntryCount:        3,
+		TranscriptEntries:          []clientui.ChatEntry{{Role: "assistant", Text: "foreground done", Phase: string(llm.MessagePhaseFinal)}},
+	})
+	msgs := collectCmdMessages(t, cmd)
+	for _, msg := range msgs {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect hydration after assistant caught up with deferred user flush, got %+v", msgs)
+		}
+	}
+	if got := len(m.deferredCommittedTail); got != 0 {
+		t.Fatalf("expected deferred tail cleared after assistant catch-up, got %d", got)
+	}
+	if got := len(m.transcriptEntries); got != 3 {
+		t.Fatalf("expected seed + deferred user + assistant, got %d entries", got)
 	}
 	if got := m.transcriptEntries[1].Text; got != "steered message" {
-		t.Fatalf("expected deferred user message appended after hydration, got %q", got)
+		t.Fatalf("second transcript entry = %q, want steered message", got)
+	}
+	if got := m.transcriptEntries[2].Text; got != "foreground done" {
+		t.Fatalf("third transcript entry = %q, want foreground done", got)
 	}
 	if got := m.view.OngoingStreamingText(); got != "" {
-		t.Fatalf("expected authoritative hydration to clear stale live assistant stream, got %q", got)
+		t.Fatalf("expected assistant commit to clear live stream after deferred merge, got %q", got)
 	}
-	if followCmd == nil {
-		t.Fatal("expected native replay after authoritative hydration")
+	if m.sawAssistantDelta {
+		t.Fatal("expected assistant delta flag cleared after deferred merge")
+	}
+}
+
+func TestProjectedAssistantMessageReplacesNonTailCommittedRangeWithoutHydration(t *testing.T) {
+	client := &runtimeControlFakeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.transcriptEntries = []tui.TranscriptEntry{
+		{Role: "assistant", Text: "seed"},
+		{Role: "assistant", Text: "stale final", Phase: llm.MessagePhaseFinal},
+		{Role: "reviewer_status", Text: "Supervisor ran: no changes."},
+	}
+	m.transcriptRevision = 10
+	m.transcriptTotalEntries = len(m.transcriptEntries)
+	m.forwardToView(tui.SetConversationMsg{BaseOffset: 0, TotalEntries: len(m.transcriptEntries), Entries: m.transcriptEntries})
+	m.syncViewport()
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventAssistantMessage,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         11,
+		CommittedEntryCount:        3,
+		CommittedEntryStart:        1,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:  "assistant",
+			Text:  "reviewed final",
+			Phase: string(llm.MessagePhaseFinal),
+		}},
+	})
+	for _, msg := range collectCmdMessages(t, cmd) {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			t.Fatalf("did not expect non-tail committed assistant replacement to trigger hydration, got %+v", msg)
+		}
+	}
+	if got := len(m.transcriptEntries); got != 3 {
+		t.Fatalf("transcript entry count = %d, want 3", got)
+	}
+	if got := m.transcriptEntries[1].Text; got != "reviewed final" {
+		t.Fatalf("replaced assistant text = %q, want reviewed final", got)
+	}
+	if got := m.transcriptEntries[2].Role; got != "reviewer_status" {
+		t.Fatalf("suffix role = %q, want reviewer_status", got)
+	}
+	committed := stripANSIAndTrimRight(m.view.OngoingCommittedSnapshot())
+	if !containsInOrder(committed, "seed", "reviewed final", "Supervisor ran: no changes.") {
+		t.Fatalf("expected committed ongoing surface to keep reviewer suffix after assistant replacement, got %q", committed)
+	}
+}
+
+func TestProjectedCommittedGapClearsDeferredCommittedTailBeforeHydration(t *testing.T) {
+	client := &runtimeControlFakeClient{transcript: clientui.TranscriptPage{SessionID: "session-1"}}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "assistant", Text: "seed"}}
+	m.transcriptRevision = 7
+	m.transcriptTotalEntries = 2
+	m.deferredCommittedTail = []deferredProjectedTranscriptTail{{
+		rangeStart: 1,
+		rangeEnd:   2,
+		revision:   7,
+		entries:    []clientui.ChatEntry{{Role: "user", Text: "queued user"}},
+	}}
+	m.forwardToView(tui.SetConversationMsg{BaseOffset: 0, TotalEntries: 1, Entries: m.transcriptEntries, Ongoing: "foreground done"})
+	m.sawAssistantDelta = true
+
+	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventAssistantMessage,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         8,
+		CommittedEntryCount:        4,
+		CommittedEntryStart:        3,
+		CommittedEntryStartSet:     true,
+		TranscriptEntries: []clientui.ChatEntry{{
+			Role:  "assistant",
+			Text:  "authoritative tail",
+			Phase: string(llm.MessagePhaseFinal),
+		}},
+	})
+	msgs := collectCmdMessages(t, cmd)
+	refreshFound := false
+	for _, msg := range msgs {
+		if _, ok := msg.(runtimeTranscriptRefreshedMsg); ok {
+			refreshFound = true
+		}
+	}
+	if !refreshFound {
+		t.Fatalf("expected committed gap to request hydration, got %+v", msgs)
+	}
+	if got := len(m.deferredCommittedTail); got != 0 {
+		t.Fatalf("expected committed continuity loss to clear deferred committed tail before hydration, got %d", got)
+	}
+	if got := m.view.OngoingStreamingText(); got != "" {
+		t.Fatalf("expected continuity recovery to clear stale ongoing assistant text, got %q", got)
 	}
 }
 
@@ -2983,8 +3808,9 @@ func TestProjectedUserMessageFlushedDoesNotDeferAfterCommittedAssistantToolProgr
 	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, Ongoing: "working"})
 
 	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:        clientui.EventUserMessageFlushed,
-		UserMessage: "steered message",
+		Kind:                       clientui.EventUserMessageFlushed,
+		CommittedTranscriptChanged: true,
+		UserMessage:                "steered message",
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "user",
 			Text: "steered message",
@@ -3015,8 +3841,9 @@ func TestProjectedUserMessageFlushedDoesNotDeferWhenUIIsIdleDespiteStaleLiveAssi
 	m.forwardToView(tui.SetConversationMsg{Ongoing: "stale assistant"})
 
 	cmd := m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
-		Kind:        clientui.EventUserMessageFlushed,
-		UserMessage: "steered message",
+		Kind:                       clientui.EventUserMessageFlushed,
+		CommittedTranscriptChanged: true,
+		UserMessage:                "steered message",
 		TranscriptEntries: []clientui.ChatEntry{{
 			Role: "user",
 			Text: "steered message",

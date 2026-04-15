@@ -316,12 +316,14 @@ func (c *sessionRuntimeClient) refreshTranscriptPageSync(req clientui.Transcript
 	ctx, cancel := c.readContext(timeout)
 	defer cancel()
 	resp, err := c.reads.GetSessionTranscriptPage(ctx, serverapi.SessionTranscriptPageRequest{
-		SessionID: c.sessionID,
-		Offset:    req.Offset,
-		Limit:     req.Limit,
-		Page:      req.Page,
-		PageSize:  req.PageSize,
-		Window:    req.Window,
+		SessionID:                c.sessionID,
+		Offset:                   req.Offset,
+		Limit:                    req.Limit,
+		Page:                     req.Page,
+		PageSize:                 req.PageSize,
+		Window:                   req.Window,
+		KnownRevision:            req.KnownRevision,
+		KnownCommittedEntryCount: req.KnownCommittedEntryCount,
 	})
 	c.notifyConnectionState(err)
 	if c.transcriptDiagnosticsEnabled() {

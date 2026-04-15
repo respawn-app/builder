@@ -159,8 +159,8 @@ func (e dormantTranscriptCacheEntry) mainView(meta session.Meta, freshness clien
 	}
 }
 
-func (e dormantTranscriptCacheEntry) transcriptPageFromTail(meta session.Meta, freshness clientui.ConversationFreshness) clientui.TranscriptPage {
-	return runtimeview.TranscriptPageFromWindow(meta.SessionID, meta.Name, freshness, meta.LastSequence, e.ongoingTail)
+func (e dormantTranscriptCacheEntry) transcriptPageFromTail(meta session.Meta, freshness clientui.ConversationFreshness, req clientui.TranscriptPageRequest) clientui.TranscriptPage {
+	return runtimeview.TranscriptPageFromOngoingTailWindow(meta.SessionID, meta.Name, freshness, meta.LastSequence, e.ongoingTail, req)
 }
 
 func (e dormantTranscriptCacheEntry) transcriptPageCoveredByTail(meta session.Meta, freshness clientui.ConversationFreshness, req clientui.TranscriptPageRequest) (clientui.TranscriptPage, bool) {

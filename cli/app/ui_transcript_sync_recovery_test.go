@@ -65,6 +65,9 @@ func TestSessionActivityGapRecoveryEventuallyHydratesCommittedTranscriptInBothMo
 	if !ok {
 		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", firstCmd())
 	}
+	if firstRefresh.syncCause != runtimeTranscriptSyncCauseContinuityRecovery {
+		t.Fatalf("first sync cause = %q, want %q", firstRefresh.syncCause, runtimeTranscriptSyncCauseContinuityRecovery)
+	}
 	next, retryCmd := m.Update(firstRefresh)
 	if retryCmd == nil {
 		t.Fatal("expected retry command after first refresh failure")
@@ -76,6 +79,9 @@ func TestSessionActivityGapRecoveryEventuallyHydratesCommittedTranscriptInBothMo
 	if retryMsg.recoveryCause != clientui.TranscriptRecoveryCauseStreamGap {
 		t.Fatalf("expected retry to preserve stream-gap recovery cause, got %+v", retryMsg)
 	}
+	if retryMsg.syncCause != runtimeTranscriptSyncCauseContinuityRecovery {
+		t.Fatalf("retry sync cause = %q, want %q", retryMsg.syncCause, runtimeTranscriptSyncCauseContinuityRecovery)
+	}
 
 	next, secondCmd := next.(*uiModel).Update(retryMsg)
 	if secondCmd == nil {
@@ -84,6 +90,9 @@ func TestSessionActivityGapRecoveryEventuallyHydratesCommittedTranscriptInBothMo
 	secondRefresh, ok := secondCmd().(runtimeTranscriptRefreshedMsg)
 	if !ok {
 		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", secondCmd())
+	}
+	if secondRefresh.syncCause != runtimeTranscriptSyncCauseContinuityRecovery {
+		t.Fatalf("second sync cause = %q, want %q", secondRefresh.syncCause, runtimeTranscriptSyncCauseContinuityRecovery)
 	}
 	next, followUp := next.(*uiModel).Update(secondRefresh)
 	m = next.(*uiModel)
@@ -142,6 +151,9 @@ func TestDeferredContinuityRefreshPreservesRecoveryCauseAcrossBusyHydration(t *t
 	}
 	if followMsg.recoveryCause != clientui.TranscriptRecoveryCauseStreamGap {
 		t.Fatalf("follow-up recovery cause = %q, want %q", followMsg.recoveryCause, clientui.TranscriptRecoveryCauseStreamGap)
+	}
+	if followMsg.syncCause != runtimeTranscriptSyncCauseDirtyFollowUp {
+		t.Fatalf("follow-up sync cause = %q, want %q", followMsg.syncCause, runtimeTranscriptSyncCauseDirtyFollowUp)
 	}
 	updated := next.(*uiModel)
 	if updated.runtimeTranscriptDirty {

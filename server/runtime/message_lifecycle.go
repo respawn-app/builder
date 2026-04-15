@@ -249,8 +249,7 @@ func (m *defaultMessageLifecycle) FlushPendingUserInjections(stepID string) (int
 			return flushed, err
 		}
 		flushed++
-		e.emit(Event{Kind: EventUserMessageFlushed, StepID: stepID, UserMessage: joined, UserMessageBatch: queuedMessages})
-		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
+		e.emit(Event{Kind: EventUserMessageFlushed, StepID: stepID, UserMessage: joined, UserMessageBatch: queuedMessages, CommittedTranscriptChanged: true})
 	}
 	for _, notice := range pendingNotices {
 		if err := e.appendMessage(stepID, notice); err != nil {

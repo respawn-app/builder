@@ -409,7 +409,6 @@ func (e *Engine) SubmitUserMessage(ctx context.Context, text string) (assistant 
 			if flushed := flushedUserMessageEvent(llm.Message{Role: llm.RoleUser, Content: text}, stepID); flushed != nil {
 				e.emit(*flushed)
 			}
-			e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
 		} else if err := e.appendUserMessage(stepID, text); err != nil {
 			return err
 		}
@@ -447,12 +446,12 @@ func (e *Engine) SubmitUserShellCommand(ctx context.Context, command string) (re
 			return err
 		}
 		if _, ok := e.registry.Get(tools.ToolShell); !ok {
-			e.emit(Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: copiedToolCall(normalizeToolCallForTranscript(call, e.store.Meta().WorkspaceRoot))})
+			e.emit(Event{Kind: EventToolCallStarted, StepID: stepID, ToolCall: copiedToolCall(normalizeToolCallForTranscript(call, e.store.Meta().WorkspaceRoot)), CommittedTranscriptChanged: true})
 			result = tools.Result{CallID: call.ID, Name: tools.ToolShell, IsError: true, Output: mustJSON(map[string]any{"error": "unknown tool"})}
 			if err := e.persistToolCompletion(stepID, result); err != nil {
 				return fmt.Errorf("persist tool completion (call_id=%s tool=%s): %w", call.ID, result.Name, err)
 			}
-			e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: copiedToolResult(result)})
+			e.emit(Event{Kind: EventToolCallCompleted, StepID: stepID, ToolResult: copiedToolResult(result), CommittedTranscriptChanged: true})
 			if appendErr := e.appendMessage(stepID, llm.Message{Role: llm.RoleTool, Content: string(result.Output), ToolCallID: result.CallID, Name: string(result.Name)}); appendErr != nil {
 				return appendErr
 			}
@@ -475,11 +474,11 @@ func (e *Engine) SubmitUserShellCommand(ctx context.Context, command string) (re
 func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, error) {
 	reviewerFrequency := e.ReviewerFrequency()
 	reviewerClient := e.reviewerClientSnapshot()
-	msg, _, noopFinalAnswer, err := e.runStepLoopWithOptions(ctx, stepID, reviewerFrequency, reviewerClient, true, true)
-	if noopFinalAnswer {
+	result, err := e.runStepLoopWithOptions(ctx, stepID, reviewerFrequency, reviewerClient, true, true)
+	if result.NoopFinalAnswer {
 		return llm.Message{}, err
 	}
-	return msg, err
+	return result.Message, err
 }
 
 // runStepLoopWithOptions executes a single assistant/tool loop.
@@ -487,7 +486,7 @@ func (e *Engine) runStepLoop(ctx context.Context, stepID string) (llm.Message, e
 // this run. When refreshReviewerConfigOnResolve is true, the final assistant
 // resolution re-reads current runtime reviewer config so busy-time toggles (for
 // example from /supervisor) affect the currently running step at completion.
-func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, reviewerFrequency string, reviewerClient llm.Client, emitAssistantEvent bool, refreshReviewerConfigOnResolve bool) (llm.Message, bool, bool, error) {
+func (e *Engine) runStepLoopWithOptions(ctx context.Context, stepID string, reviewerFrequency string, reviewerClient llm.Client, emitAssistantEvent bool, refreshReviewerConfigOnResolve bool) (stepLoopResult, error) {
 	e.ensureOrchestrationCollaborators()
 	return e.stepFlow.RunStepLoopWithOptions(ctx, stepID, stepLoopOptions{
 		ReviewerFrequency:              reviewerFrequency,
@@ -507,9 +506,9 @@ func (e *Engine) shouldRunReviewerTurnForFrequency(frequency string, reviewerCli
 	return e.reviewerFlow.ShouldRunTurn(frequency, reviewerClient, patchEditsApplied)
 }
 
-func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, original llm.Message, reviewerClient llm.Client) (reviewerFollowUpResult, error) {
+func (e *Engine) runReviewerFollowUp(ctx context.Context, stepID string, original llm.Message, originalCommittedStart int, originalCommittedStartSet bool, reviewerClient llm.Client) (reviewerFollowUpResult, error) {
 	e.ensureOrchestrationCollaborators()
-	return e.reviewerFlow.RunFollowUp(ctx, stepID, original, reviewerClient)
+	return e.reviewerFlow.RunFollowUp(ctx, stepID, original, originalCommittedStart, originalCommittedStartSet, reviewerClient)
 }
 
 func (e *Engine) ensureLocked() (session.LockedContract, error) {

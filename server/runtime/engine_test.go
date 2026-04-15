@@ -2312,6 +2312,7 @@ func TestSubmitUserMessageCommentaryWithToolCallsPublishesCommittedEntryStartMet
 	snapshot := eng.ChatSnapshot()
 	assistantEntryIndex := -1
 	toolCallEntryIndex := -1
+	toolResultEntryIndex := -1
 	for idx, entry := range snapshot.Entries {
 		if assistantEntryIndex < 0 && entry.Role == "assistant" && entry.Text == "working" {
 			assistantEntryIndex = idx
@@ -2319,9 +2320,12 @@ func TestSubmitUserMessageCommentaryWithToolCallsPublishesCommittedEntryStartMet
 		if toolCallEntryIndex < 0 && entry.Role == "tool_call" && entry.ToolCallID == "call_shell_1" {
 			toolCallEntryIndex = idx
 		}
+		if toolResultEntryIndex < 0 && entry.ToolCallID == "call_shell_1" && (entry.Role == "tool_result_ok" || entry.Role == "tool_result_error") {
+			toolResultEntryIndex = idx
+		}
 	}
-	if assistantEntryIndex < 0 || toolCallEntryIndex < 0 {
-		t.Fatalf("expected authoritative snapshot to contain commentary assistant + tool call, snapshot=%+v", snapshot.Entries)
+	if assistantEntryIndex < 0 || toolCallEntryIndex < 0 || toolResultEntryIndex < 0 {
+		t.Fatalf("expected authoritative snapshot to contain commentary assistant + tool call/result, snapshot=%+v", snapshot.Entries)
 	}
 
 	eventsMu.Lock()
@@ -2329,6 +2333,7 @@ func TestSubmitUserMessageCommentaryWithToolCallsPublishesCommittedEntryStartMet
 	eventsMu.Unlock()
 	assistantIdx := -1
 	toolStartIdx := -1
+	toolCompleteIdx := -1
 	for idx, evt := range eventsSnapshot {
 		if evt.Kind == EventAssistantMessage && evt.Message.Content == "working" {
 			assistantIdx = idx
@@ -2336,12 +2341,18 @@ func TestSubmitUserMessageCommentaryWithToolCallsPublishesCommittedEntryStartMet
 		if evt.Kind == EventToolCallStarted && evt.ToolCall != nil && evt.ToolCall.ID == "call_shell_1" {
 			toolStartIdx = idx
 		}
+		if evt.Kind == EventToolCallCompleted && evt.ToolResult != nil && evt.ToolResult.CallID == "call_shell_1" {
+			toolCompleteIdx = idx
+		}
 	}
 	if assistantIdx < 0 {
 		t.Fatalf("expected commentary assistant event, got %+v", eventsSnapshot)
 	}
 	if toolStartIdx < 0 {
 		t.Fatalf("expected tool_call_started event, got %+v", eventsSnapshot)
+	}
+	if toolCompleteIdx < 0 {
+		t.Fatalf("expected tool_call_completed event, got %+v", eventsSnapshot)
 	}
 	assistantEvt := eventsSnapshot[assistantIdx]
 	if !assistantEvt.CommittedEntryStartSet {
@@ -2357,8 +2368,18 @@ func TestSubmitUserMessageCommentaryWithToolCallsPublishesCommittedEntryStartMet
 	if got, want := toolStartEvt.CommittedEntryStart, toolCallEntryIndex; got != want {
 		t.Fatalf("tool_call_started committed start = %d, want %d", got, want)
 	}
+	toolCompleteEvt := eventsSnapshot[toolCompleteIdx]
+	if !toolCompleteEvt.CommittedEntryStartSet {
+		t.Fatalf("expected tool_call_completed committed start set, got %+v", toolCompleteEvt)
+	}
+	if got, want := toolCompleteEvt.CommittedEntryStart, toolResultEntryIndex; got != want {
+		t.Fatalf("tool_call_completed committed start = %d, want %d", got, want)
+	}
 	if toolStartEvt.CommittedEntryCount < toolStartEvt.CommittedEntryStart+1 {
 		t.Fatalf("tool_call_started committed count/start inconsistent: %+v", toolStartEvt)
+	}
+	if toolCompleteEvt.CommittedEntryCount < toolCompleteEvt.CommittedEntryStart+1 {
+		t.Fatalf("tool_call_completed committed count/start inconsistent: %+v", toolCompleteEvt)
 	}
 	if assistantEvt.CommittedEntryCount < assistantEvt.CommittedEntryStart+1 {
 		t.Fatalf("assistant committed count/start inconsistent: %+v", assistantEvt)
@@ -2366,8 +2387,14 @@ func TestSubmitUserMessageCommentaryWithToolCallsPublishesCommittedEntryStartMet
 	if toolStartIdx <= assistantIdx {
 		t.Fatalf("expected tool_call_started after commentary assistant event, assistant_idx=%d tool_idx=%d events=%+v", assistantIdx, toolStartIdx, eventsSnapshot)
 	}
+	if toolCompleteIdx <= toolStartIdx {
+		t.Fatalf("expected tool_call_completed after tool_call_started, start_idx=%d complete_idx=%d events=%+v", toolStartIdx, toolCompleteIdx, eventsSnapshot)
+	}
 	if assistantEvt.CommittedEntryStart >= toolStartEvt.CommittedEntryStart {
 		t.Fatalf("expected commentary assistant before tool call in committed order, assistant=%+v tool=%+v", assistantEvt, toolStartEvt)
+	}
+	if toolStartEvt.CommittedEntryStart >= toolCompleteEvt.CommittedEntryStart {
+		t.Fatalf("expected tool call before tool result in committed order, start=%+v complete=%+v", toolStartEvt, toolCompleteEvt)
 	}
 }
 
@@ -3531,6 +3558,7 @@ func TestReviewerCompletedEventReflectsPersistedReviewerStatusState(t *testing.T
 
 	var (
 		eventsMu                   sync.Mutex
+		assistantEvent             *Event
 		reviewerCompletedEvent     *Event
 		snapshotAtReviewerComplete ChatSnapshot
 		eng                        *Engine
@@ -3538,6 +3566,13 @@ func TestReviewerCompletedEventReflectsPersistedReviewerStatusState(t *testing.T
 	eng, err = New(store, mainClient, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
+			if evt.Kind == EventAssistantMessage && evt.Message.Content == "updated final after review" {
+				eventsMu.Lock()
+				captured := evt
+				assistantEvent = &captured
+				eventsMu.Unlock()
+				return
+			}
 			if evt.Kind != EventReviewerCompleted || evt.Reviewer == nil || evt.Reviewer.Outcome != "applied" {
 				return
 			}
@@ -3568,9 +3603,13 @@ func TestReviewerCompletedEventReflectsPersistedReviewerStatusState(t *testing.T
 	}
 
 	eventsMu.Lock()
+	assistant := assistantEvent
 	completed := reviewerCompletedEvent
 	snapshotAtCompletion := snapshotAtReviewerComplete
 	eventsMu.Unlock()
+	if assistant == nil {
+		t.Fatal("expected follow-up assistant event")
+	}
 	if completed == nil {
 		t.Fatal("expected reviewer completed event")
 	}
@@ -3583,6 +3622,12 @@ func TestReviewerCompletedEventReflectsPersistedReviewerStatusState(t *testing.T
 	assistantEntry := snapshotAtCompletion.Entries[len(snapshotAtCompletion.Entries)-2]
 	if assistantEntry.Role != "assistant" || assistantEntry.Text != "updated final after review" {
 		t.Fatalf("expected completion snapshot penultimate entry to be follow-up assistant, got %+v", assistantEntry)
+	}
+	if !assistant.CommittedEntryStartSet {
+		t.Fatalf("expected follow-up assistant event committed start metadata, got %+v", *assistant)
+	}
+	if got, want := assistant.CommittedEntryStart, len(snapshotAtCompletion.Entries)-2; got != want {
+		t.Fatalf("follow-up assistant committed start = %d, want %d; snapshot=%+v", got, want, snapshotAtCompletion.Entries)
 	}
 	statusEntry := snapshotAtCompletion.Entries[len(snapshotAtCompletion.Entries)-1]
 	if statusEntry.Role != "reviewer_status" || statusEntry.Text != "Supervisor ran: 1 suggestion, applied." {
@@ -3619,8 +3664,8 @@ func TestAppendPersistedLocalEntryEmitsRealtimeLocalEntryEvent(t *testing.T) {
 	if err := eng.appendPersistedLocalEntryWithOngoingText("step-1", "reviewer_suggestions", "Supervisor suggested:\n1. Add verification notes.", "Supervisor made 1 suggestion."); err != nil {
 		t.Fatalf("append persisted local entry: %v", err)
 	}
-	if got := len(events); got != 2 {
-		t.Fatalf("event count = %d, want 2", got)
+	if got := len(events); got != 1 {
+		t.Fatalf("event count = %d, want 1", got)
 	}
 	if got := events[0].Kind; got != EventLocalEntryAdded {
 		t.Fatalf("first event kind = %q, want %q", got, EventLocalEntryAdded)
@@ -3633,9 +3678,6 @@ func TestAppendPersistedLocalEntryEmitsRealtimeLocalEntryEvent(t *testing.T) {
 	}
 	if got := events[0].LocalEntry.OngoingText; got != "Supervisor made 1 suggestion." {
 		t.Fatalf("local entry ongoing text = %q, want supervisor summary", got)
-	}
-	if got := events[1].Kind; got != EventConversationUpdated {
-		t.Fatalf("second event kind = %q, want %q", got, EventConversationUpdated)
 	}
 }
 
@@ -3671,7 +3713,7 @@ func TestRunReviewerFollowUpReturnsCompletionWhenReviewerInstructionAppendFails(
 	}
 	t.Cleanup(func() { _ = os.Chmod(eventsPath, info.Mode()) })
 
-	result, err := eng.runReviewerFollowUp(context.Background(), "step-1", llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "original final"}, reviewerClient)
+	result, err := eng.runReviewerFollowUp(context.Background(), "step-1", llm.Message{Role: llm.RoleAssistant, Phase: llm.MessagePhaseFinal, Content: "original final"}, -1, false, reviewerClient)
 	if err != nil {
 		t.Fatalf("run reviewer follow-up: %v", err)
 	}
@@ -4906,11 +4948,14 @@ func TestDeferredFinalWithQueuedUserInjectionStillRunsReviewerAndEmitsAssistantE
 	if len(mainClient.calls) != 2 {
 		t.Fatalf("expected two main model calls for deferred final path, got %d", len(mainClient.calls))
 	}
+	snapshot := eng.ChatSnapshot()
 
 	mu.Lock()
 	defer mu.Unlock()
 	assistantMessages := 0
 	flushedQueuedUser := false
+	assistantCommittedStart := -1
+	assistantCommittedStartSet := false
 	for i, evt := range events {
 		_ = i
 		if evt.Kind == EventAssistantMessage {
@@ -4918,6 +4963,8 @@ func TestDeferredFinalWithQueuedUserInjectionStillRunsReviewerAndEmitsAssistantE
 			if evt.Message.Content != "foreground done" {
 				t.Fatalf("assistant message content = %q, want foreground done", evt.Message.Content)
 			}
+			assistantCommittedStart = evt.CommittedEntryStart
+			assistantCommittedStartSet = evt.CommittedEntryStartSet
 		}
 		if evt.Kind == EventUserMessageFlushed && evt.UserMessage == "steer now" {
 			flushedQueuedUser = true
@@ -4928,6 +4975,16 @@ func TestDeferredFinalWithQueuedUserInjectionStillRunsReviewerAndEmitsAssistantE
 	}
 	if !flushedQueuedUser {
 		t.Fatalf("expected queued user injection flush event, got %+v", events)
+	}
+	if !assistantCommittedStartSet {
+		t.Fatalf("expected deferred final assistant event committed start metadata, got %+v", events)
+	}
+	if assistantCommittedStart < 0 || assistantCommittedStart >= len(snapshot.Entries) {
+		t.Fatalf("deferred final assistant committed start = %d, snapshot=%+v", assistantCommittedStart, snapshot.Entries)
+	}
+	assistantEntry := snapshot.Entries[assistantCommittedStart]
+	if assistantEntry.Role != "assistant" || assistantEntry.Text != "foreground done" {
+		t.Fatalf("expected deferred final assistant event to point at committed assistant row, got %+v", assistantEntry)
 	}
 }
 
@@ -4986,10 +5043,13 @@ func TestDeferredFinalWithQueuedUserInjectionAndTrailingNoopStillUsesDeferredFin
 	if len(reviewerClient.calls) != 1 {
 		t.Fatalf("expected reviewer to run once for deferred final, got %d", len(reviewerClient.calls))
 	}
+	snapshot := eng.ChatSnapshot()
 
 	mu.Lock()
 	defer mu.Unlock()
 	assistantMessages := 0
+	assistantCommittedStart := -1
+	assistantCommittedStartSet := false
 	for _, evt := range events {
 		if evt.Kind != EventAssistantMessage {
 			continue
@@ -4998,9 +5058,21 @@ func TestDeferredFinalWithQueuedUserInjectionAndTrailingNoopStillUsesDeferredFin
 		if evt.Message.Content != "foreground done" {
 			t.Fatalf("assistant message content = %q, want foreground done", evt.Message.Content)
 		}
+		assistantCommittedStart = evt.CommittedEntryStart
+		assistantCommittedStartSet = evt.CommittedEntryStartSet
 	}
 	if assistantMessages != 1 {
 		t.Fatalf("expected one assistant_message event for deferred final, got %d events=%+v", assistantMessages, events)
+	}
+	if !assistantCommittedStartSet {
+		t.Fatalf("expected deferred final assistant event committed start metadata, got %+v", events)
+	}
+	if assistantCommittedStart < 0 || assistantCommittedStart >= len(snapshot.Entries) {
+		t.Fatalf("deferred final assistant committed start = %d, snapshot=%+v", assistantCommittedStart, snapshot.Entries)
+	}
+	assistantEntry := snapshot.Entries[assistantCommittedStart]
+	if assistantEntry.Role != "assistant" || assistantEntry.Text != "foreground done" {
+		t.Fatalf("expected deferred final assistant event to point at committed assistant row, got %+v", assistantEntry)
 	}
 }
 
@@ -7392,7 +7464,7 @@ func TestQueuedUserMessageFlushesWhenAssistantReturnsWithoutTools(t *testing.T) 
 	}
 }
 
-func TestQueuedUserMessageFlushedEventPrecedesConversationUpdateForInjectedMessage(t *testing.T) {
+func TestQueuedUserMessageFlushDoesNotEmitConversationUpdatedForInjectedMessage(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -7412,27 +7484,17 @@ func TestQueuedUserMessageFlushedEventPrecedesConversationUpdateForInjectedMessa
 
 	var (
 		eng                   *Engine
+		events                []Event
 		eventIndex            int
 		flushIndex            = -1
-		userConversationIndex = -1
 	)
 	eng, err = New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
+			events = append(events, evt)
 			eventIndex++
 			if evt.Kind == EventUserMessageFlushed && evt.UserMessage == "steer now" && flushIndex < 0 {
 				flushIndex = eventIndex
-			}
-			if evt.Kind != EventConversationUpdated || eng == nil || userConversationIndex >= 0 {
-				return
-			}
-			snapshot := eng.ChatSnapshot()
-			if len(snapshot.Entries) == 0 {
-				return
-			}
-			last := snapshot.Entries[len(snapshot.Entries)-1]
-			if last.Role == string(llm.RoleUser) && last.Text == "steer now" {
-				userConversationIndex = eventIndex
 			}
 		},
 	})
@@ -7447,15 +7509,12 @@ func TestQueuedUserMessageFlushedEventPrecedesConversationUpdateForInjectedMessa
 	if flushIndex < 0 {
 		t.Fatal("expected user_message_flushed event")
 	}
-	if userConversationIndex < 0 {
-		t.Fatal("expected conversation_updated event for injected user message")
-	}
-	if flushIndex >= userConversationIndex {
-		t.Fatalf("expected flushed event before conversation update, got flush=%d conversation=%d", flushIndex, userConversationIndex)
+	if got := committedConversationUpdatedCountAfterLastUserFlush(events); got != 0 {
+		t.Fatalf("committed conversation_updated count after injected user flush = %d, want 0; events=%+v", got, events)
 	}
 }
 
-func TestDirectUserMessageFlushedEventPrecedesConversationUpdate(t *testing.T) {
+func TestDirectUserMessageFlushDoesNotEmitConversationUpdated(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -7469,27 +7528,17 @@ func TestDirectUserMessageFlushedEventPrecedesConversationUpdate(t *testing.T) {
 
 	var (
 		eng                   *Engine
+		events                []Event
 		eventIndex            int
 		flushIndex            = -1
-		userConversationIndex = -1
 	)
 	eng, err = New(store, client, tools.NewRegistry(fakeTool{name: tools.ToolShell}), Config{
 		Model: "gpt-5",
 		OnEvent: func(evt Event) {
+			events = append(events, evt)
 			eventIndex++
 			if evt.Kind == EventUserMessageFlushed && evt.UserMessage == "say hi" && flushIndex < 0 {
 				flushIndex = eventIndex
-			}
-			if evt.Kind != EventConversationUpdated || eng == nil || userConversationIndex >= 0 {
-				return
-			}
-			snapshot := eng.ChatSnapshot()
-			if len(snapshot.Entries) == 0 {
-				return
-			}
-			last := snapshot.Entries[len(snapshot.Entries)-1]
-			if last.Role == string(llm.RoleUser) && last.Text == "say hi" {
-				userConversationIndex = eventIndex
 			}
 		},
 	})
@@ -7503,11 +7552,8 @@ func TestDirectUserMessageFlushedEventPrecedesConversationUpdate(t *testing.T) {
 	if flushIndex < 0 {
 		t.Fatal("expected direct user_message_flushed event")
 	}
-	if userConversationIndex < 0 {
-		t.Fatal("expected conversation_updated event for direct user message")
-	}
-	if flushIndex >= userConversationIndex {
-		t.Fatalf("expected flushed event before conversation update, got flush=%d conversation=%d", flushIndex, userConversationIndex)
+	if got := committedConversationUpdatedCountAfterLastUserFlush(events); got != 0 {
+		t.Fatalf("committed conversation_updated count after direct user flush = %d, want 0; events=%+v", got, events)
 	}
 }
 

@@ -3371,6 +3371,30 @@ func TestRenderQueuedMessagesPaneShowsPendingInjectedAfterQueuedMessages(t *test
 	}
 }
 
+func TestRenderQueuedMessagesPaneShowsDeferredCommittedInjectedMessages(t *testing.T) {
+	m := newProjectedStaticUIModel()
+	m.queued = []string{"queued later"}
+	m.deferredCommittedTail = []deferredProjectedTranscriptTail{{
+		rangeStart: 1,
+		rangeEnd:   2,
+		revision:   7,
+		entries:    []clientui.ChatEntry{{Role: "user", Text: "please continue with tests"}},
+		pending:    []string{"please continue with tests"},
+	}}
+
+	lines := m.renderQueuedMessagesPane(80)
+	plain := strings.Split(stripANSIAndTrimRight(strings.Join(lines, "\n")), "\n")
+	want := []string{"queued later", "next: please continue with tests"}
+	if len(plain) != len(want) {
+		t.Fatalf("expected %d plain lines, got %d", len(want), len(plain))
+	}
+	for i := range want {
+		if plain[i] != want[i] {
+			t.Fatalf("line %d = %q want %q", i, plain[i], want[i])
+		}
+	}
+}
+
 func TestRenderQueuedMessagesPanePrioritizesPendingInjectedWithinVisibleLimit(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.queued = []string{"one", "two", "three", "four", "five", "six"}
@@ -4812,13 +4836,8 @@ func TestBusyQueuedSlashCommandDrainContinuesIntoQueuedPrompt(t *testing.T) {
 	}
 }
 
-func TestSubmitDoneWithRuntimeClientRequestsTranscriptCatchUp(t *testing.T) {
-	client := &refreshingRuntimeClient{
-		transcripts: []clientui.TranscriptPage{{
-			SessionID: "session-1",
-			Entries:   []clientui.ChatEntry{{Role: "assistant", Text: "final answer"}},
-		}},
-	}
+func TestSubmitDoneWithRuntimeClientDoesNotRequestTranscriptCatchUpWithoutQueuedWork(t *testing.T) {
+	client := &refreshingRuntimeClient{}
 	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
 	m.startupCmds = nil
 	m.busy = true
@@ -4826,26 +4845,14 @@ func TestSubmitDoneWithRuntimeClientRequestsTranscriptCatchUp(t *testing.T) {
 
 	next, cmd := m.Update(submitDoneMsg{message: "ignored by runtime-backed flow"})
 	updated := next.(*uiModel)
-	if cmd == nil {
-		t.Fatal("expected transcript sync command after runtime-backed submit completes")
-	}
-	refreshMsg, ok := cmd().(runtimeTranscriptRefreshedMsg)
-	if !ok {
-		t.Fatalf("expected runtimeTranscriptRefreshedMsg, got %T", cmd())
-	}
-	next, applyCmd := updated.Update(refreshMsg)
-	updated = next.(*uiModel)
-	if applyCmd != nil {
-		_ = applyCmd()
+	if cmd != nil {
+		t.Fatalf("did not expect transcript sync command after ordinary runtime-backed submit completion, got %T", cmd())
 	}
 	if updated.activity != uiActivityIdle {
 		t.Fatalf("expected idle activity after submit completion, got %v", updated.activity)
 	}
-	if got := stripANSIAndTrimRight(updated.view.OngoingSnapshot()); !strings.Contains(got, "final answer") {
-		t.Fatalf("expected transcript catch-up to hydrate final answer, got %q", got)
-	}
-	if client.calls != 1 {
-		t.Fatalf("refresh call count = %d, want 1", client.calls)
+	if client.calls != 0 {
+		t.Fatalf("refresh call count = %d, want 0", client.calls)
 	}
 }
 
@@ -4904,6 +4911,9 @@ func TestSubmitDoneWithQueuedWorkWaitsForInFlightTranscriptCatchUp(t *testing.T)
 	if !ok {
 		t.Fatalf("expected runtimeTranscriptRefreshedMsg from follow-up hydration command, got %T", applyCmd())
 	}
+	if refreshAgain.syncCause != runtimeTranscriptSyncCauseDirtyFollowUp {
+		t.Fatalf("follow-up sync cause = %q, want %q", refreshAgain.syncCause, runtimeTranscriptSyncCauseDirtyFollowUp)
+	}
 
 	next, finalCmd := updated.Update(refreshAgain)
 	updated = next.(*uiModel)
@@ -4921,6 +4931,72 @@ func TestSubmitDoneWithQueuedWorkWaitsForInFlightTranscriptCatchUp(t *testing.T)
 	}
 	if finalCmd == nil {
 		t.Fatal("expected follow-up command sequence after hydration")
+	}
+}
+
+func TestStaleHydrateDoesNotClearDeferredCommittedTailBeforeQueuedDrain(t *testing.T) {
+	client := &refreshingRuntimeClient{}
+	m := newProjectedTestUIModel(client, closedProjectedRuntimeEvents(), closedAskEvents())
+	m.startupCmds = nil
+	m.termWidth = 100
+	m.termHeight = 20
+	m.windowSizeKnown = true
+	m.busy = true
+	m.activity = uiActivityRunning
+	m.pendingInjected = []string{"steered message"}
+	m.input = "steered message"
+	m.lockedInjectText = "steered message"
+	m.inputSubmitLocked = true
+	m.transcriptEntries = []tui.TranscriptEntry{{Role: "user", Text: "seed"}}
+	m.transcriptRevision = 6
+	m.transcriptTotalEntries = 1
+	m.forwardToView(tui.SetConversationMsg{Entries: m.transcriptEntries, Ongoing: "working"})
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{Kind: clientui.EventAssistantDelta, StepID: "step-1", AssistantDelta: "working"})
+
+	_ = m.runtimeAdapter().handleProjectedRuntimeEvent(clientui.Event{
+		Kind:                       clientui.EventUserMessageFlushed,
+		StepID:                     "step-1",
+		CommittedTranscriptChanged: true,
+		TranscriptRevision:         7,
+		CommittedEntryCount:        2,
+		UserMessage:                "steered message",
+		TranscriptEntries:          []clientui.ChatEntry{{Role: "user", Text: "steered message"}},
+	})
+	if got := len(m.deferredCommittedTail); got != 1 {
+		t.Fatalf("expected deferred committed user tail before hydration, got %d", got)
+	}
+
+	m.busy = false
+	m.activity = uiActivityIdle
+	m.queued = []string{"follow up"}
+	m.pendingQueuedDrainAfterHydration = true
+	m.queuedDrainReadyAfterHydration = false
+	m.runtimeTranscriptBusy = true
+	m.runtimeTranscriptToken = 7
+
+	next, cmd := m.Update(runtimeTranscriptRefreshedMsg{
+		token: 7,
+		req:   clientui.TranscriptPageRequest{Window: clientui.TranscriptWindowOngoingTail},
+		transcript: clientui.TranscriptPage{
+			SessionID:    "session-1",
+			Revision:     6,
+			Offset:       0,
+			TotalEntries: 1,
+			Entries:      []clientui.ChatEntry{{Role: "user", Text: "seed"}},
+		},
+	})
+	updated := next.(*uiModel)
+	if got := len(updated.deferredCommittedTail); got != 1 {
+		t.Fatalf("expected stale hydrate + queued drain path to preserve deferred committed tail, got %d", got)
+	}
+	if updated.pendingPreSubmitText != "follow up" {
+		t.Fatalf("expected queued drain to continue after stale hydrate rejection, got pending=%q", updated.pendingPreSubmitText)
+	}
+	if !updated.busy {
+		t.Fatal("expected queued drain to start the next submission after stale hydrate rejection")
+	}
+	if cmd == nil {
+		t.Fatal("expected queued follow-up command after stale hydrate rejection")
 	}
 }
 
@@ -5234,6 +5310,9 @@ func TestBusyQueuedReviewSlashCommandWaitsForHydrationBeforePromptSubmission(t *
 	if !refreshFound {
 		t.Fatalf("expected runtime transcript refresh before queued /review drains, got %+v", msgs)
 	}
+	if refresh.syncCause != runtimeTranscriptSyncCauseQueuedDrain {
+		t.Fatalf("queued /review sync cause = %q, want %q", refresh.syncCause, runtimeTranscriptSyncCauseQueuedDrain)
+	}
 
 	next, drainCmd := updated.Update(refresh)
 	updated = next.(*uiModel)
@@ -5311,6 +5390,9 @@ func TestQueuedReviewUsesEngineConversationFreshnessWhenUIDidNotReceiveRuntimeUp
 	}
 	if !refreshFound {
 		t.Fatalf("expected transcript refresh before queued /review handoff, got %+v", msgs)
+	}
+	if refresh.syncCause != runtimeTranscriptSyncCauseQueuedDrain {
+		t.Fatalf("queued /review handoff sync cause = %q, want %q", refresh.syncCause, runtimeTranscriptSyncCauseQueuedDrain)
 	}
 
 	next, followCmd := updated.Update(refresh)

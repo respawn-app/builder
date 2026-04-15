@@ -29,7 +29,6 @@ func (e *Engine) persistToolCompletion(stepID string, r tools.Result) error {
 	if err == nil {
 		e.markCurrentRequestShapeDirtyForSignificantMutation()
 		e.chat.recordToolCompletion(r)
-		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
 	}
 	return err
 }
@@ -99,7 +98,7 @@ func headlessModeActive(messages []llm.Message) bool {
 }
 
 func (e *Engine) appendAssistantMessage(stepID string, msg llm.Message) error {
-	return e.appendMessage(stepID, msg)
+	return e.appendMessageWithoutConversationUpdate(stepID, msg)
 }
 
 func (e *Engine) appendReasoningEntries(stepID string, entries []llm.ReasoningEntry) error {
@@ -151,8 +150,7 @@ func (e *Engine) appendPersistedDiagnosticEntry(stepID, diagnosticKey, role, tex
 		return err
 	}
 	e.chat.appendLocalEntryWithOngoingText(entry.Role, entry.Text, entry.OngoingText)
-	e.emit(Event{Kind: EventLocalEntryAdded, StepID: stepID, LocalEntry: localEntryChatEntry(entry)})
-	e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
+	e.emit(Event{Kind: EventLocalEntryAdded, StepID: stepID, LocalEntry: localEntryChatEntry(entry), CommittedTranscriptChanged: true})
 	return nil
 }
 
@@ -167,8 +165,7 @@ func (e *Engine) appendPersistedLocalEntryRecord(stepID string, entry storedLoca
 	_, err := e.store.AppendEvent(stepID, "local_entry", entry)
 	if err == nil {
 		e.chat.appendLocalEntryWithOngoingTextAndVisibility(entry.Role, entry.Text, entry.OngoingText, entry.Visibility)
-		e.emit(Event{Kind: EventLocalEntryAdded, StepID: stepID, LocalEntry: localEntryChatEntry(entry)})
-		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
+		e.emit(Event{Kind: EventLocalEntryAdded, StepID: stepID, LocalEntry: localEntryChatEntry(entry), CommittedTranscriptChanged: true})
 	}
 	return err
 }
@@ -241,6 +238,7 @@ func (e *Engine) resetLocalDiagnostics() {
 
 func (e *Engine) appendMessage(stepID string, msg llm.Message) error {
 	msg = normalizeMessageForTranscript(msg, e.store.Meta().WorkspaceRoot)
+	previousCommittedCount := e.CommittedTranscriptEntryCount()
 	if e.beforePersistMessage != nil {
 		if err := e.beforePersistMessage(msg); err != nil {
 			return err
@@ -254,9 +252,23 @@ func (e *Engine) appendMessage(stepID string, msg llm.Message) error {
 	e.chat.appendMessage(msg)
 	_, err := e.store.AppendEvent(stepID, "message", msg)
 	if err == nil {
-		e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
+		if shouldEmitCommittedTranscriptAdvancedForAppendedMessage(msg, previousCommittedCount, e.CommittedTranscriptEntryCount()) {
+			e.emitCommittedTranscriptAdvanced(stepID)
+		}
 	}
 	return err
+}
+
+func shouldEmitCommittedTranscriptAdvancedForAppendedMessage(msg llm.Message, previousCommittedCount int, currentCommittedCount int) bool {
+	if currentCommittedCount <= previousCommittedCount {
+		return false
+	}
+	// Tool completion transcript visibility is owned by the rich tool_call_completed
+	// event; the persisted llm.RoleTool mirror exists for request reconstruction.
+	if msg.Role == llm.RoleTool {
+		return false
+	}
+	return true
 }
 
 func (e *Engine) appendMessageWithoutConversationUpdate(stepID string, msg llm.Message) error {
@@ -279,7 +291,7 @@ func (e *Engine) appendMessageWithoutConversationUpdate(stepID string, msg llm.M
 func (e *Engine) clearStreamingAssistantState(stepID string) {
 	e.chat.clearOngoing()
 	e.chat.clearOngoingError()
-	e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
+	e.emitConversationUpdated(stepID)
 	e.emit(Event{Kind: EventAssistantDeltaReset, StepID: stepID})
 	e.emit(Event{Kind: EventReasoningDeltaReset, StepID: stepID})
 }
@@ -294,7 +306,7 @@ func flushedUserMessageEvent(msg llm.Message, stepID string) *Event {
 	if strings.TrimSpace(msg.Content) == "" {
 		return nil
 	}
-	return &Event{Kind: EventUserMessageFlushed, StepID: stepID, UserMessage: msg.Content, UserMessageBatch: []string{msg.Content}}
+	return &Event{Kind: EventUserMessageFlushed, StepID: stepID, UserMessage: msg.Content, UserMessageBatch: []string{msg.Content}, CommittedTranscriptChanged: true}
 }
 
 func (e *Engine) flushPendingUserInjections(stepID string) (int, error) {
