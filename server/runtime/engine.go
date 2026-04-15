@@ -186,7 +186,8 @@ type Engine struct {
 	stepFlow       stepExecutor
 	toolFlow       toolExecutor
 
-	beforePersistMessage func(llm.Message) error
+	beforePersistMessage    func(llm.Message) error
+	beforePersistLocalEntry func(storedLocalEntry) error
 }
 
 type handoffRequest struct {

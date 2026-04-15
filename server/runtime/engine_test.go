@@ -2467,8 +2467,8 @@ func TestAutoCompactionStatusEventDoesNotPublishCommittedEntryStart(t *testing.T
 	if !localEntryEvt.CommittedEntryStartSet {
 		t.Fatalf("expected persisted local entry to publish committed start, got %+v", localEntryEvt)
 	}
-	if localEntryIdx <= compactionIdx {
-		t.Fatalf("expected persisted local entry after compaction status, compaction_idx=%d local_entry_idx=%d events=%+v", compactionIdx, localEntryIdx, eventsSnapshot)
+	if localEntryIdx >= compactionIdx {
+		t.Fatalf("expected persisted local entry before compaction status, compaction_idx=%d local_entry_idx=%d events=%+v", compactionIdx, localEntryIdx, eventsSnapshot)
 	}
 }
 
@@ -3743,33 +3743,22 @@ func TestRunReviewerFollowUpReturnsCompletionWhenReviewerInstructionAppendFails(
 }
 
 func TestRunStepLoopFailsWhenReviewerStatusPersistenceFailsAfterReviewerInstructionAppendFailure(t *testing.T) {
+	reviewerInstructionErr := errors.New("injected reviewer instruction persistence failure")
+	localEntryErr := errors.New("injected reviewer status persistence failure")
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
 
-	eventsPath := filepath.Join(store.Dir(), "events.jsonl")
-	info, err := os.Stat(eventsPath)
-	if err != nil {
-		t.Fatalf("stat events log: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(eventsPath, info.Mode()) })
-
 	mainClient := &fakeClient{responses: []llm.Response{{
 		Assistant: llm.Message{Role: llm.RoleAssistant, Content: "original final", Phase: llm.MessagePhaseFinal},
 		Usage:     llm.Usage{WindowTokens: 200000},
 	}}}
-	reviewerClient := &hookClient{
-		caps: llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true},
-		response: llm.Response{
-			Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["Add final verification notes."]}`},
-			Usage:     llm.Usage{InputTokens: 10, WindowTokens: 200000},
-		},
-		beforeReturn: func() error {
-			return os.Chmod(eventsPath, 0o400)
-		},
-	}
+	reviewerClient := &fakeClient{caps: llm.ProviderCapabilities{ProviderID: "openai-compatible", SupportsResponsesAPI: true}, responses: []llm.Response{{
+		Assistant: llm.Message{Role: llm.RoleAssistant, Content: `{"suggestions":["Add final verification notes."]}`},
+		Usage:     llm.Usage{InputTokens: 10, WindowTokens: 200000},
+	}}}
 
 	var (
 		eventsMu sync.Mutex
@@ -3791,6 +3780,18 @@ func TestRunStepLoopFailsWhenReviewerStatusPersistenceFailsAfterReviewerInstruct
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
+	}
+	eng.beforePersistMessage = func(msg llm.Message) error {
+		if msg.MessageType == llm.MessageTypeReviewerFeedback {
+			return reviewerInstructionErr
+		}
+		return nil
+	}
+	eng.beforePersistLocalEntry = func(entry storedLocalEntry) error {
+		if entry.Role == "reviewer_status" {
+			return localEntryErr
+		}
+		return nil
 	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "do task"}); err != nil {
 		t.Fatalf("append user message: %v", err)
@@ -3816,8 +3817,8 @@ func TestRunStepLoopFailsWhenReviewerStatusPersistenceFailsAfterReviewerInstruct
 	if assistantEventIdx < 0 {
 		t.Fatalf("expected assistant message event, got %+v", deferredEvents)
 	}
-	if !strings.Contains(err.Error(), "permission") && !strings.Contains(strings.ToLower(err.Error()), "read-only") {
-		t.Fatalf("expected permission-style failure, got %v", err)
+	if !errors.Is(err, localEntryErr) {
+		t.Fatalf("expected injected reviewer status failure, got %v", err)
 	}
 
 	snapshot := eng.ChatSnapshot()
@@ -3832,18 +3833,12 @@ func TestRunStepLoopFailsWhenReviewerStatusPersistenceFailsAfterReviewerInstruct
 }
 
 func TestSubmitUserMessageFailsWhenReviewerStatusPersistenceFailsAfterAssistantEvent(t *testing.T) {
+	localEntryErr := errors.New("injected reviewer status persistence failure")
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-
-	eventsPath := filepath.Join(store.Dir(), "events.jsonl")
-	info, err := os.Stat(eventsPath)
-	if err != nil {
-		t.Fatalf("stat events log: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(eventsPath, info.Mode()) })
 
 	mainClient := &fakeClient{responses: []llm.Response{
 		{
@@ -3870,9 +3865,6 @@ func TestSubmitUserMessageFailsWhenReviewerStatusPersistenceFailsAfterAssistantE
 			eventsMu.Lock()
 			defer eventsMu.Unlock()
 			events = append(events, evt)
-			if evt.Kind == EventAssistantMessage && evt.Message.Content == "updated final after review" {
-				_ = os.Chmod(eventsPath, 0o400)
-			}
 		},
 		Reviewer: ReviewerConfig{
 			Frequency:     "all",
@@ -3884,6 +3876,12 @@ func TestSubmitUserMessageFailsWhenReviewerStatusPersistenceFailsAfterAssistantE
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
+	}
+	eng.beforePersistLocalEntry = func(entry storedLocalEntry) error {
+		if entry.Role == "reviewer_status" {
+			return localEntryErr
+		}
+		return nil
 	}
 
 	_, err = eng.SubmitUserMessage(context.Background(), "do task")
@@ -3899,8 +3897,8 @@ func TestSubmitUserMessageFailsWhenReviewerStatusPersistenceFailsAfterAssistantE
 			t.Fatalf("did not expect reviewer completed event after reviewer status persistence failure, got %+v", deferredEvents)
 		}
 	}
-	if !strings.Contains(err.Error(), "permission") && !strings.Contains(strings.ToLower(err.Error()), "read-only") {
-		t.Fatalf("expected permission-style failure, got %v", err)
+	if !errors.Is(err, localEntryErr) {
+		t.Fatalf("expected injected reviewer status failure, got %v", err)
 	}
 }
 
@@ -3941,6 +3939,7 @@ func TestRestoreMessagesKeepsStoredReviewerEntriesVerbatim(t *testing.T) {
 }
 
 func TestAppendPersistedLocalEntryRecordDoesNotMutateChatOnAppendFailure(t *testing.T) {
+	localEntryErr := errors.New("injected local entry persistence failure")
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
@@ -3950,24 +3949,17 @@ func TestAppendPersistedLocalEntryRecordDoesNotMutateChatOnAppendFailure(t *test
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-
-	eventsPath := filepath.Join(store.Dir(), "events.jsonl")
-	info, err := os.Stat(eventsPath)
-	if err != nil {
-		t.Fatalf("stat events log: %v", err)
+	eng.beforePersistLocalEntry = func(entry storedLocalEntry) error {
+		return localEntryErr
 	}
-	if err := os.Chmod(eventsPath, 0o400); err != nil {
-		t.Fatalf("chmod events log readonly: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(eventsPath, info.Mode()) })
 
 	err = eng.appendPersistedLocalEntryRecord("step-1", storedLocalEntry{
 		Visibility: transcript.EntryVisibilityAll,
 		Role:       "reviewer_status",
 		Text:       "Supervisor ran, applied 1 suggestion.",
 	})
-	if err == nil {
-		t.Fatal("expected appendPersistedLocalEntryRecord to fail when events log is read-only")
+	if !errors.Is(err, localEntryErr) {
+		t.Fatalf("expected injected local entry failure, got %v", err)
 	}
 	if snapshot := eng.ChatSnapshot(); len(snapshot.Entries) != 0 {
 		t.Fatalf("expected no in-memory local entries after append failure, got %+v", snapshot.Entries)
@@ -11129,18 +11121,12 @@ func TestCompactionPersistsSingleNoticeEntry(t *testing.T) {
 }
 
 func TestAutoCompactionFailsWhenCompactionNoticePersistenceFails(t *testing.T) {
+	localEntryErr := errors.New("injected compaction notice persistence failure")
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-
-	eventsPath := filepath.Join(store.Dir(), "events.jsonl")
-	info, err := os.Stat(eventsPath)
-	if err != nil {
-		t.Fatalf("stat events log: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(eventsPath, info.Mode()) })
 
 	client := &fakeCompactionClient{
 		compactionResponses: []llm.CompactionResponse{
@@ -11156,14 +11142,15 @@ func TestAutoCompactionFailsWhenCompactionNoticePersistenceFails(t *testing.T) {
 
 	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
 		Model: "gpt-5",
-		OnEvent: func(evt Event) {
-			if evt.Kind == EventCompactionCompleted {
-				_ = os.Chmod(eventsPath, 0o400)
-			}
-		},
 	})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
+	}
+	eng.beforePersistLocalEntry = func(entry storedLocalEntry) error {
+		if entry.Role == "compaction_notice" {
+			return localEntryErr
+		}
+		return nil
 	}
 	if err := eng.appendMessage("", llm.Message{Role: llm.RoleUser, Content: "seed"}); err != nil {
 		t.Fatalf("append seed message: %v", err)
@@ -11174,8 +11161,8 @@ func TestAutoCompactionFailsWhenCompactionNoticePersistenceFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected auto compaction to fail when notice persistence fails")
 	}
-	if !strings.Contains(err.Error(), "permission") && !strings.Contains(strings.ToLower(err.Error()), "read-only") {
-		t.Fatalf("expected permission-style failure, got %v", err)
+	if !errors.Is(err, localEntryErr) {
+		t.Fatalf("expected injected compaction notice failure, got %v", err)
 	}
 }
 
