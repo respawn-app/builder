@@ -170,6 +170,7 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 				continue
 			}
 			if len(hostedToolExecutions) > 0 {
+				e.emitCommittedTranscriptAdvanced(stepID)
 				continue
 			}
 
