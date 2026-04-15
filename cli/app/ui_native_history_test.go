@@ -1877,7 +1877,7 @@ func TestNativeScrollbackResumesAssistantFlushesAfterSameSessionRebase(t *testin
 	}
 }
 
-func TestNativeDetailExitReplaysCommittedTranscriptWhenDetailChangedState(t *testing.T) {
+func TestNativeDetailExitRebasesCommittedTranscriptWhenDetailChangedState(t *testing.T) {
 	m := newProjectedStaticUIModel(
 		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
@@ -1905,20 +1905,8 @@ func TestNativeDetailExitReplaysCommittedTranscriptWhenDetailChangedState(t *tes
 	if m.view.Mode() != tui.ModeOngoing {
 		t.Fatalf("expected ongoing mode, got %q", m.view.Mode())
 	}
-	if leaveCmd == nil {
-		t.Fatal("expected detail exit to restore committed normal-buffer history")
-	}
-	msgs := collectCmdMessages(t, leaveCmd)
-	if len(msgs) != 2 {
-		t.Fatalf("expected clear-screen plus native history flush for detail exit restore, got %d message(s)", len(msgs))
-	}
-	flush, ok := msgs[1].(nativeHistoryFlushMsg)
-	if !ok {
-		t.Fatalf("expected nativeHistoryFlushMsg as detail-exit replay payload, got %T", msgs[1])
-	}
-	plainReplay := stripANSIText(flush.Text)
-	if !strings.Contains(plainReplay, "fresh root") || !strings.Contains(plainReplay, "rewritten tail") || strings.Contains(plainReplay, "seed") {
-		t.Fatalf("expected detail exit replay to emit authoritative transcript, got %q", plainReplay)
+	if leaveCmd != nil {
+		t.Fatalf("expected detail exit to rebase committed normal-buffer history without replay, got %T", leaveCmd())
 	}
 	plain := stripANSIText(m.nativeRenderedSnapshot)
 	if !strings.Contains(plain, "fresh root") || !strings.Contains(plain, "rewritten tail") {
@@ -1944,6 +1932,57 @@ func TestNativeDetailExitReplaysCommittedTranscriptWhenDetailChangedState(t *tes
 	}
 	if strings.Contains(appendPlain, "fresh root") || strings.Contains(appendPlain, "rewritten tail") {
 		t.Fatalf("expected resumed append to exclude already rebuilt transcript root, got %q", appendPlain)
+	}
+}
+
+func TestNativeDetailRepeatedTogglesDoNotPoisonNextAppend(t *testing.T) {
+	m := newProjectedStaticUIModel(
+		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
+		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
+	)
+	_, startupCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	if startupCmd == nil {
+		t.Fatal("expected startup replay command")
+	}
+	_ = collectCmdMessages(t, startupCmd)
+
+	_ = collectCmdMessages(t, m.toggleTranscriptModeWithNativeReplay(false))
+	cmd := m.runtimeAdapter().applyChatSnapshot(runtime.ChatSnapshot{
+		Entries: []runtime.ChatEntry{{Role: "user", Text: "fresh root"}, {Role: "assistant", Text: "rewritten tail"}},
+	})
+	if cmd != nil {
+		t.Fatalf("expected detail-mode hydrate repair to stay deferred, got %T", cmd())
+	}
+	if leaveCmd := m.toggleTranscriptModeWithNativeReplay(true); leaveCmd != nil {
+		t.Fatalf("expected first detail exit to rebase without replay, got %T", leaveCmd())
+	}
+
+	for i := 0; i < 2; i++ {
+		_ = collectCmdMessages(t, m.toggleTranscriptModeWithNativeReplay(false))
+		if leaveCmd := m.toggleTranscriptModeWithNativeReplay(true); leaveCmd != nil {
+			t.Fatalf("expected repeated detail exit %d to avoid replay, got %T", i, leaveCmd())
+		}
+	}
+
+	m.forwardToView(tui.AppendTranscriptMsg{Role: "assistant", Text: "echo hi"})
+	m.transcriptEntries = append(m.transcriptEntries, tui.TranscriptEntry{Role: "assistant", Text: "echo hi"})
+	appendCmd := m.syncNativeHistoryFromTranscript()
+	if appendCmd == nil {
+		t.Fatal("expected next append after repeated detail toggles")
+	}
+	appendMsg, ok := appendCmd().(nativeHistoryFlushMsg)
+	if !ok {
+		t.Fatalf("expected nativeHistoryFlushMsg, got %T", appendCmd())
+	}
+	appendPlain := stripANSIText(appendMsg.Text)
+	if !strings.Contains(appendPlain, "echo hi") {
+		t.Fatalf("expected next append to include only the new assistant turn, got %q", appendPlain)
+	}
+	if strings.Contains(appendPlain, "fresh root") || strings.Contains(appendPlain, "rewritten tail") || strings.Contains(appendPlain, "seed") {
+		t.Fatalf("expected repeated detail toggles to keep prior transcript rebased, got %q", appendPlain)
+	}
+	if m.transientStatus == nativeHistoryDivergenceStatusMessage {
+		t.Fatalf("did not expect repeated detail toggles to poison the next append, got status=%q", m.transientStatus)
 	}
 }
 
@@ -2007,7 +2046,7 @@ func TestNativeHistorySnapshotReplaysDuringContinuityRecovery(t *testing.T) {
 	}
 }
 
-func TestNativeHistorySnapshotReplaysDuringAuthoritativeHydrateRepair(t *testing.T) {
+func TestNativeHistorySnapshotRebasesDuringAuthoritativeHydrateWithoutReplay(t *testing.T) {
 	m := newProjectedStaticUIModel()
 	m.termWidth = 80
 	m.windowSizeKnown = true
@@ -2025,26 +2064,24 @@ func TestNativeHistorySnapshotReplaysDuringAuthoritativeHydrateRepair(t *testing
 
 	cmd := m.emitCurrentNativeHistorySnapshot(false, nativeHistoryReplayPermitAuthoritativeHydrate)
 	if cmd == nil {
-		t.Fatal("expected authoritative hydrate repair to replay committed scrollback")
+		t.Fatal("expected authoritative hydrate divergence to surface status without replay")
 	}
 	msgs := collectCmdMessages(t, cmd)
-	if len(msgs) != 3 {
-		t.Fatalf("expected status timer plus clear-screen plus native history flush for authoritative hydrate repair, got %d message(s)", len(msgs))
+	if len(msgs) != 1 {
+		t.Fatalf("expected authoritative hydrate divergence to emit status only, got %d message(s)", len(msgs))
 	}
-	flush, ok := msgs[2].(nativeHistoryFlushMsg)
-	if !ok {
-		t.Fatalf("expected nativeHistoryFlushMsg as authoritative hydrate replay payload, got %T", msgs[2])
-	}
-	plain := stripANSIPreserve(flush.Text)
-	if !strings.Contains(plain, "commit/push") || !strings.Contains(plain, "after") || strings.Contains(plain, "before") {
-		t.Fatalf("expected authoritative hydrate replay to emit corrected transcript, got %q", plain)
+	if _, ok := msgs[0].(nativeHistoryFlushMsg); ok {
+		t.Fatalf("did not expect authoritative hydrate divergence to replay normal-buffer history, got %+v", msgs)
 	}
 	if m.transientStatus != nativeHistoryDivergenceStatusMessage || m.transientStatusKind != uiStatusNoticeError {
-		t.Fatalf("expected authoritative hydrate repair to surface divergence status, got status=%q kind=%v", m.transientStatus, m.transientStatusKind)
+		t.Fatalf("expected authoritative hydrate divergence to surface status, got status=%q kind=%v", m.transientStatus, m.transientStatusKind)
+	}
+	if got := stripANSIPreserve(m.nativeRenderedSnapshot); !strings.Contains(got, "commit/push") || !strings.Contains(got, "after") || strings.Contains(got, "before") {
+		t.Fatalf("expected authoritative hydrate divergence to rebase internal rendered snapshot, got %q", got)
 	}
 }
 
-func TestNativeHistorySnapshotAuthoritativeHydrateRepairDoesNotPanicInDebugMode(t *testing.T) {
+func TestNativeHistorySnapshotAuthoritativeHydrateDoesNotReplayInDebugMode(t *testing.T) {
 	m := newProjectedStaticUIModel(WithUIDebug(true))
 	m.termWidth = 80
 	m.windowSizeKnown = true
@@ -2062,22 +2099,20 @@ func TestNativeHistorySnapshotAuthoritativeHydrateRepairDoesNotPanicInDebugMode(
 
 	cmd := m.emitCurrentNativeHistorySnapshot(false, nativeHistoryReplayPermitAuthoritativeHydrate)
 	if cmd == nil {
-		t.Fatal("expected authoritative hydrate repair replay in debug mode")
+		t.Fatal("expected authoritative hydrate divergence status in debug mode")
 	}
 	msgs := collectCmdMessages(t, cmd)
-	if len(msgs) != 3 {
-		t.Fatalf("expected status plus clear-screen plus native history flush during debug authoritative hydrate repair, got %d message(s)", len(msgs))
+	if len(msgs) != 1 {
+		t.Fatalf("expected debug authoritative hydrate divergence to emit status only, got %d message(s)", len(msgs))
 	}
 	if m.transientStatus != nativeHistoryDivergenceStatusMessage || m.transientStatusKind != uiStatusNoticeError {
-		t.Fatalf("expected debug authoritative hydrate repair to surface divergence status, got status=%q kind=%v", m.transientStatus, m.transientStatusKind)
+		t.Fatalf("expected debug authoritative hydrate divergence to surface status, got status=%q kind=%v", m.transientStatus, m.transientStatusKind)
 	}
-	flush, ok := msgs[2].(nativeHistoryFlushMsg)
-	if !ok {
-		t.Fatalf("expected nativeHistoryFlushMsg as debug authoritative hydrate replay payload, got %T", msgs[2])
+	if _, ok := msgs[0].(nativeHistoryFlushMsg); ok {
+		t.Fatalf("did not expect debug authoritative hydrate divergence to replay normal-buffer history, got %+v", msgs)
 	}
-	plain := stripANSIPreserve(flush.Text)
-	if !strings.Contains(plain, "commit/push") || !strings.Contains(plain, "after") || strings.Contains(plain, "before") {
-		t.Fatalf("expected debug authoritative hydrate replay to emit corrected transcript, got %q", plain)
+	if got := stripANSIPreserve(m.nativeRenderedSnapshot); !strings.Contains(got, "commit/push") || !strings.Contains(got, "after") || strings.Contains(got, "before") {
+		t.Fatalf("expected debug authoritative hydrate divergence to rebase internal rendered snapshot, got %q", got)
 	}
 }
 
@@ -2118,7 +2153,7 @@ func TestNativeHistorySnapshotAppendsAcrossSlidingTailWindowWithoutReplay(t *tes
 	}
 }
 
-func TestModeRestoreReplayPermitOverridesEarlierAuthoritativeHydratePermit(t *testing.T) {
+func TestModeRestorePermitOverridesEarlierAuthoritativeHydratePermitWithoutReplay(t *testing.T) {
 	m := newProjectedStaticUIModel(
 		WithUIAlternateScreenPolicy(config.TUIAlternateScreenNever),
 		WithUIInitialTranscript([]UITranscriptEntry{{Role: "assistant", Text: "seed"}}),
@@ -2150,23 +2185,15 @@ func TestModeRestoreReplayPermitOverridesEarlierAuthoritativeHydratePermit(t *te
 	if m.view.Mode() != tui.ModeOngoing {
 		t.Fatalf("expected ongoing mode, got %q", m.view.Mode())
 	}
-	if leaveCmd == nil {
-		t.Fatal("expected detail exit to restore committed normal-buffer history")
+	if leaveCmd != nil {
+		t.Fatalf("expected mode-restore to rebase without replay, got %T", leaveCmd())
 	}
-	msgs := collectCmdMessages(t, leaveCmd)
-	if len(msgs) != 2 {
-		t.Fatalf("expected clear-screen plus native history flush for mode-restore replay, got %d message(s)", len(msgs))
-	}
-	flush, ok := msgs[1].(nativeHistoryFlushMsg)
-	if !ok {
-		t.Fatalf("expected nativeHistoryFlushMsg as mode-restore replay payload, got %T", msgs[1])
-	}
-	plain := stripANSIText(flush.Text)
+	plain := stripANSIText(m.nativeRenderedSnapshot)
 	if !strings.Contains(plain, "fresh root") || !strings.Contains(plain, "rewritten tail") || strings.Contains(plain, "seed") {
-		t.Fatalf("expected mode-restore replay to emit authoritative transcript, got %q", plain)
+		t.Fatalf("expected mode-restore to update rendered baseline, got %q", plain)
 	}
 	if m.transientStatus == nativeHistoryDivergenceStatusMessage {
-		t.Fatalf("did not expect authoritative-hydrate warning to win after mode-restore replay, got status=%q", m.transientStatus)
+		t.Fatalf("did not expect authoritative-hydrate warning to win after mode-restore rebase, got status=%q", m.transientStatus)
 	}
 }
 

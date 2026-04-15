@@ -68,19 +68,9 @@ func TranscriptEntriesFromEvent(evt Event) []ChatEntry {
 		}
 		return []ChatEntry{{Role: "reviewer_status", Text: reviewerStatusText(*evt.Reviewer, nil)}}
 	case EventCompactionCompleted:
-		if evt.Compaction == nil {
-			return nil
-		}
-		return []ChatEntry{{Role: "compaction_notice", Text: fmt.Sprintf("context compacted for the %s time", ordinal(evt.Compaction.Count))}}
+		return nil
 	case EventCompactionFailed:
-		if evt.Compaction == nil {
-			return nil
-		}
-		message := fmt.Sprintf("Context compaction failed (%s): %s", evt.Compaction.Mode, evt.Compaction.Error)
-		if strings.TrimSpace(evt.Compaction.Error) == "" {
-			message = fmt.Sprintf("Context compaction failed (%s).", evt.Compaction.Mode)
-		}
-		return []ChatEntry{{Role: "error", Text: message}}
+		return nil
 	case EventInFlightClearFailed:
 		if strings.TrimSpace(evt.Error) == "" {
 			return nil

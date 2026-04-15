@@ -14,6 +14,7 @@ const (
 	EventConversationUpdated EventKind = "conversation_updated"
 	EventAssistantDelta      EventKind = "assistant_delta"
 	EventAssistantDeltaReset EventKind = "assistant_delta_reset"
+	EventOngoingErrorUpdated EventKind = "ongoing_error_updated"
 	EventReasoningDelta      EventKind = "reasoning_delta"
 	EventReasoningDeltaReset EventKind = "reasoning_delta_reset"
 	EventAssistantMessage    EventKind = "assistant_message"
@@ -38,23 +39,24 @@ const (
 )
 
 type Event struct {
-	Kind                   EventKind
-	StepID                 string
-	RecoveryCause          TranscriptRecoveryCause
-	TranscriptRevision     int64
-	CommittedEntryCount    int
-	CommittedEntryStart    int
-	CommittedEntryStartSet bool
-	Error                  string
-	AssistantDelta         string
-	ReasoningDelta         *ReasoningDelta
-	UserMessage            string
-	UserMessageBatch       []string
-	TranscriptEntries      []ChatEntry
-	CacheWarning           *cachewarn.Warning
-	CacheWarningVisibility EntryVisibility
-	RunState               *RunState
-	Background             *BackgroundShellEvent
+	Kind                       EventKind
+	StepID                     string
+	RecoveryCause              TranscriptRecoveryCause
+	CommittedTranscriptChanged bool
+	TranscriptRevision         int64
+	CommittedEntryCount        int
+	CommittedEntryStart        int
+	CommittedEntryStartSet     bool
+	Error                      string
+	AssistantDelta             string
+	ReasoningDelta             *ReasoningDelta
+	UserMessage                string
+	UserMessageBatch           []string
+	TranscriptEntries          []ChatEntry
+	CacheWarning               *cachewarn.Warning
+	CacheWarningVisibility     EntryVisibility
+	RunState                   *RunState
+	Background                 *BackgroundShellEvent
 }
 
 type ReasoningDelta struct {
@@ -111,11 +113,13 @@ const (
 )
 
 type TranscriptPageRequest struct {
-	Offset   int
-	Limit    int
-	Page     int
-	PageSize int
-	Window   TranscriptWindow
+	Offset                   int
+	Limit                    int
+	Page                     int
+	PageSize                 int
+	Window                   TranscriptWindow
+	KnownRevision            int64
+	KnownCommittedEntryCount int
 }
 
 type TranscriptPage struct {

@@ -108,6 +108,12 @@ func RequestFields(req clientui.TranscriptPageRequest) map[string]string {
 	if req.PageSize != 0 {
 		fields["page_size"] = strconv.Itoa(req.PageSize)
 	}
+	if req.KnownRevision != 0 {
+		fields["known_revision"] = strconv.FormatInt(req.KnownRevision, 10)
+	}
+	if req.KnownCommittedEntryCount != 0 {
+		fields["known_committed_entry_count"] = strconv.Itoa(req.KnownCommittedEntryCount)
+	}
 	return fields
 }
 

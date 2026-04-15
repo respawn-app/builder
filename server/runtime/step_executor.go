@@ -16,20 +16,21 @@ type defaultStepExecutor struct {
 	tools    toolExecutor
 }
 
-func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID string, options stepLoopOptions) (llm.Message, bool, bool, error) {
+func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID string, options stepLoopOptions) (stepLoopResult, error) {
 	e := s.engine
 	executedToolCall := false
 	patchEditsApplied := false
 	deferredFinal := llm.Message{}
+	deferredFinalCommittedStart := -1
 	hasDeferredFinal := false
 	for {
 		if err := s.prepareModelTurn(ctx, stepID); err != nil {
-			return llm.Message{}, executedToolCall, false, err
+			return stepLoopResult{}, err
 		}
 
 		req, err := e.buildRequest(ctx, stepID, true)
 		if err != nil {
-			return llm.Message{}, executedToolCall, false, err
+			return stepLoopResult{}, err
 		}
 
 		resp, err := e.generateWithRetry(
@@ -44,17 +45,14 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 				e.emit(Event{Kind: EventReasoningDelta, StepID: stepID, ReasoningDelta: &delta})
 			},
 			func() {
-				e.chat.clearOngoing()
-				e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
-				e.emit(Event{Kind: EventAssistantDeltaReset, StepID: stepID})
-				e.emit(Event{Kind: EventReasoningDeltaReset, StepID: stepID})
+				e.clearStreamingAssistantState(stepID)
 			},
 		)
 		if err != nil {
-			return llm.Message{}, executedToolCall, false, err
+			return stepLoopResult{}, err
 		}
 		if err := e.recordLastUsage(resp.Usage); err != nil {
-			return llm.Message{}, executedToolCall, false, err
+			return stepLoopResult{}, err
 		}
 
 		localToolCalls := append([]llm.ToolCall(nil), resp.ToolCalls...)
@@ -68,9 +66,11 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 		localToolCalls = phaseTurn.LocalToolCalls
 		hostedToolExecutions = phaseTurn.HostedToolExecutions
 		noopFinalAnswer := isNoopFinalAnswer(assistantMsg)
+		assistantCommittedStart := -1
 		if noopFinalAnswer {
 			e.clearStreamingAssistantState(stepID)
 		}
+
 		if !noopFinalAnswer {
 			e.emit(Event{
 				Kind:   EventModelResponse,
@@ -83,11 +83,8 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 					OutputItemTypes:  summarizeOutputItemTypes(resp.OutputItems),
 				},
 			})
-		}
-
-		if !noopFinalAnswer {
 			if err := e.appendAssistantMessage(stepID, assistantMsg); err != nil {
-				return llm.Message{}, executedToolCall, false, err
+				return stepLoopResult{}, err
 			}
 			executableCallIDs := make(map[string]struct{}, len(localToolCalls))
 			for _, call := range localToolCalls {
@@ -95,79 +92,78 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 					executableCallIDs[callID] = struct{}{}
 				}
 			}
-			assistantCommittedStart, toolCallStarts := committedStartsForPersistedAssistantMessage(e, assistantMsg, executableCallIDs)
+			toolCallStarts := map[string]int(nil)
+			assistantCommittedStart, toolCallStarts = committedStartsForPersistedAssistantMessage(e, assistantMsg, executableCallIDs)
 			e.rememberPendingToolCallStarts(toolCallStarts)
 			if liveAssistant, ok := liveCommittedAssistantEventMessage(assistantMsg); ok && options.EmitAssistantEvent {
 				e.emit(Event{
-					Kind:                   EventAssistantMessage,
-					StepID:                 stepID,
-					Message:                liveAssistant,
-					CommittedEntryStart:    assistantCommittedStart,
-					CommittedEntryStartSet: assistantCommittedStart >= 0,
+					Kind:                       EventAssistantMessage,
+					StepID:                     stepID,
+					Message:                    liveAssistant,
+					CommittedTranscriptChanged: true,
+					CommittedEntryStart:        assistantCommittedStart,
+					CommittedEntryStartSet:     assistantCommittedStart >= 0,
 				})
 			}
 			if err := e.appendReasoningEntries(stepID, resp.Reasoning); err != nil {
-				return llm.Message{}, executedToolCall, false, err
+				return stepLoopResult{}, err
 			}
 			if phaseTurn.MissingAssistantPhase {
 				if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: missingAssistantPhaseWarning}); err != nil {
-					return llm.Message{}, executedToolCall, false, err
+					return stepLoopResult{}, err
 				}
 			}
 			if phaseTurn.FinalAnswerIncludedToolCalls {
 				if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: finalWithToolCallsIgnoredWarning}); err != nil {
-					return llm.Message{}, executedToolCall, false, err
+					return stepLoopResult{}, err
 				}
 			}
 		}
 
 		for _, hosted := range hostedToolExecutions {
 			if err := e.persistToolCompletion(stepID, hosted.Result); err != nil {
-				return llm.Message{}, executedToolCall, false, err
+				return stepLoopResult{}, err
 			}
-			msg := llm.Message{
-				Role:       llm.RoleTool,
-				Content:    string(hosted.Result.Output),
-				ToolCallID: hosted.Result.CallID,
-				Name:       string(hosted.Result.Name),
-			}
+			msg := llm.Message{Role: llm.RoleTool, Content: string(hosted.Result.Output), ToolCallID: hosted.Result.CallID, Name: string(hosted.Result.Name)}
 			if err := e.appendMessage(stepID, msg); err != nil {
-				return llm.Message{}, executedToolCall, false, err
+				return stepLoopResult{}, err
 			}
 		}
 
 		if len(localToolCalls) == 0 {
 			if phaseTurn.MissingAssistantPhase {
 				if _, err := s.messages.FlushPendingUserInjections(stepID); err != nil {
-					return llm.Message{}, executedToolCall, false, err
+					return stepLoopResult{}, err
 				}
 				continue
 			}
 			if phaseTurn.EnforcePhaseProtocol && assistantMsg.Phase != llm.MessagePhaseFinal {
 				if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: commentaryWithoutToolCallsWarning}); err != nil {
-					return llm.Message{}, executedToolCall, false, err
+					return stepLoopResult{}, err
 				}
 				if _, err := s.messages.FlushPendingUserInjections(stepID); err != nil {
-					return llm.Message{}, executedToolCall, false, err
+					return stepLoopResult{}, err
 				}
 				continue
 			}
 			if phaseTurn.EnforcePhaseProtocol && assistantMsg.Phase == llm.MessagePhaseFinal && strings.TrimSpace(assistantMsg.Content) == "" && !noopFinalAnswer {
 				if err := e.appendMessage(stepID, llm.Message{Role: llm.RoleDeveloper, MessageType: llm.MessageTypeErrorFeedback, Content: finalWithoutContentWarning}); err != nil {
-					return llm.Message{}, executedToolCall, false, err
+					return stepLoopResult{}, err
 				}
 				if _, err := s.messages.FlushPendingUserInjections(stepID); err != nil {
-					return llm.Message{}, executedToolCall, false, err
+					return stepLoopResult{}, err
 				}
 				continue
 			}
+
 			flushed, err := s.messages.FlushPendingUserInjections(stepID)
 			if err != nil {
-				return llm.Message{}, executedToolCall, false, err
+				return stepLoopResult{}, err
 			}
 			if flushed > 0 {
 				if assistantMsg.Phase == llm.MessagePhaseFinal && strings.TrimSpace(assistantMsg.Content) != "" && !noopFinalAnswer {
 					deferredFinal = assistantMsg
+					deferredFinalCommittedStart = assistantCommittedStart
 					hasDeferredFinal = true
 				}
 				continue
@@ -175,60 +171,62 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 			if len(hostedToolExecutions) > 0 {
 				continue
 			}
+
 			resolved := assistantMsg
 			resolvedNoopFinalAnswer := noopFinalAnswer
+			resolvedCommittedStart := assistantCommittedStart
+			resolvedCommittedStartSet := assistantCommittedStart >= 0
 			var reviewerCompletion *ReviewerStatus
 			if hasDeferredFinal {
 				resolved = deferredFinal
 				resolvedNoopFinalAnswer = isNoopFinalAnswer(resolved)
+				resolvedCommittedStart = deferredFinalCommittedStart
+				resolvedCommittedStartSet = deferredFinalCommittedStart >= 0
 				hasDeferredFinal = false
+				deferredFinalCommittedStart = -1
 			}
 			if resolvedNoopFinalAnswer {
-				return resolved, executedToolCall, true, nil
+				return stepLoopResult{Message: resolved, ExecutedToolCall: executedToolCall, NoopFinalAnswer: true, AssistantCommittedStart: resolvedCommittedStart, AssistantCommittedStartSet: resolvedCommittedStartSet}, nil
 			}
+
 			effectiveReviewerFrequency := options.ReviewerFrequency
 			effectiveReviewerClient := options.ReviewerClient
 			if options.RefreshReviewerConfigOnResolve {
 				effectiveReviewerFrequency, effectiveReviewerClient = e.reviewerTurnConfigSnapshot()
 			}
 			if s.reviewer.ShouldRunTurn(effectiveReviewerFrequency, effectiveReviewerClient, patchEditsApplied) {
-				reviewed, err := s.reviewer.RunFollowUp(ctx, stepID, resolved, effectiveReviewerClient)
+				reviewed, err := s.reviewer.RunFollowUp(ctx, stepID, resolved, resolvedCommittedStart, resolvedCommittedStartSet, effectiveReviewerClient)
 				if err == nil {
 					resolved = reviewed.Message
 					reviewerCompletion = reviewed.Completion
+					resolvedCommittedStart = reviewed.AssistantCommittedStart
+					resolvedCommittedStartSet = reviewed.AssistantCommittedStartSet
 				}
 			}
 			if options.EmitAssistantEvent {
-				e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: resolved})
+				e.emit(Event{Kind: EventAssistantMessage, StepID: stepID, Message: resolved, CommittedTranscriptChanged: true, CommittedEntryStart: resolvedCommittedStart, CommittedEntryStartSet: resolvedCommittedStartSet})
 			}
 			if reviewerCompletion != nil {
-				e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: reviewerCompletion})
+				e.emit(Event{Kind: EventReviewerCompleted, StepID: stepID, Reviewer: reviewerCompletion, CommittedTranscriptChanged: true})
 			}
-			return resolved, executedToolCall, false, nil
+			return stepLoopResult{Message: resolved, ExecutedToolCall: executedToolCall, AssistantCommittedStart: resolvedCommittedStart, AssistantCommittedStartSet: resolvedCommittedStartSet}, nil
 		}
 
 		results, err := s.tools.ExecuteToolCalls(ctx, stepID, localToolCalls)
 		if err != nil {
-			return llm.Message{}, executedToolCall, false, err
+			return stepLoopResult{}, err
 		}
-
 		for _, result := range results {
 			if result.Name == tools.ToolPatch && !result.IsError {
 				patchEditsApplied = true
 			}
-			msg := llm.Message{
-				Role:       llm.RoleTool,
-				Content:    string(result.Output),
-				ToolCallID: result.CallID,
-				Name:       string(result.Name),
-			}
+			msg := llm.Message{Role: llm.RoleTool, Content: string(result.Output), ToolCallID: result.CallID, Name: string(result.Name)}
 			if err := e.appendMessage(stepID, msg); err != nil {
-				return llm.Message{}, executedToolCall, false, err
+				return stepLoopResult{}, err
 			}
 		}
-
 		if _, err := s.messages.FlushPendingUserInjections(stepID); err != nil {
-			return llm.Message{}, executedToolCall, false, err
+			return stepLoopResult{}, err
 		}
 	}
 }

@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -86,20 +87,42 @@ type runtimeMainViewRefreshedMsg struct {
 type runtimeTranscriptRefreshedMsg struct {
 	token         uint64
 	req           clientui.TranscriptPageRequest
+	syncCause     runtimeTranscriptSyncCause
 	transcript    clientui.TranscriptPage
 	recoveryCause clientui.TranscriptRecoveryCause
 	err           error
 }
 
 type runtimeTranscriptRetryMsg struct {
+	syncCause     runtimeTranscriptSyncCause
 	token         uint64
 	recoveryCause clientui.TranscriptRecoveryCause
 }
+
+type runtimeTranscriptSyncCause string
+
+const (
+	runtimeTranscriptSyncCauseBootstrap               runtimeTranscriptSyncCause = "bootstrap"
+	runtimeTranscriptSyncCauseCommittedConversation   runtimeTranscriptSyncCause = "committed_conversation_updated"
+	runtimeTranscriptSyncCauseCommittedGap            runtimeTranscriptSyncCause = "committed_gap"
+	runtimeTranscriptSyncCauseQueuedDrain             runtimeTranscriptSyncCause = "queued_drain"
+	runtimeTranscriptSyncCauseDirtyFollowUp           runtimeTranscriptSyncCause = "dirty_follow_up"
+	runtimeTranscriptSyncCauseContinuityRecovery      runtimeTranscriptSyncCause = "continuity_recovery"
+	runtimeTranscriptSyncCauseManualTranscriptRefresh runtimeTranscriptSyncCause = "manual_transcript_refresh"
+)
 
 type detailTranscriptLoadMsg struct{}
 
 type renderDiagnosticMsg struct {
 	diagnostic tui.RenderDiagnostic
+}
+
+type deferredProjectedTranscriptTail struct {
+	rangeStart int
+	rangeEnd   int
+	revision   int64
+	entries    []clientui.ChatEntry
+	pending    []string
 }
 
 type nativeHistoryReplayPermit uint8
@@ -490,6 +513,7 @@ type uiModel struct {
 	transcriptBaseOffset                int
 	transcriptTotalEntries              int
 	transcriptRevision                  int64
+	deferredCommittedTail               []deferredProjectedTranscriptTail
 	runtimeDisconnected                 bool
 	transcriptLiveDirty                 bool
 	reasoningLiveDirty                  bool
@@ -610,7 +634,7 @@ func NewProjectedUIModel(runtimeClient clientui.RuntimeClient, runtimeEvents <-c
 		seedView := m.runtimeMainView().Session
 		_ = m.runtimeAdapter().applyProjectedSessionMetadata(seedView)
 		_ = m.runtimeAdapter().applyProjectedTranscriptPage(m.runtimeTranscript())
-		startupNativeHistoryCmd = m.requestRuntimeTranscriptSync()
+		startupNativeHistoryCmd = m.requestRuntimeBootstrapTranscriptSync()
 		m.runtimeTranscriptBusy = false
 	} else {
 		for _, entry := range m.initialTranscript {
@@ -688,6 +712,14 @@ func (m *uiModel) applyRunLoggerDiagnostic(diag runLoggerDiagnostic) tea.Cmd {
 
 func (m *uiModel) handleRuntimeEventBatch(events []clientui.Event) (*uiModel, tea.Cmd) {
 	flushSequenceBefore := m.nativeFlushSequence
+	m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.runtime_batch", map[string]string{
+		"session_id":             strings.TrimSpace(m.sessionID),
+		"mode":                   string(m.view.Mode()),
+		"event_count":            strconv.Itoa(len(events)),
+		"pending_runtime_events": strconv.Itoa(len(m.pendingRuntimeEvents)),
+		"wait_after_flush":       strconv.FormatUint(m.waitRuntimeEventAfterFlushSequence, 10),
+		"wait_after_hydration":   strconv.FormatBool(m.waitRuntimeEventAfterHydration),
+	}))
 	result := m.runtimeAdapter().applyProjectedRuntimeEventsBatch(events)
 	cmd := result.cmd
 	if !result.awaitsHydration {
@@ -695,10 +727,22 @@ func (m *uiModel) handleRuntimeEventBatch(events []clientui.Event) (*uiModel, te
 	}
 	m.syncViewport()
 	if result.awaitsHydration {
+		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.runtime_batch_pause", map[string]string{
+			"session_id":             strings.TrimSpace(m.sessionID),
+			"mode":                   string(m.view.Mode()),
+			"pending_runtime_events": strconv.Itoa(len(m.pendingRuntimeEvents)),
+			"native_flush_sequence":  strconv.FormatUint(m.nativeFlushSequence, 10),
+		}))
 		m.waitRuntimeEventAfterHydration = true
 	}
 	if m.nativeFlushSequence != flushSequenceBefore {
 		m.waitRuntimeEventAfterFlushSequence = m.nativeFlushSequence
+		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.runtime_batch_wait_flush", map[string]string{
+			"session_id":             strings.TrimSpace(m.sessionID),
+			"mode":                   string(m.view.Mode()),
+			"pending_runtime_events": strconv.Itoa(len(m.pendingRuntimeEvents)),
+			"native_flush_sequence":  strconv.FormatUint(m.nativeFlushSequence, 10),
+		}))
 		return m, cmd
 	}
 	if result.awaitsHydration {
@@ -712,6 +756,13 @@ func (m *uiModel) waitRuntimeEventCmd() tea.Cmd {
 		return nil
 	}
 	if m.waitRuntimeEventAfterFlushSequence != 0 || m.waitRuntimeEventAfterHydration {
+		m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.wait_runtime_event_blocked", map[string]string{
+			"session_id":             strings.TrimSpace(m.sessionID),
+			"mode":                   string(m.view.Mode()),
+			"pending_runtime_events": strconv.Itoa(len(m.pendingRuntimeEvents)),
+			"wait_after_flush":       strconv.FormatUint(m.waitRuntimeEventAfterFlushSequence, 10),
+			"wait_after_hydration":   strconv.FormatBool(m.waitRuntimeEventAfterHydration),
+		}))
 		return nil
 	}
 	if len(m.pendingRuntimeEvents) == 0 {
@@ -719,6 +770,12 @@ func (m *uiModel) waitRuntimeEventCmd() tea.Cmd {
 	}
 	evt := m.pendingRuntimeEvents[0]
 	m.pendingRuntimeEvents = append([]clientui.Event(nil), m.pendingRuntimeEvents[1:]...)
+	m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.wait_runtime_event_resume_pending", map[string]string{
+		"session_id":             strings.TrimSpace(m.sessionID),
+		"mode":                   string(m.view.Mode()),
+		"kind":                   string(evt.Kind),
+		"pending_runtime_events": strconv.Itoa(len(m.pendingRuntimeEvents)),
+	}))
 	return func() tea.Msg {
 		return runtimeEventBatchMsg{events: []clientui.Event{evt}}
 	}
@@ -846,6 +903,12 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleRuntimeEventBatch([]clientui.Event{msg.event})
 	case runtimeEventBatchMsg:
 		if msg.carry != nil {
+			m.logTranscriptDiag(transcriptdiag.FormatLine("transcript.diag.client.runtime_batch_carry", map[string]string{
+				"session_id":             strings.TrimSpace(m.sessionID),
+				"mode":                   string(m.view.Mode()),
+				"kind":                   string(msg.carry.Kind),
+				"pending_runtime_events": strconv.Itoa(len(m.pendingRuntimeEvents) + 1),
+			}))
 			m.pendingRuntimeEvents = append([]clientui.Event{*msg.carry}, m.pendingRuntimeEvents...)
 		}
 		return m.handleRuntimeEventBatch(msg.events)
@@ -866,12 +929,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncViewport()
 			return m, nil
 		}
-		var cmd tea.Cmd
-		if msg.recoveryCause != clientui.TranscriptRecoveryCauseNone {
-			cmd = m.requestRuntimeTranscriptSyncForContinuityLoss(msg.recoveryCause)
-		} else {
-			cmd = m.requestRuntimeTranscriptSync()
-		}
+		cmd := m.startRuntimeTranscriptPageRequest(m.transcriptRequestForCurrentMode(), false, msg.syncCause, msg.recoveryCause)
 		m.syncViewport()
 		return m, cmd
 	case detailTranscriptLoadMsg:

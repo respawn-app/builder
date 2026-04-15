@@ -82,6 +82,48 @@ func TestReduceRuntimeEvent_RunStateStartedDoesNotRequestTranscriptSync(t *testi
 	}
 }
 
+func TestReduceRuntimeEvent_ConversationUpdatedRequiresExplicitCommittedAdvanceOrRecovery(t *testing.T) {
+	plain := ReduceRuntimeEvent(
+		RuntimeEventState{},
+		PendingInputState{},
+		false,
+		Event{Kind: EventConversationUpdated},
+	)
+	if plain.SyncSessionView {
+		t.Fatal("did not expect plain conversation_updated to request transcript sync")
+	}
+	committed := ReduceRuntimeEvent(
+		RuntimeEventState{},
+		PendingInputState{},
+		false,
+		Event{Kind: EventConversationUpdated, CommittedTranscriptChanged: true},
+	)
+	if !committed.SyncSessionView {
+		t.Fatal("expected committed conversation_updated to request transcript sync")
+	}
+	recovery := ReduceRuntimeEvent(
+		RuntimeEventState{},
+		PendingInputState{},
+		false,
+		Event{Kind: EventConversationUpdated, RecoveryCause: TranscriptRecoveryCauseStreamGap},
+	)
+	if !recovery.SyncSessionView {
+		t.Fatal("expected recovery conversation_updated to request transcript sync")
+	}
+}
+
+func TestReduceRuntimeEvent_OngoingErrorUpdatedRequestsSessionSync(t *testing.T) {
+	update := ReduceRuntimeEvent(
+		RuntimeEventState{},
+		PendingInputState{},
+		false,
+		Event{Kind: EventOngoingErrorUpdated},
+	)
+	if !update.SyncSessionView {
+		t.Fatal("expected ongoing_error_updated to request transcript sync")
+	}
+}
+
 func TestReduceRuntimeEvent_BackgroundCompletionProducesNotice(t *testing.T) {
 	update := ReduceRuntimeEvent(
 		RuntimeEventState{},

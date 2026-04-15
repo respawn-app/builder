@@ -95,3 +95,39 @@ func TestTranscriptEntriesFromEventEmitsVisibleToolCompletionEntriesForOrdinaryA
 		})
 	}
 }
+
+func TestTranscriptEntriesFromEventOmitsPrePersistCompactionStatusRows(t *testing.T) {
+	testCases := []struct {
+		name string
+		evt  Event
+	}{
+		{
+			name: "compaction completed",
+			evt: Event{
+				Kind: EventCompactionCompleted,
+				Compaction: &CompactionStatus{
+					Mode:  "auto",
+					Count: 1,
+				},
+			},
+		},
+		{
+			name: "compaction failed",
+			evt: Event{
+				Kind: EventCompactionFailed,
+				Compaction: &CompactionStatus{
+					Mode:  "manual",
+					Error: "quota exceeded",
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if entries := TranscriptEntriesFromEvent(tc.evt); len(entries) != 0 {
+				t.Fatalf("expected no transcript entries for pre-persist compaction status, got %+v", entries)
+			}
+		})
+	}
+}

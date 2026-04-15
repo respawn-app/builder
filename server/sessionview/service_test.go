@@ -239,6 +239,39 @@ func TestServiceGetSessionTranscriptPageUsesLiveRuntimeWhenAttached(t *testing.T
 	}
 }
 
+func TestServiceGetSessionTranscriptPageUsesIncrementalOngoingTailForDormantSession(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	for i := 0; i < 600; i++ {
+		if _, err := store.AppendEvent("step-1", "message", llm.Message{Role: llm.RoleAssistant, Content: fmt.Sprintf("reply-%03d", i), Phase: llm.MessagePhaseFinal}); err != nil {
+			t.Fatalf("append message %d: %v", i, err)
+		}
+	}
+
+	svc := NewService(NewStaticSessionResolver(store), nil, nil)
+	resp, err := svc.GetSessionTranscriptPage(context.Background(), serverapi.SessionTranscriptPageRequest{
+		SessionID:                store.Meta().SessionID,
+		Window:                   clientui.TranscriptWindowOngoingTail,
+		KnownRevision:            store.Meta().LastSequence - 1,
+		KnownCommittedEntryCount: 590,
+	})
+	if err != nil {
+		t.Fatalf("get incremental dormant transcript page: %v", err)
+	}
+	if got := resp.Transcript.Offset; got != 558 {
+		t.Fatalf("offset = %d, want 558", got)
+	}
+	if got := len(resp.Transcript.Entries); got != 42 {
+		t.Fatalf("entry count = %d, want 42", got)
+	}
+	if got := resp.Transcript.Entries[0].Text; got != "reply-558" {
+		t.Fatalf("first entry = %q, want reply-558", got)
+	}
+}
+
 func TestServiceGetSessionTranscriptPageSupportsPagination(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

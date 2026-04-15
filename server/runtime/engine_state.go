@@ -114,7 +114,7 @@ func (e *Engine) AppendLocalEntryWithOngoingText(role, text, ongoingText string)
 	}
 	e.chat.appendLocalEntryWithOngoingTextAndVisibility(entry.Role, entry.Text, entry.OngoingText, entry.Visibility)
 	e.emit(Event{Kind: EventLocalEntryAdded, LocalEntry: localEntryChatEntry(entry)})
-	e.emit(Event{Kind: EventConversationUpdated, StepID: ""})
+	e.emitConversationUpdated("")
 }
 
 func (e *Engine) RecordPromptHistory(text string) error {
@@ -128,12 +128,12 @@ func (e *Engine) RecordPromptHistory(text string) error {
 
 func (e *Engine) SetOngoingError(text string) {
 	e.chat.setOngoingError(text)
-	e.emit(Event{Kind: EventConversationUpdated, StepID: ""})
+	e.emit(Event{Kind: EventOngoingErrorUpdated})
 }
 
 func (e *Engine) ClearOngoingError() {
 	e.chat.clearOngoingError()
-	e.emit(Event{Kind: EventConversationUpdated, StepID: ""})
+	e.emit(Event{Kind: EventOngoingErrorUpdated})
 }
 
 func (e *Engine) SetSessionName(name string) error {
@@ -597,6 +597,14 @@ func (e *Engine) emit(evt Event) {
 	if e.cfg.OnEvent != nil {
 		e.cfg.OnEvent(evt)
 	}
+}
+
+func (e *Engine) emitConversationUpdated(stepID string) {
+	e.emit(Event{Kind: EventConversationUpdated, StepID: stepID})
+}
+
+func (e *Engine) emitCommittedTranscriptAdvanced(stepID string) {
+	e.emit(Event{Kind: EventConversationUpdated, StepID: stepID, CommittedTranscriptChanged: true})
 }
 
 func eventMayInferCommittedEntryStart(kind EventKind) bool {
