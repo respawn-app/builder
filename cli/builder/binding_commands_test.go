@@ -176,6 +176,24 @@ func TestAttachSubcommandWithoutProjectGuidanceFailsWhenCurrentWorkspaceUnregist
 	}
 }
 
+func TestAttachSubcommandRejectsUnknownExplicitProjectIDCleanly(t *testing.T) {
+	home := t.TempDir()
+	target := t.TempDir()
+	t.Setenv("HOME", home)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := attachSubcommand([]string{"--project", "project-missing", target}, &stdout, &stderr); code != 1 {
+		t.Fatalf("exit code = %d, want 1 stderr=%q", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if got := stderr.String(); !bytes.Contains([]byte(got), []byte("does not exist in this Builder state")) || !bytes.Contains([]byte(got), []byte("project-missing")) {
+		t.Fatalf("stderr = %q, want missing project guidance", got)
+	}
+}
+
 func TestRebindSubcommandPreservesWorkspaceIdentity(t *testing.T) {
 	home := t.TempDir()
 	oldWorkspace := t.TempDir()

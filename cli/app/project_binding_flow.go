@@ -478,7 +478,11 @@ func ensureInteractiveProjectBinding(ctx context.Context, server embeddedServer)
 		if strings.TrimSpace(server.ProjectID()) == projectID {
 			return server, nil
 		}
-		return server.BindProject(ctx, projectID)
+		bound, bindErr := server.BindProject(ctx, projectID)
+		if bindErr != nil {
+			return nil, formatProjectBindingStartupError(workspaceRoot, projectID, bindErr)
+		}
+		return bound, nil
 	}
 	projects, err := server.ProjectViewClient().ListProjects(ctx, serverapi.ProjectListRequest{})
 	if err != nil {
@@ -499,18 +503,26 @@ func ensureInteractiveProjectBinding(ctx context.Context, server embeddedServer)
 		}
 		created, err := server.ProjectViewClient().CreateProject(ctx, serverapi.ProjectCreateRequest{DisplayName: projectName, WorkspaceRoot: workspaceRoot})
 		if err != nil {
-			return nil, err
+			return nil, formatProjectBindingMutationError(workspaceRoot, "", err)
 		}
-		return server.BindProject(ctx, created.Binding.ProjectID)
+		bound, bindErr := server.BindProject(ctx, created.Binding.ProjectID)
+		if bindErr != nil {
+			return nil, formatProjectBindingStartupError(workspaceRoot, created.Binding.ProjectID, bindErr)
+		}
+		return bound, nil
 	}
 	if picked.Project == nil {
 		return nil, errors.New("no project selected")
 	}
 	attached, err := server.ProjectViewClient().AttachWorkspaceToProject(ctx, serverapi.ProjectAttachWorkspaceRequest{ProjectID: picked.Project.ProjectID, WorkspaceRoot: workspaceRoot})
 	if err != nil {
-		return nil, err
+		return nil, formatProjectBindingMutationError(workspaceRoot, picked.Project.ProjectID, err)
 	}
-	return server.BindProject(ctx, attached.Binding.ProjectID)
+	bound, bindErr := server.BindProject(ctx, attached.Binding.ProjectID)
+	if bindErr != nil {
+		return nil, formatProjectBindingStartupError(workspaceRoot, attached.Binding.ProjectID, bindErr)
+	}
+	return bound, nil
 }
 
 func headerInsetFromRenderedHeader(rendered string) string {
