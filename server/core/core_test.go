@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"builder/server/auth"
@@ -189,6 +190,65 @@ func TestSessionLaunchClientForProjectWorkspaceRejectsUnavailableProjectRoot(t *
 		t.Fatalf("expected ProjectUnavailableError, got %v", err)
 	}
 	if unavailable.ProjectID != binding.ProjectID || unavailable.Availability != clientui.ProjectAvailabilityMissing {
+		t.Fatalf("unexpected unavailable project: %+v", unavailable)
+	}
+}
+
+func TestSessionLaunchClientForProjectWorkspaceRejectsInaccessibleProjectRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission-based inaccessible path assertion is platform-specific")
+	}
+	home := t.TempDir()
+	lockedParent := filepath.Join(t.TempDir(), "locked-parent")
+	workspaceA := filepath.Join(lockedParent, "workspace-a")
+	workspaceB := t.TempDir()
+	if err := os.MkdirAll(workspaceA, 0o755); err != nil {
+		t.Fatalf("MkdirAll workspaceA: %v", err)
+	}
+	t.Setenv("HOME", home)
+
+	resolvedA, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspaceA})
+	if err != nil {
+		t.Fatalf("ResolveConfig A: %v", err)
+	}
+	binding, err := metadata.RegisterBinding(context.Background(), resolvedA.Config.PersistenceRoot, resolvedA.Config.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("RegisterBinding: %v", err)
+	}
+	if err := os.Chmod(lockedParent, 0o000); err != nil {
+		t.Fatalf("Chmod lockedParent: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(lockedParent, 0o755) })
+
+	resolvedB, err := serverbootstrap.ResolveConfig(serverbootstrap.Request{WorkspaceRoot: workspaceB})
+	if err != nil {
+		t.Fatalf("ResolveConfig B: %v", err)
+	}
+	authSupport, err := serverbootstrap.BuildAuthSupport(auth.NewMemoryStore(auth.EmptyState()), nil, nil)
+	if err != nil {
+		t.Fatalf("BuildAuthSupport: %v", err)
+	}
+	runtimeSupport, err := serverbootstrap.BuildRuntimeSupport(resolvedB.Config)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSupport: %v", err)
+	}
+	t.Cleanup(func() { _ = runtimeSupport.Background.Close() })
+
+	appCore, err := New(resolvedB.Config, authSupport, runtimeSupport)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = appCore.Close() })
+
+	_, err = appCore.SessionLaunchClientForProjectWorkspace(context.Background(), binding.ProjectID, workspaceB)
+	if !errors.Is(err, metadata.ErrProjectUnavailable) {
+		t.Fatalf("SessionLaunchClientForProjectWorkspace error = %v, want ErrProjectUnavailable", err)
+	}
+	unavailable, ok := metadata.AsProjectUnavailable(err)
+	if !ok {
+		t.Fatalf("expected ProjectUnavailableError, got %v", err)
+	}
+	if unavailable.ProjectID != binding.ProjectID || unavailable.Availability != clientui.ProjectAvailabilityInaccessible {
 		t.Fatalf("unexpected unavailable project: %+v", unavailable)
 	}
 }
