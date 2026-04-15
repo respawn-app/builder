@@ -643,32 +643,32 @@ func (e *Engine) compactNow(ctx context.Context, stepID string, mode compactionM
 		result, err = e.compactLocal(ctx, input, providerID, instructions)
 	}
 	if err != nil {
-		_ = e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
-		return compactionResult{}, err
+		statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
+		return compactionResult{}, errors.Join(err, statusErr)
 	}
 
 	if len(result.items) == 0 {
 		err := errors.New("compaction returned empty replacement history")
-		_ = e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
-		return compactionResult{}, err
+		statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
+		return compactionResult{}, errors.Join(err, statusErr)
 	}
 
 	if err := e.replaceHistory(stepID, result.engine, mode, result.items); err != nil {
-		_ = e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
-		return compactionResult{}, err
+		statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
+		return compactionResult{}, errors.Join(err, statusErr)
 	}
 	if strings.TrimSpace(result.summary) != "" {
 		summary := strings.TrimSpace(result.summary)
 		if err := e.appendPersistedLocalEntry(stepID, "compaction_summary", summary); err != nil {
-			_ = e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
-			return compactionResult{}, err
+			statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
+			return compactionResult{}, errors.Join(err, statusErr)
 		}
 	}
 	if mode == compactionModeManual {
 		if carryover := manualCompactionCarryoverMessage(manualCarryover); strings.TrimSpace(carryover.Content) != "" {
 			if err := e.appendMessage(stepID, carryover); err != nil {
-				_ = e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
-				return compactionResult{}, err
+				statusErr := e.emitCompactionStatus(stepID, EventCompactionFailed, mode, result.engine, providerID, result.trimmedItemsCount, 0, err.Error())
+				return compactionResult{}, errors.Join(err, statusErr)
 			}
 		}
 	}
