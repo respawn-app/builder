@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"builder/server/idempotency"
 	"builder/server/launch"
 	"builder/server/registry"
 	"builder/shared/config"
@@ -51,64 +50,5 @@ func TestServicePlanSessionRegistersStoreAndReturnsPlan(t *testing.T) {
 	}
 	if store.Meta().ParentSessionID != "parent-1" {
 		t.Fatalf("parent session id = %q, want parent-1", store.Meta().ParentSessionID)
-	}
-}
-
-func TestDeduplicatingServiceReturnsSameSessionForDuplicateNewSession(t *testing.T) {
-	stores := registry.NewSessionStoreRegistry()
-	persistenceRoot := t.TempDir()
-	containerDir := t.TempDir()
-	inner := NewService(launch.Planner{
-		Config:       config.App{WorkspaceRoot: "/tmp/workspace-a", PersistenceRoot: persistenceRoot},
-		ContainerDir: containerDir,
-	}, stores)
-	service := NewDeduplicatingService(ScopeID(config.App{WorkspaceRoot: "/tmp/workspace-a", PersistenceRoot: persistenceRoot}, containerDir), idempotency.NewCoordinator(nil, idempotency.DefaultRetention), inner)
-	req := serverapi.SessionPlanRequest{
-		ClientRequestID: "dup-1",
-		Mode:            serverapi.SessionLaunchModeInteractive,
-		ForceNewSession: true,
-	}
-
-	first, err := service.PlanSession(context.Background(), req)
-	if err != nil {
-		t.Fatalf("first PlanSession: %v", err)
-	}
-	second, err := service.PlanSession(context.Background(), req)
-	if err != nil {
-		t.Fatalf("second PlanSession: %v", err)
-	}
-	if first.Plan.SessionID != second.Plan.SessionID {
-		t.Fatalf("duplicate session ids differ: first=%q second=%q", first.Plan.SessionID, second.Plan.SessionID)
-	}
-}
-
-func TestDeduplicatingServiceRejectsReusedRequestIDWithDifferentPayload(t *testing.T) {
-	stores := registry.NewSessionStoreRegistry()
-	persistenceRoot := t.TempDir()
-	containerDir := t.TempDir()
-	inner := NewService(launch.Planner{
-		Config:       config.App{WorkspaceRoot: "/tmp/workspace-a", PersistenceRoot: persistenceRoot},
-		ContainerDir: containerDir,
-	}, stores)
-	service := NewDeduplicatingService(ScopeID(config.App{WorkspaceRoot: "/tmp/workspace-a", PersistenceRoot: persistenceRoot}, containerDir), idempotency.NewCoordinator(nil, idempotency.DefaultRetention), inner)
-
-	_, err := service.PlanSession(context.Background(), serverapi.SessionPlanRequest{
-		ClientRequestID: "dup-2",
-		Mode:            serverapi.SessionLaunchModeInteractive,
-		ForceNewSession: true,
-		ParentSessionID: "parent-1",
-	})
-	if err != nil {
-		t.Fatalf("first PlanSession: %v", err)
-	}
-
-	_, err = service.PlanSession(context.Background(), serverapi.SessionPlanRequest{
-		ClientRequestID: "dup-2",
-		Mode:            serverapi.SessionLaunchModeInteractive,
-		ForceNewSession: true,
-		ParentSessionID: "parent-2",
-	})
-	if err == nil || err.Error() != "client_request_id \"dup-2\" reused with different payload" {
-		t.Fatalf("expected reused request id error, got %v", err)
 	}
 }

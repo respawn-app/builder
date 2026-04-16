@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"builder/server/auth"
-	"builder/server/idempotency"
 	serverlifecycle "builder/server/lifecycle"
 	"builder/server/runtime"
 	"builder/server/session"
@@ -21,7 +20,6 @@ type Service struct {
 	authManager     *auth.Manager
 	controller      ControllerLeaseVerifier
 	storeOptions    []session.StoreOption
-	coordinator     *idempotency.Coordinator
 }
 
 type sessionStoreResolver interface {
@@ -48,14 +46,6 @@ func (s *Service) WithControllerLeaseVerifier(verifier ControllerLeaseVerifier) 
 	return s
 }
 
-func (s *Service) WithIdempotencyCoordinator(coordinator *idempotency.Coordinator) *Service {
-	if s == nil {
-		return nil
-	}
-	s.coordinator = coordinator
-	return s
-}
-
 func (s *Service) requireControllerLease(ctx context.Context, sessionID string, leaseID string) error {
 	if s == nil || s.controller == nil || strings.TrimSpace(sessionID) == "" {
 		return nil
@@ -78,82 +68,27 @@ func (s *Service) PersistInputDraft(ctx context.Context, req serverapi.SessionPe
 	if err := req.Validate(); err != nil {
 		return serverapi.SessionPersistInputDraftResponse{}, err
 	}
-	run := func(ctx context.Context) (serverapi.SessionPersistInputDraftResponse, error) {
-		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
-			return serverapi.SessionPersistInputDraftResponse{}, err
-		}
-		store, err := s.openStore(req.SessionID)
-		if err != nil {
-			return serverapi.SessionPersistInputDraftResponse{}, err
-		}
-		if err := serverlifecycle.PersistInputDraft(store, req.Input); err != nil {
-			return serverapi.SessionPersistInputDraftResponse{}, err
-		}
-		return serverapi.SessionPersistInputDraftResponse{}, nil
+	if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
+		return serverapi.SessionPersistInputDraftResponse{}, err
 	}
-	if s.coordinator == nil {
-		return run(ctx)
-	}
-	fingerprint, err := idempotency.FingerprintPayload(struct {
-		SessionID string `json:"session_id"`
-		Input     string `json:"input,omitempty"`
-	}{
-		SessionID: req.SessionID,
-		Input:     req.Input,
-	})
+	store, err := s.openStore(req.SessionID)
 	if err != nil {
 		return serverapi.SessionPersistInputDraftResponse{}, err
 	}
-	return idempotency.Execute(ctx, s.coordinator, idempotency.Request{
-		Method:             "session_lifecycle.persist_input_draft",
-		ResourceID:         strings.TrimSpace(req.SessionID),
-		ClientRequestID:    strings.TrimSpace(req.ClientRequestID),
-		PayloadFingerprint: fingerprint,
-	}, idempotency.JSONCodec[serverapi.SessionPersistInputDraftResponse]{}, run)
+	if err := serverlifecycle.PersistInputDraft(store, req.Input); err != nil {
+		return serverapi.SessionPersistInputDraftResponse{}, err
+	}
+	return serverapi.SessionPersistInputDraftResponse{}, nil
 }
 
 func (s *Service) ResolveTransition(ctx context.Context, req serverapi.SessionResolveTransitionRequest) (serverapi.SessionResolveTransitionResponse, error) {
 	if err := req.Validate(); err != nil {
 		return serverapi.SessionResolveTransitionResponse{}, err
 	}
-	run := func(ctx context.Context) (serverapi.SessionResolveTransitionResponse, error) {
-		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
-			return serverapi.SessionResolveTransitionResponse{}, err
-		}
-		return s.resolveTransitionOnce(ctx, req)
-	}
-	if s.coordinator == nil {
-		return run(ctx)
-	}
-	fingerprint, err := idempotency.FingerprintPayload(struct {
-		SessionID  string                      `json:"session_id,omitempty"`
-		Transition serverapi.SessionTransition `json:"transition"`
-	}{
-		SessionID:  req.SessionID,
-		Transition: req.Transition,
-	})
-	if err != nil {
+	if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
 		return serverapi.SessionResolveTransitionResponse{}, err
 	}
-	return idempotency.Execute(ctx, s.coordinator, idempotency.Request{
-		Method:             "session_lifecycle.resolve_transition",
-		ResourceID:         s.resolveTransitionResourceID(req.SessionID),
-		ClientRequestID:    strings.TrimSpace(req.ClientRequestID),
-		PayloadFingerprint: fingerprint,
-	}, idempotency.JSONCodec[serverapi.SessionResolveTransitionResponse]{}, run)
-}
-
-func (s *Service) resolveTransitionResourceID(sessionID string) string {
-	if trimmed := strings.TrimSpace(sessionID); trimmed != "" {
-		return trimmed
-	}
-	if trimmed := strings.TrimSpace(s.persistenceRoot); trimmed != "" {
-		return trimmed
-	}
-	if trimmed := strings.TrimSpace(s.containerDir); trimmed != "" {
-		return trimmed
-	}
-	return "session_lifecycle"
+	return s.resolveTransitionOnce(ctx, req)
 }
 
 func (s *Service) resolveTransitionOnce(ctx context.Context, req serverapi.SessionResolveTransitionRequest) (serverapi.SessionResolveTransitionResponse, error) {

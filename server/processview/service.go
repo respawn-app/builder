@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"builder/server/idempotency"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/clientui"
 	"builder/shared/serverapi"
@@ -19,20 +18,11 @@ type ProcessSource interface {
 }
 
 type Service struct {
-	processes   ProcessSource
-	coordinator *idempotency.Coordinator
+	processes ProcessSource
 }
 
 func NewService(processes ProcessSource) *Service {
 	return &Service{processes: processes}
-}
-
-func (s *Service) WithIdempotencyCoordinator(coordinator *idempotency.Coordinator) *Service {
-	if s == nil {
-		return nil
-	}
-	s.coordinator = coordinator
-	return s
 }
 
 func (s *Service) ListProcesses(_ context.Context, req serverapi.ProcessListRequest) (serverapi.ProcessListResponse, error) {
@@ -70,29 +60,14 @@ func (s *Service) GetProcess(_ context.Context, req serverapi.ProcessGetRequest)
 	return serverapi.ProcessGetResponse{Process: &process}, nil
 }
 
-func (s *Service) KillProcess(ctx context.Context, req serverapi.ProcessKillRequest) (serverapi.ProcessKillResponse, error) {
+func (s *Service) KillProcess(_ context.Context, req serverapi.ProcessKillRequest) (serverapi.ProcessKillResponse, error) {
 	if err := req.Validate(); err != nil {
 		return serverapi.ProcessKillResponse{}, err
 	}
 	if s == nil || s.processes == nil {
 		return serverapi.ProcessKillResponse{}, fmt.Errorf("process source is required")
 	}
-	if s.coordinator == nil {
-		return serverapi.ProcessKillResponse{}, s.processes.Kill(strings.TrimSpace(req.ProcessID))
-	}
-	fingerprint, err := idempotency.FingerprintPayload(req)
-	if err != nil {
-		return serverapi.ProcessKillResponse{}, err
-	}
-	request := idempotency.Request{
-		Method:             "process.kill",
-		ResourceID:         strings.TrimSpace(req.ProcessID),
-		ClientRequestID:    strings.TrimSpace(req.ClientRequestID),
-		PayloadFingerprint: fingerprint,
-	}
-	return idempotency.Execute(ctx, s.coordinator, request, idempotency.JSONCodec[serverapi.ProcessKillResponse]{}, func(context.Context) (serverapi.ProcessKillResponse, error) {
-		return serverapi.ProcessKillResponse{}, s.processes.Kill(strings.TrimSpace(req.ProcessID))
-	})
+	return serverapi.ProcessKillResponse{}, s.processes.Kill(strings.TrimSpace(req.ProcessID))
 }
 
 func (s *Service) GetInlineOutput(_ context.Context, req serverapi.ProcessInlineOutputRequest) (serverapi.ProcessInlineOutputResponse, error) {
