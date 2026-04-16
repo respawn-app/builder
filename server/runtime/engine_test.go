@@ -11166,6 +11166,86 @@ func TestAutoCompactionFailsWhenCompactionNoticePersistenceFails(t *testing.T) {
 	}
 }
 
+func TestEmitCompactionStatusStillPublishesTerminalEventWhenNoticePersistenceFails(t *testing.T) {
+	localEntryErr := errors.New("injected compaction notice persistence failure")
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	var events []Event
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+		Model:   "gpt-5",
+		OnEvent: func(evt Event) { events = append(events, evt) },
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.beforePersistLocalEntry = func(entry storedLocalEntry) error {
+		if entry.Role == "compaction_notice" {
+			return localEntryErr
+		}
+		return nil
+	}
+
+	err = eng.emitCompactionStatus("step-1", EventCompactionCompleted, compactionModeAuto, "remote", "openai", 4, 2, "")
+	if !errors.Is(err, localEntryErr) {
+		t.Fatalf("emitCompactionStatus error = %v, want %v", err, localEntryErr)
+	}
+	terminalEvents := 0
+	for _, evt := range events {
+		if evt.Kind == EventLocalEntryAdded {
+			t.Fatalf("did not expect persisted local entry event after notice persistence failure, got %+v", events)
+		}
+		if evt.Kind == EventCompactionCompleted {
+			terminalEvents++
+		}
+	}
+	if terminalEvents != 1 {
+		t.Fatalf("expected one compaction completed event despite notice persistence failure, got %+v", events)
+	}
+}
+
+func TestEmitCompactionStatusStillPublishesFailureEventWhenErrorPersistenceFails(t *testing.T) {
+	localEntryErr := errors.New("injected compaction error persistence failure")
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	var events []Event
+	eng, err := New(store, &fakeClient{}, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+		Model:   "gpt-5",
+		OnEvent: func(evt Event) { events = append(events, evt) },
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	eng.beforePersistLocalEntry = func(entry storedLocalEntry) error {
+		if entry.Role == "error" {
+			return localEntryErr
+		}
+		return nil
+	}
+
+	err = eng.emitCompactionStatus("step-1", EventCompactionFailed, compactionModeAuto, "remote", "openai", 0, 2, "quota exceeded")
+	if !errors.Is(err, localEntryErr) {
+		t.Fatalf("emitCompactionStatus error = %v, want %v", err, localEntryErr)
+	}
+	terminalEvents := 0
+	for _, evt := range events {
+		if evt.Kind == EventLocalEntryAdded {
+			t.Fatalf("did not expect persisted local entry event after error persistence failure, got %+v", events)
+		}
+		if evt.Kind == EventCompactionFailed {
+			terminalEvents++
+		}
+	}
+	if terminalEvents != 1 {
+		t.Fatalf("expected one compaction failed event despite error persistence failure, got %+v", events)
+	}
+}
+
 func TestAutoCompactionRemoteReplacesHistoryAndCarriesCompactionItem(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)

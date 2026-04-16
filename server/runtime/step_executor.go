@@ -133,6 +133,9 @@ func (s *defaultStepExecutor) RunStepLoopWithOptions(ctx context.Context, stepID
 
 		if len(localToolCalls) == 0 {
 			if phaseTurn.MissingAssistantPhase {
+				if len(hostedToolExecutions) > 0 {
+					e.emitCommittedTranscriptAdvanced(stepID)
+				}
 				if _, err := s.messages.FlushPendingUserInjections(stepID); err != nil {
 					return stepLoopResult{}, err
 				}
