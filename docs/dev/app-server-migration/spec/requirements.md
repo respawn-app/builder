@@ -51,8 +51,10 @@ The resulting frontends should:
 
 ## Architectural Invariants
 
-- Frontend packages must not import server-owned runtime, persistence, tool, process, or provider-auth packages directly.
-- All mutating protocol requests must carry a client-generated `client_request_id` and be idempotent within an explicit server-defined scope and retention window.
+- Target architecture: frontend packages should not depend on server-owned runtime, persistence, tool, process, or provider-auth packages directly.
+- Current shipping exception: the Go TUI still carries a temporary `cli/* -> server/*` shared-runtime adapter layer while embedded mode exists.
+- That temporary exception is bounded: frontend code must not access persistence internals directly, must not stitch metadata locally, and must not call persistence storage APIs from `cli/*`.
+- All mutating protocol requests must carry a client-generated `client_request_id` and be idempotent within an explicit server-defined scope. Durable/shared dedup authority is not part of the current shipping contract and remains deferred.
 - `project_id`, `session_id`, `run_id`, `process_id`, `approval_id`, and `ask_id` are opaque server-assigned IDs. Filesystem paths are never protocol identity.
 - v1 supports at most one active primary run per session.
 - Typed queries and hydration views are the source of truth for initial render and reconnect.
@@ -79,7 +81,8 @@ The following are already locked for this feature and should be treated as requi
 - CLI default behavior: dial the explicitly configured local server address (`server_host` + `server_port`) with a compatibility handshake; if no compatible server is listening there, offer local server startup.
 - Ownership boundary: the server owns runtime, persistence, tools, provider credentials, background processes, and policy enforcement.
 - Presentation boundary: frontends own all UX and rendering.
-- Control model: multiple frontends may control one session; the server serializes mutating commands per session.
+- Control model target: multiple frontends may control one session; the server serializes mutating commands per session.
+- Current shipping simplification: the current-TUI path temporarily restricts same-session mutation/control to one controlling client at a time through controller-lease-gated APIs. This is a scope reduction, not the target contract. The lift plan is tracked in `planning/phase-9-multi-client-session-control.md`.
 - Reconnect model: frontends refetch authoritative state through typed hydration views and transcript pages, then resubscribe to live streams. A stream-history or cursor recovery contract is not required.
 - Trust model: local/single-user in v1, but future remote authn/authz must remain architecturally possible.
 - Frontend submissions: structured request objects from day one.
@@ -115,7 +118,7 @@ Frontends must be responsible for:
 - answering asks and approvals surfaced by the server,
 - owning built-in and file-backed slash-command catalogs.
 
-Frontends must not depend on privileged in-process access that future frontends cannot rely on.
+Future frontends must not depend on privileged in-process access that other frontends cannot rely on. The current Go TUI still has a temporary embedded/shared-runtime adapter layer, but that is migration debt rather than the intended long-term boundary.
 
 The server must never interpret raw slash-command syntax. The frontend must translate slash commands into frontend-local actions, one or more server requests, or a structured submission envelope.
 
@@ -265,7 +268,8 @@ The server must allow multiple frontends to attach to and control the same sessi
 Requirements:
 
 - mutating operations are serialized through authoritative per-session ordering,
-- every mutating request is idempotent through `client_request_id` within a documented server-side retention window,
+- every mutating request is idempotent through `client_request_id` within a documented server-side scope,
+- current shipping direction does not require SQLite-backed/shared dedup state as part of that contract; durable/shared dedup is deferred to later multi-client session-control work,
 - runtime activation and release must use an explicit lease identity distinct from `client_request_id`,
 - reconnect acquires a fresh runtime lease after hydrate/attach rather than reclaiming an abandoned lease id,
 - duplicate retries must not create duplicate prompt submissions, duplicate approvals, or duplicate process-control actions,

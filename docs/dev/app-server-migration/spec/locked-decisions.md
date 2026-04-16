@@ -23,7 +23,7 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 - Frontend submissions should use structured request objects from day one rather than plain-text-only request shapes.
 - Structured frontend submissions should use a generic user-intent envelope rather than separate RPC shapes for every submission style.
 - Incompatible protocol versions should fail explicitly with a compatibility error; there is no silent downgrade or best-effort fallback.
-- Every mutating request includes a client-generated `client_request_id` and must be idempotent within an explicit scope.
+- Every mutating request includes a client-generated `client_request_id` and must be idempotent within an explicit scope. Durable/shared dedup authority is not part of the current shipping contract and remains deferred.
 
 ## Ownership And Boundaries
 
@@ -32,7 +32,10 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 - Frontends own presentation, rendering, navigation, and slash-command catalogs.
 - Frontends may query server state on demand in addition to subscribing to live activity.
 - The server must never interpret raw slash-command syntax.
-- Frontend packages must not import server-owned runtime, persistence, tool, process, or auth internals directly.
+- Target architecture: frontend packages should not depend on server-owned runtime, persistence, tool, process, or auth internals directly.
+- Current shipping exception: the Go TUI still carries a temporary `cli/* -> server/*` shared-runtime adapter layer while embedded mode exists.
+- That temporary exception does not permit direct frontend persistence access, CLI-owned metadata stitching, or direct calls from `cli/*` into persistence storage APIs.
+- Kotlin/web/desktop frontends are expected to use the protocol boundary rather than any Go in-process adapter layer.
 
 ## Project, Session, And Run Model
 
@@ -63,8 +66,9 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 - A run is a single execution attempt or span within a session.
 - v1 supports at most one active primary run per session.
 - Internal delegated workers should not automatically become child sessions; user-visible branch and review workflows may create child sessions, while internal delegated work should stay under session or run-scoped runtime structures.
-- Multiple frontends may control the same session concurrently.
-- The server serializes mutating commands through authoritative per-session ordering.
+- Multi-client control target: multiple frontends may control the same session concurrently.
+- The target server contract serializes mutating commands through authoritative per-session ordering.
+- Current shipping simplification: the current-TUI path temporarily restricts same-session mutation/control to one controlling client at a time through controller-lease-gated APIs. This is a deliberate scope reduction, not the target long-term contract. The lift plan is tracked in `planning/phase-9-multi-client-session-control.md`.
 - The server persists durable parent/child session lineage links and related metadata.
 - Session discovery and listing are first-class server query surfaces with enough metadata for startup and picker UIs.
 
@@ -93,7 +97,8 @@ Locked from product work on 2026-03-27 and updated after external architecture r
 - Upstream LLM and provider credentials are server-owned.
 - Frontends should authenticate to the builder server rather than directly to providers.
 - The server is the sole policy enforcer for guarded actions and blocks on approval requests until a frontend answers.
-- Any attached frontend with access to the session may answer asks or approvals; the server applies the first committed authoritative response.
+- Prompt-response target: any attached frontend with access to the session may answer asks or approvals; the server applies the first committed authoritative response.
+- Current shipping simplification: ask/approval answers are still controller-lease-gated on the current-TUI path. That temporary restriction should be removed only through the Phase 9 follow-up in `planning/phase-9-multi-client-session-control.md`.
 - Pending ask and approval delivery is a first-class server-driven prompt activity stream; attach and reconnect still use explicit pending-resource reads for hydration.
 - Restart recovery should preserve the current transcript-driven behavior: interrupted tool-call attempts remain durable in conversation state, reopen appends the interruption marker, and the next model turn re-evaluates what to do. This is distinct from persisting broker queue state as a first-class durable object.
 - The server binds locally by default. Remote listeners require explicit opt-in.

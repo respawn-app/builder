@@ -92,8 +92,8 @@ Current remote proof:
 
 Important limitation:
 
-- These tests intentionally prove ordering with live assistant progress via `assistant_delta`.
-- They do not prove raw session-activity parity for the persisted assistant commentary transcript entry on assistant/tool-call turns.
+- `server/transport/gateway_test.go` now proves raw session-activity parity for the persisted assistant commentary transcript entry on assistant/tool-call turns.
+- `shared/client/remote_test.go` remains narrower and only proves ordering with live assistant progress via `assistant_delta`.
 
 ## Minimum Required Scenarios
 
@@ -109,7 +109,7 @@ Proven now:
 
 Still intentionally open:
 
-- loopback and remote paths behave equivalently for transcript-critical commentary flow on the raw session-activity stream
+- remote rendered-path proof for suffix repair and rebuild parity with loopback
 
 ## Phase 5A Pre-Implementation Gaps
 

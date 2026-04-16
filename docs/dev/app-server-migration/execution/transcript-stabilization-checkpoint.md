@@ -2,7 +2,7 @@
 
 Status: handoff note
 
-Last updated: 2026-04-05
+Last updated: 2026-04-16
 
 ## Recent Commits
 
@@ -20,13 +20,13 @@ Last updated: 2026-04-05
 
 ## True Remaining Items
 
-Only these remain meaningfully open in the stabilization plan.
+Only these were still open when this checkpoint was first written. The remote commentary-stream defer noted below has since landed in code; the release-gate proof items remain intentionally open.
 
-### 1. Intentional functional defer
+### 1. Historical functional defer since resolved
 
-- remote raw session-activity still does not carry the persisted assistant commentary transcript entry for assistant/tool-call turns
-- current contract remains: live progress via `assistant_delta`, then convergence via hydrate
-- this should only be reopened alongside a deliberate runtime-event/projection contract change
+- remote raw session-activity now carries the persisted assistant commentary transcript entry for assistant/tool-call turns
+- live progress may still stream via `assistant_delta`, but the same session-activity stream now also carries the committed commentary/tool-call/tool-result/final transcript entries
+- hydrate remains the recovery path for reconnect/stream-gap cases, not the normal convergence path for commentary/tool-call ordering
 
 ### 2. Cleanup/process bullet
 
