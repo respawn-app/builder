@@ -151,6 +151,23 @@ func (s *Service) AttachWorkspaceToProject(ctx context.Context, req serverapi.Pr
 	return serverapi.ProjectAttachWorkspaceResponse{Binding: projectBindingFromMetadata(binding)}, nil
 }
 
+func (s *Service) RebindWorkspace(ctx context.Context, req serverapi.ProjectRebindWorkspaceRequest) (serverapi.ProjectRebindWorkspaceResponse, error) {
+	if err := req.Validate(); err != nil {
+		return serverapi.ProjectRebindWorkspaceResponse{}, err
+	}
+	if s == nil {
+		return serverapi.ProjectRebindWorkspaceResponse{}, errors.New("project service is required")
+	}
+	if s.metadata == nil {
+		return serverapi.ProjectRebindWorkspaceResponse{}, errors.New("workspace rebind requires metadata service")
+	}
+	binding, err := s.metadata.RebindWorkspace(ctx, req.OldWorkspaceRoot, req.NewWorkspaceRoot)
+	if err != nil {
+		return serverapi.ProjectRebindWorkspaceResponse{}, err
+	}
+	return serverapi.ProjectRebindWorkspaceResponse{Binding: projectBindingFromMetadata(binding)}, nil
+}
+
 func (s *Service) GetProjectOverview(ctx context.Context, req serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
 	if err := req.Validate(); err != nil {
 		return serverapi.ProjectGetOverviewResponse{}, err

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"builder/server/auth"
+	"builder/server/idempotency"
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/shared/serverapi"
@@ -17,6 +18,18 @@ import (
 )
 
 func testIntPtr(v int) *int { return &v }
+
+const testControllerLeaseID = "lease-test-controller"
+
+type stubSessionLifecycleLeaseVerifier struct {
+	calls int
+	err   error
+}
+
+func (s *stubSessionLifecycleLeaseVerifier) RequireControllerLease(context.Context, string, string) error {
+	s.calls++
+	return s.err
+}
 
 func createPersistedSession(t *testing.T) (string, string, *session.Store) {
 	t.Helper()
@@ -79,8 +92,10 @@ func TestServicePersistInputDraftWritesBySessionID(t *testing.T) {
 
 	service := NewService(containerDir, nil, nil)
 	if _, err := service.PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{
-		SessionID: store.Meta().SessionID,
-		Input:     "saved by service",
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: testControllerLeaseID,
+		Input:             "saved by service",
 	}); err != nil {
 		t.Fatalf("PersistInputDraft: %v", err)
 	}
@@ -94,11 +109,50 @@ func TestServicePersistInputDraftWritesBySessionID(t *testing.T) {
 	}
 }
 
+func TestServicePersistInputDraftReplaysAcrossLaterLeaseChange(t *testing.T) {
+	_, containerDir, store := createPersistedSession(t)
+	if err := store.SetName("session name"); err != nil {
+		t.Fatalf("set session name: %v", err)
+	}
+	verifier := &stubSessionLifecycleLeaseVerifier{}
+	service := NewService(containerDir, nil, nil).
+		WithControllerLeaseVerifier(verifier).
+		WithIdempotencyCoordinator(idempotency.NewCoordinator(nil, idempotency.DefaultRetention))
+	first := serverapi.SessionPersistInputDraftRequest{
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: "lease-1",
+		Input:             "saved by service",
+	}
+	second := first
+	second.ControllerLeaseID = "lease-2"
+
+	if _, err := service.PersistInputDraft(context.Background(), first); err != nil {
+		t.Fatalf("PersistInputDraft first: %v", err)
+	}
+	verifier.err = serverapi.ErrInvalidControllerLease
+	if _, err := service.PersistInputDraft(context.Background(), second); err != nil {
+		t.Fatalf("PersistInputDraft replay: %v", err)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("lease verifier call count = %d, want 1", verifier.calls)
+	}
+	reopened, err := session.Open(store.Dir())
+	if err != nil {
+		t.Fatalf("reopen session store: %v", err)
+	}
+	if reopened.Meta().InputDraft != "saved by service" {
+		t.Fatalf("input draft = %q, want %q", reopened.Meta().InputDraft, "saved by service")
+	}
+}
+
 func TestServicePersistInputDraftRejectsPathLikeSessionID(t *testing.T) {
 	service := NewService(t.TempDir(), nil, nil)
 	_, err := service.PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{
-		SessionID: "sessions/workspace-x/session-1",
-		Input:     "draft",
+		ClientRequestID:   "req-1",
+		SessionID:         "sessions/workspace-x/session-1",
+		ControllerLeaseID: testControllerLeaseID,
+		Input:             "draft",
 	})
 	if err == nil || !strings.Contains(err.Error(), "single session id") {
 		t.Fatalf("expected path-like session id rejection, got %v", err)
@@ -108,8 +162,9 @@ func TestServicePersistInputDraftRejectsPathLikeSessionID(t *testing.T) {
 func TestServiceResolveTransitionRejectsPathLikeSessionID(t *testing.T) {
 	service := NewService(t.TempDir(), nil, nil)
 	_, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
-		ClientRequestID: "req-1",
-		SessionID:       "../session-1",
+		ClientRequestID:   "req-1",
+		SessionID:         "../session-1",
+		ControllerLeaseID: testControllerLeaseID,
 		Transition: serverapi.SessionTransition{
 			Action: "continue",
 		},
@@ -136,8 +191,9 @@ func TestServiceResolveTransitionForkRollbackCreatesFork(t *testing.T) {
 
 	service := NewService(containerDir, nil, nil)
 	resp, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
-		ClientRequestID: "req-1",
-		SessionID:       store.Meta().SessionID,
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: testControllerLeaseID,
 		Transition: serverapi.SessionTransition{
 			Action:               "fork_rollback",
 			InitialPrompt:        "edited prompt",
@@ -178,8 +234,9 @@ func TestServiceResolveTransitionForkRollbackResolvesTranscriptEntryIndex(t *tes
 
 	service := NewService(containerDir, nil, nil)
 	resp, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
-		ClientRequestID: "req-1",
-		SessionID:       store.Meta().SessionID,
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: testControllerLeaseID,
 		Transition: serverapi.SessionTransition{
 			Action:                   "fork_rollback",
 			InitialPrompt:            "edited prompt",
@@ -238,8 +295,9 @@ func TestServiceResolveTransitionForkRollbackRejectsNonUserTranscriptEntryIndex(
 
 	service := NewService(containerDir, nil, nil)
 	_, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
-		ClientRequestID: "req-1",
-		SessionID:       store.Meta().SessionID,
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: testControllerLeaseID,
 		Transition: serverapi.SessionTransition{
 			Action:                   "fork_rollback",
 			ForkTranscriptEntryIndex: testIntPtr(1),
@@ -334,8 +392,10 @@ func TestServicePersistInputDraftRejectsSessionOutsideContainer(t *testing.T) {
 
 	service := NewService(containerA, nil, nil)
 	_, err = service.PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{
-		SessionID: store.Meta().SessionID,
-		Input:     "should fail",
+		ClientRequestID:   "req-1",
+		SessionID:         store.Meta().SessionID,
+		ControllerLeaseID: testControllerLeaseID,
+		Input:             "should fail",
 	})
 	if err == nil {
 		t.Fatal("expected foreign session mutation rejection")
@@ -353,11 +413,12 @@ func TestServiceResolveTransitionLogoutUsesSessionIDWithoutStoreLookup(t *testin
 			APIKey: &auth.APIKeyMethod{Key: "sk-before"},
 		},
 	}), nil, time.Now)
-	service := NewService(t.TempDir(), nil, mgr)
+	service := NewService(t.TempDir(), nil, mgr).WithIdempotencyCoordinator(idempotency.NewCoordinator(nil, idempotency.DefaultRetention))
 
 	resp, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
-		ClientRequestID: "req-1",
-		SessionID:       "session-42",
+		ClientRequestID:   "req-1",
+		SessionID:         "session-42",
+		ControllerLeaseID: testControllerLeaseID,
 		Transition: serverapi.SessionTransition{
 			Action: "logout",
 		},
@@ -381,7 +442,7 @@ func TestServiceResolveTransitionLogoutUsesSessionIDWithoutStoreLookup(t *testin
 }
 
 func TestServiceResolveTransitionRequiresClientRequestID(t *testing.T) {
-	service := NewService(t.TempDir(), nil, nil)
+	service := NewService(t.TempDir(), nil, nil).WithIdempotencyCoordinator(idempotency.NewCoordinator(nil, idempotency.DefaultRetention))
 	_, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
 		Transition: serverapi.SessionTransition{Action: "continue"},
 	})
@@ -400,9 +461,10 @@ func TestServiceResolveTransitionDeduplicatesLogoutByClientRequestID(t *testing.
 	}), nil, time.Now)
 	service := NewService(t.TempDir(), nil, mgr)
 	req := serverapi.SessionResolveTransitionRequest{
-		ClientRequestID: "dup-1",
-		SessionID:       "session-42",
-		Transition:      serverapi.SessionTransition{Action: "logout"},
+		ClientRequestID:   "dup-1",
+		SessionID:         "session-42",
+		ControllerLeaseID: testControllerLeaseID,
+		Transition:        serverapi.SessionTransition{Action: "logout"},
 	}
 
 	first, err := service.ResolveTransition(context.Background(), req)
@@ -418,12 +480,51 @@ func TestServiceResolveTransitionDeduplicatesLogoutByClientRequestID(t *testing.
 	}
 }
 
-func TestServiceResolveTransitionRejectsClientRequestIDReuseWithDifferentPayload(t *testing.T) {
-	service := NewService(t.TempDir(), nil, nil)
+func TestServiceResolveTransitionReplaysAcrossLaterLeaseChange(t *testing.T) {
+	mgr := auth.NewManager(auth.NewMemoryStore(auth.State{
+		Scope: auth.ScopeGlobal,
+		Method: auth.Method{
+			Type:   auth.MethodAPIKey,
+			APIKey: &auth.APIKeyMethod{Key: "sk-before"},
+		},
+	}), nil, time.Now)
+	verifier := &stubSessionLifecycleLeaseVerifier{}
+	service := NewService(t.TempDir(), nil, mgr).
+		WithControllerLeaseVerifier(verifier).
+		WithIdempotencyCoordinator(idempotency.NewCoordinator(nil, idempotency.DefaultRetention))
 	first := serverapi.SessionResolveTransitionRequest{
-		ClientRequestID: "dup-1",
-		SessionID:       "session-42",
-		Transition:      serverapi.SessionTransition{Action: "continue"},
+		ClientRequestID:   "dup-lease",
+		SessionID:         "session-42",
+		ControllerLeaseID: "lease-1",
+		Transition:        serverapi.SessionTransition{Action: "logout"},
+	}
+	second := first
+	second.ControllerLeaseID = "lease-2"
+
+	firstResp, err := service.ResolveTransition(context.Background(), first)
+	if err != nil {
+		t.Fatalf("ResolveTransition first: %v", err)
+	}
+	verifier.err = serverapi.ErrInvalidControllerLease
+	secondResp, err := service.ResolveTransition(context.Background(), second)
+	if err != nil {
+		t.Fatalf("ResolveTransition replay: %v", err)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("lease verifier call count = %d, want 1", verifier.calls)
+	}
+	if firstResp != secondResp {
+		t.Fatalf("expected replayed response, first=%+v second=%+v", firstResp, secondResp)
+	}
+}
+
+func TestServiceResolveTransitionRejectsClientRequestIDReuseWithDifferentPayload(t *testing.T) {
+	service := NewService(t.TempDir(), nil, nil).WithIdempotencyCoordinator(idempotency.NewCoordinator(nil, idempotency.DefaultRetention))
+	first := serverapi.SessionResolveTransitionRequest{
+		ClientRequestID:   "dup-1",
+		SessionID:         "session-42",
+		ControllerLeaseID: testControllerLeaseID,
+		Transition:        serverapi.SessionTransition{Action: "continue"},
 	}
 	second := first
 	second.Transition.Action = "logout"

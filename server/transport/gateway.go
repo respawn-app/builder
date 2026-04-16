@@ -170,6 +170,10 @@ func (g *Gateway) dispatch(ctx context.Context, state *connectionState, req prot
 		return decodeAndHandle(req, func(params serverapi.ProjectAttachWorkspaceRequest) (serverapi.ProjectAttachWorkspaceResponse, error) {
 			return g.core.ProjectViewClient().AttachWorkspaceToProject(ctx, params)
 		})
+	case protocol.MethodProjectRebindWorkspace:
+		return decodeAndHandle(req, func(params serverapi.ProjectRebindWorkspaceRequest) (serverapi.ProjectRebindWorkspaceResponse, error) {
+			return g.core.ProjectViewClient().RebindWorkspace(ctx, params)
+		})
 	case protocol.MethodProjectGetOverview:
 		return decodeAndHandle(req, func(params serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
 			return g.core.ProjectViewClient().GetProjectOverview(ctx, params)
@@ -704,6 +708,21 @@ func protocolError(err error) (int, string) {
 	message := strings.TrimSpace(err.Error())
 	if errors.Is(err, serverapi.ErrStreamGap) {
 		return protocol.ErrCodeStreamGap, message
+	}
+	if errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
+		return protocol.ErrCodeWorkspaceNotRegistered, message
+	}
+	if errors.Is(err, serverapi.ErrProjectNotFound) {
+		return protocol.ErrCodeProjectNotFound, message
+	}
+	if errors.Is(err, serverapi.ErrProjectUnavailable) {
+		return protocol.ErrCodeProjectUnavailable, message
+	}
+	if errors.Is(err, serverapi.ErrSessionAlreadyControlled) {
+		return protocol.ErrCodeSessionAlreadyControlled, message
+	}
+	if errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		return protocol.ErrCodeInvalidControllerLease, message
 	}
 	if errors.Is(err, serverapi.ErrStreamUnavailable) {
 		return protocol.ErrCodeStreamUnavailable, message

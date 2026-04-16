@@ -450,6 +450,8 @@ func TestRemoteProjectViewCallsDoNotAttachScopedProjectFirst(t *testing.T) {
 			_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectCreateResponse{Binding: serverapi.ProjectBinding{ProjectID: "project-1"}}))
 		case protocol.MethodProjectAttachWorkspace:
 			_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectAttachWorkspaceResponse{Binding: serverapi.ProjectBinding{ProjectID: "project-1"}}))
+		case protocol.MethodProjectRebindWorkspace:
+			_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectRebindWorkspaceResponse{Binding: serverapi.ProjectBinding{ProjectID: "project-1", WorkspaceID: "workspace-1"}}))
 		case protocol.MethodProjectGetOverview:
 			_ = websocket.JSON.Send(ws, protocol.NewSuccessResponse(req.ID, serverapi.ProjectGetOverviewResponse{}))
 		case protocol.MethodSessionListByProject:
@@ -471,6 +473,9 @@ func TestRemoteProjectViewCallsDoNotAttachScopedProjectFirst(t *testing.T) {
 	}
 	if _, err := remote.AttachWorkspaceToProject(context.Background(), serverapi.ProjectAttachWorkspaceRequest{ProjectID: "project-1", WorkspaceRoot: "/tmp/workspace-b"}); err != nil {
 		t.Fatalf("AttachWorkspaceToProject: %v", err)
+	}
+	if _, err := remote.RebindWorkspace(context.Background(), serverapi.ProjectRebindWorkspaceRequest{OldWorkspaceRoot: "/tmp/workspace-a", NewWorkspaceRoot: "/tmp/workspace-b"}); err != nil {
+		t.Fatalf("RebindWorkspace: %v", err)
 	}
 	if _, err := remote.GetProjectOverview(context.Background(), serverapi.ProjectGetOverviewRequest{ProjectID: "project-1"}); err != nil {
 		t.Fatalf("GetProjectOverview: %v", err)

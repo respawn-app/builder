@@ -16,6 +16,7 @@ import (
 	"builder/server/session"
 	"builder/shared/clientui"
 	"builder/shared/config"
+	"builder/shared/serverapi"
 )
 
 func TestEnsureWorkspaceBindingDoesNotRegisterUnknownWorkspace(t *testing.T) {
@@ -33,7 +34,7 @@ func TestEnsureWorkspaceBindingDoesNotRegisterUnknownWorkspace(t *testing.T) {
 	}
 	defer func() { _ = store.Close() }()
 
-	if _, err := store.EnsureWorkspaceBinding(context.Background(), cfg.WorkspaceRoot); !errors.Is(err, ErrWorkspaceNotRegistered) {
+	if _, err := store.EnsureWorkspaceBinding(context.Background(), cfg.WorkspaceRoot); !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
 		t.Fatalf("EnsureWorkspaceBinding error = %v, want ErrWorkspaceNotRegistered", err)
 	}
 	projects, err := store.ListProjects(context.Background())
@@ -96,7 +97,7 @@ func TestResolveWorkspacePathLeavesNestedDirectoryUnbound(t *testing.T) {
 		t.Fatalf("expected nested directory to remain unbound, got %+v", *resolved)
 	}
 
-	if _, err := store.EnsureWorkspaceBinding(context.Background(), nested); !errors.Is(err, ErrWorkspaceNotRegistered) {
+	if _, err := store.EnsureWorkspaceBinding(context.Background(), nested); !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
 		t.Fatalf("EnsureWorkspaceBinding nested error = %v, want ErrWorkspaceNotRegistered", err)
 	}
 
@@ -242,7 +243,7 @@ func TestRebindWorkspacePreservesWorkspaceIdentity(t *testing.T) {
 	if rebound.CanonicalRoot != canonicalNewWorkspace {
 		t.Fatalf("rebound canonical root = %q, want %q", rebound.CanonicalRoot, canonicalNewWorkspace)
 	}
-	if _, err := store.EnsureWorkspaceBinding(context.Background(), oldWorkspace); !errors.Is(err, ErrWorkspaceNotRegistered) {
+	if _, err := store.EnsureWorkspaceBinding(context.Background(), oldWorkspace); !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
 		t.Fatalf("EnsureWorkspaceBinding old workspace error = %v, want ErrWorkspaceNotRegistered", err)
 	}
 	resolved, err := store.EnsureWorkspaceBinding(context.Background(), newWorkspace)
@@ -298,7 +299,7 @@ func TestRebindWorkspaceRejectsInvalidTargets(t *testing.T) {
 		t.Fatalf("RegisterWorkspaceBinding otherWorkspace: %v", err)
 	}
 
-	if _, err := store.RebindWorkspace(context.Background(), filepath.Join(t.TempDir(), "unknown-old"), otherWorkspace); !errors.Is(err, ErrWorkspaceNotRegistered) {
+	if _, err := store.RebindWorkspace(context.Background(), filepath.Join(t.TempDir(), "unknown-old"), otherWorkspace); !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
 		t.Fatalf("RebindWorkspace unknown old error = %v, want ErrWorkspaceNotRegistered", err)
 	}
 	if _, err := store.RebindWorkspace(context.Background(), oldWorkspace, missingWorkspace); err == nil || !strings.Contains(err.Error(), "does not exist") {

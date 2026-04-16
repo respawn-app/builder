@@ -450,6 +450,10 @@ func (s *stubLaunchProjectViewService) AttachWorkspaceToProject(_ context.Contex
 	return serverapi.ProjectAttachWorkspaceResponse{}, errors.New("AttachWorkspaceToProject should not be called in planner tests")
 }
 
+func (s *stubLaunchProjectViewService) RebindWorkspace(_ context.Context, _ serverapi.ProjectRebindWorkspaceRequest) (serverapi.ProjectRebindWorkspaceResponse, error) {
+	return serverapi.ProjectRebindWorkspaceResponse{}, errors.New("RebindWorkspace should not be called in planner tests")
+}
+
 func (s *stubLaunchProjectViewService) GetProjectOverview(_ context.Context, _ serverapi.ProjectGetOverviewRequest) (serverapi.ProjectGetOverviewResponse, error) {
 	s.overviewCalls++
 	return s.overview, nil
