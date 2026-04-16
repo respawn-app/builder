@@ -135,6 +135,59 @@ func TestHostedToolOnlyTurnEmitsCommittedConversationUpdatedBeforeFollowUpAssist
 	}
 }
 
+func TestHostedToolOnlyMissingPhaseTurnEmitsCommittedConversationUpdatedAfterHostedPersistence(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Create(dir, "ws", dir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	client := &fakeClient{responses: []llm.Response{
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: ""},
+			OutputItems: []llm.ResponseItem{
+				{Type: llm.ResponseItemTypeMessage, Role: llm.RoleAssistant, Content: "working"},
+				{Type: llm.ResponseItemTypeOther, Raw: json.RawMessage(`{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"builder cli"}}`)},
+			},
+			Usage: llm.Usage{WindowTokens: 200000},
+		},
+		{
+			Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done", Phase: llm.MessagePhaseFinal},
+			Usage:     llm.Usage{WindowTokens: 200000},
+		},
+	}}
+	client.caps = llm.ProviderCapabilities{
+		ProviderID:                    "openai",
+		SupportsResponsesAPI:          true,
+		SupportsResponsesCompact:      true,
+		SupportsNativeWebSearch:       true,
+		SupportsReasoningEncrypted:    true,
+		SupportsServerSideContextEdit: true,
+		IsOpenAIFirstParty:            true,
+	}
+	events := make([]Event, 0, 24)
+	autoCompactionEnabled := false
+	eng, err := New(store, client, tools.NewRegistry(fakeTool{name: toolspec.ToolShell}), Config{
+		Model:                 "gpt-5",
+		WebSearchMode:         "native",
+		EnabledTools:          []toolspec.ID{toolspec.ToolWebSearch},
+		AutoCompactionEnabled: &autoCompactionEnabled,
+		OnEvent:               func(evt Event) { events = append(events, evt) },
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	msg, err := eng.SubmitUserMessage(context.Background(), "find latest")
+	if err != nil {
+		t.Fatalf("submit user message: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Fatalf("assistant content = %q, want done", msg.Content)
+	}
+	if got := committedConversationUpdatedCountAfterLastUserFlush(events); got != 2 {
+		t.Fatalf("committed conversation_updated count after missing-phase hosted-only turn = %d, want 2; events=%+v", got, events)
+	}
+}
+
 func TestReviewerTranscriptPathsUseRichEventsWithoutCommittedConversationUpdatedAfterUserFlush(t *testing.T) {
 	dir := t.TempDir()
 	store, err := session.Create(dir, "ws", dir)
