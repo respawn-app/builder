@@ -19,7 +19,6 @@ import (
 	"builder/server/auth"
 	"builder/server/authflow"
 	"builder/server/llm"
-	"builder/server/metadata"
 	"builder/server/runtime"
 	"builder/server/serve"
 	"builder/server/session"
@@ -460,7 +459,7 @@ func TestTryDialMatchingConfiguredRemoteSkipsUnregisteredWorkspace(t *testing.T)
 	}
 }
 
-func TestStartLocalRunPromptDaemonSkipsUnregisteredWorkspaceWithoutSpawning(t *testing.T) {
+func TestStartLocalRunPromptDaemonAttemptsLaunchWhenRegistrationMustBeResolvedByServer(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	t.Setenv("HOME", home)
@@ -476,11 +475,11 @@ func TestStartLocalRunPromptDaemonSkipsUnregisteredWorkspaceWithoutSpawning(t *t
 	}
 
 	remote, closeFn, ok, err := startLocalRunPromptDaemon(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true})
-	if err != nil {
-		t.Fatalf("startLocalRunPromptDaemon: %v", err)
+	if err == nil {
+		t.Fatal("expected daemon launch attempt to fail for unregistered workspace probe")
 	}
 	if ok {
-		t.Fatal("expected no daemon launch for unregistered workspace")
+		t.Fatal("expected no connected daemon client after failed launch attempt")
 	}
 	if remote != nil {
 		t.Fatalf("expected no remote client, got %v", remote)
@@ -488,8 +487,8 @@ func TestStartLocalRunPromptDaemonSkipsUnregisteredWorkspaceWithoutSpawning(t *t
 	if closeFn != nil {
 		t.Fatal("expected no close function when launch is skipped")
 	}
-	if lookupCalls != 0 {
-		t.Fatalf("expected daemon executable lookup to be skipped, got %d calls", lookupCalls)
+	if lookupCalls != 1 {
+		t.Fatalf("expected daemon executable lookup once, got %d calls", lookupCalls)
 	}
 }
 
@@ -500,7 +499,7 @@ func TestStartRunPromptClientUnregisteredWorkspaceReturnsRegistrationError(t *te
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	runClient, closeFn, err := startRunPromptClient(context.Background(), Options{WorkspaceRoot: workspace, WorkspaceRootExplicit: true})
-	if !errors.Is(err, metadata.ErrWorkspaceNotRegistered) {
+	if !errors.Is(err, serverapi.ErrWorkspaceNotRegistered) {
 		t.Fatalf("startRunPromptClient error = %v, want ErrWorkspaceNotRegistered", err)
 	}
 	if runClient != nil {

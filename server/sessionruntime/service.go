@@ -2,6 +2,7 @@ package sessionruntime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -42,14 +43,12 @@ type Service struct {
 }
 
 type runtimeHandle struct {
-	refs               int
-	activationRequests map[string]string
-	activeLeases       map[string]struct{}
-	ready              chan struct{}
-	close              func()
+	controllerRequestID string
+	controllerLeaseID   string
+	activationErr       error
+	ready               chan struct{}
+	close               func()
 }
-
-const maxActivationRetries = 3
 
 func NewService(persistenceRoot string, metadataStore *metadata.Store, authManager *auth.Manager, fastModeState *runtime.FastModeState, background *shelltool.Manager, backgroundRouter *runtimewire.BackgroundEventRouter, runtimes *registry.RuntimeRegistry, sessionStores *registry.SessionStoreRegistry, storeOptions ...session.StoreOption) *Service {
 	return &Service{
@@ -72,42 +71,30 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	requestID := strings.TrimSpace(req.ClientRequestID)
-
-	s.mu.Lock()
-	if handle := s.handles[sessionID]; handle != nil {
-		if leaseID, ok := handle.activationRequests[requestID]; ok {
-			s.mu.Unlock()
-			if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
-				return serverapi.SessionRuntimeActivateResponse{}, err
-			}
-			return serverapi.SessionRuntimeActivateResponse{LeaseID: leaseID}, nil
-		}
-		s.mu.Unlock()
-
-		for attempt := 0; attempt < maxActivationRetries; attempt++ {
-			lease, err := s.createRuntimeLease(ctx, sessionID, requestID)
-			if err != nil {
-				return serverapi.SessionRuntimeActivateResponse{}, err
-			}
-			handle, actualLeaseID, ok, ownsClaim := s.claimExistingHandleLease(sessionID, requestID, lease.LeaseID)
-			if !ok {
-				_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
-				break
-			}
-			if actualLeaseID != lease.LeaseID {
-				_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
-				lease.LeaseID = actualLeaseID
-			}
-			if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
-				s.rollbackActivationClaim(sessionID, requestID, lease.LeaseID, handle, ownsClaim)
-				_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
-				return serverapi.SessionRuntimeActivateResponse{}, err
-			}
-			return serverapi.SessionRuntimeActivateResponse{LeaseID: lease.LeaseID}, nil
-		}
-		return serverapi.SessionRuntimeActivateResponse{}, fmt.Errorf("activate session runtime: exceeded retry budget for %q", sessionID)
+	handle, owner, err := s.claimActivation(sessionID, requestID)
+	if err != nil {
+		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
-	s.mu.Unlock()
+	if !owner {
+		if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
+			return serverapi.SessionRuntimeActivateResponse{}, err
+		}
+		return activationResponseForHandle(handle)
+	}
+	var leaseID string
+	var cleanup func()
+	defer func() {
+		if err == nil {
+			return
+		}
+		if cleanup != nil {
+			cleanup()
+		}
+		if strings.TrimSpace(leaseID) != "" {
+			_, _ = s.releaseRuntimeLease(context.Background(), sessionID, leaseID)
+		}
+		s.failActivation(sessionID, handle, err)
+	}()
 	store, err := s.resolveStore(ctx, sessionID)
 	if err != nil {
 		return serverapi.SessionRuntimeActivateResponse{}, err
@@ -122,18 +109,16 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 	if err != nil {
 		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
+	leaseID = lease.LeaseID
 	target, err := s.resolveExecutionTarget(ctx, sessionID)
 	if err != nil {
-		_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
 		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
 		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
 	logger, err := runprompt.NewRunLogger(store.Dir(), nil)
 	if err != nil {
-		_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
 		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
 	logger.Logf("app.interactive.start session_id=%s workspace=%s workdir=%s model=%s", sessionID, target.WorkspaceRoot, target.EffectiveWorkdir, req.ActiveSettings.Model)
@@ -144,7 +129,6 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 	enabledTools, err := parseToolIDs(req.EnabledToolIDs)
 	if err != nil {
 		_ = logger.Close()
-		_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
 		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
 	wiring, err := runtimewire.NewRuntimeWiringWithBackground(store, req.ActiveSettings, enabledTools, target.EffectiveWorkdir, s.authManager, logger, s.background, runtimewire.RuntimeWiringOptions{
@@ -163,7 +147,6 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 	})
 	if err != nil {
 		_ = logger.Close()
-		_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
 		return serverapi.SessionRuntimeActivateResponse{}, err
 	}
 	if wiring.AskBroker != nil && s.runtimes != nil {
@@ -171,45 +154,25 @@ func (s *Service) ActivateSessionRuntime(ctx context.Context, req serverapi.Sess
 			return s.runtimes.AwaitPromptResponse(context.Background(), sessionID, req)
 		})
 	}
-	handle := &runtimeHandle{
-		refs:               1,
-		activationRequests: map[string]string{requestID: lease.LeaseID},
-		activeLeases:       map[string]struct{}{lease.LeaseID: {}},
-		ready:              make(chan struct{}),
-		close: func() {
-			if s.runtimes != nil {
-				s.runtimes.Unregister(sessionID, wiring.Engine)
-			}
-			if s.backgroundRouter != nil {
-				s.backgroundRouter.ClearActiveSession(sessionID)
-			}
-			_ = wiring.Close()
-			_ = logger.Close()
-		},
-	}
-	current, installed, actualLeaseID, ownsClaim := s.installHandle(sessionID, requestID, lease.LeaseID, handle)
-	if !installed {
-		_ = wiring.Close()
-		_ = logger.Close()
-		if actualLeaseID != lease.LeaseID {
-			_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
-			lease.LeaseID = actualLeaseID
-		}
-		if err := waitForRuntimeHandleReady(ctx, current); err != nil {
-			s.rollbackActivationClaim(sessionID, requestID, lease.LeaseID, current, ownsClaim)
-			_, _ = s.releaseRuntimeLease(context.Background(), sessionID, lease.LeaseID)
-			return serverapi.SessionRuntimeActivateResponse{}, err
-		}
-		return serverapi.SessionRuntimeActivateResponse{LeaseID: lease.LeaseID}, nil
-	}
-	defer close(handle.ready)
 	if s.runtimes != nil {
 		s.runtimes.Register(sessionID, wiring.Engine)
 	}
 	if s.backgroundRouter != nil {
 		s.backgroundRouter.SetActiveSession(sessionID, wiring.Engine)
 	}
-	return serverapi.SessionRuntimeActivateResponse{LeaseID: lease.LeaseID}, nil
+	cleanup = func() {
+		if s.runtimes != nil {
+			s.runtimes.Unregister(sessionID, wiring.Engine)
+		}
+		if s.backgroundRouter != nil {
+			s.backgroundRouter.ClearActiveSession(sessionID)
+		}
+		_ = wiring.Close()
+		_ = logger.Close()
+	}
+	s.completeActivation(handle, leaseID, cleanup)
+	cleanup = nil
+	return serverapi.SessionRuntimeActivateResponse{LeaseID: leaseID}, nil
 }
 
 func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.SessionRuntimeReleaseRequest) (serverapi.SessionRuntimeReleaseResponse, error) {
@@ -228,20 +191,7 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 		s.mu.Unlock()
 		return serverapi.SessionRuntimeReleaseResponse{}, leaseErr
 	}
-	if _, ok := handle.activeLeases[leaseID]; !ok {
-		s.mu.Unlock()
-		return serverapi.SessionRuntimeReleaseResponse{}, leaseErr
-	}
-	delete(handle.activeLeases, leaseID)
-	for requestID, claimedLeaseID := range handle.activationRequests {
-		if claimedLeaseID == leaseID {
-			delete(handle.activationRequests, requestID)
-		}
-	}
-	if handle.refs > 0 {
-		handle.refs--
-	}
-	if handle.refs > 0 {
+	if strings.TrimSpace(handle.controllerLeaseID) != leaseID {
 		s.mu.Unlock()
 		return serverapi.SessionRuntimeReleaseResponse{}, leaseErr
 	}
@@ -256,6 +206,30 @@ func (s *Service) ReleaseSessionRuntime(ctx context.Context, req serverapi.Sessi
 		closeFn()
 	}
 	return serverapi.SessionRuntimeReleaseResponse{}, leaseErr
+}
+
+func (s *Service) RequireControllerLease(ctx context.Context, sessionID string, leaseID string) error {
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	trimmedLeaseID := strings.TrimSpace(leaseID)
+	if trimmedLeaseID == "" {
+		return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is required", trimmedSessionID))
+	}
+	s.mu.Lock()
+	handle := s.handles[trimmedSessionID]
+	s.mu.Unlock()
+	if handle == nil {
+		return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", trimmedSessionID))
+	}
+	if err := waitForRuntimeHandleReady(ctx, handle); err != nil {
+		return err
+	}
+	if handle.activationErr != nil {
+		return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", trimmedSessionID))
+	}
+	if strings.TrimSpace(handle.controllerLeaseID) != trimmedLeaseID {
+		return errors.Join(serverapi.ErrInvalidControllerLease, fmt.Errorf("controller lease for session %q is invalid or expired", trimmedSessionID))
+	}
+	return nil
 }
 
 func (s *Service) resolveStore(ctx context.Context, sessionID string) (*session.Store, error) {
@@ -284,62 +258,45 @@ func (s *Service) resolveStore(ctx context.Context, sessionID string) (*session.
 	return store, nil
 }
 
-func (s *Service) installHandle(sessionID string, requestID string, leaseID string, handle *runtimeHandle) (*runtimeHandle, bool, string, bool) {
+// Phase 2 temporarily allows many attached readers, but exactly one controlling
+// client per session. A second activation must fail explicitly instead of
+// joining the active runtime.
+func (s *Service) claimActivation(sessionID string, requestID string) (*runtimeHandle, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if current := s.handles[sessionID]; current != nil {
-		if currentLeaseID, exists := current.activationRequests[requestID]; exists {
-			return current, false, currentLeaseID, false
+		if current.controllerRequestID == requestID {
+			return current, false, nil
 		}
-		current.activationRequests[requestID] = leaseID
-		current.activeLeases[leaseID] = struct{}{}
-		current.refs++
-		return current, false, leaseID, true
+		return nil, false, errors.Join(serverapi.ErrSessionAlreadyControlled, fmt.Errorf("session %q is already controlled by another client", sessionID))
 	}
+	handle := &runtimeHandle{controllerRequestID: requestID, ready: make(chan struct{})}
 	s.handles[sessionID] = handle
-	return handle, true, leaseID, true
+	return handle, true, nil
 }
 
-func (s *Service) claimExistingHandleLease(sessionID string, requestID string, leaseID string) (*runtimeHandle, string, bool, bool) {
-	sessionID = strings.TrimSpace(sessionID)
-	requestID = strings.TrimSpace(requestID)
-	leaseID = strings.TrimSpace(leaseID)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	handle := s.handles[sessionID]
+func (s *Service) completeActivation(handle *runtimeHandle, leaseID string, closeFn func()) {
 	if handle == nil {
-		return nil, "", false, false
-	}
-	if currentLeaseID, exists := handle.activationRequests[requestID]; exists {
-		return handle, currentLeaseID, true, false
-	}
-	handle.activationRequests[requestID] = leaseID
-	handle.activeLeases[leaseID] = struct{}{}
-	handle.refs++
-	return handle, leaseID, true, true
-}
-
-func (s *Service) rollbackActivationClaim(sessionID string, requestID string, leaseID string, handle *runtimeHandle, ownsClaim bool) {
-	if handle == nil || !ownsClaim {
 		return
 	}
+	handle.controllerLeaseID = strings.TrimSpace(leaseID)
+	handle.close = closeFn
+	close(handle.ready)
+}
+
+func (s *Service) failActivation(sessionID string, handle *runtimeHandle, err error) {
+	if handle == nil {
+		return
+	}
+	handle.activationErr = err
+	close(handle.ready)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	current := s.handles[strings.TrimSpace(sessionID)]
 	if current == nil || current != handle {
 		return
 	}
-	claimedLeaseID, ok := current.activationRequests[strings.TrimSpace(requestID)]
-	if !ok {
-		return
-	}
-	delete(current.activationRequests, strings.TrimSpace(requestID))
-	if strings.TrimSpace(claimedLeaseID) == strings.TrimSpace(leaseID) {
-		delete(current.activeLeases, strings.TrimSpace(leaseID))
-	}
-	if current.refs > 0 {
-		current.refs--
-	}
+	delete(s.handles, strings.TrimSpace(sessionID))
 }
 
 func (s *Service) resolveExecutionTarget(ctx context.Context, sessionID string) (clientui.SessionExecutionTarget, error) {
@@ -380,6 +337,20 @@ func waitForRuntimeHandleReady(ctx context.Context, handle *runtimeHandle) error
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func activationResponseForHandle(handle *runtimeHandle) (serverapi.SessionRuntimeActivateResponse, error) {
+	if handle == nil {
+		return serverapi.SessionRuntimeActivateResponse{}, fmt.Errorf("activate session runtime: missing runtime handle")
+	}
+	if handle.activationErr != nil {
+		return serverapi.SessionRuntimeActivateResponse{}, handle.activationErr
+	}
+	leaseID := strings.TrimSpace(handle.controllerLeaseID)
+	if leaseID == "" {
+		return serverapi.SessionRuntimeActivateResponse{}, fmt.Errorf("activate session runtime: controller lease is unavailable")
+	}
+	return serverapi.SessionRuntimeActivateResponse{LeaseID: leaseID}, nil
 }
 
 func parseToolIDs(raw []string) ([]toolspec.ID, error) {

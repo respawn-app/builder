@@ -53,6 +53,41 @@ func configureGatewayTestServerPort(t *testing.T) {
 
 var gatewayTestPortCounter atomic.Uint32
 
+func activateGatewayController(t *testing.T, appCore *core.Core, sessionID string) string {
+	t.Helper()
+	settings := appCore.Config().Settings
+	if strings.TrimSpace(settings.Model) == "" {
+		settings.Model = "gpt-5"
+	}
+	if strings.TrimSpace(settings.ProviderOverride) == "" && strings.TrimSpace(settings.OpenAIBaseURL) == "" {
+		settings.ProviderOverride = "openai"
+	}
+	resp, err := appCore.SessionRuntimeClient().ActivateSessionRuntime(context.Background(), serverapi.SessionRuntimeActivateRequest{
+		ClientRequestID: "activate-" + strings.TrimSpace(sessionID),
+		SessionID:       strings.TrimSpace(sessionID),
+		ActiveSettings:  settings,
+		Source:          appCore.Config().Source,
+	})
+	if err != nil {
+		t.Fatalf("ActivateSessionRuntime: %v", err)
+	}
+	return resp.LeaseID
+}
+
+func releaseGatewayController(t *testing.T, appCore *core.Core, sessionID string, leaseID string) {
+	t.Helper()
+	if strings.TrimSpace(leaseID) == "" {
+		return
+	}
+	if _, err := appCore.SessionRuntimeClient().ReleaseSessionRuntime(context.Background(), serverapi.SessionRuntimeReleaseRequest{
+		ClientRequestID: "release-" + strings.TrimSpace(sessionID),
+		SessionID:       strings.TrimSpace(sessionID),
+		LeaseID:         strings.TrimSpace(leaseID),
+	}); err != nil {
+		t.Fatalf("ReleaseSessionRuntime: %v", err)
+	}
+}
+
 func TestGatewayHandshakeAndProjectList(t *testing.T) {
 	home := t.TempDir()
 	workspace := t.TempDir()
@@ -244,7 +279,7 @@ func TestGatewayRejectsSessionAccessOutsideAttachedProject(t *testing.T) {
 	if _, err := remote.GetSessionMainView(context.Background(), serverapi.SessionMainViewRequest{SessionID: foreignSession.Meta().SessionID}); err == nil {
 		t.Fatal("expected foreign-project session view access to be rejected")
 	}
-	if _, err := remote.PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{SessionID: foreignSession.Meta().SessionID, Input: "should fail"}); err == nil {
+	if _, err := remote.PersistInputDraft(context.Background(), serverapi.SessionPersistInputDraftRequest{ClientRequestID: "persist-foreign", SessionID: foreignSession.Meta().SessionID, ControllerLeaseID: "lease-foreign", Input: "should fail"}); err == nil {
 		t.Fatal("expected foreign-project session mutation to be rejected")
 	}
 	if bindingA.ProjectID == bindingB.ProjectID {
@@ -771,6 +806,8 @@ func TestGatewayRemoteSessionActivityStreamsDirectSubmittedUserMessage(t *testin
 	defer server.Close()
 
 	store := createGatewayAuthoritativeSession(t, appCore)
+	controllerLeaseID := activateGatewayController(t, appCore, store.Meta().SessionID)
+	defer releaseGatewayController(t, appCore, store.Meta().SessionID, controllerLeaseID)
 	eng, err := runtime.New(store, gatewayTestLLMClient{response: llm.Response{Assistant: llm.Message{Role: llm.RoleAssistant, Content: "done"}, Usage: llm.Usage{WindowTokens: 200000}}}, tools.NewRegistry(), runtime.Config{Model: "gpt-5", OnEvent: func(evt runtime.Event) {
 		appCore.PublishRuntimeEvent(store.Meta().SessionID, evt)
 	}})
@@ -793,7 +830,7 @@ func TestGatewayRemoteSessionActivityStreamsDirectSubmittedUserMessage(t *testin
 	}
 	defer func() { _ = sub.Close() }()
 
-	if _, err := remote.SubmitUserMessage(context.Background(), serverapi.RuntimeSubmitUserMessageRequest{SessionID: store.Meta().SessionID, Text: "say hi"}); err != nil {
+	if _, err := remote.SubmitUserMessage(context.Background(), serverapi.RuntimeSubmitUserMessageRequest{ClientRequestID: "submit-say-hi", SessionID: store.Meta().SessionID, ControllerLeaseID: controllerLeaseID, Text: "say hi"}); err != nil {
 		t.Fatalf("SubmitUserMessage: %v", err)
 	}
 
@@ -827,6 +864,8 @@ func TestGatewayRemoteSessionActivityPreservesActiveSubmitOrderingUsingAssistant
 	defer server.Close()
 
 	store := createGatewayAuthoritativeSession(t, appCore)
+	controllerLeaseID := activateGatewayController(t, appCore, store.Meta().SessionID)
+	defer releaseGatewayController(t, appCore, store.Meta().SessionID, controllerLeaseID)
 	eng, err := runtime.New(store, &gatewayTestStreamingClient{}, tools.NewRegistry(gatewayTestShellTool{}), runtime.Config{Model: "gpt-5", OnEvent: func(evt runtime.Event) {
 		appCore.PublishRuntimeEvent(store.Meta().SessionID, evt)
 	}})
@@ -851,7 +890,7 @@ func TestGatewayRemoteSessionActivityPreservesActiveSubmitOrderingUsingAssistant
 
 	submitDone := make(chan error, 1)
 	go func() {
-		_, submitErr := remote.SubmitUserMessage(context.Background(), serverapi.RuntimeSubmitUserMessageRequest{SessionID: store.Meta().SessionID, Text: "run tools"})
+		_, submitErr := remote.SubmitUserMessage(context.Background(), serverapi.RuntimeSubmitUserMessageRequest{ClientRequestID: "submit-run-tools", SessionID: store.Meta().SessionID, ControllerLeaseID: controllerLeaseID, Text: "run tools"})
 		submitDone <- submitErr
 	}()
 

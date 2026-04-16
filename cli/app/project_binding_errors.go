@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"builder/server/metadata"
 	"builder/shared/clientui"
+	"builder/shared/serverapi"
 )
 
 func formatProjectBindingStartupError(workspaceRoot string, projectID string, err error) error {
@@ -15,10 +15,10 @@ func formatProjectBindingStartupError(workspaceRoot string, projectID string, er
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, metadata.ErrProjectNotFound):
+	case errors.Is(err, serverapi.ErrProjectNotFound):
 		return fmt.Errorf("workspace %q is attached to missing project %q. Repair the binding before continuing: %w", trimmedWorkspaceRoot, trimmedProjectID, err)
-	case errors.Is(err, metadata.ErrProjectUnavailable):
-		if unavailable, ok := metadata.AsProjectUnavailable(err); ok {
+	case errors.Is(err, serverapi.ErrProjectUnavailable):
+		if unavailable, ok := serverapi.AsProjectUnavailable(err); ok {
 			switch unavailable.Availability {
 			case clientui.ProjectAvailabilityMissing:
 				return fmt.Errorf("project %q root %q is missing. Run `builder rebind <old-path> <new-path>` if the workspace moved: %w", unavailable.ProjectID, unavailable.RootPath, err)
@@ -36,9 +36,9 @@ func formatProjectBindingMutationError(workspaceRoot string, projectID string, e
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, metadata.ErrWorkspaceNotRegistered):
+	case errors.Is(err, serverapi.ErrWorkspaceNotRegistered):
 		return headlessWorkspaceRegistrationError(trimmedWorkspaceRoot)
-	case errors.Is(err, metadata.ErrProjectNotFound):
+	case errors.Is(err, serverapi.ErrProjectNotFound):
 		return fmt.Errorf("project %q is no longer available. Restart Builder and choose another project: %w", trimmedProjectID, err)
 	}
 	return err

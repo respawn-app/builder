@@ -293,6 +293,7 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 	_ = diagnosticWriter
 	logger.Logf("%s", startLogLine)
 	runtimeClient := newUIRuntimeClientWithReads(plan.SessionID, server.SessionViewClient(), server.RuntimeControlClient()).(*sessionRuntimeClient)
+	runtimeClient.SetControllerLeaseID(leaseID)
 	runtimeClient.SetTranscriptDiagnosticsEnabled(transcriptdiag.EnabledForProcess(plan.ActiveSettings.Debug))
 	runtimeEvents, stopRuntimeEvents := startSessionActivityEvents(ctx, sub, func(ctx context.Context) (serverapi.SessionActivitySubscription, error) {
 		return server.SessionActivityClient().SubscribeSessionActivity(ctx, serverapi.SessionActivitySubscribeRequest{SessionID: plan.SessionID})
@@ -303,7 +304,7 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 		return server.PromptActivityClient().SubscribePromptActivity(ctx, serverapi.PromptActivitySubscribeRequest{SessionID: plan.SessionID})
 	}, func(ctx context.Context) (map[string]struct{}, error) {
 		return listPendingPromptIDs(ctx, plan.SessionID, server.AskViewClient(), server.ApprovalViewClient())
-	}, server.PromptControlClient())
+	}, server.PromptControlClient(), leaseID)
 	turnQueueHook := newBellHooks(defaultTerminalNotifier(plan.ActiveSettings.NotificationMethod), func() string {
 		if runtimeClient != nil {
 			if sessionName := strings.TrimSpace(runtimeClient.MainView().Session.SessionName); sessionName != "" {
@@ -329,8 +330,9 @@ func prepareSharedRuntime(ctx context.Context, server embeddedServer, plan sessi
 		sessionViews:    server.SessionViewClient(),
 	}
 	return &runtimeLaunchPlan{
-		Logger: logger,
-		Wiring: wiring,
+		Logger:            logger,
+		Wiring:            wiring,
+		ControllerLeaseID: leaseID,
 		close: func() {
 			stopAskEvents()
 			stopRuntimeEvents()

@@ -66,7 +66,7 @@ func (e *promptEventEmitter) close() {
 	close(e.out)
 }
 
-func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivitySubscription, subscribe promptActivitySubscriber, snapshot pendingPromptSnapshotProvider, control client.PromptControlClient) (<-chan askEvent, func()) {
+func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivitySubscription, subscribe promptActivitySubscriber, snapshot pendingPromptSnapshotProvider, control client.PromptControlClient, controllerLeaseID string) (<-chan askEvent, func()) {
 	emitter := newPromptEventEmitter(16)
 	out := emitter.channel()
 	if sub == nil || subscribe == nil || control == nil {
@@ -87,7 +87,7 @@ func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivityS
 		if !isPromptPending(item.PromptID) {
 			return
 		}
-		_ = emitter.emit(pollCtx, pendingPromptEvent(pollCtx, item, control, requeue))
+		_ = emitter.emit(pollCtx, pendingPromptEvent(pollCtx, item, controllerLeaseID, control, requeue))
 	}
 	go func() {
 		defer emitter.close()
@@ -141,7 +141,7 @@ func startPendingPromptEvents(ctx context.Context, sub serverapi.PromptActivityS
 			default:
 				continue
 			}
-			if !emitter.emit(pollCtx, pendingPromptEvent(pollCtx, evt, control, requeue)) {
+			if !emitter.emit(pollCtx, pendingPromptEvent(pollCtx, evt, controllerLeaseID, control, requeue)) {
 				_ = current.Close()
 				return
 			}
@@ -205,7 +205,7 @@ func waitPromptActivityRetry(ctx context.Context) bool {
 	}
 }
 
-func pendingPromptEvent(ctx context.Context, item clientui.PendingPromptEvent, control client.PromptControlClient, retry func(clientui.PendingPromptEvent)) askEvent {
+func pendingPromptEvent(ctx context.Context, item clientui.PendingPromptEvent, controllerLeaseID string, control client.PromptControlClient, retry func(clientui.PendingPromptEvent)) askEvent {
 	req := askquestion.Request{
 		ID:                     item.PromptID,
 		Question:               item.Question,
@@ -235,7 +235,7 @@ func pendingPromptEvent(ctx context.Context, item clientui.PendingPromptEvent, c
 			}
 		}
 		if item.Approval {
-			answerReq := serverapi.ApprovalAnswerRequest{ClientRequestID: uuid.NewString(), SessionID: item.SessionID, ApprovalID: item.PromptID}
+			answerReq := serverapi.ApprovalAnswerRequest{ClientRequestID: uuid.NewString(), SessionID: item.SessionID, ControllerLeaseID: controllerLeaseID, ApprovalID: item.PromptID}
 			if result.err != nil {
 				answerReq.ErrorMessage = result.err.Error()
 			} else if result.response.Approval != nil {
@@ -251,7 +251,7 @@ func pendingPromptEvent(ctx context.Context, item clientui.PendingPromptEvent, c
 			}
 			return
 		}
-		answerReq := serverapi.AskAnswerRequest{ClientRequestID: uuid.NewString(), SessionID: item.SessionID, AskID: item.PromptID}
+		answerReq := serverapi.AskAnswerRequest{ClientRequestID: uuid.NewString(), SessionID: item.SessionID, ControllerLeaseID: controllerLeaseID, AskID: item.PromptID}
 		if result.err != nil {
 			answerReq.ErrorMessage = result.err.Error()
 		} else {

@@ -116,7 +116,7 @@ func TestStartPendingPromptEventsResubscribesWithoutDuplicatingPendingPrompt(t *
 		next := remaining[0]
 		remaining = remaining[1:]
 		return next, nil
-	}, nil, stubPromptControlClient{})
+	}, nil, stubPromptControlClient{}, "lease-test-controller")
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -153,7 +153,7 @@ func TestStartPendingPromptEventsResubscribeEmitsResolutionForPromptMissingFromS
 		return next, nil
 	}, func(context.Context) (map[string]struct{}, error) {
 		return map[string]struct{}{"ask-2": {}}, nil
-	}, stubPromptControlClient{})
+	}, stubPromptControlClient{}, "lease-test-controller")
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -193,7 +193,7 @@ func TestStartPendingPromptEventsRetriesResubscribeWhenSnapshotReadFails(t *test
 			return nil, errors.New("snapshot unavailable")
 		}
 		return map[string]struct{}{"ask-2": {}}, nil
-	}, stubPromptControlClient{})
+	}, stubPromptControlClient{}, "lease-test-controller")
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -225,7 +225,7 @@ func TestPendingPromptEventRequeuesWhenAnswerRPCFails(t *testing.T) {
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, nil, control)
+	}, nil, control, "lease-test-controller")
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -268,7 +268,7 @@ func TestPendingPromptEventRetryAfterStopDoesNotPanic(t *testing.T) {
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, nil, control)
+	}, nil, control, "lease-test-controller")
 
 	first := waitPromptEvent(t, events)
 	stop()
@@ -295,7 +295,7 @@ func TestStartPendingPromptEventsEmitsResolutionEvent(t *testing.T) {
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, nil, stubPromptControlClient{})
+	}, nil, stubPromptControlClient{}, "lease-test-controller")
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -317,7 +317,7 @@ func TestPendingPromptEventDoesNotRequeueOnTerminalAnswerError(t *testing.T) {
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, nil, control)
+	}, nil, control, "lease-test-controller")
 	defer stop()
 
 	first := waitPromptEvent(t, events)
@@ -344,7 +344,7 @@ func TestPendingPromptEventDoesNotRequeueAfterPromptAlreadyResolvedLocally(t *te
 
 	events, stop := startPendingPromptEvents(ctx, initial, func(context.Context) (serverapi.PromptActivitySubscription, error) {
 		return nil, context.Canceled
-	}, nil, control)
+	}, nil, control, "lease-test-controller")
 	defer stop()
 
 	first := waitPromptEvent(t, events)
