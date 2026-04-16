@@ -2,9 +2,9 @@ package runtimecontrol
 
 import (
 	"context"
+	"errors"
 	"testing"
 
-	"builder/server/idempotency"
 	"builder/server/llm"
 	"builder/server/runtime"
 	"builder/server/session"
@@ -36,7 +36,7 @@ func (runtimeControlFakeClient) Generate(context.Context, llm.Request) (llm.Resp
 	return llm.Response{}, nil
 }
 
-func TestServiceSetSessionNameReplaysAcrossLaterLeaseChange(t *testing.T) {
+func TestServiceSetSessionNameRequiresControllerLease(t *testing.T) {
 	store, err := session.Create(t.TempDir(), "workspace-x", "/tmp/workspace-x")
 	if err != nil {
 		t.Fatalf("create session store: %v", err)
@@ -50,26 +50,23 @@ func TestServiceSetSessionNameReplaysAcrossLaterLeaseChange(t *testing.T) {
 	}
 	verifier := &stubRuntimeLeaseVerifier{}
 	service := NewService(stubRuntimeResolver{engine: engine}, nil).
-		WithControllerLeaseVerifier(verifier).
-		WithIdempotencyCoordinator(idempotency.NewCoordinator(nil, idempotency.DefaultRetention))
-	first := serverapi.RuntimeSetSessionNameRequest{
+		WithControllerLeaseVerifier(verifier)
+	req := serverapi.RuntimeSetSessionNameRequest{
 		ClientRequestID:   "req-1",
 		SessionID:         store.Meta().SessionID,
 		ControllerLeaseID: "lease-1",
 		Name:              "after",
 	}
-	second := first
-	second.ControllerLeaseID = "lease-2"
 
-	if err := service.SetSessionName(context.Background(), first); err != nil {
+	if err := service.SetSessionName(context.Background(), req); err != nil {
 		t.Fatalf("SetSessionName first: %v", err)
 	}
 	verifier.err = serverapi.ErrInvalidControllerLease
-	if err := service.SetSessionName(context.Background(), second); err != nil {
-		t.Fatalf("SetSessionName replay: %v", err)
+	if err := service.SetSessionName(context.Background(), req); !errors.Is(err, serverapi.ErrInvalidControllerLease) {
+		t.Fatalf("SetSessionName second = %v, want ErrInvalidControllerLease", err)
 	}
-	if verifier.calls != 1 {
-		t.Fatalf("lease verifier call count = %d, want 1", verifier.calls)
+	if verifier.calls != 2 {
+		t.Fatalf("lease verifier call count = %d, want 2", verifier.calls)
 	}
 	if got := store.Meta().Name; got != "after" {
 		t.Fatalf("session name = %q, want after", got)

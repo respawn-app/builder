@@ -3,12 +3,8 @@ package runprompt
 import (
 	"context"
 	"errors"
-	"fmt"
-	"path/filepath"
-	"strings"
 
 	"builder/server/auth"
-	"builder/server/idempotency"
 	"builder/server/launch"
 	"builder/server/primaryrun"
 	"builder/server/runtime"
@@ -40,35 +36,12 @@ type HeadlessBootstrap struct {
 		SetActiveSession(sessionID string, engine *runtime.Engine)
 		ClearActiveSession(sessionID string)
 	}
-	Coordinator *idempotency.Coordinator
 }
 
 func NewLoopbackRunPromptClient(boot HeadlessBootstrap) client.RunPromptClient {
 	launcher := &headlessPromptLauncher{boot: boot}
-	service := newDeduplicatingPromptService(runPromptDedupeScopeID(boot), boot.Coordinator, primaryrun.NewGuardingPromptService(boot.RuntimeRegistry, serverapi.NewPromptService(launcher)))
+	service := primaryrun.NewGuardingPromptService(boot.RuntimeRegistry, serverapi.NewPromptService(launcher))
 	return client.NewLoopbackRunPromptClient(service)
-}
-
-func runPromptDedupeScopeID(boot HeadlessBootstrap) string {
-	parts := make([]string, 0, 3)
-	if part := normalizedRunPromptScopePart(boot.Config.PersistenceRoot); part != "" {
-		parts = append(parts, part)
-	}
-	if part := normalizedRunPromptScopePart(boot.ContainerDir); part != "" {
-		parts = append(parts, part)
-	}
-	if part := normalizedRunPromptScopePart(boot.Config.WorkspaceRoot); part != "" {
-		parts = append(parts, part)
-	}
-	return strings.Join(parts, "|")
-}
-
-func normalizedRunPromptScopePart(raw string) string {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return ""
-	}
-	return filepath.Clean(trimmed)
 }
 
 type headlessPromptLauncher struct {
@@ -223,51 +196,4 @@ func RunPromptProgressFromRuntimeEvent(evt runtime.Event) (serverapi.RunPromptPr
 	default:
 		return serverapi.RunPromptProgress{}, false
 	}
-}
-
-type deduplicatingPromptService struct {
-	scopeID     string
-	coordinator *idempotency.Coordinator
-	inner       serverapi.RunPromptService
-}
-
-func newDeduplicatingPromptService(scopeID string, coordinator *idempotency.Coordinator, inner serverapi.RunPromptService) serverapi.RunPromptService {
-	return &deduplicatingPromptService{scopeID: strings.TrimSpace(scopeID), coordinator: coordinator, inner: inner}
-}
-
-func (s *deduplicatingPromptService) RunPrompt(ctx context.Context, req serverapi.RunPromptRequest, progress serverapi.RunPromptProgressSink) (serverapi.RunPromptResponse, error) {
-	if s == nil || s.inner == nil {
-		return serverapi.RunPromptResponse{}, fmt.Errorf("run prompt service is required")
-	}
-	if s.coordinator == nil {
-		return s.inner.RunPrompt(ctx, req, progress)
-	}
-	fingerprint, err := idempotency.FingerprintPayload(struct {
-		SelectedSessionID string                       `json:"selected_session_id,omitempty"`
-		Prompt            string                       `json:"prompt"`
-		Timeout           int64                        `json:"timeout_ns,omitempty"`
-		Overrides         serverapi.RunPromptOverrides `json:"overrides,omitempty"`
-	}{
-		SelectedSessionID: strings.TrimSpace(req.SelectedSessionID),
-		Prompt:            strings.TrimSpace(req.Prompt),
-		Timeout:           int64(req.Timeout),
-		Overrides:         req.Overrides,
-	})
-	if err != nil {
-		return serverapi.RunPromptResponse{}, err
-	}
-	resourceID := strings.Join([]string{strings.TrimSpace(s.scopeID), strings.TrimSpace(req.SelectedSessionID)}, "|")
-	request := idempotency.Request{
-		Method:             "run_prompt.run",
-		ResourceID:         resourceID,
-		ClientRequestID:    strings.TrimSpace(req.ClientRequestID),
-		PayloadFingerprint: fingerprint,
-	}
-	return idempotency.ExecuteWithPolicy(ctx, s.coordinator, request, idempotency.JSONCodec[serverapi.RunPromptResponse]{}, idempotency.CachePolicy{
-		ShouldCacheError: func(err error) bool {
-			return !errors.Is(err, primaryrun.ErrActivePrimaryRun)
-		},
-	}, func(ctx context.Context) (serverapi.RunPromptResponse, error) {
-		return s.inner.RunPrompt(ctx, req, progress)
-	})
 }

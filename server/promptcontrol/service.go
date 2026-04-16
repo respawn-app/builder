@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"builder/server/idempotency"
 	askquestion "builder/server/tools/askquestion"
-	"builder/shared/clientui"
 	"builder/shared/serverapi"
 )
 
@@ -19,9 +17,8 @@ type ControllerLeaseVerifier interface {
 }
 
 type Service struct {
-	prompts     PendingPromptResponder
-	control     ControllerLeaseVerifier
-	coordinator *idempotency.Coordinator
+	prompts PendingPromptResponder
+	control ControllerLeaseVerifier
 }
 
 func NewService(prompts PendingPromptResponder) *Service {
@@ -33,14 +30,6 @@ func (s *Service) WithControllerLeaseVerifier(verifier ControllerLeaseVerifier) 
 		return nil
 	}
 	s.control = verifier
-	return s
-}
-
-func (s *Service) WithIdempotencyCoordinator(coordinator *idempotency.Coordinator) *Service {
-	if s == nil {
-		return nil
-	}
-	s.coordinator = coordinator
 	return s
 }
 
@@ -58,49 +47,18 @@ func (s *Service) AnswerAsk(ctx context.Context, req serverapi.AskAnswerRequest)
 	if s == nil || s.prompts == nil {
 		return errors.New("prompt responder is required")
 	}
-	run := func(ctx context.Context) (struct{}, error) {
-		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
-			return struct{}{}, err
-		}
-		if req.ErrorMessage != "" {
-			return struct{}{}, s.prompts.SubmitPromptResponse(req.SessionID, askquestion.Response{RequestID: req.AskID}, errors.New(req.ErrorMessage))
-		}
-		return struct{}{}, s.prompts.SubmitPromptResponse(req.SessionID, askquestion.Response{
-			RequestID:            req.AskID,
-			Answer:               req.Answer,
-			SelectedOptionNumber: req.SelectedOptionNumber,
-			FreeformAnswer:       req.FreeformAnswer,
-		}, nil)
-	}
-	if s.coordinator == nil {
-		_, err := run(ctx)
+	if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
 		return err
 	}
-	fingerprint, err := idempotency.FingerprintPayload(struct {
-		SessionID            string `json:"session_id"`
-		AskID                string `json:"ask_id"`
-		ErrorMessage         string `json:"error_message,omitempty"`
-		Answer               string `json:"answer,omitempty"`
-		SelectedOptionNumber int    `json:"selected_option_number,omitempty"`
-		FreeformAnswer       string `json:"freeform_answer,omitempty"`
-	}{
-		SessionID:            req.SessionID,
-		AskID:                req.AskID,
-		ErrorMessage:         req.ErrorMessage,
+	if req.ErrorMessage != "" {
+		return s.prompts.SubmitPromptResponse(req.SessionID, askquestion.Response{RequestID: req.AskID}, errors.New(req.ErrorMessage))
+	}
+	return s.prompts.SubmitPromptResponse(req.SessionID, askquestion.Response{
+		RequestID:            req.AskID,
 		Answer:               req.Answer,
 		SelectedOptionNumber: req.SelectedOptionNumber,
 		FreeformAnswer:       req.FreeformAnswer,
-	})
-	if err != nil {
-		return err
-	}
-	_, err = idempotency.Execute(ctx, s.coordinator, idempotency.Request{
-		Method:             "prompt.answer_ask",
-		ResourceID:         req.AskID,
-		ClientRequestID:    req.ClientRequestID,
-		PayloadFingerprint: fingerprint,
-	}, idempotency.JSONCodec[struct{}]{}, run)
-	return err
+	}, nil)
 }
 
 func (s *Service) AnswerApproval(ctx context.Context, req serverapi.ApprovalAnswerRequest) error {
@@ -110,48 +68,19 @@ func (s *Service) AnswerApproval(ctx context.Context, req serverapi.ApprovalAnsw
 	if s == nil || s.prompts == nil {
 		return errors.New("prompt responder is required")
 	}
-	run := func(ctx context.Context) (struct{}, error) {
-		if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
-			return struct{}{}, err
-		}
-		if req.ErrorMessage != "" {
-			return struct{}{}, s.prompts.SubmitPromptResponse(req.SessionID, askquestion.Response{RequestID: req.ApprovalID}, errors.New(req.ErrorMessage))
-		}
-		return struct{}{}, s.prompts.SubmitPromptResponse(req.SessionID, askquestion.Response{
-			RequestID: req.ApprovalID,
-			Approval: &askquestion.ApprovalPayload{
-				Decision:   askquestion.ApprovalDecision(req.Decision),
-				Commentary: req.Commentary,
-			},
-		}, nil)
-	}
-	if s.coordinator == nil {
-		_, err := run(ctx)
+	if err := s.requireControllerLease(ctx, req.SessionID, req.ControllerLeaseID); err != nil {
 		return err
 	}
-	fingerprint, err := idempotency.FingerprintPayload(struct {
-		SessionID    string                    `json:"session_id"`
-		ApprovalID   string                    `json:"approval_id"`
-		ErrorMessage string                    `json:"error_message,omitempty"`
-		Decision     clientui.ApprovalDecision `json:"decision"`
-		Commentary   string                    `json:"commentary,omitempty"`
-	}{
-		SessionID:    req.SessionID,
-		ApprovalID:   req.ApprovalID,
-		ErrorMessage: req.ErrorMessage,
-		Decision:     req.Decision,
-		Commentary:   req.Commentary,
-	})
-	if err != nil {
-		return err
+	if req.ErrorMessage != "" {
+		return s.prompts.SubmitPromptResponse(req.SessionID, askquestion.Response{RequestID: req.ApprovalID}, errors.New(req.ErrorMessage))
 	}
-	_, err = idempotency.Execute(ctx, s.coordinator, idempotency.Request{
-		Method:             "prompt.answer_approval",
-		ResourceID:         req.ApprovalID,
-		ClientRequestID:    req.ClientRequestID,
-		PayloadFingerprint: fingerprint,
-	}, idempotency.JSONCodec[struct{}]{}, run)
-	return err
+	return s.prompts.SubmitPromptResponse(req.SessionID, askquestion.Response{
+		RequestID: req.ApprovalID,
+		Approval: &askquestion.ApprovalPayload{
+			Decision:   askquestion.ApprovalDecision(req.Decision),
+			Commentary: req.Commentary,
+		},
+	}, nil)
 }
 
 var _ serverapi.PromptControlService = (*Service)(nil)

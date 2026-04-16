@@ -10,7 +10,6 @@ import (
 	"builder/server/askview"
 	"builder/server/auth"
 	serverbootstrap "builder/server/bootstrap"
-	"builder/server/idempotency"
 	"builder/server/launch"
 	"builder/server/metadata"
 	"builder/server/primaryrun"
@@ -49,7 +48,6 @@ type Core struct {
 	backgroundRouter *runtimewire.BackgroundEventRouter
 	rootLock         *rootlock.Lease
 	metadataStore    *metadata.Store
-	mutationDedup    *idempotency.Coordinator
 	runtimeRegistry  *registry.RuntimeRegistry
 	sessionStores    *registry.SessionStoreRegistry
 	projectID        string
@@ -112,7 +110,6 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		return nil, fmt.Errorf("background manager is required")
 	}
 	storeOptions := metadataStore.AuthoritativeSessionStoreOptions()
-	mutationDedup := idempotency.NewCoordinator(metadataStore, idempotency.DefaultRetention)
 	runtimeRegistry := registry.NewRuntimeRegistry()
 	sessionStoreRegistry := registry.NewSessionStoreRegistry()
 	projectService, err := projectview.NewMetadataService(metadataStore, "", "")
@@ -122,15 +119,15 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 	}
 	askService := askview.NewService(runtimeRegistry)
 	approvalService := approvalview.NewService(runtimeRegistry)
-	processService := processview.NewService(runtimeSupport.Background).WithIdempotencyCoordinator(mutationDedup)
+	processService := processview.NewService(runtimeSupport.Background)
 	processOutputService := processoutput.NewService(runtimeSupport.Background, runtimeSupport.Background)
 	sessionRuntimeService := sessionruntime.NewService(cfg.PersistenceRoot, metadataStore, authSupport.AuthManager, runtimeSupport.FastModeState, runtimeSupport.Background, runtimeSupport.BackgroundRouter, runtimeRegistry, sessionStoreRegistry, storeOptions...)
-	promptControlService := promptcontrol.NewService(runtimeRegistry).WithControllerLeaseVerifier(sessionRuntimeService).WithIdempotencyCoordinator(mutationDedup)
+	promptControlService := promptcontrol.NewService(runtimeRegistry).WithControllerLeaseVerifier(sessionRuntimeService)
 	promptActivityService := promptactivity.NewService(runtimeRegistry)
-	runtimeControlService := runtimecontrol.NewService(runtimeRegistry, runtimeRegistry).WithControllerLeaseVerifier(sessionRuntimeService).WithIdempotencyCoordinator(mutationDedup)
+	runtimeControlService := runtimecontrol.NewService(runtimeRegistry, runtimeRegistry).WithControllerLeaseVerifier(sessionRuntimeService)
 	projectViews := client.NewLoopbackProjectViewClient(projectService)
 	sessionViewService := sessionview.NewService(registry.NewGlobalPersistenceSessionResolver(cfg.PersistenceRoot, storeOptions...), runtimeRegistry, metadataStore)
-	sessionLifecycleService := sessionlifecycle.NewGlobalService(cfg.PersistenceRoot, sessionStoreRegistry, authSupport.AuthManager, storeOptions...).WithControllerLeaseVerifier(sessionRuntimeService).WithIdempotencyCoordinator(mutationDedup)
+	sessionLifecycleService := sessionlifecycle.NewGlobalService(cfg.PersistenceRoot, sessionStoreRegistry, authSupport.AuthManager, storeOptions...).WithControllerLeaseVerifier(sessionRuntimeService)
 	sessionActivityService := sessionactivity.NewService(runtimeRegistry)
 	core := &Core{
 		cfg:              cfg,
@@ -141,7 +138,6 @@ func New(cfg config.App, authSupport serverbootstrap.AuthSupport, runtimeSupport
 		backgroundRouter: runtimeSupport.BackgroundRouter,
 		rootLock:         rootLease,
 		metadataStore:    metadataStore,
-		mutationDedup:    mutationDedup,
 		runtimeRegistry:  runtimeRegistry,
 		sessionStores:    sessionStoreRegistry,
 		projectViews:     projectViews,
@@ -230,11 +226,7 @@ func (s *Core) SessionLaunchClientForProjectWorkspace(ctx context.Context, proje
 	if err != nil {
 		return nil, err
 	}
-	service := sessionlaunch.NewDeduplicatingService(
-		sessionlaunch.ScopeID(projectCtx.config, projectCtx.projectSession),
-		s.mutationDedup,
-		sessionlaunch.NewService(launch.Planner{Config: projectCtx.config, ContainerDir: projectCtx.projectSession, ProjectID: projectCtx.projectID, ProjectViews: s.projectViews, StoreOptions: s.metadataStore.AuthoritativeSessionStoreOptions()}, s.sessionStores),
-	)
+	service := sessionlaunch.NewService(launch.Planner{Config: projectCtx.config, ContainerDir: projectCtx.projectSession, ProjectID: projectCtx.projectID, ProjectViews: s.projectViews, StoreOptions: s.metadataStore.AuthoritativeSessionStoreOptions()}, s.sessionStores)
 	return client.NewLoopbackSessionLaunchClient(service), nil
 }
 
@@ -256,7 +248,6 @@ func (s *Core) RunPromptClientForProjectWorkspace(ctx context.Context, projectID
 		Background:       s.background,
 		RuntimeRegistry:  s.runtimeRegistry,
 		BackgroundRouter: s.backgroundRouter,
-		Coordinator:      s.mutationDedup,
 	}), nil
 }
 

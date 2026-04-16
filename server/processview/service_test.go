@@ -3,12 +3,10 @@ package processview
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 	"time"
 
-	"builder/server/idempotency"
 	"builder/server/tools"
 	shelltool "builder/server/tools/shell"
 	"builder/shared/serverapi"
@@ -204,56 +202,6 @@ func TestServiceKillProcessRequiresClientRequestID(t *testing.T) {
 	}
 }
 
-func TestServiceKillProcessDeduplicatesSuccessfulRetryByClientRequestID(t *testing.T) {
-	processes := &stubKillProcessSource{}
-	svc := NewService(processes).WithIdempotencyCoordinator(idempotency.NewCoordinator(nil, idempotency.DefaultRetention))
-	req := serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "proc-1"}
-	if _, err := svc.KillProcess(context.Background(), req); err != nil {
-		t.Fatalf("first KillProcess: %v", err)
-	}
-	processes.killErr = errors.New("unknown session_id proc-1")
-	if _, err := svc.KillProcess(context.Background(), req); err != nil {
-		t.Fatalf("second KillProcess retry: %v", err)
-	}
-	if processes.killCalls != 1 {
-		t.Fatalf("kill call count = %d, want 1", processes.killCalls)
-	}
-}
-
-func TestServiceKillProcessScopesClientRequestIDByProcess(t *testing.T) {
-	processes := &stubKillProcessSource{}
-	svc := NewService(processes).WithIdempotencyCoordinator(idempotency.NewCoordinator(nil, idempotency.DefaultRetention))
-	if _, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "proc-1"}); err != nil {
-		t.Fatalf("first KillProcess: %v", err)
-	}
-	if _, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "proc-2"}); err != nil {
-		t.Fatalf("second KillProcess: %v", err)
-	}
-	if processes.killCalls != 2 {
-		t.Fatalf("kill call count = %d, want 2", processes.killCalls)
-	}
-}
-
-func TestServiceKillProcessReturnsContextCanceledWhileWaitingForDuplicateInFlight(t *testing.T) {
-	processes := &blockingKillProcessSource{started: make(chan struct{}), release: make(chan struct{})}
-	svc := NewService(processes).WithIdempotencyCoordinator(idempotency.NewCoordinator(nil, idempotency.DefaultRetention))
-	done := make(chan error, 1)
-	go func() {
-		_, err := svc.KillProcess(context.Background(), serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "proc-1"})
-		done <- err
-	}()
-	<-processes.started
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := svc.KillProcess(ctx, serverapi.ProcessKillRequest{ClientRequestID: "req-kill-1", ProcessID: "proc-1"}); !errors.Is(err, context.Canceled) {
-		t.Fatalf("expected context canceled while waiting for duplicate in-flight request, got %v", err)
-	}
-	close(processes.release)
-	if err := <-done; err != nil {
-		t.Fatalf("first KillProcess: %v", err)
-	}
-}
-
 type stubKillProcessSource struct {
 	killCalls int
 	killErr   error
@@ -271,27 +219,6 @@ func (s *stubKillProcessSource) Kill(string) error {
 }
 
 func (s *stubKillProcessSource) InlineOutput(string, int) (string, string, error) {
-	return "", "", nil
-}
-
-type blockingKillProcessSource struct {
-	started chan struct{}
-	release chan struct{}
-}
-
-func (s *blockingKillProcessSource) List() []shelltool.Snapshot { return nil }
-
-func (s *blockingKillProcessSource) Snapshot(string) (shelltool.Snapshot, error) {
-	return shelltool.Snapshot{}, nil
-}
-
-func (s *blockingKillProcessSource) Kill(string) error {
-	close(s.started)
-	<-s.release
-	return nil
-}
-
-func (s *blockingKillProcessSource) InlineOutput(string, int) (string, string, error) {
 	return "", "", nil
 }
 

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"builder/server/auth"
-	"builder/server/idempotency"
 	"builder/server/llm"
 	"builder/server/session"
 	"builder/shared/serverapi"
@@ -109,33 +108,30 @@ func TestServicePersistInputDraftWritesBySessionID(t *testing.T) {
 	}
 }
 
-func TestServicePersistInputDraftReplaysAcrossLaterLeaseChange(t *testing.T) {
+func TestServicePersistInputDraftRequiresControllerLease(t *testing.T) {
 	_, containerDir, store := createPersistedSession(t)
 	if err := store.SetName("session name"); err != nil {
 		t.Fatalf("set session name: %v", err)
 	}
 	verifier := &stubSessionLifecycleLeaseVerifier{}
 	service := NewService(containerDir, nil, nil).
-		WithControllerLeaseVerifier(verifier).
-		WithIdempotencyCoordinator(idempotency.NewCoordinator(nil, idempotency.DefaultRetention))
-	first := serverapi.SessionPersistInputDraftRequest{
+		WithControllerLeaseVerifier(verifier)
+	req := serverapi.SessionPersistInputDraftRequest{
 		ClientRequestID:   "req-1",
 		SessionID:         store.Meta().SessionID,
 		ControllerLeaseID: "lease-1",
 		Input:             "saved by service",
 	}
-	second := first
-	second.ControllerLeaseID = "lease-2"
 
-	if _, err := service.PersistInputDraft(context.Background(), first); err != nil {
+	if _, err := service.PersistInputDraft(context.Background(), req); err != nil {
 		t.Fatalf("PersistInputDraft first: %v", err)
 	}
 	verifier.err = serverapi.ErrInvalidControllerLease
-	if _, err := service.PersistInputDraft(context.Background(), second); err != nil {
-		t.Fatalf("PersistInputDraft replay: %v", err)
+	if _, err := service.PersistInputDraft(context.Background(), req); err != serverapi.ErrInvalidControllerLease {
+		t.Fatalf("PersistInputDraft second = %v, want ErrInvalidControllerLease", err)
 	}
-	if verifier.calls != 1 {
-		t.Fatalf("lease verifier call count = %d, want 1", verifier.calls)
+	if verifier.calls != 2 {
+		t.Fatalf("lease verifier call count = %d, want 2", verifier.calls)
 	}
 	reopened, err := session.Open(store.Dir())
 	if err != nil {
@@ -413,7 +409,7 @@ func TestServiceResolveTransitionLogoutUsesSessionIDWithoutStoreLookup(t *testin
 			APIKey: &auth.APIKeyMethod{Key: "sk-before"},
 		},
 	}), nil, time.Now)
-	service := NewService(t.TempDir(), nil, mgr).WithIdempotencyCoordinator(idempotency.NewCoordinator(nil, idempotency.DefaultRetention))
+	service := NewService(t.TempDir(), nil, mgr)
 
 	resp, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
 		ClientRequestID:   "req-1",
@@ -442,7 +438,7 @@ func TestServiceResolveTransitionLogoutUsesSessionIDWithoutStoreLookup(t *testin
 }
 
 func TestServiceResolveTransitionRequiresClientRequestID(t *testing.T) {
-	service := NewService(t.TempDir(), nil, nil).WithIdempotencyCoordinator(idempotency.NewCoordinator(nil, idempotency.DefaultRetention))
+	service := NewService(t.TempDir(), nil, nil)
 	_, err := service.ResolveTransition(context.Background(), serverapi.SessionResolveTransitionRequest{
 		Transition: serverapi.SessionTransition{Action: "continue"},
 	})
@@ -451,36 +447,7 @@ func TestServiceResolveTransitionRequiresClientRequestID(t *testing.T) {
 	}
 }
 
-func TestServiceResolveTransitionDeduplicatesLogoutByClientRequestID(t *testing.T) {
-	mgr := auth.NewManager(auth.NewMemoryStore(auth.State{
-		Scope: auth.ScopeGlobal,
-		Method: auth.Method{
-			Type:   auth.MethodAPIKey,
-			APIKey: &auth.APIKeyMethod{Key: "sk-before"},
-		},
-	}), nil, time.Now)
-	service := NewService(t.TempDir(), nil, mgr)
-	req := serverapi.SessionResolveTransitionRequest{
-		ClientRequestID:   "dup-1",
-		SessionID:         "session-42",
-		ControllerLeaseID: testControllerLeaseID,
-		Transition:        serverapi.SessionTransition{Action: "logout"},
-	}
-
-	first, err := service.ResolveTransition(context.Background(), req)
-	if err != nil {
-		t.Fatalf("ResolveTransition first: %v", err)
-	}
-	second, err := service.ResolveTransition(context.Background(), req)
-	if err != nil {
-		t.Fatalf("ResolveTransition second: %v", err)
-	}
-	if first != second {
-		t.Fatalf("expected duplicate logout response replay, first=%+v second=%+v", first, second)
-	}
-}
-
-func TestServiceResolveTransitionReplaysAcrossLaterLeaseChange(t *testing.T) {
+func TestServiceResolveTransitionRequiresControllerLease(t *testing.T) {
 	mgr := auth.NewManager(auth.NewMemoryStore(auth.State{
 		Scope: auth.ScopeGlobal,
 		Method: auth.Method{
@@ -490,49 +457,30 @@ func TestServiceResolveTransitionReplaysAcrossLaterLeaseChange(t *testing.T) {
 	}), nil, time.Now)
 	verifier := &stubSessionLifecycleLeaseVerifier{}
 	service := NewService(t.TempDir(), nil, mgr).
-		WithControllerLeaseVerifier(verifier).
-		WithIdempotencyCoordinator(idempotency.NewCoordinator(nil, idempotency.DefaultRetention))
-	first := serverapi.SessionResolveTransitionRequest{
+		WithControllerLeaseVerifier(verifier)
+	req := serverapi.SessionResolveTransitionRequest{
 		ClientRequestID:   "dup-lease",
 		SessionID:         "session-42",
 		ControllerLeaseID: "lease-1",
 		Transition:        serverapi.SessionTransition{Action: "logout"},
 	}
-	second := first
-	second.ControllerLeaseID = "lease-2"
 
-	firstResp, err := service.ResolveTransition(context.Background(), first)
+	firstResp, err := service.ResolveTransition(context.Background(), req)
 	if err != nil {
 		t.Fatalf("ResolveTransition first: %v", err)
 	}
 	verifier.err = serverapi.ErrInvalidControllerLease
-	secondResp, err := service.ResolveTransition(context.Background(), second)
-	if err != nil {
-		t.Fatalf("ResolveTransition replay: %v", err)
+	secondResp, err := service.ResolveTransition(context.Background(), req)
+	if err != serverapi.ErrInvalidControllerLease {
+		t.Fatalf("ResolveTransition second = %v, want ErrInvalidControllerLease", err)
 	}
-	if verifier.calls != 1 {
-		t.Fatalf("lease verifier call count = %d, want 1", verifier.calls)
+	if verifier.calls != 2 {
+		t.Fatalf("lease verifier call count = %d, want 2", verifier.calls)
 	}
-	if firstResp != secondResp {
-		t.Fatalf("expected replayed response, first=%+v second=%+v", firstResp, secondResp)
+	if !firstResp.ShouldContinue || !firstResp.RequiresReauth {
+		t.Fatalf("unexpected first logout response: %+v", firstResp)
 	}
-}
-
-func TestServiceResolveTransitionRejectsClientRequestIDReuseWithDifferentPayload(t *testing.T) {
-	service := NewService(t.TempDir(), nil, nil).WithIdempotencyCoordinator(idempotency.NewCoordinator(nil, idempotency.DefaultRetention))
-	first := serverapi.SessionResolveTransitionRequest{
-		ClientRequestID:   "dup-1",
-		SessionID:         "session-42",
-		ControllerLeaseID: testControllerLeaseID,
-		Transition:        serverapi.SessionTransition{Action: "continue"},
-	}
-	second := first
-	second.Transition.Action = "logout"
-
-	if _, err := service.ResolveTransition(context.Background(), first); err != nil {
-		t.Fatalf("ResolveTransition first: %v", err)
-	}
-	if _, err := service.ResolveTransition(context.Background(), second); err == nil || err.Error() != "client_request_id \"dup-1\" reused with different payload" {
-		t.Fatalf("expected payload reuse rejection, got %v", err)
+	if secondResp != (serverapi.SessionResolveTransitionResponse{}) {
+		t.Fatalf("unexpected second response on lease failure: %+v", secondResp)
 	}
 }
