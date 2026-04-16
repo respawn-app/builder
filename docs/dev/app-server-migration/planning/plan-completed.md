@@ -128,6 +128,51 @@ Outcome:
 - frontend caches/projection state are explicitly treated as non-durable transcript views
 - direct-address attach and fail-fast workspace binding docs are reconciled
 
+### Phase 2 Residual: Implemented Slices
+
+Completed implementation slices from the broader Phase 2 residual are archived here so `plan.md` can stay focused on the remaining proof/cleanup work.
+
+#### 2R.1 Required project/session reads for current TUI startup
+
+Outcome:
+
+- current TUI startup, project picker, and session picker hydrate from typed project/session reads without CLI-local metadata stitching
+- project/session picker flows consume the same transport-neutral DTOs in loopback and real-server mode
+- dormant project/session picker hydration is regression-covered as side-effect-free
+- obsolete CLI-local persistence bootstrap and lifecycle helper paths on the startup path were removed in favor of server-owned reads
+
+#### 2R.2 Single-server and single-controller guardrails
+
+Outcome:
+
+- one app-server process per persistence root is enforced explicitly
+- same-session mutation/control is temporarily restricted to one controlling client while preserving attach/read access for others
+- the temporary restriction is documented as a scoped shipping simplification, not the target multi-client contract
+
+#### 2R.3 TUI-critical live surface contracts
+
+Outcome:
+
+- retained TUI-facing live surfaces are locked for this phase: session activity, prompt activity, ask/approval routes, process inspection/control, and required process output
+- loopback and real transport preserve the same live-surface semantics for the current TUI
+- gap/backpressure behavior is defined around rehydrate/resubscribe rather than silent loss
+
+#### 2R.4 `client_request_id` idempotency expansion for TUI-critical mutations
+
+Outcome:
+
+- persisted deduplication now covers session launch, headless run prompt, prompt answers, process kill, session lifecycle draft/transition mutations, and the current runtime-control write surface
+- duplicate retries replay deterministically, mismatched payloads reject cleanly, and cancellations are not cached as success
+- persisted idempotency for `sessionruntime.activate` / `sessionruntime.release` is explicitly deferred to a later dedicated session-control slice
+
+#### 2R.5 Phase proof and rollout
+
+Outcome:
+
+- remaining intentional `cli/* -> builder/server/*` imports were audited and documented as a temporary shared-runtime adapter set rather than persistence-boundary leaks; persistence-specific frontend bypasses and dead local-only persistence helpers were removed
+- current-TUI device-global-server acceptance proof is covered by `server/serve/serve_test.go` (`TestStartBuildsStandaloneServerFromCoreStartup`, `TestServeExposesConfiguredHealthEndpoints`) and `cli/app/session_server_target_test.go` (`TestStartSessionServerUsesConfiguredDaemonForInteractiveFlow`, `TestRemoteInteractiveRuntimeTwoClientsConvergeOnSameSessionAcrossWorkspaces`, `TestRemoteReadOnlyClientHydratesCommittedTranscriptAcrossWorkspaces`)
+- the active plan was reduced to residual open work, with completed Phase 2 implementation slices archived here
+
 ## Still Partially Open Elsewhere
 
 These historical phases still have residual open work tracked in `plan.md`:

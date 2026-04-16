@@ -33,7 +33,6 @@ The migration does not move the session transcript log into a relational model r
 - session metadata
 - session execution target
 - run metadata
-- process metadata
 - ask/approval metadata
 - runtime leases
 - request-id deduplication state
@@ -131,11 +130,16 @@ Expected first-wave tables:
 - `worktrees`
 - `sessions`
 - `runs`
-- `processes`
 - `asks`
 - `approvals`
 - `runtime_leases`
 - `client_request_dedup`
+
+Explicit non-requirement for the migration:
+
+- live process APIs and process control are part of the frontend/server split
+- durable process-history/resource persistence is not required for that split
+- if Builder later wants historical process records after process exit or server restart, that should be treated as a separate feature rather than as migration-critical metadata authority
 
 ### JSON Column Guidance
 

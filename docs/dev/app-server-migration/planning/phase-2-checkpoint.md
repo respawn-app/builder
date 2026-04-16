@@ -50,8 +50,8 @@ This checkpoint tracks the first resource-model and hydration slice after the Ph
 
 ## Current Limitations
 
-- Durable run history currently covers lifecycle metadata only. There is still no durable run-scoped index for processes, asks, approvals, or delegated task state after process exit or restart.
-- Process ownership/read metadata is currently live-only and in-memory. Restarting the app server loses process resources and their run/step ownership history.
+- Durable run history currently covers lifecycle metadata only. There is still no durable run-scoped index for asks, approvals, or delegated task state after restart.
+- Process ownership/read metadata is currently live-only and in-memory. Restarting the app server loses live process resources and their run/step ownership history. That is acceptable for the current migration scope; durable process history would be a separate follow-up feature rather than a prerequisite for the frontend/server split.
 - Reopen semantics currently reconstruct unfinished durable runs from `run_started` without a matching `run_finished`, but that state is not yet surfaced through a higher-level application read API.
 - The new application read services still use partial dormant reconstruction rather than richer persisted read models for settings/approval state.
 - Process control is only partially on the new boundary so far: `kill` and `inline-output` are shared, `kill` now carries `client_request_id` as a mutating contract, but log opening remains a frontend-local action over server-provided file paths.
